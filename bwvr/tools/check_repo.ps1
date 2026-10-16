@@ -9,7 +9,8 @@
     made) and ends with exit code 1 when it finds one of these:
 
       - a file with a name or a type that the game uses
-      - an .exe, a .dll or a .lib outside the folder third_party
+      - an .exe, a .dll, a .lib or an .so outside the folder third_party,
+        an APK, or a key store
       - a file larger than 12 MB
 
     The git hook .githooks\pre-commit runs it with -Staged, and the build on
@@ -54,8 +55,12 @@ foreach ($rel in $paths) {
     foreach ($folder in $GameFolders) {
         if ($rel -like "*$folder*") { $bad += "$rel  is in a folder of the game ($folder)" }
     }
-    if (@('.exe', '.dll', '.lib') -contains $ext -and -not $inThirdParty) {
+    if (@('.exe', '.dll', '.lib', '.so') -contains $ext -and -not $inThirdParty) {
         $bad += "$rel  is a binary outside third_party"
+    }
+    # An APK is build output, and a key store holds the key of a person.
+    if (@('.apk', '.keystore', '.jks') -contains $ext) {
+        $bad += "$rel  is an APK or a key store"
     }
     $size = (Get-Item -LiteralPath $full).Length
     if ($size -gt $MaxBytes) { $bad += ("$rel  is {0:N1} MB, more than 12 MB" -f ($size / 1MB)) }

@@ -3566,6 +3566,7 @@ void CreatureChecks() {
 #include "vk_prim_checks.h"
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
+#include "menu_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3976,6 +3977,7 @@ int main() {
   vk_prim_checks::VkPrimChecks();
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
+  menu_checks::AllMenuChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

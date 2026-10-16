@@ -26,7 +26,9 @@ of Windows, and a button can show a picture beside its text.
 
 ## The table
 
-The launcher is built from one array, `kSettings`:
+The launcher is built from one array, `kSettings` in
+`src/common/settings_table.h`. The menu of the headset app
+(`android.md`, "The menu") is built from the same array:
 
 ```cpp
 {kBool, "force_mips", "Enable texture mipmaps", nullptr, 1,

@@ -201,7 +201,7 @@ Filename: "{#SupportUrl}"; Description: "{cm:OpenSupportPage}"; Flags: shellexec
 const
   { The game's own registry key. The game writes GameDir under HKCU. }
   GameKey = 'SOFTWARE\Lionhead Studios Ltd\Black & White';
-  { Keep in step with kGameExeSha1 in bwvr/src/common/exe_check.h. }
+  { Keep in step with kGameExeSha1 in bwvr/src/common/exe_sha1.h. }
   GameExeSha1 = '9c9aea96f046911ab1b7e496fae511ed5ebbfefe';
   GameExeSize = 8663040;
   PatchUrl = 'https://www.bwfiles.com/';

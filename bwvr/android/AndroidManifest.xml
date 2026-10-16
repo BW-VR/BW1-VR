@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The headset app of the Black & White VR Mod (docs/android.md). A native
+     activity with no Java code. build_apk.ps1 sets the version and the SDK
+     levels. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.bwvr.quest"
+    android:installLocation="auto">
+
+  <!-- The OpenXR loader of Khronos talks to the broker of the runtime. These
+       lines are the ones of the manifest of the loader
+       (third_party/openxr-android/AndroidManifest-of-the-aar.xml). -->
+  <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+  <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+  <queries>
+    <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+    <intent>
+      <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+    </intent>
+    <intent>
+      <action android:name="org.khronos.openxr.OpenXRApiLayerService" />
+    </intent>
+  </queries>
+
+  <!-- A headset with head tracking and Vulkan. required="false", so the
+       Android emulator can install the same APK for a test. -->
+  <uses-feature android:name="android.hardware.vr.headtracking"
+      android:version="1" android:required="false" />
+  <uses-feature android:name="android.hardware.vulkan.version"
+      android:version="0x401000" android:required="true" />
+
+  <application
+      android:label="Black &amp; White VR Mod"
+      android:hasCode="false"
+      android:allowBackup="false"
+      android:extractNativeLibs="false">
+
+    <!-- Meta Horizon OS: the headsets that the app is for. -->
+    <meta-data android:name="com.oculus.supportedDevices"
+        android:value="quest2|questpro|quest3|quest3s" />
+
+    <activity
+        android:name="android.app.NativeActivity"
+        android:exported="true"
+        android:launchMode="singleTask"
+        android:screenOrientation="landscape"
+        android:resizeableActivity="false"
+        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+        android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode">
+      <meta-data android:name="android.app.lib_name" android:value="bwvr_quest" />
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+        <!-- An immersive app on Meta Horizon OS and on each runtime of the
+             OpenXR broker of Khronos. -->
+        <category android:name="com.oculus.intent.category.VR" />
+        <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

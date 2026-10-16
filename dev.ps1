@@ -16,6 +16,8 @@
       .\dev.ps1 install      put the last build in the game folder
       .\dev.ps1 uninstall    take the mod out of the game folder
       .\dev.ps1 package      make the installer (needs Inno Setup 6)
+      .\dev.ps1 apk          build the APK of the headset app and check it
+                             (needs the Android SDK, see docs/android.md)
       .\dev.ps1 status       say what is set up, and what is in the game folder
 
     The script never changes the registry and never touches a file of the
@@ -33,7 +35,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('all', 'setup', 'build', 'install', 'play', 'uninstall', 'package', 'status')]
+    [ValidateSet('all', 'setup', 'build', 'install', 'play', 'uninstall', 'package', 'apk', 'status')]
     [string]$Command = 'all',
     [string]$Game,
     [switch]$Clean
@@ -266,6 +268,16 @@ switch ($Command) {
     'package'   {
         Invoke-Build
         & powershell -NoProfile -ExecutionPolicy Bypass -File $Package -SkipBuild
+        exit $LASTEXITCODE
+    }
+    'apk'       {
+        # The tools of the NDK write warnings to stderr. The scripts check the
+        # exit codes, so a line on stderr must not stop this one.
+        $ErrorActionPreference = 'Continue'
+        $android = Join-Path $Bwvr 'tools\android'
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $android 'build_apk.ps1') @(if ($Clean) { '-Clean' })
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $android 'check_apk.ps1')
         exit $LASTEXITCODE
     }
     'status'    { Show-Status }

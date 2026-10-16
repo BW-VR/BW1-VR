@@ -30,6 +30,9 @@ them come from a lesson that cost time.
   [step 1 of the README](README.md#1-set-up-a-clean-copy-of-the-game), in a
   folder that your account can write to (not in Program Files).
 - Only to make an installer yourself: Inno Setup 6.
+- Only for the headset app (the APK): the Android SDK with the NDK, and a
+  JDK 17. See [`bwvr/docs/android.md`](bwvr/docs/android.md), "Build the
+  APK". `.\dev.ps1 apk` builds and checks it.
 
 All other code that the mod needs is in the repo (`third_party/`). There is
 nothing more to download.
@@ -113,13 +116,15 @@ each change.
 | `bwvr/src/mod/` | The mod (`ddraw.dll`): the hooks, the hands, the God view, the sound |
 | `bwvr/src/vr/` | The OpenXR session and the layers |
 | `bwvr/src/launcher/` | The launcher with the settings |
-| `bwvr/src/common/` | The addresses in the game, the version |
+| `bwvr/src/common/` | The addresses in the game, the version, the table of the settings |
+| `bwvr/android/` | The headset app for Android (the APK) |
 | `bwvr/test/controller_math/` | The math tests (no game needed) |
 | `bwvr/tools/desk/` | The desktop test runs with a scripted controller |
 | `bwvr/tools/package.ps1` | Makes the installer |
+| `bwvr/tools/android/` | Builds, checks and tests the APK |
 | `bwvr/installer/` | The installer script, the player readme, the notices |
 | `bwvr/docs/` | The design and the reverse engineering notes of each area |
-| `third_party/` | MinHook, the OpenXR loader, dxwrapper, cgltf |
+| `third_party/` | MinHook, the OpenXR loaders, dxwrapper, cgltf |
 
 Start with [`bwvr/docs/roadmap.md`](bwvr/docs/roadmap.md) (the open work),
 then the doc of your area in `bwvr/docs/`:
@@ -137,6 +142,7 @@ then the doc of your area in `bwvr/docs/`:
 | `audio.md` | The sound |
 | `cutscene-window.md`, `intro.md` | Stories in a window, and the start of the game |
 | `launcher.md`, `installer.md` | The launcher and the installer |
+| `android.md` | The headset app for Android: the APK, its menu, its tests |
 | `address-map.md`, `software-tnl.md`, `stereo-artifacts.md`, `input-devices.md` | Facts about the game's code and its renderer |
 | `research-hla.md` | Notes on Half-Life: Alyx as a guide for the hands |
 
@@ -169,6 +175,7 @@ Each doc holds the current state and the plans. The history is in git.
 | --- | --- | --- |
 | The math tests | Nothing | Part of `.\dev.ps1 build`. Put new math in a pure header and add checks in `bwvr/test/controller_math/` |
 | Desktop runs | The game | `bwvr/tools/desk/`, see its README. A scripted controller plays, and the script reads the log |
+| The APK | The Android SDK | `.\dev.ps1 apk` checks the APK, `bwvr/tools/android/emu_test.ps1` runs it in the Android emulator (`android.md`, "Test the APK") |
 | The headset | A headset | The only proof of feel and comfort. Say which headset and runtime |
 
 The desktop runs never move the real mouse, never bring a window to the

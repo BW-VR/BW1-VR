@@ -13,6 +13,7 @@ The full license texts that go out with the mod are in
 | `backends/dx7.games/` | dxwrapper: `dxwrapper.dll` and its `ddraw.dll` stub. It turns the DirectX 7 of the game into Direct3D 9 | release 1.8.8600.25 | see `bwvr/installer/Notices.txt`, section 4 | https://github.com/elishacloud/dxwrapper |
 | `Vulkan-Headers/include/` | The C headers of Vulkan (`vulkan/*.h`, `vk_video/*.h`), no C++ headers | tag `vulkan-sdk-1.4.357.0` | Apache-2.0 or MIT (`LICENSE.md`, `LICENSES/`) | https://github.com/KhronosGroup/Vulkan-Headers |
 | `cgltf/` | cgltf, the glTF reader for a hand model file (`cgltf.h`) | v1.14 | MIT (`LICENSE`) | https://github.com/jkuhlmann/cgltf |
+| `openxr-android/` | The OpenXR loader of Khronos for Android, `libopenxr_loader.so` for `arm64-v8a` and `x86_64`, for the headset app (`bwvr/docs/android.md`) | release 1.1.43 | Apache-2.0 (`LICENSE`) | the AAR `org.khronos.openxr:openxr_loader_for_android:1.1.43` of Maven Central |
 
 ## The binaries are pinned
 
@@ -33,6 +34,22 @@ cmake --build OpenXR-SDK/build32 --config Release
 
 A new build gives a file with a different hash. Only do this to move to a
 new SDK version, and update the hash in `package.ps1` in the same commit.
+
+## The OpenXR loader for Android
+
+The two files are from the AAR of Khronos on Maven Central
+(`https://repo1.maven.org/maven2/org/khronos/openxr/openxr_loader_for_android/1.1.43/`),
+folder `prefab/modules/openxr_loader/libs/android.<abi>/`. The SHA-256 of the
+AAR is `7e1b36141f9a4f1fa4a7e061936344fd9fcd36bce6c47eae2ad09812736167b6`.
+`AndroidManifest-of-the-aar.xml` is the manifest of the AAR: the headset app
+copies its permissions and queries into its own manifest.
+
+| File | SHA-256 |
+| --- | --- |
+| `arm64-v8a/libopenxr_loader.so` | `713e3bb8d955254c670acc1c4899a65cb8c930e97dd9958bf37ea922d72b7a06` |
+| `x86_64/libopenxr_loader.so` | `f7dd88045009be157b6d25041782e769a8aafd2c70a65b9d19d8fc9083fa376e` |
+
+The loader is of the same release as the headers in `OpenXR-SDK/include`.
 
 ## Not in the repo
 

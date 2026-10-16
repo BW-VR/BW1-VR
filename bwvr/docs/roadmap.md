@@ -755,9 +755,17 @@ that moves while the Hand takes it.
     7900 XTX neither takes time off the GPU, because the time is in the
     draws. Not run in a headset, and not run with an eye tracker. (B) one draw
     for many copies of a mesh (about 870 draws of a frame are 36 meshes);
-    (C) a new renderer of the land, after a count of its draws. The Quest 3
-    cannot run `runblack.exe`; a port there needs an x86 emulator with Wine
-    or a new engine.
+    (C) a new renderer of the land, after a count of its draws. (D) The
+    headset app for Android (`android.md`): an APK for the Quest 3 and for
+    other headsets with Android and OpenXR. It has an OpenXR session with
+    Vulkan, the settings of the launcher in a menu in the form of the menu
+    of the game, and the check of the game folder on the headset. The
+    Android emulator runs it (`emu_test.ps1`). Not run in a headset. It
+    cannot start the game: `runblack.exe` needs an x86 runtime (Box64 with
+    Wine in the WoW64 mode) in the app, a backend `remote` that gives the
+    calls of the walks of the Vulkan renderer to the app, and the poses and
+    the actions of the session for the mod (`android.md`, "What the app
+    cannot do yet").
     With the render
     thread, one walk draws most batches in one draw for both eyes (`one_walk_merge`, `backend.md`, "One
     draw for both eyes"). Before the thread, with one walk, a view of the

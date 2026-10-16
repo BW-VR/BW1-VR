@@ -1043,8 +1043,9 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
     }
     s->last_quads.push_back(*q);
     char part[160];
-    snprintf(part, sizeof(part), " quad %.3f %.3f %.3f size %.3f %.3f", q->pose.position.x, q->pose.position.y,
-             q->pose.position.z, q->size.width, q->size.height);
+    snprintf(part, sizeof(part), " quad %.3f %.3f %.3f size %.3f %.3f eye %d", q->pose.position.x,
+             q->pose.position.y, q->pose.position.z, q->size.width, q->size.height,
+             static_cast<int>(q->eyeVisibility));
     what += part;
   }
   // One line for each change of the layers, not one for each frame.

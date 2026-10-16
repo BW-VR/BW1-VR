@@ -29,6 +29,7 @@
 #include "menu_layout.h"
 #include "menu_model.h"
 #include "menu_painter.h"
+#include "../../src/mod/vk_scene.h"
 #include "scene_player.h"
 #include "xr_app.h"
 
@@ -364,16 +365,30 @@ void android_main(android_app* android) {
     ANativeActivity_finish(android->activity);
   }
 
+  app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
+                           kCursorPixels);
+
   // A TEST AID (stream_replay=1 in bwvr.ini): the stream of the walks in
   // bwvr-stream.bin of the game folder goes to the Vulkan renderer of the
   // mod, which writes the pictures of vk_scene_test_frame of the stream
-  // into the game folder (docs/android.md, "The stream of the walks").
+  // into the game folder (docs/android.md, "The stream of the walks"). In a
+  // session the renderer draws on the device of the session, and its last
+  // picture shows on a stereo screen behind the menu.
   if (app.ini.GetInt("bwvr", "stream_replay", 0) != 0) {
+    if (app.xr_on && app.xr.Renderer13()) {
+      vk::External device;
+      app.xr.RendererDevice(&device);
+      vk::UseExternal(device);
+    }
     PlayStreamFile(app.game.folder + "/bwvr-stream.bin", app.game.folder);
+    uint64_t image = 0;
+    uint32_t w = 0, h = 0;
+    if (app.xr_on && VkSceneEyes(&image, &w, &h) && app.xr.MakeScreen(w / 2, h / 2)) {
+      app.xr.SetScreenSource(reinterpret_cast<VkImage>(image), w, h);
+    } else if (app.xr_on) {
+      AppLog("replay       : no picture of the renderer for the session");
+    }
   }
-
-  app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
-                           kCursorPixels);
   if (app.xr_on) {
     TakeHeadsetSize(&app);
     app.base_status = app.game.exe_right

@@ -32,6 +32,12 @@
 .PARAMETER Keep
     Leaves the emulator on at the end.
 
+.PARAMETER Stream
+    A stream of the walks (docs/android.md, "The stream of the walks"). The
+    app plays it into the renderer of the mod on the device of the session,
+    and the test checks the stereo screen of the renderer too. It needs
+    -Gpu host: the renderer needs Vulkan 1.3.
+
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
     the CPU) or host (the GPU of the PC).
@@ -39,7 +45,8 @@
 [CmdletBinding()]
 param(
     [switch]$Keep,
-    [string]$Gpu = 'swiftshader_indirect'
+    [string]$Gpu = 'swiftshader_indirect',
+    [string]$Stream
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -150,18 +157,20 @@ try {
 
     # The script of the controllers. The rows of the menu picture are 74
     # pixels high from y = 190 (menu_layout.h), so the middle of row r is at
-    # 227 + 74 r. Layer 0 is the menu quad.
+    # 227 + 74 r. Layer $L is the menu quad.
     $script = Join-Path $Out 'script.txt'
+    # With a stream the two quads of the stereo screen come first.
+    $L = $(if ($Stream) { 2 } else { 0 })
     Set-Content -LiteralPath $script -Encoding ascii -Value @(
         '40 capture start',
-        '50 point right 0 800 671',
+        "50 point right $L 800 671",
         '60 capture point',
         '70 trigger right 1', '74 trigger right 0',
-        '90 point right 0 400 227',
+        "90 point right $L 400 227",
         '100 trigger right 1', '104 trigger right 0',
         '110 capture moving',
         '120 button right 1', '124 button right 0',
-        '140 point right 0 800 893',
+        "140 point right $L 800 893",
         '150 trigger right 1', '154 trigger right 0',
         '170 capture saved',
         '200 exit')
@@ -184,14 +193,17 @@ try {
     Adb @('shell', 'am', 'force-stop', $Package)
     Adb @('shell', 'rm', '-f', "$XrDir/report.txt", "$XrDir/*.bmp")
     $ini = Join-Path $Out 'bwvr.ini.pushed'
-    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'snap_turn=2', 'menu_capture=1')
+    $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1')
+    if ($Stream) { $iniLines += 'stream_replay=1' }
+    Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
+    if ($Stream) { Adb @('push', $Stream, "$AppDir/game/bwvr-stream.bin") }
 
     # 4. The run.
     Say 'Start the app with the test runtime'
     Adb @('logcat', '-c')
     Adb @('shell', 'am', 'start', '-n', "$Package/android.app.NativeActivity")
-    $deadline = (Get-Date).AddSeconds(120)
+    $deadline = (Get-Date).AddSeconds($(if ($Stream) { 400 } else { 120 }))
     do {
         Start-Sleep -Seconds 2
         $report = AdbOut @('shell', 'cat', "$XrDir/report.txt")
@@ -220,16 +232,30 @@ try {
     Expect ($report -match 'call xrCreateSwapchain 1600x1200') 'a swapchain of 1600 by 1200 for the menu'
     Expect ($report -match 'call xrCreateSwapchain 64x64') 'a swapchain of 64 by 64 for the cursor'
     Expect ($report -match 'call xrBeginSession') 'the app began the session at READY'
-    Expect ($report -match 'layers \d quad 0\.000 -0\.150 -1\.400 size 1\.400 1\.050') 'the menu quad is 1.4 m in front, 0.15 m down, 1.4 by 1.05 m'
-    Expect ($report -match 'layers 2 quad 0\.000 -0\.150 -1\.400 size 1\.400 1\.050 quad') 'the cursor quad shows when the ray hits the menu'
+    Expect ($report -match 'layers \d .*quad 0\.000 -0\.150 -1\.400 size 1\.400 1\.050') 'the menu quad is 1.4 m in front, 0.15 m down, 1.4 by 1.05 m'
+    Expect ($report -match 'quad 0\.000 -0\.150 -1\.400 size 1\.400 1\.050 eye 0 quad') 'the cursor quad shows when the ray hits the menu'
     $pulses = ([regex]::Matches($report, 'pulse /user/hand/right')).Count
     Expect ($pulses -ge 3) "the right hand had a pulse at each new row ($pulses pulses)"
     Expect ($report -match 'call xrEndSession') 'the app ended the session at STOPPING'
     Expect ($report -match 'call xrDestroySession') 'the app destroyed the session'
     Expect ($report -notmatch '(?m)^fault ') ('the runtime found no fault' + $(if ($report -match '(?m)^fault (.*)$') { ': ' + $Matches[1] } else { '' }))
+    # With a stream the stereo screen is layer 0 (left eye) and 1 (right
+    # eye), and the menu is layer 2.
+    $menuLayer = $(if ($Stream) { 2 } else { 0 })
     foreach ($name in @('start', 'point', 'moving', 'saved')) {
-        $m = [regex]::Match($report, "capture \S*/$name-0\.bmp (\d+)x(\d+) lit (\d+)")
+        $m = [regex]::Match($report, "capture \S*/$name-$menuLayer\.bmp (\d+)x(\d+) lit (\d+)")
         Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[3].Value) lit pixels)"
+    }
+    if ($Stream) {
+        Expect ($log -match 'xr           : the GPU of the runtime: .*The renderer of the mod: yes') 'the device of the session has Vulkan 1.3 and the features of the renderer'
+        Expect ($log -match 'vulkan       : the Vulkan of the OpenXR session') 'the renderer drew on the device of the session'
+        Expect ($log -match 'replay       : .*: \d+ records, \d+ frames, [1-9]\d* walks') 'the app played the stream'
+        Expect ($log -match 'a stereo screen of two quads') 'the app made the stereo screen'
+        Expect ($report -match 'quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 1 quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 2') 'the stereo screen is a quad for the left eye and a quad for the right eye, 2.6 m in front'
+        foreach ($eye in 0, 1) {
+            $m = [regex]::Match($report, "capture \S*/start-$eye\.bmp (\d+)x(\d+) lit (\d+)")
+            Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the stereo screen has the scene ($($m.Groups[3].Value) lit pixels)"
+        }
     }
 
     Expect ($log -match 'xr           : runtime bwvr test runtime') 'the app logged the runtime'

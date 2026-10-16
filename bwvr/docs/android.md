@@ -24,7 +24,10 @@ Summary:
   the same source as the `ddraw.dll` of the PC. It draws the walks of a
   stream that the mod records on the PC (`vk_stream_record`). In the
   emulator its pictures of a walk of the game are the same as the pictures
-  of the PC, to the pixel (see "The stream of the walks").
+  of the PC, to the pixel (see "The stream of the walks"). In a session the
+  renderer draws on the Vulkan device of the session, and its eye pictures
+  show on a stereo screen in front of the player (see "The picture of the
+  renderer in the headset").
 - **The app cannot start the game yet.** `runblack.exe` is a Windows
   program for x86, and the APK has no x86 runtime (see "What the app cannot
   do yet").
@@ -285,6 +288,11 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
    the calls of OpenXR in the right order with the right structs. It does
    not show the runtime of Meta.
+   With `-Stream <file> -Gpu host` (35 checks) the app also plays a stream
+   of the walks on the device of the session, and the test checks the
+   device (Vulkan 1.3 with the features of the renderer), the renderer on
+   that device, the two quads of the stereo screen (one for each eye, 2.6
+   m in front) and the pictures of both eyes that the runtime read back.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -345,6 +353,27 @@ has Vulkan 1.2. The emulator with `-gpu host` has the Vulkan 1.3 of the GPU
 of the PC. Open: the version of Vulkan of the Quest 3 and of the Steam Frame
 for an APK.
 
+## The picture of the renderer in the headset
+
+The session asks the runtime for a Vulkan 1.3 device with the features of
+the renderer, as the session of the PC does (`xr_screen.cpp`): dynamic
+rendering, synchronization2, multiview, the anisotropic filter, and a
+shading rate attachment when the GPU has it. The log names the GPU and
+says if the renderer can use it (`the renderer of the mod: yes`). With no
+Vulkan 1.3 the session has Vulkan 1.1, and only the menu shows.
+
+With `stream_replay=1` and a device of Vulkan 1.3, the app gives the device
+of the session to the renderer (`vk::UseExternal`), as on the PC with
+`xr_vulkan=1`, and plays the stream. Then the last eye picture of the
+renderer (`VkSceneEyes`, an image with a layer for each eye) shows on a
+**stereo screen**: two quads 2.6 m wide, 2.6 m in front of the head and
+0.1 m above it, one for the left eye and one for the right eye, behind the
+menu. Each frame blits each layer to the size of the quads (half the size
+of the picture) into an image of UNORM, and copies that image into the
+swapchain of the quad, so the bytes of the game keep their values also in
+a swapchain of sRGB. This is the form of the "Stereoscopic window" of the
+PC: the picture does not follow the head.
+
 ## The stream of the walks
 
 The stream is a record of each call of the Vulkan renderer (`vk_scene.h`)
@@ -387,6 +416,11 @@ renderer. A surface of the game is an object of the stream with its pixels
 (`ReadRgba`), and the device at the start of a walk gives the states of the
 stream. With `vk_scene_test_frame` in the options of the stream, the
 renderer writes the pictures of that frame into the game folder.
+
+**In a session** the same stream shows on the stereo screen ("The picture of
+the renderer in the headset"). In the emulator with the test runtime and
+`-gpu host`, the runtime reads back the pictures of both eyes from the
+swapchains of the screen.
 
 **What the replay shows.** The stream of the test save "pen" (frames 3000 to
 3003, the Main Menu of the game over the island, `one_walk=1`,

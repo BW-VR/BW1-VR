@@ -20,6 +20,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#include "../../src/mod/vk_core.h"
 #include "gpu.h"
 
 // The state of the controllers of one frame. Index 0 is the left hand, 1
@@ -66,6 +67,21 @@ class XrApp {
   // A short pulse on one hand, for example when the highlight moves.
   void Pulse(int hand);
 
+  // THE RENDERER OF THE MOD IN THE SESSION (docs/android.md, "The picture
+  // of the renderer in the headset"). True when the device of the runtime
+  // has Vulkan 1.3 and the features of the renderer.
+  bool Renderer13() const { return renderer13_; }
+  // The instance, the device and the queue of the session for
+  // vk::UseExternal, so the renderer draws on the device of the session.
+  void RendererDevice(vk::External* out) const;
+  // A STEREO SCREEN in front of the player: two quads, one for each eye,
+  // width by height pixels. image is an image of the renderer with a layer
+  // for each eye, in the layout of a color attachment, image_width by
+  // image_height (VkSceneEyes). Each frame copies it into the quads.
+  bool MakeScreen(uint32_t width, uint32_t height);
+  void SetScreenSource(VkImage image, uint32_t image_width,
+                       uint32_t image_height);
+
  private:
   struct Layer {
     XrSwapchain swapchain = XR_NULL_HANDLE;
@@ -82,6 +98,7 @@ class XrApp {
   bool MakeActions();
   bool MakeLayer(Layer* layer, uint32_t width, uint32_t height);
   void CopyLayer(Layer* layer);
+  void CopyScreen(int eye);
   void SetPixels(Layer* layer, const std::vector<uint8_t>& rgba);
 
   XrInstance instance_ = XR_NULL_HANDLE;
@@ -111,4 +128,14 @@ class XrApp {
   Layer cursor_;
   bool menu_written_ = false;
   bool cursor_written_ = false;
+
+  bool renderer13_ = false;
+  bool shading_rate_ = false;
+  float max_anisotropy_ = 0.0f;
+  Layer screen_[2];
+  VkImage between_ = VK_NULL_HANDLE;  // the picture at the size of the quads
+  VkDeviceMemory between_memory_ = VK_NULL_HANDLE;
+  VkImage screen_source_ = VK_NULL_HANDLE;
+  uint32_t source_width_ = 0;
+  uint32_t source_height_ = 0;
 };

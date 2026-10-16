@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include <mutex>
+
 #include "app_log.h"
 
 namespace {
@@ -18,6 +20,13 @@ T Proc(XrInstance instance, const char* name) {
   if (XR_FAILED(xrGetInstanceProcAddr(instance, name, &f))) return nullptr;
   return reinterpret_cast<T>(f);
 }
+
+// The lock of the queue that the renderer of the mod and the app share
+// (vk::External::lock). The app draws and submits on one thread, so the lock
+// only keeps the rule of the renderer.
+std::recursive_mutex g_queue_lock;
+void LockQueue() { g_queue_lock.lock(); }
+void UnlockQueue() { g_queue_lock.unlock(); }
 
 XrPath Path(XrInstance instance, const char* text) {
   XrPath path = XR_NULL_PATH;
@@ -157,10 +166,13 @@ bool XrApp::MakeVulkan() {
     return false;
   }
 
+  // Vulkan 1.3 for the renderer of the mod when the runtime takes it. The
+  // menu alone needs Vulkan 1.1.
+  const bool runtime13 = req.maxApiVersionSupported >= XR_MAKE_VERSION(1, 3, 0);
   VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app.pApplicationName = "Black & White VR Mod";
   app.pEngineName = "bwvr";
-  app.apiVersion = VK_API_VERSION_1_1;
+  app.apiVersion = runtime13 ? VK_API_VERSION_1_3 : VK_API_VERSION_1_1;
   VkInstanceCreateInfo vi = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   vi.pApplicationInfo = &app;
   XrVulkanInstanceCreateInfoKHR xi = {XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR};
@@ -195,12 +207,86 @@ bool XrApp::MakeVulkan() {
     }
   }
   if (gpu_.queue_family == UINT32_MAX) return false;
+
+  // THE FEATURES OF THE RENDERER OF THE MOD, as the session of the PC asks
+  // for them (xr_screen.cpp): dynamic rendering, synchronization2,
+  // multiview, the anisotropic filter, and a shading rate attachment when
+  // the GPU has it.
+  VkPhysicalDeviceProperties properties;
+  vkGetPhysicalDeviceProperties(gpu_.physical, &properties);
+  VkPhysicalDeviceVulkan13Features have13 = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+  VkPhysicalDeviceVulkan11Features have11 = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+  have13.pNext = &have11;
+  VkPhysicalDeviceFeatures2 have = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+  if (runtime13 && properties.apiVersion >= VK_API_VERSION_1_3) {
+    have.pNext = &have13;
+    vkGetPhysicalDeviceFeatures2(gpu_.physical, &have);
+  }
+  renderer13_ = runtime13 && properties.apiVersion >= VK_API_VERSION_1_3 &&
+                have13.dynamicRendering && have13.synchronization2 &&
+                have11.multiview;
+  max_anisotropy_ = have.features.samplerAnisotropy
+                        ? properties.limits.maxSamplerAnisotropy
+                        : 0.0f;
+  uint32_t extension_count = 0;
+  vkEnumerateDeviceExtensionProperties(gpu_.physical, nullptr, &extension_count,
+                                       nullptr);
+  std::vector<VkExtensionProperties> extensions(extension_count);
+  vkEnumerateDeviceExtensionProperties(gpu_.physical, nullptr, &extension_count,
+                                       extensions.data());
+  bool rate_extension = false;
+  for (const VkExtensionProperties& e : extensions) {
+    if (strcmp(e.extensionName, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) == 0) {
+      rate_extension = true;
+    }
+  }
+  VkPhysicalDeviceFragmentShadingRateFeaturesKHR rate = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+  if (renderer13_ && rate_extension) {
+    VkPhysicalDeviceFeatures2 query = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    query.pNext = &rate;
+    vkGetPhysicalDeviceFeatures2(gpu_.physical, &query);
+  }
+  shading_rate_ = renderer13_ && rate_extension && rate.attachmentFragmentShadingRate;
+  AppLog("xr           : the GPU of the runtime: %s, Vulkan %u.%u. The renderer "
+         "of the mod: %s. The anisotropic filter: up to %.0f. A shading rate "
+         "attachment: %s",
+         properties.deviceName, VK_API_VERSION_MAJOR(properties.apiVersion),
+         VK_API_VERSION_MINOR(properties.apiVersion),
+         renderer13_ ? "yes" : "no (it needs Vulkan 1.3)", max_anisotropy_,
+         shading_rate_ ? "yes" : "no");
+
   const float priority = 1.0f;
   VkDeviceQueueCreateInfo queue = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
   queue.queueFamilyIndex = gpu_.queue_family;
   queue.queueCount = 1;
   queue.pQueuePriorities = &priority;
+  VkPhysicalDeviceVulkan13Features want13 = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+  want13.dynamicRendering = VK_TRUE;
+  want13.synchronization2 = VK_TRUE;
+  VkPhysicalDeviceVulkan11Features want11 = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+  want11.multiview = VK_TRUE;
+  want13.pNext = &want11;
+  VkPhysicalDeviceFragmentShadingRateFeaturesKHR want_rate = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+  want_rate.attachmentFragmentShadingRate = VK_TRUE;
+  if (shading_rate_) want11.pNext = &want_rate;
+  VkPhysicalDeviceFeatures2 want = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+  want.pNext = &want13;
+  want.features.samplerAnisotropy = max_anisotropy_ > 0.0f ? VK_TRUE : VK_FALSE;
+  const char* rate_name = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME;
   VkDeviceCreateInfo di = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+  if (renderer13_) {
+    di.pNext = &want;
+    if (shading_rate_) {
+      di.enabledExtensionCount = 1;
+      di.ppEnabledExtensionNames = &rate_name;
+    }
+  }
   di.queueCreateInfoCount = 1;
   di.pQueueCreateInfos = &queue;
   XrVulkanDeviceCreateInfoKHR xd = {XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
@@ -523,10 +609,31 @@ bool XrApp::BeginFrame(XrInput* input) {
 void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                      bool show_cursor, const float cursor_point[3],
                      float cursor_size) {
-  XrCompositionLayerQuad quads[2] = {{XR_TYPE_COMPOSITION_LAYER_QUAD},
-                                     {XR_TYPE_COMPOSITION_LAYER_QUAD}};
-  const XrCompositionLayerBaseHeader* layers[2];
+  XrCompositionLayerQuad quads[4] = {
+      {XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD},
+      {XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}};
+  const XrCompositionLayerBaseHeader* layers[4];
   uint32_t count = 0;
+  // THE STEREO SCREEN of the renderer, behind the menu: a quad for each eye,
+  // 2.6 m wide, 2.6 m in front of the head.
+  if (frame_.shouldRender && screen_source_ != VK_NULL_HANDLE) {
+    const float width = 2.6f;
+    const float height = width * screen_[0].height / screen_[0].width;
+    for (int eye = 0; eye < 2; ++eye) {
+      CopyScreen(eye);
+      XrCompositionLayerQuad& q = quads[count];
+      q.space = local_;
+      q.eyeVisibility = eye == 0 ? XR_EYE_VISIBILITY_LEFT : XR_EYE_VISIBILITY_RIGHT;
+      q.subImage.swapchain = screen_[eye].swapchain;
+      q.subImage.imageRect.extent = {static_cast<int32_t>(screen_[eye].width),
+                                     static_cast<int32_t>(screen_[eye].height)};
+      q.pose.orientation.w = 1.0f;
+      q.pose.position = {0.0f, 0.1f, -2.6f};
+      q.size = {width, height};
+      layers[count] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
+      ++count;
+    }
+  }
   if (frame_.shouldRender && menu_written_) {
     CopyLayer(&menu_);
     XrCompositionLayerQuad& q = quads[count];
@@ -566,6 +673,152 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
 }
 
+void XrApp::RendererDevice(vk::External* out) const {
+  *out = vk::External();
+  out->get_instance_proc_addr = &vkGetInstanceProcAddr;
+  out->instance = gpu_.instance;
+  out->physical = gpu_.physical;
+  out->device = gpu_.device;
+  out->queue_family = gpu_.queue_family;
+  out->queue_index = 0;
+  out->max_anisotropy = max_anisotropy_;
+  // The renderer writes the bytes of the game, which are sRGB, into an image
+  // of UNORM, as on the PC. The copy into the quads keeps the bytes.
+  out->color_format = VK_FORMAT_R8G8B8A8_UNORM;
+  out->shading_rate = shading_rate_;
+  out->window_present = false;
+  out->lock = &LockQueue;
+  out->unlock = &UnlockQueue;
+}
+
+bool XrApp::MakeScreen(uint32_t width, uint32_t height) {
+  for (Layer& l : screen_) {
+    if (!MakeLayer(&l, width, height)) return false;
+  }
+  // The picture of the renderer goes into an image of its own format at the
+  // size of the quads first (a blit), then into the swapchain with a copy,
+  // which keeps the bytes also when the swapchain has an sRGB format.
+  VkImageCreateInfo info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  info.imageType = VK_IMAGE_TYPE_2D;
+  // The order of the bytes of the swapchain: the blit puts the channels of
+  // the renderer (RGBA) into that order.
+  info.format = screen_[0].swap_red_blue ? VK_FORMAT_B8G8R8A8_UNORM
+                                         : VK_FORMAT_R8G8B8A8_UNORM;
+  info.extent = {width, height, 1};
+  info.mipLevels = 1;
+  info.arrayLayers = 1;
+  info.samples = VK_SAMPLE_COUNT_1_BIT;
+  info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  if (vkCreateImage(gpu_.device, &info, nullptr, &between_) != VK_SUCCESS) return false;
+  VkMemoryRequirements req;
+  vkGetImageMemoryRequirements(gpu_.device, between_, &req);
+  uint32_t type = UINT32_MAX;
+  for (uint32_t i = 0; i < gpu_.memory.memoryTypeCount; ++i) {
+    if ((req.memoryTypeBits & (1u << i)) != 0 &&
+        (gpu_.memory.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+      type = i;
+      break;
+    }
+  }
+  VkMemoryAllocateInfo alloc = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  alloc.allocationSize = req.size;
+  alloc.memoryTypeIndex = type;
+  if (type == UINT32_MAX ||
+      vkAllocateMemory(gpu_.device, &alloc, nullptr, &between_memory_) != VK_SUCCESS) {
+    return false;
+  }
+  vkBindImageMemory(gpu_.device, between_, between_memory_, 0);
+  AppLog("xr           : a stereo screen of two quads of %u by %u for the "
+         "pictures of the renderer", width, height);
+  return true;
+}
+
+void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
+                            uint32_t image_height) {
+  screen_source_ = image;
+  source_width_ = image_width;
+  source_height_ = image_height;
+}
+
+// One eye of the picture of the renderer into the next image of its quad.
+void XrApp::CopyScreen(int eye) {
+  Layer* layer = &screen_[eye];
+  uint32_t index = 0;
+  XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+  if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &index),
+          "xrAcquireSwapchainImage")) {
+    return;
+  }
+  XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+  wait.timeout = XR_INFINITE_DURATION;
+  xrWaitSwapchainImage(layer->swapchain, &wait);
+  const VkImage target = layer->images[index].image;
+  LockQueue();
+  VkCommandBuffer cmd = GpuBegin(&gpu_);
+  VkImageMemoryBarrier b[2] = {{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER},
+                               {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}};
+  // The layer of the eye of the renderer: from a color attachment to a
+  // source, and the image between to a target.
+  b[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  b[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  b[0].oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  b[0].srcQueueFamilyIndex = b[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b[0].image = screen_source_;
+  b[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, static_cast<uint32_t>(eye), 1};
+  b[1].srcAccessMask = 0;
+  b[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  b[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  b[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  b[1].srcQueueFamilyIndex = b[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b[1].image = between_;
+  b[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, b);
+  VkImageBlit blit = {};
+  blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, static_cast<uint32_t>(eye), 1};
+  blit.srcOffsets[1] = {static_cast<int32_t>(source_width_),
+                        static_cast<int32_t>(source_height_), 1};
+  blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  blit.dstOffsets[1] = {static_cast<int32_t>(layer->width),
+                        static_cast<int32_t>(layer->height), 1};
+  vkCmdBlitImage(cmd, screen_source_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, between_,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+  // Back to a color attachment for the renderer. The image between to a
+  // source, and the swapchain image to a target.
+  b[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  b[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  b[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  b[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  b[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  b[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  b[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT |
+                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       0, 0, nullptr, 0, nullptr, 2, b);
+  ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_UNDEFINED,
+               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+               VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+  VkImageCopy copy = {};
+  copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copy.extent = {layer->width, layer->height, 1};
+  vkCmdCopyImage(cmd, between_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+               VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
+  UnlockQueue();
+  XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+  xrReleaseSwapchainImage(layer->swapchain, &release);
+}
+
 void XrApp::Pulse(int hand) {
   if (haptic_ == XR_NULL_HANDLE || state_ != XR_SESSION_STATE_FOCUSED) return;
   XrHapticVibration v = {XR_TYPE_HAPTIC_VIBRATION};
@@ -583,6 +836,16 @@ void XrApp::Stop() {
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   FreeStaging(&gpu_, &menu_.staging);
   FreeStaging(&gpu_, &cursor_.staging);
+  for (Layer& l : screen_) {
+    FreeStaging(&gpu_, &l.staging);
+    if (l.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(l.swapchain);
+    l.swapchain = XR_NULL_HANDLE;
+  }
+  if (between_ != VK_NULL_HANDLE) vkDestroyImage(gpu_.device, between_, nullptr);
+  if (between_memory_ != VK_NULL_HANDLE) vkFreeMemory(gpu_.device, between_memory_, nullptr);
+  between_ = VK_NULL_HANDLE;
+  between_memory_ = VK_NULL_HANDLE;
+  screen_source_ = VK_NULL_HANDLE;
   if (menu_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(menu_.swapchain);
   if (cursor_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(cursor_.swapchain);
   menu_.swapchain = cursor_.swapchain = XR_NULL_HANDLE;

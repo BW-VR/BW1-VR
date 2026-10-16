@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "../../src/common/version.h"
 #include "menu_layout.h"
 
 namespace {
@@ -10,48 +11,60 @@ namespace ml = menu_layout;
 using menu_model::Item;
 using menu_model::ItemKind;
 
-// THE COLORS. A dark panel with a frame of bronze and text of gold and of
-// parchment, as the dialog boxes of the game.
-constexpr uint32_t kPanelTop = 0xF22A1C10u;
-constexpr uint32_t kPanelBottom = 0xF2100A05u;
-constexpr uint32_t kBronze = 0xFFA87A3Au;
-constexpr uint32_t kBronzeDark = 0xFF5A3D18u;
-constexpr uint32_t kGold = 0xFFF0CF7Au;
-constexpr uint32_t kGoldDim = 0xFFC9A55Au;
-constexpr uint32_t kParchment = 0xFFEFE2C2u;
-constexpr uint32_t kParchmentDim = 0xFFB9AC8Cu;
-constexpr uint32_t kHighlight = 0xD08A5A22u;
-constexpr uint32_t kHelpBack = 0x50000000u;
+// THE LOOK OF THE MENU OF THE GAME (the Main Menu over a loaded game): a
+// light panel that shows the world behind it, a thin light frame, tabs at
+// its top left, a line of white text, and dark buttons with a light frame and
+// white text in the middle. The text of the game has a dark edge, so it
+// stays clear over the land and the sky.
+constexpr uint32_t kPanel = 0x5CFFFFFFu;        // white, 36 percent
+constexpr uint32_t kPanelEdge = 0xD8F4F0EAu;
+constexpr uint32_t kPanelShade = 0x70000000u;
+constexpr uint32_t kTab = 0x5CFFFFFFu;
+constexpr uint32_t kTabBack = 0x30FFFFFFu;
+constexpr uint32_t kButton = 0xE02A2321u;       // the dark brown of a button
+constexpr uint32_t kButtonLit = 0xF0463A33u;
+constexpr uint32_t kButtonEdge = 0xE8E8E2DAu;
+constexpr uint32_t kButtonEdgeLit = 0xFFFFFFFFu;
+constexpr uint32_t kButtonShade = 0xC0000000u;
+constexpr uint32_t kText = 0xFFF4F1EDu;
+constexpr uint32_t kTextDim = 0xFFD8D2CAu;
+constexpr uint32_t kRowLit = 0x38FFFFFFu;
 
-void Diamond(Canvas2D* c, float x, float y, float r, uint32_t argb) {
-  // Two lines across give a small mark with four points.
-  c->Line(x - r, y, x + r, y, 3.0f, argb);
-  c->Line(x, y - r * 0.6f, x, y + r * 0.6f, 3.0f, argb);
-  c->FillCircle(x, y, r * 0.35f, argb);
+constexpr float kTabTop = 22;
+constexpr float kPanelTop = 74;
+constexpr float kButtonLeft = 330;
+constexpr float kButtonRight = ml::kWidth - 330;
+
+void Button(Canvas2D* c, float l, float t, float r, float b, bool lit) {
+  c->FillRect(l - 2, t - 2, r + 2, b + 2, kButtonShade);
+  c->FillRect(l, t, r, b, lit ? kButtonLit : kButton);
+  c->StrokeRect(l + 1, t + 1, r - 1, b - 1, lit ? 3 : 2,
+                lit ? kButtonEdgeLit : kButtonEdge);
 }
 
-void Frame(Canvas2D* c) {
+// A tab at the top of the panel. The tab of the page is lighter and joins
+// the panel.
+float Tab(Canvas2D* c, float left, const std::string& text, bool on) {
+  const float size = 30;
+  const float w = c->Measure(text, size, false) + 70;
+  const float bottom = kPanelTop + (on ? 2 : 0);
+  c->FillRect(left, kTabTop, left + w, bottom, on ? kTab : kTabBack);
+  c->StrokeRect(left + 1, kTabTop + 1, left + w - 1, bottom + 2, 2,
+                on ? kPanelEdge : 0x90F4F0EAu);
+  c->Text(text, left + w * 0.5f, kTabTop + 38, size, on ? kText : kTextDim,
+          false, Canvas2D::kCenterAlign, true);
+  return left + w + 10;
+}
+
+void Panel(Canvas2D* c, const menu_model::Menu& menu) {
   const float w = static_cast<float>(ml::kWidth);
   const float h = static_cast<float>(ml::kHeight);
-  c->GradientRect(8, 8, w - 8, h - 8, 0, 0, 0, h, kPanelTop, kPanelBottom, 28);
-  c->StrokeRoundRect(8, 8, w - 8, h - 8, 28, 8, kBronzeDark);
-  c->StrokeRoundRect(12, 12, w - 12, h - 12, 24, 3, kBronze);
-  c->StrokeRoundRect(30, 30, w - 30, h - 30, 14, 2, kGoldDim);
-  const float inset = 30;
-  Diamond(c, inset, inset, 14, kGold);
-  Diamond(c, w - inset, inset, 14, kGold);
-  Diamond(c, inset, h - inset, 14, kGold);
-  Diamond(c, w - inset, h - inset, 14, kGold);
-}
-
-void Title(Canvas2D* c, const std::string& title) {
-  const float mid = ml::kWidth * 0.5f;
-  c->Text(title, mid, ml::kTitleBaseline, 66, kGold, true,
-          Canvas2D::kCenterAlign, true);
-  const float y = ml::kTitleBaseline + 34;
-  c->Line(ml::kLeft + 40, y, mid - 40, y, 2, kBronze);
-  c->Line(mid + 40, y, ml::kRight - 40, y, 2, kBronze);
-  Diamond(c, mid, y, 18, kGold);
+  float x = 40;
+  x = Tab(c, x, "Main Menu", menu.OnMain());
+  if (!menu.OnMain()) Tab(c, x, menu.Title(), true);
+  c->FillRect(14, kPanelTop, w - 14, h - 14, kPanel);
+  c->StrokeRect(14, kPanelTop, w - 14, h - 14, 6, kPanelShade);
+  c->StrokeRect(17, kPanelTop + 3, w - 17, h - 17, 3, kPanelEdge);
 }
 
 // The words of `text` in lines of at most `width` pixels.
@@ -77,24 +90,24 @@ std::vector<std::string> Wrap(Canvas2D* c, const std::string& text,
   return lines;
 }
 
-void Slider(Canvas2D* c, float mid, double fraction) {
+void Slider(Canvas2D* c, float mid, double fraction, bool lit) {
   const float l = ml::kBarLeft, r = ml::kBarRight;
-  c->FillRoundRect(l, mid - 7, r, mid + 7, 7, 0xFF241608u);
+  c->FillRect(l - 2, mid - 10, r + 2, mid + 10, kButtonShade);
+  c->FillRect(l, mid - 8, r, mid + 8, kButton);
   const float x = static_cast<float>(l + fraction * (r - l));
-  c->GradientRect(l, mid - 7, x, mid + 7, l, 0, r, 0, kBronze, kGold, 7);
-  c->StrokeRoundRect(l, mid - 7, r, mid + 7, 7, 2, kBronzeDark);
-  c->FillCircle(x, mid, 17, kBronzeDark);
-  c->FillCircle(x, mid, 13, kGold);
+  c->FillRect(l + 3, mid - 5, x, mid + 5, 0xC0D8D2CAu);
+  c->StrokeRect(l + 1, mid - 7, r - 1, mid + 7, 2, lit ? kButtonEdgeLit : kButtonEdge);
+  c->FillRect(x - 9, mid - 22, x + 9, mid + 22, kButtonShade);
+  c->FillRect(x - 7, mid - 20, x + 7, mid + 20, lit ? kButtonEdgeLit : kButtonEdge);
 }
 
-void CheckBox(Canvas2D* c, float mid, bool on) {
+void CheckBox(Canvas2D* c, float mid, bool on, bool lit) {
   const float r = ml::kRight, l = r - ml::kCheckSize;
   const float t = mid - ml::kCheckSize * 0.5f, b = mid + ml::kCheckSize * 0.5f;
-  c->FillRoundRect(l, t, r, b, 6, 0xFF241608u);
-  c->StrokeRoundRect(l, t, r, b, 6, 3, kBronze);
+  Button(c, l, t, r, b, lit);
   if (on) {
-    c->Line(l + 9, mid + 1, l + 19, b - 10, 6, kGold);
-    c->Line(l + 19, b - 10, r - 8, t + 9, 6, kGold);
+    c->Line(l + 10, mid + 1, l + 19, b - 11, 6, kText);
+    c->Line(l + 19, b - 11, r - 9, t + 10, 6, kText);
   }
 }
 
@@ -103,8 +116,14 @@ void CheckBox(Canvas2D* c, float mid, bool on) {
 void PaintMenu(Canvas2D* c, const menu_model::Menu& menu,
                const std::string& status) {
   c->Clear();
-  Frame(c);
-  Title(c, menu.Title());
+  Panel(c, menu);
+  // The line of white text at the top of the panel, as "Welcome. You are
+  // playing Black & White as ..." of the game.
+  const std::string head =
+      menu.OnMain() ? "Welcome to the " BWVR_PRODUCT_NAME " " BWVR_VERSION_TEXT "."
+                    : menu.Title();
+  c->Text(head, ml::kWidth * 0.5f, ml::kTitleBaseline + 18, 40, kText, false,
+          Canvas2D::kCenterAlign, true);
 
   const std::vector<Item> items = menu.Items();
   const bool main = menu.OnMain();
@@ -113,48 +132,40 @@ void PaintMenu(Canvas2D* c, const menu_model::Menu& menu,
     const Item& item = items[r];
     const float top = static_cast<float>(ml::RowTop(r));
     const float mid = top + ml::kRowHeight * 0.5f;
-    const float baseline = mid + 14;
+    const float baseline = mid + 12;
     const bool lit = r == cursor;
-    if (lit) {
-      c->GradientRect(ml::kLeft - 40, top + 4, ml::kRight + 40,
-                      top + ml::kRowHeight - 4, ml::kLeft - 40, 0,
-                      ml::kRight + 40, 0, kHighlight, 0x308A5A22u, 10);
-      c->FillRect(ml::kLeft - 40, top + 8, ml::kLeft - 32,
-                  top + ml::kRowHeight - 8, kGold);
-    }
     const std::string label = menu.Label(item);
-    const uint32_t color = lit ? 0xFFFFF2C8u : kParchment;
-    const bool command = item.kind != ItemKind::kSetting;
     if (main || item.kind == ItemKind::kBack) {
-      // The main page of the game has its entries in the middle.
-      const bool group = item.kind == ItemKind::kGroup;
-      c->Text(label, ml::kWidth * 0.5f, baseline, group ? 40 : 44,
-              group ? color : (lit ? 0xFFFFE9A8u : kGold), !group,
+      // A button of the game: each entry of the main page, and Back.
+      Button(c, kButtonLeft, top + 6, kButtonRight, top + ml::kRowHeight - 6, lit);
+      c->Text(label, ml::kWidth * 0.5f, baseline, 36, kText, false,
               Canvas2D::kCenterAlign, true);
       continue;
     }
-    c->Text(label, ml::kLeft, baseline, 38, color, command,
-            Canvas2D::kLeftAlign, true);
+    // A row of settings: the label on the panel, its control at the right.
+    if (lit) c->FillRect(ml::kLeft - 40, top + 3, ml::kRight + 40, top + ml::kRowHeight - 3, kRowLit);
+    c->Text(label, ml::kLeft, baseline, 34, kText, false, Canvas2D::kLeftAlign, true);
     const double fraction = menu.SliderFraction(item);
     const int check = menu.CheckValue(item);
     const std::string value = menu.ValueText(item);
     if (fraction >= 0.0) {
-      Slider(c, mid, fraction);
-      c->Text(value, ml::kBarLeft - 30, baseline, 34, kGold, false,
+      Slider(c, mid, fraction, lit);
+      c->Text(value, ml::kBarLeft - 30, baseline, 32, kText, false,
               Canvas2D::kRightAlign, true);
     } else if (check >= 0) {
-      CheckBox(c, mid, check != 0);
+      CheckBox(c, mid, check != 0, lit);
     } else if (!value.empty()) {
-      c->Text(value, ml::kRight, baseline, 36, kGold, false,
-              Canvas2D::kRightAlign, true);
+      // A list: its item in a dark box, as a button of the game.
+      const float w = c->Measure(value, 32, false) + 60;
+      Button(c, ml::kRight - w, top + 10, ml::kRight, top + ml::kRowHeight - 10, lit);
+      c->Text(value, ml::kRight - w * 0.5f, baseline, 32, kText, false,
+              Canvas2D::kCenterAlign, true);
     }
   }
 
-  // THE HELP of the row with the highlight, as the tooltips of the launcher.
-  c->FillRoundRect(ml::kLeft - 40, ml::kHelpTop, ml::kRight + 40,
-                   ml::kHelpBottom, 12, kHelpBack);
-  c->StrokeRoundRect(ml::kLeft - 40, ml::kHelpTop, ml::kRight + 40,
-                     ml::kHelpBottom, 12, 2, kBronzeDark);
+  // THE HELP of the row with the highlight, as the tooltips of the launcher,
+  // in a dark box of the game.
+  Button(c, ml::kLeft - 40, ml::kHelpTop, ml::kRight + 40, ml::kHelpBottom, false);
   if (cursor >= 0 && cursor < static_cast<int>(items.size())) {
     const std::string help = menu.Help(items[cursor]);
     if (!help.empty()) {
@@ -163,20 +174,20 @@ void PaintMenu(Canvas2D* c, const menu_model::Menu& menu,
           Wrap(c, help, size, ml::kRight - ml::kLeft);
       float y = ml::kHelpTop + 38;
       for (size_t i = 0; i < lines.size() && i < 4; ++i) {
-        c->Text(lines[i], ml::kLeft, y, size, kParchmentDim, false,
+        c->Text(lines[i], ml::kLeft, y, size, kTextDim, false,
                 Canvas2D::kLeftAlign, false);
         y += size * 1.32f;
       }
     }
   }
-  c->Text(status, ml::kWidth * 0.5f, ml::kStatusBaseline, 28, kGoldDim, false,
-          Canvas2D::kCenterAlign, false);
+  c->Text(status, ml::kWidth * 0.5f, ml::kStatusBaseline, 28, kText, false,
+          Canvas2D::kCenterAlign, true);
 }
 
 void PaintCursor(Canvas2D* c) {
   c->Clear();
   const float m = c->Width() * 0.5f;
-  c->FillCircle(m, m, m * 0.95f, 0x40F0CF7Au);
-  c->FillCircle(m, m, m * 0.55f, 0xA0F0CF7Au);
-  c->FillCircle(m, m, m * 0.28f, 0xFFFFF2C8u);
+  c->FillCircle(m, m, m * 0.95f, 0x40FFFFFFu);
+  c->FillCircle(m, m, m * 0.55f, 0xA0FFFFFFu);
+  c->FillCircle(m, m, m * 0.28f, 0xFFFFFFFFu);
 }

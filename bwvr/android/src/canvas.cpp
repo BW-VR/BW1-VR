@@ -71,16 +71,16 @@ bool Canvas2D::Start(JNIEnv* env, int width, int height) {
   paint_ = Keep(env, env->NewObject(paint_class, paint_new, 0x01 | 0x02 | 0x80));
   if (Failed(env, "new Canvas, new Paint")) return false;
 
-  jobject serif = StaticField(env, "android/graphics/Typeface", "SERIF",
+  jobject sans = StaticField(env, "android/graphics/Typeface", "SANS_SERIF",
                               "Landroid/graphics/Typeface;");
   jmethodID typeface_create = env->GetStaticMethodID(
       typeface_class, "create",
       "(Landroid/graphics/Typeface;I)Landroid/graphics/Typeface;");
-  serif_ = Keep(env, env->CallStaticObjectMethod(typeface_class,
-                                                 typeface_create, serif, 0));
-  serif_bold_ = Keep(env, env->CallStaticObjectMethod(
-                              typeface_class, typeface_create, serif, 1));
-  env->DeleteGlobalRef(serif);
+  font_ = Keep(env, env->CallStaticObjectMethod(typeface_class,
+                                                 typeface_create, sans, 0));
+  font_bold_ = Keep(env, env->CallStaticObjectMethod(
+                              typeface_class, typeface_create, sans, 1));
+  env->DeleteGlobalRef(sans);
 
   style_fill_ = StaticField(env, "android/graphics/Paint$Style", "FILL",
                             "Landroid/graphics/Paint$Style;");
@@ -137,19 +137,19 @@ bool Canvas2D::Start(JNIEnv* env, int width, int height) {
   env->DeleteLocalRef(paint_class);
   env->DeleteLocalRef(typeface_class);
   if (Failed(env, "the methods of Paint and Canvas") || draw_text_ == nullptr ||
-      serif_bold_ == nullptr || mode_clear_ == nullptr) {
+      font_bold_ == nullptr || mode_clear_ == nullptr) {
     Stop();
     return false;
   }
-  AppLog("canvas       : a picture of %d by %d with the serif font of the "
-         "system", width, height);
+  AppLog("canvas       : a picture of %d by %d with the sans serif font "
+         "of the system", width, height);
   return true;
 }
 
 void Canvas2D::Stop() {
   if (env_ == nullptr) return;
-  jobject* refs[] = {&bitmap_,     &canvas_,       &paint_,     &serif_,
-                     &serif_bold_, &style_fill_,   &style_stroke_,
+  jobject* refs[] = {&bitmap_,     &canvas_,       &paint_,     &font_,
+                     &font_bold_, &style_fill_,   &style_stroke_,
                      &align_[0],   &align_[1],     &align_[2],  &tile_clamp_,
                      &mode_clear_};
   for (jobject* r : refs) {
@@ -237,7 +237,7 @@ void Canvas2D::Text(const std::string& text, float x, float y, float size,
                     uint32_t argb, bool bold, Align align, bool shadow) {
   UsePaint(argb, true, 0.0f);
   jobject old = env_->CallObjectMethod(paint_, set_typeface_,
-                                       bold ? serif_bold_ : serif_);
+                                       bold ? font_bold_ : font_);
   if (old != nullptr) env_->DeleteLocalRef(old);
   env_->CallVoidMethod(paint_, set_text_size_, size);
   env_->CallVoidMethod(paint_, set_text_align_, align_[align]);
@@ -253,7 +253,7 @@ void Canvas2D::Text(const std::string& text, float x, float y, float size,
 
 float Canvas2D::Measure(const std::string& text, float size, bool bold) {
   jobject old = env_->CallObjectMethod(paint_, set_typeface_,
-                                       bold ? serif_bold_ : serif_);
+                                       bold ? font_bold_ : font_);
   if (old != nullptr) env_->DeleteLocalRef(old);
   env_->CallVoidMethod(paint_, set_text_size_, size);
   jstring s = Str(text);

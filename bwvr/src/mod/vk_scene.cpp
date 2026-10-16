@@ -118,6 +118,7 @@
 #include "one_walk_math.h"
 #include "vk_core.h"
 #include "vk_scene.h"
+#include "vk_stream.h"
 #ifdef _WIN32
 #include "vk_window.h"
 #endif
@@ -1010,6 +1011,20 @@ bool ReadSurface(IDirectDrawSurface7* s, uint32_t* width, uint32_t* height,
   return ok;
 #endif
 }
+
+}  // namespace
+
+#ifdef _WIN32
+// vk_stream.h: the pixels of the record are the pixels of this read.
+bool VkSceneReadSurfaceRgba(void* surface, uint32_t* width, uint32_t* height,
+                            uint8_t** pixels) {
+  return surface != nullptr &&
+         ReadSurface(static_cast<IDirectDrawSurface7*>(surface), width, height,
+                     pixels);
+}
+#endif
+
+namespace {
 
 // Records the copy of `staging` (width by height pixels of RGBA8) into
 // `image`, each mip level from the one before it, and the layout for the
@@ -3030,6 +3045,8 @@ void EndOnWorker(const void*) {
 }  // namespace
 
 void VkSceneSetOptions(int mode, int test_frame) {
+  BWVR_STREAM_OPTION(mode = mode);
+  BWVR_STREAM_OPTION(test_frame = test_frame);
   g_mode = mode == 1 ? 1 : 0;
   g_test_frame = test_frame;
   if (g_mode != 0 && g_direct) {
@@ -3050,6 +3067,7 @@ uint64_t g_eye_frames = 0;  // for the report
 }  // namespace
 
 void VkSceneSetEyes(bool on) {
+  BWVR_STREAM_OPTION(eyes = on ? 1 : 0);
   g_eyes = on;
   if (on) {
     ModLog("vk scene     : vk_eyes=1. In a frame of one walk the eye pictures "
@@ -3108,6 +3126,7 @@ bool VkSceneEyes(uint64_t* image, uint32_t* width, uint32_t* height) {
 bool VkSceneOn() { return g_mode != 0 && !g_failed; }
 
 void VkSceneWalkBegin(void* device7) {
+  BWVR_STREAM(VkStreamWalkBegin(device7));
   if (!VkSceneOn() || device7 == nullptr) return;
   IDirect3DDevice7* d = static_cast<IDirect3DDevice7*>(device7);
   Seed seed;
@@ -3168,14 +3187,23 @@ void VkSceneWalkBegin(void* device7) {
           g_fovea_outer_ini > 0.0f ? g_fovea_outer_ini : level.outer_deg;
     }
     seed.fovea.quarter = vk::Get().rate_quarter;
+#ifdef _WIN32
     const bw::tech::InfoTransform* info =
         reinterpret_cast<const bw::tech::InfoTransform*>(
             bw::tech::kInfoTransform);
-    if (info->inv_half_tan_fov_x > 0.0f && info->res_x > 0 &&
-        info->res_y > 0) {
-      seed.fovea.tan_h = 1.0f / info->inv_half_tan_fov_x;
-      seed.fovea.tan_v = seed.fovea.tan_h * static_cast<float>(info->res_y) /
-                         static_cast<float>(info->res_x);
+    const float inv_half_tan = info->inv_half_tan_fov_x;
+    const int32_t res_x = info->res_x, res_y = info->res_y;
+#else
+    // The headset app has no game in its process: the stream gives the
+    // angles of the camera with the start of the walk.
+    float inv_half_tan = 0.0f;
+    int32_t res_x = 0, res_y = 0;
+    VkPlatformTransform(&inv_half_tan, &res_x, &res_y);
+#endif
+    if (inv_half_tan > 0.0f && res_x > 0 && res_y > 0) {
+      seed.fovea.tan_h = 1.0f / inv_half_tan;
+      seed.fovea.tan_v = seed.fovea.tan_h * static_cast<float>(res_y) /
+                         static_cast<float>(res_x);
     }
     seed.fovea_show = g_fovea_show;
     seed.gaze[0] = g_gaze_valid ? g_gaze_now[0] : 0.0f;
@@ -3199,6 +3227,9 @@ void VkSceneWalkBegin(void* device7) {
 }
 
 void VkSceneFrame(uint64_t frame, uint64_t name, bool capture) {
+#ifdef _WIN32
+  VkStreamFrame(frame, name, capture);
+#endif
   if (!VkSceneOn()) return;
   // The walks of the frames before this one are over (D3D7ThreadWalk).
   g_frame_walks = InterlockedCompareExchange(&g_walk_serial, 0, 0);
@@ -3209,6 +3240,7 @@ void VkSceneFrame(uint64_t frame, uint64_t name, bool capture) {
 }
 
 void VkSceneSetFollow(int on) {
+  BWVR_STREAM_OPTION(follow = on);
   g_follow = on != 0;
   if (g_mode == 0) return;
   ModLog("vk scene     : vk_scene_follow=%d. %s", g_follow ? 1 : 0,
@@ -3233,18 +3265,21 @@ void VkSceneFollowToggle(const char* keys) {
 }
 
 void VkSceneTarget(void* surface) {
+  BWVR_STREAM(VkStreamTarget(surface));
   if (!VkSceneOn() || (!g_direct && !D3D7ThreadActive())) return;
   TargetArgs a = {surface, GpuBridgeIsPanel(surface) ? 1u : 0u};
   Deliver(&TargetOnWorker, &a, sizeof(a));
 }
 
 void VkScenePanelBind(bool panel) {
+  BWVR_STREAM(VkStreamPanelBind(panel));
   if (!VkSceneOn() || !g_direct) return;
   TargetArgs a = {nullptr, panel ? 1u : 0u};
   Deliver(&TargetOnWorker, &a, sizeof(a));
 }
 
 void VkSceneViewport(const void* viewport7) {
+  BWVR_STREAM(VkStreamViewport(viewport7));
   if (!VkSceneOn() || (!g_direct && !D3D7ThreadActive()) ||
       viewport7 == nullptr) {
     return;
@@ -3254,6 +3289,7 @@ void VkSceneViewport(const void* viewport7) {
 
 void VkSceneClear(uint32_t count, const void* rects, uint32_t flags,
                   uint32_t color, float z) {
+  BWVR_STREAM(VkStreamClear(count, rects, flags, color, z));
   if (!VkSceneOn() || (!g_direct && !D3D7ThreadActive())) return;
   ClearArgs a;
   memset(&a, 0, sizeof(a));
@@ -3268,6 +3304,7 @@ void VkSceneClear(uint32_t count, const void* rects, uint32_t flags,
 }
 
 void VkSceneWalkEnd() {
+  BWVR_STREAM(VkStreamWalkEnd());
   if (!VkSceneOn()) return;
   if (g_direct) {
     EndOnWorker(nullptr);
@@ -3277,10 +3314,12 @@ void VkSceneWalkEnd() {
 }
 
 void VkSceneRenderState(uint32_t state, uint32_t value) {
+  BWVR_STREAM(VkStreamRenderState(state, value));
   if (state < static_cast<uint32_t>(kStates)) g_rs[state] = value;
 }
 
 void VkSceneStageState(uint32_t stage, uint32_t type, uint32_t value) {
+  BWVR_STREAM(VkStreamStageState(stage, type, value));
   if (stage < 2 && type < static_cast<uint32_t>(kStageStates)) {
     g_ts[stage][type] = value;
     // In Direct3D 7 D3DTSS_ADDRESS sets the address mode of u and of v. The
@@ -3294,6 +3333,7 @@ void VkSceneStageState(uint32_t stage, uint32_t type, uint32_t value) {
 }
 
 void VkSceneTexture(uint32_t stage, void* surface) {
+  BWVR_STREAM(VkStreamTexture(stage, surface));
   if (stage == 0) g_texture = surface;
   if (stage == 1) g_texture1 = surface;
 }
@@ -3301,6 +3341,8 @@ void VkSceneTexture(uint32_t stage, void* surface) {
 void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
                  uint32_t vertex_count, const uint16_t* indices,
                  uint32_t index_count) {
+  BWVR_STREAM(VkStreamDraw(type, fvf, vertices, vertex_count, indices,
+                           index_count));
   if (!g_recording) return;
   // A draw for the panel target goes into the panel (THE PANEL).
   const bool panel = ForPanel();
@@ -3604,6 +3646,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
 }
 
 void VkSceneSetPanel(int on) {
+  BWVR_STREAM_OPTION(panel = on);
   g_panel_mode = on != 0;
   if (g_mode == 0) return;
   ModLog("vk scene     : vk_panel=%d. %s", g_panel_mode ? 1 : 0,
@@ -3759,6 +3802,10 @@ void VkScenePanelReadDone() { g_half_locked = false; }
 
 void VkSceneSetFoveation(int level, int inner_deg, int outer_deg,
                          int show) {
+  BWVR_STREAM_OPTION(fovea_level = level);
+  BWVR_STREAM_OPTION(fovea_inner = inner_deg);
+  BWVR_STREAM_OPTION(fovea_outer = outer_deg);
+  BWVR_STREAM_OPTION(fovea_show = show);
   g_fovea_level = level >= 0 && level <= 3 ? level : 0;
   g_fovea_show = show != 0;
   g_fovea_inner_ini = static_cast<float>(inner_deg);
@@ -3799,6 +3846,11 @@ void VkSceneFoveationToggle(const char* keys) {
 
 void VkSceneSetFoveaRes(int on, int outer_pct, int center_pct, int inset_deg,
                         int down_deg) {
+  BWVR_STREAM_OPTION(mres_on = on);
+  BWVR_STREAM_OPTION(mres_outer = outer_pct);
+  BWVR_STREAM_OPTION(mres_center = center_pct);
+  BWVR_STREAM_OPTION(mres_inset = inset_deg);
+  BWVR_STREAM_OPTION(mres_down = down_deg);
   g_mres_mode = on != 0;
   g_mres_down_deg = static_cast<float>(
       down_deg < 0 ? 0 : (down_deg > 15 ? 15 : down_deg));
@@ -3826,6 +3878,7 @@ void VkSceneFoveaResToggle(const char* keys) {
 }
 
 void VkSceneSetGaze(bool valid, float gx, float gy) {
+  BWVR_STREAM(VkStreamGaze(valid, gx, gy));
   g_gaze_valid = valid;
   g_gaze_now[0] = gx;
   g_gaze_now[1] = gy;
@@ -3833,6 +3886,7 @@ void VkSceneSetGaze(bool valid, float gx, float gy) {
 }
 
 void VkSceneSetDirect(bool on) {
+  BWVR_STREAM_OPTION(direct = on ? 1 : 0);
   g_direct = on;
   if (on) g_mode = 1;
 }
@@ -3900,6 +3954,7 @@ void WaitPresent(PresentEntry& e) {
 }  // namespace
 
 void VkSceneSetTextureReuse(int on) {
+  BWVR_STREAM_OPTION(texture_reuse = on);
   g_texture_reuse = on != 0;
   if (g_mode == 0) return;
   ModLog("vk scene     : vk_texture_reuse=%d. %s", g_texture_reuse ? 1 : 0,
@@ -3911,6 +3966,7 @@ void VkSceneSetTextureReuse(int on) {
 }
 
 void VkSceneSetPresentLate(int on) {
+  BWVR_STREAM_OPTION(present_late = on);
   g_present_late = on != 0;
   if (!g_direct) return;
   ModLog("vk scene     : vk_present_late=%d. The window shows %s",
@@ -3922,6 +3978,7 @@ void VkSceneSetPresentLate(int on) {
 }
 
 void VkSceneSetKeepPicture(int on) {
+  BWVR_STREAM_OPTION(keep_picture = on);
   g_keep_picture = on != 0;
   if (!g_direct) return;
   ModLog("vk scene     : vk_keep_picture=%d. %s", g_keep_picture ? 1 : 0,
@@ -3933,6 +3990,7 @@ void VkSceneSetKeepPicture(int on) {
 }
 
 void VkSceneSetStage1(int on) {
+  BWVR_STREAM_OPTION(stage1 = on);
   g_stage1_mode = on != 0;
   if (g_mode == 0) return;
   ModLog("vk scene     : vk_stage1=%d. %s", g_stage1_mode ? 1 : 0,
@@ -3951,6 +4009,7 @@ void VkSceneStage1Toggle(const char* keys) {
 }
 
 void VkSceneSetUntextured(int on) {
+  BWVR_STREAM_OPTION(untextured = on);
   g_untextured = on != 0;
   if (g_mode == 0) return;
   ModLog("vk scene     : vk_untextured=%d. %s", g_untextured ? 1 : 0,
@@ -3969,6 +4028,7 @@ void VkSceneUntexturedToggle(const char* keys) {
 }
 
 void VkSceneSetBlackCheck(int on) {
+  BWVR_STREAM_OPTION(black_check = on);
   g_black_check = on != 0;
   if (!g_direct) return;
   ModLog("vk scene     : vk_black_check=%d. %s", g_black_check ? 1 : 0,
@@ -4110,6 +4170,8 @@ const uint8_t* VkScenePresentPixels(uint32_t width, uint32_t height,
 }
 
 void VkSceneSetOnly(int on, int test) {
+  BWVR_STREAM_OPTION(only = on);
+  BWVR_STREAM_OPTION(only_test = test);
   g_only_mode = on != 0;
   g_only_test = test != 0;
   // backend=vulkan has no Direct3D 9 that could draw a walk too.
@@ -4138,6 +4200,8 @@ void VkSceneOnlyToggle(const char* keys) {
 bool VkSceneOnlyTest() { return g_only_test; }
 
 void VkSceneSetUploads(int queue, int reread_test) {
+  BWVR_STREAM_OPTION(upload_queue = queue);
+  BWVR_STREAM_OPTION(reread_test = reread_test);
   g_upload_queue = queue != 0;
   g_reread_test = reread_test > 0 ? reread_test : 0;
   if (g_mode == 0) return;
@@ -4161,7 +4225,10 @@ void VkSceneUploadsToggle(const char* keys) {
                         : "at once, with a wait for the GPU");
 }
 
-void VkSceneOnlyFrame(bool can) { g_only_frame = can && VkSceneOn(); }
+void VkSceneOnlyFrame(bool can) {
+  BWVR_STREAM(VkStreamOnlyFrame(can));
+  g_only_frame = can && VkSceneOn();
+}
 
 bool VkSceneOnlyNow() { return g_walk_only; }
 
@@ -4188,6 +4255,7 @@ void VkSceneCounts(uint64_t* walks, uint64_t* draws, uint64_t* clears,
 }
 
 void VkSceneSurfaceWritten(void* surface) {
+  BWVR_STREAM(VkStreamWritten(surface));
   // A write of the CPU into the render target: its pixels are the newer
   // picture.
   if (g_direct && surface != nullptr) {

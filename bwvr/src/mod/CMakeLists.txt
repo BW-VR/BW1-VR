@@ -38,6 +38,7 @@ add_library(bwvr_mod SHARED
     vk_ddraw.cpp
     vk_core.cpp
     vk_scene.cpp
+    vk_stream.cpp
     vk_window.cpp
     frame_time.cpp
     fov.cpp

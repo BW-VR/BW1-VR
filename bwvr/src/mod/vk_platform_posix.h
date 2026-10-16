@@ -145,8 +145,16 @@ inline int strncpy_s(char (&buffer)[N], const char* text, size_t) {
   snprintf(buffer, N, "%s", text);
   return 0;
 }
+// The renderer joins a folder and a name with a backslash, as Windows does.
+// Android takes a backslash as a part of the name, so each one becomes a
+// slash.
 inline int fopen_s(FILE** file, const char* path, const char* mode) {
-  *file = fopen(path, mode);
+  char posix[1024];
+  snprintf(posix, sizeof(posix), "%s", path);
+  for (char* p = posix; *p != 0; ++p) {
+    if (*p == '\\') *p = '/';
+  }
+  *file = fopen(posix, mode);
   return *file != nullptr ? 0 : 1;
 }
 inline void* _aligned_malloc(size_t size, size_t alignment) {
@@ -159,6 +167,11 @@ inline void _aligned_free(void* p) { free(p); }
 // it is the folder of runblack.exe. The app gives its game folder.
 void VkPlatformSetFolder(const char* folder);
 const char* VkPlatformFolder();
+// The angles of the camera of the game of the walk now
+// (bw::tech::InfoTransform on the PC). The app gives the values of the
+// stream.
+void VkPlatformTransform(float* inv_half_tan_fov_x, int32_t* res_x,
+                         int32_t* res_y);
 inline HMODULE GetModuleHandleA(const char*) { return nullptr; }
 inline DWORD GetModuleFileNameA(HMODULE, char* path, DWORD size) {
   // The renderer cuts the name after the last backslash.

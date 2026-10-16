@@ -9,10 +9,12 @@
 #include "scene_host.h"
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include <string>
 
+#include "../../src/mod/d3d7_thread.h"
 #include "app_log.h"
 
 namespace {
@@ -49,6 +51,20 @@ int OneWalkModeNow() { return g_state.one_walk_mode; }
 
 bool GpuBridgeIsPanel(const void* surface) {
   return surface != nullptr && surface == g_state.panel_target;
+}
+
+// d3d7_thread.h: the app has no D3D7 thread. With backend=vulkan of the
+// stream each call comes on the thread of the player, as on the frame thread
+// of the PC, so a post is the call itself.
+bool D3D7ThreadPost(D3D7ThreadFn, const void*, unsigned) { return false; }
+bool D3D7ThreadActive() { return false; }
+bool D3D7ThreadOnWorker() { return false; }
+
+void VkPlatformTransform(float* inv_half_tan_fov_x, int32_t* res_x,
+                         int32_t* res_y) {
+  *inv_half_tan_fov_x = g_state.inv_half_tan_fov_x;
+  *res_x = g_state.res_x;
+  *res_y = g_state.res_y;
 }
 
 void VkPlatformSetFolder(const char* folder) { g_folder = folder; }

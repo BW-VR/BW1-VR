@@ -21,8 +21,10 @@ Summary:
 - The app finds the game folder on the headset and checks `runblack.exe`
   (the SHA-1 of the unofficial patch v1.42).
 - The app has the Vulkan renderer of the mod (`vk_core.cpp`, `vk_scene.cpp`),
-  the same source as the `ddraw.dll` of the PC. Nothing gives it walks yet
-  (see "The renderer in the app").
+  the same source as the `ddraw.dll` of the PC. It draws the walks of a
+  stream that the mod records on the PC (`vk_stream_record`). In the
+  emulator its pictures of a walk of the game are the same as the pictures
+  of the PC, to the pixel (see "The stream of the walks").
 - **The app cannot start the game yet.** `runblack.exe` is a Windows
   program for x86, and the APK has no x86 runtime (see "What the app cannot
   do yet").
@@ -43,6 +45,9 @@ Summary:
 | `android/src/menu_paint.cpp` | The paint of the menu |
 | `android/src/menu_painter.cpp` | The thread that paints the menu |
 | `android/src/scene_host.cpp` | The functions of the mod that the renderer calls, with the state of the walk |
+| `android/src/scene_player.cpp` | Gives each record of a stream of the walks to the renderer |
+| `src/mod/scene_stream.h` | The format of the stream of the walks. No Windows code |
+| `src/mod/vk_stream.cpp` | The record of the stream in the mod on the PC |
 | `android/test_runtime/test_runtime.cpp` | The OpenXR test runtime for the emulator. Not in the APK |
 | `src/mod/vk_platform_posix.h` | The parts of Windows that the renderer uses, for a build with no Windows |
 | `src/mod/vk_d3d7_posix.h` | The parts of Direct3D 7 that the renderer uses, with the values of the SDK |
@@ -54,6 +59,7 @@ Summary:
 | `tools/android/check_apk.ps1` | The checks of the APK with no device |
 | `tools/android/emu_test.ps1` | The test in the Android emulator |
 | `tools/android/emu_xr_test.ps1` | The test in the Android emulator with the OpenXR test runtime |
+| `tools/android/emu_replay_test.ps1` | A stream of the game in the renderer of the app in the emulator, against the pictures of the PC |
 | `tools/android/android_env.ps1` | Finds the SDK, the NDK and the JDK |
 
 ## Build the APK
@@ -143,16 +149,20 @@ found.
 
 ## The menu
 
-The menu has the form of the menu of the game: a dark panel with a frame of
-bronze, the title in gold and the entries in the middle of the main page.
+The menu has the form of the Main Menu that the game shows over a loaded
+game: a light panel that shows the world behind it, a thin light frame, tabs
+at its top left ("Main Menu", and the group of a page), a line of white text
+at the top, and dark brown buttons with a light frame and white text in the
+middle. The font is the sans serif font of the system. The text has a dark
+shadow, as the text of the game has.
 
 - **The main page.** "Play in VR", "Play, new game", one entry for each
   group of the table ("Picture", "Performance", "Foveated rendering",
   "View", "Moving around", "Controllers", "Testing") and "Save Config".
 - **A group page.** The rows of the group: the label at the left, the value
   at the right. A check box for a setting that is on or off, a slider with
-  its value for a slider, the name of the item for a list. "Back" at the
-  end.
+  its value for a slider, the name of the item in a dark box for a list.
+  "Back" is a button at the end.
 - **The help.** Below the rows, the help text of the row with the highlight,
   the same text as the tooltip of the launcher. The help of a group names
   the settings on its page.
@@ -275,12 +285,21 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
    the calls of OpenXR in the right order with the right structs. It does
    not show the runtime of Meta.
-4. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
+4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
+   checks). The stream and the pictures of the PC come from one desktop run
+   (see "The stream of the walks"). The emulator has the GPU of the PC
+   (`-gpu host`): the renderer needs Vulkan 1.3, and SwiftShader has 1.2. The
+   script puts the stream and `stream_replay=1` into the game folder of the
+   app, starts the app, and compares each picture of the renderer of the app
+   with the picture of the same name of the PC. The pass is at most 2
+   percent of the pixels with a difference of more than 24 in a channel.
+5. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
    the table, the menu (the pages, the steps, the help, the save rules), the
-   hit of a ray on the quad (`test/controller_math/menu_checks.h`), and each
+   hit of a ray on the quad (`test/controller_math/menu_checks.h`), each
    value and struct of `vk_d3d7_posix.h` against the Windows SDK
-   (`vk_platform_checks.h`).
-5. **In a headset** (only a headset can show it): install the APK with
+   (`vk_platform_checks.h`), and the writer and the reader of the stream
+   (`stream_checks.h`).
+6. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
    session is made`. Check that the menu is in front of you at a good
@@ -306,18 +325,78 @@ The app compiles `vk_core.cpp` and `vk_scene.cpp` of the mod into
   (`ReadRgba`), and the reads of the PC with `Lock` and SSE stay in the
   build of the PC.
 - `scene_host.cpp` gives the functions of the other parts of the mod that the
-  renderer calls (`StereoPassEye`, `OneWalkActive`, `OneWalkModeNow`,
-  `OneWalkShiftPerRhw`, `OneWalkBoundTarget`, `GpuBridgeIsPanel`, `ModLog`)
-  with the state of the walk (`SceneHostState`).
+  renderer calls (`StereoPassEye`, `IntroPassEye`, `OneWalkActive`,
+  `OneWalkModeNow`, `OneWalkShiftPerRhw`, `OneWalkBoundTarget`,
+  `GpuBridgeIsPanel`, `ModLog`, and the D3D7 thread, which the app does not
+  have) with the state of the walk (`SceneHostState`).
+- The renderer reads one value from the memory of the game: the angles of
+  the camera (`bw::tech::InfoTransform`) for the foveation. In the app the
+  stream gives them with the start of each walk (`VkPlatformTransform`).
+- A picture of a test (`vk_scene_test_frame`, F12) goes into the folder that
+  the app gives (`VkPlatformSetFolder`): the game folder. `fopen_s` of the
+  app makes each backslash of a path a slash.
 
 The code of the PC does not change: each part for the app is in `#ifndef
-_WIN32`. Nothing in the app calls the renderer yet, so the linker leaves it
-out of the library for now.
+_WIN32`.
 
 **Vulkan 1.3.** `vk_core.cpp` needs Vulkan 1.3 (dynamic rendering,
 synchronization2, the extended dynamic state). SwiftShader of the emulator
-has Vulkan 1.2. Open: the version of Vulkan of the Quest 3 and of the Steam
-Frame for an APK.
+has Vulkan 1.2. The emulator with `-gpu host` has the Vulkan 1.3 of the GPU
+of the PC. Open: the version of Vulkan of the Quest 3 and of the Steam Frame
+for an APK.
+
+## The stream of the walks
+
+The stream is a record of each call of the Vulkan renderer (`vk_scene.h`)
+with `backend=vulkan`, in the format of `scene_stream.h`: the options of the
+renderer, the frames, the start and the end of each walk with the state of
+the device, the render states, the textures, the draws with their vertices
+and indices, the targets, the viewports, the clears, and each surface of the
+game with its pixels as RGBA8 before its first use and after the game writes
+it. With each walk, draw and target the stream has the values of the other
+parts of the mod that the renderer reads (`StreamState`).
+
+**The record on the PC** (`vk_stream.cpp`, a test aid). `vk_stream_record=N`
+in `bwvr.ini`: from the frame with the count N of the controllers (as
+`vk_scene_test_frame`), the calls of `vk_stream_frames` frames (3 by
+default) go to `bwvr-stream.bin` beside `runblack.exe`. Only with
+`backend=vulkan`, where each call comes on the frame thread in the order of
+the walk. A desktop run needs `fake_controller=1`: with no controller the
+count of the frames does not move. The launcher removes both keys on each
+save. A test key that changes a rule of the renderer during a record is not
+in the stream. Each public call of `vk_scene.cpp` has one line
+`BWVR_STREAM(...)` at its start, and each setter one line
+`BWVR_STREAM_OPTION(...)`. In the build of the app these lines are empty.
+
+```
+desk_run.ps1 -Name stream -Dll <ddraw.dll> -Save pen -Seconds 60 -Extra @{
+  one_walk = 1; fake_controller = 1; vk_stream_record = 3000;
+  vk_stream_frames = 4; vk_scene_test_frame = 3002 }
+```
+
+A desktop run in the test save "pen" gives a stream of 4 frames of 16.8 MB:
+1600 draws and 56 surfaces with 13.7 MB of pixels. **The file holds the
+pixels of the textures of the game.** It stays on the PC of the person who
+made it (`local\android-stream`), and never goes into the repo or into an
+APK.
+
+**The replay in the app** (`scene_player.cpp`, a test aid).
+`stream_replay=1` in `bwvr.ini` of the game folder of the app: at its start
+the app gives each record of `bwvr-stream.bin` of the game folder to its
+renderer. A surface of the game is an object of the stream with its pixels
+(`ReadRgba`), and the device at the start of a walk gives the states of the
+stream. With `vk_scene_test_frame` in the options of the stream, the
+renderer writes the pictures of that frame into the game folder.
+
+**What the replay shows.** The stream of the test save "pen" (frames 3000 to
+3003, the Main Menu of the game over the island, `one_walk=1`,
+`foveation=1`, `fovea_res=1`) in the emulator with `-gpu host`: the four
+pictures of frame 3002 (the left eye, the right eye, and the outer and the
+centre image of the foveated resolution) are the same as the pictures of the
+PC, to the pixel. The four walks take 0.25 s with the first pipelines and
+the uploads of the textures. The read back of the pictures takes about two
+minutes in the emulator, because the GPU of the emulator gives an image of
+40 MB to the CPU slowly.
 
 ## What the app cannot do yet
 
@@ -331,16 +410,14 @@ Android. The plan, in steps:
    give it the game folder, and write `ScreenW`, `ScreenH`, `FullScreen`
    and `ScreenD` (`Menu::RenderSize`) into the registry of its Wine prefix.
    Wine also needs a display driver with no screen, and an audio driver.
-2. **The walks for the renderer in the app.** With `backend=vulkan` the
-   device of the mod gives each call of a walk to the Vulkan renderer
-   (`VkSceneRenderState`, `VkSceneDraw`, `VkSceneTexture` and the others in
-   `vk_scene.h`). The renderer is in the app ("The renderer in the app").
-   The plan: the mod writes these calls and the pixels of the textures into
-   a stream (shared memory with the app, or a file for a test), and the app
-   gives each call to its renderer, which draws natively on ARM with Vulkan
-   into the swapchains of its session. So no draw goes through x86 code or
-   through the Vulkan of Wine. The game already sends vertices in screen
-   space, so the stream needs no matrices.
+2. **The walks for the renderer in the app, live.** The renderer is in the
+   app, and it draws a stream of the walks of the game to the pixel ("The
+   stream of the walks"). The stream goes through a file now, for a test.
+   The plan: the same stream through shared memory between the process of
+   Wine and the app, frame by frame, and the eye pictures of the renderer
+   into the swapchains of the session of the app. So no draw goes through
+   x86 code or through the Vulkan of Wine. The game already sends vertices
+   in screen space, so the stream needs no matrices.
 3. **The head and the controllers.** The mod reads the head pose and the
    controllers from OpenXR. Wine has no OpenXR for Android, so the app must
    give the mod its poses and its actions through the same shared memory.

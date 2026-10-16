@@ -31,10 +31,15 @@
 
 .PARAMETER Keep
     Leaves the emulator on at the end.
+
+.PARAMETER Gpu
+    The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
+    the CPU) or host (the GPU of the PC).
 #>
 [CmdletBinding()]
 param(
-    [switch]$Keep
+    [switch]$Keep,
+    [string]$Gpu = 'swiftshader_indirect'
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -109,7 +114,7 @@ if (-not $running) {
     Say 'Start the emulator (no window, a system that it can write)'
     Start-Process -FilePath $Emulator -ArgumentList @('-avd', $Avd, '-port', "$Port",
         '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot', '-writable-system',
-        '-gpu', 'swiftshader_indirect') -WindowStyle Hidden | Out-Null
+        '-gpu', $Gpu) -WindowStyle Hidden | Out-Null
     $started = $true
 }
 if (-not (Wait-Boot 6)) { Stop-Android 'The emulator did not start in 6 minutes.' }

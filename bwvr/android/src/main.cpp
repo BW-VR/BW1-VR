@@ -29,6 +29,7 @@
 #include "menu_layout.h"
 #include "menu_model.h"
 #include "menu_painter.h"
+#include "scene_player.h"
 #include "xr_app.h"
 
 namespace {
@@ -361,6 +362,14 @@ void android_main(android_app* android) {
                          app.capture ? app.game.folder + "/bwvr-menu.bmp" : "")) {
     AppLog("app          : the canvas of Android did not start. The app stops");
     ANativeActivity_finish(android->activity);
+  }
+
+  // A TEST AID (stream_replay=1 in bwvr.ini): the stream of the walks in
+  // bwvr-stream.bin of the game folder goes to the Vulkan renderer of the
+  // mod, which writes the pictures of vk_scene_test_frame of the stream
+  // into the game folder (docs/android.md, "The stream of the walks").
+  if (app.ini.GetInt("bwvr", "stream_replay", 0) != 0) {
+    PlayStreamFile(app.game.folder + "/bwvr-stream.bin", app.game.folder);
   }
 
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,

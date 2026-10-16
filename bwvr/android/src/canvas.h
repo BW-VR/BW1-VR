@@ -1,6 +1,7 @@
 // A PICTURE OF THE CPU drawn with android.graphics.Canvas through JNI
 // (docs/android.md, "The menu"). The app has no Java code: the text gets the
-// serif font of the system, and the shapes get the anti-aliasing of
+// sans serif font of the system, as the menu of the game has, and the
+// shapes get the anti-aliasing of
 // Android. The pixels are RGBA, 8 bits each, with the color multiplied by
 // the alpha.
 #pragma once
@@ -57,8 +58,8 @@ class Canvas2D {
   jobject bitmap_ = nullptr;
   jobject canvas_ = nullptr;
   jobject paint_ = nullptr;
-  jobject serif_ = nullptr;
-  jobject serif_bold_ = nullptr;
+  jobject font_ = nullptr;
+  jobject font_bold_ = nullptr;
   jobject style_fill_ = nullptr;
   jobject style_stroke_ = nullptr;
   jobject align_[3] = {nullptr, nullptr, nullptr};

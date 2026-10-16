@@ -17,6 +17,10 @@ struct SceneHostState {
   int one_walk_mode = 0;
   // ui_panel.h, GpuBridgeIsPanel: the surface of the panel target.
   const void* panel_target = nullptr;
+  // The angles of the camera of the game (bw::tech::InfoTransform).
+  float inv_half_tan_fov_x = 0.0f;
+  int res_x = 0;
+  int res_y = 0;
 };
 
 void SceneHostSetState(const SceneHostState& state);

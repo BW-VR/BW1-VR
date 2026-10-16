@@ -4618,6 +4618,7 @@ keys that the launcher sets.
 | `d3d7_count` | 0 | A test key. See "The calls of Direct3D 7 in a walk" |
 | `ddraw_census` | 0 | A test key. See "The calls of DirectDraw and Direct3D 7 in a session" |
 | `vk_scene`, `vk_scene_test_frame` | 0, 0 | Test keys: 1 draws each walk also with the Vulkan renderer, both eyes, and frame N writes its images to files. See "The Vulkan renderer" |
+| `vk_stream_record`, `vk_stream_frames` | 0, 3 | Test keys, with `backend=vulkan`: from frame N each call of the Vulkan renderer of that many frames goes to `bwvr-stream.bin` beside `runblack.exe`, for the headset app. The file holds pixels of the game. See `android.md`, "The stream of the walks" |
 | `xr_vulkan` | 0 | 0: the OpenXR session has Direct3D 11. 1: the session has Vulkan, and the Vulkan renderer draws with its device. When it cannot start, the next try has Direct3D 11. There is no test key: the choice is made at the start. See "The session with Vulkan" |
 | `vk_eyes` | 1 | With `xr_vulkan=1`: 1 the eye pictures of a frame of one walk come from the Vulkan renderer, 0 from Direct3D 9. `backend=vulkan` sets `xr_vulkan=1` and `vk_eyes=1`. A test key: Shift C. See "The session with Vulkan" |
 | `xr_vulkan_upload` | 1 | With `xr_vulkan=1`: 1 the pixels of the CPU (an eye picture of the CPU, a card, the walls of the cut scene window) go into the swapchain images with a copy of Vulkan. 0 they go into the relays of Direct3D 11, and the release of an image copies its relay. A test key: Shift Z. See "The session with Vulkan" |

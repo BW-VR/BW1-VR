@@ -156,8 +156,8 @@ void PaintMenu(Canvas2D* c, const menu_model::Menu& menu,
   c->StrokeRoundRect(ml::kLeft - 40, ml::kHelpTop, ml::kRight + 40,
                      ml::kHelpBottom, 12, 2, kBronzeDark);
   if (cursor >= 0 && cursor < static_cast<int>(items.size())) {
-    const char* help = menu.Help(items[cursor]);
-    if (help != nullptr) {
+    const std::string help = menu.Help(items[cursor]);
+    if (!help.empty()) {
       const float size = 27;
       const std::vector<std::string> lines =
           Wrap(c, help, size, ml::kRight - ml::kLeft);

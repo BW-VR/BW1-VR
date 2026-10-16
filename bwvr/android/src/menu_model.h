@@ -249,10 +249,24 @@ class Menu {
     return text;
   }
 
-  // The help text of a row, or null.
-  const char* Help(const Item& item) const {
-    if (item.kind == ItemKind::kSetting || item.kind == ItemKind::kGroup) {
-      return st::kSettings[item.index].help;
+  // The help text of a row. A group says the settings on its page. Empty
+  // when the row has no help.
+  std::string Help(const Item& item) const {
+    if (item.kind == ItemKind::kSetting) {
+      const char* help = st::kSettings[item.index].help;
+      return help != nullptr ? help : "";
+    }
+    if (item.kind == ItemKind::kGroup) {
+      std::string text = "The settings: ";
+      bool first = true;
+      for (int i = item.index + 1; i < st::kSettingCount; ++i) {
+        if (st::kSettings[i].kind == st::kGroup) break;
+        if (!Shown(i)) continue;
+        if (!first) text += ", ";
+        text += st::kSettings[i].label;
+        first = false;
+      }
+      return text + ".";
     }
     switch (item.kind) {
       case ItemKind::kPlay:
@@ -266,7 +280,7 @@ class Menu {
       case ItemKind::kBack:
         return "Goes back to the main page.";
       default:
-        return nullptr;
+        return "";
     }
   }
 

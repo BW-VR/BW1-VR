@@ -33,6 +33,18 @@ add_library(native_app_glue STATIC
 target_include_directories(native_app_glue PUBLIC
     "${ANDROID_NDK}/sources/android/native_app_glue")
 
+# THE VULKAN RENDERER OF THE MOD (docs/android.md, "The renderer in the app").
+# The same vk_core.cpp and vk_scene.cpp as the ddraw.dll of the PC. With no
+# _WIN32 they take vk_platform_posix.h in place of Windows and Direct3D 7.
+# The headers of Vulkan are the ones of the repo, the headers of the PC
+# build.
+add_library(bwvr_renderer STATIC
+    ../src/mod/vk_core.cpp
+    ../src/mod/vk_scene.cpp
+)
+target_include_directories(bwvr_renderer PUBLIC
+    "${BWVR_THIRD_PARTY}/Vulkan-Headers/include")
+
 add_library(bwvr_quest SHARED
     src/main.cpp
     src/app_log.cpp
@@ -41,6 +53,8 @@ add_library(bwvr_quest SHARED
     src/game_folder.cpp
     src/gpu.cpp
     src/menu_paint.cpp
+    src/menu_painter.cpp
+    src/scene_host.cpp
     src/xr_app.cpp
 )
 target_include_directories(bwvr_quest PRIVATE
@@ -54,4 +68,4 @@ target_link_options(bwvr_quest PRIVATE
     "-u" "ANativeActivity_onCreate"
     "-Wl,-z,max-page-size=16384")
 target_link_libraries(bwvr_quest PRIVATE
-    native_app_glue openxr_loader vulkan android jnigraphics log)
+    bwvr_renderer native_app_glue openxr_loader vulkan android jnigraphics log)

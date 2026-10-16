@@ -95,12 +95,17 @@
 // so each draw has each binding, and the shader does not read them. With
 // vk_stage1=0 the renderer makes stage 0 alone.
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d.h>
 #include <intrin.h>
 #include <smmintrin.h>
 #include <ddraw.h>
+#else
+// The headset app (docs/android.md, "The renderer in the app").
+#include "vk_platform_posix.h"
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -113,7 +118,9 @@
 #include "one_walk_math.h"
 #include "vk_core.h"
 #include "vk_scene.h"
+#ifdef _WIN32
 #include "vk_window.h"
+#endif
 #include "../common/bw_addresses.h"
 #include "fovea_res_math.h"
 #include "foveation_math.h"
@@ -884,6 +891,12 @@ uint8_t* g_row = nullptr;
 uint32_t g_row_size = 0;
 
 const uint8_t* ReadRow(const uint8_t* src, uint32_t bytes) {
+#ifndef _WIN32
+  // The headset app reads the pixels from the stream of the game, from the
+  // memory of the CPU (IDirectDrawSurface7::ReadRgba).
+  (void)bytes;
+  return src;
+#else
   if (!g_sse41_known) {
     int regs[4];
     __cpuid(regs, 1);
@@ -922,11 +935,16 @@ const uint8_t* ReadRow(const uint8_t* src, uint32_t bytes) {
   }
   memcpy(g_row + at, src + at, bytes - at);
   return g_row;
+#endif
 }
 
 // Reads a surface of the game into RGBA8. False when it cannot.
 bool ReadSurface(IDirectDrawSurface7* s, uint32_t* width, uint32_t* height,
                  uint8_t** pixels) {
+#ifndef _WIN32
+  // In the headset app the stream of the game gives the pixels as RGBA8.
+  return s->ReadRgba(width, height, pixels);
+#else
   DDSURFACEDESC2 desc = {};
   desc.dwSize = sizeof(desc);
   if (FAILED(s->Lock(nullptr, &desc, DDLOCK_READONLY | DDLOCK_WAIT, nullptr))) {
@@ -990,6 +1008,7 @@ bool ReadSurface(IDirectDrawSurface7* s, uint32_t* width, uint32_t* height,
   }
   s->Unlock(nullptr);
   return ok;
+#endif
 }
 
 // Records the copy of `staging` (width by height pixels of RGBA8) into
@@ -3968,8 +3987,16 @@ void VkSceneKeepPictureToggle(const char* keys) {
 
 bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height) {
   if (!g_ready || !g_present_ready) return false;
+#ifdef _WIN32
   return VkWindowPresent(static_cast<HWND>(window), g_colors[g_present_index],
                          width, height);
+#else
+  // The headset app has no window of the game.
+  (void)window;
+  (void)width;
+  (void)height;
+  return false;
+#endif
 }
 
 const uint8_t* VkScenePresentPixels(uint32_t width, uint32_t height,

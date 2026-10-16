@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <time.h>
 
 #include <string>
 #include <vector>
@@ -25,12 +24,11 @@
 #include "../../src/common/version.h"
 #include "app_log.h"
 #include "build_id.h"
-#include "canvas.h"
 #include "flat_view.h"
 #include "game_folder.h"
 #include "menu_layout.h"
 #include "menu_model.h"
-#include "menu_paint.h"
+#include "menu_painter.h"
 #include "xr_app.h"
 
 namespace {
@@ -40,8 +38,9 @@ using menu_model::Action;
 using menu_model::Item;
 using menu_model::Menu;
 
-constexpr int kCursorSize = 64;
 constexpr float kCursorMeters = 0.03f;
+// The picture of the cursor (menu_painter.cpp).
+constexpr uint32_t kCursorPixels = 64;
 
 struct App {
   android_app* android = nullptr;
@@ -54,11 +53,9 @@ struct App {
   std::string base_status;
   bool capture = false;  // menu_capture=1: each paint goes to bwvr-menu.bmp
 
-  Canvas2D canvas;
-  Canvas2D cursor_canvas;
-  std::vector<uint8_t> pixels;
-  unsigned painted_revision = ~0u;
-  std::string painted_status;
+  MenuPainter painter;
+  std::vector<uint8_t> pixels;  // the last picture of the menu
+  bool flat_dirty = true;       // the window needs a frame
 
   bool xr_on = false;
   XrApp xr;
@@ -75,46 +72,6 @@ struct App {
   int stick_x_was = 0;
   bool dragging = false;
 };
-
-double Now() {
-  timespec t;
-  clock_gettime(CLOCK_MONOTONIC, &t);
-  return t.tv_sec + t.tv_nsec * 1e-9;
-}
-
-// A TEST AID (menu_capture=1 in bwvr.ini): the picture of the menu as a BMP
-// of 32 bits, so a run on a device or in the emulator can show the menu.
-void WriteBmp(const std::string& path, const std::vector<uint8_t>& rgba, int w,
-              int h) {
-  FILE* f = fopen(path.c_str(), "wb");
-  if (f == nullptr) return;
-  const uint32_t data = static_cast<uint32_t>(w) * h * 4;
-  uint8_t header[54] = {'B', 'M'};
-  auto put32 = [&](int at, uint32_t v) {
-    for (int i = 0; i < 4; ++i) header[at + i] = static_cast<uint8_t>(v >> (8 * i));
-  };
-  put32(2, 54 + data);
-  put32(10, 54);
-  put32(14, 40);
-  put32(18, static_cast<uint32_t>(w));
-  put32(22, static_cast<uint32_t>(h));
-  header[26] = 1;
-  header[28] = 32;
-  put32(34, data);
-  fwrite(header, 1, sizeof(header), f);
-  std::vector<uint8_t> row(static_cast<size_t>(w) * 4);
-  for (int y = h - 1; y >= 0; --y) {
-    const uint8_t* src = rgba.data() + static_cast<size_t>(y) * w * 4;
-    for (int x = 0; x < w; ++x) {
-      row[x * 4 + 0] = src[x * 4 + 2];
-      row[x * 4 + 1] = src[x * 4 + 1];
-      row[x * 4 + 2] = src[x * 4 + 0];
-      row[x * 4 + 3] = src[x * 4 + 3];
-    }
-    fwrite(row.data(), 1, row.size(), f);
-  }
-  fclose(f);
-}
 
 void Save(App* app) {
   app->menu.Store(&app->ini);
@@ -152,30 +109,18 @@ void Do(App* app, Action action) {
   }
 }
 
-// The menu into the picture, when it changed.
+// The menu goes to the paint thread after each change, and the pixels of a
+// paint that is done go to the quad or to the window.
 void Paint(App* app) {
   const std::string& status = app->status.empty() ? app->base_status : app->status;
-  if (app->painted_revision == app->menu.Revision() && app->painted_status == status) {
-    return;
+  app->painter.Ask(app->menu, status);
+  if (!app->painter.Take(&app->pixels)) return;
+  if (app->xr_on) {
+    app->xr.SetMenuPixels(app->pixels);
+  } else {
+    app->flat.SetMenuPixels(app->pixels);
   }
-  if (!app->canvas.Ready()) return;
-  const double start = Now();
-  PaintMenu(&app->canvas, app->menu, status);
-  app->canvas.ReadPixels(&app->pixels);
-  if (app->xr_on) app->xr.SetMenuPixels(app->pixels);
-  if (app->flat.Ready() || !app->xr_on) app->flat.SetMenuPixels(app->pixels);
-  if (app->capture) {
-    WriteBmp(app->game.folder + "/bwvr-menu.bmp", app->pixels, ml::kWidth,
-             ml::kHeight);
-  }
-  static int s_logged = 0;
-  if (s_logged < 8) {
-    ++s_logged;
-    AppLog("menu         : paint %u took %.1f ms", app->menu.Revision(),
-           (Now() - start) * 1000.0);
-  }
-  app->painted_revision = app->menu.Revision();
-  app->painted_status = status;
+  app->flat_dirty = true;
 }
 
 // A key of a keyboard, of a game pad or of the remote of the emulator.
@@ -263,7 +208,8 @@ void OnCommand(android_app* android, int32_t command) {
       app->window = true;
       if (!app->xr_on && android->window != nullptr) {
         app->flat.Start(android->window, ml::kWidth, ml::kHeight);
-        app->painted_revision = ~0u;
+        if (!app->pixels.empty()) app->flat.SetMenuPixels(app->pixels);
+        app->flat_dirty = true;
       }
       break;
     case APP_CMD_CONTENT_RECT_CHANGED:
@@ -272,7 +218,7 @@ void OnCommand(android_app* android, int32_t command) {
       app->flat.SetContentRect(android->contentRect.left, android->contentRect.top,
                                android->contentRect.right,
                                android->contentRect.bottom);
-      app->painted_revision = ~0u;
+      app->flat_dirty = true;
       AppLog("app          : the content of the window is %d %d %d %d",
              android->contentRect.left, android->contentRect.top,
              android->contentRect.right, android->contentRect.bottom);
@@ -411,24 +357,20 @@ void android_main(android_app* android) {
   AppLog("app          : the folder of the app is %s", app.folder.c_str());
 
   Load(&app);
-  if (!app.canvas.Start(app.env, ml::kWidth, ml::kHeight)) {
+  if (!app.painter.Start(android->activity->vm,
+                         app.capture ? app.game.folder + "/bwvr-menu.bmp" : "")) {
     AppLog("app          : the canvas of Android did not start. The app stops");
     ANativeActivity_finish(android->activity);
   }
-  app.cursor_canvas.Start(app.env, kCursorSize, kCursorSize);
 
-  app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight, kCursorSize);
+  app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
+                           kCursorPixels);
   if (app.xr_on) {
     TakeHeadsetSize(&app);
     app.base_status = app.game.exe_right
                           ? "Ready. OpenXR runtime: " + app.xr.RuntimeName()
                           : app.game.message;
-    if (app.cursor_canvas.Ready()) {
-      std::vector<uint8_t> dot;
-      PaintCursor(&app.cursor_canvas);
-      app.cursor_canvas.ReadPixels(&dot);
-      app.xr.SetCursorPixels(dot);
-    }
+    app.xr.SetCursorPixels(app.painter.Cursor());
   } else {
     app.xr.Stop();
     app.base_status = app.game.exe_right
@@ -470,22 +412,14 @@ void android_main(android_app* android) {
       app.xr.EndFrame(quad.center, menu_size, show_cursor, cursor,
                       kCursorMeters);
     } else if (app.window && app.flat.Ready()) {
-      const unsigned before = app.painted_revision;
-      const std::string status_before = app.painted_status;
       Paint(&app);
-      static int s_presents = 0;
-      if (before != app.painted_revision || status_before != app.painted_status ||
-          s_presents < 3) {
-        ++s_presents;
-        app.flat.Present();
-      }
+      if (app.flat_dirty && app.flat.Present()) app.flat_dirty = false;
     }
   }
 
   AppLog("app          : the app ends");
   if (app.xr_on) app.xr.Stop();
   app.flat.Stop();
-  app.canvas.Stop();
-  app.cursor_canvas.Stop();
+  app.painter.Stop();
   android->activity->vm->DetachCurrentThread();
 }

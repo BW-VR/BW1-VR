@@ -1,7 +1,12 @@
 // The Vulkan core of the mod (vk_core.h).
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+// The headset app (docs/android.md, "The renderer in the app").
+#include "vk_platform_posix.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 

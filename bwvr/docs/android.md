@@ -20,6 +20,9 @@ Summary:
   rules of the launcher for the renderer Vulkan.
 - The app finds the game folder on the headset and checks `runblack.exe`
   (the SHA-1 of the unofficial patch v1.42).
+- The app has the Vulkan renderer of the mod (`vk_core.cpp`, `vk_scene.cpp`),
+  the same source as the `ddraw.dll` of the PC. Nothing gives it walks yet
+  (see "The renderer in the app").
 - **The app cannot start the game yet.** `runblack.exe` is a Windows
   program for x86, and the APK has no x86 runtime (see "What the app cannot
   do yet").
@@ -38,6 +41,11 @@ Summary:
 | `android/src/menu_model.h` | The menu: the pages, the rows, the values, the input, the save. No Android code |
 | `android/src/menu_layout.h` | The layout of the menu picture, the quad, the hit of a controller ray. No Android code |
 | `android/src/menu_paint.cpp` | The paint of the menu |
+| `android/src/menu_painter.cpp` | The thread that paints the menu |
+| `android/src/scene_host.cpp` | The functions of the mod that the renderer calls, with the state of the walk |
+| `android/test_runtime/test_runtime.cpp` | The OpenXR test runtime for the emulator. Not in the APK |
+| `src/mod/vk_platform_posix.h` | The parts of Windows that the renderer uses, for a build with no Windows |
+| `src/mod/vk_d3d7_posix.h` | The parts of Direct3D 7 that the renderer uses, with the values of the SDK |
 | `android/src/game_folder.cpp` | The game folder, the check of `runblack.exe`, the read and the write of a file |
 | `src/common/settings_table.h` | The table of the settings, for the launcher and for the menu |
 | `src/common/ini_text.h` | An ini file as text, with the rules of `GetPrivateProfileString` |
@@ -45,6 +53,7 @@ Summary:
 | `tools/android/build_apk.ps1` | The build of the APK |
 | `tools/android/check_apk.ps1` | The checks of the APK with no device |
 | `tools/android/emu_test.ps1` | The test in the Android emulator |
+| `tools/android/emu_xr_test.ps1` | The test in the Android emulator with the OpenXR test runtime |
 | `tools/android/android_env.ps1` | Finds the SDK, the NDK and the JDK |
 
 ## Build the APK
@@ -145,7 +154,8 @@ bronze, the title in gold and the entries in the middle of the main page.
   its value for a slider, the name of the item for a list. "Back" at the
   end.
 - **The help.** Below the rows, the help text of the row with the highlight,
-  the same text as the tooltip of the launcher.
+  the same text as the tooltip of the launcher. The help of a group names
+  the settings on its page.
 - **The status line.** At the bottom: the game folder, the runtime, "Saved."
 
 The rows are the rows of `kSettings` in `settings_table.h` with the renderer
@@ -201,7 +211,11 @@ bar of a slider sets its value.
 - The actions: an aim pose, select, back, the stick and a pulse for each
   hand, with bindings for `khr/simple_controller`,
   `oculus/touch_controller` and `valve/index_controller`.
-- The app paints the menu again only when it changes (`Menu::Revision`).
+- The app paints the menu again only when it changes (`Menu::Revision`). A
+  thread of its own paints (`menu_painter.cpp`), so the frame loop does not
+  wait: a paint takes 17 to 70 ms in the emulator, and more than 100 ms with
+  the test runtime. The frames show the picture before until the new one is
+  ready.
 
 ## With no headset
 
@@ -233,24 +247,77 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    headsets of Meta, no Java code), the libraries of both ABIs (stored,
    on pages of 16 KB, LOAD segments of 16 KB, no `libc++_shared.so`), and
    that the APK has no other file. So no file of the game can be in it.
-2. **In the Android emulator** (`emu_test.ps1`): the same APK on an x86_64
-   image of Android 14 with no window. The script puts a `bwvr.ini` and a
-   stand in for `runblack.exe` (or with `-Exe` a real one) into the app
-   folder, starts the app, drives the menu with key events, and checks the
-   saved `bwvr.ini`, the log, logcat (no JNI error, no crash) and three
-   screenshots. The emulator has no OpenXR runtime, so this step tests the
-   menu, the canvas, the save, Vulkan in a window and the lifecycle, not
-   the session.
-3. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
-   the table, the menu (the pages, the steps, the save rules) and the hit of
-   a ray on the quad (`test/controller_math/menu_checks.h`).
-4. **In a headset** (only a headset can show it): install the APK with
+2. **In the Android emulator** (`emu_test.ps1`, 18 checks): the same APK on
+   an x86_64 image of Android 14 with no window, port 5584, a cold boot. The
+   script deletes the folder of the app, installs the APK, starts it one
+   time, puts a `bwvr.ini` and a stand in for `runblack.exe` (or with `-Exe`
+   a real one) into the app folder, starts the app, drives the menu with key
+   events, and checks the saved `bwvr.ini`, the log of this build, logcat
+   (no JNI error, no crash) and three screenshots. The emulator has no OpenXR
+   runtime, so this step tests the menu in the window.
+3. **In the emulator with the OpenXR test runtime** (`emu_xr_test.ps1`, 28
+   checks). The test runtime (`android/test_runtime`) is a headset with two
+   Touch controllers that follow a script. The script puts it into an AVD
+   with a system that it can write (`bwvr_xr_test`, port 5586) as
+   `/system/etc/openxr/1/active_runtime.json`, where the Khronos loader looks
+   when no runtime broker is there, and sets SELinux to permissive so the app
+   can load it from `/data/local/tmp/bwvr-xr`. The right controller points at
+   "Moving around", pulls the trigger, points at "Turn in steps", pulls the
+   trigger, presses B, points at "Save Config" and pulls the trigger, then
+   the runtime ends the session. The checks: the loader found the runtime,
+   the instance, the Vulkan device of the runtime, the session, bindings with
+   only paths of the Touch profile, the two swapchains, the state machine
+   (begin at READY, end at STOPPING, EXITING), the place and the size of the
+   menu quad, the cursor quad, a pulse at each new row, the saved
+   `bwvr.ini`, no fault of the order of the calls (a swapchain image that is
+   released with no wait, a layer of an acquired image), and four pictures
+   of the quad that the runtime read back from the swapchain. The pictures
+   are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
+   the calls of OpenXR in the right order with the right structs. It does
+   not show the runtime of Meta.
+4. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
+   the table, the menu (the pages, the steps, the help, the save rules), the
+   hit of a ray on the quad (`test/controller_math/menu_checks.h`), and each
+   value and struct of `vk_d3d7_posix.h` against the Windows SDK
+   (`vk_platform_checks.h`).
+5. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
    session is made`. Check that the menu is in front of you at a good
    height, that the ray and the cursor meet the rows, that the trigger, the
    stick, B and Y do what "The menu" says, and that the text is sharp.
    `menu_capture=1` gives the picture of the menu.
+
+## The renderer in the app
+
+The app compiles `vk_core.cpp` and `vk_scene.cpp` of the mod into
+`libbwvr_quest.so` (`bwvr_renderer` in `android/CMakeLists.txt`). With no
+`_WIN32` the two files include `vk_platform_posix.h` in place of
+`windows.h`, `ddraw.h` and `d3d.h`:
+
+- The calls of Windows that they make: the locks, the atomic counts, the
+  clock, the secure string calls, `VirtualAlloc`, and the loader of Vulkan
+  (`libvulkan.so` in place of `vulkan-1.dll`).
+- The parts of Direct3D 7 that they use (`vk_d3d7_posix.h`): 55 enum values,
+  20 constants and the structs `D3DVIEWPORT7`, `D3DRECT` and `DDSCAPS2`. The
+  math test of the PC compares each one with the Windows SDK.
+- `IDirectDrawSurface7` and `IDirect3DDevice7` are only the methods that the
+  renderer calls. In the app a surface gives its pixels as RGBA8
+  (`ReadRgba`), and the reads of the PC with `Lock` and SSE stay in the
+  build of the PC.
+- `scene_host.cpp` gives the functions of the other parts of the mod that the
+  renderer calls (`StereoPassEye`, `OneWalkActive`, `OneWalkModeNow`,
+  `OneWalkShiftPerRhw`, `OneWalkBoundTarget`, `GpuBridgeIsPanel`, `ModLog`)
+  with the state of the walk (`SceneHostState`).
+
+The code of the PC does not change: each part for the app is in `#ifndef
+_WIN32`. Nothing in the app calls the renderer yet, so the linker leaves it
+out of the library for now.
+
+**Vulkan 1.3.** `vk_core.cpp` needs Vulkan 1.3 (dynamic rendering,
+synchronization2, the extended dynamic state). SwiftShader of the emulator
+has Vulkan 1.2. Open: the version of Vulkan of the Quest 3 and of the Steam
+Frame for an APK.
 
 ## What the app cannot do yet
 
@@ -264,14 +331,16 @@ Android. The plan, in steps:
    give it the game folder, and write `ScreenW`, `ScreenH`, `FullScreen`
    and `ScreenD` (`Menu::RenderSize`) into the registry of its Wine prefix.
    Wine also needs a display driver with no screen, and an audio driver.
-2. **The renderer of the scene walks in the app.** With `backend=vulkan` the
+2. **The walks for the renderer in the app.** With `backend=vulkan` the
    device of the mod gives each call of a walk to the Vulkan renderer
    (`VkSceneRenderState`, `VkSceneDraw`, `VkSceneTexture` and the others in
-   `vk_scene.h`). The plan: a backend `remote` that sends these calls and
-   the pixels of the textures through shared memory to the app, which draws
-   them natively on ARM with Vulkan into the swapchains of its session. So
-   no draw goes through x86 code or through the Vulkan of Wine. The game
-   already sends vertices in screen space, so the stream needs no matrices.
+   `vk_scene.h`). The renderer is in the app ("The renderer in the app").
+   The plan: the mod writes these calls and the pixels of the textures into
+   a stream (shared memory with the app, or a file for a test), and the app
+   gives each call to its renderer, which draws natively on ARM with Vulkan
+   into the swapchains of its session. So no draw goes through x86 code or
+   through the Vulkan of Wine. The game already sends vertices in screen
+   space, so the stream needs no matrices.
 3. **The head and the controllers.** The mod reads the head pose and the
    controllers from OpenXR. Wine has no OpenXR for Android, so the app must
    give the mod its poses and its actions through the same shared memory.

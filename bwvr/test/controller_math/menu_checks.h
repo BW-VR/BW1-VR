@@ -155,6 +155,8 @@ inline void MenuChecks() {
   }
   Check(performance >= 0, "the group Performance is there", performance, 0);
   menu.SetCursor(performance);
+  Check(menu.Help(menu.Items()[performance]) == "The settings: Renderer.",
+        "the help of a group names the settings on its page", 0, 0);
   Check(menu.Select() == Action::kNone && !menu.OnMain(),
         "a select on a group opens its page", 0, 0);
   items = menu.Items();

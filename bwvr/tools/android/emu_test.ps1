@@ -80,18 +80,18 @@ if (-not ($avds -contains $Avd)) {
 }
 
 & $Adb start-server 2>&1 | Out-Null
-$Serial = $null
-$running = & $Adb devices 2>$null | Select-String -Pattern '^(emulator-\d+)\s+device'
+# The test has its own port, so it never takes the emulator of the test with
+# the OpenXR test runtime (emu_xr_test.ps1, port 5586).
+$port = 5584
+$Serial = "emulator-$port"
 $started = $false
+$running = & $Adb devices 2>$null | Select-String -Pattern "^$Serial\s+device"
 if ($running) {
-    $Serial = $running[0].Matches[0].Groups[1].Value
     Say "The emulator $Serial runs already"
 } else {
     Say "Start the emulator (no window)"
-    $port = 5584
-    $Serial = "emulator-$port"
     Start-Process -FilePath $Emulator -ArgumentList @('-avd', $Avd, '-port', "$port",
-        '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot-save',
+        '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot',
         '-gpu', 'swiftshader_indirect') -WindowStyle Hidden | Out-Null
     $started = $true
 }
@@ -101,6 +101,11 @@ do {
     $booted = (& $Adb -s $Serial shell getprop sys.boot_completed 2>$null | Out-String).Trim()
 } while ($booted -ne '1' -and (Get-Date) -lt $deadline)
 if ($booted -ne '1') { Stop-Android "The emulator did not start in 6 minutes." }
+# The package manager answers some seconds after the end of the boot.
+do {
+    Start-Sleep -Seconds 2
+    $pm = (& $Adb -s $Serial shell pm path android 2>$null | Out-String)
+} while ($pm -notmatch 'package:' -and (Get-Date) -lt $deadline)
 Write-Host ('   ' + (AdbOut @('shell', 'getprop', 'ro.build.fingerprint')).Trim())
 
 try {
@@ -108,6 +113,9 @@ try {
     Say 'Install the APK'
     Adb @('shell', 'am', 'force-stop', $Package)
     Adb @('uninstall', $Package)
+    # A folder of the app that adb made belongs to the shell, and an
+    # uninstall leaves it. The shell can delete it.
+    Adb @('shell', 'rm', '-rf', "/sdcard/Android/data/$Package")
     $install = AdbOut @('install', $Apk)
     Expect ($install -match 'Success') ('adb install: ' + ($install.Trim() -split "`n")[-1])
 
@@ -169,7 +177,8 @@ try {
 
     $log = ''
     if (Test-Path -LiteralPath (Join-Path $Out 'bwvr-quest.log')) { $log = Get-Content -LiteralPath (Join-Path $Out 'bwvr-quest.log') -Raw }
-    Expect ($log -match 'the headset app') 'the app wrote its log'
+    $buildId = (& git -C (Split-Path $Bwvr -Parent) rev-parse --short=7 HEAD 2>$null)
+    Expect ($log -match "the headset app" -and $log -match [regex]::Escape("(build $buildId")) "the app of this build wrote its log (build $buildId)"
     Expect ($log -match 'no OpenXR session') 'with no runtime the app went to the window'
     Expect ($log -match 'flat view    : a swapchain') 'the window has a swapchain of Vulkan'
     Expect ($log -match 'canvas       : a picture of 1600 by 1200') 'the canvas of Android started'

@@ -2311,6 +2311,10 @@ the eye pictures in a session with Vulkan ("The session with Vulkan"). In
 a session with Vulkan a walk of one walk goes to the renderer alone ("The
 walk without Direct3D 9").
 
+The headset app for Android builds the same `vk_core.cpp` and `vk_scene.cpp`
+(`android.md`, "The renderer in the app"). The parts for the app are in
+`#ifndef _WIN32`, and the build of the PC does not change.
+
 **The shadow test.** With `d3d7_thread=1` the D3D7 thread gives each call
 of its queue to dxwrapper as before, and also to the Vulkan renderer. The
 renderer draws both eyes into an image of its own, with a layer for each

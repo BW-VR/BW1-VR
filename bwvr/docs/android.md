@@ -508,6 +508,23 @@ Android. The plan, in steps:
    give it the game folder, and write `ScreenW`, `ScreenH`, `FullScreen`
    and `ScreenD` (`Menu::RenderSize`) into the registry of its Wine prefix.
    Wine also needs a display driver with no screen, and an audio driver.
+
+   Box64 builds for the headsets with the NDK of the app:
+   `bwvr/tools/android/build_box64.ps1 -Source <folder>` takes the folder
+   of an unpacked source archive of Box64 (not in the repo, for example in
+   `local/`), and writes `bwvr/out/android/box64/box64`. With the release
+   v0.4.4 it is an AArch64 program for the linker of Android
+   (`/system/bin/linker64`) of 21 MB that needs only `libc.so`, `libm.so`
+   and `libdl.so`. The APK does not contain it yet, and it did not run yet:
+   the emulator of the tests is x86_64, so a run needs a headset or another
+   ARM64 device.
+
+   Open: the way for the 32 bit code. Box64 runs x86_64 programs of Linux.
+   `runblack.exe` is a 32 bit program of Windows, so either an x86_64 Wine
+   in the WoW64 mode runs under Box64 (with the x86_64 libraries that Wine
+   needs), or an ARM64 Wine in the WoW64 mode loads `wowbox64.dll` (the
+   option `WOW64` of Box64, a DLL for Windows on ARM64 that needs a
+   compiler for Windows, for example llvm-mingw).
 2. **The walks for the renderer in the app, live.** The renderer is in the
    app, and it draws a stream of the walks of the game to the pixel ("The
    stream of the walks"). The stream goes through a file now, for a test.

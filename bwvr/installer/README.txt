@@ -285,6 +285,10 @@ still:
   Shift Menu key      Change the walk with the left stick: where your
                       head faces, where the controller points, or off
                       (move_stick).
+  Ctrl Shift '        Change the controls: as set in the launcher,
+                      or the other choice of "Controls" (key
+                      controls). The ' key is the key with the
+                      letter A with two dots on a German keyboard.
   Ctrl Shift Comma    Change the switch of the game that the teleport
                       keeps to: the drag of the land, or the double
                       click jump (teleport_switch).
@@ -311,6 +315,22 @@ left controller is the Hand, and the controls below change sides: the
 left trigger, grip, stick, X and Y do the jobs of the right trigger,
 grip, stick, A and B. The right controller does the jobs of the left
 controller. The left menu button opens the game menu with each hand.
+
+The list below is for the choice "Default" of "Controls" in the
+launcher. The choice "Fly and grab" (key controls=1) changes these
+controls:
+
+  Both grips          Each grip grabs the land and pulls it. Hold both
+                      grips, then turn or spread your hands to turn
+                      and zoom. Your height above the land stays.
+  Right trigger       Point at a thing, or put the glow of your Hand on
+                      it, and close the trigger: you take it. Pull to
+                      fetch a thing from a distance. Keep the trigger
+                      closed to carry, and open it to let go or to
+                      throw. Where nothing can be taken, a press of
+                      the trigger is a click.
+  Left trigger        Pull it while you move with the left stick to
+                      move faster (key move_stick_boost_pct).
 
   Trigger             The left mouse button: drag the land, and click
                       on things.

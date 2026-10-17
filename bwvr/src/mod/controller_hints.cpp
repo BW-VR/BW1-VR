@@ -47,6 +47,7 @@ struct Words {
   const wchar_t* noun;        // "stick" or "pad", for a sentence
   const wchar_t* verb;        // "Push" or "Press"
   bool swap;
+  bool fly;                   // controls=1: the trigger is both buttons
   bool menu_on_pointing;      // the menu button is on the pointing hand
 };
 
@@ -66,6 +67,7 @@ Words BuildWords(const ControllerHintState& state, const char* profile) {
   memset(&w, 0, sizeof(w));
   w.family = FamilyOf(profile);
   w.swap = state.swap_buttons;
+  w.fly = state.fly;
   const bool left = state.left_handed;
   const Family f = w.family;
   w.trigger = (f == kSimple) ? L"Select" : L"Trigger";
@@ -113,7 +115,7 @@ Words BuildWords(const ControllerHintState& state, const char* profile) {
   // points with. A face button of the game menu is on the other hand.
   w.menu_on_pointing = left && w.menu[0] == L'M';
   // The grab of the world (controllers.cpp, UpdateGrab): the grip of the
-  // hand that does not point.
+  // hand that does not point, and with controls=1 the grip of each hand.
   if (state.world_grab && f != kSimple) w.world = L"Grip";
   // The ring (radial_menu.cpp): a face button of the hand that does not
   // point (the second one with button_layout=1, the first one with 0), or
@@ -142,7 +144,7 @@ uint32_t SignatureOf(const Words& w, const ControllerHintState& s) {
          (static_cast<uint32_t>(s.gesture_button & 3) << 6) |
          (static_cast<uint32_t>(s.ring & 3) << 9) |
          (s.layout != 0 ? 0x800u : 0u) | (w.menu_on_pointing ? 0x1000u : 0u) |
-         (s.walk ? 0x2000u : 0u);
+         (s.walk ? 0x2000u : 0u) | (s.fly ? 0x4000u : 0u);
 }
 
 // --- the census -------------------------------------------------------------
@@ -465,13 +467,13 @@ std::wstring ReplacePhrases(const wchar_t* text, const wchar_t* noun) {
 bool BuildAlt(const TextRow& row, const Words& w, std::wstring* out) {
   switch (row.kind) {
     case kLmb:
-      if (const wchar_t* word = w.swap ? w.grip : w.trigger) {
+      if (const wchar_t* word = w.fly || !w.swap ? w.trigger : w.grip) {
         *out = word;
         return true;
       }
       return false;
     case kRmb:
-      if (const wchar_t* word = w.swap ? w.trigger : w.grip) {
+      if (const wchar_t* word = w.fly || w.swap ? w.trigger : w.grip) {
         *out = word;
         return true;
       }
@@ -740,9 +742,9 @@ bool ControllerHintsActive() { return g_active; }
 const wchar_t* ControllerHintLabel(uint32_t code) {
   switch (code) {
     case 1:
-      return g_words.swap ? g_words.grip : g_words.trigger;
+      return g_words.fly || !g_words.swap ? g_words.trigger : g_words.grip;
     case 2:
-      return g_words.swap ? g_words.trigger : g_words.grip;
+      return g_words.fly || g_words.swap ? g_words.trigger : g_words.grip;
     case 8:
     case 0x10:
       return g_words.stick;

@@ -910,6 +910,7 @@ The words that act on the first frame of the word only:
 | `movekey` | The test key of `move_stick` acts (`god-view.md`, section 5.7) |
 | `teleportkey` | The test key of `teleport_switch` acts (`god-view.md`, section 14.6) |
 | `promptkey` | The test key of `prompt_moves` acts (`controller-hints.md`, 9.5) |
+| `controlskey` | The test key of `controls` acts (5.7) |
 
 The placement of the hand is in cm from the head center. Each pose word sets
 the position of the right hand until the next one.
@@ -957,7 +958,8 @@ a test save, N is a frame after the Main Menu closed: the run scripts give
 
 The pointing hand is the right hand. When the left controller is the Hand
 (5.6) the hands change sides. The default mode is the God view
-(`god-view.md`).
+(`god-view.md`). The tables are the control scheme `controls=0`. The scheme
+`controls=1` is in 5.7.
 
 **The pointing hand**
 
@@ -1030,7 +1032,9 @@ default. Each control has one job, and one button opens the game menu.
 | --- | --- | --- |
 | `controllers` | 1 | Use tracked controllers when the headset has them |
 | `left_hand` | -1 | Which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. The launcher row "Hand" |
-| `controller_swap_buttons` | 0 | 1 makes the grip the left button and the trigger the right |
+| `controls` | 0 | The control scheme (5.7). 0: the tables of 5.1. 1: the grips only grab the world, the trigger of the pointing hand is the left and the right button of the game, and the trigger of the other hand makes the walk faster. The launcher row "Controls". The test key Ctrl Shift and the apostrophe key goes between the two (`test_keys=1`) |
+| `move_stick_boost_pct` | 500 | With `controls=1`: the speed of the walk with the stick at a full pull of the trigger of that hand, in percent of the speed with no trigger, 100 to 2000 (`god-view.md`, 5.7). Not in the launcher |
+| `controller_swap_buttons` | 0 | 1 makes the grip the left button and the trigger the right. With `controls=1` it changes only the dialog boxes, the rooms of the Temple and the pointer |
 | `controller_haptics` | 1 | Short pulses on presses and turns |
 | `controller_hand` | 1 | 1 puts the Hand at the controller (the direct hand). 0 keeps the pointer mode of section 3. Not in the launcher, and a save of the launcher removes the key |
 | `grip_fast_open` | 1 | With the direct hand, a closed grip also opens on a fast fall of its value (3.6) |
@@ -1211,6 +1215,96 @@ hand.
 Only a headset shows: the left hand with a real controller, the hand model
 and the game's Hand on the left controller, and the menu button of the left
 controller as the button of the pointing hand.
+
+### 5.7 The control schemes
+
+The key `controls` chooses one of two control schemes. The launcher row is
+"Controls" in the group "Controllers". 0 ("Default") is the scheme of 5.1.
+1 ("Fly and grab") changes these controls in the God view:
+
+| Control | `controls=1` |
+| --- | --- |
+| Grip of the pointing hand | Grabs the world, as the grip of the other hand does. It is never a button of the game. A press grabs also while the trigger takes or carries an object. A left button that the trigger holds stops a grab from starting |
+| Both grips | Turn the world and zoom it. The land under the head at the press keeps its height in the room, so the zoom does not lift or drop the player (`god-view.md`, 5.1) |
+| Trigger of the pointing hand | The left button and the right button of the game. The press decides which one, and the trigger keeps that button until it opens (see below) |
+| Trigger of the other hand | Makes the walk with the stick faster while it is pulled (`god-view.md`, 5.7). No job when the stick does not walk |
+
+The other controls (A, B, the sticks, the ring, the menu button) do not
+change. A dialog box, a room of the Temple and the pointer keep the buttons
+of 5.1: the trigger is the left button and the grip the right button.
+`grab_hand=0` turns off the grab with the grips in both schemes.
+
+**The press of the trigger** (`FlyPressButton` in `controller_math.h`,
+`FlyPress` in `controllers.cpp`). At the press the mod reads the facts of
+the last frame:
+
+1. The controller does not place the Hand (a menu of the game, a load): the
+   left button, as with `controls=0`.
+2. A text of the game waits for a click (`text_click`): the left button.
+3. The leash is on the Hand, and the trigger commands the Creature
+   (`creature.md`, section 4): the left button, which the command takes.
+4. The aim has a far target, or the Hand is not free: it holds an object, it
+   is not in its Normal state (a miracle), or it is on or near an object
+   that a press acts on (`HandDirectClaimFree`). The right button. It goes
+   to the grip machine (`grab.md`, "The grip holds"), so the trigger takes,
+   carries, throws, taps, strokes and casts as the grip does with
+   `controls=0`. A far target comes to the Hand with a pull of the trigger
+   (`grab.md`, "The grab from a distance").
+5. Else the left button. A short press is a click of the game, and a press
+   that is held is a held left button.
+
+So a press on a target takes it at once, with no wait for a tap time, and a
+press where nothing can be taken is a click. A tap of the trigger on a
+target is the tap of the game (the right button for less than 225 ms), for
+example the tap that makes a one-off seed active (`miracles.md`).
+
+The log has one line for each press of the trigger (`controllers : the
+trigger closes and is the left button ...` or `... the right button ...`),
+with the reason, and one line for each grab of the pointing grip (`grab :
+the pointing grip grabs the world (controls=1)`).
+
+**The hint cards** name the trigger for the left button and for the right
+button of the game (`controller-hints.md`).
+
+**The test key.** With `test_keys=1`, Ctrl, Shift and the apostrophe key
+change `controls` between 0 and 1 while the game runs. On a German keyboard
+the key is the key with the letter A with two dots. Both controllers give a
+long pulse for 1 and a short pulse for 0, and the log names the scheme. The
+hands let go of the world. A trigger or a grip that is down must open before
+it presses a button of the game, and a stick that is pushed must come back.
+The word `controlskey` of the scripted controller does the same in a desktop
+run.
+
+**Tests.** The math tests (`grip_checks.h`, `walk_checks.h`) cover the
+choice of the press, the boost and the zoom about the land under the head.
+Desktop runs [R]:
+
+- `aim_run.ps1 -Save pen` with `controls=1`, the far fetch of the rock at the
+  pen with `trigger` in place of `grip`, then `grip`, `grip` with `lgrip` and
+  a step of `lpoint`, `controlskey` and the same two hand grab again. The
+  trigger with the far target is the right button, and the Hand holds the
+  rock after the pull. The pointing grip grabs the world. With `controls=1`
+  the land under the head goes 0.00 cm up in the room in a zoom from 100 to
+  77.3 units for each meter. With `controls=0` it goes 2.82 cm up in the zoom
+  back to 99.7. After the test key the trigger is the plain left button.
+- `spawn_run.ps1 -Save temple` with `controls=1`: a press of the trigger with
+  no target is the left button. A walk with `ltrigger` goes 750 cm of the
+  room each second ("at most 5.00 times as fast"), a walk with no trigger
+  150. After `controlskey` the same `ltrigger` gives 150.
+
+Not run on the desktop: a press of the trigger on an object near the Hand
+(the save at the Temple has no holdable object near the Hand).
+
+**Known limits, and what only a headset can show.**
+
+- A one-off seed that the trigger carries cannot become active by a second
+  press, because the trigger holds it. Let it go and tap it with the
+  trigger.
+- With the leash on the Hand, the trigger commands the Creature and takes
+  nothing. Take the leash off with a shake of the hand to take things.
+- Only a headset shows how the choice of the press feels: a press near an
+  object that the player did not want to take, and a click that the player
+  wanted on an object that the Hand can hold.
 
 ## 6. Risks and known limits
 

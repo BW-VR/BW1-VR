@@ -169,6 +169,9 @@ bool FarGrabPumpGrip(bool grip, bool ok, bool hand);
 // True while the press of the fetch goes to the game, so it needs no pixel in
 // view: the hand is near the head after a pull.
 bool FarGrabPressing();
+// For controllers.cpp (controls=1): the aim has a far target now, and a
+// press that closes now locks it.
+bool FarGrabHasTarget();
 
 // For overlay.cpp and hand_glow.cpp: what to draw on this frame. hand_glow.cpp
 // draws the halo around the target, and overlay.cpp draws the tether. Nothing

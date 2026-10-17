@@ -469,7 +469,7 @@ text), the hook `h_DrawKeyOrMouse` in `src/mod/draw_hooks.cpp`, and
 | `hint_selftest` | 0 | Test key (8.5) |
 | `help_test` | 0 | Test key. Turns the game's help on in memory (`ui-layer.md`, 15.1). |
 | `hint_mode` | 1 with head tracking, else 2 | What to do with the two copies the game draws of a picture hint: 0 draw both, 1 keep the copy at the Hand, 2 keep the pinned copy (`draw_hooks.cpp`) |
-| `controller_swap_buttons`, `gesture_button`, `grab_world` | `controllers.md` | Change the words (the trigger and the grip swap, the gesture word, the word of the world grip) |
+| `controller_swap_buttons`, `controls`, `gesture_button`, `grab_world` | `controllers.md` | Change the words (the trigger and the grip swap, the trigger for both buttons with `controls=1`, the gesture word, the word of the world grip) |
 
 ### 8.1 When the controller words show
 
@@ -519,8 +519,8 @@ The labels come from one function, `BuildWords`. It follows `xr_screen.cpp`
 
 | Button code | Word | Hidden when |
 | --- | --- | --- |
-| 1, the left button | Trigger (Grip with `controller_swap_buttons`) | never. The Simple profile says "Select". |
-| 2, the right button | Grip (Trigger when swapped) | Simple has no grip |
+| 1, the left button | Trigger (Grip with `controller_swap_buttons`, Trigger with `controls=1`) | never. The Simple profile says "Select". |
+| 2, the right button | Grip (Trigger when swapped, and with `controls=1`) | Simple has no grip |
 | 8 and 0x10, the wheel | Stick ("Pad click" on Wand, because its pad works only when clicked) | Simple has no stick |
 | 4, the middle button | none | always, it has no controller input |
 | 3 | none | always, the control map never gives it |

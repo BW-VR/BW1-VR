@@ -513,6 +513,8 @@ uint64_t g_clears = 0;
 // the land under the head was below the head at the start.
 struct WalkHold {
   float push[2] = {0.0f, 0.0f};
+  float boost = 1.0f;  // the factor of the speed of the request (controls=1)
+  float boost_most = 1.0f;  // the largest factor in the walk, for the log
   bool fresh = false;
   bool have_aim = false;
   float aim[2] = {0.0f, 1.0f};
@@ -2002,20 +2004,25 @@ void StopWalk(const char* cause, bool view_stays) {
               g_walk.frame_most * 1000.0f, g_walk.step_least * 100.0f,
               g_walk.step_most * 100.0f);
   }
+  char boosted[128] = "";
+  if (g_walk.boost_most > 1.0f) {
+    sprintf_s(boosted, " The trigger made the walk at most %.2f times as fast "
+              "(controls=1).", g_walk.boost_most);
+  }
   ModLog("god view     : the walk with the stick stopped (%s). You went %.2f "
          "units over the land, which is %.2f cm of the room, %.1f degrees to "
          "the %s of straight ahead in the room. The land under your head was "
          "at %.1f %.1f and is at %.1f %.1f. The stick was pushed for %.3f s, "
          "which gives %.1f cm of the room each second, and the view moved on "
          "%llu of %llu frames (move_stick=%d, %.2f to %.2f units per "
-         "meter), frame %llu.%s%s%s%s%s",
+         "meter), frame %llu.%s%s%s%s%s%s",
          cause, sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
          degrees < -0.05f ? "left" : "right", g_walk.start_under[0],
          g_walk.start_under[1], g_walk.under[0], g_walk.under[1],
          g_walk.seconds,
          g_walk.seconds > 0.0 ? g_walk.path * 100.0f / g_walk.seconds : 0.0,
          g_walk.moved, g_walk.frames, g_walk.rule, g_walk.start_scale, g_scale,
-         ControllersFrameCount(), hill, blind, land, even, late);
+         ControllersFrameCount(), hill, blind, land, even, late, boosted);
 }
 
 // THE WALK WITH THE STICK (move_stick, docs/god-view.md, "The walk with the
@@ -2054,9 +2061,11 @@ void ApplyGodWalk(double frame_seconds) {
                          fresh ? g_walk.push[1] : 0.0f};
   const bool have_aim = fresh && g_walk.have_aim;
   const float aim[2] = {g_walk.aim[0], g_walk.aim[1]};
+  const float boost = fresh ? g_walk.boost : 1.0f;
   g_walk.fresh = false;
   g_walk.have_aim = false;
   g_walk.push[0] = g_walk.push[1] = 0.0f;
+  g_walk.boost = 1.0f;
   if (g_walk_check.frames_left > 0 && --g_walk_check.frames_left == 0 &&
       WalkLog()) {
     float eye[3];
@@ -2132,6 +2141,7 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.rose = g_walk.fell = 0.0f;
     g_walk.shown_at = g_walk.period = 0;
     g_walk.shown = g_walk.late = 0;
+    g_walk.boost_most = 1.0f;
     g_walk.have_below = pose.scale > 0.0f;
     g_walk.start_below = g_walk.below =
         g_walk.have_below
@@ -2176,8 +2186,9 @@ void ApplyGodWalk(double frame_seconds) {
     forward[1] = g_walk.forward[1];
   }
   float speed[2], step[2];
-  walk_math::Speed(forward, push, g_settings.move_stick_speed_cm * 0.01f,
-                   speed);
+  if (boost > g_walk.boost_most) g_walk.boost_most = boost;
+  walk_math::Speed(forward, push,
+                   g_settings.move_stick_speed_cm * 0.01f * boost, speed);
   walk_math::Step(speed, seconds, step);
   // In a frame with no time, nothing moves.
   if (step[0] == 0.0f && step[1] == 0.0f) return;
@@ -3519,7 +3530,7 @@ int TabletopGodMoveStick() {
 
 bool TabletopMoveAllowed() { return (CameraFeatures() & kFeatureDrag) != 0; }
 
-bool TabletopGodWalk(const float push[2], const float* aim) {
+bool TabletopGodWalk(const float push[2], const float* aim, float boost) {
   if (TabletopGodMoveStick() == walk_math::kRuleOff || !TabletopGodOwnsView()) {
     return false;
   }
@@ -3537,6 +3548,7 @@ bool TabletopGodWalk(const float push[2], const float* aim) {
   }
   g_walk.push[0] = push[0];
   g_walk.push[1] = push[1];
+  g_walk.boost = boost >= 1.0f ? boost : 1.0f;
   g_walk.have_aim = aim != nullptr;
   if (aim != nullptr) {
     g_walk.aim[0] = aim[0];

@@ -147,6 +147,8 @@ struct ControllerHintState {
   bool owns;            // the controller owns the pointer now
   bool left_handed;     // the left hand points
   bool swap_buttons;    // the trigger is the right button, the grip the left
+  bool fly;             // controls=1: the trigger is both buttons, the grips
+                        // grab the world
   int gesture_button;   // 0 off, 1 the second face button, 2 the stick click
   bool world_grab;      // the grip of the other hand grabs the world
   int ring;             // 0 no ring, 1 a button opens it, 2 only the stick
@@ -168,6 +170,15 @@ bool ControllersWalkPossible();
 // the second face button opens the game menu, the first one opens the ring,
 // and the stick can drive the ring.
 int ControllersButtonLayout();
+
+// THE CONTROL SCHEME (controls, docs/controllers.md, "5.7 The control
+// schemes"). True for controls=1: the grips of both hands only grab the
+// world, the trigger of the pointing hand is the left and the right button of
+// the game, and the trigger of the other hand makes the walk faster.
+bool ControllersFly();
+// The test key of controls (Ctrl, Shift and the apostrophe key, with
+// test_keys=1), and the word "controlskey" of the scripted controller.
+void ControllersControlsToggle(const char* by);
 // The test key of button_layout (Ctrl and the Menu key, with test_keys=1),
 // and the word "layoutkey" of the scripted controller.
 void ControllersButtonLayoutToggle(const char* by);

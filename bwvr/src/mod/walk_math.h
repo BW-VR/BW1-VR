@@ -91,6 +91,20 @@ inline void Speed(const float forward[2], const float push[2], float top,
   out[1] = top * (push[1] * forward[1] + push[0] * right[1]);
 }
 
+// THE BOOST (controls=1). The trigger of the hand of the stick makes the walk
+// faster while the player pulls it. The factor of the speed is 1 below
+// kBoostDead and `most` from kBoostFull, with a straight line between the
+// two. So a light touch of the trigger does not change the speed, and the
+// walk is never slower than with no trigger. A `most` below 1 counts as 1.
+const float kBoostDead = 0.1f;
+const float kBoostFull = 0.95f;
+
+inline float Boost(float trigger, float most) {
+  if (!(most > 1.0f)) return 1.0f;
+  const float share = zoom_math::StickShare(trigger, kBoostDead, kBoostFull);
+  return 1.0f + (most - 1.0f) * share;
+}
+
 // THE STEP OF ONE FRAME, in meters of the room: the speed times the time of
 // the frame (zoom_math::FrameSeconds gives that time, with its cap). A time
 // that is not above 0 gives no step.

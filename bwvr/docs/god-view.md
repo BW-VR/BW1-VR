@@ -363,8 +363,16 @@ and the ground limits added.
   section 3). At a limit the land stops and does not jump. The height of the
   waist point is the height of the press plus the rise of the hand.
 - Both grips: the land turns about up with the hands and scales with their
-  spread, about the land point under the middle of the hands. The height of
-  the press stays, so two hands move the land only across.
+  spread, about the land point under the middle of the hands. Two hands move
+  the land only across. With `controls=0` the height of the table center of
+  the press stays, so land at a different height goes up or down in the room
+  with the zoom. With `controls=1` (`controllers.md`, 5.7) the land under the
+  head at the press keeps its height in the room
+  (`C.y = H - (H - C_a.y) * s / s_a`, `TableGrabSolve` with a level), so the
+  zoom does not lift or drop the player. With each value of `controls` the
+  log names the land under the head at the anchor (`grab : two hands, the
+  land under your head is at ...`) and, when the grips settle, how far that
+  land is below the head now and at the anchor.
 - The solve is from the press every time, so a head that moves with still
   hands moves nothing, and nothing moves after the release.
 - The scale stays between 7.5 and `god_far_units_per_meter`. The mouse pan
@@ -728,6 +736,14 @@ event.
   has one line for a refused push.
 - **The other stick** keeps its jobs. The stick of the pointing hand turns
   and zooms, also during a walk.
+- **The boost** (`controls=1`, `controllers.md`, 5.7). The trigger of the
+  hand of the stick makes the walk faster while it is pulled. The factor of
+  the speed is 1 up to 10 percent of the pull, `move_stick_boost_pct` / 100
+  (5 by default) from 95 percent, and a straight line between the two
+  (`Boost` in `walk_math.h`). The trigger is the player's own input, and the
+  walk stops in the frame in which the stick comes back, as with no boost.
+  The line of the end of a walk gives the largest factor of the walk. With
+  `controls=0` the trigger of that hand has no job.
 - **Comfort.** A walk with a stick makes some players ill. The grab and the
   teleport move the player with no such motion. `move_stick=0`, and the
   choice "Off" of the launcher, turn the walk off.
@@ -736,6 +752,7 @@ event.
 | --- | --- | --- |
 | `move_stick` | 1 | 0: the stick does not move the player. 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Move with the other stick" |
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
+| `move_stick_boost_pct` | 500 | With `controls=1`: the speed at a full pull of the trigger of the hand of the stick, in percent of the speed with no trigger, 100 to 2000 |
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
 | `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. The launcher row "Walk follows the land" |
 | `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk (at most 2000 lines in a game) |

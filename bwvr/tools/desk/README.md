@@ -115,6 +115,7 @@ calls it. It keeps these rules, and a new script must keep them too:
 | `hand_run.ps1`, `village_run.ps1`, `temple_run.ps1`, `miracle_run.ps1` | Runs for the near hand, the village, the Temple and miracles. See "The scripts of one area" |
 | `intro_run.ps1` | The Lionhead logo in stereo, with a picture of each eye each few seconds. The run does not skip the logos. See "The logos" |
 | `bench_run.ps1` | The frame cost measure: six still scenes, the numbers of each scene, the spread of some runs, and the comparison of two builds or of two sets of keys. See "The frame cost measure" |
+| `live_stream_run.ps1` | A run in the test save `pen` with the live stream of the walks (`vk_stream_live=1`) and the test reader of the PC (`bwvr_stream_reader.exe`), which comes late and compares each frame of the record of the run with the frame of the ring. See `android.md`, "The live stream" |
 | `perf_ab.ps1` | Some sets of ini keys with one build: a table of the frame time, the render thread, the GPU time and, with `-Pictures`, the pictures of two modes. See "A comparison of sets of keys" |
 
 The scripted controller is driven by ini keys: `fake_controller_script` (words

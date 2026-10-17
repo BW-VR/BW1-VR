@@ -767,6 +767,10 @@ void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
   source_height_ = image_height;
 }
 
+void XrApp::MarkScreenChanged() {
+  for (Layer& l : screen_) ++l.revision;
+}
+
 // One eye of the picture of the renderer into the next image of its quad.
 void XrApp::CopyScreen(int eye) {
   Layer* layer = &screen_[eye];

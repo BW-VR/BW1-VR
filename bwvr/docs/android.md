@@ -28,6 +28,13 @@ Summary:
   renderer draws on the Vulkan device of the session, and its eye pictures
   show on a stereo screen in front of the player (see "The picture of the
   renderer in the headset").
+- The stream can be live: the mod writes each frame of its walks into a
+  ring file (`vk_stream_live`), and a thread of the app reads the frames
+  from the same file while the game runs (`stream_live`, see "The live
+  stream"). In a desktop run the frames of the ring have the same bytes as
+  the record of the same run. In the emulator the app takes the frames from
+  a second process through the file, and its pictures are the same as the
+  pictures of the PC.
 - **Only Vulkan.** The app draws with Vulkan alone: the menu, the stereo
   screen and the renderer of the mod. It has no fallback to Direct3D,
   DirectDraw or another graphics interface (see "Only Vulkan").
@@ -53,7 +60,10 @@ Summary:
 | `android/src/scene_host.cpp` | The functions of the mod that the renderer calls, with the state of the walk |
 | `android/src/scene_player.cpp` | Gives each record of a stream of the walks to the renderer |
 | `src/mod/scene_stream.h` | The format of the stream of the walks. No Windows code |
-| `src/mod/vk_stream.cpp` | The record of the stream in the mod on the PC |
+| `src/mod/vk_stream.cpp` | The record of the stream and the writer of the live stream in the mod on the PC |
+| `src/mod/stream_ring.h` | The ring of the live stream: the head, the indices, the wrap, the choice of the writer for a full ring, the frames of the reader. No Windows code |
+| `android/src/stream_reader.cpp` | The reader thread of the live stream in the app, and the feed process of a test |
+| `test/stream_reader/main.cpp` | The test reader of the live stream on the PC (`bwvr_stream_reader.exe`) |
 | `android/test_runtime/test_runtime.cpp` | The OpenXR test runtime for the emulator. Not in the APK |
 | `src/mod/vk_platform_posix.h` | The parts of Windows that the renderer uses, for a build with no Windows |
 | `src/mod/vk_d3d7_posix.h` | The parts of Direct3D 7 that the renderer uses, with the values of the SDK |
@@ -66,6 +76,8 @@ Summary:
 | `tools/android/emu_test.ps1` | The test in the Android emulator |
 | `tools/android/emu_xr_test.ps1` | The test in the Android emulator with the OpenXR test runtime |
 | `tools/android/emu_replay_test.ps1` | A stream of the game in the renderer of the app in the emulator, against the pictures of the PC |
+| `tools/android/emu_live_test.ps1` | The live stream through the ring file in the emulator, against the pictures of the PC |
+| `tools/desk/live_stream_run.ps1` | A desktop run with the live stream and the test reader of the PC |
 | `tools/android/android_env.ps1` | Finds the SDK, the NDK and the JDK |
 
 ## Build the APK
@@ -310,13 +322,33 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    app, starts the app, and compares each picture of the renderer of the app
    with the picture of the same name of the PC. The pass is at most 2
    percent of the pixels with a difference of more than 24 in a channel.
-5. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
+5. **The live stream in the emulator** (`emu_live_test.ps1 -Run <folder>`,
+   22 checks). The feed (`ring-capture.bin`) and the pictures of the PC come
+   from one desktop run of `live_stream_run.ps1` (see "The live stream").
+   The emulator has the GPU of the PC (`-gpu host`). The script puts the
+   feed, `stream_live=1` and `stream_live_feed=1` into the game folder of
+   the app and starts the app. A child process of the app makes
+   `bwvr-stream.ring` in the game folder and writes the frames of the feed
+   into it as the mod does, and the reader thread of the app takes them
+   from the same file. The checks: the ring file and its head, the answer
+   to the ask, the first frame with the whole state, each frame of the feed
+   played, no record of an unknown kind, the end of the child process with
+   the status 0 (the reader took each byte), no lost place, Vulkan 1.3, no
+   crash, and each picture against the picture of the PC (the pass of step
+   4). The results are in `bwvr/out/android/emu-live-test`. The script
+   starts its own emulator on port 5584 and stops when an emulator runs
+   there already (the test of a different session), unless `-Reuse` is
+   given.
+6. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
    the table, the menu (the pages, the steps, the help, the save rules), the
    hit of a ray on the quad (`test/controller_math/menu_checks.h`), each
    value and struct of `vk_d3d7_posix.h` against the Windows SDK
-   (`vk_platform_checks.h`), and the writer and the reader of the stream
-   (`stream_checks.h`).
-6. **In a headset** (only a headset can show it): install the APK with
+   (`vk_platform_checks.h`), the writer and the reader of the stream
+   (`stream_checks.h`), and the ring of the live stream
+   (`stream_ring_checks.h`: the wrap at the end of the data and at 2^32, a
+   full ring, the choice of the writer, the frames of the reader, a reader
+   that comes late, and 3000 frames through a ring of 4 KB in two threads).
+7. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
    session is made`. Check that the menu is in front of you at a good
@@ -446,6 +478,99 @@ the uploads of the textures. The read back of the pictures takes about two
 minutes in the emulator, because the GPU of the emulator gives an image of
 40 MB to the CPU slowly.
 
+## The live stream
+
+The live stream gives each frame of the walks of the game to the app while
+the game runs, through a real file that both map: the **ring**
+(`stream_ring.h`). On the PC and in Wine the mod maps the file with
+`CreateFileMapping`, and the app maps it with `mmap` and `MAP_SHARED`. A
+named section of Wine is not visible to the app, so it must be a file.
+
+**The ring.** `bwvr-stream.ring` beside `runblack.exe`: a head of 4 KB and
+32 MB of data. The data is a pipe of bytes: the records of the stream
+(`scene_stream.h`) with no head of a stream, one frame after the other. A
+frame is the records from one `kFrame` of the game to its `kFrameEnd`. The
+head has the indices `write` (of the writer) and `read` (of the reader).
+They count the bytes since the start and wrap at 2^32. Each side stores its
+index with a release after its copy, and loads the other index with an
+acquire before its copy: `InterlockedExchange` and
+`InterlockedCompareExchange` in the mod, the `__atomic` builtins in the app.
+In the headset the mod runs in Box64 on ARM, which has a weak memory model,
+and Box64 gives the interlocked instructions their barriers.
+
+**The writer** (`vk_stream_live=1`, `vk_stream.cpp`, only with
+`backend=vulkan`). At its start the mod makes the file and a new head. The
+records of a frame collect in the memory of the mod. At the start of the
+next frame of the game they go into the ring, so a frame is in the ring one
+frame of the game after it was drawn. A record (`vk_stream_record`) and the
+live stream get the same bytes for a frame, and the first frame of a record
+has the whole state for both. With no reader the mod puts no frame into
+the ring and reads no surface for it.
+
+**A reader that comes late** adds one to `ask` in the head. At the start of
+its next frame the writer sets `sync` to its write index, then `answer` to
+that ask, and that frame starts with `kStart` (the options) and has each
+surface with its pixels before its first use. The reader sets `read` to
+`sync` and reads from there. A reader that leaves adds one to `bye`, and
+the writer stops until the next ask. The same holds for the first frame
+after a frame with no stream.
+
+**A full ring** (a slow reader). A frame with no `kStart`, `kSurface` or
+`kWritten` record waits up to 4 ms for room for the whole frame, then the
+writer drops it and the log says so. The reader keeps each texture, because
+such a frame changes no surface. A frame with one of these records is never
+dropped: it goes into the ring in parts as the reader makes room. When the
+reader takes no byte for 2 s, the writer gives up on it (`lost` in the
+head), says so in the log, and stops until the next ask. In the test save
+"pen" most frames have a `kSurface` record (3 small surfaces that the game
+writes in each frame), so few frames can drop.
+
+**The reader in the app** (`stream_live=1` in `bwvr.ini` of the game folder
+of the app, `stream_reader.cpp`). A thread waits for the ring file with a
+whole head, asks for the whole state, and takes whole frames into a queue of
+3 frames. A full queue takes no byte from the ring, so the writer waits or
+drops. The loop of the app gives one frame of the queue to the renderer for
+each frame of the session (the renderer is not thread safe), through the
+same player as the file (`PlayStreamRecords`, `scene_player.cpp`), and the
+eye picture goes to the stereo screen with a new revision. With no session
+the loop runs each 5 ms. A new head (a new start of the game), a `lost` of
+the writer or a record that is not of the stream makes the reader ask
+again. The log has one line for each change of state, and a line with the
+counts when no frame came for 1 s.
+
+**The test reader of the PC** (`bwvr_stream_reader.exe`,
+`test/stream_reader`). `live_stream_run.ps1` starts it with a desktop run in
+the test save "pen" (`one_walk=1`, `fake_controller=1`, `vk_stream_live=1`,
+a record of the frames 3000 to 3003, the pictures of frame 2996). The reader
+asks at frame 2990, so it comes late, takes the frames to frame 3003, writes
+them to `ring-capture.bin` and the size and the wait of the writer of each
+frame to `ring-frames.txt`, and leaves. Then the script compares each frame
+of the record with the frame of the same number of the ring.
+
+```
+live_stream_run.ps1 -Name live -Dll <ddraw.dll>
+```
+
+**What the desktop run shows** (a Radeon RX 7900 XTX): the answer comes 1
+to 2 ms after the ask, at the next frame. The frame of the answer and the
+first frame of the record have 14.4 MB (59 surfaces with 13.6 MB of
+pixels), and the other frames 0.79 MB. Each of the frames 3000 to 3003 of
+the ring has the same bytes as the frame in `bwvr-stream.bin`. The writer
+waited for room for no frame. The copy of a frame into the ring took 4 to 6
+ms for a frame of 14.4 MB and 0.05 to 0.5 ms for the others.
+
+**A TEST AID of the app** (`stream_live_feed=1`): a child process of the app
+makes the ring and writes the frames of `bwvr-stream-feed.bin` of the game
+folder into it as the mod does, after the ask, with no drop. So the reader
+takes the frames from a second process through the file, as from Wine.
+`emu_live_test.ps1` uses it with the capture of a desktop run (see "Test the
+APK", step 5). In the emulator the four pictures of frame 2996 are the same
+as the pictures of the PC, to the byte.
+
+**Not shown yet:** the ring under Wine and Box64 in the headset (the
+mapping of a real file by Wine and by the app, and the barriers of Box64),
+and the frame rate of the live stream in a headset.
+
 ## Only Vulkan
 
 The app has one renderer: the Vulkan renderer of the mod. There is no
@@ -490,19 +615,22 @@ Android. The plan, in steps:
    Wine also needs a display driver with no screen, and an audio driver.
 2. **The walks for the renderer in the app, live.** The renderer is in the
    app, and it draws a stream of the walks of the game to the pixel ("The
-   stream of the walks"). The stream goes through a file now, for a test.
-   The plan: the same stream through shared memory between the process of
-   Wine and the app, frame by frame, and the eye pictures of the renderer
-   into the swapchains of the session of the app. So no draw goes through
-   x86 code or through the Vulkan of Wine. The game already sends vertices
-   in screen space, so the stream needs no matrices.
+   stream of the walks"). The live stream gives the frames of the mod to the
+   app through the ring file, frame by frame, and the eye pictures go to
+   the stereo screen of the session ("The live stream"). So no draw goes
+   through x86 code or through the Vulkan of Wine. The game already sends
+   vertices in screen space, so the stream needs no matrices. Open: the run
+   with the game in Wine, with `vk_stream_live=1` and `stream_live=1`, and
+   the eye pictures in the swapchains of the projection layer in place of
+   the stereo screen.
 3. **The head and the controllers.** The mod reads the head pose and the
    controllers from OpenXR. Wine has no OpenXR for Android, so the app must
-   give the mod its poses and its actions through the same shared memory.
+   give the mod its poses and its actions through a ring file of the same
+   kind.
 
-Each step needs a check that a desktop run can make. Step 2 can be tested
-on the PC: the game with `backend=remote` and the renderer of the app built
-for Windows.
+Each step needs a check that a desktop run can make. Step 2 has one: the
+live stream to the test reader of the PC (`live_stream_run.ps1`), and the
+frames of that run through the ring in the emulator (`emu_live_test.ps1`).
 
 **The Steam Frame.** SteamOS on the Steam Frame has Proton and FEX (an x86
 emulator). That way can run the PC build of the mod with no APK, if the

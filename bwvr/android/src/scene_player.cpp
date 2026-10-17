@@ -279,7 +279,27 @@ double NowMs() {
   return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
 
+// The renderer and SceneHostState keep the addresses of the surfaces of the
+// stream (the textures, the targets), so the one player of the process and
+// its surfaces live until the end of the process.
+Player* ThePlayer(PlayResult* result) {
+  static Player* s_player = nullptr;
+  if (s_player == nullptr) s_player = new Player(result);
+  s_player->SetResult(result);
+  return s_player;
+}
+
 }  // namespace
+
+void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result) {
+  ss::Reader reader = ss::Reader::Records(bytes, size);
+  Player* player = ThePlayer(result);
+  ss::Kind kind;
+  const uint8_t* body = nullptr;
+  uint32_t n = 0;
+  while (reader.Next(&kind, &body, &n)) player->Play(kind, body, n);
+  if (reader.Broken()) result->broken = true;
+}
 
 PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
   PlayResult result;
@@ -293,16 +313,11 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
   result.loaded = true;
   VkPlatformSetFolder(folder.c_str());
   const double start = NowMs();
-  // The renderer and SceneHostState keep the addresses of the surfaces of
-  // the stream (the textures, the targets), so the player and its surfaces
-  // live until the end of the process.
-  static Player* s_player = nullptr;
-  if (s_player == nullptr) s_player = new Player(&result);
-  s_player->SetResult(&result);
+  Player* player = ThePlayer(&result);
   ss::Kind kind;
   const uint8_t* body = nullptr;
   uint32_t size = 0;
-  while (reader.Next(&kind, &body, &size)) s_player->Play(kind, body, size);
+  while (reader.Next(&kind, &body, &size)) player->Play(kind, body, size);
   result.broken = reader.Broken();
   result.ms = NowMs() - start;
   AppLog("replay       : %s: %llu records, %llu frames, %llu walks, %llu draws, "

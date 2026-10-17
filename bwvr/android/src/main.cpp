@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include <string>
 #include <vector>
@@ -29,8 +30,11 @@
 #include "menu_layout.h"
 #include "menu_model.h"
 #include "menu_painter.h"
+#include "../../src/mod/stream_ring.h"
+#include "../../src/mod/vk_platform_posix.h"
 #include "../../src/mod/vk_scene.h"
 #include "scene_player.h"
+#include "stream_reader.h"
 #include "xr_app.h"
 
 namespace {
@@ -73,7 +77,101 @@ struct App {
   int stick_y_was = 0;
   int stick_x_was = 0;
   bool dragging = false;
+
+  // The picture of the renderer on the stereo screen of the session.
+  VkImage screen_image = VK_NULL_HANDLE;
+
+  // THE LIVE STREAM (stream_live=1, docs/android.md, "The live stream").
+  bool live = false;
+  StreamReader live_reader;
+  PlayResult live_result;
+  std::vector<uint8_t> live_frame;
+  uint64_t live_frames = 0;  // the frames played since frames came
+  uint64_t live_first = 0;
+  uint64_t live_last = 0;
+  double live_last_ms = 0.0;  // the time of the last frame
+  double live_play_ms = 0.0;
+  double live_play_most = 0.0;
+  bool live_quiet = true;  // no frame came for 1 s
 };
+
+double NowMs() {
+  timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
+// The last eye picture of the renderer (VkSceneEyes) on the stereo screen of
+// the session. A new picture in the same image gets a new revision, so the
+// quads copy it.
+bool ShowEyes(App* app) {
+  if (!app->xr_on) return false;
+  uint64_t image = 0;
+  uint32_t w = 0, h = 0;
+  if (!VkSceneEyes(&image, &w, &h)) return false;
+  if (!app->xr.HasScreen() && !app->xr.MakeScreen(w / 2, h / 2)) return false;
+  const VkImage now = reinterpret_cast<VkImage>(image);
+  if (now != app->screen_image) {
+    app->xr.SetScreenSource(now, w, h);
+    app->screen_image = now;
+  } else {
+    app->xr.MarkScreenChanged();
+  }
+  return true;
+}
+
+void LiveSummary(App* app, const char* why) {
+  const PlayResult& r = app->live_result;
+  AppLog("live         : %s: %llu frames played (frames %llu to %llu). In all "
+         "%llu records, %llu walks, %llu draws, %llu surfaces, %llu of an "
+         "unknown kind%s. The play of a frame took %.1f ms as a mean and %.1f "
+         "ms at most",
+         why, static_cast<unsigned long long>(app->live_frames),
+         static_cast<unsigned long long>(app->live_first),
+         static_cast<unsigned long long>(app->live_last),
+         static_cast<unsigned long long>(r.records),
+         static_cast<unsigned long long>(r.walks),
+         static_cast<unsigned long long>(r.draws),
+         static_cast<unsigned long long>(r.surfaces),
+         static_cast<unsigned long long>(r.unknown),
+         r.broken ? ", a frame stops in a record" : "",
+         app->live_frames > 0 ? app->live_play_ms / app->live_frames : 0.0,
+         app->live_play_most);
+}
+
+// One frame of the live stream into the renderer, for each frame of the
+// session. The renderer is not thread safe, so only this thread plays.
+void PlayLive(App* app) {
+  if (!app->live_reader.Next(&app->live_frame)) {
+    if (!app->live_quiet && NowMs() - app->live_last_ms > 1000.0) {
+      LiveSummary(app, "no new frame for 1 s");
+      app->live_quiet = true;
+    }
+    return;
+  }
+  bool bad = false, whole = false;
+  uint64_t frame = 0;
+  stream_ring::UnitBytes(app->live_frame.data(), app->live_frame.size(),
+                         app->live_frame.size(), &bad, &frame, &whole);
+  if (app->live_quiet) {
+    AppLog("live         : frames come. The first is frame %llu%s",
+           static_cast<unsigned long long>(frame),
+           whole ? ", with the whole state" : "");
+    app->live_quiet = false;
+    app->live_frames = 0;
+    app->live_first = frame;
+    app->live_play_ms = app->live_play_most = 0.0;
+  }
+  const double start = NowMs();
+  PlayStreamRecords(app->live_frame.data(), app->live_frame.size(), &app->live_result);
+  const double ms = NowMs() - start;
+  app->live_play_ms += ms;
+  if (ms > app->live_play_most) app->live_play_most = ms;
+  ++app->live_frames;
+  app->live_last = frame;
+  app->live_last_ms = NowMs();
+  ShowEyes(app);
+}
 
 void Save(App* app) {
   app->menu.Store(&app->ini);
@@ -368,26 +466,41 @@ void android_main(android_app* android) {
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
                            kCursorPixels);
 
+  // The renderer of the mod (docs/android.md, "The renderer in the app").
+  // In a session it draws on the device of the session, and its last
+  // picture shows on a stereo screen behind the menu.
+  const bool replay = app.ini.GetInt("bwvr", "stream_replay", 0) != 0;
+  app.live = app.ini.GetInt("bwvr", "stream_live", 0) != 0;
+  if ((replay || app.live) && app.xr_on && app.xr.Renderer13()) {
+    vk::External device;
+    app.xr.RendererDevice(&device);
+    vk::UseExternal(device);
+  }
   // A TEST AID (stream_replay=1 in bwvr.ini): the stream of the walks in
   // bwvr-stream.bin of the game folder goes to the Vulkan renderer of the
   // mod, which writes the pictures of vk_scene_test_frame of the stream
-  // into the game folder (docs/android.md, "The stream of the walks"). In a
-  // session the renderer draws on the device of the session, and its last
-  // picture shows on a stereo screen behind the menu.
-  if (app.ini.GetInt("bwvr", "stream_replay", 0) != 0) {
-    if (app.xr_on && app.xr.Renderer13()) {
-      vk::External device;
-      app.xr.RendererDevice(&device);
-      vk::UseExternal(device);
-    }
+  // into the game folder (docs/android.md, "The stream of the walks").
+  if (replay) {
     PlayStreamFile(app.game.folder + "/bwvr-stream.bin", app.game.folder);
-    uint64_t image = 0;
-    uint32_t w = 0, h = 0;
-    if (app.xr_on && VkSceneEyes(&image, &w, &h) && app.xr.MakeScreen(w / 2, h / 2)) {
-      app.xr.SetScreenSource(reinterpret_cast<VkImage>(image), w, h);
-    } else if (app.xr_on) {
+    if (app.xr_on && !ShowEyes(&app)) {
       AppLog("replay       : no picture of the renderer for the session");
     }
+  }
+  // THE LIVE STREAM (stream_live=1 in bwvr.ini): a thread reads the frames
+  // of the walks of the mod from the ring bwvr-stream.ring of the game
+  // folder, and the loop below gives one frame to the renderer for each
+  // frame (docs/android.md, "The live stream"). stream_live_feed=1 (a test
+  // aid): a child process writes the frames of bwvr-stream-feed.bin into the
+  // ring, as the mod does.
+  if (app.live) {
+    const std::string ring = app.game.folder + "/bwvr-stream.ring";
+    AppLog("live         : stream_live=1. The app reads the frames of the walks "
+           "from %s", ring.c_str());
+    VkPlatformSetFolder(app.game.folder.c_str());
+    if (app.ini.GetInt("bwvr", "stream_live_feed", 0) != 0) {
+      app.live_reader.StartFeed(ring, app.game.folder + "/bwvr-stream-feed.bin");
+    }
+    app.live_reader.Start(ring, 3);
   }
   if (app.xr_on) {
     TakeHeadsetSize(&app);
@@ -408,7 +521,7 @@ void android_main(android_app* android) {
   while (!android->destroyRequested && !app.quit) {
     // With a session the frame loop sets the pace. Else the app waits for
     // an event, or for 50 ms.
-    const int timeout = (app.xr_on && app.xr.Running()) ? 0 : 50;
+    const int timeout = (app.xr_on && app.xr.Running()) ? 0 : (app.live ? 5 : 50);
     int events = 0;
     android_poll_source* source = nullptr;
     while (ALooper_pollOnce(timeout, nullptr, &events,
@@ -429,18 +542,26 @@ void android_main(android_app* android) {
       if (!app.xr.Running()) continue;
       XrInput input;
       if (!app.xr.BeginFrame(&input)) continue;
+      if (app.live) PlayLive(&app);
       bool show_cursor = false;
       float cursor[3] = {0, 0, 0};
       OnControllers(&app, input, &show_cursor, cursor);
       Paint(&app);
       app.xr.EndFrame(quad.center, menu_size, show_cursor, cursor,
                       kCursorMeters);
-    } else if (app.window && app.flat.Ready()) {
+    } else {
+      // With no session the loop runs each 5 ms for the live stream.
+      if (app.live) PlayLive(&app);
+      if (!app.window || !app.flat.Ready()) continue;
       Paint(&app);
       if (app.flat_dirty && app.flat.Present()) app.flat_dirty = false;
     }
   }
 
+  if (app.live) {
+    app.live_reader.Stop();
+    if (!app.live_quiet) LiveSummary(&app, "the app ends");
+  }
   AppLog("app          : the app ends");
   if (app.xr_on) app.xr.Stop();
   app.flat.Stop();

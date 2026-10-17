@@ -56,6 +56,7 @@ add_library(bwvr_quest SHARED
     src/menu_painter.cpp
     src/scene_host.cpp
     src/scene_player.cpp
+    src/stream_reader.cpp
     src/xr_app.cpp
 )
 target_include_directories(bwvr_quest PRIVATE

@@ -3569,6 +3569,7 @@ void CreatureChecks() {
 #include "menu_checks.h"
 #include "vk_platform_checks.h"
 #include "stream_checks.h"
+#include "stream_ring_checks.h"
 #include "proxy_choice_checks.h"
 
 int main() {
@@ -3983,6 +3984,7 @@ int main() {
   menu_checks::AllMenuChecks();
   vk_platform_checks::VkPlatformChecks();
   stream_checks::StreamChecks();
+  stream_ring_checks::StreamRingChecks();
   proxy_choice_checks::ProxyChoiceChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);

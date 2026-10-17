@@ -22,6 +22,12 @@ struct PlayResult {
   double ms = 0.0;
 };
 
+// The records of a buffer with no head of a stream into the renderer: a
+// frame of the live stream (stream_reader.h). The counts go into result. The
+// same player as PlayStreamFile, so the surfaces of a file and of the live
+// stream are one set.
+void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result);
+
 // The whole stream of `path` into the renderer. `folder` is the folder for
 // the pictures of the renderer (vk_scene_test_frame of the stream).
 PlayResult PlayStreamFile(const std::string& path, const std::string& folder);

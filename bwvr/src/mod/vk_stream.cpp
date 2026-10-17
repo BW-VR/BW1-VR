@@ -1,4 +1,5 @@
-// THE RECORD OF THE WALKS FOR THE HEADSET APP (vk_stream.h).
+// THE STREAM OF THE WALKS FOR THE HEADSET APP (vk_stream.h): the record to a
+// file and the live stream through a ring.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -8,9 +9,11 @@
 #include <stdlib.h>
 
 #include <set>
+#include <vector>
 
 #include "../common/bw_addresses.h"
 #include "one_walk.h"
+#include "stream_ring.h"
 #include "ui_panel.h"
 #include "vk_prim_math.h"
 #include "vk_scene.h"
@@ -25,22 +28,82 @@ bool g_vk_stream_on = false;
 namespace {
 
 namespace ss = scene_stream;
+namespace sr = stream_ring;
 
+// THE RECORD (vk_stream_record).
 int g_record_frame = 0;
 int g_frames = 3;
 uint64_t g_first = 0;
 uint64_t g_last = 0;
+bool g_record_on = false;
 bool g_done = false;
+std::vector<uint8_t> g_record;  // the head of a stream, then the frames
+uint64_t g_draws = 0;
+uint64_t g_surface_bytes = 0;
+
+// THE FRAME THAT THE CALLS GO TO NOW. g_writer holds the head of a stream and
+// then the records of one frame of the game. At the start of the next frame
+// the records go to the record and to the ring, so both get the same bytes.
 ss::StartBody g_options = {};
 ss::Writer g_writer;
+bool g_unit_open = false;
+bool g_unit_record = false;
+bool g_unit_live = false;
+bool g_unit_keep = false;  // the frame has a kStart, a kSurface or a kWritten
+uint64_t g_unit_frame = 0;
+bool g_was_on = false;
 // The surfaces in the stream, and the ones that the game wrote since their
 // pixels went in.
 std::set<uint64_t> g_known;
 std::set<uint64_t> g_with_pixels;
-uint64_t g_draws = 0;
-uint64_t g_surface_bytes = 0;
+
+// THE RING (vk_stream_live, stream_ring.h).
+struct Live {
+  bool want = false;  // vk_stream_live=1
+  bool tried = false;
+  HANDLE file = INVALID_HANDLE_VALUE;
+  HANDLE mapping = nullptr;
+  uint8_t* view = nullptr;
+  sr::Head* head = nullptr;
+  uint8_t* data = nullptr;
+  char path[MAX_PATH] = {};
+  bool reader = false;  // a reader asked, and the writer did not give up on it
+  uint32_t answered = 0;
+  uint32_t bye_seen = 0;
+  uint32_t lost = 0;
+  sr::Policy policy;
+  // The reader made progress at this time: it took a byte, or the ring was
+  // empty.
+  uint32_t last_read = 0;
+  LARGE_INTEGER progress = {};
+  // The counts since the last ask, for the log.
+  uint64_t units = 0;
+  uint64_t bytes = 0;
+  uint64_t dropped = 0;
+  uint64_t drops_now = 0;  // the frames dropped since the last frame that went in
+  double wait_ms = 0.0;
+  double wait_ms_max = 0.0;
+  uint32_t wait_us_part = 0;  // the part of a ms of the waits for the head
+};
+Live g_live;
+LARGE_INTEGER g_ticks = {};
 
 uint64_t Id(const void* p) { return reinterpret_cast<uintptr_t>(p); }
+
+double MsSince(const LARGE_INTEGER& t) {
+  LARGE_INTEGER now;
+  QueryPerformanceCounter(&now);
+  return static_cast<double>(now.QuadPart - t.QuadPart) * 1000.0 /
+         static_cast<double>(g_ticks.QuadPart);
+}
+
+// A file beside runblack.exe.
+void GamePath(char* path, const char* name) {
+  GetModuleFileNameA(GetModuleHandleA(nullptr), path, MAX_PATH);
+  char* slash = strrchr(path, '\\');
+  if (slash != nullptr) slash[1] = 0;
+  strcat_s(path, MAX_PATH, name);
+}
 
 ss::StreamState State() {
   ss::StreamState s = {};
@@ -73,42 +136,210 @@ void Surface(void* surface, bool pixels) {
     body.has_pixels = 1;
     const uint32_t bytes = body.width * body.height * 4;
     g_writer.Record(ss::kSurface, &body, sizeof(body), rgba, bytes);
-    g_surface_bytes += bytes;
+    if (g_unit_record) g_surface_bytes += bytes;
     free(rgba);
     g_with_pixels.insert(id);
   } else {
     g_writer.Record(ss::kSurface, &body, sizeof(body));
   }
+  g_unit_keep = true;
   g_known.insert(id);
 }
 
 void Finish() {
-  g_vk_stream_on = false;
+  g_record_on = false;
   g_done = true;
   char path[MAX_PATH];
-  GetModuleFileNameA(GetModuleHandleA(nullptr), path, MAX_PATH);
-  char* slash = strrchr(path, '\\');
-  if (slash != nullptr) slash[1] = 0;
-  strcat_s(path, "bwvr-stream.bin");
+  GamePath(path, "bwvr-stream.bin");
   FILE* f = nullptr;
-  const std::vector<uint8_t>& bytes = g_writer.Bytes();
   bool ok = false;
   if (fopen_s(&f, path, "wb") == 0 && f != nullptr) {
-    ok = fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
+    ok = fwrite(g_record.data(), 1, g_record.size(), f) == g_record.size();
     fclose(f);
   }
   ModLog("vk stream    : %s frames %llu to %llu, %llu draws, %zu surfaces "
          "(%llu bytes of pixels), %zu bytes, to %s",
          ok ? "wrote" : "could not write", g_first, g_last, g_draws,
-         g_known.size(), g_surface_bytes, bytes.size(), path);
-  g_writer.Clear();
+         g_known.size(), g_surface_bytes, g_record.size(), path);
+  std::vector<uint8_t>().swap(g_record);
+}
+
+// THE RING FILE beside runblack.exe. Each start of the game makes a new
+// head, so a reader of a run before asks again.
+bool LiveOpen() {
+  g_live.tried = true;
+  QueryPerformanceFrequency(&g_ticks);
+  LARGE_INTEGER start;
+  QueryPerformanceCounter(&start);
+  GamePath(g_live.path, "bwvr-stream.ring");
+  const uint32_t bytes = sr::kHeadBytes + sr::kCapacity;
+  g_live.file = CreateFileA(g_live.path, GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (g_live.file != INVALID_HANDLE_VALUE) {
+    g_live.mapping = CreateFileMappingA(g_live.file, nullptr, PAGE_READWRITE, 0,
+                                        bytes, nullptr);
+  }
+  if (g_live.mapping != nullptr) {
+    g_live.view = static_cast<uint8_t*>(
+        MapViewOfFile(g_live.mapping, FILE_MAP_ALL_ACCESS, 0, 0, bytes));
+  }
+  if (g_live.view == nullptr) {
+    ModLog("vk stream    : vk_stream_live=1, but the ring %s cannot be made "
+           "(error %lu). There is no live stream",
+           g_live.path, GetLastError());
+    return false;
+  }
+  g_live.head = reinterpret_cast<sr::Head*>(g_live.view);
+  g_live.data = g_live.view + sr::kHeadBytes;
+  LARGE_INTEGER now;
+  QueryPerformanceCounter(&now);
+  sr::MakeHead(g_live.head, sr::kCapacity,
+               GetCurrentProcessId() ^ static_cast<uint32_t>(now.QuadPart));
+  ModLog("vk stream    : vk_stream_live=1. The ring %s has %u MB (made in "
+         "%.1f ms). The frames of the walks go into it when a reader asks for "
+         "them",
+         g_live.path, sr::kCapacity >> 20, MsSince(start));
+  return true;
+}
+
+void LiveSummary(const char* why) {
+  ModLog("vk stream    : %s. Since the last ask: %llu frames, %llu bytes, %llu "
+         "frames dropped, a wait for room of %.1f ms in all and %.2f ms at most "
+         "for one frame",
+         why, g_live.units, g_live.bytes, g_live.dropped, g_live.wait_ms,
+         g_live.wait_ms_max);
+}
+
+// The frame into the ring, by the choice of stream_ring.h.
+void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
+  sr::Head* h = g_live.head;
+  LARGE_INTEGER start;
+  QueryPerformanceCounter(&start);
+  uint32_t done = 0;
+  bool dropped = false;
+  double wait_for_room = 0.0;
+  for (;;) {
+    const uint32_t r = sr::LoadAcquire(&h->read);
+    if (r != g_live.last_read || r == h->write) {
+      g_live.last_read = r;
+      QueryPerformanceCounter(&g_live.progress);
+    }
+    const double waited = MsSince(start);
+    const double stalled = MsSince(g_live.progress);
+    const sr::Step step = sr::Choose(
+        h->capacity, sr::Room(h->capacity, h->write, r), n - done, done > 0,
+        keep, static_cast<uint32_t>(waited * 1000.0),
+        static_cast<uint32_t>(stalled * 1000.0), g_live.policy);
+    if (step == sr::Step::kWrite) {
+      done += sr::Put(h, g_live.data, bytes + done, n - done);
+      if (done == n) break;
+      continue;
+    }
+    if (step == sr::Step::kDrop) {
+      dropped = true;
+      break;
+    }
+    if (step == sr::Step::kLost) {
+      g_live.reader = false;
+      sr::StoreRelease(&h->lost, ++g_live.lost);
+      char why[160];
+      sprintf_s(why, "the reader took no byte for %.0f ms in frame %llu. The "
+                "writer stops until a reader asks again", stalled, frame);
+      LiveSummary(why);
+      return;
+    }
+    // A short wait spins. A long wait (a frame with a surface) sleeps.
+    LARGE_INTEGER wait_start;
+    QueryPerformanceCounter(&wait_start);
+    if (waited < 4.0) {
+      YieldProcessor();
+    } else {
+      Sleep(1);
+    }
+    wait_for_room += MsSince(wait_start);
+  }
+  const double took = MsSince(start);
+  const double waited = wait_for_room;
+  // The stats go in before the write index of the next frame, so a reader
+  // that has the next frame sees them.
+  sr::FrameStat* stat = &h->stats[frame % sr::kStats];
+  stat->frame = static_cast<uint32_t>(frame);
+  stat->bytes = n;
+  stat->wait_us = static_cast<uint32_t>(waited * 1000.0);
+  stat->put_us = static_cast<uint32_t>(took * 1000.0);
+  stat->dropped = dropped ? 1u : 0u;
+  g_live.wait_ms += waited;
+  if (waited > g_live.wait_ms_max) g_live.wait_ms_max = waited;
+  g_live.wait_us_part += static_cast<uint32_t>(waited * 1000.0);
+  sr::StoreRelease(&h->wait_ms, h->wait_ms + g_live.wait_us_part / 1000);
+  g_live.wait_us_part %= 1000;
+  if (stat->wait_us > h->wait_us_max) sr::StoreRelease(&h->wait_us_max, stat->wait_us);
+  if (dropped) {
+    ++g_live.dropped;
+    sr::StoreRelease(&h->dropped, h->dropped + 1);
+    if (g_live.drops_now++ == 0) {
+      ModLog("vk stream    : the reader is slow. Frame %llu (%u bytes, no "
+             "surface) did not go into the ring after a wait of %.1f ms",
+             frame, n, took);
+    }
+    return;
+  }
+  ++g_live.units;
+  g_live.bytes += n;
+  sr::StoreRelease(&h->units, h->units + 1);
+  if (g_live.drops_now > 0) {
+    ModLog("vk stream    : the reader takes frames again at frame %llu, after "
+           "%llu dropped frames",
+           frame, g_live.drops_now);
+    g_live.drops_now = 0;
+  }
+}
+
+// The frame in g_writer is whole: it goes to the record and to the ring.
+void Deliver() {
+  const std::vector<uint8_t>& b = g_writer.Bytes();
+  const uint8_t* unit = b.data() + 8;  // after the head of a stream
+  const size_t n = b.size() - 8;
+  if (g_unit_record) g_record.insert(g_record.end(), unit, unit + n);
+  if (g_unit_live && g_live.reader) {
+    LivePut(g_unit_frame, unit, static_cast<uint32_t>(n), g_unit_keep);
+  }
+}
+
+// At the start of a frame: true when a reader takes this frame. reset: the
+// frame must have the whole state.
+bool LiveFrame(uint64_t frame, bool* reset) {
+  if (!g_live.want) return false;
+  if (!g_live.tried && !LiveOpen()) g_live.want = false;
+  if (g_live.head == nullptr) return false;
+  sr::Head* h = g_live.head;
+  sr::StoreRelease(&h->frame, static_cast<uint32_t>(frame));
+  if (sr::TakeBye(h, &g_live.bye_seen) && g_live.reader) {
+    g_live.reader = false;
+    LiveSummary("the reader left. The writer stops until a reader asks again");
+  }
+  if (sr::TakeAsk(h, &g_live.answered)) {
+    if (g_live.reader) LiveSummary("the reader asks again");
+    g_live.reader = true;
+    g_live.units = g_live.bytes = g_live.dropped = g_live.drops_now = 0;
+    g_live.wait_ms = g_live.wait_ms_max = 0.0;
+    g_live.last_read = sr::LoadAcquire(&h->read);
+    QueryPerformanceCounter(&g_live.progress);
+    *reset = true;
+    ModLog("vk stream    : a reader asks for the whole state. Frame %llu has "
+           "the options and each surface again",
+           frame);
+  }
+  return g_live.reader;
 }
 
 }  // namespace
 
-void VkStreamSetOptions(int record_frame, int frames) {
+void VkStreamSetOptions(int record_frame, int frames, int live) {
   g_record_frame = record_frame > 0 ? record_frame : 0;
   g_frames = frames > 0 ? frames : 3;
+  g_live.want = live != 0;
   if (g_record_frame > 0) {
     ModLog("vk stream    : vk_stream_record=%d, vk_stream_frames=%d. The "
            "calls of the Vulkan renderer of these frames go to "
@@ -120,33 +351,66 @@ void VkStreamSetOptions(int record_frame, int frames) {
 scene_stream::StartBody* VkStreamOptions() { return &g_options; }
 
 void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
-  if (g_record_frame == 0 || g_done) return;
-  if (!g_vk_stream_on && frame == static_cast<uint64_t>(g_record_frame)) {
-    if (g_options.direct == 0) {
-      ModLog("vk stream    : no record: it needs backend=vulkan");
-      g_done = true;
-      return;
-    }
-    g_vk_stream_on = true;
-    g_first = frame;
-    g_writer.Clear();
-    g_writer.Record(ss::kStart, &g_options, sizeof(g_options));
-  }
-  if (!g_vk_stream_on) return;
+  if ((g_record_frame == 0 || g_done) && !g_live.want && !g_unit_open) return;
   // intro_vr.cpp gives VkSceneFrame(0, ...) for its pictures. It is not a
-  // frame of the game, so it ends no frame of the record.
-  if (frame < g_first) {
+  // frame of the game, so it ends no frame of the stream.
+  if (g_unit_open && frame < g_unit_frame) {
     ss::FrameBody body = {frame, name, capture ? 1u : 0u, 0};
     g_writer.Record(ss::kFrame, &body, sizeof(body));
     return;
   }
-  if (frame >= g_first + static_cast<uint64_t>(g_frames)) {
-    g_writer.Record(ss::kFrameEnd, &g_last, sizeof(g_last));
-    Finish();
+  if (g_unit_open) {
+    g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
+    Deliver();
+    g_unit_open = false;
+  }
+  if (g_options.direct == 0) {
+    // Only with backend=vulkan each call comes on the frame thread in the
+    // order of the walk.
+    if (g_record_frame > 0 && !g_done && frame == static_cast<uint64_t>(g_record_frame)) {
+      ModLog("vk stream    : no record: it needs backend=vulkan");
+      g_done = true;
+    }
+    if (g_live.want && frame > 0) {
+      ModLog("vk stream    : no live stream: vk_stream_live needs backend=vulkan");
+      g_live.want = false;
+    }
+    g_vk_stream_on = false;
     return;
   }
-  if (frame != g_first) g_writer.Record(ss::kFrameEnd, &g_last, sizeof(g_last));
-  g_last = frame;
+  bool reset = false;
+  if (g_record_on && frame >= g_first + static_cast<uint64_t>(g_frames)) Finish();
+  if (!g_record_on && !g_done && g_record_frame > 0 &&
+      frame == static_cast<uint64_t>(g_record_frame)) {
+    g_record_on = true;
+    g_first = frame;
+    g_writer.Clear();
+    g_record.assign(g_writer.Bytes().begin(), g_writer.Bytes().end());
+    reset = true;
+  }
+  const bool live = LiveFrame(frame, &reset);
+  g_vk_stream_on = g_record_on || live;
+  if (!g_vk_stream_on) {
+    g_was_on = false;
+    return;
+  }
+  // The first frame after a frame with no stream has the whole state: the
+  // stream did not see what the game wrote in between.
+  if (!g_was_on) reset = true;
+  g_was_on = true;
+  g_unit_record = g_record_on;
+  g_unit_live = live;
+  g_unit_keep = false;
+  g_writer.Clear();
+  if (reset) {
+    g_known.clear();
+    g_with_pixels.clear();
+    g_writer.Record(ss::kStart, &g_options, sizeof(g_options));
+    g_unit_keep = true;
+  }
+  if (g_record_on) g_last = frame;
+  g_unit_open = true;
+  g_unit_frame = frame;
   ss::FrameBody body = {frame, name, capture ? 1u : 0u, 0};
   g_writer.Record(ss::kFrame, &body, sizeof(body));
 }
@@ -229,7 +493,7 @@ void VkStreamDraw(uint32_t type, uint32_t fvf, const void* vertices,
   if (vertices == nullptr) body.vertex_bytes = 0;
   g_writer.Record(ss::kDraw, &body, sizeof(body), vertices, body.vertex_bytes,
                   indices, body.index_count * 2);
-  ++g_draws;
+  if (g_unit_record) ++g_draws;
 }
 
 void VkStreamTarget(void* surface) {
@@ -266,4 +530,5 @@ void VkStreamWritten(void* surface) {
   g_with_pixels.erase(Id(surface));
   const uint64_t id = Id(surface);
   g_writer.Record(ss::kWritten, &id, sizeof(id));
+  g_unit_keep = true;
 }

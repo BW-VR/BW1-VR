@@ -81,6 +81,11 @@ class XrApp {
   bool MakeScreen(uint32_t width, uint32_t height);
   void SetScreenSource(VkImage image, uint32_t image_width,
                        uint32_t image_height);
+  // The renderer drew a new picture into the image of SetScreenSource. The
+  // next frames copy it into the quads, because a quad copies only a
+  // picture of a new revision.
+  void MarkScreenChanged();
+  bool HasScreen() const { return between_ != VK_NULL_HANDLE; }
 
  private:
   struct Layer {

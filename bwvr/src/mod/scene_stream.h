@@ -207,6 +207,15 @@ class Reader {
     ok_ = head[0] == kMagic && head[1] == kVersion;
     at_ = ok_ ? sizeof(head) : size_;
   }
+  // Records with no head of a stream before them: a frame of the live
+  // stream (stream_ring.h).
+  static Reader Records(const uint8_t* data, size_t size) {
+    Reader r(data, 0);
+    r.size_ = size;
+    r.ok_ = true;
+    r.at_ = 0;
+    return r;
+  }
   // False when the buffer does not start with the head of a stream.
   bool Ok() const { return ok_; }
 

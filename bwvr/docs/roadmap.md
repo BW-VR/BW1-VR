@@ -765,11 +765,18 @@ that moves while the Hand takes it.
     pictures of the game are the same as the pictures of the PC, to the
     pixel (`emu_replay_test.ps1`). The emulator also runs the menu
     (`emu_test.ps1`) and the session with an OpenXR test runtime
-    (`emu_xr_test.ps1`). Not run in a headset. It cannot start the game:
+    (`emu_xr_test.ps1`). The stream can be live: the mod writes each frame
+    of its walks into a ring file (`vk_stream_live`), and a thread of the
+    app reads the frames from the same file (`stream_live`). In a desktop
+    run the frames of the ring have the bytes of the record of the same run
+    (`live_stream_run.ps1`), and in the emulator the app takes them from a
+    second process and draws the pictures of the PC
+    (`emu_live_test.ps1`). Not run in a headset. It cannot start the game:
     `runblack.exe` needs an x86 runtime (Box64 with Wine in the WoW64 mode)
-    in the app, the stream live through shared memory in place of a file,
-    and the poses and the actions of the session for the mod (`android.md`,
-    "What the app cannot do yet").
+    in the app, and the poses and the actions of the session for the mod
+    (`android.md`, "What the app cannot do yet"). Open for the live stream:
+    the ring file under Wine and Box64, and the delay of one frame (a frame
+    goes into the ring at the start of the next frame of the game).
     With the render
     thread, one walk draws most batches in one draw for both eyes (`one_walk_merge`, `backend.md`, "One
     draw for both eyes"). Before the thread, with one walk, a view of the

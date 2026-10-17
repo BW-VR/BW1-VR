@@ -1,25 +1,34 @@
-// THE RECORD OF THE WALKS FOR THE HEADSET APP (vk_stream.cpp, docs/android.md,
-// "The stream of the walks"). A test aid of the PC.
+// THE STREAM OF THE WALKS FOR THE HEADSET APP (vk_stream.cpp, docs/android.md,
+// "The stream of the walks" and "The live stream").
 //
-// vk_stream_record of bwvr.ini: 0 (the default) no record. N: from the frame
-// that starts with the count N of the controllers (as vk_scene_test_frame),
-// each call of the Vulkan renderer of vk_stream_frames frames (3 by default)
-// goes into the stream format of scene_stream.h, and the stream goes to
-// bwvr-stream.bin beside runblack.exe. The headset app gives the same calls
-// to its own renderer. Only with backend=vulkan: there the device of the mod
-// gives each call on the frame thread, in the order of the walk.
+// vk_stream_record of bwvr.ini (a test aid): 0 (the default) no record. N:
+// from the frame that starts with the count N of the controllers (as
+// vk_scene_test_frame), each call of the Vulkan renderer of vk_stream_frames
+// frames (3 by default) goes into the stream format of scene_stream.h, and
+// the stream goes to bwvr-stream.bin beside runblack.exe. The headset app
+// gives the same calls to its own renderer.
 //
-// The file holds the pixels of the textures of the game. It stays on the PC
-// of the person who made it, and never goes into the repo.
+// vk_stream_live of bwvr.ini: 0 (the default) no live stream. 1: the ring
+// bwvr-stream.ring beside runblack.exe (stream_ring.h). When a reader asks,
+// each frame of the game goes into the ring at the start of the next frame.
+// A record and the live stream get the same bytes for a frame, and the
+// first frame of a record has the whole state for both.
+//
+// Both only with backend=vulkan: there the device of the mod gives each call
+// on the frame thread, in the order of the walk.
+//
+// The files hold the pixels of the textures of the game. They stay on the
+// PC of the person who made them, and never go into the repo.
 #pragma once
 
 #include <stdint.h>
 
 #include "scene_stream.h"
 
-void VkStreamSetOptions(int record_frame, int frames);
+void VkStreamSetOptions(int record_frame, int frames, int live);
 
-// True while the record runs. The calls below do nothing when it is false.
+// True while the record runs or a reader takes the frames. The calls below
+// do nothing when it is false.
 extern bool g_vk_stream_on;
 inline bool VkStreamOn() { return g_vk_stream_on; }
 

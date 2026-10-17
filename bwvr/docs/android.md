@@ -609,6 +609,20 @@ as the pictures of the PC, to the byte.
 mapping of a real file by Wine and by the app, and the barriers of Box64),
 and the frame rate of the live stream in a headset.
 
+**Known limits:**
+
+- The app did not skip a frame in a run. Each frame of the test save
+  "pen" has records of surfaces (three small surfaces that the game writes
+  in each frame), so the app plays each frame.
+- The writer did not drop a frame in a desk run, for the same reason. Only
+  the math checks of `stream_ring.h` show the drop.
+- A slow app holds the frame thread of the game: a frame with records of
+  surfaces waits for room in the ring. The frames that wait can fill the
+  queue of the app (64 MB) and the ring (32 MB), about 120 frames of the
+  test save, so the picture can come more than 1.5 s late. With a test
+  reader that sleeps 10 ms for each MB, the game ran at about 126 frames a
+  second in place of 536.
+
 ## Only Vulkan
 
 The app has one renderer: the Vulkan renderer of the mod. There is no

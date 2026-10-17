@@ -782,7 +782,12 @@ that moves while the Hand takes it.
     in the app, and the poses and the actions of the session for the mod
     (`android.md`, "What the app cannot do yet"). Open for the live stream:
     the ring file under Wine and Box64, and the delay of one frame (a frame
-    goes into the ring at the start of the next frame of the game).
+    goes into the ring at the start of the next frame of the game). Each
+    frame of the test save has records of surfaces, so no run skipped or
+    dropped a frame, and a slow app holds the frame thread of the game with
+    a backlog up to the queue of 64 MB and the ring of 32 MB. Next: a skip
+    and a drop that keep the records of state and lose only the walks, and
+    a bound of the queue of the app in frames.
     With the render
     thread, one walk draws most batches in one draw for both eyes (`one_walk_merge`, `backend.md`, "One
     draw for both eyes"). Before the thread, with one walk, a view of the

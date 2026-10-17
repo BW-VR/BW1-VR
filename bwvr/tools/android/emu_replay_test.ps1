@@ -42,6 +42,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
+Lock-AndroidEmulator
 $ErrorActionPreference = 'Continue'
 
 $Bwvr = Resolve-Path (Join-Path $PSScriptRoot '..\..')

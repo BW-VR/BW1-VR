@@ -42,6 +42,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
+Lock-AndroidEmulator
 # The tools write notes to stderr. Each check here reads their output, so a
 # line on stderr must not stop the script.
 $ErrorActionPreference = 'Continue'

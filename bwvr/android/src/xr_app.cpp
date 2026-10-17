@@ -513,7 +513,6 @@ bool XrApp::LayerChanged(Layer* layer) {
     ++copies_skipped_;
     return false;
   }
-  ++copies_;
   return true;
 }
 
@@ -551,6 +550,7 @@ void XrApp::CopyLayer(Layer* layer) {
   XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
   xrReleaseSwapchainImage(layer->swapchain, &release);
   layer->released = layer->revision;
+  ++copies_;
 }
 
 void XrApp::PollEvents(bool* quit) {
@@ -850,6 +850,7 @@ void XrApp::CopyScreen(int eye) {
   XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
   xrReleaseSwapchainImage(layer->swapchain, &release);
   layer->released = layer->revision;
+  ++copies_;
 }
 
 void XrApp::Pulse(int hand) {

@@ -322,6 +322,12 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    keeps the whole output of each test in `bwvr/out/android/emu-all`, and it
    stops at the first test that does not end with "N checks, 0 failed.",
    also when a test gives no such line.
+
+   The emulator tests of all checkouts and worktrees use the same AVDs and
+   ports, so each test takes a lock (`Lock-AndroidEmulator` in
+   `android_env.ps1`). When a test of another process holds it, the test
+   gives "NOT RUN" and the exit code 2. At its end each test waits until
+   adb no longer lists its emulator.
 5. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
    the table, the menu (the pages, the steps, the help, the save rules), the
    hit of a ray on the quad (`test/controller_math/menu_checks.h`), each

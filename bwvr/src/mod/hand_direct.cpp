@@ -131,6 +131,7 @@
 #include "creature_stay.h"
 #include "far_choice_math.h"
 #include "far_grab.h"
+#include "fight_math.h"
 #include "take_stream.h"
 #include "forest_take.h"
 #include "haptics.h"
@@ -382,6 +383,9 @@ const uintptr_t kInteractCamera = 0x0046CB60;
 const uintptr_t kMeshRay = 0x00865020;
 const uintptr_t kMeshRayHand = 0x005B19F1;    // the return address of each
 const uintptr_t kMeshRayMiddle = 0x005B1ABC;
+// The press of a fight on a Creature (fn_005D3EF0) calls it at 0x005D4033 for
+// the ray from the stored camera through the pointer of the interface.
+const uintptr_t kMeshRayFight = 0x005D4038;
 // fn_004813D0, thiscall on an LH3DCreature, no arguments, plain ret: the
 // position of the body bone (+0x51D8), through GetSafeBuffer.
 const uintptr_t kBodyBone = 0x004813D0;
@@ -971,10 +975,17 @@ bool g_wide_key_down = false;
 bool g_choice_wide = false;               // the choice is a wide pick
 // hand_sign_last: at the Hand a signpost that the point is not in comes last
 // (near_math::SignOut). hand_wide_creature: the Creature has the wide reach.
-// g_choice_last: the choice of this frame is such a signpost.
+// far_grab_beside_loose: a tree, a building or a pile that the point is not
+// in does not turn the grab from a distance off (near_math::LooseOut).
+// g_choice_last: the choice of this frame gives way to a target of the aim:
+// such a signpost, or such a loose body (then g_choice_loose is true too).
 bool g_sign_last = true;
 bool g_creature_wide = true;
+bool g_beside_loose = true;
 bool g_choice_last = false;
+bool g_choice_loose = false;
+// The loose body that the log said leaves the grab from a distance on.
+void* g_loose_said = nullptr;
 int g_sign_way_logs = 0;
 const int kMaxSignWayLogs = 40;
 float g_choice_wide_cm = 0.0f;            // and the wide reach that it had
@@ -1206,6 +1217,16 @@ float SlapMps() {
 // NO CAMERA. The mod holds the Creature state with no camera mode from the
 // press to the release, even when the owner of the pointer changes.
 int g_creature_camera = 2;       // creature_camera
+// A FIGHT OF CREATURES (fight_grip, docs/creature.md, "A fight of Creatures").
+bool g_fight_grip = true;
+bool g_fight_seen = false;        // the far aim saw a fight at its last frame
+uint64_t g_fight_rays = 0;        // steps of a press of a fight, this window
+uint64_t g_fight_hits = 0;        // and the ray from the Hand's point hit
+uint64_t g_fight_game_hits = 0;   // and the game's ray hit
+uint64_t g_fight_ray_frame = 0;   // the frame of the last such step
+int g_fight_ray_hit = -1;         // and its result, for the log
+int g_fight_logs = 0;
+const int kMaxFightLogs = 120;
 bool g_virtual = false;
 const void* g_virtual_hand = nullptr;
 void* g_virtual_creature = nullptr;
@@ -2656,8 +2677,14 @@ int StrokeHand(float curl[5]) {
 // body. The ray of the middle pixel counts not at all when the swept test
 // forced the slap branch, because that pixel is then the screen center.
 // Only the two calls of the Creature state, by their return address.
+int FightMeshRay(void* self, void* unused, void* a, void* b, void* c, void* d,
+                 void* e, void* f, void* g, void* h);
+
 int __fastcall h_MeshRay(void* self, void* unused, void* a, void* b, void* c,
                          void* d, void* e, void* f, void* g, void* h) {
+  if (reinterpret_cast<uintptr_t>(_ReturnAddress()) == kMeshRayFight) {
+    return FightMeshRay(self, unused, a, b, c, d, e, f, g, h);
+  }
   if (g_in_creature && g_touch_valid) {
     const uintptr_t from = reinterpret_cast<uintptr_t>(_ReturnAddress());
     const bool at_hand = from == kMeshRayHand;
@@ -2725,6 +2752,129 @@ int LeashKind(void* creature) {
       mine, ready, holder != nullptr && holder != status,
       *reinterpret_cast<const int32_t*>(leash + kLeashOn) != 0,
       *reinterpret_cast<void* const*>(leash + kLeashObject) != nullptr);
+}
+
+// A FIGHT OF CREATURES (docs/creature.md, "A fight of Creatures").
+// Creature::IsFighting 0x0047B1C0 reads the LH3DCreature of the Creature
+// (+0x160, then +0x58): in a fight the LH3DCreature of the other Creature is
+// at +0x528C. [V]
+const int kCreatureFoe = 0x528C;     // LH3DCreature: the other Creature
+const int kCreatureLod = 0x98;       // LH3DCreature: the index of the mesh
+const int kCreatureMeshes = 0xB4;    // LH3DCreature: the meshes, by index
+const int kMaxCreatureLod = 16;
+
+bool IsCreatureObject(void* object);
+
+// True while the Creature of the local player is in a fight.
+bool InFight() {
+  const uint8_t* player = static_cast<const uint8_t*>(LocalPlayer());
+  if (player == nullptr) return false;
+  void* creature = *reinterpret_cast<void* const*>(player + kPlayerCreature);
+  const uint8_t* model = CreatureModel(creature);
+  if (model == nullptr || IsBadReadPtr(model + kCreatureFoe, sizeof(void*))) {
+    return false;
+  }
+  return *reinterpret_cast<void* const*>(model + kCreatureFoe) != nullptr;
+}
+
+// THE PRESS OF A FIGHT ON A CREATURE. The interface step of a fight
+// (0x005D4AC0) takes a press of either button with a Creature in the pick
+// record to fn_005D3EF0 (packet 0x23 for the left button and 0x22 for the
+// right button). That function casts a ray from the stored camera through the
+// pointer of the interface (GInterface+0x418) against the mesh of the
+// Creature (the call at 0x005D4033). Only when the ray hits does the press
+// act: an attack at that place of the other Creature, or a block at that
+// place of your Creature, and a mark there. With the direct hand that
+// pointer is the Hand's point seen from the eye, and the step runs with the
+// camera of the game. So the ray is not the ray of the Hand, and it misses
+// the body that the Hand is at.
+//
+// With fight_grip=1, while the controller placed the Hand and the record holds
+// the Creature that is the target at the Hand, the ray goes from the Hand's
+// point to the body (fight_math::BodyRay). When it misses, the game's ray
+// stays. The game makes all the rest from the place that the ray hits.
+bool FightBodyRay(const void* mesh, void** creature, float origin[3],
+                  float direction[3]) {
+  if (!g_fight_grip || !g_owns || g_face == nullptr || g_hand == nullptr) {
+    return false;
+  }
+  void* object = *reinterpret_cast<void* const*>(g_face + kFaceNextObject);
+  if (object == nullptr || object != g_choice || g_choice_far ||
+      !IsCreatureObject(object)) {
+    return false;
+  }
+  const uint8_t* model = CreatureModel(object);
+  if (model == nullptr) return false;
+  const int32_t lod = *reinterpret_cast<const int32_t*>(model + kCreatureLod);
+  if (lod < 0 || lod >= kMaxCreatureLod ||
+      IsBadReadPtr(model + kCreatureMeshes + 4 * lod, sizeof(void*)) ||
+      *reinterpret_cast<const void* const*>(model + kCreatureMeshes +
+                                            4 * lod) != mesh) {
+    return false;
+  }
+  controller_math::Capsule body;
+  if (!CreatureBody(object, &body)) return false;
+  *creature = object;
+  return fight_math::BodyRay(body.base, body.height, body.radius, g_target,
+                             Camera(), origin, direction);
+}
+
+int FightMeshRay(void* self, void* unused, void* a, void* b, void* c, void* d,
+                 void* e, void* f, void* g, void* h) {
+  void* creature = nullptr;
+  float origin[3], direction[3];
+  if (!FightBodyRay(a, &creature, origin, direction)) {
+    return o_MeshRay(self, unused, a, b, c, d, e, f, g, h);
+  }
+  // The game's ray first, for the log. A copy, so that its own arrays stay.
+  float game_origin[3], game_direction[3];
+  memcpy(game_origin, c, sizeof(game_origin));
+  memcpy(game_direction, d, sizeof(game_direction));
+  const int game =
+      o_MeshRay(self, unused, a, b, game_origin, game_direction, e, f, g, h);
+  const int ours = o_MeshRay(self, unused, a, b, origin, direction, e, f, g, h);
+  ++g_fight_rays;
+  if (ours != 0) ++g_fight_hits;
+  if (game != 0) ++g_fight_game_hits;
+  // One line for each press, and one more when the result changes: the step
+  // runs on each frame while the button is down and the ray misses.
+  const int hit = ours != 0 ? 1 : 0;
+  if ((g_frame > g_fight_ray_frame + 1 || hit != g_fight_ray_hit) &&
+      g_fight_logs < kMaxFightLogs) {
+    ++g_fight_logs;
+    controller_math::Capsule body;
+    const bool have = CreatureBody(creature, &body);
+    const float units = RoomUnits();
+    float top[3] = {0.0f, 0.0f, 0.0f};
+    if (have) {
+      for (int i = 0; i < 3; ++i) top[i] = body.base[i];
+      top[1] += body.height;
+    }
+    const float gap =
+        have ? controller_math::SegmentPointDistance(body.base, top,
+                                                     g_target) -
+                   body.radius
+             : 0.0f;
+    ModLog("hand fight   : a press of the fight on %s %p: the ray from the "
+           "Hand's point %s its mesh, and the game's ray through the pointer "
+           "%s it. The Hand's point is %.1f cm of the room from its body, at "
+           "%.0f%% of its height (fight_grip=1), frame %llu",
+           IsOwnCreature(creature) ? "your Creature (a block)"
+                                   : "the other Creature (an attack)",
+           creature, ours != 0 ? "hits" : "misses",
+           game != 0 ? "hits" : "misses",
+           units > 0.0f ? gap / units * 100.0f : 0.0f,
+           have ? 100.0f * fight_math::BodyLevel(body.base, body.height,
+                                                 g_target)
+                : 0.0f,
+           g_frame);
+  }
+  g_fight_ray_frame = g_frame;
+  g_fight_ray_hit = hit;
+  if (ours != 0) return ours;
+  // The ray of the Hand missed: the game's ray once more, so that the hit
+  // record is the record of the game's ray.
+  return game != 0 ? o_MeshRay(self, unused, a, b, c, d, e, f, g, h) : 0;
 }
 
 // creature_camera: 0 never moves the camera, 1 is the game's camera move, 2
@@ -4281,6 +4431,7 @@ void Choose() {
   g_near_blocked = false;
   g_choice_wide = false;
   g_choice_last = false;
+  g_choice_loose = false;
   if (!g_active || g_face == nullptr || !HandEmpty()) return;
   // In the Creature state the pick keeps the Creature (KeepCreature).
   if (State(g_hand) == kStateCreature) return;
@@ -4313,6 +4464,12 @@ void Choose() {
   near_math::Gap best = {reach, 1e30f};
   int best_kind = near_math::kNone;
   float nearest = 1e30f;
+  // The gap of the nearest body that turns the grab from a distance off
+  // (near_math::StopsFar): the gap that NearBlocks reads.
+  float block_gap = 1e30f;
+  // The nearest loose body that the point is not in, for the log.
+  float loose_gap = 1e30f;
+  void* loose_object = nullptr;
   float creature_gap = 1e30f;
   Measured chosen = {};
   float chosen_reach = reach, chosen_speed = 0.0f;
@@ -4372,7 +4529,19 @@ void Choose() {
           m.target.gap.gap, touch);
       if (!m.target.last && m.target.gap.gap < nearest) {
         nearest = m.target.gap.gap;
+      }
+      // A TREE, A BUILDING OR A PILE THAT THE POINT IS NOT IN does not turn
+      // the grab from a distance off either (near_math::LooseOut).
+      const bool loose_out = near_math::LooseOut(
+          g_beside_loose, m.target.loose, m.target.gap.gap, touch);
+      if (near_math::StopsFar(m.target.last, loose_out) &&
+          m.target.gap.gap < block_gap) {
+        block_gap = m.target.gap.gap;
         g_near_object = c.object;
+      }
+      if (loose_out && m.target.gap.gap < loose_gap) {
+        loose_gap = m.target.gap.gap;
+        loose_object = c.object;
       }
       if (m.target.gap.gap < g_any_gap) {
         g_any_gap = m.target.gap.gap;
@@ -4432,6 +4601,7 @@ void Choose() {
     }
     if (gap.gap < nearest) {
       nearest = gap.gap;
+      block_gap = gap.gap;
       g_near_object = c.object;
     }
     // The Creature stays with the game's own pick.
@@ -4502,14 +4672,19 @@ void Choose() {
   // A SIGNPOST OF RULE 6 GIVES WAY TO THE AIM (near_math::SignGivesWay). It is
   // no choice while the aim has a target at a distance from the last frame.
   // FarSelect runs with such a choice, and it takes the choice away in the
-  // frame in which the aim gets its target.
-  g_choice_last = g_choice != nullptr && chosen.target.last;
+  // frame in which the aim gets its target. A loose body that the point is
+  // not in gives way the same (far_grab_beside_loose).
+  g_choice_loose = g_choice != nullptr && g_one_target && !g_choice_wide &&
+                   near_math::LooseOut(g_beside_loose, chosen.target.loose,
+                                       chosen.target.gap.gap, touch);
+  g_choice_last = g_choice != nullptr && (chosen.target.last || g_choice_loose);
   if (near_math::SignGivesWay(g_choice_last,
                               g_far_ready && g_far_ray && FarGrabOn() &&
                                   FarGrabTargetObject() != nullptr)) {
     g_choice = nullptr;
     best_kind = near_math::kNone;
     g_choice_last = false;
+    g_choice_loose = false;
   }
   // While a choice stands, the table hook keeps each other object from the
   // game's pick, the Creature too. A house beside the Creature must not do
@@ -4607,8 +4782,24 @@ void Choose() {
   }
   g_near_blocked =
       g_near_rule && g_near_object != nullptr &&
-      near_math::NearBlocks(nearest, was_blocked, near_in, near_out);
+      near_math::NearBlocks(block_gap, was_blocked, near_in, near_out);
   if (g_near_blocked) ++g_near_block_frames;
+  // A loose body that the point is not in, as near as the gap at which the
+  // grab from a distance goes off: one line for each new such body while the
+  // grab from a distance stays on.
+  void* spared = g_near_rule && !g_near_blocked && loose_gap <= near_in
+                     ? loose_object
+                     : nullptr;
+  if (spared != g_loose_said && FarGrabOn()) {
+    g_loose_said = spared;
+    if (spared != nullptr && g_near_logs < kMaxNearLogs) {
+      ++g_near_logs;
+      ModLog("far grab    : stays on. The Hand's point is %.1f cm of the room "
+             "from %p (%s) and not in it (far_grab_beside_loose=1), frame %llu",
+             units > 0.0f ? loose_gap / units * 100.0f : 0.0f, spared,
+             ClassName(spared), g_frame);
+    }
+  }
   if (g_near_blocked != was_blocked && FarGrabOn()) {
     if (g_near_blocked) ++g_near_blocks;
     if (g_near_logs < kMaxNearLogs) {
@@ -4617,8 +4808,9 @@ void Choose() {
         ModLog("far grab    : off. The Hand's point is %.1f cm of the room "
                "from %p (%s), and a press acts on that object. Near objects "
                "win to %d cm, frame %llu",
-               units > 0.0f ? nearest / units * 100.0f : 0.0f, g_near_object,
-               ClassName(g_near_object), g_near_out_cm, g_frame);
+               units > 0.0f ? block_gap / units * 100.0f : 0.0f,
+               g_near_object, ClassName(g_near_object), g_near_out_cm,
+               g_frame);
       } else {
         ModLog("far grab    : on again. No object that a press acts on is "
                "within %d cm of the Hand's point, frame %llu", g_near_out_cm,
@@ -4949,7 +5141,8 @@ void FarSelect() {
     }
     return;
   }
-  // A signpost of rule 6 at the Hand does not stop the aim (g_choice_last).
+  // A signpost of rule 6 at the Hand, or a loose body that the point is not
+  // in, does not stop the aim (g_choice_last).
   if ((g_choice != nullptr && !g_choice_last) || g_near_blocked) {
     FarGrabNoTarget();
     return;
@@ -4995,6 +5188,20 @@ void FarSelect() {
         CreatureBody(mine, &own_body)) {
       own = mine;
     }
+  }
+  // A FIGHT OF CREATURES (fight_grip=1). A press on a Creature is the attack
+  // or the block of the fight, so no Creature is a far target: no leash click
+  // and no stay. The grip at the Creature goes to the game.
+  const bool fight = g_fight_grip && InFight();
+  if (fight != g_fight_seen) {
+    g_fight_seen = fight;
+    ModLog("far grab    : %s, frame %llu",
+           fight ? "a fight of Creatures starts, so no Creature is a far "
+                   "target until it ends (fight_grip=1). The grip at a "
+                   "Creature is the attack or the block of the game"
+                 : "the fight of Creatures ended, so your Creature is a far "
+                   "target again",
+           g_frame);
   }
   for (int i = 0; own != nullptr && i < g_candidate_count; ++i) {
     if (g_candidates[i].object == own) own_offered = true;
@@ -5070,6 +5277,7 @@ void FarSelect() {
     // Creature that the game would not leash now, is no target. far_leash=0
     // takes the Creature out of the far targets.
     const bool creature = IsCreatureObject(c.object);
+    if (creature && fight) continue;
     const int leash = creature && g_far_leash ? LeashKind(c.object) : 0;
     if (creature && leash == 0) {
       LogOtherCreature(c.object, rough.te);
@@ -5330,11 +5538,19 @@ void FarSelect() {
   }
   // The leash click has no test of the influence (fn_005D06E0).
   if (out.leash != 0) out.inside = true;
-  // THE AIM HAS ITS TARGET, so a signpost of rule 6 is no choice at the Hand
-  // from this frame (near_math::SignGivesWay). The grip acts on the far
-  // target.
+  // THE AIM HAS ITS TARGET, so a signpost of rule 6, or a loose body that the
+  // point is not in, is no choice at the Hand from this frame
+  // (near_math::SignGivesWay). The grip acts on the far target.
   if (g_choice_last) {
-    if (g_sign_way_logs < kMaxSignWayLogs) {
+    if (g_sign_way_logs < kMaxSignWayLogs && g_choice_loose) {
+      ++g_sign_way_logs;
+      ModLog("hand pick    : the %s %p is %.1f cm of the room from the Hand's "
+             "point, and the point is not in it. The aim has the target %p "
+             "(%s), so the %s is no target now (far_grab_beside_loose=1), "
+             "frame %llu", ClassName(g_choice), g_choice,
+             g_choice_gap / g_far_units * 100.0f, c.object, g_far_name,
+             ClassName(g_choice), g_frame);
+    } else if (g_sign_way_logs < kMaxSignWayLogs) {
       ++g_sign_way_logs;
       ModLog("hand pick    : the signpost %p is %.1f cm of the room from the "
              "Hand's point, and the point is not in it. The aim has the "
@@ -5352,6 +5568,7 @@ void FarSelect() {
     g_choice_touched = false;
     g_choice_table = nullptr;
     g_choice_last = false;
+    g_choice_loose = false;
   }
   FarGrabSelect(out);
 }
@@ -6880,6 +7097,16 @@ void InstallNear() {
   }
   ScriptPlayerInstall();
   g_far_leash = IniKey("far_leash", 1) != 0;
+  g_fight_grip = IniKey("fight_grip", 1) != 0;
+  ModLog("hand fight   : fight_grip=%d. %s", g_fight_grip ? 1 : 0,
+         g_fight_grip
+             ? "In a fight of Creatures, a press on a Creature at the Hand "
+               "hits the place of the body that is nearest to the Hand's "
+               "point: an attack on the other Creature, a block on your "
+               "Creature. No Creature is a far target in a fight"
+             : "In a fight of Creatures, the game casts the ray of a press "
+               "through the pointer, and the far aim keeps your Creature as "
+               "a target of the leash");
   ModLog("far grab    : far_leash=%d. %s", g_far_leash ? 1 : 0,
          g_far_leash ? "Your Creature in the aim is a target of the leash: "
                        "the grip sends the leash click, and no press"
@@ -6912,6 +7139,7 @@ void InstallNear() {
              : "A signpost is a scroll of the first rank");
   g_sign_last = IniKey("hand_sign_last", 1) != 0;
   g_creature_wide = IniKey("hand_wide_creature", 1) != 0;
+  g_beside_loose = IniKey("far_grab_beside_loose", 1) != 0;
   ModLog("hand pick    : hand_sign_last=%d. %s. hand_wide_creature=%d. %s",
          g_sign_last ? 1 : 0,
          g_sign_last
@@ -6951,6 +7179,13 @@ void InstallNear() {
            g_far_touch ? "a scroll in the aim is a target, and the grip "
                          "activates it with no pull"
                        : "a scroll is no target of the aim");
+    ModLog("far grab    : far_grab_beside_loose=%d. %s", g_beside_loose ? 1 : 0,
+           g_beside_loose
+               ? "A tree, a building or a pile that the Hand's point is not "
+                 "in does not turn the grab from a distance off. It is the "
+                 "target at the Hand only while the aim has no target"
+               : "A tree, a building or a pile near the Hand's point turns "
+                 "the grab from a distance off as each other object");
   } else {
     ModLog("hand pick    : near_rule=0, so the pick reaches 60 percent of the "
            "Hand's length");
@@ -9818,6 +10053,14 @@ void HandDirectReport() {
     g_scroll_frames = g_scroll_added = 0;
     g_scroll_most = 0;
     g_scroll_eye_middle = g_scroll_eye_radius = 0.0f;
+  }
+  if (g_fight_rays != 0) {
+    ModLog("hand fight   : %llu interface steps of a press of the fight on a "
+           "Creature at the Hand. The ray from the Hand's point hit the body "
+           "%llu times, and the game's ray through the pointer %llu times "
+           "(fight_grip=%d), this window", g_fight_rays, g_fight_hits,
+           g_fight_game_hits, g_fight_grip ? 1 : 0);
+    g_fight_rays = g_fight_hits = g_fight_game_hits = 0;
   }
   if (g_presses != 0 || g_palm_asks != 0 || g_record_puts != 0 ||
       g_record_clears != 0) {

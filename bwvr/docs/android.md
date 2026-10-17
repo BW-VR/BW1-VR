@@ -651,6 +651,31 @@ Android. The plan, in steps:
    give it the game folder, and write `ScreenW`, `ScreenH`, `FullScreen`
    and `ScreenD` (`Menu::RenderSize`) into the registry of its Wine prefix.
    Wine also needs a display driver with no screen, and an audio driver.
+
+   Box64 builds for the headsets with the NDK of the app:
+   `bwvr/tools/android/build_box64.ps1 -Source <folder>` takes the folder
+   of an unpacked source archive of Box64 (not in the repo, for example in
+   `local/`), and writes `bwvr/out/android/box64/box64`. With the release
+   v0.4.4 it is an AArch64 program for the linker of Android
+   (`/system/bin/linker64`) of 21 MB that needs only `libc.so`, `libm.so`
+   and `libdl.so`. The APK does not contain it yet, and it did not run yet:
+   the emulator of the tests is x86_64, so a run needs a headset or another
+   ARM64 device.
+
+   The way for the 32 bit code is an ARM64 Wine for Android in the WoW64
+   mode that loads `wowbox64.dll` (the option `WOW64` of Box64) as its CPU
+   for x86. Then all of Wine runs as native ARM64 code, and only the 32 bit
+   code (the game, the mod, the 32 bit DLLs of Wine) goes through the
+   emulator. Wine needs no x86_64 libraries and no Linux program box64.
+   `wowbox64.dll` is a DLL for Windows on ARM64, so its build needs a
+   compiler for Windows (llvm-mingw): the NDK has no headers of Windows.
+   `build_box64.ps1 -Source <folder> -Mingw <bin folder of llvm-mingw>`
+   builds it. With Box64 v0.4.4 and llvm-mingw 20261006 it is a DLL for
+   ARM64 (machine 0xAA64) of 4.5 MB with the 13 exports `BTCpu...` of the
+   CPU interface of the WoW64 of Wine, and it imports only `ntdll.dll` and
+   `wow64.dll`. It did not run yet: it needs the ARM64 Wine.
+   The fall back is an x86_64 Wine in the WoW64 mode under the Linux
+   program box64, with the x86_64 libraries of glibc that it needs.
 2. **The walks for the renderer in the app, live.** The renderer is in the
    app, and it draws a stream of the walks of the game to the pixel ("The
    stream of the walks"). The live stream gives the frames of the mod to the

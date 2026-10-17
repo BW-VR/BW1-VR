@@ -519,12 +519,15 @@ Android. The plan, in steps:
    the emulator of the tests is x86_64, so a run needs a headset or another
    ARM64 device.
 
-   Open: the way for the 32 bit code. Box64 runs x86_64 programs of Linux.
-   `runblack.exe` is a 32 bit program of Windows, so either an x86_64 Wine
-   in the WoW64 mode runs under Box64 (with the x86_64 libraries that Wine
-   needs), or an ARM64 Wine in the WoW64 mode loads `wowbox64.dll` (the
-   option `WOW64` of Box64, a DLL for Windows on ARM64 that needs a
-   compiler for Windows, for example llvm-mingw).
+   The way for the 32 bit code is an ARM64 Wine for Android in the WoW64
+   mode that loads `wowbox64.dll` (the option `WOW64` of Box64) as its CPU
+   for x86. Then all of Wine runs as native ARM64 code, and only the 32 bit
+   code (the game, the mod, the 32 bit DLLs of Wine) goes through the
+   emulator. Wine needs no x86_64 libraries and no Linux program box64.
+   `wowbox64.dll` is a DLL for Windows on ARM64, so its build needs a
+   compiler for Windows (llvm-mingw): the NDK has no headers of Windows.
+   The fall back is an x86_64 Wine in the WoW64 mode under the Linux
+   program box64, with the x86_64 libraries of glibc that it needs.
 2. **The walks for the renderer in the app, live.** The renderer is in the
    app, and it draws a stream of the walks of the game to the pixel ("The
    stream of the walks"). The stream goes through a file now, for a test.

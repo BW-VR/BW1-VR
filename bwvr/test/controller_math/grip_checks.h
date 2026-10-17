@@ -747,7 +747,33 @@ inline void PressHoldChecks() {
   }
 }
 
+// THE TRIGGER OF controls=1 (controller_math.h, FlyPressButton): 0 is the
+// left button and 1 the right button of the game.
+inline void FlyPressChecks() {
+  using controller_math::FlyPressButton;
+  printf("\nThe trigger of controls=1\n");
+  Check(FlyPressButton(true, false, false, false, true) == 0,
+        "a press where nothing can be taken is the left button, a click",
+        FlyPressButton(true, false, false, false, true), 0);
+  Check(FlyPressButton(true, false, false, false, false) == 1,
+        "a press on a target near the Hand is the right button, a take",
+        FlyPressButton(true, false, false, false, false), 1);
+  Check(FlyPressButton(true, false, false, true, true) == 1,
+        "a press with a far target is the right button, a far grab",
+        FlyPressButton(true, false, false, true, true), 1);
+  Check(FlyPressButton(true, true, false, true, false) == 0,
+        "a text that waits for a click takes the press before a target",
+        FlyPressButton(true, true, false, true, false), 0);
+  Check(FlyPressButton(true, false, true, true, false) == 0,
+        "a Creature command takes the press before a target",
+        FlyPressButton(true, false, true, true, false), 0);
+  Check(FlyPressButton(false, false, false, false, false) == 0,
+        "with no Hand of the controller the press is the left button",
+        FlyPressButton(false, false, false, false, false), 0);
+}
+
 inline void GripRuleChecks() {
+  FlyPressChecks();
   TakeRuleChecks();
   FarTakeChecks();
   LevelChecks();

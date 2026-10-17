@@ -157,6 +157,15 @@ bool g_ready_seen = false;
 bool g_on_table = false;
 table_math::TableGrab g_table_anchor;
 float g_table_room[3] = {0.0f, 0.0f, 0.0f};  // the table center, room meters
+// Two hands in the God view: the land height under the head at the anchor,
+// and how far it was below the head then, in meters of the room. With
+// controls=1 two hands zoom about this height, so that land keeps its height
+// in the room (table_math.h, TableGrabSolve). The log of a settled grab
+// says with each value of controls how far that land went up in the room.
+bool g_table_have_level = false;
+bool g_table_level_on = false;
+float g_table_level = 0.0f;
+float g_table_level_below = 0.0f;
 float g_table_low = 40.0f;
 float g_table_high = 40.0f;
 uint64_t g_table_serial = 0;
@@ -464,6 +473,20 @@ void Release(const char* why) {
            ControllersFrameCount(), g_table_written.center[0],
            g_table_written.center[2], g_table_written.heading * 57.29578f,
            g_table_written.scale);
+    // The last anchor had two hands in the God view: how far the land that
+    // was under the head then went up in the room. With controls=1 it is 0.
+    if (g_table_have_level && g_have_table_written) {
+      const float rise =
+          table_math::GroundInRoom(g_table_written, g_table_room,
+                                   g_table_level) -
+          table_math::GroundInRoom(g_table_anchor.pose, g_table_room,
+                                   g_table_level);
+      ModLog("grab         : the land that was under your head at the two "
+             "hand anchor went %.2f cm up in the room, at %.2f to %.2f units "
+             "per meter (controls=%d)", rise * 100.0f,
+             g_table_anchor.pose.scale, g_table_written.scale,
+             g_table_level_on ? 1 : 0);
+    }
   } else if (g_holding && LogRoom()) {
     ModLog("grab         : released (%s) after %llu frames, frame %llu. The "
            "camera stays at %.3f %.3f %.3f.", why, g_hold_frames,
@@ -617,6 +640,28 @@ bool TableAnchor(const GrabInput& in, int mask, const char* why) {
   TableHands(in, mask, a.middle, a.spread);
   g_table_anchor = a;
   g_table_serial = serial;
+  g_table_have_level = false;
+  g_table_level_on = false;
+  if (a.hands == 2 && TabletopGodOwnsView()) {
+    const float scale = in.scale > 0.0f ? in.scale : 7.5f;
+    const float head[3] = {in.head[0] / scale, in.head[1] / scale,
+                           in.head[2] / scale};
+    float under[3];
+    table_math::FlatWorld(pose, g_table_room, head, under);
+    g_table_level = Ground(under[0], under[2]);
+    g_table_level_below =
+        head[1] - table_math::GroundInRoom(pose, g_table_room, g_table_level);
+    g_table_have_level = true;
+    g_table_level_on = ControllersFly();
+    if (LogRoom()) {
+      ModLog("grab         : two hands, the land under your head is at %.2f "
+             "%.2f, height %.2f, %.1f cm below your head. The zoom keeps %s "
+             "at its height in the room (controls=%d), frame %llu",
+             under[0], under[2], g_table_level, g_table_level_below * 100.0f,
+             g_table_level_on ? "that land" : "the height of the table center",
+             g_table_level_on ? 1 : 0, in.frame);
+    }
+  }
   g_theta = 0.0f;
   g_k = 1.0f;
   for (int slot = 0; slot < 2; ++slot) Copy3(g_hand_a[slot], g_smooth[slot]);
@@ -694,11 +739,13 @@ void TableSolve(const GrabInput& in, int mask, const char* why) {
   TabletopGrabAllows(&turn, &zoom);
   table_math::TablePose pose;
   // In the God view one hand also moves the land up and down, inside the
-  // ground limits. Two hands keep the height of the press.
+  // ground limits. Two hands keep the height of the press, or with
+  // controls=1 the height of the land under the head in the room.
   const bool god = TabletopGodOwnsView();
   table_math::TableGrabSolve(g_table_anchor, g_table_room, middle, spread,
                              turn, zoom, kMinSpreadMeters, g_table_low,
-                             g_table_high, &g_theta, &g_k, &pose, god);
+                             g_table_high, &g_theta, &g_k, &pose, god,
+                             g_table_level_on ? &g_table_level : nullptr);
   if (god && mask != 3) {
     const float asked = pose.center[1];
     bool cut = false;

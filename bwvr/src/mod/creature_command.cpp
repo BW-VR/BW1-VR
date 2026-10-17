@@ -1849,6 +1849,14 @@ void CreatureCommandSelect() {
   }
 }
 
+bool CreatureCommandWouldClaim() {
+  Init();
+  if (!g_settings.on) return false;
+  Facts f;
+  const bool have = Active(&f);
+  return Refuse(f, have) == nullptr;
+}
+
 bool CreatureCommandPumpTrigger(bool trigger, bool ok) {
   Init();
   const bool was = g_trigger;

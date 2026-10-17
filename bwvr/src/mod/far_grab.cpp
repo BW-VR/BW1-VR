@@ -1007,6 +1007,10 @@ bool FarGrabPumpGrip(bool grip, bool ok, bool hand) {
 
 bool FarGrabPressing() { return g_state == kFetch; }
 
+bool FarGrabHasTarget() {
+  return g_set.on && g_state == kAim && g_have_pick;
+}
+
 bool FarGrabDrawState(FarDraw* out) {
   if (!g_set.on || !g_have_frame || !g_have_pick || g_state == kIdle) {
     return false;

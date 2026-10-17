@@ -337,6 +337,76 @@ inline void WalkChecks() {
        0.0, 20.0 * 0.05);
   Near("a step with a height that is not a number moves nothing",
        FollowStep(&bump, sqrtf(-1.0f), 0.01f, length), 0.0, 1e-6);
+
+  // THE BOOST (controls=1): the trigger of the hand of the stick.
+  Near("a trigger at rest gives the speed of the stick", Boost(0.0f, 5.0f),
+       1.0, 1e-6);
+  Near("a light touch of 0.1 does not change the speed", Boost(0.1f, 5.0f),
+       1.0, 1e-6);
+  Near("half of the way from 0.1 to 0.95 is half of the boost",
+       Boost(0.525f, 5.0f), 3.0, 1e-5);
+  Near("a full pull is the most", Boost(1.0f, 5.0f), 5.0, 1e-6);
+  Near("a most of 1 or less is no boost", Boost(1.0f, 0.5f), 1.0, 1e-6);
+  Near("a trigger that is not a number is no boost",
+       Boost(sqrtf(-1.0f), 5.0f), 1.0, 1e-6);
+
+  // TWO HANDS ZOOM ABOUT A LEVEL (controls=1). The land under the head is at
+  // world height 40, and the center of the table is at height 10. With no
+  // level, a zoom moves that land in the room. With the level it stays.
+  {
+    const float table_room[3] = {0.0f, -0.6f, 0.0f};
+    TableGrab two = {};
+    two.hands = 2;
+    two.pose.center[0] = 2000.0f;
+    two.pose.center[1] = 10.0f;
+    two.pose.center[2] = 2000.0f;
+    two.pose.heading = 0.3f;
+    two.pose.scale = 100.0f;
+    const float left[3] = {-0.2f, -0.3f, 0.5f};
+    const float right[3] = {0.2f, -0.3f, 0.5f};
+    for (int i = 0; i < 3; ++i) {
+      two.middle[i] = 0.5f * (left[i] + right[i]);
+      two.spread[i] = right[i] - left[i];
+    }
+    const float wide[3] = {0.8f, 0.0f, 0.0f};  // twice the spread
+    const float level = 40.0f;
+    float turned = 0.0f, ratio = 1.0f;
+    TablePose plain, kept;
+    TableGrabSolve(two, table_room, two.middle, wide, false, true, 0.08f,
+                   7.5f, 4000.0f, &turned, &ratio, &plain, true);
+    turned = 0.0f;
+    ratio = 1.0f;
+    TableGrabSolve(two, table_room, two.middle, wide, false, true, 0.08f,
+                   7.5f, 4000.0f, &turned, &ratio, &kept, true, &level);
+    Near("hands twice as far apart halve the scale, with the level too",
+         kept.scale, 50.0, 1e-3);
+    const float before = GroundInRoom(two.pose, table_room, level);
+    Near("with no level, the land under the head moves in the room, cm",
+         (GroundInRoom(plain, table_room, level) - before) * 100.0f, 30.0,
+         1e-2);
+    Near("with the level, the land under the head keeps its height, cm",
+         (GroundInRoom(kept, table_room, level) - before) * 100.0f, 0.0,
+         1e-3);
+    Near("and the land under the middle of the hands moves across as with "
+         "no level, units",
+         sqrtf((kept.center[0] - plain.center[0]) *
+                   (kept.center[0] - plain.center[0]) +
+               (kept.center[2] - plain.center[2]) *
+                   (kept.center[2] - plain.center[2])),
+         0.0, 1e-3);
+    // One hand: the level does nothing, the hand moves the land up and down.
+    TableGrab single = two;
+    single.hands = 1;
+    const float up[3] = {two.middle[0], two.middle[1] + 0.1f, two.middle[2]};
+    const float none[3] = {0.0f, 0.0f, 0.0f};
+    TablePose a, b;
+    TableGrabSolve(single, table_room, up, none, false, true, 0.08f, 7.5f,
+                   4000.0f, &turned, &ratio, &a, true);
+    TableGrabSolve(single, table_room, up, none, false, true, 0.08f, 7.5f,
+                   4000.0f, &turned, &ratio, &b, true, &level);
+    Near("with one hand the level changes nothing, units",
+         fabsf(a.center[1] - b.center[1]), 0.0, 1e-6);
+  }
 }
 
 }  // namespace walk_checks

@@ -21,6 +21,12 @@ void CreatureCommandSelect();
 // The answer is true while the trigger must not reach the game.
 bool CreatureCommandPumpTrigger(bool trigger, bool ok);
 
+// controllers.cpp (controls=1), at a press of the trigger: a press now would
+// be a command of the Creature, by the tests of the press in
+// CreatureCommandPumpTrigger. The tests of the hand (it can act, it owns the
+// pointer) are for the caller.
+bool CreatureCommandWouldClaim();
+
 // stereo.cpp, once a frame, after TeleportFrame.
 void CreatureCommandFrame();
 

@@ -966,6 +966,32 @@ inline bool GripPressGuarded(bool guard_on, bool closed, int phase,
          since_close_ms < kGripGuardMs;
 }
 
+// THE TRIGGER OF controls=1 (docs/controllers.md, "5.7 The control
+// schemes"). The grips of both hands only grab the world. So the trigger of
+// the pointing hand is the left button and the right button of the game. The
+// press decides which, and the trigger keeps that button until it opens:
+//
+//   0. The controller does not place the Hand (a menu of the game, a load):
+//      the left button, as with controls=0.
+//   1. A text of the game waits for a click: the left button, the click.
+//   2. The leash is on the Hand, and the trigger commands the Creature: the
+//      left button, which the command takes (creature_command.cpp).
+//   3. The far grab has a target, or the Hand is not free (it holds a thing,
+//      it is not in its Normal state, or it is on or near an object that a
+//      press acts on): the right button. It takes, carries, throws, taps,
+//      strokes and casts, as the grip does with controls=0.
+//   4. Else the left button: a short press is a click of the game.
+//
+// So a press on a target takes it at once, with no wait for a tap time, and
+// a press where nothing can be taken clicks. Returns 0 for the left button
+// and 1 for the right button.
+inline int FlyPressButton(bool placed, bool text_waits, bool command,
+                          bool far_target, bool hand_free) {
+  if (!placed || text_waits || command) return 0;
+  if (far_target || !hand_free) return 1;
+  return 0;
+}
+
 // THE GRAB OF THE WORLD. See docs/god-view.md, "5.1 The grab of the land".
 //
 // A point a in the room is the world point C + L * a, with C the game camera

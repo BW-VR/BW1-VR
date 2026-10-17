@@ -103,6 +103,8 @@ bool HandDirectSeekFarPoint(float out[3]);
 void HandDirectWidenFar(int frames, float meters);
 // hand_direct.cpp: whether the pointing grip may grab the world.
 bool HandDirectClaimFree(const char** why);
+// The Hand's point now, and whether the controller placed it.
+bool HandDirectHandPosition(float out[3], bool* by_controller);
 // hand_direct.cpp: the Hand facts of the grip, and the latch of the throw at
 // the opening of the grip. See docs/grab.md, "The grip holds".
 bool HandDirectGripFacts(bool* holding, bool* settled, bool* spring,
@@ -174,7 +176,7 @@ bool TabletopGodZoomForwardIn();
 // rule, its request for the next frame, and its test key. And the game's
 // switch for the drag of the land, which the walk keeps to.
 int TabletopGodMoveStick();
-bool TabletopGodWalk(const float push[2], const float* aim);
+bool TabletopGodWalk(const float push[2], const float* aim, float boost);
 void TabletopGodMoveStickCycle();
 bool TabletopMoveAllowed();
 // teleport.cpp and hint_card.cpp: the test keys of teleport_switch and of
@@ -288,6 +290,8 @@ enum FakeInput {
   // (hint_card.cpp) act on the first frame of the word.
   kTeleportKey,
   kPromptKey,
+  // The test key of controls acts on the first frame of the word.
+  kControlsKey,
   kInputCount
 };
 
@@ -301,7 +305,8 @@ const char* const kInputName[kInputCount] = {
     "nofocus",    "deactivate",
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
-    "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey"};
+    "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
+    "controlskey"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -1099,6 +1104,9 @@ void UpdateScript() {
     if (step.input == kPromptKey && t == step.start) {
       HintCardMovesToggle("The word promptkey");
     }
+    if (step.input == kControlsKey && t == step.start) {
+      ControllersControlsToggle("The word controlskey");
+    }
     if ((step.input == kNudge || step.input == kSlap) &&
         t == step.start) {
       const float side = step.input == kNudge ? 2.0f : 12.0f;
@@ -1693,11 +1701,61 @@ bool InView() {
   return g_point.have_pixel && !g_point.off_view;
 }
 
+// THE CONTROL SCHEME (controls, docs/controllers.md, "5.7 The control
+// schemes"). 0: the trigger is the left button of the game and the grip the
+// right button (controller_swap_buttons exchanges them). 1: the grips of both
+// hands only grab the world, the trigger of the pointing hand is the left and
+// the right button (controller_math::FlyPressButton), and the trigger of the
+// other hand makes the walk with the stick faster. With test_keys=1, Ctrl,
+// Shift and the apostrophe key change it while the game runs.
+int g_controls = -1;
+// controls=1: the press of the trigger that is down now is the right button.
+bool g_fly_right = false;
+int g_fly_logs = 0;
+const int kMaxFlyLogs = 120;
+// controls=1: the trigger of the other hand at its full pull makes the walk
+// this many percent of its speed (move_stick_boost_pct).
+int g_boost_pct = -1;
+
+void LogControls(const char* by) {
+  const bool keys = IniInt("test_keys", 0) != 0;
+  ModLog("controllers  : %s%scontrols=%d. %s%s", by, by[0] != 0 ? ": " : "",
+         g_controls,
+         g_controls == 1
+             ? "The grips of both hands grab the world, and both grips "
+               "together turn and zoom it with no change of your height. The "
+               "trigger takes a target at once, and a press where nothing "
+               "can be taken is a click. The trigger of the other hand makes "
+               "the walk with the stick faster"
+             : "The trigger is the left button of the game and the grip of "
+               "the pointing hand the right button. The grip of the other "
+               "hand grabs the world",
+         keys ? ". Ctrl, Shift and the apostrophe key change it" : "");
+}
+
+bool FlyScheme() {
+  if (g_controls < 0) {
+    g_controls = IniInt("controls", 0) == 1 ? 1 : 0;
+    LogControls("");
+  }
+  return g_controls == 1;
+}
+
+// controls=1 with the direct hand. In a dialog box, in a room of the Temple
+// and with the pointer the trigger and the grip keep the plain buttons.
+bool FlyDirect() { return FlyScheme() && DirectHandNow(); }
+
 // The trigger or the grip that makes a game button, as the pump last saw it.
 bool RawDown(int button) {
+  if (FlyDirect()) {
+    return g_trigger_down && button == (g_fly_right ? kRight : kLeft);
+  }
   if (button == kLeft) return g_swap_buttons ? g_grip_down : g_trigger_down;
   return g_swap_buttons ? g_trigger_down : g_grip_down;
 }
+
+// The trigger is the control of the right button of the grip machine.
+bool RightIsTrigger() { return g_swap_buttons || FlyScheme(); }
 
 // The Vive trackpad reports a position whenever it is touched, so a resting
 // thumb would turn and zoom. That profile needs the click.
@@ -1949,8 +2007,16 @@ const int kMaxGrabLogs = 120;
 int OtherIndex() { return 1 - PointingIndex(); }
 
 // The trigger's and the grip's game buttons, after controller_swap_buttons.
-int TriggerButton() { return g_swap_buttons ? kRight : kLeft; }
-int GripButton() { return g_swap_buttons ? kLeft : kRight; }
+// With controls=1 the left button comes from the trigger, and the grip of the
+// direct hand is no button (-1).
+int TriggerButton() {
+  if (FlyScheme()) return kLeft;
+  return g_swap_buttons ? kRight : kLeft;
+}
+int GripButton() {
+  if (FlyDirect()) return -1;
+  return g_swap_buttons ? kLeft : kRight;
+}
 
 bool GrabHeld() { return g_off_engaged || g_grip_claimed; }
 
@@ -1991,7 +2057,8 @@ void LetGoOfWorld(const char* why) {
   g_off_engaged = false;
   if (g_grip_claimed) {
     g_grip_claimed = false;
-    if (g_grip_down) g_button[GripButton()].need_up = true;
+    const int button = GripButton();
+    if (g_grip_down && button >= 0) g_button[button].need_up = true;
   }
 }
 
@@ -2099,7 +2166,28 @@ void UpdateGrab(bool usable, bool back, bool far_claim) {
       HapticsPulseHands(1, haptics_math::kWorld);
     }
   }
-  if (grip_edge && !g_grip_claimed && allowed && !far_claim &&
+  // controls=1: the pointing grip is no button of the game. It grabs the
+  // world at each press that a grab allows, also while the trigger takes or
+  // carries an object.
+  if (grip_edge && !g_grip_claimed && allowed && FlyDirect()) {
+    const char* blocked = "";
+    if (TriggerBlocks(&blocked)) {
+      ++g_grab_refused;
+      if (GrabLogRoom()) {
+        ModLog("grab         : the pointing grip does not grab: %s, frame "
+               "%llu", blocked, g_frame);
+      }
+    } else {
+      g_grip_claimed = true;
+      ++g_grab_claims;
+      if (GrabLogRoom()) {
+        ModLog("grab         : the pointing grip grabs the world (controls=1), "
+               "frame %llu", g_frame);
+      }
+      HapticsPulseHands(2, haptics_math::kWorld);
+    }
+  }
+  if (grip_edge && !g_grip_claimed && allowed && !far_claim && !FlyDirect() &&
       (g_grab.hand >= 2 || (g_off_engaged && g_grab.two_hands))) {
     const char* blocked = "";
     const char* hand_why = "";
@@ -2721,6 +2809,57 @@ void PollPressHoldKey() {
   ControllersPressHoldChange("Shift and the plus key of the number pad");
 }
 
+// THE PRESS OF THE TRIGGER WITH controls=1 (controller_math.h,
+// FlyPressButton). At the press the trigger becomes the left or the right
+// button of the game, and it keeps that button until it opens. The facts are
+// the ones of the last frame, read now. With the plain buttons (a dialog box,
+// a room of the Temple, the pointer) the choice is not used.
+void FlyPress() {
+  if (!FlyScheme()) return;
+  float at[3];
+  bool by_controller = false;
+  const bool placed =
+      HandDirectHandPosition(at, &by_controller) && by_controller;
+  const bool waits = TextClickOn() && TextClickFlag();
+  const bool command = Usable() && DirectHandNow() && g_pointer_owned &&
+                       !g_jump_control && !g_gesture_held &&
+                       !TeleportAiming() && CreatureCommandWouldClaim();
+  const bool far_target = FarGrabHasTarget();
+  const char* why = "";
+  const bool free = HandDirectClaimFree(&why);
+  g_fly_right =
+      controller_math::FlyPressButton(placed, waits, command, far_target,
+                                      free) == 1;
+  if (g_fly_logs < kMaxFlyLogs && DirectHandNow()) {
+    ++g_fly_logs;
+    const char* reason = !placed      ? "the controller does not place the Hand"
+                         : waits      ? "a text of the game waits for a click"
+                         : command    ? "the trigger commands the Creature"
+                         : far_target ? "the aim has a far target"
+                                      : why;
+    ModLog("controllers  : the trigger closes and is the %s button of the "
+           "game until it opens (controls=1): %s, frame %llu",
+           g_fly_right ? "right" : "left", reason, g_frame);
+  }
+}
+
+// THE TEST KEY OF controls: Ctrl, Shift and the apostrophe key (test_keys=1)
+// change it between 0 and 1 while the game runs. On a German keyboard the
+// key is the one with the letter A with two dots.
+void PollControlsKey() {
+  static int test_keys = -1;
+  if (test_keys < 0) test_keys = IniInt("test_keys", 0) != 0 ? 1 : 0;
+  if (test_keys == 0) return;
+  static bool before = false;
+  const bool down = (GetAsyncKeyState(VK_OEM_7) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool pressed = down && !before;
+  before = down;
+  if (!pressed || !GameInFront()) return;
+  ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
+}
+
 void PumpButtons(ULONGLONG now) {
   const bwvr::HandInput& hand = g_hands[PointingIndex()];
   // THE GRIP OPENS AT ONCE. The control that is the game's right button with
@@ -2763,9 +2902,10 @@ void PumpButtons(ULONGLONG now) {
   }
   PollPressGuardKey();
   PollPressHoldKey();
+  PollControlsKey();
   const bool trigger_was = g_trigger_down, grip_was = g_grip_down;
   // The control of the game's right button, as the last pump left it.
-  const bool right_was = g_swap_buttons ? trigger_was : grip_was;
+  const bool right_was = RightIsTrigger() ? trigger_was : grip_was;
   const bool guarded = controller_math::GripPressGuarded(
       g_press_guard != 0, right_was, g_hold.phase,
       now - g_right_close_ms);
@@ -2773,28 +2913,28 @@ void PumpButtons(ULONGLONG now) {
       g_fast_open != 0 && HandDirectReleaseAtOnce() && DirectHandNow() &&
       !guarded;
   g_trigger_down = controller_math::GripLevelStep(
-      &g_trigger_level, hand.trigger, fast && g_swap_buttons);
+      &g_trigger_level, hand.trigger, fast && RightIsTrigger());
   g_grip_down = controller_math::GripLevelStep(&g_grip_level, hand.squeeze,
-                                               fast && !g_swap_buttons);
-  if (g_swap_buttons ? (!trigger_was && g_trigger_down)
+                                               fast && !RightIsTrigger());
+  if (RightIsTrigger() ? (!trigger_was && g_trigger_down)
                      : (!grip_was && g_grip_down)) {
     g_right_close_ms = now;
   }
   // THE GRIP IS FULLY OPEN: the value of the control of the right button is
   // at or below the level that opens a slow grip. The guard of a throw ends
   // here (hand_direct.cpp, catch_moving=3).
-  if (!((g_swap_buttons ? hand.trigger : hand.squeeze) >
+  if (!((RightIsTrigger() ? hand.trigger : hand.squeeze) >
         controller_math::kGripOpenBelow)) {
     HandDirectGripFullyOpen();
   }
   {
     // Each opening of the right button's control, with the values of the
     // frames before it, so a log shows how the real hand opened.
-    const bool opened = g_swap_buttons ? trigger_was && !g_trigger_down
+    const bool opened = RightIsTrigger() ? trigger_was && !g_trigger_down
                                        : grip_was && !g_grip_down;
     if (opened && DirectHandNow()) {
       const controller_math::GripLevel& level =
-          g_swap_buttons ? g_trigger_level : g_grip_level;
+          RightIsTrigger() ? g_trigger_level : g_grip_level;
       if (level.fast) ++g_fast_opens;
       else ++g_slow_opens;
       if (g_level_logs < kMaxLevelLogs) {
@@ -2806,12 +2946,16 @@ void PumpButtons(ULONGLONG now) {
               trace + used, sizeof(trace) - used, " %.2f", level.trace[i]));
         }
         ModLog("grip         : the %s opens %s, frame %llu. Its values over "
-               "the last %d frames:%s", g_swap_buttons ? "trigger" : "grip",
+               "the last %d frames:%s", RightIsTrigger() ? "trigger" : "grip",
                level.fast ? "on a fast fall" : "below 35%", g_frame,
                level.count, trace);
       }
     }
   }
+
+  // THE PRESS OF THE TRIGGER WITH controls=1: it is the left or the right
+  // button of the game until it opens (FlyPress).
+  if (!trigger_was && g_trigger_down) FlyPress();
 
   // The pointing hand is active again: the session has input focus again,
   // or the controller woke. A focus loss reads every button as up, so a
@@ -2844,7 +2988,8 @@ void PumpButtons(ULONGLONG now) {
   // THE CREATURE COMMAND. While the leash is on the Hand, a press of the
   // trigger commands the Creature and does not reach the game
   // (creature_command.cpp). Not with controller_swap_buttons=1, where the
-  // trigger does the work of the grip.
+  // trigger does the work of the grip. With controls=1 only a press that
+  // FlyPress made the left button reaches the command.
   //
   // A TEXT THAT WAITS FOR A CLICK (text_click.cpp). The game ends that wait
   // only when its left button goes up. So while a text waits, a new press of
@@ -2854,7 +2999,8 @@ void PumpButtons(ULONGLONG now) {
   bool command_claim = false;
   {
     const bool ok = usable && DirectHandNow() && g_pointer_owned &&
-                    !g_swap_buttons && !GrabHeld() && !far_claim &&
+                    (!g_swap_buttons || FlyScheme()) && !GrabHeld() &&
+                    !far_claim &&
                     !g_jump_control && !g_gesture_held && !TeleportAiming() &&
                     text_click_math::TriggerMayCommand(click_on, click_waits);
     command_claim = CreatureCommandPumpTrigger(RawDown(kLeft), ok);
@@ -2916,6 +3062,16 @@ void PumpButtons(ULONGLONG now) {
       g_button[kRight].need_up = true;
     }
     ray_before = ray;
+    // With controls=1 the direct hand has its own buttons. A dialog box or a
+    // room of the Temple that comes or goes with a control down gives that
+    // control a different game button too.
+    static bool direct_before = false;
+    const bool direct = FlyDirect();
+    if (direct != direct_before && (g_trigger_down || g_grip_down)) {
+      g_button[kLeft].need_up = true;
+      g_button[kRight].need_up = true;
+    }
+    direct_before = direct;
   }
 
   uint8_t next = 0;
@@ -3191,7 +3347,18 @@ void PumpWalk() {
       controller_math::AimDirection(rotation, direction);
       have_aim = walk_math::AimForward(direction, walk_math::kAimLeast, aim);
     }
-    if (!TabletopGodWalk(push, have_aim ? aim : nullptr)) {
+    // THE BOOST (controls=1): the trigger of the hand of the stick makes the
+    // walk faster while it is pulled (walk_math.h, Boost).
+    float boost = 1.0f;
+    if (FlyScheme()) {
+      if (g_boost_pct < 0) {
+        g_boost_pct = IniInt("move_stick_boost_pct", 500);
+        if (g_boost_pct < 100) g_boost_pct = 100;
+        if (g_boost_pct > 2000) g_boost_pct = 2000;
+      }
+      boost = walk_math::Boost(hand.trigger, g_boost_pct * 0.01f);
+    }
+    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost)) {
       why = "the game does not allow a drag of the land now";
     }
   }
@@ -4040,6 +4207,7 @@ void ControllersHintState(ControllerHintState* out) {
   out->owns = ControllersOwnPointer();
   out->left_handed = g_left_handed;
   out->swap_buttons = g_swap_buttons;
+  out->fly = ControllersFly();
   out->gesture_button = g_gesture.button;
   out->world_grab = g_grab.on && g_grab.hand >= 1;
   out->ring = RadialMenuHintMode();
@@ -4708,6 +4876,23 @@ void ControllersButtonLayoutToggle(const char* by) {
   RadialMenuLayoutChanged();
   ControllersGrabPulse(1, 0.5f, g_layout != 0 ? 0.30f : 0.08f);
   LogLayout(by);
+}
+
+bool ControllersFly() { return g_on && FlyScheme(); }
+
+void ControllersControlsToggle(const char* by) {
+  if (!g_on) return;
+  g_controls = FlyScheme() ? 0 : 1;
+  // A control that is down has a different job now. It must open before it
+  // presses a button of the game, and a stick that is pushed must come back.
+  if (g_trigger_down || g_grip_down) {
+    g_button[kLeft].need_up = true;
+    g_button[kRight].need_up = true;
+  }
+  LetGoOfWorld("the control scheme changed");
+  g_walk_blocked = true;
+  ControllersGrabPulse(3, 0.5f, g_controls == 1 ? 0.30f : 0.08f);
+  LogControls(by);
 }
 
 // Hook the two functions. Only with the controller option on, so with it off

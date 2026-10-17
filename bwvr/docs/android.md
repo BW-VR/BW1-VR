@@ -320,16 +320,20 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    that device, the two quads of the stereo screen (one for each eye, 2.6
    m in front) and the pictures of both eyes that the runtime read back. Its
    results are in `bwvr/out/android/emu-xr-stream-test`.
-   With `-Live <desk folder> -Gpu host` (40 checks) the app plays the live stream
-   of `ring-capture.bin` of a desktop run of `live_stream_run.ps1` on the
-   device of the session: a child process of the app writes one frame into
-   the ring each 14 ms. The script of the controllers starts 200 frames
-   later, after the first picture. The test checks the device, the stereo
-   screen and the pictures of both eyes as with `-Stream`, the feed
-   process, the answer to the ask, the first frame with the whole state,
-   the frames that the app played and skipped, and that each eye of the
-   stereo screen got a copy for each new picture of the live stream. Its
-   results are in `bwvr/out/android/emu-xr-live-test`.
+   With `-Live <desk folder> -Gpu host` (45 checks, 46 with `-FeedMs 0`)
+   the app plays the live stream of `ring-capture.bin` of a desktop run of
+   `live_stream_run.ps1` on the device of the session: a child process of
+   the app writes one frame into the ring each `-FeedMs` ms (14 by
+   default). The script of the controllers starts 200 frames later, after
+   the first picture. The test checks the device, the stereo screen and the
+   pictures of both eyes as with `-Stream`, the feed process, the answer to
+   the ask, the first frame with the whole state, the frames that the app
+   played and skipped, that each eye of the stereo screen got a copy for
+   each new picture of the live stream, and the four pictures of the test
+   frame of the stream against the pictures of the PC (the pass of step 4).
+   With `-FeedMs 0` the feed is faster than the session, and the test also
+   checks that the app skipped the walks of frames. Its results are in
+   `bwvr/out/android/emu-xr-live-test`.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -608,13 +612,23 @@ of the record with the frame of the same number of the ring.
 live_stream_run.ps1 -Name live -Dll <ddraw.dll>
 ```
 
-**What the desktop run shows** (a Radeon RX 7900 XTX): the answer comes 1
-to 2 ms after the ask, at the next frame. The frame of the answer and the
-first frame of the record have 14.4 MB (59 surfaces with 13.6 MB of
-pixels), and the other frames 0.79 MB. Each of the frames 3000 to 3003 of
-the ring has the same bytes as the frame in `bwvr-stream.bin`. The writer
-waited for room for no frame. The copy of a frame into the ring took 4 to 6
-ms for a frame of 14.4 MB and 0.05 to 0.5 ms for the others.
+**What the desktop run shows** (a Radeon RX 7900 XTX, about 500 frames a
+second): the answer comes 1 to 2 ms after the ask, at the next frame. The
+frame of the answer and the first frame of the record have 14.4 MB (59
+surfaces with 13.6 MB of pixels), and the other frames 0.79 MB. Each of the
+frames 3000 to 3003 of the ring has the same bytes as the frame in
+`bwvr-stream.bin`. The writer waited for room for no frame. The copy of a
+frame into the ring took 4 to 6 ms for a frame of 14.4 MB and 0.05 to 0.5
+ms for the others. Each of the 997 frames 3004 to 4000 was at the test
+reader in its own game frame. After a frame of 14.4 MB the next frames are
+1 to 4 game frames late, because the test reader takes some milliseconds
+for the large frame.
+
+**With a slow reader** (`live_stream_run.ps1 -SlowMs 10`: the test reader
+takes 1 MB and then sleeps 10 ms): the writer dropped the walks of 12487 of
+16890 frames, each in at most 0.17 ms with no wait for room, and the game
+ran at 467 frames a second against 502 and 509 with no reader. Each frame
+of the record was whole in the ring.
 
 **A TEST AID of the app** (`stream_live_feed=1`): a child process of the app
 makes the ring and writes the frames of `bwvr-stream-feed.bin` of the game
@@ -632,17 +646,17 @@ and the frame rate of the live stream in a headset.
 
 **Known limits:**
 
-- The app did not skip a frame in a run. Each frame of the test save
-  "pen" has records of surfaces (three small surfaces that the game writes
-  in each frame), so the app plays each frame.
-- The writer did not drop a frame in a desk run, for the same reason. Only
-  the math checks of `stream_ring.h` show the drop.
-- A slow app holds the frame thread of the game: a frame with records of
-  surfaces waits for room in the ring. The frames that wait can fill the
-  queue of the app (64 MB) and the ring (32 MB), about 120 frames of the
-  test save, so the picture can come more than 1.5 s late. With a test
-  reader that sleeps 10 ms for each MB, the game ran at about 126 frames a
-  second in place of 536.
+- With `vk_keep_picture=1` a walk with no clear of the whole target starts
+  with the picture of the walk before (the trails of the intro). After a
+  frame that lost its walks, such a walk starts with an older picture. The
+  walks of "pen" start with a clear.
+- A frame with the whole state (14.4 MB in "pen") takes some milliseconds in
+  the writer and in the reader, so the next frames come 1 to 4 game frames
+  late.
+- With `vk_stream_live_drop=0` and `stream_live_frames=0` (the first way) a
+  slow app holds the frame thread of the game, and the picture can come
+  more than 1.5 s late (about 126 frames a second in place of 536 with the
+  slow test reader).
 
 ## Only Vulkan
 

@@ -780,14 +780,15 @@ that moves while the Hand takes it.
     (`emu_live_test.ps1`). Not run in a headset. It cannot start the game:
     `runblack.exe` needs an x86 runtime (Box64 with Wine in the WoW64 mode)
     in the app, and the poses and the actions of the session for the mod
-    (`android.md`, "What the app cannot do yet"). Open for the live stream:
-    the ring file under Wine and Box64, and the delay of one frame (a frame
-    goes into the ring at the start of the next frame of the game). Each
-    frame of the test save has records of surfaces, so no run skipped or
-    dropped a frame, and a slow app holds the frame thread of the game with
-    a backlog up to the queue of 64 MB and the ring of 32 MB. Next: a skip
-    and a drop that keep the records of state and lose only the walks, and
-    a bound of the queue of the app in frames.
+    (`android.md`, "What the app cannot do yet"). A frame goes into the
+    ring at the end of its last walk, and in a desktop run each frame after
+    a frame with the whole state was at the reader in its own game frame. A
+    skip of the app and a drop of the writer keep the records of state and
+    lose only the walks, and the queue of the app keeps 3 frames whole, so a
+    slow reader does not hold the frame thread of the game. Open for the
+    live stream: the ring file under Wine and Box64, and the walks that keep
+    the picture of the walk before (`vk_keep_picture`, the intro) after a
+    frame with no walks.
     With the render
     thread, one walk draws most batches in one draw for both eyes (`one_walk_merge`, `backend.md`, "One
     draw for both eyes"). Before the thread, with one walk, a view of the

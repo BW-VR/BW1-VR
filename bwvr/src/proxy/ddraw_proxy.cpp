@@ -121,7 +121,8 @@ void GameFolder(char* out, size_t size) {
 }
 
 // Set when the game is a build the mod does not fit. Then nothing of the mod
-// runs, and the game gets the DirectDraw it would have had on its own.
+// runs, and the game gets the DirectDraw it would have had on its own. With
+// vulkan_strict=1 it gets no DirectDraw (proxy_choice_math.h).
 bool g_force_system = false;
 
 // backend=vulkan (ReadBackendSetting).
@@ -267,8 +268,12 @@ HRESULT WINAPI StrictGetClassObject(REFCLSID, REFIID, LPVOID* out) {
 }
 
 // The other exports are inner parts of DirectDraw that the game does not
-// call. Their arguments are not documented, so a stub cannot return to the
-// caller with the right stack: it stops the game with a line of the log.
+// call. Most of them have no documented arguments, so a stub cannot return
+// to the caller with the right stack. AcquireDDThreadLock and
+// ReleaseDDThreadLock take no arguments and SetAppCompatData takes two
+// DWORDs, but the mod has no lock and no data of DirectDraw for them. So
+// each stub stops the game with a line of the log, and a run shows each
+// such call.
 void StrictMissing(const char* name) {
   if (g_log != nullptr) {
     g_log("backend      : vulkan_strict=1, and the game called %s, which the "
@@ -354,14 +359,23 @@ bool ProxyLoadRealDDraw() {
     char backend[MAX_PATH];
     ReadBackendSetting(backend, MAX_PATH);
     SetStrictExports();
-    lstrcpynA(g_note,
-              g_vulkan
-                  ? "backend      : vulkan_strict=1. The DirectDraw of the mod "
-                    "(vk_ddraw.cpp) alone: no DirectDraw of the system, no "
-                    "dxwrapper, whatever the key backend says"
-                  : "backend      : vulkan_strict=1, and the game is not the "
-                    "v1.42 file. No DirectDraw: the game gets an error",
-              sizeof(g_note));
+    // The value of the key backend, which has no effect here, so that the
+    // log shows it.
+    char shown[64];
+    lstrcpynA(shown, backend[0] != 0 ? backend : "no key", sizeof(shown));
+    if (g_vulkan) {
+      wsprintfA(g_note,
+                "backend      : vulkan_strict=1. The DirectDraw of the mod "
+                "(vk_ddraw.cpp) alone: no DirectDraw of the system, no "
+                "dxwrapper. The key backend (%s) has no effect",
+                shown);
+    } else {
+      wsprintfA(g_note,
+                "backend      : vulkan_strict=1, and the game is not the "
+                "v1.42 file. No DirectDraw: the game gets an error. The key "
+                "backend (%s) has no effect",
+                shown);
+    }
     return true;
   }
   char backend[MAX_PATH];

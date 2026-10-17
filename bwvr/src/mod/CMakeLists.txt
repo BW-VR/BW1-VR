@@ -2,6 +2,7 @@
 add_library(bwvr_mod SHARED
     ../proxy/ddraw_proxy.cpp
     mod_main.cpp
+    vr_start.cpp
     frame_source.cpp
     stereo.cpp
     one_walk.cpp
@@ -57,6 +58,7 @@ add_library(bwvr_mod SHARED
     cutscene_window.cpp
     sky_detail.cpp
     spirit_anchor.cpp
+    fight_marks.cpp
     controllers.cpp
     controller_hints.cpp
     hint_card.cpp

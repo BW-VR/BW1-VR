@@ -77,7 +77,8 @@ class XrApp {
   // A STEREO SCREEN in front of the player: two quads, one for each eye,
   // width by height pixels. image is an image of the renderer with a layer
   // for each eye, in the layout of a color attachment, image_width by
-  // image_height (VkSceneEyes). Each frame copies it into the quads.
+  // image_height (VkSceneEyes). A frame copies it into the quads only after
+  // SetScreenSource gave a new picture.
   bool MakeScreen(uint32_t width, uint32_t height);
   void SetScreenSource(VkImage image, uint32_t image_width,
                        uint32_t image_height);
@@ -86,6 +87,10 @@ class XrApp {
   // picture of a new revision.
   void MarkScreenChanged();
   bool HasScreen() const { return between_ != VK_NULL_HANDLE; }
+  // xr_copy_on_change (1 is the default): true, a layer gets a new image of
+  // its swapchain only when its picture changed, and the runtime shows the
+  // last released image. false, each frame copies each layer. Before Start.
+  void SetCopyOnChange(bool on) { copy_on_change_ = on; }
 
  private:
   struct Layer {
@@ -95,11 +100,14 @@ class XrApp {
     uint32_t height = 0;
     Staging staging;
     bool swap_red_blue = false;
-    // The revision of the content, and the revision that each image of the
-    // swapchain has. An image of an old revision gets the copy.
+    // The revision of the content, and the revision of the last image that
+    // the app released. 0: no image is released yet.
     unsigned revision = 1;
-    std::vector<unsigned> filled;
+    unsigned released = 0;
   };
+  // True when the layer needs a new image in this frame. Else it counts a
+  // skipped copy.
+  bool LayerChanged(Layer* layer);
 
   bool MakeInstance(ANativeActivity* activity);
   bool MakeVulkan();
@@ -139,6 +147,9 @@ class XrApp {
   bool menu_written_ = false;
   bool cursor_written_ = false;
 
+  bool copy_on_change_ = true;
+  uint64_t copies_ = 0;
+  uint64_t copies_skipped_ = 0;
   bool renderer13_ = false;
   bool renderer_used_ = false;
   bool shading_rate_ = false;

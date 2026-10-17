@@ -34,10 +34,6 @@
     The folder of the desktop run: ring-capture.bin and the pictures
     bwvr-vk-*.bmp of the PC.
 
-.PARAMETER Reuse
-    Takes an emulator that runs on the port already. Without it the script
-    stops when an emulator runs there.
-
 .PARAMETER MaxPercent
     The most pixels in percent that may differ by more than 24 in a channel.
     2 by default, as in emu_replay_test.ps1.
@@ -46,11 +42,11 @@
 param(
     [Parameter(Mandatory = $true)][string]$Run,
     [double]$MaxPercent = 2.0,
-    [switch]$Keep,
-    [switch]$Reuse
+    [switch]$Keep
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
+Lock-AndroidEmulator
 $ErrorActionPreference = 'Continue'
 
 $Bwvr = Resolve-Path (Join-Path $PSScriptRoot '..\..')
@@ -133,11 +129,6 @@ Expect ($feedFrames.Count -gt 0) "the feed has $($feedFrames.Count) frames ($($f
 # 1. The emulator with the GPU of the PC.
 & $Adb start-server 2>&1 | Out-Null
 $started = $false
-# An emulator on the port that this script did not start can be the test of
-# a different session, and it can have no GPU of the PC. Only -Reuse takes it.
-if ((& $Adb devices 2>$null | Select-String -Pattern "^$Serial\s") -and -not $Reuse) {
-    Stop-Android "NOT RUN: an emulator runs on the port $Port already. It can be the test of a different session. Wait for its end, or give -Reuse."
-}
 if (-not (& $Adb devices 2>$null | Select-String -Pattern "^$Serial\s+device")) {
     Say 'Start the emulator (no window, the GPU of the PC)'
     Start-Process -FilePath $Emulator -ArgumentList @('-avd', $Avd, '-port', "$Port",
@@ -235,6 +226,14 @@ try {
     if ($started -and -not $Keep) {
         Say 'Stop the emulator'
         & $Adb -s $Serial emu kill 2>&1 | Out-Null
+        # adb lists the emulator for some seconds after the kill. A test that
+        # starts in that time on the same port would take it for a running
+        # emulator, so the script waits until it is gone.
+        $gone = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $gone -and
+               (& $Adb devices 2>$null | Select-String -Pattern "^$Serial\s")) {
+            Start-Sleep -Seconds 1
+        }
     }
 }
 

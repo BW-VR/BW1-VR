@@ -281,7 +281,10 @@ double NowMs() {
 
 // The renderer and SceneHostState keep the addresses of the surfaces of the
 // stream (the textures, the targets), so the one player of the process and
-// its surfaces live until the end of the process.
+// its surfaces live until the end of the process. The app plays one stream
+// in a process (main.cpp): the file or the live stream. So the map of the
+// surfaces holds the surfaces of that stream alone. A play gives the
+// player its result and takes it back before it returns.
 Player* ThePlayer(PlayResult* result) {
   static Player* s_player = nullptr;
   if (s_player == nullptr) s_player = new Player(result);
@@ -299,6 +302,8 @@ void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result) {
   uint32_t n = 0;
   while (reader.Next(&kind, &body, &n)) player->Play(kind, body, n);
   if (reader.Broken()) result->broken = true;
+  // result belongs to the caller (App, a local of android_main).
+  player->SetResult(nullptr);
 }
 
 PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
@@ -318,6 +323,8 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
   const uint8_t* body = nullptr;
   uint32_t size = 0;
   while (reader.Next(&kind, &body, &size)) player->Play(kind, body, size);
+  // result is on the stack of this call.
+  player->SetResult(nullptr);
   result.broken = reader.Broken();
   result.ms = NowMs() - start;
   AppLog("replay       : %s: %llu records, %llu frames, %llu walks, %llu draws, "

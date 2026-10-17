@@ -81,7 +81,7 @@ char g_ini_path[MAX_PATH];
 int g_dpi = 96;
 // The most rows of a column. A test sets a smaller number with "-rows" to get
 // a picture of a table that has more columns.
-int g_max_rows = 22;
+int g_max_rows = 26;
 
 int Scaled(int at96) { return MulDiv(at96, g_dpi, 96); }
 

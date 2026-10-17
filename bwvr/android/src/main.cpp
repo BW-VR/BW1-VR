@@ -463,18 +463,39 @@ void android_main(android_app* android) {
     ANativeActivity_finish(android->activity);
   }
 
+  app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
                            kCursorPixels);
 
-  // The renderer of the mod (docs/android.md, "The renderer in the app").
-  // In a session it draws on the device of the session, and its last
-  // picture shows on a stereo screen behind the menu.
-  const bool replay = app.ini.GetInt("bwvr", "stream_replay", 0) != 0;
+  // The renderer of the mod (docs/android.md, "The renderer in the app"). It
+  // plays one stream in a process: a file (stream_replay=1) or the live
+  // stream (stream_live=1). In a session it draws on the device of the
+  // session, and its last picture shows on a stereo screen behind the menu.
+  // The renderer keeps the images and the pipelines of its first device to
+  // the end of the process, so it takes one device in a process. The glue
+  // code of Android can start android_main again in the same process.
+  static bool renderer_ran = false;
+  bool replay = app.ini.GetInt("bwvr", "stream_replay", 0) != 0;
   app.live = app.ini.GetInt("bwvr", "stream_live", 0) != 0;
-  if ((replay || app.live) && app.xr_on && app.xr.Renderer13()) {
-    vk::External device;
-    app.xr.RendererDevice(&device);
-    vk::UseExternal(device);
+  if (replay && app.live) {
+    AppLog("replay       : stream_live=1, so no replay of bwvr-stream.bin. The "
+           "app plays one stream in a process");
+    replay = false;
+  }
+  if ((replay || app.live) && renderer_ran) {
+    AppLog("%s : the renderer ran in this process already, and it takes no "
+           "second device. No %s. Start the app again",
+           replay ? "replay      " : "live        ",
+           replay ? "replay" : "live stream, no reader thread and no feed process");
+    replay = false;
+    app.live = false;
+  } else if (replay || app.live) {
+    renderer_ran = true;
+    if (app.xr_on && app.xr.Renderer13()) {
+      vk::External device;
+      app.xr.RendererDevice(&device);
+      vk::UseExternal(device);
+    }
   }
   // A TEST AID (stream_replay=1 in bwvr.ini): the stream of the walks in
   // bwvr-stream.bin of the game folder goes to the Vulkan renderer of the

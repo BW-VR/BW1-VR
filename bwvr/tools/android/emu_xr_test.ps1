@@ -51,6 +51,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
+Lock-AndroidEmulator
 # The tools write notes to stderr. Each check here reads their output, so a
 # line on stderr must not stop the script.
 $ErrorActionPreference = 'Continue'
@@ -270,6 +271,8 @@ try {
     # Android can keep the process after the end of the activity, so the
     # log of the app is the proof.
     Expect ($log -match 'the session state is 8' -and $log -match 'app          : the app ends') 'the app ended after the runtime ended the session (EXITING)'
+    $copies = [regex]::Match($log, 'xr           : (\d+) copies into the layers, (\d+) skipped because the picture did not change \(xr_copy_on_change=1\)')
+    Expect ($copies.Success -and [int64]$copies.Groups[1].Value -gt 0 -and [int64]$copies.Groups[2].Value -gt 0) ("the app copied a layer only when its picture changed (" + $(if ($copies.Success) { $copies.Groups[1].Value + ' copies, ' + $copies.Groups[2].Value + ' skipped' } else { 'no line in the log' }) + ')')
 
     # The pictures as PNG files, for a look.
     Add-Type -AssemblyName System.Drawing
@@ -282,6 +285,14 @@ try {
     if ($started -and -not $Keep) {
         Say 'Stop the emulator'
         & $Adb -s $Serial emu kill 2>&1 | Out-Null
+        # adb lists the emulator for some seconds after the kill. A test that
+        # starts in that time on the same port would take it for a running
+        # emulator, so the script waits until it is gone.
+        $gone = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $gone -and
+               (& $Adb devices 2>$null | Select-String -Pattern "^$Serial\s")) {
+            Start-Sleep -Seconds 2
+        }
     }
 }
 

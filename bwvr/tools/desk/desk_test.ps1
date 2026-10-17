@@ -86,7 +86,10 @@ try {
     # pointer scales the same way both ways.
     # god_zoom_forward_in=1: the word stick_up of a recipe zooms in. Each
     # recipe counts on that, and the default of the mod zooms out with the
-    # stick forward.
+    # stick forward. god_zoom_smooth=0: a push of a recipe is one zoom step,
+    # as each recipe counts, also when the installed bwvr.ini has the smooth
+    # zoom (a push of 10 frames is then less than half a step, and the
+    # scenes of bench_run.ps1 are not at their zoom).
     $keys = [ordered]@{
         vr = 0; stereo = 1; stereo_headless = 1; fake_head = 1;
         fake_head_yaw = 0; fake_head_pitch = 0; fov_absolute_deg = 110
@@ -95,6 +98,7 @@ try {
         registry_test_guard = 1
         window_width = 800; window_height = 640
         god_zoom_forward_in = 1
+        god_zoom_smooth = 0
     }
     foreach ($k in $Extra.Keys) { $keys[$k] = $Extra[$k] }
 

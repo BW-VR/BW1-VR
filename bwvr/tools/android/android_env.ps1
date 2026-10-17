@@ -27,6 +27,24 @@ function Stop-Android([string]$Text) {
     exit 1
 }
 
+# THE LOCK OF THE EMULATOR TESTS. The emulator tests of each checkout and
+# each worktree use the same AVDs and ports. A test calls Lock-AndroidEmulator
+# before it starts or uses an emulator. When a test of another process holds
+# the lock, the test gives "NOT RUN" and the exit code 2. Windows frees the
+# lock when the process ends, also after a crash.
+$script:EmulatorLock = $null
+function Lock-AndroidEmulator {
+    $script:EmulatorLock = New-Object System.Threading.Mutex($false, 'Local\bwvr-android-emulator')
+    $held = $false
+    try { $held = $script:EmulatorLock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+    if (-not $held) {
+        Write-Host ''
+        Write-Host '   NOT RUN: an emulator test of another process runs. Start this test when it ended.' -ForegroundColor Yellow
+        Write-Host ''
+        exit 2
+    }
+}
+
 function Find-Newest([string]$Dir, [string]$Want) {
     if (-not (Test-Path -LiteralPath $Dir)) { return $null }
     $exact = Join-Path $Dir $Want

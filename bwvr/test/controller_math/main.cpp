@@ -3571,6 +3571,8 @@ void CreatureChecks() {
 #include "stream_checks.h"
 #include "stream_ring_checks.h"
 #include "proxy_choice_checks.h"
+#include "fight_checks.h"
+#include "vr_start_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3986,6 +3988,8 @@ int main() {
   stream_checks::StreamChecks();
   stream_ring_checks::StreamRingChecks();
   proxy_choice_checks::ProxyChoiceChecks();
+  fight_checks::FightChecks();
+  vr_start_checks::VrStartChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

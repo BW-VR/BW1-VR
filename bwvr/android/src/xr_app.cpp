@@ -473,7 +473,6 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
   layer->height = height;
   layer->swap_red_blue =
       format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_B8G8R8A8_UNORM;
-  layer->filled.assign(layer->images.size(), 0);
   if (!staging) return true;
   return MakeStaging(&gpu_, static_cast<VkDeviceSize>(width) * height * 4,
                      &layer->staging);
@@ -509,9 +508,18 @@ void XrApp::SetCursorPixels(const std::vector<uint8_t>& rgba) {
   cursor_written_ = true;
 }
 
+bool XrApp::LayerChanged(Layer* layer) {
+  if (copy_on_change_ && layer->released == layer->revision) {
+    ++copies_skipped_;
+    return false;
+  }
+  return true;
+}
+
 // The staging buffer into the next image of the swapchain. The runtime
 // takes a released image in the layout of a color attachment.
 void XrApp::CopyLayer(Layer* layer) {
+  if (!LayerChanged(layer)) return;
   uint32_t index = 0;
   XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &index),
@@ -521,15 +529,9 @@ void XrApp::CopyLayer(Layer* layer) {
   XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
   xrWaitSwapchainImage(layer->swapchain, &wait);
-  // An image that has the pixels of now needs no copy. The runtime gives a
-  // released image back with its content.
-  if (layer->filled[index] == layer->revision) {
-    XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-    xrReleaseSwapchainImage(layer->swapchain, &release);
-    return;
-  }
-  layer->filled[index] = layer->revision;
   const VkImage image = layer->images[index].image;
+  // The renderer submits to the same queue.
+  LockQueue();
   VkCommandBuffer cmd = GpuBegin(&gpu_);
   ImageBarrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
@@ -544,8 +546,11 @@ void XrApp::CopyLayer(Layer* layer) {
                VK_PIPELINE_STAGE_TRANSFER_BIT,
                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
   GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
+  UnlockQueue();
   XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
   xrReleaseSwapchainImage(layer->swapchain, &release);
+  layer->released = layer->revision;
+  ++copies_;
 }
 
 void XrApp::PollEvents(bool* quit) {
@@ -774,6 +779,7 @@ void XrApp::MarkScreenChanged() {
 // One eye of the picture of the renderer into the next image of its quad.
 void XrApp::CopyScreen(int eye) {
   Layer* layer = &screen_[eye];
+  if (!LayerChanged(layer)) return;
   uint32_t index = 0;
   XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &index),
@@ -783,12 +789,6 @@ void XrApp::CopyScreen(int eye) {
   XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
   xrWaitSwapchainImage(layer->swapchain, &wait);
-  if (layer->filled[index] == layer->revision) {
-    XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-    xrReleaseSwapchainImage(layer->swapchain, &release);
-    return;
-  }
-  layer->filled[index] = layer->revision;
   const VkImage target = layer->images[index].image;
   LockQueue();
   VkCommandBuffer cmd = GpuBegin(&gpu_);
@@ -853,6 +853,8 @@ void XrApp::CopyScreen(int eye) {
   UnlockQueue();
   XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
   xrReleaseSwapchainImage(layer->swapchain, &release);
+  layer->released = layer->revision;
+  ++copies_;
 }
 
 void XrApp::Pulse(int hand) {
@@ -869,6 +871,13 @@ void XrApp::Pulse(int hand) {
 }
 
 void XrApp::Stop() {
+  if (copies_ + copies_skipped_ > 0) {
+    AppLog("xr           : %llu copies into the layers, %llu skipped because "
+           "the picture did not change (xr_copy_on_change=%d)",
+           static_cast<unsigned long long>(copies_),
+           static_cast<unsigned long long>(copies_skipped_),
+           copy_on_change_ ? 1 : 0);
+  }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   FreeStaging(&gpu_, &menu_.staging);
   FreeStaging(&gpu_, &cursor_.staging);

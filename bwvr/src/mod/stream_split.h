@@ -78,11 +78,12 @@ inline uint32_t Walks(const uint8_t* unit, size_t n) {
   return walks;
 }
 
-// THE END OF A FRAME (vk_stream_live_end=1). A walk ends its frame when it is
-// the last walk of the frame: the one walk of one_walk=1, the walk of the
-// right eye (the second eye pass), or the walk of a frame with no eye passes.
-// The rule is the rule of vk_scene.cpp for the walk of a frame that has both
-// eyes (the picture of vk_scene_test_frame).
+// THE END OF A FRAME (vk_stream_live_end=1). The first walk of a frame that
+// has both eyes ends the frame: the one walk of one_walk=1, the walk of the
+// right eye (the second eye pass), or a walk with no eye pass. A later walk
+// of the same frame goes into the tail, at the start of the next frame. The
+// rule is the rule of vk_scene.cpp for the walk of a frame that has both eyes
+// (the picture of vk_scene_test_frame).
 inline bool WalkEndsFrame(const ss::StreamState& s) {
   return s.one_walk != 0 || s.pass_eye != 0;
 }
@@ -93,6 +94,24 @@ inline bool WalkEndsFrame(const ss::StreamState& s) {
 inline bool KeepWalks(size_t index, size_t count, size_t bound, bool picture) {
   if (picture) return true;
   return index + bound >= count;
+}
+
+// The one frame that passes the bound when a frame comes to a queue of count
+// frames: the frame before the newest bound frames. count when no frame
+// passes it.
+inline size_t PassesBound(size_t count, size_t bound) {
+  return count > bound ? count - bound - 1 : count;
+}
+
+// THE LIMIT OF THE QUEUE (stream_live_queue_mb). The frames of state are
+// small, but the session can stop (a session that does not run takes no
+// frame). When the bytes of the queue with a new frame pass the limit, the
+// reader clears the queue and leaves the ring: the writer stops at its next
+// frame and does not wait. When the session takes frames again, the reader
+// asks for the whole state (the way of a reader that comes late). limit 0:
+// no limit.
+inline bool QueueFull(size_t queue_bytes, size_t frame_bytes, size_t limit) {
+  return limit > 0 && queue_bytes + frame_bytes > limit;
 }
 
 }  // namespace stream_split

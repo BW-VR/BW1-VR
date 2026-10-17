@@ -22,7 +22,9 @@
 // kStart, kSurface or kWritten record never drops, and a frame with none
 // drops whole.
 // vk_stream_live_end: 1 (the default) a frame goes to the record and to the
-// ring at the end of its last walk. 0: at the start of the next frame.
+// ring at the end of its first walk with both eyes (stream_split.h), and a
+// later walk of the frame goes at the start of the next frame. 0: at the
+// start of the next frame.
 //
 // Both only with backend=vulkan: there the device of the mod gives each call
 // on the frame thread, in the order of the walk.

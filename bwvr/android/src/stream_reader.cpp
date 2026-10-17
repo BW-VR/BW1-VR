@@ -74,7 +74,7 @@ bool Open(const std::string& path, Map* m) {
 bool StreamReader::Start(const std::string& path, size_t frames, size_t queue_bytes) {
   path_ = path;
   whole_frames_ = frames;
-  queue_max_bytes_ = queue_bytes > 0 ? queue_bytes : 1;
+  queue_max_bytes_ = queue_bytes;
   stop_ = false;
   started_ = pthread_create(&thread_, nullptr, &StreamReader::Main, this) == 0;
   if (!started_) AppLog("live         : the reader thread did not start");
@@ -88,9 +88,17 @@ void StreamReader::Stop() {
   started_ = false;
 }
 
+size_t StreamReader::MostBytes() {
+  pthread_mutex_lock(&lock_);
+  const size_t most = most_bytes_;
+  pthread_mutex_unlock(&lock_);
+  return most;
+}
+
 bool StreamReader::TakeAll(std::vector<QueuedFrame>* frames) {
   frames->clear();
   pthread_mutex_lock(&lock_);
+  ++takes_;
   while (!queue_.empty()) {
     frames->push_back(std::move(queue_.front()));
     queue_.pop_front();
@@ -106,7 +114,7 @@ void* StreamReader::Main(void* self) {
 }
 
 void StreamReader::Run() {
-  enum class State { kNoRing, kAsk, kWait, kRead };
+  enum class State { kNoRing, kAsk, kWait, kRead, kPaused };
   State state = State::kNoRing;
   Map m;
   uint32_t session = 0, lost = 0, ask = 0;
@@ -118,6 +126,9 @@ void StreamReader::Run() {
   size_t queue_most = 0;
   int32_t test_frame = 0;
   std::vector<uint8_t> state_only;
+  size_t queue_most_bytes = 0;
+  uint64_t takes_at_pause = 0;
+  uint64_t pauses = 0;
   while (!stop_) {
     if (feed_ > 0) {
       int status = 0;
@@ -154,6 +165,19 @@ void StreamReader::Run() {
       AppLog("live         : the writer gave up on the reader. The app asks again");
       state = State::kAsk;
     }
+    if (state == State::kPaused) {
+      // The session took no frame while the queue filled. It takes frames
+      // again: ask for the whole state.
+      pthread_mutex_lock(&lock_);
+      const bool again = takes_ != takes_at_pause;
+      pthread_mutex_unlock(&lock_);
+      if (!again) {
+        SleepUs(2000);
+        continue;
+      }
+      AppLog("live         : the session takes frames again. The app asks for the whole state");
+      state = State::kAsk;
+    }
     if (state == State::kAsk) {
       pending.clear();
       ask = sr::Ask(m.head);
@@ -176,7 +200,7 @@ void StreamReader::Run() {
     pthread_mutex_lock(&lock_);
     const size_t waiting = queue_.empty() ? 0 : queue_bytes_;
     pthread_mutex_unlock(&lock_);
-    if (whole_frames_ == 0 && waiting >= queue_max_bytes_) {
+    if (whole_frames_ == 0 && queue_max_bytes_ > 0 && waiting >= queue_max_bytes_) {
       SleepUs(500);
       continue;
     }
@@ -218,34 +242,56 @@ void StreamReader::Run() {
       ++frames;
       bytes += len;
       pthread_mutex_lock(&lock_);
+      // THE LIMIT: a queue that the session does not take (a session that
+      // does not run) is cleared, and the reader leaves the ring.
+      if (whole_frames_ > 0 &&
+          stream_split::QueueFull(queue_bytes_, q.bytes.size(), queue_max_bytes_)) {
+        queue_.clear();
+        queue_bytes_ = 0;
+        takes_at_pause = takes_;
+        pthread_mutex_unlock(&lock_);
+        sr::Leave(m.head);
+        ++pauses;
+        AppLog("live         : the queue passed %zu MB, and the session took no frame. "
+               "The app clears the queue, leaves the ring and asks again when the "
+               "session takes frames",
+               queue_max_bytes_ >> 20);
+        state = State::kPaused;
+        break;
+      }
       queue_bytes_ += q.bytes.size();
       queue_.push_back(std::move(q));
-      // THE BOUND: the newest frames stay whole, and an older frame keeps
-      // only its records of state.
+      // THE BOUND: the newest frames stay whole. The one frame that passes
+      // the bound keeps only its records of state.
       if (whole_frames_ > 0) {
-        for (size_t i = 0; i < queue_.size(); ++i) {
+        const size_t i = stream_split::PassesBound(queue_.size(), whole_frames_);
+        if (i < queue_.size()) {
           QueuedFrame& old = queue_[i];
-          if (!old.whole ||
-              stream_split::KeepWalks(i, queue_.size(), whole_frames_, old.picture)) {
-            continue;
+          if (old.whole &&
+              !stream_split::KeepWalks(i, queue_.size(), whole_frames_, old.picture)) {
+            stream_split::StateOnly(old.bytes.data(), old.bytes.size(), &state_only);
+            queue_bytes_ -= old.bytes.size() - state_only.size();
+            old.bytes.swap(state_only);
+            old.whole = false;
+            ++stripped;
           }
-          stream_split::StateOnly(old.bytes.data(), old.bytes.size(), &state_only);
-          queue_bytes_ -= old.bytes.size() - state_only.size();
-          old.bytes.swap(state_only);
-          old.whole = false;
-          ++stripped;
         }
       }
       if (queue_.size() > queue_most) queue_most = queue_.size();
+      if (queue_bytes_ > queue_most_bytes) queue_most_bytes = queue_bytes_;
+      most_bytes_ = queue_most_bytes;
       pthread_mutex_unlock(&lock_);
     }
     if (state == State::kRead) pending.erase(pending.begin(), pending.begin() + used);
+    if (state == State::kPaused) pending.clear();
   }
   if (m.head != nullptr) sr::Leave(m.head);
   AppLog("live         : the reader leaves the ring: %llu frames, %llu bytes, at most %zu "
-         "frames waited for the session, %llu frames lost their walks in the queue",
+         "frames and %zu bytes waited for the session (the limit is %zu bytes), %llu "
+         "frames lost their walks in the queue, %llu times the queue passed the limit",
          static_cast<unsigned long long>(frames), static_cast<unsigned long long>(bytes),
-         queue_most, static_cast<unsigned long long>(stripped));
+         queue_most, queue_most_bytes, whole_frames_ > 0 ? queue_max_bytes_ : 0,
+         static_cast<unsigned long long>(stripped), static_cast<unsigned long long>(pauses));
   m.Close();
 }
 

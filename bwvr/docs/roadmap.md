@@ -781,14 +781,20 @@ that moves while the Hand takes it.
     `runblack.exe` needs an x86 runtime (Box64 with Wine in the WoW64 mode)
     in the app, and the poses and the actions of the session for the mod
     (`android.md`, "What the app cannot do yet"). A frame goes into the
-    ring at the end of its last walk, and in a desktop run each frame after
+    ring at the end of its first walk with both eyes, and in a desktop run each frame after
     a frame with the whole state was at the reader in its own game frame. A
     skip of the app and a drop of the writer keep the records of state and
     lose only the walks, and the queue of the app keeps 3 frames whole, so a
     slow reader does not hold the frame thread of the game. Open for the
-    live stream: the ring file under Wine and Box64, and the walks that keep
+    live stream: the ring file under Wine and Box64, the walks that keep
     the picture of the walk before (`vk_keep_picture`, the intro) after a
-    frame with no walks.
+    frame with no walks, and a run in a scene with more than one walk in a
+    frame or with records after the walk with both eyes (no run had such a
+    tail, and the move of the tail has no math check). A frame with kStart
+    drops the tail before it, also its kGaze and kOnlyFrame. No desk run
+    compared a frame of state of the writer with the record. The picture of
+    frame 3002 of the test save changes with the time of the run, so a desk
+    comparison of pictures needs runs close in time (A, B, A).
     With the render
     thread, one walk draws most batches in one draw for both eyes (`one_walk_merge`, `backend.md`, "One
     draw for both eyes"). Before the thread, with one walk, a view of the

@@ -343,7 +343,7 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    with the picture of the same name of the PC. The pass is at most 2
    percent of the pixels with a difference of more than 24 in a channel.
 5. **The live stream in the emulator** (`emu_live_test.ps1 -Run <folder>`,
-   22 checks). The feed (`ring-capture.bin`) and the pictures of the PC come
+   23 checks). The feed (`ring-capture.bin`) and the pictures of the PC come
    from one desktop run of `live_stream_run.ps1` (see "The live stream").
    The emulator has the GPU of the PC (`-gpu host`). The script puts the
    feed, `stream_live=1` and `stream_live_feed=1` into the game folder of
@@ -353,7 +353,8 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    from the same file. The checks: the ring file and its head, the answer
    to the ask, the first frame with the whole state, each frame of the feed
    played, no record of an unknown kind, the end of the child process with
-   the status 0 (the reader took each byte), no lost place, Vulkan 1.3, no
+   the status 0 (the reader took each byte), the queue of the app under its
+   limit with no session, no lost place, Vulkan 1.3, no
    crash, and each picture against the picture of the PC (the pass of step
    4). The results are in `bwvr/out/android/emu-live-test`.
 
@@ -534,14 +535,16 @@ and Box64 gives the interlocked instructions their barriers.
 
 **The writer** (`vk_stream_live=1`, `vk_stream.cpp`, only with
 `backend=vulkan`). At its start the mod makes the file and a new head. The
-records of a frame collect in the memory of the mod. At the end of the last
-walk of the frame (`vk_stream_live_end=1`, the default) they go into the
-ring, so the reader can have the frame in the game frame of its walks. The
-last walk is the one walk of `one_walk=1`, the walk of the right eye, or the
-walk of a frame with no eye passes (`WalkEndsFrame`, `stream_split.h`): the
-walk that `vk_scene.cpp` takes for the picture of a test. A record after
-that walk and before the next frame goes at the start of the next frame, in
-its order. The walks of "pen" have no record after the last walk.
+records of a frame collect in the memory of the mod. At the end of the walk
+of the frame with both eyes (`vk_stream_live_end=1`, the default) they go
+into the ring, so the reader can have the frame in the game frame of its walks. The
+frame ends at the first walk that has both eyes: the one walk of
+`one_walk=1`, the walk of the right eye, or a walk with no eye pass
+(`WalkEndsFrame`, `stream_split.h`), the walk that `vk_scene.cpp` takes for
+the picture of a test. A record after that walk and before the next frame,
+also a later walk of the same frame, goes at the start of the next frame
+(the tail), in its order. The walks of "pen" have no record after that
+walk.
 `vk_stream_live_end=0`: a frame goes at the start of the next frame of the
 game. A record (`vk_stream_record`) and the live stream get the same bytes
 for a frame, and the first frame of a record has the whole state for both.
@@ -590,7 +593,14 @@ frame and of each frame with a picture of a test (`vk_scene_test_frame` of
 the stream, or F12), and only the records of state of the other frames (the
 log counts them as skipped). So the picture is at most one batch late, and
 no surface is lost. Then the eye picture goes to the stereo screen with a
-new revision, one for each batch. `stream_live_frames=0`: the queue takes
+new revision, one for each batch. With `stream_live_frames` above 0 the
+queue has a limit of `stream_live_queue_mb` (64 by default): when a frame
+would pass it, for example while the session does not run and takes no
+frame, the reader clears the queue and leaves the ring, so the writer stops
+at its next frame with no wait. When the session takes frames again, the
+reader asks for the whole state, as a reader that comes late
+(`QueueFull`, `stream_split.h`). `stream_live_queue_mb=0`: no limit.
+`stream_live_frames=0`: the queue takes
 up to 64 MB of whole frames, and a batch plays each frame with a `kStart`,
 `kSurface` or `kWritten` record, each frame with a picture of a test and the
 newest frame (`PlayInBatch`, `stream_ring.h`).
@@ -652,7 +662,20 @@ and the frame rate of the live stream in a headset.
   walks of "pen" start with a clear.
 - A frame with the whole state (14.4 MB in "pen") takes some milliseconds in
   the writer and in the reader, so the next frames come 1 to 4 game frames
-  late.
+  late. Its 13.6 MB of pixels can wait in parts for room in the ring, also
+  with the room that the walks leave free (4 MB).
+- No run had a tail or more than one walk in a frame, and the move of the
+  tail at the start of the next frame (`VkStreamFrame`) has no math check.
+- A frame with `kStart` drops the tail before it, also the `kGaze` and the
+  `kOnlyFrame` of the tail.
+- No desk run compared a frame of state of the writer (a frame with no
+  walks) with the record: the slow reader of the desk run took each frame
+  of the record whole.
+- The picture of frame 3002 of the test save changes with the time of the
+  run (the same build gave other pictures 8 minutes later). A comparison of
+  pictures of two builds needs runs close in time, in the order A, B, A.
+- The limit of the queue of the app (`stream_live_queue_mb`) ran in no
+  test: no test stops the session while frames come.
 - With `vk_stream_live_drop=0` and `stream_live_frames=0` (the first way) a
   slow app holds the frame thread of the game, and the picture can come
   more than 1.5 s late (about 126 frames a second in place of 536 with the

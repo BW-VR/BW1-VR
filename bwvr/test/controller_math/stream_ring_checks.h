@@ -314,6 +314,25 @@ inline void StreamRingChecks() {
               sp::KeepWalks(2, 5, 3, false) && !sp::KeepWalks(1, 5, 3, false) &&
               sp::KeepWalks(0, 5, 1, true),
           "the queue keeps the walks of the newest frames and of a picture of a test", 0, 0);
+    // A frame comes to a queue of 3 whole frames: only the oldest one passes
+    // the bound of 3, and each frame before it lost its walks already.
+    Check(sp::PassesBound(4, 3) == 0 && sp::PassesBound(9, 3) == 5 && sp::PassesBound(3, 3) == 3 &&
+              sp::PassesBound(1, 3) == 1,
+          "the one frame that passes the bound of 3 is the frame before the newest 3",
+          static_cast<double>(sp::PassesBound(9, 3)), 5);
+    // A queue of frames that the session does not take: 1000 frames of
+    // state of 12560 bytes stay under 64 MB, and the next frame of 785000
+    // bytes after 85 whole ones passes it.
+    const size_t limit = 64u << 20;
+    size_t q = 0;
+    int whole_frames = 0;
+    while (!sp::QueueFull(q, 785000, limit)) {
+      q += 785000;
+      ++whole_frames;
+    }
+    Check(!sp::QueueFull(1000 * 12560, 12560, limit) && whole_frames == 85 &&
+              !sp::QueueFull(q, 1000000000, 0),
+          "a queue passes 64 MB at the 86th whole frame, and 0 is no limit", whole_frames, 85);
   }
 
   // A READER THAT COMES LATE. The first reader takes the first frame, then it

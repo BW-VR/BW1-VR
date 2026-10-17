@@ -131,7 +131,8 @@ void LiveSummary(App* app, const char* why) {
   AppLog("live         : %s: %llu frames played and %llu skipped (frames %llu to "
          "%llu), %llu pictures. In all %llu records, %llu walks, %llu draws, "
          "%llu surfaces, %llu of an unknown kind%s. The play of a picture took "
-         "%.1f ms as a mean and %.1f ms at most",
+         "%.1f ms as a mean and %.1f ms at most. The queue held %zu bytes at "
+         "most (the limit is %zu bytes, 0 is none)",
          why, static_cast<unsigned long long>(app->live_frames),
          static_cast<unsigned long long>(app->live_skipped),
          static_cast<unsigned long long>(app->live_first),
@@ -144,7 +145,8 @@ void LiveSummary(App* app, const char* why) {
          static_cast<unsigned long long>(r.unknown),
          r.broken ? ", a frame stops in a record" : "",
          app->live_pictures > 0 ? app->live_play_ms / app->live_pictures : 0.0,
-         app->live_play_most);
+         app->live_play_most, app->live_reader.MostBytes(),
+         app->live_reader.LimitBytes());
 }
 
 // The frames of the live stream into the renderer, at each frame of the
@@ -569,7 +571,15 @@ void android_main(android_app* android) {
            app.live_whole > 0 ? "The newest frames of the queue stay whole, and "
                                 "an older frame keeps only its records of state"
                               : "Up to 64 MB of whole frames wait for the session");
-    app.live_reader.Start(ring, app.live_whole, 64u << 20);
+    // stream_live_queue_mb (64 by default): with stream_live_frames > 0 a
+    // queue that passes this limit is cleared, for example while the
+    // session does not run, and the app asks again for the whole state. 0:
+    // no limit.
+    const int queue_mb = app.ini.GetInt("bwvr", "stream_live_queue_mb", 64);
+    const size_t queue_bytes =
+        app.live_whole > 0 ? static_cast<size_t>(queue_mb > 0 ? queue_mb : 0) << 20
+                           : static_cast<size_t>(64u << 20);
+    app.live_reader.Start(ring, app.live_whole, queue_bytes);
   }
   if (app.xr_on) {
     TakeHeadsetSize(&app);

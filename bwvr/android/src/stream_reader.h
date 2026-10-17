@@ -31,14 +31,19 @@ class StreamReader {
  public:
   // The thread for the ring at path. frames > 0: the reader takes each
   // frame of the ring at once, and the newest frames of the queue stay
-  // whole. frames == 0: the way of queue_bytes, the most bytes of frames
-  // that wait for the session. A full queue takes no byte from the ring, so
-  // the writer waits or drops (stream_ring.h).
+  // whole. A queue that passes queue_bytes (0: no limit) is cleared, the
+  // reader leaves the ring and asks again when the session takes frames
+  // again (stream_split.h, QueueFull). frames == 0: queue_bytes is the most
+  // bytes of frames that wait for the session. A full queue takes no byte
+  // from the ring, so the writer waits or drops (stream_ring.h).
   bool Start(const std::string& path, size_t frames, size_t queue_bytes);
   // Leaves the ring (the writer stops) and ends the thread.
   void Stop();
   // Each frame that waits, the oldest first, or false when none waits.
   bool TakeAll(std::vector<QueuedFrame>* frames);
+  // The most bytes that waited in the queue, and the limit (0: none).
+  size_t MostBytes();
+  size_t LimitBytes() const { return whole_frames_ > 0 ? queue_max_bytes_ : 0; }
 
   // A TEST AID (stream_live_feed=1): a child process writes the frames of
   // the stream file feed into the ring as the mod does, so the reader takes
@@ -61,5 +66,7 @@ class StreamReader {
   std::atomic<bool> stop_{false};
   pthread_mutex_t lock_ = PTHREAD_MUTEX_INITIALIZER;
   std::deque<QueuedFrame> queue_;
+  uint64_t takes_ = 0;  // the calls of TakeAll: the session takes frames
+  size_t most_bytes_ = 0;
   pid_t feed_ = 0;
 };

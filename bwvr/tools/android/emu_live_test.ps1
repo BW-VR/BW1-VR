@@ -203,6 +203,8 @@ try {
         Expect ([int]$m.Groups[7].Value -gt 0 -and [int]$m.Groups[8].Value -gt 0) "the frames had $($m.Groups[7].Value) walks, $($m.Groups[8].Value) draws and $($m.Groups[9].Value) surfaces"
         Expect ([int]$m.Groups[10].Value -eq 0 -and $m.Groups[11].Value -eq '') 'each record had a kind that the player knows, and no frame stops in a record'
         Write-Host ("   info  the play of a picture took {0} ms as a mean and {1} ms at most" -f $m.Groups[12].Value, $m.Groups[13].Value)
+        $queue = [regex]::Match($log, 'The queue held (\d+) bytes at most \(the limit is (\d+) bytes')
+        Expect ($queue.Success -and [int64]$queue.Groups[2].Value -gt 0 -and [int64]$queue.Groups[1].Value -le [int64]$queue.Groups[2].Value -and $log -notmatch 'the queue passed') ("the queue of the app stayed under its limit with no session" + $(if ($queue.Success) { ": $($queue.Groups[1].Value) of $($queue.Groups[2].Value) bytes" } else { ': no line in the log' }))
     }
     Expect ($log -match 'live         : the feed process ended with the status 0') 'the feed process ended with the status 0: the reader took each byte'
     Expect ($log -notmatch 'live         : the writer gave up|live         : a record in the ring is not|live         : the indices of the ring are not valid') 'the reader did not lose its place'

@@ -526,6 +526,11 @@ Android. The plan, in steps:
    emulator. Wine needs no x86_64 libraries and no Linux program box64.
    `wowbox64.dll` is a DLL for Windows on ARM64, so its build needs a
    compiler for Windows (llvm-mingw): the NDK has no headers of Windows.
+   `build_box64.ps1 -Source <folder> -Mingw <bin folder of llvm-mingw>`
+   builds it. With Box64 v0.4.4 and llvm-mingw 20261006 it is a DLL for
+   ARM64 (machine 0xAA64) of 4.5 MB with the 13 exports `BTCpu...` of the
+   CPU interface of the WoW64 of Wine, and it imports only `ntdll.dll` and
+   `wow64.dll`. It did not run yet: it needs the ARM64 Wine.
    The fall back is an x86_64 Wine in the WoW64 mode under the Linux
    program box64, with the x86_64 libraries of glibc that it needs.
 2. **The walks for the renderer in the app, live.** The renderer is in the

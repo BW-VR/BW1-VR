@@ -121,6 +121,8 @@ void LogTargetWrite(const char* how, const RECT* rect, DWORD flags,
 volatile LONG g_surfaces = 0;
 volatile LONG g_surfaces_made = 0;
 volatile LONG g_presents = 0;
+// The presents that went to the window through GDI. vulkan_strict=1 has none.
+volatile LONG g_gdi_presents = 0;
 volatile LONG g_dxt_blts = 0;
 volatile LONG g_copy_blts = 0;
 volatile LONG g_fills = 0;
@@ -1884,9 +1886,21 @@ void Surface::Present() {
   if (w == 0 || h == 0) return;
   // A swapchain of Vulkan on the window (vk_window=1), else the way through
   // the CPU and GDI. GDI can draw into the window only when it has no
-  // swapchain.
-  if (VkWindowWanted()) {
+  // swapchain. With vulkan_strict=1 there is no way through GDI: a window
+  // that Vulkan cannot show stays as it is.
+  if (VkWindowWanted() || ProxyVulkanStrict()) {
     if (VkScenePresentWindow(window, w, h)) return;
+  }
+  if (ProxyVulkanStrict()) {
+    // Before the first walk Vulkan has no picture for the window, and GDI
+    // would have none too. The line is for a picture that the window lost.
+    static LONG s_said = 0;
+    if (vk::Started() && InterlockedExchange(&s_said, 1) == 0) {
+      ModLog("vk ddraw     : vulkan_strict=1, and the swapchain of Vulkan on "
+             "the window does not show the picture. The window gets no "
+             "picture (no GDI)");
+    }
+    return;
   }
   VkWindowStop();
   int pitch = 0;
@@ -1901,6 +1915,7 @@ void Surface::Present() {
   info.bmiHeader.biCompression = BI_RGB;
   HDC dc = ::GetDC(window);
   if (dc == nullptr) return;
+  InterlockedIncrement(&g_gdi_presents);
   SetDIBitsToDevice(dc, 0, 0, w, h, 0, 0, 0, h, pixels, &info,
                     DIB_RGB_COLORS);
   ::ReleaseDC(window, dc);
@@ -2075,9 +2090,10 @@ bool VkDdrawOn() { return g_on; }
 void VkDdrawReport(unsigned long long frames) {
   if (!g_on || frames == 0) return;
   ModLog("vk ddraw     : %ld surfaces (%ld made since the start). In the "
-         "window: %ld presents, %ld color fills, %ld copies, %ld copies from "
-         "DXT",
+         "window: %ld presents (%ld through GDI), %ld color fills, %ld copies, "
+         "%ld copies from DXT",
          g_surfaces, g_surfaces_made, InterlockedExchange(&g_presents, 0),
+         InterlockedExchange(&g_gdi_presents, 0),
          InterlockedExchange(&g_fills, 0), InterlockedExchange(&g_copy_blts, 0),
          InterlockedExchange(&g_dxt_blts, 0));
   const LONG line_draws = InterlockedExchange(&g_line_draws, 0);

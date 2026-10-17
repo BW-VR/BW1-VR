@@ -244,6 +244,8 @@ void NearPlaneSetOptions(int cm_24, int cm_16);
 void NearPlaneInstall();
 // proxy/ddraw_proxy.cpp
 void ProxyForceSystemDDraw();
+bool ProxyVulkanStrict();
+void ProxySetLog(void (*log)(const char* format, ...));
 void ProxyCreateStarts(unsigned char ex[2], unsigned char old[2]);
 void GpuBridgeInstall();
 // d3d9_backend.cpp
@@ -2326,8 +2328,17 @@ void EarlyHooks() {
   Depth24SetWanted(GetPrivateProfileIntA("bwvr", "depth24", 1, path) != 0);
   // backend=vulkan with vulkan_only=1: no DXVK, no hook on Direct3D 9 and no
   // load of d3d9.dll.
+  // vulkan_strict=1 (ddraw_proxy.cpp, "ONLY VULKAN"): vulkan_only=1 too,
+  // whatever the ini says.
   g_vulkan_only = ProxyBackendVulkan() &&
-                  GetPrivateProfileIntA("bwvr", "vulkan_only", 1, path) != 0;
+                  (ProxyVulkanStrict() ||
+                   GetPrivateProfileIntA("bwvr", "vulkan_only", 1, path) != 0);
+  if (ProxyVulkanStrict()) {
+    ModLog("vulkan strict: vulkan_strict=1. The mod draws with Vulkan alone: "
+           "no DirectDraw of the system, no dxwrapper, no Direct3D 9, no "
+           "Direct3D 11 and no GDI for the window. A step that needs one of "
+           "them gives an error and a line of the log");
+  }
   if (ProxyBackendVulkan()) {
     ModLog("vulkan only  : vulkan_only=%d. %s", g_vulkan_only ? 1 : 0,
            g_vulkan_only
@@ -2603,14 +2614,25 @@ bool VulkanOnly() { return g_vulkan_only; }
 // the process. The OpenXR runtime and the driver can load some of them
 // themselves.
 void LogDirect3DModules(const char* when) {
-  static const char* const kNames[] = {"dxwrapper.dll", "d3d9.dll",
-                                       "d3d11.dll", "dxgi.dll", "d3d12.dll"};
-  char loaded[160] = "";
-  char absent[160] = "";
+  static const char* const kNames[] = {
+      "dxwrapper.dll", "d3d9.dll",  "d3d11.dll",    "dxgi.dll",
+      "d3d12.dll",     "d3dim.dll", "d3dim700.dll", "opengl32.dll"};
+  char loaded[256] = "";
+  char absent[256] = "";
   for (const char* name : kNames) {
     char* list = GetModuleHandleA(name) != nullptr ? loaded : absent;
-    if (list[0] != 0) strcat_s(list, 160, ", ");
-    strcat_s(list, 160, name);
+    if (list[0] != 0) strcat_s(list, 256, ", ");
+    strcat_s(list, 256, name);
+  }
+  // The DirectDraw of the system has the name of the mod, so only its path
+  // tells it apart (vulkan_strict=1 does not load it).
+  char system[MAX_PATH];
+  const UINT n = GetSystemDirectoryA(system, MAX_PATH);
+  if (n > 0 && n < MAX_PATH - 12) {
+    strcat_s(system, "\\ddraw.dll");
+    char* list = GetModuleHandleA(system) != nullptr ? loaded : absent;
+    if (list[0] != 0) strcat_s(list, 256, ", ");
+    strcat_s(list, 256, "the ddraw.dll of the system");
   }
   ModLog("modules      : %s. In the process: %s. Not in the process: %s", when,
          loaded[0] != 0 ? loaded : "none", absent[0] != 0 ? absent : "none");
@@ -2664,6 +2686,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
   if (reason == DLL_PROCESS_ATTACH) {
     DisableThreadLibraryCalls(instance);
     OpenLog();
+    // The lines of the exports of vulkan_strict=1 go to this log.
+    ProxySetLog(&ModLog);
     // Before any hook goes in, and before a backend loads.
     const bool game_ok = CheckGameBuild();
     if (game_ok) {

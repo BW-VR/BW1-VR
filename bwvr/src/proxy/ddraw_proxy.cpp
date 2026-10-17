@@ -38,8 +38,21 @@
 // A name with no path is looked for beside the game first. Anything the
 // chosen backend does not export falls back to system DirectDraw, so a
 // partial implementation cannot leave a null pointer behind a thunk.
+//
+// ONLY VULKAN (vulkan_strict=1, docs/backend.md, "Only Vulkan"). The backend
+// is vulkan whatever the key backend says, and the proxy loads no other
+// DirectDraw: not the one of the system, not dxwrapper. Each export is a
+// function of this file. The enumeration gives the one display of the mod,
+// and an export that the mod does not make stops the game with a line of
+// the log. With a runblack.exe that is not v1.42 the mod makes no
+// DirectDraw, so the game gets an error at its first DirectDraw call. The
+// headset app always writes vulkan_strict=1. 0 (the default) keeps the ways
+// above.
 
 #include <windows.h>
+#include <ddraw.h>
+
+#include "proxy_choice_math.h"
 
 #include "ddraw_proxy.h"
 
@@ -47,6 +60,12 @@ namespace {
 
 HMODULE g_real = nullptr;
 HMODULE g_system = nullptr;
+
+// vulkan_strict of bwvr.ini, read one time.
+bool g_strict = false;
+bool g_strict_read = false;
+// The log of the mod (ProxySetLog). The probe has none.
+void (*g_log)(const char* format, ...) = nullptr;
 
 // What happened, for the log. The proxy loads before logging starts, so it
 // leaves a note for Startup to print.
@@ -108,6 +127,19 @@ bool g_force_system = false;
 // backend=vulkan (ReadBackendSetting).
 bool g_vulkan = false;
 
+bool ReadStrict() {
+  if (g_strict_read) return g_strict;
+  g_strict_read = true;
+  char folder[MAX_PATH];
+  GameFolder(folder, MAX_PATH);
+  if (folder[0] == 0) return false;
+  char ini[MAX_PATH];
+  lstrcpynA(ini, folder, MAX_PATH);
+  lstrcatA(ini, "bwvr.ini");
+  g_strict = GetPrivateProfileIntA("bwvr", "vulkan_strict", 0, ini) != 0;
+  return g_strict;
+}
+
 // Reads the backend name from bwvr.ini. Returns false when the setting names
 // the system implementation, or when there is nothing to load.
 //
@@ -116,8 +148,7 @@ bool g_vulkan = false;
 // what every measurement in docs/backend.md was made on. System DirectDraw
 // cannot go far above 720p here, so a missing key must not choose it.
 bool ReadBackendSetting(char* out, size_t size) {
-  if (g_force_system) return false;
-
+  if (size > 0) out[0] = 0;
   char folder[MAX_PATH];
   GameFolder(folder, MAX_PATH);
   if (folder[0] == 0) return false;
@@ -125,28 +156,25 @@ bool ReadBackendSetting(char* out, size_t size) {
   char ini[MAX_PATH];
   lstrcpynA(ini, folder, MAX_PATH);
   lstrcatA(ini, "bwvr.ini");
-
-  out[0] = 0;
-  if (GetFileAttributesA(ini) != INVALID_FILE_ATTRIBUTES) {
+  if (!g_force_system && GetFileAttributesA(ini) != INVALID_FILE_ATTRIBUTES) {
     GetPrivateProfileStringA("bwvr", "backend", "", out,
                              static_cast<DWORD>(size), ini);
   }
-  if (out[0] == 0) {
-    const char* fallback = "dxwrapper\\ddraw.dll";
-    char beside[MAX_PATH];
-    lstrcpynA(beside, folder, MAX_PATH);
-    lstrcatA(beside, fallback);
-    if (GetFileAttributesA(beside) == INVALID_FILE_ATTRIBUTES) return false;
-    lstrcpynA(out, fallback, static_cast<int>(size));
-    return true;
-  }
-  if (lstrcmpiA(out, "system") == 0) return false;
-  // backend=vulkan: the mod makes DirectDraw itself (vk_ddraw.cpp). System
-  // DirectDraw gives only the exports that the mod does not make.
-  if (lstrcmpiA(out, "vulkan") == 0) {
-    g_vulkan = true;
-    return false;
-  }
+  const char* fallback = "dxwrapper\\ddraw.dll";
+  char beside[MAX_PATH];
+  lstrcpynA(beside, folder, MAX_PATH);
+  lstrcatA(beside, fallback);
+  const bool dxwrapper_there =
+      GetFileAttributesA(beside) != INVALID_FILE_ATTRIBUTES;
+
+  // proxy_choice_math.h: vulkan_strict=1 gives the DirectDraw of the mod or
+  // none. backend=vulkan: the mod makes DirectDraw itself (vk_ddraw.cpp), and
+  // system DirectDraw gives only the exports that the mod does not make.
+  const proxy_choice::Path path = proxy_choice::Choose(
+      ReadStrict(), g_force_system, out, dxwrapper_there);
+  g_vulkan = path == proxy_choice::Path::kModVulkan;
+  if (path != proxy_choice::Path::kDll) return false;
+  if (out[0] == 0) lstrcpynA(out, fallback, static_cast<int>(size));
   return true;
 }
 
@@ -165,7 +193,143 @@ HMODULE SystemDDraw() {
   return g_system;
 }
 
+// THE EXPORTS OF ONLY VULKAN (vulkan_strict=1). Each one has the calling
+// convention and the arguments of the export of DirectDraw, because the
+// thunks jump to it with the stack of the caller.
+HRESULT WINAPI StrictCreateEx(GUID*, void** out, REFIID, IUnknown*) {
+  // The mod makes DirectDraw through ProxySetCreateHooks. Here no hook is
+  // set, so the game is not v1.42 and gets no DirectDraw.
+  if (out != nullptr) *out = nullptr;
+  if (g_log != nullptr) {
+    g_log("backend      : vulkan_strict=1, and the mod makes no DirectDraw "
+          "(the game is not the v1.42 file). DirectDrawCreateEx gives an "
+          "error");
+  }
+  return DDERR_GENERIC;
+}
+
+HRESULT WINAPI StrictCreate(GUID*, void** out, IUnknown*) {
+  if (out != nullptr) *out = nullptr;
+  if (g_log != nullptr) {
+    g_log("backend      : vulkan_strict=1, and the mod makes no DirectDraw "
+          "(the game is not the v1.42 file). DirectDrawCreate gives an error");
+  }
+  return DDERR_GENERIC;
+}
+
+// The one display of the DirectDraw of the mod: the primary display, with no
+// GUID, as the first entry of the enumeration of Windows.
+const char kDisplayName[] = "display";
+const char kDisplayText[] = "Primary Display Driver";
+const wchar_t kDisplayNameW[] = L"display";
+const wchar_t kDisplayTextW[] = L"Primary Display Driver";
+
+HRESULT WINAPI StrictEnumerateA(LPDDENUMCALLBACKA callback, LPVOID context) {
+  if (callback == nullptr) return DDERR_INVALIDPARAMS;
+  callback(nullptr, const_cast<LPSTR>(kDisplayText),
+           const_cast<LPSTR>(kDisplayName), context);
+  return DD_OK;
+}
+
+HRESULT WINAPI StrictEnumerateW(LPDDENUMCALLBACKW callback, LPVOID context) {
+  if (callback == nullptr) return DDERR_INVALIDPARAMS;
+  callback(nullptr, const_cast<LPWSTR>(kDisplayTextW),
+           const_cast<LPWSTR>(kDisplayNameW), context);
+  return DD_OK;
+}
+
+HRESULT WINAPI StrictEnumerateExA(LPDDENUMCALLBACKEXA callback, LPVOID context,
+                                  DWORD) {
+  if (callback == nullptr) return DDERR_INVALIDPARAMS;
+  callback(nullptr, const_cast<LPSTR>(kDisplayText),
+           const_cast<LPSTR>(kDisplayName), context, nullptr);
+  return DD_OK;
+}
+
+HRESULT WINAPI StrictEnumerateExW(LPDDENUMCALLBACKEXW callback, LPVOID context,
+                                  DWORD) {
+  if (callback == nullptr) return DDERR_INVALIDPARAMS;
+  callback(nullptr, const_cast<LPWSTR>(kDisplayTextW),
+           const_cast<LPWSTR>(kDisplayNameW), context, nullptr);
+  return DD_OK;
+}
+
+HRESULT WINAPI StrictCreateClipper(DWORD, LPDIRECTDRAWCLIPPER* out, IUnknown*) {
+  if (out != nullptr) *out = nullptr;
+  return DDERR_UNSUPPORTED;
+}
+
+HRESULT WINAPI StrictCanUnloadNow() { return S_FALSE; }
+
+HRESULT WINAPI StrictGetClassObject(REFCLSID, REFIID, LPVOID* out) {
+  if (out != nullptr) *out = nullptr;
+  return CLASS_E_CLASSNOTAVAILABLE;
+}
+
+// The other exports are inner parts of DirectDraw that the game does not
+// call. Their arguments are not documented, so a stub cannot return to the
+// caller with the right stack: it stops the game with a line of the log.
+void StrictMissing(const char* name) {
+  if (g_log != nullptr) {
+    g_log("backend      : vulkan_strict=1, and the game called %s, which the "
+          "DirectDraw of the mod does not make. With no other DirectDraw the "
+          "game stops",
+          name);
+  }
+  ExitProcess(3);
+}
+
+#define BWVR_STRICT_MISSING(name) \
+  void WINAPI StrictMissing_##name() { StrictMissing(#name); }
+BWVR_STRICT_MISSING(AcquireDDThreadLock)
+BWVR_STRICT_MISSING(CompleteCreateSysmemSurface)
+BWVR_STRICT_MISSING(D3DParseUnknownCommand)
+BWVR_STRICT_MISSING(DDGetAttachedSurfaceLcl)
+BWVR_STRICT_MISSING(DDInternalLock)
+BWVR_STRICT_MISSING(DDInternalUnlock)
+BWVR_STRICT_MISSING(DSoundHelp)
+BWVR_STRICT_MISSING(GetDDSurfaceLocal)
+BWVR_STRICT_MISSING(GetOLEThunkData)
+BWVR_STRICT_MISSING(GetSurfaceFromDC)
+BWVR_STRICT_MISSING(RegisterSpecialCase)
+BWVR_STRICT_MISSING(ReleaseDDThreadLock)
+BWVR_STRICT_MISSING(SetAppCompatData)
+#undef BWVR_STRICT_MISSING
+
+void SetStrictExports() {
+#define BWVR_STRICT(name, fn) real_##name = reinterpret_cast<FARPROC>(&fn);
+  BWVR_STRICT(DirectDrawCreate, StrictCreate)
+  BWVR_STRICT(DirectDrawCreateEx, StrictCreateEx)
+  BWVR_STRICT(DirectDrawEnumerateA, StrictEnumerateA)
+  BWVR_STRICT(DirectDrawEnumerateW, StrictEnumerateW)
+  BWVR_STRICT(DirectDrawEnumerateExA, StrictEnumerateExA)
+  BWVR_STRICT(DirectDrawEnumerateExW, StrictEnumerateExW)
+  BWVR_STRICT(DirectDrawCreateClipper, StrictCreateClipper)
+  BWVR_STRICT(DllCanUnloadNow, StrictCanUnloadNow)
+  BWVR_STRICT(DllGetClassObject, StrictGetClassObject)
+#define BWVR_STRICT_SELF(name) BWVR_STRICT(name, StrictMissing_##name)
+  BWVR_STRICT_SELF(AcquireDDThreadLock)
+  BWVR_STRICT_SELF(CompleteCreateSysmemSurface)
+  BWVR_STRICT_SELF(D3DParseUnknownCommand)
+  BWVR_STRICT_SELF(DDGetAttachedSurfaceLcl)
+  BWVR_STRICT_SELF(DDInternalLock)
+  BWVR_STRICT_SELF(DDInternalUnlock)
+  BWVR_STRICT_SELF(DSoundHelp)
+  BWVR_STRICT_SELF(GetDDSurfaceLocal)
+  BWVR_STRICT_SELF(GetOLEThunkData)
+  BWVR_STRICT_SELF(GetSurfaceFromDC)
+  BWVR_STRICT_SELF(RegisterSpecialCase)
+  BWVR_STRICT_SELF(ReleaseDDThreadLock)
+  BWVR_STRICT_SELF(SetAppCompatData)
+#undef BWVR_STRICT_SELF
+#undef BWVR_STRICT
+}
+
 }  // namespace
+
+void ProxySetLog(void (*log)(const char* format, ...)) { g_log = log; }
+
+bool ProxyVulkanStrict() { return ReadStrict(); }
 
 // Called before ProxyLoadRealDDraw when the game build is not the one the
 // mod fits. See CheckGameBuild in mod_main.cpp.
@@ -184,6 +348,22 @@ bool ProxyBackendVulkan() {
 }
 
 bool ProxyLoadRealDDraw() {
+  // vulkan_strict=1: no DLL of another DirectDraw, and each export of this
+  // file.
+  if (ReadStrict()) {
+    char backend[MAX_PATH];
+    ReadBackendSetting(backend, MAX_PATH);
+    SetStrictExports();
+    lstrcpynA(g_note,
+              g_vulkan
+                  ? "backend      : vulkan_strict=1. The DirectDraw of the mod "
+                    "(vk_ddraw.cpp) alone: no DirectDraw of the system, no "
+                    "dxwrapper, whatever the key backend says"
+                  : "backend      : vulkan_strict=1, and the game is not the "
+                    "v1.42 file. No DirectDraw: the game gets an error",
+              sizeof(g_note));
+    return true;
+  }
   char backend[MAX_PATH];
   if (ReadBackendSetting(backend, MAX_PATH)) {
     char folder[MAX_PATH];

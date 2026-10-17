@@ -176,6 +176,7 @@ try {
     if (Test-Path -LiteralPath (Join-Path $Out 'bwvr.ini')) { $saved = Get-Content -LiteralPath (Join-Path $Out 'bwvr.ini') -Raw }
     Expect ($saved -match '(?m)^snap_turn=3\r?$') 'the key step made snap_turn 3 (90 degrees), and the save wrote it'
     Expect ($saved -match '(?m)^backend=vulkan\r?$') 'the save wrote backend=vulkan'
+    Expect ($saved -match '(?m)^vulkan_strict=1\r?$') 'the save wrote vulkan_strict=1: no fallback of the mod'
     Expect ($saved -match '(?m)^vr=1\r?$' -and $saved -match '(?m)^stereo=1\r?$' -and $saved -match '(?m)^head_camera=1\r?$') 'the save wrote vr, stereo and head_camera'
     Expect ($saved -notmatch 'gpu_bridge' -and $saved -notmatch 'fake_head') 'the save removed gpu_bridge and a retired key'
     Expect ($saved -match '(?m)^keep_me=7\r?$' -and $saved -match '(?m)^menu_capture=1\r?$') 'the save kept the keys that are not in the table'

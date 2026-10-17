@@ -26,3 +26,10 @@ void* ProxyRealExport(const char* name);
 // backend=vulkan in bwvr.ini: the proxy loaded no backend DLL, and the mod
 // makes DirectDraw itself (vk_ddraw.h).
 bool ProxyBackendVulkan();
+
+// vulkan_strict=1 in bwvr.ini (ddraw_proxy.cpp, "ONLY VULKAN"): the mod
+// draws with Vulkan alone, with no fallback to another DirectDraw, to
+// Direct3D or to GDI.
+bool ProxyVulkanStrict();
+// The log of the mod, for the lines of the exports of ONLY VULKAN.
+void ProxySetLog(void (*log)(const char* format, ...));

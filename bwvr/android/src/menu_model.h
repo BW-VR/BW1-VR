@@ -65,8 +65,8 @@ class Menu {
           break;
         }
         case st::kValues:
-          // The God view replaced the immersive mode, play mode 0. An older
-          // bwvr.ini can still hold 0, and it shows the God view.
+          // play_mode 0 is not a mode of the table, and it shows the God
+          // view, as in the launcher.
           if (strcmp(s.key, "play_mode") == 0 && value == 0) value = 4;
           value = st::ChoiceIndex(s.choices, value);
           break;
@@ -95,8 +95,8 @@ class Menu {
   }
 
   // The values into bwvr.ini, as SaveAll of the launcher with the renderer
-  // Vulkan. The resolution of the game is not in the ini: RenderSize gives
-  // it for the registry of the game.
+  // Vulkan, and vulkan_strict=1. The resolution of the game is not in the
+  // ini: RenderSize gives it for the registry of the game.
   void Store(IniText* ini) const {
     for (int i = 0; i < st::kSettingCount; ++i) {
       const st::Setting& s = st::kSettings[i];
@@ -122,6 +122,9 @@ class Menu {
     // The keys with one right answer. The renderer Vulkan has no bridge of
     // Direct3D 9.
     ini->Remove("bwvr", "gpu_bridge");
+    // The app draws with Vulkan alone: no fallback of the mod to another
+    // DirectDraw, to Direct3D or to GDI (ddraw_proxy.cpp, "ONLY VULKAN").
+    ini->SetInt("bwvr", "vulkan_strict", 1);
     ini->SetInt("bwvr", "vr", 1);
     ini->SetInt("bwvr", "stereo", 1);
     ini->SetInt("bwvr", "head_camera", 1);

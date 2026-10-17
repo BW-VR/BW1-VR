@@ -2784,6 +2784,29 @@ not have it.
 use, and a session with Vulkan has its Direct3D 11 device. There is no test
 key: the choice is made at the start of the process.
 
+**No fallback at all (`vulkan_strict=1`).** `vulkan_only=1` keeps some ways
+to other graphics interfaces: with `backend=vulkan` the proxy still loads
+the DirectDraw of the system and gives it each export that the mod does
+not make (among them `DirectDrawEnumerateA`, which the game imports), a
+`runblack.exe` that is not v1.42 gets the DirectDraw of the system, a
+missing key `backend` loads dxwrapper, and the window takes GDI when its
+swapchain of Vulkan does not show the picture. With `vulkan_strict=1`:
+
+| Way | With `vulkan_strict=1` |
+| --- | --- |
+| The key `backend` | The backend is vulkan, whatever the key says, also with no key |
+| The DirectDraw of the system | The proxy does not load it |
+| `DirectDrawEnumerateA`, `W`, `ExA`, `ExW` | The proxy gives the one display of the mod: the primary display, with no GUID |
+| `DirectDrawCreateClipper`, `DllCanUnloadNow`, `DllGetClassObject` | An error (`DDERR_UNSUPPORTED`, `S_FALSE`, `CLASS_E_CLASSNOTAVAILABLE`) |
+| Each other export of DirectDraw (inner parts that the game does not call) | A line of the log, and the game stops |
+| A `runblack.exe` that is not v1.42 | No DirectDraw: `DirectDrawCreate` and `DirectDrawCreateEx` give `DDERR_GENERIC` and a line of the log |
+| `vulkan_only` | 1, whatever the key says |
+| The window of the game | The swapchain of Vulkan alone. When it does not show the picture, the window gets none and the log says so one time. No GDI |
+
+The headset app writes `vulkan_strict=1` with each save (`android.md`,
+"Only Vulkan"). On the PC 0 is the default, because the launcher keeps
+dxwrapper for a PC with no Vulkan 1.3 and for "Play, no VR".
+
 `bwvr-xrtest 30 vulkan alone` shows the test pattern through a session with
 Vulkan and no Direct3D 11, as the session of `vulkan_only=1` has.
 
@@ -4636,6 +4659,7 @@ keys that the launcher sets.
 | `vk_stage1` | 1 | With the Vulkan renderer: 1 a draw with a color operation and a texture on texture stage 1 gets that stage, for example the light maps of the Temple. 0 the renderer makes stage 0 alone. A test key: Shift E. See "The second stage" |
 | `vk_present_late` | 1 | With `backend=vulkan` and the way through the CPU (`vk_window=0`): 1 the window on the monitor shows the picture of the present before, with no wait for the GPU, 0 each present waits for its own picture. See "The backend of the mod on Vulkan" |
 | `vulkan_only` | 1 | With `backend=vulkan`: 1 no part for Direct3D 9 starts, and the session with Vulkan has no Direct3D 11 device. 0 these parts start, with no Direct3D 9 to use. There is no test key: the choice is made at the start. See "Only Vulkan" |
+| `vulkan_strict` | 0 | 1 the mod draws with Vulkan alone and has no fallback: backend=vulkan whatever the key `backend` says, no DirectDraw of the system, no dxwrapper, `vulkan_only=1`, no GDI for the window. The headset app writes 1. 0 the ways of `backend` and `vulkan_only`. There is no test key: the proxy reads it at the load of the DLL. See "Only Vulkan" |
 | `vk_window` | 1 | With `backend=vulkan`: 1 the window of the game gets the picture through a swapchain of Vulkan, 0 through the CPU and GDI. A test key: Shift D. See "The window with Vulkan" |
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |

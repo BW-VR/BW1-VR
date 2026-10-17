@@ -239,6 +239,8 @@ inline void MenuChecks() {
   menu.Store(&ini);
   Check(ini.Get("bwvr", "backend", "") == "vulkan", "backend=vulkan", 0, 0);
   Check(!ini.Has("bwvr", "gpu_bridge"), "the save removes gpu_bridge", 0, 0);
+  Check(ini.GetInt("bwvr", "vulkan_strict", 0) == 1,
+        "the save writes vulkan_strict=1: Vulkan alone", 0, 0);
   Check(!ini.Has("bwvr", "fake_head"), "the save removes a retired key", 0, 0);
   Check(ini.GetInt("bwvr", "vr", 0) == 1 && ini.GetInt("bwvr", "stereo", 0) == 1 &&
             ini.GetInt("bwvr", "head_camera", 0) == 1,

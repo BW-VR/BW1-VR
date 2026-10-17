@@ -28,6 +28,9 @@ Summary:
   renderer draws on the Vulkan device of the session, and its eye pictures
   show on a stereo screen in front of the player (see "The picture of the
   renderer in the headset").
+- **Only Vulkan.** The app draws with Vulkan alone: the menu, the stereo
+  screen and the renderer of the mod. It has no fallback to Direct3D,
+  DirectDraw or another graphics interface (see "Only Vulkan").
 - **The app cannot start the game yet.** `runblack.exe` is a Windows
   program for x86, and the APK has no x86 runtime (see "What the app cannot
   do yet").
@@ -431,6 +434,40 @@ PC, to the pixel. The four walks take 0.25 s with the first pipelines and
 the uploads of the textures. The read back of the pictures takes about two
 minutes in the emulator, because the GPU of the emulator gives an image of
 40 MB to the CPU slowly.
+
+## Only Vulkan
+
+The app has one renderer: the Vulkan renderer of the mod. There is no
+fallback to Direct3D, DirectDraw or another graphics interface, now or with
+the x86 runtime.
+
+- The menu, the cursor, the stereo screen and the menu in the window go to
+  the screen with Vulkan. `android.graphics.Canvas` only paints the picture
+  of the menu into memory of the CPU (the text and the shapes). It shows
+  nothing itself.
+- The renderer of the mod needs Vulkan 1.3 with its features ("The picture
+  of the renderer in the headset"). With no Vulkan 1.3 the app shows the
+  menu, and the game does not start: there is no other renderer.
+- The menu writes `backend=vulkan` with each save, and the row "Renderer"
+  has no other choice. "Play, no VR" of the launcher (dxwrapper) is not in
+  the app.
+
+**The fallbacks of the PC that the build for the x86 runtime must not
+have.** In a process of Wine, "system DirectDraw" is the DirectDraw of Wine,
+which draws with its own Direct3D. So in that build:
+
+1. With `backend=vulkan` the proxy gives each export that the mod does not
+   make to system DirectDraw (`ddraw_proxy.cpp`, the gaps of the thunks).
+   In the app such a call must fail with an error and a line of the log.
+2. With a `runblack.exe` that is not v1.42 the proxy loads system DirectDraw
+   (`ProxyForceSystemDDraw`). In the app the start must stop with the
+   message of the game folder.
+3. With no key `backend` the proxy loads dxwrapper (Direct3D 9). In the app
+   the mod reads `backend=vulkan` alone, and `vulkan_only=1` holds.
+
+The runtime gets no `ddraw.dll`, `d3d*.dll`, `wined3d.dll` or `dxgi.dll` of
+Wine, and Wine loads the `ddraw.dll` of the mod as a native DLL only, with
+no builtin one behind it.
 
 ## What the app cannot do yet
 

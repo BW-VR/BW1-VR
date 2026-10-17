@@ -206,6 +206,7 @@ try {
             Start-Sleep -Seconds 2
         }
     }
+    Unlock-AndroidEmulator
 }
 
 Write-Host ('== ' + $checks + ' checks, ' + $faults.Count + ' failed. The results are in ' + $Out) -ForegroundColor Cyan

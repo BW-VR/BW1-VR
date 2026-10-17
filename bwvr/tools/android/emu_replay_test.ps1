@@ -188,6 +188,11 @@ try {
         }
         Expect ($d[0] -le $MaxPercent) ("{0}: {1:N2} percent of the pixels differ by more than 24, the mean difference is {2:N2}" -f $ref.Name, $d[0], $d[1])
     }
+} catch {
+    # A fault of the script is a failed check, so that a test that stops
+    # early does not end with "0 failed".
+    Expect $false ('the script ran to its end: ' + $_.Exception.Message +
+        ' (line ' + $_.InvocationInfo.ScriptLineNumber + ')')
 } finally {
     if ($started -and -not $Keep) {
         Say 'Stop the emulator'

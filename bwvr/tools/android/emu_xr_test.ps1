@@ -317,6 +317,11 @@ try {
         try { $image.Save([IO.Path]::ChangeExtension($bmp.FullName, '.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
         finally { $image.Dispose() }
     }
+} catch {
+    # A fault of the script is a failed check, so that a test that stops
+    # early does not end with "0 failed".
+    Expect $false ('the script ran to its end: ' + $_.Exception.Message +
+        ' (line ' + $_.InvocationInfo.ScriptLineNumber + ')')
 } finally {
     if ($started -and -not $Keep) {
         Say 'Stop the emulator'

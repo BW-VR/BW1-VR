@@ -81,9 +81,10 @@ try {
 } finally {
     $zip.Dispose()
 }
-$allowed = '^(AndroidManifest\.xml|resources\.arsc|META-INF/[^/]+|lib/(arm64-v8a|x86_64)/lib(bwvr_quest|openxr_loader)\.so)$'
+$allowed = '^(AndroidManifest\.xml|resources\.arsc|META-INF/[^/]+|lib/(arm64-v8a|x86_64)/lib(bwvr_quest|openxr_loader)\.so|assets/licenses/[a-z0-9_]+\.txt)$'
 $other = @($names | Where-Object { $_ -notmatch $allowed })
-Expect ($other.Count -eq 0) ('only the manifest, the libraries and the signature are in the APK' + $(if ($other.Count) { ': ' + ($other -join ', ') } else { '' }))
+Expect ($other.Count -eq 0) ('only the manifest, the libraries, the license texts and the signature are in the APK' + $(if ($other.Count) { ': ' + ($other -join ', ') } else { '' }))
+Expect ($names -contains 'assets/licenses/openxr_loader.txt') 'the license text of the OpenXR loader is in the APK'
 foreach ($abi in @('arm64-v8a', 'x86_64')) {
     foreach ($lib in @('libbwvr_quest.so', 'libopenxr_loader.so')) {
         $name = "lib/$abi/$lib"

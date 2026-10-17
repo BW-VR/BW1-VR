@@ -23,7 +23,8 @@
       5. Reads back the report of the runtime, its pictures of the quads,
          the log of the app, bwvr.ini and logcat, and checks them.
 
-    The results go to bwvr/out/android/emu-xr-test. The script stops the
+    The results go to bwvr/out/android/emu-xr-test, and with -Stream to
+    bwvr/out/android/emu-xr-stream-test. The script stops the
     emulator at the end. The test runtime is only a test: it shows that the
     app makes the calls of OpenXR in the right order with the right structs,
     and that the menu works with a controller ray. Only a headset shows the
@@ -57,7 +58,8 @@ $ErrorActionPreference = 'Continue'
 $Bwvr = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $Repo = Split-Path $Bwvr -Parent
 $Apk = Join-Path $Bwvr 'out\android\bwvr-quest.apk'
-$Out = Join-Path $Bwvr 'out\android\emu-xr-test'
+# A run with a stream keeps its results in a folder of its own.
+$Out = Join-Path $Bwvr $(if ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
 $Avd = 'bwvr_xr_test'
 $Image = 'system-images;android-34;google_apis;x86_64'
 $Package = 'org.bwvr.quest'

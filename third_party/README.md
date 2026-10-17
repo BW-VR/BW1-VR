@@ -13,7 +13,7 @@ The full license texts that go out with the mod are in
 | `backends/dx7.games/` | dxwrapper: `dxwrapper.dll` and its `ddraw.dll` stub. It turns the DirectX 7 of the game into Direct3D 9 | release 1.8.8600.25 | see `bwvr/installer/Notices.txt`, section 4 | https://github.com/elishacloud/dxwrapper |
 | `Vulkan-Headers/include/` | The C headers of Vulkan (`vulkan/*.h`, `vk_video/*.h`), no C++ headers | tag `vulkan-sdk-1.4.357.0` | Apache-2.0 or MIT (`LICENSE.md`, `LICENSES/`) | https://github.com/KhronosGroup/Vulkan-Headers |
 | `cgltf/` | cgltf, the glTF reader for a hand model file (`cgltf.h`) | v1.14 | MIT (`LICENSE`) | https://github.com/jkuhlmann/cgltf |
-| `openxr-android/` | The OpenXR loader of Khronos for Android, `libopenxr_loader.so` for `arm64-v8a` and `x86_64`, for the headset app (`bwvr/docs/android.md`) | release 1.1.43 | Apache-2.0 (`LICENSE`) | the AAR `org.khronos.openxr:openxr_loader_for_android:1.1.43` of Maven Central |
+| `openxr-android/` | The OpenXR loader of Khronos for Android, `libopenxr_loader.so` for `arm64-v8a` and `x86_64`, for the headset app (`bwvr/docs/android.md`) | release 1.1.43 | Apache-2.0 OR MIT (`LICENSE` has the text of Apache-2.0) | the AAR `org.khronos.openxr:openxr_loader_for_android:1.1.43` of Maven Central |
 
 ## The binaries are pinned
 
@@ -50,6 +50,9 @@ copies its permissions and queries into its own manifest.
 | `x86_64/libopenxr_loader.so` | `f7dd88045009be157b6d25041782e769a8aafd2c70a65b9d19d8fc9083fa376e` |
 
 The loader is of the same release as the headers in `OpenXR-SDK/include`.
+The manifest of the AAR names the license `Apache-2.0 OR MIT`. The APK
+carries `LICENSE` as `assets/licenses/openxr_loader.txt`
+(`bwvr/tools/android/build_apk.ps1`).
 
 ## Not in the repo
 

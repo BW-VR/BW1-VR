@@ -119,6 +119,13 @@ struct WalkBeginBody {
   TransformBody transform;
 };
 
+// VkSceneTexture.
+struct TextureBody {
+  uint32_t stage;
+  uint32_t reserved;
+  uint64_t surface;
+};
+
 struct DrawBody {
   StreamState state;
   uint32_t type, fvf;
@@ -143,6 +150,20 @@ struct SurfaceBody {
   uint32_t width, height;
   uint32_t has_pixels;  // 0: a render target with no pixels for a texture
 };
+
+// The mod is 32 bit and the app is 64 bit: each body has one size on both.
+static_assert(sizeof(StreamState) == 40, "StreamState");
+static_assert(sizeof(StartBody) == 100, "StartBody");
+static_assert(sizeof(FrameBody) == 24, "FrameBody");
+static_assert(sizeof(GazeBody) == 12, "GazeBody");
+static_assert(sizeof(ViewportBody) == 24, "ViewportBody");
+static_assert(sizeof(TransformBody) == 16, "TransformBody");
+static_assert(sizeof(WalkBeginBody) == 616, "WalkBeginBody");
+static_assert(sizeof(TextureBody) == 16, "TextureBody");
+static_assert(sizeof(DrawBody) == 64, "DrawBody");
+static_assert(sizeof(TargetBody) == 48, "TargetBody");
+static_assert(sizeof(ClearBody) == 16, "ClearBody");
+static_assert(sizeof(SurfaceBody) == 24, "SurfaceBody");
 
 // THE WRITER: records into a buffer.
 class Writer {

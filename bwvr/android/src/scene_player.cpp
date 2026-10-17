@@ -79,6 +79,7 @@ struct StreamDevice : IDirect3DDevice7 {
 class Player {
  public:
   explicit Player(PlayResult* result) : result_(result) {}
+  void SetResult(PlayResult* result) { result_ = result; }
 
   // The surface of an id. The stream gives each surface before its first
   // use, so an id that is new here is a surface with no pixels.
@@ -157,7 +158,7 @@ class Player {
         StreamSurface* surface = Surface(s.surface);
         surface->caps = s.caps;
         if (s.has_pixels != 0) {
-          const size_t n = static_cast<size_t>(s.width) * s.height * 4;
+          const uint64_t n = static_cast<uint64_t>(s.width) * s.height * 4;
           if (bytes >= sizeof(s) + n) {
             surface->width = s.width;
             surface->height = s.height;
@@ -198,18 +199,15 @@ class Player {
         break;
       }
       case ss::kTexture: {
-        struct {
-          uint32_t stage;
-          uint32_t pad;
-          uint64_t surface;
-        } t;
+        ss::TextureBody t;
         if (ss::Body(body, bytes, &t)) VkSceneTexture(t.stage, Surface(t.surface));
         break;
       }
       case ss::kDraw: {
         ss::DrawBody d;
         if (!ss::Body(body, bytes, &d)) break;
-        const uint32_t need = sizeof(d) + d.vertex_bytes + d.index_count * 2;
+        const uint64_t need = sizeof(d) + static_cast<uint64_t>(d.vertex_bytes) +
+                              static_cast<uint64_t>(d.index_count) * 2;
         if (bytes < need) break;
         State(d.state);
         // The indices follow the vertices with no gap, so they can start on
@@ -242,7 +240,7 @@ class Player {
       case ss::kClear: {
         ss::ClearBody c;
         if (!ss::Body(body, bytes, &c)) break;
-        if (bytes < sizeof(c) + c.count * sizeof(D3DRECT)) break;
+        if (bytes < sizeof(c) + static_cast<uint64_t>(c.count) * sizeof(D3DRECT)) break;
         rects_.resize(c.count);
         if (c.count > 0) memcpy(rects_.data(), body + sizeof(c), c.count * sizeof(D3DRECT));
         VkSceneClear(c.count, c.count > 0 ? rects_.data() : nullptr, c.flags,
@@ -295,11 +293,16 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
   result.loaded = true;
   VkPlatformSetFolder(folder.c_str());
   const double start = NowMs();
-  Player player(&result);
+  // The renderer and SceneHostState keep the addresses of the surfaces of
+  // the stream (the textures, the targets), so the player and its surfaces
+  // live until the end of the process.
+  static Player* s_player = nullptr;
+  if (s_player == nullptr) s_player = new Player(&result);
+  s_player->SetResult(&result);
   ss::Kind kind;
   const uint8_t* body = nullptr;
   uint32_t size = 0;
-  while (reader.Next(&kind, &body, &size)) player.Play(kind, body, size);
+  while (reader.Next(&kind, &body, &size)) s_player->Play(kind, body, size);
   result.broken = reader.Broken();
   result.ms = NowMs() - start;
   AppLog("replay       : %s: %llu records, %llu frames, %llu walks, %llu draws, "

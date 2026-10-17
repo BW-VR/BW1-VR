@@ -166,13 +166,19 @@ bool XrApp::MakeVulkan() {
     return false;
   }
 
-  // Vulkan 1.3 for the renderer of the mod when the runtime takes it. The
-  // menu alone needs Vulkan 1.1.
-  const bool runtime13 = req.maxApiVersionSupported >= XR_MAKE_VERSION(1, 3, 0);
+  // The instance asks for Vulkan 1.3 for the renderer of the mod, and the
+  // device decides. maxApiVersionSupported is the highest version that the
+  // runtime was tested with, not a limit, so the log only names it.
+  AppLog("xr           : the runtime takes Vulkan %u.%u to %u.%u (the highest "
+         "version that it was tested with)",
+         XR_VERSION_MAJOR(req.minApiVersionSupported),
+         XR_VERSION_MINOR(req.minApiVersionSupported),
+         XR_VERSION_MAJOR(req.maxApiVersionSupported),
+         XR_VERSION_MINOR(req.maxApiVersionSupported));
   VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app.pApplicationName = "Black & White VR Mod";
   app.pEngineName = "bwvr";
-  app.apiVersion = runtime13 ? VK_API_VERSION_1_3 : VK_API_VERSION_1_1;
+  app.apiVersion = VK_API_VERSION_1_3;
   VkInstanceCreateInfo vi = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   vi.pApplicationInfo = &app;
   XrVulkanInstanceCreateInfoKHR xi = {XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR};
@@ -220,11 +226,11 @@ bool XrApp::MakeVulkan() {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
   have13.pNext = &have11;
   VkPhysicalDeviceFeatures2 have = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-  if (runtime13 && properties.apiVersion >= VK_API_VERSION_1_3) {
+  if (properties.apiVersion >= VK_API_VERSION_1_3) {
     have.pNext = &have13;
     vkGetPhysicalDeviceFeatures2(gpu_.physical, &have);
   }
-  renderer13_ = runtime13 && properties.apiVersion >= VK_API_VERSION_1_3 &&
+  renderer13_ = properties.apiVersion >= VK_API_VERSION_1_3 &&
                 have13.dynamicRendering && have13.synchronization2 &&
                 have11.multiview;
   max_anisotropy_ = have.features.samplerAnisotropy
@@ -255,7 +261,12 @@ bool XrApp::MakeVulkan() {
          "attachment: %s",
          properties.deviceName, VK_API_VERSION_MAJOR(properties.apiVersion),
          VK_API_VERSION_MINOR(properties.apiVersion),
-         renderer13_ ? "yes" : "no (it needs Vulkan 1.3)", max_anisotropy_,
+         renderer13_ ? "yes"
+                     : properties.apiVersion < VK_API_VERSION_1_3
+                           ? "no (it needs Vulkan 1.3)"
+                           : "no (the GPU has no dynamic rendering, "
+                             "synchronization2 or multiview)",
+         max_anisotropy_,
          shading_rate_ ? "yes" : "no");
 
   const float priority = 1.0f;
@@ -435,7 +446,8 @@ bool XrApp::MakeActions() {
   return true;
 }
 
-bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height) {
+bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
+                      bool staging) {
   XrSwapchainCreateInfo info = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
   info.usageFlags = XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT |
                     XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
@@ -461,6 +473,8 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height) {
   layer->height = height;
   layer->swap_red_blue =
       format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_B8G8R8A8_UNORM;
+  layer->filled.assign(layer->images.size(), 0);
+  if (!staging) return true;
   return MakeStaging(&gpu_, static_cast<VkDeviceSize>(width) * height * 4,
                      &layer->staging);
 }
@@ -485,11 +499,13 @@ void XrApp::SetPixels(Layer* layer, const std::vector<uint8_t>& rgba) {
 
 void XrApp::SetMenuPixels(const std::vector<uint8_t>& rgba) {
   SetPixels(&menu_, rgba);
+  ++menu_.revision;
   menu_written_ = true;
 }
 
 void XrApp::SetCursorPixels(const std::vector<uint8_t>& rgba) {
   SetPixels(&cursor_, rgba);
+  ++cursor_.revision;
   cursor_written_ = true;
 }
 
@@ -505,6 +521,14 @@ void XrApp::CopyLayer(Layer* layer) {
   XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
   xrWaitSwapchainImage(layer->swapchain, &wait);
+  // An image that has the pixels of now needs no copy. The runtime gives a
+  // released image back with its content.
+  if (layer->filled[index] == layer->revision) {
+    XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    xrReleaseSwapchainImage(layer->swapchain, &release);
+    return;
+  }
+  layer->filled[index] = layer->revision;
   const VkImage image = layer->images[index].image;
   VkCommandBuffer cmd = GpuBegin(&gpu_);
   ImageBarrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -673,7 +697,8 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
 }
 
-void XrApp::RendererDevice(vk::External* out) const {
+void XrApp::RendererDevice(vk::External* out) {
+  renderer_used_ = true;
   *out = vk::External();
   out->get_instance_proc_addr = &vkGetInstanceProcAddr;
   out->instance = gpu_.instance;
@@ -693,7 +718,7 @@ void XrApp::RendererDevice(vk::External* out) const {
 
 bool XrApp::MakeScreen(uint32_t width, uint32_t height) {
   for (Layer& l : screen_) {
-    if (!MakeLayer(&l, width, height)) return false;
+    if (!MakeLayer(&l, width, height, false)) return false;
   }
   // The picture of the renderer goes into an image of its own format at the
   // size of the quads first (a blit), then into the swapchain with a copy,
@@ -736,6 +761,7 @@ bool XrApp::MakeScreen(uint32_t width, uint32_t height) {
 
 void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
                             uint32_t image_height) {
+  for (Layer& l : screen_) ++l.revision;
   screen_source_ = image;
   source_width_ = image_width;
   source_height_ = image_height;
@@ -753,6 +779,12 @@ void XrApp::CopyScreen(int eye) {
   XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
   xrWaitSwapchainImage(layer->swapchain, &wait);
+  if (layer->filled[index] == layer->revision) {
+    XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    xrReleaseSwapchainImage(layer->swapchain, &release);
+    return;
+  }
+  layer->filled[index] = layer->revision;
   const VkImage target = layer->images[index].image;
   LockQueue();
   VkCommandBuffer cmd = GpuBegin(&gpu_);
@@ -858,8 +890,17 @@ void XrApp::Stop() {
   if (session_ != XR_NULL_HANDLE) xrDestroySession(session_);
   session_ = XR_NULL_HANDLE;
   GpuRelease(&gpu_);
-  if (gpu_.device != VK_NULL_HANDLE) vkDestroyDevice(gpu_.device, nullptr);
-  if (gpu_.instance != VK_NULL_HANDLE) vkDestroyInstance(gpu_.instance, nullptr);
+  if (renderer_used_) {
+    // The renderer of the mod has its images and pipelines on the device and
+    // has no stop of its own, so the device and the instance stay to the end
+    // of the process. vk::Stop waits until the GPU is idle.
+    vk::Stop();
+    AppLog("xr           : the renderer of the mod used the device of the "
+           "session, so the device stays to the end of the process");
+  } else {
+    if (gpu_.device != VK_NULL_HANDLE) vkDestroyDevice(gpu_.device, nullptr);
+    if (gpu_.instance != VK_NULL_HANDLE) vkDestroyInstance(gpu_.instance, nullptr);
+  }
   gpu_ = Gpu();
   if (instance_ != XR_NULL_HANDLE) xrDestroyInstance(instance_);
   instance_ = XR_NULL_HANDLE;

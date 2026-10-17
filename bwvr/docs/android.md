@@ -146,8 +146,9 @@ adb push "C:\Black & White\." /sdcard/Android/data/org.bwvr.quest/files/game/
 The first start is necessary. Android gives the folder of the app to the
 app when the app asks for it, and the app makes the folder `game` then. A
 folder that `adb` makes before the first start belongs to the shell, and
-the app cannot read or write in it (the emulator test showed it). Then
-uninstall the app and install it again. `bwvr.ini` is in the
+the app cannot read or write in it. To repair that: uninstall the app,
+delete `/sdcard/Android/data/org.bwvr.quest` with `adb shell rm -rf`,
+install the app again, and start it one time. `bwvr.ini` is in the
 game folder beside `runblack.exe`, as on the PC. At each start the app
 reads `runblack.exe` and compares its SHA-1 with the value of
 `bw_addresses.h` (`exe_sha1.h`). The status line of the menu says what it
@@ -213,13 +214,16 @@ bar of a slider sets its value.
   Horizon OS has one.
 - The instance has `XR_KHR_vulkan_enable2` and
   `XR_KHR_android_create_instance`. The runtime makes the Vulkan instance
-  and the device (Vulkan 1.1 is enough for the menu).
+  (it asks for Vulkan 1.3) and the device (Vulkan 1.1 is enough for the
+  menu). The log names the versions that the runtime was tested with
+  (`minApiVersionSupported`, `maxApiVersionSupported`). The device decides
+  if the renderer of the mod can draw.
 - The reference space is `LOCAL`. The menu quad is 1.4 m wide, 1.4 m in
   front of the head and 0.15 m below it (`menu_layout.h`, `MenuQuad`). The
   cursor quad is 3 cm wide and 4 mm in front of the menu.
 - The app copies the picture of the menu into an image of the swapchain of
-  each quad at each frame, and gives the images in the layout of a color
-  attachment. The swapchain format is the first of R8G8B8A8_SRGB,
+  a quad when that image does not have the picture of now, and gives the
+  images in the layout of a color attachment. The swapchain format is the first of R8G8B8A8_SRGB,
   B8G8R8A8_SRGB, R8G8B8A8_UNORM and B8G8R8A8_UNORM that the runtime has.
   The pixels of the canvas are sRGB with the color multiplied by the alpha,
   which is what a quad with `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT`
@@ -257,13 +261,14 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
 
 ## Test the APK
 
-1. **With no device** (`check_apk.ps1`, 30 checks): the signature, the
+1. **With no device** (`check_apk.ps1`, 31 checks): the signature, the
    manifest (the package, the SDK levels, the categories of an immersive app
    of Meta and of OpenXR, the permissions and the queries of the loader, the
    headsets of Meta, no Java code), the libraries of both ABIs (stored,
    on pages of 16 KB, LOAD segments of 16 KB, no `libc++_shared.so`), and
-   that the APK has no other file. So no file of the game can be in it.
-2. **In the Android emulator** (`emu_test.ps1`, 18 checks): the same APK on
+   that the APK has no other file than the license texts
+   (`assets/licenses/`). So no file of the game can be in it.
+2. **In the Android emulator** (`emu_test.ps1`, 19 checks): the same APK on
    an x86_64 image of Android 14 with no window, port 5584, a cold boot. The
    script deletes the folder of the app, installs the APK, starts it one
    time, puts a `bwvr.ini` and a stand in for `runblack.exe` (or with `-Exe`
@@ -295,7 +300,8 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    of the walks on the device of the session, and the test checks the
    device (Vulkan 1.3 with the features of the renderer), the renderer on
    that device, the two quads of the stereo screen (one for each eye, 2.6
-   m in front) and the pictures of both eyes that the runtime read back.
+   m in front) and the pictures of both eyes that the runtime read back. Its
+   results are in `bwvr/out/android/emu-xr-stream-test`.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -371,10 +377,15 @@ of the session to the renderer (`vk::UseExternal`), as on the PC with
 renderer (`VkSceneEyes`, an image with a layer for each eye) shows on a
 **stereo screen**: two quads 2.6 m wide, 2.6 m in front of the head and
 0.1 m above it, one for the left eye and one for the right eye, behind the
-menu. Each frame blits each layer to the size of the quads (half the size
-of the picture) into an image of UNORM, and copies that image into the
-swapchain of the quad, so the bytes of the game keep their values also in
-a swapchain of sRGB. This is the form of the "Stereoscopic window" of the
+menu. Each layer goes with a blit to the size of the quads (half the size
+of the picture) into an image of UNORM, and that image goes with a copy
+into the swapchain of the quad, so the bytes of the game keep their values
+also in a swapchain of sRGB. An image of a swapchain gets the copy only
+when it does not have the picture of now (a revision for each image), and
+the same holds for the menu and the cursor. When the renderer used the
+device of the session, the app waits for the idle GPU at its end
+(`vk::Stop`) and keeps the device to the end of the process, because the
+renderer has no stop for its images and pipelines. This is the form of the "Stereoscopic window" of the
 PC: the picture does not follow the head.
 
 ## The stream of the walks
@@ -452,18 +463,14 @@ the x86 runtime.
   has no other choice. "Play, no VR" of the launcher (dxwrapper) is not in
   the app.
 
-**The fallbacks of the PC that the build for the x86 runtime must not
-have.** In a process of Wine, "system DirectDraw" is the DirectDraw of Wine,
-which draws with its own Direct3D. So in that build:
-
-1. With `backend=vulkan` the proxy gives each export that the mod does not
-   make to system DirectDraw (`ddraw_proxy.cpp`, the gaps of the thunks).
-   In the app such a call must fail with an error and a line of the log.
-2. With a `runblack.exe` that is not v1.42 the proxy loads system DirectDraw
-   (`ProxyForceSystemDDraw`). In the app the start must stop with the
-   message of the game folder.
-3. With no key `backend` the proxy loads dxwrapper (Direct3D 9). In the app
-   the mod reads `backend=vulkan` alone, and `vulkan_only=1` holds.
+**No fallback of the mod.** Each save of the menu writes `vulkan_strict=1`
+(`backend.md`, "Only Vulkan"). With it the mod has none of the ways of the
+PC to another graphics interface: the proxy loads no DirectDraw of the
+system and no dxwrapper, whatever the key `backend` says, it gives the
+enumeration of the displays itself, a `runblack.exe` that is not v1.42 gets
+no DirectDraw, `vulkan_only` is 1, and the window of the game gets no GDI.
+In a process of Wine "system DirectDraw" is the DirectDraw of Wine, which
+draws with its own Direct3D, so these ways must not be there.
 
 The runtime gets no `ddraw.dll`, `d3d*.dll`, `wined3d.dll` or `dxgi.dll` of
 Wine, and Wine loads the `ddraw.dll` of the mod as a native DLL only, with

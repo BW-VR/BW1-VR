@@ -86,6 +86,11 @@ foreach ($abi in $Abis) {
 }
 
 Say 'The APK'
+# The license texts of the third party code in the APK.
+$assets = Join-Path $stage 'assets'
+New-Item -ItemType Directory -Force -Path (Join-Path $assets 'licenses') | Out-Null
+Copy-Item -LiteralPath (Join-Path $ThirdParty 'openxr-android\LICENSE') `
+    -Destination (Join-Path $assets 'licenses\openxr_loader.txt')
 $base = Join-Path $stage 'base.apk'
 Run (Join-Path $BuildTools 'aapt2.exe') @('link', '-o', $base,
     '--manifest', (Join-Path $Source 'AndroidManifest.xml'),
@@ -98,8 +103,12 @@ Run (Join-Path $BuildTools 'aapt2.exe') @('link', '-o', $base,
 # NoCompression, so the jar tool of the JDK adds them (0: store, M: no
 # manifest of a jar). Each file is named, so the APK gets no entry for a
 # folder.
+# The license texts go in the same way: aapt2 of Windows gives an asset a
+# name with a backslash, which Android does not find.
 $libs = @(Get-ChildItem -LiteralPath (Join-Path $stage 'lib') -Recurse -File |
-    ForEach-Object { 'lib/' + $_.Directory.Name + '/' + $_.Name })
+    ForEach-Object { 'lib/' + $_.Directory.Name + '/' + $_.Name }) +
+    @(Get-ChildItem -LiteralPath (Join-Path $assets 'licenses') -File |
+    ForEach-Object { 'assets/licenses/' + $_.Name })
 Push-Location $stage
 try {
     Run (Join-Path $JavaHome 'bin\jar.exe') (@('uf0M', $base) + $libs)

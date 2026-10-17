@@ -133,6 +133,13 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
     g_writer.Record(ss::kStart, &g_options, sizeof(g_options));
   }
   if (!g_vk_stream_on) return;
+  // intro_vr.cpp gives VkSceneFrame(0, ...) for its pictures. It is not a
+  // frame of the game, so it ends no frame of the record.
+  if (frame < g_first) {
+    ss::FrameBody body = {frame, name, capture ? 1u : 0u, 0};
+    g_writer.Record(ss::kFrame, &body, sizeof(body));
+    return;
+  }
   if (frame >= g_first + static_cast<uint64_t>(g_frames)) {
     g_writer.Record(ss::kFrameEnd, &g_last, sizeof(g_last));
     Finish();
@@ -205,11 +212,7 @@ void VkStreamStageState(uint32_t stage, uint32_t type, uint32_t value) {
 
 void VkStreamTexture(uint32_t stage, void* surface) {
   Surface(surface, true);
-  struct {
-    uint32_t stage;
-    uint32_t pad;
-    uint64_t surface;
-  } body = {stage, 0, Id(surface)};
+  const ss::TextureBody body = {stage, 0, Id(surface)};
   g_writer.Record(ss::kTexture, &body, sizeof(body));
 }
 

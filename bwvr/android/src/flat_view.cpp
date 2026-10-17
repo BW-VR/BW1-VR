@@ -88,7 +88,6 @@ bool FlatView::Start(ANativeWindow* window, uint32_t menu_width,
     if (!GpuFinish(&gpu_)) return false;
     VkSemaphoreCreateInfo s = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     vkCreateSemaphore(gpu_.device, &s, nullptr, &acquired_);
-    vkCreateSemaphore(gpu_.device, &s, nullptr, &drawn_);
     if (!MakeStaging(&gpu_, static_cast<VkDeviceSize>(menu_width) * menu_height * 4,
                      &staging_)) {
       AppLog("flat view    : the staging buffer failed");
@@ -150,6 +149,12 @@ bool FlatView::MakeSwapchain() {
   vkGetSwapchainImagesKHR(gpu_.device, swapchain_, &count, nullptr);
   images_.resize(count);
   vkGetSwapchainImagesKHR(gpu_.device, swapchain_, &count, images_.data());
+  while (drawn_.size() < count) {
+    VkSemaphoreCreateInfo s = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    vkCreateSemaphore(gpu_.device, &s, nullptr, &semaphore);
+    drawn_.push_back(semaphore);
+  }
 
   // The image of the menu, with the same encoding as the swapchain, so the
   // blit does not change the colors.
@@ -301,11 +306,11 @@ bool FlatView::Present() {
                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0,
                VK_PIPELINE_STAGE_TRANSFER_BIT,
                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-  if (!GpuSubmit(&gpu_, acquired_, drawn_)) return false;
+  if (!GpuSubmit(&gpu_, acquired_, drawn_[index])) return false;
 
   VkPresentInfoKHR present = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
   present.waitSemaphoreCount = 1;
-  present.pWaitSemaphores = &drawn_;
+  present.pWaitSemaphores = &drawn_[index];
   present.swapchainCount = 1;
   present.pSwapchains = &swapchain_;
   present.pImageIndices = &index;

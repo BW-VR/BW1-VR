@@ -73,7 +73,7 @@ class XrApp {
   bool Renderer13() const { return renderer13_; }
   // The instance, the device and the queue of the session for
   // vk::UseExternal, so the renderer draws on the device of the session.
-  void RendererDevice(vk::External* out) const;
+  void RendererDevice(vk::External* out);
   // A STEREO SCREEN in front of the player: two quads, one for each eye,
   // width by height pixels. image is an image of the renderer with a layer
   // for each eye, in the layout of a color attachment, image_width by
@@ -90,13 +90,18 @@ class XrApp {
     uint32_t height = 0;
     Staging staging;
     bool swap_red_blue = false;
+    // The revision of the content, and the revision that each image of the
+    // swapchain has. An image of an old revision gets the copy.
+    unsigned revision = 1;
+    std::vector<unsigned> filled;
   };
 
   bool MakeInstance(ANativeActivity* activity);
   bool MakeVulkan();
   bool MakeSession();
   bool MakeActions();
-  bool MakeLayer(Layer* layer, uint32_t width, uint32_t height);
+  bool MakeLayer(Layer* layer, uint32_t width, uint32_t height,
+                 bool staging = true);
   void CopyLayer(Layer* layer);
   void CopyScreen(int eye);
   void SetPixels(Layer* layer, const std::vector<uint8_t>& rgba);
@@ -130,6 +135,7 @@ class XrApp {
   bool cursor_written_ = false;
 
   bool renderer13_ = false;
+  bool renderer_used_ = false;
   bool shading_rate_ = false;
   float max_anisotropy_ = 0.0f;
   Layer screen_[2];

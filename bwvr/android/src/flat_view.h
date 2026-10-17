@@ -42,7 +42,9 @@ class FlatView {
   VkExtent2D extent_ = {0, 0};
   std::vector<VkImage> images_;
   VkSemaphore acquired_ = VK_NULL_HANDLE;
-  VkSemaphore drawn_ = VK_NULL_HANDLE;
+  // One for each image: a present can still wait on the semaphore of its
+  // image when the next present comes.
+  std::vector<VkSemaphore> drawn_;
 
   uint32_t menu_width_ = 0;
   uint32_t menu_height_ = 0;

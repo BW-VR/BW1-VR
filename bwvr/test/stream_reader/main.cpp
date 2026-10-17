@@ -2,13 +2,14 @@
 // live stream"). A Windows program for a desktop run, with the ring code of
 // the mod and the app (src/mod/stream_ring.h).
 //
-//   bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds]
+//   bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms]
 //     Waits for a new head in the ring file, then for the frame <attach> of
 //     the game, and asks for the whole state as a reader that comes late.
 //     Takes each frame to the frame <last>, then leaves. Writes
 //     ring-capture.bin (a stream: the head of a stream and the frames that it
 //     got) and ring-frames.txt (each frame: its bytes, its records of a
-//     surface, the wait of the writer).
+//     surface, the wait of the writer). With slow ms the reader takes 1 MB
+//     and then sleeps that time, so the ring is full (a test of the drop).
 //
 //   bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>
 //     Compares the bytes of each frame of the record with the frame of the
@@ -125,7 +126,8 @@ struct Got {
   double ms;     // the time of the reader when the frame was whole
 };
 
-int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, double seconds) {
+int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, double seconds,
+         int slow_ms) {
   const double start = NowMs();
   const double deadline = start + seconds * 1000.0;
   // A head that is there now is of a run before.
@@ -186,7 +188,10 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
     capture = w.Bytes();
   }
   std::vector<uint8_t> pending;
-  std::vector<uint8_t> chunk(4u << 20);
+  // A slow reader (slow_ms > 0, a test of a full ring) takes 1 MB, then
+  // sleeps slow_ms.
+  std::vector<uint8_t> chunk(slow_ms > 0 ? (1u << 20) : (4u << 20));
+  if (slow_ms > 0) printf("reader       : a slow reader: 1 MB, then a sleep of %d ms\n", slow_ms);
   std::vector<Got> got;
   std::map<uint32_t, sr::FrameStat> stats;
   bool broken = false;
@@ -217,6 +222,7 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
       continue;
     }
     pending.insert(pending.end(), chunk.begin(), chunk.begin() + n);
+    if (slow_ms > 0) Sleep(static_cast<DWORD>(slow_ms));
     size_t used = 0;
     for (;;) {
       bool bad = false, whole = false;
@@ -264,9 +270,11 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
   }
   sr::Leave(h);
   printf("reader       : left the ring. The writer: %u frames in the ring, %u "
-         "dropped, a wait for room of %u ms in all, %u us at most for one frame\n",
+         "dropped, a wait for room of %u ms in all, %u us at most for one frame, "
+         "%u us at most in the writer for a dropped frame\n",
          sr::LoadAcquire(&h->units), sr::LoadAcquire(&h->dropped),
-         sr::LoadAcquire(&h->wait_ms), sr::LoadAcquire(&h->wait_us_max));
+         sr::LoadAcquire(&h->wait_ms), sr::LoadAcquire(&h->wait_us_max),
+         sr::LoadAcquire(&h->drop_us_max));
   m.Close();
 
   const std::string folder(out);
@@ -370,10 +378,11 @@ int main(int argc, char** argv) {
     const uint32_t attach = argc > 4 ? static_cast<uint32_t>(strtoul(argv[4], nullptr, 10)) : 0;
     const uint32_t last = argc > 5 ? static_cast<uint32_t>(strtoul(argv[5], nullptr, 10)) : 0xFFFFFFFFu;
     const double seconds = argc > 6 ? atof(argv[6]) : 120.0;
-    return Read(argv[2], argv[3], attach, last, seconds);
+    const int slow_ms = argc > 7 ? atoi(argv[7]) : 0;
+    return Read(argv[2], argv[3], attach, last, seconds, slow_ms);
   }
   if (argc == 4 && strcmp(argv[1], "compare") == 0) return Compare(argv[2], argv[3]);
-  printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds]\n"
+  printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms]\n"
          "bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>\n");
   return 1;
 }

@@ -855,6 +855,7 @@ void XrApp::CopyScreen(int eye) {
   xrReleaseSwapchainImage(layer->swapchain, &release);
   layer->released = layer->revision;
   ++copies_;
+  ++screen_copies_[eye];
 }
 
 void XrApp::Pulse(int hand) {
@@ -877,6 +878,12 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(copies_),
            static_cast<unsigned long long>(copies_skipped_),
            copy_on_change_ ? 1 : 0);
+  }
+  if (screen_copies_[0] + screen_copies_[1] > 0) {
+    AppLog("xr           : %llu copies of the stereo screen for eye 0 and %llu "
+           "for eye 1",
+           static_cast<unsigned long long>(screen_copies_[0]),
+           static_cast<unsigned long long>(screen_copies_[1]));
   }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   FreeStaging(&gpu_, &menu_.staging);

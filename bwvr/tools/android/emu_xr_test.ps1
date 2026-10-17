@@ -23,8 +23,9 @@
       5. Reads back the report of the runtime, its pictures of the quads,
          the log of the app, bwvr.ini and logcat, and checks them.
 
-    The results go to bwvr/out/android/emu-xr-test, and with -Stream to
-    bwvr/out/android/emu-xr-stream-test. The script stops the
+    The results go to bwvr/out/android/emu-xr-test, with -Stream to
+    bwvr/out/android/emu-xr-stream-test, and with -Live to
+    bwvr/out/android/emu-xr-live-test. The script stops the
     emulator at the end. The test runtime is only a test: it shows that the
     app makes the calls of OpenXR in the right order with the right structs,
     and that the menu works with a controller ray. Only a headset shows the
@@ -39,6 +40,15 @@
     and the test checks the stereo screen of the renderer too. It needs
     -Gpu host: the renderer needs Vulkan 1.3.
 
+.PARAMETER Live
+    The folder of a desk run of live_stream_run.ps1 (docs/android.md, "The
+    live stream"). Its ring-capture.bin goes into the game folder of the app
+    as the feed, with stream_live=1, stream_live_feed=1 and
+    stream_live_feed_ms=14: a child process of the app writes a frame into
+    the ring each 14 ms, and the app plays the live stream on the device of
+    the session. The test checks the stereo screen and that the screen got
+    a copy for each new picture. It needs -Gpu host.
+
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
     the CPU) or host (the GPU of the PC).
@@ -47,7 +57,8 @@
 param(
     [switch]$Keep,
     [string]$Gpu = 'swiftshader_indirect',
-    [string]$Stream
+    [string]$Stream,
+    [string]$Live
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -60,7 +71,15 @@ $Bwvr = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $Repo = Split-Path $Bwvr -Parent
 $Apk = Join-Path $Bwvr 'out\android\bwvr-quest.apk'
 # A run with a stream keeps its results in a folder of its own.
-$Out = Join-Path $Bwvr $(if ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
+$Out = Join-Path $Bwvr $(if ($Live) { 'out\android\emu-xr-live-test' } elseif ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
+$Feed = $null
+if ($Live) {
+    $Feed = Join-Path $Live 'ring-capture.bin'
+    if (-not (Test-Path -LiteralPath $Feed)) { Stop-Android "There is no feed at:`n$Feed" }
+}
+# The renderer draws on the device of the session with a stream or a live
+# stream, and then the stereo screen is there.
+$Screen = [bool]$Stream -or [bool]$Live
 $Avd = 'bwvr_xr_test'
 $Image = 'system-images;android-34;google_apis;x86_64'
 $Package = 'org.bwvr.quest'
@@ -163,20 +182,23 @@ try {
     # 227 + 74 r. Layer $L is the menu quad.
     $script = Join-Path $Out 'script.txt'
     # With a stream the two quads of the stereo screen come first.
-    $L = $(if ($Stream) { 2 } else { 0 })
+    $L = $(if ($Screen) { 2 } else { 0 })
+    # The live stream makes the stereo screen at its first picture, after the
+    # first frames of the session: its script starts 200 frames later.
+    $T = $(if ($Live) { 200 } else { 0 })
     Set-Content -LiteralPath $script -Encoding ascii -Value @(
-        '40 capture start',
-        "50 point right $L 800 671",
-        '60 capture point',
-        '70 trigger right 1', '74 trigger right 0',
-        "90 point right $L 400 227",
-        '100 trigger right 1', '104 trigger right 0',
-        '110 capture moving',
-        '120 button right 1', '124 button right 0',
-        "140 point right $L 800 893",
-        '150 trigger right 1', '154 trigger right 0',
-        '170 capture saved',
-        '200 exit')
+        "$(40 + $T) capture start",
+        "$(50 + $T) point right $L 800 671",
+        "$(60 + $T) capture point",
+        "$(70 + $T) trigger right 1", "$(74 + $T) trigger right 0",
+        "$(90 + $T) point right $L 400 227",
+        "$(100 + $T) trigger right 1", "$(104 + $T) trigger right 0",
+        "$(110 + $T) capture moving",
+        "$(120 + $T) button right 1", "$(124 + $T) button right 0",
+        "$(140 + $T) point right $L 800 893",
+        "$(150 + $T) trigger right 1", "$(154 + $T) trigger right 0",
+        "$(170 + $T) capture saved",
+        "$(200 + $T) exit")
     Adb @('push', $script, "$XrDir/script.txt")
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
@@ -198,15 +220,17 @@ try {
     $ini = Join-Path $Out 'bwvr.ini.pushed'
     $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1')
     if ($Stream) { $iniLines += 'stream_replay=1' }
+    if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', 'stream_live_feed_ms=14') }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     if ($Stream) { Adb @('push', $Stream, "$AppDir/game/bwvr-stream.bin") }
+    if ($Live) { Adb @('push', $Feed, "$AppDir/game/bwvr-stream-feed.bin") }
 
     # 4. The run.
     Say 'Start the app with the test runtime'
     Adb @('logcat', '-c')
     Adb @('shell', 'am', 'start', '-n', "$Package/android.app.NativeActivity")
-    $deadline = (Get-Date).AddSeconds($(if ($Stream) { 400 } else { 120 }))
+    $deadline = (Get-Date).AddSeconds($(if ($Live) { 600 } elseif ($Stream) { 400 } else { 120 }))
     do {
         Start-Sleep -Seconds 2
         $report = AdbOut @('shell', 'cat', "$XrDir/report.txt")
@@ -244,21 +268,33 @@ try {
     Expect ($report -notmatch '(?m)^fault ') ('the runtime found no fault' + $(if ($report -match '(?m)^fault (.*)$') { ': ' + $Matches[1] } else { '' }))
     # With a stream the stereo screen is layer 0 (left eye) and 1 (right
     # eye), and the menu is layer 2.
-    $menuLayer = $(if ($Stream) { 2 } else { 0 })
+    $menuLayer = $(if ($Screen) { 2 } else { 0 })
     foreach ($name in @('start', 'point', 'moving', 'saved')) {
         $m = [regex]::Match($report, "capture \S*/$name-$menuLayer\.bmp (\d+)x(\d+) lit (\d+)")
         Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[3].Value) lit pixels)"
     }
-    if ($Stream) {
+    if ($Screen) {
         Expect ($log -match 'xr           : the GPU of the runtime: .*The renderer of the mod: yes') 'the device of the session has Vulkan 1.3 and the features of the renderer'
         Expect ($log -match 'vulkan       : the Vulkan of the OpenXR session') 'the renderer drew on the device of the session'
-        Expect ($log -match 'replay       : .*: \d+ records, \d+ frames, [1-9]\d* walks') 'the app played the stream'
+        if ($Stream) {
+            Expect ($log -match 'replay       : .*: \d+ records, \d+ frames, [1-9]\d* walks') 'the app played the stream'
+        }
         Expect ($log -match 'a stereo screen of two quads') 'the app made the stereo screen'
         Expect ($report -match 'quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 1 quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 2') 'the stereo screen is a quad for the left eye and a quad for the right eye, 2.6 m in front'
         foreach ($eye in 0, 1) {
             $m = [regex]::Match($report, "capture \S*/start-$eye\.bmp (\d+)x(\d+) lit (\d+)")
             Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the stereo screen has the scene ($($m.Groups[3].Value) lit pixels)"
         }
+    }
+    if ($Live) {
+        Expect ($log -match 'live         : stream_live_feed=1\. The process \d+ writes the \d+ frames .* one each 14 ms') 'a child process of the app writes the frames of the feed into the ring, one each 14 ms'
+        Expect ($log -match 'live         : the writer answered the ask') 'the writer answered the ask for the whole state'
+        Expect ($log -match 'live         : frames come\. The first is frame \d+, with the whole state') 'the first frame has the whole state'
+        $liveLine = [regex]::Match($log, 'live         : (no new frame for 1 s|the app ends): (\d+) frames played and (\d+) skipped \(frames (\d+) to (\d+)\), (\d+) pictures\. In all (\d+) records, (\d+) walks, (\d+) draws, (\d+) surfaces, (\d+) of an unknown kind([^.]*)\.')
+        Expect ($liveLine.Success -and [int]$liveLine.Groups[2].Value -gt 0 -and [int]$liveLine.Groups[8].Value -gt 0 -and [int]$liveLine.Groups[11].Value -eq 0 -and $liveLine.Groups[12].Value -eq '') ("the app played the live stream" + $(if ($liveLine.Success) { ": $($liveLine.Groups[2].Value) frames played and $($liveLine.Groups[3].Value) skipped, frames $($liveLine.Groups[4].Value) to $($liveLine.Groups[5].Value), $($liveLine.Groups[6].Value) pictures, $($liveLine.Groups[8].Value) walks, 0 of an unknown kind" } else { '' }))
+        $screenLine = [regex]::Match($log, 'xr           : (\d+) copies of the stereo screen for eye 0 and (\d+) for eye 1')
+        $pictures = $(if ($liveLine.Success) { [int]$liveLine.Groups[6].Value } else { 0 })
+        Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of the stereo screen got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')')
     }
 
     Expect ($log -match 'xr           : runtime bwvr test runtime') 'the app logged the runtime'

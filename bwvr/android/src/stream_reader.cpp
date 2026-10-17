@@ -70,9 +70,9 @@ bool Open(const std::string& path, Map* m) {
 
 }  // namespace
 
-bool StreamReader::Start(const std::string& path, size_t queue) {
+bool StreamReader::Start(const std::string& path, size_t queue_bytes) {
   path_ = path;
-  queue_max_ = queue > 0 ? queue : 1;
+  queue_max_bytes_ = queue_bytes > 0 ? queue_bytes : 1;
   stop_ = false;
   started_ = pthread_create(&thread_, nullptr, &StreamReader::Main, this) == 0;
   if (!started_) AppLog("live         : the reader thread did not start");
@@ -86,15 +86,16 @@ void StreamReader::Stop() {
   started_ = false;
 }
 
-bool StreamReader::Next(std::vector<uint8_t>* frame) {
+bool StreamReader::TakeAll(std::vector<std::vector<uint8_t>>* frames) {
+  frames->clear();
   pthread_mutex_lock(&lock_);
-  const bool have = !queue_.empty();
-  if (have) {
-    frame->swap(queue_.front());
+  while (!queue_.empty()) {
+    frames->push_back(std::move(queue_.front()));
     queue_.pop_front();
   }
+  queue_bytes_ = 0;
   pthread_mutex_unlock(&lock_);
-  return have;
+  return !frames->empty();
 }
 
 void* StreamReader::Main(void* self) {
@@ -166,10 +167,12 @@ void StreamReader::Run() {
              NowMs() - asked, sr::LoadAcquire(&m.head->frame));
       state = State::kRead;
     }
+    // One frame can be larger than the limit, so the limit holds only when
+    // a frame waits.
     pthread_mutex_lock(&lock_);
-    const size_t waiting = queue_.size();
+    const size_t waiting = queue_.empty() ? 0 : queue_bytes_;
     pthread_mutex_unlock(&lock_);
-    if (waiting >= queue_max_) {
+    if (waiting >= queue_max_bytes_) {
       SleepUs(500);
       continue;
     }
@@ -203,6 +206,7 @@ void StreamReader::Run() {
       ++frames;
       bytes += len;
       pthread_mutex_lock(&lock_);
+      queue_bytes_ += unit.size();
       queue_.push_back(std::move(unit));
       if (queue_.size() > queue_most) queue_most = queue_.size();
       pthread_mutex_unlock(&lock_);
@@ -217,7 +221,8 @@ void StreamReader::Run() {
   m.Close();
 }
 
-bool StreamReader::StartFeed(const std::string& ring, const std::string& feed) {
+bool StreamReader::StartFeed(const std::string& ring, const std::string& feed,
+                             int pace_ms) {
   // Everything that the child needs is made before the fork: the child of a
   // process with threads may call no function that takes a lock (malloc, the
   // log).
@@ -286,6 +291,7 @@ bool StreamReader::StartFeed(const std::string& ring, const std::string& feed) {
         }
       }
       sr::StoreRelease(&h->units, h->units + 1);
+      if (pace_ms > 0) SleepUs(pace_ms * 1000L);
     }
     // The end: the reader took each byte (0), or not in 5 minutes (6). The
     // write of a picture of a test in the emulator holds the reader for
@@ -299,7 +305,7 @@ bool StreamReader::StartFeed(const std::string& ring, const std::string& feed) {
   }
   feed_ = pid;
   AppLog("live         : stream_live_feed=1. The process %d writes the %zu frames of "
-         "%s into the ring",
-         static_cast<int>(pid), s_units.size(), feed.c_str());
+         "%s into the ring, one each %d ms",
+         static_cast<int>(pid), s_units.size(), feed.c_str(), pace_ms);
   return true;
 }

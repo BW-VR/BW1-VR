@@ -15,6 +15,10 @@
 #    folder of the run, and compares each frame of the record with the frame
 #    of the same number that the reader took (bwvr_stream_reader compare).
 #
+# -SlowMs N: the test reader takes 1 MB and then sleeps N ms, so the ring is
+# full (a test of the drop). -More @{...}: more ini keys, for example
+# vk_stream_live_drop_us.
+#
 # The output is in desk-<Name>: reader.txt, ring-frames.txt (the bytes and
 # the wait of the writer for each frame), ring-capture.bin, the record and
 # the pictures. These files hold pixels of the game and stay in the folder of
@@ -25,7 +29,9 @@ param(
     [int]$Attach = 2990,
     [int]$Record = 3000,
     [int]$TestFrame = 2996,
-    [int]$Seconds = 60
+    [int]$Seconds = 60,
+    [int]$SlowMs = 0,
+    [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -38,13 +44,15 @@ $out = Join-Path $sp ("desk-" + $Name)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $last = $Record + 3
 $p = Start-Process -FilePath $reader -NoNewWindow -PassThru `
-    -ArgumentList @('read', "`"$ring`"", "`"$out`"", "$Attach", "$last", "$($Seconds * 4)") `
+    -ArgumentList @('read', "`"$ring`"", "`"$out`"", "$Attach", "$last", "$($Seconds * 4)", "$SlowMs") `
     -RedirectStandardOutput (Join-Path $out 'reader.txt') -RedirectStandardError (Join-Path $out 'reader-err.txt')
 $null = $p.Handle  # keeps the exit code
 "the test reader runs (process $($p.Id)): it asks at frame $Attach and leaves after frame $last"
-& (Join-Path $sp 'desk_run.ps1') -Name $Name -Dll $Dll -Save pen -Seconds $Seconds -Extra @{
+$keys = @{
     backend = 'vulkan'; one_walk = 1; fake_controller = 1; vk_stream_live = 1
-    vk_stream_record = $Record; vk_stream_frames = 4; vk_scene_test_frame = $TestFrame } |
+    vk_stream_record = $Record; vk_stream_frames = 4; vk_scene_test_frame = $TestFrame }
+foreach ($k in $More.Keys) { $keys[$k] = $More[$k] }
+& (Join-Path $sp 'desk_run.ps1') -Name $Name -Dll $Dll -Save pen -Seconds $Seconds -Extra $keys |
     Tee-Object -Variable runOut
 if (Test-BwvrVerdict $runOut 'NOT RUN') {
     Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue

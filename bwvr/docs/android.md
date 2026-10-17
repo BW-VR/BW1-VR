@@ -320,6 +320,16 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    that device, the two quads of the stereo screen (one for each eye, 2.6
    m in front) and the pictures of both eyes that the runtime read back. Its
    results are in `bwvr/out/android/emu-xr-stream-test`.
+   With `-Live <desk folder> -Gpu host` (40 checks) the app plays the live stream
+   of `ring-capture.bin` of a desktop run of `live_stream_run.ps1` on the
+   device of the session: a child process of the app writes one frame into
+   the ring each 14 ms. The script of the controllers starts 200 frames
+   later, after the first picture. The test checks the device, the stereo
+   screen and the pictures of both eyes as with `-Stream`, the feed
+   process, the answer to the ask, the first frame with the whole state,
+   the frames that the app played and skipped, and that each eye of the
+   stereo screen got a copy for each new picture of the live stream. Its
+   results are in `bwvr/out/android/emu-xr-live-test`.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -534,24 +544,32 @@ the writer stops until the next ask. The same holds for the first frame
 after a frame with no stream.
 
 **A full ring** (a slow reader). A frame with no `kStart`, `kSurface` or
-`kWritten` record waits up to 4 ms for room for the whole frame, then the
-writer drops it and the log says so. The reader keeps each texture, because
-such a frame changes no surface. A frame with one of these records is never
-dropped: it goes into the ring in parts as the reader makes room. When the
-reader takes no byte for 2 s, the writer gives up on it (`lost` in the
-head), says so in the log, and stops until the next ask. In the test save
-"pen" most frames have a `kSurface` record (3 small surfaces that the game
-writes in each frame), so few frames can drop.
+`kWritten` record waits up to `vk_stream_live_drop_us` microseconds for room
+for the whole frame (0 by default: no wait), then the writer drops it and
+the log says so. The reader keeps each texture, because such a frame
+changes no surface. A frame with one of these records is never dropped: it
+goes into the ring in parts as the reader makes room, and the frame thread
+sleeps while it waits. The frame thread spins no longer than
+`vk_stream_live_drop_us`. When the reader takes no byte for 2 s, the writer
+gives up on it (`lost` in the head), says so in the log, and stops until
+the next ask. In the test save "pen" each frame has a `kSurface` record (3
+small surfaces that the game writes in each frame), so no frame can drop
+there, and a slow reader makes the game wait.
 
 **The reader in the app** (`stream_live=1` in `bwvr.ini` of the game folder
 of the app, `stream_reader.cpp`). A thread waits for the ring file with a
-whole head, asks for the whole state, and takes whole frames into a queue of
-3 frames. A full queue takes no byte from the ring, so the writer waits or
-drops. The loop of the app gives one frame of the queue to the renderer for
-each frame of the session (the renderer is not thread safe), through the
-same player as the file (`PlayStreamRecords`, `scene_player.cpp`), and the
-eye picture goes to the stereo screen with a new revision. With no session
-the loop runs each 5 ms. A new head (a new start of the game), a `lost` of
+whole head, asks for the whole state, and takes each whole frame that waits
+in the ring into a queue, up to 64 MB. A full queue takes no byte from the
+ring, so the writer waits or drops. At each frame of the session the loop of
+the app takes the whole queue (a batch) and gives its frames to the renderer
+(the renderer is not thread safe), through the same player as the file
+(`PlayStreamRecords`, `scene_player.cpp`). It plays each frame that has a
+`kStart`, `kSurface` or `kWritten` record, each frame with a picture of a
+test (`vk_scene_test_frame` of the stream, or F12), and the newest frame.
+The other frames are skipped: the newest frame replaces their picture, and
+they change no surface (`PlayInBatch`, `stream_ring.h`). Then the eye
+picture goes to the stereo screen with a new revision, one for each batch.
+With no session the loop runs each 5 ms. A new head (a new start of the game), a `lost` of
 the writer or a record that is not of the stream makes the reader ask
 again. The log has one line for each change of state, and a line with the
 counts when no frame came for 1 s.
@@ -579,10 +597,12 @@ ms for a frame of 14.4 MB and 0.05 to 0.5 ms for the others.
 
 **A TEST AID of the app** (`stream_live_feed=1`): a child process of the app
 makes the ring and writes the frames of `bwvr-stream-feed.bin` of the game
-folder into it as the mod does, after the ask, with no drop. So the reader
+folder into it as the mod does, after the ask, with no drop, one frame each
+`stream_live_feed_ms` (0 by default: no wait). So the reader
 takes the frames from a second process through the file, as from Wine.
 `emu_live_test.ps1` uses it with the capture of a desktop run (see "Test the
-APK", step 5). In the emulator the four pictures of frame 2996 are the same
+APK", step 5), and `emu_xr_test.ps1 -Live` in a session of the test runtime
+with one frame each 14 ms (step 3). In the emulator the four pictures of frame 2996 are the same
 as the pictures of the PC, to the byte.
 
 **Not shown yet:** the ring under Wine and Box64 in the headset (the

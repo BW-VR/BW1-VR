@@ -150,6 +150,7 @@ class XrApp {
   bool copy_on_change_ = true;
   uint64_t copies_ = 0;
   uint64_t copies_skipped_ = 0;
+  uint64_t screen_copies_[2] = {0, 0};  // the copies of each eye of the stereo screen
   bool renderer13_ = false;
   bool renderer_used_ = false;
   bool shading_rate_ = false;

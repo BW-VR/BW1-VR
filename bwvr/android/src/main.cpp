@@ -85,8 +85,11 @@ struct App {
   bool live = false;
   StreamReader live_reader;
   PlayResult live_result;
-  std::vector<uint8_t> live_frame;
-  uint64_t live_frames = 0;  // the frames played since frames came
+  std::vector<std::vector<uint8_t>> live_batch;
+  int32_t live_test_frame = 0;  // vk_scene_test_frame of the last kStart
+  uint64_t live_frames = 0;    // the frames played since frames came
+  uint64_t live_skipped = 0;   // the frames that a newer frame replaced
+  uint64_t live_pictures = 0;  // the batches: one new picture each
   uint64_t live_first = 0;
   uint64_t live_last = 0;
   double live_last_ms = 0.0;  // the time of the last frame
@@ -122,53 +125,66 @@ bool ShowEyes(App* app) {
 
 void LiveSummary(App* app, const char* why) {
   const PlayResult& r = app->live_result;
-  AppLog("live         : %s: %llu frames played (frames %llu to %llu). In all "
-         "%llu records, %llu walks, %llu draws, %llu surfaces, %llu of an "
-         "unknown kind%s. The play of a frame took %.1f ms as a mean and %.1f "
-         "ms at most",
+  AppLog("live         : %s: %llu frames played and %llu skipped (frames %llu to "
+         "%llu), %llu pictures. In all %llu records, %llu walks, %llu draws, "
+         "%llu surfaces, %llu of an unknown kind%s. The play of a picture took "
+         "%.1f ms as a mean and %.1f ms at most",
          why, static_cast<unsigned long long>(app->live_frames),
+         static_cast<unsigned long long>(app->live_skipped),
          static_cast<unsigned long long>(app->live_first),
          static_cast<unsigned long long>(app->live_last),
+         static_cast<unsigned long long>(app->live_pictures),
          static_cast<unsigned long long>(r.records),
          static_cast<unsigned long long>(r.walks),
          static_cast<unsigned long long>(r.draws),
          static_cast<unsigned long long>(r.surfaces),
          static_cast<unsigned long long>(r.unknown),
          r.broken ? ", a frame stops in a record" : "",
-         app->live_frames > 0 ? app->live_play_ms / app->live_frames : 0.0,
+         app->live_pictures > 0 ? app->live_play_ms / app->live_pictures : 0.0,
          app->live_play_most);
 }
 
-// One frame of the live stream into the renderer, for each frame of the
-// session. The renderer is not thread safe, so only this thread plays.
+// The frames of the live stream into the renderer, at each frame of the
+// session. The renderer is not thread safe, so only this thread plays. The
+// batch is each frame that waits: the app plays each frame that changes a
+// surface or the options, each frame with a picture of a test and the newest
+// frame (stream_ring.h, PlayInBatch), and the stereo screen gets one new
+// picture.
 void PlayLive(App* app) {
-  if (!app->live_reader.Next(&app->live_frame)) {
+  if (!app->live_reader.TakeAll(&app->live_batch)) {
     if (!app->live_quiet && NowMs() - app->live_last_ms > 1000.0) {
       LiveSummary(app, "no new frame for 1 s");
       app->live_quiet = true;
     }
     return;
   }
-  bool bad = false, whole = false;
-  uint64_t frame = 0;
-  stream_ring::UnitBytes(app->live_frame.data(), app->live_frame.size(),
-                         app->live_frame.size(), &bad, &frame, &whole);
-  if (app->live_quiet) {
-    AppLog("live         : frames come. The first is frame %llu%s",
-           static_cast<unsigned long long>(frame),
-           whole ? ", with the whole state" : "");
-    app->live_quiet = false;
-    app->live_frames = 0;
-    app->live_first = frame;
-    app->live_play_ms = app->live_play_most = 0.0;
-  }
   const double start = NowMs();
-  PlayStreamRecords(app->live_frame.data(), app->live_frame.size(), &app->live_result);
+  const size_t n = app->live_batch.size();
+  for (size_t i = 0; i < n; ++i) {
+    const std::vector<uint8_t>& f = app->live_batch[i];
+    const stream_ring::UnitInfo u = stream_ring::Inspect(f.data(), f.size());
+    if (u.start) app->live_test_frame = u.test_frame;
+    if (app->live_quiet) {
+      AppLog("live         : frames come. The first is frame %llu%s",
+             static_cast<unsigned long long>(u.frame),
+             u.start ? ", with the whole state" : "");
+      app->live_quiet = false;
+      app->live_frames = app->live_skipped = app->live_pictures = 0;
+      app->live_first = u.frame;
+      app->live_play_ms = app->live_play_most = 0.0;
+    }
+    app->live_last = u.frame;
+    if (!stream_ring::PlayInBatch(u, i + 1 == n, app->live_test_frame)) {
+      ++app->live_skipped;
+      continue;
+    }
+    PlayStreamRecords(f.data(), f.size(), &app->live_result);
+    ++app->live_frames;
+  }
   const double ms = NowMs() - start;
   app->live_play_ms += ms;
   if (ms > app->live_play_most) app->live_play_most = ms;
-  ++app->live_frames;
-  app->live_last = frame;
+  ++app->live_pictures;
   app->live_last_ms = NowMs();
   ShowEyes(app);
 }
@@ -509,19 +525,21 @@ void android_main(android_app* android) {
   }
   // THE LIVE STREAM (stream_live=1 in bwvr.ini): a thread reads the frames
   // of the walks of the mod from the ring bwvr-stream.ring of the game
-  // folder, and the loop below gives one frame to the renderer for each
-  // frame (docs/android.md, "The live stream"). stream_live_feed=1 (a test
+  // folder, and at each step the loop below gives the frames that wait to
+  // the renderer (PlayLive, docs/android.md, "The live stream"). stream_live_feed=1 (a test
   // aid): a child process writes the frames of bwvr-stream-feed.bin into the
-  // ring, as the mod does.
+  // ring, as the mod does, one each stream_live_feed_ms.
   if (app.live) {
     const std::string ring = app.game.folder + "/bwvr-stream.ring";
     AppLog("live         : stream_live=1. The app reads the frames of the walks "
            "from %s", ring.c_str());
     VkPlatformSetFolder(app.game.folder.c_str());
     if (app.ini.GetInt("bwvr", "stream_live_feed", 0) != 0) {
-      app.live_reader.StartFeed(ring, app.game.folder + "/bwvr-stream-feed.bin");
+      app.live_reader.StartFeed(ring, app.game.folder + "/bwvr-stream-feed.bin",
+                                app.ini.GetInt("bwvr", "stream_live_feed_ms", 0));
     }
-    app.live_reader.Start(ring, 3);
+    // 64 MB of frames wait at most for the session.
+    app.live_reader.Start(ring, 64u << 20);
   }
   if (app.xr_on) {
     TakeHeadsetSize(&app);

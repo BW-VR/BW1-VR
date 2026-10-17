@@ -193,13 +193,16 @@ try {
     Expect $m.Success 'the writer answered the ask for the whole state'
     $m = [regex]::Match($log, 'live         : frames come\. The first is frame (\d+)(, with the whole state)?')
     Expect ($m.Success -and [long]$m.Groups[1].Value -eq $feedFrames[0] -and $m.Groups[2].Success) "the first frame is the first frame of the feed ($($feedFrames[0])), with the whole state"
-    $m = [regex]::Match($log, 'live         : no new frame for 1 s: (\d+) frames played \(frames (\d+) to (\d+)\)\. In all (\d+) records, (\d+) walks, (\d+) draws, (\d+) surfaces, (\d+) of an unknown kind([^.]*)\. The play of a frame took ([\d.]+) ms as a mean and ([\d.]+) ms at most')
+    $m = [regex]::Match($log, 'live         : no new frame for 1 s: (\d+) frames played and (\d+) skipped \(frames (\d+) to (\d+)\), (\d+) pictures\. In all (\d+) records, (\d+) walks, (\d+) draws, (\d+) surfaces, (\d+) of an unknown kind([^.]*)\. The play of a picture took ([\d.]+) ms as a mean and ([\d.]+) ms at most')
     Expect $m.Success 'the app played the frames and then waited for more'
     if ($m.Success) {
-        Expect ([int]$m.Groups[1].Value -eq $feedFrames.Count -and [long]$m.Groups[3].Value -eq $feedFrames[$feedFrames.Count - 1]) "the app played each frame of the feed: $($m.Groups[1].Value) frames, $($m.Groups[2].Value) to $($m.Groups[3].Value)"
-        Expect ([int]$m.Groups[5].Value -gt 0 -and [int]$m.Groups[6].Value -gt 0) "the frames had $($m.Groups[5].Value) walks, $($m.Groups[6].Value) draws and $($m.Groups[7].Value) surfaces"
-        Expect ([int]$m.Groups[8].Value -eq 0 -and $m.Groups[9].Value -eq '') 'each record had a kind that the player knows, and no frame stops in a record'
-        Write-Host ("   info  the play of a frame took {0} ms as a mean and {1} ms at most" -f $m.Groups[10].Value, $m.Groups[11].Value)
+        # A frame that a newer frame replaced is skipped (stream_ring.h,
+        # PlayInBatch). Each frame of the feed is played or skipped.
+        $played = [int]$m.Groups[1].Value; $skipped = [int]$m.Groups[2].Value
+        Expect ($played + $skipped -eq $feedFrames.Count -and [long]$m.Groups[4].Value -eq $feedFrames[$feedFrames.Count - 1]) "the app took each frame of the feed: $played played and $skipped skipped, frames $($m.Groups[3].Value) to $($m.Groups[4].Value), in $($m.Groups[5].Value) pictures"
+        Expect ([int]$m.Groups[7].Value -gt 0 -and [int]$m.Groups[8].Value -gt 0) "the frames had $($m.Groups[7].Value) walks, $($m.Groups[8].Value) draws and $($m.Groups[9].Value) surfaces"
+        Expect ([int]$m.Groups[10].Value -eq 0 -and $m.Groups[11].Value -eq '') 'each record had a kind that the player knows, and no frame stops in a record'
+        Write-Host ("   info  the play of a picture took {0} ms as a mean and {1} ms at most" -f $m.Groups[12].Value, $m.Groups[13].Value)
     }
     Expect ($log -match 'live         : the feed process ended with the status 0') 'the feed process ended with the status 0: the reader took each byte'
     Expect ($log -notmatch 'live         : the writer gave up|live         : a record in the ring is not|live         : the indices of the ring are not valid') 'the reader did not lose its place'

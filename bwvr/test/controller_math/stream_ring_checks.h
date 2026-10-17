@@ -112,7 +112,9 @@ inline void StreamRingChecks() {
 
   // THE CHOICE OF THE WRITER.
   {
-    const sr::Policy p;
+    // vk_stream_live_drop_us=4000: a wait of 4 ms.
+    sr::Policy p;
+    p.drop_us = 4000;
     const uint32_t cap = 1000;
     Check(sr::Choose(cap, 500, 400, false, false, 0, 0, p) == sr::Step::kWrite,
           "a frame that fits goes in", 0, 0);
@@ -132,6 +134,14 @@ inline void StreamRingChecks() {
           "a frame larger than the ring goes in parts", 0, 0);
     Check(sr::Choose(cap, 0, 400, false, false, 9000, 2000000, p) == sr::Step::kLost,
           "a frame with no surface also ends at a lost reader", 0, 0);
+    // The default: vk_stream_live_drop_us=0, a drop with no wait.
+    const sr::Policy now;
+    Check(now.drop_us == 0 &&
+              sr::Choose(cap, 100, 400, false, false, 0, 0, now) == sr::Step::kDrop,
+          "with the default the writer drops a frame with no surface at once", 0, 0);
+    Check(sr::Choose(cap, 100, 400, false, true, 0, 0, now) == sr::Step::kWrite &&
+              sr::Choose(cap, 0, 400, false, true, 0, 0, now) == sr::Step::kWait,
+          "with the default a frame with a surface still waits for room", 0, 0);
     Check(sr::KeepKind(ss::kStart) && sr::KeepKind(ss::kSurface) &&
               sr::KeepKind(ss::kWritten) && !sr::KeepKind(ss::kDraw) &&
               !sr::KeepKind(ss::kTexture),
@@ -179,6 +189,31 @@ inline void StreamRingChecks() {
     }
     Check(records.Ok() && kinds == 4 && order && !records.Broken(),
           "the records of a frame read back with no head of a stream", kinds, 4);
+  }
+
+  // THE FRAMES OF A BATCH IN THE APP.
+  {
+    const std::vector<uint8_t> whole = Unit(50, 8, true);
+    const std::vector<uint8_t> plain = Unit(51, 8, false);
+    const sr::UnitInfo a = sr::Inspect(whole.data(), whole.size());
+    const sr::UnitInfo b = sr::Inspect(plain.data(), plain.size());
+    Check(a.frame == 50 && a.keep && a.start && !b.keep && !b.start && b.frame == 51,
+          "the app sees the frame and the kStart of a frame", static_cast<double>(b.frame), 51);
+    ss::Writer w;
+    ss::StartBody o = {};
+    o.test_frame = 52;
+    w.Record(ss::kStart, &o, sizeof(o));
+    ss::FrameBody f = {52, 0, 1, 0};
+    w.Record(ss::kFrame, &f, sizeof(f));
+    w.Record(ss::kFrameEnd, &f.frame, sizeof(f.frame));
+    const sr::UnitInfo c = sr::Inspect(w.Bytes().data() + 8, w.Bytes().size() - 8);
+    Check(c.test_frame == 52 && c.capture, "the app reads the test frame of kStart and a capture",
+          c.test_frame, 52);
+    Check(sr::PlayInBatch(a, false, 0) && !sr::PlayInBatch(b, false, 0) &&
+              sr::PlayInBatch(b, true, 0) && sr::PlayInBatch(b, false, 51),
+          "a batch plays each frame with a surface, the newest frame and the frame of a "
+          "test picture, and no other",
+          0, 0);
   }
 
   // A READER THAT COMES LATE. The first reader takes the first frame, then it

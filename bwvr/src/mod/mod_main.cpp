@@ -564,6 +564,9 @@ int g_vk_stream_frames = 3;
 // vk_stream_live (vk_stream.h): the live stream of the walks for the headset
 // app through the ring bwvr-stream.ring. 0: no live stream.
 int g_vk_stream_live = 0;
+// vk_stream_live_drop_us (vk_stream.h): the wait for room for a frame with no
+// surface before the writer drops it. 0: a drop at once. 4000: 4 ms.
+int g_vk_stream_live_drop_us = 0;
 int g_vk_scene_follow = 1;
 int g_vk_panel = 1;
 int g_vk_only = 1;
@@ -1470,6 +1473,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_stream_frames", 3, path));
   g_vk_stream_live =
       GetPrivateProfileIntA("bwvr", "vk_stream_live", 0, path) != 0 ? 1 : 0;
+  g_vk_stream_live_drop_us = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "vk_stream_live_drop_us", 0, path));
   g_vk_scene_follow =
       GetPrivateProfileIntA("bwvr", "vk_scene_follow", 1, path) != 0 ? 1 : 0;
   g_vk_panel = GetPrivateProfileIntA("bwvr", "vk_panel", 1, path) != 0 ? 1 : 0;
@@ -1883,7 +1888,8 @@ void StartVrStep() {
     VkSceneSetFoveaRes(g_fovea_res, g_fovea_res_outer_pct,
                        g_fovea_res_center_pct, g_fovea_res_center_deg,
                        g_fovea_res_center_down_deg);
-    VkStreamSetOptions(g_vk_stream_record, g_vk_stream_frames, g_vk_stream_live);
+    VkStreamSetOptions(g_vk_stream_record, g_vk_stream_frames, g_vk_stream_live,
+                       g_vk_stream_live_drop_us);
     if ((g_foveation != 0 || g_fovea_res != 0) && g_vk_scene == 0 &&
         !vk_eyes && !direct) {
       ModLog("vk scene     : foveation=%d and fovea_res=%d, but the eye "

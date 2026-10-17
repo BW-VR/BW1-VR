@@ -185,9 +185,15 @@ bool LiveOpen() {
         MapViewOfFile(g_live.mapping, FILE_MAP_ALL_ACCESS, 0, 0, bytes));
   }
   if (g_live.view == nullptr) {
+    const DWORD error = GetLastError();
+    // The handles of the steps that worked go, so the file is free again.
+    if (g_live.mapping != nullptr) CloseHandle(g_live.mapping);
+    if (g_live.file != INVALID_HANDLE_VALUE) CloseHandle(g_live.file);
+    g_live.mapping = nullptr;
+    g_live.file = INVALID_HANDLE_VALUE;
     ModLog("vk stream    : vk_stream_live=1, but the ring %s cannot be made "
            "(error %lu). There is no live stream",
-           g_live.path, GetLastError());
+           g_live.path, error);
     return false;
   }
   g_live.head = reinterpret_cast<sr::Head*>(g_live.view);
@@ -198,8 +204,9 @@ bool LiveOpen() {
                GetCurrentProcessId() ^ static_cast<uint32_t>(now.QuadPart));
   ModLog("vk stream    : vk_stream_live=1. The ring %s has %u MB (made in "
          "%.1f ms). The frames of the walks go into it when a reader asks for "
-         "them",
-         g_live.path, sr::kCapacity >> 20, MsSince(start));
+         "them. vk_stream_live_drop_us=%u: a frame with no surface waits up "
+         "to that time for room, then it drops",
+         g_live.path, sr::kCapacity >> 20, MsSince(start), g_live.policy.drop_us);
   return true;
 }
 
@@ -249,10 +256,12 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
       LiveSummary(why);
       return;
     }
-    // A short wait spins. A long wait (a frame with a surface) sleeps.
+    // A wait spins up to vk_stream_live_drop_us. A longer wait (a frame
+    // with a surface) sleeps, so the frame thread spins no longer than the
+    // key says.
     LARGE_INTEGER wait_start;
     QueryPerformanceCounter(&wait_start);
-    if (waited < 4.0) {
+    if (waited * 1000.0 < g_live.policy.drop_us) {
       YieldProcessor();
     } else {
       Sleep(1);
@@ -277,6 +286,7 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
   if (stat->wait_us > h->wait_us_max) sr::StoreRelease(&h->wait_us_max, stat->wait_us);
   if (dropped) {
     ++g_live.dropped;
+    if (stat->put_us > h->drop_us_max) sr::StoreRelease(&h->drop_us_max, stat->put_us);
     sr::StoreRelease(&h->dropped, h->dropped + 1);
     if (g_live.drops_now++ == 0) {
       ModLog("vk stream    : the reader is slow. Frame %llu (%u bytes, no "
@@ -336,10 +346,11 @@ bool LiveFrame(uint64_t frame, bool* reset) {
 
 }  // namespace
 
-void VkStreamSetOptions(int record_frame, int frames, int live) {
+void VkStreamSetOptions(int record_frame, int frames, int live, int drop_us) {
   g_record_frame = record_frame > 0 ? record_frame : 0;
   g_frames = frames > 0 ? frames : 3;
   g_live.want = live != 0;
+  g_live.policy.drop_us = drop_us > 0 ? static_cast<uint32_t>(drop_us) : 0u;
   if (g_record_frame > 0) {
     ModLog("vk stream    : vk_stream_record=%d, vk_stream_frames=%d. The "
            "calls of the Vulkan renderer of these frames go to "

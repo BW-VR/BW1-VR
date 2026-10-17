@@ -13,6 +13,9 @@
 // each frame of the game goes into the ring at the start of the next frame.
 // A record and the live stream get the same bytes for a frame, and the
 // first frame of a record has the whole state for both.
+// vk_stream_live_drop_us: the wait in microseconds for room for a frame with
+// no surface before the writer drops it. 0 (the default) drops at once.
+// 4000 is the wait of 4 ms of the first version.
 //
 // Both only with backend=vulkan: there the device of the mod gives each call
 // on the frame thread, in the order of the walk.
@@ -25,7 +28,7 @@
 
 #include "scene_stream.h"
 
-void VkStreamSetOptions(int record_frame, int frames, int live);
+void VkStreamSetOptions(int record_frame, int frames, int live, int drop_us);
 
 // True while the record runs or a reader takes the frames. The calls below
 // do nothing when it is false.

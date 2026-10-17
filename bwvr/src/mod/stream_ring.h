@@ -29,12 +29,12 @@
 // until the next ask.
 //
 // A FULL RING (a slow reader). A frame with no kStart, kSurface or kWritten
-// record waits up to Policy::drop_us for room for the whole frame. Then the
-// writer drops it: the reader keeps each texture, because such a frame
-// changes no surface. A frame with one of these records is never dropped: it
-// goes into the ring in parts as the reader makes room. When the reader takes
-// no byte for Policy::gone_us, the writer gives up on it (lost) and stops
-// until the next ask.
+// record waits up to Policy::drop_us (vk_stream_live_drop_us, 0 by default)
+// for room for the whole frame. Then the writer drops it: the reader keeps
+// each texture, because such a frame changes no surface. A frame with one of
+// these records is never dropped: it goes into the ring in parts as the
+// reader makes room. When the reader takes no byte for Policy::gone_us, the
+// writer gives up on it (lost) and stops until the next ask.
 #pragma once
 
 #include <stdint.h>
@@ -81,7 +81,8 @@ struct Head {
   uint32_t dropped;     // the writer: the frames that it dropped
   uint32_t wait_ms;     // the writer: the sum of its waits for room
   uint32_t wait_us_max; // the writer: the longest wait for room for one frame
-  uint32_t reserved[15];
+  uint32_t drop_us_max; // the writer: the longest time in the writer of a dropped frame
+  uint32_t reserved[14];
   FrameStat stats[kStats];  // the frame f is at f % kStats
 };
 static_assert(sizeof(Head) == 128 + kStats * 20, "Head");
@@ -224,7 +225,7 @@ inline bool TakeBye(Head* h, uint32_t* seen) {
 
 // THE CHOICE OF THE WRITER for one frame, at each step of its wait.
 struct Policy {
-  uint32_t drop_us = 4000;     // the wait for a frame that the writer can drop
+  uint32_t drop_us = 0;        // the wait for a frame that the writer can drop
   uint32_t gone_us = 2000000;  // no byte taken for this time: the reader is lost
 };
 
@@ -288,6 +289,51 @@ inline size_t UnitBytes(const uint8_t* bytes, size_t n, size_t limit,
     at = end;
   }
   return 0;
+}
+
+// THE FRAMES OF A BATCH (the app). The app takes all whole frames that wait
+// in the ring at one time (a batch).
+struct UnitInfo {
+  uint64_t frame = 0;      // the frame of its first kFrame
+  bool keep = false;       // a kStart, a kSurface or a kWritten record
+  bool capture = false;    // a kFrame with a picture of a test (F12)
+  bool start = false;      // a kStart record
+  int32_t test_frame = 0;  // vk_scene_test_frame of its kStart
+};
+
+inline UnitInfo Inspect(const uint8_t* unit, size_t n) {
+  UnitInfo u;
+  bool have_frame = false;
+  size_t at = 0;
+  while (at + 8 <= n) {
+    uint32_t head[2];
+    memcpy(head, unit + at, sizeof(head));
+    if (at + 8 + head[1] > n) break;
+    const uint8_t* body = unit + at + 8;
+    if (KeepKind(head[0])) u.keep = true;
+    if (head[0] == scene_stream::kStart && head[1] >= 8) {
+      u.start = true;
+      memcpy(&u.test_frame, body + 4, 4);  // StartBody: mode, test_frame
+    }
+    if (head[0] == scene_stream::kFrame && head[1] >= sizeof(scene_stream::FrameBody)) {
+      scene_stream::FrameBody f;
+      memcpy(&f, body, sizeof(f));
+      if (!have_frame) u.frame = f.frame;
+      have_frame = true;
+      if (f.capture != 0) u.capture = true;
+    }
+    at = (at + 8 + head[1] + 3) & ~static_cast<size_t>(3);
+  }
+  return u;
+}
+
+// True when the app plays a frame of a batch: each frame that changes a
+// surface or the options, each frame with a picture of a test, and the
+// newest frame. The renderer draws the other frames for no one: the newest
+// frame replaces their picture, and they change no surface.
+inline bool PlayInBatch(const UnitInfo& u, bool newest, int32_t test_frame) {
+  return u.keep || newest || u.capture ||
+         (test_frame > 0 && u.frame == static_cast<uint64_t>(test_frame));
 }
 
 }  // namespace stream_ring

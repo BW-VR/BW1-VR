@@ -3,8 +3,9 @@
 // with MAP_SHARED, asks the writer for the whole state, and takes each whole
 // frame that waits in the ring into a queue. At each frame of the session the
 // thread of the session takes the whole queue (a batch) and gives its frames
-// to the renderer (scene_player.h, stream_ring.h PlayInBatch), because the
-// renderer is not thread safe.
+// to the renderer (scene_player.h), because the renderer is not thread safe.
+// With stream_live_frames=N the queue keeps the newest N frames whole, and
+// each older frame keeps only its records of state (stream_split.h).
 #pragma once
 
 #include <pthread.h>
@@ -16,16 +17,28 @@
 #include <string>
 #include <vector>
 
+// A frame of the queue.
+struct QueuedFrame {
+  std::vector<uint8_t> bytes;
+  uint64_t frame = 0;
+  bool whole = true;     // false: only its records of state
+  bool picture = false;  // a picture of a test (vk_scene_test_frame or F12)
+  bool start = false;    // a kStart record
+  int32_t test_frame = 0;
+};
+
 class StreamReader {
  public:
-  // The thread for the ring at path. queue_bytes: the most bytes of frames
+  // The thread for the ring at path. frames > 0: the reader takes each
+  // frame of the ring at once, and the newest frames of the queue stay
+  // whole. frames == 0: the way of queue_bytes, the most bytes of frames
   // that wait for the session. A full queue takes no byte from the ring, so
-  // the writer waits or drops a frame with no surface (stream_ring.h).
-  bool Start(const std::string& path, size_t queue_bytes);
+  // the writer waits or drops (stream_ring.h).
+  bool Start(const std::string& path, size_t frames, size_t queue_bytes);
   // Leaves the ring (the writer stops) and ends the thread.
   void Stop();
-  // Each whole frame that waits, the oldest first, or false when none waits.
-  bool TakeAll(std::vector<std::vector<uint8_t>>* frames);
+  // Each frame that waits, the oldest first, or false when none waits.
+  bool TakeAll(std::vector<QueuedFrame>* frames);
 
   // A TEST AID (stream_live_feed=1): a child process writes the frames of
   // the stream file feed into the ring as the mod does, so the reader takes
@@ -40,12 +53,13 @@ class StreamReader {
   void Run();
 
   std::string path_;
+  size_t whole_frames_ = 3;
   size_t queue_max_bytes_ = 64u << 20;
   size_t queue_bytes_ = 0;
   pthread_t thread_ = {};
   bool started_ = false;
   std::atomic<bool> stop_{false};
   pthread_mutex_t lock_ = PTHREAD_MUTEX_INITIALIZER;
-  std::deque<std::vector<uint8_t>> queue_;
+  std::deque<QueuedFrame> queue_;
   pid_t feed_ = 0;
 };

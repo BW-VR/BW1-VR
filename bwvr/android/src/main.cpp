@@ -31,6 +31,7 @@
 #include "menu_model.h"
 #include "menu_painter.h"
 #include "../../src/mod/stream_ring.h"
+#include "../../src/mod/stream_split.h"
 #include "../../src/mod/vk_platform_posix.h"
 #include "../../src/mod/vk_scene.h"
 #include "scene_player.h"
@@ -85,10 +86,12 @@ struct App {
   bool live = false;
   StreamReader live_reader;
   PlayResult live_result;
-  std::vector<std::vector<uint8_t>> live_batch;
+  std::vector<QueuedFrame> live_batch;
+  size_t live_whole = 3;  // stream_live_frames
+  std::vector<uint8_t> live_state;
   int32_t live_test_frame = 0;  // vk_scene_test_frame of the last kStart
   uint64_t live_frames = 0;    // the frames played since frames came
-  uint64_t live_skipped = 0;   // the frames that a newer frame replaced
+  uint64_t live_skipped = 0;   // the frames with no walks: a newer frame replaced them
   uint64_t live_pictures = 0;  // the batches: one new picture each
   uint64_t live_first = 0;
   uint64_t live_last = 0;
@@ -146,10 +149,12 @@ void LiveSummary(App* app, const char* why) {
 
 // The frames of the live stream into the renderer, at each frame of the
 // session. The renderer is not thread safe, so only this thread plays. The
-// batch is each frame that waits: the app plays each frame that changes a
-// surface or the options, each frame with a picture of a test and the newest
-// frame (stream_ring.h, PlayInBatch), and the stereo screen gets one new
-// picture.
+// batch is each frame that waits. With stream_live_frames=N (N > 0) the app
+// plays the walks of the newest frame and of each frame with a picture of a
+// test, and only the records of state of the other frames (stream_split.h).
+// With 0 it plays each frame that changes a surface or the options, each
+// frame with a picture of a test and the newest frame (stream_ring.h,
+// PlayInBatch). The stereo screen gets one new picture.
 void PlayLive(App* app) {
   if (!app->live_reader.TakeAll(&app->live_batch)) {
     if (!app->live_quiet && NowMs() - app->live_last_ms > 1000.0) {
@@ -161,7 +166,8 @@ void PlayLive(App* app) {
   const double start = NowMs();
   const size_t n = app->live_batch.size();
   for (size_t i = 0; i < n; ++i) {
-    const std::vector<uint8_t>& f = app->live_batch[i];
+    QueuedFrame& q = app->live_batch[i];
+    const std::vector<uint8_t>& f = q.bytes;
     const stream_ring::UnitInfo u = stream_ring::Inspect(f.data(), f.size());
     if (u.start) app->live_test_frame = u.test_frame;
     if (app->live_quiet) {
@@ -174,12 +180,28 @@ void PlayLive(App* app) {
       app->live_play_ms = app->live_play_most = 0.0;
     }
     app->live_last = u.frame;
-    if (!stream_ring::PlayInBatch(u, i + 1 == n, app->live_test_frame)) {
-      ++app->live_skipped;
+    if (app->live_whole == 0) {
+      if (!stream_ring::PlayInBatch(u, i + 1 == n, app->live_test_frame)) {
+        ++app->live_skipped;
+        continue;
+      }
+      PlayStreamRecords(f.data(), f.size(), &app->live_result);
+      ++app->live_frames;
       continue;
     }
-    PlayStreamRecords(f.data(), f.size(), &app->live_result);
-    ++app->live_frames;
+    if (q.whole && stream_split::KeepWalks(i, n, 1, q.picture)) {
+      PlayStreamRecords(f.data(), f.size(), &app->live_result);
+      ++app->live_frames;
+      continue;
+    }
+    // A frame that a newer frame replaces: its records of state, no walks.
+    if (q.whole) {
+      stream_split::StateOnly(f.data(), f.size(), &app->live_state);
+      PlayStreamRecords(app->live_state.data(), app->live_state.size(), &app->live_result);
+    } else {
+      PlayStreamRecords(f.data(), f.size(), &app->live_result);
+    }
+    ++app->live_skipped;
   }
   const double ms = NowMs() - start;
   app->live_play_ms += ms;
@@ -538,8 +560,16 @@ void android_main(android_app* android) {
       app.live_reader.StartFeed(ring, app.game.folder + "/bwvr-stream-feed.bin",
                                 app.ini.GetInt("bwvr", "stream_live_feed_ms", 0));
     }
-    // 64 MB of frames wait at most for the session.
-    app.live_reader.Start(ring, 64u << 20);
+    // stream_live_frames=N (3 by default): the newest N frames of the queue
+    // stay whole, and each older frame keeps only its records of state. 0:
+    // up to 64 MB of whole frames wait for the session.
+    const int whole = app.ini.GetInt("bwvr", "stream_live_frames", 3);
+    app.live_whole = whole > 0 ? static_cast<size_t>(whole) : 0;
+    AppLog("live         : stream_live_frames=%d. %s", whole,
+           app.live_whole > 0 ? "The newest frames of the queue stay whole, and "
+                                "an older frame keeps only its records of state"
+                              : "Up to 64 MB of whole frames wait for the session");
+    app.live_reader.Start(ring, app.live_whole, 64u << 20);
   }
   if (app.xr_on) {
     TakeHeadsetSize(&app);

@@ -44,10 +44,17 @@
     The folder of a desk run of live_stream_run.ps1 (docs/android.md, "The
     live stream"). Its ring-capture.bin goes into the game folder of the app
     as the feed, with stream_live=1, stream_live_feed=1 and
-    stream_live_feed_ms=14: a child process of the app writes a frame into
-    the ring each 14 ms, and the app plays the live stream on the device of
-    the session. The test checks the stereo screen and that the screen got
-    a copy for each new picture. It needs -Gpu host.
+    stream_live_feed_ms (-FeedMs): a child process of the app writes a frame
+    into the ring each FeedMs, and the app plays the live stream on the
+    device of the session. The test checks the stereo screen, that the
+    screen got a copy for each new picture, and the pictures of the test
+    frame of the stream against the pictures of the PC in the desk folder.
+    It needs -Gpu host.
+
+.PARAMETER FeedMs
+    With -Live: the time between two frames of the feed, 14 by default. 0:
+    no wait, so the feed is faster than the session, and the test checks
+    that the app skipped the walks of frames.
 
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
@@ -58,7 +65,8 @@ param(
     [switch]$Keep,
     [string]$Gpu = 'swiftshader_indirect',
     [string]$Stream,
-    [string]$Live
+    [string]$Live,
+    [int]$FeedMs = 14
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -91,6 +99,40 @@ $Serial = "emulator-$Port"
 if (-not (Test-Path -LiteralPath $Apk)) { Stop-Android "There is no APK at:`n$Apk`nRun build_apk.ps1 first." }
 if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
+
+# The share of pixels that differ by more than 24 in a channel, and the mean
+# difference, of two BMP files of one size (as emu_replay_test.ps1). -1 for
+# two sizes.
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+public static class XrLiveBmpDiff {
+  public static double[] Compare(string a, string b) {
+    byte[] x = File.ReadAllBytes(a), y = File.ReadAllBytes(b);
+    int wx = BitConverter.ToInt32(x, 18), hx = BitConverter.ToInt32(x, 22);
+    int wy = BitConverter.ToInt32(y, 18), hy = BitConverter.ToInt32(y, 22);
+    int bx = BitConverter.ToInt16(x, 28) / 8, by = BitConverter.ToInt16(y, 28) / 8;
+    if (wx != wy || Math.Abs(hx) != Math.Abs(hy)) return new double[] { -1, -1 };
+    int ox = BitConverter.ToInt32(x, 10), oy = BitConverter.ToInt32(y, 10);
+    int rx = (wx * bx + 3) & ~3, ry = (wy * by + 3) & ~3;
+    long differ = 0, total = 0; double sum = 0;
+    for (int row = 0; row < Math.Abs(hx); ++row) {
+      for (int col = 0; col < wx; ++col) {
+        int px = ox + row * rx + col * bx, py = oy + row * ry + col * by;
+        int worst = 0;
+        for (int c = 0; c < 3; ++c) {
+          int d = Math.Abs(x[px + c] - y[py + c]);
+          sum += d;
+          if (d > worst) worst = d;
+        }
+        if (worst > 24) ++differ;
+        ++total;
+      }
+    }
+    return new double[] { 100.0 * differ / total, sum / (3.0 * total) };
+  }
+}
+'@
 
 $faults = New-Object System.Collections.Generic.List[string]
 $checks = 0
@@ -220,7 +262,7 @@ try {
     $ini = Join-Path $Out 'bwvr.ini.pushed'
     $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1')
     if ($Stream) { $iniLines += 'stream_replay=1' }
-    if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', 'stream_live_feed_ms=14') }
+    if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', "stream_live_feed_ms=$FeedMs") }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     if ($Stream) { Adb @('push', $Stream, "$AppDir/game/bwvr-stream.bin") }
@@ -287,14 +329,35 @@ try {
         }
     }
     if ($Live) {
-        Expect ($log -match 'live         : stream_live_feed=1\. The process \d+ writes the \d+ frames .* one each 14 ms') 'a child process of the app writes the frames of the feed into the ring, one each 14 ms'
+        Expect ($log -match "live         : stream_live_feed=1\. The process \d+ writes the \d+ frames .* one each $FeedMs ms") "a child process of the app writes the frames of the feed into the ring, one each $FeedMs ms"
         Expect ($log -match 'live         : the writer answered the ask') 'the writer answered the ask for the whole state'
         Expect ($log -match 'live         : frames come\. The first is frame \d+, with the whole state') 'the first frame has the whole state'
         $liveLine = [regex]::Match($log, 'live         : (no new frame for 1 s|the app ends): (\d+) frames played and (\d+) skipped \(frames (\d+) to (\d+)\), (\d+) pictures\. In all (\d+) records, (\d+) walks, (\d+) draws, (\d+) surfaces, (\d+) of an unknown kind([^.]*)\.')
         Expect ($liveLine.Success -and [int]$liveLine.Groups[2].Value -gt 0 -and [int]$liveLine.Groups[8].Value -gt 0 -and [int]$liveLine.Groups[11].Value -eq 0 -and $liveLine.Groups[12].Value -eq '') ("the app played the live stream" + $(if ($liveLine.Success) { ": $($liveLine.Groups[2].Value) frames played and $($liveLine.Groups[3].Value) skipped, frames $($liveLine.Groups[4].Value) to $($liveLine.Groups[5].Value), $($liveLine.Groups[6].Value) pictures, $($liveLine.Groups[8].Value) walks, 0 of an unknown kind" } else { '' }))
         $screenLine = [regex]::Match($log, 'xr           : (\d+) copies of the stereo screen for eye 0 and (\d+) for eye 1')
         $pictures = $(if ($liveLine.Success) { [int]$liveLine.Groups[6].Value } else { 0 })
+        if ($FeedMs -eq 0 -and $liveLine.Success) {
+            Expect ([int]$liveLine.Groups[3].Value -gt 0) "a feed faster than the session: the app skipped the walks of $($liveLine.Groups[3].Value) frames and played $($liveLine.Groups[2].Value) frames whole"
+        }
         Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of the stereo screen got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')')
+        # The pictures of the test frame of the stream (vk_scene_test_frame),
+        # against the pictures of the PC of the same desk run: at most 2
+        # percent of the pixels with a difference of more than 24.
+        $references = @(Get-ChildItem -LiteralPath $Live -Filter 'bwvr-vk-*.bmp')
+        Expect ($references.Count -gt 0) "the PC made $($references.Count) pictures of the test frame"
+        $listing = AdbOut @('shell', 'ls', "$AppDir/game")
+        foreach ($name in ([regex]::Matches($listing, 'bwvr-vk-[a-z]+-\d+\.bmp') | ForEach-Object { $_.Value })) {
+            Adb @('pull', "$AppDir/game/$name", (Join-Path $Out $name))
+        }
+        foreach ($ref in $references) {
+            $mine = Join-Path $Out $ref.Name
+            if (-not (Test-Path -LiteralPath $mine)) {
+                Expect $false "the app made the picture $($ref.Name) of the test frame"
+                continue
+            }
+            $d = [XrLiveBmpDiff]::Compare($ref.FullName, $mine)
+            Expect ($d[0] -ge 0 -and $d[0] -le 2.0) ("{0}: {1:N2} percent of the pixels differ by more than 24 from the PC, the mean difference is {2:N2}" -f $ref.Name, $d[0], $d[1])
+        }
     }
 
     Expect ($log -match 'xr           : runtime bwvr test runtime') 'the app logged the runtime'

@@ -528,12 +528,19 @@ and Box64 gives the interlocked instructions their barriers.
 
 **The writer** (`vk_stream_live=1`, `vk_stream.cpp`, only with
 `backend=vulkan`). At its start the mod makes the file and a new head. The
-records of a frame collect in the memory of the mod. At the start of the
-next frame of the game they go into the ring, so a frame is in the ring one
-frame of the game after it was drawn. A record (`vk_stream_record`) and the
-live stream get the same bytes for a frame, and the first frame of a record
-has the whole state for both. With no reader the mod puts no frame into
-the ring and reads no surface for it.
+records of a frame collect in the memory of the mod. At the end of the last
+walk of the frame (`vk_stream_live_end=1`, the default) they go into the
+ring, so the reader can have the frame in the game frame of its walks. The
+last walk is the one walk of `one_walk=1`, the walk of the right eye, or the
+walk of a frame with no eye passes (`WalkEndsFrame`, `stream_split.h`): the
+walk that `vk_scene.cpp` takes for the picture of a test. A record after
+that walk and before the next frame goes at the start of the next frame, in
+its order. The walks of "pen" have no record after the last walk.
+`vk_stream_live_end=0`: a frame goes at the start of the next frame of the
+game. A record (`vk_stream_record`) and the live stream get the same bytes
+for a frame, and the first frame of a record has the whole state for both.
+With no reader the mod puts no frame into the ring and reads no surface for
+it.
 
 **A reader that comes late** adds one to `ask` in the head. At the start of
 its next frame the writer sets `sync` to its write index, then `answer` to
@@ -543,32 +550,44 @@ surface with its pixels before its first use. The reader sets `read` to
 the writer stops until the next ask. The same holds for the first frame
 after a frame with no stream.
 
-**A full ring** (a slow reader). A frame with no `kStart`, `kSurface` or
-`kWritten` record waits up to `vk_stream_live_drop_us` microseconds for room
-for the whole frame (0 by default: no wait), then the writer drops it and
-the log says so. The reader keeps each texture, because such a frame
-changes no surface. A frame with one of these records is never dropped: it
-goes into the ring in parts as the reader makes room, and the frame thread
-sleeps while it waits. The frame thread spins no longer than
-`vk_stream_live_drop_us`. When the reader takes no byte for 2 s, the writer
-gives up on it (`lost` in the head), says so in the log, and stops until
-the next ask. In the test save "pen" each frame has a `kSurface` record (3
-small surfaces that the game writes in each frame), so no frame can drop
-there, and a slow reader makes the game wait.
+**A full ring** (a slow reader). A frame waits up to
+`vk_stream_live_drop_us` microseconds (0 by default: no wait) for room for
+the whole frame. Then the writer drops its walks (`vk_stream_live_drop=1`,
+the default): the frame keeps its records of state, `kStart`, `kFrame`,
+`kGaze`, `kOnlyFrame`, `kTarget`, `kPanelBind`, `kSurface`, `kWritten` and
+`kFrameEnd`, and loses `kWalkBegin` to `kWalkEnd` with the draws, the
+clears, the render states, the stage states, the textures and the viewports
+(`StateOnly`, `stream_split.h`). A walk needs nothing of an earlier walk,
+because `kWalkBegin` has the whole state of the device (`WalkBeginBody`, and
+`BeginOnWorker` of `vk_scene.cpp` takes each render state, each stage state,
+both textures and the viewport from it). The records of state go into the
+ring in parts as the reader makes room. A whole frame leaves 4 MB of the
+ring free (`state_reserve`), so the state of a dropped frame goes in with
+no wait. The log has one line when the reader becomes slow, one for each
+10000 dropped frames, and one when 1 s went with no drop.
+`vk_stream_live_drop=0`: a frame with a `kStart`, `kSurface` or `kWritten`
+record never drops and waits for room, and a frame with none drops whole.
+The frame thread spins no longer than `vk_stream_live_drop_us`, and a longer
+wait sleeps. When the reader takes no byte for 2 s, the writer gives up on
+it (`lost` in the head), says so in the log, and stops until the next ask.
 
 **The reader in the app** (`stream_live=1` in `bwvr.ini` of the game folder
 of the app, `stream_reader.cpp`). A thread waits for the ring file with a
-whole head, asks for the whole state, and takes each whole frame that waits
-in the ring into a queue, up to 64 MB. A full queue takes no byte from the
-ring, so the writer waits or drops. At each frame of the session the loop of
+whole head, asks for the whole state, and takes each frame of the ring into
+a queue at once. The queue keeps the newest `stream_live_frames` frames
+whole (3 by default), and each older frame keeps only its records of state
+(`KeepWalks`, `stream_split.h`). At each frame of the session the loop of
 the app takes the whole queue (a batch) and gives its frames to the renderer
 (the renderer is not thread safe), through the same player as the file
-(`PlayStreamRecords`, `scene_player.cpp`). It plays each frame that has a
-`kStart`, `kSurface` or `kWritten` record, each frame with a picture of a
-test (`vk_scene_test_frame` of the stream, or F12), and the newest frame.
-The other frames are skipped: the newest frame replaces their picture, and
-they change no surface (`PlayInBatch`, `stream_ring.h`). Then the eye
-picture goes to the stereo screen with a new revision, one for each batch.
+(`PlayStreamRecords`, `scene_player.cpp`). It plays the walks of the newest
+frame and of each frame with a picture of a test (`vk_scene_test_frame` of
+the stream, or F12), and only the records of state of the other frames (the
+log counts them as skipped). So the picture is at most one batch late, and
+no surface is lost. Then the eye picture goes to the stereo screen with a
+new revision, one for each batch. `stream_live_frames=0`: the queue takes
+up to 64 MB of whole frames, and a batch plays each frame with a `kStart`,
+`kSurface` or `kWritten` record, each frame with a picture of a test and the
+newest frame (`PlayInBatch`, `stream_ring.h`).
 With no session the loop runs each 5 ms. A new head (a new start of the game), a `lost` of
 the writer or a record that is not of the stream makes the reader ask
 again. The log has one line for each change of state, and a line with the

@@ -2,7 +2,7 @@
 // live stream"). A Windows program for a desktop run, with the ring code of
 // the mod and the app (src/mod/stream_ring.h).
 //
-//   bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms]
+//   bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame]
 //     Waits for a new head in the ring file, then for the frame <attach> of
 //     the game, and asks for the whole state as a reader that comes late.
 //     Takes each frame to the frame <last>, then leaves. Writes
@@ -10,6 +10,8 @@
 //     got) and ring-frames.txt (each frame: its bytes, its records of a
 //     surface, the wait of the writer). With slow ms the reader takes 1 MB
 //     and then sleeps that time, so the ring is full (a test of the drop).
+//     With lag frame the reader reads on to that frame, and counts the
+//     frames that are at the reader in their game frame.
 //
 //   bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>
 //     Compares the bytes of each frame of the record with the frame of the
@@ -29,6 +31,7 @@
 #include <vector>
 
 #include "../../src/mod/stream_ring.h"
+#include "../../src/mod/stream_split.h"
 
 namespace {
 
@@ -124,10 +127,12 @@ struct Got {
   int surfaces;
   uint64_t pixels;
   double ms;     // the time of the reader when the frame was whole
+  uint32_t walks;
+  uint32_t game;  // the frame of the game (the head) when the frame was whole
 };
 
 int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, double seconds,
-         int slow_ms) {
+         int slow_ms, uint32_t lag_until) {
   const double start = NowMs();
   const double deadline = start + seconds * 1000.0;
   // A head that is there now is of a run before.
@@ -196,6 +201,10 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
   std::map<uint32_t, sr::FrameStat> stats;
   bool broken = false;
   bool done = false;
+  // After the frame last: the lag of each frame with no kStart, up to the
+  // frame lag_until, and no copy.
+  int lag[3] = {0, 0, 0};
+  bool lag_done = lag_until <= last;
   int code = 0;
   double done_at = 0.0;
   while (NowMs() < deadline) {
@@ -217,8 +226,15 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
       break;
     }
     if (n == 0) {
-      if (done && NowMs() - done_at > 200.0) break;
-      Sleep(1);
+      if (done && lag_done && NowMs() - done_at > 200.0) break;
+      // A reader that sleeps 1 ms sleeps about 15 ms on Windows, many frames
+      // of the game. So the reader looks again at once, and the time from
+      // the writer to the reader is the time of the ring alone.
+      if (slow_ms > 0) {
+        Sleep(1);
+      } else {
+        SwitchToThread();
+      }
       continue;
     }
     pending.insert(pending.end(), chunk.begin(), chunk.begin() + n);
@@ -242,6 +258,15 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
           stats[s.frame] = s;
         }
       }
+      if (done && !lag_done) {
+        const int64_t late = static_cast<int64_t>(sr::LoadAcquire(&h->frame)) -
+                             static_cast<int64_t>(frame);
+        if (!whole) ++lag[late <= 0 ? 0 : (late == 1 ? 1 : 2)];
+        if (frame >= lag_until) {
+          lag_done = true;
+          done_at = NowMs();
+        }
+      }
       if (!done) {
         Got g = {};
         g.frame = frame;
@@ -249,6 +274,8 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
         g.bytes = len;
         g.whole = whole;
         g.ms = NowMs() - start;
+        g.game = sr::LoadAcquire(&h->frame);
+        g.walks = stream_split::Walks(pending.data() + used, len);
         CountSurfaces(pending.data() + used, len, &g.surfaces, &g.pixels);
         capture.insert(capture.end(), pending.begin() + used, pending.begin() + used + len);
         got.push_back(g);
@@ -281,26 +308,44 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
   const bool wrote = WriteFile(folder + "\\ring-capture.bin", capture);
   std::string text;
   char line[256];
-  sprintf_s(line, "frame\tbytes\tkStart\tsurfaces\tpixel bytes\twriter wait us\t"
-                  "writer put us\treader ms\n");
+  sprintf_s(line, "frame\tbytes\tkStart\tsurfaces\tpixel bytes\twalks\twriter wait us\t"
+                  "writer put us\treader ms\tgame frame at the reader\n");
   text += line;
+  int in_time = 0, one_late = 0, later = 0, walkless = 0;
   for (const Got& g : got) {
     const auto s = stats.find(static_cast<uint32_t>(g.frame));
     if (s != stats.end()) {
-      sprintf_s(line, "%llu\t%zu\t%d\t%d\t%llu\t%u\t%u\t%.1f\n", g.frame, g.bytes,
-                g.whole ? 1 : 0, g.surfaces, g.pixels, s->second.wait_us,
-                s->second.put_us, g.ms);
+      sprintf_s(line, "%llu\t%zu\t%d\t%d\t%llu\t%u\t%u\t%u\t%.1f\t%u\n", g.frame, g.bytes,
+                g.whole ? 1 : 0, g.surfaces, g.pixels, g.walks, s->second.wait_us,
+                s->second.put_us, g.ms, g.game);
     } else {
-      sprintf_s(line, "%llu\t%zu\t%d\t%d\t%llu\t-\t-\t%.1f\n", g.frame, g.bytes,
-                g.whole ? 1 : 0, g.surfaces, g.pixels, g.ms);
+      sprintf_s(line, "%llu\t%zu\t%d\t%d\t%llu\t%u\t-\t-\t%.1f\t%u\n", g.frame, g.bytes,
+                g.whole ? 1 : 0, g.surfaces, g.pixels, g.walks, g.ms, g.game);
     }
     text += line;
+    const int64_t behind = static_cast<int64_t>(g.game) - static_cast<int64_t>(g.frame);
+    if (behind <= 0) {
+      ++in_time;
+    } else if (behind == 1) {
+      ++one_late;
+    } else {
+      ++later;
+    }
+    if (g.walks == 0) ++walkless;
   }
   WriteFile(folder + "\\ring-frames.txt", std::vector<uint8_t>(text.begin(), text.end()));
   printf("reader       : %zu frames (%llu to %llu), %zu bytes, to %s\\ring-capture.bin%s\n",
          got.size(), got.empty() ? 0ull : got.front().frame,
          got.empty() ? 0ull : got.back().frame, capture.size() - 8, out,
          wrote ? "" : " (FAULT: cannot write it)");
+  printf("reader       : %d frames at the reader in their game frame, %d one game "
+         "frame later, %d later. %d frames with no walks\n",
+         in_time, one_late, later, walkless);
+  if (lag_until > last) {
+    printf("reader       : the frames %u to %u with no kStart: %d at the reader in "
+           "their game frame, %d one game frame later, %d later\n",
+           last + 1, lag_until, lag[0], lag[1], lag[2]);
+  }
   if (!done && code == 0) {
     printf("reader       : FAULT the frame %u did not come in %.0f s\n", last, seconds);
     code = 4;
@@ -337,7 +382,8 @@ int Compare(const char* capture_path, const char* record_path) {
   printf("compare      : the capture has %zu frames%s, the record %zu frames%s\n",
          a.size(), ok_a ? "" : " (it stops in a frame)", b.size(),
          ok_b ? "" : " (it stops in a frame)");
-  int same = 0, differ = 0;
+  int same = 0, same_state = 0, differ = 0;
+  std::vector<uint8_t> state;
   for (const auto& r : b) {
     const auto c = a.find(r.first);
     if (c == a.end()) {
@@ -360,6 +406,15 @@ int Compare(const char* capture_path, const char* record_path) {
       printf("compare      : frame %llu: %zu bytes, the same bytes in the ring and in the record\n",
              r.first, r.second.second);
       ++same;
+    } else if (stream_split::Walks(y, c->second.second) == 0 &&
+               stream_split::StateOnly(x, r.second.second, &state) > 0 &&
+               state.size() == c->second.second &&
+               memcmp(state.data(), y, state.size()) == 0) {
+      // A frame that the writer dropped: its records of state, with no walks.
+      printf("compare      : frame %llu: dropped in the ring: its %zu bytes of state "
+             "are the same as the records of state of the record\n",
+             r.first, state.size());
+      ++same_state;
     } else {
       printf("compare      : frame %llu: FAULT %zu bytes in the record, %zu in the "
              "ring, the first different byte at %zu\n",
@@ -367,8 +422,9 @@ int Compare(const char* capture_path, const char* record_path) {
       ++differ;
     }
   }
-  printf("compare      : %d frames the same, %d different\n", same, differ);
-  return differ == 0 && same > 0 && ok_a && ok_b ? 0 : 1;
+  printf("compare      : %d frames the same, %d frames with the same state and no walks, "
+         "%d different\n", same, same_state, differ);
+  return differ == 0 && same + same_state > 0 && ok_a && ok_b ? 0 : 1;
 }
 
 }  // namespace
@@ -379,10 +435,11 @@ int main(int argc, char** argv) {
     const uint32_t last = argc > 5 ? static_cast<uint32_t>(strtoul(argv[5], nullptr, 10)) : 0xFFFFFFFFu;
     const double seconds = argc > 6 ? atof(argv[6]) : 120.0;
     const int slow_ms = argc > 7 ? atoi(argv[7]) : 0;
-    return Read(argv[2], argv[3], attach, last, seconds, slow_ms);
+    const uint32_t lag_until = argc > 8 ? static_cast<uint32_t>(strtoul(argv[8], nullptr, 10)) : 0;
+    return Read(argv[2], argv[3], attach, last, seconds, slow_ms, lag_until);
   }
   if (argc == 4 && strcmp(argv[1], "compare") == 0) return Compare(argv[2], argv[3]);
-  printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms]\n"
+  printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame]\n"
          "bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>\n");
   return 1;
 }

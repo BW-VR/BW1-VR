@@ -16,7 +16,9 @@
 #    of the same number that the reader took (bwvr_stream_reader compare).
 #
 # -SlowMs N: the test reader takes 1 MB and then sleeps N ms, so the ring is
-# full (a test of the drop). -More @{...}: more ini keys, for example
+# full (a test of the drop). -LagUntil F (4000 by default): after frame
+# -Record + 3 the reader reads on to frame F and counts the frames that are
+# at the reader in their game frame. -More @{...}: more ini keys, for example
 # vk_stream_live_drop_us.
 #
 # The output is in desk-<Name>: reader.txt, ring-frames.txt (the bytes and
@@ -31,6 +33,7 @@ param(
     [int]$TestFrame = 2996,
     [int]$Seconds = 60,
     [int]$SlowMs = 0,
+    [int]$LagUntil = 4000,
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -44,7 +47,7 @@ $out = Join-Path $sp ("desk-" + $Name)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $last = $Record + 3
 $p = Start-Process -FilePath $reader -NoNewWindow -PassThru `
-    -ArgumentList @('read', "`"$ring`"", "`"$out`"", "$Attach", "$last", "$($Seconds * 4)", "$SlowMs") `
+    -ArgumentList @('read', "`"$ring`"", "`"$out`"", "$Attach", "$last", "$($Seconds * 4)", "$SlowMs", "$LagUntil") `
     -RedirectStandardOutput (Join-Path $out 'reader.txt') -RedirectStandardError (Join-Path $out 'reader-err.txt')
 $null = $p.Handle  # keeps the exit code
 "the test reader runs (process $($p.Id)): it asks at frame $Attach and leaves after frame $last"
@@ -72,5 +75,5 @@ foreach ($f in @('bwvr-stream.bin', 'bwvr-stream.ring')) {
     }
 }
 & $reader compare (Join-Path $out 'ring-capture.bin') (Join-Path $out 'bwvr-stream.bin')
-if ($LASTEXITCODE -eq 0) { 'LIVE STREAM VERIFIED: each frame of the record has the same bytes in the ring' }
+if ($LASTEXITCODE -eq 0) { 'LIVE STREAM VERIFIED: each frame of the record has the same bytes in the ring, or the same records of state when the writer dropped its walks' }
 else { 'LIVE STREAM FAULT: see the lines compare' }

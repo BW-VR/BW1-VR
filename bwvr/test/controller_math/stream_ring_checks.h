@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "../../src/mod/stream_ring.h"
+#include "../../src/mod/stream_split.h"
 
 namespace stream_ring_checks {
 
@@ -142,6 +143,14 @@ inline void StreamRingChecks() {
     Check(sr::Choose(cap, 100, 400, false, true, 0, 0, now) == sr::Step::kWrite &&
               sr::Choose(cap, 0, 400, false, true, 0, 0, now) == sr::Step::kWait,
           "with the default a frame with a surface still waits for room", 0, 0);
+    // A writer that can drop the walks keeps room for the records of state.
+    Check(now.state_reserve == sr::kCapacity / 8 && sr::RoomForWalks(5000, 4000) == 1000 &&
+              sr::RoomForWalks(3000, 4000) == 0 &&
+              sr::Choose(cap, sr::RoomForWalks(4300, 4000), 400, false, false, 0, 0, now) ==
+                  sr::Step::kDrop &&
+              sr::Choose(cap, 4300, 400, false, true, 0, 0, now) == sr::Step::kWrite,
+          "the walks leave 4 MB of the ring free, so the state of a dropped frame goes in at once",
+          sr::RoomForWalks(5000, 4000), 1000);
     Check(sr::KeepKind(ss::kStart) && sr::KeepKind(ss::kSurface) &&
               sr::KeepKind(ss::kWritten) && !sr::KeepKind(ss::kDraw) &&
               !sr::KeepKind(ss::kTexture),
@@ -214,6 +223,97 @@ inline void StreamRingChecks() {
           "a batch plays each frame with a surface, the newest frame and the frame of a "
           "test picture, and no other",
           0, 0);
+  }
+
+  // THE SPLIT OF A FRAME (stream_split.h): a frame with no walks keeps each
+  // record of state in its order.
+  {
+    namespace sp = stream_split;
+    ss::Writer w;
+    ss::StartBody o = {};
+    w.Record(ss::kStart, &o, sizeof(o));
+    ss::FrameBody f = {60, 0, 0, 0};
+    w.Record(ss::kFrame, &f, sizeof(f));
+    ss::GazeBody g = {1, 0.5f, 0.5f};
+    w.Record(ss::kGaze, &g, sizeof(g));
+    const uint32_t one = 1;
+    w.Record(ss::kOnlyFrame, &one, sizeof(one));
+    ss::WalkBeginBody b = {};
+    w.Record(ss::kWalkBegin, &b, sizeof(b));
+    const uint32_t rs[2] = {27, 1};
+    w.Record(ss::kRenderState, rs, sizeof(rs));
+    ss::SurfaceBody sb = {0x1234, 0, 1, 1, 1};
+    const uint8_t px[4] = {1, 2, 3, 4};
+    w.Record(ss::kSurface, &sb, sizeof(sb), px, 4);
+    ss::TextureBody t = {0, 0, 0x1234};
+    w.Record(ss::kTexture, &t, sizeof(t));
+    ss::DrawBody d = {};
+    const uint8_t v[6] = {9, 9, 9, 9, 9, 9};
+    d.vertex_bytes = 6;
+    w.Record(ss::kDraw, &d, sizeof(d), v, 6);
+    const uint64_t id = 0x1234;
+    w.Record(ss::kWritten, &id, sizeof(id));
+    ss::TargetBody tb = {};
+    w.Record(ss::kTarget, &tb, sizeof(tb));
+    ss::ClearBody c = {0, 3, 0, 1.0f};
+    w.Record(ss::kClear, &c, sizeof(c));
+    ss::ViewportBody vp = {};
+    w.Record(ss::kViewport, &vp, sizeof(vp));
+    ss::StreamState st = {};
+    w.Record(ss::kWalkEnd, &st, sizeof(st));
+    w.Record(ss::kPanelBind, &one, sizeof(one));
+    w.Record(ss::kFrameEnd, &f.frame, sizeof(f.frame));
+    const uint8_t* unit = w.Bytes().data() + 8;
+    const size_t n = w.Bytes().size() - 8;
+    std::vector<uint8_t> state;
+    const uint32_t walks = sp::StateOnly(unit, n, &state);
+    const ss::Kind want[9] = {ss::kStart, ss::kFrame, ss::kGaze, ss::kOnlyFrame, ss::kSurface,
+                              ss::kWritten, ss::kTarget, ss::kPanelBind, ss::kFrameEnd};
+    ss::Reader r = ss::Reader::Records(state.data(), state.size());
+    ss::Kind kind;
+    const uint8_t* body = nullptr;
+    uint32_t bytes = 0;
+    int count = 0;
+    bool order = true;
+    bool pixels = false;
+    while (r.Next(&kind, &body, &bytes)) {
+      if (count >= 9 || kind != want[count]) order = false;
+      if (kind == ss::kSurface && bytes == sizeof(sb) + 4 && body[sizeof(sb) + 3] == 4) {
+        pixels = true;
+      }
+      ++count;
+    }
+    Check(walks == 1 && count == 9 && order && pixels && !r.Broken(),
+          "a frame with no walks keeps the 9 records of state in their order, with the pixels",
+          count, 9);
+    Check(sp::Walks(unit, n) == 1 && sp::Walks(state.data(), state.size()) == 0 &&
+              state.size() % 4 == 0,
+          "the frame had one walk, and the frame of state has none", sp::Walks(unit, n), 1);
+    bool bad = false, whole = false;
+    uint64_t frame = 0;
+    Check(sr::UnitBytes(state.data(), state.size(), 1u << 20, &bad, &frame, &whole) ==
+                  state.size() &&
+              whole && frame == 60,
+          "the frame of state is a whole frame of the ring with its kStart",
+          static_cast<double>(frame), 60);
+    ss::StreamState s = {};
+    s.one_walk = 1;
+    s.pass_eye = 0;
+    const bool one_walk = sp::WalkEndsFrame(s);
+    s.one_walk = 0;
+    const bool left = sp::WalkEndsFrame(s);
+    s.pass_eye = 1;
+    const bool right = sp::WalkEndsFrame(s);
+    s.pass_eye = -1;
+    const bool no_pass = sp::WalkEndsFrame(s);
+    Check(one_walk && !left && right && no_pass,
+          "the one walk, the walk of the right eye and a walk with no eye pass end a frame, "
+          "the walk of the left eye does not",
+          0, 0);
+    Check(sp::KeepWalks(4, 5, 1, false) && !sp::KeepWalks(3, 5, 1, false) &&
+              sp::KeepWalks(2, 5, 3, false) && !sp::KeepWalks(1, 5, 3, false) &&
+              sp::KeepWalks(0, 5, 1, true),
+          "the queue keeps the walks of the newest frames and of a picture of a test", 0, 0);
   }
 
   // A READER THAT COMES LATE. The first reader takes the first frame, then it

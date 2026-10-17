@@ -227,7 +227,16 @@ inline bool TakeBye(Head* h, uint32_t* seen) {
 struct Policy {
   uint32_t drop_us = 0;        // the wait for a frame that the writer can drop
   uint32_t gone_us = 2000000;  // no byte taken for this time: the reader is lost
+  // With a drop that keeps the state (vk_stream_live_drop=1): the room that
+  // the walks leave free for the records of state, so the state of a dropped
+  // frame goes in with no wait.
+  uint32_t state_reserve = kCapacity / 8;
 };
+
+// The room for a whole frame when the walks leave state_reserve bytes free.
+inline uint32_t RoomForWalks(uint32_t room, uint32_t reserve) {
+  return room > reserve ? room - reserve : 0;
+}
 
 enum class Step { kWrite, kWait, kDrop, kLost };
 

@@ -14,6 +14,7 @@
 #include "../common/bw_addresses.h"
 #include "one_walk.h"
 #include "stream_ring.h"
+#include "stream_split.h"
 #include "ui_panel.h"
 #include "vk_prim_math.h"
 #include "vk_scene.h"
@@ -42,10 +43,15 @@ uint64_t g_draws = 0;
 uint64_t g_surface_bytes = 0;
 
 // THE FRAME THAT THE CALLS GO TO NOW. g_writer holds the head of a stream and
-// then the records of one frame of the game. At the start of the next frame
-// the records go to the record and to the ring, so both get the same bytes.
+// then the records of one frame of the game. At the end of the last walk of
+// the frame (vk_stream_live_end=1, stream_split.h WalkEndsFrame), or at the
+// start of the next frame, the records go to the record and to the ring, so
+// both get the same bytes. A record after the end of the frame (the tail)
+// goes at the start of the next frame, in its order.
 ss::StartBody g_options = {};
 ss::Writer g_writer;
+bool g_end_at_walk = true;  // vk_stream_live_end=1
+bool g_unit_ended = false;  // the frame went at the end of its last walk
 bool g_unit_open = false;
 bool g_unit_record = false;
 bool g_unit_live = false;
@@ -72,6 +78,11 @@ struct Live {
   uint32_t bye_seen = 0;
   uint32_t lost = 0;
   sr::Policy policy;
+  // vk_stream_live_drop=1: a drop keeps the records of state of the frame
+  // and loses its walks. 0: a frame with a surface waits, and a frame with
+  // no surface drops whole.
+  bool strip = true;
+  std::vector<uint8_t> state;  // the records of state of a dropped frame
   // The reader made progress at this time: it took a byte, or the ring was
   // empty.
   uint32_t last_read = 0;
@@ -80,7 +91,10 @@ struct Live {
   uint64_t units = 0;
   uint64_t bytes = 0;
   uint64_t dropped = 0;
-  uint64_t drops_now = 0;  // the frames dropped since the last frame that went in
+  uint64_t drops_now = 0;  // the frames dropped since the reader was slow
+  LARGE_INTEGER last_drop = {};
+  uint64_t drops_said = 0;  // drops_now at the last line of the log
+  uint64_t first_drop = 0;
   double wait_ms = 0.0;
   double wait_ms_max = 0.0;
   uint32_t wait_us_part = 0;  // the part of a ms of the waits for the head
@@ -225,6 +239,10 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
   QueryPerformanceCounter(&start);
   uint32_t done = 0;
   bool dropped = false;
+  bool stripped = false;
+  // With vk_stream_live_drop=1 each frame can drop its walks, so the whole
+  // frame waits only up to vk_stream_live_drop_us for room.
+  if (g_live.strip) keep = false;
   double wait_for_room = 0.0;
   for (;;) {
     const uint32_t r = sr::LoadAcquire(&h->read);
@@ -234,13 +252,31 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
     }
     const double waited = MsSince(start);
     const double stalled = MsSince(g_live.progress);
+    // The whole frame of a writer that can drop the walks leaves room for
+    // the records of state of the frames that come.
+    uint32_t room = sr::Room(h->capacity, h->write, r);
+    if (g_live.strip && !stripped && done == 0) {
+      room = sr::RoomForWalks(room, g_live.policy.state_reserve);
+    }
     const sr::Step step = sr::Choose(
-        h->capacity, sr::Room(h->capacity, h->write, r), n - done, done > 0,
+        h->capacity, room, n - done, done > 0,
         keep, static_cast<uint32_t>(waited * 1000.0),
         static_cast<uint32_t>(stalled * 1000.0), g_live.policy);
     if (step == sr::Step::kWrite) {
       done += sr::Put(h, g_live.data, bytes + done, n - done);
       if (done == n) break;
+      continue;
+    }
+    if (step == sr::Step::kDrop && g_live.strip && !stripped) {
+      // The records of state go into the ring in parts, as the reader makes
+      // room, and the walks go.
+      stream_split::StateOnly(bytes, n, &g_live.state);
+      bytes = g_live.state.data();
+      n = static_cast<uint32_t>(g_live.state.size());
+      done = 0;
+      keep = true;
+      stripped = true;
+      dropped = true;
       continue;
     }
     if (step == sr::Step::kDrop) {
@@ -277,7 +313,7 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
   stat->bytes = n;
   stat->wait_us = static_cast<uint32_t>(waited * 1000.0);
   stat->put_us = static_cast<uint32_t>(took * 1000.0);
-  stat->dropped = dropped ? 1u : 0u;
+  stat->dropped = dropped ? 1u : 0u;  // with vk_stream_live_drop=1: the walks went
   g_live.wait_ms += waited;
   if (waited > g_live.wait_ms_max) g_live.wait_ms_max = waited;
   g_live.wait_us_part += static_cast<uint32_t>(waited * 1000.0);
@@ -288,18 +324,37 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
     ++g_live.dropped;
     if (stat->put_us > h->drop_us_max) sr::StoreRelease(&h->drop_us_max, stat->put_us);
     sr::StoreRelease(&h->dropped, h->dropped + 1);
-    if (g_live.drops_now++ == 0) {
-      ModLog("vk stream    : the reader is slow. Frame %llu (%u bytes, no "
-             "surface) did not go into the ring after a wait of %.1f ms",
-             frame, n, took);
+    QueryPerformanceCounter(&g_live.last_drop);
+    // One line when the reader becomes slow, then one for each 10000 drops.
+    const bool first = g_live.drops_now++ == 0;
+    if (!first && g_live.drops_now - g_live.drops_said >= 10000) {
+      ModLog("vk stream    : the reader is still slow: %llu frames dropped since "
+             "frame %llu was the first",
+             g_live.drops_now, g_live.first_drop);
+      g_live.drops_said = g_live.drops_now;
     }
-    return;
+    if (first) {
+      g_live.first_drop = frame;
+      g_live.drops_said = 0;
+      if (stripped) {
+        ModLog("vk stream    : the reader is slow. Frame %llu went into the "
+               "ring with no walks: its %u bytes of state, in %.2f ms",
+               frame, n, took);
+      } else {
+        ModLog("vk stream    : the reader is slow. Frame %llu (%u bytes, no "
+               "surface) did not go into the ring after a wait of %.1f ms",
+               frame, n, took);
+      }
+    }
+    if (!stripped) return;
   }
   ++g_live.units;
   g_live.bytes += n;
   sr::StoreRelease(&h->units, h->units + 1);
-  if (g_live.drops_now > 0) {
-    ModLog("vk stream    : the reader takes frames again at frame %llu, after "
+  if (dropped) return;
+  // The reader is not slow when 1 s went with no drop.
+  if (g_live.drops_now > 0 && MsSince(g_live.last_drop) > 1000.0) {
+    ModLog("vk stream    : the reader takes each frame again at frame %llu, after "
            "%llu dropped frames",
            frame, g_live.drops_now);
     g_live.drops_now = 0;
@@ -346,11 +401,14 @@ bool LiveFrame(uint64_t frame, bool* reset) {
 
 }  // namespace
 
-void VkStreamSetOptions(int record_frame, int frames, int live, int drop_us) {
+void VkStreamSetOptions(int record_frame, int frames, int live, int drop_us,
+                        int drop, int end) {
   g_record_frame = record_frame > 0 ? record_frame : 0;
   g_frames = frames > 0 ? frames : 3;
   g_live.want = live != 0;
   g_live.policy.drop_us = drop_us > 0 ? static_cast<uint32_t>(drop_us) : 0u;
+  g_live.strip = drop != 0;
+  g_end_at_walk = end != 0;
   if (g_record_frame > 0) {
     ModLog("vk stream    : vk_stream_record=%d, vk_stream_frames=%d. The "
            "calls of the Vulkan renderer of these frames go to "
@@ -370,11 +428,19 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
     g_writer.Record(ss::kFrame, &body, sizeof(body));
     return;
   }
-  if (g_unit_open) {
+  // The tail: the records after the end of the last walk of the frame
+  // before. They go at the start of this frame.
+  std::vector<uint8_t> tail;
+  bool tail_keep = false;
+  if (g_unit_open && g_unit_ended) {
+    tail.assign(g_writer.Bytes().begin() + 8, g_writer.Bytes().end());
+    tail_keep = g_unit_keep;
+  } else if (g_unit_open) {
     g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
     Deliver();
-    g_unit_open = false;
   }
+  g_unit_open = false;
+  g_unit_ended = false;
   if (g_options.direct == 0) {
     // Only with backend=vulkan each call comes on the frame thread in the
     // order of the walk.
@@ -414,10 +480,15 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
   g_unit_keep = false;
   g_writer.Clear();
   if (reset) {
+    // A frame with the whole state starts with kStart. The tail belongs to
+    // a frame that the reader or the record does not have.
     g_known.clear();
     g_with_pixels.clear();
     g_writer.Record(ss::kStart, &g_options, sizeof(g_options));
     g_unit_keep = true;
+  } else if (!tail.empty()) {
+    g_writer.Append(tail.data(), tail.size());
+    g_unit_keep = tail_keep;
   }
   if (g_record_on) g_last = frame;
   g_unit_open = true;
@@ -473,6 +544,15 @@ void VkStreamWalkBegin(void* device7) {
 void VkStreamWalkEnd() {
   const ss::StreamState state = State();
   g_writer.Record(ss::kWalkEnd, &state, sizeof(state));
+  // The last walk of the frame ends it, so the reader has the frame in the
+  // game frame of its walks.
+  if (g_end_at_walk && g_unit_open && !g_unit_ended && stream_split::WalkEndsFrame(state)) {
+    g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
+    Deliver();
+    g_unit_ended = true;
+    g_unit_keep = false;
+    g_writer.Clear();
+  }
 }
 
 void VkStreamRenderState(uint32_t state, uint32_t value) {

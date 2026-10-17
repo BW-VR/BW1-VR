@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "../../src/mod/stream_ring.h"
+#include "../../src/mod/stream_split.h"
 #include "app_log.h"
 #include "game_folder.h"
 
@@ -70,8 +71,9 @@ bool Open(const std::string& path, Map* m) {
 
 }  // namespace
 
-bool StreamReader::Start(const std::string& path, size_t queue_bytes) {
+bool StreamReader::Start(const std::string& path, size_t frames, size_t queue_bytes) {
   path_ = path;
+  whole_frames_ = frames;
   queue_max_bytes_ = queue_bytes > 0 ? queue_bytes : 1;
   stop_ = false;
   started_ = pthread_create(&thread_, nullptr, &StreamReader::Main, this) == 0;
@@ -86,7 +88,7 @@ void StreamReader::Stop() {
   started_ = false;
 }
 
-bool StreamReader::TakeAll(std::vector<std::vector<uint8_t>>* frames) {
+bool StreamReader::TakeAll(std::vector<QueuedFrame>* frames) {
   frames->clear();
   pthread_mutex_lock(&lock_);
   while (!queue_.empty()) {
@@ -112,8 +114,10 @@ void StreamReader::Run() {
   bool said_wait = false;
   std::vector<uint8_t> pending;
   std::vector<uint8_t> chunk(4u << 20);
-  uint64_t frames = 0, bytes = 0;
+  uint64_t frames = 0, bytes = 0, stripped = 0;
   size_t queue_most = 0;
+  int32_t test_frame = 0;
+  std::vector<uint8_t> state_only;
   while (!stop_) {
     if (feed_ > 0) {
       int status = 0;
@@ -168,11 +172,11 @@ void StreamReader::Run() {
       state = State::kRead;
     }
     // One frame can be larger than the limit, so the limit holds only when
-    // a frame waits.
+    // a frame waits. With a bound of frames the reader takes each frame.
     pthread_mutex_lock(&lock_);
     const size_t waiting = queue_.empty() ? 0 : queue_bytes_;
     pthread_mutex_unlock(&lock_);
-    if (waiting >= queue_max_bytes_) {
+    if (whole_frames_ == 0 && waiting >= queue_max_bytes_) {
       SleepUs(500);
       continue;
     }
@@ -201,13 +205,37 @@ void StreamReader::Run() {
         break;
       }
       if (len == 0) break;
-      std::vector<uint8_t> unit(pending.begin() + used, pending.begin() + used + len);
+      QueuedFrame q;
+      q.bytes.assign(pending.begin() + used, pending.begin() + used + len);
+      const sr::UnitInfo info = sr::Inspect(q.bytes.data(), q.bytes.size());
+      if (info.start) test_frame = info.test_frame;
+      q.frame = info.frame;
+      q.start = info.start;
+      q.test_frame = test_frame;
+      q.picture = info.capture ||
+                  (test_frame > 0 && info.frame == static_cast<uint64_t>(test_frame));
       used += len;
       ++frames;
       bytes += len;
       pthread_mutex_lock(&lock_);
-      queue_bytes_ += unit.size();
-      queue_.push_back(std::move(unit));
+      queue_bytes_ += q.bytes.size();
+      queue_.push_back(std::move(q));
+      // THE BOUND: the newest frames stay whole, and an older frame keeps
+      // only its records of state.
+      if (whole_frames_ > 0) {
+        for (size_t i = 0; i < queue_.size(); ++i) {
+          QueuedFrame& old = queue_[i];
+          if (!old.whole ||
+              stream_split::KeepWalks(i, queue_.size(), whole_frames_, old.picture)) {
+            continue;
+          }
+          stream_split::StateOnly(old.bytes.data(), old.bytes.size(), &state_only);
+          queue_bytes_ -= old.bytes.size() - state_only.size();
+          old.bytes.swap(state_only);
+          old.whole = false;
+          ++stripped;
+        }
+      }
       if (queue_.size() > queue_most) queue_most = queue_.size();
       pthread_mutex_unlock(&lock_);
     }
@@ -215,9 +243,9 @@ void StreamReader::Run() {
   }
   if (m.head != nullptr) sr::Leave(m.head);
   AppLog("live         : the reader leaves the ring: %llu frames, %llu bytes, at most %zu "
-         "frames waited for the session",
+         "frames waited for the session, %llu frames lost their walks in the queue",
          static_cast<unsigned long long>(frames), static_cast<unsigned long long>(bytes),
-         queue_most);
+         queue_most, static_cast<unsigned long long>(stripped));
   m.Close();
 }
 

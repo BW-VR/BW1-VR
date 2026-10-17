@@ -175,6 +175,11 @@ class Writer {
     Put(head, sizeof(head));
   }
   const std::vector<uint8_t>& Bytes() const { return bytes_; }
+  // Whole records of another writer (with no head of a stream), in their
+  // order. n is a multiple of 4.
+  void Append(const uint8_t* records, size_t n) {
+    bytes_.insert(bytes_.end(), records, records + n);
+  }
 
   // A record of one body and up to two blocks after it.
   void Record(Kind kind, const void* body, uint32_t body_bytes,

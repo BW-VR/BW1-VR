@@ -567,6 +567,11 @@ int g_vk_stream_live = 0;
 // vk_stream_live_drop_us (vk_stream.h): the wait for room for a frame with no
 // surface before the writer drops it. 0: a drop at once. 4000: 4 ms.
 int g_vk_stream_live_drop_us = 0;
+// vk_stream_live_drop and vk_stream_live_end (vk_stream.h): a drop keeps the
+// state and loses the walks (1), and a frame goes at the end of its last
+// walk (1). 0: the first way of each.
+int g_vk_stream_live_drop = 1;
+int g_vk_stream_live_end = 1;
 int g_vk_scene_follow = 1;
 int g_vk_panel = 1;
 int g_vk_only = 1;
@@ -1475,6 +1480,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_stream_live", 0, path) != 0 ? 1 : 0;
   g_vk_stream_live_drop_us = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "vk_stream_live_drop_us", 0, path));
+  g_vk_stream_live_drop =
+      GetPrivateProfileIntA("bwvr", "vk_stream_live_drop", 1, path) != 0 ? 1 : 0;
+  g_vk_stream_live_end =
+      GetPrivateProfileIntA("bwvr", "vk_stream_live_end", 1, path) != 0 ? 1 : 0;
   g_vk_scene_follow =
       GetPrivateProfileIntA("bwvr", "vk_scene_follow", 1, path) != 0 ? 1 : 0;
   g_vk_panel = GetPrivateProfileIntA("bwvr", "vk_panel", 1, path) != 0 ? 1 : 0;
@@ -1889,7 +1898,8 @@ void StartVrStep() {
                        g_fovea_res_center_pct, g_fovea_res_center_deg,
                        g_fovea_res_center_down_deg);
     VkStreamSetOptions(g_vk_stream_record, g_vk_stream_frames, g_vk_stream_live,
-                       g_vk_stream_live_drop_us);
+                       g_vk_stream_live_drop_us, g_vk_stream_live_drop,
+                       g_vk_stream_live_end);
     if ((g_foveation != 0 || g_fovea_res != 0) && g_vk_scene == 0 &&
         !vk_eyes && !direct) {
       ModLog("vk scene     : foveation=%d and fovea_res=%d, but the eye "

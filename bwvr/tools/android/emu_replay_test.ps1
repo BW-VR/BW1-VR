@@ -191,6 +191,14 @@ try {
     if ($started -and -not $Keep) {
         Say 'Stop the emulator'
         & $Adb -s $Serial emu kill 2>&1 | Out-Null
+        # adb lists the emulator for some seconds after the kill. A test that
+        # starts in that time on the same port would take it for a running
+        # emulator, so the script waits until it is gone.
+        $gone = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $gone -and
+               (& $Adb devices 2>$null | Select-String -Pattern "^$Serial\s")) {
+            Start-Sleep -Seconds 2
+        }
     }
 }
 

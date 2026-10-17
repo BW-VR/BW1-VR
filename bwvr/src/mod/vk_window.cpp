@@ -367,8 +367,18 @@ int MakeSwapchain(uint32_t width, uint32_t height) {
 
 }  // namespace
 
+// proxy/ddraw_proxy.cpp
+bool ProxyVulkanStrict();
+
 void VkWindowSetOptions(int on) {
   g_wanted = on != 0;
+  // vulkan_strict=1 has no way through GDI, so the window keeps the
+  // swapchain of Vulkan.
+  if (!g_wanted && ProxyVulkanStrict()) {
+    g_wanted = true;
+    ModLog("vk window    : vulkan_strict=1, so vk_window=1 and not 0: the "
+           "window of the game has no way through GDI");
+  }
   ModLog("vk window    : vk_window=%d. %s", g_wanted ? 1 : 0,
          g_wanted ? "The window of the game gets the picture through a "
                     "swapchain of Vulkan, with no copy to the CPU"
@@ -377,6 +387,12 @@ void VkWindowSetOptions(int on) {
 }
 
 void VkWindowToggle(const char* keys) {
+  if (ProxyVulkanStrict()) {
+    ModLog("test key     : %s does nothing with vulkan_strict=1: the window "
+           "keeps the swapchain of Vulkan (no GDI)",
+           keys);
+    return;
+  }
   g_wanted = !g_wanted;
   ControllersGesturePulse(0.5f, g_wanted ? 0.30f : 0.08f);
   ModLog("test key     : %s, vk_window is %d from the next present: the "

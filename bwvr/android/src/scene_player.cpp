@@ -295,7 +295,9 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
   const double start = NowMs();
   // The renderer and SceneHostState keep the addresses of the surfaces of
   // the stream (the textures, the targets), so the player and its surfaces
-  // live until the end of the process.
+  // live until the end of the process. The app plays one stream in a
+  // process (main.cpp), so the map of the surfaces holds the surfaces of
+  // that stream alone.
   static Player* s_player = nullptr;
   if (s_player == nullptr) s_player = new Player(&result);
   s_player->SetResult(&result);
@@ -303,6 +305,8 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
   const uint8_t* body = nullptr;
   uint32_t size = 0;
   while (reader.Next(&kind, &body, &size)) s_player->Play(kind, body, size);
+  // result is on the stack of this call.
+  s_player->SetResult(nullptr);
   result.broken = reader.Broken();
   result.ms = NowMs() - start;
   AppLog("replay       : %s: %llu records, %llu frames, %llu walks, %llu draws, "

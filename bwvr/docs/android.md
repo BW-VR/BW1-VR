@@ -221,10 +221,15 @@ bar of a slider sets its value.
 - The reference space is `LOCAL`. The menu quad is 1.4 m wide, 1.4 m in
   front of the head and 0.15 m below it (`menu_layout.h`, `MenuQuad`). The
   cursor quad is 3 cm wide and 4 mm in front of the menu.
-- The app copies the picture of the menu into an image of the swapchain of
-  a quad when that image does not have the picture of now, and gives the
-  images in the layout of a color attachment. The swapchain format is the first of R8G8B8A8_SRGB,
-  B8G8R8A8_SRGB, R8G8B8A8_UNORM and B8G8R8A8_UNORM that the runtime has.
+- The app copies the picture of the menu into a new image of the swapchain
+  of a quad only when the picture changed (`xr_copy_on_change=1`, the
+  default). In the other frames it takes no image, and the runtime shows
+  the image that the app released last. `xr_copy_on_change=0` copies each
+  layer in each frame. At its end the app logs the count of the copies and
+  of the copies that it did not make. The images go to the runtime in the
+  layout of a color attachment. The swapchain format is the first of
+  R8G8B8A8_SRGB, B8G8R8A8_SRGB, R8G8B8A8_UNORM and B8G8R8A8_UNORM that the
+  runtime has.
   The pixels of the canvas are sRGB with the color multiplied by the alpha,
   which is what a quad with `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT`
   takes.
@@ -276,7 +281,7 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    events, and checks the saved `bwvr.ini`, the log of this build, logcat
    (no JNI error, no crash) and three screenshots. The emulator has no OpenXR
    runtime, so this step tests the menu in the window.
-3. **In the emulator with the OpenXR test runtime** (`emu_xr_test.ps1`, 28
+3. **In the emulator with the OpenXR test runtime** (`emu_xr_test.ps1`, 29
    checks). The test runtime (`android/test_runtime`) is a headset with two
    Touch controllers that follow a script. The script puts it into an AVD
    with a system that it can write (`bwvr_xr_test`, port 5586) as
@@ -291,12 +296,13 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    (begin at READY, end at STOPPING, EXITING), the place and the size of the
    menu quad, the cursor quad, a pulse at each new row, the saved
    `bwvr.ini`, no fault of the order of the calls (a swapchain image that is
-   released with no wait, a layer of an acquired image), and four pictures
-   of the quad that the runtime read back from the swapchain. The pictures
+   released with no wait, a layer of an acquired image), copies into the
+   layers only when a picture changed (the count in the log), and four
+   pictures of the quad that the runtime read back from the swapchain. The pictures
    are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
    the calls of OpenXR in the right order with the right structs. It does
    not show the runtime of Meta.
-   With `-Stream <file> -Gpu host` (35 checks) the app also plays a stream
+   With `-Stream <file> -Gpu host` (36 checks) the app also plays a stream
    of the walks on the device of the session, and the test checks the
    device (Vulkan 1.3 with the features of the renderer), the renderer on
    that device, the two quads of the stereo screen (one for each eye, 2.6
@@ -310,6 +316,12 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    app, starts the app, and compares each picture of the renderer of the app
    with the picture of the same name of the PC. The pass is at most 2
    percent of the pixels with a difference of more than 24 in a channel.
+
+   `emu_all.ps1 -Stream <file> -Reference <desk folder>` runs the tests 2,
+   3 (plain and with `-Stream -Gpu host`) and 4 one after the other. It
+   keeps the whole output of each test in `bwvr/out/android/emu-all`, and it
+   stops at the first test that does not end with "N checks, 0 failed.",
+   also when a test gives no such line.
 5. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
    the table, the menu (the pages, the steps, the help, the save rules), the
    hit of a ray on the quad (`test/controller_math/menu_checks.h`), each
@@ -380,13 +392,15 @@ renderer (`VkSceneEyes`, an image with a layer for each eye) shows on a
 menu. Each layer goes with a blit to the size of the quads (half the size
 of the picture) into an image of UNORM, and that image goes with a copy
 into the swapchain of the quad, so the bytes of the game keep their values
-also in a swapchain of sRGB. An image of a swapchain gets the copy only
-when it does not have the picture of now (a revision for each image), and
-the same holds for the menu and the cursor. When the renderer used the
-device of the session, the app waits for the idle GPU at its end
-(`vk::Stop`) and keeps the device to the end of the process, because the
-renderer has no stop for its images and pipelines. This is the form of the "Stereoscopic window" of the
-PC: the picture does not follow the head.
+also in a swapchain of sRGB. A quad gets a new image only when
+`SetScreenSource` gave a new picture (`xr_copy_on_change`, as for the
+menu and the cursor). When the renderer used the device of the session,
+the app waits for the idle GPU at its end (`vk::Stop`) and keeps the device
+to the end of the process, because the renderer has no stop for its images
+and pipelines. So the renderer takes one device in a process: when the
+glue code of Android starts `android_main` again in the same process, the
+app logs it and plays no stream. This is the form of the "Stereoscopic
+window" of the PC: the picture does not follow the head.
 
 ## The stream of the walks
 

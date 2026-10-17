@@ -365,6 +365,7 @@ void android_main(android_app* android) {
     ANativeActivity_finish(android->activity);
   }
 
+  app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
                            kCursorPixels);
 
@@ -374,7 +375,15 @@ void android_main(android_app* android) {
   // into the game folder (docs/android.md, "The stream of the walks"). In a
   // session the renderer draws on the device of the session, and its last
   // picture shows on a stereo screen behind the menu.
-  if (app.ini.GetInt("bwvr", "stream_replay", 0) != 0) {
+  // The renderer keeps the images and the pipelines of its first device to
+  // the end of the process, so it takes one device in a process. The glue
+  // code of Android can start android_main again in the same process.
+  static bool renderer_ran = false;
+  if (app.ini.GetInt("bwvr", "stream_replay", 0) != 0 && renderer_ran) {
+    AppLog("replay       : the renderer ran in this process already, and it "
+           "takes no second device. No replay. Start the app again");
+  } else if (app.ini.GetInt("bwvr", "stream_replay", 0) != 0) {
+    renderer_ran = true;
     if (app.xr_on && app.xr.Renderer13()) {
       vk::External device;
       app.xr.RendererDevice(&device);

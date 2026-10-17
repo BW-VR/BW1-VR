@@ -2989,7 +2989,7 @@ swapchain of Vulkan does not show the picture. With `vulkan_strict=1`:
 | Each other export of DirectDraw (inner parts that the game does not call) | A line of the log, and the game stops |
 | A `runblack.exe` that is not v1.42 | No DirectDraw: `DirectDrawCreate` and `DirectDrawCreateEx` give `DDERR_GENERIC` and a line of the log |
 | `vulkan_only` | 1, whatever the key says |
-| The window of the game | The swapchain of Vulkan alone. When it does not show the picture, the window gets none and the log says so one time. No GDI |
+| The window of the game | The swapchain of Vulkan alone: `vk_window` is 1 whatever the key says, and the test key Shift D does nothing. When the swapchain does not show the picture, the window gets none and the log says so one time. No GDI |
 
 The headset app writes `vulkan_strict=1` with each save (`android.md`,
 "Only Vulkan"). On the PC 0 is the default, because the launcher keeps

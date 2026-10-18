@@ -793,7 +793,76 @@ inline void BandChecks() {
   Near("and on the other side", least, -overlay_math::kWristLoopWide, 1e-5);
 }
 
+// THE TAKE WITH THE TRIGGER OF THE OTHER HAND (controller_math.h,
+// LeftTakeStep).
+inline void LeftTakeChecks() {
+  using namespace controller_math;
+  printf("\nThe take with the trigger of the other hand\n");
+  LeftTake t;
+  LeftTakeIn in = {true, false, false, false, false, 10};
+  LeftTakeOut o = LeftTakeStep(&t, in);
+  Check(o.borrow && o.hold_up && t.state == kLeftProbe,
+        "a press borrows the Hand and holds its trigger open for the probe",
+        t.state, kLeftProbe);
+  in.frame = 12;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftProbe, "the probe lasts kLeftProbeFrames frames",
+        t.state, kLeftProbe);
+  in.frame = 13;
+  in.target = true;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftTake && o.borrow && !o.hold_up,
+        "a target at the borrowed Hand gives the take", t.state, kLeftTake);
+  in.down = false;
+  in.busy = true;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftTake && o.borrow,
+        "the Hand stays while it still carries or lets go", t.state,
+        kLeftTake);
+  in.busy = false;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftIdle && !o.borrow, "then the Hand goes back",
+        t.state, kLeftIdle);
+  // No target, the leash on: a command.
+  LeftTake c;
+  LeftTakeIn ci = {true, false, false, true, false, 20};
+  LeftTakeStep(&c, ci);
+  ci.frame = 23;
+  o = LeftTakeStep(&c, ci);
+  Check(c.state == kLeftCommand && o.command && !o.borrow,
+        "with no target and the leash on, the press commands", c.state,
+        kLeftCommand);
+  // No target, no leash: nothing until it opens.
+  LeftTake n;
+  LeftTakeIn ni = {true, false, false, false, false, 30};
+  LeftTakeStep(&n, ni);
+  ni.frame = 33;
+  o = LeftTakeStep(&n, ni);
+  Check(n.state == kLeftNone && !o.command && !o.borrow,
+        "with no target and no leash, the press does nothing", n.state,
+        kLeftNone);
+  // The Hand is busy at the press: no probe.
+  LeftTake h;
+  LeftTakeIn hi = {true, false, true, true, true, 50};
+  o = LeftTakeStep(&h, hi);
+  Check(h.state == kLeftCommand && o.command && !o.borrow,
+        "a press while the Hand holds an object commands and borrows nothing",
+        h.state, kLeftCommand);
+  LeftTake h2;
+  hi.leash_on = false;
+  o = LeftTakeStep(&h2, hi);
+  Check(h2.state == kLeftNone && !o.borrow,
+        "without the leash such a press does nothing", h2.state, kLeftNone);
+  // The stick walks: the boost.
+  LeftTake b;
+  LeftTakeIn bi = {true, true, true, true, false, 40};
+  o = LeftTakeStep(&b, bi);
+  Check(b.state == kLeftBoost && o.boost && !o.borrow,
+        "a press while the stick walks is the boost", b.state, kLeftBoost);
+}
+
 inline void GripRuleChecks() {
+  LeftTakeChecks();
   BandChecks();
   FlyPressChecks();
   Check(controller_math::OtherPressCommands(false),

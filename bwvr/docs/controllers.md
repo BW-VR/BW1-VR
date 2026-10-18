@@ -889,6 +889,7 @@ The words that act on the first frame of the word only:
 | `pose2` | Moves the right hand to the second pose (`fake_controller_sweep_yaw`, `fake_controller_sweep_pitch`) for the rest of the run |
 | `point` | Steps the right hand to the next of `fake_controller_points`. After the last one the list starts again |
 | `lpoint` | The same for the left hand and `fake_controller_left_points` |
+| `lmatch` | Steps the left hand to the place of the right hand at that frame, for example after a `seek`. The left hand keeps that place until the next `lpoint` |
 | `rot` | Turns the right hand to the next of `fake_controller_rots`. After a word that turns the aim (`aimfar`, `aimcmd`, `aimturn`) the hand keeps that aim, and `rot` does not turn it: use `aimturn` there |
 | `seek` | Steps the right hand once onto the nearest holdable object (see `hand.md` and `grab.md`). On the table it first asks for a wider pick, and steps 2 frames later |
 | `seekc` | The same for a point on the line to the nearest Creature |
@@ -1034,9 +1035,10 @@ default. Each control has one job, and one button opens the game menu.
 | `controllers` | 1 | Use tracked controllers when the headset has them |
 | `left_hand` | -1 | Which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. The launcher row "Hand" |
 | `controls` | 0 | The control scheme (5.7). 0: the tables of 5.1. 1: the grips only grab the world, the trigger of the pointing hand is the left and the right button of the game, and the trigger of the other hand makes the walk faster. The launcher row "Controls". The test key Ctrl Shift and the apostrophe key goes between the two (`test_keys=1`) |
-| `move_stick_path` | 1 | With `controls=1`: the flight with the stick keeps its height and stops at the land (`god-view.md`, 5.7). The test key Ctrl Shift and 0 of the number pad goes between 1 and 0 (`test_keys=1`). Not in the launcher |
+| `move_stick_path` | 1 | With `controls=1`: the flight with the stick keeps its height and stops at the land (`god-view.md`, 5.7). The test key Ctrl Shift and the grave accent key (on a German keyboard the key with the letter O with two dots) goes between 1 and 0 (`test_keys=1`). Not in the launcher |
 | `move_stick_climb` | 1 | With `controls=1`: the tilt of the controller of the stick moves the player up and down in the walk (`god-view.md`, 5.7). The test key Ctrl Shift and the backslash key goes between 1 and 0 (`test_keys=1`). Not in the launcher |
 | `left_leash` | 1 | With `controls=1`: 1 X of the other hand is the button of the leash, and a shake of the other hand takes the leash off (5.7). 0 keeps the leash with the pointing hand. The test key Ctrl Shift and the slash key goes between the two (`test_keys=1`). Not in the launcher |
+| `left_take` | 1 | With `controls=1`: 1 the trigger of the other hand also takes, and the Hand goes to that controller for the take (5.7). 0 keeps that trigger for the boost and the commands. The test key Ctrl Shift and the less than key goes between the two (`test_keys=1`). Not in the launcher |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed of the walk with the stick at a full pull of the trigger of that hand, in percent of the speed with no trigger, 100 to 2000 (`god-view.md`, 5.7). Not in the launcher |
 | `controller_swap_buttons` | 0 | 1 makes the grip the left button and the trigger the right. With `controls=1` it changes only the dialog boxes, the rooms of the Temple and the pointer |
 | `controller_haptics` | 1 | Short pulses on presses and turns |
@@ -1209,7 +1211,9 @@ right handed player. When the left controller is the Hand, the words of the
 right hand (`trigger`, `grip`, `a`, `b`, `menu`, the `stick_` words,
 `point`, `seek`, `rot`, the aim words) drive the left controller, and the
 words of the left hand (`ltrigger`, `lgrip`, `x`, `y`, `lmenu`, the
-`lstick_` words, `lpoint`) drive the right controller. The pointing hand
+`lstick_` words, `lpoint`, `lmatch`) drive the right controller. A borrow of
+the Hand by the trigger of the other hand (`left_take=1`) does not change
+these jobs, so the hands stay where they are. The pointing hand
 keeps the turns of the script. On the left controller it also turns by the
 difference of the aim rays of the two hands, so its ray points where the ray
 of the right hand points. The base pose of each hand is on the side of its
@@ -1231,11 +1235,11 @@ The key `controls` chooses one of two control schemes. The launcher row is
 | Grip of the pointing hand | Grabs the world, as the grip of the other hand does. It is never a button of the game. A press grabs also while the trigger takes or carries an object. A left button that the trigger holds stops a grab from starting |
 | Both grips | Turn the world and zoom it. The land under the head at the press keeps its height in the room, so the zoom does not lift or drop the player. When one grip opens, the other hand moves the world only across until both grips are open, so a zoom in steps keeps the height too (`god-view.md`, 5.1) |
 | Trigger of the pointing hand | The left button and the right button of the game. The press decides which one, and the trigger keeps that button until it opens (see below) |
-| Trigger of the other hand | Makes the walk with the stick faster while it is pulled (`god-view.md`, 5.7). No job when the stick does not walk |
+| Trigger of the other hand | Makes the walk with the stick faster while it is pulled (`god-view.md`, 5.7), when the stick walks at the press. With `left_take=1` each other press takes as the trigger of the pointing hand does (see "The take with the other trigger" below) |
 | Tilt of the other controller | With `move_stick_climb=1`: up or down while the stick walks, and past the top limit of the ground the world gets smaller (`god-view.md`, 5.7) |
 | Stick of the other hand, with `move_stick_path=1` | The flight keeps its height and does not follow the land. The land stops it 10 cm below the head (`god-view.md`, 5.7) |
 | X (A when the left hand points), with `left_leash=1` | The button of the leash: with no leash it puts the leash on the Creature (the leash click, packet `0x5F`, which needs no aim). With the leash on the Hand it gives the next kind that the Creature has (the item `leash_next` of the ring, the key of the game "Next Leash"). With the leash tied to an object it brings the leash back to the Hand. Not with `button_layout=0` and not on an Index controller, where that button has its own job |
-| Trigger of the other hand, with `left_leash=1` and the leash on | Commands the Creature as the trigger of 5.1 does with `controls=0` (`creature.md`, section 4): a tap, a hold with the arc and the ring, and a double press that ties the leash. It aims with the other controller: its aim ray, the halo, the arc and the ring come from that hand. A press while the stick of that hand walks is the boost and no command (`OtherPressCommands`). The Hand of the game may hold an object, so the pointing trigger always takes. The hint card of the other hand has the lines of the commands |
+| Trigger of the other hand, with `left_leash=1` and the leash on | With no target at that hand (or while the Hand holds an object, with `left_take=1`), it commands the Creature as the trigger of 5.1 does with `controls=0` (`creature.md`, section 4): a tap, a hold with the arc and the ring, and a double press that ties the leash. It aims with the other controller: its aim ray, the halo, the arc and the ring come from that hand. A press while the stick of that hand walks is the boost and no command (`OtherPressCommands`). The Hand of the game may hold an object, so the pointing trigger always takes. The hint card of the other hand has the lines of the commands |
 | The rope of the leash, with `left_leash=1` | Ends at the middle of the wrist of the other hand, as the overlay drew it. The ring of the leash that the game draws over its Hand is not drawn, and the overlay draws a band of rope around the wrist of the other hand, with the size of the hand (`grab.md`, "The leash at the mod's hand") |
 | A shake of the other hand, with `left_leash=1` | Takes the leash off (`creature.md`, "The shake"). It acts also while the Hand of the game holds an object: the handler of the leash click has no test of the Hand. A shake of the pointing hand does not take the leash off |
 
@@ -1278,6 +1282,39 @@ the pointing grip grabs the world (controls=1)`).
 The log has one line for each press of X (`controllers : X of the hand that
 does not point (left_leash=1): ...`), with what went to the game.
 
+**The take with the other trigger** (`left_take=1`, `LeftTakeStep` in
+`controller_math.h`). The game has one Hand. A press of the trigger of the
+other hand borrows it:
+
+1. The stick of that hand walks at the press: the boost, until the trigger
+   opens. The Hand stays.
+2. The Hand is busy at the press: it holds an object, the trigger of the
+   pointing hand is down, or the controller does not place the Hand. No
+   take: the press commands the Creature with the leash on, else it does
+   nothing.
+3. Else the probe. The Hand goes to the other controller, and for 3 frames
+   the trigger of the Hand reads as open, so the game gets no press. Then
+   the mod looks at the Hand there. With an object that a press acts on
+   (`HandDirectTakeTarget`) or a far target (`FarGrabHasTarget`), it is the
+   take: the press of the trigger goes to the game as a press of the
+   pointing trigger does (the list above), and the Hand stays at that
+   controller while the trigger is down and while the Hand holds an object.
+   With no target, the Hand goes back. The press commands the Creature with
+   the leash on, else it does nothing.
+
+While the other controller has the Hand, its aim is the aim of the Hand (the
+far grab, the halo). The face buttons and the sticks keep their hands: the
+stick of the other hand still walks, its X is still the button of the leash,
+and the rope stays at its wrist. `left_take=0` keeps the trigger of the
+other hand for the boost and the commands.
+
+The log has one line for each change of the state of the other trigger
+(`controllers : the trigger of the left hand borrows the Hand and looks for
+a target there (left_take=1)`, `... takes with the Hand ...`, `... is
+open ...`), and one line for each change of the hand that has the Hand
+(`controllers : the left controller has the Hand now (the trigger of the
+other hand borrows it, left_take=1)`).
+
 **The hint cards** name the trigger for the left button and for the right
 button of the game (`controller-hints.md`).
 
@@ -1289,7 +1326,9 @@ hands let go of the world. A trigger or a grip that is down must open before
 it presses a button of the game, and a stick that is pushed must come back.
 The word `controlskey` of the scripted controller does the same in a desktop
 run. Ctrl, Shift and the slash key change `left_leash` between 1 and 0 (on a
-German keyboard the key with the number sign). The other controller gives a
+German keyboard the key with the number sign). Ctrl, Shift and the key
+between the left Shift and Z change `left_take` between 1 and 0 (on a German
+keyboard the key with the less than sign). The other controller gives a
 long pulse for 1 and a short pulse for 0.
 
 **Tests.** The math tests (`grip_checks.h`, `walk_checks.h`) cover the
@@ -1347,6 +1386,17 @@ Desktop runs [R]:
   to the right into the slope does not move, and a walk back moves away
   (the land is then 46.4 cm below the head).
 
+- `spawn_run.ps1 -Save temple` and `-Save pen` with `controls=1` and
+  `left_take=1`: `lmatch` after `seek` puts the left hand on an object.
+  `ltrigger` there borrows the Hand for 3 frames and then takes: the press
+  is the right button of the game, as `trigger` at the same place. That
+  place is out of the view of the desk, so the mod drops both presses there,
+  and the run does not show the object in the Hand. At `lpoint` the aim
+  of the left hand has a far target, and the far grab locks on it. A press
+  with no target does nothing and sends no button. `ltrigger` with
+  `lstick_up` is the boost. After each press the Hand goes back to the right
+  controller.
+
 **Known limits, and what only a headset can show.**
 
 - A one-off seed that the trigger carries cannot become active by a second
@@ -1357,6 +1407,11 @@ Desktop runs [R]:
 - With `left_leash=1`, while the Hand of the game holds an object, the game
   offers no objects to the pick, so the cone of the other hand has no
   target then, and a command from the other hand goes to the land.
+- With `left_take=1` the hint card of the other hand does not name the
+  take. It shows the boost and the commands.
+- Only a headset shows how the probe of 3 frames feels: the Hand goes to the
+  other controller at each press of its trigger that is no boost, and comes
+  back when there is no target there.
 - The hint card shows the lines of one context: while the pointing hand is
   on a target, the lines of the commands on the card of the other hand can
   give way to the lines of the take.

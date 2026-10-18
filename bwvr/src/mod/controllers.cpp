@@ -101,6 +101,8 @@ bool HandDirectSeekFarPoint(float out[3]);
 void HandDirectWidenFar(int frames, float meters);
 // hand_direct.cpp: whether the pointing grip may grab the world.
 bool HandDirectClaimFree(const char** why);
+bool HandDirectHandBusy();
+bool HandDirectTakeTarget();
 // The Hand's point now, and whether the controller placed it.
 bool HandDirectHandPosition(float out[3], bool* by_controller);
 // hand_direct.cpp: the Hand facts of the grip, and the latch of the throw at
@@ -199,6 +201,11 @@ bool g_on = true;
 // the key left_hand and the game's own option.
 bool g_left_handed = false;
 int g_left_hand_key = -1;  // -1 follows the game, 0 right, 1 left
+// The side that left_hand and the game's option give. g_left_handed is this
+// side, or the other side while the trigger of the other hand borrows the
+// Hand for a take (g_borrow, controls=1 with left_take=1).
+bool g_left_handed_base = false;
+bool g_borrow = false;
 bool g_haptics = true;
 bool g_swap_buttons = false;
 bwvr::XrScreen* g_screen = nullptr;
@@ -291,6 +298,9 @@ enum FakeInput {
   kPromptKey,
   // The test key of controls acts on the first frame of the word.
   kControlsKey,
+  // The left hand goes to the place of the right hand now, on the first frame
+  // of the word.
+  kLMatch,
   kInputCount
 };
 
@@ -305,7 +315,7 @@ const char* const kInputName[kInputCount] = {
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
-    "controlskey"};
+    "controlskey", "lmatch"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -317,6 +327,10 @@ int g_points_used = 0;
 int g_lpoints[kMaxPoints][3];
 int g_lpoint_count = 0;
 int g_lpoint_index = -1;
+// The word "lmatch": the left hand takes the place of the right hand at that
+// frame, in cm, and keeps it until the next "lpoint".
+bool g_lmatch = false;
+float g_lmatch_cm[3] = {0.0f, 0.0f, 0.0f};
 int g_lpoints_used = 0;
 // The turns of the right hand for the word "rot": yaw,pitch,roll in degrees,
 // from the test key fake_controller_rots. -1 is the pose of the settings.
@@ -586,7 +600,8 @@ void LoadTraces(const char* list) {
 // controller: on the left of the head for the left controller. The point of a
 // word is a place in the room, so it is not mirrored.
 void RightHandCm(float cm[3]) {
-  cm[0] = static_cast<float>(g_fake.right_cm) * (g_left_handed ? -1.0f : 1.0f);
+  cm[0] = static_cast<float>(g_fake.right_cm) *
+          (g_left_handed_base ? -1.0f : 1.0f);
   cm[1] = static_cast<float>(g_fake.up_cm);
   cm[2] = static_cast<float>(g_fake.forward_cm);
   if (g_point_index >= 0 && g_point_index < g_point_count) {
@@ -613,8 +628,10 @@ void FakeHand(int index, bwvr::HandInput* out) {
   // The job of this controller in the script: 1 the words of the right hand
   // ("trigger", "point", "seek"), 0 the words of the left hand ("lgrip",
   // "lpoint"). When the left controller is the Hand, the words of the right
-  // hand drive it, so each recipe runs with either hand.
-  const int role = g_left_handed ? 1 - index : index;
+  // hand drive it, so each recipe runs with either hand. A borrow of the Hand
+  // by the trigger of the other hand (left_take) does not change the jobs:
+  // the hands stay where they are.
+  const int role = g_left_handed_base ? 1 - index : index;
   memset(out, 0, sizeof(*out));
   out->aim_orientation[3] = 1.0f;
   out->grip_orientation[3] = 1.0f;
@@ -666,6 +683,9 @@ void FakeHand(int index, bwvr::HandInput* out) {
     for (int i = 0; i < 3; ++i) {
       cm[i] = static_cast<float>(g_lpoints[g_lpoint_index][i]);
     }
+  }
+  if (role == 0 && g_lmatch) {
+    for (int i = 0; i < 3; ++i) cm[i] = g_lmatch_cm[i];
   }
   const float position[3] = {cm[0] * 0.01f, cm[1] * 0.01f, -cm[2] * 0.01f};
   for (int i = 0; i < 3; ++i) {
@@ -999,7 +1019,15 @@ void UpdateScript() {
              "at frame %llu", g_point_index, g_points[g_point_index][0],
              g_points[g_point_index][1], g_points[g_point_index][2], g_frame);
     }
+    if (step.input == kLMatch && t == step.start) {
+      RightHandCm(g_lmatch_cm);
+      g_lmatch = true;
+      ModLog("controllers  : the fake left hand steps to the place of the "
+             "right hand (%.1f %.1f %.1f cm) at frame %llu", g_lmatch_cm[0],
+             g_lmatch_cm[1], g_lmatch_cm[2], g_frame);
+    }
     if (step.input == kLPoint && t == step.start && g_lpoint_count > 0) {
+      g_lmatch = false;
       g_lpoint_index = g_lpoints_used++ % g_lpoint_count;
       ModLog("controllers  : the fake left hand steps to point %d (%d %d %d "
              "cm) at frame %llu", g_lpoint_index,
@@ -1132,7 +1160,7 @@ void UpdateScript() {
         i == kTouchCreature || i == kRot || i == kAimFar || i == kPull ||
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
-        i == kMoveKey) {
+        i == kMoveKey || i == kLMatch) {
       continue;
     }
     if (i == kPose2) {
@@ -1806,6 +1834,41 @@ bool LeftLeashOn() {
   return g_left_leash != 0;
 }
 
+// THE TAKE WITH THE TRIGGER OF THE OTHER HAND (left_take, docs/controllers.md,
+// 5.7). With controls=1 and left_take=1, the trigger of the hand that does
+// not point also takes: a press with a target at that hand borrows the Hand,
+// and the Hand is at that controller while the press takes
+// (controller_math.h, LeftTakeStep). 0 keeps that trigger for the boost and
+// the commands. With test_keys=1, Ctrl, Shift and the less than key change
+// it.
+int g_left_take = -1;
+controller_math::LeftTake g_left_take_state;
+bool g_left_boost = false;  // the press of now is the boost of the walk
+int g_left_take_logs = 0;
+const int kMaxLeftTakeLogs = 120;
+
+void LogLeftTake(const char* by) {
+  ModLog("controllers  : %s%sleft_take=%d. %s", by, by[0] != 0 ? ": " : "",
+         g_left_take,
+         g_left_take != 0
+             ? "With controls=1, a press of the trigger of the hand that "
+               "does not point takes as the trigger of the pointing hand "
+               "does: the Hand goes to that controller for the take. With "
+               "no target there, the press commands the Creature or does "
+               "nothing, and while the stick of that hand walks it is the "
+               "boost"
+             : "The trigger of the hand that does not point is the boost "
+               "while its stick walks, and else it commands the Creature");
+}
+
+bool LeftTakeOn() {
+  if (g_left_take < 0) {
+    g_left_take = IniInt("left_take", 1) != 0 ? 1 : 0;
+    LogLeftTake("");
+  }
+  return g_left_take != 0;
+}
+
 // The trigger or the grip that makes a game button, as the pump last saw it.
 bool RawDown(int button) {
   if (FlyDirect()) {
@@ -2066,6 +2129,15 @@ int g_grab_logs = 0;
 const int kMaxGrabLogs = 120;
 
 int OtherIndex() { return 1 - PointingIndex(); }
+// The hand that does not point by left_hand and the game's option. It is
+// OtherIndex, except while the trigger of that hand borrows the Hand for a
+// take (left_take). Its stick, its buttons, its aim and the leash stay with it
+// then.
+int FreeIndex() { return g_left_handed_base ? 1 : 0; }
+// The hand of the face buttons and the stick of the pointing hand. It is
+// PointingIndex, except while the Hand is borrowed: the buttons and the stick
+// do not change sides with the Hand.
+int ButtonIndex() { return 1 - FreeIndex(); }
 
 // The trigger's and the grip's game buttons, after controller_swap_buttons.
 // With controls=1 the left button comes from the trigger, and the grip of the
@@ -2342,7 +2414,7 @@ bool GestureButtonDown(const bwvr::HandInput& hand) {
 
 // Once a frame, from ControllersFrame, after the latches of the pump.
 void LatchGesture(bool back) {
-  const bwvr::HandInput& hand = g_hands[PointingIndex()];
+  const bwvr::HandInput& hand = g_hands[ButtonIndex()];
   const bool down = hand.active && GestureButtonDown(hand);
   const bool press = down && !g_gesture_before;
   g_gesture_before = down;
@@ -2473,11 +2545,11 @@ const int kMaxIdleLogs = 20;
 // is already down when a hand wakes is not a new press.
 void LatchEsc() {
   const bwvr::HandInput& left = g_hands[0];
-  const bwvr::HandInput& free_hand = g_hands[OtherIndex()];
+  const bwvr::HandInput& free_hand = g_hands[FreeIndex()];
   const bool active = left.active || free_hand.active;
   // The face button of the game menu, on the hand that does not point.
   const bool index =
-      strstr(HandProfileOf(OtherIndex()), "index") != nullptr;
+      strstr(HandProfileOf(FreeIndex()), "index") != nullptr;
   bool face = false;
   if (ButtonLayout() == 0) {
     face = free_hand.secondary;
@@ -2498,7 +2570,7 @@ void LatchEsc() {
     ++g_idle_logs;
     ModLog("controllers  : the first face button of the %s hand is down. It "
            "has no job with button_layout=1, frame %llu",
-           OtherIndex() == 0 ? "left" : "right", g_frame);
+           FreeIndex() == 0 ? "left" : "right", g_frame);
   }
   g_idle_before = idle;
 }
@@ -2514,7 +2586,7 @@ int g_leash_button_logs = 0;
 const int kMaxLeashButtonLogs = 60;
 
 void LatchLeashButton() {
-  const bwvr::HandInput& free_hand = g_hands[OtherIndex()];
+  const bwvr::HandInput& free_hand = g_hands[FreeIndex()];
   const bool down = free_hand.active && free_hand.primary;
   const bool back = free_hand.active && !g_leash_button_active;
   const bool edge = down && !g_leash_button_before && !back;
@@ -2522,7 +2594,7 @@ void LatchLeashButton() {
   g_leash_button_active = free_hand.active;
   if (!edge || !ControllersLeftLeash()) return;
   if (ButtonLayout() == 0 ||
-      strstr(HandProfileOf(OtherIndex()), "index") != nullptr) {
+      strstr(HandProfileOf(FreeIndex()), "index") != nullptr) {
     return;
   }
   const char* why = nullptr;
@@ -2533,7 +2605,7 @@ void LatchLeashButton() {
   }
   bool acted = false;
   const char* what = why != nullptr ? why : CreatureCommandLeashButton(&acted);
-  if (acted) PulseWith(OtherIndex(), 0.3f, 0.02f);
+  if (acted) PulseWith(FreeIndex(), 0.3f, 0.02f);
   if (g_leash_button_logs < kMaxLeashButtonLogs) {
     ++g_leash_button_logs;
     ModLog("controllers  : X of the hand that does not point (left_leash=1): "
@@ -2610,7 +2682,7 @@ bool ControllersHoldButtons() { return g_ctrl_mask != 0; }
 // this frame (B, or Y on the left hand), and the hand can act.
 bool ControllersSecondButton() {
   if (!g_on) return false;
-  const bwvr::HandInput& hand = g_hands[PointingIndex()];
+  const bwvr::HandInput& hand = g_hands[ButtonIndex()];
   return hand.active && hand.secondary && Usable();
 }
 
@@ -2958,15 +3030,27 @@ void PollControlsKey() {
   if (back_pressed && GameInFront()) {
     ControllersClimbToggle("Ctrl, Shift and the backslash key");
   }
-  // Ctrl, Shift and 0 of the number pad: move_stick_path.
-  static bool zero_before = false;
-  const bool zero = (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0 &&
+  // Ctrl, Shift and the grave accent key: move_stick_path. On a German
+  // keyboard the key is the one with the letter O with two dots.
+  static bool grave_before = false;
+  const bool grave = (GetAsyncKeyState(VK_OEM_3) & 0x8000) != 0 &&
+                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool grave_pressed = grave && !grave_before;
+  grave_before = grave;
+  if (grave_pressed && GameInFront()) {
+    ControllersPathToggle("Ctrl, Shift and the grave accent key");
+  }
+  // Ctrl, Shift and the key between the left Shift and Z: left_take. On a
+  // German keyboard the key is the one with the less than sign.
+  static bool less_before = false;
+  const bool less = (GetAsyncKeyState(VK_OEM_102) & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-  const bool zero_pressed = zero && !zero_before;
-  zero_before = zero;
-  if (zero_pressed && GameInFront()) {
-    ControllersPathToggle("Ctrl, Shift and 0 of the number pad");
+  const bool less_pressed = less && !less_before;
+  less_before = less;
+  if (less_pressed && GameInFront()) {
+    ControllersLeftTakeToggle("Ctrl, Shift and the less than key");
   }
   if (!pressed || !GameInFront()) return;
   ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
@@ -3025,6 +3109,56 @@ void PumpButtons(ULONGLONG now) {
   PollPressGuardKey();
   PollPressHoldKey();
   PollControlsKey();
+  // THE TRIGGER OF THE OTHER HAND (controls=1). It is read before the
+  // trigger of the Hand: a take with it borrows the Hand (left_take=1), and
+  // in the probe the trigger of the Hand reads as open.
+  controller_math::LeftTakeOut left_out = {};
+  {
+    const bwvr::HandInput& free_hand = g_hands[FreeIndex()];
+    const bool was = g_ltrigger_down;
+    g_ltrigger_down =
+        free_hand.active &&
+        controller_math::GripLevelStep(&g_ltrigger_level, free_hand.trigger,
+                                       false);
+    if (FlyScheme() && LeftTakeOn()) {
+      controller_math::LeftTakeIn in;
+      in.down = g_ltrigger_down;
+      in.stick_walks = OtherStickPushed();
+      in.target = HandDirectTakeTarget() || FarGrabHasTarget();
+      in.leash_on = ControllersLeftLeash() && CreatureCommandLeashOn();
+      in.busy = !DirectHandNow() || !Usable() || HandDirectHandBusy() ||
+                g_trigger_down;
+      in.frame = g_frame;
+      const int before = g_left_take_state.state;
+      left_out = controller_math::LeftTakeStep(&g_left_take_state, in);
+      g_left_command = left_out.command;
+      if (g_left_take_state.state != before &&
+          g_left_take_logs < kMaxLeftTakeLogs) {
+        ++g_left_take_logs;
+        static const char* const kWords[] = {
+            "is open", "is the boost of the walk",
+            "borrows the Hand and looks for a target there",
+            "takes with the Hand (a target at that hand)",
+            "commands the Creature (no target there)",
+            "does nothing (no target there, and no leash)"};
+        const int state = g_left_take_state.state;
+        ModLog("controllers  : the trigger of the %s hand %s (left_take=1), "
+               "frame %llu", FreeIndex() == 0 ? "left" : "right",
+               state >= 0 && state <= controller_math::kLeftNone
+                   ? kWords[state] : "?",
+               g_frame);
+      }
+    } else {
+      g_left_take_state = controller_math::LeftTake();
+      if (!was && g_ltrigger_down) {
+        g_left_command =
+            controller_math::OtherPressCommands(OtherStickPushed());
+      }
+      if (!g_ltrigger_down) g_left_command = false;
+    }
+    g_left_boost = left_out.boost;
+    g_borrow = left_out.borrow;
+  }
   const bool trigger_was = g_trigger_down, grip_was = g_grip_down;
   // The control of the game's right button, as the last pump left it.
   const bool right_was = RightIsTrigger() ? trigger_was : grip_was;
@@ -3036,6 +3170,13 @@ void PumpButtons(ULONGLONG now) {
       !guarded;
   g_trigger_down = controller_math::GripLevelStep(
       &g_trigger_level, hand.trigger, fast && RightIsTrigger());
+  // In the probe, and on the frame on which the Hand goes back after a probe
+  // with no target, the trigger of the Hand is the trigger of the other hand.
+  // It is no press of the game then.
+  if (left_out.hold_up ||
+      (g_left_handed != g_left_handed_base && !left_out.borrow)) {
+    g_trigger_down = false;
+  }
   g_grip_down = controller_math::GripLevelStep(&g_grip_level, hand.squeeze,
                                                fast && !RightIsTrigger());
   if (RightIsTrigger() ? (!trigger_was && g_trigger_down)
@@ -3123,18 +3264,6 @@ void PumpButtons(ULONGLONG now) {
   // the pointing trigger no command then). Its press is a command when the
   // stick of that hand does not walk at the press.
   const bool left_command = ControllersLeftLeash();
-  {
-    const bwvr::HandInput& other_hand = g_hands[OtherIndex()];
-    const bool was = g_ltrigger_down;
-    g_ltrigger_down =
-        other_hand.active &&
-        controller_math::GripLevelStep(&g_ltrigger_level, other_hand.trigger,
-                                       false);
-    if (!was && g_ltrigger_down) {
-      g_left_command = controller_math::OtherPressCommands(OtherStickPushed());
-    }
-    if (!g_ltrigger_down) g_left_command = false;
-  }
   {
     const bool ok = usable && DirectHandNow() && g_pointer_owned &&
                     (!g_swap_buttons || FlyScheme()) && !GrabHeld() &&
@@ -3307,7 +3436,7 @@ void PumpStick(ULONGLONG now) {
     g_wheel_tick = 0;
     return;
   }
-  const bwvr::HandInput& hand = g_hands[PointingIndex()];
+  const bwvr::HandInput& hand = g_hands[ButtonIndex()];
   const float ax = fabsf(hand.stick[0]);
   const float ay = fabsf(hand.stick[1]);
   const bool live = StickLive(hand);
@@ -3329,7 +3458,7 @@ void PumpStick(ULONGLONG now) {
   if (TempleTurnOn()) {
     if (live && g_turn_armed && ax > kStickPast && ax > ay) {
       g_turn_armed = false;
-      if (TempleTurn(hand.stick[0] > 0.0f ? 1 : -1)) Pulse(PointingIndex());
+      if (TempleTurn(hand.stick[0] > 0.0f ? 1 : -1)) Pulse(ButtonIndex());
     }
     g_wheel_tick = 0;
     return;
@@ -3369,7 +3498,7 @@ void PumpStick(ULONGLONG now) {
       g_god_zoom_holding = TabletopGodZoomHold(in ? share : -share);
       if (g_god_zoom_holding && !was_holding) {
         ++g_god_holds;
-        Pulse(PointingIndex());
+        Pulse(ButtonIndex());
         if (g_event_logs < kMaxEventLogs) {
           ++g_event_logs;
           ModLog("controllers  : the stick starts a smooth zoom %s of the God "
@@ -3385,7 +3514,7 @@ void PumpStick(ULONGLONG now) {
       g_god_zoom_armed = false;
       if (TabletopGodStep(zoom_in ? 1 : -1, 0)) {
         ++g_god_zooms;
-        Pulse(PointingIndex());
+        Pulse(ButtonIndex());
         if (g_event_logs < kMaxEventLogs) {
           ++g_event_logs;
           ModLog("controllers  : the stick asks the God view to zoom %s, frame "
@@ -3449,7 +3578,7 @@ bool StickWalks() {
 // The stick of the other hand is pushed past the dead zone of the walk, and
 // it has the job of the walk.
 bool OtherStickPushed() {
-  const bwvr::HandInput& hand = g_hands[OtherIndex()];
+  const bwvr::HandInput& hand = g_hands[FreeIndex()];
   float push[2];
   return hand.active && StickLive(hand) && StickWalks() &&
          walk_math::Push(hand.stick[0], hand.stick[1], kStickBack, kStickFull,
@@ -3469,7 +3598,7 @@ const char* WalkRefusal() {
 }
 
 void PumpWalk() {
-  const int other = OtherIndex();
+  const int other = FreeIndex();
   const bwvr::HandInput& hand = g_hands[other];
   float push[2] = {0.0f, 0.0f};
   const bool pushed =
@@ -3510,8 +3639,9 @@ void PumpWalk() {
         if (g_boost_pct < 100) g_boost_pct = 100;
         if (g_boost_pct > 2000) g_boost_pct = 2000;
       }
-      // A press of the trigger that commands the Creature is no boost.
-      if (!g_left_command) {
+      // A press of the trigger that commands the Creature is no boost. With
+      // left_take=1 only a press that LeftTakeStep made the boost is one.
+      if (LeftTakeOn() ? g_left_boost : !g_left_command) {
         boost = walk_math::Boost(hand.trigger, g_boost_pct * 0.01f);
       }
     }
@@ -3933,6 +4063,7 @@ void ControllersSetFake(const FakeControllerSettings& fake) {
   g_point_index = -1;
   g_points_used = 0;
   g_lpoint_index = -1;
+  g_lmatch = false;
   g_lpoints_used = 0;
   // The test key fake_controller_rots: yaw,pitch,roll in degrees for the
   // word "rot", from the game folder's bwvr.ini. Not in the launcher.
@@ -4146,7 +4277,7 @@ void UpdateHandSide() {
            "(HAND_ORIENTATION) is %d, frame %llu", game, g_frame);
   }
   const bool want = g_left_hand_key >= 0 ? g_left_hand_key != 0 : game != 0;
-  if (!decided || want != g_left_handed) {
+  if (!decided || want != g_left_handed_base) {
     if (decided && (HandAnyDown(g_hands[0]) || HandAnyDown(g_hands[1]))) {
       if (!said_wait) {
         said_wait = true;
@@ -4156,7 +4287,8 @@ void UpdateHandSide() {
     } else {
       said_wait = false;
       decided = true;
-      g_left_handed = want;
+      g_left_handed_base = want;
+      g_left_handed = want != g_borrow;
       // The hand that points now: a button that is down on it must go up
       // before it presses.
       g_hand_back = true;
@@ -4165,6 +4297,16 @@ void UpdateHandSide() {
              "%d), frame %llu", want ? "left" : "right",
              want ? "right" : "left", g_left_hand_key, game, g_frame);
     }
+  }
+  // THE BORROWED HAND (left_take=1): the Hand goes to the other controller
+  // at once, with no wait for the buttons. The press of the trigger of that
+  // controller is the press of the take, so no button must go up first.
+  if (decided && g_left_handed != (g_left_handed_base != g_borrow)) {
+    g_left_handed = g_left_handed_base != g_borrow;
+    ModLog("controllers  : the %s controller has the Hand now (%s, "
+           "left_take=1), frame %llu", g_left_handed ? "left" : "right",
+           g_borrow ? "the trigger of the other hand borrows it"
+                    : "back after the take", g_frame);
   }
   MatchGameHand();
 }
@@ -4216,7 +4358,7 @@ void ControllersFrame() {
     }
     off_before = off;
   }
-  const bwvr::HandInput& pointing = g_hands[PointingIndex()];
+  const bwvr::HandInput& pointing = g_hands[ButtonIndex()];
   // The hand is active again. A button that is already down on this frame
   // was pressed while the hand could not act, so it is not a new press.
   const bool back = pointing.active && !g_pointing_active;
@@ -4340,7 +4482,7 @@ void ControllersHintState(ControllerHintState* out) {
 }
 
 bool ControllersWalkPossible() {
-  return StickWalks() && g_hands[OtherIndex()].active &&
+  return StickWalks() && g_hands[FreeIndex()].active &&
          WalkRefusal() == nullptr && TabletopMoveAllowed();
 }
 
@@ -4386,19 +4528,19 @@ bool ControllersCardPose(int which, float grip_position[3],
 bool ControllersRingHand(RingHand* out) {
   memset(out, 0, sizeof(*out));
   if (!g_on || !g_installed || g_frame == 0) return false;
-  const bwvr::HandInput& hand = g_hands[OtherIndex()];
+  const bwvr::HandInput& hand = g_hands[FreeIndex()];
   float orientation[4];
   bool left = false;
   out->active =
       ControllersCardPose(1, out->position, orientation, out->head, &left);
-  out->left = OtherIndex() == 0;
+  out->left = FreeIndex() == 0;
   out->usable = g_owner_mode != 2 && !IntroBlocksButtons() &&
                 (GameInFront() || ActsBehind()) && !StereoIdle();
   out->dialog = MenuUp();
   out->grab_held = GrabHeld();
   // A Vive wand, a Windows Mixed Reality controller and the simple controller
   // have no face buttons.
-  const char* profile = HandProfileOf(OtherIndex());
+  const char* profile = HandProfileOf(FreeIndex());
   out->face_buttons = strstr(profile, "vive") == nullptr &&
                       strstr(profile, "microsoft") == nullptr &&
                       strstr(profile, "simple") == nullptr;
@@ -4573,6 +4715,7 @@ bool ControllersOverlayHands(OverlayHands* out) {
                                lean_w, eye);
   out->units_per_meter = HeadPoseScale() * gain;
   out->pointing = PointingIndex();
+  out->free_hand = FreeIndex();
   out->frame = g_frame;
   for (int index = 0; index < 2; ++index) {
     const bwvr::HandInput& hand = g_hands[index];
@@ -4631,7 +4774,7 @@ bool ControllersTeleportInput(TeleportInput* out) {
   memset(out, 0, sizeof(*out));
   if (!g_on || g_frame == 0) return false;
   *out = g_frame_aim;
-  const int index = PointingIndex();
+  const int index = ButtonIndex();
   const bwvr::HandInput& hand = g_hands[index];
   out->hand = hand.active;
   out->a_down = hand.active && hand.primary;
@@ -4706,7 +4849,7 @@ void LatchAimOf(int index, TeleportInput* out, bool* seen_tracked) {
 // teleport, the far grab) and of the other hand.
 void LatchFrameAim() {
   LatchAimOf(PointingIndex(), &g_frame_aim, &g_tele_seen_tracked);
-  LatchAimOf(OtherIndex(), &g_other_aim, &g_other_aim_seen_tracked);
+  LatchAimOf(FreeIndex(), &g_other_aim, &g_other_aim_seen_tracked);
 }
 
 // A ray in the world from the aim of a frame.
@@ -4748,7 +4891,7 @@ bool ControllersCommandInput(TeleportInput* out) {
   memset(out, 0, sizeof(*out));
   if (!g_on || g_frame == 0) return false;
   *out = g_other_aim;
-  const bwvr::HandInput& hand = g_hands[OtherIndex()];
+  const bwvr::HandInput& hand = g_hands[FreeIndex()];
   out->hand = hand.active;
   out->usable = Usable();
   out->grab_held = GrabHeld();
@@ -5077,6 +5220,16 @@ void ControllersClimbToggle(const char* by) {
          g_frame);
 }
 
+void ControllersLeftTakeToggle(const char* by) {
+  if (!g_on) return;
+  g_left_take = LeftTakeOn() ? 0 : 1;
+  g_left_take_state = controller_math::LeftTake();
+  g_borrow = false;
+  g_left_boost = false;
+  ControllersGrabPulse(1, 0.5f, g_left_take != 0 ? 0.30f : 0.08f);
+  LogLeftTake(by);
+}
+
 void ControllersLeftLeashToggle(const char* by) {
   if (!g_on) return;
   g_left_leash = LeftLeashOn() ? 0 : 1;
@@ -5085,10 +5238,13 @@ void ControllersLeftLeashToggle(const char* by) {
 }
 
 bool ControllersOtherMotion(float grip_room_out[3]) {
-  if (!g_on || !DirectHandNow() || !g_grab_have[0] || !g_grab_tracked[0]) {
+  // Slot 0 of the grab samples is OtherIndex, slot 1 PointingIndex.
+  const int slot = OtherIndex() == FreeIndex() ? 0 : 1;
+  if (!g_on || !DirectHandNow() || !g_grab_have[slot] ||
+      !g_grab_tracked[slot]) {
     return false;
   }
-  for (int i = 0; i < 3; ++i) grip_room_out[i] = g_grab_room[0][i];
+  for (int i = 0; i < 3; ++i) grip_room_out[i] = g_grab_room[slot][i];
   return true;
 }
 

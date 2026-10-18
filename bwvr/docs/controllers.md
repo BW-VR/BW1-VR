@@ -1222,7 +1222,7 @@ controller as the button of the pointing hand.
 
 The key `controls` chooses one of two control schemes. The launcher row is
 "Controls" in the group "Controllers". 0 ("Default") is the scheme of 5.1.
-1 ("Fly and grab") changes these controls in the God view:
+1 ("Trigger is grab") changes these controls in the God view:
 
 | Control | `controls=1` |
 | --- | --- |

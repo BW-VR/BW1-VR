@@ -317,9 +317,9 @@ const Setting kSettings[] = {
      "and long is 0.2 seconds. Some people find a jump easier with a blink."},
 
     {kGroup, nullptr, "Controllers", nullptr, 0, nullptr},
-    {kValues, "controls", "Controls", "Default=0|Fly and grab=1", 0,
+    {kValues, "controls", "Controls", "Default=0|Trigger is grab=1", 0,
      "Default: the trigger of your Hand clicks, and its grip takes things. "
-     "The grip of your other hand moves the world. Fly and grab: the grips "
+     "The grip of your other hand moves the world. Trigger is grab: the grips "
      "of both hands only move the world. Hold both grips to turn the world "
      "and to make it larger or smaller, and your height above the land "
      "stays. The trigger of your Hand takes a thing at once, also from a "

@@ -889,7 +889,7 @@ that moves while the Hand takes it.
   take (`hand-model.md`, "Haptics from the world"). Only a headset shows
   how each pattern feels, and whether a new target and a lock stay clear.
   The mod reads no type of the ground, so rock and grass feel the same.
-- **N20. The control scheme "Fly and grab"** (`controls=1`,
+- **N20. The control scheme "Trigger is grab"** (`controls=1`,
   `controllers.md`, 5.7). No headset session yet. Only a headset shows how
   the choice of the press feels, and whether the boost of 5 times is a good
   speed.

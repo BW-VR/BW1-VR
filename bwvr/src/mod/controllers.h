@@ -184,6 +184,10 @@ void ControllersControlsToggle(const char* by);
 // (docs/controllers.md, 5.7). The test key (Ctrl, Shift and the slash key,
 // with test_keys=1) changes left_leash.
 bool ControllersLeftLeash();
+// The test key of move_stick_climb (Ctrl, Shift and the backslash key, with
+// test_keys=1): the tilt of the controller of the stick moves the player up
+// and down in the walk with controls=1.
+void ControllersClimbToggle(const char* by);
 void ControllersLeftLeashToggle(const char* by);
 // The grip point of the hand that does not point in the room, in game units
 // as ControllerDirectMotion gives the grip of the pointing hand. False while

@@ -283,7 +283,10 @@ inline const Setting kSettings[] = {
      "stays. The trigger of your Hand takes a thing at once, also from a "
      "distance: point, hold the trigger and pull. Where nothing can be "
      "taken, a press of the trigger clicks. Pull the trigger of your other "
-     "hand while you move with its stick to move faster."},
+     "hand while you move with its stick to move faster, and tilt that "
+     "controller up or down to fly up or down. Its X puts the leash on your "
+     "Creature and gives the next kind, and a shake of that hand takes the "
+     "leash off."},
     // Not offered: the Hand is the real hand. The pointer stays in the mod
     // for a dialog box and for tests (controller_hand=0).
     // {kValues, "controller_hand", "Hand", "Direct hand=1|Pointer=0", 1,

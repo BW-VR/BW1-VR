@@ -515,6 +515,9 @@ struct WalkHold {
   float push[2] = {0.0f, 0.0f};
   float boost = 1.0f;  // the factor of the speed of the request (controls=1)
   float boost_most = 1.0f;  // the largest factor in the walk, for the log
+  float climb = 0.0f;       // the share of the climb of the request
+  float climbed = 0.0f;     // the climb of the walk over the land, m of room
+  float zoomed = 1.0f;      // the zoom out of the climb, new scale over old
   bool fresh = false;
   bool have_aim = false;
   float aim[2] = {0.0f, 1.0f};
@@ -2004,10 +2007,18 @@ void StopWalk(const char* cause, bool view_stays) {
               g_walk.frame_most * 1000.0f, g_walk.step_least * 100.0f,
               g_walk.step_most * 100.0f);
   }
-  char boosted[128] = "";
+  char boosted[256] = "";
   if (g_walk.boost_most > 1.0f) {
     sprintf_s(boosted, " The trigger made the walk at most %.2f times as fast "
               "(controls=1).", g_walk.boost_most);
+  }
+  if (g_walk.climbed != 0.0f || g_walk.zoomed != 1.0f) {
+    const size_t used = strlen(boosted);
+    sprintf_s(boosted + used, sizeof(boosted) - used,
+              " The tilt of the controller moved the head %.1f cm up over "
+              "the land, and the climb past the top made the world %.3f "
+              "times smaller (controls=1).", g_walk.climbed * 100.0f,
+              g_walk.zoomed);
   }
   ModLog("god view     : the walk with the stick stopped (%s). You went %.2f "
          "units over the land, which is %.2f cm of the room, %.1f degrees to "
@@ -2062,10 +2073,12 @@ void ApplyGodWalk(double frame_seconds) {
   const bool have_aim = fresh && g_walk.have_aim;
   const float aim[2] = {g_walk.aim[0], g_walk.aim[1]};
   const float boost = fresh ? g_walk.boost : 1.0f;
+  const float climb = fresh ? g_walk.climb : 0.0f;
   g_walk.fresh = false;
   g_walk.have_aim = false;
   g_walk.push[0] = g_walk.push[1] = 0.0f;
   g_walk.boost = 1.0f;
+  g_walk.climb = 0.0f;
   if (g_walk_check.frames_left > 0 && --g_walk_check.frames_left == 0 &&
       WalkLog()) {
     float eye[3];
@@ -2142,6 +2155,8 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.shown_at = g_walk.period = 0;
     g_walk.shown = g_walk.late = 0;
     g_walk.boost_most = 1.0f;
+    g_walk.climbed = 0.0f;
+    g_walk.zoomed = 1.0f;
     g_walk.have_below = pose.scale > 0.0f;
     g_walk.start_below = g_walk.below =
         g_walk.have_below
@@ -2226,9 +2241,38 @@ void ApplyGodWalk(double frame_seconds) {
       g_walk.fell -= rise / next.scale;
     }
   }
+  // THE CLIMB (controls=1, walk_math.h, Climb). The tilt of the controller
+  // of the stick moves the head up or down over the land while the stick
+  // pushes forward, at the speed of the walk. Past the top limit of the
+  // ground the climb goes on as a zoom out about the land under the head,
+  // so that land stays at the limit below the head and the world gets
+  // smaller. A descent stops at the bottom limit.
+  if (climb != 0.0f && next.scale > 0.0f) {
+    const float rise = climb * push[1] *
+                       g_settings.move_stick_speed_cm * 0.01f * boost *
+                       seconds;
+    const float land = LandUnderHead(next, room, head);
+    const float below = head[1] - GroundInRoom(next, room, land);
+    const walk_math::ClimbStep up = walk_math::Climb(
+        below, rise, kGroundNearest, kGroundFarthest);
+    next.center[1] += up.lift * next.scale;
+    g_walk.climbed += up.lift;
+    // The zoom keeps to the game's switch of the zoom, as the zoom of the
+    // stick does (the tutorial turns it on at its own step).
+    if (up.ratio != 1.0f && (CameraFeatures() & kFeatureZoom) != 0) {
+      TablePose zoomed;
+      const float used = GodZoom(next, room, head, land, up.ratio,
+                                 GodLowest(), GodHighest(), &zoomed);
+      next = zoomed;
+      next.center[0] = ClampCenter(next.center[0]);
+      next.center[2] = ClampCenter(next.center[2]);
+      g_walk.zoomed *= used;
+    }
+  }
   // The head moves over the land, and a hill there stays below it.
   g_walk.sunk += ZoomClearHead(&next, room, head);
   for (int i = 0; i < 3; ++i) g_center[i] = next.center[i];
+  g_scale = next.scale;
   Derive();
   ++g_serial;
   ++g_god_version;
@@ -3530,7 +3574,8 @@ int TabletopGodMoveStick() {
 
 bool TabletopMoveAllowed() { return (CameraFeatures() & kFeatureDrag) != 0; }
 
-bool TabletopGodWalk(const float push[2], const float* aim, float boost) {
+bool TabletopGodWalk(const float push[2], const float* aim, float boost,
+                     float climb) {
   if (TabletopGodMoveStick() == walk_math::kRuleOff || !TabletopGodOwnsView()) {
     return false;
   }
@@ -3549,6 +3594,7 @@ bool TabletopGodWalk(const float push[2], const float* aim, float boost) {
   g_walk.push[0] = push[0];
   g_walk.push[1] = push[1];
   g_walk.boost = boost >= 1.0f ? boost : 1.0f;
+  g_walk.climb = climb == climb ? climb : 0.0f;
   g_walk.have_aim = aim != nullptr;
   if (aim != nullptr) {
     g_walk.aim[0] = aim[0];

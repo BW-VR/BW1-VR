@@ -289,6 +289,10 @@ still:
                       or the other choice of "Controls" (key
                       controls). The ' key is the key with the
                       letter A with two dots on a German keyboard.
+  Ctrl Shift \        Turn the flight up and down by the tilt of the
+                      left controller on and off (move_stick_climb).
+                      The \ key is the key with the caret on a German
+                      keyboard.
   Ctrl Shift /        Change the leash buttons of "Trigger is grab":
                       X and a shake of the left hand, or the right
                       hand (key left_leash). The / key is the key
@@ -335,6 +339,10 @@ controls:
                       the trigger is a click.
   Left trigger        Pull it while you move with the left stick to
                       move faster (key move_stick_boost_pct).
+  Tilt left hand      Point the left controller up or down while you
+                      push the left stick forward to fly up or down.
+                      When you fly up past the highest place, the
+                      world gets smaller (key move_stick_climb).
   X                   Put the leash on your Creature. Press it again
                       for the next kind of leash. A leash that is
                       tied to a thing comes back to your Hand.

@@ -174,7 +174,8 @@ bool TabletopGodZoomForwardIn();
 // rule, its request for the next frame, and its test key. And the game's
 // switch for the drag of the land, which the walk keeps to.
 int TabletopGodMoveStick();
-bool TabletopGodWalk(const float push[2], const float* aim, float boost);
+bool TabletopGodWalk(const float push[2], const float* aim, float boost,
+                     float climb);
 void TabletopGodMoveStickCycle();
 bool TabletopMoveAllowed();
 // teleport.cpp and hint_card.cpp: the test keys of teleport_switch and of
@@ -1714,6 +1715,23 @@ const int kMaxFlyLogs = 120;
 // controls=1: the trigger of the other hand at its full pull makes the walk
 // this many percent of its speed (move_stick_boost_pct).
 int g_boost_pct = -1;
+// controls=1: the tilt of the controller of the stick moves the player up
+// and down in the walk (move_stick_climb). With test_keys=1, Ctrl, Shift and
+// the backslash key change it.
+int g_climb = -1;
+
+bool ClimbOn() {
+  if (g_climb < 0) {
+    g_climb = IniInt("move_stick_climb", 1) != 0 ? 1 : 0;
+    ModLog("controllers  : move_stick_climb=%d. %s", g_climb,
+           g_climb != 0
+               ? "With controls=1, the tilt of the controller of the stick "
+                 "moves you up and down while the stick pushes forward. Past "
+                 "the top limit of the ground the world gets smaller"
+               : "The walk with the stick keeps the height");
+  }
+  return g_climb != 0;
+}
 
 void LogControls(const char* by) {
   const bool keys = IniInt("test_keys", 0) != 0;
@@ -2907,6 +2925,17 @@ void PollControlsKey() {
   if (slash_pressed && GameInFront()) {
     ControllersLeftLeashToggle("Ctrl, Shift and the slash key");
   }
+  // Ctrl, Shift and the backslash key: move_stick_climb. On a German
+  // keyboard the key is the one with the caret.
+  static bool back_before = false;
+  const bool back = (GetAsyncKeyState(VK_OEM_5) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool back_pressed = back && !back_before;
+  back_before = back;
+  if (back_pressed && GameInFront()) {
+    ControllersClimbToggle("Ctrl, Shift and the backslash key");
+  }
   if (!pressed || !GameInFront()) return;
   ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
 }
@@ -3393,10 +3422,14 @@ void PumpWalk() {
     // land, in the room.
     float rotation[9], translation[3], direction[3], aim[2];
     bool have_aim = false;
+    float climb = 0.0f;
     if (hand.aim_valid &&
         HeadPoseToRoom(g_aim_p[other], g_aim_q[other], rotation, translation)) {
       controller_math::AimDirection(rotation, direction);
       have_aim = walk_math::AimForward(direction, walk_math::kAimLeast, aim);
+      // THE CLIMB (controls=1): the up part of the direction of that
+      // controller (walk_math.h, ClimbShare).
+      if (FlyScheme() && ClimbOn()) climb = walk_math::ClimbShare(direction[1]);
     }
     // THE BOOST (controls=1): the trigger of the hand of the stick makes the
     // walk faster while it is pulled (walk_math.h, Boost).
@@ -3409,7 +3442,7 @@ void PumpWalk() {
       }
       boost = walk_math::Boost(hand.trigger, g_boost_pct * 0.01f);
     }
-    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost)) {
+    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost, climb)) {
       why = "the game does not allow a drag of the land now";
     }
   }
@@ -4883,6 +4916,16 @@ void ControllersButtonLayoutToggle(const char* by) {
 bool ControllersFly() { return g_on && FlyScheme(); }
 
 bool ControllersLeftLeash() { return g_on && FlyScheme() && LeftLeashOn(); }
+
+void ControllersClimbToggle(const char* by) {
+  if (!g_on) return;
+  g_climb = ClimbOn() ? 0 : 1;
+  // A walk that runs stops, and a stick that is pushed must come back.
+  g_walk_blocked = true;
+  ControllersGrabPulse(1, 0.5f, g_climb != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: move_stick_climb=%d, frame %llu", by, g_climb,
+         g_frame);
+}
 
 void ControllersLeftLeashToggle(const char* by) {
   if (!g_on) return;

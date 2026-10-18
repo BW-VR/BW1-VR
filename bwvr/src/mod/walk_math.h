@@ -105,6 +105,62 @@ inline float Boost(float trigger, float most) {
   return 1.0f + (most - 1.0f) * share;
 }
 
+// THE CLIMB (controls=1, move_stick_climb=1). The tilt of the controller of
+// the stick moves the player up and down while the stick pushes forward. up
+// is the up part of the unit direction in which that controller points, the
+// sine of its pitch. Within kClimbDead of level the share is 0, so a flight
+// straight ahead is easy. Past it the share grows in a straight line to 1
+// (or -1) at straight up (or down). A push back climbs the other way.
+const float kClimbDead = 0.1736f;  // the sine of 10 degrees
+
+inline float ClimbShare(float up) {
+  if (!(up == up)) return 0.0f;
+  const float a = fabsf(up);
+  if (!(a > kClimbDead)) return 0.0f;
+  float share = (a - kClimbDead) / (1.0f - kClimbDead);
+  if (share > 1.0f) share = 1.0f;
+  return up < 0.0f ? -share : share;
+}
+
+// ONE FRAME OF THE CLIMB AT THE LIMITS OF THE GROUND. below is how far the
+// land under the head is below the head, and rise the climb of the frame,
+// both in meters of the room (up is more than 0). The land stays between
+// nearest and farthest below the head:
+//
+//   - lift is how far the head goes up over the land in the room. The view
+//     moves the land down by it.
+//   - a climb past farthest goes on as a zoom out about the land under the
+//     head: ratio is the new scale over the old one. The land stays at
+//     farthest below the head, and the world gets smaller as if the head
+//     went up by the rest: ratio = (top + rest) / top.
+//   - a descent stops at nearest. It never zooms in.
+struct ClimbStep {
+  float lift;
+  float ratio;
+};
+
+inline ClimbStep Climb(float below, float rise, float nearest,
+                       float farthest) {
+  ClimbStep out = {0.0f, 1.0f};
+  if (!(rise == rise) || !(below == below)) return out;
+  if (rise > 0.0f) {
+    float room = farthest - below;
+    if (room < 0.0f) room = 0.0f;
+    if (rise <= room) {
+      out.lift = rise;
+      return out;
+    }
+    out.lift = room;
+    const float top = below + room;
+    if (top > 0.0f) out.ratio = (top + rise - room) / top;
+  } else if (rise < 0.0f) {
+    float room = below - nearest;
+    if (room < 0.0f) room = 0.0f;
+    out.lift = rise < -room ? -room : rise;
+  }
+  return out;
+}
+
 // THE STEP OF ONE FRAME, in meters of the room: the speed times the time of
 // the frame (zoom_math::FrameSeconds gives that time, with its cap). A time
 // that is not above 0 gives no step.

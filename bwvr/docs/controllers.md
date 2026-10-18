@@ -1034,6 +1034,7 @@ default. Each control has one job, and one button opens the game menu.
 | `controllers` | 1 | Use tracked controllers when the headset has them |
 | `left_hand` | -1 | Which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. The launcher row "Hand" |
 | `controls` | 0 | The control scheme (5.7). 0: the tables of 5.1. 1: the grips only grab the world, the trigger of the pointing hand is the left and the right button of the game, and the trigger of the other hand makes the walk faster. The launcher row "Controls". The test key Ctrl Shift and the apostrophe key goes between the two (`test_keys=1`) |
+| `move_stick_path` | 1 | With `controls=1`: the flight with the stick keeps its height and stops at the land (`god-view.md`, 5.7). The test key Ctrl Shift and 0 of the number pad goes between 1 and 0 (`test_keys=1`). Not in the launcher |
 | `move_stick_climb` | 1 | With `controls=1`: the tilt of the controller of the stick moves the player up and down in the walk (`god-view.md`, 5.7). The test key Ctrl Shift and the backslash key goes between 1 and 0 (`test_keys=1`). Not in the launcher |
 | `left_leash` | 1 | With `controls=1`: 1 X of the other hand is the button of the leash, and a shake of the other hand takes the leash off (5.7). 0 keeps the leash with the pointing hand. The test key Ctrl Shift and the slash key goes between the two (`test_keys=1`). Not in the launcher |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed of the walk with the stick at a full pull of the trigger of that hand, in percent of the speed with no trigger, 100 to 2000 (`god-view.md`, 5.7). Not in the launcher |
@@ -1232,7 +1233,10 @@ The key `controls` chooses one of two control schemes. The launcher row is
 | Trigger of the pointing hand | The left button and the right button of the game. The press decides which one, and the trigger keeps that button until it opens (see below) |
 | Trigger of the other hand | Makes the walk with the stick faster while it is pulled (`god-view.md`, 5.7). No job when the stick does not walk |
 | Tilt of the other controller | With `move_stick_climb=1`: up or down while the stick walks, and past the top limit of the ground the world gets smaller (`god-view.md`, 5.7) |
+| Stick of the other hand, with `move_stick_path=1` | The flight keeps its height and does not follow the land. The land stops it 10 cm below the head (`god-view.md`, 5.7) |
 | X (A when the left hand points), with `left_leash=1` | The button of the leash: with no leash it puts the leash on the Creature (the leash click, packet `0x5F`, which needs no aim). With the leash on the Hand it gives the next kind that the Creature has (the item `leash_next` of the ring, the key of the game "Next Leash"). With the leash tied to an object it brings the leash back to the Hand. Not with `button_layout=0` and not on an Index controller, where that button has its own job |
+| Trigger of the other hand, with `left_leash=1` and the leash on | Commands the Creature as the trigger of 5.1 does with `controls=0` (`creature.md`, section 4): a tap, a hold with the arc and the ring, and a double press that ties the leash. It aims with the other controller: its aim ray, the halo, the arc and the ring come from that hand. A press while the stick of that hand walks is the boost and no command (`OtherPressCommands`). The Hand of the game may hold an object, so the pointing trigger always takes. The hint card of the other hand has the lines of the commands |
+| The rope of the leash, with `left_leash=1` | Ends at the middle of the wrist of the other hand, as the overlay drew it (`grab.md`, "The leash at the mod's hand") |
 | A shake of the other hand, with `left_leash=1` | Takes the leash off (`creature.md`, "The shake"). It acts also while the Hand of the game holds an object: the handler of the leash click has no test of the Hand. A shake of the pointing hand does not take the leash off |
 
 The other controls (A, B, the sticks, the ring, the menu button) do not
@@ -1328,14 +1332,34 @@ Desktop runs [R]:
   climbs 205 cm and then zooms the world out from 100 to 118.7 units for
   each meter, and a walk back of 0.13 s goes down 10.7 cm.
 
+- `aim_run.ps1 -Save temple` with `controls=1`: `x` puts the leash on,
+  `aimcmd` aims both rays at an object, and a tap of `ltrigger` sends packet
+  `0x5D` on the CitadelHeart. `ltrigger` during a walk with `lstick_up` is
+  the boost and sends nothing. Then `trigger` takes a tree beside the Hand,
+  and a tap of `ltrigger` while the Hand holds it sends packet `0x5E` to the
+  land of the aim.
+
+- `aim_run.ps1 -Save temple` with `controls=1`: after `x` the log says that
+  the rope ends at the wrist of the other hand, 32.8 cm from the wrist bone
+  of the game's Hand. A walk forward with the boost over the hills at the
+  Temple keeps the height of the view (0.0 cm up and down with the land),
+  and the land stops the step on 75 frames, 10.0 cm below the head. A walk
+  to the right into the slope does not move, and a walk back moves away
+  (the land is then 46.4 cm below the head).
+
 **Known limits, and what only a headset can show.**
 
 - A one-off seed that the trigger carries cannot become active by a second
   press, because the trigger holds it. Let it go and tap it with the
   trigger.
-- With the leash on the Hand, the trigger commands the Creature and takes
-  nothing. Take the leash off with a shake of the other hand
-  (`left_leash=1`) to take things.
+- With `left_leash=0` and the leash on the Hand, the pointing trigger
+  commands the Creature and takes nothing.
+- With `left_leash=1`, while the Hand of the game holds an object, the game
+  offers no objects to the pick, so the cone of the other hand has no
+  target then, and a command from the other hand goes to the land.
+- The hint card shows the lines of one context: while the pointing hand is
+  on a target, the lines of the commands on the card of the other hand can
+  give way to the lines of the take.
 - Only a headset shows how the choice of the press feels: a press near an
   object that the player did not want to take, and a click that the player
   wanted on an object that the Hand can hold.

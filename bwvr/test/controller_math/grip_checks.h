@@ -774,6 +774,11 @@ inline void FlyPressChecks() {
 
 inline void GripRuleChecks() {
   FlyPressChecks();
+  Check(controller_math::OtherPressCommands(false),
+        "a press of the other trigger with the stick at rest commands", 1, 1);
+  Check(!controller_math::OtherPressCommands(true),
+        "a press of the other trigger while the stick walks is the boost", 0,
+        0);
   TakeRuleChecks();
   FarTakeChecks();
   LevelChecks();

@@ -188,6 +188,10 @@ bool ControllersLeftLeash();
 // test_keys=1): the tilt of the controller of the stick moves the player up
 // and down in the walk with controls=1.
 void ControllersClimbToggle(const char* by);
+// The test key of move_stick_path (Ctrl, Shift and 0 of the number pad, with
+// test_keys=1): with controls=1 the flight keeps its height and stops at the
+// land, or it follows the land.
+void ControllersPathToggle(const char* by);
 void ControllersLeftLeashToggle(const char* by);
 // The grip point of the hand that does not point in the room, in game units
 // as ControllerDirectMotion gives the grip of the pointing hand. False while
@@ -236,6 +240,16 @@ struct TeleportInput {
   unsigned long long frame;  // the controllers frame
 };
 bool ControllersTeleportInput(TeleportInput* out);
+// THE AIM OF THE COMMANDS OF THE CREATURE (docs/creature.md, section 4). With
+// left_leash=1 and controls=1 it is the aim of the hand that does not point,
+// else the aim of the pointing hand, as ControllersTeleportInput and
+// ControllersFarRay give it.
+bool ControllersCommandInput(TeleportInput* out);
+// The commands of the Creature may start now. With left_leash=1 the pointing
+// trigger may be down, else the rule of ControllersFarAllowed.
+bool ControllersCommandAllowed(const char** why);
+bool ControllersCommandRay(float origin[3], float direction[3], float* units,
+                           float eye[3]);
 
 // The ray of the pointing hand while a dialog box is up and the controller
 // owns the pointer. The two ends are in the world. False when none is drawn.

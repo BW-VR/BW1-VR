@@ -206,6 +206,9 @@ bool HandExactPalm(float out[3], uint64_t* frame, int32_t* state);
 // controllers.cpp: the grab from a distance (docs/grab.md, "The grab from a
 // distance"). The aim ray in the world, and whether the pointing hand may act
 // on a far object now.
+// overlay.cpp: the middle of the wrist of the hand that does not point, as
+// it was drawn last. False when it was not drawn in the last two frames.
+bool OverlayOtherWrist(float out[3]);
 bool ControllersFarRay(float origin[3], float direction[3],
                        float* units_per_meter, float eye[3]);
 bool ControllersFarAllowed(const char** why);
@@ -780,6 +783,14 @@ void* g_far_debug_object = nullptr;
 int g_far_debug_frames = 0;
 float g_far_offer_deg = 12.0f;
 uint64_t g_far_offers = 0;
+// THE CONE OF THE COMMANDS ON THE OTHER HAND (left_leash=1): the commands of
+// the Creature aim with the hand that does not point, so the objects in the
+// cone of its aim ray go to the pick too (creature_command.cpp).
+bool g_cmd_offer = false;
+float g_cmd_origin[3] = {0.0f, 0.0f, 0.0f};
+float g_cmd_direction[3] = {0.0f, 0.0f, 1.0f};
+float g_cmd_units = 0.0f;
+uint64_t g_cmd_offers = 0;
 uint64_t g_far_land_writes = 0;
 bool g_said_multiplayer = false;
 bool FarTargetLives();
@@ -3183,8 +3194,8 @@ int __fastcall h_SendObjectDrawCollision(void* self, void* unused,
 int __fastcall h_ScreenTest(const void* bounds, void* unused,
                             const uint8_t* object) {
   const int result = o_ScreenTest(bounds, unused, object);
-  if ((!g_near_pick && !g_far_offer) || g_eye != 0 || result == 0 ||
-      object == nullptr) {
+  if ((!g_near_pick && !g_far_offer && !g_cmd_offer) || g_eye != 0 ||
+      result == 0 || object == nullptr) {
     return result;
   }
   int32_t* under = reinterpret_cast<int32_t*>(kPickUnder);
@@ -3225,6 +3236,22 @@ int __fastcall h_ScreenTest(const void* bounds, void* unused,
     if (s.valid && s.te <= g_far_offer_deg) {
       *under = 1;
       ++g_far_offers;
+      return result;
+    }
+  }
+  // THE CONE OF THE COMMANDS ON THE OTHER HAND, with the same rule.
+  if (g_cmd_offer) {
+    const float cx = at[0] - g_cmd_origin[0], cy = at[1] - g_cmd_origin[1],
+                cz = at[2] - g_cmd_origin[2];
+    float hand_m = sqrtf(cx * cx + cy * cy + cz * cz) / g_cmd_units;
+    if (hand_m < controller_math::kFarMinHandM) {
+      hand_m = controller_math::kFarMinHandM;
+    }
+    const controller_math::FarScore s = controller_math::FarConeScore(
+        g_cmd_origin, g_cmd_direction, at, 0.0f, hand_m);
+    if (s.valid && s.te <= FarGrabSelectDeg() + 4.0f) {
+      *under = 1;
+      ++g_cmd_offers;
     }
   }
   return result;
@@ -6075,6 +6102,9 @@ int __fastcall h_PickStep(void* self, void* unused) {
 // once a frame, so each call of a frame gets the same point. With the mouse,
 // with the game's mesh shown, for the leash of another player and for a leash
 // that is tied to an object, the game's point stays.
+uint64_t g_leash_wrist_last = 0;
+int g_leash_wrist_logs = 0;
+
 void __fastcall h_LeashStart(void* self, void* unused, float* out,
                              int from_status) {
   o_LeashStart(self, unused, out, from_status);
@@ -6089,6 +6119,28 @@ void __fastcall h_LeashStart(void* self, void* unused, float* out,
       *reinterpret_cast<uint8_t* const*>(status + kStatusLeash);
   if (leash == nullptr ||
       *reinterpret_cast<void* const*>(leash + kLeashObject) != nullptr) {
+    return;
+  }
+  // THE LEASH ON THE OTHER HAND (left_leash=1, docs/controllers.md, 5.7):
+  // X of the hand that does not point puts the leash on, and that hand
+  // commands the Creature, so the rope ends at the middle of its wrist, as
+  // the overlay drew it.
+  if (ControllersLeftLeash()) {
+    float wrist[3];
+    if (!OverlayOtherWrist(wrist)) return;
+    const bool fresh = g_frame > g_leash_wrist_last + 90;
+    g_leash_wrist_last = g_frame;
+    if (fresh && g_leash_wrist_logs < kMaxLeashLogs) {
+      ++g_leash_wrist_logs;
+      const float units = RoomUnits();
+      ModLog("leash        : the rope ends at the wrist of the hand that does "
+             "not point, %.1f %.1f %.1f, %.1f cm of the room from the wrist "
+             "bone of the game's Hand (left_leash=1), frame %llu",
+             wrist[0], wrist[1], wrist[2],
+             units > 0.0f ? Distance(out, wrist) / units * 100.0f : 0.0f,
+             g_frame);
+    }
+    for (int i = 0; i < 3; ++i) out[i] = wrist[i];
     return;
   }
   if (g_leash_frame != g_frame) {
@@ -6789,6 +6841,14 @@ void FarFrameStep(bool active) {
   g_far_ready = false;
   g_far_offer = false;
   g_far_ray = false;
+  g_cmd_offer = false;
+  if (active && ControllersLeftLeash() && CreatureCommandWantsCone()) {
+    float eye[3];
+    g_cmd_offer =
+        ControllersCommandRay(g_cmd_origin, g_cmd_direction, &g_cmd_units,
+                              eye) &&
+        g_cmd_units > 0.0f;
+  }
   FarTestTakeGone();
   // THE TARGET LIVES, or the far grab lets it go now. The mesh of a locked
   // target stays in the pick of this frame.
@@ -6869,9 +6929,10 @@ void FarFrameStep(bool active) {
   // ready.
   // A MIRACLE IN THE HAND (miracle.cpp) aims with the same cone: the Hand is
   // not empty then, so the far grab is not ready.
-  const bool command = f.usable && f.have_ray &&
-                       (CreatureCommandWantsCone() || MiracleWantsCone() ||
-                        ForestTakeWantsCone());
+  const bool command =
+      f.usable && f.have_ray &&
+      ((CreatureCommandWantsCone() && !ControllersLeftLeash()) ||
+       MiracleWantsCone() || ForestTakeWantsCone());
   if (!f.ready && !command) return;
   g_far_ready = f.ready;
   g_far_ray = true;

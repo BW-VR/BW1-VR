@@ -818,6 +818,8 @@ const wchar_t* ControllerHintWord(int word) {
       return g_words.ring;
     case kWordWalk:
       return g_words.walk;
+    case kWordCommand:
+      return ControllersLeftLeash() ? g_words.trigger : ControllerHintLabel(1);
     default:
       return nullptr;
   }

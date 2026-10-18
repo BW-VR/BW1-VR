@@ -175,7 +175,7 @@ bool TabletopGodZoomForwardIn();
 // switch for the drag of the land, which the walk keeps to.
 int TabletopGodMoveStick();
 bool TabletopGodWalk(const float push[2], const float* aim, float boost,
-                     float climb);
+                     float climb, bool path);
 void TabletopGodMoveStickCycle();
 bool TabletopMoveAllowed();
 // teleport.cpp and hint_card.cpp: the test keys of teleport_switch and of
@@ -1720,6 +1720,25 @@ int g_boost_pct = -1;
 // the backslash key change it.
 int g_climb = -1;
 
+// controls=1: the flight keeps its height and stops at the land, with no
+// follow of the land (move_stick_path). With test_keys=1, Ctrl, Shift and 0
+// of the number pad change it.
+int g_path = -1;
+
+bool PathOn() {
+  if (g_path < 0) {
+    g_path = IniInt("move_stick_path", 1) != 0 ? 1 : 0;
+    ModLog("controllers  : move_stick_path=%d. %s", g_path,
+           g_path != 0
+               ? "With controls=1, the flight with the stick keeps its "
+                 "height, and the land stops it when it comes nearer than "
+                 "10 cm below your head"
+               : "The walk with the stick follows the land as "
+                 "move_stick_follow_land says");
+  }
+  return g_path != 0;
+}
+
 bool ClimbOn() {
   if (g_climb < 0) {
     g_climb = IniInt("move_stick_climb", 1) != 0 ? 1 : 0;
@@ -2879,7 +2898,10 @@ void FlyPress() {
   const bool placed =
       HandDirectHandPosition(at, &by_controller) && by_controller;
   const bool waits = TextClickOn() && TextClickFlag();
-  const bool command = Usable() && DirectHandNow() && g_pointer_owned &&
+  // With left_leash=1 the trigger of the other hand commands the Creature,
+  // and this trigger takes.
+  const bool command = !ControllersLeftLeash() && Usable() &&
+                       DirectHandNow() && g_pointer_owned &&
                        !g_jump_control && !g_gesture_held &&
                        !TeleportAiming() && CreatureCommandWouldClaim();
   const bool far_target = FarGrabHasTarget();
@@ -2936,9 +2958,29 @@ void PollControlsKey() {
   if (back_pressed && GameInFront()) {
     ControllersClimbToggle("Ctrl, Shift and the backslash key");
   }
+  // Ctrl, Shift and 0 of the number pad: move_stick_path.
+  static bool zero_before = false;
+  const bool zero = (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool zero_pressed = zero && !zero_before;
+  zero_before = zero;
+  if (zero_pressed && GameInFront()) {
+    ControllersPathToggle("Ctrl, Shift and 0 of the number pad");
+  }
   if (!pressed || !GameInFront()) return;
   ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
 }
+
+// THE TRIGGER OF THE OTHER HAND WITH left_leash=1 (docs/controllers.md,
+// 5.7). The press decides: with the stick of that hand pushed for a walk it
+// is the boost, else it commands the Creature, and it keeps that job until it
+// opens.
+controller_math::GripLevel g_ltrigger_level = {};
+bool g_ltrigger_down = false;
+bool g_left_command = false;  // the press of now commands the Creature
+bool StickWalks();
+bool OtherStickPushed();
 
 void PumpButtons(ULONGLONG now) {
   const bwvr::HandInput& hand = g_hands[PointingIndex()];
@@ -3077,13 +3119,31 @@ void PumpButtons(ULONGLONG now) {
   const bool click_waits = TextClickFlag();
   const bool click_on = TextClickOn();
   bool command_claim = false;
+  // With left_leash=1 the trigger of the other hand commands (FlyPress gives
+  // the pointing trigger no command then). Its press is a command when the
+  // stick of that hand does not walk at the press.
+  const bool left_command = ControllersLeftLeash();
+  {
+    const bwvr::HandInput& other_hand = g_hands[OtherIndex()];
+    const bool was = g_ltrigger_down;
+    g_ltrigger_down =
+        other_hand.active &&
+        controller_math::GripLevelStep(&g_ltrigger_level, other_hand.trigger,
+                                       false);
+    if (!was && g_ltrigger_down) {
+      g_left_command = controller_math::OtherPressCommands(OtherStickPushed());
+    }
+    if (!g_ltrigger_down) g_left_command = false;
+  }
   {
     const bool ok = usable && DirectHandNow() && g_pointer_owned &&
                     (!g_swap_buttons || FlyScheme()) && !GrabHeld() &&
-                    !far_claim &&
+                    (left_command || !far_claim) &&
                     !g_jump_control && !g_gesture_held && !TeleportAiming() &&
                     text_click_math::TriggerMayCommand(click_on, click_waits);
-    command_claim = CreatureCommandPumpTrigger(RawDown(kLeft), ok);
+    const bool trigger =
+        left_command ? g_ltrigger_down && g_left_command : RawDown(kLeft);
+    command_claim = CreatureCommandPumpTrigger(trigger, ok) && !left_command;
     // A SEED IN THE HAND. While the Hand carries a one-off seed, a press of
     // the trigger makes the seed active and does not reach the game
     // (miracle.cpp).
@@ -3386,6 +3446,16 @@ bool StickWalks() {
          !RadialMenuStickDrives();
 }
 
+// The stick of the other hand is pushed past the dead zone of the walk, and
+// it has the job of the walk.
+bool OtherStickPushed() {
+  const bwvr::HandInput& hand = g_hands[OtherIndex()];
+  float push[2];
+  return hand.active && StickLive(hand) && StickWalks() &&
+         walk_math::Push(hand.stick[0], hand.stick[1], kStickBack, kStickFull,
+                         push) > 0.0f;
+}
+
 // The first reason that a push of the stick does not move the player now, or
 // null. The game's switch for the drag of the land is not in this list:
 // TabletopGodWalk tests it.
@@ -3440,9 +3510,13 @@ void PumpWalk() {
         if (g_boost_pct < 100) g_boost_pct = 100;
         if (g_boost_pct > 2000) g_boost_pct = 2000;
       }
-      boost = walk_math::Boost(hand.trigger, g_boost_pct * 0.01f);
+      // A press of the trigger that commands the Creature is no boost.
+      if (!g_left_command) {
+        boost = walk_math::Boost(hand.trigger, g_boost_pct * 0.01f);
+      }
     }
-    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost, climb)) {
+    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost, climb,
+                         FlyScheme() && PathOn())) {
       why = "the game does not allow a drag of the land now";
     }
   }
@@ -4590,15 +4664,18 @@ bool ControllersTeleportInput(TeleportInput* out) {
 }
 
 namespace {
-// The aim of this frame: have_aim, the aim in the room, and the map to the
-// world. Called once a frame from ControllersFrame.
-void LatchFrameAim() {
-  TeleportInput* out = &g_frame_aim;
+// The aim of the hand that does not point, for the commands of the Creature
+// with left_leash=1 (ControllersCommandInput).
+TeleportInput g_other_aim = {};
+bool g_other_aim_seen_tracked = false;
+
+// The aim of one hand in this frame: have_aim, the aim in the room, and the
+// map to the world.
+void LatchAimOf(int index, TeleportInput* out, bool* seen_tracked) {
   memset(out, 0, sizeof(*out));
-  const int index = PointingIndex();
   const bwvr::HandInput& hand = g_hands[index];
   if (!hand.active || !hand.aim_valid) return;
-  if (!Tracked(hand.aim_tracked, &g_tele_seen_tracked)) return;
+  if (!Tracked(hand.aim_tracked, seen_tracked)) return;
   float head[9], lean[3], room[9], game_position[3], focus[3], t_head[3];
   if (!HeadPoseCurrent(head, lean) || !HeadCameraStageBasis(room) ||
       !HeadCameraGameCamera(game_position, focus) ||
@@ -4641,17 +4718,18 @@ void LatchFrameAim() {
   for (int i = 0; i < 9; ++i) out->map[i] = room[i] * out->units_per_meter;
   out->have_aim = true;
 }
-}  // namespace
 
-// THE RAY OF A FAR GRAB (docs/grab.md, "The grab from a distance"): the aim
-// pose of the pointing hand in the world, as the teleport takes it. The origin
-// is the aim point, the direction is a unit vector, and units is the world
-// units in a meter of the room. eye is the eye in the world. False when the
-// aim is not known.
-bool ControllersFarRay(float origin[3], float direction[3], float* units,
-                       float eye[3]) {
-  TeleportInput in;
-  if (!ControllersTeleportInput(&in) || !in.have_aim) return false;
+// Once a frame from ControllersFrame: the aim of the pointing hand (the
+// teleport, the far grab) and of the other hand.
+void LatchFrameAim() {
+  LatchAimOf(PointingIndex(), &g_frame_aim, &g_tele_seen_tracked);
+  LatchAimOf(OtherIndex(), &g_other_aim, &g_other_aim_seen_tracked);
+}
+
+// A ray in the world from the aim of a frame.
+bool RayOf(const TeleportInput& in, float origin[3], float direction[3],
+           float* units, float eye[3]) {
+  if (!in.have_aim) return false;
   float world[3];
   for (int i = 0; i < 3; ++i) {
     origin[i] = in.base[i] + in.map[i * 3 + 0] * in.origin_m[0] +
@@ -4667,6 +4745,41 @@ bool ControllersFarRay(float origin[3], float direction[3], float* units,
   *units = in.units_per_meter;
   for (int i = 0; i < 3; ++i) eye[i] = in.eye[i];
   return true;
+}
+}  // namespace
+
+// THE RAY OF A FAR GRAB (docs/grab.md, "The grab from a distance"): the aim
+// pose of the pointing hand in the world, as the teleport takes it. The origin
+// is the aim point, the direction is a unit vector, and units is the world
+// units in a meter of the room. eye is the eye in the world. False when the
+// aim is not known.
+bool ControllersFarRay(float origin[3], float direction[3], float* units,
+                       float eye[3]) {
+  TeleportInput in;
+  if (!ControllersTeleportInput(&in)) return false;
+  return RayOf(in, origin, direction, units, eye);
+}
+
+bool ControllersCommandInput(TeleportInput* out) {
+  if (!ControllersLeftLeash()) return ControllersTeleportInput(out);
+  memset(out, 0, sizeof(*out));
+  if (!g_on || g_frame == 0) return false;
+  *out = g_other_aim;
+  const bwvr::HandInput& hand = g_hands[OtherIndex()];
+  out->hand = hand.active;
+  out->usable = Usable();
+  out->grab_held = GrabHeld();
+  out->gesture_held = g_gesture_held;
+  out->frame = g_frame;
+  if (!hand.active || !hand.aim_valid) out->have_aim = false;
+  return true;
+}
+
+bool ControllersCommandRay(float origin[3], float direction[3], float* units,
+                           float eye[3]) {
+  TeleportInput in;
+  if (!ControllersCommandInput(&in)) return false;
+  return RayOf(in, origin, direction, units, eye);
 }
 
 // Whether the pointing hand may act on a far object now: it can act, the
@@ -4696,6 +4809,34 @@ bool ControllersFarAllowed(const char** why) {
   }
   if (RawDown(kLeft) || ((g_game_mask | g_mouse_mask | g_ctrl_mask) & 1) != 0) {
     *why = "the trigger is down";
+    return false;
+  }
+  return true;
+}
+
+bool ControllersCommandAllowed(const char** why) {
+  if (!ControllersLeftLeash()) return ControllersFarAllowed(why);
+  // The pointing trigger may take or carry an object while the other hand
+  // commands, so only the tests of the hands and of the view count.
+  *why = "";
+  if (!g_on || !DirectHandNow()) {
+    *why = "the direct hand is off";
+    return false;
+  }
+  if (!Usable()) {
+    *why = "the hand cannot act now";
+    return false;
+  }
+  if (!g_pointer_owned) {
+    *why = "the mouse owns the pointer";
+    return false;
+  }
+  if (GrabHeld()) {
+    *why = "a grip holds the world";
+    return false;
+  }
+  if (g_jump_control || g_gesture_held || TeleportAiming()) {
+    *why = "a jump, a gesture or a teleport runs";
     return false;
   }
   return true;
@@ -4933,6 +5074,15 @@ void ControllersButtonLayoutToggle(const char* by) {
 bool ControllersFly() { return g_on && FlyScheme(); }
 
 bool ControllersLeftLeash() { return g_on && FlyScheme() && LeftLeashOn(); }
+
+void ControllersPathToggle(const char* by) {
+  if (!g_on) return;
+  g_path = PathOn() ? 0 : 1;
+  g_walk_blocked = true;
+  ControllersGrabPulse(1, 0.5f, g_path != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: move_stick_path=%d, frame %llu", by, g_path,
+         g_frame);
+}
 
 void ControllersClimbToggle(const char* by) {
   if (!g_on) return;

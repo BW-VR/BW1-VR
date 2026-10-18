@@ -542,6 +542,17 @@ bool Active(Facts* f) {
   return ReadFacts(f);
 }
 
+// The point that the commands measure from: the Hand's point, or with
+// left_leash=1 the aim point of the hand that does not point.
+bool CommandHand(float out[3], bool* by_controller) {
+  if (ControllersLeftLeash()) {
+    float direction[3], eye[3], units = 0.0f;
+    *by_controller = true;
+    return ControllersCommandRay(out, direction, &units, eye);
+  }
+  return HandDirectHandPosition(out, by_controller);
+}
+
 // The leash is on the player's Creature and the Hand holds it: the game's own
 // tests for a command (0x005D3D38 to 0x005D3D61). With the test key the leash
 // counts as on.
@@ -879,14 +890,20 @@ void PollRuleKey() {
 // Why a press is not a command, or null. Silent reasons give "". While the
 // leash is tied to an object, a press is a command only with the aim on that
 // object or on the Creature: it takes the leash back.
+//
+// With the commands on the hand that does not point (left_leash=1) the Hand
+// of the game is free for the other jobs: it may hold an object and touch
+// the Creature. The handlers of the packets of the commands have no test of
+// the Hand (docs/creature.md, 1.4).
 const char* Refuse(const Facts& f, bool have) {
   if (!have) return "";
   if (!Leashed(f) && !(Tied(f) && g_target.kind != kTargetNone)) return "";
-  if (f.hand_state != kStateNormal) {
+  const bool left = ControllersLeftLeash();
+  if (!left && f.hand_state != kStateNormal) {
     return "the Hand is not in its Normal state";
   }
-  if (!f.hand_empty) return "the Hand holds an object";
-  if (f.creature != nullptr &&
+  if (!left && !f.hand_empty) return "the Hand holds an object";
+  if (!left && f.creature != nullptr &&
       (f.under == f.creature || f.next == f.creature)) {
     return "the Hand is on the Creature, so the press is the touch";
   }
@@ -1262,7 +1279,7 @@ void EvaluateLand(const TeleportInput& in) {
 // is kept for a tap.
 void AimLand() {
   TeleportInput in;
-  if (ControllersTeleportInput(&in) && in.have_aim) {
+  if (ControllersCommandInput(&in) && in.have_aim) {
     SmoothAim(&in, g_aim_reset);
     g_aim_reset = false;
     EvaluateLand(in);
@@ -1314,7 +1331,7 @@ void ShakeFrame(const Facts& f, bool have, bool leashed) {
     why = "the Hand is not empty in its Normal state";
   } else if (g_claim) {
     why = "the trigger holds a command";
-  } else if (!ControllersFarAllowed(&allowed)) {
+  } else if (!ControllersCommandAllowed(&allowed)) {
     why = allowed;
   }
   if (why != nullptr) {
@@ -1439,8 +1456,8 @@ bool CreatureCommandTestPoint(float out[3]) {
   Facts f;
   float origin[3], direction[3], eye[3], hand[3], units = 0.0f;
   bool by_controller = false;
-  if (!Active(&f) || !ControllersFarRay(origin, direction, &units, eye) ||
-      !(units > 0.0f) || !HandDirectHandPosition(hand, &by_controller)) {
+  if (!Active(&f) || !ControllersCommandRay(origin, direction, &units, eye) ||
+      !(units > 0.0f) || !CommandHand(hand, &by_controller)) {
     return false;
   }
   const bool tied = Tied(f);
@@ -1514,8 +1531,8 @@ void CreatureCommandSelect() {
   const bool tied = Tied(f);
   float origin[3], direction[3], eye[3], hand[3], units = 0.0f;
   bool by_controller = false;
-  if (!ControllersFarRay(origin, direction, &units, eye) || !(units > 0.0f) ||
-      !HandDirectHandPosition(hand, &by_controller)) {
+  if (!ControllersCommandRay(origin, direction, &units, eye) || !(units > 0.0f) ||
+      !CommandHand(hand, &by_controller)) {
     return;
   }
   const command_math::AimRule rule = AimRuleNow();
@@ -1695,7 +1712,10 @@ void CreatureCommandSelect() {
   {
     void* object = nullptr;
     float at[3];
-    if (HandDirectNearObject(&object, at) && object != f.creature &&
+    // With left_leash=1 the object at the Hand is for the take of the
+    // pointing trigger, not for a command.
+    if (!ControllersLeftLeash() && HandDirectNearObject(&object, at) &&
+        object != f.creature &&
         ValidTarget(object) && (!tied || object == f.leash_object) &&
         (only == nullptr || object == only)) {
       at_hand = count;
@@ -2047,12 +2067,13 @@ void CreatureCommandFrame() {
   const char* why = "";
   if (!leashed && !tied) {
     g_live_why = "the leash is not on the Hand";
-  } else if (f.hand_state != kStateNormal || !f.hand_empty) {
+  } else if (!ControllersLeftLeash() &&
+             (f.hand_state != kStateNormal || !f.hand_empty)) {
     g_live_why = "the Hand is not empty in its Normal state";
   } else if (g_claim) {
     g_live = g_press != command_math::kPressNone;
     g_live_why = "a press runs";
-  } else if (!ControllersFarAllowed(&why)) {
+  } else if (!ControllersCommandAllowed(&why)) {
     g_live_why = why;
   } else {
     g_live = true;
@@ -2158,8 +2179,8 @@ void CreatureCommandFrame() {
     float hand[3];
     bool by_controller = false;
     float origin[3], direction[3], eye[3], units = 0.0f;
-    if (HandDirectHandPosition(hand, &by_controller) &&
-        ControllersFarRay(origin, direction, &units, eye) && units > 0.0f) {
+    if (CommandHand(hand, &by_controller) &&
+        ControllersCommandRay(origin, direction, &units, eye) && units > 0.0f) {
       g_halo.active = true;
       g_halo.valid = true;
       g_halo.locked = false;

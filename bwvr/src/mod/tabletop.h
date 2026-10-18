@@ -171,9 +171,12 @@ int TabletopGodZoomAboutValue();
 // off, the God view does not own the view, or the game's switch for the drag
 // of the land is off. The push must then come back before it asks again.
 // boost multiplies the speed of the frame (controls=1, walk_math::Boost). It
-// is 1 with no trigger.
+// is 1 with no trigger. climb is the share of the climb from the tilt of the
+// controller of the stick (controls=1, walk_math::ClimbShare), -1 to 1, and 0
+// for no climb.
 int TabletopGodMoveStick();
-bool TabletopGodWalk(const float push[2], const float* aim, float boost);
+bool TabletopGodWalk(const float push[2], const float* aim, float boost,
+                     float climb);
 
 // THE SWITCH OF A MOVE OVER THE LAND. True while the game's switch for the
 // drag of the land is on (bit 8 of CameraHelp::EnabledFeatures). The grab,

@@ -408,6 +408,32 @@ inline void WalkChecks() {
          fabsf(a.center[1] - b.center[1]), 0.0, 1e-6);
   }
 
+  // THE CLIMB (controls=1): the share of the tilt and the limits.
+  Near("a level controller does not climb", ClimbShare(0.0f), 0.0, 1e-6);
+  Near("a tilt of 8 degrees is in the dead zone",
+       ClimbShare(sinf(8.0f * 3.14159265f / 180.0f)), 0.0, 1e-6);
+  Near("straight up is the full climb", ClimbShare(1.0f), 1.0, 1e-6);
+  Near("straight down is the full descent", ClimbShare(-1.0f), -1.0, 1e-6);
+  Near("half way from the dead zone to straight up is half the climb",
+       ClimbShare(0.5f * (1.0f + kClimbDead)), 0.5, 1e-5);
+  {
+    const ClimbStep a = Climb(0.6f, 0.1f, 0.1f, 2.5f);
+    Near("a climb inside the limits lifts the head, m", a.lift, 0.1, 1e-6);
+    Near("and does not zoom", a.ratio, 1.0, 1e-6);
+    const ClimbStep b = Climb(2.4f, 0.6f, 0.1f, 2.5f);
+    Near("a climb past the top lifts to the top, m", b.lift, 0.1, 1e-5);
+    Near("and zooms out by the rest: (2.5 + 0.5) / 2.5", b.ratio, 1.2, 1e-5);
+    const ClimbStep c = Climb(2.5f, 0.25f, 0.1f, 2.5f);
+    Near("at the top a climb is only a zoom out, m", c.lift, 0.0, 1e-6);
+    Near("of (2.5 + 0.25) / 2.5", c.ratio, 1.1, 1e-5);
+    const ClimbStep d = Climb(0.15f, -0.2f, 0.1f, 2.5f);
+    Near("a descent stops at the bottom, m", d.lift, -0.05, 1e-5);
+    Near("and never zooms in", d.ratio, 1.0, 1e-6);
+    const ClimbStep e = Climb(1.0f, -0.2f, 0.1f, 2.5f);
+    Near("a descent inside the limits lowers the head, m", e.lift, -0.2,
+         1e-6);
+  }
+
   // THE HEIGHT OF ONE HAND (GrabVertical).
   Check(GrabVertical(true, false, true), "with controls=0 one hand moves the "
         "height also after two hands", 1, 1);

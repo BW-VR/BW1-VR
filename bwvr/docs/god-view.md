@@ -756,7 +756,8 @@ event.
   hill. A step that brings the land no nearer goes on, so the player can
   turn away or climb with the tilt. The line of the end of a walk counts
   the frames in which the land stopped the step. With `test_keys=1`, Ctrl,
-  Shift and 0 of the number pad change `move_stick_path`. With
+  Shift and the grave accent key (on a German keyboard the key with the
+  letter O with two dots) change `move_stick_path`. With
   `controls=0`, or with `move_stick_path=0`, the walk follows the land as
   `move_stick_follow_land` says.
 - **The climb** (`controls=1` and `move_stick_climb=1`). The tilt of the

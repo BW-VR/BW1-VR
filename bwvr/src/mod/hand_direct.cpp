@@ -9144,6 +9144,26 @@ bool HandDirectClaimFree(const char** why) {
   return true;
 }
 
+// For the take with the trigger of the other hand (controllers.cpp,
+// left_take): the Hand is not free for a new take. It is not in its Normal
+// state, or it holds an object.
+bool HandDirectHandBusy() {
+  if (!g_installed || !g_owns || g_hand == nullptr) return false;
+  return State(g_hand) != kStateNormal || !HandEmpty();
+}
+
+// For the take with the trigger of the other hand: the Hand is empty and in
+// its Normal state, and a press at its point acts on an object. These are
+// the tests of HandDirectClaimFree that find an object.
+bool HandDirectTakeTarget() {
+  if (!g_installed || !g_owns || g_hand == nullptr || g_face == nullptr) {
+    return false;
+  }
+  if (State(g_hand) != kStateNormal || !HandEmpty()) return false;
+  return g_choice != nullptr || g_near_blocked ||
+         *reinterpret_cast<void* const*>(g_face + kFaceObject) != nullptr;
+}
+
 // For the grip (controllers.cpp, docs/grab.md, "The grip holds"): what the
 // grip needs to know of the Hand, read now, at the pump after the frame.
 // holding: the Holding state with an object that is no Miracle. settled: the

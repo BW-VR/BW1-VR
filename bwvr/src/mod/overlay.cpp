@@ -270,6 +270,9 @@ float g_index_tip[kHands][3];
 float g_trigger[kHands] = {0.0f, 0.0f};
 float g_squeeze[kHands] = {0.0f, 0.0f};
 int g_pointing = 1;
+// The hand of the leash. It is the other hand, also while the trigger of
+// that hand borrows the pointer for a take (controllers.cpp, left_take).
+int g_free_hand = 0;
 float g_units_per_meter = 0.0f;
 float g_length = 0.0f;
 // The index tip on the screen in each eye, for each hand.
@@ -576,6 +579,7 @@ bool BuildFrame() {
     }
   }
   g_pointing = hands.pointing;
+  g_free_hand = hands.free_hand;
   g_units_per_meter = hands.units_per_meter;
   g_length = ControllersHandCm() * 0.01f * ControllersHandScalePct() * 0.01f *
              hands.units_per_meter;
@@ -767,7 +771,7 @@ uint64_t g_band_frames = 0;
 
 void BuildWristBand() {
   if (!HandDirectLeashBandLeft()) return;
-  const int hand = 1 - g_pointing;
+  const int hand = g_free_hand;
   if (hand < 0 || hand >= kHands) return;
   const HandPlace& place = g_hand_place[hand];
   if (!place.have || place.frame != g_frame) return;
@@ -1180,7 +1184,7 @@ int OverlayEyeTriangles(int eye) {
 }
 
 bool OverlayOtherWrist(float out[3]) {
-  const int hand = 1 - g_pointing;
+  const int hand = g_free_hand;
   if (hand < 0 || hand >= kHands) return false;
   const HandPlace& place = g_hand_place[hand];
   if (!place.have || g_frame > place.frame + 1) return false;

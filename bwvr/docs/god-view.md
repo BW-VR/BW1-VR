@@ -748,6 +748,17 @@ event.
   walk stops in the frame in which the stick comes back, as with no boost.
   The line of the end of a walk gives the largest factor of the walk. With
   `controls=0` the trigger of that hand has no job.
+- **The path of a flight** (`controls=1` and `move_stick_path=1`). The view
+  keeps its height in the world while the stick walks: there is no follow
+  of the land, so the view does not go up and down over hills. When the
+  land under the head would come nearer than 10 cm below the head, the step
+  ends before that place (`PathShare` in `walk_math.h`): the player hits the
+  hill. A step that brings the land no nearer goes on, so the player can
+  turn away or climb with the tilt. The line of the end of a walk counts
+  the frames in which the land stopped the step. With `test_keys=1`, Ctrl,
+  Shift and 0 of the number pad change `move_stick_path`. With
+  `controls=0`, or with `move_stick_path=0`, the walk follows the land as
+  `move_stick_follow_land` says.
 - **The climb** (`controls=1` and `move_stick_climb=1`). The tilt of the
   controller of the stick moves the player up and down while the stick
   pushes forward, at the speed of the walk (with the boost). The share is 0
@@ -759,8 +770,9 @@ event.
   the world gets smaller as if the head went up by the rest
   (`Climb` in `walk_math.h`, ratio = (2.5 m + rest) / 2.5 m). The zoom keeps
   to the game's switch of the zoom and to the scale limits. The climb never
-  zooms in. The follow of the land still acts in a climb, so on a slope the
-  land under the head can be some cm past 2.5 m for a moment. The line of
+  zooms in. With `move_stick_path=0` the follow of the land acts in a
+  climb, so on a slope the land under the head can be some cm past 2.5 m
+  for a moment. The line of
   the end of a walk gives the climb and the zoom of the walk. With
   `test_keys=1`, Ctrl, Shift and the backslash key change
   `move_stick_climb` (on a German keyboard the key with the caret).
@@ -773,6 +785,7 @@ event.
 | `move_stick` | 1 | 0: the stick does not move the player. 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Move with the other stick" |
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed at a full pull of the trigger of the hand of the stick, in percent of the speed with no trigger, 100 to 2000 |
+| `move_stick_path` | 1 | With `controls=1`: 1 the flight keeps its height and stops at the land, with no follow of the land. 0 the walk follows the land as `move_stick_follow_land` says |
 | `move_stick_climb` | 1 | With `controls=1`: 1 the tilt of the controller of the stick moves the player up and down, and past the top limit the world gets smaller. 0 the walk keeps the height |
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
 | `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. The launcher row "Walk follows the land" |

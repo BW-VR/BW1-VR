@@ -796,7 +796,13 @@ each of these is true:
   hidden.
 
 In each other case the game's point stays, and the log says why (8 lines at
-most). The hook goes in only when the first 13 bytes of the function are the
+most).
+
+With `controls=1` and `left_leash=1` the leash is a job of the hand that
+does not point (`controllers.md`, 5.7). The hook then writes the middle of
+the wrist of that hand, as the overlay drew it (`OverlayOtherWrist`,
+`overlay_math::kWristPoint`), for a leash on the Hand. The log line says
+`the rope ends at the wrist of the hand that does not point`. The hook goes in only when the first 13 bytes of the function are the
 bytes of the disassembly. `leash_at_palm=0` leaves the hook out. Tag `leash`
 gives one line each time the leash comes on, with the palm, the distance from
 the game's point to it, and how far that point is below it. No desktop run can

@@ -434,6 +434,22 @@ inline void WalkChecks() {
          1e-6);
   }
 
+  // THE PATH OF A FLIGHT (PathShare). The land under the head rises from
+  // 0.6 m below the head to 0 m over the step, so it is 0.1 m below at 5/6.
+  {
+    const auto hill = [](float t) { return 0.6f - 0.6f * t; };
+    Near("a step into a hill ends where the land is 10 cm below the head",
+         PathShare(hill, 0.1f), 5.0 / 6.0, 2e-3);
+    const auto flat = [](float t) { return 0.6f + 0.0f * t; };
+    Near("a step over flat land is whole", PathShare(flat, 0.1f), 1.0, 1e-6);
+    const auto away = [](float t) { return 0.05f + 0.3f * t; };
+    Near("from too near, a step away from the land is whole",
+         PathShare(away, 0.1f), 1.0, 1e-6);
+    const auto nearer = [](float t) { return 0.05f - 0.01f * t; };
+    Near("from too near, a step that comes nearer is not taken",
+         PathShare(nearer, 0.1f), 0.0, 1e-6);
+  }
+
   // THE HEIGHT OF ONE HAND (GrabVertical).
   Check(GrabVertical(true, false, true), "with controls=0 one hand moves the "
         "height also after two hands", 1, 1);

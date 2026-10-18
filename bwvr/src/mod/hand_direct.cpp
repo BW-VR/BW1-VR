@@ -210,6 +210,9 @@ bool HandExactPalm(float out[3], uint64_t* frame, int32_t* state);
 // controllers.cpp: the grab from a distance (docs/grab.md, "The grab from a
 // distance"). The aim ray in the world, and whether the pointing hand may act
 // on a far object now.
+// overlay.cpp: the middle of the wrist of the hand that does not point, as
+// it was drawn last. False when it was not drawn in the last two frames.
+bool OverlayOtherWrist(float out[3]);
 bool ControllersFarRay(float origin[3], float direction[3],
                        float* units_per_meter, float eye[3]);
 bool ControllersFarAllowed(const char** why);
@@ -6467,6 +6470,9 @@ int __fastcall h_PickStep(void* self, void* unused) {
 // once a frame, so each call of a frame gets the same point. With the mouse,
 // with the game's mesh shown, for the leash of another player and for a leash
 // that is tied to an object, the game's point stays.
+uint64_t g_leash_wrist_last = 0;
+int g_leash_wrist_logs = 0;
+
 void __fastcall h_LeashStart(void* self, void* unused, float* out,
                              int from_status) {
   o_LeashStart(self, unused, out, from_status);
@@ -6481,6 +6487,28 @@ void __fastcall h_LeashStart(void* self, void* unused, float* out,
       *reinterpret_cast<uint8_t* const*>(status + kStatusLeash);
   if (leash == nullptr ||
       *reinterpret_cast<void* const*>(leash + kLeashObject) != nullptr) {
+    return;
+  }
+  // THE LEASH ON THE OTHER HAND (left_leash=1, docs/controllers.md, 5.7):
+  // X of the hand that does not point puts the leash on, and that hand
+  // commands the Creature, so the rope ends at the middle of its wrist, as
+  // the overlay drew it.
+  if (ControllersLeftLeash()) {
+    float wrist[3];
+    if (!OverlayOtherWrist(wrist)) return;
+    const bool fresh = g_frame > g_leash_wrist_last + 90;
+    g_leash_wrist_last = g_frame;
+    if (fresh && g_leash_wrist_logs < kMaxLeashLogs) {
+      ++g_leash_wrist_logs;
+      const float units = RoomUnits();
+      ModLog("leash        : the rope ends at the wrist of the hand that does "
+             "not point, %.1f %.1f %.1f, %.1f cm of the room from the wrist "
+             "bone of the game's Hand (left_leash=1), frame %llu",
+             wrist[0], wrist[1], wrist[2],
+             units > 0.0f ? Distance(out, wrist) / units * 100.0f : 0.0f,
+             g_frame);
+    }
+    for (int i = 0; i < 3; ++i) out[i] = wrist[i];
     return;
   }
   if (g_leash_frame != g_frame) {

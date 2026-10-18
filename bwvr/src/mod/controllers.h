@@ -188,11 +188,15 @@ bool ControllersLeftLeash();
 // test_keys=1): the tilt of the controller of the stick moves the player up
 // and down in the walk with controls=1.
 void ControllersClimbToggle(const char* by);
-// The test key of move_stick_path (Ctrl, Shift and 0 of the number pad, with
+// The test key of move_stick_path (Ctrl, Shift and the grave accent key, with
 // test_keys=1): with controls=1 the flight keeps its height and stops at the
 // land, or it follows the land.
 void ControllersPathToggle(const char* by);
 void ControllersLeftLeashToggle(const char* by);
+// The test key of left_take (Ctrl, Shift and the less than key, with
+// test_keys=1): with controls=1 the trigger of the hand that does not point
+// takes as the trigger of the pointing hand does (docs/controllers.md, 5.7).
+void ControllersLeftTakeToggle(const char* by);
 // The grip point of the hand that does not point in the room, in game units
 // as ControllerDirectMotion gives the grip of the pointing hand. False while
 // that hand is not tracked or the direct hand does not act.
@@ -214,6 +218,7 @@ struct OverlayHand {
 struct OverlayHands {
   OverlayHand hand[2];     // 0 the left hand, 1 the right hand
   int pointing;            // the hand that holds the pointer
+  int free_hand;           // the hand of the leash and the walk
   float units_per_meter;   // world units in a meter of the room, at the scale now
   unsigned long long frame;  // the controllers frame
 };

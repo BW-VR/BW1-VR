@@ -6105,6 +6105,70 @@ int __fastcall h_PickStep(void* self, void* unused) {
 uint64_t g_leash_wrist_last = 0;
 int g_leash_wrist_logs = 0;
 
+// THE BAND OF THE LEASH ON THE OTHER HAND (left_leash=1): the leash is on
+// the Hand (not tied to an object), and the Hand holds no miracle. Then the
+// overlay draws a band around the wrist of the other hand.
+bool LeashBandLeft() {
+  if (!ControllersLeftLeash() || !g_owns || g_face == nullptr ||
+      g_hand == nullptr || State(g_hand) == kStateGrain) {
+    return false;
+  }
+  const uint8_t* status =
+      *reinterpret_cast<uint8_t* const*>(g_face + kFaceStatus);
+  if (status == nullptr) return false;
+  const uint8_t* leash =
+      *reinterpret_cast<uint8_t* const*>(status + kStatusLeash);
+  return leash != nullptr &&
+         *reinterpret_cast<const int32_t*>(leash + kLeashOn) != 0 &&
+         *reinterpret_cast<void* const*>(leash + kLeashObject) == nullptr;
+}
+
+// THE RING OF THE LEASH AT THE GAME'S HAND. While the leash is on the Hand,
+// the game draws a ring of the mesh Data\MISC\leash.l3d (one of the three
+// meshes that fn_004645D0 loads to 0x00C5E3D8, one for each kind) as an
+// LH3DStaticObject a little over its Hand, through the draw of an object
+// fn_0080DB30 (thiscall, the object). The object keeps its mesh at +0x7C and
+// its place at +0x38. With the leash on the other hand (left_leash=1) that
+// ring is not drawn: the overlay draws the band around the wrist of the
+// other hand (overlay.cpp, BuildWristBand). The posts of the leash at the
+// Temple have the same meshes, so only an object near the game's Hand
+// counts.
+const uintptr_t kObjectDraw = 0x0080DB30;
+const uintptr_t kLeashMeshes = 0x00C5E3D8;
+const int kStaticMesh = 0x7C;
+const int kStaticPlace = 0x38;
+typedef void(__fastcall* ObjectDrawFn)(void* object, void* unused);
+ObjectDrawFn o_ObjectDraw = nullptr;
+uint64_t g_ring_hidden = 0;
+bool g_ring_said = false;
+
+bool HandLeashRing(const uint8_t* object) {
+  if (object == nullptr || IsBadReadPtr(object, kStaticMesh + 4)) return false;
+  const void* mesh = *reinterpret_cast<void* const*>(object + kStaticMesh);
+  if (mesh == nullptr) return false;
+  const void* const* meshes = reinterpret_cast<const void* const*>(kLeashMeshes);
+  if (mesh != meshes[0] && mesh != meshes[1] && mesh != meshes[2]) {
+    return false;
+  }
+  const float* place = reinterpret_cast<const float*>(object + kStaticPlace);
+  const float units = RoomUnits();
+  return units > 0.0f && Distance(place, g_target) < 0.6f * units;
+}
+
+void __fastcall h_ObjectDraw(void* object, void* unused) {
+  if (LeashBandLeft() && HandLeashRing(static_cast<const uint8_t*>(object))) {
+    ++g_ring_hidden;
+    if (!g_ring_said) {
+      g_ring_said = true;
+      ModLog("leash        : the ring of the leash at the game's Hand is not "
+             "drawn, and the overlay draws the band at the other wrist "
+             "(left_leash=1), frame %llu", g_frame);
+    }
+    return;
+  }
+  o_ObjectDraw(object, unused);
+}
+
 void __fastcall h_LeashStart(void* self, void* unused, float* out,
                              int from_status) {
   o_LeashStart(self, unused, out, from_status);
@@ -7304,6 +7368,19 @@ void InstallNear() {
   Hook(kGetLeashStartPoint, reinterpret_cast<void*>(&h_LeashStart),
        reinterpret_cast<void**>(&o_LeashStart),
        "GInterface::GetLeashStartPoint (the leash at the mod's hand)");
+  static const uint8_t kObjectDrawBytes[10] = {0x83, 0xEC, 0x0C, 0x8B, 0x15,
+                                               0x88, 0x1A, 0xEA, 0x00, 0x53};
+  const void* draw = reinterpret_cast<const void*>(kObjectDraw);
+  if (IsBadReadPtr(draw, sizeof(kObjectDrawBytes)) ||
+      memcmp(draw, kObjectDrawBytes, sizeof(kObjectDrawBytes)) != 0) {
+    ModLog("hooks        : the draw of an object at 0x%08X does not have the "
+           "bytes of the disassembly, so the ring of the leash stays at the "
+           "game's Hand", static_cast<unsigned>(kObjectDraw));
+    return;
+  }
+  Hook(kObjectDraw, reinterpret_cast<void*>(&h_ObjectDraw),
+       reinterpret_cast<void**>(&o_ObjectDraw),
+       "the draw of an object (the ring of the leash on the other hand)");
 }
 
 }  // namespace
@@ -8360,6 +8437,9 @@ bool HandDirectHandPosition(float out[3], bool* by_controller) {
 // Normal state, empty, and over nothing it can hold, by the mod's own pick
 // and by the game's. These are from the last frame, which is the frame the
 // player saw. why says the first reason for a no.
+bool HandDirectLeashBandLeft() { return g_installed && LeashBandLeft(); }
+
+
 bool HandDirectClaimFree(const char** why) {
   if (!g_installed || !g_owns || g_hand == nullptr || g_face == nullptr) {
     *why = "the controller does not place the Hand";
@@ -8391,6 +8471,26 @@ bool HandDirectClaimFree(const char** why) {
   }
   *why = "the Hand is empty and over nothing it can hold";
   return true;
+}
+
+// For the take with the trigger of the other hand (controllers.cpp,
+// left_take): the Hand is not free for a new take. It is not in its Normal
+// state, or it holds an object.
+bool HandDirectHandBusy() {
+  if (!g_installed || !g_owns || g_hand == nullptr) return false;
+  return State(g_hand) != kStateNormal || !HandEmpty();
+}
+
+// For the take with the trigger of the other hand: the Hand is empty and in
+// its Normal state, and a press at its point acts on an object. These are
+// the tests of HandDirectClaimFree that find an object.
+bool HandDirectTakeTarget() {
+  if (!g_installed || !g_owns || g_hand == nullptr || g_face == nullptr) {
+    return false;
+  }
+  if (State(g_hand) != kStateNormal || !HandEmpty()) return false;
+  return g_choice != nullptr || g_near_blocked ||
+         *reinterpret_cast<void* const*>(g_face + kFaceObject) != nullptr;
 }
 
 // For the grip (controllers.cpp, docs/grab.md, "The grip holds"): what the

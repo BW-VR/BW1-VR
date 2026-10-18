@@ -601,7 +601,7 @@ section 7 for the size of the exact Hand.
 | `hand_reach_start_cm` | 35 | The Hand follows the controller one to one up to this far from the reach anchor |
 | `hand_reach_gain` | 0 | Per meter past the start. 0 gives one to one at all distances. 215 gives the Go-Go reach: a hand 65 cm from the anchor reaches 150 units |
 | `hand_reach_anchor_down_cm` | 20 | The reach anchor is the head center at the last recenter, this far down (0 to 100) |
-| `hand_real_cm` | 19 | The length of the real hand, from the wrist to the finger tips |
+| `hand_real_cm` | 19 | The length of the real hand, from the wrist to the finger tips. The launcher row "Your hand length", 14 to 26 cm |
 | `hand_scale_pct` | 100 | The Hand's size in percent of the real hand |
 | `left_hand` | -1 | Which controller is the Hand (section 8). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller |
 | `fake_controller_points` | | Test key. A list of `right,up,forward` in cm |

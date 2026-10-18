@@ -1745,6 +1745,32 @@ bool FlyScheme() {
 // and with the pointer the trigger and the grip keep the plain buttons.
 bool FlyDirect() { return FlyScheme() && DirectHandNow(); }
 
+// THE LEASH ON THE HAND THAT DOES NOT POINT (left_leash, docs/controllers.md,
+// 5.7). With controls=1 and left_leash=1, X of that hand puts the leash on,
+// gives its next kind, and brings a tied leash back. A shake of that hand
+// takes the leash off. 0 keeps the leash on the pointing hand, as with
+// controls=0. With test_keys=1, Ctrl, Shift and the slash key change it.
+int g_left_leash = -1;
+
+void LogLeftLeash(const char* by) {
+  ModLog("controllers  : %s%sleft_leash=%d. %s", by, by[0] != 0 ? ": " : "",
+         g_left_leash,
+         g_left_leash != 0
+             ? "With controls=1, X of the hand that does not point puts the "
+               "leash on, gives its next kind and brings a tied leash back, "
+               "and a shake of that hand takes the leash off"
+             : "The leash stays with the pointing hand: X has no job, and a "
+               "shake of the pointing hand takes the leash off");
+}
+
+bool LeftLeashOn() {
+  if (g_left_leash < 0) {
+    g_left_leash = IniInt("left_leash", 1) != 0 ? 1 : 0;
+    LogLeftLeash("");
+  }
+  return g_left_leash != 0;
+}
+
 // The trigger or the grip that makes a game button, as the pump last saw it.
 bool RawDown(int button) {
   if (FlyDirect()) {
@@ -2432,7 +2458,7 @@ void LatchEsc() {
   // The first face button has no job with button_layout=1. The log says so
   // for a press, so a log from a headset session shows why nothing happened.
   const bool idle = ButtonLayout() != 0 && !index && free_hand.active &&
-                    free_hand.primary;
+                    free_hand.primary && !ControllersLeftLeash();
   if (idle && !g_idle_before && g_idle_logs < kMaxIdleLogs) {
     ++g_idle_logs;
     ModLog("controllers  : the first face button of the %s hand is down. It "
@@ -2440,6 +2466,45 @@ void LatchEsc() {
            OtherIndex() == 0 ? "left" : "right", g_frame);
   }
   g_idle_before = idle;
+}
+
+// THE BUTTON OF THE LEASH (left_leash=1 with controls=1): X of the hand that
+// does not point, once a frame, so an edge is seen once. Not with
+// button_layout=0, where the first face button opens the ring, and not on
+// an Index controller, where it is the button of the game menu. A button
+// that is down when the hand wakes is not a new press.
+bool g_leash_button_before = false;
+bool g_leash_button_active = false;
+int g_leash_button_logs = 0;
+const int kMaxLeashButtonLogs = 60;
+
+void LatchLeashButton() {
+  const bwvr::HandInput& free_hand = g_hands[OtherIndex()];
+  const bool down = free_hand.active && free_hand.primary;
+  const bool back = free_hand.active && !g_leash_button_active;
+  const bool edge = down && !g_leash_button_before && !back;
+  g_leash_button_before = down;
+  g_leash_button_active = free_hand.active;
+  if (!edge || !ControllersLeftLeash()) return;
+  if (ButtonLayout() == 0 ||
+      strstr(HandProfileOf(OtherIndex()), "index") != nullptr) {
+    return;
+  }
+  const char* why = nullptr;
+  if (!Usable()) {
+    why = "the controllers cannot act now";
+  } else if (!DirectHandNow()) {
+    why = "a dialog box or a room of the Temple is up";
+  }
+  bool acted = false;
+  const char* what = why != nullptr ? why : CreatureCommandLeashButton(&acted);
+  if (acted) PulseWith(OtherIndex(), 0.3f, 0.02f);
+  if (g_leash_button_logs < kMaxLeashButtonLogs) {
+    ++g_leash_button_logs;
+    ModLog("controllers  : X of the hand that does not point (left_leash=1): "
+           "%s%s, frame %llu", acted ? "" : "nothing goes to the game, ", what,
+           g_frame);
+  }
 }
 
 void SendEsc(bool down) {
@@ -2856,6 +2921,17 @@ void PollControlsKey() {
                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
   const bool pressed = down && !before;
   before = down;
+  // Ctrl, Shift and the slash key: left_leash. On a German keyboard the key
+  // is the one with the number sign.
+  static bool slash_before = false;
+  const bool slash = (GetAsyncKeyState(VK_OEM_2) & 0x8000) != 0 &&
+                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool slash_pressed = slash && !slash_before;
+  slash_before = slash;
+  if (slash_pressed && GameInFront()) {
+    ControllersLeftLeashToggle("Ctrl, Shift and the slash key");
+  }
   if (!pressed || !GameInFront()) return;
   ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
 }
@@ -4112,6 +4188,7 @@ void ControllersFrame() {
   LatchGesture(back);
   PollLayoutKeys();
   LatchEsc();
+  LatchLeashButton();
   RadialMenuFrame();
 }
 
@@ -4879,6 +4956,23 @@ void ControllersButtonLayoutToggle(const char* by) {
 }
 
 bool ControllersFly() { return g_on && FlyScheme(); }
+
+bool ControllersLeftLeash() { return g_on && FlyScheme() && LeftLeashOn(); }
+
+void ControllersLeftLeashToggle(const char* by) {
+  if (!g_on) return;
+  g_left_leash = LeftLeashOn() ? 0 : 1;
+  ControllersGrabPulse(1, 0.5f, g_left_leash != 0 ? 0.30f : 0.08f);
+  LogLeftLeash(by);
+}
+
+bool ControllersOtherMotion(float grip_room_out[3]) {
+  if (!g_on || !DirectHandNow() || !g_grab_have[0] || !g_grab_tracked[0]) {
+    return false;
+  }
+  for (int i = 0; i < 3; ++i) grip_room_out[i] = g_grab_room[0][i];
+  return true;
+}
 
 void ControllersControlsToggle(const char* by) {
   if (!g_on) return;

@@ -406,6 +406,15 @@ inline void TableGrabSolve(const TableGrab& a, const float table_room[3],
   }
 }
 
+// THE HEIGHT OF ONE HAND (docs/god-view.md, 5.1). In the God view one hand
+// moves the land up and down. With level_after_two (controls=1) a hand that
+// holds on after the other hand let go of a two hand grab moves the land
+// only across, until both grips are open. So a zoom in steps, with one grip
+// that opens and closes again, never lifts or drops the player.
+inline bool GrabVertical(bool god, bool level_after_two, bool had_two) {
+  return god && !(level_after_two && had_two);
+}
+
 // THE EARS ON THE TABLE (docs/tabletop.md, "The ears on the table").
 //
 // The render head is hundreds or thousands of units over the land, where the

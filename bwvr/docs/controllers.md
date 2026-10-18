@@ -913,6 +913,7 @@ The words that act on the first frame of the word only:
 | `teleportkey` | The test key of `teleport_switch` acts (`god-view.md`, section 14.6) |
 | `promptkey` | The test key of `prompt_moves` acts (`controller-hints.md`, 9.5) |
 | `controlskey` | The test key of `controls` acts (5.7) |
+| `x` | X of the left hand. With `controls=1` and `left_leash=1` it is the button of the leash (5.7) |
 
 The placement of the hand is in cm from the head center. Each pose word sets
 the position of the right hand until the next one.
@@ -1035,6 +1036,7 @@ default. Each control has one job, and one button opens the game menu.
 | `controllers` | 1 | Use tracked controllers when the headset has them |
 | `left_hand` | -1 | Which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. The launcher row "Hand" |
 | `controls` | 0 | The control scheme (5.7). 0: the tables of 5.1. 1: the grips only grab the world, the trigger of the pointing hand is the left and the right button of the game, and the trigger of the other hand makes the walk faster. The launcher row "Controls". The test key Ctrl Shift and the apostrophe key goes between the two (`test_keys=1`) |
+| `left_leash` | 1 | With `controls=1`: 1 X of the other hand is the button of the leash, and a shake of the other hand takes the leash off (5.7). 0 keeps the leash with the pointing hand. The test key Ctrl Shift and the slash key goes between the two (`test_keys=1`). Not in the launcher |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed of the walk with the stick at a full pull of the trigger of that hand, in percent of the speed with no trigger, 100 to 2000 (`god-view.md`, 5.7). Not in the launcher |
 | `controller_swap_buttons` | 0 | 1 makes the grip the left button and the trigger the right. With `controls=1` it changes only the dialog boxes, the rooms of the Temple and the pointer |
 | `controller_haptics` | 1 | Short pulses on presses and turns |
@@ -1227,12 +1229,16 @@ The key `controls` chooses one of two control schemes. The launcher row is
 | Control | `controls=1` |
 | --- | --- |
 | Grip of the pointing hand | Grabs the world, as the grip of the other hand does. It is never a button of the game. A press grabs also while the trigger takes or carries an object. A left button that the trigger holds stops a grab from starting |
-| Both grips | Turn the world and zoom it. The land under the head at the press keeps its height in the room, so the zoom does not lift or drop the player (`god-view.md`, 5.1) |
+| Both grips | Turn the world and zoom it. The land under the head at the press keeps its height in the room, so the zoom does not lift or drop the player. When one grip opens, the other hand moves the world only across until both grips are open, so a zoom in steps keeps the height too (`god-view.md`, 5.1) |
 | Trigger of the pointing hand | The left button and the right button of the game. The press decides which one, and the trigger keeps that button until it opens (see below) |
 | Trigger of the other hand | Makes the walk with the stick faster while it is pulled (`god-view.md`, 5.7). No job when the stick does not walk |
+| X (A when the left hand points), with `left_leash=1` | The button of the leash: with no leash it puts the leash on the Creature (the leash click, packet `0x5F`, which needs no aim). With the leash on the Hand it gives the next kind that the Creature has (the item `leash_next` of the ring, the key of the game "Next Leash"). With the leash tied to an object it brings the leash back to the Hand. Not with `button_layout=0` and not on an Index controller, where that button has its own job |
+| A shake of the other hand, with `left_leash=1` | Takes the leash off (`creature.md`, "The shake"). It acts also while the Hand of the game holds an object: the handler of the leash click has no test of the Hand. A shake of the pointing hand does not take the leash off |
 
 The other controls (A, B, the sticks, the ring, the menu button) do not
-change. A dialog box, a room of the Temple and the pointer keep the buttons
+change. `left_leash=0` keeps the leash with the pointing hand, as with
+`controls=0`: X has no job, and a shake of the pointing hand takes the leash
+off. A dialog box, a room of the Temple and the pointer keep the buttons
 of 5.1: the trigger is the left button and the grip the right button.
 `grab_hand=0` turns off the grab with the grips in both schemes.
 
@@ -1265,6 +1271,9 @@ trigger closes and is the left button ...` or `... the right button ...`),
 with the reason, and one line for each grab of the pointing grip (`grab :
 the pointing grip grabs the world (controls=1)`).
 
+The log has one line for each press of X (`controllers : X of the hand that
+does not point (left_leash=1): ...`), with what went to the game.
+
 **The hint cards** name the trigger for the left button and for the right
 button of the game (`controller-hints.md`).
 
@@ -1275,7 +1284,9 @@ long pulse for 1 and a short pulse for 0, and the log names the scheme. The
 hands let go of the world. A trigger or a grip that is down must open before
 it presses a button of the game, and a stick that is pushed must come back.
 The word `controlskey` of the scripted controller does the same in a desktop
-run.
+run. Ctrl, Shift and the slash key change `left_leash` between 1 and 0 (on a
+German keyboard the key with the number sign). The other controller gives a
+long pulse for 1 and a short pulse for 0.
 
 **Tests.** The math tests (`grip_checks.h`, `walk_checks.h`) cover the
 choice of the press, the boost and the zoom about the land under the head.
@@ -1301,13 +1312,24 @@ Desktop runs [R]:
   hold"), the Hand holds the tree while the trigger is closed, and lets it
   go when the trigger opens. The hint card says "Trigger Take".
 
+- `aim_run.ps1 -Save temple` with `controls=1` and the keys of
+  `creature_recipe.ps1`: `x` puts the leash on (the game says kind 2 and on),
+  two more presses of `x` give kind 1 and kind 3, a shake of the left hand
+  (seven jumps of `lpoint` between two points 25 cm apart) takes the leash
+  off 65 ms later, and `x` puts it on again.
+- `aim_run.ps1 -Save temple`: `lgrip`, `grip` joins, `grip` opens, and the
+  left hand goes 20 cm up while it holds on. With `controls=1` the waist
+  point stays at the height 29.480. After `controlskey` (`controls=0`) the
+  same steps put it at 9.497: the land goes 20 cm up.
+
 **Known limits, and what only a headset can show.**
 
 - A one-off seed that the trigger carries cannot become active by a second
   press, because the trigger holds it. Let it go and tap it with the
   trigger.
 - With the leash on the Hand, the trigger commands the Creature and takes
-  nothing. Take the leash off with a shake of the hand to take things.
+  nothing. Take the leash off with a shake of the other hand
+  (`left_leash=1`) to take things.
 - Only a headset shows how the choice of the press feels: a press near an
   object that the player did not want to take, and a click that the player
   wanted on an object that the Hand can hold.

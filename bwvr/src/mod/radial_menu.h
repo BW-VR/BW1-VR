@@ -35,5 +35,10 @@ void RadialMenuLayoutChanged();
 int RadialMenuWayValue();
 void RadialMenuWayChange(const char* by);
 
+// creature_command.cpp (the button of the leash, controls=1): the item
+// "leash_next" acts as when the player chose it on the ring, with the tests
+// of the ring. True when its key is queued. The pump sends it.
+bool RadialMenuLeashNext();
+
 // Once a report window.
 void RadialMenuReport();

@@ -369,7 +369,11 @@ and the ground limits added.
   with the zoom. With `controls=1` (`controllers.md`, 5.7) the land under the
   head at the press keeps its height in the room
   (`C.y = H - (H - C_a.y) * s / s_a`, `TableGrabSolve` with a level), so the
-  zoom does not lift or drop the player. With each value of `controls` the
+  zoom does not lift or drop the player. With `controls=1` the hand that
+  holds on after the other grip opens moves the land only across, until
+  both grips are open (`GrabVertical`), so a zoom in steps keeps the height
+  too. A grab that starts with one hand moves the land up and down. With
+  each value of `controls` the
   log names the land under the head at the anchor (`grab : two hands, the
   land under your head is at ...`) and, when the grips settle, how far that
   land is below the head now and at the anchor.

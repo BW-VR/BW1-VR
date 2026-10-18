@@ -876,8 +876,7 @@ that moves while the Hand takes it.
 - **N17. Only one headset.** No person has run the mod with a headset or a
   runtime other than a Quest 3 through Virtual Desktop.
 - **N18. The control scheme "Fly and grab"** (`controls=1`,
-  `controllers.md`, 5.7). Not run: a take with the trigger of an object near
-  the Hand on the desktop, and a headset session. Only a headset shows how
+  `controllers.md`, 5.7). No headset session yet. Only a headset shows how
   the choice of the press feels, and whether the boost of 5 times is a good
   speed.
 

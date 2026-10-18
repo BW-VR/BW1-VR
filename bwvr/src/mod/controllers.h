@@ -236,6 +236,16 @@ struct TeleportInput {
   unsigned long long frame;  // the controllers frame
 };
 bool ControllersTeleportInput(TeleportInput* out);
+// THE AIM OF THE COMMANDS OF THE CREATURE (docs/creature.md, section 4). With
+// left_leash=1 and controls=1 it is the aim of the hand that does not point,
+// else the aim of the pointing hand, as ControllersTeleportInput and
+// ControllersFarRay give it.
+bool ControllersCommandInput(TeleportInput* out);
+// The commands of the Creature may start now. With left_leash=1 the pointing
+// trigger may be down, else the rule of ControllersFarAllowed.
+bool ControllersCommandAllowed(const char** why);
+bool ControllersCommandRay(float origin[3], float direction[3], float* units,
+                           float eye[3]);
 
 // The ray of the pointing hand while a dialog box is up and the controller
 // owns the pointer. The two ends are in the world. False when none is drawn.

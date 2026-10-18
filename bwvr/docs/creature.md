@@ -930,6 +930,15 @@ Hand, and the Hand is empty in its Normal state. It is off with
 `controller_swap_buttons=1`, where the trigger does the work of the grip.
 With no leash, the trigger does what it does in the plain game.
 
+With `controls=1` and `left_leash=1` the trigger of the hand that does not
+point commands, and it aims with that controller (`controllers.md`, 5.7).
+The Hand of the game may then hold an object or touch the Creature: the
+handlers of packets `0x5D` and `0x5E` have no test of the Hand (section
+1.4). The object at the Hand's point is no target of a command then. The
+code is `ControllersCommandInput`, `ControllersCommandRay` and
+`ControllersCommandAllowed` in `controllers.cpp`, and the second cone of the
+pick in `hand_direct.cpp` (`g_cmd_offer`).
+
 ### 4.1 What the trigger does
 
 | The trigger, with the leash on the Hand | What it does |

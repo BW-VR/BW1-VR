@@ -780,6 +780,14 @@ void* g_far_debug_object = nullptr;
 int g_far_debug_frames = 0;
 float g_far_offer_deg = 12.0f;
 uint64_t g_far_offers = 0;
+// THE CONE OF THE COMMANDS ON THE OTHER HAND (left_leash=1): the commands of
+// the Creature aim with the hand that does not point, so the objects in the
+// cone of its aim ray go to the pick too (creature_command.cpp).
+bool g_cmd_offer = false;
+float g_cmd_origin[3] = {0.0f, 0.0f, 0.0f};
+float g_cmd_direction[3] = {0.0f, 0.0f, 1.0f};
+float g_cmd_units = 0.0f;
+uint64_t g_cmd_offers = 0;
 uint64_t g_far_land_writes = 0;
 bool g_said_multiplayer = false;
 bool FarTargetLives();
@@ -3183,8 +3191,8 @@ int __fastcall h_SendObjectDrawCollision(void* self, void* unused,
 int __fastcall h_ScreenTest(const void* bounds, void* unused,
                             const uint8_t* object) {
   const int result = o_ScreenTest(bounds, unused, object);
-  if ((!g_near_pick && !g_far_offer) || g_eye != 0 || result == 0 ||
-      object == nullptr) {
+  if ((!g_near_pick && !g_far_offer && !g_cmd_offer) || g_eye != 0 ||
+      result == 0 || object == nullptr) {
     return result;
   }
   int32_t* under = reinterpret_cast<int32_t*>(kPickUnder);
@@ -3225,6 +3233,22 @@ int __fastcall h_ScreenTest(const void* bounds, void* unused,
     if (s.valid && s.te <= g_far_offer_deg) {
       *under = 1;
       ++g_far_offers;
+      return result;
+    }
+  }
+  // THE CONE OF THE COMMANDS ON THE OTHER HAND, with the same rule.
+  if (g_cmd_offer) {
+    const float cx = at[0] - g_cmd_origin[0], cy = at[1] - g_cmd_origin[1],
+                cz = at[2] - g_cmd_origin[2];
+    float hand_m = sqrtf(cx * cx + cy * cy + cz * cz) / g_cmd_units;
+    if (hand_m < controller_math::kFarMinHandM) {
+      hand_m = controller_math::kFarMinHandM;
+    }
+    const controller_math::FarScore s = controller_math::FarConeScore(
+        g_cmd_origin, g_cmd_direction, at, 0.0f, hand_m);
+    if (s.valid && s.te <= FarGrabSelectDeg() + 4.0f) {
+      *under = 1;
+      ++g_cmd_offers;
     }
   }
   return result;
@@ -6789,6 +6813,14 @@ void FarFrameStep(bool active) {
   g_far_ready = false;
   g_far_offer = false;
   g_far_ray = false;
+  g_cmd_offer = false;
+  if (active && ControllersLeftLeash() && CreatureCommandWantsCone()) {
+    float eye[3];
+    g_cmd_offer =
+        ControllersCommandRay(g_cmd_origin, g_cmd_direction, &g_cmd_units,
+                              eye) &&
+        g_cmd_units > 0.0f;
+  }
   FarTestTakeGone();
   // THE TARGET LIVES, or the far grab lets it go now. The mesh of a locked
   // target stays in the pick of this frame.
@@ -6869,9 +6901,10 @@ void FarFrameStep(bool active) {
   // ready.
   // A MIRACLE IN THE HAND (miracle.cpp) aims with the same cone: the Hand is
   // not empty then, so the far grab is not ready.
-  const bool command = f.usable && f.have_ray &&
-                       (CreatureCommandWantsCone() || MiracleWantsCone() ||
-                        ForestTakeWantsCone());
+  const bool command =
+      f.usable && f.have_ray &&
+      ((CreatureCommandWantsCone() && !ControllersLeftLeash()) ||
+       MiracleWantsCone() || ForestTakeWantsCone());
   if (!f.ready && !command) return;
   g_far_ready = f.ready;
   g_far_ray = true;

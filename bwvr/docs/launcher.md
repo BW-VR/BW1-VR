@@ -228,7 +228,7 @@ move the camera in steps.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Controls | Default | Key `controls`, a value. 0 Default: the trigger of the Hand clicks and its grip takes things, and the grip of the other hand moves the world. 1 Fly and grab: the grips of both hands only move the world, both grips turn and zoom it with no change of the height of the player, the trigger of the Hand takes a target at once (also from a distance) and clicks where nothing can be taken, and the trigger of the other hand makes the walk with the stick faster (`controllers.md`, 5.7) |
+| Controls | Default | Key `controls`, a value. 0 Default: the trigger of the Hand clicks and its grip takes things, and the grip of the other hand moves the world. 1 Trigger is grab: the grips of both hands only move the world, both grips turn and zoom it with no change of the height of the player, the trigger of the Hand takes a target at once (also from a distance) and clicks where nothing can be taken, and the trigger of the other hand makes the walk with the stick faster (`controllers.md`, 5.7) |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |
 | Grab the world | Grip of the other hand | Key `grab_hand`, a value. 1 Hold the grip of your other hand and move that hand to pull the world. Hold both grips to turn the world and to zoom. 2 Either grip: the grip of the pointing hand also grabs the world when the Hand is empty and not over an object. 0 Off. |
 

@@ -317,7 +317,7 @@ grip, stick, A and B. The right controller does the jobs of the left
 controller. The left menu button opens the game menu with each hand.
 
 The list below is for the choice "Default" of "Controls" in the
-launcher. The choice "Fly and grab" (key controls=1) changes these
+launcher. The choice "Trigger is grab" (key controls=1) changes these
 controls:
 
   Both grips          Each grip grabs the land and pulls it. Hold both

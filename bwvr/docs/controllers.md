@@ -1294,8 +1294,12 @@ Desktop runs [R]:
   room each second ("at most 5.00 times as fast"), a walk with no trigger
   150. After `controlskey` the same `ltrigger` gives 150.
 
-Not run on the desktop: a press of the trigger on an object near the Hand
-(the save at the Temple has no holdable object near the Hand).
+- `aim_run.ps1 -Save pen` with `controls=1`, the steps of the run
+  `rollnear` of `throw_queue.ps1` with `trigger` in place of `grip`: a far
+  fetch with the trigger, then `seek` and the trigger at a tree beside the
+  Hand. That press is the right button ("the Hand is over an object it can
+  hold"), the Hand holds the tree while the trigger is closed, and lets it
+  go when the trigger opens. The hint card says "Trigger Take".
 
 **Known limits, and what only a headset can show.**
 

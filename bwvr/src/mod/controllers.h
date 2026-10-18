@@ -188,6 +188,10 @@ bool ControllersLeftLeash();
 // test_keys=1): the tilt of the controller of the stick moves the player up
 // and down in the walk with controls=1.
 void ControllersClimbToggle(const char* by);
+// The test key of move_stick_path (Ctrl, Shift and 0 of the number pad, with
+// test_keys=1): with controls=1 the flight keeps its height and stops at the
+// land, or it follows the land.
+void ControllersPathToggle(const char* by);
 void ControllersLeftLeashToggle(const char* by);
 // The grip point of the hand that does not point in the room, in game units
 // as ControllerDirectMotion gives the grip of the pointing hand. False while

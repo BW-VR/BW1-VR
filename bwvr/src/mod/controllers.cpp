@@ -175,7 +175,7 @@ bool TabletopGodZoomForwardIn();
 // switch for the drag of the land, which the walk keeps to.
 int TabletopGodMoveStick();
 bool TabletopGodWalk(const float push[2], const float* aim, float boost,
-                     float climb);
+                     float climb, bool path);
 void TabletopGodMoveStickCycle();
 bool TabletopMoveAllowed();
 // teleport.cpp and hint_card.cpp: the test keys of teleport_switch and of
@@ -1720,6 +1720,25 @@ int g_boost_pct = -1;
 // the backslash key change it.
 int g_climb = -1;
 
+// controls=1: the flight keeps its height and stops at the land, with no
+// follow of the land (move_stick_path). With test_keys=1, Ctrl, Shift and 0
+// of the number pad change it.
+int g_path = -1;
+
+bool PathOn() {
+  if (g_path < 0) {
+    g_path = IniInt("move_stick_path", 1) != 0 ? 1 : 0;
+    ModLog("controllers  : move_stick_path=%d. %s", g_path,
+           g_path != 0
+               ? "With controls=1, the flight with the stick keeps its "
+                 "height, and the land stops it when it comes nearer than "
+                 "10 cm below your head"
+               : "The walk with the stick follows the land as "
+                 "move_stick_follow_land says");
+  }
+  return g_path != 0;
+}
+
 bool ClimbOn() {
   if (g_climb < 0) {
     g_climb = IniInt("move_stick_climb", 1) != 0 ? 1 : 0;
@@ -2939,6 +2958,16 @@ void PollControlsKey() {
   if (back_pressed && GameInFront()) {
     ControllersClimbToggle("Ctrl, Shift and the backslash key");
   }
+  // Ctrl, Shift and 0 of the number pad: move_stick_path.
+  static bool zero_before = false;
+  const bool zero = (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool zero_pressed = zero && !zero_before;
+  zero_before = zero;
+  if (zero_pressed && GameInFront()) {
+    ControllersPathToggle("Ctrl, Shift and 0 of the number pad");
+  }
   if (!pressed || !GameInFront()) return;
   ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
 }
@@ -3486,7 +3515,8 @@ void PumpWalk() {
         boost = walk_math::Boost(hand.trigger, g_boost_pct * 0.01f);
       }
     }
-    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost, climb)) {
+    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost, climb,
+                         FlyScheme() && PathOn())) {
       why = "the game does not allow a drag of the land now";
     }
   }
@@ -5027,6 +5057,15 @@ void ControllersButtonLayoutToggle(const char* by) {
 bool ControllersFly() { return g_on && FlyScheme(); }
 
 bool ControllersLeftLeash() { return g_on && FlyScheme() && LeftLeashOn(); }
+
+void ControllersPathToggle(const char* by) {
+  if (!g_on) return;
+  g_path = PathOn() ? 0 : 1;
+  g_walk_blocked = true;
+  ControllersGrabPulse(1, 0.5f, g_path != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: move_stick_path=%d, frame %llu", by, g_path,
+         g_frame);
+}
 
 void ControllersClimbToggle(const char* by) {
   if (!g_on) return;

@@ -297,6 +297,9 @@ still:
                       or the other choice of "Controls" (key
                       controls). The ' key is the key with the
                       letter A with two dots on a German keyboard.
+  Ctrl Shift Num 0    Change the flight with the left stick: at one
+                      height and stopped by the land, or along the
+                      land (move_stick_path).
   Ctrl Shift \        Turn the flight up and down by the tilt of the
                       left controller on and off (move_stick_climb).
                       The \ key is the key with the caret on a German
@@ -347,6 +350,9 @@ controls:
                       the trigger is a click.
   Left trigger        Pull it while you move with the left stick to
                       move faster (key move_stick_boost_pct).
+  Left stick          You fly at one height and do not follow the
+                      land. A hill stops you: fly up over it (key
+                      move_stick_path).
   Tilt left hand      Point the left controller up or down while you
                       push the left stick forward to fly up or down.
                       When you fly up past the highest place, the
@@ -354,7 +360,8 @@ controls:
   X                   Put the leash on your Creature. Press it again
                       for the next kind of leash. A leash that is
                       tied to a thing comes back to your Hand.
-  Shake left hand     Take the leash off.
+  Shake left hand     Take the leash off. The leash is at your left
+                      wrist.
   Left trigger        With the leash on, point the left controller at a
                       thing or at the land and press the trigger: your
                       Creature goes there. Hold it to aim with the arc.

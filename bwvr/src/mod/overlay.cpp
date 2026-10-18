@@ -1048,6 +1048,16 @@ void OverlayPassEye(int eye) { g_eye = eye; }
 // the mesh of the game's Hand can stay hidden.
 bool OverlayPointingHandDrawn() { return g_pointing_drawn; }
 
+bool OverlayOtherWrist(float out[3]) {
+  const int hand = 1 - g_pointing;
+  if (hand < 0 || hand >= kHands) return false;
+  const HandPlace& place = g_hand_place[hand];
+  if (!place.have || g_frame > place.frame + 1) return false;
+  overlay_math::PlacePoint(place.position, place.rotation, place.length,
+                           hand == 0, overlay_math::kWristPoint, out);
+  return true;
+}
+
 // For a source that aims with a hand (0 the left hand, 1 the right hand), for
 // example a Creature command: the hand takes the point pose. Call it in each
 // frame of the aim. The pose ends one frame after the last call.

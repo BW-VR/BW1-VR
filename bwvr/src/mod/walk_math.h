@@ -161,6 +161,32 @@ inline ClimbStep Climb(float below, float rise, float nearest,
   return out;
 }
 
+// THE PATH OF A FLIGHT (controls=1, move_stick_path=1). The view keeps its
+// height in the world, so the land under the head comes nearer on a hill.
+// When it would come nearer than `nearest` below the head, the step ends
+// before that place: the player hits the land. below(t) is how far the land
+// under the head is below the head after the share t of the step, in meters
+// of the room. Returns the share of the step to take, 0 to 1. A start that
+// is already nearer than `nearest` may take the step only when the step
+// does not bring the land nearer.
+template <typename Below>
+inline float PathShare(Below below, float nearest) {
+  const float end = below(1.0f);
+  if (end >= nearest) return 1.0f;
+  const float start = below(0.0f);
+  if (!(start >= nearest)) return end >= start ? 1.0f : 0.0f;
+  float low = 0.0f, high = 1.0f;
+  for (int i = 0; i < 10; ++i) {
+    const float mid = 0.5f * (low + high);
+    if (below(mid) >= nearest) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+}
+
 // THE STEP OF ONE FRAME, in meters of the room: the speed times the time of
 // the frame (zoom_math::FrameSeconds gives that time, with its cap). A time
 // that is not above 0 gives no step.

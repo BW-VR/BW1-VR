@@ -460,6 +460,10 @@ inline void SkinTint(float alignment, float out[3]) {
   }
 }
 
+// THE MIDDLE OF THE WRIST in the hand frame: the point where the palm of the
+// test hand starts (MakeHand).
+const float kWristPoint[3] = {kPalmX, kKnuckleY + kPalmLength, 0.0f};
+
 // A point of the hand frame in the world: position + rotation * (p * length).
 // The left hand mirrors x first. The rotation is the grip's axes in the world.
 inline void PlacePoint(const float position[3], const float rotation[9],

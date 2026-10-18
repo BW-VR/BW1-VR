@@ -802,7 +802,23 @@ With `controls=1` and `left_leash=1` the leash is a job of the hand that
 does not point (`controllers.md`, 5.7). The hook then writes the middle of
 the wrist of that hand, as the overlay drew it (`OverlayOtherWrist`,
 `overlay_math::kWristPoint`), for a leash on the Hand. The log line says
-`the rope ends at the wrist of the hand that does not point`. The hook goes in only when the first 13 bytes of the function are the
+`the rope ends at the wrist of the hand that does not point`.
+
+**The ring of the leash.** While the leash is on the Hand, the game draws a
+ring of the mesh `Data\MISC\leash.l3d` a little over its Hand [R]. It is an
+`LH3DStaticObject` with one of the three meshes that `fn_004645D0` loads to
+`0x00C5E3D8` (one for each kind, the posts of the leash at the Temple use
+them too), with its mesh at `+0x7C` and its place at `+0x38`. It goes into
+the z sorter of the frame, and `LH3DRender::FinishFrame` draws it through
+the draw of an object `fn_0080DB30` (thiscall, the object) [V]. With
+`left_leash=1` a hook of `fn_0080DB30` does not draw an object with one of
+those meshes within 60 cm of the room of the Hand's point, while the leash
+is on the Hand and the Hand holds no miracle. The overlay draws a band of
+rope around the middle of the wrist of the other hand instead
+(`BuildWristBand`, `overlay_math::WristLoop`), with the size of that hand.
+The log line says `the ring of the leash at the game's Hand is not drawn`.
+The band of the overlay has one color and does not turn, as the ring of the
+game does. The hook goes in only when the first 13 bytes of the function are the
 bytes of the disassembly. `leash_at_palm=0` leaves the hook out. Tag `leash`
 gives one line each time the leash comes on, with the palm, the distance from
 the game's point to it, and how far that point is below it. No desktop run can

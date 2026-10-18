@@ -739,8 +739,12 @@ begin
   DeleteFile(Dir + '\bwvr.log');
   DeleteFile(Dir + '\bwvr-draw-probe.txt');
   DeleteFile(Dir + '\bwvr-eye-frames.txt');
+  DeleteFile(Dir + '\bwvr-hint-counts.ini');
+  DeleteFile(Dir + '\bwvr-hint-counts.ini.new');
   DeleteMatching(Dir, 'bwvr-old-*.log');
   DeleteMatching(Dir, 'bwvr-*.bmp');
+  { The Steam Frame add-on and its log (bwvr/src/vr/bridge/README.md). }
+  DelTree(Dir + '\bwvr-host', True, True, True);
 end;
 
 { The game's own display settings, as they were before the mod.

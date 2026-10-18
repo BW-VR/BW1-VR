@@ -985,6 +985,11 @@ inline bool GripPressGuarded(bool guard_on, bool closed, int phase,
 // So a press on a target takes it at once, with no wait for a tap time, and
 // a press where nothing can be taken clicks. Returns 0 for the left button
 // and 1 for the right button.
+// THE TRIGGER OF THE OTHER HAND with left_leash=1. A press while the stick
+// of that hand walks is the boost of the walk. Each other press commands the
+// Creature. The press keeps its job until the trigger opens.
+inline bool OtherPressCommands(bool stick_walks) { return !stick_walks; }
+
 inline int FlyPressButton(bool placed, bool text_waits, bool command,
                           bool far_target, bool hand_free) {
   if (!placed || text_waits || command) return 0;

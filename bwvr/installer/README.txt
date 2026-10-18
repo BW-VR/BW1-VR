@@ -386,6 +386,10 @@ controls:
                       for the next kind of leash. A leash that is
                       tied to a thing comes back to your Hand.
   Shake left hand     Take the leash off.
+  Left trigger        With the leash on, point the left controller at a
+                      thing or at the land and press the trigger: your
+                      Creature goes there. Hold it to aim with the arc.
+                      Your right hand can hold a thing meanwhile.
 
 When you let go of one grip while you zoom, your height stays until
 you let go of both grips.

@@ -179,6 +179,16 @@ bool ControllersFly();
 // The test key of controls (Ctrl, Shift and the apostrophe key, with
 // test_keys=1), and the word "controlskey" of the scripted controller.
 void ControllersControlsToggle(const char* by);
+// controls=1 with left_leash=1: X of the hand that does not point is the
+// button of the leash, and a shake of that hand takes the leash off
+// (docs/controllers.md, 5.7). The test key (Ctrl, Shift and the slash key,
+// with test_keys=1) changes left_leash.
+bool ControllersLeftLeash();
+void ControllersLeftLeashToggle(const char* by);
+// The grip point of the hand that does not point in the room, in game units
+// as ControllerDirectMotion gives the grip of the pointing hand. False while
+// that hand is not tracked or the direct hand does not act.
+bool ControllersOtherMotion(float grip_room_out[3]);
 // The test key of button_layout (Ctrl and the Menu key, with test_keys=1),
 // and the word "layoutkey" of the scripted controller.
 void ControllersButtonLayoutToggle(const char* by);

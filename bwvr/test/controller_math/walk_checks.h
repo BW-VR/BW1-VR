@@ -407,6 +407,16 @@ inline void WalkChecks() {
     Near("with one hand the level changes nothing, units",
          fabsf(a.center[1] - b.center[1]), 0.0, 1e-6);
   }
+
+  // THE HEIGHT OF ONE HAND (GrabVertical).
+  Check(GrabVertical(true, false, true), "with controls=0 one hand moves the "
+        "height also after two hands", 1, 1);
+  Check(GrabVertical(true, true, false), "with controls=1 a grab that began "
+        "with one hand moves the height", 1, 1);
+  Check(!GrabVertical(true, true, true), "with controls=1 one hand after two "
+        "hands moves the land only across", 0, 0);
+  Check(!GrabVertical(false, false, false), "outside the God view one hand "
+        "never moves the height", 0, 0);
 }
 
 }  // namespace walk_checks

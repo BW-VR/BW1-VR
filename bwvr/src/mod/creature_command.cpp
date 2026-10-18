@@ -114,6 +114,7 @@
 #include "far_grab.h"
 #include "haptics.h"
 #include "overlay_math.h"
+#include "radial_menu.h"
 #include "table_math.h"
 #include "tabletop.h"
 #include "teleport.h"
@@ -1276,11 +1277,19 @@ void AimLand() {
 // Once a frame: the grip of this frame goes to the detector. A shake acts
 // only when the game's own tests pass (0x005CF6AC to 0x005CF733): the Hand is
 // empty, the leash is on, and no object holds the leash.
+//
+// With the leash on the hand that does not point (controls=1 and
+// left_leash=1) the shake is the shake of that hand. The mod sends the leash
+// click itself, and the handler of the packet has no test of the Hand
+// (docs/creature.md, 1.4), so the Hand of the game may hold an object then.
 void ShakeFrame(const Facts& f, bool have, bool leashed) {
   if (!(g_settings.shake_mps > 0.0f)) return;
   float reach[3], grip[3], room[9];
   const float life = HeadPoseScale();
-  if (!have || !(life > 0.1f) || !ControllerDirectMotion(reach, grip, room)) {
+  const bool other = ControllersLeftLeash();
+  const bool motion = other ? ControllersOtherMotion(grip)
+                            : ControllerDirectMotion(reach, grip, room);
+  if (!have || !(life > 0.1f) || !motion) {
     command_math::ShakeReset(&g_shake);
     return;
   }
@@ -1295,7 +1304,7 @@ void ShakeFrame(const Facts& f, bool have, bool leashed) {
   const char* allowed = "";
   if (!leashed) {
     why = "";  // the common case: no leash to take off
-  } else if (!f.hand_empty || f.hand_state != kStateNormal) {
+  } else if (!other && (!f.hand_empty || f.hand_state != kStateNormal)) {
     why = "the Hand is not empty in its Normal state";
   } else if (g_claim) {
     why = "the trigger holds a command";
@@ -1321,10 +1330,11 @@ void ShakeFrame(const Facts& f, bool have, bool leashed) {
   g_shake_waits = true;
   HapticsPulse(haptics_math::kTick);
   if (Log()) {
-    ModLog("creature cmd : a shake of the hand: %d strokes in %.0f ms, the "
+    ModLog("creature cmd : a shake of the %s: %d strokes in %.0f ms, the "
            "slowest at %.2f m/s, the last one %.0f cm long. A stroke needs "
            "%.2f m/s (leash_shake_mps). The leash click (packet 0x5F), frame "
-           "%llu", result.strokes, result.seconds * 1000.0f, result.slowest,
+           "%llu", other ? "hand that does not point" : "hand",
+           result.strokes, result.seconds * 1000.0f, result.slowest,
            result.length * 100.0f, g_settings.shake_mps, g_frame);
   }
 }
@@ -1820,6 +1830,38 @@ void CreatureCommandSelect() {
       }
     }
   }
+}
+
+const char* CreatureCommandLeashButton(bool* acted) {
+  Init();
+  *acted = false;
+  Facts f;
+  if (!ReadFacts(&f)) return "there is no game now";
+  if (f.creature == nullptr) return "you have no Creature";
+  if (g_settings.test) {
+    return "the test key of the commands counts the leash as on, so the "
+           "button does nothing";
+  }
+  const int act = command_math::LeashButton(true, Tied(f), f.leash_on, f.mine);
+  if (act == command_math::kLeashButtonNone) {
+    return "a leash is on, but it is not on your Creature";
+  }
+  if (act == command_math::kLeashButtonClick) {
+    const bool tied = Tied(f);
+    SendLeash(f);
+    *acted = true;
+    return tied ? "the leash is tied to an object: the leash click (packet "
+                  "0x5F) brings it back to the Hand"
+                : "the leash is off: the leash click (packet 0x5F) puts it "
+                  "on your Creature";
+  }
+  if (!RadialMenuLeashNext()) {
+    return "the leash is on, and the next kind does not act (the ring says "
+           "why)";
+  }
+  *acted = true;
+  HapticsPulse(haptics_math::kTick);
+  return "the leash is on: the key of the next kind of the leash";
 }
 
 bool CreatureCommandWouldClaim() {

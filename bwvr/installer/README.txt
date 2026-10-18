@@ -289,6 +289,10 @@ still:
                       or the other choice of "Controls" (key
                       controls). The ' key is the key with the
                       letter A with two dots on a German keyboard.
+  Ctrl Shift /        Change the leash buttons of "Trigger is grab":
+                      X and a shake of the left hand, or the right
+                      hand (key left_leash). The / key is the key
+                      with the number sign on a German keyboard.
   Ctrl Shift Comma    Change the switch of the game that the teleport
                       keeps to: the drag of the land, or the double
                       click jump (teleport_switch).
@@ -331,6 +335,13 @@ controls:
                       the trigger is a click.
   Left trigger        Pull it while you move with the left stick to
                       move faster (key move_stick_boost_pct).
+  X                   Put the leash on your Creature. Press it again
+                      for the next kind of leash. A leash that is
+                      tied to a thing comes back to your Hand.
+  Shake left hand     Take the leash off.
+
+When you let go of one grip while you zoom, your height stays until
+you let go of both grips.
 
   Trigger             The left mouse button: drag the land, and click
                       on things.

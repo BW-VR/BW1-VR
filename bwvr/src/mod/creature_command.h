@@ -21,6 +21,14 @@ void CreatureCommandSelect();
 // The answer is true while the trigger must not reach the game.
 bool CreatureCommandPumpTrigger(bool trigger, bool ok);
 
+// controllers.cpp (controls=1 with left_leash=1), at a press of the first
+// face button of the hand that does not point (X): with no leash, the leash
+// goes on the Creature. With the leash on the Hand, its kind goes to the next
+// one that the Creature has (the item "leash_next" of the ring). With the
+// leash tied to an object, it comes back to the Hand. acted is true when
+// something went to the game. The answer is the text for the log.
+const char* CreatureCommandLeashButton(bool* acted);
+
 // controllers.cpp (controls=1), at a press of the trigger: a press now would
 // be a command of the Creature, by the tests of the press in
 // CreatureCommandPumpTrigger. The tests of the hand (it can act, it owns the

@@ -778,7 +778,7 @@ inline void LeftTakeChecks() {
   using namespace controller_math;
   printf("\nThe take with the trigger of the other hand\n");
   LeftTake t;
-  LeftTakeIn in = {true, false, false, false, false, 10};
+  LeftTakeIn in = {true, false, false, false, false, false, 10};
   LeftTakeOut o = LeftTakeStep(&t, in);
   Check(o.borrow && o.hold_up && t.state == kLeftProbe,
         "a press borrows the Hand and holds its trigger open for the probe",
@@ -804,7 +804,7 @@ inline void LeftTakeChecks() {
         t.state, kLeftIdle);
   // No target, the leash on: a command.
   LeftTake c;
-  LeftTakeIn ci = {true, false, false, true, false, 20};
+  LeftTakeIn ci = {true, false, false, true, false, false, 20};
   LeftTakeStep(&c, ci);
   ci.frame = 23;
   o = LeftTakeStep(&c, ci);
@@ -813,16 +813,40 @@ inline void LeftTakeChecks() {
         kLeftCommand);
   // No target, no leash: nothing until it opens.
   LeftTake n;
-  LeftTakeIn ni = {true, false, false, false, false, 30};
+  LeftTakeIn ni = {true, false, false, false, false, false, 30};
   LeftTakeStep(&n, ni);
   ni.frame = 33;
   o = LeftTakeStep(&n, ni);
   Check(n.state == kLeftNone && !o.command && !o.borrow,
         "with no target and no leash, the press does nothing", n.state,
         kLeftNone);
+  // The carry (left_hold=1): the parked object stays in the other hand, the
+  // Hand goes back, and the opening of the trigger lets the object go.
+  LeftTake k;
+  LeftTakeIn ki = {true, false, true, false, false, false, 60};
+  LeftTakeStep(&k, ki);
+  ki.frame = 63;
+  LeftTakeStep(&k, ki);
+  Check(k.state == kLeftTake, "a take before the park", k.state, kLeftTake);
+  ki.parked = true;
+  ki.busy = false;
+  o = LeftTakeStep(&k, ki);
+  Check(k.state == kLeftCarry && !o.borrow && !o.drop,
+        "the park gives the carry, and the Hand goes back", k.state,
+        kLeftCarry);
+  ki.busy = true;
+  o = LeftTakeStep(&k, ki);
+  Check(k.state == kLeftCarry && !o.borrow,
+        "the carry stays while the Hand takes something else", k.state,
+        kLeftCarry);
+  ki.down = false;
+  o = LeftTakeStep(&k, ki);
+  Check(k.state == kLeftIdle && o.drop,
+        "the opening of the trigger lets the carried object go", o.drop ? 1 : 0,
+        1);
   // The Hand is busy at the press: no probe.
   LeftTake h;
-  LeftTakeIn hi = {true, false, true, true, true, 50};
+  LeftTakeIn hi = {true, false, true, true, true, false, 50};
   o = LeftTakeStep(&h, hi);
   Check(h.state == kLeftCommand && o.command && !o.borrow,
         "a press while the Hand holds an object commands and borrows nothing",
@@ -834,7 +858,7 @@ inline void LeftTakeChecks() {
         "without the leash such a press does nothing", h2.state, kLeftNone);
   // The stick walks: the boost.
   LeftTake b;
-  LeftTakeIn bi = {true, true, true, true, false, 40};
+  LeftTakeIn bi = {true, true, true, true, false, false, 40};
   o = LeftTakeStep(&b, bi);
   Check(b.state == kLeftBoost && o.boost && !o.borrow,
         "a press while the stick walks is the boost", b.state, kLeftBoost);

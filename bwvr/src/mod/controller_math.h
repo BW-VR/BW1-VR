@@ -1006,6 +1006,11 @@ inline bool OtherPressCommands(bool stick_walks) { return !stick_walks; }
 //   - no target, the leash on: the Hand goes back, and the press commands
 //     the Creature;
 //   - no target, no leash: the Hand goes back, and the press does nothing.
+//
+// With left_hold=1 the take ends in the carry: once the Hand holds the
+// object, the mod parks it in the other hand (left_hold.cpp, parked), and the
+// Hand goes back. The object stays in that hand while the trigger is down,
+// and the opening of the trigger lets it go (drop).
 enum LeftTakeState {
   kLeftIdle,
   kLeftBoost,
@@ -1013,6 +1018,7 @@ enum LeftTakeState {
   kLeftTake,
   kLeftCommand,
   kLeftNone,
+  kLeftCarry,
 };
 const uint64_t kLeftProbeFrames = 3;
 
@@ -1027,6 +1033,7 @@ struct LeftTakeIn {
   bool target;       // the pick has a target at the borrowed Hand
   bool leash_on;     // the leash is on the Hand
   bool busy;         // the Hand holds an object, or its trigger is down
+  bool parked;       // the other hand carries the object of the take now
   uint64_t frame;    // the controllers frame
 };
 
@@ -1035,9 +1042,11 @@ struct LeftTakeOut {
   bool hold_up;  // the trigger of the Hand reads as open (the probe)
   bool command;  // the trigger of the other hand commands the Creature
   bool boost;    // the trigger of the other hand is the boost of the walk
+  bool drop;     // the other hand lets go of the object that it carries
 };
 
 inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
+  bool drop = false;
   switch (t->state) {
     case kLeftIdle:
       if (in.down) {
@@ -1060,7 +1069,17 @@ inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
       }
       break;
     case kLeftTake:
-      if (!in.down && !in.busy) t->state = kLeftIdle;
+      if (in.parked) {
+        t->state = kLeftCarry;
+      } else if (!in.down && !in.busy) {
+        t->state = kLeftIdle;
+      }
+      break;
+    case kLeftCarry:
+      if (!in.down || !in.parked) {
+        t->state = kLeftIdle;
+        if (in.parked) drop = true;
+      }
       break;
     default:  // the boost, the command, nothing: until the trigger opens
       if (!in.down) t->state = kLeftIdle;
@@ -1071,6 +1090,7 @@ inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
   out.hold_up = t->state == kLeftProbe;
   out.command = t->state == kLeftCommand;
   out.boost = t->state == kLeftBoost;
+  out.drop = drop;
   return out;
 }
 

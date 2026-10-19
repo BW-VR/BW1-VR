@@ -1416,6 +1416,60 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
   return n / 3;
 }
 
+// THE REFLECTION IN THE WATER (docs/hand.md, "The reflection of the hands").
+// The game draws the reflection of its Hand after the reflection of the land
+// and before the sea, in the color 0x65A0A0A0 with no light [V 0x005E496E].
+// The hands of the mod take the same place in the frame (hand_exact.cpp calls
+// this through OverlayDrawReflection) and the same color. The camera is
+// mirrored at the sea, so each corner goes to its mirror image under the
+// water. The hands write no depth, so the sea draws over them as over the
+// game's reflection.
+int HandModelDrawReflection(IDirect3DDevice7* device, const float camera[12],
+                            float near_plane, float half_x, float half_y) {
+  const float kSeaLevel = 0.0f;
+  const uint32_t kReflectionGray = 0x00A0A0A0u;
+  const uint32_t kReflectionAlpha = 0x65u;
+  if (!HandModelBuilt() || device == nullptr || g_texture == nullptr) {
+    return 0;
+  }
+  float mirror[12];
+  overlay_math::MirrorCameraY(camera, kSeaLevel, mirror);
+  int n = 0;
+  for (int h = 0; h < 2; ++h) {
+    if (!g_built[h].valid) continue;
+    n = FillHand(g_built[h], mirror, near_plane, half_x, half_y, n);
+  }
+  if (n == 0) return 0;
+  // The alpha of each corner (the fade of the wrist) times the alpha of the
+  // game's reflection, and its gray in place of the light.
+  for (int i = 0; i < n; ++i) {
+    const uint32_t alpha = (g_vertices[i].diffuse >> 24) * kReflectionAlpha /
+                           255u;
+    g_vertices[i].diffuse = (alpha << 24) | kReflectionGray;
+  }
+  SetStates(device);
+  device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
+  IDirectDrawSurface7* before = nullptr;
+  const bool have_before = SUCCEEDED(device->GetTexture(0, &before));
+  device->SetTexture(0, g_texture);
+  HRESULT result = S_OK;
+  for (int first = 0; first < n && SUCCEEDED(result); first += kDrawVertices) {
+    const int count = n - first < kDrawVertices ? n - first : kDrawVertices;
+    result = device->DrawPrimitive(D3DPT_TRIANGLELIST, kFvf,
+                                   g_vertices + first,
+                                   static_cast<DWORD>(count), 0);
+  }
+  if (have_before) {
+    device->SetTexture(0, before);
+    if (before != nullptr) before->Release();
+  }
+  // SetStates turned the depth write on, so it goes back on before
+  // PutStatesBack puts back the value of the game.
+  device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+  PutStatesBack(device);
+  return FAILED(result) ? -1 : n / 3;
+}
+
 void HandModelReport() {
   if (g_draws == 0 && g_failed == 0) return;
   const double passes = g_draws > 0 ? static_cast<double>(g_draws) : 1.0;

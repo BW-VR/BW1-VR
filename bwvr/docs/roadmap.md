@@ -356,8 +356,8 @@ is built, and no test has proven it.
   while the leash is on (`DisplayGesture`, `grab.md`, "The leash at the
   mod's hand"). In the headset it moves with the player, and over the sea it
   looks like a ring in the water. The ring of the leash on the left wrist
-  has no reflection, and the reflection of the game's Hand is hidden with its
-  mesh (`hand_hide_reflection`). To decide: the icon at a place in the room
+  has no reflection, and the water shows both hands of the mod
+  (`hand_reflection`). To decide: the icon at a place in the room
   (for example on the card of the left hand), or no icon while the ring is
   on the wrist. Only a headset shows whether the water now looks right.
 

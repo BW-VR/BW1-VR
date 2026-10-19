@@ -842,7 +842,7 @@ the sorted list (`fn_0068AA60` puts each `DisplayGesture` there with the draw
 view, so it moves with the player, and over the sea it looks like a ring in
 the water [V: desk runs at 13 units per meter, the same pixel in each
 picture while both hands moved]. The ring of the leash at the wrist has no
-reflection in the water ([hand.md](hand.md), "The mesh is hidden"). Open:
+reflection in the water ([hand.md](hand.md), "The reflection of the hands"). Open:
 whether the icon must go to a place in the room, or away while the ring is
 on the wrist. The same list draws the pictures of the gestures that the
 game looks for, so a change must find the icon of the leash in it.

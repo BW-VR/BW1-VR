@@ -817,16 +817,21 @@ instead: the angles of the first matrix of the pose of the Hand's mesh
 offset and a size from the size of the mesh (`+0x44` times 173.5) [V]. The
 glow takes the same place.
 
-With `left_leash=1` and `leash_ring_left=1`, a hook of `fn_00466730` moves
-that first matrix of the pose for the call: each axis turns by the turn
-from the pointing hand to the other hand, and its place moves from the wrist
-of the pointing hand to the wrist of the other hand, as the overlay drew the
-two hands (`OverlayWristFrames`). After the call the matrix is as before.
-So the game puts its own ring and glow over the wrist of the other hand,
-with its turn and its size. The hook goes in only when the first 11 bytes of
-the function are the bytes of the disassembly. The log line says `the game
-puts the ring of the leash at the wrist of the hand that does not point`.
-`leash_ring_left=0` leaves the ring at the game's Hand.
+With `left_leash=1` and `leash_ring_left=1`, a hook of `fn_00466730` gives
+the function a wrist bone of its own for the call, and after the call puts
+back the matrix of the pose and the size of the mesh. The ring lies across
+the z axis of the bone, so the z axis of that bone goes along the other hand
+(the overlay's hand, `OverlayFreeWrist`), and the ring goes around the
+wrist. The size of the mesh for the call makes the radius of the ring 0.17
+of the length of the hand. Its place is the middle of the wrist, 0.04 of the
+length of the hand toward the knuckles, less the offset of the game. The
+hook measures that offset at the ring after each call, in the frame of the
+bone, for the next call. So the game puts its own ring and glow around the
+wrist of the other hand, with its size and its look. The hook goes in only
+when the first 11 bytes of the function are the bytes of the disassembly.
+The log line says `the game puts the ring of the leash around the wrist of
+the hand that does not point`, with the distance of the ring from the place
+that the hook wants. `leash_ring_left=0` leaves the ring at the game's Hand.
 
 The interface of the game also shows the kind of leash as a small icon at
 the lower right corner of the screen (`DisplayGesture`,

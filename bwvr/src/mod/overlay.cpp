@@ -1062,27 +1062,25 @@ bool OverlayOtherWrist(float out[3]) {
   return true;
 }
 
-// The wrists of the two hands in the world, for the ring of the leash
-// (hand_direct.cpp): the middle of the wrist and the axes of the hand, of the
-// pointing hand (from) and of the other hand (to). False while one of the
-// two was not drawn, or while one hand is both.
-bool OverlayWristFrames(float from_point[3], float from_axes[9],
-                        float to_point[3], float to_axes[9]) {
-  const int from = g_pointing, to = g_free_hand;
-  if (from < 0 || from >= kHands || to < 0 || to >= kHands || from == to) {
+// The wrist of the hand that does not point in the world, for the ring of
+// the leash (hand_direct.cpp): the middle of the wrist, the axes of the hand
+// (rows: across the palm, along the fingers, out of the palm) and the length
+// of the hand. False while that hand was not drawn, or while it points and
+// pointing is false.
+bool OverlayFreeWrist(float point[3], float axes[9], float* length,
+                      bool pointing) {
+  const int hand = g_free_hand;
+  if (hand < 0 || hand >= kHands || (hand == g_pointing && !pointing)) {
     return false;
   }
-  const HandPlace& a = g_hand_place[from];
-  const HandPlace& b = g_hand_place[to];
-  if (!a.have || !b.have || g_frame > a.frame + 1 || g_frame > b.frame + 1) {
-    return false;
+  const HandPlace& place = g_hand_place[hand];
+  if (!place.have || g_frame > place.frame + 1) return false;
+  overlay_math::PlacePoint(place.position, place.rotation, place.length,
+                           hand == 0, overlay_math::kWristPoint, point);
+  for (int axis = 0; axis < 3; ++axis) {
+    for (int r = 0; r < 3; ++r) axes[axis * 3 + r] = place.rotation[r * 3 + axis];
   }
-  overlay_math::PlacePoint(a.position, a.rotation, a.length, from == 0,
-                           overlay_math::kWristPoint, from_point);
-  overlay_math::PlacePoint(b.position, b.rotation, b.length, to == 0,
-                           overlay_math::kWristPoint, to_point);
-  memcpy(from_axes, a.rotation, 9 * sizeof(float));
-  memcpy(to_axes, b.rotation, 9 * sizeof(float));
+  *length = place.length;
   return true;
 }
 

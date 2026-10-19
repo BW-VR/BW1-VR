@@ -860,8 +860,10 @@ see it, about 30 cm across. Moves of the Hand without B do not draw.
 
 A miracle from a reward or a dispenser is a bubble on the land. Close
 the grip on the bubble to carry it. Then press the trigger to use it.
-A short press of the grip on the bubble uses it at once. The card on
-your hand shows these controls.
+A short press of the grip on the bubble uses it at once. A quick press
+of the trigger with your hand on the bubble uses it too, also while
+your Creature is on the leash. The card on your hand shows these
+controls.
 
 A miracle in your Hand is at your real hand. The card on your hand
 says what the grip does with it:
@@ -950,6 +952,12 @@ place for a moment. The sea is not a place for this: the ring is red
 there. The grip does not send the Creature. To stroke or slap, put your
 hand on the Creature. Set creature_command=0 to turn the commands of
 the trigger off. The grip on the land then sends the Creature.
+
+A miracle bubble from a reward or a dispenser is no target of a
+command. Put your hand on the bubble and press the trigger quickly:
+the miracle goes into your Hand, as with no leash. Your Creature
+stays on the leash. Set leash_miracle_tap=0 in bwvr.ini if a press
+on the bubble must send your Creature to it, as in the original game.
 
 A press of the trigger is one of two things. A quick press on an
 object with a halo makes your Creature act on that object. So does a

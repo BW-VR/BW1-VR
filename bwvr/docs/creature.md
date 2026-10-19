@@ -244,7 +244,12 @@ With the leash on the Hand, `ValidAsInterfaceTarget` (slot `0x6F0`) at 1 and
 `ValidAsInterfaceLeashTarget` (slot `0x6F4`) not 0, it calls `fn_005D4180`
 (thiscall on `GInterface`, the object, `ret 4`), which sends packet `0x5D`.
 Else the object gets its own tap (packet `0x20`). Both slots give 1 for
-`Object`, so almost each object is a target. A press of the grip on an object
+`Object`, so almost each object is a target. A miracle on the land
+(`OneOffSpellSeed`) keeps the slots of `Object` [V]. So in the plain game a
+short click on it with the leash on the Hand sends the Creature to it, and
+the miracle does not go into the Hand. `fn_005D3930` sends the tap only when
+`fn_005D4180` gives 0, and `fn_005D3930` is the one caller of `fn_005D4180`
+(`0x005D39A6`). A press of the grip on an object
 outside the influence goes from `fn_005D1740` (`0x005D17A5`, the influence
 `+0x48` is 0 and slot `0x714` gives 1) to `fn_005D3930`, which sends the
 packet.
@@ -1014,6 +1019,7 @@ pick in `hand_direct.cpp` (`g_cmd_offer`).
 | A hold: a later release | It acts on what shows at the release: the object with the halo (packet `0x5D`), or the land point of the ring (packet `0x5E`) |
 | A hold that ends on your Creature | The leash click, only when the press started on the Creature and is shorter than 450 ms. A press that started on the land or on an object does not take the Creature as a target, so the ring can go past it |
 | A press while the game's pick has the Creature under the Hand | Not a command. The press goes to the game: the stroke, the slap and the short press that changes the leash |
+| A press with the Hand on a miracle on the land (`leash_miracle_tap=1`) | Not a command. The press goes to the game, as with no leash: a short press taps the miracle, and it goes into the Hand. A longer press takes the miracle as an object. See "A miracle on the land" below |
 | A release with the aim off the target, on the sky, on the sea or off the map | Nothing |
 | A drag of the land | None. The trigger of a command does not reach the game. The grip of the other hand, the stick and the teleport move the player |
 
@@ -1035,6 +1041,37 @@ the Hand and `creature_command=1`. It clears the pick lock and gives 1, as the
 game does after the packet. The mouse gets the game's function. The reason: a
 grip from a distance that misses its target would send the Creature to the
 land under the Hand.
+
+**A miracle on the land** (`leash_miracle_tap=1`, the default). A
+`OneOffSpellSeed` is the bubble of a reward or of a dispenser. With the
+leash on the Hand, the trigger on the bubble makes the miracle active, as
+with no leash. The leash stays on.
+
+- A `OneOffSpellSeed` is no target of a command (`ValidTarget`): it gets no
+  halo, and the aim goes past it.
+- The Hand is on the bubble when the object under the Hand
+  (`GInterface+0x3C8`), the object of the next pick record (`+0x400`) or
+  the object at the Hand's point is a `OneOffSpellSeed` (`SeedAtHand`).
+  Then a press goes to the game, and the cone, the halo and the prompts of
+  a command are off.
+- The game's click (`fn_005D3930`) calls `fn_005D4180` first. A hook on
+  `fn_005D4180` gives 0 for a `OneOffSpellSeed` while the controller places
+  the Hand, and sends no packet. Then the click sends the tap (packet
+  `0x20`), and `OneOffSpellSeed::InterfaceTap` puts the miracle in the Hand.
+  The hook is not on `fn_005D3930`, because `hand_direct.cpp` tests the
+  first bytes of that function before its own click on a scroll.
+- The hook acts also with `creature_command=0` and with `left_leash=1`: then
+  the trigger of the Hand goes to the game, and the game's click would send
+  the Creature. The mouse gets the game's function.
+
+With `leash_miracle_tap=0` the bubble is a target of a command, as in the
+plain game: the trigger sends the Creature to it. The test key is Ctrl with
+the decimal key of the number pad (section 4.5).
+
+```
+creature cmd : a click on the miracle 05705750 with the leash on the Hand. The Creature does not go to it, and the game's click taps it (packet 0x20) (leash_miracle_tap=1), frame 475
+creature cmd : 1 clicks on a miracle with the leash on the Hand were taps of the miracle (leash_miracle_tap=1)
+```
 
 ### 4.2 The land aim and a tap
 
@@ -1199,6 +1236,7 @@ With the mouse, the game's own test acts.
 | `far_grab_choice`, `far_grab_stay` | 2, 1 | The choice among the objects in the cone, and the target that stays (section 4.3, and `grab.md`). Test keys: Ctrl and Delete, Ctrl and Backspace |
 | `creature_command_behind_cm` | 30 | The land in front wins past this many cm of the room, plus 20 percent of the distance. -1 turns the rule off |
 | `creature_command_double_ms` | 500 | The time of a double press (section 5.2). 0 turns the double press off |
+| `leash_miracle_tap` | 1 | 1: with the leash on the Hand, a press with the Hand on a miracle on the land taps it, and a miracle on the land is no target of a command (section 4.1). 0: the trigger sends the Creature to the miracle, as in the plain game |
 | `teleport_reach_m`, `teleport_ring_cm` | 10, 11 | The arc and the ring of the land aim. See `god-view.md` |
 
 **The A/B key.** With `test_keys=1`, Ctrl with the 5 key of the number pad
@@ -1206,6 +1244,12 @@ changes `creature_command_rule` from 4 to 3 to 2 to 1 and back while the game
 runs. The pointing controller gives one short pulse for each unit of the
 value (four for 4, one for 1), and the log has a line. The keys of the aim
 trim (numpad 8, 2, 4, 6 and 5) do not act while Ctrl is down.
+
+Ctrl with the decimal key of the number pad, with Shift up, changes
+`leash_miracle_tap` between 1 and 0. The pointing controller gives a long
+pulse for 1 and a short pulse for 0, and the log has a line. With
+`test_keys=1` the hook of section 4.1 is there also when the game starts with
+`leash_miracle_tap=0`.
 
 **Test keys for the desktop runs only:**
 
@@ -1363,7 +1407,9 @@ A short grip on your Creature from a distance takes the leash back too (kind
 3 of `near_math::LeashClick`). It sends the leash click.
 
 Each object that is a target of a command passes the tests of the double
-click, except a `OneOffSpellSeed`. So the same objects can take the leash.
+click. So the same objects can take the leash. With `leash_miracle_tap=0` a
+`OneOffSpellSeed` is a target of a command too, and the double press does not
+tie the leash to it, as the game's double click does not.
 
 The card (`AddPromptTwice` in `hint_card.cpp`) has two lines for an object
 that can take the leash: "Trigger Send the Creature" and "Trigger x2 Tie the

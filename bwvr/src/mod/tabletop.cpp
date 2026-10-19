@@ -116,6 +116,9 @@ void ComfortCameraBlink();
 bool ScriptCameraStoryOwns();
 // cutscene_window.cpp: this frame draws on the screen of the cut scene window.
 bool CutsceneWindowFlat();
+// cutscene_window.cpp: a story camera owns the view, and the God view keeps
+// its view until the window is closed (cutscene_hold).
+bool CutsceneWindowHoldsGod(bool story_owns);
 // hand_direct.cpp: the answers that the scripts of the game got from the
 // player since the last call (docs/god-view.md, "The player that a script
 // sees").
@@ -419,6 +422,9 @@ void StopZoomHold(const char* cause, bool view_stays);
 float g_god_last_scale = 0.0f;
 // A story holds the camera, and the God view stands aside.
 bool g_god_story = false;
+// A story holds the camera, and the God view keeps its view until the cut
+// scene window is closed (cutscene_hold). Nothing moves the view then.
+bool g_god_hold = false;
 // Goes up each time the player moves the God view: a step or a grab. The game
 // camera is written once for each value (TabletopGodGameCamera).
 uint64_t g_god_version = 0;
@@ -2802,6 +2808,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
                     float* lean_gain) {
   g_live = false;
   g_owned = false;
+  g_god_hold = false;
   if (!g_installed || !g_on) return false;
   // The Temple and the other rooms draw from a camera of their own.
   if (!GameCameraPlain()) {
@@ -2829,7 +2836,33 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
     // frame the game camera goes to a screen in the room, and head_camera.cpp
     // makes this call only so that the God view lets go of the frame.
     const bool window = CutsceneWindowFlat();
-    if (ScriptCameraStoryOwns() || window) {
+    const bool story = ScriptCameraStoryOwns();
+    // THE HOLD (cutscene_hold). A story camera starts at the game camera of
+    // the God view, 400 units from the player and far above the land. While
+    // the story waits for its bars and while the walls of the window close,
+    // the God view keeps the view of the frame before, with no step of the
+    // player. The walls then close over the land that the player saw.
+    g_god_hold = g_have_table && CutsceneWindowHoldsGod(story);
+    if (g_god_hold) {
+      g_god_zoom = g_god_ground = g_god_turn = 0;
+      StopZoomHold("a story takes the camera", false);
+      StopWalk("a story takes the camera", false);
+      g_tele.pending = false;
+      g_spawn.pending = false;
+      g_spawn.again = false;
+      g_pan = {};
+      g_god_clock = Seconds();
+      g_god_display = ModDisplaySeconds();
+      for (int i = 0; i < 3; ++i) {
+        position_out[i] = g_origin[i];
+        focus_out[i] = g_origin[i] + g_basis[i * 3 + 2] * g_focus_distance;
+      }
+      *lean_gain = LeanGain(g_scale, HeadPoseScale());
+      g_live = true;
+      g_owned = true;
+      return true;
+    }
+    if (story || window) {
       if (!g_god_story) {
         g_god_story = true;
         ModLog("god view     : %s, so the God view stands aside until your "
@@ -3045,6 +3078,12 @@ bool TabletopPose(TablePose* pose, float table_room[3], float* lowest_scale,
 void TabletopMove(const TablePose& pose) {
   if (!g_installed || !g_have_table) return;
   if (!(pose.scale > 0.0f) || !(pose.heading == pose.heading)) return;
+  // The God view keeps its view while a story takes the camera. The serial
+  // goes up, so the grab anchors again when the view is free.
+  if (g_god_hold) {
+    ++g_serial;
+    return;
+  }
   if ((CameraFeatures() & kFeatureDrag) == 0) {
     ++g_serial;
     ++g_switch_refused;

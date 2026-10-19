@@ -559,6 +559,19 @@ that moves while the Hand takes it.
   around the player, with no window and with the camera of the game and all
   its motion (`script_camera=0`). The window stays the default. No run has
   shown it: a desktop run has no head to feel the motion.
+- **P18. The hold of the God view at the start of a story: run it and check
+  it in a headset.** When a story takes the camera (a tap on a scroll), the
+  God view keeps its view until the cut scene window is closed
+  (`cutscene_hold=1`, `cutscene-window.md`, section 3). The story camera
+  starts at the game camera of the God view, about 300 units above the land,
+  and the player saw that camera for the 0.5 s of the enter. The math checks
+  have the rule. Not run: a desktop run of a story (the story of the scroll
+  of the Creche, or the story to the pen) that shows the lines of the hold
+  and no frame of the story camera before the first flat frame. Check in a
+  headset that the walls close over the land with no jump, at the scroll of
+  the Creche, and compare with Shift S (`test_keys=1`). Not known: how long
+  a script waits between the camera and the bars. A story camera with no
+  bars gets the full view after `cutscene_hold_wait_ms` (1000).
 - **P5. Hand tracking.** The player plays with the hands and no
   controllers: the Hand follows the real hand and its fingers, one to one,
   as it follows a controller. First find what the headset gives to the

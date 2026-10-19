@@ -76,5 +76,13 @@ void HandModelSetOpacity(int hand, float opacity);
 int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
                   float near_plane, float half_x, float half_y);
 
+// In an eye pass: draws the hands of this frame once more, mirrored at the
+// sea (the plane y = 0), in the color of the game's reflection of its Hand:
+// the texture times a gray of 0xA0 with no light, and the alpha 0x65. They
+// write no depth. Returns the count of triangles drawn, or -1 when the draw
+// failed.
+int HandModelDrawReflection(IDirect3DDevice7* device, const float camera[12],
+                            float near_plane, float half_x, float half_y);
+
 // Once a report window.
 void HandModelReport();

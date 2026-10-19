@@ -258,6 +258,11 @@ bool g_said_failed = false;
 uint64_t g_frame = 0;
 int g_eye = -1;
 uint64_t g_asked_frame[2] = {0, 0};
+// The reflection of the hands: the frame of each eye, and the counts of a
+// report window.
+uint64_t g_reflected_frame[2] = {0, 0};
+uint64_t g_reflections = 0;
+uint64_t g_reflection_triangles = 0;
 uint64_t g_drawn_frame[2] = {0, 0};
 
 // For the log: the hands of this frame.
@@ -1343,8 +1348,46 @@ void OverlayDraw() {
   }
 }
 
+// hand_exact.cpp, in place of the game's reflection of its hidden Hand
+// (GLandscape::Draw, 0x005E4985): the reflection of the hands of the mod in
+// the water, in each eye pass at most once a frame. Only the mesh hands of
+// hand_model.cpp have a reflection. True when a hand was drawn.
+bool OverlayDrawReflection() {
+  if (!g_mesh_hands) return false;
+  const int eye = g_eye;
+  if (eye < 0 || eye > 1 || g_reflected_frame[eye] == g_frame) return false;
+  g_reflected_frame[eye] = g_frame;
+  IDirect3DDevice7* device =
+      *reinterpret_cast<IDirect3DDevice7* const*>(
+          bw::render::kDirect3DDevice7);
+  if (device == nullptr) return false;
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(
+          bw::tech::kInfoTransform);
+  const float near_plane =
+      *reinterpret_cast<const float*>(bw::tech::kNearPlane);
+  const float hx = info->half_res_x, hy = info->half_res_y;
+  if (!(near_plane > 0.0f) || !(hx > 0.0f) || !(hy > 0.0f)) return false;
+  float m[12];
+  OverlayEyeMatrix(m);
+  const int drawn = HandModelDrawReflection(device, m, near_plane, hx, hy);
+  if (drawn > 0) {
+    ++g_reflections;
+    g_reflection_triangles += static_cast<uint64_t>(drawn);
+  }
+  return drawn > 0;
+}
+
 // Once a report window.
 void OverlayReport() {
+  if (g_reflections > 0) {
+    ModLog("overlay      : the reflection of the hands in the water is drawn "
+           "in %llu eye passes, %.0f triangles a pass",
+           g_reflections,
+           static_cast<double>(g_reflection_triangles) /
+               static_cast<double>(g_reflections));
+    g_reflections = g_reflection_triangles = 0;
+  }
   HandModelReport();
   HandFeelReport();
   if (g_drawn == 0 && g_nothing == 0 && g_failed == 0) return;

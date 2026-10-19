@@ -1222,10 +1222,10 @@ the blocks of the land again with the heights times -1, under the sea. It
 draws no object. After it, at each gain, `GLandscape::Draw` draws the mesh
 of the player's Hand once more, pale, under the water, and the Creature when
 it is near the sea (`0x005E4914` to `0x005E4B26`). With the controls of the
-mod the game's Hand is hidden, and its reflection is hidden too
-(`hand_hide_reflection`, [hand.md](hand.md), "The mesh is hidden"). So the
-water shows the reflection of no hand, and the ring of the leash has none in
-the game. The icon of the kind of leash of the game's interface is a small
+mod the game's Hand is hidden, and in place of its reflection the overlay
+draws both hands of the mod there, mirrored at the sea, in the color of the
+game's reflection (`hand_reflection`, [hand.md](hand.md), "The reflection of
+the hands"). The ring of the leash has no reflection in the game. The icon of the kind of leash of the game's interface is a small
 leash at a fixed place in front of the head. While the ring of the leash is
 on the wrist of the hand that does not point, the mod hides that icon
 (`leash_icon_hide`, [grab.md](grab.md), "The leash at the mod's hand"), so

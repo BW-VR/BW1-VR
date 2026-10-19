@@ -880,7 +880,7 @@ order, with the kind, the gesture and whether the icon is hidden.
 Ctrl, Shift and L change the value: a long pulse for 1 and a short pulse
 for 0. The test key `leash_icon_test` gives a frame of the mod at which the
 value changes, as the key does. The ring of the leash at the wrist has no
-reflection in the water ([hand.md](hand.md), "The mesh is hidden"). Only a
+reflection in the water ([hand.md](hand.md), "The reflection of the hands"). Only a
 headset shows whether the view over the sea now has no ring that moves with
 the head.
 

@@ -644,6 +644,20 @@ inline void ToCamera(const float m[12], const float p[3], float out[3]) {
   out[2] = p[0] * m[2] + p[1] * m[5] + p[2] * m[8] + m[11];
 }
 
+// THE REFLECTION IN THE WATER. A world to camera matrix that first mirrors a
+// world point at the plane y = plane: ToCamera(out, p) is ToCamera(m, p')
+// with p' = (p.x, 2 * plane - p.y, p.z). The sea of the game is the plane
+// y = 0, and the reflection of the land has its heights times -1 (fn_007FF4F0).
+// The mirror makes the determinant of the turn negative, so the triangles
+// turn the other way.
+inline void MirrorCameraY(const float m[12], float plane, float out[12]) {
+  for (int i = 0; i < 12; ++i) out[i] = m[i];
+  for (int i = 0; i < 3; ++i) {
+    out[3 + i] = -m[3 + i];
+    out[9 + i] = m[9 + i] + 2.0f * plane * m[3 + i];
+  }
+}
+
 // A camera point on the screen, with the depth the game writes:
 //
 //   x = (1 + cx / cz) * hx      y = (1 - cy / cz) * hy

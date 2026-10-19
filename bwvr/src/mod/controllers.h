@@ -197,6 +197,11 @@ void ControllersLeftLeashToggle(const char* by);
 // test_keys=1): with controls=1 the trigger of the hand that does not point
 // takes as the trigger of the pointing hand does (docs/controllers.md, 5.7).
 void ControllersLeftTakeToggle(const char* by);
+// The test key of left_hold (Ctrl, Shift and the decimal key of the number
+// pad, with test_keys=1) and the word "holdkey" of the scripted controller:
+// with controls=1 an object that the trigger of the other hand takes stays
+// in that hand (docs/controllers.md, 5.7).
+void ControllersLeftHoldToggle(const char* by);
 // The grip point of the hand that does not point in the room, in game units
 // as ControllerDirectMotion gives the grip of the pointing hand. False while
 // that hand is not tracked or the direct hand does not act.

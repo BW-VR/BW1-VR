@@ -8828,6 +8828,108 @@ bool HandDirectTakeRuns() {
   return g_face != nullptr && TakeObject(g_face) != nullptr;
 }
 
+// For left_hold.cpp (docs/controllers.md, 5.7, "The carry of the other
+// hand"): the objects that the Hand can hold near a point, from the map of
+// the game. The candidates of the draw are only the objects near the pick of
+// the Hand, so the search walks the cells of the map instead. MapCoords::ToMap
+// (0x00603430) gives the cell: x and z of the world over 10 (the high words
+// of the MapCoords, x and z times 6553.6), the cell at GGame+0x59FC +
+// (width * x + z) * 8, x below GGame+0x59C8 and z below the width at
+// GGame+0x59C4. A cell has its first mobile object at +0 and its first fixed
+// object at +4, and Object::GetMapChild (vtable +0x53C, the cell) gives the
+// next one. The gap to an object is the smaller one of its body, a cylinder
+// from its base (near_math::BodyGap), and the ball of the box of its mesh
+// (BoxBall), so a hand in the crown of a tree reaches the tree.
+const uintptr_t kGameCells = 0x59FC;
+const uintptr_t kGameCellsZ = 0x59C4;
+const uintptr_t kGameCellsX = 0x59C8;
+const int kGetMapChild = 0x53C;
+const float kCellUnits = 10.0f;
+typedef void*(__fastcall* MapChildFn)(void* object, void* unused, void* cell);
+
+// The gap of each object that the Hand can hold in the 3 by 3 cells around
+// the point. Returns the nearest one with its gap, or null.
+void* NearestHoldableOnMap(const float point[3], float* best_gap) {
+  *best_gap = -1.0f;
+  if (g_face == nullptr) return nullptr;
+  const uint8_t* const* game_link =
+      reinterpret_cast<const uint8_t* const*>(0x00D0195C);
+  if (IsBadReadPtr(game_link, sizeof(void*)) || *game_link == nullptr) {
+    return nullptr;
+  }
+  const uint8_t* game = *game_link;
+  const uint32_t cells_x = *reinterpret_cast<const uint32_t*>(game + kGameCellsX);
+  const uint32_t cells_z = *reinterpret_cast<const uint32_t*>(game + kGameCellsZ);
+  void* status = *reinterpret_cast<void* const*>(g_face + kFaceStatus);
+  const int cx = static_cast<int>(floorf(point[0] / kCellUnits));
+  const int cz = static_cast<int>(floorf(point[2] / kCellUnits));
+  void* best = nullptr;
+  for (int x = cx - 1; x <= cx + 1; ++x) {
+    for (int z = cz - 1; z <= cz + 1; ++z) {
+      if (x < 0 || z < 0 || static_cast<uint32_t>(x) >= cells_x ||
+          static_cast<uint32_t>(z) >= cells_z) {
+        continue;
+      }
+      uint8_t* cell = const_cast<uint8_t*>(game) + kGameCells +
+                      (static_cast<uintptr_t>(cells_z) * x + z) * 8;
+      for (int list = 0; list < 2; ++list) {
+        void* object = *reinterpret_cast<void**>(cell + list * 4);
+        for (int n = 0; object != nullptr && n < 512; ++n) {
+          if (IsBadReadPtr(object, 0x48)) break;
+          void** table = VTable(object);
+          const uint8_t* model = *reinterpret_cast<uint8_t* const*>(
+              static_cast<uint8_t*>(object) + kObjectMesh);
+          if (model != nullptr && !IsCreatureObject(object) &&
+              Holdable(object, status)) {
+            const float* at =
+                reinterpret_cast<const float*>(model + kMeshTranslation);
+            const Body body = BodyOf(object);
+            float gap =
+                near_math::BodyGap(point, at, body.radius, body.height).gap;
+            // The crown of a tree is out of its body: the ball of the box of
+            // the mesh holds it.
+            Candidate c;
+            c.object = object;
+            c.model = model;
+            for (int k = 0; k < 3; ++k) c.position[k] = at[k];
+            float ball[3], ball_radius = 0.0f;
+            if (BoxBall(c, ball, &ball_radius)) {
+              const float boxed = Distance(point, ball) - ball_radius;
+              if (boxed < gap) gap = boxed;
+            }
+            if (gap < 0.0f) gap = 0.0f;
+            if (*best_gap < 0.0f || gap < *best_gap) {
+              *best_gap = gap;
+              best = object;
+            }
+          }
+          object = reinterpret_cast<MapChildFn>(table[kGetMapChild / 4])(
+              object, nullptr, cell);
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// The object that the Hand can hold whose body is nearest to a point, with a
+// gap of at most max_gap world units.
+bool HandDirectHoldableAt(const float point[3], float max_gap,
+                          void** object) {
+  float gap = -1.0f;
+  void* best = NearestHoldableOnMap(point, &gap);
+  *object = best != nullptr && gap <= max_gap ? best : nullptr;
+  return *object != nullptr;
+}
+
+// The gap of the nearest object that the Hand can hold to a point, for the
+// log of left_hold.cpp, or -1 with none in the 3 by 3 cells.
+float HandDirectNearestHoldableGap(const float point[3]) {
+  float gap = -1.0f;
+  NearestHoldableOnMap(point, &gap);
+  return gap;
+}
+
 // For miracle.cpp (docs/miracles.md, "A miracle in the Hand in the plain
 // game"): world units in a meter of the room now, the point of the real hand of
 // this frame, and the object of the next pick record. The record gets the

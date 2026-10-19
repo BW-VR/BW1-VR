@@ -40,6 +40,7 @@
 #include "render_thread.h"
 #include "tabletop.h"
 #include "far_grab.h"
+#include "left_hold.h"
 #include "take_stream.h"
 #include "target_glow.h"
 #include "throw_physics.h"
@@ -1782,6 +1783,7 @@ void StartVrStep() {
         ThrowPhysicsSetDraw(g_throw_draw);
         ThrowPhysicsInstallEarly();
         FarGrabInstall();
+        LeftHoldInstall();
         TakeStreamSetOptions(g_take_stream, g_test_keys);
         TakeStreamInstall();
         ThrowPhysicsInstall();

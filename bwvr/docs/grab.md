@@ -804,34 +804,42 @@ the wrist of that hand, as the overlay drew it (`OverlayOtherWrist`,
 `overlay_math::kWristPoint`), for a leash on the Hand. The log line says
 `the rope ends at the wrist of the hand that does not point`.
 
-**The ring of the leash.** While the leash is on the Hand, the game draws a
-turning ring of the mesh `Data\MISC\leash.l3d` and a glow over the wrist of
-its Hand [R]. The ring is the ring of a post of the leash at the Temple: each
-`LeashObj` of the `TempleLeash` (`CitadelHeart::CreateLeashes`) has a ring at
-`+0x5C` and a sprite at `+0x70`. `CitadelHeart::DrawNow` calls
-`fn_00466730` (thiscall, the `CitadelHeart`, no arguments), which turns the
-three rings at their posts. For the kind of leash that is on the Hand of
-the local player, it puts the ring at the wrist bone of the game's Hand
-instead: the angles of the first matrix of the pose of the Hand's mesh
-(`CHand+0x482C`, then `+0x80`, `LHMatrix::GetYXZ`), its place, and an
+**The ring of the leash.** For the kind of leash of the Temple, the game draws
+a turning ring of the mesh `Data\MISC\leash.l3d` and a glow over the wrist of
+its Hand [R]. The ring stays at the Hand while the leash is off the Creature
+and while the Hand holds a miracle. The ring is the ring of a post of the
+leash at the Temple: each `LeashObj` of the `TempleLeash`
+(`CitadelHeart::CreateLeashes`) has a ring at `+0x5C` and a sprite at `+0x70`.
+`CitadelHeart::DrawNow` calls `fn_00466730` (thiscall, the `CitadelHeart`, no
+arguments), which turns the three rings at their posts. For the kind of leash
+of the `TempleLeash` (`CitadelHeart+0xE4`, its first value), it puts the ring
+at the wrist bone of the game's Hand instead, when the heart is the heart of
+the local player, the Creature of that player has that kind
+(`Creature+0x1108`, a slot for each kind from 1), the float at `+0x9C` of the
+object at `CitadelHeart+0x40` is 1, and the mesh of the Hand has 0 at `+0xAC`.
+It puts it there with the angles of the first matrix of the pose of the Hand's
+mesh (`CHand+0x482C`, then `+0x80`, `LHMatrix::GetYXZ`), its place, and an
 offset and a size from the size of the mesh (`+0x44` times 173.5) [V]. The
 glow takes the same place.
 
-With `left_leash=1` and `leash_ring_left=1`, a hook of `fn_00466730` gives
-the function a wrist bone of its own for the call, and after the call puts
-back the matrix of the pose and the size of the mesh. The ring lies across
-the z axis of the bone, so the z axis of that bone goes along the other hand
-(the overlay's hand, `OverlayFreeWrist`), and the ring goes around the
-wrist. The size of the mesh for the call makes the radius of the ring 0.17
-of the length of the hand. Its place is the middle of the wrist, 0.04 of the
-length of the hand toward the knuckles, less the offset of the game. The
-hook measures that offset at the ring after each call, in the frame of the
-bone, for the next call. So the game puts its own ring and glow around the
-wrist of the other hand, with its size and its look. The hook goes in only
-when the first 11 bytes of the function are the bytes of the disassembly.
-The log line says `the game puts the ring of the leash around the wrist of
-the hand that does not point`, with the distance of the ring from the place
-that the hook wants. `leash_ring_left=0` leaves the ring at the game's Hand.
+With `left_leash=1` and `leash_ring_left=1`, while the controller places the
+Hand, a hook of `fn_00466730` makes the same tests (`RingAtHand`). For a call
+that puts the ring at the Hand it gives the function a wrist bone of its own,
+and after the call puts back the matrix of the pose and the size of the mesh.
+The ring lies across the z axis of the bone, so the z axis of that bone goes
+along the other hand (the overlay's hand, `OverlayFreeWrist`), and the ring
+goes around the wrist. The size of the mesh for the call makes the radius of
+the ring 0.17 of the length of the hand. Its place is the middle of the wrist,
+0.04 of the length of the hand toward the knuckles, less the offset of the
+game. The hook measures that offset at the ring after each call, in the frame
+of the bone, for the next call. So the game puts its own ring and glow around
+the wrist of the other hand, with its size and its look. The hook goes in only
+when the first 11 bytes of the function are the bytes of the disassembly. The
+log line says `the game puts the ring of the leash around the wrist of the
+hand that does not point`, with the distance of the ring from the place that
+the hook wants. Tag `leash` also gives one line for each change of the leash
+on the Creature: `the ring stays around the wrist of the hand that does not
+point`. `leash_ring_left=0` leaves the ring at the game's Hand.
 
 The interface of the game also shows the kind of leash as a small icon at
 the lower right corner of the screen (`DisplayGesture`,

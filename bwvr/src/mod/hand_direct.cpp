@@ -6108,26 +6108,19 @@ uint64_t g_leash_wrist_last = 0;
 int g_leash_wrist_logs = 0;
 
 // THE RING OF THE LEASH ON THE OTHER HAND (left_leash=1, leash_ring_left=1):
-// the leash is on the Hand (not tied to an object), and the Hand holds no
-// miracle.
+// the controller places the Hand, and the leash is a job of the other hand.
+// The game shows the ring at its Hand for the kind of leash of the Temple,
+// also while the leash is off the Creature and while the Hand holds a
+// miracle (RingAtHand). So no state of the leash and no state of the Hand
+// counts here.
 bool LeashRingLeft() {
-  if (!ControllersLeftLeash() || !g_owns || g_face == nullptr ||
-      g_hand == nullptr || State(g_hand) == kStateGrain) {
-    return false;
-  }
-  const uint8_t* status =
-      *reinterpret_cast<uint8_t* const*>(g_face + kFaceStatus);
-  if (status == nullptr) return false;
-  const uint8_t* leash =
-      *reinterpret_cast<uint8_t* const*>(status + kStatusLeash);
-  return leash != nullptr &&
-         *reinterpret_cast<const int32_t*>(leash + kLeashOn) != 0 &&
-         *reinterpret_cast<void* const*>(leash + kLeashObject) == nullptr;
+  return ControllersLeftLeash() && g_owns && g_hand != nullptr;
 }
 
-// THE RING OF THE LEASH (docs/grab.md, "The leash at the mod's hand"). While
-// the leash is on the Hand, the game draws a ring of the mesh
-// Data\MISC\leash.l3d and a glow at the wrist of its Hand.
+// THE RING OF THE LEASH (docs/grab.md, "The leash at the mod's hand"). For
+// the kind of leash of the Temple, the game draws a ring of the mesh
+// Data\MISC\leash.l3d and a glow at the wrist of its Hand, also while the
+// leash is off the Creature (RingAtHand).
 // CitadelHeart::DrawNow calls fn_00466730 (thiscall, the CitadelHeart, no
 // arguments) for the three rings at the posts of the leash in the Temple.
 // For the kind of leash that is on the Hand, that function puts the ring at
@@ -6144,7 +6137,9 @@ bool LeashRingLeft() {
 // kRingToKnuckles toward the knuckles, less the
 // offset of the game, measured at the ring after each call in the frame of
 // the bone. So the game puts its own ring and glow around the wrist of the
-// other hand. leash_ring_left=0 leaves the ring at the game's Hand.
+// other hand. The hook changes the bone only for the call that puts the ring
+// at the Hand (RingAtHand), so the offset never comes from a ring at a post.
+// leash_ring_left=0 leaves the ring at the game's Hand.
 const uintptr_t kDrawLeashRings = 0x00466730;
 const int kHandMeshObject = 0x482C;
 const int kMeshPose = 0x80;
@@ -6156,12 +6151,19 @@ const float kRingRadiusShare = 0.17f;   // of the length of the hand
 // the hand, so the ring lies on the skin and not over the end of the mesh.
 const float kRingToKnuckles = 0.04f;
 const int kHeartLeashes = 0xE4;         // CitadelHeart: its TempleLeash
+const int kHeartPlayer = 0x1C;          // CitadelHeart vtable: its GPlayer
+const int kHeartObject = 0x40;          // CitadelHeart: an object with
+const int kHeartObjectOn = 0x9C;        // a float, 1 when the rings turn
+const int kCreatureLeashes = 0x1108;    // Creature: a slot for each kind from 1
+const int kMeshNoRing = 0xAC;           // the mesh of the Hand: 0 for a ring
 const int kLeashRing = 0x5C;            // LeashObj: its ring
 typedef void(__fastcall* DrawRingsFn)(void* self, void* unused);
 DrawRingsFn o_DrawLeashRings = nullptr;
 bool g_leash_ring_left = true;  // leash_ring_left
 uint64_t g_ring_left_calls = 0;
 bool g_ring_left_said = false;
+int g_ring_leash_on = -1;  // the leash on the Creature at the last call
+int g_ring_leash_logs = 0;
 // The offset of the ring from the bone, in the frame of the bone, from the
 // last call.
 float g_ring_offset[3] = {0.0f, 0.0f, 0.0f};
@@ -6201,6 +6203,43 @@ float* RingMatrix(void* heart) {
   return reinterpret_cast<float*>(ring + 0x14);
 }
 
+// True when fn_00466730 puts the ring of this CitadelHeart at the Hand, with
+// the tests of the function: the float at +0x9C of the object at +0x40 is 1
+// (0x00466764), the GPlayer of the heart has a Creature (+0xA4C) with the
+// kind of leash of the TempleLeash (0x004667B0), that GPlayer is the local
+// player (0x004669D1), and the mesh of the Hand has 0 at +0xAC (0x004669F0).
+// The heart of each other player keeps its ring at its post, and the hook
+// does not measure an offset there.
+bool RingAtHand(void* heart, const uint8_t* mesh) {
+  uint8_t* const h = static_cast<uint8_t*>(heart);
+  if (IsBadReadPtr(h, kHeartLeashes + 4) ||
+      IsBadReadPtr(mesh + kMeshNoRing, sizeof(int32_t)) ||
+      *reinterpret_cast<const int32_t*>(mesh + kMeshNoRing) != 0) {
+    return false;
+  }
+  const uint8_t* object = *reinterpret_cast<uint8_t* const*>(h + kHeartObject);
+  if (object == nullptr || IsBadReadPtr(object + kHeartObjectOn, 4) ||
+      *reinterpret_cast<const float*>(object + kHeartObjectOn) != 1.0f) {
+    return false;
+  }
+  const uint8_t* temple = *reinterpret_cast<uint8_t* const*>(h + kHeartLeashes);
+  if (temple == nullptr || IsBadReadPtr(temple, 4)) return false;
+  const int kind = *reinterpret_cast<const int32_t*>(temple);
+  if (kind < 0 || kind > 2) return false;
+  const uint8_t* player = static_cast<const uint8_t*>(
+      reinterpret_cast<GetPlayerFn>(VTable(heart)[kHeartPlayer / 4])(heart,
+                                                                     nullptr));
+  if (player == nullptr || player != LocalPlayer()) return false;
+  const uint8_t* creature =
+      *reinterpret_cast<uint8_t* const*>(player + kPlayerCreature);
+  if (creature == nullptr ||
+      IsBadReadPtr(creature + kCreatureLeashes, 4 * sizeof(void*))) {
+    return false;
+  }
+  return *reinterpret_cast<void* const*>(creature + kCreatureLeashes +
+                                         4 * (kind + 1)) != nullptr;
+}
+
 void __fastcall h_DrawLeashRings(void* self, void* unused) {
   float* bone = nullptr;
   uint8_t* mesh = nullptr;
@@ -6209,6 +6248,7 @@ void __fastcall h_DrawLeashRings(void* self, void* unused) {
   if (g_leash_ring_left && LeashRingLeft() &&
       OverlayFreeWrist(wrist, axes, &length, false) && length > 0.0f) {
     mesh = HandMeshObject();
+    if (mesh != nullptr && !RingAtHand(self, mesh)) mesh = nullptr;
     if (mesh != nullptr) {
       float* const pose = *reinterpret_cast<float* const*>(mesh + kMeshPose);
       if (pose != nullptr && !IsBadWritePtr(pose, 12 * sizeof(float))) {
@@ -6286,6 +6326,29 @@ void __fastcall h_DrawLeashRings(void* self, void* unused) {
            sqrtf(gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]),
            2.0f * kRingRadiusShare * length, length, g_frame);
   }
+  // One line for each change of the leash on the Creature, so a run shows
+  // that the ring stays at the other hand when the leash comes off.
+  const uint8_t* status =
+      g_face != nullptr
+          ? *reinterpret_cast<uint8_t* const*>(g_face + kFaceStatus)
+          : nullptr;
+  const uint8_t* leash =
+      status != nullptr
+          ? *reinterpret_cast<uint8_t* const*>(status + kStatusLeash)
+          : nullptr;
+  const int on = leash != nullptr &&
+                 *reinterpret_cast<const int32_t*>(leash + kLeashOn) != 0;
+  if (ring != nullptr && on != g_ring_leash_on && g_ring_leash_logs < 8) {
+    ++g_ring_leash_logs;
+    const float gap[3] = {ring[9] - wrist[0], ring[10] - wrist[1],
+                          ring[11] - wrist[2]};
+    ModLog("leash        : the leash is %s the Creature, and the ring stays "
+           "around the wrist of the hand that does not point, %.2f units "
+           "from its middle, frame %llu", on ? "on" : "off",
+           sqrtf(gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]),
+           g_frame);
+  }
+  g_ring_leash_on = on;
 }
 
 void __fastcall h_LeashStart(void* self, void* unused, float* out,

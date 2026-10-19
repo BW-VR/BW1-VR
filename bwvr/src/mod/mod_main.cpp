@@ -114,6 +114,8 @@ void IntroSkipFrame(uintptr_t caller, bwvr::XrScreen* screen);
 // and the crash log (crash_log).
 void HangWatchFrame();
 void CrashLogInstall();
+// memory_watch.cpp: the line of the address space (memory_log).
+void MemoryWatchInstall();
 // controllers.cpp
 void ControllerHintsSetOptions(bool on, const char* forced_profile);
 bool ControllerHintsInstall();
@@ -2704,6 +2706,7 @@ void Startup() {
   if (status != MH_OK) g_vr_enabled = false;
   ExitPathInstall();
   Depth24Install();
+  MemoryWatchInstall();
 }
 
 // THE END OF THE MOD.

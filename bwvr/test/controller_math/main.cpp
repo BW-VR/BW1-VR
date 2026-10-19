@@ -3576,6 +3576,7 @@ void CreatureChecks() {
 #include "fight_checks.h"
 #include "vr_start_checks.h"
 #include "learn_checks.h"
+#include "address_space_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3996,6 +3997,7 @@ int main() {
   fight_checks::FightChecks();
   vr_start_checks::VrStartChecks();
   learn_checks::LearnChecks();
+  address_space_checks::AddressSpaceChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

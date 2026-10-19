@@ -57,6 +57,7 @@
 #include "creature_command.h"
 #include "debug_menu.h"
 #include "far_grab.h"
+#include "left_hold.h"
 #include "frame_profile.h"
 #include "haptics.h"
 #include "hand_exact_math.h"
@@ -303,6 +304,8 @@ enum FakeInput {
   // The left hand goes to the place of the right hand now, on the first frame
   // of the word.
   kLMatch,
+  // The test key of left_hold acts on the first frame of the word.
+  kHoldKey,
   kInputCount
 };
 
@@ -317,7 +320,7 @@ const char* const kInputName[kInputCount] = {
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
-    "controlskey", "lmatch"};
+    "controlskey", "lmatch", "holdkey"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -1133,6 +1136,9 @@ void UpdateScript() {
     if (step.input == kPromptKey && t == step.start) {
       HintCardMovesToggle("The word promptkey");
     }
+    if (step.input == kHoldKey && t == step.start) {
+      ControllersLeftHoldToggle("The word holdkey");
+    }
     if (step.input == kControlsKey && t == step.start) {
       ControllersControlsToggle("The word controlskey");
     }
@@ -1162,7 +1168,7 @@ void UpdateScript() {
         i == kTouchCreature || i == kRot || i == kAimFar || i == kPull ||
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
-        i == kMoveKey || i == kLMatch) {
+        i == kMoveKey || i == kLMatch || i == kHoldKey) {
       continue;
     }
     if (i == kPose2) {
@@ -1869,6 +1875,36 @@ bool LeftTakeOn() {
     LogLeftTake("");
   }
   return g_left_take != 0;
+}
+
+// THE CARRY OF THE OTHER HAND (left_hold, docs/controllers.md, 5.7). With
+// controls=1, left_take=1 and left_hold=1, a take with the trigger of the
+// other hand ends in the carry of that hand (left_hold.cpp): the object stays
+// in that hand while its trigger is down, and the Hand of the game is free
+// for a take of its own. 0 keeps the take in the Hand of the game, which goes
+// back when the trigger opens. With test_keys=1, Ctrl, Shift and the decimal
+// key of the number pad change it.
+int g_left_hold = -1;
+
+void LogLeftHold(const char* by) {
+  ModLog("controllers  : %s%sleft_hold=%d. %s", by, by[0] != 0 ? ": " : "",
+         g_left_hold,
+         g_left_hold != 0
+             ? "With controls=1 and left_take=1, an object that the trigger "
+               "of the hand that does not point takes stays in that hand "
+               "while the trigger is down, and the Hand of the game is free "
+               "for the pointing hand"
+             : "An object that the trigger of the hand that does not point "
+               "takes is in the Hand of the game, and the Hand stays at "
+               "that controller until the trigger opens");
+}
+
+bool LeftHoldKeyOn() {
+  if (g_left_hold < 0) {
+    g_left_hold = IniInt("left_hold", 1) != 0 ? 1 : 0;
+    LogLeftHold("");
+  }
+  return g_left_hold != 0;
 }
 
 // The trigger or the grip that makes a game button, as the pump last saw it.
@@ -3077,6 +3113,17 @@ void PollControlsKey() {
   if (less_pressed && GameInFront()) {
     ControllersLeftTakeToggle("Ctrl, Shift and the less than key");
   }
+  // Ctrl, Shift and the decimal key of the number pad: left_hold.
+  static bool decimal_before = false;
+  const bool decimal = (GetAsyncKeyState(VK_DECIMAL) & 0x8000) != 0 &&
+                       (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                       (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool decimal_pressed = decimal && !decimal_before;
+  decimal_before = decimal;
+  if (decimal_pressed && GameInFront()) {
+    ControllersLeftHoldToggle("Ctrl, Shift and the decimal key of the number "
+                              "pad");
+  }
   if (!pressed || !GameInFront()) return;
   ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
 }
@@ -3153,10 +3200,17 @@ void PumpButtons(ULONGLONG now) {
       in.leash_on = ControllersLeftLeash() && CreatureCommandLeashOn();
       in.busy = !DirectHandNow() || !Usable() || HandDirectHandBusy() ||
                 g_trigger_down;
+      in.parked = LeftHoldKeyOn() && LeftHoldCarrying();
       in.frame = g_frame;
       const int before = g_left_take_state.state;
       left_out = controller_math::LeftTakeStep(&g_left_take_state, in);
       g_left_command = left_out.command;
+      if (LeftHoldKeyOn()) {
+        LeftHoldFrame(g_left_take_state.state == controller_math::kLeftTake,
+                      left_out.drop, Usable(), g_frame);
+      } else {
+        LeftHoldLetGo("left_hold is 0");
+      }
       if (g_left_take_state.state != before &&
           g_left_take_logs < kMaxLeftTakeLogs) {
         ++g_left_take_logs;
@@ -3165,16 +3219,18 @@ void PumpButtons(ULONGLONG now) {
             "borrows the Hand and looks for a target there",
             "takes with the Hand (a target at that hand)",
             "commands the Creature (no target there)",
-            "does nothing (no target there, and no leash)"};
+            "does nothing (no target there, and no leash)",
+            "carries the object of the take, and the Hand goes back"};
         const int state = g_left_take_state.state;
         ModLog("controllers  : the trigger of the %s hand %s (left_take=1), "
                "frame %llu", FreeIndex() == 0 ? "left" : "right",
-               state >= 0 && state <= controller_math::kLeftNone
+               state >= 0 && state <= controller_math::kLeftCarry
                    ? kWords[state] : "?",
                g_frame);
       }
     } else {
       g_left_take_state = controller_math::LeftTake();
+      LeftHoldLetGo("the take of the other hand is off");
       if (!was && g_ltrigger_down) {
         g_left_command =
             controller_math::OtherPressCommands(OtherStickPushed());
@@ -5293,6 +5349,14 @@ void ControllersClimbToggle(const char* by) {
   ControllersGrabPulse(1, 0.5f, g_climb != 0 ? 0.30f : 0.08f);
   ModLog("controllers  : %s: move_stick_climb=%d, frame %llu", by, g_climb,
          g_frame);
+}
+
+void ControllersLeftHoldToggle(const char* by) {
+  if (!g_on) return;
+  g_left_hold = LeftHoldKeyOn() ? 0 : 1;
+  if (g_left_hold == 0) LeftHoldLetGo("left_hold is 0 now");
+  ControllersGrabPulse(1, 0.5f, g_left_hold != 0 ? 0.30f : 0.08f);
+  LogLeftHold(by);
 }
 
 void ControllersLeftTakeToggle(const char* by) {

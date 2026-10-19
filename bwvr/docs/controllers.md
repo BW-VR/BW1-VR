@@ -1341,16 +1341,20 @@ of that hand:
 4. **The take from the side.** While the Hand of the game holds an object,
    a press of the other trigger takes an object in the reach of the other
    hand with no borrow. The search walks the 3 by 3 cells of the map of the
-   game around the middle of that hand (`HandDirectHoldableAt`: a cell at
-   `GGame+0x59FC`, the lists at `+0` and `+4`, `Object::GetMapChild`), and
-   the reach is 0.35 of the length of the hand to the body of the object or
-   to the ball of the box of its mesh. For one call the mod empties the hands
-   and the `CHand` (it keeps the fields `+0x48FC` to `+0x4948`), and the
-   pick up of the game takes the object
+   game (`HandDirectHoldableAt`: a cell at `GGame+0x59FC`, the lists at `+0`
+   and `+4`, `Object::GetMapChild`) around 5 points along the hand, from 0.2
+   of the hand past the wrist to the finger tips. The reach is 0.25 of the
+   length of the hand from one of those points to the body of the object or
+   to the ball of the box of its mesh. For one call the mod empties the
+   hands and the `CHand` (it keeps the fields `+0x48FC` to `+0x4948`), and
+   the pick up of the game takes the object
    (`GInterface::PlaceObjectInMagicHand`, `0x005DA6F0`): its tests, the
-   reaction and the removal from the map. Then the mod parks the new object
-   and puts back the object of the Hand. So each hand holds its own object
-   in either order.
+   reaction and the removal from the map. Then the mod parks the new object,
+   puts back the object of the Hand, and moves the new object into the palm
+   of the other hand in 0.12 s, as the Hand of the game puts its object
+   there: the ball of its body touches the palm (`WristHoldPlace` in
+   `hand_exact_math.h`), with its 2D radius or, for a tree, the radius of
+   its trunk. So each hand holds its own object in either order.
 
 A miracle that the other hand takes stays in the Hand of the game.
 `left_hold=0` keeps the object in the Hand of the game, and the Hand stays

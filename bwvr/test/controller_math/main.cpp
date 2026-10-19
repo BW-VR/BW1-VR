@@ -3573,6 +3573,7 @@ void CreatureChecks() {
 #include "proxy_choice_checks.h"
 #include "fight_checks.h"
 #include "vr_start_checks.h"
+#include "address_space_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3990,6 +3991,7 @@ int main() {
   proxy_choice_checks::ProxyChoiceChecks();
   fight_checks::FightChecks();
   vr_start_checks::VrStartChecks();
+  address_space_checks::AddressSpaceChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

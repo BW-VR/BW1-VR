@@ -3201,13 +3201,17 @@ void PumpButtons(ULONGLONG now) {
       in.busy = !DirectHandNow() || !Usable() || HandDirectHandBusy() ||
                 g_trigger_down;
       in.parked = LeftHoldKeyOn() && LeftHoldCarrying();
+      // The take from the side: only at a press while the Hand is busy.
+      in.side_target = LeftHoldKeyOn() && in.busy && !was &&
+                       g_ltrigger_down && DirectHandNow() && Usable() &&
+                       LeftHoldSideTarget();
       in.frame = g_frame;
       const int before = g_left_take_state.state;
       left_out = controller_math::LeftTakeStep(&g_left_take_state, in);
       g_left_command = left_out.command;
       if (LeftHoldKeyOn()) {
         LeftHoldFrame(g_left_take_state.state == controller_math::kLeftTake,
-                      left_out.drop, Usable(), g_frame);
+                      left_out.side_take, left_out.drop, Usable(), g_frame);
       } else {
         LeftHoldLetGo("left_hold is 0");
       }
@@ -3220,11 +3224,12 @@ void PumpButtons(ULONGLONG now) {
             "takes with the Hand (a target at that hand)",
             "commands the Creature (no target there)",
             "does nothing (no target there, and no leash)",
-            "carries the object of the take, and the Hand goes back"};
+            "carries the object of the take, and the Hand goes back",
+            "takes the object at its palm from the side"};
         const int state = g_left_take_state.state;
         ModLog("controllers  : the trigger of the %s hand %s (left_take=1), "
                "frame %llu", FreeIndex() == 0 ? "left" : "right",
-               state >= 0 && state <= controller_math::kLeftCarry
+               state >= 0 && state <= controller_math::kLeftSide
                    ? kWords[state] : "?",
                g_frame);
       }

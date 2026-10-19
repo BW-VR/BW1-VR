@@ -1338,6 +1338,20 @@ of that hand:
    release. After the call the mod puts back what the Hand of the game holds.
    A carry also ends with no speed when the controllers cannot act.
 
+4. **The take from the side.** While the Hand of the game holds an object,
+   a press of the other trigger takes an object in the reach of the other
+   hand with no borrow. The search walks the 3 by 3 cells of the map of the
+   game around the middle of that hand (`HandDirectHoldableAt`: a cell at
+   `GGame+0x59FC`, the lists at `+0` and `+4`, `Object::GetMapChild`), and
+   the reach is 0.35 of the length of the hand to the body of the object or
+   to the ball of the box of its mesh. For one call the mod empties the hands
+   and the `CHand` (it keeps the fields `+0x48FC` to `+0x4948`), and the
+   pick up of the game takes the object
+   (`GInterface::PlaceObjectInMagicHand`, `0x005DA6F0`): its tests, the
+   reaction and the removal from the map. Then the mod parks the new object
+   and puts back the object of the Hand. So each hand holds its own object
+   in either order.
+
 A miracle that the other hand takes stays in the Hand of the game.
 `left_hold=0` keeps the object in the Hand of the game, and the Hand stays
 at the other controller until the trigger opens.
@@ -1447,6 +1461,11 @@ Desktop runs [R]:
   left hand, and the opening of `ltrigger` lets it go through the drop
   action of the game (it returns 22, the value of a throw from the Hand).
 
+- `spawn_run.ps1 -Save pen`, the take from the side: the pointing trigger
+  holds a tree, then `ltrigger` at a second tree. The log says that the pick
+  up of the game gave 1, that the other hand carries the tree, and that the
+  Hand keeps its own tree. The drop of the left hand gives 22.
+
 **Known limits, and what only a headset can show.**
 
 - A one-off seed that the trigger carries cannot become active by a second
@@ -1457,10 +1476,9 @@ Desktop runs [R]:
 - With `left_leash=1`, while the Hand of the game holds an object, the game
   offers no objects to the pick, so the cone of the other hand has no
   target then, and a command from the other hand goes to the land.
-- The carry needs the Hand of the game to be free at the press of the other
-  trigger: take with the other hand first, then with the pointing hand.
-  While the Hand of the game holds an object, a press of the other trigger
-  commands the Creature or does nothing.
+- While the Hand of the game holds an object, the other hand takes only
+  from its reach, and not from a distance. With no object in its reach, the
+  press commands the Creature or does nothing.
 - A carried object is not in the save of the game. A carry ends with no
   speed when the controllers cannot act (a menu of the game).
 - With `left_take=1` the hint card of the other hand does not name the

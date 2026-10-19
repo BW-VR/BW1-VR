@@ -387,7 +387,7 @@ is built, and no test has proven it.
   The A/B key is Ctrl, Shift and H. Not run: a story, a cut scene, a point
   or a throw at the player, and a Creature of a different player.
 
-- **B33. The game ends with "abnormal program termination" after a fetch
+- **B35. The game ends with "abnormal program termination" after a fetch
   of a dead tree.** In a headset session on the second island, the Hand
   took a dead tree from a distance. About 0.3 s after the glide the game
   ended with the box of `abort`, with no line in the log and with no dump.

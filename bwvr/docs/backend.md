@@ -60,7 +60,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/render_thread.cpp`, `render_thread_ring.h` | The hooks of the Direct3D 9 device, and the render thread (`render_thread`) |
 | `src/mod/fast_transform.cpp`, `fast_transform_math.h` | The two vertex loops of the engine with SSE (`fast_transform`) |
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`) |
-| `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`) |
+| `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`). The crash log: the C++ exceptions and each end of the game in its C runtime (`crash_log`) |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
 | `src/common/exe_check.h`, `version.h` | The build check and the product name |
@@ -1515,7 +1515,40 @@ needs no lock of the loader. `hang_watch=2` writes the place each 8 s, also
 while the frame thread makes frames. With each of the two values a fault
 that no handler takes writes its code, its place and the return addresses
 on the stack of its thread (a stack overflow shows the calls that repeat),
-and the frame thread keeps 64 KiB of its stack for that line.
+and the frame thread keeps 64 KiB of its stack for that line. Then the
+filter that was there before gets the fault.
+
+**The crash log.** The C runtime of the game (Visual C++ 6) ends the game
+with the box "abnormal program termination" in `abort` (`0x007C9849`). A
+C++ exception that no code catches, on any thread, comes there: the
+unhandled exception filter of the game (`0x007D5160`) calls `terminate`
+(`0x007D480C`), and `terminate` calls `abort`. The C++ exceptions of the mod
+and of the runtimes have the same code (`0xE06D7363`), so they come there
+too. A box with an error number (R6025 is a pure virtual call) comes from
+`_amsg_exit` (`0x007CA5A7`). Each of these ends the game with no line in
+the log and with no dump. So with `crash_log=1` (the default,
+`hang_watch.cpp`):
+
+- A vectored handler writes the first 8 C++ exceptions: the type, the text
+  of a class of the standard library, the thread, the frame and the return
+  addresses on the stack of the throw. It only reads, so a handler of the
+  game or of the mod still catches the exception.
+- Hooks of `abort`, `terminate` and `_amsg_exit` write the caller, the
+  thread, the count of the C++ exceptions, the type of the last one and the
+  return addresses on 16 KiB of the stack, so the frames of the throw are in
+  the line. Then the function of the game runs as before.
+- A filter writes a fault that no handler takes (for example an access
+  violation, with its address), and then gives it to the filter that was
+  there before.
+
+The names of the modules are read at the first frame and each 1800 frames.
+The return addresses are "module+offset": `runblack.exe+0x...` is the
+address `0x00400000` plus the offset for `bwvr/tools/disasm.py`, and
+`ddraw.dll+0x...` is an address of the mod for its PDB. `crash_log=0`
+installs nothing, and the game ends with no line. Two test keys prove the
+lines: `crash_log_caught_test=N` throws a C++ exception at the frame N of
+the frame thread and catches it, and `crash_log_test=N` throws one that the
+mod does not catch, so the game ends.
 
 **The split in a headset.** SteamVR with a Steam Frame, Ryzen 9 7950X3D,
 Radeon RX 7900 XTX, a render of 3304 by 2644 with 4x multisampling,
@@ -4916,6 +4949,8 @@ keys that the launcher sets.
 | `vk_upload_queue`, `vk_scene_reread_test` | 1, 0 | `vk_upload_queue=1`: the copy of a texture that a walk reads again goes to the GPU in the submit of the walk, with no wait of the D3D7 thread. 0: each copy goes to the GPU at once with a wait. A test key: Shift I. `vk_scene_reread_test=N` (a test key) reads N textures again in each walk, in turn. See "The Vulkan renderer" |
 | `fast_transform` | 1 | 1: the two vertex loops of the engine run with SSE, with the bits of the game. 0: on the x87 unit. See "The vertex loops with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
+| `crash_log` | 1 | 1: the log gets the first 8 C++ exceptions, an end of the game in `abort`, `terminate` or `_amsg_exit`, and a fault that no handler takes, each with the return addresses on its stack. 0: no line. See "The crash log" |
+| `crash_log_test`, `crash_log_caught_test` | 0, 0 | Test keys: at the frame N the frame thread throws a C++ exception that the mod does not catch (the game ends), or that the mod catches. See "The crash log" |
 | `hang_watch` | 0 | A test key: 1 the place of the frame thread when it makes no frame for 8 s, 2 each 8 s. With each of the two the place of a fault. See "The watch of the frame thread" |
 | `vk_lines` | 1 | With `backend=vulkan`: 1 a draw of points or lines becomes triangles of 1 pixel across, 0 it is not drawn. See "The backend of the mod on Vulkan" |
 | `vk_keep_picture` | 1 | With `backend=vulkan`: 1 a walk with no clear of the whole target before its first draw starts with the picture of the walk before, and the intro in stereo keeps the picture of each eye. 0 each walk starts black. A test key: Shift T. See "The picture of the walk before" |

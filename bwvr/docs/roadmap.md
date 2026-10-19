@@ -375,6 +375,14 @@ is built, and no test has proven it.
   The A/B key is Ctrl, Shift and H. Not run: a story, a cut scene, a point
   or a throw at the player, and a Creature of a different player.
 
+- **B33. The game ends with "abnormal program termination" after a fetch
+  of a dead tree.** In a headset session on the second island, the Hand
+  took a dead tree from a distance. About 0.3 s after the glide the game
+  ended with the box of `abort`, with no line in the log and with no dump.
+  The cause is not known. The crash log (`crash_log=1`, `backend.md`, "The
+  crash log") now writes the C++ exception and the caller of `abort`. The
+  next log of this end gives the place.
+
 B1b, B2, B4 and B11 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.
 

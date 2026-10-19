@@ -1010,7 +1010,11 @@ inline bool OtherPressCommands(bool stick_walks) { return !stick_walks; }
 // With left_hold=1 the take ends in the carry: once the Hand holds the
 // object, the mod parks it in the other hand (left_hold.cpp, parked), and the
 // Hand goes back. The object stays in that hand while the trigger is down,
-// and the opening of the trigger lets it go (drop).
+// and the opening of the trigger lets it go (drop). While the Hand is busy,
+// a press with an object that the Hand can hold at the palm of the other
+// hand (side_target) is the take from the side: the mod takes the object
+// for the other hand with no borrow of the Hand (side_take), and the park
+// gives the carry.
 enum LeftTakeState {
   kLeftIdle,
   kLeftBoost,
@@ -1019,6 +1023,7 @@ enum LeftTakeState {
   kLeftCommand,
   kLeftNone,
   kLeftCarry,
+  kLeftSide,
 };
 const uint64_t kLeftProbeFrames = 3;
 
@@ -1034,6 +1039,7 @@ struct LeftTakeIn {
   bool leash_on;     // the leash is on the Hand
   bool busy;         // the Hand holds an object, or its trigger is down
   bool parked;       // the other hand carries the object of the take now
+  bool side_target;  // an object to hold at the palm of the other hand
   uint64_t frame;    // the controllers frame
 };
 
@@ -1043,6 +1049,7 @@ struct LeftTakeOut {
   bool command;  // the trigger of the other hand commands the Creature
   bool boost;    // the trigger of the other hand is the boost of the walk
   bool drop;     // the other hand lets go of the object that it carries
+  bool side_take;  // take the object at the palm for the other hand
 };
 
 inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
@@ -1053,7 +1060,8 @@ inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
         if (in.stick_walks) {
           t->state = kLeftBoost;
         } else if (in.busy) {
-          t->state = in.leash_on ? kLeftCommand : kLeftNone;
+          t->state = in.side_target ? kLeftSide
+                                    : (in.leash_on ? kLeftCommand : kLeftNone);
         } else {
           t->state = kLeftProbe;
           t->probe_frame = in.frame;
@@ -1075,6 +1083,13 @@ inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
         t->state = kLeftIdle;
       }
       break;
+    case kLeftSide:
+      if (in.parked) {
+        t->state = kLeftCarry;
+      } else if (!in.down) {
+        t->state = kLeftIdle;
+      }
+      break;
     case kLeftCarry:
       if (!in.down || !in.parked) {
         t->state = kLeftIdle;
@@ -1091,6 +1106,7 @@ inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
   out.command = t->state == kLeftCommand;
   out.boost = t->state == kLeftBoost;
   out.drop = drop;
+  out.side_take = t->state == kLeftSide;
   return out;
 }
 

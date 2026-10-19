@@ -26,6 +26,17 @@
 // (Object+0x40, then +0x14) from the wrist of this frame. The object turns
 // and moves with the hand, one to one.
 //
+// THE TAKE FROM THE SIDE. While the Hand of the game holds an object, a
+// press of the trigger of the other hand with an object that the Hand can
+// hold at the palm of that hand (HandDirectHoldableAt) takes it with the pick
+// up of the game, GInterface::PlaceObjectInMagicHand (0x005DA6F0, thiscall,
+// the object, ret 4): its tests, the reaction, the removal from the map and
+// the GMagicHand. For that call the mod empties the hands and the CHand, and
+// keeps the fields of the CHand from +0x48FC to +0x4948 (the object, the
+// draw settings and the hold). After the call it parks the new object as
+// above, and puts back the object of the Hand and those fields. The new
+// object stays at its place in the frame of the wrist of the other hand.
+//
 // THE DROP. For one call the mod puts the object back as the only object of
 // the GMagicHand, with the count of the hands at 1 and no object in the
 // CHand. It writes the data of a release to the interface status, as packet
@@ -51,6 +62,8 @@ void ModLog(const char* format, ...);
 bool HandExactAddPrepareHook(void (*hook)(void* hand));
 bool HandDirectGripFacts(bool* holding, bool* settled, bool* spring,
                          bool* take);
+bool HandDirectHoldableAt(const float point[3], float max_gap, void** object);
+float HandDirectNearestHoldableGap(const float point[3]);
 bool OverlayFreeWrist(float point[3], float axes[9], float* length,
                       bool pointing);
 
@@ -61,6 +74,11 @@ const uintptr_t kMyInterface = 0x00555850;  // GGame::MyInterface
 const uintptr_t kThrowObject = 0x0046DDD0;  // CHand::ThrowObject
 const uintptr_t kEndAction = 0x005D1260;    // the interface ends its action
 const uintptr_t kDropAction = 0x005DA400;   // the drop action
+const uintptr_t kPlaceInHand = 0x005DA6F0;  // PlaceObjectInMagicHand
+const int kHandKeepFrom = 0x48FC;     // the fields of the CHand of a hold
+const int kHandKeepSize = 0x4948 - 0x48FC;
+const float kPalmFromWrist = 0.4f;    // of the hand: the middle of the hand
+const float kSideGap = 0.35f;         // of the hand: the reach of the hand
 const int kFaceLocked = 0x38;   // a byte: the pick of the game is locked
 const int kFaceStatus = 0x39C;  // GInterfaceStatus*
 const int kFaceHand = 0x3A0;    // CHand*
@@ -87,12 +105,12 @@ typedef void*(__fastcall* MyInterfaceFn)(void* game, void* unused);
 typedef void(__fastcall* ThisFn)(void* self, void* unused);
 typedef int(__fastcall* DropFn)(void* face, void* unused, void* packet);
 typedef int(__fastcall* VirtualIntFn)(void* self, void* unused);
+typedef int(__fastcall* PlaceFn)(void* face, void* unused, void* object);
 
 struct Carry {
   uint8_t* object = nullptr;
   float axes[9];      // the axes of the object in the frame of the wrist
   float place[3];     // its place in the frame of the wrist
-  float scale = 1.0f;
 };
 Carry g_carry;
 // The take of the borrowed Hand: since when it holds the object.
@@ -174,6 +192,110 @@ void Log(const char* text) {
   ModLog("left hold    : %s, frame %llu", text, g_frame);
 }
 
+// The place and the axes of an object in the frame of the wrist of the
+// other hand, and its distance from the wrist.
+bool CaptureCarry(uint8_t* object, Carry* carry, float* distance) {
+  const float* matrix = MeshMatrix(object);
+  float wrist[3], axes[9], length = 0.0f;
+  if (matrix == nullptr || !OverlayFreeWrist(wrist, axes, &length, true)) {
+    return false;
+  }
+  carry->object = object;
+  for (int row = 0; row < 3; ++row) {
+    for (int k = 0; k < 3; ++k) {
+      carry->axes[row * 3 + k] = Dot(&matrix[row * 3], &axes[k * 3]);
+    }
+  }
+  const float gap[3] = {matrix[9] - wrist[0], matrix[10] - wrist[1],
+                        matrix[11] - wrist[2]};
+  for (int k = 0; k < 3; ++k) carry->place[k] = Dot(gap, &axes[k * 3]);
+  *distance = sqrtf(Dot(gap, gap));
+  return true;
+}
+
+// The object that the Hand can hold in the reach of the other hand (its body
+// at most kSideGap of the hand from the middle of the hand), or null.
+void* SideObject() {
+  float wrist[3], axes[9], length = 0.0f;
+  if (!OverlayFreeWrist(wrist, axes, &length, false) || !(length > 0.0f)) {
+    return nullptr;
+  }
+  float palm[3];
+  for (int i = 0; i < 3; ++i) {
+    palm[i] = wrist[i] - kPalmFromWrist * length * axes[3 + i];
+  }
+  void* object = nullptr;
+  return HandDirectHoldableAt(palm, kSideGap * length, &object) ? object
+                                                                : nullptr;
+}
+
+// The take from the side, once for each press.
+bool g_side_tried = false;
+
+void SideTake() {
+  uint8_t* face = Face();
+  if (face == nullptr) return;
+  uint8_t* hand = At<uint8_t*>(face, kFaceHand);
+  uint8_t* status = At<uint8_t*>(face, kFaceStatus);
+  uint8_t* object = static_cast<uint8_t*>(SideObject());
+  if (hand == nullptr || status == nullptr || object == nullptr ||
+      At<uint8_t>(face, kFaceLocked) != 0 ||
+      (At<uint16_t>(object, kObjectFlags) & kFlagInHand) != 0) {
+    Log("the take from the side has no object in the reach of the other "
+        "hand");
+    return;
+  }
+  // Keep what the Hand of the game holds.
+  const uint8_t hands = At<uint8_t>(status, kStatusHands);
+  const uint8_t count = At<uint8_t>(status, kStatusMagicCount);
+  uint8_t* const magic = At<uint8_t*>(status, kStatusMagicObject);
+  uint8_t keep[kHandKeepSize];
+  memcpy(keep, hand + kHandKeepFrom, sizeof(keep));
+  At<uint8_t>(status, kStatusHands) = 0;
+  At<uint8_t>(status, kStatusMagicCount) = 0;
+  At<uint8_t*>(status, kStatusMagicObject) = nullptr;
+  At<uint8_t*>(hand, kHandHeld) = nullptr;
+  const int placed =
+      reinterpret_cast<PlaceFn>(kPlaceInHand)(face, nullptr, object);
+  // A forest gives a new tree (BigForest::InterfaceSetInMagicHand), so the
+  // object of the take is the object of the GMagicHand after the call.
+  uint8_t* const taken = At<uint8_t*>(status, kStatusMagicObject);
+  const bool in_hand =
+      placed == 1 && taken != nullptr && !IsBadReadPtr(taken, 0x48) &&
+      (At<uint16_t>(taken, kObjectFlags) & kFlagInHand) != 0;
+  Carry carry;
+  float gap = 0.0f;
+  bool carried = false;
+  if (in_hand) {
+    // The park of the new object.
+    At<uint8_t>(status, kStatusHands) = 0;
+    At<uint8_t>(status, kStatusMagicCount) = 0;
+    At<uint8_t*>(status, kStatusMagicObject) = nullptr;
+    if (At<uint8_t*>(hand, kHandHeld) == taken) {
+      reinterpret_cast<ThisFn>(kThrowObject)(hand, nullptr);
+    }
+    carried = CaptureCarry(taken, &carry, &gap);
+  }
+  // What the Hand of the game holds comes back.
+  At<uint8_t>(status, kStatusHands) = hands;
+  At<uint8_t>(status, kStatusMagicCount) = count;
+  At<uint8_t*>(status, kStatusMagicObject) = magic;
+  memcpy(hand + kHandKeepFrom, keep, sizeof(keep));
+  if (carried) {
+    g_carry = carry;
+    g_samples = 0;
+  }
+  if (g_logs < kMaxLogs) {
+    ++g_logs;
+    ModLog("left hold    : the take from the side: the pick up of the game "
+           "gave %d for %p, and the other hand %s, %.1f units from its "
+           "wrist. The Hand of the game keeps %p (left_hold=1), frame %llu",
+           placed, carried ? taken : object,
+           carried ? "carries it" : "does not carry it", gap,
+           magic, g_frame);
+  }
+}
+
 // The park, when the borrowed Hand holds the object of the take.
 void TryPark() {
   uint8_t* face = Face();
@@ -215,23 +337,10 @@ void TryPark() {
               frequency.QuadPart < kParkAfterSeconds) {
     return;
   }
-  // The place and the axes of the object in the frame of the wrist.
-  float* matrix = MeshMatrix(held);
-  float wrist[3], axes[9], length = 0.0f;
-  if (matrix == nullptr || !OverlayFreeWrist(wrist, axes, &length, true)) {
-    return;
-  }
   Carry carry;
-  carry.object = held;
-  carry.scale = sqrtf(Dot(matrix, matrix));
-  for (int row = 0; row < 3; ++row) {
-    for (int k = 0; k < 3; ++k) {
-      carry.axes[row * 3 + k] = Dot(&matrix[row * 3], &axes[k * 3]);
-    }
-  }
-  const float gap[3] = {matrix[9] - wrist[0], matrix[10] - wrist[1],
-                        matrix[11] - wrist[2]};
-  for (int k = 0; k < 3; ++k) carry.place[k] = Dot(gap, &axes[k * 3]);
+  float gap = 0.0f;
+  if (!CaptureCarry(held, &carry, &gap)) return;
+  const float* matrix = MeshMatrix(held);
   // The park: the hands of the game are empty, and the object stays in a
   // hand.
   At<uint8_t>(status, kStatusHands) = 0;
@@ -247,7 +356,7 @@ void TryPark() {
     ModLog("left hold    : the other hand carries the object %p, %.1f %.1f "
            "%.1f, %.1f units from its wrist. The Hand of the game is free "
            "(left_hold=1), frame %llu", held, matrix[9], matrix[10],
-           matrix[11], sqrtf(Dot(gap, gap)), g_frame);
+           matrix[11], gap, g_frame);
   }
 }
 
@@ -393,8 +502,28 @@ void __fastcall h_FaceDraw(void* face, void* unused) {
 
 bool LeftHoldCarrying() { return g_carry.object != nullptr; }
 
-void LeftHoldFrame(bool take, bool drop, bool usable, uint64_t frame) {
+bool LeftHoldSideTarget() {
+  if (g_carry.object != nullptr) return false;
+  if (SideObject() != nullptr) return true;
+  float wrist[3], axes[9], length = 0.0f;
+  if (g_logs < kMaxLogs && OverlayFreeWrist(wrist, axes, &length, false)) {
+    float middle[3];
+    for (int i = 0; i < 3; ++i) {
+      middle[i] = wrist[i] - kPalmFromWrist * length * axes[3 + i];
+    }
+    ++g_logs;
+    ModLog("left hold    : no object that the Hand can hold is in the reach of "
+           "the other hand (%.1f units from the middle of the hand). The "
+           "nearest one is %.1f units from it, frame %llu", kSideGap * length,
+           HandDirectNearestHoldableGap(middle), g_frame);
+  }
+  return false;
+}
+
+void LeftHoldFrame(bool take, bool side_take, bool drop, bool usable,
+                   uint64_t frame) {
   g_frame = frame;
+  if (!side_take) g_side_tried = false;
   if (g_carry.object != nullptr) {
     if (!CarryAlive()) {
       Log("the carried object is no longer in a hand, so the other hand lets "
@@ -408,6 +537,11 @@ void LeftHoldFrame(bool take, bool drop, bool usable, uint64_t frame) {
     } else if (!usable) {
       Drop(false, "the controllers cannot act now");
     }
+    return;
+  }
+  if (side_take && !g_side_tried) {
+    g_side_tried = true;
+    SideTake();
     return;
   }
   if (take) {

@@ -73,6 +73,7 @@ bool HandDirectHoldableAt(const float point[3], float max_gap, void** object,
 bool OverlayFreeWrist(float point[3], float axes[9], float* length,
                       bool pointing);
 bool OverlayFreeHandLeft();
+bool OverlayFreeTip(float out[3], float* length);
 
 namespace {
 
@@ -630,6 +631,34 @@ void LeftHoldFrame(bool take, bool side_take, bool drop, bool usable,
   } else {
     g_take_held = nullptr;
   }
+}
+
+// THE GLOW OF THE OTHER HAND. The target of this frame, for hand_glow.cpp.
+void* g_glow_target = nullptr;
+uint64_t g_glow_frame = 0;
+uint64_t g_glow_frames = 0;  // the frames with a target, for the log
+bool g_glow_said = false;
+
+void LeftHoldGlowFrame(bool on, uint64_t frame) {
+  g_glow_frame = frame;
+  g_glow_target = on && g_carry.object == nullptr ? SideObject() : nullptr;
+  if (g_glow_target == nullptr) return;
+  ++g_glow_frames;
+  if (!g_glow_said) {
+    g_glow_said = true;
+    ModLog("left hold    : the first target of the other hand glows: %p, "
+           "and the tip of its index finger has the glow of a take "
+           "(left_glow=1), frame %llu", g_glow_target, frame);
+  }
+}
+
+void* LeftHoldGlowTarget(uint64_t frame) {
+  if (g_glow_target == nullptr || g_glow_frame + 1 < frame) return nullptr;
+  return g_glow_target;
+}
+
+bool LeftHoldGlowTip(float tip[3], float* length) {
+  return OverlayFreeTip(tip, length);
 }
 
 void LeftHoldLetGo(const char* why) {

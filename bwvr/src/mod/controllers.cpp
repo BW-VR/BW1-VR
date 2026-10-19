@@ -1899,6 +1899,26 @@ void LogLeftHold(const char* by) {
                "that controller until the trigger opens");
 }
 
+// THE GLOW OF THE OTHER HAND (left_glow, docs/hand-model.md, "The glow at
+// the Hand's point"): with controls=1 and left_take=1, the object that the
+// trigger of the other hand can take in its reach glows as the target of the
+// Hand does, and the tip of the index finger of that hand has the glow of a
+// take. It follows hand_glow and its test key. 0: no glow at the other hand.
+int g_left_glow = -1;
+
+bool LeftGlowOn() {
+  if (g_left_glow < 0) {
+    g_left_glow = IniInt("left_glow", 1) != 0 ? 1 : 0;
+    ModLog("controllers  : left_glow=%d. %s", g_left_glow,
+           g_left_glow != 0
+               ? "With controls=1 and left_take=1, the object that the "
+                 "trigger of the hand that does not point can take glows, "
+                 "and so does the tip of the index finger of that hand"
+               : "No glow at the hand that does not point");
+  }
+  return g_left_glow != 0;
+}
+
 bool LeftHoldKeyOn() {
   if (g_left_hold < 0) {
     g_left_hold = IniInt("left_hold", 1) != 0 ? 1 : 0;
@@ -3209,6 +3229,13 @@ void PumpButtons(ULONGLONG now) {
       const int before = g_left_take_state.state;
       left_out = controller_math::LeftTakeStep(&g_left_take_state, in);
       g_left_command = left_out.command;
+      // The glow of the other hand: while its trigger is open, or in the probe
+      // of a press, and while the Hand of the game can take for it.
+      LeftHoldGlowFrame(
+          LeftGlowOn() && DirectHandNow() && Usable() &&
+              (g_left_take_state.state == controller_math::kLeftIdle ||
+               g_left_take_state.state == controller_math::kLeftProbe),
+          g_frame);
       if (LeftHoldKeyOn()) {
         LeftHoldFrame(g_left_take_state.state == controller_math::kLeftTake,
                       left_out.side_take, left_out.drop, Usable(), g_frame);
@@ -3236,6 +3263,7 @@ void PumpButtons(ULONGLONG now) {
     } else {
       g_left_take_state = controller_math::LeftTake();
       LeftHoldLetGo("the take of the other hand is off");
+      LeftHoldGlowFrame(false, g_frame);
       if (!was && g_ltrigger_down) {
         g_left_command =
             controller_math::OtherPressCommands(OtherStickPushed());

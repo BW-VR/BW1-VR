@@ -626,8 +626,8 @@ float FrameSeparation() {
 // Shift 8, Shift 9, Shift F, Shift G, Shift H, Shift J, Shift K, Shift L,
 // Shift M, Shift N, Shift B, Shift V, Shift C, Shift X, Shift Z, Shift Y,
 // Shift U, Shift I, Shift O, Shift P, Shift T, Shift W, Shift Q, Shift E,
-// Shift R, Shift D
-static const int kShiftKeys = 26;
+// Shift R, Shift D, Shift S
+static const int kShiftKeys = 27;
 static volatile LONG g_shift_key[kShiftKeys] = {};
 static DWORD g_shift_key_at[kShiftKeys] = {};
 static HHOOK g_message_hook = nullptr;
@@ -660,6 +660,7 @@ static int ShiftKeyIndex(WPARAM key) {
          : key == 'E' ? 23
          : key == 'R' ? 24
          : key == 'D' ? 25
+         : key == 'S' ? 26
                       : -1;
 }
 
@@ -790,6 +791,9 @@ bool D3D9KeyHere(const char* keys) {
 //   Shift D     with backend=vulkan the window of the game gets the picture
 //               through a swapchain of Vulkan, or through the CPU and GDI
 //               (vk_window, vk_window.cpp)
+//   Shift S     when a story takes the camera, the God view keeps its view
+//               until the cut scene window is closed, or the full view
+//               shows the story camera (cutscene_hold, cutscene_window.cpp)
 //   Ctrl Shift Numpad Slash  the mod waits for the GPU after each eye pass,
 //               one time a frame, or one time a frame on a second thread
 //               that also gives the frame to the runtime (frame_send,
@@ -1027,6 +1031,11 @@ void PollHotkeys() {
   // with Vulkan").
   if (InterlockedExchange(&g_shift_key[25], 0) != 0) {
     VkWindowToggle("Shift and D");
+  }
+  // An A/B of the hold of the God view when a story takes the camera
+  // (docs/cutscene-window.md, "The sequence").
+  if (InterlockedExchange(&g_shift_key[26], 0) != 0) {
+    CutsceneWindowHoldToggle("Shift and S");
   }
   // An A/B of the read ahead of the subtitle card (docs/ui-layer.md, "The
   // subtitle card"). Ctrl Shift Pause is the key of throw_land_rest

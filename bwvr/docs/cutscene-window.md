@@ -22,7 +22,8 @@ The code is in `src/mod/cutscene_window.cpp` and `cutscene_window_math.h`.
   pose. It stays there in the room.
 - **The enter.** Black walls close around an opening in 0.5 s. The opening ends
   with the size of the opening of the screen: 2.53 m wide and 2.6 m high with a
-  square render.
+  square render. While a story camera owns the view and the walls close, the
+  God view keeps its view (`cutscene_hold`).
 - **The window.** The frame is a frame of play mode 1: the game camera with no
   head on it, the view angle of the game, two eye pictures on one screen. The
   bars are in the picture.
@@ -41,8 +42,8 @@ The code is in `src/mod/cutscene_window.cpp` and `cutscene_window_math.h`.
   moves while they open.
 - **The keys.** `cutscene_window` (1) is the window. `cutscene_face_head`,
   `cutscene_depth`, `cutscene_subtitles`, `cutscene_edge_columns` and
-  `cutscene_video` and `cutscene_advisors` (all 1) are its parts, and 0 turns each part off. With `test_keys=1`, numpad 0
-  changes the window live and numpad 1 the depth limit.
+  `cutscene_video`, `cutscene_advisors` and `cutscene_hold` (all 1) are its parts, and 0 turns each part off. With `test_keys=1`, numpad 0
+  changes the window live, numpad 1 the depth limit and Shift S the hold.
 - **A mouse player** with no headset gets no change.
 
 ## 1. The signal
@@ -105,6 +106,34 @@ takes its place (section 5.1). While the window is wanted and the frame is not
 flat, `open` goes down by the frame time divided by `cutscene_window_ms` (500).
 The frames are full view frames. Four black walls go over all the layers of the
 frame (section 5.3). When `open` is 0, the frame after that one is flat.
+
+**The hold of the God view** (`cutscene_hold=1`, `window_math::HoldGod`). A
+script takes the camera some frames before it puts the bars up: a tap on the
+scroll of the Creche took the camera 4 frames before the bars in a headset
+session, and a later story 36 frames before. A story camera starts at the game
+camera of the God view, 400 units from the player and about 300 units above the
+land (`god-view.md`, section 7). So in those frames, and in the frames of the
+enter, the God view keeps the view of the frame before:
+
+- It holds while a story camera owns the view and the window is wanted and not
+  flat, and while a story camera owns the view and the window is not wanted
+  yet, for at most `cutscene_hold_wait_ms` (1000) after the story took the
+  camera.
+- It does not hold in a flat frame, with no story camera (the bars are up with
+  the camera of the player), or when the window cannot come
+  (`cutscene_window=0`, a play mode that is not the God view).
+- In a hold no step, zoom, walk, teleport or grab moves the view. The Hand, the
+  pointer and the spirits stay as in the God view.
+- A story camera with no bars gets the full view after the wait, as in
+  section 2.
+- `tabletop.cpp` asks `CutsceneWindowHoldsGod` at the main camera call. The
+  state of the window and the time of the story are the values of the end of
+  the frame before (`CutsceneWindowEndFrame`).
+
+So the walls close over the land that the player saw, and the first picture of
+the story is in the window. With `cutscene_hold=0` the God view stands aside
+when the story takes the camera, and the full view shows the story camera
+until the window is flat.
 
 **The window.** A flat frame is a frame of play mode 1 (section 4). It stays for
 as long as the window is wanted.
@@ -604,6 +633,8 @@ All in `[bwvr]`. None is in the launcher.
 | `cutscene_window` | 1 | 1 plays a cut scene of the God view on the screen. 0 plays it in the full view with held shots |
 | `cutscene_immersive` | 0 | 1 (the launcher row "Cut scenes", "Around you") plays a cut scene in the full view with no window, and gives `script_camera=0`: the camera of the game with all its motion, and no held shots. 0 keeps `cutscene_window` and `script_camera` as they are |
 | `cutscene_window_ms` | 500 | The time of the close and of the open, 0 to 3000. 0 is a cut |
+| `cutscene_hold` | 1 | 1: when a story takes the camera, the God view keeps its view until the window is flat (section 3). 0: the full view shows the story camera until then |
+| `cutscene_hold_wait_ms` | 1000 | How long the God view waits for the bars after a story took the camera, 0 to 5000. 0 holds only while the walls close |
 | `cutscene_window_linger_ms` | 3000 | How long the window stays for a story camera after the bars went down, 0 to 20000 |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | The screen. The keys of play mode 1 |
 | `cutscene_face_head` | 1 | 1 puts the screen ahead of the head when the cut scene starts. 0 puts it ahead of the recenter pose |
@@ -627,6 +658,8 @@ With `test_keys=1` and Num Lock on:
   view at once, with held shots. On during a cut scene closes it.
 - Numpad 1 turns the depth limit off and on, for a live comparison in one shot.
   Off puts both pictures at one place.
+- Shift S turns the hold of the God view off and on (`cutscene_hold`). It acts
+  at the next story.
 
 ## 9. The log
 
@@ -636,6 +669,9 @@ says its key and its value (`cutscene_window`, the size of the screen,
 `cutscene_video`, `cutscene_advisors`). The `hooks` tag gives the two hooks
 of the advisors. Then the log has these lines:
 
+- The start and the end of a hold of the God view, with the reason of the end:
+  the window is closed, the story camera is gone, or no bars came in
+  `cutscene_hold_wait_ms`.
 - The frame that the bars go up, and the frame that a cut scene starts. With
   `cutscene_face_head=1`, a line gives the head (position and yaw) and the place
   of the screen.
@@ -683,6 +719,11 @@ the frames of a change, and 400 lines for the depth.
 
 - The rule, the state, the shrink, the screen pose, the walls and the stereo with
   no depth limit.
+- The hold of the God view: a story with no bars yet, the walls that close
+  after the wait, a story with no bars past the wait, a flat frame, the bars
+  with the camera of the player, `cutscene_hold=0`, the window off, a wait of
+  0, and the story of the scroll of the Creche (bars 4 frames after the story,
+  120 frames a second), which holds in each frame until the first flat frame.
 - The place: the yaw of a head, also of a head that looks 60 degrees down, the
   anchor at the head along the floor with the height that the caller gives, and a
   screen that is 2 m ahead at that yaw, level, with its front toward the head.
@@ -817,3 +858,7 @@ pictures (`cutscene_window_capture=1`) are the proof. The checks are:
   LOCAL space and not the place of the window. The Esc menu cannot open in a
   story (section 7).
 - **The table** (play mode 3) has no window. Its stories play on the table.
+- **The hold of the God view** (section 3) has no desktop run yet, and only
+  the headset can show that the walls close over the land with no jump.
+  Not known: how long a script of the game waits between the camera and the
+  bars, and whether 1000 ms covers each story.

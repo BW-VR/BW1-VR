@@ -871,7 +871,9 @@ land build it again the same way.
 bars of the game are up, the view closes to a screen 2 m ahead, and the game
 shows its cut scene there as play mode 1 does (`cutscene-window.md`). The God
 view stands aside for those frames in the same way, and it is built again in
-the same way when the cut scene ends. The rule above is for a story camera
+the same way when the cut scene ends. Before the first frame in the window,
+while the story waits for its bars and the walls close, the God view keeps
+its view with no move (`cutscene_hold`, `cutscene-window.md`, section 3). The rule above is for a story camera
 with no bars, for example a camera that follows the Creature.
 `cutscene_window=0` gives that rule to cut scenes too.
 

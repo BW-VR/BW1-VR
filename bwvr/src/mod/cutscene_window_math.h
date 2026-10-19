@@ -34,6 +34,25 @@ inline bool Wanted(bool bars_up, bool was_wanted, bool story_owns,
   return story_owns && seconds_since_bars < linger;
 }
 
+// THE HOLD OF THE GOD VIEW (cutscene_hold). A script takes the camera some
+// frames before it puts the bars up, and the view then closes for the time of
+// the enter. A story camera starts at the game camera of the God view, which
+// is far above the player. So in those frames the God view keeps the view of
+// the frame before, and the walls close over the land that the player saw.
+// The God view holds:
+// - while the window is wanted and the frame is not flat (the walls close),
+// - while a story camera owns the view and the window is not wanted yet, for
+//   at most `wait` seconds after the story took the camera. A story camera
+//   with no bars then gets the full view, as before.
+// It does not hold in a flat frame, with no story camera, or when the window
+// cannot come (`window_on` false).
+inline bool HoldGod(bool on, bool window_on, bool story_owns, bool wanted,
+                    bool flat, float seconds_since_story, float wait) {
+  if (!on || !window_on || !story_owns || flat) return false;
+  if (wanted) return true;
+  return seconds_since_story < wait;
+}
+
 // THE STATE. `open` is 1 for the full view and 0 for the opening that has
 // the size of the window. `flat` is true while the eye pictures go to the
 // screen of the window.

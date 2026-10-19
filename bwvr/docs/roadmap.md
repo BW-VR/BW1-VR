@@ -343,7 +343,7 @@ is built, and no test has proven it.
   To decide: a halo or a line of the card that shows which objects the
   grip takes, a longer range of the grab while the leash is on, or no
   change.
-- **B34. The address space of 2 GiB runs full.** A headset session with
+- **B36. The address space of 2 GiB runs full.** A headset session with
   `backend=vulkan` ended after about 16 minutes of play with an access
   violation in `LH3DMem::Alloc` (`0x00842D4A`): `malloc` gave a null
   pointer for 109 KB. The dump had 2035 MB of addresses in use, the limit of

@@ -213,8 +213,8 @@ bool HandExactPalm(float out[3], uint64_t* frame, int32_t* state);
 // overlay.cpp: the middle of the wrist of the hand that does not point, as
 // it was drawn last. False when it was not drawn in the last two frames.
 bool OverlayOtherWrist(float out[3]);
-bool OverlayWristFrames(float from_point[3], float from_axes[9],
-                        float to_point[3], float to_axes[9]);
+bool OverlayFreeWrist(float point[3], float axes[9], float* length,
+                      bool pointing);
 bool ControllersFarRay(float origin[3], float direction[3],
                        float* units_per_meter, float eye[3]);
 bool ControllersFarAllowed(const char** why);
@@ -6494,87 +6494,165 @@ bool LeashRingLeft() {
 }
 
 // THE RING OF THE LEASH (docs/grab.md, "The leash at the mod's hand"). While
-// the leash is on the Hand, the game draws a turning ring of the mesh
+// the leash is on the Hand, the game draws a ring of the mesh
 // Data\MISC\leash.l3d and a glow at the wrist of its Hand.
 // CitadelHeart::DrawNow calls fn_00466730 (thiscall, the CitadelHeart, no
 // arguments) for the three rings at the posts of the leash in the Temple.
 // For the kind of leash that is on the Hand, that function puts the ring at
-// the wrist bone of the game's Hand: the first matrix of the pose of the
-// Hand's mesh (CHand+0x482C, then +0x80), with the size of the mesh. With
-// the leash on the other hand (left_leash=1, leash_ring_left=1), the mod
-// moves that matrix for the call from the wrist of the pointing hand to the
-// wrist of the other hand, and puts it back after the call. So the game puts
-// its own ring and glow at the other wrist. leash_ring_left=0 leaves the ring
-// at the game's Hand.
+// the wrist bone of the game's Hand: the turn of the first matrix of the
+// pose of the Hand's mesh (CHand+0x482C, then +0x80), its place, and an
+// offset and a size from the size of the mesh (+0x44). The ring lies across
+// the z axis of that bone.
+//
+// With the leash on the other hand (left_leash=1, leash_ring_left=1), the
+// mod gives the function a bone of its own for the call, and puts the pose
+// and the size back after the call. Its z axis is along the other hand, so
+// the ring goes around the wrist. Its size makes the ring kRingRadiusShare of
+// the length of the hand. Its place is the middle of the wrist, moved
+// kRingToKnuckles toward the knuckles, less the
+// offset of the game, measured at the ring after each call in the frame of
+// the bone. So the game puts its own ring and glow around the wrist of the
+// other hand. leash_ring_left=0 leaves the ring at the game's Hand.
 const uintptr_t kDrawLeashRings = 0x00466730;
 const int kHandMeshObject = 0x482C;
 const int kMeshPose = 0x80;
+const int kMeshSize = 0x44;
+const float kRingSizeUnits = 173.529f;  // the game: the size of the mesh * this
+const float kRingMeshRadius = 1.063f;   // leash.l3d: the half width in x and y
+const float kRingRadiusShare = 0.17f;   // of the length of the hand
+// From the middle of the wrist toward the knuckles, a share of the length of
+// the hand, so the ring lies on the skin and not over the end of the mesh.
+const float kRingToKnuckles = 0.04f;
+const int kHeartLeashes = 0xE4;         // CitadelHeart: its TempleLeash
+const int kLeashRing = 0x5C;            // LeashObj: its ring
 typedef void(__fastcall* DrawRingsFn)(void* self, void* unused);
 DrawRingsFn o_DrawLeashRings = nullptr;
 bool g_leash_ring_left = true;  // leash_ring_left
 uint64_t g_ring_left_calls = 0;
 bool g_ring_left_said = false;
+// The offset of the ring from the bone, in the frame of the bone, from the
+// last call.
+float g_ring_offset[3] = {0.0f, 0.0f, 0.0f};
 
-// The first matrix of the pose of the Hand's mesh: 3 rows (the axes of the
-// wrist bone in the world), then its place. Null when there is none.
-float* WristBone() {
+// The mesh of the game's Hand, or null.
+uint8_t* HandMeshObject() {
   if (g_hand == nullptr) return nullptr;
-  uint8_t* const* mesh_link =
+  uint8_t* const* link =
       reinterpret_cast<uint8_t* const*>(g_hand + kHandMeshObject);
-  if (IsBadReadPtr(mesh_link, sizeof(void*)) || *mesh_link == nullptr) {
+  if (IsBadReadPtr(link, sizeof(void*)) || *link == nullptr ||
+      IsBadWritePtr(*link + kMeshSize, sizeof(float)) ||
+      IsBadReadPtr(*link + kMeshPose, sizeof(void*))) {
     return nullptr;
   }
-  float* const* pose_link =
-      reinterpret_cast<float* const*>(*mesh_link + kMeshPose);
-  if (IsBadReadPtr(pose_link, sizeof(void*)) || *pose_link == nullptr ||
-      IsBadWritePtr(*pose_link, 12 * sizeof(float))) {
+  return *link;
+}
+
+// The ring of the kind of leash that is on the Hand, after the call, or null.
+float* RingMatrix(void* heart) {
+  const uint8_t* const* temple = reinterpret_cast<const uint8_t* const*>(
+      static_cast<uint8_t*>(heart) + kHeartLeashes);
+  if (IsBadReadPtr(temple, sizeof(void*)) || *temple == nullptr ||
+      IsBadReadPtr(*temple, 16)) {
     return nullptr;
   }
-  return *pose_link;
+  const int kind = *reinterpret_cast<const int32_t*>(*temple);
+  if (kind < 0 || kind > 2) return nullptr;
+  const uint8_t* leash = *reinterpret_cast<const uint8_t* const*>(
+      *temple + 4 + kind * 4);
+  if (leash == nullptr || IsBadReadPtr(leash + kLeashRing, sizeof(void*))) {
+    return nullptr;
+  }
+  uint8_t* ring = *reinterpret_cast<uint8_t* const*>(leash + kLeashRing);
+  if (ring == nullptr || IsBadWritePtr(ring + 0x14, 12 * sizeof(float))) {
+    return nullptr;
+  }
+  return reinterpret_cast<float*>(ring + 0x14);
 }
 
 void __fastcall h_DrawLeashRings(void* self, void* unused) {
   float* bone = nullptr;
-  float saved[12];
-  float from[3], from_axes[9], to[3], to_axes[9];
+  uint8_t* mesh = nullptr;
+  float saved[12], saved_size = 0.0f;
+  float wrist[3], axes[9], length = 0.0f;
   if (g_leash_ring_left && LeashRingLeft() &&
-      OverlayWristFrames(from, from_axes, to, to_axes)) {
-    bone = WristBone();
-  }
-  if (bone != nullptr) {
-    memcpy(saved, bone, sizeof(saved));
-    // The turn from the pointing hand to the other hand: to * from^T. Each
-    // axis of the bone turns, and its place moves with the wrist.
-    float turn[9];
-    for (int r = 0; r < 3; ++r) {
-      for (int c = 0; c < 3; ++c) {
-        turn[r * 3 + c] = to_axes[r * 3 + 0] * from_axes[c * 3 + 0] +
-                          to_axes[r * 3 + 1] * from_axes[c * 3 + 1] +
-                          to_axes[r * 3 + 2] * from_axes[c * 3 + 2];
+      OverlayFreeWrist(wrist, axes, &length, false) && length > 0.0f) {
+    mesh = HandMeshObject();
+    if (mesh != nullptr) {
+      float* const pose = *reinterpret_cast<float* const*>(mesh + kMeshPose);
+      if (pose != nullptr && !IsBadWritePtr(pose, 12 * sizeof(float))) {
+        bone = pose;
       }
     }
-    for (int row = 0; row < 4; ++row) {
-      float v[3] = {saved[row * 3], saved[row * 3 + 1], saved[row * 3 + 2]};
-      if (row == 3) {
-        for (int k = 0; k < 3; ++k) v[k] -= from[k];
+  }
+  float rows[9];
+  if (bone != nullptr) {
+    memcpy(saved, bone, sizeof(saved));
+    saved_size = *reinterpret_cast<float*>(mesh + kMeshSize);
+    // z along the hand, x across the palm, y = z cross x.
+    float z[3] = {axes[3], axes[4], axes[5]};
+    float x[3] = {axes[0], axes[1], axes[2]};
+    const float zl = sqrtf(z[0] * z[0] + z[1] * z[1] + z[2] * z[2]);
+    if (zl > 1e-6f) {
+      for (int i = 0; i < 3; ++i) z[i] /= zl;
+      const float d = x[0] * z[0] + x[1] * z[1] + x[2] * z[2];
+      for (int i = 0; i < 3; ++i) x[i] -= d * z[i];
+      const float xl = sqrtf(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+      if (xl > 1e-6f) {
+        for (int i = 0; i < 3; ++i) x[i] /= xl;
+        const float y[3] = {z[1] * x[2] - z[2] * x[1],
+                            z[2] * x[0] - z[0] * x[2],
+                            z[0] * x[1] - z[1] * x[0]};
+        for (int i = 0; i < 3; ++i) {
+          rows[i] = x[i];
+          rows[3 + i] = y[i];
+          rows[6 + i] = z[i];
+        }
+        memcpy(bone, rows, sizeof(rows));
+        // The knuckles are at a smaller y of the hand than the wrist
+        // (overlay_math.h, kWristPoint).
+        for (int i = 0; i < 3; ++i) wrist[i] -= kRingToKnuckles * length * z[i];
+        for (int i = 0; i < 3; ++i) {
+          bone[9 + i] = wrist[i] - (rows[i] * g_ring_offset[0] +
+                                    rows[3 + i] * g_ring_offset[1] +
+                                    rows[6 + i] * g_ring_offset[2]);
+        }
+        // The ring of the game has the radius 0.5 * size * 173.5 * 1.063.
+        *reinterpret_cast<float*>(mesh + kMeshSize) =
+            2.0f * kRingRadiusShare * length /
+            (kRingSizeUnits * kRingMeshRadius);
+      } else {
+        bone = nullptr;
       }
-      for (int r = 0; r < 3; ++r) {
-        bone[row * 3 + r] = turn[r * 3 + 0] * v[0] + turn[r * 3 + 1] * v[1] +
-                            turn[r * 3 + 2] * v[2] + (row == 3 ? to[r] : 0.0f);
-      }
+    } else {
+      bone = nullptr;
     }
   }
   o_DrawLeashRings(self, unused);
   if (bone == nullptr) return;
+  // The offset of the game, in the frame of the bone, for the next call.
+  const float* ring = RingMatrix(self);
+  if (ring != nullptr) {
+    const float gap[3] = {ring[9] - bone[9], ring[10] - bone[10],
+                          ring[11] - bone[11]};
+    for (int a = 0; a < 3; ++a) {
+      g_ring_offset[a] = rows[a * 3] * gap[0] + rows[a * 3 + 1] * gap[1] +
+                         rows[a * 3 + 2] * gap[2];
+    }
+  }
   memcpy(bone, saved, sizeof(saved));
+  *reinterpret_cast<float*>(mesh + kMeshSize) = saved_size;
   ++g_ring_left_calls;
-  if (!g_ring_left_said) {
+  if (!g_ring_left_said && ring != nullptr && g_ring_left_calls > 2) {
     g_ring_left_said = true;
-    ModLog("leash        : the game puts the ring of the leash at the wrist of "
-           "the hand that does not point, %.1f %.1f %.1f, and not at the "
-           "wrist of its Hand at %.1f %.1f %.1f (left_leash=1, "
-           "leash_ring_left=1), frame %llu", to[0], to[1], to[2], saved[9],
-           saved[10], saved[11], g_frame);
+    const float gap[3] = {ring[9] - wrist[0], ring[10] - wrist[1],
+                          ring[11] - wrist[2]};
+    ModLog("leash        : the game puts the ring of the leash around the "
+           "wrist of the hand that does not point, %.1f %.1f %.1f, %.2f "
+           "units from its middle, %.2f units across for a hand of %.2f "
+           "units (left_leash=1, leash_ring_left=1), frame %llu", wrist[0],
+           wrist[1], wrist[2],
+           sqrtf(gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]),
+           2.0f * kRingRadiusShare * length, length, g_frame);
   }
 }
 
@@ -7829,8 +7907,8 @@ void InstallNear() {
          "the draw of the rings of the leash (the ring on the other hand)");
     ModLog("leash        : leash_ring_left=%d. %s", g_leash_ring_left ? 1 : 0,
            g_leash_ring_left
-               ? "With left_leash=1 the game puts the ring of the leash at "
-                 "the wrist of the hand that does not point"
+               ? "With left_leash=1 the game puts the ring of the leash "
+                 "around the wrist of the hand that does not point"
                : "The ring of the leash stays at the game's Hand");
   }
   if (!g_leash_palm) {

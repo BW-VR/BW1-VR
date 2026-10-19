@@ -1133,6 +1133,22 @@ bool OverlayFreeWrist(float point[3], float axes[9], float* length,
   return true;
 }
 
+// The tip of the index finger of the hand that does not point, at rest, in
+// the world (left_hold.cpp, the glow of the other hand), and the length of
+// the hand. False while that hand was not drawn.
+bool OverlayFreeTip(float out[3], float* length) {
+  const int hand = g_free_hand;
+  if (hand < 0 || hand >= kHands) return false;
+  const HandPlace& place = g_hand_place[hand];
+  if (!place.have || g_frame > place.frame + 1) return false;
+  float tip[3];
+  overlay_math::FingerTip(1, overlay_math::kRestCurl, tip);
+  overlay_math::PlacePoint(place.position, place.rotation, place.length,
+                           hand == 0, tip, out);
+  *length = place.length;
+  return true;
+}
+
 // The hand that does not point is the left hand (left_hold.cpp).
 bool OverlayFreeHandLeft() { return g_free_hand == 0; }
 

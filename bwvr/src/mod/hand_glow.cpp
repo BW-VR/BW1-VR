@@ -99,8 +99,11 @@
 #include "village.h"
 #include "near_math.h"
 #include "target_glow.h"
+#include "left_hold.h"
 
 extern void ModLog(const char* format, ...);
+// controllers.cpp: the count of the controllers frames.
+uint64_t ControllersFrameCount();
 
 // hand_direct.cpp: the Hand's point and what a press does there, latched
 // once a frame.
@@ -501,6 +504,37 @@ HRESULT DrawDisc(IDirect3DDevice7* device, float move) {
   return FAILED(left) ? left : right;
 }
 
+// THE GLOW OF THE OTHER HAND (left_glow): while the other hand has a
+// target in its reach (left_hold.cpp), the tip of its index finger has the
+// disc of a take, as the Hand's point has it over something to take.
+void DrawOtherTip(IDirect3DDevice7* device, int eye, uint64_t frame,
+                  const float m[12], float half_x, float half_y,
+                  float near_plane, float units_per_meter) {
+  float tip[3], length = 0.0f;
+  if (LeftHoldGlowTarget(frame) == nullptr || !LeftHoldGlowTip(tip, &length) ||
+      !(units_per_meter > 0.0f)) {
+    return;
+  }
+  const Style& style = kStyles[kLookTake];
+  const float radius = style.radius_cm * 0.01f * units_per_meter;
+  GlowDisc disc = {};
+  if (!GlowProject(m, half_x, half_y, near_plane, tip, radius, 0.5f * length,
+                   &disc) ||
+      disc.rx > half_x || disc.ry > half_y) {
+    return;
+  }
+  const float move = WalkMove(disc, near_plane, eye);
+  Build(disc, style, false);
+  SetStates(device);
+  HRESULT result = DrawDisc(device, move);
+  if (SUCCEEDED(result) &&
+      SetOne(device, D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE)) {
+    Build(disc, style, true);
+    DrawDisc(device, move);
+  }
+  PutStatesBack(device);
+}
+
 // One halo: the disc around an object, in the pass of this eye.
 void DrawOneHalo(IDirect3DDevice7* device, const FarDraw& d,
                  const Style& style, int eye, uint64_t frame) {
@@ -849,6 +883,8 @@ void HandGlowDraw() {
   DrawNearHalo(device, eye, frame, m, info->half_res_x, info->half_res_y,
                near_plane, units_per_meter);
   if (!g_on) return;
+  DrawOtherTip(device, eye, frame, m, info->half_res_x, info->half_res_y,
+               near_plane, units_per_meter);
   const Look look = LookFor(HandDirectPressKind(), holding);
   // NO GLOW WITH NO TARGET (hand_glow_idle=0). The glow shows only while a
   // press of the grip at this place acts on something. With the value 1, the pale blue glow
@@ -961,6 +997,27 @@ int HandGlowTargets(TargetGlowMark* out, int max) {
     out[n].b = style.b;
     out[n++].name = acts ? "the target at the Hand"
                          : "the target at the Hand outside the influence";
+  }
+  // THE TARGET OF THE OTHER HAND (left_hold.cpp, left_glow): the same gold
+  // as the target at the Hand.
+  // This runs before the eye passes, so the frame is the one of the
+  // controllers.
+  const uint64_t frame = ControllersFrameCount();
+  if (g_on && n < max) {
+    void* other = LeftHoldGlowTarget(frame);
+    if (other != nullptr && other != near_target) {
+      out[n].object = other;
+      out[n].r = kHaloValid.r;
+      out[n].g = kHaloValid.g;
+      out[n].b = kHaloValid.b;
+      out[n++].name = "the target of the other hand";
+      static bool said = false;
+      if (!said) {
+        said = true;
+        ModLog("hand glow    : the target of the other hand %p has the gold "
+               "glow of a target, frame %llu", other, frame);
+      }
+    }
   }
   return n;
 }

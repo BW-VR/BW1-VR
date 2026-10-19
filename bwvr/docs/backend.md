@@ -568,13 +568,22 @@ gives the thread of each part with `vr_start=1`, the default:
 | --- | --- | --- | --- |
 | `StartInstance` | `xrEnumerateInstanceExtensionProperties` and `xrCreateInstance`. The loader loads the DLL of the runtime here | The thread of the tries | It needs no device. It can fail (no runtime, or a broken API layer: `XR_ERROR_FILE_ACCESS_ERROR`) or wait for the runtime |
 | `StartSystem`, `LogSystem` | `xrGetSystem`, and the name and the size of the headset | The thread of the tries | With no headset it can only fail |
-| `StartSession` | The Direct3D 11 device on the adapter of the runtime, `xrCreateSession`, the spaces, the controllers and the swapchains | The frame thread | It runs one time, only when the runtime has a headset. The frame thread uses the session from the next frame on, and `GpuBridgeStart` opens the shared textures of the game on its device at once, on the frame thread |
+| `StartSession` | The device of the session on the adapter of the runtime (Direct3D 11, or Vulkan with `xr_vulkan=1` and `backend=vulkan`), `xrCreateSession`, the spaces, the controllers and the swapchains | The frame thread | It runs one time, only when the runtime has a headset. The frame thread uses the session from the next frame on, and `GpuBridgeStart` opens the shared textures of the game on its device at once, on the frame thread |
 | `Stop` after a try with no headset | `xrDestroyInstance`. The loader unloads the DLL of the runtime here | The thread of the tries | It can wait for the runtime |
 
 OpenXR lets each call come from any thread, when two threads do not use one
 handle at one time. The thread of the tries gives the screen to the frame
 thread when it finds the headset. After that only the frame thread uses the
 screen.
+
+The instance names the graphics API of the session. So the thread of the
+tries makes its screen with the choices of the frame thread
+(`VrStartOptions`): a session with Vulkan (`xr_vulkan=1`, and each
+`backend=vulkan`), with no Direct3D 11 device (`vulkan_only=1`, "Only
+Vulkan"), and eye tracking for foveated rendering. The frame thread gives
+`xr_vulkan_upload` and `xr_hold_ms` before `StartSession`. With
+`backend=vulkan` and no session after 3 tries, the renderer draws with a
+device of its own, as with the tries on the frame thread.
 
 ### One instance for all tries
 
@@ -725,6 +734,10 @@ OpenXR runtime. `xr_bridge=0` is the default and keeps the local runtime.
 The mod reads the key at the start of the game, so a change needs a
 restart. `bwvr/src/vr/bridge/README.md` tells a player how to install the
 Steam Frame add-on.
+
+The host takes the frames of Direct3D 11 only. A session with Vulkan
+(`backend=vulkan`, or `xr_vulkan=1`) uses the local runtime, also with
+`xr_bridge=1`, and the line `settings` of the log says so.
 
 The game keeps the XrScreen interface. Each call of XrScreen goes to the
 host, and the host runs the same `xr_screen.cpp` with its local runtime.
@@ -2993,6 +3006,7 @@ part that gives calls to Direct3D 9 or that needs a Direct3D 11 device:
 | The merge of draw calls (`draw_merge`) and `one_walk_merge` | No merge and no hook |
 | The session with Vulkan | No Direct3D 11 device and no relay (`XrScreen::UseD3D11`). The pixels of the CPU go into the swapchains with Vulkan (`xr_vulkan_upload=1`) |
 | A session with Vulkan that does not start | No session with Direct3D 11 after it: the game stays on the monitor |
+| The x64 host for Steam Frame (`xr_bridge`) | Not used: the host takes the frames of Direct3D 11 only, so the session uses the local runtime |
 
 Their keys do nothing then, and their test keys (Shift 8, 9, F, G, H, J,
 K, M, N, V, C, Z and U) write a line of the log and change nothing. The

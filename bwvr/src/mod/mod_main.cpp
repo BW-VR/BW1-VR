@@ -1142,10 +1142,22 @@ void ReadSettings() {
   // The launcher's "Test keys" box. F12 saves both eye pictures and
   // Shift F12 steps the subtitles. Off for players.
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, path) != 0;
-  const bool xr_bridge = GetPrivateProfileIntA("bwvr", "xr_bridge", 0, path) == 1;
+  const bool xr_bridge_key =
+      GetPrivateProfileIntA("bwvr", "xr_bridge", 0, path) == 1;
+  // The bridge to the x64 host gives the frames of Direct3D 11 to the host.
+  // backend=vulkan and xr_vulkan=1 have a session with Vulkan, so they use
+  // the local runtime (docs/backend.md, "Only Vulkan").
+  const bool vulkan_session =
+      ProxyBackendVulkan() ||
+      GetPrivateProfileIntA("bwvr", "xr_vulkan", 0, path) != 0;
+  const bool xr_bridge = xr_bridge_key && !vulkan_session;
   bwvr::XrScreen::ConfigureBridge(xr_bridge);
-  ModLog("settings     : xr_bridge=%d, %s", xr_bridge ? 1 : 0,
-         xr_bridge ? "experimental x64 OpenXR host" : "local OpenXR runtime");
+  ModLog("settings     : xr_bridge=%d, %s", xr_bridge_key ? 1 : 0,
+         xr_bridge ? "experimental x64 OpenXR host"
+         : xr_bridge_key
+             ? "but the session has Vulkan (backend=vulkan or xr_vulkan=1), "
+               "and the bridge needs Direct3D 11. The local OpenXR runtime"
+             : "local OpenXR runtime");
   // Not in the launcher. Off only to test the fault it fixes.
   g_game_camera_rebuild =
       GetPrivateProfileIntA("bwvr", "game_camera_rebuild", 1, path) != 0;
@@ -1649,7 +1661,6 @@ double MsSince(const LARGE_INTEGER& start);
 void StartVrFromThread();
 void VrSessionRuns(bwvr::XrScreen* screen, uint32_t width, uint32_t height);
 void PrepareScreen(bwvr::XrScreen* screen);
-void RendererStopsWait(int tries);
 
 // Starting the VR session needs the Direct3D device, which does not exist
 // until the game has opened it. So this runs on a frame, not in DllMain, where
@@ -1986,7 +1997,9 @@ void StartVrStep() {
     options.max_tries = kMaxVrTries;
     options.test_hang_try = g_vr_start_test_hang_try;
     options.test_hang_ms = g_vr_start_test_hang_ms;
-    options.prepare = &PrepareScreen;
+    options.vulkan = g_xr_vulkan != 0;
+    options.d3d11 = !g_vulkan_only;
+    options.eye_gaze = g_foveation != 0 && g_foveation_gaze != 0;
     if (VrStartBegin(options)) {
       g_vr_thread = true;
       return;
@@ -2031,12 +2044,20 @@ void StartVrStep() {
     delete screen;
     g_vr_code_ms += MsSince(try_start);
     ++g_vr_tries;
-    RendererStopsWait(g_vr_tries);
     if (g_vr_fallback_try) {
       g_vr_fallback_try = false;
       ModLog("vr           : the start on the frame thread failed too, in try "
              "%d. The tries go on to the end of the 2 minutes (vr_start=0)",
              g_vr_tries);
+    }
+    // backend=vulkan: the window of the game needs the renderer. After three
+    // tries (about 9 s) it draws with a device of its own, and a session
+    // that starts later gets no image of it (VkSceneEyesWanted).
+    if (g_vr_tries >= 3 && VkSceneDirect() && vk::Pending()) {
+      vk::WaitForExternal(false);
+      ModLog("vr           : no session after 3 tries, so the Vulkan renderer "
+             "draws with a device of its own. A session that starts later "
+             "gets no picture of it: start the game with the headset ready");
     }
     if (g_vr_tries == 1) {
       ModLog("vr           : waiting for the headset, will keep trying for "
@@ -2068,7 +2089,6 @@ void StartVrFromThread() {
            "mod does not use the headset. Start the game from the launcher");
     return;
   }
-  RendererStopsWait(VrStartTries());
   bool over = false;
   bwvr::XrScreen* screen = VrStartTake(&over);
   if (over) {
@@ -2087,6 +2107,15 @@ void StartVrFromThread() {
     vk::WaitForExternal(false);
     return;
   }
+  // backend=vulkan: the window of the game needs the renderer, as with the
+  // tries on the frame thread.
+  if (screen == nullptr && VrStartTries() >= 3 && VkSceneDirect() &&
+      vk::Pending()) {
+    vk::WaitForExternal(false);
+    ModLog("vr           : no session after 3 tries, so the Vulkan renderer "
+           "draws with a device of its own. A session that starts later "
+           "gets no picture of it: start the game with the headset ready");
+  }
   if (screen == nullptr) return;
 
   // THE SESSION RUNS ON THE FRAME THREAD. The thread found the headset, so
@@ -2101,6 +2130,8 @@ void StartVrFromThread() {
   } else if (!FrameSourceSize(&width, &height)) {
     failed = "the size of the render target, before StartSession";
   } else {
+    screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
+    screen->SetHoldMs(g_xr_hold_ms);
     screen->SetPlacement(g_distance, g_width);
     screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
     screen->SetLog(&ModLog);
@@ -2134,19 +2165,6 @@ void PrepareScreen(bwvr::XrScreen* screen) {
   screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
   screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
   screen->SetHoldMs(g_xr_hold_ms);
-}
-
-// backend=vulkan: the window of the game needs the renderer. After three
-// tries (about 9 s) it draws with a device of its own, and a session that
-// starts later gets no image of it (VkSceneEyesWanted). On the frame thread,
-// for each way of the tries.
-void RendererStopsWait(int tries) {
-  if (tries >= 3 && VkSceneDirect() && vk::Pending()) {
-    vk::WaitForExternal(false);
-    ModLog("vr           : no session after 3 tries, so the Vulkan renderer "
-           "draws with a device of its own. A session that starts later "
-           "gets no picture of it: start the game with the headset ready");
-  }
 }
 
 // A screen with a session that runs, from either way of the tries.

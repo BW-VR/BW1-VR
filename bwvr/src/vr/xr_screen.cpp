@@ -1181,7 +1181,9 @@ bool XrScreen::has_instance() const {
 }
 
 bool XrScreen::StartInstance(LogFn log) {
-  if (g_bridge_enabled || remote_) {
+  // The bridge gives the frames of Direct3D 11 to the host, so a session
+  // with Vulkan does not use it.
+  if ((g_bridge_enabled && !impl_->vulkan) || remote_) {
     impl_->log = log ? log : NoLog;
     if (!remote_) {
       remote_ = new RemoteScreen(log ? log : NoLog);
@@ -1321,10 +1323,10 @@ int XrScreen::StartSystem() {
   }
 
   XrSystemProperties system_properties = {XR_TYPE_SYSTEM_PROPERTIES};
+  s.system_name[0] = 0;
   XrSystemEyeGazeInteractionPropertiesEXT gaze_properties = {
       XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
   if (s.gaze_extension) system_properties.next = &gaze_properties;
-  s.system_name[0] = 0;
   if (XR_SUCCEEDED(
           xrGetSystemProperties(s.instance, s.system, &system_properties))) {
     strcpy_s(s.system_name, system_properties.systemName);
@@ -1395,7 +1397,8 @@ bool XrScreen::StartSession(uint32_t width, uint32_t height, int eyes) {
   s.height = height;
 
   if (s.vulkan) {
-    // --- Vulkan through the runtime, and Direct3D 11 on its GPU ------------
+    // --- Vulkan through the runtime, and Direct3D 11 on its GPU when the
+    // session has it (UseD3D11) ------------------------------------------
     if (!s.StartVulkan()) {
       s.vk_failed = true;
       return false;
@@ -1543,30 +1546,26 @@ bool XrScreen::StartSession(uint32_t width, uint32_t height, int eyes) {
   // A dynamic texture is the cheap way to get CPU pixels onto the GPU: map,
   // copy the rows, unmap, then let the GPU do the copy into the swapchain.
   // A session with no Direct3D 11 copies them with Vulkan.
-  if (s.device == nullptr) {
-    s.log("  openxr: ready, %d eye(s), %u swapchain images each, with no "
-          "Direct3D 11", eyes_, s.image_count[0]);
-    running_ = true;
-    return true;
-  }
-  D3D11_TEXTURE2D_DESC staging_desc;
-  ZeroMemory(&staging_desc, sizeof(staging_desc));
-  staging_desc.Width = s.width;
-  staging_desc.Height = s.height;
-  staging_desc.MipLevels = 1;
-  staging_desc.ArraySize = 1;
-  staging_desc.Format = s.format;
-  staging_desc.SampleDesc.Count = 1;
-  staging_desc.Usage = D3D11_USAGE_DYNAMIC;
-  staging_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-  staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-  if (FAILED(s.device->CreateTexture2D(&staging_desc, nullptr, &s.staging))) {
-    s.log("  openxr: could not create the upload texture");
-    return false;
+  if (s.device != nullptr) {
+    D3D11_TEXTURE2D_DESC staging_desc;
+    ZeroMemory(&staging_desc, sizeof(staging_desc));
+    staging_desc.Width = s.width;
+    staging_desc.Height = s.height;
+    staging_desc.MipLevels = 1;
+    staging_desc.ArraySize = 1;
+    staging_desc.Format = s.format;
+    staging_desc.SampleDesc.Count = 1;
+    staging_desc.Usage = D3D11_USAGE_DYNAMIC;
+    staging_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(s.device->CreateTexture2D(&staging_desc, nullptr, &s.staging))) {
+      s.log("  openxr: could not create the upload texture");
+      return false;
+    }
   }
 
-  s.log("  openxr: ready, %d eye(s), %u swapchain images each", eyes_,
-        s.image_count[0]);
+  s.log("  openxr: ready, %d eye(s), %u swapchain images each%s", eyes_,
+        s.image_count[0], s.device == nullptr ? ", with no Direct3D 11" : "");
   // A layer that was staged before the session is not for its first frame.
   for (int i = 0; i < kCards; ++i) g_have_staged_card[i] = false;
   g_have_staged_window = false;
@@ -2416,9 +2415,6 @@ void XrScreen::SetRenderPose(int index, const float position[3],
 }
 
 void XrScreen::EndFrame() {
-  // A frame with no wait for the GPU and no copies of a late frame.
-  impl_->late_gpu = 0;
-  impl_->late_copy = 0;
   if (remote_) {
     if (!impl_->frame_open) return;
     if (!remote_->healthy()) { impl_->frame_open = false; running_ = false; return; }
@@ -2437,6 +2433,9 @@ void XrScreen::EndFrame() {
     for (int i = 0; i < kCards; ++i) g_card_failed[i] = p.state.card_failed[i] != 0;
     impl_->frame_open = false; return;
   }
+  // A frame with no wait for the GPU and no copies of a late frame.
+  impl_->late_gpu = 0;
+  impl_->late_copy = 0;
   if (!BuildFrame()) return;
   impl_->SendFrame();
   FinishFrame();

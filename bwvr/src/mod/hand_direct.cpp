@@ -128,6 +128,7 @@
 #include "controller_math.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "creature_head.h"
 #include "creature_stay.h"
 #include "far_choice_math.h"
 #include "far_grab.h"
@@ -7155,6 +7156,7 @@ void InstallNear() {
                "acts on is nearer"
              : "The reach of the Creature at the Hand is hand_pick_cm");
   CreatureStayInstall();
+  CreatureHeadInstall();
   g_creature_bone = IniKey("creature_bone", 1) != 0;
   ModLog("hand creature: creature_bone=%d. %s", g_creature_bone ? 1 : 0,
          g_creature_bone
@@ -7708,6 +7710,29 @@ void ScriptPlayerInstall() {
 
 }  // namespace
 
+// creature_head.cpp: the head of the player in the world, while the player
+// stands for the camera now (docs/god-view.md, "When the player stands for
+// the camera"). The latch of the last frame gives the head. why gets the
+// reason when the player does not stand for the camera.
+bool HandDirectPlayerHead(float head[3], const char** why) {
+  const bool view = TabletopGodOwnsView();
+  const int owner = ScriptCameraOwnerNow();
+  const bool bars = CutsceneWindowBarsUp();
+  const bool moves = ComfortCameraGameMoves();
+  const char* reason = nullptr;
+  if (!near_math::PlayerIsCamera(g_player.valid, view, owner, bars, moves)) {
+    reason = !g_player.valid ? "the God view did not own the last frame"
+             : !view         ? "the God view does not own the view now"
+             : owner != 0    ? "a story has the camera"
+             : bars          ? "the cinema bars are up"
+                             : "the game moves its own camera to a new place";
+  }
+  if (why != nullptr) *why = reason;
+  if (reason != nullptr) return false;
+  for (int i = 0; i < 3; ++i) head[i] = g_player.points.head_at[i];
+  return true;
+}
+
 // For the fake controller's word "seek" on the table: offer the objects
 // within 50 cm of the room of the Hand to the pick, for a few frames.
 void HandDirectWidenPick(int frames) {
@@ -7725,7 +7750,8 @@ void HandDirectWidenFar(int frames, float meters) {
 // passes.
 void HandDirectFrame() {
   ++g_frame;
-  if (g_script_hooked) LatchPlayer();
+  if (g_script_hooked || CreatureHeadHooked()) LatchPlayer();
+  CreatureHeadFrame(g_frame);
   g_candidate_count = 0;
   g_ball_count = 0;
   g_scroll_count = 0;
@@ -10001,6 +10027,7 @@ uint64_t HandDirectTakeScriptAnswers() {
 // Once a report window.
 void HandDirectReport() {
   ForestTakeReport();
+  CreatureHeadReport();
   if (!g_installed || g_active_frames == 0) return;
   ModLog("hand         : the controller placed the Hand on %llu frames: %llu "
          "depths, %llu poses, %llu rays, %llu picks put in, %llu far picks "

@@ -2331,8 +2331,11 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   another god in front of the camera. Each place is in a cut scene. Not
   changed.
 - **The other readers of the engine camera** in the game logic (184
-  instructions read `LH3DTech::g_camera`): the villagers, the Creature and
-  the sounds. The sound has its own work (`audio.md`).
+  instructions read `LH3DTech::g_camera`): the villagers and the sounds. The
+  sound has its own work (`audio.md`). The Creature reads the camera of the
+  player from its `GInterfaceStatus`, and in the God view it gets the head
+  while the player stands for the camera (`creature.md`, sections 1.9 and
+  5.4).
 - **The Temple key, a load and a bookmark** have no run with a script test.
 - **Only the headset can show** if the quests of a real session go on:
   the guide of Land 1, the mother of `FollowUs`, the zoom lesson. It can

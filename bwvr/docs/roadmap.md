@@ -357,6 +357,22 @@ is built, and no test has proven it.
   checks and the code show it (`creature.md`, section 6). To see in the
   headset: the attack and the block act at the first grip, and the stars
   sit on the body in both eyes.
+- **B33. The Creature turns to the head: check it in a headset.** In the
+  God view the Creature reads the head of the player as the camera of the
+  player: its turn, its look, a point or a throw at the player, and the
+  distance to the player (`creature_player_head=1`, `creature.md`, section
+  5.4). The game's own camera there is about 300 units above the land, so
+  the Creature looked up into the sky. Desktop runs show the turn of the
+  stay and the look at the head, and each read of the camera in the code of
+  the Creature got the head. Check in a headset:
+  - that the Creature faces you and looks at your head after a stay and
+    after a cut scene,
+  - that the Creature does what you show it in the Creche quest of Land 2,
+  - that in a story the Creature looks at the camera of the story.
+
+  The A/B key is Ctrl, Shift and the slash key (the # key of a German
+  keyboard). Not run: a story, a cut scene, a point or a throw at the
+  player, and a Creature of a different player.
 
 B1b, B2, B4 and B11 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.
@@ -433,8 +449,8 @@ that moves while the Hand takes it.
   Desktop runs show it with a Creature that stands and with a Creature that
   walks. Check in a headset:
   - the hold time of 350 ms with a real grip (`creature_hold_stay_ms`),
-  - where the Creature turns to, and how its head follows the real hand
-    (`creature_stay_look`),
+  - that the Creature turns to your head (B33), and how its head follows
+    the real hand (`creature_stay_look`),
   - whether the halo, the pulse and the card show well that the stay is on.
 
   The leash click, the stay and a command act on the Creature of the local

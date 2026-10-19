@@ -477,28 +477,6 @@ inline void PlacePoint(const float position[3], const float rotation[9],
   }
 }
 
-// THE BAND OF THE LEASH AROUND THE WRIST (left_leash=1, docs/grab.md, "The
-// leash at the mod's hand"). A closed loop of points in the hand frame,
-// around the middle of the wrist (kWristPoint), across the line of the
-// fingers: kWristLoopThick across the palm (x) and kWristLoopWide along the
-// knuckles (z), a little larger than the wrist of the test hand, so the rope
-// lies on the skin. The last point is the first one again. The overlay
-// places the points with the hand, so the loop has the size of the hand.
-const int kWristLoopPoints = 16;
-const float kWristLoopThick = 0.09f;
-const float kWristLoopWide = 0.17f;
-const float kWristRopeRadius = 0.022f;  // the rope, as a share of the hand
-
-inline void WristLoop(float out[kWristLoopPoints + 1][3]) {
-  for (int i = 0; i <= kWristLoopPoints; ++i) {
-    const float a = 6.2831853f * static_cast<float>(i % kWristLoopPoints) /
-                    static_cast<float>(kWristLoopPoints);
-    out[i][0] = kWristPoint[0] + kWristLoopThick * cosf(a);
-    out[i][1] = kWristPoint[1];
-    out[i][2] = kWristPoint[2] + kWristLoopWide * sinf(a);
-  }
-}
-
 inline void PlaceNormal(const float rotation[9], bool left, const float n[3],
                         float out[3]) {
   const float q[3] = {left ? -n[0] : n[0], n[1], n[2]};

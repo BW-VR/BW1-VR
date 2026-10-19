@@ -213,6 +213,8 @@ bool HandExactPalm(float out[3], uint64_t* frame, int32_t* state);
 // overlay.cpp: the middle of the wrist of the hand that does not point, as
 // it was drawn last. False when it was not drawn in the last two frames.
 bool OverlayOtherWrist(float out[3]);
+bool OverlayWristFrames(float from_point[3], float from_axes[9],
+                        float to_point[3], float to_axes[9]);
 bool ControllersFarRay(float origin[3], float direction[3],
                        float* units_per_meter, float eye[3]);
 bool ControllersFarAllowed(const char** why);
@@ -6473,10 +6475,10 @@ int __fastcall h_PickStep(void* self, void* unused) {
 uint64_t g_leash_wrist_last = 0;
 int g_leash_wrist_logs = 0;
 
-// THE BAND OF THE LEASH ON THE OTHER HAND (left_leash=1): the leash is on
-// the Hand (not tied to an object), and the Hand holds no miracle. Then the
-// overlay draws a band around the wrist of the other hand.
-bool LeashBandLeft() {
+// THE RING OF THE LEASH ON THE OTHER HAND (left_leash=1, leash_ring_left=1):
+// the leash is on the Hand (not tied to an object), and the Hand holds no
+// miracle.
+bool LeashRingLeft() {
   if (!ControllersLeftLeash() || !g_owns || g_face == nullptr ||
       g_hand == nullptr || State(g_hand) == kStateGrain) {
     return false;
@@ -6491,50 +6493,89 @@ bool LeashBandLeft() {
          *reinterpret_cast<void* const*>(leash + kLeashObject) == nullptr;
 }
 
-// THE RING OF THE LEASH AT THE GAME'S HAND. While the leash is on the Hand,
-// the game draws a ring of the mesh Data\MISC\leash.l3d (one of the three
-// meshes that fn_004645D0 loads to 0x00C5E3D8, one for each kind) as an
-// LH3DStaticObject a little over its Hand, through the draw of an object
-// fn_0080DB30 (thiscall, the object). The object keeps its mesh at +0x7C and
-// its place at +0x38. With the leash on the other hand (left_leash=1) that
-// ring is not drawn: the overlay draws the band around the wrist of the
-// other hand (overlay.cpp, BuildWristBand). The posts of the leash at the
-// Temple have the same meshes, so only an object near the game's Hand
-// counts.
-const uintptr_t kObjectDraw = 0x0080DB30;
-const uintptr_t kLeashMeshes = 0x00C5E3D8;
-const int kStaticMesh = 0x7C;
-const int kStaticPlace = 0x38;
-typedef void(__fastcall* ObjectDrawFn)(void* object, void* unused);
-ObjectDrawFn o_ObjectDraw = nullptr;
-uint64_t g_ring_hidden = 0;
-bool g_ring_said = false;
+// THE RING OF THE LEASH (docs/grab.md, "The leash at the mod's hand"). While
+// the leash is on the Hand, the game draws a turning ring of the mesh
+// Data\MISC\leash.l3d and a glow at the wrist of its Hand.
+// CitadelHeart::DrawNow calls fn_00466730 (thiscall, the CitadelHeart, no
+// arguments) for the three rings at the posts of the leash in the Temple.
+// For the kind of leash that is on the Hand, that function puts the ring at
+// the wrist bone of the game's Hand: the first matrix of the pose of the
+// Hand's mesh (CHand+0x482C, then +0x80), with the size of the mesh. With
+// the leash on the other hand (left_leash=1, leash_ring_left=1), the mod
+// moves that matrix for the call from the wrist of the pointing hand to the
+// wrist of the other hand, and puts it back after the call. So the game puts
+// its own ring and glow at the other wrist. leash_ring_left=0 leaves the ring
+// at the game's Hand.
+const uintptr_t kDrawLeashRings = 0x00466730;
+const int kHandMeshObject = 0x482C;
+const int kMeshPose = 0x80;
+typedef void(__fastcall* DrawRingsFn)(void* self, void* unused);
+DrawRingsFn o_DrawLeashRings = nullptr;
+bool g_leash_ring_left = true;  // leash_ring_left
+uint64_t g_ring_left_calls = 0;
+bool g_ring_left_said = false;
 
-bool HandLeashRing(const uint8_t* object) {
-  if (object == nullptr || IsBadReadPtr(object, kStaticMesh + 4)) return false;
-  const void* mesh = *reinterpret_cast<void* const*>(object + kStaticMesh);
-  if (mesh == nullptr) return false;
-  const void* const* meshes = reinterpret_cast<const void* const*>(kLeashMeshes);
-  if (mesh != meshes[0] && mesh != meshes[1] && mesh != meshes[2]) {
-    return false;
+// The first matrix of the pose of the Hand's mesh: 3 rows (the axes of the
+// wrist bone in the world), then its place. Null when there is none.
+float* WristBone() {
+  if (g_hand == nullptr) return nullptr;
+  uint8_t* const* mesh_link =
+      reinterpret_cast<uint8_t* const*>(g_hand + kHandMeshObject);
+  if (IsBadReadPtr(mesh_link, sizeof(void*)) || *mesh_link == nullptr) {
+    return nullptr;
   }
-  const float* place = reinterpret_cast<const float*>(object + kStaticPlace);
-  const float units = RoomUnits();
-  return units > 0.0f && Distance(place, g_target) < 0.6f * units;
+  float* const* pose_link =
+      reinterpret_cast<float* const*>(*mesh_link + kMeshPose);
+  if (IsBadReadPtr(pose_link, sizeof(void*)) || *pose_link == nullptr ||
+      IsBadWritePtr(*pose_link, 12 * sizeof(float))) {
+    return nullptr;
+  }
+  return *pose_link;
 }
 
-void __fastcall h_ObjectDraw(void* object, void* unused) {
-  if (LeashBandLeft() && HandLeashRing(static_cast<const uint8_t*>(object))) {
-    ++g_ring_hidden;
-    if (!g_ring_said) {
-      g_ring_said = true;
-      ModLog("leash        : the ring of the leash at the game's Hand is not "
-             "drawn, and the overlay draws the band at the other wrist "
-             "(left_leash=1), frame %llu", g_frame);
-    }
-    return;
+void __fastcall h_DrawLeashRings(void* self, void* unused) {
+  float* bone = nullptr;
+  float saved[12];
+  float from[3], from_axes[9], to[3], to_axes[9];
+  if (g_leash_ring_left && LeashRingLeft() &&
+      OverlayWristFrames(from, from_axes, to, to_axes)) {
+    bone = WristBone();
   }
-  o_ObjectDraw(object, unused);
+  if (bone != nullptr) {
+    memcpy(saved, bone, sizeof(saved));
+    // The turn from the pointing hand to the other hand: to * from^T. Each
+    // axis of the bone turns, and its place moves with the wrist.
+    float turn[9];
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        turn[r * 3 + c] = to_axes[r * 3 + 0] * from_axes[c * 3 + 0] +
+                          to_axes[r * 3 + 1] * from_axes[c * 3 + 1] +
+                          to_axes[r * 3 + 2] * from_axes[c * 3 + 2];
+      }
+    }
+    for (int row = 0; row < 4; ++row) {
+      float v[3] = {saved[row * 3], saved[row * 3 + 1], saved[row * 3 + 2]};
+      if (row == 3) {
+        for (int k = 0; k < 3; ++k) v[k] -= from[k];
+      }
+      for (int r = 0; r < 3; ++r) {
+        bone[row * 3 + r] = turn[r * 3 + 0] * v[0] + turn[r * 3 + 1] * v[1] +
+                            turn[r * 3 + 2] * v[2] + (row == 3 ? to[r] : 0.0f);
+      }
+    }
+  }
+  o_DrawLeashRings(self, unused);
+  if (bone == nullptr) return;
+  memcpy(bone, saved, sizeof(saved));
+  ++g_ring_left_calls;
+  if (!g_ring_left_said) {
+    g_ring_left_said = true;
+    ModLog("leash        : the game puts the ring of the leash at the wrist of "
+           "the hand that does not point, %.1f %.1f %.1f, and not at the "
+           "wrist of its Hand at %.1f %.1f %.1f (left_leash=1, "
+           "leash_ring_left=1), frame %llu", to[0], to[1], to[2], saved[9],
+           saved[10], saved[11], g_frame);
+  }
 }
 
 void __fastcall h_LeashStart(void* self, void* unused, float* out,
@@ -7772,6 +7813,26 @@ void InstallNear() {
     ModLog("hand pick    : near_rule=0, so the pick reaches 60 percent of the "
            "Hand's length");
   }
+  g_leash_ring_left = IniKey("leash_ring_left", 1) != 0;
+  static const uint8_t kRingsBytes[11] = {0x81, 0xEC, 0xD8, 0x00, 0x00, 0x00,
+                                           0x56, 0x8B, 0xF1, 0x8B, 0x06};
+  const void* rings = reinterpret_cast<const void*>(kDrawLeashRings);
+  if (IsBadReadPtr(rings, sizeof(kRingsBytes)) ||
+      memcmp(rings, kRingsBytes, sizeof(kRingsBytes)) != 0) {
+    ModLog("hooks        : the draw of the rings of the leash at 0x%08X does "
+           "not have the bytes of the disassembly, so the ring of the leash "
+           "stays at the game's Hand",
+           static_cast<unsigned>(kDrawLeashRings));
+  } else {
+    Hook(kDrawLeashRings, reinterpret_cast<void*>(&h_DrawLeashRings),
+         reinterpret_cast<void**>(&o_DrawLeashRings),
+         "the draw of the rings of the leash (the ring on the other hand)");
+    ModLog("leash        : leash_ring_left=%d. %s", g_leash_ring_left ? 1 : 0,
+           g_leash_ring_left
+               ? "With left_leash=1 the game puts the ring of the leash at "
+                 "the wrist of the hand that does not point"
+               : "The ring of the leash stays at the game's Hand");
+  }
   if (!g_leash_palm) {
     ModLog("leash        : leash_at_palm=0, so the rope ends at the wrist "
            "bone of the game's Hand");
@@ -7791,19 +7852,6 @@ void InstallNear() {
   Hook(kGetLeashStartPoint, reinterpret_cast<void*>(&h_LeashStart),
        reinterpret_cast<void**>(&o_LeashStart),
        "GInterface::GetLeashStartPoint (the leash at the mod's hand)");
-  static const uint8_t kObjectDrawBytes[10] = {0x83, 0xEC, 0x0C, 0x8B, 0x15,
-                                               0x88, 0x1A, 0xEA, 0x00, 0x53};
-  const void* draw = reinterpret_cast<const void*>(kObjectDraw);
-  if (IsBadReadPtr(draw, sizeof(kObjectDrawBytes)) ||
-      memcmp(draw, kObjectDrawBytes, sizeof(kObjectDrawBytes)) != 0) {
-    ModLog("hooks        : the draw of an object at 0x%08X does not have the "
-           "bytes of the disassembly, so the ring of the leash stays at the "
-           "game's Hand", static_cast<unsigned>(kObjectDraw));
-    return;
-  }
-  Hook(kObjectDraw, reinterpret_cast<void*>(&h_ObjectDraw),
-       reinterpret_cast<void**>(&o_ObjectDraw),
-       "the draw of an object (the ring of the leash on the other hand)");
 }
 
 }  // namespace
@@ -9108,7 +9156,6 @@ bool HandDirectHandPosition(float out[3], bool* by_controller) {
 // Normal state, empty, and over nothing it can hold, by the mod's own pick
 // and by the game's. These are from the last frame, which is the frame the
 // player saw. why says the first reason for a no.
-bool HandDirectLeashBandLeft() { return g_installed && LeashBandLeft(); }
 
 
 bool HandDirectClaimFree(const char** why) {

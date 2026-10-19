@@ -343,7 +343,7 @@ const Setting kSettings[] = {
     {kSlider, "hand_real_cm", "Your hand length", "14|26|1| cm", 19,
      "The length of your real hand, from the wrist to the tip of the middle "
      "finger. Your hands in the game have this length, so they are the size "
-     "of your own hands. The band and the rope of the leash go with them. "
+     "of your own hands, and so has the ring of the leash. "
      "Measure your hand and set the value here."},
     {kBool, "hand_glow", "Glow at the Hand's point", nullptr, 0,
      "A small glow at the tip of the index finger shows the point of the "

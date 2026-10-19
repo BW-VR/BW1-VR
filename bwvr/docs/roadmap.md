@@ -351,6 +351,14 @@ is built, and no test has proven it.
   checks and the code show it (`creature.md`, section 6). To see in the
   headset: the attack and the block act at the first grip, and the stars
   sit on the body in both eyes.
+- **B33. The water with the leash on: test it in the headset.** While the
+  ring of the leash is on the left wrist, the icon of the kind of leash at
+  the lower right of the view is hidden (`leash_icon_hide=1`, test key Ctrl
+  Shift L, `grab.md`, "The leash at the mod's hand"). The reflection of the
+  game's Hand is hidden with its mesh (`hand_hide_reflection`). No desktop
+  run has shown the icon hidden. To see in the headset: with the leash on,
+  no ring in the water moves with the head, and Ctrl Shift L shows the icon
+  again.
 
 B1b, B2, B4 and B11 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.

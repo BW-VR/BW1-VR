@@ -6288,6 +6288,106 @@ void __fastcall h_DrawLeashRings(void* self, void* unused) {
   }
 }
 
+// THE ICON OF THE KIND OF LEASH (docs/grab.md, "The leash at the mod's
+// hand"). The interface of the game keeps a list of DisplayGesture items
+// (0x00D4EAC8, the count at 0x00D4EAD0). fn_0068AA60 puts each item on the
+// sorted list with the draw fn_0068B480. That draw calls fn_0068B7E0
+// (thiscall, the item, its kind of spell seed +0x10 and its kind of leash
+// +0x14, ret 8), then the sprite of the gesture. For a kind of leash that is
+// not -1, fn_0068B7E0 draws the small leash mesh of that kind (fn_004645A0)
+// with a camera of its own at the lower right of the view, and puts the
+// camera back (fn_0068B7D0). ProcessPowerUpSystem gives an item with the kind
+// of leash that is on (order 2, 0x005CFA0F), and DoLeashSelectionSystem one
+// for each other kind (order 3 + the kind, 0x005D0362).
+//
+// In the headset that leash is at one place in front of the head. While the
+// game puts the ring of the leash around the wrist of the hand that does not
+// point (left_leash=1, leash_ring_left=1), the ring shows that the leash is
+// on, and leash_icon_hide=1 skips the call for an item with a kind of leash.
+// The sprite of the gesture stays. The decision is latched once a frame, so
+// both eyes agree. leash_icon_hide=0 draws the icon as the game does.
+const uintptr_t kDrawGestureIcon = 0x0068B7E0;
+const int kGestureOrder = 0x34;
+const int kGestureType = 0x0C;
+typedef void(__fastcall* DrawGestureIconFn)(void* self, void* unused,
+                                            int seed, int leash);
+DrawGestureIconFn o_DrawGestureIcon = nullptr;
+bool g_rings_hooked = false;
+bool g_icon_hide_live = true;  // leash_icon_hide, the test key changes it
+bool g_icon_key_down = false;
+uint64_t g_icon_test_frame = 0;  // leash_icon_test
+uint64_t g_icon_frame = ~0ull;
+bool g_icon_hide_now = false;
+uint64_t g_icon_skips = 0;
+uint32_t g_icon_said = 0;  // a bit for each order that the log has
+
+void __fastcall h_DrawGestureIcon(void* self, void* unused, int seed,
+                                  int leash) {
+  if (leash != -1 && self != nullptr) {
+    if (g_frame != g_icon_frame) {
+      g_icon_frame = g_frame;
+      g_icon_hide_now = g_icon_hide_live && g_rings_hooked &&
+                        g_leash_ring_left && LeashRingLeft();
+    }
+    const uint8_t* item = static_cast<const uint8_t*>(self);
+    const int order = *reinterpret_cast<const int32_t*>(item + kGestureOrder);
+    if (order >= 0 && order < 32 && (g_icon_said & (1u << order)) == 0) {
+      g_icon_said |= 1u << order;
+      ModLog("leash        : the game draws the icon of the kind of leash %d "
+             "(a DisplayGesture item, order %d, gesture %d). It is %s, "
+             "frame %llu", leash, order,
+             *reinterpret_cast<const int32_t*>(item + kGestureType),
+             g_icon_hide_now ? "hidden, because the ring of the leash is on "
+                               "the wrist of the hand that does not point"
+                             : "drawn",
+             g_frame);
+    }
+    if (g_icon_hide_now) {
+      ++g_icon_skips;
+      return;
+    }
+  }
+  o_DrawGestureIcon(self, unused, seed, leash);
+}
+
+void ToggleLeashIcon(const char* by) {
+  g_icon_hide_live = !g_icon_hide_live;
+  g_icon_frame = ~0ull;
+  ControllersGesturePulse(0.5f, g_icon_hide_live ? 0.30f : 0.08f);
+  ModLog("leash        : %s: leash_icon_hide is %d now, frame %llu. The icon "
+         "of the kind of leash is %s while the ring is on the wrist of the "
+         "hand that does not point. %llu draws skipped so far",
+         by, g_icon_hide_live ? 1 : 0, g_frame,
+         g_icon_hide_live ? "hidden" : "drawn",
+         static_cast<unsigned long long>(g_icon_skips));
+}
+
+// THE A/B KEY OF THE ICON OF THE LEASH (test_keys=1): Ctrl, Shift and L
+// change leash_icon_hide between 1 and 0. The pointing controller gives a
+// long pulse for 1 and a short pulse for 0. Shift and L without Ctrl is a key
+// of stereo.cpp. Read once a frame, only while a window of the game is in
+// front. The test key leash_icon_test gives a frame at which the value
+// changes, as the key does.
+void PollLeashIconKey() {
+  if (o_DrawGestureIcon == nullptr) return;
+  if (g_icon_test_frame > 0 && g_frame >= g_icon_test_frame) {
+    g_icon_test_frame = 0;
+    ToggleLeashIcon("the test frame (leash_icon_test)");
+  }
+  if (!g_release_key) return;
+  const bool down = (GetAsyncKeyState('L') & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool pressed = down && !g_icon_key_down;
+  g_icon_key_down = down;
+  if (!pressed) return;
+  HWND window = GetForegroundWindow();
+  DWORD process = 0;
+  if (window != nullptr) GetWindowThreadProcessId(window, &process);
+  if (process != GetCurrentProcessId()) return;
+  ToggleLeashIcon("Ctrl, Shift and L");
+}
+
 void __fastcall h_LeashStart(void* self, void* unused, float* out,
                              int from_status) {
   o_LeashStart(self, unused, out, from_status);
@@ -7482,11 +7582,43 @@ void InstallNear() {
     Hook(kDrawLeashRings, reinterpret_cast<void*>(&h_DrawLeashRings),
          reinterpret_cast<void**>(&o_DrawLeashRings),
          "the draw of the rings of the leash (the ring on the other hand)");
+    g_rings_hooked = true;
     ModLog("leash        : leash_ring_left=%d. %s", g_leash_ring_left ? 1 : 0,
            g_leash_ring_left
                ? "With left_leash=1 the game puts the ring of the leash "
                  "around the wrist of the hand that does not point"
                : "The ring of the leash stays at the game's Hand");
+  }
+  g_icon_hide_live = IniKey("leash_icon_hide", 1) != 0;
+  g_icon_test_frame = static_cast<uint64_t>(TestKey("leash_icon_test"));
+  const bool icon_keys = TestKey("test_keys") != 0;
+  static const uint8_t kIconBytes[13] = {0x83, 0xEC, 0x64, 0x53, 0x55,
+                                         0x56, 0x57, 0x8B, 0xF9, 0x83,
+                                         0x7F, 0x34, 0x09};
+  const void* icon = reinterpret_cast<const void*>(kDrawGestureIcon);
+  if (IsBadReadPtr(icon, sizeof(kIconBytes)) ||
+      memcmp(icon, kIconBytes, sizeof(kIconBytes)) != 0) {
+    ModLog("hooks        : the draw of the icon of a gesture at 0x%08X does "
+           "not have the bytes of the disassembly, so the game draws the "
+           "icon of the kind of leash",
+           static_cast<unsigned>(kDrawGestureIcon));
+  } else if (g_icon_hide_live || icon_keys || g_icon_test_frame > 0) {
+    // With test_keys=1 or leash_icon_test the hook goes in for both values,
+    // so the A/B can change it.
+    Hook(kDrawGestureIcon, reinterpret_cast<void*>(&h_DrawGestureIcon),
+         reinterpret_cast<void**>(&o_DrawGestureIcon),
+         "the draw of the icon of a gesture (the icon of the kind of leash)");
+    ModLog("leash        : leash_icon_hide=%d. %s%s", g_icon_hide_live ? 1 : 0,
+           g_icon_hide_live
+               ? "While the ring of the leash is on the wrist of the hand "
+                 "that does not point, the icon of the kind of leash at the "
+                 "lower right of the view is hidden"
+               : "The game draws the icon of the kind of leash at the lower "
+                 "right of the view",
+           icon_keys ? ". test_keys=1: Ctrl, Shift and L change it" : "");
+  } else {
+    ModLog("leash        : leash_icon_hide=0, so the game draws the icon of "
+           "the kind of leash at the lower right of the view");
   }
   if (!g_leash_palm) {
     ModLog("leash        : leash_at_palm=0, so the rope ends at the wrist "
@@ -8208,6 +8340,7 @@ void HandDirectFrame() {
   PollChoiceKey();
   PollStayKey();
   PollTakeCarryKey();
+  PollLeashIconKey();
   TakeStreamFrame(g_frame);
   PollCatchKey();
   PollWideKey();

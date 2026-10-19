@@ -8913,21 +8913,15 @@ void* NearestHoldableOnMap(const float point[3], float* best_gap) {
 }
 
 // The object that the Hand can hold whose body is nearest to a point, with a
-// gap of at most max_gap world units.
+// gap of at most max_gap world units, and the gap of the nearest one (-1
+// with none).
 bool HandDirectHoldableAt(const float point[3], float max_gap,
-                          void** object) {
+                          void** object, float* gap_out) {
   float gap = -1.0f;
   void* best = NearestHoldableOnMap(point, &gap);
+  if (gap_out != nullptr) *gap_out = gap;
   *object = best != nullptr && gap <= max_gap ? best : nullptr;
   return *object != nullptr;
-}
-
-// The gap of the nearest object that the Hand can hold to a point, for the
-// log of left_hold.cpp, or -1 with none in the 3 by 3 cells.
-float HandDirectNearestHoldableGap(const float point[3]) {
-  float gap = -1.0f;
-  NearestHoldableOnMap(point, &gap);
-  return gap;
 }
 
 // For miracle.cpp (docs/miracles.md, "A miracle in the Hand in the plain

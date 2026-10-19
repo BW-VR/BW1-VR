@@ -286,4 +286,24 @@ void ExactChecks() {
     Near("a point to the model frame and back (units)",
          controller_math::Distance(point, world), 0.0, 1e-4);
   }
+  // THE TAKE FROM THE SIDE: the ball of the object touches the palm.
+  {
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    const float length = 19.0f, radius = 1.5f;
+    float right[3], left[3];
+    hx::WristHoldPlace(radius, length, false, up, right);
+    hx::WristHoldPlace(radius, length, true, up, left);
+    // Back to the hand frame of the right hand: the middle of the ball.
+    float center[3];
+    overlay_math::HoldCenter(radius / length, center);
+    const float middle_y =
+        (right[1] + radius) / length + overlay_math::kWristPoint[1];
+    Near("the side take: the ball is at the height of the hold (hand)",
+         middle_y, center[1], 1e-5);
+    Near("the side take: the ball touches the palm (hand)",
+         right[0] / length + overlay_math::kWristPoint[0], center[0], 1e-5);
+    Near("the side take: the left hand is the mirror image in x",
+         left[0], -right[0], 1e-5);
+    Near("the side take: the mirror leaves y alone", left[1], right[1], 1e-5);
+  }
 }

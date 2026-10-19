@@ -1084,6 +1084,9 @@ bool OverlayFreeWrist(float point[3], float axes[9], float* length,
   return true;
 }
 
+// The hand that does not point is the left hand (left_hold.cpp).
+bool OverlayFreeHandLeft() { return g_free_hand == 0; }
+
 // For a source that aims with a hand (0 the left hand, 1 the right hand), for
 // example a Creature command: the hand takes the point pose. Call it in each
 // frame of the aim. The pose ends one frame after the last call.

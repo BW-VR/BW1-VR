@@ -34,8 +34,13 @@
 // the GMagicHand. For that call the mod empties the hands and the CHand, and
 // keeps the fields of the CHand from +0x48FC to +0x4948 (the object, the
 // draw settings and the hold). After the call it parks the new object as
-// above, and puts back the object of the Hand and those fields. The new
-// object stays at its place in the frame of the wrist of the other hand.
+// above, and puts back the object of the Hand and those fields. Then the new
+// object goes into the palm of the other hand as the Hand of the game puts
+// its object there: the ball of its body touches the palm
+// (hand_exact_math.h, WristHoldPlace), with the 2D radius of the object or,
+// for a tree, the radius of its trunk (Object::GetHoldRadius). It moves there
+// from its place in kSettleSeconds, in the frame of the hand, and keeps its
+// axes.
 //
 // THE DROP. For one call the mod puts the object back as the only object of
 // the GMagicHand, with the count of the hands at 1 and no object in the
@@ -55,6 +60,7 @@
 #include <string.h>
 
 #include "left_hold.h"
+#include "hand_exact_math.h"
 #include "MinHook.h"
 
 
@@ -62,10 +68,11 @@ void ModLog(const char* format, ...);
 bool HandExactAddPrepareHook(void (*hook)(void* hand));
 bool HandDirectGripFacts(bool* holding, bool* settled, bool* spring,
                          bool* take);
-bool HandDirectHoldableAt(const float point[3], float max_gap, void** object);
-float HandDirectNearestHoldableGap(const float point[3]);
+bool HandDirectHoldableAt(const float point[3], float max_gap, void** object,
+                          float* gap);
 bool OverlayFreeWrist(float point[3], float axes[9], float* length,
                       bool pointing);
+bool OverlayFreeHandLeft();
 
 namespace {
 
@@ -77,8 +84,8 @@ const uintptr_t kDropAction = 0x005DA400;   // the drop action
 const uintptr_t kPlaceInHand = 0x005DA6F0;  // PlaceObjectInMagicHand
 const int kHandKeepFrom = 0x48FC;     // the fields of the CHand of a hold
 const int kHandKeepSize = 0x4948 - 0x48FC;
-const float kPalmFromWrist = 0.4f;    // of the hand: the middle of the hand
-const float kSideGap = 0.35f;         // of the hand: the reach of the hand
+const int kReachPoints = 5;           // along the hand, the wrist to the tips
+const float kSideGap = 0.25f;         // of the hand: the reach of each point
 const int kFaceLocked = 0x38;   // a byte: the pick of the game is locked
 const int kFaceStatus = 0x39C;  // GInterfaceStatus*
 const int kFaceHand = 0x3A0;    // CHand*
@@ -94,6 +101,10 @@ const uint16_t kFlagInHand = 0x4;
 const int kObjectMesh = 0x40;
 const int kMeshMatrix = 0x14;         // 3 rows (the axes), then the place
 const int kIsSpellSeed = 0x4C4;
+const int kGet2DRadius = 0x64;
+const int kGetHoldType = 0x58C;
+const int kGetHoldRadius = 0x590;
+const int kHoldTypeTree = 5;
 const int kDrawItself = 0x614;  // the draw of an object, as the Hand draws it
 const uintptr_t kFaceDraw = 0x00518640;  // GInterface::Draw
 const float kSpeedCap = 124.0f;       // the cap of the game's release
@@ -105,12 +116,15 @@ typedef void*(__fastcall* MyInterfaceFn)(void* game, void* unused);
 typedef void(__fastcall* ThisFn)(void* self, void* unused);
 typedef int(__fastcall* DropFn)(void* face, void* unused, void* packet);
 typedef int(__fastcall* VirtualIntFn)(void* self, void* unused);
+typedef float(__fastcall* VirtualFloatFn)(void* self, void* unused);
 typedef int(__fastcall* PlaceFn)(void* face, void* unused, void* object);
 
 struct Carry {
   uint8_t* object = nullptr;
   float axes[9];      // the axes of the object in the frame of the wrist
   float place[3];     // its place in the frame of the wrist
+  float place_from[3];  // the place at the take, for the settle
+  double settle_start = 0.0;  // the time of the take from the side, or 0
 };
 Carry g_carry;
 // The take of the borrowed Hand: since when it holds the object.
@@ -170,10 +184,17 @@ bool CarryMatrix(float out[12]) {
                          g_carry.axes[row * 3 + 2] * axes[6 + r];
     }
   }
+  float place[3] = {g_carry.place[0], g_carry.place[1], g_carry.place[2]};
+  if (g_carry.settle_start > 0.0) {
+    const float share = hand_exact_math::SettleShare(
+        static_cast<float>(Now() - g_carry.settle_start));
+    for (int i = 0; i < 3; ++i) {
+      place[i] += share * (g_carry.place_from[i] - g_carry.place[i]);
+    }
+  }
   for (int r = 0; r < 3; ++r) {
-    out[9 + r] = wrist[r] + g_carry.place[0] * axes[0 + r] +
-                 g_carry.place[1] * axes[3 + r] +
-                 g_carry.place[2] * axes[6 + r];
+    out[9 + r] = wrist[r] + place[0] * axes[0 + r] + place[1] * axes[3 + r] +
+                 place[2] * axes[6 + r];
   }
   return true;
 }
@@ -213,20 +234,83 @@ bool CaptureCarry(uint8_t* object, Carry* carry, float* distance) {
   return true;
 }
 
-// The object that the Hand can hold in the reach of the other hand (its body
-// at most kSideGap of the hand from the middle of the hand), or null.
-void* SideObject() {
+// The radius of the ball of the body of a held object, in world units, as
+// hand_exact.cpp takes it: the 2D radius (vtable +0x64), and for a tree the
+// radius of its trunk (GetHoldRadius, +0x590) when that is less.
+float HoldRadius(uint8_t* object) {
+  void** vtable = *reinterpret_cast<void***>(object);
+  float radius = reinterpret_cast<VirtualFloatFn>(vtable[kGet2DRadius / 4])(
+      object, nullptr);
+  if (!(radius > 0.0f) || radius > 1000.0f) radius = 0.0f;
+  if (reinterpret_cast<VirtualIntFn>(vtable[kGetHoldType / 4])(object,
+                                                               nullptr) ==
+      kHoldTypeTree) {
+    const float trunk = reinterpret_cast<VirtualFloatFn>(
+        vtable[kGetHoldRadius / 4])(object, nullptr);
+    if (trunk > 0.0f && (radius == 0.0f || trunk < radius)) radius = trunk;
+  }
+  return radius;
+}
+
+// The carry goes into the palm: the place where the ball of the body touches
+// it, with a settle from the place of now.
+void IntoPalm(Carry* carry) {
+  float wrist[3], axes[9], length = 0.0f;
+  if (!OverlayFreeWrist(wrist, axes, &length, true) || !(length > 0.0f)) {
+    return;
+  }
+  // The up axis of the object in the frame of the wrist: its row 1.
+  float up[3] = {carry->axes[3], carry->axes[4], carry->axes[5]};
+  const float n = sqrtf(Dot(up, up));
+  if (!(n > 1e-6f)) return;
+  for (int i = 0; i < 3; ++i) up[i] /= n;
+  memcpy(carry->place_from, carry->place, sizeof(carry->place));
+  const float radius = HoldRadius(carry->object);
+  hand_exact_math::WristHoldPlace(radius, length, OverlayFreeHandLeft(), up,
+                                  carry->place);
+  carry->settle_start = Now();
+  if (g_logs < kMaxLogs) {
+    ++g_logs;
+    float move[3];
+    for (int i = 0; i < 3; ++i) move[i] = carry->place[i] - carry->place_from[i];
+    ModLog("left hold    : the object %p goes into the palm of the other hand "
+           "in %.2f s: a ball of %.2f units on a hand of %.2f units, %.1f "
+           "units from its place at the take, frame %llu", carry->object,
+           hand_exact_math::kSettleSeconds, radius, length,
+           sqrtf(Dot(move, move)), g_frame);
+  }
+}
+
+// The object that the Hand can hold in the reach of the other hand, or null:
+// the nearest body to one of kReachPoints points along the hand, from 0.2 of
+// the hand past the wrist toward the knuckles to the finger tips (the length
+// of the hand is from the wrist to the tip of the middle finger), at most
+// kSideGap of the hand from it. gap gets the gap of the nearest one.
+void* SideObject(float* gap_out = nullptr, float* reach_out = nullptr) {
+  if (gap_out != nullptr) *gap_out = -1.0f;
   float wrist[3], axes[9], length = 0.0f;
   if (!OverlayFreeWrist(wrist, axes, &length, false) || !(length > 0.0f)) {
     return nullptr;
   }
-  float palm[3];
-  for (int i = 0; i < 3; ++i) {
-    palm[i] = wrist[i] - kPalmFromWrist * length * axes[3 + i];
+  if (reach_out != nullptr) *reach_out = kSideGap * length;
+  void* best = nullptr;
+  float best_gap = -1.0f;
+  for (int k = 1; k <= kReachPoints; ++k) {
+    const float along = static_cast<float>(k) / kReachPoints;
+    float point[3];
+    for (int i = 0; i < 3; ++i) {
+      point[i] = wrist[i] - along * length * axes[3 + i];
+    }
+    void* object = nullptr;
+    float gap = -1.0f;
+    HandDirectHoldableAt(point, kSideGap * length, &object, &gap);
+    if (gap >= 0.0f && (best_gap < 0.0f || gap < best_gap)) best_gap = gap;
+    if (object != nullptr && (best == nullptr || gap <= best_gap)) {
+      best = object;
+    }
   }
-  void* object = nullptr;
-  return HandDirectHoldableAt(palm, kSideGap * length, &object) ? object
-                                                                : nullptr;
+  if (gap_out != nullptr) *gap_out = best_gap;
+  return best;
 }
 
 // The take from the side, once for each press.
@@ -275,6 +359,7 @@ void SideTake() {
       reinterpret_cast<ThisFn>(kThrowObject)(hand, nullptr);
     }
     carried = CaptureCarry(taken, &carry, &gap);
+    if (carried) IntoPalm(&carry);
   }
   // What the Hand of the game holds comes back.
   At<uint8_t>(status, kStatusHands) = hands;
@@ -504,18 +589,14 @@ bool LeftHoldCarrying() { return g_carry.object != nullptr; }
 
 bool LeftHoldSideTarget() {
   if (g_carry.object != nullptr) return false;
-  if (SideObject() != nullptr) return true;
-  float wrist[3], axes[9], length = 0.0f;
-  if (g_logs < kMaxLogs && OverlayFreeWrist(wrist, axes, &length, false)) {
-    float middle[3];
-    for (int i = 0; i < 3; ++i) {
-      middle[i] = wrist[i] - kPalmFromWrist * length * axes[3 + i];
-    }
+  float gap = -1.0f, reach = 0.0f;
+  if (SideObject(&gap, &reach) != nullptr) return true;
+  if (g_logs < kMaxLogs) {
     ++g_logs;
     ModLog("left hold    : no object that the Hand can hold is in the reach of "
-           "the other hand (%.1f units from the middle of the hand). The "
-           "nearest one is %.1f units from it, frame %llu", kSideGap * length,
-           HandDirectNearestHoldableGap(middle), g_frame);
+           "the other hand (%.1f units from a point along the hand). The "
+           "nearest one is %.1f units from it, frame %llu", reach, gap,
+           g_frame);
   }
   return false;
 }

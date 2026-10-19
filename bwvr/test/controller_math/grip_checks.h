@@ -772,27 +772,6 @@ inline void FlyPressChecks() {
         FlyPressButton(false, false, false, false, false), 0);
 }
 
-// THE BAND OF THE LEASH AROUND THE WRIST (overlay_math.h, WristLoop).
-inline void BandChecks() {
-  float loop[overlay_math::kWristLoopPoints + 1][3];
-  overlay_math::WristLoop(loop);
-  const int n = overlay_math::kWristLoopPoints;
-  Check(loop[n][0] == loop[0][0] && loop[n][2] == loop[0][2],
-        "the loop of the wrist is closed", loop[n][0], loop[0][0]);
-  float most = 0.0f, least = 1.0f;
-  for (int i = 0; i < n; ++i) {
-    Check(loop[i][1] == overlay_math::kWristPoint[1],
-          "each point of the loop is across the line of the fingers",
-          loop[i][1], overlay_math::kWristPoint[1]);
-    const float dz = loop[i][2] - overlay_math::kWristPoint[2];
-    if (dz > most) most = dz;
-    if (dz < least) least = dz;
-  }
-  Near("the loop is kWristLoopWide to each side of the wrist", most,
-       overlay_math::kWristLoopWide, 1e-5);
-  Near("and on the other side", least, -overlay_math::kWristLoopWide, 1e-5);
-}
-
 // THE TAKE WITH THE TRIGGER OF THE OTHER HAND (controller_math.h,
 // LeftTakeStep).
 inline void LeftTakeChecks() {
@@ -863,7 +842,6 @@ inline void LeftTakeChecks() {
 
 inline void GripRuleChecks() {
   LeftTakeChecks();
-  BandChecks();
   FlyPressChecks();
   Check(controller_math::OtherPressCommands(false),
         "a press of the other trigger with the stick at rest commands", 1, 1);

@@ -136,9 +136,6 @@ int ControllersHandScalePct();
 // hand_direct.cpp: the game's Hand position, and whether the controller
 // places the Hand.
 bool HandDirectHandPosition(float out[3], bool* by_controller);
-// hand_direct.cpp: the band of the leash is on the other hand now
-// (left_leash=1).
-bool HandDirectLeashBandLeft();
 // hand_direct.cpp: the hand of a stroke of the Creature (0 none, 1 the flat
 // hand, 2 the index finger, 3 a fist while the grip is closed), and what the tickle
 // adds to each finger's curl.
@@ -719,40 +716,6 @@ bool BuildFrame() {
   return g_count > 0 || g_mesh_hands;
 }
 
-// THE BAND OF THE LEASH AROUND THE WRIST OF THE OTHER HAND (left_leash=1):
-// a closed rope around the middle of its wrist (overlay_math::WristLoop),
-// with the place and the size of that hand as it was drawn in this frame.
-const float kRope[3] = {0.47f, 0.31f, 0.16f};
-uint64_t g_band_frames = 0;
-
-void BuildWristBand() {
-  if (!HandDirectLeashBandLeft()) return;
-  const int hand = g_free_hand;
-  if (hand < 0 || hand >= kHands) return;
-  const HandPlace& place = g_hand_place[hand];
-  if (!place.have || place.frame != g_frame) return;
-  float local[overlay_math::kWristLoopPoints + 1][3];
-  float world[overlay_math::kWristLoopPoints + 1][3];
-  overlay_math::WristLoop(local);
-  for (int i = 0; i <= overlay_math::kWristLoopPoints; ++i) {
-    overlay_math::PlacePoint(place.position, place.rotation, place.length,
-                             hand == 0, local[i], world[i]);
-  }
-  const int start = g_count;
-  g_count += overlay_math::BuildTube(
-      world, overlay_math::kWristLoopPoints + 1,
-      overlay_math::kWristRopeRadius * place.length, &g_world[g_count],
-      kMaxTriangles - g_count);
-  for (int t = start; t < g_count; ++t) {
-    for (int v = 0; v < 3; ++v) {
-      const float level =
-          overlay_math::LightLevel(g_world[t].n[v], kArcAmbient);
-      for (int k = 0; k < 3; ++k) g_color[t][v][k] = kRope[k] * level;
-    }
-  }
-  if (g_count > start) ++g_band_frames;
-}
-
 // THE ARC AND THE RING of the teleport, after the hands. Nothing when the
 // player does not aim.
 void BuildTeleport() {
@@ -1095,7 +1058,6 @@ void OverlayFrame() {
   HandFeelFrame();
   if (g_on || HandExactOn()) BuildFrame();
   g_pointing_drawn = g_hand_valid[g_pointing];
-  BuildWristBand();
   BuildTeleport();
   BuildCommand();
   BuildMenuRay();
@@ -1146,6 +1108,28 @@ bool OverlayOtherWrist(float out[3]) {
   if (!place.have || g_frame > place.frame + 1) return false;
   overlay_math::PlacePoint(place.position, place.rotation, place.length,
                            hand == 0, overlay_math::kWristPoint, out);
+  return true;
+}
+
+// The wrist of the hand that does not point in the world, for the ring of
+// the leash (hand_direct.cpp): the middle of the wrist, the axes of the hand
+// (rows: across the palm, along the fingers, out of the palm) and the length
+// of the hand. False while that hand was not drawn, or while it points and
+// pointing is false.
+bool OverlayFreeWrist(float point[3], float axes[9], float* length,
+                      bool pointing) {
+  const int hand = g_free_hand;
+  if (hand < 0 || hand >= kHands || (hand == g_pointing && !pointing)) {
+    return false;
+  }
+  const HandPlace& place = g_hand_place[hand];
+  if (!place.have || g_frame > place.frame + 1) return false;
+  overlay_math::PlacePoint(place.position, place.rotation, place.length,
+                           hand == 0, overlay_math::kWristPoint, point);
+  for (int axis = 0; axis < 3; ++axis) {
+    for (int r = 0; r < 3; ++r) axes[axis * 3 + r] = place.rotation[r * 3 + axis];
+  }
+  *length = place.length;
   return true;
 }
 

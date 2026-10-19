@@ -358,7 +358,7 @@ is built, and no test has proven it.
   headset: the attack and the block act at the first grip, and the stars
   sit on the body in both eyes.
 
-- **B33. The game ends with "abnormal program termination" after a fetch
+- **B35. The game ends with "abnormal program termination" after a fetch
   of a dead tree.** In a headset session on the second island, the Hand
   took a dead tree from a distance. About 0.3 s after the glide the game
   ended with the box of `abort`, with no line in the log and with no dump.

@@ -17,6 +17,12 @@
 //   0x5D with the object. The packet runs Creature::ForceActOnObject
 //   (0x004C5FF0): the Creature acts on the object. A press on an object that
 //   the Hand can take picks it up, as with no leash.
+// - A short click on a miracle on the land (a OneOffSpellSeed) runs
+//   fn_005D3930 too. Both slots give 1 for it, so with the leash on the Hand
+//   the Creature goes to the miracle, and the click sends no tap. Only when
+//   fn_005D4180 gives 0 does fn_005D3930 send the tap (fn_005D38A0, packet
+//   0x20), and the tap makes the miracle active. fn_005D3930 is the one
+//   caller of fn_005D4180.
 // - A double click on an object sends packet 0x5C (fn_005D4210): the leash
 //   is tied to the object. The mod does not use it.
 // - The shake is the gesture of type 5 (the scribble). With an empty Hand and
@@ -89,6 +95,11 @@
 // - A press of the grip on bare land does not send the Creature: the hook
 //   on fn_005D3D10 leaves the packet out while the controller places the
 //   Hand. The mouse gets the game's function.
+// - A MIRACLE ON THE LAND (leash_miracle_tap=1). A press while the Hand is
+//   on a OneOffSpellSeed is not a command. It goes to the game, as with no
+//   leash. The hook on fn_005D4180 gives 0 for a OneOffSpellSeed while the
+//   controller places the Hand, so the game's click taps the miracle and does
+//   not send the Creature. A OneOffSpellSeed is no target of a command.
 //
 // THE SHAKE. The mod does not feed the game's shape test. A real hand moves
 // all the time, and the same ring starts the Miracle gestures and changes the
@@ -195,7 +206,8 @@ const int kMindActionSize = 0x60;
 const int32_t kActionNoCommand = 0x5D;
 // fn_005D4180, thiscall on GInterface (Object*), ret 4. It sends packet 0x5D
 // with the object when the player's Creature is on this leash and its action
-// is not 0x5D. It gives 1 when it sent the packet.
+// is not 0x5D. It gives 1 when it sent the packet. Its one caller in the game
+// is fn_005D3930 (0x005D39A6), which sends the tap when it gives 0.
 const uintptr_t kActOnObject = 0x005D4180;
 // fn_005D3D10, thiscall on GInterface (const MapCoords*), ret 4: a press of
 // the Action button on bare land. With the leash on the Hand it sends packet
@@ -267,6 +279,7 @@ typedef void*(__cdecl* DynamicCastFn)(void* object, int32_t delta,
 typedef float(__fastcall* GetAltitudeFn)(const MapCoords* at, void* unused);
 
 LandPressFn o_LandPress = nullptr;
+ActOnObjectFn o_ActOnObject = nullptr;
 
 // --- the keys ---------------------------------------------------------------
 
@@ -299,11 +312,16 @@ struct Settings {
   // creature_command_double_ms: a second press on the same object this soon
   // after the first press ties the leash. 0 turns the double press off.
   int double_ms = 500;
+  // leash_miracle_tap: with the leash on the Hand, a press on a miracle on
+  // the land taps it. 0 is the game's own way: the Creature goes to it.
+  bool seed_tap = true;
   bool test_keys = false;  // test_keys: Ctrl and numpad 5 change the rule
 };
 Settings g_settings;
 bool g_ready = false;
 bool g_hooked = false;
+bool g_seed_hooked = false;
+uint64_t g_seed_taps = 0;  // clicks on a miracle that the hook made a tap
 
 bool IniPath(char path[MAX_PATH]) {
   const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -617,13 +635,27 @@ float HeightOf(void* object, float radius) {
   return 2.0f * radius;
 }
 
-// The game's tests of fn_005D3930 for a command on an object.
+// The object is a miracle on the land: the cast of the game's double click
+// (0x005D42BB).
+bool IsOneOffSeed(void* object) {
+  if (object == nullptr || IsBadReadPtr(object, sizeof(void*))) return false;
+  return reinterpret_cast<DynamicCastFn>(kDynamicCast)(
+             object, 0, reinterpret_cast<void*>(kTypeObject),
+             reinterpret_cast<void*>(kTypeOneOffSpellSeed), 0) != nullptr;
+}
+
+// The game's tests of fn_005D3930 for a command on an object. With
+// leash_miracle_tap=1 a miracle on the land is no target: a press on it taps
+// it.
 bool ValidTarget(void* object) {
   void** table = VTable(object);
-  return reinterpret_cast<VirtualIntFn>(table[kValidAsTarget / 4])(
-             object, nullptr) == 1 &&
-         reinterpret_cast<VirtualIntFn>(table[kValidAsLeashTarget / 4])(
-             object, nullptr) != 0;
+  if (reinterpret_cast<VirtualIntFn>(table[kValidAsTarget / 4])(
+          object, nullptr) != 1 ||
+      reinterpret_cast<VirtualIntFn>(table[kValidAsLeashTarget / 4])(
+          object, nullptr) == 0) {
+    return false;
+  }
+  return !(g_settings.seed_tap && IsOneOffSeed(object));
 }
 
 // WHETHER THE LEASH CAN GO ON AN OBJECT: the tests of the game's double click
@@ -633,9 +665,20 @@ bool ValidTarget(void* object) {
 bool CanTie(const Facts& f, void* object) {
   if (object == nullptr || object == f.creature) return false;
   if (!ValidTarget(object)) return false;
-  return reinterpret_cast<DynamicCastFn>(kDynamicCast)(
-             object, 0, reinterpret_cast<void*>(kTypeObject),
-             reinterpret_cast<void*>(kTypeOneOffSpellSeed), 0) == nullptr;
+  return !IsOneOffSeed(object);
+}
+
+// THE HAND IS ON A MIRACLE (leash_miracle_tap=1): the object under the Hand,
+// the object of the next pick record, or the object at the Hand's point is a
+// OneOffSpellSeed. A press then goes to the game, and the game taps the
+// miracle. With left_leash=1 the trigger of the commands is on the other
+// hand, so this test is not needed.
+bool SeedAtHand(const Facts& f) {
+  if (!g_settings.seed_tap || ControllersLeftLeash()) return false;
+  if (IsOneOffSeed(f.under) || IsOneOffSeed(f.next)) return true;
+  void* object = nullptr;
+  float at[3];
+  return HandDirectNearObject(&object, at) && IsOneOffSeed(object);
 }
 
 // --- the commands -------------------------------------------------------------
@@ -734,6 +777,27 @@ int __fastcall h_LandPress(void* self, void* unused, const MapCoords* at) {
   return o_LandPress(self, unused, at);
 }
 
+// THE CLICK ON A MIRACLE ON THE LAND. While the controller places the Hand
+// and leash_miracle_tap=1, fn_005D4180 gives 0 for a OneOffSpellSeed and
+// sends no packet. Then the game's click (fn_005D3930) sends the tap, as with
+// no leash, and the miracle goes into the Hand. The mouse gets the game's
+// function.
+int __fastcall h_ActOnObject(void* self, void* unused, void* object) {
+  Facts f;
+  if (g_settings.seed_tap && self != nullptr && IsOneOffSeed(object) &&
+      Active(&f) && f.face == self) {
+    ++g_seed_taps;
+    if (Log()) {
+      ModLog("creature cmd : a click on the miracle %p with the leash on the "
+             "Hand. The Creature does not go to it, and the game's click taps "
+             "it (packet 0x20) (leash_miracle_tap=1), frame %llu", object,
+             g_frame);
+    }
+    return 0;
+  }
+  return o_ActOnObject(self, unused, object);
+}
+
 // The line of the rule in use, at the start and at each press of the key.
 void LogRule(const char* from) {
   if (LiveRule()) {
@@ -810,6 +874,7 @@ void Init() {
   g_settings.double_ms = IniInt("creature_command_double_ms", 500);
   if (g_settings.double_ms < 0) g_settings.double_ms = 0;
   if (g_settings.double_ms > 2000) g_settings.double_ms = 2000;
+  g_settings.seed_tap = IniInt("leash_miracle_tap", 1) != 0;
   g_settings.test_keys = IniInt("test_keys", 0) != 0;
   command_math::ShakeReset(&g_shake);
   if (g_settings.on) {
@@ -821,6 +886,29 @@ void Init() {
     ModLog("hooks        : the press on bare land at 0x%08X %s",
            static_cast<unsigned>(kLandPress), g_hooked ? "ok" : "FAILED");
   }
+  // The hook of the click on a miracle is there also with
+  // creature_command=0: then the trigger goes to the game, and the game's
+  // click would send the Creature. With test_keys=1 it is there for the A/B
+  // key.
+  if (g_settings.seed_tap || g_settings.test_keys) {
+    void* target = reinterpret_cast<void*>(kActOnObject);
+    MH_STATUS status = MH_CreateHook(
+        target, &h_ActOnObject, reinterpret_cast<void**>(&o_ActOnObject));
+    if (status == MH_OK) status = MH_EnableHook(target);
+    g_seed_hooked = status == MH_OK;
+    ModLog("hooks        : the command on an object at 0x%08X %s",
+           static_cast<unsigned>(kActOnObject),
+           g_seed_hooked ? "ok" : "FAILED");
+  }
+  if (!g_seed_hooked) g_settings.seed_tap = false;
+  ModLog("creature cmd : leash_miracle_tap=%d. %s",
+         g_settings.seed_tap ? 1 : 0,
+         g_settings.seed_tap
+             ? "With the leash on the Hand, a press with the Hand on a "
+               "miracle on the land goes to the game, and the game taps the "
+               "miracle. A miracle on the land is no target of a command"
+             : "With the leash on the Hand, a press on a miracle on the land "
+               "sends the Creature to it, as in the game");
   ModLog("creature cmd : creature_command=%d. %s. A press on the land of "
          "less than %d ms is a tap, and it sends the Creature to the aim of "
          "the press (creature_command_hold_ms). leash_shake_mps=%.2f: %s%s",
@@ -850,7 +938,43 @@ void Init() {
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 5 changes creature_command_rule "
            "from 4 to 3 to 2 to 1 and back (test_keys=1)");
+    ModLog("keys         : Ctrl with the decimal key of the number pad (Shift "
+           "up) changes leash_miracle_tap between 1 and 0 (test_keys=1)");
   }
+}
+
+// THE A/B KEY OF THE MIRACLE (test_keys=1): Ctrl with the decimal key of the
+// number pad, with Shift up, changes leash_miracle_tap. The pointing
+// controller gives a long pulse for 1 and a short pulse for 0. Ctrl, Shift
+// and the decimal key is left_hold (controllers.cpp). Only while a window of
+// the game is in front.
+void PollSeedKey() {
+  static bool was = false;
+  if (!g_settings.test_keys) return;
+  const bool down = (GetAsyncKeyState(VK_DECIMAL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
+  const bool pressed = down && !was;
+  was = down;
+  if (!pressed) return;
+  DWORD process = 0;
+  const HWND window = GetForegroundWindow();
+  if (window != nullptr) GetWindowThreadProcessId(window, &process);
+  if (process != GetCurrentProcessId()) return;
+  if (!g_seed_hooked) {
+    ModLog("keys         : Ctrl and the decimal key: leash_miracle_tap stays 0, "
+           "because the hook of the command on an object is not there, frame "
+           "%llu", g_frame);
+    return;
+  }
+  g_settings.seed_tap = !g_settings.seed_tap;
+  ControllersGesturePulse(0.5f, g_settings.seed_tap ? 0.24f : 0.08f);
+  ModLog("keys         : Ctrl and the decimal key: leash_miracle_tap=%d. %s, "
+         "frame %llu", g_settings.seed_tap ? 1 : 0,
+         g_settings.seed_tap
+             ? "A press with the Hand on a miracle taps it"
+             : "A press on a miracle sends the Creature to it, as in the game",
+         g_frame);
 }
 
 // THE A/B KEY (test_keys=1): Ctrl with the 5 key of the number pad changes
@@ -907,6 +1031,7 @@ const char* Refuse(const Facts& f, bool have) {
       (f.under == f.creature || f.next == f.creature)) {
     return "the Hand is on the Creature, so the press is the touch";
   }
+  if (SeedAtHand(f)) return "the Hand is on a miracle, so the game taps it";
   if (TeleportAiming()) return "a teleport runs";
   return nullptr;
 }
@@ -2043,6 +2168,7 @@ void CreatureCommandFrame() {
   Init();
   ++g_frame;
   PollRuleKey();
+  PollSeedKey();
   g_draw.active = false;
   g_halo.active = false;
   g_live = false;
@@ -2073,6 +2199,9 @@ void CreatureCommandFrame() {
   } else if (g_claim) {
     g_live = g_press != command_math::kPressNone;
     g_live_why = "a press runs";
+  } else if (SeedAtHand(f)) {
+    // No halo, no arc and no prompt of a command: a press taps the miracle.
+    g_live_why = "the Hand is on a miracle";
   } else if (!ControllersCommandAllowed(&why)) {
     g_live_why = why;
   } else {
@@ -2254,7 +2383,14 @@ bool CreatureCommandCanTie() {
 }
 
 void CreatureCommandReport() {
-  if (!g_ready || !g_settings.on) return;
+  if (!g_ready) return;
+  if (g_seed_taps > 0) {
+    ModLog("creature cmd : %llu clicks on a miracle with the leash on the "
+           "Hand were taps of the miracle (leash_miracle_tap=1)",
+           g_seed_taps);
+    g_seed_taps = 0;
+  }
+  if (!g_settings.on) return;
   if (g_presses + g_passed + g_shakes + g_shakes_idle + g_grip_land +
           g_targets == 0) {
     return;

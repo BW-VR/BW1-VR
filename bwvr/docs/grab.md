@@ -836,7 +836,16 @@ that the hook wants. `leash_ring_left=0` leaves the ring at the game's Hand.
 The interface of the game also shows the kind of leash as a small icon at
 the lower right corner of the screen (`DisplayGesture`,
 `GInterface::ProcessPowerUpSystem`, `fn_0068B7E0`). The mod does not move
-it.
+it. The game draws it as a small 3D leash in the space of the camera, through
+the sorted list (`fn_0068AA60` puts each `DisplayGesture` there with the draw
+`fn_0068B480`). In each eye it is at a fixed place to the lower right of the
+view, so it moves with the player, and over the sea it looks like a ring in
+the water [V: desk runs at 13 units per meter, the same pixel in each
+picture while both hands moved]. The ring of the leash at the wrist has no
+reflection in the water ([hand.md](hand.md), "The mesh is hidden"). Open:
+whether the icon must go to a place in the room, or away while the ring is
+on the wrist. The same list draws the pictures of the gestures that the
+game looks for, so a change must find the icon of the leash in it.
 
 The hook of the rope goes in only when the first 13 bytes of its function
 are the bytes of the disassembly. `leash_at_palm=0` leaves that hook out. Tag `leash`

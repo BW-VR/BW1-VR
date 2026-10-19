@@ -73,6 +73,17 @@
 //   frame. Each other part of CHand::Draw still runs. The mouse player sees
 //   the game's Hand as the game draws it.
 //
+//   THE REFLECTION IS HIDDEN TOO. After the reflection of the land,
+//   GLandscape::Draw draws the mesh of the player's Hand one more time, under
+//   the water and pale (the color 0x65A0A0A0), with its vtable +0x118 at
+//   0x005E4985 (fn_00813300), then the object at +0x8C of the mesh [V
+//   0x005E4914 to 0x005E49DC]. The reflection setting 0x00E9CD8C does not
+//   guard this draw. Only +0xAC of the mesh (CHand::Show) skips it, and that
+//   also skips the dynamic shadow of the mesh. A hook of fn_00813300 skips
+//   the draw from 0x005E4985 when the mesh is hidden as above
+//   (hand_hide_reflection). The overlay draws no reflection, so the water
+//   shows no hand, and not only the pointing hand.
+//
 //   THE HELD OBJECT IN THE PALM. In the Holding state PrepareForDrawing puts
 //   the object's mesh at the Hand's point plus the hang offset (0x0046CA50 to
 //   0x0046CA97) [V]. After it, the mod puts the object in the palm of the
@@ -177,6 +188,15 @@ const uintptr_t kDrawReturnA = 0x0046D25E;
 const uintptr_t kDrawReturnB = 0x0046D282;
 typedef void(__fastcall* MeshDrawFn)(void* mesh, void* unused);
 MeshDrawFn o_MeshDraw = nullptr;
+// THE REFLECTION OF THE HAND. The draw of the mesh at once: fn_00813300,
+// thiscall with no arguments, at +0x118 of the same vtable [V].
+// GLandscape::Draw calls it for the mesh of the player's Hand at 0x005E4985,
+// so it returns to 0x005E498B.
+const uintptr_t kMeshDrawNow = 0x00813300;
+const int kMeshDrawNowSlot = 0x118;
+const uintptr_t kReflectCall = 0x005E4985;
+const uintptr_t kReflectReturn = 0x005E498B;
+MeshDrawFn o_MeshDrawNow = nullptr;
 // Morphable::GetAnim, thiscall (int animation, int), ret 8 [V].
 const uintptr_t kGetAnim = 0x00619650;
 typedef void*(__fastcall* GetAnimFn)(void* self, void* unused, int animation,
@@ -203,6 +223,7 @@ struct Settings {
   float roll = hx::kRestRollDeg;
   bool left_mesh = false;
   bool hide = true;        // hand_hide_game
+  bool hide_reflection = true;  // hand_hide_reflection
   bool wrist_lock = true;  // hand_wrist_lock
   bool hold_palm = true;   // hand_hold_palm
   bool hold_turn = true;   // hand_hold_turn
@@ -217,6 +238,16 @@ bool g_mesh_hooked = false;
 bool g_anim_hooked = false;
 // The mesh is hidden now: hand_hide_game, and the test key.
 bool g_hide_live = false;
+// The reflection of the hidden mesh is hidden now: hand_hide_reflection, the
+// test key and the test frames.
+bool g_reflection_hooked = false;
+bool g_hide_reflection_live = false;
+const int kMaxReflectionTests = 8;
+uint64_t g_reflection_tests[kMaxReflectionTests];
+int g_reflection_test_count = 0;
+uint32_t g_reflection_done = 0;  // a bit for each test frame that acted
+uint64_t g_reflection_skips = 0;
+bool g_said_reflection = false;
 
 // The roots of the last compose of each pose array, for the rebase.
 struct ArrayRoot {
@@ -280,6 +311,7 @@ uint64_t g_hidden_draws = 0;
 bool g_said_hidden = false;
 bool g_said_vtable = false;
 bool g_key_down = false;
+bool g_reflection_key_down = false;
 uint64_t g_key_frame = 0;
 
 // THE HELD OBJECT IN THE PALM. The pose of the hand and of the object when
@@ -356,6 +388,24 @@ void LoadSettings() {
     g_set.left_mesh =
         GetPrivateProfileIntA("bwvr", "hand_left_mesh", 0, path) != 0;
     g_set.hide = GetPrivateProfileIntA("bwvr", "hand_hide_game", 1, path) != 0;
+    g_set.hide_reflection =
+        GetPrivateProfileIntA("bwvr", "hand_hide_reflection", 1, path) != 0;
+    // hand_reflection_test: frame numbers. At each one the reflection of
+    // the hidden mesh changes, as the test key does.
+    char text[128];
+    GetPrivateProfileStringA("bwvr", "hand_reflection_test", "", text,
+                             sizeof(text), path);
+    const char* at = text;
+    while (*at != 0 && g_reflection_test_count < kMaxReflectionTests) {
+      char* end = nullptr;
+      const unsigned long frame = strtoul(at, &end, 10);
+      if (end == at) {
+        ++at;
+        continue;
+      }
+      if (frame > 0) g_reflection_tests[g_reflection_test_count++] = frame;
+      at = end;
+    }
     g_set.wrist_lock =
         GetPrivateProfileIntA("bwvr", "hand_wrist_lock", 1, path) != 0;
     g_set.hold_palm =
@@ -738,6 +788,27 @@ void __fastcall h_MeshDraw(void* mesh, void* unused) {
   o_MeshDraw(mesh, unused);
 }
 
+// The draw at once of a mesh of the Hand's class. While the mesh of the
+// Hand is hidden, its reflection from GLandscape::Draw is not drawn either.
+// The overlay draws no reflection of the mod's hands, so the water shows no
+// hand, and not one hand of two.
+void __fastcall h_MeshDrawNow(void* mesh, void* unused) {
+  if (g_hide_live && g_hide_reflection_live) {
+    const uintptr_t back = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if (back == kReflectReturn && HideNow(mesh)) {
+      ++g_reflection_skips;
+      if (!g_said_reflection) {
+        g_said_reflection = true;
+        ModLog("hand exact   : the reflection of the game's Hand is not drawn "
+               "(the call from 0x%08X), as its mesh is not drawn, frame %llu",
+               static_cast<unsigned>(kReflectCall), ControllersFrameCount());
+      }
+      return;
+    }
+  }
+  o_MeshDrawNow(mesh, unused);
+}
+
 // The animation that a Morphable asks for. Only the Hand's number is kept.
 void* __fastcall h_GetAnim(void* self, void* unused, int animation,
                            int second) {
@@ -945,11 +1016,45 @@ void PlaceHeld(uint8_t* hand) {
 // key is read once a frame, only while a window of the game is in front, and
 // the mod does not take it from the game. The minus key with Ctrl or Shift is
 // a key of hand_model.cpp, so it does nothing here.
+void ToggleReflection(const char* by, uint64_t frame) {
+  g_hide_reflection_live = !g_hide_reflection_live;
+  ControllersGesturePulse(0.5f, g_hide_reflection_live ? 0.30f : 0.08f);
+  ModLog("hand exact   : %s: the reflection of the hidden game's Hand is %s "
+         "(hand_hide_reflection=%d), frame %llu. %llu draws skipped so far",
+         by, g_hide_reflection_live ? "HIDDEN" : "DRAWN",
+         g_hide_reflection_live ? 1 : 0, frame,
+         static_cast<unsigned long long>(g_reflection_skips));
+}
+
 void PollHideKey() {
-  if (!g_set.test_keys || !g_mesh_hooked) return;
+  if (!g_mesh_hooked) return;
   const uint64_t frame = ControllersFrameCount();
   if (frame == g_key_frame) return;
   g_key_frame = frame;
+  if (g_reflection_hooked) {
+    for (int i = 0; i < g_reflection_test_count; ++i) {
+      if (frame >= g_reflection_tests[i] &&
+          (g_reflection_done & (1u << i)) == 0) {
+        g_reflection_done |= 1u << i;
+        ToggleReflection("the test frame (hand_reflection_test)", frame);
+      }
+    }
+  }
+  if (!g_set.test_keys) return;
+  // Ctrl, Shift and D: the reflection of the hidden mesh.
+  const bool reflection_down = (GetAsyncKeyState('D') & 0x8000) != 0 &&
+                               (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                               (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool reflection_pressed = reflection_down && !g_reflection_key_down;
+  g_reflection_key_down = reflection_down;
+  if (reflection_pressed && g_reflection_hooked) {
+    HWND window = GetForegroundWindow();
+    DWORD process = 0;
+    if (window != nullptr) GetWindowThreadProcessId(window, &process);
+    if (process == GetCurrentProcessId()) {
+      ToggleReflection("Ctrl, Shift and D", frame);
+    }
+  }
   const bool down = (GetAsyncKeyState(VK_SUBTRACT) & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0 &&
                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
@@ -1006,6 +1111,39 @@ void InstallOnePair() {
     }
   }
   g_hide_live = g_mesh_hooked;
+  // THE REFLECTION OF THE HAND: only with the hidden mesh. The hook is in
+  // with hand_hide_reflection=0 too, so the test key can turn it on.
+  const uint8_t draw_now[] = {0x56, 0x8B, 0xF1, 0x89, 0x35,
+                              0xE8, 0x1A, 0xEA, 0x00};
+  const uint8_t reflect_call[] = {0xFF, 0x92, 0x18, 0x01, 0x00, 0x00};
+  const uintptr_t* now_slot =
+      reinterpret_cast<const uintptr_t*>(kMeshVtable + kMeshDrawNowSlot);
+  if (g_mesh_hooked) {
+    const bool same =
+        SameBytes(kMeshDrawNow, draw_now, sizeof(draw_now)) &&
+        SameBytes(kReflectCall, reflect_call, sizeof(reflect_call)) &&
+        !IsBadReadPtr(now_slot, sizeof(*now_slot)) &&
+        *now_slot == kMeshDrawNow;
+    if (!same) {
+      ModLog("hand exact   : the draw of the reflection of the Hand is not as "
+             "the mod knows it, so the water shows the reflection of the "
+             "game's Hand");
+    } else {
+      g_reflection_hooked =
+          Hook(kMeshDrawNow, reinterpret_cast<void*>(&h_MeshDrawNow),
+               reinterpret_cast<void**>(&o_MeshDrawNow),
+               "the draw of the reflection of the Hand (hidden with the "
+               "mesh)");
+    }
+  }
+  g_hide_reflection_live = g_reflection_hooked && g_set.hide_reflection;
+  ModLog("hand exact   : hand_hide_reflection=%d: the reflection of the "
+         "game's Hand in the water is %s while its mesh is hidden%s",
+         g_set.hide_reflection ? 1 : 0,
+         g_hide_reflection_live ? "hidden" : "drawn",
+         g_set.test_keys && g_reflection_hooked
+             ? ". test_keys=1: Ctrl, Shift and D show and hide the reflection"
+             : "");
   if (SameBytes(kGetAnim, get_anim, sizeof(get_anim))) {
     g_anim_hooked = Hook(kGetAnim, reinterpret_cast<void*>(&h_GetAnim),
                          reinterpret_cast<void**>(&o_GetAnim),

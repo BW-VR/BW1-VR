@@ -1225,11 +1225,11 @@ it is near the sea (`0x005E4914` to `0x005E4B26`). With the controls of the
 mod the game's Hand is hidden, and its reflection is hidden too
 (`hand_hide_reflection`, [hand.md](hand.md), "The mesh is hidden"). So the
 water shows the reflection of no hand, and the ring of the leash has none in
-the game. The small leash at the lower right of the view is the icon of the
-kind of leash of the game's interface (`DisplayGesture`, [grab.md](grab.md),
-"The leash at the mod's hand"). It is at a fixed place in front of the head,
-so it moves with the player, and over the sea it looks like a thing in the
-water.
+the game. The icon of the kind of leash of the game's interface is a small
+leash at a fixed place in front of the head. While the ring of the leash is
+on the wrist of the hand that does not point, the mod hides that icon
+(`leash_icon_hide`, [grab.md](grab.md), "The leash at the mod's hand"), so
+no ring in the water moves with the head.
 
 **The near plane.** `LandFeature::GetNearClipping` `0x005E2F30` gives 3.5
 units for a camera 20 units or more over the land. At the life size scale that

@@ -833,19 +833,48 @@ The log line says `the game puts the ring of the leash around the wrist of
 the hand that does not point`, with the distance of the ring from the place
 that the hook wants. `leash_ring_left=0` leaves the ring at the game's Hand.
 
-The interface of the game also shows the kind of leash as a small icon at
-the lower right corner of the screen (`DisplayGesture`,
-`GInterface::ProcessPowerUpSystem`, `fn_0068B7E0`). The mod does not move
-it. The game draws it as a small 3D leash in the space of the camera, through
-the sorted list (`fn_0068AA60` puts each `DisplayGesture` there with the draw
-`fn_0068B480`). In each eye it is at a fixed place to the lower right of the
+**The icon of the kind of leash.** The interface of the game keeps a list of
+`DisplayGesture` items (`0x00D4EAC8`, the count at `0x00D4EAD0`).
+`fn_0068ABA0` makes the list again from the "looking for" list of
+`GInterface::ProcessPowerUpSystem` when that list changes: 24 rows of 16
+bytes, one for each type of gesture, with the order, the kind of spell
+seed, the kind of leash and the level of the power up [V]. An item has the
+type of its gesture at `+0x0C`, the kind of spell seed at `+0x10`, the kind
+of leash at `+0x14` (-1 for none), the level at `+0x18` and the order at
+`+0x34`. `fn_0068AA60` puts each item on the sorted list with the draw
+`fn_0068B480`. That draw calls `fn_0068B7E0` (thiscall, the item, the kind
+of spell seed and the kind of leash, `ret 8`), then the sprite of the
+gesture. For a kind of leash that is not -1, `fn_0068B7E0` draws the small
+leash mesh of that kind (`fn_004645A0`, kinds 1 to 3) with a camera of its
+own at the lower right of the view, and puts the camera back
+(`fn_0068B7D0`). For a kind of spell seed it draws the spell seed. Two
+places make items with a kind of leash [V]:
+
+- `ProcessPowerUpSystem` at `0x005CFA0F`: order 2, the gesture at
+  `0x00DA0590`, and the kind of leash that is on. A match of that gesture
+  puts the leash on or takes it off.
+- `GInterface::DoLeashSelectionSystem` at `0x005D0362`: order 3 plus the
+  kind, the gesture of that kind (`0x00DA0598` and on), one for each kind
+  that is not on. A match changes the kind of leash.
+
+In each eye the leash mesh is at a fixed place to the lower right of the
 view, so it moves with the player, and over the sea it looks like a ring in
-the water [V: desk runs at 13 units per meter, the same pixel in each
-picture while both hands moved]. The ring of the leash at the wrist has no
-reflection in the water ([hand.md](hand.md), "The mesh is hidden"). Open:
-whether the icon must go to a place in the room, or away while the ring is
-on the wrist. The same list draws the pictures of the gestures that the
-game looks for, so a change must find the icon of the leash in it.
+the water. The ring of the leash at the wrist shows that the leash is on.
+With `leash_icon_hide=1`, a hook of `fn_0068B7E0` skips the call for an item
+with a kind of leash while the game puts the ring around the wrist of the
+hand that does not point (`left_leash=1`, `leash_ring_left=1`). The sprite
+of the gesture stays, and an item with no kind of leash stays. The decision
+is latched once a frame, so both eyes agree. The hook goes in only when the
+first 13 bytes of the function are the bytes of the disassembly. The log
+line `the game draws the icon of the kind of leash` comes one time for each
+order, with the kind, the gesture and whether the icon is hidden.
+`leash_icon_hide=0` draws the icon as the game does. With `test_keys=1`,
+Ctrl, Shift and L change the value: a long pulse for 1 and a short pulse
+for 0. The test key `leash_icon_test` gives a frame of the mod at which the
+value changes, as the key does. The ring of the leash at the wrist has no
+reflection in the water ([hand.md](hand.md), "The mesh is hidden"). Only a
+headset shows whether the view over the sea now has no ring that moves with
+the head.
 
 The hook of the rope goes in only when the first 13 bytes of its function
 are the bytes of the disassembly. `leash_at_palm=0` leaves that hook out. Tag `leash`

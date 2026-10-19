@@ -19,6 +19,16 @@ bool LeftHoldSideTarget();
 // lets the object go.
 void LeftHoldFrame(bool take, bool side_take, bool drop, bool usable,
                    uint64_t frame);
+// THE GLOW OF THE OTHER HAND (left_glow). Once a controllers frame: on is
+// false while the other hand can take nothing now. The object in the reach
+// of the other hand, the same search as the take from the side, is the
+// target of that hand for this frame.
+void LeftHoldGlowFrame(bool on, uint64_t frame);
+// hand_glow.cpp: the target of the other hand of this frame or the frame
+// before, or null, and the tip of its index finger with the length of the
+// hand.
+void* LeftHoldGlowTarget(uint64_t frame);
+bool LeftHoldGlowTip(float tip[3], float* length);
 // The other hand lets go of the object that it carries, with no speed.
 void LeftHoldLetGo(const char* why);
 // After the hooks of the Hand are in: the call after the draw setup of the

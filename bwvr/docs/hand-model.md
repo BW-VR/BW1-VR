@@ -1224,6 +1224,18 @@ on each frame, also over nothing and while the Hand holds an object. With the
 mouse, with `controller_hand=0` or with `hand_glow=0` the disc draws nothing
 and changes no state.
 
+**The other hand** (`left_glow=1`, with `controls=1` and `left_take=1`). The
+trigger of the hand that does not point can take too (`controllers.md`,
+5.7). While its trigger is open, the object in its reach (`left_hold.cpp`,
+the search of the take from the side: 5 points along the hand, 0.25 of the
+hand from one of them) has the gold glow of the target at the Hand on its
+mesh (`HandGlowTargets`, "the target of the other hand"), and the tip of the
+index finger of that hand has the disc of a take, the same size and color
+as the disc at the Hand's point over something to take (`DrawOtherTip`).
+Both follow `hand_glow` and its test key. `left_glow=0` gives the other hand
+no glow. The log says `the first target of the other hand glows` and `the
+target of the other hand ... has the gold glow of a target`, once each.
+
 **The log.** The tag is `hand glow`. One line at the first draw. One line for
 each change of the look and every 900 frames, 40 lines at most, with the
 center in each eye, the distance between the two, the radius and the depth.

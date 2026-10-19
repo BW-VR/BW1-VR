@@ -370,15 +370,15 @@ bool Hook(uintptr_t address, void* replacement, void** original,
   return status == MH_OK;
 }
 
-// THE A/B KEY (test_keys=1): Ctrl, Shift and the slash key (VK_OEM_2, the #
-// key of a German keyboard) change creature_player_head between 1 and 0.
-// The pointing controller gives a long pulse for 1 and a short pulse for 0.
-// The key is read once a frame, and only while a window of the game is in
-// front.
+// THE A/B KEY (test_keys=1): Ctrl, Shift and H change creature_player_head
+// between 1 and 0. Shift H with Ctrl up is a test key of the render
+// (stereo.cpp), and its message hook takes no press with Ctrl. The pointing
+// controller gives a long pulse for 1 and a short pulse for 0. The key is
+// read once a frame, and only while a window of the game is in front.
 void PollKey() {
   static bool was = false;
   if (!g_test_keys || !g_hooked) return;
-  const bool down = (GetAsyncKeyState(VK_OEM_2) & 0x8000) != 0 &&
+  const bool down = (GetAsyncKeyState('H') & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
   const bool pressed = down && !was;
@@ -393,7 +393,7 @@ void PollKey() {
   ControllersGesturePulse(0.5f, g_mode == head_math::kModeHead ? 0.24f : 0.08f);
   char from[64];
   _snprintf_s(from, sizeof(from), _TRUNCATE,
-              "Ctrl, Shift and the slash key, frame %llu", g_frame);
+              "Ctrl, Shift and H, frame %llu", g_frame);
   LogMode(from);
 }
 
@@ -444,8 +444,8 @@ void CreatureHeadInstall() {
   }
   LogMode("creature_player_head");
   if (g_test_keys) {
-    ModLog("keys         : Ctrl, Shift and the slash key change "
-           "creature_player_head between 1 and 0 (test_keys=1)");
+    ModLog("keys         : Ctrl, Shift and H change creature_player_head "
+           "between 1 and 0 (test_keys=1)");
   }
 }
 

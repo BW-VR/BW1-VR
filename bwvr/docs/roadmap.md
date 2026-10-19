@@ -372,9 +372,8 @@ is built, and no test has proven it.
   - that the Creature does what you show it in the Creche quest of Land 2,
   - that in a story the Creature looks at the camera of the story.
 
-  The A/B key is Ctrl, Shift and the slash key (the # key of a German
-  keyboard). Not run: a story, a cut scene, a point or a throw at the
-  player, and a Creature of a different player.
+  The A/B key is Ctrl, Shift and H. Not run: a story, a cut scene, a point
+  or a throw at the player, and a Creature of a different player.
 
 B1b, B2, B4 and B11 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.

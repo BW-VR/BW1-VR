@@ -1544,10 +1544,8 @@ of a different player reads the camera of its own player, as in the game.
 When a function does not have the bytes of the disassembly, the mod hooks
 none of them, the key is 0, and a line with the tag `hooks` says so.
 
-**The A/B key.** With `test_keys=1`, Ctrl, Shift and the slash key change
-`creature_player_head` between 1 and 0 while the game runs. The key is
-`VK_OEM_2`: the slash key of a US keyboard and the # key of a German
-keyboard. The pointing
+**The A/B key.** With `test_keys=1`, Ctrl, Shift and H change
+`creature_player_head` between 1 and 0 while the game runs. The pointing
 controller gives a long pulse for 1 and a short pulse for 0, and the log has
 a line.
 

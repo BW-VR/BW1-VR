@@ -33,3 +33,9 @@ bool ProxyBackendVulkan();
 bool ProxyVulkanStrict();
 // The log of the mod, for the lines of the exports of ONLY VULKAN.
 void ProxySetLog(void (*log)(const char* format, ...));
+// backend=vulkan in bwvr.ini, but this start uses dxwrapper (vulkan_fallback,
+// docs/backend.md, "The fall back of the renderer Vulkan"). The reason, ready
+// to log, or null. Always null with vulkan_strict=1.
+const char* ProxyVulkanFallback();
+// The name of the file of the fall back, beside the game.
+const char* ProxyVulkanPendingFile();

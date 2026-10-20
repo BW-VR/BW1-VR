@@ -23,7 +23,8 @@ the Temple).
   each scroll from the game's draw call and treats a press on it as a click
   for the scripts.
 - The totem of the Village Centre follows the real hand one to one. The mod
-  gives the game the screen rows that make its own math do that.
+  gives the game the screen rows that make its own math do that. After the
+  release the pole stays where the hand let it go.
 - A miracle icon, the store, the Workshop, a scaffold and a villager work with
   the grip. The rules for the grip are in `grab.md`.
 - The door of the Temple and the leash posts are targets of a tap. The mod
@@ -310,17 +311,55 @@ from 0 to 1.
 - `TotemStatue::Draw` `0x00738960` puts the pole 8 units higher for each 1.0
   of the value. While the Hand moves the totem it shows a tooltip (text
   `0xEEB`) with the value times 100: "People Worshipping: 22%".
+- **The ghost.** The totem has two meshes, at `+0x8C` and at `+0x40` (2.73
+  units higher). The pole shows the value at `+0x9C`, which goes to the value
+  of the totem (`+0x80`) in `|change| * 5.2` s (see "The pole after the
+  release"). While the Hand moves the totem (bit `0x10` of `+0x24`), `Draw`
+  puts the pole at the value of the Hand (`+0x88`). When the two values are
+  not the same, `Draw` first draws both meshes at the other value with an
+  alpha of `0x80` (the byte `+0x4F` of the 3D object, the calls of
+  `LH3DObject::SetPosition` at `0x00738B9C` and `0x00738C13`). So while the
+  Hand moves the totem, the ghost is at the old value. After the release, the
+  pole goes up or down to the new value, and the ghost is at the new value
+  (with `totem_hold=0`). The ghost is the same mesh at a different height,
+  so each vertical face of the ghost is in the plane of a face of the pole.
+  Where the two overlap, the depth test gives noise: the faces fight. This
+  comes from the draw of the game, so it is the same with each renderer.
+- The start of the locked select (`fn_005DA950`) writes the totem to
+  `GInterfaceStatus+0x3C`, as it writes a pile of a store. The totem says no
+  to `IsLockedInInteract` (slot `0x6A0`, `0x00402790`), and its
+  `ProcessInInteract` (slot `0x808`, `0x00639B10`) always says go on. So the
+  game ends the action only at the release, and only when the pick record
+  holds the totem then ("How a take ends in the game", `grab.md`).
 - The release (`NetworkUnfriendlyEndLockedSelect` `0x00738630`) sends packet
-  `0x29` with the value. The town then works to that value (`Town+0x5C0`).
-  `Town::GetWorshipersNeeded` `0x0073C860` multiplies it with the count of
-  the villagers that can worship (`Town+0x618` and `+0x61C`) and rounds. A
-  value above 0 sends one villager at the least.
+  `0x29` with the value of the Hand (`+0x88`). Then packet `0x1C` ends the
+  locked select (`0x005D2239`). The two packets come some frames after the
+  release, and until then the pole stays at the value of the Hand. Packet
+  `0x29` calls `Town::SetWorshipPercentage` `0x0073C060`: the town works to
+  that value from then on (`Town+0x5C0`). `Town::GetWorshipersNeeded`
+  `0x0073C860` multiplies it with the count of the villagers that can worship
+  (`Town+0x618` and `+0x61C`) and rounds. A value above 0 sends one villager
+  at the least.
+- **The pole after the release.** Packet `0x29` also gives the value to the
+  totem (`TotemStatue::SetWorshipPercentage` `0x00738270`, through the
+  town). The totem keeps it at `+0x80`, and `+0x88` gets it too
+  (`GetWorshipSpeed`). The value that the pole shows (`+0x9C`) is only the
+  picture: the game moves it from where it is to the new value on a smooth
+  curve (`TotemStatue::Process` `0x00737F40` and `Draw`), in 5.2 s for each
+  1.0 of change from the old `+0x80`. When that time is less than 0.001 ms,
+  `SetWorshipPercentage` puts it at the new value at once. When the shown
+  value comes within 0.005 of the new value, the game stops the sound of the
+  move and plays the sound of the stop. So in the plain game, when packet
+  `0x1C` ends the locked select, the pole jumps back to the value that it
+  showed before the Hand took it, and then slides to the new value with the
+  ghost there. The value of the town does not slide: only the picture does.
 
 In state 5 the Hand of the game is on the top of the pole. The mesh of the
 game's Hand is hidden (`hand_hide_game=1`), and the mod draws its hands at the
-real hands. The source of the take stays in the pick record ("The bulk take",
-see `grab.md`), so the game keeps the totem while the hand goes away from it,
-and the opening of the grip ends the action.
+real hands. With `totem_take=1` the totem stays in the pick record while the
+grip is closed, so the game keeps the totem while the hand goes away from it,
+and the opening of the grip ends the action (see "The mod: the totem is the
+source of a take").
 
 ### The Worship Site and its chants [V]
 
@@ -456,7 +495,7 @@ not use the pick record.
 
 | Thing | With the real hand |
 | --- | --- |
-| The totem | The grip takes it, and the pole follows the hand one to one (`totem_hand=1`) |
+| The totem | The grip takes it, at the Hand or from a distance, and the pole follows the hand one to one until the grip opens. Then it stays there (`totem_hand=1`, `totem_take=1`, `totem_hold=1`) |
 | A miracle icon | A short press of the grip takes the miracle |
 | The gestures of a miracle | B and a draw: the spiral, then the gesture of the miracle |
 | A power up | Before the first cast. B and a draw of its gesture |
@@ -489,6 +528,69 @@ the room at the default scale of the God view.
 
 The mod changes only the rows. The game does the rest: the start, the stop
 at the land, the tooltip, the sound, the packet.
+
+### The mod: the totem is the source of a take (`totem_take=1`)
+
+The totem in the locked select of the game is the source of a take for the
+mod, as a pile of a store is (`VillageTotemInSelect`, `SelectSource` in
+`hand_direct.cpp`). Two things then follow:
+
+- `KeepTakeSource` puts the totem in the next pick record before each
+  interface step and after each eye pass. So the release step of the game
+  finds the totem and ends the action when the grip opens, also when the real
+  hand is far from the pole. With the mouse the game holds the pointer on the
+  totem, so its pick record always holds it.
+- **The totem from a distance.** The totem is a bulk target of the grab from
+  a distance (`TakeValid`, see `grab.md`, "A bulk source at a distance"). The
+  grip that closes on it goes to the game as a press. The far grab then waits
+  for the source of a take. With `totem_take=1` that is the totem, so the far
+  grab goes to its Take state, and the grip stays the button of the game until
+  it opens. The pole follows the height of the hand from where the grip
+  closed. The tether and the halo stay until the game ends the action.
+
+With `totem_take=0` the totem is no source: the far grab finds no take,
+cancels the press after 700 ms (`near_math::kFetchMs`) and holds the grip
+back. The game then sees the button up and lets the totem go, with the grip
+still closed. At the Hand, the pick record has the object at the Hand's
+point.
+
+### The mod: the ghost is inside the pole (`totem_ghost=1`)
+
+A hook on `LH3DObject::SetPosition` (`0x00423140`) acts only on the two calls
+of the ghost in `TotemStatue::Draw` (by their return addresses `0x00738BA1`
+and `0x00738C18`). It gives the ghost 97 percent of the scale of the game
+(`village_math::GhostScale`), and then writes the scale of the game to the y
+row of the matrix (`+0x24`). So the ghost has the height of the pole, at the
+same place, and each side of the ghost is 3 percent of its distance from the
+line of the pole inside the pole. The pole hides the ghost where the two
+overlap, and the ghost shows only where it is above or below the pole. The
+fix is in the geometry of the game, so it is the same with each renderer.
+With `totem_ghost=0` the ghost has the size of the pole.
+
+### The mod: the pole stays where the Hand let it go (`totem_hold=1`)
+
+In VR the pole is in the Hand at the new height, so a pole that jumps back
+and slides after the release is a motion that the player did not make. A
+hook on the release (`0x00738630`) keeps the totem and the value of the
+Hand. A hook on `TotemStatue::SetWorshipPercentage` (`0x00738270`) knows the
+call of packet `0x29` for that release: the same totem and the same value.
+Just before that call the mod writes the new value to `+0x80`, so the game
+takes its own path for no change: it puts the shown value at the new value
+at once, ends the sound of the move with the sound of the stop, and has no
+curve to run (`village_math::TotemValueBefore`, `TotemSlideMs`). When packet
+`0x1C` then ends the locked select, the pole and the value of the Hand are
+the same, so the pole stays where the Hand let it go and the game draws no
+ghost. Until packet `0x29` comes (4 to 6 frames after the grip opens), the
+ghost stays at the old value, as while the Hand holds the totem.
+
+The mod changes only the old value of the totem for that one call. The town
+gets the value of the release from the game, as before, and its villagers
+walk to the Worship Site in the time of the game. A change of the value from
+the game itself (a script, a Creature, a villager) slides as in the plain
+game.
+
+With `totem_hold=0` the pole jumps back to the value that it showed before
+the Hand took it, and slides to the new value with the ghost there.
 
 ### The mod: a scaffold joins the scaffold at the Hand
 
@@ -532,6 +634,9 @@ The count of the villagers is the count of the game
 | Key | Default | What it does |
 | --- | --- | --- |
 | `totem_hand` | 1 | 0: the game moves the totem with the screen rows of the pixel of the Hand's point |
+| `totem_take` | 1 | 0: the totem is no source of a take. The grab from a distance lets it go 700 ms after the press, and the pick record has the object at the Hand's point |
+| `totem_ghost` | 1 | 0: the ghost of the pole has the size of the pole, and where the two overlap their faces fight |
+| `totem_hold` | 1 | 0: after the release the pole jumps back to the value that it showed before and slides to the new value, 5.2 s for each 1.0 of change, as in the plain game |
 | `hold_target`, `hold_target_cm` | 1, 6 | See `grab.md`, "An object in the Hand that goes onto a thing". The code also reads the old names `scaffold_join` and `scaffold_join_cm` as the defaults |
 
 The keys are read from `bwvr.ini`. They are not in the launcher.
@@ -579,6 +684,18 @@ The tag `village` has one line for each change:
 - "the totem is at ...", for each 10 percent of change, with the way of the
   real hand, the value that the mod wanted and the rows that it gave.
 - "the Hand let the totem ... go", with the frames and the value.
+- "the game draws the ghost of the totem at the other value" and "the ghost
+  of the totem is gone after ... frames".
+- "packet 0x29 gives the totem ... the value ... of the release", with the
+  value that the totem had, the value that the pole showed, and the time in
+  which the game moves the pole.
+- "the locked select of the totem ... ended ... frames after the release",
+  with the value of the pole and whether a ghost is there.
+- "after the release of the totem ...": one line when the pole shows the
+  value of the totem, or 900 frames after the release. It has the lowest and
+  the highest value of the pole since the release, the frames on which the
+  pole was away from the value of the Hand, and the frames with a ghost.
+- With the tag `far grab`: "the game moves the totem ... at a distance".
 - "the town ... now works to a value of worship of ...".
 - "the miracle icon ... starts to charge" and "the charge of the miracle
   icon ... ended", with the chants of the icon and of the site.
@@ -587,7 +704,8 @@ The tag `village` has one line for each change:
 - "the scaffold ... in the Hand can go on the ...", with the gap and the
   reach, and "... has no object to go on now".
 - One line each report window: the frames in the Totem state, the frames on
-  which the mod gave the rows, the totems taken and the charges.
+  which the mod gave the rows, the totems taken and the charges. One more
+  line with the frames that had a ghost of a totem.
 
 The lines of a miracle in the Hand have the tag `miracle`, and they say
 "from a Worship Site". A press with the miracle at its icon gives "the game
@@ -596,8 +714,10 @@ takes ... back at the ... of its Worship Site".
 ### Tests and limits of the village
 
 The math test (`village_checks.h`) covers the value of the totem for a hand
-that goes up, down, above the top and back, the rows against the game's own
-math on a screen of 2880 and of 600 rows, the count of the worshippers, the
+that goes up, down, above the top and back, the scale of the ghost and how
+far its faces are inside the pole, the time of the slide and the pole and
+the ghost after the release with `totem_hold` at 1 and at 0, the rows
+against the game's own math on a screen of 2880 and of 600 rows, the count of the worshippers, the
 percent, each state of a miracle icon, the percent of its charge, and the gap
 and the choice of a join.
 
@@ -611,6 +731,28 @@ a power up with the spiral, a pour and a cancel
 (`village_run.ps1 -Kind miracle -Icon 3`). The start with no story has no
 Worship Site, so the totem is no target there.
 
+The totem from a distance (`village_run.ps1 -Kind fartotem`): the grip
+closes on the totem 0.56 m of the room from the Hand and stays closed for 400
+frames. With `totem_take=1` the far grab goes to its Take state 5 frames
+after the press, the pole follows the hand to 0.67 and back to 0.44, and the
+Hand lets the totem go 3 frames after the grip opens. With `totem_take=0`
+the far grab cancels the press after 42 frames (700 ms), and the Hand lets
+the totem go with the grip still closed. The eye pictures of the same run
+show the ghost: with `totem_ghost=0` the faces of the pole have lines of
+noise where the ghost overlaps them, with the Vulkan renderer and with
+dxwrapper. With `totem_ghost=1` the faces are clean with both.
+
+The pole after the release (`village_run.ps1 -Kind fartotem`, and
+`-Kind totem` with the plan `gototem,totem,up,up,up,down,down` and eye
+pictures in the second after the release): packet `0x29` comes 4 to 6 frames
+after the grip opens, and packet `0x1C` ends the locked select one frame
+later. With `totem_hold=1` the pole stays at the value of the Hand (0.44
+from a distance, 0.22 at the Hand) in each frame after the release, with
+Vulkan and with dxwrapper, and the eye pictures show the solid pole at that
+height and no ghost. With `totem_hold=0` the pole is back at 0.00 when the
+locked select ends, with the ghost at the new value, and it comes to the new
+value after 100 frames (0.44) and 44 frames (0.22).
+
 **Not run on the desktop:**
 
 - Heal from its icon, and the second power up.
@@ -622,6 +764,8 @@ Worship Site, so the totem is no target there.
 
 - Whether the pole feels held: the mod's hand stays where the grip closed on
   the pole, and the pole moves with it.
+- Whether the totem from a distance is easy to set: the pole follows the
+  height of the hand, and the hand is not at the pole.
 - Whether 18 cm for the whole travel is easy to set to a wanted count.
 - Whether a real draw of the spiral and of the second gesture fits the
   templates of the game.

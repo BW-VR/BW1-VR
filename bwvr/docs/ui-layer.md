@@ -36,6 +36,9 @@ Marks, as in `tabletop.md`:
   works with `ui_panel=0`.
 - The hints and the prompts of the controllers are on the hint cards
   (section 16 and `controller-hints.md`).
+- A note of the game over a thing (the percent of a lesson over the
+  Creature) stays in the eye pictures, at the depth of its place (section
+  19).
 - The pointer on the panel is not built (section 5). The menus draw on the
   panel at their own pixels, but the pointer still comes from the eye view.
 
@@ -665,6 +668,7 @@ recenter, and whether Virtual Desktop composes quad layers before the encode.
 | `creature_panel` | 2 | the Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature (section 13) |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4 |
 | `ui_scale_pct`, `hint_scale_pct`, `hint_flat`, `ui_shift_max_px`, `subtitle_lift_pct`, `subtitle_deg` | 25, 20, 1, 24, 0, 35 | the interface in the eye pictures (`backend.md`) |
+| `hint_hand_depth` | 1 | a hint of the game at the game's Hand at the depth of the Hand (section 15.6) |
 | `subtitle_*` | section 17.5 | the subtitle card |
 | `hint_card`, `prompts`, `hint_card_size_pct` | `controller-hints.md` | the hint cards |
 | `bubble_card` | section 18.4 | a speech bubble of the game |
@@ -941,8 +945,8 @@ in `controller_math.h`):
    the Hand's depth, beside the hand.
 
 `ui_scale_pct`, `hint_scale_pct` and `hint_flat` do not change a tooltip at
-the Hand. With the mouse nothing of this runs. The game's mouse picture hint
-(the widget band) is not changed. With the controller words on, the game's
+the Hand. While the game places the Hand, section 15.6 gives the depth.
+The game's mouse picture hint (the widget band) is not changed. With the controller words on, the game's
 hints become key caps and take the tooltip path.
 
 The game draws its Hand after the help, so the mesh can hide a part of a
@@ -966,6 +970,89 @@ take rig of `hand.md` with `help_test=1`.
 
 **Needs the headset.** Whether 2.5 cm reads well at 40 to 80 cm, whether the
 label fuses at the hand's depth, and where the Hand's mesh hides it.
+
+### 15.6 A hint at the game's Hand
+
+While the game places the Hand (with the mouse, or while the controllers are
+not tracked), no controller gives a Hand's point, so 15.3 does not run. The
+tooltip of the thing under the Hand ("Got 22 Belief", "Wood Required: 1000")
+and the hint with a mouse picture ("Move") then draw in the eye pictures.
+
+**What the game does [V].** `fn_005C9D00` makes the tooltip of the thing
+under the Hand with the flags `0x16`. When the bits 2 and 4 of its flags are
+set, `CameraHelp::DrawKeyOrMouse` (`0x00447EA0`) projects the point of the
+Hand mesh (`CHand+0x482C`, its place at `+0x38`) with the camera of the pass,
+and draws the hint at that pixel. So the game puts the hint at a point of the
+world, but its batches have no depth of their own.
+
+**Why it is double.** `hint_flat=1` puts the right eye of the hint at the
+pixel of the left eye, and one walk draws the batch of the left eye again. A
+hint with no disparity is at the far end of the view. In a desktop run the
+point of the Hand was 163 units from the eye, with an eye difference of 52
+px. The eyes look at the Hand or at the land under it, so they see the hint
+two times.
+
+**What the mod does (`hint_hand_depth=1`).** For a batch of a DrawKeyOrMouse
+call with the bits 2 and 4, `HandHintMove` in `draw_hooks.cpp` gives the right
+eye the eye difference of the point of the Hand (`hint_depth_math.h`):
+
+- One walk: the move of the depth of the point
+  (`one_walk_math::ShiftAtDepth`), with the camera of the left eye.
+- Two walks: the pixel of the point in the right eye less its pixel in the
+  left eye. With `hint_flat=0` the right eye pass keeps the pixel that the
+  game gave, which has that eye difference already.
+
+This applies to a tooltip with no picture (the tooltip path of
+`h_DrawKeyOrMouse`) and to the kept copy of a hint with a mouse picture
+(`FlattenIn`). The left eye does not change. A hint that the game does not
+draw at the Hand (the flags without the bits 2 and 4, for example the hint
+beside the help text, or the label of the hand demo) stays as before. When
+the point is not in front of the eye, the hint stays flat. `hint_hand_depth=0`
+keeps each such hint flat.
+
+While a controller places the Hand, these hints go to the hint card (section
+16), or to the Hand's point of 15.3 with `hint_card=0`. No other yellow text
+of the game takes the flat path then.
+
+**Keys, test keys and the log.**
+
+| Key of `bwvr.ini` | Default | Meaning |
+| --- | --- | --- |
+| `hint_hand_depth` | 1 | 1: a tooltip or a hint of the game at the game's Hand has the depth of the Hand. 0: the same pixel in both eyes |
+
+With `test_keys=1`, Ctrl, Shift and the slash key change `hint_hand_depth` in
+play, with a long pulse for 1 and a short pulse for 0. Test keys for the
+desktop runs:
+
+- `hint_hand_depth_test_frame=<frame>`: the key changes at that frame.
+- `mouse_owner_test_frame=<frame>`: from that frame the mouse owns the
+  pointer, as with Ctrl F12 "mouse only" (`controllers.md`, section 3). The
+  game then places the Hand at the pointer that the controller left.
+- `hint_selftest=2`: the five hints of `hint_selftest=1`, and a yellow
+  tooltip and a hint with a mouse picture at the game's Hand, with the flags
+  `0x16`, two copies of each.
+
+The frames of the test keys count as the steps of the scripted controller
+count. On a sample frame of the log the tag `ui hint` gives the depth of the
+point of the Hand, its eye difference and the move of the right eye. The
+report of the tag `ui depth` counts the right eyes at the depth of the Hand,
+the right eyes at the pixel of the left eye, and the frames with the point
+of the Hand not in front.
+
+**Tests.** The math test (`OneWalkChecks`) has a point of the Hand 55 units
+from the eye: one walk puts the hint at the pixel of the point in the right
+eye, and a flat hint is more than 50 px from it. The desktop run is
+`creature_recipe.ps1 -Kind leash` with `hint_selftest=2`,
+`mouse_owner_test_frame=860` and `hint_hand_depth_test_frame=925`, and
+`test_frame_rate=60` for the Vulkan renderer: the pictures of frame 903 have
+the key at 1, and the pictures of frame 953 have it at 0. The game's own
+hint "Move" is at the Hand in that run.
+
+**Limits.**
+
+- No run had a real tooltip of a thing under the Hand while the game placed
+  the Hand. The test key draws through the same call with the same flags.
+- Only a headset can show that the hint fuses with the Hand and the land.
 
 ## 16. The hint card
 
@@ -1523,3 +1610,126 @@ was a villager 615 units deep: the villager, the box and the text are each
   sign. No run has shown it. A run shows the same for the text of a name
   with `name_card=0`.
 - No run had the name of a quest character.
+
+## 19. A note over a thing
+
+Code: `src/mod/note_depth.cpp` (the hook, the test key and the log), and the
+step in `DrawInterface` of `src/mod/draw_hooks.cpp`.
+
+### 19.1 What the game draws [V]
+
+The game shows a short yellow text over a thing in the world for 6 s, with a
+sprite. `fn_00827A50` puts such a note in a list (the first note is at
+`0x00EB9A74`). The only code that adds a note is the note of a Creature that
+learns: `CreatureMental::ConsiderLearningAction` calls `fn_0047CDA0`, which
+shows the percent of a lesson (`"%.0f%%"`) over the head of the Creature, at
+most each 100 game turns.
+
+Each frame `fn_00827B90` draws the list in the eye pass, from
+`fn_0x005e5cd0`. `fn_00827BD0` draws one note:
+
+1. It projects the point over the thing with the camera of the pass
+   (`fn_00819490`).
+2. It draws the text two times with `GatheringText::DrawTextRaw`: a black
+   shadow 1 px down and to the right, then the text in its colour (yellow,
+   `0xFFFFFF00`, by default). The depth that it gives is the camera depth of
+   the point.
+
+`DrawTextRaw` draws through `LH3DTech::Draw3DScreenTriangle`, which writes
+`rhw = near / depth`. So each vertex of the text has the rhw of the place of
+the note.
+
+### 19.2 Why the interface depth makes it double
+
+`draw_hooks.cpp` takes each batch of `Draw3DScreenTriangle` as interface. The
+interface depth moves a batch to the depth of the nearest world, and in one
+walk the right eye gets the pixel of the left eye with that depth. Neither is
+the depth of the thing. In a desktop run at a render of 3600 by 2880, the
+note over the Creature was 50 units from the eye. The eye difference of its
+place was 168 px, and the interface depth gave the note 48 px. The eyes look
+at the Creature, so they see the note two times, 120 px apart.
+
+### 19.3 What the mod does (`note_depth=1`)
+
+`h_NotesDraw` marks the draw of the list in an eye pass. A batch in that draw
+gets none of the steps of the interface: no interface depth, no interface
+size, no hint rule and no panel.
+
+- Two walks: each eye pass draws the note where the game put it for that
+  eye. The camera of each eye gives the eye difference of the place.
+- One walk: the batch goes to both eyes as a batch of the world. The right
+  eye gets the move of its rhw (`one_walk_math::CopyForRightEye`), with
+  dxwrapper and with the Vulkan renderer. The rhw is that of the place, so
+  the move is the eye difference of the place.
+
+So the note is at the depth of the thing in both eyes, beside it, at the
+size of the game. The depth test of the game stays: a part of the note
+behind the head of the Creature does not show, as in the plain game.
+
+`note_depth=0` gives a note the steps of the interface.
+
+### 19.4 Keys, the test keys and the log
+
+| Key of `bwvr.ini` | Default | Meaning |
+| --- | --- | --- |
+| `note_depth` | 1 | 1: a note of the game over a thing has the depth of its place. 0: the interface depth |
+
+With `test_keys=1`, Ctrl, Shift and the apostrophe key change `note_depth` in
+play. The pointing hand gets a long pulse for 1 and a short pulse for 0.
+
+Test keys for the desktop runs:
+
+- `note_test=<frames>` (up to 4 frames, with commas): at each frame the mod
+  asks the game for the note of a Creature that learns over the player's
+  Creature, with 37 percent (`fn_0047CDA0`). The game shows a note of a
+  Creature at most each 100 game turns, and a test save starts soon after
+  its own start. So the test puts the turn of the last note of the Creature
+  101 game turns back. When the game shows the note, the mod saves the eye
+  pictures of a frame 20 frames later.
+- `note_depth_test_frame=<frame>`: `note_depth` changes at that frame, as
+  the key does.
+
+The frames of both keys count as the steps of the scripted controller count
+(`fake_controller_play_frame`).
+
+The tag `note depth`:
+
+- At the start: `note_depth`, and the test keys.
+- `the game shows a note over a thing: "37%", colour 0xFFFFFF00, ...`: each
+  new note, with its text, its colour and its place.
+- `a batch of a note in one walk: x ... in the left eye as the game put it,
+  rhw ... The right eye has it N px from the left eye`: the first batch of a
+  new note, and then each 150 frames while a note shows. With two walks the
+  line is for each eye pass.
+- Each report window: the new notes, and the batches at the depth of their
+  place and at the interface depth.
+
+### 19.5 Tests
+
+The math test (`OneWalkChecks`) has a note over a Creature 300 units away:
+the right eye of one walk has it at the pixel of the point in that eye, with
+its layout. The interface depth puts the eyes more than 20 px from the eye
+difference of the place.
+
+The desktop run is `creature_recipe.ps1 -Kind leash` in the test save
+`temple`, with `note_test=870,1700` and `note_depth_test_frame=1300`: a note
+over the Creature with `note_depth=1`, and one with 0. Add
+`test_frame_rate=60` for the Vulkan renderer, and
+`backend=dxwrapper\ddraw.dll` for Direct3D 9.
+
+With one walk, the Vulkan renderer and dxwrapper gave the same result. The
+note was 51 units from the eye. With `note_depth=1` the right eye had it 166
+px to the left of the left eye, which is the eye difference of its place,
+and the eye pictures show it over the head of the Creature in both eyes.
+With 0 the right eye had it 48 px to the left, about 120 px to the right of
+the Creature. With two walks (`one_walk=0`) and the Vulkan renderer, the
+camera of each eye pass gave the note 166 px between the eyes. With
+`note_depth=1` that stays. With 0 the interface depth adds its move in each
+eye, so the note is not at the depth of the Creature there either.
+
+### 19.6 Limits
+
+- No run has shown a note that the game made by itself: a Creature that
+  learns from a miracle of the player. The test key uses the same function
+  of the game.
+- Only a headset can show that the note fuses with the Creature.

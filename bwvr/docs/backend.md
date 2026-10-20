@@ -34,6 +34,8 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/proxy/ddraw_proxy.cpp` | The `ddraw.dll` stub. Loads the backend named by `backend` |
 | `src/mod/mod_main.cpp` | Settings (`ReadSettings`), hook installation, the log, the shutdown |
 | `src/mod/vr_start.cpp` | The tries to start the headset session on a thread of the mod, and the frame watch of the tries (`vr_start`) |
+| `src/vr/xr_screen.cpp` | The OpenXR session, the frames, the input and the layers |
+| `src/vr/bridge/client.cpp`, `host.cpp`, `protocol.h` | The x64 host for Steam Frame and its client in the mod (`xr_bridge`) |
 | `src/mod/gpu_bridge.cpp` | Shared textures, Direct3D 9 to Direct3D 11 copy, depth format hook |
 | `src/mod/frame_send.cpp` | The way of the eye pictures to the headset: when the mod waits for the GPU, and on which thread (`frame_send`) |
 | `src/mod/draw_merge.cpp` | One draw call for a row of draw calls of the game with one state (`draw_merge`) |
@@ -51,7 +53,9 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/draw_hooks.cpp` | Hints, tooltips, subtitles, interface depth and size |
 | `src/mod/eye_clean.cpp` | The frame before of each eye: the clean of each eye pass, and the keeps of the eye pictures |
 | `src/mod/bubble_card.cpp` | A speech bubble of the game as one card at the depth of its sign, and the name of a villager as one card at the depth of the villager |
-| `src/mod/sky_detail.cpp`, `water_mode.cpp` | Clouds, sun glare, detail distance, the sea |
+| `src/mod/note_depth.cpp` | A note of the game over a thing (the percent of a lesson over the Creature) at the depth of its place |
+| `src/mod/sky_detail.cpp`, `water_mode.cpp` | Clouds, the moon, sun glare, detail distance, the sea |
+| `src/mod/sprite_up.cpp`, `sprite_math.h` | Smoke, fire and the other sprites with world up |
 | `src/mod/spirit_anchor.cpp` | The advisors |
 | `src/mod/near_plane.cpp` | The near plane |
 | `src/mod/frame_timers.cpp`, `eye_capture.cpp`, `draw_probe.cpp` | Timing, eye pictures, draw probe |
@@ -59,8 +63,10 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/fast_transform.cpp`, `fast_transform_math.h` | The two vertex loops of the engine with SSE (`fast_transform`) |
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`) |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`) |
+| `src/mod/crash_report.cpp` | The report of a crash in the log, and the dump `bwvr-crash.dmp` (`crash_report`) |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
+| `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
 | `src/common/exe_check.h`, `version.h` | The build check and the product name |
 
 ## How the game draws
@@ -326,6 +332,7 @@ backend=system                  ; system DirectDraw
 backend=vulkan                  ; DirectDraw 7 and Direct3D 7 of the mod on Vulkan
 gpu_bridge=1                    ; use the GPU path when the backend allows it
 vulkan_only=1                   ; backend=vulkan uses only Vulkan ("Only Vulkan")
+vulkan_fallback=1               ; backend=vulkan takes dxwrapper when Vulkan failed
 ```
 
 A name with no path is searched beside the game first. If the chosen backend
@@ -566,13 +573,22 @@ gives the thread of each part with `vr_start=1`, the default:
 | --- | --- | --- | --- |
 | `StartInstance` | `xrEnumerateInstanceExtensionProperties` and `xrCreateInstance`. The loader loads the DLL of the runtime here | The thread of the tries | It needs no device. It can fail (no runtime, or a broken API layer: `XR_ERROR_FILE_ACCESS_ERROR`) or wait for the runtime |
 | `StartSystem`, `LogSystem` | `xrGetSystem`, and the name and the size of the headset | The thread of the tries | With no headset it can only fail |
-| `StartSession` | The Direct3D 11 device on the adapter of the runtime, `xrCreateSession`, the spaces, the controllers and the swapchains | The frame thread | It runs one time, only when the runtime has a headset. The frame thread uses the session from the next frame on, and `GpuBridgeStart` opens the shared textures of the game on its device at once, on the frame thread |
+| `StartSession` | The device of the session on the adapter of the runtime (Direct3D 11, or Vulkan with `xr_vulkan=1` and `backend=vulkan`), `xrCreateSession`, the spaces, the controllers and the swapchains | The frame thread | It runs one time, only when the runtime has a headset. The frame thread uses the session from the next frame on, and `GpuBridgeStart` opens the shared textures of the game on its device at once, on the frame thread |
 | `Stop` after a try with no headset | `xrDestroyInstance`. The loader unloads the DLL of the runtime here | The thread of the tries | It can wait for the runtime |
 
 OpenXR lets each call come from any thread, when two threads do not use one
 handle at one time. The thread of the tries gives the screen to the frame
 thread when it finds the headset. After that only the frame thread uses the
 screen.
+
+The instance names the graphics API of the session. So the thread of the
+tries makes its screen with the choices of the frame thread
+(`VrStartOptions`): a session with Vulkan (`xr_vulkan=1`, and each
+`backend=vulkan`), with no Direct3D 11 device (`vulkan_only=1`, "Only
+Vulkan"), and eye tracking for foveated rendering. The frame thread gives
+`xr_vulkan_upload` and `xr_hold_ms` before `StartSession`. With
+`backend=vulkan` and no session after 3 tries, the renderer draws with a
+device of its own, as with the tries on the frame thread.
 
 ### One instance for all tries
 
@@ -714,6 +730,55 @@ monitor:
 ```
 
 A desktop run cannot show a session that starts: only a headset can.
+
+## The x64 host for Steam Frame
+
+`xr_bridge=1` sends the OpenXR work of the mod to an x64 process,
+`bwvr-host\bwvr-xr-host.exe`. Steam Frame can then use its 64 bit Proton
+OpenXR runtime. `xr_bridge=0` is the default and keeps the local runtime.
+The mod reads the key at the start of the game, so a change needs a
+restart. `bwvr/src/vr/bridge/README.md` tells a player how to install the
+Steam Frame add-on.
+
+The host takes the frames of Direct3D 11 only. A session with Vulkan
+(`backend=vulkan`, or `xr_vulkan=1`) uses the local runtime, also with
+`xr_bridge=1`, and the line `settings` of the log says so.
+
+The game keeps the XrScreen interface. Each call of XrScreen goes to the
+host, and the host runs the same `xr_screen.cpp` with its local runtime.
+The host has the OpenXR session, both eyes, the input, the haptics, the
+panels, the cards and the cut scene window. At BeginFrame the eye and hand
+poses, the display time, the focus and a recenter come back to the game.
+
+- The eye textures stay on the GPU. The mod makes its own D3D11 device on
+  the adapter of the host, and the GPU bridge opens the shared textures of
+  Direct3D 9 on it. The host opens the same shared handles and waits for
+  its copy before it answers.
+- The cards and the eye pictures of the CPU path go through a shared
+  memory of at most 32 MiB for each request.
+- Each request has a sequence number. A request that fails or has no
+  answer in time stops the frames to the headset. The start has 30 s,
+  other requests have 5 s and a GPU copy of the host has 2 s. The game
+  does not go back to the local runtime.
+- The frame goes to the headset on the frame thread, also with
+  `frame_send=2`. The second thread of `frame_send=2` is only on the local
+  runtime.
+- At the end of the game the mod tells the host to stop. A host that does
+  not stop in 3 s is ended. A job object of Windows ends the host when the
+  game ends, and the host also watches the game between requests.
+
+The add-on holds only the host, its 64 bit OpenXR loader and the license
+of the loader. The `ddraw.dll` of the installer has the client. The Build
+workflow and the release make the add-on with `steam-frame.yml`, and the
+CI runs 120 requests between an x86 client and the host with no OpenXR.
+
+Known limits:
+
+- On Steam Frame (Proton 11 ARM64, SteamVR OpenXR 2.18.2) the game ran
+  with both eyes, the input and a clean stop, at 42 to 44 frames a second.
+  All controls, the haptics, the loss of the device and long sessions are
+  not tested.
+- A desktop run does not start OpenXR, so it cannot show the host.
 
 ## The end of the mod
 
@@ -1457,6 +1522,58 @@ that no handler takes writes its code, its place and the return addresses
 on the stack of its thread (a stack overflow shows the calls that repeat),
 and the frame thread keeps 64 KiB of its stack for that line.
 
+**The report of a crash.** `crash_report=1` (the default, `crash_report.cpp`)
+puts an unhandled exception filter of the mod in place when the DLL loads. A
+fault that no handler takes then writes one block of lines with the tag
+`crash` to `bwvr.log`:
+
+- the code of the exception, the address of the code with its module and
+  the offset in the module, or "no module", the thread (the frame thread or
+  not), and for an access violation the kind and the address of the access,
+- the registers,
+- up to 32 return addresses on the stack of the thread, the nearest first.
+  Each one is a word of the stack that is in a module, after a call,
+- the frame, the frame of the Hand, the Hand state, the hand mode, the object
+  in the Hand and the object of the next pick record, each with its class.
+
+Then the filter writes a small minidump, `bwvr-crash.dmp`, beside
+`runblack.exe` (`MiniDumpWriteDump` of `dbghelp.dll`, with the threads, their
+stacks, the modules and the memory that the stacks point to). A new crash
+writes over the dump of the crash before. The last line of the block names
+the dump and its size. Each line of the log goes to the file at once. Then
+the filter calls the filter that was there before it, and Windows ends the
+game as it does with no report.
+
+The module of an address comes from `VirtualQuery` and from the headers of
+the module in memory (the game is `runblack.exe`, each DLL has the name of
+its export directory), so the filter needs no lock of the loader. The C
+runtime of the game puts its own filter in front of the mod's filter at its
+start (`__CxxSetUnhandledExceptionFilter` `0x007D51A6`). That filter calls
+the filter before it for each fault that is not a C++ exception. At the first
+frame the mod puts its filter in front again, and it calls the filter of the
+C runtime after its report. `dbghelp.dll` loads at the first frame too, so a
+crash before the first frame gives the lines and no dump. The frame thread
+keeps 64 KiB of its stack for the report of a stack overflow. With `hang_watch`
+both filters write, and the one of the watch calls the other one after it.
+
+`crash_report=0` puts no filter in place. `crash_test_frame=N` (a test key)
+writes to address 0 at frame N of `FinishFrame`. Windows then shows no box
+for that fault, so a desktop run puts no window in front. The run scripts
+move each `bwvr-*.dmp` that the run wrote into the folder of the run
+(`desk_test.ps1`).
+
+The log of a crash test:
+
+```
+crash report : test key crash_test_frame=N. The mod writes to address 0 now
+crash        : a fault that no handler takes. Exception 0xC0000005 at ddraw.dll+0x..., on thread T (the frame thread). It was a write to 0x00000000
+crash        : registers eax=... ebx=... ...
+crash        : 32 return addresses on the stack, the nearest first: ddraw.dll+0x..., runblack.exe+0x..., ...
+crash        : frame N (hand frame N). Hand state 1, hand mode 0x1. The Hand holds 00000000 (nothing). The pick record holds 00000000 (nothing)
+crash        : the dump is C:\Black & White\bwvr-crash.dmp, N KiB
+crash        : the report ends. The filter before the mod's filter runs now
+```
+
 **The split in a headset.** SteamVR with a Steam Frame, Ryzen 9 7950X3D,
 Radeon RX 7900 XTX, a render of 3304 by 2644 with 4x multisampling,
 `one_walk=1`, `frame_send=2`, `profile_sample=250`. The ms are of one frame,
@@ -1816,6 +1933,7 @@ against a true right eye camera at three rolls.
 | A batch with no depth | Every rhw exactly 1 (screen space) or every z 1 (the sky): the copy moves by the eye width only |
 | The interface | `draw_hooks.cpp` runs its chain a second time with the right eye, and the batch goes to the right half only. A tooltip at the Hand has an anchor for each eye. `hand_glow.cpp` gives the right eye its Hand's point by the same rule |
 | A card or a mark of the mod | Its batch goes to the left half only, and then to the right half only, moved by the eye difference of its place. See "The cards and the marks of the mod" |
+| A note of the game over a thing (`note_depth=1`) | Its text has the rhw of its place, so the batch goes to both eyes as a batch of the world, and the right copy moves by its rhw. See `ui-layer.md`, section 19 |
 | An advisor in the cut scene window (`cutscene_advisors=1`) | Its batch goes to the left half only, and then to the right half only, with the eye difference of its place in front of the screen. See `cutscene-window.md`, section 7 |
 | The pass ends | The game's target is bound again. The two halves go to the shared textures: with `frame_send=0` the first copy has no wait and the second has the wait for the GPU, and with `frame_send` 1 and 2 both are copies alone, and `frame_send.cpp` waits one time as for two eye passes |
 
@@ -2789,9 +2907,12 @@ mod, in place of dxwrapper and Direct3D 9. The proxy then loads no backend
 DLL: system DirectDraw gives only the exports that the mod does not make
 (the enumeration of the displays). The two exports that make a DirectDraw
 object go to the mod (`ProxySetCreateHooks`, `ddraw_proxy.h`). The launcher
-row "Renderer" chooses Vulkan or Direct3D 9: it writes `backend=vulkan` only
+row "Renderer" chooses Vulkan or Direct3D 9. Vulkan is the default: the
+launcher shows it for an ini with no key, and it writes `backend=vulkan` only
 when the GPU has Vulkan 1.3, else dxwrapper. With no key the proxy takes
-dxwrapper.
+dxwrapper, because the proxy cannot ask Vulkan before the mod loads. A
+start after a fault of Vulkan takes dxwrapper too ("The fall back of the
+renderer Vulkan").
 
 **What the game uses.** `ddraw_census=1` with `backend=system` counts each
 call from the start (dxwrapper puts a hot patch on `DirectDrawCreateEx`
@@ -2946,6 +3067,7 @@ part that gives calls to Direct3D 9 or that needs a Direct3D 11 device:
 | The merge of draw calls (`draw_merge`) and `one_walk_merge` | No merge and no hook |
 | The session with Vulkan | No Direct3D 11 device and no relay (`XrScreen::UseD3D11`). The pixels of the CPU go into the swapchains with Vulkan (`xr_vulkan_upload=1`) |
 | A session with Vulkan that does not start | No session with Direct3D 11 after it: the game stays on the monitor |
+| The x64 host for Steam Frame (`xr_bridge`) | Not used: the host takes the frames of Direct3D 11 only, so the session uses the local runtime |
 
 Their keys do nothing then, and their test keys (Shift 8, 9, F, G, H, J,
 K, M, N, V, C, Z and U) write a line of the log and change nothing. The
@@ -2989,6 +3111,7 @@ swapchain of Vulkan does not show the picture. With `vulkan_strict=1`:
 | Each other export of DirectDraw (inner parts that the game does not call) | A line of the log, and the game stops |
 | A `runblack.exe` that is not v1.42 | No DirectDraw: `DirectDrawCreate` and `DirectDrawCreateEx` give `DDERR_GENERIC` and a line of the log |
 | `vulkan_only` | 1, whatever the key says |
+| `vulkan_fallback` | No fall back: the file `bwvr-vulkan-pending.txt` and a missing `vulkan-1.dll` do not give dxwrapper |
 | The window of the game | The swapchain of Vulkan alone: `vk_window` is 1 whatever the key says, and the test key Shift D does nothing. When the swapchain does not show the picture, the window gets none and the log says so one time. No GDI |
 
 The headset app writes `vulkan_strict=1` with each save (`android.md`,
@@ -3048,6 +3171,94 @@ Shift D changes it from the next present: a change to 0 takes the
 swapchain and the surface away, so GDI can draw into the window again. The
 report of each 450 frames has the presents through the swapchain and the
 presents with no free image.
+
+### The fall back of the renderer Vulkan
+
+`vulkan_fallback=1` (the default, `vk_fallback.cpp`, `TestVulkan` in
+`ddraw_proxy.cpp`). With `backend=vulkan` a PC with a GPU or a driver that
+the renderer does not run on gets dxwrapper and Direct3D 9, at this start or
+at the next start. The proxy chooses the backend in `DllMain`, before the
+mod loads one, so it does only cheap tests there. It does not make a Vulkan
+instance under the loader lock. With `vulkan_strict=1` ("Only Vulkan") there
+is no fall back: the proxy does not test the file or `vulkan-1.dll`, and the
+mod draws with Vulkan or not at all (`proxy_choice_math.h`).
+
+**The file.** Before the mod uses Vulkan, it writes
+`bwvr-vulkan-pending.txt` beside the game (in `EarlyHooks`, before the game
+makes its DirectDraw object). The first picture of the renderer deletes it:
+a present to the window through the swapchain (`VkWindowPresent`) or
+through GDI, or the first frame that a session with Vulkan presented. A
+start that ends before its first picture leaves the file: a fault, a hang
+that a person stops, a stop of the process. A game that ends as Quit ends
+it (the hook of `free_system`) deletes the file when no fault came, because
+a start that waits for the headset is not a fault ("The device of the
+session").
+
+**When the proxy takes dxwrapper at this start.** With `backend=vulkan` the
+proxy takes `dxwrapper\ddraw.dll`, as with no `backend` key, when:
+
+- the file `bwvr-vulkan-pending.txt` is beside the game. The file stays, so
+  each next start uses dxwrapper too, until a save of the launcher deletes
+  it ("The launcher").
+- there is no `vulkan-1.dll` in the folders where Windows looks for a DLL.
+
+Then the mod is the mod of dxwrapper for the whole process: the GPU bridge,
+the session with Direct3D 11 and the parts for Direct3D 9. The log says
+why:
+
+```
+vulkan fallback: backend=vulkan, but the start before with Vulkan ended before its first picture, or Vulkan failed (bwvr-vulkan-pending.txt is there). This start uses dxwrapper and Direct3D 9. The file stays, so each start uses dxwrapper until a save of the launcher deletes it
+backend      : dxwrapper\ddraw.dll in place of vulkan (the line vulkan fallback says why)
+```
+
+**What falls back at the next start.** These faults come after the game
+made its DirectDraw object of the mod, so this start cannot change its
+backend. The mod writes the file again with the cause, and keeps it, also
+after a picture. The log says so (`vulkan fallback: ... The mod wrote the
+file again, and the next start uses dxwrapper and Direct3D 9`).
+
+| Fault | This start | The next start |
+| --- | --- | --- |
+| No GPU with Vulkan 1.3, dynamic rendering and multiview, or a failed instance or device (`vk::Start`) | The renderer stops, and the window stays black | dxwrapper |
+| A fault that stops the renderer (`Fail` of `vk_scene.cpp`: the shaders, the pipelines, a submit) | The window stays black from the fault | dxwrapper |
+| A session with Vulkan that does not start (`XrScreen::VulkanFailed`) | With `vulkan_only=1` no session: the game is on the monitor | dxwrapper, with a session with Direct3D 11 |
+| A fault or a hang before the first picture | The game stops | dxwrapper |
+
+A failed swapchain of the window is not a fault here: the window then gets
+the picture through GDI ("The window with Vulkan").
+
+**The launcher** shows the file in its status line, and the row "Renderer"
+then shows Direct3D 9 (`launcher.md`, "What it checks"). Each save deletes
+the file, so the next start with the renderer Vulkan tries Vulkan again.
+The game does not write `bwvr.ini`.
+
+**The keys.** `vulkan_fallback=0` is the behavior with no fall back: the
+proxy does not read the file, the mod writes none, and a fault of Vulkan
+does not change the next start. `vulkan_fallback_test=1` (a test key of
+the desktop runs) stops the process when the game makes its DirectDraw
+object, before the first walk, with `TerminateProcess`, as a fault does.
+The launcher removes the key on each save. There is no keyboard test key:
+the choice is made at the start of the process. `desk_run.ps1` takes the
+file out of the game folder for each run and puts the file of the player
+back after the run, and `-VulkanPending <text>` starts a run with the file
+there.
+
+**Desktop runs** (an NVIDIA GeForce RTX 3090, `vulkan_only=1`, a new
+game):
+
+| Run | What it showed |
+| --- | --- |
+| `vulkan_fallback_test=1` | The mod wrote the file, the game made its DirectDraw object, and the process stopped before the first walk. The file stayed |
+| The file there at the start | The line `vulkan fallback` with the cause, the backend `dxwrapper\ddraw.dll in place of vulkan`, and the game with dxwrapper, the GPU bridge and Direct3D 9. The file stayed |
+| No file | The mod wrote the file, and the first present through the swapchain of the window deleted it |
+| `vulkan_fallback=0`, the file there | The game used Vulkan, and the file stayed as it was |
+
+With `test_frame_rate=60` the mod makes no present to the window, so on the
+desktop the file stays until the end of the run.
+
+**Not run:** a PC with no Vulkan 1.3 or no `vulkan-1.dll`, a fault of the
+driver, and a session with Vulkan that does not start. Only a headset shows
+the first picture of a session with Vulkan that deletes the file.
 
 ## Foveated rendering
 
@@ -4074,6 +4285,13 @@ anchored to the Hand. `hint_scale_pct` (default 20) sets its size about its own
 anchor, because the game sizes its interface in pixels, which is small on a monitor
 and large in a view of 110 degrees.
 
+A flat hint has no disparity, so it is at the far end of the view. While the game
+places the Hand (the mouse, or controllers that are not tracked), the hint and the
+tooltip of the thing under the Hand are in the eye pictures. With
+`hint_hand_depth=1` (default) the right eye gets the eye difference of the point of
+the Hand, so they have the depth of the Hand. 0 keeps them flat. See `ui-layer.md`,
+section 15.6.
+
 ### Tooltips
 
 The belief gained notice, the Storehouse readout and the Temple readout are
@@ -4216,9 +4434,13 @@ the camera it gets, which is the head camera. The body of the dome sits 130 to 5
 units from its pivot along that basis, so a nod would swing each cloud across the
 sky.
 
-A hook on `LH3DMist::Draw` gives each cloud its own basis: facing the game camera
-position at `0x00EA1DB8` (no head) with world up. With the head straight ahead this
-is the engine's own basis. Weather clouds and ground mist are the same class. The
+A hook on `LH3DMist::Draw` gives each cloud its own basis: facing the camera of the
+frame with no head in it, with world up. In the full view that is the stored camera
+at `0x00EA1DB8`, which `head_camera.cpp` keeps free of the head. In a table frame
+(the table and the God view) the stored camera is the render head while the scene
+is drawn, so the clouds face the table camera: the place of the recenter pose in the
+world (`HeadCameraTableCamera`). With the head straight ahead this is the engine's
+own basis. Weather clouds and ground mist are the same class. The
 engine makes the pole `20 * A` long (`A` is the scale at `+0x88`, divided by a
 flatten term for sky clouds: flag value 2 at `+0x80`, flatten at `+0x8C`), which is
 260 to 1000 units seen from below. With the pole pointed at the eye, a cloud nearer
@@ -4228,14 +4450,141 @@ line of sight, so the outline stays and the geometry stays away from the eye. Th
 basis of the game camera does not work, because the dome is one sided, and the
 clouds behind the player would vanish.
 
+**The head does not turn a cloud.** A cloud that faces the render head turns with
+each move of the head. In the God view the clouds can be near the head: at 1000 units
+for each meter they hang 30 to 50 cm over the land. A small move of the head is then
+a large turn of a cloud, and a cloud below the head spins about its pole when the
+head goes over it. The body and the rim of the dome then move up, down
+and to the side. A cloud that faces the table camera keeps its place and its turn
+while the head moves. Only the steps of the player move the table camera: a zoom, a
+grab, a snap turn and a teleport. The engine also scales the rows 1 and 2 of the
+basis by `A` from the stored camera. The mod gives those rows the ratio of `A` from
+the table camera to `A` from the render head (`sky_math.h`, `MistScale`), so the
+shape of a cloud does not change with the head either.
+
+`clouds_head_free` (default 1) picks the point in a table frame: 1 the table camera,
+0 the render head. The full view is the same with each value. The pole limit uses
+the distance to the point that the cloud faces.
+
+A cloud moves only as the plain game moves it. `CloudInSky` (`0x005E23F0` makes 70
+clouds, `fn_005E25C0` moves them, from `GLandscape::Draw`) adds 70 units for each
+second of the time step of the game (`0x00EA9EC0`) along the wind, and wraps a cloud
+at 8000 units. It reads no camera. In the second eye pass the time step is 0, and
+with one walk the right eye is a copy of the batches of the left eye, so a cloud is
+at the same place in both eyes.
+
 `UpdateCamera` also builds a heading turn at `0x00EA1D88` from the stored camera. The
 draw at `0x0080DB30` turns billboard meshes at the lowest detail by it, so far trees
 would turn with the head. It is built again after each call from the camera the game
 asked for, with the engine's `fn_00841260` and the constant at `0x008C78D8`.
 
-`LH3DSprite::Draw` builds the model view of each billboard at `0x00EA9E10` as an
-identity rotation in camera space, with the centre from the full per eye matrix. A
-billboard for VR wants world up, not the camera's up.
+### The moon
+
+`LH3DSky::Draw` (`0x0086B010`) puts the moon at the stored camera plus the moon
+position (`0x00EDD378`), so the moon keeps its direction from the eye at each place.
+It draws the moon when the height of the moon position is more than 220.
+`fn_0086AC60` (`__cdecl`: the place, the turn, the matrix of the mesh) turns the moon
+to the camera. It takes the direction `d` from the camera matrix at `0x00EA1D28` to
+the moon, and the right of the moon is the camera up crossed with `d`. The glow quad
+(`fn_0086A930`, 1000 units across times the scale at `0x00FA2750`) and the moon mesh
+(the object at `0x00FA2728`, turned by the phase of the moon from the date) take that
+turn. The second call of `fn_0086AC60` is the reflection of the moon in the sea. The
+camera matrix has the head with its roll, so with the matrix of the game the moon
+turns with the head.
+
+A hook on `fn_0086AC60` gives it a camera matrix at the same place with world up
+(`sky_math.h`, `LevelCamera`), and puts the camera matrix back after the call. The
+moon then turns only with its direction from the eye, so it stays fixed in the sky.
+With the head level and no roll, this is the turn of the game. `moon_world_up`
+(default 1) picks it: 1 world up, 0 the camera with the head.
+
+The sun disc (`fn_0086C140`) is a fixed quad and reads no camera turn. The dome
+(`fn_0086B6B0`) is a sphere about a fixed point. The sun glare has its own key (see
+"The sun glare").
+
+Three test keys are for desktop runs. The launcher removes them from `bwvr.ini` on
+each save.
+
+- `sky_test_frame=N`: at frame N of the scripted controller, `clouds_head_free` and
+  `moon_world_up` both change.
+- `sky_test_trace=1`: each report window has a line `sky trace` with the largest move
+  of an axis of a cloud and of a cloud from one frame to the next, and the largest
+  move of the point that the clouds face. With a moon, a second line has the largest
+  angle of the right of the moon from level, and its largest turn from one frame to
+  the next.
+- `sky_test_hour=H`: at the first frame of play, the time of day of the game goes to
+  hour H (`GLandAlignement::SetTime` `0x005E22E0`, and the visual time at
+  `0x00BF3380`). The time then goes on as the game moves it. `LH3DAtmos::UpdateGame`
+  gives the moon the height `1100 * cos(15 * t) - 150`, with `t` from the visual time
+  (`fn_0086A160`), so the moon shows at night. The time of day comes from the game
+  and not from the clock of the PC: the test save "pen" is at dusk.
+
+### Sprites with world up
+
+`LH3DSprite::Draw` (`0x00840530`, `__thiscall`, no arguments) draws each billboard
+of the engine: smoke, fire, sparks, the glow of a miracle, the notes over a thing,
+the marks of a fight and the orbs of the logo. A particle system draws its sprites
+through `Particle3DSprite::DrawAt` (`0x0067AE80`). It calls the draw at once, or it
+puts the sprite in the sorted list (`LH3DSprite::AddDrawing` `0x00840C70`), which
+calls the same address later. With the SSE path (`0x00EA9EB4` not zero) the draw
+goes on in `fn_007A8DB0`, which does the same work.
+
+When the flag `0x40` of the sprite (`+0x28`) is clear, the draw builds the model
+view at `0x00EA9E10` in camera space: the centre from the camera matrix at
+`0x00EA1D28`, and the four corners in the camera plane, turned by the angle of the
+sprite (`+0x14`). So the up of a sprite is the camera up turned by its angle. The
+camera matrix has the head with its roll, so each sprite rolls with the head. A
+sprite with the flag `0x40` is a flat quad in the world (a turn about world up at
+`+0x14`, through the clip matrix `0x00EA9E40`), and it does not roll.
+
+A hook on the draw adds a turn to the angle for the one call and puts the angle back
+after it (`sprite_math.h`, `SpriteTurn`). The turn is the angle of world up in the
+camera plane, `atan2(m[3], m[4])` of the camera matrix. The sprite then keeps world
+up as it shows on the screen, it still faces the eye, and it keeps the place, the
+size and the turn of the game. With the head level and no roll the turn is 0, and
+the draw is the draw of the game. A turn of the head about world up does not change
+the turn. The two eyes differ only in the camera x translation, so they get one turn,
+and with one walk the right eye is a copy of the draws of the left eye. In the last
+10 degrees before a look straight up or down, world up has almost no length in the
+camera plane, so the turn fades to 0 there. The glow and the sparks of an advisor are
+drawn with the room camera of the advisors (see "The advisors"), which has world up,
+so they get no turn.
+
+Two particle rules of the game give a sprite the direction of its speed on the
+screen as its angle: `UR_OrientSpriteWithVelocity::ModifyAtomCore` (`0x0069A790`,
+`__thiscall`, ret 4) and `fn_006840E0` (`__stdcall`, the atom and the speed, from
+`UR_Flocking::ModifyAtomCollection`). Each measures the speed in the camera plane of
+`0x00EA1D28`. If that matrix has a roll, the angle has it, and the turn of the draw
+would add it a second time. These calls run in the scene walk, so the matrix has the
+roll of the head. A hook gives these two calls the camera with no roll
+(`DerollCamera`: the same place and forward, turned about the forward) and puts the
+matrix back after the call.
+
+The cost is one compare of three floats for each sprite. The turn is made again only
+when the camera matrix changes. With a Fireball and its fire in view (about 260
+sprites a frame), `GGame::ProcessGraphicsEngine` took the same time with each value
+of the key, within 0.13 ms, with each renderer.
+
+The other readers of the camera matrix and of its inverse at `0x00EA9DE0` are not
+billboards: the transforms of meshes with their own world matrix (`fn_00852C40`,
+`fn_00853A50`, `fn_0084CE20` and the functions near it), the clip planes
+(`fn_00822560`), the listener of the sound (`fn_004270D0`), and the seven sprites of
+`fn_00827500`, which `LH3DSprite::DrawSpecial1` (`0x00840CC0`) draws as quads in a
+world matrix. The far trees turn about world up with the heading at `0x00EA1D88`
+(see "Clouds"). The clouds and the ground mist are `LH3DMist` (see "Clouds").
+
+`sprite_world_up` (default 1) picks it: 1 world up, 0 the camera up with the head.
+Two test keys are for desktop runs. The launcher removes them from `bwvr.ini` on each
+save.
+
+- `sprite_test_frame=N`: at frame N of the scripted controller, `sprite_world_up`
+  changes.
+- `sprite_test_trace=1`: each report window has a line `sprite trace` with the
+  largest angle of the up of a drawn sprite from world up, less the angle of the
+  sprite. It reads the model view that the engine built. The line also has the
+  largest roll of the camera, and the largest difference of the turn between the
+  sprites of one frame. A second line has the largest roll of the camera at a turn
+  from a speed.
 
 ### The sun glare
 
@@ -4252,8 +4601,8 @@ Ruled out as the cause: the full screen quad that `LH3DRender::FinishFrame` draw
 `0x0082F617` (diffuse 0, a transparent fade) and `CloudInSky` (its per frame update at
 `0x005E25C0` drifts the 70 clouds in world space and reads no camera).
 
-Open: the clouds and the sun bob a little as the head moves in the headset. The sun
-glare is the best candidate, and it is not proven.
+Open: the sun bobs a little as the head moves in the headset. The sun glare is the
+best candidate, and it is not proven.
 
 ### Models keep their detail further out
 
@@ -4653,9 +5002,9 @@ in front. The mod reads the keys and never takes them from the game.
 | Shift Scroll Lock | `test_keys=1` | A still hand high over the land lets the object fall, or sets it down at each height (`release_fall_cm`, `throw.md`). Ctrl must be up |
 | Ctrl Shift Scroll Lock | `test_keys=1` | An object that comes to rest while the Hand takes it stays in the physics of the game until the game puts it in the Hand, or the game ends its physics and a tree is then a dead tree (`catch_rest_guard`, `grab.md`, "An object that comes to rest while the Hand takes it"). A long pulse and a short pulse |
 | Ctrl Shift Backspace | `test_keys=1` | An object that moves is in the hand at the press of the grip, or it moves on until the game takes it, which is 225 ms and some game turns after the press. A long pulse and a short pulse (`catch_at_once`, `grab.md`, "A catch at once"). Backspace with Ctrl and no Shift is the key of `far_grab_stay` |
-| Shift Backspace | `test_keys=1` | When the source of a take at a distance goes away while the grip is closed, the grip carries the bundle, or the far grab holds the grip back and the Hand lets the bundle go. A long pulse and a short pulse (`far_take_carry`, `grab.md`). Ctrl must be up |
+| Shift Backspace | `test_keys=1` | While the Lionhead logo plays in stereo: the hand models show while they move, while they are tracked, or not. One short pulse for each unit of the new value and one long pulse for 0 (`intro_hand_show`, `intro.md`). In play: when the source of a take at a distance goes away while the grip is closed, the grip carries the bundle, or the far grab holds the grip back and the Hand lets the bundle go. A long pulse and a short pulse (`far_take_carry`, `grab.md`). Ctrl must be up |
 | Ctrl Scroll Lock | `test_keys=1` | The picture of a thrown object between the steps of the game: a touch of another object has the real time and the picture does not go back behind a guess, or each substep has its time of the flight (`throw_draw`, `throw.md`, "The picture between the steps"). Shift must be up |
-| Shift Pause | `test_keys=1` | A tree that falls turns down fast on the land, or keeps the game's turn (`throw_tree_settle`, `throw.md`). Ctrl must be up |
+| Shift Pause | `test_keys=1` | While the Lionhead logo plays in stereo: the hands draw before the orbs, so an orb in front of a hand draws over it, or the hands draw over each orb. A long pulse for 1 and a short pulse for 0 (`intro_hand_depth`, `intro.md`). In play: a tree that falls turns down fast on the land, or keeps the game's turn (`throw_tree_settle`, `throw.md`). Ctrl must be up |
 | Ctrl Shift Pause | `test_keys=1` | After its landing a thrown object loses a turn in place fast, the brake of the land is off on steep land and an object that lies still for 0.5 s is at rest, or the object keeps the turn of the brake, the brake acts on each land and only the rest test of the game ends the landing (`throw_land_rest`, `throw.md`, "The rest after a landing"). A long pulse and a short pulse |
 | Ctrl End | `test_keys=1` | The prompt of a target shows at once, or after its dwell (`prompt_timing`, `controller-hints.md`) |
 | Ctrl Home | `test_keys=1` | The words of a target on the hint card: 3, 2, 1 or 0, with one short pulse for each unit of the value and one long pulse for 0. With 3 the prompt "Pull to fetch" stays from the end of the far target until the Hand holds the object, and a hint of the game that a prompt owned does not show for 0.25 s after the prompt went. With 2 only the prompt "Take" stays, from the close of the grip until the Hand holds the object. With 1 the hint of the game shows in those frames. With 0 the hint of the game takes the place of each prompt (`hint_words`, `controller-hints.md`) |
@@ -4670,9 +5019,9 @@ in front. The mod reads the keys and never takes them from the game.
 | Ctrl Shift Home | `test_keys=1` | A dip of the squeeze in the first 300 ms of a press does not open the grip, or the fast fall opens it at any time (`grip_press_guard`, `grab.md`) |
 | Shift Numpad Plus | `test_keys=1` | The button of the game stays down until the game has the object in its Hand, and a press on an object that moves is no click for the game, or the button goes up 167 ms after the object came into the Hand of the picture: with `catch_at_once=0` a grip on an object that moves is then a click, the Hand lets the object go, and a rock splits. A long pulse and a short pulse (`grip_press_hold`, `grab.md`, "The press of the game"). Ctrl must be up |
 | Ctrl Shift End | `test_keys=1` | A small object in the Hand is held in a pinch between the thumb and the index finger, or in the fist (`hand_pinch`, `hand-model.md`) |
-| Shift Home | `test_keys=1` | An advisor at a place of the world has the size for the eye that it has at its usual place, or the size of the game (`spirit_world_size`, `tabletop.md`) |
-| Shift End | `test_keys=1` | A grip that stays closed on the far Creature makes it stay and a short grip changes the leash when it opens, or each grip changes the leash when it closes (`creature_hold_stay`, `creature.md`, section 5.3). Ctrl must be up |
-| Shift Insert | `test_keys=1` | The prompt of a text that waits for a click shows in each view and the trigger is that click, or the prompt has the rule of each other hint of the left button (`text_click`, `controller-hints.md`, section 10). Ctrl must be up |
+| Shift Home | `test_keys=1` | While the Lionhead logo plays in stereo: a motion of the hand pushes the orbs, or only a motion of the mouse pushes them. A long pulse for on and a short pulse for off (`intro_hand_push_pct`, `intro.md`). In play: an advisor at a place of the world has the size for the eye that it has at its usual place, or the size of the game (`spirit_world_size`, `tabletop.md`) |
+| Shift End | `test_keys=1` | While the Lionhead logo plays in stereo: the pointer is at the Hand's point, or at the pixel of the aim ray. A long pulse for 1 and a short pulse for 0 (`intro_hand_point`, `intro.md`). In play: a grip that stays closed on the far Creature makes it stay and a short grip changes the leash when it opens, or each grip changes the leash when it closes (`creature_hold_stay`, `creature.md`, section 5.3). Ctrl must be up |
+| Shift Insert | `test_keys=1` | While the Lionhead logo plays in stereo: each hand takes the orbs in its reach in 3D, or the pointing hand pushes through the pointer. A long pulse for 1 and a short pulse for 0 (`intro_push_3d`, `intro.md`). In play: the prompt of a text that waits for a click shows in each view and the trigger is that click, or the prompt has the rule of each other hint of the left button (`text_click`, `controller-hints.md`, section 10). Ctrl must be up |
 | Shift Page Up | `test_keys=1` | While the Lionhead logo plays in stereo: the motion of the view steps through 1, 2, 3 and 0. With 1 the camera goes along the path of the game and does not turn, with 2 the orbs are a model in a room that stays still, with 3 the camera of the game turns the view, with 0 the camera is still. One short pulse for each unit of the value and one long pulse for 0 (`intro_motion`, `intro.md`). Ctrl must be up |
 | Shift Page Down | `test_keys=1` | While the Lionhead logo plays in stereo: each eye has its own trails, or each eye pass draws over the picture of the other eye and each orb shows two times (`intro_eye_trails`, `intro.md`). In play: each eye pass of the scene starts from its own frame before, or the two eye passes share the render target (`eye_clean`, `stereo-artifacts.md`, "The frame before of each eye"). A long pulse and a short pulse. Ctrl must be up |
 | Shift Delete | `test_keys=1` | While the Lionhead logo plays in stereo: the mark beside the logo has the depth of the logo, or the same pixel in each eye (`intro_text_place`, `intro.md`). In play: a speech bubble of the game (a signpost, a villager that speaks, the Creature) is one flat card at the depth of its sign, or it is drawn as the game and the interface depth make it in each eye pass (`bubble_card`, `ui-layer.md`, section 18). A long pulse and a short pulse. Ctrl must be up |
@@ -4711,6 +5060,8 @@ in front. The mod reads the keys and never takes them from the game.
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw |
 | Menu key | `test_keys=1` | One walk for both eyes on and off (see "One walk for both eyes"). The key beside the right Ctrl key that opens a context menu. Ctrl and Shift must be up |
 | Ctrl Shift Right bracket | `test_keys=1` | In one walk: a speech bubble or the name of a villager as a card, the glow at the Hand's point and a halo are drawn for each eye by itself, or the right eye gets them as each other batch. A long pulse and a short pulse (`one_walk_marks`, "The cards and the marks of the mod"). The right square bracket key is two keys right of the P key on a US keyboard |
+| Ctrl Shift Apostrophe | `test_keys=1` | A note of the game over a thing (the percent of a lesson over the Creature) has the depth of its place, or the interface depth. A long pulse and a short pulse (`note_depth`, `ui-layer.md`, section 19). The apostrophe key is right of the semicolon key on a US keyboard |
+| Ctrl Shift Slash | `test_keys=1` | A tooltip or a hint of the game at the game's Hand, while the game places the Hand, has the depth of the Hand, or the same pixel in both eyes. A long pulse and a short pulse (`hint_hand_depth`, `ui-layer.md`, section 15.6). The slash key is the key of the main keyboard left of the right Shift key on a US keyboard |
 | Ctrl Menu key | `test_keys=1` | The layout of the buttons of the hand that does not point. The menu button of the left controller opens the game menu, Y opens the ring and the stick does not drive the ring, or Y opens the game menu and X and the stick open the ring. A long pulse and a short pulse on that hand (`button_layout`, `controllers.md`, 5.1). Shift must be up |
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up |
 
@@ -4750,10 +5101,13 @@ The ini keys of the settled choices stay, so a test can set a value by hand:
 | Freeze time on the second pass | `freeze_time` |
 | No Hand prepare on the second pass | `skip_hand_prepare` |
 | Sun glare | `sun_glare` |
+| Clouds that the head does not turn | `clouds_head_free` |
+| A moon with world up | `moon_world_up` |
+| Sprites with world up | `sprite_world_up` |
 | Advisors in the room | `spirit_anchor` |
 
-Head position is always 6DOF, the world steps run once a frame, the Hand uses its
-exact ray and the clouds hold still. These have no key.
+Head position is always 6DOF, the world steps run once a frame and the Hand uses
+its exact ray. These have no key.
 
 ## Ini keys of this area
 
@@ -4762,7 +5116,7 @@ keys that the launcher sets.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `backend` | dxwrapper when installed | The launcher row "Renderer": Vulkan writes `vulkan` when the GPU has Vulkan 1.3 (the launcher asks the Vulkan of Windows), Direct3D 9 writes `dxwrapperddraw.dll`. See "Settings" and "The backend of the mod on Vulkan" |
+| `backend` | `vulkan` from the launcher when the GPU has Vulkan 1.3, dxwrapper with no key | The launcher row "Renderer": Vulkan writes `vulkan` when the GPU has Vulkan 1.3 (the launcher asks the Vulkan of Windows), Direct3D 9 writes `dxwrapper\ddraw.dll`. See "Settings" and "The backend of the mod on Vulkan" |
 | `gpu_bridge` | 1 | The GPU path |
 | `frame_send` | 0 | 0: the mod waits for the GPU after each eye pass. 1: one wait a frame. 2: one wait a frame on a second thread, which also gives the frame to the runtime. See "One wait a frame, and a second thread" |
 | `xr_hold_ms` | 30 | When the game gives the runtime no frame for this many ms, a second thread sends the layers of the last frame again, at the rate of the headset. 0 is off: the headset gets no frame while the game gives none. 0 to 1000. A test key: Shift W. See "The hold of the last frame" |
@@ -4776,6 +5130,7 @@ keys that the launcher sets.
 | `vr_full_screen` | 0 | 0: in a full screen game the mod does not start a headset session, and the game stays on the monitor. 1: it starts one |
 | `vr_start` | 1 | Where the tries to start the headset session run. 0: on the frame thread, with a new instance for each try. 1: on a thread of the mod, with one instance for all tries. 2: on that thread, with a new instance for each try. See "The start of the headset session" |
 | `vr_start_test_hang_try`, `vr_start_test_hang_ms`, `vr_start_test_fail_session` | 0, 0, 0 | Test keys. See the same section |
+| `xr_bridge` | 0 | 0: the mod uses the OpenXR runtime of the PC. 1: the x64 host in `bwvr-host` runs the OpenXR session. See "The x64 host for Steam Frame" |
 | `play_mode` | 4 | See "Keys for v1.0" |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | The quad in the window modes |
 | `eye_separation_milli` | 0 | 0 asks the headset |
@@ -4800,12 +5155,19 @@ keys that the launcher sets.
 | `drag_smoothing_ms` | 35 | See "Smoother drags far out" |
 | `script_camera` and its keys | 2 | See "The story camera" |
 | `hint_mode`, `hint_flat`, `hint_scale_pct` | by head, 1, 20 | See "The hint beside the Hand" |
+| `hint_hand_depth` | 1 | 1: a tooltip or a hint of the game at the game's Hand has the depth of the Hand in both eyes. 0: the same pixel in both eyes. See `ui-layer.md`, section 15.6 |
+| `hint_hand_depth_test_frame`, `mouse_owner_test_frame` | 0, 0 | Test keys of the desktop runs. See the same section |
 | `ui_scale_pct` | 25 | See "Interface size" |
 | `subtitle_lift_pct`, `subtitle_deg` | 0, 35 | See "Subtitles" |
 | `cinema_bars` | 0 | 1 shows the story bars |
 | `spirit_anchor` | 1 | See "The advisors" |
 | `spirit_world_size` | 1 | The size of an advisor at a place of the world. See "The advisors" and `tabletop.md` |
 | `cloud_pole_pct`, `sun_glare`, `detail_distance` | 25, 0, 3 | See "Sky, clouds and detail" |
+| `clouds_head_free` | 1 | 1: in the table and the God view the clouds face the table camera, so a move of the head does not turn them. 0: they face the render head. See "Clouds" |
+| `moon_world_up` | 1 | 1: the moon turns with world up, so it stays fixed in the sky. 0: it turns with the camera of the head. See "The moon" |
+| `sky_test_frame`, `sky_test_trace`, `sky_test_hour` | 0, 0, -1 | Test keys of the desktop runs. See "The moon" |
+| `sprite_world_up` | 1 | 1: smoke, fire and the other sprites keep world up, so they do not roll with the head. 0: they roll with the head. See "Sprites with world up" |
+| `sprite_test_frame`, `sprite_test_trace` | 0, 0 | Test keys of the desktop runs. See "Sprites with world up" |
 | `freeze_time` | 1 | See "Time, bars and the second eye pass" |
 | `frame_time_real` | 1 | 1: after the two eye passes the game has the real time of the frame as its frame time. 0: it has the number from before the passes. See "The delta time after the passes" |
 | `frame_time_test_frame`, `frame_time_test_readers`, `frame_time_test_readers_frames` | 0, 0, 600 | Test keys of the desktop runs. See "The delta time after the passes" |
@@ -4814,6 +5176,8 @@ keys that the launcher sets.
 | `bubble_card` | 1 | 1: a speech bubble of the game is one flat card at the depth of its sign. 0: it is drawn as the game and the interface depth make it in each eye pass. See `ui-layer.md`, section 18 |
 | `name_card` | 1 | 1: the name of a villager is one flat card at the depth of the villager. 0: it is drawn as the game and the interface depth make it in each eye pass. See `ui-layer.md`, section 18 |
 | `bubble_card_test`, `bubble_card_test_frame` | 0, 0 | Test keys of the desktop runs. See the same section |
+| `note_depth` | 1 | 1: a note of the game over a thing (the percent of a lesson over the Creature) has the depth of its place. 0: the interface depth. See `ui-layer.md`, section 19 |
+| `note_test`, `note_depth_test_frame` | none, 0 | Test keys of the desktop runs. See the same section |
 | `one_walk`, `one_walk_check` | 1, 0 | See "One walk for both eyes" |
 | `one_walk_merge` | 1 | 1: with the render thread, a batch whose two copies are in their own halves is one draw for both eyes. 0: one draw for each eye. See "One draw for both eyes" |
 | `render_thread`, `render_thread_test_frame` | 0, 0 | See "The render thread" |
@@ -4848,6 +5212,8 @@ keys that the launcher sets.
 | `fast_transform` | 1 | 1: the two vertex loops of the engine run with SSE, with the bits of the game. 0: on the x87 unit. See "The vertex loops with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `hang_watch` | 0 | A test key: 1 the place of the frame thread when it makes no frame for 8 s, 2 each 8 s. With each of the two the place of a fault. See "The watch of the frame thread" |
+| `crash_report` | 1 | 1: a fault that no handler takes writes a report to the log and the dump `bwvr-crash.dmp`. 0: no report and no dump. See "The report of a crash" |
+| `crash_test_frame` | 0 | A test key of the desktop runs: the frame of `FinishFrame` at which the mod writes to address 0. See "The report of a crash" |
 | `vk_lines` | 1 | With `backend=vulkan`: 1 a draw of points or lines becomes triangles of 1 pixel across, 0 it is not drawn. See "The backend of the mod on Vulkan" |
 | `vk_keep_picture` | 1 | With `backend=vulkan`: 1 a walk with no clear of the whole target before its first draw starts with the picture of the walk before, and the intro in stereo keeps the picture of each eye. 0 each walk starts black. A test key: Shift T. See "The picture of the walk before" |
 | `vk_black_check` | 1 | With `backend=vulkan`, a test aid: 1 checks 16 by 16 points of each eye picture, and a black picture gives a line of the log with what its walk drew. 0 no check. See "The check for a black picture" |
@@ -4856,6 +5222,8 @@ keys that the launcher sets.
 | `vk_present_late` | 1 | With `backend=vulkan` and the way through the CPU (`vk_window=0`): 1 the window on the monitor shows the picture of the present before, with no wait for the GPU, 0 each present waits for its own picture. See "The backend of the mod on Vulkan" |
 | `vulkan_only` | 1 | With `backend=vulkan`: 1 no part for Direct3D 9 starts, and the session with Vulkan has no Direct3D 11 device. 0 these parts start, with no Direct3D 9 to use. There is no test key: the choice is made at the start. See "Only Vulkan" |
 | `vulkan_strict` | 0 | 1 the mod draws with Vulkan alone and has no fallback: backend=vulkan whatever the key `backend` says, no DirectDraw of the system, no dxwrapper, `vulkan_only=1`, no GDI for the window. The headset app writes 1. 0 the ways of `backend` and `vulkan_only`. There is no test key: the proxy reads it at the load of the DLL. See "Only Vulkan" |
+| `vulkan_fallback` | 1 | With `backend=vulkan`: 1 a start takes dxwrapper when the file `bwvr-vulkan-pending.txt` is beside the game or there is no `vulkan-1.dll`, and a fault of Vulkan writes the file for the next start. 0 no file and no fall back. See "The fall back of the renderer Vulkan" |
+| `vulkan_fallback_test` | 0 | A test key of the desktop runs: 1 the mod stops the process before the first walk. See the same section |
 | `vk_window` | 1 | With `backend=vulkan`: 1 the window of the game gets the picture through a swapchain of Vulkan, 0 through the CPU and GDI. A test key: Shift D. See "The window with Vulkan" |
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |
@@ -4942,7 +5310,7 @@ section, so the uninstaller can put them back.
   session. See "The start of the headset session".
 - A device lost after the bridge has started is not tested.
 - The worst frames of 31 to 52 ms have no explanation.
-- The clouds and the sun bob a little in the headset.
+- The sun bobs a little in the headset.
 - The advisors look a little beside the Hand when the head is turned away.
 - The detail distance is measured along the view axis, not as a distance.
 - A vignette during a land drag, and a single scene walk with a derived second eye

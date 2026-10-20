@@ -10,7 +10,7 @@ detail.
 
 ## Where it stands
 
-The mod is at version 1.1.0, an alpha for a small group of testers.
+The mod is at version 1.2.0, an alpha for a small group of testers.
 
 - **The game in VR.** The game draws the scene one time for each eye, the
   head moves the camera, and the picture goes to the headset through
@@ -82,30 +82,16 @@ is built, and no test has proven it.
     `throw.md`, "The rest after a landing"). A tree thrown at 3 m/s left
     the physics 2.6 and 4.3 s after the release (`throw_queue.ps1 -Runs
     tree`).
-- **B4. The card does not know a body in the way of a planted tree.** The
-  card says "plant" by the tests of the game that it can read (the height,
-  the lean, dry land, fire, `grab.md`, "A tree in the Hand"). The game also
-  lets a tree fall when it raised the tree over a body at the release, and
-  the card does not see that. A desktop run shows the fault: a tree set down
-  upright on dry land with a rock 0.8 units from its place has the card
-  "Plant", and the game does not plant it. The log has the 6 objects of the
-  game's physics that are near the tree, and the flag of the tree that the
-  release leaves out when it raised the tree (`throw_queue.ps1 -Runs
-  treeset -NewGame` in `bwvr/tools/desk`).
-  The test of the game puts each near object into its physics and compares
-  two physics bodies, and the tree has a physics body only from the release
-  on (`grab.md`, "The test of a body in the way"). So no call of the game
-  gives the answer before the release with no change of state. A tree that
-  stands and a forest are never in the way. A rock, a scaffold, a Creature,
-  a dead tree and a building can be. Not built: the same test with physics
-  bodies that the mod makes for the tree and for each near object.
-  The lean is shown in a desktop run: a hand that turns 30 degrees makes the
-  tree lean 0.26 and -0.46 rad, the card says "Hold upright to plant", and the
-  tree has the same lean in the physics of the game (`-Runs treelean
-  -NewGame`). That
-  run is at the place with the rock, so it does not show that the lean alone
-  stops the planting. Not run: a tree that leans at a place where the game
-  plants an upright tree.
+- **B4. The lean alone at a place where the game plants a tree.** The card
+  says "Hold upright to plant" for a tree that leans more than 0.2 rad in the
+  Hand, and the tree has the same lean in the physics of the game
+  (`throw_queue.ps1 -Runs treelean -NewGame` in `bwvr/tools/desk`). That run
+  is at a place where a body is in the way, so it does not show that the lean
+  alone stops the planting. Not run: the turn of `treelean` at the place of
+  `-Runs treeleft`, where the game plants an upright tree. The card does not
+  count a near object of a class whose body the mod does not make: a
+  fragment, a field crop, a chess piece, the heart of a citadel and a shield
+  (`grab.md`, "The test of the mod").
 - **B1b. The roots pile of a far grab.** `far_roots_at_tree=1` puts the pile
   at the roots, as for a tree that the Hand takes. Only a headset shows
   whether that is what the player means by the "pit" at the roots. Not
@@ -297,15 +283,23 @@ is built, and no test has proven it.
   controller on. Still open: check in a headset whether a still controller
   stays on when the setting of the headset that switches between the
   controllers and the hands is off.
-- **B26. The tutorial after its first step.** The aim: a player can play the
-  whole tutorial in VR, also where the words of the game do not fit the
-  controllers. The first step is shown in a desktop run: the walk to the
-  village with the teleport and with the stick (`god-view.md`, section 14.9).
-  No run and no headset session has the later steps: the way to the Temple,
-  the three lessons of the camera, the guide at the mountain. `god-view.md`,
-  section 7, "The interface levels", has the camera controls that the game
-  allows in each step. Wanted: a headset session through the whole tutorial,
-  and a correction for each step that stops the player.
+- **B26. The tutorial: the steps that no run and no session has.** Each step
+  of the tutorial waits for an input that a VR player can give with the
+  controls of the mod (`god-view.md`, section 7, "The steps of the
+  tutorial"). A desktop run and the log of a session in the headset show the
+  tutorial of Land 1 from the walk to the village to the texts after the zoom
+  lesson. Still open:
+  - The end of the build of the Temple, the missionaries and the lessons of
+    Land 2 (the gestures, the shield, the fireball) have no run and no
+    session.
+  - The lessons of the Gods' Playground after the step of the turn have no
+    run. A desktop run shows the first walk of the Island Keeper and the step
+    of the turn only with `script_view=0`. With `script_view=1` the Keeper did
+    not start his walk, also when an eye picture showed him in the view
+    (`god-view.md`, section 7). Find out if the view test of the head is
+    too narrow, or if only the fixed head of the run is at fault.
+  - The game tells the player to press F2 for the Gods' Playground, and no
+    page of the ring has the item `playground` by default.
 - **B27. The walk with the stick is not smooth in the headset.** The walk
   itself is even: each frame moves the view at the speed of the push, and no
   limit, hill or switch stops it on some frames (`god-view.md`, section 5.7,
@@ -357,6 +351,21 @@ is built, and no test has proven it.
   checks and the code show it (`creature.md`, section 6). To see in the
   headset: the attack and the block act at the first grip, and the stars
   sit on the body in both eyes.
+- **B33. The note over a Creature that learns: check it in a headset.** The
+  yellow percent of a lesson over the Creature has the depth of the
+  Creature in both eyes (`note_depth=1`, `ui-layer.md`, section 19). Desktop
+  runs with the test key `note_test` show it with both renderers. No run and
+  no session has a note that the game made by itself, from a miracle that
+  the Creature sees. To see in the headset: the note shows one time, over
+  the head of the Creature.
+- **B34. A hint at the game's Hand: check it in a headset.** While the game
+  places the Hand (the mouse, or controllers that are not tracked), a
+  tooltip or a hint of the game at the Hand has the depth of the Hand in
+  both eyes (`hint_hand_depth=1`, `ui-layer.md`, section 15.6). Desktop runs
+  with the test keys show it with both renderers, in one walk and in two
+  walks. No run had a real tooltip of a thing under the Hand in that state.
+  Only a headset can show that the yellow text at the Hand then shows one
+  time.
 
 B1b, B2, B4 and B11 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.
@@ -514,7 +523,7 @@ that moves while the Hand takes it.
     in a second. If that does not read well, the rule has both values
     (`RaiseTime` at `+0x2C`, `EmitRate` at `+0x30`), and the hook can change
     them for a take at a distance.
-  - No run has shown the stream from a pile of food, a field, a fish farm or
+  - No run has shown the stream from a pile of food, a field or
     the pile of a miracle, a way that is long along the floor, and a pile
     that goes down in the take.
 - **P15. The glow on the mesh of a target: check it in a headset, and the
@@ -565,9 +574,6 @@ that moves while the Hand takes it.
   choose a gesture for each control: the grip, the trigger, the stick, and
   A, B, X and Y. The rules of the Hand stay: the real hand, one to one, and
   no motion that the player did not make.
-- **P6. Hints that count successes.** An option behind the hint setting:
-  with all hints on, each hint shows always. With a different setting, a
-  hint goes away after the player did its action a few times.
 - **P7. A view for videos.** A 16:9 view in the game window with the cards
   and the subtitles in it and a smoothed head, for a capture on the PC.
 - **P8. Pictures in the hints.** A flat picture of each button, then a
@@ -591,8 +597,16 @@ that moves while the Hand takes it.
     rule "no motion that the player did not make"), 3 is the camera of the
     game with its turns, 0 is the still camera. `intro_speed_pct` makes the
     path slower. Then choose the default, and decide if `intro_vr` goes on.
-  - Not built: a push of the orbs with a controller, and a push in 3D. A
-    controller does not push the orbs now (`intro.md`, "Open work").
+  - Does the push in 3D feel right? Each hand takes the orbs in its reach
+    with its own motion, one to one (`intro_push_3d=1`, a reach of
+    `intro_push_radius_cm=30`), and the hand models show while the hands
+    move (`intro_hand_show=1`). An orb in front of a hand draws over it
+    (`intro_hand_depth=1`). With `intro_distance_cm=300` the hands reach the
+    orbs in the orbit at the start.
+    Shift and Insert switch the push in 3D, Shift and Backspace step
+    `intro_hand_show`, and Shift and Pause switch `intro_hand_depth`.
+  - Not built: a speed for the orbs that a hand moved, and a push of the
+    hand in the flat intro (`intro.md`, "Open work").
 - **P12. Ideas from Half-Life: Alyx** that are not built are in
   `research-hla.md`, for the far grab, the teleport, the hands, the hints,
   the sound and comfort.
@@ -869,8 +883,8 @@ that moves while the Hand takes it.
   the game still glide: the follow of the Creature after a double click, the
   pull back past 3500 units, the arrow keys and the automatic tilt
   (`backend.md`).
-- **N12. The far grab.** No desktop run: a villager in the sea, a Field or
-  a FishFarm as a target, a take while the Hand is outside the influence,
+- **N12. The far grab.** No desktop run: a villager in the sea, a Field as
+  a target, a take while the Hand is outside the influence,
   and a second object in the Hand (`grab.md`).
 - **N13. The exact Hand.** No desktop run in the PlayAnim state. The Totem
   and the Citadel states are not read (`hand.md`).
@@ -878,8 +892,13 @@ that moves while the Hand takes it.
   villager lives (`throw.md`).
 - **N15. The interface panel** (`ui_panel=1`). No run, on the desktop or in
   a headset (`ui-layer.md`).
-- **N17. Only one headset.** No person has run the mod with a headset or a
-  runtime other than a Quest 3 through Virtual Desktop.
+- **N17. Headset coverage.** Quest 3 through Virtual Desktop and Steam Frame
+  through Proton have game coverage. Other headsets and runtimes need tests.
+- **N18. The x64 host for Steam Frame** (`xr_bridge=1`). Not tested: all
+  controls, the haptics, the loss of the device, long sessions, and the
+  install and the uninstall of the add-on on a clean setup. The game ran
+  at 42 to 44 frames a second, and the host sends each frame on the frame
+  thread (`backend.md`).
 
 ### The repo, the release and the tools
 
@@ -911,7 +930,7 @@ that moves while the Hand takes it.
 - **R7. The word `aimfar` chooses a different object in the test save
   `pen`.** The head is 1 cm from its place in a new game, and some objects
   are at the least distance of the word. So `throw_queue.ps1 -Runs
-  treeset,treelean` shows its proof only with `-NewGame`
+  treeset,treelean,treeleft,treeright` shows its proof only with `-NewGame`
   (`bwvr/tools/desk/README.md`, "Known limits of the recipes"). Give these
   recipes an aim that does not depend on the least distance, as `aim_queue.ps1
   -Runs ring1,ring0` has with the word `aimturn`, or the start of a new game
@@ -931,22 +950,3 @@ that moves while the Hand takes it.
   from a forest (`forest_take.cpp`). The keys of the keyboard that no code
   of the game or of the mod reads are few: a new test key needs a search
   first (`backend.md`, the hotkey table).
-- **R11. Three recipes do not show their proof at the render of 3600 by
-  2880.** The objects of these steps are low in the view, and a render of
-  3600 by 2880 gives the view a different shape than 2208 by 2208. Not
-  proven: the render size is the cause.
-  - `throw_queue.ps1 -Runs catchfar` and `-Runs treedropend`. The second
-    `aimfar` aims at the thrown tree 0.43 m of the room from the Hand, but
-    the draw does not offer that tree ("aimfar: the draw did not offer the
-    thrown object ... among 105 candidates"). The far grab takes a tree that
-    stands 0.48 m from the Hand ("target ... (Tree) at 0.0 degrees from the
-    ray ... Why: the lowest score"). So no run takes a tree that still
-    moves, and `catch_rest_test` acts on the standing tree. `one_walk=0`
-    gives the same result.
-  - `hand_run.ps1 -Kind one`. With `near_rule` 2 the grip at the scroll taps
-    the scroll ("the grip taps it ... rule 2"), and it does not take the
-    rock beside it. The two presses at the crown of the tree start off view,
-    and the controller code drops them ("the right button press started off
-    view, so it is dropped").
-  Give these steps a head that looks down (`fake_head_pitch`) or hand places
-  higher in the view, and compare a run at each render size.

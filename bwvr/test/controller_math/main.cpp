@@ -3540,6 +3540,8 @@ void CreatureChecks() {
 #include "stay_checks.h"
 #include "ring_checks.h"
 #include "teleport_checks.h"
+#include "sky_checks.h"
+#include "sprite_checks.h"
 #include "feel_checks.h"
 #include "pinch_checks.h"
 #include "temple_checks.h"
@@ -3547,6 +3549,7 @@ void CreatureChecks() {
 #include "eye_luma_checks.h"
 #include "land_light_checks.h"
 #include "tree_plant_checks.h"
+#include "tree_body_checks.h"
 #include "text_click_checks.h"
 #include "script_frame_checks.h"
 #include "frame_stats_checks.h"
@@ -3574,6 +3577,7 @@ void CreatureChecks() {
 #include "fight_checks.h"
 #include "vr_start_checks.h"
 #include "input_channel_checks.h"
+#include "learn_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3955,6 +3959,8 @@ int main() {
   miracle_checks::MiracleChecks();
   ring_checks::RingChecks();
   teleport_checks::TeleportChecks();
+  sky_checks::SkyChecks();
+  sprite_checks::SpriteChecks();
   forest_checks::ForestChecks();
   forest_checks::ForestGripChecks();
   feel_checks::FeelChecks();
@@ -3963,6 +3969,7 @@ int main() {
   eye_luma_checks::EyeLumaChecks();
   land_light_checks::LandLightChecks();
   tree_plant_checks::TreePlantChecks();
+  tree_body_checks::TreeBodyChecks();
   zoom_checks::ZoomChecks();
   stay_checks::StayChecks();
   text_click_checks::TextClickChecks();
@@ -3992,6 +3999,7 @@ int main() {
   fight_checks::FightChecks();
   vr_start_checks::VrStartChecks();
   input_channel_checks::InputChannelChecks();
+  learn_checks::LearnChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

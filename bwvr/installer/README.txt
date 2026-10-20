@@ -1,6 +1,6 @@
 ====================================================================
  Black & White VR Mod
- Version 1.1.0 (alpha, for testers)
+ Version 1.2.0 (alpha, for testers)
  By Buck
 ====================================================================
 
@@ -68,6 +68,16 @@ and closes. "Play, new game" does the same and starts a new game.
 
 If the headset is not connected when the game starts, the game plays
 on the monitor, and the mod looks for the headset for 2 minutes.
+
+The line at the bottom of the launcher shows if your PC is ready. A
+green tick and "Ready" show that each check passed. A red warning
+shows the first problem and what to do. Hold the pointer over the
+line to see each check.
+
+If a start with the renderer Vulkan fails, the next start uses
+Direct3D 9. The launcher then shows "Direct3D 9" in the row
+"Renderer", and a red warning. To try Vulkan again, set "Renderer" to
+Vulkan and save. To turn this off, set vulkan_fallback=0 in bwvr.ini.
 Connect the headset in that time, and the game goes to the headset.
 
 A new game opens the start dialog of the game. You can play the
@@ -113,7 +123,8 @@ The launcher shows five groups.
                   with the left stick, and a blink when you jump or
                   turn.
 
-  Controllers     The glow at the Hand, and the grab of the world.
+  Controllers     The glow at the Hand, the grab of the world, and the
+                  lines of the hint cards.
 
   Testing         One box, which turns on keys for tests. The box
                   is off, and a player does not need it.
@@ -217,6 +228,13 @@ the teleport go together. They work from the first step of the
 tutorial, when the villagers ask you to follow them. Set
 teleport_switch=0 in bwvr.ini to keep the teleport off until the
 tutorial turns on the double click jump of the game.
+
+The lessons of the camera count the moves of the God view. A turn
+with the right stick is the turn of the lesson, a look of your head
+up and down is the tilt, and a zoom with the right stick is the zoom.
+The lessons of the Gods' Playground count them the same way. Set
+script_camera_moves=0 in bwvr.ini if a lesson must see only the
+buttons of the mouse.
 
 Ctrl F11 turns the God view off and on. Off gives the immersive
 view, which is for tests only.
@@ -328,15 +346,16 @@ controller. The left menu button opens the game menu with each hand.
   Grip, forest        Put your Hand in a forest and keep the grip
                       closed. After a moment a tree is in your Hand.
   Grip, store         On the food or wood of a store, on a field or on
-                      a fish farm: keep the grip closed to collect.
+                      the fish in the sea: keep the grip closed to
+                      collect.
                       Open it to stop. The bundle stays in your Hand.
                       Close and open the grip again to put the bundle
                       down.
   Grip, far object    Point at an object that is out of reach. Close
                       the grip, then pull your hand toward your head.
                       The object comes to your Hand. On a far pile of
-                      a store or a far field, the closed grip collects
-                      with no pull. On a far scroll, the closed grip
+                      a store, a far field or far fish, the closed grip
+                      collects with no pull. On a far scroll, the closed grip
                       starts the scroll.
   Grip, far Creature  Point at your Creature from a distance. A short
                       grip changes its leash. Keep the grip closed,
@@ -524,16 +543,39 @@ show while a step of the tutorial holds you in your place. Set
 prompt_moves=0 in bwvr.ini for no line of the stick and a line of A
 in each case.
 
+A prompt that you know goes away. After you did its action 3 times
+(for example, 3 objects that the grip took), its line does not show.
+After 10 minutes of play without that action, the line comes back,
+and your next use takes it away again. In a lesson of the tutorial,
+each line shows. The hints of the game stay: its own help options
+control them. In the launcher, "Hints" is "Until learned" (the
+default) or "Always" (key hint_learn, 0 shows each line always). The
+counts are in the file bwvr-hint-counts.ini in the game folder. To
+show each line again, delete that file.
+
 With a tree in your Hand, the card says "Grip Plant" only when opening
 the grip plants the tree. If your Hand is more than 15 cm over the land,
 or the tree leans, or the land is not dry, it says "Lower to plant. Open
-to drop" (or a line for the other cause), and the tree falls. Set
-tree_plant_hint=0 in bwvr.ini for the text of the game. A tree that comes
-from a distance leaves its roots pile at the roots, on the land. Set
-far_roots_at_tree=0 to leave the pile where the game puts it. A tree that
-you drop or throw turns down fast when it lies on the land, so it comes to
-rest in about 1 s. Set throw_tree_settle=0 in bwvr.ini for the turn of the
-game.
+to drop" (or a line for the other cause), and the tree falls. A rock, a
+building, a villager or your Creature can be in the way of the tree.
+Then the card says "Object in the way. Open to drop". Set
+tree_plant_hint=0 in bwvr.ini for the text of the game, or
+tree_plant_bodies=0 for a card with no test of an object in the way. A
+tree that comes from a distance leaves its roots pile at the roots, on
+the land. Set far_roots_at_tree=0 to leave the pile where the game puts
+it. A tree that you drop or throw turns down fast when it lies on the
+land, so it comes to rest in about 1 s. Set throw_tree_settle=0 in
+bwvr.ini for the turn of the game.
+
+When the game places the Hand (with the mouse, or while the controllers
+are not tracked), its yellow hints at the Hand are at the depth of the
+Hand, so they are not double. Set hint_hand_depth=0 in bwvr.ini to draw
+them at the same place in both eyes.
+
+When your Creature learns from a miracle, the game shows the percent of
+the lesson in yellow over its head. This note is at the depth of the
+Creature, so it is not double. Set note_depth=0 in bwvr.ini to give it
+the depth of the other text in the view.
 
 The game shows its hints, the amount that you take and the subtitles
 only when its own help options are on. If you see none of them, open
@@ -698,7 +740,9 @@ targets too. Point at one and keep the grip closed to collect from a
 distance. Open the grip to stop. When the pile is used up while the
 grip is closed, the grip carries the bundle, and the next opening of
 the grip puts it down. With far_take_carry=0 in bwvr.ini the Hand
-lets the bundle go when such a pile is used up.
+lets the bundle go when such a pile is used up. To collect fish, put
+your Hand in the water where the fish are, or point at them. With
+fish_take=0 in bwvr.ini the fish are no target.
 
 While you collect from a distance, the pieces of food or wood go up
 out of the pile and along a curve into your Hand. With take_stream=0
@@ -974,8 +1018,9 @@ does not need them.
   Ctrl 5    The four rules of the aim of the trigger
             (creature_command_rule). One short pulse for each
             unit of the value.
-  Ctrl 7    The two rules for what a quest sees
-            (script_distance and script_view).
+  Ctrl 7    The three rules for what a quest sees
+            (script_distance, script_view and
+            script_camera_moves).
   Ctrl 8    The two ways to cast a miracle (miracle_hand).
   .         The rule "near objects win" and the pick of the Hand
             (far_grab_near_cm).
@@ -1064,7 +1109,7 @@ text and tooltips follow your head. They do not hang in the world.
 Smoke and other particles shimmer. The game asks for new random
 numbers for each eye, so each eye gets a different jitter.
 
-The clouds and the sun move a little as you move your head.
+The sun can move a little as you move your head.
 
 A hill in the distance can look different in each eye. The game
 picks how much detail an island gets from its distance. An island at
@@ -1094,13 +1139,17 @@ To report a fault:
    https://github.com/BW1-VR/BW1-VR/issues
 2. Select "New issue", and fill in the form.
 3. Attach bwvr.log and each bwvr-old file of the same day.
-4. Write what you did, what you expected and what happened.
+4. If the game crashed, put bwvr-crash.dmp from the game folder in
+   a zip file, and attach the zip file too.
+5. Write what you did, what you expected and what happened.
 
 The log holds:
 
   - the settings that the mod read,
   - the hooks that went in, and the hooks that failed,
-  - the frame rate reports, and a count of the frames.
+  - the frame rate reports, and a count of the frames,
+  - a report of a crash: where the game stopped and what the Hand
+    held. The mod also writes the file bwvr-crash.dmp then.
 
 To ask a question or to talk with other players, join the Discord
 server of the mod:

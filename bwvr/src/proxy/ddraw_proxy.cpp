@@ -30,6 +30,12 @@
 //   backend=dxwrapper\ddraw.dll  the same, named in full
 //   backend=system               system DirectDraw, which cannot go far
 //                                above 720p here
+//   backend=vulkan               DirectDraw of the mod on Vulkan
+//                                (vk_ddraw.cpp). With vulkan_fallback=1
+//                                (the default) the start takes dxwrapper
+//                                when the file bwvr-vulkan-pending.txt is
+//                                beside the game, or when there is no
+//                                vulkan-1.dll (TestVulkan).
 //
 // The stub keeps the name ddraw.dll inside the dxwrapper folder, because it
 // takes its mode from its own name. backend=dxwrapper.dll loads the wrong
@@ -141,6 +147,41 @@ bool ReadStrict() {
   return g_strict;
 }
 
+// THE FALL BACK OF backend=vulkan (vulkan_fallback=1, the default). The mod
+// writes this file beside the game before it uses Vulkan, and the first
+// picture deletes it (vk_fallback.cpp). A fault of Vulkan writes it again.
+// When the file is there at a start, the start before ended before its
+// first picture, or Vulkan failed. Then this start uses dxwrapper. With
+// vulkan_strict=1 there is no fall back (proxy_choice_math.h).
+const char kVulkanPendingFile[] = "bwvr-vulkan-pending.txt";
+
+// Why backend=vulkan uses dxwrapper in this start, or empty.
+char g_vulkan_fallback[192] = "";
+
+// Fills g_vulkan_fallback when backend=vulkan cannot start in this process.
+// Only cheap tests: the proxy is in DllMain, under the loader lock.
+void TestVulkan(const char* folder, const char* ini) {
+  g_vulkan_fallback[0] = 0;
+  if (GetPrivateProfileIntA("bwvr", "vulkan_fallback", 1, ini) == 0) return;
+  char pending[MAX_PATH];
+  lstrcpynA(pending, folder, MAX_PATH);
+  lstrcatA(pending, kVulkanPendingFile);
+  if (GetFileAttributesA(pending) != INVALID_FILE_ATTRIBUTES) {
+    wsprintfA(g_vulkan_fallback,
+              "the start before with Vulkan ended before its first picture, "
+              "or Vulkan failed (%s is there)",
+              kVulkanPendingFile);
+    return;
+  }
+  char found[MAX_PATH];
+  if (SearchPathA(nullptr, "vulkan-1.dll", nullptr, MAX_PATH, found,
+                  nullptr) == 0) {
+    lstrcpynA(g_vulkan_fallback,
+              "there is no vulkan-1.dll (no Vulkan driver)",
+              sizeof(g_vulkan_fallback));
+  }
+}
+
 // Reads the backend name from bwvr.ini. Returns false when the setting names
 // the system implementation, or when there is nothing to load.
 //
@@ -148,7 +189,11 @@ bool ReadStrict() {
 // is installed beside the game. That is what the installer puts there, and
 // what every measurement in docs/backend.md was made on. System DirectDraw
 // cannot go far above 720p here, so a missing key must not choose it.
-bool ReadBackendSetting(char* out, size_t size) {
+//
+// The choice is made one time, because the mod asks before
+// ProxyLoadRealDDraw too, and the file of the fall back changes after the
+// first answer.
+bool DecideBackend(char* out, size_t size) {
   if (size > 0) out[0] = 0;
   char folder[MAX_PATH];
   GameFolder(folder, MAX_PATH);
@@ -168,15 +213,41 @@ bool ReadBackendSetting(char* out, size_t size) {
   const bool dxwrapper_there =
       GetFileAttributesA(beside) != INVALID_FILE_ATTRIBUTES;
 
+  // The fall back of backend=vulkan is tested only when it can count: the
+  // key names vulkan and vulkan_strict=0.
+  const bool strict = ReadStrict();
+  bool vulkan_fails = false;
+  if (!strict && !g_force_system && proxy_choice::SameText(out, "vulkan")) {
+    TestVulkan(folder, ini);
+    vulkan_fails = g_vulkan_fallback[0] != 0;
+  }
+
   // proxy_choice_math.h: vulkan_strict=1 gives the DirectDraw of the mod or
   // none. backend=vulkan: the mod makes DirectDraw itself (vk_ddraw.cpp), and
   // system DirectDraw gives only the exports that the mod does not make.
+  // When Vulkan cannot start, dxwrapper as with no key.
   const proxy_choice::Path path = proxy_choice::Choose(
-      ReadStrict(), g_force_system, out, dxwrapper_there);
+      strict, g_force_system, out, dxwrapper_there, vulkan_fails);
   g_vulkan = path == proxy_choice::Path::kModVulkan;
   if (path != proxy_choice::Path::kDll) return false;
-  if (out[0] == 0) lstrcpynA(out, fallback, static_cast<int>(size));
+  if (out[0] == 0 || vulkan_fails) {
+    lstrcpynA(out, fallback, static_cast<int>(size));
+  }
   return true;
+}
+
+char g_backend[MAX_PATH] = "";
+bool g_backend_load = false;
+bool g_backend_read = false;
+
+bool ReadBackendSetting(char* out, size_t size) {
+  if (g_force_system) return false;
+  if (!g_backend_read) {
+    g_backend_read = true;
+    g_backend_load = DecideBackend(g_backend, MAX_PATH);
+  }
+  lstrcpynA(out, g_backend, static_cast<int>(size));
+  return g_backend_load;
 }
 
 // Loads system DirectDraw, on demand only.
@@ -343,20 +414,25 @@ void ProxyForceSystemDDraw() { g_force_system = true; }
 // The mod asks before ProxyLoadRealDDraw too (EarlyHooks), so the first call
 // reads the setting.
 bool ProxyBackendVulkan() {
-  static bool read = false;
-  if (!read) {
-    read = true;
-    char backend[MAX_PATH];
-    ReadBackendSetting(backend, MAX_PATH);
-  }
+  char backend[MAX_PATH];
+  ReadBackendSetting(backend, MAX_PATH);
   return g_vulkan;
 }
+
+// Why backend=vulkan uses dxwrapper in this start, or null.
+const char* ProxyVulkanFallback() {
+  char backend[MAX_PATH];
+  ReadBackendSetting(backend, MAX_PATH);
+  return g_vulkan_fallback[0] != 0 ? g_vulkan_fallback : nullptr;
+}
+
+const char* ProxyVulkanPendingFile() { return kVulkanPendingFile; }
 
 bool ProxyLoadRealDDraw() {
   // vulkan_strict=1: no DLL of another DirectDraw, and each export of this
   // file.
   if (ReadStrict()) {
-    char backend[MAX_PATH];
+    char backend[MAX_PATH] = "";
     ReadBackendSetting(backend, MAX_PATH);
     SetStrictExports();
     // The value of the key backend, which has no effect here, so that the
@@ -390,7 +466,10 @@ bool ProxyLoadRealDDraw() {
     if (g_real == nullptr) g_real = LoadLibraryA(backend);
 
     if (g_real != nullptr) {
-      wsprintfA(g_note, "backend      : %s", backend);
+      wsprintfA(g_note, "backend      : %s%s", backend,
+                g_vulkan_fallback[0] != 0
+                    ? " in place of vulkan (the line vulkan fallback says why)"
+                    : "");
     } else {
       wsprintfA(g_note,
                 "backend      : %s would not load (error %lu), falling back "

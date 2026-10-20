@@ -62,6 +62,7 @@
 #include "haptics.h"
 #include "hand_exact_math.h"
 #include "miracle.h"
+#include "note_depth.h"
 #include "radial_menu.h"
 #include "script_frame_math.h"
 #include "temple.h"
@@ -209,7 +210,7 @@ bool g_pointer_owned = false;
 
 // --- the fake controller -----------------------------------------------------
 
-const int kMaxScript = 64;
+const int kMaxScript = 192;
 
 enum FakeInput {
   kTrigger,
@@ -3838,6 +3839,25 @@ void UpdateHandSide() {
   MatchGameHand();
 }
 
+// The test key mouse_owner_test_frame: from that frame the mouse owns the
+// pointer (the owner mode "mouse only" of Ctrl F12), as when the controllers
+// are not tracked. The game then places the Hand at the pointer, and its
+// hints at the Hand draw in the eye pictures (hint_hand_depth).
+void MouseOwnerTestFrame() {
+  static int at = -1;
+  if (at < 0) at = IniInt("mouse_owner_test_frame", 0);
+  if (at <= 0 || g_owner_mode == 2) return;
+  // As ControllersTestFrame counts it (fake_controller_play_frame).
+  if (script_frame_math::Counted(g_frame, static_cast<uint64_t>(at),
+                                g_script_play, g_script_shift_known,
+                                g_script_shift) != static_cast<uint64_t>(at)) {
+    return;
+  }
+  g_owner_mode = 2;
+  ModLog("controllers  : test key mouse_owner_test_frame: the pointer owner "
+         "is now %s, frame %llu", kOwnerModeName[g_owner_mode], g_frame);
+}
+
 }  // namespace
 
 // head_pose.cpp: the invented head.
@@ -3907,6 +3927,8 @@ void ControllersFrame() {
   UpdateAim();
   TempleFrame(g_frame);
   TextClickFrame(g_frame);
+  MouseOwnerTestFrame();
+  NoteDepthFrame(g_frame);
   Compute();
   ++g_frame;
   ++g_frames_in_window;
@@ -3995,6 +4017,23 @@ bool ControllerRenderPixel(float* x, float* y, bool* off_view) {
   *x = g_point.x;
   *y = g_point.y;
   *off_view = g_point.off_view;
+  return true;
+}
+
+// For intro_vr.cpp: the render pixel of the Hand's point of the pointing
+// hand with the direct hand, also while a dialog box is up. The value of the
+// active box is not 0 while the Lionhead logo plays, so ControllerRenderPixel
+// gives the pixel of the aim ray there. False with controller_hand=0. With
+// no pixel of the Hand, off_view is true.
+bool ControllerHandPixel(float* x, float* y, bool* off_view) {
+  if (!DirectMode()) return false;
+  if (!g_point.have_hand_pixel) {
+    *off_view = true;
+    return true;
+  }
+  *x = g_point.hand_x;
+  *y = g_point.hand_y;
+  *off_view = g_point.hand_off_view;
   return true;
 }
 
@@ -4745,6 +4784,7 @@ void ControllersPump() {
   if (!g_on) return;
   if (g_fake_deactivate) FakeDeactivate();
   TextClickPump();
+  NoteDepthPump();
   PumpButtons(now);
   PumpStick(now);
   PumpWalk();

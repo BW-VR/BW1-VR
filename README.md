@@ -24,6 +24,13 @@ To build the mod or to change its code, see
   know.
 - Your own copy of Black & White (the first game, not Black & White 2).
 
+### Steam Frame (experimental)
+
+Steam Frame can run the mod through Proton 11 ARM64 with a separate x64
+OpenXR host. Use the normal installer and the Steam Frame add-on from the
+same build. See the [Steam Frame instructions](bwvr/src/vr/bridge/README.md)
+for the tested runtime, installation, launcher settings and limits.
+
 ## 1. Set up a clean copy of the game
 
 The mod does not contain the game. No store sells Black & White today, so you
@@ -137,7 +144,7 @@ Open [Issues](../../issues), select "New issue", and fill in the form. Three
 things make a report useful:
 
 - **The build.** It is the first line of `bwvr.log` in your game folder, for
-  example `Black & White VR Mod 1.1.0 (build abc1234)`.
+  example `Black & White VR Mod 1.2.0 (build abc1234)`.
 - **The logs.** Attach `bwvr.log` and each `bwvr-old-*.log` of that day. The
   mod keeps the logs of your last 20 sessions.
 - **What you did**, what you expected and what happened. A short video helps.

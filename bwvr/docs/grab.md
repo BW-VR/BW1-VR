@@ -406,10 +406,12 @@ game has the rock 50 to 97 ms after the press, and the open Hand lets it go
 then. A tree in its fall is in the Hand in the same way (`-Runs treedrop`).
 
 `-Runs catchfar` fetches a tree from a distance 1.0 s after its release,
-while the physics of the game still has it. With `catch_at_once=1` the glide
+while the physics of the game still has it. The head looks 25 degrees down,
+so the tree on the land is in the view. With `catch_at_once=1` the glide
 draws the tree from the first frame after the press. The largest move of a
-frame is 5.5 cm, which is the first frame of a glide of 0.5 m in 0.32 s, and
-the game takes the tree 42 to 54 ms after the press. With `catch_at_once=0`
+frame is 5.5 to 9.0 cm, in the first frames of a glide of about 0.5 m in
+0.32 s, and the game takes the tree 42 to 127 ms after the press, in game
+turn 1 or 2. With `catch_at_once=0`
 the tree stays at its place for 320 ms. The game takes it then, and the tree
 is 52 to 54 cm nearer in one frame, at the end of the glide.
 
@@ -800,6 +802,41 @@ gives one line each time the leash comes on, with the palm, the distance from
 the game's point to it, and how far that point is below it. No desktop run can
 put the leash on from a new game.
 
+### A target that the game deletes
+
+The mod chooses its target in the first eye pass of a draw (`Choose`). The
+game turn runs between two draws, and the game can delete the object of the
+target in it: a script deletes the scroll of a challenge, the physics breaks
+a rock, a villager dies. The target of the last draw then points to freed
+memory. At the start of the first eye pass of the next draw, `Inject` puts
+the target in the next pick record, and the function of the record
+(`fn_005D5E40`) calls `IsInteractable` through the first word of the object
+(slot `0x190`, at `0x005D5E50`) [V]. When the heap gave that memory to a new
+block, the call goes to an address that no module holds, and the game
+crashes.
+
+`target_check=1` drops a target that does not live, at the start of each
+frame and before `Inject` puts it in the record. An object lives while its
+first word is the table of its class from the draw that offered it
+(`ChoiceLives`, the same test as before an interface step and before a
+press). The target of a fetch from a distance has its own check, which also
+ends the fetch. The target of the next draw comes from the objects that the draw
+offers, so a deleted object is no target after that draw. The log has one
+line for each dropped target, "the target ... is gone", with the first word
+and the table, and a count in each report window.
+
+`target_check=0` puts the target of the last draw in the record with no
+check.
+
+A desktop run cannot make a script delete its scroll. The test key
+`target_check_test_frame=N` makes the target a dead object of the mod's own
+at the first eye pass from frame N on (frame of the steps, as
+`near_test_flips` counts). The first word of that object points to a table of
+zeros. With `target_check=1` the log has "the target ... is gone" and the run
+goes on. With `target_check=0` the call of the record goes to address 0, and
+the report of a crash (`backend.md`, "The report of a crash") names the
+return address in `fn_005D5E40`.
+
 ### Keys of the pick and the target
 
 | Key | Default | What it does |
@@ -820,6 +857,8 @@ put the leash on from a new game.
 | `far_grab_beside_loose` | 1 | 1: a tree, a forest, a building or a bulk source that the Hand's point is not in does not turn the far grab off, and it is no target at the Hand while the aim has a far target. 0: it turns the far grab off as each other object that a press acts on |
 | `far_grab_near_out_cm` | 15 | The far grab comes back past this distance |
 | `palm_search` | 0 | 1 leaves the game's search at the palm on |
+| `target_check` | 1 | 1 drops a target that the game deleted, at the start of each frame and before the mod puts the target in the pick record (see "A target that the game deletes"). 0 puts the target of the last draw in the record with no check |
+| `fish_take` | 1 | 1 makes each fish farm in reach a candidate of the choice and a far target, so the grip takes fish ("The fish in the sea"). 0 leaves the farms out: the game does not draw them |
 | `hand_glow_idle` | 0 | 1 draws the glow also with no target and while the Hand holds an object |
 | `leash_at_palm` | 1 | 1 ends the rope of the leash at the palm of the mod's hand |
 
@@ -1158,6 +1197,78 @@ For the player:
 
 The mouse is as before: no change runs while no controller button is held.
 
+### The fish in the sea
+
+**What the game does [V].** A `FishFarm` is a bulk source in the sea. Its
+take gives a Pot of fish, with the stream `SF_MultiPickUpFoodFish.txt`
+(`FishFarm::NetworkFriendlyStartLockedSelect` `0x0052D770`). The game does not
+draw the farm (`FishFarm::Draw` `0x0052C830` is a plain `ret`), so the draw
+never offers it to the pick, and no hover gives hand mode `0xD` for it. With
+the mouse a right press over the sea finds it with the search at the palm: the
+record has no object, so `FUN_005D1330` calls `fn_005D39E0` (`0x005D13A1`),
+which takes the nearest object within 5 units of the land under the Hand. The
+press then tests slot `0x6CC` first and starts the take. The farm also says
+yes to `ValidForPlaceInHand` while it has fish, but the press never gets to
+that test. The game's hint for the right button over the land there is "Pick
+Up". An empty farm stays: `FishFarm::Process` `0x0052D130` gives it its fish
+back over time.
+
+Each `FishFarm` is in a list of its town. The constructor (`0x0052C360`)
+takes the nearest town and puts the farm in the list at `Town+0x788` (nodes
+of 8 bytes: the next node, then the farm). The towns of a player are a list
+from `GPlayer+0xA50`, with the next town at `Town+0x75C`
+(`Town::GetNearestTownToPos` `0x0073B170`).
+
+**What the mod does (`fish_take=1`).** The rule of one target turns the search
+at the palm off, so the grip on the fish did nothing. Now the mod reads the
+lists of the towns once a frame and makes each farm in reach a candidate of
+the choice, with no mesh (`OfferFishFarms` in `hand_direct.cpp`):
+
+- The point of a farm is its x and z, at the height of the land there. The
+  sea gives 0.
+- In reach is the range of the far grab from the Hand's point, plus 1 m of
+  the room for the head. With `far_grab_max_m=0` each farm is a candidate.
+- The body is a cylinder of the game's 2D radius (5 units). It goes from 5
+  units under the sea to 10 units over it: the fish are in the water, and the
+  game holds the Hand 5 units over the farm in a take.
+- A grip on a farm takes fish, also when the farm says yes to
+  `ValidForPlaceInHand` (`PressKind` tests the take first, as the press of the
+  game does).
+
+So the Hand at the fish has the halo, the game gives hand mode `0xD`, the card
+says "Hold to collect", and the closed grip collects fish as from a pile. At a
+distance a farm is a target of the aim with no pull ("A bulk source at a
+distance"). The farm has no mesh, so it gets the halo and no glow on a mesh.
+
+**The hint over the land (`hint_palm_check=1`).** With the search at the palm
+off, a press over the land acts on no object. So the card does not show a
+grip hint of the game while the hand mode is the land (`GameHintTrue`,
+[controller-hints.md](controller-hints.md), 9.9). The "Pick Up" of a farm
+behind the palm does not show, and the line "Hold to collect" shows when the
+Hand's point is at the farm. `hint_palm_check=0` shows the grip hints of the
+game over the land.
+
+Tag `hand fish`: the key at the start, and each change of the count of the
+farms, with the place of each farm and its distance from the Hand's point.
+
+**Tests.** Land 1 has 13 farms in 6 towns. Five of them are in the sea west
+of the Temple of the test save `temple` (1755 to 1845, 2425 to 2505). A desktop
+run teleports the God view there (`seek_plan=go,pile`,
+`fish_test_only=1`): the Hand at a farm has it as the target, the card says
+"Hold to collect", and the closed grip takes fish for 51 game turns. A run
+that aims from 1.2 m (`aimfar`, `seek_bulk=1`) takes fish at a distance, with
+the stream from the farm. With `fish_test_off_frame` the same grip presses
+with no target, the search at the palm finds the farm, and the mod gives the
+press no object.
+
+**Not shown on the desktop.** The game did not give its grip hint over the
+land near a farm in the desktop runs, also with `hint_palm_check=0`. Only the
+math checks (`hint_checks.h`) show the rule of `hint_palm_check`.
+
+**Needs the headset.** Whether the body of a farm (5 units around its point,
+11 cm of the room at 44 units a meter) is easy to find with the hand. The
+farm has no mesh, so only the halo shows where it is.
+
 ### The log, tests and keys of the take
 
 Tag `hand bulk`: the start of a take with the class of the source and the first
@@ -1193,10 +1304,16 @@ Test keys of `bwvr.ini`, for the desktop runs only:
   Land 1 is outside the influence for minutes after a new game.
 - `bulk_test_no_keep=1`: the source does not go back in the record, and the mod
   ends no take. This shows the take that does not end.
+- `fish_test_only=1`: the word `pile` of `seek_plan`, and the word `aimfar`
+  with `seek_bulk=1`, go to a fish farm only.
+- `fish_test_off_frame=N`: from frame N of the hand on, the mod acts as with
+  `fish_take=0`. A run puts the Hand on the fish first, and then shows a grip
+  there with the old behavior.
 
-**Not tested:** a field and a fish farm, a store inside the real influence,
-and a take with the hand pulled away from the store. A desktop run has the
-loop of a take of wood ([audio.md](audio.md), section 11).
+**Not tested:** a field, a store inside the real influence, and a take with
+the hand pulled away from the store. A desktop run has the loop of a take of
+wood ([audio.md](audio.md), section 11). Desktop runs have the take of fish
+(see "The fish in the sea").
 
 **Needs the headset.** Whether the count reads at the hand. Whether the loop
 of the take sounds, and how loud it is beside the other sounds. Whether the
@@ -1556,6 +1673,12 @@ A press that the game does not answer in 700 ms ends as a fetch does. The
 rule of "The bulk take" applies: hold the grip to collect, open it to stop and
 keep the bundle, close and open it again to drop.
 
+**The totem of a Village Centre** is a target of this kind too: the game
+starts the same locked select for it (`village.md`, "The mod: the totem is the
+source of a take"). With `totem_take=1` the far grab goes to the Take state
+when the game has the totem, and the pole follows the hand until the grip
+opens.
+
 On each game turn the game ends a take when the Hand's own position is over land
 outside the influence. So the halo of a bulk source is gold only when the land
 under the Hand is inside the influence too.
@@ -1734,52 +1857,102 @@ Hand takes it".
 Hand. With `tree_plant_hint=1` the card tests the same things in each frame
 (`tree_plant_math.h`, `HandDirectTreeVerdict`): the height rule of
 `release_fall_cm` (throw.md), the lean, dry land (`MapCoords::IsDryLand`) and
-fire. When the release plants the tree, the card keeps the text of the game.
-Else it says what the opening does: "Lower to plant. Open to drop", "Hold
-upright to plant. Open to drop", "Needs dry land. Open to drop" or "On fire.
-Open to drop". The test of a body in the way is not in the card.
+fire. With `tree_plant_bodies=1` it also does the test of a body in the way
+(the next paragraphs). When the release plants the tree, the card keeps the
+text of the game. Else it says what the opening does: "Lower to plant. Open
+to drop", "Hold upright to plant. Open to drop", "Needs dry land. Open to
+drop", "On fire. Open to drop" or "Object in the way. Open to drop".
 
-**The test of a body in the way [V].** The release makes the physics object of
-the tree (`PhysicsObject::AddObject`), puts it on the land
-(`PhysOb::AdjustToGroundLevel` `0x007FCB80`) and calls
-`PhysicsObject::RaiseUntilNotIntersecting` `0x00644800`. When that call moved
-the tree up, the tree falls. The call has two parts:
+**The test of a body in the way [V].** The release makes the physics body of
+the tree (`PhysicsObject::AddObject` `0x006443A0`, `Tree::SetUpPhysOb`
+`0x0074B650`), puts its lowest point on the land
+(`PhysOb::AdjustToGroundLevel` `0x007FCB80`), places its points there
+(`PhysOb::ZeroForces` `0x007FD200`) and calls
+`PhysicsObject::RaiseUntilNotIntersecting` `0x00644800`. When that call moves
+the tree up, the release does not plant it. The call has two parts:
 
-1. It reads each object in the map cells of a square about the tree, as wide
-   as the radius of the physics object (`PhysOb+0x150`). It asks each one
+1. It reads each object in the map cells (10 units wide) of the square of the
+   center of the tree plus and minus the radius of its body. It asks each one
    `Object::ShouldPhysicsRaiseObjectUntilNotIntersectingThis` `0x006377D0`
    (the table slot `+0x7A4`), which gives the answer of
-   `InteractsWithPhysicsObjects` (`+0x79C`). An object that says yes and is not
-   in the physics goes into the physics now (`fn_00644DF0`, with
-   `PhysOb::Initialise` from its mesh).
-2. For each other object in the physics whose center is nearer than the sum
-   of the two radii, `fn_007FDD60` gives how deep the points of the one body
-   are in the other, along up. More than 0.001 units raises the tree by that
-   depth, and the call starts again.
+   `InteractsWithPhysicsObjects` (`+0x79C`). An object that says yes, has a
+   mesh and is not in the physics goes into the physics now (`fn_00644DF0`).
+   It gets the body of its class (slot `+0x78C`) at the place of its mesh, and
+   it is at rest.
+2. For each other body in the physics whose center is nearer than the sum of
+   the two radii, `fn_007FDD60` gives two depths along up: the points of the
+   tree in the other body, and the points of the other body in the tree.
+   Each point casts a line along down (the tree) or up (the other body). The
+   line meets a face that faces it, behind the point and inside the three
+   edges of the face, and the nearest such face gives the depth
+   (`fn_007FC310`). A Creature has ellipsoids in place of faces
+   (`fn_008683C0`). More than 0.001 units raises the tree by that depth, and
+   the call starts again.
 
-`InteractsWithPhysicsObjects` is yes for an object with a mesh
-(`Object`, `0x006377B0`), and for a rock, a scaffold, a Creature and a dead
-tree. A house or other building says yes by two of its own values
-(`MultiMapFixed`, `0x0052F3D0`). It is no for a tree that stands
-(`Tree`, `0x0074B6A0`), a forest, a field, a fish farm, a Worship Site, a
-graveyard and a bonfire. So the trees of a forest are never in the way of a
-planted tree.
+So a body is in the way when it goes up into the low part of the tree, or
+when a point of the tree is under the top of the body. The body of a tree
+(`Object::SetUpPhysObAsATree` `0x0063A230`) has 16 points and 24 faces: a
+foot on the land at 0.1 of the 2D radius from the trunk, three rings at 0.24,
+0.6 and 0.96 of the height over the land with 0.65, 1 and 0.65 of the 2D
+radius, and a top at 1.2 of the height. The low faces go from the foot up to
+the low ring. A low rock under the crown is not in the way. A rock that goes
+up into the low faces is. The bodies of the other classes (slot `+0x78C`):
 
-No call of the game gives this answer before the release with no change of
-state. The first part puts each near object into the physics of the game. The
-second part compares two physics bodies, and the tree has a physics body only
-from the release on. A test with the same answer needs a body of its own for
-the tree and for each near object (`PhysOb::Initialise` on memory of the mod,
-then `AdjustToGroundLevel` and `fn_007FDD60`). That is not built.
+- A dead tree: the shape of a tree, with its middle at half its height.
+- A villager (`Villager::SetUpPhysOb` `0x005EFF40`) and an animal
+  (`Animal::SetUpPhysOb` `0x005F04E0`): a box of 12 points in three levels,
+  from the height and the 2D radius, turned 90 degrees about up.
+- Each class with `Object::SetUpPhysOb` `0x006376B0` or
+  `Abode::SetUpPhysOb` `0x00402DD0`, for example a rock, a scaffold and a
+  building: the hull of the parts of its mesh with the flag bit 13, or with
+  the bit 29 when no part has bit 13 (`fn_007FBAE0`).
+- A Creature (`Creature::SetUpPhysOb` `0x00479B90`): a point at the middle of
+  each bone, an ellipsoid in the frame of each bone, and the sphere of its
+  bones.
+
+`InteractsWithPhysicsObjects` is yes for an object with a mesh (`Object`,
+`0x006377B0`, so for a villager and an animal too), and for a rock, a
+scaffold, a Creature and a dead tree. A house or other building says yes by
+two of its own values (`MultiMapFixed`, `0x0052F3D0`). It is no for a tree
+that stands (`Tree`, `0x0074B6A0`), a forest, a field, a fish farm, a Worship
+Site, a graveyard and a bonfire. So the trees of a forest are never in the
+way of a planted tree.
+
+**The test of the mod.** With `tree_plant_bodies=1` the mod does the same two
+parts in each frame while the Hand holds a tree and the other tests let the
+release plant it (`tree_body.cpp`, `tree_body_math.h`). It makes the body of
+the tree at the frame of its mesh now and puts it on the land. It reads the
+same map cells, asks each object the same slot `+0x7A4`, and makes the body
+of each object that says yes in memory of the mod. It also reads the bodies
+that are in the physics now. It changes nothing in the game: it only reads,
+and it calls only slots that give a value (`GetMapChild`, `+0x7A4`,
+`IsARootedObject`, the height, the 2D radius and the scale). The limits:
+
+- The release gives the tree the speed of the hand, and `ZeroForces` moves
+  its points by 0.06 of that speed. The test takes the tree as still. The
+  game sets a tree down only at 2 units a turn or less, so the difference is
+  0.12 units at most.
+- The mod does not make the body of a class with a different
+  `SetUpPhysOb`: a fragment, a field crop, a chess piece, the heart of a
+  citadel and a shield. The test does not count such an object, and the log
+  names its class.
 
 **The log.** Tag `hand tree`: the settings, each roots pile that the game makes
 (with the place), each change of the answer for the tree in the Hand (the
-height, the lean, dry land, fire), the release with the lean of the last frame
+height, the lean, dry land, fire, a body in the way), the release with the lean of the last frame
 in the Hand, the first frame of the tree in the physics (the height of its
 mesh over the land, its lean, the count of the objects in the physics of the
 game that are nearer to the tree than the sum of the two radii, the nearest
 one, and the flag 8 of the tree), and what the tree is when it leaves the
 physics (its class and its forest).
+
+Tag `tree body`: each change of the answer of the test of a body in the way
+(the body in the way and its depth, the body of the tree, the time of the
+test), with each body whose sphere met the sphere of the tree (its middle,
+its radius, its counts of points, faces and ellipsoids, and its depth). On
+the first frame of the tree in the physics, the body that the game made for
+the tree beside the body of the mod, and each near object in the physics
+beside its body of the mod.
 
 **The lean in a desktop run.** The tree in the Hand turns with the hand
 (`hand_hold_turn`, [hand.md](hand.md)). `throw_queue.ps1 -Runs treelean
@@ -1791,26 +1964,33 @@ an upright tree at that place either (the next paragraph). So the run shows
 the lean that the card and the game read, and it does not show that the lean
 alone stops the planting.
 
-**A tree that the card calls "plant" and the game does not plant.**
-`throw_queue.ps1 -Runs treeset -NewGame` is the same recipe with a hand that
-does not turn. The hand takes a tree at the land and sets it down upright
-where it stood, 1.3 cm of the room over dry land. A rock lies 0.8 units from
-that place. The card says "Plant". The game does not plant the tree: it is in
-the physics with no forest, its mesh is 0.7 units over the land in its first
-frame there, and the flag 8 of its physics object is not set. The physics of
-the game then has 6 other objects with their center nearer to the tree than
-the sum of the two radii, and the nearest one is a rock. After a set down
-with a still hand, with no lean, on dry land and with no fire, the release
-leaves the flag 8 out only when it raised the tree. So a body was in the way.
-[I: which of the 6 objects raised the tree.]
+**A body in the way in a desktop run.** `throw_queue.ps1 -Runs treeset
+-NewGame` is the same recipe with a hand that does not turn. The hand takes a
+tree at the land and sets it down upright where it stood, 1.3 cm of the room
+over dry land. Six small objects of the class `MobileObject` lie 1 to 3 units
+from that place. The test finds the object with a radius of 1 unit in the
+way, 0.06 units deep, and the card says "Object in the way. Open to drop".
+The game does not plant the tree: it is in the physics with no forest, its
+mesh is 0.7 units over the land in its first frame there, and the flag 8 of
+its physics object is not set. The bodies of the mod are the bodies of the
+game: the 16 points of the tree are at most 0.0001 units apart, and the six
+objects that the release puts in the physics have the same middle, radius
+and counts of points and faces. With `-More 'tree_plant_bodies=0'` the card
+says "Plant" for the same tree, and the game does not plant it.
 
-In the test save `pen` the two recipes take a small rock beside the tree and
+`-Runs treeleft` and `-Runs treeright` set the tree down 6 cm of the room to
+the left or to the right, about 5 units from its place. No body is in the
+way there, the card says "Plant", and the game plants the tree: 25 frames
+later it is a `Tree` in a forest. In these runs the test took 0.04 ms at
+most. The pulls of the recipes move the tree in the Hand over a dead tree,
+and the card then says "Object in the way" for the dead tree (3 units deep).
+
+In the test save `pen` these recipes take a small rock beside the tree and
 not the tree, so they need `-NewGame` (`tools/desk/README.md`, "Known limits
 of the recipes").
 
-**Open.** A body in the way is not predicted, and the card says "Plant" for a
-tree that the game then lets fall (the run above). Whether the pile at the
-roots is what the player means by the "pit" needs the headset.
+**Open.** Whether the pile at the roots is what the player means by the "pit"
+needs the headset.
 
 ### The far touch
 
@@ -1982,8 +2162,10 @@ does not hold" the object, with the count of the game turns and of the steps
 that the mod held back.
 
 **Desktop runs.** `throw_queue.ps1 -Runs treedropend` in `bwvr/tools/desk`
-lets a tree fall from the Hand and locks it from a distance 1.3 s later. The
-pull comes 10 frames after the lock, and the press 2 frames after the pull.
+lets a tree fall from the Hand and locks it from a distance 65 frames later
+(1.2 s at 53 frames a second), when the tree is on the land. The head looks
+25 degrees down, so the tree is in the view. The pull comes 10 frames after
+the lock, and the press 2 frames after the pull.
 A tree that falls comes to rest by itself 1.2 to more than 2.3 s after the
 release, so the rest of the game itself comes in the take in some runs only.
 For the other runs the recipe has the test key `catch_rest_test=1`: it makes
@@ -1994,8 +2176,11 @@ so the runs of the table have `-More 'catch_at_once=0'`.
 
 | `catch_rest_guard` | What the runs show |
 | --- | --- |
-| 1 | In 3 of 4 runs the mod holds the rest back (1, 11 and 30 steps), and the tree leaves the Hand when the grip opens, 46 frames after the Hand took it. In one of the three the rest of the game itself came in the lock, before the pull. In the fourth run the tree came to rest before the aim, so there was no take |
-| 0 | In 3 of 3 runs the game ends the physics of the tree in a turn of the take: by the test key in 2 runs, and by itself in 1 run. The Hand holds nothing 1 or 2 frames after it took the tree, and the grip stays closed on an empty Hand for 44 frames more |
+| 1 | In 3 of 3 runs the mod holds the rest back (1, 38 and 59 steps), and the tree leaves the Hand when the grip opens, 45 frames after the Hand took it. In one of the three the rest of the game itself came in game turn 1 of the take, before the test key |
+| 0 | In 3 of 3 runs the test key ends the physics of the tree in game turn 2 or 3 of the take. The Hand holds nothing 1 to 4 frames after it took the tree, and the grip stays closed on an empty Hand for 41 to 44 frames more |
+
+With `catch_at_once=1` (two runs) the press is a catch at once: the game has
+the tree in game turn 2, and the tree is in the Hand until the grip opens.
 
 With `catch_rest_guard=1` the two recipes with no test key keep their
 results. In `throw_queue.ps1 -Runs treedrop` a near grip on a tree in its
@@ -2087,6 +2272,7 @@ not jump.
 | `creature_hold_stay`, `creature_hold_stay_ms`, `creature_stay_look` | 1, 350, 1 | A grip that stays closed on the far Creature makes it stay (see [creature.md](creature.md), section 5.3). Test key: Shift and End |
 | `far_roots_at_tree` | 1 | 1 puts the roots pile of a tree that comes from a distance at the roots, on the land where the tree stood. 0 leaves it where the game puts it, on the way of the glide. Test key: Ctrl, Shift and Page Down |
 | `tree_plant_hint` | 1 | 1 makes the card say what the opening of the grip does with a tree in the Hand. 0 shows the text of the game ("Plant") each time. Test key: Ctrl and Page Down |
+| `tree_plant_bodies` | 1 | 1 adds the test of a body in the way to what the card says for a tree in the Hand (see "The test of a body in the way"). 0 leaves it out: the card can say "Plant" when a body is in the way and the tree falls |
 | `throw_law` | 2 | The law of the throw (see [throw.md](throw.md)) |
 
 With `test_keys=1`, Ctrl with the Delete key steps `far_grab_choice` from 2 to
@@ -2354,9 +2540,9 @@ gets the Hand (`fake_controller_play_frame=2750`, `aim_queue.ps1` and
 **Not shown in a run:** a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
 influence, a villager in the sea, the tether and the halo during a take at a
 distance, a take at a distance from a pile that the game deletes (the runs
-make that case with the test key and a pile of the store), a `Field` and a
-`FishFarm` as a far target, the stream of a take at a distance from a source
-that is not a `PileWood`, on a way that is long along the floor, with a pile
+make that case with the test key and a pile of the store), a `Field` as a
+far target, the stream of a take at a distance from a source that is not a
+`PileWood` or a `FishFarm`, on a way that is long along the floor, with a pile
 that goes down, and with a hand that moves, a take with the Hand over
 land outside the influence, a multiplayer game, a fetch of a villager, a
 Creature or a building, the haptics on a real controller, and the look of the

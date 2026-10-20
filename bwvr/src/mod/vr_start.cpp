@@ -169,7 +169,9 @@ DWORD WINAPI TriesMain(void*) {
     const bwvr::LogFn log = LoudTry(tries) ? &ModLog : &LogNowhere;
     if (screen == nullptr) {
       screen = new bwvr::XrScreen();
-      if (o.prepare != nullptr) o.prepare(screen);
+      screen->UseVulkan(o.vulkan);
+      screen->UseD3D11(o.d3d11);
+      screen->WantEyeGaze(o.eye_gaze);
     }
     bool instance = screen->has_instance();
     if (instance) {

@@ -53,6 +53,10 @@ bool GpuBridgeIsPanel(const void* surface) {
   return surface != nullptr && surface == g_state.panel_target;
 }
 
+// vk_fallback.h: the app has no other renderer, so it has no fall back. The
+// fault of the renderer is in the log (vk_scene.cpp, Fail).
+void VkFallbackFault(const char*) {}
+
 // d3d7_thread.h: the app has no D3D7 thread. With backend=vulkan of the
 // stream each call comes on the thread of the player, as on the frame thread
 // of the PC, so a post is the call itself.

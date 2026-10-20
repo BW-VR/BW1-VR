@@ -26,9 +26,11 @@ inline bool SameText(const char* a, const char* b) {
 // strict: vulkan_strict=1. wrong_game: runblack.exe is not the v1.42 file
 // (ProxyForceSystemDDraw). backend: the text of the key backend, empty when
 // the key is not there. dxwrapper_there: dxwrapper\ddraw.dll is beside the
-// game.
+// game. vulkan_fails: backend=vulkan cannot start in this process
+// (vulkan_fallback: the file of the fall back is there, or there is no
+// vulkan-1.dll).
 inline Path Choose(bool strict, bool wrong_game, const char* backend,
-                   bool dxwrapper_there) {
+                   bool dxwrapper_there, bool vulkan_fails) {
   // ONLY VULKAN: the DirectDraw of the mod, or none. The key backend does
   // not count.
   if (strict) return wrong_game ? Path::kNoDirectDraw : Path::kModVulkan;
@@ -39,7 +41,11 @@ inline Path Choose(bool strict, bool wrong_game, const char* backend,
     return dxwrapper_there ? Path::kDll : Path::kSystem;
   }
   if (SameText(backend, "system")) return Path::kSystem;
-  if (SameText(backend, "vulkan")) return Path::kModVulkan;
+  if (SameText(backend, "vulkan")) {
+    // The fall back: dxwrapper as with no key.
+    if (!vulkan_fails) return Path::kModVulkan;
+    return dxwrapper_there ? Path::kDll : Path::kSystem;
+  }
   return Path::kDll;
 }
 

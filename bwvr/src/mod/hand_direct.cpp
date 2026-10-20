@@ -140,6 +140,7 @@
 #include "near_math.h"
 #include "table_math.h"
 #include "throw_physics.h"
+#include "tree_body.h"
 #include "tree_plant_math.h"
 
 extern void ModLog(const char* format, ...);
@@ -183,6 +184,10 @@ bool TabletopRoom(float origin[3], float basis[9], float center[3],
 int ScriptCameraOwnerNow();
 bool CutsceneWindowBarsUp();
 bool ComfortCameraGameMoves();
+// comfort_camera.cpp: the clock of the help at the last camera help event
+// 0x300 + low, and now. controllers.cpp: a grip holds the land.
+bool ComfortCameraHelpClock(int low, int32_t* at, int32_t* now);
+bool ControllersGrabHeld();
 // tabletop.cpp: the teleport of the God view, for the test word "go".
 bool TabletopGodTeleport(const float target[3]);
 // temple.cpp: the door of the Temple (0) or the next leash post (1), for the
@@ -880,6 +885,8 @@ bool g_grip_reopened = true;
 bool HandEmpty();
 void Inject();
 void AssertRecord();
+bool ChoiceLives();
+bool KeepLiveChoice(const char* when);
 int PlanCount();
 float RoomUnits();
 
@@ -918,6 +925,21 @@ bool g_choice_touched = false;
 int g_logged_acts = -1;
 // The first word of the choice at the draw that offered it (ChoiceLives).
 void* g_choice_table = nullptr;
+// THE TARGET CHECK (target_check, docs/grab.md, "A target that the game
+// deletes"). The game turn runs between two draws, and a script or the
+// physics can delete the object of the choice in it. The choice of the last
+// draw then points to freed memory. 1: at the start of each frame and before
+// Inject puts the choice in the pick record, a choice that does not live
+// (ChoiceLives) is dropped. 0: no check.
+bool g_target_check = true;
+uint64_t g_target_gone = 0;  // choices dropped, this window
+int g_target_gone_logs = 0;
+const int kMaxTargetGoneLogs = 40;
+// target_check_test_frame (a test key): at the first eye pass from that
+// frame on with a choice at the Hand, the choice becomes a dead object of
+// the mod's own, with a first word that is not the table of a class.
+uint64_t g_gone_test_frame = 0;
+bool g_gone_test_done = false;
 
 // THE PICK AT THE GLOW (docs/grab.md, "One point for each interaction").
 // The keys, in centimeters of the room. The A/B key (test_keys=1, the point
@@ -1164,6 +1186,10 @@ double g_stroke_wait_said = -1.0;
 bool g_script_hooked = false;
 int g_script_distance = 1;
 int g_script_view = 1;
+// script_camera_moves: a script that asks how the player holds the land, or
+// if the rotate arrow shows, gets the moves of the God view (h_ScriptHandState
+// and h_ScriptArrows).
+int g_script_moves = 1;
 bool g_script_on = true;
 bool g_script_key_down = false;
 void ScriptPlayerInstall();
@@ -1416,6 +1442,23 @@ void* TakeObject(const uint8_t* face) {
              : nullptr;
 }
 
+// The source of the locked select of the game now: the object of a bulk take
+// (TakeObject), or the totem of a Village Centre that the Hand moves
+// (village.cpp, totem_take). The start of the locked select writes the totem
+// to GInterfaceStatus+0x3C as it writes a pile (fn_005DA950), but the totem
+// says no to IsLockedInInteract (Object 0x00402790), so TakeObject does not
+// give it. The release step of the game reads the pick record for the totem
+// too (FUN_005D4830), and the far grab waits for the game to have it.
+void* SelectSource(const uint8_t* face) {
+  void* take = TakeObject(face);
+  if (take != nullptr || face == nullptr) return take;
+  const uint8_t* status =
+      *reinterpret_cast<uint8_t* const*>(face + kFaceStatus);
+  if (status == nullptr) return nullptr;
+  void* object = *reinterpret_cast<void* const*>(status + kStatusTakeObject);
+  return VillageTotemInSelect(object) ? object : nullptr;
+}
+
 // The class of a game object, from its RTTI, for the log: "PileFood" from
 // ".?AVPileFood@@". The locator is at vtable[-1], its type at +0x0C, and the
 // name at +0x08 of the type.
@@ -1523,6 +1566,64 @@ bool TakeValid(void* object, void* status) {
   }
   return reinterpret_cast<VirtualIntFn>(table[kIsCannotBePickedUp / 4])(
              object, nullptr) == 0;
+}
+
+// THE FISH IN THE SEA (docs/grab.md, "The fish in the sea"). A FishFarm is a
+// bulk source in the sea, and the game does not draw it (FishFarm::Draw
+// 0x0052C830 is a plain ret). So the draw does not offer it to the pick. With
+// the mouse the game finds it with the search at the palm: a right press with
+// no object in the pick record takes the nearest object within 5 units of
+// the land under the Hand (fn_005D39E0 at 0x005D13A1), and the press then
+// starts the take of fish (FUN_005D1330 tests slot 0x6CC first). The rule of
+// one target turns that search off, so the mod must offer the farm itself.
+// [V]
+//
+// Each FishFarm is in a list of its town. The constructor (0x0052C360)
+// takes the nearest town and puts the farm at the head of the list at
+// Town+0x788. A node of that list is 8 bytes: the next node, then the farm.
+// The towns of a player are a list from GPlayer+0xA50, with the next town at
+// Town+0x75C (Town::GetNearestTownToPos 0x0073B170). The players are at
+// GGame+0x18, 0xA60 bytes each, up to GGame+0x5318
+// (GGame::GetNextPlayerAndNeutral 0x00550980). The game does not delete an
+// empty FishFarm: its fish come back (FishFarm::Process 0x0052D130). [V]
+const uintptr_t kFishFarmTable = 0x008DADC0;  // ??_7FishFarm
+const int kGamePlayerEnd = 0x5318;  // GGame: the end of the players
+const int kPlayerTowns = 0xA50;     // GPlayer: its first Town
+const int kTownNext = 0x75C;        // Town: the next Town of the player
+const int kTownFishFarms = 0x788;   // Town: the first node of its farms
+// GameThingWithPos: the MapCoords of the object, x and z as ints of the
+// world unit times 6553.6.
+const int kThingPosition = 0x14;
+// Slot 0x64C, GetHeightForHandAboveInteractObject: 5 units for a FishFarm
+// (0x0052C840). The game holds the Hand that high over the farm in a take.
+const int kHandAboveSource = 0x64C;
+const int kMaxTownWalk = 64;
+const int kMaxFarmWalk = 256;
+// fish_take: 1 makes each FishFarm near the Hand a candidate of the choice,
+// and a far target. 0 leaves it out, as the draw does.
+bool g_fish_take = true;
+
+// The test key fish_test_off_frame=N: from frame N of the mod's hand on, the
+// mod acts as with fish_take=0. A desktop run can then put the Hand on the
+// fish and show a grip there with the old behavior.
+uint64_t g_fish_off_frame = 0;
+bool g_fish_said_off = false;
+
+bool FishTakeOn(uint64_t frame) {
+  if (!g_fish_take) return false;
+  if (g_fish_off_frame == 0 || frame < g_fish_off_frame) return true;
+  if (!g_fish_said_off) {
+    g_fish_said_off = true;
+    ModLog("hand fish    : test key fish_test_off_frame: from frame %llu the "
+           "mod acts as with fish_take=0", frame);
+  }
+  return false;
+}
+
+bool IsFishFarm(void* object) {
+  return object != nullptr &&
+         *static_cast<void* const*>(object) ==
+             reinterpret_cast<void*>(kFishFarmTable);
 }
 
 // Once a frame: each start and end of a bulk take, and the amount in the
@@ -3090,6 +3191,11 @@ bool ClickScroll(void* object) {
 
 int PressKind(void* object, void* status) {
   if (g_one_target && IsCreatureObject(object)) return near_math::kCreature;
+  // A FishFarm with fish says yes to ValidForPlaceInHand too. The press of
+  // the game tests the take first, so a grip on it takes fish.
+  if (FishTakeOn(g_frame) && IsFishFarm(object) && TakeValid(object, status)) {
+    return near_math::kTake;
+  }
   if (Holdable(object, status)) return near_math::kHold;
   if (TakeValid(object, status)) return near_math::kTake;
   if (!g_near_rule) return near_math::kNone;
@@ -3563,12 +3669,12 @@ void PollNearKey() {
     if (g_script_on) {
       ModLog("scripts      : Ctrl and the 7 key: a script that asks about the "
              "camera gets the player again (script_distance=%d, "
-             "script_view=%d), frame %llu", g_script_distance, g_script_view,
-             g_frame);
+             "script_view=%d, script_camera_moves=%d), frame %llu",
+             g_script_distance, g_script_view, g_script_moves, g_frame);
     } else {
       ModLog("scripts      : Ctrl and the 7 key: a script that asks about the "
-             "camera gets the game's camera, as with script_distance=0 and "
-             "script_view=0, frame %llu", g_frame);
+             "camera gets the game's camera, as with script_distance=0, "
+             "script_view=0 and script_camera_moves=0, frame %llu", g_frame);
     }
   }
   if (palm_pressed) {
@@ -3673,13 +3779,15 @@ void LogRelease() {
 // source and the controller places the Hand, the source goes in the next pick
 // record. The game's release step reads that record (see kTakeEndStep), so it
 // then ends the take on the frame the button goes up, as it does for the
-// mouse. Before each interface step, and after each eye pass. True when the
-// record holds the source.
+// mouse. The totem that the Hand moves is such a source too (SelectSource):
+// the mouse stays on the totem, and the real hand can go away from it.
+// Before each interface step, and after each eye pass. True when the record
+// holds the source.
 bool KeepTakeSource(uint8_t* face) {
   if (!g_owns || face == nullptr || face != g_face || g_take_no_keep) {
     return false;
   }
-  void* source = TakeObject(face);
+  void* source = SelectSource(face);
   if (source == nullptr) return false;
   void* next = *reinterpret_cast<void* const*>(face + kFaceNextObject);
   if (next == source) {
@@ -4299,6 +4407,12 @@ void Measure(const Candidate& c, int kind, Measured* out) {
   } else if (IsTreeObject(c.object) && !IsForest(c.object)) {
     out->target.gap =
         near_math::TreeGap(g_target, c.position, body.radius, body.height);
+  } else if (IsFishFarm(c.object)) {
+    // The fish swim in the sea: the cylinder also goes half its height under
+    // the point of the farm on the sea.
+    out->target.gap = GapTo(body, c.position, true);
+    out->center[1] = c.position[1] + 0.25f * body.height;
+    out->half = 0.75f * body.height;
   } else {
     out->target.gap = GapTo(body, c.position, false);
   }
@@ -4944,9 +5058,97 @@ void Choose() {
 // picture of a frame shows the choice of that frame, and the next press acts
 // on the object that the halo was on. The end of the pass asks again, and the
 // choice is made again only when the draw offered more objects since.
+// THE FISH IN THE SEA AS CANDIDATES (fish_take=1, see kFishFarmTable). Once a
+// frame, before the first choice: each FishFarm of each town that is in reach
+// becomes a candidate with no mesh. Its point is the x and z of the farm and
+// the height of the land there (GetAltitude gives 0 for the sea). In reach is
+// near the Hand's point, or in the range of the far grab from the Hand with 1
+// m more for the head. With far_grab_max_m=0 each farm is a candidate.
+uint64_t g_fish_frame = 0;
+int g_fish_farms = 0;      // the farms in the lists in the last frame
+int g_fish_offered = 0;    // the farms that were candidates in the last frame
+int g_fish_said_farms = -1;
+
+void OfferFishFarms() {
+  if (!FishTakeOn(g_frame) || g_fish_frame == g_frame) return;
+  g_fish_frame = g_frame;
+  if (!g_active || g_face == nullptr || g_face[kFaceLocked] != 0) return;
+  const uint8_t* game = *reinterpret_cast<uint8_t* const*>(kGame);
+  if (game == nullptr) return;
+  const float units = RoomUnits();
+  const float far_m = FarGrabMaxMeters();
+  const float reach = far_m > 0.0f ? (far_m + 1.0f) * units : 0.0f;
+  const GetAltitudeFn altitude = reinterpret_cast<GetAltitudeFn>(kGetAltitude);
+  int farms = 0, offered = 0, towns = 0, walked = 0;
+  const int kSaidFarms = 8;
+  float said[kSaidFarms][3] = {};
+  void* said_object[kSaidFarms] = {};
+  for (int at = kGamePlayers; at + kGamePlayerSize <= kGamePlayerEnd;
+       at += kGamePlayerSize) {
+    const uint8_t* town =
+        *reinterpret_cast<uint8_t* const*>(game + at + kPlayerTowns);
+    while (town != nullptr && towns < kMaxTownWalk) {
+      if (IsBadReadPtr(town, kTownFishFarms + sizeof(void*))) break;
+      ++towns;
+      const uint8_t* node =
+          *reinterpret_cast<uint8_t* const*>(town + kTownFishFarms);
+      while (node != nullptr && walked < kMaxFarmWalk) {
+        if (IsBadReadPtr(node, 2 * sizeof(void*))) break;
+        ++walked;
+        void* farm = *reinterpret_cast<void* const*>(node + sizeof(void*));
+        node = *reinterpret_cast<uint8_t* const*>(node);
+        if (!ObjectLives(farm, reinterpret_cast<void*>(kFishFarmTable))) {
+          continue;
+        }
+        ++farms;
+        const int32_t* coords = reinterpret_cast<const int32_t*>(
+            static_cast<const uint8_t*>(farm) + kThingPosition);
+        const float point[3] = {static_cast<float>(coords[0]) / kMapScale,
+                                altitude(coords),
+                                static_cast<float>(coords[1]) / kMapScale};
+        if (!(point[1] == point[1])) continue;
+        if (farms <= kSaidFarms) {
+          for (int k = 0; k < 3; ++k) said[farms - 1][k] = point[k];
+          said_object[farms - 1] = farm;
+        }
+        if (reach > 0.0f && Distance(point, g_target) > reach) continue;
+        if (g_candidate_count >= g_candidate_limit || !FirstOffer(farm)) {
+          continue;
+        }
+        Candidate& c = g_candidates[g_candidate_count++];
+        if (g_candidate_count > g_most_candidates) {
+          g_most_candidates = g_candidate_count;
+        }
+        c.object = farm;
+        c.model = nullptr;
+        for (int k = 0; k < 3; ++k) c.position[k] = point[k];
+        ++offered;
+      }
+      town = *reinterpret_cast<uint8_t* const*>(town + kTownNext);
+    }
+    if (towns >= kMaxTownWalk) break;
+  }
+  g_fish_farms = farms;
+  g_fish_offered = offered;
+  if (farms != g_fish_said_farms) {
+    g_fish_said_farms = farms;
+    ModLog("hand fish    : %d towns have %d fish farms, %d of them in reach "
+           "of the Hand. A farm in reach is a candidate of the grip "
+           "(fish_take=1), frame %llu", towns, farms, offered, g_frame);
+    for (int i = 0; i < farms && i < kSaidFarms; ++i) {
+      ModLog("hand fish    : the farm %p is at %.1f %.1f %.1f, %.1f cm of the "
+             "room from the Hand's point", said_object[i], said[i][0],
+             said[i][1], said[i][2],
+             units > 0.0f ? Distance(said[i], g_target) / units * 100.0f
+                          : 0.0f);
+    }
+  }
+}
+
 uint64_t g_choose_frame = 0;
 int g_choose_count = -1;
 void ChooseOnce() {
+  OfferFishFarms();
   if (g_choose_frame == g_frame && g_choose_count == g_candidate_count) return;
   g_choose_frame = g_frame;
   g_choose_count = g_candidate_count;
@@ -5585,6 +5787,9 @@ void FarSelect() {
 void Inject() {
   if (!g_active || g_face == nullptr || !HandEmpty()) return;
   if (State(g_hand) == kStateCreature) return;
+  // The pick record calls IsInteractable through the first word of the
+  // object (fn_005D5E40 at 0x005D5E50).
+  if (!KeepLiveChoice("before the mod puts it in the pick record")) return;
   // The object of a fetch can die in the game turn of this frame, after the
   // test of FarFrameStep. Then the record does not get it.
   if (g_choice_far && !FarTargetLives()) {
@@ -5638,6 +5843,40 @@ bool ChoiceLives() {
   return g_choice != nullptr && g_choice_table != nullptr &&
          !IsBadReadPtr(g_choice, sizeof(void*)) &&
          *static_cast<void* const*>(g_choice) == g_choice_table;
+}
+
+// THE TARGET CHECK (target_check=1). True when the choice lives, when there
+// is no choice, or when the key is 0. Else the choice is dropped with each of
+// its facts, and the log names it. `when` is the place in the frame. The
+// object of a fetch from a distance has its own check, which also ends the
+// fetch (FarTargetLives).
+bool KeepLiveChoice(const char* when) {
+  if (!g_target_check || g_choice == nullptr || g_choice_far ||
+      ChoiceLives()) {
+    return true;
+  }
+  ++g_target_gone;
+  if (g_target_gone_logs < kMaxTargetGoneLogs) {
+    ++g_target_gone_logs;
+    const void* first = !IsBadReadPtr(g_choice, sizeof(void*))
+                            ? *static_cast<void* const*>(g_choice)
+                            : nullptr;
+    ModLog("hand pick    : the target %p is gone: its first word is %p and "
+           "not the table %p of its class. The game deleted it after the "
+           "draw that offered it. The mod drops it %s (target_check=1), "
+           "frame %llu", g_choice, first, g_choice_table, when, g_frame);
+  }
+  g_choice = nullptr;
+  g_choice_take = false;
+  g_choice_tap = false;
+  g_choice_click = false;
+  g_choice_kind = near_math::kNone;
+  g_choice_acts = false;
+  g_choice_touched = false;
+  g_choice_table = nullptr;
+  g_choice_last = false;
+  g_choice_loose = false;
+  return false;
 }
 
 // ONE TARGET: THE RECORD IS THE CHOICE WHEN THE PRESS COMES. The game reads
@@ -6309,7 +6548,8 @@ void LogCheck() {
 // tree did. It also logs each change of the roots piles of the game, the
 // pieces of mesh that the Tug of a tree puts in the land.
 // tree_plant_hint=0 keeps the text of the game. Ctrl and Page Down
-// (test_keys=1) switch it.
+// (test_keys=1) switch it. tree_plant_bodies=1 adds the test of a body in the
+// way (tree_body.cpp) to the tests of the answer. 0 leaves it out.
 typedef void(__fastcall* GetYXZFn)(const void* matrix, void*, float* y,
                                    float* x, float* z);
 typedef int(__fastcall* CoordsTestFn)(const int32_t* coords, void*);
@@ -6321,6 +6561,7 @@ const int kTreeFlags = 0x24;                  // Object: bit 0x40 is "in physics
 const int kTreeForest = 0x68;                 // Tree: its Forest
 
 int g_tree_hint = 1;
+int g_tree_bodies = 1;  // tree_plant_bodies
 bool g_tree_hint_read = false;
 int g_tree_verdict = -1;  // -1: no tree in the Hand now
 uint64_t g_tree_frame = 0;
@@ -6355,6 +6596,13 @@ void ReadTreeHintKey() {
              ? "The card says what the opening of the grip does with a tree "
                "in the Hand, by the tests of the game and the height rule"
              : "The card shows the text of the game for a tree in the Hand");
+  g_tree_bodies = IniKey("tree_plant_bodies", 1) != 0 ? 1 : 0;
+  ModLog("hand tree    : tree_plant_bodies=%d. %s", g_tree_bodies,
+         g_tree_bodies != 0
+             ? "The answer for a tree in the Hand has the test of the game for "
+               "a body in the way of the tree"
+             : "The answer for a tree in the Hand has no test of a body in the "
+               "way of the tree");
 }
 
 // The roots piles of the game: a list of entries (next, LH3DObject, life).
@@ -6510,6 +6758,16 @@ void TreeReleaseFrame() {
         *reinterpret_cast<const int32_t*>(object + kTreeBurning) != 0;
     g_tree_verdict = tree_plant_math::ReleaseVerdict(
         height_m, ThrowPhysicsFallLimitM(), lean_x, lean_z, dry, burning);
+    // The release raises the tree over a body in its way, and then it does
+    // not plant the tree (docs/grab.md, "The test of a body in the way").
+    bool in_way = false;
+    if (g_tree_verdict == tree_plant_math::kPlants && g_tree_bodies != 0) {
+      TreeBodyAnswer answer;
+      if (TreeBodyTest(held, &answer) && answer.in_way) {
+        in_way = true;
+        g_tree_verdict = tree_plant_math::kInTheWay;
+      }
+    }
     g_tree_height_cm = height_m * 100.0f;
     g_tree_lean[0] = lean_x;
     g_tree_lean[1] = lean_z;
@@ -6520,13 +6778,13 @@ void TreeReleaseFrame() {
         ModLog("hand tree    : the tree %p in the Hand: an opening of the grip "
                "now %s (the hand is %.1f cm over the land and the limit is "
                "%.0f cm, the tree leans %.2f and %.2f rad, dry land %d, fire "
-               "%d), frame %llu",
+               "%d, a body in the way %d), frame %llu",
                held,
                g_tree_verdict == tree_plant_math::kPlants
                    ? "plants it"
                    : "does not plant it, and the tree falls",
                g_tree_height_cm, ThrowPhysicsFallLimitM() * 100.0f, lean_x,
-               lean_z, dry ? 1 : 0, burning ? 1 : 0, g_frame);
+               lean_z, dry ? 1 : 0, burning ? 1 : 0, in_way ? 1 : 0, g_frame);
       }
     }
     g_tree_held = held;
@@ -6589,6 +6847,12 @@ void TreeReleaseFrame() {
              g_tree_watch, g_frame, over, lean_x, lean_z,
              g_tree_watch_height_cm);
       LogTreeBodies(g_tree_watch);
+      // The bodies of the last test, beside the bodies that the game made.
+      if (g_tree_bodies != 0 &&
+          (g_tree_watch_verdict == tree_plant_math::kPlants ||
+           g_tree_watch_verdict == tree_plant_math::kInTheWay)) {
+        TreeBodyLogAfterRelease(g_tree_watch);
+      }
     }
     if (physics) g_tree_watch_physics = true;
     static void* said = nullptr;
@@ -6772,7 +7036,8 @@ void FarFrameStep(bool active) {
                ? *reinterpret_cast<void* const*>(g_hand + kHandHeld)
                : nullptr;
   f.hand_state = g_hand != nullptr ? State(g_hand) : 0;
-  f.take = g_face != nullptr ? TakeObject(g_face) : nullptr;
+  // A bulk take, or the totem that the Hand moves (SelectSource).
+  f.take = g_face != nullptr ? SelectSource(g_face) : nullptr;
   const float life = HeadPoseScale();
   if (active && FarGrabOn()) {
     f.usable = true;
@@ -6864,6 +7129,23 @@ void InstallNear() {
   if (g_touch_cm < 0) g_touch_cm = 0;
   if (g_touch_cm > g_pick_cm) g_touch_cm = g_pick_cm;
   g_palm_search = IniKey("palm_search", 0) != 0;
+  g_target_check = IniKey("target_check", 1) != 0;
+  g_gone_test_frame =
+      static_cast<uint64_t>(IniKey("target_check_test_frame", 0));
+  ModLog("hand pick    : target_check=%d. %s", g_target_check ? 1 : 0,
+         g_target_check
+             ? "At the start of each frame and before the mod puts its "
+               "target in the pick record, a target that the game deleted "
+               "is dropped"
+             : "The mod puts its target of the last draw in the pick record "
+               "with no check that it lives");
+  g_fish_take = IniKey("fish_take", 1) != 0;
+  g_fish_off_frame = static_cast<uint64_t>(TestKey("fish_test_off_frame"));
+  ModLog("hand fish    : fish_take=%d: %s", g_fish_take ? 1 : 0,
+         g_fish_take ? "a fish farm in the sea is a target of the grip at "
+                       "the Hand and at a distance, and the grip takes fish"
+                     : "a fish farm is no target, because the game does not "
+                       "draw it");
   g_stroke_mode = IniKey("creature_stroke_hand", 0);
   if (g_stroke_mode < 0 || g_stroke_mode > 3) g_stroke_mode = 0;
   // -1 says that the ini has no creature_slap_mps: the fist stroke then has
@@ -7440,6 +7722,35 @@ ScriptWordFn o_ScriptDistance = nullptr;
 ScriptWordFn o_ScriptPosView = nullptr;
 ScriptWordFn o_ScriptThingView = nullptr;
 ScriptWordFn o_ScriptThingSees = nullptr;
+// THE CAMERA MOVES THAT A SCRIPT SEES (script_camera_moves). Two words of the
+// scripts ask what the player does with the camera [V: the disassembly and
+// challenge.chl]:
+// - GScript::GetHandState pushes the interface hand mode (GInterface +
+//   0x3AC) as an int. The interface state LANDSCAPE_LOCK (0x005D8090) gives
+//   0x14 while the Move Button holds the land, and 0x16 while both buttons
+//   hold it and the camera can zoom. TeachRotate, TeachZoom,
+//   MoveAroundMountain and ZoomInAndOut read it.
+// - GScript::WithinRotation pushes the arrows of the camera that show
+//   (0x00C5B0F4, which CameraModeNew3::UpdateTricons sets in each frame).
+//   Bit 2 is the rotate arrow. MoveAroundMountain of the Gods' Playground
+//   waits for it.
+// In the God view a zoom, a turn and a grip on the land give the value that
+// the game gives for the same move with the mouse (near_math::ScriptHandState
+// and ScriptArrows). The game's word runs first, and the mod changes its
+// answer on the stack.
+const uintptr_t kScriptHandState = 0x006FF730;
+const uintptr_t kScriptArrows = 0x0070B9D0;
+const uintptr_t kCameraFeatures = 0x009CDD6C;  // CameraHelp::EnabledFeatures
+const int kHelpTurnLow = 0x0;  // camera help event 0x300: the camera turned
+const int kHelpZoomLow = 0x4;  // 0x304: the camera zoomed
+ScriptWordFn o_ScriptHandState = nullptr;
+ScriptWordFn o_ScriptArrows = nullptr;
+// The changed answers of this report window, and the last pair of the game's
+// answer and the mod's answer that the log named, for each word.
+uint64_t g_moves_answers = 0;
+unsigned g_moves_said[2][2] = {{~0u, ~0u}, {~0u, ~0u}};
+int g_moves_logs = 0;
+const int kMaxMovesLogs = 24;
 // The player of the last frame: the head and the hands in the world, the
 // axes of the head (right, up and forward), and the view angle of the frame.
 struct ScriptPlayer {
@@ -7625,6 +7936,77 @@ void __cdecl h_ScriptThingSees() {
   ++g_script_answers;
 }
 
+// The moves of the God view, at the moment of the word.
+near_math::ViewMoves ScriptViewMoves() {
+  near_math::ViewMoves moves = {false, false, false};
+  int32_t at = 0, now = 0;
+  if (ComfortCameraHelpClock(kHelpTurnLow, &at, &now)) {
+    moves.turned = near_math::HelpRecent(true, at, now);
+  }
+  if (ComfortCameraHelpClock(kHelpZoomLow, &at, &now)) {
+    moves.zoomed = near_math::HelpRecent(true, at, now);
+  }
+  moves.land_held = ControllersGrabHeld();
+  return moves;
+}
+
+const char* ScriptMoveWhy(const near_math::ViewMoves& moves, int word,
+                          unsigned answer) {
+  if (word == 0 && answer == near_math::kHandZoomHold) {
+    return "the view zoomed in the last two game turns, which is the hold of "
+           "both buttons";
+  }
+  if (moves.turned) {
+    return word == 0 ? "the view turned in the last two game turns, which is "
+                       "the hold of the Move Button at the rotate arrow"
+                     : "the view turned in the last two game turns";
+  }
+  return "a grip holds the land, which is the hold of the Move Button";
+}
+
+// The game's word pushed its answer. The mod takes it off the stack and
+// pushes the answer of the moves of the God view, with the same type.
+void ScriptMoveAnswer(int word) {
+  uint8_t* machine = *reinterpret_cast<uint8_t* const*>(kScriptMachine);
+  if (machine == nullptr || g_script_moves == 0 || !ScriptPlayerNow()) return;
+  const ScriptPopFn pop = reinterpret_cast<ScriptPopFn>(kScriptPop);
+  const ScriptPushFn push = reinterpret_cast<ScriptPushFn>(kScriptPush);
+  int type = 0;
+  const uint32_t game = pop(machine, nullptr, &type);
+  const near_math::ViewMoves moves = ScriptViewMoves();
+  const unsigned features =
+      *reinterpret_cast<const uint32_t*>(kCameraFeatures);
+  const unsigned answer =
+      word == 0 ? near_math::ScriptHandState(game, moves, features)
+                : near_math::ScriptArrows(game, moves, features);
+  push(machine, nullptr, answer, type);
+  if (answer == game) return;
+  ++g_moves_answers;
+  if (g_moves_said[word][0] == game && g_moves_said[word][1] == answer) {
+    return;
+  }
+  g_moves_said[word][0] = game;
+  g_moves_said[word][1] = answer;
+  if (g_moves_logs >= kMaxMovesLogs) return;
+  ++g_moves_logs;
+  ModLog("scripts      : a script asked %s. The game said 0x%X, and the "
+         "script gets 0x%X: %s (script_camera_moves=1, camera controls 0x%X), "
+         "frame %llu",
+         word == 0 ? "for the hand state" : "if the rotate arrow shows",
+         static_cast<unsigned>(game), answer,
+         ScriptMoveWhy(moves, word, answer), features, g_frame);
+}
+
+void __cdecl h_ScriptHandState() {
+  o_ScriptHandState();
+  ScriptMoveAnswer(0);
+}
+
+void __cdecl h_ScriptArrows() {
+  o_ScriptArrows();
+  ScriptMoveAnswer(1);
+}
+
 bool ScriptBytes(uintptr_t address, const uint8_t* bytes, size_t count) {
   const void* at = reinterpret_cast<const void*>(address);
   return !IsBadReadPtr(at, count) && memcmp(at, bytes, count) == 0;
@@ -7691,7 +8073,43 @@ void ScriptPlayerInstall() {
   }
   if (!distance) g_script_distance = 0;
   if (!view) g_script_view = 0;
-  g_script_hooked = distance || view;
+  // The two words that ask how the player moves the camera.
+  static const uint8_t kHandStateBytes[17] = {
+      0x8B, 0x0D, 0x5C, 0x19, 0xD0, 0x00, 0xE8, 0x15, 0x61,
+      0xE5, 0xFF, 0x8B, 0x80, 0xAC, 0x03, 0x00, 0x00};
+  static const uint8_t kArrowsBytes[13] = {0xA1, 0xF4, 0xB0, 0xC5, 0x00,
+                                           0x8B, 0x0D, 0x10, 0x5C, 0xD9,
+                                           0x00, 0x6A, 0x06};
+  bool moves = false;
+  g_script_moves = IniKey("script_camera_moves", 1) != 0 ? 1 : 0;
+  if (g_script_moves != 0) {
+    if (!ScriptBytes(kScriptHandState, kHandStateBytes,
+                     sizeof(kHandStateBytes)) ||
+        !ScriptBytes(kScriptArrows, kArrowsBytes, sizeof(kArrowsBytes))) {
+      ModLog("hooks        : GScript::GetHandState or GScript::WithinRotation "
+             "does not have the bytes of the disassembly, so a script that "
+             "asks how you move the camera gets the game's answer");
+    } else {
+      moves = Hook(kScriptHandState,
+                   reinterpret_cast<void*>(&h_ScriptHandState),
+                   reinterpret_cast<void**>(&o_ScriptHandState),
+                   "GScript::GetHandState (the moves of the God view)") &&
+              Hook(kScriptArrows, reinterpret_cast<void*>(&h_ScriptArrows),
+                   reinterpret_cast<void**>(&o_ScriptArrows),
+                   "GScript::WithinRotation (the turns of the God view)");
+    }
+  }
+  if (!moves) g_script_moves = 0;
+  ModLog("scripts      : script_camera_moves=%d. %s", g_script_moves,
+         g_script_moves != 0
+             ? "In the God view a script that asks how you hold the land, or "
+               "if the rotate arrow shows, gets the moves of the view: a zoom "
+               "is the hold of both buttons (hand state 0x16), a turn and a "
+               "grip on the land are the hold of the Move Button (0x14), and "
+               "a turn shows the rotate arrow. 0 gives the game's answers"
+             : "A script that asks how you hold the land, or if the rotate "
+               "arrow shows, gets the game's answer");
+  g_script_hooked = distance || view || moves;
   if (!g_script_hooked) return;
   ModLog("scripts      : script_distance=%d, script_view=%d. In the God view "
          "a script of the game that asks about the camera gets the player. "
@@ -7800,6 +8218,9 @@ void HandDirectFrame() {
     return;
   }
   ++g_active_frames;
+  // The game turn before this draw can have deleted the choice of the last
+  // draw. Each reader of the choice in this frame gets a live object or none.
+  KeepLiveChoice("at the start of the frame");
   {
     // The motion history of the throw and of the Creature.
     float reach_room[3], grip_room[3], room[9];
@@ -8005,6 +8426,13 @@ void HandDirectChooseNow() {
 
 // For hand_glow.cpp: hand_glow_idle, and its A/B key.
 bool HandDirectGlowIdle() { return g_glow_idle; }
+
+// For hint_card.cpp: a press with no object in the pick record acts on no
+// object now. The controller places the Hand, the rule is one target, and the
+// search at the palm is off (h_PalmSearch).
+bool HandDirectPalmOff() {
+  return g_installed && g_owns && g_one_target && !g_palm_search;
+}
 
 // For far_grab.cpp (docs/creature.md, "The leash from a distance"): the leash
 // click on the player's own Creature, as the game sends it after a short
@@ -8297,6 +8725,24 @@ void HandDirectGripOpened() {
 // choice all through the pass.
 void HandDirectPassBegin(int eye) {
   g_eye = eye;
+  // The test key target_check_test_frame: the choice of the last draw is a
+  // dead object now, as after a delete of the game in the game turn. Its
+  // first word points to a table of zeros, so a virtual call through it goes
+  // to address 0.
+  if (eye == 0 && g_gone_test_frame > 0 && !g_gone_test_done &&
+      g_active && g_near_pick && g_choice != nullptr && !g_choice_far &&
+      ControllersTestFrame(g_gone_test_frame, g_frame) >=
+          g_gone_test_frame) {
+    g_gone_test_done = true;
+    static void* s_zeros[0x200 / sizeof(void*)] = {};
+    static void* s_dead[0x100 / sizeof(void*)] = {};
+    s_dead[0] = s_zeros;
+    ModLog("hand pick    : test key target_check_test_frame=%llu. The target "
+           "%p (%s) becomes the dead object %p, frame %llu",
+           g_gone_test_frame, g_choice, ClassName(g_choice),
+           static_cast<void*>(s_dead), g_frame);
+    g_choice = s_dead;
+  }
   if (g_active && g_near_pick && g_choice != nullptr) Inject();
 }
 
@@ -8451,6 +8897,34 @@ bool HandDirectSeen(const float at[3], float radius) {
 }
 
 const char* HandDirectClass(void* object) { return ClassName(object); }
+
+// For crash_report.cpp: the Hand at a fault. The CHand and the GInterface of
+// the last frame, the Hand state, the hand mode, the object in the Hand and
+// the object of the next pick record, each with its class. The function only
+// reads, and it checks each pointer before the read. False with no CHand.
+bool HandDirectCrashFacts(int32_t* state, int32_t* mode, void** held,
+                          char* held_class, size_t held_size, void** next,
+                          char* next_class, size_t next_size,
+                          uint64_t* frame) {
+  *frame = g_frame;
+  if (g_hand == nullptr || IsBadReadPtr(g_hand, kHandHeld + sizeof(void*))) {
+    return false;
+  }
+  *state = State(g_hand);
+  *held = *reinterpret_cast<void* const*>(g_hand + kHandHeld);
+  strcpy_s(held_class, held_size,
+           *held != nullptr ? ClassName(*held) : "nothing");
+  *mode = 0;
+  *next = nullptr;
+  strcpy_s(next_class, next_size, "nothing");
+  if (g_face != nullptr &&
+      !IsBadReadPtr(g_face, kFaceNextObject + sizeof(void*))) {
+    *mode = *reinterpret_cast<const int32_t*>(g_face + kFaceHandMode);
+    *next = *reinterpret_cast<void* const*>(g_face + kFaceNextObject);
+    if (*next != nullptr) strcpy_s(next_class, next_size, ClassName(*next));
+  }
+  return true;
+}
 
 // For creature_command.cpp: a living thing, by the class test of the value of
 // far_grab_choice in use (FarLiving).
@@ -8799,6 +9273,10 @@ bool PlanPoint(int word, float out[3]) {
           continue;
         }
       } else if (!TakeValid(c.object, status)) {
+        continue;
+      } else if (TestKey("fish_test_only") != 0 && !IsFishFarm(c.object)) {
+        // The test key fish_test_only=1: the word "pile" goes to a fish
+        // farm only.
         continue;
       }
       const float d = Distance(c.position, g_target);
@@ -9688,6 +10166,9 @@ bool HandDirectSeekFarPoint(float out[3]) {
     }
     if (bulk) {
       if (!TakeValid(c.object, status)) continue;
+      // The test key fish_test_only=1: the aim goes to a fish farm only.
+      static const bool fish_only = TestKey("fish_test_only") != 0;
+      if (fish_only && !IsFishFarm(c.object)) continue;
     } else if (only == 1) {
       // The test of a fetch from a forest aims at the nearest forest.
       if (!IsForest(c.object)) continue;
@@ -10001,6 +10482,12 @@ uint64_t HandDirectTakeScriptAnswers() {
 // Once a report window.
 void HandDirectReport() {
   ForestTakeReport();
+  if (g_moves_answers != 0) {
+    ModLog("scripts      : %llu answers to a script that asked how you hold "
+           "the land or if the rotate arrow shows came from the moves of the "
+           "God view (script_camera_moves=1)", g_moves_answers);
+    g_moves_answers = 0;
+  }
   if (!g_installed || g_active_frames == 0) return;
   ModLog("hand         : the controller placed the Hand on %llu frames: %llu "
          "depths, %llu poses, %llu rays, %llu picks put in, %llu far picks "
@@ -10061,6 +10548,12 @@ void HandDirectReport() {
            "(fight_grip=%d), this window", g_fight_rays, g_fight_hits,
            g_fight_game_hits, g_fight_grip ? 1 : 0);
     g_fight_rays = g_fight_hits = g_fight_game_hits = 0;
+  }
+  if (g_target_gone != 0) {
+    ModLog("hand pick    : %llu targets were gone at the start of a frame or "
+           "before the pick record, and the mod dropped them (target_check=1), "
+           "this window", g_target_gone);
+    g_target_gone = 0;
   }
   if (g_presses != 0 || g_palm_asks != 0 || g_record_puts != 0 ||
       g_record_clears != 0) {

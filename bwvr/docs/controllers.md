@@ -602,7 +602,9 @@ The mouse keeps working all the time. One owner at a time:
 - The pointer stays where the last owner left it. The log names each change.
 
 `test_keys=1` and Ctrl+F12 cycle the owner: automatic, controller only, mouse
-only. This gives an A/B in one run. F11 and F12 are the only keys the mod
+only. This gives an A/B in one run. The test key `mouse_owner_test_frame=<frame>`
+gives the owner "mouse only" at that frame, for a desktop run in which the game
+places the Hand (`ui-layer.md`, 15.6). F11 and F12 are the only keys the mod
 reads for itself. Ctrl held with the mouse at rest does not start the zoom of
 the game.
 
@@ -852,7 +854,7 @@ The script is a list of `input@frame+frames`, separated by spaces. The input
 is a word from the table. `frame` is the frame at which it starts. `frames` is
 how many frames it lasts. The mod counts frames from the first frame of the
 controllers (one for each frame that draws the world). A word that does not
-parse is logged and skipped. The script has 64 words at most and 1023
+parse is logged and skipped. The script has 192 words at most and 4095
 characters at most.
 
 ```ini

@@ -29,7 +29,17 @@ param(
     [Parameter(Mandatory = $true)][string]$Live
 )
 
+. (Join-Path $PSScriptRoot 'android_env.ps1')
 $ErrorActionPreference = 'Continue'
+# adb starts its server at its first call, and the server keeps the handles
+# that it gets from the process that starts it. A server that a test of the
+# chain starts keeps the output pipe of the chain open, and the chain then
+# waits for that pipe with no end. So the chain starts the server first,
+# through the shell of Windows, and the server gets no handle of the chain.
+# The chain waits for the client of adb only: -Wait of Start-Process would
+# also wait for the server, which runs on.
+$client = Start-Process -FilePath $Adb -ArgumentList 'start-server' -WindowStyle Hidden -PassThru
+$client.WaitForExit()
 $Bwvr = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $Out = Join-Path $Bwvr 'out\android\emu-all'
 New-Item -ItemType Directory -Force -Path $Out | Out-Null

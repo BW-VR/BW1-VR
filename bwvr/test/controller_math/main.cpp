@@ -3530,6 +3530,7 @@ void CreatureChecks() {
 #include "polish_checks.h"
 #include "throw_checks.h"
 #include "window_checks.h"
+#include "story_start_checks.h"
 #include "intro_skip_checks.h"
 #include "intro_motion_checks.h"
 #include "eye_clean_checks.h"
@@ -3942,6 +3943,7 @@ int main() {
   command_checks::CommandChecks();
   command_checks::LiveChecks();
   window_checks::WindowChecks();
+  story_start_checks::StoryStartChecks();
   intro_skip_checks::IntroSkipChecks();
   intro_motion_checks::IntroMotionChecks();
   eye_clean_checks::EyeCleanChecks();

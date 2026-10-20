@@ -567,9 +567,18 @@ that moves while the Hand takes it.
   of the Creche, or the story to the pen) that shows the lines of the hold
   and no frame of the story camera before the first flat frame. Check in a
   headset that the walls close over the land with no jump, at the scroll of
-  the Creche, and compare with Shift S (`test_keys=1`). Not known: how long
-  a script waits between the camera and the bars. A story camera with no
-  bars gets the full view after `cutscene_hold_wait_ms` (1000).
+  the Creche, and compare with Shift S (`test_keys=1`). The scroll of a silver
+  quest moves the camera for about 8 s before its bars, so the hold ends
+  after `cutscene_hold_wait_ms` (1000) and the full view shows the move,
+  which starts at the head (P19). The hold needs the window: with "Around
+  you" it does not act.
+- **P19. A story starts at the head: check it in a headset.** When a script
+  takes the camera in the God view, the game camera goes to the head, so the
+  move of the story starts there and not 300 units above the player
+  (`story_start_at_head=1`, `god-view.md`, section 17). Check in a headset,
+  with "Around you" and with the window: the scroll of a silver quest, the
+  cut to the life size scale at the head, and the move after it. The A/B key
+  is Ctrl, Shift and S.
 - **P5. Hand tracking.** The player plays with the hands and no
   controllers: the Hand follows the real hand and its fingers, one to one,
   as it follows a controller. First find what the headset gives to the

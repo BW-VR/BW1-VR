@@ -39,6 +39,7 @@
 #include "../proxy/ddraw_proxy.h"
 #include "render_thread.h"
 #include "tabletop.h"
+#include "story_start.h"
 #include "far_grab.h"
 #include "take_stream.h"
 #include "target_glow.h"
@@ -413,6 +414,9 @@ int g_script_close_zoom = -1;
 int g_script_cut_degrees = -1;
 int g_script_cut_percent = -1;
 bool g_script_follow = true;
+// A story starts at the head: the move of a story starts at the head of
+// the player in the God view (story_start.cpp).
+bool g_story_start_at_head = true;
 // The mouse part of a land drag is smoothed over this many milliseconds.
 int g_drag_smoothing_ms = 35;
 // The sun glare: 0 through the eye camera, 1 as the game draws it, 2 hidden.
@@ -1076,6 +1080,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "script_camera_cut_percent", -1, path));
   g_script_follow =
       GetPrivateProfileIntA("bwvr", "script_camera_follow", 1, path) != 0;
+  g_story_start_at_head =
+      GetPrivateProfileIntA("bwvr", "story_start_at_head", 1, path) != 0;
   // Not in the launcher. Tests in the headset chose these values: the drag
   // smoothing, the sun glare, the cloud pole, the cinema bars and the
   // advisors.
@@ -1675,6 +1681,8 @@ void StartVrStep() {
                            g_script_close_zoom, g_script_cut_degrees,
                            g_script_cut_percent, g_script_follow);
     ScriptCameraInstall();
+    StoryStartSetOptions(g_story_start_at_head);
+    StoryStartInstall();
     PointerMapSetDragSmoothing(g_drag_smoothing_ms);
     PointerMapSetFakeMouse(g_fake_mouse_script, g_fake_mouse_step_px,
                            g_fake_mouse_x_pct, g_fake_mouse_y_pct);

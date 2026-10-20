@@ -66,6 +66,7 @@
 #include "../vr/xr_screen.h"
 #include "bubble_card.h"
 #include "cutscene_window.h"
+#include "story_start.h"
 #include "frame_profile.h"
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
@@ -794,6 +795,8 @@ bool D3D9KeyHere(const char* keys) {
 //   Shift S     when a story takes the camera, the God view keeps its view
 //               until the cut scene window is closed, or the full view
 //               shows the story camera (cutscene_hold, cutscene_window.cpp)
+//   Ctrl Shift S  the move of a story starts at the head, or at the camera
+//               of the game (story_start_at_head, story_start.cpp)
 //   Ctrl Shift Numpad Slash  the mod waits for the GPU after each eye pass,
 //               one time a frame, or one time a frame on a second thread
 //               that also gives the frame to the runtime (frame_send,
@@ -817,12 +820,12 @@ bool D3D9KeyHere(const char* keys) {
 // values chosen. The ini keys stay, except the ones the launcher rewrites on
 // every save. See launcher.cpp, kRetiredKeys.
 void PollHotkeys() {
-  const int kKeys = 11;
+  const int kKeys = 12;
   static bool down[kKeys] = {false, false, false, false, false, false,
-                             false, false, false, false, false};
+                             false, false, false, false, false, false};
   const int keys[kKeys] = {VK_F11,    VK_F12,    VK_NUMPAD0, VK_NUMPAD1,
                            VK_INSERT, VK_DELETE, VK_HOME,    VK_CANCEL,
-                           VK_MULTIPLY, VK_NEXT, VK_DIVIDE};
+                           VK_MULTIPLY, VK_NEXT, VK_DIVIDE, 'S'};
   bool now[kKeys];
   for (int i = 0; i < kKeys; ++i) {
     now[i] = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
@@ -919,6 +922,12 @@ void PollHotkeys() {
     // key of the throw (throw_physics.cpp).
     if (g_test_keys && now[10] && !down[10] && ctrl && shift) {
       FrameSendCycle("Ctrl, Shift and the slash key of the number pad");
+    }
+    // An A/B of the start of a story at the head (docs/god-view.md, "A
+    // story starts at the head"). Shift and S with no Ctrl is the key of
+    // cutscene_hold (cutscene_window.cpp).
+    if (g_test_keys && now[11] && !down[11] && ctrl && shift) {
+      StoryStartToggle("Ctrl, Shift and S");
     }
   }
   // Kept up to date without focus too, so a key that is already down when
@@ -1925,6 +1934,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     const uint64_t save = CutsceneWindowEndFrame(g_frames);
     if (save != 0) EyeCaptureArmNow(save);
   }
+  StoryStartFrame(g_frames);
 
   if (profile) {
     FrameProfileStereoFrame(ControllersFrameCount());
@@ -2056,6 +2066,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     ComfortCameraReport();
     ScriptCameraReport();
     CutsceneWindowReport();
+    StoryStartReport();
     UiDepthReportHelp();
     UiPanelReport();
     SkyDetailReport();

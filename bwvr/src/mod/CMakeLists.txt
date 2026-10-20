@@ -55,6 +55,7 @@ add_library(bwvr_mod SHARED
     game_start.cpp
     comfort_camera.cpp
     script_camera.cpp
+    story_start.cpp
     cutscene_window.cpp
     sky_detail.cpp
     spirit_anchor.cpp

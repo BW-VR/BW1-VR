@@ -917,7 +917,8 @@ try rotating first." after three seconds and starts again.
 The story plays at the life size scale, as in the immersive mode. When the
 player's camera is back, the God view is built again at the game camera, with
 the last scale and the last ground height (section 15). Ctrl F11 and a new
-land build it again the same way.
+land build it again the same way. The move of a story starts at the head of
+the player, not at the game camera of the God view (section 17).
 
 **Cut scenes.** A cut scene does not play in the full view. While the cinema
 bars of the game are up, the view closes to a screen 2 m ahead, and the game
@@ -1369,6 +1370,7 @@ the walk with the stick are in section 5.7.
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
+| `story_start_at_head` | 1 | 1: when a script takes the camera, the game camera goes to the head, so the move of the story starts there (section 17). 0: the move starts at the game camera of the God view |
 | `god_spawn` | 1 | 1: the player goes where the game puts its own camera (section 15). 0: the view is built at the start, a load and the end of a story only, with the focus under the recenter pose |
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
 | `god_camera_at` | 1 | 1: the game camera is over the land point under the head. 0: over the recenter place (section 7). Ctrl and Numpad 1 change it with `test_keys=1` |
@@ -1426,6 +1428,7 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | `src/mod/controllers.cpp` | The sticks (`PumpStick`, and `PumpWalk` for the walk), the layout of the buttons (`ButtonLayout`), the menu button (`PumpEsc`), the pointer mode while a dialog box is up (`DirectHandNow`, `ControllersMenuRay`), the grip points and the fake left hand |
 | `src/mod/script_camera.cpp` | `ScriptCameraStoryOwns`, and `ScriptCameraOwnerNow` for the scripts |
 | `src/mod/hand_direct.cpp`, `near_math.h` | The player that a script sees: the hooks on the six script words, the latch of the player and the test of section 16.4 (`ScriptPlayerNow`, `PlayerDistance`, `PlayerIsCamera`, `HeadSees`), and the camera moves of section 16.6 (`ScriptMoveAnswer`, `ScriptHandState`, `ScriptArrows`, `HelpRecent`) |
+| `src/mod/story_start.cpp`, `story_start_math.h` | The start of a story at the head: the hook on `GScript::StartCameraControl` and the camera at the head (section 17) |
 | `src/mod/cutscene_window.cpp`, `cutscene_window_math.h` | The cut scene window: the signal, the state of each frame, the screen and the walls (`cutscene-window.md`) |
 | `src/mod/mod_main.cpp`, `src/launcher/launcher.cpp` | The play modes, the default, and the keys |
 
@@ -2596,3 +2599,81 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   the Island Keeper of the Gods' Playground, the mother of `FollowUs`. It can
   also show if the nearest hand is the right point for a real player, and if
   a script that deletes a thing behind the head is good in VR.
+
+## 17. A story starts at the head
+
+The code is in `story_start.cpp` and `story_start_math.h`.
+
+### 17.1 Why
+
+The game camera of the God view is 400 units from the player and about 300
+units above the land (section 7). A script takes the camera with
+`START_CAMERA_CONTROL` (`GScript::StartCameraControl` `0x006ECCA0`), which
+pushes `CameraModeScript`. Then `MOVE_CAMERA_POSITION` and
+`MOVE_CAMERA_FOCUS` ease the six Zoomers of `GCamera` from where they are
+(`CameraModeScript::MoveCameraPosition` `0x004616F0` calls
+`Zoomer::SetDestinationWithSpeedAndTime` `0x00407D60`) [V]. So the move of a
+story starts far above the player. The scroll of a silver quest is an
+example: its script flies the camera to the scroll for about 8 s, and the
+cinema bars come only after that. In the plain game the move starts at the
+camera of the player, which shows what the player saw.
+
+### 17.2 The rule
+
+- A hook on `GScript::StartCameraControl` reads the top camera mode before
+  and after the call. When the call pushed `CameraModeScript` over a mode of
+  the player, and the God view owned the last frame, the mod puts the six
+  Zoomers at the head of that frame with `Zoomer::SetPosition`
+  `0x00441AC0`: the position at the render head in the world, and the focus
+  one meter of the room ahead of it along the forward axis of the head, at
+  least 10 units (`story_start_math::StartPose`).
+- The next move of the script then starts at the head. A cut of the script
+  (`SET_CAMERA_POSITION`) still cuts.
+- A script that takes the camera again in its story changes nothing: a
+  story mode was on top already.
+- The rule is the same with the cut scene window and with "Around you"
+  (`cutscene_immersive=1`). With the window, the hold of the God view comes
+  first (`cutscene-window.md`, section 3). A story camera that waits longer
+  than `cutscene_hold_wait_ms` for its bars then shows a move that starts at
+  the head.
+- At the start the view goes from the scale of the God view to the life size
+  scale in one cut, at the place of the head. The move of the story comes
+  after the cut.
+- A script that keeps the camera after `START_CAMERA_CONTROL` to put it back
+  at its end keeps the camera at the head. The God view is then built at the
+  land that the head looked at (section 15.4), and not at its place of
+  before the story (section 15.5).
+
+### 17.3 The keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `story_start_at_head` | 1 | 1 is this section. 0 leaves the game camera where the God view put it |
+
+With `test_keys=1`, Ctrl, Shift and S change it. It acts at the next story.
+
+The tag is `story start`. At the start one line gives the key. Each story
+start has one line with the camera of the game before and after the write.
+The three frames after it each have a line with the camera of the game and
+its distance from the head of the start. The report has the count of the
+starts.
+
+### 17.4 Tests and what needs the headset
+
+The math test (`story_start_checks.h`) covers the rule (each condition) and
+the camera at the head: the position, the focus 100 units ahead at 100 units
+a meter, the pitch and the heading of the head, the least distance at the
+life size scale, a head with no forward axis, and a value that is not a
+number.
+
+A desktop run of a new game on Land 1 (`throw_queue.ps1 -Runs land
+-NewGame`) shows the start of the first story: the script took the camera
+at 1486.3 26.7 1973.7, and the mod put it at the head at 1462.1 60.0 2032.3,
+71.6 units away. In the three frames after it the camera of the game was
+0.0 units from the head. The story ran to its end, and the God view was
+built again at the game camera.
+
+- **Only the headset can show** whether the cut to the life size scale at
+  the head, and the move after it, feel right. Not run: the scroll of a
+  silver quest, a story with the cut scene window that waits for its bars,
+  and a script that puts the camera back at its end.

@@ -860,5 +860,6 @@ pictures (`cutscene_window_capture=1`) are the proof. The checks are:
 - **The table** (play mode 3) has no window. Its stories play on the table.
 - **The hold of the God view** (section 3) has no desktop run yet, and only
   the headset can show that the walls close over the land with no jump.
-  Not known: how long a script of the game waits between the camera and the
-  bars, and whether 1000 ms covers each story.
+  The scroll of a silver quest moves the camera for about 8 s before its
+  bars, past `cutscene_hold_wait_ms`. The full view then shows that move,
+  and it starts at the head (`god-view.md`, section 17).

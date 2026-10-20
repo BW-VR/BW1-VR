@@ -58,6 +58,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/render_thread.cpp`, `render_thread_ring.h` | The hooks of the Direct3D 9 device, and the render thread (`render_thread`) |
 | `src/mod/fast_transform.cpp`, `fast_transform_math.h` | The two vertex loops of the engine with SSE (`fast_transform`) |
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`) |
+| `src/mod/block_watch.cpp`, `large_block_math.h` | The large blocks of the heap and of VirtualAlloc with their places, for the line of the address space (`memory_blocks`) |
 | `src/mod/memory_watch.cpp` | The line of the address space each 20 s, on a thread of its own (`memory_log`, `address_space_math.h`) |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`) |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
@@ -1478,6 +1479,27 @@ and the change since the first line and per minute. The sums are in
 `address_space_math.h`. A walk takes some milliseconds, so it is not on the
 frame thread, and it only reads. When the largest free run is under 64 MB,
 one more line says so. `memory_log=0` writes no line.
+
+**The large blocks.** With `memory_blocks=1` (the default, `block_watch.cpp`)
+hooks of ntdll count each block of 256 KB or more while it lives: the
+blocks of each heap (`RtlAllocateHeap`, `RtlReAllocateHeap`, `RtlFreeHeap`,
+so `HeapAlloc`, `malloc` and `new` of each C runtime), and the regions of
+`VirtualAlloc` (`NtAllocateVirtualMemory` with `MEM_RESERVE`,
+`NtFreeVirtualMemory` with `MEM_RELEASE`), also of a driver. A region that a
+heap makes for a large block of its own is not counted again. A block gets a
+place: the first 4 return addresses on the stack of the call outside ntdll,
+KernelBase and kernel32. The stack is read from the return address of the
+call up, and a word counts when it is in an image with code and the bytes
+before it end with a call. A word that only looks like a return address can
+pass. After each line of the address space, one line gives the live large
+blocks (heap and VirtualAlloc) and the change since the line before, and up
+to 6 lines give the places with the most live bytes, each with its blocks,
+its bytes, its change and its calls as "module+offset". Blocks from before
+the start of the mod are not counted, and `HeapDestroy` frees blocks with no
+hook: a new block at the same address takes the old one out of its place. A
+small block costs a compare in the hook, a large block a walk of the stack,
+and a free a look in the table with no lock. `memory_blocks=0` installs no
+hook.
 
 **The split in a headset.** SteamVR with a Steam Frame, Ryzen 9 7950X3D,
 Radeon RX 7900 XTX, a render of 3304 by 2644 with 4x multisampling,
@@ -4870,6 +4892,7 @@ keys that the launcher sets.
 | `fast_transform` | 1 | 1: the two vertex loops of the engine run with SSE, with the bits of the game. 0: on the x87 unit. See "The vertex loops with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `memory_log` | 20 | Each N seconds a line of the use of the address space of 2 GiB, the largest free run and the heap of the game. 0: no line. See "The address space" |
+| `memory_blocks` | 1 | 1: the line of the address space also gives the live large blocks (256 KB or more) of the heap and of VirtualAlloc and the 6 places with the most bytes. 0: no hook. See "The large blocks" |
 | `hang_watch` | 0 | A test key: 1 the place of the frame thread when it makes no frame for 8 s, 2 each 8 s. With each of the two the place of a fault. See "The watch of the frame thread" |
 | `vk_lines` | 1 | With `backend=vulkan`: 1 a draw of points or lines becomes triangles of 1 pixel across, 0 it is not drawn. See "The backend of the mod on Vulkan" |
 | `vk_keep_picture` | 1 | With `backend=vulkan`: 1 a walk with no clear of the whole target before its first draw starts with the picture of the walk before, and the intro in stereo keeps the picture of each eye. 0 each walk starts black. A test key: Shift T. See "The picture of the walk before" |

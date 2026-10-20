@@ -38,7 +38,6 @@ param(
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
-if (Test-Path -LiteralPath 'C:\Users\chris\AppData\Local\Temp\claude\D--Programmieren-BW1-VR\2fcc6cd4-74ed-4eae-9d1d-ce8b59c86a22\scratchpad\PAUSE') { 'NOT RUN: paused by the main session'; exit 7 }
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $sp 'game.ps1')
 $writer = Join-Path $sp '..\..\build\test\input_writer\Release\bwvr_input_writer.exe'

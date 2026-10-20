@@ -43,6 +43,7 @@
 
 #include "../vr/xr_screen.h"
 #include "intro_skip_math.h"
+#include "xr_input.h"
 
 extern void ModLog(const char* format, ...);
 // controllers.cpp: the triggers and the face buttons that are down, as the
@@ -177,6 +178,11 @@ void IntroSkipFrame(uintptr_t caller, bwvr::XrScreen* screen) {
   if (screen != nullptr && screen->running()) {
     down |= HandBits(screen->hand(0), 0, &awake);
     down |= HandBits(screen->hand(1), 1, &awake);
+  } else if (XrInputOn()) {
+    // The hands of the input channel of the headset app (xr_input=1).
+    XrInputLatch();
+    down |= HandBits(XrInputHand(0), 0, &awake);
+    down |= HandBits(XrInputHand(1), 1, &awake);
   }
   const bool test = part != intro_skip::kNone && g_test_frame != 0 &&
                     g_intro_frames == g_test_frame;

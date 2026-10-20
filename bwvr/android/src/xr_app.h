@@ -20,6 +20,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#include "../../src/common/input_channel.h"
 #include "../../src/mod/vk_core.h"
 #include "gpu.h"
 
@@ -66,6 +67,22 @@ class XrApp {
                 float cursor_size);
   // A short pulse on one hand, for example when the highlight moves.
   void Pulse(int hand);
+  // A pulse of the mod (the ring of the events of the input channel):
+  // amplitude 0 to 1, seconds.
+  void PulseWith(int hand, float amplitude, float seconds);
+
+  // THE INPUT OF THE MOD (input_live=1, docs/android.md, "The input
+  // channel"). Call SetInputLive before Start: the session then has the
+  // actions of the mod as well (the grip pose, the trigger and the squeeze
+  // as values, the stick click, the face buttons and the menu button), with
+  // the bindings of xr_screen.cpp of the PC. After BeginFrame, InputSlot
+  // gives what the mod reads from a session of its own: the views of the
+  // eyes (xrLocateViews), the hands after xrSyncActions, the display time of
+  // the frame, the focus, the count of the recenters and the profiles. The
+  // poses are the poses of the runtime at the display time, with no
+  // smoothing and no prediction of the app.
+  void SetInputLive(bool on) { input_live_ = on; }
+  void InputSlot(input_channel::SlotData* out);
 
   // THE RENDERER OF THE MOD IN THE SESSION (docs/android.md, "The picture
   // of the renderer in the headset"). True when the device of the runtime
@@ -137,6 +154,22 @@ class XrApp {
   XrAction back_ = XR_NULL_HANDLE;
   XrAction stick_ = XR_NULL_HANDLE;
   XrAction haptic_ = XR_NULL_HANDLE;
+  // The actions of the mod (input_live=1).
+  bool input_live_ = false;
+  bool synced_ = false;  // xrSyncActions of this frame gave the input
+  XrAction grip_ = XR_NULL_HANDLE;
+  XrAction trigger_ = XR_NULL_HANDLE;
+  XrAction squeeze_ = XR_NULL_HANDLE;
+  XrAction stick_click_ = XR_NULL_HANDLE;
+  XrAction primary_ = XR_NULL_HANDLE;
+  XrAction secondary_ = XR_NULL_HANDLE;
+  XrAction menu_button_ = XR_NULL_HANDLE;
+  XrSpace grip_space_[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+  uint32_t recenters_ = 0;
+  uint32_t serial_[2] = {0, 0};
+  std::string profile_[2];
+  bool profiles_read_ = false;
+  void ReadProfiles();
   XrPath hands_[2] = {XR_NULL_PATH, XR_NULL_PATH};
   XrSpace aim_space_[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
 

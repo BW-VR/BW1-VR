@@ -93,6 +93,7 @@
 #include "../vr/xr_screen.h"
 #include "vk_scene.h"
 #include "intro_motion_math.h"
+#include "xr_input.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -399,6 +400,30 @@ void UpdateHead() {
       }
       g_screen->SetRenderPose(e, g_eye_position[e], orientation);
     }
+    g_have_eyes = true;
+  } else if (XrInputOn()) {
+    // The eyes of the input channel of the headset app (xr_input=1), as the
+    // eyes of the session, with no pose to declare: the app has the layers.
+    const bwvr::EyeView& left = XrInputEye(0);
+    const bwvr::EyeView& right = XrInputEye(1);
+    if (!left.valid || !right.valid) return;
+    float center[3];
+    for (int i = 0; i < 3; ++i) {
+      center[i] = (left.position[i] + right.position[i]) * 0.5f;
+      g_eye_position[0][i] = left.position[i];
+      g_eye_position[1][i] = right.position[i];
+    }
+    for (int i = 0; i < 4; ++i) {
+      g_eye_orientation[0][i] = left.orientation[i];
+      g_eye_orientation[1][i] = right.orientation[i];
+    }
+    const float dx = right.position[0] - left.position[0];
+    const float dy = right.position[1] - left.position[1];
+    const float dz = right.position[2] - left.position[2];
+    const float ipd = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (ipd > 0.03f && ipd < 0.12f) g_separation_m = ipd;
+    HeadPoseSetHead(center);
+    HeadPoseUpdate(center, left.orientation);
     g_have_eyes = true;
   } else if (HeadPoseFakeOn()) {
     float center[3];
@@ -733,6 +758,9 @@ void RunPair() {
       ++g_flat_frames;
       return;
     }
+  } else if (XrInputOn()) {
+    XrInputLatch();
+    if (XrInputTakeRecenter()) HeadPoseRecenter();
   }
 
   ++g_pairs;
@@ -756,8 +784,10 @@ void RunPair() {
   if (g_pairs == 1) FirstPair();
 
   // The menu button on either controller ends the intro on purpose.
-  if (g_to_headset) {
-    const bool menu = g_screen->hand(0).menu || g_screen->hand(1).menu;
+  if (g_to_headset || XrInputOn()) {
+    const bool menu = g_to_headset
+                          ? g_screen->hand(0).menu || g_screen->hand(1).menu
+                          : XrInputHand(0).menu || XrInputHand(1).menu;
     if (menu && !g_menu_before) {
       *DoneFlag() = 1;
       ModLog("intro        : the menu button ends the intro");

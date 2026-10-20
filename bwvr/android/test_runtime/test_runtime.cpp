@@ -14,7 +14,13 @@
 //   <frame> stick <hand> <x> <y>           the thumbstick
 //   <frame> capture <name>                 the images of the quads of this
 //                                          frame go to <name>-<layer>.bmp
+//   <frame> recenter                       the LOCAL space recenters (an
+//                                          event of a change of the space)
 //   <frame> exit                           the runtime ends the session
+//
+// The head stands still at the origin of the LOCAL space: each eye is 32 mm
+// to its side, with the angles of view below (xrLocateViews). The grip pose
+// of a hand is its aim pose.
 //
 // <hand> is left or right. The script is script.txt in the folder
 // /data/local/tmp/bwvr-xr, and the runtime writes report.txt and the
@@ -207,6 +213,12 @@ Instance* g_instance = nullptr;
 // The one session of a test run.
 Session* g_session = nullptr;
 long g_faults = 0;
+// The recenters of the script that the app did not poll yet.
+int g_recenters_due = 0;
+// The views of the head: the angles left, right, up and down in radians.
+const float kFov[4] = {-0.9425f, 0.8203f, 0.8901f, -0.9599f};
+const float kEyeX = 0.032f;
+bool g_views_said = false;
 
 void Fault(const char* format, ...) {
   char line[512];
@@ -454,7 +466,10 @@ void RunScript(Session* s) {
     Hand& h = s->hands[st.hand];
     if (st.what == "point") {
       PointAt(s, st.hand, st.layer, st.a, st.b);
-      Report("frame %ld point %d %d %.0f %.0f", s->frame, st.hand, st.layer, st.a, st.b);
+      const Hand& hp = s->hands[st.hand];
+      Report("frame %ld point %d %d %.0f %.0f pose %.4f %.4f %.4f %.4f %.4f %.4f %.4f", s->frame,
+             st.hand, st.layer, st.a, st.b, hp.position.x, hp.position.y, hp.position.z,
+             hp.orientation.x, hp.orientation.y, hp.orientation.z, hp.orientation.w);
     } else if (st.what == "trigger") {
       h.trigger = st.a != 0.0f;
       Report("frame %ld trigger %d %d", s->frame, st.hand, h.trigger ? 1 : 0);
@@ -464,6 +479,9 @@ void RunScript(Session* s) {
     } else if (st.what == "stick") {
       h.stick[0] = st.a;
       h.stick[1] = st.b;
+    } else if (st.what == "recenter") {
+      ++g_recenters_due;
+      Report("frame %ld recenter", s->frame);
     } else if (st.what == "exit" && !s->exit_asked) {
       s->exit_asked = true;
       Report("frame %ld exit", s->frame);
@@ -690,6 +708,17 @@ XrResult XRAPI_CALL DestroySession(XrSession session) {
 }
 
 XrResult XRAPI_CALL PollEvent(XrInstance, XrEventDataBuffer* event) {
+  if (g_recenters_due > 0 && g_session != nullptr) {
+    --g_recenters_due;
+    auto* e = reinterpret_cast<XrEventDataReferenceSpaceChangePending*>(event);
+    *e = {XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING};
+    e->session = reinterpret_cast<XrSession>(g_session);
+    e->referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+    e->changeTime = NowNs();
+    e->poseValid = XR_TRUE;
+    e->poseInPreviousSpace.orientation.w = 1.0f;
+    return XR_SUCCESS;
+  }
   if (g_events.empty()) return XR_EVENT_UNAVAILABLE;
   auto* e = reinterpret_cast<XrEventDataSessionStateChanged*>(event);
   e->type = XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED;
@@ -766,7 +795,10 @@ XrResult XRAPI_CALL LocateSpace(XrSpace space, XrSpace, XrTime, XrSpaceLocation*
   Session* s = g_session;
   if (s == nullptr) return XR_SUCCESS;
   const int hand = HandOf(g_instance, sp->subaction);
-  if (hand < 0 || !BoundTo(sp->of, g_instance, hand, "/input/aim/pose")) return XR_SUCCESS;
+  if (hand < 0 || (!BoundTo(sp->of, g_instance, hand, "/input/aim/pose") &&
+                   !BoundTo(sp->of, g_instance, hand, "/input/grip/pose"))) {
+    return XR_SUCCESS;
+  }
   where->pose.position = s->hands[hand].position;
   where->pose.orientation = s->hands[hand].orientation;
   where->locationFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
@@ -963,9 +995,57 @@ XrResult XRAPI_CALL GetActionStateBoolean(XrSession session, const XrActionState
   return XR_SUCCESS;
 }
 
-XrResult XRAPI_CALL GetActionStateFloat(XrSession, const XrActionStateGetInfo*, XrActionStateFloat* state) {
+XrResult XRAPI_CALL GetActionStateFloat(XrSession session, const XrActionStateGetInfo* info,
+                                        XrActionStateFloat* state) {
+  Session* s = reinterpret_cast<Session*>(session);
+  Action* a = reinterpret_cast<Action*>(info->action);
+  const int hand = HandOf(s->instance, info->subactionPath);
   state->isActive = XR_FALSE;
   state->currentState = 0.0f;
+  if (a->type != XR_ACTION_TYPE_FLOAT_INPUT) Fault("xrGetActionStateFloat of a %d action", a->type);
+  if (hand < 0) return XR_SUCCESS;
+  if (BoundTo(a, s->instance, hand, "/input/trigger/value")) {
+    state->isActive = XR_TRUE;
+    state->currentState = s->hands[hand].trigger ? 1.0f : 0.0f;
+  } else if (BoundTo(a, s->instance, hand, "/input/squeeze/value")) {
+    state->isActive = XR_TRUE;
+  }
+  return XR_SUCCESS;
+}
+
+XrResult XRAPI_CALL GetCurrentInteractionProfile(XrSession session, XrPath hand,
+                                                 XrInteractionProfileState* state) {
+  Session* s = reinterpret_cast<Session*>(session);
+  state->interactionProfile = XR_NULL_PATH;
+  if (s->instance->touch_bound && HandOf(s->instance, hand) >= 0) {
+    state->interactionProfile = PathOf(s->instance, "/interaction_profiles/oculus/touch_controller");
+  }
+  return XR_SUCCESS;
+}
+
+XrResult XRAPI_CALL LocateViews(XrSession session, const XrViewLocateInfo* info, XrViewState* state,
+                                uint32_t capacity, uint32_t* count, XrView* views) {
+  Session* s = reinterpret_cast<Session*>(session);
+  if (info->type != XR_TYPE_VIEW_LOCATE_INFO) Fault("xrLocateViews: a wrong type");
+  if (info->viewConfigurationType != XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO) Fault("xrLocateViews not stereo");
+  if (!s->begun) Fault("xrLocateViews before xrBeginSession");
+  *count = 2;
+  if (capacity == 0) return XR_SUCCESS;
+  if (capacity < 2) return XR_ERROR_SIZE_INSUFFICIENT;
+  state->viewStateFlags = XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT |
+                          XR_VIEW_STATE_POSITION_TRACKED_BIT | XR_VIEW_STATE_ORIENTATION_TRACKED_BIT;
+  for (int e = 0; e < 2; ++e) {
+    if (views[e].type != XR_TYPE_VIEW) Fault("xrLocateViews: a view of a wrong type");
+    views[e].pose = {};
+    views[e].pose.orientation.w = 1.0f;
+    views[e].pose.position.x = e == 0 ? -kEyeX : kEyeX;
+    views[e].fov = {kFov[0], kFov[1], kFov[2], kFov[3]};
+  }
+  if (!g_views_said) {
+    g_views_said = true;
+    Report("call xrLocateViews eyes %.4f %.4f fov %.4f %.4f %.4f %.4f", -kEyeX, kEyeX, kFov[0], kFov[1],
+           kFov[2], kFov[3]);
+  }
   return XR_SUCCESS;
 }
 
@@ -992,7 +1072,10 @@ XrResult XRAPI_CALL ApplyHapticFeedback(XrSession session, const XrHapticActionI
   Session* s = reinterpret_cast<Session*>(session);
   if (haptic->type != XR_TYPE_HAPTIC_VIBRATION) Fault("a pulse of a wrong type");
   ++s->haptics;
-  Report("frame %ld pulse %s", s->frame, NameOf(s->instance, info->subactionPath).c_str());
+  const auto* v = reinterpret_cast<const XrHapticVibration*>(haptic);
+  Report("frame %ld pulse %s amplitude %.2f duration %lld", s->frame,
+         NameOf(s->instance, info->subactionPath).c_str(), v->amplitude,
+         static_cast<long long>(v->duration));
   return XR_SUCCESS;
 }
 
@@ -1126,6 +1209,8 @@ XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, P
       BWVR_XR("xrGetActionStateFloat", GetActionStateFloat),
       BWVR_XR("xrGetActionStateVector2f", GetActionStateVector2f),
       BWVR_XR("xrGetActionStatePose", GetActionStatePose),
+      BWVR_XR("xrGetCurrentInteractionProfile", GetCurrentInteractionProfile),
+      BWVR_XR("xrLocateViews", LocateViews),
       BWVR_XR("xrApplyHapticFeedback", ApplyHapticFeedback),
       BWVR_XR("xrWaitFrame", WaitFrame),
       BWVR_XR("xrBeginFrame", BeginFrame),

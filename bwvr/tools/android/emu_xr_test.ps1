@@ -23,6 +23,16 @@
       5. Reads back the report of the runtime, its pictures of the quads,
          the log of the app, bwvr.ini and logcat, and checks them.
 
+    Each run has input_live=1 (docs/android.md, "The input channel"): the
+    app writes the input of the mod into bwvr-input.chan of the game folder
+    at each frame of the session. The runtime recenters its LOCAL space one
+    time, and the app puts one pulse into the ring of the events itself
+    (input_live_test_pulse). The test reads the file back with
+    bwvr_input_writer.exe (bwvr\build\test\input_writer) and checks the views,
+    the display period, the recenter, the size of the eyes and the end of the
+    session in the slot, the poses of the right hand of the script in the
+    slots of the log, and the pulse at the runtime.
+
     The results go to bwvr/out/android/emu-xr-test, with -Stream to
     bwvr/out/android/emu-xr-stream-test, and with -Live to
     bwvr/out/android/emu-xr-live-test. The script stops the
@@ -78,6 +88,7 @@ $ErrorActionPreference = 'Continue'
 $Bwvr = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $Repo = Split-Path $Bwvr -Parent
 $Apk = Join-Path $Bwvr 'out\android\bwvr-quest.apk'
+$InputWriter = Join-Path $Bwvr 'build\test\input_writer\Release\bwvr_input_writer.exe'
 # A run with a stream keeps its results in a folder of its own.
 $Out = Join-Path $Bwvr $(if ($Live) { 'out\android\emu-xr-live-test' } elseif ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
 $Feed = $null
@@ -97,6 +108,7 @@ $Port = 5586
 $Serial = "emulator-$Port"
 
 if (-not (Test-Path -LiteralPath $Apk)) { Stop-Android "There is no APK at:`n$Apk`nRun build_apk.ps1 first." }
+if (-not (Test-Path -LiteralPath $InputWriter)) { Stop-Android "There is no test writer of the input channel at:`n$InputWriter`nRun .\dev.ps1 build first." }
 if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
@@ -229,6 +241,7 @@ try {
     # first frames of the session: its script starts 200 frames later.
     $T = $(if ($Live) { 200 } else { 0 })
     Set-Content -LiteralPath $script -Encoding ascii -Value @(
+        "$(30 + $T) recenter",
         "$(40 + $T) capture start",
         "$(50 + $T) point right $L 800 671",
         "$(60 + $T) capture point",
@@ -260,7 +273,9 @@ try {
     Adb @('shell', 'am', 'force-stop', $Package)
     Adb @('shell', 'rm', '-f', "$XrDir/report.txt", "$XrDir/*.bmp")
     $ini = Join-Path $Out 'bwvr.ini.pushed'
-    $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1')
+    # The pulse of the test goes into the ring after the script points at
+    # the menu, so the hand has a pulse of each kind.
+    $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1', 'input_live=1', "input_live_test_pulse=$(100 + $T)")
     if ($Stream) { $iniLines += 'stream_replay=1' }
     if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', "stream_live_feed_ms=$FeedMs") }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
@@ -284,6 +299,7 @@ try {
     Adb @('pull', "$XrDir/.", $Out)
     Adb @('pull', "$AppDir/bwvr-quest.log", (Join-Path $Out 'bwvr-quest.log'))
     Adb @('pull', "$AppDir/game/bwvr.ini", (Join-Path $Out 'bwvr.ini'))
+    Adb @('pull', "$AppDir/game/bwvr-input.chan", (Join-Path $Out 'bwvr-input.chan'))
     $logcat = AdbOut @('logcat', '-d', '-v', 'brief')
     Set-Content -LiteralPath (Join-Path $Out 'logcat.txt') -Value $logcat -Encoding utf8
     $report = ''
@@ -359,6 +375,46 @@ try {
             Expect ($d[0] -ge 0 -and $d[0] -le 2.0) ("{0}: {1:N2} percent of the pixels differ by more than 24 from the PC, the mean difference is {2:N2}" -f $ref.Name, $d[0], $d[1])
         }
     }
+
+    # THE INPUT CHANNEL (input_live=1).
+    Expect ($log -match 'input        : input_live=1\. Each frame of the session writes the input of the mod') 'the app maps the input channel (input_live=1)'
+    Expect ($log -match 'the session has the actions of the mod') 'the session has the actions of the mod'
+    Expect ($report -match 'call xrLocateViews eyes -0\.0320 0\.0320 fov -0\.9425 0\.8203 0\.8901 -0\.9599') 'the app locates the views of the eyes (xrLocateViews)'
+    $dump = ''
+    if (Test-Path -LiteralPath (Join-Path $Out 'bwvr-input.chan')) {
+        $dump = (& $InputWriter dump (Join-Path $Out 'bwvr-input.chan') | Out-String)
+    }
+    Set-Content -LiteralPath (Join-Path $Out 'input-dump.txt') -Value $dump -Encoding utf8
+    Expect ($dump -match 'head whole, 4096 bytes, version 1') 'the channel file has a whole head'
+    $slotLine = [regex]::Match($dump, 'slot seq (\d+) frame (\d+) flags 0x([0-9A-F]+) time (\d+) period (\d+) recenters (\d+) size (\d+) (\d+)')
+    Expect ($slotLine.Success -and [int]$slotLine.Groups[2].Value -gt 100 -and ([int]$slotLine.Groups[1].Value % 2) -eq 0) ("the app wrote the slot at each frame (" + $(if ($slotLine.Success) { "$($slotLine.Groups[2].Value) slots, the sequence $($slotLine.Groups[1].Value) is even" } else { 'no slot' }) + ')')
+    Expect ($slotLine.Success -and $slotLine.Groups[5].Value -eq '13888888' -and [int64]$slotLine.Groups[4].Value -gt 0) ("the slot has the display time of the runtime, period 13888888 ns (" + $(if ($slotLine.Success) { $slotLine.Groups[5].Value } else { '' }) + ')')
+    Expect ($slotLine.Success -and $slotLine.Groups[6].Value -eq '1' -and $log -match 'the LOCAL space recentered \(1 recenters\)') 'the recenter of the runtime is in the slot (1 recenter)'
+    Expect ($slotLine.Success -and $slotLine.Groups[7].Value -eq '2064' -and $slotLine.Groups[8].Value -eq '2208') 'the slot has the size of the eyes that the headset asks for'
+    Expect ($dump -match 'eye 0 valid 1 position -0\.0320 0\.0000 0\.0000 orientation 0\.0000 0\.0000 0\.0000 1\.0000 fov -0\.9425 0\.8203 0\.8901 -0\.9599' -and
+            $dump -match 'eye 1 valid 1 position 0\.0320 0\.0000 0\.0000 orientation 0\.0000 0\.0000 0\.0000 1\.0000 fov -0\.9425 0\.8203 0\.8901 -0\.9599') 'the views of the runtime are in the slot, as the runtime gave them'
+    Expect ($slotLine.Success -and ([Convert]::ToInt32($slotLine.Groups[3].Value, 16) -band 1) -eq 0 -and $dump -match 'hand 1 flags 0x000 ') 'the last slot, at the end of the session, has no focus and no active hand'
+    # The poses of the right hand of the script: each point of the report
+    # gives the aim pose of the runtime, and the slots in the log have it.
+    $poses = @()
+    foreach ($m in [regex]::Matches($report, 'frame \d+ point 1 \d+ \d+ \d+ pose (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) (\S+)')) {
+        $poses += , @(1..7 | ForEach-Object { [double]$m.Groups[$_].Value })
+    }
+    $slots = @([regex]::Matches($log, 'input        : slot (\d+), focus 1, .* the right hand flags 0x([0-9A-F]+) aim (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) trigger ([0-9.]+), profile "([^"]*)"'))
+    $matched = 0
+    foreach ($s in $slots) {
+        $v = @(3..9 | ForEach-Object { [double]$s.Groups[$_].Value })
+        foreach ($p in $poses) {
+            $near = $true
+            for ($i = 0; $i -lt 7; ++$i) { if ([math]::Abs($v[$i] - $p[$i]) -gt 0.0011) { $near = $false } }
+            if ($near) { $matched++; break }
+        }
+    }
+    Expect ($poses.Count -ge 3 -and $matched -ge 1) "the aim poses of the right hand of the script are in the slots ($($poses.Count) points of the script, $matched of $($slots.Count) slots in the log with one of them)"
+    Expect (@($slots | Where-Object { $_.Groups[11].Value -eq 'oculus/touch_controller' -and ([Convert]::ToInt32($_.Groups[2].Value, 16) -band 0x1F) -eq 0x1F }).Count -ge 1) 'a slot has the right hand active with the aim and the grip valid and tracked, and the profile oculus/touch_controller'
+    Expect ($log -match "input        : input_live_test_pulse: a pulse of 80 ms at 0\.50 for the right hand goes into the ring at slot $(100 + $T)" -and
+            $log -match 'input        : a pulse of the mod, 80 ms at 0\.50 for the right hand' -and
+            $report -match 'pulse /user/hand/right amplitude 0\.50 duration 80000000') 'a pulse of the ring of the events reaches the runtime, 80 ms at 0.50'
 
     Expect ($log -match 'xr           : runtime bwvr test runtime') 'the app logged the runtime'
     Expect ($log -match 'the headset asks for 2064 by 2208') 'the app read the size of the eyes'

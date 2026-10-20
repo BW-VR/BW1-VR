@@ -60,6 +60,7 @@ add_library(bwvr_mod SHARED
     spirit_anchor.cpp
     fight_marks.cpp
     controllers.cpp
+    xr_input.cpp
     controller_hints.cpp
     hint_card.cpp
     text_click.cpp

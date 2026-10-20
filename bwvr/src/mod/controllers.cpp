@@ -14,9 +14,11 @@
 // The pump compares the buttons it wants with the buttons it has sent, so a
 // second run in one frame does nothing.
 //
-// THE SOURCE. Real hands come from XrScreen, one sync a frame. The fake
-// controller builds the same HandInput values, so everything after it is the
-// same path, exactly as the fake head does (head_pose.cpp).
+// THE SOURCE. Real hands come from XrScreen, one sync a frame, or with
+// xr_input=1 from the input channel of the headset app (xr_input.h), one
+// latch a frame. The fake controller builds the same HandInput values, so
+// everything after it is the same path, exactly as the fake head does
+// (head_pose.cpp).
 //
 // THE TRANSFORM. The head reaches the game in two steps: head_pose.cpp puts it
 // in the room, and head_camera.cpp puts the room in the world through the
@@ -67,6 +69,7 @@
 #include "text_click.h"
 #include "text_click_math.h"
 #include "walk_math.h"
+#include "xr_input.h"
 #include "zoom_math.h"
 
 extern void ModLog(const char* format, ...);
@@ -1157,6 +1160,8 @@ void Compute() {
   p.have_hand = true;
   if (g_fake.mode != 0) {
     strcpy_s(p.profile, "fake");
+  } else if (XrInputOn()) {
+    strcpy_s(p.profile, XrInputProfile(index));
   } else if (g_screen != nullptr) {
     strcpy_s(p.profile, g_screen->HandProfile(index));
   }
@@ -1712,6 +1717,15 @@ void PulseWith(int index, float amplitude, float seconds) {
       ModLog("controllers  : haptic pulse, %.0f ms at %.2f, frame %llu",
              seconds * 1000.0f, amplitude, g_frame);
     }
+  } else if (XrInputOn()) {
+    // The same line as for the fake controller, so the logs of the two
+    // sources compare line by line.
+    if (g_event_logs < kMaxEventLogs) {
+      ++g_event_logs;
+      ModLog("controllers  : haptic pulse, %.0f ms at %.2f, frame %llu",
+             seconds * 1000.0f, amplitude, g_frame);
+    }
+    XrInputHaptic(index, amplitude, seconds);
   } else if (g_screen != nullptr) {
     g_screen->Haptic(index, amplitude, seconds);
   }
@@ -1970,9 +1984,10 @@ double NowSeconds() {
 
 // The other hand's grab level: its squeeze. A profile with no squeeze bound
 // (khr/simple_controller) grabs with its select, which is the trigger here.
+const char* HandProfileOf(int index);
 float OtherGrabLevel(const bwvr::HandInput& hand) {
-  if (g_fake.mode == 0 && g_screen != nullptr &&
-      strstr(g_screen->HandProfile(OtherIndex()), "simple") != nullptr) {
+  if (g_fake.mode == 0 &&
+      strstr(HandProfileOf(OtherIndex()), "simple") != nullptr) {
     return hand.trigger;
   }
   return hand.squeeze;
@@ -2273,6 +2288,7 @@ int ButtonLayout() {
 // the runtime tells it.
 const char* HandProfileOf(int index) {
   if (g_fake.mode != 0) return "fake";
+  if (XrInputOn()) return XrInputProfile(index);
   return g_screen != nullptr ? g_screen->HandProfile(index) : "";
 }
 
@@ -3341,6 +3357,7 @@ float IniFloat(const char* key, float fallback) {
 
 const char* AimProfile(int index) {
   if (g_fake.mode != 0) return "fake";
+  if (XrInputOn()) return XrInputProfile(index);
   return g_screen != nullptr ? g_screen->HandProfile(index) : "";
 }
 
@@ -3677,9 +3694,10 @@ int g_front_logs = 0;
 const int kMaxFrontLogs = 60;
 
 void LatchFront() {
-  g_session_focus = g_fake.mode != 0
-                        ? !g_held[kNoFocus]
-                        : g_screen != nullptr && g_screen->InputFocused();
+  g_session_focus = g_fake.mode != 0 ? !g_held[kNoFocus]
+                    : XrInputOn()    ? XrInputFocused()
+                                     : g_screen != nullptr &&
+                                           g_screen->InputFocused();
   const bool option = BehindOption();
   const bool real = GameInFront();
   const bool acts = FakeFront() || (option && g_session_focus);
@@ -3707,7 +3725,8 @@ void LatchFront() {
            FakeFront() ? "the test key fake_controller_front"
            : g_fake.mode != 0
                  ? "the fake controller, which stands for the headset session"
-                 : "the headset session",
+           : XrInputOn() ? "the input channel of the headset app"
+                         : "the headset session",
            g_frame);
   } else {
     ModLog("controllers  : the game window is behind (%s). The controllers "
@@ -3821,15 +3840,55 @@ void UpdateHandSide() {
 
 }  // namespace
 
+// head_pose.cpp: the invented head.
+bool HeadPoseFakeOn();
+void HeadPoseFakeEye(int eye, float position[3], float orientation[4]);
+
+namespace {
+// The head of this frame for the record (xr_input_record): the input
+// channel, the session, or the invented head. The invented head has no
+// angles of view, so its record has 0 for each angle, and the mod keeps its
+// own angle of view with that record.
+void RecordEyes(bwvr::EyeView eyes[2], int64_t* time, int64_t* period) {
+  for (int e = 0; e < 2; ++e) {
+    memset(&eyes[e], 0, sizeof(eyes[e]));
+    eyes[e].orientation[3] = 1.0f;
+  }
+  if (XrInputOn()) {
+    XrInputLatch();
+    for (int e = 0; e < 2; ++e) eyes[e] = XrInputEye(e);
+    XrInputDisplayTime(time, period);
+  } else if (g_screen != nullptr && g_screen->running()) {
+    for (int e = 0; e < 2; ++e) eyes[e] = g_screen->eye(e);
+    g_screen->LastDisplayTime(time, period);
+  } else if (HeadPoseFakeOn()) {
+    for (int e = 0; e < 2; ++e) {
+      HeadPoseFakeEye(e, eyes[e].position, eyes[e].orientation);
+      eyes[e].valid = true;
+    }
+  }
+}
+}  // namespace
+
 // Once for each frame the scene is drawn, after the head pose of the frame is
 // known. The first call is frame 0 for the script.
 void ControllersFrame() {
   if (!g_on) return;
   UpdateHandSide();
+  // THE RECORD (xr_input_record, a test aid): the head of this frame, before
+  // a word of the script changes the invented head for the next frame.
+  bwvr::EyeView record_eyes[2] = {};
+  int64_t record_time = 0, record_period = 0;
+  const bool record = XrInputRecording();
+  if (record) RecordEyes(record_eyes, &record_time, &record_period);
   if (g_fake.mode != 0) {
     UpdateScript();
     FakeHand(0, &g_hands[0]);
     FakeHand(1, &g_hands[1]);
+  } else if (XrInputOn()) {
+    XrInputLatch();
+    g_hands[0] = XrInputHand(0);
+    g_hands[1] = XrInputHand(1);
   } else if (g_screen != nullptr) {
     g_hands[0] = g_screen->hand(0);
     g_hands[1] = g_screen->hand(1);
@@ -3837,6 +3896,13 @@ void ControllersFrame() {
     return;
   }
   LatchFront();
+  if (record) {
+    const char* const profiles[2] = {HandProfileOf(0), HandProfileOf(1)};
+    XrInputRecordFrame(g_frame,
+                       g_fake.mode != 0 ? 1 : (XrInputOn() ? 2 : 0),
+                       record_eyes, g_hands, profiles, g_session_focus,
+                       record_time, record_period);
+  }
   LogBothButtons();
   UpdateAim();
   TempleFrame(g_frame);
@@ -3982,6 +4048,8 @@ void ControllersHintState(ControllerHintState* out) {
   out->walk = StickWalks();
   if (g_fake.mode != 0) {
     strcpy_s(out->profile, "fake");
+  } else if (XrInputOn()) {
+    strcpy_s(out->profile, XrInputProfile(PointingIndex()));
   } else if (g_screen != nullptr) {
     strcpy_s(out->profile, g_screen->HandProfile(PointingIndex()));
   }
@@ -4014,6 +4082,10 @@ bool ControllersCardPose(int which, float grip_position[3],
   for (int i = 0; i < 4; ++i) grip_orientation[i] = orientation[i];
   if (g_fake.mode != 0) {
     HeadPoseFakeCenter(head);
+  } else if (XrInputOn() && XrInputEye(0).valid && XrInputEye(1).valid) {
+    for (int i = 0; i < 3; ++i) {
+      head[i] = 0.5f * (XrInputEye(0).position[i] + XrInputEye(1).position[i]);
+    }
   } else if (g_screen != nullptr && g_screen->eye(0).valid &&
              g_screen->eye(1).valid) {
     for (int i = 0; i < 3; ++i) {

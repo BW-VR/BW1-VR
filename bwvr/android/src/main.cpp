@@ -27,6 +27,7 @@
 #include "build_id.h"
 #include "flat_view.h"
 #include "game_folder.h"
+#include "input_live.h"
 #include "menu_layout.h"
 #include "menu_model.h"
 #include "menu_painter.h"
@@ -99,6 +100,9 @@ struct App {
   double live_play_ms = 0.0;
   double live_play_most = 0.0;
   bool live_quiet = true;  // no frame came for 1 s
+
+  // THE INPUT CHANNEL (input_live=1, docs/android.md, "The input channel").
+  InputLive input_live;
 };
 
 double NowMs() {
@@ -504,6 +508,11 @@ void android_main(android_app* android) {
   }
 
   app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
+  // input_live=1: the session also reads the input of the mod, and each frame
+  // goes into bwvr-input.chan of the game folder. 0: the app reads only the
+  // input of its menu.
+  const bool input_live = app.ini.GetInt("bwvr", "input_live", 0) != 0;
+  app.xr.SetInputLive(input_live);
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
                            kCursorPixels);
 
@@ -581,6 +590,14 @@ void android_main(android_app* android) {
                            : static_cast<size_t>(64u << 20);
     app.live_reader.Start(ring, app.live_whole, queue_bytes);
   }
+  if (input_live && app.xr_on) {
+    const int test_pulse = app.ini.GetInt("bwvr", "input_live_test_pulse", 0);
+    app.input_live.Start(app.game.folder + "/bwvr-input.chan",
+                         test_pulse > 0 ? static_cast<uint32_t>(test_pulse) : 0);
+  } else if (input_live) {
+    AppLog("input        : input_live=1, but there is no OpenXR session, so "
+           "the app writes no input");
+  }
   if (app.xr_on) {
     TakeHeadsetSize(&app);
     app.base_status = app.game.exe_right
@@ -618,9 +635,20 @@ void android_main(android_app* android) {
         ANativeActivity_finish(android->activity);
         break;
       }
-      if (!app.xr.Running()) continue;
+      if (!app.xr.Running()) {
+        app.input_live.WriteNoInput();
+        continue;
+      }
       XrInput input;
       if (!app.xr.BeginFrame(&input)) continue;
+      // The input of the mod: after xrSyncActions of BeginFrame, with the
+      // views of xrLocateViews at the display time of this frame.
+      if (app.input_live.On()) {
+        input_channel::SlotData slot;
+        app.xr.InputSlot(&slot);
+        app.input_live.Write(&slot);
+        app.input_live.PlayPulses(&app.xr);
+      }
       if (app.live) PlayLive(&app);
       bool show_cursor = false;
       float cursor[3] = {0, 0, 0};
@@ -641,6 +669,8 @@ void android_main(android_app* android) {
     app.live_reader.Stop();
     if (!app.live_quiet) LiveSummary(&app, "the app ends");
   }
+  app.input_live.WriteNoInput();
+  app.input_live.Stop();
   AppLog("app          : the app ends");
   if (app.xr_on) app.xr.Stop();
   app.flat.Stop();

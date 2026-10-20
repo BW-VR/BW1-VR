@@ -51,6 +51,7 @@ add_library(bwvr_quest SHARED
     src/canvas.cpp
     src/flat_view.cpp
     src/game_folder.cpp
+    src/input_live.cpp
     src/gpu.cpp
     src/menu_paint.cpp
     src/menu_painter.cpp

@@ -35,6 +35,12 @@ Summary:
   the record of the same run. In the emulator the app takes the frames from
   a second process through the file, and its pictures are the same as the
   pictures of the PC.
+- The input goes the other way through a second file, the **input
+  channel**: at each frame of its session the app writes the views of the
+  eyes, the hands, the display time, the focus and the recenter
+  (`input_live`), and the mod reads them in place of a session of its own
+  (`xr_input`). The pulses of the hands go back to the app (see "The input
+  channel").
 - **Only Vulkan.** The app draws with Vulkan alone: the menu, the stereo
   screen and the renderer of the mod. It has no fallback to Direct3D,
   DirectDraw or another graphics interface (see "Only Vulkan").
@@ -64,6 +70,12 @@ Summary:
 | `src/mod/stream_ring.h` | The ring of the live stream: the head, the indices, the wrap, the choice of the writer for a full ring, the frames of the reader. No Windows code |
 | `android/src/stream_reader.cpp` | The reader thread of the live stream in the app, and the feed process of a test |
 | `test/stream_reader/main.cpp` | The test reader of the live stream on the PC (`bwvr_stream_reader.exe`) |
+| `src/common/input_channel.h` | The input channel: the file, the slot of the newest input, the ring of the events, the record. No Windows code |
+| `src/mod/xr_input.cpp` | The reader of the input channel in the mod (`xr_input`), and the record of the input of a run (`xr_input_record`) |
+| `src/mod/xr_input_math.h` | The values of the input channel as the values of `XrScreen`, the recenter, the lockstep of a test. No Windows code |
+| `android/src/input_live.cpp` | The writer of the input channel in the app (`input_live`), and the play of the pulses of the mod |
+| `test/input_writer/main.cpp` | The test writer of the input channel on the PC (`bwvr_input_writer.exe`) |
+| `tools/desk/input_channel_run.ps1` | A desktop run with the input channel and the test writer of the PC |
 | `android/test_runtime/test_runtime.cpp` | The OpenXR test runtime for the emulator. Not in the APK |
 | `src/mod/vk_platform_posix.h` | The parts of Windows that the renderer uses, for a build with no Windows |
 | `src/mod/vk_d3d7_posix.h` | The parts of Direct3D 7 that the renderer uses, with the values of the SDK |
@@ -293,7 +305,7 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    events, and checks the saved `bwvr.ini`, the log of this build, logcat
    (no JNI error, no crash) and three screenshots. The emulator has no OpenXR
    runtime, so this step tests the menu in the window.
-3. **In the emulator with the OpenXR test runtime** (`emu_xr_test.ps1`, 29
+3. **In the emulator with the OpenXR test runtime** (`emu_xr_test.ps1`, 42
    checks). The test runtime (`android/test_runtime`) is a headset with two
    Touch controllers that follow a script. The script puts it into an AVD
    with a system that it can write (`bwvr_xr_test`, port 5586) as
@@ -310,17 +322,26 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    `bwvr.ini`, no fault of the order of the calls (a swapchain image that is
    released with no wait, a layer of an acquired image), copies into the
    layers only when a picture changed (the count in the log), and four
-   pictures of the quad that the runtime read back from the swapchain. The pictures
+   pictures of the quad that the runtime read back from the swapchain. The
+   run has `input_live=1`: the runtime recenters its LOCAL space one time
+   (the script word `recenter`), and the app puts one pulse into the ring of
+   the events itself (`input_live_test_pulse`). The test reads
+   `bwvr-input.chan` back with `bwvr_input_writer.exe dump` and checks the
+   views of the runtime (`xrLocateViews`, each eye 32 mm to its side, the
+   four angles), the display period of 13888888 ns, one recenter, the size
+   of the eyes, a last slot with no focus and no active hand, the aim poses
+   of the right hand of the script in the slots of the log, the profile of
+   the Touch controller, and the pulse of 80 ms at 0.50 at the runtime. The pictures
    are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
    the calls of OpenXR in the right order with the right structs. It does
    not show the runtime of Meta.
-   With `-Stream <file> -Gpu host` (36 checks) the app also plays a stream
+   With `-Stream <file> -Gpu host` (49 checks) the app also plays a stream
    of the walks on the device of the session, and the test checks the
    device (Vulkan 1.3 with the features of the renderer), the renderer on
    that device, the two quads of the stereo screen (one for each eye, 2.6
    m in front) and the pictures of both eyes that the runtime read back. Its
    results are in `bwvr/out/android/emu-xr-stream-test`.
-   With `-Live <desk folder> -Gpu host` (45 checks, 46 with `-FeedMs 0`)
+   With `-Live <desk folder> -Gpu host` (58 checks, 59 with `-FeedMs 0`)
    the app plays the live stream of `ring-capture.bin` of a desktop run of
    `live_stream_run.ps1` on the device of the session: a child process of
    the app writes one frame into the ring each `-FeedMs` ms (14 by
@@ -380,7 +401,11 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    (`stream_checks.h`), and the ring of the live stream
    (`stream_ring_checks.h`: the wrap at the end of the data and at 2^32, a
    full ring, the choice of the writer, the frames of the reader, a reader
-   that comes late, and 3000 frames through a ring of 4 KB in two threads).
+   that comes late, and 3000 frames through a ring of 4 KB in two threads),
+   and the input channel (`input_channel_checks.h`: the layout of the file,
+   a torn read of the slot, the wrap of the ring of the events at its end and
+   at 2^32, a full ring, the values of `XrScreen` through the channel, the
+   recenter, the lockstep, 200000 slots and 100000 events in two threads).
 7. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
@@ -681,6 +706,121 @@ and the frame rate of the live stream in a headset.
   more than 1.5 s late (about 126 frames a second in place of 536 with the
   slow test reader).
 
+## The input channel
+
+In the headset the game runs in Wine, and Wine has no OpenXR. The app has
+the OpenXR session. So the app gives the mod what the mod reads from a
+session of its own (`XrScreen`, `src/vr/xr_screen.h`), and the mod gives
+the app the pulses of the hands. Both map one real file of 4 KB,
+`bwvr-input.chan` beside `runblack.exe` (`src/common/input_channel.h`): the
+mod with `CreateFileMapping`, the app with `mmap` and `MAP_SHARED`, as the
+ring of the live stream.
+
+**The file.** A head (a magic, a version, the size, the offsets, the
+sessions of the two sides and the indices), at 256 the slot of the newest
+input, and at 1024 a ring of 64 events. Each part has one layout on 32 bit
+x86 and on 64 bit ARM (`static_assert` of each size and offset).
+
+**The slot.** One writer (the app) and one reader (the mod). The writer
+makes the sequence odd, writes the data and makes the sequence even. The
+reader loads the sequence, copies the data and loads the sequence again.
+When the first is odd, or the two are not the same, the copy is torn and
+the reader reads again (up to 64 times, then it keeps the values of the
+frame before). A full barrier is between the steps: the interlocked calls
+of MSVC in the mod, which Box64 translates with barriers, and the
+`__atomic` builtins in the app. The slot holds:
+
+- the two eyes at the display time: position, orientation and the four
+  angles of view of `xrLocateViews`, in the LOCAL space;
+- the two hands after `xrSyncActions`: active, the aim and the grip poses
+  with valid and tracked, trigger, squeeze, the stick, the stick click, the
+  face buttons, the menu button, the serial and the profile;
+- the predicted display time and the display period of the runtime, the
+  focus, the count of the recenters of the LOCAL space, the size of an eye
+  that the headset asks for, and the gaze of an eye tracker (the app has
+  none yet).
+
+The values go across as the runtime gave them: no smoothing, no prediction
+of the app, the clock of the runtime.
+
+**The events.** The mod puts a pulse (the frame, the hand, the amplitude
+and the length) into the ring, and the app takes each one and plays it with
+`xrApplyHapticFeedback`. Each side stores its index with a release after
+its copy. A full ring drops the new pulse and counts it. At its start the
+app drops the pulses of an earlier run.
+
+**The mod** (`xr_input=1`, `src/mod/xr_input.cpp`). The mod starts no OpenXR
+session, and the frame runs as with `stereo_headless=1`: it waits for no
+session. The channel takes the place of the session at each place where the
+mod reads it, and it wins over `fake_head` and `fake_controller`:
+
+| What the mod reads | Where |
+| --- | --- |
+| The views of the eyes (`XrScreen::eye`) | `stereo.cpp`: the angle of view (`PrepareHeadView`), the eye separation, the head of the frame, the pose of each eye. `intro_vr.cpp`: the head of the intro. `controllers.cpp`: the head of the hint cards and the ring |
+| The hands (`XrScreen::hand`) | `controllers.cpp` (`ControllersFrame`), `intro_skip.cpp`, the menu button of the intro in `intro_vr.cpp` |
+| The profiles (`HandProfile`) | `controllers.cpp`: the pointer, the aim presets, the grab of the other hand, the hints |
+| The focus (`InputFocused`) | `controllers.cpp` (`LatchFront`, the game window behind) |
+| The recenter (`TakeRecenter`) | `stereo.cpp`, `intro_vr.cpp` |
+| The display time (`LastDisplayTime`, `DisplaySeconds`) | `stereo.cpp` (`StereoDisplayTime`), `mod_main.cpp` (`ModDisplaySeconds`) for the walk and the smooth zoom of the God view and the grips |
+| The gaze (`EyeGaze`) | `stereo.cpp`, the fovea of the foveated rendering |
+| A pulse (`Haptic`) | `controllers.cpp` (`PulseWith`): into the ring of the events |
+
+The first reader of a frame of the game reads the slot, and each later
+reader of that frame gets the same values (`XrInputLatch`). A recenter of
+the app recenters the mod one time. When the app writes no new slot for
+`xr_input_stale_ms` (500 by default, 0: never), the hands read as not
+active and the focus as off, and the head keeps its last pose. The lockstep
+of a test has no such rule. The mod does
+not write `headset_width` and `headset_height` to `bwvr.ini` from the
+channel: the app writes them itself. `xr_input=0`: the session, or the fake
+sources on the desktop.
+
+**The app** (`input_live=1`, `android/src/input_live.cpp`). The session
+also has the actions of the mod, with the bindings of `xr_screen.cpp` for
+the Touch controller, the simple controller and the Index controller. At
+each frame of the session, after `xrWaitFrame`, `xrBeginFrame` and
+`xrSyncActions`, the app locates the views and the poses at the predicted
+display time, writes the slot and plays the pulses that wait. While the
+session does not run, the app writes one slot with no focus and no active
+hand. `input_live_test_pulse=N` (a test aid, with no mod): at the slot N
+the app puts one pulse into the ring itself, as the mod does.
+`input_live=0`: the app reads only the input of its menu.
+
+**The test aids of the mod.** `xr_input_record=N`: the input of the first
+N frames of the controllers goes to `bwvr-input.rec` beside `runblack.exe`,
+from the source of the run (the session, the fake sources or the channel).
+`xr_input_lockstep_ms=N` (with `xr_input=1`): each latch waits up to N ms
+for the slot of its frame of the controllers, so a test writer can give
+each frame its input. After one wait that runs out the lockstep stops.
+
+**The test writer of the PC** (`bwvr_input_writer.exe`,
+`test/input_writer`). `play` writes the input of a record into the slot,
+frame by frame, as the app does, and writes each pulse of the mod.
+`compare` compares two records frame by frame, and `dump` writes a channel
+file as text. `input_channel_run.ps1 -Kind fake` makes a run in the test
+save "pen" with the scripted controller and a record. `-Kind channel -From
+<the fake run>` makes the same run with `xr_input=1`: the writer plays the
+record of the fake run into the channel, and the script compares the
+records, the pulses and the pictures of the test frame.
+
+INPUT_RESULTS
+
+**Not shown yet:** the channel under Wine and Box64 in the headset (the
+mapping of a real file by Wine and by the app, and the barriers of Box64),
+the input of a real headset through the channel, and the eye pictures of
+the mod with the views of the channel in the swapchains of a projection
+layer of the app.
+
+**Known limits:**
+
+- The projection layer of the app needs the angle of view that the mod
+  renders (`SetRenderHalfAngle`) and the pose that it rendered from
+  (`SetRenderPose`). The channel does not carry them back to the app yet.
+- The app has no eye tracker action, so the gaze of the slot is never
+  valid.
+- The test aid `input_live_test_pulse` writes into the ring of the mod.
+  With a mod that sends pulses at the same time, the ring has two writers.
+
 ## Only Vulkan
 
 The app has one renderer: the Vulkan renderer of the mod. There is no
@@ -758,14 +898,18 @@ Android. The plan, in steps:
    with the game in Wine, with `vk_stream_live=1` and `stream_live=1`, and
    the eye pictures in the swapchains of the projection layer in place of
    the stereo screen.
-3. **The head and the controllers.** The mod reads the head pose and the
-   controllers from OpenXR. Wine has no OpenXR for Android, so the app must
-   give the mod its poses and its actions through a ring file of the same
-   kind.
+3. **The head and the controllers.** Wine has no OpenXR for Android, so the
+   app gives the mod the views, the hands, the display time, the focus and
+   the recenter of its session through the input channel, and the mod gives
+   the pulses back (see "The input channel"). Open: the channel under Wine
+   and Box64, and the run with a real headset.
 
 Each step needs a check that a desktop run can make. Step 2 has one: the
 live stream to the test reader of the PC (`live_stream_run.ps1`), and the
 frames of that run through the ring in the emulator (`emu_live_test.ps1`).
+Step 3 has one: the input of a record through the channel of a desktop run
+(`input_channel_run.ps1`), and the slot of the test runtime in the emulator
+(`emu_xr_test.ps1`).
 
 **The Steam Frame.** SteamOS on the Steam Frame has Proton and FEX (an x86
 emulator). That way can run the PC build of the mod with no APK, if the

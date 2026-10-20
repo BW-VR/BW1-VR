@@ -779,8 +779,13 @@ that moves while the Hand takes it.
     second process and draws the pictures of the PC
     (`emu_live_test.ps1`). Not run in a headset. It cannot start the game:
     `runblack.exe` needs an x86 runtime (Box64 with Wine in the WoW64 mode)
-    in the app, and the poses and the actions of the session for the mod
-    (`android.md`, "What the app cannot do yet"). A frame goes into the
+    in the app (`android.md`, "What the app cannot do yet"). The input of
+    the session goes to the mod through a second file, the input channel
+    (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
+    channel"): the views, the hands, the display time, the focus and the
+    recenter, and the pulses back. Open for the input channel: the file under
+    Wine and Box64, a real headset, and the angle of view and the pose that
+    the mod renders back to a projection layer of the app. A frame goes into the
     ring at the end of its first walk with both eyes, and in a desktop run each frame after
     a frame with the whole state was at the reader in its own game frame. A
     skip of the app and a drop of the writer keep the records of state and

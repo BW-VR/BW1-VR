@@ -79,6 +79,7 @@
 #include "render_thread.h"
 #include "scene_sample.h"
 #include "ui_panel.h"
+#include "xr_input.h"
 
 // d3d9_backend.cpp: the start with DXVK did not fail.
 void D3D9BackendConfirm();
@@ -306,6 +307,14 @@ typedef void(__fastcall* Process3dEngineFn)(void* self, void* unused);
 Process3dEngineFn o_Process3dEngine = nullptr;
 
 bwvr::XrScreen* g_screen = nullptr;
+
+// THE EYES OF THE FRAME: from the session, or from the input channel of the
+// headset app (xr_input=1, xr_input.h), at the same places. With xr_input=1
+// the mod has no session. Without it, only a frame to the headset asks.
+const bwvr::EyeView& HeadEye(int eye) {
+  return XrInputOn() ? XrInputEye(eye) : g_screen->eye(eye);
+}
+
 float g_eye_separation = 0.5f;  // world units between the eyes
 bool g_stereo_on = true;
 float g_ui_shift = 0.0f;        // pixels, see draw_hooks.cpp
@@ -1066,14 +1075,14 @@ void PollHotkeys() {
 // direction and render that both ways, which needs a roughly square render.
 // The intro (intro_vr.cpp) runs the same setup before its first frame.
 void PrepareHeadView(bool to_headset) {
-  if (g_head_tracking && to_headset && g_immersive && !g_head_ready &&
-      g_screen->eye(0).valid && g_screen->eye(1).valid) {
+  if (g_head_tracking && (to_headset || XrInputOn()) && g_immersive &&
+      !g_head_ready && HeadEye(0).valid && HeadEye(1).valid) {
     // What the headset asks for, horizontally and vertically, taking the
     // widest of either eye in each direction.
     float need_h = 0.0f;
     float need_v = 0.0f;
     for (int e = 0; e < 2; ++e) {
-      const bwvr::EyeView& v = g_screen->eye(e);
+      const bwvr::EyeView& v = HeadEye(e);
       const float across[2] = {-v.fov_left, v.fov_right};
       const float down[2] = {v.fov_up, -v.fov_down};
       for (int i = 0; i < 2; ++i) {
@@ -1117,8 +1126,10 @@ void PrepareHeadView(bool to_headset) {
     if (g_head_fov_deg > 0.0f) half = g_head_fov_deg * 0.5f / 57.29578f;
     if (half > 0.0f) {
       FovSetAbsolute(half * 2.0f);
-      g_screen->SetRenderHalfAngle(half);
-      g_screen->SetProjection(true);
+      if (to_headset) {
+        g_screen->SetRenderHalfAngle(half);
+        g_screen->SetProjection(true);
+      }
       g_head_ready = true;
       const bw::tech::InfoTransform* info =
           reinterpret_cast<const bw::tech::InfoTransform*>(
@@ -1183,6 +1194,9 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   PollHotkeys();
   const bool to_headset = g_screen != nullptr && g_screen->running() &&
                           g_screen->eyes() > 1;
+  // The input channel (xr_input=1) stands for the session at each read of
+  // the head. The frame runs headless, and it waits for no session.
+  const bool channel = !to_headset && XrInputOn();
   if (!g_enabled || !g_stereo_on || (!to_headset && !g_headless)) {
     o_Process3dEngine(self, unused);
     return;
@@ -1256,6 +1270,11 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     }
   } else {
     t1 = t0;
+    if (channel) {
+      XrInputLatch();
+      // The app recentered: XrScreen::TakeRecenter of the channel.
+      if (XrInputTakeRecenter()) HeadPoseRecenter();
+    }
   }
 
   float base[12];
@@ -1271,11 +1290,11 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   //
   // It is taken again whenever it changes by more than half a millimeter, so
   // an IPD wheel turned during play (Quest 3) is followed.
-  if (g_eye_separation_auto && to_headset && g_screen->eye(0).valid &&
-      g_screen->eye(1).valid) {
-    const float ex = g_screen->eye(1).position[0] - g_screen->eye(0).position[0];
-    const float ey = g_screen->eye(1).position[1] - g_screen->eye(0).position[1];
-    const float ez = g_screen->eye(1).position[2] - g_screen->eye(0).position[2];
+  if (g_eye_separation_auto && (to_headset || channel) && HeadEye(0).valid &&
+      HeadEye(1).valid) {
+    const float ex = HeadEye(1).position[0] - HeadEye(0).position[0];
+    const float ey = HeadEye(1).position[1] - HeadEye(0).position[1];
+    const float ez = HeadEye(1).position[2] - HeadEye(0).position[2];
     const float ipd = sqrtf(ex * ex + ey * ey + ez * ez);
     if (ipd > 0.03f && ipd < 0.12f && fabsf(ipd - g_taken_ipd) > 0.0005f) {
       g_taken_ipd = ipd;
@@ -1312,15 +1331,15 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     UiPanelHead(centre, fake_orientation);
     CutsceneWindowHead(centre, fake_orientation);
   }
-  if (g_head_tracking && to_headset && g_screen->eye(0).valid &&
-      g_screen->eye(1).valid) {
+  if (g_head_tracking && (to_headset || channel) && HeadEye(0).valid &&
+      HeadEye(1).valid) {
     // The middle of the head, so recentring does not land on one eye and put
     // the whole view half a separation off to one side. Taken as the midpoint
     // of the two eyes, which stays right however the head is turned.
     const float center[3] = {
-        (g_screen->eye(0).position[0] + g_screen->eye(1).position[0]) * 0.5f,
-        (g_screen->eye(0).position[1] + g_screen->eye(1).position[1]) * 0.5f,
-        (g_screen->eye(0).position[2] + g_screen->eye(1).position[2]) * 0.5f};
+        (HeadEye(0).position[0] + HeadEye(1).position[0]) * 0.5f,
+        (HeadEye(0).position[1] + HeadEye(1).position[1]) * 0.5f,
+        (HeadEye(0).position[2] + HeadEye(1).position[2]) * 0.5f};
     HeadPoseSetHead(center);
     // The frame's head pose, with no eye in it, for the camera hook. It runs
     // before this point in the next frame, so what it reads is one frame old.
@@ -1331,7 +1350,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     // update runs earlier in the frame than this hook, so it used the pose
     // worked out on the previous frame, and that is what the layer has to
     // report.
-    if (g_head_camera_pose_ready) {
+    if (to_headset && g_head_camera_pose_ready) {
       for (int e = 0; e < 2; ++e) {
         g_screen->SetRenderPose(e, g_rendered_position[e],
                                 g_rendered_orientation[e]);
@@ -1349,21 +1368,21 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
     for (int e = 0; e < 2; ++e) {
       for (int i = 0; i < 3; ++i) {
-        g_rendered_position[e][i] = g_screen->eye(e).position[i];
+        g_rendered_position[e][i] = HeadEye(e).position[i];
       }
       if (declare_roll) {
         for (int i = 0; i < 4; ++i) {
-          g_rendered_orientation[e][i] = g_screen->eye(e).orientation[i];
+          g_rendered_orientation[e][i] = HeadEye(e).orientation[i];
         }
       } else {
-        HeadPoseStripRoll(g_screen->eye(e).orientation,
+        HeadPoseStripRoll(HeadEye(e).orientation,
                           g_rendered_orientation[e]);
       }
     }
     g_head_camera_pose_ready = true;
-    HeadPoseUpdate(center, g_screen->eye(0).orientation);
-    UiPanelHead(center, g_screen->eye(0).orientation);
-    CutsceneWindowHead(center, g_screen->eye(0).orientation);
+    HeadPoseUpdate(center, HeadEye(0).orientation);
+    UiPanelHead(center, HeadEye(0).orientation);
+    CutsceneWindowHead(center, HeadEye(0).orientation);
   }
 
   UiDepthNewFrame();
@@ -1383,7 +1402,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   {
     float direction[3] = {0.0f, 0.0f, -1.0f};
     float gx = 0.0f, gy = 0.0f;
-    const bool gaze = to_headset && g_screen->EyeGaze(direction) &&
+    const bool gaze = ((to_headset && g_screen->EyeGaze(direction)) ||
+                       (channel && XrInputGaze(direction))) &&
                       foveation_math::GazeTangent(direction, &gx, &gy);
     VkSceneSetGaze(gaze, gx, gy);
   }
@@ -1505,7 +1525,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   // target does not hold the eyes, or backend=vulkan, whose renderer draws
   // both eyes into the layers of its target.
   const bool pose_per_eye = g_head_tracking && !flat && !HeadCameraEnabled() &&
-                            (to_headset || HeadPoseFakeOn());
+                            (to_headset || channel || HeadPoseFakeOn());
   const bool one_walk = OneWalkWanted() && !pose_per_eye &&
                         !g_headless_grab &&
                         (!to_headset || GpuBridgeReady() || VkSceneDirect());
@@ -1537,8 +1557,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     bool placed = false;
     g_eye_placement = kEyeNotPlaced;
     g_pass_eye = eye;
-    const bool real_head = g_head_tracking && !flat && to_headset &&
-                           g_screen->eye(eye).valid;
+    const bool real_head = g_head_tracking && !flat &&
+                           (to_headset || channel) && HeadEye(eye).valid;
     const bool fake_head =
         g_head_tracking && !flat && !to_headset && HeadPoseFakeOn();
     if ((real_head || fake_head) && !HeadCameraEnabled()) {
@@ -1549,8 +1569,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
       const float* position;
       const float* orientation;
       if (real_head) {
-        position = g_screen->eye(eye).position;
-        orientation = g_screen->eye(eye).orientation;
+        position = HeadEye(eye).position;
+        orientation = HeadEye(eye).orientation;
       } else {
         HeadPoseFakeEye(eye, fake_position, fake_orientation);
         position = fake_position;
@@ -2052,6 +2072,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     SkyDetailReport();
     SpiritAnchorReport();
     ControllersReport();
+    XrInputReport();
     HandDirectReport();
     FightMarksReport();
     HandGlowReport();
@@ -2234,7 +2255,9 @@ void StereoSetScreen(bwvr::XrScreen* screen) { g_screen = screen; }
 // The display time of the last frame of the headset and the display period,
 // in nanoseconds. False with no headset.
 bool StereoDisplayTime(int64_t* time, int64_t* period) {
-  if (g_screen == nullptr || !g_screen->running()) return false;
+  if (g_screen == nullptr || !g_screen->running()) {
+    return XrInputOn() && XrInputDisplayTime(time, period);
+  }
   return g_screen->LastDisplayTime(time, period);
 }
 

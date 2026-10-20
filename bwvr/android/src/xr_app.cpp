@@ -378,14 +378,34 @@ bool XrApp::MakeActions() {
       !make("pulse", "Pulse", XR_ACTION_TYPE_VIBRATION_OUTPUT, &haptic_)) {
     return false;
   }
+  // The actions of the mod (input_live=1), as XrScreen of the PC has them. A
+  // float action on a boolean input reads 0 or 1.
+  if (input_live_ &&
+      (!make("grip_pose", "Grip pose", XR_ACTION_TYPE_POSE_INPUT, &grip_) ||
+       !make("trigger", "Trigger", XR_ACTION_TYPE_FLOAT_INPUT, &trigger_) ||
+       !make("squeeze", "Squeeze", XR_ACTION_TYPE_FLOAT_INPUT, &squeeze_) ||
+       !make("stick_click", "Stick click", XR_ACTION_TYPE_BOOLEAN_INPUT,
+             &stick_click_) ||
+       !make("primary", "Primary button", XR_ACTION_TYPE_BOOLEAN_INPUT,
+             &primary_) ||
+       !make("secondary", "Secondary button", XR_ACTION_TYPE_BOOLEAN_INPUT,
+             &secondary_) ||
+       !make("menu_button", "Menu button", XR_ACTION_TYPE_BOOLEAN_INPUT,
+             &menu_button_))) {
+    return false;
+  }
 
   struct Bind {
     XrAction action;
     const char* path;
   };
-  auto suggest = [&](const char* profile, const std::vector<Bind>& binds) {
+  auto suggest = [&](const char* profile, const std::vector<Bind>& binds,
+                     const std::vector<Bind>& live) {
     std::vector<XrActionSuggestedBinding> s;
     for (const Bind& b : binds) s.push_back({b.action, Path(instance_, b.path)});
+    if (input_live_) {
+      for (const Bind& b : live) s.push_back({b.action, Path(instance_, b.path)});
+    }
     XrInteractionProfileSuggestedBinding info = {
         XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     info.interactionProfile = Path(instance_, profile);
@@ -402,7 +422,13 @@ bool XrApp::MakeActions() {
            {back_, "/user/hand/left/input/menu/click"},
            {back_, "/user/hand/right/input/menu/click"},
            {haptic_, "/user/hand/left/output/haptic"},
-           {haptic_, "/user/hand/right/output/haptic"}});
+           {haptic_, "/user/hand/right/output/haptic"}},
+          {{grip_, "/user/hand/left/input/grip/pose"},
+           {grip_, "/user/hand/right/input/grip/pose"},
+           {trigger_, "/user/hand/left/input/select/click"},
+           {trigger_, "/user/hand/right/input/select/click"},
+           {menu_button_, "/user/hand/left/input/menu/click"},
+           {menu_button_, "/user/hand/right/input/menu/click"}});
   suggest("/interaction_profiles/oculus/touch_controller",
           {{aim_, "/user/hand/left/input/aim/pose"},
            {aim_, "/user/hand/right/input/aim/pose"},
@@ -413,7 +439,20 @@ bool XrApp::MakeActions() {
            {stick_, "/user/hand/left/input/thumbstick"},
            {stick_, "/user/hand/right/input/thumbstick"},
            {haptic_, "/user/hand/left/output/haptic"},
-           {haptic_, "/user/hand/right/output/haptic"}});
+           {haptic_, "/user/hand/right/output/haptic"}},
+          {{grip_, "/user/hand/left/input/grip/pose"},
+           {grip_, "/user/hand/right/input/grip/pose"},
+           {trigger_, "/user/hand/left/input/trigger/value"},
+           {trigger_, "/user/hand/right/input/trigger/value"},
+           {squeeze_, "/user/hand/left/input/squeeze/value"},
+           {squeeze_, "/user/hand/right/input/squeeze/value"},
+           {stick_click_, "/user/hand/left/input/thumbstick/click"},
+           {stick_click_, "/user/hand/right/input/thumbstick/click"},
+           {primary_, "/user/hand/left/input/x/click"},
+           {primary_, "/user/hand/right/input/a/click"},
+           {secondary_, "/user/hand/left/input/y/click"},
+           {secondary_, "/user/hand/right/input/b/click"},
+           {menu_button_, "/user/hand/left/input/menu/click"}});
   suggest("/interaction_profiles/valve/index_controller",
           {{aim_, "/user/hand/left/input/aim/pose"},
            {aim_, "/user/hand/right/input/aim/pose"},
@@ -424,7 +463,19 @@ bool XrApp::MakeActions() {
            {stick_, "/user/hand/left/input/thumbstick"},
            {stick_, "/user/hand/right/input/thumbstick"},
            {haptic_, "/user/hand/left/output/haptic"},
-           {haptic_, "/user/hand/right/output/haptic"}});
+           {haptic_, "/user/hand/right/output/haptic"}},
+          {{grip_, "/user/hand/left/input/grip/pose"},
+           {grip_, "/user/hand/right/input/grip/pose"},
+           {trigger_, "/user/hand/left/input/trigger/value"},
+           {trigger_, "/user/hand/right/input/trigger/value"},
+           {squeeze_, "/user/hand/left/input/squeeze/value"},
+           {squeeze_, "/user/hand/right/input/squeeze/value"},
+           {stick_click_, "/user/hand/left/input/thumbstick/click"},
+           {stick_click_, "/user/hand/right/input/thumbstick/click"},
+           {primary_, "/user/hand/left/input/a/click"},
+           {primary_, "/user/hand/right/input/a/click"},
+           {secondary_, "/user/hand/left/input/b/click"},
+           {secondary_, "/user/hand/right/input/b/click"}});
 
   XrSessionActionSetsAttachInfo attach = {XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
   attach.countActionSets = 1;
@@ -442,6 +493,17 @@ bool XrApp::MakeActions() {
             "xrCreateActionSpace")) {
       return false;
     }
+    if (!input_live_) continue;
+    space.action = grip_;
+    if (!Ok(xrCreateActionSpace(session_, &space, &grip_space_[h]),
+            "xrCreateActionSpace(grip)")) {
+      return false;
+    }
+  }
+  if (input_live_) {
+    AppLog("xr           : input_live=1. The session has the actions of the "
+           "mod: the grip pose, the trigger, the squeeze, the stick click, "
+           "the face buttons and the menu button");
   }
   return true;
 }
@@ -577,6 +639,18 @@ void XrApp::PollEvents(bool* quit) {
     } else if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
       running_ = false;
       *quit = true;
+    } else if (event.type == XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING) {
+      // The headset recentered its LOCAL space, for example from its own
+      // menu. The mod keeps an origin of its own, so it recenters too.
+      const auto* change =
+          reinterpret_cast<const XrEventDataReferenceSpaceChangePending*>(&event);
+      if (change->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL) {
+        ++recenters_;
+        AppLog("xr           : the LOCAL space recentered (%u recenters)",
+               recenters_);
+      }
+    } else if (event.type == XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED) {
+      profiles_read_ = false;
     }
     event = {XR_TYPE_EVENT_DATA_BUFFER};
   }
@@ -590,12 +664,16 @@ bool XrApp::BeginFrame(XrInput* input) {
   if (!Ok(xrBeginFrame(session_, &begin), "xrBeginFrame")) return false;
 
   *input = XrInput();
+  synced_ = false;
   if (state_ != XR_SESSION_STATE_FOCUSED) return true;
   XrActiveActionSet active = {action_set_, XR_NULL_PATH};
   XrActionsSyncInfo sync = {XR_TYPE_ACTIONS_SYNC_INFO};
   sync.countActiveActionSets = 1;
   sync.activeActionSets = &active;
-  if (XR_FAILED(xrSyncActions(session_, &sync))) return true;
+  const XrResult synced = xrSyncActions(session_, &sync);
+  if (XR_FAILED(synced)) return true;
+  // XR_SESSION_NOT_FOCUSED is a success code with no input.
+  synced_ = synced == XR_SUCCESS;
   for (int h = 0; h < 2; ++h) {
     XrActionStateGetInfo get = {XR_TYPE_ACTION_STATE_GET_INFO};
     get.subactionPath = hands_[h];
@@ -858,6 +936,178 @@ void XrApp::CopyScreen(int eye) {
   ++screen_copies_[eye];
 }
 
+void XrApp::PulseWith(int hand, float amplitude, float seconds) {
+  if (haptic_ == XR_NULL_HANDLE || state_ != XR_SESSION_STATE_FOCUSED) return;
+  XrHapticVibration v = {XR_TYPE_HAPTIC_VIBRATION};
+  v.amplitude = amplitude < 0.0f ? 0.0f : (amplitude > 1.0f ? 1.0f : amplitude);
+  v.duration = seconds > 0.0f ? static_cast<XrDuration>(seconds * 1e9f)
+                              : XR_MIN_HAPTIC_DURATION;
+  v.frequency = XR_FREQUENCY_UNSPECIFIED;
+  XrHapticActionInfo info = {XR_TYPE_HAPTIC_ACTION_INFO};
+  info.action = haptic_;
+  info.subactionPath = hands_[hand ? 1 : 0];
+  xrApplyHapticFeedback(session_, &info,
+                        reinterpret_cast<const XrHapticBaseHeader*>(&v));
+}
+
+// The profile that the runtime chose for each hand, after
+// /interaction_profiles/, as XrScreen of the PC gives it.
+void XrApp::ReadProfiles() {
+  profiles_read_ = true;
+  static const char kPrefix[] = "/interaction_profiles/";
+  for (int h = 0; h < 2; ++h) {
+    profile_[h].clear();
+    XrInteractionProfileState now = {XR_TYPE_INTERACTION_PROFILE_STATE};
+    if (XR_SUCCEEDED(xrGetCurrentInteractionProfile(session_, hands_[h], &now)) &&
+        now.interactionProfile != XR_NULL_PATH) {
+      char full[XR_MAX_PATH_LENGTH] = {0};
+      uint32_t length = 0;
+      if (XR_SUCCEEDED(xrPathToString(instance_, now.interactionProfile,
+                                      sizeof(full), &length, full))) {
+        const size_t n = sizeof(kPrefix) - 1;
+        profile_[h] = strncmp(full, kPrefix, n) == 0 ? full + n : full;
+      }
+    }
+    AppLog("xr           : the %s hand has the profile \"%s\"",
+           h == 0 ? "left" : "right", profile_[h].c_str());
+  }
+}
+
+void XrApp::InputSlot(input_channel::SlotData* out) {
+  namespace ic = input_channel;
+  memset(out, 0, sizeof(*out));
+  out->display_time = frame_.predictedDisplayTime;
+  out->display_period = frame_.predictedDisplayPeriod;
+  out->recenters = recenters_;
+  out->recommended_width = eye_width_;
+  out->recommended_height = eye_height_;
+  out->gaze[2] = -1.0f;
+  if (running_) out->flags |= ic::kRunning;
+  if (synced_) out->flags |= ic::kFocused;
+  for (int h = 0; h < 2; ++h) {
+    out->hands[h].aim_orientation[3] = 1.0f;
+    out->hands[h].grip_orientation[3] = 1.0f;
+    out->hands[h].serial = ++serial_[h];
+  }
+
+  // THE VIEWS at the display time of the frame, in the LOCAL space.
+  XrViewLocateInfo locate = {XR_TYPE_VIEW_LOCATE_INFO};
+  locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+  locate.displayTime = frame_.predictedDisplayTime;
+  locate.space = local_;
+  XrViewState view_state = {XR_TYPE_VIEW_STATE};
+  XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+  uint32_t found = 0;
+  if (frame_.predictedDisplayTime != 0 &&
+      XR_SUCCEEDED(xrLocateViews(session_, &locate, &view_state, 2, &found,
+                                 views)) &&
+      found == 2) {
+    const XrViewStateFlags need = XR_VIEW_STATE_POSITION_VALID_BIT |
+                                  XR_VIEW_STATE_ORIENTATION_VALID_BIT;
+    const bool valid = (view_state.viewStateFlags & need) == need;
+    for (int e = 0; e < 2; ++e) {
+      ic::Eye& eye = out->eyes[e];
+      const XrPosef& p = views[e].pose;
+      eye.position[0] = p.position.x;
+      eye.position[1] = p.position.y;
+      eye.position[2] = p.position.z;
+      eye.orientation[0] = p.orientation.x;
+      eye.orientation[1] = p.orientation.y;
+      eye.orientation[2] = p.orientation.z;
+      eye.orientation[3] = p.orientation.w;
+      eye.fov[0] = views[e].fov.angleLeft;
+      eye.fov[1] = views[e].fov.angleRight;
+      eye.fov[2] = views[e].fov.angleUp;
+      eye.fov[3] = views[e].fov.angleDown;
+      eye.valid = valid ? 1u : 0u;
+    }
+  }
+
+  // THE HANDS, as XrScreen::SyncInput of the PC reads them. With no input
+  // focus each hand is not active and each button is up.
+  if (!synced_ || !input_live_) return;
+  if (!profiles_read_) ReadProfiles();
+  for (int h = 0; h < 2; ++h) {
+    ic::Hand& hand = out->hands[h];
+    XrActionStateGetInfo get = {XR_TYPE_ACTION_STATE_GET_INFO};
+    get.subactionPath = hands_[h];
+    XrActionStatePose aim_state = {XR_TYPE_ACTION_STATE_POSE};
+    XrActionStatePose grip_state = {XR_TYPE_ACTION_STATE_POSE};
+    get.action = aim_;
+    xrGetActionStatePose(session_, &get, &aim_state);
+    get.action = grip_;
+    xrGetActionStatePose(session_, &get, &grip_state);
+    if (!aim_state.isActive && !grip_state.isActive) continue;
+    hand.flags |= ic::kActive;
+    const size_t n = profile_[h].size() < ic::kProfileChars - 1
+                         ? profile_[h].size()
+                         : ic::kProfileChars - 1;
+    memcpy(hand.profile, profile_[h].data(), n);
+    hand.profile[n] = 0;
+    auto value = [&](XrAction action) {
+      XrActionStateFloat v = {XR_TYPE_ACTION_STATE_FLOAT};
+      get.action = action;
+      if (XR_SUCCEEDED(xrGetActionStateFloat(session_, &get, &v)) && v.isActive) {
+        return v.currentState < 0.0f ? 0.0f
+                                     : (v.currentState > 1.0f ? 1.0f : v.currentState);
+      }
+      return 0.0f;
+    };
+    hand.trigger = value(trigger_);
+    hand.squeeze = value(squeeze_);
+    XrActionStateVector2f stick = {XR_TYPE_ACTION_STATE_VECTOR2F};
+    get.action = stick_;
+    if (XR_SUCCEEDED(xrGetActionStateVector2f(session_, &get, &stick)) &&
+        stick.isActive) {
+      hand.stick[0] = stick.currentState.x < -1.0f ? -1.0f
+                      : (stick.currentState.x > 1.0f ? 1.0f : stick.currentState.x);
+      hand.stick[1] = stick.currentState.y < -1.0f ? -1.0f
+                      : (stick.currentState.y > 1.0f ? 1.0f : stick.currentState.y);
+    }
+    const XrAction buttons[4] = {stick_click_, primary_, secondary_, menu_button_};
+    const uint32_t bits[4] = {ic::kStickClick, ic::kPrimary, ic::kSecondary, ic::kMenu};
+    for (int i = 0; i < 4; ++i) {
+      XrActionStateBoolean b = {XR_TYPE_ACTION_STATE_BOOLEAN};
+      get.action = buttons[i];
+      if (XR_SUCCEEDED(xrGetActionStateBoolean(session_, &get, &b)) &&
+          b.isActive && b.currentState) {
+        hand.flags |= bits[i];
+      }
+    }
+    // Both poses at the display time of the eyes, so the hands and the head
+    // share one moment.
+    const XrSpaceLocationFlags need = XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                                      XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    const XrSpaceLocationFlags tracked = XR_SPACE_LOCATION_POSITION_TRACKED_BIT |
+                                         XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+    for (int which = 0; which < 2; ++which) {
+      const bool active = which == 0 ? aim_state.isActive : grip_state.isActive;
+      XrSpace space = which == 0 ? aim_space_[h] : grip_space_[h];
+      XrSpaceLocation where = {XR_TYPE_SPACE_LOCATION};
+      if (!active || space == XR_NULL_HANDLE ||
+          XR_FAILED(xrLocateSpace(space, local_, frame_.predictedDisplayTime,
+                                  &where))) {
+        continue;
+      }
+      float* position = which == 0 ? hand.aim_position : hand.grip_position;
+      float* orientation = which == 0 ? hand.aim_orientation : hand.grip_orientation;
+      position[0] = where.pose.position.x;
+      position[1] = where.pose.position.y;
+      position[2] = where.pose.position.z;
+      orientation[0] = where.pose.orientation.x;
+      orientation[1] = where.pose.orientation.y;
+      orientation[2] = where.pose.orientation.z;
+      orientation[3] = where.pose.orientation.w;
+      if ((where.locationFlags & need) == need) {
+        hand.flags |= which == 0 ? ic::kAimValid : ic::kGripValid;
+      }
+      if ((where.locationFlags & tracked) == tracked) {
+        hand.flags |= which == 0 ? ic::kAimTracked : ic::kGripTracked;
+      }
+    }
+  }
+}
+
 void XrApp::Pulse(int hand) {
   if (haptic_ == XR_NULL_HANDLE || state_ != XR_SESSION_STATE_FOCUSED) return;
   XrHapticVibration v = {XR_TYPE_HAPTIC_VIBRATION};
@@ -902,6 +1152,10 @@ void XrApp::Stop() {
   if (cursor_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(cursor_.swapchain);
   menu_.swapchain = cursor_.swapchain = XR_NULL_HANDLE;
   for (XrSpace& s : aim_space_) {
+    if (s != XR_NULL_HANDLE) xrDestroySpace(s);
+    s = XR_NULL_HANDLE;
+  }
+  for (XrSpace& s : grip_space_) {
     if (s != XR_NULL_HANDLE) xrDestroySpace(s);
     s = XR_NULL_HANDLE;
   }

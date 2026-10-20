@@ -47,6 +47,7 @@
 #include "ui_panel.h"
 #include "vr_start.h"
 #include "vr_start_math.h"
+#include "xr_input.h"
 
 bool ProxyLoadRealDDraw();
 const char* ProxyBackendNote();
@@ -519,6 +520,8 @@ int g_draw_probe_delay = 0;
 // Run both passes with no headset, so the draw probe can be used from a
 // plain desktop session.
 bool g_stereo_headless = false;
+// The input channel from the headset app (xr_input.h).
+XrInputOptions g_xr_input;
 
 // The Lionhead intro in stereo. Off by default while it is tested. See
 // intro_vr.cpp and docs/intro.md.
@@ -1411,6 +1414,18 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "draw_probe_delay", 0, path);
   g_stereo_headless =
       GetPrivateProfileIntA("bwvr", "stereo_headless", 0, path) != 0;
+  // THE INPUT CHANNEL (xr_input.h, docs/android.md, "The input channel").
+  // xr_input=1: the views, the hands, the display time, the focus and the
+  // recenter come from the headset app. Then the mod starts no OpenXR
+  // session, and the frame runs as with stereo_headless=1. 0: the session,
+  // or the fake sources on the desktop.
+  g_xr_input.mode =
+      GetPrivateProfileIntA("bwvr", "xr_input", 0, path) != 0 ? 1 : 0;
+  g_xr_input.record_frames = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "xr_input_record", 0, path));
+  g_xr_input.lockstep_ms = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "xr_input_lockstep_ms", 0, path));
+  if (g_xr_input.mode != 0) g_stereo_headless = true;
   g_intro_vr = GetPrivateProfileIntA("bwvr", "intro_vr", 0, path) != 0;
   g_intro_motion = GetPrivateProfileIntA("bwvr", "intro_motion", 1, path);
   g_intro_speed_pct =
@@ -1719,6 +1734,16 @@ void StartVrStep() {
     HeadPoseSetScale(g_head_units_per_meter);
     StereoSetHeadFov(g_head_fov_deg);
     StereoSetFovMargin(g_fov_margin_pct);
+    // The input channel takes the place of the session and of the fake
+    // sources, at the same places.
+    XrInputSetOptions(g_xr_input);
+    XrInputStart(g_dir);
+    if (XrInputOn() && (g_fake_head || g_fake_controller.mode != 0)) {
+      ModLog("xr input     : xr_input=1, so fake_head=%d and fake_controller=%d "
+             "have no effect", g_fake_head ? 1 : 0, g_fake_controller.mode);
+      g_fake_head = false;
+      g_fake_controller.mode = 0;
+    }
     HeadPoseSetFake(g_fake_head, g_fake_yaw, g_fake_pitch, g_fake_roll);
     HeadPoseFakeSweep(g_fake_sweep);
     if (g_fake_head) {
@@ -2261,6 +2286,8 @@ void __cdecl h_FinishFrame() {
   o_FinishFrame();
   UiBarsEnd(bars);
   ++g_frame;
+  // The next reader of the input channel reads a new slot.
+  XrInputNewFrame();
   ExitTestFrame(g_frame);
   if (g_cursor_trace) CursorTraceFrame(g_frame);
   // The rules for the switch (docs/ui-layer.md, "Rules for the switch"):
@@ -2706,6 +2733,7 @@ void Shutdown(const char* path) {
   QueryPerformanceCounter(&start);
   ModLog("");
   ModLog("shutdown     : the shutdown starts, %s, frame %llu", path, g_frame);
+  XrInputReport();
   LogDirect3DModules("the shutdown starts");
   // Let the cursor go before anything else. A clipped cursor outlives the
   // process that clipped it, so a crash here would leave the pointer trapped
@@ -2871,9 +2899,12 @@ void LogDirect3DModules(const char* when) {
 }
 
 // For tabletop.cpp: the predicted display time of the frame of the headset
-// that is open, in seconds, or 0 with no session.
+// that is open, in seconds, or 0 with no session. With xr_input=1 it is the
+// display time of the slot of the app.
 double ModDisplaySeconds() {
-  if (g_screen == nullptr || !g_screen->running()) return 0.0;
+  if (g_screen == nullptr || !g_screen->running()) {
+    return XrInputOn() ? XrInputDisplaySeconds() : 0.0;
+  }
   return g_screen->DisplaySeconds();
 }
 

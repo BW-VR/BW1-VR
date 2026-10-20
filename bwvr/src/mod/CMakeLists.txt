@@ -12,6 +12,7 @@ add_library(bwvr_mod SHARED
     frame_send.cpp
     draw_merge.cpp
     bubble_card.cpp
+    note_depth.cpp
     draw_hooks.cpp
     ui_panel.cpp
     eye_camera.cpp
@@ -41,6 +42,7 @@ add_library(bwvr_mod SHARED
     vk_scene.cpp
     vk_stream.cpp
     vk_window.cpp
+    vk_fallback.cpp
     frame_time.cpp
     fov.cpp
     input_watch.cpp
@@ -52,11 +54,13 @@ add_library(bwvr_mod SHARED
     pointer_map.cpp
     cursor_trace.cpp
     exit_test.cpp
+    crash_report.cpp
     game_start.cpp
     comfort_camera.cpp
     script_camera.cpp
     cutscene_window.cpp
     sky_detail.cpp
+    sprite_up.cpp
     spirit_anchor.cpp
     fight_marks.cpp
     controllers.cpp
@@ -74,6 +78,7 @@ add_library(bwvr_mod SHARED
     far_grab.cpp
     take_stream.cpp
     forest_take.cpp
+    tree_body.cpp
     creature_command.cpp
     creature_stay.cpp
     miracle.cpp

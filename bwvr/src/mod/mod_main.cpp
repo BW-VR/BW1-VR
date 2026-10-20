@@ -36,6 +36,7 @@
 #include "vk_stream.h"
 #include "vk_ddraw.h"
 #include "vk_window.h"
+#include "vk_fallback.h"
 #include "../proxy/ddraw_proxy.h"
 #include "render_thread.h"
 #include "tabletop.h"
@@ -94,6 +95,9 @@ void IntroSetOptions(bool on, int motion, int speed_pct, int distance_cm,
                      bool push_once, bool controller, bool probe,
                      bool test_keys);
 void IntroSetTests(int motion_seconds, int push_pixels);
+void IntroSetHandPush(int percent, bool hand_point);
+void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
+                   bool hand_depth);
 void IntroSetScreen(bwvr::XrScreen* screen);
 void IntroInstall();
 bool IntroFinishFrame();
@@ -103,6 +107,9 @@ void EyeCleanInstall();
 // bubble_card.cpp: a speech bubble of the game as one card.
 void BubbleCardSetOptions(int on, int name_on, int test, int test_frame);
 void BubbleCardInstall();
+// note_depth.cpp: a note of the game over a thing at the depth of its place.
+void NoteDepthSetOptions(int on, const char* test_frames, int test_frame);
+void NoteDepthInstall();
 // intro_skip.cpp: a press of a controller button skips the logos at the
 // start of the game. `caller` is the address that called FinishFrame.
 void IntroSkipFrame(uintptr_t caller, bwvr::XrScreen* screen);
@@ -186,6 +193,10 @@ void SkyDetailInstall();
 void SkyDetailRelease();
 void SkySetGlareMode(int mode);
 void SkySetCloudPoleShare(int percent);
+void SkySetHeadFree(bool clouds, bool moon, int test_frame, bool trace,
+                    int test_hour);
+void SpriteUpSet(bool on, int test_frame, bool trace);
+void SpriteUpInstall();
 void PointerMapSetDragSmoothing(int ms);
 void PointerMapSetFakeMouse(const char* script, int step_px,
                             const int x_pct[2], const int y_pct[2]);
@@ -230,7 +241,8 @@ void CutsceneWindowInstall();
 bool UiDepthInstall(bool with_attribution);
 void UiDepthSetAccounting(bool on);
 void UiDepthSetHintMode(int mode);
-void UiDepthSetHintSelfTest(bool on);
+void UiDepthSetHintSelfTest(int mode);
+void UiDepthSetHintHandDepth(int on, int test_frame);
 void UiDepthSetHintScale(float scale);
 DWORD TextureFilterInstall(int requested_anisotropy);
 void TextureFilterReport();
@@ -273,6 +285,9 @@ void UiDepthReport();
 void ExitTestSetFrame(int frame);
 void ExitTestFrame(uint64_t frame);
 void ExitTestGuardFromStart();
+// crash_report.cpp: the report and the dump of a fault (crash_report).
+void CrashReportInstall(const char* ini);
+void CrashReportFrame(uint64_t frame);
 
 void ModLog(const char* format, ...);
 
@@ -419,6 +434,20 @@ int g_drag_smoothing_ms = 35;
 int g_sun_glare = 0;
 // How long a cloud may reach toward the eye, as a percent of its distance.
 int g_cloud_pole_pct = 25;
+// In the table and the God view the clouds face the table camera, not the
+// render head. The moon turns with world up, not with the head.
+bool g_clouds_head_free = true;
+bool g_moon_world_up = true;
+// Test keys of a desktop run: both keys above change at this frame, and the
+// report has the moves of the clouds and the moon from frame to frame.
+int g_sky_test_frame = 0;
+bool g_sky_test_trace = false;
+int g_sky_test_hour = -1;
+// Smoke, fire and the other sprites keep world up, not the camera up with
+// the roll of the head. The test keys change it at a frame and trace it.
+bool g_sprite_world_up = true;
+int g_sprite_test_frame = 0;
+bool g_sprite_test_trace = false;
 // The black bars of the story scenes. Off by default in a headset.
 bool g_cinema_bars = false;
 // The advisors stay where the player looked when they came.
@@ -455,7 +484,11 @@ bool g_controllers = true;
 int g_left_hand = -1;
 bool g_controller_swap_buttons = false;
 bool g_controller_hints = true;
-bool g_hint_selftest = false;
+int g_hint_selftest = 0;
+// A tooltip or a hint of the game at the game's Hand has the depth of the
+// Hand (draw_hooks.cpp, HandHintMove), and its test key with a frame.
+int g_hint_hand_depth = 1;
+int g_hint_hand_depth_test_frame = 0;
 char g_hint_profile[64] = {0};
 bool g_controller_haptics = true;
 FakeControllerSettings g_fake_controller;
@@ -624,9 +657,27 @@ int g_bubble_card = 1;
 int g_name_card = 1;
 int g_bubble_card_test = 0;
 int g_bubble_card_test_frame = 0;
+// A note of the game over a thing at the depth of its place (note_depth.cpp),
+// and its test keys for desktop runs.
+int g_note_depth = 1;
+char g_note_test[64] = "";
+int g_note_depth_test_frame = 0;
 bool g_intro_text_place = true;
 bool g_intro_push_once = true;
 bool g_intro_controller = true;
+// The motion of the hand that goes to the motion of the mouse in the intro,
+// in percent. 0: only a mouse pushes the orbs.
+int g_intro_hand_push_pct = 100;
+// In the intro the pointer is at the Hand's point, not where the aim ray
+// points.
+bool g_intro_hand_point = true;
+// In the intro each hand takes the orbs in its reach in 3D, the reach in cm
+// of the room, when the hand models show (0 never, 1 while a hand moves, 2
+// while it is tracked), and whether they draw before the orbs.
+bool g_intro_push_3d = true;
+int g_intro_push_radius_cm = 30;
+int g_intro_hand_show = 1;
+bool g_intro_hand_depth = true;
 bool g_intro_probe = false;
 // Tests of the desktop runs.
 int g_intro_motion_test_seconds = 0;
@@ -1085,6 +1136,24 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "sun_glare", 0, path));
   g_cloud_pole_pct = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "cloud_pole_pct", 25, path));
+  // Not in the launcher. See docs/backend.md, "Sky, clouds and detail".
+  g_clouds_head_free =
+      GetPrivateProfileIntA("bwvr", "clouds_head_free", 1, path) != 0;
+  g_moon_world_up =
+      GetPrivateProfileIntA("bwvr", "moon_world_up", 1, path) != 0;
+  g_sky_test_frame = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "sky_test_frame", 0, path));
+  g_sky_test_trace =
+      GetPrivateProfileIntA("bwvr", "sky_test_trace", 0, path) != 0;
+  g_sky_test_hour = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "sky_test_hour", -1, path));
+  // Not in the launcher. See docs/backend.md, "Sprites with world up".
+  g_sprite_world_up =
+      GetPrivateProfileIntA("bwvr", "sprite_world_up", 1, path) != 0;
+  g_sprite_test_frame = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "sprite_test_frame", 0, path));
+  g_sprite_test_trace =
+      GetPrivateProfileIntA("bwvr", "sprite_test_trace", 0, path) != 0;
   g_cinema_bars = GetPrivateProfileIntA("bwvr", "cinema_bars", 0, path) != 0;
   g_spirit_anchor =
       GetPrivateProfileIntA("bwvr", "spirit_anchor", 1, path) != 0;
@@ -1125,6 +1194,22 @@ void ReadSettings() {
   // The launcher's "Test keys" box. F12 saves both eye pictures and
   // Shift F12 steps the subtitles. Off for players.
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, path) != 0;
+  const bool xr_bridge_key =
+      GetPrivateProfileIntA("bwvr", "xr_bridge", 0, path) == 1;
+  // The bridge to the x64 host gives the frames of Direct3D 11 to the host.
+  // backend=vulkan and xr_vulkan=1 have a session with Vulkan, so they use
+  // the local runtime (docs/backend.md, "Only Vulkan").
+  const bool vulkan_session =
+      ProxyBackendVulkan() ||
+      GetPrivateProfileIntA("bwvr", "xr_vulkan", 0, path) != 0;
+  const bool xr_bridge = xr_bridge_key && !vulkan_session;
+  bwvr::XrScreen::ConfigureBridge(xr_bridge);
+  ModLog("settings     : xr_bridge=%d, %s", xr_bridge_key ? 1 : 0,
+         xr_bridge ? "experimental x64 OpenXR host"
+         : xr_bridge_key
+             ? "but the session has Vulkan (backend=vulkan or xr_vulkan=1), "
+               "and the bridge needs Direct3D 11. The local OpenXR runtime"
+             : "local OpenXR runtime");
   // Not in the launcher. Off only to test the fault it fixes.
   g_game_camera_rebuild =
       GetPrivateProfileIntA("bwvr", "game_camera_rebuild", 1, path) != 0;
@@ -1163,7 +1248,12 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "controller_hints", 1, path) != 0;
   GetPrivateProfileStringA("bwvr", "hint_profile", "", g_hint_profile,
                            sizeof(g_hint_profile), path);
-  g_hint_selftest = GetPrivateProfileIntA("bwvr", "hint_selftest", 0, path) != 0;
+  g_hint_selftest = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "hint_selftest", 0, path));
+  g_hint_hand_depth =
+      GetPrivateProfileIntA("bwvr", "hint_hand_depth", 1, path) != 0 ? 1 : 0;
+  g_hint_hand_depth_test_frame = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "hint_hand_depth_test_frame", 0, path));
   {
     FakeControllerSettings& f = g_fake_controller;
     const auto number = [&](const char* key, int fallback) {
@@ -1562,6 +1652,12 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "bubble_card_test", 0, path) != 0 ? 1 : 0;
   g_bubble_card_test_frame = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "bubble_card_test_frame", 0, path));
+  g_note_depth =
+      GetPrivateProfileIntA("bwvr", "note_depth", 1, path) != 0 ? 1 : 0;
+  GetPrivateProfileStringA("bwvr", "note_test", "", g_note_test,
+                           sizeof(g_note_test), path);
+  g_note_depth_test_frame = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "note_depth_test_frame", 0, path));
   g_intro_text_place =
       GetPrivateProfileIntA("bwvr", "intro_text_place", 1, path) != 0;
   g_intro_push_once =
@@ -1572,6 +1668,18 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "intro_push_test_px", 0, path);
   g_intro_controller =
       GetPrivateProfileIntA("bwvr", "intro_controller", 1, path) != 0;
+  g_intro_hand_push_pct = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "intro_hand_push_pct", 100, path));
+  g_intro_hand_point =
+      GetPrivateProfileIntA("bwvr", "intro_hand_point", 1, path) != 0;
+  g_intro_push_3d =
+      GetPrivateProfileIntA("bwvr", "intro_push_3d", 1, path) != 0;
+  g_intro_push_radius_cm = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "intro_push_radius_cm", 30, path));
+  g_intro_hand_show = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "intro_hand_show", 1, path));
+  g_intro_hand_depth =
+      GetPrivateProfileIntA("bwvr", "intro_hand_depth", 1, path) != 0;
   g_intro_probe = GetPrivateProfileIntA("bwvr", "intro_probe", 0, path) != 0;
   g_fix_unscaled =
       GetPrivateProfileIntA("bwvr", "fix_unscaled", 1, path) != 0;
@@ -1615,8 +1723,6 @@ void ModLogNowhere(const char* format, ...);
 double MsSince(const LARGE_INTEGER& start);
 void StartVrFromThread();
 void VrSessionRuns(bwvr::XrScreen* screen, uint32_t width, uint32_t height);
-void PrepareScreen(bwvr::XrScreen* screen);
-void RendererStopsWait(int tries);
 
 // Starting the VR session needs the Direct3D device, which does not exist
 // until the game has opened it. So this runs on a frame, not in DllMain, where
@@ -1679,8 +1785,12 @@ void StartVrStep() {
     PointerMapSetFakeMouse(g_fake_mouse_script, g_fake_mouse_step_px,
                            g_fake_mouse_x_pct, g_fake_mouse_y_pct);
     SkySetCloudPoleShare(g_cloud_pole_pct);
+    SkySetHeadFree(g_clouds_head_free, g_moon_world_up, g_sky_test_frame,
+                   g_sky_test_trace, g_sky_test_hour);
     SkySetGlareMode(g_sun_glare);
     SkyDetailInstall();
+    SpriteUpSet(g_sprite_world_up, g_sprite_test_frame, g_sprite_test_trace);
+    SpriteUpInstall();
     SpiritAnchorSetEnabled(g_spirit_anchor);
     SpiritAnchorSetWorldSize(g_spirit_world_size, g_test_keys,
                              g_spirit_world_size_test,
@@ -1711,6 +1821,7 @@ void StartVrStep() {
     UiDepthSetHintSelfTest(g_hint_selftest);
     UiDepthSetHintScale(g_hint_scale);
     UiDepthSetHintFlat(g_hint_flat);
+    UiDepthSetHintHandDepth(g_hint_hand_depth, g_hint_hand_depth_test_frame);
     UiDepthSetSubtitleLift(g_subtitle_lift);
     UiDepthSetSubtitleDegrees(g_subtitle_degrees);
     // After UiDepthInstall, and before GpuBridgeStart below.
@@ -1833,6 +1944,9 @@ void StartVrStep() {
                     g_intro_eye_trails, g_intro_text_place, g_intro_push_once,
                     g_intro_controller, g_intro_probe, g_test_keys);
     IntroSetTests(g_intro_motion_test_seconds, g_intro_push_test_px);
+    IntroSetHandPush(g_intro_hand_push_pct, g_intro_hand_point);
+    IntroSetHands(g_intro_push_3d, g_intro_push_radius_cm, g_intro_hand_show,
+                  g_intro_hand_depth);
     IntroInstall();
     EyeCleanSetOptions(g_eye_clean, g_eye_clean_test, g_eye_clean_test_frame);
     EyeCleanInstall();
@@ -1918,6 +2032,8 @@ void StartVrStep() {
     BubbleCardSetOptions(g_bubble_card, g_name_card, g_bubble_card_test,
                          g_bubble_card_test_frame);
     BubbleCardInstall();
+    NoteDepthSetOptions(g_note_depth, g_note_test, g_note_depth_test_frame);
+    NoteDepthInstall();
   }
 
   // Headless measuring runs the two passes and throws the pictures away, so
@@ -1949,7 +2065,9 @@ void StartVrStep() {
     options.max_tries = kMaxVrTries;
     options.test_hang_try = g_vr_start_test_hang_try;
     options.test_hang_ms = g_vr_start_test_hang_ms;
-    options.prepare = &PrepareScreen;
+    options.vulkan = g_xr_vulkan != 0;
+    options.d3d11 = !g_vulkan_only;
+    options.eye_gaze = g_foveation != 0 && g_foveation_gaze != 0;
     if (VrStartBegin(options)) {
       g_vr_thread = true;
       return;
@@ -1961,7 +2079,11 @@ void StartVrStep() {
   LARGE_INTEGER try_start;
   QueryPerformanceCounter(&try_start);
   bwvr::XrScreen* screen = new bwvr::XrScreen();
-  PrepareScreen(screen);
+  screen->UseVulkan(g_xr_vulkan != 0);
+  screen->UseD3D11(!g_vulkan_only);
+  screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
+  screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
+  screen->SetHoldMs(g_xr_hold_ms);
   screen->SetPlacement(g_distance, g_width);
   screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
   // Only the first failure and every tenth after it reach the log. A message
@@ -1972,7 +2094,12 @@ void StartVrStep() {
                      quiet ? &ModLogNowhere : &ModLog)) {
     // A session with Vulkan that the GPU or the runtime cannot have. With
     // vulkan_only=1 there is no session with Direct3D 11, so the game stays
-    // on the monitor.
+    // on the monitor. With backend=vulkan the next start uses dxwrapper and
+    // a session with Direct3D 11 (VkFallbackFault).
+    if (screen->VulkanFailed()) {
+      VkFallbackFault("the session with Vulkan did not start (the openxr "
+                      "lines before name the call)");
+    }
     if (screen->VulkanFailed() && g_vulkan_only) {
       delete screen;
       g_vr_gave_up = true;
@@ -1994,12 +2121,20 @@ void StartVrStep() {
     delete screen;
     g_vr_code_ms += MsSince(try_start);
     ++g_vr_tries;
-    RendererStopsWait(g_vr_tries);
     if (g_vr_fallback_try) {
       g_vr_fallback_try = false;
       ModLog("vr           : the start on the frame thread failed too, in try "
              "%d. The tries go on to the end of the 2 minutes (vr_start=0)",
              g_vr_tries);
+    }
+    // backend=vulkan: the window of the game needs the renderer. After three
+    // tries (about 9 s) it draws with a device of its own, and a session
+    // that starts later gets no image of it (VkSceneEyesWanted).
+    if (g_vr_tries >= 3 && VkSceneDirect() && vk::Pending()) {
+      vk::WaitForExternal(false);
+      ModLog("vr           : no session after 3 tries, so the Vulkan renderer "
+             "draws with a device of its own. A session that starts later "
+             "gets no picture of it: start the game with the headset ready");
     }
     if (g_vr_tries == 1) {
       ModLog("vr           : waiting for the headset, will keep trying for "
@@ -2031,7 +2166,6 @@ void StartVrFromThread() {
            "mod does not use the headset. Start the game from the launcher");
     return;
   }
-  RendererStopsWait(VrStartTries());
   bool over = false;
   bwvr::XrScreen* screen = VrStartTake(&over);
   if (over) {
@@ -2050,6 +2184,15 @@ void StartVrFromThread() {
     vk::WaitForExternal(false);
     return;
   }
+  // backend=vulkan: the window of the game needs the renderer, as with the
+  // tries on the frame thread.
+  if (screen == nullptr && VrStartTries() >= 3 && VkSceneDirect() &&
+      vk::Pending()) {
+    vk::WaitForExternal(false);
+    ModLog("vr           : no session after 3 tries, so the Vulkan renderer "
+           "draws with a device of its own. A session that starts later "
+           "gets no picture of it: start the game with the headset ready");
+  }
   if (screen == nullptr) return;
 
   // THE SESSION RUNS ON THE FRAME THREAD. The thread found the headset, so
@@ -2064,6 +2207,8 @@ void StartVrFromThread() {
   } else if (!FrameSourceSize(&width, &height)) {
     failed = "the size of the render target, before StartSession";
   } else {
+    screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
+    screen->SetHoldMs(g_xr_hold_ms);
     screen->SetPlacement(g_distance, g_width);
     screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
     screen->SetLog(&ModLog);
@@ -2086,30 +2231,6 @@ void StartVrFromThread() {
   g_vr_fell_back = true;
   g_vr_start = vr_start_math::kOnFrameThread;
   VrStartGiveBack(screen);
-}
-
-// The options of a new screen, before its instance, for each way of the
-// tries. The thread of the tries calls it too: it reads only values that
-// the start of the mod set.
-void PrepareScreen(bwvr::XrScreen* screen) {
-  screen->UseVulkan(g_xr_vulkan != 0);
-  screen->UseD3D11(!g_vulkan_only);
-  screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
-  screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
-  screen->SetHoldMs(g_xr_hold_ms);
-}
-
-// backend=vulkan: the window of the game needs the renderer. After three
-// tries (about 9 s) it draws with a device of its own, and a session that
-// starts later gets no image of it (VkSceneEyesWanted). On the frame thread,
-// for each way of the tries.
-void RendererStopsWait(int tries) {
-  if (tries >= 3 && VkSceneDirect() && vk::Pending()) {
-    vk::WaitForExternal(false);
-    ModLog("vr           : no session after 3 tries, so the Vulkan renderer "
-           "draws with a device of its own. A session that starts later "
-           "gets no picture of it: start the game with the headset ready");
-  }
 }
 
 // A screen with a session that runs, from either way of the tries.
@@ -2262,6 +2383,7 @@ void __cdecl h_FinishFrame() {
   UiBarsEnd(bars);
   ++g_frame;
   ExitTestFrame(g_frame);
+  CrashReportFrame(g_frame);
   if (g_cursor_trace) CursorTraceFrame(g_frame);
   // The rules for the switch (docs/ui-layer.md, "Rules for the switch"):
   // the game's target is back before anything else runs.
@@ -2292,6 +2414,12 @@ void __cdecl h_FinishFrame() {
   // and make the game look hung with no way back.
   PresentWatchSkipDesktop(g_skip_desktop && g_screen != nullptr &&
                           g_screen->running());
+  // backend=vulkan: the first frame that the session with Vulkan presented
+  // deletes the file of the fall back (vk_fallback.h).
+  if (VkFallbackWaiting() && g_screen != nullptr && g_screen->vulkan() &&
+      vk::Started() && g_screen->presented() > 0) {
+    VkFallbackPicture("the headset");
+  }
 
   // The watch of the frame thread counts each frame, also of the logos
   // (hang_watch, a test key).
@@ -2532,6 +2660,8 @@ void EarlyHooks() {
   char path[MAX_PATH];
   lstrcpynA(path, g_dir, MAX_PATH);
   lstrcatA(path, "bwvr.ini");
+  // The report of a fault goes in first, so it also covers the start.
+  CrashReportInstall(path);
   // The game's check for an internet connection can wait forever when a
   // service of Windows does not answer. The mod answers it by default. It
   // goes in here, before each other thing, because it must work with vr
@@ -2550,6 +2680,9 @@ void EarlyHooks() {
   // On by default from version 1.1.0. Read here because the device hooks of
   // the bridge need it.
   Depth24SetWanted(GetPrivateProfileIntA("bwvr", "depth24", 1, path) != 0);
+  // backend=vulkan: the line of a fall back to dxwrapper, or the file that
+  // the first picture deletes (vk_fallback.h).
+  VkFallbackStart(g_dir, path);
   // backend=vulkan with vulkan_only=1: no DXVK, no hook on Direct3D 9 and no
   // load of d3d9.dll.
   // vulkan_strict=1 (ddraw_proxy.cpp, "ONLY VULKAN"): vulkan_only=1 too,
@@ -2753,6 +2886,9 @@ void Shutdown(const char* path) {
 }
 
 void __cdecl h_free_system() {
+  // The game loop ended as it does for Quit. A fault comes to exit or to
+  // DllMain, not here.
+  VkFallbackEnd();
   Shutdown("the game frees its system (free_system)");
   o_free_system();
 }

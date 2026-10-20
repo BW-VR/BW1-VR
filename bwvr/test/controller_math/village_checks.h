@@ -42,6 +42,29 @@ inline void VillageChecks() {
   Near("back from above the top: 0.9 at 4 units up",
        TotemValue(0.4f, 20.0f, 24.0f), 0.9, 1e-6);
 
+  // THE GHOST OF THE POLE: narrower than the pole with totem_ghost=1, and
+  // the scale of the game with totem_ghost=0.
+  Near("the ghost of a pole of scale 1 is 0.97 wide", GhostScale(1.0f, true),
+       0.97, 1e-6);
+  Near("the ghost of a pole of scale 1.5", GhostScale(1.5f, true), 1.455,
+       1e-6);
+  Near("totem_ghost=0: the scale of the game", GhostScale(1.5f, false), 1.5,
+       1e-6);
+  Check(GhostScale(1.0f, true) < 1.0f, "the ghost is inside the pole", 1, 1);
+  // A face 1 unit from the line of the pole is 0.03 units inside: at 30
+  // units from the eye with a near plane of 1.125 units, that is hundreds of
+  // steps of a 24 bit depth buffer.
+  Near("a face 1 unit out is 0.03 units inside", GhostInset(1.0f, true), 0.03,
+       1e-6);
+  Near("totem_ghost=0: the faces are in one plane", GhostInset(1.0f, false),
+       0.0, 1e-6);
+  {
+    const float steps = 1.125f / (30.0f * 30.0f) * GhostInset(1.0f, true) *
+                        16777216.0f;
+    Check(steps > 100.0f, "the inset is many depth steps at 30 units",
+          static_cast<int>(steps), 100);
+  }
+
   // THE ROWS: the game's own math brings its value to the wanted one.
   const float height = 12.0f, screen = 2880.0f;
   Check(TotemRows(0.4f, 0.4f, height, screen) == 0, "no move: no rows",
@@ -79,6 +102,39 @@ inline void VillageChecks() {
   Check(TotemRows(0.0f, 1.0f, 0.02f, screen) <= 4 * 2880,
         "the rows of one frame have a limit",
         TotemRows(0.0f, 1.0f, 0.02f, screen), 4 * 2880);
+
+  // THE POLE AFTER THE RELEASE. The totem was at 0.22, and the Hand lets it
+  // go at 0.44. While the locked select runs, the pole is at the value of
+  // the Hand.
+  {
+    const float before = 0.22f, released = 0.44f;
+    Near("the pole at the release is at the value of the Hand",
+         TotemPoleValue(before, released, true), 0.44, 1e-6);
+    Near("totem_hold=0: the game slides the pole for 1144 ms",
+         TotemSlideMs(TotemValueBefore(before, released, false, true),
+                      released),
+         1144.0, 0.5);
+    Check(TotemSlideMs(TotemValueBefore(before, released, true, true),
+                       released) < kTotemSnapMs,
+          "totem_hold=1: the game puts the pole at the new value at once", 1,
+          1);
+    Near("totem_hold=1: a value that is not from a release slides",
+         TotemSlideMs(TotemValueBefore(before, released, true, false),
+                      released),
+         1144.0, 0.5);
+    // After packet 0x29 the drag value is the new value (GetWorshipSpeed).
+    // With the snap the shown value is the new value too, and then packet
+    // 0x1C ends the locked select.
+    Near("totem_hold=1: after the end the pole stays at 0.44",
+         TotemPoleValue(released, released, false), 0.44, 1e-6);
+    Check(TotemPoleValue(released, released, false) ==
+              TotemGhostValue(released, released, false),
+          "totem_hold=1: no ghost after the end", 1, 1);
+    Near("totem_hold=0: after the end the pole is back at 0.22",
+         TotemPoleValue(before, released, false), 0.22, 1e-6);
+    Near("totem_hold=0: the ghost is at the new value",
+         TotemGhostValue(before, released, false), 0.44, 1e-6);
+  }
 
   // THE COUNT OF THE WORSHIPPERS, as Town::GetWorshipersNeeded.
   Check(Worshippers(15, 0.0f) == 0, "value 0: no villager worships",

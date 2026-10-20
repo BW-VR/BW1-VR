@@ -90,6 +90,13 @@ try {
     # as each recipe counts, also when the installed bwvr.ini has the smooth
     # zoom (a push of 10 frames is then less than half a step, and the
     # scenes of bench_run.ps1 are not at their zoom).
+    # hint_counts_test_file: the mod keeps the counts of the hint cards
+    # (hint_learn=1) in this file in the folder of the run, and not in the
+    # file bwvr-hint-counts.ini of the game folder, which is the player's.
+    # The file of the run before goes first, so each run starts with no
+    # counts.
+    $counts = Join-Path $out 'bwvr-hint-counts.ini'
+    Remove-Item -LiteralPath $counts, "$counts.new" -Force -ErrorAction SilentlyContinue
     $keys = [ordered]@{
         vr = 0; stereo = 1; stereo_headless = 1; fake_head = 1;
         fake_head_yaw = 0; fake_head_pitch = 0; fov_absolute_deg = 110
@@ -99,6 +106,7 @@ try {
         window_width = 800; window_height = 640
         god_zoom_forward_in = 1
         god_zoom_smooth = 0
+        hint_counts_test_file = $counts
     }
     foreach ($k in $Extra.Keys) { $keys[$k] = $Extra[$k] }
 
@@ -145,6 +153,7 @@ try {
         }
         $script:watch = $now
     }
+    $runStart = Get-Date
     $p = Start-Process @startArgs
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
@@ -158,6 +167,12 @@ try {
     Copy-Item $log (Join-Path $out 'bwvr.log') -Force
     "game exited on its own: $exited"
     Get-ChildItem $game -Filter 'bwvr-*.bmp' -ErrorAction SilentlyContinue |
+        Move-Item -Destination $out -Force
+    # A dump of a fault (crash_report=1) that this run wrote is a file of the
+    # run, and not of the player's game folder. An older dump is the player's
+    # and stays.
+    Get-ChildItem $game -Filter 'bwvr-*.dmp' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $runStart } |
         Move-Item -Destination $out -Force
 }
 finally {

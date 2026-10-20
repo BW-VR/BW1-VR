@@ -193,8 +193,12 @@ struct LateFrame {
   void (*wait)();
 };
 
+class RemoteScreen;
+
 class XrScreen {
  public:
+  // Select before startup. 0 uses the local runtime, 1 uses the x64 host.
+  static void ConfigureBridge(bool enabled);
   XrScreen();
   ~XrScreen();
 
@@ -208,6 +212,27 @@ class XrScreen {
   // each call come from any thread, when two threads do not use one handle
   // at one time.
   bool Start(uint32_t width, uint32_t height, int eyes, LogFn log);
+
+  // Makes the instance, and sets the log. With an instance, it only sets
+  // the log. False: no instance, and the log has the reason.
+  bool StartInstance(LogFn log);
+  bool has_instance() const;
+
+  // Asks the runtime for the head mounted display. 1: the system is there.
+  // 0: the runtime has no head mounted display now
+  // (XR_ERROR_FORM_FACTOR_UNAVAILABLE). The instance stays, and a later call
+  // can find it. -1: a different fault, and only Stop is left to do.
+  int StartSystem();
+
+  // Writes the name and the size of the headset that StartSystem found to
+  // the log.
+  void LogSystem();
+
+  // The device of the session on the adapter of the runtime (Direct3D 11,
+  // or Vulkan with UseVulkan), the session, the spaces, the controllers and
+  // the swapchains. After StartSystem gave 1. False: only Stop is left to
+  // do, and VulkanFailed says if the Vulkan part failed.
+  bool StartSession(uint32_t width, uint32_t height, int eyes);
 
   // THE GRAPHICS API OF THE SESSION. Call it before Start. false (the
   // default): a session with Direct3D 11. true: a session with Vulkan
@@ -277,25 +302,6 @@ class XrScreen {
   // The size of each eye picture, as Start had it.
   uint32_t width() const;
   uint32_t height() const;
-  // Makes the instance, and sets the log. With an instance, it only sets
-  // the log. False: no instance, and the log has the reason.
-  bool StartInstance(LogFn log);
-  bool has_instance() const;
-
-  // Asks the runtime for the head mounted display. 1: the system is there.
-  // 0: the runtime has no head mounted display now
-  // (XR_ERROR_FORM_FACTOR_UNAVAILABLE). The instance stays, and a later call
-  // can find it. -1: a different fault, and only Stop is left to do.
-  int StartSystem();
-
-  // Writes the name and the size of the headset that StartSystem found to
-  // the log.
-  void LogSystem();
-
-  // The Direct3D 11 device on the adapter of the runtime, the session, the
-  // spaces, the controllers and the swapchains. After StartSystem gave 1.
-  // False: only Stop is left to do.
-  bool StartSession(uint32_t width, uint32_t height, int eyes);
 
   // Waits for the runtime and starts a frame. Returns false when the session
   // has ended and the caller should stop. When it returns true but
@@ -508,6 +514,7 @@ class XrScreen {
   void ReportUpload(uint64_t frames);
 
  private:
+  RemoteScreen* remote_ = nullptr;
   struct Impl;
   Impl* impl_;
   bool BuildFrame();   // the layers of the frame

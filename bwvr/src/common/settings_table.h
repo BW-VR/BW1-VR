@@ -80,11 +80,12 @@ inline const Setting kSettings[] = {
      "frame time in busy places."},
 
     {kGroup, nullptr, "Performance", nullptr, 0, nullptr},
-    {kRenderer, "backend", "Renderer", "Vulkan|Direct3D 9", 1,
-     "Vulkan: the mod draws the game with a Vulkan renderer of its own, and "
-     "the pictures go to the headset and to the window through Vulkan. The "
-     "mod then uses no dxwrapper, no Direct3D 9 and no Direct3D 11. Your GPU "
-     "needs Vulkan 1.3: with no Vulkan 1.3 the launcher keeps Direct3D 9. "
+    {kRenderer, "backend", "Renderer", "Vulkan|Direct3D 9", 0,
+     "Vulkan (the default): the mod draws the game with a Vulkan renderer of "
+     "its own, and the pictures go to the headset and to the window through "
+     "Vulkan. The mod then uses no dxwrapper, no Direct3D 9 and no Direct3D "
+     "11. Your GPU needs Vulkan 1.3: with no Vulkan 1.3 the launcher keeps "
+     "Direct3D 9. "
      "Direct3D 9: the game draws through dxwrapper and Direct3D 9, as in "
      "the versions before. The change counts from the next start."},
     {kBool, "d3d9_backend", "Direct3D 9 through DXVK", nullptr, 0,
@@ -296,6 +297,12 @@ inline const Setting kSettings[] = {
      "Hold both grips to turn the world and to zoom. Either grip: the grip "
      "of your pointing hand also grabs the world when the Hand is empty and "
      "not over an object. Off: the grips do not move the world."},
+    {kValues, "hint_learn", "Hints", "Until learned=1|Always=0", 1,
+     "The cards beside your wrists show what each button does. Until "
+     "learned: a line goes away after you do its action 3 times. It comes "
+     "back after 10 minutes of play without that action. In a lesson of the "
+     "tutorial, each line shows. Always: each line always shows. To show all "
+     "lines again, delete bwvr-hint-counts.ini in the game folder."},
 
     {kGroup, nullptr, "Testing", nullptr, 0, nullptr},
     {kBool, "test_keys", "Test keys", nullptr, 0,
@@ -340,7 +347,8 @@ inline const char* const kRetiredKeys[] = {
     "village_test_icon", "village_test_site", "seek_step_cm",
     "village_test_miracles", "village_test_scaffolds",
     "village_test_workshop", "pointer_leave_cursor", "cursor_trace",
-    "exit_test_frame", "registry_test_guard", "intro_skip_test_frame",
+    "exit_test_frame", "crash_test_frame", "target_check_test_frame",
+    "registry_test_guard", "intro_skip_test_frame",
     "fake_controller_play_frame", "fake_controller_play_after",
     "menu_skip_test_frame", "intro_motion_test_seconds",
     "intro_push_test_px",
@@ -366,7 +374,10 @@ inline const char* const kRetiredKeys[] = {
     "frame_time_test_readers_frames", "god_zoom_about_test",
     "god_zoom_test_toggle",
     "hand_feel_test_toggle", "hand_model_test_look", "hand_model_test_swap",
-    "help_test", "land_light_test", "near_test_flips", "spawn_test_flag",
+    "help_test", "hint_counts_test_file", "land_light_test",
+    "near_test_flips", "sky_test_frame", "sky_test_trace",
+    "sky_test_hour", "spawn_test_flag", "sprite_test_frame",
+    "sprite_test_trace",
     "spawn_test_temple",
     "spawn_test_toggle", "spawn_test_x", "spawn_test_z",
     "spirit_point_world_test", "spirit_world_size_test",
@@ -375,7 +386,9 @@ inline const char* const kRetiredKeys[] = {
     "profile_sample_thread", "profile_sample_dump", "profile_gpu",
     "hang_watch", "gpu_flush_ab", "ab_test", "d3d7_count", "fast_transform_check",
     "test_cores", "vk_scene", "vk_scene_test_frame", "vk_scene_follow", "vk_eyes", "xr_vulkan_upload", "vk_panel", "vk_only", "vk_only_test", "vk_upload_queue", "vk_scene_reread_test", "ddraw_census", "test_smt", "test_spin_walk_us", "test_spin_idle_us",
-    "test_wake_records", "vk_stream_record", "vk_stream_frames", "vk_stream_live", "vk_stream_live_drop_us", "vk_stream_live_drop", "vk_stream_live_end",
+    "test_wake_records", "vulkan_fallback_test", "vk_stream_record",
+    "vk_stream_frames", "vk_stream_live", "vk_stream_live_drop_us",
+    "vk_stream_live_drop", "vk_stream_live_end",
     "render_thread_test_frame",
     "temple_test_camera_trace",
     "temple_test_click_frame", "temple_test_door_on",

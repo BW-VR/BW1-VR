@@ -387,7 +387,7 @@ try {
     Set-Content -LiteralPath (Join-Path $Out 'input-dump.txt') -Value $dump -Encoding utf8
     Expect ($dump -match 'head whole, 4096 bytes, version 1') 'the channel file has a whole head'
     $slotLine = [regex]::Match($dump, 'slot seq (\d+) frame (\d+) flags 0x([0-9A-F]+) time (\d+) period (\d+) recenters (\d+) size (\d+) (\d+)')
-    Expect ($slotLine.Success -and [int]$slotLine.Groups[2].Value -gt 100 -and ([int]$slotLine.Groups[1].Value % 2) -eq 0) ("the app wrote the slot at each frame (" + $(if ($slotLine.Success) { "$($slotLine.Groups[2].Value) slots, the sequence $($slotLine.Groups[1].Value) is even" } else { 'no slot' }) + ')')
+    Expect ($slotLine.Success -and [int]$slotLine.Groups[2].Value -gt 100 -and ([int]$slotLine.Groups[1].Value % 2) -eq 0) ("the app wrote slots in the frames of the session (" + $(if ($slotLine.Success) { "$($slotLine.Groups[2].Value) slots, the sequence $($slotLine.Groups[1].Value) is even" } else { 'no slot' }) + ')')
     Expect ($slotLine.Success -and $slotLine.Groups[5].Value -eq '13888888' -and [int64]$slotLine.Groups[4].Value -gt 0) ("the slot has the display time of the runtime, period 13888888 ns (" + $(if ($slotLine.Success) { $slotLine.Groups[5].Value } else { '' }) + ')')
     Expect ($slotLine.Success -and $slotLine.Groups[6].Value -eq '1' -and $log -match 'the LOCAL space recentered \(1 recenters\)') 'the recenter of the runtime is in the slot (1 recenter)'
     Expect ($slotLine.Success -and $slotLine.Groups[7].Value -eq '2064' -and $slotLine.Groups[8].Value -eq '2208') 'the slot has the size of the eyes that the headset asks for'

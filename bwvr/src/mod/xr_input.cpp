@@ -44,6 +44,8 @@ bool g_gaze_valid = false;
 float g_gaze[3] = {0.0f, 0.0f, -1.0f};
 bool g_have_recenter = false;
 uint32_t g_recenters_seen = 0;
+bool g_have_session = false;
+uint32_t g_session = 0;
 bool g_recenter_due = false;
 // The time of the last new slot, for xr_input_stale_ms.
 ULONGLONG g_slot_tick = 0;
@@ -106,6 +108,15 @@ void Take(const ic::SlotData& d) {
   g_display_period = d.display_period;
   g_gaze_valid = (d.flags & ic::kGazeValid) != 0;
   for (int i = 0; i < 3; ++i) g_gaze[i] = d.gaze[i];
+  // A new start of the app counts its recenters from 0 again. That is no
+  // recenter of the player.
+  const uint32_t session = ic::LoadAcquire(&g_chan->head.app_session);
+  if (xm::NewSession(session, &g_have_session, &g_session)) {
+    g_have_recenter = false;
+    ModLog("xr input     : a new session of the app (%u), slot %u. Its count "
+           "of the recenters starts with no recenter, frame %llu",
+           session, d.frame, ControllersFrameCount());
+  }
   if (xm::TakeRecenter(d.recenters, &g_have_recenter, &g_recenters_seen)) {
     g_recenter_due = true;
     ModLog("xr input     : the app recentered (%u recenters), frame %llu",

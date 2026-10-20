@@ -803,7 +803,13 @@ save "pen" with the scripted controller and a record. `-Kind channel -From
 record of the fake run into the channel, and the script compares the
 records, the pulses and the pictures of the test frame.
 
-INPUT_RESULTS
+A channel run gives the mod the input of the fake run in each frame of the
+record (the two records have the same bytes), the same pulses at the same
+frames, and pictures of the test frame within the noise of two fake runs
+close in time. With `xr_input=0` the pictures are within the same noise as
+the build before. `xr_input` and `input_live` have no test key: the source
+of the input is chosen at the start, and with `xr_input=1` the mod starts
+no session.
 
 **Not shown yet:** the channel under Wine and Box64 in the headset (the
 mapping of a real file by Wine and by the app, and the barriers of Box64),

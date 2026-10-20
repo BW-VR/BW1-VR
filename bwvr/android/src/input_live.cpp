@@ -45,6 +45,17 @@ bool InputLive::Start(const std::string& path, uint32_t test_pulse) {
   clock_gettime(CLOCK_MONOTONIC, &t);
   ic::StoreRelease(&file_->head.app_session,
                    static_cast<uint32_t>(getpid()) ^ static_cast<uint32_t>(t.tv_nsec));
+  // After a crash the slot of an earlier run of the app can hold the focus
+  // and active hands. The first slot of this run has neither, so the mod
+  // takes no input of the earlier run.
+  ic::SlotData none = {};
+  for (int e = 0; e < 2; ++e) none.eyes[e].orientation[3] = 1.0f;
+  for (int h = 0; h < 2; ++h) {
+    none.hands[h].aim_orientation[3] = 1.0f;
+    none.hands[h].grip_orientation[3] = 1.0f;
+  }
+  Write(&none);
+  no_input_ = true;
   // A pulse of an earlier run is not for now.
   const uint32_t old = ic::DropOldEvents(file_);
   AppLog("input        : input_live=1. Each frame of the session writes the "

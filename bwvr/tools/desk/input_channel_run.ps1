@@ -20,7 +20,11 @@
 #   the mod sends. After the run the script compares the record of this run
 #   with the record of -From, the pulses that came to the writer with the
 #   pulses in the log of this run and of -From, and the pictures of the test
-#   frame with the pictures of -From.
+#   frame with the pictures of -From. The writer waits up to 35 minutes for
+#   the head of the mod, because desk_run.ps1 can first wait for an idle PC.
+# -MaxPercent (0.25): the bound for each picture of the test frame against
+#   the picture of -From, as the percentage of its pixels that differ by more
+#   than 24. Two fake runs close in time differ by about 0.05.
 #
 # The output is in desk-<Name>: bwvr-input.rec, bwvr-input.chan,
 # writer.txt and the pictures. The pictures hold pixels of the game and stay
@@ -35,6 +39,7 @@ param(
     [int]$Seconds = 60,
     [string]$Script = 'point@1500+1 trigger@1800+8 point@2300+1 trigger@2600+8',
     [string]$Points = '15,-25,40 -10,-30,50',
+    [double]$MaxPercent = 0.25,
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -67,7 +72,7 @@ if ($Kind -eq 'channel') {
     $keys['xr_input'] = 1
     $keys['xr_input_lockstep_ms'] = 2000
     $p = Start-Process -FilePath $writer -NoNewWindow -PassThru `
-        -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)") `
+        -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)", '2100') `
         -RedirectStandardOutput (Join-Path $out 'writer.txt') -RedirectStandardError (Join-Path $out 'writer-err.txt')
     $null = $p.Handle  # keeps the exit code
     "the test writer runs (process $($p.Id)): it plays $fromRec"
@@ -167,8 +172,10 @@ foreach ($ref in $pictures) {
     $mine = Join-Path $out $ref.Name
     if (-not (Test-Path -LiteralPath $mine)) { "   $($ref.Name): not in this run"; $fails++; continue }
     $d = [InputBmpDiff]::Compare($ref.FullName, $mine)
-    "   {0}: {1:N3} percent of the pixels differ by more than 24, {2:N3} percent differ at all, the mean difference {3:N3}" -f $ref.Name, $d[0], $d[1], $d[2]
+    $over = $d[0] -gt $MaxPercent
+    if ($over) { $fails++ }
+    "   {0}: {1:N3} percent of the pixels differ by more than 24, {2:N3} percent differ at all, the mean difference {3:N3}{4}" -f $ref.Name, $d[0], $d[1], $d[2], $(if ($over) { " (more than $MaxPercent percent: FAULT)" } else { '' })
 }
 if ($pictures.Count -eq 0) { $fails++ }
-if ($fails -eq 0) { 'INPUT CHANNEL VERIFIED: the record, the pulses and the pictures (see the numbers above, against the noise of two fake runs)' }
+if ($fails -eq 0) { "INPUT CHANNEL VERIFIED: the record, the pulses and the pictures (each picture at most $MaxPercent percent of its pixels by more than 24)" }
 else { "INPUT CHANNEL FAULT: $fails of the checks above" }

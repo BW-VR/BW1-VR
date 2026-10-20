@@ -209,6 +209,23 @@ inline void InputChannelChecks() {
           "a recenter of the app recenters the mod one time", next ? 1 : 0, 1);
   }
 
+  // A NEW SESSION OF THE APP: its count of the recenters starts at 0. The
+  // mod takes it as it is, with no recenter of the player.
+  {
+    bool have_session = false, have = false;
+    uint32_t session = 0, seen = 0;
+    const bool first = xm::NewSession(77, &have_session, &session);
+    xm::TakeRecenter(3, &have, &seen);
+    const bool same = xm::NewSession(77, &have_session, &session);
+    const bool other = xm::NewSession(91, &have_session, &session);
+    if (other) have = false;
+    const bool recenter = xm::TakeRecenter(0, &have, &seen);
+    const bool next = xm::TakeRecenter(1, &have, &seen);
+    Check(!first && !same && other && !recenter && next,
+          "a new session of the app gives no recenter, and its next recenter "
+          "counts", recenter ? 1 : 0, 0);
+  }
+
   // THE LOCKSTEP of a test: a slot of frame + 1 is for the frame.
   Check(!xm::SlotFor(0, 0) && xm::SlotFor(1, 0) && !xm::SlotFor(5, 5) &&
             xm::SlotFor(6, 5) && !xm::SlotFor(9, 5),

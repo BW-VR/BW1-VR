@@ -103,6 +103,17 @@ inline void NoHand(bwvr::HandInput* out) {
 // One more recenter of the slot than the reader saw: the reader recenters
 // one time. The first slot that the reader sees sets the count with no
 // recenter, because a recenter before the start of the mod is not for it.
+// THE SESSION OF THE APP. The count of the recenters starts at 0 in each
+// start of the writer of the app. A new session is true one time, and the
+// mod then takes the count of that session as it is, with no recenter.
+inline bool NewSession(uint32_t session, bool* have, uint32_t* seen) {
+  if (*have && session == *seen) return false;
+  const bool changed = *have;
+  *have = true;
+  *seen = session;
+  return changed;
+}
+
 inline bool TakeRecenter(uint32_t slot_recenters, bool* have, uint32_t* seen) {
   if (!*have) {
     *have = true;

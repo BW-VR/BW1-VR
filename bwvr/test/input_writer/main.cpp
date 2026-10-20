@@ -3,14 +3,16 @@
 // the mod and the app (src/common/input_channel.h). It does what the headset
 // app does, with the input of a record in place of a session.
 //
-//   bwvr_input_writer play <channel> <record> <seconds>
-//     Waits for the head of the mod in the channel file. Then for each frame
+//   bwvr_input_writer play <channel> <record> <seconds> [<head seconds>]
+//     Waits up to <head seconds> (<seconds> when not given) for the head of
+//     the mod in the channel file, so that a run can first wait for an idle
+//     PC. Then for each frame
 //     of the controllers that the mod latches (Head::want), it writes the
 //     input of the same frame of the record into the slot, with the frame +
 //     1 as its tag (the lockstep of xr_input_lockstep_ms). After the end of
 //     the record it writes the last frame of the record. It takes each pulse
-//     of the ring of the events and writes one line for it. It ends after
-//     <seconds>.
+//     of the ring of the events and writes one line for it. It ends
+//     <seconds> after the head of the mod came.
 //
 //   bwvr_input_writer compare <record A> <record B>
 //     Compares the input of each frame that is in both records. Exit code 0
@@ -94,16 +96,18 @@ bool Map(const char* path, Mapped* m) {
   return true;
 }
 
-int Play(const char* channel, const char* record, int seconds) {
+int Play(const char* channel, const char* record, int seconds,
+         int head_seconds) {
   std::vector<ic::SlotData> frames;
   uint32_t source = 0;
   if (!ReadRecord(record, &frames, &source) || frames.empty()) return 2;
   printf("the record has %zu frames of the controllers (source %u)\n",
          frames.size(), source);
   fflush(stdout);
-  const ULONGLONG end = GetTickCount64() + static_cast<ULONGLONG>(seconds) * 1000;
+  const ULONGLONG head_end =
+      GetTickCount64() + static_cast<ULONGLONG>(head_seconds) * 1000;
   Mapped m;
-  while (GetTickCount64() < end) {
+  while (GetTickCount64() < head_end) {
     if (Map(channel, &m)) {
       if (ic::HeadOk(m.view, ic::kFileBytes) &&
           ic::LoadAcquire(&m.view->head.mod_session) != 0) {
@@ -114,9 +118,10 @@ int Play(const char* channel, const char* record, int seconds) {
     Sleep(20);
   }
   if (m.view == nullptr) {
-    printf("no channel of the mod at %s in %d s\n", channel, seconds);
+    printf("no channel of the mod at %s in %d s\n", channel, head_seconds);
     return 3;
   }
+  const ULONGLONG end = GetTickCount64() + static_cast<ULONGLONG>(seconds) * 1000;
   ic::File* f = m.view;
   ic::StoreRelease(&f->head.app_session, GetCurrentProcessId());
   ic::DropOldEvents(f);
@@ -260,7 +265,9 @@ int Dump(const char* channel) {
 int main(int argc, char** argv) {
   setvbuf(stdout, nullptr, _IOFBF, 1 << 16);
   if (argc >= 5 && strcmp(argv[1], "play") == 0) {
-    return Play(argv[2], argv[3], atoi(argv[4]));
+    const int seconds = atoi(argv[4]);
+    return Play(argv[2], argv[3], seconds,
+                argc >= 6 ? atoi(argv[5]) : seconds);
   }
   if (argc >= 4 && strcmp(argv[1], "compare") == 0) {
     const int code = Compare(argv[2], argv[3]);

@@ -902,6 +902,11 @@ God view keeps to the same bits:
   (`TabletopGrabAllows`, called by `world_grab.cpp`).
 - A snap turn needs bit 2 (`MayTurn` in `comfort_camera.cpp`).
 - The mouse double click needs bit 0x10, because it is the jump of the game.
+- While bit 8 is off the player cannot come nearer to an object, so the far
+  grab has no range limit then (`far_grab_still_m`, `grab.md`, "The range in a
+  view that the game holds still"). The fireball challenge of Land 2 holds the
+  view still with its seeds 37 units from the game camera, and the God view
+  puts the player at the huts of the target, more than 200 units away.
 
 **The interface levels** [V: the disassembly and
 `Scripts\Quests\challenge.chl`]. A script sets all the bits at one time with

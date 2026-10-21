@@ -169,6 +169,9 @@ float TabletopViewScale();
 // tabletop.cpp: true while the table or the God view owns the view.
 bool TabletopOwnsView();
 bool TabletopGodOwnsView();
+// tabletop.cpp: true while the game's switch for the drag of the land is on,
+// so the player can move the view.
+bool TabletopMoveAllowed();
 // head_camera.cpp: the rotation and the position that the scene was drawn
 // from, in the world.
 bool HeadCameraRenderBasis(float basis_out[9], float position_out[3]);
@@ -6783,6 +6786,25 @@ void FarTestTakeGone() {
   FarGrabGone();
 }
 
+// TEST (far_test_still_view=N, for the desktop runs only): at frame N the
+// test writes 0 to the camera switches of the game (CameraHelp::
+// EnabledFeatures), as the interface level 12 of a script does. The game
+// then holds the view still, as in the fireball challenge of Land 2.
+void FarTestStillView() {
+  static const int frame = TestKey("far_test_still_view");
+  static bool done = false;
+  if (frame <= 0 || done) return;
+  if (ControllersTestFrame(frame, g_frame) < static_cast<uint64_t>(frame)) {
+    return;
+  }
+  done = true;
+  uint32_t* features = reinterpret_cast<uint32_t*>(0x009CDD6C);
+  ModLog("far grab    : test key far_test_still_view=%d: the camera switches "
+         "of the game go from 0x%X to 0, frame %llu", frame, *features,
+         g_frame);
+  *features = 0;
+}
+
 // The grab from a distance, once a frame: the facts of the frame go to
 // far_grab.cpp, and the cone and the selection latch what they need.
 void FarFrameStep(bool active) {
@@ -6798,9 +6820,11 @@ void FarFrameStep(bool active) {
     g_far_keep_model = *reinterpret_cast<uint8_t* const*>(
         static_cast<uint8_t*>(locked) + kObjectMesh);
   }
+  FarTestStillView();
   FarFrame f = {};
   f.frame = g_frame;
   f.now = NowSeconds();
+  f.still = !TabletopMoveAllowed();
   f.why = "the controller does not place the Hand";
   f.held = g_hand != nullptr
                ? *reinterpret_cast<void* const*>(g_hand + kHandHeld)

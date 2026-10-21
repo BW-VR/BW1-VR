@@ -69,6 +69,7 @@
 #include "frame_profile.h"
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
+#include "far_grab.h"
 #include "fast_transform.h"
 #include "thread_wait.h"
 #include "ddraw_census.h"
@@ -626,8 +627,8 @@ float FrameSeparation() {
 // Shift 8, Shift 9, Shift F, Shift G, Shift H, Shift J, Shift K, Shift L,
 // Shift M, Shift N, Shift B, Shift V, Shift C, Shift X, Shift Z, Shift Y,
 // Shift U, Shift I, Shift O, Shift P, Shift T, Shift W, Shift Q, Shift E,
-// Shift R, Shift D
-static const int kShiftKeys = 26;
+// Shift R, Shift D, Shift A
+static const int kShiftKeys = 27;
 static volatile LONG g_shift_key[kShiftKeys] = {};
 static DWORD g_shift_key_at[kShiftKeys] = {};
 static HHOOK g_message_hook = nullptr;
@@ -660,6 +661,7 @@ static int ShiftKeyIndex(WPARAM key) {
          : key == 'E' ? 23
          : key == 'R' ? 24
          : key == 'D' ? 25
+         : key == 'A' ? 26
                       : -1;
 }
 
@@ -1027,6 +1029,11 @@ void PollHotkeys() {
   // with Vulkan").
   if (InterlockedExchange(&g_shift_key[25], 0) != 0) {
     VkWindowToggle("Shift and D");
+  }
+  // An A/B of the range of the far grab while the game holds the view still
+  // (docs/grab.md, "The range").
+  if (InterlockedExchange(&g_shift_key[26], 0) != 0) {
+    FarGrabStillToggle("Shift and A");
   }
   // An A/B of the read ahead of the subtitle card (docs/ui-layer.md, "The
   // subtitle card"). Ctrl Shift Pause is the key of throw_land_rest

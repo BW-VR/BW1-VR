@@ -123,12 +123,13 @@ bool ShowEyes(App* app) {
   uint32_t w = 0, h = 0;
   if (!VkSceneEyes(&image, &w, &h)) return false;
   if (!app->xr.HasScreen() && !app->xr.MakeScreen(w / 2, h / 2)) return false;
-  // The values of the projection layer of the frame of this picture.
+  // The values of the projection layer of the frame of this picture. With
+  // no swapchains of the projection layer (MakeEyes failed one time) the
+  // picture shows on the stereo screen.
   scene_stream::ViewBody view = {};
-  uint64_t pictures = 0;
-  const bool has = app->xr.ProjectionOn() && StreamPictureView(&view, &pictures) &&
-                   view_layer_math::ShowsProjection(view) &&
-                   (app->xr.HasEyes() || app->xr.MakeEyes(w, h));
+  const bool has = app->xr.ProjectionOn() && StreamPictureView(&view) &&
+                   view_layer_math::ShowsProjection(view);
+  if (has && !app->xr.HasEyes()) app->xr.MakeEyes(w, h);
   if (has && (view.width != w || view.height != h) && !app->said_view_size) {
     app->said_view_size = true;
     AppLog("xr           : the mod gives the angles of view for pictures of %u by "

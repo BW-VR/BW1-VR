@@ -373,6 +373,10 @@ try {
         }
         Expect ($log -match 'a stereo screen of two quads') 'the app made the stereo screen'
         if (-not $Projection) {
+            # A stream with no kView: the fall back to the stereo screen, one
+            # line in the log.
+            $noView = ([regex]::Matches($log, 'xr           : stream_projection=1, but the mod gave no values of the projection layer for the picture of the renderer')).Count
+            Expect ($noView -eq 1) "the log says one time that the pictures with no values of the mod show on the stereo screen ($noView lines)"
             Expect ($report -match 'quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 1 quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 2') 'the stereo screen is a quad for the left eye and a quad for the right eye, 2.6 m in front'
             foreach ($eye in 0, 1) {
                 $m = [regex]::Match($report, "capture \S*/start-$eye\.bmp (\d+)x(\d+) lit (\d+)")
@@ -396,7 +400,34 @@ try {
                 if ($m.Groups[2].Value -eq $v[1] -and $m.Groups[7].Value -eq $v[2]) { $matched++; $frames += $v[0]; break }
             }
         }
-        Expect ($layerLines.Count -gt 0 -and $matched -eq $layerLines.Count) ("the pose and the angles of view of each eye of each projection layer of the runtime are the values of a record kView of the feed ($matched of $($layerLines.Count) lines of the report" + $(if ($frames.Count -gt 0) { ", frames $(($frames | Sort-Object -Unique) -join ' ')" } else { '' }) + ')')
+        Expect ($layerLines.Count -gt 0 -and $matched -eq $layerLines.Count) ("the pose and the angles of view of each eye of each projection layer of the runtime are the values of a record kView of the feed ($matched of $($layerLines.Count) lines of the report)")
+        # THE FRAME OF EACH PICTURE. The app logs the frame of the mod of each
+        # new picture of the layer. The values of the kView of those frames,
+        # in their order, are the values of the layers that the runtime
+        # reports, in their order (each with no repeat of the value before).
+        $byFrame = @{}
+        foreach ($v in $feedViews) { $byFrame[$v[0]] = $v[1] + ' ' + $v[2] }
+        $shown = @([regex]::Matches($log, 'xr           : the projection layer shows the picture of frame (\d+)') | ForEach-Object { $_.Groups[1].Value })
+        $want = New-Object System.Collections.Generic.List[string]
+        $unknown = 0
+        foreach ($f in $shown) {
+            if (-not $byFrame.ContainsKey($f)) { $unknown++; continue }
+            if ($want.Count -eq 0 -or $want[$want.Count - 1] -ne $byFrame[$f]) { $want.Add($byFrame[$f]) }
+        }
+        $got = New-Object System.Collections.Generic.List[string]
+        foreach ($m in $layerLines) {
+            # Not $t: PowerShell names are not case sensitive, and $T is the
+            # start of the script of the controllers.
+            $layerText = $m.Groups[2].Value + ' ' + $m.Groups[7].Value
+            if ($got.Count -eq 0 -or $got[$got.Count - 1] -ne $layerText) { $got.Add($layerText) }
+        }
+        $distinct = @($got | Sort-Object -Unique).Count
+        Expect ($shown.Count -gt 0 -and $unknown -eq 0 -and ($want -join ';') -eq ($got -join ';')) ("each projection layer of the runtime has the values of the kView of the frame of its picture: the app showed the pictures of $($shown.Count) frames ($($shown -join ' ')), $unknown not in the feed, the values of $($want.Count) and $($got.Count) steps in the same order")
+        # The app plays the first frame of the feed and the newest frame. A
+        # feed with another pose in its last frames than in its first frames
+        # gives two poses.
+        Expect ($distinct -ge 2) "the layers of the runtime have $distinct poses, so the check above can tell the frames apart"
+
         if ($layerLines.Count -gt 0) {
             $first = $layerLines[0]
             Write-Host ('         the runtime: ' + $first.Value.Trim())

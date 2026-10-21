@@ -311,10 +311,8 @@ Player* ThePlayer(PlayResult* result) {
 
 }  // namespace
 
-bool StreamPictureView(scene_stream::ViewBody* out, uint64_t* pictures) {
-  const view_layer_math::PictureView& v = ThePlayer(nullptr)->View();
-  *pictures = v.Pictures();
-  return v.Get(out);
+bool StreamPictureView(scene_stream::ViewBody* out) {
+  return ThePlayer(nullptr)->View().Get(out);
 }
 
 void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result) {

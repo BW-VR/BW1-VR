@@ -342,13 +342,15 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
    the calls of OpenXR in the right order with the right structs. It does
    not show the runtime of Meta.
-   With `-Stream <file> -Gpu host` (49 checks) the app also plays a stream
+   With `-Stream <file> -Gpu host` (50 checks) the app also plays a stream
    of the walks on the device of the session, and the test checks the
    device (Vulkan 1.3 with the features of the renderer), the renderer on
    that device, the two quads of the stereo screen (one for each eye, 2.6
-   m in front) and the pictures of both eyes that the runtime read back. Its
+   m in front), the pictures of both eyes that the runtime read back, and
+   that the log says one time that a picture with no values of the
+   projection layer of the mod shows on the stereo screen. Its
    results are in `bwvr/out/android/emu-xr-stream-test`.
-   With `-Live <desk folder> -Gpu host` (58 checks, 59 with `-FeedMs 0`)
+   With `-Live <desk folder> -Gpu host` (59 checks, 60 with `-FeedMs 0`)
    the app plays the live stream of `ring-capture.bin` of a desktop run of
    `live_stream_run.ps1` on the device of the session: a child process of
    the app writes one frame into the ring each `-FeedMs` ms (14 by
@@ -365,13 +367,17 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    When the feed has records `kView` for a projection layer (a desk run of
    `input_channel_run.ps1 -Kind channel -Live`, see "The projection
    layer"), the app shows the pictures in a projection layer, and the test
-   checks it in place of the stereo screen (64 checks): the
-   two swapchains, no quad of the stereo screen, that the pose and the angles
-   of view of each eye of each projection layer that the runtime reports are
-   the values of a record `kView` of the feed, that the rect of each eye is
-   its whole picture, the pictures of both eyes that the runtime read back,
-   a copy for each new picture, and a projection layer in each frame with a
-   picture.
+   checks it in place of the stereo screen (66 checks, 67 with `-FeedMs
+   0`): the two swapchains, no quad of the stereo screen, that the pose and
+   the angles of view of each eye of each projection layer that the runtime
+   reports are the values of a record `kView` of the feed, that the layers
+   have the values of the `kView` of the frame of each picture in the order
+   of the pictures (the app logs the frame of each new picture), that the
+   layers have two poses or more, that the rect of each eye is its whole
+   picture, the pictures of both eyes that the runtime read back, a copy for
+   each new picture, and a projection layer in each frame with a picture.
+   The feed needs another pose in its last frames than in its first frames,
+   because the app plays the first frame and the newest frame.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -900,6 +906,10 @@ quads over it. A swapchain gets a new image only for a new picture
 released. The app adds no motion: no smoothing and no prediction of the
 pose. A picture with no view shows on the stereo screen, and the log says so
 one time. `stream_projection=0`: each picture shows on the stereo screen.
+`stream_projection` has no test key: the app reads it at its start, and the
+app has no hotkeys. When the app cannot make the swapchains of the layer, it
+frees what it made, says why in the log one time, does not try again, and
+the pictures show on the stereo screen.
 
 **The test aids of the mod.** `xr_view_record=N`: the values of the first N
 frames of the scene go to `bwvr-view.rec` beside `runblack.exe`, from the
@@ -928,18 +938,29 @@ stream (frames 3000 to 3003) has the bytes of the view of its frame. The
 pictures of frame 2996 of the channel run differ from the pictures of the
 fake run by 0.000 to 0.028 percent of their pixels by more than 24.
 
+A head in steps: the fake run has the words `look@3004+4 look@3016+40` of
+the scripted controller (the head turns 30 degrees left and 20 degrees
+down, still between the steps, with no motion), and the channel run has
+`-Live -LiveRecord 3030`, so the capture has the frames 2991 to 3033. Its
+`kView` have the straight pose in the frames 2991 to 3005 and 3010 to 3017,
+and the turned pose in the frames 3006 to 3009 and 3018 to 3033, one frame
+after each step of the head: the pose that each picture was drawn from.
+The 3100 views of the two runs are the same, and each of the 43 `kView` of
+the ring and the 4 of the record of the stream has the bytes of the view of
+its frame.
+
 **In the emulator** (`emu_xr_test.ps1 -Live <the channel run> -Gpu host`,
-"Test the APK", step 3). With the capture of the channel run above (13
-frames, each with a `kView`): the app made the two swapchains of 4080 by
-3264, and each of the 395 frames of the session with a picture had the
-projection layer and no quad of the stereo screen. Each projection layer
-that the runtime reported has the pose and the angles of view of a `kView`
-of the feed and the whole picture as its rect, and the pictures of both
-eyes that the runtime read back have the scene. Each eye got a copy for
-each of the 2 new pictures. The four pictures of frame 2996 are the same as
-the pictures of the PC, to the pixel. The invented head of the desk run is
-still, so each `kView` of the feed has the same values: the test shows that
-the values reach the layer, not which frame they come from.
+"Test the APK", step 3). With the capture of the head in steps (43 frames,
+each with a `kView`): the app made the two swapchains of 4080 by 3264, and
+each of the 397 frames of the session with a picture had the projection
+layer and no quad of the stereo screen. The app showed the pictures of the
+frames 2992, 3013 and 3033, and the layers that the runtime reported have
+the values of the `kView` of those frames in that order: the straight pose,
+then the turned pose. The rect of each eye is its whole picture, and the
+pictures of both eyes that the runtime read back have the scene. Each eye
+got a copy for each of the 3 new pictures. The four pictures of frame 2996
+are the same as the pictures of the PC, to the pixel. With `-FeedMs 0` the
+app showed the frames 2991 and 3033, with the two poses in that order.
 
 **Not shown yet:** a real headset (the reprojection of the runtime of Meta
 with the poses of the mod, and the comfort of the God view in the app), and

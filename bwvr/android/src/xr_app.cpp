@@ -742,6 +742,13 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     world = view_shown_[0] && view_shown_[1];
   }
   if (world) {
+    // One line for each new picture of the layer: the frame of the mod of its
+    // values.
+    if (!said_projection_ || shown_view_[0].frame != said_frame_) {
+      said_frame_ = shown_view_[0].frame;
+      AppLog("xr           : the projection layer shows the picture of frame %llu",
+             static_cast<unsigned long long>(said_frame_));
+    }
     for (int eye = 0; eye < 2; ++eye) {
       const scene_stream::ViewEye& e = shown_view_[eye].eyes[eye];
       XrCompositionLayerProjectionView& v = views[eye];
@@ -860,22 +867,46 @@ void XrApp::RendererDevice(vk::External* out) {
 }
 
 bool XrApp::MakeScreen(uint32_t width, uint32_t height) {
-  if (!MakeScreenSet(&screen_, width, height)) return false;
+  if (screen_.failed) return false;
+  const char* why = "";
+  if (!MakeScreenSet(&screen_, width, height, &why)) {
+    AppLog("xr           : the stereo screen of %u by %u cannot be made: %s. The "
+           "session shows no picture of the renderer", width, height, why);
+    return false;
+  }
   AppLog("xr           : a stereo screen of two quads of %u by %u for the "
          "pictures of the renderer", width, height);
   return true;
 }
 
 bool XrApp::MakeEyes(uint32_t width, uint32_t height) {
-  if (!MakeScreenSet(&eyes_, width, height)) return false;
+  if (eyes_.failed) return false;
+  const char* why = "";
+  if (!MakeScreenSet(&eyes_, width, height, &why)) {
+    AppLog("xr           : the projection layer of %u by %u cannot be made: %s. "
+           "The pictures of the renderer show on the stereo screen",
+           width, height, why);
+    return false;
+  }
   AppLog("xr           : a projection layer of two swapchains of %u by %u for "
          "the pictures of the renderer (stream_projection=1)", width, height);
   return true;
 }
 
-bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height) {
+// A set that cannot be made frees each part that it made, and the app does
+// not try it again (Screen::failed).
+bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
+                          const char** why) {
+  auto fail = [&](const char* reason) {
+    FreeScreenSet(screen);
+    screen->failed = true;
+    *why = reason;
+    return false;
+  };
   for (Layer& l : screen->layer) {
-    if (!MakeLayer(&l, width, height, false)) return false;
+    if (!MakeLayer(&l, width, height, false)) {
+      return fail("the runtime gave no swapchain (xrCreateSwapchain)");
+    }
   }
   // The picture of the renderer goes into an image of its own format at the
   // size of the swapchains first (a blit), then into the swapchain with a
@@ -893,7 +924,8 @@ bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height) {
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
   info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   if (vkCreateImage(gpu_.device, &info, nullptr, &screen->between) != VK_SUCCESS) {
-    return false;
+    screen->between = VK_NULL_HANDLE;
+    return fail("the image between the renderer and the swapchains (vkCreateImage)");
   }
   VkMemoryRequirements req;
   vkGetImageMemoryRequirements(gpu_.device, screen->between, &req);
@@ -908,10 +940,15 @@ bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height) {
   VkMemoryAllocateInfo alloc = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   alloc.allocationSize = req.size;
   alloc.memoryTypeIndex = type;
-  if (type == UINT32_MAX ||
-      vkAllocateMemory(gpu_.device, &alloc, nullptr, &screen->between_memory) !=
-          VK_SUCCESS) {
-    return false;
+  if (type == UINT32_MAX) {
+    return fail("no memory of the device for the image between the renderer and "
+                "the swapchains");
+  }
+  if (vkAllocateMemory(gpu_.device, &alloc, nullptr, &screen->between_memory) !=
+      VK_SUCCESS) {
+    screen->between_memory = VK_NULL_HANDLE;
+    return fail("the memory of the image between the renderer and the swapchains "
+                "(vkAllocateMemory)");
   }
   vkBindImageMemory(gpu_.device, screen->between, screen->between_memory, 0);
   return true;

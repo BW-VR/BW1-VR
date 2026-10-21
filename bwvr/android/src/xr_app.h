@@ -117,7 +117,8 @@ class XrApp {
   void SetProjection(bool on) { projection_on_ = on; }
   bool ProjectionOn() const { return projection_on_; }
   // The two swapchains of the projection layer, width by height (the size of
-  // the picture of the renderer).
+  // the picture of the renderer). After one fault it gives false with no new
+  // try, and the pictures show on the stereo screen.
   bool MakeEyes(uint32_t width, uint32_t height);
   bool HasEyes() const { return eyes_.between != VK_NULL_HANDLE; }
   // The values of the projection layer of the newest picture (after
@@ -160,8 +161,11 @@ class XrApp {
     VkImage between = VK_NULL_HANDLE;  // the picture at the size of the swapchains
     VkDeviceMemory between_memory = VK_NULL_HANDLE;
     uint64_t copies[2] = {0, 0};  // the copies of each eye
+    bool failed = false;  // the set could not be made, and the app does not try again
   };
-  bool MakeScreenSet(Screen* screen, uint32_t width, uint32_t height);
+  // False with the reason in *why, and then the set has no part.
+  bool MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
+                     const char** why);
   void FreeScreenSet(Screen* screen);
   // One eye of the picture of the renderer into the next image of its
   // swapchain. True when the eye released a new image in this call.
@@ -231,6 +235,7 @@ class XrApp {
   uint64_t projection_frames_ = 0;  // frames of the session with the projection layer
   uint64_t screen_frames_ = 0;      // frames of the session with the stereo screen
   bool said_projection_ = false;
+  uint64_t said_frame_ = 0;  // the frame of the last picture of the layer in the log
   bool said_no_view_ = false;
   VkImage screen_source_ = VK_NULL_HANDLE;
   uint32_t source_width_ = 0;

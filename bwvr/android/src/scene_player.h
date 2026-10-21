@@ -33,9 +33,8 @@ void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result);
 
 // THE PROJECTION LAYER OF THE LAST PICTURE of the renderer: the kView of the
 // frame of that picture (src/mod/view_layer_math.h, PictureView). False when
-// the frame of that picture has none. pictures: the count of the pictures
-// that ended, so a caller can see a new picture.
-bool StreamPictureView(scene_stream::ViewBody* out, uint64_t* pictures);
+// the frame of that picture has none.
+bool StreamPictureView(scene_stream::ViewBody* out);
 
 // The whole stream of `path` into the renderer. `folder` is the folder for
 // the pictures of the renderer (vk_scene_test_frame of the stream).

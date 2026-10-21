@@ -137,7 +137,7 @@ bool ShowEyes(App* app) {
   static const quad_layer_math::FrameLayers kNoLayers;
   const quad_layer_math::FrameLayers& layers =
       app->xr.LayersOn() ? StreamPictureLayers() : kNoLayers;
-  const bool window = quad_layer_math::AsScreen(layers);
+  const bool window = app->xr.ProjectionOn() && quad_layer_math::AsScreen(layers);
   if ((has || window) && !app->xr.HasEyes()) app->xr.MakeEyes(w, h);
   if (has && (view.width != w || view.height != h) && !app->said_view_size) {
     app->said_view_size = true;

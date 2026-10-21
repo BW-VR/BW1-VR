@@ -745,8 +745,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   // window.
   const bool source = frame_.shouldRender && screen_source_ != VK_NULL_HANDLE;
   const bool want_world = source && projection_on_ && view_newest_ && HasEyes();
-  const bool want_window =
-      source && layers_on_ && ql::AsScreen(newest_layers_) && HasEyes();
+  // With stream_projection=0 each picture shows on the stereo screen, a frame
+  // of the cut scene window too, and no quad layer of the mod goes out.
+  const bool want_window = source && projection_on_ && layers_on_ &&
+                           ql::AsScreen(newest_layers_) && HasEyes();
   bool world = false;
   bool window = false;
   if (want_world || want_window) {
@@ -815,6 +817,8 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         panel_width_ == f.panel_body.width && panel_height_ == f.panel_body.height) {
       if (panel_.between != VK_NULL_HANDLE &&
           (panel_.layer[0].width != panel_width_ || panel_.layer[0].height != panel_height_)) {
+        // The GPU may still copy into the swapchain or the image between.
+        vkDeviceWaitIdle(gpu_.device);
         FreeScreenSet(&panel_);
         panel_shown_ = false;
       }
@@ -945,9 +949,11 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                f.window_body.position[2], shown, eyes_.layer[0].width);
       }
     }
-  } else if (source) {
+  }
+  if (!world && !window && source) {
     // THE STEREO SCREEN of the renderer, behind the menu: a quad for each
-    // eye, 2.6 m wide, 2.6 m in front of the head.
+    // eye, 2.6 m wide, 2.6 m in front of the head. Only when the picture
+    // went out in no projection layer and in no cut scene window.
     if (projection_on_ && !view_newest_ && !said_no_view_) {
       said_no_view_ = true;
       AppLog("xr           : stream_projection=1, but the mod gave no values of "
@@ -1014,7 +1020,7 @@ void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
                             uint32_t panel_width, uint32_t panel_height) {
   newest_layers_ = layers;
   for (int c = 0; c < bwvr::kCards; ++c) {
-    card_ready_[c] = layers.card[c] && TakeCard(c, layers.cards[c], pictures);
+    if (layers.card[c]) TakeCard(c, layers.cards[c], pictures);
   }
   panel_source_ = layers.panel ? panel : VK_NULL_HANDLE;
   panel_width_ = panel_width;
@@ -1083,6 +1089,12 @@ bool XrApp::TakeCard(int index, const scene_stream::CardBody& body,
   k.picture = body.picture;
   memcpy(k.rect, body.rect, sizeof(k.rect));
   ++k.layer.revision;
+  // The first new pictures of each card, with the hash of the stream, so a
+  // test can find each picture. A fade gives a new picture in each frame.
+  if (k.layer.revision <= 21) {
+    AppLog("xr           : %s gets a new picture %016llx, %d by %d",
+           ql::CardName(index), static_cast<unsigned long long>(body.picture), w, h);
+  }
   return true;
 }
 
@@ -1535,14 +1547,16 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(screen_.copies[0]),
            static_cast<unsigned long long>(screen_.copies[1]));
   }
-  if (projection_frames_ + screen_frames_ > 0) {
+  if (projection_frames_ + screen_frames_ + window_frames_ > 0) {
     AppLog("xr           : %llu copies of the projection layer for eye 0 and %llu "
            "for eye 1. %llu frames with the projection layer, %llu frames with "
-           "the stereo screen (stream_projection=%d)",
+           "the stereo screen, %llu frames with the cut scene window "
+           "(stream_projection=%d)",
            static_cast<unsigned long long>(eyes_.copies[0]),
            static_cast<unsigned long long>(eyes_.copies[1]),
            static_cast<unsigned long long>(projection_frames_),
-           static_cast<unsigned long long>(screen_frames_), projection_on_ ? 1 : 0);
+           static_cast<unsigned long long>(screen_frames_),
+           static_cast<unsigned long long>(window_frames_), projection_on_ ? 1 : 0);
   }
   {
     if (cards_[0].frames + cards_[1].frames + cards_[2].frames + cards_[3].frames +

@@ -555,8 +555,9 @@ void VkStreamWalkEnd() {
   // The first walk with both eyes ends the frame, so the reader has it in the
   // game frame of its walks. With the layers (VkStreamSetLayers) the layers
   // end it.
-  if (g_end_at_walk && !g_end_at_layers && g_unit_open && !g_unit_ended &&
-      stream_split::WalkEndsFrame(state)) {
+  if (quad_layer_math::WhereFrameEnds(g_end_at_walk, g_end_at_layers) ==
+          quad_layer_math::FrameEnd::kAtWalk &&
+      g_unit_open && !g_unit_ended && stream_split::WalkEndsFrame(state)) {
     g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
     Deliver();
     g_unit_ended = true;
@@ -643,7 +644,8 @@ bool VkStreamLayers(const quad_layer_math::FrameLayers& layers,
     }
   }
   quad_layer_math::WriteFrame(layers, pictures, &g_sent_pictures, &g_writer);
-  if (g_end_at_walk) {
+  if (quad_layer_math::WhereFrameEnds(g_end_at_walk, g_end_at_layers) ==
+      quad_layer_math::FrameEnd::kAtLayers) {
     g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
     Deliver();
     g_unit_ended = true;

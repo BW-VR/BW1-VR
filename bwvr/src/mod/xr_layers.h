@@ -56,7 +56,8 @@ void XrLayersPanel(uint32_t width, uint32_t height, const bwvr::PanelQuad quads[
 // to_stream: the layers go into the frame of the live stream.
 void XrLayersEndFrame(uint64_t frame, int source, bool to_stream);
 // A frame that ends with no picture: the stage goes, as EndFrame of a frame
-// with no eye picture shows no layer.
-void XrLayersDrop();
+// with no eye picture shows no layer. to_stream: the frame of the live
+// stream ends with no layer record.
+void XrLayersDrop(bool to_stream);
 
 void XrLayersReport();

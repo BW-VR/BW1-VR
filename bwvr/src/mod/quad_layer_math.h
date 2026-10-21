@@ -359,6 +359,18 @@ inline bool Spec(const FrameLayers& f, const LayerRef& r, uint32_t picture_width
   }
 }
 
+// WHERE A FRAME OF THE STREAM ENDS (vk_stream.cpp). vk_stream_live_end=1:
+// at its first walk with both eyes, or with the quad layers
+// (VkStreamSetLayers) at the end of the frame of the scene, after the layers.
+// A frame of the scene with no eye passes (no camera of the eyes) ends there
+// too, with no layer record. vk_stream_live_end=0: at the start of the next
+// frame.
+enum class FrameEnd { kAtWalk, kAtLayers, kAtNextFrame };
+inline FrameEnd WhereFrameEnds(bool end_at_walk, bool layers) {
+  if (!end_at_walk) return FrameEnd::kAtNextFrame;
+  return layers ? FrameEnd::kAtLayers : FrameEnd::kAtWalk;
+}
+
 // THE CARD PICTURES OF THE MOD: the newest picture of each card that the mod
 // staged, and its hash. Take compares the pixels of the rect with the
 // picture before, so a hash is made only for a new picture.

@@ -156,6 +156,25 @@ inline void QuadLayerChecks() {
           static_cast<double>(n), static_cast<double>(unit.size()));
   }
 
+  // WHERE A FRAME ENDS. With the layers the walk does not end the frame,
+  // and a frame with no eye camera ends with no layer record.
+  {
+    ql::CardPictures pictures;
+    ql::SentPictures sent;
+    const std::vector<uint8_t> none = Frame(20, 0, ql::FrameLayers(), pictures, &sent);
+    const std::vector<uint32_t> k = Kinds(none);
+    ql::PictureLayers layers;
+    ql::AppPictures app;
+    Play(none, &layers, &app);
+    Check(ql::WhereFrameEnds(true, false) == ql::FrameEnd::kAtWalk &&
+              ql::WhereFrameEnds(true, true) == ql::FrameEnd::kAtLayers &&
+              ql::WhereFrameEnds(false, true) == ql::FrameEnd::kAtNextFrame &&
+              k.size() == 2 && k[0] == ss::kFrame && k[1] == ss::kFrameEnd &&
+              layers.Pictures() == 0 && !layers.Get().Any(),
+          "with the layers the layers end a frame, and a frame with no eye camera ends with no layer record and gives no layers",
+          static_cast<double>(k.size()), 2);
+  }
+
   // THE HASH OF A PICTURE.
   {
     const std::vector<uint8_t> a = Pixels(16, 8, 1);

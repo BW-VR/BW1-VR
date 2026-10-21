@@ -44,8 +44,12 @@
 //   bwvr_stream_reader layer-compare <bwvr-layer.rec> <bwvr-layer.rec>
 //     Compares the layers of two records frame by frame (Normal), and counts
 //     the frames that differ only in the picture of a card, only in a card
-//     that one record has, or in other values. Exit code 0 when no frame
-//     differs in other values and both have the same frames.
+//     that one record has, or in other values. A run of frames that differ
+//     only in the cards counts as the same calls only when a picture of a
+//     card or the set of the cards changes in one record at each of its
+//     frames or at the frame after it (a fade by the clock of the PC), and
+//     the line names the reason. Exit code 0 when
+//     no frame differs in other values and both have the same frames.
 //
 //   bwvr_stream_reader window-feed <stream> <out stream> <first frame> <last frame> <crop> <edge>
 //     A test feed of the cut scene window for the app: a copy of the stream
@@ -827,7 +831,42 @@ int Layers(const char* stream_path, const char* record_path, const char* bmp_fol
 // THE SAME CALLS IN TWO RUNS: the layers of each frame of two records. A
 // frame of both is the same (the same normal records), or it differs only in
 // the hash of a picture of a card (the picture), or only in a card that one
-// run has and the other does not, or in other values.
+// run has and the other does not, or in other values. The fades of the cards
+// go by the clock of the PC, so two runs with the same input can differ in
+// the pictures and in the frames of a card while a card fades in or out. A
+// frame that differs only in this way is the same calls only when a picture
+// of a card or the set of the cards changes in one of the runs at that frame
+// or at the frame after it. Each other frame that differs counts as a frame
+// with other values.
+struct CardState {
+  uint32_t set = 0;  // bit c: the card c is in the frame
+  uint64_t picture[bwvr::kCards] = {0, 0, 0, 0};
+};
+
+CardState StateOf(const FrameOfLayers& f) {
+  CardState s;
+  for (int c = 0; c < bwvr::kCards; ++c) {
+    if (!f.layers.card[c]) continue;
+    s.set |= 1u << c;
+    s.picture[c] = f.layers.cards[c].picture;
+  }
+  return s;
+}
+
+// The change of the cards of a run at a frame against the frame before. 0:
+// no change. 1: a picture changed (a fade). 2: the set of the cards changed.
+int CardChange(const std::map<uint64_t, FrameOfLayers>& run, uint64_t frame) {
+  const auto now = run.find(frame);
+  const auto before = run.find(frame - 1);
+  if (now == run.end() || before == run.end()) return 0;
+  const CardState x = StateOf(now->second), y = StateOf(before->second);
+  if (x.set != y.set) return 2;
+  for (int c = 0; c < bwvr::kCards; ++c) {
+    if (((x.set >> c) & 1u) != 0 && x.picture[c] != y.picture[c]) return 1;
+  }
+  return 0;
+}
+
 int LayerCompare(const char* a_path, const char* b_path) {
   std::map<uint64_t, FrameOfLayers> a, b;
   if (!RecordLayers(a_path, &a) || !RecordLayers(b_path, &b)) {
@@ -835,7 +874,11 @@ int LayerCompare(const char* a_path, const char* b_path) {
     return 2;
   }
   int same = 0, picture = 0, presence = 0, other = 0, only = 0, said = 0, with_layers = 0;
+  int unexplained = 0, ranges = 0;
   uint64_t first_other = 0;
+  // The frames that differ only in the pictures or the set of the cards, in
+  // runs of frames: the first frame, the last frame.
+  std::vector<std::pair<uint64_t, uint64_t>> runs;
   for (const auto& e : a) {
     const auto o = b.find(e.first);
     if (o == b.end()) {
@@ -865,31 +908,78 @@ int LayerCompare(const char* a_path, const char* b_path) {
       p.picture = q.picture = 0;
       if (memcmp(&p, &q, sizeof(p)) != 0) only_pictures = false;
     }
-    if (only_pictures && cards_same_set) {
-      ++picture;
-    } else if (only_pictures) {
-      ++presence;
-    } else {
-      ++other;
-      if (first_other == 0) first_other = e.first;
-      if (said++ < 5) {
-        int nx = 0, ny = 0;
-        printf("layer compare: frame %llu differs:\n  %s:%s\n  %s:%s\n", e.first,
-               LayerNames(x).c_str(), FrameQuads(x, &nx).c_str(), LayerNames(y).c_str(),
-               FrameQuads(y, &ny).c_str());
+    if (only_pictures) {
+      if (cards_same_set) {
+        ++picture;
+      } else {
+        ++presence;
       }
+      if (!runs.empty() && runs.back().second + 1 == e.first) {
+        runs.back().second = e.first;
+      } else {
+        runs.push_back(std::make_pair(e.first, e.first));
+      }
+      continue;
+    }
+    ++other;
+    if (first_other == 0) first_other = e.first;
+    if (said++ < 5) {
+      int nx = 0, ny = 0;
+      printf("layer compare: frame %llu differs:\n  %s:%s\n  %s:%s\n", e.first,
+             LayerNames(x).c_str(), FrameQuads(x, &nx).c_str(), LayerNames(y).c_str(),
+             FrameQuads(y, &ny).c_str());
     }
   }
   for (const auto& e : b) {
     if (a.find(e.first) == a.end()) ++only;
   }
-  printf("layer compare: %zu and %zu frames, %d with layers: %d frames the same, %d differ only in "
+  // Each frame that differs only in the cards: a fade or a change of the set
+  // of the cards in one of the runs at that frame or at the frame after it
+  // explains it (in a fade each frame has a new picture), or it counts as a
+  // frame with other values. The lines name each run of frames with its
+  // reason.
+  for (const auto& r : runs) {
+    uint64_t start = r.first;
+    int last_reason = -1;
+    for (uint64_t f = r.first; f <= r.second + 1; ++f) {
+      int reason = 0;  // 0 none, 1 a fade, 2 a change of the set
+      if (f <= r.second) {
+        const int c[4] = {CardChange(a, f), CardChange(b, f), CardChange(a, f + 1),
+                          CardChange(b, f + 1)};
+        for (int i = 0; i < 4; ++i) {
+          if (c[i] > reason) reason = c[i];
+        }
+      } else {
+        reason = -2;  // the end of the run
+      }
+      if (f != r.first && reason != last_reason) {
+        ++ranges;
+        const int n = static_cast<int>(f - start);
+        if (last_reason == 0) {
+          unexplained += n;
+          other += n;
+          if (first_other == 0 || start < first_other) first_other = start;
+          printf("layer compare: frames %llu to %llu differ only in the cards, with no fade and "
+                 "no change of the set of the cards in either run: FAULT, %d frames\n",
+                 start, f - 1, n);
+        } else {
+          printf("layer compare: frames %llu to %llu differ only in the cards: %s in a run at "
+                 "each frame or at the frame after it\n", start, f - 1,
+                 last_reason == 1 ? "a picture of a card changes (a fade)"
+                                  : "the set of the cards changes");
+        }
+        start = f;
+      }
+      last_reason = reason;
+    }
+  }  printf("layer compare: %zu and %zu frames, %d with layers: %d frames the same, %d differ only in "
          "the picture of a card, %d differ only in a card that one run has and the other does "
-         "not, %d differ in other values (the first in frame %llu), %d frames not in both\n",
-         a.size(), b.size(), with_layers, same, picture, presence, other, first_other, only);
+         "not (%d runs of frames, %d frames of them with no fade and no change of the set), %d "
+         "differ in other values (the first in frame %llu), %d frames not in both\n",
+         a.size(), b.size(), with_layers, same, picture, presence, ranges, unexplained, other,
+         first_other, only);
   return other == 0 && only == 0 && same > 0 ? 0 : 1;
 }
-
 // A TEST FEED OF THE CUT SCENE WINDOW for the app (emu_xr_test.ps1): a copy
 // of a stream in which each frame from `first` to `last` is a frame of the window
 // as a screen. Its kView gets kViewFlat, and a kWindow with a screen goes

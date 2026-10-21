@@ -84,6 +84,17 @@
     test checks the two quads of the eyes of the window too. The values of
     the window are of the test, not of a run of the mod.
 
+.PARAMETER NoLayers
+    The app has stream_layers=0: no quad layer of the mod. The test checks
+    that the runtime has no quad but the menu and the cursor, also in the
+    frames of the projection layer (no stereo screen over it).
+
+.PARAMETER QuadFrames
+    With a feed with cards: the runtime reads back the quads of the mod in
+    each of its first 60 frames (the word quads), and the test checks that
+    they have two different pictures of the cards or more, each with the
+    bytes of a new picture that the app logs. For a feed over a fade.
+
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
     the CPU) or host (the GPU of the PC).
@@ -96,7 +107,9 @@ param(
     [string]$Live,
     [int]$FeedMs = 14,
     [int]$WindowFrom = 0,
-    [int]$WindowTo = 0
+    [int]$WindowTo = 0,
+    [switch]$NoLayers,
+    [switch]$QuadFrames
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -153,6 +166,11 @@ if ($viewSource) {
         }
     }
 }
+# A feed of the cut scene window alone (each kView is of a frame of the
+# window): no picture goes out in a projection layer, and the checks of the
+# projection layer do not apply. The quad layers are checked.
+$AllWindow = $false
+if (-not $Projection -and $lastFlat -and $feedViews.Count -gt 0) { $Projection = $true; $AllWindow = $true }
 # THE QUAD LAYERS: a feed or a stream with the records of the quad layers of
 # the mod (kCard, kPanel, kWindow, bwvr_stream_reader layers) shows them over
 # the projection layer. The reader gives the quads of each frame as the test
@@ -343,6 +361,9 @@ try {
     # The pictures of the eyes of the projection layer, one time: an image of
     # the size of the render takes a long time to read back in the emulator.
     if ($Projection -and -not $lastFlat) { Add-Content -LiteralPath $script -Encoding ascii -Value "$(40 + $T) eyes start" }
+    # The quads of the mod in each of the first frames, while the pictures of
+    # a fade come (-QuadFrames).
+    if ($QuadFrames) { Add-Content -LiteralPath $script -Encoding ascii -Value @(1..60 | ForEach-Object { "$_ quads cards$_" }) }
     Adb @('push', $script, "$XrDir/script.txt")
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
@@ -367,6 +388,7 @@ try {
     $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1', 'input_live=1', "input_live_test_pulse=$(100 + $T)")
     if ($Stream) { $iniLines += 'stream_replay=1' }
     if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', "stream_live_feed_ms=$FeedMs") }
+    if ($NoLayers) { $iniLines += 'stream_layers=0' }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     if ($Stream) { Adb @('push', $Stream, "$AppDir/game/bwvr-stream.bin") }
@@ -446,7 +468,7 @@ try {
         Expect ($feedViews.Count -gt 0) "the $(if ($Live) { 'feed' } else { 'stream' }) has $($feedViews.Count) records kView for a projection layer"
         $eyesLine = [regex]::Match($log, 'xr           : a projection layer of two swapchains of (\d+) by (\d+) for the pictures of the renderer')
         Expect $eyesLine.Success ("the app made the two swapchains of the projection layer" + $(if ($eyesLine.Success) { ", $($eyesLine.Groups[1].Value) by $($eyesLine.Groups[2].Value)" } else { '' }))
-        Expect ($log -match 'xr           : the pictures of the renderer go out in a projection layer, with the values of frame \d+ of the mod') 'the pictures of the renderer go out in a projection layer'
+        if (-not $AllWindow) { Expect ($log -match 'xr           : the pictures of the renderer go out in a projection layer, with the values of frame \d+ of the mod') 'the pictures of the renderer go out in a projection layer' }
         Expect ($report -notmatch 'quad 0\.000 0\.100 -2\.600 size 2\.600') 'no frame has the quads of the stereo screen'
         $layerLines = @([regex]::Matches($report, '(?m)^frame (\d+) projection (eye 0 pose .* fov \S+ \S+ \S+ \S+) rect (\d+) (\d+) (\d+)x(\d+) (eye 1 pose .* fov \S+ \S+ \S+ \S+) rect (\d+) (\d+) (\d+)x(\d+)\r?$'))
         $matched = 0
@@ -456,7 +478,7 @@ try {
                 if ($m.Groups[2].Value -eq $v[1] -and $m.Groups[7].Value -eq $v[2]) { $matched++; $frames += $v[0]; break }
             }
         }
-        Expect ($layerLines.Count -gt 0 -and $matched -eq $layerLines.Count) ("the pose and the angles of view of each eye of each projection layer of the runtime are the values of a record kView of the feed ($matched of $($layerLines.Count) lines of the report)")
+        if (-not $AllWindow) { Expect ($layerLines.Count -gt 0 -and $matched -eq $layerLines.Count) ("the pose and the angles of view of each eye of each projection layer of the runtime are the values of a record kView of the feed ($matched of $($layerLines.Count) lines of the report)") }
         # THE FRAME OF EACH PICTURE. The app logs the frame of the mod of each
         # new picture of the layer. The values of the kView of those frames,
         # in their order, are the values of the layers that the runtime
@@ -478,13 +500,17 @@ try {
             if ($got.Count -eq 0 -or $got[$got.Count - 1] -ne $layerText) { $got.Add($layerText) }
         }
         $distinct = @($got | Sort-Object -Unique).Count
-        Expect ($shown.Count -gt 0 -and $unknown -eq 0 -and ($want -join ';') -eq ($got -join ';')) ("each projection layer of the runtime has the values of the kView of the frame of its picture: the app showed the pictures of $($shown.Count) frames ($($shown -join ' ')), $unknown not in the feed, the values of $($want.Count) and $($got.Count) steps in the same order")
+        if (-not $AllWindow) { Expect ($shown.Count -gt 0 -and $unknown -eq 0 -and ($want -join ';') -eq ($got -join ';')) ("each projection layer of the runtime has the values of the kView of the frame of its picture: the app showed the pictures of $($shown.Count) frames ($($shown -join ' ')), $unknown not in the feed, the values of $($want.Count) and $($got.Count) steps in the same order") }
         # The app plays the first frame of the feed and the newest frame. A
         # feed with another pose in its last frames than in its first frames
         # gives two poses.
         # A feed with frames of the cut scene window from a frame on has fewer
         # pictures in the projection layer.
-        if ($WindowFrom -le 0 -and -not $feedWindow) { Expect ($distinct -ge 2) "the layers of the runtime have $distinct poses, so the check above can tell the frames apart" }
+        # A feed with one pose (no step of the head) cannot tell the frames
+        # apart by the pose.
+        $feedPoses = @($feedViews | ForEach-Object { $_[1] + ' ' + $_[2] } | Sort-Object -Unique).Count
+        if ($feedPoses -lt 2) { Write-Host "         the feed has $feedPoses pose of the head, so the poses do not tell its frames apart" }
+        if ($WindowFrom -le 0 -and -not $feedWindow -and $feedPoses -ge 2) { Expect ($distinct -ge 2) "the layers of the runtime have $distinct poses, so the check above can tell the frames apart" }
 
         if ($layerLines.Count -gt 0) {
             $first = $layerLines[0]
@@ -496,13 +522,23 @@ try {
                 $m.Groups[5].Value -ne $eyesLine.Groups[1].Value -or $m.Groups[6].Value -ne $eyesLine.Groups[2].Value -or
                 $m.Groups[10].Value -ne $eyesLine.Groups[1].Value -or $m.Groups[11].Value -ne $eyesLine.Groups[2].Value) { $rectOk = $false }
         }
-        Expect $rectOk 'the rect of each eye is its whole picture'
+        if (-not $AllWindow) { Expect $rectOk 'the rect of each eye is its whole picture' }
         foreach ($eye in @($(if (-not $lastFlat) { 0, 1 }))) {
             $m = [regex]::Match($report, "capture \S*/start-p$eye\.bmp (\d+)x(\d+) lit (\d+)")
             Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the projection layer has the scene ($($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels)"
         }
     }
-    if ($Layers) {
+    if ($Layers -and $NoLayers) {
+        # stream_layers=0: the projection layer, the menu and the cursor, and
+        # no other quad.
+        Expect ($log -match 'xr           : stream_layers=0\. No quad layer of the mod') 'the app has stream_layers=0'
+        $menuQuadNo = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 1600x1200 eye 0 flags 2'
+        $cursorQuadNo = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 64x64 eye 0 flags 2'
+        $allQuads = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
+        $extra = @($allQuads | Where-Object { [regex]::Replace($_.Groups[2].Value, "($menuQuadNo)($cursorQuadNo)?$", '') -ne '' })
+        Expect ($allQuads.Count -gt 0 -and $extra.Count -eq 0) "each line of the quads of the runtime has the menu and the cursor alone: no quad of the mod and no quad of the stereo screen over the projection layer ($($allQuads.Count) lines, $($extra.Count) with another quad)"
+    }
+    if ($Layers -and -not $NoLayers) {
         # THE QUAD LAYERS OF THE MOD over the projection layer. Each line
         # "quads" of the runtime, with no menu and no cursor at its end, is
         # the quads of the layers of the frame of a picture of the app, in
@@ -578,10 +614,28 @@ public static class CardBmp {
   }
 }
 '@
-        $captureFrames = @([regex]::Matches($report, '(?m)^frame (\d+) capture \S*/(start|point|moving|saved)-0\.bmp') | ForEach-Object { , @([int]$_.Groups[1].Value, $_.Groups[2].Value) })
+        $captureFrames = @([regex]::Matches($report, '(?m)^frame (\d+) capture \S*/(start|point|moving|saved|cards\d+)-0\.bmp') | ForEach-Object { , @([int]$_.Groups[1].Value, $_.Groups[2].Value) })
         $cardChecks = 0
         $cardSame = 0
         $cardText = @()
+        # THE NEW PICTURES OF THE CARDS that the app logs, with the hash of the
+        # stream. Each one is a picture of that card in the feed. A readback
+        # has the bytes of one of them: the captures of the runtime have no
+        # frame of the mod, and a fade changes only the pixels of a card.
+        $cardIndex = @{ 'the hint card of the hand that points' = '0'; 'the hint card of the other hand' = '1'; 'the subtitle card' = '2'; 'the ring' = '3' }
+        $newPictures = @{}
+        foreach ($m in [regex]::Matches($log, 'xr           : (.+?) gets a new picture ([0-9a-f]{16}), (\d+) by (\d+)')) {
+            $ci = $cardIndex[$m.Groups[1].Value]
+            if (-not $newPictures.ContainsKey($ci)) { $newPictures[$ci] = New-Object System.Collections.Generic.List[string] }
+            $newPictures[$ci].Add($m.Groups[2].Value)
+        }
+        $logged = 0
+        $inFeed = 0
+        foreach ($ci in $newPictures.Keys) {
+            foreach ($h in $newPictures[$ci]) { $logged++; if (Test-Path -LiteralPath (Join-Path $cardBmps "card-$ci-$h.bmp")) { $inFeed++ } }
+        }
+        if ($cardFrames.Count -gt 0) { Expect ($logged -gt 0 -and $inFeed -eq $logged) "each new picture of a card that the app logs is a picture of that card in the feed ($inFeed of $logged)" }
+        $matched = @{}
         foreach ($cap in $captureFrames) {
             # The quads of the runtime at the frame of the capture.
             $at = $null
@@ -600,18 +654,25 @@ public static class CardBmp {
                 if (-not $nm.Success) { continue }
                 $c = $nm.Groups[1].Value
                 $bmp = Join-Path $Out "$($cap[1])-$i.bmp"
-                $card = Join-Path $cardBmps "card-$c-$($hashes[$c]).bmp"
-                if (-not (Test-Path -LiteralPath $bmp) -or -not (Test-Path -LiteralPath $card)) { $cardChecks++; $cardText += "$($cap[1]) quad $i card $($c): no picture"; continue }
+                $candidates = @($(if ($newPictures.ContainsKey($c)) { $newPictures[$c] } else { $hashes[$c] }))
+                if (-not (Test-Path -LiteralPath $bmp)) { $cardChecks++; $cardText += "$($cap[1]) quad $i card $($c): no picture"; continue }
                 $r = $rects[$i]
-                $d = [CardBmp]::Compare($bmp, [int]$r.Groups[1].Value, [int]$r.Groups[2].Value, [int]$r.Groups[3].Value, [int]$r.Groups[4].Value, $card)
+                $hit = $null
+                foreach ($h in $candidates) {
+                    $card = Join-Path $cardBmps "card-$c-$h.bmp"
+                    if (-not (Test-Path -LiteralPath $card)) { continue }
+                    $d = [CardBmp]::Compare($bmp, [int]$r.Groups[1].Value, [int]$r.Groups[2].Value, [int]$r.Groups[3].Value, [int]$r.Groups[4].Value, $card)
+                    if ($d -eq 0) { $hit = $h; break }
+                }
                 $cardChecks++
-                if ($d -eq 0) { $cardSame++ }
-                $cardText += "$($cap[1]) quad $i card $c of frame $($frame): $d bytes differ"
+                if ($hit) { $cardSame++; $matched["$c-$hit"] = $true }
+                $cardText += "$($cap[1]) quad $i card $($c): $(if ($hit) { "the same bytes as the picture $hit" } else { "FAULT the bytes of none of the $($candidates.Count) pictures" })"
             }
         }
         foreach ($l in $cardText) { Write-Host "         $l" }
+        if ($QuadFrames) { Expect ($matched.Count -ge 2) "the readbacks of the quads of the first frames have $($matched.Count) different pictures of the cards, each with the bytes of a new picture that the app logs" }
         if ($feedWindow -and $cardChecks -eq 0) { Write-Host '         no picture of a card: each capture of the runtime has a frame of the cut scene window' }
-        else { Expect ($cardChecks -gt 0 -and $cardSame -eq $cardChecks) "the pictures of the cards that the runtime read back have the pixels of the pictures of the mod in the stream ($cardSame of $cardChecks the same bytes)" }
+        else { Expect ($cardChecks -gt 0 -and $cardSame -eq $cardChecks) "the pictures of the cards that the runtime read back have the pixels of the pictures of the mod in the stream ($cardSame of $cardChecks the same bytes, $($matched.Count) different pictures, of $logged new pictures in the log of the app)" }
         if ($feedWindow) {
             # THE CUT SCENE WINDOW: a quad of each eye of the swapchains of the
             # eyes at the pose of the window, each eye with its columns, and no
@@ -651,13 +712,23 @@ public static class CardBmp {
         Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of $what got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')')
         if ($Projection) {
             $frameLine = [regex]::Match($log, 'xr           : \d+ copies of the projection layer for eye 0 and \d+ for eye 1\. (\d+) frames with the projection layer, (\d+) frames with the stereo screen')
-            Expect ($frameLine.Success -and [int]$frameLine.Groups[1].Value -gt 0 -and [int]$frameLine.Groups[2].Value -eq 0) ("each frame with a picture had the projection layer (" + $(if ($frameLine.Success) { "$($frameLine.Groups[1].Value) frames with the projection layer, $($frameLine.Groups[2].Value) with the stereo screen" } else { 'no line in the log' }) + ')')
+            if (-not $AllWindow) { Expect ($frameLine.Success -and [int]$frameLine.Groups[1].Value -gt 0 -and [int]$frameLine.Groups[2].Value -eq 0) ("each frame with a picture had the projection layer (" + $(if ($frameLine.Success) { "$($frameLine.Groups[1].Value) frames with the projection layer, $($frameLine.Groups[2].Value) with the stereo screen" } else { 'no line in the log' }) + ')') }
         }
         # The pictures of the test frame of the stream (vk_scene_test_frame),
         # against the pictures of the PC of the same desk run: at most 2
         # percent of the pixels with a difference of more than 24.
         $references = @(Get-ChildItem -LiteralPath $Live -Filter 'bwvr-vk-*.bmp')
-        Expect ($references.Count -gt 0) "the PC made $($references.Count) pictures of the test frame"
+        # A feed with kView names its frames. The app makes the pictures of the
+        # test frame only when the feed has that frame.
+        $feedFrames = @($feedViews | ForEach-Object { [int]$_[0] })
+        if ($feedFrames.Count -gt 0 -and $references.Count -gt 0) {
+            $testFrame = [int][regex]::Match($references[0].Name, '-(\d+)\.bmp$').Groups[1].Value
+            if ($feedFrames -notcontains $testFrame) {
+                Write-Host "         the feed has the frames $($feedFrames[0]) to $($feedFrames[-1]) and not the test frame $testFrame of the PC, so the app makes no picture of it"
+                $references = @()
+            }
+        }
+        if ($references.Count -gt 0 -or $feedFrames.Count -eq 0) { Expect ($references.Count -gt 0) "the PC made $($references.Count) pictures of the test frame" }
         $listing = AdbOut @('shell', 'ls', "$AppDir/game")
         foreach ($name in ([regex]::Matches($listing, 'bwvr-vk-[a-z]+-\d+\.bmp') | ForEach-Object { $_.Value })) {
             Adb @('pull', "$AppDir/game/$name", (Join-Path $Out $name))

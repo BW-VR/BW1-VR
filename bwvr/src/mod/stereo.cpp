@@ -1583,7 +1583,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   if (!EyeCameraCapture()) {
     o_Process3dEngine(self, unused);
     if (to_headset) g_screen->EndFrame();
-    if (layers_out) XrLayersDrop();
+    if (layers_out) XrLayersDrop(channel);
     return;
   }
 

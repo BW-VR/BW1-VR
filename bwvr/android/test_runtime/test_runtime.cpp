@@ -16,6 +16,10 @@
 //   <frame> stick <hand> <x> <y>           the thumbstick
 //   <frame> capture <name>                 the images of the quads of this
 //                                          frame go to <name>-<layer>.bmp
+//   <frame> quads <name>                   the images of the quads of this
+//                                          frame but the menu and the cursor
+//                                          of the app (1600 by 1200 and 64 by
+//                                          64) go to <name>-<layer>.bmp
 //   <frame> eyes <name>                    the images of the eyes of the
 //                                          projection layer of this frame go
 //                                          to <name>-p<eye>.bmp
@@ -135,7 +139,7 @@ void LoadScript() {
       sscanf(rest, "%15s %f", hand, &s.a);
     } else if (s.what == "stick") {
       sscanf(rest, "%15s %f %f", hand, &s.a, &s.b);
-    } else if (s.what == "capture" || s.what == "eyes") {
+    } else if (s.what == "capture" || s.what == "eyes" || s.what == "quads") {
       sscanf(rest, "%63s", name);
       s.name = name;
     }
@@ -1226,8 +1230,10 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
   s_last_quads = quads;
   for (const Step& st : g_script) {
     if (st.frame != s->frame) continue;
-    if (st.what == "capture") {
+    if (st.what == "capture" || st.what == "quads") {
       for (uint32_t i = 0; i < s->last_quads.size(); ++i) {
+        const XrExtent2Di e = s->last_quads[i].subImage.imageRect.extent;
+        if (st.what == "quads" && ((e.width == 1600 && e.height == 1200) || (e.width == 64 && e.height == 64))) continue;
         char path[256];
         snprintf(path, sizeof(path), "%s/%s-%u.bmp", kFolder, st.name.c_str(), i);
         Capture(s, reinterpret_cast<Swapchain*>(s->last_quads[i].subImage.swapchain), path);

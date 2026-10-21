@@ -375,9 +375,9 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    `input_channel_run.ps1 -Kind channel -Live`, see "The projection
    layer"), the app shows the pictures in a projection layer, and the test
    checks it in place of the stereo screen (with the quad layers of the
-   desk runs of "The quad layers": 72 checks for the hint card, 73 with
-   `-FeedMs 0`, 74 with the panel quads, 71 and 72 with the cut scene
-   window, 74 with the test feed of the window): the two swapchains, no quad of the stereo screen, that the pose and
+   desk runs of "The quad layers": 73 checks for the hint card, 68 with
+   `-NoLayers`, 68 for a fade of the card with `-QuadFrames`, 64 for a feed
+   of the cut scene window alone): the two swapchains, no quad of the stereo screen, that the pose and
    the angles of view of each eye of each projection layer that the runtime
    reports are the values of a record `kView` of the feed, that the layers
    have the values of the `kView` of the frame of each picture in the order
@@ -406,6 +406,13 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    frames N to M become frames of the window as a screen, with values of the
    test (2.6 m wide, 2 m in front, a crop of 120 and an edge of 2 columns),
    and the test checks the two quads of the eyes with those columns.
+   `-NoLayers` gives the app `stream_layers=0`, and the test checks that
+   each line of the quads of the runtime has the menu and the cursor alone:
+   no quad of the mod, and no quad of the stereo screen over the projection
+   layer. `-QuadFrames` (a feed over a fade of a card) reads back the quads
+   of the mod in each of the first 60 frames of the runtime (the word
+   `quads`) and checks that they have two different pictures of a card or
+   more, each with the bytes of a new picture that the app logs.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -1055,14 +1062,13 @@ surface: a frame that the writer or the app strips keeps it, and the writer
 does not drop a frame with one (`KeepKind`). `xr_input_layers=0`: the
 interface goes as with no headset, the stream has no layers, and a frame ends
 at its walk. With `xr_input=0` nothing changes. `xr_input_layers` has no
-test key: with `xr_input=1` the mod has no session, and the test key of the
-cards (Ctrl Shift F11) moves them into the eye pictures and back.
+test key (see below).
 
 The records (`scene_stream.h`) have one layout on 32 bit x86 and on 64 bit
 ARM (`static_assert` of each size and offset): `kCard` 80 bytes,
 `kCardPicture` 24 bytes and the pixels, `kPanel` 176 bytes, `kWindow` 136
-bytes. The stream keeps version 2: a stream of the brief before (with no
-layer records) plays as before.
+bytes. The stream has version 2: a stream with no layer records plays with
+no quad layer of the mod.
 
 **The app** (`stream_layers=1`, the default). The player takes the layer
 records of a frame, and they go with the picture of the frame at its
@@ -1090,9 +1096,16 @@ size with each new picture. The walls are a swapchain of 16 by 16 pixels,
 black with the alpha of the frame. The rules of `SendCard`, of the rect of a
 panel quad and of the walls are the rules of the PC (`CardShows`,
 `PanelQuadRect`, `WallsShow`). `stream_layers=0`: no quad layer of the mod,
-and a frame of the cut scene window shows on the stereo screen.
-`stream_layers` has no test key: the app reads it at its start, and the app
-has no hotkeys.
+the pictures of the world show in the projection layer alone, and a frame
+of the cut scene window shows on the stereo screen. `stream_projection=0`:
+each picture shows on the stereo screen, a frame of the cut scene window
+too, and no quad layer of the mod goes out, with each value of
+`stream_layers`. The stereo screen shows only a picture that went out in no
+projection layer and in no cut scene window. `xr_input_layers` and
+`stream_layers` have no test key: the mod with `xr_input=1` has no session
+(the test key of the cards, Ctrl Shift F11, still moves them into the eye
+pictures and back), and the app reads its keys at its start and has no
+hotkeys.
 
 **The test aids.** `xr_layer_record=N` (the mod): the layers of the first N
 frames of the scene go to `bwvr-layer.rec` beside `runblack.exe`, a stream
@@ -1109,72 +1122,42 @@ in full (`frame N quads`: the pose, the size, the rect, the eye and the
 flags), and the word `point <hand> menu` points at the menu quad of the app
 over the layers of the mod.
 
-**The desk runs** (`input_channel_run.ps1`, the test save "pen", the fake run
-with `-More @{ fake_head_fov = 1; fake_head_layers = 1 }` and the same keys
-in the channel run, which has `-Live -LiveRecord 3030`). In "pen" the game
-shows a dialog box, and the hint card of the hand that points says
-"[Trigger] Select": the record of the layers of the fake run has the card in
-1228 of 3100 frames, with 66 new pictures (the fade in and the fade out).
-The channel run with the input of that run:
+**The tests.**
 
-- Each of the 43 frames of the ring (2991 to 3033) and the 4 frames of the
-  record of the stream (3000 to 3003) has the hint card, and its layer
-  records have the bytes of the frame in the record of the layers of the
-  channel run. Each picture of a card in the ring has the hash of its
-  `kCard`: 2 pictures, one in the first frame of the ring and one in the
-  first frame of the record of the stream, each a frame with the whole state.
-- The layers of the channel run against the layers of the fake run: 3036 of
-  3100 frames the same bytes, 63 differ only in the picture of the card and 1
-  only in a card that one run has and the other does not. No frame differs in
-  another value. The fades of the cards go by the clock of the PC, not by
-  the frames, so the pixels of a fade differ between two runs.
-- With `ui_panel=1` the menu of the game goes to the menu panel quad: each of
-  the 3100 frames of the fake run has the panel quads (the menu at the rect
-  1400 1152 1280x960 of the panel image of 4080 by 3264, 2.35 m wide, 1.38 m
-  in front), and the 43 frames of the ring have them. The layers of the two
-  runs: 3006 frames the same, 66 only the picture, 28 only a card, 0 in
-  another value.
-- The cut scene window: `cutscene_window=1`, `cutscene_immersive=0` and the
-  test key `cutscene_window_test_bars=2700` close the view to the window in
-  "pen". The fake run has the four walls in the frames 2701 to 3025 and the
-  quads of the eyes from frame 3026. In the channel run the window closed
-  faster (frame 3014 is its first frame of the window), because the window
-  closes by the clock of the PC (`cutscene_window_ms`): 12 of the 3100 views
-  and 325 frames of the layers differ from the fake run in that time. The 43
-  frames of the ring (the walls to frame 3013, the window from frame 3014)
-  have the bytes of the record of the layers of the channel run.
-- The subtitle card and the ring did not show: "pen" has no help text in these
-  frames, and the ring does not open while a dialog box is up.
+- `.\dev.ps1 build`: the math checks of `quad_layer_checks.h` ("Test the
+  APK", step 6).
+- A pair of desk runs (`input_channel_run.ps1`): a fake run with `-More @{
+  fake_head_fov = 1; fake_head_layers = 1 }` and a channel run with the same
+  keys and `-Kind channel -From <the fake run> -Live`. `-LiveAttach` and
+  `-LiveRecord` choose the frames of the capture. The channel run checks that
+  the layer records of each frame of the ring and of the record of the
+  stream are the bytes of the record of the layers of the channel run, that
+  each picture of a card has the hash of its `kCard` and that each card has
+  its picture, and it compares the layers of the two runs
+  (`layer-compare`): a frame differs only in the pictures or in the cards
+  that show only when a picture of a card or the set of the cards changes in
+  one run at that frame or at the frame after it (a fade by the clock of the
+  PC). Each other frame that differs is a fault. `ui_panel = 1` in both runs
+  gives the panel quads. `cutscene_window = 1`, `cutscene_immersive = 0` and
+  the test key `cutscene_window_test_bars` give the cut scene window in the
+  test save "pen". The window opens and closes by the clock of the PC
+  (`cutscene_window_ms`), so `cutscene_window_ms = 0` gives both runs the
+  same frames of the window.
+- `emu_xr_test.ps1 -Live <the channel run> -Gpu host` (step 3 of "Test the
+  APK"): the quads of the runtime against the layers of the frames of the
+  pictures of the app, the pictures of the cards that the runtime read back
+  against the new pictures that the app logs (each one a picture of the
+  feed), the panel quads, the walls and the window. `-NoLayers` runs the app
+  with `stream_layers=0` and checks that the runtime has no quad but the
+  menu and the cursor. `-WindowFrom` and `-WindowTo` make a test feed of
+  the cut scene window.
 
-With `xr_input=0` the pictures of the test frame of this build are within the
-noise of the build before (A B A: the build before against itself 0.000,
-0.002, 0.053 and 0.002 percent of the pixels by more than 24, this build
-against each of them 0.000 to 0.042).
-
-**In the emulator** (`emu_xr_test.ps1 -Live <the channel run> -Gpu host`,
-"Test the APK", step 3). With the capture of the hint card the app showed the
-pictures of the frames 2994, 3012 and 3033, and each line of the quads of the
-runtime is the quads of the layers of those frames: the hint card, 8.2 by
-2.2 cm, the rect 0 0 327x86 of its swapchain of 768 by 320. The rect of the
-card in the 4 pictures that the runtime read back has the bytes of the
-picture of the card in the feed. The card got new pixels one time
-(`xr_copy_on_change`). With `-FeedMs 0` the
-same with the pictures of the frames 2992 and 3033. With the capture of
-`ui_panel=1` the menu panel quad goes under the hint card, with the panel
-image of the renderer (the Main Menu of the game, 288922 lit pixels in the
-picture that the runtime read back). With the capture of the cut scene
-window the app showed frame 2993 in the projection layer with the hint card
-and the four walls, and the frames 3029 and 3033 on the two quads of the
-eyes at the pose of the window, each eye with its columns. A test feed with
-the frames 3010 to 3020 as frames of the window (`-WindowFrom 3010
--WindowTo 3020`): the app showed frame 3014 in the window between the frames
-2992 and 3033 in the projection layer, the left eye from column 122 and the
-right eye from column 2.
-
+The commit messages have the numbers of the runs.
 **Not shown yet:** a real headset (the cards, the panel quads and the window
 over the reprojection of the runtime of Meta), the subtitle card and the
-ring through the live stream (no desk run had help text or an open ring in
-the frames of the capture), and the run with the game in Wine.
+ring through the live stream (in the test save "pen" no frame has help
+text, and the ring does not open while a dialog box is up), and the run with
+the game in Wine.
 
 **Known limits:**
 

@@ -218,7 +218,6 @@ class XrApp {
   bool layers_on_ = true;  // stream_layers
   quad_layer_math::FrameLayers newest_layers_;
   quad_layer_math::FrameLayers shown_layers_;
-  bool card_ready_[bwvr::kCards] = {false, false, false, false};
   Card cards_[bwvr::kCards];
   Screen panel_;  // one swapchain of the size of the panel image
   VkImage panel_source_ = VK_NULL_HANDLE;

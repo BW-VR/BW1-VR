@@ -157,10 +157,13 @@ void XrLayersEndFrame(uint64_t frame, int source, bool to_stream) {
   if (g_record != nullptr) Record(frame, f);
 }
 
-void XrLayersDrop() {
+void XrLayersDrop(bool to_stream) {
   bwvr::StagedLayers s;
   bwvr::XrScreen::TakeStaged(&s, true);
   g_have_panel = false;
+  // The frame of the stream ends here with no layer record, as a frame with
+  // layers ends at its end (quad_layer_math.h, WhereFrameEnds).
+  if (to_stream) VkStreamLayers(ql::FrameLayers(), g_pictures);
 }
 
 void XrLayersReport() {

@@ -3691,6 +3691,11 @@ const vk::Image* PanelOfFrame() {
 }
 }  // namespace
 
+bool VkScenePanelDrew(uint32_t width, uint32_t height) {
+  const vk::Image* panel = PanelOfFrame();
+  return panel != nullptr && panel->width == width && panel->height == height;
+}
+
 bool VkScenePanelFor(uint32_t width, uint32_t height, uint64_t* image) {
   if (!SameDeviceAsSession()) return false;
   const vk::Image* panel = PanelOfFrame();

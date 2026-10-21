@@ -220,6 +220,15 @@ struct LateFrame {
   void (*wait)();
 };
 
+// THE STAGED LAYERS OF A FRAME: the cards and the cut scene window that
+// EndFrame takes (XrScreen::TakeStaged).
+struct StagedLayers {
+  bool card[kCards];
+  CardLayer cards[kCards];
+  bool window;
+  WindowLayer window_layer;
+};
+
 class RemoteScreen;
 
 class XrScreen {
@@ -419,6 +428,16 @@ class XrScreen {
   // When the runtime gives no swapchain for the walls, the frame goes out
   // with no walls.
   static void StageWindow(const WindowLayer& layer);
+
+  // THE STAGED LAYERS FOR THE HEADSET APP (src/mod/xr_layers.cpp). With
+  // xr_input=1 the mod has no session, and the app shows the layers. At the
+  // place of EndFrame TakeStaged gives the cards and the window that EndFrame
+  // takes, and at the place of SetPanelQuads TakeStagedPanelQuad gives the
+  // Creature panel that SetPanelQuads takes. clear: the stage is empty after
+  // the call, as after EndFrame and SetPanelQuads. false: a copy, and the
+  // session takes the stage after it.
+  static void TakeStaged(StagedLayers* out, bool clear);
+  static bool TakeStagedPanelQuad(PanelQuad* out, bool clear);
 
   // Presents whatever was uploaded.
   void EndFrame();

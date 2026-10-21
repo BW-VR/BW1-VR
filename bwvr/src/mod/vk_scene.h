@@ -104,6 +104,10 @@ void VkScenePanelBind(bool panel);
 // in vk::Core::color_format. False when no walk of this frame drew into the
 // panel, or when the panel has another size.
 bool VkScenePanelFor(uint32_t width, uint32_t height, uint64_t* image);
+// True when a walk of this frame drew into the panel and the panel has this
+// size, on any device. With no session (xr_input=1) the headset app draws
+// the same panel image itself (xr_layers.h).
+bool VkScenePanelDrew(uint32_t width, uint32_t height);
 // THE SUBTITLE CARD, as GpuBridgePanelReadHalf: the rect x, y, width and
 // height of the panel of this frame at half the size, as pixels for the
 // CPU: BGRA, the color multiplied by the alpha, each pixel the mean of four.

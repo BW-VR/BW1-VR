@@ -83,6 +83,7 @@
 #include "view_layer_math.h"
 #include "vk_stream.h"
 #include "xr_input.h"
+#include "xr_layers.h"
 
 // d3d9_backend.cpp: the start with DXVK did not fail.
 void D3D9BackendConfirm();
@@ -1414,6 +1415,13 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     }
   }
 
+  // THE QUAD LAYERS OF A FRAME WITH NO SESSION (xr_layers.h): with the input
+  // channel and xr_input_layers=1, or the invented head and
+  // fake_head_layers=1, the interface goes as in a session, and the mod
+  // takes the layers where the session takes them.
+  const bool layers_out =
+      !to_headset && XrLayersRoute(to_headset, channel, fake_views);
+
   // Not in a flat frame: the setup fixes the view angle of the headset, and
   // a flat frame has the game's own.
   if (!flat) PrepareHeadView(to_headset);
@@ -1495,6 +1503,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   if (g_test_keys) EyeCaptureCheckFile(g_frames);
   VkSceneFrame(ControllersFrameCount(), g_frames + 1,
                EyeCaptureWanted(g_frames + 1));
+  // The frame of the controllers of this frame, for the layers at its end.
+  const uint64_t scene_frame = ControllersFrameCount();
   // THE BACK CHANNEL (xr_input=1, docs/android.md, "The projection layer"):
   // the projection layer of this frame goes into the frame of the stream,
   // before its walks, so the headset app has the values of the eye pictures
@@ -1543,7 +1553,11 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   if (capture_frame && to_headset && g_screen->vulkan()) {
     g_screen->CaptureSwapchainNext(g_frames + 1);
   }
-  UiPanelBeginFrame(to_headset, to_headset && g_screen->projection() && !flat,
+  // With the layers of a frame with no session, the interface has the route
+  // of a session with the projection layer of the frame.
+  UiPanelBeginFrame(to_headset || layers_out,
+                    to_headset ? g_screen->projection() && !flat
+                               : layers_out && g_layer_projection && !flat,
                     g_frames + 1, capture_frame);
   InputWatchFrame();
   g_ui_shift_used = AdaptiveUiShift();
@@ -1569,6 +1583,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   if (!EyeCameraCapture()) {
     o_Process3dEngine(self, unused);
     if (to_headset) g_screen->EndFrame();
+    if (layers_out) XrLayersDrop(channel);
     return;
   }
 
@@ -1910,6 +1925,10 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
       if (!IsBadReadPtr(info, sizeof(*info)) &&
           UiPanelQuads(static_cast<uint32_t>(info->res_x),
                        static_cast<uint32_t>(info->res_y), quads)) {
+        // The record of the layers takes the quads before the session.
+        if (XrLayersRecording()) {
+          XrLayersPanel(g_screen->width(), g_screen->height(), quads, true);
+        }
         if (send_mode == 0 && ui_vulkan != 0) {
           g_screen->SetPanelVulkan(ui_vulkan);
         } else if (send_mode == 0) {
@@ -1919,6 +1938,23 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
           late.panel_vulkan = ui_vulkan;
         }
         g_screen->SetPanelQuads(quads);
+      }
+    }
+    // THE PANEL QUADS OF A FRAME WITH NO SESSION, at the place of a session
+    // with Vulkan and vk_panel=1: after the one walk, with the panel image of
+    // the renderer. The app draws that image itself.
+    if (eye == 0 && layers_out && walked_once && VkSceneDirect() &&
+        UiPanelMode() == kUiPanelLayer && VkScenePanelOn()) {
+      const bw::tech::InfoTransform* info = Info();
+      bwvr::PanelQuad quads[2];
+      if (!IsBadReadPtr(info, sizeof(*info)) && info->res_x > 0 &&
+          info->res_y > 0 &&
+          VkScenePanelDrew(static_cast<uint32_t>(info->res_x),
+                           static_cast<uint32_t>(info->res_y)) &&
+          UiPanelQuads(static_cast<uint32_t>(info->res_x),
+                       static_cast<uint32_t>(info->res_y), quads)) {
+        XrLayersPanel(static_cast<uint32_t>(info->res_x),
+                      static_cast<uint32_t>(info->res_y), quads, false);
       }
     }
 
@@ -2038,7 +2074,14 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   // The screen or the walls of the cut scene window go out with this frame.
   {
     const uint64_t end_start = profile ? FrameProfileTicks() : 0;
-    CutsceneWindowStage(to_headset, g_frames + 1, eyes_apart);
+    CutsceneWindowStage(to_headset || layers_out, g_frames + 1, eyes_apart);
+    // THE LAYERS OF THE FRAME, where the session takes them: into the frame
+    // of the live stream with the input channel, and into the record.
+    if (layers_out) {
+      XrLayersEndFrame(scene_frame, channel ? 2 : 1, channel);
+    } else if (to_headset && XrLayersRecording()) {
+      XrLayersEndFrame(scene_frame, 0, false);
+    }
     // A wait for the GPU on this thread is time of the eye pictures, as the
     // wait after each eye pass is.
     uint64_t gpu_wait = 0;
@@ -2202,6 +2245,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     SpiritAnchorReport();
     ControllersReport();
     XrInputReport();
+    XrLayersReport();
     HandDirectReport();
     FightMarksReport();
     HandGlowReport();

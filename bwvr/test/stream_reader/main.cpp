@@ -29,6 +29,34 @@
 //     value but the frame of the input channel). Exit code 0 when each frame
 //     of both is the same.
 //
+//   bwvr_stream_reader layers <stream> [<bwvr-layer.rec> or -] [<folder>]
+//     Writes the quad layers of each frame of a stream or a capture (kCard,
+//     kCardPicture, kPanel, kWindow, src/mod/quad_layer_math.h): their order
+//     in the app, and each quad as the OpenXR test runtime of the app reports
+//     it. Checks that the pixels of each picture of a card have its hash, and
+//     that each card has a picture. With a record of the layers of the same
+//     run (xr_layer_record), compares the layer records of each frame with
+//     the frame in the record (Normal). With a folder, writes each picture of
+//     a card there as card-<card>-<hash>.bmp. Exit code 0 when the stream has
+//     layers, each picture is whole and each frame is the same as in the
+//     record.
+//
+//   bwvr_stream_reader layer-compare <bwvr-layer.rec> <bwvr-layer.rec>
+//     Compares the layers of two records frame by frame (Normal), and counts
+//     the frames that differ only in the picture of a card, only in a card
+//     that one record has, or in other values. A run of frames that differ
+//     only in the cards counts as the same calls only when a picture of a
+//     card or the set of the cards changes in one record at each of its
+//     frames or at the frame after it (a fade by the clock of the PC), and
+//     the line names the reason. Exit code 0 when
+//     no frame differs in other values and both have the same frames.
+//
+//   bwvr_stream_reader window-feed <stream> <out stream> <first frame> <last frame> <crop> <edge>
+//     A test feed of the cut scene window for the app: a copy of the stream
+//     in which each frame from <first frame> to <last frame> is a frame of
+//     the window as a screen (kViewFlat, and a kWindow of the test before kFrameEnd). The
+//     values of the window are of the test, not of a run of the mod.
+//
 // The files hold the pixels of the textures of the game: keep them in the
 // folder of the desktop run.
 
@@ -42,6 +70,7 @@
 #include <string>
 #include <vector>
 
+#include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
 #include "../../src/mod/view_layer_math.h"
@@ -581,6 +610,443 @@ int ViewCompare(const char* a_path, const char* b_path) {
   return differ == 0 && only == 0 && same > 0 ? 0 : 1;
 }
 
+// THE QUAD LAYERS (kCard, kCardPicture, kPanel, kWindow).
+namespace ql = quad_layer_math;
+
+// A quad as the OpenXR test runtime of the app writes it in its report
+// (android/test_runtime, the lines "frame N quads").
+std::string QuadText(const ql::QuadSpec& q) {
+  char line[320];
+  sprintf_s(line, " quad %.4f %.4f %.4f turn %.4f %.4f %.4f %.4f size %.4f %.4f rect %d %d %dx%d eye %u flags %u",
+            q.position[0], q.position[1], q.position[2], q.orientation[0], q.orientation[1],
+            q.orientation[2], q.orientation[3], q.size[0], q.size[1], q.rect[0], q.rect[1],
+            q.rect[2], q.rect[3], q.eye, q.flags);
+  return line;
+}
+
+const char* const kLayerKindNames[] = {"projection", "eye", "panel", "card", "wall"};
+
+// A picture of a card as a BMP of 32 bits, the bottom row first, as the test
+// runtime writes its pictures.
+bool WriteCardBmp(const std::string& path, uint32_t w, uint32_t h, const std::vector<uint8_t>& bgra) {
+  std::vector<uint8_t> out(54 + static_cast<size_t>(w) * h * 4, 0);
+  auto put32 = [&](size_t at, uint32_t v) {
+    for (int i = 0; i < 4; ++i) out[at + i] = static_cast<uint8_t>(v >> (8 * i));
+  };
+  out[0] = 'B';
+  out[1] = 'M';
+  put32(2, static_cast<uint32_t>(out.size()));
+  put32(10, 54);
+  put32(14, 40);
+  put32(18, w);
+  put32(22, h);
+  out[26] = 1;
+  out[28] = 32;
+  put32(34, w * h * 4);
+  for (uint32_t y = 0; y < h; ++y) {
+    memcpy(out.data() + 54 + static_cast<size_t>(y) * w * 4,
+           bgra.data() + static_cast<size_t>(h - 1 - y) * w * 4, static_cast<size_t>(w) * 4);
+  }
+  return WriteFile(path, out);
+}
+
+// The layers of each frame of a stream, as the player of the app reads them.
+struct FrameOfLayers {
+  bool has_view = false;
+  ss::ViewBody view = {};
+  ql::FrameLayers layers;
+  std::vector<uint8_t> normal;
+  int pictures = 0;      // kCardPicture records in the frame
+  int bad_pictures = 0;  // a kCardPicture whose pixels do not have its hash
+  bool card_picture[bwvr::kCards] = {false, false, false, false};
+};
+
+bool StreamLayers(const std::vector<uint8_t>& file, std::map<uint64_t, FrameOfLayers>* out,
+                  const char* bmp_folder, int* bmps) {
+  std::map<uint64_t, std::pair<size_t, size_t>> units;
+  if (!Units(file, &units)) return false;
+  ql::AppPictures pictures;
+  std::map<uint64_t, bool> written;
+  // In the order of the stream (Units is a map by frame, and the frames of a
+  // stream go up).
+  for (const auto& u : units) {
+    FrameOfLayers& f = (*out)[u.first];
+    const uint8_t* unit = file.data() + u.second.first;
+    f.normal = ql::Normal(unit, u.second.second);
+    ss::Reader r = ss::Reader::Records(unit, u.second.second);
+    ss::Kind kind;
+    const uint8_t* body = nullptr;
+    uint32_t n = 0;
+    while (r.Next(&kind, &body, &n)) {
+      if (kind == ss::kStart) pictures = ql::AppPictures();
+      if (kind == ss::kView) f.has_view = ss::Body(body, n, &f.view);
+      if (kind == ss::kCardPicture) {
+        ++f.pictures;
+        ss::CardPictureBody p;
+        if (!ss::Body(body, n, &p) || !pictures.OnPicture(body, n) ||
+            ql::PictureHash(pictures.Pixels(p.card).data(), p.width * 4, p.width, p.height) !=
+                p.picture) {
+          ++f.bad_pictures;
+          continue;
+        }
+        if (bmp_folder != nullptr && !written[p.picture]) {
+          written[p.picture] = true;
+          char name[64];
+          sprintf_s(name, "\\card-%u-%016llx.bmp", p.card, p.picture);
+          if (WriteCardBmp(std::string(bmp_folder) + name, p.width, p.height, pictures.Pixels(p.card))) {
+            ++*bmps;
+          }
+        }
+      }
+      if (kind == ss::kCard) {
+        ss::CardBody c;
+        if (ss::Body(body, n, &c) && c.card < static_cast<uint32_t>(bwvr::kCards)) {
+          f.layers.card[c.card] = true;
+          f.layers.cards[c.card] = c;
+          f.card_picture[c.card] = pictures.Has(static_cast<int>(c.card), c.picture);
+        }
+      }
+      if (kind == ss::kPanel) f.layers.panel = ss::Body(body, n, &f.layers.panel_body);
+      if (kind == ss::kWindow) f.layers.window = ss::Body(body, n, &f.layers.window_body);
+    }
+  }
+  return true;
+}
+
+// A frame of the world: its kView is for a projection layer. A record of the
+// layers has no kView, and its frames count as frames of the world.
+bool World(const FrameOfLayers& f) {
+  return !f.has_view || view_layer_math::ShowsProjection(f.view);
+}
+
+// The quads of the layers of a frame, in the order of the app, as the test
+// runtime reports them.
+std::string FrameQuads(const FrameOfLayers& f, int* count) {
+  const bool world = World(f);
+  ql::LayerRef order[ql::kMostLayers];
+  const int n = ql::Order(f.layers, world, true, f.card_picture, order);
+  std::string text;
+  *count = 0;
+  for (int i = 0; i < n; ++i) {
+    ql::QuadSpec q;
+    if (!ql::Spec(f.layers, order[i], f.view.width, f.view.height, &q)) continue;
+    text += QuadText(q);
+    ++*count;
+  }
+  return text;
+}
+
+std::string LayerNames(const FrameOfLayers& f) {
+  const bool world = World(f);
+  ql::LayerRef order[ql::kMostLayers];
+  const int n = ql::Order(f.layers, world, true, f.card_picture, order);
+  std::string text;
+  for (int i = 0; i < n; ++i) {
+    char part[32];
+    sprintf_s(part, "%s%s %d", i == 0 ? "" : ", ", kLayerKindNames[order[i].kind], order[i].index);
+    text += part;
+  }
+  return text.empty() ? "none" : text;
+}
+
+// The layer records of each frame of a record of the layers (xr_layer_record).
+bool RecordLayers(const char* path, std::map<uint64_t, FrameOfLayers>* out) {
+  std::vector<uint8_t> file;
+  if (!ReadFile(path, &file)) return false;
+  int bmps = 0;
+  return StreamLayers(file, out, nullptr, &bmps);
+}
+
+int Layers(const char* stream_path, const char* record_path, const char* bmp_folder) {
+  std::vector<uint8_t> file;
+  std::map<uint64_t, FrameOfLayers> frames;
+  int bmps = 0;
+  if (!ReadFile(stream_path, &file) || !StreamLayers(file, &frames, bmp_folder, &bmps)) {
+    printf("layers       : FAULT %s is not a whole stream\n", stream_path);
+    return 2;
+  }
+  std::map<uint64_t, FrameOfLayers> record;
+  if (record_path != nullptr && !RecordLayers(record_path, &record)) {
+    printf("layers       : FAULT %s is not a record of the layers\n", record_path);
+    return 2;
+  }
+  int with_layers = 0, pictures = 0, bad = 0, same = 0, differ = 0, missing = 0, no_picture = 0;
+  for (const auto& e : frames) {
+    const FrameOfLayers& f = e.second;
+    pictures += f.pictures;
+    bad += f.bad_pictures;
+    if (!f.layers.Any()) continue;
+    ++with_layers;
+    for (int c = 0; c < bwvr::kCards; ++c) {
+      if (f.layers.card[c] && !f.card_picture[c]) ++no_picture;
+    }
+    const char* verdict = "";
+    if (record_path != nullptr) {
+      const auto r = record.find(e.first);
+      if (r == record.end()) {
+        ++missing;
+        verdict = ": not in the record";
+      } else if (r->second.normal == f.normal) {
+        ++same;
+        verdict = ": the same bytes as in the record";
+      } else {
+        ++differ;
+        verdict = ": FAULT not the same as in the record";
+      }
+    }
+    int quads = 0;
+    const std::string text = FrameQuads(f, &quads);
+    printf("layers       : frame %llu: %s, %d pictures%s\n", e.first, LayerNames(f).c_str(),
+           f.pictures, verdict);
+    printf("layers       : frame %llu quads%s\n", e.first, text.c_str());
+    std::string cards;
+    for (int c = 0; c < bwvr::kCards; ++c) {
+      if (!f.layers.card[c]) continue;
+      char part[48];
+      sprintf_s(part, " %d:%016llx", c, f.layers.cards[c].picture);
+      cards += part;
+    }
+    if (!cards.empty()) printf("layers       : frame %llu cards%s\n", e.first, cards.c_str());
+  }
+  for (int c = 0; c < bwvr::kCards; ++c) {
+    int count = 0;
+    for (const auto& e : frames) {
+      if (e.second.layers.card[c]) ++count;
+    }
+    if (count > 0) printf("layers       : %s is in %d frames\n", ql::CardName(c), count);
+  }
+  printf("layers       : %zu frames in %s, %d with layers, %d pictures of a card (%d with pixels "
+         "that do not have their hash), %d cards with no picture",
+         frames.size(), stream_path, with_layers, pictures, bad, no_picture);
+  if (record_path != nullptr) {
+    printf(". The record has %zu frames: %d the same, %d different, %d not in the record",
+           record.size(), same, differ, missing);
+  }
+  if (bmp_folder != nullptr) printf(". %d pictures of a card to %s", bmps, bmp_folder);
+  printf("\n");
+  if (with_layers == 0 || bad > 0 || no_picture > 0) return 1;
+  return record_path == nullptr || (differ == 0 && missing == 0) ? 0 : 1;
+}
+
+// THE SAME CALLS IN TWO RUNS: the layers of each frame of two records. A
+// frame of both is the same (the same normal records), or it differs only in
+// the hash of a picture of a card (the picture), or only in a card that one
+// run has and the other does not, or in other values. The fades of the cards
+// go by the clock of the PC, so two runs with the same input can differ in
+// the pictures and in the frames of a card while a card fades in or out. A
+// frame that differs only in this way is the same calls only when a picture
+// of a card or the set of the cards changes in one of the runs at that frame
+// or at the frame after it. Each other frame that differs counts as a frame
+// with other values.
+struct CardState {
+  uint32_t set = 0;  // bit c: the card c is in the frame
+  uint64_t picture[bwvr::kCards] = {0, 0, 0, 0};
+};
+
+CardState StateOf(const FrameOfLayers& f) {
+  CardState s;
+  for (int c = 0; c < bwvr::kCards; ++c) {
+    if (!f.layers.card[c]) continue;
+    s.set |= 1u << c;
+    s.picture[c] = f.layers.cards[c].picture;
+  }
+  return s;
+}
+
+// The change of the cards of a run at a frame against the frame before. 0:
+// no change. 1: a picture changed (a fade). 2: the set of the cards changed.
+int CardChange(const std::map<uint64_t, FrameOfLayers>& run, uint64_t frame) {
+  const auto now = run.find(frame);
+  const auto before = run.find(frame - 1);
+  if (now == run.end() || before == run.end()) return 0;
+  const CardState x = StateOf(now->second), y = StateOf(before->second);
+  if (x.set != y.set) return 2;
+  for (int c = 0; c < bwvr::kCards; ++c) {
+    if (((x.set >> c) & 1u) != 0 && x.picture[c] != y.picture[c]) return 1;
+  }
+  return 0;
+}
+
+int LayerCompare(const char* a_path, const char* b_path) {
+  std::map<uint64_t, FrameOfLayers> a, b;
+  if (!RecordLayers(a_path, &a) || !RecordLayers(b_path, &b)) {
+    printf("layer compare: FAULT a file is not a record of the layers\n");
+    return 2;
+  }
+  int same = 0, picture = 0, presence = 0, other = 0, only = 0, said = 0, with_layers = 0;
+  int unexplained = 0, ranges = 0;
+  uint64_t first_other = 0;
+  // The frames that differ only in the pictures or the set of the cards, in
+  // runs of frames: the first frame, the last frame.
+  std::vector<std::pair<uint64_t, uint64_t>> runs;
+  for (const auto& e : a) {
+    const auto o = b.find(e.first);
+    if (o == b.end()) {
+      ++only;
+      continue;
+    }
+    const FrameOfLayers& x = e.second;
+    const FrameOfLayers& y = o->second;
+    if (x.layers.Any() || y.layers.Any()) ++with_layers;
+    if (x.normal == y.normal) {
+      ++same;
+      continue;
+    }
+    bool only_pictures = x.layers.panel == y.layers.panel && x.layers.window == y.layers.window &&
+                         (!x.layers.panel || memcmp(&x.layers.panel_body, &y.layers.panel_body,
+                                                    sizeof(ss::PanelBody)) == 0) &&
+                         (!x.layers.window || memcmp(&x.layers.window_body, &y.layers.window_body,
+                                                     sizeof(ss::WindowBody)) == 0);
+    bool cards_same_set = true;
+    for (int c = 0; c < bwvr::kCards; ++c) {
+      if (x.layers.card[c] != y.layers.card[c]) {
+        cards_same_set = false;
+        continue;
+      }
+      if (!x.layers.card[c]) continue;
+      ss::CardBody p = x.layers.cards[c], q = y.layers.cards[c];
+      p.picture = q.picture = 0;
+      if (memcmp(&p, &q, sizeof(p)) != 0) only_pictures = false;
+    }
+    if (only_pictures) {
+      if (cards_same_set) {
+        ++picture;
+      } else {
+        ++presence;
+      }
+      if (!runs.empty() && runs.back().second + 1 == e.first) {
+        runs.back().second = e.first;
+      } else {
+        runs.push_back(std::make_pair(e.first, e.first));
+      }
+      continue;
+    }
+    ++other;
+    if (first_other == 0) first_other = e.first;
+    if (said++ < 5) {
+      int nx = 0, ny = 0;
+      printf("layer compare: frame %llu differs in other values:\n  the first record: %s:%s\n  "
+             "the second record: %s:%s\n", e.first,
+             LayerNames(x).c_str(), FrameQuads(x, &nx).c_str(), LayerNames(y).c_str(),
+             FrameQuads(y, &ny).c_str());
+    }
+  }
+  for (const auto& e : b) {
+    if (a.find(e.first) == a.end()) ++only;
+  }
+  // Each frame that differs only in the cards: a fade or a change of the set
+  // of the cards in one of the runs at that frame or at the frame after it
+  // explains it (in a fade each frame has a new picture), or it counts as a
+  // frame with other values. The lines name each run of frames with its
+  // reason.
+  for (const auto& r : runs) {
+    uint64_t start = r.first;
+    int last_reason = -1;
+    for (uint64_t f = r.first; f <= r.second + 1; ++f) {
+      int reason = 0;  // 0 none, 1 a fade, 2 a change of the set
+      if (f <= r.second) {
+        const int c[4] = {CardChange(a, f), CardChange(b, f), CardChange(a, f + 1),
+                          CardChange(b, f + 1)};
+        for (int i = 0; i < 4; ++i) {
+          if (c[i] > reason) reason = c[i];
+        }
+      } else {
+        reason = -2;  // the end of the run
+      }
+      if (f != r.first && reason != last_reason) {
+        ++ranges;
+        const int n = static_cast<int>(f - start);
+        if (last_reason == 0) {
+          unexplained += n;
+          other += n;
+          if (first_other == 0 || start < first_other) first_other = start;
+          printf("layer compare: frames %llu to %llu differ only in the cards, with no fade and "
+                 "no change of the set of the cards in either run: FAULT, %d frames\n",
+                 start, f - 1, n);
+        } else {
+          printf("layer compare: frames %llu to %llu differ only in the cards: %s in a run at "
+                 "each frame or at the frame after it\n", start, f - 1,
+                 last_reason == 1 ? "a picture of a card changes (a fade)"
+                                  : "the set of the cards changes");
+        }
+        start = f;
+      }
+      last_reason = reason;
+    }
+  }
+  printf("layer compare: %zu and %zu frames, %d with layers: %d frames the same, %d differ only in "
+         "the picture of a card, %d differ only in a card that one run has and the other does "
+         "not (%d runs of frames, %d frames of them with no fade and no change of the set), %d "
+         "differ in other values (the first in frame %llu), %d frames not in both\n",
+         a.size(), b.size(), with_layers, same, picture, presence, ranges, unexplained, other,
+         first_other, only);
+  return other == 0 && only == 0 && same > 0 ? 0 : 1;
+}
+
+// A TEST FEED OF THE CUT SCENE WINDOW for the app (emu_xr_test.ps1): a copy
+// of a stream in which each frame from `first` to `last` is a frame of the
+// window as a screen. Its kView gets kViewFlat, and a kWindow with a screen
+// goes before its kFrameEnd: 2.6 m wide, 2 m in front, the crop and the edge
+// of the arguments. The values of the window are of the test, not of the mod.
+int WindowFeed(const char* in_path, const char* out_path, uint64_t first, uint64_t last,
+               int32_t crop, int32_t edge) {
+  std::vector<uint8_t> file;
+  if (!ReadFile(in_path, &file)) {
+    printf("window feed  : FAULT cannot read %s\n", in_path);
+    return 2;
+  }
+  ss::Reader r(file.data(), file.size());
+  if (!r.Ok()) {
+    printf("window feed  : FAULT %s is not a stream\n", in_path);
+    return 2;
+  }
+  ss::Writer w;
+  ss::Kind kind;
+  const uint8_t* body = nullptr;
+  uint32_t n = 0;
+  uint64_t frame = 0;
+  int windows = 0;
+  uint32_t width = 0, height = 0;
+  while (r.Next(&kind, &body, &n)) {
+    if (kind == ss::kFrame && n >= 8) memcpy(&frame, body, 8);
+    const bool in_window = frame >= first && frame <= last;
+    if (kind == ss::kView && in_window) {
+      ss::ViewBody v;
+      if (ss::Body(body, n, &v)) {
+        v.flags |= ss::kViewFlat;
+        width = v.width;
+        height = v.height;
+        w.Record(ss::kView, &v, sizeof(v));
+        continue;
+      }
+    }
+    if (kind == ss::kFrameEnd && in_window) {
+      ss::WindowBody win;
+      memset(&win, 0, sizeof(win));
+      win.screen = 1;
+      win.crop = crop;
+      win.edge = edge;
+      win.position[1] = 0.1f;
+      win.position[2] = -2.0f;
+      win.orientation[3] = 1.0f;
+      win.width = 2.6f;
+      const float shown = static_cast<float>(width) - crop - 2.0f * edge;
+      win.height = shown > 0.0f ? 2.6f * height / shown : 1.5f;
+      w.Record(ss::kWindow, &win, sizeof(win));
+      ++windows;
+    }
+    w.Record(kind, body, n);
+  }
+  if (!WriteFile(out_path, w.Bytes())) {
+    printf("window feed  : FAULT cannot write %s\n", out_path);
+    return 2;
+  }
+  printf("window feed  : %s: %d frames from frame %llu to frame %llu are frames of the cut "
+         "scene window (crop %d, edge %d), %zu bytes\n", out_path, windows, first, last, crop,
+         edge, w.Bytes().size());
+  return windows > 0 ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -597,9 +1063,21 @@ int main(int argc, char** argv) {
     return Views(argv[2], argc == 4 ? argv[3] : nullptr);
   }
   if (argc == 4 && strcmp(argv[1], "view-compare") == 0) return ViewCompare(argv[2], argv[3]);
+  if (argc >= 3 && argc <= 5 && strcmp(argv[1], "layers") == 0) {
+    const char* record = argc >= 4 && strcmp(argv[3], "-") != 0 ? argv[3] : nullptr;
+    return Layers(argv[2], record, argc == 5 ? argv[4] : nullptr);
+  }
+  if (argc == 4 && strcmp(argv[1], "layer-compare") == 0) return LayerCompare(argv[2], argv[3]);
+  if (argc == 8 && strcmp(argv[1], "window-feed") == 0) {
+    return WindowFeed(argv[2], argv[3], strtoull(argv[4], nullptr, 10),
+                      strtoull(argv[5], nullptr, 10), atoi(argv[6]), atoi(argv[7]));
+  }
   printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame]\n"
          "bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>\n"
          "bwvr_stream_reader views <stream> [<bwvr-view.rec>]\n"
-         "bwvr_stream_reader view-compare <bwvr-view.rec> <bwvr-view.rec>\n");
+         "bwvr_stream_reader view-compare <bwvr-view.rec> <bwvr-view.rec>\n"
+         "bwvr_stream_reader layers <stream> [<bwvr-layer.rec> or -] [<folder for the card pictures>]\n"
+         "bwvr_stream_reader layer-compare <bwvr-layer.rec> <bwvr-layer.rec>\n"
+         "bwvr_stream_reader window-feed <stream> <out stream> <first frame> <last frame> <crop> <edge>\n");
   return 1;
 }

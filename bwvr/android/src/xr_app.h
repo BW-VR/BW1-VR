@@ -21,6 +21,7 @@
 #include <openxr/openxr_platform.h>
 
 #include "../../src/common/input_channel.h"
+#include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/vk_core.h"
 #include "gpu.h"
@@ -124,11 +125,33 @@ class XrApp {
   // The values of the projection layer of the newest picture (after
   // SetScreenSource or MarkScreenChanged). has: false when that picture has
   // none, and then it shows on the stereo screen.
+  // view.frame is the frame of the mod of the picture also when has is false.
   void SetScreenView(bool has, const scene_stream::ViewBody& view);
   // xr_copy_on_change (1 is the default): true, a layer gets a new image of
   // its swapchain only when its picture changed, and the runtime shows the
   // last released image. false, each frame copies each layer. Before Start.
   void SetCopyOnChange(bool on) { copy_on_change_ = on; }
+
+  // THE QUAD LAYERS (stream_layers, docs/android.md, "The quad layers"). On
+  // (1, the default): the cards, the panel quads and the cut scene window of
+  // the mod for the frame of the newest picture (quad_layer_math.h,
+  // PictureLayers) show as the session of the mod shows them: quad layers
+  // over the projection layer, in the order of XrScreen::BuildFrame, and a
+  // frame of the cut scene window as a quad of each eye at the pose of the
+  // window. The menu and the cursor stay over them. Off (0): no quad layer of
+  // the mod, and a frame of the cut scene window shows on the stereo screen.
+  // Before Start.
+  void SetLayersOn(bool on) { layers_on_ = on; }
+  bool LayersOn() const { return layers_on_; }
+  // The layers of the newest picture (after SetScreenSource or
+  // MarkScreenChanged), the pictures of the cards of the stream, and the
+  // panel image of the renderer for that picture (VkScenePanelFor, a VkImage
+  // of panel_width by panel_height in the layout of a color attachment), or
+  // VK_NULL_HANDLE. A card gets new pixels only when its picture, its rect or
+  // the size of its texture changed.
+  void SetScreenLayers(const quad_layer_math::FrameLayers& layers,
+                       const quad_layer_math::AppPictures& pictures, VkImage panel,
+                       uint32_t panel_width, uint32_t panel_height);
 
  private:
   struct Layer {
@@ -163,14 +186,53 @@ class XrApp {
     uint64_t copies[2] = {0, 0};  // the copies of each eye
     bool failed = false;  // the set could not be made, and the app does not try again
   };
-  // False with the reason in *why, and then the set has no part.
+  // False with the reason in *why, and then the set has no part. count: the
+  // swapchains of the set (2 for the eyes, 1 for the panel).
   bool MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
-                     const char** why);
+                     const char** why, int count = 2);
   void FreeScreenSet(Screen* screen);
   // One eye of the picture of the renderer into the next image of its
   // swapchain. True when the eye released a new image in this call.
   bool CopyScreen(Screen* screen, int eye);
+  // Layer `source_layer` of `source` (source_width by source_height, in the
+  // layout of a color attachment) into the next image of swapchain `index`
+  // of the set, with a blit to the size of the swapchain and a copy.
+  bool CopyImage(Screen* screen, int index, VkImage source, uint32_t source_layer,
+                 uint32_t source_width, uint32_t source_height);
   void SetPixels(Layer* layer, const std::vector<uint8_t>& rgba);
+
+  // THE QUAD LAYERS OF THE MOD.
+  struct Card {
+    Layer layer;
+    bool failed = false;   // the runtime gave no swapchain: the card does not show
+    uint64_t picture = 0;  // the hash of the picture in the staging buffer
+    int32_t rect[4] = {0, 0, 0, 0};
+    bool said = false;
+    uint64_t frames = 0;   // frames with this card
+  };
+  // The pixels of a card into its staging buffer, at its rect. True when
+  // the card has the picture of `body` after the call.
+  bool TakeCard(int index, const scene_stream::CardBody& body,
+                const quad_layer_math::AppPictures& pictures);
+  void FreeLayers();
+  bool layers_on_ = true;  // stream_layers
+  quad_layer_math::FrameLayers newest_layers_;
+  quad_layer_math::FrameLayers shown_layers_;
+  Card cards_[bwvr::kCards];
+  Screen panel_;  // one swapchain of the size of the panel image
+  VkImage panel_source_ = VK_NULL_HANDLE;
+  uint32_t panel_width_ = 0;
+  uint32_t panel_height_ = 0;
+  bool panel_shown_ = false;  // the released image has the panel of shown_layers_
+  Layer wall_;                // the walls of the cut scene window: black with an alpha
+  bool wall_failed_ = false;
+  int wall_alpha_ = -1;       // the alpha of the staging buffer of the walls
+  uint64_t panel_frames_ = 0;
+  uint64_t wall_frames_ = 0;
+  uint64_t window_frames_ = 0;
+  bool said_panel_ = false;
+  bool said_walls_ = false;
+  bool said_window_ = false;
 
   XrInstance instance_ = XR_NULL_HANDLE;
   XrSystemId system_ = XR_NULL_SYSTEM_ID;
@@ -236,6 +298,11 @@ class XrApp {
   uint64_t screen_frames_ = 0;      // frames of the session with the stereo screen
   bool said_projection_ = false;
   uint64_t said_frame_ = 0;  // the frame of the last picture of the layer in the log
+  // The frame of the mod of the newest picture and of the picture of the
+  // released images of the eyes, for the log of the cut scene window.
+  uint64_t newest_frame_ = 0;
+  uint64_t shown_frame_ = 0;
+  uint64_t said_window_frame_ = 0;
   bool said_no_view_ = false;
   VkImage screen_source_ = VK_NULL_HANDLE;
   uint32_t source_width_ = 0;

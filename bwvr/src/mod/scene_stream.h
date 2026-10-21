@@ -46,9 +46,13 @@ enum Kind : uint32_t {
   kWritten = 16,      // u64: VkSceneSurfaceWritten
   kFrameEnd = 17,     // u64 frame: the end of a frame of the game
   kView = 18,         // ViewBody: the projection layer of the frame (the back channel)
+  kCard = 19,         // CardBody: a card of the frame (XrScreen::StageCard)
+  kCardPicture = 20,  // CardPictureBody, the pixels: a new picture of a card
+  kPanel = 21,        // PanelBody: the panel quads of the frame (XrScreen::SetPanelQuads)
+  kWindow = 22,       // WindowBody: the cut scene window of the frame (XrScreen::StageWindow)
 };
 // The last kind. A record of a higher kind is not of the stream.
-constexpr uint32_t kLastKind = kView;
+constexpr uint32_t kLastKind = kWindow;
 
 // The values of the other parts of the mod that the renderer reads, at the
 // time of a record (scene_host.h in the app).
@@ -188,6 +192,72 @@ struct ViewBody {
   ViewEye eyes[2];
 };
 
+// THE QUAD LAYERS OF A FRAME (kCard, kCardPicture, kPanel, kWindow), THE BACK
+// CHANNEL TO THE HEADSET APP (docs/android.md, "The quad layers"). The mod
+// gives the app what it gives a session of its own for the frame, at the
+// place where the session takes it (XrScreen::EndFrame): the cards, the
+// panel quads and the cut scene window. The records are in the frame of
+// their eye pictures: after the walk that ends the picture and before
+// kFrameEnd (src/mod/quad_layer_math.h).
+//
+// The bits of CardBody::flags.
+constexpr uint32_t kCardVisible = 1u << 0;  // CardLayer::visible
+
+// A card of the frame (bwvr::CardLayer). picture is the hash of the pixels
+// of the rect (quad_layer_math.h, PictureHash): a kCardPicture with the same
+// hash gives them, in this frame or in an earlier one.
+struct CardBody {
+  uint32_t card;    // kCardHintPointing, kCardHintOther, kCardSubtitles or kCardRing
+  uint32_t flags;   // kCardVisible
+  uint32_t texture_width, texture_height;
+  int32_t rect[4];  // the part that shows: x, y, width, height
+  float position[3];     // meters, the center, in the LOCAL space
+  float orientation[4];  // x y z w, the front of the quad is its +z side
+  float width, height;   // meters
+  uint32_t reserved;
+  uint64_t picture;
+};
+
+// A new picture of a card: then width * height pixels follow, BGRA, top row
+// first, with the color multiplied by the alpha. They are the pixels of the
+// rect of the card, and they go only when the picture changed.
+struct CardPictureBody {
+  uint32_t card;
+  uint32_t width, height;  // rect[2] and rect[3] of the card
+  uint32_t reserved;
+  uint64_t picture;        // the hash of the pixels
+};
+
+// One panel quad (bwvr::PanelQuad). rect is in the pixels of the panel image.
+struct PanelQuadBody {
+  uint32_t visible;
+  int32_t rect[4];
+  float position[3];
+  float orientation[4];
+  float width, height;
+};
+
+// The panel quads of the frame: the menu and the help (SetPanelQuads) and the
+// Creature panel (StagePanelQuad). The picture is the panel image of the
+// renderer of the frame (VkScenePanelFor, vk_panel=1), which the app draws
+// itself. width and height: the size of the panel image (the render size).
+struct PanelBody {
+  uint32_t width, height;
+  PanelQuadBody quads[3];  // kPanelQuads of src/vr/xr_screen.h
+};
+
+// The cut scene window of the frame (bwvr::WindowLayer).
+struct WindowBody {
+  uint32_t screen, mask;
+  int32_t crop, edge;
+  float position[3];
+  float orientation[4];
+  float width, height;
+  float wall_position[4][3];
+  float wall_size[4][2];
+  float alpha;
+};
+
 // The mod is 32 bit and the app is 64 bit: each body has one size on both.
 static_assert(sizeof(StreamState) == 40, "StreamState");
 static_assert(sizeof(StartBody) == 100, "StartBody");
@@ -209,6 +279,28 @@ static_assert(offsetof(ViewBody, frame) == 8 && offsetof(ViewBody, display_time)
               "ViewBody offsets");
 static_assert(offsetof(ViewEye, orientation) == 12 && offsetof(ViewEye, fov) == 28,
               "ViewEye offsets");
+static_assert(sizeof(CardBody) == 80, "CardBody");
+static_assert(offsetof(CardBody, texture_width) == 8 && offsetof(CardBody, rect) == 16 &&
+                  offsetof(CardBody, position) == 32 && offsetof(CardBody, orientation) == 44 &&
+                  offsetof(CardBody, width) == 60 && offsetof(CardBody, reserved) == 68 &&
+                  offsetof(CardBody, picture) == 72,
+              "CardBody offsets");
+static_assert(sizeof(CardPictureBody) == 24 && offsetof(CardPictureBody, picture) == 16,
+              "CardPictureBody");
+static_assert(sizeof(PanelQuadBody) == 56 && offsetof(PanelQuadBody, rect) == 4 &&
+                  offsetof(PanelQuadBody, position) == 20 &&
+                  offsetof(PanelQuadBody, orientation) == 32 &&
+                  offsetof(PanelQuadBody, width) == 48,
+              "PanelQuadBody");
+static_assert(sizeof(PanelBody) == 176 && offsetof(PanelBody, quads) == 8, "PanelBody");
+static_assert(sizeof(WindowBody) == 136 && offsetof(WindowBody, crop) == 8 &&
+                  offsetof(WindowBody, position) == 16 &&
+                  offsetof(WindowBody, orientation) == 28 &&
+                  offsetof(WindowBody, width) == 44 &&
+                  offsetof(WindowBody, wall_position) == 52 &&
+                  offsetof(WindowBody, wall_size) == 100 &&
+                  offsetof(WindowBody, alpha) == 132,
+              "WindowBody");
 
 // THE WRITER: records into a buffer.
 class Writer {

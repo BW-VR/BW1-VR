@@ -2081,6 +2081,24 @@ void XrScreen::StageWindow(const WindowLayer& layer) {
   g_have_staged_window = true;
 }
 
+void XrScreen::TakeStaged(StagedLayers* out, bool clear) {
+  for (int i = 0; i < kCards; ++i) {
+    out->card[i] = g_have_staged_card[i];
+    out->cards[i] = g_staged_card[i];
+    if (clear) g_have_staged_card[i] = false;
+  }
+  out->window = g_have_staged_window;
+  out->window_layer = g_staged_window;
+  if (clear) g_have_staged_window = false;
+}
+
+bool XrScreen::TakeStagedPanelQuad(PanelQuad* out, bool clear) {
+  const bool have = g_have_staged_quad;
+  *out = g_staged_quad;
+  if (clear) g_have_staged_quad = false;
+  return have;
+}
+
 void XrScreen::Impl::DestroyMask() {
   DestroyChain(&mask_swapchain);
   delete[] mask_images;

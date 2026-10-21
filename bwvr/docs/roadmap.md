@@ -801,10 +801,13 @@ that moves while the Hand takes it.
     Wine and Box64, and a real headset. The mod gives the app the values of
     the projection layer of each frame in the frame of the live stream (a
     record `kView`), and the app shows the eye pictures in a projection
-    layer (`stream_projection`, `android.md`, "The projection layer"). Open
-    for it: a real headset, the cards, the panel quads and the window of the
-    cut scenes as layers of the app, and the intro, which gives no frame of
-    the live stream. A frame goes into the
+    layer (`stream_projection`, `android.md`, "The projection layer"). The
+    cards, the panel quads and the cut scene window of the session go into
+    the same frame (records `kCard`, `kCardPicture`, `kPanel`, `kWindow`),
+    and the app shows them as quad layers over the projection layer in the
+    order of the session of the mod (`xr_input_layers`, `stream_layers`,
+    `android.md`, "The quad layers"). Open for it: a real headset, and the
+    intro, which gives no frame of the live stream. A frame goes into the
     ring at the end of its first walk with both eyes, and in a desktop run each frame after
     a frame with the whole state was at the reader in its own game frame. A
     skip of the app and a drop of the writer keep the records of state and

@@ -22,8 +22,9 @@
 // kStart, kSurface or kWritten record never drops, and a frame with none
 // drops whole.
 // vk_stream_live_end: 1 (the default) a frame goes to the record and to the
-// ring at the end of its first walk with both eyes (stream_split.h), and a
-// later walk of the frame goes at the start of the next frame. 0: at the
+// ring at the end of its first walk with both eyes (stream_split.h), or with
+// the quad layers (VkStreamSetLayers) after its layers, and a later walk of
+// the frame goes at the start of the next frame. 0: at the
 // start of the next frame.
 //
 // Both only with backend=vulkan: there the device of the mod gives each call
@@ -72,6 +73,21 @@ void VkStreamWritten(void* surface);
 // view_layer_math.h). stereo.cpp gives it with xr_input=1, after
 // VkSceneFrame and before the walks of the frame.
 void VkStreamView(const scene_stream::ViewBody& view);
+// THE QUAD LAYERS of the frame for the headset app (kCard, kCardPicture,
+// kPanel, kWindow, quad_layer_math.h). VkStreamSetLayers(true), with
+// xr_input=1 and xr_input_layers=1: the first walk with both eyes does not
+// end the frame, and VkStreamLayers at the end of the frame of the scene
+// writes the layers into the frame and then ends it (vk_stream_live_end=1).
+// So the layers are in the frame of their eye pictures. A picture of a card
+// goes only when the reader does not have it. False when no frame of the
+// stream is open.
+namespace quad_layer_math {
+struct FrameLayers;
+class CardPictures;
+}  // namespace quad_layer_math
+void VkStreamSetLayers(bool on);
+bool VkStreamLayers(const quad_layer_math::FrameLayers& layers,
+                    const quad_layer_math::CardPictures& pictures);
 
 // vk_scene.cpp gives the read of a surface of the game as RGBA8 (ReadSurface),
 // so the stream has the same pixels as the renderer of the PC. pixels must

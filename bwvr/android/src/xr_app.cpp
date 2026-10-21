@@ -8,6 +8,14 @@
 
 namespace {
 
+// The quads of the mod take these values of openxr.h (quad_layer_math.h).
+static_assert(quad_layer_math::kEyeBoth == XR_EYE_VISIBILITY_BOTH &&
+                  quad_layer_math::kEyeLeft == XR_EYE_VISIBILITY_LEFT &&
+                  quad_layer_math::kEyeRight == XR_EYE_VISIBILITY_RIGHT &&
+                  quad_layer_math::kBlendSourceAlpha ==
+                      XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
+              "the values of a quad of quad_layer_math.h");
+
 bool Ok(XrResult result, const char* what) {
   if (XR_SUCCEEDED(result)) return true;
   AppLog("xr           : %s failed (%d)", what, static_cast<int>(result));
@@ -716,30 +724,48 @@ bool XrApp::BeginFrame(XrInput* input) {
 void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                      bool show_cursor, const float cursor_point[3],
                      float cursor_size) {
-  XrCompositionLayerQuad quads[4] = {
-      {XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD},
-      {XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}};
+  namespace ql = quad_layer_math;
+  // The quads: the two of the stereo screen or the quad layers of the mod
+  // (ql::kMostLayers), then the menu and the cursor.
+  constexpr int kQuads = ql::kMostLayers + 2;
+  XrCompositionLayerQuad quads[kQuads];
+  for (XrCompositionLayerQuad& q : quads) q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerProjectionView views[2] = {
       {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
       {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
   XrCompositionLayerProjection projection = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-  const XrCompositionLayerBaseHeader* layers[4];
+  const XrCompositionLayerBaseHeader* layers[kQuads + 1];
   uint32_t count = 0;
+  int used = 0;  // the quads in use
   // THE PROJECTION LAYER of the renderer, behind the menu: each eye with the
   // pose that the mod drew it from and the angles of view that the mod
   // gives (kView). The runtime reprojects it to the pose of the head, so the
-  // app adds no motion.
+  // app adds no motion. A frame of the cut scene window (stream_layers=1)
+  // shows the same eye pictures on a quad of each eye at the pose of the
+  // window.
+  const bool source = frame_.shouldRender && screen_source_ != VK_NULL_HANDLE;
+  const bool want_world = source && projection_on_ && view_newest_ && HasEyes();
+  // With stream_projection=0 each picture shows on the stereo screen, a frame
+  // of the cut scene window too, and no quad layer of the mod goes out.
+  const bool want_window = source && projection_on_ && layers_on_ &&
+                           ql::AsScreen(newest_layers_) && HasEyes();
   bool world = false;
-  if (frame_.shouldRender && screen_source_ != VK_NULL_HANDLE &&
-      projection_on_ && view_newest_ && HasEyes()) {
+  bool window = false;
+  if (want_world || want_window) {
     for (int eye = 0; eye < 2; ++eye) {
       // The values go with the picture of the image that the eye released.
       if (CopyScreen(&eyes_, eye)) {
         shown_view_[eye] = newest_view_;
-        view_shown_[eye] = true;
+        view_shown_[eye] = view_newest_;
+        if (eye == 0) {
+          shown_layers_ = newest_layers_;
+          shown_frame_ = newest_frame_;
+        }
       }
     }
-    world = view_shown_[0] && view_shown_[1];
+    world = want_world && view_shown_[0] && view_shown_[1];
+    window = !world && want_window && eyes_.layer[0].released > 0 &&
+             eyes_.layer[1].released > 0 && ql::AsScreen(shown_layers_);
   }
   if (world) {
     // One line for each new picture of the layer: the frame of the mod of its
@@ -781,9 +807,153 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
              b.eyes[0].fov[1], b.eyes[0].fov[2], b.eyes[0].fov[3],
              b.half_angle * 57.29578f);
     }
-  } else if (frame_.shouldRender && screen_source_ != VK_NULL_HANDLE) {
+  }
+  if ((world || window) && layers_on_) {
+    // THE QUAD LAYERS OF THE MOD, in the order of XrScreen::BuildFrame. The
+    // panel image goes into its swapchain for a new picture.
+    const ql::FrameLayers& f = shown_layers_;
+    bool panel_ok = false;
+    if (world && f.panel && panel_source_ != VK_NULL_HANDLE &&
+        panel_width_ == f.panel_body.width && panel_height_ == f.panel_body.height) {
+      if (panel_.between != VK_NULL_HANDLE &&
+          (panel_.layer[0].width != panel_width_ || panel_.layer[0].height != panel_height_)) {
+        // The GPU may still copy into the swapchain or the image between.
+        vkDeviceWaitIdle(gpu_.device);
+        FreeScreenSet(&panel_);
+        panel_shown_ = false;
+      }
+      if (panel_.between == VK_NULL_HANDLE && !panel_.failed) {
+        const char* why = "";
+        if (MakeScreenSet(&panel_, panel_width_, panel_height_, &why, 1)) {
+          AppLog("xr           : a swapchain of %u by %u for the panel image of the "
+                 "renderer (the panel quads of the mod)", panel_width_, panel_height_);
+        } else {
+          AppLog("xr           : the swapchain of the panel quads of %u by %u cannot "
+                 "be made: %s. The panel quads do not show", panel_width_,
+                 panel_height_, why);
+        }
+      }
+      if (panel_.between != VK_NULL_HANDLE) {
+        if (CopyImage(&panel_, 0, panel_source_, 0, panel_width_, panel_height_)) {
+          panel_shown_ = true;
+        }
+        panel_ok = panel_shown_;
+      }
+    }
+    bool card_ok[bwvr::kCards];
+    for (int c = 0; c < bwvr::kCards; ++c) {
+      const Card& k = cards_[c];
+      card_ok[c] = f.card[c] && !k.failed && k.layer.swapchain != XR_NULL_HANDLE &&
+                   k.picture == f.cards[c].picture &&
+                   memcmp(k.rect, f.cards[c].rect, sizeof(k.rect)) == 0;
+    }
+    ql::LayerRef order[ql::kMostLayers];
+    const int n = ql::Order(f, world, panel_ok, card_ok, order);
+    int panels = 0;
+    bool walls = false;
+    for (int i = 0; i < n && used < kQuads - 2; ++i) {
+      const ql::LayerRef& r = order[i];
+      ql::QuadSpec s;
+      if (!ql::Spec(f, r, eyes_.layer[0].width, eyes_.layer[0].height, &s)) continue;
+      XrSwapchain swapchain = XR_NULL_HANDLE;
+      if (r.kind == ql::kLayerPanel) {
+        swapchain = panel_.layer[0].swapchain;
+        ++panels;
+      } else if (r.kind == ql::kLayerCard) {
+        Card& k = cards_[r.index];
+        CopyLayer(&k.layer);
+        if (k.layer.released == 0) continue;
+        swapchain = k.layer.swapchain;
+        ++k.frames;
+        if (!k.said) {
+          k.said = true;
+          AppLog("xr           : %s goes out as one quad layer over the %s, %.3f by "
+                 "%.3f m", ql::CardName(r.index), window ? "cut scene window" : "projection layer",
+                 s.size[0], s.size[1]);
+        }
+      } else if (r.kind == ql::kLayerWall) {
+        if (wall_.swapchain == XR_NULL_HANDLE && !wall_failed_) {
+          if (!MakeLayer(&wall_, ql::kWallPixels, ql::kWallPixels)) {
+            wall_failed_ = true;
+            if (wall_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(wall_.swapchain);
+            FreeStaging(&gpu_, &wall_.staging);
+            wall_ = Layer();
+            AppLog("xr           : no swapchain for the walls of the cut scene window, so "
+                   "the view has the window with no walls");
+          }
+        }
+        if (wall_failed_) continue;
+        const int alpha = ql::WallAlpha(f.window_body);
+        if (alpha != wall_alpha_) {
+          std::vector<uint8_t> black(static_cast<size_t>(ql::kWallPixels) * ql::kWallPixels * 4, 0);
+          // Black has no color to multiply, so only the alpha changes. It is
+          // the last byte of a pixel in each format of the swapchain.
+          for (size_t p = 3; p < black.size(); p += 4) black[p] = static_cast<uint8_t>(alpha);
+          SetPixels(&wall_, black);
+          ++wall_.revision;
+          wall_alpha_ = alpha;
+        }
+        CopyLayer(&wall_);
+        if (wall_.released == 0) continue;
+        swapchain = wall_.swapchain;
+        walls = true;
+      } else if (r.kind == ql::kLayerEye) {
+        swapchain = eyes_.layer[r.index].swapchain;
+      }
+      XrCompositionLayerQuad& q = quads[used++];
+      q.layerFlags = s.flags;
+      q.space = local_;
+      q.eyeVisibility = static_cast<XrEyeVisibility>(s.eye);
+      q.subImage.swapchain = swapchain;
+      q.subImage.imageRect.offset = {s.rect[0], s.rect[1]};
+      q.subImage.imageRect.extent = {s.rect[2], s.rect[3]};
+      q.subImage.imageArrayIndex = 0;
+      q.pose.position = {s.position[0], s.position[1], s.position[2]};
+      q.pose.orientation = {s.orientation[0], s.orientation[1], s.orientation[2],
+                            s.orientation[3]};
+      q.size = {s.size[0], s.size[1]};
+      layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
+    }
+    if (panels > 0) {
+      ++panel_frames_;
+      if (!said_panel_) {
+        said_panel_ = true;
+        AppLog("xr           : the panel quads of the mod go out as %d quad layer(s) over "
+               "the projection layer, with the panel image of the renderer", panels);
+      }
+    }
+    if (walls) {
+      ++wall_frames_;
+      if (!said_walls_) {
+        said_walls_ = true;
+        AppLog("xr           : the walls of the cut scene window go out as four quad "
+               "layers over the other layers");
+      }
+    }
+    if (window) {
+      ++window_frames_;
+      // One line for each new picture of the window: the frame of the mod.
+      if (said_window_frame_ != shown_frame_) {
+        said_window_frame_ = shown_frame_;
+        AppLog("xr           : the cut scene window shows the picture of frame %llu",
+               static_cast<unsigned long long>(shown_frame_));
+      }
+      if (!said_window_) {
+        said_window_ = true;
+        int32_t x = 0, shown = 0;
+        ql::WindowColumns(f.window_body, eyes_.layer[0].width, 0, &x, &shown);
+        AppLog("xr           : the cut scene window goes out as two quad layers, %.2f "
+               "by %.2f m at %.2f %.2f %.2f m. Each eye shows %d of the %u columns of "
+               "its picture", f.window_body.width, f.window_body.height,
+               f.window_body.position[0], f.window_body.position[1],
+               f.window_body.position[2], shown, eyes_.layer[0].width);
+      }
+    }
+  }
+  if (!world && !window && source) {
     // THE STEREO SCREEN of the renderer, behind the menu: a quad for each
-    // eye, 2.6 m wide, 2.6 m in front of the head.
+    // eye, 2.6 m wide, 2.6 m in front of the head. Only when the picture
+    // went out in no projection layer and in no cut scene window.
     if (projection_on_ && !view_newest_ && !said_no_view_) {
       said_no_view_ = true;
       AppLog("xr           : stream_projection=1, but the mod gave no values of "
@@ -794,7 +964,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     const float height = width * screen_.layer[0].height / screen_.layer[0].width;
     for (int eye = 0; eye < 2; ++eye) {
       CopyScreen(&screen_, eye);
-      XrCompositionLayerQuad& q = quads[count];
+      XrCompositionLayerQuad& q = quads[used++];
       q.space = local_;
       q.eyeVisibility = eye == 0 ? XR_EYE_VISIBILITY_LEFT : XR_EYE_VISIBILITY_RIGHT;
       q.subImage.swapchain = screen_.layer[eye].swapchain;
@@ -803,14 +973,14 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       q.pose.orientation.w = 1.0f;
       q.pose.position = {0.0f, 0.1f, -2.6f};
       q.size = {width, height};
-      layers[count] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
-      ++count;
+      layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
     }
     ++screen_frames_;
   }
+  // THE MENU AND THE CURSOR, over each layer of the mod.
   if (frame_.shouldRender && menu_written_) {
     CopyLayer(&menu_);
-    XrCompositionLayerQuad& q = quads[count];
+    XrCompositionLayerQuad& q = quads[used++];
     q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     q.space = local_;
     q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -820,11 +990,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     q.pose.orientation.w = 1.0f;
     q.pose.position = {menu_center[0], menu_center[1], menu_center[2]};
     q.size = {menu_size[0], menu_size[1]};
-    layers[count] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
-    ++count;
+    layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
     if (show_cursor && cursor_written_) {
       CopyLayer(&cursor_);
-      XrCompositionLayerQuad& c = quads[count];
+      XrCompositionLayerQuad& c = quads[used++];
       c.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
       c.space = local_;
       c.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -835,8 +1004,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       // A little in front of the menu, so the menu does not hide it.
       c.pose.position = {cursor_point[0], cursor_point[1], cursor_point[2] + 0.004f};
       c.size = {cursor_size, cursor_size};
-      layers[count] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&c);
-      ++count;
+      layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&c);
     }
   }
   XrFrameEndInfo end = {XR_TYPE_FRAME_END_INFO};
@@ -845,6 +1013,101 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   end.layerCount = count;
   end.layers = layers;
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
+}
+
+void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
+                            const quad_layer_math::AppPictures& pictures, VkImage panel,
+                            uint32_t panel_width, uint32_t panel_height) {
+  newest_layers_ = layers;
+  for (int c = 0; c < bwvr::kCards; ++c) {
+    if (layers.card[c]) TakeCard(c, layers.cards[c], pictures);
+  }
+  panel_source_ = layers.panel ? panel : VK_NULL_HANDLE;
+  panel_width_ = panel_width;
+  panel_height_ = panel_height;
+  // A new picture has a new panel image.
+  if (panel_source_ != VK_NULL_HANDLE) ++panel_.layer[0].revision;
+}
+
+// The swapchain of a card has the size of its texture, as XrScreen::SendCard
+// makes it. Its staging buffer holds the newest picture at its rect, and a
+// frame copies it into a new image only after a change.
+bool XrApp::TakeCard(int index, const scene_stream::CardBody& body,
+                     const quad_layer_math::AppPictures& pictures) {
+  namespace ql = quad_layer_math;
+  Card& k = cards_[index];
+  if (k.failed || !ql::CardShows(body) || !pictures.Has(index, body.picture)) return false;
+  const int32_t x = body.rect[0], y = body.rect[1], w = body.rect[2], h = body.rect[3];
+  if (pictures.Width(index) != static_cast<uint32_t>(w) ||
+      pictures.Height(index) != static_cast<uint32_t>(h)) {
+    return false;
+  }
+  // A picture of a new size needs a new swapchain.
+  if (k.layer.swapchain != XR_NULL_HANDLE &&
+      (k.layer.width != body.texture_width || k.layer.height != body.texture_height)) {
+    vkDeviceWaitIdle(gpu_.device);
+    FreeStaging(&gpu_, &k.layer.staging);
+    xrDestroySwapchain(k.layer.swapchain);
+    k.layer = Layer();
+    k.picture = 0;
+  }
+  if (k.layer.swapchain == XR_NULL_HANDLE) {
+    if (!MakeLayer(&k.layer, body.texture_width, body.texture_height)) {
+      if (k.layer.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(k.layer.swapchain);
+      FreeStaging(&gpu_, &k.layer.staging);
+      k.layer = Layer();
+      k.failed = true;
+      AppLog("xr           : no swapchain for %s, so it does not show",
+             ql::CardName(index));
+      return false;
+    }
+    AppLog("xr           : %s has its own swapchain, %u by %u", ql::CardName(index),
+           body.texture_width, body.texture_height);
+  }
+  if (k.picture == body.picture && memcmp(k.rect, body.rect, sizeof(k.rect)) == 0) return true;
+  // The GPU may still copy the buffer of the frame before.
+  vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
+  uint8_t* out = static_cast<uint8_t*>(k.layer.staging.mapped);
+  if (out == nullptr) return false;
+  const std::vector<uint8_t>& in = pictures.Pixels(index);
+  const size_t row = static_cast<size_t>(w) * 4;
+  for (int32_t r = 0; r < h; ++r) {
+    const uint8_t* from = in.data() + static_cast<size_t>(r) * row;
+    uint8_t* to = out + (static_cast<size_t>(y + r) * k.layer.width + static_cast<size_t>(x)) * 4;
+    // The card is BGRA. A swapchain with red first needs the two swapped.
+    if (k.layer.swap_red_blue) {
+      memcpy(to, from, row);
+    } else {
+      for (size_t i = 0; i < row; i += 4) {
+        to[i] = from[i + 2];
+        to[i + 1] = from[i + 1];
+        to[i + 2] = from[i];
+        to[i + 3] = from[i + 3];
+      }
+    }
+  }
+  k.picture = body.picture;
+  memcpy(k.rect, body.rect, sizeof(k.rect));
+  ++k.layer.revision;
+  // The first new pictures of each card, with the hash of the stream, so a
+  // test can find each picture. A fade gives a new picture in each frame.
+  if (k.layer.revision <= 21) {
+    AppLog("xr           : %s gets a new picture %016llx, %d by %d",
+           ql::CardName(index), static_cast<unsigned long long>(body.picture), w, h);
+  }
+  return true;
+}
+
+void XrApp::FreeLayers() {
+  for (Card& k : cards_) {
+    FreeStaging(&gpu_, &k.layer.staging);
+    if (k.layer.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(k.layer.swapchain);
+    k.layer = Layer();
+  }
+  FreeScreenSet(&panel_);
+  FreeStaging(&gpu_, &wall_.staging);
+  if (wall_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(wall_.swapchain);
+  wall_ = Layer();
 }
 
 void XrApp::RendererDevice(vk::External* out) {
@@ -896,15 +1159,15 @@ bool XrApp::MakeEyes(uint32_t width, uint32_t height) {
 // A set that cannot be made frees each part that it made, and the app does
 // not try it again (Screen::failed).
 bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
-                          const char** why) {
+                          const char** why, int count) {
   auto fail = [&](const char* reason) {
     FreeScreenSet(screen);
     screen->failed = true;
     *why = reason;
     return false;
   };
-  for (Layer& l : screen->layer) {
-    if (!MakeLayer(&l, width, height, false)) {
+  for (int i = 0; i < count && i < 2; ++i) {
+    if (!MakeLayer(&screen->layer[i], width, height, false)) {
       return fail("the runtime gave no swapchain (xrCreateSwapchain)");
     }
   }
@@ -973,6 +1236,7 @@ void XrApp::FreeScreenSet(Screen* screen) {
 void XrApp::SetScreenView(bool has, const scene_stream::ViewBody& view) {
   view_newest_ = has;
   if (has) newest_view_ = view;
+  newest_frame_ = view.frame;
 }
 
 void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
@@ -992,32 +1256,39 @@ void XrApp::MarkScreenChanged() {
 // One eye of the picture of the renderer into the next image of its
 // swapchain.
 bool XrApp::CopyScreen(Screen* screen, int eye) {
-  Layer* layer = &screen->layer[eye];
+  return CopyImage(screen, eye, screen_source_, static_cast<uint32_t>(eye),
+                   source_width_, source_height_);
+}
+
+bool XrApp::CopyImage(Screen* screen, int index, VkImage source,
+                      uint32_t source_layer, uint32_t source_width,
+                      uint32_t source_height) {
+  Layer* layer = &screen->layer[index];
   if (!LayerChanged(layer)) return false;
   VkImage between = screen->between;
-  uint32_t index = 0;
+  uint32_t image = 0;
   XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-  if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &index),
+  if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &image),
           "xrAcquireSwapchainImage")) {
     return false;
   }
   XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
   xrWaitSwapchainImage(layer->swapchain, &wait);
-  const VkImage target = layer->images[index].image;
+  const VkImage target = layer->images[image].image;
   LockQueue();
   VkCommandBuffer cmd = GpuBegin(&gpu_);
   VkImageMemoryBarrier b[2] = {{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER},
                                {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}};
-  // The layer of the eye of the renderer: from a color attachment to a
+  // The layer of the image of the renderer: from a color attachment to a
   // source, and the image between to a target.
   b[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   b[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
   b[0].oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   b[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   b[0].srcQueueFamilyIndex = b[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  b[0].image = screen_source_;
-  b[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, static_cast<uint32_t>(eye), 1};
+  b[0].image = source;
+  b[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, source_layer, 1};
   b[1].srcAccessMask = 0;
   b[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   b[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1029,15 +1300,15 @@ bool XrApp::CopyScreen(Screen* screen, int eye) {
                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, b);
   VkImageBlit blit = {};
-  blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, static_cast<uint32_t>(eye), 1};
-  blit.srcOffsets[1] = {static_cast<int32_t>(source_width_),
-                        static_cast<int32_t>(source_height_), 1};
+  blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, source_layer, 1};
+  blit.srcOffsets[1] = {static_cast<int32_t>(source_width),
+                        static_cast<int32_t>(source_height), 1};
   blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
   blit.dstOffsets[1] = {static_cast<int32_t>(layer->width),
                         static_cast<int32_t>(layer->height), 1};
   // A blit of the same size takes each pixel as it is.
-  const bool same = source_width_ == layer->width && source_height_ == layer->height;
-  vkCmdBlitImage(cmd, screen_source_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, between,
+  const bool same = source_width == layer->width && source_height == layer->height;
+  vkCmdBlitImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, between,
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                  same ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
   // Back to a color attachment for the renderer. The image between to a
@@ -1073,7 +1344,7 @@ bool XrApp::CopyScreen(Screen* screen, int eye) {
   xrReleaseSwapchainImage(layer->swapchain, &release);
   layer->released = layer->revision;
   ++copies_;
-  ++screen->copies[eye];
+  ++screen->copies[index];
   return true;
 }
 
@@ -1276,16 +1547,41 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(screen_.copies[0]),
            static_cast<unsigned long long>(screen_.copies[1]));
   }
-  if (projection_frames_ + screen_frames_ > 0) {
+  if (projection_frames_ + screen_frames_ + window_frames_ > 0) {
     AppLog("xr           : %llu copies of the projection layer for eye 0 and %llu "
            "for eye 1. %llu frames with the projection layer, %llu frames with "
-           "the stereo screen (stream_projection=%d)",
+           "the stereo screen, %llu frames with the cut scene window "
+           "(stream_projection=%d)",
            static_cast<unsigned long long>(eyes_.copies[0]),
            static_cast<unsigned long long>(eyes_.copies[1]),
            static_cast<unsigned long long>(projection_frames_),
-           static_cast<unsigned long long>(screen_frames_), projection_on_ ? 1 : 0);
+           static_cast<unsigned long long>(screen_frames_),
+           static_cast<unsigned long long>(window_frames_), projection_on_ ? 1 : 0);
+  }
+  {
+    if (cards_[0].frames + cards_[1].frames + cards_[2].frames + cards_[3].frames +
+            panel_frames_ + wall_frames_ + window_frames_ > 0) {
+      AppLog("xr           : the quad layers of the mod (stream_layers=%d): %llu frames "
+             "with %s, %llu with %s, %llu with %s, %llu with %s, %llu with the panel "
+             "quads, %llu with the walls and %llu with the cut scene window as a screen",
+             layers_on_ ? 1 : 0, static_cast<unsigned long long>(cards_[0].frames),
+             quad_layer_math::CardName(0), static_cast<unsigned long long>(cards_[1].frames),
+             quad_layer_math::CardName(1), static_cast<unsigned long long>(cards_[2].frames),
+             quad_layer_math::CardName(2), static_cast<unsigned long long>(cards_[3].frames),
+             quad_layer_math::CardName(3), static_cast<unsigned long long>(panel_frames_),
+             static_cast<unsigned long long>(wall_frames_),
+             static_cast<unsigned long long>(window_frames_));
+      AppLog("xr           : the cards got new pixels %llu, %llu, %llu and %llu times, "
+             "and the panel %llu copies",
+             static_cast<unsigned long long>(cards_[0].layer.revision - 1),
+             static_cast<unsigned long long>(cards_[1].layer.revision - 1),
+             static_cast<unsigned long long>(cards_[2].layer.revision - 1),
+             static_cast<unsigned long long>(cards_[3].layer.revision - 1),
+             static_cast<unsigned long long>(panel_.copies[0]));
+    }
   }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
+  FreeLayers();
   FreeStaging(&gpu_, &menu_.staging);
   FreeStaging(&gpu_, &cursor_.staging);
   FreeScreenSet(&screen_);

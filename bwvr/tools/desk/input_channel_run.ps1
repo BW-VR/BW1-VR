@@ -35,17 +35,30 @@
 # views have a projection layer, and the channel run gets the same angles
 # from the record of the input.
 #
+# Both kinds also record the quad layers of each frame of the record
+# (xr_layer_record, docs/android.md, "The quad layers"): the cards, the
+# panel quads and the cut scene window that the mod gives its session, or
+# with xr_input=1 the layers of the live stream. With -More @{
+# fake_head_layers = 1 } in the fake run, the invented head routes the
+# interface as a session does, as a channel run with xr_input_layers=1. A
+# channel run compares its record of the layers with the record of -From
+# (bwvr_stream_reader layer-compare). Give the same -More to both runs, for
+# example ui_panel = 1 for the panel quads.
+#
 # -Live: the run also has the live stream of the walks (vk_stream_live=1, a
 #   record of the frames -LiveRecord to -LiveRecord + 3), and
 #   bwvr_stream_reader (bwvr\build\test\stream_reader) takes the frames
 #   -LiveAttach to -LiveRecord + 3 from the ring, as live_stream_run.ps1
 #   does. A channel run then checks that each record kView of the ring and of
 #   the record of the stream is the view of the same frame in the record of
-#   the views. Its ring-capture.bin is a feed for emu_xr_test.ps1 -Live, with
+#   the views, and that the layer records of each frame of the ring and of
+#   the record of the stream are the same bytes as in the record of the
+#   layers. Its ring-capture.bin is a feed for emu_xr_test.ps1 -Live, with
 #   the back channel.
 #
 # The output is in desk-<Name>: bwvr-input.rec, bwvr-input.chan,
-# bwvr-view.rec, writer.txt, with -Live reader.txt, ring-capture.bin and
+# bwvr-view.rec, bwvr-layer.rec, with -Live the pictures of the cards of the
+# capture (card-*.bmp), writer.txt, with -Live reader.txt, ring-capture.bin and
 # bwvr-stream.bin, and the pictures. The pictures, the stream and the
 # capture hold pixels of the game and stay in the folder of the run.
 param(
@@ -75,6 +88,7 @@ $game = Get-BwvrGame
 $chan = Join-Path $game 'bwvr-input.chan'
 $rec = Join-Path $game 'bwvr-input.rec'
 $views = Join-Path $game 'bwvr-view.rec'
+$layerRec = Join-Path $game 'bwvr-layer.rec'
 $ring = Join-Path $game 'bwvr-stream.ring'
 $out = Join-Path $sp ("desk-" + $Name)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
@@ -86,7 +100,7 @@ if ($Kind -eq 'channel') {
     if (-not (Test-Path -LiteralPath $fromRec)) { "NOT RUN: no record at $fromRec"; exit 9 }
 }
 # A channel or a record of an earlier run must not be read.
-foreach ($f in @($chan, $rec, $views)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+foreach ($f in @($chan, $rec, $views, $layerRec)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
 # With -Live the run writes bwvr-stream.bin and bwvr-stream.ring. A file of
 # that name that is in the game folder before the run is not of this run: it
 # waits in the folder of the run and goes back after the run.
@@ -106,7 +120,7 @@ $keys = @{
     backend = 'vulkan'; one_walk = 1; fake_controller = 2
     fake_controller_script = $Script; fake_controller_points = $Points
     vk_scene_test_frame = $TestFrame; xr_input_record = $Record
-    xr_view_record = $Record; eye_separation_milli = 500 }
+    xr_view_record = $Record; xr_layer_record = $Record; eye_separation_milli = 500 }
 $q = $null
 if ($Live) {
     $keys['vk_stream_live'] = 1
@@ -159,7 +173,7 @@ if ($q) {
     "the test reader ended with the code $($q.ExitCode)"
     Get-Content -LiteralPath (Join-Path $out 'reader.txt')
 }
-$made = @($chan, $rec, $views)
+$made = @($chan, $rec, $views, $layerRec)
 if ($Live) { $made += $streamFiles }
 foreach ($f in $made) {
     if (Test-Path -LiteralPath $f) {
@@ -202,6 +216,27 @@ if ($Live) {
         "== the records kView of $s against the views of this run"
         & $reader views (Join-Path $out $s) (Join-Path $out 'bwvr-view.rec') |
             Where-Object { $_ -notmatch ': the same bytes as in the record$' }
+        if ($LASTEXITCODE -ne 0) { $fails++ }
+    }
+}
+# THE QUAD LAYERS: the layers of each frame, from the record of the layers of
+# this run and from the fake run of the same input. A record with no frame
+# (a run with no layers) has only its head of 8 bytes, or no byte.
+$layersHere = Join-Path $out 'bwvr-layer.rec'
+$layersFrom = Join-Path $From 'bwvr-layer.rec'
+$haveLayers = (Test-Path -LiteralPath $layersHere) -and (Get-Item -LiteralPath $layersHere).Length -gt 8
+if ($haveLayers -and (Test-Path -LiteralPath $layersFrom) -and (Get-Item -LiteralPath $layersFrom).Length -gt 8) {
+    "== the layers of this run against the layers of $From"
+    & $reader layer-compare $layersFrom $layersHere
+    if ($LASTEXITCODE -ne 0) { $fails++ }
+}
+if ($Live -and $haveLayers) {
+    foreach ($s in @('ring-capture.bin', 'bwvr-stream.bin')) {
+        "== the layer records of $s against the layers of this run"
+        # The pictures of the cards of the capture go to the folder of the run.
+        $folder = @($(if ($s -eq 'ring-capture.bin') { $out }))
+        & $reader layers (Join-Path $out $s) $layersHere @folder |
+            Where-Object { $_ -notmatch ': the same bytes as in the record$' -and $_ -notmatch '^layers       : frame \d+ (quads|cards)' }
         if ($LASTEXITCODE -ne 0) { $fails++ }
     }
 }
@@ -271,5 +306,5 @@ foreach ($ref in $pictures) {
     "   {0}: {1:N3} percent of the pixels differ by more than 24, {2:N3} percent differ at all, the mean difference {3:N3}{4}" -f $ref.Name, $d[0], $d[1], $d[2], $(if ($over) { " (more than $MaxPercent percent: FAULT)" } else { '' })
 }
 if ($pictures.Count -eq 0) { $fails++ }
-if ($fails -eq 0) { "INPUT CHANNEL VERIFIED: the record, the pulses, the views$(if ($Live) { ', the views in the stream' }) and the pictures (each picture at most $MaxPercent percent of its pixels by more than 24)" }
+if ($fails -eq 0) { "INPUT CHANNEL VERIFIED: the record, the pulses, the views$(if ($haveLayers) { ', the layers' })$(if ($Live) { ', the views in the stream' })$(if ($Live -and $haveLayers) { ', the layers in the stream' }) and the pictures (each picture at most $MaxPercent percent of its pixels by more than 24)" }
 else { "INPUT CHANNEL FAULT: $fails of the checks above" }

@@ -47,6 +47,11 @@ Summary:
   `kView`). The app shows the eye pictures of its renderer in a projection
   layer with these values (`stream_projection=1`), as the mod does on the PC
   (see "The projection layer").
+- The mod also gives the app the quad layers of its session for each frame:
+  the hint cards, the subtitle card, the ring, the panel quads and the cut
+  scene window (records `kCard`, `kCardPicture`, `kPanel` and `kWindow`). The
+  app shows them over the projection layer in the order of the session of
+  the mod (`stream_layers=1`, see "The quad layers").
 - **Only Vulkan.** The app draws with Vulkan alone: the menu, the stereo
   screen and the renderer of the mod. It has no fallback to Direct3D,
   DirectDraw or another graphics interface (see "Only Vulkan").
@@ -80,6 +85,8 @@ Summary:
 | `src/mod/xr_input.cpp` | The reader of the input channel in the mod (`xr_input`), and the record of the input of a run (`xr_input_record`) |
 | `src/mod/xr_input_math.h` | The values of the input channel as the values of `XrScreen`, the recenter, the lockstep of a test. No Windows code |
 | `src/mod/view_layer_math.h` | The projection layer of a frame for the app (the record `kView`): the values that the mod gives its session, the view of a picture in the player of the app, the record of a test. No Windows code |
+| `src/mod/quad_layer_math.h` | The quad layers of a frame for the app (the records `kCard`, `kCardPicture`, `kPanel`, `kWindow`): the values of the calls of the session, the hash and the change of a picture of a card, the order and the quads of `XrScreen::BuildFrame`, the layers of a picture in the player of the app. No Windows code |
+| `src/mod/xr_layers.cpp` | The quad layers of a frame with no session in the mod (`xr_input_layers`), and the record of the layers of a run (`xr_layer_record`) |
 | `android/src/input_live.cpp` | The writer of the input channel in the app (`input_live`), and the play of the pulses of the mod |
 | `test/input_writer/main.cpp` | The test writer of the input channel on the PC (`bwvr_input_writer.exe`) |
 | `tools/desk/input_channel_run.ps1` | A desktop run with the input channel and the test writer of the PC |
@@ -367,17 +374,50 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    When the feed has records `kView` for a projection layer (a desk run of
    `input_channel_run.ps1 -Kind channel -Live`, see "The projection
    layer"), the app shows the pictures in a projection layer, and the test
-   checks it in place of the stereo screen (66 checks, 67 with `-FeedMs
-   0`): the two swapchains, no quad of the stereo screen, that the pose and
+   checks it in place of the stereo screen (with the quad layers of the
+   desk runs of "The quad layers": 73 checks for the hint card, 68 with
+   `-NoLayers`, 68 for a fade of the card with `-QuadFrames`, 64 for a feed
+   of the cut scene window alone): the two swapchains, no quad of the stereo screen, that the pose and
    the angles of view of each eye of each projection layer that the runtime
    reports are the values of a record `kView` of the feed, that the layers
    have the values of the `kView` of the frame of each picture in the order
    of the pictures (the app logs the frame of each new picture), that the
-   layers have two poses or more, that the rect of each eye is its whole
+   layers have two poses or more (not in a feed with frames of the cut
+   scene window), that the rect of each eye is its whole
    picture, the pictures of both eyes that the runtime read back, a copy for
    each new picture, and a projection layer in each frame with a picture.
    The feed needs another pose in its last frames than in its first frames,
    because the app plays the first frame and the newest frame.
+   When the feed has the quad layers of the mod (`bwvr_stream_reader
+   layers`, see "The quad layers"), the test also checks that each line of
+   the quads of the runtime, with no menu and no cursor, is the quads of the
+   layers of the frame of a picture of the app (the pose, the size, the rect,
+   the eye and the flags, in the order of the session of the mod), that they
+   come in the order of the pictures, that the log names each card of the
+   feed as a quad layer, and that the rect of each card in the pictures that
+   the runtime read back has the bytes of the picture of that card in the
+   feed. The menu quad is the quad of 1600 by 1200 pixels over the layers of
+   the mod. A feed with frames of the cut scene window: the test also checks
+   that the log names the window and each picture in it, that each picture
+   in the window is a frame of the window in the feed, and the four walls.
+   When the newest frame of the feed is a frame of the window, the runtime
+   reads back no eye of a projection layer. `-WindowFrom N -WindowTo M` makes
+   a test feed from the capture (`bwvr_stream_reader window-feed`): the
+   frames N to M become frames of the window as a screen, with values of the
+   test (2.6 m wide, 2 m in front, a crop of 120 and an edge of 2 columns),
+   and the test checks the two quads of the eyes with those columns.
+   `-NoLayers` gives the app `stream_layers=0`, and the test checks that
+   each line of the quads of the runtime has the menu and the cursor alone:
+   no quad of the mod, and no quad of the stereo screen over the projection
+   layer. `-NoProjection` gives the app `stream_projection=0`, and the test
+   checks that the app had no frame with the projection layer and no frame
+   with the cut scene window, the stereo screen in each frame with a
+   picture, and that each line of the quads of the runtime has the stereo
+   screen, the menu and the cursor, and no quad of the mod. `-QuadFrames` (a
+   feed over a fade of a card) reads back the quads of the mod in each of the
+   first 60 frames of the runtime (the word `quads`) and checks that they
+   have two different pictures of a card or more, each with the bytes of a
+   new picture that the app logs.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -434,7 +474,13 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    the app shows a projection layer, `kView` in a frame of the ring and in
    the records of state, and the order in the player: the view goes with the
    picture at the walk that ends it, and a frame with no walks gives its
-   view to no picture).
+   view to no picture), and the quad layers (`quad_layer_checks.h`: the
+   layout of the records, the hash of a picture, a picture only when the
+   reader does not have it, the order of the records of a frame, the values
+   of the calls, the layers of a picture in the player, the state of a frame
+   with no walks, the rules of `SendCard`, of a panel quad, of the walls and
+   of the columns of the cut scene window, and the order of the layers of
+   `BuildFrame`).
 7. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
@@ -599,7 +645,9 @@ into the ring, so the reader can have the frame in the game frame of its walks. 
 frame ends at the first walk that has both eyes: the one walk of
 `one_walk=1`, the walk of the right eye, or a walk with no eye pass
 (`WalkEndsFrame`, `stream_split.h`), the walk that `vk_scene.cpp` takes for
-the picture of a test. A record after that walk and before the next frame,
+the picture of a test. With the quad layers (`xr_input=1`,
+`xr_input_layers=1`) the layers at the end of the frame end it (see "The
+quad layers"). A record after that walk and before the next frame,
 also a later walk of the same frame, goes at the start of the next frame
 (the tail), in its order. The walks of "pen" have no record after that
 walk.
@@ -968,14 +1016,171 @@ the run with the game in Wine.
 
 **Known limits:**
 
-- The cards, the panel quads of the interface and the window of the cut
-  scenes are not layers of the app yet. A frame of the cut scene window
-  shows on the stereo screen.
 - The intro (`intro_vr.cpp`) gives no frame of the live stream, so its
   pictures and its poses do not go to the app.
 - After a recenter of the LOCAL space the frames that the mod drew before
   the recenter go out with the poses of the space before, until the frame of
   the new input comes.
+
+## The quad layers
+
+Over its projection layer a session of the mod on the PC has quad layers
+(`XrScreen`, `src/vr/xr_screen.h`, `BuildFrame`):
+
+- **The cards** (`StageCard`): the hint card of the hand that points, the
+  hint card of the other hand, the subtitle card and the ring. Each card is a
+  quad in the LOCAL space with a picture of its own that the mod draws on the
+  CPU (`hint_card.cpp`, `ui_panel.cpp`, `radial_menu.cpp`): a texture of BGRA
+  with the color multiplied by the alpha, and the rect of it that shows.
+- **The panel quads** (`SetPanelQuads`, `StagePanelQuad`, `ui_panel=1`): the
+  menu, the help and the Creature panel, rects of the panel image of the
+  renderer (`vk_panel=1`).
+- **The cut scene window** (`StageWindow`, `cutscene_window.cpp`): a frame of
+  the window as a screen (the eye pictures on a quad of each eye at the pose
+  of the window, with the crop and the edge columns, and the subtitle card),
+  or the four black walls around the opening while the window opens and
+  closes.
+
+In the headset the app has the session, so the mod gives the app the same
+layers for each frame, and the app shows them.
+
+**The mod** (`xr_input_layers=1`, the default, with `xr_input=1`,
+`src/mod/xr_layers.cpp`). The interface of each frame goes as in a session
+with the projection layer of the frame: the hint cards and the subtitle card
+take the routes of a headset (`UiPanelBeginFrame`), the panel quads come
+after the one walk with the panel image of the renderer, and the cut scene
+window stages its layer. At the place where the session takes the layers
+(the end of the frame of `stereo.cpp`, and the place of `SetPanelQuads`), the
+mod takes what was staged (`XrScreen::TakeStaged`, `TakeStagedPanelQuad`)
+and writes it into the frame of the live stream: one record `kPanel`, one
+`kCard` for each staged card and one `kWindow`, the values of the calls
+(`src/mod/quad_layer_math.h`, `MakeCard`, `MakePanel`, `MakeWindow`). A
+`kCard` has the hash of the pixels of its rect (`PictureHash`). The pixels go
+in a record `kCardPicture` only when the picture is new for the reader
+(`CardPictures`, `SentPictures`): after a change, and in a frame with the
+whole state (`kStart`). The picture of the panel quads is the panel image of
+the renderer, which the app draws itself, so it does not go. The first walk
+with both eyes does not end the frame of the stream then: the layers end it
+(`VkStreamLayers`), so they are in the frame of their eye pictures, after the
+walk and before `kFrameEnd`. A `kCardPicture` is state as the pixels of a
+surface: a frame that the writer or the app strips keeps it, and the writer
+does not drop a frame with one (`KeepKind`). `xr_input_layers=0`: the
+interface goes as with no headset, the stream has no layers, and a frame ends
+at its walk. With `xr_input=0` nothing changes. `xr_input_layers` has no
+test key (see below).
+
+The records (`scene_stream.h`) have one layout on 32 bit x86 and on 64 bit
+ARM (`static_assert` of each size and offset): `kCard` 80 bytes,
+`kCardPicture` 24 bytes and the pixels, `kPanel` 176 bytes, `kWindow` 136
+bytes. The stream has version 2: a stream with no layer records plays with
+no quad layer of the mod.
+
+**The app** (`stream_layers=1`, the default). The player takes the layer
+records of a frame, and they go with the picture of the frame at its
+`kFrameEnd`, when a walk of the frame ended the picture (`PictureLayers`). A
+frame that lost its walks gives its layers to no picture, but its
+`kCardPicture` still gives the newest picture of the card (`AppPictures`).
+The app shows the layers as `BuildFrame` makes them (`Order`, `Spec`):
+
+- a frame of the world: the projection layer, the panel quads, the subtitle
+  card, the hint card of the hand that points, the hint card of the other
+  hand, the ring, then the four walls.
+- a frame of the cut scene window as a screen (`kViewFlat` and a `kWindow`
+  with a screen): a quad of each eye of the swapchains of the projection
+  layer, at the pose of the window with the columns of the crop and the
+  edge, then the subtitle card. No panel and no other card.
+
+The menu and the cursor of the app stay over each layer of the mod. Each
+quad has the pose, the size and the rect that the mod gave for that frame,
+and the app adds no motion. A card has a swapchain of the size of its
+texture, as on the PC. Its pixels go into its staging buffer only when its
+picture, its rect or the size of its texture changed, and a frame copies
+them into a new image of the swapchain only then (`xr_copy_on_change`). The
+panel image of the renderer (`VkScenePanelFor`) goes into a swapchain of its
+size with each new picture. The walls are a swapchain of 16 by 16 pixels,
+black with the alpha of the frame. The rules of `SendCard`, of the rect of a
+panel quad and of the walls are the rules of the PC (`CardShows`,
+`PanelQuadRect`, `WallsShow`). `stream_layers=0`: no quad layer of the mod,
+the pictures of the world show in the projection layer alone, and a frame
+of the cut scene window shows on the stereo screen. `stream_projection=0`:
+each picture shows on the stereo screen, a frame of the cut scene window
+too, and no quad layer of the mod goes out, with each value of
+`stream_layers`. The stereo screen shows only a picture that went out in no
+projection layer and in no cut scene window. `xr_input_layers` and
+`stream_layers` have no test key: the mod with `xr_input=1` has no session
+(the test key of the cards, Ctrl Shift F11, still moves them into the eye
+pictures and back), and the app reads its keys at its start and has no
+hotkeys.
+
+**The test aids.** `xr_layer_record=N` (the mod): the layers of the first N
+frames of the scene go to `bwvr-layer.rec` beside `runblack.exe`, a stream
+with one frame for each frame of the scene, from the source of the run (the
+session, the invented head or the input channel). `fake_head_layers=1`: the
+invented head routes the interface as a session does (`backend.md`,
+"Testing without a headset"). `bwvr_stream_reader layers <stream> [<record>]
+[<folder>]` writes the layers of each frame of a stream with the quads as
+the test runtime reports them, checks the hash of each picture, compares the
+layer records of each frame with a record, and writes the pictures of the
+cards as BMP files. `bwvr_stream_reader layer-compare` compares two records
+of the layers frame by frame. The test runtime of the app reports each quad
+in full (`frame N quads`: the pose, the size, the rect, the eye and the
+flags), and the word `point <hand> menu` points at the menu quad of the app
+over the layers of the mod.
+
+**The tests.**
+
+- `.\dev.ps1 build`: the math checks of `quad_layer_checks.h` ("Test the
+  APK", step 6).
+- A pair of desk runs (`input_channel_run.ps1`): a fake run with `-More @{
+  fake_head_fov = 1; fake_head_layers = 1 }` and a channel run with the same
+  keys and `-Kind channel -From <the fake run> -Live`. `-LiveAttach` and
+  `-LiveRecord` choose the frames of the capture. The channel run checks that
+  the layer records of each frame of the ring and of the record of the
+  stream are the bytes of the record of the layers of the channel run, that
+  each picture of a card has the hash of its `kCard` and that each card has
+  its picture, and it compares the layers of the two runs
+  (`layer-compare`): a frame differs only in the pictures or in the cards
+  that show only when a picture of a card or the set of the cards changes in
+  one run at that frame or at the frame after it (a fade by the clock of the
+  PC). Each other frame that differs is a fault. `ui_panel = 1` in both runs
+  gives the panel quads. `cutscene_window = 1`, `cutscene_immersive = 0` and
+  the test key `cutscene_window_test_bars` give the cut scene window in the
+  test save "pen". The window opens and closes by the clock of the PC
+  (`cutscene_window_ms`), so `cutscene_window_ms = 0` gives both runs the
+  same frames of the window.
+- `emu_xr_test.ps1 -Live <the channel run> -Gpu host` (step 3 of "Test the
+  APK"): the quads of the runtime against the layers of the frames of the
+  pictures of the app, the pictures of the cards that the runtime read back
+  against the new pictures that the app logs (each one a picture of the
+  feed), the panel quads, the walls and the window. `-NoLayers` runs the app
+  with `stream_layers=0` and checks that the runtime has no quad but the
+  menu and the cursor. `-NoProjection` runs it with `stream_projection=0`:
+  the stereo screen in each frame with a picture, and no quad of the mod. `-WindowFrom` and `-WindowTo` make a test feed of
+  the cut scene window.
+
+The commit messages have the numbers of the runs.
+
+**Not shown yet:** a real headset (the cards, the panel quads and the window
+over the reprojection of the runtime of Meta), the subtitle card and the
+ring through the live stream (in the test save "pen" no frame has help
+text, and the ring does not open while a dialog box is up), and the run with
+the game in Wine.
+
+**Known limits:**
+
+- The app gives no fault of a card back to the mod. On the PC a card that
+  the runtime refuses goes back into the eye pictures (`CardFailed`). With
+  `xr_input=1` the mod takes each card as sent, and a card that the app
+  cannot show (no swapchain) does not show at all.
+- The fades of the cards and the opening and the closing of the cut scene
+  window go by the clock of the PC, so two runs with the same input differ in
+  those frames.
+- A card picture goes whole when it changes: the subtitle card of a large
+  render can be some MB in a frame of its fade.
+- Two desk runs with the same input give eye pictures of a frame of the cut
+  scene window that differ in about 22 percent of the pixels, up to 0.4
+  percent by more than 24, while the views and the layers of the frame are
+  the same bytes. The cause is not known.
 
 ## Only Vulkan
 

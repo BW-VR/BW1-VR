@@ -65,6 +65,7 @@ add_library(bwvr_mod SHARED
     fight_marks.cpp
     controllers.cpp
     xr_input.cpp
+    xr_layers.cpp
     controller_hints.cpp
     hint_card.cpp
     text_click.cpp

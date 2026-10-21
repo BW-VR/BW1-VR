@@ -13,6 +13,7 @@
 
 #include "../common/bw_addresses.h"
 #include "one_walk.h"
+#include "quad_layer_math.h"
 #include "stream_ring.h"
 #include "stream_split.h"
 #include "ui_panel.h"
@@ -51,7 +52,13 @@ uint64_t g_surface_bytes = 0;
 ss::StartBody g_options = {};
 ss::Writer g_writer;
 bool g_end_at_walk = true;  // vk_stream_live_end=1
-bool g_unit_ended = false;  // the frame went at the end of its walk with both eyes
+// The layers of the frame end it (VkStreamSetLayers): the walk with both
+// eyes does not.
+bool g_end_at_layers = false;
+// The pictures of the cards that the reader and the record have. A frame
+// with the whole state starts with none.
+quad_layer_math::SentPictures g_sent_pictures;
+bool g_unit_ended = false;  // the frame went at its walk with both eyes, or at its layers
 bool g_unit_open = false;
 bool g_unit_record = false;
 bool g_unit_live = false;
@@ -484,6 +491,7 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
     // a frame that the reader or the record does not have.
     g_known.clear();
     g_with_pixels.clear();
+    g_sent_pictures.Reset();
     g_writer.Record(ss::kStart, &g_options, sizeof(g_options));
     g_unit_keep = true;
   } else if (!tail.empty()) {
@@ -545,8 +553,10 @@ void VkStreamWalkEnd() {
   const ss::StreamState state = State();
   g_writer.Record(ss::kWalkEnd, &state, sizeof(state));
   // The first walk with both eyes ends the frame, so the reader has it in the
-  // game frame of its walks.
-  if (g_end_at_walk && g_unit_open && !g_unit_ended && stream_split::WalkEndsFrame(state)) {
+  // game frame of its walks. With the layers (VkStreamSetLayers) the layers
+  // end it.
+  if (g_end_at_walk && !g_end_at_layers && g_unit_open && !g_unit_ended &&
+      stream_split::WalkEndsFrame(state)) {
     g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
     Deliver();
     g_unit_ended = true;
@@ -618,6 +628,29 @@ void VkStreamPanelBind(bool panel) {
 void VkStreamView(const ss::ViewBody& view) {
   if (!g_unit_open) return;
   g_writer.Record(ss::kView, &view, sizeof(view));
+}
+
+void VkStreamSetLayers(bool on) { g_end_at_layers = on; }
+
+bool VkStreamLayers(const quad_layer_math::FrameLayers& layers,
+                    const quad_layer_math::CardPictures& pictures) {
+  if (!g_vk_stream_on || !g_unit_open || g_unit_ended) return false;
+  // A picture of a card is state that a later frame needs, as the pixels of
+  // a surface: the frame keeps it when the writer drops the walks.
+  for (int c = 0; c < bwvr::kCards; ++c) {
+    if (layers.card[c] && g_sent_pictures.Needs(c, layers.cards[c].picture)) {
+      g_unit_keep = true;
+    }
+  }
+  quad_layer_math::WriteFrame(layers, pictures, &g_sent_pictures, &g_writer);
+  if (g_end_at_walk) {
+    g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
+    Deliver();
+    g_unit_ended = true;
+    g_unit_keep = false;
+    g_writer.Clear();
+  }
+  return true;
 }
 
 void VkStreamWritten(void* surface) {

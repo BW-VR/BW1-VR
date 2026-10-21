@@ -49,6 +49,7 @@
 #include "vr_start.h"
 #include "vr_start_math.h"
 #include "xr_input.h"
+#include "xr_layers.h"
 
 bool ProxyLoadRealDDraw();
 const char* ProxyBackendNote();
@@ -557,6 +558,8 @@ int g_draw_probe_delay = 0;
 bool g_stereo_headless = false;
 // The input channel from the headset app (xr_input.h).
 XrInputOptions g_xr_input;
+// The quad layers for the headset app (xr_layers.h).
+XrLayersOptions g_xr_layers;
 
 // The Lionhead intro in stereo. Off by default while it is tested. See
 // intro_vr.cpp and docs/intro.md.
@@ -1526,6 +1529,16 @@ void ReadSettings() {
   g_xr_input.view_record_frames = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "xr_view_record", 0, path));
   if (g_xr_input.mode != 0) g_stereo_headless = true;
+  // THE QUAD LAYERS FOR THE HEADSET APP (xr_layers.h, docs/android.md, "The
+  // quad layers"). xr_input_layers=1: with xr_input=1 the interface goes as
+  // in a session, and the layers go into the frames of the live stream. 0:
+  // the interface goes as with no headset.
+  g_xr_layers.input_layers =
+      GetPrivateProfileIntA("bwvr", "xr_input_layers", 1, path) != 0 ? 1 : 0;
+  g_xr_layers.fake_layers =
+      GetPrivateProfileIntA("bwvr", "fake_head_layers", 0, path) != 0 ? 1 : 0;
+  g_xr_layers.record_frames = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "xr_layer_record", 0, path));
   g_intro_vr = GetPrivateProfileIntA("bwvr", "intro_vr", 0, path) != 0;
   g_intro_motion = GetPrivateProfileIntA("bwvr", "intro_motion", 1, path);
   g_intro_speed_pct =
@@ -1860,6 +1873,8 @@ void StartVrStep() {
     // sources, at the same places.
     XrInputSetOptions(g_xr_input);
     XrInputStart(g_dir);
+    XrLayersSetOptions(g_xr_layers, XrInputOn());
+    XrLayersStart(g_dir);
     if (XrInputOn() && (g_fake_head || g_fake_controller.mode != 0)) {
       ModLog("xr input     : xr_input=1, so fake_head=%d and fake_controller=%d "
              "have no effect", g_fake_head ? 1 : 0, g_fake_controller.mode);
@@ -2878,6 +2893,7 @@ void Shutdown(const char* path) {
   ModLog("");
   ModLog("shutdown     : the shutdown starts, %s, frame %llu", path, g_frame);
   XrInputReport();
+  XrLayersReport();
   LogDirect3DModules("the shutdown starts");
   // Let the cursor go before anything else. A clipped cursor outlives the
   // process that clipped it, so a crash here would leave the pointer trapped

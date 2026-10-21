@@ -76,6 +76,14 @@
     no wait, so the feed is faster than the session, and the test checks
     that the app skipped the walks of frames.
 
+.PARAMETER WindowFrom
+    With -Live: a test of the cut scene window of the app. The feed is a copy
+    of ring-capture.bin in which each frame from this frame to -WindowTo is a
+    frame of the window as a screen (bwvr_stream_reader window-feed: kViewFlat and a
+    kWindow of the test, with a crop of 120 and an edge of 2 columns). The
+    test checks the two quads of the eyes of the window too. The values of
+    the window are of the test, not of a run of the mod.
+
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
     the CPU) or host (the GPU of the PC).
@@ -86,7 +94,9 @@ param(
     [string]$Gpu = 'swiftshader_indirect',
     [string]$Stream,
     [string]$Live,
-    [int]$FeedMs = 14
+    [int]$FeedMs = 14,
+    [int]$WindowFrom = 0,
+    [int]$WindowTo = 0
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -101,11 +111,20 @@ $Apk = Join-Path $Bwvr 'out\android\bwvr-quest.apk'
 $InputWriter = Join-Path $Bwvr 'build\test\input_writer\Release\bwvr_input_writer.exe'
 $StreamReader = Join-Path $Bwvr 'build\test\stream_reader\Release\bwvr_stream_reader.exe'
 # A run with a stream keeps its results in a folder of its own.
-$Out = Join-Path $Bwvr $(if ($Live) { 'out\android\emu-xr-live-test' } elseif ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
+$Out = Join-Path $Bwvr $(if ($Live -and $WindowFrom -gt 0) { 'out\android\emu-xr-window-test' } elseif ($Live) { 'out\android\emu-xr-live-test' } elseif ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
 $Feed = $null
 if ($Live) {
     $Feed = Join-Path $Live 'ring-capture.bin'
     if (-not (Test-Path -LiteralPath $Feed)) { Stop-Android "There is no feed at:`n$Feed" }
+    if ($WindowFrom -gt 0) {
+        # The feed of the test of the cut scene window, beside the folder of
+        # the results. It holds the pixels of the game.
+        $windowFeed = Join-Path $Bwvr 'out\android\emu-xr-window-feed.bin'
+        $made = & $StreamReader window-feed $Feed $windowFeed $WindowFrom $WindowTo 120 2 2>&1 | Out-String
+        Write-Host ('   ' + $made.Trim())
+        if ($LASTEXITCODE -ne 0) { Stop-Android "The feed of the cut scene window was not made:`n$made" }
+        $Feed = $windowFeed
+    }
 }
 # The renderer draws on the device of the session with a stream or a live
 # stream, and then the stereo screen is there.
@@ -115,6 +134,10 @@ $Screen = [bool]$Stream -or [bool]$Live
 # and not on the stereo screen.
 $Projection = $false
 $feedViews = @()
+# The newest frame of the feed is a frame of the cut scene window. The app
+# then shows its pictures on the quads of the window, and the runtime reads
+# back no eye of a projection layer.
+$lastFlat = $false
 $viewSource = $(if ($Live) { $Feed } elseif ($Stream) { $Stream } else { $null })
 if ($viewSource) {
     if (-not (Test-Path -LiteralPath $StreamReader)) { Stop-Android "There is no test reader of the live stream at:`n$StreamReader`nRun .\dev.ps1 build first." }
@@ -122,9 +145,44 @@ if ($viewSource) {
     $summary = $viewLines | Where-Object { $_ -match 'records of the projection layer in .*, (\d+) for a projection layer' } | Select-Object -Last 1
     if ($summary -and [regex]::Match($summary, ', (\d+) for a projection layer').Groups[1].Value -ne '0') { $Projection = $true }
     foreach ($l in $viewLines) {
-        $m = [regex]::Match($l, '^views        : frame (\d+) flags \S+ input \d+ time -?\d+ size \S+ half \S+ (eye 0 pose .* fov \S+ \S+ \S+ \S+) (eye 1 pose .* fov \S+ \S+ \S+ \S+)$')
-        if ($m.Success) { $feedViews += , @($m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value) }
+        $m = [regex]::Match($l, '^views        : frame (\d+) flags 0x(\S+) input \d+ time -?\d+ size \S+ half \S+ (eye 0 pose .* fov \S+ \S+ \S+ \S+) (eye 1 pose .* fov \S+ \S+ \S+ \S+)$')
+        if ($m.Success) {
+            $feedViews += , @($m.Groups[1].Value, $m.Groups[3].Value, $m.Groups[4].Value)
+            # kViewFlat (8): a frame of the cut scene window.
+            $lastFlat = ([Convert]::ToInt32($m.Groups[2].Value, 16) -band 8) -ne 0
+        }
     }
+}
+# THE QUAD LAYERS: a feed or a stream with the records of the quad layers of
+# the mod (kCard, kPanel, kWindow, bwvr_stream_reader layers) shows them over
+# the projection layer. The reader gives the quads of each frame as the test
+# runtime reports them, and the pictures of the cards (card-*.bmp).
+$Layers = $false
+$feedQuads = @{}
+$feedCards = @{}
+$feedNames = @{}
+$cardFrames = @{}
+$cardBmps = $null
+$feedWindow = $false
+if ($viewSource -and $Projection) {
+    $cardBmps = Join-Path $Bwvr $(if ($Live) { 'out\android\emu-xr-live-cards' } else { 'out\android\emu-xr-stream-cards' })
+    if (Test-Path -LiteralPath $cardBmps) { Remove-Item -LiteralPath $cardBmps -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $cardBmps | Out-Null
+    $layerLines = @(& $StreamReader layers $viewSource - $cardBmps 2>&1 | ForEach-Object { "$_" })
+    $layerSummary = $layerLines | Where-Object { $_ -match '^layers       : \d+ frames in .*, (\d+) with layers' } | Select-Object -Last 1
+    if ($layerSummary -and [regex]::Match($layerSummary, ', (\d+) with layers').Groups[1].Value -ne '0') { $Layers = $true }
+    # The feed has frames of the cut scene window as a screen.
+    foreach ($l in $layerLines) {
+        $m = [regex]::Match($l, '^layers       : frame (\d+) quads(.*)$')
+        if ($m.Success) { $feedQuads[$m.Groups[1].Value] = $m.Groups[2].Value }
+        $m = [regex]::Match($l, '^layers       : frame (\d+) cards (.*)$')
+        if ($m.Success) { $feedCards[$m.Groups[1].Value] = $m.Groups[2].Value }
+        $m = [regex]::Match($l, '^layers       : frame (\d+): (.*), \d+ pictures')
+        if ($m.Success) { $feedNames[$m.Groups[1].Value] = $m.Groups[2].Value }
+        $m = [regex]::Match($l, '^layers       : (.*) is in (\d+) frames$')
+        if ($m.Success) { $cardFrames[$m.Groups[1].Value] = [int]$m.Groups[2].Value }
+    }
+    $feedWindow = @($feedNames.Values | Where-Object { $_ -match '^eye 0, eye 1' }).Count -gt 0
 }
 $Avd = 'bwvr_xr_test'
 $Image = 'system-images;android-34;google_apis;x86_64'
@@ -260,11 +318,11 @@ try {
 
     # The script of the controllers. The rows of the menu picture are 74
     # pixels high from y = 190 (menu_layout.h), so the middle of row r is at
-    # 227 + 74 r. Layer $L is the menu quad.
+    # 227 + 74 r. The layer "menu" of the runtime is the menu quad: the last
+    # quad of 1600 by 1200 pixels, over the stereo screen and the quad layers
+    # of the mod.
     $script = Join-Path $Out 'script.txt'
-    # With a stream the two quads of the stereo screen come first. The
-    # projection layer is no quad.
-    $L = $(if ($Screen -and -not $Projection) { 2 } else { 0 })
+    $L = 'menu'
     # The live stream makes the stereo screen at its first picture, after the
     # first frames of the session: its script starts 200 frames later.
     $T = $(if ($Live) { 200 } else { 0 })
@@ -284,7 +342,7 @@ try {
         "$(200 + $T) exit")
     # The pictures of the eyes of the projection layer, one time: an image of
     # the size of the render takes a long time to read back in the emulator.
-    if ($Projection) { Add-Content -LiteralPath $script -Encoding ascii -Value "$(40 + $T) eyes start" }
+    if ($Projection -and -not $lastFlat) { Add-Content -LiteralPath $script -Encoding ascii -Value "$(40 + $T) eyes start" }
     Adb @('push', $script, "$XrDir/script.txt")
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
@@ -357,13 +415,11 @@ try {
     Expect ($report -match 'call xrEndSession') 'the app ended the session at STOPPING'
     Expect ($report -match 'call xrDestroySession') 'the app destroyed the session'
     Expect ($report -notmatch '(?m)^fault ') ('the runtime found no fault' + $(if ($report -match '(?m)^fault (.*)$') { ': ' + $Matches[1] } else { '' }))
-    # With a stream the stereo screen is layer 0 (left eye) and 1 (right
-    # eye), and the menu is layer 2. With the projection layer the menu is
-    # quad 0.
-    $menuLayer = $(if ($Screen -and -not $Projection) { 2 } else { 0 })
+    # The menu quad is the quad of 1600 by 1200 pixels, over the stereo screen
+    # and the quad layers of the mod.
     foreach ($name in @('start', 'point', 'moving', 'saved')) {
-        $m = [regex]::Match($report, "capture \S*/$name-$menuLayer\.bmp (\d+)x(\d+) lit (\d+)")
-        Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[3].Value) lit pixels)"
+        $m = [regex]::Match($report, "capture \S*/$name-\d+\.bmp 1600x1200 lit (\d+)")
+        Expect ($m.Success -and [int]$m.Groups[1].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[1].Value) lit pixels)"
     }
     if ($Screen) {
         Expect ($log -match 'xr           : the GPU of the runtime: .*The renderer of the mod: yes') 'the device of the session has Vulkan 1.3 and the features of the renderer'
@@ -426,7 +482,9 @@ try {
         # The app plays the first frame of the feed and the newest frame. A
         # feed with another pose in its last frames than in its first frames
         # gives two poses.
-        Expect ($distinct -ge 2) "the layers of the runtime have $distinct poses, so the check above can tell the frames apart"
+        # A feed with frames of the cut scene window from a frame on has fewer
+        # pictures in the projection layer.
+        if ($WindowFrom -le 0 -and -not $feedWindow) { Expect ($distinct -ge 2) "the layers of the runtime have $distinct poses, so the check above can tell the frames apart" }
 
         if ($layerLines.Count -gt 0) {
             $first = $layerLines[0]
@@ -439,10 +497,144 @@ try {
                 $m.Groups[10].Value -ne $eyesLine.Groups[1].Value -or $m.Groups[11].Value -ne $eyesLine.Groups[2].Value) { $rectOk = $false }
         }
         Expect $rectOk 'the rect of each eye is its whole picture'
-        foreach ($eye in 0, 1) {
+        foreach ($eye in @($(if (-not $lastFlat) { 0, 1 }))) {
             $m = [regex]::Match($report, "capture \S*/start-p$eye\.bmp (\d+)x(\d+) lit (\d+)")
             Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the projection layer has the scene ($($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels)"
         }
+    }
+    if ($Layers) {
+        # THE QUAD LAYERS OF THE MOD over the projection layer. Each line
+        # "quads" of the runtime, with no menu and no cursor at its end, is
+        # the quads of the layers of the frame of a picture of the app, in
+        # the order of the session of the mod, with the pose, the size, the
+        # rect, the eye and the flags of the stream.
+        Expect ($feedQuads.Count -gt 0) "the $(if ($Live) { 'feed' } else { 'stream' }) has the quad layers of $($feedQuads.Count) frames"
+        $shownFrames = @([regex]::Matches($log, 'xr           : the (projection layer|cut scene window) shows the picture of frame (\d+)') | ForEach-Object { $_.Groups[2].Value })
+        $quadLines = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
+        $menuQuad = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 1600x1200 eye 0 flags 2'
+        $cursorQuad = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 64x64 eye 0 flags 2'
+        $runtimeLayers = New-Object System.Collections.Generic.List[object]
+        foreach ($m in $quadLines) {
+            $text = [regex]::Replace($m.Groups[2].Value, "($menuQuad)($cursorQuad)?$", '')
+            $runtimeLayers.Add(@([int]$m.Groups[1].Value, $text))
+        }
+        $withLayers = @($runtimeLayers | Where-Object { $_[1] -ne '' })
+        $matchedLayers = 0
+        $layerFrames = @()
+        foreach ($r in $withLayers) {
+            # The shown frames with these quads (frames with the same quads are
+            # one step).
+            $hits = @($shownFrames | Where-Object { $feedQuads.ContainsKey($_) -and $feedQuads[$_] -eq $r[1] })
+            if ($hits.Count -gt 0) { $matchedLayers++; $layerFrames += ($hits -join '/') }
+        }
+        Expect ($withLayers.Count -gt 0 -and $matchedLayers -eq $withLayers.Count) ("each line of the quads of the runtime has the quads of the layers of the frame of a picture of the app, in the order of the session of the mod ($matchedLayers of $($withLayers.Count) lines, the frames $($layerFrames -join ' '))")
+        # The order of the pictures: the quads of the shown frames with
+        # layers, with no repeat, are the quads of the runtime in their order.
+        $wantQuads = New-Object System.Collections.Generic.List[string]
+        foreach ($f in $shownFrames) {
+            $q = $(if ($feedQuads.ContainsKey($f)) { $feedQuads[$f] } else { '' })
+            if ($q -ne '' -and ($wantQuads.Count -eq 0 -or $wantQuads[$wantQuads.Count - 1] -ne $q)) { $wantQuads.Add($q) }
+        }
+        $gotQuads = New-Object System.Collections.Generic.List[string]
+        foreach ($r in $withLayers) {
+            if ($gotQuads.Count -eq 0 -or $gotQuads[$gotQuads.Count - 1] -ne $r[1]) { $gotQuads.Add($r[1]) }
+        }
+        Expect (($wantQuads -join ';') -eq ($gotQuads -join ';')) "the quads of the runtime come in the order of the pictures of the app ($($wantQuads.Count) and $($gotQuads.Count) steps)"
+        if ($withLayers.Count -gt 0) {
+            Write-Host ('         the runtime: frame ' + $withLayers[0][0] + ' quads' + $withLayers[0][1])
+            $f0 = ($layerFrames[0] -split '/')[-1]
+            if ($f0 -and $feedNames.ContainsKey($f0)) { Write-Host ("         the layers of frame $($f0): " + $feedNames[$f0]) }
+        }
+        foreach ($name in $cardFrames.Keys) {
+            Expect ($log -match ('xr           : ' + [regex]::Escape($name) + ' goes out as one quad layer over the projection layer')) "the app shows $name as a quad layer (the feed has it in $($cardFrames[$name]) frames)"
+        }
+        if ($feedNames.Values | Where-Object { $_ -match 'panel \d' }) {
+            Expect ($log -match 'xr           : the panel quads of the mod go out as \d+ quad layer') 'the app shows the panel quads of the mod with the panel image of the renderer'
+        }
+        # THE PICTURES OF THE CARDS that the runtime read back (the word
+        # capture of the script): the rect of each quad of a card has the
+        # pixels of the picture of that card in the stream, to the byte.
+        Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+public static class CardBmp {
+  // The pixels of rect x, y, w, h of a BMP of 32 bits (bottom row first) of
+  // a swapchain against a BMP of w by h of the stream. Gives the count of
+  // the bytes that differ, or -1 for a wrong size.
+  public static long Compare(string capture, int x, int y, int w, int h, string card) {
+    byte[] a = File.ReadAllBytes(capture), b = File.ReadAllBytes(card);
+    int wa = BitConverter.ToInt32(a, 18), ha = Math.Abs(BitConverter.ToInt32(a, 22));
+    int wb = BitConverter.ToInt32(b, 18), hb = Math.Abs(BitConverter.ToInt32(b, 22));
+    if (wb != w || hb != h || x + w > wa || y + h > ha) return -1;
+    int oa = BitConverter.ToInt32(a, 10), ob = BitConverter.ToInt32(b, 10);
+    long differ = 0;
+    for (int row = 0; row < h; ++row) {
+      // Row r from the top is row (height - 1 - r) of the file.
+      int ra = oa + (ha - 1 - (y + row)) * wa * 4 + x * 4;
+      int rb = ob + (hb - 1 - row) * wb * 4;
+      for (int i = 0; i < w * 4; ++i) if (a[ra + i] != b[rb + i]) ++differ;
+    }
+    return differ;
+  }
+}
+'@
+        $captureFrames = @([regex]::Matches($report, '(?m)^frame (\d+) capture \S*/(start|point|moving|saved)-0\.bmp') | ForEach-Object { , @([int]$_.Groups[1].Value, $_.Groups[2].Value) })
+        $cardChecks = 0
+        $cardSame = 0
+        $cardText = @()
+        foreach ($cap in $captureFrames) {
+            # The quads of the runtime at the frame of the capture.
+            $at = $null
+            foreach ($m in $quadLines) { if ([int]$m.Groups[1].Value -le $cap[0]) { $at = $m } }
+            if (-not $at) { continue }
+            $atText = [regex]::Replace($at.Groups[2].Value, "($menuQuad)($cursorQuad)?$", '')
+            $frame = $null
+            foreach ($f in $shownFrames) { if ($feedQuads.ContainsKey($f) -and $feedQuads[$f] -eq $atText) { $frame = $f } }
+            if (-not $frame -or -not $feedNames.ContainsKey($frame) -or -not $feedCards.ContainsKey($frame)) { continue }
+            $names = @($feedNames[$frame] -split ', ' | Where-Object { $_ -notmatch '^projection' })
+            $rects = @([regex]::Matches($atText, 'rect (\d+) (\d+) (\d+)x(\d+)'))
+            $hashes = @{}
+            foreach ($p in ($feedCards[$frame].Trim() -split ' ')) { $kv = $p -split ':'; $hashes[$kv[0]] = $kv[1] }
+            for ($i = 0; $i -lt $names.Count -and $i -lt $rects.Count; ++$i) {
+                $nm = [regex]::Match($names[$i], '^card (\d)$')
+                if (-not $nm.Success) { continue }
+                $c = $nm.Groups[1].Value
+                $bmp = Join-Path $Out "$($cap[1])-$i.bmp"
+                $card = Join-Path $cardBmps "card-$c-$($hashes[$c]).bmp"
+                if (-not (Test-Path -LiteralPath $bmp) -or -not (Test-Path -LiteralPath $card)) { $cardChecks++; $cardText += "$($cap[1]) quad $i card $($c): no picture"; continue }
+                $r = $rects[$i]
+                $d = [CardBmp]::Compare($bmp, [int]$r.Groups[1].Value, [int]$r.Groups[2].Value, [int]$r.Groups[3].Value, [int]$r.Groups[4].Value, $card)
+                $cardChecks++
+                if ($d -eq 0) { $cardSame++ }
+                $cardText += "$($cap[1]) quad $i card $c of frame $($frame): $d bytes differ"
+            }
+        }
+        foreach ($l in $cardText) { Write-Host "         $l" }
+        if ($feedWindow -and $cardChecks -eq 0) { Write-Host '         no picture of a card: each capture of the runtime has a frame of the cut scene window' }
+        else { Expect ($cardChecks -gt 0 -and $cardSame -eq $cardChecks) "the pictures of the cards that the runtime read back have the pixels of the pictures of the mod in the stream ($cardSame of $cardChecks the same bytes)" }
+        if ($feedWindow) {
+            # THE CUT SCENE WINDOW: a quad of each eye of the swapchains of the
+            # eyes at the pose of the window, each eye with its columns, and no
+            # other layer of the mod but the subtitle card. The quads are the
+            # quads of the feed (the check of the lines of the quads above).
+            Expect ($log -match 'xr           : the cut scene window goes out as two quad layers') 'the app shows a frame of the cut scene window as two quad layers'
+            $windowShown = @([regex]::Matches($log, 'xr           : the cut scene window shows the picture of frame (\d+)') | ForEach-Object { [int]$_.Groups[1].Value })
+            $notFlat = @($windowShown | Where-Object { -not $feedNames.ContainsKey("$_") -or $feedNames["$_"] -notmatch '^eye 0, eye 1' })
+            Expect ($windowShown.Count -gt 0 -and $notFlat.Count -eq 0) "the app showed the pictures of the frames $($windowShown -join ' ') in the cut scene window, each a frame of the window in the feed"
+            if ($WindowFrom -gt 0) {
+            $eyesW = [int]$eyesLine.Groups[1].Value
+            $eyesH = [int]$eyesLine.Groups[2].Value
+            $wantEyes = " quad 0.0000 0.1000 -2.0000 turn 0.0000 0.0000 0.0000 1.0000 size 2.6000 \S+ rect 122 0 $($eyesW - 124)x$eyesH eye 1 flags 0 quad 0.0000 0.1000 -2.0000 turn 0.0000 0.0000 0.0000 1.0000 size 2.6000 \S+ rect 2 0 $($eyesW - 124)x$eyesH eye 2 flags 0"
+            $windowLines = @($runtimeLayers | Where-Object { $_[1] -match "^$wantEyes$" })
+            Expect ($windowLines.Count -gt 0) "the runtime has the quads of the window: the left eye from column 122 and the right eye from column 2, $($eyesW - 124) columns each, 2.6 m wide, 2 m in front ($($windowLines.Count) lines)"
+            }
+            $wallLines = @($runtimeLayers | Where-Object { $_[1] -match 'rect 0 0 16x16 eye 0 flags 2' })
+            if ($feedNames.Values -match 'wall 0') {
+                Expect ($wallLines.Count -gt 0 -and $log -match 'xr           : the walls of the cut scene window go out as four quad layers') "the runtime has the four walls of the window over the projection layer ($($wallLines.Count) lines)"
+            }
+        }
+        $newPixels = [regex]::Match($log, 'xr           : the cards got new pixels (\d+), (\d+), (\d+) and (\d+) times')
+        Expect $newPixels.Success ("the app logs the new pixels of each card" + $(if ($newPixels.Success) { ": $($newPixels.Groups[1].Value), $($newPixels.Groups[2].Value), $($newPixels.Groups[3].Value) and $($newPixels.Groups[4].Value) times, for the pictures that the app showed (xr_copy_on_change=1)" } else { '' }))
     }
     if ($Live) {
         Expect ($log -match "live         : stream_live_feed=1\. The process \d+ writes the \d+ frames .* one each $FeedMs ms") "a child process of the app writes the frames of the feed into the ring, one each $FeedMs ms"
@@ -502,7 +694,7 @@ try {
     # The poses of the right hand of the script: each point of the report
     # gives the aim pose of the runtime, and the slots in the log have it.
     $poses = @()
-    foreach ($m in [regex]::Matches($report, 'frame \d+ point 1 \d+ \d+ \d+ pose (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) (\S+)')) {
+    foreach ($m in [regex]::Matches($report, 'frame \d+ point 1 -?\d+ \d+ \d+ pose (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) (\S+)')) {
         $poses += , @(1..7 | ForEach-Object { [double]$m.Groups[$_].Value })
     }
     $slots = @([regex]::Matches($log, 'input        : slot (\d+), focus 1, .* the right hand flags 0x([0-9A-F]+) aim (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) trigger ([0-9.]+), profile "([^"]*)"'))

@@ -112,7 +112,7 @@ inline void ViewLayerChecks() {
             offsetof(ss::ViewEye, fov) == 28,
         "the record kView has one layout for the mod and the app",
         static_cast<double>(sizeof(ss::ViewBody)), 128);
-  Check(sizeof(vl::RecordHead) == 16 && ss::kView == 18 && ss::kLastKind == ss::kView,
+  Check(sizeof(vl::RecordHead) == 16 && ss::kView == 18 && ss::kLastKind >= ss::kView,
         "the record of the views has a head of 16 bytes, and kView is the kind 18",
         static_cast<double>(ss::kView), 18);
 
@@ -223,7 +223,7 @@ inline void ViewLayerChecks() {
     memcpy(junk.data(), &next, 4);
     Check(stream_ring::UnitBytes(junk.data(), junk.size(), 1u << 20, &bad, &frame, &whole) == 0 &&
               bad,
-          "a record of the kind after kView is not of the stream", 0, 0);
+          "a record of the kind after the last kind is not of the stream", 0, 0);
   }
 
   // THE ORDER IN THE PLAYER (PictureView).

@@ -84,6 +84,7 @@ struct App {
   // The picture of the renderer on the stereo screen of the session.
   VkImage screen_image = VK_NULL_HANDLE;
   bool said_view_size = false;
+  bool said_no_panel = false;
 
   // THE LIVE STREAM (stream_live=1, docs/android.md, "The live stream").
   bool live = false;
@@ -127,9 +128,17 @@ bool ShowEyes(App* app) {
   // no swapchains of the projection layer (MakeEyes failed one time) the
   // picture shows on the stereo screen.
   scene_stream::ViewBody view = {};
-  const bool has = app->xr.ProjectionOn() && StreamPictureView(&view) &&
+  const bool have_view = StreamPictureView(&view);
+  const bool has = app->xr.ProjectionOn() && have_view &&
                    view_layer_math::ShowsProjection(view);
-  if (has && !app->xr.HasEyes()) app->xr.MakeEyes(w, h);
+  // THE QUAD LAYERS of the frame of this picture (stream_layers=1). A frame
+  // of the cut scene window as a screen shows on the swapchains of the eyes
+  // too.
+  static const quad_layer_math::FrameLayers kNoLayers;
+  const quad_layer_math::FrameLayers& layers =
+      app->xr.LayersOn() ? StreamPictureLayers() : kNoLayers;
+  const bool window = quad_layer_math::AsScreen(layers);
+  if ((has || window) && !app->xr.HasEyes()) app->xr.MakeEyes(w, h);
   if (has && (view.width != w || view.height != h) && !app->said_view_size) {
     app->said_view_size = true;
     AppLog("xr           : the mod gives the angles of view for pictures of %u by "
@@ -144,6 +153,16 @@ bool ShowEyes(App* app) {
     app->xr.MarkScreenChanged();
   }
   app->xr.SetScreenView(has, view);
+  // The panel quads show the panel image of the renderer of this frame.
+  uint64_t panel = 0;
+  if (layers.panel && !VkScenePanelFor(w, h, &panel)) panel = 0;
+  if (layers.panel && panel == 0 && !app->said_no_panel) {
+    app->said_no_panel = true;
+    AppLog("xr           : the mod gives panel quads, but the renderer has no panel "
+           "image of %u by %u for the picture. The panel quads do not show", w, h);
+  }
+  app->xr.SetScreenLayers(layers, StreamCardPictures(), reinterpret_cast<VkImage>(panel), w,
+                          h);
   return true;
 }
 
@@ -529,6 +548,10 @@ void android_main(android_app* android) {
   // values of the projection layer of the mod for its frame shows in a
   // projection layer. 0: each picture shows on the stereo screen.
   app.xr.SetProjection(app.ini.GetInt("bwvr", "stream_projection", 1) != 0);
+  // stream_layers=1 (the default): the cards, the panel quads and the cut
+  // scene window of the mod for the frame of a picture show as quad layers,
+  // as the session of the mod shows them. 0: no quad layer of the mod.
+  app.xr.SetLayersOn(app.ini.GetInt("bwvr", "stream_layers", 1) != 0);
   // input_live=1: the session also reads the input of the mod, and each frame
   // goes into bwvr-input.chan of the game folder. 0: the app reads only the
   // input of its menu.
@@ -567,6 +590,11 @@ void android_main(android_app* android) {
                  "layer of the mod shows in a projection layer, a picture with "
                  "none on the stereo screen"
                : "Each picture of the renderer shows on the stereo screen");
+    AppLog("xr           : stream_layers=%d. %s", app.xr.LayersOn() ? 1 : 0,
+           app.xr.LayersOn()
+               ? "The cards, the panel quads and the cut scene window of the mod "
+                 "show as quad layers, as the session of the mod shows them"
+               : "No quad layer of the mod");
     if (app.xr_on && app.xr.Renderer13()) {
       vk::External device;
       app.xr.RendererDevice(&device);

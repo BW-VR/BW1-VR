@@ -28,10 +28,11 @@
 // from there. A reader that leaves adds one to bye, and the writer stops
 // until the next ask.
 //
-// A FULL RING (a slow reader). A frame with no kStart, kSurface or kWritten
-// record waits up to Policy::drop_us (vk_stream_live_drop_us, 0 by default)
-// for room for the whole frame. Then the writer drops it: the reader keeps
-// each texture, because such a frame changes no surface. A frame with one of
+// A FULL RING (a slow reader). A frame with no kStart, kSurface, kWritten or
+// kCardPicture record waits up to Policy::drop_us (vk_stream_live_drop_us, 0
+// by default) for room for the whole frame. Then the writer drops it: the
+// reader keeps each texture and each picture of a card, because such a frame
+// changes none. A frame with one of
 // these records is never dropped: it goes into the ring in parts as the
 // reader makes room. When the reader takes no byte for Policy::gone_us, the
 // writer gives up on it (lost) and stops until the next ask.
@@ -241,9 +242,10 @@ inline uint32_t RoomForWalks(uint32_t room, uint32_t reserve) {
 enum class Step { kWrite, kWait, kDrop, kLost };
 
 // left: the bytes of the frame that are not in the ring yet. started: a part
-// of the frame is in the ring. keep: the frame has a kStart, a kSurface or a
-// kWritten record. waited_us: the wait for this frame so far. stalled_us:
-// the time since the reader last took a byte, or since the ring was empty.
+// of the frame is in the ring. keep: the frame has a kStart, a kSurface, a
+// kWritten or a kCardPicture record. waited_us: the wait for this frame so
+// far. stalled_us: the time since the reader last took a byte, or since the
+// ring was empty.
 inline Step Choose(uint32_t capacity, uint32_t room, uint32_t left,
                    bool started, bool keep, uint32_t waited_us,
                    uint32_t stalled_us, const Policy& p) {
@@ -258,11 +260,12 @@ inline Step Choose(uint32_t capacity, uint32_t room, uint32_t left,
   return Step::kWait;
 }
 
-// True for the records that change the state of a surface or the options.
-// The writer never drops a frame with one of them.
+// True for the records that change the state of a surface, of the picture
+// of a card or of the options. The writer never drops a frame with one of
+// them.
 inline bool KeepKind(uint32_t kind) {
   return kind == scene_stream::kStart || kind == scene_stream::kSurface ||
-         kind == scene_stream::kWritten;
+         kind == scene_stream::kWritten || kind == scene_stream::kCardPicture;
 }
 
 // THE FRAMES OF THE READER. The length of the first whole frame at the start
@@ -304,7 +307,7 @@ inline size_t UnitBytes(const uint8_t* bytes, size_t n, size_t limit,
 // in the ring at one time (a batch).
 struct UnitInfo {
   uint64_t frame = 0;      // the frame of its first kFrame
-  bool keep = false;       // a kStart, a kSurface or a kWritten record
+  bool keep = false;       // a kStart, a kSurface, a kWritten or a kCardPicture record
   bool capture = false;    // a kFrame with a picture of a test (F12)
   bool start = false;      // a kStart record
   int32_t test_frame = 0;  // vk_scene_test_frame of its kStart
@@ -337,9 +340,10 @@ inline UnitInfo Inspect(const uint8_t* unit, size_t n) {
 }
 
 // True when the app plays a frame of a batch: each frame that changes a
-// surface or the options, each frame with a picture of a test, and the
-// newest frame. The renderer draws the other frames for no one: the newest
-// frame replaces their picture, and they change no surface.
+// surface, the picture of a card or the options, each frame with a picture
+// of a test, and the newest frame. The renderer draws the other frames for
+// no one: the newest frame replaces their picture, and they change no
+// surface and no picture of a card.
 inline bool PlayInBatch(const UnitInfo& u, bool newest, int32_t test_frame) {
   return u.keep || newest || u.capture ||
          (test_frame > 0 && u.frame == static_cast<uint64_t>(test_frame));

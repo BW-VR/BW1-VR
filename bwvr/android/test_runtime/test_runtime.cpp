@@ -8,7 +8,9 @@
 //
 //   <frame> point <hand> <layer> <x> <y>   the aim of the hand goes to the
 //                                          pixel x, y of quad <layer> of the
-//                                          last frame
+//                                          last frame. <layer> menu: the last
+//                                          quad of 1600 by 1200 pixels (the
+//                                          menu of the app)
 //   <frame> trigger <hand> <0|1>           the trigger of the hand
 //   <frame> button <hand> <0|1>            B (right) or Y (left)
 //   <frame> stick <hand> <x> <y>           the thumbstick
@@ -35,7 +37,10 @@
 // layers, and the bindings for /interaction_profiles/oculus/touch_controller.
 // A fault goes into the report as a line "fault ...". For a projection layer
 // the report has the pose, the angles of view and the rect of each eye, one
-// line for each change ("frame N projection ...").
+// line for each change ("frame N projection ..."). For the quads the report
+// has the pose, the size, the rect, the eye and the flags of each quad of a
+// frame, one line for each change ("frame N quads ..."), and each picture
+// that it reads back has the frame ("frame N capture ...").
 
 #include <android/log.h>
 #include <math.h>
@@ -123,7 +128,9 @@ void LoadScript() {
     s.what = what;
     const char* rest = strstr(line, what) + strlen(what);
     if (s.what == "point") {
-      sscanf(rest, "%15s %d %f %f", hand, &s.layer, &s.a, &s.b);
+      char layer[16] = {0};
+      sscanf(rest, "%15s %15s %f %f", hand, layer, &s.a, &s.b);
+      s.layer = strcmp(layer, "menu") == 0 ? -1 : atoi(layer);
     } else if (s.what == "trigger" || s.what == "button") {
       sscanf(rest, "%15s %f", hand, &s.a);
     } else if (s.what == "stick") {
@@ -437,11 +444,21 @@ void Capture(Session* s, Swapchain* sc, const std::string& path) {
     fwrite(row.data(), 1, row.size(), f);
   }
   fclose(f);
-  Report("capture %s %ux%u lit %ld", path.c_str(), w, h, lit);
+  Report("frame %ld capture %s %ux%u lit %ld", s->frame, path.c_str(), w, h, lit);
 }
 
 // THE AIM: from the hand at its place to a pixel of a quad of the last frame.
 void PointAt(Session* s, int hand, int layer, float px, float py) {
+  // The menu: the last quad of the size of the menu picture.
+  if (layer == -1) {
+    for (int i = static_cast<int>(s->last_quads.size()) - 1; i >= 0; --i) {
+      const XrCompositionLayerQuad& m = s->last_quads[i];
+      if (m.subImage.imageRect.extent.width == 1600 && m.subImage.imageRect.extent.height == 1200) {
+        layer = i;
+        break;
+      }
+    }
+  }
   if (layer < 0 || layer >= static_cast<int>(s->last_quads.size())) {
     Fault("point at layer %d, the last frame had %zu quads", layer, s->last_quads.size());
     return;
@@ -1118,6 +1135,7 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
   s->last_quads.clear();
   s->last_eyes.clear();
   std::string what;
+  std::string quads;  // each quad in full, for the line "quads"
   static std::string s_last_projection;
   for (uint32_t i = 0; i < info->layerCount; ++i) {
     const XrCompositionLayerBaseHeader* l = info->layers[i];
@@ -1172,6 +1190,21 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
       Fault("frame %ld: the rect of a quad is larger than its swapchain", s->frame);
     }
     s->last_quads.push_back(*q);
+    if (sc != nullptr && (q->subImage.imageRect.offset.x < 0 || q->subImage.imageRect.offset.y < 0 ||
+                          q->subImage.imageRect.offset.x + q->subImage.imageRect.extent.width > static_cast<int32_t>(sc->width) ||
+                          q->subImage.imageRect.offset.y + q->subImage.imageRect.extent.height > static_cast<int32_t>(sc->height))) {
+      Fault("frame %ld: the rect of a quad is not in its swapchain", s->frame);
+    }
+    {
+      char full[320];
+      snprintf(full, sizeof(full), " quad %.4f %.4f %.4f turn %.4f %.4f %.4f %.4f size %.4f %.4f rect %d %d %dx%d eye %d flags %u",
+               q->pose.position.x, q->pose.position.y, q->pose.position.z, q->pose.orientation.x,
+               q->pose.orientation.y, q->pose.orientation.z, q->pose.orientation.w, q->size.width,
+               q->size.height, q->subImage.imageRect.offset.x, q->subImage.imageRect.offset.y,
+               q->subImage.imageRect.extent.width, q->subImage.imageRect.extent.height,
+               static_cast<int>(q->eyeVisibility), static_cast<unsigned>(q->layerFlags));
+      quads += full;
+    }
     char part[160];
     snprintf(part, sizeof(part), " quad %.3f %.3f %.3f size %.3f %.3f eye %d", q->pose.position.x,
              q->pose.position.y, q->pose.position.z, q->size.width, q->size.height,
@@ -1187,6 +1220,10 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
     Report("frame %ld %s", s->frame, line.c_str());
   }
   s_last = line;
+  // One line for each change of the quads.
+  static std::string s_last_quads;
+  if (quads != s_last_quads) Report("frame %ld quads%s", s->frame, quads.c_str());
+  s_last_quads = quads;
   for (const Step& st : g_script) {
     if (st.frame != s->frame) continue;
     if (st.what == "capture") {

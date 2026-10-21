@@ -4920,6 +4920,16 @@ Both eye images are written as BMP, which converts to PNG. `fake_head_pitch` and
 `fake_head_roll` take negative values. `fake_head_sweep=1` alternates the whole
 pose with a level head, so a pitch can be tested like a turn.
 
+`fake_head_fov=1` gives each eye of the invented head the angles of view of
+the OpenXR test runtime of the headset app (-0.9425, 0.8203, 0.8901 and
+-0.9599 radians, as a Quest 3). The frame then sets up the view of the
+headset as with a session ("THE HEAD TRACKING SETUP" of `stereo.cpp`), and
+the angle of view of the headset takes the place of `fov_absolute_deg`. The
+record of the input (`xr_input_record`) has the angles, and the projection
+layer of each frame is what a session would get (`android.md`, "The
+projection layer"). `fake_head_fov=0` (the default): the invented head has no
+angles of view, and the game keeps its own.
+
 A test drives the game from inside the game process. It never moves or clicks
 the real mouse, and it never brings a window to the front. The tools:
 
@@ -5252,7 +5262,7 @@ keys that the launcher sets.
 | `target_glow` | 1 | What marks a target of the Hand. 1: the glow on its mesh, and a halo only for a target whose mesh does not glow. 0: the halo. 2: the glow and the halo. See `hand-model.md`, "The glow on the mesh of a target" |
 | `target_glow_pct`, `target_glow_anim` | 45, 3 | The strength of that glow, 0 to 200 percent of the halo color. Its animation: 0 steady, 1 the pulse, 2 the band of light that goes up the mesh, 3 both |
 | `target_glow_test_keys`, `target_glow_log` | none, 0 | Test keys of the desktop runs. See the same section |
-| `fake_head`, `fake_head_yaw`, `fake_head_pitch`, `fake_head_roll`, `fake_head_sweep`, `stereo_headless`, `fov_absolute_deg`, `head_fov_deg` | 0 | See "Testing without a headset" |
+| `fake_head`, `fake_head_yaw`, `fake_head_pitch`, `fake_head_roll`, `fake_head_sweep`, `fake_head_fov`, `stereo_headless`, `fov_absolute_deg`, `head_fov_deg` | 0 | See "Testing without a headset" |
 
 ## Ready to hand out
 

@@ -719,27 +719,87 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   XrCompositionLayerQuad quads[4] = {
       {XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD},
       {XR_TYPE_COMPOSITION_LAYER_QUAD}, {XR_TYPE_COMPOSITION_LAYER_QUAD}};
+  XrCompositionLayerProjectionView views[2] = {
+      {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
+      {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
+  XrCompositionLayerProjection projection = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
   const XrCompositionLayerBaseHeader* layers[4];
   uint32_t count = 0;
-  // THE STEREO SCREEN of the renderer, behind the menu: a quad for each eye,
-  // 2.6 m wide, 2.6 m in front of the head.
-  if (frame_.shouldRender && screen_source_ != VK_NULL_HANDLE) {
-    const float width = 2.6f;
-    const float height = width * screen_[0].height / screen_[0].width;
+  // THE PROJECTION LAYER of the renderer, behind the menu: each eye with the
+  // pose that the mod drew it from and the angles of view that the mod
+  // gives (kView). The runtime reprojects it to the pose of the head, so the
+  // app adds no motion.
+  bool world = false;
+  if (frame_.shouldRender && screen_source_ != VK_NULL_HANDLE &&
+      projection_on_ && view_newest_ && HasEyes()) {
     for (int eye = 0; eye < 2; ++eye) {
-      CopyScreen(eye);
+      // The values go with the picture of the image that the eye released.
+      if (CopyScreen(&eyes_, eye)) {
+        shown_view_[eye] = newest_view_;
+        view_shown_[eye] = true;
+      }
+    }
+    world = view_shown_[0] && view_shown_[1];
+  }
+  if (world) {
+    for (int eye = 0; eye < 2; ++eye) {
+      const scene_stream::ViewEye& e = shown_view_[eye].eyes[eye];
+      XrCompositionLayerProjectionView& v = views[eye];
+      v.pose.position = {e.position[0], e.position[1], e.position[2]};
+      v.pose.orientation = {e.orientation[0], e.orientation[1], e.orientation[2],
+                            e.orientation[3]};
+      v.fov = {e.fov[0], e.fov[1], e.fov[2], e.fov[3]};
+      v.subImage.swapchain = eyes_.layer[eye].swapchain;
+      v.subImage.imageRect.offset = {0, 0};
+      v.subImage.imageRect.extent = {static_cast<int32_t>(eyes_.layer[eye].width),
+                                     static_cast<int32_t>(eyes_.layer[eye].height)};
+      v.subImage.imageArrayIndex = 0;
+    }
+    projection.layerFlags = 0;
+    projection.space = local_;
+    projection.viewCount = 2;
+    projection.views = views;
+    layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
+    ++projection_frames_;
+    if (!said_projection_) {
+      said_projection_ = true;
+      const scene_stream::ViewBody& b = shown_view_[0];
+      AppLog("xr           : the pictures of the renderer go out in a projection "
+             "layer, with the values of frame %llu of the mod: the left eye at "
+             "%.4f %.4f %.4f, the right eye at %.4f %.4f %.4f, the angles of view "
+             "%.4f %.4f %.4f %.4f, half angle %.2f degrees",
+             static_cast<unsigned long long>(b.frame), b.eyes[0].position[0],
+             b.eyes[0].position[1], b.eyes[0].position[2], b.eyes[1].position[0],
+             b.eyes[1].position[1], b.eyes[1].position[2], b.eyes[0].fov[0],
+             b.eyes[0].fov[1], b.eyes[0].fov[2], b.eyes[0].fov[3],
+             b.half_angle * 57.29578f);
+    }
+  } else if (frame_.shouldRender && screen_source_ != VK_NULL_HANDLE) {
+    // THE STEREO SCREEN of the renderer, behind the menu: a quad for each
+    // eye, 2.6 m wide, 2.6 m in front of the head.
+    if (projection_on_ && !view_newest_ && !said_no_view_) {
+      said_no_view_ = true;
+      AppLog("xr           : stream_projection=1, but the mod gave no values of "
+             "the projection layer for the picture of the renderer. It shows on "
+             "the stereo screen");
+    }
+    const float width = 2.6f;
+    const float height = width * screen_.layer[0].height / screen_.layer[0].width;
+    for (int eye = 0; eye < 2; ++eye) {
+      CopyScreen(&screen_, eye);
       XrCompositionLayerQuad& q = quads[count];
       q.space = local_;
       q.eyeVisibility = eye == 0 ? XR_EYE_VISIBILITY_LEFT : XR_EYE_VISIBILITY_RIGHT;
-      q.subImage.swapchain = screen_[eye].swapchain;
-      q.subImage.imageRect.extent = {static_cast<int32_t>(screen_[eye].width),
-                                     static_cast<int32_t>(screen_[eye].height)};
+      q.subImage.swapchain = screen_.layer[eye].swapchain;
+      q.subImage.imageRect.extent = {static_cast<int32_t>(screen_.layer[eye].width),
+                                     static_cast<int32_t>(screen_.layer[eye].height)};
       q.pose.orientation.w = 1.0f;
       q.pose.position = {0.0f, 0.1f, -2.6f};
       q.size = {width, height};
       layers[count] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
       ++count;
     }
+    ++screen_frames_;
   }
   if (frame_.shouldRender && menu_written_) {
     CopyLayer(&menu_);
@@ -800,27 +860,43 @@ void XrApp::RendererDevice(vk::External* out) {
 }
 
 bool XrApp::MakeScreen(uint32_t width, uint32_t height) {
-  for (Layer& l : screen_) {
+  if (!MakeScreenSet(&screen_, width, height)) return false;
+  AppLog("xr           : a stereo screen of two quads of %u by %u for the "
+         "pictures of the renderer", width, height);
+  return true;
+}
+
+bool XrApp::MakeEyes(uint32_t width, uint32_t height) {
+  if (!MakeScreenSet(&eyes_, width, height)) return false;
+  AppLog("xr           : a projection layer of two swapchains of %u by %u for "
+         "the pictures of the renderer (stream_projection=1)", width, height);
+  return true;
+}
+
+bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height) {
+  for (Layer& l : screen->layer) {
     if (!MakeLayer(&l, width, height, false)) return false;
   }
   // The picture of the renderer goes into an image of its own format at the
-  // size of the quads first (a blit), then into the swapchain with a copy,
-  // which keeps the bytes also when the swapchain has an sRGB format.
+  // size of the swapchains first (a blit), then into the swapchain with a
+  // copy, which keeps the bytes also when the swapchain has an sRGB format.
   VkImageCreateInfo info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   info.imageType = VK_IMAGE_TYPE_2D;
   // The order of the bytes of the swapchain: the blit puts the channels of
   // the renderer (RGBA) into that order.
-  info.format = screen_[0].swap_red_blue ? VK_FORMAT_B8G8R8A8_UNORM
-                                         : VK_FORMAT_R8G8B8A8_UNORM;
+  info.format = screen->layer[0].swap_red_blue ? VK_FORMAT_B8G8R8A8_UNORM
+                                               : VK_FORMAT_R8G8B8A8_UNORM;
   info.extent = {width, height, 1};
   info.mipLevels = 1;
   info.arrayLayers = 1;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
   info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-  if (vkCreateImage(gpu_.device, &info, nullptr, &between_) != VK_SUCCESS) return false;
+  if (vkCreateImage(gpu_.device, &info, nullptr, &screen->between) != VK_SUCCESS) {
+    return false;
+  }
   VkMemoryRequirements req;
-  vkGetImageMemoryRequirements(gpu_.device, between_, &req);
+  vkGetImageMemoryRequirements(gpu_.device, screen->between, &req);
   uint32_t type = UINT32_MAX;
   for (uint32_t i = 0; i < gpu_.memory.memoryTypeCount; ++i) {
     if ((req.memoryTypeBits & (1u << i)) != 0 &&
@@ -833,36 +909,60 @@ bool XrApp::MakeScreen(uint32_t width, uint32_t height) {
   alloc.allocationSize = req.size;
   alloc.memoryTypeIndex = type;
   if (type == UINT32_MAX ||
-      vkAllocateMemory(gpu_.device, &alloc, nullptr, &between_memory_) != VK_SUCCESS) {
+      vkAllocateMemory(gpu_.device, &alloc, nullptr, &screen->between_memory) !=
+          VK_SUCCESS) {
     return false;
   }
-  vkBindImageMemory(gpu_.device, between_, between_memory_, 0);
-  AppLog("xr           : a stereo screen of two quads of %u by %u for the "
-         "pictures of the renderer", width, height);
+  vkBindImageMemory(gpu_.device, screen->between, screen->between_memory, 0);
   return true;
+}
+
+void XrApp::FreeScreenSet(Screen* screen) {
+  for (Layer& l : screen->layer) {
+    FreeStaging(&gpu_, &l.staging);
+    if (l.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(l.swapchain);
+    l.swapchain = XR_NULL_HANDLE;
+  }
+  if (screen->between != VK_NULL_HANDLE) {
+    vkDestroyImage(gpu_.device, screen->between, nullptr);
+  }
+  if (screen->between_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(gpu_.device, screen->between_memory, nullptr);
+  }
+  screen->between = VK_NULL_HANDLE;
+  screen->between_memory = VK_NULL_HANDLE;
+}
+
+void XrApp::SetScreenView(bool has, const scene_stream::ViewBody& view) {
+  view_newest_ = has;
+  if (has) newest_view_ = view;
 }
 
 void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
                             uint32_t image_height) {
-  for (Layer& l : screen_) ++l.revision;
+  for (Layer& l : screen_.layer) ++l.revision;
+  for (Layer& l : eyes_.layer) ++l.revision;
   screen_source_ = image;
   source_width_ = image_width;
   source_height_ = image_height;
 }
 
 void XrApp::MarkScreenChanged() {
-  for (Layer& l : screen_) ++l.revision;
+  for (Layer& l : screen_.layer) ++l.revision;
+  for (Layer& l : eyes_.layer) ++l.revision;
 }
 
-// One eye of the picture of the renderer into the next image of its quad.
-void XrApp::CopyScreen(int eye) {
-  Layer* layer = &screen_[eye];
-  if (!LayerChanged(layer)) return;
+// One eye of the picture of the renderer into the next image of its
+// swapchain.
+bool XrApp::CopyScreen(Screen* screen, int eye) {
+  Layer* layer = &screen->layer[eye];
+  if (!LayerChanged(layer)) return false;
+  VkImage between = screen->between;
   uint32_t index = 0;
   XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &index),
           "xrAcquireSwapchainImage")) {
-    return;
+    return false;
   }
   XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
@@ -886,7 +986,7 @@ void XrApp::CopyScreen(int eye) {
   b[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   b[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   b[1].srcQueueFamilyIndex = b[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  b[1].image = between_;
+  b[1].image = between;
   b[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -898,8 +998,11 @@ void XrApp::CopyScreen(int eye) {
   blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
   blit.dstOffsets[1] = {static_cast<int32_t>(layer->width),
                         static_cast<int32_t>(layer->height), 1};
-  vkCmdBlitImage(cmd, screen_source_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, between_,
-                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+  // A blit of the same size takes each pixel as it is.
+  const bool same = source_width_ == layer->width && source_height_ == layer->height;
+  vkCmdBlitImage(cmd, screen_source_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, between,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                 same ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
   // Back to a color attachment for the renderer. The image between to a
   // source, and the swapchain image to a target.
   b[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -921,7 +1024,7 @@ void XrApp::CopyScreen(int eye) {
   copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
   copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
   copy.extent = {layer->width, layer->height, 1};
-  vkCmdCopyImage(cmd, between_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
+  vkCmdCopyImage(cmd, between, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
   ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -933,7 +1036,8 @@ void XrApp::CopyScreen(int eye) {
   xrReleaseSwapchainImage(layer->swapchain, &release);
   layer->released = layer->revision;
   ++copies_;
-  ++screen_copies_[eye];
+  ++screen->copies[eye];
+  return true;
 }
 
 void XrApp::PulseWith(int hand, float amplitude, float seconds) {
@@ -1129,24 +1233,26 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(copies_skipped_),
            copy_on_change_ ? 1 : 0);
   }
-  if (screen_copies_[0] + screen_copies_[1] > 0) {
+  if (screen_.copies[0] + screen_.copies[1] > 0) {
     AppLog("xr           : %llu copies of the stereo screen for eye 0 and %llu "
            "for eye 1",
-           static_cast<unsigned long long>(screen_copies_[0]),
-           static_cast<unsigned long long>(screen_copies_[1]));
+           static_cast<unsigned long long>(screen_.copies[0]),
+           static_cast<unsigned long long>(screen_.copies[1]));
+  }
+  if (projection_frames_ + screen_frames_ > 0) {
+    AppLog("xr           : %llu copies of the projection layer for eye 0 and %llu "
+           "for eye 1. %llu frames with the projection layer, %llu frames with "
+           "the stereo screen (stream_projection=%d)",
+           static_cast<unsigned long long>(eyes_.copies[0]),
+           static_cast<unsigned long long>(eyes_.copies[1]),
+           static_cast<unsigned long long>(projection_frames_),
+           static_cast<unsigned long long>(screen_frames_), projection_on_ ? 1 : 0);
   }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   FreeStaging(&gpu_, &menu_.staging);
   FreeStaging(&gpu_, &cursor_.staging);
-  for (Layer& l : screen_) {
-    FreeStaging(&gpu_, &l.staging);
-    if (l.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(l.swapchain);
-    l.swapchain = XR_NULL_HANDLE;
-  }
-  if (between_ != VK_NULL_HANDLE) vkDestroyImage(gpu_.device, between_, nullptr);
-  if (between_memory_ != VK_NULL_HANDLE) vkFreeMemory(gpu_.device, between_memory_, nullptr);
-  between_ = VK_NULL_HANDLE;
-  between_memory_ = VK_NULL_HANDLE;
+  FreeScreenSet(&screen_);
+  FreeScreenSet(&eyes_);
   screen_source_ = VK_NULL_HANDLE;
   if (menu_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(menu_.swapchain);
   if (cursor_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(cursor_.swapchain);

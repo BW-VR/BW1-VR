@@ -2520,22 +2520,13 @@ bool XrScreen::BuildFrame() {
       v.pose.orientation.w = from.orientation[3];
       // The frustum reported has to be the frustum rendered, not the one the
       // runtime asked for. The game renders a symmetric view, so the caller
-      // tells us the half angle it used and both sides get it.
-      const float half = render_half_angle_ > 0.0f ? render_half_angle_ : 0.0f;
-      if (half > 0.0f) {
-        const float aspect_half =
-            atanf(tanf(half) * static_cast<float>(s.height) /
-                  static_cast<float>(s.width));
-        v.fov.angleLeft = -half;
-        v.fov.angleRight = half;
-        v.fov.angleUp = aspect_half;
-        v.fov.angleDown = -aspect_half;
-      } else {
-        v.fov.angleLeft = views_[eye].fov_left;
-        v.fov.angleRight = views_[eye].fov_right;
-        v.fov.angleUp = views_[eye].fov_up;
-        v.fov.angleDown = views_[eye].fov_down;
-      }
+      // tells us the half angle it used and both sides get it (LayerFov).
+      float fov[4];
+      LayerFov(render_half_angle_, s.width, s.height, views_[eye], fov);
+      v.fov.angleLeft = fov[0];
+      v.fov.angleRight = fov[1];
+      v.fov.angleUp = fov[2];
+      v.fov.angleDown = fov[3];
       v.subImage.swapchain = s.swapchain[eye];
       v.subImage.imageRect.offset = {0, 0};
       v.subImage.imageRect.extent = {static_cast<int32_t>(s.width),

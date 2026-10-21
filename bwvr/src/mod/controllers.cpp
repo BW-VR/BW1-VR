@@ -3863,12 +3863,15 @@ void MouseOwnerTestFrame() {
 // head_pose.cpp: the invented head.
 bool HeadPoseFakeOn();
 void HeadPoseFakeEye(int eye, float position[3], float orientation[4]);
+// stereo.cpp: the angles of view of the invented head (fake_head_fov=1).
+bool StereoFakeFov(float fov[4]);
 
 namespace {
 // The head of this frame for the record (xr_input_record): the input
-// channel, the session, or the invented head. The invented head has no
-// angles of view, so its record has 0 for each angle, and the mod keeps its
-// own angle of view with that record.
+// channel, the session, or the invented head. The invented head has the
+// angles of view of fake_head_fov=1. With fake_head_fov=0 it has none, so
+// its record has 0 for each angle, and the mod keeps its own angle of view
+// with that record.
 void RecordEyes(bwvr::EyeView eyes[2], int64_t* time, int64_t* period) {
   for (int e = 0; e < 2; ++e) {
     memset(&eyes[e], 0, sizeof(eyes[e]));
@@ -3882,8 +3885,14 @@ void RecordEyes(bwvr::EyeView eyes[2], int64_t* time, int64_t* period) {
     for (int e = 0; e < 2; ++e) eyes[e] = g_screen->eye(e);
     g_screen->LastDisplayTime(time, period);
   } else if (HeadPoseFakeOn()) {
+    float fov[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    StereoFakeFov(fov);
     for (int e = 0; e < 2; ++e) {
       HeadPoseFakeEye(e, eyes[e].position, eyes[e].orientation);
+      eyes[e].fov_left = fov[0];
+      eyes[e].fov_right = fov[1];
+      eyes[e].fov_up = fov[2];
+      eyes[e].fov_down = fov[3];
       eyes[e].valid = true;
     }
   }

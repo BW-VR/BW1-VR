@@ -615,6 +615,11 @@ void VkStreamPanelBind(bool panel) {
   g_writer.Record(ss::kPanelBind, &v, sizeof(v));
 }
 
+void VkStreamView(const ss::ViewBody& view) {
+  if (!g_unit_open) return;
+  g_writer.Record(ss::kView, &view, sizeof(view));
+}
+
 void VkStreamWritten(void* surface) {
   if (surface == nullptr) return;
   Surface(surface, false);

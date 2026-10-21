@@ -3577,6 +3577,7 @@ void CreatureChecks() {
 #include "fight_checks.h"
 #include "vr_start_checks.h"
 #include "input_channel_checks.h"
+#include "view_layer_checks.h"
 #include "learn_checks.h"
 
 int main() {
@@ -3999,6 +4000,7 @@ int main() {
   fight_checks::FightChecks();
   vr_start_checks::VrStartChecks();
   input_channel_checks::InputChannelChecks();
+  view_layer_checks::ViewLayerChecks();
   learn_checks::LearnChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);

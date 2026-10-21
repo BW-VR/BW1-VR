@@ -41,6 +41,12 @@ Summary:
   (`input_live`), and the mod reads them in place of a session of its own
   (`xr_input`). The pulses of the hands go back to the app (see "The input
   channel").
+- The mod gives the app the values of the projection layer of each frame in
+  the frame of the live stream: the pose that each eye was drawn from, the
+  angles of view that the game drew and the size of the pictures (a record
+  `kView`). The app shows the eye pictures of its renderer in a projection
+  layer with these values (`stream_projection=1`), as the mod does on the PC
+  (see "The projection layer").
 - **Only Vulkan.** The app draws with Vulkan alone: the menu, the stereo
   screen and the renderer of the mod. It has no fallback to Direct3D,
   DirectDraw or another graphics interface (see "Only Vulkan").
@@ -73,6 +79,7 @@ Summary:
 | `src/common/input_channel.h` | The input channel: the file, the slot of the newest input, the ring of the events, the record. No Windows code |
 | `src/mod/xr_input.cpp` | The reader of the input channel in the mod (`xr_input`), and the record of the input of a run (`xr_input_record`) |
 | `src/mod/xr_input_math.h` | The values of the input channel as the values of `XrScreen`, the recenter, the lockstep of a test. No Windows code |
+| `src/mod/view_layer_math.h` | The projection layer of a frame for the app (the record `kView`): the values that the mod gives its session, the view of a picture in the player of the app, the record of a test. No Windows code |
 | `android/src/input_live.cpp` | The writer of the input channel in the app (`input_live`), and the play of the pulses of the mod |
 | `test/input_writer/main.cpp` | The test writer of the input channel on the PC (`bwvr_input_writer.exe`) |
 | `tools/desk/input_channel_run.ps1` | A desktop run with the input channel and the test writer of the PC |
@@ -355,6 +362,16 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    With `-FeedMs 0` the feed is faster than the session, and the test also
    checks that the app skipped the walks of frames. Its results are in
    `bwvr/out/android/emu-xr-live-test`.
+   When the feed has records `kView` for a projection layer (a desk run of
+   `input_channel_run.ps1 -Kind channel -Live`, see "The projection
+   layer"), the app shows the pictures in a projection layer, and the test
+   checks it in place of the stereo screen (64 checks): the
+   two swapchains, no quad of the stereo screen, that the pose and the angles
+   of view of each eye of each projection layer that the runtime reports are
+   the values of a record `kView` of the feed, that the rect of each eye is
+   its whole picture, the pictures of both eyes that the runtime read back,
+   a copy for each new picture, and a projection layer in each frame with a
+   picture.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -405,7 +422,13 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    and the input channel (`input_channel_checks.h`: the layout of the file,
    a torn read of the slot, the wrap of the ring of the events at its end and
    at 2^32, a full ring, the values of `XrScreen` through the channel, the
-   recenter, the lockstep, 200000 slots and 100000 events in two threads).
+   recenter, the lockstep, 200000 slots and 100000 events in two threads),
+   and the projection layer (`view_layer_checks.h`: the layout of the record
+   `kView`, the angles of view of `LayerFov`, the values of `MakeView`, when
+   the app shows a projection layer, `kView` in a frame of the ring and in
+   the records of state, and the order in the player: the view goes with the
+   picture at the walk that ends it, and a frame with no walks gives its
+   view to no picture).
 7. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
@@ -479,6 +502,10 @@ and pipelines. So the renderer takes one device in a process: when the
 glue code of Android starts `android_main` again in the same process, the
 app logs it and plays no stream. This is the form of the "Stereoscopic
 window" of the PC: the picture does not follow the head.
+
+With the values of the projection layer of the mod for the frame of the
+picture (`stream_projection=1`, see "The projection layer"), the picture
+shows in a projection layer in place of the stereo screen.
 
 ## The stream of the walks
 
@@ -813,19 +840,121 @@ no session.
 
 **Not shown yet:** the channel under Wine and Box64 in the headset (the
 mapping of a real file by Wine and by the app, and the barriers of Box64),
-the input of a real headset through the channel, and the eye pictures of
-the mod with the views of the channel in the swapchains of a projection
-layer of the app.
+and the input of a real headset through the channel.
 
 **Known limits:**
 
-- The projection layer of the app needs the angle of view that the mod
-  renders (`SetRenderHalfAngle`) and the pose that it rendered from
-  (`SetRenderPose`). The channel does not carry them back to the app yet.
 - The app has no eye tracker action, so the gaze of the slot is never
   valid.
 - The test aid `input_live_test_pulse` writes into the ring of the mod.
   With a mod that sends pulses at the same time, the ring has two writers.
+
+## The projection layer
+
+On the PC the mod shows the God view in a projection layer of its session
+(`XrCompositionLayerProjection`, `XrScreen::BuildFrame`): each eye with the
+pose that the game drew it from, and the angles of view that the game drew.
+The runtime reprojects the picture to the pose of the head at the display
+time. In the headset the app has the session, so the mod gives the app the
+same values for each frame, and the app makes the layer.
+
+**The values of a frame** (`src/mod/view_layer_math.h`, `MakeView`). These
+are the values of the projection layer that the mod gives its session in a
+frame of the God view:
+
+- `SetProjection`: a projection layer, or the screen of two quads. The head
+  view setup of the first frame turns it on.
+- `SetRenderHalfAngle`: the half angle of the symmetric frustum that the game
+  draws. The four angles of each eye come from it and from the size of the
+  picture (`LayerFov` in `src/vr/xr_screen.h`, the rule of `BuildFrame`).
+  With no half angle, the angles of the views of the frame.
+- `SetRenderPose`: the pose of each eye that the picture was drawn from, one
+  frame older than the newest pose, because the camera of the engine is
+  built before the frame begins. In the first frame, the views of the frame.
+  With no roll of the camera the pose has no roll.
+- The size of each eye picture. The rect of each eye is the whole picture,
+  layer 0 of its swapchain, in the LOCAL space.
+- The display time of the input of the frame, and the frame of the input
+  channel (`SlotData::frame`).
+- A frame of the cut scene window: the mod shows it as a screen.
+
+**The back channel** (`xr_input=1`). The values go with the frame of the
+live stream, as a record `kView` of `scene_stream.h` (128 bytes), after
+`kFrame` and before the first walk. So the values belong to the eye pictures
+of the same frame with no frame number to match, and a skip, a drop and the
+queue of the app keep them with their frame. The layout is the same on 32
+bit x86 and on 64 bit ARM (`static_assert` of each size and offset). With
+`xr_input=0` the stream has no `kView`, and the session gets the values.
+
+**The app** (`stream_projection=1`, the default). The player of the app
+(`scene_player.cpp`) takes the `kView` of a frame, and the view goes with the
+picture at the end of the walk that ends the picture of that frame
+(`PictureView`, the rule of `WalkEndsFrame`). A frame that a newer frame
+replaced keeps its records of state with no walks, so its view never goes
+with a picture. A picture with a view for a projection layer (a projection
+layer, valid views, no frame of the cut scene window) shows in a projection
+layer: two swapchains of the size of the picture of the renderer, each eye
+with the pose and the angles of view of the mod, the menu and the cursor as
+quads over it. A swapchain gets a new image only for a new picture
+(`xr_copy_on_change`), and the values go with the image that an eye
+released. The app adds no motion: no smoothing and no prediction of the
+pose. A picture with no view shows on the stereo screen, and the log says so
+one time. `stream_projection=0`: each picture shows on the stereo screen.
+
+**The test aids of the mod.** `xr_view_record=N`: the values of the first N
+frames of the scene go to `bwvr-view.rec` beside `runblack.exe`, from the
+source of the run (the session, the invented head, or the back channel).
+`fake_head_fov=1`: the invented head has the angles of view of the OpenXR
+test runtime of the app, so a desk run with no headset has the view setup of
+a headset and a projection layer (`backend.md`, "Testing without a
+headset"). `bwvr_stream_reader views` writes the `kView` of a stream and
+compares them with a record of the views, and `bwvr_stream_reader
+view-compare` compares two records of the views.
+
+**The desk runs** (`input_channel_run.ps1`). A fake run with
+`-More @{ fake_head_fov = 1 }` records the input and the views. A channel
+run `-Kind channel -From <the fake run> -Live` plays that input into the
+channel, has the live stream with the test reader, and checks that the
+views of the back channel are the views of the fake run (`view-compare`)
+and that each `kView` of the ring and of the record of the stream is the
+view of the same frame. In the test save "pen" (a render of 4080 by 3264,
+`one_walk=1`) the 3100 views of the channel run are the 3100 views of the
+fake run, each with a projection layer: the half angle 1.0602 radians
+(60.74 degrees), the angles -1.0602, 1.0602, 0.9599 and -0.9599 for each
+eye, the eyes at -0.0334 and 0.0334 m. The first frame has the views of the
+frame, and each later frame the pose of `SetRenderPose`. Each of the 13
+`kView` of the ring (frames 2991 to 3003) and the 4 of the record of the
+stream (frames 3000 to 3003) has the bytes of the view of its frame. The
+pictures of frame 2996 of the channel run differ from the pictures of the
+fake run by 0.000 to 0.028 percent of their pixels by more than 24.
+
+**In the emulator** (`emu_xr_test.ps1 -Live <the channel run> -Gpu host`,
+"Test the APK", step 3). With the capture of the channel run above (13
+frames, each with a `kView`): the app made the two swapchains of 4080 by
+3264, and each of the 395 frames of the session with a picture had the
+projection layer and no quad of the stereo screen. Each projection layer
+that the runtime reported has the pose and the angles of view of a `kView`
+of the feed and the whole picture as its rect, and the pictures of both
+eyes that the runtime read back have the scene. Each eye got a copy for
+each of the 2 new pictures. The four pictures of frame 2996 are the same as
+the pictures of the PC, to the pixel. The invented head of the desk run is
+still, so each `kView` of the feed has the same values: the test shows that
+the values reach the layer, not which frame they come from.
+
+**Not shown yet:** a real headset (the reprojection of the runtime of Meta
+with the poses of the mod, and the comfort of the God view in the app), and
+the run with the game in Wine.
+
+**Known limits:**
+
+- The cards, the panel quads of the interface and the window of the cut
+  scenes are not layers of the app yet. A frame of the cut scene window
+  shows on the stereo screen.
+- The intro (`intro_vr.cpp`) gives no frame of the live stream, so its
+  pictures and its poses do not go to the app.
+- After a recenter of the LOCAL space the frames that the mod drew before
+  the recenter go out with the poses of the space before, until the frame of
+  the new input comes.
 
 ## Only Vulkan
 
@@ -833,8 +962,8 @@ The app has one renderer: the Vulkan renderer of the mod. There is no
 fallback to Direct3D, DirectDraw or another graphics interface, now or with
 the x86 runtime.
 
-- The menu, the cursor, the stereo screen and the menu in the window go to
-  the screen with Vulkan. `android.graphics.Canvas` only paints the picture
+- The menu, the cursor, the stereo screen, the projection layer and the menu
+  in the window go to the screen with Vulkan. `android.graphics.Canvas` only paints the picture
   of the menu into memory of the CPU (the text and the shapes). It shows
   nothing itself.
 - The renderer of the mod needs Vulkan 1.3 with its features ("The picture
@@ -900,10 +1029,10 @@ Android. The plan, in steps:
    app through the ring file, frame by frame, and the eye pictures go to
    the stereo screen of the session ("The live stream"). So no draw goes
    through x86 code or through the Vulkan of Wine. The game already sends
-   vertices in screen space, so the stream needs no matrices. Open: the run
-   with the game in Wine, with `vk_stream_live=1` and `stream_live=1`, and
-   the eye pictures in the swapchains of the projection layer in place of
-   the stereo screen.
+   vertices in screen space, so the stream needs no matrices. With
+   `xr_input=1` the eye pictures show in a projection layer with the values
+   of the mod ("The projection layer"). Open: the run with the game in
+   Wine, with `vk_stream_live=1` and `stream_live=1`.
 3. **The head and the controllers.** Wine has no OpenXR for Android, so the
    app gives the mod the views, the hands, the display time, the focus and
    the recenter of its session through the input channel, and the mod gives

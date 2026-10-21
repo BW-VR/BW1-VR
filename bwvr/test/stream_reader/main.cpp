@@ -17,6 +17,18 @@
 //     Compares the bytes of each frame of the record with the frame of the
 //     same number in the capture. Exit code 0 when each one is the same.
 //
+//   bwvr_stream_reader views <stream> [<bwvr-view.rec>]
+//     Writes each record of the projection layer of a frame (kView,
+//     src/mod/view_layer_math.h) of a stream or a capture. With a record of
+//     the views of the same run (xr_view_record), compares each kView with
+//     the view of the same frame in the record. Exit code 0 when the stream
+//     has a kView and each one is the same as in the record.
+//
+//   bwvr_stream_reader view-compare <bwvr-view.rec> <bwvr-view.rec>
+//     Compares two records of the views frame by frame (SameLayer: each
+//     value but the frame of the input channel). Exit code 0 when each frame
+//     of both is the same.
+//
 // The files hold the pixels of the textures of the game: keep them in the
 // folder of the desktop run.
 
@@ -32,6 +44,7 @@
 
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
+#include "../../src/mod/view_layer_math.h"
 
 namespace {
 
@@ -427,6 +440,147 @@ int Compare(const char* capture_path, const char* record_path) {
   return differ == 0 && same + same_state > 0 && ok_a && ok_b ? 0 : 1;
 }
 
+// THE VIEWS (kView).
+std::string ViewText(const ss::ViewBody& v) {
+  char line[512];
+  sprintf_s(line, "frame %llu flags 0x%X input %u time %lld size %ux%u half %.6f", v.frame,
+            v.flags, v.input_frame, v.display_time, v.width, v.height, v.half_angle);
+  std::string text = line;
+  for (int e = 0; e < 2; ++e) {
+    const ss::ViewEye& eye = v.eyes[e];
+    sprintf_s(line, " eye %d pose %.4f %.4f %.4f %.4f %.4f %.4f %.4f fov %.4f %.4f %.4f %.4f", e,
+              eye.position[0], eye.position[1], eye.position[2], eye.orientation[0],
+              eye.orientation[1], eye.orientation[2], eye.orientation[3], eye.fov[0], eye.fov[1],
+              eye.fov[2], eye.fov[3]);
+    text += line;
+  }
+  return text;
+}
+
+// The kView records of a stream, in their order.
+bool StreamViews(const std::vector<uint8_t>& file, std::vector<ss::ViewBody>* out) {
+  ss::Reader reader(file.data(), file.size());
+  if (!reader.Ok()) return false;
+  ss::Kind kind;
+  const uint8_t* body = nullptr;
+  uint32_t n = 0;
+  while (reader.Next(&kind, &body, &n)) {
+    ss::ViewBody v;
+    if (kind == ss::kView && ss::Body(body, n, &v)) out->push_back(v);
+  }
+  return !reader.Broken();
+}
+
+bool ReadViewRecord(const char* path, std::vector<ss::ViewBody>* out, uint32_t* source) {
+  std::vector<uint8_t> bytes;
+  if (!ReadFile(path, &bytes) || bytes.size() < sizeof(view_layer_math::RecordHead)) return false;
+  view_layer_math::RecordHead head;
+  memcpy(&head, bytes.data(), sizeof(head));
+  if (head.magic != view_layer_math::kRecordMagic ||
+      head.version != view_layer_math::kRecordVersion || head.view_bytes != sizeof(ss::ViewBody)) {
+    return false;
+  }
+  *source = head.source;
+  for (size_t at = sizeof(head); at + sizeof(ss::ViewBody) <= bytes.size(); at += sizeof(ss::ViewBody)) {
+    ss::ViewBody v;
+    memcpy(&v, bytes.data() + at, sizeof(v));
+    out->push_back(v);
+  }
+  return true;
+}
+
+int Views(const char* stream_path, const char* record_path) {
+  std::vector<uint8_t> file;
+  std::vector<ss::ViewBody> views;
+  if (!ReadFile(stream_path, &file) || !StreamViews(file, &views)) {
+    printf("views        : FAULT %s is not a whole stream\n", stream_path);
+    return 2;
+  }
+  std::vector<ss::ViewBody> record;
+  uint32_t source = 0;
+  if (record_path != nullptr && !ReadViewRecord(record_path, &record, &source)) {
+    printf("views        : FAULT %s is not a record of the views\n", record_path);
+    return 2;
+  }
+  int same = 0, differ = 0, missing = 0, projection = 0;
+  for (const ss::ViewBody& v : views) {
+    if (view_layer_math::ShowsProjection(v)) ++projection;
+    const char* verdict = "";
+    if (record_path != nullptr) {
+      bool found = false, equal = false;
+      for (const ss::ViewBody& r : record) {
+        if (r.frame != v.frame) continue;
+        found = true;
+        if (memcmp(&r, &v, sizeof(v)) == 0) equal = true;
+      }
+      if (!found) {
+        ++missing;
+        verdict = ": not in the record";
+      } else if (equal) {
+        ++same;
+        verdict = ": the same bytes as in the record";
+      } else {
+        ++differ;
+        verdict = ": FAULT not the same as in the record";
+      }
+    }
+    printf("views        : %s%s\n", ViewText(v).c_str(), verdict);
+  }
+  printf("views        : %zu records of the projection layer in %s, %d for a projection layer",
+         views.size(), stream_path, projection);
+  if (record_path != nullptr) {
+    printf(". The record has %zu frames (source %u): %d the same, %d different, %d not in the record",
+           record.size(), source, same, differ, missing);
+  }
+  printf("\n");
+  if (views.empty()) return 1;
+  return record_path == nullptr || (differ == 0 && missing == 0) ? 0 : 1;
+}
+
+int ViewCompare(const char* a_path, const char* b_path) {
+  std::vector<ss::ViewBody> a, b;
+  uint32_t source_a = 0, source_b = 0;
+  if (!ReadViewRecord(a_path, &a, &source_a) || !ReadViewRecord(b_path, &b, &source_b)) {
+    printf("view compare : FAULT a file is not a record of the views\n");
+    return 2;
+  }
+  std::map<uint64_t, std::vector<ss::ViewBody>> by_a, by_b;
+  for (const ss::ViewBody& v : a) by_a[v.frame].push_back(v);
+  for (const ss::ViewBody& v : b) by_b[v.frame].push_back(v);
+  int same = 0, differ = 0, only = 0, said = 0;
+  for (const auto& f : by_a) {
+    const auto other = by_b.find(f.first);
+    if (other == by_b.end() || other->second.size() != f.second.size()) {
+      ++only;
+      continue;
+    }
+    for (size_t i = 0; i < f.second.size(); ++i) {
+      if (view_layer_math::SameLayer(f.second[i], other->second[i])) {
+        ++same;
+        continue;
+      }
+      ++differ;
+      if (said++ < 5) {
+        printf("view compare : FAULT\n  %s\n  %s\n", ViewText(f.second[i]).c_str(),
+               ViewText(other->second[i]).c_str());
+      }
+    }
+  }
+  for (const auto& f : by_b) {
+    if (by_a.find(f.first) == by_a.end()) ++only;
+  }
+  int projection = 0;
+  for (const ss::ViewBody& v : b) {
+    if (view_layer_math::ShowsProjection(v)) ++projection;
+  }
+  printf("view compare : %zu views (source %u) and %zu views (source %u): %d the same, %d "
+         "different, %d frames not in both. %d views of the second for a projection layer\n",
+         a.size(), source_a, b.size(), source_b, same, differ, only, projection);
+  if (!b.empty()) printf("view compare : the first: %s\n", ViewText(b.front()).c_str());
+  if (!b.empty()) printf("view compare : the last: %s\n", ViewText(b.back()).c_str());
+  return differ == 0 && only == 0 && same > 0 ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -439,7 +593,13 @@ int main(int argc, char** argv) {
     return Read(argv[2], argv[3], attach, last, seconds, slow_ms, lag_until);
   }
   if (argc == 4 && strcmp(argv[1], "compare") == 0) return Compare(argv[2], argv[3]);
+  if ((argc == 3 || argc == 4) && strcmp(argv[1], "views") == 0) {
+    return Views(argv[2], argc == 4 ? argv[3] : nullptr);
+  }
+  if (argc == 4 && strcmp(argv[1], "view-compare") == 0) return ViewCompare(argv[2], argv[3]);
   printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame]\n"
-         "bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>\n");
+         "bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>\n"
+         "bwvr_stream_reader views <stream> [<bwvr-view.rec>]\n"
+         "bwvr_stream_reader view-compare <bwvr-view.rec> <bwvr-view.rec>\n");
   return 1;
 }

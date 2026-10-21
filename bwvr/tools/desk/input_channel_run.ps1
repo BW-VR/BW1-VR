@@ -26,9 +26,28 @@
 #   the picture of -From, as the percentage of its pixels that differ by more
 #   than 24. Two fake runs close in time differ by about 0.05.
 #
+# Both kinds also record the projection layer of each frame of the record
+# (xr_view_record, docs/android.md, "The projection layer"): what the mod
+# gives its session, or with xr_input=1 the back channel to the app. A
+# channel run compares its record of the views with the record of -From
+# (bwvr_stream_reader view-compare). With -More @{ fake_head_fov = 1 } in the
+# fake run, the invented head has the angles of view of a headset, so the
+# views have a projection layer, and the channel run gets the same angles
+# from the record of the input.
+#
+# -Live: the run also has the live stream of the walks (vk_stream_live=1, a
+#   record of the frames -LiveRecord to -LiveRecord + 3), and
+#   bwvr_stream_reader (bwvr\build\test\stream_reader) takes the frames
+#   -LiveAttach to -LiveRecord + 3 from the ring, as live_stream_run.ps1
+#   does. A channel run then checks that each record kView of the ring and of
+#   the record of the stream is the view of the same frame in the record of
+#   the views. Its ring-capture.bin is a feed for emu_xr_test.ps1 -Live, with
+#   the back channel.
+#
 # The output is in desk-<Name>: bwvr-input.rec, bwvr-input.chan,
-# writer.txt and the pictures. The pictures hold pixels of the game and stay
-# in the folder of the run.
+# bwvr-view.rec, writer.txt, with -Live reader.txt, ring-capture.bin and
+# bwvr-stream.bin, and the pictures. The pictures, the stream and the
+# capture hold pixels of the game and stay in the folder of the run.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -40,6 +59,9 @@ param(
     [string]$Script = 'point@1500+1 trigger@1800+8 point@2300+1 trigger@2600+8',
     [string]$Points = '15,-25,40 -10,-30,50',
     [double]$MaxPercent = 0.25,
+    [switch]$Live,
+    [int]$LiveAttach = 2990,
+    [int]$LiveRecord = 3000,
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -47,9 +69,13 @@ $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $sp 'game.ps1')
 $writer = Join-Path $sp '..\..\build\test\input_writer\Release\bwvr_input_writer.exe'
 if (-not (Test-Path -LiteralPath $writer)) { "NOT RUN: no test writer at $writer. Build with .\dev.ps1 build"; exit 6 }
+$reader = Join-Path $sp '..\..\build\test\stream_reader\Release\bwvr_stream_reader.exe'
+if (-not (Test-Path -LiteralPath $reader)) { "NOT RUN: no test reader at $reader. Build with .\dev.ps1 build"; exit 6 }
 $game = Get-BwvrGame
 $chan = Join-Path $game 'bwvr-input.chan'
 $rec = Join-Path $game 'bwvr-input.rec'
+$views = Join-Path $game 'bwvr-view.rec'
+$ring = Join-Path $game 'bwvr-stream.ring'
 $out = Join-Path $sp ("desk-" + $Name)
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $fromRec = $null
@@ -60,13 +86,39 @@ if ($Kind -eq 'channel') {
     if (-not (Test-Path -LiteralPath $fromRec)) { "NOT RUN: no record at $fromRec"; exit 9 }
 }
 # A channel or a record of an earlier run must not be read.
-foreach ($f in @($chan, $rec)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+foreach ($f in @($chan, $rec, $views)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+# With -Live the run writes bwvr-stream.bin and bwvr-stream.ring. A file of
+# that name that is in the game folder before the run is not of this run: it
+# waits in the folder of the run and goes back after the run.
+$streamFiles = @((Join-Path $game 'bwvr-stream.bin'), $ring)
+$aside = Join-Path $out 'game-folder-before'
+if ($Live) {
+    foreach ($f in $streamFiles) {
+        if (Test-Path -LiteralPath $f) {
+            New-Item -ItemType Directory -Force -Path $aside | Out-Null
+            Move-Item -LiteralPath $f -Destination (Join-Path $aside (Split-Path -Leaf $f)) -Force
+            "the file $f of an earlier run waits in $aside and goes back after the run"
+        }
+    }
+}
 
 $keys = @{
     backend = 'vulkan'; one_walk = 1; fake_controller = 2
     fake_controller_script = $Script; fake_controller_points = $Points
     vk_scene_test_frame = $TestFrame; xr_input_record = $Record
-    eye_separation_milli = 500 }
+    xr_view_record = $Record; eye_separation_milli = 500 }
+$q = $null
+if ($Live) {
+    $keys['vk_stream_live'] = 1
+    $keys['vk_stream_record'] = $LiveRecord
+    $keys['vk_stream_frames'] = 4
+    $last = $LiveRecord + 3
+    $q = Start-Process -FilePath $reader -NoNewWindow -PassThru `
+        -ArgumentList @('read', "`"$ring`"", "`"$out`"", "$LiveAttach", "$last", "$(2100 + ($Seconds + 60) * 4)", '0', '0') `
+        -RedirectStandardOutput (Join-Path $out 'reader.txt') -RedirectStandardError (Join-Path $out 'reader-err.txt')
+    $null = $q.Handle  # keeps the exit code
+    "the test reader runs (process $($q.Id)): it asks at frame $LiveAttach and leaves after frame $last"
+}
 $p = $null
 if ($Kind -eq 'channel') {
     $keys['xr_input'] = 1
@@ -82,6 +134,11 @@ foreach ($k in $More.Keys) { $keys[$k] = $More[$k] }
     Tee-Object -Variable runOut
 if (Test-BwvrVerdict $runOut 'NOT RUN') {
     if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    if ($q) { Stop-Process -Id $q.Id -Force -ErrorAction SilentlyContinue }
+    foreach ($f in $streamFiles) {
+        $kept = Join-Path $aside (Split-Path -Leaf $f)
+        if (Test-Path -LiteralPath $kept) { Move-Item -LiteralPath $kept -Destination $f -Force }
+    }
     'NOT RUN: the desktop run did not start'
     exit 7
 }
@@ -94,9 +151,25 @@ if ($p) {
     }
     "the test writer ended with the code $($p.ExitCode)"
 }
-foreach ($f in @($chan, $rec)) {
+if ($q) {
+    if (-not $q.WaitForExit(60000)) {
+        'the test reader did not end: it is stopped'
+        Stop-Process -Id $q.Id -Force
+    }
+    "the test reader ended with the code $($q.ExitCode)"
+    Get-Content -LiteralPath (Join-Path $out 'reader.txt')
+}
+$made = @($chan, $rec, $views)
+if ($Live) { $made += $streamFiles }
+foreach ($f in $made) {
     if (Test-Path -LiteralPath $f) {
         try { Move-Item -LiteralPath $f -Destination (Join-Path $out (Split-Path -Leaf $f)) -Force } catch { "WARNING: $f was not moved out of the game folder: $_" }
+    }
+}
+foreach ($f in $streamFiles) {
+    $kept = Join-Path $aside (Split-Path -Leaf $f)
+    if ($Live -and (Test-Path -LiteralPath $kept)) {
+        try { Move-Item -LiteralPath $kept -Destination $f -Force; "the file $f of the earlier run is back" } catch { "WARNING: $kept did not go back to the game folder: $_" }
     }
 }
 $log = Join-Path $out 'bwvr.log'
@@ -104,13 +177,34 @@ if (Test-Path -LiteralPath $log) {
     'the lines of the input channel and of the pulses in the log:'
     Select-String -LiteralPath $log -Pattern 'xr input     :|haptic pulse' | Select-Object -First 40 | ForEach-Object { '  ' + $_.Line }
 }
-if ($Kind -ne 'channel') { exit 0 }
+$fails = 0
+if ($Live) {
+    "== the frames of the ring against the record of the stream"
+    & $reader compare (Join-Path $out 'ring-capture.bin') (Join-Path $out 'bwvr-stream.bin')
+    if ($LASTEXITCODE -ne 0) { $fails++ }
+}
+if ($Kind -ne 'channel') {
+    if ($fails -gt 0) { "LIVE STREAM FAULT: see the lines compare"; exit 1 }
+    exit 0
+}
 
 # THE RESULTS of a channel run.
-$fails = 0
 "== the record of this run against the record of $From"
 & $writer compare $fromRec (Join-Path $out 'bwvr-input.rec')
 if ($LASTEXITCODE -ne 0) { $fails++ }
+# THE VIEWS: the projection layer of each frame, from the back channel of
+# this run and from the fake run of the same input.
+"== the views of this run against the views of $From"
+& $reader view-compare (Join-Path $From 'bwvr-view.rec') (Join-Path $out 'bwvr-view.rec')
+if ($LASTEXITCODE -ne 0) { $fails++ }
+if ($Live) {
+    foreach ($s in @('ring-capture.bin', 'bwvr-stream.bin')) {
+        "== the records kView of $s against the views of this run"
+        & $reader views (Join-Path $out $s) (Join-Path $out 'bwvr-view.rec') |
+            Where-Object { $_ -notmatch ': the same bytes as in the record$' }
+        if ($LASTEXITCODE -ne 0) { $fails++ }
+    }
+}
 function Get-LogPulses([string]$File) {
     if (-not (Test-Path -LiteralPath $File)) { return @() }
     return @(Select-String -LiteralPath $File -Pattern 'haptic pulse, (\d+) ms at ([0-9.]+), frame (\d+)' |
@@ -177,5 +271,5 @@ foreach ($ref in $pictures) {
     "   {0}: {1:N3} percent of the pixels differ by more than 24, {2:N3} percent differ at all, the mean difference {3:N3}{4}" -f $ref.Name, $d[0], $d[1], $d[2], $(if ($over) { " (more than $MaxPercent percent: FAULT)" } else { '' })
 }
 if ($pictures.Count -eq 0) { $fails++ }
-if ($fails -eq 0) { "INPUT CHANNEL VERIFIED: the record, the pulses and the pictures (each picture at most $MaxPercent percent of its pixels by more than 24)" }
+if ($fails -eq 0) { "INPUT CHANNEL VERIFIED: the record, the pulses, the views$(if ($Live) { ', the views in the stream' }) and the pictures (each picture at most $MaxPercent percent of its pixels by more than 24)" }
 else { "INPUT CHANNEL FAULT: $fails of the checks above" }

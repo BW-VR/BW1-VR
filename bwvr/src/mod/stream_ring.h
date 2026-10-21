@@ -281,7 +281,7 @@ inline size_t UnitBytes(const uint8_t* bytes, size_t n, size_t limit,
   while (at + 8 <= n) {
     uint32_t head[2];
     memcpy(head, bytes + at, sizeof(head));
-    if (head[0] < scene_stream::kStart || head[0] > scene_stream::kFrameEnd ||
+    if (head[0] < scene_stream::kStart || head[0] > scene_stream::kLastKind ||
         head[1] > limit) {
       *bad = true;
       return 0;

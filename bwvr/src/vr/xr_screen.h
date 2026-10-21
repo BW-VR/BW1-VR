@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <math.h>
 #include <stdint.h>
 
 namespace bwvr {
@@ -42,6 +43,32 @@ struct EyeView {
   float fov_down;
   bool valid;
 };
+
+// THE ANGLES OF VIEW OF A PROJECTION LAYER for one eye: the layer of
+// XrScreen::EndFrame, and the back channel to the headset app
+// (src/mod/scene_stream.h, kView). The frustum of the layer must be the
+// frustum that the caller rendered. The game renders a symmetric frustum, so
+// with the half angle of SetRenderHalfAngle both sides get it, and the
+// vertical half angle follows from the size of the picture. With no half
+// angle (0) the layer takes the angles of the view. out: left, right, up,
+// down in radians, signed, as XrFovf.
+inline void LayerFov(float half, uint32_t width, uint32_t height,
+                     const EyeView& view, float out[4]) {
+  if (half > 0.0f) {
+    const float aspect_half =
+        atanf(tanf(half) * static_cast<float>(height) /
+              static_cast<float>(width));
+    out[0] = -half;
+    out[1] = half;
+    out[2] = aspect_half;
+    out[3] = -aspect_half;
+  } else {
+    out[0] = view.fov_left;
+    out[1] = view.fov_right;
+    out[2] = view.fov_up;
+    out[3] = view.fov_down;
+  }
+}
 
 // One hand, as the runtime reported it at the display time of the last
 // BeginFrame. Poses are in meters, in the same LOCAL space as EyeView.

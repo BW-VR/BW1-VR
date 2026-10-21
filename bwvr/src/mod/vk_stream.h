@@ -68,6 +68,10 @@ void VkStreamClear(uint32_t count, const void* rects, uint32_t flags,
                    uint32_t color, float z);
 void VkStreamPanelBind(bool panel);
 void VkStreamWritten(void* surface);
+// THE PROJECTION LAYER of the frame for the headset app (kView,
+// view_layer_math.h). stereo.cpp gives it with xr_input=1, after
+// VkSceneFrame and before the walks of the frame.
+void VkStreamView(const scene_stream::ViewBody& view);
 
 // vk_scene.cpp gives the read of a surface of the game as RGBA8 (ReadSurface),
 // so the stream has the same pixels as the renderer of the PC. pixels must

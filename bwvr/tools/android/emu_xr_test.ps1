@@ -61,6 +61,16 @@
     frame of the stream against the pictures of the PC in the desk folder.
     It needs -Gpu host.
 
+    When the feed has the records of the projection layer of a desk run
+    with xr_input=1 (kView, docs/android.md, "The projection layer", for
+    example a run of input_channel_run.ps1 -Kind channel -Live), the app
+    shows the pictures in a projection layer (stream_projection=1). The test
+    then checks the projection layer in place of the stereo screen: its two
+    swapchains, the pose, the angles of view and the rect of each eye that
+    the runtime reports against the records kView of the feed, the pictures
+    of both eyes that the runtime read back, and a copy for each new
+    picture.
+
 .PARAMETER FeedMs
     With -Live: the time between two frames of the feed, 14 by default. 0:
     no wait, so the feed is faster than the session, and the test checks
@@ -89,6 +99,7 @@ $Bwvr = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $Repo = Split-Path $Bwvr -Parent
 $Apk = Join-Path $Bwvr 'out\android\bwvr-quest.apk'
 $InputWriter = Join-Path $Bwvr 'build\test\input_writer\Release\bwvr_input_writer.exe'
+$StreamReader = Join-Path $Bwvr 'build\test\stream_reader\Release\bwvr_stream_reader.exe'
 # A run with a stream keeps its results in a folder of its own.
 $Out = Join-Path $Bwvr $(if ($Live) { 'out\android\emu-xr-live-test' } elseif ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
 $Feed = $null
@@ -99,6 +110,22 @@ if ($Live) {
 # The renderer draws on the device of the session with a stream or a live
 # stream, and then the stereo screen is there.
 $Screen = [bool]$Stream -or [bool]$Live
+# THE PROJECTION LAYER: a feed or a stream with records kView for a
+# projection layer (bwvr_stream_reader views) shows in a projection layer,
+# and not on the stereo screen.
+$Projection = $false
+$feedViews = @()
+$viewSource = $(if ($Live) { $Feed } elseif ($Stream) { $Stream } else { $null })
+if ($viewSource) {
+    if (-not (Test-Path -LiteralPath $StreamReader)) { Stop-Android "There is no test reader of the live stream at:`n$StreamReader`nRun .\dev.ps1 build first." }
+    $viewLines = @(& $StreamReader views $viewSource 2>&1 | ForEach-Object { "$_" })
+    $summary = $viewLines | Where-Object { $_ -match 'records of the projection layer in .*, (\d+) for a projection layer' } | Select-Object -Last 1
+    if ($summary -and [regex]::Match($summary, ', (\d+) for a projection layer').Groups[1].Value -ne '0') { $Projection = $true }
+    foreach ($l in $viewLines) {
+        $m = [regex]::Match($l, '^views        : frame (\d+) flags \S+ input \d+ time -?\d+ size \S+ half \S+ (eye 0 pose .* fov \S+ \S+ \S+ \S+) (eye 1 pose .* fov \S+ \S+ \S+ \S+)$')
+        if ($m.Success) { $feedViews += , @($m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value) }
+    }
+}
 $Avd = 'bwvr_xr_test'
 $Image = 'system-images;android-34;google_apis;x86_64'
 $Package = 'org.bwvr.quest'
@@ -235,8 +262,9 @@ try {
     # pixels high from y = 190 (menu_layout.h), so the middle of row r is at
     # 227 + 74 r. Layer $L is the menu quad.
     $script = Join-Path $Out 'script.txt'
-    # With a stream the two quads of the stereo screen come first.
-    $L = $(if ($Screen) { 2 } else { 0 })
+    # With a stream the two quads of the stereo screen come first. The
+    # projection layer is no quad.
+    $L = $(if ($Screen -and -not $Projection) { 2 } else { 0 })
     # The live stream makes the stereo screen at its first picture, after the
     # first frames of the session: its script starts 200 frames later.
     $T = $(if ($Live) { 200 } else { 0 })
@@ -254,6 +282,9 @@ try {
         "$(150 + $T) trigger right 1", "$(154 + $T) trigger right 0",
         "$(170 + $T) capture saved",
         "$(200 + $T) exit")
+    # The pictures of the eyes of the projection layer, one time: an image of
+    # the size of the render takes a long time to read back in the emulator.
+    if ($Projection) { Add-Content -LiteralPath $script -Encoding ascii -Value "$(40 + $T) eyes start" }
     Adb @('push', $script, "$XrDir/script.txt")
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
@@ -287,7 +318,9 @@ try {
     Say 'Start the app with the test runtime'
     Adb @('logcat', '-c')
     Adb @('shell', 'am', 'start', '-n', "$Package/android.app.NativeActivity")
-    $deadline = (Get-Date).AddSeconds($(if ($Live) { 600 } elseif ($Stream) { 400 } else { 120 }))
+    # The read back of an eye of the projection layer (the size of the render)
+    # takes minutes in the emulator.
+    $deadline = (Get-Date).AddSeconds($(if ($Projection) { 1200 } elseif ($Live) { 600 } elseif ($Stream) { 400 } else { 120 }))
     do {
         Start-Sleep -Seconds 2
         $report = AdbOut @('shell', 'cat', "$XrDir/report.txt")
@@ -325,8 +358,9 @@ try {
     Expect ($report -match 'call xrDestroySession') 'the app destroyed the session'
     Expect ($report -notmatch '(?m)^fault ') ('the runtime found no fault' + $(if ($report -match '(?m)^fault (.*)$') { ': ' + $Matches[1] } else { '' }))
     # With a stream the stereo screen is layer 0 (left eye) and 1 (right
-    # eye), and the menu is layer 2.
-    $menuLayer = $(if ($Screen) { 2 } else { 0 })
+    # eye), and the menu is layer 2. With the projection layer the menu is
+    # quad 0.
+    $menuLayer = $(if ($Screen -and -not $Projection) { 2 } else { 0 })
     foreach ($name in @('start', 'point', 'moving', 'saved')) {
         $m = [regex]::Match($report, "capture \S*/$name-$menuLayer\.bmp (\d+)x(\d+) lit (\d+)")
         Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[3].Value) lit pixels)"
@@ -338,10 +372,45 @@ try {
             Expect ($log -match 'replay       : .*: \d+ records, \d+ frames, [1-9]\d* walks') 'the app played the stream'
         }
         Expect ($log -match 'a stereo screen of two quads') 'the app made the stereo screen'
-        Expect ($report -match 'quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 1 quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 2') 'the stereo screen is a quad for the left eye and a quad for the right eye, 2.6 m in front'
+        if (-not $Projection) {
+            Expect ($report -match 'quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 1 quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 2') 'the stereo screen is a quad for the left eye and a quad for the right eye, 2.6 m in front'
+            foreach ($eye in 0, 1) {
+                $m = [regex]::Match($report, "capture \S*/start-$eye\.bmp (\d+)x(\d+) lit (\d+)")
+                Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the stereo screen has the scene ($($m.Groups[3].Value) lit pixels)"
+            }
+        }
+    }
+    if ($Projection) {
+        # THE PROJECTION LAYER of the pictures of the renderer, with the
+        # values of the mod for the frame of each picture (kView).
+        Expect ($feedViews.Count -gt 0) "the $(if ($Live) { 'feed' } else { 'stream' }) has $($feedViews.Count) records kView for a projection layer"
+        $eyesLine = [regex]::Match($log, 'xr           : a projection layer of two swapchains of (\d+) by (\d+) for the pictures of the renderer')
+        Expect $eyesLine.Success ("the app made the two swapchains of the projection layer" + $(if ($eyesLine.Success) { ", $($eyesLine.Groups[1].Value) by $($eyesLine.Groups[2].Value)" } else { '' }))
+        Expect ($log -match 'xr           : the pictures of the renderer go out in a projection layer, with the values of frame \d+ of the mod') 'the pictures of the renderer go out in a projection layer'
+        Expect ($report -notmatch 'quad 0\.000 0\.100 -2\.600 size 2\.600') 'no frame has the quads of the stereo screen'
+        $layerLines = @([regex]::Matches($report, '(?m)^frame (\d+) projection (eye 0 pose .* fov \S+ \S+ \S+ \S+) rect (\d+) (\d+) (\d+)x(\d+) (eye 1 pose .* fov \S+ \S+ \S+ \S+) rect (\d+) (\d+) (\d+)x(\d+)\r?$'))
+        $matched = 0
+        $frames = @()
+        foreach ($m in $layerLines) {
+            foreach ($v in $feedViews) {
+                if ($m.Groups[2].Value -eq $v[1] -and $m.Groups[7].Value -eq $v[2]) { $matched++; $frames += $v[0]; break }
+            }
+        }
+        Expect ($layerLines.Count -gt 0 -and $matched -eq $layerLines.Count) ("the pose and the angles of view of each eye of each projection layer of the runtime are the values of a record kView of the feed ($matched of $($layerLines.Count) lines of the report" + $(if ($frames.Count -gt 0) { ", frames $(($frames | Sort-Object -Unique) -join ' ')" } else { '' }) + ')')
+        if ($layerLines.Count -gt 0) {
+            $first = $layerLines[0]
+            Write-Host ('         the runtime: ' + $first.Value.Trim())
+        }
+        $rectOk = $eyesLine.Success -and $layerLines.Count -gt 0
+        foreach ($m in $layerLines) {
+            if ($m.Groups[3].Value -ne '0' -or $m.Groups[4].Value -ne '0' -or $m.Groups[8].Value -ne '0' -or $m.Groups[9].Value -ne '0' -or
+                $m.Groups[5].Value -ne $eyesLine.Groups[1].Value -or $m.Groups[6].Value -ne $eyesLine.Groups[2].Value -or
+                $m.Groups[10].Value -ne $eyesLine.Groups[1].Value -or $m.Groups[11].Value -ne $eyesLine.Groups[2].Value) { $rectOk = $false }
+        }
+        Expect $rectOk 'the rect of each eye is its whole picture'
         foreach ($eye in 0, 1) {
-            $m = [regex]::Match($report, "capture \S*/start-$eye\.bmp (\d+)x(\d+) lit (\d+)")
-            Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the stereo screen has the scene ($($m.Groups[3].Value) lit pixels)"
+            $m = [regex]::Match($report, "capture \S*/start-p$eye\.bmp (\d+)x(\d+) lit (\d+)")
+            Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the projection layer has the scene ($($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels)"
         }
     }
     if ($Live) {
@@ -350,12 +419,17 @@ try {
         Expect ($log -match 'live         : frames come\. The first is frame \d+, with the whole state') 'the first frame has the whole state'
         $liveLine = [regex]::Match($log, 'live         : (no new frame for 1 s|the app ends): (\d+) frames played and (\d+) skipped \(frames (\d+) to (\d+)\), (\d+) pictures\. In all (\d+) records, (\d+) walks, (\d+) draws, (\d+) surfaces, (\d+) of an unknown kind([^.]*)\.')
         Expect ($liveLine.Success -and [int]$liveLine.Groups[2].Value -gt 0 -and [int]$liveLine.Groups[8].Value -gt 0 -and [int]$liveLine.Groups[11].Value -eq 0 -and $liveLine.Groups[12].Value -eq '') ("the app played the live stream" + $(if ($liveLine.Success) { ": $($liveLine.Groups[2].Value) frames played and $($liveLine.Groups[3].Value) skipped, frames $($liveLine.Groups[4].Value) to $($liveLine.Groups[5].Value), $($liveLine.Groups[6].Value) pictures, $($liveLine.Groups[8].Value) walks, 0 of an unknown kind" } else { '' }))
-        $screenLine = [regex]::Match($log, 'xr           : (\d+) copies of the stereo screen for eye 0 and (\d+) for eye 1')
+        $screenLine = $(if ($Projection) { [regex]::Match($log, 'xr           : (\d+) copies of the projection layer for eye 0 and (\d+) for eye 1') } else { [regex]::Match($log, 'xr           : (\d+) copies of the stereo screen for eye 0 and (\d+) for eye 1') })
         $pictures = $(if ($liveLine.Success) { [int]$liveLine.Groups[6].Value } else { 0 })
         if ($FeedMs -eq 0 -and $liveLine.Success) {
             Expect ([int]$liveLine.Groups[3].Value -gt 0) "a feed faster than the session: the app skipped the walks of $($liveLine.Groups[3].Value) frames and played $($liveLine.Groups[2].Value) frames whole"
         }
-        Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of the stereo screen got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')')
+        $what = $(if ($Projection) { 'the projection layer' } else { 'the stereo screen' })
+        Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of $what got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')')
+        if ($Projection) {
+            $frameLine = [regex]::Match($log, 'xr           : \d+ copies of the projection layer for eye 0 and \d+ for eye 1\. (\d+) frames with the projection layer, (\d+) frames with the stereo screen')
+            Expect ($frameLine.Success -and [int]$frameLine.Groups[1].Value -gt 0 -and [int]$frameLine.Groups[2].Value -eq 0) ("each frame with a picture had the projection layer (" + $(if ($frameLine.Success) { "$($frameLine.Groups[1].Value) frames with the projection layer, $($frameLine.Groups[2].Value) with the stereo screen" } else { 'no line in the log' }) + ')')
+        }
         # The pictures of the test frame of the stream (vk_scene_test_frame),
         # against the pictures of the PC of the same desk run: at most 2
         # percent of the pixels with a difference of more than 24.

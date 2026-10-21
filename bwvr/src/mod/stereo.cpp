@@ -80,6 +80,8 @@
 #include "render_thread.h"
 #include "scene_sample.h"
 #include "ui_panel.h"
+#include "view_layer_math.h"
+#include "vk_stream.h"
 #include "xr_input.h"
 
 // d3d9_backend.cpp: the start with DXVK did not fail.
@@ -302,6 +304,9 @@ void EyeLumaFrame(uint64_t frame);
 void EyeLumaReport();
 // temple.cpp: before the scene walk of a frame in the Temple.
 void TempleBeforeScene();
+// Below: the display time of the frame, from the session or the input
+// channel.
+bool StereoDisplayTime(int64_t* time, int64_t* period);
 
 namespace {
 
@@ -312,12 +317,40 @@ Process3dEngineFn o_Process3dEngine = nullptr;
 
 bwvr::XrScreen* g_screen = nullptr;
 
-// THE EYES OF THE FRAME: from the session, or from the input channel of the
-// headset app (xr_input=1, xr_input.h), at the same places. With xr_input=1
-// the mod has no session. Without it, only a frame to the headset asks.
+// THE INVENTED HEAD AS VIEWS (fake_head_fov=1, a test aid). The eyes of the
+// invented head get the angles of view of the OpenXR test runtime of the
+// headset app (android/test_runtime), so a desktop run and the emulator test
+// have the same headset. Then the frame sets up the view of the headset
+// (PrepareHeadView) and the projection layer of the frame as with a session.
+// Off, the invented head has no angles of view, and the game keeps its own.
+const float kFakeFov[4] = {-0.9425f, 0.8203f, 0.8901f, -0.9599f};
+bool g_fake_fov = false;
+bwvr::EyeView g_fake_view[2] = {};
+
+// THE EYES OF THE FRAME: from the session, from the input channel of the
+// headset app (xr_input=1, xr_input.h), or from the invented head with
+// fake_head_fov=1, at the same places. With xr_input=1 the mod has no
+// session. Without it, only a frame to the headset or a frame of the
+// invented head with angles of view asks.
 const bwvr::EyeView& HeadEye(int eye) {
-  return XrInputOn() ? XrInputEye(eye) : g_screen->eye(eye);
+  if (XrInputOn()) return XrInputEye(eye);
+  if (g_screen != nullptr && g_screen->running()) return g_screen->eye(eye);
+  return g_fake_view[eye ? 1 : 0];
 }
+
+// True when the views of this frame come from the invented head with angles
+// of view (fake_head_fov=1), and not from a session or the input channel.
+bool FakeViewsOn(bool to_headset) {
+  return g_fake_fov && !to_headset && !XrInputOn() && HeadPoseFakeOn();
+}
+
+// THE PROJECTION LAYER OF THE FRAME (view_layer_math.h): what the mod gives
+// its session with SetProjection and SetRenderHalfAngle. PrepareHeadView sets
+// both, for each source of the views. The session gets them there, and the
+// back channel of xr_input=1 and the record of xr_view_record take them from
+// here.
+bool g_layer_projection = false;
+float g_layer_half = 0.0f;
 
 float g_eye_separation = 0.5f;  // world units between the eyes
 bool g_stereo_on = true;
@@ -1093,13 +1126,39 @@ void PollHotkeys() {
   hint_down = hint_now;
 }
 
+// DECLARE A POSE THE PICTURE COULD HAVE COME FROM.
+//
+// The runtime's own pose is the right thing to declare, because the layer
+// says "this image is what a head at this pose sees" and that is exactly what
+// the render is built to be. The one place it lies is roll. With roll
+// switched off the picture is drawn level while the runtime's pose still
+// carries the player's tilt, so the runtime shows a level picture inside a
+// tilted frustum and the whole world tilts with the player's head. Take the
+// roll out of the claim whenever the render leaves it out. The next frame
+// declares this pose (SetRenderPose).
+void DeclareRenderedPose(const bwvr::EyeView eyes[2]) {
+  const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
+  for (int e = 0; e < 2; ++e) {
+    for (int i = 0; i < 3; ++i) g_rendered_position[e][i] = eyes[e].position[i];
+    if (declare_roll) {
+      for (int i = 0; i < 4; ++i) {
+        g_rendered_orientation[e][i] = eyes[e].orientation[i];
+      }
+    } else {
+      HeadPoseStripRoll(eyes[e].orientation, g_rendered_orientation[e]);
+    }
+  }
+  g_head_camera_pose_ready = true;
+}
+
 // THE HEAD TRACKING SETUP, once. The render has to cover what the headset asks for,
 // and the game renders a symmetric frustum whose vertical angle comes from
 // the render aspect. So take the widest half angle of either eye in either
 // direction and render that both ways, which needs a roughly square render.
 // The intro (intro_vr.cpp) runs the same setup before its first frame.
 void PrepareHeadView(bool to_headset) {
-  if (g_head_tracking && (to_headset || XrInputOn()) && g_immersive &&
+  if (g_head_tracking &&
+      (to_headset || XrInputOn() || FakeViewsOn(to_headset)) && g_immersive &&
       !g_head_ready && HeadEye(0).valid && HeadEye(1).valid) {
     // What the headset asks for, horizontally and vertically, taking the
     // widest of either eye in each direction.
@@ -1154,6 +1213,8 @@ void PrepareHeadView(bool to_headset) {
         g_screen->SetRenderHalfAngle(half);
         g_screen->SetProjection(true);
       }
+      g_layer_half = half;
+      g_layer_projection = true;
       g_head_ready = true;
       const bw::tech::InfoTransform* info =
           reinterpret_cast<const bw::tech::InfoTransform*>(
@@ -1337,9 +1398,40 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   // camera call of this frame read the same value.
   const bool flat = CutsceneWindowFlat();
 
+  // The invented head as the views of this frame, with the angles of view of
+  // fake_head_fov.
+  const bool fake_views = g_head_tracking && !to_headset && !channel &&
+                          HeadPoseFakeOn();
+  if (fake_views) {
+    for (int e = 0; e < 2; ++e) {
+      bwvr::EyeView& v = g_fake_view[e];
+      HeadPoseFakeEye(e, v.position, v.orientation);
+      v.fov_left = g_fake_fov ? kFakeFov[0] : 0.0f;
+      v.fov_right = g_fake_fov ? kFakeFov[1] : 0.0f;
+      v.fov_up = g_fake_fov ? kFakeFov[2] : 0.0f;
+      v.fov_down = g_fake_fov ? kFakeFov[3] : 0.0f;
+      v.valid = true;
+    }
+  }
+
   // Not in a flat frame: the setup fixes the view angle of the headset, and
   // a flat frame has the game's own.
   if (!flat) PrepareHeadView(to_headset);
+
+  // THE PROJECTION LAYER OF THIS FRAME (view_layer_math.h), before the head
+  // blocks below make the pose of this frame the pose of the next one.
+  view_layer_math::LayerInput layer;
+  layer.projection = to_headset ? g_screen->projection() : g_layer_projection;
+  layer.half_angle = g_layer_half;
+  layer.render_pose = g_head_camera_pose_ready;
+  memcpy(layer.pose_position, g_rendered_position, sizeof(layer.pose_position));
+  memcpy(layer.pose_orientation, g_rendered_orientation,
+         sizeof(layer.pose_orientation));
+  if (to_headset || channel || fake_views) {
+    layer.views[0] = HeadEye(0);
+    layer.views[1] = HeadEye(1);
+  }
+  layer.flat = flat;
 
   // An invented head sits at the origin by construction, or at its still
   // lean, so the centre is known without asking the runtime.
@@ -1354,6 +1446,9 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     // The subtitle card hangs in the room, so it needs the head of the frame.
     UiPanelHead(centre, fake_orientation);
     CutsceneWindowHead(centre, fake_orientation);
+    // The pose that the next frame is drawn from, as for a session below,
+    // for the projection layer of the frame (view_layer_math.h).
+    DeclareRenderedPose(g_fake_view);
   }
   if (g_head_tracking && (to_headset || channel) && HeadEye(0).valid &&
       HeadEye(1).valid) {
@@ -1380,30 +1475,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
                                 g_rendered_orientation[e]);
       }
     }
-    // DECLARE A POSE THE PICTURE COULD HAVE COME FROM.
-    //
-    // The runtime's own pose is the right thing to declare, because the layer
-    // says "this image is what a head at this pose sees" and that is exactly
-    // what the render is built to be. The one place it lies is roll. With roll
-    // switched off the picture is drawn level while the runtime's pose still
-    // carries the player's tilt, so the runtime shows a level picture inside a
-    // tilted frustum and the whole world tilts with the player's head. Take
-    // the roll out of the claim whenever the render leaves it out.
-    const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
-    for (int e = 0; e < 2; ++e) {
-      for (int i = 0; i < 3; ++i) {
-        g_rendered_position[e][i] = HeadEye(e).position[i];
-      }
-      if (declare_roll) {
-        for (int i = 0; i < 4; ++i) {
-          g_rendered_orientation[e][i] = HeadEye(e).orientation[i];
-        }
-      } else {
-        HeadPoseStripRoll(HeadEye(e).orientation,
-                          g_rendered_orientation[e]);
-      }
-    }
-    g_head_camera_pose_ready = true;
+    const bwvr::EyeView eyes[2] = {HeadEye(0), HeadEye(1)};
+    DeclareRenderedPose(eyes);
     HeadPoseUpdate(center, HeadEye(0).orientation);
     UiPanelHead(center, HeadEye(0).orientation);
     CutsceneWindowHead(center, HeadEye(0).orientation);
@@ -1422,6 +1495,33 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   if (g_test_keys) EyeCaptureCheckFile(g_frames);
   VkSceneFrame(ControllersFrameCount(), g_frames + 1,
                EyeCaptureWanted(g_frames + 1));
+  // THE BACK CHANNEL (xr_input=1, docs/android.md, "The projection layer"):
+  // the projection layer of this frame goes into the frame of the stream,
+  // before its walks, so the headset app has the values of the eye pictures
+  // that it shows. xr_view_record (a test aid) keeps the same values for
+  // each source of the views.
+  if ((channel && VkStreamOn()) || XrInputViewRecording()) {
+    layer.frame = ControllersFrameCount();
+    if (to_headset) {
+      layer.width = g_screen->width();
+      layer.height = g_screen->height();
+    } else {
+      const bw::tech::InfoTransform* info =
+          reinterpret_cast<const bw::tech::InfoTransform*>(
+              bw::tech::kInfoTransform);
+      if (!IsBadReadPtr(info, sizeof(*info)) && info->res_x > 0 &&
+          info->res_y > 0) {
+        layer.width = static_cast<uint32_t>(info->res_x);
+        layer.height = static_cast<uint32_t>(info->res_y);
+      }
+    }
+    int64_t period = 0;
+    if (!StereoDisplayTime(&layer.display_time, &period)) layer.display_time = 0;
+    layer.input_frame = channel ? XrInputSlotFrame() : 0u;
+    const scene_stream::ViewBody view = view_layer_math::MakeView(layer);
+    if (channel && VkStreamOn()) VkStreamView(view);
+    XrInputRecordView(view, to_headset ? 0 : (channel ? 2 : 1));
+  }
   // FOVEATED RENDERING: the gaze of an eye tracker is the centre of the
   // fovea of this frame. With none the centre is straight ahead.
   {
@@ -2233,6 +2333,23 @@ void StereoSetTestKeys(bool on) { g_test_keys = on; }
 void StereoSetHeadFov(float degrees) { g_head_fov_deg = degrees; }
 void StereoSetFovMargin(int percent) {
   g_fov_margin_pct = percent < 0 ? 0 : (percent > 30 ? 30 : percent);
+}
+
+void StereoSetFakeFov(bool on) {
+  g_fake_fov = on;
+  if (on) {
+    ModLog("head         : fake_head_fov=1. The eyes of the invented head have "
+           "the angles of view %.4f %.4f %.4f %.4f (a test aid)",
+           kFakeFov[0], kFakeFov[1], kFakeFov[2], kFakeFov[3]);
+  }
+}
+
+// The angles of view of the invented head (fake_head_fov=1), for the record
+// of the input (controllers.cpp). False when it has none.
+bool StereoFakeFov(float fov[4]) {
+  if (!g_fake_fov) return false;
+  for (int i = 0; i < 4; ++i) fov[i] = kFakeFov[i];
+  return true;
 }
 
 void StereoSetHeadTracking(bool on) {

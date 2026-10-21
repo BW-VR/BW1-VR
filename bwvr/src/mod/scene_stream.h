@@ -16,6 +16,7 @@
 // after the game writes it.
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -44,7 +45,10 @@ enum Kind : uint32_t {
   kSurface = 15,      // SurfaceBody, the pixels (RGBA8)
   kWritten = 16,      // u64: VkSceneSurfaceWritten
   kFrameEnd = 17,     // u64 frame: the end of a frame of the game
+  kView = 18,         // ViewBody: the projection layer of the frame (the back channel)
 };
+// The last kind. A record of a higher kind is not of the stream.
+constexpr uint32_t kLastKind = kView;
 
 // The values of the other parts of the mod that the renderer reads, at the
 // time of a record (scene_host.h in the app).
@@ -151,6 +155,39 @@ struct SurfaceBody {
   uint32_t has_pixels;  // 0: a render target with no pixels for a texture
 };
 
+// THE PROJECTION LAYER OF A FRAME (kView), THE BACK CHANNEL TO THE HEADSET APP
+// (docs/android.md, "The projection layer"). With xr_input=1 the mod has no
+// OpenXR session, and the app shows the eye pictures. So the mod gives the
+// app what it gives a session of its own for the frame (XrScreen,
+// src/vr/xr_screen.h): SetProjection, SetRenderHalfAngle, SetRenderPose,
+// the size of the eye pictures, and the angles of view that the layer gets
+// from them (LayerFov). The record is in the frame of its eye pictures: after
+// kFrame and before the first walk.
+//
+// The bits of ViewBody::flags.
+constexpr uint32_t kViewProjection = 1u << 0;  // SetProjection(true): a projection layer, not a screen
+constexpr uint32_t kViewRenderPose = 1u << 1;  // the poses of SetRenderPose. Else the views of the frame
+constexpr uint32_t kViewValid = 1u << 2;       // both views of the frame are valid
+constexpr uint32_t kViewFlat = 1u << 3;        // a frame of the cut scene window (a screen)
+
+// One eye of the layer, in meters in the LOCAL space of the session.
+struct ViewEye {
+  float position[3];
+  float orientation[4];  // x y z w
+  float fov[4];          // left, right, up, down in radians, signed, as XrFovf
+};
+
+struct ViewBody {
+  uint32_t flags;          // kViewProjection, kViewRenderPose, kViewValid, kViewFlat
+  uint32_t input_frame;    // SlotData::frame of the input of the frame. 0 with no input channel
+  uint64_t frame;          // the frame of the controllers, as kFrame
+  int64_t display_time;    // ns, the display time of the input of the frame
+  uint32_t width, height;  // the size of each eye picture of the layer
+  float half_angle;        // SetRenderHalfAngle, radians. 0: none
+  uint32_t reserved;
+  ViewEye eyes[2];
+};
+
 // The mod is 32 bit and the app is 64 bit: each body has one size on both.
 static_assert(sizeof(StreamState) == 40, "StreamState");
 static_assert(sizeof(StartBody) == 100, "StartBody");
@@ -164,6 +201,14 @@ static_assert(sizeof(DrawBody) == 64, "DrawBody");
 static_assert(sizeof(TargetBody) == 48, "TargetBody");
 static_assert(sizeof(ClearBody) == 16, "ClearBody");
 static_assert(sizeof(SurfaceBody) == 24, "SurfaceBody");
+static_assert(sizeof(ViewEye) == 44, "ViewEye");
+static_assert(sizeof(ViewBody) == 128, "ViewBody");
+static_assert(offsetof(ViewBody, frame) == 8 && offsetof(ViewBody, display_time) == 16 &&
+                  offsetof(ViewBody, width) == 24 && offsetof(ViewBody, half_angle) == 32 &&
+                  offsetof(ViewBody, eyes) == 40,
+              "ViewBody offsets");
+static_assert(offsetof(ViewEye, orientation) == 12 && offsetof(ViewEye, fov) == 28,
+              "ViewEye offsets");
 
 // THE WRITER: records into a buffer.
 class Writer {

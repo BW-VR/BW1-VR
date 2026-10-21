@@ -21,6 +21,7 @@
 #include <openxr/openxr_platform.h>
 
 #include "../../src/common/input_channel.h"
+#include "../../src/mod/scene_stream.h"
 #include "../../src/mod/vk_core.h"
 #include "gpu.h"
 
@@ -103,7 +104,26 @@ class XrApp {
   // next frames copy it into the quads, because a quad copies only a
   // picture of a new revision.
   void MarkScreenChanged();
-  bool HasScreen() const { return between_ != VK_NULL_HANDLE; }
+  bool HasScreen() const { return screen_.between != VK_NULL_HANDLE; }
+
+  // THE PROJECTION LAYER (stream_projection, docs/android.md, "The
+  // projection layer"). On (1, the default): a picture of the renderer with
+  // the values of the projection layer of the mod (the kView of its frame,
+  // src/mod/view_layer_math.h, ShowsProjection) shows in a projection layer,
+  // each eye with the pose and the angles of view that the mod gives. The
+  // runtime reprojects it to the pose of the head at the display time. A
+  // picture with no such values shows on the stereo screen. Off (0): each
+  // picture shows on the stereo screen. Before Start.
+  void SetProjection(bool on) { projection_on_ = on; }
+  bool ProjectionOn() const { return projection_on_; }
+  // The two swapchains of the projection layer, width by height (the size of
+  // the picture of the renderer).
+  bool MakeEyes(uint32_t width, uint32_t height);
+  bool HasEyes() const { return eyes_.between != VK_NULL_HANDLE; }
+  // The values of the projection layer of the newest picture (after
+  // SetScreenSource or MarkScreenChanged). has: false when that picture has
+  // none, and then it shows on the stereo screen.
+  void SetScreenView(bool has, const scene_stream::ViewBody& view);
   // xr_copy_on_change (1 is the default): true, a layer gets a new image of
   // its swapchain only when its picture changed, and the runtime shows the
   // last released image. false, each frame copies each layer. Before Start.
@@ -133,7 +153,19 @@ class XrApp {
   bool MakeLayer(Layer* layer, uint32_t width, uint32_t height,
                  bool staging = true);
   void CopyLayer(Layer* layer);
-  void CopyScreen(int eye);
+  // THE EYE PICTURES OF THE RENDERER in two swapchains: the stereo screen (two
+  // quads), or the projection layer.
+  struct Screen {
+    Layer layer[2];
+    VkImage between = VK_NULL_HANDLE;  // the picture at the size of the swapchains
+    VkDeviceMemory between_memory = VK_NULL_HANDLE;
+    uint64_t copies[2] = {0, 0};  // the copies of each eye
+  };
+  bool MakeScreenSet(Screen* screen, uint32_t width, uint32_t height);
+  void FreeScreenSet(Screen* screen);
+  // One eye of the picture of the renderer into the next image of its
+  // swapchain. True when the eye released a new image in this call.
+  bool CopyScreen(Screen* screen, int eye);
   void SetPixels(Layer* layer, const std::vector<uint8_t>& rgba);
 
   XrInstance instance_ = XR_NULL_HANDLE;
@@ -183,14 +215,23 @@ class XrApp {
   bool copy_on_change_ = true;
   uint64_t copies_ = 0;
   uint64_t copies_skipped_ = 0;
-  uint64_t screen_copies_[2] = {0, 0};  // the copies of each eye of the stereo screen
   bool renderer13_ = false;
   bool renderer_used_ = false;
   bool shading_rate_ = false;
   float max_anisotropy_ = 0.0f;
-  Layer screen_[2];
-  VkImage between_ = VK_NULL_HANDLE;  // the picture at the size of the quads
-  VkDeviceMemory between_memory_ = VK_NULL_HANDLE;
+  Screen screen_;  // the stereo screen
+  Screen eyes_;    // the projection layer
+  bool projection_on_ = true;  // stream_projection
+  // The values of the projection layer of the newest picture, and of the
+  // picture in the released image of each eye of the projection layer.
+  bool view_newest_ = false;
+  scene_stream::ViewBody newest_view_ = {};
+  bool view_shown_[2] = {false, false};
+  scene_stream::ViewBody shown_view_[2] = {};
+  uint64_t projection_frames_ = 0;  // frames of the session with the projection layer
+  uint64_t screen_frames_ = 0;      // frames of the session with the stereo screen
+  bool said_projection_ = false;
+  bool said_no_view_ = false;
   VkImage screen_source_ = VK_NULL_HANDLE;
   uint32_t source_width_ = 0;
   uint32_t source_height_ = 0;

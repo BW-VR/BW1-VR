@@ -798,8 +798,13 @@ that moves while the Hand takes it.
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the
     recenter, and the pulses back. Open for the input channel: the file under
-    Wine and Box64, a real headset, and the angle of view and the pose that
-    the mod renders back to a projection layer of the app. A frame goes into the
+    Wine and Box64, and a real headset. The mod gives the app the values of
+    the projection layer of each frame in the frame of the live stream (a
+    record `kView`), and the app shows the eye pictures in a projection
+    layer (`stream_projection`, `android.md`, "The projection layer"). Open
+    for it: a real headset, the cards, the panel quads and the window of the
+    cut scenes as layers of the app, and the intro, which gives no frame of
+    the live stream. A frame goes into the
     ring at the end of its first walk with both eyes, and in a desktop run each frame after
     a frame with the whole state was at the reader in its own game frame. A
     skip of the app and a drop of the writer keep the records of state and

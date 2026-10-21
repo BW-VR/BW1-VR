@@ -33,6 +33,7 @@
 #include "menu_painter.h"
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
+#include "../../src/mod/view_layer_math.h"
 #include "../../src/mod/vk_platform_posix.h"
 #include "../../src/mod/vk_scene.h"
 #include "scene_player.h"
@@ -82,6 +83,7 @@ struct App {
 
   // The picture of the renderer on the stereo screen of the session.
   VkImage screen_image = VK_NULL_HANDLE;
+  bool said_view_size = false;
 
   // THE LIVE STREAM (stream_live=1, docs/android.md, "The live stream").
   bool live = false;
@@ -111,15 +113,28 @@ double NowMs() {
   return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
 
-// The last eye picture of the renderer (VkSceneEyes) on the stereo screen of
-// the session. A new picture in the same image gets a new revision, so the
-// quads copy it.
+// The last eye picture of the renderer (VkSceneEyes) in the session: in the
+// projection layer with the values of the mod for its frame (kView,
+// stream_projection=1), else on the stereo screen. A new picture in the same
+// image gets a new revision, so the swapchains copy it.
 bool ShowEyes(App* app) {
   if (!app->xr_on) return false;
   uint64_t image = 0;
   uint32_t w = 0, h = 0;
   if (!VkSceneEyes(&image, &w, &h)) return false;
   if (!app->xr.HasScreen() && !app->xr.MakeScreen(w / 2, h / 2)) return false;
+  // The values of the projection layer of the frame of this picture.
+  scene_stream::ViewBody view = {};
+  uint64_t pictures = 0;
+  const bool has = app->xr.ProjectionOn() && StreamPictureView(&view, &pictures) &&
+                   view_layer_math::ShowsProjection(view) &&
+                   (app->xr.HasEyes() || app->xr.MakeEyes(w, h));
+  if (has && (view.width != w || view.height != h) && !app->said_view_size) {
+    app->said_view_size = true;
+    AppLog("xr           : the mod gives the angles of view for pictures of %u by "
+           "%u, and the picture of the renderer has %u by %u",
+           view.width, view.height, w, h);
+  }
   const VkImage now = reinterpret_cast<VkImage>(image);
   if (now != app->screen_image) {
     app->xr.SetScreenSource(now, w, h);
@@ -127,6 +142,7 @@ bool ShowEyes(App* app) {
   } else {
     app->xr.MarkScreenChanged();
   }
+  app->xr.SetScreenView(has, view);
   return true;
 }
 
@@ -508,6 +524,10 @@ void android_main(android_app* android) {
   }
 
   app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
+  // stream_projection=1 (the default): a picture of the renderer with the
+  // values of the projection layer of the mod for its frame shows in a
+  // projection layer. 0: each picture shows on the stereo screen.
+  app.xr.SetProjection(app.ini.GetInt("bwvr", "stream_projection", 1) != 0);
   // input_live=1: the session also reads the input of the mod, and each frame
   // goes into bwvr-input.chan of the game folder. 0: the app reads only the
   // input of its menu.
@@ -540,6 +560,12 @@ void android_main(android_app* android) {
     app.live = false;
   } else if (replay || app.live) {
     renderer_ran = true;
+    AppLog("xr           : stream_projection=%d. %s", app.xr.ProjectionOn() ? 1 : 0,
+           app.xr.ProjectionOn()
+               ? "A picture of the renderer with the values of the projection "
+                 "layer of the mod shows in a projection layer, a picture with "
+                 "none on the stereo screen"
+               : "Each picture of the renderer shows on the stereo screen");
     if (app.xr_on && app.xr.Renderer13()) {
       vk::External device;
       app.xr.RendererDevice(&device);

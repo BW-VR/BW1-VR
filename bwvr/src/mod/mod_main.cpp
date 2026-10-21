@@ -224,6 +224,7 @@ void HeadCameraSetEnabled(bool on);
 void StereoSetHeadTracking(bool on);
 void StereoSetHeadFov(float degrees);
 void StereoSetFovMargin(int percent);
+void StereoSetFakeFov(bool on);
 void HeadPoseSetScale(float units_per_meter);
 void HeadPoseSetEnabled(bool on);
 void HeadPoseSetFake(bool on, float yaw_degrees, float pitch_degrees,
@@ -473,6 +474,7 @@ int g_audio_test_tag = 0;
 int g_audio_test_tag_bank = 1;
 bool g_game_camera_rebuild = true;
 bool g_fake_head = false;
+bool g_fake_head_fov = false;
 bool g_head_camera = true;
 float g_fake_yaw = 0.0f;
 float g_fake_pitch = 0.0f;
@@ -1222,6 +1224,12 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "fov_margin_pct", 0, path));
   // An invented head, for testing on the desktop with no headset.
   g_fake_head = GetPrivateProfileIntA("bwvr", "fake_head", 0, path) != 0;
+  // fake_head_fov=1 (a test aid): the eyes of the invented head have the
+  // angles of view of a headset, so the frame sets up the view of the
+  // headset as with a session. 0: no angles, and the game keeps its own
+  // angle of view.
+  g_fake_head_fov =
+      GetPrivateProfileIntA("bwvr", "fake_head_fov", 0, path) != 0;
   g_head_camera =
       GetPrivateProfileIntA("bwvr", "head_camera", 1, path) != 0;
   // GetPrivateProfileIntA returns an unsigned value, so a negative angle
@@ -1515,6 +1523,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "xr_input_record", 0, path));
   g_xr_input.lockstep_ms = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "xr_input_lockstep_ms", 0, path));
+  g_xr_input.view_record_frames = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "xr_view_record", 0, path));
   if (g_xr_input.mode != 0) g_stereo_headless = true;
   g_intro_vr = GetPrivateProfileIntA("bwvr", "intro_vr", 0, path) != 0;
   g_intro_motion = GetPrivateProfileIntA("bwvr", "intro_motion", 1, path);
@@ -1845,6 +1855,7 @@ void StartVrStep() {
     HeadPoseSetScale(g_head_units_per_meter);
     StereoSetHeadFov(g_head_fov_deg);
     StereoSetFovMargin(g_fov_margin_pct);
+    StereoSetFakeFov(g_fake_head_fov);
     // The input channel takes the place of the session and of the fake
     // sources, at the same places.
     XrInputSetOptions(g_xr_input);

@@ -14,6 +14,9 @@
 //   <frame> stick <hand> <x> <y>           the thumbstick
 //   <frame> capture <name>                 the images of the quads of this
 //                                          frame go to <name>-<layer>.bmp
+//   <frame> eyes <name>                    the images of the eyes of the
+//                                          projection layer of this frame go
+//                                          to <name>-p<eye>.bmp
 //   <frame> recenter                       the LOCAL space recenters (an
 //                                          event of a change of the space)
 //   <frame> exit                           the runtime ends the session
@@ -30,7 +33,9 @@
 // The runtime checks what a runtime of a headset needs: the types of the
 // structs, the order of the calls of a swapchain image, the layouts of the
 // layers, and the bindings for /interaction_profiles/oculus/touch_controller.
-// A fault goes into the report as a line "fault ...".
+// A fault goes into the report as a line "fault ...". For a projection layer
+// the report has the pose, the angles of view and the rect of each eye, one
+// line for each change ("frame N projection ...").
 
 #include <android/log.h>
 #include <math.h>
@@ -123,7 +128,7 @@ void LoadScript() {
       sscanf(rest, "%15s %f", hand, &s.a);
     } else if (s.what == "stick") {
       sscanf(rest, "%15s %f %f", hand, &s.a, &s.b);
-    } else if (s.what == "capture") {
+    } else if (s.what == "capture" || s.what == "eyes") {
       sscanf(rest, "%63s", name);
       s.name = name;
     }
@@ -202,6 +207,8 @@ struct Session {
   bool waited = false;
   Hand hands[2];
   std::vector<XrCompositionLayerQuad> last_quads;
+  // The swapchains of the eyes of the projection layer of the last frame.
+  std::vector<XrSwapchain> last_eyes;
   long haptics = 0;
   std::vector<std::unique_ptr<Swapchain>> swapchains;
   std::vector<std::unique_ptr<Space>> spaces;
@@ -1109,9 +1116,49 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
   if (!s->in_frame) Fault("xrEndFrame with no xrBeginFrame");
   s->in_frame = false;
   s->last_quads.clear();
+  s->last_eyes.clear();
   std::string what;
+  static std::string s_last_projection;
   for (uint32_t i = 0; i < info->layerCount; ++i) {
     const XrCompositionLayerBaseHeader* l = info->layers[i];
+    if (l->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
+      // THE PROJECTION LAYER: two views, each of a released image of its
+      // swapchain, with a rect in that swapchain.
+      const auto* p = reinterpret_cast<const XrCompositionLayerProjection*>(l);
+      what += " projection";
+      if (p->viewCount != 2 || p->views == nullptr) {
+        Fault("frame %ld: a projection layer with %u views", s->frame, p->viewCount);
+        continue;
+      }
+      if (reinterpret_cast<Space*>(p->space) == nullptr) Fault("frame %ld: a projection layer with no space", s->frame);
+      std::string text;
+      for (uint32_t e = 0; e < 2; ++e) {
+        const XrCompositionLayerProjectionView& v = p->views[e];
+        if (v.type != XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW) Fault("frame %ld: a view of a projection layer of a wrong type", s->frame);
+        Swapchain* sc = reinterpret_cast<Swapchain*>(v.subImage.swapchain);
+        if (sc == nullptr || sc->released < 0) Fault("frame %ld: a view of a projection layer with no released image", s->frame);
+        if (sc != nullptr && sc->acquired >= 0) Fault("frame %ld: a view of a projection layer of a swapchain with an acquired image", s->frame);
+        if (sc != nullptr && (v.subImage.imageRect.offset.x < 0 || v.subImage.imageRect.offset.y < 0 ||
+                              v.subImage.imageRect.offset.x + v.subImage.imageRect.extent.width > static_cast<int32_t>(sc->width) ||
+                              v.subImage.imageRect.offset.y + v.subImage.imageRect.extent.height > static_cast<int32_t>(sc->height))) {
+          Fault("frame %ld: the rect of a view of a projection layer is not in its swapchain", s->frame);
+        }
+        if (v.subImage.imageArrayIndex != 0) Fault("frame %ld: a view of a projection layer of array index %u", s->frame, v.subImage.imageArrayIndex);
+        if (!(v.fov.angleLeft < v.fov.angleRight) || !(v.fov.angleDown < v.fov.angleUp)) Fault("frame %ld: the angles of a view of a projection layer are empty", s->frame);
+        s->last_eyes.push_back(v.subImage.swapchain);
+        char part[256];
+        snprintf(part, sizeof(part), " eye %u pose %.4f %.4f %.4f %.4f %.4f %.4f %.4f fov %.4f %.4f %.4f %.4f rect %d %d %dx%d",
+                 e, v.pose.position.x, v.pose.position.y, v.pose.position.z, v.pose.orientation.x,
+                 v.pose.orientation.y, v.pose.orientation.z, v.pose.orientation.w, v.fov.angleLeft,
+                 v.fov.angleRight, v.fov.angleUp, v.fov.angleDown, v.subImage.imageRect.offset.x,
+                 v.subImage.imageRect.offset.y, v.subImage.imageRect.extent.width,
+                 v.subImage.imageRect.extent.height);
+        text += part;
+      }
+      if (text != s_last_projection || s->frame % 72 == 0) Report("frame %ld projection%s", s->frame, text.c_str());
+      s_last_projection = text;
+      continue;
+    }
     if (l->type != XR_TYPE_COMPOSITION_LAYER_QUAD) {
       what += " other";
       continue;
@@ -1141,11 +1188,20 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
   }
   s_last = line;
   for (const Step& st : g_script) {
-    if (st.frame != s->frame || st.what != "capture") continue;
-    for (uint32_t i = 0; i < s->last_quads.size(); ++i) {
+    if (st.frame != s->frame) continue;
+    if (st.what == "capture") {
+      for (uint32_t i = 0; i < s->last_quads.size(); ++i) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/%s-%u.bmp", kFolder, st.name.c_str(), i);
+        Capture(s, reinterpret_cast<Swapchain*>(s->last_quads[i].subImage.swapchain), path);
+      }
+    }
+    if (st.what != "eyes") continue;
+    if (s->last_eyes.empty()) Fault("frame %ld: eyes of a frame with no projection layer", s->frame);
+    for (uint32_t e = 0; e < s->last_eyes.size(); ++e) {
       char path[256];
-      snprintf(path, sizeof(path), "%s/%s-%u.bmp", kFolder, st.name.c_str(), i);
-      Capture(s, reinterpret_cast<Swapchain*>(s->last_quads[i].subImage.swapchain), path);
+      snprintf(path, sizeof(path), "%s/%s-p%u.bmp", kFolder, st.name.c_str(), e);
+      Capture(s, reinterpret_cast<Swapchain*>(s->last_eyes[e]), path);
     }
   }
   return XR_SUCCESS;

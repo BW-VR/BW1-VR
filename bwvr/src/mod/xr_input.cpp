@@ -9,6 +9,7 @@
 #include "../common/input_channel.h"
 #include "xr_input.h"
 #include "xr_input_math.h"
+#include "view_layer_math.h"
 
 extern void ModLog(const char* format, ...);
 // controllers.cpp: the frames that the controllers saw.
@@ -68,6 +69,9 @@ uint64_t g_pulses_dropped = 0;
 // THE RECORD.
 FILE* g_record = nullptr;
 uint64_t g_recorded = 0;
+// THE RECORD OF THE VIEWS.
+FILE* g_view_record = nullptr;
+uint64_t g_views_recorded = 0;
 
 double MsSince(const LARGE_INTEGER& from) {
   LARGE_INTEGER now, hz;
@@ -171,6 +175,20 @@ bool XrInputStart(const char* dir) {
     } else {
       ModLog("xr input     : xr_input_record=%d, but %s cannot be made",
              g_options.record_frames, rec);
+    }
+  }
+  if (g_options.view_record_frames > 0) {
+    char rec[MAX_PATH];
+    lstrcpynA(rec, dir, MAX_PATH);
+    lstrcatA(rec, "bwvr-view.rec");
+    if (fopen_s(&g_view_record, rec, "wb") != 0) g_view_record = nullptr;
+    if (g_view_record != nullptr) {
+      ModLog("xr input     : xr_view_record=%d. The projection layer of the "
+             "first %d frames of the scene goes to %s (a test aid)",
+             g_options.view_record_frames, g_options.view_record_frames, rec);
+    } else {
+      ModLog("xr input     : xr_view_record=%d, but %s cannot be made",
+             g_options.view_record_frames, rec);
     }
   }
   if (g_options.mode == 0) return false;
@@ -326,6 +344,8 @@ void XrInputHaptic(int index, float amplitude, float seconds) {
   LeaveCriticalSection(&g_push_lock);
 }
 
+uint32_t XrInputSlotFrame() { return g_have_slot ? g_slot_frame : 0u; }
+
 bool XrInputRecording() { return g_record != nullptr; }
 
 void XrInputRecordFrame(uint64_t frame, int source, const bwvr::EyeView eyes[2],
@@ -354,6 +374,26 @@ void XrInputRecordFrame(uint64_t frame, int source, const bwvr::EyeView eyes[2],
     g_record = nullptr;
     ModLog("xr input     : the record has the input of %llu frames of the "
            "controllers, to frame %llu", g_recorded, frame);
+  }
+}
+
+bool XrInputViewRecording() { return g_view_record != nullptr; }
+
+void XrInputRecordView(const scene_stream::ViewBody& view, int source) {
+  if (g_view_record == nullptr) return;
+  if (g_views_recorded == 0) {
+    const view_layer_math::RecordHead head = {
+        view_layer_math::kRecordMagic, view_layer_math::kRecordVersion,
+        static_cast<uint32_t>(sizeof(view)), static_cast<uint32_t>(source)};
+    fwrite(&head, sizeof(head), 1, g_view_record);
+  }
+  fwrite(&view, sizeof(view), 1, g_view_record);
+  ++g_views_recorded;
+  if (g_views_recorded >= static_cast<uint64_t>(g_options.view_record_frames)) {
+    fclose(g_view_record);
+    g_view_record = nullptr;
+    ModLog("xr input     : the record of the views has %llu frames of the "
+           "scene, to frame %llu", g_views_recorded, view.frame);
   }
 }
 

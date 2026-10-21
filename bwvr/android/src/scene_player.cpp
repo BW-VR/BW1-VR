@@ -9,6 +9,8 @@
 #include <memory>
 
 #include "../../src/mod/scene_stream.h"
+#include "../../src/mod/stream_split.h"
+#include "../../src/mod/view_layer_math.h"
 #include "../../src/mod/vk_platform_posix.h"
 #include "../../src/mod/vk_scene.h"
 #include "app_log.h"
@@ -103,6 +105,8 @@ class Player {
     SceneHostSetState(h);
   }
 
+  const view_layer_math::PictureView& View() const { return view_; }
+
   void Start(const ss::StartBody& o) {
     // The order of the setters of ReadSettings in mod_main.cpp, then the
     // backend of the mod (vk_ddraw.cpp).
@@ -139,6 +143,7 @@ class Player {
         ss::FrameBody f;
         if (!ss::Body(body, bytes, &f)) break;
         VkSceneFrame(f.frame, f.name, f.capture != 0);
+        view_.OnFrame();
         ++result_->frames;
         break;
       }
@@ -184,8 +189,19 @@ class Player {
       }
       case ss::kWalkEnd: {
         ss::StreamState s;
-        if (ss::Body(body, bytes, &s)) State(s);
+        const bool have = ss::Body(body, bytes, &s);
+        if (have) State(s);
         VkSceneWalkEnd();
+        // The picture of the frame ends with this walk: the view of the
+        // frame goes with it.
+        if (have) view_.OnWalkEnd(stream_split::WalkEndsFrame(s));
+        break;
+      }
+      case ss::kView: {
+        ss::ViewBody v;
+        if (!ss::Body(body, bytes, &v)) break;
+        view_.OnView(v);
+        ++result_->views;
         break;
       }
       case ss::kRenderState: {
@@ -269,6 +285,7 @@ class Player {
   PlayResult* result_;
   std::map<uint64_t, std::unique_ptr<StreamSurface>> surfaces_;
   StreamDevice device_;
+  view_layer_math::PictureView view_;
   std::vector<uint16_t> indices_;
   std::vector<D3DRECT> rects_;
 };
@@ -293,6 +310,12 @@ Player* ThePlayer(PlayResult* result) {
 }
 
 }  // namespace
+
+bool StreamPictureView(scene_stream::ViewBody* out, uint64_t* pictures) {
+  const view_layer_math::PictureView& v = ThePlayer(nullptr)->View();
+  *pictures = v.Pictures();
+  return v.Get(out);
+}
 
 void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result) {
   ss::Reader reader = ss::Reader::Records(bytes, size);
@@ -336,5 +359,9 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
          static_cast<unsigned long long>(result.surfaces),
          static_cast<unsigned long long>(result.unknown),
          result.broken ? ", the file stops in a record" : "", result.ms);
+  if (result.views > 0) {
+    AppLog("replay       : %llu records of the projection layer of a frame (kView)",
+           static_cast<unsigned long long>(result.views));
+  }
   return result;
 }

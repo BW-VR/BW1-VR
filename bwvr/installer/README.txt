@@ -762,7 +762,9 @@ far_grab_creature=0 to choose your Creature by the point at its feet.
 
 A far object must be near you: at most 2 m of your room from your
 head, along the floor. Set far_grab_max_m in bwvr.ini to change this
-distance. The value 0 gives no limit.
+distance. The value 0 gives no limit. When the game holds your view
+still, as in the fireball challenge of Land 2, a far object can be at
+any distance. Set far_grab_still_m=-1 to keep the limit then.
 
 A pile of food or wood of a store, a field and a fish farm are far
 targets too. Point at one and keep the grip closed to collect from a

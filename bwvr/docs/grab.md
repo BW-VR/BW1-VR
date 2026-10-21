@@ -1572,6 +1572,36 @@ last frame stays to 15 cm more (`FarInRange`, `kFarRangeKeepM`), so a small move
 of the head does not turn the target off and on. `far_grab_max_m=0` gives no
 limit. An object past the range gets no halo and no lock.
 
+**The range in a view that the game holds still.** While the game's switch for
+the drag of the land is off (bit 8 of `CameraHelp::EnabledFeatures`,
+`god-view.md`, section 7), the player cannot move the view: no grab of the
+land, no walk with the stick and no teleport. Then the range is
+`far_grab_still_m` (0, no limit). The mouse of the plain game reaches each
+object on the screen, and the player of the plain game does not need to move
+there either. `far_test_still_view` and the log line of the change are in
+"The keys".
+
+The fireball challenge of Land 2 needs it [V: `Scripts\Quests\challenge.chl`,
+the scripts `FireBallChallenge` and `Fireball`, source file
+`Land2FireballChallenge.txt`]:
+
+- The script turns all camera controls off with the interface level 12, and
+  it turns them on again only at its end.
+- It puts three one-off seeds of Fireball on the land at 3246.6 3165.7, 37
+  units from its camera at 3217.2 45.2 3189.6. The camera looks at the huts
+  of the target at 3413.2 1.9 3017.7, 264 units away. The plain game shows
+  the seeds at the bottom of the screen and the huts far away.
+- The hand demo of the script (`Fireball`) puts a fourth Fireball in the
+  Hand at the end of the cut scene. No seed is used for it.
+- The challenge waits until the three seeds are gone from the land and the
+  Hand is empty for 6 s, or until three huts are damaged. A fireball that
+  hits only the land does not end it.
+- The God view puts the look point of the camera in front of the head
+  (`god-view.md`, section 15.4), which is the place of the huts. At 12.9
+  units for each meter the seeds are then 215 units away, which is 16.7 m.
+  With the range of 2 m no seed was a far target, and the challenge could not
+  end.
+
 **Classes of far targets.**
 
 - A holdable object, including a single `Tree`. The fetch gives that object.
@@ -2231,6 +2261,7 @@ not jump.
 | `far_grab_sign` | 1 | 1: a signpost is in the last rank: it takes the halo only when the aim is on it and on no other target, or when no other target is in the cone (`far_grab_choice` 2 and 4). 0: a signpost is a scroll of the first rank |
 | `far_grab_pull` | 80 | The speed of the pull, in cm/s |
 | `far_grab_max_m` | 2.0 | The range: a target is at most this far from the head, in meters of the room along the floor. 0 gives no limit |
+| `far_grab_still_m` | 0 | The range while the game holds the view still: its switch for the drag of the land is off (see "The range in a view that the game holds still"). 0 gives no limit. Less than 0 keeps `far_grab_max_m`. Test key: Shift and A |
 | `far_grab_near_cm`, `far_grab_near_out_cm`, `far_grab_beside_loose` | 10, 15, 1 | See "Near objects win" |
 | `far_touch` | 1 | 1 makes a scroll in the aim a far target that the grip activates |
 | `far_leash` | 1 | The leash click on the player's own Creature at a distance (see [creature.md](creature.md)) |
@@ -2250,9 +2281,16 @@ the log has a line. Ctrl with the Backspace key changes `far_grab_stay` between
 both keys. Shift with the Backspace key, with Ctrl up, changes `far_take_carry`
 between 1 and 0, with the same pulses. Ctrl and Shift with the minus key of
 the row of digits change `take_stream` between 1 and 0, with the same pulses.
-The change applies from the next frame, also in a take that runs.
+The change applies from the next frame, also in a take that runs. Shift and
+A, with Ctrl up, change the range of a view that the game holds still between
+`far_grab_still_m` and `far_grab_max_m`, with the same pulses. With
+`far_grab_still_m` less than 0, the key gives no limit.
 
 Test keys for the desktop runs only:
+
+- `far_test_still_view=N`: at frame N the test writes 0 to the camera
+  switches of the game, as the interface level 12 of a script does. The game
+  then holds the view still.
 
 - `far_test_influence=1`: every land point is inside the influence.
 - `far_test_no_trees=1`: no tree is a far target.
@@ -2316,7 +2354,9 @@ the object moved while the lock held, a locked target that goes in or out of the
 influence, a target that the game deleted ("the target is gone", with what the
 far grab does with a closed grip then), and how often
 the locked target went to the pick. "the grip closed on the scroll", "the far
-touch is over", "the forest P gave the new object Q". Tag `take stream`: the
+touch is over", "the forest P gave the new object Q". "the game holds the view
+still" and "the player can move the view again" with the range of a far target
+then (40 lines in a session). Tag `take stream`: the
 start and the end of the stream of a take at a distance ("The stream of a take
 at a distance"). Tag `hand throw`: the
 speed sent and the landing of the real throw. Tag `hand glow` and tag `overlay`:
@@ -2504,7 +2544,17 @@ in a new game, with the dialog recipe of [god-view.md](god-view.md), section
 gets the Hand (`fake_controller_play_frame=2750`, `aim_queue.ps1` and
 `throw_queue.ps1` in `bwvr/tools/desk`).
 
-**Not shown in a run:** a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
+The range in a view that the game holds still: the far fetch of
+`verify_build.ps1` in the test save `pen`, with `far_grab_max_m=0.5` and
+`far_test_still_view=2900`. The test key writes 0 to the camera switches, the
+log says that the game holds the view still, and a press of A is refused.
+With `far_grab_still_m=0` the word `aimfar` takes a rock 3.86 m of the room
+from the Hand, and the lock, the pull and the fetch put it in the Hand. With
+`far_grab_still_m=-1` no object is in the range of 0.5 m, and nothing is
+fetched.
+
+**Not shown in a run:** the fireball challenge of Land 2 itself (no test save
+is there), the test key Shift A, a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
 influence, a villager in the sea, the tether and the halo during a take at a
 distance, a take at a distance from a pile that the game deletes (the runs
 make that case with the test key and a pile of the store), a `Field` and a
@@ -2515,7 +2565,9 @@ land outside the influence, a multiplayer game, a fetch of a villager, a
 Creature or a building, the haptics on a real controller, and the look of the
 halo against open land (the pen is a slope).
 
-**Needs the headset.** Whether 2 m is the right range. Whether the body, the size term and the bias of 3 degrees pick the villager that the hand points at in a crowd, in the quest to save the children. Whether the Creature, a miracle and a signpost are easy to choose with the real aim, and whether a signpost in the last rank is still easy to choose with the aim on it. Whether the cone of 8
+**Needs the headset.** Whether 2 m is the right range. Whether a seed of the
+fireball challenge of Land 2, 16.7 m away at 12.9 units for each meter, is easy
+to aim at with no range limit. Whether the body, the size term and the bias of 3 degrees pick the villager that the hand points at in a crowd, in the quest to save the children. Whether the Creature, a miracle and a signpost are easy to choose with the real aim, and whether a signpost in the last rank is still easy to choose with the aim on it. Whether the cone of 8
 degrees feels right with the real aim pose. Whether the pull at 0.8 m/s or 12 cm
 is easy to do and does not fire by accident. Whether the glide time reads well.
 Whether a take at a distance reads well: the halo, the tether and the count at

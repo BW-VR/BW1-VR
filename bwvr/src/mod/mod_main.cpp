@@ -1369,6 +1369,15 @@ void ReadSettings() {
       const double meters = atof(text);
       g_far_grab.max_m = meters > 0.0 ? static_cast<float>(meters) : 0.0f;
     }
+    // far_grab_still_m: the range while the game holds the view still (its
+    // switch for the drag of the land is off). 0 gives no limit, and less
+    // than 0 keeps far_grab_max_m (docs/grab.md, "The range").
+    {
+      char text[32];
+      GetPrivateProfileStringA("bwvr", "far_grab_still_m", "0", text,
+                               sizeof(text), path);
+      g_far_grab.still_m = static_cast<float>(atof(text));
+    }
     // The choice of a far target (docs/grab.md, "The cone and the choice").
     // far_grab_living_deg: the cone of a living thing, for the ranks of
     // far_grab_choice 2 and 4. far_grab_ball_living_deg and

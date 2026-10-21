@@ -290,8 +290,15 @@ is built, and no test has proven it.
   tutorial of Land 1 from the walk to the village to the texts after the zoom
   lesson. Still open:
   - The end of the build of the Temple, the missionaries and the lessons of
-    Land 2 (the gestures, the shield, the fireball) have no run and no
-    session.
+    Land 2 (the gestures, the shield) have no run and no session.
+  - The fireball challenge of Land 2 holds the view still, and its three
+    seeds are more than 200 units from the place of the God view. The far
+    grab has no range limit while the game holds the view still
+    (`far_grab_still_m`, `grab.md`, "The range in a view that the game holds
+    still"). Check in a headset that the far grab fetches each seed from
+    there, that a throw reaches the huts, and that the challenge ends. The
+    shield challenge holds the view still too: check that its seeds are in
+    reach.
   - The lessons of the Gods' Playground after the step of the turn have no
     run. A desktop run shows the first walk of the Island Keeper and the step
     of the turn only with `script_view=0`. With `script_view=1` the Keeper did

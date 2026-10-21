@@ -1041,7 +1041,23 @@ Android. The plan, in steps:
    builds it. With Box64 v0.4.4 and llvm-mingw 20261006 it is a DLL for
    ARM64 (machine 0xAA64) of 4.5 MB with the 13 exports `BTCpu...` of the
    CPU interface of the WoW64 of Wine, and it imports only `ntdll.dll` and
-   `wow64.dll`. It did not run yet: it needs the ARM64 Wine.
+   `wow64.dll`. It did not run yet.
+
+   Wine builds for the headsets in a Linux of WSL2:
+   `bwvr/tools/android/build_wine.sh <work folder>` takes the unpacked
+   source of Wine 11.0, the NDK r27d for Linux and llvm-mingw 20261006 for
+   Ubuntu (none of them is in the repo). It builds the tools of Wine for that
+   Linux, then Wine for `aarch64-linux-android` (API 29) with
+   `--enable-archs=i386,aarch64`, no display driver of Wine
+   (`--disable-wineandroid_drv`, the app draws), no X and no FreeType. The
+   result has the loader `wine`, `wineserver` and `ntdll.so` as AArch64
+   programs for `/system/bin/linker64`, `wow64.dll` and `ntdll.dll` for
+   ARM64, and the DLLs of Wine for i386. Wine has no sound driver on
+   Android yet, and no fonts. The APK does not contain Wine yet, and it did
+   not run yet. When it goes into the APK, the DLLs of Wine for DirectDraw,
+   Direct3D and OpenGL (`ddraw`, `d3d*`, `wined3d`, `dxgi`, `opengl32`)
+   stay out of it: the mod is the DirectDraw of the game, and the app
+   draws with Vulkan alone.
    The fall back is an x86_64 Wine in the WoW64 mode under the Linux
    program box64, with the x86_64 libraries of glibc that it needs.
 2. **The walks for the renderer in the app, live.** The renderer is in the

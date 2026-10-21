@@ -4,6 +4,8 @@
 *.ps1  text eol=crlf
 *.bat  text eol=crlf
 *.iss  text eol=crlf
+# A Linux of WSL runs the shell scripts.
+*.sh   text eol=lf
 *.rc   text eol=crlf
 bwvr/installer/README.txt   text eol=crlf
 bwvr/installer/Notices.txt  text eol=crlf

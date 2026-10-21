@@ -377,7 +377,8 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    checks it in place of the stereo screen (with the quad layers of the
    desk runs of "The quad layers": 73 checks for the hint card, 68 with
    `-NoLayers`, 68 for a fade of the card with `-QuadFrames`, 64 for a feed
-   of the cut scene window alone): the two swapchains, no quad of the stereo screen, that the pose and
+   of the cut scene window alone): the two swapchains, no quad of the stereo
+   screen, that the pose and
    the angles of view of each eye of each projection layer that the runtime
    reports are the values of a record `kView` of the feed, that the layers
    have the values of the `kView` of the frame of each picture in the order
@@ -405,7 +406,10 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    a test feed from the capture (`bwvr_stream_reader window-feed`): the
    frames N to M become frames of the window as a screen, with values of the
    test (2.6 m wide, 2 m in front, a crop of 120 and an edge of 2 columns),
-   and the test checks the two quads of the eyes with those columns.
+   and the test checks the two quads of the eyes with those columns. The
+   app plays only some frames of a feed at a pace of 14 ms, so the range must
+   cover about half of the frames of the feed: else no frame that the app
+   shows can be a frame of the window.
    `-NoLayers` gives the app `stream_layers=0`, and the test checks that
    each line of the quads of the runtime has the menu and the cursor alone:
    no quad of the mod, and no quad of the stereo screen over the projection
@@ -1155,8 +1159,8 @@ over the layers of the mod.
   feed), the panel quads, the walls and the window. `-NoLayers` runs the app
   with `stream_layers=0` and checks that the runtime has no quad but the
   menu and the cursor. `-NoProjection` runs it with `stream_projection=0`:
-  the stereo screen in each frame with a picture, and no quad of the mod. `-WindowFrom` and `-WindowTo` make a test feed of
-  the cut scene window.
+  the stereo screen in each frame with a picture, and no quad of the mod.
+  `-WindowFrom` and `-WindowTo` make a test feed of the cut scene window.
 
 The commit messages have the numbers of the runs.
 

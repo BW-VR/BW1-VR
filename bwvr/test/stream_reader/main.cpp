@@ -925,7 +925,8 @@ int LayerCompare(const char* a_path, const char* b_path) {
     if (first_other == 0) first_other = e.first;
     if (said++ < 5) {
       int nx = 0, ny = 0;
-      printf("layer compare: frame %llu differs:\n  %s:%s\n  %s:%s\n", e.first,
+      printf("layer compare: frame %llu differs in other values:\n  the first record: %s:%s\n  "
+             "the second record: %s:%s\n", e.first,
              LayerNames(x).c_str(), FrameQuads(x, &nx).c_str(), LayerNames(y).c_str(),
              FrameQuads(y, &ny).c_str());
     }
@@ -972,7 +973,8 @@ int LayerCompare(const char* a_path, const char* b_path) {
       }
       last_reason = reason;
     }
-  }  printf("layer compare: %zu and %zu frames, %d with layers: %d frames the same, %d differ only in "
+  }
+  printf("layer compare: %zu and %zu frames, %d with layers: %d frames the same, %d differ only in "
          "the picture of a card, %d differ only in a card that one run has and the other does "
          "not (%d runs of frames, %d frames of them with no fade and no change of the set), %d "
          "differ in other values (the first in frame %llu), %d frames not in both\n",
@@ -980,11 +982,12 @@ int LayerCompare(const char* a_path, const char* b_path) {
          first_other, only);
   return other == 0 && only == 0 && same > 0 ? 0 : 1;
 }
+
 // A TEST FEED OF THE CUT SCENE WINDOW for the app (emu_xr_test.ps1): a copy
-// of a stream in which each frame from `first` to `last` is a frame of the window
-// as a screen. Its kView gets kViewFlat, and a kWindow with a screen goes
-// before its kFrameEnd: 2.6 m wide, 2 m in front, the crop and the edge of
-// the arguments. The values of the window are of the test, not of the mod.
+// of a stream in which each frame from `first` to `last` is a frame of the
+// window as a screen. Its kView gets kViewFlat, and a kWindow with a screen
+// goes before its kFrameEnd: 2.6 m wide, 2 m in front, the crop and the edge
+// of the arguments. The values of the window are of the test, not of the mod.
 int WindowFeed(const char* in_path, const char* out_path, uint64_t first, uint64_t last,
                int32_t crop, int32_t edge) {
   std::vector<uint8_t> file;

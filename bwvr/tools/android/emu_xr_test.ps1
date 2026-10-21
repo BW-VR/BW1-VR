@@ -89,6 +89,14 @@
     that the runtime has no quad but the menu and the cursor, also in the
     frames of the projection layer (no stereo screen over it).
 
+.PARAMETER NoProjection
+    The app has stream_projection=0: each picture shows on the stereo screen,
+    a frame of the cut scene window too, and no quad layer of the mod goes
+    out. The test checks that the app had no frame with the projection layer
+    and no frame with the cut scene window, the stereo screen in each frame
+    with a picture, and that each line of the quads of the runtime has the two
+    quads of the stereo screen, the menu and the cursor, and no other quad.
+
 .PARAMETER QuadFrames
     With a feed with cards: the runtime reads back the quads of the mod in
     each of its first 60 frames (the word quads), and the test checks that
@@ -109,7 +117,8 @@ param(
     [int]$WindowFrom = 0,
     [int]$WindowTo = 0,
     [switch]$NoLayers,
-    [switch]$QuadFrames
+    [switch]$QuadFrames,
+    [switch]$NoProjection
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -171,6 +180,8 @@ if ($viewSource) {
 # projection layer do not apply. The quad layers are checked.
 $AllWindow = $false
 if (-not $Projection -and $lastFlat -and $feedViews.Count -gt 0) { $Projection = $true; $AllWindow = $true }
+# stream_projection=0 (-NoProjection): each picture on the stereo screen.
+if ($NoProjection) { $Projection = $false; $AllWindow = $false }
 # THE QUAD LAYERS: a feed or a stream with the records of the quad layers of
 # the mod (kCard, kPanel, kWindow, bwvr_stream_reader layers) shows them over
 # the projection layer. The reader gives the quads of each frame as the test
@@ -389,6 +400,7 @@ try {
     if ($Stream) { $iniLines += 'stream_replay=1' }
     if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', "stream_live_feed_ms=$FeedMs") }
     if ($NoLayers) { $iniLines += 'stream_layers=0' }
+    if ($NoProjection) { $iniLines += 'stream_projection=0' }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     if ($Stream) { Adb @('push', $Stream, "$AppDir/game/bwvr-stream.bin") }
@@ -453,8 +465,22 @@ try {
         if (-not $Projection) {
             # A stream with no kView: the fall back to the stereo screen, one
             # line in the log.
-            $noView = ([regex]::Matches($log, 'xr           : stream_projection=1, but the mod gave no values of the projection layer for the picture of the renderer')).Count
-            Expect ($noView -eq 1) "the log says one time that the pictures with no values of the mod show on the stereo screen ($noView lines)"
+            if (-not $NoProjection) {
+                $noView = ([regex]::Matches($log, 'xr           : stream_projection=1, but the mod gave no values of the projection layer for the picture of the renderer')).Count
+                Expect ($noView -eq 1) "the log says one time that the pictures with no values of the mod show on the stereo screen ($noView lines)"
+            } else {
+                # stream_projection=0: no projection layer, no cut scene window,
+                # no quad layer of the mod.
+                Expect ($log -match 'xr           : stream_projection=0\. Each picture of the renderer shows on the stereo screen') 'the app has stream_projection=0'
+                $counts = [regex]::Match($log, 'xr           : \d+ copies of the projection layer for eye 0 and \d+ for eye 1\. (\d+) frames with the projection layer, (\d+) frames with the stereo screen, (\d+) frames with the cut scene window')
+                Expect ($counts.Success -and [int]$counts.Groups[1].Value -eq 0 -and [int]$counts.Groups[2].Value -gt 0 -and [int]$counts.Groups[3].Value -eq 0) ("no frame with the projection layer and no frame with the cut scene window, the stereo screen in the frames with a picture (" + $(if ($counts.Success) { "$($counts.Groups[1].Value), $($counts.Groups[2].Value) and $($counts.Groups[3].Value) frames" } else { 'no line in the log' }) + ')')
+                $stereoQuads = ' quad 0\.0000 0\.1000 -2\.6000 turn 0\.0000 0\.0000 0\.0000 1\.0000 size 2\.6000 [0-9.]+ rect 0 0 \d+x\d+ eye 1 flags 0 quad 0\.0000 0\.1000 -2\.6000 turn 0\.0000 0\.0000 0\.0000 1\.0000 size 2\.6000 [0-9.]+ rect 0 0 \d+x\d+ eye 2 flags 0'
+                $menuOnly = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 1600x1200 eye 0 flags 2( quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 64x64 eye 0 flags 2)?'
+                $quadLinesNo = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
+                $withScreen = @($quadLinesNo | Where-Object { $_.Groups[2].Value -match "^$stereoQuads$menuOnly$" })
+                $otherLines = @($quadLinesNo | Where-Object { $_.Groups[2].Value -notmatch "^($stereoQuads)?$menuOnly$" })
+                Expect ($withScreen.Count -gt 0 -and $otherLines.Count -eq 0) "each line of the quads of the runtime has the stereo screen, the menu and the cursor, and no quad of the mod ($($quadLinesNo.Count) lines, $($withScreen.Count) with the stereo screen, $($otherLines.Count) with another quad)"
+            }
             Expect ($report -match 'quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 1 quad 0\.000 0\.100 -2\.600 size 2\.600 [0-9.]+ eye 2') 'the stereo screen is a quad for the left eye and a quad for the right eye, 2.6 m in front'
             foreach ($eye in 0, 1) {
                 $m = [regex]::Match($report, "capture \S*/start-$eye\.bmp (\d+)x(\d+) lit (\d+)")
@@ -655,6 +681,11 @@ public static class CardBmp {
                 $c = $nm.Groups[1].Value
                 $bmp = Join-Path $Out "$($cap[1])-$i.bmp"
                 $candidates = @($(if ($newPictures.ContainsKey($c)) { $newPictures[$c] } else { $hashes[$c] }))
+                # The app logs the first 20 new pictures of a card. After them each
+                # picture of that card in the feed counts.
+                if ($newPictures.ContainsKey($c) -and $newPictures[$c].Count -ge 20) {
+                    $candidates += @(Get-ChildItem -LiteralPath $cardBmps -Filter "card-$c-*.bmp" | ForEach-Object { $_.BaseName.Substring("card-$c-".Length) })
+                }
                 if (-not (Test-Path -LiteralPath $bmp)) { $cardChecks++; $cardText += "$($cap[1]) quad $i card $($c): no picture"; continue }
                 $r = $rects[$i]
                 $hit = $null

@@ -409,10 +409,15 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    `-NoLayers` gives the app `stream_layers=0`, and the test checks that
    each line of the quads of the runtime has the menu and the cursor alone:
    no quad of the mod, and no quad of the stereo screen over the projection
-   layer. `-QuadFrames` (a feed over a fade of a card) reads back the quads
-   of the mod in each of the first 60 frames of the runtime (the word
-   `quads`) and checks that they have two different pictures of a card or
-   more, each with the bytes of a new picture that the app logs.
+   layer. `-NoProjection` gives the app `stream_projection=0`, and the test
+   checks that the app had no frame with the projection layer and no frame
+   with the cut scene window, the stereo screen in each frame with a
+   picture, and that each line of the quads of the runtime has the stereo
+   screen, the menu and the cursor, and no quad of the mod. `-QuadFrames` (a
+   feed over a fade of a card) reads back the quads of the mod in each of the
+   first 60 frames of the runtime (the word `quads`) and checks that they
+   have two different pictures of a card or more, each with the bytes of a
+   new picture that the app logs.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -1149,10 +1154,12 @@ over the layers of the mod.
   against the new pictures that the app logs (each one a picture of the
   feed), the panel quads, the walls and the window. `-NoLayers` runs the app
   with `stream_layers=0` and checks that the runtime has no quad but the
-  menu and the cursor. `-WindowFrom` and `-WindowTo` make a test feed of
+  menu and the cursor. `-NoProjection` runs it with `stream_projection=0`:
+  the stereo screen in each frame with a picture, and no quad of the mod. `-WindowFrom` and `-WindowTo` make a test feed of
   the cut scene window.
 
 The commit messages have the numbers of the runs.
+
 **Not shown yet:** a real headset (the cards, the panel quads and the window
 over the reprojection of the runtime of Meta), the subtitle card and the
 ring through the live stream (in the test save "pen" no frame has help
@@ -1170,6 +1177,10 @@ the game in Wine.
   those frames.
 - A card picture goes whole when it changes: the subtitle card of a large
   render can be some MB in a frame of its fade.
+- Two desk runs with the same input give eye pictures of a frame of the cut
+  scene window that differ in about 22 percent of the pixels, up to 0.4
+  percent by more than 24, while the views and the layers of the frame are
+  the same bytes. The cause is not known.
 
 ## Only Vulkan
 

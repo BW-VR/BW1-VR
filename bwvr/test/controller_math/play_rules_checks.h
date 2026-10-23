@@ -311,8 +311,16 @@ inline void QuitChecks() {
     if (item.kind == ItemKind::kPlay || item.kind == ItemKind::kNewGame) play = true;
   }
   Check(!play, "no Play while the game runs", 0, 0);
+  menu.SetCursor(static_cast<int>(items.size()) - 1);
+  Check(menu.Select() == Action::kExit, "a select on Exit while the game runs", 0, 0);
   menu.SetGameRunning(false);
-  Check(menu.Items()[0].kind == ItemKind::kPlay, "the end of the game: Play again", 0, 0);
+  items = menu.Items();
+  Check(items[0].kind == ItemKind::kPlay, "the end of the game: Play again", 0, 0);
+  Check(items.back().kind == ItemKind::kExit && menu.Label(items.back()) == "Exit" &&
+            !menu.Help(items.back()).empty(),
+        "no game: Exit is the last row, with a help text", 0, 0);
+  menu.SetCursor(static_cast<int>(items.size()) - 1);
+  Check(menu.Select() == Action::kExit, "a select on Exit", 0, 0);
 }
 
 inline void PlayRulesChecks() {

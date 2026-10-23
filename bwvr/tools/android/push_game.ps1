@@ -4,9 +4,14 @@
 #   push_game.ps1                       the folder of local\game-path.txt
 #   push_game.ps1 -Game "C:\Black & White"
 #   push_game.ps1 -Serial <adb serial>  when more than one device is there
-#   push_game.ps1 -NoProfile            no Profiles folder and no Creature of
-#                                       a profile (Scripts\CreatureMind\*.erc),
-#                                       for a test
+#   push_game.ps1 -WithProfile          also the folder Profiles and the
+#                                       Creatures of the profiles (each *.erc
+#                                       of Scripts)
+#
+# With no -WithProfile the copy has no Profiles folder and no *.erc of
+# Scripts, as the copy of emu_game_test.ps1: the game then starts with the
+# dialog of a new profile. A profile of the PC also has values in the
+# registry of the PC, which the folder does not carry.
 #
 # A push of the whole folder (adb push <folder> ...) does not work in the
 # folder of an app on a Quest 3: adb makes the first folder, and then the
@@ -20,7 +25,7 @@
 param(
     [string]$Game,
     [string]$Serial,
-    [switch]$NoProfile
+    [switch]$WithProfile
 )
 $ErrorActionPreference = 'Stop'
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -32,6 +37,7 @@ if (-not $Game) {
     $Game = (Get-Content -LiteralPath $pathFile -TotalCount 1).Trim()
 }
 if (-not (Test-Path -LiteralPath (Join-Path $Game 'runblack.exe'))) { "NOT COPIED: $Game has no runblack.exe"; exit 3 }
+$Game = (Resolve-Path -LiteralPath $Game).ProviderPath.TrimEnd('\')
 $dev = @('-s', $Serial)
 if (-not $Serial) { $dev = @() }
 $dest = '/sdcard/Android/data/org.bwvr.quest/files/game'
@@ -46,8 +52,8 @@ function Skip([string]$rel) {
     $top = $rel.Split('\')[0]
     if ($top -eq 'MemoryLeaks.txt') { return $true }
     if ($rel -notmatch '\\' -and ($top -like 'bwvr.ini*' -or $top -like 'bwvr*.log' -or $top -eq 'bwvr-hint-counts.ini')) { return $true }
-    if ($NoProfile -and $top -eq 'Profiles') { return $true }
-    if ($NoProfile -and $rel -like 'Scripts\CreatureMind\*' -and $rel.EndsWith('.erc')) { return $true }
+    if (-not $WithProfile -and $top -eq 'Profiles') { return $true }
+    if (-not $WithProfile -and $top -eq 'Scripts' -and $rel.EndsWith('.erc')) { return $true }
     return $false
 }
 
@@ -56,7 +62,8 @@ $dirs = @(Get-ChildItem -LiteralPath $Game -Recurse -Directory -Force |
     ForEach-Object { $_.FullName.Substring($Game.Length).TrimStart('\') } | Where-Object { -not (Skip $_) })
 $batch = @()
 foreach ($d in $dirs) {
-    $batch += "mkdir -p '$dest/$($d.Replace('\', '/'))'"
+    # A name in single quotes of the shell: each ' becomes '\''.
+    $batch += "mkdir -p '$dest/$($d.Replace('\', '/').Replace("'", "'\''"))'"
     if ($batch.Count -ge 40) { & $adb @dev shell ($batch -join '; ') | Out-Null; $batch = @() }
 }
 if ($batch.Count) { & $adb @dev shell ($batch -join '; ') | Out-Null }

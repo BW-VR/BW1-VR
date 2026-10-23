@@ -31,7 +31,7 @@ enum class ItemKind {
   kSave,     // "Save Config"
   kSetting,  // a row of the table
   kBack,     // back to the main page
-  kQuit,     // "Quit game": while the game runs, in place of the two plays
+  kQuit,     // "Quit game": while the game runs, above Exit
   kExit,     // "Exit": ends the app
 };
 
@@ -163,9 +163,9 @@ class Menu {
     ++revision_;
   }
 
-  // THE GAME. While the game runs, the main page has "Quit game" in place
-  // of "Play in VR" and "Play, new game". A change goes to the main page, on
-  // its first row.
+  // THE GAME. While the game runs, the main page has no "Play in VR" and no
+  // "Play, new game", and "Quit game" is above "Exit" at the bottom. A
+  // change goes to the main page, on its first row.
   void SetGameRunning(bool running) {
     if (running == game_running_) return;
     game_running_ = running;

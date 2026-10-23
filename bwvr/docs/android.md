@@ -213,9 +213,11 @@ file. A push of the whole folder (`adb push <folder>`) does not work in the
 folder of an app on a Quest 3: adb makes the first folder, and the make of
 each folder in it fails ("remote secure_mkdirs failed: Operation not
 permitted"). The ini and the logs of the mod of the PC and
-`MemoryLeaks.txt` stay on the PC. `-NoProfile` leaves out the folder
-`Profiles` and the Creatures of the profiles (`Scripts\CreatureMind\*.erc`),
-for a test. Start the app again after the copy, so it checks
+`MemoryLeaks.txt` stay on the PC. The copy has no folder `Profiles` and no
+Creature of a profile (each `*.erc` of `Scripts`), so the game starts with
+the dialog of a new profile. `-WithProfile` copies them too, but a profile
+of the PC also has values in the registry of the PC, which the folder does
+not carry. Start the app again after the copy, so it checks
 `runblack.exe`.
 
 The first start is necessary. Android gives the folder of the app to the
@@ -822,9 +824,14 @@ also in a swapchain of sRGB. A quad gets a new image only when
 menu and the cursor). When the renderer used the device of the session,
 the app waits for the idle GPU at its end (`vk::Stop`) and keeps the device
 to the end of the process, because the renderer has no stop for its images
-and pipelines. So the renderer takes one device in a process: when the
-glue code of Android starts `android_main` again in the same process, the
-app logs it and plays no stream. This is the form of the "Stereoscopic
+and pipelines. So the renderer takes one device in a process. A headset
+keeps the process of an app when the app goes to the back or the headset
+sleeps, and the next start of the app is then a new `android_main` in the
+same process. So the process ends with `android_main` (`exit_at_end=1`, the
+default), and each start of the app is a new process. `exit_at_end=0`: the
+process stays, and a new `android_main` in the same process logs that the
+renderer ran in it already and plays no stream (and "Play" does not start
+the game). This is the form of the "Stereoscopic
 window" of the PC: the picture does not follow the head.
 
 With the values of the projection layer of the mod for the frame of the
@@ -1762,9 +1769,16 @@ the `wowbox64.dll` of the new tree into the prefix. The game ran with patch
 frames) and the video before the intro (skipped with the right trigger) to
 the dialog of a new profile, as in the emulator.
 
-**Not shown yet:** the end of the app in a session of a headset (the end
-of the session, not the back key of the window), the FUSE daemon of the
-Quest with the ioctl of patch 0001, and the Steam Frame.
+On the Quest the end of the app by the system (after the session states 4,
+3, 6 and 1) ended the process (`exit_at_end=1`), and "Quit game" at the
+bottom of the menu over the game ended the game.
+
+**Not shown yet:** "Exit" and the start after an end on a headset (the
+emulator shows both, `emu_test.ps1`), the end of the process while the
+activity is still in front after a quit of the OpenXR runtime (the
+emulator logs "has died: fg TOP": not known what Meta Horizon OS does
+then), the FUSE daemon of the Quest with the ioctl of patch 0001, and the
+Steam Frame.
 
 **Known limits:**
 

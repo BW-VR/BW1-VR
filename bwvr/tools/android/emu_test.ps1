@@ -19,6 +19,9 @@
          step of "Turn in steps", Back, down to "Save Config", Enter.
       5. Reads back bwvr.ini, the log of the app, logcat, a screenshot and
          the picture of the menu, and checks them.
+      6. Goes down to "Exit", Enter: the process ends (exit_at_end=1), and
+         the next start is a new process. With exit_at_end=0 the process
+         stays after Exit.
 
     The results go to bwvr/out/android/emu-test. The script stops the
     emulator at the end when it started it.
@@ -151,7 +154,8 @@ try {
     Start-Sleep -Seconds 4
     cmd /c "`"$Adb`" -s $Serial exec-out screencap -p > `"$Out\menu-main.png`""
     # The main page: Play, Play new game, Picture, Performance, Foveated
-    # rendering, View, Moving around (row 6), Controllers, Testing, Save.
+    # rendering, View, Moving around (row 6), Controllers, Testing, Save
+    # (row 9), Exit (row 10).
     Key 'KEYCODE_DPAD_DOWN' 6
     Key 'KEYCODE_ENTER'
     Start-Sleep -Seconds 1
@@ -216,6 +220,46 @@ try {
         }
         Expect ($lit -gt 50) "the screenshot $shot shows the menu ($lit lit samples)"
     }
+
+    # 6. "Exit" (the last row, under Save Config) ends the app, and with
+    # exit_at_end=1 (the default) its process. The next start is a new
+    # process. With exit_at_end=0 the process stays, and the next start is a
+    # new android_main in the same process.
+    Say 'Exit, and a start after it'
+    Key 'KEYCODE_DPAD_DOWN'
+    Key 'KEYCODE_ENTER'
+    Start-Sleep -Seconds 3
+    $afterExit = (AdbOut @('shell', 'pidof', $Package)).Trim()
+    Adb @('pull', "$AppDir/bwvr-quest.log", (Join-Path $Out 'bwvr-quest-exit.log'))
+    $exitLog = Get-Content -LiteralPath (Join-Path $Out 'bwvr-quest-exit.log') -Raw -ErrorAction SilentlyContinue
+    Expect ($exitLog -match 'menu         : Exit') 'a select on Exit logged "Exit"'
+    Expect ($exitLog -match 'app          : exit_at_end=1\. The process ends') 'with exit_at_end=1 the process ends with the app'
+    Expect ($afterExit -eq '') "no process of the app after Exit (pidof: '$afterExit')"
+    Adb @('shell', 'am', 'start', '-W', '-n', "$Package/android.app.NativeActivity")
+    Start-Sleep -Seconds 4
+    $secondPid = (AdbOut @('shell', 'pidof', $Package)).Trim()
+    Expect ($secondPid -match '^\d+$' -and $secondPid -ne $appPid) "the start after Exit is a new process (pid $secondPid, before $appPid)"
+
+    # The A/B: exit_at_end=0. Exit ends the activity, and the process stays.
+    $iniOld = Join-Path $Out 'bwvr.ini.exit0'
+    Set-Content -LiteralPath $iniOld -Encoding ascii -Value ($saved.TrimEnd() + "`r`nexit_at_end=0`r`n")
+    Adb @('push', $iniOld, "$AppDir/game/bwvr.ini")
+    Adb @('shell', 'am', 'force-stop', $Package)
+    Adb @('shell', 'am', 'start', '-W', '-n', "$Package/android.app.NativeActivity")
+    Start-Sleep -Seconds 4
+    $oldPid = (AdbOut @('shell', 'pidof', $Package)).Trim()
+    Key 'KEYCODE_DPAD_DOWN' 10
+    Key 'KEYCODE_ENTER'
+    Start-Sleep -Seconds 3
+    $oldAfter = (AdbOut @('shell', 'pidof', $Package)).Trim()
+    Adb @('pull', "$AppDir/bwvr-quest.log", (Join-Path $Out 'bwvr-quest-exit0.log'))
+    $oldLog = Get-Content -LiteralPath (Join-Path $Out 'bwvr-quest-exit0.log') -Raw -ErrorAction SilentlyContinue
+    Expect ($oldLog -match 'menu         : Exit' -and $oldLog -notmatch 'exit_at_end=1\. The process ends') 'exit_at_end=0: Exit ends the app, and the log has no end of the process'
+    Expect ($oldPid -match '^\d+$' -and $oldAfter -eq $oldPid) "exit_at_end=0: the process stays after Exit (pid $oldPid, after $oldAfter)"
+    Adb @('shell', 'am', 'force-stop', $Package)
+    $logcat2 = AdbOut @('logcat', '-d', '-v', 'brief')
+    Set-Content -LiteralPath (Join-Path $Out 'logcat-exit.txt') -Value $logcat2 -Encoding utf8
+    Expect ($logcat2 -notmatch 'FATAL EXCEPTION' -and $logcat2 -notmatch 'Fatal signal') 'logcat has no crash after Exit'
 } catch {
     # A fault of the script is a failed check, so that a test that stops
     # early does not end with "0 failed".

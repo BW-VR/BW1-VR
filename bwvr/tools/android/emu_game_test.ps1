@@ -287,7 +287,7 @@ try {
         '60 menu left 1', '150 menu left 0',
         '170 capture over1',
         '180 menu left 1', '186 menu left 0',
-        '200 quads hidden1',
+        '200 quads hidden1', '205 capture notice1',
         '220 menu left 1', '310 menu left 0',
         '330 capture again1',
         '340 point right menu 800 768', '350 trigger right 1', '354 trigger right 0',
@@ -534,6 +534,17 @@ try {
             Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of eye $eye of the projection layer in game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels" } else { 'none' }))
         }
     }
+    # The notice (play_notice=1): with the menu hidden before the first frame
+    # of the game the quad shows the notice, a picture that is not the main
+    # page of the menu.
+    if ($log -notmatch 'game         : the first frame of the game') {
+        $n = [regex]::Match($report, 'capture \S*/notice1-\d+\.bmp 1600x1200 lit (\d+)')
+        $b = [regex]::Match($report, 'capture \S*/before-\d+\.bmp 1600x1200 lit (\d+)')
+        $nLit = if ($n.Success) { [int64]$n.Groups[1].Value } else { 0 }
+        $bLit = if ($b.Success) { [int64]$b.Groups[1].Value } else { 0 }
+        Expect ($nLit -gt 100000 -and $bLit -gt 0 -and [math]::Abs($nLit - $bLit) -gt $bLit * 0.02) "the quad shows the notice with the menu hidden, not the main page ($nLit lit pixels, the main page $bLit)"
+    }
+
     foreach ($name in @('before', 'over1', 'again1', 'after1', 'over2', 'after2')) {
         $m = [regex]::Match($report, "capture \S*/$name-\d+\.bmp 1600x1200 lit (\d+)")
         Expect ($m.Success -and [int]$m.Groups[1].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[1].Value) lit pixels)"

@@ -791,22 +791,25 @@ that moves while the Hand takes it.
     run the frames of the ring have the bytes of the record of the same run
     (`live_stream_run.ps1`), and in the emulator the app takes them from a
     second process and draws the pictures of the PC
-    (`emu_live_test.ps1`). Not run in a headset. The APK carries Wine 11.0
+    (`emu_live_test.ps1`). The APK carries Wine 11.0
     in the WoW64 mode for each ABI (`wowbox64.dll` of Box64 on ARM64), and
     the app unpacks it, makes a prefix and runs a 32 bit test program in it
     (`android.md`, "Wine in the app"): in the emulator with the x86_64
     tree. "Play in VR" and "Play, new game" start `runblack.exe` in Wine with
     the `ddraw.dll` of the APK as a known DLL, `vk_device=0`, the live
-    stream and the input channel (`android.md`, "Play in the app"). Open: the
-    arm64-v8a tree on a headset, a game folder with no profile (the game
+    stream and the input channel (`android.md`, "Play in the app"). On a
+    Quest 3 the arm64-v8a tree runs the test program and the game with
+    `wowbox64.dll` to the dialog of a new profile, and the mod reads the
+    input channel under Box64. Open: a game folder with no profile (the game
     then waits in a dialog before its first frame, and the live stream has
     no frame there), the sound (Wine has no audio driver on Android), and
     the frame pace with `vk_device=0`. The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the
-    recenter, and the pulses back. Open for the input channel: the file under
-    Wine and Box64, and a real headset. The mod gives the app the values of
+    recenter, and the pulses back. Open for the input channel: the input of
+    a game frame in a headset (the game did not reach a frame of the scene
+    there yet). The mod gives the app the values of
     the projection layer of each frame in the frame of the live stream (a
     record `kView`), and the app shows the eye pictures in a projection
     layer (`stream_projection`, `android.md`, "The projection layer"). The

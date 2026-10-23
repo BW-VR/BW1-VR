@@ -5,8 +5,9 @@
 //
 //   1. unpacks the tree of its own ABI into the internal folder of the app
 //      when the tree is not there or has another build id.
-//   2. makes the Wine prefix with wineboot the first time: no display driver
-//      of Wine (user.reg), the CPU DLL for x86 in system32 (arm64-v8a).
+//   2. makes the Wine prefix with wineboot when the prefix has no marker (a
+//      new app, or a wineboot that stopped or failed): no display driver of
+//      Wine (user.reg), the CPU DLL for x86 in system32 (arm64-v8a).
 //   3. links the drive G: of the prefix to the game folder.
 //   4. with wine_probe=1 runs the test program bwvr_wine_probe.exe of the
 //      game folder one time.
@@ -48,7 +49,8 @@ class WineRuntime {
   // has no Wine tree or wine_setup=0.
   std::string Status();
   // At the end of the app: stops the setup, waits for its thread, and stops
-  // each process of Wine (wineserver -k).
+  // each process of Wine (wineserver -k). With no thread (wine_setup=0, or
+  // no internal folder) it does nothing.
   void Stop();
 
  private:

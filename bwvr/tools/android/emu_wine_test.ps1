@@ -16,8 +16,11 @@
          its internal folder and starts wineboot for the prefix. The test
          checks the targetSdkVersion, the SELinux domain of the app
          (untrusted_app_27: Android lets it run the programs of its own
-         folder) and the unpack, and stops the app (force-stop) while
-         wineboot runs.
+         folder) and the unpack, and ends the app with the back key while
+         wineboot runs: the end of the app stops wineboot and runs
+         wineserver -k, and no process of Wine stays. As root the test
+         checks that the stopped prefix has no marker and has a system.reg
+         (it puts an empty one there when wineboot made none).
       3. The start after the stop: no unpack, and a new prefix, because the
          stopped prefix has no marker. The test waits for "Wine is ready"
          in the log, and checks the steps, the time, and that the menu came
@@ -34,7 +37,8 @@
          DirectDraw, Direct3D, OpenGL or Vulkan of Wine, and a TrueType font
          (Tahoma) with glyphs.
       6. Checks that no process of Wine is left after the test program,
-         and logcat (no crash).
+         ends the app with the back key (wineserver -k), and checks logcat
+         (no crash).
 
     The results go to bwvr/out/android/emu-wine-test.
 
@@ -90,12 +94,37 @@ function WaitLog([string[]]$Patterns, [int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
         Start-Sleep -Seconds 3
-        $log = AdbOut @('shell', 'cat', "$AppDir/bwvr-quest.log")
+        $log = LastStart (AdbOut @('shell', 'cat', "$AppDir/bwvr-quest.log"))
         foreach ($p in $Patterns) { if ($log -match $p) { return $log } }
         $alive = (AdbOut @('shell', 'pidof', $Package)).Trim()
     } while ((Get-Date) -lt $deadline -and $alive -match '^\d+$')
     return $log
 }
+# The part of the log of the last start. After the back key Android keeps
+# the process, android_main starts again in it, and the log file stays
+# open, so the log holds each start of that process.
+function LastStart([string]$Log) {
+    $at = $Log.LastIndexOf(', the headset app')
+    if ($at -lt 0) { return $Log }
+    $line = $Log.LastIndexOf("`n", $at)
+    return $Log.Substring($line + 1)
+}
+# Ends the app with the back key on the main page and waits for its last
+# log line. When the app does not end in 30 s, the test says so and stops
+# it with force-stop. Gives the log and if the app ended itself.
+function EndWithBack {
+    Adb @('shell', 'input', 'keyevent', 'KEYCODE_BACK')
+    $log = WaitLog @('app          : the app ends') 30
+    $ended = $log -match 'app          : the app ends'
+    if (-not $ended) {
+        Write-Host '   NOTE: the back key did not end the app in 30 s. The test stops it with force-stop' -ForegroundColor Yellow
+        Adb @('shell', 'am', 'force-stop', $Package)
+        $log = LastStart (AdbOut @('shell', 'cat', "$AppDir/bwvr-quest.log"))
+    }
+    $script:BackEnded += @($ended)
+    return @{ Log = $log; Ended = $ended }
+}
+$BackEnded = @()
 # The processes of the user of the app, with no process of the app itself.
 function WineProcesses([string]$User) {
     $ps = AdbOut @('shell', 'ps', '-A', '-o', 'USER,PID,NAME')
@@ -174,19 +203,49 @@ try {
     $current = [regex]::Match($focus, 'mCurrentFocus=([^\r\n]*)').Groups[1].Value
     Write-Host "   mCurrentFocus=$current"
     Expect ($current -match 'NativeActivity') 'the app has the focus: no dialog of the system over it'
-    # The app stops while wineboot runs: the force-stop of the system ends
-    # the app and each process of Wine.
+    # The app ends while wineboot runs: the back key on the main page gives
+    # the key back to the system, which finishes the activity, and the end
+    # of android_main calls WineRuntime::Stop.
     $log0 = WaitLog @('wine         : make the prefix', 'FAULT') ($SetupMinutes * 60)
     Start-Sleep -Seconds 4
-    $log0 = AdbOut @('shell', 'cat', "$AppDir/bwvr-quest.log")
-    Adb @('shell', 'am', 'force-stop', $Package)
+    $end0 = EndWithBack
+    $log0 = $end0.Log
     Set-Content -LiteralPath (Join-Path $Out 'bwvr-quest-start1.log') -Value $log0 -Encoding utf8
     Expect ($log0 -match 'wine         : the APK has the Wine tree [0-9a-f]{16} for x86_64') 'the app found the Wine tree of x86_64 in the APK'
     Expect ($log0 -match 'is not there\. Unpack the tree of the APK') 'the first start unpacks the tree'
     $unpack = [regex]::Match($log0, 'unpacked (\d+) files \(([\d.]+) MB\) and (\d+) folders in ([\d.]+) s')
     Expect $unpack.Success ('the unpack ended: ' + $unpack.Value)
-    Expect ($log0 -match 'wine         : make the prefix' -and $log0 -notmatch 'wineboot --init ended' -and $log0 -notmatch 'Wine is ready') 'the app stopped while wineboot ran'
+    Expect ($log0 -match 'wine         : make the prefix' -and $log0 -notmatch 'the prefix took' -and $log0 -notmatch 'Wine is ready') 'the app stopped while wineboot ran'
+    if ($end0.Ended) {
+        Expect ($log0 -match 'wine         : the app ends, so it stops \S+/wine') 'the end of the app stopped the wineboot that the thread waited for'
+        Expect ($log0 -match 'wineserver -k ended with 0 ') ('the end of the app ran wineserver -k and stopped the server of wineboot: ' + [regex]::Match($log0, 'wineserver -k ended with \S+').Value)
+        Expect ($log0 -match 'app          : the app ends') 'the app ended (android_main returned)'
+        Start-Sleep -Seconds 5
+        $left = @(WineProcesses $user)
+        Expect ($left.Count -eq 0) ('no process of Wine is left after the end of the app' + $(if ($left.Count) { ': ' + ($left -join '; ') } else { '' }))
+    }
+
+    # The prefix after the stop, as root: it has no marker. When wineboot
+    # made no system.reg yet, the test puts an empty one there, so the next
+    # start meets a prefix with system.reg and no marker.
+    Adb @('root')
     Start-Sleep -Seconds 3
+    Adb @('wait-for-device')
+    $prefixDir = "/data/data/$Package/files/prefix"
+    $prefixList = AdbOut @('shell', 'ls', '-la', $prefixDir)
+    Set-Content -LiteralPath (Join-Path $Out 'prefix-after-stop.txt') -Value $prefixList -Encoding utf8
+    $hadReg = $prefixList -match '\ssystem\.reg\r?\n'
+    Write-Host ("   the stopped prefix " + $(if ($hadReg) { 'has' } else { 'has no' }) + ' system.reg of wineboot')
+    Expect ($prefixList -match 'user\.reg' -and $prefixList -notmatch 'bwvr-prefix-id\.txt') 'the stopped prefix has no marker'
+    if (-not $hadReg) {
+        Adb @('shell', "touch $prefixDir/system.reg && chown ${user}:${user} $prefixDir/system.reg")
+    }
+    $prefixList = AdbOut @('shell', 'ls', '-la', $prefixDir)
+    Expect ($prefixList -match '\ssystem\.reg\r?\n') 'the prefix with no marker has a system.reg before the next start'
+    Adb @('unroot')
+    Start-Sleep -Seconds 3
+    Adb @('wait-for-device')
+    do { Start-Sleep -Seconds 2; $pm = (AdbOut @('shell', 'pm', 'path', 'android')) } while ($pm -notmatch 'package:')
 
     # The start after the stop: the tree is whole, and the prefix has no
     # marker, so the app makes it again.
@@ -277,6 +336,24 @@ try {
     Start-Sleep -Seconds 8
     $left = @(WineProcesses $user)
     Expect ($left.Count -eq 0) ('no process of Wine is left after the test program' + $(if ($left.Count) { ': ' + ($left -join '; ') } else { '' }))
+
+    # The end of the app after the test program: wineserver -k with no
+    # program of Wine that runs.
+    Say 'The end of the app with the back key'
+    $end2 = EndWithBack
+    Set-Content -LiteralPath (Join-Path $Out 'bwvr-quest-start2-end.log') -Value $end2.Log -Encoding utf8
+    if ($end2.Ended) {
+        # wineserver -k ends with 0 when it stopped a server, and with 1 when
+        # no server ran (server/main.c, kill_lock_owner). The server of the
+        # test program ends some seconds after the program.
+        $kill = [regex]::Match($end2.Log, 'wineserver -k ended with (-?\d+) ')
+        Expect ($kill.Success -and ($kill.Groups[1].Value -eq '0' -or $kill.Groups[1].Value -eq '1')) ('the end of the app ran wineserver -k: ' + $kill.Value + $(if ($kill.Groups[1].Value -eq '1') { '(no server ran)' } else { '' }))
+        Expect ($end2.Log -match 'app          : the app ends') 'the app ended (android_main returned)'
+        Start-Sleep -Seconds 5
+        $left = @(WineProcesses $user)
+        Expect ($left.Count -eq 0) ('no process of Wine is left after the end of the app' + $(if ($left.Count) { ': ' + ($left -join '; ') } else { '' }))
+    }
+    Write-Host ('   the back key ended the app ' + @($BackEnded | Where-Object { $_ }).Count + ' of ' + $BackEnded.Count + ' times')
 
     $logcat = AdbOut @('logcat', '-d', '-v', 'brief')
     Set-Content -LiteralPath (Join-Path $Out 'logcat.txt') -Value $logcat -Encoding utf8

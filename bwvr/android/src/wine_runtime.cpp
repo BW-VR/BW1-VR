@@ -150,9 +150,11 @@ void WineRuntime::Stop() {
   // The thread stops between its steps, and a program that it waits for
   // gets SIGKILL. wineserver -k then ends each other process of Wine, also
   // the ones of an earlier start of the app.
+  // With wine_setup=0 (no thread) the app touches no part of Wine.
   stop_ = true;
-  if (thread_.joinable()) thread_.join();
-  if (!paths_.server.empty() && Exists(paths_.server)) {
+  if (!thread_.joinable()) return;
+  thread_.join();
+  if (Exists(paths_.server)) {
     double ms = 0.0;
     const int code = Spawn({paths_.server, "-k"}, 20, &ms, false);
     AppLog("wine         : wineserver -k ended with %d after %.0f ms", code, ms);

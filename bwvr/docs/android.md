@@ -466,7 +466,7 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    crash, and each picture against the picture of the PC (the pass of step
    4). The results are in `bwvr/out/android/emu-live-test`.
 
-   **Wine in the emulator** (`emu_wine_test.ps1`, 42 checks): see "Wine in
+   **Wine in the emulator** (`emu_wine_test.ps1`, 51 checks): see "Wine in
    the app". The results are in `bwvr/out/android/emu-wine-test`.
 
    `emu_all.ps1 -Stream <file> -Reference <desk folder> -Live <desk folder>`
@@ -1364,7 +1364,8 @@ line with the command, and the log of the app has its exit code. When
 app: the first program of a start makes it empty. At its end the app stops
 the thread of the setup (a program that the thread waits for gets
 `SIGKILL`), then each process of Wine (`wineserver -k`, also when no
-program ran in this start).
+program ran in this start). With `wine_setup=0` the app touches no part of
+Wine: no thread, no `wine.log`, no `wineserver -k`.
 
 **The test program** (`bwvr/test/wine_probe`, `bwvr_wine_probe.exe` of the
 PC build, a 32 bit console program with no game code). `wine_probe=1` in
@@ -1378,25 +1379,30 @@ what `LoadLibraryEx` finds in the system folder for `ddraw`, `d3d9`,
 `wined3d`, `dxgi`, `opengl32` and `vulkan-1`, and the face, the extent and
 the outline of a glyph of the font Tahoma.
 
-**The test in the emulator** (`emu_wine_test.ps1`, 42 checks, the
+**The test in the emulator** (`emu_wine_test.ps1`, 51 checks, the
 x86_64 tree, Android 14, SwiftShader). A clean install, then the first
 start: the app ran in the domain `untrusted_app_27`, had the focus (no
-warning of the system), unpacked 1589 files (343.2 MB) in 2.6 s,
-and the test stopped it (force-stop) while wineboot ran. The next start did
-no unpack and made a new prefix, because the stopped prefix had no marker:
-`wineboot --init` 14.0 s and `wineserver -w` 8.1 s, so the prefix
-took 22.0 s, and the menu was on the screen before the setup ended.
+warning of the system), and unpacked 1589 files (343.2 MB) in 2.7 s.
+While wineboot ran, the test ended the app with the back key: the end of
+the app stopped wineboot, `wineserver -k` ended with 0, and no process of
+Wine stayed. The stopped prefix had a `system.reg` of wineboot and no
+marker. The next start did no unpack and made a new prefix:
+`wineboot --init` 20.2 s and `wineserver -w` 8.0 s, so the
+prefix took 28.2 s, and the menu was on the screen before the setup
+ended.
 Then the test puts `bwvr_wine_probe.exe` and `bwvr.ini` with `wine_probe=1`
 into the game folder, and the next start does no unpack and makes no
-prefix. The test program ran from `G:` in 2.2 s and wrote: Windows
+prefix. The test program ran from `G:` in 1.9 s and wrote: Windows
 10.0.19045, Wine 11.0, a process for i386 on x86_64,
 `cpu_dll=wow64cpu.dll` (the line of `pack_wine.sh` in `wine.inf`),
-`graphics=null`, a loop of 86.4 ms, the write, the read and the delete
+`graphics=null`, a loop of 83 ms, the write, the read and the delete
 of the file of 64 KB on `G:`, no `ddraw`, `d3d9`, `wined3d`, `dxgi`,
 `opengl32` or `vulkan-1` in the system folder (error 126), Tahoma as a
 TrueType font with an extent of 200 by 39 and an outline of 112 bytes for
 "A". No process of Wine was left after the setup or after the test
-program, and logcat has no crash.
+program. At the end the back key ended the app, `wineserver -k` ended with
+1 (no server ran: the server of the test program had ended, and -k gives 0
+only when it stops one), and logcat has no crash.
 
 The game folder is on the shared storage, which has `noexec`. Wine reads a
 PE file with `read` when its `mmap` fails there (`map_pe_header` of
@@ -1413,11 +1419,10 @@ the game files (`runblack.exe` and the `ddraw.dll` of the mod).
 for the tree of arm64-v8a only the machine of each ELF and PE file, the
 imports and exports of `wowbox64.dll` and its line in `wine.inf` are
 checked), the time of the setup on a headset, the path of Wine for
-`noexec` (`read`) with the game files, `wineserver -k` at the end of the
-app (the emulator test ends the app with a stop of the system), and if
-Meta Horizon OS and the
-Steam Frame let an app with `targetSdkVersion` 28 start programs of its
-folder.
+`noexec` (`read`) with the game files, the end of the app in a session of
+a headset (the end of the session, not the back key of the window), and
+if Meta Horizon OS and the Steam Frame let an app with `targetSdkVersion`
+28 start programs of its folder.
 
 **Known limits:**
 
@@ -1458,11 +1463,12 @@ draws with its own Direct3D, so these ways must not be there.
 
 The Wine tree of the APK has no `ddraw`, `ddrawex`, `d3d*`, `wined3d`,
 `dxgi`, `opengl32`, `vulkan-1` or `winevulkan` of Wine (the PE DLLs of each
-architecture and their Unix libraries), and no display driver of Wine (`wineandroid.drv` is not
-built, and the prefix has `Graphics` = `null`). The list is
-`kLeftOutNames` and `kLeftOutPrefix` of `android/src/wine_rules.h`:
-`pack_wine.sh` leaves the files out, `check_apk.ps1` checks each tree, and
-the app checks its unpacked tree before it starts Wine. So Wine can load
+architecture and their Unix libraries), and no display driver of Wine
+(`wineandroid.drv` is not built, and the prefix has `Graphics` = `null`).
+The list is `kLeftOutNames` and `kLeftOutPrefix` of
+`android/src/wine_rules.h`: `pack_wine.sh` leaves the files out,
+`check_apk.ps1` checks each tree, and the app checks its unpacked tree
+before it starts Wine. So Wine can load
 the `ddraw.dll` of the mod only as a native DLL, with no builtin one behind
 it. The test program of Wine shows it in the emulator: `LoadLibraryEx` of
 `ddraw.dll`, `d3d9.dll`, `wined3d.dll`, `dxgi.dll`, `opengl32.dll` and

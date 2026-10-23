@@ -119,12 +119,13 @@ struct App {
   // THE GAME ("Play", docs/android.md, "Play in the app").
   bool play_game = true;         // play_game
   int play_menu_hold_ms = 1000;  // play_menu_hold_ms
-  double menu_down_ms = 0.0;     // the time of the last press of the menu button
-  bool menu_hold_done = false;   // the hold of this press showed the menu
+  bool play_menu_press = true;   // play_menu_press
+  play_rules::MenuButtonRule menu_rule;  // the menu button of this game
+  play_rules::MenuStep menu_step;        // of this frame of the session
+  bool menu_mod_said = false;  // the log has the press that goes to the mod now
   bool can_play = false;  // the APK has Wine for this ABI, wine_setup=1, play_game=1
   bool game_on = false;   // a game starts or runs
   bool menu_over_game = false;  // the menu shows over the game
-  bool menu_was[2] = {false, false};
   double play_ms = 0.0;    // the time of the last Play
   std::string play_clock;  // and its time of the day
   bool first_frame = false;  // a frame of the game came after Play
@@ -420,8 +421,14 @@ void Play(App* app, bool new_game) {
     why = "Saved. The game needs a headset: the app has no OpenXR session.";
   } else if (!app->xr.Renderer13()) {
     why = "Saved. The renderer of the mod needs Vulkan 1.3, and this headset has none.";
-  } else if (!app->live && !StartRenderer(app, "game        ")) {
-    why = "Saved. The renderer ran in this start of the app. Start the app again.";
+  } else if (!app->live) {
+    // The reader starts with the renderer, so a fault of a later step does
+    // not block the next Play: the renderer takes one device in a process.
+    if (StartRenderer(app, "game        ")) {
+      StartLiveReader(app);
+    } else {
+      why = "Saved. The renderer ran in this start of the app. Start the app again.";
+    }
   }
   if (!why.empty()) {
     app->status = why;
@@ -441,7 +448,6 @@ void Play(App* app, bool new_game) {
     keys += std::string(keys.empty() ? "" : ", ") + k.key + "=" + std::to_string(k.value);
   }
   AppLog("menu         : %s. bwvr.ini has the keys of the run: %s", name, keys.c_str());
-  if (!app->live) StartLiveReader(app);
   if (!app->input_live.On()) app->input_live.Start(app->game.folder + "/bwvr-input.chan", 0);
   WineRuntime::Game game;
   game.new_game = new_game;
@@ -461,6 +467,36 @@ void Play(App* app, bool new_game) {
   app->status = "Starting the game (" + app->play_clock + ")...";
   AppLog("game         : %s at %s, the render %d by %d", name, app->play_clock.c_str(),
          game.width, game.height);
+}
+
+// THE MENU BUTTON at each frame of the session while the game runs
+// (play_rules.h, StepMenuButton): a hold shows the menu over the game, a
+// press hides it, and the step has the menu bits for the slot of the mod.
+void MenuButton(App* app, const XrInput& in) {
+  if (!app->game_on) {
+    app->menu_rule = play_rules::MenuButtonRule();
+    app->menu_step = play_rules::MenuStep();
+    return;
+  }
+  app->menu_step = play_rules::StepMenuButton(&app->menu_rule, in.menu, NowMs(),
+                                              app->menu_over_game, app->play_menu_hold_ms,
+                                              app->play_menu_press);
+  if (app->menu_step.action == play_rules::MenuAction::kShow) {
+    ShowMenuOverGame(app, true);
+  } else if (app->menu_step.action == play_rules::MenuAction::kHide) {
+    ShowMenuOverGame(app, false);
+  }
+  if (app->menu_step.mod_menu[0] || app->menu_step.mod_menu[1]) {
+    if (!app->menu_mod_said) {
+      app->menu_mod_said = true;
+      AppLog("game         : a press of the menu button goes to the mod %s",
+             app->play_menu_press && app->play_menu_hold_ms > 0
+                 ? "at its release (play_menu_press=1)"
+                 : "at once");
+    }
+  } else {
+    app->menu_mod_said = false;
+  }
 }
 
 // At each step: the end of the game brings the menu back, with the exit
@@ -526,14 +562,17 @@ bool OnKey(App* app, int32_t code) {
   Menu& m = app->menu;
   // While the game runs: the menu key shows or hides the menu over the game,
   // and Back shows it. With no menu the other keys have no job in the app.
+  // play_menu_hold_ms=0: no menu over the game, and the app takes Back.
   if (app->game_on) {
+    const bool can_show = app->play_menu_hold_ms > 0;
     if (code == AKEYCODE_MENU) {
-      ShowMenuOverGame(app, !app->menu_over_game);
+      if (can_show) ShowMenuOverGame(app, !app->menu_over_game);
       return true;
     }
     if (!app->menu_over_game) {
-      if (code == AKEYCODE_BACK || code == AKEYCODE_ESCAPE) ShowMenuOverGame(app, true);
-      return code == AKEYCODE_BACK || code == AKEYCODE_ESCAPE;
+      const bool back = code == AKEYCODE_BACK || code == AKEYCODE_ESCAPE;
+      if (back && can_show) ShowMenuOverGame(app, true);
+      return back;
     }
     if ((code == AKEYCODE_BACK || code == AKEYCODE_ESCAPE || code == AKEYCODE_BUTTON_B) &&
         m.OnMain()) {
@@ -662,29 +701,9 @@ void OnControllers(App* app, const XrInput& in, bool* show_cursor,
                    float cursor[3]) {
   Menu& m = app->menu;
   const ml::Quad quad = ml::MenuQuad();
-  // While the game runs, a hold of the menu button for play_menu_hold_ms
-  // shows the menu over the game, and a press hides it. The mod gets each
-  // press too: a short press is the menu of the game. With no menu the
-  // controllers are the hands of the game, and the menu takes no input.
-  bool menu_press = false, menu_down = false;
-  for (int h = 0; h < 2; ++h) {
-    if (in.menu[h] && !app->menu_was[h]) menu_press = true;
-    if (in.menu[h]) menu_down = true;
-    app->menu_was[h] = in.menu[h];
-  }
-  if (menu_press) {
-    app->menu_down_ms = NowMs();
-    app->menu_hold_done = false;
-  }
-  if (app->game_on && app->play_menu_hold_ms > 0) {
-    if (app->menu_over_game && menu_press) {
-      ShowMenuOverGame(app, false);
-    } else if (!app->menu_over_game && menu_down && !app->menu_hold_done &&
-               NowMs() - app->menu_down_ms >= app->play_menu_hold_ms) {
-      app->menu_hold_done = true;
-      ShowMenuOverGame(app, true);
-    }
-  }
+  // While the game runs, the menu button shows and hides the menu over the
+  // game (MenuButton, before this call). With no menu the controllers are
+  // the hands of the game, and the menu takes no input.
   if (app->game_on && !app->menu_over_game) {
     for (int h = 0; h < 2; ++h) {
       app->select_was[h] = in.select[h];
@@ -860,14 +879,18 @@ void android_main(android_app* android) {
                  android->activity->internalDataPath != nullptr &&
                  WineRuntime::ApkHasTree(android->activity->assetManager);
   // play_menu_hold_ms=N (1000 by default): while the game runs, a hold of
-  // the menu button of a controller for N ms shows the menu of the app over
-  // the game. The mod gets the button as always (a press is the menu of the
-  // game). 0: no menu of the app over the game, it comes back when the game
-  // ends.
+  // the menu button of a controller for N ms (or the key Menu, or Back with
+  // no headset) shows the menu of the app over the game. 0: no menu of the
+  // app over the game, it comes back when the game ends.
+  // play_menu_press=1 (the default): the app holds the menu bit back while
+  // the button is down, a short press goes to the mod at its release, and a
+  // hold or the press that hides the menu never reaches the mod. 0: the mod
+  // gets each press at once (a hold opens the menu of the game too).
   app.play_menu_hold_ms = app.ini.GetInt("bwvr", "play_menu_hold_ms", 1000);
   if (app.play_menu_hold_ms < 0) app.play_menu_hold_ms = 0;
-  AppLog("game         : play_game=%d, play_menu_hold_ms=%d. %s", app.play_game ? 1 : 0,
-         app.play_menu_hold_ms,
+  app.play_menu_press = app.ini.GetInt("bwvr", "play_menu_press", 1) != 0;
+  AppLog("game         : play_game=%d, play_menu_hold_ms=%d, play_menu_press=%d. %s",
+         app.play_game ? 1 : 0, app.play_menu_hold_ms, app.play_menu_press ? 1 : 0,
          app.can_play ? "Play starts the game in Wine"
                       : "Play saves and does not start the game: the app has no Wine, or "
                         "play_game=0");
@@ -964,12 +987,16 @@ void android_main(android_app* android) {
       }
       XrInput input;
       if (!app.xr.BeginFrame(&input)) continue;
+      MenuButton(&app, input);
       // The input of the mod: after xrSyncActions of BeginFrame, with the
       // views of xrLocateViews at the display time of this frame.
       if (app.input_live.On()) {
         input_channel::SlotData slot;
         app.xr.InputSlot(&slot);
-        if (app.game_on) play_rules::MaskInput(&slot, app.menu_over_game);
+        if (app.game_on) {
+          play_rules::MaskInput(&slot, app.menu_over_game);
+          if (!app.menu_over_game) play_rules::ApplyMenuBits(&slot, app.menu_step);
+        }
         app.input_live.Write(&slot);
         app.input_live.PlayPulses(&app.xr);
       }

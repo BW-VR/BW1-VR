@@ -307,7 +307,8 @@ saves and starts nothing (no game in Wine).
    time, so with Wine in the APK (and `play_game=1`) the session has the
    actions of the mod from its start (`SetInputLive`).
 4. The thread of the game puts `ddraw.dll` and `openxr_loader.dll` of the
-   APK (`assets/mod`, the build of `.\dev.ps1 build`) into
+   APK (`assets/mod`, the build of `.\dev.ps1 build`, with their notices in
+   `assets/licenses/mod_notices.txt`) into
    `drive_c/windows/syswow64` of the prefix, the 32 bit system folder. The
    mod needs no other file: with `vulkan_strict=1` it loads no dxwrapper,
    and it loads `d3d11.dll` and `dxgi.dll` only at a first call, which the
@@ -332,25 +333,35 @@ saves and starts nothing (no game in Wine).
    and the server of `reg import` made them before the import. So the game
    starts a new server.
 6. `wine G:\runblack.exe` (with `-NEWGAME` for "Play, new game"), with the
-   game folder as the current folder and `WINEDLLOVERRIDES=mscoree,mshtml=;
-   ddraw=n`: the DirectDraw of the game is a native DLL, and the tree has no
-   builtin one.
+   game folder as the current folder and
+   `WINEDLLOVERRIDES=mscoree,mshtml=;ddraw=n`: the DirectDraw of the game is
+   a native DLL, and the tree has no builtin one.
 
 **While the game runs** the menu quad and the cursor do not go out, and the
 app shows the frames of the live stream in the projection layer and the
 quad layers. A hold of the menu button of the left controller for
 `play_menu_hold_ms` (1000 by default) shows the menu over the game, and a
-press of the menu button, or B or Y on the main page, hides it. The mod gets
-each press of the menu button as always: with `button_layout=1` it is the
-one button of the menu of the game (`controllers.md`, "Esc"), so a hold
-opens the menu of the game under the menu of the app too. While the menu
-shows over the game, the mod gets no focus and no active hand through the
-input channel, as with no input focus of the session (`MaskInput`).
-`play_menu_hold_ms=0`: no menu of the app over the game, and the menu
-comes back only when the game ends. With no headset the key Menu shows and hides the menu, and Back shows
-it. "Quit game" stops `runblack.exe` (SIGKILL) and then each process of
-Wine (`wineserver -k`). The game does not save. When the game ends, the
-menu comes back with the exit code in the status line, and the last
+press of the menu button, or B or Y on the main page, hides it. With
+`button_layout=1` the menu button is the one button of the menu of the game
+(`controllers.md`, "Esc"), so the app holds the menu bit of the input
+channel back while the button is down (`play_menu_press=1`, the default,
+`StepMenuButton` of `play_rules.h`): a press shorter than the hold goes to
+the mod at its release, down for two slots and then up, on the hand that
+pressed. A hold and the press that hides the menu never reach the mod.
+`play_menu_press=0`: the mod gets each press at once, and a hold opens the
+menu of the game under the menu of the app too. While the menu shows over
+the game, the mod gets no focus and no active hand through the input
+channel, as with no input focus of the session (`MaskInput`). With no
+headset the key Menu shows and hides the menu, and Back shows it.
+`play_menu_hold_ms=0`: no menu of the app over the game (the menu button,
+the key Menu and Back do not show it), each press of the menu button goes
+to the mod at once, and the menu comes back only when the game ends.
+The process that the app starts is the loader of Wine. It becomes
+`start.exe` of Wine, which runs `runblack.exe` as a process of its own (its
+parent is 1, `emu_game_test.ps1` logs the tree) and gives its exit code
+back. "Quit game" sends SIGKILL to `start.exe`, and then `wineserver -k`
+ends `runblack.exe` and each other process of Wine. The game does not save.
+When the game ends, the menu comes back with the exit code in the status line, and the last
 picture of the game goes out of the layers. At the end of the app a game
 that runs ends with it.
 
@@ -370,40 +381,54 @@ a profile (`Scripts\CreatureMind\*.erc`), no `MemoryLeaks.txt` and no
 `bwvr.ini` or log of the PC, and with the `ddraw.dll` of the mod of the PC
 in it. It writes `resolution_pct=50` (a render of 1380 by 1104) and
 `wine_debug=warn+virtual`. The runtime points at "Play, new game" when the
-log says "Wine is ready", holds the menu button for 90 frames after the
-measure, points at "Quit game", then does the same with "Play in VR". At
-its end the test deletes the app and the copy. What it shows:
+log says "Wine is ready". After the measure it holds the menu button for 90
+frames, presses it for 6 frames, holds it again, points at "Quit game" and
+pulls the trigger. Then "Play in VR": a press of 6 frames, a hold, "Quit
+game". At its end the test deletes the app and the copy. What it shows
+(`-StartMinutes 3 -PlaySeconds 10`):
 
 - "Play" wrote the keys of the run, and `bwvr.ini` at the start of the game
   has `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1`,
   `stream_live=1`, `input_live=1`, `vulkan_strict=1` and `backend=vulkan`.
-- `reg import` took 1.8 s, and `wineserver -w` 4.2 to 4.5 s, so the game
-  starts about 6.3 s after "Play".
+- `reg import` took 1.8 to 1.9 s, and `wineserver -w` 4.1 to 4.5 s, so the
+  game starts about 6.3 s after "Play".
 - The log of the mod has the build of the APK ("1.2.0 (build ...)"), not
   the build of the `ddraw.dll` of the game folder: the known DLL comes
   first. It has "vk_device=0. The mod makes no Vulkan instance and no
   device", `vulkan_strict=1`, "xr_input=1" with the channel of the app,
   and the first slot of the app.
-- With `-NEWGAME` and with no word the same: the logo screens (6907 and
-  6913 frames of the game), the video before the intro (2515 frames, about
+- With `-NEWGAME` and with no word the same: the logo screens (6934 and
+  6972 frames of the game), the video before the intro (2515 frames, about
   100 s), then the game waits in a dialog box at frame 0 of the
-  controllers. A game folder with no profile gets the dialog of a new
-  profile (the class `NewProfileBox` of `runblack.exe`). The live stream
+  controllers: the log of the mod has "controllers : a dialog box is up
+  now, frame 0", and no line names the box. It is likely the dialog of a
+  new profile, because the copy has no profile and `runblack.exe` has a
+  class `NewProfileBox`. This is not proven. The live stream
   has no frame there: the mod starts a frame of the stream in the frame of
   the scene (`stereo.cpp`), and the logos, the video and this dialog come
   before it. So the app shows nothing in the headset while the menu is
   hidden, the ring file is not made, and no picture of the game goes out.
-  `runblack.exe` takes one CPU in the dialog (97.2 and 97.1 percent in 31
-  s, `wineserver` 2.7, the app 1.1).
-- A hold of the menu button for 90 frames showed the menu over the game,
-  and the trigger on "Quit game" stopped `runblack.exe` (`-1`, SIGKILL)
-  after 401.7 s and 401.3 s. `wineserver -k` ended with 0 after 78 and 76
-  ms, the menu came back with "The game ended with the exit code -1 (...,
-  Quit game).", and no process of Wine stayed.
-- The test runs 85 checks, and 15 fail: each check of a frame, of the
-  ring, of the pictures of the game and of the frame rate, and the fault
-  of the test runtime for the read back of the eyes of a frame with no
-  projection layer.
+  The processes of Wine take one CPU in the dialog (99 and 100 percent in
+  11 s, nearly all `runblack.exe`, the app 1).
+- The tree of the processes: the process that the app started is
+  `start.exe`, and `runblack.exe` has the parent 1.
+- Game 1: the hold showed the menu over the game, the press of 6 frames
+  hid it ("the menu goes"), and the second hold showed it again. The app
+  gave no press of the menu button to the mod. Game 2: the app gave the
+  press of 6 frames to the mod at its release ("a press of the menu button
+  goes to the mod at its release"). The mod reads the buttons only in a
+  frame of the scene (`ControllersFrame` of `stereo.cpp`), so in the dialog
+  its log cannot show a press, and it has no line of Esc.
+- The trigger on "Quit game" sent SIGKILL to `start.exe`, which ended with
+  -1 after 215.3 s and 202.0 s. `wineserver -k` ended with 0 after 74 and
+  75 ms, the menu came back with "The game ended with the exit code -1
+  (..., Quit game).", and no process of Wine stayed.
+- The test runs 90 checks, and 15 fail, each for the missing frames of the
+  game: the first frame and the frame rate of each game, the ring of the
+  mod in each game, the frames and the pictures of the reader, the
+  projection layer in the log and in the report of the runtime, the four
+  eye pictures, and the fault of the runtime for the read back of the eyes
+  of a frame with no projection layer.
 
 **The sound.** Wine has no audio driver on Android: `mmdevapi` gives "No
 driver from L"pulse,alsa,oss,coreaudio" could be initialized". The game
@@ -438,6 +463,9 @@ each step in a headset.
   logos, the videos and a dialog at frame 0 of the controllers (the dialog
   of a new profile) do not show in the headset. A player with no profile in
   the game folder sees nothing while the menu of the app is hidden.
+- The mod reads the buttons of the input channel only in a frame of the
+  scene, so before the first such frame a press of the menu button that
+  the app gives to the mod does nothing.
 - "Quit game" does not save the game.
 - With `vk_device=0` and no frame of the scene the game takes a whole CPU.
 
@@ -500,7 +528,7 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
 
 ## Test the APK
 
-1. **With no device** (`check_apk.ps1`, 64 checks with both Wine trees):
+1. **With no device** (`check_apk.ps1`, 66 checks with both Wine trees):
    the signature, the
    manifest (the package, the SDK levels, the categories of an immersive app
    of Meta and of OpenXR, the permissions and the queries of the loader, the
@@ -511,8 +539,11 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    the mod (`assets/mod/ddraw.dll` and `openxr_loader.dll`). So no file of
    the game can be in it. The files of the mod have the SHA-256 of the
    files of `bwvr/build/src/mod/Release` (`.\dev.ps1 build`), and each is a
-   PE file for 32 bit x86. An APK with no Wine has none of them. For each
-   Wine tree: a build id, the compression,
+   PE file for 32 bit x86. The OpenXR loader has the pinned SHA-256 of
+   `package.ps1`, and the files of the mod never go without their notices
+   (`assets/licenses/mod_notices.txt`, the `Notices.txt` of the installer of
+   the PC). An APK with no Wine has none of them. For each Wine tree: a
+   build id, the compression,
    the loader, `wineserver`, `ntdll` of i386 and of the ABI, the CPU DLL of
    the ABI in the tree and in `wine.inf`, `libfreetype.so`, `tahoma.ttf`,
    none of the DLLs that stay out, and the license texts of Wine, FreeType
@@ -1682,17 +1713,11 @@ setup, its end runs no `wineserver -k`, the folder of the app has no
 The game folder is on the shared storage, which has `noexec`. The `mmap`
 of a PE file there works, so Wine 11.0 does not take the `read` path of
 `map_pe_header` ("noexec file system, falling back to read"). The
-`mprotect` of a code section to `PROT_EXEC` then fails. With no patch, in
-the emulator with `wine_debug=warn+virtual`, `runblack.exe` gave the error
-"failed to set 60000020 protection on L"\\??\\G:\\runblack.exe" section
-.text, noexec filesystem?" for its `.text` and for the `.text` of each DLL
-of the game folder (`IFC22.dll`, `LHLogR.dll`, `LHaudiodllR.dll`,
-`QMIXER.dll`, `LHMultiplayerR.dll`, `LHDialogLib.dll`, `MFC42D.DLL`,
-`wearasr.dll`), then "\"IFC22.dll\" failed to initialize, aborting" and
-"Initializing dlls for L"G:\\runblack.exe" failed, status c0000005", and
-`runblack.exe` ended with the exit code 5 after 0.5 s. The test program
-of MSVC (a file alignment of 512 bytes) ran, because Wine reads a section
-that is not on a page of the file in each case. With the patch 0002 each
+`mprotect` of a code section to `PROT_EXEC` then fails, so the code of the
+game and of its DLLs is not executable, and the game cannot start from the
+shared storage with no patch. The test program of MSVC (a file alignment of
+512 bytes) runs, because Wine reads a section that is not on a page of the
+file in each case. With the patch 0002 each
 image of the shared storage gets the line "noexec file system, reading the
 sections of ..." (`runblack.exe`, the DLLs of the game folder,
 `Plug Ins\ScriptLibraryR.dll`, `binkw32.dll`), and the game runs. The files
@@ -1703,7 +1728,8 @@ of the mod in `syswow64` are in the internal folder, which has no
 for the tree of arm64-v8a only the machine of each ELF and PE file, the
 imports and exports of `wowbox64.dll` and its line in `wine.inf` are
 checked), the time of the setup on a headset, the patch 0002 on the FUSE
-storage of a headset, the end of the app in a session of a headset (the end of the session, not the back key of the window), and
+storage of a headset, the end of the app in a session of a headset (the
+end of the session, not the back key of the window), and
 if Meta Horizon OS and the Steam Frame let an app with `targetSdkVersion`
 28 start programs of its folder.
 

@@ -138,6 +138,11 @@ if ($wineAbis.Count -gt 0) {
         Note ("the mod: $name, " + (Get-Item -LiteralPath $file).Length + ' bytes, SHA-256 ' +
             (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant())
     }
+    # The notices of the code of other people in the two files (MinHook,
+    # cgltf and jsmn in ddraw.dll, the OpenXR loader and jsoncpp), as the
+    # installer of the PC ships them.
+    Copy-Item -LiteralPath (Join-Path $Bwvr 'installer\Notices.txt') `
+        -Destination (Join-Path $assets 'licenses\mod_notices.txt')
 }
 $targetSdk = '32'
 if ($wineAbis.Count -gt 0) {

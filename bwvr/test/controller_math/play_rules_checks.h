@@ -159,6 +159,130 @@ inline void MaskChecks() {
         "the serials and the views stay", 0, 0);
 }
 
+// The slots of the menu button: one each 14 ms, from the time 0. Gives the
+// count of the slots with the menu bit for the mod, the first and the last
+// of them, and the actions.
+struct MenuRun {
+  int mod_slots = 0;
+  int first = -1;
+  int last = -1;
+  int shows = 0;
+  int hides = 0;
+};
+
+inline MenuRun RunMenu(play_rules::MenuButtonRule* r, int press_from, int press_to,
+                       int slots, bool* menu_over, int hold_ms, bool hold_back,
+                       int hand = 0) {
+  MenuRun run;
+  for (int i = 0; i < slots; ++i) {
+    bool down[2] = {false, false};
+    down[hand] = i >= press_from && i < press_to;
+    const play_rules::MenuStep s =
+        play_rules::StepMenuButton(r, down, i * 14.0, *menu_over, hold_ms, hold_back);
+    if (s.action == play_rules::MenuAction::kShow) {
+      ++run.shows;
+      *menu_over = true;
+    }
+    if (s.action == play_rules::MenuAction::kHide) {
+      ++run.hides;
+      *menu_over = false;
+    }
+    if (s.mod_menu[0] || s.mod_menu[1]) {
+      if (!s.mod_menu[hand]) run.mod_slots = -1000;  // the bit on the other hand
+      ++run.mod_slots;
+      if (run.first < 0) run.first = i;
+      run.last = i;
+    }
+  }
+  return run;
+}
+
+inline void MenuButtonChecks() {
+  printf("\nPlay: the menu button while the game runs\n");
+  using play_rules::MenuButtonRule;
+  {
+    // A short press (slots 10 to 19, 140 ms): nothing while it is down, then
+    // the mod gets it at its release for two slots.
+    MenuButtonRule r;
+    bool over = false;
+    const MenuRun run = RunMenu(&r, 10, 20, 40, &over, 1000, true);
+    Check(run.mod_slots == 2 && run.first == 20 && run.last == 21,
+          "a short press goes to the mod at its release, down for two slots",
+          run.first, 20);
+    Check(run.shows == 0 && !over, "a short press shows no menu", run.shows, 0);
+  }
+  {
+    // The right hand presses: the bit goes to the right hand.
+    MenuButtonRule r;
+    bool over = false;
+    const MenuRun run = RunMenu(&r, 5, 8, 20, &over, 1000, true, 1);
+    Check(run.mod_slots == 2 && run.first == 8, "the press goes to the hand that pressed",
+          run.mod_slots, 2);
+  }
+  {
+    // A hold of 90 slots (1260 ms): the menu shows at 1000 ms, and the mod
+    // gets nothing, also not at the release.
+    MenuButtonRule r;
+    bool over = false;
+    const MenuRun run = RunMenu(&r, 10, 100, 130, &over, 1000, true);
+    Check(run.shows == 1 && over, "a hold of 1260 ms shows the menu", run.shows, 1);
+    Check(run.mod_slots == 0, "a hold never reaches the mod", run.mod_slots, 0);
+    // Then a press while the menu shows: it hides the menu, and the mod gets
+    // nothing.
+    const MenuRun hide = RunMenu(&r, 5, 12, 40, &over, 1000, true);
+    Check(hide.hides == 1 && !over, "a press while the menu shows hides it", hide.hides, 1);
+    Check(hide.mod_slots == 0, "the press that hides the menu never reaches the mod",
+          hide.mod_slots, 0);
+    // The next short press goes to the mod again.
+    const MenuRun again = RunMenu(&r, 5, 10, 30, &over, 1000, true);
+    Check(again.mod_slots == 2 && again.first == 10, "then a short press goes to the mod again",
+          again.first, 10);
+  }
+  {
+    // A press of 999 ms is short, one of 1000 ms is a hold.
+    MenuButtonRule r;
+    bool over = false;
+    MenuRun run = RunMenu(&r, 0, 71, 80, &over, 1000, true);  // 70 * 14 = 980 ms
+    Check(run.shows == 0 && run.mod_slots == 2, "a press of 980 ms is short", run.shows, 0);
+    MenuButtonRule r2;
+    run = RunMenu(&r2, 0, 73, 80, &over, 1000, true);  // 72 * 14 = 1008 ms
+    Check(run.shows == 1 && run.mod_slots == 0, "a press of 1008 ms is a hold", run.shows, 1);
+  }
+  {
+    // play_menu_press=0 (the old way): each press goes to the mod at once,
+    // and a hold shows the menu too.
+    MenuButtonRule r;
+    bool over = false;
+    const MenuRun run = RunMenu(&r, 10, 100, 130, &over, 1000, false);
+    Check(run.mod_slots == 90 && run.first == 10 && run.shows == 1,
+          "play_menu_press=0: the mod gets each slot of the press at once", run.mod_slots, 90);
+  }
+  {
+    // play_menu_hold_ms=0: no menu over the game, and each press at once.
+    MenuButtonRule r;
+    bool over = false;
+    const MenuRun run = RunMenu(&r, 10, 100, 130, &over, 0, true);
+    Check(run.shows == 0 && run.mod_slots == 90 && run.first == 10,
+          "play_menu_hold_ms=0: no menu, each press at once", run.mod_slots, 90);
+  }
+  {
+    namespace ic = input_channel;
+    ic::SlotData slot;
+    memset(&slot, 0, sizeof(slot));
+    slot.hands[0].flags = ic::kActive | ic::kMenu | ic::kPrimary;
+    slot.hands[1].flags = ic::kActive;
+    play_rules::MenuStep held;
+    play_rules::ApplyMenuBits(&slot, held);
+    Check(slot.hands[0].flags == (ic::kActive | ic::kPrimary),
+          "the app holds the menu bit back, the other bits stay", 0, 0);
+    play_rules::MenuStep give;
+    give.mod_menu[1] = true;
+    play_rules::ApplyMenuBits(&slot, give);
+    Check((slot.hands[1].flags & ic::kMenu) != 0 && (slot.hands[0].flags & ic::kMenu) == 0,
+          "the press goes into the slot of its hand", 0, 0);
+  }
+}
+
 inline void QuitChecks() {
   printf("\nPlay: Quit game in the menu\n");
   using namespace menu_model;
@@ -194,6 +318,7 @@ inline void PlayRulesChecks() {
   RegistryChecks();
   GameStartChecks();
   MaskChecks();
+  MenuButtonChecks();
   QuitChecks();
 }
 

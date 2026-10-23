@@ -67,6 +67,14 @@ text of each one in `assets/licenses/`.
 | FreeType | `libfreetype.so` in each Wine tree, for the TrueType fonts of Wine. Built by `build_wine.sh` with no HarfBuzz, PNG, Brotli or bzip2 | 2.13.3, `freetype-2.13.3.tar.xz`, SHA-256 `0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289` | the FreeType License, FTL (`docs/FTL.TXT`, in the APK as `assets/licenses/freetype.txt`). FreeType is also under GPL-2.0, and the mod takes the FTL | the release archive of https://freetype.org (its signature `.sig` is beside it in the work folder, not checked with a key) |
 | Box64 | `wowbox64.dll` in the Wine tree of `arm64-v8a`: the CPU of the 32 bit x86 code. Built by `bwvr/tools/android/build_box64.ps1 -Mingw` | v0.4.4, `box64-v0.4.4.tar.gz`, SHA-256 `99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029` | MIT (`LICENSE`, in the APK as `assets/licenses/box64.txt`) | https://github.com/ptitSeb/box64 |
 
+An APK with Wine also carries the files of the mod for "Play"
+(`assets/mod/ddraw.dll` and `openxr_loader.dll`, the build of `.\dev.ps1
+build`). They hold MinHook, cgltf and jsmn (in `ddraw.dll`), the OpenXR
+loader and jsoncpp, under the licenses of the rows above. Their notices
+are `bwvr/installer/Notices.txt`, in the APK as
+`assets/licenses/mod_notices.txt`, and `check_apk.ps1` checks that the
+files of the mod never go without it.
+
 The tools of the build go into no APK: the Android NDK r27d for Linux and
 llvm-mingw 20261006 (Apache-2.0 with LLVM exceptions).
 

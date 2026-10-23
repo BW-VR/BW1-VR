@@ -284,16 +284,22 @@ void WineRuntime::RunGame(Game game) {
   const std::vector<std::string> args = play_rules::GameArgs(paths_.loader, game.new_game);
   AppLog("game         : start %s%s in Wine, in the folder %s, with %s", play_rules::kGameExe,
          game.new_game ? " -NEWGAME" : "", game_.c_str(), play_rules::kGameOverrides);
-  const int code = Spawn(args, 0, &ms, &game_stop_, game_, &env);
+  const int code = Spawn(args, 0, &ms, &game_stop_, game_, &env, true);
   const bool quit = game_stop_;
-  AppLog("game         : runblack.exe ended with %d after %.1f s%s", code, ms / 1000.0,
-         quit ? " (Quit game)" : "");
+  // The process that the app started is the loader of Wine. It becomes
+  // start.exe of Wine, which runs runblack.exe as a process of its own
+  // (its parent is 1) and gives its exit code back.
+  AppLog("game         : the process of the game (start.exe of Wine, for runblack.exe) "
+         "ended with %d after %.1f s%s",
+         code, ms / 1000.0, quit ? " (Quit game)" : "");
   if (quit && !stop_) {
-    // The other processes of Wine of the game (the server, services.exe and
-    // the others) end with it.
+    // The SIGKILL ended start.exe. runblack.exe and the other processes of
+    // Wine (the server, services.exe and the others) end with wineserver -k.
     double kill_ms = 0.0;
     const int k = Spawn({paths_.server, "-k"}, 20, &kill_ms, nullptr);
-    AppLog("game         : wineserver -k ended with %d after %.0f ms", k, kill_ms);
+    AppLog("game         : wineserver -k ended with %d after %.0f ms. It ends runblack.exe "
+           "and each other process of Wine",
+           k, kill_ms);
   }
   EndGame(code, quit ? "Quit game" : "the game ended");
 }
@@ -537,7 +543,7 @@ void WineRuntime::Probe() {
 
 int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, double* ms,
                        const std::atomic<bool>* stop, const std::string& cwd,
-                       const std::vector<std::string>* env) {
+                       const std::vector<std::string>* env, bool say_pid) {
   const double start = NowMs();
   *ms = 0.0;
   std::vector<char*> argv, envp;
@@ -618,6 +624,10 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
     if (pipe_fd[0] >= 0) close(pipe_fd[0]);
     return -1;
   }
+  if (say_pid) {
+    AppLog("wine         : the process %d of the app runs %s", static_cast<int>(pid),
+           args.size() > 1 ? args[1].c_str() : argv[0]);
+  }
   int exec_errno = 0;
   ssize_t got = -1;
   if (pipe_fd[0] >= 0) {
@@ -645,7 +655,9 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
       if (stop_) {
         AppLog("wine         : the app ends, so it stops %s", argv[0]);
       } else {
-        AppLog("wine         : Quit game stops %s", argv[0]);
+        AppLog("wine         : Quit game sends SIGKILL to the process %d, the loader of "
+               "Wine that the app started (%s)",
+               static_cast<int>(pid), argv[0]);
       }
       kill(pid, SIGKILL);
       waitpid(pid, &status, 0);

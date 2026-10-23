@@ -155,6 +155,76 @@ inline void MaskInput(input_channel::SlotData* slot, bool menu_over_game) {
   slot->flags &= ~input_channel::kFocused;
 }
 
+// THE MENU BUTTON while the game runs. A hold of play_menu_hold_ms shows the
+// menu of the app over the game, and a press while the menu shows hides it.
+// With play_menu_press=1 (hold_back) the app holds the menu bit of the slot
+// back while the button is down: a press shorter than the hold goes to the
+// mod at its release (down for kReleaseSlots slots, then up), on the hand
+// that pressed. A hold and a press that hides the menu never reach the mod.
+// With play_menu_press=0 the mod gets each press at once, as the session
+// gives it, and a hold opens the menu of the game too. With hold_ms=0 there
+// is no menu over the game, and each press goes to the mod at once.
+constexpr int kReleaseSlots = 2;
+
+enum class MenuAction { kNone, kShow, kHide };
+
+struct MenuButtonRule {
+  bool down = false;     // the button was down in the slot before
+  double down_ms = 0.0;  // the time of the press
+  bool taken = false;    // the press is the app's: a hold or a hide
+  int hand = 0;          // the hand of the press
+  int release_slots = 0; // the slots that still give the press to the mod
+};
+
+struct MenuStep {
+  MenuAction action = MenuAction::kNone;
+  bool mod_menu[2] = {false, false};  // the menu bit of each hand for the mod
+};
+
+// One slot. down: the menu button of each hand in this slot.
+inline MenuStep StepMenuButton(MenuButtonRule* r, const bool down[2], double now_ms,
+                               bool menu_over_game, int hold_ms, bool hold_back) {
+  MenuStep s;
+  const bool any = down[0] || down[1];
+  const bool back = hold_back && hold_ms > 0;
+  if (any && !r->down) {
+    r->down_ms = now_ms;
+    r->hand = down[0] ? 0 : 1;
+    r->taken = false;
+    if (menu_over_game && hold_ms > 0) {
+      s.action = MenuAction::kHide;
+      r->taken = true;
+    }
+  }
+  if (any && !r->taken && !menu_over_game && hold_ms > 0 && now_ms - r->down_ms >= hold_ms) {
+    s.action = MenuAction::kShow;
+    r->taken = true;
+  }
+  if (back) {
+    if (!any && r->down && !r->taken) r->release_slots = kReleaseSlots;
+    if (r->release_slots > 0) {
+      s.mod_menu[r->hand] = true;
+      --r->release_slots;
+    }
+  } else {
+    s.mod_menu[0] = down[0];
+    s.mod_menu[1] = down[1];
+  }
+  r->down = any;
+  return s;
+}
+
+// The menu bits of the step into the slot of the mod.
+inline void ApplyMenuBits(input_channel::SlotData* slot, const MenuStep& step) {
+  for (int h = 0; h < 2; ++h) {
+    if (step.mod_menu[h]) {
+      slot->hands[h].flags |= input_channel::kMenu;
+    } else {
+      slot->hands[h].flags &= ~input_channel::kMenu;
+    }
+  }
+}
+
 // The time of the day as text for the status line, "14:03:22".
 inline std::string Clock(int hour, int minute, int second) {
   char text[16];

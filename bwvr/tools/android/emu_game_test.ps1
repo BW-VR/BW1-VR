@@ -25,10 +25,13 @@
          reads back the eye pictures of the projection layer and the quads.
       3. holds the menu button of the left controller for 90 frames (1.25
          s, the menu shows over the game after play_menu_hold_ms=1000),
-         points at "Quit game" and pulls the trigger. It waits
-         until the log says that the game ended.
+         presses it for 6 frames (the menu goes), holds it again, points
+         at "Quit game" and pulls the trigger. It waits until the log says
+         that the game ended. The mod must get no press of the menu button.
       4. the same with "Play in VR" (no word on the command line: the game
-         loads slot 20 of the profile, or starts a new game).
+         loads slot 20 of the profile, or starts a new game), with a short
+         press of 6 frames first, which goes to the mod at its release, and
+         no hide step.
       5. ends the session.
 
     The checks: the files of the mod in the prefix, the registry, the keys
@@ -278,20 +281,29 @@ try {
         '40 trigger right 1', '44 trigger right 0',
         '50 hold measured1',
         '51 eyes new', '52 quads new',
+        # Game 1: show (a hold of 90 frames), hide (a press of 6 frames),
+        # show again, Quit game. No press reaches the mod.
         '60 menu left 1', '150 menu left 0',
         '170 capture over1',
-        '180 point right menu 800 227', '190 trigger right 1', '194 trigger right 0',
-        '200 hold ended1',
-        '210 capture after1',
-        '220 point right menu 800 227', '230 trigger right 1', '234 trigger right 0',
-        '240 hold measured2',
-        '241 eyes play', '242 quads play',
-        '250 menu left 1', '340 menu left 0',
-        '360 capture over2',
-        '370 point right menu 800 227', '380 trigger right 1', '384 trigger right 0',
-        '390 hold ended2',
-        '400 capture after2',
-        '420 exit')
+        '180 menu left 1', '186 menu left 0',
+        '200 quads hidden1',
+        '220 menu left 1', '310 menu left 0',
+        '330 capture again1',
+        '340 point right menu 800 227', '350 trigger right 1', '354 trigger right 0',
+        '360 hold ended1',
+        '370 capture after1',
+        '380 point right menu 800 227', '390 trigger right 1', '394 trigger right 0',
+        '400 hold measured2',
+        '401 eyes play', '402 quads play',
+        # Game 2: a short press (6 frames) goes to the mod at its release,
+        # then show and Quit game.
+        '410 menu left 1', '416 menu left 0',
+        '470 menu left 1', '560 menu left 0',
+        '580 capture over2',
+        '590 point right menu 800 227', '600 trigger right 1', '604 trigger right 0',
+        '610 hold ended2',
+        '620 capture after2',
+        '640 exit')
     Adb @('push', $script, "$XrDir/script.txt")
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
@@ -361,7 +373,7 @@ try {
     Adb @('shell', 'am', 'start', '-n', "$Package/android.app.NativeActivity")
     $log = WaitLog @('wine         : Wine is ready', 'FAULT') 900
     Expect ($log -match 'wine         : Wine is ready') 'Wine is ready'
-    Expect ($log -match 'game         : play_game=1, play_menu_hold_ms=1000\. Play starts the game in Wine') 'the app can play: Wine is in the APK'
+    Expect ($log -match 'game         : play_game=1, play_menu_hold_ms=1000, play_menu_press=1\. Play starts the game in Wine') 'the app can play: Wine is in the APK'
     Expect ($log -match 'xr           : input_live=1\. The session has the actions of the mod') 'the session has the actions of the mod from its start'
     Hold 'ready'
 
@@ -410,19 +422,47 @@ try {
         $load.Lines | Select-Object -First 8 | ForEach-Object { Note $_ }
         Expect ($load.Wine -gt 0) "the processes of Wine ran ($([math]::Round($load.Wine)) % of one CPU)"
         $results["cpu$n"] = $load
+        # The tree of the processes of the user: which process the app
+        # started, and the parent of runblack.exe.
+        $tree = @((AdbOut @('shell', 'ps', '-A', '-o', 'PID,PPID,USER,NAME')) -split "`r?`n" | Where-Object { $_ -match "^\s*\d+\s+\d+\s+$User\s" })
+        Set-Content -LiteralPath (Join-Path $Out "tree-game$n.txt") -Value $tree -Encoding utf8
+        Note 'the processes of the user of the app (PID PPID USER NAME):'
+        $tree | ForEach-Object { Note $_.Trim() }
+        $started = [regex]::Match($log.Substring([math]::Max(0, $playAt)), 'wine         : the process (\d+) of the app runs G:\\runblack\.exe').Groups[1].Value
+        $byPid = @{}
+        foreach ($t in $tree) { $f = $t.Trim() -split '\s+', 4; if ($f.Count -eq 4) { $byPid[$f[0]] = @{ Parent = $f[1]; Name = $f[3] } } }
+        $game = @($byPid.Keys | Where-Object { $byPid[$_].Name -match 'runblack\.exe' }) | Select-Object -First 1
+        $gameParent = if ($game) { $byPid[$game].Parent } else { '' }
+        $parentName = if ($byPid.ContainsKey($gameParent)) { $byPid[$gameParent].Name } else { 'not of the user' }
+        $startedName = if ($started -and $byPid.ContainsKey($started)) { $byPid[$started].Name } else { 'not there' }
+        Note "the app started the process $started ($startedName). runblack.exe is $game, its parent is $gameParent ($parentName)"
+        $results["tree$n"] = "the app started $started ($startedName), runblack.exe $game has the parent $gameParent ($parentName)"
+        Expect ($started -ne '' -and $byPid.ContainsKey($started)) "the log names the process that the app started, and it runs ($started, $startedName)"
         Hold "measured$n"
         # The eye pictures (the read back takes a time), then the menu over
         # the game, and Quit game.
         $log = WaitLog @('game         : Quit game') 900 $playAt
         $log = WaitLog @("game         : the game ended with the exit code -?\d+ at [\d:]+ \(Quit game\)") 300 $playAt
         $part = $log.Substring([math]::Max(0, $playAt))
-        $overAt = $part.IndexOf('game         : the menu shows over the game')
+        $show = 'game         : the menu shows over the game'
+        $hide = 'game         : the menu goes. The game has the hands again'
         $quitAt = $part.IndexOf('game         : Quit game')
-        Expect ($overAt -ge 0 -and $quitAt -gt $overAt) "the hold of the menu button showed the menu over game $n before Quit game"
+        $overAt = $part.IndexOf($show)
+        if ($n -eq 1) {
+            # Show, hide with a press, show again, then Quit game.
+            $hideAt = if ($overAt -ge 0) { $part.IndexOf($hide, $overAt) } else { -1 }
+            $againAt = if ($hideAt -ge 0) { $part.IndexOf($show, $hideAt) } else { -1 }
+            Expect ($overAt -ge 0 -and $hideAt -gt $overAt -and $againAt -gt $hideAt -and $quitAt -gt $againAt) 'game 1: the hold showed the menu over the game, a press hid it, a hold showed it again, then Quit game'
+            Expect ($part.Substring(0, [math]::Max(0, $quitAt)) -notmatch 'game         : a press of the menu button goes to the mod') 'game 1: the app gave no press of the menu button to the mod (the holds and the press that hid the menu)'
+        } else {
+            Expect ($overAt -ge 0 -and $quitAt -gt $overAt) "the hold of the menu button showed the menu over game $n before Quit game"
+            Expect ($part -match 'game         : a press of the menu button goes to the mod at its release \(play_menu_press=1\)') 'game 2: the short press went to the mod at its release'
+        }
         Expect ($part -match 'game         : Quit game') "the trigger on Quit game in game $n"
-        Expect ($part -match 'wine         : Quit game stops \S+/wine') 'Quit game stopped runblack.exe'
-        $ended = [regex]::Match($part, 'game         : runblack\.exe ended with (-?\d+) after ([\d.]+) s \(Quit game\)')
-        Expect $ended.Success ('runblack.exe ended: ' + $ended.Value)
+        $sig = [regex]::Match($part, 'wine         : Quit game sends SIGKILL to the process (\d+)')
+        Expect ($sig.Success -and $sig.Groups[1].Value -eq $started) ("Quit game sent SIGKILL to the process that the app started: " + $sig.Value)
+        $ended = [regex]::Match($part, 'game         : the process of the game \(start\.exe of Wine, for runblack\.exe\) ended with (-?\d+) after ([\d.]+) s \(Quit game\)')
+        Expect $ended.Success ('the process that the app started ended: ' + $ended.Value)
         $kill = [regex]::Match($part, 'game         : wineserver -k ended with (-?\d+) after')
         Expect ($kill.Success -and $kill.Groups[1].Value -eq '0') ('wineserver -k after Quit game stopped the server: ' + $kill.Value)
         Expect ($part -match 'game         : the game ended with the exit code -?\d+ at [\d:]+ \(Quit game\)') 'the menu came back with the exit code'
@@ -437,8 +477,22 @@ try {
         Expect ($rates.Count -gt 0) "the app logged the frame rate of game $n ($($rates.Count) lines)"
         $results["rates$n"] = $rates
         $results["first$n"] = $first.Groups[2].Value
-        # The log of the mod of this game.
+        # The log of the mod of this game: the Esc of the menu button. In
+        # game 1 no press reached the mod, in game 2 the short press did.
         Adb @('pull', "$GameDir/bwvr.log", (Join-Path $Out "bwvr-game$n.log"))
+        $modLogNow = if (Test-Path -LiteralPath (Join-Path $Out "bwvr-game$n.log")) { Get-Content -LiteralPath (Join-Path $Out "bwvr-game$n.log") -Raw } else { '' }
+        $escLines = @($modLogNow -split "`r?`n" | Where-Object { $_ -match 'controllers  : the menu button (sends Esc|is dropped)' })
+        $escLines | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        if (-not $first.Success) {
+            # The mod reads the buttons in a frame of the scene
+            # (ControllersFrame of stereo.cpp). With no such frame its log
+            # cannot show a press: the log of the app above is the proof.
+            Note "no frame of the scene came, so the mod read no button in game $n ($($escLines.Count) lines of the Esc of the mod)"
+        } elseif ($n -eq 1) {
+            Expect ($escLines.Count -eq 0) "game 1: the mod got no press of the menu button ($($escLines.Count) lines of the mod)"
+        } else {
+            Expect ($escLines.Count -ge 1) "game 2: the mod got the short press of the menu button ($($escLines.Count) lines of the mod)"
+        }
         Adb @('pull', "$AppDir/wine.log", (Join-Path $Out "wine-game$n.log"))
         Hold "ended$n"
     }
@@ -479,7 +533,7 @@ try {
             Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of eye $eye of the projection layer in game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels" } else { 'none' }))
         }
     }
-    foreach ($name in @('before', 'over1', 'after1', 'over2', 'after2')) {
+    foreach ($name in @('before', 'over1', 'again1', 'after1', 'over2', 'after2')) {
         $m = [regex]::Match($report, "capture \S*/$name-\d+\.bmp 1600x1200 lit (\d+)")
         Expect ($m.Success -and [int]$m.Groups[1].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[1].Value) lit pixels)"
     }

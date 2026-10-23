@@ -94,10 +94,11 @@ class WineRuntime {
   // no limit). The exit code, or -1 when it did not start or did not end.
   // stop: a flag that stops the program (SIGKILL), or null. cwd: the
   // current folder of the program, or empty for the folder of the app. env:
-  // the environment, or null for the environment of each program.
+  // the environment, or null for the environment of each program. say_pid:
+  // the log names the process that the app started.
   int Spawn(const std::vector<std::string>& args, int timeout_s, double* ms,
             const std::atomic<bool>* stop, const std::string& cwd = std::string(),
-            const std::vector<std::string>* env = nullptr);
+            const std::vector<std::string>* env = nullptr, bool say_pid = false);
   void RunGame(Game game);
   bool PutModFiles();
   void EndGame(int code, const std::string& why);

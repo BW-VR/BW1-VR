@@ -17,7 +17,9 @@
         signature. No file of the game can be in the APK.
       - The files of the mod (assets/mod, with Wine only): ddraw.dll and
         openxr_loader.dll are the files of bwvr/build/src/mod/Release (the
-        SHA-256), each a PE file for 32 bit x86.
+        SHA-256), each a PE file for 32 bit x86, the loader has the pinned
+        SHA-256 of package.ps1, and assets/licenses/mod_notices.txt is the
+        Notices.txt of the installer.
       - Each Wine tree (assets/wine/<abi>.tar): a build id, the loader,
         wineserver, ntdll.dll of i386, the CPU DLL of its ABI in wine.inf
         and in the tree, libfreetype.so, the fonts, and none of the DLLs
@@ -110,6 +112,9 @@ try {
             if ($e.FullName -match '^assets/mod/([^/]+)$') {
                 [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, (Join-Path $wineDir ('mod-' + $Matches[1])), $true)
             }
+            if ($e.FullName -eq 'assets/licenses/mod_notices.txt') {
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, (Join-Path $wineDir 'mod_notices.txt'), $true)
+            }
         }
     }
 } finally {
@@ -142,6 +147,25 @@ foreach ($name in @('ddraw.dll', 'openxr_loader.dll')) {
         if ($pe.Length -gt $at + 6 -and [BitConverter]::ToUInt32($pe, $at) -eq 0x4550) { $machine = '0x{0:x}' -f [BitConverter]::ToUInt16($pe, $at + 4) }
     }
     Expect ($machine -eq '0x14c') "$entry is a PE file for 32 bit x86 (machine $machine)"
+}
+# The notices of the code of other people in the files of the mod go with
+# them: assets/mod never goes without assets/licenses/mod_notices.txt, the
+# Notices.txt of the installer of the PC.
+$modNames = @($names | Where-Object { $_ -match '^assets/mod/' })
+if ($modNames.Count -gt 0) {
+    $notices = Join-Path $wineDir 'mod_notices.txt'
+    $same = (Test-Path -LiteralPath $notices) -and
+        ((Get-FileHash -LiteralPath $notices -Algorithm SHA256).Hash -eq
+         (Get-FileHash -LiteralPath (Join-Path $Bwvr 'installer\Notices.txt') -Algorithm SHA256).Hash)
+    Expect $same 'the files of the mod go with assets/licenses/mod_notices.txt, the Notices.txt of the installer'
+    # The OpenXR loader is the file of the pinned hash of package.ps1.
+    $package = Get-Content -LiteralPath (Join-Path $Bwvr 'tools\package.ps1') -Raw
+    $pinned = [regex]::Match($package, "'openxr_loader\.dll'\s*=\s*'([0-9A-Fa-f]{64})'").Groups[1].Value.ToLowerInvariant()
+    $loader = Join-Path $wineDir 'mod-openxr_loader.dll'
+    $loaderHash = if (Test-Path -LiteralPath $loader) { (Get-FileHash -LiteralPath $loader -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'none' }
+    Expect ($pinned -ne '' -and $loaderHash -eq $pinned) "assets/mod/openxr_loader.dll has the pinned SHA-256 of package.ps1 ($pinned)"
+} else {
+    Expect (-not ($names -contains 'assets/licenses/mod_notices.txt')) 'an APK with no files of the mod has no mod_notices.txt'
 }
 
 # THE WINE TREES. The tar of Windows (bsdtar) lists them and reads wine.inf.

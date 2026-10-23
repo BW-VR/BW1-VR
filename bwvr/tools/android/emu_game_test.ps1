@@ -270,14 +270,15 @@ try {
     [IO.File]::WriteAllText($cpuScript, "u=`$1`nfor d in /proc/[0-9]*; do`n  [ `"`$(stat -c %U `$d 2>/dev/null)`" = `"`$u`" ] || continue`n  cat `$d/stat 2>/dev/null`n  echo`ndone`ncat /proc/uptime`n")
     Adb @('push', $cpuScript, "$XrDir/cpu.sh")
 
-    # THE SCRIPT OF THE CONTROLLERS. The rows of the menu are 74 pixels high
-    # from y = 190 (menu_layout.h): row r has its middle at 227 + 74 r. With
+    # THE SCRIPT OF THE CONTROLLERS. The rows of the menu are 68 pixels high
+    # from y = 190 (menu_layout.h): row r has its middle at 224 + 68 r. With
     # no game, row 0 is "Play in VR" and row 1 "Play, new game". While the
-    # game runs, row 0 is "Quit game".
+    # game runs, row 8 is "Quit game" (the 7 groups, Save Config, Quit game,
+    # Exit).
     $script = Join-Path $Out 'script.txt'
     Set-Content -LiteralPath $script -Encoding ascii -Value @(
         '10 hold ready',
-        '20 point right menu 800 301', '30 capture before',
+        '20 point right menu 800 292', '30 capture before',
         '40 trigger right 1', '44 trigger right 0',
         '50 hold measured1',
         '51 eyes new', '52 quads new',
@@ -289,7 +290,7 @@ try {
         '200 quads hidden1',
         '220 menu left 1', '310 menu left 0',
         '330 capture again1',
-        '340 point right menu 800 227', '350 trigger right 1', '354 trigger right 0',
+        '340 point right menu 800 768', '350 trigger right 1', '354 trigger right 0',
         '360 hold ended1',
         '370 capture after1',
         '380 point right menu 800 227', '390 trigger right 1', '394 trigger right 0',
@@ -300,7 +301,7 @@ try {
         '410 menu left 1', '416 menu left 0',
         '470 menu left 1', '560 menu left 0',
         '580 capture over2',
-        '590 point right menu 800 227', '600 trigger right 1', '604 trigger right 0',
+        '590 point right menu 800 768', '600 trigger right 1', '604 trigger right 0',
         '610 hold ended2',
         '620 capture after2',
         '640 exit')
@@ -537,10 +538,17 @@ try {
         $m = [regex]::Match($report, "capture \S*/$name-\d+\.bmp 1600x1200 lit (\d+)")
         Expect ($m.Success -and [int]$m.Groups[1].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[1].Value) lit pixels)"
     }
-    # With no menu (the game runs) the runtime gets no quad of 1600 by 1200.
+    # With no menu (the game runs) the runtime gets no quad of 1600 by 1200
+    # after the first frame of the game. Before it the quad shows the notice
+    # (play_notice=1).
     $quadLines = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
     $noMenu = @($quadLines | Where-Object { $_.Groups[2].Value -notmatch 'rect 0 0 1600x1200' })
-    Expect ($noMenu.Count -gt 0) "the runtime had frames with no menu quad while the game ran ($($noMenu.Count) lines of the quads)"
+    if ($log -match 'game         : the first frame of the game') {
+        Expect ($noMenu.Count -gt 0) "the runtime had frames with no menu quad while the game ran ($($noMenu.Count) lines of the quads)"
+    } else {
+        Expect ($log -match 'game         : play_notice=1\. The quad of the menu shows a notice') 'no first frame of the game: the quad of the menu shows the notice (play_notice=1)'
+        Expect ($noMenu.Count -eq 0) "no first frame of the game: each frame of the runtime has the quad of the menu ($($quadLines.Count) lines of the quads, $($noMenu.Count) with no menu)"
+    }
 
     # THE LOG OF THE MOD of the first game (the second game writes it again).
     foreach ($n in 1, 2) {

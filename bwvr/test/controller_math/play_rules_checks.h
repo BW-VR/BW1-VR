@@ -298,12 +298,14 @@ inline void QuitChecks() {
   menu.SetGameRunning(true);
   items = menu.Items();
   Check(menu.OnMain() && menu.Cursor() == 0, "the start of a game goes to the main page", 0, 0);
-  Check(items[0].kind == ItemKind::kQuit && menu.Label(items[0]) == "Quit game" &&
-            items.size() == rows - 1,
-        "the game runs: Quit game in place of the two plays", static_cast<double>(items.size()),
-        static_cast<double>(rows - 1));
+  const size_t quit = items.size() - 2;
+  Check(items[quit].kind == ItemKind::kQuit && menu.Label(items[quit]) == "Quit game" &&
+            items.back().kind == ItemKind::kExit && items.size() == rows - 1,
+        "the game runs: no plays, Quit game above Exit at the bottom",
+        static_cast<double>(items.size()), static_cast<double>(rows - 1));
+  menu.SetCursor(static_cast<int>(quit));
   Check(menu.Select() == Action::kQuit, "a select on Quit game", 0, 0);
-  Check(!menu.Help(items[0]).empty(), "Quit game has a help text", 0, 0);
+  Check(!menu.Help(items[quit]).empty(), "Quit game has a help text", 0, 0);
   bool play = false;
   for (const Item& item : items) {
     if (item.kind == ItemKind::kPlay || item.kind == ItemKind::kNewGame) play = true;

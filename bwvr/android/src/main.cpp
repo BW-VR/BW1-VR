@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <string>
 #include <vector>
@@ -120,6 +121,8 @@ struct App {
   bool play_game = true;         // play_game
   int play_menu_hold_ms = 1000;  // play_menu_hold_ms
   bool play_menu_press = true;   // play_menu_press
+  bool play_notice = true;       // play_notice
+  bool exit_at_end = true;       // exit_at_end
   play_rules::MenuButtonRule menu_rule;  // the menu button of this game
   play_rules::MenuStep menu_step;        // of this frame of the session
   bool menu_mod_said = false;  // the log has the press that goes to the mod now
@@ -217,6 +220,8 @@ void LiveSummary(App* app, const char* why) {
          app->live_reader.LimitBytes());
 }
 
+void ShowNotice(App* app);
+
 // While a game runs: the first frame of the game after Play, and the frame
 // rate of the game each 10 s, from the frame numbers of the mod in the live
 // stream. With vk_device=0 nothing paces the frames of the game.
@@ -230,6 +235,7 @@ void GameFrames(App* app) {
     AppLog("game         : the first frame of the game (frame %llu) came %.1f s after Play",
            static_cast<unsigned long long>(app->live_last), (now - app->play_ms) / 1000.0);
     app->status = "The game runs (started " + app->play_clock + ").";
+    ShowNotice(app);
     return;
   }
   if (now - app->rate_ms < 10000.0) return;
@@ -390,11 +396,38 @@ std::string ClockNow() {
   return play_rules::Clock(local.tm_hour, local.tm_min, local.tm_sec);
 }
 
+// THE NOTICE while the game starts (play_notice=1): from Play to the first
+// frame of the game the quad of the menu shows a notice in place of the
+// rows, because the headset shows nothing of the game before its first
+// frame. The menu over the game takes the place of the notice.
+void ShowNotice(App* app) {
+  const bool notice = app->play_notice && app->game_on && !app->first_frame &&
+                      !app->menu_over_game;
+  if (notice) {
+    const int ms = app->play_menu_hold_ms;
+    char text[320];
+    if (ms > 0) {
+      snprintf(text, sizeof(text),
+               "The game starts in Wine. The picture of the game comes with its first "
+               "frame. Hold the left menu button for %.1f s to show the menu with "
+               "\"Quit game\".", ms / 1000.0);
+    } else {
+      snprintf(text, sizeof(text),
+               "The game starts in Wine. The picture of the game comes with its first "
+               "frame. play_menu_hold_ms=0: the menu comes back when the game ends.");
+    }
+    app->menu.SetNotice(text);
+  } else {
+    app->menu.SetNotice("");
+  }
+  app->xr.SetMenuShown(app->menu_over_game || notice || !app->game_on);
+}
+
 // The menu over the game, or the game with no menu.
 void ShowMenuOverGame(App* app, bool on) {
   if (app->menu_over_game == on) return;
   app->menu_over_game = on;
-  app->xr.SetMenuShown(on);
+  ShowNotice(app);
   app->dragging = false;
   AppLog("game         : %s", on ? "the menu shows over the game. The mod gets no hand"
                                  : "the menu goes. The game has the hands again");
@@ -465,6 +498,7 @@ void Play(App* app, bool new_game) {
   app->menu_over_game = true;
   ShowMenuOverGame(app, false);
   app->status = "Starting the game (" + app->play_clock + ")...";
+  if (app->play_notice) AppLog("game         : play_notice=1. The quad of the menu shows a notice until the first frame of the game");
   AppLog("game         : %s at %s, the render %d by %d", name, app->play_clock.c_str(),
          game.width, game.height);
 }
@@ -532,6 +566,13 @@ void Do(App* app, Action action) {
       app->wine.StopGame();
       app->status = "Quitting the game...";
       AppLog("game         : Quit game");
+      break;
+    case Action::kExit:
+      // The end of the activity ends android_main, which stops the game and
+      // Wine (and, with exit_at_end=1, the process).
+      AppLog("menu         : Exit%s", app->game_on ? ". The game ends" : "");
+      app->status = "Exit...";
+      ANativeActivity_finish(app->android->activity);
       break;
     case Action::kNone:
       break;
@@ -888,6 +929,17 @@ void android_main(android_app* android) {
   // gets each press at once (a hold opens the menu of the game too).
   app.play_menu_hold_ms = app.ini.GetInt("bwvr", "play_menu_hold_ms", 1000);
   if (app.play_menu_hold_ms < 0) app.play_menu_hold_ms = 0;
+  // play_notice=1 (the default): from Play to the first frame of the game
+  // the quad of the menu shows a notice with the way to the menu. 0: the
+  // headset shows nothing until the first frame.
+  app.play_notice = app.ini.GetInt("bwvr", "play_notice", 1) != 0;
+  // exit_at_end=1 (the default): the process ends with android_main. A
+  // headset keeps the process of an app when the app goes to the back or
+  // the headset sleeps, and the next start of the app is a new android_main
+  // in the same process. The renderer of the mod takes one device in a
+  // process, so a new android_main in an old process cannot play. 0: the
+  // process stays, as the system wants.
+  app.exit_at_end = app.ini.GetInt("bwvr", "exit_at_end", 1) != 0;
   app.play_menu_press = app.ini.GetInt("bwvr", "play_menu_press", 1) != 0;
   AppLog("game         : play_game=%d, play_menu_hold_ms=%d, play_menu_press=%d. %s",
          app.play_game ? 1 : 0, app.play_menu_hold_ms, app.play_menu_press ? 1 : 0,
@@ -1029,4 +1081,9 @@ void android_main(android_app* android) {
   app.flat.Stop();
   app.painter.Stop();
   android->activity->vm->DetachCurrentThread();
+  if (app.exit_at_end) {
+    AppLog("app          : exit_at_end=1. The process ends, so the next start of the app "
+           "is a new process");
+    _exit(0);
+  }
 }

@@ -19,8 +19,8 @@ constexpr int kHeight = 1200;
 constexpr int kTitleBaseline = 120;
 // The rows.
 constexpr int kRowTop = 190;
-constexpr int kRowHeight = 74;
-constexpr int kMaxRows = 10;
+constexpr int kRowHeight = 68;
+constexpr int kMaxRows = 11;
 constexpr int kLeft = 110;
 constexpr int kRight = 1490;
 // The bar of a slider and the box of a check box, at the right of a row.

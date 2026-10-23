@@ -32,6 +32,7 @@ enum class ItemKind {
   kSetting,  // a row of the table
   kBack,     // back to the main page
   kQuit,     // "Quit game": while the game runs, in place of the two plays
+  kExit,     // "Exit": ends the app
 };
 
 struct Item {
@@ -45,6 +46,7 @@ enum class Action {
   kNewGame,
   kSave,
   kQuit,
+  kExit,
 };
 
 class Menu {
@@ -173,6 +175,16 @@ class Menu {
   }
   bool GameRunning() const { return game_running_; }
 
+  // THE NOTICE while the game starts (play_notice=1): a text in place of
+  // the rows, until the first frame of the game. An empty notice gives the
+  // rows.
+  void SetNotice(const std::string& text) {
+    if (text == notice_) return;
+    notice_ = text;
+    ++revision_;
+  }
+  const std::string& Notice() const { return notice_; }
+
   // THE ROWS OF THE PAGE.
   bool OnMain() const { return group_ < 0; }
   int Group() const { return group_; }
@@ -189,9 +201,7 @@ class Menu {
   std::vector<Item> Items() const {
     std::vector<Item> items;
     if (OnMain()) {
-      if (game_running_) {
-        items.push_back({ItemKind::kQuit, -1});
-      } else {
+      if (!game_running_) {
         items.push_back({ItemKind::kPlay, -1});
         items.push_back({ItemKind::kNewGame, -1});
       }
@@ -201,6 +211,9 @@ class Menu {
         }
       }
       items.push_back({ItemKind::kSave, -1});
+      // The rows that end something are at the bottom.
+      if (game_running_) items.push_back({ItemKind::kQuit, -1});
+      items.push_back({ItemKind::kExit, -1});
       return items;
     }
     for (int i = group_ + 1; i < st::kSettingCount; ++i) {
@@ -229,6 +242,8 @@ class Menu {
         return "Back";
       case ItemKind::kQuit:
         return "Quit game";
+      case ItemKind::kExit:
+        return "Exit";
       case ItemKind::kGroup:
       case ItemKind::kSetting:
         return st::kSettings[item.index].label;
@@ -305,6 +320,8 @@ class Menu {
       case ItemKind::kQuit:
         return "Ends the game and each program of Wine. The game does not save. "
                "The menu button, B or Y go back to the game.";
+      case ItemKind::kExit:
+        return "Ends the app. A game that runs ends too, and it does not save.";
       default:
         return "";
     }
@@ -417,6 +434,8 @@ class Menu {
         return Action::kSave;
       case ItemKind::kQuit:
         return Action::kQuit;
+      case ItemKind::kExit:
+        return Action::kExit;
       case ItemKind::kGroup:
         group_ = item.index;
         cursor_ = 0;
@@ -480,6 +499,7 @@ class Menu {
   int headset_height_ = 2208;
   int guard_pct_ = 25;
   bool game_running_ = false;
+  std::string notice_;
 };
 
 }  // namespace menu_model

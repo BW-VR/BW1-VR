@@ -345,9 +345,9 @@ try {
     Adb @('shell', 'mkdir', '-p', '/system/etc/openxr/1')
     Adb @('push', $manifest, '/system/etc/openxr/1/active_runtime.json')
 
-    # The script of the controllers. The rows of the menu picture are 74
+    # The script of the controllers. The rows of the menu picture are 68
     # pixels high from y = 190 (menu_layout.h), so the middle of row r is at
-    # 227 + 74 r. The layer "menu" of the runtime is the menu quad: the last
+    # 224 + 68 r. The layer "menu" of the runtime is the menu quad: the last
     # quad of 1600 by 1200 pixels, over the stereo screen and the quad layers
     # of the mod.
     $script = Join-Path $Out 'script.txt'
@@ -358,14 +358,14 @@ try {
     Set-Content -LiteralPath $script -Encoding ascii -Value @(
         "$(30 + $T) recenter",
         "$(40 + $T) capture start",
-        "$(50 + $T) point right $L 800 671",
+        "$(50 + $T) point right $L 800 632",
         "$(60 + $T) capture point",
         "$(70 + $T) trigger right 1", "$(74 + $T) trigger right 0",
         "$(90 + $T) point right $L 400 227",
         "$(100 + $T) trigger right 1", "$(104 + $T) trigger right 0",
         "$(110 + $T) capture moving",
         "$(120 + $T) button right 1", "$(124 + $T) button right 0",
-        "$(140 + $T) point right $L 800 893",
+        "$(140 + $T) point right $L 800 836",
         "$(150 + $T) trigger right 1", "$(154 + $T) trigger right 0",
         "$(170 + $T) capture saved",
         "$(200 + $T) exit")

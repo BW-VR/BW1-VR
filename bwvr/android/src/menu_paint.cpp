@@ -125,6 +125,22 @@ void PaintMenu(Canvas2D* c, const menu_model::Menu& menu,
   c->Text(head, ml::kWidth * 0.5f, ml::kTitleBaseline + 18, 40, kText, false,
           Canvas2D::kCenterAlign, true);
 
+  // THE NOTICE while the game starts: its text in place of the rows.
+  if (!menu.Notice().empty()) {
+    const float size = 40;
+    const std::vector<std::string> lines =
+        Wrap(c, menu.Notice(), size, ml::kRight - ml::kLeft);
+    float y = static_cast<float>(ml::RowTop(1));
+    for (const std::string& line : lines) {
+      c->Text(line, ml::kWidth * 0.5f, y, size, kText, false,
+              Canvas2D::kCenterAlign, true);
+      y += size * 1.4f;
+    }
+    c->Text(status, ml::kWidth * 0.5f, ml::kStatusBaseline, 28, kText, false,
+            Canvas2D::kCenterAlign, true);
+    return;
+  }
+
   const std::vector<Item> items = menu.Items();
   const bool main = menu.OnMain();
   const int cursor = menu.Cursor();

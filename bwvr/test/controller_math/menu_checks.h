@@ -139,7 +139,8 @@ inline void MenuChecks() {
   std::vector<Item> items = menu.Items();
   Check(menu.OnMain(), "the menu starts on the main page", 0, 0);
   Check(items.front().kind == ItemKind::kPlay, "the first row is Play", 0, 0);
-  Check(items.back().kind == ItemKind::kSave, "the last row is Save", 0, 0);
+  Check(items.back().kind == ItemKind::kExit, "the last row is Exit", 0, 0);
+  Check(items[items.size() - 2].kind == ItemKind::kSave, "the row before Exit is Save", 0, 0);
   int groups = 0;
   for (const Item& item : items) {
     if (item.kind == ItemKind::kGroup) ++groups;

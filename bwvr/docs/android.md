@@ -205,8 +205,18 @@ patch v1.42, as in `README.md`) to the folder `game` in the folder of the
 app:
 
 ```
-adb push "C:\Black & White\." /sdcard/Android/data/org.bwvr.quest/files/game/
+.\bwvr\tools\android\push_game.ps1 -Game "C:\Black & White"
 ```
+
+`push_game.ps1` makes each folder with `mkdir -p` first and then pushes each
+file. A push of the whole folder (`adb push <folder>`) does not work in the
+folder of an app on a Quest 3: adb makes the first folder, and the make of
+each folder in it fails ("remote secure_mkdirs failed: Operation not
+permitted"). The ini and the logs of the mod of the PC and
+`MemoryLeaks.txt` stay on the PC. `-NoProfile` leaves out the folder
+`Profiles` and the Creatures of the profiles (`Scripts\CreatureMind\*.erc`),
+for a test. Start the app again after the copy, so it checks
+`runblack.exe`.
 
 The first start is necessary. Android gives the folder of the app to the
 app when the app asks for it, and the app makes the folder `game` then. A
@@ -230,7 +240,8 @@ shadow, as the text of the game has.
 
 - **The main page.** "Play in VR", "Play, new game", one entry for each
   group of the table ("Picture", "Performance", "Foveated rendering",
-  "View", "Moving around", "Controllers", "Testing") and "Save Config".
+  "View", "Moving around", "Controllers", "Testing"), "Save Config" and
+  "Exit". "Exit" ends the app (and a game that runs, with no save).
 - **A group page.** The rows of the group: the label at the left, the value
   at the right. A check box for a setting that is on or off, a slider with
   its value for a slider, the name of the item in a dark box for a list.
@@ -242,8 +253,9 @@ shadow, as the text of the game has.
   the setup of Wine, and the game: "Starting the game (14:03:22)...", "The
   game runs (started 14:03:22).", "The game ended with the exit code N
   (14:10:05, Quit game)." or why "Play" did not start the game.
-- **While the game runs** the main page has "Quit game" in place of "Play in
-  VR" and "Play, new game" (see "Play in the app").
+- **While the game runs** the main page has no "Play in VR" and no "Play,
+  new game", and "Quit game" is above "Exit" at the bottom (see "Play in the
+  app"). The rows that end something are at the bottom.
 
 The rows are the rows of `kSettings` in `settings_table.h` with the renderer
 Vulkan. The rows that only the renderer Direct3D 9 uses (`d3d9_backend`,
@@ -336,6 +348,13 @@ saves and starts nothing (no game in Wine).
    game folder as the current folder and
    `WINEDLLOVERRIDES=mscoree,mshtml=;ddraw=n`: the DirectDraw of the game is
    a native DLL, and the tree has no builtin one.
+
+**The notice** (`play_notice=1`, the default). From "Play" to the first
+frame of the game the quad of the menu shows a notice in place of the rows:
+the game starts in Wine, its picture comes with its first frame, and a hold
+of the left menu button shows the menu with "Quit game". The headset shows
+nothing of the game before its first frame, so with no notice the player
+sees only black. `play_notice=0`: no quad until the first frame.
 
 **While the game runs** the menu quad and the cursor do not go out, and the
 app shows the frames of the live stream in the projection layer and the
@@ -462,7 +481,7 @@ each step in a headset.
 - The live stream has no frame before the first frame of the scene: the
   logos, the videos and a dialog at frame 0 of the controllers (the dialog
   of a new profile) do not show in the headset. A player with no profile in
-  the game folder sees nothing while the menu of the app is hidden.
+  the game folder sees only the notice.
 - The mod reads the buttons of the input channel only in a frame of the
   scene, so before the first such frame a press of the menu button that
   the app gives to the mod does nothing.
@@ -1546,9 +1565,13 @@ the same fault. `0002-ntdll-read-image-sections-on-noexec-fs.patch`: the
 shared storage has `noexec`. The `mmap` of a PE file there works, but the
 `mprotect` of a code section to `PROT_EXEC` fails, so with no patch the game
 cannot run from the game folder (see "The noexec storage" in "Play in the
-app"). With the patch `map_image_into_view` asks `fstatvfs` for
-`ST_NOEXEC`, and then it reads each section of the image into memory, as
-Wine does for a file on a removable medium.
+app"). With the patch `map_image_into_view` reads each section of the
+image into memory, as Wine does for a file on a removable medium, when
+`fstatvfs` gives `ST_NOEXEC` or when a mapping of the first page of the file
+with `PROT_EXEC` fails with `EPERM` or `EACCES`. The second test is
+necessary on a Quest 3: its FUSE passthrough gives `fstatvfs` the flags of
+the file system under FUSE, with no `ST_NOEXEC`, although the mount has
+`noexec`.
 Wine for Android installs `bin` and `lib` into a folder of the ABI of
 Android (`arm64-v8a`, `x86_64`) beside `share`, and its loader is
 `lib/wine/<arch>-unix/wine`, in the folder of `ntdll.so`.
@@ -1724,18 +1747,28 @@ sections of ..." (`runblack.exe`, the DLLs of the game folder,
 of the mod in `syswow64` are in the internal folder, which has no
 `noexec`.
 
-**Not shown yet:** Wine with `wowbox64.dll` on ARM64 (no device ran it:
-for the tree of arm64-v8a only the machine of each ELF and PE file, the
-imports and exports of `wowbox64.dll` and its line in `wine.inf` are
-checked), the time of the setup on a headset, the patch 0002 on the FUSE
-storage of a headset, the end of the app in a session of a headset (the
-end of the session, not the back key of the window), and
-if Meta Horizon OS and the Steam Frame let an app with `targetSdkVersion`
-28 start programs of its folder.
+**On a Quest 3** (Meta Horizon OS v209, Android 14,
+`ro.build.version.min_supported_target_sdk` 28, Adreno 740 with Vulkan 1.3):
+the APK installs and the app with `targetSdkVersion` 28 starts the programs
+of Wine from its folder. The first start unpacked the tree of arm64-v8a
+(1587 files, 603.2 MB) in 2.7 s, `wineboot --init` took 8.3 s and
+`wineserver -w` 7.4 s, so the prefix took 15.7 s. The test program ran with
+`wowbox64.dll` as the CPU for x86 in 1.2 s: a process for i386 on arm64,
+`cpu_dll=wowbox64.dll`, a loop of 143.6 ms (83 ms in the emulator with the
+x86_64 tree), the drive, no graphics DLL of Wine, and Tahoma as a TrueType
+font. A new tree over the prefix of an older tree unpacked in 2.3 s and put
+the `wowbox64.dll` of the new tree into the prefix. The game ran with patch
+0002 ("no PROT_EXEC for a mapping of the file") through the logos (6980
+frames) and the video before the intro (skipped with the right trigger) to
+the dialog of a new profile, as in the emulator.
+
+**Not shown yet:** the end of the app in a session of a headset (the end
+of the session, not the back key of the window), the FUSE daemon of the
+Quest with the ioctl of patch 0001, and the Steam Frame.
 
 **Known limits:**
 
-- The APK is 205.3 MB (215,270,541 bytes) with both trees: a tar in the
+- The APK is 205.4 MB with both trees: a tar in the
   method deflate. A better compression (xz) needs a decoder in the app.
 - Wine has no audio driver on Android ("No driver from
   L"pulse,alsa,oss,coreaudio" could be initialized" of `mmdevapi`), and no

@@ -6,12 +6,15 @@ PROT_EXEC fails ("failed to set 60000020 protection on ... section
 .text, noexec filesystem?"), and the first call into the code of the
 game gives an access violation (loader_init: "IFC22.dll" failed to
 initialize, c0000005). map_pe_header falls back to read only when the
-mmap fails. With this patch map_image_into_view asks fstatvfs for
-ST_NOEXEC and then reads each section into the view, as for a file on
-a removable medium.
+mmap fails. With this patch map_image_into_view reads each section into
+the view, as for a file on a removable medium, when fstatvfs gives
+ST_NOEXEC or when a mapping of the first page of the file with PROT_EXEC
+fails with EPERM or EACCES. The second test is necessary on the Quest 3:
+its FUSE passthrough gives the flags of the file system under FUSE to
+fstatvfs, with no ST_NOEXEC.
 
---- a/dlls/ntdll/unix/virtual.c	2026-10-23 13:09:57.484543210 +0200
-+++ b/dlls/ntdll/unix/virtual.c	2026-10-23 13:09:57.496282781 +0200
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
 @@ -37,6 +37,7 @@
  #include <sys/stat.h>
  #include <sys/mman.h>
@@ -20,21 +23,34 @@ a removable medium.
  #ifdef HAVE_SYS_SYSINFO_H
  # include <sys/sysinfo.h>
  #endif
-@@ -3040,6 +3041,18 @@
+@@ -3040,6 +3041,31 @@
      /* map the header */
  
      fstat( fd, &st );
 +    /* A file system with noexec (the shared storage of Android) gives no
 +     * executable page of a mapped file, so each section is read into the
-+     * view, as from a removable medium. */
++     * view, as from a removable medium. The flags of statvfs do not always
++     * say noexec: with the FUSE passthrough of Android they can come from
++     * the file system under FUSE. So a mapping of the first page of the
++     * file with PROT_EXEC tests it too. */
 +    if (!removable)
 +    {
 +        struct statvfs vfs;
++        void *probe;
 +        if (!fstatvfs( fd, &vfs ) && (vfs.f_flag & ST_NOEXEC))
 +        {
 +            WARN( "noexec file system, reading the sections of %s\n", debugstr_us(nt_name) );
 +            removable = TRUE;
 +        }
++        else if ((probe = mmap( NULL, host_page_mask + 1, PROT_READ | PROT_EXEC, MAP_PRIVATE, fd, 0 )) == MAP_FAILED)
++        {
++            if (errno == EPERM || errno == EACCES)
++            {
++                WARN( "no PROT_EXEC for a mapping of the file (noexec), reading the sections of %s\n", debugstr_us(nt_name) );
++                removable = TRUE;
++            }
++        }
++        else munmap( probe, host_page_mask + 1 );
 +    }
      header_size = min( image_info->header_size, st.st_size );
      header_map_size = min( image_info->header_map_size, ROUND_SIZE( 0, st.st_size, host_page_mask ));

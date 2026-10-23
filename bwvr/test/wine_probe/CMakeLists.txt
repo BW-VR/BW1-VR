@@ -3,7 +3,7 @@
 # of Wine puts it into the game folder of the app. Only Windows calls, so
 # it builds with the static CRT and needs nothing beside it.
 add_executable(bwvr_wine_probe main.cpp)
-target_link_libraries(bwvr_wine_probe PRIVATE gdi32 advapi32)
+target_link_libraries(bwvr_wine_probe PRIVATE gdi32 advapi32 ole32 winmm dsound)
 if(MSVC)
   target_compile_options(bwvr_wine_probe PRIVATE /W4 /permissive-)
 endif()

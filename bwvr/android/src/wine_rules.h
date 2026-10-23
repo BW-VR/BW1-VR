@@ -189,15 +189,25 @@ inline std::vector<std::string> Environment(const std::vector<std::string>& inhe
   return env;
 }
 
+// The audio driver of the tree (patch 0003 of wine-patches): wineaaudio.drv
+// gives the sound of mmdevapi to AAudio of Android. Wine has no other audio
+// driver on Android.
+constexpr char kAudioDriver[] = "aaudio";
+
 // user.reg of a new prefix, before the first wineboot: no display driver
-// of Wine (the app draws, and the game shows no window). The wine server
-// loads it into HKEY_CURRENT_USER, and wineboot adds the rest.
-inline std::string UserRegSeed() {
-  return "WINE REGISTRY Version 2\n"
-         ";; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n"
-         "\n"
-         "[Software\\\\Wine\\\\Drivers]\n"
-         "\"Graphics\"=\"null\"\n";
+// of Wine (the app draws, and the game shows no window). audio
+// (wine_audio=1): the audio driver of the tree. With no "Audio" value
+// (wine_audio=0) mmdevapi tries its default list, which has no driver for
+// Android, so a program has no sound. The wine server loads the file into
+// HKEY_CURRENT_USER, and wineboot adds the rest.
+inline std::string UserRegSeed(bool audio) {
+  std::string text = "WINE REGISTRY Version 2\n"
+                     ";; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n"
+                     "\n"
+                     "[Software\\\\Wine\\\\Drivers]\n";
+  if (audio) text += std::string("\"Audio\"=\"") + kAudioDriver + "\"\n";
+  text += "\"Graphics\"=\"null\"\n";
+  return text;
 }
 
 // THE TAR FILE OF A TREE (ustar, as GNU tar --format=ustar writes it).

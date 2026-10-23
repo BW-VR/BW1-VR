@@ -22,7 +22,9 @@
         Notices.txt of the installer.
       - Each Wine tree (assets/wine/<abi>.tar): a build id, the loader,
         wineserver, ntdll.dll of i386, the CPU DLL of its ABI in wine.inf
-        and in the tree, libfreetype.so, the fonts, and none of the DLLs
+        and in the tree, libfreetype.so, the fonts, the audio driver
+        wineaaudio (the PE module of i386 and of the ABI, and its Unix
+        library: patch 0003 of wine-patches), and none of the DLLs
         that stay out (kLeftOutNames and kLeftOutPrefix of
         android/src/wine_rules.h). With a tree the targetSdkVersion is 28
         and the license texts of Wine and FreeType (and Box64 for
@@ -187,6 +189,8 @@ foreach ($abi in $wineAbis) {
     foreach ($need in @("$abi/lib/wine/$arch-unix/wine", "$abi/bin/wineserver",
                         "$abi/lib/wine/$arch-unix/ntdll.so", "$abi/lib/wine/i386-windows/ntdll.dll",
                         "$abi/lib/wine/$arch-windows/$cpu", "$abi/lib/libfreetype.so",
+                        "$abi/lib/wine/i386-windows/wineaaudio.drv", "$abi/lib/wine/$arch-windows/wineaaudio.drv",
+                        "$abi/lib/wine/$arch-unix/wineaaudio.so",
                         'share/wine/wine.inf', 'share/wine/fonts/tahoma.ttf')) {
         Expect ($list -contains $need) "the Wine tree of $abi has $need"
     }

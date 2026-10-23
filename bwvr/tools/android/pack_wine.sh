@@ -7,8 +7,9 @@
 #
 # The tree has only what a 32 bit Windows program needs: the loader,
 # wineserver, the Unix libraries, the PE DLLs and programs of the two
-# architectures, libfreetype.so and share/wine (wine.inf, the NLS files,
-# the fonts of Wine). The script:
+# architectures (with the audio driver wineaaudio of patch 0003),
+# libfreetype.so and share/wine (wine.inf, the NLS files, the fonts of
+# Wine). The script:
 #   - leaves out the DLLs of kLeftOutNames and kLeftOutPrefix of
 #     android/src/wine_rules.h ("Only Vulkan"), the headers, the man pages,
 #     the import libraries (.a), the shell scripts of bin (they need
@@ -125,6 +126,8 @@ echo "   the libraries that the ELF files need:" $(find "$S" -type f -exec sh -c
 for f in "$APK_ABI/lib/wine/$ABI-unix/wine" "$APK_ABI/bin/wineserver" \
          "$APK_ABI/lib/wine/$ABI-unix/ntdll.so" "$APK_ABI/lib/libfreetype.so" \
          "$APK_ABI/lib/wine/i386-windows/ntdll.dll" "$APK_ABI/lib/wine/$ABI-windows/$CPU" \
+         "$APK_ABI/lib/wine/i386-windows/wineaaudio.drv" "$APK_ABI/lib/wine/$ABI-windows/wineaaudio.drv" \
+         "$APK_ABI/lib/wine/$ABI-unix/wineaaudio.so" \
          share/wine/wine.inf share/wine/fonts/tahoma.ttf; do
   [ -e "$S/$f" ] || fault "the tree has no $f"
 done

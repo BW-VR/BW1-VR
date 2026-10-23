@@ -197,11 +197,16 @@ inline void EnvironmentChecks() {
         0, 0);
   Check(CountKey(plain, "WINELOADER") == 0 && CountKey(plain, "WINEDLLPATH") == 0,
         "no WINELOADER and no WINEDLLPATH: Wine finds them from ntdll.so", 0, 0);
-  const std::string reg = wine_rules::UserRegSeed();
+  const std::string reg = wine_rules::UserRegSeed(true);
   Check(reg.compare(0, 24, "WINE REGISTRY Version 2\n") == 0, "user.reg starts with its head",
         0, 0);
-  Check(reg.find("[Software\\\\Wine\\\\Drivers]\n\"Graphics\"=\"null\"\n") != std::string::npos,
-        "user.reg: HKCU\\Software\\Wine\\Drivers, Graphics = null", 0, 0);
+  Check(reg.find("[Software\\\\Wine\\\\Drivers]\n\"Audio\"=\"aaudio\"\n\"Graphics\"=\"null\"\n") !=
+            std::string::npos,
+        "user.reg: HKCU\\Software\\Wine\\Drivers, Audio = aaudio, Graphics = null", 0, 0);
+  const std::string quiet = wine_rules::UserRegSeed(false);
+  Check(quiet.find("[Software\\\\Wine\\\\Drivers]\n\"Graphics\"=\"null\"\n") != std::string::npos &&
+            quiet.find("Audio") == std::string::npos,
+        "user.reg with wine_audio=0: Graphics = null, no Audio value", 0, 0);
 }
 
 inline void TarChecks() {

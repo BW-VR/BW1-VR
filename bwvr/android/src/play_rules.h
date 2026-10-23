@@ -18,6 +18,7 @@
 
 #include "../../src/common/ini_text.h"
 #include "../../src/common/input_channel.h"
+#include "wine_rules.h"
 
 namespace play_rules {
 
@@ -81,8 +82,11 @@ constexpr char kGameExe[] = "G:\\runblack.exe";
 // the launcher of the PC (docs/launcher.md): the size of the render as
 // ScreenW and ScreenH, FullScreen 0 and ScreenD 32. Each a REG_DWORD as the
 // game writes it, GameDir a REG_SZ. Then the values of KnownDLLs for the
-// files of the mod.
-inline std::string GameRegistry(int width, int height) {
+// files of the mod. Then the audio driver of Wine (wine_audio), so a prefix
+// of an older tree gets it too: audio gives "Audio" = "aaudio", and no audio
+// deletes the value (mmdevapi then finds no driver, and the game has no
+// sound).
+inline std::string GameRegistry(int width, int height, bool audio) {
   char dwords[256];
   snprintf(dwords, sizeof(dwords),
            "\"ScreenW\"=dword:%08x\r\n\"ScreenH\"=dword:%08x\r\n"
@@ -100,6 +104,9 @@ inline std::string GameRegistry(int width, int height) {
     name.resize(name.find('.'));
     text += "\"bwvr_" + name + "\"=\"" + f + "\"\r\n";
   }
+  text += "\r\n[HKEY_CURRENT_USER\\Software\\Wine\\Drivers]\r\n";
+  text += audio ? "\"Audio\"=\"" + std::string(wine_rules::kAudioDriver) + "\"\r\n"
+                : "\"Audio\"=-\r\n";
   return text;
 }
 

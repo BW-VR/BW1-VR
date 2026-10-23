@@ -41,8 +41,13 @@
     took from the ring, the projection layer, the eye pictures, the time
     from Play to the first frame, the frame rate of the game, the CPU load
     of the processes of Wine, the menu over the game, Quit game, no process
-    of Wine after each game, and no crash. The test also collects the facts
-    of the sound, of the null display driver and of the noexec storage (the
+    of Wine after each game, and no crash. The sound of each game: the audio
+    driver aaudio in the registry, an output stream of wineaaudio in
+    wine.log and no line "No driver ... could be initialized" of mmdevapi,
+    and in the log of the mod the start of QMixer and its stream (no line
+    "QMixer gave no block"). The test also collects the facts of the sound
+    (the lines of wineaaudio, and the lines "audio out" and "audio mixer" of
+    the mod), of the null display driver and of the noexec storage (the
     lines of wine.log with wine_debug=warn+virtual).
 
     The results go to bwvr/out/android/emu-game-test. They hold pictures of
@@ -65,6 +70,12 @@
     The value of wine_debug in bwvr.ini. warn+virtual by default, for the
     lines of the noexec storage.
 
+.PARAMETER Audio
+    The audio backend of the emulator (its option -audio). 'none' (the
+    default): the emulator gives Android an output device and plays its
+    sound nowhere, so no person hears the game. 'off': the option -no-audio,
+    the emulator gives Android no audio device.
+
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
     game in it.
@@ -76,6 +87,7 @@ param(
     [int]$StartMinutes = 15,
     [int]$Memory = 4096,
     [string]$WineDebug = 'warn+virtual',
+    [string]$Audio = 'none',
     [switch]$Keep
 )
 
@@ -226,11 +238,14 @@ if (-not ($avds -contains $Avd)) {
 $started = $false
 $running = & $Adb devices 2>$null | Select-String -Pattern "^$Serial\s+device"
 if (-not $running) {
-    Say "Start the emulator (no window, a system that it can write, the GPU of the PC, $Memory MB)"
-    Start-Process -FilePath $Emulator -ArgumentList @('-avd', $Avd, '-port', "$Port",
-        '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot', '-writable-system',
-        '-gpu', 'host', '-memory', "$Memory") -WindowStyle Hidden | Out-Null
+    Say "Start the emulator (no window, a system that it can write, the GPU of the PC, $Memory MB, audio $Audio)"
+    $audioArgs = if ($Audio -eq 'off') { @('-no-audio') } else { @('-audio', $Audio) }
+    Start-Process -FilePath $Emulator -ArgumentList (@('-avd', $Avd, '-port', "$Port",
+        '-no-window') + $audioArgs + @('-no-boot-anim', '-no-snapshot', '-writable-system',
+        '-gpu', 'host', '-memory', "$Memory")) -WindowStyle Hidden | Out-Null
     $started = $true
+} else {
+    Say "The emulator $Serial runs already. Its audio is the one of its start, not -Audio $Audio"
 }
 if (-not (Wait-Boot 6)) { Stop-Android 'The emulator did not start in 6 minutes.' }
 
@@ -335,7 +350,11 @@ try {
     $t0 = Get-Date
     foreach ($item in Get-ChildItem -LiteralPath $Game -Force) {
         if ($skipTop -contains $item.Name) { continue }
-        if ($item.Name -like 'bwvr.ini*' -or $item.Name -like 'bwvr*.log' -or $item.Name -eq 'bwvr-hint-counts.ini') { continue }
+        # The files of the mod of a desk run that runs now (the input
+        # channel, the ring) are not files of the game. With a copy of them
+        # the app got errno 13 at the open of bwvr-input.chan.
+        if ($item.Name -like 'bwvr.ini*' -or $item.Name -like 'bwvr*.log' -or $item.Name -eq 'bwvr-hint-counts.ini' -or
+            $item.Name -like 'bwvr-*.chan' -or $item.Name -like 'bwvr-*.ring') { continue }
         Adb @('push', $item.FullName, "$GameDir/")
         if ($item.PSIsContainer) {
             $files = @(Get-ChildItem -LiteralPath $item.FullName -Recurse -File -Force)
@@ -399,6 +418,7 @@ try {
         Expect ($part -match 'game         : ddraw\.dll of the APK \(\d+ bytes\) is in \S+/drive_c/windows/syswow64') "the ddraw.dll of the APK is in syswow64 of the prefix"
         $reg = [regex]::Match($part, 'game         : reg import of C:\\bwvr\\game\.reg ended with (-?\d+) after ([\d.]+) s: GameDir G:\\, ScreenW (\d+), ScreenH (\d+)')
         Expect ($reg.Success -and $reg.Groups[1].Value -eq '0') ('reg import of the registry of the game: ' + $reg.Value)
+        Expect ($part -match 'game         : reg import of .* and the audio driver aaudio \(wine_audio=1\)') "the registry of game $n has the audio driver aaudio"
         Expect ($part -match "game         : start G:\\runblack\.exe$([regex]::Escape($r.Args)) in Wine") "the app started G:\runblack.exe$($r.Args)"
         $first = [regex]::Match($part, 'game         : the first frame of the game \(frame (\d+)\) came ([\d.]+) s after Play')
         Expect $first.Success ("the first frame of game $n came: " + $first.Value)
@@ -495,6 +515,17 @@ try {
             Expect ($escLines.Count -ge 1) "game 2: the mod got the short press of the menu button ($($escLines.Count) lines of the mod)"
         }
         Adb @('pull', "$AppDir/wine.log", (Join-Path $Out "wine-game$n.log"))
+        # The sound of this game: the stream of wineaaudio in wine.log, and
+        # QMixer in the log of the mod.
+        $wineNow = if (Test-Path -LiteralPath (Join-Path $Out "wine-game$n.log")) { Get-Content -LiteralPath (Join-Path $Out "wine-game$n.log") -Raw } else { '' }
+        $streams = @($wineNow -split "`r?`n" | Where-Object { $_ -match '^wineaaudio: (opened|opened again) the output stream' })
+        $streams | Select-Object -First 4 | ForEach-Object { Note ('wine.log: ' + $_) }
+        Expect ($streams.Count -ge 1) "game $n`: wineaaudio opened an output stream ($($streams.Count) in wine.log)"
+        Expect ($wineNow -notmatch 'No driver from .* could be initialized') "game $n`: mmdevapi found an audio driver (no line `"No driver ... could be initialized`")"
+        $qmixer = @($modLogNow -split "`r?`n" | Where-Object { $_ -match '^audio out    : (QMixer starts|the stream of QMixer is|QMixer gave no block)' })
+        $qmixer | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        Expect ($modLogNow -match 'audio out    : QMixer starts' -and $modLogNow -notmatch 'audio out    : QMixer gave no block') "game $n`: QMixer started and gave blocks to its output"
+        Expect ($modLogNow -match 'audio out    : the stream of QMixer is \d+ Hz, 16 bit stereo PCM') "game $n`: the mod knows the stream of QMixer (16 bit stereo PCM, the mixer of the mod can work)"
         Hold "ended$n"
     }
 
@@ -591,13 +622,15 @@ try {
     $facts = New-Object System.Collections.Generic.List[string]
     $facts.Add("wine.log: $(([regex]::Matches($wineLog, 'falling back to read')).Count) lines 'falling back to read', $(([regex]::Matches($wineLog, 'noexec filesystem\?')).Count) lines 'noexec filesystem?'")
     foreach ($p in @('falling back to read', 'noexec', 'dsound', 'winmm', 'mmdevapi', 'audio', 'sound', 'explorer', 'desktop', 'nulldrv', 'display', 'socket')) {
-        $lines = @($wineLog -split "`r?`n" | Where-Object { $_ -match $p } | Select-Object -First 6)
+        $lines = @($wineLog -split "`r?`n" | Where-Object { $_ -match $p -and $_ -notmatch '^wineaaudio: ' } | Select-Object -First 6)
         foreach ($l in $lines) { $facts.Add("wine.log [$p]: $l") }
     }
+    foreach ($l in @($wineLog -split "`r?`n" | Where-Object { $_ -match '^wineaaudio: ' } | Select-Object -First 30)) { $facts.Add("wine.log [wineaaudio]: $l") }
     foreach ($p in @('audio out', 'window', 'focus', 'activ', 'front', 'pause', 'dialog', 'intro skip')) {
         $lines = @($modLog1 -split "`r?`n" | Where-Object { $_ -match $p } | Select-Object -First 6)
         foreach ($l in $lines) { $facts.Add("bwvr.log [$p]: $l") }
     }
+    foreach ($l in @($modLog1 -split "`r?`n" | Where-Object { $_ -match '^audio (out|mixer) ' } | Select-Object -First 30)) { $facts.Add("bwvr.log [audio]: $l") }
     $facts.Add("user.reg of the prefix: " + (@($prefixReg -split "`r?`n" | Where-Object { $_ -match 'Lionhead|GameDir|Screen|FullScreen' }) -join ' | '))
     Set-Content -LiteralPath (Join-Path $Out 'facts.txt') -Value $facts -Encoding utf8
     $facts | ForEach-Object { Note $_ }

@@ -239,7 +239,8 @@ void WineRuntime::RunGame(Game game) {
   const std::string folder = play_rules::AppFolder(paths_.prefix);
   const std::string reg_file = folder + "/" + play_rules::kRegFile;
   if (!MakeDirs(folder) ||
-      !WriteTextFile(reg_file, play_rules::GameRegistry(game.width, game.height))) {
+      !WriteTextFile(reg_file,
+                     play_rules::GameRegistry(game.width, game.height, options_.audio))) {
     AppLog("game         : cannot write %s", reg_file.c_str());
     EndGame(-1, "the registry file of the game cannot be written");
     return;
@@ -248,9 +249,11 @@ void WineRuntime::RunGame(Game game) {
   const int reg = Spawn({paths_.loader, "reg", "import", play_rules::kRegFileWine}, 120, &ms,
                         &game_stop_);
   AppLog("game         : reg import of %s ended with %d after %.1f s: GameDir %s, ScreenW %d, "
-         "ScreenH %d, FullScreen 0, ScreenD 32, and the files of the mod as KnownDLLs",
+         "ScreenH %d, FullScreen 0, ScreenD 32, the files of the mod as KnownDLLs, and %s",
          play_rules::kRegFileWine, reg, ms / 1000.0, play_rules::kGameDir, game.width,
-         game.height);
+         game.height,
+         options_.audio ? "the audio driver aaudio (wine_audio=1)"
+                        : "no audio driver (wine_audio=0)");
   if (game_stop_) {
     EndGame(-1, "Quit game");
     return;
@@ -471,9 +474,12 @@ bool WineRuntime::MakePrefix(const std::string& tree_id) {
   if (!MakeDirs(paths_.prefix) || !MakeDirs(files_ + "/tmp")) {
     return Fault("cannot make " + paths_.prefix);
   }
-  if (!WriteTextFile(paths_.user_reg, wine_rules::UserRegSeed())) {
+  if (!WriteTextFile(paths_.user_reg, wine_rules::UserRegSeed(options_.audio))) {
     return Fault("cannot write user.reg");
   }
+  AppLog("wine         : user.reg of the prefix: no display driver, %s",
+         options_.audio ? "the audio driver aaudio (wine_audio=1)"
+                        : "no audio driver (wine_audio=0)");
   // The CPU DLL of ARM64 must be in system32 before wineboot: wineboot
   // runs the 32 bit part of wine.inf in a 32 bit process.
   if (wine_rules::CopiesCpuDll(abi_)) {

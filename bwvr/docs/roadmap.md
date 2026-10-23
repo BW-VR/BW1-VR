@@ -802,7 +802,9 @@ that moves while the Hand takes it.
     `wowbox64.dll` to the dialog of a new profile, and the mod reads the
     input channel under Box64. Open: a game folder with no profile (the game
     then waits in a dialog before its first frame, and the live stream has
-    no frame there), the sound (Wine has no audio driver on Android), and
+    no frame there), the sound in a headset (the audio driver `wineaaudio`
+    of patch 0003 gives the sound of Wine to AAudio, `audio.md`, "In Wine on
+    Android"), and
     the frame pace with `vk_device=0`. The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input

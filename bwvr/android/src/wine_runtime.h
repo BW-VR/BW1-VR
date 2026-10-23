@@ -38,6 +38,9 @@ class WineRuntime {
     bool setup = true;   // wine_setup: 0 is the app with no Wine
     bool probe = false;  // wine_probe: run the test program after the setup
     std::string debug;   // wine_debug: the value of WINEDEBUG
+    // wine_audio=1 (the default): the prefix has the audio driver of the
+    // tree (wineaaudio, "Audio" = "aaudio"). 0: no audio driver, no sound.
+    bool audio = true;
   };
 
   // The ABI of this build of the app: arm64-v8a or x86_64.

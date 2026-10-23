@@ -156,6 +156,11 @@ cd "$B" || exit 1
   echo "The configure of Wine failed. See logs/$ABI-configure.txt."; exit 1; }
 grep -E "^checking for -lfreetype|FreeType" "$LOG-configure.txt"
 grep -E "define SONAME_LIBFREETYPE" include/config.h
+# The audio driver of patch 0003 needs aaudio/AAudio.h and libaaudio of the
+# NDK. With no driver the build has no sound, so the script stops.
+grep -E "checking for AAudioStreamBuilder_openStream in -laaudio" "$LOG-configure.txt"
+[ -f dlls/wineaaudio.drv/Makefile ] || {
+  echo "The configure of Wine has no dlls/wineaaudio.drv. See logs/$ABI-configure.txt."; exit 1; }
 make -j"$JOBS" > "$LOG-make.txt" 2>&1 || {
   echo "The build of Wine failed. See logs/$ABI-make.txt."; exit 1; }
 
@@ -170,10 +175,14 @@ cp "$SRC/COPYING.LIB" "$W/install/$ABI/COPYING.LIB"
 T=$W/install/$ABI/wine/$APK_ABI
 R=$NDK/llvm-readelf
 O=$MINGW/llvm-objdump
-for f in lib/wine/$ABI-unix/wine bin/wineserver lib/wine/$ABI-unix/ntdll.so lib/libfreetype.so; do
+for f in lib/wine/$ABI-unix/wine bin/wineserver lib/wine/$ABI-unix/ntdll.so lib/libfreetype.so \
+         lib/wine/$ABI-unix/wineaaudio.so; do
   echo "$f: $($R -h "$T/$f" | sed -n 's/ *Machine: *//p')"
 done
-for f in lib/wine/$ABI-windows/wow64.dll lib/wine/i386-windows/ntdll.dll; do
+echo "lib/wine/$ABI-unix/wineaaudio.so needs:" $($R -d "$T/lib/wine/$ABI-unix/wineaaudio.so" |
+  sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
+for f in lib/wine/$ABI-windows/wow64.dll lib/wine/i386-windows/ntdll.dll \
+         lib/wine/i386-windows/wineaaudio.drv lib/wine/$ABI-windows/wineaaudio.drv; do
   echo "$f: $($O -f "$T/$f" | grep -o 'file format [^ ]*')"
 done
 echo "== Wine is in $W/install/$ABI/wine ($(du -sh "$W/install/$ABI/wine" | cut -f1))"

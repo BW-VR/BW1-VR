@@ -67,6 +67,15 @@ inline void LeftOutChecks() {
         0, 0);
   Check(IsLeftOut("opengl32.dll"), "opengl32.dll stays out", 0, 0);
   Check(IsLeftOut("wineandroid.drv"), "the display driver of Android stays out", 0, 0);
+  Check(IsLeftOut("lib/wine/i386-windows/vulkan-1.dll") &&
+            IsLeftOut("lib/wine/aarch64-windows/vulkan-1.dll"),
+        "vulkan-1.dll of each architecture stays out", 0, 0);
+  Check(IsLeftOut("lib/wine/i386-windows/winevulkan.dll") &&
+            IsLeftOut("lib/wine/x86_64-windows/winevulkan.dll") &&
+            IsLeftOut("lib/wine/x86_64-unix/winevulkan.so"),
+        "winevulkan of each architecture and its Unix library stay out", 0, 0);
+  Check(!IsLeftOut("vulkan.dll") && !IsLeftOut("winevulkanx.dll"),
+        "only the whole names vulkan-1 and winevulkan stay out", 0, 0);
   Check(IsLeftOut("d3d8.dll") && IsLeftOut("d3d9.dll") && IsLeftOut("d3d11.dll") &&
             IsLeftOut("d3d12core.dll") && IsLeftOut("d3dim700.dll") && IsLeftOut("d3drm.dll"),
         "each d3d DLL stays out", 0, 0);
@@ -134,6 +143,22 @@ inline void IdChecks() {
   Check(!NeedsUnpack("3f2a\n", "  3f2a\r\n"), "the white space at the ends does not count", 0,
         0);
   Check(NeedsUnpack("  \n", "  \n"), "an empty id is no tree", 0, 0);
+
+  printf("\nWine: the marker of the prefix\n");
+  using wine_rules::NeedsCpuCopy;
+  using wine_rules::NeedsPrefix;
+  Check(NeedsPrefix("") && NeedsPrefix(" \r\n"),
+        "no marker (a wineboot that stopped or failed): a new prefix", 0, 0);
+  Check(!NeedsPrefix("3f2a\n"), "a marker: the prefix stays", 0, 0);
+  Check(!NeedsPrefix("1111"), "a marker of another tree: the prefix stays too", 0, 0);
+  Check(NeedsCpuCopy("arm64-v8a", "1111", "3f2a"),
+        "arm64: a prefix of another tree gets the CPU DLL of this tree", 0, 0);
+  Check(!NeedsCpuCopy("arm64-v8a", "3f2a\n", "3f2a"),
+        "arm64: a prefix of this tree has its CPU DLL", 0, 0);
+  Check(!NeedsCpuCopy("x86_64", "1111", "3f2a"),
+        "x86_64: no CPU DLL to copy (wow64cpu.dll is a part of Wine)", 0, 0);
+  const wine_rules::Paths p = wine_rules::MakePaths("/f", "/s", "arm64-v8a");
+  Check(p.prefix_id == "/f/prefix/bwvr-prefix-id.txt", "the marker is in the prefix", 0, 0);
 }
 
 inline void EnvironmentChecks() {
@@ -212,18 +237,12 @@ inline void TarChecks() {
   memset(h, 0, sizeof(h));
   Check(wine_rules::ParseTarHeader(h, &e) && e.end, "a block of zeros is the end", 0, 0);
 
-  using wine_rules::SafeLink;
   using wine_rules::SafeName;
   Check(SafeName("bin/wine") && SafeName("lib/wine/i386-windows/ntdll.dll"),
         "a relative name is safe", 0, 0);
   Check(!SafeName("/system/bin/sh") && !SafeName("../files/x") && !SafeName("lib/../../x") &&
             !SafeName("") && !SafeName("lib//x"),
         "an absolute name, a .. and an empty part are not safe", 0, 0);
-  Check(SafeLink("lib/wine/x86_64-unix/wine", "../../../bin/wine"),
-        "a link into the tree is safe", 0, 0);
-  Check(!SafeLink("lib/wine/x86_64-unix/wine", "../../../../bin/sh") &&
-            !SafeLink("bin/sh", "/system/bin/sh"),
-        "a link out of the tree is not safe", 0, 0);
 }
 
 inline void WineRulesChecks() {

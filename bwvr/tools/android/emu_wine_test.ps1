@@ -13,23 +13,27 @@
          emu_test.ps1), and installs bwvr/out/android/bwvr-quest.apk on a
          clean app folder. The APK must have a Wine tree for x86_64.
       2. The first start: the app makes its folders, unpacks the tree into
-         its internal folder and makes the prefix with wineboot. The test
-         waits for "Wine is ready" in the log, and checks the steps, the
-         time, the targetSdkVersion and the SELinux domain of the app
+         its internal folder and starts wineboot for the prefix. The test
+         checks the targetSdkVersion, the SELinux domain of the app
          (untrusted_app_27: Android lets it run the programs of its own
-         folder), and that the menu came up before the setup ended.
-      3. Puts bwvr.ini with wine_probe=1 and wine_debug=warn+virtual,
+         folder) and the unpack, and stops the app (force-stop) while
+         wineboot runs.
+      3. The start after the stop: no unpack, and a new prefix, because the
+         stopped prefix has no marker. The test waits for "Wine is ready"
+         in the log, and checks the steps, the time, and that the menu came
+         up before the setup ended.
+      4. Puts bwvr.ini with wine_probe=1 and wine_debug=warn+virtual,
          bwvr_wine_probe.exe of the PC build (.\dev.ps1 build) and a stand
          in for runblack.exe into the game folder on the shared storage.
-      4. The second start: no unpack and no new prefix. The test program
+      5. The next start: no unpack and no new prefix. The test program
          runs from the drive G: (the game folder on the shared storage, a
          file system with noexec), and the test checks each value of its
          result file: the Windows version, the version of Wine, a 32 bit
          process on x86_64, the CPU DLL of the registry, the null display
          driver, the loop time, the read and the write of the drive, no
-         DirectDraw, Direct3D or OpenGL of Wine, and a TrueType font
+         DirectDraw, Direct3D, OpenGL or Vulkan of Wine, and a TrueType font
          (Tahoma) with glyphs.
-      5. Checks that no process of Wine is left after the test program,
+      6. Checks that no process of Wine is left after the test program,
          and logcat (no crash).
 
     The results go to bwvr/out/android/emu-wine-test.
@@ -170,16 +174,32 @@ try {
     $current = [regex]::Match($focus, 'mCurrentFocus=([^\r\n]*)').Groups[1].Value
     Write-Host "   mCurrentFocus=$current"
     Expect ($current -match 'NativeActivity') 'the app has the focus: no dialog of the system over it'
+    # The app stops while wineboot runs: the force-stop of the system ends
+    # the app and each process of Wine.
+    $log0 = WaitLog @('wine         : make the prefix', 'FAULT') ($SetupMinutes * 60)
+    Start-Sleep -Seconds 4
+    $log0 = AdbOut @('shell', 'cat', "$AppDir/bwvr-quest.log")
+    Adb @('shell', 'am', 'force-stop', $Package)
+    Set-Content -LiteralPath (Join-Path $Out 'bwvr-quest-start1.log') -Value $log0 -Encoding utf8
+    Expect ($log0 -match 'wine         : the APK has the Wine tree [0-9a-f]{16} for x86_64') 'the app found the Wine tree of x86_64 in the APK'
+    Expect ($log0 -match 'is not there\. Unpack the tree of the APK') 'the first start unpacks the tree'
+    $unpack = [regex]::Match($log0, 'unpacked (\d+) files \(([\d.]+) MB\) and (\d+) folders in ([\d.]+) s')
+    Expect $unpack.Success ('the unpack ended: ' + $unpack.Value)
+    Expect ($log0 -match 'wine         : make the prefix' -and $log0 -notmatch 'wineboot --init ended' -and $log0 -notmatch 'Wine is ready') 'the app stopped while wineboot ran'
+    Start-Sleep -Seconds 3
+
+    # The start after the stop: the tree is whole, and the prefix has no
+    # marker, so the app makes it again.
+    Say 'The start after the stop: a new prefix'
+    $t0 = Get-Date
+    Adb @('shell', 'am', 'start', '-W', '-n', "$Package/android.app.NativeActivity")
     $log1 = WaitLog @('wine         : Wine is ready', 'FAULT') ($SetupMinutes * 60)
     $setupSeconds = [math]::Round(((Get-Date) - $t0).TotalSeconds)
     Shot 'start1-ready.png'
-    Set-Content -LiteralPath (Join-Path $Out 'bwvr-quest-start1.log') -Value $log1 -Encoding utf8
-    Write-Host "   the setup took about $setupSeconds s (the test reads the log each 3 s)"
-    Expect ($log1 -match 'wine         : the APK has the Wine tree [0-9a-f]{16} for x86_64') 'the app found the Wine tree of x86_64 in the APK'
-    Expect ($log1 -match 'is not there\. Unpack the tree of the APK') 'the first start unpacks the tree'
-    $unpack = [regex]::Match($log1, 'unpacked (\d+) files \(([\d.]+) MB\), (\d+) folders and (\d+) links in ([\d.]+) s')
-    Expect $unpack.Success ('the unpack ended: ' + $unpack.Value)
-    Expect ($log1 -match 'wine         : make the prefix') 'the first start makes the prefix'
+    Set-Content -LiteralPath (Join-Path $Out 'bwvr-quest-start1b.log') -Value $log1 -Encoding utf8
+    Write-Host "   the prefix of this start took about $setupSeconds s (the test reads the log each 3 s)"
+    Expect ($log1 -match 'is the tree of the APK\. No unpack') 'the start after the stop does not unpack: the tree is whole'
+    Expect ($log1 -match 'wine         : make the prefix') 'the start after the stop makes a new prefix: the stopped prefix has no marker'
     $boot = [regex]::Match($log1, 'wineboot --init ended with (-?\d+) after ([\d.]+) s')
     Expect ($boot.Success -and $boot.Groups[1].Value -eq '0') ('wineboot --init: ' + $boot.Value)
     $wait = [regex]::Match($log1, 'wineserver -w ended with (-?\d+) after ([\d.]+) s')
@@ -233,7 +253,7 @@ try {
     $loop = 0.0
     Expect ([double]::TryParse((ProbeValue $r 'loop_ms'), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$loop) -and $loop -gt 0) "the loop took $loop ms"
     Expect ((ProbeValue $r 'drive') -eq 'G:' -and (ProbeValue $r 'drive_write') -eq '1' -and (ProbeValue $r 'drive_read') -eq '1' -and (ProbeValue $r 'drive_delete') -eq '1') 'the program wrote, read back and deleted a file of 64 KB on G:'
-    foreach ($dll in @('ddraw', 'd3d9', 'wined3d', 'dxgi', 'opengl32')) {
+    foreach ($dll in @('ddraw', 'd3d9', 'wined3d', 'dxgi', 'opengl32', 'vulkan-1')) {
         Expect ((ProbeValue $r "system_$dll") -match '^none ') ("Wine has no $dll.dll in the system folder: " + (ProbeValue $r "system_$dll"))
     }
     Expect ((ProbeValue $r 'font_face') -eq 'Tahoma' -and (ProbeValue $r 'font_truetype') -eq '1') 'the font Tahoma is a TrueType font'
@@ -244,12 +264,15 @@ try {
     Expect ((ProbeValue $r 'result') -eq 'ok') 'the result file is whole'
     $wineLog = ''
     if (Test-Path -LiteralPath (Join-Path $Out 'wine.log')) { $wineLog = Get-Content -LiteralPath (Join-Path $Out 'wine.log') -Raw }
-    $noexec = ([regex]::Matches($wineLog, 'noexec file system, falling back to read')).Count
-    $protect = ([regex]::Matches($wineLog, 'noexec filesystem\?')).Count
-    # With warn+virtual Wine says when it reads a PE file with read because
-    # the mmap of the file failed (a file system with noexec), and it says a
-    # fault when a section gets no protection.
-    Write-Host "   wine.log: $noexec lines 'noexec file system, falling back to read', $protect lines 'failed to set ... protection'"
+    # The texts of dlls/ntdll/unix/virtual.c: with warn+virtual map_pe_header
+    # says "noexec file system, falling back to read" or "file system doesn't
+    # support mmap, falling back to read" when the mmap of a PE file fails,
+    # and map_image_into_view says "failed to set ... protection on ...
+    # section ..., noexec filesystem?" (an err line) when a section gets no
+    # protection.
+    $noexec = ([regex]::Matches($wineLog, 'falling back to read')).Count
+    $protect = ([regex]::Matches($wineLog, 'protection on .* section .*, noexec filesystem\?')).Count
+    Write-Host "   wine.log: $noexec lines 'falling back to read', $protect lines 'failed to set ... protection ... noexec filesystem?'"
     Expect ($protect -eq 0) 'each section of the PE file of the shared storage got its protection'
     Start-Sleep -Seconds 8
     $left = @(WineProcesses $user)

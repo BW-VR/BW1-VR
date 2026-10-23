@@ -13,8 +13,8 @@
 //   drive        the drive of this program, and if a file of 64 KB on it
 //                writes, reads back with the same bytes and deletes
 //   system_<dll> what LoadLibraryEx finds in the system folder for ddraw,
-//                d3d9, wined3d, dxgi and opengl32: "none" with the error, or
-//                "loaded"
+//                d3d9, wined3d, dxgi, opengl32 and vulkan-1: "none" with
+//                the error, or "loaded"
 //   font_*       the face, the extent of a text and the bytes of the
 //                outline of a glyph of the font "Tahoma" (FreeType)
 //   result       "ok" at the end of the file
@@ -143,7 +143,8 @@ void Drive(const char* folder) {
 }
 
 void SystemDlls() {
-  static const char* const kNames[] = {"ddraw", "d3d9", "wined3d", "dxgi", "opengl32"};
+  static const char* const kNames[] = {"ddraw", "d3d9",     "wined3d",
+                                       "dxgi",  "opengl32", "vulkan-1"};
   for (const char* name : kNames) {
     char file[64];
     sprintf_s(file, "%s.dll", name);

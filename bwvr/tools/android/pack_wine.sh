@@ -13,13 +13,13 @@
 #     android/src/wine_rules.h ("Only Vulkan"), the headers, the man pages,
 #     the import libraries (.a), the shell scripts of bin (they need
 #     /bin/sh, and the app starts the loader itself), and some programs with
-#     a window that a game does not use (kProgramsOut below);
-#   - puts wowbox64.dll of build_box64.ps1 into aarch64-windows (aarch64);
+#     a window that a game does not use (kProgramsOut below).
+#   - puts wowbox64.dll of build_box64.ps1 into aarch64-windows (aarch64).
 #   - adds the default value of HKLM\Software\Microsoft\Wow64\x86 (the CPU
 #     DLL of the 32 bit code, CpuDll of wine_rules.h) to the section [Wow64]
-#     of wine.inf, which wineboot reads before the 32 bit part of the prefix;
-#   - strips each ELF file;
-#   - checks the machine of each ELF file and of each PE file;
+#     of wine.inf, which wineboot reads before the 32 bit part of the prefix.
+#   - strips each ELF file.
+#   - checks the machine of each ELF file and of each PE file.
 #   - writes into bwvr/out/android/wine: <apk abi>.tar (ustar, the tree),
 #     <apk abi>.id (the build id: a hash of the names and the bytes of the
 #     tree), <apk abi>-files.txt, <apk abi>-left-out.txt and licenses/.
@@ -134,6 +134,8 @@ if [ "$ABI" = aarch64 ]; then
     ", exports BTCpu:" $("$MINGW/llvm-objdump" -p "$S/$APK_ABI/lib/wine/aarch64-windows/wowbox64.dll" | grep -c 'BTCpu')
 fi
 echo "   the fonts:" $(cd "$S/share/wine/fonts" && ls)
+# The app takes only files and folders from the tar file (wine_runtime.cpp).
+[ "$(find "$S" -type l | wc -l)" -eq 0 ] || fault "the tree has symbolic links, and the app takes none"
 
 echo "== The tar file"
 cd "$S" || exit 1

@@ -4,10 +4,10 @@
 // build id (assets/wine/<abi>.id). At each start a thread of the app:
 //
 //   1. unpacks the tree of its own ABI into the internal folder of the app
-//      when the tree is not there or has another build id;
+//      when the tree is not there or has another build id.
 //   2. makes the Wine prefix with wineboot the first time: no display driver
-//      of Wine (user.reg), the CPU DLL for x86 in system32 (arm64-v8a);
-//   3. links the drive G: of the prefix to the game folder;
+//      of Wine (user.reg), the CPU DLL for x86 in system32 (arm64-v8a).
+//   3. links the drive G: of the prefix to the game folder.
 //   4. with wine_probe=1 runs the test program bwvr_wine_probe.exe of the
 //      game folder one time.
 //
@@ -57,13 +57,17 @@ class WineRuntime {
   bool Fault(const std::string& text);
   bool Unpack(const std::string& apk_id);
   bool CheckTree();
-  bool MakePrefix();
+  // Makes a new prefix. Its last step writes the marker with the build id
+  // of the tree.
+  bool MakePrefix(const std::string& tree_id);
   bool LinkGame();
   void Probe();
   // Runs a program of the tree with the environment of the prefix, with its
   // stdout and stderr into wine.log, and waits up to timeout_s seconds. The
-  // exit code, or -1 when it did not start or did not end.
-  int Spawn(const std::vector<std::string>& args, int timeout_s, double* ms);
+  // exit code, or -1 when it did not start or did not end. stoppable: the
+  // end of the app (Stop) stops the program.
+  int Spawn(const std::vector<std::string>& args, int timeout_s, double* ms,
+            bool stoppable = true);
 
   AAssetManager* assets_ = nullptr;
   std::string files_;
@@ -76,5 +80,5 @@ class WineRuntime {
   std::mutex lock_;
   std::string status_;
   std::atomic<bool> stop_{false};
-  std::atomic<bool> used_{false};  // a program of Wine ran in this process
+  bool log_started_ = false;  // a program wrote into wine.log in this start
 };

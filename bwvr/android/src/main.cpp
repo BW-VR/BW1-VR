@@ -555,11 +555,16 @@ void android_main(android_app* android) {
     wine.setup = app.ini.GetInt("bwvr", "wine_setup", 1) != 0;
     wine.probe = app.ini.GetInt("bwvr", "wine_probe", 0) != 0;
     wine.debug = app.ini.Get("bwvr", "wine_debug", "");
-    const std::string files = android->activity->internalDataPath != nullptr
-                                  ? android->activity->internalDataPath
-                                  : app.folder;
-    mkdir(files.c_str(), 0700);
-    app.wine.Start(android->activity->assetManager, files, app.folder, app.game.folder, wine);
+    // The tree must be in the internal folder: Android runs no program of
+    // the shared storage.
+    if (android->activity->internalDataPath == nullptr) {
+      AppLog("wine         : Android gives the app no internal folder. The app does not "
+             "set up Wine");
+    } else {
+      const std::string files = android->activity->internalDataPath;
+      mkdir(files.c_str(), 0700);
+      app.wine.Start(android->activity->assetManager, files, app.folder, app.game.folder, wine);
+    }
   }
   if (!app.painter.Start(android->activity->vm,
                          app.capture ? app.game.folder + "/bwvr-menu.bmp" : "")) {

@@ -20,7 +20,8 @@
     unpacks only the tree of its own ABI. With a Wine tree the
     targetSdkVersion is 28: Android lets an app with 29 or later run no
     program of its own folder (docs/android.md, "Wine in the app"). With no
-    Wine tree the APK is as before, with 32, and the log says so.
+    Wine tree the APK has no Wine and targetSdkVersion 32, and the log says
+    so.
 
 .PARAMETER Abis
     The ABIs to build. arm64-v8a and x86_64 by default.

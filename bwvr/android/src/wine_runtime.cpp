@@ -9,7 +9,9 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -96,10 +98,6 @@ bool CopyFile(const std::string& from, const std::string& to) {
   return ok && rename(tmp.c_str(), to.c_str()) == 0;
 }
 
-off_t FileSize(const std::string& path) {
-  struct stat st;
-  return stat(path.c_str(), &st) == 0 ? st.st_size : -1;
-}
 
 }  // namespace
 
@@ -149,15 +147,16 @@ bool WineRuntime::Fault(const std::string& text) {
 }
 
 void WineRuntime::Stop() {
+  // The thread stops between its steps, and a program that it waits for
+  // gets SIGKILL. wineserver -k then ends each other process of Wine, also
+  // the ones of an earlier start of the app.
   stop_ = true;
-  // wineserver -k ends each process of Wine, also a program that the
-  // thread waits for.
-  if (used_ && Exists(paths_.server)) {
+  if (thread_.joinable()) thread_.join();
+  if (!paths_.server.empty() && Exists(paths_.server)) {
     double ms = 0.0;
-    const int code = Spawn({paths_.server, "-k"}, 20, &ms);
+    const int code = Spawn({paths_.server, "-k"}, 20, &ms, false);
     AppLog("wine         : wineserver -k ended with %d after %.0f ms", code, ms);
   }
-  if (thread_.joinable()) thread_.join();
 }
 
 void WineRuntime::Run() {
@@ -180,21 +179,31 @@ void WineRuntime::Run() {
            paths_.tree.c_str());
   }
   if (stop_ || !CheckTree()) return;
-  if (!Exists(paths_.prefix + "/system.reg")) {
+  // The marker of the prefix is the last step of a good MakePrefix, so a
+  // stopped or failed wineboot gives a new prefix at the next start.
+  std::string made = wine_rules::Trim(ReadTextFile(paths_.prefix_id));
+  if (wine_rules::NeedsPrefix(made)) {
     SetStatus("Setting up Wine: making the prefix...");
-    if (!MakePrefix()) return;
+    if (!MakePrefix(apk_id)) return;
+    made = apk_id;
   } else {
-    AppLog("wine         : the prefix %s is there", paths_.prefix.c_str());
+    AppLog("wine         : the prefix %s is there (made with the tree %s)",
+           paths_.prefix.c_str(), made.c_str());
   }
   if (stop_) return;
-  if (wine_rules::CopiesCpuDll(abi_)) {
+  if (wine_rules::NeedsCpuCopy(abi_, made, apk_id)) {
     const std::string dll = paths_.system32 + "/" + wine_rules::CpuDll(abi_);
-    if (FileSize(dll) != FileSize(paths_.cpu_dll)) {
-      if (!MakeDirs(paths_.system32) || !CopyFile(paths_.cpu_dll, dll)) {
-        Fault("cannot copy " + std::string(wine_rules::CpuDll(abi_)) + " into system32");
-        return;
-      }
-      AppLog("wine         : %s is in system32 of the prefix", wine_rules::CpuDll(abi_));
+    if (!MakeDirs(paths_.system32) || !CopyFile(paths_.cpu_dll, dll)) {
+      Fault("cannot copy " + std::string(wine_rules::CpuDll(abi_)) + " into system32");
+      return;
+    }
+    AppLog("wine         : %s of the tree %s is in system32 of the prefix",
+           wine_rules::CpuDll(abi_), apk_id.c_str());
+  }
+  if (made != apk_id) {
+    if (!WriteTextFile(paths_.prefix_id, apk_id + "\n")) {
+      Fault("cannot write the marker of the prefix");
+      return;
     }
   }
   if (!LinkGame()) return;
@@ -215,7 +224,7 @@ bool WineRuntime::Unpack(const std::string& apk_id) {
   }
   uint8_t header[512];
   static uint8_t buffer[1 << 16];
-  uint64_t files = 0, folders = 0, links = 0, bytes = 0;
+  uint64_t files = 0, folders = 0, bytes = 0;
   bool ok = true, end = false;
   std::string why;
   while (ok && !end && !stop_) {
@@ -238,14 +247,6 @@ bool WineRuntime::Unpack(const std::string& apk_id) {
     if (e.type == '5') {
       ok = MakeDirs(path);
       ++folders;
-    } else if (e.type == '2') {
-      if (!wine_rules::SafeLink(e.name, e.link)) {
-        ok = false;
-        why = "the link " + e.name + " points out of the tree";
-        break;
-      }
-      ok = symlink(e.link.c_str(), path.c_str()) == 0;
-      ++links;
     } else if (e.type == '0') {
       const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
                           (e.mode & 0700) | 0600);
@@ -263,6 +264,8 @@ bool WineRuntime::Unpack(const std::string& apk_id) {
       ++files;
       bytes += e.size;
     } else {
+      // The trees of pack_wine.sh have only files and folders, so a link
+      // or another kind of entry stops the unpack.
       ok = false;
       why = std::string("the entry ") + e.name + " has the type " + e.type;
       break;
@@ -276,10 +279,9 @@ bool WineRuntime::Unpack(const std::string& apk_id) {
     return Fault("cannot put the new tree in place");
   }
   if (!WriteTextFile(paths_.id_file, apk_id + "\n")) return Fault("cannot write the build id");
-  AppLog("wine         : unpacked %llu files (%.1f MB), %llu folders and %llu links in %.1f s",
+  AppLog("wine         : unpacked %llu files (%.1f MB) and %llu folders in %.1f s",
          static_cast<unsigned long long>(files), bytes / 1048576.0,
-         static_cast<unsigned long long>(folders), static_cast<unsigned long long>(links),
-         (NowMs() - start) / 1000.0);
+         static_cast<unsigned long long>(folders), (NowMs() - start) / 1000.0);
   return true;
 }
 
@@ -315,7 +317,7 @@ bool WineRuntime::CheckTree() {
   return true;
 }
 
-bool WineRuntime::MakePrefix() {
+bool WineRuntime::MakePrefix(const std::string& tree_id) {
   AppLog("wine         : make the prefix %s", paths_.prefix.c_str());
   RemoveTree(paths_.prefix);
   if (!MakeDirs(paths_.prefix) || !MakeDirs(files_ + "/tmp")) {
@@ -341,6 +343,9 @@ bool WineRuntime::MakePrefix() {
   AppLog("wine         : wineserver -w ended with %d after %.1f s", wait, wait_ms / 1000.0);
   if (boot != 0) return Fault("wineboot ended with " + std::to_string(boot) + ". See wine.log");
   if (!Exists(paths_.prefix + "/system.reg")) return Fault("wineboot made no system.reg");
+  if (!WriteTextFile(paths_.prefix_id, tree_id + "\n")) {
+    return Fault("cannot write the marker of the prefix");
+  }
   AppLog("wine         : the prefix took %.1f s", (boot_ms + wait_ms) / 1000.0);
   return true;
 }
@@ -387,7 +392,8 @@ void WineRuntime::Probe() {
   SetStatus("Wine ready. The test program ended with " + std::to_string(code) + ".");
 }
 
-int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, double* ms) {
+int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, double* ms,
+                       bool stoppable) {
   const double start = NowMs();
   *ms = 0.0;
   std::vector<char*> argv, envp;
@@ -395,8 +401,20 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
   argv.push_back(nullptr);
   for (const std::string& s : env_) envp.push_back(const_cast<char*>(s.c_str()));
   envp.push_back(nullptr);
+  // The highest file descriptor that the child closes. getrlimit is not a
+  // call for the child of a process with threads, so it comes first.
+  struct rlimit files;
+  const int top = getrlimit(RLIMIT_NOFILE, &files) == 0 && files.rlim_cur != RLIM_INFINITY &&
+                          files.rlim_cur < 1048576
+                      ? static_cast<int>(files.rlim_cur)
+                      : 65536;
 
-  const int log = open(paths_.log.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0660);
+  // wine.log holds the programs of one start of the app: the first program
+  // of a start makes it empty.
+  const int log = open(paths_.log.c_str(),
+                       O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | (log_started_ ? 0 : O_TRUNC),
+                       0660);
+  log_started_ = true;
   if (log >= 0) {
     std::string head = "== bwvr: start";
     for (const std::string& s : args) head += " " + s;
@@ -431,6 +449,12 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
       dup2(log, 1);
       dup2(log, 2);
     }
+    // No other file of the app goes into Wine: each descriptor from 3 up
+    // closes, except the pipe of the errno (it closes at the execve). The
+    // system call and not close(): the fdsan of bionic owns some of them.
+    for (int fd = 3; fd < top; ++fd) {
+      if (fd != pipe_fd[1]) syscall(__NR_close, fd);
+    }
     execve(argv[0], argv.data(), envp.data());
     const int e = errno;
     if (pipe_fd[1] >= 0 && write(pipe_fd[1], &e, sizeof(e)) < 0) _exit(126);
@@ -459,12 +483,18 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
     *ms = NowMs() - start;
     return -1;
   }
-  used_ = true;
   int status = 0;
   for (;;) {
     const pid_t w = waitpid(pid, &status, WNOHANG);
     if (w == pid) break;
     if (w < 0 && errno != EINTR) {
+      *ms = NowMs() - start;
+      return -1;
+    }
+    if (stoppable && stop_) {
+      AppLog("wine         : the app ends, so it stops %s", argv[0]);
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
       *ms = NowMs() - start;
       return -1;
     }

@@ -85,7 +85,7 @@ if ($Mingw) {
         (Join-Path $Build 'wowbox64-prefix\src\wowbox64-build\wowbox64.dll')
     if ($LASTEXITCODE -ne 0) { Stop-Android 'llvm-strip failed.' }
     Copy-Item -LiteralPath (Join-Path $Source 'LICENSE') -Destination (Join-Path $OutDir 'LICENSE')
-    $info =(& (Join-Path $Mingw 'llvm-objdump.exe') -p $dll | Out-String)
+    $info = (& (Join-Path $Mingw 'llvm-objdump.exe') -p $dll | Out-String)
     $exports = ([regex]::Matches($info, 'BTCpu\w+')).Count
     $imports = @([regex]::Matches($info, 'DLL Name: (\S+)') | ForEach-Object { $_.Groups[1].Value })
     $header = (& (Join-Path $Mingw 'llvm-readobj.exe') --file-headers $dll | Out-String)

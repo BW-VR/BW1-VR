@@ -21,12 +21,14 @@
 namespace wine_rules {
 
 // THE DLLS THAT STAY OUT OF THE TREE ("Only Vulkan"): the mod is the
-// DirectDraw of the game, and the app draws with Vulkan alone. So Wine has
-// no DirectDraw, no Direct3D, no OpenGL and no display driver of Android.
-// A name is the file name with no extension: each file of that name (the PE
-// DLL of each architecture and its Unix library) stays out.
-constexpr const char* kLeftOutNames[] = {"ddraw",  "ddrawex",  "wined3d",
-                                         "dxgi",   "opengl32", "wineandroid"};
+// DirectDraw of the game, and the app draws with Vulkan alone. So Wine gets
+// no graphics DLL: no DirectDraw, no Direct3D, no OpenGL, no Vulkan of Wine
+// and no display driver of Android. A name is the file name with no
+// extension: each file of that name (the PE DLL of each architecture and
+// its Unix library) stays out.
+constexpr const char* kLeftOutNames[] = {"ddraw",    "ddrawex",    "wined3d",
+                                         "dxgi",     "opengl32",   "vulkan-1",
+                                         "winevulkan", "wineandroid"};
 // And each file whose name starts with this: d3d8, d3d9, d3d10, d3d11,
 // d3d12, d3dim, d3drm, d3dx9_*, d3dcompiler_* and the others.
 constexpr const char kLeftOutPrefix[] = "d3d";
@@ -99,6 +101,7 @@ struct Paths {
   std::string dlls;      // <abi>/lib/wine: a folder for each architecture
   std::string cpu_dll;   // the CPU DLL in the tree (arm64-v8a only)
   std::string prefix;    // the Wine prefix
+  std::string prefix_id; // the marker of a whole prefix: the build id of its tree
   std::string user_reg;  // user.reg of the prefix
   std::string system32;  // system32 of the prefix
   std::string game_link; // dosdevices/g: of the prefix
@@ -121,6 +124,7 @@ inline Paths MakePaths(const std::string& files, const std::string& app_folder,
   p.server = p.tree + "/" + abi + "/bin/wineserver";
   p.cpu_dll = CopiesCpuDll(abi) ? p.dlls + "/" + arch + "-windows/" + CpuDll(abi) : "";
   p.prefix = files + "/prefix";
+  p.prefix_id = p.prefix + "/bwvr-prefix-id.txt";
   p.user_reg = p.prefix + "/user.reg";
   p.system32 = p.prefix + "/drive_c/windows/system32";
   p.game_link = p.prefix + "/dosdevices/" + kGameDrive;
@@ -141,6 +145,19 @@ inline std::string Trim(const std::string& s) {
 inline bool NeedsUnpack(const std::string& installed_id, const std::string& apk_id) {
   const std::string a = Trim(installed_id), b = Trim(apk_id);
   return a.empty() || a != b;
+}
+
+// True when the app makes a new prefix: the prefix has no marker. The last
+// step of a good setup of the prefix writes the marker, so a wineboot that
+// stopped or failed gives a new prefix.
+inline bool NeedsPrefix(const std::string& marker) { return Trim(marker).empty(); }
+
+// True when the CPU DLL of the tree goes into system32 of a prefix that is
+// there: the prefix was made with a tree of another build. A new prefix gets
+// it before its wineboot.
+inline bool NeedsCpuCopy(const std::string& abi, const std::string& marker,
+                         const std::string& tree_id) {
+  return CopiesCpuDll(abi) && Trim(marker) != Trim(tree_id);
 }
 
 // The environment of a program in Wine: the environment of the app with
@@ -248,7 +265,8 @@ inline uint64_t TarDataBytes(const TarEntry& e) {
 }
 
 // True for a name that stays in the tree: relative, no "..", no empty part.
-// "./" at the start is allowed. A link may only point into the tree too.
+// "./" at the start is allowed. The app takes only files and folders from
+// the archive, no links.
 inline bool SafeName(const std::string& name) {
   if (name.empty() || name[0] == '/') return false;
   size_t at = 0;
@@ -260,29 +278,6 @@ inline bool SafeName(const std::string& name) {
     at = end + 1;
   }
   return true;
-}
-
-// The target of a symbolic link at `name`, joined with the folder of the
-// link, stays in the tree.
-inline bool SafeLink(const std::string& name, const std::string& target) {
-  if (target.empty() || target[0] == '/') return false;
-  const size_t slash = name.find_last_of('/');
-  std::string joined = slash == std::string::npos ? target : name.substr(0, slash + 1) + target;
-  std::vector<std::string> parts;
-  size_t at = 0;
-  while (at <= joined.size()) {
-    size_t end = joined.find('/', at);
-    if (end == std::string::npos) end = joined.size();
-    const std::string part = joined.substr(at, end - at);
-    if (part == "..") {
-      if (parts.empty()) return false;
-      parts.pop_back();
-    } else if (!part.empty() && part != ".") {
-      parts.push_back(part);
-    }
-    at = end + 1;
-  }
-  return !parts.empty();
 }
 
 }  // namespace wine_rules

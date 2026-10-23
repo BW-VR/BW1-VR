@@ -13,6 +13,16 @@
     emulator, so one file is the one that the tests install and the one
     that goes to a headset.
 
+    WINE. When bwvr/out/android/wine has the Wine tree of an ABI
+    (<abi>.tar and <abi>.id of pack_wine.sh), the APK carries it as
+    assets/wine/<abi>.tar (compressed) and assets/wine/<abi>.id, with the
+    license texts of Wine, FreeType and Box64 in assets/licenses. A device
+    unpacks only the tree of its own ABI. With a Wine tree the
+    targetSdkVersion is 28: Android lets an app with 29 or later run no
+    program of its own folder (docs/android.md, "Wine in the app"). With no
+    Wine tree the APK has no Wine and targetSdkVersion 32, and the log says
+    so.
+
 .PARAMETER Abis
     The ABIs to build. arm64-v8a and x86_64 by default.
 
@@ -91,10 +101,38 @@ $assets = Join-Path $stage 'assets'
 New-Item -ItemType Directory -Force -Path (Join-Path $assets 'licenses') | Out-Null
 Copy-Item -LiteralPath (Join-Path $ThirdParty 'openxr-android\LICENSE') `
     -Destination (Join-Path $assets 'licenses\openxr_loader.txt')
+
+# THE WINE TREES (pack_wine.sh). Each ABI that has one gets it.
+$wineDir = Join-Path $OutDir 'wine'
+$wineAbis = @()
+foreach ($abi in $Abis) {
+    $tar = Join-Path $wineDir "$abi.tar"
+    $id = Join-Path $wineDir "$abi.id"
+    if ((Test-Path -LiteralPath $tar) -and (Test-Path -LiteralPath $id)) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $assets 'wine') | Out-Null
+        Copy-Item -LiteralPath $tar, $id -Destination (Join-Path $assets 'wine')
+        $wineAbis += $abi
+        Note ("Wine tree of ${abi}: " + (Get-Content -LiteralPath $id -Raw).Trim() + ', ' +
+            [math]::Round((Get-Item -LiteralPath $tar).Length / 1MB, 1) + ' MB')
+    } else {
+        Note "Wine tree of ${abi}: none in $wineDir. The APK has no Wine for $abi"
+    }
+}
+$targetSdk = '32'
+if ($wineAbis.Count -gt 0) {
+    $targetSdk = '28'
+    foreach ($name in @('wine', 'freetype') + $(if ($wineAbis -contains 'arm64-v8a') { @('box64') } else { @() })) {
+        $text = Join-Path $wineDir "licenses\$name.txt"
+        if (-not (Test-Path -LiteralPath $text)) { Stop-Android "There is no license text $text. Run pack_wine.sh again." }
+        Copy-Item -LiteralPath $text -Destination (Join-Path $assets "licenses\$name.txt")
+    }
+}
+Note "targetSdkVersion $targetSdk"
+
 $base = Join-Path $stage 'base.apk'
 Run (Join-Path $BuildTools 'aapt2.exe') @('link', '-o', $base,
     '--manifest', (Join-Path $Source 'AndroidManifest.xml'),
-    '-I', $AndroidJar, '--min-sdk-version', '29', '--target-sdk-version', '32',
+    '-I', $AndroidJar, '--min-sdk-version', '29', '--target-sdk-version', $targetSdk,
     '--version-code', "$versionCode", '--version-name', $versionName)
 
 # The libraries go in with no compression (the method "stored"): with
@@ -112,6 +150,10 @@ $libs = @(Get-ChildItem -LiteralPath (Join-Path $stage 'lib') -Recurse -File |
 Push-Location $stage
 try {
     Run (Join-Path $JavaHome 'bin\jar.exe') (@('uf0M', $base) + $libs)
+    # The Wine trees go in compressed (the method "deflate"). The asset
+    # manager of Android inflates them as a stream when the app reads them.
+    $wineFiles = @($wineAbis | ForEach-Object { "assets/wine/$_.tar"; "assets/wine/$_.id" })
+    if ($wineFiles.Count -gt 0) { Run (Join-Path $JavaHome 'bin\jar.exe') (@('ufM', $base) + $wineFiles) }
 } finally {
     Pop-Location
 }

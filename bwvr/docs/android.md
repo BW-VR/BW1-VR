@@ -58,9 +58,13 @@ Summary:
 - **Only Vulkan.** The app draws with Vulkan alone: the menu, the stereo
   screen and the renderer of the mod. It has no fallback to Direct3D,
   DirectDraw or another graphics interface (see "Only Vulkan").
-- **The app cannot start the game yet.** `runblack.exe` is a Windows
-  program for x86, and the APK has no x86 runtime (see "What the app cannot
-  do yet").
+- **Wine.** The APK carries Wine 11.0 in the WoW64 mode for each ABI, with
+  `wowbox64.dll` of Box64 as the CPU of the 32 bit x86 code on ARM64. At its
+  start the app unpacks the tree of its ABI into its internal folder, makes
+  a Wine prefix and links the drive `G:` to the game folder. In the emulator
+  it runs a 32 bit test program in Wine (see "Wine in the app").
+- **The app cannot start the game yet** (see "What the app cannot do
+  yet").
 
 ## Source files of this area
 
@@ -108,6 +112,14 @@ Summary:
 | `tools/android/emu_live_test.ps1` | The live stream through the ring file in the emulator, against the pictures of the PC |
 | `tools/desk/live_stream_run.ps1` | A desktop run with the live stream and the test reader of the PC |
 | `tools/android/android_env.ps1` | Finds the SDK, the NDK and the JDK |
+| `android/src/wine_runtime.cpp` | Wine in the app: the thread of the setup (the unpack of the tree, the prefix, the drive of the game folder), the start of a program in Wine, `wineserver -k` at the end |
+| `android/src/wine_rules.h` | The rules of Wine in the app: the DLLs that stay out of the tree, the paths, the environment, the build id, the seed of `user.reg`, the reader of the tar file. No Android code |
+| `test/wine_probe/main.cpp` | The test program of Wine (`bwvr_wine_probe.exe`), a 32 bit console program with no game code |
+| `tools/android/build_wine.sh` | The build of FreeType and Wine for each ABI, in a Linux of WSL2 |
+| `tools/android/wine-patches/` | The patches of the source of Wine |
+| `tools/android/pack_wine.sh` | The Wine tree of the APK for each ABI, with its checks |
+| `tools/android/build_box64.ps1` | The build of Box64 and of `wowbox64.dll` |
+| `tools/android/emu_wine_test.ps1` | The test of Wine in the app in the Android emulator |
 
 ## Build the APK
 
@@ -139,7 +151,9 @@ builds the APK and runs the checks of step 1 below. The steps alone:
 ```
 
 `build_apk.ps1` builds `libbwvr_quest.so` for each ABI, links the manifest
-with `aapt2` (`minSdkVersion` 29, `targetSdkVersion` 32), adds the libraries
+with `aapt2` (`minSdkVersion` 29, `targetSdkVersion` 28 with a Wine tree and
+32 with none, see "Wine in the app"), adds the Wine tree of each ABI that
+has one in `bwvr/out/android/wine` (compressed), adds the libraries
 with no compression (with the `jar` tool of the JDK, because the zip classes
 of .NET Framework give a deflate entry for `NoCompression`), aligns the APK
 for pages of 16 KB and signs it with the schemes v2 and v3.
@@ -169,9 +183,11 @@ adb install -r bwvr\out\android\bwvr-quest.apk
 The app is in the library of the headset under "Unknown sources". SideQuest
 can install the APK too.
 
-**Steam Frame.** Valve says that the Steam Frame can install APKs. Not known
-yet: if an APK there has an OpenXR runtime with Vulkan. If it has one, the
-app starts its session there. If not, it shows the menu in a window.
+**Steam Frame.** Turn on the developer mode, start Lepton Development, and
+connect `adb` as the Steamworks documentation of Valve says ("Steam Frame").
+Then `adb install -r` as above. The app is in the Android part of the
+headset. Lepton has OpenXR, so the app starts its session there. If the
+session fails, the app shows the menu in a window. Not tried yet.
 
 ## The game folder
 
@@ -307,13 +323,19 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
 
 ## Test the APK
 
-1. **With no device** (`check_apk.ps1`, 31 checks): the signature, the
+1. **With no device** (`check_apk.ps1`, 60 checks with both Wine trees):
+   the signature, the
    manifest (the package, the SDK levels, the categories of an immersive app
    of Meta and of OpenXR, the permissions and the queries of the loader, the
    headsets of Meta, no Java code), the libraries of both ABIs (stored,
    on pages of 16 KB, LOAD segments of 16 KB, no `libc++_shared.so`), and
    that the APK has no other file than the license texts
-   (`assets/licenses/`). So no file of the game can be in it.
+   (`assets/licenses/`) and the Wine trees (`assets/wine/`). So no file of
+   the game can be in it. For each Wine tree: a build id, the compression,
+   the loader, `wineserver`, `ntdll` of i386 and of the ABI, the CPU DLL of
+   the ABI in the tree and in `wine.inf`, `libfreetype.so`, `tahoma.ttf`,
+   none of the DLLs that stay out, and the license texts of Wine, FreeType
+   and Box64. With a tree `targetSdkVersion` must be 28, with none 32.
 2. **In the Android emulator** (`emu_test.ps1`, 19 checks): the same APK on
    an x86_64 image of Android 14 with no window, port 5584, a cold boot. The
    script deletes the folder of the app, installs the APK, starts it one
@@ -449,9 +471,12 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    crash, and each picture against the picture of the PC (the pass of step
    4). The results are in `bwvr/out/android/emu-live-test`.
 
+   **Wine in the emulator** (`emu_wine_test.ps1`, 51 checks): see "Wine in
+   the app". The results are in `bwvr/out/android/emu-wine-test`.
+
    `emu_all.ps1 -Stream <file> -Reference <desk folder> -Live <desk folder>`
-   runs the tests 2, 3 (plain and with `-Stream -Gpu host`), 4 and 5 one
-   after the other. It
+   runs the tests 2, Wine, 3 (plain and with `-Stream -Gpu host`), 4 and 5
+   one after the other. It
    keeps the whole output of each test in `bwvr/out/android/emu-all`, and it
    stops at the first test that does not end with "N checks, 0 failed.",
    also when a test gives no such line.
@@ -487,7 +512,11 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    of the calls, the layers of a picture in the player, the state of a frame
    with no walks, the rules of `SendCard`, of a panel quad, of the walls and
    of the columns of the cut scene window, and the order of the layers of
-   `BuildFrame`).
+   `BuildFrame`), and the rules of Wine (`wine_rules_checks.h`: the DLLs
+   that stay out, the paths of each ABI, the build id, the environment of a
+   program, the seed of `user.reg`, the marker of the prefix and the copy
+   of the CPU DLL, the headers of the tar file and the names that stay in
+   the tree).
 7. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
@@ -1248,6 +1277,230 @@ two captures differ by at most 0.003 percent of their pixels by more than
 
 **Not shown yet:** the run with the game in Wine with `vk_device=0`.
 
+## Wine in the app
+
+The APK carries Wine 11.0 in the WoW64 mode, one tree for each ABI, and the
+app sets it up at its start. It starts Windows programs in Wine as child
+processes. It does not start the game yet ("What the app cannot do yet").
+
+**The two builds** (`bwvr/tools/android/build_wine.sh <work folder> <abi>`,
+in a Linux of WSL2, see the head of the script for the work folder):
+
+- `aarch64` for the headsets: `--host=aarch64-linux-android`,
+  `--enable-archs=i386,aarch64`. All of Wine runs as ARM64 code, and the 32
+  bit x86 code runs in `wowbox64.dll` of Box64 (`build_box64.ps1 -Mingw`).
+- `x86_64` for the Android emulator of the tests: `--host=x86_64-linux-android`,
+  `--enable-archs=i386,x86_64`. The 32 bit code runs natively through
+  `wow64cpu.dll` of Wine. So the emulator tests the whole path of the app
+  except the CPU emulator.
+
+Each build has FreeType 2.13.3 as a shared library (`libfreetype.so`, with
+the zlib of the NDK, no HarfBuzz, PNG, Brotli or bzip2), so Wine has the
+TrueType fonts of `share/wine/fonts` (Tahoma, Marlett, Symbol, Webdings,
+Wingdings) and makes its bitmap fonts (`.fon`) from them. The tools of Wine
+for the build get a FreeType of the same source for the Linux of WSL2. Wine
+gets no display driver (`--disable-wineandroid_drv`, no X), and no debug
+data. For x86_64 the Unix side needs `-D_GNU_SOURCE -include strings.h`:
+the code of the LDT calls `ffs`, which bionic declares in `strings.h`.
+`build_wine.sh` applies the patches of `bwvr/tools/android/wine-patches/`
+to the source one time. `0001-ntdll-no-casefold-ioctl-on-fuse.patch`: Wine
+asks each directory that it looks into for the casefold flag
+(`FS_IOC_GETFLAGS`), and the FUSE daemon of Android 14 (MediaProvider with
+fuse-bpf) stops on that ioctl of a directory of `Android/data` ("Check
+failed: active_nodes_.find(node)"). Then the app and each process with the
+shared storage lose it. The app alone shows it in the emulator: an `open`
+of the game folder, `fstatat` and `fstatfs` work, and the ioctl stops the
+daemon. With the patch Wine makes no such ioctl on a FUSE file system,
+which has no casefold flag. Not known: if the FUSE daemon of the Quest has
+the same fault.
+Wine for Android installs `bin` and `lib` into a folder of the ABI of
+Android (`arm64-v8a`, `x86_64`) beside `share`, and its loader is
+`lib/wine/<arch>-unix/wine`, in the folder of `ntdll.so`.
+
+**The runtime tree** (`pack_wine.sh <work folder> <abi>`) takes from the
+install only what a 32 bit program needs, strips each ELF file, checks the
+machine of each ELF and PE file, and writes `bwvr/out/android/wine/<abi>.tar`
+(ustar), `<abi>.id` (the build id: a hash of the names and the bytes of the
+tree), the list of its files and the list of what it left out. It leaves
+out:
+
+| What | Why |
+| --- | --- |
+| `ddraw`, `ddrawex`, each `d3d*`, `wined3d`, `dxgi`, `opengl32`, `vulkan-1`, `winevulkan` (each architecture, also the Unix library) | "Only Vulkan": the mod is the DirectDraw of the game, the app draws, and Wine gets no graphics DLL |
+| `include`, `share/man` | headers and man pages |
+| the import libraries (`lib*.a`) | only a build uses them |
+| the scripts of `bin` (`wineboot`, `winecfg`, `notepad` and the others), all but `wineserver` | they need `/bin/sh`, and the app starts the loader itself |
+| `notepad`, `wordpad`, `write`, `winemine`, `winhlp32`, `iexplore`, `winefile` | programs with a window for a person at a desktop. A game does not start them |
+
+`wineandroid.drv` is not built. The tree of arm64-v8a also gets
+`wowbox64.dll` in `aarch64-windows`. In both trees `pack_wine.sh` adds the
+default value of `HKLM\Software\Microsoft\Wow64\x86` (the CPU of the 32 bit
+code: `wowbox64.dll` and `wow64cpu.dll`) to the section `[Wow64]` of
+`wine.inf`. wineboot reads that section in a 64 bit process before it runs
+the 32 bit part of `wine.inf`, and the WoW64 of Wine takes `xtajit.dll` on
+ARM64 when the value is not there (`dlls/wow64/syscall.c`). A seed of
+`system.reg` would not work: the wine server makes the link
+`CurrentControlSet` only for a new `system.reg`. The tree has no symbolic
+links (`pack_wine.sh` checks it), and the app takes none from the tar file.
+
+| Tree | Files | Bytes | In the APK |
+| --- | --- | --- | --- |
+| install of `x86_64` | | 514,210,617 | |
+| tree of `x86_64` | 1589 | 359,869,009 | `assets/wine/x86_64.tar`, 360,744,960 bytes, compressed |
+| install of `aarch64` | | 810,645,019 | |
+| tree of `arm64-v8a` | 1587 | 632,448,745 | `assets/wine/arm64-v8a.tar`, 633,323,520 bytes, compressed |
+
+The PE DLLs of ARM64 have the file alignment of 64 KB, so the ARM64 tree
+is larger. With both trees the APK is 204.0 MB (213,906,433 bytes).
+
+**The APK.** `build_apk.ps1` puts the tree of each ABI that has one into
+the APK as `assets/wine/<abi>.tar` (the method deflate) and
+`assets/wine/<abi>.id`, with the license texts of Wine (LGPL-2.1),
+FreeType (FTL) and Box64 (MIT) in `assets/licenses/`
+(`third_party/README.md`). The asset manager of Android inflates a tar as a
+stream, and the app reads only the tree of its own ABI. With no tree the APK
+has no Wine and `targetSdkVersion` 32, and the log of the build says so for
+each ABI.
+
+**Executable files.** An app with `targetSdkVersion` 29 or later cannot
+run (`execve`) a file of its own data folder (Android 10: the SELinux
+domain `untrusted_app` has no `execute_no_trans` for `app_data_file`). Wine
+must run its loader, its preloader and `wineserver`, and each new Windows
+process is a new `execve` of the loader. So the APK with a Wine tree has
+`targetSdkVersion` 28, as Winlator, and the app runs in the domain
+`untrusted_app_27`, which can run the files of its folder. The tree is in
+the internal folder of the app (`getFilesDir`), not on the shared storage.
+What else changes with 28:
+
+- Android 14 warns about an app whose `targetSdkVersion` is below
+  `ro.build.version.min_supported_target_sdk`. The emulator of the tests
+  (Android 14) has 28 there, so 28 gets no warning, and the app has the focus
+  at its start. A later Android can raise the value.
+- The shared storage: with 28 the app has the old storage of Android 9. The
+  app uses only its own folder `Android/data/org.bwvr.quest`, which an app
+  can read and write with each level. The game folder stays there.
+- The package visibility of Android 11 (the `queries` of the manifest) is
+  for 30 and later. With 28 the OpenXR loader sees each package, also the
+  runtime broker.
+- Not known: if Meta Horizon OS or the Steam Frame treat an app with 28
+  differently (a warning, the OpenXR runtime). Only a headset can show it.
+
+**The setup at each start** (`wine_runtime.cpp`, a thread, so the frame
+loop and the menu do not wait):
+
+1. With no tree of its ABI in the APK (`wine/<abi>.id`) the app sets up no
+   Wine, and the log says so. `wine_setup=0` in `bwvr.ini`: the same, with
+   a tree.
+2. When the tree in `files/wine` has no build id or another one, the app
+   unpacks the tar of the APK into `files/wine.new`, puts it in place of the
+   old tree, and writes the build id last. A name that points out of the
+   tree, a link or an entry of another kind stops the unpack.
+3. The app checks the tree: the loader, `wineserver`, `ntdll` of i386 and of
+   the ABI, the CPU DLL, and none of the DLLs that stay out.
+4. With no marker in the prefix (`files/prefix/bwvr-prefix-id.txt`), the
+   app makes a new prefix: it deletes the old one, writes a `user.reg` with
+   `HKCU\Software\Wine\Drivers`, `Graphics` = `null` (no display driver),
+   puts `wowbox64.dll` into `system32` on arm64-v8a, then runs
+   `wine wineboot --init` and `wineserver -w`. The log has the time of each.
+   The last step of a good prefix writes the marker: the build id of the
+   tree. So a wineboot that stopped (the end of the app) or failed gives a
+   new prefix at the next start. A prefix with the marker of another tree
+   stays, and on arm64-v8a it gets the `wowbox64.dll` of the new tree.
+5. The drive `G:` of the prefix (`dosdevices/g:`) is a link to the game
+   folder of the app.
+
+The status line of the menu says what the app does: "Setting up Wine:
+unpacking the runtime...", "Setting up Wine: making the prefix...", "Wine
+ready.", or the fault. The log lines start with `wine`.
+
+**A program in Wine.** The app starts the loader with the environment of
+the app and `WINEPREFIX`, `WINESERVER`, `LD_LIBRARY_PATH` (the `lib` of the
+tree, for `libfreetype.so`), `HOME` and `TMPDIR` (the internal folder),
+`WINEDLLOVERRIDES=mscoree,mshtml=` (no Mono and no Gecko, so wineboot asks
+for no download) and `WINEDEBUG` from `wine_debug` in `bwvr.ini` (with no
+value, the default of Wine). Wine finds its DLLs and its loader from the
+place of `ntdll.so`, so it needs no `WINELOADER` and no `WINEDLLPATH`. The
+child gets each signal with its default action and none blocked, and no
+file of the app: it closes each descriptor from 3 up before its `execve`.
+Its stdout and stderr go to `wine.log` in the folder of the app, after a
+line with the command, and the log of the app has its exit code. When
+`execve` fails, the log has its errno. `wine.log` holds one start of the
+app: the first program of a start makes it empty. At its end the app stops
+the thread of the setup (a program that the thread waits for gets
+`SIGKILL`), then each process of Wine (`wineserver -k`, also when no
+program ran in this start). With `wine_setup=0` the app touches no part of
+Wine: no thread, no `wine.log`, no `wineserver -k`.
+
+**The test program** (`bwvr/test/wine_probe`, `bwvr_wine_probe.exe` of the
+PC build, a 32 bit console program with no game code). `wine_probe=1` in
+`bwvr.ini` (a test aid): after the setup the app runs
+`G:\bwvr_wine_probe.exe` of the game folder one time. It writes
+`bwvr-wine-probe.txt` beside itself, and the app copies each line into its
+log: the Windows version, the version of Wine, the machines of
+`IsWow64Process2`, the CPU DLL of the registry, the display driver, the time
+of a fixed loop, a write, a read and a delete of a file of 64 KB on `G:`,
+what `LoadLibraryEx` finds in the system folder for `ddraw`, `d3d9`,
+`wined3d`, `dxgi`, `opengl32` and `vulkan-1`, and the face, the extent and
+the outline of a glyph of the font Tahoma.
+
+**The test in the emulator** (`emu_wine_test.ps1`, 51 checks, the
+x86_64 tree, Android 14, SwiftShader). The test lists the prefix with
+`adb root`, so it needs an emulator image of the kind userdebug
+(`google_apis`, not `google_apis_playstore`). A clean install, then the first
+start: the app ran in the domain `untrusted_app_27`, had the focus (no
+warning of the system), and unpacked 1589 files (343.2 MB) in 2.7 s.
+While wineboot ran, the test ended the app with the back key: the end of
+the app stopped wineboot, `wineserver -k` ended with 0, and no process of
+Wine stayed. The stopped prefix had a `system.reg` of wineboot and no
+marker. The next start did no unpack and made a new prefix:
+`wineboot --init` 20.2 s and `wineserver -w` 8.0 s, so the
+prefix took 28.2 s, and the menu was on the screen before the setup
+ended.
+Then the test puts `bwvr_wine_probe.exe` and `bwvr.ini` with `wine_probe=1`
+into the game folder, and the next start does no unpack and makes no
+prefix. The test program ran from `G:` in 1.9 s and wrote: Windows
+10.0.19045, Wine 11.0, a process for i386 on x86_64,
+`cpu_dll=wow64cpu.dll` (the line of `pack_wine.sh` in `wine.inf`),
+`graphics=null`, a loop of 83 ms, the write, the read and the delete
+of the file of 64 KB on `G:`, no `ddraw`, `d3d9`, `wined3d`, `dxgi`,
+`opengl32` or `vulkan-1` in the system folder (error 126), Tahoma as a
+TrueType font with an extent of 200 by 39 and an outline of 112 bytes for
+"A". No process of Wine was left after the setup or after the test
+program. At the end the back key ended the app, `wineserver -k` ended with
+1 (no server ran: the server of the test program had ended, and -k gives 0
+only when it stops one), and logcat has no crash.
+
+The game folder is on the shared storage, which has `noexec`. Wine reads a
+PE file with `read` when its `mmap` fails there (`map_pe_header` of
+`dlls/ntdll/unix/virtual.c`, the warning "noexec file system, falling back
+to read"), and it gives an error "failed to set ... protection ...,
+noexec filesystem?" when a section gets no protection. In the emulator,
+with `wine_debug=warn+virtual`, the test program gave neither line, so the
+`read` path did not run. Wine reads a section that is not on a page of the
+file with `read` in each case, and the sections of the test program of MSVC
+(a file alignment of 512 bytes) are such sections. The path is open for
+the game files (`runblack.exe` and the `ddraw.dll` of the mod).
+
+**Not shown yet:** Wine with `wowbox64.dll` on ARM64 (no device ran it:
+for the tree of arm64-v8a only the machine of each ELF and PE file, the
+imports and exports of `wowbox64.dll` and its line in `wine.inf` are
+checked), the time of the setup on a headset, the path of Wine for
+`noexec` (`read`) with the game files, the end of the app in a session of
+a headset (the end of the session, not the back key of the window), and
+if Meta Horizon OS and the Steam Frame let an app with `targetSdkVersion`
+28 start programs of its folder.
+
+**Known limits:**
+
+- The APK is 204.0 MB (213,906,433 bytes) with both trees: a tar in the
+  method deflate. A better compression (xz) needs a decoder in the app.
+- Wine has no audio driver on Android, and no display driver: a program
+  that needs a window or a sound does not work yet.
+- A tree of another build gets a new unpack, and the prefix with its
+  marker stays. wineboot updates a prefix when `wine.inf` is newer than the
+  prefix (`update_wineprefix`), but no test ran a new tree over an old
+  prefix.
+
 ## Only Vulkan
 
 The app has one renderer: the Vulkan renderer of the mod. There is no
@@ -1274,9 +1527,18 @@ no DirectDraw, `vulkan_only` is 1, and the window of the game gets no GDI.
 In a process of Wine "system DirectDraw" is the DirectDraw of Wine, which
 draws with its own Direct3D, so these ways must not be there.
 
-The runtime gets no `ddraw.dll`, `d3d*.dll`, `wined3d.dll` or `dxgi.dll` of
-Wine, and Wine loads the `ddraw.dll` of the mod as a native DLL only, with
-no builtin one behind it.
+The Wine tree of the APK has no `ddraw`, `ddrawex`, `d3d*`, `wined3d`,
+`dxgi`, `opengl32`, `vulkan-1` or `winevulkan` of Wine (the PE DLLs of each
+architecture and their Unix libraries), and no display driver of Wine
+(`wineandroid.drv` is not built, and the prefix has `Graphics` = `null`).
+The list is `kLeftOutNames` and `kLeftOutPrefix` of
+`android/src/wine_rules.h`: `pack_wine.sh` leaves the files out,
+`check_apk.ps1` checks each tree, and the app checks its unpacked tree
+before it starts Wine. So Wine can load
+the `ddraw.dll` of the mod only as a native DLL, with no builtin one behind
+it. The test program of Wine shows it in the emulator: `LoadLibraryEx` of
+`ddraw.dll`, `d3d9.dll`, `wined3d.dll`, `dxgi.dll`, `opengl32.dll` and
+`vulkan-1.dll` in the system folder finds none.
 
 ## What the app cannot do yet
 
@@ -1284,12 +1546,14 @@ no builtin one behind it.
 Windows programs for x86 (32 bit), and the headsets have an ARM CPU with
 Android. The plan, in steps:
 
-1. **An x86 runtime in the app.** Box64 with Wine in the WoW64 mode runs a
-   32 bit Windows program on ARM64 with no 32 bit libraries (the way of
-   Winlator and similar apps). The app must start it in its own process,
-   give it the game folder, and write `ScreenW`, `ScreenH`, `FullScreen`
-   and `ScreenD` (`Menu::RenderSize`) into the registry of its Wine prefix.
-   Wine also needs a display driver with no screen, and an audio driver.
+1. **An x86 runtime in the app.** The APK carries Wine in the WoW64 mode
+   for each ABI, and the app sets it up and runs a 32 bit Windows program
+   in it (see "Wine in the app"). In the emulator the whole path runs with
+   the x86_64 tree. Open: a run of the arm64-v8a tree with `wowbox64.dll`
+   on a headset, the start of `runblack.exe` with the mod, `ScreenW`,
+   `ScreenH`, `FullScreen` and `ScreenD` (`Menu::RenderSize`) in the
+   registry of the prefix, and an audio driver (Wine has none on Android
+   yet, and the game plays its sound through DirectSound).
 
    Box64 builds for the headsets with the NDK of the app:
    `bwvr/tools/android/build_box64.ps1 -Source <folder>` takes the folder
@@ -1297,9 +1561,9 @@ Android. The plan, in steps:
    `local/`), and writes `bwvr/out/android/box64/box64`. With the release
    v0.4.4 it is an AArch64 program for the linker of Android
    (`/system/bin/linker64`) of 21 MB that needs only `libc.so`, `libm.so`
-   and `libdl.so`. The APK does not contain it yet, and it did not run yet:
-   the emulator of the tests is x86_64, so a run needs a headset or another
-   ARM64 device.
+   and `libdl.so`. The way of the app needs no Linux program box64, and the
+   APK does not contain it. It did not run: the emulator of the tests is
+   x86_64, so a run needs a headset or another ARM64 device.
 
    The way for the 32 bit code is an ARM64 Wine for Android in the WoW64
    mode that loads `wowbox64.dll` (the option `WOW64` of Box64) as its CPU
@@ -1312,23 +1576,9 @@ Android. The plan, in steps:
    builds it. With Box64 v0.4.4 and llvm-mingw 20261006 it is a DLL for
    ARM64 (machine 0xAA64) of 4.5 MB with the 13 exports `BTCpu...` of the
    CPU interface of the WoW64 of Wine, and it imports only `ntdll.dll` and
-   `wow64.dll`. It did not run yet.
+   `wow64.dll`. It goes into the Wine tree of arm64-v8a. It did not run
+   yet.
 
-   Wine builds for the headsets in a Linux of WSL2:
-   `bwvr/tools/android/build_wine.sh <work folder>` takes the unpacked
-   source of Wine 11.0, the NDK r27d for Linux and llvm-mingw 20261006 for
-   Ubuntu (none of them is in the repo). It builds the tools of Wine for that
-   Linux, then Wine for `aarch64-linux-android` (API 29) with
-   `--enable-archs=i386,aarch64`, no display driver of Wine
-   (`--disable-wineandroid_drv`, the app draws), no X and no FreeType. The
-   result has the loader `wine`, `wineserver` and `ntdll.so` as AArch64
-   programs for `/system/bin/linker64`, `wow64.dll` and `ntdll.dll` for
-   ARM64, and the DLLs of Wine for i386. Wine has no sound driver on
-   Android yet, and no fonts. The APK does not contain Wine yet, and it did
-   not run yet. When it goes into the APK, the DLLs of Wine for DirectDraw,
-   Direct3D and OpenGL (`ddraw`, `d3d*`, `wined3d`, `dxgi`, `opengl32`)
-   stay out of it: the mod is the DirectDraw of the game, and the app
-   draws with Vulkan alone.
    The fall back is an x86_64 Wine in the WoW64 mode under the Linux
    program box64, with the x86_64 libraries of glibc that it needs.
 2. **The walks for the renderer in the app, live.** The renderer is in the
@@ -1356,8 +1606,13 @@ Step 3 has one: the input of a record through the channel of a desktop run
 (`input_channel_run.ps1`), and the slot of the test runtime in the emulator
 (`emu_xr_test.ps1`).
 
-**The Steam Frame.** SteamOS on the Steam Frame has Proton and FEX (an x86
-emulator). That way can run the PC build of the mod with no APK, if the
+**The Steam Frame.** The Steamworks documentation of Valve ("Steam Frame")
+says that the Steam Frame runs APKs in Lepton, an Android runtime of
+SteamOS based on Waydroid, with OpenXR, and that an APK installs with `adb`
+in the developer mode. So the APK of arm64-v8a is the way for the Steam
+Frame too. Not tried: the APK in Lepton, `targetSdkVersion` 28 there, and
+the child processes of Wine in Lepton. SteamOS also has Proton and FEX (an
+x86 emulator), which could run the PC build of the mod with no APK, if the
 OpenXR of SteamOS takes a 32 bit program. Not tried.
 
 **Open questions:** the frame rate of the menu quads on a Quest 3, the

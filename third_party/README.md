@@ -54,6 +54,27 @@ The manifest of the AAR names the license `Apache-2.0 OR MIT`. The APK
 carries `LICENSE` as `assets/licenses/openxr_loader.txt`
 (`bwvr/tools/android/build_apk.ps1`).
 
+## In the APK, not in the repo
+
+The headset app carries Wine (`bwvr/docs/android.md`, "Wine in the app").
+Its source and its build tools are not in the repo: the build scripts take
+them from a work folder in a Linux of WSL2. The APK carries the license
+text of each one in `assets/licenses/`.
+
+| Part | What | Version | License | From |
+| --- | --- | --- | --- | --- |
+| Wine | The Wine tree of each ABI (`assets/wine/<abi>.tar`): the loader, `wineserver`, the Unix libraries and the PE DLLs of Wine, built by `bwvr/tools/android/build_wine.sh` and `pack_wine.sh`. `build_wine.sh` applies the patches of `bwvr/tools/android/wine-patches/`, and `pack_wine.sh` adds one line to `wine.inf` (the CPU DLL of the 32 bit code) | 11.0, `wine-11.0.tar.xz`, SHA-256 `c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701` | LGPL-2.1 or later (`COPYING.LIB`, in the APK as `assets/licenses/wine.txt`). The patches of `wine-patches/` change the source of Wine, so they are under the license of Wine too: LGPL-2.1 or later | the source release of https://www.winehq.org |
+| FreeType | `libfreetype.so` in each Wine tree, for the TrueType fonts of Wine. Built by `build_wine.sh` with no HarfBuzz, PNG, Brotli or bzip2 | 2.13.3, `freetype-2.13.3.tar.xz`, SHA-256 `0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289` | the FreeType License, FTL (`docs/FTL.TXT`, in the APK as `assets/licenses/freetype.txt`). FreeType is also under GPL-2.0, and the mod takes the FTL | the release archive of https://freetype.org (its signature `.sig` is beside it in the work folder, not checked with a key) |
+| Box64 | `wowbox64.dll` in the Wine tree of `arm64-v8a`: the CPU of the 32 bit x86 code. Built by `bwvr/tools/android/build_box64.ps1 -Mingw` | v0.4.4, `box64-v0.4.4.tar.gz`, SHA-256 `99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029` | MIT (`LICENSE`, in the APK as `assets/licenses/box64.txt`) | https://github.com/ptitSeb/box64 |
+
+The tools of the build go into no APK: the Android NDK r27d for Linux and
+llvm-mingw 20261006 (Apache-2.0 with LLVM exceptions).
+
+Open before a publication of an APK with Wine: the LGPL asks for an offer
+of the source of the exact Wine that the APK carries, with the patches, the
+change of `pack_wine.sh` and the options of `build_wine.sh`, and the FTL asks for a
+credit of the FreeType Project in the documentation.
+
 ## Not in the repo
 
 `bw1-decomp` (https://github.com/openblack/bw1-decomp) has names for about

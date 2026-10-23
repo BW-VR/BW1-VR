@@ -6,8 +6,9 @@
 // headset (the Android emulator) it shows the same menu in its window.
 //
 // The game itself is a Windows program for x86. The app finds the game
-// folder and checks runblack.exe, but it cannot start the game yet: that
-// needs the x86 runtime (docs/android.md, "What the app cannot do yet").
+// folder and checks runblack.exe, and it sets up Wine from the APK
+// (wine_runtime.h), but it cannot start the game yet (docs/android.md,
+// "What the app cannot do yet").
 
 #include <android/input.h>
 #include <android/keycodes.h>
@@ -38,6 +39,7 @@
 #include "../../src/mod/vk_scene.h"
 #include "scene_player.h"
 #include "stream_reader.h"
+#include "wine_runtime.h"
 #include "xr_app.h"
 
 namespace {
@@ -106,6 +108,9 @@ struct App {
 
   // THE INPUT CHANNEL (input_live=1, docs/android.md, "The input channel").
   InputLive input_live;
+
+  // WINE (docs/android.md, "Wine in the app"): a thread sets it up.
+  WineRuntime wine;
 };
 
 double NowMs() {
@@ -277,8 +282,7 @@ void Do(App* app, Action action) {
       if (!app->game.exe_right) {
         app->status = app->game.message;
       } else {
-        app->status = "Saved. This build cannot start the game: it has no x86 "
-                      "runtime yet.";
+        app->status = "Saved. This build cannot start the game yet.";
       }
       AppLog("menu         : %s. %s",
              action == Action::kPlay ? "Play in VR" : "Play, new game",
@@ -292,7 +296,12 @@ void Do(App* app, Action action) {
 // The menu goes to the paint thread after each change, and the pixels of a
 // paint that is done go to the quad or to the window.
 void Paint(App* app) {
-  const std::string& status = app->status.empty() ? app->base_status : app->status;
+  // The status of the setup of Wine follows the status of the game folder.
+  std::string status = app->status;
+  if (status.empty()) {
+    const std::string wine = app->wine.Status();
+    status = wine.empty() ? app->base_status : app->base_status + "  " + wine;
+  }
   app->painter.Ask(app->menu, status);
   if (!app->painter.Take(&app->pixels)) return;
   if (app->xr_on) {
@@ -537,6 +546,26 @@ void android_main(android_app* android) {
   AppLog("app          : the folder of the app is %s", app.folder.c_str());
 
   Load(&app);
+  // WINE: the thread unpacks the tree of the APK into the internal folder of
+  // the app, makes the prefix and, with wine_probe=1, runs the test program
+  // of the game folder. wine_setup=0: no Wine, as an APK with no Wine tree.
+  // wine_debug: the value of WINEDEBUG (empty: the default of Wine).
+  {
+    WineRuntime::Options wine;
+    wine.setup = app.ini.GetInt("bwvr", "wine_setup", 1) != 0;
+    wine.probe = app.ini.GetInt("bwvr", "wine_probe", 0) != 0;
+    wine.debug = app.ini.Get("bwvr", "wine_debug", "");
+    // The tree must be in the internal folder: Android runs no program of
+    // the shared storage.
+    if (android->activity->internalDataPath == nullptr) {
+      AppLog("wine         : Android gives the app no internal folder. The app does not "
+             "set up Wine");
+    } else {
+      const std::string files = android->activity->internalDataPath;
+      mkdir(files.c_str(), 0700);
+      app.wine.Start(android->activity->assetManager, files, app.folder, app.game.folder, wine);
+    }
+  }
   if (!app.painter.Start(android->activity->vm,
                          app.capture ? app.game.folder + "/bwvr-menu.bmp" : "")) {
     AppLog("app          : the canvas of Android did not start. The app stops");
@@ -726,6 +755,7 @@ void android_main(android_app* android) {
   }
   app.input_live.WriteNoInput();
   app.input_live.Stop();
+  app.wine.Stop();
   AppLog("app          : the app ends");
   if (app.xr_on) app.xr.Stop();
   app.flat.Stop();

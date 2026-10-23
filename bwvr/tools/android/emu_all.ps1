@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Runs the five emulator tests of the APK one after the other
+    Runs the six emulator tests of the APK one after the other
     (docs/android.md, "Test the APK").
 
 .DESCRIPTION
-    The order: emu_test.ps1, emu_xr_test.ps1, emu_xr_test.ps1 -Gpu host
+    The order: emu_test.ps1, emu_wine_test.ps1, emu_xr_test.ps1, emu_xr_test.ps1 -Gpu host
     -Stream, emu_replay_test.ps1, emu_live_test.ps1. Each test writes its whole output to
     out/android/emu-all/<name>.txt. The chain stops at the first test that
     does not end with a line "N checks, 0 failed.", also when the test gives
@@ -49,6 +49,7 @@ $Live = (Resolve-Path -LiteralPath $Live).Path
 
 $tests = @(
     @{ Name = 'emu-test'; Script = 'emu_test.ps1'; Args = @() },
+    @{ Name = 'emu-wine-test'; Script = 'emu_wine_test.ps1'; Args = @() },
     @{ Name = 'emu-xr-test'; Script = 'emu_xr_test.ps1'; Args = @() },
     @{ Name = 'emu-xr-stream-test'; Script = 'emu_xr_test.ps1'; Args = @('-Gpu', 'host', '-Stream', $Stream) },
     @{ Name = 'emu-replay-test'; Script = 'emu_replay_test.ps1'; Args = @('-Stream', $Stream, '-Reference', $Reference) },
@@ -73,5 +74,5 @@ foreach ($t in $tests) {
         exit 1
     }
 }
-Write-Host '== All five emulator tests passed' -ForegroundColor Cyan
+Write-Host '== All six emulator tests passed' -ForegroundColor Cyan
 exit 0

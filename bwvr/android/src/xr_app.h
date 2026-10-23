@@ -35,6 +35,8 @@ struct XrInput {
   bool select[2] = {false, false};
   bool back[2] = {false, false};
   float stick[2][2] = {};
+  // The menu button (the actions of the mod, SetInputLive).
+  bool menu[2] = {false, false};
 };
 
 class XrApp {
@@ -85,6 +87,14 @@ class XrApp {
   // smoothing and no prediction of the app.
   void SetInputLive(bool on) { input_live_ = on; }
   void InputSlot(input_channel::SlotData* out);
+
+  // THE MENU QUAD. Shown (the default): the menu and the cursor go out over
+  // each other layer. Not shown (the game runs and the player plays): no
+  // menu quad and no cursor.
+  void SetMenuShown(bool on) { menu_shown_ = on; }
+  // The picture of the renderer goes out of the layers until the next
+  // picture (the game ended).
+  void ClearScreenSource() { screen_source_ = VK_NULL_HANDLE; }
 
   // THE RENDERER OF THE MOD IN THE SESSION (docs/android.md, "The picture
   // of the renderer in the headset"). True when the device of the runtime
@@ -277,6 +287,7 @@ class XrApp {
   Layer cursor_;
   bool menu_written_ = false;
   bool cursor_written_ = false;
+  bool menu_shown_ = true;
 
   bool copy_on_change_ = true;
   uint64_t copies_ = 0;

@@ -795,8 +795,13 @@ that moves while the Hand takes it.
     in the WoW64 mode for each ABI (`wowbox64.dll` of Box64 on ARM64), and
     the app unpacks it, makes a prefix and runs a 32 bit test program in it
     (`android.md`, "Wine in the app"): in the emulator with the x86_64
-    tree. Open: the arm64-v8a tree on a headset, and the start of the game
-    in Wine (`android.md`, "What the app cannot do yet"). The input of
+    tree. "Play in VR" and "Play, new game" start `runblack.exe` in Wine with
+    the `ddraw.dll` of the APK as a known DLL, `vk_device=0`, the live
+    stream and the input channel (`android.md`, "Play in the app"). Open: the
+    arm64-v8a tree on a headset, a game folder with no profile (the game
+    then waits in a dialog before its first frame, and the live stream has
+    no frame there), the sound (Wine has no audio driver on Android), and
+    the frame pace with `vk_device=0`. The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the
@@ -813,7 +818,7 @@ that moves while the Hand takes it.
     intro, which gives no frame of the live stream. With `vk_device=0` the
     mod makes no Vulkan device, so only the app draws the walks (`android.md`,
     "No Vulkan device of the mod"). Open for it: the subtitle card, which
-    then has no pixels, and the run in Wine. A frame goes into the
+    then has no pixels, and a frame of the game in Wine. A frame goes into the
     ring at the end of its first walk with both eyes, and in a desktop run each frame after
     a frame with the whole state was at the reader in its own game frame. A
     skip of the app and a drop of the writer keep the records of state and

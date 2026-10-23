@@ -7,8 +7,11 @@
 //
 // The game itself is a Windows program for x86. The app finds the game
 // folder and checks runblack.exe, and it sets up Wine from the APK
-// (wine_runtime.h), but it cannot start the game yet (docs/android.md,
-// "What the app cannot do yet").
+// (wine_runtime.h). "Play in VR" and "Play, new game" start the game in
+// Wine with the mod as its DirectDraw (play_rules.h, docs/android.md, "Play
+// in the app"): the mod gives its frames through the live stream, the app
+// draws them, and the app gives the head and the hands to the mod through
+// the input channel.
 
 #include <android/input.h>
 #include <android/keycodes.h>
@@ -32,6 +35,7 @@
 #include "menu_layout.h"
 #include "menu_model.h"
 #include "menu_painter.h"
+#include "play_rules.h"
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
 #include "../../src/mod/view_layer_math.h"
@@ -111,7 +115,25 @@ struct App {
 
   // WINE (docs/android.md, "Wine in the app"): a thread sets it up.
   WineRuntime wine;
+
+  // THE GAME ("Play", docs/android.md, "Play in the app").
+  bool play_game = true;         // play_game
+  int play_menu_hold_ms = 1000;  // play_menu_hold_ms
+  double menu_down_ms = 0.0;     // the time of the last press of the menu button
+  bool menu_hold_done = false;   // the hold of this press showed the menu
+  bool can_play = false;  // the APK has Wine for this ABI, wine_setup=1, play_game=1
+  bool game_on = false;   // a game starts or runs
+  bool menu_over_game = false;  // the menu shows over the game
+  bool menu_was[2] = {false, false};
+  double play_ms = 0.0;    // the time of the last Play
+  std::string play_clock;  // and its time of the day
+  bool first_frame = false;  // a frame of the game came after Play
+  uint64_t rate_frame = 0;   // the frame and the time of the last line of the frame rate
+  double rate_ms = 0.0;
 };
+
+// The renderer of the mod takes one device in a process (see android_main).
+bool g_renderer_ran = false;
 
 double NowMs() {
   timespec t;
@@ -194,6 +216,31 @@ void LiveSummary(App* app, const char* why) {
          app->live_reader.LimitBytes());
 }
 
+// While a game runs: the first frame of the game after Play, and the frame
+// rate of the game each 10 s, from the frame numbers of the mod in the live
+// stream. With vk_device=0 nothing paces the frames of the game.
+void GameFrames(App* app) {
+  if (!app->game_on) return;
+  const double now = NowMs();
+  if (!app->first_frame) {
+    app->first_frame = true;
+    app->rate_frame = app->live_last;
+    app->rate_ms = now;
+    AppLog("game         : the first frame of the game (frame %llu) came %.1f s after Play",
+           static_cast<unsigned long long>(app->live_last), (now - app->play_ms) / 1000.0);
+    app->status = "The game runs (started " + app->play_clock + ").";
+    return;
+  }
+  if (now - app->rate_ms < 10000.0) return;
+  AppLog("game         : frame %llu, %.1f frames a second in the last %.1f s, %llu pictures "
+         "of the app since frames came",
+         static_cast<unsigned long long>(app->live_last),
+         play_rules::FramesPerSecond(app->rate_frame, app->rate_ms, app->live_last, now),
+         (now - app->rate_ms) / 1000.0, static_cast<unsigned long long>(app->live_pictures));
+  app->rate_frame = app->live_last;
+  app->rate_ms = now;
+}
+
 // The frames of the live stream into the renderer, at each frame of the
 // session. The renderer is not thread safe, so only this thread plays. The
 // batch is each frame that waits. With stream_live_frames=N (N > 0) the app
@@ -256,6 +303,7 @@ void PlayLive(App* app) {
   ++app->live_pictures;
   app->live_last_ms = NowMs();
   ShowEyes(app);
+  GameFrames(app);
 }
 
 void Save(App* app) {
@@ -270,6 +318,171 @@ void Save(App* app) {
   }
 }
 
+// THE RENDERER OF THE MOD on the device of the session. It takes one device
+// in a process. False when it ran in this process already. what: the log
+// name of the stream.
+bool StartRenderer(App* app, const char* what) {
+  if (g_renderer_ran) {
+    AppLog("%s : the renderer ran in this process already, and it takes no "
+           "second device. Start the app again", what);
+    return false;
+  }
+  g_renderer_ran = true;
+  AppLog("xr           : stream_projection=%d. %s", app->xr.ProjectionOn() ? 1 : 0,
+         app->xr.ProjectionOn()
+             ? "A picture of the renderer with the values of the projection "
+               "layer of the mod shows in a projection layer, a picture with "
+               "none on the stereo screen"
+             : "Each picture of the renderer shows on the stereo screen");
+  AppLog("xr           : stream_layers=%d. %s", app->xr.LayersOn() ? 1 : 0,
+         app->xr.LayersOn()
+             ? "The cards, the panel quads and the cut scene window of the mod "
+               "show as quad layers, as the session of the mod shows them"
+             : "No quad layer of the mod");
+  if (app->xr_on && app->xr.Renderer13()) {
+    vk::External device;
+    app->xr.RendererDevice(&device);
+    vk::UseExternal(device);
+  }
+  return true;
+}
+
+// THE LIVE STREAM (stream_live=1): a thread reads the frames of the walks of
+// the mod from the ring bwvr-stream.ring of the game folder, and at each
+// step the loop gives the frames that wait to the renderer (PlayLive,
+// docs/android.md, "The live stream"). stream_live_feed=1 (a test aid): a
+// child process writes the frames of bwvr-stream-feed.bin into the ring, as
+// the mod does, one each stream_live_feed_ms.
+void StartLiveReader(App* app) {
+  app->live = true;
+  const std::string ring = app->game.folder + "/bwvr-stream.ring";
+  AppLog("live         : stream_live=1. The app reads the frames of the walks "
+         "from %s", ring.c_str());
+  VkPlatformSetFolder(app->game.folder.c_str());
+  if (app->ini.GetInt("bwvr", "stream_live_feed", 0) != 0) {
+    app->live_reader.StartFeed(ring, app->game.folder + "/bwvr-stream-feed.bin",
+                               app->ini.GetInt("bwvr", "stream_live_feed_ms", 0));
+  }
+  // stream_live_frames=N (3 by default): the newest N frames of the queue
+  // stay whole, and each older frame keeps only its records of state. 0: up
+  // to 64 MB of whole frames wait for the session.
+  const int whole = app->ini.GetInt("bwvr", "stream_live_frames", 3);
+  app->live_whole = whole > 0 ? static_cast<size_t>(whole) : 0;
+  AppLog("live         : stream_live_frames=%d. %s", whole,
+         app->live_whole > 0 ? "The newest frames of the queue stay whole, and "
+                               "an older frame keeps only its records of state"
+                             : "Up to 64 MB of whole frames wait for the session");
+  // stream_live_queue_mb (64 by default): with stream_live_frames > 0 a
+  // queue that passes this limit is cleared, for example while the session
+  // does not run, and the app asks again for the whole state. 0: no limit.
+  const int queue_mb = app->ini.GetInt("bwvr", "stream_live_queue_mb", 64);
+  const size_t queue_bytes =
+      app->live_whole > 0 ? static_cast<size_t>(queue_mb > 0 ? queue_mb : 0) << 20
+                          : static_cast<size_t>(64u << 20);
+  app->live_reader.Start(ring, app->live_whole, queue_bytes);
+}
+
+std::string ClockNow() {
+  const time_t now = time(nullptr);
+  struct tm local;
+  localtime_r(&now, &local);
+  return play_rules::Clock(local.tm_hour, local.tm_min, local.tm_sec);
+}
+
+// The menu over the game, or the game with no menu.
+void ShowMenuOverGame(App* app, bool on) {
+  if (app->menu_over_game == on) return;
+  app->menu_over_game = on;
+  app->xr.SetMenuShown(on);
+  app->dragging = false;
+  AppLog("game         : %s", on ? "the menu shows over the game. The mod gets no hand"
+                                 : "the menu goes. The game has the hands again");
+}
+
+// "Play in VR" and "Play, new game" (docs/android.md, "Play in the app"). As
+// the launcher, each start saves the settings first. Then the keys of the
+// run, the live stream and the input channel in this process, and the game
+// in Wine.
+void Play(App* app, bool new_game) {
+  const char* name = new_game ? "Play, new game" : "Play in VR";
+  Save(app);
+  std::string why;
+  if (!app->game.exe_right) {
+    why = app->game.message;
+  } else if (!app->play_game) {
+    why = "Saved. play_game=0: the app does not start the game.";
+  } else if (!app->can_play) {
+    why = "Saved. The app has no Wine, so it cannot start the game.";
+  } else if (!app->wine.Ready()) {
+    const std::string wine = app->wine.Status();
+    why = "Saved. Wine is not ready yet" + (wine.empty() ? std::string(".") : ": " + wine);
+  } else if (!app->xr_on) {
+    why = "Saved. The game needs a headset: the app has no OpenXR session.";
+  } else if (!app->xr.Renderer13()) {
+    why = "Saved. The renderer of the mod needs Vulkan 1.3, and this headset has none.";
+  } else if (!app->live && !StartRenderer(app, "game        ")) {
+    why = "Saved. The renderer ran in this start of the app. Start the app again.";
+  }
+  if (!why.empty()) {
+    app->status = why;
+    AppLog("menu         : %s. %s", name, why.c_str());
+    return;
+  }
+  // The keys of the run, after the save: a save deletes the retired keys.
+  play_rules::SetRunKeys(&app->ini);
+  if (!WriteTextFile(app->game.ini_path, app->ini.Text())) {
+    app->status = "Cannot write bwvr.ini in the game folder.";
+    AppLog("menu         : %s. Cannot write the keys of the run to %s", name,
+           app->game.ini_path.c_str());
+    return;
+  }
+  std::string keys;
+  for (const play_rules::RunKey& k : play_rules::kRunKeys) {
+    keys += std::string(keys.empty() ? "" : ", ") + k.key + "=" + std::to_string(k.value);
+  }
+  AppLog("menu         : %s. bwvr.ini has the keys of the run: %s", name, keys.c_str());
+  if (!app->live) StartLiveReader(app);
+  if (!app->input_live.On()) app->input_live.Start(app->game.folder + "/bwvr-input.chan", 0);
+  WineRuntime::Game game;
+  game.new_game = new_game;
+  app->menu.RenderSize(&game.width, &game.height);
+  if (!app->wine.StartGame(game)) {
+    app->status = "Saved. A game runs already.";
+    AppLog("menu         : %s. A game runs already", name);
+    return;
+  }
+  app->play_ms = NowMs();
+  app->play_clock = ClockNow();
+  app->first_frame = false;
+  app->game_on = true;
+  app->menu.SetGameRunning(true);
+  app->menu_over_game = true;
+  ShowMenuOverGame(app, false);
+  app->status = "Starting the game (" + app->play_clock + ")...";
+  AppLog("game         : %s at %s, the render %d by %d", name, app->play_clock.c_str(),
+         game.width, game.height);
+}
+
+// At each step: the end of the game brings the menu back, with the exit
+// code in the status line.
+void GameTick(App* app) {
+  if (!app->game_on) return;
+  int code = 0;
+  std::string why;
+  if (app->wine.State(&code, &why) != WineRuntime::GameState::kEnded) return;
+  app->game_on = false;
+  app->menu.SetGameRunning(false);
+  ShowMenuOverGame(app, true);
+  // The last picture of the game goes out of the layers.
+  app->xr.ClearScreenSource();
+  app->screen_image = VK_NULL_HANDLE;
+  const std::string clock = ClockNow();
+  app->status = "The game ended with the exit code " + std::to_string(code) + " (" + clock +
+                ", " + why + ").";
+  AppLog("game         : the game ended with the exit code %d at %s (%s), %.1f s after Play",
+         code, clock.c_str(), why.c_str(), (NowMs() - app->play_ms) / 1000.0);
+}
+
 void Do(App* app, Action action) {
   switch (action) {
     case Action::kSave:
@@ -277,16 +490,12 @@ void Do(App* app, Action action) {
       break;
     case Action::kPlay:
     case Action::kNewGame:
-      // As the launcher: each start saves the settings first.
-      Save(app);
-      if (!app->game.exe_right) {
-        app->status = app->game.message;
-      } else {
-        app->status = "Saved. This build cannot start the game yet.";
-      }
-      AppLog("menu         : %s. %s",
-             action == Action::kPlay ? "Play in VR" : "Play, new game",
-             app->status.c_str());
+      Play(app, action == Action::kNewGame);
+      break;
+    case Action::kQuit:
+      app->wine.StopGame();
+      app->status = "Quitting the game...";
+      AppLog("game         : Quit game");
       break;
     case Action::kNone:
       break;
@@ -315,6 +524,23 @@ void Paint(App* app) {
 // A key of a keyboard, of a game pad or of the remote of the emulator.
 bool OnKey(App* app, int32_t code) {
   Menu& m = app->menu;
+  // While the game runs: the menu key shows or hides the menu over the game,
+  // and Back shows it. With no menu the other keys have no job in the app.
+  if (app->game_on) {
+    if (code == AKEYCODE_MENU) {
+      ShowMenuOverGame(app, !app->menu_over_game);
+      return true;
+    }
+    if (!app->menu_over_game) {
+      if (code == AKEYCODE_BACK || code == AKEYCODE_ESCAPE) ShowMenuOverGame(app, true);
+      return code == AKEYCODE_BACK || code == AKEYCODE_ESCAPE;
+    }
+    if ((code == AKEYCODE_BACK || code == AKEYCODE_ESCAPE || code == AKEYCODE_BUTTON_B) &&
+        m.OnMain()) {
+      ShowMenuOverGame(app, false);
+      return true;
+    }
+  }
   switch (code) {
     case AKEYCODE_DPAD_UP:
     case AKEYCODE_W:
@@ -352,6 +578,7 @@ bool OnKey(App* app, int32_t code) {
 
 // A touch on the window: the row under it, and on a slider its value.
 void OnTouch(App* app, float x, float y) {
+  if (app->game_on && !app->menu_over_game) return;
   float rx, ry, rw, rh;
   app->flat.MenuRect(&rx, &ry, &rw, &rh);
   if (rw <= 0.0f || rh <= 0.0f) return;
@@ -376,7 +603,7 @@ int32_t OnInput(android_app* android, AInputEvent* event) {
     if (AKeyEvent_getAction(event) != AKEY_EVENT_ACTION_DOWN) {
       // The up of a key that the down took.
       const int32_t code = AKeyEvent_getKeyCode(event);
-      return code == AKEYCODE_BACK && app->menu.OnMain() ? 0 : 1;
+      return code == AKEYCODE_BACK && app->menu.OnMain() && !app->game_on ? 0 : 1;
     }
     return OnKey(app, AKeyEvent_getKeyCode(event)) ? 1 : 0;
   }
@@ -435,6 +662,37 @@ void OnControllers(App* app, const XrInput& in, bool* show_cursor,
                    float cursor[3]) {
   Menu& m = app->menu;
   const ml::Quad quad = ml::MenuQuad();
+  // While the game runs, a hold of the menu button for play_menu_hold_ms
+  // shows the menu over the game, and a press hides it. The mod gets each
+  // press too: a short press is the menu of the game. With no menu the
+  // controllers are the hands of the game, and the menu takes no input.
+  bool menu_press = false, menu_down = false;
+  for (int h = 0; h < 2; ++h) {
+    if (in.menu[h] && !app->menu_was[h]) menu_press = true;
+    if (in.menu[h]) menu_down = true;
+    app->menu_was[h] = in.menu[h];
+  }
+  if (menu_press) {
+    app->menu_down_ms = NowMs();
+    app->menu_hold_done = false;
+  }
+  if (app->game_on && app->play_menu_hold_ms > 0) {
+    if (app->menu_over_game && menu_press) {
+      ShowMenuOverGame(app, false);
+    } else if (!app->menu_over_game && menu_down && !app->menu_hold_done &&
+               NowMs() - app->menu_down_ms >= app->play_menu_hold_ms) {
+      app->menu_hold_done = true;
+      ShowMenuOverGame(app, true);
+    }
+  }
+  if (app->game_on && !app->menu_over_game) {
+    for (int h = 0; h < 2; ++h) {
+      app->select_was[h] = in.select[h];
+      app->back_was[h] = in.back[h];
+    }
+    *show_cursor = false;
+    return;
+  }
   // The hand that pressed its trigger last points.
   for (int h = 0; h < 2; ++h) {
     if (in.select[h] && !app->select_was[h]) app->pointer_hand = h;
@@ -470,7 +728,14 @@ void OnControllers(App* app, const XrInput& in, bool* show_cursor,
     }
   }
   for (int h = 0; h < 2; ++h) {
-    if (in.back[h] && !app->back_was[h]) m.Back();
+    if (!in.back[h] || app->back_was[h]) continue;
+    // B or Y on the main page of the menu over the game goes back to the
+    // game.
+    if (app->game_on && m.OnMain()) {
+      ShowMenuOverGame(app, false);
+    } else {
+      m.Back();
+    }
   }
 
   // The sticks: up and down move the highlight, left and right change the
@@ -585,7 +850,28 @@ void android_main(android_app* android) {
   // goes into bwvr-input.chan of the game folder. 0: the app reads only the
   // input of its menu.
   const bool input_live = app.ini.GetInt("bwvr", "input_live", 0) != 0;
-  app.xr.SetInputLive(input_live);
+  // play_game=1 (the default): "Play" starts the game in Wine, when the APK
+  // has Wine for this ABI and wine_setup=1. Then the session has the actions
+  // of the mod from its start, because a session takes its actions one
+  // time, and "Play" starts the input channel. 0: "Play" saves and starts
+  // nothing.
+  app.play_game = app.ini.GetInt("bwvr", "play_game", 1) != 0;
+  app.can_play = app.play_game && app.ini.GetInt("bwvr", "wine_setup", 1) != 0 &&
+                 android->activity->internalDataPath != nullptr &&
+                 WineRuntime::ApkHasTree(android->activity->assetManager);
+  // play_menu_hold_ms=N (1000 by default): while the game runs, a hold of
+  // the menu button of a controller for N ms shows the menu of the app over
+  // the game. The mod gets the button as always (a press is the menu of the
+  // game). 0: no menu of the app over the game, it comes back when the game
+  // ends.
+  app.play_menu_hold_ms = app.ini.GetInt("bwvr", "play_menu_hold_ms", 1000);
+  if (app.play_menu_hold_ms < 0) app.play_menu_hold_ms = 0;
+  AppLog("game         : play_game=%d, play_menu_hold_ms=%d. %s", app.play_game ? 1 : 0,
+         app.play_menu_hold_ms,
+         app.can_play ? "Play starts the game in Wine"
+                      : "Play saves and does not start the game: the app has no Wine, or "
+                        "play_game=0");
+  app.xr.SetInputLive(input_live || app.can_play);
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
                            kCursorPixels);
 
@@ -596,38 +882,21 @@ void android_main(android_app* android) {
   // The renderer keeps the images and the pipelines of its first device to
   // the end of the process, so it takes one device in a process. The glue
   // code of Android can start android_main again in the same process.
-  static bool renderer_ran = false;
   bool replay = app.ini.GetInt("bwvr", "stream_replay", 0) != 0;
-  app.live = app.ini.GetInt("bwvr", "stream_live", 0) != 0;
-  if (replay && app.live) {
+  const bool live = app.ini.GetInt("bwvr", "stream_live", 0) != 0;
+  if (replay && live) {
     AppLog("replay       : stream_live=1, so no replay of bwvr-stream.bin. The "
            "app plays one stream in a process");
     replay = false;
   }
-  if ((replay || app.live) && renderer_ran) {
-    AppLog("%s : the renderer ran in this process already, and it takes no "
-           "second device. No %s. Start the app again",
-           replay ? "replay      " : "live        ",
-           replay ? "replay" : "live stream, no reader thread and no feed process");
-    replay = false;
-    app.live = false;
-  } else if (replay || app.live) {
-    renderer_ran = true;
-    AppLog("xr           : stream_projection=%d. %s", app.xr.ProjectionOn() ? 1 : 0,
-           app.xr.ProjectionOn()
-               ? "A picture of the renderer with the values of the projection "
-                 "layer of the mod shows in a projection layer, a picture with "
-                 "none on the stereo screen"
-               : "Each picture of the renderer shows on the stereo screen");
-    AppLog("xr           : stream_layers=%d. %s", app.xr.LayersOn() ? 1 : 0,
-           app.xr.LayersOn()
-               ? "The cards, the panel quads and the cut scene window of the mod "
-                 "show as quad layers, as the session of the mod shows them"
-               : "No quad layer of the mod");
-    if (app.xr_on && app.xr.Renderer13()) {
-      vk::External device;
-      app.xr.RendererDevice(&device);
-      vk::UseExternal(device);
+  bool live_on = false;
+  if (replay || live) {
+    if (StartRenderer(&app, replay ? "replay      " : "live        ")) {
+      live_on = live;
+    } else {
+      AppLog("%s : no %s", replay ? "replay      " : "live        ",
+             replay ? "replay" : "live stream, no reader thread and no feed process");
+      replay = false;
     }
   }
   // A TEST AID (stream_replay=1 in bwvr.ini): the stream of the walks in
@@ -640,40 +909,9 @@ void android_main(android_app* android) {
       AppLog("replay       : no picture of the renderer for the session");
     }
   }
-  // THE LIVE STREAM (stream_live=1 in bwvr.ini): a thread reads the frames
-  // of the walks of the mod from the ring bwvr-stream.ring of the game
-  // folder, and at each step the loop below gives the frames that wait to
-  // the renderer (PlayLive, docs/android.md, "The live stream"). stream_live_feed=1 (a test
-  // aid): a child process writes the frames of bwvr-stream-feed.bin into the
-  // ring, as the mod does, one each stream_live_feed_ms.
-  if (app.live) {
-    const std::string ring = app.game.folder + "/bwvr-stream.ring";
-    AppLog("live         : stream_live=1. The app reads the frames of the walks "
-           "from %s", ring.c_str());
-    VkPlatformSetFolder(app.game.folder.c_str());
-    if (app.ini.GetInt("bwvr", "stream_live_feed", 0) != 0) {
-      app.live_reader.StartFeed(ring, app.game.folder + "/bwvr-stream-feed.bin",
-                                app.ini.GetInt("bwvr", "stream_live_feed_ms", 0));
-    }
-    // stream_live_frames=N (3 by default): the newest N frames of the queue
-    // stay whole, and each older frame keeps only its records of state. 0:
-    // up to 64 MB of whole frames wait for the session.
-    const int whole = app.ini.GetInt("bwvr", "stream_live_frames", 3);
-    app.live_whole = whole > 0 ? static_cast<size_t>(whole) : 0;
-    AppLog("live         : stream_live_frames=%d. %s", whole,
-           app.live_whole > 0 ? "The newest frames of the queue stay whole, and "
-                                "an older frame keeps only its records of state"
-                              : "Up to 64 MB of whole frames wait for the session");
-    // stream_live_queue_mb (64 by default): with stream_live_frames > 0 a
-    // queue that passes this limit is cleared, for example while the
-    // session does not run, and the app asks again for the whole state. 0:
-    // no limit.
-    const int queue_mb = app.ini.GetInt("bwvr", "stream_live_queue_mb", 64);
-    const size_t queue_bytes =
-        app.live_whole > 0 ? static_cast<size_t>(queue_mb > 0 ? queue_mb : 0) << 20
-                           : static_cast<size_t>(64u << 20);
-    app.live_reader.Start(ring, app.live_whole, queue_bytes);
-  }
+  // THE LIVE STREAM (stream_live=1 in bwvr.ini, StartLiveReader). "Play"
+  // starts it too.
+  if (live_on) StartLiveReader(&app);
   if (input_live && app.xr_on) {
     const int test_pulse = app.ini.GetInt("bwvr", "input_live_test_pulse", 0);
     app.input_live.Start(app.game.folder + "/bwvr-input.chan",
@@ -711,6 +949,7 @@ void android_main(android_app* android) {
       if (timeout != 0) break;
     }
     if (android->destroyRequested) break;
+    GameTick(&app);
 
     if (app.xr_on) {
       bool quit = false;
@@ -730,6 +969,7 @@ void android_main(android_app* android) {
       if (app.input_live.On()) {
         input_channel::SlotData slot;
         app.xr.InputSlot(&slot);
+        if (app.game_on) play_rules::MaskInput(&slot, app.menu_over_game);
         app.input_live.Write(&slot);
         app.input_live.PlayPulses(&app.xr);
       }
@@ -755,6 +995,7 @@ void android_main(android_app* android) {
   }
   app.input_live.WriteNoInput();
   app.input_live.Stop();
+  if (app.game_on) AppLog("game         : the app ends, so the game ends");
   app.wine.Stop();
   AppLog("app          : the app ends");
   if (app.xr_on) app.xr.Stop();

@@ -23,6 +23,10 @@
     Wine tree the APK has no Wine and targetSdkVersion 32, and the log says
     so.
 
+    THE MOD. An APK with Wine also carries ddraw.dll and openxr_loader.dll
+    of bwvr/build/src/mod/Release (.\dev.ps1 build) as assets/mod, for
+    "Play" (docs/android.md, "Play in the app").
+
 .PARAMETER Abis
     The ABIs to build. arm64-v8a and x86_64 by default.
 
@@ -118,6 +122,23 @@ foreach ($abi in $Abis) {
         Note "Wine tree of ${abi}: none in $wineDir. The APK has no Wine for $abi"
     }
 }
+# THE FILES OF THE MOD (android/src/play_rules.h, kModFiles): the 32 bit
+# ddraw.dll of the build of .\dev.ps1 build and the OpenXR loader that it
+# imports. "Play" puts them into the Wine prefix. Only an APK with Wine
+# needs them.
+$modFiles = @()
+if ($wineAbis.Count -gt 0) {
+    $modBuild = Join-Path $Bwvr 'build\src\mod\Release'
+    New-Item -ItemType Directory -Force -Path (Join-Path $assets 'mod') | Out-Null
+    foreach ($name in @('ddraw.dll', 'openxr_loader.dll')) {
+        $file = Join-Path $modBuild $name
+        if (-not (Test-Path -LiteralPath $file)) { Stop-Android "There is no $file. Run .\dev.ps1 build first." }
+        Copy-Item -LiteralPath $file -Destination (Join-Path $assets "mod\$name")
+        $modFiles += "assets/mod/$name"
+        Note ("the mod: $name, " + (Get-Item -LiteralPath $file).Length + ' bytes, SHA-256 ' +
+            (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant())
+    }
+}
 $targetSdk = '32'
 if ($wineAbis.Count -gt 0) {
     $targetSdk = '28'
@@ -152,7 +173,7 @@ try {
     Run (Join-Path $JavaHome 'bin\jar.exe') (@('uf0M', $base) + $libs)
     # The Wine trees go in compressed (the method "deflate"). The asset
     # manager of Android inflates them as a stream when the app reads them.
-    $wineFiles = @($wineAbis | ForEach-Object { "assets/wine/$_.tar"; "assets/wine/$_.id" })
+    $wineFiles = @($wineAbis | ForEach-Object { "assets/wine/$_.tar"; "assets/wine/$_.id" }) + $modFiles
     if ($wineFiles.Count -gt 0) { Run (Join-Path $JavaHome 'bin\jar.exe') (@('ufM', $base) + $wineFiles) }
 } finally {
     Pop-Location

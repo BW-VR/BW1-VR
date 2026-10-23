@@ -695,6 +695,13 @@ bool XrApp::BeginFrame(XrInput* input) {
     if (XR_SUCCEEDED(xrGetActionStateBoolean(session_, &get, &b))) {
       input->back[h] = b.isActive && b.currentState;
     }
+    if (menu_button_ != XR_NULL_HANDLE) {
+      b = {XR_TYPE_ACTION_STATE_BOOLEAN};
+      get.action = menu_button_;
+      if (XR_SUCCEEDED(xrGetActionStateBoolean(session_, &get, &b))) {
+        input->menu[h] = b.isActive && b.currentState;
+      }
+    }
     XrActionStateVector2f v = {XR_TYPE_ACTION_STATE_VECTOR2F};
     get.action = stick_;
     if (XR_SUCCEEDED(xrGetActionStateVector2f(session_, &get, &v)) && v.isActive) {
@@ -978,7 +985,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     ++screen_frames_;
   }
   // THE MENU AND THE CURSOR, over each layer of the mod.
-  if (frame_.shouldRender && menu_written_) {
+  if (frame_.shouldRender && menu_written_ && menu_shown_) {
     CopyLayer(&menu_);
     XrCompositionLayerQuad& q = quads[used++];
     q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;

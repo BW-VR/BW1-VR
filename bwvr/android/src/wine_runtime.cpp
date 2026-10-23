@@ -18,6 +18,7 @@
 
 #include "app_log.h"
 #include "game_folder.h"
+#include "play_rules.h"
 
 extern char** environ;
 
@@ -147,18 +148,154 @@ bool WineRuntime::Fault(const std::string& text) {
 }
 
 void WineRuntime::Stop() {
-  // The thread stops between its steps, and a program that it waits for
-  // gets SIGKILL. wineserver -k then ends each other process of Wine, also
-  // the ones of an earlier start of the app.
+  // The threads stop between their steps, and a program that one waits for
+  // gets SIGKILL (also the game). wineserver -k then ends each other process
+  // of Wine, also the ones of an earlier start of the app.
   // With wine_setup=0 (no thread) the app touches no part of Wine.
   stop_ = true;
+  game_stop_ = true;
   if (!thread_.joinable()) return;
   thread_.join();
+  if (game_thread_.joinable()) game_thread_.join();
   if (Exists(paths_.server)) {
     double ms = 0.0;
-    const int code = Spawn({paths_.server, "-k"}, 20, &ms, false);
+    const int code = Spawn({paths_.server, "-k"}, 20, &ms, nullptr);
     AppLog("wine         : wineserver -k ended with %d after %.0f ms", code, ms);
   }
+}
+
+bool WineRuntime::ApkHasTree(AAssetManager* assets) {
+  bool found = false;
+  const std::string id =
+      wine_rules::Trim(ReadAsset(assets, std::string("wine/") + Abi() + ".id", &found));
+  return found && !id.empty();
+}
+
+bool WineRuntime::StartGame(const Game& game) {
+  if (!ready_) return false;
+  {
+    std::lock_guard<std::mutex> hold(lock_);
+    if (state_ == GameState::kStarting || state_ == GameState::kRunning) return false;
+    state_ = GameState::kStarting;
+    code_ = 0;
+    why_.clear();
+  }
+  // The thread of the game before has ended (kEnded or kIdle).
+  if (game_thread_.joinable()) game_thread_.join();
+  game_stop_ = false;
+  game_thread_ = std::thread(&WineRuntime::RunGame, this, game);
+  return true;
+}
+
+WineRuntime::GameState WineRuntime::State(int* exit_code, std::string* why) {
+  std::lock_guard<std::mutex> hold(lock_);
+  if (exit_code != nullptr) *exit_code = code_;
+  if (why != nullptr) *why = why_;
+  return state_;
+}
+
+void WineRuntime::StopGame() { game_stop_ = true; }
+
+void WineRuntime::EndGame(int code, const std::string& why) {
+  std::lock_guard<std::mutex> hold(lock_);
+  state_ = GameState::kEnded;
+  code_ = code;
+  why_ = why;
+}
+
+// The files of the mod from the APK into the 32 bit system folder of the
+// prefix, at each start of the game, so the game has the mod of this APK.
+bool WineRuntime::PutModFiles() {
+  const std::string folder = play_rules::ModFolder(paths_.prefix);
+  if (!MakeDirs(folder)) return Fault("cannot make " + folder);
+  for (const char* name : play_rules::kModFiles) {
+    const std::string asset = std::string(play_rules::kModAssets) + "/" + name;
+    bool found = false;
+    const std::string bytes = ReadAsset(assets_, asset, &found);
+    if (!found || bytes.empty()) {
+      AppLog("game         : the APK has no %s", asset.c_str());
+      return false;
+    }
+    const std::string to = folder + "/" + name;
+    const std::string tmp = to + ".tmp";
+    const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    bool ok = fd >= 0 && write(fd, bytes.data(), bytes.size()) == static_cast<ssize_t>(bytes.size());
+    if (fd >= 0 && close(fd) != 0) ok = false;
+    if (!ok || rename(tmp.c_str(), to.c_str()) != 0) {
+      AppLog("game         : cannot write %s (errno %d)", to.c_str(), errno);
+      return false;
+    }
+    AppLog("game         : %s of the APK (%zu bytes) is in %s", name, bytes.size(), folder.c_str());
+  }
+  return true;
+}
+
+void WineRuntime::RunGame(Game game) {
+  if (!PutModFiles()) {
+    EndGame(-1, "the files of the mod are not in the prefix");
+    return;
+  }
+  // The registry of the game, at each start, so a change of the menu counts.
+  const std::string folder = play_rules::AppFolder(paths_.prefix);
+  const std::string reg_file = folder + "/" + play_rules::kRegFile;
+  if (!MakeDirs(folder) ||
+      !WriteTextFile(reg_file, play_rules::GameRegistry(game.width, game.height))) {
+    AppLog("game         : cannot write %s", reg_file.c_str());
+    EndGame(-1, "the registry file of the game cannot be written");
+    return;
+  }
+  double ms = 0.0;
+  const int reg = Spawn({paths_.loader, "reg", "import", play_rules::kRegFileWine}, 120, &ms,
+                        &game_stop_);
+  AppLog("game         : reg import of %s ended with %d after %.1f s: GameDir %s, ScreenW %d, "
+         "ScreenH %d, FullScreen 0, ScreenD 32, and the files of the mod as KnownDLLs",
+         play_rules::kRegFileWine, reg, ms / 1000.0, play_rules::kGameDir, game.width,
+         game.height);
+  if (game_stop_) {
+    EndGame(-1, "Quit game");
+    return;
+  }
+  if (reg != 0) {
+    EndGame(reg, "the registry of the game is not in the prefix. See wine.log");
+    return;
+  }
+  // wineboot makes the sections of the known DLLs one time for each start of
+  // the wine server, from the registry at that time. The server of reg
+  // import made them before the import, so the game must start a new
+  // server: wait until this one ends.
+  double wait_ms = 0.0;
+  const int wait = Spawn({paths_.server, "-w"}, 60, &wait_ms, &game_stop_);
+  AppLog("game         : wineserver -w ended with %d after %.1f s, so the game starts a new "
+         "server, which makes the known DLLs with the values of the import",
+         wait, wait_ms / 1000.0);
+  if (game_stop_) {
+    EndGame(-1, "Quit game");
+    return;
+  }
+  if (Exists(game_ + "/ddraw.dll")) {
+    AppLog("game         : the game folder has a ddraw.dll. Wine loads the ddraw.dll of the "
+           "prefix in its place: it is a known DLL");
+  }
+  {
+    std::lock_guard<std::mutex> hold(lock_);
+    state_ = GameState::kRunning;
+  }
+  const std::vector<std::string> env = play_rules::GameEnvironment(env_);
+  const std::vector<std::string> args = play_rules::GameArgs(paths_.loader, game.new_game);
+  AppLog("game         : start %s%s in Wine, in the folder %s, with %s", play_rules::kGameExe,
+         game.new_game ? " -NEWGAME" : "", game_.c_str(), play_rules::kGameOverrides);
+  const int code = Spawn(args, 0, &ms, &game_stop_, game_, &env);
+  const bool quit = game_stop_;
+  AppLog("game         : runblack.exe ended with %d after %.1f s%s", code, ms / 1000.0,
+         quit ? " (Quit game)" : "");
+  if (quit && !stop_) {
+    // The other processes of Wine of the game (the server, services.exe and
+    // the others) end with it.
+    double kill_ms = 0.0;
+    const int k = Spawn({paths_.server, "-k"}, 20, &kill_ms, nullptr);
+    AppLog("game         : wineserver -k ended with %d after %.0f ms", k, kill_ms);
+  }
+  EndGame(code, quit ? "Quit game" : "the game ended");
 }
 
 void WineRuntime::Run() {
@@ -212,6 +349,9 @@ void WineRuntime::Run() {
   SetStatus("Wine ready.");
   AppLog("wine         : Wine is ready");
   if (options_.probe && !stop_) Probe();
+  // The game starts only now: the probe and the game must not write wine.log
+  // at one time.
+  ready_ = true;
 }
 
 bool WineRuntime::Unpack(const std::string& apk_id) {
@@ -337,11 +477,11 @@ bool WineRuntime::MakePrefix(const std::string& tree_id) {
     }
   }
   double boot_ms = 0.0, wait_ms = 0.0;
-  const int boot = Spawn({paths_.loader, "wineboot", "--init"}, 900, &boot_ms);
+  const int boot = Spawn({paths_.loader, "wineboot", "--init"}, 900, &boot_ms, &stop_);
   AppLog("wine         : wineboot --init ended with %d after %.1f s", boot, boot_ms / 1000.0);
   if (stop_) return false;
   // The wine server writes the registry when its last process ends.
-  const int wait = Spawn({paths_.server, "-w"}, 300, &wait_ms);
+  const int wait = Spawn({paths_.server, "-w"}, 300, &wait_ms, &stop_);
   AppLog("wine         : wineserver -w ended with %d after %.1f s", wait, wait_ms / 1000.0);
   if (boot != 0) return Fault("wineboot ended with " + std::to_string(boot) + ". See wine.log");
   if (!Exists(paths_.prefix + "/system.reg")) return Fault("wineboot made no system.reg");
@@ -378,7 +518,8 @@ void WineRuntime::Probe() {
   unlink(result.c_str());
   SetStatus("Wine ready. The test program runs...");
   double ms = 0.0;
-  const int code = Spawn({paths_.loader, std::string("G:\\") + wine_rules::kProbeExe}, 600, &ms);
+  const int code =
+      Spawn({paths_.loader, std::string("G:\\") + wine_rules::kProbeExe}, 600, &ms, &stop_);
   AppLog("wine         : wine_probe=1. %s ended with %d after %.1f s", wine_rules::kProbeExe,
          code, ms / 1000.0);
   const std::string text = ReadTextFile(result);
@@ -395,13 +536,16 @@ void WineRuntime::Probe() {
 }
 
 int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, double* ms,
-                       bool stoppable) {
+                       const std::atomic<bool>* stop, const std::string& cwd,
+                       const std::vector<std::string>* env) {
   const double start = NowMs();
   *ms = 0.0;
   std::vector<char*> argv, envp;
   for (const std::string& s : args) argv.push_back(const_cast<char*>(s.c_str()));
   argv.push_back(nullptr);
-  for (const std::string& s : env_) envp.push_back(const_cast<char*>(s.c_str()));
+  for (const std::string& s : env != nullptr ? *env : env_) {
+    envp.push_back(const_cast<char*>(s.c_str()));
+  }
   envp.push_back(nullptr);
   // The highest file descriptor that the child closes. getrlimit is not a
   // call for the child of a process with threads, so it comes first.
@@ -431,6 +575,7 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
   // writes its errno into it, so the log can say why.
   int pipe_fd[2] = {-1, -1};
   if (pipe2(pipe_fd, O_CLOEXEC) != 0) pipe_fd[0] = pipe_fd[1] = -1;
+  const char* dir = cwd.empty() ? nullptr : cwd.c_str();
   const pid_t pid = fork();
   if (pid == 0) {
     // THE CHILD of a process with threads: only calls that are safe after
@@ -457,6 +602,9 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
     for (int fd = 3; fd < top; ++fd) {
       if (fd != pipe_fd[1]) syscall(__NR_close, fd);
     }
+    // The current folder of the program. Wine gives the program the drive
+    // and the folder of a drive that holds it (G: for the game folder).
+    if (dir != nullptr && chdir(dir) != 0) _exit(125);
     execve(argv[0], argv.data(), envp.data());
     const int e = errno;
     if (pipe_fd[1] >= 0 && write(pipe_fd[1], &e, sizeof(e)) < 0) _exit(126);
@@ -493,14 +641,18 @@ int WineRuntime::Spawn(const std::vector<std::string>& args, int timeout_s, doub
       *ms = NowMs() - start;
       return -1;
     }
-    if (stoppable && stop_) {
-      AppLog("wine         : the app ends, so it stops %s", argv[0]);
+    if (stop != nullptr && *stop) {
+      if (stop_) {
+        AppLog("wine         : the app ends, so it stops %s", argv[0]);
+      } else {
+        AppLog("wine         : Quit game stops %s", argv[0]);
+      }
       kill(pid, SIGKILL);
       waitpid(pid, &status, 0);
       *ms = NowMs() - start;
       return -1;
     }
-    if (NowMs() - start > timeout_s * 1000.0) {
+    if (timeout_s > 0 && NowMs() - start > timeout_s * 1000.0) {
       AppLog("wine         : %s did not end in %d s. The app stops it", argv[0], timeout_s);
       kill(pid, SIGKILL);
       waitpid(pid, &status, 0);

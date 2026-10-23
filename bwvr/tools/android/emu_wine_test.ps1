@@ -37,8 +37,10 @@
          DirectDraw, Direct3D, OpenGL or Vulkan of Wine, and a TrueType font
          (Tahoma) with glyphs.
       6. Checks that no process of Wine is left after the test program,
-         ends the app with the back key (wineserver -k), and checks logcat
-         (no crash).
+         and ends the app with the back key (wineserver -k).
+      7. A start with wine_setup=0 in bwvr.ini: the log line, no setup, no
+         wineserver -k at the end, no wine.log and no process of Wine. Then
+         the test checks logcat (no crash).
 
     The results go to bwvr/out/android/emu-wine-test.
 
@@ -234,14 +236,14 @@ try {
     $prefixDir = "/data/data/$Package/files/prefix"
     $prefixList = AdbOut @('shell', 'ls', '-la', $prefixDir)
     Set-Content -LiteralPath (Join-Path $Out 'prefix-after-stop.txt') -Value $prefixList -Encoding utf8
-    $hadReg = $prefixList -match '\ssystem\.reg\r?\n'
+    $hadReg = $prefixList -match '\ssystem\.reg(\r?\n|$)'
     Write-Host ("   the stopped prefix " + $(if ($hadReg) { 'has' } else { 'has no' }) + ' system.reg of wineboot')
     Expect ($prefixList -match 'user\.reg' -and $prefixList -notmatch 'bwvr-prefix-id\.txt') 'the stopped prefix has no marker'
     if (-not $hadReg) {
         Adb @('shell', "touch $prefixDir/system.reg && chown ${user}:${user} $prefixDir/system.reg")
     }
     $prefixList = AdbOut @('shell', 'ls', '-la', $prefixDir)
-    Expect ($prefixList -match '\ssystem\.reg\r?\n') 'the prefix with no marker has a system.reg before the next start'
+    Expect ($prefixList -match '\ssystem\.reg(\r?\n|$)') 'the prefix with no marker has a system.reg before the next start'
     Adb @('unroot')
     Start-Sleep -Seconds 3
     Adb @('wait-for-device')
@@ -353,6 +355,31 @@ try {
         $left = @(WineProcesses $user)
         Expect ($left.Count -eq 0) ('no process of Wine is left after the end of the app' + $(if ($left.Count) { ': ' + ($left -join '; ') } else { '' }))
     }
+    # 5. wine_setup=0: the app touches no part of Wine. No thread, no
+    # wineserver -k at the end, and no wine.log.
+    Say 'A start with wine_setup=0'
+    Adb @('shell', 'am', 'force-stop', $Package)
+    $iniOff = Join-Path $Out 'bwvr.ini.off'
+    Set-Content -LiteralPath $iniOff -Encoding ascii -Value @('[bwvr]', 'wine_setup=0', 'menu_capture=1')
+    Adb @('push', $iniOff, "$AppDir/game/bwvr.ini")
+    Adb @('shell', 'rm', '-f', "$AppDir/wine.log")
+    Adb @('shell', 'am', 'start', '-W', '-n', "$Package/android.app.NativeActivity")
+    $log3 = WaitLog @('canvas       : a picture of 1600 by 1200') 120
+    Start-Sleep -Seconds 4
+    $end3 = EndWithBack
+    $log3 = $end3.Log
+    Set-Content -LiteralPath (Join-Path $Out 'bwvr-quest-start3.log') -Value $log3 -Encoding utf8
+    Expect ($log3 -match 'wine         : wine_setup=0\. The app does not set up Wine') 'wine_setup=0: the log says that the app does not set up Wine'
+    Expect ($log3 -notmatch 'wine         : the APK has the Wine tree' -and $log3 -notmatch 'wine         : Wine is ready') 'wine_setup=0: no setup thread'
+    if ($end3.Ended) {
+        Expect ($log3 -match 'app          : the app ends' -and $log3 -notmatch 'wineserver -k') 'wine_setup=0: the end of the app runs no wineserver -k'
+    }
+    $wineLogThere = (AdbOut @('shell', 'ls', "$AppDir/wine.log")).Trim()
+    Expect ($wineLogThere -match 'No such file') ("wine_setup=0: no wine.log in the folder of the app ($wineLogThere)")
+    Start-Sleep -Seconds 3
+    $left = @(WineProcesses $user)
+    Expect ($left.Count -eq 0) ('wine_setup=0: no process of Wine' + $(if ($left.Count) { ': ' + ($left -join '; ') } else { '' }))
+
     Write-Host ('   the back key ended the app ' + @($BackEnded | Where-Object { $_ }).Count + ' of ' + $BackEnded.Count + ' times')
 
     $logcat = AdbOut @('logcat', '-d', '-v', 'brief')

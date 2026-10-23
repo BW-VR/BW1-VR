@@ -63,8 +63,13 @@ Summary:
   start the app unpacks the tree of its ABI into its internal folder, makes
   a Wine prefix and links the drive `G:` to the game folder. In the emulator
   it runs a 32 bit test program in Wine (see "Wine in the app").
-- **The app cannot start the game yet** (see "What the app cannot do
-  yet").
+- **Play.** "Play in VR" and "Play, new game" write the keys of a run into
+  `bwvr.ini`, put the `ddraw.dll` of the mod from the APK into the prefix,
+  write the registry of the game into the prefix and start `runblack.exe`
+  in Wine. The mod has no Vulkan device, gives its frames through the live
+  stream and takes the head and the hands from the input channel. The menu
+  button shows the menu over the game with "Quit game" (see "Play in the
+  app").
 
 ## Source files of this area
 
@@ -120,6 +125,9 @@ Summary:
 | `tools/android/pack_wine.sh` | The Wine tree of the APK for each ABI, with its checks |
 | `tools/android/build_box64.ps1` | The build of Box64 and of `wowbox64.dll` |
 | `tools/android/emu_wine_test.ps1` | The test of Wine in the app in the Android emulator |
+| `android/src/play_rules.h` | The rules of "Play": the keys of a run, the files of the mod, the registry of the game, the environment and the command line of the game, the input of the mod while the menu shows over the game. No Android code |
+| `test/controller_math/play_rules_checks.h` | The math checks of `play_rules.h` and of "Quit game" in the menu |
+| `tools/android/emu_game_test.ps1` | The game from the menu of the app in the Android emulator, with the test runtime |
 
 ## Build the APK
 
@@ -230,7 +238,12 @@ shadow, as the text of the game has.
 - **The help.** Below the rows, the help text of the row with the highlight,
   the same text as the tooltip of the launcher. The help of a group names
   the settings on its page.
-- **The status line.** At the bottom: the game folder, the runtime, "Saved."
+- **The status line.** At the bottom: the game folder, the runtime, "Saved.",
+  the setup of Wine, and the game: "Starting the game (14:03:22)...", "The
+  game runs (started 14:03:22).", "The game ended with the exit code N
+  (14:10:05, Quit game)." or why "Play" did not start the game.
+- **While the game runs** the main page has "Quit game" in place of "Play in
+  VR" and "Play, new game" (see "Play in the app").
 
 The rows are the rows of `kSettings` in `settings_table.h` with the renderer
 Vulkan. The rows that only the renderer Direct3D 9 uses (`d3d9_backend`,
@@ -263,6 +276,170 @@ has the ray. The cursor is a small glow on the menu where the ray hits it.
 of the D-pad or A selects. Back, Esc or B goes back, and on the main page
 Back closes the app. A touch selects the row under it, and a touch on the
 bar of a slider sets its value.
+
+## Play in the app
+
+"Play in VR" and "Play, new game" start the game in Wine with the mod of the
+APK as its DirectDraw (`main.cpp`, `Play`, the rules in `play_rules.h`, the
+thread in `wine_runtime.cpp`, `RunGame`).
+
+**What "Play" needs.** `runblack.exe` of v1.42 in the game folder, an APK
+with Wine for the ABI and `wine_setup=1`, a setup of Wine that ended with
+"Wine is ready", an OpenXR session, and a device of the session with Vulkan
+1.3 for the renderer. With one of them missing "Play" saves, starts
+nothing, and the status line says why. `play_game=0` in `bwvr.ini`: "Play"
+saves and starts nothing (no game in Wine).
+
+**The steps of "Play":**
+
+1. The save of the menu, as on the PC.
+2. The keys of a run go into `bwvr.ini`, after the save, at each start: a
+   save deletes the retired keys (`kRetiredKeys`), and `vk_stream_live` is
+   one. Only the keys whose default is not the value of a run:
+   `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1` (the mod)
+   and `stream_live=1`, `input_live=1` (the app). The save writes
+   `vulkan_strict=1` and `backend=vulkan` itself. `stream_projection` and
+   `stream_layers` have 1 as the default, and "Play" does not write them.
+   `ui_panel=1`: with `vk_device=0` the help text needs the panel quads (see
+   "No Vulkan device of the mod").
+3. The live stream and the input channel start in this process, when the
+   start of the app did not start them. A session takes its actions one
+   time, so with Wine in the APK (and `play_game=1`) the session has the
+   actions of the mod from its start (`SetInputLive`).
+4. The thread of the game puts `ddraw.dll` and `openxr_loader.dll` of the
+   APK (`assets/mod`, the build of `.\dev.ps1 build`) into
+   `drive_c/windows/syswow64` of the prefix, the 32 bit system folder. The
+   mod needs no other file: with `vulkan_strict=1` it loads no dxwrapper,
+   and it loads `d3d11.dll` and `dxgi.dll` only at a first call, which the
+   renderer Vulkan does not make. Not in the game folder: the DLL search of
+   Windows looks first in the folder of the program, so a `ddraw.dll` there
+   (the mod of a PC install) would come first. The registry makes both
+   files known DLLs, and Wine maps a known DLL from the system folder
+   whatever the folder of the program has (`create_known_dlls` of wineboot,
+   `open_known_dll` of ntdll).
+5. The registry of the game, at each start, so a change of the menu
+   counts: `reg import` of `C:\bwvr\game.reg` (`GameRegistry`). Only what
+   the game needs: `GameDir` = `G:\` (the game makes it its current folder
+   after its start) under `HKCU\Software\Lionhead Studios Ltd\Black &
+   White`, and under `...\BWSetup` `ScreenW` and `ScreenH`
+   (`Menu::RenderSize`), `FullScreen` 0 and `ScreenD` 32, each a REG_DWORD as
+   the install of the game writes it. Then the values `bwvr_ddraw` and
+   `bwvr_openxr_loader` of `HKLM\System\CurrentControlSet\Control\Session
+   Manager\KnownDLLs`. No value of a profile. The registry of the PC is not
+   a source of the app: these are the values of the launcher of the PC.
+   Then `wineserver -w`: wineboot makes the sections of the known DLLs one
+   time for each start of the wine server, from the registry of that time,
+   and the server of `reg import` made them before the import. So the game
+   starts a new server.
+6. `wine G:\runblack.exe` (with `-NEWGAME` for "Play, new game"), with the
+   game folder as the current folder and `WINEDLLOVERRIDES=mscoree,mshtml=;
+   ddraw=n`: the DirectDraw of the game is a native DLL, and the tree has no
+   builtin one.
+
+**While the game runs** the menu quad and the cursor do not go out, and the
+app shows the frames of the live stream in the projection layer and the
+quad layers. A hold of the menu button of the left controller for
+`play_menu_hold_ms` (1000 by default) shows the menu over the game, and a
+press of the menu button, or B or Y on the main page, hides it. The mod gets
+each press of the menu button as always: with `button_layout=1` it is the
+one button of the menu of the game (`controllers.md`, "Esc"), so a hold
+opens the menu of the game under the menu of the app too. While the menu
+shows over the game, the mod gets no focus and no active hand through the
+input channel, as with no input focus of the session (`MaskInput`).
+`play_menu_hold_ms=0`: no menu of the app over the game, and the menu
+comes back only when the game ends. With no headset the key Menu shows and hides the menu, and Back shows
+it. "Quit game" stops `runblack.exe` (SIGKILL) and then each process of
+Wine (`wineserver -k`). The game does not save. When the game ends, the
+menu comes back with the exit code in the status line, and the last
+picture of the game goes out of the layers. At the end of the app a game
+that runs ends with it.
+
+**The log.** Each step has a line `game` in `bwvr-quest.log`: the files of
+the mod, the end of `reg import`, the command line, the first frame of the
+game and its time after "Play", the frame rate of the game each 10 s (from
+the frame numbers of the mod in the live stream), the menu over the game,
+Quit game, and the exit code. The log of the mod is `bwvr.log` in the game
+folder, as on the PC, and `wine.log` in the folder of the app has the
+output of Wine.
+
+**The test in the emulator** (`emu_game_test.ps1`). The AVD `bwvr_xr_test`
+with the test runtime (a head that stands still), `-gpu host` and 4096 MB.
+The test copies the game folder of `local/game-path.txt` into the game
+folder of the app (1032 files, 548.8 MB): with no `Profiles`, no Creature of
+a profile (`Scripts\CreatureMind\*.erc`), no `MemoryLeaks.txt` and no
+`bwvr.ini` or log of the PC, and with the `ddraw.dll` of the mod of the PC
+in it. It writes `resolution_pct=50` (a render of 1380 by 1104) and
+`wine_debug=warn+virtual`. The runtime points at "Play, new game" when the
+log says "Wine is ready", holds the menu button for 90 frames after the
+measure, points at "Quit game", then does the same with "Play in VR". At
+its end the test deletes the app and the copy. What it shows:
+
+- "Play" wrote the keys of the run, and `bwvr.ini` at the start of the game
+  has `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1`,
+  `stream_live=1`, `input_live=1`, `vulkan_strict=1` and `backend=vulkan`.
+- `reg import` took 1.8 s, and `wineserver -w` 4.2 to 4.5 s, so the game
+  starts about 6.3 s after "Play".
+- The log of the mod has the build of the APK ("1.2.0 (build ...)"), not
+  the build of the `ddraw.dll` of the game folder: the known DLL comes
+  first. It has "vk_device=0. The mod makes no Vulkan instance and no
+  device", `vulkan_strict=1`, "xr_input=1" with the channel of the app,
+  and the first slot of the app.
+- With `-NEWGAME` and with no word the same: the logo screens (6907 and
+  6913 frames of the game), the video before the intro (2515 frames, about
+  100 s), then the game waits in a dialog box at frame 0 of the
+  controllers. A game folder with no profile gets the dialog of a new
+  profile (the class `NewProfileBox` of `runblack.exe`). The live stream
+  has no frame there: the mod starts a frame of the stream in the frame of
+  the scene (`stereo.cpp`), and the logos, the video and this dialog come
+  before it. So the app shows nothing in the headset while the menu is
+  hidden, the ring file is not made, and no picture of the game goes out.
+  `runblack.exe` takes one CPU in the dialog (97.2 and 97.1 percent in 31
+  s, `wineserver` 2.7, the app 1.1).
+- A hold of the menu button for 90 frames showed the menu over the game,
+  and the trigger on "Quit game" stopped `runblack.exe` (`-1`, SIGKILL)
+  after 401.7 s and 401.3 s. `wineserver -k` ended with 0 after 78 and 76
+  ms, the menu came back with "The game ended with the exit code -1 (...,
+  Quit game).", and no process of Wine stayed.
+- The test runs 85 checks, and 15 fail: each check of a frame, of the
+  ring, of the pictures of the game and of the frame rate, and the fault
+  of the test runtime for the read back of the eyes of a frame with no
+  projection layer.
+
+**The sound.** Wine has no audio driver on Android: `mmdevapi` gives "No
+driver from L"pulse,alsa,oss,coreaudio" could be initialized". The game
+does not stop for it. QMixer starts ("QMixer starts: 22050 Hz, 22
+channels") and gives no block to the wave device ("QMixer gave no block to
+the wave device in 15 s"), and the videos play with no sound.
+
+**The null display driver.** With `Graphics` = `null` Wine runs
+`explorer.exe` for the desktop. In the source of Wine 11.0
+(`dlls/win32u/driver.c`) the null driver makes each window
+(`nulldrv_CreateWindow` gives TRUE), gives it no surface of its own
+(`nulldrv_CreateWindowSurface` gives FALSE), and has no events of its own
+(`nulldrv_ProcessEvents` gives FALSE): no input of a mouse or a keyboard
+comes through it. The messages of activation, focus and size come from
+`win32u` itself, as with each driver. The game makes its window and draws
+through the mod, which shows nothing in the window with `vk_device=0`. The
+game does not pause: the logos and the video ran to their end, and the game
+takes a whole CPU in the dialog. The messages that the window of the game
+gets are not in a log yet.
+
+**The noexec storage:** see "Wine in the app", the patch 0002.
+
+**Not shown yet:** a frame of the game in Wine (the ring, the projection
+layer and the quad layers of a game in Wine, the time from "Play" to the
+first frame, the frame rate and the pace of the frames with
+`vk_device=0`), a game with a profile and a test save in the emulator, and
+each step in a headset.
+
+**Known limits:**
+
+- The live stream has no frame before the first frame of the scene: the
+  logos, the videos and a dialog at frame 0 of the controllers (the dialog
+  of a new profile) do not show in the headset. A player with no profile in
+  the game folder sees nothing while the menu of the app is hidden.
+- "Quit game" does not save the game.
+- With `vk_device=0` and no frame of the scene the game takes a whole CPU.
 
 ## The session
 
@@ -323,15 +500,19 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
 
 ## Test the APK
 
-1. **With no device** (`check_apk.ps1`, 60 checks with both Wine trees):
+1. **With no device** (`check_apk.ps1`, 64 checks with both Wine trees):
    the signature, the
    manifest (the package, the SDK levels, the categories of an immersive app
    of Meta and of OpenXR, the permissions and the queries of the loader, the
    headsets of Meta, no Java code), the libraries of both ABIs (stored,
    on pages of 16 KB, LOAD segments of 16 KB, no `libc++_shared.so`), and
    that the APK has no other file than the license texts
-   (`assets/licenses/`) and the Wine trees (`assets/wine/`). So no file of
-   the game can be in it. For each Wine tree: a build id, the compression,
+   (`assets/licenses/`), the Wine trees (`assets/wine/`) and the files of
+   the mod (`assets/mod/ddraw.dll` and `openxr_loader.dll`). So no file of
+   the game can be in it. The files of the mod have the SHA-256 of the
+   files of `bwvr/build/src/mod/Release` (`.\dev.ps1 build`), and each is a
+   PE file for 32 bit x86. An APK with no Wine has none of them. For each
+   Wine tree: a build id, the compression,
    the loader, `wineserver`, `ntdll` of i386 and of the ABI, the CPU DLL of
    the ABI in the tree and in `wine.inf`, `libfreetype.so`, `tahoma.ttf`,
    none of the DLLs that stay out, and the license texts of Wine, FreeType
@@ -471,8 +652,13 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    crash, and each picture against the picture of the PC (the pass of step
    4). The results are in `bwvr/out/android/emu-live-test`.
 
-   **Wine in the emulator** (`emu_wine_test.ps1`, 51 checks): see "Wine in
-   the app". The results are in `bwvr/out/android/emu-wine-test`.
+   **Wine in the emulator** (`emu_wine_test.ps1`): see "Wine in the app".
+   The results are in `bwvr/out/android/emu-wine-test`.
+
+   **The game from the menu in the emulator** (`emu_game_test.ps1`, it
+   needs the game): see "Play in the app". The results are in
+   `bwvr/out/android/emu-game-test`, with pictures of the game, so they stay
+   on the PC. `emu_all.ps1` does not run it.
 
    `emu_all.ps1 -Stream <file> -Reference <desk folder> -Live <desk folder>`
    runs the tests 2, Wine, 3 (plain and with `-Stream -Gpu host`), 4 and 5
@@ -792,9 +978,11 @@ APK", step 5), and `emu_xr_test.ps1 -Live` in a session of the test runtime
 with one frame each 14 ms (step 3). In the emulator the four pictures of frame 2996 are the same
 as the pictures of the PC, to the byte.
 
-**Not shown yet:** the ring under Wine and Box64 in the headset (the
-mapping of a real file by Wine and by the app, and the barriers of Box64),
-and the frame rate of the live stream in a headset.
+**Not shown yet:** the ring under Wine and Box64 (the mapping of a real
+file by Wine and by the app, and the barriers of Box64), and the frame rate
+of the live stream in a headset. With the game in Wine in the emulator the
+mod made no ring: the game did not come to its first frame of the scene
+("Play in the app").
 
 **Known limits:**
 
@@ -928,9 +1116,14 @@ the build before. `xr_input` and `input_live` have no test key: the source
 of the input is chosen at the start, and with `xr_input=1` the mod starts
 no session.
 
-**Not shown yet:** the channel under Wine and Box64 in the headset (the
-mapping of a real file by Wine and by the app, and the barriers of Box64),
-and the input of a real headset through the channel.
+In the emulator with the game in Wine (x86_64, no Box64, `emu_game_test.ps1`)
+the mod maps the channel that the app made and reads the slots of the test
+runtime ("xr input : the first slot of the app ..., eyes valid, focus yes,
+profiles "oculus/touch_controller" and "oculus/touch_controller", the
+headset asks for 2064 by 2208, display period 13.89 ms").
+
+**Not shown yet:** the channel under Box64 in the headset (the barriers of
+Box64), and the input of a real headset through the channel.
 
 **Known limits:**
 
@@ -1237,8 +1430,8 @@ through the Vulkan of Wine. So the mod has the key `vk_device` in
 
 The key is not a row of `settings_table.h` and not a retired key, so a save
 of the launcher and of the menu keeps it as it is (the math test checks the
-save of the menu). The app does not write it yet, because it does not start
-the game yet. `backend.md`, "No Vulkan device of the mod", has what each
+save of the menu). "Play" writes `vk_device=0` ("Play in the app").
+`backend.md`, "No Vulkan device of the mod", has what each
 reader of a picture of the renderer gets with `vk_device=0`.
 
 **The stream is the same.** `vk_device` is not an option of the stream, and
@@ -1275,13 +1468,19 @@ two captures differ by at most 0.003 percent of their pixels by more than
   CPU can, faster than the app shows them. The live stream then has more
   frames than the app plays, and the app skips the walks of the others.
 
-**Not shown yet:** the run with the game in Wine with `vk_device=0`.
+In Wine in the emulator (`emu_game_test.ps1`, "Play in the app") the mod
+logs `vk_device=0` and makes no Vulkan instance and no device. Wine has no
+`vulkan-1.dll`.
+
+**Not shown yet:** a frame of the game in Wine with `vk_device=0` (the test
+game waits in the dialog of a new profile before its first frame), and so
+the frame rate of the game and the pace of its frames.
 
 ## Wine in the app
 
 The APK carries Wine 11.0 in the WoW64 mode, one tree for each ABI, and the
 app sets it up at its start. It starts Windows programs in Wine as child
-processes. It does not start the game yet ("What the app cannot do yet").
+processes: the test program, and the game ("Play in the app").
 
 **The two builds** (`bwvr/tools/android/build_wine.sh <work folder> <abi>`,
 in a Linux of WSL2, see the head of the script for the work folder):
@@ -1312,7 +1511,13 @@ shared storage lose it. The app alone shows it in the emulator: an `open`
 of the game folder, `fstatat` and `fstatfs` work, and the ioctl stops the
 daemon. With the patch Wine makes no such ioctl on a FUSE file system,
 which has no casefold flag. Not known: if the FUSE daemon of the Quest has
-the same fault.
+the same fault. `0002-ntdll-read-image-sections-on-noexec-fs.patch`: the
+shared storage has `noexec`. The `mmap` of a PE file there works, but the
+`mprotect` of a code section to `PROT_EXEC` fails, so with no patch the game
+cannot run from the game folder (see "The noexec storage" in "Play in the
+app"). With the patch `map_image_into_view` asks `fstatvfs` for
+`ST_NOEXEC`, and then it reads each section of the image into memory, as
+Wine does for a file on a removable medium.
 Wine for Android installs `bin` and `lib` into a folder of the ABI of
 Android (`arm64-v8a`, `x86_64`) beside `share`, and its loader is
 `lib/wine/<arch>-unix/wine`, in the folder of `ntdll.so`.
@@ -1345,13 +1550,14 @@ links (`pack_wine.sh` checks it), and the app takes none from the tar file.
 
 | Tree | Files | Bytes | In the APK |
 | --- | --- | --- | --- |
-| install of `x86_64` | | 514,210,617 | |
-| tree of `x86_64` | 1589 | 359,869,009 | `assets/wine/x86_64.tar`, 360,744,960 bytes, compressed |
-| install of `aarch64` | | 810,645,019 | |
-| tree of `arm64-v8a` | 1587 | 632,448,745 | `assets/wine/arm64-v8a.tar`, 633,323,520 bytes, compressed |
+| install of `x86_64` | | 514,210,921 | |
+| tree of `x86_64` | 1589 | 359,869,281 | `assets/wine/x86_64.tar`, 360,744,960 bytes, compressed |
+| install of `aarch64` | | 810,645,299 | |
+| tree of `arm64-v8a` | 1587 | 632,448,993 | `assets/wine/arm64-v8a.tar`, 633,323,520 bytes, compressed |
 
 The PE DLLs of ARM64 have the file alignment of 64 KB, so the ARM64 tree
-is larger. With both trees the APK is 204.0 MB (213,906,433 bytes).
+is larger. With both trees and the files of the mod the APK is 205.3 MB
+(215,270,541 bytes).
 
 **The APK.** `build_apk.ps1` puts the tree of each ABI that has one into
 the APK as `assets/wine/<abi>.tar` (the method deflate) and
@@ -1443,59 +1649,76 @@ what `LoadLibraryEx` finds in the system folder for `ddraw`, `d3d9`,
 `wined3d`, `dxgi`, `opengl32` and `vulkan-1`, and the face, the extent and
 the outline of a glyph of the font Tahoma.
 
-**The test in the emulator** (`emu_wine_test.ps1`, 51 checks, the
+**The test in the emulator** (`emu_wine_test.ps1`, 56 checks, the
 x86_64 tree, Android 14, SwiftShader). The test lists the prefix with
 `adb root`, so it needs an emulator image of the kind userdebug
 (`google_apis`, not `google_apis_playstore`). A clean install, then the first
 start: the app ran in the domain `untrusted_app_27`, had the focus (no
-warning of the system), and unpacked 1589 files (343.2 MB) in 2.7 s.
+warning of the system), and unpacked 1589 files (343.2 MB) in 2.4 s.
 While wineboot ran, the test ended the app with the back key: the end of
 the app stopped wineboot, `wineserver -k` ended with 0, and no process of
 Wine stayed. The stopped prefix had a `system.reg` of wineboot and no
 marker. The next start did no unpack and made a new prefix:
-`wineboot --init` 20.2 s and `wineserver -w` 8.0 s, so the
-prefix took 28.2 s, and the menu was on the screen before the setup
+`wineboot --init` 18.5 s and `wineserver -w` 8.1 s, so the
+prefix took 26.6 s, and the menu was on the screen before the setup
 ended.
 Then the test puts `bwvr_wine_probe.exe` and `bwvr.ini` with `wine_probe=1`
 into the game folder, and the next start does no unpack and makes no
-prefix. The test program ran from `G:` in 1.9 s and wrote: Windows
+prefix. The test program ran from `G:` in 2.0 s and wrote: Windows
 10.0.19045, Wine 11.0, a process for i386 on x86_64,
 `cpu_dll=wow64cpu.dll` (the line of `pack_wine.sh` in `wine.inf`),
-`graphics=null`, a loop of 83 ms, the write, the read and the delete
+`graphics=null`, a loop of 79.5 ms, the write, the read and the delete
 of the file of 64 KB on `G:`, no `ddraw`, `d3d9`, `wined3d`, `dxgi`,
 `opengl32` or `vulkan-1` in the system folder (error 126), Tahoma as a
 TrueType font with an extent of 200 by 39 and an outline of 112 bytes for
 "A". No process of Wine was left after the setup or after the test
 program. At the end the back key ended the app, `wineserver -k` ended with
 1 (no server ran: the server of the test program had ended, and -k gives 0
-only when it stops one), and logcat has no crash.
+only when it stops one). The last start has `wine_setup=0`: the log says
+"wine_setup=0. The app does not set up Wine", the app has no thread of the
+setup, its end runs no `wineserver -k`, the folder of the app has no
+`wine.log`, and no process of Wine runs. Logcat has no crash.
 
-The game folder is on the shared storage, which has `noexec`. Wine reads a
-PE file with `read` when its `mmap` fails there (`map_pe_header` of
-`dlls/ntdll/unix/virtual.c`, the warning "noexec file system, falling back
-to read"), and it gives an error "failed to set ... protection ...,
-noexec filesystem?" when a section gets no protection. In the emulator,
-with `wine_debug=warn+virtual`, the test program gave neither line, so the
-`read` path did not run. Wine reads a section that is not on a page of the
-file with `read` in each case, and the sections of the test program of MSVC
-(a file alignment of 512 bytes) are such sections. The path is open for
-the game files (`runblack.exe` and the `ddraw.dll` of the mod).
+The game folder is on the shared storage, which has `noexec`. The `mmap`
+of a PE file there works, so Wine 11.0 does not take the `read` path of
+`map_pe_header` ("noexec file system, falling back to read"). The
+`mprotect` of a code section to `PROT_EXEC` then fails. With no patch, in
+the emulator with `wine_debug=warn+virtual`, `runblack.exe` gave the error
+"failed to set 60000020 protection on L"\\??\\G:\\runblack.exe" section
+.text, noexec filesystem?" for its `.text` and for the `.text` of each DLL
+of the game folder (`IFC22.dll`, `LHLogR.dll`, `LHaudiodllR.dll`,
+`QMIXER.dll`, `LHMultiplayerR.dll`, `LHDialogLib.dll`, `MFC42D.DLL`,
+`wearasr.dll`), then "\"IFC22.dll\" failed to initialize, aborting" and
+"Initializing dlls for L"G:\\runblack.exe" failed, status c0000005", and
+`runblack.exe` ended with the exit code 5 after 0.5 s. The test program
+of MSVC (a file alignment of 512 bytes) ran, because Wine reads a section
+that is not on a page of the file in each case. With the patch 0002 each
+image of the shared storage gets the line "noexec file system, reading the
+sections of ..." (`runblack.exe`, the DLLs of the game folder,
+`Plug Ins\ScriptLibraryR.dll`, `binkw32.dll`), and the game runs. The files
+of the mod in `syswow64` are in the internal folder, which has no
+`noexec`.
 
 **Not shown yet:** Wine with `wowbox64.dll` on ARM64 (no device ran it:
 for the tree of arm64-v8a only the machine of each ELF and PE file, the
 imports and exports of `wowbox64.dll` and its line in `wine.inf` are
-checked), the time of the setup on a headset, the path of Wine for
-`noexec` (`read`) with the game files, the end of the app in a session of
-a headset (the end of the session, not the back key of the window), and
+checked), the time of the setup on a headset, the patch 0002 on the FUSE
+storage of a headset, the end of the app in a session of a headset (the end of the session, not the back key of the window), and
 if Meta Horizon OS and the Steam Frame let an app with `targetSdkVersion`
 28 start programs of its folder.
 
 **Known limits:**
 
-- The APK is 204.0 MB (213,906,433 bytes) with both trees: a tar in the
+- The APK is 205.3 MB (215,270,541 bytes) with both trees: a tar in the
   method deflate. A better compression (xz) needs a decoder in the app.
-- Wine has no audio driver on Android, and no display driver: a program
-  that needs a window or a sound does not work yet.
+- Wine has no audio driver on Android ("No driver from
+  L"pulse,alsa,oss,coreaudio" could be initialized" of `mmdevapi`), and no
+  display driver (`Graphics` = `null`). What the game does with them: see
+  "Play in the app".
+- The APK has no permission `INTERNET`, so Wine makes no socket
+  ("WSASocketW Failed to create socket, this requires special
+  permissions"). The mod answers the check of the game for an internet
+  connection itself (`net_check=0`).
 - A tree of another build gets a new unpack, and the prefix with its
   marker stays. wineboot updates a prefix when `wine.inf` is newer than the
   prefix (`update_wineprefix`), but no test ran a new tree over an old
@@ -1549,11 +1772,11 @@ Android. The plan, in steps:
 1. **An x86 runtime in the app.** The APK carries Wine in the WoW64 mode
    for each ABI, and the app sets it up and runs a 32 bit Windows program
    in it (see "Wine in the app"). In the emulator the whole path runs with
-   the x86_64 tree. Open: a run of the arm64-v8a tree with `wowbox64.dll`
-   on a headset, the start of `runblack.exe` with the mod, `ScreenW`,
-   `ScreenH`, `FullScreen` and `ScreenD` (`Menu::RenderSize`) in the
-   registry of the prefix, and an audio driver (Wine has none on Android
-   yet, and the game plays its sound through DirectSound).
+   the x86_64 tree, and "Play" starts `runblack.exe` with the mod there
+   ("Play in the app"). Open: a run of the arm64-v8a tree with
+   `wowbox64.dll` on a headset, and an audio driver (Wine has none on
+   Android yet, and the game plays its sound through QMixer and the wave
+   device).
 
    Box64 builds for the headsets with the NDK of the app:
    `bwvr/tools/android/build_box64.ps1 -Source <folder>` takes the folder
@@ -1590,9 +1813,11 @@ Android. The plan, in steps:
    vertices in screen space, so the stream needs no matrices. With
    `xr_input=1` the eye pictures show in a projection layer with the values
    of the mod ("The projection layer"). With `vk_device=0` the mod has no
-   Vulkan device of its own ("No Vulkan device of the mod"). Open: the run
-   with the game in Wine, with `vk_stream_live=1`, `vk_device=0` and
-   `stream_live=1`.
+   Vulkan device of its own ("No Vulkan device of the mod"). "Play" starts
+   the game in Wine with `vk_stream_live=1`, `vk_device=0` and
+   `stream_live=1` ("Play in the app"). Open: a frame of the game in Wine
+   through the ring, and the frames before the first frame of the scene
+   (the logos, the videos, the dialog of a new profile).
 3. **The head and the controllers.** Wine has no OpenXR for Android, so the
    app gives the mod the views, the hands, the display time, the focus and
    the recenter of its session through the input channel, and the mod gives

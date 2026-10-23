@@ -1,0 +1,41 @@
+ntdll: Read the sections of a PE image on a noexec file system.
+
+The shared storage of Android (/storage/emulated, FUSE) has noexec. The
+mmap of a PE file there works, but the mprotect of a code section to
+PROT_EXEC fails ("failed to set 60000020 protection on ... section
+.text, noexec filesystem?"), and the first call into the code of the
+game gives an access violation (loader_init: "IFC22.dll" failed to
+initialize, c0000005). map_pe_header falls back to read only when the
+mmap fails. With this patch map_image_into_view asks fstatvfs for
+ST_NOEXEC and then reads each section into the view, as for a file on
+a removable medium.
+
+--- a/dlls/ntdll/unix/virtual.c	2026-10-23 13:09:57.484543210 +0200
++++ b/dlls/ntdll/unix/virtual.c	2026-10-23 13:09:57.496282781 +0200
+@@ -37,6 +37,7 @@
+ #include <sys/stat.h>
+ #include <sys/mman.h>
+ #include <sys/ioctl.h>
++#include <sys/statvfs.h>
+ #ifdef HAVE_SYS_SYSINFO_H
+ # include <sys/sysinfo.h>
+ #endif
+@@ -3040,6 +3041,18 @@
+     /* map the header */
+ 
+     fstat( fd, &st );
++    /* A file system with noexec (the shared storage of Android) gives no
++     * executable page of a mapped file, so each section is read into the
++     * view, as from a removable medium. */
++    if (!removable)
++    {
++        struct statvfs vfs;
++        if (!fstatvfs( fd, &vfs ) && (vfs.f_flag & ST_NOEXEC))
++        {
++            WARN( "noexec file system, reading the sections of %s\n", debugstr_us(nt_name) );
++            removable = TRUE;
++        }
++    }
+     header_size = min( image_info->header_size, st.st_size );
+     header_map_size = min( image_info->header_map_size, ROUND_SIZE( 0, st.st_size, host_page_mask ));
+     if ((status = map_pe_header( view->base, header_size, header_map_size, fd, &removable )))

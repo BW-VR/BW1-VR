@@ -13,8 +13,11 @@
         emulator. Each library is stored with no compression, on a page of
         16 KB, and its LOAD segments have an alignment of 16 KB.
       - The files: only the manifest, the resource table, the libraries,
-        the license texts, the Wine trees and the signature. No file of the
-        game can be in the APK.
+        the license texts, the Wine trees, the files of the mod and the
+        signature. No file of the game can be in the APK.
+      - The files of the mod (assets/mod, with Wine only): ddraw.dll and
+        openxr_loader.dll are the files of bwvr/build/src/mod/Release (the
+        SHA-256), each a PE file for 32 bit x86.
       - Each Wine tree (assets/wine/<abi>.tar): a build id, the loader,
         wineserver, ntdll.dll of i386, the CPU DLL of its ABI in wine.inf
         and in the tree, libfreetype.so, the fonts, and none of the DLLs
@@ -104,15 +107,42 @@ try {
             if ($e.FullName -match '^assets/wine/([^/]+)$') {
                 [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, (Join-Path $wineDir $Matches[1]), $true)
             }
+            if ($e.FullName -match '^assets/mod/([^/]+)$') {
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, (Join-Path $wineDir ('mod-' + $Matches[1])), $true)
+            }
         }
     }
 } finally {
     $zip.Dispose()
 }
-$allowed = '^(AndroidManifest\.xml|resources\.arsc|META-INF/[^/]+|lib/(arm64-v8a|x86_64)/lib(bwvr_quest|openxr_loader)\.so|assets/licenses/[a-z0-9_]+\.txt|assets/wine/(arm64-v8a|x86_64)\.(tar|id))$'
+$allowed = '^(AndroidManifest\.xml|resources\.arsc|META-INF/[^/]+|lib/(arm64-v8a|x86_64)/lib(bwvr_quest|openxr_loader)\.so|assets/licenses/[a-z0-9_]+\.txt|assets/wine/(arm64-v8a|x86_64)\.(tar|id)|assets/mod/(ddraw|openxr_loader)\.dll)$'
 $other = @($names | Where-Object { $_ -notmatch $allowed })
-Expect ($other.Count -eq 0) ('only the manifest, the libraries, the license texts, the Wine trees and the signature are in the APK' + $(if ($other.Count) { ': ' + ($other -join ', ') } else { '' }))
+Expect ($other.Count -eq 0) ('only the manifest, the libraries, the license texts, the Wine trees, the files of the mod and the signature are in the APK' + $(if ($other.Count) { ': ' + ($other -join ', ') } else { '' }))
 Expect ($names -contains 'assets/licenses/openxr_loader.txt') 'the license text of the OpenXR loader is in the APK'
+
+# THE FILES OF THE MOD (assets/mod, android/src/play_rules.h): with Wine,
+# the ddraw.dll and the OpenXR loader of the build of .\dev.ps1 build, byte
+# for byte, as 32 bit DLLs for x86. With no Wine, none.
+$modBuild = Join-Path $Bwvr 'build\src\mod\Release'
+foreach ($name in @('ddraw.dll', 'openxr_loader.dll')) {
+    $entry = "assets/mod/$name"
+    if ($wineAbis.Count -eq 0) {
+        Expect (-not ($names -contains $entry)) "an APK with no Wine has no $entry"
+        continue
+    }
+    $inApk = Join-Path $wineDir "mod-$name"
+    $built = Join-Path $modBuild $name
+    $apkHash = if (Test-Path -LiteralPath $inApk) { (Get-FileHash -LiteralPath $inApk -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'none' }
+    $buildHash = if (Test-Path -LiteralPath $built) { (Get-FileHash -LiteralPath $built -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'no build' }
+    Expect ($apkHash -eq $buildHash) "$entry is the $name of the build ($modBuild): SHA-256 $apkHash"
+    $machine = ''
+    if (Test-Path -LiteralPath $inApk) {
+        $pe = [IO.File]::ReadAllBytes($inApk)
+        $at = [BitConverter]::ToInt32($pe, 0x3C)
+        if ($pe.Length -gt $at + 6 -and [BitConverter]::ToUInt32($pe, $at) -eq 0x4550) { $machine = '0x{0:x}' -f [BitConverter]::ToUInt16($pe, $at + 4) }
+    }
+    Expect ($machine -eq '0x14c') "$entry is a PE file for 32 bit x86 (machine $machine)"
+}
 
 # THE WINE TREES. The tar of Windows (bsdtar) lists them and reads wine.inf.
 $rules = Get-Content -LiteralPath (Join-Path $Bwvr 'android\src\wine_rules.h') -Raw

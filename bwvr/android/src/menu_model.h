@@ -31,6 +31,7 @@ enum class ItemKind {
   kSave,     // "Save Config"
   kSetting,  // a row of the table
   kBack,     // back to the main page
+  kQuit,     // "Quit game": while the game runs, in place of the two plays
 };
 
 struct Item {
@@ -43,6 +44,7 @@ enum class Action {
   kPlay,
   kNewGame,
   kSave,
+  kQuit,
 };
 
 class Menu {
@@ -159,6 +161,18 @@ class Menu {
     ++revision_;
   }
 
+  // THE GAME. While the game runs, the main page has "Quit game" in place
+  // of "Play in VR" and "Play, new game". A change goes to the main page, on
+  // its first row.
+  void SetGameRunning(bool running) {
+    if (running == game_running_) return;
+    game_running_ = running;
+    group_ = -1;
+    cursor_ = 0;
+    ++revision_;
+  }
+  bool GameRunning() const { return game_running_; }
+
   // THE ROWS OF THE PAGE.
   bool OnMain() const { return group_ < 0; }
   int Group() const { return group_; }
@@ -175,8 +189,12 @@ class Menu {
   std::vector<Item> Items() const {
     std::vector<Item> items;
     if (OnMain()) {
-      items.push_back({ItemKind::kPlay, -1});
-      items.push_back({ItemKind::kNewGame, -1});
+      if (game_running_) {
+        items.push_back({ItemKind::kQuit, -1});
+      } else {
+        items.push_back({ItemKind::kPlay, -1});
+        items.push_back({ItemKind::kNewGame, -1});
+      }
       for (int i = 0; i < st::kSettingCount; ++i) {
         if (st::kSettings[i].kind == st::kGroup && GroupHasRows(i)) {
           items.push_back({ItemKind::kGroup, i});
@@ -209,6 +227,8 @@ class Menu {
         return changed_ ? "Save Config *" : "Save Config";
       case ItemKind::kBack:
         return "Back";
+      case ItemKind::kQuit:
+        return "Quit game";
       case ItemKind::kGroup:
       case ItemKind::kSetting:
         return st::kSettings[item.index].label;
@@ -282,6 +302,9 @@ class Menu {
                "not start the game.";
       case ItemKind::kBack:
         return "Goes back to the main page.";
+      case ItemKind::kQuit:
+        return "Ends the game and each program of Wine. The game does not save. "
+               "The menu button, B or Y go back to the game.";
       default:
         return "";
     }
@@ -392,6 +415,8 @@ class Menu {
         return Action::kNewGame;
       case ItemKind::kSave:
         return Action::kSave;
+      case ItemKind::kQuit:
+        return Action::kQuit;
       case ItemKind::kGroup:
         group_ = item.index;
         cursor_ = 0;
@@ -454,6 +479,7 @@ class Menu {
   int headset_width_ = 2064;
   int headset_height_ = 2208;
   int guard_pct_ = 25;
+  bool game_running_ = false;
 };
 
 }  // namespace menu_model

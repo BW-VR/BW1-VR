@@ -13,6 +13,13 @@
 //                                          menu of the app)
 //   <frame> trigger <hand> <0|1>           the trigger of the hand
 //   <frame> button <hand> <0|1>            B (right) or Y (left)
+//   <frame> menu <hand> <0|1>              the menu button (left on a Touch
+//                                          controller)
+//   <frame> hold <name>                    the script waits at this frame
+//                                          until the file <name> is in the
+//                                          folder of the runtime (the test
+//                                          puts it there). The frames of
+//                                          the session go on
 //   <frame> stick <hand> <x> <y>           the thumbstick
 //   <frame> capture <name>                 the images of the quads of this
 //                                          frame go to <name>-<layer>.bmp
@@ -30,6 +37,11 @@
 // The head stands still at the origin of the LOCAL space: each eye is 32 mm
 // to its side, with the angles of view below (xrLocateViews). The grip pose
 // of a hand is its aim pose.
+//
+// <frame> is a frame of the script. The script counts the frames of the
+// session, but it stops at a hold, so after a hold the frames of the script
+// are behind the frames of the session. A line of the report has the frame
+// of the session.
 //
 // <hand> is left or right. The script is script.txt in the folder
 // /data/local/tmp/bwvr-xr, and the runtime writes report.txt and the
@@ -135,11 +147,12 @@ void LoadScript() {
       char layer[16] = {0};
       sscanf(rest, "%15s %15s %f %f", hand, layer, &s.a, &s.b);
       s.layer = strcmp(layer, "menu") == 0 ? -1 : atoi(layer);
-    } else if (s.what == "trigger" || s.what == "button") {
+    } else if (s.what == "trigger" || s.what == "button" || s.what == "menu") {
       sscanf(rest, "%15s %f", hand, &s.a);
     } else if (s.what == "stick") {
       sscanf(rest, "%15s %f %f", hand, &s.a, &s.b);
-    } else if (s.what == "capture" || s.what == "eyes" || s.what == "quads") {
+    } else if (s.what == "capture" || s.what == "eyes" || s.what == "quads" ||
+               s.what == "hold") {
       sscanf(rest, "%63s", name);
       s.name = name;
     }
@@ -189,6 +202,7 @@ struct Hand {
   XrQuaternionf orientation;
   bool trigger = false;
   bool button = false;
+  bool menu = false;
   float stick[2] = {0, 0};
 };
 
@@ -213,6 +227,11 @@ struct Session {
   bool begun = false;
   bool attached = false;
   long frame = 0;
+  // The frame of the script, and true in the frame of the session in which
+  // it came to that frame (a hold keeps it).
+  long script = 0;
+  bool script_new = false;
+  std::string held;  // the name of the hold that waits, or empty
   int64_t last_wait = 0;
   bool in_frame = false;
   bool waited = false;
@@ -488,9 +507,27 @@ void PointAt(Session* s, int hand, int layer, float px, float py) {
   hd.orientation = {cy * sp, sy * cp, -sy * sp, cy * cp};
 }
 
+// The script goes to its next frame, except at a hold whose file is not
+// there yet.
+void StepScript(Session* s) {
+  if (!s->held.empty()) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", kFolder, s->held.c_str());
+    if (access(path, F_OK) != 0) {
+      s->script_new = false;
+      return;
+    }
+    Report("frame %ld go %s script %ld", s->frame, s->held.c_str(), s->script);
+    s->held.clear();
+  }
+  ++s->script;
+  s->script_new = true;
+}
+
 void RunScript(Session* s) {
+  if (!s->script_new) return;
   for (const Step& st : g_script) {
-    if (st.frame != s->frame) continue;
+    if (st.frame != s->script) continue;
     Hand& h = s->hands[st.hand];
     if (st.what == "point") {
       PointAt(s, st.hand, st.layer, st.a, st.b);
@@ -504,6 +541,12 @@ void RunScript(Session* s) {
     } else if (st.what == "button") {
       h.button = st.a != 0.0f;
       Report("frame %ld button %d %d", s->frame, st.hand, h.button ? 1 : 0);
+    } else if (st.what == "menu") {
+      h.menu = st.a != 0.0f;
+      Report("frame %ld menu %d %d", s->frame, st.hand, h.menu ? 1 : 0);
+    } else if (st.what == "hold") {
+      s->held = st.name;
+      Report("frame %ld hold %s script %ld", s->frame, st.name.c_str(), s->script);
     } else if (st.what == "stick") {
       h.stick[0] = st.a;
       h.stick[1] = st.b;
@@ -1018,6 +1061,10 @@ XrResult XRAPI_CALL GetActionStateBoolean(XrSession session, const XrActionState
     active = true;
     value = value || h.button;
   }
+  if (BoundTo(a, s->instance, hand, "/input/menu/click")) {
+    active = true;
+    value = value || h.menu;
+  }
   state->isActive = active ? XR_TRUE : XR_FALSE;
   state->currentState = value ? XR_TRUE : XR_FALSE;
   return XR_SUCCESS;
@@ -1120,6 +1167,7 @@ XrResult XRAPI_CALL WaitFrame(XrSession session, const XrFrameWaitInfo*, XrFrame
   state->shouldRender = s->state == XR_SESSION_STATE_VISIBLE || s->state == XR_SESSION_STATE_FOCUSED;
   s->waited = true;
   ++s->frame;
+  StepScript(s);
   RunScript(s);
   return XR_SUCCESS;
 }
@@ -1229,7 +1277,7 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
   if (quads != s_last_quads) Report("frame %ld quads%s", s->frame, quads.c_str());
   s_last_quads = quads;
   for (const Step& st : g_script) {
-    if (st.frame != s->frame) continue;
+    if (!s->script_new || st.frame != s->script) continue;
     if (st.what == "capture" || st.what == "quads") {
       for (uint32_t i = 0; i < s->last_quads.size(); ++i) {
         const XrExtent2Di e = s->last_quads[i].subImage.imageRect.extent;

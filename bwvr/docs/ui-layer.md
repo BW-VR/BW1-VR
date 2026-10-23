@@ -30,8 +30,9 @@ Marks, as in `tabletop.md`:
   and a third swapchain. It goes out as `XrCompositionLayerQuad` layers in
   the LOCAL space, after the projection layer, with the source alpha flag.
 - One target feeds three quads: a menu panel, a help panel and a Creature
-  panel. Screens with no scene use an opaque quad for the picture behind the
-  menus (planned, section 6).
+  panel. In the headset app a screen with no scene (the logos, the videos,
+  the front end, a dialog box) shows on an opaque quad fixed in the room
+  (section 6). With a session of the mod on the PC that quad is planned.
 - The subtitles and the help text have a card of their own (section 17). It
   works with `ui_panel=0`.
 - The hints and the prompts of the controllers are on the hint cards
@@ -143,6 +144,9 @@ whole render target through `SubmitTexture`, the same picture to both eyes
   runtime then shows the flat picture over the whole view, with no depth,
   fixed in the room where the head pointed at that last frame [I]. A player
   who turned since then sees the picture to one side and black past its edge.
+- **With the input channel** (`xr_input=1`, the headset app): the mod has no
+  session, so this path sends nothing. The frame goes into the live stream
+  as a screen frame, and the app shows it on the screen quad of section 6.
 
 The menu text is a fixed 20 to 35 px at any render size [M, `backend.md`],
 which is about 0.8 to 1.3 degrees at 26 px per degree.
@@ -493,7 +497,15 @@ that the hit test reads. So the plan needs no mark of its own for the menus.
 
 The pointer is on the menu panel while a Setup dialog is up, or while a screen
 with no scene shows. `SetupBox::GetCurrentActiveBox` `0x00407ED0` returns
-`[0x00C4CD20]`, and a value other than 0 means a dialog is up [V].
+`[0x00C4CD20]`, and a value other than 0 means a dialog is up [V]. That
+value is a `SetupBox` (vtable `0x008D85F0`) that `DialogBoxBase::Init` makes
+and keeps at +4 of the dialog object, a class of its own (`NewProfileBox`,
+`SkipBox`, `MainMenu` and more) [V]. The log names each dialog box that comes
+up, with the class of the dialog object from the RTTI of the game
+(`setup_box.cpp`, the line `setup box`). It finds the dialog object of the
+front end in the globals that `FrontEnd::Init` fills
+(`bw::setup::kFrontEndDialogs`). A dialog of another part of the game gives
+the callback of its controls (+0xB0 of the SetupBox).
 
 The game's state decides the surface, not the ray. A ray that leaves the panel
 does not drop the pointer onto the island. The pointer keeps its last panel
@@ -553,9 +565,22 @@ is turned with the head, and a controller ray goes through the world. So the
 arrow moves on the panel when the head turns, and a controller does not point
 at the panel.
 
-## 6. Screens with no scene, with the panel (planned)
+## 6. Screens with no scene, with the panel
 
-Not built. A frame with no scene still goes out as in 1.4.
+**In the headset app** (`xr_input=1`, built): the mod has no session, and
+each frame with no scene goes into the live stream as a screen frame with a
+record `kScreen` (`vk_stream_screens=1`, `src/mod/screen_quad_math.h`). The
+app shows its picture on one quad fixed in the room with the place and the
+size of the screen of 1.4 before the first stereo frame: 260 cm wide
+(`screen_width_cm`), 200 cm in front of the origin of the LOCAL space
+(`screen_distance_cm`), as high as the shape of the picture, opaque, the same
+picture for both eyes. It is never a projection layer
+(`stream_screen=1`, `android.md`, "The screens with no scene"). With
+`ui_panel=1` the Setup dialogs of these frames draw in the picture, as on the
+PC.
+
+**With a session of the mod on the PC** (planned): a frame with no scene
+still goes out as in 1.4.
 
 - The picture (the plasma background, the loading art, a video) goes on the
   screen quad of 1.4. It is always a quad fixed in the room, and never a
@@ -637,7 +662,8 @@ The biggest cost is memory, and it is small against a headset render.
 | The Creature panel quad | built (section 13) |
 | The subtitle card | built (section 17) |
 | Input on the panel (section 5) | planned |
-| Screens with no scene on a screen quad (section 6) | planned |
+| Screens with no scene on a screen quad in the headset app, `xr_input=1` (section 6) | built, desktop runs and the emulator, never seen in a headset |
+| Screens with no scene on a screen quad with a session of the mod (section 6) | planned |
 | Tabletop placement of the panels (4.4) | planned |
 | A line from the controller to the panel hit | planned |
 | The panel over the monitor copy, when the monitor copy is on | planned |
@@ -666,7 +692,8 @@ recenter, and whether Virtual Desktop composes quad layers before the encode.
 | `ui_help_px_per_deg` | 44 | help panel scale at a 2880 px tall render. It scales with the render height, as the help text does. |
 | `ui_help_rect` | 0 | the help rect in render pixels. 0 takes the default of 4.1. |
 | `creature_panel` | 2 | the Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature (section 13) |
-| `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4 |
+| `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4, and of section 6 in the headset app |
+| `vk_stream_screens` | 1 | with `xr_input=1` a frame with no scene goes into the live stream for the screen quad of the headset app (section 6). 0: no frame with no scene in the stream |
 | `ui_scale_pct`, `hint_scale_pct`, `hint_flat`, `ui_shift_max_px`, `subtitle_lift_pct`, `subtitle_deg` | 25, 20, 1, 24, 0, 35 | the interface in the eye pictures (`backend.md`) |
 | `hint_hand_depth` | 1 | a hint of the game at the game's Hand at the depth of the Hand (section 15.6) |
 | `subtitle_*` | section 17.5 | the subtitle card |

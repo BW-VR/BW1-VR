@@ -65,6 +65,17 @@
     The value of wine_debug in bwvr.ini. warn+virtual by default, for the
     lines of the noexec storage.
 
+.PARAMETER SceneEyes
+    After the measure of each game the runtime reads back the eye pictures of
+    the projection layer (the word eyes), and the test checks the projection
+    layer. Only for a game that comes to a frame of the scene: with no
+    projection layer the read back is a fault of the runtime. With no
+    -SceneEyes the runtime reads back the quads (the word quads), and the
+    test checks the screen quad of the frames with no scene (docs/android.md,
+    "The screens with no scene"): the log of the app, the quad that the
+    runtime reports, its picture, and the line of the mod that names the
+    dialog box.
+
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
     game in it.
@@ -76,6 +87,7 @@ param(
     [int]$StartMinutes = 15,
     [int]$Memory = 4096,
     [string]$WineDebug = 'warn+virtual',
+    [switch]$SceneEyes,
     [switch]$Keep
 )
 
@@ -281,7 +293,7 @@ try {
         '20 point right menu 800 292', '30 capture before',
         '40 trigger right 1', '44 trigger right 0',
         '50 hold measured1',
-        '51 eyes new', '52 quads new',
+        $(if ($SceneEyes) { '51 eyes new' } else { '' }), '52 quads new',
         # Game 1: show (a hold of 90 frames), hide (a press of 6 frames),
         # show again, Quit game. No press reaches the mod.
         '60 menu left 1', '150 menu left 0',
@@ -295,7 +307,7 @@ try {
         '370 capture after1',
         '380 point right menu 800 227', '390 trigger right 1', '394 trigger right 0',
         '400 hold measured2',
-        '401 eyes play', '402 quads play',
+        $(if ($SceneEyes) { '401 eyes play' } else { '' }), '402 quads play',
         # Game 2: a short press (6 frames) goes to the mod at its release,
         # then show and Quit game.
         '410 menu left 1', '416 menu left 0',
@@ -304,7 +316,7 @@ try {
         '590 point right menu 800 768', '600 trigger right 1', '604 trigger right 0',
         '610 hold ended2',
         '620 capture after2',
-        '640 exit')
+        '640 exit' | Where-Object { $_ -ne '' })
     Adb @('push', $script, "$XrDir/script.txt")
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
@@ -394,13 +406,13 @@ try {
         foreach ($kv in @('vk_stream_live=1', 'xr_input=1', 'vk_device=0', 'ui_panel=1', 'stream_live=1', 'input_live=1', 'vulkan_strict=1', 'backend=vulkan')) {
             Expect ($iniText -match "(?m)^$([regex]::Escape($kv))\r?$") "bwvr.ini at the start of game $n has $kv"
         }
-        $log = WaitLog @("game         : the first frame of the game \(frame \d+\) came", 'game         : the game ended with the exit code') ($StartMinutes * 60) $playAt
+        $log = WaitLog @("game         : the first frame of the game \(frame \d+(, a screen with no scene)?\) came", 'game         : the game ended with the exit code') ($StartMinutes * 60) $playAt
         $part = $log.Substring([math]::Max(0, $playAt))
         Expect ($part -match 'game         : ddraw\.dll of the APK \(\d+ bytes\) is in \S+/drive_c/windows/syswow64') "the ddraw.dll of the APK is in syswow64 of the prefix"
         $reg = [regex]::Match($part, 'game         : reg import of C:\\bwvr\\game\.reg ended with (-?\d+) after ([\d.]+) s: GameDir G:\\, ScreenW (\d+), ScreenH (\d+)')
         Expect ($reg.Success -and $reg.Groups[1].Value -eq '0') ('reg import of the registry of the game: ' + $reg.Value)
         Expect ($part -match "game         : start G:\\runblack\.exe$([regex]::Escape($r.Args)) in Wine") "the app started G:\runblack.exe$($r.Args)"
-        $first = [regex]::Match($part, 'game         : the first frame of the game \(frame (\d+)\) came ([\d.]+) s after Play')
+        $first = [regex]::Match($part, 'game         : the first frame of the game \(frame (\d+)(, a screen with no scene)?\) came ([\d.]+) s after Play')
         Expect $first.Success ("the first frame of game $n came: " + $first.Value)
         if (-not $first.Success) {
             # The test goes on: the CPU load, the menu over the game and Quit
@@ -477,14 +489,16 @@ try {
         }
         Expect ($rates.Count -gt 0) "the app logged the frame rate of game $n ($($rates.Count) lines)"
         $results["rates$n"] = $rates
-        $results["first$n"] = $first.Groups[2].Value
+        $results["first$n"] = $first.Groups[3].Value
+        $results["firstScreen$n"] = $first.Groups[2].Success
         # The log of the mod of this game: the Esc of the menu button. In
         # game 1 no press reached the mod, in game 2 the short press did.
         Adb @('pull', "$GameDir/bwvr.log", (Join-Path $Out "bwvr-game$n.log"))
         $modLogNow = if (Test-Path -LiteralPath (Join-Path $Out "bwvr-game$n.log")) { Get-Content -LiteralPath (Join-Path $Out "bwvr-game$n.log") -Raw } else { '' }
         $escLines = @($modLogNow -split "`r?`n" | Where-Object { $_ -match 'controllers  : the menu button (sends Esc|is dropped)' })
         $escLines | ForEach-Object { Note ('bwvr.log: ' + $_) }
-        if (-not $first.Success) {
+        $sceneHere = $first.Success -and (-not $first.Groups[2].Success -or $part -match 'game         : the frames of the scene start')
+        if (-not $sceneHere) {
             # The mod reads the buttons in a frame of the scene
             # (ControllersFrame of stereo.cpp). With no such frame its log
             # cannot show a press: the log of the app above is the proof.
@@ -525,13 +539,42 @@ try {
     $summary = [regex]::Matches($log, 'live         : [^:]+: (\d+) frames played and (\d+) skipped \(frames (\d+) to (\d+)\), (\d+) pictures')
     foreach ($s in $summary) { Note $s.Value }
     Expect ($summary.Count -gt 0 -and [int64]$summary[0].Groups[5].Value -gt 0) 'the app played the frames of the ring and made pictures'
-    Expect ($log -match 'xr           : the pictures of the renderer go out in a projection layer') 'the pictures of the game go out in a projection layer'
-    $projectionLines = ([regex]::Matches($report, '(?m)^frame \d+ projection ')).Count
-    Expect ($projectionLines -gt 0) "the runtime reports the projection layer ($projectionLines lines)"
-    foreach ($name in @('new', 'play')) {
-        foreach ($eye in 0, 1) {
-            $m = [regex]::Match($report, "capture \S*/$name-p$eye\.bmp (\d+)x(\d+) lit (\d+)")
-            Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of eye $eye of the projection layer in game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels" } else { 'none' }))
+    # THE FRAMES OF THE SCENE: the projection layer. A game that waits in a
+    # dialog box before its first frame of the scene has none.
+    $sceneFrames = $log -match 'game         : the frames of the scene start' -or
+        ($log -match 'game         : the first frame of the game \(frame \d+\) came')
+    if ($sceneFrames -or $SceneEyes) {
+        Expect ($log -match 'xr           : the pictures of the renderer go out in a projection layer') 'the pictures of the game go out in a projection layer'
+        $projectionLines = ([regex]::Matches($report, '(?m)^frame \d+ projection ')).Count
+        Expect ($projectionLines -gt 0) "the runtime reports the projection layer ($projectionLines lines)"
+    } else {
+        Note 'no frame of the scene came in a game, so there is no projection layer to check'
+    }
+    if ($SceneEyes) {
+        foreach ($name in @('new', 'play')) {
+            foreach ($eye in 0, 1) {
+                $m = [regex]::Match($report, "capture \S*/$name-p$eye\.bmp (\d+)x(\d+) lit (\d+)")
+                Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of eye $eye of the projection layer in game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels" } else { 'none' }))
+            }
+        }
+    }
+    # THE SCREEN QUAD of the frames with no scene (stream_screen=1): the
+    # logos, the video before the intro and the dialog box. The quad of the
+    # screen of the PC: 2.6 m wide (screen_width_cm), 2 m in front
+    # (screen_distance_cm), opaque, for both eyes, with the whole render.
+    $screenShown = @([regex]::Matches($log, 'xr           : the screen quad shows screen (\d+) of the mod \(([^,]+), (\d+) by (\d+)\) as one quad layer, ([0-9.]+) by ([0-9.]+) m at ([-0-9.]+) ([-0-9.]+) ([-0-9.]+) m'))
+    foreach ($s in $screenShown | Select-Object -First 4) { Note $s.Value }
+    if (@($results.Keys | Where-Object { $_ -like 'firstScreen*' -and $results[$_] }).Count -gt 0) {
+        Expect ($screenShown.Count -gt 0) "the app showed the frames with no scene on the screen quad ($($screenShown.Count) lines)"
+        $screenQuad = ' quad 0\.0000 0\.0000 -2\.0000 turn 0\.0000 0\.0000 0\.0000 1\.0000 size 2\.6000 ([0-9.]+) rect 0 0 (\d+)x(\d+) eye 0 flags 0'
+        $screenQuadLines = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
+        $withScreen = @($screenQuadLines | Where-Object { $_.Groups[2].Value -match "^$screenQuad" })
+        $screenSize = if ($withScreen.Count -gt 0) { [regex]::Match($withScreen[0].Groups[2].Value, "^$screenQuad") } else { $null }
+        Expect ($withScreen.Count -gt 0) ("the runtime has the screen quad, 2.6 m wide at 0 0 -2 m, opaque, for both eyes" + $(if ($screenSize) { ": $($screenSize.Groups[2].Value) by $($screenSize.Groups[3].Value) pixels, $($screenSize.Groups[1].Value) m high, $($withScreen.Count) lines" } else { '' }))
+        Expect ($report -notmatch 'quad 0\.000 0\.100 -2\.600 size 2\.600') 'no frame has the quads of the stereo screen'
+        foreach ($name in @('new', 'play')) {
+            $m = [regex]::Match($report, "capture \S*/$name-0\.bmp (\d+)x(\d+) lit (\d+)")
+            Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of the screen quad after the measure of game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels (the files $name-0.bmp and $name-0.png)" } else { 'none' }))
         }
     }
     # The notice (play_notice=1): with the menu hidden before the first frame
@@ -577,6 +620,13 @@ try {
         Expect ($modLog -match 'xr input     : the first slot of the app') "the mod of game $n read a slot of the app"
         Expect ($modLog -match 'vk stream    : vk_stream_live=1\. The ring') "the mod of game $n writes the ring"
         Expect ($modLog -match 'vulkan strict: vulkan_strict=1') "the mod of game $n has vulkan_strict=1"
+        $firstScreen = [regex]::Match($modLog, 'vk stream    : screen frame (\d+) is the first frame with no scene in the stream: ([^,]+), (\d+) by (\d+), on a quad ([0-9.]+) by ([0-9.]+) m')
+        Expect $firstScreen.Success ("the mod of game $n gave the frames with no scene to the stream" + $(if ($firstScreen.Success) { ": the first is screen frame $($firstScreen.Groups[1].Value), $($firstScreen.Groups[2].Value), $($firstScreen.Groups[3].Value) by $($firstScreen.Groups[4].Value), on a quad $($firstScreen.Groups[5].Value) by $($firstScreen.Groups[6].Value) m" } else { '' }))
+        $boxLines = @($modLog -split "`r?`n" | Where-Object { $_ -match '^setup box    : ' })
+        $boxLines | Select-Object -First 6 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        Expect (@($boxLines | Where-Object { $_ -match '^setup box    : the dialog box \S+ is up now' }).Count -gt 0) "the log of the mod of game $n names the class of the dialog box that is up ($($boxLines.Count) lines)"
+        $rateLines = @($modLog -split "`r?`n" | Where-Object { $_ -match '^vk stream    : screen frame \d+, [0-9.]+ screen frames a second' })
+        $rateLines | Select-Object -First 4 | ForEach-Object { Note ('bwvr.log: ' + $_) }
     }
 
     # THE FACTS for the doc: the sound, the window of the null driver, the

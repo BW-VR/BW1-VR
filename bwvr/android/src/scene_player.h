@@ -12,6 +12,7 @@
 
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
+#include "../../src/mod/screen_quad_math.h"
 
 struct PlayResult {
   bool loaded = false;   // the file is a stream
@@ -24,6 +25,7 @@ struct PlayResult {
   uint64_t views = 0;    // kView: the projection layer of a frame
   uint64_t layers = 0;   // kCard, kPanel, kWindow: the quad layers of a frame
   uint64_t card_pictures = 0;  // kCardPicture: a new picture of a card
+  uint64_t screens = 0;  // kScreen: the screen of a frame with no scene
   uint64_t unknown = 0;  // records of a kind that the player does not know
   double ms = 0.0;
 };
@@ -45,6 +47,15 @@ bool StreamPictureView(scene_stream::ViewBody* out);
 // when the frame of that picture has none.
 const quad_layer_math::FrameLayers& StreamPictureLayers();
 const quad_layer_math::AppPictures& StreamCardPictures();
+
+// THE SCREENS WITH NO SCENE (src/mod/screen_quad_math.h, ScreenPicture):
+// which picture came last, a screen or the world, the screen of the newest
+// screen picture, and the count of the screen pictures.
+const screen_quad_math::ScreenPicture& StreamScreen();
+// The last pixels of a surface of the stream (RGBA, top row first). False
+// when the stream gave none.
+bool StreamSurfacePixels(uint64_t id, const std::vector<uint8_t>** rgba, uint32_t* width,
+                         uint32_t* height);
 
 // The whole stream of `path` into the renderer. `folder` is the folder for
 // the pictures of the renderer (vk_scene_test_frame of the stream).

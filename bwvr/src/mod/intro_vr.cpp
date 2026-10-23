@@ -1529,6 +1529,10 @@ bool IntroFinishFrame() {
 // its own picture (intro_eye_trails). Else -1.
 int IntroPassEye() { return g_eye_trails ? g_eye : -1; }
 
+// For mod_main.cpp: an eye pass of the intro runs. Its FinishFrame is not a
+// screen with no scene (vk_stream_screens).
+bool IntroInPass() { return g_eye >= 0; }
+
 // For controllers.cpp: while the intro draws in stereo, a controller must not
 // press a mouse button. Any click ends the logo (DoLogo tests both main
 // buttons), and the trigger would end it at the first push.

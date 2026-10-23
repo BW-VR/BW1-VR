@@ -263,6 +263,25 @@ namespace gesture {
 constexpr uintptr_t kVTable = 0x008DF800;  // GestureSystem, 7 virtual functions
 }
 
+// THE DIALOG BOXES (docs/ui-layer.md, section 5.2). SetupBox::
+// GetCurrentActiveBox 0x00407ED0 gives [kActiveBox]: the SetupBox of the
+// dialog that is up, or 0. DialogBoxBase::Init 0x00513400 makes that
+// SetupBox (its vtable is ??_7SetupBox 0x008D85F0), keeps it at
+// kDialogBox of the dialog object (mov [edi+4], esi), and its third
+// argument, the callback of the controls, at kBoxCallback of the SetupBox
+// (mov [edx+0xB0], eax). FrontEnd::Init 0x0053B4D0 keeps the dialog objects
+// of the front end in the globals of two ranges, from 0x00CD0624
+// (ChannelBox) to 0x00CD065C (MainMenu), and from 0x00CD0B0C (EndGameBox)
+// to 0x00CD0B1C (SkirmishGameBox).
+namespace setup {
+constexpr uintptr_t kActiveBox = 0x00C4CD20;
+constexpr uintptr_t kSetupBoxVTable = 0x008D85F0;
+constexpr uintptr_t kDialogBox = 0x4;
+constexpr uintptr_t kBoxCallback = 0xB0;
+constexpr uintptr_t kFrontEndDialogs[2][2] = {{0x00CD0620, 0x00CD0664},
+                                              {0x00CD0B08, 0x00CD0B28}};
+}  // namespace setup
+
 // The engine's matrix: 4 rows of 3 columns, with the translation in the last
 // row at m[9..11]. LH3DTech::ProjectPoint computes
 //   cam.x = p.x*m[0] + p.y*m[3] + p.z*m[6] + m[9]

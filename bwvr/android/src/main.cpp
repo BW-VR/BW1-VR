@@ -37,6 +37,7 @@
 #include "menu_model.h"
 #include "menu_painter.h"
 #include "play_rules.h"
+#include "../../src/mod/screen_quad_math.h"
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
 #include "../../src/mod/view_layer_math.h"
@@ -132,6 +133,10 @@ struct App {
   double play_ms = 0.0;    // the time of the last Play
   std::string play_clock;  // and its time of the day
   bool first_frame = false;  // a frame of the game came after Play
+  // THE SCREEN QUAD (stream_screen=1): the screen pictures of the stream that
+  // went to the quad.
+  uint64_t screen_pictures = 0;
+  bool said_no_screen = false;
   uint64_t rate_frame = 0;   // the frame and the time of the last line of the frame rate
   double rate_ms = 0.0;
 };
@@ -197,6 +202,53 @@ bool ShowEyes(App* app) {
   return true;
 }
 
+// THE SCREEN QUAD (stream_screen=1, docs/android.md, "The screens with no
+// scene"): the newest screen picture of the stream on the quad of its kScreen,
+// the picture of the last walk of the renderer or the pixels of the CPU of
+// the render target. False when the renderer has no picture for it.
+bool ShowScreen(App* app) {
+  if (!app->xr_on) return false;
+  const screen_quad_math::ScreenPicture& s = StreamScreen();
+  if (s.Pictures() == app->screen_pictures) return true;
+  app->screen_pictures = s.Pictures();
+  const scene_stream::ScreenBody& b = s.Get();
+  if ((b.flags & scene_stream::kScreenCpu) != 0) {
+    const std::vector<uint8_t>* rgba = nullptr;
+    uint32_t w = 0, h = 0;
+    if (StreamSurfacePixels(b.surface, &rgba, &w, &h)) {
+      app->xr.SetScreenQuadPixels(b, *rgba, w, h);
+      return true;
+    }
+  } else {
+    uint64_t image = 0;
+    uint32_t layer = 0, w = 0, h = 0;
+    if (VkSceneLastPicture(&image, &layer, &w, &h)) {
+      app->xr.SetScreenQuadImage(b, reinterpret_cast<VkImage>(image), layer, w, h);
+      return true;
+    }
+  }
+  if (!app->said_no_screen) {
+    app->said_no_screen = true;
+    AppLog("xr           : the mod gives screen %llu of a frame with no scene, but the "
+           "renderer has no picture for it (%s)",
+           static_cast<unsigned long long>(b.count),
+           (b.flags & scene_stream::kScreenCpu) != 0 ? "no pixels of the render target"
+                                                     : "no picture of a walk");
+  }
+  return false;
+}
+
+// The newest picture of the stream: a screen on the screen quad, or the
+// world in the projection layer, on the stereo screen or in the cut scene
+// window (ShowEyes).
+bool ShowPicture(App* app) {
+  namespace sq = screen_quad_math;
+  const sq::Last last = StreamScreen().LastPicture();
+  if (last == sq::Last::kScreen && app->xr.ScreenQuadOn()) return ShowScreen(app);
+  if (last == sq::Last::kWorld) app->xr.ClearScreenQuad();
+  return ShowEyes(app);
+}
+
 void LiveSummary(App* app, const char* why) {
   const PlayResult& r = app->live_result;
   AppLog("live         : %s: %llu frames played and %llu skipped (frames %llu to "
@@ -232,10 +284,25 @@ void GameFrames(App* app) {
     app->first_frame = true;
     app->rate_frame = app->live_last;
     app->rate_ms = now;
-    AppLog("game         : the first frame of the game (frame %llu) came %.1f s after Play",
-           static_cast<unsigned long long>(app->live_last), (now - app->play_ms) / 1000.0);
+    AppLog("game         : the first frame of the game (frame %llu%s) came %.1f s after Play",
+           static_cast<unsigned long long>(app->live_last),
+           screen_quad_math::IsScreenFrame(app->live_last) ? ", a screen with no scene" : "",
+           (now - app->play_ms) / 1000.0);
     app->status = "The game runs (started " + app->play_clock + ").";
     ShowNotice(app);
+    return;
+  }
+  // The screen frames have numbers of their own (screen_quad_math.h), so the
+  // rate starts again when the frames of the scene start or stop.
+  if (screen_quad_math::IsScreenFrame(app->rate_frame) !=
+      screen_quad_math::IsScreenFrame(app->live_last)) {
+    AppLog("game         : %s at frame %llu, %.1f s after Play",
+           screen_quad_math::IsScreenFrame(app->live_last)
+               ? "the screens with no scene start"
+               : "the frames of the scene start",
+           static_cast<unsigned long long>(app->live_last), (now - app->play_ms) / 1000.0);
+    app->rate_frame = app->live_last;
+    app->rate_ms = now;
     return;
   }
   if (now - app->rate_ms < 10000.0) return;
@@ -309,7 +376,7 @@ void PlayLive(App* app) {
   if (ms > app->live_play_most) app->live_play_most = ms;
   ++app->live_pictures;
   app->live_last_ms = NowMs();
-  ShowEyes(app);
+  ShowPicture(app);
   GameFrames(app);
 }
 
@@ -346,6 +413,11 @@ bool StartRenderer(App* app, const char* what) {
              ? "The cards, the panel quads and the cut scene window of the mod "
                "show as quad layers, as the session of the mod shows them"
              : "No quad layer of the mod");
+  AppLog("xr           : stream_screen=%d. %s", app->xr.ScreenQuadOn() ? 1 : 0,
+         app->xr.ScreenQuadOn()
+             ? "A frame with no scene of the mod shows on a quad fixed in the room, "
+               "with the screen of the PC"
+             : "No screen quad: a frame with no scene of the mod does not show");
   if (app->xr_on && app->xr.Renderer13()) {
     vk::External device;
     app->xr.RendererDevice(&device);
@@ -545,6 +617,7 @@ void GameTick(App* app) {
   ShowMenuOverGame(app, true);
   // The last picture of the game goes out of the layers.
   app->xr.ClearScreenSource();
+  app->xr.ClearScreenQuad();
   app->screen_image = VK_NULL_HANDLE;
   const std::string clock = ClockNow();
   app->status = "The game ended with the exit code " + std::to_string(code) + " (" + clock +
@@ -906,6 +979,11 @@ void android_main(android_app* android) {
   // scene window of the mod for the frame of a picture show as quad layers,
   // as the session of the mod shows them. 0: no quad layer of the mod.
   app.xr.SetLayersOn(app.ini.GetInt("bwvr", "stream_layers", 1) != 0);
+  // stream_screen=1 (the default): a frame with no scene of the mod (the
+  // logos, the videos, the front end, a dialog box) shows on a quad fixed in
+  // the room, with the screen of the PC. 0: no screen quad, the app shows no
+  // frame with no scene.
+  app.xr.SetScreenQuadOn(app.ini.GetInt("bwvr", "stream_screen", 1) != 0);
   // input_live=1: the session also reads the input of the mod, and each frame
   // goes into bwvr-input.chan of the game folder. 0: the app reads only the
   // input of its menu.
@@ -980,7 +1058,7 @@ void android_main(android_app* android) {
   // into the game folder (docs/android.md, "The stream of the walks").
   if (replay) {
     PlayStreamFile(app.game.folder + "/bwvr-stream.bin", app.game.folder);
-    if (app.xr_on && !ShowEyes(&app)) {
+    if (app.xr_on && !ShowPicture(&app)) {
       AppLog("replay       : no picture of the renderer for the session");
     }
   }

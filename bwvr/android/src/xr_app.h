@@ -163,6 +163,29 @@ class XrApp {
                        const quad_layer_math::AppPictures& pictures, VkImage panel,
                        uint32_t panel_width, uint32_t panel_height);
 
+  // THE SCREEN QUAD (stream_screen, docs/android.md, "The screens with no
+  // scene"). On (1, the default): a frame with no scene of the mod (the
+  // logos, the videos, the front end, a dialog box) shows on one quad fixed
+  // in the room, with the pose and the size of its kScreen
+  // (src/mod/screen_quad_math.h), as the screen of the PC. It is never a
+  // projection layer. The menu and the cursor stay over it. Off (0): the
+  // app shows no frame with no scene. Before Start.
+  void SetScreenQuadOn(bool on) { screen_quad_on_ = on; }
+  bool ScreenQuadOn() const { return screen_quad_on_; }
+  // A new screen picture: layer `layer` of `image` (the picture of the last
+  // walk of the renderer, image_width by image_height, in the layout of a
+  // color attachment), or the pixels of the CPU (RGBA, width by height). The
+  // quad shows the picture in place of the pictures of the world until
+  // ClearScreenQuad.
+  void SetScreenQuadImage(const scene_stream::ScreenBody& body, VkImage image,
+                          uint32_t layer, uint32_t image_width, uint32_t image_height);
+  void SetScreenQuadPixels(const scene_stream::ScreenBody& body,
+                           const std::vector<uint8_t>& rgba, uint32_t width,
+                           uint32_t height);
+  // The pictures of the world come again, or the game ended.
+  void ClearScreenQuad() { flat_on_ = false; }
+  bool ScreenQuadShown() const { return flat_on_; }
+
  private:
   struct Layer {
     XrSwapchain swapchain = XR_NULL_HANDLE;
@@ -243,6 +266,27 @@ class XrApp {
   bool said_panel_ = false;
   bool said_walls_ = false;
   bool said_window_ = false;
+
+  // THE SCREEN QUAD.
+  bool screen_quad_on_ = true;  // stream_screen
+  bool flat_on_ = false;        // the newest picture is a screen
+  bool flat_cpu_ = false;       // its source is the pixels of the CPU
+  scene_stream::ScreenBody flat_body_ = {};
+  Screen flat_;                 // one swapchain for the picture of the walk
+  Layer flat_pixels_;           // a swapchain with staging for the pixels of the CPU
+  bool flat_pixels_failed_ = false;
+  VkImage flat_source_ = VK_NULL_HANDLE;
+  uint32_t flat_layer_ = 0;
+  uint32_t flat_width_ = 0;
+  uint32_t flat_height_ = 0;
+  uint64_t flat_frames_ = 0;    // frames of the session with the screen quad
+  uint64_t flat_pictures_ = 0;  // new screen pictures
+  // The source, the size and the quad in the log, for one line at a change.
+  int said_flat_source_ = -1;
+  uint32_t said_flat_width_ = 0;
+  uint32_t said_flat_height_ = 0;
+  float said_flat_size_[2] = {0.0f, 0.0f};
+  int flat_lines_ = 0;
 
   XrInstance instance_ = XR_NULL_HANDLE;
   XrSystemId system_ = XR_NULL_SYSTEM_ID;

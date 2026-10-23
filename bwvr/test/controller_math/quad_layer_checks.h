@@ -130,9 +130,9 @@ inline void QuadLayerChecks() {
         "the records kPanel and kWindow have one layout for the mod and the app",
         static_cast<double>(sizeof(ss::PanelBody) + sizeof(ss::WindowBody)), 312);
   Check(ss::kCard == 19 && ss::kCardPicture == 20 && ss::kPanel == 21 &&
-            ss::kWindow == 22 && ss::kLastKind == ss::kWindow,
-        "the kinds of the quad layers are 19 to 22, and kWindow is the last kind",
-        static_cast<double>(ss::kLastKind), 22);
+            ss::kWindow == 22 && ss::kLastKind == ss::kScreen && ss::kScreen == 23,
+        "the kinds of the quad layers are 19 to 22, and kScreen (23) is the last kind",
+        static_cast<double>(ss::kLastKind), 23);
   {
     // The reader of the ring takes the new kinds, and no kind after them.
     ss::Writer w;
@@ -146,13 +146,13 @@ inline void QuadLayerChecks() {
     bool bad = false, whole = false;
     uint64_t frame = 0;
     const size_t n = stream_ring::UnitBytes(unit.data(), unit.size(), 1u << 20, &bad, &frame, &whole);
-    uint32_t next = ss::kWindow + 1;
+    uint32_t next = ss::kLastKind + 1;
     std::vector<uint8_t> wrong = unit;
     memcpy(wrong.data() + 32, &next, 4);  // the head of the kWindow record
     bool bad2 = false;
     stream_ring::UnitBytes(wrong.data(), wrong.size(), 1u << 20, &bad2, &frame, &whole);
     Check(n == unit.size() && !bad && bad2,
-          "a frame of the ring with a kWindow is whole, and a record of the kind 23 is not of the stream",
+          "a frame of the ring with a kWindow is whole, and a record of the kind 24 is not of the stream",
           static_cast<double>(n), static_cast<double>(unit.size()));
   }
 

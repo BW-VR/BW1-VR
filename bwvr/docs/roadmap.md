@@ -580,7 +580,9 @@ that moves while the Hand takes it.
   picture of the controller with the button lit, then a 3D model of the
   controller (`controller-hints.md`).
 - **P9. The pointer on the interface panel**, and the screens with no
-  scene (menus, loading, videos) on a panel in the room (`ui-layer.md`).
+  scene (menus, loading, videos) on a panel in the room with a session of
+  the mod on the PC (`ui-layer.md`, section 6). The headset app has the
+  screen quad.
 - **P10. The tabletop mode** (play mode 3) is a test mode. Not built: a
   game camera over the table, the mouse, the wheel, the stick and the
   double click for the table, the ring and the depth key for the key color,
@@ -800,10 +802,14 @@ that moves while the Hand takes it.
     stream and the input channel (`android.md`, "Play in the app"). On a
     Quest 3 the arm64-v8a tree runs the test program and the game with
     `wowbox64.dll` to the dialog of a new profile, and the mod reads the
-    input channel under Box64. Open: a game folder with no profile (the game
-    then waits in a dialog before its first frame, and the live stream has
-    no frame there), the sound (Wine has no audio driver on Android), and
-    the frame pace with `vk_device=0`. The input of
+    input channel under Box64. The logos, the videos, the front end and the
+    dialog boxes go into the live stream as screen frames, and the app shows
+    them on a quad fixed in the room (`android.md`, "The screens with no
+    scene"). Open: a game folder with no profile (the game then waits in the
+    dialog of a new profile, and the pointer, the clicks and a text input on
+    the screen quad are not built), the sound (Wine has no audio driver on
+    Android), the frame pace with `vk_device=0`, and the screen quad in a
+    headset. The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the

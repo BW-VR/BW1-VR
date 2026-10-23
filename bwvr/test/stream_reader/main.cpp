@@ -66,6 +66,17 @@
 //     each other frame of both has the same count of records, and no other
 //     record differs.
 //
+//   bwvr_stream_reader screens <stream>
+//     Writes each record of the screen of a frame with no scene (kScreen,
+//     src/mod/screen_quad_math.h) of a stream or a capture: the frame, the
+//     source of the picture, the size, the quad as the OpenXR test runtime of
+//     the app reports it, and the walks of its frame. Counts the screen
+//     frames (screen_quad_math::IsScreenFrame) and the frames of the scene.
+//     Checks that each kScreen is in a screen frame, that the app can show it
+//     (ScreenShows), and that a screen of the pixels of the CPU has its
+//     surface with its pixels before it. Exit code 0 when the stream has a
+//     kScreen and each check holds.
+//
 //   bwvr_stream_reader window-feed <stream> <out stream> <first frame> <last frame> <crop> <edge>
 //     A test feed of the cut scene window for the app: a copy of the stream
 //     in which each frame from <first frame> to <last frame> is a frame of
@@ -86,6 +97,7 @@
 #include <vector>
 
 #include "../../src/mod/quad_layer_math.h"
+#include "../../src/mod/screen_quad_math.h"
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
 #include "../../src/mod/view_layer_math.h"
@@ -1069,7 +1081,7 @@ const char* KindName(uint32_t kind) {
       "kWalkBegin", "kWalkEnd",    "kRenderState", "kStageState", "kTexture",
       "kDraw",      "kTarget",     "kViewport",  "kClear",       "kPanelBind",
       "kSurface",   "kWritten",    "kFrameEnd",  "kView",        "kCard",
-      "kCardPicture", "kPanel",    "kWindow"};
+      "kCardPicture", "kPanel",    "kWindow",     "kScreen"};
   return kind <= ss::kLastKind ? kNames[kind] : "?";
 }
 
@@ -1108,6 +1120,9 @@ int IdPlaces(uint32_t kind, size_t places[6]) {
       return 1;
     case ss::kWritten:
       places[0] = 0;
+      return 1;
+    case ss::kScreen:
+      places[0] = offsetof(ss::ScreenBody, surface);
       return 1;
     default:
       return 0;
@@ -1410,6 +1425,84 @@ int RunCompare(const char* a_path, const char* b_path, const char* may_differ,
              : 1;
 }
 
+// THE SCREENS OF A STREAM (screens).
+int Screens(const char* path) {
+  std::vector<uint8_t> file;
+  if (!ReadFile(path, &file)) {
+    printf("screens      : FAULT no stream at %s\n", path);
+    return 2;
+  }
+  ss::Reader r(file.data(), file.size());
+  if (!r.Ok()) {
+    printf("screens      : FAULT %s is not a stream\n", path);
+    return 2;
+  }
+  namespace sq = screen_quad_math;
+  std::map<uint64_t, bool> pixels;  // the surfaces with their pixels in the stream
+  uint64_t frame = 0, screen_frames = 0, scene_frames = 0, screens = 0, cpu = 0;
+  uint64_t walks = 0, faults = 0, lines = 0;
+  ss::Kind kind;
+  const uint8_t* body = nullptr;
+  uint32_t bytes = 0;
+  while (r.Next(&kind, &body, &bytes)) {
+    if (kind == ss::kFrame) {
+      ss::FrameBody f;
+      if (!ss::Body(body, bytes, &f)) continue;
+      frame = f.frame;
+      walks = 0;
+      if (sq::IsScreenFrame(frame)) {
+        ++screen_frames;
+      } else {
+        ++scene_frames;
+      }
+    } else if (kind == ss::kStart) {
+      pixels.clear();
+    } else if (kind == ss::kSurface) {
+      ss::SurfaceBody b;
+      if (ss::Body(body, bytes, &b)) pixels[b.surface] = b.has_pixels != 0;
+    } else if (kind == ss::kWritten) {
+      uint64_t id = 0;
+      if (ss::Body(body, bytes, &id)) pixels[id] = false;
+    } else if (kind == ss::kWalkBegin) {
+      ++walks;
+    } else if (kind == ss::kScreen) {
+      ss::ScreenBody b;
+      if (!ss::Body(body, bytes, &b)) continue;
+      ++screens;
+      const bool is_cpu = (b.flags & ss::kScreenCpu) != 0;
+      if (is_cpu) ++cpu;
+      std::string verdict;
+      if (!sq::IsScreenFrame(frame)) verdict += " FAULT not in a screen frame";
+      if (!sq::ScreenShows(b)) verdict += " FAULT the app cannot show it";
+      if (is_cpu && !pixels[b.surface]) verdict += " FAULT no pixels of its surface before it";
+      if (!verdict.empty()) ++faults;
+      quad_layer_math::QuadSpec q;
+      sq::Spec(b, b.width, b.height, &q);
+      // The first 40 screens, each fault, and each 1000th screen.
+      if (lines < 40 || !verdict.empty() || screens % 1000 == 0) {
+        ++lines;
+        printf("screens      : frame %llu, screen %llu, %s, %ux%u, %llu walks in its "
+               "frame, quad %.4f %.4f %.4f turn %.4f %.4f %.4f %.4f size %.4f %.4f rect "
+               "%d %d %dx%d eye %u flags %u%s\n",
+               static_cast<unsigned long long>(frame),
+               static_cast<unsigned long long>(b.count),
+               is_cpu ? "the pixels of the CPU" : "the picture of the last walk", b.width,
+               b.height, static_cast<unsigned long long>(walks), q.position[0], q.position[1],
+               q.position[2], q.orientation[0], q.orientation[1], q.orientation[2],
+               q.orientation[3], q.size[0], q.size[1], q.rect[0], q.rect[1], q.rect[2],
+               q.rect[3], q.eye, q.flags, verdict.c_str());
+      }
+    }
+  }
+  printf("screens      : %s has %llu screen frames and %llu frames of the scene, %llu "
+         "records kScreen (%llu with the pixels of the CPU), %llu faults%s\n",
+         path, static_cast<unsigned long long>(screen_frames),
+         static_cast<unsigned long long>(scene_frames), static_cast<unsigned long long>(screens),
+         static_cast<unsigned long long>(cpu), static_cast<unsigned long long>(faults),
+         r.Broken() ? ", and the stream stops in a record" : "");
+  return screens > 0 && faults == 0 && !r.Broken() ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1435,6 +1528,7 @@ int main(int argc, char** argv) {
     const char* kinds = argc >= 5 && strcmp(argv[4], "-") != 0 ? argv[4] : nullptr;
     return RunCompare(argv[2], argv[3], kinds, argc == 6 ? argv[5] : nullptr);
   }
+  if (argc == 3 && strcmp(argv[1], "screens") == 0) return Screens(argv[2]);
   if (argc == 8 && strcmp(argv[1], "window-feed") == 0) {
     return WindowFeed(argv[2], argv[3], strtoull(argv[4], nullptr, 10),
                       strtoull(argv[5], nullptr, 10), atoi(argv[6]), atoi(argv[7]));
@@ -1446,6 +1540,7 @@ int main(int argc, char** argv) {
          "bwvr_stream_reader layers <stream> [<bwvr-layer.rec> or -] [<folder for the card pictures>]\n"
          "bwvr_stream_reader layer-compare <bwvr-layer.rec> <bwvr-layer.rec>\n"
          "bwvr_stream_reader run-compare <stream of run A> <stream of run B> [kinds that may differ or -] [stream of run C]\n"
+         "bwvr_stream_reader screens <stream>\n"
          "bwvr_stream_reader window-feed <stream> <out stream> <first frame> <last frame> <crop> <edge>\n");
   return 1;
 }

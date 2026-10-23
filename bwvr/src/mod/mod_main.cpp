@@ -50,6 +50,7 @@
 #include "vr_start_math.h"
 #include "xr_input.h"
 #include "xr_layers.h"
+#include "screen_quad_math.h"
 
 bool ProxyLoadRealDDraw();
 const char* ProxyBackendNote();
@@ -103,6 +104,9 @@ void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
 void IntroSetScreen(bwvr::XrScreen* screen);
 void IntroInstall();
 bool IntroFinishFrame();
+bool IntroInPass();
+// setup_box.cpp: one line of the log for each dialog box that comes up.
+void SetupBoxWatchFrame(uint64_t finish_frame);
 // eye_clean.cpp: the frame before of each eye.
 void EyeCleanSetOptions(int key, int test, int test_frame);
 void EyeCleanInstall();
@@ -613,6 +617,12 @@ int g_vk_stream_live_drop_us = 0;
 // walk (1). 0: the first way of each.
 int g_vk_stream_live_drop = 1;
 int g_vk_stream_live_end = 1;
+// vk_stream_screens (vk_stream.h): with xr_input=1 a frame with no scene
+// goes into the live stream on a screen (1). 0: no frame with no scene.
+// vk_stream_screen_test: each Nth screen frame saves its pictures (a test
+// aid). 0: none.
+int g_vk_stream_screens = 1;
+int g_vk_stream_screen_test = 0;
 int g_vk_scene_follow = 1;
 int g_vk_panel = 1;
 int g_vk_only = 1;
@@ -1612,6 +1622,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_stream_live_drop", 1, path) != 0 ? 1 : 0;
   g_vk_stream_live_end =
       GetPrivateProfileIntA("bwvr", "vk_stream_live_end", 1, path) != 0 ? 1 : 0;
+  g_vk_stream_screens =
+      GetPrivateProfileIntA("bwvr", "vk_stream_screens", 1, path) != 0 ? 1 : 0;
+  g_vk_stream_screen_test = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "vk_stream_screen_test", 0, path));
   g_vk_scene_follow =
       GetPrivateProfileIntA("bwvr", "vk_scene_follow", 1, path) != 0 ? 1 : 0;
   g_vk_panel = GetPrivateProfileIntA("bwvr", "vk_panel", 1, path) != 0 ? 1 : 0;
@@ -2065,6 +2079,15 @@ void StartVrStep() {
     VkStreamSetOptions(g_vk_stream_record, g_vk_stream_frames, g_vk_stream_live,
                        g_vk_stream_live_drop_us, g_vk_stream_live_drop,
                        g_vk_stream_live_end);
+    // The screens with no scene go to the headset app only with the input
+    // channel. With xr_input=0 the PC shows them as before.
+    if (XrInputOn() && g_vk_stream_screens == 0) {
+      ModLog("vk stream    : vk_stream_screens=0. The live stream has no frame with "
+             "no scene, so the headset app shows nothing of the logos, the videos, "
+             "the front end and the dialog boxes before the first frame of the scene");
+    }
+    VkStreamSetScreens(XrInputOn() && g_vk_stream_screens != 0,
+                       g_vk_stream_screen_test, g_distance, g_width);
     if ((g_foveation != 0 || g_fovea_res != 0) && g_vk_scene == 0 &&
         !vk_eyes && !direct) {
       ModLog("vk scene     : foveation=%d and fovea_res=%d, but the eye "
@@ -2443,6 +2466,8 @@ void __cdecl h_FinishFrame() {
   UiPanelAfterFinish(in_pass, g_frame);
   // The ears and the advisors. It latches itself to one run per frame.
   AudioFrame();
+  // The log names each dialog box that comes up (setup_box.cpp).
+  SetupBoxWatchFrame(g_frame);
 
   // Shutdown never runs when the game is force killed, and it usually is
   // during a test. So the accounting report goes out while the game runs.
@@ -2481,6 +2506,21 @@ void __cdecl h_FinishFrame() {
   // The logos at the start of the game end on a press of a controller
   // button. The caller of FinishFrame says which logo plays.
   IntroSkipFrame(reinterpret_cast<uintptr_t>(_ReturnAddress()), g_screen);
+
+  // THE SCREENS WITH NO SCENE FOR THE HEADSET APP (vk_stream_screens,
+  // screen_quad_math.h). With xr_input=1 there is no session below, so a
+  // frame that the StereoIdle path shows on the PC goes into the live stream
+  // as a screen frame, with the screen of the PC.
+  {
+    const screen_quad_math::Route route = screen_quad_math::ScreenRoute(
+        g_vk_stream_screens != 0, XrInputOn(), in_pass, IntroInPass(),
+        g_stereo, StereoIdle());
+    if (route != screen_quad_math::Route::kNone) {
+      VkStreamScreen(route == screen_quad_math::Route::kShows, g_distance, g_width);
+    } else if (IntroInPass()) {
+      VkStreamScreenStop();
+    }
+  }
 
   // The intro draws its own eye passes and sends them itself. Its
   // FinishFrame must not also go out as a flat picture.
@@ -2914,6 +2954,7 @@ void Shutdown(const char* path) {
   ModLog("shutdown     : the shutdown starts, %s, frame %llu", path, g_frame);
   XrInputReport();
   XrLayersReport();
+  VkStreamScreenReport();
   LogDirect3DModules("the shutdown starts");
   // Let the cursor go before anything else. A clipped cursor outlives the
   // process that clipped it, so a crash here would leave the pointer trapped

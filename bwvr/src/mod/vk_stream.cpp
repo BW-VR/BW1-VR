@@ -14,6 +14,7 @@
 #include "../common/bw_addresses.h"
 #include "one_walk.h"
 #include "quad_layer_math.h"
+#include "screen_quad_math.h"
 #include "stream_ring.h"
 #include "stream_split.h"
 #include "ui_panel.h"
@@ -64,6 +65,9 @@ bool g_unit_record = false;
 bool g_unit_live = false;
 bool g_unit_keep = false;  // the frame has a kStart, a kSurface or a kWritten
 uint64_t g_unit_frame = 0;
+// The open frame is a screen frame (VkStreamScreen): it ends at the end of
+// its FinishFrame, and a frame of the scene after it ends it.
+bool g_unit_screen = false;
 bool g_was_on = false;
 // The surfaces in the stream, and the ones that the game wrote since their
 // pixels went in.
@@ -108,6 +112,27 @@ struct Live {
 };
 Live g_live;
 LARGE_INTEGER g_ticks = {};
+
+// THE SCREENS WITH NO SCENE (vk_stream_screens, screen_quad_math.h).
+struct Screens {
+  bool on = false;     // vk_stream_screens=1 and xr_input=1
+  int test_every = 0;  // vk_stream_screen_test
+  uint64_t count = 0;  // the screen frames
+  screen_quad_math::ScreenSource source;
+  // For the log: the screen frames with a kScreen in the stream, the last
+  // source, and the run of screen frames now.
+  uint64_t streamed = 0;
+  uint64_t cpu = 0;
+  int last_source = -1;  // 0 the walk, 1 the CPU
+  int source_lines = 0;
+  bool in_screens = false;
+  uint64_t run_first = 0;
+  uint64_t run_streamed = 0;
+  // The line of the rate, each 30 s while the screens run.
+  ULONGLONG rate_tick = 0;
+  uint64_t rate_count = 0;
+};
+Screens g_screens;
 
 uint64_t Id(const void* p) { return reinterpret_cast<uintptr_t>(p); }
 
@@ -429,8 +454,10 @@ scene_stream::StartBody* VkStreamOptions() { return &g_options; }
 void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
   if ((g_record_frame == 0 || g_done) && !g_live.want && !g_unit_open) return;
   // intro_vr.cpp gives VkSceneFrame(0, ...) for its pictures. It is not a
-  // frame of the game, so it ends no frame of the stream.
-  if (g_unit_open && frame < g_unit_frame) {
+  // frame of the game, so it ends no frame of the stream. A screen frame has
+  // a number above each frame of the scene (screen_quad_math.h), and a frame
+  // of the scene after it ends it.
+  if (g_unit_open && !g_unit_screen && frame < g_unit_frame) {
     ss::FrameBody body = {frame, name, capture ? 1u : 0u, 0};
     g_writer.Record(ss::kFrame, &body, sizeof(body));
     return;
@@ -448,6 +475,15 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
   }
   g_unit_open = false;
   g_unit_ended = false;
+  g_unit_screen = false;
+  // The first frame of the scene after a run of screen frames.
+  if (g_screens.in_screens && !screen_quad_math::IsScreenFrame(frame)) {
+    g_screens.in_screens = false;
+    ModLog("vk stream    : the screens with no scene end at frame %llu: %llu screen "
+           "frames since screen frame %llu, %llu of them with a screen in the stream",
+           frame, g_screens.count - g_screens.run_first + 1, g_screens.run_first,
+           g_screens.run_streamed);
+  }
   if (g_options.direct == 0) {
     // Only with backend=vulkan each call comes on the frame thread in the
     // order of the walk.
@@ -555,9 +591,10 @@ void VkStreamWalkEnd() {
   // The first walk with both eyes ends the frame, so the reader has it in the
   // game frame of its walks. With the layers (VkStreamSetLayers) the layers
   // end it.
+  // A screen frame ends at the end of its FinishFrame (VkStreamScreen).
   if (quad_layer_math::WhereFrameEnds(g_end_at_walk, g_end_at_layers) ==
           quad_layer_math::FrameEnd::kAtWalk &&
-      g_unit_open && !g_unit_ended && stream_split::WalkEndsFrame(state)) {
+      g_unit_open && !g_unit_ended && !g_unit_screen && stream_split::WalkEndsFrame(state)) {
     g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
     Deliver();
     g_unit_ended = true;
@@ -662,4 +699,174 @@ void VkStreamWritten(void* surface) {
   const uint64_t id = Id(surface);
   g_writer.Record(ss::kWritten, &id, sizeof(id));
   g_unit_keep = true;
+}
+
+// THE SCREENS WITH NO SCENE (vk_stream_screens, screen_quad_math.h).
+namespace {
+
+// The render target of the device of the game, with a reference. Null when
+// the game has no device.
+IDirectDrawSurface7* RenderTarget() {
+  IDirect3DDevice7** slot =
+      reinterpret_cast<IDirect3DDevice7**>(bw::render::kDirect3DDevice7);
+  if (IsBadReadPtr(slot, sizeof(void*)) || *slot == nullptr) return nullptr;
+  IDirectDrawSurface7* target = nullptr;
+  if (FAILED((*slot)->GetRenderTarget(&target))) return nullptr;
+  return target;
+}
+
+// The next screen frame opens, for the walks of the next FinishFrame. With
+// no record and no reader it does not open (VkStreamFrame).
+void StartScreen() {
+  const uint64_t n = ++g_screens.count;
+  const uint64_t frame = screen_quad_math::ScreenFrame(n);
+  if (!g_screens.in_screens) {
+    g_screens.in_screens = true;
+    g_screens.run_first = n;
+    g_screens.run_streamed = 0;
+  }
+  VkSceneFrame(frame, frame, screen_quad_math::ScreenCapture(n, g_screens.test_every));
+  if (g_unit_open && g_unit_frame == frame) g_unit_screen = true;
+}
+
+// The open screen frame ends: with a kScreen when the PC shows it, then
+// kFrameEnd. The records after it go into the next screen frame.
+void EndScreen(bool shows, float distance_m, float width_m) {
+  if (shows) {
+    IDirectDrawSurface7* target = RenderTarget();
+    uint32_t tw = 0, th = 0;
+    if (target != nullptr) {
+      DDSURFACEDESC2 desc = {};
+      desc.dwSize = sizeof(desc);
+      if (SUCCEEDED(target->GetSurfaceDesc(&desc))) {
+        tw = desc.dwWidth;
+        th = desc.dwHeight;
+      }
+    }
+    const bool walk = g_screens.source.Walk(tw, th);
+    // The pixels of the CPU go before the record, when the stream does not
+    // have them since the last write of the game.
+    if (!walk && target != nullptr) Surface(target, true);
+    const ss::ScreenBody body = screen_quad_math::MakeScreen(
+        g_screens.count, !walk, Id(target), tw, th, distance_m, width_m);
+    if (target != nullptr) target->Release();
+    if (screen_quad_math::ScreenShows(body)) {
+      g_writer.Record(ss::kScreen, &body, sizeof(body));
+      ++g_screens.streamed;
+      ++g_screens.run_streamed;
+      if (!walk) ++g_screens.cpu;
+      const int source = walk ? 0 : 1;
+      if (g_screens.last_source < 0) {
+        ModLog("vk stream    : screen frame %llu is the first frame with no scene in "
+               "the stream: %s, %u by %u, on a quad %.2f by %.2f m, %.2f m in front of "
+               "the origin of the room",
+               g_screens.count,
+               walk ? "the picture of the last walk"
+                    : "the pixels that the game wrote into the render target",
+               tw, th, body.size[0], body.size[1], distance_m);
+      } else if (source != g_screens.last_source && g_screens.source_lines < 24) {
+        ++g_screens.source_lines;
+        ModLog("vk stream    : screen frame %llu: the picture is now %s",
+               g_screens.count,
+               walk ? "the picture of the last walk"
+                    : "the pixels that the game wrote into the render target");
+      }
+      g_screens.last_source = source;
+    }
+  }
+  g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
+  Deliver();
+  g_unit_ended = true;
+  g_unit_keep = false;
+  g_writer.Clear();
+}
+
+}  // namespace
+
+void VkStreamSetScreens(bool on, int test_every, float distance_m, float width_m) {
+  g_screens.on = on;
+  g_screens.test_every = test_every > 0 ? test_every : 0;
+  if (!on) return;
+  ModLog("vk stream    : vk_stream_screens=1. A frame with no scene (the logos, the "
+         "videos, the front end, a dialog box) is a screen frame of the live "
+         "stream, number %llu and up, and the headset app shows it on a quad "
+         "%.2f m wide, %.2f m in front of the origin of the room. "
+         "vk_stream_screen_test=%d",
+         screen_quad_math::kScreenFrameBase + 1, width_m, distance_m,
+         g_screens.test_every);
+}
+
+void VkStreamScreen(bool shows, float distance_m, float width_m) {
+  if (!g_screens.on) return;
+  const ULONGLONG now = GetTickCount64();
+  if (g_screens.rate_tick == 0) {
+    g_screens.rate_tick = now;
+    g_screens.rate_count = g_screens.count;
+  } else if (now - g_screens.rate_tick >= 30000) {
+    ModLog("vk stream    : screen frame %llu, %.1f screen frames a second in the last "
+           "%.1f s. %llu of the %llu screen frames had a screen in the stream",
+           g_screens.count,
+           (g_screens.count - g_screens.rate_count) * 1000.0 / (now - g_screens.rate_tick),
+           (now - g_screens.rate_tick) / 1000.0, g_screens.streamed, g_screens.count);
+    g_screens.rate_tick = now;
+    g_screens.rate_count = g_screens.count;
+  }
+  // After a frame of the scene, the walks of this FinishFrame are in the
+  // tail of that frame: they get a screen frame of their own.
+  if (g_unit_open && g_unit_ended && !g_unit_screen) StartScreen();
+  if (g_unit_open && g_unit_screen && !g_unit_ended) EndScreen(shows, distance_m, width_m);
+  StartScreen();
+}
+
+void VkStreamScreenStop() {
+  if (!g_screens.on || !g_unit_screen) return;
+  // The open screen frame ends with no kScreen, and no record goes into the
+  // stream until the next frame of the stream. That frame has the whole
+  // state, because the stream did not see what the game did in between.
+  if (g_unit_open && !g_unit_ended) {
+    g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
+    Deliver();
+  }
+  g_writer.Clear();
+  g_unit_open = false;
+  g_unit_ended = false;
+  g_unit_screen = false;
+  g_vk_stream_on = false;
+  g_was_on = false;
+  if (g_screens.in_screens) {
+    g_screens.in_screens = false;
+    ModLog("vk stream    : the screens with no scene end at screen frame %llu, in an eye "
+           "pass of the intro: %llu screen frames since screen frame %llu, %llu of them "
+           "with a screen in the stream. The intro gives no frame to the stream",
+           g_screens.count, g_screens.count - g_screens.run_first + 1, g_screens.run_first,
+           g_screens.run_streamed);
+  }
+}
+
+void VkStreamScreenWalkBegin(void* device7) {
+  if (!g_screens.on || device7 == nullptr) return;
+  D3DVIEWPORT7 v = {};
+  if (SUCCEEDED(static_cast<IDirect3DDevice7*>(device7)->GetViewport(&v))) {
+    g_screens.source.OnWalkBegin(v.dwWidth, v.dwHeight);
+  }
+}
+
+void VkStreamScreenWalkEnd() {
+  if (g_screens.on) g_screens.source.OnWalkEnd();
+}
+
+void VkStreamScreenWritten(void* surface) {
+  if (!g_screens.on || surface == nullptr) return;
+  DDSCAPS2 caps = {};
+  const bool target =
+      SUCCEEDED(static_cast<IDirectDrawSurface7*>(surface)->GetCaps(&caps)) &&
+      (caps.dwCaps & DDSCAPS_3DDEVICE) != 0;
+  g_screens.source.OnWritten(target);
+}
+
+void VkStreamScreenReport() {
+  if (!g_screens.on || g_screens.count == 0) return;
+  ModLog("vk stream    : %llu screen frames, %llu of them with a screen in the stream, "
+         "%llu of those with the pixels of the CPU",
+         g_screens.count, g_screens.streamed, g_screens.cpu);
 }

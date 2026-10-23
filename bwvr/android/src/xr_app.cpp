@@ -4,6 +4,7 @@
 
 #include <mutex>
 
+#include "../../src/mod/screen_quad_math.h"
 #include "app_log.h"
 
 namespace {
@@ -750,7 +751,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   // app adds no motion. A frame of the cut scene window (stream_layers=1)
   // shows the same eye pictures on a quad of each eye at the pose of the
   // window.
-  const bool source = frame_.shouldRender && screen_source_ != VK_NULL_HANDLE;
+  // THE SCREEN QUAD of a frame with no scene (stream_screen=1) takes the
+  // place of the pictures of the world.
+  const bool flat = frame_.shouldRender && flat_on_ && screen_quad_on_;
+  const bool source = frame_.shouldRender && screen_source_ != VK_NULL_HANDLE && !flat;
   const bool want_world = source && projection_on_ && view_newest_ && HasEyes();
   // With stream_projection=0 each picture shows on the stereo screen, a frame
   // of the cut scene window too, and no quad layer of the mod goes out.
@@ -984,6 +988,63 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     }
     ++screen_frames_;
   }
+  if (flat) {
+    // One quad for both eyes, fixed in the room where the mod put it, with
+    // the newest screen picture. A swapchain gets a new image only for a new
+    // picture (xr_copy_on_change).
+    XrSwapchain swapchain = XR_NULL_HANDLE;
+    uint32_t w = 0, h = 0;
+    if (flat_cpu_) {
+      CopyLayer(&flat_pixels_);
+      if (flat_pixels_.released > 0) {
+        swapchain = flat_pixels_.swapchain;
+        w = flat_pixels_.width;
+        h = flat_pixels_.height;
+      }
+    } else if (flat_.between != VK_NULL_HANDLE && flat_source_ != VK_NULL_HANDLE) {
+      CopyImage(&flat_, 0, flat_source_, flat_layer_, flat_width_, flat_height_);
+      if (flat_.layer[0].released > 0) {
+        swapchain = flat_.layer[0].swapchain;
+        w = flat_.layer[0].width;
+        h = flat_.layer[0].height;
+      }
+    }
+    quad_layer_math::QuadSpec s;
+    if (swapchain != XR_NULL_HANDLE && screen_quad_math::Spec(flat_body_, w, h, &s)) {
+      XrCompositionLayerQuad& q = quads[used++];
+      q.layerFlags = s.flags;
+      q.space = local_;
+      q.eyeVisibility = static_cast<XrEyeVisibility>(s.eye);
+      q.subImage.swapchain = swapchain;
+      q.subImage.imageRect.offset = {s.rect[0], s.rect[1]};
+      q.subImage.imageRect.extent = {s.rect[2], s.rect[3]};
+      q.subImage.imageArrayIndex = 0;
+      q.pose.position = {s.position[0], s.position[1], s.position[2]};
+      q.pose.orientation = {s.orientation[0], s.orientation[1], s.orientation[2],
+                            s.orientation[3]};
+      q.size = {s.size[0], s.size[1]};
+      layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
+      ++flat_frames_;
+      // One line for the first quad and for each change of the source, of the
+      // size of the picture or of the quad.
+      const int kind = flat_cpu_ ? 1 : 0;
+      if (flat_lines_ < 40 &&
+          (kind != said_flat_source_ || w != said_flat_width_ || h != said_flat_height_ ||
+           s.size[0] != said_flat_size_[0] || s.size[1] != said_flat_size_[1])) {
+        ++flat_lines_;
+        said_flat_source_ = kind;
+        said_flat_width_ = w;
+        said_flat_height_ = h;
+        said_flat_size_[0] = s.size[0];
+        said_flat_size_[1] = s.size[1];
+        AppLog("xr           : the screen quad shows screen %llu of the mod (%s, %u by %u) "
+               "as one quad layer, %.2f by %.2f m at %.2f %.2f %.2f m",
+               static_cast<unsigned long long>(flat_body_.count),
+               flat_cpu_ ? "the pixels of the CPU" : "the picture of the last walk", w, h,
+               s.size[0], s.size[1], s.position[0], s.position[1], s.position[2]);
+      }
+    }
+  }
   // THE MENU AND THE CURSOR, over each layer of the mod.
   if (frame_.shouldRender && menu_written_ && menu_shown_) {
     CopyLayer(&menu_);
@@ -1034,6 +1095,76 @@ void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
   panel_height_ = panel_height;
   // A new picture has a new panel image.
   if (panel_source_ != VK_NULL_HANDLE) ++panel_.layer[0].revision;
+}
+
+void XrApp::SetScreenQuadImage(const scene_stream::ScreenBody& body, VkImage image,
+                               uint32_t layer, uint32_t image_width, uint32_t image_height) {
+  if (!screen_quad_on_ || image == VK_NULL_HANDLE || image_width == 0 || image_height == 0) {
+    return;
+  }
+  // A picture of a new size needs a new swapchain.
+  if (flat_.between != VK_NULL_HANDLE &&
+      (flat_.layer[0].width != image_width || flat_.layer[0].height != image_height)) {
+    // The GPU may still copy into the swapchain or the image between.
+    vkDeviceWaitIdle(gpu_.device);
+    FreeScreenSet(&flat_);
+  }
+  if (flat_.between == VK_NULL_HANDLE) {
+    if (flat_.failed) return;
+    const char* why = "";
+    if (!MakeScreenSet(&flat_, image_width, image_height, &why, 1)) {
+      AppLog("xr           : the swapchain of the screen quad of %u by %u cannot be made: "
+             "%s. The frames with no scene do not show", image_width, image_height, why);
+      return;
+    }
+    AppLog("xr           : a swapchain of %u by %u for the screen quad (the frames with no "
+           "scene of the mod, stream_screen=1)", image_width, image_height);
+  }
+  flat_body_ = body;
+  flat_cpu_ = false;
+  flat_source_ = image;
+  flat_layer_ = layer;
+  flat_width_ = image_width;
+  flat_height_ = image_height;
+  ++flat_.layer[0].revision;
+  ++flat_pictures_;
+  flat_on_ = true;
+}
+
+void XrApp::SetScreenQuadPixels(const scene_stream::ScreenBody& body,
+                                const std::vector<uint8_t>& rgba, uint32_t width,
+                                uint32_t height) {
+  if (!screen_quad_on_ || width == 0 || height == 0 ||
+      rgba.size() < static_cast<size_t>(width) * height * 4) {
+    return;
+  }
+  if (flat_pixels_.swapchain != XR_NULL_HANDLE &&
+      (flat_pixels_.width != width || flat_pixels_.height != height)) {
+    vkDeviceWaitIdle(gpu_.device);
+    FreeStaging(&gpu_, &flat_pixels_.staging);
+    xrDestroySwapchain(flat_pixels_.swapchain);
+    flat_pixels_ = Layer();
+  }
+  if (flat_pixels_.swapchain == XR_NULL_HANDLE) {
+    if (flat_pixels_failed_) return;
+    if (!MakeLayer(&flat_pixels_, width, height)) {
+      if (flat_pixels_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(flat_pixels_.swapchain);
+      FreeStaging(&gpu_, &flat_pixels_.staging);
+      flat_pixels_ = Layer();
+      flat_pixels_failed_ = true;
+      AppLog("xr           : no swapchain of %u by %u for the pixels of the CPU of the "
+             "screen quad, so those frames with no scene do not show", width, height);
+      return;
+    }
+    AppLog("xr           : a swapchain of %u by %u for the pixels of the CPU of the screen "
+           "quad", width, height);
+  }
+  SetPixels(&flat_pixels_, rgba);
+  ++flat_pixels_.revision;
+  flat_body_ = body;
+  flat_cpu_ = true;
+  ++flat_pictures_;
+  flat_on_ = true;
 }
 
 // The swapchain of a card has the size of its texture, as XrScreen::SendCard
@@ -1587,8 +1718,23 @@ void XrApp::Stop() {
              static_cast<unsigned long long>(panel_.copies[0]));
     }
   }
+  if (flat_pictures_ + flat_frames_ > 0) {
+    AppLog("xr           : the screen quad (stream_screen=%d): %llu screen pictures of the "
+           "mod, %llu frames of the session with the screen quad, %llu copies of the "
+           "picture of a walk, %llu pictures of the pixels of the CPU",
+           screen_quad_on_ ? 1 : 0, static_cast<unsigned long long>(flat_pictures_),
+           static_cast<unsigned long long>(flat_frames_),
+           static_cast<unsigned long long>(flat_.copies[0]),
+           static_cast<unsigned long long>(flat_pixels_.revision - 1));
+  }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   FreeLayers();
+  FreeScreenSet(&flat_);
+  FreeStaging(&gpu_, &flat_pixels_.staging);
+  if (flat_pixels_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(flat_pixels_.swapchain);
+  flat_pixels_ = Layer();
+  flat_source_ = VK_NULL_HANDLE;
+  flat_on_ = false;
   FreeStaging(&gpu_, &menu_.staging);
   FreeStaging(&gpu_, &cursor_.staging);
   FreeScreenSet(&screen_);

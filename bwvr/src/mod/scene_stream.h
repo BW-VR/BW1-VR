@@ -25,7 +25,10 @@
 namespace scene_stream {
 
 constexpr uint32_t kMagic = 0x53535742u;  // "BWSS"
-constexpr uint32_t kVersion = 2;
+// Version 3 has the record kScreen. The reader plays a stream of version 2
+// too: it has no kScreen.
+constexpr uint32_t kVersion = 3;
+constexpr uint32_t kOldestVersion = 2;
 
 enum Kind : uint32_t {
   kStart = 1,         // StartBody: the options of the renderer
@@ -50,9 +53,10 @@ enum Kind : uint32_t {
   kCardPicture = 20,  // CardPictureBody, the pixels: a new picture of a card
   kPanel = 21,        // PanelBody: the panel quads of the frame (XrScreen::SetPanelQuads)
   kWindow = 22,       // WindowBody: the cut scene window of the frame (XrScreen::StageWindow)
+  kScreen = 23,       // ScreenBody: the screen of a frame with no scene (screen_quad_math.h)
 };
 // The last kind. A record of a higher kind is not of the stream.
-constexpr uint32_t kLastKind = kWindow;
+constexpr uint32_t kLastKind = kScreen;
 
 // The values of the other parts of the mod that the renderer reads, at the
 // time of a record (scene_host.h in the app).
@@ -258,6 +262,30 @@ struct WindowBody {
   float alpha;
 };
 
+// THE SCREEN OF A FRAME WITH NO SCENE (kScreen), THE BACK CHANNEL TO THE
+// HEADSET APP (docs/android.md, "The screens with no scene"). The logos, the
+// videos, the front end and the dialog boxes of the game do not walk the
+// scene. On the PC the mod shows such a frame on a screen fixed in the room
+// (mod_main.cpp, h_FinishFrame). With xr_input=1 the mod gives the app the
+// same screen in the frame of the stream: the source of the picture and the
+// quad (src/mod/screen_quad_math.h). The record is the last record of its
+// frame before kFrameEnd.
+//
+// The bits of ScreenBody::flags.
+constexpr uint32_t kScreenCpu = 1u << 0;  // the picture is the pixels of `surface`. Else the picture of the last walk
+
+struct ScreenBody {
+  uint32_t flags;          // kScreenCpu
+  uint32_t reserved0;
+  uint64_t count;          // the screen frames of the mod since its start
+  uint64_t surface;        // kScreenCpu: the render target. A kSurface with its pixels is before this record
+  uint32_t width, height;  // the size of the render target
+  float position[3];       // meters, the center, in the LOCAL space
+  float orientation[4];    // x y z w, the front of the quad is its +z side
+  float size[2];           // meters
+  uint32_t reserved;
+};
+
 // The mod is 32 bit and the app is 64 bit: each body has one size on both.
 static_assert(sizeof(StreamState) == 40, "StreamState");
 static_assert(sizeof(StartBody) == 100, "StartBody");
@@ -301,6 +329,12 @@ static_assert(sizeof(WindowBody) == 136 && offsetof(WindowBody, crop) == 8 &&
                   offsetof(WindowBody, wall_size) == 100 &&
                   offsetof(WindowBody, alpha) == 132,
               "WindowBody");
+static_assert(sizeof(ScreenBody) == 72 && offsetof(ScreenBody, count) == 8 &&
+                  offsetof(ScreenBody, surface) == 16 && offsetof(ScreenBody, width) == 24 &&
+                  offsetof(ScreenBody, position) == 32 &&
+                  offsetof(ScreenBody, orientation) == 44 && offsetof(ScreenBody, size) == 60 &&
+                  offsetof(ScreenBody, reserved) == 68,
+              "ScreenBody");
 
 // THE WRITER: records into a buffer.
 class Writer {
@@ -346,7 +380,7 @@ class Reader {
   Reader(const uint8_t* data, size_t size) : data_(data), size_(size) {
     uint32_t head[2] = {0, 0};
     if (size_ >= sizeof(head)) memcpy(head, data_, sizeof(head));
-    ok_ = head[0] == kMagic && head[1] == kVersion;
+    ok_ = head[0] == kMagic && head[1] >= kOldestVersion && head[1] <= kVersion;
     at_ = ok_ ? sizeof(head) : size_;
   }
   // Records with no head of a stream before them: a frame of the live

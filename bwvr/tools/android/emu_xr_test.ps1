@@ -103,6 +103,20 @@
     they have two different pictures of the cards or more, each with the
     bytes of a new picture that the app logs. For a feed over a fade.
 
+.PARAMETER NoScreen
+    The app has stream_screen=0: no screen quad. With a feed of the screens
+    with no scene (a desk run of screens_run.ps1), the test checks that the
+    runtime has no quad but the menu and the cursor, and no projection layer.
+
+    With such a feed and stream_screen=1 (the default) the test checks the
+    screen quad (docs/android.md, "The screens with no scene"): the log of
+    the app, each quad of the runtime against a record kScreen of the feed
+    (bwvr_stream_reader screens), no stereo screen and no projection layer,
+    the pictures of the screen frames of the feed that the app made
+    (vk_stream_screen_test) against the pictures of the PC, and the picture
+    of the quad that the runtime read back at the end against the picture of
+    the PC of the last frame of the feed.
+
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
     the CPU) or host (the GPU of the PC).
@@ -118,7 +132,8 @@ param(
     [int]$WindowTo = 0,
     [switch]$NoLayers,
     [switch]$QuadFrames,
-    [switch]$NoProjection
+    [switch]$NoProjection,
+    [switch]$NoScreen
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -213,6 +228,32 @@ if ($viewSource -and $Projection) {
     }
     $feedWindow = @($feedNames.Values | Where-Object { $_ -match '^eye 0, eye 1' }).Count -gt 0
 }
+# THE SCREENS WITH NO SCENE: a feed or a stream with records kScreen
+# (bwvr_stream_reader screens). With no kView for a projection layer the app
+# shows its pictures on the screen quad and makes no stereo screen. The
+# reader gives each quad as the test runtime reports it.
+$Screens = $false
+$feedScreens = @{}
+$feedScreenFrames = @()
+$lastScreenFrame = 0
+if ($viewSource) {
+    $screenLines = @(& $StreamReader screens $viewSource 2>&1 | ForEach-Object { "$_" })
+    foreach ($l in $screenLines) {
+        $m = [regex]::Match($l, '^screens      : frame (\d+), screen \d+, [^,]+, \d+x\d+, \d+ walks in its frame, (quad .* eye \d+ flags \d+)$')
+        if ($m.Success) {
+            $feedScreens[$m.Groups[1].Value] = ' ' + $m.Groups[2].Value
+            $feedScreenFrames += [int64]$m.Groups[1].Value
+        }
+    }
+    $screenSummary = $screenLines | Where-Object { $_ -match '^screens      : .* has \d+ screen frames and \d+ frames of the scene, (\d+) records kScreen' } | Select-Object -Last 1
+    if ($screenSummary) {
+        Write-Host ('   ' + $screenSummary)
+        if ([regex]::Match($screenSummary, ', (\d+) records kScreen').Groups[1].Value -ne '0') { $Screens = $true }
+    }
+    if ($feedScreenFrames.Count -gt 0) { $lastScreenFrame = ($feedScreenFrames | Measure-Object -Maximum).Maximum }
+}
+# The feed has screens and no picture of the world in a projection layer.
+$ScreensOnly = $Screens -and -not $Projection
 $Avd = 'bwvr_xr_test'
 $Image = 'system-images;android-34;google_apis;x86_64'
 $Package = 'org.bwvr.quest'
@@ -401,6 +442,7 @@ try {
     if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', "stream_live_feed_ms=$FeedMs") }
     if ($NoLayers) { $iniLines += 'stream_layers=0' }
     if ($NoProjection) { $iniLines += 'stream_projection=0' }
+    if ($NoScreen) { $iniLines += 'stream_screen=0' }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     if ($Stream) { Adb @('push', $Stream, "$AppDir/game/bwvr-stream.bin") }
@@ -461,8 +503,52 @@ try {
         if ($Stream) {
             Expect ($log -match 'replay       : .*: \d+ records, \d+ frames, [1-9]\d* walks') 'the app played the stream'
         }
-        Expect ($log -match 'a stereo screen of two quads') 'the app made the stereo screen'
-        if (-not $Projection) {
+        if ($ScreensOnly) {
+            # THE SCREEN QUAD of the frames with no scene: no stereo screen and
+            # no projection layer.
+            $menuQuadS = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 1600x1200 eye 0 flags 2'
+            $cursorQuadS = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 64x64 eye 0 flags 2'
+            $quadLinesS = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
+            $modQuads = @($quadLinesS | ForEach-Object { [regex]::Replace($_.Groups[2].Value, "($menuQuadS)($cursorQuadS)?$", '') })
+            Expect ($log -notmatch 'a stereo screen of two quads' -and $report -notmatch 'quad 0\.000 0\.100 -2\.600 size 2\.600') 'the app made no stereo screen'
+            Expect ($report -notmatch '(?m)^frame \d+ projection ') 'the runtime had no projection layer'
+            Expect ($feedScreens.Count -gt 0) "the feed has $($feedScreens.Count) records kScreen"
+            if ($NoScreen) {
+                Expect ($log -match 'xr           : stream_screen=0\. No screen quad') 'the app has stream_screen=0'
+                $extraS = @($modQuads | Where-Object { $_ -ne '' })
+                Expect ($quadLinesS.Count -gt 0 -and $extraS.Count -eq 0) "each line of the quads of the runtime has the menu and the cursor alone ($($quadLinesS.Count) lines, $($extraS.Count) with another quad)"
+            } else {
+                Expect ($log -match 'xr           : stream_screen=1\. A frame with no scene of the mod shows on a quad fixed in the room') 'the app has stream_screen=1'
+                $chainS = [regex]::Match($log, 'xr           : a swapchain of (\d+) by (\d+) for the screen quad')
+                Expect $chainS.Success ("the app made the swapchain of the screen quad" + $(if ($chainS.Success) { ", $($chainS.Groups[1].Value) by $($chainS.Groups[2].Value)" } else { '' }))
+                $shownS = [regex]::Match($log, 'xr           : the screen quad shows screen (\d+) of the mod \(([^,]+), (\d+) by (\d+)\) as one quad layer, ([0-9.]+) by ([0-9.]+) m at ([-0-9.]+) ([-0-9.]+) ([-0-9.]+) m')
+                Expect $shownS.Success ("the log says that the screen quad shows a screen of the mod" + $(if ($shownS.Success) { ": screen $($shownS.Groups[1].Value), $($shownS.Groups[2].Value), $($shownS.Groups[5].Value) by $($shownS.Groups[6].Value) m at $($shownS.Groups[7].Value) $($shownS.Groups[8].Value) $($shownS.Groups[9].Value) m" } else { '' }))
+                $withS = @($modQuads | Where-Object { $_ -ne '' })
+                $feedQuadTexts = @($feedScreens.Values | Sort-Object -Unique)
+                $knownS = @($withS | Where-Object { $feedQuadTexts -contains $_ })
+                Expect ($withS.Count -gt 0 -and $knownS.Count -eq $withS.Count) "each quad of the mod that the runtime reports is the quad of a record kScreen of the feed, one opaque quad for both eyes ($($knownS.Count) of $($withS.Count) lines)"
+                if ($withS.Count -gt 0) { Write-Host ('         the runtime: quads' + $withS[0]) }
+                $countS = [regex]::Match($log, 'xr           : the screen quad \(stream_screen=1\): (\d+) screen pictures of the mod, (\d+) frames of the session with the screen quad, (\d+) copies of the picture of a walk, (\d+) pictures of the pixels of the CPU')
+                Expect ($countS.Success -and [int]$countS.Groups[1].Value -gt 0 -and [int]$countS.Groups[2].Value -gt 0 -and ([int]$countS.Groups[3].Value + [int]$countS.Groups[4].Value) -gt 0) ("the app showed the screen pictures on the quad" + $(if ($countS.Success) { ": $($countS.Groups[1].Value) screen pictures, $($countS.Groups[2].Value) frames, $($countS.Groups[3].Value) copies of the picture of a walk, $($countS.Groups[4].Value) pictures of the pixels of the CPU" } else { ' (no line in the log)' }))
+                # The picture of the quad at the end (the capture "saved") is the
+                # picture of the last frame of the feed: against the picture of
+                # the PC of that frame (vk_stream_screen_test).
+                $lastRef = Join-Path $Live ("bwvr-vk-left-$lastScreenFrame.bmp")
+                $savedS = Join-Path $Out 'saved-0.bmp'
+                if ($Live -and (Test-Path -LiteralPath $lastRef)) {
+                    if (Test-Path -LiteralPath $savedS) {
+                        $d = [XrLiveBmpDiff]::Compare($lastRef, $savedS)
+                        Expect ($d[0] -ge 0 -and $d[0] -le 2.0) ("the picture of the screen quad that the runtime read back at the end against the picture of the PC of frame {0}: {1:N2} percent of the pixels differ by more than 24, the mean difference is {2:N2}" -f $lastScreenFrame, $d[0], $d[1])
+                    } else {
+                        Expect $false 'the runtime read back the screen quad at the end (saved-0.bmp)'
+                    }
+                } else {
+                    Write-Host "         the PC has no picture of the last frame $lastScreenFrame of the feed, so the picture of the quad is not compared"
+                }
+            }
+        }
+        if (-not $ScreensOnly) { Expect ($log -match 'a stereo screen of two quads') 'the app made the stereo screen' }
+        if (-not $Projection -and -not $ScreensOnly) {
             # A stream with no kView: the fall back to the stereo screen, one
             # line in the log.
             if (-not $NoProjection) {
@@ -740,7 +826,7 @@ public static class CardBmp {
             Expect ([int]$liveLine.Groups[3].Value -gt 0) "a feed faster than the session: the app skipped the walks of $($liveLine.Groups[3].Value) frames and played $($liveLine.Groups[2].Value) frames whole"
         }
         $what = $(if ($Projection) { 'the projection layer' } else { 'the stereo screen' })
-        Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of $what got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')')
+        if (-not $ScreensOnly) { Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of $what got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')') }
         if ($Projection) {
             $frameLine = [regex]::Match($log, 'xr           : \d+ copies of the projection layer for eye 0 and \d+ for eye 1\. (\d+) frames with the projection layer, (\d+) frames with the stereo screen')
             if (-not $AllWindow) { Expect ($frameLine.Success -and [int]$frameLine.Groups[1].Value -gt 0 -and [int]$frameLine.Groups[2].Value -eq 0) ("each frame with a picture had the projection layer (" + $(if ($frameLine.Success) { "$($frameLine.Groups[1].Value) frames with the projection layer, $($frameLine.Groups[2].Value) with the stereo screen" } else { 'no line in the log' }) + ')') }
@@ -758,6 +844,15 @@ public static class CardBmp {
                 Write-Host "         the feed has the frames $($feedFrames[0]) to $($feedFrames[-1]) and not the test frame $testFrame of the PC, so the app makes no picture of it"
                 $references = @()
             }
+        }
+        # A feed of the screens with no scene: the pictures of the PC of the
+        # screen frames of the feed (vk_stream_screen_test).
+        if ($Screens -and $feedFrames.Count -eq 0) {
+            $inFeed = @($references | Where-Object {
+                $n = [regex]::Match($_.Name, '-(\d+)\.bmp$')
+                $n.Success -and $feedScreenFrames -contains [int64]$n.Groups[1].Value })
+            Write-Host "         the PC has $($references.Count) pictures, $($inFeed.Count) of them of the screen frames of the feed"
+            $references = $inFeed
         }
         if ($references.Count -gt 0 -or $feedFrames.Count -eq 0) { Expect ($references.Count -gt 0) "the PC made $($references.Count) pictures of the test frame" }
         $listing = AdbOut @('shell', 'ls', "$AppDir/game")

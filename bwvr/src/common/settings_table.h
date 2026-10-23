@@ -389,7 +389,7 @@ inline const char* const kRetiredKeys[] = {
     "test_cores", "vk_scene", "vk_scene_test_frame", "vk_scene_follow", "vk_eyes", "xr_vulkan_upload", "vk_panel", "vk_only", "vk_only_test", "vk_upload_queue", "vk_scene_reread_test", "ddraw_census", "test_smt", "test_spin_walk_us", "test_spin_idle_us",
     "test_wake_records", "vulkan_fallback_test", "vk_stream_record",
     "vk_stream_frames", "vk_stream_live", "vk_stream_live_drop_us",
-    "vk_stream_live_drop", "vk_stream_live_end",
+    "vk_stream_live_drop", "vk_stream_live_end", "vk_stream_screen_test",
     "render_thread_test_frame",
     "temple_test_camera_trace",
     "temple_test_click_frame", "temple_test_door_on",

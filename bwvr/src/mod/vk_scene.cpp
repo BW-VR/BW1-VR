@@ -3246,6 +3246,9 @@ bool VkSceneOn() { return g_mode != 0 && !g_failed; }
 
 void VkSceneWalkBegin(void* device7) {
   BWVR_STREAM(VkStreamWalkBegin(device7));
+#ifdef _WIN32
+  VkStreamScreenWalkBegin(device7);
+#endif
   if (!VkSceneOn() || device7 == nullptr) return;
   IDirect3DDevice7* d = static_cast<IDirect3DDevice7*>(device7);
   Seed seed;
@@ -3424,6 +3427,9 @@ void VkSceneClear(uint32_t count, const void* rects, uint32_t flags,
 
 void VkSceneWalkEnd() {
   BWVR_STREAM(VkStreamWalkEnd());
+#ifdef _WIN32
+  VkStreamScreenWalkEnd();
+#endif
   if (!VkSceneOn()) return;
   if (g_direct) {
     EndOnWorker(nullptr);
@@ -4402,6 +4408,9 @@ void VkSceneCounts(uint64_t* walks, uint64_t* draws, uint64_t* clears,
 
 void VkSceneSurfaceWritten(void* surface) {
   BWVR_STREAM(VkStreamWritten(surface));
+#ifdef _WIN32
+  VkStreamScreenWritten(surface);
+#endif
   // A write of the CPU into the render target: its pixels are the newer
   // picture.
   if (g_direct && surface != nullptr) {

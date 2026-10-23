@@ -109,6 +109,12 @@ class Player {
   const view_layer_math::PictureView& View() const { return view_; }
   const quad_layer_math::PictureLayers& Layers() const { return layers_; }
   const quad_layer_math::AppPictures& Pictures() const { return pictures_; }
+  const screen_quad_math::ScreenPicture& Screen() const { return screen_; }
+  // The surface of an id that the stream gave, or null.
+  const StreamSurface* Find(uint64_t id) const {
+    auto it = surfaces_.find(id);
+    return it != surfaces_.end() ? it->second.get() : nullptr;
+  }
 
   void Start(const ss::StartBody& o) {
     // The order of the setters of ReadSettings in mod_main.cpp, then the
@@ -148,6 +154,7 @@ class Player {
         VkSceneFrame(f.frame, f.name, f.capture != 0);
         view_.OnFrame();
         layers_.OnFrame();
+        screen_.OnFrame();
         ++result_->frames;
         break;
       }
@@ -200,6 +207,7 @@ class Player {
         // frame goes with it.
         if (have) view_.OnWalkEnd(stream_split::WalkEndsFrame(s));
         if (have) layers_.OnWalkEnd(stream_split::WalkEndsFrame(s));
+        if (have) screen_.OnWalkEnd(s);
         break;
       }
       case ss::kView: {
@@ -302,9 +310,18 @@ class Player {
         ++result_->layers;
         break;
       }
+      case ss::kScreen: {
+        ss::ScreenBody b;
+        if (!ss::Body(body, bytes, &b)) break;
+        screen_.OnScreen(b);
+        ++result_->screens;
+        break;
+      }
       case ss::kFrameEnd:
-        // The layers of the frame go with its picture.
+        // The layers of the frame go with its picture, and the screen of a
+        // frame with no scene gives the screen picture.
         layers_.OnFrameEnd();
+        screen_.OnFrameEnd();
         break;
       default:
         ++result_->unknown;
@@ -319,6 +336,7 @@ class Player {
   view_layer_math::PictureView view_;
   quad_layer_math::PictureLayers layers_;
   quad_layer_math::AppPictures pictures_;
+  screen_quad_math::ScreenPicture screen_;
   std::vector<uint16_t> indices_;
   std::vector<D3DRECT> rects_;
 };
@@ -354,6 +372,18 @@ const quad_layer_math::FrameLayers& StreamPictureLayers() {
 
 const quad_layer_math::AppPictures& StreamCardPictures() {
   return ThePlayer(nullptr)->Pictures();
+}
+
+const screen_quad_math::ScreenPicture& StreamScreen() { return ThePlayer(nullptr)->Screen(); }
+
+bool StreamSurfacePixels(uint64_t id, const std::vector<uint8_t>** rgba, uint32_t* width,
+                         uint32_t* height) {
+  const StreamSurface* s = ThePlayer(nullptr)->Find(id);
+  if (s == nullptr || s->rgba.empty()) return false;
+  *rgba = &s->rgba;
+  *width = s->width;
+  *height = s->height;
+  return true;
 }
 
 void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result) {
@@ -401,6 +431,10 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
   if (result.views > 0) {
     AppLog("replay       : %llu records of the projection layer of a frame (kView)",
            static_cast<unsigned long long>(result.views));
+  }
+  if (result.screens > 0) {
+    AppLog("replay       : %llu records of the screen of a frame with no scene (kScreen)",
+           static_cast<unsigned long long>(result.screens));
   }
   if (result.layers + result.card_pictures > 0) {
     AppLog("replay       : %llu records of the quad layers of a frame and %llu "

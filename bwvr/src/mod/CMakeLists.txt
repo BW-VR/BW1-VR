@@ -66,6 +66,7 @@ add_library(bwvr_mod SHARED
     controllers.cpp
     xr_input.cpp
     xr_layers.cpp
+    setup_box.cpp
     controller_hints.cpp
     hint_card.cpp
     text_click.cpp

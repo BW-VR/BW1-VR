@@ -52,6 +52,11 @@ Summary:
   scene window (records `kCard`, `kCardPicture`, `kPanel` and `kWindow`). The
   app shows them over the projection layer in the order of the session of
   the mod (`stream_layers=1`, see "The quad layers").
+- The mod gives the app the frames with no scene too: the logos, the
+  videos, the front end and the dialog boxes go into the live stream as
+  screen frames with a record `kScreen`, and the app shows them on a quad
+  fixed in the room, as the screen of the PC (`vk_stream_screens=1`,
+  `stream_screen=1`, see "The screens with no scene").
 - With `vk_device=0` the mod makes no Vulkan instance and no device of its
   own, and its walks only go into the live stream: only the app draws them
   (see "No Vulkan device of the mod").
@@ -99,6 +104,9 @@ Summary:
 | `src/mod/view_layer_math.h` | The projection layer of a frame for the app (the record `kView`): the values that the mod gives its session, the view of a picture in the player of the app, the record of a test. No Windows code |
 | `src/mod/quad_layer_math.h` | The quad layers of a frame for the app (the records `kCard`, `kCardPicture`, `kPanel`, `kWindow`): the values of the calls of the session, the hash and the change of a picture of a card, the order and the quads of `XrScreen::BuildFrame`, the layers of a picture in the player of the app. No Windows code |
 | `src/mod/xr_layers.cpp` | The quad layers of a frame with no session in the mod (`xr_input_layers`), and the record of the layers of a run (`xr_layer_record`) |
+| `src/mod/screen_quad_math.h` | The screens with no scene (the record `kScreen`): the number of a screen frame, the route of a FinishFrame, the source of the picture, the quad of the screen of the PC, the screen in the player of the app. No Windows code |
+| `src/mod/setup_box.cpp`, `src/mod/setup_box_math.h` | The line of the log that names the dialog box that is up, with the class from the RTTI of the game |
+| `tools/desk/screens_run.ps1` | A desktop run of a new game with the screens with no scene through the live stream |
 | `android/src/input_live.cpp` | The writer of the input channel in the app (`input_live`), and the play of the pulses of the mod |
 | `test/input_writer/main.cpp` | The test writer of the input channel on the PC (`bwvr_input_writer.exe`) |
 | `tools/desk/input_channel_run.ps1` | A desktop run with the input channel and the test writer of the PC |
@@ -405,8 +413,11 @@ in it. It writes `resolution_pct=50` (a render of 1380 by 1104) and
 log says "Wine is ready". After the measure it holds the menu button for 90
 frames, presses it for 6 frames, holds it again, points at "Quit game" and
 pulls the trigger. Then "Play in VR": a press of 6 frames, a hold, "Quit
-game". At its end the test deletes the app and the copy. What it shows
-(`-StartMinutes 3 -PlaySeconds 10`):
+game". At its end the test deletes the app and the copy. After the measure
+the runtime reads back the quads (the word `quads`): the picture of the
+screen quad. `-SceneEyes`: the runtime reads back the eye pictures of the
+projection layer too, for a game that comes to a frame of the scene. What
+it shows (`-StartMinutes 10 -PlaySeconds 360`, 93 checks, 0 failed):
 
 - "Play" wrote the keys of the run, and `bwvr.ini` at the start of the game
   has `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1`,
@@ -418,19 +429,25 @@ game". At its end the test deletes the app and the copy. What it shows
   first. It has "vk_device=0. The mod makes no Vulkan instance and no
   device", `vulkan_strict=1`, "xr_input=1" with the channel of the app,
   and the first slot of the app.
-- With `-NEWGAME` and with no word the same: the logo screens (6934 and
-  6972 frames of the game), the video before the intro (2515 frames, about
-  100 s), then the game waits in a dialog box at frame 0 of the
-  controllers: the log of the mod has "controllers : a dialog box is up
-  now, frame 0", and no line names the box. It is likely the dialog of a
-  new profile, because the copy has no profile and `runblack.exe` has a
-  class `NewProfileBox`. This is not proven. The live stream
-  has no frame there: the mod starts a frame of the stream in the frame of
-  the scene (`stereo.cpp`), and the logos, the video and this dialog come
-  before it. So the app shows nothing in the headset while the menu is
-  hidden, the ring file is not made, and no picture of the game goes out.
-  The processes of Wine take one CPU in the dialog (99 and 100 percent in
-  11 s, nearly all `runblack.exe`, the app 1).
+- With `-NEWGAME` and with no word the same: the logo screens (6964 and
+  6953 frames of the game), the video before the intro (2515 frames, about
+  100 s), then the game waits in the dialog of a new profile at frame 0 of
+  the controllers: the log of the mod has "setup box : the dialog box
+  NewProfileBox is up now" (the SetupBox with the vtable `0x008D85F0`, kept
+  by the `NewProfileBox` with the vtable `0x008DEC1C`, the callback
+  `0x0053D210`, at FinishFrame 10000 and 9997). Each of these frames is a
+  screen frame of the live stream (see "The screens with no scene"). The
+  first frame of the game came 11.9 s after "Play" in both games, a screen
+  frame of the logos (`game : the first frame of the game (frame
+  1000000440, a screen with no scene)`). The frame rate of the app each
+  10 s: 672 and 711 in the logos, 25 in the video (9 lines), then 368 to
+  475 in the dialog. The app showed each picture on the screen quad: one
+  quad for both eyes, 2.60 by 2.08 m at 0, 0, -2 m, opaque, with the whole
+  render of 1380 by 1104, no stereo screen and no projection layer. The
+  quad that the runtime read back after 360 s has the dialog of a new
+  profile over the plasma of the front end (`new-0.png`, `play-0.png`).
+  The processes of Wine take 75 and 76 percent of one CPU in 361 s
+  (`runblack.exe` 73 percent, the app 14 percent).
 - The tree of the processes: the process that the app started is
   `start.exe`, and `runblack.exe` has the parent 1.
 - Game 1: the hold showed the menu over the game, the press of 6 frames
@@ -441,15 +458,9 @@ game". At its end the test deletes the app and the copy. What it shows
   frame of the scene (`ControllersFrame` of `stereo.cpp`), so in the dialog
   its log cannot show a press, and it has no line of Esc.
 - The trigger on "Quit game" sent SIGKILL to `start.exe`, which ended with
-  -1 after 215.3 s and 202.0 s. `wineserver -k` ended with 0 after 74 and
-  75 ms, the menu came back with "The game ended with the exit code -1
-  (..., Quit game).", and no process of Wine stayed.
-- The test runs 90 checks, and 15 fail, each for the missing frames of the
-  game: the first frame and the frame rate of each game, the ring of the
-  mod in each game, the frames and the pictures of the reader, the
-  projection layer in the log and in the report of the runtime, the four
-  eye pictures, and the fault of the runtime for the read back of the eyes
-  of a frame with no projection layer.
+  -1 after 440.6 s and 400.8 s. `wineserver -k` ended with 0, the menu came
+  back with "The game ended with the exit code -1 (..., Quit game).", and
+  no process of Wine stayed.
 
 **The sound.** Wine has no audio driver on Android: `mmdevapi` gives "No
 driver from L"pulse,alsa,oss,coreaudio" could be initialized". The game
@@ -472,23 +483,23 @@ gets are not in a log yet.
 
 **The noexec storage:** see "Wine in the app", the patch 0002.
 
-**Not shown yet:** a frame of the game in Wine (the ring, the projection
-layer and the quad layers of a game in Wine, the time from "Play" to the
-first frame, the frame rate and the pace of the frames with
+**Not shown yet:** a frame of the scene of the game in Wine (the projection
+layer and the quad layers of a game in Wine, the pace of the frames with
 `vk_device=0`), a game with a profile and a test save in the emulator, and
-each step in a headset.
+each step in a headset (the screen quad too).
 
 **Known limits:**
 
-- The live stream has no frame before the first frame of the scene: the
-  logos, the videos and a dialog at frame 0 of the controllers (the dialog
-  of a new profile) do not show in the headset. A player with no profile in
-  the game folder sees only the notice.
+- The pointer, the clicks and a text input on the screen quad are not
+  built, so a player with no profile in the game folder sees the dialog of
+  a new profile and cannot leave it.
 - The mod reads the buttons of the input channel only in a frame of the
   scene, so before the first such frame a press of the menu button that
   the app gives to the mod does nothing.
 - "Quit game" does not save the game.
-- With `vk_device=0` and no frame of the scene the game takes a whole CPU.
+- With `vk_device=0` nothing paces the frames with no scene either: the
+  game makes 368 to 711 of them a second in the emulator, and the processes
+  of Wine take three quarters of one CPU.
 
 ## The session
 
@@ -680,6 +691,11 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    first 60 frames of the runtime (the word `quads`) and checks that they
    have two different pictures of a card or more, each with the bytes of a
    new picture that the app logs.
+   A feed of the screens with no scene (a desk run of `screens_run.ps1`, 60
+   checks, see "The screens with no scene"): the test checks the screen quad
+   in place of the stereo screen and the projection layer. `-NoScreen` (56
+   checks) gives the app `stream_screen=0`, and the test checks that each
+   line of the quads of the runtime has the menu and the cursor alone.
 4. **A stream of the game in the emulator** (`emu_replay_test.ps1`, 13
    checks). The stream and the pictures of the PC come from one desktop run
    (see "The stream of the walks"). The emulator has the GPU of the PC
@@ -750,7 +766,8 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    of the calls, the layers of a picture in the player, the state of a frame
    with no walks, the rules of `SendCard`, of a panel quad, of the walls and
    of the columns of the cut scene window, and the order of the layers of
-   `BuildFrame`), and the rules of Wine (`wine_rules_checks.h`: the DLLs
+   `BuildFrame`), and the screens with no scene (`screen_quad_checks.h`),
+   and the rules of Wine (`wine_rules_checks.h`: the DLLs
    that stay out, the paths of each ABI, the build id, the environment of a
    program, the seed of `user.reg`, the marker of the prefix and the copy
    of the CPU DLL, the headers of the tar file and the names that stay in
@@ -1035,11 +1052,13 @@ APK", step 5), and `emu_xr_test.ps1 -Live` in a session of the test runtime
 with one frame each 14 ms (step 3). In the emulator the four pictures of frame 2996 are the same
 as the pictures of the PC, to the byte.
 
-**Not shown yet:** the ring under Wine and Box64 (the mapping of a real
-file by Wine and by the app, and the barriers of Box64), and the frame rate
-of the live stream in a headset. With the game in Wine in the emulator the
-mod made no ring: the game did not come to its first frame of the scene
-("Play in the app").
+**Not shown yet:** the ring under Box64 (the barriers of Box64 in a
+headset), and the frame rate of the live stream in a headset. With the game
+in Wine in the emulator the ring of the mod (a real file of the game folder
+that Wine and the app map) carries the screen frames of the logos, the video
+and the dialog of a new profile: the app took 20749 and 20609 frames whole
+and skipped the walks of 137922 and 120925 ("Play in the app", "The screens
+with no scene").
 
 **Known limits:**
 
@@ -1468,6 +1487,153 @@ the game in Wine.
   percent by more than 24, while the views and the layers of the frame are
   the same bytes. The cause is not known.
 
+## The screens with no scene
+
+The logos, the videos, the front end and the dialog boxes of the game
+(SetupBox) do not walk the scene: the game calls `LH3DRender::FinishFrame`
+outside `GGame::Process3dEngine` (`ui-layer.md`, section 1.4). On the PC
+the StereoIdle path of `h_FinishFrame` (`mod_main.cpp`) shows such a frame
+on a screen in front of the player: the picture of the last walk, or the
+pixels that the game wrote into the render target with the CPU. With
+`xr_input=1` the mod has no session, and the frames of the live stream start
+in the frame of the scene. So the mod gives the app these frames too, and
+the app shows them on a quad fixed in the room.
+
+**The mod** (`vk_stream_screens=1`, the default, only with `xr_input=1`,
+`vk_stream.cpp`, the rules in `src/mod/screen_quad_math.h`). Each
+FinishFrame outside the eye passes of the scene and of the intro is a
+**screen frame** of the stream (`ScreenRoute`): the next screen frame starts
+at the end of a FinishFrame, so its walk and each record before it (a new
+picture of a video texture, `kWritten`) are in it, and it ends at the end
+of its FinishFrame. A frame that the PC shows (`StereoIdle`, 150 ms after
+the last frame of the scene) ends with a record `kScreen` (72 bytes, one
+layout on 32 bit x86 and on 64 bit ARM):
+
+- the source of the picture (`ScreenSource`, the rule of `h_FinishFrame` and
+  `VkSceneLastPicture`): the picture of the last walk, or, when the game
+  wrote the render target with the CPU after that walk or the walk is
+  smaller than the render target, the pixels of the render target. Then a
+  `kSurface` with its pixels comes before the record, when the stream does
+  not have them since the last write.
+- the size of the render target.
+- the quad of the screen of the PC (`MakeScreen`, the screen of
+  `XrScreen::BuildFrame` with no projection layer): the LOCAL space, no
+  turn, `screen_distance_cm` in front of the origin at its height (200),
+  `screen_width_cm` wide (260), and as high as the shape of the picture.
+
+The frame of the controllers does not move in these screens (it is 0 before
+the first game), so a screen frame has the number 1000000000 + its count in
+`kFrame` (`ScreenFrame`). A record (`vk_stream_record`), a picture of a test
+(`vk_scene_test_frame`) and the test reader of the PC can name it.
+`vk_stream_screen_test=N` (a test aid): each Nth screen frame saves the
+pictures of its walk, as F12 does (`bwvr-vk-left-<frame>.bmp`, with a device
+of the mod). A frame of the scene after a screen frame ends it. In an eye
+pass of the intro (`intro_vr=1`) the open screen frame ends, and the stream
+takes no record until its next frame, which has the whole state: the intro
+gives no frame to the stream. The log has a line for the first screen in the
+stream, for each change of the source, for the end of a run of screen
+frames, and the rate of the screen frames each 30 s. The stream has version
+3, and the reader plays a stream of version 2 (no `kScreen`) too.
+`vk_stream_screens=0`: no screen frame, as with `xr_input=0`. The key is not
+a row of `settings_table.h` and not a retired key, so a save keeps it.
+
+**The dialog box** (`setup_box.cpp`): the log names each dialog box that
+comes up, with the class of its dialog object from the RTTI of the game (for
+example `setup box : the dialog box NewProfileBox is up now`), its
+SetupBox, the callback of its controls, the FinishFrame and the frame of
+the controllers (`ui-layer.md`, section 5.2).
+
+**The app** (`stream_screen=1`, the default). The player takes the
+`kScreen` of a frame at its `kFrameEnd` (`ScreenPicture`): a screen of the
+picture of the last walk only when a walk of the frame ended, a screen of
+the pixels of the CPU always (they are state). The newest picture of a
+batch decides: a screen shows on the **screen quad**, a picture of the world
+as before (the projection layer, the stereo screen or the cut scene window).
+The screen quad is one quad layer for both eyes, opaque, with the pose and
+the size of the `kScreen` and the whole picture: the picture of the last
+walk of the renderer (`VkSceneLastPicture`) goes with a blit and a copy into
+a swapchain of its size, the pixels of the CPU go into a swapchain with a
+staging buffer. Each swapchain gets a new image only for a new screen
+picture (`xr_copy_on_change`). It is never a projection layer, and the menu
+and the cursor stay over it. With `ui_panel=1` the dialog boxes of these
+frames are in the picture, as on the PC. The log has a line for the first
+quad and for each change of its source, its size or its quad, and the
+counts at the end. The first frame of the game after "Play" can now be a
+screen frame (`game : the first frame of the game (frame N, a screen with no
+scene)`), and the rate of the frames starts again when the frames of the
+scene start. `stream_screen=0`: no screen quad, the app shows no frame with
+no scene.
+
+**The tests.**
+
+- `.\dev.ps1 build`: the checks of `screen_quad_checks.h` (the layout of
+  `kScreen`, the version, the numbers of the screen frames, the route, the
+  source, the quad of the PC, the screen in the player, a stripped frame,
+  the name of a class from the RTTI).
+- `screens_run.ps1` (a desk run): a new game with the logos (no skip) and
+  `intro_vr=0`, `xr_input=1` with the test writer, the live stream with the
+  test reader in screen frames, a record of the screen frames and the
+  pictures of each Nth screen frame. Then `bwvr_stream_reader screens` of the
+  capture and of the record.
+- `emu_replay_test.ps1` with that record and the pictures of the PC of its
+  screen frames, and `emu_xr_test.ps1 -Live <the run> -Gpu host`: the screen
+  quad against the `kScreen` of the feed, no stereo screen and no projection
+  layer, the pictures of the screen frames of the feed against the pictures
+  of the PC, and the quad that the runtime read back at the end against the
+  picture of the PC of the last frame of the feed. `-NoScreen`: the app with
+  `stream_screen=0`.
+- `emu_game_test.ps1`: the screen quad in the game in Wine (see "Play in the
+  app").
+
+**What the desk runs show** (`screens_run.ps1`, a render of 4080 by 3264,
+`intro_vr=0`, the profile of the PC): the logos are screen frames 1 to about
+6700, the game puts up the dialog box `SkipBox` at about screen frame 7700
+(the log names it), and the Lionhead logo with that box plays as screen
+frames to about 27300, at 742 screen frames a second. Then the frames of the
+scene start. Each `kScreen` of the runs has the picture of the last walk
+(the game wrote no render target with the CPU after a walk), and the quad
+2.60 by 2.08 m at 0, 0, -2 m. A screen frame of a logo has 2.6 KB with no new
+texture. A frame with the whole state has 1.5 MB. The flow of a game folder
+with no profile is another one: the logos, the video before the intro and
+the dialog of a new profile (see "Play in the app"). With `intro_vr=1` the
+Lionhead logo is an intro in stereo, and its frames are not in the stream.
+In the A, B, A runs with `xr_input=0` (the build before, this build, the
+build before, the test save of a new game) the frame time is 1.9 ms in each
+run and the scene 1.73, 1.75 and 1.725 ms: the same within the noise.
+
+**In the emulator** (`-gpu host`): the replay of a record of 4 screen frames
+of the logos gives the pictures of the PC (0.00 percent of the pixels differ
+by more than 24). `emu_xr_test.ps1 -Live` with 40 screen frames of the
+Lionhead logo (60 checks): the app showed 24 screen pictures on the screen
+quad in 398 frames of the session, each quad of the runtime is the quad of a
+`kScreen`, the runtime had no projection layer and no stereo screen, and the
+picture of the quad that the runtime read back at the end differs from the
+picture of the PC of the last frame of the feed in 0.20 percent of the pixels
+by more than 24. The app skipped the walks of 16 frames, and a walk of the
+Lionhead logo draws over the picture of the walk before (`vk_keep_picture`),
+so that is the likely cause.
+`-NoScreen` (56 checks): the menu and the cursor alone.
+
+**The game in Wine** (`emu_game_test.ps1`, see "Play in the app"): the
+logos, the video before the intro and the dialog of a new profile show on
+the screen quad, and the first frame of the game comes 11.9 s after
+"Play".
+
+**Not shown yet:** the screen quad in a headset (its place, its size and the
+sharpness of the text of a dialog), a screen of the pixels of the CPU (no
+run had one), and the screens with no scene with a session of the mod on
+the PC.
+
+**Known limits:**
+
+- The pointer and the clicks on the screen quad are not built (`ui-layer.md`,
+  section 5), so a dialog box with no scene cannot be used in the headset.
+- The intro in stereo (`intro_vr=1`) gives no frame to the stream, so the
+  headset shows its last screen picture while it plays.
+- A frame of the Lionhead logo draws over the walk before it
+  (`vk_keep_picture`), so a picture after walks that the app skipped differs
+  a little from the picture of the PC.
+
 ## No Vulkan device of the mod
 
 In the headset the game runs in Wine, and the app draws the frames of the
@@ -1529,9 +1695,11 @@ In Wine in the emulator (`emu_game_test.ps1`, "Play in the app") the mod
 logs `vk_device=0` and makes no Vulkan instance and no device. Wine has no
 `vulkan-1.dll`.
 
-**Not shown yet:** a frame of the game in Wine with `vk_device=0` (the test
-game waits in the dialog of a new profile before its first frame), and so
-the frame rate of the game and the pace of its frames.
+**Not shown yet:** a frame of the scene of the game in Wine with
+`vk_device=0` (the test game waits in the dialog of a new profile), and so
+the frame rate of the scene and the pace of its frames. The screen frames
+of the logos, the video and the dialog came at 25 to 711 frames a second
+("Play in the app").
 
 ## Wine in the app
 

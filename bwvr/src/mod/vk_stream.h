@@ -89,6 +89,34 @@ void VkStreamSetLayers(bool on);
 bool VkStreamLayers(const quad_layer_math::FrameLayers& layers,
                     const quad_layer_math::CardPictures& pictures);
 
+// THE SCREENS WITH NO SCENE (docs/android.md, "The screens with no scene",
+// screen_quad_math.h). vk_stream_screens=1 (the default) with xr_input=1: on
+// means each FinishFrame outside the eye passes is a screen frame of the
+// stream (number screen_quad_math::ScreenFrame of its count), and a frame
+// that the PC shows ends with a record kScreen: the source of the picture
+// and the quad of distance_m and width_m (screen_distance_cm and
+// screen_width_cm). 0, or xr_input=0: no screen frame. test_every
+// (vk_stream_screen_test, a test aid): each Nth screen frame saves the
+// pictures of its walk, as F12 does. 0: none.
+void VkStreamSetScreens(bool on, int test_every, float distance_m, float width_m);
+// mod_main.cpp, at the end of each FinishFrame outside the eye passes
+// (screen_quad_math.h, ScreenRoute). shows: the PC shows this frame on its
+// screen. Ends the screen frame of this FinishFrame and starts the next one.
+void VkStreamScreen(bool shows, float distance_m, float width_m);
+// mod_main.cpp, at the end of a FinishFrame of an eye pass of the intro
+// (intro_vr.cpp). An open screen frame ends with no kScreen, and the stream
+// takes no record until its next frame (the intro gives no frame to the
+// stream), so the walks of the intro do not collect in the open frame.
+void VkStreamScreenStop();
+// vk_scene.cpp, at the start and the end of each walk and at each write of
+// the CPU into a surface, also with no record and no reader: the source of
+// the picture (screen_quad_math.h, ScreenSource).
+void VkStreamScreenWalkBegin(void* device7);
+void VkStreamScreenWalkEnd();
+void VkStreamScreenWritten(void* surface);
+// One line with the counts of the screen frames.
+void VkStreamScreenReport();
+
 // vk_scene.cpp gives the read of a surface of the game as RGBA8 (ReadSurface),
 // so the stream has the same pixels as the renderer of the PC. pixels must
 // be freed with free().

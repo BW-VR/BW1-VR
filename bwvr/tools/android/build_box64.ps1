@@ -20,9 +20,10 @@
     the WoW64 mode, a DLL for Windows on ARM64. Its build needs llvm-mingw
     (aarch64-w64-mingw32-clang), because the NDK has no headers of
     Windows. The script writes a copy with no debug data to
-    bwvr/out/android/box64/wowbox64.dll.
-
-    The APK does not contain Box64 yet.
+    bwvr/out/android/box64/wowbox64.dll, and the license text of Box64 to
+    bwvr/out/android/box64/LICENSE. pack_wine.sh puts both into the Wine
+    tree of arm64-v8a for the APK. The Linux program box64 is not in the
+    APK.
 
 .PARAMETER Source
     The folder of the Box64 source, with its CMakeLists.txt.
@@ -83,7 +84,8 @@ if ($Mingw) {
     & (Join-Path $Mingw 'llvm-strip.exe') '--strip-debug' '-o' $dll `
         (Join-Path $Build 'wowbox64-prefix\src\wowbox64-build\wowbox64.dll')
     if ($LASTEXITCODE -ne 0) { Stop-Android 'llvm-strip failed.' }
-    $info = (& (Join-Path $Mingw 'llvm-objdump.exe') -p $dll | Out-String)
+    Copy-Item -LiteralPath (Join-Path $Source 'LICENSE') -Destination (Join-Path $OutDir 'LICENSE')
+    $info =(& (Join-Path $Mingw 'llvm-objdump.exe') -p $dll | Out-String)
     $exports = ([regex]::Matches($info, 'BTCpu\w+')).Count
     $imports = @([regex]::Matches($info, 'DLL Name: (\S+)') | ForEach-Object { $_.Groups[1].Value })
     $header = (& (Join-Path $Mingw 'llvm-readobj.exe') --file-headers $dll | Out-String)

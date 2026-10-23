@@ -791,9 +791,12 @@ that moves while the Hand takes it.
     run the frames of the ring have the bytes of the record of the same run
     (`live_stream_run.ps1`), and in the emulator the app takes them from a
     second process and draws the pictures of the PC
-    (`emu_live_test.ps1`). Not run in a headset. It cannot start the game:
-    `runblack.exe` needs an x86 runtime (Box64 with Wine in the WoW64 mode)
-    in the app (`android.md`, "What the app cannot do yet"). The input of
+    (`emu_live_test.ps1`). Not run in a headset. The APK carries Wine 11.0
+    in the WoW64 mode for each ABI (`wowbox64.dll` of Box64 on ARM64), and
+    the app unpacks it, makes a prefix and runs a 32 bit test program in it
+    (`android.md`, "Wine in the app"): in the emulator with the x86_64
+    tree. Open: the arm64-v8a tree on a headset, and the start of the game
+    in Wine (`android.md`, "What the app cannot do yet"). The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the

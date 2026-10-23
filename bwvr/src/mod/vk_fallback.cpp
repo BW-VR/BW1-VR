@@ -6,6 +6,7 @@
 
 #include "../proxy/ddraw_proxy.h"
 #include "vk_fallback.h"
+#include "vk_scene.h"
 
 void ModLog(const char* format, ...);
 
@@ -50,6 +51,14 @@ void VkFallbackStart(const char* dir, const char* ini) {
   if (ProxyVulkanStrict()) {
     ModLog("vulkan fallback: vulkan_strict=1. There is no fall back, so the "
            "mod writes no %s",
+           name);
+    return;
+  }
+  // vk_device=0 (vk_scene.h): the mod makes no Vulkan device, so no fault of
+  // Vulkan can stop its first picture, and the window gets none.
+  if (!VkSceneDevice()) {
+    ModLog("vulkan fallback: vk_device=0. The mod has no Vulkan device, so it "
+           "writes no %s",
            name);
     return;
   }

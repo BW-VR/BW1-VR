@@ -52,6 +52,9 @@ Summary:
   scene window (records `kCard`, `kCardPicture`, `kPanel` and `kWindow`). The
   app shows them over the projection layer in the order of the session of
   the mod (`stream_layers=1`, see "The quad layers").
+- With `vk_device=0` the mod makes no Vulkan instance and no device of its
+  own, and its walks only go into the live stream: only the app draws them
+  (see "No Vulkan device of the mod").
 - **Only Vulkan.** The app draws with Vulkan alone: the menu, the stereo
   screen and the renderer of the mod. It has no fallback to Direct3D,
   DirectDraw or another graphics interface (see "Only Vulkan").
@@ -1186,6 +1189,65 @@ the game in Wine.
   percent by more than 24, while the views and the layers of the frame are
   the same bytes. The cause is not known.
 
+## No Vulkan device of the mod
+
+In the headset the game runs in Wine, and the app draws the frames of the
+live stream on the device of its session. A Vulkan device of the mod in the
+process of Wine would draw each frame a second time on the same GPU,
+through the Vulkan of Wine. So the mod has the key `vk_device` in
+`bwvr.ini`:
+
+- `vk_device=1` (the default): the renderer of the mod draws on a Vulkan
+  device of its own, as on the PC.
+- `vk_device=0`: the mod makes no Vulkan instance and no device, and it does
+  not load `vulkan-1.dll`. The calls of each walk still go into the stream,
+  and a walk keeps only what the panel quads need (`VkScenePanelDrew`). The
+  window of the game gets no picture and no GDI, and the present does not
+  wait. It needs `backend=vulkan` and `xr_input=1`. With another setting the
+  log says why, and the mod keeps `vk_device=1`.
+
+The key is not a row of `settings_table.h` and not a retired key, so a save
+of the launcher and of the menu keeps it as it is (the math test checks the
+save of the menu). The app does not write it yet, because it does not start
+the game yet. `backend.md`, "No Vulkan device of the mod", has what each
+reader of a picture of the renderer gets with `vk_device=0`.
+
+**The stream is the same.** `vk_device` is not an option of the stream, and
+the panel quads (`kPanel`) and the binds of the panel (`kPanelBind`) come
+from the same tests as with a device. In desk runs of `input_channel_run.ps1
+-Kind channel -Live` with the same input (`-RingFrom`, `-NoiseFrom`), each
+record of the run with 0 has the bytes of the run with 1, but for 28 draws
+of each frame. Those draws differ between two runs with 1 too: their
+vertices follow the clock of the PC (`backend.md`). The ids of the surfaces
+are addresses of the process, so `bwvr_stream_reader run-compare` takes the
+ids of one run as the ids of the other, one to one.
+
+**In the emulator** (`emu_xr_test.ps1 -Live <the run> -Gpu host`): the
+capture of the run with 0 passes 68 checks, and the capture of the run with
+1 passes 74 (the 6 more checks compare with the pictures of the PC, and a
+run with 0 has none). The pictures of frame 2996 that the app drew from the
+two captures differ by at most 0.003 percent of their pixels by more than
+24, the noise of two desk runs.
+
+**Known limits:**
+
+- The subtitle card of `ui_panel=0` has no pixels with `vk_device=0`: the
+  mod reads them from its own panel image. The subtitles and the help text
+  then draw in the eye pictures at a fixed depth, so a frame with help text
+  differs from the stream of `vk_device=1`. For the card the mod must give
+  the rect of the panel in place of the pixels, and the app must cut the
+  card from its own panel image. Not made yet. With `ui_panel=1` the help
+  text is in the panel quads, which the app draws.
+- A draw for the panel that the device of the mod would not take (no
+  pipeline, no descriptor set) counts as drawn into the panel with
+  `vk_device=0`.
+- With `vk_device=0` nothing paces the frames of the game: the mod waits
+  for no GPU and for no present, so the game makes frames as fast as the
+  CPU can, faster than the app shows them. The live stream then has more
+  frames than the app plays, and the app skips the walks of the others.
+
+**Not shown yet:** the run with the game in Wine with `vk_device=0`.
+
 ## Only Vulkan
 
 The app has one renderer: the Vulkan renderer of the mod. There is no
@@ -1277,8 +1339,10 @@ Android. The plan, in steps:
    through x86 code or through the Vulkan of Wine. The game already sends
    vertices in screen space, so the stream needs no matrices. With
    `xr_input=1` the eye pictures show in a projection layer with the values
-   of the mod ("The projection layer"). Open: the run with the game in
-   Wine, with `vk_stream_live=1` and `stream_live=1`.
+   of the mod ("The projection layer"). With `vk_device=0` the mod has no
+   Vulkan device of its own ("No Vulkan device of the mod"). Open: the run
+   with the game in Wine, with `vk_stream_live=1`, `vk_device=0` and
+   `stream_live=1`.
 3. **The head and the controllers.** Wine has no OpenXR for Android, so the
    app gives the mod the views, the hands, the display time, the focus and
    the recenter of its session through the input channel, and the mod gives

@@ -27,7 +27,8 @@
 // renderer (VkSceneWalkBegin, VkSceneWalkEnd). The Blt from the render
 // target to the primary is the present: the picture of the last walk of the
 // left eye goes to the window at the size of its client area
-// (VkScenePresentPixels, then SetDIBitsToDevice).
+// (VkScenePresentPixels, then SetDIBitsToDevice). With vk_device=0 the mod
+// has no Vulkan device, and the window gets no picture.
 
 #define WIN32_LEAN_AND_MEAN
 #define INITGUID
@@ -1885,6 +1886,17 @@ void Surface::Present() {
   const uint32_t w = static_cast<uint32_t>(client.right - client.left);
   const uint32_t h = static_cast<uint32_t>(client.bottom - client.top);
   if (w == 0 || h == 0) return;
+  // vk_device=0 (vk_scene.h): the mod has no Vulkan device, so the window
+  // gets no picture and no GDI. The present does not wait: the headset app
+  // draws the frames of the live stream.
+  if (!VkSceneDevice()) {
+    static LONG s_said_none = 0;
+    if (InterlockedExchange(&s_said_none, 1) == 0) {
+      ModLog("vk ddraw     : vk_device=0. The window of the game gets no "
+             "picture and no GDI");
+    }
+    return;
+  }
   // A swapchain of Vulkan on the window (vk_window=1), else the way through
   // the CPU and GDI. GDI can draw into the window only when it has no
   // swapchain. With vulkan_strict=1 there is no way through GDI: a window

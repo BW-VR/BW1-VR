@@ -105,15 +105,16 @@ void VkScenePanelBind(bool panel);
 // panel, or when the panel has another size.
 bool VkScenePanelFor(uint32_t width, uint32_t height, uint64_t* image);
 // True when a walk of this frame drew into the panel and the panel has this
-// size, on any device. With no session (xr_input=1) the headset app draws
-// the same panel image itself (xr_layers.h).
+// size, on any device and with no device (vk_device=0). With no session
+// (xr_input=1) the headset app draws the same panel image itself
+// (xr_layers.h).
 bool VkScenePanelDrew(uint32_t width, uint32_t height);
 // THE SUBTITLE CARD, as GpuBridgePanelReadHalf: the rect x, y, width and
 // height of the panel of this frame at half the size, as pixels for the
 // CPU: BGRA, the color multiplied by the alpha, each pixel the mean of four.
 // The pixels stay valid until VkScenePanelReadDone. Null when no walk of
-// this frame drew into the panel, or when a step failed. It waits for the
-// GPU.
+// this frame drew into the panel, when a step failed, or with no device
+// (vk_device=0). It waits for the GPU.
 const void* VkScenePanelReadHalf(const int rect[4], int* pitch,
                                  uint32_t* width, uint32_t* height);
 void VkScenePanelReadDone();
@@ -165,6 +166,17 @@ void VkSceneSetDirect(bool on);
 bool VkSceneLastPicture(uint64_t* image, uint32_t* layer, uint32_t* width,
                         uint32_t* height);
 bool VkSceneDirect();
+// THE VULKAN DEVICE OF THE MOD (vk_device of bwvr.ini, docs/backend.md, "No
+// Vulkan device of the mod"). on: 1 (the default) the renderer draws on a
+// Vulkan device of its own or of the session. 0 (only with backend=vulkan
+// and xr_input=1, mod_main.cpp): the headset app draws the frames of the
+// live stream, so the mod makes no Vulkan instance and no device. Each call
+// still goes into the stream (vk_stream.h). A walk keeps only what the
+// panel quads need: the walk that drew into the panel, and its size
+// (VkScenePanelDrew). Each reader of a picture of the renderer gets none.
+// Before the first walk.
+void VkSceneSetDevice(bool on);
+bool VkSceneDevice();
 // vk_keep_picture of bwvr.ini, backend=vulkan: 1 (the default) a walk that
 // draws, or clears a part, before a clear of the whole target starts with
 // the picture of the walk before it, as a render target of Direct3D 7 keeps
@@ -197,7 +209,8 @@ void VkSceneStage1Toggle(const char* keys);
 // The picture of the last walk of the left eye (or of a scene with no eye
 // pass) into the client area of `window` (an HWND), width by height, with a
 // swapchain of Vulkan (vk_window.h). False when it did not go there: then
-// VkScenePresentPixels gives it for GDI.
+// VkScenePresentPixels gives it for GDI. With no device (vk_device=0) both
+// give no picture.
 bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height);
 // The picture of the last walk of the left eye (or of a scene with no eye
 // pass), at width by height with a linear filter, as BGRA pixels for the

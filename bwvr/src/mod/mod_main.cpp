@@ -2733,6 +2733,26 @@ void EarlyHooks() {
   // On by default from version 1.1.0. Read here because the device hooks of
   // the bridge need it.
   Depth24SetWanted(GetPrivateProfileIntA("bwvr", "depth24", 1, path) != 0);
+  // THE VULKAN DEVICE OF THE MOD (vk_device, vk_scene.h). 0 is for the
+  // headset app, which draws the frames of the live stream with its own
+  // device. It needs backend=vulkan and the input channel (xr_input=1):
+  // else nothing draws the walks. Before the fall back, which writes no file
+  // with no device.
+  if (GetPrivateProfileIntA("bwvr", "vk_device", 1, path) == 0) {
+    const bool channel =
+        GetPrivateProfileIntA("bwvr", "xr_input", 0, path) != 0;
+    if (ProxyBackendVulkan() && channel) {
+      VkSceneSetDevice(false);
+      ModLog("vk device    : vk_device=0. The mod makes no Vulkan instance "
+             "and no device. The headset app draws the frames of the live "
+             "stream, and the window of the game gets no picture");
+    } else {
+      ModLog("vk device    : vk_device=0 needs backend=vulkan and xr_input=1, "
+             "but %s. The mod keeps vk_device=1",
+             !ProxyBackendVulkan() ? "the backend is not vulkan"
+                                   : "xr_input is 0");
+    }
+  }
   // backend=vulkan: the line of a fall back to dxwrapper, or the file that
   // the first picture deletes (vk_fallback.h).
   VkFallbackStart(g_dir, path);

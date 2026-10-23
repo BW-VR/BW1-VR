@@ -124,7 +124,8 @@ inline void MenuChecks() {
 
   Menu menu;
   IniText ini("[bwvr]\r\nsnap_turn=3\r\nplay_mode=0\r\nfake_head=1\r\n"
-              "gpu_bridge=1\r\nresolution_pct=500\r\nkeep_me=7\r\n");
+              "gpu_bridge=1\r\nresolution_pct=500\r\nkeep_me=7\r\n"
+              "vk_device=0\r\n");
   menu.Load(ini);
   Check(menu.ValueOf("snap_turn") == 3, "a choice reads its index", 0, 0);
   Check(menu.ValueOf("play_mode") == 0,
@@ -250,6 +251,8 @@ inline void MenuChecks() {
         4);
   Check(ini.GetInt("bwvr", "keep_me", 0) == 7,
         "a key that is not in the table stays", 0, 0);
+  Check(ini.GetInt("bwvr", "vk_device", 1) == 0,
+        "vk_device=0 of the headset app stays (no row, not retired)", 0, 0);
   Check(!ini.Has("bwvr", "d3d9_backend") && !ini.Has("bwvr", "xr_vulkan"),
         "the rows of Direct3D 9 are not written", 0, 0);
   Check(ini.GetInt("bwvr", "foveation", 0) == 1, "foveation=1 is saved", 0, 0);

@@ -94,6 +94,16 @@
 // stage 1 binds the set of stage 0 as set 1 and its vertices as buffer 1,
 // so each draw has each binding, and the shader does not read them. With
 // vk_stage1=0 the renderer makes stage 0 alone.
+//
+// THE WALKS WITH NO DEVICE (vk_device=0). In the headset the app draws the
+// frames of the live stream, and a device of the mod in the process of Wine
+// would draw each frame a second time. So the renderer starts no Vulkan: a
+// walk records no command, makes no image and reads no texture. The calls
+// still go into the stream at the start of each public function. A walk
+// keeps only what the panel quads of the stream need (VkScenePanelDrew):
+// the size of its target, and if a draw went into the panel by the rules of
+// VkSceneDraw up to the device. Each reader of a picture (the eyes, the
+// panel image, the window, the pictures of a test) gets none.
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -156,6 +166,13 @@ int g_present_index = 0;
 bool g_present_ready = false;
 bool g_failed = false;
 bool g_ready = false;
+// THE WALKS WITH NO DEVICE: vk_device, the walk now, the size of its target,
+// and the bytes that its draws would take in the ring of the slot.
+bool g_device = true;
+bool g_bare_walk = false;
+uint32_t g_bare_size[2] = {0, 0};
+uint64_t g_bare_used = 0;
+bool g_said_bare_picture = false;
 
 // THE STATE, on the D3D7 thread. Render states 0 to 63 and the states 0 to
 // 31 of stages 0 and 1, as Direct3D 7 numbers them.
@@ -1402,6 +1419,15 @@ bool MakeTarget(uint32_t width, uint32_t height) {
 bool Ready() {
   if (g_ready) return true;
   if (g_failed) return false;
+  // THE WALKS WITH NO DEVICE: no vk::Start, so no load of vulkan-1.dll, no
+  // instance and no device.
+  if (!g_device) {
+    g_ready = true;
+    ModLog("vk scene     : vk_device=0. The renderer has no Vulkan device: "
+           "the walks go into the stream, and the renderer keeps only the "
+           "walk that drew into the panel");
+    return true;
+  }
   if (!vk::Start()) {
     if (vk::Pending()) {
       // The walks before the start of the OpenXR session draw nothing here.
@@ -2625,6 +2651,87 @@ bool PrepareFovea(Slot& s, const Seed* seed) {
   return true;
 }
 
+// THE WALKS WITH NO DEVICE (vk_device=0). The start of a walk, after the
+// seed: the states that ForPanel and OffTarget read, and the size of the
+// target. As MakeTarget, a target of a new size has no panel of a walk
+// before.
+void BeginWithNoDevice(const Seed* seed) {
+  if (g_viewport.dwWidth != g_bare_size[0] ||
+      g_viewport.dwHeight != g_bare_size[1]) {
+    g_bare_size[0] = g_viewport.dwWidth;
+    g_bare_size[1] = g_viewport.dwHeight;
+    InterlockedExchange(&g_panel_walk, 0);
+  }
+  if (seed->picture && !g_said_bare_picture) {
+    g_said_bare_picture = true;
+    ModLog("vk scene     : vk_device=0, so the walk of picture %llu writes no "
+           "picture (vk_scene_test_frame, F12). The app draws the pictures of "
+           "the stream",
+           seed->frame);
+  }
+  g_walk_follow = seed->follow;
+  g_eye_target = seed->target;
+  g_draw_target = seed->target;
+  g_walk_panel = seed->panel;
+  g_walk_stage1 = seed->stage1;
+  g_draw_panel = false;
+  g_panel_drawn = false;
+  g_bare_used = 0;
+  g_bare_walk = true;
+  ++g_walks;
+  ++g_walk_number;
+}
+
+// A draw of a walk with no device: the tests of VkSceneDraw before the
+// device, in their order. A draw that the device would not take for want of
+// a pipeline or of a descriptor set counts as drawn here.
+void DrawWithNoDevice(uint32_t fvf, const void* vertices,
+                      uint32_t vertex_count, uint32_t index_count) {
+  const bool panel = ForPanel();
+  if (!panel && OffTarget()) {
+    ++g_skipped;
+    ++g_skip_target;
+    return;
+  }
+  if (vertices == nullptr || vertex_count == 0) return;
+  VertexLayout layout = {32, 16, 20, 24, 24};
+  if (fvf != 0x1C4 &&
+      !LayoutOf(fvf, g_ts[0][D3DTSS_TEXCOORDINDEX] & 0xFFFF,
+                g_ts[1][D3DTSS_TEXCOORDINDEX] & 0xFFFF, &layout)) {
+    ++g_skipped;
+    ++g_skip_format;
+    return;
+  }
+  const bool with1 = g_ts[1][D3DTSS_COLOROP] > 1 && g_texture1 != nullptr &&
+                     g_walk_stage1;
+  const uint64_t vertex_bytes = static_cast<uint64_t>(vertex_count) * 32;
+  const uint64_t uv1_bytes = with1 ? static_cast<uint64_t>(vertex_count) * 8 : 0;
+  const uint64_t index_bytes =
+      (static_cast<uint64_t>(index_count) * 2 + 3) & ~3ull;
+  if (g_bare_used + vertex_bytes + uv1_bytes + index_bytes > kRingBytes) {
+    ++g_skipped;
+    ++g_skip_ring;
+    return;
+  }
+  g_bare_used = (g_bare_used + vertex_bytes + uv1_bytes + index_bytes + 31) &
+                ~31ull;
+  if (panel) {
+    g_panel_drawn = true;
+    ++g_panel_draws;
+  }
+  ++g_draws;
+}
+
+// The end of a walk with no device: the count of the walk, and the panel.
+void EndWithNoDevice() {
+  g_bare_walk = false;
+  const LONG walk = InterlockedIncrement(&g_walk_serial);
+  if (g_panel_drawn) {
+    InterlockedExchange(&g_panel_walk, walk);
+    ++g_panel_walks;
+  }
+}
+
 // THE WALK, on the D3D7 thread.
 void BeginOnWorker(const void* data) {
   const Seed* seed = static_cast<const Seed*>(data);
@@ -2649,6 +2756,10 @@ void BeginOnWorker(const void* data) {
            g_rs[7], g_ts[0][24]);
   }
   if (g_viewport.dwWidth == 0 || g_viewport.dwHeight == 0) return;
+  if (!g_device) {
+    BeginWithNoDevice(seed);
+    return;
+  }
   if (!MakeTarget(g_viewport.dwWidth, g_viewport.dwHeight)) {
     Fail("the target");
     return;
@@ -2956,6 +3067,10 @@ void DrawFoveaMarks() {
 
 void EndOnWorker(const void*) {
   g_walk_only = false;
+  if (g_bare_walk) {
+    EndWithNoDevice();
+    return;
+  }
   if (!g_recording) return;
   if (g_walk_show && g_walk_fovea) DrawFoveaMarks();
   // A walk with no draw and no clear for the eyes keeps the picture too.
@@ -3347,6 +3462,10 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
                  uint32_t index_count) {
   BWVR_STREAM(VkStreamDraw(type, fvf, vertices, vertex_count, indices,
                            index_count));
+  if (g_bare_walk) {
+    DrawWithNoDevice(fvf, vertices, vertex_count, index_count);
+    return;
+  }
   if (!g_recording) return;
   // A draw for the panel target goes into the panel (THE PANEL).
   const bool panel = ForPanel();
@@ -3681,17 +3800,28 @@ void VkScenePanelToggle(const char* keys) {
 bool VkScenePanelOn() { return g_panel_mode && VkSceneOn() && g_ready; }
 
 namespace {
-// The panel of the last walk of this frame that drew into it, or null.
-const vk::Image* PanelOfFrame() {
-  if (!VkScenePanelOn()) return nullptr;
+// True when a walk of this frame drew into the panel.
+bool PanelWalkOfFrame() {
+  if (!VkScenePanelOn()) return false;
   const LONG walk = InterlockedCompareExchange(&g_panel_walk, 0, 0);
-  if (walk == 0 || walk <= g_frame_walks) return nullptr;
+  return walk != 0 && walk > g_frame_walks;
+}
+
+// The panel of the last walk of this frame that drew into it, or null. With
+// no device there is no panel image.
+const vk::Image* PanelOfFrame() {
+  if (!g_device || !PanelWalkOfFrame()) return nullptr;
   const vk::Image& image = g_panels[g_panel_index];
   return image.image != VK_NULL_HANDLE ? &image : nullptr;
 }
 }  // namespace
 
 bool VkScenePanelDrew(uint32_t width, uint32_t height) {
+  // With no device the panel has the size of the target of its walk.
+  if (!g_device) {
+    return PanelWalkOfFrame() && g_bare_size[0] == width &&
+           g_bare_size[1] == height;
+  }
   const vk::Image* panel = PanelOfFrame();
   return panel != nullptr && panel->width == width && panel->height == height;
 }
@@ -3902,6 +4032,12 @@ void VkSceneSetDirect(bool on) {
 
 bool VkSceneDirect() { return g_direct; }
 
+// Not an option of the stream: the app draws each stream on its own device,
+// so a stream of vk_device=0 has the same bytes as a stream of 1.
+void VkSceneSetDevice(bool on) { g_device = on; }
+
+bool VkSceneDevice() { return g_device; }
+
 namespace {
 // THE WINDOW. Two entries in turn. A present records a blit of the picture
 // to the size of the window and a copy to the CPU, and submits them with no
@@ -4055,7 +4191,7 @@ void VkSceneKeepPictureToggle(const char* keys) {
 }
 
 bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height) {
-  if (!g_ready || !g_present_ready) return false;
+  if (!g_device || !g_ready || !g_present_ready) return false;
 #ifdef _WIN32
   return VkWindowPresent(static_cast<HWND>(window), g_colors[g_present_index],
                          width, height);
@@ -4070,7 +4206,8 @@ bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height) {
 
 const uint8_t* VkScenePresentPixels(uint32_t width, uint32_t height,
                                     int* pitch) {
-  if (!g_ready || !g_present_ready || width == 0 || height == 0) {
+  if (!g_device || !g_ready || !g_present_ready || width == 0 ||
+      height == 0) {
     return nullptr;
   }
   const vk::Image& source = g_colors[g_present_index];
@@ -4284,6 +4421,17 @@ void VkSceneSurfaceWritten(void* surface) {
 void VkSceneReport(uint64_t frames) {
   if (g_mode == 0 || frames == 0) return;
   const double per = static_cast<double>(frames);
+#ifdef _WIN32
+  // vk_device=0: the proof that no part of the process loaded Vulkan.
+  if (!g_device) {
+    ModLog("vk scene     : vk_device=0. %llu walks with no Vulkan device, %llu "
+           "of them drew into the panel. vulkan-1.dll is %s",
+           g_walks, g_panel_walks,
+           GetModuleHandleA("vulkan-1.dll") != nullptr
+               ? "in the process"
+               : "not in the process");
+  }
+#endif
   ModLog("vk scene     : a frame: %.1f draws for the right eye only, %.1f "
          "draws with a texture on stage 1, %.1f of them with stage 1 "
          "(vk_stage1=%d)",

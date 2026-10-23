@@ -807,7 +807,10 @@ that moves while the Hand takes it.
     and the app shows them as quad layers over the projection layer in the
     order of the session of the mod (`xr_input_layers`, `stream_layers`,
     `android.md`, "The quad layers"). Open for it: a real headset, and the
-    intro, which gives no frame of the live stream. A frame goes into the
+    intro, which gives no frame of the live stream. With `vk_device=0` the
+    mod makes no Vulkan device, so only the app draws the walks (`android.md`,
+    "No Vulkan device of the mod"). Open for it: the subtitle card, which
+    then has no pixels, and the run in Wine. A frame goes into the
     ring at the end of its first walk with both eyes, and in a desktop run each frame after
     a frame with the whole state was at the reader in its own game frame. A
     skip of the app and a drop of the writer keep the records of state and

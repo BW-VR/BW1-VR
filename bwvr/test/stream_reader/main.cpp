@@ -51,6 +51,21 @@
 //     the line names the reason. Exit code 0 when
 //     no frame differs in other values and both have the same frames.
 //
+//   bwvr_stream_reader run-compare <stream A> <stream B> [kinds or -] [stream C]
+//     Compares the frames of the streams (a record or a capture) of two runs
+//     with the same input, record by record. The id of an object of the game
+//     (a surface, the device) is its address in the process, so it can have
+//     another value in run B when each id of A goes with one id of B (a map
+//     both ways). Counts the records that differ for each kind. kinds: the
+//     kinds that may differ, because they follow the clock of the PC (for
+//     example kCard,kCardPicture). stream C: a third run with the keys of A.
+//     A record that differs between A and B and also between A and C at the
+//     same place of the same frame follows the clock of the PC too. A frame
+//     with the whole state (kStart) in one stream only, and a frame before
+//     the first frame of the other stream, are not compared. Exit code 0 when
+//     each other frame of both has the same count of records, and no other
+//     record differs.
+//
 //   bwvr_stream_reader window-feed <stream> <out stream> <first frame> <last frame> <crop> <edge>
 //     A test feed of the cut scene window for the app: a copy of the stream
 //     in which each frame from <first frame> to <last frame> is a frame of
@@ -1047,6 +1062,354 @@ int WindowFeed(const char* in_path, const char* out_path, uint64_t first, uint64
   return windows > 0 ? 0 : 1;
 }
 
+// THE STREAMS OF TWO RUNS (run-compare).
+const char* KindName(uint32_t kind) {
+  static const char* const kNames[] = {
+      "?",          "kStart",      "kFrame",     "kOnlyFrame",   "kGaze",
+      "kWalkBegin", "kWalkEnd",    "kRenderState", "kStageState", "kTexture",
+      "kDraw",      "kTarget",     "kViewport",  "kClear",       "kPanelBind",
+      "kSurface",   "kWritten",    "kFrameEnd",  "kView",        "kCard",
+      "kCardPicture", "kPanel",    "kWindow"};
+  return kind <= ss::kLastKind ? kNames[kind] : "?";
+}
+
+// The places of the ids of objects of the game (a surface, the device) in
+// the body of a record of a kind. The ids are addresses in the process of
+// the game, so two runs can give one object other ids.
+int IdPlaces(uint32_t kind, size_t places[6]) {
+  const size_t bound = offsetof(ss::StreamState, bound_target);
+  const size_t panel = offsetof(ss::StreamState, panel_target);
+  switch (kind) {
+    case ss::kWalkBegin: {
+      const size_t state = offsetof(ss::WalkBeginBody, state);
+      const size_t texture = offsetof(ss::WalkBeginBody, texture);
+      places[0] = offsetof(ss::WalkBeginBody, device);
+      places[1] = state + bound;
+      places[2] = state + panel;
+      places[3] = texture;
+      places[4] = texture + 8;
+      return 5;
+    }
+    case ss::kWalkEnd:
+    case ss::kDraw:
+      places[0] = bound;
+      places[1] = panel;
+      return 2;
+    case ss::kTarget:
+      places[0] = bound;
+      places[1] = panel;
+      places[2] = offsetof(ss::TargetBody, surface);
+      return 3;
+    case ss::kTexture:
+      places[0] = offsetof(ss::TextureBody, surface);
+      return 1;
+    case ss::kSurface:
+      places[0] = offsetof(ss::SurfaceBody, surface);
+      return 1;
+    case ss::kWritten:
+      places[0] = 0;
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+// True when `name` is one of the names of the list "a,b,c".
+bool InList(const char* list, const char* name) {
+  if (list == nullptr) return false;
+  const size_t n = strlen(name);
+  for (const char* p = list; *p != 0;) {
+    const char* end = strchr(p, ',');
+    const size_t len = end != nullptr ? static_cast<size_t>(end - p) : strlen(p);
+    if (len == n && strncmp(p, name, n) == 0) return true;
+    if (end == nullptr) break;
+    p = end + 1;
+  }
+  return false;
+}
+
+struct Rec {
+  uint32_t kind;
+  const uint8_t* body;
+  uint32_t bytes;
+};
+
+std::vector<Rec> RecordsOf(const uint8_t* unit, size_t n) {
+  std::vector<Rec> out;
+  ss::Reader r = ss::Reader::Records(unit, n);
+  ss::Kind kind;
+  const uint8_t* body = nullptr;
+  uint32_t bytes = 0;
+  while (r.Next(&kind, &body, &bytes)) out.push_back({static_cast<uint32_t>(kind), body, bytes});
+  return out;
+}
+
+// The ids of the objects of one run and of the other, both ways.
+struct IdMap {
+  std::map<uint64_t, uint64_t> to, back;
+};
+
+// True when two records have the same bytes, with the ids of the objects of
+// x given as the ids of y by the map. The new pairs of ids of the record go
+// into the map only when the record is the same. tmp gets the body of x
+// with the ids of y. renamed: an id had another value.
+bool SameRecord(const Rec& x, const Rec& y, IdMap* map, std::vector<uint8_t>* tmp,
+                bool* renamed) {
+  *renamed = false;
+  if (x.kind != y.kind || x.bytes != y.bytes) return false;
+  tmp->assign(x.body, x.body + x.bytes);
+  size_t places[6];
+  const int n = IdPlaces(x.kind, places);
+  std::pair<uint64_t, uint64_t> pairs[6];
+  int new_pairs = 0;
+  for (int p = 0; p < n; ++p) {
+    if (places[p] + 8 > x.bytes) continue;
+    uint64_t ia = 0, ib = 0;
+    memcpy(&ia, x.body + places[p], 8);
+    memcpy(&ib, y.body + places[p], 8);
+    if (ia == 0 && ib == 0) continue;
+    const auto m = map->to.find(ia);
+    const auto w = map->back.find(ib);
+    if ((m != map->to.end() && m->second != ib) || (w != map->back.end() && w->second != ia)) {
+      return false;
+    }
+    // Two places of one record with one id of A and two ids of B.
+    for (int q = 0; q < new_pairs; ++q) {
+      if ((pairs[q].first == ia) != (pairs[q].second == ib)) return false;
+    }
+    if (m == map->to.end()) pairs[new_pairs++] = std::make_pair(ia, ib);
+    if (ia != ib) *renamed = true;
+    memcpy(tmp->data() + places[p], &ib, 8);
+  }
+  if (memcmp(tmp->data(), y.body, x.bytes) != 0) return false;
+  for (int q = 0; q < new_pairs; ++q) {
+    map->to[pairs[q].first] = pairs[q].second;
+    map->back[pairs[q].second] = pairs[q].first;
+  }
+  return true;
+}
+
+bool HasStart(const std::vector<Rec>& records) {
+  for (const Rec& r : records) {
+    if (r.kind == ss::kStart) return true;
+  }
+  return false;
+}
+
+// Compares the frames of two streams of two runs (a record or a capture of
+// the ring) record by record. An id of an object of the game in run A may
+// have another value in run B, when each id of A has one id of B in each
+// record (a map both ways). `may_differ`: the kinds of the records that
+// follow the clock of the PC, as "kCard,kCardPicture". `noise`: the stream
+// of a third run C with the same keys as A. A record that differs between A
+// and B and also between A and C at the same place of the same frame follows
+// the clock of the PC too.
+int RunCompare(const char* a_path, const char* b_path, const char* may_differ,
+               const char* noise) {
+  std::vector<uint8_t> a, b, c;
+  if (!ReadFile(a_path, &a) || !ReadFile(b_path, &b) ||
+      (noise != nullptr && !ReadFile(noise, &c))) {
+    printf("run compare  : FAULT cannot read the files\n");
+    return 2;
+  }
+  std::map<uint64_t, std::pair<size_t, size_t>> ua, ub, uc;
+  const bool ok_a = Units(a, &ua);
+  const bool ok_b = Units(b, &ub);
+  const bool ok_c = noise == nullptr || Units(c, &uc);
+  printf("run compare  : A has %zu frames%s, B %zu frames%s", ua.size(),
+         ok_a ? "" : " (it stops in a frame)", ub.size(), ok_b ? "" : " (it stops in a frame)");
+  if (noise != nullptr) {
+    printf(", C (the noise of A) %zu frames%s", uc.size(), ok_c ? "" : " (it stops in a frame)");
+  }
+  printf("\n");
+  IdMap ab, ac;
+  uint64_t differ_by_kind[ss::kLastKind + 1] = {};
+  uint64_t records = 0, renamed_records = 0, differ_all = 0, not_allowed = 0, in_noise = 0;
+  int frames_same = 0, frames_differ = 0, frames_missing = 0, frames_counts = 0;
+  int frames_start = 0;
+  const uint64_t first_a = ua.empty() ? 0 : ua.begin()->first;
+  const uint64_t first_b = ub.empty() ? 0 : ub.begin()->first;
+  std::vector<uint8_t> tmp;
+  for (const auto& fa : ua) {
+    const auto fb = ub.find(fa.first);
+    if (fb == ub.end()) {
+      // A capture whose reader came one frame later starts later.
+      if (fa.first < first_b) {
+        printf("run compare  : frame %llu: in A, before the first frame of B\n", fa.first);
+      } else {
+        printf("run compare  : frame %llu: FAULT in A, not in B\n", fa.first);
+        ++frames_missing;
+      }
+      continue;
+    }
+    const std::vector<Rec> ra = RecordsOf(a.data() + fa.second.first, fa.second.second);
+    const std::vector<Rec> rb = RecordsOf(b.data() + fb->second.first, fb->second.second);
+    // The frame of the answer to the ask of a reader has the whole state
+    // (kStart and each surface). A frame with it in one stream only is not
+    // compared.
+    if (HasStart(ra) != HasStart(rb)) {
+      printf("run compare  : frame %llu: the whole state (kStart) in %s only, not compared\n",
+             fa.first, HasStart(ra) ? "A" : "B");
+      ++frames_start;
+      continue;
+    }
+    if (ra.size() != rb.size()) {
+      // The kinds of each side, for the line.
+      std::map<uint32_t, int> ka, kb;
+      for (const Rec& r : ra) ++ka[r.kind];
+      for (const Rec& r : rb) ++kb[r.kind];
+      std::string what;
+      for (uint32_t k = 0; k <= ss::kLastKind; ++k) {
+        if (ka[k] != kb[k]) {
+          char part[96];
+          sprintf_s(part, "%s%s %d in A, %d in B", what.empty() ? "" : ", ", KindName(k), ka[k],
+                    kb[k]);
+          what += part;
+        }
+      }
+      printf("run compare  : frame %llu: FAULT %zu records in A, %zu in B: %s\n", fa.first,
+             ra.size(), rb.size(), what.c_str());
+      ++frames_counts;
+      continue;
+    }
+    std::vector<Rec> rc;
+    if (noise != nullptr) {
+      const auto fc = uc.find(fa.first);
+      if (fc != uc.end()) rc = RecordsOf(c.data() + fc->second.first, fc->second.second);
+    }
+    uint64_t differ_here[ss::kLastKind + 1] = {};
+    int differ_frame = 0, renamed_frame = 0, noise_frame = 0;
+    std::vector<size_t> differ_at;  // the places of the records that differ
+    for (size_t i = 0; i < ra.size(); ++i) {
+      ++records;
+      const Rec& x = ra[i];
+      const Rec& y = rb[i];
+      const uint32_t kind = x.kind <= ss::kLastKind ? x.kind : 0;
+      bool renamed = false;
+      if (SameRecord(x, y, &ab, &tmp, &renamed)) {
+        if (renamed) {
+          ++renamed_records;
+          ++renamed_frame;
+        }
+        continue;
+      }
+      ++differ_here[kind];
+      ++differ_by_kind[kind];
+      ++differ_all;
+      ++differ_frame;
+      differ_at.push_back(i);
+      // The first records that differ, with the first byte that differs.
+      if (differ_all <= 12) {
+        // The body with the ids of B, when both have one kind and one size.
+        const uint8_t* xb = x.kind == y.kind && x.bytes == y.bytes ? tmp.data() : x.body;
+        size_t first = 0;
+        const uint32_t n = x.bytes < y.bytes ? x.bytes : y.bytes;
+        while (first < n && xb[first] == y.body[first]) ++first;
+        char extra[256] = "";
+        if (x.kind == ss::kDraw && x.bytes >= sizeof(ss::DrawBody) + 16 &&
+            y.bytes >= sizeof(ss::DrawBody) + 16) {
+          // The draw, and the first vertex (x, y, z, rhw) of each run.
+          ss::DrawBody d, e;
+          memcpy(&d, x.body, sizeof(d));
+          memcpy(&e, y.body, sizeof(e));
+          float va[4], vb[4];
+          memcpy(va, x.body + sizeof(d), sizeof(va));
+          memcpy(vb, y.body + sizeof(e), sizeof(vb));
+          sprintf_s(extra, ", type %u, fvf 0x%X, %u and %u vertices, %u and %u indices, pass eye "
+                    "%d, the first vertex %.2f %.2f %.4f %.4f and %.2f %.2f %.4f %.4f",
+                    d.type, d.fvf, d.vertex_count, e.vertex_count, d.index_count, e.index_count,
+                    d.state.pass_eye, va[0], va[1], va[2], va[3], vb[0], vb[1], vb[2], vb[3]);
+        }
+        printf("run compare  : frame %llu, record %zu: %s, %u bytes in A and %u in B, the first "
+               "byte that differs at %zu%s\n",
+               fa.first, i, KindName(kind), x.bytes, y.bytes, first, extra);
+      }
+      if (InList(may_differ, KindName(kind))) continue;
+      // The same record differs between A and the noise run C.
+      bool renamed_c = false;
+      std::vector<uint8_t> tmp_c;
+      if (rc.size() == ra.size() && !SameRecord(x, rc[i], &ac, &tmp_c, &renamed_c)) {
+        ++in_noise;
+        ++noise_frame;
+        continue;
+      }
+      ++not_allowed;
+    }
+    if (differ_frame == 0) {
+      ++frames_same;
+      if (renamed_frame > 0) {
+        printf("run compare  : frame %llu: %zu records, the same (%d with ids of other "
+               "addresses)\n", fa.first, ra.size(), renamed_frame);
+      }
+      continue;
+    }
+    ++frames_differ;
+    std::string what;
+    for (uint32_t k = 0; k <= ss::kLastKind; ++k) {
+      if (differ_here[k] == 0) continue;
+      char part[64];
+      sprintf_s(part, "%s%s %llu", what.empty() ? "" : ", ", KindName(k), differ_here[k]);
+      what += part;
+    }
+    // The places as ranges, so two compares can show the same records.
+    std::string at;
+    for (size_t k = 0; k < differ_at.size();) {
+      size_t end = k;
+      while (end + 1 < differ_at.size() && differ_at[end + 1] == differ_at[end] + 1) ++end;
+      char part[48];
+      if (end == k) {
+        sprintf_s(part, "%s%zu", at.empty() ? "" : " ", differ_at[k]);
+      } else {
+        sprintf_s(part, "%s%zu-%zu", at.empty() ? "" : " ", differ_at[k], differ_at[end]);
+      }
+      at += part;
+      k = end + 1;
+    }
+    char noise_text[96] = "";
+    if (noise != nullptr) {
+      sprintf_s(noise_text, ", %d of them differ between A and C too", noise_frame);
+    }
+    printf("run compare  : frame %llu: %zu records, %d differ: %s%s. The records %s\n", fa.first,
+           ra.size(), differ_frame, what.c_str(), noise_text, at.c_str());
+  }
+  for (const auto& fb : ub) {
+    if (ua.count(fb.first) != 0) continue;
+    if (fb.first < first_a) {
+      printf("run compare  : frame %llu: in B, before the first frame of A\n", fb.first);
+    } else {
+      printf("run compare  : frame %llu: FAULT in B, not in A\n", fb.first);
+      ++frames_missing;
+    }
+  }
+  int renamed_ids = 0;
+  for (const auto& m : ab.to) {
+    if (m.first != m.second) ++renamed_ids;
+  }
+  std::string kinds;
+  for (uint32_t k = 0; k <= ss::kLastKind; ++k) {
+    if (differ_by_kind[k] == 0) continue;
+    char part[64];
+    sprintf_s(part, "%s%s %llu", kinds.empty() ? "" : ", ", KindName(k), differ_by_kind[k]);
+    kinds += part;
+  }
+  printf("run compare  : %d frames the same, %d frames with records that differ, %d frames "
+         "with another count of records, %d frames with the whole state in one stream only, "
+         "%d frames missing\n",
+         frames_same, frames_differ, frames_counts, frames_start, frames_missing);
+  printf("run compare  : %llu records, %llu differ%s%s. %llu records are the same with the ids "
+         "of %d objects at other addresses (%zu objects in the map)\n",
+         records, differ_all, kinds.empty() ? "" : ": ", kinds.c_str(), renamed_records,
+         renamed_ids, ab.to.size());
+  printf("run compare  : of the records that differ: %llu of the kinds of the clock of the PC "
+         "(%s), %llu that differ between A and C too%s, %llu other\n",
+         differ_all - in_noise - not_allowed, may_differ != nullptr ? may_differ : "none",
+         in_noise, noise != nullptr ? "" : " (no C)", not_allowed);
+  return frames_counts == 0 && frames_missing == 0 && not_allowed == 0 && ok_a && ok_b && ok_c &&
+                 frames_same + frames_differ > 0
+             ? 0
+             : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1068,6 +1431,10 @@ int main(int argc, char** argv) {
     return Layers(argv[2], record, argc == 5 ? argv[4] : nullptr);
   }
   if (argc == 4 && strcmp(argv[1], "layer-compare") == 0) return LayerCompare(argv[2], argv[3]);
+  if (argc >= 4 && argc <= 6 && strcmp(argv[1], "run-compare") == 0) {
+    const char* kinds = argc >= 5 && strcmp(argv[4], "-") != 0 ? argv[4] : nullptr;
+    return RunCompare(argv[2], argv[3], kinds, argc == 6 ? argv[5] : nullptr);
+  }
   if (argc == 8 && strcmp(argv[1], "window-feed") == 0) {
     return WindowFeed(argv[2], argv[3], strtoull(argv[4], nullptr, 10),
                       strtoull(argv[5], nullptr, 10), atoi(argv[6]), atoi(argv[7]));
@@ -1078,6 +1445,7 @@ int main(int argc, char** argv) {
          "bwvr_stream_reader view-compare <bwvr-view.rec> <bwvr-view.rec>\n"
          "bwvr_stream_reader layers <stream> [<bwvr-layer.rec> or -] [<folder for the card pictures>]\n"
          "bwvr_stream_reader layer-compare <bwvr-layer.rec> <bwvr-layer.rec>\n"
+         "bwvr_stream_reader run-compare <stream of run A> <stream of run B> [kinds that may differ or -] [stream of run C]\n"
          "bwvr_stream_reader window-feed <stream> <out stream> <first frame> <last frame> <crop> <edge>\n");
   return 1;
 }

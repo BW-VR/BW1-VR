@@ -3260,6 +3260,67 @@ desktop the file stays until the end of the run.
 driver, and a session with Vulkan that does not start. Only a headset shows
 the first picture of a session with Vulkan that deletes the file.
 
+With `vk_device=0` ("No Vulkan device of the mod") the mod has no Vulkan
+device, so it writes no file. The proxy still tests for `vulkan-1.dll` with
+`vulkan_strict=0`, and the headset app writes `vulkan_strict=1`.
+
+### No Vulkan device of the mod
+
+`vk_device=1` (the default): the renderer draws on a Vulkan device of its
+own, or on the device of the session. `vk_device=0` is for the headset app
+(`android.md`, "No Vulkan device of the mod"). There the game runs in Wine,
+and the app draws the frames of the live stream on its own device. A device
+of the mod would draw each frame a second time on the same GPU, through the
+Vulkan of Wine. With `vk_device=0` the renderer calls no `vk::Start`: the
+mod does not load `vulkan-1.dll`, and it makes no instance and no device.
+The calls of each walk still go into the stream (`BWVR_STREAM` at the start
+of each public function of `vk_scene.cpp`), and the surfaces of
+`vk_ddraw.cpp` are memory of the CPU, so the stream needs no GPU.
+
+`vk_device=0` needs `backend=vulkan` and `xr_input=1` (the input channel):
+with no session of the mod and no device, only the app draws the walks.
+`EarlyHooks` reads the key. With another setting the log says why, and the
+mod keeps `vk_device=1`. There is no test key: the choice is made at the
+start of the process. The key is not an option of the stream, so a stream
+of `vk_device=0` has the bytes of a stream of 1.
+
+**A walk with no device** (`vk_scene.cpp`, "THE WALKS WITH NO DEVICE")
+records no command, makes no image and reads no texture. It keeps only what
+the panel quads of the stream need: the size of its target (a new size, as
+a new target, has no panel of a walk before), and if a draw went into the
+panel. That test is the test of `VkSceneDraw` before the device, in its
+order: the draw is for the panel target (`ForPanel`) or for the eyes, it has
+vertices, its vertex format has XYZRHW, and the ring of the walk has room.
+
+What each reader of a picture of the renderer gets with `vk_device=0`:
+
+| Reader | With `vk_device=0` |
+| --- | --- |
+| The panel quads of the stream (`VkScenePanelDrew`, the record `kPanel`) | The same answer as with a device: a walk of this frame drew into the panel, and the panel has the size of the render. So the records are the same |
+| `VkScenePanelOn`, `GpuBridgePanelUsable` | True after the first walk, as with a device. So the binds of the panel target (`kPanelBind`) are the same |
+| The panel image for a session (`VkScenePanelFor`), the eye pictures (`VkSceneEyes`, `VkSceneEyesFor`, `VkSceneEyesWanted`) and the picture of the last walk (`VkSceneLastPicture`) | None. Each one needs a session of the mod, and with `xr_input=1` there is none |
+| The subtitle card of `ui_panel=0` (`VkScenePanelReadHalf`) | No pixels. The subtitles and the help text draw in the eye pictures at the depth of `subtitle_fallback_cm`, and the log says why (`subtitles : no subtitle card, because the mod has no Vulkan device`). In a frame with help text the stream then differs from a stream of `vk_device=1`. With `ui_panel=1` the help text is in the panel quads, which need no pixels of the mod |
+| The window of the game (`VkScenePresentWindow`, `VkScenePresentPixels`) | No picture and no GDI, also with `vulkan_strict=0`. The present returns at once, and the log says so one time |
+| The pictures of a test (`vk_scene_test_frame`, F12) | None. The log says so one time. The app draws the pictures of the stream |
+| The check for a black picture (`vk_black_check`) and the GPU times of the report | Nothing to check |
+| The pointer | No change: it reads the size of the render target and the camera of the game, and no picture |
+| The fall back (`vk_fallback.cpp`) | No file `bwvr-vulkan-pending.txt` |
+| The identifier of the device (`GetDeviceIdentifier`) | "Black & White VR Mod on Vulkan", as before the start of Vulkan |
+
+The report of each 450 frames has the walks with no device, the walks that
+drew into the panel, and if `vulkan-1.dll` is in the process.
+
+**What the app must do for the subtitle card.** The pixels of the card are
+a part of the panel image at half its size, and with no device only the app
+has the panel image. So the mod must give the card with the rect of the
+panel in place of its pixels, and the app must cut the card from its own
+panel image. Not made yet. With `ui_panel=1` the help text is in the panel
+quads, which the app draws from the stream.
+
+**Known limit:** with `vk_device=0` the mod waits for no GPU and for no
+present, so nothing paces the frames of the game (`android.md`, "No
+Vulkan device of the mod").
+
 ## Foveated rendering
 
 `foveation` (0 is the default, a test key: Shift O, the launcher row "Fewer
@@ -5241,6 +5302,7 @@ keys that the launcher sets.
 | `vulkan_strict` | 0 | 1 the mod draws with Vulkan alone and has no fallback: backend=vulkan whatever the key `backend` says, no DirectDraw of the system, no dxwrapper, `vulkan_only=1`, no GDI for the window. The headset app writes 1. 0 the ways of `backend` and `vulkan_only`. There is no test key: the proxy reads it at the load of the DLL. See "Only Vulkan" |
 | `vulkan_fallback` | 1 | With `backend=vulkan`: 1 a start takes dxwrapper when the file `bwvr-vulkan-pending.txt` is beside the game or there is no `vulkan-1.dll`, and a fault of Vulkan writes the file for the next start. 0 no file and no fall back. See "The fall back of the renderer Vulkan" |
 | `vulkan_fallback_test` | 0 | A test key of the desktop runs: 1 the mod stops the process before the first walk. See the same section |
+| `vk_device` | 1 | With `backend=vulkan`: 1 the renderer draws on a Vulkan device of its own or of the session. 0 (only with `xr_input=1`, for the headset app) the mod makes no Vulkan instance and no device, and the walks only go into the stream. There is no test key: the choice is made at the start. See "No Vulkan device of the mod" |
 | `vk_window` | 1 | With `backend=vulkan`: 1 the window of the game gets the picture through a swapchain of Vulkan, 0 through the CPU and GDI. A test key: Shift D. See "The window with Vulkan" |
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |

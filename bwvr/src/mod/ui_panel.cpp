@@ -511,13 +511,20 @@ void SubtitleBeginFrame(bool to_headset, bool projection, uint64_t frame,
           "subtitles in its picture";
   } else if (!to_headset) {
     // The mouse player with no headset keeps the old subtitles.
-    if (s.set.test && GpuBridgePanelUsable() && !s.read_failed) {
+    if (s.set.test && GpuBridgePanelUsable() && VkSceneDevice() &&
+        !s.read_failed) {
       mode = kSubtitlesCard;
     } else {
       why = "no headset";
     }
   } else if (!projection && !window) {
     why = "the stereoscopic window has its interface in its picture";
+  } else if (!VkSceneDevice()) {
+    // vk_device=0: the panel is a picture of the headset app, so the mod
+    // has no pixels of the help text for the card.
+    mode = no_card;
+    why = "the mod has no Vulkan device (vk_device=0) for the pixels of the "
+          "help text";
   } else if (!GpuBridgePanelUsable()) {
     mode = no_card;
     why = "there is no target for the help text";

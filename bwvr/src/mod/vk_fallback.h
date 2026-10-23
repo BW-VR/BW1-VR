@@ -6,7 +6,8 @@
 // first picture that goes to the window or to the headset deletes it. A
 // fault of Vulkan writes it again and keeps it. When the file is there at a
 // start, the proxy takes dxwrapper for that start (ddraw_proxy.cpp,
-// TestVulkan). A save of the launcher deletes the file.
+// TestVulkan). A save of the launcher deletes the file. With vk_device=0
+// (vk_scene.h) the mod has no Vulkan device and writes no file.
 #pragma once
 
 // In DllMain, after the proxy chose the backend. Writes the log line of a

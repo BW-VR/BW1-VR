@@ -56,6 +56,24 @@
 #   layers. Its ring-capture.bin is a feed for emu_xr_test.ps1 -Live, with
 #   the back channel.
 #
+# -RingFrom <folder> (with -Live): the folder of another run with -Live and
+#   the same input, for example the same channel run with vk_device=1. The
+#   script compares the frames of the ring and of the record of the stream of
+#   this run with the frames of that run, record by record
+#   (bwvr_stream_reader run-compare). An id of an object of the game is its
+#   address in the process, so it can differ when each id has one id of the
+#   other run. The records kCard, kCardPicture and kWindow follow the clock
+#   of the PC and may differ. -NoiseFrom <folder>: a third run with the keys
+#   of -RingFrom. A record that differs from -RingFrom, and that differs
+#   between -RingFrom and -NoiseFrom at the same place too, follows the clock
+#   of the PC (for example the vertices of a model that moves by the time of
+#   the PC).
+#
+# -More @{ vk_device = 0 } (a channel run): the mod makes no Vulkan device
+#   (docs/backend.md, "No Vulkan device of the mod"), so the run has no
+#   pictures of the test frame. The script checks the lines of the log: no
+#   Vulkan instance, no device, and vulkan-1.dll not in the process.
+#
 # The output is in desk-<Name>: bwvr-input.rec, bwvr-input.chan,
 # bwvr-view.rec, bwvr-layer.rec, with -Live the pictures of the cards of the
 # capture (card-*.bmp), writer.txt, with -Live reader.txt, ring-capture.bin and
@@ -75,6 +93,8 @@ param(
     [switch]$Live,
     [int]$LiveAttach = 2990,
     [int]$LiveRecord = 3000,
+    [string]$RingFrom = '',
+    [string]$NoiseFrom = '',
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -197,6 +217,35 @@ if ($Live) {
     & $reader compare (Join-Path $out 'ring-capture.bin') (Join-Path $out 'bwvr-stream.bin')
     if ($LASTEXITCODE -ne 0) { $fails++ }
 }
+if ($Live -and $RingFrom -ne '') {
+    if (-not [System.IO.Path]::IsPathRooted($RingFrom)) { $RingFrom = Join-Path $sp $RingFrom }
+    if ($NoiseFrom -ne '' -and -not [System.IO.Path]::IsPathRooted($NoiseFrom)) { $NoiseFrom = Join-Path $sp $NoiseFrom }
+    foreach ($s in @('ring-capture.bin', 'bwvr-stream.bin')) {
+        "== the frames of $s of this run against $s of $RingFrom$(if ($NoiseFrom -ne '') { ", with the noise of $NoiseFrom" })"
+        $there = Join-Path $RingFrom $s
+        if (-not (Test-Path -LiteralPath $there)) { "   no $there"; $fails++; continue }
+        $noise = @()
+        if ($NoiseFrom -ne '') {
+            $noise = @(Join-Path $NoiseFrom $s)
+            if (-not (Test-Path -LiteralPath $noise[0])) { "   no $($noise[0])"; $fails++; continue }
+        }
+        & $reader run-compare $there (Join-Path $out $s) 'kCard,kCardPicture,kWindow' @noise
+        if ($LASTEXITCODE -ne 0) { $fails++ }
+    }
+}
+# vk_device=0: the log must have no Vulkan instance and no device.
+$noDevice = $More.ContainsKey('vk_device') -and [int]$More['vk_device'] -eq 0
+if ($noDevice -and (Test-Path -LiteralPath $log)) {
+    "== vk_device=0: the lines of the log about Vulkan"
+    $vkLines = @(Select-String -LiteralPath $log -Pattern '^(vk device|vulkan +:|vulkan fallback|vk scene     : vk_device=0|vk ddraw     : vk_device=0)' | ForEach-Object { $_.Line })
+    $vkLines | Select-Object -First 12 | ForEach-Object { '   ' + $_ }
+    $started = @($vkLines | Where-Object { $_ -match '^vulkan +: ' }).Count
+    $inProcess = @($vkLines | Where-Object { $_ -match 'vulkan-1\.dll is in the process' }).Count
+    $notInProcess = @($vkLines | Where-Object { $_ -match 'vulkan-1\.dll is not in the process' }).Count
+    $kept = @($vkLines | Where-Object { $_ -match 'The mod keeps vk_device=1' }).Count
+    "   lines of a start of Vulkan (vulkan : ...): $started. Reports with vulkan-1.dll in the process: $inProcess, not in the process: $notInProcess"
+    if ($started -ne 0 -or $inProcess -ne 0 -or $notInProcess -eq 0 -or $kept -ne 0) { $fails++ }
+}
 if ($Kind -ne 'channel') {
     if ($fails -gt 0) { "LIVE STREAM FAULT: see the lines compare"; exit 1 }
     exit 0
@@ -297,6 +346,13 @@ public static class InputBmpDiff {
 '@
 $pictures = @(Get-ChildItem -LiteralPath $From -Filter 'bwvr-vk-*.bmp' -ErrorAction SilentlyContinue)
 "== the pictures of the test frame against $From ($($pictures.Count) pictures)"
+if ($noDevice) {
+    # With no device the renderer writes no picture: the app draws them.
+    $mine = @(Get-ChildItem -LiteralPath $out -Filter 'bwvr-vk-*.bmp' -ErrorAction SilentlyContinue)
+    "   vk_device=0: the run has $($mine.Count) pictures of the test frame (0 is right)"
+    if ($mine.Count -ne 0) { $fails++ }
+    $pictures = @()
+}
 foreach ($ref in $pictures) {
     $mine = Join-Path $out $ref.Name
     if (-not (Test-Path -LiteralPath $mine)) { "   $($ref.Name): not in this run"; $fails++; continue }
@@ -305,6 +361,6 @@ foreach ($ref in $pictures) {
     if ($over) { $fails++ }
     "   {0}: {1:N3} percent of the pixels differ by more than 24, {2:N3} percent differ at all, the mean difference {3:N3}{4}" -f $ref.Name, $d[0], $d[1], $d[2], $(if ($over) { " (more than $MaxPercent percent: FAULT)" } else { '' })
 }
-if ($pictures.Count -eq 0) { $fails++ }
-if ($fails -eq 0) { "INPUT CHANNEL VERIFIED: the record, the pulses, the views$(if ($haveLayers) { ', the layers' })$(if ($Live) { ', the views in the stream' })$(if ($Live -and $haveLayers) { ', the layers in the stream' }) and the pictures (each picture at most $MaxPercent percent of its pixels by more than 24)" }
+if ($pictures.Count -eq 0 -and -not $noDevice) { $fails++ }
+if ($fails -eq 0) { "INPUT CHANNEL VERIFIED: the record, the pulses, the views$(if ($haveLayers) { ', the layers' })$(if ($Live) { ', the views in the stream' })$(if ($Live -and $haveLayers) { ', the layers in the stream' })$(if ($Live -and $RingFrom -ne '') { ", the stream against $RingFrom" })$(if ($noDevice) { ', no Vulkan device' } else { " and the pictures (each picture at most $MaxPercent percent of its pixels by more than 24)" })" }
 else { "INPUT CHANNEL FAULT: $fails of the checks above" }

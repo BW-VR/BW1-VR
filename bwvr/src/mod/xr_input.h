@@ -59,7 +59,9 @@ void XrInputLatch();
 // frame of the scene and of the intro calls it before its first latch, where
 // a session of the PC waits in xrWaitFrame. A frame with no scene calls it at
 // the end of its FinishFrame, after its screen frame went into the live
-// stream. True when the frame waited.
+// stream. A latch after the wait marks its write as taken, and a latch
+// before it (the intro skip in FinishFrame) does not. True when the frame
+// waited.
 bool XrInputPace();
 
 // The values of the last latch.

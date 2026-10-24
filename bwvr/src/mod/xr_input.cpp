@@ -398,8 +398,12 @@ void XrInputLatch() {
   } else if (d.frame != 0) {
     Take(d);
   }
-  // The next frame of the pace waits for a write after this one.
-  if (whole && g_options.pace != 0) {
+  // The next frame of the pace waits for a write after this one. Only a
+  // latch after the wait of its frame counts (a frame of the scene and of
+  // the intro). The intro skip latches in FinishFrame before the wait of a
+  // frame with no scene, and a write that came in the work of that frame
+  // must end the wait.
+  if (whole && g_options.pace != 0 && !g_pace_due) {
     const int64_t now = PaceNow();
     fp::Took(&g_pace, seq, now);
     fp::SetPeriod(&g_pace, d.display_period);

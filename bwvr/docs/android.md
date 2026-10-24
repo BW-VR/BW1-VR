@@ -425,33 +425,33 @@ it shows (`-StartMinutes 15 -PlaySeconds 360`, 101 checks, 0 failed):
   has `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1`,
   `vk_pace=1`, `stream_live=1`, `input_live=1`, `vulkan_strict=1` and
   `backend=vulkan`.
-- `reg import` took 1.7 to 2.1 s, and `wineserver -w` 4.2 to 4.5 s, so the
-  game starts about 6.3 s after "Play".
+- `reg import` took 2.1 to 2.2 s, and `wineserver -w` 4.4 to 4.5 s, so the
+  game starts about 6.6 s after "Play".
 - The log of the mod has the build of the APK ("1.2.0 (build ...)"), not
   the build of the `ddraw.dll` of the game folder: the known DLL comes
   first. It has "vk_device=0. The mod makes no Vulkan instance and no
   device", `vulkan_strict=1`, "xr_input=1" with the channel of the app,
   and the first slot of the app.
-- With `-NEWGAME` and with no word the same: the logo screens (479 and
-  481 frames of the game), the video before the intro (2515 frames, about
+- With `-NEWGAME` and with no word the same: the logo screens (476 and
+  475 frames of the game), the video before the intro (2515 frames, about
   100 s), then the game waits in the dialog of a new profile at frame 0 of
   the controllers: the log of the mod has "setup box : the dialog box
   NewProfileBox is up now" (the SetupBox with the vtable `0x008D85F0`, kept
   by the `NewProfileBox` with the vtable `0x008DEC1C`, the callback
-  `0x0053D210`, at FinishFrame 3066 and 3069). Each of these frames is a
+  `0x0053D210`, at FinishFrame 3064 and 3063). Each of these frames is a
   screen frame of the live stream (see "The screens with no scene"). The
-  first frame of the game came 11.2 and 12.9 s after "Play", a screen
+  first frame of the game came 13.7 and 13.5 s after "Play", a screen
   frame of the logos (`game : the first frame of the game (frame
   1000000004, a screen with no scene)`). The frame rate of the app each
-  10 s: 55 in the logos, 25 in the video (9 lines), then 67 to 68 in the
+  10 s: 55 in the logos, 25 in the video (9 lines), then 68 in the
   dialog, with `vk_pace=1` ("The pace of the frames"). The app showed each
-  picture on the screen quad: one
-  quad for both eyes, 2.60 by 2.08 m at 0, 0, -2 m, opaque, with the whole
-  render of 1380 by 1104, no stereo screen and no projection layer. The
+  picture on the screen quad: one quad for both eyes, 2.60 by 2.08 m at 0,
+  0, -2 m, opaque, with the whole render of 1380 by 1104, no stereo screen
+  and no projection layer. The
   quad that the runtime read back after 360 s has the dialog of a new
   profile over the plasma of the front end (`new-0.png`, `play-0.png`).
-  The processes of Wine take 18 and 19 percent of one CPU in 361 s
-  (`runblack.exe` 15 and 16 percent, the app 13 and 14 percent).
+  The processes of Wine take 20 percent of one CPU in 361 s in each game
+  (`runblack.exe` 16 percent, the app 15 percent).
 - The tree of the processes: the process that the app started is
   `start.exe`, and `runblack.exe` has the parent 1.
 - Game 1: the hold showed the menu over the game, the press of 6 frames
@@ -1656,7 +1656,7 @@ percent of the pixels differ by more than 24).
 
 **The game in Wine** (`emu_game_test.ps1`, see "Play in the app"): the
 logos, the video before the intro and the dialog of a new profile show on
-the screen quad, and the first frame of the game comes 11.2 to 12.9 s
+the screen quad, and the first frame of the game comes 13.5 to 13.7 s
 after "Play".
 
 **Not shown yet:** the screen quad in a headset (its place, its size and the
@@ -1811,14 +1811,19 @@ FinishFrame does not.
 | A frame of the intro (`intro_vr=1`) | Before the read of the input channel of the intro (`intro_vr.cpp`) | The eye passes of the intro |
 | A frame with no scene (the logos, the videos, the front end, a dialog box, a load) | The end of `h_FinishFrame` (`mod_main.cpp`), after its screen frame went into the live stream | The logic of the game, the walk of the next screen, and its FinishFrame. On the PC with a session these frames wait in `xrWaitFrame` of `XrScreen::SubmitVulkan` |
 
-So the wait holds no input: each read of the input channel of a frame comes
-after its wait, and the frame of the controllers reads the slot at its own
-place in the frame. The present of `vk_ddraw.cpp` does not wait: it runs in
-FinishFrame, inside the eye pass of a frame of the scene, before the layers
-of the frame go into the live stream. A wait there would hold the frame
-from the app, and the logic of the game after it would use input that is
-one wait older. The wait of a frame of the scene is the "wait" of the frame
-time in the line `stereo` of the log.
+So the wait holds no input of the scene: in a frame of the scene and of the
+intro each read of the input channel comes after the wait, and the frame of
+the controllers reads the slot at its own place in the frame. In a frame
+with no scene the intro skip reads the hands in FinishFrame, before the
+wait of that frame. A frame takes a write only at its wait and at a read
+after the wait: the read of the intro skip does not take a write, so a
+write that came in the work of the frame ends the wait at once. The present
+of `vk_ddraw.cpp` does not wait: it runs in FinishFrame, inside the eye
+pass of a frame of the scene, before the layers of the frame go into the
+live stream. A wait there would hold the frame from the app, and the logic
+of the game after it would use input that is one wait older. The wait of a
+frame of the scene is the "wait" of the frame time in the line `stereo` of
+the log.
 
 **The log.** At the start: "xr input : vk_pace=1 with vk_device=0. Each
 frame of the game waits for the next write of the slot of the app, ...".
@@ -1861,20 +1866,23 @@ frame of the scene, so these runs have `vk_stream_screens=0`.
   The quad layers differ from the fake run only in the hint cards, which
   follow the clock of the PC, with `vk_pace=0` too.
 
-**In the emulator** (`emu_game_test.ps1 -StartMinutes 15 -PlaySeconds
-360`, Wine of x86_64, the test runtime at 72 Hz, "Play" with
-`vk_pace=1`): the slots have a display period of 13.89 ms. In the dialog of
-a new profile each frame of the game started at a new write of the slot,
-after a wait of 12.0 ms as a mean, and the game made 67 to 68 frames a
-second, the rate of the frames of the session of the app. In the video
-before the intro the game makes 25 frames a second by itself, and a frame
-of 40 ms is longer than the time limit, so no frame waits. The processes of Wine took 18 and 19
-percent of one CPU in 361 s (`runblack.exe` 15 and 16 percent, the app 13
-and 14 percent). With `vk_pace=0` the same screens come at 368 to 711
-frames a second, and the processes of Wine take three quarters of one CPU.
-The first frame came 11.2 and 12.9 s after "Play", the logo screens took
-479 and 481 frames and the video 2515 frames, and the dialog of a new
-profile came at FinishFrame 3066 and 3069.
+**In the emulator** (`emu_game_test.ps1 -StartMinutes 15 -PlaySeconds 360`,
+Wine of x86_64, the test runtime at 72 Hz, "Play" with `vk_pace=1`): the
+slots have a display period of 13.89 ms. In the logos 1047 and 1048 of the
+frames of the first 30 s started at a new write of the slot (2 and 0 at the
+time limit), at 34.9 frames a second, after a wait of 6.3 ms as a mean. In
+the video before the intro the game makes 25 frames a second by itself: a
+frame of 40 ms is longer than a period, so each frame starts at a write
+that came in its work, with no wait. In the dialog of a new profile each
+frame started at a new write, after a wait of 11.8 ms as a mean, and the
+game made 68.1 to 68.4 frames a second, the rate of the frames of the
+session of the app. The processes of Wine took 20 percent of one CPU in 361
+s in each game (`runblack.exe` 16 percent, the app 15 percent). With
+`vk_pace=0` the same screens come at 368 to 711 frames a second, and the
+processes of Wine take three quarters of one CPU. The first frame came 13.7
+and 13.5 s after "Play", the logo screens took 476 and 475 frames and the
+video 2515 frames, and the dialog of a new profile came at FinishFrame 3064
+and 3063.
 
 **Not shown yet:** the pace in a headset (the timers of Wine under Box64,
 the CPU load and the heat of a Quest 3), a frame of the scene of the game
@@ -1888,6 +1896,10 @@ in Wine with the pace, and a display period of a rate other than 72 Hz.
 - No event of the app wakes the wait: it looks at the slot after each
   sleep, so a frame starts up to 0.5 ms after the write (1 ms with no fresh
   slot), plus the lateness of the timer.
+- The layer compare of `input_channel_run.ps1` fails when the frame rate of
+  the channel run differs from the frame rate of the fake run, with
+  `vk_pace=1` and with `vk_pace=0`: the hint cards follow the clock of the
+  PC, so they show at other frames.
 
 ## Wine in the app
 

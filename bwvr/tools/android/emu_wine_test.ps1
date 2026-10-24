@@ -34,8 +34,16 @@
          result file: the Windows version, the version of Wine, a 32 bit
          process on x86_64, the CPU DLL of the registry, the null display
          driver, the loop time, the read and the write of the drive, no
-         DirectDraw, Direct3D, OpenGL or Vulkan of Wine, and a TrueType font
-         (Tahoma) with glyphs.
+         DirectDraw, Direct3D, OpenGL or Vulkan of Wine, a TrueType font
+         (Tahoma) with glyphs, the audio driver aaudio of the registry, and
+         a tone of 1 s through waveOut and through DirectSound: each call
+         gave no error, and each play took 0.75 to 3 s (the end of a play
+         is the time when the last frame went to AAudio, so 1 s less the
+         buffer of AAudio is the least), and each stream gave the whole
+         tone to AAudio (22050 and 48000 frames of the program at least).
+         wine.log has the
+         lines of wineaaudio (the stream, its buffer, its latency) and no
+         line "No driver ... could be initialized" of mmdevapi.
       6. Checks that no process of Wine is left after the test program,
          and ends the app with the back key (wineserver -k).
       7. A start with wine_setup=0 in bwvr.ini: the log line, no setup, no
@@ -49,11 +57,25 @@
 
 .PARAMETER SetupMinutes
     The time that the first start may take for the setup. 15 by default.
+
+.PARAMETER Audio
+    The audio backend of the emulator (its option -audio). 'none' (the
+    default): the emulator gives Android an output device and plays its
+    sound nowhere, so no person hears the tone. 'off': the option
+    -no-audio, the emulator gives Android no audio device.
+
+.PARAMETER LowLatency
+    The value of wine_audio_low_latency in bwvr.ini of the start of the
+    test program: 1 (the default, the driver asks for the low latency mode
+    first) or 0 (the mode none). The test checks the log of the app and the
+    mode in each open line of wine.log.
 #>
 [CmdletBinding()]
 param(
     [switch]$Keep,
-    [int]$SetupMinutes = 15
+    [int]$SetupMinutes = 15,
+    [string]$Audio = 'none',
+    [ValidateSet(0, 1)][int]$LowLatency = 1
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -152,12 +174,13 @@ $Serial = "emulator-$port"
 $started = $false
 $running = & $Adb devices 2>$null | Select-String -Pattern "^$Serial\s+device"
 if ($running) {
-    Say "The emulator $Serial runs already"
+    Say "The emulator $Serial runs already. Its audio is the one of its start, not -Audio $Audio"
 } else {
-    Say 'Start the emulator (no window)'
-    Start-Process -FilePath $Emulator -ArgumentList @('-avd', $Avd, '-port', "$port",
-        '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot',
-        '-gpu', 'swiftshader_indirect') -WindowStyle Hidden | Out-Null
+    Say "Start the emulator (no window, audio $Audio)"
+    $audioArgs = if ($Audio -eq 'off') { @('-no-audio') } else { @('-audio', $Audio) }
+    Start-Process -FilePath $Emulator -ArgumentList (@('-avd', $Avd, '-port', "$port",
+        '-no-window') + $audioArgs + @('-no-boot-anim', '-no-snapshot',
+        '-gpu', 'swiftshader_indirect')) -WindowStyle Hidden | Out-Null
     $started = $true
 }
 $deadline = (Get-Date).AddMinutes(6)
@@ -280,7 +303,7 @@ try {
     Say 'Put the test program and bwvr.ini into the game folder'
     Adb @('shell', 'am', 'force-stop', $Package)
     $ini = Join-Path $Out 'bwvr.ini.pushed'
-    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'wine_probe=1', 'wine_debug=warn+virtual', 'menu_capture=1')
+    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'wine_probe=1', 'wine_debug=warn+virtual', 'menu_capture=1', "wine_audio_low_latency=$LowLatency")
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     Adb @('push', $Probe, "$AppDir/game/bwvr_wine_probe.exe")
     $standIn = Join-Path $Out 'stand-in.exe'
@@ -335,6 +358,37 @@ try {
     $protect = ([regex]::Matches($wineLog, 'protection on .* section .*, noexec filesystem\?')).Count
     Write-Host "   wine.log: $noexec lines 'falling back to read', $protect lines 'failed to set ... protection ... noexec filesystem?'"
     Expect ($protect -eq 0) 'each section of the PE file of the shared storage got its protection'
+    # The sound: the audio driver of patch 0003, a tone through waveOut and
+    # through DirectSound.
+    Expect ((ProbeValue $r 'audio') -eq 'aaudio') ('HKCU\Software\Wine\Drivers, Audio is aaudio (user.reg of the app): ' + (ProbeValue $r 'audio'))
+    Expect ($log1 -match 'wine         : user\.reg of the prefix: no display driver, the audio driver aaudio \(wine_audio=1\)') 'the log of the prefix names the audio driver aaudio'
+    Expect ([int](ProbeValue $r 'sound_waveout_devices') -ge 1) ('waveOut has a device: ' + (ProbeValue $r 'sound_waveout_devices') + ', ' + (ProbeValue $r 'sound_waveout_name'))
+    Expect ((ProbeValue $r 'sound_waveout_open') -eq '0' -and (ProbeValue $r 'sound_waveout_prepare') -eq '0' -and (ProbeValue $r 'sound_waveout_write') -eq '0') ('waveOutOpen, waveOutPrepareHeader and waveOutWrite gave no error: ' + (ProbeValue $r 'sound_waveout_open') + ' ' + (ProbeValue $r 'sound_waveout_prepare') + ' ' + (ProbeValue $r 'sound_waveout_write'))
+    $waveMs = 0.0
+    [void][double]::TryParse([string](ProbeValue $r 'sound_waveout_ms'), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$waveMs)
+    Expect ((ProbeValue $r 'sound_waveout_done') -eq '1' -and $waveMs -ge 750 -and $waveMs -le 3000) ("waveOut played the tone of 1 s in $waveMs ms (the buffer is done, at " + (ProbeValue $r 'sound_waveout_samples') + ' samples)')
+    Expect ((ProbeValue $r 'sound_dsound_create') -eq '0x00000000' -and (ProbeValue $r 'sound_dsound_buffer') -eq '0x00000000' -and (ProbeValue $r 'sound_dsound_lock') -eq '0x00000000' -and (ProbeValue $r 'sound_dsound_play') -eq '0x00000000') ('DirectSoundCreate, CreateSoundBuffer, Lock and Play gave DS_OK: ' + (ProbeValue $r 'sound_dsound_create') + ' ' + (ProbeValue $r 'sound_dsound_buffer') + ' ' + (ProbeValue $r 'sound_dsound_lock') + ' ' + (ProbeValue $r 'sound_dsound_play'))
+    $dsMs = 0.0
+    [void][double]::TryParse([string](ProbeValue $r 'sound_dsound_ms'), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dsMs)
+    Expect ((ProbeValue $r 'sound_dsound_done') -eq '1' -and $dsMs -ge 750 -and $dsMs -le 3000) ("DirectSound played the tone of 1 s in $dsMs ms (the last play cursor " + (ProbeValue $r 'sound_dsound_cursor') + ')')
+    $aaLines = @($wineLog -split "`r?`n" | Where-Object { $_ -match '^wineaaudio: ' })
+    foreach ($l in $aaLines) { Write-Host ('         ' + $l) }
+    Expect (@($aaLines | Where-Object { $_ -match 'opened the output stream' }).Count -ge 2) ('wine.log has an output stream of wineaaudio for waveOut and for DirectSound: ' + @($aaLines | Where-Object { $_ -match 'opened the output stream' }).Count)
+    Expect (@($aaLines | Where-Object { $_ -match 'the latency of AAudio after' }).Count -ge 1) 'wine.log has the latency of AAudio'
+    # The frames of each stream that came from the program (all frames to
+    # AAudio less the silence of the callback): the tone of 1 s and the
+    # silence that the program gave after it, in the 300 ms before the end.
+    $ends = @([regex]::Matches($wineLog, 'wineaaudio: the output stream ends: (\d+) frames to AAudio, (\d+) underruns of AAudio, (\d+) frames of silence'))
+    $fromProgram = @($ends | ForEach-Object { [int64]$_.Groups[1].Value - [int64]$_.Groups[3].Value })
+    Expect ($ends.Count -ge 2 -and $fromProgram[0] -ge 22050 -and $fromProgram[1] -ge 48000) ('each stream gave the whole tone to AAudio: ' + ($fromProgram -join ' and ') + ' frames of the program (waveOut at least 22050, DirectSound at least 48000)')
+    # wine_audio_low_latency: the log of the app and the mode that the
+    # driver asks for.
+    $modeText = if ($LowLatency -eq 1) { 'The audio driver aaudio asks AAudio for the low latency mode first' } else { 'The audio driver aaudio asks AAudio for the mode none' }
+    Expect ($log2 -match "wine         : wine_audio=1, wine_audio_low_latency=$LowLatency\. $modeText") "the log of the app has wine_audio_low_latency=$LowLatency"
+    $asked = if ($LowLatency -eq 1) { 'low latency' } else { 'none' }
+    $openLines = @($aaLines | Where-Object { $_ -match 'opened the output stream' })
+    Expect ($openLines.Count -ge 2 -and @($openLines | Where-Object { $_ -notmatch "The driver asks for the mode $asked \(WINEAAUDIO_LOW_LATENCY=$LowLatency\)" }).Count -eq 0) "each open line of wine.log names the mode that the driver asks for: $asked (WINEAAUDIO_LOW_LATENCY=$LowLatency)"
+    Expect ($wineLog -notmatch 'No driver from .* could be initialized') 'mmdevapi found an audio driver (no line "No driver ... could be initialized")'
     Start-Sleep -Seconds 8
     $left = @(WineProcesses $user)
     Expect ($left.Count -eq 0) ('no process of Wine is left after the test program' + $(if ($left.Count) { ': ' + ($left -join '; ') } else { '' }))

@@ -17,11 +17,21 @@
 //                the error, or "loaded"
 //   font_*       the face, the extent of a text and the bytes of the
 //                outline of a glyph of the font "Tahoma" (FreeType)
+//   audio        HKCU\Software\Wine\Drivers, Audio: the audio driver
+//   sound_*      a tone of 1 s through waveOut and through DirectSound, in
+//                the format of QMixer (22050 Hz, 16 bit, stereo): what each
+//                call gave, and the time from the start of the play to its
+//                end (waveOut: the buffer is done, DirectSound: the buffer
+//                does not play now). Then 300 ms more before the stream
+//                ends, so the end of the tone gets to the device.
 //   result       "ok" at the end of the file
 //
 // The exit code is 0 when the file is written, else 1.
 #include <windows.h>
+#include <mmsystem.h>
+#include <dsound.h>
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -192,6 +202,162 @@ void Font() {
   DeleteDC(dc);
 }
 
+// THE SOUND TEST. A tone of 440 Hz for 1 s, at -26 dB of the full level, in
+// the format of the output of QMixer (docs/audio.md, section 2).
+constexpr DWORD kToneRate = 22050;
+constexpr DWORD kToneFrames = kToneRate;
+constexpr DWORD kToneBytes = kToneFrames * 4;
+constexpr DWORD kSoundWaitMs = 5000;
+// The wait after the end of a play, before the stream ends.
+constexpr DWORD kSoundTailMs = 300;
+
+WAVEFORMATEX ToneFormat() {
+  WAVEFORMATEX f = {};
+  f.wFormatTag = WAVE_FORMAT_PCM;
+  f.nChannels = 2;
+  f.nSamplesPerSec = kToneRate;
+  f.wBitsPerSample = 16;
+  f.nBlockAlign = 4;
+  f.nAvgBytesPerSec = kToneRate * 4;
+  return f;
+}
+
+void FillTone(void* data, DWORD bytes) {
+  short* s = static_cast<short*>(data);
+  const DWORD frames = bytes / 4;
+  for (DWORD i = 0; i < frames; ++i) {
+    const short v = static_cast<short>(1638.0 * sin(2.0 * 3.14159265358979 * 440.0 * i / kToneRate));
+    s[2 * i] = v;
+    s[2 * i + 1] = v;
+  }
+}
+
+double Ms(const LARGE_INTEGER& a, const LARGE_INTEGER& b) {
+  LARGE_INTEGER f;
+  QueryPerformanceFrequency(&f);
+  return (b.QuadPart - a.QuadPart) * 1000.0 / f.QuadPart;
+}
+
+void WaveOutTone() {
+  Line("sound_waveout_devices=%u", waveOutGetNumDevs());
+  WAVEOUTCAPSA caps = {};
+  if (waveOutGetDevCapsA(0, &caps, sizeof(caps)) == MMSYSERR_NOERROR) {
+    Line("sound_waveout_name=%s", caps.szPname);
+  } else {
+    Line("sound_waveout_name=none");
+  }
+  WAVEFORMATEX f = ToneFormat();
+  HANDLE done = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+  HWAVEOUT out = nullptr;
+  MMRESULT r = waveOutOpen(&out, WAVE_MAPPER, &f, reinterpret_cast<DWORD_PTR>(done), 0,
+                           CALLBACK_EVENT);
+  Line("sound_waveout_open=%u", r);
+  if (r != MMSYSERR_NOERROR) {
+    CloseHandle(done);
+    return;
+  }
+  static char data[kToneBytes];
+  FillTone(data, kToneBytes);
+  WAVEHDR hdr = {};
+  hdr.lpData = data;
+  hdr.dwBufferLength = kToneBytes;
+  r = waveOutPrepareHeader(out, &hdr, sizeof(hdr));
+  Line("sound_waveout_prepare=%u", r);
+  LARGE_INTEGER a, b;
+  QueryPerformanceCounter(&a);
+  r = waveOutWrite(out, &hdr, sizeof(hdr));
+  Line("sound_waveout_write=%u", r);
+  bool finished = false;
+  if (r == MMSYSERR_NOERROR) {
+    for (;;) {
+      if (hdr.dwFlags & WHDR_DONE) {
+        finished = true;
+        break;
+      }
+      QueryPerformanceCounter(&b);
+      if (Ms(a, b) > kSoundWaitMs) break;
+      WaitForSingleObject(done, 20);
+    }
+  }
+  QueryPerformanceCounter(&b);
+  Line("sound_waveout_done=%d", finished ? 1 : 0);
+  Line("sound_waveout_ms=%.1f", Ms(a, b));
+  MMTIME pos = {};
+  pos.wType = TIME_SAMPLES;
+  r = waveOutGetPosition(out, &pos, sizeof(pos));
+  Line("sound_waveout_samples=%lu", r == MMSYSERR_NOERROR && pos.wType == TIME_SAMPLES
+                                         ? pos.u.sample : 0ul);
+  // A done buffer is in the audio driver, not yet at the device. The wait
+  // lets it play before the reset and the close end the stream.
+  Sleep(kSoundTailMs);
+  waveOutReset(out);
+  waveOutUnprepareHeader(out, &hdr, sizeof(hdr));
+  Line("sound_waveout_close=%u", waveOutClose(out));
+  CloseHandle(done);
+}
+
+void DirectSoundTone() {
+  IDirectSound* ds = nullptr;
+  HRESULT hr = DirectSoundCreate(nullptr, &ds, nullptr);
+  Line("sound_dsound_create=0x%08lx", static_cast<unsigned long>(hr));
+  if (FAILED(hr)) return;
+  hr = ds->SetCooperativeLevel(GetDesktopWindow(), DSSCL_PRIORITY);
+  Line("sound_dsound_cooperative=0x%08lx", static_cast<unsigned long>(hr));
+  WAVEFORMATEX f = ToneFormat();
+  DSBUFFERDESC desc = {};
+  desc.dwSize = sizeof(desc);
+  desc.dwFlags = DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_GLOBALFOCUS;
+  desc.dwBufferBytes = kToneBytes;
+  desc.lpwfxFormat = &f;
+  IDirectSoundBuffer* buffer = nullptr;
+  hr = ds->CreateSoundBuffer(&desc, &buffer, nullptr);
+  Line("sound_dsound_buffer=0x%08lx", static_cast<unsigned long>(hr));
+  if (FAILED(hr)) {
+    ds->Release();
+    return;
+  }
+  void* p1 = nullptr;
+  void* p2 = nullptr;
+  DWORD n1 = 0, n2 = 0;
+  hr = buffer->Lock(0, kToneBytes, &p1, &n1, &p2, &n2, 0);
+  if (SUCCEEDED(hr)) {
+    FillTone(p1, n1);
+    buffer->Unlock(p1, n1, p2, n2);
+  }
+  Line("sound_dsound_lock=0x%08lx", static_cast<unsigned long>(hr));
+  LARGE_INTEGER a, b;
+  QueryPerformanceCounter(&a);
+  hr = buffer->Play(0, 0, 0);
+  Line("sound_dsound_play=0x%08lx", static_cast<unsigned long>(hr));
+  bool finished = false;
+  DWORD cursor = 0;
+  if (SUCCEEDED(hr)) {
+    for (;;) {
+      DWORD status = 0, play = 0, write = 0;
+      buffer->GetStatus(&status);
+      if (!(status & DSBSTATUS_PLAYING)) {
+        finished = true;
+        break;
+      }
+      if (SUCCEEDED(buffer->GetCurrentPosition(&play, &write)) && play > cursor) cursor = play;
+      QueryPerformanceCounter(&b);
+      if (Ms(a, b) > kSoundWaitMs) break;
+      Sleep(10);
+    }
+  }
+  QueryPerformanceCounter(&b);
+  Line("sound_dsound_done=%d", finished ? 1 : 0);
+  Line("sound_dsound_ms=%.1f", Ms(a, b));
+  Line("sound_dsound_cursor=%lu", cursor);
+  // The mix of dsound and the local buffer of the audio driver still hold
+  // the end of the tone (about 3 periods). The wait lets it go to the
+  // device before the release ends the stream.
+  Sleep(kSoundTailMs);
+  buffer->Stop();
+  buffer->Release();
+  ds->Release();
+}
+
 }  // namespace
 
 int main() {
@@ -210,6 +376,11 @@ int main() {
   Drive(folder);
   SystemDlls();
   Font();
+  RegText(HKEY_CURRENT_USER, "Software\\Wine\\Drivers", "Audio", "audio");
+  CoInitialize(nullptr);
+  WaveOutTone();
+  DirectSoundTone();
+  CoUninitialize();
   Line("result=ok");
 
   fputs(g_text, stdout);

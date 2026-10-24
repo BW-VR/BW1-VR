@@ -173,8 +173,11 @@ inline void EnvironmentChecks() {
       "WINEPREFIX=/somewhere",
       "LD_PRELOAD=libsigchain.so",
       "LD_LIBRARY_PATH=/system/lib64",
-      "TMPDIR=/data/local/tmp"};
-  const std::vector<std::string> env = wine_rules::Environment(app, p, files, " -all ");
+      "TMPDIR=/data/local/tmp",
+      "WINEAAUDIO_LOW_LATENCY=5"};
+  const std::vector<std::string> env = wine_rules::Environment(app, p, files, " -all ", true);
+  Check(HasEntry(env, "WINEAAUDIO_LOW_LATENCY=1") && CountKey(env, "WINEAAUDIO_LOW_LATENCY") == 1,
+        "wine_audio_low_latency=1: WINEAAUDIO_LOW_LATENCY=1, one time", 0, 0);
   Check(HasEntry(env, "PATH=/product/bin:/apex/com.android.runtime/bin:/system/bin") &&
             HasEntry(env, "ANDROID_DATA=/data"),
         "the other values of the app stay", 0, 0);
@@ -192,16 +195,24 @@ inline void EnvironmentChecks() {
   Check(HasEntry(env, "WINEDEBUG=-all") && CountKey(env, "WINEDEBUG") == 1,
         "WINEDEBUG is the trimmed wine_debug, one time", 0, 0);
   Check(HasEntry(env, "WINEDLLOVERRIDES=mscoree,mshtml="), "no Mono and no Gecko", 0, 0);
-  const std::vector<std::string> plain = wine_rules::Environment(app, p, files, "");
+  const std::vector<std::string> plain = wine_rules::Environment(app, p, files, "", false);
+  Check(HasEntry(plain, "WINEAAUDIO_LOW_LATENCY=0") &&
+            CountKey(plain, "WINEAAUDIO_LOW_LATENCY") == 1,
+        "wine_audio_low_latency=0: WINEAAUDIO_LOW_LATENCY=0 (the mode none), one time", 0, 0);
   Check(CountKey(plain, "WINEDEBUG") == 0, "no wine_debug: no WINEDEBUG, the default of Wine",
         0, 0);
   Check(CountKey(plain, "WINELOADER") == 0 && CountKey(plain, "WINEDLLPATH") == 0,
         "no WINELOADER and no WINEDLLPATH: Wine finds them from ntdll.so", 0, 0);
-  const std::string reg = wine_rules::UserRegSeed();
+  const std::string reg = wine_rules::UserRegSeed(true);
   Check(reg.compare(0, 24, "WINE REGISTRY Version 2\n") == 0, "user.reg starts with its head",
         0, 0);
-  Check(reg.find("[Software\\\\Wine\\\\Drivers]\n\"Graphics\"=\"null\"\n") != std::string::npos,
-        "user.reg: HKCU\\Software\\Wine\\Drivers, Graphics = null", 0, 0);
+  Check(reg.find("[Software\\\\Wine\\\\Drivers]\n\"Audio\"=\"aaudio\"\n\"Graphics\"=\"null\"\n") !=
+            std::string::npos,
+        "user.reg: HKCU\\Software\\Wine\\Drivers, Audio = aaudio, Graphics = null", 0, 0);
+  const std::string quiet = wine_rules::UserRegSeed(false);
+  Check(quiet.find("[Software\\\\Wine\\\\Drivers]\n\"Graphics\"=\"null\"\n") != std::string::npos &&
+            quiet.find("Audio") == std::string::npos,
+        "user.reg with wine_audio=0: Graphics = null, no Audio value", 0, 0);
 }
 
 inline void TarChecks() {

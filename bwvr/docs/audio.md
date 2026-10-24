@@ -163,6 +163,78 @@ stream 2 to 4 times the latency ahead. The DLL has 16 sample slots. (V)
 The mod calls QMixer only from the game thread, as the DLL does. The mixer of
 the mod runs on the thread of QMixer (section 7).
 
+### In Wine on Android (the headset app)
+
+In the headset app the game runs in Wine (`android.md`, "Play in the app").
+There DirectSound and the wave device of QMixer are `dsound` and `winmm` of
+Wine. Both give their sound to `mmdevapi`, and `mmdevapi` gives it to the
+audio driver of Wine:
+
+```
+QMixer.dll -> dsound or winmm (Wine) -> mmdevapi -> wineaaudio.drv -> AAudio of Android
+```
+
+Wine has no audio driver of its own for Android. The patch
+`bwvr/tools/android/wine-patches/0003-wineaaudio.patch` adds one,
+`wineaaudio.drv`:
+
+- It has the form of `dlls/wineoss.drv/oss.c`: the local buffer of
+  `mmdevapi`, and a timer loop that signals the program each period. The
+  output is an AAudio stream of the NDK (`libaaudio.so`, Android 8 and
+  later) with a data callback: AAudio asks for each burst, and the callback
+  takes the frames from the local buffer (as the render callback of
+  `winecoreaudio`). When the local buffer has too few frames, the rest of
+  the burst is silence. The driver does not write the stream itself: an
+  AAudio stream of the mode none (an AudioTrack) plays only after its buffer
+  is full, and a program keeps only a few periods in the local buffer, so
+  such a stream does not start.
+- The period of `mmdevapi` is 10 ms, or one burst of the device when a burst
+  is longer (the emulator has bursts of 45.4 ms), so the local buffer has
+  the frames of a burst at each callback. The burst is the one of a test
+  stream at the rate of the device. A stream of the mode none or of another
+  rate (`waveOut` at 22050 Hz) can have a longer burst. Only a headset can
+  show if that gives gaps there.
+- One output device, the output of the route of Android (the speakers of
+  the headset). No capture device, and no MIDI device: the game needs
+  neither.
+- The formats: AAudio takes 16 bit PCM and 32 bit float. The driver gives
+  8 bit PCM as 16 bit PCM, and 24 bit and 32 bit PCM as float. AAudio
+  converts the sample rate. The mix format of the driver is the rate of the
+  device, 2 channels, 32 bit float. `dsound` of Wine mixes its buffers into
+  the mix format, so the stream of DirectSound has the rate of the device. A
+  stream of `waveOut` has the format of the program (the tone of the test
+  program: 22050 Hz, 16 bit, stereo).
+- The volume of `mmdevapi` (`waveOutSetVolume`, the volume of a session)
+  goes into the samples in the same step.
+- The driver asks for `AAUDIO_PERFORMANCE_MODE_LOW_LATENCY` first
+  (`wine_audio_low_latency=1` in `bwvr.ini`, the default). When that stream
+  has another rate, another channel count or another format than the
+  program asked for, the driver opens a stream with the mode none. With
+  `wine_audio_low_latency=0` the driver asks for the mode none at once. The
+  app gives the key to the driver as `WINEAAUDIO_LOW_LATENCY` of the
+  environment of each program in Wine. AAudio can give another mode than
+  the driver asks for: the open line of the log names both.
+- When AAudio disconnects a stream (a change of the route), the timer loop
+  opens a new one. After an open that failed, it tries again each 1 s.
+- The data callback runs in real time and takes the lock of the stream. So
+  the timer loop writes its lines to the log after the unlock.
+- The log (`wine.log` of the app, lines `wineaaudio:`): the rate and the
+  burst of the device, one line for each stream (the format of the program,
+  the mode, the burst, the buffer of AAudio and the period of `mmdevapi`),
+  the latency from the timestamp of AAudio after 0.5 s of output, the
+  underruns of AAudio and the frames of silence while a stream played (one
+  line at most each 10 s, when a number grew), and the end of each stream.
+
+The prefix of the app selects the driver: `HKCU\Software\Wine\Drivers`,
+`Audio` = `aaudio` (`wine_audio=1`, the default). With `wine_audio=0` the
+prefix has no `Audio` value, `mmdevapi` tries its default list (pulse, alsa,
+oss, coreaudio), finds no driver, and the game has no sound.
+
+What the emulator shows: see `android.md`, "Wine in the app" (the tone of
+the test program) and "Play in the app" (the game). Only a headset can show
+the sound itself, its latency on the Quest, and if the low latency mode
+gives gaps.
+
 ## 3. The listener
 
 ### Where the game sets it (V)

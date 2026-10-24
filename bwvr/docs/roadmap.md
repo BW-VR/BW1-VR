@@ -807,8 +807,9 @@ that moves while the Hand takes it.
     them on a quad fixed in the room (`android.md`, "The screens with no
     scene"). Open: a game folder with no profile (the game then waits in the
     dialog of a new profile, and the pointer, the clicks and a text input on
-    the screen quad are not built), the sound (Wine has no audio driver on
-    Android), the frame pace with `vk_device=0`, and the screen quad in a
+    the screen quad are not built), the sound in a headset (the audio
+    driver `wineaaudio` of patch 0003 gives the sound of Wine to AAudio,
+    `audio.md`, "In Wine on Android"), the frame pace with `vk_device=0`, and the screen quad in a
     headset. The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input

@@ -79,7 +79,7 @@ inline void RunKeyChecks() {
 
 inline void RegistryChecks() {
   printf("\nPlay: the registry of the game in the prefix\n");
-  const std::string reg = play_rules::GameRegistry(1380, 1104);
+  const std::string reg = play_rules::GameRegistry(1380, 1104, true);
   Check(reg.compare(0, 36, "Windows Registry Editor Version 5.00") == 0,
         "a file of reg import", 0, 0);
   Check(reg.find("[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White]\r\n"
@@ -94,6 +94,13 @@ inline void RegistryChecks() {
         "the files of the mod are known DLLs", 0, 0);
   Check(reg.find("Profile") == std::string::npos && reg.find("LHMultiplayer") == std::string::npos,
         "no value of a profile", 0, 0);
+  Check(reg.find("[HKEY_CURRENT_USER\\Software\\Wine\\Drivers]\r\n\"Audio\"=\"aaudio\"\r\n") !=
+            std::string::npos,
+        "wine_audio=1: the audio driver of Wine is aaudio", 0, 0);
+  const std::string quiet = play_rules::GameRegistry(1380, 1104, false);
+  Check(quiet.find("[HKEY_CURRENT_USER\\Software\\Wine\\Drivers]\r\n\"Audio\"=-\r\n") !=
+            std::string::npos,
+        "wine_audio=0: reg import deletes the Audio value (no audio driver)", 0, 0);
   Check(play_rules::ModFolder("/f/prefix") == "/f/prefix/drive_c/windows/syswow64",
         "the files of the mod go into syswow64, the 32 bit system folder", 0, 0);
   Check(play_rules::AppFolder("/f/prefix") + "/" + play_rules::kRegFile ==

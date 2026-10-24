@@ -165,9 +165,11 @@ inline bool NeedsCpuCopy(const std::string& abi, const std::string& marker,
 // value. WINEDLLOVERRIDES: no Mono and no Gecko, so wineboot asks for no
 // download. WINELOADER and WINEDLLPATH are not needed: Wine finds its loader
 // and its DLLs from the place of ntdll.so in the tree.
+// WINEAAUDIO_LOW_LATENCY (wine_audio_low_latency): 1 lets the audio driver
+// ask AAudio for the low latency mode first, 0 gives the mode none at once.
 inline std::vector<std::string> Environment(const std::vector<std::string>& inherited,
                                             const Paths& p, const std::string& files,
-                                            const std::string& debug) {
+                                            const std::string& debug, bool low_latency) {
   static const char* const kDrop[] = {"WINE",    "LD_LIBRARY_PATH=", "LD_PRELOAD=",
                                       "HOME=",   "TMPDIR=",          "DISPLAY=",
                                       "WAYLAND_DISPLAY="};
@@ -186,18 +188,29 @@ inline std::vector<std::string> Environment(const std::vector<std::string>& inhe
   env.push_back("HOME=" + files);
   env.push_back("TMPDIR=" + files + "/tmp");
   if (!Trim(debug).empty()) env.push_back("WINEDEBUG=" + Trim(debug));
+  env.push_back(low_latency ? "WINEAAUDIO_LOW_LATENCY=1" : "WINEAAUDIO_LOW_LATENCY=0");
   return env;
 }
 
+// The audio driver of the tree (patch 0003 of wine-patches): wineaaudio.drv
+// gives the sound of mmdevapi to AAudio of Android. Wine has no other audio
+// driver on Android.
+constexpr char kAudioDriver[] = "aaudio";
+
 // user.reg of a new prefix, before the first wineboot: no display driver
-// of Wine (the app draws, and the game shows no window). The wine server
-// loads it into HKEY_CURRENT_USER, and wineboot adds the rest.
-inline std::string UserRegSeed() {
-  return "WINE REGISTRY Version 2\n"
-         ";; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n"
-         "\n"
-         "[Software\\\\Wine\\\\Drivers]\n"
-         "\"Graphics\"=\"null\"\n";
+// of Wine (the app draws, and the game shows no window). audio
+// (wine_audio=1): the audio driver of the tree. With no "Audio" value
+// (wine_audio=0) mmdevapi tries its default list, which has no driver for
+// Android, so a program has no sound. The wine server loads the file into
+// HKEY_CURRENT_USER, and wineboot adds the rest.
+inline std::string UserRegSeed(bool audio) {
+  std::string text = "WINE REGISTRY Version 2\n"
+                     ";; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n"
+                     "\n"
+                     "[Software\\\\Wine\\\\Drivers]\n";
+  if (audio) text += std::string("\"Audio\"=\"") + kAudioDriver + "\"\n";
+  text += "\"Graphics\"=\"null\"\n";
+  return text;
 }
 
 // THE TAR FILE OF A TREE (ustar, as GNU tar --format=ustar writes it).

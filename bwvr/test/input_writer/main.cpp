@@ -3,7 +3,7 @@
 // the mod and the app (src/common/input_channel.h). It does what the headset
 // app does, with the input of a record in place of a session.
 //
-//   bwvr_input_writer play <channel> <record> <seconds> [<head seconds>] [<hz>]
+//   bwvr_input_writer play <channel> <record> <seconds> [<head seconds>] [<hz>] [app]
 //     Waits up to <head seconds> (<seconds> when not given) for the head of
 //     the mod in the channel file, so that a run can first wait for an idle
 //     PC. Then for each frame
@@ -13,7 +13,11 @@
 //     the record it writes the last frame of the record. With <hz> above 0
 //     it also writes the last slot again <hz> times a second, with the same
 //     bytes, as the app writes a slot at each frame of its session: these
-//     writes pace the frames of the mod with vk_pace=1. It takes each pulse
+//     writes pace the frames of the mod with vk_pace=1. With the word app
+//     (and <hz> above 0) it writes as the app does: only at <hz>, the input
+//     of the frame that the mod latched last, with a frame of the writer that
+//     is one more for each write, and no answer to a latch (no lockstep). It
+//     takes each pulse
 //     of the ring of the events and writes one line for it. It ends
 //     <seconds> after the head of the mod came.
 //
@@ -100,7 +104,7 @@ bool Map(const char* path, Mapped* m) {
 }
 
 int Play(const char* channel, const char* record, int seconds,
-         int head_seconds, int hz) {
+         int head_seconds, int hz, bool app) {
   std::vector<ic::SlotData> frames;
   uint32_t source = 0;
   if (!ReadRecord(record, &frames, &source) || frames.empty()) return 2;
@@ -144,10 +148,24 @@ int Play(const char* channel, const char* record, int seconds,
   QueryPerformanceCounter(&now);
   int64_t next = now.QuadPart + tick;
   ic::SlotData last = {};
+  uint32_t app_frame = 0;
   while (GetTickCount64() < end) {
     const uint32_t want = ic::LoadAcquire(&f->head.want);
     const uint32_t tag = want + 1;
-    if (f->slot.data.frame != tag) {
+    if (app) {
+      // As the app: one write at each tick, a new frame of the writer.
+      QueryPerformanceCounter(&now);
+      if (now.QuadPart >= next) {
+        ic::SlotData d = frames[want < frames.size() ? want : frames.size() - 1];
+        d.frame = ++app_frame;
+        ic::Write(&f->slot, d);
+        ++writes;
+        last_want = want;
+        seen_want = true;
+        next += tick;
+        if (next <= now.QuadPart) next = now.QuadPart + tick;
+      }
+    } else if (f->slot.data.frame != tag) {
       ic::SlotData d = frames[want < frames.size() ? want : frames.size() - 1];
       d.frame = tag;
       ic::Write(&f->slot, d);
@@ -156,7 +174,7 @@ int Play(const char* channel, const char* record, int seconds,
       last_want = want;
       seen_want = true;
     }
-    if (tick > 0) {
+    if (tick > 0 && !app) {
       QueryPerformanceCounter(&now);
       if (now.QuadPart >= next) {
         if (seen_want) {
@@ -185,7 +203,10 @@ int Play(const char* channel, const char* record, int seconds,
          static_cast<unsigned long long>(writes), last_want,
          seen_want ? "" : " (the mod asked for no frame)", pulses,
          f->head.latches, f->head.torn, f->head.events_dropped);
-  if (hz > 0) {
+  if (hz > 0 && app) {
+    printf("the writer wrote as the app at %d Hz for %d s, %u frames of the "
+           "writer\n", hz, seconds, app_frame);
+  } else if (hz > 0) {
     printf("the writer wrote the last slot again %llu times at %d Hz in %d s\n",
            static_cast<unsigned long long>(again), hz, seconds);
   }
@@ -295,7 +316,8 @@ int main(int argc, char** argv) {
     const int seconds = atoi(argv[4]);
     return Play(argv[2], argv[3], seconds,
                 argc >= 6 ? atoi(argv[5]) : seconds,
-                argc >= 7 ? atoi(argv[6]) : 0);
+                argc >= 7 ? atoi(argv[6]) : 0,
+                argc >= 8 && strcmp(argv[7], "app") == 0);
   }
   if (argc >= 4 && strcmp(argv[1], "compare") == 0) {
     const int code = Compare(argv[2], argv[3]);
@@ -307,7 +329,7 @@ int main(int argc, char** argv) {
     fflush(stdout);
     return code;
   }
-  printf("bwvr_input_writer play <channel> <record> <seconds> [<head seconds>] [<hz>]\n"
+  printf("bwvr_input_writer play <channel> <record> <seconds> [<head seconds>] [<hz>] [app]\n"
          "bwvr_input_writer compare <record A> <record B>\n"
          "bwvr_input_writer dump <channel>\n");
   return 9;

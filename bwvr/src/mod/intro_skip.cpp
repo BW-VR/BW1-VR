@@ -67,6 +67,9 @@ uint64_t g_intro_frames = 0;  // frames of a part this session
 uint64_t g_part_frames = 0;   // frames of the part that plays now
 uint64_t g_skip_frames = 0;   // frames that got the skip key
 bool g_was_latched = false;
+// The awake hands that the last frame read, for the log of a change.
+unsigned g_awake_said = 0xFFFFFFFFu;
+int g_awake_lines = 0;
 LARGE_INTEGER g_frequency = {0};
 LARGE_INTEGER g_last = {0};
 
@@ -184,6 +187,20 @@ void IntroSkipFrame(uintptr_t caller, bwvr::XrScreen* screen) {
     down |= HandBits(XrInputHand(0), 0, &awake);
     down |= HandBits(XrInputHand(1), 1, &awake);
   }
+  // The log names each change of the awake hands that the skip reads, at
+  // most 16 times. Only reads: a hand of the headset, of the input channel,
+  // or of the fake controller.
+  if (awake != g_awake_said && g_awake_lines < 16) {
+    ++g_awake_lines;
+    ModLog("intro skip   : the hands that the skip reads: %s, at frame %llu "
+           "of the intro",
+           awake == 3u   ? "both"
+           : awake == 1u ? "the left hand"
+           : awake == 2u ? "the right hand"
+                         : "no active hand",
+           g_intro_frames);
+  }
+  g_awake_said = awake;
   const bool test = part != intro_skip::kNone && g_test_frame != 0 &&
                     g_intro_frames == g_test_frame;
   if (test) {

@@ -42,6 +42,12 @@
 # vk_stream_screens = 0. -WriterHz <hz>: the test writer also writes the
 # last slot again <hz> times a second, as the app writes a slot at each
 # frame of its session (input_channel_run.ps1 -WriterHz), for vk_pace = 1.
+# -WriterApp (with -WriterHz): the writer writes as the app, only at its
+# rate and with a new frame of the writer in each write, and it answers no
+# latch (with no xr_input_lockstep_ms). -WriterSeconds N: the writer stops N
+# s after the channel of the mod came, so a run shows the stale rule of the
+# input channel (xr_input_stale_ms in -More). 0 (the default): the run time
+# and 60 s.
 #
 # The output is in desk-<Name>: bwvr.log, reader.txt, writer.txt,
 # ring-capture.bin, bwvr-stream.bin and the pictures. The stream, the capture
@@ -59,6 +65,8 @@ param(
     [int]$SkipAt = 0,
     [int]$TestFrame = 0,
     [int]$WriterHz = 0,
+    [switch]$WriterApp,
+    [int]$WriterSeconds = 0,
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -108,7 +116,7 @@ $q = Start-Process -FilePath $reader -NoNewWindow -PassThru `
 $null = $q.Handle  # keeps the exit code
 "the test reader runs (process $($q.Id)): it asks at screen frame $Attach ($($base + $Attach)) and leaves after screen frame $Last$(if ($Most -gt 0) { " or after $Most frames" })"
 $p = Start-Process -FilePath $writer -NoNewWindow -PassThru `
-    -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)", '2100', "$WriterHz") `
+    -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$(if ($WriterSeconds -gt 0) { $WriterSeconds } else { $Seconds + 60 })", '2100', "$WriterHz", $(if ($WriterApp) { 'app' } else { 'lockstep' })) `
     -RedirectStandardOutput (Join-Path $out 'writer.txt') -RedirectStandardError (Join-Path $out 'writer-err.txt')
 $null = $p.Handle
 "the test writer runs (process $($p.Id)): it plays $fromRec"

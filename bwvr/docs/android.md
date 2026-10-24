@@ -1175,7 +1175,10 @@ mod reads it, and it wins over `fake_head` and `fake_controller`:
 | A pulse (`Haptic`) | `controllers.cpp` (`PulseWith`): into the ring of the events |
 
 The first reader of a frame of the game reads the slot, and each later
-reader of that frame gets the same values (`XrInputLatch`). A recenter of
+reader of that frame gets the same values (`XrInputLatch`). With
+`vk_pace=1` a read before the wait of the frame (the intro skip in
+FinishFrame) reads only the newest slot, and the first read after the wait
+latches the frame ("The pace of the frames"). A recenter of
 the app recenters the mod one time. When the app writes no new slot for
 `xr_input_stale_ms` (500 by default, 0: never), the hands read as not
 active and the focus as off, and the head keeps its last pose. The lockstep
@@ -1209,7 +1212,10 @@ of the game ("The pace of the frames").
 frame by frame, as the app does, and writes each pulse of the mod.
 With a rate (`input_channel_run.ps1 -WriterHz`) it also writes the last
 slot again at that rate, as the app writes a slot at each frame of its
-session.
+session. With the word `app` (`screens_run.ps1 -WriterApp`) it writes
+only at its rate, with a new frame of the writer in each write and no
+answer to a latch, as the app does, and `screens_run.ps1 -WriterSeconds`
+stops it early, for the stale rule.
 `compare` compares two records frame by frame, and `dump` writes a channel
 file as text. `input_channel_run.ps1 -Kind fake` makes a run in the test
 save "pen" with the scripted controller and a record. `-Kind channel -From

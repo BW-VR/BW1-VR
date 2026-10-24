@@ -107,6 +107,24 @@ bool ReadOnce(ic::SlotData* d, uint32_t* seq, uint32_t* torn) {
   return whole;
 }
 
+// THE STALE RULE. With no new slot for xr_input_stale_ms the hands read as
+// not active and the focus as off. Not in the lockstep of a test: there the
+// writer writes a new slot only for a new frame of the controllers, and a
+// load of the game has many frames of the game with no frame of the
+// controllers. The latch and the read before the wait of the pace call it.
+void NoInput();
+void StaleRule() {
+  if (g_have_slot && g_stale_ms > 0 && !g_stale && !g_lockstep &&
+      GetTickCount64() - g_slot_tick > static_cast<ULONGLONG>(g_stale_ms)) {
+    g_stale = true;
+    ModLog("xr input     : no new slot of the app for %d ms (slot %u). The "
+           "hands are not active and the focus is off until the app writes "
+           "again. The head keeps its last pose, frame %llu",
+           g_stale_ms, g_slot_frame, ControllersFrameCount());
+  }
+  if (g_stale) NoInput();
+}
+
 // A look at the sequence of the slot. The display period comes from a whole
 // copy of a new write.
 void PaceLook(int64_t now) {
@@ -375,7 +393,7 @@ void XrInputLatch() {
     ++g_early_reads;
     g_early_in_frame = true;
     if (early_whole && early.frame != 0) Take(early);
-    if (g_stale) NoInput();
+    StaleRule();
     return;
   }
   g_new_frame = false;
@@ -445,18 +463,7 @@ void XrInputLatch() {
     fp::Took(&g_pace, seq, now);
     fp::SetPeriod(&g_pace, d.display_period);
   }
-  // THE STALE RULE. Not in the lockstep of a test: there the writer writes a
-  // new slot only for a new frame of the controllers, and a load of the game
-  // has many frames of the game with no frame of the controllers.
-  if (g_have_slot && g_stale_ms > 0 && !g_stale && !g_lockstep &&
-      GetTickCount64() - g_slot_tick > static_cast<ULONGLONG>(g_stale_ms)) {
-    g_stale = true;
-    ModLog("xr input     : no new slot of the app for %d ms (slot %u). The "
-           "hands are not active and the focus is off until the app writes "
-           "again. The head keeps its last pose, frame %llu",
-           g_stale_ms, g_slot_frame, ControllersFrameCount());
-  }
-  if (g_stale) NoInput();
+  StaleRule();
 }
 
 const bwvr::EyeView& XrInputEye(int index) { return g_eyes[index ? 1 : 0]; }

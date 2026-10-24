@@ -825,6 +825,10 @@ For a desktop run, `intro_skip_test_frame=30` sends a press at frame 30. The log
 then shows the logo screens and the Lionhead logo end early, and the game goes on
 to the land and to its start dialog. Keep the mouse and the keyboard still
 during a run, because the logo ends on each key and each mouse button.
+The log names each change of the awake hands that the skip reads ("intro
+skip : the hands that the skip reads: both, at frame 1 of the intro", at
+most 16 lines), so a run shows when the hands of the input channel go not
+active.
 
 Each run of the scripts in `bwvr/tools/desk` has `intro_skip_test_frame=5`, so
 a run does not wait for the logos (`tools/desk/README.md`, "A fast start"). A

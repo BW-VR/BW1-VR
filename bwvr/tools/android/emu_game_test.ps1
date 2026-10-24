@@ -76,6 +76,13 @@
     sound nowhere, so no person hears the game. 'off': the option -no-audio,
     the emulator gives Android no audio device.
 
+.PARAMETER WineAudio
+    The value of wine_audio in bwvr.ini: 1 (the default, the audio driver
+    aaudio) or 0 (no audio driver, the behavior before the driver). With 0
+    the test checks the log line of reg import, no Audio value in user.reg
+    of the prefix after Play, no stream of wineaaudio and the line "No
+    driver ... could be initialized" of mmdevapi.
+
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
     game in it.
@@ -88,6 +95,7 @@ param(
     [int]$Memory = 4096,
     [string]$WineDebug = 'warn+virtual',
     [string]$Audio = 'none',
+    [ValidateSet(0, 1)][int]$WineAudio = 1,
     [switch]$Keep
 )
 
@@ -352,7 +360,7 @@ try {
         if ($skipTop -contains $item.Name) { continue }
         # The files of the mod of a desk run that runs now (the input
         # channel, the ring) are not files of the game. With a copy of them
-        # the app got errno 13 at the open of bwvr-input.chan.
+        # the open of bwvr-input.chan in the app gives errno 13.
         if ($item.Name -like 'bwvr.ini*' -or $item.Name -like 'bwvr*.log' -or $item.Name -eq 'bwvr-hint-counts.ini' -or
             $item.Name -like 'bwvr-*.chan' -or $item.Name -like 'bwvr-*.ring') { continue }
         Adb @('push', $item.FullName, "$GameDir/")
@@ -384,7 +392,7 @@ try {
     Expect ($profiles -match 'No such file') 'the copy has no Profiles folder'
     $ini = Join-Path $Out 'bwvr.ini.pushed'
     # A render of 50 percent of the eye of the test runtime: 1380 by 1104.
-    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1')
+    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio")
     Adb @('push', $ini, "$GameDir/bwvr.ini")
 
     # 4. The run.
@@ -418,7 +426,11 @@ try {
         Expect ($part -match 'game         : ddraw\.dll of the APK \(\d+ bytes\) is in \S+/drive_c/windows/syswow64') "the ddraw.dll of the APK is in syswow64 of the prefix"
         $reg = [regex]::Match($part, 'game         : reg import of C:\\bwvr\\game\.reg ended with (-?\d+) after ([\d.]+) s: GameDir G:\\, ScreenW (\d+), ScreenH (\d+)')
         Expect ($reg.Success -and $reg.Groups[1].Value -eq '0') ('reg import of the registry of the game: ' + $reg.Value)
-        Expect ($part -match 'game         : reg import of .* and the audio driver aaudio \(wine_audio=1\)') "the registry of game $n has the audio driver aaudio"
+        if ($WineAudio -eq 1) {
+            Expect ($part -match 'game         : reg import of .* and the audio driver aaudio \(wine_audio=1\)') "the registry of game $n has the audio driver aaudio"
+        } else {
+            Expect ($part -match 'game         : reg import of .* and no audio driver \(wine_audio=0\)') "the registry of game $n has no audio driver (wine_audio=0)"
+        }
         Expect ($part -match "game         : start G:\\runblack\.exe$([regex]::Escape($r.Args)) in Wine") "the app started G:\runblack.exe$($r.Args)"
         $first = [regex]::Match($part, 'game         : the first frame of the game \(frame (\d+)\) came ([\d.]+) s after Play')
         Expect $first.Success ("the first frame of game $n came: " + $first.Value)
@@ -520,12 +532,20 @@ try {
         $wineNow = if (Test-Path -LiteralPath (Join-Path $Out "wine-game$n.log")) { Get-Content -LiteralPath (Join-Path $Out "wine-game$n.log") -Raw } else { '' }
         $streams = @($wineNow -split "`r?`n" | Where-Object { $_ -match '^wineaaudio: (opened|opened again) the output stream' })
         $streams | Select-Object -First 4 | ForEach-Object { Note ('wine.log: ' + $_) }
-        Expect ($streams.Count -ge 1) "game $n`: wineaaudio opened an output stream ($($streams.Count) in wine.log)"
-        Expect ($wineNow -notmatch 'No driver from .* could be initialized') "game $n`: mmdevapi found an audio driver (no line `"No driver ... could be initialized`")"
         $qmixer = @($modLogNow -split "`r?`n" | Where-Object { $_ -match '^audio out    : (QMixer starts|the stream of QMixer is|QMixer gave no block)' })
         $qmixer | ForEach-Object { Note ('bwvr.log: ' + $_) }
-        Expect ($modLogNow -match 'audio out    : QMixer starts' -and $modLogNow -notmatch 'audio out    : QMixer gave no block') "game $n`: QMixer started and gave blocks to its output"
-        Expect ($modLogNow -match 'audio out    : the stream of QMixer is \d+ Hz, 16 bit stereo PCM') "game $n`: the mod knows the stream of QMixer (16 bit stereo PCM, the mixer of the mod can work)"
+        if ($WineAudio -eq 1) {
+            Expect ($streams.Count -ge 1) "game $n`: wineaaudio opened an output stream ($($streams.Count) in wine.log)"
+            Expect ($wineNow -notmatch 'No driver from .* could be initialized') "game $n`: mmdevapi found an audio driver (no line `"No driver ... could be initialized`")"
+            Expect ($modLogNow -match 'audio out    : QMixer starts' -and $modLogNow -notmatch 'audio out    : QMixer gave no block') "game $n`: QMixer started and gave blocks to its output"
+            Expect ($modLogNow -match 'audio out    : the stream of QMixer is \d+ Hz, 16 bit stereo PCM') "game $n`: the mod knows the stream of QMixer (16 bit stereo PCM, the mixer of the mod can work)"
+        } else {
+            # wine_audio=0, the behavior before the driver: no driver, no sound.
+            Expect ($streams.Count -eq 0) "game $n with wine_audio=0: wineaaudio opened no output stream"
+            $noDriver = [regex]::Match($wineNow, 'No driver from .* could be initialized')
+            Expect $noDriver.Success ("game $n with wine_audio=0: mmdevapi found no audio driver: " + $noDriver.Value)
+            Expect ($modLogNow -match 'audio out    : QMixer starts') "game $n with wine_audio=0: QMixer starts"
+        }
         Hold "ended$n"
     }
 
@@ -550,7 +570,16 @@ try {
     if (Test-Path -LiteralPath (Join-Path $Out 'report.txt')) { $report = Get-Content -LiteralPath (Join-Path $Out 'report.txt') -Raw }
     $log = if (Test-Path -LiteralPath (Join-Path $Out 'bwvr-quest.log')) { Get-Content -LiteralPath (Join-Path $Out 'bwvr-quest.log') -Raw } else { '' }
 
-    Expect ($report -notmatch '(?m)^fault ') ('the runtime found no fault' + $(if ($report -match '(?m)^fault (.*)$') { ': ' + $Matches[1] } else { '' }))
+    # The audio driver in user.reg of the prefix after the Play of game 2
+    # (wine_audio).
+    $audioReg = @($prefixReg -split "`r?`n" | Where-Object { $_ -match '^"Audio"=' })
+    if ($WineAudio -eq 1) {
+        Expect ($audioReg.Count -eq 1 -and $audioReg[0] -match '^"Audio"="aaudio"') ('user.reg of the prefix after Play has "Audio"="aaudio": ' + ($audioReg -join ' '))
+    } else {
+        Expect ($audioReg.Count -eq 0) ('user.reg of the prefix after Play has no Audio value (wine_audio=0)' + $(if ($audioReg.Count) { ': ' + ($audioReg -join ' ') } else { '' }))
+    }
+    Expect ($log -match "wine         : wine_audio=$WineAudio, wine_audio_low_latency=1\.") "the log of the app has wine_audio=$WineAudio"
+    Expect ($report -notmatch '(?m)^fault ')('the runtime found no fault' + $(if ($report -match '(?m)^fault (.*)$') { ': ' + $Matches[1] } else { '' }))
     Expect ($log -match 'xr           : the GPU of the runtime: .*The renderer of the mod: yes') 'the device of the session has Vulkan 1.3 and the features of the renderer'
     Expect ($log -match 'live         : frames come') 'the reader of the app took frames from the ring'
     $summary = [regex]::Matches($log, 'live         : [^:]+: (\d+) frames played and (\d+) skipped \(frames (\d+) to (\d+)\), (\d+) pictures')

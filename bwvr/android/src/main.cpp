@@ -876,12 +876,14 @@ void android_main(android_app* android) {
   // of the game folder. wine_setup=0: no Wine, as an APK with no Wine tree.
   // wine_debug: the value of WINEDEBUG (empty: the default of Wine).
   // wine_audio=0: no audio driver in the prefix, so the game has no sound.
+  // wine_audio_low_latency=0: the audio driver asks AAudio for the mode none.
   {
     WineRuntime::Options wine;
     wine.setup = app.ini.GetInt("bwvr", "wine_setup", 1) != 0;
     wine.probe = app.ini.GetInt("bwvr", "wine_probe", 0) != 0;
     wine.debug = app.ini.Get("bwvr", "wine_debug", "");
     wine.audio = app.ini.GetInt("bwvr", "wine_audio", 1) != 0;
+    wine.low_latency = app.ini.GetInt("bwvr", "wine_audio_low_latency", 1) != 0;
     // The tree must be in the internal folder: Android runs no program of
     // the shared storage.
     if (android->activity->internalDataPath == nullptr) {

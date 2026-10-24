@@ -123,11 +123,17 @@ void WineRuntime::Start(AAssetManager* assets, const std::string& files,
   paths_ = wine_rules::MakePaths(files, app_folder, abi_);
   std::vector<std::string> inherited;
   for (char** e = environ; e != nullptr && *e != nullptr; ++e) inherited.push_back(*e);
-  env_ = wine_rules::Environment(inherited, paths_, files, options.debug);
+  env_ = wine_rules::Environment(inherited, paths_, files, options.debug, options.low_latency);
   if (!options.setup) {
     AppLog("wine         : wine_setup=0. The app does not set up Wine");
     return;
   }
+  AppLog("wine         : wine_audio=%d, wine_audio_low_latency=%d. %s", options.audio ? 1 : 0,
+         options.low_latency ? 1 : 0,
+         !options.audio ? "No audio driver of Wine: the game has no sound"
+         : options.low_latency
+             ? "The audio driver aaudio asks AAudio for the low latency mode first"
+             : "The audio driver aaudio asks AAudio for the mode none");
   thread_ = std::thread(&WineRuntime::Run, this);
 }
 

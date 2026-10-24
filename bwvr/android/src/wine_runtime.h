@@ -41,6 +41,10 @@ class WineRuntime {
     // wine_audio=1 (the default): the prefix has the audio driver of the
     // tree (wineaaudio, "Audio" = "aaudio"). 0: no audio driver, no sound.
     bool audio = true;
+    // wine_audio_low_latency=1 (the default): the audio driver asks AAudio
+    // for the low latency mode first. 0: the mode none
+    // (WINEAAUDIO_LOW_LATENCY of the environment).
+    bool low_latency = true;
   };
 
   // The ABI of this build of the app: arm64-v8a or x86_64.

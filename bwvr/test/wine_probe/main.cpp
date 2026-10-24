@@ -22,7 +22,8 @@
 //                the format of QMixer (22050 Hz, 16 bit, stereo): what each
 //                call gave, and the time from the start of the play to its
 //                end (waveOut: the buffer is done, DirectSound: the buffer
-//                does not play now)
+//                does not play now). Then 300 ms more before the stream
+//                ends, so the end of the tone gets to the device.
 //   result       "ok" at the end of the file
 //
 // The exit code is 0 when the file is written, else 1.
@@ -207,6 +208,8 @@ constexpr DWORD kToneRate = 22050;
 constexpr DWORD kToneFrames = kToneRate;
 constexpr DWORD kToneBytes = kToneFrames * 4;
 constexpr DWORD kSoundWaitMs = 5000;
+// The wait after the end of a play, before the stream ends.
+constexpr DWORD kSoundTailMs = 300;
 
 WAVEFORMATEX ToneFormat() {
   WAVEFORMATEX f = {};
@@ -284,6 +287,9 @@ void WaveOutTone() {
   r = waveOutGetPosition(out, &pos, sizeof(pos));
   Line("sound_waveout_samples=%lu", r == MMSYSERR_NOERROR && pos.wType == TIME_SAMPLES
                                          ? pos.u.sample : 0ul);
+  // A done buffer is in the audio driver, not yet at the device. The wait
+  // lets it play before the reset and the close end the stream.
+  Sleep(kSoundTailMs);
   waveOutReset(out);
   waveOutUnprepareHeader(out, &hdr, sizeof(hdr));
   Line("sound_waveout_close=%u", waveOutClose(out));
@@ -343,6 +349,10 @@ void DirectSoundTone() {
   Line("sound_dsound_done=%d", finished ? 1 : 0);
   Line("sound_dsound_ms=%.1f", Ms(a, b));
   Line("sound_dsound_cursor=%lu", cursor);
+  // The mix of dsound and the local buffer of the audio driver still hold
+  // the end of the tone (about 3 periods). The wait lets it go to the
+  // device before the release ends the stream.
+  Sleep(kSoundTailMs);
   buffer->Stop();
   buffer->Release();
   ds->Release();

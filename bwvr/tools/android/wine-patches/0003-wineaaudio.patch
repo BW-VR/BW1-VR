@@ -14,8 +14,8 @@ and libaaudio links (the NDK, API 26 and later). The prefix selects it
 with HKCU\Software\Wine\Drivers, "Audio" = "aaudio".
 
 diff -ruN a/configure b/configure
---- a/configure	2026-10-23 18:35:30.486583143 +0200
-+++ b/configure	2026-10-23 18:35:30.522781126 +0200
+--- a/configure	2026-10-24 11:38:11.684601574 +0200
++++ b/configure	2026-10-24 11:38:11.728322476 +0200
 @@ -668,6 +668,7 @@
  UNWIND_CFLAGS
  UDEV_LIBS
@@ -113,8 +113,8 @@ diff -ruN a/configure b/configure
  UDEV_LIBS = $UDEV_LIBS
  UNWIND_CFLAGS = $UNWIND_CFLAGS
 diff -ruN a/configure.ac b/configure.ac
---- a/configure.ac	2026-10-23 18:35:30.487748134 +0200
-+++ b/configure.ac	2026-10-23 18:35:30.518677988 +0200
+--- a/configure.ac	2026-10-24 11:38:11.685458020 +0200
++++ b/configure.ac	2026-10-24 11:38:11.724891931 +0200
 @@ -1757,6 +1757,12 @@
                   [OSS sound system found but too old (OSSv4 needed), OSS won't be supported.],
                   [enable_wineoss_drv])
@@ -138,7 +138,7 @@ diff -ruN a/configure.ac b/configure.ac
  WINE_CONFIG_MAKEFILE(dlls/winebth.sys)
 diff -ruN a/dlls/wineaaudio.drv/Makefile.in b/dlls/wineaaudio.drv/Makefile.in
 --- a/dlls/wineaaudio.drv/Makefile.in	1970-01-01 01:00:00.000000000 +0100
-+++ b/dlls/wineaaudio.drv/Makefile.in	2026-10-23 18:35:30.499351013 +0200
++++ b/dlls/wineaaudio.drv/Makefile.in	2026-10-24 11:38:11.701126126 +0200
 @@ -0,0 +1,7 @@
 +MODULE    = wineaaudio.drv
 +UNIXLIB   = wineaaudio.so
@@ -149,8 +149,8 @@ diff -ruN a/dlls/wineaaudio.drv/Makefile.in b/dlls/wineaaudio.drv/Makefile.in
 +	aaudio.c
 diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 --- a/dlls/wineaaudio.drv/aaudio.c	1970-01-01 01:00:00.000000000 +0100
-+++ b/dlls/wineaaudio.drv/aaudio.c	2026-10-23 18:35:30.499844613 +0200
-@@ -0,0 +1,1915 @@
++++ b/dlls/wineaaudio.drv/aaudio.c	2026-10-24 11:38:11.701546795 +0200
+@@ -0,0 +1,1994 @@
 +/*
 + * AAudio driver for Android (unixlib)
 + *
@@ -198,10 +198,17 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 + * sample rate.
 + *
 + * The performance mode: the driver asks for AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
-+ * first. When that stream has another sample rate, another channel count or
++ * first (WINEAAUDIO_LOW_LATENCY=0 in the environment: the mode none at
++ * once). When that stream has another sample rate, another channel count or
 + * another format than the program asked for, the driver opens a stream with
 + * the mode none. When AAudio disconnects the stream (a change of the route),
-+ * the timer loop opens a new one.
++ * the timer loop opens a new one, and after an open that failed it tries
++ * again each 1 s.
++ *
++ * The data callback of AAudio runs in real time and takes the lock of the
++ * stream. So the timer loop, the open of a stream, the start and the reset
++ * write no line to the log while they hold that lock: the lines wait in
++ * log_text, or come after the unlock.
 + *
 + * Each stream writes one line to the log (MESSAGE): the format of the
 + * program, what AAudio gives (the mode, the burst, the buffer), after 0.5 s
@@ -216,6 +223,8 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +
 +#include <stdarg.h>
 +#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
 +#include <string.h>
 +#include <time.h>
 +#include <pthread.h>
@@ -247,6 +256,9 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    int32_t aa_burst, aa_bufsize, aa_capacity;
 +
 +    BOOL playing, mute, please_quit, unity, convert_format, latency_logged;
++    BOOL stopping; /* aaudio_stop pauses aa out of the lock: no reopen */
++    INT64 next_reopen_ns; /* a reopen that failed: the time of the next try */
++    char log_text[1536]; /* lines for wine.log, written out of the lock */
 +    UINT64 written_frames, last_pos_frames;
 +    UINT32 period_frames, bufsize_frames, held_frames, tmp_buffer_frames;
 +    UINT32 lcl_offs_frames; /* offs into local_buffer where valid data starts */
@@ -353,6 +365,44 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    struct timespec ts;
 +    clock_gettime(CLOCK_MONOTONIC, &ts);
 +    return (INT64)ts.tv_sec * 1000000000 + ts.tv_nsec;
++}
++
++/* A line for wine.log. The caller holds the lock of the stream, and the
++ * data callback of AAudio (a thread of real time) takes the same lock, so
++ * the line waits in log_text until write_log, out of the lock. */
++static void queue_log(struct aaudio_stream *stream, const char *format, ...)
++{
++    size_t used = strlen(stream->log_text);
++    va_list args;
++
++    if (used + 1 >= sizeof(stream->log_text)) return;
++    va_start(args, format);
++    vsnprintf(stream->log_text + used, sizeof(stream->log_text) - used, format, args);
++    va_end(args);
++}
++
++/* Takes the waiting lines out of the stream. The caller holds the lock. */
++static void take_log(struct aaudio_stream *stream, char *out, size_t size)
++{
++    snprintf(out, size, "%s", stream->log_text);
++    stream->log_text[0] = 0;
++}
++
++/* Writes lines of take_log. The caller holds no lock of a stream. */
++static void write_log(const char *text)
++{
++    if (text[0]) MESSAGE("%s", text);
++}
++
++/* The performance mode that the driver asks for first: low latency, or
++ * with WINEAAUDIO_LOW_LATENCY=0 in the environment (the key
++ * wine_audio_low_latency=0 of the app) the mode none. */
++static aaudio_performance_mode_t asked_mode(void)
++{
++    const char *value = getenv("WINEAAUDIO_LOW_LATENCY");
++
++    if (value && value[0] == '0' && !value[1]) return AAUDIO_PERFORMANCE_MODE_NONE;
++    return AAUDIO_PERFORMANCE_MODE_LOW_LATENCY;
 +}
 +
 +static NTSTATUS aaudio_test_connect(void *args)
@@ -600,16 +650,16 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    pthread_mutex_lock(&native_rate_lock);
 +    if (!native_rate)
 +    {
-+        res = open_aaudio(0, 2, AAUDIO_FORMAT_PCM_FLOAT, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY, NULL, &aa);
++        res = open_aaudio(0, 2, AAUDIO_FORMAT_PCM_FLOAT, asked_mode(), NULL, &aa);
 +        if (res == AAUDIO_OK)
 +        {
 +            native_rate = AAudioStream_getSampleRate(aa);
 +            burst = AAudioStream_getFramesPerBurst(aa);
 +            if (native_rate > 0 && burst > 0)
 +                native_burst_time = (REFERENCE_TIME)burst * 10000000 / native_rate;
-+            MESSAGE("wineaaudio: the output of Android has %d Hz (a test stream: %s, burst %d frames, %.1f ms)\n",
-+                    native_rate, mode_name(AAudioStream_getPerformanceMode(aa)), burst,
-+                    native_burst_time / 10000.0);
++            MESSAGE("wineaaudio: the output of Android has %d Hz (a test stream: the mode %s asked, %s given, burst %d frames, %.1f ms)\n",
++                    native_rate, mode_name(asked_mode()), mode_name(AAudioStream_getPerformanceMode(aa)),
++                    burst, native_burst_time / 10000.0);
 +            AAudioStream_close(aa);
 +        }
 +        else
@@ -622,17 +672,18 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    return native_rate;
 +}
 +
-+/* Opens the AAudio stream of a stream of mmdevapi: low latency when it fits
-+ * (see the head of this file), else the mode none. */
++/* Opens the AAudio stream of a stream of mmdevapi: first in the mode of
++ * asked_mode, then, when that stream does not fit (see the head of this
++ * file), in the mode none. The lines for wine.log go to log_text. */
 +static HRESULT open_stream_output(struct aaudio_stream *stream, BOOL reopen)
 +{
 +    const WAVEFORMATEX *fmt = stream->fmt;
++    aaudio_performance_mode_t asked = asked_mode();
 +    aaudio_result_t res;
 +    const char *why = NULL;
 +    AAudioStream *aa;
 +
-+    res = open_aaudio(fmt->nSamplesPerSec, fmt->nChannels, stream->aa_format,
-+                      AAUDIO_PERFORMANCE_MODE_LOW_LATENCY, stream, &aa);
++    res = open_aaudio(fmt->nSamplesPerSec, fmt->nChannels, stream->aa_format, asked, stream, &aa);
 +    if (res != AAUDIO_OK)
 +        why = AAudio_convertResultToText(res);
 +    else if (AAudioStream_getSampleRate(aa) != fmt->nSamplesPerSec)
@@ -642,38 +693,39 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    else if (AAudioStream_getFormat(aa) != stream->aa_format)
 +        why = "another format";
 +
-+    if (why)
++    if (why && asked != AAUDIO_PERFORMANCE_MODE_NONE)
 +    {
 +        if (aa)
 +        {
-+            MESSAGE("wineaaudio: the low latency stream has %s (%d Hz, %d channels, %s, a buffer of %d frames). The driver uses the mode none\n",
-+                    why, AAudioStream_getSampleRate(aa), AAudioStream_getChannelCount(aa),
-+                    format_name(AAudioStream_getFormat(aa)), AAudioStream_getBufferCapacityInFrames(aa));
++            queue_log(stream, "wineaaudio: the stream of the mode %s has %s (%d Hz, %d channels, %s, a buffer of %d frames). The driver uses the mode none\n",
++                      mode_name(asked), why, AAudioStream_getSampleRate(aa), AAudioStream_getChannelCount(aa),
++                      format_name(AAudioStream_getFormat(aa)), AAudioStream_getBufferCapacityInFrames(aa));
 +            AAudioStream_close(aa);
 +        }
 +        else
-+            MESSAGE("wineaaudio: AAudio opens no low latency stream: %s. The driver uses the mode none\n", why);
++            queue_log(stream, "wineaaudio: AAudio opens no stream of the mode %s: %s. The driver uses the mode none\n",
++                      mode_name(asked), why);
 +
 +        res = open_aaudio(fmt->nSamplesPerSec, fmt->nChannels, stream->aa_format,
 +                          AAUDIO_PERFORMANCE_MODE_NONE, stream, &aa);
-+        if (res != AAUDIO_OK)
-+        {
-+            ERR("AAudio opens no output stream for %u Hz, %u channels, %s: %s\n",
-+                (unsigned)fmt->nSamplesPerSec, fmt->nChannels, format_name(stream->aa_format),
-+                AAudio_convertResultToText(res));
-+            return AUDCLNT_E_DEVICE_INVALIDATED;
-+        }
-+        if (AAudioStream_getSampleRate(aa) != fmt->nSamplesPerSec ||
-+            AAudioStream_getChannelCount(aa) != fmt->nChannels ||
-+            AAudioStream_getFormat(aa) != stream->aa_format)
-+        {
-+            ERR("AAudio gives %d Hz, %d channels, %s for %u Hz, %u channels, %s\n",
-+                AAudioStream_getSampleRate(aa), AAudioStream_getChannelCount(aa),
-+                format_name(AAudioStream_getFormat(aa)), (unsigned)fmt->nSamplesPerSec,
-+                fmt->nChannels, format_name(stream->aa_format));
-+            AAudioStream_close(aa);
-+            return AUDCLNT_E_UNSUPPORTED_FORMAT;
-+        }
++        why = res != AAUDIO_OK ? AAudio_convertResultToText(res) : NULL;
++    }
++    if (why && res != AAUDIO_OK)
++    {
++        queue_log(stream, "wineaaudio: AAudio opens no output stream for %u Hz, %u channels, %s: %s\n",
++                  (unsigned)fmt->nSamplesPerSec, fmt->nChannels, format_name(stream->aa_format), why);
++        return AUDCLNT_E_DEVICE_INVALIDATED;
++    }
++    if (AAudioStream_getSampleRate(aa) != fmt->nSamplesPerSec ||
++        AAudioStream_getChannelCount(aa) != fmt->nChannels ||
++        AAudioStream_getFormat(aa) != stream->aa_format)
++    {
++        queue_log(stream, "wineaaudio: AAudio gives %d Hz, %d channels, %s for %u Hz, %u channels, %s\n",
++                  AAudioStream_getSampleRate(aa), AAudioStream_getChannelCount(aa),
++                  format_name(AAudioStream_getFormat(aa)), (unsigned)fmt->nSamplesPerSec,
++                  fmt->nChannels, format_name(stream->aa_format));
++        AAudioStream_close(aa);
++        return AUDCLNT_E_UNSUPPORTED_FORMAT;
 +    }
 +
 +    stream->aa = aa;
@@ -685,15 +737,16 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    stream->xruns_logged = 0;
 +    stream->log_check_frames = 0;
 +
-+    MESSAGE("wineaaudio: %s the output stream: the program gives %u Hz, %u channels, %u bit %s%s. AAudio: %s, %s sharing, %s, a burst of %d frames, a buffer of %d of %d frames (%.1f ms), the period of mmdevapi %u frames (%.1f ms)\n",
-+            reopen ? "opened again" : "opened", (unsigned)fmt->nSamplesPerSec, fmt->nChannels,
-+            fmt->wBitsPerSample, is_float(fmt) ? "float" : "PCM",
-+            stream->convert_format ? " (the driver converts it)" : "",
-+            mode_name(stream->aa_mode),
-+            AAudioStream_getSharingMode(aa) == AAUDIO_SHARING_MODE_EXCLUSIVE ? "exclusive" : "shared",
-+            format_name(stream->aa_format), stream->aa_burst, stream->aa_bufsize, stream->aa_capacity,
-+            stream->aa_bufsize * 1000.0 / fmt->nSamplesPerSec, stream->period_frames,
-+            stream->period_frames * 1000.0 / fmt->nSamplesPerSec);
++    queue_log(stream, "wineaaudio: %s the output stream: the program gives %u Hz, %u channels, %u bit %s%s. The driver asks for the mode %s (WINEAAUDIO_LOW_LATENCY=%d). AAudio: %s, %s sharing, %s, a burst of %d frames, a buffer of %d of %d frames (%.1f ms), the period of mmdevapi %u frames (%.1f ms)\n",
++              reopen ? "opened again" : "opened", (unsigned)fmt->nSamplesPerSec, fmt->nChannels,
++              fmt->wBitsPerSample, is_float(fmt) ? "float" : "PCM",
++              stream->convert_format ? " (the driver converts it)" : "",
++              mode_name(asked), asked == AAUDIO_PERFORMANCE_MODE_NONE ? 0 : 1,
++              mode_name(stream->aa_mode),
++              AAudioStream_getSharingMode(aa) == AAUDIO_SHARING_MODE_EXCLUSIVE ? "exclusive" : "shared",
++              format_name(stream->aa_format), stream->aa_burst, stream->aa_bufsize, stream->aa_capacity,
++              stream->aa_bufsize * 1000.0 / fmt->nSamplesPerSec, stream->period_frames,
++              stream->period_frames * 1000.0 / fmt->nSamplesPerSec);
 +    return S_OK;
 +}
 +
@@ -756,7 +809,10 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    stream->share = params->share;
 +    stream->flags = params->flags;
 +
++    /* No callback runs yet, so the lines can go to wine.log now. */
 +    params->result = open_stream_output(stream, FALSE);
++    write_log(stream->log_text);
++    stream->log_text[0] = 0;
 +
 +exit:
 +    if(FAILED(params->result)){
@@ -788,6 +844,7 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +        NtClose(params->timer_thread);
 +    }
 +
++    write_log(stream->log_text);
 +    if(stream->aa){
 +        MESSAGE("wineaaudio: the output stream ends: %lld frames to AAudio, %d underruns of AAudio, %llu frames of silence while it played\n",
 +                (long long)AAudioStream_getFramesWritten(stream->aa),
@@ -831,8 +888,9 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +        return aaudio_unlock_result(stream, &params->result, AUDCLNT_E_DEVICE_INVALIDATED);
 +
 +    if((res = AAudioStream_requestStart(stream->aa)) != AAUDIO_OK){
++        aaudio_unlock_result(stream, &params->result, AUDCLNT_E_DEVICE_INVALIDATED);
 +        ERR("AAudioStream_requestStart failed: %s\n", AAudio_convertResultToText(res));
-+        return aaudio_unlock_result(stream, &params->result, AUDCLNT_E_DEVICE_INVALIDATED);
++        return STATUS_SUCCESS;
 +    }
 +
 +    stream->playing = TRUE;
@@ -855,8 +913,10 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +
 +    /* The callback gives silence from now on. A pause keeps the data in the
 +     * buffer of AAudio, as the local buffer keeps its data until a reset.
-+     * The wait for the pause is out of the lock: the callback takes it. */
++     * The wait for the pause is out of the lock: the callback takes it.
++     * While stopping is set, the timer loop does not close aa (no reopen). */
 +    stream->playing = FALSE;
++    stream->stopping = TRUE;
 +    aa = stream->aa;
 +    aaudio_unlock(stream);
 +
@@ -867,8 +927,9 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    else
 +        AAudioStream_waitForStateChange(aa, AAUDIO_STREAM_STATE_PAUSING, &state, 200000000);
 +
-+    params->result = S_OK;
-+    return STATUS_SUCCESS;
++    aaudio_lock(stream);
++    stream->stopping = FALSE;
++    return aaudio_unlock_result(stream, &params->result, S_OK);
 +}
 +
 +static NTSTATUS aaudio_reset(void *args)
@@ -887,16 +948,19 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +
 +    /* The flush needs the state paused (aaudio_stop waits for it) or
 +     * open (no start yet). */
-+    if(stream->aa && AAudioStream_getState(stream->aa) == AAUDIO_STREAM_STATE_PAUSED &&
-+       (res = AAudioStream_requestFlush(stream->aa)) != AAUDIO_OK)
-+        WARN("AAudioStream_requestFlush failed: %s\n", AAudio_convertResultToText(res));
++    res = AAUDIO_OK;
++    if(stream->aa && AAudioStream_getState(stream->aa) == AAUDIO_STREAM_STATE_PAUSED)
++        res = AAudioStream_requestFlush(stream->aa);
 +
 +    stream->written_frames = 0;
 +    stream->last_pos_frames = 0;
 +    stream->held_frames = 0;
 +    stream->lcl_offs_frames = 0;
 +
-+    return aaudio_unlock_result(stream, &params->result, S_OK);
++    aaudio_unlock_result(stream, &params->result, S_OK);
++    if(res != AAUDIO_OK)
++        WARN("AAudioStream_requestFlush failed: %s\n", AAudio_convertResultToText(res));
++    return STATUS_SUCCESS;
 +}
 +
 +static void silence_buffer(struct aaudio_stream *stream, BYTE *buffer, UINT32 frames)
@@ -987,30 +1051,38 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +}
 +
 +/* A new AAudio stream in place of one that AAudio disconnected (a change of
-+ * the route of the output). The caller holds the lock. The close of the old
-+ * stream waits for the end of its callback, which takes the lock, so the
-+ * close is out of the lock. The data in the old buffer of AAudio is lost. */
++ * the route of the output), or, with no stream (a reopen that failed), a
++ * new try. The caller holds the lock, and aaudio_stop does not use aa now
++ * (stopping is not set). The close of the old stream waits for the end of
++ * its callback, which takes the lock, so the close is out of the lock. The
++ * data in the old buffer of AAudio is lost. When the open fails, the timer
++ * loop tries again after 1 s, and the stream keeps its state. */
 +static void reopen_output(struct aaudio_stream *stream)
 +{
 +    AAudioStream *old = stream->aa;
 +    aaudio_result_t res;
 +
-+    MESSAGE("wineaaudio: AAudio disconnected the output stream. The driver opens a new one\n");
-+    stream->aa = NULL;
-+    aaudio_unlock(stream);
-+    AAudioStream_requestStop(old);
-+    AAudioStream_close(old);
-+    aaudio_lock(stream);
++    if(old){
++        queue_log(stream, "wineaaudio: AAudio disconnected the output stream. The driver opens a new one\n");
++        stream->aa = NULL;
++        aaudio_unlock(stream);
++        AAudioStream_requestStop(old);
++        AAudioStream_close(old);
++        aaudio_lock(stream);
++    }
 +    if(FAILED(open_stream_output(stream, TRUE))){
-+        stream->playing = FALSE;
++        queue_log(stream, "wineaaudio: the driver tries the open again in 1 s\n");
++        stream->next_reopen_ns = monotonic_ns() + 1000000000;
 +        return;
 +    }
 +    if(stream->playing && (res = AAudioStream_requestStart(stream->aa)) != AAUDIO_OK)
-+        ERR("AAudioStream_requestStart failed: %s\n", AAudio_convertResultToText(res));
++        queue_log(stream, "wineaaudio: AAudioStream_requestStart failed: %s\n",
++                  AAudio_convertResultToText(res));
 +}
 +
 +/* The log of the latency after 0.5 s of output, and of new underruns and
-+ * frames of silence, at most one line each 10 s. */
++ * frames of silence, at most one line each 10 s. The caller holds the lock,
++ * so the lines go to log_text. */
 +static void log_output(struct aaudio_stream *stream)
 +{
 +    INT64 read = AAudioStream_getFramesRead(stream->aa), written, position, time_ns;
@@ -1025,21 +1097,21 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +            written = AAudioStream_getFramesWritten(stream->aa);
 +            /* The time at which the last frame that the callback gave plays,
 +             * after the time of now. */
-+            MESSAGE("wineaaudio: the latency of AAudio after %lld frames of output: %.1f ms (%lld frames in its buffer)\n",
-+                    (long long)read,
-+                    ((time_ns + (written - position) * 1000000000.0 / rate) - monotonic_ns()) / 1000000.0,
-+                    (long long)(written - read));
++            queue_log(stream, "wineaaudio: the latency of AAudio after %lld frames of output: %.1f ms (%lld frames in its buffer)\n",
++                      (long long)read,
++                      ((time_ns + (written - position) * 1000000000.0 / rate) - monotonic_ns()) / 1000000.0,
++                      (long long)(written - read));
 +        }else
-+            MESSAGE("wineaaudio: AAudio gives no timestamp after %lld frames of output: %s\n",
-+                    (long long)read, AAudio_convertResultToText(res));
++            queue_log(stream, "wineaaudio: AAudio gives no timestamp after %lld frames of output: %s\n",
++                      (long long)read, AAudio_convertResultToText(res));
 +    }
 +
 +    if(read >= stream->log_check_frames + 10 * (UINT64)rate){
 +        stream->log_check_frames = read;
 +        xruns = AAudioStream_getXRunCount(stream->aa);
 +        if(xruns > stream->xruns_logged || stream->silent_frames > stream->silent_logged){
-+            MESSAGE("wineaaudio: after %lld frames of output: %d underruns of AAudio, %llu frames of silence while the stream played (the program gave no data)\n",
-+                    (long long)read, xruns, (unsigned long long)stream->silent_frames);
++            queue_log(stream, "wineaaudio: after %lld frames of output: %d underruns of AAudio, %llu frames of silence while the stream played (the program gave no data)\n",
++                      (long long)read, xruns, (unsigned long long)stream->silent_frames);
 +            stream->xruns_logged = xruns;
 +            stream->silent_logged = stream->silent_frames;
 +        }
@@ -1051,6 +1123,7 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    struct timer_loop_params *params = args;
 +    struct aaudio_stream *stream = handle_get_stream(params->stream);
 +    LARGE_INTEGER delay, now, next;
++    char text[sizeof(stream->log_text)];
 +    int adjust;
 +
 +    aaudio_lock(stream);
@@ -1060,14 +1133,19 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +    next.QuadPart = now.QuadPart + stream->period;
 +
 +    while(!stream->please_quit){
-+        if(stream->aa && AAudioStream_getState(stream->aa) == AAUDIO_STREAM_STATE_DISCONNECTED)
-+            reopen_output(stream);
++        if(!stream->stopping){
++            if(stream->aa ? AAudioStream_getState(stream->aa) == AAUDIO_STREAM_STATE_DISCONNECTED
++                          : monotonic_ns() >= stream->next_reopen_ns)
++                reopen_output(stream);
++        }
 +        if(stream->playing && stream->aa)
 +            log_output(stream);
 +        if(stream->event)
 +            NtSetEvent(stream->event, NULL);
++        take_log(stream, text, sizeof(text));
 +        aaudio_unlock(stream);
 +
++        write_log(text);
 +        NtDelayExecution(FALSE, &delay);
 +
 +        aaudio_lock(stream);
@@ -1257,11 +1335,12 @@ diff -ruN a/dlls/wineaaudio.drv/aaudio.c b/dlls/wineaaudio.drv/aaudio.c
 +
 +    REFERENCE_TIME burst_time = 0;
 +
-+    /* A period of at least one burst of the device. AAudio of the mode
-+     * none (an AudioTrack) plays a stream only when its buffer has the
-+     * frames of its start threshold, at least one burst, and the program
-+     * keeps about 3 periods in the buffer: with a period shorter than a
-+     * burst (an emulator has bursts of 45 ms) the stream does not start. */
++    /* A period of at least one burst of the device. The data callback takes
++     * one burst at each call, and the program keeps about 3 periods in the
++     * local buffer, so with a period of one burst the local buffer has the
++     * frames of a burst at each callback (an emulator has bursts of 45 ms).
++     * The burst is the one of the test stream of get_native_rate. A stream
++     * of another rate or of the mode none can have a longer burst. */
 +    get_native_rate(&burst_time);
 +    burst_time = (burst_time + 9999) / 10000 * 10000;
 +

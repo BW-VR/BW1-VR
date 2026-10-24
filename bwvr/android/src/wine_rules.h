@@ -165,9 +165,11 @@ inline bool NeedsCpuCopy(const std::string& abi, const std::string& marker,
 // value. WINEDLLOVERRIDES: no Mono and no Gecko, so wineboot asks for no
 // download. WINELOADER and WINEDLLPATH are not needed: Wine finds its loader
 // and its DLLs from the place of ntdll.so in the tree.
+// WINEAAUDIO_LOW_LATENCY (wine_audio_low_latency): 1 lets the audio driver
+// ask AAudio for the low latency mode first, 0 gives the mode none at once.
 inline std::vector<std::string> Environment(const std::vector<std::string>& inherited,
                                             const Paths& p, const std::string& files,
-                                            const std::string& debug) {
+                                            const std::string& debug, bool low_latency) {
   static const char* const kDrop[] = {"WINE",    "LD_LIBRARY_PATH=", "LD_PRELOAD=",
                                       "HOME=",   "TMPDIR=",          "DISPLAY=",
                                       "WAYLAND_DISPLAY="};
@@ -186,6 +188,7 @@ inline std::vector<std::string> Environment(const std::vector<std::string>& inhe
   env.push_back("HOME=" + files);
   env.push_back("TMPDIR=" + files + "/tmp");
   if (!Trim(debug).empty()) env.push_back("WINEDEBUG=" + Trim(debug));
+  env.push_back(low_latency ? "WINEAAUDIO_LOW_LATENCY=1" : "WINEAAUDIO_LOW_LATENCY=0");
   return env;
 }
 

@@ -39,7 +39,9 @@
          a tone of 1 s through waveOut and through DirectSound: each call
          gave no error, and each play took 0.75 to 3 s (the end of a play
          is the time when the last frame went to AAudio, so 1 s less the
-         buffer of AAudio is the least). wine.log has the
+         buffer of AAudio is the least), and each stream gave the whole
+         tone to AAudio (22050 and 48000 frames of the program at least).
+         wine.log has the
          lines of wineaaudio (the stream, its buffer, its latency) and no
          line "No driver ... could be initialized" of mmdevapi.
       6. Checks that no process of Wine is left after the test program,
@@ -61,12 +63,19 @@
     default): the emulator gives Android an output device and plays its
     sound nowhere, so no person hears the tone. 'off': the option
     -no-audio, the emulator gives Android no audio device.
+
+.PARAMETER LowLatency
+    The value of wine_audio_low_latency in bwvr.ini of the start of the
+    test program: 1 (the default, the driver asks for the low latency mode
+    first) or 0 (the mode none). The test checks the log of the app and the
+    mode in each open line of wine.log.
 #>
 [CmdletBinding()]
 param(
     [switch]$Keep,
     [int]$SetupMinutes = 15,
-    [string]$Audio = 'none'
+    [string]$Audio = 'none',
+    [ValidateSet(0, 1)][int]$LowLatency = 1
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -294,7 +303,7 @@ try {
     Say 'Put the test program and bwvr.ini into the game folder'
     Adb @('shell', 'am', 'force-stop', $Package)
     $ini = Join-Path $Out 'bwvr.ini.pushed'
-    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'wine_probe=1', 'wine_debug=warn+virtual', 'menu_capture=1')
+    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'wine_probe=1', 'wine_debug=warn+virtual', 'menu_capture=1', "wine_audio_low_latency=$LowLatency")
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     Adb @('push', $Probe, "$AppDir/game/bwvr_wine_probe.exe")
     $standIn = Join-Path $Out 'stand-in.exe'
@@ -366,6 +375,19 @@ try {
     foreach ($l in $aaLines) { Write-Host ('         ' + $l) }
     Expect (@($aaLines | Where-Object { $_ -match 'opened the output stream' }).Count -ge 2) ('wine.log has an output stream of wineaaudio for waveOut and for DirectSound: ' + @($aaLines | Where-Object { $_ -match 'opened the output stream' }).Count)
     Expect (@($aaLines | Where-Object { $_ -match 'the latency of AAudio after' }).Count -ge 1) 'wine.log has the latency of AAudio'
+    # The frames of each stream that came from the program (all frames to
+    # AAudio less the silence of the callback): the tone of 1 s and the
+    # silence that the program gave after it, in the 300 ms before the end.
+    $ends = @([regex]::Matches($wineLog, 'wineaaudio: the output stream ends: (\d+) frames to AAudio, (\d+) underruns of AAudio, (\d+) frames of silence'))
+    $fromProgram = @($ends | ForEach-Object { [int64]$_.Groups[1].Value - [int64]$_.Groups[3].Value })
+    Expect ($ends.Count -ge 2 -and $fromProgram[0] -ge 22050 -and $fromProgram[1] -ge 48000) ('each stream gave the whole tone to AAudio: ' + ($fromProgram -join ' and ') + ' frames of the program (waveOut at least 22050, DirectSound at least 48000)')
+    # wine_audio_low_latency: the log of the app and the mode that the
+    # driver asks for.
+    $modeText = if ($LowLatency -eq 1) { 'The audio driver aaudio asks AAudio for the low latency mode first' } else { 'The audio driver aaudio asks AAudio for the mode none' }
+    Expect ($log2 -match "wine         : wine_audio=1, wine_audio_low_latency=$LowLatency\. $modeText") "the log of the app has wine_audio_low_latency=$LowLatency"
+    $asked = if ($LowLatency -eq 1) { 'low latency' } else { 'none' }
+    $openLines = @($aaLines | Where-Object { $_ -match 'opened the output stream' })
+    Expect ($openLines.Count -ge 2 -and @($openLines | Where-Object { $_ -notmatch "The driver asks for the mode $asked \(WINEAAUDIO_LOW_LATENCY=$LowLatency\)" }).Count -eq 0) "each open line of wine.log names the mode that the driver asks for: $asked (WINEAAUDIO_LOW_LATENCY=$LowLatency)"
     Expect ($wineLog -notmatch 'No driver from .* could be initialized') 'mmdevapi found an audio driver (no line "No driver ... could be initialized")'
     Start-Sleep -Seconds 8
     $left = @(WineProcesses $user)

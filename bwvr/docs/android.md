@@ -403,8 +403,8 @@ The test copies the game folder of `local/game-path.txt` into the game
 folder of the app (1032 files, 548.8 MB): with no `Profiles`, no Creature of
 a profile (`Scripts\CreatureMind\*.erc`), no `MemoryLeaks.txt`, no
 `bwvr.ini` or log of the PC and no input channel or ring of a desk run
-that runs at the same time (with a copy of them the app got errno 13 at
-the open of `bwvr-input.chan`), and with the `ddraw.dll` of the mod of the PC
+that runs at the same time (with a copy of them the open of
+`bwvr-input.chan` in the app gives errno 13), and with the `ddraw.dll` of the mod of the PC
 in it. It writes `resolution_pct=50` (a render of 1380 by 1104) and
 `wine_debug=warn+virtual`. The runtime points at "Play, new game" when the
 log says "Wine is ready". After the measure it holds the menu button for 90
@@ -449,8 +449,8 @@ game". At its end the test deletes the app and the copy. What it shows
   -1 after 215.3 s and 202.0 s. `wineserver -k` ended with 0 after 74 and
   75 ms, the menu came back with "The game ended with the exit code -1
   (..., Quit game).", and no process of Wine stayed.
-- The test runs 102 checks (with the checks of the sound, see "The
-  sound"), and 15 fail, each for the missing frames of the
+- The test runs 104 checks (with the checks of the sound, see "The
+  sound"), 102 with `-WineAudio 0`, and 15 fail, each for the missing frames of the
   game: the first frame and the frame rate of each game, the ring of the
   mod in each game, the frames and the pictures of the reader, the
   projection layer in the log and in the report of the runtime, the four
@@ -470,11 +470,19 @@ buffer ...: 2 channels, 22050 Hz, 16 bit"), and the mod knows its stream
 the mod can work. `dsound` of Wine gives one stream to `wineaaudio`: 48000
 Hz, 32 bit float, the mode none, a burst of 960 frames, a buffer of 4360
 frames (90.8 ms), the period of `mmdevapi` 2208 frames (46 ms). The
-latency from the timestamp of AAudio after 0.5 s: 161.4 to 161.5 ms.
+latency from the timestamp of AAudio after 0.5 s: 161.5 to 162.0 ms.
 After 481984 frames (10 s) of output: 0 underruns of AAudio, and 3840
-frames of silence from the callback. Each game ran about 200 s, and no
-later line of the log has more underruns or more frames of silence. Only
-a headset can show the sound itself.
+frames of silence from the callback. No later line of the log has more
+underruns or more frames of silence. `user.reg` of the prefix after Play
+has `"Audio"="aaudio"`.
+With `-WineAudio 0` (`wine_audio=0`, the behavior before the driver) the
+log of the app has "wine_audio=0, wine_audio_low_latency=1. No audio
+driver of Wine", the line of `reg import` says "no audio driver
+(wine_audio=0)", `user.reg` of the prefix after Play has no `Audio` value,
+`wine.log` has no stream of `wineaaudio` and the line "No driver from
+L"pulse,alsa,oss,coreaudio" could be initialized" of `mmdevapi`, QMixer
+starts, and the log of the mod has "QMixer gave no block to the wave
+device in 15 s". Only a headset can show the sound itself.
 
 **The null display driver.** With `Graphics` = `null` Wine runs
 `explorer.exe` for the desktop. In the source of Wine 11.0
@@ -1637,16 +1645,16 @@ links (`pack_wine.sh` checks it), and the app takes none from the tar file.
 
 | Tree | Files | Bytes | In the APK |
 | --- | --- | --- | --- |
-| install of `x86_64` | | 514,308,203 | |
-| tree of `x86_64` | 1592 | 359,944,497 | `assets/wine/x86_64.tar`, 360,826,880 bytes, compressed |
-| install of `aarch64` | | 811,050,545 | |
-| tree of `arm64-v8a` | 1590 | 632,831,585 | `assets/wine/arm64-v8a.tar`, 633,712,640 bytes, compressed |
+| install of `x86_64` | | 514,308,971 | |
+| tree of `x86_64` | 1592 | 359,945,233 | `assets/wine/x86_64.tar`, 360,826,880 bytes, compressed |
+| install of `aarch64` | | 811,051,089 | |
+| tree of `arm64-v8a` | 1590 | 632,832,097 | `assets/wine/arm64-v8a.tar`, 633,712,640 bytes, compressed |
 
 Each tree has the three files of the audio driver: `wineaaudio.drv` of
 i386 and of the ABI, and `wineaaudio.so` (it needs `libaaudio.so` of
 Android). `pack_wine.sh` and `check_apk.ps1` check them. The PE DLLs of
 ARM64 have the file alignment of 64 KB, so the ARM64 tree is larger. With
-both trees and the files of the mod the APK is 205.4 MB (215,364,826
+both trees and the files of the mod the APK is 205.4 MB (215,368,922
 bytes).
 
 **The APK.** `build_apk.ps1` puts the tree of each ABI that has one into
@@ -1696,8 +1704,9 @@ loop and the menu do not wait):
 4. With no marker in the prefix (`files/prefix/bwvr-prefix-id.txt`), the
    app makes a new prefix: it deletes the old one, writes a `user.reg` with
    `HKCU\Software\Wine\Drivers`, `Graphics` = `null` (no display driver)
-   and `Audio` = `aaudio` (the audio driver of patch 0003; `wine_audio=0` in
-   `bwvr.ini`: no `Audio` value, so a program has no sound), puts
+   and `Audio` = `aaudio` (the audio driver of patch 0003. With
+   `wine_audio=0` in `bwvr.ini` there is no `Audio` value, so a program has
+   no sound), puts
    `wowbox64.dll` into `system32` on arm64-v8a, then runs
    `wine wineboot --init` and `wineserver -w`. The log has the time of each.
    The last step of a good prefix writes the marker: the build id of the
@@ -1746,46 +1755,57 @@ DirectSound: what each call gave, and the time from the start of the play
 to its end (`waveOut`: the buffer is done, DirectSound: the buffer does not
 play now).
 
-**The test in the emulator** (`emu_wine_test.ps1`, 66 checks, the
+**The test in the emulator** (`emu_wine_test.ps1`, 69 checks, the
 x86_64 tree, Android 14, SwiftShader, the emulator with `-audio none`: the
 emulator gives Android an output device and plays its sound nowhere, so no
-person hears the tone. `-Audio off` gives `-no-audio`). The test lists the prefix with
+person hears the tone. `-Audio off` gives `-no-audio`, and `-LowLatency 0`
+puts `wine_audio_low_latency=0` into `bwvr.ini` of the test program). The
+test lists the prefix with
 `adb root`, so it needs an emulator image of the kind userdebug
 (`google_apis`, not `google_apis_playstore`). A clean install, then the first
 start: the app ran in the domain `untrusted_app_27`, had the focus (no
-warning of the system), and unpacked 1592 files (343.3 MB) in 3.2 s.
+warning of the system), and unpacked 1592 files (343.3 MB) in 2.9 s.
 While wineboot ran, the test ended the app with the back key: the end of
 the app stopped wineboot, `wineserver -k` ended with 0, and no process of
 Wine stayed. The stopped prefix had a `system.reg` of wineboot and no
 marker. The next start did no unpack and made a new prefix:
-`wineboot --init` 20.6 s and `wineserver -w` 8.1 s, so the
-prefix took 28.7 s, and the menu was on the screen before the setup
+`wineboot --init` 17.5 s and `wineserver -w` 8.0 s, so the
+prefix took 25.4 s, and the menu was on the screen before the setup
 ended.
 Then the test puts `bwvr_wine_probe.exe` and `bwvr.ini` with `wine_probe=1`
 into the game folder, and the next start does no unpack and makes no
-prefix. The test program ran from `G:` in 4.4 s and wrote: Windows
+prefix. The test program ran from `G:` in 4.8 s and wrote: Windows
 10.0.19045, Wine 11.0, a process for i386 on x86_64,
 `cpu_dll=wow64cpu.dll` (the line of `pack_wine.sh` in `wine.inf`),
-`graphics=null`, a loop of 81.5 ms, the write, the read and the delete
+`graphics=null`, a loop of 80.5 ms, the write, the read and the delete
 of the file of 64 KB on `G:`, no `ddraw`, `d3d9`, `wined3d`, `dxgi`,
 `opengl32` or `vulkan-1` in the system folder (error 126), Tahoma as a
 TrueType font with an extent of 200 by 39 and an outline of 112 bytes for
 "A", and `audio=aaudio`. The sound: `waveOut` has one device ("AAudio
 output"), and each call of the tone gave 0. The buffer of 1 s was done
-after 879.4 ms at 22050 samples. DirectSound gave `DS_OK` for each call,
-and the buffer stopped after 875.9 ms (the last play cursor 85096 of
+after 879.2 ms at 22050 samples. DirectSound gave `DS_OK` for each call,
+and the buffer stopped after 887.0 ms (the last play cursor 85096 of
 88200 bytes). The end of a play is the time when the last frame went to
-AAudio, so it is 1 s less the buffer of AAudio. `wine.log` has: the
-output of the emulator has 48000 Hz and bursts of 2180 frames (45.4 ms),
-so the period of `mmdevapi` is 46 ms. AAudio gave each stream the mode
-none (the emulator has no low latency output). The stream of `waveOut`
-has 22050 Hz, 16 bit PCM, a burst of 441 frames and a buffer of 2012
-frames (91.2 ms), the stream of DirectSound has 48000 Hz, 32 bit float, a
-burst of 960 frames and a buffer of 4360 frames (90.8 ms). The latency
-from the timestamp of AAudio after 0.5 s: 162.4 ms and 166.6 ms. 0
-underruns of AAudio. The callback gave 453 and 3840 frames of silence
-while the streams played (the local buffer had no frames). When in the
-stream these frames came is not in the log.
+AAudio, so it is 1 s less the buffer of AAudio. Then the test program
+waits 300 ms before the end of each stream. `wine.log` has: the output
+of the emulator has 48000 Hz and bursts of 2180 frames (45.4 ms), so the
+period of `mmdevapi` is 46 ms. The driver asked for the low latency mode,
+and AAudio gave each stream the mode none (the emulator has no low latency
+output). The stream of `waveOut` has 22050 Hz, 16 bit PCM, a burst of 441
+frames and a buffer of 2012 frames (91.2 ms), the stream of DirectSound
+has 48000 Hz, 32 bit float, a burst of 960 frames and a buffer of 4360
+frames (90.8 ms). The latency from the timestamp of AAudio after 0.5 s:
+161.9 ms and 162.2 ms. 0 underruns of AAudio. The frames of the program
+that went to AAudio (all frames less the silence of the callback): 22050
+of `waveOut` (23503 less 1453) and 57096 of DirectSound (60936 less
+3840: the tone of 48000 frames and the silence of the mix of `dsound`
+after it). When in the stream the frames of silence came is not in the
+log. The log of the app has "wine_audio_low_latency=1", and each open
+line of `wine.log` names the mode "low latency (WINEAAUDIO_LOW_LATENCY=1)".
+With `-LowLatency 0` (69 checks, 0 failed) the open lines name the mode
+"none (WINEAAUDIO_LOW_LATENCY=0)", the stream of `waveOut` has a burst of
+1006 frames (in place of 441), and the frames of the program are 22050
+and 56576.
 `mmdevapi` has no line "No driver ... could be initialized". No process
 of Wine was left after the setup or after the test program. At the end the back key ended the app, `wineserver -k` ended with
 1 (no server ran: the server of the test program had ended, and -k gives 0
@@ -1836,7 +1856,7 @@ Steam Frame.
 
 **Known limits:**
 
-- The APK is 205.4 MB with both trees: a tar in the
+- The APK is large with both trees (see the table above): a tar in the
   method deflate. A better compression (xz) needs a decoder in the app.
 - Wine has no display driver (`Graphics` = `null`). What the game does with
   it: see "Play in the app".

@@ -2104,6 +2104,34 @@ bool PointerMapMouseRay(float dir_room[3]) {
   return true;
 }
 
+// The render size, for the pointer on the screen quad (controllers.cpp).
+bool PointerMapRenderSize(int* width, int* height) {
+  return RenderSize(width, height);
+}
+
+// THE POINTER ON THE SCREEN QUAD (controllers.cpp, ControllersScreenApply).
+// In a frame with no scene the game reads its pointer only from the pointer
+// of LHMouse: the Setup callback gives it to the dialog box, and the front
+// end draws its cursor there (fn_0053C0F0). LHMouse::UpdateDeltaPos does
+// not run in these frames, so PointerMapApply does not run either. The
+// pixel also becomes the exact pointer of this file, so a message of the
+// mouse thread (h_MouseMoveHandler) with the window behind gives the game
+// the same pixel. The cursor of Windows stays where it is.
+void PointerMapSetScreenPixel(float x, float y) {
+  g_true_x = x;
+  g_true_y = y;
+  g_have_true = true;
+  g_pend_x = 0.0f;
+  g_pend_y = 0.0f;
+  int32_t* px = reinterpret_cast<int32_t*>(kPointerX);
+  int32_t* py = reinterpret_cast<int32_t*>(kPointerY);
+  if (IsBadWritePtr(px, sizeof(int32_t)) || IsBadWritePtr(py, sizeof(int32_t))) {
+    return;
+  }
+  *px = static_cast<int32_t>(x);
+  *py = static_cast<int32_t>(y);
+}
+
 // The test mouse of a desktop run. See FakeMouseFrame.
 void PointerMapSetFakeMouse(const char* script, int step_px,
                             const int x_pct[2], const int y_pct[2]) {

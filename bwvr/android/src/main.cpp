@@ -33,6 +33,7 @@
 #include "flat_view.h"
 #include "game_folder.h"
 #include "input_live.h"
+#include "keyboard_layout.h"
 #include "menu_layout.h"
 #include "menu_model.h"
 #include "menu_painter.h"
@@ -138,6 +139,13 @@ struct App {
   uint64_t screen_pictures = 0;
   bool said_no_screen = false;
   int live_space = -1;  // the last frame of the stream: 1 a screen frame, 0 a frame of the scene
+  // THE KEYBOARD OF THE APP (screen_keyboard=1): it shows while the newest
+  // screen picture has a dialog box of the game that takes text.
+  bool keyboard_on = true;     // screen_keyboard
+  bool keyboard_shown = false;
+  keyboard_layout::Quad keyboard_quad = {};
+  int keyboard_lit = -1;       // the key under the ray
+  uint64_t keys_typed = 0;
   uint64_t rate_frame = 0;   // the frame and the time of the last line of the frame rate
   double rate_ms = 0.0;
 };
@@ -672,6 +680,13 @@ void Paint(App* app) {
     status = wine.empty() ? app->base_status : app->base_status + "  " + wine;
   }
   app->painter.Ask(app->menu, status);
+  if (app->xr_on && app->keyboard_shown) app->painter.AskKeyboard(app->keyboard_lit);
+  {
+    std::vector<uint8_t> keys;
+    if (app->painter.TakeKeyboard(&keys)) {
+      app->xr.SetKeyboardPixels(keys, keyboard_layout::kWidth, keyboard_layout::kHeight);
+    }
+  }
   if (!app->painter.Take(&app->pixels)) return;
   if (app->xr_on) {
     app->xr.SetMenuPixels(app->pixels);
@@ -820,6 +835,74 @@ void OnCommand(android_app* android, int32_t command) {
   }
 }
 
+// THE KEYBOARD OF THE APP (screen_keyboard=1, docs/android.md, "The keyboard
+// of the app"): while the game runs with no menu over it, and the newest
+// screen picture has a dialog box of the game that takes text (kScreenText
+// of its kScreen), the keyboard shows on a quad under the screen quad.
+void UpdateKeyboard(App* app) {
+  bool shown = false;
+  if (app->keyboard_on && app->game_on && !app->menu_over_game &&
+      app->xr.ScreenQuadShown()) {
+    const scene_stream::ScreenBody& b = app->xr.ScreenQuadBody();
+    shown = (b.flags & scene_stream::kScreenText) != 0 &&
+            keyboard_layout::QuadUnder(b.position, b.size, &app->keyboard_quad);
+  }
+  if (shown != app->keyboard_shown) {
+    app->keyboard_shown = shown;
+    app->keyboard_lit = -1;
+    const keyboard_layout::Quad& q = app->keyboard_quad;
+    if (shown) {
+      AppLog("keyboard     : a dialog box of the game takes text. The keyboard shows, "
+             "%.2f by %.2f m at %.2f %.2f %.2f m, turned %.1f degrees to the head",
+             q.size[0], q.size[1], q.position[0], q.position[1], q.position[2],
+             -2.0f * asinf(q.orientation[0]) * 57.29578f);
+    } else {
+      AppLog("keyboard     : the keyboard goes. %llu keys went to the mod",
+             static_cast<unsigned long long>(app->keys_typed));
+    }
+  }
+  app->xr.SetKeyboard(shown, app->keyboard_quad.position, app->keyboard_quad.orientation,
+                      app->keyboard_quad.size);
+}
+
+// The ray and the trigger on the keyboard. The hand that pulled its trigger
+// last points, as on the menu. The trigger types the key under the ray: the
+// key goes to the mod through the ring of the keys of the input channel. The
+// mod takes the trigger only on the screen quad, so a press on the keyboard
+// clicks nothing in the game.
+void OnKeyboard(App* app, const XrInput& in, bool* show_cursor, float cursor[3]) {
+  for (int h = 0; h < 2; ++h) {
+    if (in.select[h] && !app->select_was[h]) app->pointer_hand = h;
+  }
+  const int p = app->pointer_hand;
+  float px = 0.0f, py = 0.0f;
+  bool hit = false;
+  if (in.aim_valid[p]) {
+    float forward[3];
+    controller_math::AimForward(in.aim_orientation[p], forward);
+    hit = keyboard_layout::RayToPixel(in.aim_position[p], forward, app->keyboard_quad, &px,
+                                      &py);
+  }
+  const int key = hit ? keyboard_layout::KeyIndexAt(px, py) : -1;
+  if (key != app->keyboard_lit) {
+    app->keyboard_lit = key;
+    if (key >= 0) app->xr.Pulse(p);
+  }
+  if (in.select[p] && !app->select_was[p] && key >= 0) {
+    keyboard_layout::Key k;
+    keyboard_layout::Rect r;
+    keyboard_layout::KeyAt(key, &k, &r);
+    const bool in_ring = app->input_live.PushKey(k.code);
+    if (in_ring) ++app->keys_typed;
+    if (app->keys_typed <= 64 || !in_ring) {
+      AppLog("keyboard     : the key %s %s", k.label,
+             in_ring ? "goes to the mod" : "does not fit into the ring of the keys");
+    }
+  }
+  *show_cursor = hit;
+  if (hit) keyboard_layout::PixelToPoint(app->keyboard_quad, px, py, cursor);
+}
+
 // THE CONTROLLERS on the menu quad.
 void OnControllers(App* app, const XrInput& in, bool* show_cursor,
                    float cursor[3]) {
@@ -829,11 +912,12 @@ void OnControllers(App* app, const XrInput& in, bool* show_cursor,
   // game (MenuButton, before this call). With no menu the controllers are
   // the hands of the game, and the menu takes no input.
   if (app->game_on && !app->menu_over_game) {
+    *show_cursor = false;
+    if (app->keyboard_shown) OnKeyboard(app, in, show_cursor, cursor);
     for (int h = 0; h < 2; ++h) {
       app->select_was[h] = in.select[h];
       app->back_was[h] = in.back[h];
     }
-    *show_cursor = false;
     return;
   }
   // The hand that pressed its trigger last points.
@@ -1033,6 +1117,14 @@ void android_main(android_app* android) {
   // process stays, as the system wants.
   app.exit_at_end = app.ini.GetInt("bwvr", "exit_at_end", 1) != 0;
   app.play_menu_press = app.ini.GetInt("bwvr", "play_menu_press", 1) != 0;
+  // screen_keyboard=1 (the default): while a dialog box of the game takes
+  // text, the app shows its keyboard under the screen quad, and the trigger
+  // on a key gives the key to the mod. 0: no keyboard.
+  app.keyboard_on = app.ini.GetInt("bwvr", "screen_keyboard", 1) != 0;
+  AppLog("keyboard     : screen_keyboard=%d. %s", app.keyboard_on ? 1 : 0,
+         app.keyboard_on ? "While a dialog box of the game takes text, the keyboard of the "
+                           "app shows under the screen quad"
+                         : "No keyboard of the app");
   AppLog("game         : play_game=%d, play_menu_hold_ms=%d, play_menu_press=%d. %s",
          app.play_game ? 1 : 0, app.play_menu_hold_ms, app.play_menu_press ? 1 : 0,
          app.can_play ? "Play starts the game in Wine"
@@ -1145,6 +1237,7 @@ void android_main(android_app* android) {
         app.input_live.PlayPulses(&app.xr);
       }
       if (app.live) PlayLive(&app);
+      UpdateKeyboard(&app);
       bool show_cursor = false;
       float cursor[3] = {0, 0, 0};
       OnControllers(&app, input, &show_cursor, cursor);

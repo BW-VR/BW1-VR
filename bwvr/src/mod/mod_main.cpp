@@ -175,6 +175,13 @@ void UiDepthSetUiScale(int percent);
 void UiDepthSetSubtitleDegrees(int degrees);
 void PointerMapSetOptions(bool scale, bool clip, bool leave_cursor);
 void PointerMapSetRenderSize(int width, int height);
+bool PointerMapRenderSize(int* width, int* height);
+// controllers.cpp: the pointer on the screen quad of the headset app
+// (screen_pointer, screen_keys).
+void ControllersScreenFrame(float distance_m, float width_m, int render_w,
+                            int render_h);
+void ControllersScreenApply();
+uint32_t ControllersScreenFlags();
 void PointerMapSetWindowSize(int width, int height);
 void PointerMapRelease();
 void PointerMapSetRebuild(bool on);
@@ -2458,6 +2465,9 @@ void __cdecl h_FinishFrame() {
   // the stereo loop latched the route already.
   const bool in_pass = StereoInPass();
   UiPanelBeforeFinish(in_pass);
+  // The pointer on the screen quad (controllers.cpp): the Setup callback in
+  // FinishFrame reads the pointer of the game.
+  if (!in_pass && !IntroInPass()) ControllersScreenApply();
   o_FinishFrame();
   UiBarsEnd(bars);
   ++g_frame;
@@ -2521,7 +2531,8 @@ void __cdecl h_FinishFrame() {
         g_vk_stream_screens != 0, XrInputOn(), in_pass, IntroInPass(),
         g_stereo, StereoIdle());
     if (route != screen_quad_math::Route::kNone) {
-      VkStreamScreen(route == screen_quad_math::Route::kShows, g_distance, g_width);
+      VkStreamScreen(route == screen_quad_math::Route::kShows, g_distance, g_width,
+                     ControllersScreenFlags());
     } else if (IntroInPass()) {
       VkStreamScreenStop();
     }
@@ -2530,6 +2541,13 @@ void __cdecl h_FinishFrame() {
     // the live stream. A frame of the scene and of the intro waits before its
     // first read of the input (stereo.cpp, intro_vr.cpp).
     if (!in_pass && !IntroInPass()) XrInputPace();
+    // The pointer on the screen quad and the keys of the app, after the
+    // wait, so the hands are of the frame of the session that ended it.
+    if (!in_pass && !IntroInPass()) {
+      int render_w = 0, render_h = 0;
+      PointerMapRenderSize(&render_w, &render_h);
+      ControllersScreenFrame(g_distance, g_width, render_w, render_h);
+    }
   }
 
   // The intro draws its own eye passes and sends them itself. Its

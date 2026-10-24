@@ -291,6 +291,12 @@ bool XrInputStart(const char* dir) {
   g_chan = static_cast<ic::File*>(view);
   const bool whole = ic::HeadOk(g_chan, ic::kFileBytes);
   if (!whole) ic::MakeHead(g_chan);
+  // The keys of the app from before this start are not for this game.
+  const uint32_t old_keys = ic::DropOldKeys(g_chan);
+  if (old_keys > 0) {
+    ModLog("xr input     : %u keys of the app from before the start of the game "
+           "are dropped", old_keys);
+  }
   LARGE_INTEGER now;
   QueryPerformanceCounter(&now);
   ic::StoreRelease(&g_chan->head.mod_session,
@@ -511,6 +517,19 @@ void XrInputHaptic(int index, float amplitude, float seconds) {
 }
 
 uint32_t XrInputSlotFrame() { return g_have_slot ? g_slot_frame : 0u; }
+
+uint32_t XrInputTakeKeys(uint32_t* codes, uint32_t max) {
+  if (g_chan == nullptr || max == 0) return 0;
+  ic::KeyEvent keys[ic::kKeys];
+  bool broken = false;
+  const uint32_t n = ic::TakeKeys(g_chan, keys, max < ic::kKeys ? max : ic::kKeys, &broken);
+  if (broken) {
+    ModLog("xr input     : the indices of the keys of the app are not valid. The mod "
+           "drops the keys that wait, frame %llu", ControllersFrameCount());
+  }
+  for (uint32_t i = 0; i < n; ++i) codes[i] = keys[i].code;
+  return n;
+}
 
 bool XrInputRecording() { return g_record != nullptr; }
 

@@ -50,6 +50,7 @@
 #include <string.h>
 
 #include "../common/bw_addresses.h"
+#include "../common/input_channel.h"
 #include "../vr/xr_screen.h"
 #include "MinHook.h"
 #include "aim_math.h"
@@ -64,6 +65,7 @@
 #include "miracle.h"
 #include "note_depth.h"
 #include "radial_menu.h"
+#include "screen_quad_math.h"
 #include "script_frame_math.h"
 #include "temple.h"
 #include "temple_math.h"
@@ -1602,7 +1604,76 @@ bool GameInFront() {
   return process == GetCurrentProcessId() && WindowActive();
 }
 
-int PointingIndex() { return g_left_handed ? 0 : 1; }
+// THE POINTER ON THE SCREEN QUAD (screen_pointer=1, docs/controllers.md,
+// "The screens with no scene"). With xr_input=1 the headset app shows a
+// frame with no scene on the screen quad of its kScreen
+// (screen_quad_math.h): the logos, the videos, the front end and the dialog
+// boxes. While a dialog box of the game is up in such a frame, the aim ray of
+// the hand that pulled its trigger last points at that quad, and the trigger
+// is the left button. The mod does it as the game takes its mouse in a box:
+//
+//   - The Setup callback of FinishFrame (0x006424E0) gives the pointer of
+//     LHMouse (0x00E852C0) and the buttons of the box (0x00C4CD0C, which
+//     the loop of the box copies from the held buttons of LHMouse before
+//     FinishFrame) to fn_00408340 of the box. The front end draws its own
+//     cursor at that pointer in the same callback (fn_0053C0F0), so the
+//     cursor is in the picture of the screen quad.
+//   - ControllersScreenFrame latches the hands once for each FinishFrame,
+//     after the wait of the pace, and makes the hit on the quad the pixel of
+//     the pointer. ControllersScreenApply writes it before the next
+//     FinishFrame. The pump (PumpScreenButtons) gives the trigger to
+//     LHMouse::SetButtons, where the real buttons arrive.
+//
+// The mod computes the hit, not the app: the mod makes the quad (the kScreen)
+// and has the hands of the input channel, the pixel goes into the game in
+// the frame of the latch with no trip back through the app, and the same
+// code can serve a session of the mod on the PC.
+//
+// In these frames only the trigger acts. The stick, the walk, Esc and the
+// ring of the left hand wait for a frame of the scene. screen_pointer=0: the
+// controllers do not act in a frame with no scene.
+//
+// THE KEYS (screen_keys=1). While the box takes text (a SetupEdit has its
+// focus, setup_box.cpp), the kScreen of the frame says so (kScreenText),
+// and the app shows its keyboard under the screen quad. Each key of the app
+// comes through the ring of the keys of the input channel, and the mod
+// posts it to the game window as WM_CHAR, as Windows gives the game a key of
+// a keyboard: the window procedure puts it into the queue of the characters
+// (0x00E855A0), and the box gives it to SetupEdit::Char. screen_keys=0: no
+// kScreenText, and the mod drops the keys.
+int g_screen_pointer = -1;  // screen_pointer, read once
+int g_screen_keys = -1;     // screen_keys, read once
+controller_math::ScreenHands g_screen_hands = {{false, false}, 1};
+controller_math::ScreenPress g_screen_press = {false, false};
+bool g_screen_on_quad = false;   // the ray of the pointing hand is on the quad
+bool g_screen_have_pixel = false;
+float g_screen_x = 0.0f;
+float g_screen_y = 0.0f;
+ULONGLONG g_screen_tick = 0;     // the last screen frame in which the pointer acted
+bool g_screen_acting = false;    // for one line of the log at each change
+bool g_screen_pumped = false;    // the last pump was a pump of the screen
+uint64_t g_screen_frames = 0;    // screen frames with the pointer
+uint64_t g_screen_presses = 0;
+uint64_t g_screen_dropped = 0;   // presses that started off the quad
+uint64_t g_screen_keys_posted = 0;
+uint64_t g_screen_keys_dropped = 0;
+int g_screen_logs = 0;
+const int kMaxScreenLogs = 80;
+
+// The pointer acts in this frame: the key is on, the input channel gives the
+// hands, a dialog box is up in a frame with no scene, and a screen frame
+// latched the hands in the last 250 ms.
+bool ScreenPointerActs() {
+  return g_screen_pointer == 1 && XrInputOn() && MenuUp() && StereoIdle() &&
+         GetTickCount64() - g_screen_tick <= 250;
+}
+
+// The hand that points: on the screen quad the hand that pulled its trigger
+// last, else the hand of the side of the player.
+int PointingIndex() {
+  if (ScreenPointerActs()) return g_screen_hands.hand;
+  return g_left_handed ? 0 : 1;
+}
 
 // A TEST KEY for desktop runs, fake_controller_front=1, read only with the
 // fake controller on. Windows does not always give the front to a game that
@@ -1681,7 +1752,9 @@ bool Usable() {
   // The intro ends on a click. See intro_vr.cpp.
   if (IntroBlocksButtons()) return false;
   g_not_usable[0] = !GameInFront() && !ActsBehind();
-  g_not_usable[1] = StereoIdle();
+  // A frame with no scene blocks the hands, except the pointer on the
+  // screen quad (screen_pointer=1).
+  g_not_usable[1] = StereoIdle() && !ScreenPointerActs();
   g_not_usable[2] = GetTickCount64() - g_frame_tick > 250;
   g_not_usable[3] = !g_hands[PointingIndex()].active;
   if (!g_on || !g_installed || g_owner_mode == 2) return false;
@@ -2711,6 +2784,62 @@ void PollPressHoldKey() {
                "click"
              : "The button of the game goes up 167 ms after the object came "
                "into the Hand of the picture");
+}
+
+// THE TRIGGER ON THE SCREEN QUAD (see ScreenPointerActs): the left button of
+// the game, from the trigger of the hand that points, as ControllersScreenFrame
+// latched it. A press starts only with the ray on the quad
+// (ScreenPressStep). The right button is not used.
+void PumpScreenButtons(ULONGLONG now) {
+  const bool usable = Usable();
+  const bool trigger = g_screen_hands.down[g_screen_hands.hand];
+  const bool was_held = g_screen_press.held;
+  const bool was_need_up = g_screen_press.need_up;
+  const bool held = controller_math::ScreenPressStep(&g_screen_press, trigger,
+                                                     g_screen_on_quad, usable);
+  if (!was_held && held) {
+    ++g_screen_presses;
+    if (g_screen_logs < kMaxScreenLogs) {
+      ++g_screen_logs;
+      ModLog("controllers  : screen quad: the %s trigger presses at the pixel "
+             "%.0f %.0f of the render", g_screen_hands.hand == 0 ? "left" : "right",
+             g_screen_x, g_screen_y);
+    }
+  } else if (trigger && usable && !was_need_up && g_screen_press.need_up) {
+    ++g_screen_dropped;
+    if (g_screen_logs < kMaxScreenLogs) {
+      ++g_screen_logs;
+      ModLog("controllers  : screen quad: a press of the %s trigger with the ray "
+             "off the quad does nothing", g_screen_hands.hand == 0 ? "left" : "right");
+    }
+  }
+  if (held) {
+    g_ctrl_mask |= 1u << kLeft;
+  } else {
+    g_ctrl_mask &= static_cast<uint8_t>(~(1u << kLeft));
+  }
+  g_ctrl_mask &= static_cast<uint8_t>(~(1u << kRight));
+  ReconcileController(kLeft, now);
+  ReconcileController(kRight, now);
+}
+
+// The pointer left the screen quad (the box went, or the frames of the
+// scene came) with the trigger down: the button goes up, and a control that
+// is down must open before the pump of the scene takes it as a press.
+void EndScreenButtons(ULONGLONG now) {
+  g_screen_press.held = false;
+  g_screen_press.need_up = false;
+  if ((g_ctrl_mask & (1u << kLeft)) != 0) {
+    g_ctrl_mask &= static_cast<uint8_t>(~(1u << kLeft));
+    ReconcileController(kLeft, now);
+  }
+  for (int b = 0; b < 2; ++b) {
+    if (RawDown(b)) g_button[b].need_up = true;
+  }
+  // The pump of the scene has not seen the trigger of the screen quad.
+  if (g_screen_hands.down[0] || g_screen_hands.down[1]) {
+    g_button[g_swap_buttons ? kRight : kLeft].need_up = true;
+  }
 }
 
 void PumpButtons(ULONGLONG now) {
@@ -4794,11 +4923,178 @@ void ControllersPump() {
   if (g_fake_deactivate) FakeDeactivate();
   TextClickPump();
   NoteDepthPump();
+  // A frame with no scene with the pointer on the screen quad: only the
+  // trigger acts (ScreenPointerActs).
+  const bool screen = ScreenPointerActs();
+  if (!screen && g_screen_pumped) EndScreenButtons(now);
+  g_screen_pumped = screen;
+  if (screen) {
+    PumpScreenButtons(now);
+    return;
+  }
   PumpButtons(now);
   PumpStick(now);
   PumpWalk();
   PumpEsc(now);
   RadialMenuPump(now);
+}
+
+// FOR mod_main.cpp, at the end of each FinishFrame outside the eye passes,
+// after the wait of the pace (see ScreenPointerActs): gives the keys of the
+// app to the game, latches the hands of the input channel, and takes the
+// hand that points and the hit of its ray on the screen quad of distance_m
+// and width_m (the quad of the kScreen of a render of render_w by
+// render_h).
+bool SetupBoxTakesText();
+void ControllersScreenFrame(float distance_m, float width_m, int render_w,
+                            int render_h) {
+  if (!g_on || !g_installed || !XrInputOn()) return;
+  if (g_screen_pointer < 0) {
+    g_screen_pointer = IniInt("screen_pointer", 1) != 0 ? 1 : 0;
+    g_screen_keys = IniInt("screen_keys", 1) != 0 ? 1 : 0;
+    ModLog("controllers  : screen_pointer=%d. %s", g_screen_pointer,
+           g_screen_pointer != 0
+               ? "While a dialog box is up in a frame with no scene, the ray of "
+                 "the hand that pulled its trigger last points at the screen "
+                 "quad of the headset app, and the trigger is the left button"
+               : "The controllers do not act in a frame with no scene");
+    ModLog("controllers  : screen_keys=%d. %s", g_screen_keys,
+           g_screen_keys != 0
+               ? "While a dialog box takes text, the app shows its keyboard, "
+                 "and its keys go to the game as the keys of a keyboard"
+               : "The app shows no keyboard, and the mod drops its keys");
+  }
+  // THE KEYS. Each screen frame takes the keys of the ring, so a key never
+  // waits for a later box.
+  {
+    uint32_t codes[input_channel::kKeys];
+    const uint32_t n = XrInputTakeKeys(codes, input_channel::kKeys);
+    if (n > 0) {
+      const bool text = g_screen_keys == 1 && SetupBoxTakesText();
+      const HWND window = GameWindowHandle();
+      for (uint32_t i = 0; i < n; ++i) {
+        const bool posted =
+            text && window != nullptr &&
+            PostMessageA(window, WM_CHAR, static_cast<WPARAM>(codes[i]), 1) != 0;
+        if (posted) {
+          ++g_screen_keys_posted;
+        } else {
+          ++g_screen_keys_dropped;
+        }
+        if (g_screen_logs < kMaxScreenLogs) {
+          ++g_screen_logs;
+          char name[16];
+          if (codes[i] == input_channel::kKeyBack) {
+            strcpy_s(name, "back space");
+          } else if (codes[i] == input_channel::kKeyEnter) {
+            strcpy_s(name, "Enter");
+          } else if (codes[i] == ' ') {
+            strcpy_s(name, "space");
+          } else {
+            sprintf_s(name, "\"%c\"",
+                      codes[i] >= 32 && codes[i] < 127 ? static_cast<char>(codes[i]) : '?');
+          }
+          ModLog("controllers  : the key %s of the app %s", name,
+                 posted ? "goes to the game (WM_CHAR)"
+                 : text ? "is dropped: the game has no window"
+                        : "is dropped: no dialog box takes text");
+        }
+      }
+    }
+  }
+  if (g_screen_pointer == 0) return;
+  const bool acts = MenuUp() && StereoIdle() && render_w > 0 && render_h > 0;
+  if (!acts) {
+    if (g_screen_acting) {
+      g_screen_acting = false;
+      ModLog("controllers  : screen quad: the pointer stops (%s), after %llu "
+             "screen frames. %llu presses, %llu presses off the quad, %llu keys "
+             "to the game and %llu dropped",
+             MenuUp() ? "a frame of the scene" : "no dialog box is up",
+             g_screen_frames, g_screen_presses, g_screen_dropped,
+             g_screen_keys_posted, g_screen_keys_dropped);
+      g_screen_frames = g_screen_presses = g_screen_dropped = 0;
+      g_screen_keys_posted = g_screen_keys_dropped = 0;
+      // The hands of the last read are not of the frames after it: the
+      // intro skip reads them (ControllersButtonBits), and a trigger that
+      // was down at the end of the box must not skip the logo after it.
+      // ControllersFrame reads the hands again in the next frame of the
+      // scene.
+      for (int i = 0; i < 2; ++i) {
+        g_hands[i].active = false;
+        g_hands[i].trigger = 0.0f;
+        g_hands[i].primary = false;
+        g_hands[i].secondary = false;
+      }
+      controller_math::ScreenHandsReset(&g_screen_hands, g_screen_hands.hand);
+    }
+    return;
+  }
+  XrInputLatch();
+  g_hands[0] = XrInputHand(0);
+  g_hands[1] = XrInputHand(1);
+  LatchFront();
+  const float trigger[2] = {g_hands[0].trigger, g_hands[1].trigger};
+  const bool active[2] = {g_hands[0].active, g_hands[1].active};
+  const int before = g_screen_hands.hand;
+  const int hand = controller_math::ScreenHandsStep(&g_screen_hands, trigger, active);
+  const scene_stream::ScreenBody quad = screen_quad_math::MakeScreen(
+      0, false, 0, static_cast<uint32_t>(render_w), static_cast<uint32_t>(render_h),
+      distance_m, width_m);
+  const bwvr::HandInput& h = g_hands[hand];
+  controller_math::QuadHit hit = {false, false, 0.0f, 0.0f, 0.0f};
+  if (h.active && h.aim_valid) {
+    float forward[3];
+    controller_math::AimForward(h.aim_orientation, forward);
+    hit = controller_math::RayQuad(h.aim_position, forward, quad.position,
+                                   quad.orientation, quad.size);
+  }
+  g_screen_on_quad = hit.inside;
+  float x = 0.0f, y = 0.0f;
+  if (controller_math::ScreenPixel(hit, render_w, render_h, &x, &y)) {
+    g_screen_x = x;
+    g_screen_y = y;
+    g_screen_have_pixel = true;
+  }
+  const ULONGLONG now = GetTickCount64();
+  g_frame_tick = now;
+  g_screen_tick = now;
+  ++g_screen_frames;
+  if (!g_screen_acting) {
+    g_screen_acting = true;
+    ModLog("controllers  : screen quad: a dialog box is up in a frame with no "
+           "scene. The %s hand points at the quad %.2f by %.2f m, %.2f m in "
+           "front of the origin of the room, the render %d by %d",
+           hand == 0 ? "left" : "right", quad.size[0], quad.size[1], distance_m,
+           render_w, render_h);
+  }
+  if (hand != before && g_screen_logs < kMaxScreenLogs) {
+    ++g_screen_logs;
+    ModLog("controllers  : screen quad: the %s hand points now (its trigger)",
+           hand == 0 ? "left" : "right");
+  }
+}
+
+// FOR mod_main.cpp, at the start of each FinishFrame outside the eye
+// passes: the pixel of the pointer on the screen quad goes to the pointer of
+// the game before the Setup callback reads it.
+void PointerMapSetScreenPixel(float x, float y);
+void ControllersScreenApply() {
+  if (g_screen_have_pixel && ScreenPointerActs()) {
+    PointerMapSetScreenPixel(g_screen_x, g_screen_y);
+  }
+}
+
+// For intro_skip.cpp: the pointer on the screen quad acts now, so the
+// trigger is the left button of a dialog box and does not skip the intro.
+bool ControllersScreenPointerActs() { return ScreenPointerActs(); }
+
+// The kScreen flags of the frame (scene_stream.h): kScreenText while a
+// dialog box takes text and screen_keys=1.
+uint32_t ControllersScreenFlags() {
+  return g_screen_keys == 1 && XrInputOn() && SetupBoxTakesText()
+             ? scene_stream::kScreenText
+             : 0u;
 }
 
 // A snap turn that the stick asked for has happened.

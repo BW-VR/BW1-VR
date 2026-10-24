@@ -582,7 +582,10 @@ that moves while the Hand takes it.
 - **P9. The pointer on the interface panel**, and the screens with no
   scene (menus, loading, videos) on a panel in the room with a session of
   the mod on the PC (`ui-layer.md`, section 6). The headset app has the
-  screen quad.
+  screen quad, and the ray and the trigger on a dialog box there
+  (`controllers.md`, section 12). In the headset app the start dialog of a
+  new game after the Lionhead logo and the Esc menu are dialog boxes of a
+  frame of the scene, on the panel quads, so they need this pointer.
 - **P10. The tabletop mode** (play mode 3) is a test mode. Not built: a
   game camera over the table, the mouse, the wheel, the stick and the
   double click for the table, the ring and the depth key for the key color,
@@ -805,9 +808,12 @@ that moves while the Hand takes it.
     input channel under Box64. The logos, the videos, the front end and the
     dialog boxes go into the live stream as screen frames, and the app shows
     them on a quad fixed in the room (`android.md`, "The screens with no
-    scene"). Open: a game folder with no profile (the game then waits in the
-    dialog of a new profile, and the pointer, the clicks and a text input on
-    the screen quad are not built), the sound in a headset (the audio
+    scene"). A controller points at a dialog box on the screen quad, the
+    trigger clicks, and the keyboard of the app types the name of a new
+    profile (`android.md`, "The dialog boxes by the controllers"). Open: a
+    dialog box of a frame of the scene in the headset app (the start dialog
+    of a new game after the Lionhead logo, the Esc menu: the pointer on the
+    panel, P9), the sound in a headset (the audio
     driver `wineaaudio` of patch 0003 gives the sound of Wine to AAudio,
     `audio.md`, "In Wine on Android"), the pace of the frames with
     `vk_device=0` in a headset (`vk_pace`, `android.md`, "The pace of the

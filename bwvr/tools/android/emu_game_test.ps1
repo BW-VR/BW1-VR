@@ -95,6 +95,32 @@
     of the prefix after Play, no stream of wineaaudio and the line "No
     driver ... could be initialized" of mmdevapi.
 
+.PARAMETER NewProfile
+    Game 1 answers the dialog of a new profile (NewProfileBox) with the
+    keyboard of the app (docs/android.md, "The keyboard of the app"): when
+    the log of the mod names the dialog and says that it takes text, the
+    runtime points at the keys of -ProfileName on the keyboard under the
+    screen quad and pulls the trigger on each, then on Enter. The game makes
+    that profile in the game folder of the app (a profile of the emulator,
+    never a profile of the player). The test checks the keyboard, the keys
+    in the logs of the app and of the mod, the dialog after Enter, the folder
+    of the profile and the value Profile of the registry of the prefix after
+    the game.
+
+.PARAMETER SkipClick
+    With -NewProfile: x,y of a row of the start dialog of a new game
+    (SkipBox) on the render. When the log of the mod names that dialog over
+    the Lionhead logo, the runtime points at that pixel of the screen quad
+    and pulls the trigger. The click is a button of the mouse of the game,
+    so the logo ends, and the frames of the scene come with the dialog over
+    them (controllers.md, section 12.1).
+
+.PARAMETER TestSave
+    With -NewProfile: the name of a test save of local\test-saves of the
+    main checkout (a saved game that a test run made). After game 1 the test
+    puts its files into slot 20 of the profile of game 1 in the emulator, so
+    game 2 ("Play in VR") continues it.
+
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
     game in it.
@@ -109,6 +135,10 @@ param(
     [switch]$SceneEyes,
     [string]$Audio = 'none',
     [ValidateSet(0, 1)][int]$WineAudio = 1,
+    [switch]$NewProfile,
+    [string]$ProfileName = 'bwvrtest',
+    [int[]]$SkipClick = @(),
+    [string]$TestSave = '',
     [switch]$Keep
 )
 
@@ -236,6 +266,70 @@ function CpuLoad($A, $B) {
     return @{ Seconds = $seconds; Wine = $wine; App = $app; Lines = $lines }
 }
 
+function ModLog { return (AdbOut @('shell', 'cat', "$GameDir/bwvr.log")) }
+# Waits until the log of the mod has each pattern, or the time is over.
+# Gives the log.
+function WaitModLog([string[]]$Patterns, [int]$Seconds) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    do {
+        $log = ModLog
+        $all = $true
+        foreach ($p in $Patterns) { if ($log -notmatch $p) { $all = $false } }
+        if ($all) { return $log }
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+    return $log
+}
+# THE DIALOG OF A NEW PROFILE by the keyboard of the app (-NewProfile).
+function ProfileDialog([int]$PlayAt) {
+    Say "The dialog of a new profile: the keyboard of the app types $ProfileName"
+    $mod = WaitModLog @('setup box    : the dialog box NewProfileBox is up now',
+        'vk stream    : screen frame \d+: a dialog box takes text') 900
+    Expect ($mod -match 'setup box    : the dialog box NewProfileBox is up now') 'the mod names the dialog of a new profile'
+    Expect ($mod -match 'vk stream    : screen frame \d+: a dialog box takes text, so the kScreen asks the app for its keyboard') 'the kScreen of the mod asks the app for its keyboard'
+    Expect ($mod -match 'controllers  : screen_pointer=1\.' -and $mod -match 'controllers  : screen_keys=1\.') 'the mod has screen_pointer=1 and screen_keys=1'
+    $log = WaitLog @('keyboard     : a dialog box of the game takes text\. The keyboard shows') 60 $PlayAt
+    $kb = [regex]::Match($log, 'keyboard     : a dialog box of the game takes text\. The keyboard shows, [^\r\n]*')
+    Expect $kb.Success ('the app shows its keyboard: ' + $kb.Value)
+    Hold 'profile'
+    $keys = $ProfileName.Length + 1
+    $mod = WaitModLog @('controllers  : the key Enter of the app goes to the game') 300
+    Start-Sleep -Seconds 10
+    $mod = ModLog
+    $log = AppLog
+    $appKeys = @([regex]::Matches($log.Substring([math]::Min($PlayAt, $log.Length)), 'keyboard     : the key (\S+) goes to the mod') | ForEach-Object { $_.Groups[1].Value })
+    Note ('the keys of the app: ' + ($appKeys -join ' '))
+    Expect ($appKeys.Count -eq $keys -and (($appKeys | Select-Object -First $ProfileName.Length) -join '') -eq $ProfileName -and $appKeys[-1] -eq 'Enter') "the keyboard of the app gave $ProfileName and Enter to the mod ($($appKeys.Count) keys)"
+    $modKeys = @($mod -split "`r?`n" | Where-Object { $_ -match '^controllers  : the key .* of the app goes to the game \(WM_CHAR\)' })
+    $modKeys | Select-Object -First 3 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+    Expect ($modKeys.Count -eq $keys) "the mod gave each key to the game as WM_CHAR ($($modKeys.Count) of $keys)"
+    $boxLines = @($mod -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : screen quad|vk stream    : screen frame \d+: (a dialog box takes|no dialog box takes))' })
+    $boxLines | ForEach-Object { Note ('bwvr.log: ' + $_) }
+    $after = [regex]::Match($mod, 'setup box    : no dialog box is up now[^\r\n]*')
+    Expect ($after.Success -and $mod.IndexOf($after.Value) -gt $mod.IndexOf('the key Enter of the app goes to the game')) "the dialog of a new profile went after Enter: $($after.Value)"
+    Hold 'typed'
+    $profiles = (AdbOut @('shell', 'ls', "$GameDir/Profiles")).Trim()
+    Note "the folder Profiles of the game folder of the app: $profiles"
+    $want = (($ProfileName.ToCharArray() | ForEach-Object { "_$_" }) -join '')
+    Expect ($profiles -match [regex]::Escape($want)) "the game made the profile $ProfileName in the game folder of the app (the folder $want)"
+    if ($SkipClick.Count -eq 2) {
+        # The start dialog of a new game over the Lionhead logo, by the ray.
+        $mod = WaitModLog @('setup box    : the dialog box SkipBox is up now') 300
+        Expect ($mod -match 'setup box    : the dialog box SkipBox is up now') 'the mod names the start dialog of a new game (SkipBox)'
+        Hold 'skipbox'
+        $mod = WaitModLog @('controllers  : screen quad: the right trigger presses') 120
+        $log = WaitLog @('game         : the frames of the scene start') 180 $PlayAt
+        $mod = ModLog
+        $press = [regex]::Match($mod, 'controllers  : screen quad: the right trigger presses at the pixel [^\r\n]*')
+        Expect $press.Success ('the ray pressed on the start dialog on the screen quad: ' + $press.Value)
+        Expect ($mod -match 'controllers  : the left button is down') 'the trigger went to the game as the left button'
+        $scene = [regex]::Match($log.Substring([math]::Min($PlayAt, $log.Length)), 'game         : the frames of the scene start at frame \d+, ([\d.]+) s after Play')
+        Expect $scene.Success ('the click ended the Lionhead logo, and the frames of the scene came: ' + $scene.Value)
+        @($mod -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (screen quad|the left button|a dialog box))' }) | Select-Object -Last 8 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        Hold 'clicked'
+    }
+}
+
 # 1. The test runtime.
 Say 'Build the OpenXR test runtime for x86_64'
 $runtimeBuild = Join-Path $Bwvr 'build-android\test-runtime'
@@ -311,11 +405,39 @@ try {
     # no game, row 0 is "Play in VR" and row 1 "Play, new game". While the
     # game runs, row 8 is "Quit game" (the 7 groups, Save Config, Quit game,
     # Exit).
+    # -NewProfile: the steps of the dialog of a new profile come after the
+    # trigger on "Play, new game", and the steps after them move by $shift.
+    $profileSteps = @()
+    $shift = 0
+    if ($NewProfile) {
+        $f = 45
+        $profileSteps += "$f hold profile"; $f += 2
+        $profileSteps += "$f quads profilebox"; $f += 4
+        $keys = @($ProfileName.ToCharArray() | ForEach-Object { "$_" }) + @('enter')
+        foreach ($k in $keys) {
+            $profileSteps += "$f point right key $k"
+            $profileSteps += "$($f + 8) trigger right 1"
+            $profileSteps += "$($f + 12) trigger right 0"
+            $f += 20
+        }
+        $profileSteps += "$f hold typed"; $f += 2
+        $profileSteps += "$f quads typed"; $f += 4
+        if ($SkipClick.Count -eq 2) {
+            $profileSteps += "$f hold skipbox"; $f += 2
+            $profileSteps += "$f point right screen $($SkipClick[0]) $($SkipClick[1])"
+            $profileSteps += "$($f + 8) trigger right 1"
+            $profileSteps += "$($f + 12) trigger right 0"
+            $f += 20
+            $profileSteps += "$f hold clicked"; $f += 2
+            $profileSteps += "$f quads clicked"; $f += 4
+        }
+        $shift = $f - 49
+    }
     $script = Join-Path $Out 'script.txt'
-    Set-Content -LiteralPath $script -Encoding ascii -Value @(
+    Set-Content -LiteralPath $script -Encoding ascii -Value (@(
         '10 hold ready',
         '20 point right menu 800 292', '30 capture before',
-        '40 trigger right 1', '44 trigger right 0',
+        '40 trigger right 1', '44 trigger right 0') + $profileSteps + (@(
         '50 hold measured1',
         $(if ($SceneEyes) { '51 eyes new' } else { '' }), '52 quads new',
         # Game 1: show (a hold of 90 frames), hide (a press of 6 frames),
@@ -340,7 +462,11 @@ try {
         '590 point right menu 800 768', '600 trigger right 1', '604 trigger right 0',
         '610 hold ended2',
         '620 capture after2',
-        '640 exit' | Where-Object { $_ -ne '' })
+        '640 exit') | Where-Object { $_ -ne '' } | ForEach-Object {
+            # The steps after the dialog of a new profile move by $shift.
+            $m = [regex]::Match($_, '^(\d+) (.*)$')
+            "$([int]$m.Groups[1].Value + $shift) $($m.Groups[2].Value)"
+        }))
     Adb @('push', $script, "$XrDir/script.txt")
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
@@ -362,7 +488,8 @@ try {
     Start-Sleep -Seconds 4
     Adb @('shell', 'am', 'force-stop', $Package)
     Adb @('shell', 'rm', '-f', "$XrDir/report.txt", "$XrDir/*.bmp", "$XrDir/ready", "$XrDir/measured1",
-        "$XrDir/measured2", "$XrDir/ended1", "$XrDir/ended2")
+        "$XrDir/measured2", "$XrDir/ended1", "$XrDir/ended2", "$XrDir/profile", "$XrDir/typed", "$XrDir/skipbox",
+        "$XrDir/clicked")
 
     Say "Copy the game folder $Game into the emulator (no Profiles, no files of the player)"
     $skipTop = @('Profiles', 'MemoryLeaks.txt', 'Scripts')
@@ -458,6 +585,11 @@ try {
                 break
             }
         }
+        # THE DIALOG OF A NEW PROFILE (-NewProfile, game 1): the keyboard of
+        # the app types the name, and Enter.
+        if ($NewProfile -and $n -eq 1 -and $first.Success) {
+            ProfileDialog $playAt
+        }
         # The measure: the CPU time of the processes of Wine over PlaySeconds.
         $a = CpuSample $user
         Start-Sleep -Seconds $PlaySeconds
@@ -515,6 +647,32 @@ try {
         Start-Sleep -Seconds 5
         $left = @(WineProcesses $user)
         Expect ($left.Count -eq 0) ("no process of Wine is left after game $n" + $(if ($left.Count) { ': ' + ($left -join '; ') } else { '' }))
+        if ($NewProfile -and $n -eq 1) {
+            # The server of Wine wrote the registry at its end.
+            $prefixReg = AdbOut @('shell', 'cat', "/data/data/$Package/files/prefix/user.reg")
+            $prof = @($prefixReg -split "`r?`n" | Where-Object { $_ -match '^"Profile"=' })
+            Note ('user.reg of the prefix after game 1: ' + ($prof -join ' '))
+            Expect ($prof.Count -gt 0) 'the registry of the prefix has the value Profile of the game after game 1'
+            if ($TestSave -ne '') {
+                # The test save into slot 20 of the profile of game 1.
+                $common = (& git -C $Repo rev-parse --path-format=absolute --git-common-dir 2>$null | Out-String).Trim()
+                $main = if ($common) { Split-Path -Parent ($common -replace '/', '\') } else { $Repo }
+                $save = Join-Path $main "local\test-saves\$TestSave\20"
+                $want = (($ProfileName.ToCharArray() | ForEach-Object { "_$_" }) -join '')
+                $slot = "$GameDir/Profiles/$want/Saved Games/20"
+                if (Test-Path -LiteralPath (Join-Path $save '20.sav')) {
+                    # The path has a space: one command line for the shell.
+                    Adb @('shell', "mkdir -p '$slot' && chmod 777 '$slot'")
+                    $files = @(Get-ChildItem -LiteralPath $save -File)
+                    foreach ($f in $files) { Adb @('push', $f.FullName, "$slot/$($f.Name)") }
+                    Adb @('shell', "chmod 666 '$slot'/*")
+                    $there = (AdbOut @('shell', "ls '$slot'")).Trim() -split '\s+'
+                    Expect (@($files | Where-Object { $there -contains $_.Name }).Count -eq $files.Count) "the test save $TestSave is in slot 20 of the profile $ProfileName in the emulator ($($files.Count) files)"
+                } else {
+                    Expect $false "the test save $TestSave is in $save"
+                }
+            }
+        }
         # The frame rate of the game.
         $rates = @([regex]::Matches($part, 'game         : frame (\d+), ([\d.]+) frames a second in the last ([\d.]+) s') | ForEach-Object { [double]::Parse($_.Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture) })
         if ($rates.Count -gt 0) {
@@ -636,7 +794,12 @@ try {
         # decimals and the turn) of the runtime, and in the log of the app.
         $stereoAny = 'quad 0\.000 0\.100 -2\.600 size 2\.600|quad 0\.0000 0\.1000 -2\.6000 turn [-0-9. ]+ size 2\.6000'
         $stereoLines = ([regex]::Matches($report, $stereoAny)).Count
-        Expect ($stereoLines -eq 0 -and $log -notmatch 'a stereo screen of two quads') "no frame has the quads of the stereo screen, and the app made no stereo screen ($stereoLines lines of the runtime)"
+        # The app makes the swapchains of the stereo screen with the first
+        # picture of the world (ShowEyes), so only the log before the first
+        # frame of the scene counts.
+        $sceneAt = $log.IndexOf('live         : the frames of the scene start')
+        $beforeScene = if ($sceneAt -ge 0) { $log.Substring(0, $sceneAt) } else { $log }
+        Expect ($stereoLines -eq 0 -and $beforeScene -notmatch 'a stereo screen of two quads') "no frame has the quads of the stereo screen, and the app made no stereo screen for a screen with no scene ($stereoLines lines of the runtime)"
         foreach ($name in @('new', 'play')) {
             $m = [regex]::Match($report, "capture \S*/$name-0\.bmp (\d+)x(\d+) lit (\d+)")
             Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of the screen quad after the measure of game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels (the files $name-0.bmp and $name-0.png)" } else { 'none' }))

@@ -21,6 +21,32 @@
 //     of the ring of the events and writes one line for it. It ends
 //     <seconds> after the head of the mod came.
 //
+//   bwvr_input_writer script <channel> <script> <seconds> <head seconds> <hz>
+//                            <log> <render width> <render height>
+//                            [<distance cm> <width cm>]
+//     Waits for the head of the mod, as play does. Then it writes a new slot
+//     <hz> times a second, as the app writes a slot at each frame of its
+//     session: a head at the origin of the LOCAL space and two Touch
+//     controllers, 20 cm to the side of the head, 30 cm down and 30 cm ahead,
+//     which follow the steps of the script, one step after the other:
+//       wait <text>          the next step waits until <log> (bwvr.log of
+//                            the game folder) has the text
+//       aim <hand> <x> <y>   the aim of the hand goes to the pixel x, y of
+//                            the screen quad of the mod (the quad of its
+//                            kScreen for a render of <render width> by
+//                            <render height>, <distance cm> in front of the
+//                            origin, 200 by default, <width cm> wide, 260
+//                            by default)
+//       trigger <hand> <0|1> the trigger of the hand
+//       slots <n>            the next step waits for n slots
+//       key <word>           one key into the ring of the keys, as the
+//                            keyboard of the app: a letter or a digit,
+//                            space, back or enter
+//     <hand> is left or right. A line that starts with # is a note. Each
+//     step writes one line. It ends <seconds> after the head of the mod
+//     came, and it writes each pulse of the mod, as play does. Exit code 0
+//     when it did each step.
+//
 //   bwvr_input_writer compare <record A> <record B>
 //     Compares the input of each frame that is in both records. Exit code 0
 //     when each one has the same bytes.
@@ -36,9 +62,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <string>
 #include <vector>
 
 #include "../../src/common/input_channel.h"
+#include "../../src/mod/controller_math.h"
 
 namespace {
 
@@ -214,6 +242,231 @@ int Play(const char* channel, const char* record, int seconds,
   return writes > 0 ? 0 : 4;
 }
 
+// THE SCRIPT of the command script.
+struct ScriptStep {
+  std::string word;
+  int hand = 1;
+  float a = 0.0f, b = 0.0f;
+  std::string text;
+};
+
+bool ReadScript(const char* path, std::vector<ScriptStep>* steps) {
+  FILE* f = nullptr;
+  if (fopen_s(&f, path, "r") != 0 || f == nullptr) {
+    printf("no script at %s\n", path);
+    return false;
+  }
+  char line[512];
+  while (fgets(line, sizeof(line), f) != nullptr) {
+    size_t n = strlen(line);
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ')) {
+      line[--n] = 0;
+    }
+    if (n == 0 || line[0] == '#') continue;
+    ScriptStep s;
+    char word[32] = {0}, hand[16] = {0};
+    if (sscanf_s(line, "%31s", word, static_cast<unsigned>(sizeof(word))) != 1) continue;
+    s.word = word;
+    const char* rest = line + strlen(word);
+    while (*rest == ' ') ++rest;
+    if (s.word == "aim") {
+      sscanf_s(rest, "%15s %f %f", hand, static_cast<unsigned>(sizeof(hand)), &s.a, &s.b);
+    } else if (s.word == "trigger") {
+      sscanf_s(rest, "%15s %f", hand, static_cast<unsigned>(sizeof(hand)), &s.a);
+    } else if (s.word == "slots") {
+      s.a = static_cast<float>(atof(rest));
+    } else if (s.word == "wait" || s.word == "key") {
+      s.text = rest;
+    } else {
+      printf("the script has a word that the writer does not know: %s\n", line);
+      fclose(f);
+      return false;
+    }
+    s.hand = strcmp(hand, "left") == 0 ? 0 : 1;
+    steps->push_back(s);
+  }
+  fclose(f);
+  return true;
+}
+
+// True when the file has the text. The mod writes its log with a shared
+// read.
+bool LogHas(const char* path, const std::string& text) {
+  HANDLE h = CreateFileA(path, GENERIC_READ,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (h == INVALID_HANDLE_VALUE) return false;
+  std::string all;
+  char buffer[65536];
+  DWORD got = 0;
+  while (ReadFile(h, buffer, sizeof(buffer), &got, nullptr) && got > 0) {
+    all.append(buffer, got);
+  }
+  CloseHandle(h);
+  return all.find(text) != std::string::npos;
+}
+
+// The code of a key of the script, or 0.
+uint32_t KeyCode(const std::string& word) {
+  if (word == "space") return ' ';
+  if (word == "back") return ic::kKeyBack;
+  if (word == "enter") return ic::kKeyEnter;
+  if (word.size() == 1) return static_cast<uint8_t>(word[0]);
+  return 0;
+}
+
+int Script(const char* channel, const char* script, int seconds, int head_seconds,
+           int hz, const char* log, int render_w, int render_h, float distance_m,
+           float width_m) {
+  std::vector<ScriptStep> steps;
+  if (!ReadScript(script, &steps)) return 2;
+  if (hz <= 0 || render_w <= 0 || render_h <= 0) {
+    printf("the script needs a rate and a render size\n");
+    return 2;
+  }
+  printf("the script has %zu steps. A slot %d times a second, the screen quad %.2f m "
+         "wide at %.2f m for a render of %d by %d\n",
+         steps.size(), hz, width_m, distance_m, render_w, render_h);
+  fflush(stdout);
+  const ULONGLONG head_end =
+      GetTickCount64() + static_cast<ULONGLONG>(head_seconds) * 1000;
+  Mapped m;
+  while (GetTickCount64() < head_end) {
+    if (Map(channel, &m)) {
+      if (ic::HeadOk(m.view, ic::kFileBytes) &&
+          ic::LoadAcquire(&m.view->head.mod_session) != 0) {
+        break;
+      }
+      m.Close();
+    }
+    Sleep(20);
+  }
+  if (m.view == nullptr) {
+    printf("no channel of the mod at %s in %d s\n", channel, head_seconds);
+    return 3;
+  }
+  ic::File* f = m.view;
+  ic::StoreRelease(&f->head.app_session, GetCurrentProcessId());
+  ic::DropOldEvents(f);
+  printf("the mod made the channel (session %u). The writer runs the script\n",
+         f->head.mod_session);
+  fflush(stdout);
+
+  // The head and the hands of the slots.
+  ic::SlotData d;
+  memset(&d, 0, sizeof(d));
+  d.flags = ic::kFocused | ic::kRunning;
+  d.display_period = 1000000000LL / hz;
+  d.recommended_width = static_cast<uint32_t>(render_w);
+  d.recommended_height = static_cast<uint32_t>(render_h);
+  for (int e = 0; e < 2; ++e) {
+    d.eyes[e].position[0] = e == 0 ? -0.032f : 0.032f;
+    d.eyes[e].orientation[3] = 1.0f;
+    d.eyes[e].fov[0] = -0.82f;
+    d.eyes[e].fov[1] = 0.82f;
+    d.eyes[e].fov[2] = 0.82f;
+    d.eyes[e].fov[3] = -0.82f;
+    d.eyes[e].valid = 1;
+  }
+  for (int h = 0; h < 2; ++h) {
+    ic::Hand& x = d.hands[h];
+    x.flags = ic::kActive | ic::kAimValid | ic::kGripValid | ic::kAimTracked |
+              ic::kGripTracked;
+    const float side = h == 0 ? -0.2f : 0.2f;
+    x.aim_position[0] = x.grip_position[0] = side;
+    x.aim_position[1] = x.grip_position[1] = -0.3f;
+    x.aim_position[2] = x.grip_position[2] = -0.3f;
+    x.aim_orientation[3] = x.grip_orientation[3] = 1.0f;
+    strcpy_s(x.profile, "oculus/touch_controller");
+  }
+  const float quad_h = width_m * static_cast<float>(render_h) / static_cast<float>(render_w);
+
+  LARGE_INTEGER frequency, now;
+  QueryPerformanceFrequency(&frequency);
+  const int64_t tick = frequency.QuadPart / hz;
+  QueryPerformanceCounter(&now);
+  int64_t next = now.QuadPart;
+  const ULONGLONG end = GetTickCount64() + static_cast<ULONGLONG>(seconds) * 1000;
+  size_t step = 0;
+  uint64_t wait_slots = 0;
+  bool waiting_log = false;
+  ULONGLONG next_look = 0;
+  uint32_t frame = 0, pulses = 0, keys = 0;
+  while (GetTickCount64() < end) {
+    // The steps that do not wait.
+    while (step < steps.size() && wait_slots == 0) {
+      const ScriptStep& s = steps[step];
+      if (s.word == "wait") {
+        const ULONGLONG t = GetTickCount64();
+        if (!waiting_log) {
+          waiting_log = true;
+          printf("slot %u: wait for \"%s\" in the log\n", frame, s.text.c_str());
+          fflush(stdout);
+        }
+        if (t < next_look) break;
+        next_look = t + 100;
+        if (!LogHas(log, s.text)) break;
+        waiting_log = false;
+        printf("slot %u: the log has \"%s\"\n", frame, s.text.c_str());
+      } else if (s.word == "aim") {
+        ic::Hand& x = d.hands[s.hand];
+        const float target[3] = {(s.a / render_w - 0.5f) * width_m,
+                                 (0.5f - s.b / render_h) * quad_h, -distance_m};
+        const float dir[3] = {target[0] - x.aim_position[0], target[1] - x.aim_position[1],
+                              target[2] - x.aim_position[2]};
+        controller_math::AimAlong(dir, x.aim_orientation);
+        memcpy(x.grip_orientation, x.aim_orientation, sizeof(x.grip_orientation));
+        printf("slot %u: the %s hand aims at the pixel %.0f %.0f of the screen quad\n",
+               frame, s.hand == 0 ? "left" : "right", s.a, s.b);
+      } else if (s.word == "trigger") {
+        d.hands[s.hand].trigger = s.a > 0.5f ? 1.0f : 0.0f;
+        printf("slot %u: the %s trigger %s\n", frame, s.hand == 0 ? "left" : "right",
+               s.a > 0.5f ? "closes" : "opens");
+      } else if (s.word == "slots") {
+        wait_slots = static_cast<uint64_t>(s.a);
+      } else if (s.word == "key") {
+        const uint32_t code = KeyCode(s.text);
+        const ic::KeyEvent k = {code, frame};
+        const bool pushed = code != 0 && ic::PushKey(f, k);
+        if (pushed) ++keys;
+        printf("slot %u: the key %s %s\n", frame, s.text.c_str(),
+               pushed ? "goes into the ring" : "does not go into the ring");
+      }
+      fflush(stdout);
+      ++step;
+    }
+    // One slot at each tick of the rate.
+    QueryPerformanceCounter(&now);
+    if (now.QuadPart >= next) {
+      ++frame;
+      d.frame = frame;
+      for (int h = 0; h < 2; ++h) d.hands[h].serial = frame;
+      d.display_time = now.QuadPart / frequency.QuadPart * 1000000000LL +
+                       now.QuadPart % frequency.QuadPart * 1000000000LL / frequency.QuadPart;
+      ic::Write(&f->slot, d);
+      if (wait_slots > 0) --wait_slots;
+      next += tick;
+      if (next <= now.QuadPart) next = now.QuadPart + tick;
+    }
+    ic::Event events[ic::kEvents];
+    bool broken = false;
+    const uint32_t n = ic::TakeEvents(f, events, ic::kEvents, &broken);
+    for (uint32_t i = 0; i < n; ++i) {
+      ++pulses;
+      printf("pulse frame %u hand %u, %.0f ms at %.2f\n", events[i].frame, events[i].hand,
+             events[i].seconds * 1000.0f, events[i].amplitude);
+    }
+    if (n > 0) fflush(stdout);
+    Sleep(0);
+  }
+  printf("the writer wrote %u slots and %u keys, and did %zu of %zu steps of the script. "
+         "%u pulses came. The mod read the slot %u times and %u keys\n",
+         frame, keys, step, steps.size(), pulses, f->head.latches, f->head.key_read);
+  fflush(stdout);
+  m.Close();
+  return step == steps.size() ? 0 : 5;
+}
+
 const char* FirstField(const ic::SlotData& a, const ic::SlotData& b) {
   if (a.flags != b.flags) return "the focus";
   if (a.display_time != b.display_time || a.display_period != b.display_period)
@@ -319,6 +572,14 @@ int main(int argc, char** argv) {
                 argc >= 7 ? atoi(argv[6]) : 0,
                 argc >= 8 && strcmp(argv[7], "app") == 0);
   }
+  if (argc >= 10 && strcmp(argv[1], "script") == 0) {
+    const int code = Script(argv[2], argv[3], atoi(argv[4]), atoi(argv[5]), atoi(argv[6]),
+                            argv[7], atoi(argv[8]), atoi(argv[9]),
+                            argc >= 11 ? static_cast<float>(atof(argv[10])) / 100.0f : 2.0f,
+                            argc >= 12 ? static_cast<float>(atof(argv[11])) / 100.0f : 2.6f);
+    fflush(stdout);
+    return code;
+  }
   if (argc >= 4 && strcmp(argv[1], "compare") == 0) {
     const int code = Compare(argv[2], argv[3]);
     fflush(stdout);
@@ -330,6 +591,8 @@ int main(int argc, char** argv) {
     return code;
   }
   printf("bwvr_input_writer play <channel> <record> <seconds> [<head seconds>] [<hz>] [app]\n"
+         "bwvr_input_writer script <channel> <script> <seconds> <head seconds> <hz> <log> "
+         "<render width> <render height> [<distance cm> <width cm>]\n"
          "bwvr_input_writer compare <record A> <record B>\n"
          "bwvr_input_writer dump <channel>\n");
   return 9;

@@ -734,8 +734,8 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                      float cursor_size) {
   namespace ql = quad_layer_math;
   // The quads: the two of the stereo screen or the quad layers of the mod
-  // (ql::kMostLayers), then the menu and the cursor.
-  constexpr int kQuads = ql::kMostLayers + 2;
+  // (ql::kMostLayers), then the keyboard, the menu and the cursor.
+  constexpr int kQuads = ql::kMostLayers + 3;
   XrCompositionLayerQuad quads[kQuads];
   for (XrCompositionLayerQuad& q : quads) q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerProjectionView views[2] = {
@@ -1045,7 +1045,39 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       }
     }
   }
-  // THE MENU AND THE CURSOR, over each layer of the mod.
+  // THE KEYBOARD OF THE APP under the screen quad.
+  if (frame_.shouldRender && keyboard_shown_ && keyboard_written_ && !keyboard_failed_) {
+    CopyLayer(&keyboard_);
+    XrCompositionLayerQuad& q = quads[used++];
+    q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    q.space = local_;
+    q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    q.subImage.swapchain = keyboard_.swapchain;
+    q.subImage.imageRect.extent = {static_cast<int32_t>(keyboard_.width),
+                                   static_cast<int32_t>(keyboard_.height)};
+    q.pose.position = {keyboard_position_[0], keyboard_position_[1], keyboard_position_[2]};
+    q.pose.orientation = {keyboard_orientation_[0], keyboard_orientation_[1],
+                          keyboard_orientation_[2], keyboard_orientation_[3]};
+    q.size = {keyboard_size_[0], keyboard_size_[1]};
+    layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
+    ++keyboard_frames_;
+  }
+  // THE MENU AND THE CURSOR, over each layer of the mod. The cursor also
+  // shows on the keyboard with no menu.
+  if (frame_.shouldRender && show_cursor && cursor_written_ && !menu_shown_) {
+    CopyLayer(&cursor_);
+    XrCompositionLayerQuad& c = quads[used++];
+    c.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    c.space = local_;
+    c.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    c.subImage.swapchain = cursor_.swapchain;
+    c.subImage.imageRect.extent = {static_cast<int32_t>(cursor_.width),
+                                   static_cast<int32_t>(cursor_.height)};
+    c.pose.orientation.w = 1.0f;
+    c.pose.position = {cursor_point[0], cursor_point[1], cursor_point[2] + 0.004f};
+    c.size = {cursor_size, cursor_size};
+    layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&c);
+  }
   if (frame_.shouldRender && menu_written_ && menu_shown_) {
     CopyLayer(&menu_);
     XrCompositionLayerQuad& q = quads[used++];
@@ -1081,6 +1113,34 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   end.layerCount = count;
   end.layers = layers;
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
+}
+
+void XrApp::SetKeyboardPixels(const std::vector<uint8_t>& rgba, uint32_t width,
+                              uint32_t height) {
+  if (keyboard_failed_) return;
+  if (keyboard_.swapchain == XR_NULL_HANDLE) {
+    if (!MakeLayer(&keyboard_, width, height)) {
+      keyboard_failed_ = true;
+      AppLog("xr           : the runtime gave no swapchain for the keyboard of %u by %u. "
+             "The keyboard does not show", width, height);
+      return;
+    }
+    AppLog("xr           : the keyboard is a quad of %u by %u", width, height);
+  }
+  if (width != keyboard_.width || height != keyboard_.height) return;
+  SetPixels(&keyboard_, rgba);
+  ++keyboard_.revision;
+  keyboard_written_ = true;
+}
+
+void XrApp::SetKeyboard(bool shown, const float position[3], const float orientation[4],
+                        const float size[2]) {
+  keyboard_shown_ = shown;
+  if (!shown) return;
+  for (int i = 0; i < 3; ++i) keyboard_position_[i] = position[i];
+  for (int i = 0; i < 4; ++i) keyboard_orientation_[i] = orientation[i];
+  keyboard_size_[0] = size[0];
+  keyboard_size_[1] = size[1];
 }
 
 void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
@@ -1696,6 +1756,10 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(screen_frames_),
            static_cast<unsigned long long>(window_frames_), projection_on_ ? 1 : 0);
   }
+  if (keyboard_frames_ > 0) {
+    AppLog("xr           : %llu frames with the keyboard",
+           static_cast<unsigned long long>(keyboard_frames_));
+  }
   {
     if (cards_[0].frames + cards_[1].frames + cards_[2].frames + cards_[3].frames +
             panel_frames_ + wall_frames_ + window_frames_ > 0) {
@@ -1737,6 +1801,9 @@ void XrApp::Stop() {
   flat_on_ = false;
   FreeStaging(&gpu_, &menu_.staging);
   FreeStaging(&gpu_, &cursor_.staging);
+  FreeStaging(&gpu_, &keyboard_.staging);
+  if (keyboard_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(keyboard_.swapchain);
+  keyboard_.swapchain = XR_NULL_HANDLE;
   FreeScreenSet(&screen_);
   FreeScreenSet(&eyes_);
   screen_source_ = VK_NULL_HANDLE;

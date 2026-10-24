@@ -1960,4 +1960,145 @@ inline void SqrtThrowVelocity(const float v_reach_room[3],
                 speed_before_cut_out);
 }
 
+// A RAY AGAINST A QUAD (docs/ui-layer.md, "5.3 A ray against a quad"). The
+// quad is a quad layer of OpenXR in the LOCAL space: its center `position`,
+// its turn `orientation` (x y z w, a unit quaternion) and its size in meters.
+// Its front is its +z side. The ray starts at `origin` and goes along
+// `direction` (any length above 0). The hit is u, v on the quad: u is 0 at
+// the left edge and 1 at the right edge, v is 0 at the top and 1 at the
+// bottom. inside: u and v are both in 0 to 1. A ray from behind the quad, a
+// ray parallel to it, and a quad behind the hand give no hit.
+struct QuadHit {
+  bool hit;     // the ray meets the plane of the front of the quad ahead
+  bool inside;  // and the point is on the quad
+  float u, v;
+  float distance;  // along the ray, in units of the length of direction
+};
+inline QuadHit RayQuad(const float origin[3], const float direction[3],
+                       const float position[3], const float orientation[4],
+                       const float size[2]) {
+  QuadHit h = {false, false, 0.0f, 0.0f, 0.0f};
+  if (!(size[0] > 0.0f) || !(size[1] > 0.0f)) return h;
+  const float front[3] = {0.0f, 0.0f, 1.0f};
+  float n[3];
+  QuatRotate(orientation, front, n);
+  // Below 0: the ray meets the front side.
+  const float s = direction[0] * n[0] + direction[1] * n[1] + direction[2] * n[2];
+  if (!(s < -1e-6f)) return h;
+  const float to[3] = {position[0] - origin[0], position[1] - origin[1],
+                       position[2] - origin[2]};
+  const float t = (to[0] * n[0] + to[1] * n[1] + to[2] * n[2]) / s;
+  if (!(t > 0.0f)) return h;
+  // The hit in the frame of the quad: the turn back by the conjugate.
+  const float p[3] = {origin[0] + t * direction[0] - position[0],
+                      origin[1] + t * direction[1] - position[1],
+                      origin[2] + t * direction[2] - position[2]};
+  const float back[4] = {-orientation[0], -orientation[1], -orientation[2],
+                         orientation[3]};
+  float k[3];
+  QuatRotate(back, p, k);
+  h.hit = true;
+  h.distance = t;
+  h.u = k[0] / size[0] + 0.5f;
+  h.v = 0.5f - k[1] / size[1];
+  h.inside = h.u >= 0.0f && h.u <= 1.0f && h.v >= 0.0f && h.v <= 1.0f;
+  return h;
+}
+
+// The aim direction of a pose: its -z axis, turned by the quaternion.
+inline void AimForward(const float orientation[4], float out[3]) {
+  const float ahead[3] = {0.0f, 0.0f, -1.0f};
+  QuatRotate(orientation, ahead, out);
+}
+
+// A unit quaternion that turns -z onto `direction` with no roll: a yaw about
+// y, then a pitch about the new x. For the test writer of the PC and for the
+// checks. A direction straight up or down gives the pitch alone.
+inline void AimAlong(const float direction[3], float out[4]) {
+  const float flat = sqrtf(direction[0] * direction[0] + direction[2] * direction[2]);
+  const float yaw = flat > 1e-6f ? atan2f(-direction[0], -direction[2]) : 0.0f;
+  const float pitch = atan2f(direction[1], flat);
+  const float qy[4] = {0.0f, sinf(yaw * 0.5f), 0.0f, cosf(yaw * 0.5f)};
+  const float qx[4] = {sinf(pitch * 0.5f), 0.0f, 0.0f, cosf(pitch * 0.5f)};
+  QuatMultiply(qy, qx, out);
+}
+
+// THE POINTER ON THE SCREEN QUAD (docs/controllers.md, "The screens with no
+// scene"). The hand that pulled its trigger last points, as in the menu of
+// the headset app. The trigger is closed above kGripCloseAbove and open
+// below kGripOpenBelow, as each trigger of the mod.
+struct ScreenHands {
+  bool down[2];
+  int hand;  // the hand that points: 0 left, 1 right
+};
+inline void ScreenHandsReset(ScreenHands* s, int hand) {
+  s->down[0] = s->down[1] = false;
+  s->hand = hand;
+}
+// One frame: the values of the triggers of the two hands, and whether each
+// hand is active. A hand that is not active has its trigger open. Gives the
+// hand that points now.
+inline int ScreenHandsStep(ScreenHands* s, const float trigger[2],
+                           const bool active[2]) {
+  for (int h = 0; h < 2; ++h) {
+    const float value = active[h] ? trigger[h] : 0.0f;
+    const bool was = s->down[h];
+    if (was) {
+      s->down[h] = value > kGripOpenBelow;
+    } else {
+      s->down[h] = value > kGripCloseAbove;
+    }
+    if (!was && s->down[h]) s->hand = h;
+  }
+  return s->hand;
+}
+
+// The render pixel of a hit on the screen quad, which shows the whole render
+// target of width by height. The last pixel stays when the ray is off the
+// quad (docs/ui-layer.md, 5.2), so a ray that leaves the quad does not move
+// the pointer of the game.
+inline bool ScreenPixel(const QuadHit& hit, int width, int height, float* x,
+                        float* y) {
+  if (!hit.inside || width <= 0 || height <= 0) return false;
+  float px = hit.u * static_cast<float>(width);
+  float py = hit.v * static_cast<float>(height);
+  if (px > width - 1) px = static_cast<float>(width - 1);
+  if (py > height - 1) py = static_cast<float>(height - 1);
+  if (px < 0.0f) px = 0.0f;
+  if (py < 0.0f) py = 0.0f;
+  *x = px;
+  *y = py;
+  return true;
+}
+
+// THE PRESS ON THE SCREEN QUAD. A press starts only with the ray on the
+// quad, and a press that starts off it must go up before it can press again.
+// One that started may end anywhere. Gives whether the left button of the
+// game is down for the controller.
+struct ScreenPress {
+  bool held;     // the controller holds the left button of the game
+  bool need_up;  // the trigger must open before it can press
+};
+inline bool ScreenPressStep(ScreenPress* s, bool trigger_down, bool on_quad,
+                            bool usable) {
+  if (!trigger_down) {
+    s->need_up = false;
+    s->held = false;
+    return false;
+  }
+  if (!usable) {
+    s->need_up = true;
+    s->held = false;
+    return false;
+  }
+  if (s->held) return true;
+  if (s->need_up) return false;
+  if (!on_quad) {
+    s->need_up = true;
+    return false;
+  }
+  s->held = true;
+  return true;
+}
+
 }  // namespace controller_math

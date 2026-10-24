@@ -1,6 +1,8 @@
 // THE DIALOG BOX THAT IS UP, for the log (setup_box_math.h). Each FinishFrame
 // reads SetupBox::GetCurrentActiveBox and the dialog that keeps the box, and
-// one line of the log says each change. It only reads.
+// one line of the log says each change. It also says whether the box takes
+// text, for the keyboard of the headset app (controllers.cpp). It only
+// reads.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -62,6 +64,15 @@ uint32_t DialogOf(uint32_t box) {
 }
 
 }  // namespace
+
+// The dialog box that is up takes text now: the control with its focus is a
+// SetupEdit (bw::setup, kBoxFocus), for example the name in NewProfileBox.
+bool SetupBoxTakesText() {
+  uint32_t box = 0, focus = 0, vtable = 0;
+  return ReadU32(bw::setup::kActiveBox, &box) && box != 0 &&
+         ReadU32(box + bw::setup::kBoxFocus, &focus) && focus != 0 &&
+         ReadU32(focus, &vtable) && vtable == bw::setup::kSetupEditVTable;
+}
 
 void SetupBoxWatchFrame(uint64_t finish_frame) {
   sb::BoxState now;

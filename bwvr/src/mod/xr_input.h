@@ -81,6 +81,12 @@ void XrInputHaptic(int index, float amplitude, float seconds);
 // The frame of the slot of the last latch (SlotData::frame). 0 with no slot.
 uint32_t XrInputSlotFrame();
 
+// THE KEYS of the keyboard of the app (the ring of the keys of the input
+// channel), up to max, in their order: a character, or input_channel::kKeyBack
+// or kKeyEnter. Gives the count. The keys of the ring from before the start
+// of the mod are dropped.
+uint32_t XrInputTakeKeys(uint32_t* codes, uint32_t max);
+
 // THE RECORD (xr_input_record). True while frames go into the record.
 bool XrInputRecording();
 // One frame of the controllers. source: 0 the session, 1 the fake

@@ -8,7 +8,8 @@ reach the game. It has five parts:
 - how a controller press becomes a game input (sections 3 and 5),
 - the scripted controller for desktop runs (section 4),
 - the features of the controllers: the aim ray (8), the game window behind
-  (9), the ring (10) and the Temple (11).
+  (9), the ring (10), the Temple (11) and the dialog boxes of the screens
+  with no scene in the headset app (12).
 
 The Hand itself is in `hand.md`. The grab of an object is in `grab.md`, the
 throw in `throw.md`, the Creature in `creature.md`, the miracles in
@@ -1051,6 +1052,7 @@ default. Each control has one job, and one button opens the game menu.
 | `text_click` | 1 | 1: while a text of the game waits for a click, its prompt shows on the hint card in each view, and a press of the trigger goes to the game as the left button: no Creature command, no seed, and with the Hand off the view too. 0: the prompt has the rule of each other hint of the left button, and the trigger keeps its other jobs (`controller-hints.md`, section 10) |
 | `hint_profile` | (none) | A test key. Forces the words of one profile, for example `valve/index_controller` |
 | `controller_window_behind` | 1 | Section 9. Not in the launcher |
+| `screen_pointer`, `screen_keys` | 1, 1 | Section 12. Not in the launcher |
 | `aim_preset` | 2 | Section 8 |
 | `aim_pitch_deg`, `aim_yaw_deg` | 0, 0 | Section 8 |
 | `radial_menu` | 1 | Section 10. The other keys of the ring are in 10.5 |
@@ -1233,7 +1235,9 @@ controller as the button of the pointing hand.
   the head. Fast pointing can feel a little behind. The runtime does not
   reproject the Hand.
 - **Screens with no scene** (menus, loading, videos: `StereoIdle`) have no
-  head camera. The mouse is in charge there.
+  head camera. The mouse is in charge there, except a dialog box with the
+  input channel of the headset app, where the ray points at the screen quad
+  (section 12).
 - **The Vive trackpad** reports a position whenever it is touched. As the
   stick, a resting thumb could turn or zoom. A fix is to require the trackpad
   click for that profile.
@@ -1262,8 +1266,9 @@ controller as the button of the pointing hand.
    profile would need a pinch for the trigger and the grip and has no stick,
    so the snap turn, the zoom and the ring would need other inputs.
 3. The `LH3DMapCoords` layout, for the exact land march (3.2).
-4. Whether the pointer should work in screens with no scene, by a ray against
-   the quad that shows the menu.
+4. Whether the pointer should work in screens with no scene with a session
+   of the mod on the PC, by a ray against a screen fixed in the room. With
+   the input channel of the headset app it does (section 12).
 5. Whether a laser line or a dot at `T` helps in the pointer mode, or whether
    the Hand alone is enough. The mod draws any such mark, not the game.
 
@@ -2632,3 +2637,160 @@ Needs the headset:
    (1.4 s), in a game from a saved game. Ctrl, Shift and the star key of the
    number pad give the frame time from before the two eye passes for a
    comparison (`backend.md`, "The delta time after the passes").
+
+## 12. The screens with no scene
+
+The logos, the videos, the front end and the dialog boxes of the game do not
+walk the scene (`ui-layer.md`, section 1.4), so `ControllersFrame` does not
+run in them, and a hand cannot act as a mouse there (`StereoIdle`, section
+6). With the input channel of the headset app (`xr_input=1`) the app shows
+such a frame on the screen quad of its `kScreen` (`android.md`, "The screens
+with no scene"). While a dialog box of the game is up in such a frame, the
+ray of a hand points at that quad, and the trigger clicks
+(`screen_pointer=1`). A box that takes text gets the keys of the keyboard of
+the app (`screen_keys=1`, `android.md`, "The keyboard of the app").
+
+### 12.1 What the game does with the mouse in a dialog box [V]
+
+- The Setup callback of FinishFrame (`0x006424E0`, `ui-layer.md`, 1.2) gives
+  the pointer of `LHMouse` (`0x00E852C0`, `0x00E852C4`), the buttons of the
+  box (`0x00C4CD0C`) and its events (`0x00C4CD10`) to `fn_00408340` of the
+  box that is up. The box takes one character of the queue of `WM_CHAR`
+  (`0x00E855A0`) in each call and gives it to the control with its focus
+  (`fn_00409070`, then `SetupEdit::Char` through the vtable at `+0x2C`).
+- A loop with a box copies the held buttons of `LHMouse` (`0x00E85304`,
+  `& 0x43`) to `0x00C4CD0C` before its FinishFrame: `FrontEnd::JustDoABox`
+  `0x00544F90` (at `0x005451A9`), the loop of the front end (`0x0053CDC0`),
+  `DoCitadelDraw` and some boxes of the game. The loop of the Lionhead logo
+  (`DoLogo` `0x005FA070`) does not: a box over the logo (`SkipBox`, the
+  start dialog of a new game) takes no click there, and a button of the
+  mouse ends the logo (`0x005FA09F`). The box stays up over the first frames
+  of the scene.
+- `JustDoABox` takes the last key (`0x00E85474`) and its modifiers and gives
+  them to `fn_00408F80` of the box (Tab moves the focus, each other key goes
+  to the `KeyDown` of the control with the focus).
+- The window procedure puts each `WM_CHAR` into the queue of the characters
+  (`0x007DC199`, after `TbIME_ConvertCHAR8toCHAR16`). `WM_KEYDOWN` goes to
+  `LHKeyboard::ProcessKeyboard`.
+- A text field is a `SetupEdit` (vtable `0x008AB3A0`). `SetupEdit::Char`
+  `0x0040B5F0` takes 8 as back space and 13 as Enter: the callback of the box
+  with the action 1, then the focus goes to the next control.
+  `NewProfileBox::InitControls` `0x0053D160` gives the focus to its
+  `SetupEdit`. The control with the focus is at `+0x70` of the SetupBox
+  (`SetupBox::SetFocusControl` `0x00409140`).
+- The front end draws its own cursor at the pointer, in the Setup callback
+  (`fn_0053C0F0`, when `FrontEnd::CursorOn` `0x00CD0620` is set, which
+  `JustDoABox` sets). So the cursor of the game is in the picture of the
+  screen quad, and the app draws no cursor of its own there.
+- `LHMouse::UpdateDeltaPos` does not run in these loops, so
+  `PointerMapApply` does not run either.
+
+### 12.2 What the mod does (`screen_pointer=1`)
+
+- At the end of each FinishFrame outside the eye passes, after the wait of
+  the pace (`vk_pace`), `ControllersScreenFrame` reads the input channel one
+  time, when a dialog box is up and the frame has no scene. The hand that
+  pulled its trigger last points, as in the menu of the app
+  (`ScreenHandsStep` of `controller_math.h`).
+- The aim ray of that hand meets the quad of the `kScreen` of the frame
+  (`RayQuad` of `controller_math.h`, `ui-layer.md`, 5.3): the same quad that
+  `MakeScreen` gives the app, 260 cm wide at 200 cm (`screen_width_cm`,
+  `screen_distance_cm`), as high as the shape of the render. The hit is a
+  pixel of the render (`ScreenPixel`). A ray off the quad keeps the last
+  pixel.
+- `ControllersScreenApply` writes the pixel to the pointer of `LHMouse` at
+  the start of the next FinishFrame, before the Setup callback reads it
+  (`PointerMapSetScreenPixel`). The cursor of Windows stays where it is.
+- The pump (`AnyWindowMessages`) gives the trigger to `LHMouse::SetButtons`
+  as the left button, with the merge of the real mouse of section 3.6
+  (`PumpScreenButtons`). A press starts only with the ray on the quad
+  (`ScreenPressStep`), and one that started may end anywhere. Only the
+  trigger acts in these frames: the stick, the walk, Esc and the ring wait
+  for a frame of the scene. When the frames of the scene come with the
+  trigger down, the button goes up, and the trigger must open before the
+  pump of the scene takes it.
+- `Usable` (section 3.6) does not block the hand in such a frame
+  (`g_not_usable[1]`).
+- While the pointer acts, the trigger does not skip the intro
+  (`intro_skip.cpp`). A face button still skips. The click is the button of
+  the mouse of the game, so it ends the Lionhead logo as a mouse does.
+
+The mod computes the hit, not the app: the mod makes the quad (the
+`kScreen`) and has the hands of the input channel, the pixel goes into the
+game in the frame of the read with no trip back through the app, and the same
+code can serve a session of the mod on the PC.
+
+### 12.3 The keys (`screen_keys=1`)
+
+While the box takes text (its control with the focus is a `SetupEdit`,
+`SetupBoxTakesText` of `setup_box.cpp`), the `kScreen` of the frame has the
+flag `kScreenText`, and the app shows its keyboard. Each key of the keyboard
+comes through the ring of the keys of the input channel. The mod takes the
+keys at each screen frame and posts each one to the game window as
+`WM_CHAR`, as Windows gives the game a key of a keyboard: a letter, a digit,
+a space, 8 (back space) or 13 (Enter). A key that comes while no box takes
+text is dropped.
+
+### 12.4 Keys of the ini and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `screen_pointer` | 1 | With `xr_input=1`: while a dialog box is up in a frame with no scene, the ray points at the screen quad and the trigger clicks. 0: the controllers do not act in a frame with no scene |
+| `screen_keys` | 1 | With `xr_input=1`: the `kScreen` asks for the keyboard of the app while a box takes text, and its keys go to the game. 0: no `kScreenText`, and the mod drops the keys |
+
+Neither key is in the launcher, and neither has a test key: the mod with
+`xr_input=1` has no session, and the headset is tested through its
+`bwvr.ini`. "Play" of the app does not write them, because their default is
+the value of a run.
+
+The log (`controllers  :`): the keys at the first screen frame, one line when
+the pointer starts in a box ("screen quad: a dialog box is up in a frame with
+no scene ...") and when it stops, with the counts, each press on the quad with
+its pixel, a press off the quad, a change of the hand that points, and each
+key of the app (to the game, or dropped). The lines of the left button are
+those of section 3.6. `vk stream    :` has a line for each change of
+`kScreenText`.
+
+### 12.5 Tests
+
+- `.\dev.ps1 build`: the checks of `screen_pointer_checks.h` (a ray against
+  a quad: the center, a corner, past the edge, from behind, parallel, a quad
+  behind the hand, a turned quad; the aim of `AimAlong`; the pixel of a hit;
+  the hand that points; the press on the quad).
+- `screen_ray_run.ps1` (a desk run): a new game with the logos, `intro_vr=0`,
+  `intro_skip=0` and `xr_input=1`. The test writer (`bwvr_input_writer
+  script`) waits for the line of the log that names `SkipBox`, aims the right
+  hand at the row "Skip straight to the Creature select" on the screen quad
+  and pulls the trigger.
+
+  With `screen_pointer=1` (a render of 4080 by 3264): the mod took the press
+  on the quad at the pixel 1897 1655, the left button of the game went down
+  and up, the Lionhead logo ended on it, and the frames of the scene came
+  with the start dialog over them (frame 450 of the scene 14.0 s after the
+  start of the game process). With `screen_pointer=0`: no press reached the
+  game, and the logo played to its end (frame 450 of the scene 43.0 s after
+  the start). The writer and the mod: the left button down once, one pulse
+  of the mod back through the ring of the events. In the A, B, A runs with
+  `xr_input=0` (the build before, this build, the build before, the test
+  save "pen", the scripted controller still, 60 s each) the frame time is
+  1.29 ms in each run and the scene 1.12 ms: the same within the noise.
+- `emu_game_test.ps1 -NewProfile` (the emulator, `android.md`, "The dialog
+  boxes by the controllers"): the keyboard of the app and the click on the
+  start dialog in the game in Wine.
+
+### 12.6 Not done, not proven, and what needs the headset
+
+- A dialog box in a frame of the scene (the start dialog of a new game after
+  the Lionhead logo, the Esc menu, a load or a save) is on the panel quads
+  of the headset app, and the pointer there comes from the eye view
+  (`ui-layer.md`, section 5). The ray does not point at the panel.
+- A session of the mod on the PC: a frame with no scene goes out as in
+  `ui-layer.md`, 1.4, not on a fixed quad, so the pointer of this section
+  acts only with the input channel (`xr_input=1`).
+- In a frame with no scene only the trigger acts. A double click of a list
+  (the load of a game) is the double click of section 3.6 by the time and
+  the aim, not tested.
+- The keyboard has lower case letters only.
+- Only a headset shows the aim at the screen quad and at the keyboard, the
+  size of the cursor of the game at 2 m, and whether a press of the trigger
+  on the quad moves the ray off the button.

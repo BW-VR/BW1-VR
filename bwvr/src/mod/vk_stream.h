@@ -101,8 +101,9 @@ bool VkStreamLayers(const quad_layer_math::FrameLayers& layers,
 void VkStreamSetScreens(bool on, int test_every, float distance_m, float width_m);
 // mod_main.cpp, at the end of each FinishFrame outside the eye passes
 // (screen_quad_math.h, ScreenRoute). shows: the PC shows this frame on its
-// screen. Ends the screen frame of this FinishFrame and starts the next one.
-void VkStreamScreen(bool shows, float distance_m, float width_m);
+// screen. flags: more flags of the kScreen (kScreenText). Ends the screen
+// frame of this FinishFrame and starts the next one.
+void VkStreamScreen(bool shows, float distance_m, float width_m, uint32_t flags);
 // mod_main.cpp, at the end of a FinishFrame of an eye pass of the intro
 // (intro_vr.cpp). An open screen frame ends with no kScreen, and the stream
 // takes no record until its next frame (the intro gives no frame to the

@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "../../src/common/version.h"
+#include "keyboard_layout.h"
 #include "menu_layout.h"
 
 namespace {
@@ -198,6 +199,27 @@ void PaintMenu(Canvas2D* c, const menu_model::Menu& menu,
   }
   c->Text(status, ml::kWidth * 0.5f, ml::kStatusBaseline, 28, kText, false,
           Canvas2D::kCenterAlign, true);
+}
+
+void PaintKeyboard(Canvas2D* c, int lit) {
+  namespace kl = keyboard_layout;
+  c->Clear();
+  const float w = static_cast<float>(kl::kWidth);
+  const float h = static_cast<float>(kl::kHeight);
+  // The panel of the menu, a little darker: there is no world behind it.
+  c->FillRect(4, 4, w - 4, h - 4, 0xB0302A26u);
+  c->StrokeRect(4, 4, w - 4, h - 4, 6, kPanelShade);
+  c->StrokeRect(7, 7, w - 7, h - 7, 3, kPanelEdge);
+  const int n = kl::KeyCount();
+  for (int i = 0; i < n; ++i) {
+    kl::Key key;
+    kl::Rect r;
+    if (!kl::KeyAt(i, &key, &r)) continue;
+    Button(c, r.l, r.t, r.r, r.b, i == lit);
+    const float size = key.units > 1.0f ? 38.0f : 52.0f;
+    c->Text(key.label, (r.l + r.r) * 0.5f, (r.t + r.b) * 0.5f + size * 0.36f, size, kText,
+            false, Canvas2D::kCenterAlign, true);
+  }
 }
 
 void PaintCursor(Canvas2D* c) {

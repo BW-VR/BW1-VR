@@ -5,6 +5,7 @@
 
 #include "app_log.h"
 #include "canvas.h"
+#include "keyboard_layout.h"
 #include "menu_layout.h"
 #include "menu_paint.h"
 
@@ -92,13 +93,34 @@ bool MenuPainter::Take(std::vector<uint8_t>* pixels) {
   return true;
 }
 
+void MenuPainter::AskKeyboard(int lit) {
+  {
+    std::lock_guard<std::mutex> hold(lock_);
+    if (lit == asked_keyboard_lit_) return;
+    asked_keyboard_lit_ = lit;
+    keyboard_lit_ = lit;
+    keyboard_asked_ = true;
+  }
+  wake_.notify_all();
+}
+
+bool MenuPainter::TakeKeyboard(std::vector<uint8_t>* pixels) {
+  std::lock_guard<std::mutex> hold(lock_);
+  if (!keyboard_done_) return false;
+  keyboard_done_ = false;
+  pixels->swap(keyboard_pixels_);
+  return true;
+}
+
 void MenuPainter::Run(JavaVM* vm) {
   JNIEnv* env = nullptr;
   vm->AttachCurrentThread(&env, nullptr);
   Canvas2D canvas;
   Canvas2D cursor;
+  Canvas2D keyboard;
   const bool ok = canvas.Start(env, menu_layout::kWidth, menu_layout::kHeight) &&
-                  cursor.Start(env, kCursorSize, kCursorSize);
+                  cursor.Start(env, kCursorSize, kCursorSize) &&
+                  keyboard.Start(env, keyboard_layout::kWidth, keyboard_layout::kHeight);
   if (ok) {
     PaintCursor(&cursor);
     cursor.ReadPixels(&cursor_);
@@ -111,19 +133,41 @@ void MenuPainter::Run(JavaVM* vm) {
   started_.notify_all();
 
   int logged = 0;
+  int keyboard_logged = 0;
   std::vector<uint8_t> pixels;
+  std::vector<uint8_t> keyboard_pixels;
   for (;;) {
     menu_model::Menu menu;
     std::string status;
+    bool paint_menu = false;
+    bool paint_keyboard = false;
+    int lit = -1;
     {
       std::unique_lock<std::mutex> hold(lock_);
-      wake_.wait(hold, [this] { return stop_ || asked_; });
+      wake_.wait(hold, [this] { return stop_ || asked_ || keyboard_asked_; });
       if (stop_) break;
+      paint_menu = asked_;
+      paint_keyboard = keyboard_asked_;
       menu = menu_;
       status = status_;
+      lit = keyboard_lit_;
       asked_ = false;
+      keyboard_asked_ = false;
     }
     if (!ok) continue;
+    if (paint_keyboard) {
+      const double start = Now();
+      PaintKeyboard(&keyboard, lit);
+      keyboard.ReadPixels(&keyboard_pixels);
+      if (keyboard_logged < 4) {
+        ++keyboard_logged;
+        AppLog("keyboard     : a paint of the keyboard took %.1f ms", (Now() - start) * 1000.0);
+      }
+      std::lock_guard<std::mutex> hold(lock_);
+      keyboard_pixels_.swap(keyboard_pixels);
+      keyboard_done_ = true;
+    }
+    if (!paint_menu) continue;
     const double start = Now();
     PaintMenu(&canvas, menu, status);
     canvas.ReadPixels(&pixels);
@@ -141,5 +185,6 @@ void MenuPainter::Run(JavaVM* vm) {
   }
   canvas.Stop();
   cursor.Stop();
+  keyboard.Stop();
   vm->DetachCurrentThread();
 }

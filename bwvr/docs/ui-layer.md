@@ -40,8 +40,12 @@ Marks, as in `tabletop.md`:
 - A note of the game over a thing (the percent of a lesson over the
   Creature) stays in the eye pictures, at the depth of its place (section
   19).
-- The pointer on the panel is not built (section 5). The menus draw on the
-  panel at their own pixels, but the pointer still comes from the eye view.
+- In the headset app a controller points at a dialog box of a screen with no
+  scene on the screen quad, the trigger clicks, and a box that takes text
+  gets the keys of a keyboard of the app (section 6). The pointer on the
+  panel in a frame of the scene is not built (section 5). The menus draw on
+  the panel at their own pixels, but the pointer still comes from the eye
+  view.
 
 ## 1. Where the interface is drawn
 
@@ -472,7 +476,10 @@ position and yaw in the LOCAL space.
 
 ## 5. Input on the panel (planned)
 
-Not built. `ui_panel_pointer` is not in the code.
+Not built for the panel. `ui_panel_pointer` is not in the code. The ray
+against a quad (5.3) and the pointer on a quad of a dialog box are built for
+the screen quad of the headset app (section 6, `controllers.md`, section
+12).
 
 ### 5.1 One pointer, two surfaces
 
@@ -530,11 +537,12 @@ v  = 0.5 - k.y / h             0 at the top, 1 at the bottom
 pixel = (x0 + u * cw, y0 + v * ch)
 ```
 
-It is a hit when `u` and `v` are both in 0 to 1. The function belongs in
-`controller_math.h` with tests in `test/controller_math`: a ray at the center,
-at a corner, from behind, parallel to the quad, and a turned quad. The ray
-starts at the hand and ends on the panel, so there is no parallax, unlike the
-world ray (`controllers.md` 3.2).
+It is a hit when `u` and `v` are both in 0 to 1. The function is `RayQuad`
+of `controller_math.h`, with the checks in
+`test/controller_math/screen_pointer_checks.h`: a ray at the center, at a
+corner, past the edge, from behind, parallel to the quad, a quad behind the
+hand, and a turned quad. The ray starts at the hand and ends on the quad, so
+there is no parallax, unlike the world ray (`controllers.md` 3.2).
 
 ### 5.4 The mouse
 
@@ -579,6 +587,15 @@ picture for both eyes. It is never a projection layer
 (`stream_screen=1`, `android.md`, "The screens with no scene"). With
 `ui_panel=1` the Setup dialogs of these frames draw in the picture, as on the
 PC.
+
+While a dialog box is up in such a frame, the ray of a hand points at the
+screen quad, and the hit is the pointer of the game: a pixel of the render,
+because the quad shows the whole render target (`screen_pointer=1`,
+`controllers.md`, section 12). The trigger is the left button. The game
+draws its own cursor at the pointer in the picture (11, question 4). A box
+that takes text sets `kScreenText` in the `kScreen`, and the app shows its
+keyboard on a quad under the screen quad (`android.md`, "The dialog boxes by
+the controllers").
 
 **With a session of the mod on the PC** (planned): a frame with no scene
 goes out as in 1.4.
@@ -663,6 +680,7 @@ The biggest cost is memory, and it is small against a headset render.
 | The Creature panel quad | built (section 13) |
 | The subtitle card | built (section 17) |
 | Input on the panel (section 5) | planned |
+| The pointer, the trigger and the keyboard of the app on the screen quad of the headset app (section 6) | built, desktop runs and the emulator, never seen in a headset |
 | Screens with no scene on a screen quad in the headset app, `xr_input=1` (section 6) | built, desktop runs and the emulator, never seen in a headset |
 | Screens with no scene on a screen quad with a session of the mod (section 6) | planned |
 | Tabletop placement of the panels (4.4) | planned |

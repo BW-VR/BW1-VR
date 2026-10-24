@@ -10,7 +10,17 @@
 //                                          pixel x, y of quad <layer> of the
 //                                          last frame. <layer> menu: the last
 //                                          quad of 1600 by 1200 pixels (the
-//                                          menu of the app)
+//                                          menu of the app). keyboard: the
+//                                          last quad of 1600 by 640 pixels
+//                                          (the keyboard of the app).
+//                                          screen: the first opaque quad (the
+//                                          screen quad of a frame with no
+//                                          scene)
+//   <frame> point <hand> key <word>        the aim of the hand goes to the
+//                                          middle of a key of the keyboard of
+//                                          the app (keyboard_layout.h): a
+//                                          letter or a digit, space, back or
+//                                          enter
 //   <frame> trigger <hand> <0|1>           the trigger of the hand
 //   <frame> button <hand> <0|1>            B (right) or Y (left)
 //   <frame> menu <hand> <0|1>              the menu button (left on a Touch
@@ -81,6 +91,8 @@
 #include <openxr/openxr_loader_negotiation.h>
 #include <openxr/openxr_platform.h>
 
+#include "../src/keyboard_layout.h"
+
 namespace {
 
 const char* kFolder = "/data/local/tmp/bwvr-xr";
@@ -146,7 +158,30 @@ void LoadScript() {
     if (s.what == "point") {
       char layer[16] = {0};
       sscanf(rest, "%15s %15s %f %f", hand, layer, &s.a, &s.b);
-      s.layer = strcmp(layer, "menu") == 0 ? -1 : atoi(layer);
+      s.layer = strcmp(layer, "menu") == 0       ? -1
+                : strcmp(layer, "keyboard") == 0 ? -2
+                : strcmp(layer, "screen") == 0   ? -3
+                                                 : atoi(layer);
+      if (strcmp(layer, "key") == 0) {
+        // The middle of the key on the keyboard of the app.
+        char word[16] = {0};
+        sscanf(rest, "%15s %15s %15s", hand, layer, word);
+        const uint32_t code = strcmp(word, "space") == 0   ? ' '
+                              : strcmp(word, "back") == 0  ? input_channel::kKeyBack
+                              : strcmp(word, "enter") == 0 ? input_channel::kKeyEnter
+                                                           : static_cast<uint8_t>(word[0]);
+        s.layer = -2;
+        s.a = s.b = -1.0f;
+        for (int i = 0; i < keyboard_layout::KeyCount(); ++i) {
+          keyboard_layout::Key key;
+          keyboard_layout::Rect r;
+          if (keyboard_layout::KeyAt(i, &key, &r) && key.code == code) {
+            s.a = (r.l + r.r) * 0.5f;
+            s.b = (r.t + r.b) * 0.5f;
+          }
+        }
+        if (s.a < 0.0f) Report("fault the script names a key that the keyboard has not: %s", word);
+      }
     } else if (s.what == "trigger" || s.what == "button" || s.what == "menu") {
       sscanf(rest, "%15s %f", hand, &s.a);
     } else if (s.what == "stick") {
@@ -472,15 +507,30 @@ void Capture(Session* s, Swapchain* sc, const std::string& path) {
 
 // THE AIM: from the hand at its place to a pixel of a quad of the last frame.
 void PointAt(Session* s, int hand, int layer, float px, float py) {
-  // The menu: the last quad of the size of the menu picture.
-  if (layer == -1) {
+  // The menu and the keyboard: the last quad of the size of their picture.
+  // The screen: the first opaque quad.
+  const int asked = layer;
+  if (layer == -1 || layer == -2) {
+    const int32_t want_h = layer == -1 ? 1200 : 640;
     for (int i = static_cast<int>(s->last_quads.size()) - 1; i >= 0; --i) {
       const XrCompositionLayerQuad& m = s->last_quads[i];
-      if (m.subImage.imageRect.extent.width == 1600 && m.subImage.imageRect.extent.height == 1200) {
+      if (m.subImage.imageRect.extent.width == 1600 && m.subImage.imageRect.extent.height == want_h) {
         layer = i;
         break;
       }
     }
+  } else if (layer == -3) {
+    for (int i = 0; i < static_cast<int>(s->last_quads.size()); ++i) {
+      if (s->last_quads[i].layerFlags == 0) {
+        layer = i;
+        break;
+      }
+    }
+  }
+  if (layer < 0 && asked < 0) {
+    Fault("point at the %s, the last frame had no such quad",
+          asked == -1 ? "menu" : asked == -2 ? "keyboard" : "screen");
+    return;
   }
   if (layer < 0 || layer >= static_cast<int>(s->last_quads.size())) {
     Fault("point at layer %d, the last frame had %zu quads", layer, s->last_quads.size());
@@ -489,10 +539,17 @@ void PointAt(Session* s, int hand, int layer, float px, float py) {
   const XrCompositionLayerQuad& q = s->last_quads[layer];
   const uint32_t iw = static_cast<uint32_t>(q.subImage.imageRect.extent.width);
   const uint32_t ih = static_cast<uint32_t>(q.subImage.imageRect.extent.height);
-  // The quads of the app have no turn (an identity orientation).
-  const float tx = q.pose.position.x - q.size.width * 0.5f + px / iw * q.size.width;
-  const float ty = q.pose.position.y + q.size.height * 0.5f - py / ih * q.size.height;
-  const float tz = q.pose.position.z;
+  // The point in the frame of the quad, turned by its pose.
+  const float lx = (px / iw - 0.5f) * q.size.width;
+  const float ly = (0.5f - py / ih) * q.size.height;
+  const XrQuaternionf& o = q.pose.orientation;
+  // v + w * t + cross(o.xyz, t), t = 2 * cross(o.xyz, v), with v = (lx, ly, 0).
+  const float cx = 2.0f * (o.y * 0.0f - o.z * ly);
+  const float cy2 = 2.0f * (o.z * lx - o.x * 0.0f);
+  const float cz = 2.0f * (o.x * ly - o.y * lx);
+  const float tx = q.pose.position.x + lx + o.w * cx + (o.y * cz - o.z * cy2);
+  const float ty = q.pose.position.y + ly + o.w * cy2 + (o.z * cx - o.x * cz);
+  const float tz = q.pose.position.z + 0.0f + o.w * cz + (o.x * cy2 - o.y * cx);
   Hand& hd = s->hands[hand];
   float fx = tx - hd.position.x, fy = ty - hd.position.y, fz = tz - hd.position.z;
   const float len = sqrtf(fx * fx + fy * fy + fz * fz);

@@ -135,13 +135,28 @@ void InputLive::PlayPulses(XrApp* xr) {
   }
 }
 
+bool InputLive::PushKey(uint32_t code) {
+  if (file_ == nullptr) return false;
+  const ic::KeyEvent k = {code, slots_};
+  const bool in = ic::PushKey(file_, k);
+  if (in) {
+    ++keys_;
+  } else {
+    ++keys_dropped_;
+  }
+  return in;
+}
+
 void InputLive::Stop() {
   if (file_ != nullptr) {
-    AppLog("input        : %u slots written, %llu pulses of the mod played. "
-           "The mod read the slot %u times and read %u torn copies again",
+    AppLog("input        : %u slots written, %llu pulses of the mod played, %llu "
+           "keys of the keyboard written and %llu dropped. The mod read the slot "
+           "%u times, read %u torn copies again and read %u keys",
            slots_, static_cast<unsigned long long>(pulses_),
+           static_cast<unsigned long long>(keys_),
+           static_cast<unsigned long long>(keys_dropped_),
            ic::LoadAcquire(&file_->head.latches),
-           ic::LoadAcquire(&file_->head.torn));
+           ic::LoadAcquire(&file_->head.torn), ic::LoadAcquire(&file_->head.key_read));
     munmap(file_, ic::kFileBytes);
   }
   file_ = nullptr;

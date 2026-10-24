@@ -273,6 +273,7 @@ struct WindowBody {
 //
 // The bits of ScreenBody::flags.
 constexpr uint32_t kScreenCpu = 1u << 0;  // the picture is the pixels of `surface`. Else the picture of the last walk
+constexpr uint32_t kScreenText = 1u << 1;  // a dialog box of the game takes text: the app shows its keyboard
 
 struct ScreenBody {
   uint32_t flags;          // kScreenCpu

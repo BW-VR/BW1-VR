@@ -30,6 +30,13 @@
 // loads the index of the other side with an acquire before its copy. A full
 // ring drops the new event and counts it.
 //
+// THE KEYS. A second ring of the same kind goes the other way: the keys of
+// the keyboard of the app (docs/android.md, "The keyboard of the app") with
+// key_write of the app and key_read of the mod. It is in the tail of the
+// file and in fields of the head that were reserved, so the version stays
+// 1: a mod that does not read the keys and an app that writes none use the
+// file as before.
+//
 // THE BARRIERS. x86 has TSO, but in the headset the mod runs in Box64 on
 // ARM, and ARM has a weak memory model. The interlocked calls of MSVC are
 // lock cmpxchg and xchg, which are full barriers that Box64 translates with
@@ -53,6 +60,8 @@ constexpr uint32_t kHeadBytes = 256;
 constexpr uint32_t kSlotOffset = 256;
 constexpr uint32_t kEventsOffset = 1024;
 constexpr uint32_t kEvents = 64;  // a power of two
+constexpr uint32_t kKeysOffset = 2048;
+constexpr uint32_t kKeys = 32;  // a power of two
 constexpr uint32_t kProfileChars = 64;
 
 // The bits of Hand::flags.
@@ -132,6 +141,18 @@ struct Event {
 };
 static_assert(sizeof(Event) == 16, "Event");
 
+// The codes of a key that are not a character.
+constexpr uint32_t kKeyBack = 8;    // back space
+constexpr uint32_t kKeyEnter = 13;  // Enter
+
+// One key of the keyboard of the app to the mod: the character (a letter, a
+// digit, a space) or kKeyBack or kKeyEnter.
+struct KeyEvent {
+  uint32_t code;
+  uint32_t slot;  // SlotData::frame of the newest slot when the app took it
+};
+static_assert(sizeof(KeyEvent) == 8, "KeyEvent");
+
 struct Head {
   uint32_t magic;          // kMagic when the head is whole
   uint32_t version;        // kVersion
@@ -147,23 +168,30 @@ struct Head {
   uint32_t event_write;    // the mod: the events written
   uint32_t event_read;     // the app: the events read
   uint32_t events_dropped; // the mod: the events that a full ring dropped
-  uint32_t reserved[50];
+  uint32_t key_write;      // the app: the keys written
+  uint32_t key_read;       // the mod: the keys read
+  uint32_t keys_dropped;   // the app: the keys that a full ring dropped
+  uint32_t reserved[47];
 };
 static_assert(sizeof(Head) == kHeadBytes, "Head");
 static_assert(offsetof(Head, want) == 32 && offsetof(Head, event_read) == 48,
               "Head indices");
+static_assert(offsetof(Head, key_write) == 56 && offsetof(Head, key_read) == 60,
+              "Head keys");
 
 // The whole file.
 struct File {
   Head head;
   Slot slot;
   uint8_t pad[kEventsOffset - kSlotOffset - sizeof(Slot)];
-  Event events[kEvents];
-  uint8_t tail[kFileBytes - kEventsOffset - kEvents * sizeof(Event)];
+  Event events[kEvents];  // the keys follow the events at once
+  KeyEvent keys[kKeys];
+  uint8_t tail[kFileBytes - kKeysOffset - kKeys * sizeof(KeyEvent)];
 };
 static_assert(sizeof(File) == kFileBytes, "File");
 static_assert(offsetof(File, slot) == kSlotOffset, "File slot");
 static_assert(offsetof(File, events) == kEventsOffset, "File events");
+static_assert(offsetof(File, keys) == kKeysOffset, "File keys");
 
 // THE INDICES between the processes.
 inline uint32_t LoadAcquire(const uint32_t* p) {
@@ -290,6 +318,44 @@ inline uint32_t DropOldEvents(File* f) {
   const uint32_t w = LoadAcquire(&f->head.event_write);
   const uint32_t r = f->head.event_read;
   StoreRelease(&f->head.event_read, w);
+  return EventsWaiting(w, r);
+}
+
+// THE KEYS, from the app to the mod.
+// The app: false when the ring is full, and then the key is dropped.
+inline bool PushKey(File* f, const KeyEvent& k) {
+  const uint32_t w = f->head.key_write;  // the app owns it
+  const uint32_t r = LoadAcquire(&f->head.key_read);
+  if (EventsWaiting(w, r) >= kKeys) {
+    StoreRelease(&f->head.keys_dropped, f->head.keys_dropped + 1);
+    return false;
+  }
+  f->keys[w & (kKeys - 1)] = k;
+  StoreRelease(&f->head.key_write, w + 1);
+  return true;
+}
+// The mod: up to max keys in their order. Gives the count. broken: the
+// indices are not valid (more keys than the ring holds), and the mod takes
+// the write index as its read index.
+inline uint32_t TakeKeys(File* f, KeyEvent* out, uint32_t max, bool* broken) {
+  const uint32_t r = f->head.key_read;  // the mod owns it
+  const uint32_t w = LoadAcquire(&f->head.key_write);
+  uint32_t n = EventsWaiting(w, r);
+  *broken = n > kKeys;
+  if (*broken) {
+    StoreRelease(&f->head.key_read, w);
+    return 0;
+  }
+  if (n > max) n = max;
+  for (uint32_t i = 0; i < n; ++i) out[i] = f->keys[(r + i) & (kKeys - 1)];
+  if (n > 0) StoreRelease(&f->head.key_read, r + n);
+  return n;
+}
+// The mod at its start: the keys of an earlier run are not for this game.
+inline uint32_t DropOldKeys(File* f) {
+  const uint32_t w = LoadAcquire(&f->head.key_write);
+  const uint32_t r = f->head.key_read;
+  StoreRelease(&f->head.key_read, w);
   return EventsWaiting(w, r);
 }
 

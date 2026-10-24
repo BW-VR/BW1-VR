@@ -25,6 +25,10 @@ class InputLive {
   void Write(input_channel::SlotData* slot);
   // The pulses of the mod to the hands of the session.
   void PlayPulses(XrApp* xr);
+  // A key of the keyboard of the app into the ring of the keys
+  // (docs/android.md, "The keyboard of the app"): a character, or
+  // input_channel::kKeyBack or kKeyEnter. False when the ring is full.
+  bool PushKey(uint32_t code);
   // The session does not give input now (it does not run, or it ended): one
   // slot with no focus and no active hand, the views of the last slot.
   void WriteNoInput();
@@ -38,6 +42,8 @@ class InputLive {
   uint32_t slots_ = 0;
   uint32_t test_pulse_ = 0;
   uint64_t pulses_ = 0;
+  uint64_t keys_ = 0;
+  uint64_t keys_dropped_ = 0;
   int lines_ = 0;
   bool no_input_ = false;
   input_channel::SlotData last_ = {};

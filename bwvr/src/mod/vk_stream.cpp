@@ -125,6 +125,8 @@ struct Screens {
   uint64_t cpu = 0;
   int last_source = -1;  // 0 the walk, 1 the CPU
   int source_lines = 0;
+  int last_text = 0;     // 1: the last kScreen had kScreenText
+  int text_lines = 0;
   bool in_screens = false;
   uint64_t run_first = 0;
   uint64_t run_streamed = 0;
@@ -731,7 +733,7 @@ void StartScreen() {
 
 // The open screen frame ends: with a kScreen when the PC shows it, then
 // kFrameEnd. The records after it go into the next screen frame.
-void EndScreen(bool shows, float distance_m, float width_m) {
+void EndScreen(bool shows, float distance_m, float width_m, uint32_t flags) {
   if (shows) {
     IDirectDrawSurface7* target = RenderTarget();
     uint32_t tw = 0, th = 0;
@@ -747,8 +749,9 @@ void EndScreen(bool shows, float distance_m, float width_m) {
     // The pixels of the CPU go before the record, when the stream does not
     // have them since the last write of the game.
     if (!walk && target != nullptr) Surface(target, true);
-    const ss::ScreenBody body = screen_quad_math::MakeScreen(
+    ss::ScreenBody body = screen_quad_math::MakeScreen(
         g_screens.count, !walk, Id(target), tw, th, distance_m, width_m);
+    body.flags |= flags & ss::kScreenText;
     if (target != nullptr) target->Release();
     if (screen_quad_math::ScreenShows(body)) {
       g_writer.Record(ss::kScreen, &body, sizeof(body));
@@ -772,6 +775,17 @@ void EndScreen(bool shows, float distance_m, float width_m) {
                     : "the pixels that the game wrote into the render target");
       }
       g_screens.last_source = source;
+      // One line for each change of the text flag: the app shows its
+      // keyboard while it is set.
+      const int text = (body.flags & ss::kScreenText) != 0 ? 1 : 0;
+      if (text != g_screens.last_text && g_screens.text_lines < 40) {
+        ++g_screens.text_lines;
+        ModLog("vk stream    : screen frame %llu: %s", g_screens.count,
+               text != 0 ? "a dialog box takes text, so the kScreen asks the app "
+                           "for its keyboard"
+                         : "no dialog box takes text");
+      }
+      g_screens.last_text = text;
     }
   }
   g_writer.Record(ss::kFrameEnd, &g_unit_frame, sizeof(g_unit_frame));
@@ -796,7 +810,7 @@ void VkStreamSetScreens(bool on, int test_every, float distance_m, float width_m
          g_screens.test_every);
 }
 
-void VkStreamScreen(bool shows, float distance_m, float width_m) {
+void VkStreamScreen(bool shows, float distance_m, float width_m, uint32_t flags) {
   if (!g_screens.on) return;
   const ULONGLONG now = GetTickCount64();
   if (g_screens.rate_tick == 0) {
@@ -814,7 +828,7 @@ void VkStreamScreen(bool shows, float distance_m, float width_m) {
   // After a frame of the scene, the walks of this FinishFrame are in the
   // tail of that frame: they get a screen frame of their own.
   if (g_unit_open && g_unit_ended && !g_unit_screen) StartScreen();
-  if (g_unit_open && g_unit_screen && !g_unit_ended) EndScreen(shows, distance_m, width_m);
+  if (g_unit_open && g_unit_screen && !g_unit_ended) EndScreen(shows, distance_m, width_m, flags);
   StartScreen();
 }
 

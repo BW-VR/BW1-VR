@@ -185,6 +185,17 @@ class XrApp {
   // The pictures of the world come again, or the game ended.
   void ClearScreenQuad() { flat_on_ = false; }
   bool ScreenQuadShown() const { return flat_on_; }
+  // The kScreen of the newest screen picture.
+  const scene_stream::ScreenBody& ScreenQuadBody() const { return flat_body_; }
+
+  // THE KEYBOARD OF THE APP (screen_keyboard, docs/android.md, "The keyboard
+  // of the app"): one quad for both eyes with the picture of the keyboard
+  // (RGBA, with the color multiplied by the alpha, width by height), at the
+  // pose and the size of SetKeyboard, after the screen quad and before the
+  // menu. The swapchain is made at the first pixels.
+  void SetKeyboardPixels(const std::vector<uint8_t>& rgba, uint32_t width, uint32_t height);
+  void SetKeyboard(bool shown, const float position[3], const float orientation[4],
+                   const float size[2]);
 
  private:
   struct Layer {
@@ -266,6 +277,16 @@ class XrApp {
   bool said_panel_ = false;
   bool said_walls_ = false;
   bool said_window_ = false;
+
+  // THE KEYBOARD.
+  Layer keyboard_;
+  bool keyboard_failed_ = false;
+  bool keyboard_written_ = false;
+  bool keyboard_shown_ = false;
+  float keyboard_position_[3] = {0.0f, 0.0f, 0.0f};
+  float keyboard_orientation_[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  float keyboard_size_[2] = {0.0f, 0.0f};
+  uint64_t keyboard_frames_ = 0;
 
   // THE SCREEN QUAD.
   bool screen_quad_on_ = true;  // stream_screen

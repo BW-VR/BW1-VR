@@ -49,6 +49,8 @@ extern void ModLog(const char* format, ...);
 // controllers.cpp: the triggers and the face buttons that are down, as the
 // last ControllersFrame read them, with the bits of intro_skip_math.h.
 unsigned ControllersButtonBits(unsigned* awake);
+// controllers.cpp: the pointer on the screen quad acts (screen_pointer=1).
+bool ControllersScreenPointerActs();
 
 namespace {
 
@@ -201,6 +203,10 @@ void IntroSkipFrame(uintptr_t caller, bwvr::XrScreen* screen) {
            g_intro_frames);
   }
   g_awake_said = awake;
+  // A dialog box over the Lionhead logo (SkipBox) with the pointer on the
+  // screen quad: the trigger is the left button of the box, so it does not
+  // skip the logo. A face button still skips.
+  if (ControllersScreenPointerActs()) down &= ~(1u | 8u);
   const bool test = part != intro_skip::kNone && g_test_frame != 0 &&
                     g_intro_frames == g_test_frame;
   if (test) {

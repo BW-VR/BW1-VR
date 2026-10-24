@@ -98,7 +98,10 @@ Summary:
 | `src/mod/stream_ring.h` | The ring of the live stream: the head, the indices, the wrap, the choice of the writer for a full ring, the frames of the reader. No Windows code |
 | `android/src/stream_reader.cpp` | The reader thread of the live stream in the app, and the feed process of a test |
 | `test/stream_reader/main.cpp` | The test reader of the live stream on the PC (`bwvr_stream_reader.exe`) |
-| `src/common/input_channel.h` | The input channel: the file, the slot of the newest input, the ring of the events, the record. No Windows code |
+| `src/common/input_channel.h` | The input channel: the file, the slot of the newest input, the ring of the events, the ring of the keys, the record. No Windows code |
+| `android/src/keyboard_layout.h` | The keyboard of the app: the layout of its picture, its quad under the screen quad, the hit of a controller ray. No Android code |
+| `test/controller_math/screen_pointer_checks.h` | The math checks of the ray against a quad, of the pointer on the screen quad, of the keyboard and of the ring of the keys |
+| `tools/desk/screen_ray_run.ps1` | A desktop run with a click of the ray on the start dialog of a new game on the screen quad |
 | `src/mod/xr_input.cpp` | The reader of the input channel in the mod (`xr_input`), and the record of the input of a run (`xr_input_record`) |
 | `src/mod/xr_input_math.h` | The values of the input channel as the values of `XrScreen`, the recenter, the lockstep of a test. No Windows code |
 | `src/mod/frame_pace_math.h` | The pace of the frames of the game with no Vulkan device of the mod (`vk_pace`): the end of a wait at a new write of the slot or at its time limit. No Windows code |
@@ -513,16 +516,17 @@ gets are not in a log yet.
 
 **The noexec storage:** see "Wine in the app", the patch 0002.
 
-**Not shown yet:** a frame of the scene of the game in Wine (the projection
-layer and the quad layers of a game in Wine, the pace of the frames of the
-scene), a game with a profile and a test save in the emulator, and each
-step in a headset (the screen quad and the pace too).
+**The dialog boxes by the controllers** (`emu_game_test.ps1 -NewProfile
+-SceneEyes -SkipClick 547,575 -TestSave pen`): game 1 makes the profile of
+the emulator with the keyboard of the app, the click on the start dialog
+ends the Lionhead logo, and game 2 continues the test save "pen" in slot 20
+of that profile. The facts are in "The dialog boxes by the controllers".
+
+**Not shown yet:** each step in a headset (the screen quad, the keyboard
+and the pace too).
 
 **Known limits:**
 
-- The pointer, the clicks and a text input on the screen quad are not
-  built, so a player with no profile in the game folder sees the dialog of
-  a new profile and cannot leave it.
 - The mod reads the buttons of the input channel only in a frame of the
   scene, so before the first such frame a press of the menu button that
   the app gives to the mod does nothing.
@@ -1127,7 +1131,7 @@ ring of the live stream.
 
 **The file.** A head (a magic, a version, the size, the offsets, the
 sessions of the two sides and the indices), at 256 the slot of the newest
-input, and at 1024 a ring of 64 events. Each part has one layout on 32 bit
+input, at 1024 a ring of 64 events, and at 2048 a ring of 32 keys. Each part has one layout on 32 bit
 x86 and on 64 bit ARM (`static_assert` of each size and offset).
 
 **The slot.** One writer (the app) and one reader (the mod). The writer
@@ -1157,6 +1161,16 @@ and the length) into the ring, and the app takes each one and plays it with
 `xrApplyHapticFeedback`. Each side stores its index with a release after
 its copy. A full ring drops the new pulse and counts it. At its start the
 app drops the pulses of an earlier run.
+
+**The keys.** The ring of the keys goes the other way: the app puts each
+key of its keyboard into it (a character, 8 for back space or 13 for Enter,
+with the number of the newest slot), and the mod takes the keys at each
+frame with no scene ("The dialog boxes by the controllers"). The rules are
+those of the ring of the events. A full ring drops the new key and counts
+it. At its start the mod drops the keys of an earlier run. The ring and its
+indices are in fields of the head and of the tail that were reserved, so
+the version stays 1: a mod that reads no keys and an app that writes none
+use the file as before.
 
 **The mod** (`xr_input=1`, `src/mod/xr_input.cpp`). The mod starts no OpenXR
 session, and the frame runs as with `stereo_headless=1`: it waits for no
@@ -1631,7 +1645,8 @@ no hotkeys.
   picture of the PC of the last frame of the feed. `-NoScreen`: the app with
   `stream_screen=0`.
 - `emu_game_test.ps1`: the screen quad in the game in Wine (see "Play in the
-  app").
+  app"). With `-NewProfile` the dialog boxes by the controllers ("The dialog
+  boxes by the controllers").
 
 **What the desk runs show** (`screens_run.ps1`, a render of 4080 by 3264,
 `intro_vr=0`, the profile of the PC): the logos are screen frames 1 to about
@@ -1702,13 +1717,121 @@ of the mod on the PC.
 
 **Known limits:**
 
-- The pointer and the clicks on the screen quad are not built (`ui-layer.md`,
-  section 5), so a dialog box with no scene cannot be used in the headset.
+- A dialog box of a frame of the scene (the start dialog of a new game
+  after the Lionhead logo, the Esc menu) is on the panel quads, and the
+  pointer there comes from the eye view (`ui-layer.md`, section 5). The ray
+  of a controller does not point at the panel.
 - The intro in stereo (`intro_vr=1`) gives no frame to the stream, so the
   headset shows its last screen picture while it plays.
 - A frame of the Lionhead logo draws over the walk before it
   (`vk_keep_picture`), so a picture after walks that the app skipped differs
   a little from the picture of the PC.
+
+## The dialog boxes by the controllers
+
+A dialog box of the game in a frame with no scene (the dialog of a new
+profile, `NewProfileBox`, and each box of the front end) shows on the screen
+quad. The player points at it with a controller and clicks with the trigger,
+and a box that takes text gets the keys of a keyboard of the app. The game
+then takes them as the mouse and the keys of a PC.
+
+**The pointer** (`screen_pointer=1` of the mod, `controllers.md`, section
+12). The mod reads the hands of the input channel one time for each frame
+with no scene, after the wait of the pace. While a dialog box is up, the aim
+ray of the hand that pulled its trigger last meets the quad of the `kScreen`
+of the frame, and the hit is the pointer of the game, as a pixel of the
+render. The trigger is the left button of the mouse of the game. A press
+starts only with the ray on the quad. The mod computes the hit, not the app:
+the mod makes the quad and has the hands, and the pixel goes into the game in
+the frame of the read. The cursor is the cursor of the game: the front end
+draws it at the pointer in the picture, so the app draws no cursor on the
+screen quad.
+
+**The keyboard of the app** (`screen_keyboard=1` of the app). While a box of
+the game takes text (its control with the focus is a text field), the mod
+sets the flag `kScreenText` in the `kScreen` of the frame (`screen_keys=1`),
+and the app shows its keyboard on a quad under the screen quad
+(`keyboard_layout.h`): the digits, the lower case letters, Space, Back and
+Enter, in the look of the menu of the app. The quad is 0.6 of the width of
+the screen quad, its top is 5 cm under the bottom of the screen quad, and it
+turns about its x axis so that its front faces the origin of the LOCAL space.
+The hand that pulled its trigger last points, as on the menu, the key under
+the ray is lit (a short pulse at each new key), the cursor of the app shows
+at the hit, and the trigger types the key. The key goes to the mod through
+the ring of the keys of the input channel ("The input channel"), and the mod
+posts it to the game window as `WM_CHAR`, as Windows gives the game a key of
+a keyboard. The mod takes the trigger only on the screen quad, so a press on
+the keyboard clicks nothing in the game. `screen_keyboard=0`: no keyboard.
+
+The user chose a keyboard of the app over `XR_META_virtual_keyboard`, so it
+works on each runtime, the Quest 3 and the Steam Frame alike.
+
+**The log.** The app: `keyboard     : screen_keyboard=1 ...` at the start,
+one line when the keyboard shows (its size, its place and its turn) and when
+it goes (the count of the keys), each key that goes to the mod, the time of
+the first paints, and `xr           : N frames with the keyboard` at the end.
+The mod: `controllers  :` and `vk stream    :` lines of `controllers.md`,
+12.4.
+
+**The tests.**
+
+- `.\dev.ps1 build`: the checks of `screen_pointer_checks.h`: the ray
+  against a quad, the hand that points, the press on the quad, the layout of
+  the keyboard (39 keys, none over another, the middle of each key gives
+  that key), its quad under the screen quad and facing the head, the ray at
+  a key, and the ring of the keys (the order, a full ring, the keys of an
+  earlier run, indices that are not valid, the layout of the file).
+- `screen_ray_run.ps1` (a desk run, `controllers.md`, 12.5): a click of the
+  ray of the test writer on the start dialog over the Lionhead logo.
+- `emu_game_test.ps1 -NewProfile` (the emulator, the test runtime, the
+  copy of the game folder with no `Profiles`): when the log of the mod
+  names `NewProfileBox` and the `kScreen` asks for the keyboard, the
+  runtime points at the keys of `bwvrtest` and at Enter, and pulls the
+  trigger on each (`point <hand> key <word>` of the runtime). With
+  `-SkipClick x,y` it then clicks the start dialog on the screen quad. With
+  `-TestSave <name>` the test puts the test save into slot 20 of the new
+  profile before game 2.
+
+**What the emulator shows** (`-NewProfile -SceneEyes -SkipClick 547,575
+-TestSave pen -PlaySeconds 60`, a render of 1380 by 1104, 135 checks, 0
+failed):
+
+- The dialog of a new profile came at FinishFrame 3066, after the logos and
+  the video before the intro. The `kScreen` asked for the keyboard, and the
+  app showed it, 1.56 by 0.62 m at 0, -1.40, -2 m, turned 35 degrees to the
+  head. A paint of the keyboard takes 2.7 to 5 ms.
+- The game draws the dialog and its cursor in the picture of the screen
+  quad, and the cursor is at the hit of the ray.
+- The keyboard gave `b w v r t e s t` and Enter to the mod (9 keys, one for
+  each pull of the trigger, about 0.3 s apart), the mod posted each one as
+  `WM_CHAR`, and the dialog went after Enter. Each pull of the trigger on
+  the keyboard was "a press with the ray off the quad" for the mod: no
+  click in the game. The game made the folder `Profiles\_b_w_v_r_t_e_s_t`
+  in the game folder of the app, and `user.reg` of the prefix has the value
+  `Profile` after the game.
+- The start dialog of a new game (`SkipBox`) came over the Lionhead logo.
+  The ray pressed at the pixel 547 575, the left button of the game went
+  down, the logo ended, and the frames of the scene came 166 s after Play
+  (most of it the video before the intro and the typing), with the start
+  dialog over the land. The runtime read back the eye pictures of the
+  projection layer with the land in them.
+- Game 2 ("Play in VR") continued the test save "pen" in slot 20 of the
+  profile: the Main Menu of the game over the land of the save, the frames
+  of the scene 56.7 s after Play, and the eye pictures of the land.
+- The frame rates and the pace: see "The pace of the frames". The
+  processes of Wine took 97 percent of one CPU in game 1 (the scene with
+  the start dialog) and 68 percent in game 2.
+
+**Not shown yet:** the dialog boxes in a headset (the aim at the screen
+quad and at the keyboard, the size of the cursor of the game at 2 m), a
+double click in a list of the front end, and the start dialog and the Main
+Menu of the game in a frame of the scene by the ray (the pointer on the
+panel, `ui-layer.md`, section 5).
+
+**Keys.** `screen_pointer` and `screen_keys` of the mod and
+`screen_keyboard` of the app have 1 as the default, the value of a run, so
+"Play" does not write them. None has a test key: the mod with `xr_input=1`
+has no hotkeys, and the app reads its keys at its start.
 
 ## No Vulkan device of the mod
 
@@ -1773,9 +1896,9 @@ In Wine in the emulator (`emu_game_test.ps1`, "Play in the app") the mod
 logs `vk_device=0` and makes no Vulkan instance and no device. Wine has no
 `vulkan-1.dll`.
 
-**Not shown yet:** a frame of the scene of the game in Wine with
-`vk_device=0` (the test game waits in the dialog of a new profile), and so
-the frame rate of the scene. The screen frames of the logos, the video and
+The frames of the scene of the game in Wine come with `vk_device=0` in the
+emulator ("The dialog boxes by the controllers"): the projection layer has
+the eye pictures of the game. The screen frames of the logos, the video and
 the dialog come at 25 to 711 frames a second with `vk_pace=0`, and at 25 to
 68 with `vk_pace=1` ("The pace of the frames").
 
@@ -1925,9 +2048,19 @@ quarters of one CPU. The first frame came 13.4 and 12.4 s after "Play", the
 logo screens took 479 and 484 frames and the video 2515 frames, and the
 dialog of a new profile came at FinishFrame 3068 and 3072.
 
+**In the scene in the emulator** (`emu_game_test.ps1 -NewProfile`, the
+test runtime at 72 Hz): with the start dialog of a new game over the land,
+the frame of the scene takes 22 ms (the two eye passes 18 ms on the CPU of
+the emulator), and the game makes 41 to 55 frames a second with no wait. In
+the test save "pen" (the Main Menu of the game over the land) a frame takes
+15 ms with a wait of 5.7 to 7.7 ms, and the game makes 66 to 68 frames a
+second: in one window of 30 s 1549 of 1550 frames started at a new write of
+the slot. While the menu of the app shows over the game, most frames start
+at the time limit with no fresh slot.
+
 **Not shown yet:** the pace in a headset (the timers of Wine under Box64,
-the CPU load and the heat of a Quest 3), a frame of the scene of the game
-in Wine with the pace, and a display period of a rate other than 72 Hz.
+the CPU load and the heat of a Quest 3), and a display period of a rate
+other than 72 Hz.
 
 **Known limits:**
 

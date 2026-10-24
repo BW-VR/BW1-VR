@@ -274,11 +274,24 @@ constexpr uintptr_t kVTable = 0x008DF800;  // GestureSystem, 7 virtual functions
 // (ChannelBox) to 0x00CD065C (MainMenu), and from 0x00CD0B0C (EndGameBox)
 // to 0x00CD0B1C (SkirmishGameBox). kFrontEndDialogs has the first global
 // of each range and the address after its last global.
+//
+// THE CONTROL WITH THE FOCUS. SetupBox::SetFocusControl 0x00409140 keeps it
+// at kBoxFocus of the SetupBox (mov [edi+0x70], esi). The keys of the box go
+// to it: fn_00408F80 calls its KeyDown (vtable + 0x28), and the box takes one
+// character of the queue of WM_CHAR (0x00E855A0) in each call of
+// fn_00408340 and gives it to fn_00409070, which calls the Char of that
+// control. A text field is a SetupEdit (the constructor 0x0040C220 writes
+// the vtable kSetupEditVTable). SetupEdit::Char 0x0040B5F0 takes 8 as back
+// space and 13 as Enter (the callback of the box with the action 1, then
+// the next control). NewProfileBox::InitControls 0x0053D160 gives the focus
+// to its SetupEdit.
 namespace setup {
 constexpr uintptr_t kActiveBox = 0x00C4CD20;
 constexpr uintptr_t kSetupBoxVTable = 0x008D85F0;
 constexpr uintptr_t kDialogBox = 0x4;
 constexpr uintptr_t kBoxCallback = 0xB0;
+constexpr uintptr_t kBoxFocus = 0x70;
+constexpr uintptr_t kSetupEditVTable = 0x008AB3A0;
 constexpr uintptr_t kFrontEndDialogs[2][2] = {{0x00CD0624, 0x00CD0660},
                                               {0x00CD0B0C, 0x00CD0B20}};
 }  // namespace setup

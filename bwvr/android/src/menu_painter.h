@@ -33,6 +33,11 @@ class MenuPainter {
   bool Take(std::vector<uint8_t>* pixels);
   // The pixels of the cursor, painted one time at the start.
   const std::vector<uint8_t>& Cursor() const { return cursor_; }
+  // THE KEYBOARD OF THE APP (keyboard_layout.h): a paint with the key `lit`
+  // lit (-1: none), when it differs from the last asked paint of the
+  // keyboard. TakeKeyboard is true once for each paint that is done.
+  void AskKeyboard(int lit);
+  bool TakeKeyboard(std::vector<uint8_t>* pixels);
 
  private:
   void Run(JavaVM* vm);
@@ -53,4 +58,9 @@ class MenuPainter {
   std::vector<uint8_t> pixels_;
   std::vector<uint8_t> cursor_;
   std::string capture_path_;
+  bool keyboard_asked_ = false;
+  bool keyboard_done_ = false;
+  int keyboard_lit_ = -1;
+  int asked_keyboard_lit_ = -2;
+  std::vector<uint8_t> keyboard_pixels_;
 };

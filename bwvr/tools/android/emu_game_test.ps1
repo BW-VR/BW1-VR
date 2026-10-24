@@ -176,7 +176,8 @@
     frames. 0 (the default): no key, and the runtime stays at 72 Hz.
 
 .PARAMETER PullProfile
-    With -NewProfile: a folder on the PC. At the end the test pulls the
+    With -NewProfile: a folder on the PC that is not there yet (the test
+    stops when it is there). At the end the test pulls the
     profile that game 1 made in the emulator into it: Profiles\<folder> (with
     the test save of -TestSave), the Creature files (*.erc of
     Scripts\CreatureMind) and user.reg of the prefix. A profile of the
@@ -188,10 +189,13 @@
     copies that profile with push_profile.ps1 (-WineUserReg, the values of
     user.reg of that folder), as a player copies the profile of the PC
     (docs/android.md, "The profile of the PC"). The test checks the import of
-    the values at the Play of game 1, no import at the Play of game 2, the
-    value Profile in the registry of the prefix, that no game shows the
-    dialog of a new profile, and that game 2 loads the saved game of slot 20
-    of the profile.
+    the values at the Play of game 1, with no "login password". After game 1
+    it copies the profile again: with no -Replace the copy must stop, and
+    with -Replace the folder of the profile in the app must go into the
+    backup folder that the script names. The Play of game 2 must import that
+    new copy one time. The test also checks the value Profile in the
+    registry of the prefix, that no game shows the dialog of a new profile,
+    and that game 2 loads the saved game of slot 20 of the profile.
 
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
@@ -250,6 +254,8 @@ if (-not $Game) {
 if (-not (Test-Path -LiteralPath (Join-Path $Game 'runblack.exe'))) { Stop-Android "There is no runblack.exe in $Game." }
 if (-not (Test-Path -LiteralPath $Apk)) { Stop-Android "There is no APK at:`n$Apk`nRun build_apk.ps1 first." }
 if ($PullProfile -ne '' -and -not $NewProfile) { Stop-Android '-PullProfile needs -NewProfile: the test pulls the profile that game 1 makes.' }
+# The test deletes no folder that the caller names: -PullProfile must be new.
+if ($PullProfile -ne '' -and (Test-Path -LiteralPath $PullProfile)) { Stop-Android "$PullProfile is there. Give a folder that is not there: the test writes the pulled profile into a new folder." }
 if ($ProfileFrom -ne '') {
     if ($NewProfile) { Stop-Android '-ProfileFrom and -NewProfile do not go together: the game folder of the app gets the profile of -ProfileFrom.' }
     if (-not (Test-Path -LiteralPath (Join-Path $ProfileFrom 'user.reg'))) { Stop-Android "There is no user.reg in $ProfileFrom. Make the folder with -NewProfile -PullProfile." }
@@ -431,6 +437,16 @@ function ProfileDialog([int]$PlayAt) {
         Hold 'clicked'
         if ($PanelClicks.Count -ge 2) { PanelClicks 'SkipBox' $PanelClicks 'panel1' 'start dialog' }
     }
+}
+
+# A copy of the test profile of -ProfileFrom with push_profile.ps1, as a
+# player copies the profile of the PC. Extra: more words, for example
+# -Replace. Gives the lines of the script, and keeps them in Out\Name.
+function PushTestProfile([string]$Name, [string[]]$Extra) {
+    $lines = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'push_profile.ps1') -Serial $Serial -From $ProfileFrom -WineUserReg (Join-Path $ProfileFrom 'user.reg') @Extra 2>&1 | ForEach-Object { "$_" })
+    Set-Content -LiteralPath (Join-Path $Out $Name) -Value $lines -Encoding utf8
+    $lines | ForEach-Object { Note ('push_profile: ' + $_) }
+    return $lines
 }
 
 # A place for the word pointfile of the runtime, during the run.
@@ -887,15 +903,32 @@ try {
     # -ProfileFrom: the profile of an earlier run of the emulator goes in as
     # a player copies the profile of the PC.
     $wantProfile = ''
+    $wantFolder = ''
+    $wantValues = -1
+    $stamps = New-Object System.Collections.Generic.List[string]
     if ($ProfileFrom -ne '') {
         Say "Copy the test profile of $ProfileFrom with push_profile.ps1"
-        $copy = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'push_profile.ps1') -Serial $Serial -From $ProfileFrom -WineUserReg (Join-Path $ProfileFrom 'user.reg') 2>&1 | ForEach-Object { "$_" })
-        Set-Content -LiteralPath (Join-Path $Out 'push-profile.txt') -Value $copy -Encoding utf8
-        $copy | ForEach-Object { Note ('push_profile: ' + $_) }
+        $copy = @(PushTestProfile 'push-profile.txt' @())
         Expect ($copy.Count -gt 0 -and $copy[-1] -match '^COPIED\.') ('push_profile.ps1 copied the test profile: ' + $(if ($copy.Count) { $copy[-1] } else { 'no output' }))
-        $named = [regex]::Match(($copy -join "`n"), 'COPIED\. The profile (\S+) \((_\S+),')
+        $named = [regex]::Match(($copy -join "`n"), 'The profile (\S+) \((_\S+)\): (\d+) values')
         $wantProfile = $named.Groups[1].Value
-        $there = (AdbOut @('shell', "ls '$GameDir/bwvr-profile.reg' '$GameDir/Profiles/$($named.Groups[2].Value)/Saved Games/20'")).Trim()
+        $wantFolder = $named.Groups[2].Value
+        # The values of the key of the profile in user.reg, with no login
+        # password: push_profile.ps1 leaves the secret out.
+        $userReg = Get-Content -LiteralPath (Join-Path $ProfileFrom 'user.reg')
+        $at = -1
+        for ($i = 0; $i -lt $userReg.Count; $i++) {
+            if ($userReg[$i] -match ('^\[.*\\\\Profiles\\\\' + [regex]::Escape($wantFolder) + '\]')) { $at = $i; break }
+        }
+        $own = @()
+        if ($at -ge 0) { for ($i = $at + 1; $i -lt $userReg.Count -and $userReg[$i] -notmatch '^\['; $i++) { if ($userReg[$i] -match '^"') { $own += $userReg[$i] } } }
+        $secret = @($own | Where-Object { $_ -match '^"login password"=' }).Count
+        $wantValues = $own.Count - $secret
+        Note "user.reg of $ProfileFrom has $($own.Count) values of the key $wantFolder, $secret of them login password"
+        Expect ($named.Success -and [int]$named.Groups[3].Value -eq $wantValues -and $secret -eq 1) "push_profile.ps1 took $wantValues values: each value of the key but login password ($($named.Groups[3].Value))"
+        $regOnDevice = AdbOut @('shell', 'cat', "$GameDir/bwvr-profile.reg")
+        Expect ($regOnDevice -match '(?m)^; copy [0-9a-f-]{36}\r?$' -and $regOnDevice -notmatch 'login password') 'bwvr-profile.reg of the app has a line "; copy <guid>" and no login password'
+        $there = (AdbOut @('shell', "ls '$GameDir/bwvr-profile.reg' '$GameDir/Profiles/$wantFolder/Saved Games/20'")).Trim()
         Note "the game folder of the app: $($there -replace '\s+', ' ')"
         Expect ($named.Success -and $there -notmatch 'No such file' -and $there -match '20\.sav') "the game folder of the app has bwvr-profile.reg and slot 20 of the profile $wantProfile"
     }
@@ -951,16 +984,15 @@ try {
         if ($ProfileFrom -ne '') {
             # THE PROFILE OF bwvr-profile.reg: the lines of Play come before
             # the line "<name> at", the line of the import after it.
+            # Game 1 imports the first copy, game 2 the copy of -Replace after
+            # game 1: one import for each copy.
             $playPart = $log.Substring($lastPlayAt, [math]::Max(0, $playAt - $lastPlayAt))
-            if ($n -eq 1) {
-                $imp = [regex]::Match($playPart, 'profile      : Play imports the profile (\S+) of bwvr-profile\.reg: the value Profile and (\d+) values of the key (\S+)\. The filter dropped (\d+) keys and values\. The game folder has the folder Profiles/\S+')
-                Expect ($imp.Success -and $imp.Groups[1].Value -eq $wantProfile -and [int]$imp.Groups[2].Value -gt 0) ("Play of game 1 imports the profile of bwvr-profile.reg: " + $imp.Value)
-                $put = [regex]::Match($part, 'profile      : reg import put the profile (\S+) into the registry of the prefix\. The stamp [^\r\n]*')
-                Expect ($put.Success -and $put.Groups[1].Value -eq $wantProfile) ("reg import put the profile into the registry of the prefix: " + $put.Value)
-            } else {
-                $none = [regex]::Match($playPart, 'profile      : the prefix has the profile (\S+) of bwvr-profile\.reg from an earlier Play[^\r\n]*')
-                Expect ($none.Success -and $playPart -notmatch 'profile      : Play imports the profile') ("Play of game 2 imports nothing: the prefix has the profile from game 1: " + $none.Value)
-            }
+            $imps = @([regex]::Matches($playPart, 'profile      : Play imports the profile (\S+) of bwvr-profile\.reg: the value Profile and (\d+) values of the key (\S+)\. The filter dropped (\d+) keys and values\. The game folder has the folder Profiles/\S+'))
+            $imp = if ($imps.Count) { $imps[0] } else { $null }
+            Expect ($imps.Count -eq 1 -and $imp.Groups[1].Value -eq $wantProfile -and [int]$imp.Groups[2].Value -eq $wantValues) ("Play of game $n imports the copy of bwvr-profile.reg one time with $wantValues values: " + $(if ($imp) { $imp.Value } else { 'no line' }))
+            $put = [regex]::Match($part, 'profile      : reg import put the profile (\S+) into the registry of the prefix\. The stamp (\S+ \d+)[^\r\n]*')
+            Expect ($put.Success -and $put.Groups[1].Value -eq $wantProfile -and -not $stamps.Contains($put.Groups[2].Value)) ("reg import put the profile into the registry of the prefix, with a new stamp: " + $put.Value)
+            if ($put.Success) { $stamps.Add($put.Groups[2].Value) }
         }
         $lastPlayAt = [math]::Max(0, $playAt)
         $first = [regex]::Match($part, 'game         : the first frame of the game \(frame (\d+)(, a screen with no scene)?\) came ([\d.]+) s after Play')
@@ -1138,6 +1170,29 @@ try {
             Expect $noDriver.Success ("game $n with wine_audio=0: mmdevapi found no audio driver: " + $noDriver.Value)
             Expect ($modLogNow -match 'audio out    : QMixer starts') "game $n with wine_audio=0: QMixer starts"
         }
+        if ($ProfileFrom -ne '' -and $n -eq 1) {
+            # A SECOND COPY over the folder of the profile in the app: with no
+            # -Replace it stops, and the values file of the app stays. With
+            # -Replace the folder goes into a backup, and the copy goes into
+            # an empty folder. Game 2 then imports the new copy.
+            Say 'Copy the test profile again: with no -Replace, then with -Replace'
+            $refused = @(PushTestProfile 'push-profile-again.txt' @())
+            $regStays = (AdbOut @('shell', 'ls', "$GameDir/bwvr-profile.reg")).Trim()
+            Expect ($refused.Count -gt 0 -and $refused[-1] -match '^NOT COPIED: the game folder of the app has the profile folder' -and $regStays -notmatch 'No such file') ('a copy with no -Replace stops, and bwvr-profile.reg of the app stays: ' + $(if ($refused.Count) { $refused[-1] } else { 'no output' }))
+            $replaced = @(PushTestProfile 'push-profile-replace.txt' @('-Replace'))
+            $backupLine = [regex]::Match(($replaced -join "`n"), '-Replace: the folder Profiles/\S+ of the app and its Creature files are in the backup (\S+)\. ')
+            Expect ($replaced.Count -gt 0 -and $replaced[-1] -match '^COPIED\.' -and $backupLine.Success) ('a copy with -Replace names the backup folder and copies: ' + $backupLine.Value)
+            if ($backupLine.Success) {
+                $backup = $backupLine.Groups[1].Value
+                $inBackup = (AdbOut @('shell', "ls '$backup/$wantFolder/Saved Games/20'")).Trim()
+                $inNew = (AdbOut @('shell', "ls '$GameDir/Profiles/$wantFolder/Saved Games/20'")).Trim()
+                Note "the backup folder of the app: $backup, slot 20: $($inBackup -replace '\s+', ' ')"
+                Note "the new folder of the profile, slot 20: $($inNew -replace '\s+', ' ')"
+                # A new app folder has no backup yet: the first name is free,
+                # with no -2.
+                Expect ($backup -match ('^' + [regex]::Escape("$GameDir/bwvr-profile-backup/$wantFolder-") + '\d{8}-\d{6}$') -and $inBackup -match '20\.sav' -and $inNew -match '20\.sav') 'the old folder of the profile is in bwvr-profile-backup of the game folder (the first free name, <date>-<time>), and the new folder has slot 20'
+            }
+        }
         Hold "ended$n"
     }
 
@@ -1162,7 +1217,6 @@ try {
         # the emulator, with the test save in slot 20.
         Say "Pull the test profile $ProfileName into $PullProfile"
         $want = (($ProfileName.ToCharArray() | ForEach-Object { "_$_" }) -join '')
-        if (Test-Path -LiteralPath $PullProfile) { Remove-Item -LiteralPath $PullProfile -Recurse -Force }
         New-Item -ItemType Directory -Force -Path (Join-Path $PullProfile 'Profiles') | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $PullProfile 'Scripts\CreatureMind') | Out-Null
         Adb @('pull', "$GameDir/Profiles/$want", (Join-Path $PullProfile 'Profiles'))

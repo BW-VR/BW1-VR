@@ -20,7 +20,9 @@
 
     The script READS the values of the current profile from the registry and
     writes them into bwvr-profile.reg (only the value Profile and the key of
-    the profile: no GameDir, no value of BWSetup). It pushes the files of the
+    the profile: no GameDir, no value of BWSetup, and no "login password").
+    The first line after the header is "; copy <guid>", new for each run, so
+    the app imports each copy one time. It pushes the files of the
     profile and then bwvr-profile.reg into the game folder of the app. At
     "Play" the app imports the values into the registry of the game in the
     Wine prefix (pc_profile=1, android/src/play_rules.h).
@@ -47,7 +49,8 @@
     of the files into -Out, and pushes nothing. Needs no device.
 
 .PARAMETER Out
-    With -DryRun: the folder for bwvr-profile.reg and files.txt.
+    With -DryRun: the folder for bwvr-profile.reg and files.txt. Not in a
+    folder of the profile and not in GameDir.
 
 .PARAMETER From
     The folders that hold Profiles and Scripts\CreatureMind, in the order in
@@ -60,9 +63,12 @@
     in the emulator (emu_game_test.ps1 -PullProfile). Needs -From.
 
 .PARAMETER Replace
-    Copies over a folder of the same profile that the game folder of the app
-    has. With no -Replace the script stops when that folder is there: the
-    game in the headset can have newer saves in it.
+    The game folder of the app has a folder of the same profile: the script
+    moves it, and the Creature files of the profile, into
+    bwvr-profile-backup/<folder>-<date>-<time> of the game folder, then
+    copies into an empty folder. So no slot mixes the files of two games.
+    With no -Replace the script stops when that folder is there: the game in
+    the headset can have newer saves in it.
 #>
 [CmdletBinding()]
 param(
@@ -91,6 +97,12 @@ if ($WineUserReg -and $From.Count -eq 0) { Stop-Profile 'with -WineUserReg give 
 $GameKey = 'Software\Lionhead Studios Ltd\Black & White'
 $MultiKey = "$GameKey\LHMultiplayer"
 $ProfilesKey = "$MultiKey\Profiles"
+# The game keeps the password of the online login of the player in this
+# value, encrypted with a key of the game (LHVersion::EncryptBlock), which
+# each copy of the game can undo. A secret does not go into a file on the
+# headset, so the script leaves the value out. The app drops it too
+# (play_rules.h, kSecretValue).
+$SecretValue = 'login password'
 
 # A text of a .reg file: a backslash and a quote get a backslash. Only the
 # printable characters of ASCII: the app takes no other byte.
@@ -150,6 +162,8 @@ if ($WineUserReg) {
     $own =$sections["$ProfilesKey\$folder".ToLowerInvariant()]
     if (-not $own -or $own.Count -eq 0) { Stop-Profile "$WineUserReg has no key $ProfilesKey\$folder" 3 }
     foreach ($v in $own) {
+        # The secret stays out ($SecretValue).
+        if ($v.Name -eq $SecretValue) { continue }
         # The forms of data that the app takes (play_rules.h, ValueDataRight).
         if ($v.Data -notmatch '^(dword:[0-9a-fA-F]{8}|hex(\([0-9a-fA-F]{1,8}\))?:([0-9a-fA-F]{2}(,[0-9a-fA-F]{2})*)?|"(?:[^"\\]|\\["\\])*")$') {
             Stop-Profile "the value $($v.Name) of the profile in $WineUserReg has a form that the app does not take: $($v.Data)" 3
@@ -178,7 +192,9 @@ if ($WineUserReg) {
     if ($null -eq $key) { Stop-Profile "the registry of the PC has no key HKCU\$ProfilesKey\$folder" 3 }
     try {
         foreach ($name in $key.GetValueNames()) {
-            if ($name -eq '') { continue }
+            # The default value has no job here, and the secret stays out
+            # ($SecretValue): the script does not read it.
+            if ($name -eq '' -or $name -eq $SecretValue) { continue }
             $kind = $key.GetValueKind($name)
             $raw = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
             switch ($kind) {
@@ -203,7 +219,11 @@ foreach ($v in $values) {
 # bwvr-profile.reg: ASCII with CRLF lines and no BOM (play_rules.h,
 # ParseProfileFile).
 $reg = New-Object System.Text.StringBuilder
-[void]$reg.Append("Windows Registry Editor Version 5.00`r`n`r`n")
+[void]$reg.Append("Windows Registry Editor Version 5.00`r`n")
+# The comment line makes each copy a new file for the stamp of the app
+# (play_rules.h, ProfileStamp): the app imports each copy one time, also a
+# copy with the same values.
+[void]$reg.Append("; copy $([Guid]::NewGuid().ToString())`r`n`r`n")
 [void]$reg.Append("[HKEY_CURRENT_USER\$MultiKey]`r`n")
 [void]$reg.Append("`"Profile`"=$profileData`r`n`r`n")
 [void]$reg.Append("[HKEY_CURRENT_USER\$ProfilesKey\$folder]`r`n")
@@ -235,6 +255,23 @@ if ($From.Count -gt 0) {
     $roots += $gameDir
 }
 "The folders of the files, first to last: $($roots -join ' | ')"
+if ($DryRun) {
+    # The files of the dry run never go into a folder of the profile or of
+    # GameDir: the game would see them there.
+    $outFull = [IO.Path]::GetFullPath($Out).TrimEnd('\')
+    $guarded = @($roots)
+    $gk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($GameKey, $false)
+    if ($null -ne $gk) {
+        try { $gd = [string]$gk.GetValue('GameDir', '') } finally { $gk.Close() }
+        if ($gd.Trim()) { $guarded += [IO.Path]::GetFullPath($gd.Trim()).TrimEnd('\') }
+    }
+    foreach ($g in $guarded) {
+        if ($outFull.Equals($g, [StringComparison]::OrdinalIgnoreCase) -or
+            $outFull.StartsWith($g + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            Stop-Profile "-Out $outFull is in $g, a folder of the profile or GameDir. Give a folder outside of them" 2
+        }
+    }
+}
 
 # Each file of Profiles\<folder> and of the Creature, from the first folder
 # that has it.
@@ -290,20 +327,52 @@ $dev = @('-s', $Serial)
 $dest = '/sdcard/Android/data/org.bwvr.quest/files/game'
 $state = (& $Adb @dev get-state 2>&1 | Out-String).Trim()
 if ($state -ne 'device') { Stop-Profile "adb has no device $Serial ($state)" 4 }
-$there = (& $Adb @dev shell "ls $dest/runblack.exe" 2>&1 | Out-String).Trim()
-if ($there -match 'No such file' -or $there -notmatch 'runblack\.exe') {
-    Stop-Profile "the game folder of the app on $Serial has no runblack.exe. Copy the game first (push_game.ps1) ($there)" 4
-}
 # A name in single quotes of the shell: each ' becomes '\''.
 function Sh([string]$Path) { return "'" + $Path.Replace("'", "'\''") + "'" }
-$have = (& $Adb @dev shell "ls -d $(Sh "$dest/Profiles/$folder")" 2>&1 | Out-String).Trim()
-if ($have -notmatch 'No such file') {
-    if (-not $Replace) { Stop-Profile "the game folder of the app has the profile folder Profiles/$folder. The game in the headset can have newer saves there. Give -Replace to copy over it" 5 }
-    "-Replace: the copy goes over Profiles/$folder of the app. Files of the app that the PC does not have stay"
+# True when the path is on the device. The shell of the device answers with
+# one word on stdout, so no text of an error decides it. A fault of adb
+# stops the script.
+function There([string]$Path) {
+    $a = (& $Adb @dev shell "if [ -e $(Sh $Path) ]; then echo there; else echo none; fi" 2>$null | Out-String).Trim()
+    if ($a -eq 'there') { return $true }
+    if ($a -eq 'none') { return $false }
+    # The output of a function goes to its caller, so the last line goes
+    # to the console itself.
+    [Console]::Out.WriteLine("NOT COPIED: adb gave no answer for $Path ($a)")
+    exit 4
+}
+if (-not (There "$dest/runblack.exe")) {
+    Stop-Profile "the game folder of the app on $Serial has no runblack.exe. Copy the game first (push_game.ps1)" 4
+}
+$have = There "$dest/Profiles/$folder"
+if ($have -and -not $Replace) {
+    Stop-Profile "the game folder of the app has the profile folder Profiles/$folder. The game in the headset can have newer saves there. Give -Replace to move it to a backup and copy into an empty folder" 5
 }
 # The app imports nothing while the copy is not whole: the values file goes
-# last.
+# first out and last in.
 & $Adb @dev shell "rm -f $(Sh "$dest/bwvr-profile.reg")" 2>&1 | Out-Null
+if ($have) {
+    # -Replace: the folder of the profile and the Creature files of the app
+    # go into a backup folder with a name that is not there yet, so the copy
+    # goes into an empty folder and no slot mixes the files of two games.
+    $stampName = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $backup = "$dest/bwvr-profile-backup/$folder-$stampName"
+    for ($k = 2; (There $backup); $k++) {
+        $backup = "$dest/bwvr-profile-backup/$folder-$stampName-$k"
+    }
+    $moves = @("mkdir -p $(Sh "$backup/Scripts/CreatureMind")", "mv $(Sh "$dest/Profiles/$folder") $(Sh "$backup/$folder")")
+    if ($creatureFile) {
+        foreach ($name in @($creatureFile, "Physique$creatureFile")) {
+            $c = "$dest/Scripts/CreatureMind/$name"
+            $moves += "if [ -e $(Sh $c) ]; then mv $(Sh $c) $(Sh "$backup/Scripts/CreatureMind/$name"); fi"
+        }
+    }
+    $moved = (& $Adb @dev shell (($moves -join ' && ') + '; echo moved $?') 2>&1 | Out-String).Trim()
+    if ($moved -notmatch 'moved 0$' -or (There "$dest/Profiles/$folder") -or -not (There "$backup/$folder")) {
+        Stop-Profile "the folder Profiles/$folder of the app did not go into the backup $backup ($moved)" 5
+    }
+    "-Replace: the folder Profiles/$folder of the app and its Creature files are in the backup $backup. The copy goes into an empty folder"
+}
 $t0 = Get-Date
 $dirs = @($files | ForEach-Object { Split-Path -Parent $_.Rel } | Sort-Object -Unique)
 $batch = @()

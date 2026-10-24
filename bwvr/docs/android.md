@@ -558,8 +558,8 @@ One command on the PC copies it to the headset:
   its start (`LHNetGetCurrentProfileNameFromRegistry`), and with no such
   value or no key of that profile it shows the dialog of a new profile. The
   key `Profiles\<folder>` has the values of that player. `<folder>` is the
-  name with a `_` before each character (`ProfileNameToKey`, `Tias` gives
-  `_T_i_a_s`). `PlayerProfile` reads and writes `creature name`, `login
+  name with a `_` before each character (`ProfileNameToKey`, `Kim` gives
+  `_K_i_m`). `PlayerProfile` reads and writes `creature name`, `login
   name`, `login password`, `stuff`, `player symbol`, `timestarted`,
   `numberofsaves`, `numberofloads`, `pitchaboutcentre`, `pushscroll`,
   `IMMERSION_KEY` and `HAND_ORIENTATION` (`0x0066BB00` to `0x0066BCD0`,
@@ -583,8 +583,13 @@ the app", step 5), and the volumes stay at the default of the game.
 **`push_profile.ps1`** reads the values of the current profile from the
 registry of the PC, read only, and writes them into `bwvr-profile.reg`: the
 value `Profile` and each value of the key of that profile (REG_DWORD,
-REG_BINARY and REG_SZ), nothing else. It takes each file of
-`Profiles\<folder>` and the two Creature files from the folders of the game:
+REG_BINARY and REG_SZ) but `login password`, nothing else. `login password`
+holds the password of the online login of the player, encrypted with a key
+of the game that each copy of the game can undo: a secret does not go into
+a file on the headset. The line after the header is `; copy <guid>`, new
+for each run of the script, so each copy is a new file for the app. It
+takes each file of `Profiles\<folder>` and the two Creature files from the
+folders of the game:
 when `GameDir` is in Program Files, from the VirtualStore of `GameDir`
 first (a game with no administrator rights reads a file there before the
 file of `GameDir`), then from `GameDir`. `-From` names other folders. It
@@ -595,12 +600,18 @@ writes to the registry of the PC, and it never changes, moves or deletes a
 file on the PC. It does nothing with no `-Serial`.
 
 - When the game folder of the app has the folder of that profile, the script
-  stops: the game in the headset can have newer saves there. `-Replace`
-  copies over it. Files of the headset that the PC does not have stay.
+  stops: the game in the headset can have newer saves there. With
+  `-Replace` it first moves that folder and the two Creature files of the
+  app into a backup folder of the game folder of the app,
+  `bwvr-profile-backup/<folder>-<date>-<time>` (with `-2`, `-3` and so on
+  when that name is there), and then copies into an empty folder. So no
+  slot mixes the files of two games. The script names the backup folder. To
+  go back, move the folder from there to `Profiles` again.
 - `-DryRun -Out <folder>` writes `bwvr-profile.reg` and `files.txt` (each
   file, its size, its time and the folder that it comes from) into that
-  folder, and pushes nothing. It also lists the files of each slot of the
-  saved games, so a slot with no whole save shows (a `.sav`, a
+  folder, and pushes nothing. The script stops when that folder is in a
+  folder of the profile or in `GameDir`. It also lists the files of each
+  slot of the saved games, so a slot with no whole save shows (a `.sav`, a
   `Script_<n>.sav` and `SaveGame.inf`). The script copies the files as they
   are: a slot that the game on the PC cannot load does not load in the
   headset either.
@@ -613,22 +624,25 @@ file on the PC. It does nothing with no `-Serial`.
 app reads `bwvr-profile.reg` of the game folder, keeps only the value
 `Profile` of `LHMultiplayer` and the values of the key of that profile, and
 adds them after the registry of the game in `C:\bwvr\game.reg`: one `reg
-import`. It never imports `GameDir`, a value of `BWSetup`, another key, a
-delete or the default value of a key. The file must have the form that the
-script writes: the first line `Windows Registry Editor Version 5.00`, one
+import`. It never imports `GameDir`, a value of `BWSetup`, another key,
+`login password`, a delete or the default value of a key. The file must
+have the form that the script writes: the first line `Windows Registry
+Editor Version 5.00`, one
 key or value on each line, only the printable characters of ASCII, the data
 as `dword:`, `hex:`, `hex(N):` or a quoted text. The export of regedit
 (UTF-16, long values on more lines) does not have this form. A file that is
-not right gives no import, and the log and the help of "Play" say why. The
-app imports a file one time: after a good import it writes the stamp of the
-file (FNV-1a of its bytes, and its size) into `C:\bwvr\pc-profile.done` of
-the prefix. So the values that the game in the headset writes later (the
-saves, the alignment, the options) stay, and only a new file of
-`push_profile.ps1` goes in again. `pc_profile=0`: no import, and the game
+not right gives no import, and the log and the help of "Play" say why. A
+line that starts with `;` is a comment. The app makes one import for each
+copy: after a good import it writes the stamp of the file (FNV-1a of its
+bytes, and its size) into `C:\bwvr\pc-profile.done` of the prefix. So the
+values that the game in the headset writes later (the saves, the
+alignment, the options) stay, and only a new copy of `push_profile.ps1`
+goes in again, also a copy with the same values: its line `; copy <guid>`
+gives it a new stamp. `pc_profile=0`: no import, and the game
 has the profile that it made in the headset, or none.
 
 **The menu.** The help of "Play in VR" and "Play, new game" names the
-profile of the game: "The profile of the game: Tias, from the PC. Play puts
+profile of the game: "The profile of the game: Kim, from the PC. Play puts
 it into the game." before the import, "..., from the PC." after it, the
 profile in `user.reg` of the prefix with no file of the PC, or "No profile:
 the game asks for a new one." The app reads it at its start and at the end
@@ -639,10 +653,11 @@ in the game folder, and the end of the import.
 **The tests.**
 
 - `.\dev.ps1 build`: the checks of `play_rules_checks.h`: a right file and
-  what the filter keeps and drops, the import after the registry of the game
-  with one `GameDir`, 21 files that are not right, the name in the value
-  `Profile`, the stamp and the one import for each file, the profile in
-  `user.reg` of a prefix, and the help of "Play".
+  what the filter keeps and drops (`login password` too), the import after
+  the registry of the game with one `GameDir`, 21 files that are not right,
+  the name in the value `Profile`, the stamp and the one import for each
+  copy (two copies with the same values), the profile in `user.reg` of a
+  prefix, and the help of "Play".
 - `push_profile.ps1 -DryRun` against the registry and the profile of a PC:
   an export of the key of the game and a hash of each file of the profile
   folders before and after the run are the same.
@@ -651,9 +666,11 @@ in the game folder, and the end of the import.
   the profile with the test save in slot 20, and `user.reg` of the prefix).
   `emu_game_test.ps1 -ProfileFrom <folder>` copies it into a new game folder
   of the app with `push_profile.ps1 -WineUserReg`, then plays: game 1
-  imports the values, game 2 imports nothing, and no game shows the dialog
-  of a new profile. Game 2 loads slot 20 of the profile. A profile of the
-  emulator, never a profile of the player.
+  imports the values (no `login password`). After game 1 a copy with no
+  `-Replace` stops, and a copy with `-Replace` moves the folder of the
+  profile into the backup folder. Game 2 imports that new copy one time. No
+  game shows the dialog of a new profile, and game 2 loads slot 20 of the
+  profile. A profile of the emulator, never a profile of the player.
 
 **Known limits:**
 

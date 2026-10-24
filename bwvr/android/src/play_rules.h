@@ -7,9 +7,8 @@
 // profile of the PC, when the game folder has a new one) into the Wine
 // prefix, put the files of the mod from the APK into the 32 bit system
 // folder of the prefix, and start runblack.exe in Wine. The mod then has no
-// Vulkan device
-// (vk_device=0), gives its frames to the app through the live stream, and
-// takes the head and the hands from the input channel.
+// Vulkan device (vk_device=0), gives its frames to the app through the live
+// stream, and takes the head and the hands from the input channel.
 #pragma once
 
 #include <stdio.h>
@@ -253,13 +252,18 @@ inline std::string Clock(int hour, int minute, int second) {
 // values of that player (PlayerProfile, the key bindings, LoveBuckets). The
 // folder is the name with a "_" before each character (ProfileNameToKey).
 // The app imports only these values, after GameRegistry: never GameDir, a
-// value of BWSetup (the screen, the detail, the volumes of the PC) or a value
-// of another key. It imports a file one time: the stamp of the file goes into
-// kProfileDone, so the values that the game in the headset writes later stay
-// until push_profile.ps1 copies a new file.
+// value of BWSetup (the screen, the detail, the volumes of the PC), a value
+// of another key, or kSecretValue. It imports each copy one time: the stamp
+// of the file goes into kProfileDone, so the values that the game in the
+// headset writes later stay until push_profile.ps1 makes a new copy (each
+// copy has its own line "; copy <guid>").
 constexpr char kProfileFile[] = "bwvr-profile.reg";
 constexpr char kProfileDone[] = "pc-profile.done";
 constexpr size_t kProfileFileMost = 256 * 1024;
+// The password of the online login of the player, encrypted with a key of
+// the game that each copy of the game can undo. A secret does not go to the
+// headset: push_profile.ps1 leaves it out, and the filter drops it.
+constexpr char kSecretValue[] = "login password";
 
 inline const char* RegHeader() { return "Windows Registry Editor Version 5.00"; }
 inline const char* MultiplayerKey() {
@@ -282,7 +286,7 @@ struct ProfileFile {
   std::string why;         // why the file is not right (ok false)
   std::string name;        // the name of the profile, from the value Profile
   std::string profile;     // the data of the value Profile
-  std::string folder;      // the key of the profile, for example _T_i_a_s
+  std::string folder;      // the key of the profile, for example _A_n_n
   std::vector<ProfileValue> values;  // the values of the key of the profile
   int dropped = 0;         // the keys and the values that the filter dropped
 };
@@ -405,9 +409,11 @@ inline std::string ProfileFolder(const std::string& name) {
 // Reads bwvr-profile.reg. The form: the line "Windows Registry Editor Version
 // 5.00", then keys ("[key]") and values ("name"=data), one on each line,
 // only the printable characters of ASCII. The filter keeps the value Profile
-// of LHMultiplayer and each value of the key of that profile. It drops each
-// other key and value, each delete ("[-key]", "name"=-) and the default
-// value (@). A file with a line of another form, no value Profile, or no key
+// of LHMultiplayer and each value of the key of that profile but
+// kSecretValue. It drops each other key and value, kSecretValue, each delete
+// ("[-key]", "name"=-) and the default value (@). Lines that start with ";"
+// are comments ("; copy <guid>" of push_profile.ps1). A file with a line of
+// another form, no value Profile, or no key
 // of that profile is not right, and the app imports nothing from it.
 inline ProfileFile ParseProfileFile(const std::string& text) {
   ProfileFile f;
@@ -505,7 +511,7 @@ inline ProfileFile ParseProfileFile(const std::string& text) {
     if (key == Key::kMultiplayer && SameKey(value_name, "Profile")) {
       f.profile = data;
       have_profile = true;
-    } else if (key == Key::kProfile) {
+    } else if (key == Key::kProfile && !SameKey(value_name, kSecretValue)) {
       profiles.back().second.push_back({value_name, data});
     } else {
       ++f.dropped;

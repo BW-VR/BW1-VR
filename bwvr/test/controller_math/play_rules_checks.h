@@ -353,6 +353,7 @@ inline std::string ProfileText() {
          "\"file\"=\"Cbf0dfe1f.erc\"\r\n"
          "\"creature name\"=hex:41,00,6e,00,6e,00,00,00\r\n"
          "\"login name\"=hex:00,00\r\n"
+         "\"login password\"=hex:c8,8b\r\n"
          "\"stuff\"=dword:00000000\r\n"
          "\"Key 0 Primary\"=dword:0000003b\r\n"
          "\"READ_SPEED\"=hex:00,00,00,00,00,00,e0,3f\r\n"
@@ -386,11 +387,23 @@ inline void ProfileChecks() {
         f.ok ? 1 : 0, 1);
   Check(f.values.size() == 7, "the seven values of the key of the profile",
         static_cast<double>(f.values.size()), 7);
-  // The key of the game with GameDir, BWSetup with ScreenW, Other, the
-  // delete of a value, the default value, the profile Bob with its value,
-  // the key of HKEY_LOCAL_MACHINE with its value, the delete of a key.
-  Check(f.dropped == 12, "the filter drops each other key and value, and each delete", f.dropped,
-        12);
+  // The key of the game with GameDir, BWSetup with ScreenW, Other, login
+  // password, the delete of a value, the default value, the profile Bob with
+  // its value, the key of HKEY_LOCAL_MACHINE with its value, the delete of a
+  // key.
+  Check(f.dropped == 13, "the filter drops each other key and value, and each delete", f.dropped,
+        13);
+  bool secret = false;
+  for (const play_rules::ProfileValue& v : f.values) {
+    if (v.name == "login password") secret = true;
+  }
+  Check(!secret && play_rules::ProfileRegistry(f).find("login password") == std::string::npos,
+        "the filter drops login password (a secret of the player)", 0, 0);
+  const play_rules::ProfileFile upper = ParseProfileFile(
+      Swap(text, "\"login password\"=hex:c8,8b", "\"LOGIN PASSWORD\"=hex:c8,8b"));
+  Check(upper.ok && upper.values.size() == 7 && upper.dropped == 13,
+        "login password in another case is dropped too", static_cast<double>(upper.values.size()),
+        7);
   Check(f.values[0].name == "file" && f.values[0].data == "\"Cbf0dfe1f.erc\"" &&
             f.values[5].name == "READ_SPEED" &&
             f.values[6].name == "a \\\"quoted\\\" name" && f.values[6].data == "\"a \\\\ text\"",
@@ -488,15 +501,14 @@ inline void ProfileChecks() {
 
   // The name in the value Profile and the key of a profile.
   std::string name;
-  Check(play_rules::ProfileNameFromData("hex:54,00,69,00,61,00,73,00,00,00", &name) &&
-            name == "Tias",
-        "the value Profile of a PC gives Tias", 0, 0);
+  Check(play_rules::ProfileNameFromData("hex:4b,00,69,00,6d,00,00,00", &name) && name == "Kim",
+        "the value Profile hex:4b,00,69,00,6d,00,00,00 gives Kim", 0, 0);
   Check(play_rules::ProfileNameFromData("hex:54,00,69,00", &name) && name == "Ti",
         "a name with no zero at its end", 0, 0);
   Check(!play_rules::ProfileNameFromData("hex:fc,00,00,00", &name) &&
             !play_rules::ProfileNameFromData("hex:41,01,00,00", &name),
         "no name with a character outside ASCII", 0, 0);
-  Check(play_rules::ProfileFolder("Tias") == "_T_i_a_s" &&
+  Check(play_rules::ProfileFolder("Kim") == "_K_i_m" &&
             play_rules::ProfileFolder("bwvrtest") == "_b_w_v_r_t_e_s_t",
         "the key of a profile: a _ before each character", 0, 0);
 
@@ -505,6 +517,21 @@ inline void ProfileChecks() {
   Check(stamp == play_rules::ProfileStamp(ProfileText()) &&
             stamp != play_rules::ProfileStamp(Swap(text, "dword:0000003b", "dword:0000003c")),
         "the stamp: the same file the same stamp, a changed byte a new one", 0, 0);
+  // Each copy of push_profile.ps1 has its own line "; copy <guid>": a second
+  // copy with the same values is a new file, and Play imports it again.
+  const std::string header = "Windows Registry Editor Version 5.00\r\n";
+  const std::string copy1 =
+      Swap(text, header, header + "; copy 3f2a7c1e-0d4b-4a8e-9b6f-1c2d3e4f5a6b\r\n");
+  const std::string copy2 =
+      Swap(text, header, header + "; copy 8e9d0c1b-2a3f-4e5d-8c7b-6a5f4e3d2c1b\r\n");
+  const play_rules::ProfileFile c1 = ParseProfileFile(copy1);
+  const play_rules::ProfileFile c2 = ParseProfileFile(copy2);
+  Check(c1.ok && c2.ok && c1.values.size() == 7 && c1.dropped == f.dropped,
+        "the line \"; copy <guid>\" is a comment: the same values", 0, 0);
+  Check(play_rules::ProfileStamp(copy1) != play_rules::ProfileStamp(copy2) &&
+            play_rules::NeedsProfileImport(c2, play_rules::ProfileStamp(copy2),
+                                           play_rules::ProfileStamp(copy1) + "\n"),
+        "a second copy with the same values has a new stamp: Play imports it again", 0, 0);
   Check(play_rules::NeedsProfileImport(f, stamp, ""), "a file with no import before: Play imports it",
         0, 0);
   Check(!play_rules::NeedsProfileImport(f, stamp, stamp + "\n"),

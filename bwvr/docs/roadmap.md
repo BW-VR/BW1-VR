@@ -815,12 +815,12 @@ that moves while the Hand takes it.
     controllers"). `push_profile.ps1` copies the profile of the player of
     the PC (the values of the registry and the files) to the game folder of
     the app, and "Play" imports its values into the registry of the prefix
-    one time for each new file (`pc_profile`, `android.md`, "The profile of
+    one time for each copy (`pc_profile`, `android.md`, "The profile of
     the PC"). Open: the profile of a player in a headset, the sound in a
     headset (the audio driver `wineaaudio` of patch 0003 gives the sound of
     Wine to AAudio, `audio.md`, "In Wine on Android"), the pace of the
-    frames with `vk_device=0` in a headset (`vk_pace`, `android.md`, "The pace of the
-    frames"), the test reader of
+    frames with `vk_device=0` in a headset (`vk_pace`, `android.md`, "The
+    pace of the frames"), the test reader of
     `input_channel_run.ps1 -Live` with screen frames, the time of the copy
     of a screen frame (the logos at 35 frames a second with the pace), and
     the screen quad in a headset. The input of

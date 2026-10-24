@@ -1538,6 +1538,11 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "xr_input_lockstep_ms", 0, path));
   g_xr_input.view_record_frames = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "xr_view_record", 0, path));
+  // THE PACE (frame_pace_math.h, docs/android.md, "The pace of the frames").
+  // vk_pace=1: with vk_device=0 each frame of the game waits for the next
+  // frame of the session of the app. 0: no wait.
+  g_xr_input.pace =
+      GetPrivateProfileIntA("bwvr", "vk_pace", 0, path) != 0 ? 1 : 0;
   if (g_xr_input.mode != 0) g_stereo_headless = true;
   // THE QUAD LAYERS FOR THE HEADSET APP (xr_layers.h, docs/android.md, "The
   // quad layers"). xr_input_layers=1: with xr_input=1 the interface goes as
@@ -2520,6 +2525,11 @@ void __cdecl h_FinishFrame() {
     } else if (IntroInPass()) {
       VkStreamScreenStop();
     }
+    // vk_pace=1 with vk_device=0: a frame with no scene waits here for the
+    // next frame of the session of the app, after its screen frame went into
+    // the live stream. A frame of the scene and of the intro waits before its
+    // first read of the input (stereo.cpp, intro_vr.cpp).
+    if (!in_pass && !IntroInPass()) XrInputPace();
   }
 
   // The intro draws its own eye passes and sends them itself. Its

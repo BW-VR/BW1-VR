@@ -808,8 +808,9 @@ that moves while the Hand takes it.
     scene"). Open: a game folder with no profile (the game then waits in the
     dialog of a new profile, and the pointer, the clicks and a text input on
     the screen quad are not built), the sound (Wine has no audio driver on
-    Android), the frame pace with `vk_device=0`, and the screen quad in a
-    headset. The input of
+    Android), the pace of the frames with `vk_device=0` in a headset
+    (`vk_pace`, `android.md`, "The pace of the frames"), and the screen quad
+    in a headset. The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the

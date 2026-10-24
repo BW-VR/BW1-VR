@@ -101,6 +101,7 @@ Summary:
 | `src/common/input_channel.h` | The input channel: the file, the slot of the newest input, the ring of the events, the record. No Windows code |
 | `src/mod/xr_input.cpp` | The reader of the input channel in the mod (`xr_input`), and the record of the input of a run (`xr_input_record`) |
 | `src/mod/xr_input_math.h` | The values of the input channel as the values of `XrScreen`, the recenter, the lockstep of a test. No Windows code |
+| `src/mod/frame_pace_math.h` | The pace of the frames of the game with no Vulkan device of the mod (`vk_pace`): the end of a wait at a new write of the slot or at its time limit. No Windows code |
 | `src/mod/view_layer_math.h` | The projection layer of a frame for the app (the record `kView`): the values that the mod gives its session, the view of a picture in the player of the app, the record of a test. No Windows code |
 | `src/mod/quad_layer_math.h` | The quad layers of a frame for the app (the records `kCard`, `kCardPicture`, `kPanel`, `kWindow`): the values of the calls of the session, the hash and the change of a picture of a card, the order and the quads of `XrScreen::BuildFrame`, the layers of a picture in the player of the app. No Windows code |
 | `src/mod/xr_layers.cpp` | The quad layers of a frame with no session in the mod (`xr_input_layers`), and the record of the layers of a run (`xr_layer_record`) |
@@ -318,12 +319,13 @@ saves and starts nothing (no game in Wine).
 2. The keys of a run go into `bwvr.ini`, after the save, at each start: a
    save deletes the retired keys (`kRetiredKeys`), and `vk_stream_live` is
    one. Only the keys whose default is not the value of a run:
-   `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1` (the mod)
-   and `stream_live=1`, `input_live=1` (the app). The save writes
+   `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1`,
+   `vk_pace=1` (the mod) and `stream_live=1`, `input_live=1` (the app). The save writes
    `vulkan_strict=1` and `backend=vulkan` itself. `stream_projection` and
    `stream_layers` have 1 as the default, and "Play" does not write them.
    `ui_panel=1`: with `vk_device=0` the help text needs the panel quads (see
-   "No Vulkan device of the mod").
+   "No Vulkan device of the mod"). `vk_pace=1`: each frame of the game
+   waits for a frame of the session (see "The pace of the frames").
 3. The live stream and the input channel start in this process, when the
    start of the app did not start them. A session takes its actions one
    time, so with Wine in the APK (and `play_game=1`) the session has the
@@ -417,37 +419,39 @@ game". At its end the test deletes the app and the copy. After the measure
 the runtime reads back the quads (the word `quads`): the picture of the
 screen quad. `-SceneEyes`: the runtime reads back the eye pictures of the
 projection layer too, for a game that comes to a frame of the scene. What
-it shows (`-StartMinutes 10 -PlaySeconds 360`, 93 checks, 0 failed):
+it shows (`-StartMinutes 15 -PlaySeconds 360`, 101 checks, 0 failed):
 
 - "Play" wrote the keys of the run, and `bwvr.ini` at the start of the game
   has `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1`,
-  `stream_live=1`, `input_live=1`, `vulkan_strict=1` and `backend=vulkan`.
-- `reg import` took 1.8 to 1.9 s, and `wineserver -w` 4.1 to 4.5 s, so the
+  `vk_pace=1`, `stream_live=1`, `input_live=1`, `vulkan_strict=1` and
+  `backend=vulkan`.
+- `reg import` took 1.7 to 2.1 s, and `wineserver -w` 4.2 to 4.5 s, so the
   game starts about 6.3 s after "Play".
 - The log of the mod has the build of the APK ("1.2.0 (build ...)"), not
   the build of the `ddraw.dll` of the game folder: the known DLL comes
   first. It has "vk_device=0. The mod makes no Vulkan instance and no
   device", `vulkan_strict=1`, "xr_input=1" with the channel of the app,
   and the first slot of the app.
-- With `-NEWGAME` and with no word the same: the logo screens (6964 and
-  6953 frames of the game), the video before the intro (2515 frames, about
+- With `-NEWGAME` and with no word the same: the logo screens (479 and
+  481 frames of the game), the video before the intro (2515 frames, about
   100 s), then the game waits in the dialog of a new profile at frame 0 of
   the controllers: the log of the mod has "setup box : the dialog box
   NewProfileBox is up now" (the SetupBox with the vtable `0x008D85F0`, kept
   by the `NewProfileBox` with the vtable `0x008DEC1C`, the callback
-  `0x0053D210`, at FinishFrame 10000 and 9997). Each of these frames is a
+  `0x0053D210`, at FinishFrame 3066 and 3069). Each of these frames is a
   screen frame of the live stream (see "The screens with no scene"). The
-  first frame of the game came 11.9 s after "Play" in both games, a screen
+  first frame of the game came 11.2 and 12.9 s after "Play", a screen
   frame of the logos (`game : the first frame of the game (frame
-  1000000440, a screen with no scene)`). The frame rate of the app each
-  10 s: 672 and 711 in the logos, 25 in the video (9 lines), then 368 to
-  475 in the dialog. The app showed each picture on the screen quad: one
+  1000000004, a screen with no scene)`). The frame rate of the app each
+  10 s: 55 in the logos, 25 in the video (9 lines), then 67 to 68 in the
+  dialog, with `vk_pace=1` ("The pace of the frames"). The app showed each
+  picture on the screen quad: one
   quad for both eyes, 2.60 by 2.08 m at 0, 0, -2 m, opaque, with the whole
   render of 1380 by 1104, no stereo screen and no projection layer. The
   quad that the runtime read back after 360 s has the dialog of a new
   profile over the plasma of the front end (`new-0.png`, `play-0.png`).
-  The processes of Wine take 75 and 76 percent of one CPU in 361 s
-  (`runblack.exe` 73 percent, the app 14 percent).
+  The processes of Wine take 18 and 19 percent of one CPU in 361 s
+  (`runblack.exe` 15 and 16 percent, the app 13 and 14 percent).
 - The tree of the processes: the process that the app started is
   `start.exe`, and `runblack.exe` has the parent 1.
 - Game 1: the hold showed the menu over the game, the press of 6 frames
@@ -484,9 +488,9 @@ gets are not in a log yet.
 **The noexec storage:** see "Wine in the app", the patch 0002.
 
 **Not shown yet:** a frame of the scene of the game in Wine (the projection
-layer and the quad layers of a game in Wine, the pace of the frames with
-`vk_device=0`), a game with a profile and a test save in the emulator, and
-each step in a headset (the screen quad too).
+layer and the quad layers of a game in Wine, the pace of the frames of the
+scene), a game with a profile and a test save in the emulator, and each
+step in a headset (the screen quad and the pace too).
 
 **Known limits:**
 
@@ -497,9 +501,6 @@ each step in a headset (the screen quad too).
   scene, so before the first such frame a press of the menu button that
   the app gives to the mod does nothing.
 - "Quit game" does not save the game.
-- With `vk_device=0` nothing paces the frames with no scene either: the
-  game makes 368 to 711 of them a second in the emulator, and the processes
-  of Wine take three quarters of one CPU.
 
 ## The session
 
@@ -1173,10 +1174,15 @@ from the source of the run (the session, the fake sources or the channel).
 `xr_input_lockstep_ms=N` (with `xr_input=1`): each latch waits up to N ms
 for the slot of its frame of the controllers, so a test writer can give
 each frame its input. After one wait that runs out the lockstep stops.
+With `vk_pace=1` and `vk_device=0` the writes of the slot pace the frames
+of the game ("The pace of the frames").
 
 **The test writer of the PC** (`bwvr_input_writer.exe`,
 `test/input_writer`). `play` writes the input of a record into the slot,
 frame by frame, as the app does, and writes each pulse of the mod.
+With a rate (`input_channel_run.ps1 -WriterHz`) it also writes the last
+slot again at that rate, as the app writes a slot at each frame of its
+session.
 `compare` compares two records frame by frame, and `dump` writes a channel
 file as text. `input_channel_run.ps1 -Kind fake` makes a run in the test
 save "pen" with the scripted controller and a record. `-Kind channel -From
@@ -1650,8 +1656,8 @@ percent of the pixels differ by more than 24).
 
 **The game in Wine** (`emu_game_test.ps1`, see "Play in the app"): the
 logos, the video before the intro and the dialog of a new profile show on
-the screen quad, and the first frame of the game comes 11.9 s after
-"Play".
+the screen quad, and the first frame of the game comes 11.2 to 12.9 s
+after "Play".
 
 **Not shown yet:** the screen quad in a headset (its place, its size and the
 sharpness of the text of a dialog), a screen of the pixels of the CPU (no
@@ -1723,10 +1729,12 @@ two captures differ by at most 0.003 percent of their pixels by more than
 - A draw for the panel that the device of the mod would not take (no
   pipeline, no descriptor set) counts as drawn into the panel with
   `vk_device=0`.
-- With `vk_device=0` nothing paces the frames of the game: the mod waits
-  for no GPU and for no present, so the game makes frames as fast as the
-  CPU can, faster than the app shows them. The live stream then has more
-  frames than the app plays, and the app skips the walks of the others.
+- With `vk_device=0` and `vk_pace=0` nothing paces the frames of the game:
+  the mod waits for no GPU and for no present, so the game makes frames as
+  fast as the CPU can, faster than the app shows them. The live stream then
+  has more frames than the app plays, and the app skips the walks of the
+  others. `vk_pace=1` ("Play" writes it) paces them ("The pace of the
+  frames").
 
 In Wine in the emulator (`emu_game_test.ps1`, "Play in the app") the mod
 logs `vk_device=0` and makes no Vulkan instance and no device. Wine has no
@@ -1734,9 +1742,152 @@ logs `vk_device=0` and makes no Vulkan instance and no device. Wine has no
 
 **Not shown yet:** a frame of the scene of the game in Wine with
 `vk_device=0` (the test game waits in the dialog of a new profile), and so
-the frame rate of the scene and the pace of its frames. The screen frames
-of the logos, the video and the dialog came at 25 to 711 frames a second
-("Play in the app").
+the frame rate of the scene. The screen frames of the logos, the video and
+the dialog come at 25 to 711 frames a second with `vk_pace=0`, and at 25 to
+68 with `vk_pace=1` ("The pace of the frames").
+
+## The pace of the frames
+
+With `vk_device=0` the mod waits for no GPU and for no present, so the game
+makes frames as fast as the CPU can. The app shows at most one frame of the
+game for each frame of its session, and the frames that it does not show
+cost CPU time that Box64 and the app need, and heat and battery in a
+headset. So the mod has the key `vk_pace` in `bwvr.ini`:
+
+- `vk_pace=0` (the default): no wait. The app skips the walks of the frames
+  that it does not show.
+- `vk_pace=1` (only with `vk_device=0` and `xr_input=1`): each frame of the
+  game waits for the next frame of the session of the app. "Play" writes it
+  ("Play in the app"). With `vk_device=1` the log says that `vk_pace=1`
+  needs `vk_device=0`, and no frame waits.
+
+The key is not a row of `settings_table.h` and not a retired key, so a save
+keeps it. It has no test key: the mod with `xr_input=1` has no hotkeys in
+the headset, and the headset is tested through its `bwvr.ini`.
+
+**The rule** (`src/mod/frame_pace_math.h`, `XrInputPace` of
+`xr_input.cpp`). The app writes the slot of the input channel one time for
+each frame of its session, after `xrWaitFrame` ("The input channel"). The
+wait of a frame ends at the first write of the slot that no frame took, or
+at its time limit. The mod counts the writes by the sequence of the slot
+(two more for each write), and a frame takes the newest write at the end of
+its wait and at its latch. The time limit counts from the end of the wait
+before:
+
+- A fresh slot (a write in the last 4 display periods, with a display period
+  of 1 to 100 ms): 5/4 of the display period of the slot. So a frame of the
+  session that comes a little late still ends the wait, and a frame that the
+  session does not make costs the game at most one period.
+- No slot yet, a slot with no write for 4 periods, or no display period (a
+  record of a fake run has 0): one period of 72 Hz, the lowest rate of a
+  Quest 3. With no write of the app no frame of the session shows the game,
+  but the game must go on: its logic, its sound, the stale rule of the
+  input channel, and the next start of the session. The next write of the
+  app ends the wait.
+
+A frame that is longer than the limit does not wait. The wait sleeps with a
+timer of high resolution (`ThreadWaitSleep`, `Sleep(1)` when there is
+none): with a fresh slot one sleep to 1 ms before the write that the period
+gives and then steps of 0.5 ms, else steps of 1 ms. After each sleep it
+looks at the sequence of the slot, and it reads the display period from a
+whole copy of each new write.
+
+**The clock.** The mod does not compare the display time of a slot with its
+own clock. The display time is the `XrTime` of the runtime of the headset,
+in ns. Wine gives `QueryPerformanceCounter` from `CLOCK_BOOTTIME`
+(`dlls/ntdll/unix/sync.c`, `monotonic_counter`), which counts the time that
+a headset slept, and `CLOCK_MONOTONIC` does not. The test writer of the PC
+writes the display times of a record. So the mod paces by the count of the
+writes and takes only the display period from the slot. The times of the
+rule are of the clock of the mod alone.
+
+**Where the wait is.** One wait for each FinishFrame of the game: the
+first call after a FinishFrame waits, and a second call before the next
+FinishFrame does not.
+
+| The frame | The place of the wait | What the game does after it |
+| --- | --- | --- |
+| A frame of the scene | The start of `Process3dEngine` (`stereo.cpp`), before the first read of the input channel of the frame, where a session of the PC waits in `xrWaitFrame` | The latch reads the slot that ended the wait, then the frame of the controllers, the eye passes with FinishFrame, the layers into the live stream, and after the hook the logic of the game with the input of that slot |
+| A frame of the intro (`intro_vr=1`) | Before the read of the input channel of the intro (`intro_vr.cpp`) | The eye passes of the intro |
+| A frame with no scene (the logos, the videos, the front end, a dialog box, a load) | The end of `h_FinishFrame` (`mod_main.cpp`), after its screen frame went into the live stream | The logic of the game, the walk of the next screen, and its FinishFrame. On the PC with a session these frames wait in `xrWaitFrame` of `XrScreen::SubmitVulkan` |
+
+So the wait holds no input: each read of the input channel of a frame comes
+after its wait, and the frame of the controllers reads the slot at its own
+place in the frame. The present of `vk_ddraw.cpp` does not wait: it runs in
+FinishFrame, inside the eye pass of a frame of the scene, before the layers
+of the frame go into the live stream. A wait there would hold the frame
+from the app, and the logic of the game after it would use input that is
+one wait older. The wait of a frame of the scene is the "wait" of the frame
+time in the line `stereo` of the log.
+
+**The log.** At the start: "xr input : vk_pace=1 with vk_device=0. Each
+frame of the game waits for the next write of the slot of the app, ...".
+Each 30 s: "xr input : the pace: N frames in S s (R a second), A started at
+a new write of the slot and B at the time limit, C with no fresh slot. A
+frame waited ... ms as a mean and ... ms at most. The display period of the
+slot is ... ms".
+
+**The tests.**
+
+- `.\dev.ps1 build`: the checks of `frame_pace_checks.h` (the limit with no
+  slot, with a fresh slot, after a frame that the app missed, with a slot
+  that does not change and with a period of 0, the end at a new write, the
+  write that a latch took, the lockstep of the test writer, the clock of the
+  mod).
+- `input_channel_run.ps1 -Kind channel -Live -WriterHz <hz>` (a desk run):
+  the test writer writes the last slot again at `<hz>`, as the app writes a
+  slot at each frame of its session, and still answers each latch of the
+  lockstep at once. The script gives the frames a second and the cores that
+  `runblack.exe` used in the windows of 450 frames, and the lines of the
+  pace.
+- `emu_game_test.ps1`: `vk_pace=1` from "Play", the lines of the pace and
+  the rate of the paced frames in the game in Wine.
+
+**What the desk runs show** (`input_channel_run.ps1 -Kind channel -Live
+-WriterHz 90`, the test save "pen", `vk_device=0`, `ui_panel=1`, the input
+of a fake run). The test reader asks for the first frame of the ring with a
+number from its attach frame up, and a screen frame has a number above each
+frame of the scene, so these runs have `vk_stream_screens=0`.
+
+- `vk_pace=1`: 90.0 frames a second in each window of 450 frames after the
+  load, and `runblack.exe` used 0.08 cores. In a window of 30 s each of the
+  2701 frames started at a new write of the slot, after a wait of 10.2 ms
+  as a mean.
+- `vk_pace=0`: 1398 frames a second as a mean (1160 to 1465), and
+  `runblack.exe` used 0.97 cores.
+- In both runs the record of the input (3100 frames), the views (3100) and
+  the pulses (frames 1801 and 2601) are the same as in the fake run, and
+  the 4 frames of the record of the stream have the same bytes in the ring.
+  The quad layers differ from the fake run only in the hint cards, which
+  follow the clock of the PC, with `vk_pace=0` too.
+
+**In the emulator** (`emu_game_test.ps1 -StartMinutes 15 -PlaySeconds
+360`, Wine of x86_64, the test runtime at 72 Hz, "Play" with
+`vk_pace=1`): the slots have a display period of 13.89 ms. In the dialog of
+a new profile each frame of the game started at a new write of the slot,
+after a wait of 12.0 ms as a mean, and the game made 67 to 68 frames a
+second, the rate of the frames of the session of the app. In the video
+before the intro the game makes 25 frames a second by itself, and a frame
+of 40 ms is longer than the time limit, so no frame waits. The processes of Wine took 18 and 19
+percent of one CPU in 361 s (`runblack.exe` 15 and 16 percent, the app 13
+and 14 percent). With `vk_pace=0` the same screens come at 368 to 711
+frames a second, and the processes of Wine take three quarters of one CPU.
+The first frame came 11.2 and 12.9 s after "Play", the logo screens took
+479 and 481 frames and the video 2515 frames, and the dialog of a new
+profile came at FinishFrame 3066 and 3069.
+
+**Not shown yet:** the pace in a headset (the timers of Wine under Box64,
+the CPU load and the heat of a Quest 3), a frame of the scene of the game
+in Wine with the pace, and a display period of a rate other than 72 Hz.
+
+**Known limits:**
+
+- A record of a fake run has no display period, so in a desk run with the
+  test writer the time limit is one period of 72 Hz. A writer above 72 Hz
+  shows the pace by the writes, a writer below it does not.
+- No event of the app wakes the wait: it looks at the slot after each
+  sleep, so a frame starts up to 0.5 ms after the write (1 ms with no fresh
+  slot), plus the lateness of the timer.
 
 ## Wine in the app
 

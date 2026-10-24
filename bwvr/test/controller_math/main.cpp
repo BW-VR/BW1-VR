@@ -3580,6 +3580,7 @@ void CreatureChecks() {
 #include "view_layer_checks.h"
 #include "quad_layer_checks.h"
 #include "screen_quad_checks.h"
+#include "frame_pace_checks.h"
 #include "learn_checks.h"
 #include "wine_rules_checks.h"
 #include "play_rules_checks.h"
@@ -4007,6 +4008,7 @@ int main() {
   view_layer_checks::ViewLayerChecks();
   quad_layer_checks::QuadLayerChecks();
   screen_quad_checks::ScreenQuadChecks();
+  frame_pace_checks::FramePaceChecks();
   learn_checks::LearnChecks();
   wine_rules_checks::WineRulesChecks();
   play_rules_checks::PlayRulesChecks();

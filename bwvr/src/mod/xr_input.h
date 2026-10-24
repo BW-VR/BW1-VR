@@ -39,6 +39,9 @@ struct XrInputOptions {
   // session, the back channel of xr_input=1, or the invented head. 0: no
   // record.
   int view_record_frames = 0;
+  // vk_pace: 0 (the default) no wait. 1: with vk_device=0 each frame of the
+  // game waits for the next write of the slot of the app (XrInputPace).
+  int pace = 0;
 };
 
 void XrInputSetOptions(const XrInputOptions& options);
@@ -50,6 +53,14 @@ bool XrInputStart(const char* dir);
 void XrInputNewFrame();
 // Reads the slot, once a frame of the game.
 void XrInputLatch();
+// THE PACE (vk_pace=1 with vk_device=0, frame_pace_math.h): waits until the
+// app writes a slot that no frame took, or until the time limit. Once a frame
+// of the game: a second call before the next FinishFrame does not wait. A
+// frame of the scene and of the intro calls it before its first latch, where
+// a session of the PC waits in xrWaitFrame. A frame with no scene calls it at
+// the end of its FinishFrame, after its screen frame went into the live
+// stream. True when the frame waited.
+bool XrInputPace();
 
 // The values of the last latch.
 const bwvr::EyeView& XrInputEye(int index);

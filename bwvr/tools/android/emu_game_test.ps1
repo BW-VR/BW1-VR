@@ -37,7 +37,8 @@
     The checks: the files of the mod in the prefix, the registry, the keys
     of the run in bwvr.ini at the start of the game, the log of the mod (the
     build of the APK and not the ddraw.dll of the game folder, vk_device=0,
-    no Vulkan device, the input channel, the ring), the frames that the app
+    no Vulkan device, the input channel, the ring, the pace of the frames
+    with vk_pace=1), the frames that the app
     took from the ring, the projection layer, the eye pictures, the time
     from Play to the first frame, the frame rate of the game, the CPU load
     of the processes of Wine, the menu over the game, Quit game, no process
@@ -403,7 +404,7 @@ try {
         # bwvr.ini at the start of the game.
         Adb @('pull', "$GameDir/bwvr.ini", (Join-Path $Out "bwvr-game$n.ini"))
         $iniText = if (Test-Path -LiteralPath (Join-Path $Out "bwvr-game$n.ini")) { Get-Content -LiteralPath (Join-Path $Out "bwvr-game$n.ini") -Raw } else { '' }
-        foreach ($kv in @('vk_stream_live=1', 'xr_input=1', 'vk_device=0', 'ui_panel=1', 'stream_live=1', 'input_live=1', 'vulkan_strict=1', 'backend=vulkan')) {
+        foreach ($kv in @('vk_stream_live=1', 'xr_input=1', 'vk_device=0', 'ui_panel=1', 'vk_pace=1', 'stream_live=1', 'input_live=1', 'vulkan_strict=1', 'backend=vulkan')) {
             Expect ($iniText -match "(?m)^$([regex]::Escape($kv))\r?$") "bwvr.ini at the start of game $n has $kv"
         }
         $log = WaitLog @("game         : the first frame of the game \(frame \d+(, a screen with no scene)?\) came", 'game         : the game ended with the exit code') ($StartMinutes * 60) $playAt
@@ -631,6 +632,18 @@ try {
         Expect (@($boxLines | Where-Object { $_ -match '^setup box    : the dialog box \S+ is up now' }).Count -gt 0) "the log of the mod of game $n names the class of the dialog box that is up ($($boxLines.Count) lines)"
         $rateLines = @($modLog -split "`r?`n" | Where-Object { $_ -match '^vk stream    : screen frame \d+, [0-9.]+ screen frames a second' })
         $rateLines | Select-Object -First 4 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        # THE PACE (vk_pace=1 of "Play", docs/android.md, "The pace of the
+        # frames"): each frame of the game waits for the next slot of the app,
+        # so the game makes no more frames than the session (72 a second with
+        # the test runtime).
+        Expect ($modLog -match 'xr input     : vk_pace=1 with vk_device=0\. Each frame of the game waits') "the mod of game $n paces its frames by the slots of the app (vk_pace=1)"
+        $paceLines = @($modLog -split "`r?`n" | Where-Object { $_ -match '^xr input     : the pace: ' })
+        $paceLines | Select-Object -First 6 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        $paceRates = @($paceLines | ForEach-Object { [double]::Parse([regex]::Match($_, 'frames in [0-9.]+ s \(([0-9.]+) a second\)').Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) })
+        $paceWrites = @($paceLines | Where-Object { $_ -match 'a second\), [1-9]\d* started at a new write' })
+        Expect ($paceLines.Count -gt 0 -and $paceWrites.Count -gt 0) "the log of the mod of game $n has the lines of the pace, and frames started at a new write of the slot ($($paceLines.Count) lines, $($paceWrites.Count) with a new write)"
+        $paceMost = if ($paceRates.Count) { ($paceRates | Measure-Object -Maximum).Maximum } else { 0 }
+        Expect ($paceRates.Count -gt 0 -and $paceMost -le 80) ("the paced frames of game $n come at most at the rate of the session: " + ($paceRates -join ' ') + ' a second')
     }
 
     # THE FACTS for the doc: the sound, the window of the null driver, the

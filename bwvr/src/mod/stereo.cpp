@@ -1357,6 +1357,11 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   } else {
     t1 = t0;
     if (channel) {
+      // vk_pace=1 with vk_device=0: the frame waits for the next frame of the
+      // session of the app, where a session of the PC waits in xrWaitFrame,
+      // before the first read of the input of the frame. The wait is the
+      // "wait" of the frame time.
+      if (XrInputPace()) QueryPerformanceCounter(&t1);
       XrInputLatch();
       // The app recentered: XrScreen::TakeRecenter of the channel.
       if (XrInputTakeRecenter()) HeadPoseRecenter();

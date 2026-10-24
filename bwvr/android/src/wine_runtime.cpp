@@ -244,9 +244,11 @@ void WineRuntime::RunGame(Game game) {
   // The registry of the game, at each start, so a change of the menu counts.
   const std::string folder = play_rules::AppFolder(paths_.prefix);
   const std::string reg_file = folder + "/" + play_rules::kRegFile;
+  // The values of the profile of the PC go after the registry of the game,
+  // in the same import.
   if (!MakeDirs(folder) ||
-      !WriteTextFile(reg_file,
-                     play_rules::GameRegistry(game.width, game.height, options_.audio))) {
+      !WriteTextFile(reg_file, play_rules::GameRegistry(game.width, game.height, options_.audio) +
+                                   game.profile_reg)) {
     AppLog("game         : cannot write %s", reg_file.c_str());
     EndGame(-1, "the registry file of the game cannot be written");
     return;
@@ -260,6 +262,20 @@ void WineRuntime::RunGame(Game game) {
          game.height,
          options_.audio ? "the audio driver aaudio (wine_audio=1)"
                         : "no audio driver (wine_audio=0)");
+  if (!game.profile_reg.empty()) {
+    // The stamp only after a good import, so a failed import comes again at
+    // the next Play.
+    const std::string done = folder + "/" + play_rules::kProfileDone;
+    if (reg == 0 && WriteTextFile(done, game.profile_stamp + "\n")) {
+      AppLog("profile      : reg import put the profile %s into the registry of the prefix. "
+             "The stamp %s is in %s",
+             game.profile_name.c_str(), game.profile_stamp.c_str(), done.c_str());
+    } else {
+      AppLog("profile      : the import of the profile %s did not end well (reg import %d). "
+             "The next Play imports it again",
+             game.profile_name.c_str(), reg);
+    }
+  }
   if (game_stop_) {
     EndGame(-1, "Quit game");
     return;

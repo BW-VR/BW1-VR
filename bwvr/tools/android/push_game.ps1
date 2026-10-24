@@ -11,7 +11,8 @@
 # With no -WithProfile the copy has no Profiles folder and no *.erc of
 # Scripts, as the copy of emu_game_test.ps1: the game then starts with the
 # dialog of a new profile. A profile of the PC also has values in the
-# registry of the PC, which the folder does not carry.
+# registry of the PC, which the folder does not carry: push_profile.ps1
+# copies a profile with its values.
 #
 # A push of the whole folder (adb push <folder> ...) does not work in the
 # folder of an app on a Quest 3: adb makes the first folder, and then the

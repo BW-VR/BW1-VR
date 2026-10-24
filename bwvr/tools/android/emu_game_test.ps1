@@ -175,6 +175,24 @@
     and in the lines of the pace of the mod, and the rate of the paced
     frames. 0 (the default): no key, and the runtime stays at 72 Hz.
 
+.PARAMETER PullProfile
+    With -NewProfile: a folder on the PC. At the end the test pulls the
+    profile that game 1 made in the emulator into it: Profiles\<folder> (with
+    the test save of -TestSave), the Creature files (*.erc of
+    Scripts\CreatureMind) and user.reg of the prefix. A profile of the
+    emulator, never a profile of the player. -ProfileFrom of a later run
+    takes it.
+
+.PARAMETER ProfileFrom
+    A folder of -PullProfile. After the copy of the game folder the test
+    copies that profile with push_profile.ps1 (-WineUserReg, the values of
+    user.reg of that folder), as a player copies the profile of the PC
+    (docs/android.md, "The profile of the PC"). The test checks the import of
+    the values at the Play of game 1, no import at the Play of game 2, the
+    value Profile in the registry of the prefix, that no game shows the
+    dialog of a new profile, and that game 2 loads the saved game of slot 20
+    of the profile.
+
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
     game in it.
@@ -200,6 +218,8 @@ param(
     [int[]]$SaveOk = @(591, 627),
     [string]$TestSave = '',
     [ValidateSet(0, 72, 80, 90, 120)][int]$DisplayHz = 0,
+    [string]$PullProfile = '',
+    [string]$ProfileFrom = '',
     [switch]$Keep
 )
 
@@ -229,6 +249,12 @@ if (-not $Game) {
 }
 if (-not (Test-Path -LiteralPath (Join-Path $Game 'runblack.exe'))) { Stop-Android "There is no runblack.exe in $Game." }
 if (-not (Test-Path -LiteralPath $Apk)) { Stop-Android "There is no APK at:`n$Apk`nRun build_apk.ps1 first." }
+if ($PullProfile -ne '' -and -not $NewProfile) { Stop-Android '-PullProfile needs -NewProfile: the test pulls the profile that game 1 makes.' }
+if ($ProfileFrom -ne '') {
+    if ($NewProfile) { Stop-Android '-ProfileFrom and -NewProfile do not go together: the game folder of the app gets the profile of -ProfileFrom.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $ProfileFrom 'user.reg'))) { Stop-Android "There is no user.reg in $ProfileFrom. Make the folder with -NewProfile -PullProfile." }
+    $ProfileFrom = (Resolve-Path -LiteralPath $ProfileFrom).ProviderPath
+}
 if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
@@ -858,6 +884,21 @@ try {
     if ($DisplayHz -gt 0) { $iniLines += "display_hz=$DisplayHz" }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$GameDir/bwvr.ini")
+    # -ProfileFrom: the profile of an earlier run of the emulator goes in as
+    # a player copies the profile of the PC.
+    $wantProfile = ''
+    if ($ProfileFrom -ne '') {
+        Say "Copy the test profile of $ProfileFrom with push_profile.ps1"
+        $copy = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'push_profile.ps1') -Serial $Serial -From $ProfileFrom -WineUserReg (Join-Path $ProfileFrom 'user.reg') 2>&1 | ForEach-Object { "$_" })
+        Set-Content -LiteralPath (Join-Path $Out 'push-profile.txt') -Value $copy -Encoding utf8
+        $copy | ForEach-Object { Note ('push_profile: ' + $_) }
+        Expect ($copy.Count -gt 0 -and $copy[-1] -match '^COPIED\.') ('push_profile.ps1 copied the test profile: ' + $(if ($copy.Count) { $copy[-1] } else { 'no output' }))
+        $named = [regex]::Match(($copy -join "`n"), 'COPIED\. The profile (\S+) \((_\S+),')
+        $wantProfile = $named.Groups[1].Value
+        $there = (AdbOut @('shell', "ls '$GameDir/bwvr-profile.reg' '$GameDir/Profiles/$($named.Groups[2].Value)/Saved Games/20'")).Trim()
+        Note "the game folder of the app: $($there -replace '\s+', ' ')"
+        Expect ($named.Success -and $there -notmatch 'No such file' -and $there -match '20\.sav') "the game folder of the app has bwvr-profile.reg and slot 20 of the profile $wantProfile"
+    }
 
     # 4. The run.
     Say 'Start the app with the test runtime'
@@ -879,6 +920,11 @@ try {
         @{ N = 1; Name = 'Play, new game'; Args = ' -NEWGAME'; Eyes = 'new' },
         @{ N = 2; Name = 'Play in VR'; Args = ''; Eyes = 'play' })
     $results = @{}
+    $lastPlayAt = 0
+    if ($ProfileFrom -ne '') {
+        $help = [regex]::Match($log, 'profile      : the help of Play says: [^\r\n]*')
+        Expect ($help.Success -and $help.Value -match "The profile of the game: $([regex]::Escape($wantProfile)), from the PC\. Play puts it into the game\.") ('the help of Play names the profile of the PC at the start of the app: ' + $help.Value)
+    }
     foreach ($r in $runs) {
         $n = $r.N
         Say "Game $n`: $($r.Name)"
@@ -902,6 +948,21 @@ try {
             Expect ($part -match 'game         : reg import of .* and no audio driver \(wine_audio=0\)') "the registry of game $n has no audio driver (wine_audio=0)"
         }
         Expect ($part -match "game         : start G:\\runblack\.exe$([regex]::Escape($r.Args)) in Wine") "the app started G:\runblack.exe$($r.Args)"
+        if ($ProfileFrom -ne '') {
+            # THE PROFILE OF bwvr-profile.reg: the lines of Play come before
+            # the line "<name> at", the line of the import after it.
+            $playPart = $log.Substring($lastPlayAt, [math]::Max(0, $playAt - $lastPlayAt))
+            if ($n -eq 1) {
+                $imp = [regex]::Match($playPart, 'profile      : Play imports the profile (\S+) of bwvr-profile\.reg: the value Profile and (\d+) values of the key (\S+)\. The filter dropped (\d+) keys and values\. The game folder has the folder Profiles/\S+')
+                Expect ($imp.Success -and $imp.Groups[1].Value -eq $wantProfile -and [int]$imp.Groups[2].Value -gt 0) ("Play of game 1 imports the profile of bwvr-profile.reg: " + $imp.Value)
+                $put = [regex]::Match($part, 'profile      : reg import put the profile (\S+) into the registry of the prefix\. The stamp [^\r\n]*')
+                Expect ($put.Success -and $put.Groups[1].Value -eq $wantProfile) ("reg import put the profile into the registry of the prefix: " + $put.Value)
+            } else {
+                $none = [regex]::Match($playPart, 'profile      : the prefix has the profile (\S+) of bwvr-profile\.reg from an earlier Play[^\r\n]*')
+                Expect ($none.Success -and $playPart -notmatch 'profile      : Play imports the profile') ("Play of game 2 imports nothing: the prefix has the profile from game 1: " + $none.Value)
+            }
+        }
+        $lastPlayAt = [math]::Max(0, $playAt)
         $first = [regex]::Match($part, 'game         : the first frame of the game \(frame (\d+)(, a screen with no scene)?\) came ([\d.]+) s after Play')
         Expect $first.Success ("the first frame of game $n came: " + $first.Value)
         if (-not $first.Success) {
@@ -1021,6 +1082,29 @@ try {
         # game 1 no press reached the mod, in game 2 the short press did.
         Adb @('pull', "$GameDir/bwvr.log", (Join-Path $Out "bwvr-game$n.log"))
         $modLogNow = if (Test-Path -LiteralPath (Join-Path $Out "bwvr-game$n.log")) { Get-Content -LiteralPath (Join-Path $Out "bwvr-game$n.log") -Raw } else { '' }
+        if ($ProfileFrom -ne '') {
+            # The game has the profile of bwvr-profile.reg: no dialog of a new
+            # profile. Game 2 loads slot 20 of that profile.
+            $boxes = @([regex]::Matches($modLogNow, 'setup box    : the dialog box (\S+) is up now') | ForEach-Object { $_.Groups[1].Value })
+            Note ("the dialog boxes of game $n`: " + ($boxes -join ' '))
+            Expect ($modLogNow -match 'setup box    : ' -and $boxes -notcontains 'NewProfileBox') "game $n shows no dialog of a new profile (the boxes: $($boxes -join ' '))"
+            $start = [regex]::Match($modLogNow, 'game start   : (the saved game is loaded|a new game starts)[^\r\n]*')
+            Note ('bwvr.log: ' + $start.Value)
+            if ($n -eq 2) {
+                Expect ($start.Value -match 'the saved game is loaded, frame \d+\. The game loaded the saved game of slot 20') ("game 2 loaded the test save of slot 20 of the profile $wantProfile`: " + $start.Value)
+            }
+            $prefixNow = AdbOut @('shell', 'cat', "/data/data/$Package/files/prefix/user.reg")
+            $prof = @($prefixNow -split "`r?`n" | Where-Object { $_ -match '^"Profile"=' })
+            $wantHex = 'hex:' + ((@($wantProfile.ToCharArray() | ForEach-Object { '{0:x2},00' -f [int]$_ }) + @('00,00')) -join ',')
+            Note ("user.reg of the prefix after game $n`: " + ($prof -join ' '))
+            Expect ($prof.Count -eq 1 -and $prof[0] -eq "`"Profile`"=$wantHex") "user.reg of the prefix after game $n has the value Profile of $wantProfile"
+            Adb @('pull', "$AppDir/bwvr-quest.log", (Join-Path $Out "bwvr-quest-game$n.log"))
+            $appNow = if (Test-Path -LiteralPath (Join-Path $Out "bwvr-quest-game$n.log")) { Get-Content -LiteralPath (Join-Path $Out "bwvr-quest-game$n.log") -Raw } else { '' }
+            $helpAfter = @([regex]::Matches($appNow, 'profile      : the help of Play says: [^\r\n]*'))
+            if ($n -eq 1) {
+                Expect ($helpAfter.Count -ge 2 -and $helpAfter[-1].Value -match "The profile of the game: $([regex]::Escape($wantProfile)), from the PC\.$") ('after the import the help of Play says: ' + $(if ($helpAfter.Count) { $helpAfter[-1].Value } else { 'no line' }))
+            }
+        }
         $escLines = @($modLogNow -split "`r?`n" | Where-Object { $_ -match 'controllers  : the menu button (sends Esc|is dropped)' })
         $escLines | ForEach-Object { Note ('bwvr.log: ' + $_) }
         $sceneHere = $first.Success -and (-not $first.Groups[2].Success -or $part -match 'game         : the frames of the scene start')
@@ -1073,6 +1157,25 @@ try {
     Adb @('pull', "$GameDir/bwvr.ini", (Join-Path $Out 'bwvr.ini'))
     Adb @('pull', "$GameDir/bwvr.log", (Join-Path $Out 'bwvr.log'))
     $prefixReg = AdbOut @('shell', 'cat', "/data/data/$Package/files/prefix/user.reg")
+    if ($PullProfile -ne '') {
+        # The profile of game 1 for -ProfileFrom of a later run: a profile of
+        # the emulator, with the test save in slot 20.
+        Say "Pull the test profile $ProfileName into $PullProfile"
+        $want = (($ProfileName.ToCharArray() | ForEach-Object { "_$_" }) -join '')
+        if (Test-Path -LiteralPath $PullProfile) { Remove-Item -LiteralPath $PullProfile -Recurse -Force }
+        New-Item -ItemType Directory -Force -Path (Join-Path $PullProfile 'Profiles') | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $PullProfile 'Scripts\CreatureMind') | Out-Null
+        Adb @('pull', "$GameDir/Profiles/$want", (Join-Path $PullProfile 'Profiles'))
+        $ercs = @((AdbOut @('shell', "ls '$GameDir/Scripts/CreatureMind/'")).Trim() -split '\s+' | Where-Object { $_ -match '\.erc$' })
+        foreach ($e in $ercs) { Adb @('pull', "$GameDir/Scripts/CreatureMind/$e", (Join-Path $PullProfile "Scripts\CreatureMind\$e")) }
+        Adb @('pull', "/data/data/$Package/files/prefix/user.reg", (Join-Path $PullProfile 'user.reg'))
+        $pulled = @(Get-ChildItem -LiteralPath $PullProfile -Recurse -File)
+        Note ("pulled $($pulled.Count) files: " + (($pulled | ForEach-Object { $_.FullName.Substring($PullProfile.Length + 1) }) -join ', '))
+        # A Creature file comes only when the game wrote one (the value "file"
+        # of the profile), so the test only names it.
+        Note ("the Creature files of the game folder of the app: " + $(if ($ercs.Count) { $ercs -join ' ' } else { 'none' }))
+        Expect ((Test-Path -LiteralPath (Join-Path $PullProfile "Profiles\$want\Saved Games\20\20.sav")) -and (Test-Path -LiteralPath (Join-Path $PullProfile 'user.reg'))) "the test profile $ProfileName with slot 20 and user.reg are in $PullProfile"
+    }
     $logcat = AdbOut @('logcat', '-d', '-v', 'brief')
     Set-Content -LiteralPath (Join-Path $Out 'logcat.txt') -Value $logcat -Encoding utf8
     if (Test-Path -LiteralPath (Join-Path $Out 'report.txt')) { $report = Get-Content -LiteralPath (Join-Path $Out 'report.txt') -Raw }

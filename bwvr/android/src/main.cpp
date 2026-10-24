@@ -129,6 +129,9 @@ struct App {
   play_rules::MenuButtonRule menu_rule;  // the menu button of this game
   play_rules::MenuStep menu_step;        // of this frame of the session
   bool menu_mod_said = false;  // the log has the press that goes to the mod now
+  bool pc_profile = true;        // pc_profile
+  std::string prefix;            // the Wine prefix, empty with no internal folder
+  std::string profile_said;      // the last line of the profile in the log
   bool can_play = false;  // the APK has Wine for this ABI, wine_setup=1, play_game=1
   bool game_on = false;   // a game starts or runs
   bool menu_over_game = false;  // the menu shows over the game
@@ -529,6 +532,71 @@ void ShowMenuOverGame(App* app, bool on) {
                                  : "the menu goes. The game has the hands again");
 }
 
+// THE PROFILE OF THE GAME in the help of "Play" (play_rules.h, ProfileHelp):
+// the profile of bwvr-profile.reg in the game folder (pc_profile=1), else
+// the profile in the registry of the prefix, else none. At the start of the
+// app and at the end of each game.
+void ShowProfile(App* app) {
+  const std::string text = ReadTextFile(app->game.folder + "/" + play_rules::kProfileFile);
+  const play_rules::ProfileFile file = play_rules::ParseProfileFile(text);
+  std::string done, prefix_name;
+  if (!app->prefix.empty()) {
+    done = ReadTextFile(play_rules::AppFolder(app->prefix) + "/" + play_rules::kProfileDone);
+    prefix_name = play_rules::PrefixProfileName(ReadTextFile(app->prefix + "/user.reg"));
+  }
+  const bool imported =
+      file.ok && !play_rules::NeedsProfileImport(file, play_rules::ProfileStamp(text), done);
+  const std::string help =
+      play_rules::ProfileHelp(app->pc_profile, !text.empty(), file, imported, prefix_name);
+  app->menu.SetProfile(help);
+  if (help != app->profile_said) {
+    app->profile_said = help;
+    AppLog("profile      : the help of Play says: %s", help.c_str());
+  }
+}
+
+// The profile of the PC for this Play (pc_profile=1): the values of
+// bwvr-profile.reg go into the game registry of the start when the prefix
+// does not have them from an earlier Play.
+void TakeProfile(App* app, WineRuntime::Game* game) {
+  if (!app->pc_profile) return;
+  const std::string path = app->game.folder + "/" + play_rules::kProfileFile;
+  const std::string text = ReadTextFile(path);
+  if (text.empty()) {
+    AppLog("profile      : the game folder has no %s. Play imports no profile",
+           play_rules::kProfileFile);
+    return;
+  }
+  const play_rules::ProfileFile file = play_rules::ParseProfileFile(text);
+  if (!file.ok) {
+    AppLog("profile      : %s is not right: %s. Play imports no value of it",
+           play_rules::kProfileFile, file.why.c_str());
+    return;
+  }
+  const std::string stamp = play_rules::ProfileStamp(text);
+  const std::string done =
+      app->prefix.empty()
+          ? ""
+          : ReadTextFile(play_rules::AppFolder(app->prefix) + "/" + play_rules::kProfileDone);
+  struct stat st;
+  const std::string folder = app->game.folder + "/Profiles/" + file.folder;
+  const bool has_folder = stat(folder.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+  if (!play_rules::NeedsProfileImport(file, stamp, done)) {
+    AppLog("profile      : the prefix has the profile %s of %s from an earlier Play (the "
+           "stamp %s). Play imports nothing",
+           file.name.c_str(), play_rules::kProfileFile, stamp.c_str());
+    return;
+  }
+  game->profile_reg = play_rules::ProfileRegistry(file);
+  game->profile_stamp = stamp;
+  game->profile_name = file.name;
+  AppLog("profile      : Play imports the profile %s of %s: the value Profile and %zu values "
+         "of the key %s. The filter dropped %d keys and values. The game folder %s the folder "
+         "Profiles/%s",
+         file.name.c_str(), play_rules::kProfileFile, file.values.size(), file.folder.c_str(),
+         file.dropped, has_folder ? "has" : "does not have", file.folder.c_str());
+}
+
 // "Play in VR" and "Play, new game" (docs/android.md, "Play in the app"). As
 // the launcher, each start saves the settings first. Then the keys of the
 // run, the live stream and the input channel in this process, and the game
@@ -581,6 +649,7 @@ void Play(App* app, bool new_game) {
   WineRuntime::Game game;
   game.new_game = new_game;
   app->menu.RenderSize(&game.width, &game.height);
+  TakeProfile(app, &game);
   if (!app->wine.StartGame(game)) {
     app->status = "Saved. A game runs already.";
     AppLog("menu         : %s. A game runs already", name);
@@ -648,6 +717,7 @@ void GameTick(App* app) {
                 ", " + why + ").";
   AppLog("game         : the game ended with the exit code %d at %s (%s), %.1f s after Play",
          code, clock.c_str(), why.c_str(), (NowMs() - app->play_ms) / 1000.0);
+  ShowProfile(app);
 }
 
 void Do(App* app, Action action) {
@@ -1119,9 +1189,19 @@ void android_main(android_app* android) {
     } else {
       const std::string files = android->activity->internalDataPath;
       mkdir(files.c_str(), 0700);
+      app.prefix = wine_rules::MakePaths(files, app.folder, WineRuntime::Abi()).prefix;
       app.wine.Start(android->activity->assetManager, files, app.folder, app.game.folder, wine);
     }
   }
+  // pc_profile=1 (the default): "Play" imports the values of the profile of
+  // bwvr-profile.reg in the game folder (push_profile.ps1) into the registry
+  // of the prefix, one time for each new file (play_rules.h). 0: no import,
+  // the game has the profile that it made in the headset, or none.
+  app.pc_profile = app.ini.GetInt("bwvr", "pc_profile", 1) != 0;
+  AppLog("profile      : pc_profile=%d. %s", app.pc_profile ? 1 : 0,
+         app.pc_profile ? "Play imports the profile of bwvr-profile.reg one time for each new file"
+                        : "Play imports no profile of the PC");
+  ShowProfile(&app);
   if (!app.painter.Start(android->activity->vm,
                          app.capture ? app.game.folder + "/bwvr-menu.bmp" : "")) {
     AppLog("app          : the canvas of Android did not start. The app stops");

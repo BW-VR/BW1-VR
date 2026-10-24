@@ -208,6 +208,14 @@ class Menu {
   }
   const std::string& Notice() const { return notice_; }
 
+  // THE PROFILE OF THE GAME (play_rules.h, ProfileHelp): a sentence at the
+  // end of the help of "Play in VR" and "Play, new game".
+  void SetProfile(const std::string& text) {
+    if (text == profile_) return;
+    profile_ = text;
+    ++revision_;
+  }
+
   // THE ROWS OF THE PAGE.
   bool OnMain() const { return group_ < 0; }
   int Group() const { return group_; }
@@ -342,10 +350,10 @@ class Menu {
     }
     switch (item.kind) {
       case ItemKind::kPlay:
-        return "Saves the settings and starts the game in the headset.";
+        return WithProfile("Saves the settings and starts the game in the headset.");
       case ItemKind::kNewGame:
-        return "Saves the settings and starts a new game on the first "
-               "island, with no menu.";
+        return WithProfile("Saves the settings and starts a new game on the first "
+                           "island, with no menu.");
       case ItemKind::kSave:
         return "Writes the settings to bwvr.ini in the game folder and does "
                "not start the game.";
@@ -528,6 +536,10 @@ class Menu {
   }
 
  private:
+  std::string WithProfile(const char* help) const {
+    return profile_.empty() ? std::string(help) : std::string(help) + " " + profile_;
+  }
+
   // A row is on its page when the renderer Vulkan uses it.
   static bool Shown(int i) { return !st::OnlyDirect3D9(st::kSettings[i].key); }
 
@@ -559,6 +571,7 @@ class Menu {
   int display_hz_ = 0;
   bool game_running_ = false;
   std::string notice_;
+  std::string profile_;
 };
 
 }  // namespace menu_model

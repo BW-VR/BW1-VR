@@ -1,7 +1,8 @@
 // The rules of "Play" in the headset app, a test (android/src/play_rules.h):
 // the keys of a run after a save of the menu, the registry of the game, the
 // environment and the command line of the game, the input of the mod while
-// the menu shows over the game, and "Quit game" in the menu. main.cpp
+// the menu shows over the game, "Quit game" in the menu, and the filter and
+// the form of the file of the profile of the PC. main.cpp
 // includes this file after Check and Near, just before main.
 #pragma once
 
@@ -331,6 +332,242 @@ inline void QuitChecks() {
   Check(menu.Select() == Action::kExit, "a select on Exit", 0, 0);
 }
 
+// A file of push_profile.ps1 for the profile "Ann", with keys and values
+// that the filter must drop.
+inline std::string ProfileText() {
+  return "Windows Registry Editor Version 5.00\r\n"
+         "\r\n"
+         "; a comment\r\n"
+         "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White]\r\n"
+         "\"GameDir\"=\"C:\\\\Program Files (x86)\\\\Black & White\"\r\n"
+         "\r\n"
+         "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\BWSetup]\r\n"
+         "\"ScreenW\"=dword:00000ff0\r\n"
+         "\r\n"
+         "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\LHMultiplayer]\r\n"
+         "\"Profile\"=hex:41,00,6e,00,6e,00,00,00\r\n"
+         "\"Other\"=dword:00000001\r\n"
+         "\r\n"
+         "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\LHMultiplayer\\"
+         "Profiles\\_A_n_n]\r\n"
+         "\"file\"=\"Cbf0dfe1f.erc\"\r\n"
+         "\"creature name\"=hex:41,00,6e,00,6e,00,00,00\r\n"
+         "\"login name\"=hex:00,00\r\n"
+         "\"stuff\"=dword:00000000\r\n"
+         "\"Key 0 Primary\"=dword:0000003b\r\n"
+         "\"READ_SPEED\"=hex:00,00,00,00,00,00,e0,3f\r\n"
+         "\"a \\\"quoted\\\" name\"=\"a \\\\ text\"\r\n"
+         "\"gone\"=-\r\n"
+         "@=\"default\"\r\n"
+         "\r\n"
+         "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\LHMultiplayer\\"
+         "Profiles\\_B_o_b]\r\n"
+         "\"stuff\"=dword:00000001\r\n"
+         "\r\n"
+         "[HKEY_LOCAL_MACHINE\\Software\\Other]\r\n"
+         "\"x\"=dword:00000001\r\n"
+         "[-HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\LHMultiplayer\\"
+         "Profiles\\_A_n_n\\Sub]\r\n";
+}
+
+// The text with one part replaced.
+inline std::string Swap(std::string text, const std::string& from, const std::string& to) {
+  const size_t at = text.find(from);
+  if (at != std::string::npos) text.replace(at, from.size(), to);
+  return text;
+}
+
+inline void ProfileChecks() {
+  printf("\nPlay: the profile of the PC (bwvr-profile.reg)\n");
+  using play_rules::ParseProfileFile;
+  const std::string text = ProfileText();
+  const play_rules::ProfileFile f = ParseProfileFile(text);
+  Check(f.ok && f.name == "Ann" && f.folder == "_A_n_n", "a right file: the profile Ann, key _A_n_n",
+        f.ok ? 1 : 0, 1);
+  Check(f.values.size() == 7, "the seven values of the key of the profile",
+        static_cast<double>(f.values.size()), 7);
+  // The key of the game with GameDir, BWSetup with ScreenW, Other, the
+  // delete of a value, the default value, the profile Bob with its value,
+  // the key of HKEY_LOCAL_MACHINE with its value, the delete of a key.
+  Check(f.dropped == 12, "the filter drops each other key and value, and each delete", f.dropped,
+        12);
+  Check(f.values[0].name == "file" && f.values[0].data == "\"Cbf0dfe1f.erc\"" &&
+            f.values[5].name == "READ_SPEED" &&
+            f.values[6].name == "a \\\"quoted\\\" name" && f.values[6].data == "\"a \\\\ text\"",
+        "the names and the data stay as the file has them, with their escapes", 0, 0);
+  const std::string reg = play_rules::ProfileRegistry(f);
+  Check(reg.find("[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\"
+                 "LHMultiplayer]\r\n\"Profile\"=hex:41,00,6e,00,6e,00,00,00\r\n") !=
+            std::string::npos,
+        "the import has the value Profile of LHMultiplayer", 0, 0);
+  Check(reg.find("\\LHMultiplayer\\Profiles\\_A_n_n]\r\n\"file\"=\"Cbf0dfe1f.erc\"\r\n") !=
+                std::string::npos &&
+            reg.find("\"Key 0 Primary\"=dword:0000003b\r\n") != std::string::npos,
+        "the import has the values of the key of the profile", 0, 0);
+  Check(reg.find("GameDir") == std::string::npos && reg.find("BWSetup") == std::string::npos &&
+            reg.find("Screen") == std::string::npos && reg.find("Other") == std::string::npos &&
+            reg.find("_B_o_b") == std::string::npos &&
+            reg.find("HKEY_LOCAL_MACHINE") == std::string::npos &&
+            reg.find("=-") == std::string::npos && reg.find("@=") == std::string::npos &&
+            reg.find("[-") == std::string::npos,
+        "the import has no GameDir, no value of BWSetup, no other key, and no delete", 0, 0);
+  const std::string all = play_rules::GameRegistry(1380, 1104, true) + reg;
+  size_t game_dirs = 0;
+  for (size_t at = all.find("\"GameDir\""); at != std::string::npos;
+       at = all.find("\"GameDir\"", at + 1)) {
+    ++game_dirs;
+  }
+  Check(game_dirs == 1 && all.find("\"GameDir\"=\"G:\\\\\"") != std::string::npos &&
+            all.find("\"ScreenW\"=dword:00000564") != std::string::npos &&
+            all.find("dword:00000ff0") == std::string::npos,
+        "after GameRegistry: one GameDir (G:\\), and the screen of the menu", 0, 0);
+  Check(play_rules::ProfileRegistry(ParseProfileFile("")).empty(),
+        "a file that is not right gives no import", 0, 0);
+
+  // The keys of the registry have no case.
+  const play_rules::ProfileFile lower = ParseProfileFile(
+      Swap(Swap(text, "Lionhead Studios Ltd\\Black & White\\LHMultiplayer]",
+                "lionhead studios ltd\\black & white\\lhmultiplayer]"),
+           "Profiles\\_A_n_n]", "PROFILES\\_a_N_N]"));
+  Check(lower.ok && lower.name == "Ann" && lower.folder == "_a_N_N" && lower.values.size() == 7,
+        "a key in another case is the same key", lower.ok ? 1 : 0, 1);
+  const play_rules::ProfileFile lf = ParseProfileFile(Swap(text, "\r\n", "\n"));
+  Check(lf.ok && lf.values.size() == 7, "a file with LF lines", 0, 0);
+
+  // The files that are not right.
+  struct Bad {
+    std::string text;
+    const char* what;
+  };
+  const Bad bad[] = {
+      {"", "an empty file"},
+      {Swap(text, "Windows Registry Editor Version 5.00", "REGEDIT4"), "another first line"},
+      {"\xEF\xBB\xBF" + text, "a UTF-8 BOM (not ASCII)"},
+      {Swap(text, "\"file\"=\"Cbf0dfe1f.erc\"", "\"file\"=\"C\xFC.erc\""),
+       "a character outside ASCII"},
+      {Swap(text, "dword:0000003b", "dword:3b"), "a dword with no 8 digits"},
+      {Swap(text, "hex:00,00\r\n", "hex:00,0\r\n"), "a byte with one digit"},
+      {Swap(text, "hex:00,00\r\n", "hex:00,00,\\\r\n  00,00\r\n"),
+       "a value on two lines (the export of regedit)"},
+      {Swap(text, "\"stuff\"=dword:00000000", "\"stuff\"=qword:0"), "a form of data that is not known"},
+      {Swap(text, "\"stuff\"=dword:00000000", "\"stuff\"dword:00000000"), "no = after the name"},
+      {Swap(text, "\"stuff\"=dword:00000000", "\"stu\\ff\"=dword:00000000"),
+       "a backslash before a letter in a name"},
+      {Swap(text, "\"Profile\"=hex:41,00,6e,00,6e,00,00,00", "\"Profil\"=hex:41,00"),
+       "no value Profile"},
+      {Swap(text, "\"Profile\"=hex:41,00,6e,00,6e,00,00,00", "\"Profile\"=\"Ann\""),
+       "a value Profile that is a text"},
+      {Swap(text, "\"Profile\"=hex:41,00,6e,00,6e,00,00,00", "\"Profile\"=hex:5c,00,00,00"),
+       "a name with a backslash"},
+      {Swap(text, "\"Profile\"=hex:41,00,6e,00,6e,00,00,00", "\"Profile\"=hex:41,00,6e"),
+       "an odd count of bytes"},
+      {Swap(text, "\"Profile\"=hex:41,00,6e,00,6e,00,00,00", "\"Profile\"=hex:00,00"),
+       "an empty name"},
+      {Swap(text, "Profiles\\_A_n_n]", "Profiles\\_A_n]"), "no key of the profile"},
+      {Swap(text, "Profiles\\_A_n_n]", "Profiles\\_A_n_n\\Deeper]"),
+       "the values in a key under the key of the profile"},
+      {"Windows Registry Editor Version 5.00\r\n\"x\"=dword:00000001\r\n",
+       "a value before the first key"},
+      {Swap(text, "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White]",
+            "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White"),
+       "a key with no ]"},
+      {std::string("Windows Registry Editor Version 5.00\r\n") +
+           "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\LHMultiplayer]\r\n"
+           "\"Profile\"=hex:41,00,00,00\r\n"
+           "[HKEY_CURRENT_USER\\Software\\Lionhead Studios Ltd\\Black & White\\LHMultiplayer\\"
+           "Profiles\\_A]\r\n\"gone\"=-\r\n",
+       "a key of the profile with no value"},
+      {std::string(play_rules::kProfileFileMost + 1, ';'), "a file of more than 256 KB"},
+  };
+  for (const Bad& b : bad) {
+    const play_rules::ProfileFile p = ParseProfileFile(b.text);
+    std::string what = std::string("not right: ") + b.what;
+    if (!p.ok) what += " (" + p.why + ")";
+    Check(!p.ok && !p.why.empty() && p.name.empty(), what.c_str(), p.ok ? 1 : 0, 0);
+  }
+
+  // The name in the value Profile and the key of a profile.
+  std::string name;
+  Check(play_rules::ProfileNameFromData("hex:54,00,69,00,61,00,73,00,00,00", &name) &&
+            name == "Tias",
+        "the value Profile of a PC gives Tias", 0, 0);
+  Check(play_rules::ProfileNameFromData("hex:54,00,69,00", &name) && name == "Ti",
+        "a name with no zero at its end", 0, 0);
+  Check(!play_rules::ProfileNameFromData("hex:fc,00,00,00", &name) &&
+            !play_rules::ProfileNameFromData("hex:41,01,00,00", &name),
+        "no name with a character outside ASCII", 0, 0);
+  Check(play_rules::ProfileFolder("Tias") == "_T_i_a_s" &&
+            play_rules::ProfileFolder("bwvrtest") == "_b_w_v_r_t_e_s_t",
+        "the key of a profile: a _ before each character", 0, 0);
+
+  // One import for each new file.
+  const std::string stamp = play_rules::ProfileStamp(text);
+  Check(stamp == play_rules::ProfileStamp(ProfileText()) &&
+            stamp != play_rules::ProfileStamp(Swap(text, "dword:0000003b", "dword:0000003c")),
+        "the stamp: the same file the same stamp, a changed byte a new one", 0, 0);
+  Check(play_rules::NeedsProfileImport(f, stamp, ""), "a file with no import before: Play imports it",
+        0, 0);
+  Check(!play_rules::NeedsProfileImport(f, stamp, stamp + "\n"),
+        "the stamp of the last import: Play imports nothing", 0, 0);
+  Check(play_rules::NeedsProfileImport(f, stamp, "0000000000000000 1\n"),
+        "a new file: Play imports it again", 0, 0);
+  Check(!play_rules::NeedsProfileImport(ParseProfileFile("x"), stamp, ""),
+        "a file that is not right: no import", 0, 0);
+
+  // The profile in user.reg of the prefix, as Wine writes it.
+  const std::string user_reg =
+      "WINE REGISTRY Version 2\n"
+      ";; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n\n"
+      "[Software\\\\Lionhead Studios Ltd\\\\Black & White\\\\LHMultiplayer\\\\Profiles\\\\_x] "
+      "1729760000\n"
+      "\"Profile\"=hex:78,00,00,00\n\n"
+      "[Software\\\\Lionhead Studios Ltd\\\\Black & White\\\\LHMultiplayer] 1729760001\n"
+      "#time=1db2a6f3c2b1e40\n"
+      "\"Profile\"=hex:62,00,77,00,76,00,72,00,74,00,65,00,73,00,74,00,00,00\n\n";
+  Check(play_rules::PrefixProfileName(user_reg) == "bwvrtest",
+        "user.reg of the prefix: the profile bwvrtest", 0, 0);
+  const std::string long_reg = Swap(user_reg, "hex:62,00,77,00,76,00,72,00,74,00,65,00,73,00,",
+                                    "hex:62,00,77,00,76,00,72,00,\\\n  74,00,65,00,73,00,");
+  Check(play_rules::PrefixProfileName(long_reg) == "bwvrtest",
+        "user.reg of the prefix: a value on two lines", 0, 0);
+  Check(play_rules::PrefixProfileName("WINE REGISTRY Version 2\n").empty() &&
+            play_rules::PrefixProfileName(Swap(user_reg, "\\\\LHMultiplayer] 1729760001",
+                                               "\\\\LHMultiplayerX] 1729760001"))
+                .empty(),
+        "no profile in a prefix with no key LHMultiplayer, and not from a key under it", 0, 0);
+
+  // The help of Play.
+  const play_rules::ProfileFile none = ParseProfileFile("");
+  Check(play_rules::ProfileHelp(true, true, f, false, "") ==
+            "The profile of the game: Ann, from the PC. Play puts it into the game.",
+        "help: a new file of the PC", 0, 0);
+  Check(play_rules::ProfileHelp(true, true, f, true, "Ann") ==
+            "The profile of the game: Ann, from the PC.",
+        "help: the file of the PC after its import", 0, 0);
+  Check(play_rules::ProfileHelp(false, true, f, false, "bwvrtest") ==
+            "The profile of the game: bwvrtest.",
+        "help with pc_profile=0: the profile of the prefix", 0, 0);
+  Check(play_rules::ProfileHelp(true, false, none, false, "") ==
+            "No profile: the game asks for a new one.",
+        "help: no file and no profile in the prefix", 0, 0);
+  const std::string wrong =
+      play_rules::ProfileHelp(true, true, ParseProfileFile("x"), false, "bwvrtest");
+  Check(wrong.compare(0, 31, "bwvr-profile.reg is not right: ") == 0 &&
+            wrong.find("The profile of the game: bwvrtest.") != std::string::npos,
+        "help: a file that is not right, and the profile of the prefix", 0, 0);
+
+  menu_model::Menu menu;
+  menu.Load(bwvr_ini::IniText("[bwvr]\r\n"));
+  const std::vector<menu_model::Item> items = menu.Items();
+  const std::string plain = menu.Help(items[0]);
+  const unsigned revision = menu.Revision();
+  menu.SetProfile("The profile of the game: Ann, from the PC.");
+  Check(menu.Help(items[0]) == plain + " The profile of the game: Ann, from the PC." &&
+            menu.Help(items[1]).find("Ann, from the PC.") != std::string::npos &&
+            menu.Revision() != revision,
+        "the help of Play in VR and of Play, new game names the profile", 0, 0);
+}
+
 inline void PlayRulesChecks() {
   RunKeyChecks();
   RegistryChecks();
@@ -338,6 +575,7 @@ inline void PlayRulesChecks() {
   MaskChecks();
   MenuButtonChecks();
   QuitChecks();
+  ProfileChecks();
 }
 
 }  // namespace play_rules_checks

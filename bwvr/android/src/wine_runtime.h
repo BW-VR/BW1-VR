@@ -75,6 +75,13 @@ class WineRuntime {
     bool new_game = false;  // -NEWGAME
     int width = 0;          // ScreenW
     int height = 0;         // ScreenH
+    // The profile of the PC (play_rules.h, ProfileRegistry): the keys that
+    // go after the registry of the game in the same import, the stamp of
+    // bwvr-profile.reg for pc-profile.done after a good import, and the name
+    // of the profile. Empty: no import.
+    std::string profile_reg;
+    std::string profile_stamp;
+    std::string profile_name;
   };
   enum class GameState { kIdle, kStarting, kRunning, kEnded };
   bool Ready() const { return ready_; }

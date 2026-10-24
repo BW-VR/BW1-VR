@@ -229,10 +229,11 @@ each folder in it fails ("remote secure_mkdirs failed: Operation not
 permitted"). The ini and the logs of the mod of the PC and
 `MemoryLeaks.txt` stay on the PC. The copy has no folder `Profiles` and no
 Creature of a profile (each `*.erc` of `Scripts`), so the game starts with
-the dialog of a new profile. `-WithProfile` copies them too, but a profile
-of the PC also has values in the registry of the PC, which the folder does
-not carry. Start the app again after the copy, so it checks
-`runblack.exe`.
+the dialog of a new profile. To play on with the profile of the PC, copy it
+with `push_profile.ps1` (see "The profile of the PC"): it also carries the
+values of the profile in the registry of the PC. `-WithProfile` of
+`push_game.ps1` copies only the folders, with no values. Start the app
+again after the copy, so it checks `runblack.exe`.
 
 The first start is necessary. Android gives the folder of the app to the
 app when the app asks for it, and the app makes the folder `game` then. A
@@ -360,8 +361,10 @@ saves and starts nothing (no game in Wine).
    Manager\KnownDLLs`. Then `HKCU\Software\Wine\Drivers`, `Audio` =
    `aaudio`, the audio driver of the tree (`wine_audio=0`: `reg import`
    deletes the value, and the game has no sound), so a prefix of an older
-   tree gets it too. No value of a profile. The registry of the PC is not
-   a source of the app: these are the values of the launcher of the PC.
+   tree gets it too. These are the values of the launcher of the PC. With
+   `pc_profile=1` and a new `bwvr-profile.reg` in the game folder, the
+   values of that profile go after them in the same import (see "The
+   profile of the PC"). The app never reads the registry of the PC.
    Then `wineserver -w`: wineboot makes the sections of the known DLLs one
    time for each start of the wine server, from the registry of that time,
    and the server of `reg import` made them before the import. So the game
@@ -535,6 +538,136 @@ and the pace too).
   scene, so before the first such frame a press of the menu button that
   the app gives to the mod does nothing.
 - "Quit game" does not save the game.
+
+## The profile of the PC
+
+The game in the headset can play on with the profile of the player of the
+PC: the name, the Creature, the saved games and the options of the game.
+One command on the PC copies it to the headset:
+
+```
+.\bwvr\tools\android\push_profile.ps1 -Serial <adb serial of the headset>
+```
+
+**What a profile is** (the disassembly of `runblack.exe` and of
+`LHMultiplayerR.dll` of v1.42). The game keeps a profile in two places:
+
+- The registry, under `HKCU\Software\Lionhead Studios Ltd\Black &
+  White\LHMultiplayer`. The value `Profile` is the name of the current
+  player (REG_BINARY, UTF-16 with a zero at its end): the game reads it at
+  its start (`LHNetGetCurrentProfileNameFromRegistry`), and with no such
+  value or no key of that profile it shows the dialog of a new profile. The
+  key `Profiles\<folder>` has the values of that player. `<folder>` is the
+  name with a `_` before each character (`ProfileNameToKey`, `Tias` gives
+  `_T_i_a_s`). `PlayerProfile` reads and writes `creature name`, `login
+  name`, `login password`, `stuff`, `player symbol`, `timestarted`,
+  `numberofsaves`, `numberofloads`, `pitchaboutcentre`, `pushscroll`,
+  `IMMERSION_KEY` and `HAND_ORIENTATION` (`0x0066BB00` to `0x0066BCD0`,
+  through `LHNetGetCurrentProfile*`). The options of the game (`pushscroll`,
+  `AUTOSAVE` and others, `0x00514726` to `0x0051494C`) are values of that
+  key too. The key bindings (`Key 0 Primary`
+  to `Key 32 Mouse Button`), `CircleSlot(n)` and `LoveBuckets` (the
+  alignment) are values of that key. The value `file` names the Creature.
+- The files, from the current folder of the game, which is the folder of
+  `GameDir` after the start (`0x0078E946`): `Profiles\<folder>` (`Saved
+  Games`, `Pictures`, `Current`, `creature.lhp`), and the Creature
+  `Scripts\CreatureMind\<file>` (`0x0066BF70`) with
+  `Scripts\CreatureMind\Physique<file>`.
+
+The values of `BWSetup` (`ScreenW`, `ScreenH`, `ScreenD`, `FullScreen`,
+`MaxVRAM`, `detailidx`, `maxdetailidx`, `AudioSampleMasterVolume`,
+`AudioMusicMasterVolume`) and `GameDir` are values of the PC, not of a
+profile. The app writes its own values of `BWSetup` and `GameDir` ("Play in
+the app", step 5), and the volumes stay at the default of the game.
+
+**`push_profile.ps1`** reads the values of the current profile from the
+registry of the PC, read only, and writes them into `bwvr-profile.reg`: the
+value `Profile` and each value of the key of that profile (REG_DWORD,
+REG_BINARY and REG_SZ), nothing else. It takes each file of
+`Profiles\<folder>` and the two Creature files from the folders of the game:
+when `GameDir` is in Program Files, from the VirtualStore of `GameDir`
+first (a game with no administrator rights reads a file there before the
+file of `GameDir`), then from `GameDir`. `-From` names other folders. It
+makes each folder in the game folder of the app with `mkdir -p` and pushes
+each file, as `push_game.ps1` does, then `bwvr-profile.reg` last. So the app
+has no `bwvr-profile.reg` while the copy is not whole. The script never
+writes to the registry of the PC, and it never changes, moves or deletes a
+file on the PC. It does nothing with no `-Serial`.
+
+- When the game folder of the app has the folder of that profile, the script
+  stops: the game in the headset can have newer saves there. `-Replace`
+  copies over it. Files of the headset that the PC does not have stay.
+- `-DryRun -Out <folder>` writes `bwvr-profile.reg` and `files.txt` (each
+  file, its size, its time and the folder that it comes from) into that
+  folder, and pushes nothing. It also lists the files of each slot of the
+  saved games, so a slot with no whole save shows (a `.sav`, a
+  `Script_<n>.sav` and `SaveGame.inf`). The script copies the files as they
+  are: a slot that the game on the PC cannot load does not load in the
+  headset either.
+- `-WineUserReg <user.reg> -From <folder>` takes the values from a
+  `user.reg` of a Wine prefix in place of the registry of the PC: the test
+  of the emulator copies a profile that the game made in the emulator with
+  it.
+
+**The import** (`pc_profile=1`, the default, `play_rules.h`). At "Play" the
+app reads `bwvr-profile.reg` of the game folder, keeps only the value
+`Profile` of `LHMultiplayer` and the values of the key of that profile, and
+adds them after the registry of the game in `C:\bwvr\game.reg`: one `reg
+import`. It never imports `GameDir`, a value of `BWSetup`, another key, a
+delete or the default value of a key. The file must have the form that the
+script writes: the first line `Windows Registry Editor Version 5.00`, one
+key or value on each line, only the printable characters of ASCII, the data
+as `dword:`, `hex:`, `hex(N):` or a quoted text. The export of regedit
+(UTF-16, long values on more lines) does not have this form. A file that is
+not right gives no import, and the log and the help of "Play" say why. The
+app imports a file one time: after a good import it writes the stamp of the
+file (FNV-1a of its bytes, and its size) into `C:\bwvr\pc-profile.done` of
+the prefix. So the values that the game in the headset writes later (the
+saves, the alignment, the options) stay, and only a new file of
+`push_profile.ps1` goes in again. `pc_profile=0`: no import, and the game
+has the profile that it made in the headset, or none.
+
+**The menu.** The help of "Play in VR" and "Play, new game" names the
+profile of the game: "The profile of the game: Tias, from the PC. Play puts
+it into the game." before the import, "..., from the PC." after it, the
+profile in `user.reg` of the prefix with no file of the PC, or "No profile:
+the game asks for a new one." The app reads it at its start and at the end
+of each game. The log has a line `profile` for each step: the key, the help,
+the import at "Play" with the count of the values, the folder of the profile
+in the game folder, and the end of the import.
+
+**The tests.**
+
+- `.\dev.ps1 build`: the checks of `play_rules_checks.h`: a right file and
+  what the filter keeps and drops, the import after the registry of the game
+  with one `GameDir`, 21 files that are not right, the name in the value
+  `Profile`, the stamp and the one import for each file, the profile in
+  `user.reg` of a prefix, and the help of "Play".
+- `push_profile.ps1 -DryRun` against the registry and the profile of a PC:
+  an export of the key of the game and a hash of each file of the profile
+  folders before and after the run are the same.
+- `emu_game_test.ps1 -NewProfile ... -TestSave pen -PullProfile <folder>`
+  makes the profile `bwvrtest` in the emulator and pulls it (the folder of
+  the profile with the test save in slot 20, and `user.reg` of the prefix).
+  `emu_game_test.ps1 -ProfileFrom <folder>` copies it into a new game folder
+  of the app with `push_profile.ps1 -WineUserReg`, then plays: game 1
+  imports the values, game 2 imports nothing, and no game shows the dialog
+  of a new profile. Game 2 loads slot 20 of the profile. A profile of the
+  emulator, never a profile of the player.
+
+**Known limits:**
+
+- A name of a profile with a character outside the printable characters of
+  ASCII: the script stops, and the app takes no such file.
+- The script takes the VirtualStore first when `GameDir` is in Program
+  Files. A game that runs with administrator rights reads only `GameDir`:
+  give `-From` with that folder.
+- The game on the PC reads `20.sav` of slot 20 from the game folder at its
+  start, and the other files of the slot from the folder of `GameDir`
+  (`tools/desk/README.md`). The script takes slot 20 from the folder of
+  `GameDir` and its VirtualStore only.
+
+**Not shown yet:** the profile of a player in a headset.
 
 ## The session
 

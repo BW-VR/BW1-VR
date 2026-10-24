@@ -2080,7 +2080,7 @@ void StartVrStep() {
                        g_vk_stream_live_drop_us, g_vk_stream_live_drop,
                        g_vk_stream_live_end);
     // The screens with no scene go to the headset app only with the input
-    // channel. With xr_input=0 the PC shows them as before.
+    // channel. With xr_input=0 the StereoIdle path below shows them.
     if (XrInputOn() && g_vk_stream_screens == 0) {
       ModLog("vk stream    : vk_stream_screens=0. The live stream has no frame with "
              "no scene, so the headset app shows nothing of the logos, the videos, "

@@ -502,7 +502,8 @@ value is a `SetupBox` (vtable `0x008D85F0`) that `DialogBoxBase::Init` makes
 and keeps at +4 of the dialog object, a class of its own (`NewProfileBox`,
 `SkipBox`, `MainMenu` and more) [V]. The log names each dialog box that comes
 up, with the class of the dialog object from the RTTI of the game
-(`setup_box.cpp`, the line `setup box`). It finds the dialog object of the
+(`setup_box.cpp`, the line `setup box`), in each mode, also on the PC with
+no headset app. It finds the dialog object of the
 front end in the globals that `FrontEnd::Init` fills
 (`bw::setup::kFrontEndDialogs`). A dialog of another part of the game gives
 the callback of its controls (+0xB0 of the SetupBox).
@@ -580,7 +581,7 @@ picture for both eyes. It is never a projection layer
 PC.
 
 **With a session of the mod on the PC** (planned): a frame with no scene
-still goes out as in 1.4.
+goes out as in 1.4.
 
 - The picture (the plasma background, the loading art, a video) goes on the
   screen quad of 1.4. It is always a quad fixed in the room, and never a

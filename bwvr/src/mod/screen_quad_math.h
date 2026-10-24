@@ -43,9 +43,9 @@ inline bool IsScreenFrame(uint64_t frame) { return frame >= kScreenFrameBase; }
 
 // THE ROUTE OF A FINISHFRAME (h_FinishFrame, after the game drew it).
 //   kNone: not a screen frame. The key is off (vk_stream_screens=0), there
-//     is no input channel (xr_input=0: the PC as before), the FinishFrame is
-//     in an eye pass of the scene, or in an eye pass of the intro
-//     (intro_vr.cpp, which gives its own frames).
+//     is no input channel (xr_input=0: the StereoIdle path of the PC shows
+//     the frame), the FinishFrame is in an eye pass of the scene, or in an
+//     eye pass of the intro (intro_vr.cpp, which gives its own frames).
 //   kSilent: a screen frame that the PC does not show: in the 150 ms after
 //     the last frame of the scene (StereoIdle), the PC holds the last picture
 //     of the scene. The frame of the stream ends with no kScreen.

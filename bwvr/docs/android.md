@@ -1541,14 +1541,15 @@ a row of `settings_table.h` and not a retired key, so a save keeps it.
 comes up, with the class of its dialog object from the RTTI of the game (for
 example `setup box : the dialog box NewProfileBox is up now`), its
 SetupBox, the callback of its controls, the FinishFrame and the frame of
-the controllers (`ui-layer.md`, section 5.2).
+the controllers (`ui-layer.md`, section 5.2). It only reads, and it runs in
+each mode: the log of the PC with `xr_input=0` has these lines too.
 
 **The app** (`stream_screen=1`, the default). The player takes the
 `kScreen` of a frame at its `kFrameEnd` (`ScreenPicture`): a screen of the
 picture of the last walk only when a walk of the frame ended, a screen of
 the pixels of the CPU always (they are state). The newest picture of a
 batch decides: a screen shows on the **screen quad**, a picture of the world
-as before (the projection layer, the stereo screen or the cut scene window).
+in the projection layer, on the stereo screen or in the cut scene window.
 The screen quad is one quad layer for both eyes, opaque, with the pose and
 the size of the `kScreen` and the whole picture: the picture of the last
 walk of the renderer (`VkSceneLastPicture`) goes with a blit and a copy into
@@ -1558,11 +1559,16 @@ picture (`xr_copy_on_change`). It is never a projection layer, and the menu
 and the cursor stay over it. With `ui_panel=1` the dialog boxes of these
 frames are in the picture, as on the PC. The log has a line for the first
 quad and for each change of its source, its size or its quad, and the
-counts at the end. The first frame of the game after "Play" can now be a
-screen frame (`game : the first frame of the game (frame N, a screen with no
-scene)`), and the rate of the frames starts again when the frames of the
-scene start. `stream_screen=0`: no screen quad, the app shows no frame with
-no scene.
+counts at the end. The first frame of the game after "Play" is a screen
+frame of the logos (`game : the first frame of the game (frame N, a screen
+with no scene)`). When the numbers of the frames go from the screen frames
+to the frames of the scene or back, the log has one line (`live : the frames
+of the scene start at frame N`, `live : the screens with no scene start at
+frame N`), and the rate of the frames of a game starts again.
+`stream_screen=0`: no screen quad, the app shows no frame with no scene.
+`stream_screen` and `vk_stream_screens` have no test key: the mod with
+`xr_input=1` has no session, and the app reads its keys at its start and has
+no hotkeys.
 
 **The tests.**
 
@@ -1574,7 +1580,10 @@ no scene.
   `intro_vr=0`, `xr_input=1` with the test writer, the live stream with the
   test reader in screen frames, a record of the screen frames and the
   pictures of each Nth screen frame. Then `bwvr_stream_reader screens` of the
-  capture and of the record.
+  capture and of the record. `-SkipAt`, `-Most` and `-TestFrame` give a
+  capture over the switch to the frames of the scene: the reader leaves
+  after a count of frames (`bwvr_stream_reader read`, the argument "most
+  frames"), because the numbers of the frames go down at the switch.
 - `emu_replay_test.ps1` with that record and the pictures of the PC of its
   screen frames, and `emu_xr_test.ps1 -Live <the run> -Gpu host`: the screen
   quad against the `kScreen` of the feed, no stereo screen and no projection
@@ -1596,7 +1605,21 @@ scene start. Each `kScreen` of the runs has the picture of the last walk
 texture. A frame with the whole state has 1.5 MB. The flow of a game folder
 with no profile is another one: the logos, the video before the intro and
 the dialog of a new profile (see "Play in the app"). With `intro_vr=1` the
-Lionhead logo is an intro in stereo, and its frames are not in the stream.
+Lionhead logo is an intro in stereo, and its frames are not in the stream:
+in a run with the test reader in the stream from screen frame 7401, the log
+has "the screens with no scene end at screen frame 7802, in an eye pass of
+the intro" at the first eye pass of the intro (`VkStreamScreenStop`).
+
+**The switch to the frames of the scene** (`screens_run.ps1 -SkipAt 8000
+-Attach 8800 -Most 350 -TestFrame 60`, `intro_vr=0`): a press of the test at
+frame 8000 of the intro skips the Lionhead logo, and the frames of the scene
+start after screen frame 8965. The capture has 165 screen frames and 185
+frames of the scene (0 to 184, each with a `kView` for a projection layer
+and the panel quads). One screen frame has no `kScreen` and no walk: the
+screen frame that the first frame of the scene ends. The run has no screen
+frame of `kSilent` (150 ms after a frame of the scene), because the game does
+not go back to a screen with no scene. The writer dropped the walks of 17
+frames of the scene for the slow test reader.
 In the A, B, A runs with `xr_input=0` (the build before, this build, the
 build before, the test save of a new game) the frame time is 1.9 ms in each
 run and the scene 1.73, 1.75 and 1.725 ms: the same within the noise.
@@ -1613,6 +1636,16 @@ by more than 24. The app skipped the walks of 16 frames, and a walk of the
 Lionhead logo draws over the picture of the walk before (`vk_keep_picture`),
 so that is the likely cause.
 `-NoScreen` (56 checks): the menu and the cursor alone.
+`emu_xr_test.ps1 -Live` with the capture of the switch (76 checks): the app
+showed the screen quad first, then the projection layer. The log has "live :
+the frames of the scene start at frame 0", the runtime had the screen quad
+before its first projection layer and no screen quad and no stereo screen
+in the lines of its quads after it, the panel quads of the frames of the
+scene show over the projection layer, each eye of the projection layer got
+a copy for each new picture of the scene (47), and the five pictures of the
+test frame (`bwvr-vk-*-00061.bmp`, the left eye, the right eye, the outer
+and the centre image and the panel) are the pictures of the PC (0.00
+percent of the pixels differ by more than 24).
 
 **The game in Wine** (`emu_game_test.ps1`, see "Play in the app"): the
 logos, the video before the intro and the dialog of a new profile show on
@@ -1621,8 +1654,11 @@ the screen quad, and the first frame of the game comes 11.9 s after
 
 **Not shown yet:** the screen quad in a headset (its place, its size and the
 sharpness of the text of a dialog), a screen of the pixels of the CPU (no
-run had one), and the screens with no scene with a session of the mod on
-the PC.
+run had one), a screen frame of `kSilent` (the app shows no new picture for
+it, and its walk with no eye pass gives no picture to the eyes, but no run
+had one), the switch from the frames of the scene back to the screens (a
+save or a load of the game), and the screens with no scene with a session
+of the mod on the PC.
 
 **Known limits:**
 

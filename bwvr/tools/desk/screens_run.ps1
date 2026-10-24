@@ -26,6 +26,17 @@
 # bwvr_stream_reader screens of the capture and of the record, and
 # bwvr_stream_reader compare of the record with the capture.
 #
+# -Most N: the reader leaves after N frames too. The numbers of the frames go
+# down when the frames of the scene start, so a capture over that switch
+# needs it. -SkipAt N (intro_skip_test_frame): at frame N of the intro a
+# press that no hand made skips what is left of the intro (with intro_vr=0
+# the Lionhead logo too), so the frames of the scene start at about the same
+# screen frame in each run. 0 (the default): no skip. -TestFrame N
+# (vk_scene_test_frame): the pictures of the frame N of the scene, the
+# pictures of the PC for emu_xr_test.ps1 -Live. Example, the switch at the
+# end of the Lionhead logo: -SkipAt 8000 -Attach 8800 -Most 350 -TestFrame
+# 60 -More @{ intro_vr = 0 }.
+#
 # -More @{...}: more ini keys, for example vk_device = 0 or
 # vk_stream_screens = 0.
 #
@@ -41,6 +52,9 @@ param(
     [int]$Last = 2040,
     [int]$Record = 0,
     [int]$Every = 0,
+    [int]$Most = 0,
+    [int]$SkipAt = 0,
+    [int]$TestFrame = 0,
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -73,17 +87,18 @@ foreach ($f in @($bin, $ring)) {
 }
 
 $keys = @{
-    backend = 'vulkan'; one_walk = 1; ui_panel = 1; intro_skip_test_frame = 0
+    backend = 'vulkan'; one_walk = 1; ui_panel = 1; intro_skip_test_frame = $SkipAt
     xr_input = 1; xr_input_stale_ms = 0; vk_stream_live = 1 }
+if ($TestFrame -gt 0) { $keys['vk_scene_test_frame'] = $TestFrame }
 if ($Record -gt 0) { $keys['vk_stream_record'] = $base + $Record; $keys['vk_stream_frames'] = 4 }
 if ($Every -gt 0) { $keys['vk_stream_screen_test'] = $Every }
 foreach ($k in $More.Keys) { $keys[$k] = $More[$k] }
 
 $q = Start-Process -FilePath $reader -NoNewWindow -PassThru `
-    -ArgumentList @('read', "`"$ring`"", "`"$out`"", "$($base + $Attach)", "$($base + $Last)", "$(2100 + ($Seconds + 60) * 4)", '0', '0') `
+    -ArgumentList @('read', "`"$ring`"", "`"$out`"", "$($base + $Attach)", "$($base + $Last)", "$(2100 + ($Seconds + 60) * 4)", '0', '0', "$Most") `
     -RedirectStandardOutput (Join-Path $out 'reader.txt') -RedirectStandardError (Join-Path $out 'reader-err.txt')
 $null = $q.Handle  # keeps the exit code
-"the test reader runs (process $($q.Id)): it asks at screen frame $Attach ($($base + $Attach)) and leaves after screen frame $Last"
+"the test reader runs (process $($q.Id)): it asks at screen frame $Attach ($($base + $Attach)) and leaves after screen frame $Last$(if ($Most -gt 0) { " or after $Most frames" })"
 $p = Start-Process -FilePath $writer -NoNewWindow -PassThru `
     -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)", '2100') `
     -RedirectStandardOutput (Join-Path $out 'writer.txt') -RedirectStandardError (Join-Path $out 'writer-err.txt')

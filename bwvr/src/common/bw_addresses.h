@@ -272,14 +272,15 @@ constexpr uintptr_t kVTable = 0x008DF800;  // GestureSystem, 7 virtual functions
 // (mov [edx+0xB0], eax). FrontEnd::Init 0x0053B4D0 keeps the dialog objects
 // of the front end in the globals of two ranges, from 0x00CD0624
 // (ChannelBox) to 0x00CD065C (MainMenu), and from 0x00CD0B0C (EndGameBox)
-// to 0x00CD0B1C (SkirmishGameBox).
+// to 0x00CD0B1C (SkirmishGameBox). kFrontEndDialogs has the first global
+// of each range and the address after its last global.
 namespace setup {
 constexpr uintptr_t kActiveBox = 0x00C4CD20;
 constexpr uintptr_t kSetupBoxVTable = 0x008D85F0;
 constexpr uintptr_t kDialogBox = 0x4;
 constexpr uintptr_t kBoxCallback = 0xB0;
-constexpr uintptr_t kFrontEndDialogs[2][2] = {{0x00CD0620, 0x00CD0664},
-                                              {0x00CD0B08, 0x00CD0B28}};
+constexpr uintptr_t kFrontEndDialogs[2][2] = {{0x00CD0624, 0x00CD0660},
+                                              {0x00CD0B0C, 0x00CD0B20}};
 }  // namespace setup
 
 // The engine's matrix: 4 rows of 3 columns, with the translation in the last

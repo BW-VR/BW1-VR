@@ -137,6 +137,7 @@ struct App {
   // went to the quad.
   uint64_t screen_pictures = 0;
   bool said_no_screen = false;
+  int live_space = -1;  // the last frame of the stream: 1 a screen frame, 0 a frame of the scene
   uint64_t rate_frame = 0;   // the frame and the time of the last line of the frame rate
   double rate_ms = 0.0;
 };
@@ -348,6 +349,15 @@ void PlayLive(App* app) {
       app->live_play_ms = app->live_play_most = 0.0;
     }
     app->live_last = u.frame;
+    // The screen frames have numbers of their own (screen_quad_math.h): one
+    // line when the frames go from the screens to the scene or back.
+    const int space = screen_quad_math::IsScreenFrame(u.frame) ? 1 : 0;
+    if (app->live_space >= 0 && space != app->live_space) {
+      AppLog("live         : %s at frame %llu",
+             space != 0 ? "the screens with no scene start" : "the frames of the scene start",
+             static_cast<unsigned long long>(u.frame));
+    }
+    app->live_space = space;
     if (app->live_whole == 0) {
       if (!stream_ring::PlayInBatch(u, i + 1 == n, app->live_test_frame)) {
         ++app->live_skipped;

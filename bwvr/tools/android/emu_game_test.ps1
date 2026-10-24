@@ -571,7 +571,11 @@ try {
         $withScreen = @($screenQuadLines | Where-Object { $_.Groups[2].Value -match "^$screenQuad" })
         $screenSize = if ($withScreen.Count -gt 0) { [regex]::Match($withScreen[0].Groups[2].Value, "^$screenQuad") } else { $null }
         Expect ($withScreen.Count -gt 0) ("the runtime has the screen quad, 2.6 m wide at 0 0 -2 m, opaque, for both eyes" + $(if ($screenSize) { ": $($screenSize.Groups[2].Value) by $($screenSize.Groups[3].Value) pixels, $($screenSize.Groups[1].Value) m high, $($withScreen.Count) lines" } else { '' }))
-        Expect ($report -notmatch 'quad 0\.000 0\.100 -2\.600 size 2\.600') 'no frame has the quads of the stereo screen'
+        # The stereo screen in the lines "layers" (3 decimals) and "quads" (4
+        # decimals and the turn) of the runtime, and in the log of the app.
+        $stereoAny = 'quad 0\.000 0\.100 -2\.600 size 2\.600|quad 0\.0000 0\.1000 -2\.6000 turn [-0-9. ]+ size 2\.6000'
+        $stereoLines = ([regex]::Matches($report, $stereoAny)).Count
+        Expect ($stereoLines -eq 0 -and $log -notmatch 'a stereo screen of two quads') "no frame has the quads of the stereo screen, and the app made no stereo screen ($stereoLines lines of the runtime)"
         foreach ($name in @('new', 'play')) {
             $m = [regex]::Match($report, "capture \S*/$name-0\.bmp (\d+)x(\d+) lit (\d+)")
             Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of the screen quad after the measure of game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels (the files $name-0.bmp and $name-0.png)" } else { 'none' }))

@@ -2,7 +2,7 @@
 // live stream"). A Windows program for a desktop run, with the ring code of
 // the mod and the app (src/mod/stream_ring.h).
 //
-//   bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame]
+//   bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame] [most frames]
 //     Waits for a new head in the ring file, then for the frame <attach> of
 //     the game, and asks for the whole state as a reader that comes late.
 //     Takes each frame to the frame <last>, then leaves. Writes
@@ -11,7 +11,11 @@
 //     surface, the wait of the writer). With slow ms the reader takes 1 MB
 //     and then sleeps that time, so the ring is full (a test of the drop).
 //     With lag frame the reader reads on to that frame, and counts the
-//     frames that are at the reader in their game frame.
+//     frames that are at the reader in their game frame. With most frames
+//     (not 0) the reader leaves after that many frames too, also when the
+//     numbers of the frames go down (from the screen frames of
+//     src/mod/screen_quad_math.h to the frames of the scene) and never come
+//     to the frame <last>.
 //
 //   bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>
 //     Compares the bytes of each frame of the record with the frame of the
@@ -201,7 +205,7 @@ struct Got {
 };
 
 int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, double seconds,
-         int slow_ms, uint32_t lag_until) {
+         int slow_ms, uint32_t lag_until, uint32_t most) {
   const double start = NowMs();
   const double deadline = start + seconds * 1000.0;
   // A head that is there now is of a run before.
@@ -348,7 +352,7 @@ int Read(const char* ring, const char* out, uint32_t attach, uint32_t last, doub
         CountSurfaces(pending.data() + used, len, &g.surfaces, &g.pixels);
         capture.insert(capture.end(), pending.begin() + used, pending.begin() + used + len);
         got.push_back(g);
-        if (frame >= last) {
+        if (frame >= last || (most > 0 && got.size() >= most)) {
           done = true;
           done_at = NowMs();
         }
@@ -1440,7 +1444,9 @@ int Screens(const char* path) {
   namespace sq = screen_quad_math;
   std::map<uint64_t, bool> pixels;  // the surfaces with their pixels in the stream
   uint64_t frame = 0, screen_frames = 0, scene_frames = 0, screens = 0, cpu = 0;
-  uint64_t walks = 0, faults = 0, lines = 0;
+  uint64_t walks = 0, faults = 0, lines = 0, silent = 0;
+  bool frame_screen = false;  // the frame has a kScreen
+  int space = -1;             // the frame before: 1 a screen frame, 0 a frame of the scene
   ss::Kind kind;
   const uint8_t* body = nullptr;
   uint32_t bytes = 0;
@@ -1450,6 +1456,14 @@ int Screens(const char* path) {
       if (!ss::Body(body, bytes, &f)) continue;
       frame = f.frame;
       walks = 0;
+      frame_screen = false;
+      const int now = sq::IsScreenFrame(frame) ? 1 : 0;
+      if (space >= 0 && now != space) {
+        printf("screens      : %s at frame %llu\n",
+               now != 0 ? "the screens with no scene start" : "the frames of the scene start",
+               static_cast<unsigned long long>(frame));
+      }
+      space = now;
       if (sq::IsScreenFrame(frame)) {
         ++screen_frames;
       } else {
@@ -1465,10 +1479,22 @@ int Screens(const char* path) {
       if (ss::Body(body, bytes, &id)) pixels[id] = false;
     } else if (kind == ss::kWalkBegin) {
       ++walks;
+    } else if (kind == ss::kFrameEnd) {
+      // A screen frame with no kScreen: in the 150 ms after a frame of the
+      // scene the PC shows no new picture (screen_quad_math.h, kSilent).
+      if (sq::IsScreenFrame(frame) && !frame_screen) {
+        ++silent;
+        if (silent <= 20) {
+          printf("screens      : frame %llu, a screen frame with no kScreen, %llu walks in "
+                 "it\n",
+                 static_cast<unsigned long long>(frame), static_cast<unsigned long long>(walks));
+        }
+      }
     } else if (kind == ss::kScreen) {
       ss::ScreenBody b;
       if (!ss::Body(body, bytes, &b)) continue;
       ++screens;
+      frame_screen = true;
       const bool is_cpu = (b.flags & ss::kScreenCpu) != 0;
       if (is_cpu) ++cpu;
       std::string verdict;
@@ -1495,10 +1521,12 @@ int Screens(const char* path) {
     }
   }
   printf("screens      : %s has %llu screen frames and %llu frames of the scene, %llu "
-         "records kScreen (%llu with the pixels of the CPU), %llu faults%s\n",
+         "records kScreen (%llu with the pixels of the CPU), %llu screen frames with no "
+         "kScreen, %llu faults%s\n",
          path, static_cast<unsigned long long>(screen_frames),
          static_cast<unsigned long long>(scene_frames), static_cast<unsigned long long>(screens),
-         static_cast<unsigned long long>(cpu), static_cast<unsigned long long>(faults),
+         static_cast<unsigned long long>(cpu), static_cast<unsigned long long>(silent),
+         static_cast<unsigned long long>(faults),
          r.Broken() ? ", and the stream stops in a record" : "");
   return screens > 0 && faults == 0 && !r.Broken() ? 0 : 1;
 }
@@ -1512,7 +1540,8 @@ int main(int argc, char** argv) {
     const double seconds = argc > 6 ? atof(argv[6]) : 120.0;
     const int slow_ms = argc > 7 ? atoi(argv[7]) : 0;
     const uint32_t lag_until = argc > 8 ? static_cast<uint32_t>(strtoul(argv[8], nullptr, 10)) : 0;
-    return Read(argv[2], argv[3], attach, last, seconds, slow_ms, lag_until);
+    const uint32_t most = argc > 9 ? static_cast<uint32_t>(strtoul(argv[9], nullptr, 10)) : 0;
+    return Read(argv[2], argv[3], attach, last, seconds, slow_ms, lag_until, most);
   }
   if (argc == 4 && strcmp(argv[1], "compare") == 0) return Compare(argv[2], argv[3]);
   if ((argc == 3 || argc == 4) && strcmp(argv[1], "views") == 0) {
@@ -1533,7 +1562,7 @@ int main(int argc, char** argv) {
     return WindowFeed(argv[2], argv[3], strtoull(argv[4], nullptr, 10),
                       strtoull(argv[5], nullptr, 10), atoi(argv[6]), atoi(argv[7]));
   }
-  printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame]\n"
+  printf("bwvr_stream_reader read <ring> <out folder> [attach frame] [last frame] [seconds] [slow ms] [lag frame] [most frames]\n"
          "bwvr_stream_reader compare <ring-capture.bin> <bwvr-stream.bin>\n"
          "bwvr_stream_reader views <stream> [<bwvr-view.rec>]\n"
          "bwvr_stream_reader view-compare <bwvr-view.rec> <bwvr-view.rec>\n"

@@ -82,7 +82,7 @@ inline void ScreenQuadChecks() {
         "kScreen is kind 23, the last kind", static_cast<double>(ss::kScreen), 23);
   {
     // A stream of version 2 (no kScreen, the streams of the runs before)
-    // still plays, a stream of version 3 plays, and a later version does not.
+    // plays, a stream of version 3 plays, and a later version does not.
     const uint32_t v2[2] = {ss::kMagic, 2}, v3[2] = {ss::kMagic, 3}, v4[2] = {ss::kMagic, 4};
     ss::Reader r2(reinterpret_cast<const uint8_t*>(v2), sizeof(v2));
     ss::Reader r3(reinterpret_cast<const uint8_t*>(v3), sizeof(v3));

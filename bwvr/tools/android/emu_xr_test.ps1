@@ -117,6 +117,15 @@
     of the quad that the runtime read back at the end against the picture of
     the PC of the last frame of the feed.
 
+    A feed of screen frames and then frames of the scene with a projection
+    layer (screens_run.ps1 over the end of the Lionhead logo): the test checks
+    the projection layer of the scene, and the switch: the screen quad first,
+    then the projection layer, the lines "the frames of the scene start" and
+    "frames come" of the log, and no screen quad and no stereo screen in the
+    lines of the quads of the runtime after its first projection layer. The
+    runtime reads back the eye pictures at the end of the script, when the
+    feed is at its frames of the scene.
+
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
     the CPU) or host (the GPU of the PC).
@@ -254,6 +263,12 @@ if ($viewSource) {
 }
 # The feed has screens and no picture of the world in a projection layer.
 $ScreensOnly = $Screens -and -not $Projection
+# The feed has screens and then frames of the scene with a projection layer
+# (the switch at the end of the Lionhead logo, screens_run.ps1).
+$ScreensThenWorld = $Screens -and $Projection
+# The quads of the stereo screen in the lines "layers" (3 decimals) and
+# "quads" (4 decimals and the turn) of the report of the runtime.
+$stereoAny = 'quad 0\.000 0\.100 -2\.600 size 2\.600|quad 0\.0000 0\.1000 -2\.6000 turn [-0-9. ]+ size 2\.6000'
 $Avd = 'bwvr_xr_test'
 $Image = 'system-images;android-34;google_apis;x86_64'
 $Package = 'org.bwvr.quest'
@@ -412,7 +427,8 @@ try {
         "$(200 + $T) exit")
     # The pictures of the eyes of the projection layer, one time: an image of
     # the size of the render takes a long time to read back in the emulator.
-    if ($Projection -and -not $lastFlat) { Add-Content -LiteralPath $script -Encoding ascii -Value "$(40 + $T) eyes start" }
+    # A feed with screens first has the projection layer only at its end.
+    if ($Projection -and -not $lastFlat) { Add-Content -LiteralPath $script -Encoding ascii -Value "$($(if ($ScreensThenWorld) { 190 } else { 40 }) + $T) eyes start" }
     # The quads of the mod in each of the first frames, while the pictures of
     # a fade come (-QuadFrames).
     if ($QuadFrames) { Add-Content -LiteralPath $script -Encoding ascii -Value @(1..60 | ForEach-Object { "$_ quads cards$_" }) }
@@ -510,7 +526,8 @@ try {
             $cursorQuadS = ' quad [-0-9.]+ [-0-9.]+ [-0-9.]+ turn [-0-9. ]+ size [0-9.]+ [0-9.]+ rect 0 0 64x64 eye 0 flags 2'
             $quadLinesS = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
             $modQuads = @($quadLinesS | ForEach-Object { [regex]::Replace($_.Groups[2].Value, "($menuQuadS)($cursorQuadS)?$", '') })
-            Expect ($log -notmatch 'a stereo screen of two quads' -and $report -notmatch 'quad 0\.000 0\.100 -2\.600 size 2\.600') 'the app made no stereo screen'
+            $stereoLinesS = ([regex]::Matches($report, $stereoAny)).Count
+            Expect ($log -notmatch 'a stereo screen of two quads' -and $stereoLinesS -eq 0) "the app made no stereo screen ($stereoLinesS lines of the runtime with its quads)"
             Expect ($report -notmatch '(?m)^frame \d+ projection ') 'the runtime had no projection layer'
             Expect ($feedScreens.Count -gt 0) "the feed has $($feedScreens.Count) records kScreen"
             if ($NoScreen) {
@@ -581,7 +598,8 @@ try {
         $eyesLine = [regex]::Match($log, 'xr           : a projection layer of two swapchains of (\d+) by (\d+) for the pictures of the renderer')
         Expect $eyesLine.Success ("the app made the two swapchains of the projection layer" + $(if ($eyesLine.Success) { ", $($eyesLine.Groups[1].Value) by $($eyesLine.Groups[2].Value)" } else { '' }))
         if (-not $AllWindow) { Expect ($log -match 'xr           : the pictures of the renderer go out in a projection layer, with the values of frame \d+ of the mod') 'the pictures of the renderer go out in a projection layer' }
-        Expect ($report -notmatch 'quad 0\.000 0\.100 -2\.600 size 2\.600') 'no frame has the quads of the stereo screen'
+        $stereoLinesP = ([regex]::Matches($report, $stereoAny)).Count
+        Expect ($stereoLinesP -eq 0) "no frame has the quads of the stereo screen ($stereoLinesP lines)"
         $layerLines = @([regex]::Matches($report, '(?m)^frame (\d+) projection (eye 0 pose .* fov \S+ \S+ \S+ \S+) rect (\d+) (\d+) (\d+)x(\d+) (eye 1 pose .* fov \S+ \S+ \S+ \S+) rect (\d+) (\d+) (\d+)x(\d+)\r?$'))
         $matched = 0
         $frames = @()
@@ -640,6 +658,28 @@ try {
             Expect ($m.Success -and [int]$m.Groups[3].Value -gt 100000) "the picture of eye $eye of the projection layer has the scene ($($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels)"
         }
     }
+    if ($ScreensThenWorld -and -not $NoScreen) {
+        # THE SWITCH FROM THE SCREENS WITH NO SCENE TO THE FRAMES OF THE SCENE
+        # (a capture of screens_run.ps1 over the end of the Lionhead logo):
+        # first the screen quad, then the projection layer with no screen quad
+        # and no stereo screen.
+        $screenAt = $log.IndexOf('xr           : the screen quad shows screen')
+        $worldAt = $log.IndexOf('xr           : the pictures of the renderer go out in a projection layer')
+        Expect ($screenAt -ge 0 -and $worldAt -gt $screenAt) "the app showed the screen quad first, then the projection layer (the lines at the characters $screenAt and $worldAt of the log)"
+        $sceneStart = [regex]::Match($log, 'live         : the frames of the scene start at frame (\d+)')
+        Expect $sceneStart.Success ("the log says that the frames of the scene start" + $(if ($sceneStart.Success) { ": frame $($sceneStart.Groups[1].Value)" } else { '' }))
+        Expect ($log -match 'live         : frames come\. The first is frame 10\d{8}') 'the log says that frames come, the first a screen frame'
+        $firstProjection = [regex]::Match($report, '(?m)^frame (\d+) projection ')
+        $quadLinesW = @([regex]::Matches($report, '(?m)^frame (\d+) quads(.*?)\r?$'))
+        $screenQuadW = 'quad 0\.0000 0\.0000 -2\.0000 turn 0\.0000 0\.0000 0\.0000 1\.0000 size 2\.6000 [0-9.]+ rect 0 0 \d+x\d+ eye 0 flags 0'
+        $before = @($quadLinesW | Where-Object { $firstProjection.Success -and [int]$_.Groups[1].Value -lt [int]$firstProjection.Groups[1].Value -and $_.Groups[2].Value -match $screenQuadW })
+        $after = @($quadLinesW | Where-Object { $firstProjection.Success -and [int]$_.Groups[1].Value -ge [int]$firstProjection.Groups[1].Value })
+        $afterScreen = @($after | Where-Object { $_.Groups[2].Value -match $screenQuadW })
+        $afterStereo = @($after | Where-Object { $_.Groups[2].Value -match $stereoAny })
+        Expect ($firstProjection.Success -and $before.Count -gt 0 -and $after.Count -gt 0 -and $afterScreen.Count -eq 0 -and $afterStereo.Count -eq 0) ("the runtime had the screen quad before its first projection layer (frame $($firstProjection.Groups[1].Value)), and no screen quad and no stereo screen in the lines of the quads after it ($($before.Count) lines before with the screen quad, $($after.Count) lines after, $($afterScreen.Count) of them with the screen quad, $($afterStereo.Count) with the stereo screen)")
+        $lastProjection = @([regex]::Matches($report, '(?m)^frame (\d+) layers \d+ projection'))
+        Expect ($lastProjection.Count -gt 0) "the runtime has frames with the projection layer after the switch ($($lastProjection.Count) lines of the layers)"
+    }
     if ($Layers -and $NoLayers) {
         # stream_layers=0: the projection layer, the menu and the cursor, and
         # no other quad.
@@ -664,6 +704,9 @@ try {
         $runtimeLayers = New-Object System.Collections.Generic.List[object]
         foreach ($m in $quadLines) {
             $text = [regex]::Replace($m.Groups[2].Value, "($menuQuad)($cursorQuad)?$", '')
+            # A line of the screen quad of a screen frame of the feed is no
+            # line of the quad layers of the mod (the checks of the switch).
+            if ($ScreensThenWorld -and $feedScreens.Values -contains $text) { continue }
             $runtimeLayers.Add(@([int]$m.Groups[1].Value, $text))
         }
         $withLayers = @($runtimeLayers | Where-Object { $_[1] -ne '' })
@@ -789,6 +832,7 @@ public static class CardBmp {
         foreach ($l in $cardText) { Write-Host "         $l" }
         if ($QuadFrames) { Expect ($matched.Count -ge 2) "the readbacks of the quads of the first frames have $($matched.Count) different pictures of the cards, each with the bytes of a new picture that the app logs" }
         if ($feedWindow -and $cardChecks -eq 0) { Write-Host '         no picture of a card: each capture of the runtime has a frame of the cut scene window' }
+        elseif ($cardFrames.Count -eq 0) { Write-Host '         the feed has no card, only other quad layers of the mod, so no picture of a card is compared' }
         else { Expect ($cardChecks -gt 0 -and $cardSame -eq $cardChecks) "the pictures of the cards that the runtime read back have the pixels of the pictures of the mod in the stream ($cardSame of $cardChecks the same bytes, $($matched.Count) different pictures, of $logged new pictures in the log of the app)" }
         if ($feedWindow) {
             # THE CUT SCENE WINDOW: a quad of each eye of the swapchains of the
@@ -826,6 +870,16 @@ public static class CardBmp {
             Expect ([int]$liveLine.Groups[3].Value -gt 0) "a feed faster than the session: the app skipped the walks of $($liveLine.Groups[3].Value) frames and played $($liveLine.Groups[2].Value) frames whole"
         }
         $what = $(if ($Projection) { 'the projection layer' } else { 'the stereo screen' })
+        # A batch with a screen picture gives a copy to the screen quad, and
+        # none to the eyes. A batch of a screen frame with no kScreen and no
+        # walk (the screen frame that the first frame of the scene ends) gives
+        # no new picture.
+        if ($ScreensThenWorld) {
+            $screenPics = [regex]::Match($log, 'xr           : the screen quad \(stream_screen=1\): (\d+) screen pictures')
+            if ($screenPics.Success) { $pictures -= [int]$screenPics.Groups[1].Value }
+            $silentFrames = [regex]::Match($screenSummary, ', (\d+) screen frames with no kScreen')
+            if ($silentFrames.Success) { $pictures -= [int]$silentFrames.Groups[1].Value }
+        }
         if (-not $ScreensOnly) { Expect ($screenLine.Success -and $pictures -gt 0 -and [int]$screenLine.Groups[1].Value -ge $pictures -and [int]$screenLine.Groups[2].Value -ge $pictures) ("each eye of $what got a copy for each new picture (" + $(if ($screenLine.Success) { "$($screenLine.Groups[1].Value) and $($screenLine.Groups[2].Value) copies, $pictures pictures" } else { 'no line in the log' }) + ')') }
         if ($Projection) {
             $frameLine = [regex]::Match($log, 'xr           : \d+ copies of the projection layer for eye 0 and \d+ for eye 1\. (\d+) frames with the projection layer, (\d+) frames with the stereo screen')

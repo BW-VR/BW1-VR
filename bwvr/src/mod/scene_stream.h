@@ -232,9 +232,15 @@ struct CardPictureBody {
   uint64_t picture;        // the hash of the pixels
 };
 
+// The bits of PanelQuadBody::visible. A reader that knows only kPanelQuadShows
+// takes a value other than 0 as a quad that shows, so the mod sets
+// kPanelQuadText only together with kPanelQuadShows.
+constexpr uint32_t kPanelQuadShows = 1u << 0;  // bwvr::PanelQuad::visible
+constexpr uint32_t kPanelQuadText = 1u << 1;   // a dialog box of the game on this quad takes text: the app shows its keyboard
+
 // One panel quad (bwvr::PanelQuad). rect is in the pixels of the panel image.
 struct PanelQuadBody {
-  uint32_t visible;
+  uint32_t visible;  // kPanelQuadShows, kPanelQuadText
   int32_t rect[4];
   float position[3];
   float orientation[4];

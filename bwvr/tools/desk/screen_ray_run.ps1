@@ -25,8 +25,9 @@
 # the buttons of the box (0x00C4CD0C). So the click ends the logo, and the
 # box stays up over the first frames of the scene, as with a mouse.
 #
-# -Row normal, select, skip (the default: "Skip straight to the Creature
-# select") or keep. -More @{...}: more ini keys, for example
+# -Row normal ("Start the game normally"), select ("Skip straight to the
+# Creature select"), skip (the default: "Skip all of the Creature
+# tutorial") or keep ("Keep your old Creature"). -More @{...}: more ini keys, for example
 # screen_pointer = 0 (the old way: the press does nothing, and the logo plays
 # to its end).
 #

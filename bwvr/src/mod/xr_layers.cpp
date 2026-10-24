@@ -11,6 +11,9 @@
 #include "xr_layers.h"
 
 extern void ModLog(const char* format, ...);
+// controllers.cpp: a dialog box of the game takes text in a frame of the
+// scene, and panel_keys=1.
+bool ControllersPanelText();
 
 namespace {
 
@@ -22,6 +25,12 @@ XrLayersOptions g_options;
 // The panel quads of this frame (XrLayersPanel), until the end of the frame.
 bool g_have_panel = false;
 ss::PanelBody g_panel = {};
+// The newest panel quads for the pointer on the panel, and the time of them.
+ss::PanelBody g_last_panel = {};
+ULONGLONG g_last_panel_tick = 0;
+// The text flag of the last kPanel, for one line of the log at each change.
+int g_last_text = 0;
+int g_text_lines = 0;
 
 // The newest picture of each card, for the hash of a picture and the pixels
 // of a new one.
@@ -127,7 +136,28 @@ void XrLayersPanel(uint32_t width, uint32_t height, const bwvr::PanelQuad quads[
   bwvr::PanelQuad creature;
   const bool have = bwvr::XrScreen::TakeStagedPanelQuad(&creature, !session);
   g_panel = ql::MakePanel(width, height, quads, have, creature);
+  // A dialog box of the game that takes text asks the app for its keyboard
+  // (panel_keys=1, controllers.cpp).
+  ql::MarkPanelText(&g_panel, ControllersPanelText());
+  const int text = (g_panel.quads[0].visible & ss::kPanelQuadText) != 0 ? 1 : 0;
+  if (text != g_last_text && g_text_lines < 40) {
+    ++g_text_lines;
+    ModLog("xr layers    : %s", text != 0
+                                    ? "a dialog box on the menu panel quad takes text, so the "
+                                      "kPanel asks the app for its keyboard"
+                                    : "no dialog box on the menu panel quad takes text");
+  }
+  g_last_text = text;
   g_have_panel = true;
+  g_last_panel = g_panel;
+  g_last_panel_tick = GetTickCount64();
+}
+
+bool XrLayersLastPanel(ss::PanelBody* out, uint64_t* age_ms) {
+  if (g_last_panel_tick == 0) return false;
+  *out = g_last_panel;
+  *age_ms = GetTickCount64() - g_last_panel_tick;
+  return true;
 }
 
 void XrLayersEndFrame(uint64_t frame, int source, bool to_stream) {

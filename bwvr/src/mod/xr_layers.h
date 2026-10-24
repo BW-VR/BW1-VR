@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "../vr/xr_screen.h"
+#include "scene_stream.h"
 
 struct XrLayersOptions {
   // xr_input_layers: 1 (the default) with xr_input=1 the interface goes as in
@@ -50,6 +51,10 @@ bool XrLayersRecording();
 void XrLayersPanel(uint32_t width, uint32_t height, const bwvr::PanelQuad quads[2],
                    bool session);
 
+// THE LAST PANEL QUADS, for the pointer on the panel (controllers.cpp): the
+// newest kPanel of XrLayersPanel and its age in ms. False when no frame had
+// panel quads.
+bool XrLayersLastPanel(scene_stream::PanelBody* out, uint64_t* age_ms);
 // THE END OF THE FRAME, at the place of XrScreen::EndFrame. frame: the frame
 // of the controllers of the frame (as kView). source: 0 the session (the
 // stage stays for EndFrame), 1 the invented head, 2 the input channel.

@@ -44,6 +44,7 @@
 #include <vector>
 
 #include "../vr/xr_screen.h"
+#include "controller_math.h"
 #include "scene_stream.h"
 
 namespace quad_layer_math {
@@ -118,7 +119,7 @@ inline ss::CardBody MakeCard(int card, const bwvr::CardLayer& l, uint64_t pictur
 inline ss::PanelQuadBody MakePanelQuad(const bwvr::PanelQuad& q) {
   ss::PanelQuadBody b;
   memset(&b, 0, sizeof(b));
-  b.visible = q.visible ? 1u : 0u;
+  b.visible = q.visible ? ss::kPanelQuadShows : 0u;
   for (int i = 0; i < 4; ++i) b.rect[i] = q.rect[i];
   for (int i = 0; i < 3; ++i) b.position[i] = q.position[i];
   for (int i = 0; i < 4; ++i) b.orientation[i] = q.orientation[i];
@@ -148,7 +149,9 @@ inline ss::PanelBody MakePanel(uint32_t width, uint32_t height,
 // image of width by height. False when the quad does not show.
 inline bool PanelQuadRect(const ss::PanelQuadBody& q, uint32_t width, uint32_t height,
                           int32_t out[4]) {
-  if (q.visible == 0 || !(q.width > 0.0f) || !(q.height > 0.0f)) return false;
+  if ((q.visible & ss::kPanelQuadShows) == 0 || !(q.width > 0.0f) || !(q.height > 0.0f)) {
+    return false;
+  }
   const int32_t x = q.rect[0] < 0 ? 0 : q.rect[0];
   const int32_t y = q.rect[1] < 0 ? 0 : q.rect[1];
   int32_t w = q.rect[2];
@@ -161,6 +164,42 @@ inline bool PanelQuadRect(const ss::PanelQuadBody& q, uint32_t width, uint32_t h
   out[2] = w;
   out[3] = h;
   return true;
+}
+
+// THE KEYBOARD OF THE APP IN A FRAME OF THE SCENE (docs/android.md, "The
+// dialog boxes by the controllers"). A dialog box of the game is on the menu
+// panel quad (quads[0]). While it takes text, the mod sets kPanelQuadText on
+// that quad, and only on a quad that shows.
+inline void MarkPanelText(ss::PanelBody* p, bool text) {
+  ss::PanelQuadBody& q = p->quads[0];
+  if (text && (q.visible & ss::kPanelQuadShows) != 0) {
+    q.visible |= ss::kPanelQuadText;
+  } else {
+    q.visible &= ~ss::kPanelQuadText;
+  }
+}
+// True when the menu panel quad shows and asks for the keyboard. rect gets
+// the rect of the quad in the panel image.
+inline bool PanelText(const ss::PanelBody& p, int32_t rect[4]) {
+  return (p.quads[0].visible & ss::kPanelQuadText) != 0 &&
+         PanelQuadRect(p.quads[0], p.width, p.height, rect);
+}
+
+// The panel quads of a frame as targets of the ray of a hand
+// (controller_math.h, RayPanels): out[0] to out[2], with the rect of each
+// quad cut to the panel image as the app shows it.
+inline void PanelTargets(const ss::PanelBody& p, controller_math::RayTarget out[3]) {
+  for (int i = 0; i < 3; ++i) {
+    const ss::PanelQuadBody& q = p.quads[i];
+    controller_math::RayTarget& t = out[i];
+    memset(&t, 0, sizeof(t));
+    t.panel = true;
+    t.on = PanelQuadRect(q, p.width, p.height, t.rect);
+    for (int k = 0; k < 3; ++k) t.position[k] = q.position[k];
+    for (int k = 0; k < 4; ++k) t.orientation[k] = q.orientation[k];
+    t.size[0] = q.width;
+    t.size[1] = q.height;
+  }
 }
 
 inline ss::WindowBody MakeWindow(const bwvr::WindowLayer& l) {

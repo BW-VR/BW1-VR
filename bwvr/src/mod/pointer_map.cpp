@@ -99,6 +99,9 @@ void ScriptCameraAfterGameCamera(void* camera);
 bool StereoIdle();
 // controllers.cpp: the motion controller as a second owner of the pointer.
 bool ControllerRenderPixel(float* x, float* y, bool* off_view);
+// controllers.cpp: the pixel of the panel image under the ray while a
+// dialog box of a frame of the scene is up (panel_pointer=1).
+bool ControllersPanelPixel(float* x, float* y);
 bool ControllerPointing();
 bool ControllerMoved();
 void ControllerRestMotion();
@@ -1994,10 +1997,18 @@ void PointerMapApply() {
   // The controller's aim, as a render pixel. A ray behind the head has no
   // pixel, and the pointer keeps its last one. The clamp below cuts a pixel
   // past the edge of the render, so the Hand stops at the edge of the view.
+  // While a dialog box of a frame of the scene is up and the ray is on a
+  // panel quad of the headset app, the pixel is the pixel of the panel
+  // image under the ray (controllers.cpp, panel_pointer=1). The panel image
+  // has the size of the render, and the game draws the box there at the
+  // pixels of its hit test.
   if (use_controller && g_have_true && focused) {
     float cx, cy;
     bool off_view = false;
-    if (ControllerRenderPixel(&cx, &cy, &off_view)) {
+    if (ControllersPanelPixel(&cx, &cy)) {
+      g_true_x = cx;
+      g_true_y = cy;
+    } else if (ControllerRenderPixel(&cx, &cy, &off_view)) {
       g_true_x = cx;
       g_true_y = cy;
     }

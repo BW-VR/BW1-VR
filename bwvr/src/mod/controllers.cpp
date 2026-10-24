@@ -50,6 +50,7 @@
 #include <string.h>
 
 #include "../common/bw_addresses.h"
+#include "../../android/src/keyboard_layout.h"
 #include "../common/input_channel.h"
 #include "../vr/xr_screen.h"
 #include "MinHook.h"
@@ -64,6 +65,7 @@
 #include "hand_exact_math.h"
 #include "miracle.h"
 #include "note_depth.h"
+#include "quad_layer_math.h"
 #include "radial_menu.h"
 #include "screen_quad_math.h"
 #include "script_frame_math.h"
@@ -73,6 +75,7 @@
 #include "text_click_math.h"
 #include "walk_math.h"
 #include "xr_input.h"
+#include "xr_layers.h"
 #include "zoom_math.h"
 
 extern void ModLog(const char* format, ...);
@@ -1668,10 +1671,73 @@ bool ScreenPointerActs() {
          GetTickCount64() - g_screen_tick <= 250;
 }
 
-// The hand that points: on the screen quad the hand that pulled its trigger
-// last, else the hand of the side of the player.
+// THE POINTER ON THE PANEL QUADS (panel_pointer=1, docs/controllers.md,
+// section 13). In a frame of the scene a dialog box of the game (the start
+// dialog of a new game, the Main Menu over a saved game, the Esc menu, a
+// load or a save) draws on the menu panel quad of the headset app
+// (ui_panel=1, docs/ui-layer.md). The game takes the mouse in such a box as
+// in a frame with no scene, with one loop more: the interface of the scene
+// (GInterface::InterfaceActionProcessFirstGUIFeatures 0x005D2A70) copies the
+// held buttons of LHMouse (0x00E85304, & 0x43) to the buttons of the box
+// (0x00C4CD0C) while a box is up, and the Setup callback of FinishFrame gives
+// the pointer of LHMouse to the box. So the mod gives the box a pixel of the
+// panel image as the pointer of LHMouse, and the trigger as the left button:
+//
+//   - PanelFrame (in ControllersFrame, once for each frame of the scene)
+//     takes the newest panel quads (xr_layers.cpp, the kPanel of the frame
+//     before), meets them with the aim ray of the hand that pulled its
+//     trigger last (RayPanels of controller_math.h, the nearest hit wins),
+//     and latches the surface of the pointer (PanelSurfaceStep).
+//   - PointerMapApply (pointer_map.cpp) writes the pixel of the panel in
+//     place of the pixel of the eye view, once at the start of the next
+//     frame, where it writes each pointer of a controller.
+//   - The pump gives the trigger to the game as the left button, as in each
+//     frame of the scene. A press starts only with the ray on a panel quad.
+//
+// When the ray leaves the panel quads, the pointer is the pointer of the eye
+// view again. A press keeps its surface until its release. With xr_input=0
+// nothing changes. panel_pointer=0: the pointer comes from the eye view in a
+// dialog box of a frame of the scene too.
+//
+// THE KEYS (panel_keys=1). While the box takes text, the kPanel of the frame
+// has kPanelQuadText on the menu panel quad (xr_layers.cpp), and the app
+// shows its keyboard in front of the lower part of that quad
+// (keyboard_layout.h, QuadOnPanel). The mod knows that quad too: it stops
+// the ray, so a press on the keyboard is no press on the panel. The keys of
+// the app go to the game as WM_CHAR, as in a frame with no scene.
+// panel_keys=0: no kPanelQuadText, and a frame of the scene takes no key of
+// the app.
+int g_panel_pointer = -1;  // panel_pointer, read once
+int g_panel_keys = -1;     // panel_keys, read once
+bool g_panel_have = false;  // the last frame of the scene met panel quads with a box up
+controller_math::PanelSurface g_panel_surface = {false, false, 0.0f, 0.0f};
+int g_panel_target = -2;    // the target of the last log line of the surface
+bool g_panel_acting = false;
+uint64_t g_panel_frames = 0;
+uint64_t g_panel_presses = 0;
+uint64_t g_panel_dropped = 0;
+int g_panel_logs = 0;
+const int kMaxPanelLogs = 80;
+
+// The pointer on the panel acts in this frame: the key is on, the input
+// channel gives the hands, a dialog box is up in a frame of the scene, and
+// the last frame of the scene had panel quads.
+bool PanelPointerActs() {
+  return g_panel_pointer == 1 && XrInputOn() && MenuUp() && !StereoIdle() &&
+         g_panel_have;
+}
+
+// The pointer is on the panel now: the pixel of the panel is the pointer of
+// the game.
+bool PanelPointerOn() {
+  return PanelPointerActs() && g_panel_surface.on && g_panel_surface.have;
+}
+
+// The hand that points: on the screen quad and on the panel quads the hand
+// that pulled its trigger last, else the hand of the side of the player.
 int PointingIndex() {
   if (ScreenPointerActs()) return g_screen_hands.hand;
+  if (PanelPointerActs()) return g_screen_hands.hand;
   return g_left_handed ? 0 : 1;
 }
 
@@ -1948,6 +2014,22 @@ void ReconcileController(int button, ULONGLONG now, bool quiet = false) {
     ++g_presses_sent;
     if (button == kLeft) TextClickSent();
     if (!quiet) Pulse(PointingIndex());
+    // A press on a dialog box of a frame of the scene (panel_pointer=1).
+    if (PanelPointerActs()) {
+      if (g_panel_surface.on) ++g_panel_presses;
+      if (g_panel_logs < kMaxPanelLogs) {
+        ++g_panel_logs;
+        if (g_panel_surface.on) {
+          ModLog("controllers  : panel quads: the %s hand presses the %s button at "
+                 "the pixel %.0f %.0f of the panel image, frame %llu",
+                 PointingIndex() == 0 ? "left" : "right", kButtonName[button],
+                 g_panel_surface.x, g_panel_surface.y, g_frame);
+        } else {
+          ModLog("controllers  : panel quads: the %s button presses with the "
+                 "pointer of the eye view, frame %llu", kButtonName[button], g_frame);
+        }
+      }
+    }
     if (g_event_logs < kMaxEventLogs) {
       ++g_event_logs;
       ModLog("controllers  : the %s button is down%s, frame %llu",
@@ -3079,16 +3161,26 @@ void PumpButtons(ULONGLONG now) {
       // there. A press is then a plain click at the place of the pointer,
       // which is all that a cut scene can use. The click that a text waits
       // for is such a click too: the game takes it at each place.
+      //
+      // While a dialog box is up on the panel quads (panel_pointer=1), a
+      // press starts only with the ray on a panel quad, as on the screen
+      // quad: the pixel of the eye view is no place on the box.
+      const bool panel = PanelPointerActs();
+      const bool in_view = panel ? PanelPointerOn() : InView();
       want = text_click_math::PressMayStart(
-          ((g_ctrl_mask >> b) & 1) != 0, InView(), CutsceneWindowFlat(),
+          ((g_ctrl_mask >> b) & 1) != 0, in_view, CutsceneWindowFlat(),
           click_on && b == kLeft, click_waits);
       if (!want) {
         g_button[b].need_up = true;
         ++g_dropped;
+        if (panel) ++g_panel_dropped;
         if (g_event_logs < kMaxEventLogs) {
           ++g_event_logs;
-          ModLog("controllers  : the %s button press started off view, so "
-                 "it is dropped, frame %llu", kButtonName[b], g_frame);
+          ModLog(panel ? "controllers  : the %s button press started with the ray off "
+                         "the panel quads, so it is dropped, frame %llu"
+                       : "controllers  : the %s button press started off view, so "
+                         "it is dropped, frame %llu",
+                 kButtonName[b], g_frame);
         }
       }
     }
@@ -4028,6 +4120,10 @@ void RecordEyes(bwvr::EyeView eyes[2], int64_t* time, int64_t* period) {
 }
 }  // namespace
 
+namespace {
+void PanelFrame();
+}  // namespace
+
 // Once for each frame the scene is drawn, after the head pose of the frame is
 // known. The first call is frame 0 for the script.
 void ControllersFrame() {
@@ -4054,6 +4150,8 @@ void ControllersFrame() {
     return;
   }
   LatchFront();
+  // The pointer on the panel quads, before the aim of the hand that points.
+  if (g_fake.mode == 0 && XrInputOn()) PanelFrame();
   if (record) {
     const char* const profiles[2] = {HandProfileOf(0), HandProfileOf(1)};
     XrInputRecordFrame(g_frame,
@@ -4946,6 +5044,197 @@ void ControllersPump() {
 // and width_m (the quad of the kScreen of a render of render_w by
 // render_h).
 bool SetupBoxTakesText();
+
+namespace {
+// THE KEYS OF THE APP (screen_keys, panel_keys): takes the keys of the ring
+// of the input channel and posts each one to the game window as WM_CHAR
+// while a dialog box takes text. on: the key of the frame is on. A key that
+// comes while no box takes text is dropped.
+void TakeAppKeys(bool on) {
+  uint32_t codes[input_channel::kKeys];
+  const uint32_t n = XrInputTakeKeys(codes, input_channel::kKeys);
+  if (n == 0) return;
+  const bool text = on && SetupBoxTakesText();
+  const HWND window = GameWindowHandle();
+  for (uint32_t i = 0; i < n; ++i) {
+    const bool posted =
+        text && window != nullptr &&
+        PostMessageA(window, WM_CHAR, static_cast<WPARAM>(codes[i]), 1) != 0;
+    if (posted) {
+      ++g_screen_keys_posted;
+    } else {
+      ++g_screen_keys_dropped;
+    }
+    if (g_screen_logs < kMaxScreenLogs) {
+      ++g_screen_logs;
+      char name[16];
+      if (codes[i] == input_channel::kKeyBack) {
+        strcpy_s(name, "back space");
+      } else if (codes[i] == input_channel::kKeyEnter) {
+        strcpy_s(name, "Enter");
+      } else if (codes[i] == ' ') {
+        strcpy_s(name, "space");
+      } else {
+        sprintf_s(name, "\"%c\"",
+                  codes[i] >= 32 && codes[i] < 127 ? static_cast<char>(codes[i]) : '?');
+      }
+      ModLog("controllers  : the key %s of the app %s", name,
+             posted ? "goes to the game (WM_CHAR)"
+             : text ? "is dropped: the game has no window"
+                    : "is dropped: no dialog box takes text");
+    }
+  }
+}
+
+// The keys panel_pointer and panel_keys, read once with the first frame of
+// the input channel.
+void ReadPanelKeys() {
+  if (g_panel_pointer >= 0) return;
+  g_panel_pointer = IniInt("panel_pointer", 1) != 0 ? 1 : 0;
+  g_panel_keys = IniInt("panel_keys", 1) != 0 ? 1 : 0;
+  ModLog("controllers  : panel_pointer=%d. %s", g_panel_pointer,
+         g_panel_pointer != 0
+             ? "While a dialog box is up in a frame of the scene, the ray of the "
+               "hand that pulled its trigger last points at the panel quads of "
+               "the headset app, and the trigger is the left button"
+             : "In a dialog box of a frame of the scene the pointer comes from "
+               "the eye view");
+  ModLog("controllers  : panel_keys=%d. %s", g_panel_keys,
+         g_panel_keys != 0
+             ? "While a dialog box of a frame of the scene takes text, the app "
+               "shows its keyboard at the menu panel quad, and its keys go to "
+               "the game as the keys of a keyboard"
+             : "In a frame of the scene the app shows no keyboard, and the mod "
+               "takes no key of the app");
+}
+
+// The pointer on the panel stops: one line with the counts.
+void PanelStop(const char* why) {
+  if (g_panel_acting) {
+    g_panel_acting = false;
+    ModLog("controllers  : panel quads: the pointer stops (%s), frame %llu, after "
+           "%llu frames of the scene. %llu presses on the panel, %llu presses "
+           "off the panel quads", why, g_frame, g_panel_frames, g_panel_presses,
+           g_panel_dropped);
+    g_panel_frames = g_panel_presses = g_panel_dropped = 0;
+  }
+  g_panel_have = false;
+  g_panel_surface.on = false;
+  g_panel_surface.have = false;
+  g_panel_target = -2;
+}
+
+// THE POINTER ON THE PANEL QUADS, once for each frame of the scene with the
+// input channel, after the hands of the frame (see PanelPointerActs).
+void PanelFrame() {
+  ReadPanelKeys();
+  if (g_panel_keys == 1) TakeAppKeys(true);
+  if (g_panel_pointer == 0) return;
+  scene_stream::PanelBody panel;
+  uint64_t age = 0;
+  const bool box = MenuUp() && !StereoIdle();
+  // The panel quads of the frame before. Each frame with a box draws it on
+  // the menu panel quad, so an old kPanel is of no box.
+  if (!box || !XrLayersLastPanel(&panel, &age) || age > 250) {
+    PanelStop(!MenuUp() ? "no dialog box is up" : "no panel quads");
+    return;
+  }
+  controller_math::RayTarget targets[4];
+  quad_layer_math::PanelTargets(panel, targets);
+  if (!targets[0].on && !targets[1].on && !targets[2].on) {
+    PanelStop("no panel quad shows");
+    return;
+  }
+  // The keyboard of the app stops the ray (keyboard_layout.h).
+  memset(&targets[3], 0, sizeof(targets[3]));
+  int32_t text_rect[4];
+  if (quad_layer_math::PanelText(panel, text_rect)) {
+    keyboard_layout::Quad k;
+    const scene_stream::PanelQuadBody& m = panel.quads[0];
+    const float size[2] = {m.width, m.height};
+    if (keyboard_layout::QuadOnPanel(m.position, m.orientation, size, &k)) {
+      targets[3].on = true;
+      for (int i = 0; i < 3; ++i) targets[3].position[i] = k.position[i];
+      for (int i = 0; i < 4; ++i) targets[3].orientation[i] = k.orientation[i];
+      targets[3].size[0] = k.size[0];
+      targets[3].size[1] = k.size[1];
+    }
+  }
+  const float trigger[2] = {g_hands[0].trigger, g_hands[1].trigger};
+  const bool active[2] = {g_hands[0].active, g_hands[1].active};
+  const int before = g_screen_hands.hand;
+  const int hand = controller_math::ScreenHandsStep(&g_screen_hands, trigger, active);
+  const bwvr::HandInput& h = g_hands[hand];
+  controller_math::PanelHit hit = {false, -1, 0.0f, 0.0f, 0.0f};
+  if (h.active && h.aim_valid) {
+    float forward[3];
+    controller_math::AimForward(h.aim_orientation, forward);
+    hit = controller_math::RayPanels(h.aim_position, forward, targets, 4);
+  }
+  controller_math::PanelSurfaceStep(&g_panel_surface, hit, g_ctrl_mask != 0);
+  g_panel_have = true;
+  ++g_panel_frames;
+  if (!g_panel_acting) {
+    g_panel_acting = true;
+    const scene_stream::PanelQuadBody& m = panel.quads[0];
+    const int32_t* r = targets[0].rect;
+    // The test writer reads the menu panel quad from this line.
+    ModLog("controllers  : panel quads: a dialog box is up in a frame of the "
+           "scene, frame %llu. The %s hand points. The menu panel quad at %.4f "
+           "%.4f %.4f m, turn %.4f %.4f %.4f %.4f, %.4f by %.4f m, the rect %d %d "
+           "%d %d of the panel image of %u by %u",
+           g_frame, hand == 0 ? "left" : "right", m.position[0], m.position[1],
+           m.position[2], m.orientation[0], m.orientation[1], m.orientation[2],
+           m.orientation[3], m.width, m.height, r[0], r[1], r[2], r[3], panel.width,
+           panel.height);
+  }
+  if (hand != before && g_panel_logs < kMaxPanelLogs) {
+    ++g_panel_logs;
+    ModLog("controllers  : panel quads: the %s hand points now (its trigger), "
+           "frame %llu", hand == 0 ? "left" : "right", g_frame);
+  }
+  // One line for each change of the target of the ray.
+  const int target = g_panel_surface.on ? 10 + (hit.hit ? hit.target : -1) : hit.target;
+  if (target != g_panel_target && g_panel_logs < kMaxPanelLogs) {
+    ++g_panel_logs;
+    static const char* const kNames[4] = {"menu", "help", "Creature", ""};
+    if (g_panel_surface.on && hit.hit) {
+      ModLog("controllers  : panel quads: the ray is on the %s panel quad at the "
+             "pixel %.0f %.0f of the panel image, frame %llu",
+             kNames[hit.target], hit.x, hit.y, g_frame);
+    } else if (g_panel_surface.on) {
+      ModLog("controllers  : panel quads: the ray leaves the panel quads with a "
+             "press held, so the pointer keeps the pixel %.0f %.0f, frame %llu",
+             g_panel_surface.x, g_panel_surface.y, g_frame);
+    } else if (hit.target == 3) {
+      ModLog("controllers  : panel quads: the ray is on the keyboard of the app, "
+             "so the pointer is the pointer of the eye view, frame %llu", g_frame);
+    } else {
+      ModLog("controllers  : panel quads: the ray is off the panel quads, so the "
+             "pointer is the pointer of the eye view, frame %llu", g_frame);
+    }
+  }
+  g_panel_target = target;
+}
+}  // namespace
+
+// For pointer_map.cpp, once a frame: the pixel of the panel image under the
+// ray, while the pointer is on the panel quads (panel_pointer=1). False
+// when the pointer comes from the eye view.
+bool ControllersPanelPixel(float* x, float* y) {
+  if (!g_on || !PanelPointerOn()) return false;
+  *x = g_panel_surface.x;
+  *y = g_panel_surface.y;
+  return true;
+}
+
+// For xr_layers.cpp: a dialog box of a frame of the scene takes text, and
+// panel_keys=1. The kPanel then asks the app for its keyboard.
+bool ControllersPanelText() {
+  return g_on && g_panel_keys == 1 && XrInputOn() && !StereoIdle() && MenuUp() &&
+         SetupBoxTakesText();
+}
+
 void ControllersScreenFrame(float distance_m, float width_m, int render_w,
                             int render_h) {
   if (!g_on || !g_installed || !XrInputOn()) return;
@@ -4966,42 +5255,7 @@ void ControllersScreenFrame(float distance_m, float width_m, int render_w,
   }
   // THE KEYS. Each screen frame takes the keys of the ring, so a key never
   // waits for a later box.
-  {
-    uint32_t codes[input_channel::kKeys];
-    const uint32_t n = XrInputTakeKeys(codes, input_channel::kKeys);
-    if (n > 0) {
-      const bool text = g_screen_keys == 1 && SetupBoxTakesText();
-      const HWND window = GameWindowHandle();
-      for (uint32_t i = 0; i < n; ++i) {
-        const bool posted =
-            text && window != nullptr &&
-            PostMessageA(window, WM_CHAR, static_cast<WPARAM>(codes[i]), 1) != 0;
-        if (posted) {
-          ++g_screen_keys_posted;
-        } else {
-          ++g_screen_keys_dropped;
-        }
-        if (g_screen_logs < kMaxScreenLogs) {
-          ++g_screen_logs;
-          char name[16];
-          if (codes[i] == input_channel::kKeyBack) {
-            strcpy_s(name, "back space");
-          } else if (codes[i] == input_channel::kKeyEnter) {
-            strcpy_s(name, "Enter");
-          } else if (codes[i] == ' ') {
-            strcpy_s(name, "space");
-          } else {
-            sprintf_s(name, "\"%c\"",
-                      codes[i] >= 32 && codes[i] < 127 ? static_cast<char>(codes[i]) : '?');
-          }
-          ModLog("controllers  : the key %s of the app %s", name,
-                 posted ? "goes to the game (WM_CHAR)"
-                 : text ? "is dropped: the game has no window"
-                        : "is dropped: no dialog box takes text");
-        }
-      }
-    }
-  }
+  TakeAppKeys(g_screen_keys == 1);
   if (g_screen_pointer == 0) return;
   const bool acts = MenuUp() && StereoIdle() && render_w > 0 && render_h > 0;
   if (!acts) {

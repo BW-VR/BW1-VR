@@ -154,6 +154,32 @@ inline bool QuadUnder(const float screen_position[3], const float screen_size[2]
   return true;
 }
 
+// THE QUAD of the keyboard in a frame of the scene, from the menu panel quad
+// of the mod (the pose and the size of quads[0] of its kPanel). The menu
+// panel quad is large (the menu rect, 1280 by 960 pixels at 16 pixels a
+// degree is about 80 by 60 degrees), and the dialog box of the game is a
+// small part of it in its middle. So the keyboard is not under the whole
+// quad but in front of its lower part: kWidthOfPanel of its width, the top
+// kPanelDrop of its height under its center, kPanelFrontMeters in front of
+// it toward the head, and with the turn of the panel quad. The mod knows this
+// quad too: a ray on the keyboard is not on the panel (controllers.cpp).
+constexpr float kWidthOfPanel = 0.5f;
+constexpr float kPanelDrop = 0.35f;
+constexpr float kPanelFrontMeters = 0.03f;
+inline bool QuadOnPanel(const float panel_position[3], const float panel_orientation[4],
+                        const float panel_size[2], Quad* q) {
+  if (!(panel_size[0] > 0.0f) || !(panel_size[1] > 0.0f)) return false;
+  q->size[0] = panel_size[0] * kWidthOfPanel;
+  q->size[1] = q->size[0] * kHeight / kWidth;
+  const float local[3] = {0.0f, -panel_size[1] * kPanelDrop - q->size[1] * 0.5f,
+                          kPanelFrontMeters};
+  float turned[3];
+  controller_math::QuatRotate(panel_orientation, local, turned);
+  for (int i = 0; i < 3; ++i) q->position[i] = panel_position[i] + turned[i];
+  for (int i = 0; i < 4; ++i) q->orientation[i] = panel_orientation[i];
+  return true;
+}
+
 // The pixel of the picture where a ray hits the quad. False when it misses.
 inline bool RayToPixel(const float origin[3], const float direction[3], const Quad& q,
                        float* x, float* y) {

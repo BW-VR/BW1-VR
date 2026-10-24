@@ -187,6 +187,10 @@ class XrApp {
   bool ScreenQuadShown() const { return flat_on_; }
   // The kScreen of the newest screen picture.
   const scene_stream::ScreenBody& ScreenQuadBody() const { return flat_body_; }
+  // THE MENU PANEL QUAD THAT ASKS FOR THE KEYBOARD: true when the last frame
+  // showed the menu panel quad of the mod with kPanelQuadText (a dialog box of
+  // the game in a frame of the scene takes text), with its pose and its size.
+  bool PanelTextQuad(float position[3], float orientation[4], float size[2]) const;
 
   // THE KEYBOARD OF THE APP (screen_keyboard, docs/android.md, "The keyboard
   // of the app"): one quad for both eyes with the picture of the keyboard
@@ -275,6 +279,12 @@ class XrApp {
   uint64_t wall_frames_ = 0;
   uint64_t window_frames_ = 0;
   bool said_panel_ = false;
+  // The menu panel quad of the last frame that asks for the keyboard
+  // (PanelTextQuad).
+  bool panel_text_ = false;
+  float panel_text_position_[3] = {0.0f, 0.0f, 0.0f};
+  float panel_text_orientation_[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  float panel_text_size_[2] = {0.0f, 0.0f};
   bool said_walls_ = false;
   bool said_window_ = false;
 

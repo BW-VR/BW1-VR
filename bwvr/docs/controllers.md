@@ -8,8 +8,9 @@ reach the game. It has five parts:
 - how a controller press becomes a game input (sections 3 and 5),
 - the scripted controller for desktop runs (section 4),
 - the features of the controllers: the aim ray (8), the game window behind
-  (9), the ring (10), the Temple (11) and the dialog boxes of the screens
-  with no scene in the headset app (12).
+  (9), the ring (10), the Temple (11), the dialog boxes of the screens with
+  no scene in the headset app (12) and the dialog boxes of the frames of the
+  scene on the panel quads of the headset app (13).
 
 The Hand itself is in `hand.md`. The grab of an object is in `grab.md`, the
 throw in `throw.md`, the Creature in `creature.md`, the miracles in
@@ -2760,7 +2761,7 @@ those of section 3.6. `vk stream    :` has a line for each change of
 - `screen_ray_run.ps1` (a desk run): a new game with the logos, `intro_vr=0`,
   `intro_skip=0` and `xr_input=1`. The test writer (`bwvr_input_writer
   script`) waits for the line of the log that names `SkipBox`, aims the right
-  hand at the row "Skip straight to the Creature select" on the screen quad
+  hand at the row "Skip all of the Creature tutorial" on the screen quad
   and pulls the trigger.
 
   With `screen_pointer=1` (a render of 4080 by 3264): the mod took the press
@@ -2778,10 +2779,6 @@ those of section 3.6. `vk stream    :` has a line for each change of
 
 ### 12.6 Not done, not proven, and what needs the headset
 
-- A dialog box in a frame of the scene (the start dialog of a new game after
-  the Lionhead logo, the Esc menu, a load or a save) is on the panel quads
-  of the headset app, and the pointer there comes from the eye view
-  (`ui-layer.md`, section 5). The ray does not point at the panel.
 - A session of the mod on the PC: a frame with no scene goes out as in
   `ui-layer.md`, 1.4, not on a fixed quad, so the pointer of this section
   acts only with the input channel (`xr_input=1`).
@@ -2792,3 +2789,158 @@ those of section 3.6. `vk stream    :` has a line for each change of
 - Only a headset shows the aim at the screen quad and at the keyboard, the
   size of the cursor of the game at 2 m, and whether a press of the trigger
   on the quad moves the ray off the button.
+
+## 13. The dialog boxes of the frames of the scene
+
+Some dialog boxes of the game come in frames of the scene, over the land:
+the start dialog of a new game (`SkipBox`, which stays up after the
+Lionhead logo), the Main Menu over a saved game, the Esc menu, and the load
+and the save. With `ui_panel=1` the Setup callback draws them on the panel
+image, and the headset app shows them on the menu panel quad
+(`ui-layer.md`, sections 2 and 4). With the input channel (`xr_input=1`) the
+ray of a hand points at the panel quads, the trigger clicks, and a box that
+takes text gets the keys of the keyboard of the app (`panel_pointer=1`,
+`panel_keys=1`).
+
+### 13.1 What the game does with the mouse in a box of a frame of the scene [V]
+
+- While a box is up, the interface of the scene
+  (`GInterface::InterfaceActionProcessFirstGUIFeatures` `0x005D2A70`) copies
+  the held buttons of `LHMouse` (`0x00E85304`, `& 0x43`) to the buttons of
+  the box (`0x00C4CD0C`), sets the cursor of the front end on
+  (`FrontEnd::SetCursorOn`), and gives `0x14` back. Before that it asks the
+  box that holds the mouse (`[0x00CC629C]`, its virtual function at `+0x18`)
+  and copies no button when that box says no.
+- The Setup callback of FinishFrame gives the pointer of `LHMouse`
+  (`0x00E852C0`, `0x00E852C4`) and those buttons to the box, as in a frame
+  with no scene (12.1). The front end draws its cursor at the pointer, so
+  the cursor of the game is in the panel image.
+- `PointerMapApply` writes the pointer of `LHMouse` once a frame, after
+  `LHMouse::UpdateDeltaPos` and before the interface and FinishFrame read it
+  (1.6).
+
+### 13.2 What the mod does (`panel_pointer=1`)
+
+- In each frame of the scene with the input channel, `ControllersFrame`
+  runs `PanelFrame` after the hands of the frame: while a dialog box is up
+  (`MenuUp`), it takes the newest panel quads (`XrLayersLastPanel` of
+  `xr_layers.cpp`: the `kPanel` of the frame before, no older than 250 ms).
+  The hand that pulled its trigger last points (`ScreenHandsStep`, as on
+  the screen quad). Its aim ray meets each panel quad that shows, with the
+  rect that the app shows of the panel image (`PanelTargets` of
+  `quad_layer_math.h`). The nearest hit along the ray wins (`RayPanels` of
+  `controller_math.h`). A hit on a panel quad is a pixel of the panel
+  image, which has the size of the render, so it is the pixel at which the
+  game drew the box and tests its controls.
+- The surface of the pointer (`PanelSurfaceStep`): with no button of the
+  controller held, the pointer is on the panel while the ray hits a panel
+  quad, and it is the pointer of the eye view (3.1) when the ray leaves the
+  panel quads. A press keeps its surface until its release: a press that
+  started on the panel keeps the last pixel of the panel when the ray
+  leaves the quads, and a press that started on the eye view stays there.
+- `PointerMapApply` writes the pixel of the panel in place of the pixel of
+  the eye view (`ControllersPanelPixel`), once at the start of the next
+  frame, where it writes each pointer of a controller. The owner rule of
+  3.5 stays: the controller owns the pointer after a turn of the aim or a
+  button.
+- The pump gives the trigger to the game as the left button and the grip as
+  the right button, as in each frame of the scene (3.6). While the pointer
+  acts on the panel, a press starts only with the ray on a panel quad. A
+  press with the ray off the quads is dropped, and the trigger must open
+  before it can press again.
+- The keyboard of the app at the menu panel quad (13.3) stops the ray: a
+  ray on it is no hit on the panel, so a pull of the trigger on a key
+  clicks nothing in the game.
+- With `xr_input=0` nothing changes. `panel_pointer=0`: in a dialog box of
+  a frame of the scene the pointer comes from the eye view, as before.
+
+### 13.3 The keys (`panel_keys=1`)
+
+While the box takes text (`SetupBoxTakesText`, as in 12.3), the mod sets
+`kPanelQuadText` on the menu panel quad of the `kPanel` of the frame
+(`xr_layers.cpp`, `MarkPanelText` of `quad_layer_math.h`). The flag is a bit
+of `PanelQuadBody::visible` beside `kPanelQuadShows`, so the record keeps its
+size and the stream its version. The app then shows its keyboard in front
+of the lower part of that quad (`QuadOnPanel` of `keyboard_layout.h`,
+`android.md`, "The dialog boxes by the controllers"). Each frame of the
+scene takes the keys of the ring of the input channel and posts each one to
+the game window as `WM_CHAR` while a box takes text, as in 12.3.
+`panel_keys=0`: no `kPanelQuadText`, and a frame of the scene takes no key of
+the app.
+
+### 13.4 Keys of the ini and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `panel_pointer` | 1 | With `xr_input=1`: while a dialog box is up in a frame of the scene, the ray points at the panel quads and the trigger clicks there. 0: the pointer comes from the eye view |
+| `panel_keys` | 1 | With `xr_input=1`: the `kPanel` asks the app for its keyboard while a box of a frame of the scene takes text, and its keys go to the game. 0: no `kPanelQuadText`, and the mod takes no key in a frame of the scene |
+
+Neither key is in the launcher, and neither has a test key, for the reason
+of 12.4. "Play" of the app does not write them, because their default is the
+value of a run.
+
+The log (`controllers  : panel quads:`): the keys at the first frame of the
+input channel, one line when the pointer starts in a box, with the menu
+panel quad (its place, its turn, its size and its rect, the test writer
+reads them from this line), one line for each change of the target of the
+ray (a panel quad and the pixel, off the quads, the keyboard), each press
+with its pixel, a change of the hand that points, and one line when the
+pointer stops, with the counts. A press off the quads is a line "the left
+button press started with the ray off the panel quads". `xr layers    :`
+has a line for each change of `kPanelQuadText`.
+
+### 13.5 Tests
+
+- `.\dev.ps1 build`: the checks of `panel_pointer_checks.h`: the pixel of a
+  hit on the menu panel quad, the last pixel of the rect, a ray past the
+  quads, a quad that does not show, the nearest quad in each order, the
+  keyboard at the menu panel quad (its size, its place, its turn) and that
+  it stops the ray, the surface of the pointer with and with no press held,
+  and the text flag of `kPanel`.
+- `panel_ray_run.ps1` (a desk run): a new game with the logos, `intro_vr=0`,
+  `intro_skip=0`, `ui_panel=1` and `xr_input=1`. The test writer clicks the
+  start dialog on the screen quad, so the Lionhead logo ends (12.5), waits
+  for the line of the menu panel quad (the word `panel` of the writer), then
+  aims at a row of the start dialog on that quad and pulls the trigger, then
+  at OK.
+
+  With a render of 4080 by 3264 the menu panel quad is 2.35 by 1.76 m at 0,
+  -0.24, -1.38 m, the rect 1400 1152 1280 960. The row "Skip straight to the
+  Creature select": the mod pressed at the pixels 1897 1612 and 1893 1745
+  (OK) of the panel image, the left button of the game went down after each
+  press, and the dialog went ("setup box : no dialog box is up now"). Then
+  the game saved the game in slot 20 of the profile (the guard of the run
+  put the profile back) and played a cut scene. The row "Skip all of the
+  Creature tutorial" in the same way: the presses at 1897 1655 and 1893
+  1745, and the dialog went. The panel image of a frame between the two
+  presses (`vk_scene_test_frame`) has the check mark in that row and the
+  cursor of the game on OK, and the eye pictures of that frame have no
+  dialog.
+
+  With `panel_pointer=0` and the same aims (the writer took the quad from
+  the line of the run before, the word `panelquad`): the left button of the
+  game went down two times at the pixels of the eye view 1445 1904 and 1403
+  2223, off the dialog, and the dialog stayed up to the end of the run.
+- `emu_game_test.ps1 -PanelClicks ... -MenuClick ...` (the emulator,
+  `android.md`, "The dialog boxes by the controllers"): the start dialog of
+  game 1 and the Main Menu of game 2 ("Continue Game") by the ray on the
+  menu panel quad, in the game in Wine. Each press went to the game at its
+  pixel, and each box went after it.
+
+### 13.6 Not done, not proven, and what needs the headset
+
+- A session of the mod on the PC: the pointer on the panel quads acts only
+  with the input channel (`ui-layer.md`, section 5).
+- When the ray leaves the panel quads, the pointer goes at once to the pixel
+  of the eye view of the ray, and the Hand of the game goes there. The plan
+  of `ui-layer.md`, 5.5, items 4 and 5 (the last pixel of the world, and the
+  camera code with that pixel) is not built.
+- Only the menu panel quad holds a dialog box. A hit on the help panel or
+  the Creature panel is a pixel of the panel image too, but no box is
+  there.
+- No run has had a box that takes text in a frame of the scene (the name of
+  a saved game), so `kPanelQuadText` and the keyboard at the panel quad have
+  run only in the checks.
+- Only a headset shows the aim at the panel quads, the size of the cursor of
+  the game on the menu panel quad, and the place of the keyboard at the
+  panel quad.

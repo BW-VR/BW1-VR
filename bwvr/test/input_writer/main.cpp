@@ -36,7 +36,19 @@
 //                            kScreen for a render of <render width> by
 //                            <render height>, <distance cm> in front of the
 //                            origin, 200 by default, <width cm> wide, 260
-//                            by default)
+//                            by default), or after the step panel to the
+//                            pixel x, y of the panel image on the menu
+//                            panel quad
+//       panel                the next step waits until <log> has the line
+//                            of the mod with the menu panel quad of a
+//                            dialog box in a frame of the scene, and aim
+//                            goes to that quad from then on
+//       panelquad <the rest of the line of the mod>
+//                            aim goes to the menu panel quad of the text
+//                            after "The menu panel quad at " of that line,
+//                            with no wait (a run with panel_pointer=0, in
+//                            which the mod writes no such line)
+//       screen               aim goes to the screen quad again
 //       trigger <hand> <0|1> the trigger of the hand
 //       slots <n>            the next step waits for n slots
 //       key <word>           one key into the ring of the keys, as the
@@ -275,8 +287,9 @@ bool ReadScript(const char* path, std::vector<ScriptStep>* steps) {
       sscanf_s(rest, "%15s %f", hand, static_cast<unsigned>(sizeof(hand)), &s.a);
     } else if (s.word == "slots") {
       s.a = static_cast<float>(atof(rest));
-    } else if (s.word == "wait" || s.word == "key") {
+    } else if (s.word == "wait" || s.word == "key" || s.word == "panelquad") {
       s.text = rest;
+    } else if (s.word == "panel" || s.word == "screen") {
     } else {
       printf("the script has a word that the writer does not know: %s\n", line);
       fclose(f);
@@ -289,9 +302,9 @@ bool ReadScript(const char* path, std::vector<ScriptStep>* steps) {
   return true;
 }
 
-// True when the file has the text. The mod writes its log with a shared
-// read.
-bool LogHas(const char* path, const std::string& text) {
+// The rest of the first line of the file after the text, or false when the
+// file does not have the text. The mod writes its log with a shared read.
+bool LogFind(const char* path, const std::string& text, std::string* rest) {
   HANDLE h = CreateFileA(path, GENERIC_READ,
                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -303,7 +316,39 @@ bool LogHas(const char* path, const std::string& text) {
     all.append(buffer, got);
   }
   CloseHandle(h);
-  return all.find(text) != std::string::npos;
+  const size_t at = all.find(text);
+  if (at == std::string::npos) return false;
+  if (rest != nullptr) {
+    const size_t from = at + text.size();
+    const size_t end = all.find('\n', from);
+    *rest = all.substr(from, end == std::string::npos ? std::string::npos : end - from);
+  }
+  return true;
+}
+bool LogHas(const char* path, const std::string& text) {
+  return LogFind(path, text, nullptr);
+}
+
+// THE MENU PANEL QUAD of a dialog box in a frame of the scene, from the line
+// of the mod (controllers.cpp, PanelFrame).
+struct PanelQuad {
+  float position[3];
+  float orientation[4];
+  float size[2];
+  float rect[4];
+};
+const char* const kPanelLine =
+    "controllers  : panel quads: a dialog box is up in a frame of the scene";
+bool ReadPanelQuad(const std::string& rest, PanelQuad* q) {
+  const size_t at = rest.find("The menu panel quad at ");
+  if (at == std::string::npos) return false;
+  return sscanf_s(rest.c_str() + at,
+                  "The menu panel quad at %f %f %f m, turn %f %f %f %f, %f by %f m, "
+                  "the rect %f %f %f %f",
+                  &q->position[0], &q->position[1], &q->position[2], &q->orientation[0],
+                  &q->orientation[1], &q->orientation[2], &q->orientation[3], &q->size[0],
+                  &q->size[1], &q->rect[0], &q->rect[1], &q->rect[2], &q->rect[3]) == 13 &&
+         q->rect[2] > 0.0f && q->rect[3] > 0.0f;
 }
 
 // The code of a key of the script, or 0.
@@ -392,6 +437,8 @@ int Script(const char* channel, const char* script, int seconds, int head_second
   bool waiting_log = false;
   ULONGLONG next_look = 0;
   uint32_t frame = 0, pulses = 0, keys = 0;
+  PanelQuad panel = {};
+  bool on_panel = false;
   while (GetTickCount64() < end) {
     // The steps that do not wait.
     while (step < steps.size() && wait_slots == 0) {
@@ -408,16 +455,52 @@ int Script(const char* channel, const char* script, int seconds, int head_second
         if (!LogHas(log, s.text)) break;
         waiting_log = false;
         printf("slot %u: the log has \"%s\"\n", frame, s.text.c_str());
+      } else if (s.word == "panel") {
+        const ULONGLONG t = GetTickCount64();
+        if (!waiting_log) {
+          waiting_log = true;
+          printf("slot %u: wait for the menu panel quad in the log\n", frame);
+          fflush(stdout);
+        }
+        if (t < next_look) break;
+        next_look = t + 100;
+        std::string rest;
+        if (!LogFind(log, kPanelLine, &rest)) break;
+        waiting_log = false;
+        if (!ReadPanelQuad(rest, &panel)) {
+          printf("slot %u: the line of the menu panel quad has no quad: %s\n", frame,
+                 rest.c_str());
+          break;
+        }
+        on_panel = true;
+        printf("slot %u: the menu panel quad is at %.4f %.4f %.4f m, %.4f by %.4f m, the "
+               "rect %.0f %.0f %.0f %.0f\n",
+               frame, panel.position[0], panel.position[1], panel.position[2], panel.size[0],
+               panel.size[1], panel.rect[0], panel.rect[1], panel.rect[2], panel.rect[3]);
+      } else if (s.word == "panelquad") {
+        on_panel = ReadPanelQuad(s.text, &panel);
+        printf("slot %u: %s\n", frame,
+               on_panel ? "aim goes to the menu panel quad of the script"
+                        : "the script has no menu panel quad after panelquad");
+      } else if (s.word == "screen") {
+        on_panel = false;
+        printf("slot %u: aim goes to the screen quad\n", frame);
       } else if (s.word == "aim") {
         ic::Hand& x = d.hands[s.hand];
-        const float target[3] = {(s.a / render_w - 0.5f) * width_m,
-                                 (0.5f - s.b / render_h) * quad_h, -distance_m};
+        float target[3] = {(s.a / render_w - 0.5f) * width_m,
+                           (0.5f - s.b / render_h) * quad_h, -distance_m};
+        if (on_panel) {
+          controller_math::QuadPoint(panel.position, panel.orientation, panel.size,
+                                     (s.a - panel.rect[0]) / panel.rect[2],
+                                     (s.b - panel.rect[1]) / panel.rect[3], target);
+        }
         const float dir[3] = {target[0] - x.aim_position[0], target[1] - x.aim_position[1],
                               target[2] - x.aim_position[2]};
         controller_math::AimAlong(dir, x.aim_orientation);
         memcpy(x.grip_orientation, x.aim_orientation, sizeof(x.grip_orientation));
-        printf("slot %u: the %s hand aims at the pixel %.0f %.0f of the screen quad\n",
-               frame, s.hand == 0 ? "left" : "right", s.a, s.b);
+        printf("slot %u: the %s hand aims at the pixel %.0f %.0f of the %s\n", frame,
+               s.hand == 0 ? "left" : "right", s.a, s.b,
+               on_panel ? "panel image on the menu panel quad" : "screen quad");
       } else if (s.word == "trigger") {
         d.hands[s.hand].trigger = s.a > 0.5f ? 1.0f : 0.0f;
         printf("slot %u: the %s trigger %s\n", frame, s.hand == 0 ? "left" : "right",

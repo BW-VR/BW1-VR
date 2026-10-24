@@ -3585,6 +3585,7 @@ void CreatureChecks() {
 #include "wine_rules_checks.h"
 #include "play_rules_checks.h"
 #include "screen_pointer_checks.h"
+#include "panel_pointer_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4014,6 +4015,7 @@ int main() {
   wine_rules_checks::WineRulesChecks();
   play_rules_checks::PlayRulesChecks();
   screen_pointer_checks::ScreenPointerChecks();
+  panel_pointer_checks::PanelPointerChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

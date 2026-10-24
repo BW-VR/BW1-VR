@@ -579,13 +579,14 @@ that moves while the Hand takes it.
 - **P8. Pictures in the hints.** A flat picture of each button, then a
   picture of the controller with the button lit, then a 3D model of the
   controller (`controller-hints.md`).
-- **P9. The pointer on the interface panel**, and the screens with no
-  scene (menus, loading, videos) on a panel in the room with a session of
-  the mod on the PC (`ui-layer.md`, section 6). The headset app has the
-  screen quad, and the ray and the trigger on a dialog box there
-  (`controllers.md`, section 12). In the headset app the start dialog of a
-  new game after the Lionhead logo and the Esc menu are dialog boxes of a
-  frame of the scene, on the panel quads, so they need this pointer.
+- **P9. The pointer on the interface panel** and the screens with no scene
+  (menus, loading, videos) on a panel in the room, with a session of the mod
+  on the PC (`ui-layer.md`, sections 5 and 6). The headset app has them: the
+  screen quad and the panel quads, with the ray, the trigger and the
+  keyboard of the app on a dialog box there (`controllers.md`, sections 12
+  and 13). Open in the headset app: the last pixel of the world when the
+  ray leaves the panel quads (`ui-layer.md`, 5.5), and a box that takes
+  text in a frame of the scene in a run.
 - **P10. The tabletop mode** (play mode 3) is a test mode. Not built: a
   game camera over the table, the mouse, the wheel, the stick and the
   double click for the table, the ring and the depth key for the key color,
@@ -810,10 +811,9 @@ that moves while the Hand takes it.
     them on a quad fixed in the room (`android.md`, "The screens with no
     scene"). A controller points at a dialog box on the screen quad, the
     trigger clicks, and the keyboard of the app types the name of a new
-    profile (`android.md`, "The dialog boxes by the controllers"). Open: a
-    dialog box of a frame of the scene in the headset app (the start dialog
-    of a new game after the Lionhead logo, the Esc menu: the pointer on the
-    panel, P9), the sound in a headset (the audio
+    profile. A controller points at a dialog box of a frame of the scene on
+    the panel quads in the same way (`android.md`, "The dialog boxes by the
+    controllers"). Open: the sound in a headset (the audio
     driver `wineaaudio` of patch 0003 gives the sound of Wine to AAudio,
     `audio.md`, "In Wine on Android"), the pace of the frames with
     `vk_device=0` in a headset (`vk_pace`, `android.md`, "The pace of the

@@ -122,6 +122,25 @@
     so the logo ends, and the frames of the scene come with the dialog over
     them (controllers.md, section 12.1).
 
+.PARAMETER PanelClicks
+    With -SkipClick: x,y pairs of pixels of the render, for example a row
+    of the start dialog and then its OK. After the click on the screen quad
+    the start dialog stays over the frames of the scene, on the menu panel
+    quad of the mod (docs/controllers.md, section 13). When the log of the
+    mod has the line of the menu panel quad, the runtime points at each
+    pixel on that quad (the panel image has the size of the render) and
+    pulls the trigger. The test checks each press of the mod on the panel at
+    its pixel, the left button of the game, and that the start dialog goes
+    after the last press.
+
+.PARAMETER MenuClick
+    x,y of a button of the Main Menu of the game over a saved game (for
+    example "Continue Game") on the render. In game 2 ("Play in VR", the
+    test save of -TestSave) the Main Menu is over the land, on the menu
+    panel quad. When the log of the mod has the line of the menu panel quad,
+    the runtime points at that pixel on the quad and pulls the trigger. The
+    test checks the press on the panel and that the Main Menu goes after it.
+
 .PARAMETER TestSave
     With -NewProfile: the name of a test save of local\test-saves of the
     main checkout (a saved game that a test run made). After game 1 the test
@@ -146,6 +165,8 @@ param(
     [string]$ProfileName = 'bwvrtest',
     [int[]]$SkipClick = @(),
     [int[]]$ProfileOk = @(),
+    [int[]]$PanelClicks = @(),
+    [int[]]$MenuClick = @(),
     [string]$TestSave = '',
     [switch]$Keep
 )
@@ -297,7 +318,7 @@ function ProfileDialog([int]$PlayAt) {
     Expect ($mod -match 'vk stream    : screen frame \d+: a dialog box takes text, so the kScreen asks the app for its keyboard') 'the kScreen of the mod asks the app for its keyboard'
     Expect ($mod -match 'controllers  : screen_pointer=1\.' -and $mod -match 'controllers  : screen_keys=1\.') 'the mod has screen_pointer=1 and screen_keys=1'
     $log = WaitLog @('keyboard     : a dialog box of the game takes text\. The keyboard shows') 60 $PlayAt
-    $kb = [regex]::Match($log, 'keyboard     : a dialog box of the game takes text\. The keyboard shows, [^\r\n]*')
+    $kb = [regex]::Match($log, 'keyboard     : a dialog box of the game takes text\. The keyboard shows under the screen quad, [^\r\n]*')
     Expect $kb.Success ('the app shows its keyboard: ' + $kb.Value)
     Hold 'profile'
     $ok = $ProfileOk.Count -eq 2
@@ -350,7 +371,53 @@ function ProfileDialog([int]$PlayAt) {
         Expect $scene.Success ('the click ended the Lionhead logo, and the frames of the scene came: ' + $scene.Value)
         @($mod -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (screen quad|the left button|a dialog box))' }) | Select-Object -Last 8 | ForEach-Object { Note ('bwvr.log: ' + $_) }
         Hold 'clicked'
+        if ($PanelClicks.Count -ge 2) { PanelClicks 'SkipBox' $PanelClicks 'panel1' 'start dialog' }
     }
+}
+
+# THE CLICKS OF THE RAY ON THE MENU PANEL QUAD in a frame of the scene
+# (-PanelClicks, -MenuClick, docs/controllers.md, section 13). Box: the class
+# of the dialog box. Points: x,y pairs of the render. Name: the hold that lets
+# the runtime point, and Name + "done" after the check.
+function PanelClicks([string]$Box, [int[]]$Points, [string]$Name, [string]$What) {
+    $count = [int][math]::Floor($Points.Count / 2)
+    Say "The $What ($Box) on the menu panel quad by the ray"
+    $line = 'controllers  : panel quads: a dialog box is up in a frame of the scene'
+    $mod = WaitModLog @("setup box    : the dialog box $Box is up now", [regex]::Escape($line)) 600
+    $boxAt = $mod.LastIndexOf("setup box    : the dialog box $Box is up now")
+    $panelAt = if ($boxAt -ge 0) { $mod.IndexOf($line, $boxAt) } else { -1 }
+    $panelLine = if ($panelAt -ge 0) { [regex]::Match($mod.Substring($panelAt), '[^\r\n]*').Value } else { '' }
+    Expect ($panelAt -gt $boxAt -and $boxAt -ge 0) ("the mod has the menu panel quad of $Box in a frame of the scene: " + $panelLine)
+    Hold $Name
+    $pattern = 'controllers  : panel quads: the right hand presses the left button at the pixel (\d+) (\d+)'
+    $from = [math]::Max(0, $panelAt)
+    $deadline = (Get-Date).AddSeconds(300)
+    do {
+        Start-Sleep -Seconds 3
+        $mod = ModLog
+        $presses = @([regex]::Matches($mod.Substring([math]::Min($from, $mod.Length)), $pattern))
+    } while ($presses.Count -lt $count -and (Get-Date) -lt $deadline)
+    Start-Sleep -Seconds 10
+    $mod = ModLog
+    $tail = $mod.Substring([math]::Min($from, $mod.Length))
+    $presses = @([regex]::Matches($tail, $pattern))
+    Expect ($presses.Count -eq $count) "the mod took $count presses of the ray on the panel ($($presses.Count))"
+    for ($k = 0; $k -lt [math]::Min($count, $presses.Count); $k++) {
+        $p = $presses[$k]
+        $x = [int]$p.Groups[1].Value; $y = [int]$p.Groups[2].Value
+        $wx = $Points[2 * $k]; $wy = $Points[2 * $k + 1]
+        $down = $tail.IndexOf('controllers  : the left button is down', $p.Index)
+        $next = if ($k + 1 -lt $presses.Count) { $presses[$k + 1].Index } else { $tail.Length }
+        Expect ([math]::Abs($x - $wx) -le 4 -and [math]::Abs($y - $wy) -le 4 -and $down -gt $p.Index -and $down -lt $next) "press $($k + 1) on the panel at the pixel $x $y (want $wx $wy), and the left button of the game went down"
+    }
+    if ($presses.Count -gt 0) {
+        $lastAt = $presses[$presses.Count - 1].Index
+        $goneAt = $tail.IndexOf('setup box    : no dialog box is up now', $lastAt)
+        $gone = if ($goneAt -ge 0) { [regex]::Match($tail.Substring($goneAt), '[^\r\n]*').Value } else { '' }
+        Expect ($goneAt -gt $lastAt) "$Box went after the last press of the ray on the panel: $gone"
+    }
+    @($tail -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (panel quads|the left button)|xr layers    : (a dialog|no dialog))' }) | Select-Object -First 14 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+    Hold ($Name + 'done')
 }
 
 # 1. The test runtime.
@@ -462,8 +529,34 @@ try {
             $f += 20
             $profileSteps += "$f hold clicked"; $f += 2
             $profileSteps += "$f quads clicked"; $f += 4
+            if ($PanelClicks.Count -ge 2) {
+                # The start dialog over the frames of the scene, on the menu
+                # panel quad.
+                $profileSteps += "$f hold panel1"; $f += 2
+                $profileSteps += "$f quads panel1"; $f += 4
+                for ($i = 0; $i + 1 -lt $PanelClicks.Count; $i += 2) {
+                    $profileSteps += "$f point right panel $($PanelClicks[$i]) $($PanelClicks[$i + 1])"
+                    $profileSteps += "$($f + 8) trigger right 1"
+                    $profileSteps += "$($f + 12) trigger right 0"
+                    $f += 30
+                }
+                $profileSteps += "$f hold panel1done"; $f += 2
+                $profileSteps += "$f quads panel1done"; $f += 4
+            }
         }
         $shift = $f - 49
+    }
+    # -MenuClick: the Main Menu of game 2 over the land, on the menu panel
+    # quad, after the trigger on "Play in VR". The steps after it move by
+    # $shift2.
+    $menuSteps = @()
+    $shift2 = 0
+    if ($MenuClick.Count -eq 2) {
+        $menuSteps = @('396 hold menu2', '398 quads menu2',
+            "402 point right panel $($MenuClick[0]) $($MenuClick[1])",
+            '410 trigger right 1', '414 trigger right 0',
+            '420 hold menu2done', '422 quads menu2done')
+        $shift2 = 26
     }
     $script = Join-Path $Out 'script.txt'
     Set-Content -LiteralPath $script -Encoding ascii -Value (@(
@@ -483,7 +576,7 @@ try {
         '340 point right menu 800 768', '350 trigger right 1', '354 trigger right 0',
         '360 hold ended1',
         '370 capture after1',
-        '380 point right menu 800 227', '390 trigger right 1', '394 trigger right 0',
+        '380 point right menu 800 227', '390 trigger right 1', '394 trigger right 0') + $menuSteps + @(@(
         '400 hold measured2',
         $(if ($SceneEyes) { '401 eyes play' } else { '' }), '402 quads play',
         # Game 2: a short press (6 frames) goes to the mod at its release,
@@ -494,7 +587,11 @@ try {
         '590 point right menu 800 768', '600 trigger right 1', '604 trigger right 0',
         '610 hold ended2',
         '620 capture after2',
-        '640 exit') | Where-Object { $_ -ne '' } | ForEach-Object {
+        '640 exit') | ForEach-Object {
+            # The steps of game 2 move by $shift2 (-MenuClick).
+            $m = [regex]::Match($_, '^(\d+) (.*)$')
+            if ($m.Success) { "$([int]$m.Groups[1].Value + $shift2) $($m.Groups[2].Value)" } else { $_ }
+        }) | Where-Object { $_ -ne '' } | ForEach-Object {
             # The steps after the dialog of a new profile move by $shift.
             $m = [regex]::Match($_, '^(\d+) (.*)$')
             "$([int]$m.Groups[1].Value + $shift) $($m.Groups[2].Value)"
@@ -521,7 +618,7 @@ try {
     Adb @('shell', 'am', 'force-stop', $Package)
     Adb @('shell', 'rm', '-f', "$XrDir/report.txt", "$XrDir/*.bmp", "$XrDir/ready", "$XrDir/measured1",
         "$XrDir/measured2", "$XrDir/ended1", "$XrDir/ended2", "$XrDir/profile", "$XrDir/typed", "$XrDir/skipbox",
-        "$XrDir/clicked")
+        "$XrDir/clicked", "$XrDir/panel1", "$XrDir/panel1done", "$XrDir/menu2", "$XrDir/menu2done")
 
     Say "Copy the game folder $Game into the emulator (no Profiles, no files of the player)"
     $skipTop = @('Profiles', 'MemoryLeaks.txt', 'Scripts')
@@ -613,7 +710,7 @@ try {
             Note ("the game gave no frame in $StartMinutes minutes" + $(if ($alive) { ', and it runs' } else { ', and it ended' }) + '. The end of the log of the app:')
             ($part -split "`n" | Select-Object -Last 8) | ForEach-Object { Note $_ }
             if (-not $alive) {
-                foreach ($h in @('measured1', 'ended1', 'measured2', 'ended2')) { Hold $h }
+                foreach ($h in @('measured1', 'ended1', 'menu2', 'menu2done', 'measured2', 'ended2')) { Hold $h }
                 break
             }
         }
@@ -621,6 +718,10 @@ try {
         # the app types the name, and Enter.
         if ($NewProfile -and $n -eq 1 -and $first.Success) {
             ProfileDialog $playAt
+        }
+        # THE MAIN MENU over the land of the test save (-MenuClick, game 2).
+        if ($MenuClick.Count -eq 2 -and $n -eq 2 -and $first.Success) {
+            PanelClicks 'MainMenu' $MenuClick 'menu2' 'Main Menu'
         }
         # The measure: the CPU time of the processes of Wine over PlaySeconds.
         $a = CpuSample $user
@@ -832,7 +933,10 @@ try {
         $sceneAt = $log.IndexOf('live         : the frames of the scene start')
         $beforeScene = if ($sceneAt -ge 0) { $log.Substring(0, $sceneAt) } else { $log }
         Expect ($stereoLines -eq 0 -and $beforeScene -notmatch 'a stereo screen of two quads') "no frame has the quads of the stereo screen, and the app made no stereo screen for a screen with no scene ($stereoLines lines of the runtime)"
-        foreach ($name in @('new', 'play')) {
+        # A game whose dialog box went by a click of the ray on the panel
+        # (-PanelClicks, -MenuClick) may have no quad at the measure: its
+        # first quad is in the picture of the step before the click.
+        foreach ($name in @($(if ($PanelClicks.Count -ge 2) { 'panel1' } else { 'new' }), $(if ($MenuClick.Count -eq 2) { 'menu2' } else { 'play' }))) {
             $m = [regex]::Match($report, "capture \S*/$name-0\.bmp (\d+)x(\d+) lit (\d+)")
             Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of the screen quad after the measure of game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels (the files $name-0.bmp and $name-0.png)" } else { 'none' }))
         }

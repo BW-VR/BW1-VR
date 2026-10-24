@@ -142,7 +142,9 @@ struct App {
   // THE KEYBOARD OF THE APP (screen_keyboard=1): it shows while the newest
   // screen picture has a dialog box of the game that takes text.
   bool keyboard_on = true;     // screen_keyboard
+  bool panel_keyboard_on = true;  // panel_keyboard: also at the menu panel quad
   bool keyboard_shown = false;
+  bool keyboard_on_panel = false;  // the keyboard shows at the menu panel quad
   keyboard_layout::Quad keyboard_quad = {};
   int keyboard_lit = -1;       // the key under the ray
   uint64_t keys_typed = 0;
@@ -838,23 +840,35 @@ void OnCommand(android_app* android, int32_t command) {
 // THE KEYBOARD OF THE APP (screen_keyboard=1, docs/android.md, "The keyboard
 // of the app"): while the game runs with no menu over it, and the newest
 // screen picture has a dialog box of the game that takes text (kScreenText
-// of its kScreen), the keyboard shows on a quad under the screen quad.
+// of its kScreen), the keyboard shows on a quad under the screen quad. In a
+// frame of the scene (panel_keyboard=1) the menu panel quad of the mod asks
+// for it (kPanelQuadText of its kPanel), and the keyboard shows in front of
+// the lower part of that quad (keyboard_layout.h, QuadOnPanel).
 void UpdateKeyboard(App* app) {
   bool shown = false;
+  bool on_panel = false;
+  float panel_position[3], panel_orientation[4], panel_size[2];
   if (app->keyboard_on && app->game_on && !app->menu_over_game &&
       app->xr.ScreenQuadShown()) {
     const scene_stream::ScreenBody& b = app->xr.ScreenQuadBody();
     shown = (b.flags & scene_stream::kScreenText) != 0 &&
             keyboard_layout::QuadUnder(b.position, b.size, &app->keyboard_quad);
+  } else if (app->panel_keyboard_on && app->game_on && !app->menu_over_game &&
+             app->xr.PanelTextQuad(panel_position, panel_orientation, panel_size)) {
+    shown = keyboard_layout::QuadOnPanel(panel_position, panel_orientation, panel_size,
+                                         &app->keyboard_quad);
+    on_panel = shown;
   }
-  if (shown != app->keyboard_shown) {
+  if (shown != app->keyboard_shown || on_panel != app->keyboard_on_panel) {
     app->keyboard_shown = shown;
+    app->keyboard_on_panel = on_panel;
     app->keyboard_lit = -1;
     const keyboard_layout::Quad& q = app->keyboard_quad;
     if (shown) {
-      AppLog("keyboard     : a dialog box of the game takes text. The keyboard shows, "
+      AppLog("keyboard     : a dialog box of the game takes text. The keyboard shows %s, "
              "%.2f by %.2f m at %.2f %.2f %.2f m, turned %.1f degrees to the head",
-             q.size[0], q.size[1], q.position[0], q.position[1], q.position[2],
+             on_panel ? "at the menu panel quad" : "under the screen quad", q.size[0],
+             q.size[1], q.position[0], q.position[1], q.position[2],
              -2.0f * asinf(q.orientation[0]) * 57.29578f);
     } else {
       AppLog("keyboard     : the keyboard goes. %llu keys went to the mod",
@@ -868,7 +882,8 @@ void UpdateKeyboard(App* app) {
 // The ray and the trigger on the keyboard. The hand that pulled its trigger
 // last points, as on the menu. The trigger types the key under the ray: the
 // key goes to the mod through the ring of the keys of the input channel. The
-// mod takes the trigger only on the screen quad, so a press on the keyboard
+// mod takes the trigger only on the screen quad or on a panel quad, and the
+// keyboard at the menu panel quad stops its ray, so a press on the keyboard
 // clicks nothing in the game.
 void OnKeyboard(App* app, const XrInput& in, bool* show_cursor, float cursor[3]) {
   for (int h = 0; h < 2; ++h) {
@@ -1125,6 +1140,16 @@ void android_main(android_app* android) {
          app.keyboard_on ? "While a dialog box of the game takes text, the keyboard of the "
                            "app shows under the screen quad"
                          : "No keyboard of the app");
+  // panel_keyboard=1 (the default): while a dialog box of the game in a frame
+  // of the scene takes text (kPanelQuadText of the menu panel quad), the app
+  // shows its keyboard in front of the lower part of that quad. 0: no
+  // keyboard in a frame of the scene.
+  app.panel_keyboard_on = app.ini.GetInt("bwvr", "panel_keyboard", 1) != 0;
+  AppLog("keyboard     : panel_keyboard=%d. %s", app.panel_keyboard_on ? 1 : 0,
+         app.panel_keyboard_on
+             ? "While a dialog box of the game in a frame of the scene takes text, "
+               "the keyboard of the app shows at the menu panel quad"
+             : "No keyboard of the app in a frame of the scene");
   AppLog("game         : play_game=%d, play_menu_hold_ms=%d, play_menu_press=%d. %s",
          app.play_game ? 1 : 0, app.play_menu_hold_ms, app.play_menu_press ? 1 : 0,
          app.can_play ? "Play starts the game in Wine"

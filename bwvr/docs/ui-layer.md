@@ -42,10 +42,10 @@ Marks, as in `tabletop.md`:
   19).
 - In the headset app a controller points at a dialog box of a screen with no
   scene on the screen quad, the trigger clicks, and a box that takes text
-  gets the keys of a keyboard of the app (section 6). The pointer on the
-  panel in a frame of the scene is not built (section 5). The menus draw on
-  the panel at their own pixels, but the pointer still comes from the eye
-  view.
+  gets the keys of a keyboard of the app (section 6). In a frame of the
+  scene a controller points at a dialog box on the panel quads in the same
+  way (section 5). With a session of the mod on the PC the pointer still
+  comes from the eye view.
 
 ## 1. Where the interface is drawn
 
@@ -474,12 +474,21 @@ and a recenter from the headset menu
 front of the player on that frame, once. `HeadPoseOrigin` gives the origin
 position and yaw in the LOCAL space.
 
-## 5. Input on the panel (planned)
+## 5. Input on the panel
 
-Not built for the panel. `ui_panel_pointer` is not in the code. The ray
-against a quad (5.3) and the pointer on a quad of a dialog box are built for
-the screen quad of the headset app (section 6, `controllers.md`, section
-12).
+**In the headset app** (`xr_input=1`, `panel_pointer=1`, built): while a
+dialog box of the game is up in a frame of the scene, the ray of the hand
+that pulled its trigger last meets the panel quads of the frame, and the
+nearest hit is the pointer of the game, a pixel of the panel image
+(`controllers.md`, section 13). The trigger is the left button. A box that
+takes text sets `kPanelQuadText` on the menu panel quad, and the app shows
+its keyboard in front of the lower part of that quad (`panel_keys=1`,
+`android.md`, "The dialog boxes by the controllers"). The ray against a
+quad (5.3) is the one of the screen quad (section 6, `controllers.md`,
+section 12).
+
+**With a session of the mod on the PC** (planned): the rest of this
+section. `ui_panel_pointer` is not in the code.
 
 ### 5.1 One pointer, two surfaces
 
@@ -568,11 +577,16 @@ target (4.2), the pointer takes the inverse: the game gets
    [I, test it].
 6. `controllers.cpp`: record the surface at each press, for 5.2.
 
-Today the menus draw on the panel at their own pixels and the hit test reads
-those pixels. But the pointer still comes from the eye view: the mouse pixel
-is turned with the head, and a controller ray goes through the world. So the
-arrow moves on the panel when the head turns, and a controller does not point
-at the panel.
+With a session of the mod on the PC the menus draw on the panel at their own
+pixels and the hit test reads those pixels. But the pointer still comes from
+the eye view: the mouse pixel is turned with the head, and a controller ray
+goes through the world. So the arrow moves on the panel when the head turns,
+and a controller does not point at the panel. In the headset app items 2, 3
+and 6 are built for the controllers (`controllers.md`, section 13): the
+panel pixel comes from the ray in `PointerMapApply`, a press keeps its
+surface, and a press starts only on a panel quad. Items 4 and 5 are not
+built: when the ray leaves the panel quads, the pointer is the pixel of the
+eye view of the ray at once.
 
 ## 6. Screens with no scene, with the panel
 
@@ -679,7 +693,8 @@ The biggest cost is memory, and it is small against a headset render.
 | The panel layers in the headset (`ui_panel=1`): menu and help quads | built, never run with `ui_panel=1` on the desktop, never seen in a headset |
 | The Creature panel quad | built (section 13) |
 | The subtitle card | built (section 17) |
-| Input on the panel (section 5) | planned |
+| The pointer, the trigger and the keyboard of the app on the panel quads of the headset app in a frame of the scene (section 5) | built, desktop runs and the emulator, never seen in a headset |
+| Input on the panel with a session of the mod on the PC (section 5) | planned |
 | The pointer, the trigger and the keyboard of the app on the screen quad of the headset app (section 6) | built, desktop runs and the emulator, never seen in a headset |
 | Screens with no scene on a screen quad in the headset app, `xr_input=1` (section 6) | built, desktop runs and the emulator, never seen in a headset |
 | Screens with no scene on a screen quad with a session of the mod (section 6) | planned |
@@ -712,6 +727,7 @@ recenter, and whether Virtual Desktop composes quad layers before the encode.
 | `ui_help_rect` | 0 | the help rect in render pixels. 0 takes the default of 4.1. |
 | `creature_panel` | 2 | the Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature (section 13) |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4, and of section 6 in the headset app |
+| `panel_pointer`, `panel_keys` | 1, 1 | with `xr_input=1` the ray and the trigger on a dialog box of a frame of the scene on the panel quads, and the keyboard of the app for a box that takes text (section 5, `controllers.md`, section 13). 0: the pointer from the eye view, and no keyboard in a frame of the scene |
 | `vk_stream_screens` | 1 | with `xr_input=1` a frame with no scene goes into the live stream for the screen quad of the headset app (section 6). 0: no frame with no scene in the stream |
 | `ui_scale_pct`, `hint_scale_pct`, `hint_flat`, `ui_shift_max_px`, `subtitle_lift_pct`, `subtitle_deg` | 25, 20, 1, 24, 0, 35 | the interface in the eye pictures (`backend.md`) |
 | `hint_hand_depth` | 1 | a hint of the game at the game's Hand at the depth of the Hand (section 15.6) |

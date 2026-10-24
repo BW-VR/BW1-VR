@@ -1430,7 +1430,9 @@ test key (see below).
 The records (`scene_stream.h`) have one layout on 32 bit x86 and on 64 bit
 ARM (`static_assert` of each size and offset): `kCard` 80 bytes,
 `kCardPicture` 24 bytes and the pixels, `kPanel` 176 bytes, `kWindow` 136
-bytes. The stream has version 2: a stream with no layer records plays with
+bytes. The field `visible` of a quad of `kPanel` has the bits
+`kPanelQuadShows` and `kPanelQuadText` (a dialog box on the menu panel quad
+takes text, "The dialog boxes by the controllers"). The stream has version 2: a stream with no layer records plays with
 no quad layer of the mod.
 
 **The app** (`stream_layers=1`, the default). The player takes the layer
@@ -1717,10 +1719,6 @@ of the mod on the PC.
 
 **Known limits:**
 
-- A dialog box of a frame of the scene (the start dialog of a new game
-  after the Lionhead logo, the Esc menu) is on the panel quads, and the
-  pointer there comes from the eye view (`ui-layer.md`, section 5). The ray
-  of a controller does not point at the panel.
 - The intro in stereo (`intro_vr=1`) gives no frame to the stream, so the
   headset shows its last screen picture while it plays.
 - A frame of the Lionhead logo draws over the walk before it
@@ -1764,6 +1762,29 @@ posts it to the game window as `WM_CHAR`, as Windows gives the game a key of
 a keyboard. The mod takes the trigger only on the screen quad, so a press on
 the keyboard clicks nothing in the game. `screen_keyboard=0`: no keyboard.
 
+**A dialog box in a frame of the scene** (`panel_pointer=1` and
+`panel_keys=1` of the mod, `panel_keyboard=1` of the app, `controllers.md`,
+section 13). The start dialog of a new game after the Lionhead logo, the
+Main Menu over a saved game, the Esc menu, a load and a save come in frames
+of the scene. They draw on the panel image, and the app shows them on the
+menu panel quad of the `kPanel` of the frame ("The quad layers"). The mod
+reads the hands in each frame of the scene. While a box is up, the aim ray
+of the hand that pulled its trigger last meets the panel quads of the last
+`kPanel`, the nearest hit wins, and the hit is the pointer of the game as a
+pixel of the panel image, which has the size of the render. The trigger is
+the left button. A press starts only with the ray on a panel quad. When the
+ray leaves the panel quads, the pointer is the pointer of the eye view
+again. While the box takes text, the mod sets `kPanelQuadText` on the menu
+panel quad (a bit of `PanelQuadBody::visible` beside `kPanelQuadShows`, so
+`kPanel` keeps its 176 bytes), and the app shows its keyboard in front of the
+lower part of that quad (`QuadOnPanel` of `keyboard_layout.h`): half as wide
+as the quad, its top 0.35 of the height of the quad under its center, 3 cm
+in front of it toward the head, with the turn of the quad. The menu panel
+quad is about 80 by 60 degrees (the menu rect at 16 pixels a degree), and the
+box is a small part of it in its middle, so the keyboard is not under the
+whole quad. The mod knows that quad too, and a ray on the keyboard is no hit
+on the panel. `panel_keyboard=0`: no keyboard in a frame of the scene.
+
 The user chose a keyboard of the app over `XR_META_virtual_keyboard`, so it
 works on each runtime, the Quest 3 and the Steam Frame alike.
 
@@ -1771,8 +1792,11 @@ works on each runtime, the Quest 3 and the Steam Frame alike.
 one line when the keyboard shows (its size, its place and its turn) and when
 it goes (the count of the keys), each key that goes to the mod, the time of
 the first paints, and `xr           : N frames with the keyboard` at the end.
-The mod: `controllers  :` and `vk stream    :` lines of `controllers.md`,
-12.4.
+`keyboard     : panel_keyboard=1 ...` at the start, and the line of the
+keyboard says whether it shows under the screen quad or at the menu panel
+quad. The mod: `controllers  :` and `vk stream    :` lines of
+`controllers.md`, 12.4, and `controllers  : panel quads:` and
+`xr layers    :` lines of 13.4.
 
 **The tests.**
 
@@ -1781,9 +1805,16 @@ The mod: `controllers  :` and `vk stream    :` lines of `controllers.md`,
   the keyboard (39 keys, none over another, the middle of each key gives
   that key), its quad under the screen quad and facing the head, the ray at
   a key, and the ring of the keys (the order, a full ring, the keys of an
-  earlier run, indices that are not valid, the layout of the file).
+  earlier run, indices that are not valid, the layout of the file). The
+  checks of `panel_pointer_checks.h`: the ray against the panel quads (the
+  pixel of a hit, the nearest quad, a quad that does not show), the
+  keyboard at the menu panel quad and that it stops the ray, the surface of
+  the pointer, and the text flag of `kPanel`.
 - `screen_ray_run.ps1` (a desk run, `controllers.md`, 12.5): a click of the
   ray of the test writer on the start dialog over the Lionhead logo.
+- `panel_ray_run.ps1` (a desk run, `controllers.md`, 13.5): the clicks of the
+  ray of the test writer on a row and on OK of the start dialog on the menu
+  panel quad in a frame of the scene.
 - `emu_game_test.ps1 -NewProfile` (the emulator, the test runtime, the
   copy of the game folder with no `Profiles`): when the log of the mod
   names `NewProfileBox` and the `kScreen` asks for the keyboard, the
@@ -1791,8 +1822,13 @@ The mod: `controllers  :` and `vk stream    :` lines of `controllers.md`,
   trigger on each (`point <hand> key <word>` of the runtime). With
   `-ProfileOk x,y` it then clicks OK of the dialog on the screen quad in
   place of Enter. With `-SkipClick x,y` it then clicks the start dialog on
-  the screen quad. With `-TestSave <name>` the test puts the test save into
-  slot 20 of the new profile before game 2.
+  the screen quad. With `-PanelClicks x,y,...` it then clicks each pixel of
+  the start dialog on the menu panel quad in the frames of the scene (`point
+  <hand> panel x y` of the runtime: the first quad with the source alpha,
+  and the pixels of the panel image). With `-TestSave <name>` the test puts
+  the test save into slot 20 of the new profile before game 2, and with
+  `-MenuClick x,y` the runtime clicks that pixel of the Main Menu of game 2
+  on the menu panel quad.
 
 **What the emulator shows** (`-NewProfile -ProfileOk 480,670 -SceneEyes
 -SkipClick 547,575 -TestSave pen -PlaySeconds 60`, a render of 1380 by
@@ -1830,15 +1866,32 @@ checks, 0 failed):
   processes of Wine took 97 percent of one CPU in game 1 (the scene with
   the start dialog) and 68 percent in game 2.
 
-**Not shown yet:** the dialog boxes in a headset (the aim at the screen
-quad and at the keyboard, the size of the cursor of the game at 2 m), a
-double click in a list of the front end, and the start dialog and the Main
-Menu of the game in a frame of the scene by the ray (the pointer on the
-panel, `ui-layer.md`, section 5).
+**What the emulator shows in a frame of the scene** (the same run with
+`-PanelClicks 547,532,543,665 -MenuClick 690,430`, 146 checks, 0 failed):
 
-**Keys.** `screen_pointer` and `screen_keys` of the mod and
-`screen_keyboard` of the app have 1 as the default, the value of a run, so
-"Play" does not write them. None has a test key: the mod with `xr_input=1`
+- Game 1: the start dialog stayed over the frames of the scene after the
+  click on the screen quad, on the menu panel quad, 2.35 by 1.76 m at 0,
+  -0.24, -1.38 m with the rect 50 72 1280 960 of the panel image of 1380 by
+  1104. The picture of the panel quad that the runtime read back has the
+  dialog. The ray pressed at the pixel 547 532 (the row "Skip straight to
+  the Creature select") and 543 665 (OK) of the panel image, the left
+  button of the game went down after each press, and the dialog went at
+  frame 987 of the scene. Then the game played a cut scene: the runtime had
+  the two quads of the cut scene window.
+- Game 2: the Main Menu over the land of the test save "pen" on the menu
+  panel quad. The ray pressed at the pixel 690 430 ("Continue Game"), the
+  left button of the game went down, and the Main Menu went at frame 676 of
+  the scene. The eye pictures of the projection layer after the measure have
+  the land.
+
+**Not shown yet:** the dialog boxes in a headset (the aim at the screen
+quad, at the panel quads and at the keyboard, the size of the cursor of the
+game), a double click in a list of the front end, and a box that takes
+text in a frame of the scene (the keyboard at the menu panel quad).
+
+**Keys.** `screen_pointer`, `screen_keys`, `panel_pointer` and `panel_keys`
+of the mod and `screen_keyboard` and `panel_keyboard` of the app have 1 as
+the default, the value of a run, so "Play" does not write them. None has a test key: the mod with `xr_input=1`
 has no hotkeys, and the app reads its keys at its start.
 
 ## No Vulkan device of the mod

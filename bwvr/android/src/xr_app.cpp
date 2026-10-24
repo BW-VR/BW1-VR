@@ -820,6 +820,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
              b.half_angle * 57.29578f);
     }
   }
+  panel_text_ = false;
   if ((world || window) && layers_on_) {
     // THE QUAD LAYERS OF THE MOD, in the order of XrScreen::BuildFrame. The
     // panel image goes into its swapchain for a new picture.
@@ -871,6 +872,16 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (r.kind == ql::kLayerPanel) {
         swapchain = panel_.layer[0].swapchain;
         ++panels;
+        // The menu panel quad of a dialog box that takes text: the keyboard
+        // of the app shows at it (main.cpp, UpdateKeyboard).
+        int32_t text_rect[4];
+        if (r.index == 0 && ql::PanelText(f.panel_body, text_rect)) {
+          panel_text_ = true;
+          for (int i = 0; i < 3; ++i) panel_text_position_[i] = s.position[i];
+          for (int i = 0; i < 4; ++i) panel_text_orientation_[i] = s.orientation[i];
+          panel_text_size_[0] = s.size[0];
+          panel_text_size_[1] = s.size[1];
+        }
       } else if (r.kind == ql::kLayerCard) {
         Card& k = cards_[r.index];
         CopyLayer(&k.layer);
@@ -1138,6 +1149,15 @@ void XrApp::SetKeyboardPixels(const std::vector<uint8_t>& rgba, uint32_t width,
   SetPixels(&keyboard_, rgba);
   ++keyboard_.revision;
   keyboard_written_ = true;
+}
+
+bool XrApp::PanelTextQuad(float position[3], float orientation[4], float size[2]) const {
+  if (!panel_text_) return false;
+  for (int i = 0; i < 3; ++i) position[i] = panel_text_position_[i];
+  for (int i = 0; i < 4; ++i) orientation[i] = panel_text_orientation_[i];
+  size[0] = panel_text_size_[0];
+  size[1] = panel_text_size_[1];
+  return true;
 }
 
 void XrApp::SetKeyboard(bool shown, const float position[3], const float orientation[4],

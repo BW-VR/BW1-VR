@@ -15,7 +15,11 @@
 //                                          (the keyboard of the app).
 //                                          screen: the first opaque quad (the
 //                                          screen quad of a frame with no
-//                                          scene)
+//                                          scene). panel: the first quad with
+//                                          the source alpha (the menu panel
+//                                          quad of the mod in a frame of the
+//                                          scene), and x, y are pixels of the
+//                                          panel image
 //   <frame> point <hand> key <word>        the aim of the hand goes to the
 //                                          middle of a key of the keyboard of
 //                                          the app (keyboard_layout.h): a
@@ -161,6 +165,7 @@ void LoadScript() {
       s.layer = strcmp(layer, "menu") == 0       ? -1
                 : strcmp(layer, "keyboard") == 0 ? -2
                 : strcmp(layer, "screen") == 0   ? -3
+                : strcmp(layer, "panel") == 0    ? -4
                                                  : atoi(layer);
       if (strcmp(layer, "key") == 0) {
         // The middle of the key on the keyboard of the app.
@@ -526,10 +531,23 @@ void PointAt(Session* s, int hand, int layer, float px, float py) {
         break;
       }
     }
+  } else if (layer == -4) {
+    // The menu panel quad of the mod: the first quad with the source alpha
+    // over the projection layer (quad_layer_math.h, Order). x, y are pixels
+    // of the panel image, so the offset of the rect of the quad goes off.
+    for (int i = 0; i < static_cast<int>(s->last_quads.size()); ++i) {
+      const XrCompositionLayerQuad& m = s->last_quads[i];
+      if ((m.layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) != 0) {
+        layer = i;
+        px -= static_cast<float>(m.subImage.imageRect.offset.x);
+        py -= static_cast<float>(m.subImage.imageRect.offset.y);
+        break;
+      }
+    }
   }
   if (layer < 0 && asked < 0) {
     Fault("point at the %s, the last frame had no such quad",
-          asked == -1 ? "menu" : asked == -2 ? "keyboard" : "screen");
+          asked == -1 ? "menu" : asked == -2 ? "keyboard" : asked == -3 ? "screen" : "panel");
     return;
   }
   if (layer < 0 || layer >= static_cast<int>(s->last_quads.size())) {

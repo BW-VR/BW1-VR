@@ -2101,4 +2101,92 @@ inline bool ScreenPressStep(ScreenPress* s, bool trigger_down, bool on_quad,
   return true;
 }
 
+// The point of a quad at u, v (RayQuad), in the LOCAL space. For the test
+// writer of the PC and for the checks.
+inline void QuadPoint(const float position[3], const float orientation[4],
+                      const float size[2], float u, float v, float out[3]) {
+  const float local[3] = {(u - 0.5f) * size[0], (0.5f - v) * size[1], 0.0f};
+  float turned[3];
+  QuatRotate(orientation, local, turned);
+  for (int i = 0; i < 3; ++i) out[i] = position[i] + turned[i];
+}
+
+// THE POINTER ON THE PANEL QUADS (docs/controllers.md, section 13). In a
+// frame of the scene a dialog box of the game is on the panel quads of the
+// headset app: rects of the panel image, which has the size of the render.
+// The ray of the hand that points meets each target. The nearest hit along
+// the ray wins. A hit on a panel quad is a pixel of the panel image, so a
+// pixel of the render. A target that is no panel quad (the keyboard of the
+// app) only stops the ray: a hit on it is no pixel.
+struct RayTarget {
+  bool on;                // the target shows in this frame
+  bool panel;             // a panel quad. Else a target that only stops the ray
+  float position[3];      // the center, in the LOCAL space
+  float orientation[4];   // x y z w, the front is the +z side
+  float size[2];          // meters
+  int32_t rect[4];        // a panel quad: x, y, width, height in the panel image
+};
+struct PanelHit {
+  bool hit;        // the nearest hit is on a panel quad
+  int target;      // the index of the nearest target that the ray meets, or -1
+  float x, y;      // hit: the pixel of the panel image
+  float distance;  // along the ray, in units of the length of direction
+};
+inline PanelHit RayPanels(const float origin[3], const float direction[3],
+                          const RayTarget* targets, int count) {
+  PanelHit best = {false, -1, 0.0f, 0.0f, 0.0f};
+  QuadHit nearest = {false, false, 0.0f, 0.0f, 0.0f};
+  for (int i = 0; i < count; ++i) {
+    const RayTarget& t = targets[i];
+    if (!t.on) continue;
+    if (t.panel && (t.rect[2] <= 0 || t.rect[3] <= 0)) continue;
+    const QuadHit h = RayQuad(origin, direction, t.position, t.orientation, t.size);
+    if (!h.inside) continue;
+    if (best.target >= 0 && !(h.distance < nearest.distance)) continue;
+    best.target = i;
+    nearest = h;
+  }
+  if (best.target < 0) return best;
+  const RayTarget& t = targets[best.target];
+  best.distance = nearest.distance;
+  best.hit = t.panel;
+  if (!best.hit) return best;
+  const float left = static_cast<float>(t.rect[0]);
+  const float top = static_cast<float>(t.rect[1]);
+  const float right = static_cast<float>(t.rect[0] + t.rect[2] - 1);
+  const float bottom = static_cast<float>(t.rect[1] + t.rect[3] - 1);
+  float x = left + nearest.u * static_cast<float>(t.rect[2]);
+  float y = top + nearest.v * static_cast<float>(t.rect[3]);
+  if (x > right) x = right;
+  if (y > bottom) y = bottom;
+  if (x < left) x = left;
+  if (y < top) y = top;
+  best.x = x;
+  best.y = y;
+  return best;
+}
+
+// THE SURFACE OF THE POINTER while a dialog box is up in a frame of the
+// scene: the panel quads, or the eye view (docs/ui-layer.md, 5.2). With no
+// button of the controller held, the pointer is on the panel while the ray
+// hits a panel quad, and on the eye view when it leaves them. A press keeps
+// its surface until its release: a press that started on the panel keeps the
+// last pixel of the panel when the ray leaves the panel quads, and a press
+// that started on the eye view stays there. Gives whether the pointer is on
+// the panel.
+struct PanelSurface {
+  bool on;    // the pointer is on the panel
+  bool have;  // x and y are a pixel of the panel image
+  float x, y;
+};
+inline bool PanelSurfaceStep(PanelSurface* s, const PanelHit& hit, bool held) {
+  if (!held) s->on = hit.hit;
+  if (s->on && hit.hit) {
+    s->x = hit.x;
+    s->y = hit.y;
+    s->have = true;
+  }
+  return s->on && s->have;
+}
+
 }  // namespace controller_math

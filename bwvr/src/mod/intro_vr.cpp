@@ -1087,6 +1087,9 @@ void RunPair() {
       return;
     }
   } else if (XrInputOn()) {
+    // vk_pace=1 with vk_device=0: the wait of the frame, as in a frame of the
+    // scene (stereo.cpp).
+    XrInputPace();
     XrInputLatch();
     if (XrInputTakeRecenter()) HeadPoseRecenter();
   }

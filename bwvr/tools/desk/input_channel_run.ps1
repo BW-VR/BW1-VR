@@ -69,6 +69,14 @@
 #   of the PC (for example the vertices of a model that moves by the time of
 #   the PC).
 #
+# -WriterHz <hz> (a channel run): the test writer also writes the last slot
+#   again <hz> times a second, as the app writes a slot at each frame of its
+#   session. With -More @{ vk_device = 0; vk_pace = 1 } these writes pace the
+#   frames of the game (docs/android.md, "The pace of the frames"). The slots
+#   of a record have no display period, so the time limit of the pace is one
+#   period of 72 Hz: a rate above 72 shows the pace by the writes. 0 (the
+#   default): the writer writes only the slot of each frame.
+#
 # -More @{ vk_device = 0 } (a channel run): the mod makes no Vulkan device
 #   (docs/backend.md, "No Vulkan device of the mod"), so the run has no
 #   pictures of the test frame. The script checks the lines of the log: no
@@ -95,6 +103,7 @@ param(
     [int]$LiveRecord = 3000,
     [string]$RingFrom = '',
     [string]$NoiseFrom = '',
+    [int]$WriterHz = 0,
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -158,7 +167,7 @@ if ($Kind -eq 'channel') {
     $keys['xr_input'] = 1
     $keys['xr_input_lockstep_ms'] = 2000
     $p = Start-Process -FilePath $writer -NoNewWindow -PassThru `
-        -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)", '2100') `
+        -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)", '2100', "$WriterHz") `
         -RedirectStandardOutput (Join-Path $out 'writer.txt') -RedirectStandardError (Join-Path $out 'writer-err.txt')
     $null = $p.Handle  # keeps the exit code
     "the test writer runs (process $($p.Id)): it plays $fromRec"
@@ -210,6 +219,20 @@ $log = Join-Path $out 'bwvr.log'
 if (Test-Path -LiteralPath $log) {
     'the lines of the input channel and of the pulses in the log:'
     Select-String -LiteralPath $log -Pattern 'xr input     :|haptic pulse' | Select-Object -First 40 | ForEach-Object { '  ' + $_.Line }
+}
+# THE PACE: the frames a second of the game and the cores that runblack.exe
+# used, in each window of 450 frames of the scene (stereo.cpp), with no first
+# window (the load), and the lines of the pace.
+if (Test-Path -LiteralPath $log) {
+    $inv = [cultureinfo]::InvariantCulture
+    $fps = @(Select-String -LiteralPath $log -Pattern '^stereo       : ([0-9.]+) fps' | ForEach-Object { [double]::Parse($_.Matches[0].Groups[1].Value, $inv) })
+    $cores = @(Select-String -LiteralPath $log -Pattern '^thread load  : .*The process used ([0-9.]+) cores' | ForEach-Object { [double]::Parse($_.Matches[0].Groups[1].Value, $inv) })
+    if ($fps.Count -gt 1) { $fps = $fps[1..($fps.Count - 1)] }
+    if ($cores.Count -gt 1) { $cores = $cores[1..($cores.Count - 1)] }
+    $fpsMean = if ($fps.Count) { ($fps | Measure-Object -Average).Average } else { 0 }
+    $coresMean = if ($cores.Count) { ($cores | Measure-Object -Average).Average } else { 0 }
+    "== the pace: {0} windows of 450 frames, {1:N1} frames a second as a mean (from {2:N1} to {3:N1}), runblack.exe used {4:N2} cores as a mean" -f $fps.Count, $fpsMean, $(if ($fps.Count) { ($fps | Measure-Object -Minimum).Minimum } else { 0 }), $(if ($fps.Count) { ($fps | Measure-Object -Maximum).Maximum } else { 0 }), $coresMean
+    Select-String -LiteralPath $log -Pattern '^xr input     : (vk_pace|the pace)' | Select-Object -First 8 | ForEach-Object { '   ' + $_.Line }
 }
 $fails = 0
 if ($Live) {

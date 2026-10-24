@@ -40,12 +40,13 @@ inline void RunKeyChecks() {
   Check(ini.Has("bwvr", "vk_device") && ini.GetInt("bwvr", "vk_device", 1) == 0, "vk_device=0",
         0, 0);
   Check(ini.GetInt("bwvr", "ui_panel", 0) == 1, "ui_panel=1 in place of 0", 0, 0);
+  Check(ini.GetInt("bwvr", "vk_pace", 0) == 1, "vk_pace=1: the frames wait for the app", 0, 0);
   Check(ini.GetInt("bwvr", "stream_live", 0) == 1 && ini.GetInt("bwvr", "input_live", 0) == 1,
         "stream_live=1 and input_live=1 for the app", 0, 0);
   Check(ini.GetInt("bwvr", "vulkan_strict", 0) == 1 && ini.Get("bwvr", "backend", "") == "vulkan",
         "the save gives vulkan_strict=1 and backend=vulkan", 0, 0);
   Check(ini.GetInt("bwvr", "keep_me", 0) == 7, "another key stays", 0, 0);
-  Check(play_rules::kRunKeyCount == 6, "six keys of a run", play_rules::kRunKeyCount, 6);
+  Check(play_rules::kRunKeyCount == 7, "seven keys of a run", play_rules::kRunKeyCount, 7);
   // A second save and Play give the same lines. The save deletes
   // vk_stream_live, and Play adds it at the end of the section again.
   auto sorted = [](const std::string& text) {

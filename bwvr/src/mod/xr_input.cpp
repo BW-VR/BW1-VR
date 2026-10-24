@@ -7,6 +7,8 @@
 #include <string.h>
 
 #include "../common/input_channel.h"
+#include "frame_pace_math.h"
+#include "thread_wait.h"
 #include "xr_input.h"
 #include "xr_input_math.h"
 #include "view_layer_math.h"
@@ -14,11 +16,14 @@
 extern void ModLog(const char* format, ...);
 // controllers.cpp: the frames that the controllers saw.
 uint64_t ControllersFrameCount();
+// vk_scene.cpp: false with vk_device=0.
+bool VkSceneDevice();
 
 namespace {
 
 namespace ic = input_channel;
 namespace xm = xr_input_math;
+namespace fp = frame_pace_math;
 
 XrInputOptions g_options;
 
@@ -55,6 +60,19 @@ int g_stale_ms = 500;
 // The lockstep of a test. It goes off after one wait that ran out.
 bool g_lockstep = false;
 
+// THE PACE (vk_pace). Due once for each FinishFrame. The counts go into the
+// log each 30 s.
+fp::State g_pace;
+bool g_pace_due = true;
+int64_t g_pace_frequency = 0;
+int64_t g_pace_report_ns = 0;
+uint64_t g_pace_waits = 0;
+uint64_t g_pace_writes = 0;  // waits that a new write ended
+uint64_t g_pace_limits = 0;  // waits that the time limit ended
+uint64_t g_pace_idle = 0;    // waits with the limit of no fresh slot
+double g_pace_ms = 0.0;
+double g_pace_ms_most = 0.0;
+
 // THE COUNTS since the last report.
 uint64_t g_latches = 0;
 uint64_t g_new_slots = 0;
@@ -65,6 +83,33 @@ double g_wait_ms = 0.0;
 double g_wait_ms_most = 0.0;
 uint64_t g_pulses = 0;
 uint64_t g_pulses_dropped = 0;
+
+int64_t PaceNow() {
+  LARGE_INTEGER now;
+  QueryPerformanceCounter(&now);
+  return fp::CountToNs(now.QuadPart, g_pace_frequency);
+}
+
+// One try of a copy of the slot, as ic::TryRead, with the sequence of the
+// write that the copy has. A torn try counts in *torn.
+bool ReadOnce(ic::SlotData* d, uint32_t* seq, uint32_t* torn) {
+  *seq = ic::ReadBegin(&g_chan->slot);
+  bool whole = false;
+  if ((*seq & 1u) == 0) {
+    memcpy(d, &g_chan->slot.data, sizeof(*d));
+    whole = ic::ReadEnd(&g_chan->slot, *seq);
+  }
+  if (!whole) ++*torn;
+  return whole;
+}
+
+// A look at the sequence of the slot. The display period comes from a whole
+// copy of a new write.
+void PaceLook(int64_t now) {
+  if (!fp::Observe(&g_pace, ic::LoadAcquire(&g_chan->slot.seq), now)) return;
+  ic::SlotData d;
+  if (ic::TryRead(&g_chan->slot, &d)) fp::SetPeriod(&g_pace, d.display_period);
+}
 
 // THE RECORD.
 FILE* g_record = nullptr;
@@ -192,6 +237,11 @@ bool XrInputStart(const char* dir) {
     }
   }
   if (g_options.mode == 0) return false;
+  {
+    LARGE_INTEGER hz;
+    QueryPerformanceFrequency(&hz);
+    g_pace_frequency = hz.QuadPart;
+  }
 
   lstrcpynA(g_path, dir, MAX_PATH);
   lstrcatA(g_path, "bwvr-input.chan");
@@ -228,6 +278,18 @@ bool XrInputStart(const char* dir) {
          "channel %s (%s), and the pulses go back through it. The mod starts "
          "no OpenXR session. xr_input_stale_ms=%d", g_path,
          whole ? "the app made it" : "a new head", g_stale_ms);
+  if (g_options.pace != 0 && !VkSceneDevice()) {
+    ModLog("xr input     : vk_pace=1 with vk_device=0. Each frame of the game "
+           "waits for the next write of the slot of the app, up to 5/4 of its "
+           "display period after the start of the frame before. With no "
+           "slot, a slot that does not change for %lld periods or no display "
+           "period, up to one period of %lld Hz",
+           static_cast<long long>(fp::kStalePeriods),
+           static_cast<long long>(fp::kIdleHz));
+  } else if (g_options.pace != 0) {
+    ModLog("xr input     : vk_pace=1 needs vk_device=0. The mod has a Vulkan "
+           "device, so the frames of the game do not wait for the app");
+  }
   if (g_lockstep) {
     ModLog("xr input     : xr_input_lockstep_ms=%d (a test aid). Each latch "
            "waits up to %d ms for the slot of its frame of the controllers",
@@ -236,7 +298,55 @@ bool XrInputStart(const char* dir) {
   return true;
 }
 
-void XrInputNewFrame() { g_new_frame = true; }
+void XrInputNewFrame() {
+  g_new_frame = true;
+  g_pace_due = true;
+}
+
+bool XrInputPace() {
+  if (!g_pace_due) return false;
+  g_pace_due = false;
+  if (g_chan == nullptr || g_options.pace == 0 || VkSceneDevice()) return false;
+  const int64_t start = PaceNow();
+  PaceLook(start);
+  const int64_t deadline = fp::Deadline(g_pace, start);
+  const bool fresh = fp::Fresh(g_pace, start);
+  int64_t now = start;
+  fp::Step step;
+  while ((step = fp::Next(g_pace, deadline, now)) == fp::Step::kWait) {
+    const int64_t ns = fp::SleepNs(g_pace, deadline, now);
+    if (!ThreadWaitSleep(fp::NsToCount(ns, g_pace_frequency))) Sleep(1);
+    now = PaceNow();
+    PaceLook(now);
+  }
+  fp::End(&g_pace, now);
+  const double ms = (now - start) / 1e6;
+  ++g_pace_waits;
+  g_pace_ms += ms;
+  if (ms > g_pace_ms_most) g_pace_ms_most = ms;
+  if (step == fp::Step::kGo) {
+    ++g_pace_writes;
+  } else {
+    ++g_pace_limits;
+  }
+  if (!fresh) ++g_pace_idle;
+  if (g_pace_report_ns == 0) g_pace_report_ns = start;
+  if (now - g_pace_report_ns >= 30000000000LL) {
+    ModLog("xr input     : the pace: %llu frames in %.1f s (%.1f a second), %llu "
+           "started at a new write of the slot and %llu at the time limit, "
+           "%llu with no fresh slot. A frame waited %.3f ms as a mean and "
+           "%.3f ms at most. The display period of the slot is %.2f ms, "
+           "frame %llu",
+           g_pace_waits, (now - g_pace_report_ns) / 1e9,
+           g_pace_waits * 1e9 / (now - g_pace_report_ns), g_pace_writes,
+           g_pace_limits, g_pace_idle, g_pace_ms / g_pace_waits,
+           g_pace_ms_most, g_pace.period_ns / 1e6, ControllersFrameCount());
+    g_pace_report_ns = now;
+    g_pace_waits = g_pace_writes = g_pace_limits = g_pace_idle = 0;
+    g_pace_ms = g_pace_ms_most = 0.0;
+  }
+  return true;
+}
 
 void XrInputLatch() {
   if (g_chan == nullptr || !g_new_frame) return;
@@ -246,15 +356,17 @@ void XrInputLatch() {
   ic::StoreRelease(&g_chan->head.want, want);
   ic::StoreRelease(&g_chan->head.latches, g_chan->head.latches + 1);
 
-  ic::SlotData d;
+  ic::SlotData d = {};
   uint32_t torn = 0;
   bool whole = false;
+  // The sequence of the write of the copy, for the pace.
+  uint32_t seq = 0;
   if (g_lockstep) {
     LARGE_INTEGER start;
     QueryPerformanceCounter(&start);
     int spins = 0;
     for (;;) {
-      whole = ic::Read(&g_chan->slot, &d, 1, &torn);
+      whole = ReadOnce(&d, &seq, &torn);
       if (whole && xm::SlotFor(d.frame, want)) break;
       const double ms = MsSince(start);
       if (ms >= g_options.lockstep_ms) {
@@ -275,7 +387,7 @@ void XrInputLatch() {
     g_wait_ms += ms;
     if (ms > g_wait_ms_most) g_wait_ms_most = ms;
   } else {
-    whole = ic::Read(&g_chan->slot, &d, 64, &torn);
+    for (int i = 0; i < 64 && !whole; ++i) whole = ReadOnce(&d, &seq, &torn);
   }
   if (torn > 0) {
     g_torn += torn;
@@ -285,6 +397,16 @@ void XrInputLatch() {
     ++g_kept;
   } else if (d.frame != 0) {
     Take(d);
+  }
+  // The next frame of the pace waits for a write after this one. Only a
+  // latch after the wait of its frame counts (a frame of the scene and of
+  // the intro). The intro skip latches in FinishFrame before the wait of a
+  // frame with no scene, and a write that came in the work of that frame
+  // must end the wait.
+  if (whole && g_options.pace != 0 && !g_pace_due) {
+    const int64_t now = PaceNow();
+    fp::Took(&g_pace, seq, now);
+    fp::SetPeriod(&g_pace, d.display_period);
   }
   // THE STALE RULE. Not in the lockstep of a test: there the writer writes a
   // new slot only for a new frame of the controllers, and a load of the game

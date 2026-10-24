@@ -809,8 +809,14 @@ that moves while the Hand takes it.
     dialog of a new profile, and the pointer, the clicks and a text input on
     the screen quad are not built), the sound in a headset (the audio
     driver `wineaaudio` of patch 0003 gives the sound of Wine to AAudio,
-    `audio.md`, "In Wine on Android"), the frame pace with `vk_device=0`, and the screen quad in a
-    headset. The input of
+    `audio.md`, "In Wine on Android"), the pace of the frames with
+    `vk_device=0` in a headset (`vk_pace`, `android.md`, "The pace of the
+    frames"), a read of the input channel before the wait of a frame that
+    uses up the read of the next frame of the intro or of the scene (the
+    intro skip in the Lionhead logo, with `vk_pace=1`), the test reader of
+    `input_channel_run.ps1 -Live` with screen frames, the time of the copy
+    of a screen frame (the logos at 35 frames a second with the pace), and
+    the screen quad in a headset. The input of
     the session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the

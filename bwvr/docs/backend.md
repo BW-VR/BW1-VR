@@ -3317,9 +3317,14 @@ panel in place of its pixels, and the app must cut the card from its own
 panel image. Not made yet. With `ui_panel=1` the help text is in the panel
 quads, which the app draws from the stream.
 
-**Known limit:** with `vk_device=0` the mod waits for no GPU and for no
-present, so nothing paces the frames of the game (`android.md`, "No
-Vulkan device of the mod").
+**The pace.** With `vk_device=0` the mod waits for no GPU and for no
+present. `vk_pace=1` (0 is the default, "Play" of the headset app writes 1)
+makes each frame of the game wait for the next write of the slot of the
+input channel, which the app writes one time for each frame of its session
+(`android.md`, "The pace of the frames"). A frame of the scene waits at the
+start of `Process3dEngine` before its first read of the input channel, and
+a frame with no scene at the end of `h_FinishFrame`. The present of
+`vk_ddraw.cpp` does not wait. With `vk_pace=0` nothing paces the frames.
 
 ## Foveated rendering
 
@@ -5303,6 +5308,7 @@ keys that the launcher sets.
 | `vulkan_fallback` | 1 | With `backend=vulkan`: 1 a start takes dxwrapper when the file `bwvr-vulkan-pending.txt` is beside the game or there is no `vulkan-1.dll`, and a fault of Vulkan writes the file for the next start. 0 no file and no fall back. See "The fall back of the renderer Vulkan" |
 | `vulkan_fallback_test` | 0 | A test key of the desktop runs: 1 the mod stops the process before the first walk. See the same section |
 | `vk_device` | 1 | With `backend=vulkan`: 1 the renderer draws on a Vulkan device of its own or of the session. 0 (only with `xr_input=1`, for the headset app) the mod makes no Vulkan instance and no device, and the walks only go into the stream. There is no test key: the choice is made at the start. See "No Vulkan device of the mod" |
+| `vk_pace` | 0 | With `vk_device=0` and `xr_input=1`: 1 each frame of the game waits for the next write of the slot of the input channel (a frame of the session of the headset app), at most 5/4 of its display period, or one period of 72 Hz with no fresh slot. 0 no wait. There is no test key. See "No Vulkan device of the mod" and `android.md`, "The pace of the frames" |
 | `vk_window` | 1 | With `backend=vulkan`: 1 the window of the game gets the picture through a swapchain of Vulkan, 0 through the CPU and GDI. A test key: Shift D. See "The window with Vulkan" |
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |

@@ -38,6 +38,7 @@ constexpr RunKey kRunKeys[] = {
     {"xr_input", 1},        // the head and the hands from the input channel (0)
     {"vk_device", 0},       // no Vulkan device of the mod (1)
     {"ui_panel", 1},        // the help text and the menus of the game as panel quads (0)
+    {"vk_pace", 1},         // a frame of the game waits for a frame of the session (0)
     // The app (main.cpp).
     {"stream_live", 1},     // the reader of the ring (0)
     {"input_live", 1},      // the writer of the input channel (0)

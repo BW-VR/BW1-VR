@@ -167,6 +167,14 @@
     puts its files into slot 20 of the profile of game 1 in the emulator, so
     game 2 ("Play in VR") continues it.
 
+.PARAMETER DisplayHz
+    The value of display_hz in bwvr.ini (docs/android.md, "The display
+    rate"): 72, 80, 90 or 120. The app asks the test runtime for that rate
+    at the start of its session, and the test checks the request, the event
+    of the change, the display period in the first slot that the mod reads
+    and in the lines of the pace of the mod, and the rate of the paced
+    frames. 0 (the default): no key, and the runtime stays at 72 Hz.
+
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
     game in it.
@@ -191,6 +199,7 @@ param(
     [int[]]$SavePicture = @(710, 445),
     [int[]]$SaveOk = @(591, 627),
     [string]$TestSave = '',
+    [ValidateSet(0, 72, 80, 90, 120)][int]$DisplayHz = 0,
     [switch]$Keep
 )
 
@@ -845,7 +854,9 @@ try {
     Expect ($profiles -match 'No such file') 'the copy has no Profiles folder'
     $ini = Join-Path $Out 'bwvr.ini.pushed'
     # A render of 50 percent of the eye of the test runtime: 1380 by 1104.
-    Set-Content -LiteralPath $ini -Encoding ascii -Value (@('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio"))
+    $iniLines = @('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio")
+    if ($DisplayHz -gt 0) { $iniLines += "display_hz=$DisplayHz" }
+    Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$GameDir/bwvr.ini")
 
     # 4. The run.
@@ -856,6 +867,12 @@ try {
     Expect ($log -match 'wine         : Wine is ready') 'Wine is ready'
     Expect ($log -match 'game         : play_game=1, play_menu_hold_ms=1000, play_menu_press=1\. Play starts the game in Wine') 'the app can play: Wine is in the APK'
     Expect ($log -match 'xr           : input_live=1\. The session has the actions of the mod') 'the session has the actions of the mod from its start'
+    # THE DISPLAY RATE (-DisplayHz): the request at the start of the session
+    # and the event of the runtime.
+    if ($DisplayHz -gt 0) {
+        Expect ($log -match "xr           : the app asks the runtime for $DisplayHz\.00 Hz \(0\)") "the app asked the runtime for $DisplayHz Hz at the start of the session (display_hz=$DisplayHz)"
+        if ($DisplayHz -ne 72) { Expect ($log -match "xr           : the display rate changed from 72\.00 to $DisplayHz\.00 Hz") "the runtime changed the rate from 72 to $DisplayHz Hz, and the app logged the event" }
+    }
     Hold 'ready'
 
     $runs = @(
@@ -1179,7 +1196,7 @@ try {
         # THE PACE (vk_pace=1 of "Play", docs/android.md, "The pace of the
         # frames"): each frame of the game waits for the next slot of the app,
         # so the game makes no more frames than the session (72 a second with
-        # the test runtime).
+        # the test runtime, or the rate of -DisplayHz).
         Expect ($modLog -match 'xr input     : vk_pace=1 with vk_device=0\. Each frame of the game waits') "the mod of game $n paces its frames by the slots of the app (vk_pace=1)"
         $paceLines = @($modLog -split "`r?`n" | Where-Object { $_ -match '^xr input     : the pace: ' })
         $paceLines | Select-Object -First 6 | ForEach-Object { Note ('bwvr.log: ' + $_) }
@@ -1187,7 +1204,18 @@ try {
         $paceWrites = @($paceLines | Where-Object { $_ -match 'a second\), [1-9]\d* started at a new write' })
         Expect ($paceLines.Count -gt 0 -and $paceWrites.Count -gt 0) "the log of the mod of game $n has the lines of the pace, and frames started at a new write of the slot ($($paceLines.Count) lines, $($paceWrites.Count) with a new write)"
         $paceMost = if ($paceRates.Count) { ($paceRates | Measure-Object -Maximum).Maximum } else { 0 }
-        Expect ($paceRates.Count -gt 0 -and $paceMost -le 80) ("the paced frames of game $n come at most at the rate of the session: " + ($paceRates -join ' ') + ' a second')
+        # The rate of the session: 72 Hz of the test runtime, or display_hz.
+        $sessionHz = if ($DisplayHz -gt 0) { $DisplayHz } else { 72 }
+        Expect ($paceRates.Count -gt 0 -and $paceMost -le ($sessionHz + 8)) ("the paced frames of game $n come at most at the rate of the session ($sessionHz Hz): " + ($paceRates -join ' ') + ' a second')
+        if ($DisplayHz -gt 0) {
+            # The display period of the rate, as the mod logs it (%.2f ms).
+            $periodText = (1000.0 / $DisplayHz).ToString('0.00', [Globalization.CultureInfo]::InvariantCulture)
+            $firstSlot = [regex]::Match($modLog, 'xr input     : the first slot of the app: .*display period ([0-9.]+) ms')
+            Expect ($firstSlot.Success -and $firstSlot.Groups[1].Value -eq $periodText) "the first slot that the mod of game $n read has the display period of $DisplayHz Hz ($($firstSlot.Groups[1].Value) ms, want $periodText ms)"
+            $periods = @($paceLines | ForEach-Object { [regex]::Match($_, 'The display period of the slot is ([0-9.]+) ms').Groups[1].Value })
+            $otherPeriods = @($periods | Where-Object { $_ -ne $periodText })
+            Expect ($periods.Count -gt 0 -and $otherPeriods.Count -eq 0) "each line of the pace of game $n has the display period of $DisplayHz Hz, $periodText ms ($($periods.Count) lines, the periods $(($periods | Sort-Object -Unique) -join ' ') ms)"
+        }
     }
 
     # THE FACTS for the doc: the sound, the window of the null driver, the

@@ -138,6 +138,41 @@ inline void FramePaceChecks() {
           static_cast<double>(end - at), static_cast<double>(fp::kIdlePeriodNs));
   }
 
+  // THE DISPLAY RATE (display_hz of the app, docs/android.md, "The display
+  // rate"): the pace follows the period of the slot at each rate of the row,
+  // and after a change of the rate the next limit is 5/4 of the new period.
+  for (int64_t hz : {72, 80, 90, 120}) {
+    const int64_t period = 1000000000 / hz;
+    Run r;
+    int64_t first[] = {0};
+    int64_t end = Wait(&r, 0, first, 1, period);
+    int64_t next[] = {period};
+    end = Wait(&r, end + 2 * kMs, next, 1, period);
+    char what[128];
+    snprintf(what, sizeof(what), "%lld Hz: the wait ends at the next write of the slot",
+             static_cast<long long>(hz));
+    Check(r.step == fp::Step::kGo && end >= period && end <= period + fp::kPollNs, what,
+          static_cast<double>(end - period), 0);
+    const int64_t before = end;
+    end = Wait(&r, before + 2 * kMs, nullptr, 0, period);
+    snprintf(what, sizeof(what), "%lld Hz: a frame that the app missed waits 5/4 of %.2f ms",
+             static_cast<long long>(hz), period / 1e6);
+    Check(r.step == fp::Step::kTimeUp && end == before + period + period / 4, what,
+          static_cast<double>(end - before), static_cast<double>(period + period / 4));
+  }
+  {
+    // 72 Hz, then the app writes a slot with the period of 90 Hz.
+    const int64_t p72 = 13888888, p90 = 11111111;
+    Run r;
+    int64_t first[] = {0};
+    int64_t end = Wait(&r, 0, first, 1, p72);
+    int64_t next[] = {p72};
+    end = Wait(&r, end + 2 * kMs, next, 1, p90);
+    Check(r.s.period_ns == p90 && fp::Limit(r.s, end) == p90 + p90 / 4,
+          "a slot with the period of 90 Hz after 72 Hz: the limit is 5/4 of 11.11 ms",
+          static_cast<double>(fp::Limit(r.s, end)), static_cast<double>(p90 + p90 / 4));
+  }
+
   // A PERIOD OF 0 (the record of a fake run has none): the limit of 72 Hz,
   // and a write still ends the wait.
   {

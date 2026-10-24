@@ -126,6 +126,26 @@
     runtime reads back the eye pictures at the end of the script, when the
     feed is at its frames of the scene.
 
+.PARAMETER DisplayRate
+    The test of the display rate (docs/android.md, "The display rate"). The
+    app starts with display_hz=80. The right controller points at
+    "Performance", pulls the trigger, points at the row "Display rate", pulls
+    the trigger (80 to 90 Hz), presses B, points at "Save Config" and pulls the
+    trigger. The test checks the rates of the runtime in the row, the request
+    for 80 Hz at the start of the session and for 90 Hz at the change of the
+    row, the event of the runtime and its line in the log, the display period
+    of 90 Hz in the input channel, and display_hz=90 in the saved bwvr.ini.
+
+    Each run checks the display rate too. With no -DisplayRate and no
+    -NoRateExtension: the runtime lists XR_FB_display_refresh_rate, the row
+    offers its rates, and display_hz=0 asks for no rate.
+
+.PARAMETER NoRateExtension
+    The test runtime lists no XR_FB_display_refresh_rate (rates.txt "none"),
+    and the app starts with display_hz=90. The test checks that the instance
+    has no such extension, that the menu has no row "Display rate", that the
+    app asks for no rate, and that the save keeps display_hz=90.
+
 .PARAMETER Gpu
     The GPU of the emulator: swiftshader_indirect (the default, Vulkan 1.2 on
     the CPU) or host (the GPU of the PC).
@@ -142,7 +162,9 @@ param(
     [switch]$NoLayers,
     [switch]$QuadFrames,
     [switch]$NoProjection,
-    [switch]$NoScreen
+    [switch]$NoScreen,
+    [switch]$DisplayRate,
+    [switch]$NoRateExtension
 )
 
 . (Join-Path $PSScriptRoot 'android_env.ps1')
@@ -157,7 +179,8 @@ $Apk = Join-Path $Bwvr 'out\android\bwvr-quest.apk'
 $InputWriter = Join-Path $Bwvr 'build\test\input_writer\Release\bwvr_input_writer.exe'
 $StreamReader = Join-Path $Bwvr 'build\test\stream_reader\Release\bwvr_stream_reader.exe'
 # A run with a stream keeps its results in a folder of its own.
-$Out = Join-Path $Bwvr $(if ($Live -and $WindowFrom -gt 0) { 'out\android\emu-xr-window-test' } elseif ($Live) { 'out\android\emu-xr-live-test' } elseif ($Stream) { 'out\android\emu-xr-stream-test' } else { 'out\android\emu-xr-test' })
+$Out = Join-Path $Bwvr $(if ($Live -and $WindowFrom -gt 0) { 'out\android\emu-xr-window-test' } elseif ($Live) { 'out\android\emu-xr-live-test' } elseif ($Stream) { 'out\android\emu-xr-stream-test' } elseif ($DisplayRate) { 'out\android\emu-xr-rate-test' } elseif ($NoRateExtension) { 'out\android\emu-xr-norate-test' } else { 'out\android\emu-xr-test' })
+if ($DisplayRate -and $NoRateExtension) { Stop-Android '-DisplayRate needs the extension: give one of -DisplayRate and -NoRateExtension.' }
 $Feed = $null
 if ($Live) {
     $Feed = Join-Path $Live 'ring-capture.bin'
@@ -411,15 +434,21 @@ try {
     # The live stream makes the stereo screen at its first picture, after the
     # first frames of the session: its script starts 200 frames later.
     $T = $(if ($Live) { 200 } else { 0 })
+    # The group and its row: "Moving around" (row 6) and "Turn in steps" (row
+    # 0), or with -DisplayRate "Performance" (row 3) and "Display rate" (row 1,
+    # after "Renderer").
+    $groupY = $(if ($DisplayRate) { 428 } else { 632 })
+    $rowY = $(if ($DisplayRate) { 292 } else { 227 })
+    $pageName = $(if ($DisplayRate) { 'rate' } else { 'moving' })
     Set-Content -LiteralPath $script -Encoding ascii -Value @(
         "$(30 + $T) recenter",
         "$(40 + $T) capture start",
-        "$(50 + $T) point right $L 800 632",
+        "$(50 + $T) point right $L 800 $groupY",
         "$(60 + $T) capture point",
         "$(70 + $T) trigger right 1", "$(74 + $T) trigger right 0",
-        "$(90 + $T) point right $L 400 227",
+        "$(90 + $T) point right $L 400 $rowY",
         "$(100 + $T) trigger right 1", "$(104 + $T) trigger right 0",
-        "$(110 + $T) capture moving",
+        "$(110 + $T) capture $pageName",
         "$(120 + $T) button right 1", "$(124 + $T) button right 0",
         "$(140 + $T) point right $L 800 836",
         "$(150 + $T) trigger right 1", "$(154 + $T) trigger right 0",
@@ -433,6 +462,14 @@ try {
     # a fade come (-QuadFrames).
     if ($QuadFrames) { Add-Content -LiteralPath $script -Encoding ascii -Value @(1..60 | ForEach-Object { "$_ quads cards$_" }) }
     Adb @('push', $script, "$XrDir/script.txt")
+    # THE DISPLAY RATE: with -NoRateExtension the runtime lists no
+    # XR_FB_display_refresh_rate. Else it has 72, 80, 90 and 120 Hz.
+    if ($NoRateExtension) {
+        $rates = Join-Path $Out 'rates.txt'
+        Set-Content -LiteralPath $rates -Encoding ascii -Value 'none'
+        Adb @('push', $rates, "$XrDir/rates.txt")
+        Adb @('shell', 'chmod', '644', "$XrDir/rates.txt")
+    }
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
     Adb @('shell', 'chmod', '644', "$XrDir/script.txt")
@@ -459,6 +496,8 @@ try {
     if ($NoLayers) { $iniLines += 'stream_layers=0' }
     if ($NoProjection) { $iniLines += 'stream_projection=0' }
     if ($NoScreen) { $iniLines += 'stream_screen=0' }
+    if ($DisplayRate) { $iniLines += 'display_hz=80' }
+    if ($NoRateExtension) { $iniLines += 'display_hz=90' }
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$AppDir/game/bwvr.ini")
     if ($Stream) { Adb @('push', $Stream, "$AppDir/game/bwvr-stream.bin") }
@@ -509,7 +548,7 @@ try {
     Expect ($report -notmatch '(?m)^fault ') ('the runtime found no fault' + $(if ($report -match '(?m)^fault (.*)$') { ': ' + $Matches[1] } else { '' }))
     # The menu quad is the quad of 1600 by 1200 pixels, over the stereo screen
     # and the quad layers of the mod.
-    foreach ($name in @('start', 'point', 'moving', 'saved')) {
+    foreach ($name in @('start', 'point', $pageName, 'saved')) {
         $m = [regex]::Match($report, "capture \S*/$name-\d+\.bmp 1600x1200 lit (\d+)")
         Expect ($m.Success -and [int]$m.Groups[1].Value -gt 100000) "the picture $name of the menu quad has the menu ($($m.Groups[1].Value) lit pixels)"
     }
@@ -936,7 +975,10 @@ public static class CardBmp {
     Expect ($dump -match 'head whole, 4096 bytes, version 1') 'the channel file has a whole head'
     $slotLine = [regex]::Match($dump, 'slot seq (\d+) frame (\d+) flags 0x([0-9A-F]+) time (\d+) period (\d+) recenters (\d+) size (\d+) (\d+)')
     Expect ($slotLine.Success -and [int]$slotLine.Groups[2].Value -gt 100 -and ([int]$slotLine.Groups[1].Value % 2) -eq 0) ("the app wrote slots in the frames of the session (" + $(if ($slotLine.Success) { "$($slotLine.Groups[2].Value) slots, the sequence $($slotLine.Groups[1].Value) is even" } else { 'no slot' }) + ')')
-    Expect ($slotLine.Success -and $slotLine.Groups[5].Value -eq '13888888' -and [int64]$slotLine.Groups[4].Value -gt 0) ("the slot has the display time of the runtime, period 13888888 ns (" + $(if ($slotLine.Success) { $slotLine.Groups[5].Value } else { '' }) + ')')
+    # 72 Hz, the rate of the runtime with no request. With -DisplayRate the
+    # last request of the app is 90 Hz: about 11.1 ms.
+    $wantPeriod = $(if ($DisplayRate) { '11111111' } else { '13888888' })
+    Expect ($slotLine.Success -and $slotLine.Groups[5].Value -eq $wantPeriod -and [int64]$slotLine.Groups[4].Value -gt 0) ("the slot has the display time of the runtime, period $wantPeriod ns (" + $(if ($slotLine.Success) { $slotLine.Groups[5].Value } else { '' }) + ')')
     Expect ($slotLine.Success -and $slotLine.Groups[6].Value -eq '1' -and $log -match 'the LOCAL space recentered \(1 recenters\)') 'the recenter of the runtime is in the slot (1 recenter)'
     Expect ($slotLine.Success -and $slotLine.Groups[7].Value -eq '2064' -and $slotLine.Groups[8].Value -eq '2208') 'the slot has the size of the eyes that the headset asks for'
     Expect ($dump -match 'eye 0 valid 1 position -0\.0320 0\.0000 0\.0000 orientation 0\.0000 0\.0000 0\.0000 1\.0000 fov -0\.9425 0\.8203 0\.8901 -0\.9599' -and
@@ -968,7 +1010,39 @@ public static class CardBmp {
     Expect ($log -match 'the headset asks for 2064 by 2208') 'the app read the size of the eyes'
     Expect ($log -match 'the session is made') 'the app made its session and its layers'
     Expect ($log -match 'menu         : saved') 'the app saved bwvr.ini after the trigger on Save Config'
-    Expect ($saved -match '(?m)^snap_turn=3\r?$') 'the trigger on "Turn in steps" made snap_turn 3, and the save wrote it'
+    if (-not $DisplayRate) { Expect ($saved -match '(?m)^snap_turn=3\r?$') 'the trigger on "Turn in steps" made snap_turn 3, and the save wrote it' }
+
+    # THE DISPLAY RATE (docs/android.md, "The display rate").
+    $requests = @([regex]::Matches($report, '(?m)^frame (\d+) call xrRequestDisplayRefreshRateFB ([0-9.]+)') | ForEach-Object { , @([int]$_.Groups[1].Value, $_.Groups[2].Value) })
+    $requestText = ($requests | ForEach-Object { "$($_[1]) at frame $($_[0])" }) -join ', '
+    if ($NoRateExtension) {
+        Expect ($report -match 'note display rates none' -and $report -match 'call xrCreateInstance ' -and $report -notmatch 'call xrCreateInstance .*XR_FB_display_refresh_rate') 'the runtime lists no XR_FB_display_refresh_rate, and the instance does not have it'
+        Expect ($log -match 'xr           : the runtime has \d+ extensions\. Vulkan 2: yes, Android: yes, display rate: no' -and $log -match 'xr           : the runtime has no XR_FB_display_refresh_rate\. The app asks for no display rate') 'the log of the app says that the runtime has no display rate'
+        Expect ($log -match 'menu         : display_hz=90\. The runtime gives none of the rates 72, 80, 90 and 120 Hz, so the menu has no row Display rate and the app asks for no rate') 'display_hz=90 and no extension: the menu has no row Display rate'
+        Expect ($report -notmatch 'xrRequestDisplayRefreshRateFB|xrEnumerateDisplayRefreshRatesFB|xrGetDisplayRefreshRateFB' -and $log -notmatch 'the app asks the runtime for') 'the app makes no call of XR_FB_display_refresh_rate'
+        Expect ($saved -match '(?m)^display_hz=90\r?$') 'with no row the save keeps display_hz=90 in bwvr.ini'
+    } else {
+        Expect ($report -match 'note display rates 72\.00 80\.00 90\.00 120\.00' -and $report -match 'call xrCreateInstance .*XR_FB_display_refresh_rate') 'the runtime lists XR_FB_display_refresh_rate with 72, 80, 90 and 120 Hz, and the instance has it'
+        Expect ($log -match 'xr           : the runtime gives 4 display rates: 72\.00 80\.00 90\.00 120\.00 Hz\. It uses 72\.00 Hz now') 'the app read the rates of the runtime (xrEnumerateDisplayRefreshRatesFB, xrGetDisplayRefreshRateFB)'
+        Expect ($log -match 'menu         : the row Display rate of the page Performance offers 72 Hz, 80 Hz, 90 Hz, 120 Hz, and 0 \(the headset sets the rate\)') 'the row Display rate offers the rates of the runtime'
+        if ($DisplayRate) {
+            Expect ($log -match 'menu         : display_hz=80\. The app asks for this rate when the session runs') 'the app starts with display_hz=80'
+            $begin = [regex]::Match($report, '(?m)^call xrBeginSession')
+            $firstAsk = [regex]::Match($report, '(?m)^frame \d+ call xrRequestDisplayRefreshRateFB 80\.00')
+            Expect ($requests.Count -eq 2 -and $requests[0][1] -eq '80.00' -and $requests[1][1] -eq '90.00' -and $begin.Success -and $firstAsk.Success -and $firstAsk.Index -gt $begin.Index -and $requests[0][0] -le 1) "the app asked for 80 Hz at the start of the session and for 90 Hz after the trigger on the row, and for no other rate ($requestText)"
+            Expect ($requests.Count -eq 2 -and $requests[1][0] -ge 100 -and $requests[1][0] -le 110) "the request for 90 Hz came in the frames of the trigger on the row (frame $(if ($requests.Count -eq 2) { $requests[1][0] }), the trigger at frame 100)"
+            Expect ($log -match 'xr           : the app asks the runtime for 80\.00 Hz \(0\)' -and $log -match 'xr           : the app asks the runtime for 90\.00 Hz \(0\)') 'the runtime took both requests (XR_SUCCESS in the log)'
+            $change = [regex]::Match($report, '(?m)^frame (\d+) display rate 80\.00 to 90\.00')
+            Expect ($change.Success -and $report -match 'call xrPollEvent display rate 80\.00 to 90\.00') "the runtime changed to 90 Hz and the app polled the event (frame $($change.Groups[1].Value))"
+            Expect ($log -match 'xr           : the display rate changed from 72\.00 to 80\.00 Hz' -and $log -match 'xr           : the display rate changed from 80\.00 to 90\.00 Hz') 'the log of the app has the event of each change: 72 to 80 Hz, and 80 to 90 Hz'
+            $periodLine = [regex]::Match($log, 'input        : slot (\d+): the display period is 11111111 ns now \(90\.00 Hz\), it was 12500000 ns')
+            Expect $periodLine.Success ("the input channel writes the display period of 90 Hz after the change (slot $($periodLine.Groups[1].Value), 11.11 ms)")
+            Expect ($saved -match '(?m)^display_hz=90\r?$') 'the save wrote display_hz=90'
+        } else {
+            Expect ($log -match 'menu         : display_hz=0\. The app asks for no rate' -and $requests.Count -eq 0 -and $report -notmatch 'display rate \d') "display_hz=0: the app asks for no rate, and the rate stays 72 Hz ($($requests.Count) requests)"
+            Expect ($saved -match '(?m)^display_hz=0\r?$') 'the save wrote display_hz=0'
+        }
+    }
     Expect ($saved -match '(?m)^headset_width=2064\r?$' -and $saved -match '(?m)^headset_height=2208\r?$') 'the app wrote the size of the eyes to bwvr.ini'
     Expect ($logcat -notmatch 'JNI DETECTED ERROR' -and $logcat -notmatch 'Fatal signal' -and $logcat -notmatch 'FATAL EXCEPTION') 'logcat has no JNI error and no crash'
     # Android can keep the process after the end of the activity, so the

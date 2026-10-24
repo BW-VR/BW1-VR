@@ -30,6 +30,7 @@
 #include "../../src/common/version.h"
 #include "app_log.h"
 #include "build_id.h"
+#include "display_rate.h"
 #include "flat_view.h"
 #include "game_folder.h"
 #include "input_live.h"
@@ -150,6 +151,9 @@ struct App {
   uint64_t keys_typed = 0;
   uint64_t rate_frame = 0;   // the frame and the time of the last line of the frame rate
   double rate_ms = 0.0;
+  // THE DISPLAY RATE (display_hz): the value of the row at the last request
+  // to the runtime. 0: no request yet, or a request for no rate.
+  int display_asked = 0;
 };
 
 // The renderer of the mod takes one device in a process (see android_main).
@@ -1004,6 +1008,47 @@ void OnControllers(App* app, const XrInput& in, bool* show_cursor,
   if (hit) ml::PixelToPoint(quad, px, py, cursor);
 }
 
+// THE DISPLAY RATE (display_hz, docs/android.md, "The display rate"). The
+// app asks the runtime for the rate of the row "Display rate" when the
+// session runs (its start) and at each change of the row, with no new start.
+// display_hz=0 (the default): no request, and the headset sets the rate. A
+// change back to 0 after a request asks for no rate ("no preference" of
+// XR_FB_display_refresh_rate).
+void ApplyDisplayRate(App* app) {
+  const int hz = app->menu.DisplayHz();
+  if (hz == app->display_asked) return;
+  app->display_asked = hz;
+  app->xr.RequestDisplayRate(display_rate::RuntimeRate(hz, app->xr.DisplayRates()));
+}
+
+// The rates of the runtime into the menu, after the start of the session.
+void TakeDisplayRates(App* app) {
+  const std::vector<int> offered = display_rate::Offered(app->xr.DisplayRates());
+  app->menu.SetDisplayRates(offered);
+  if (offered.empty()) {
+    AppLog("menu         : display_hz=%d. The runtime gives none of the rates 72, 80, 90 "
+           "and 120 Hz, so the menu has no row Display rate and the app asks for no rate",
+           app->menu.DisplayWanted());
+    return;
+  }
+  // The log has no word "default": the tests of the APK stop at a line with
+  // "FAULT" in any case.
+  std::string list;
+  for (int hz : offered) list += std::to_string(hz) + " Hz, ";
+  AppLog("menu         : the row Display rate of the page Performance offers %sand 0 "
+         "(the headset sets the rate)",
+         list.c_str());
+  if (app->menu.DisplayWanted() != app->menu.DisplayHz()) {
+    AppLog("menu         : display_hz=%d is not a rate of the row. The app takes "
+           "display_hz=0 and asks for no rate",
+           app->menu.DisplayWanted());
+  } else {
+    AppLog("menu         : display_hz=%d. %s", app->menu.DisplayHz(),
+           app->menu.DisplayHz() > 0 ? "The app asks for this rate when the session runs"
+                                     : "The app asks for no rate");
+  }
+}
+
 void Load(App* app) {
   app->game = FindGameFolder(app->folder);
   app->ini.Parse(ReadTextFile(app->game.ini_path));
@@ -1206,6 +1251,7 @@ void android_main(android_app* android) {
   }
   if (app.xr_on) {
     TakeHeadsetSize(&app);
+    TakeDisplayRates(&app);
     app.base_status = app.game.exe_right
                           ? "Ready. OpenXR runtime: " + app.xr.RuntimeName()
                           : app.game.message;
@@ -1246,6 +1292,7 @@ void android_main(android_app* android) {
         app.input_live.WriteNoInput();
         continue;
       }
+      ApplyDisplayRate(&app);
       XrInput input;
       if (!app.xr.BeginFrame(&input)) continue;
       MenuButton(&app, input);

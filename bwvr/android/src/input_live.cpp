@@ -80,6 +80,19 @@ void InputLive::Write(ic::SlotData* slot) {
            "the right hand %s the ring at slot %u", in ? "goes into" : "does not fit",
            slots_);
   }
+  // One line when the display period of the runtime changes (the display
+  // rate, docs/android.md, "The display rate"). The mod paces the game by it.
+  if (slot->display_period > 0 && slot->display_period != period_) {
+    if (period_ > 0 && period_lines_ < 20) {
+      ++period_lines_;
+      AppLog("input        : slot %u: the display period is %lld ns now (%.2f Hz), it "
+             "was %lld ns",
+             slots_, static_cast<long long>(slot->display_period),
+             1e9 / static_cast<double>(slot->display_period),
+             static_cast<long long>(period_));
+    }
+    period_ = slot->display_period;
+  }
   // Some lines for the log: the first slot, then one each 72 slots.
   const bool say = lines_ < 12 && (slots_ == 1 || slots_ % 72 == 0);
   if (!say) return;

@@ -939,6 +939,13 @@ that moves while the Hand takes it.
   install and the uninstall of the add-on on a clean setup. The game ran
   at 42 to 44 frames a second, and the host sends each frame on the frame
   thread (`backend.md`).
+- **N19. The display rate of the headset app** (`display_hz`, the row
+  "Display rate", `android.md`, "The display rate"). The emulator with the
+  test runtime shows the row, the requests, the event and the pace of the
+  game in Wine at 90 Hz. Not shown: each rate in a headset (the feel of the
+  head motion, the power and the heat of a Quest 3, the frames of the game
+  under Box64), and a runtime with no `XR_FB_display_refresh_rate` on a
+  real headset (the Steam Frame).
 
 ### The repo, the release and the tools
 

@@ -51,6 +51,7 @@ bool XrApp::Start(ANativeActivity* activity, uint32_t menu_width,
   if (!MakeInstance(activity)) return false;
   if (!MakeVulkan()) return false;
   if (!MakeSession()) return false;
+  ReadDisplayRates();
   if (!MakeActions()) return false;
   if (!MakeLayer(&menu_, menu_width, menu_height)) return false;
   if (!MakeLayer(&cursor_, cursor_size, cursor_size)) return false;
@@ -91,13 +92,21 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
     if (strcmp(e.extensionName, XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME) == 0) {
       android = true;
     }
+    if (strcmp(e.extensionName, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME) == 0) {
+      display_rate_ext_ = true;
+    }
   }
-  AppLog("xr           : the runtime has %u extensions. Vulkan 2: %s, Android: %s",
-         count, vulkan2 ? "yes" : "no", android ? "yes" : "no");
+  AppLog("xr           : the runtime has %u extensions. Vulkan 2: %s, Android: %s, "
+         "display rate: %s",
+         count, vulkan2 ? "yes" : "no", android ? "yes" : "no",
+         display_rate_ext_ ? "yes" : "no");
   if (!vulkan2 || !android) return false;
 
+  // XR_FB_display_refresh_rate only when the runtime lists it. A runtime with
+  // none (for example Lepton of the Steam Frame) uses its own rate.
   const char* names[] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
-                         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};
+                         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
+                         XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME};
   XrInstanceCreateInfoAndroidKHR android_info = {
       XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
   android_info.applicationVM = activity->vm;
@@ -108,7 +117,7 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   info.applicationInfo.applicationVersion = 1;
   strcpy(info.applicationInfo.engineName, "bwvr");
   info.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 34);
-  info.enabledExtensionCount = 2;
+  info.enabledExtensionCount = display_rate_ext_ ? 3 : 2;
   info.enabledExtensionNames = names;
   if (!Ok(xrCreateInstance(&info, &instance_), "xrCreateInstance")) return false;
 
@@ -360,6 +369,65 @@ bool XrApp::MakeSession() {
   AppLog("xr           : %u formats of a swapchain, the menu takes %lld", count,
          static_cast<long long>(format_));
   return format_ != 0;
+}
+
+void XrApp::ReadDisplayRates() {
+  display_rates_.clear();
+  if (!display_rate_ext_) {
+    AppLog("xr           : the runtime has no XR_FB_display_refresh_rate. The app asks "
+           "for no display rate, and the headset sets the rate");
+    return;
+  }
+  enumerate_rates_ = Proc<PFN_xrEnumerateDisplayRefreshRatesFB>(
+      instance_, "xrEnumerateDisplayRefreshRatesFB");
+  get_rate_ = Proc<PFN_xrGetDisplayRefreshRateFB>(instance_, "xrGetDisplayRefreshRateFB");
+  request_rate_ = Proc<PFN_xrRequestDisplayRefreshRateFB>(instance_,
+                                                         "xrRequestDisplayRefreshRateFB");
+  if (enumerate_rates_ == nullptr || get_rate_ == nullptr || request_rate_ == nullptr) {
+    AppLog("xr           : the functions of XR_FB_display_refresh_rate are missing. The "
+           "app asks for no display rate");
+    display_rate_ext_ = false;
+    return;
+  }
+  uint32_t count = 0;
+  if (!Ok(enumerate_rates_(session_, 0, &count, nullptr),
+          "xrEnumerateDisplayRefreshRatesFB")) {
+    return;
+  }
+  std::vector<float> rates(count, 0.0f);
+  if (count > 0 && !Ok(enumerate_rates_(session_, count, &count, rates.data()),
+                       "xrEnumerateDisplayRefreshRatesFB")) {
+    return;
+  }
+  rates.resize(count);
+  display_rates_ = rates;
+  std::string list;
+  for (float r : rates) {
+    char part[24];
+    snprintf(part, sizeof(part), "%s%.2f", list.empty() ? "" : " ", r);
+    list += part;
+  }
+  float now = 0.0f;
+  get_rate_(session_, &now);
+  AppLog("xr           : the runtime gives %u display rates: %s Hz. It uses %.2f Hz now",
+         count, list.c_str(), now);
+}
+
+bool XrApp::RequestDisplayRate(float hz) {
+  if (!display_rate_ext_ || request_rate_ == nullptr) return false;
+  const XrResult r = request_rate_(session_, hz);
+  float now = 0.0f;
+  if (get_rate_ != nullptr) get_rate_(session_, &now);
+  if (hz > 0.0f) {
+    AppLog("xr           : the app asks the runtime for %.2f Hz (%d). The runtime uses "
+           "%.2f Hz now",
+           hz, static_cast<int>(r), now);
+  } else {
+    AppLog("xr           : the app asks the runtime for no display rate (0, %d). The "
+           "runtime uses %.2f Hz now",
+           static_cast<int>(r), now);
+  }
+  return XR_SUCCEEDED(r);
 }
 
 bool XrApp::MakeActions() {
@@ -661,6 +729,13 @@ void XrApp::PollEvents(bool* quit) {
       }
     } else if (event.type == XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED) {
       profiles_read_ = false;
+    } else if (event.type == XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB) {
+      // The display period of the next frames follows the rate, and the input
+      // channel gives it to the mod (predictedDisplayPeriod).
+      const auto* rate =
+          reinterpret_cast<const XrEventDataDisplayRefreshRateChangedFB*>(&event);
+      AppLog("xr           : the display rate changed from %.2f to %.2f Hz",
+             rate->fromDisplayRefreshRate, rate->toDisplayRefreshRate);
     }
     event = {XR_TYPE_EVENT_DATA_BUFFER};
   }

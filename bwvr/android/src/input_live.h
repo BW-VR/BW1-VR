@@ -45,6 +45,8 @@ class InputLive {
   uint64_t keys_ = 0;
   uint64_t keys_dropped_ = 0;
   int lines_ = 0;
+  int64_t period_ = 0;  // the display period of the last slot, for one line at a change
+  int period_lines_ = 0;
   bool no_input_ = false;
   input_channel::SlotData last_ = {};
 };

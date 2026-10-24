@@ -62,6 +62,14 @@
 // to its side, with the angles of view below (xrLocateViews). The grip pose
 // of a hand is its aim pose.
 //
+// THE DISPLAY RATE. The runtime lists XR_FB_display_refresh_rate with the
+// rates 72, 80, 90 and 120 Hz, and it starts at 72 Hz. The file rates.txt
+// in the folder of the runtime can give other rates (for example "72 90"),
+// or "none": then the runtime does not list the extension. A request of the
+// app counts from the next xrWaitFrame: the period of the frames follows the
+// rate, and the app gets XrEventDataDisplayRefreshRateChangedFB. A request
+// for 0 goes back to 72 Hz.
+//
 // <frame> is a frame of the script. The script counts the frames of the
 // session, but it stops at a hold, so after a hold the frames of the script
 // are behind the frames of the session. A line of the report has the frame
@@ -95,6 +103,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #define XR_USE_PLATFORM_ANDROID
@@ -305,6 +314,16 @@ struct Session {
 };
 
 std::vector<XrSessionState> g_events;
+// THE DISPLAY RATE: the rates of the runtime (empty: no extension), the rate
+// now, a request that counts from the next frame (0: none), and the events of
+// a change that the app did not poll yet (from, to).
+bool g_rates_read = false;
+std::vector<float> g_rates;
+bool g_rate_enabled = false;  // the instance has XR_FB_display_refresh_rate
+constexpr float kDefaultRate = 72.0f;
+float g_rate = kDefaultRate;
+float g_rate_asked = 0.0f;
+std::vector<std::pair<float, float>> g_rate_events;
 Instance* g_instance = nullptr;
 // The one session of a test run.
 Session* g_session = nullptr;
@@ -746,16 +765,50 @@ int HandOf(Instance* in, XrPath subaction) {
 XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name,
                                         PFN_xrVoidFunction* function);
 
+// The rates of rates.txt, or 72, 80, 90 and 120 Hz.
+void ReadRates() {
+  if (g_rates_read) return;
+  g_rates_read = true;
+  g_rates = {72.0f, 80.0f, 90.0f, 120.0f};
+  char path[256];
+  snprintf(path, sizeof(path), "%s/rates.txt", kFolder);
+  FILE* f = fopen(path, "r");
+  if (f != nullptr) {
+    char word[32];
+    std::vector<float> rates;
+    bool none = false;
+    while (fscanf(f, "%31s", word) == 1) {
+      if (strcmp(word, "none") == 0) {
+        none = true;
+      } else {
+        rates.push_back(static_cast<float>(atof(word)));
+      }
+    }
+    fclose(f);
+    g_rates = none ? std::vector<float>() : rates;
+  }
+  std::string list;
+  for (float r : g_rates) {
+    char part[24];
+    snprintf(part, sizeof(part), " %.2f", r);
+    list += part;
+  }
+  Report("note display rates%s", g_rates.empty() ? " none, no XR_FB_display_refresh_rate" : list.c_str());
+}
+
 XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(
     const char* layer, uint32_t capacity, uint32_t* count, XrExtensionProperties* out) {
+  ReadRates();
   static const char* kNames[] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
                                  XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
                                  XR_KHR_LOADER_INIT_EXTENSION_NAME,
-                                 XR_KHR_LOADER_INIT_ANDROID_EXTENSION_NAME};
-  *count = 4;
+                                 XR_KHR_LOADER_INIT_ANDROID_EXTENSION_NAME,
+                                 XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME};
+  const uint32_t n = g_rates.empty() ? 4 : 5;
+  *count = n;
   if (capacity == 0) return XR_SUCCESS;
-  if (capacity < 4) return XR_ERROR_SIZE_INSUFFICIENT;
-  for (uint32_t i = 0; i < 4; ++i) {
+  if (capacity < n) return XR_ERROR_SIZE_INSUFFICIENT;
+  for (uint32_t i = 0; i < n; ++i) {
     strcpy(out[i].extensionName, kNames[i]);
     out[i].extensionVersion = 1;
   }
@@ -775,8 +828,17 @@ XrResult XRAPI_CALL CreateInstance(const XrInstanceCreateInfo* info, XrInstance*
   }
   if (!android) Fault("xrCreateInstance with no XrInstanceCreateInfoAndroidKHR");
   std::string ext;
+  ReadRates();
+  g_rate_enabled = false;
+  g_rate = kDefaultRate;
+  g_rate_asked = 0.0f;
+  g_rate_events.clear();
   for (uint32_t i = 0; i < info->enabledExtensionCount; ++i) {
     ext += std::string(" ") + info->enabledExtensionNames[i];
+    if (strcmp(info->enabledExtensionNames[i], XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME) == 0) {
+      if (g_rates.empty()) Fault("xrCreateInstance with XR_FB_display_refresh_rate, which the runtime does not list");
+      g_rate_enabled = true;
+    }
   }
   Report("call xrCreateInstance app %s api %u.%u extensions%s", info->applicationInfo.applicationName,
          XR_VERSION_MAJOR(info->applicationInfo.apiVersion),
@@ -941,6 +1003,16 @@ XrResult XRAPI_CALL DestroySession(XrSession session) {
 }
 
 XrResult XRAPI_CALL PollEvent(XrInstance, XrEventDataBuffer* event) {
+  if (!g_rate_events.empty()) {
+    auto* e = reinterpret_cast<XrEventDataDisplayRefreshRateChangedFB*>(event);
+    *e = {XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB};
+    e->fromDisplayRefreshRate = g_rate_events.front().first;
+    e->toDisplayRefreshRate = g_rate_events.front().second;
+    g_rate_events.erase(g_rate_events.begin());
+    Report("call xrPollEvent display rate %.2f to %.2f", e->fromDisplayRefreshRate,
+           e->toDisplayRefreshRate);
+    return XR_SUCCESS;
+  }
   if (g_recenters_due > 0 && g_session != nullptr) {
     --g_recenters_due;
     auto* e = reinterpret_cast<XrEventDataReferenceSpaceChangePending*>(event);
@@ -1316,11 +1388,64 @@ XrResult XRAPI_CALL ApplyHapticFeedback(XrSession session, const XrHapticActionI
   return XR_SUCCESS;
 }
 
+// THE DISPLAY RATE (XR_FB_display_refresh_rate).
+bool RateCall(const char* what) {
+  if (!g_rate_enabled) Fault("%s with no XR_FB_display_refresh_rate in the instance", what);
+  return g_rate_enabled;
+}
+
+XrResult XRAPI_CALL EnumerateDisplayRefreshRates(XrSession, uint32_t capacity, uint32_t* count,
+                                                 float* rates) {
+  if (!RateCall("xrEnumerateDisplayRefreshRatesFB")) return XR_ERROR_FUNCTION_UNSUPPORTED;
+  *count = static_cast<uint32_t>(g_rates.size());
+  if (capacity == 0) {
+    Report("call xrEnumerateDisplayRefreshRatesFB %u", *count);
+    return XR_SUCCESS;
+  }
+  if (capacity < *count) return XR_ERROR_SIZE_INSUFFICIENT;
+  for (size_t i = 0; i < g_rates.size(); ++i) rates[i] = g_rates[i];
+  return XR_SUCCESS;
+}
+
+XrResult XRAPI_CALL GetDisplayRefreshRate(XrSession session, float* rate) {
+  if (!RateCall("xrGetDisplayRefreshRateFB")) return XR_ERROR_FUNCTION_UNSUPPORTED;
+  *rate = g_rate;
+  Report("frame %ld call xrGetDisplayRefreshRateFB %.2f",
+         reinterpret_cast<Session*>(session)->frame, g_rate);
+  return XR_SUCCESS;
+}
+
+XrResult XRAPI_CALL RequestDisplayRefreshRate(XrSession session, float rate) {
+  if (!RateCall("xrRequestDisplayRefreshRateFB")) return XR_ERROR_FUNCTION_UNSUPPORTED;
+  Session* s = reinterpret_cast<Session*>(session);
+  bool listed = rate == 0.0f;
+  for (float r : g_rates) {
+    if (r == rate) listed = true;
+  }
+  Report("frame %ld call xrRequestDisplayRefreshRateFB %.2f%s", s->frame, rate,
+         listed ? "" : " not listed");
+  if (!listed) {
+    Fault("xrRequestDisplayRefreshRateFB of %.2f Hz, which the runtime does not list", rate);
+    return XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB;
+  }
+  g_rate_asked = rate == 0.0f ? kDefaultRate : rate;
+  return XR_SUCCESS;
+}
+
 XrResult XRAPI_CALL WaitFrame(XrSession session, const XrFrameWaitInfo*, XrFrameState* state) {
   Session* s = reinterpret_cast<Session*>(session);
   if (!s->begun) Fault("xrWaitFrame before xrBeginSession");
-  // 72 frames a second, as a Quest 3 at the lowest rate.
-  const int64_t period = 1000000000 / 72;
+  // A request of the app counts from this frame, with an event.
+  if (g_rate_asked > 0.0f) {
+    if (g_rate_asked != g_rate) {
+      Report("frame %ld display rate %.2f to %.2f", s->frame + 1, g_rate, g_rate_asked);
+      g_rate_events.push_back({g_rate, g_rate_asked});
+      g_rate = g_rate_asked;
+    }
+    g_rate_asked = 0.0f;
+  }
+  // 72 frames a second by default, as a Quest 3 at its lowest rate.
+  const int64_t period = static_cast<int64_t>(1e9 / g_rate);
   const int64_t now = NowNs();
   if (s->last_wait != 0 && now - s->last_wait < period) usleep(static_cast<useconds_t>((period - (now - s->last_wait)) / 1000));
   s->last_wait = NowNs();
@@ -1527,9 +1652,21 @@ XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, P
       BWVR_XR("xrBeginFrame", BeginFrame),
       BWVR_XR("xrEndFrame", EndFrame),
   };
+  // The functions of an extension only for an instance that enabled it.
+  static const Entry kRateTable[] = {
+      BWVR_XR("xrEnumerateDisplayRefreshRatesFB", EnumerateDisplayRefreshRates),
+      BWVR_XR("xrGetDisplayRefreshRateFB", GetDisplayRefreshRate),
+      BWVR_XR("xrRequestDisplayRefreshRateFB", RequestDisplayRefreshRate),
+  };
 #undef BWVR_XR
   for (const Entry& e : kTable) {
     if (strcmp(e.name, name) == 0) {
+      *function = e.f;
+      return XR_SUCCESS;
+    }
+  }
+  for (const Entry& e : kRateTable) {
+    if (g_rate_enabled && strcmp(e.name, name) == 0) {
       *function = e.f;
       return XR_SUCCESS;
     }

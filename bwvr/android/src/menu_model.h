@@ -18,6 +18,7 @@
 
 #include "../../src/common/ini_text.h"
 #include "../../src/common/settings_table.h"
+#include "display_rate.h"
 
 namespace menu_model {
 
@@ -30,6 +31,7 @@ enum class ItemKind {
   kGroup,    // a group of settings: opens its page
   kSave,     // "Save Config"
   kSetting,  // a row of the table
+  kDisplayRate,  // "Display rate": a row of the app, not of the table
   kBack,     // back to the main page
   kQuit,     // "Quit game": while the game runs, above Exit
   kExit,     // "Exit": ends the app
@@ -91,6 +93,8 @@ class Menu {
       }
       values_[i] = value;
     }
+    display_wanted_ = ini.GetInt("bwvr", "display_hz", 0);
+    display_hz_ = display_rate::Checked(display_wanted_, display_rates_);
     headset_width_ = ini.GetInt("bwvr", "headset_width", 2064);
     headset_height_ = ini.GetInt("bwvr", "headset_height", 2208);
     guard_pct_ = ini.GetInt("bwvr", "one_walk_guard_pct", 25);
@@ -123,6 +127,9 @@ class Menu {
           break;
       }
     }
+    // The display rate, only when the runtime gives rates: with no row the
+    // key stays as it is.
+    if (HasDisplayRow()) ini->SetInt("bwvr", "display_hz", display_hz_);
     // The keys with one right answer. The renderer Vulkan has no bridge of
     // Direct3D 9.
     ini->Remove("bwvr", "gpu_bridge");
@@ -162,6 +169,22 @@ class Menu {
     headset_height_ = height;
     ++revision_;
   }
+
+  // THE DISPLAY RATE (display_rate.h). The rates of the runtime that the
+  // menu offers, after the start of the session. With no rate the group
+  // "Performance" has no row "Display rate". The value of display_hz that
+  // the runtime does not offer is 0 (DisplayWanted keeps it for the log).
+  void SetDisplayRates(const std::vector<int>& offered) {
+    display_rates_ = offered;
+    display_hz_ = display_rate::Checked(display_wanted_, display_rates_);
+    ++revision_;
+  }
+  bool HasDisplayRow() const { return !display_rates_.empty(); }
+  const std::vector<int>& DisplayRates() const { return display_rates_; }
+  // The rate of the row: 0 (the headset sets the rate) or a rate in Hz.
+  int DisplayHz() const { return display_hz_; }
+  // display_hz of bwvr.ini at the load.
+  int DisplayWanted() const { return display_wanted_; }
 
   // THE GAME. While the game runs, the main page has no "Play in VR" and no
   // "Play, new game", and "Quit game" is above "Exit" at the bottom. A
@@ -220,6 +243,9 @@ class Menu {
       if (st::kSettings[i].kind == st::kGroup) break;
       if (Shown(i)) items.push_back({ItemKind::kSetting, i});
     }
+    if (IsRateGroup(group_) && HasDisplayRow()) {
+      items.push_back({ItemKind::kDisplayRate, -1});
+    }
     items.push_back({ItemKind::kBack, -1});
     return items;
   }
@@ -244,6 +270,8 @@ class Menu {
         return "Quit game";
       case ItemKind::kExit:
         return "Exit";
+      case ItemKind::kDisplayRate:
+        return "Display rate";
       case ItemKind::kGroup:
       case ItemKind::kSetting:
         return st::kSettings[item.index].label;
@@ -254,6 +282,9 @@ class Menu {
   // The value of a row as text, for example "On", "45 degrees", "100% (2580
   // x 2064)". Empty for a command.
   std::string ValueText(const Item& item) const {
+    if (item.kind == ItemKind::kDisplayRate) {
+      return display_hz_ > 0 ? std::to_string(display_hz_) + " Hz" : "Headset default";
+    }
     if (item.kind != ItemKind::kSetting) return "";
     const int i = item.index;
     const st::Setting& s = st::kSettings[i];
@@ -304,6 +335,9 @@ class Menu {
         text += st::kSettings[i].label;
         first = false;
       }
+      if (IsRateGroup(item.index) && HasDisplayRow()) {
+        text += first ? "Display rate" : ", Display rate";
+      }
       return text + ".";
     }
     switch (item.kind) {
@@ -322,6 +356,11 @@ class Menu {
                "The menu button, B or Y go back to the game.";
       case ItemKind::kExit:
         return "Ends the app. A game that runs ends too, and it does not save.";
+      case ItemKind::kDisplayRate:
+        return "How many pictures a second the headset shows. A higher rate gives "
+               "smoother head motion. It costs more power and heat. The game itself "
+               "can make fewer frames than the rate. Headset default: the app asks "
+               "for no rate. The change counts at once.";
       default:
         return "";
     }
@@ -363,6 +402,15 @@ class Menu {
     const std::vector<Item> items = Items();
     if (cursor_ < 0 || cursor_ >= static_cast<int>(items.size())) return;
     const Item& item = items[cursor_];
+    if (item.kind == ItemKind::kDisplayRate) {
+      const int value = display_rate::Step(display_hz_, direction, display_rates_);
+      if (value != display_hz_) {
+        display_hz_ = value;
+        changed_ = true;
+        ++revision_;
+      }
+      return;
+    }
     if (item.kind != ItemKind::kSetting) return;
     const int i = item.index;
     const st::Setting& s = st::kSettings[i];
@@ -445,6 +493,7 @@ class Menu {
         Back();
         return Action::kNone;
       case ItemKind::kSetting:
+      case ItemKind::kDisplayRate:
         Step(1);
         return Action::kNone;
     }
@@ -482,6 +531,13 @@ class Menu {
   // A row is on its page when the renderer Vulkan uses it.
   static bool Shown(int i) { return !st::OnlyDirect3D9(st::kSettings[i].key); }
 
+  // The row "Display rate" is on the page of the group "Performance".
+  static bool IsRateGroup(int group) {
+    return group >= 0 && group < st::kSettingCount &&
+           st::kSettings[group].kind == st::kGroup &&
+           strcmp(st::kSettings[group].label, "Performance") == 0;
+  }
+
   static bool GroupHasRows(int group) {
     for (int i = group + 1; i < st::kSettingCount; ++i) {
       if (st::kSettings[i].kind == st::kGroup) return false;
@@ -498,6 +554,9 @@ class Menu {
   int headset_width_ = 2064;
   int headset_height_ = 2208;
   int guard_pct_ = 25;
+  std::vector<int> display_rates_;
+  int display_wanted_ = 0;
+  int display_hz_ = 0;
   bool game_running_ = false;
   std::string notice_;
 };

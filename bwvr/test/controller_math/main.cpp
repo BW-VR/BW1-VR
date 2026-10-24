@@ -3570,6 +3570,7 @@ void CreatureChecks() {
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
 #include "menu_checks.h"
+#include "display_rate_checks.h"
 #include "vk_platform_checks.h"
 #include "stream_checks.h"
 #include "stream_ring_checks.h"
@@ -4000,6 +4001,7 @@ int main() {
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
   menu_checks::AllMenuChecks();
+  display_rate_checks::DisplayRateChecks();
   vk_platform_checks::VkPlatformChecks();
   stream_checks::StreamChecks();
   stream_ring_checks::StreamRingChecks();

@@ -88,6 +88,8 @@ Summary:
 | `android/src/gpu.cpp` | The Vulkan device, the staging buffers and the copies |
 | `android/src/canvas.cpp` | A picture of the CPU drawn with `android.graphics.Canvas` through JNI |
 | `android/src/menu_model.h` | The menu: the pages, the rows, the values, the input, the save. No Android code |
+| `android/src/display_rate.h` | The display rate: the rates of the row from the rates of the runtime, the fall back of `display_hz`, the steps of the row. No Android code |
+| `test/controller_math/display_rate_checks.h` | The math checks of `display_rate.h` and of the row "Display rate" |
 | `android/src/menu_layout.h` | The layout of the menu picture, the quad, the hit of a controller ray. No Android code |
 | `android/src/menu_paint.cpp` | The paint of the menu |
 | `android/src/menu_painter.cpp` | The thread that paints the menu |
@@ -259,7 +261,9 @@ shadow, as the text of the game has.
 - **A group page.** The rows of the group: the label at the left, the value
   at the right. A check box for a setting that is on or off, a slider with
   its value for a slider, the name of the item in a dark box for a list.
-  "Back" is a button at the end.
+  "Back" is a button at the end. The page "Performance" also has the row
+  "Display rate" of the app when the runtime gives display rates (see "The
+  display rate").
 - **The help.** Below the rows, the help text of the row with the highlight,
   the same text as the tooltip of the launcher. The help of a group names
   the settings on its page.
@@ -538,7 +542,8 @@ and the pace too).
   and the activity) finds the runtime through the broker of Khronos. Meta
   Horizon OS has one.
 - The instance has `XR_KHR_vulkan_enable2` and
-  `XR_KHR_android_create_instance`. The runtime makes the Vulkan instance
+  `XR_KHR_android_create_instance`, and `XR_FB_display_refresh_rate` when the
+  runtime lists it (see "The display rate"). The runtime makes the Vulkan instance
   (it asks for Vulkan 1.3) and the device (Vulkan 1.1 is enough for the
   menu). The log names the versions that the runtime was tested with
   (`minApiVersionSupported`, `maxApiVersionSupported`). The device decides
@@ -620,8 +625,9 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    events, and checks the saved `bwvr.ini`, the log of this build, logcat
    (no JNI error, no crash) and three screenshots. The emulator has no OpenXR
    runtime, so this step tests the menu in the window.
-3. **In the emulator with the OpenXR test runtime** (`emu_xr_test.ps1`, 42
-   checks). The test runtime (`android/test_runtime`) is a headset with two
+3. **In the emulator with the OpenXR test runtime** (`emu_xr_test.ps1`, 47
+   checks, with the checks of "The display rate"; `-DisplayRate` and
+   `-NoRateExtension` are in that section). The test runtime (`android/test_runtime`) is a headset with two
    Touch controllers that follow a script. The script puts it into an AVD
    with a system that it can write (`bwvr_xr_test`, port 5586) as
    `/system/etc/openxr/1/active_runtime.json`, where the Khronos loader looks
@@ -650,7 +656,7 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
    the calls of OpenXR in the right order with the right structs. It does
    not show the runtime of Meta.
-   With `-Stream <file> -Gpu host` (50 checks) the app also plays a stream
+   With `-Stream <file> -Gpu host` (55 checks) the app also plays a stream
    of the walks on the device of the session, and the test checks the
    device (Vulkan 1.3 with the features of the renderer), the renderer on
    that device, the two quads of the stereo screen (one for each eye, 2.6
@@ -776,7 +782,10 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    stops early does not end with "0 failed".
 6. **On the PC** (`.\dev.ps1 build`): the math test checks the ini text,
    the table, the menu (the pages, the steps, the help, the save rules), the
-   hit of a ray on the quad (`test/controller_math/menu_checks.h`), each
+   hit of a ray on the quad (`test/controller_math/menu_checks.h`), the
+   display rate (`display_rate_checks.h`: the rates of the row from the
+   rates of the runtime, the fall back of `display_hz`, the row, its steps
+   and its save), each
    value and struct of `vk_d3d7_posix.h` against the Windows SDK
    (`vk_platform_checks.h`), the writer and the reader of the stream
    (`stream_checks.h`), and the ring of the live stream
@@ -2139,8 +2148,8 @@ the slot. While the menu of the app shows over the game, most frames start
 at the time limit with no fresh slot.
 
 **Not shown yet:** the pace in a headset (the timers of Wine under Box64,
-the CPU load and the heat of a Quest 3), and a display period of a rate
-other than 72 Hz.
+the CPU load and the heat of a Quest 3). Other rates than 72 Hz: see "The
+display rate".
 
 **Known limits:**
 
@@ -2154,6 +2163,114 @@ other than 72 Hz.
   the channel run differs from the frame rate of the fake run, with
   `vk_pace=1` and with `vk_pace=0`: the hint cards follow the clock of the
   PC, so they show at other frames.
+
+## The display rate
+
+A Quest 3 runs an app at 72 Hz when the app asks for no rate. The player
+can choose the rate in the menu of the app: the row "Display rate" on the
+page "Performance" (`main.cpp`, `TakeDisplayRates` and `ApplyDisplayRate`,
+the rules in `display_rate.h`, the row in `menu_model.h`).
+
+**The extension.** The instance has `XR_FB_display_refresh_rate` only when
+the runtime lists it. After the session is made, the app reads the rates
+of the runtime (`xrEnumerateDisplayRefreshRatesFB`) and the rate that it
+uses (`xrGetDisplayRefreshRateFB`). A runtime with no such extension (for
+example Lepton of the Steam Frame, not tried) gives no rates: the menu has
+no row, the app asks for no rate, and the headset sets the rate.
+
+**The row.** A list row, in the look of the other list rows: "Headset
+default" and each of 72, 80, 90 and 120 Hz that the runtime lists (a rate
+of the runtime within 0.5 Hz counts). The help text: a higher rate gives
+smoother head motion, it costs more power and heat, and the game itself
+can make fewer frames than the rate. The trigger and the stick step the
+value, and the steps go round.
+
+**The ini key.** `display_hz` in `bwvr.ini`: 0 (the default) is "Headset
+default", and the app asks for no rate. A value that the row does not offer
+counts as 0, with a line in the log. A save writes the value of the row,
+and only when the row is there: with no row the key stays as it is.
+`display_hz` is not a row of `settings_table.h`, so the launcher of the PC
+does not show it, and a save of the launcher keeps it.
+
+**The request.** The app asks the runtime for the rate of the row
+(`xrRequestDisplayRefreshRateFB`, with the float of the list of the
+runtime) when the session runs (its start), and at each change of the row,
+with no new start of the app or of the game. A change back to "Headset
+default" after a request asks for 0, "no preference" of the extension.
+With `display_hz=0` from the start the app makes no request.
+
+**The log.** One line for each step: the extension in the line of the
+extensions, "the runtime gives 4 display rates: 72.00 80.00 90.00 120.00
+Hz. It uses 72.00 Hz now", the rates of the row, the value of `display_hz`
+or its fall back, each request with its result and the rate that the
+runtime uses after it, each event `XrEventDataDisplayRefreshRateChangedFB`
+("the display rate changed from 80.00 to 90.00 Hz"), and in the lines
+`input` each change of the display period that the input channel writes.
+
+**The pace at each rate.** The mod paces the game by the display period
+of the slot of the input channel ("The pace of the frames"), and the app
+writes the `predictedDisplayPeriod` of each frame of its session there.
+So after a change of the rate the slot has the new period, and the mod
+follows it with no change of the mod:
+
+| Rate | Period | A frame of the game starts at | A frame that the app missed waits | A slot is fresh for |
+| --- | --- | --- | --- | --- |
+| 72 Hz | 13.89 ms | the next write of the slot, at most 72 a second | 17.36 ms | 55.6 ms |
+| 80 Hz | 12.50 ms | the next write of the slot, at most 80 a second | 15.63 ms | 50.0 ms |
+| 90 Hz | 11.11 ms | the next write of the slot, at most 90 a second | 13.89 ms | 44.4 ms |
+| 120 Hz | 8.33 ms | the next write of the slot, at most 120 a second | 10.42 ms | 33.3 ms |
+
+With no fresh slot the limit is one period of 72 Hz at each rate. A frame of
+the game that takes longer than the period does not wait, so the game can
+make fewer frames than the rate.
+
+**The test runtime** lists the extension with 72, 80, 90 and 120 Hz and
+starts at 72 Hz. A request counts from its next `xrWaitFrame`: the period
+of its frames follows the rate, and the app gets the event. `rates.txt` in
+the folder of the runtime gives other rates, or "none": then the runtime
+does not list the extension.
+
+**The tests.**
+
+- `.\dev.ps1 build`: the checks of `display_rate_checks.h` (the rates of
+  the row from the rates of the runtime, the fall back of `display_hz`, the
+  steps, the row on the page "Performance", its look, its help, its save)
+  and the checks of the pace at 72, 80, 90 and 120 Hz and after a change
+  from 72 to 90 Hz (`frame_pace_checks.h`).
+- `emu_xr_test.ps1` with no word (47 checks): the runtime lists the
+  extension, the app reads its 4 rates, the row offers 72, 80, 90 and 120
+  Hz, `display_hz=0` asks for no rate (no request), and the slot has the
+  period of 72 Hz (13888888 ns).
+- `emu_xr_test.ps1 -DisplayRate` (52 checks): the app starts with
+  `display_hz=80` and asks for 80 Hz at frame 0 of the session. The trigger
+  on the row at frame 100 gives 90 Hz, and the app asks for 90 Hz in the
+  same frame (no other request). The runtime changes at frame 101, and the
+  log of the app has both events (72 to 80 Hz, 80 to 90 Hz). The input
+  channel has the period of 90 Hz from slot 102 ("the display period is
+  11111111 ns now (90.00 Hz), it was 12500000 ns"), and the last slot has
+  11111111 ns. The save writes `display_hz=90`. The picture of the page
+  that the runtime read back has the row with "90 Hz" and its help.
+- `emu_xr_test.ps1 -NoRateExtension` (47 checks): the runtime lists no
+  extension, the instance does not have it, the app makes no call of the
+  extension, the menu has no row, the slot has 13888888 ns, and the save
+  keeps `display_hz=90`.
+- `emu_game_test.ps1 -NewProfile -ProfileOk 480,670 -SceneEyes -SkipClick
+  547,575 -TestSave pen -PlaySeconds 60 -DisplayHz 90` (143 checks): the
+  app asks for 90 Hz at the start of the session, the first slot that the
+  mod reads has 11.11 ms, and each line of the pace of both games has "The
+  display period of the slot is 11.11 ms". The paced frames of the game
+  came at 25 to 64 frames a second in game 1 (the logos, the video, the
+  dialog of a new profile, the land) and at 56.8 to 71.0 in game 2 (the
+  test save), all below 90. In the test save 1868 of 1870 frames of one
+  window of 30 s started at a new write of the slot. Some windows have
+  many frames at the time limit with no fresh slot (1514 of 1922 in one
+  window of game 1), as the windows of a run at 72 Hz have (1283 of 1790).
+  The emulator does not show the frame rate of a headset.
+
+**Not shown yet:** a rate in a headset: the feel of the head motion, the
+power and the heat of a Quest 3 at each rate, and the frames of the game
+in Wine under Box64 at each rate. A runtime with no extension on a real
+headset (the Steam Frame).
 
 ## Wine in the app
 

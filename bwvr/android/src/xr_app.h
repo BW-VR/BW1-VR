@@ -56,6 +56,17 @@ class XrApp {
   uint32_t EyeHeight() const { return eye_height_; }
   const std::string& RuntimeName() const { return runtime_name_; }
 
+  // THE DISPLAY RATE (XR_FB_display_refresh_rate, docs/android.md, "The
+  // display rate"). The rates that the runtime gives, in Hz, after Start.
+  // Empty when the runtime does not list the extension: then the app asks
+  // for no rate.
+  const std::vector<float>& DisplayRates() const { return display_rates_; }
+  // Asks the runtime for a rate of DisplayRates, or for 0 (no preference:
+  // the runtime uses its own rate). The log has the request and the rate
+  // that the runtime uses after it. False with no extension or when the
+  // runtime refuses the rate.
+  bool RequestDisplayRate(float hz);
+
   // New pixels of the menu or of the cursor (RGBA, with the color multiplied
   // by the alpha). The next frames show them.
   void SetMenuPixels(const std::vector<uint8_t>& rgba);
@@ -330,6 +341,14 @@ class XrApp {
   uint32_t eye_width_ = 0;
   uint32_t eye_height_ = 0;
   std::string runtime_name_;
+
+  // THE DISPLAY RATE.
+  void ReadDisplayRates();
+  bool display_rate_ext_ = false;  // the instance has XR_FB_display_refresh_rate
+  std::vector<float> display_rates_;
+  PFN_xrEnumerateDisplayRefreshRatesFB enumerate_rates_ = nullptr;
+  PFN_xrGetDisplayRefreshRateFB get_rate_ = nullptr;
+  PFN_xrRequestDisplayRefreshRateFB request_rate_ = nullptr;
 
   XrActionSet action_set_ = XR_NULL_HANDLE;
   XrAction aim_ = XR_NULL_HANDLE;

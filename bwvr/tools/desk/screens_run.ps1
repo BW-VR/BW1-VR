@@ -39,7 +39,9 @@
 # reader leaves at the screen frame -Last.
 #
 # -More @{...}: more ini keys, for example vk_device = 0 or
-# vk_stream_screens = 0.
+# vk_stream_screens = 0. -WriterHz <hz>: the test writer also writes the
+# last slot again <hz> times a second, as the app writes a slot at each
+# frame of its session (input_channel_run.ps1 -WriterHz), for vk_pace = 1.
 #
 # The output is in desk-<Name>: bwvr.log, reader.txt, writer.txt,
 # ring-capture.bin, bwvr-stream.bin and the pictures. The stream, the capture
@@ -56,6 +58,7 @@ param(
     [int]$Most = 0,
     [int]$SkipAt = 0,
     [int]$TestFrame = 0,
+    [int]$WriterHz = 0,
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
@@ -105,7 +108,7 @@ $q = Start-Process -FilePath $reader -NoNewWindow -PassThru `
 $null = $q.Handle  # keeps the exit code
 "the test reader runs (process $($q.Id)): it asks at screen frame $Attach ($($base + $Attach)) and leaves after screen frame $Last$(if ($Most -gt 0) { " or after $Most frames" })"
 $p = Start-Process -FilePath $writer -NoNewWindow -PassThru `
-    -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)", '2100') `
+    -ArgumentList @('play', "`"$chan`"", "`"$fromRec`"", "$($Seconds + 60)", '2100', "$WriterHz") `
     -RedirectStandardOutput (Join-Path $out 'writer.txt') -RedirectStandardError (Join-Path $out 'writer-err.txt')
 $null = $p.Handle
 "the test writer runs (process $($p.Id)): it plays $fromRec"

@@ -424,39 +424,39 @@ game". At its end the test deletes the app and the copy. After the measure
 the runtime reads back the quads (the word `quads`): the picture of the
 screen quad. `-SceneEyes`: the runtime reads back the eye pictures of the
 projection layer too, for a game that comes to a frame of the scene. What
-it shows (`-StartMinutes 15 -PlaySeconds 360`, 101 checks, 0 failed):
+it shows (`-StartMinutes 15 -PlaySeconds 360`, 113 checks, 0 failed):
 
 - "Play" wrote the keys of the run, and `bwvr.ini` at the start of the game
   has `vk_stream_live=1`, `xr_input=1`, `vk_device=0`, `ui_panel=1`,
   `vk_pace=1`, `stream_live=1`, `input_live=1`, `vulkan_strict=1` and
   `backend=vulkan`.
-- `reg import` took 2.1 to 2.2 s, and `wineserver -w` 4.4 to 4.5 s, so the
-  game starts about 6.6 s after "Play".
+- `reg import` took 2.0 to 2.2 s, and `wineserver -w` 4.4 to 4.5 s, so the
+  game starts about 6.5 s after "Play".
 - The log of the mod has the build of the APK ("1.2.0 (build ...)"), not
   the build of the `ddraw.dll` of the game folder: the known DLL comes
   first. It has "vk_device=0. The mod makes no Vulkan instance and no
   device", `vulkan_strict=1`, "xr_input=1" with the channel of the app,
   and the first slot of the app.
-- With `-NEWGAME` and with no word the same: the logo screens (476 and
-  475 frames of the game), the video before the intro (2515 frames, about
+- With `-NEWGAME` and with no word the same: the logo screens (479 and
+  484 frames of the game), the video before the intro (2515 frames, about
   100 s), then the game waits in the dialog of a new profile at frame 0 of
   the controllers: the log of the mod has "setup box : the dialog box
   NewProfileBox is up now" (the SetupBox with the vtable `0x008D85F0`, kept
   by the `NewProfileBox` with the vtable `0x008DEC1C`, the callback
-  `0x0053D210`, at FinishFrame 3064 and 3063). Each of these frames is a
+  `0x0053D210`, at FinishFrame 3068 and 3072). Each of these frames is a
   screen frame of the live stream (see "The screens with no scene"). The
-  first frame of the game came 13.7 and 13.5 s after "Play", a screen
+  first frame of the game came 13.4 and 12.4 s after "Play", a screen
   frame of the logos (`game : the first frame of the game (frame
   1000000004, a screen with no scene)`). The frame rate of the app each
-  10 s: 55 in the logos, 25 in the video (9 lines), then 68 in the
+  10 s: 54 in the logos, 25 in the video (9 lines), then 68 in the
   dialog, with `vk_pace=1` ("The pace of the frames"). The app showed each
   picture on the screen quad: one quad for both eyes, 2.60 by 2.08 m at 0,
   0, -2 m, opaque, with the whole render of 1380 by 1104, no stereo screen
   and no projection layer. The
   quad that the runtime read back after 360 s has the dialog of a new
   profile over the plasma of the front end (`new-0.png`, `play-0.png`).
-  The processes of Wine take 20 percent of one CPU in 361 s in each game
-  (`runblack.exe` 16 percent, the app 15 percent).
+  The processes of Wine take 24 percent of one CPU in 361 s in each game
+  (`runblack.exe` 19 percent, the app 14 and 15 percent).
 - The tree of the processes: the process that the app started is
   `start.exe`, and `runblack.exe` has the parent 1.
 - Game 1: the hold showed the menu over the game, the press of 6 frames
@@ -1683,7 +1683,7 @@ percent of the pixels differ by more than 24).
 
 **The game in Wine** (`emu_game_test.ps1`, see "Play in the app"): the
 logos, the video before the intro and the dialog of a new profile show on
-the screen quad, and the first frame of the game comes 13.5 to 13.7 s
+the screen quad, and the first frame of the game comes 12.4 to 13.4 s
 after "Play".
 
 **Not shown yet:** the screen quad in a headset (its place, its size and the
@@ -1839,19 +1839,24 @@ FinishFrame does not.
 | A frame with no scene (the logos, the videos, the front end, a dialog box, a load) | The end of `h_FinishFrame` (`mod_main.cpp`), after its screen frame went into the live stream | The logic of the game, the walk of the next screen, and its FinishFrame. On the PC with a session these frames wait in `xrWaitFrame` of `XrScreen::SubmitVulkan` |
 
 So the wait holds no input of the scene: in a frame of the scene and of the
-intro the read of the input channel comes after the wait (but see the known
-limit of the intro skip below), and the frame of the controllers reads the
-slot at its own place in the frame. In a frame
-with no scene the intro skip reads the hands in FinishFrame, before the
-wait of that frame. A frame takes a write only at its wait and at a read
-after the wait: the read of the intro skip does not take a write, so a
-write that came in the work of the frame ends the wait at once. The present
-of `vk_ddraw.cpp` does not wait: it runs in FinishFrame, inside the eye
-pass of a frame of the scene, before the layers of the frame go into the
-live stream. A wait there would hold the frame from the app, and the logic
-of the game after it would use input that is one wait older. The wait of a
-frame of the scene is the "wait" of the frame time in the line `stereo` of
-the log.
+intro the read of the input channel that latches the input of the frame
+comes after the wait, and the frame of the controllers reads the slot at
+its own place in the frame. In a frame with no scene, and in the
+FinishFrame of an eye pass, the intro skip reads the hands before the wait
+of the next frame. With the pace on that read takes the newest slot only
+(`ReadKind` of `frame_pace_math.h`): it does not ask the writer for the
+slot of a frame of the controllers, it takes no write for the pace, and it
+leaves the latch of the frame to the first read after the wait. So a write
+that came in the work of the frame ends the wait at once, and the eye
+passes of the intro and the logic of the game use the slot that ended the
+wait. The log of each 450 frames of the scene has the count of these reads
+and of the latches of a frame after them, and one line names the first such
+latch. The present of `vk_ddraw.cpp` does not wait: it runs in FinishFrame,
+inside the eye pass of a frame of the scene, before the layers of the frame
+go into the live stream. A wait there would hold the frame from the app,
+and the logic of the game after it would use input that is one wait older.
+The wait of a frame of the scene is the "wait" of the frame time in the
+line `stereo` of the log.
 
 **The log.** At the start: "xr input : vk_pace=1 with vk_device=0. Each
 frame of the game waits for the next write of the slot of the app, ...".
@@ -1872,7 +1877,9 @@ slot is ... ms".
   slot at each frame of its session, and still answers each latch of the
   lockstep at once. The script gives the frames a second and the cores that
   `runblack.exe` used in the windows of 450 frames, and the lines of the
-  pace.
+  pace. `screens_run.ps1 -WriterHz <hz>` does the same in a new game with
+  the logos (with `xr_input_lockstep_ms` in `-More`, else the writer
+  answers each read of a frame with a new write, and no frame waits).
 - `emu_game_test.ps1`: `vk_pace=1` from "Play", the lines of the pace and
   the rate of the paced frames in the game in Wine.
 
@@ -1896,21 +1903,21 @@ frame of the scene, so these runs have `vk_stream_screens=0`.
 
 **In the emulator** (`emu_game_test.ps1 -StartMinutes 15 -PlaySeconds 360`,
 Wine of x86_64, the test runtime at 72 Hz, "Play" with `vk_pace=1`): the
-slots have a display period of 13.89 ms. In the logos 1047 and 1048 of the
+slots have a display period of 13.89 ms. In the logos 1042 and 1049 of the
 frames of the first 30 s started at a new write of the slot (2 and 0 at the
-time limit), at 34.9 frames a second, after a wait of 6.3 ms as a mean. In
-the video before the intro the game makes 25 frames a second by itself: a
-frame of 40 ms is longer than a period, so each frame starts at a write
-that came in its work, with no wait. In the dialog of a new profile each
-frame started at a new write, after a wait of 11.8 ms as a mean, and the
-game made 68.1 to 68.4 frames a second, the rate of the frames of the
-session of the app. The processes of Wine took 20 percent of one CPU in 361
-s in each game (`runblack.exe` 16 percent, the app 15 percent). With
-`vk_pace=0` the same screens come at 368 to 711 frames a second, and the
-processes of Wine take three quarters of one CPU. The first frame came 13.7
-and 13.5 s after "Play", the logo screens took 476 and 475 frames and the
-video 2515 frames, and the dialog of a new profile came at FinishFrame 3064
-and 3063.
+time limit), at 34.8 and 34.9 frames a second, after a wait of 6.3 and 6.4
+ms as a mean. In the video before the intro the game makes 25 frames a
+second by itself: a frame of 40 ms is longer than a period, so each frame
+starts at a write that came in its work, with no wait. In the dialog of a
+new profile each frame started at a new write, after a wait of 11.6 to 12.0
+ms as a mean, and the game made 68.0 to 68.4 frames a second, the rate of
+the frames of the session of the app. The processes of Wine took 24 percent
+of one CPU in 361 s in each game, with the sound (`runblack.exe` 19
+percent, the app 14 and 15 percent). With `vk_pace=0` the same screens come
+at 368 to 711 frames a second, and the processes of Wine take three
+quarters of one CPU. The first frame came 13.4 and 12.4 s after "Play", the
+logo screens took 479 and 484 frames and the video 2515 frames, and the
+dialog of a new profile came at FinishFrame 3068 and 3072.
 
 **Not shown yet:** the pace in a headset (the timers of Wine under Box64,
 the CPU load and the heat of a Quest 3), a frame of the scene of the game
@@ -1918,14 +1925,6 @@ in Wine with the pace, and a display period of a rate other than 72 Hz.
 
 **Known limits:**
 
-- The input channel is read one time for each FinishFrame. In the Lionhead
-  logo (`intro_skip=1`, no session of the mod) the intro skip reads it in
-  FinishFrame, before the wait. Then the read after the wait in the next
-  frame of the intro (`intro_vr=1`), or in a frame of the scene while a
-  skip is latched, reads nothing new: the eye passes of the intro and the
-  game logic use the slot from before the wait, one wait older (up to one
-  display period). The pace counts stay right. No run reached these frames
-  yet.
 - A record of a fake run has no display period, so in a desk run with the
   test writer the time limit is one period of 72 Hz. A writer above 72 Hz
   shows the pace by the writes, a writer below it does not.

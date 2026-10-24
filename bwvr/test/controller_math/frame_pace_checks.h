@@ -173,6 +173,41 @@ inline void FramePaceChecks() {
           static_cast<double>(end), static_cast<double>(11 * kMs));
   }
 
+  // THE READS OF THE INPUT CHANNEL. A frame of the intro or of the scene
+  // after a frame with a read of the intro skip in FinishFrame: the read
+  // before the wait does not use up the read of the frame.
+  Check(fp::ReadKind(false, true) == fp::Read::kFrame &&
+            fp::ReadKind(false, false) == fp::Read::kFrame,
+        "no pace: each read is the read of the frame", 0, 0);
+  Check(fp::ReadKind(true, true) == fp::Read::kBeforeWait,
+        "the pace on, a read before the wait reads only the newest slot", 0, 0);
+  Check(fp::ReadKind(true, false) == fp::Read::kFrame,
+        "the pace on, the first read after the wait is the read of the frame", 0, 0);
+  {
+    // FinishFrame (the wait is due), the intro skip reads, then the wait,
+    // then the read of the intro: as in xr_input.cpp, a read of the frame
+    // uses up the latch of the frame, a read before the wait does not.
+    bool new_frame = true;  // XrInputNewFrame
+    bool due = true;
+    int frame_reads = 0, early_reads = 0;
+    auto read = [&]() {
+      if (!new_frame) return;
+      if (fp::ReadKind(true, due) == fp::Read::kBeforeWait) {
+        ++early_reads;
+        return;
+      }
+      new_frame = false;
+      ++frame_reads;
+    };
+    read();       // the intro skip in FinishFrame
+    due = false;  // the wait (XrInputPace)
+    read();       // the intro (intro_vr.cpp) after the wait
+    read();       // a later read of the same frame gets the same values
+    Check(early_reads == 1 && frame_reads == 1 && !new_frame,
+          "a read before the wait and one read of the frame after the wait",
+          frame_reads, 1);
+  }
+
   // THE CLOCK of the mod.
   Check(fp::CountToNs(10000000, 10000000) == 1000000000 &&
             fp::CountToNs(15, 10) == 1500000000 && fp::CountToNs(5, 0) == 0,

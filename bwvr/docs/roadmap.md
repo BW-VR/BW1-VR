@@ -811,9 +811,7 @@ that moves while the Hand takes it.
     driver `wineaaudio` of patch 0003 gives the sound of Wine to AAudio,
     `audio.md`, "In Wine on Android"), the pace of the frames with
     `vk_device=0` in a headset (`vk_pace`, `android.md`, "The pace of the
-    frames"), a read of the input channel before the wait of a frame that
-    uses up the read of the next frame of the intro or of the scene (the
-    intro skip in the Lionhead logo, with `vk_pace=1`), the test reader of
+    frames"), the test reader of
     `input_channel_run.ps1 -Live` with screen frames, the time of the copy
     of a screen frame (the logos at 35 frames a second with the pace), and
     the screen quad in a headset. The input of

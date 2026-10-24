@@ -150,6 +150,22 @@ inline void End(State* s, int64_t now_ns) {
   }
 }
 
+// THE READS OF THE INPUT CHANNEL with the pace. The first read of the input
+// channel in a frame of the game latches the input of that frame. With the
+// pace on, a read before the wait of its frame (the intro skip in
+// FinishFrame) reads only the newest slot: it does not ask the writer for
+// the slot of a frame of the controllers, it takes no write for the pace,
+// and the first read after the wait latches the input of the frame. Else
+// each read is a read of the frame.
+enum class Read {
+  kFrame,       // the read of the frame: the latch, as with no pace
+  kBeforeWait,  // a read of the newest slot before the wait
+};
+
+inline Read ReadKind(bool pace_on, bool wait_due) {
+  return pace_on && wait_due ? Read::kBeforeWait : Read::kFrame;
+}
+
 // The clock of the mod in ns from a count of QueryPerformanceCounter, with
 // no overflow for a count of many days.
 inline int64_t CountToNs(int64_t count, int64_t frequency) {

@@ -70,6 +70,10 @@ uint64_t g_pace_waits = 0;
 uint64_t g_pace_writes = 0;  // waits that a new write ended
 uint64_t g_pace_limits = 0;  // waits that the time limit ended
 uint64_t g_pace_idle = 0;    // waits with the limit of no fresh slot
+uint64_t g_early_reads = 0;  // reads before the wait (frame_pace_math.h, ReadKind)
+uint64_t g_after_early = 0;  // latches of a frame after a read before its wait
+bool g_early_in_frame = false;
+bool g_said_after_early = false;
 double g_pace_ms = 0.0;
 double g_pace_ms_most = 0.0;
 
@@ -301,6 +305,7 @@ bool XrInputStart(const char* dir) {
 void XrInputNewFrame() {
   g_new_frame = true;
   g_pace_due = true;
+  g_early_in_frame = false;
 }
 
 bool XrInputPace() {
@@ -350,8 +355,42 @@ bool XrInputPace() {
 
 void XrInputLatch() {
   if (g_chan == nullptr || !g_new_frame) return;
+  // THE READ BEFORE THE WAIT (frame_pace_math.h, ReadKind). With the pace on,
+  // the intro skip reads the slot in FinishFrame, before the wait of the
+  // frame. That read takes the newest slot only: no want for the writer, no
+  // lockstep, no write taken for the pace, and the latch of the frame stays
+  // open for the first read after the wait.
+  const bool pace_on = g_options.pace != 0 && !VkSceneDevice();
+  if (fp::ReadKind(pace_on, g_pace_due) == fp::Read::kBeforeWait) {
+    ic::SlotData early = {};
+    uint32_t early_seq = 0, early_torn = 0;
+    bool early_whole = false;
+    for (int i = 0; i < 64 && !early_whole; ++i) {
+      early_whole = ReadOnce(&early, &early_seq, &early_torn);
+    }
+    if (early_torn > 0) {
+      g_torn += early_torn;
+      ic::StoreRelease(&g_chan->head.torn, g_chan->head.torn + early_torn);
+    }
+    ++g_early_reads;
+    g_early_in_frame = true;
+    if (early_whole && early.frame != 0) Take(early);
+    if (g_stale) NoInput();
+    return;
+  }
   g_new_frame = false;
   ++g_latches;
+  if (g_early_in_frame) {
+    g_early_in_frame = false;
+    ++g_after_early;
+    if (!g_said_after_early) {
+      g_said_after_early = true;
+      ModLog("xr input     : the first latch of a frame after a read before "
+             "its wait (vk_pace=1): the latch of the frame comes after the "
+             "wait, frame %llu of the controllers",
+             ControllersFrameCount());
+    }
+  }
   const uint32_t want = static_cast<uint32_t>(ControllersFrameCount());
   ic::StoreRelease(&g_chan->head.want, want);
   ic::StoreRelease(&g_chan->head.latches, g_chan->head.latches + 1);
@@ -398,12 +437,10 @@ void XrInputLatch() {
   } else if (d.frame != 0) {
     Take(d);
   }
-  // The next frame of the pace waits for a write after this one. Only a
-  // latch after the wait of its frame counts (a frame of the scene and of
-  // the intro). The intro skip latches in FinishFrame before the wait of a
-  // frame with no scene, and a write that came in the work of that frame
-  // must end the wait.
-  if (whole && g_options.pace != 0 && !g_pace_due) {
+  // The next frame of the pace waits for a write after this one. With the
+  // pace on this latch comes after the wait of its frame (the read before
+  // the wait returns above).
+  if (whole && pace_on) {
     const int64_t now = PaceNow();
     fp::Took(&g_pace, seq, now);
     fp::SetPeriod(&g_pace, d.display_period);
@@ -528,6 +565,13 @@ void XrInputReport() {
          g_latches, g_new_slots, g_slot_frame, g_torn, g_kept, g_pulses,
          g_pulses_dropped, ic::LoadAcquire(&g_chan->head.event_read),
          g_chan->head.event_write, g_stale ? ". No new slot now" : "");
+  if (g_early_reads > 0) {
+    ModLog("xr input     : %llu reads of the newest slot before the wait of "
+           "their frame (the intro skip in FinishFrame, vk_pace=1), and %llu "
+           "latches of a frame after such a read",
+           g_early_reads, g_after_early);
+    g_early_reads = g_after_early = 0;
+  }
   if (g_waits > 0) {
     ModLog("xr input     : the lockstep waited %.3f ms as a mean and %.3f ms "
            "at most, %llu waits", g_wait_ms / g_waits, g_wait_ms_most, g_waits);

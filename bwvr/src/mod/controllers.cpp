@@ -1710,6 +1710,7 @@ bool ScreenPointerActs() {
 int g_panel_pointer = -1;  // panel_pointer, read once
 int g_panel_keys = -1;     // panel_keys, read once
 bool g_panel_have = false;  // the last frame of the scene met panel quads with a box up
+ULONGLONG g_panel_tick = 0;  // the time of that frame
 controller_math::PanelSurface g_panel_surface = {false, false, 0.0f, 0.0f};
 int g_panel_target = -2;    // the target of the last log line of the surface
 bool g_panel_acting = false;
@@ -1720,11 +1721,12 @@ int g_panel_logs = 0;
 const int kMaxPanelLogs = 80;
 
 // The pointer on the panel acts in this frame: the key is on, the input
-// channel gives the hands, a dialog box is up in a frame of the scene, and
-// the last frame of the scene had panel quads.
+// channel gives the hands, a dialog box is up in a frame of the scene, and a
+// frame of the scene in the last 250 ms had panel quads. Screen frames do not
+// run PanelFrame, so the time check stops the latch of a frame before them.
 bool PanelPointerActs() {
   return g_panel_pointer == 1 && XrInputOn() && MenuUp() && !StereoIdle() &&
-         g_panel_have;
+         g_panel_have && GetTickCount64() - g_panel_tick <= 250;
 }
 
 // The pointer is on the panel now: the pixel of the panel is the pointer of
@@ -5173,6 +5175,7 @@ void PanelFrame() {
   }
   controller_math::PanelSurfaceStep(&g_panel_surface, hit, g_ctrl_mask != 0);
   g_panel_have = true;
+  g_panel_tick = GetTickCount64();
   ++g_panel_frames;
   if (!g_panel_acting) {
     g_panel_acting = true;

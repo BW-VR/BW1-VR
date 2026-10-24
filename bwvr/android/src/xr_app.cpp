@@ -877,8 +877,8 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         int32_t text_rect[4];
         if (r.index == 0 && ql::PanelText(f.panel_body, text_rect)) {
           panel_text_ = true;
-          for (int i = 0; i < 3; ++i) panel_text_position_[i] = s.position[i];
-          for (int i = 0; i < 4; ++i) panel_text_orientation_[i] = s.orientation[i];
+          for (int k = 0; k < 3; ++k) panel_text_position_[k] = s.position[k];
+          for (int k = 0; k < 4; ++k) panel_text_orientation_[k] = s.orientation[k];
           panel_text_size_[0] = s.size[0];
           panel_text_size_[1] = s.size[1];
         }

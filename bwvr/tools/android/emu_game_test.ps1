@@ -141,6 +141,26 @@
     the runtime points at that pixel on the quad and pulls the trigger. The
     test checks the press on the panel and that the Main Menu goes after it.
 
+.PARAMETER SaveName
+    With -MenuClick: after the Main Menu of game 2 the ring of the left hand
+    goes into the Temple and to its Save Game Room. The runtime clicks a
+    picture of a slot two times, the box "Save Game Message" takes text in a
+    frame of the scene, and the keyboard of the app at the menu panel quad
+    types this name and Enter. The test checks the text flag of the mod, the
+    keyboard of the app, the keys as WM_CHAR, and the new slot of the test
+    profile in the emulator. The game has no Save in its Esc menu: it saves
+    in the Temple.
+
+.PARAMETER SavePicture
+    With -SaveName: x,y of a picture of a slot in the view of the Save Game
+    Room at its rest pose (710,445 by default, for the head of the runtime
+    and a render of 1380 by 1104).
+
+.PARAMETER SaveOk
+    With -SaveName: x,y of OK of the box "Save Game Message" on the render
+    (591,627 by default). The runtime clicks it on the menu panel quad after
+    the name and Enter: Enter does not close the box.
+
 .PARAMETER TestSave
     With -NewProfile: the name of a test save of local\test-saves of the
     main checkout (a saved game that a test run made). After game 1 the test
@@ -167,6 +187,9 @@ param(
     [int[]]$ProfileOk = @(),
     [int[]]$PanelClicks = @(),
     [int[]]$MenuClick = @(),
+    [string]$SaveName = '',
+    [int[]]$SavePicture = @(710, 445),
+    [int[]]$SaveOk = @(591, 627),
     [string]$TestSave = '',
     [switch]$Keep
 )
@@ -375,6 +398,128 @@ function ProfileDialog([int]$PlayAt) {
     }
 }
 
+# A place for the word pointfile of the runtime, during the run.
+function PushPlace([string]$Name, [string]$Text) {
+    $local = Join-Path $Out $Name
+    Set-Content -LiteralPath $local -Value $Text -Encoding ascii
+    Adb @('push', $local, "$XrDir/$Name")
+    Adb @('shell', 'chmod', '666', "$XrDir/$Name")
+    Note "the place $Name for the runtime: $Text"
+}
+
+# A BOX THAT TAKES TEXT IN A FRAME OF THE SCENE (-SaveName, game 2): the box
+# "Save Game Message" of the Save Game Room of the Temple, with the keyboard
+# of the app at the menu panel quad (docs/controllers.md, 13.3). The game has
+# no Save in its Esc menu (the Esc menu over a game is the Main Menu). It
+# saves in the Temple: a second click on a picture of a slot with no saved
+# game opens that box. The ring of the left hand goes into the Temple and to
+# the room. -SavePicture is the pixel of a picture of the view of that room
+# at its rest pose, and the runtime aims along the ray of the eye through it. The first click turns the camera to the
+# picture, and the second click, in the middle of the view, opens the box.
+# The keys of the name and Enter come from the keyboard of the app.
+function SaveFlow {
+    Say "The box of a save in a frame of the scene: the keyboard of the app types $SaveName"
+    $holds = @('ring2', 'temple2', 'saveroom', 'aim2', 'savebox', 'saved2')
+    try {
+        Start-Sleep -Seconds 8
+        Hold 'ring2'
+        # The first visit of the hall plays a guide, and the ring does not open
+        # while it plays: the ray of the hall after the last line of a guide.
+        # A guide starts some frames after the player comes in, so the test
+        # looks 10 s after that at the earliest.
+        $deadline = (Get-Date).AddSeconds(400)
+        $inSince = $null
+        do {
+            Start-Sleep -Seconds 3
+            $mod = ModLog
+            if ($null -eq $inSince -and $mod -match 'ring         : the game: the player is in the Temple') { $inSince = Get-Date }
+            $guideAt = $mod.LastIndexOf('temple       : in the hall a guide of the game plays')
+            $rayAt = $mod.LastIndexOf('temple       : in the hall the pointing hand points with a ray')
+        } while (-not ($null -ne $inSince -and ((Get-Date) - $inSince).TotalSeconds -ge 10 -and $rayAt -gt $guideAt) -and (Get-Date) -lt $deadline)
+        Start-Sleep -Seconds 3
+        $in = [regex]::Match($mod, 'ring         : the game: the player is in the Temple[^\r\n]*')
+        Expect $in.Success ('the ring of the left hand took the player into the Temple: ' + $in.Value)
+        Hold 'temple2'
+        $mod = WaitModLog @('ring         : the game: the player is in the Temple, in the Save Game Room') 400
+        $room = [regex]::Match($mod, 'ring         : the game: the player is in the Temple, in the Save Game Room[^\r\n]*')
+        Expect $room.Success ('the ring took the player to the Save Game Room: ' + $room.Value)
+        # The ray of the room after its guide.
+        $deadline = (Get-Date).AddSeconds(400)
+        do {
+            Start-Sleep -Seconds 3
+            $mod = ModLog
+            $guideAt = $mod.LastIndexOf('temple       : in the Save Game Room a guide of the game plays')
+            $rayAt = $mod.LastIndexOf('temple       : in the Save Game Room the pointing hand points with a ray')
+        } while (-not ($guideAt -ge 0 -and $rayAt -gt $guideAt) -and (Get-Date) -lt $deadline)
+        Start-Sleep -Seconds 3
+        PushPlace 'aim1.txt' "view $($SavePicture[0]) $($SavePicture[1])"
+        Hold 'saveroom'
+        Start-Sleep -Seconds 12
+        PushPlace 'aim2.txt' 'view 690 552'
+        Hold 'aim2'
+        $text = 'xr layers    : a dialog box on the menu panel quad takes text, so the kPanel asks the app for its keyboard'
+        $mod = WaitModLog @([regex]::Escape($text)) 120
+        $boxes = @([regex]::Matches($mod, 'setup box    : the dialog box (\S+) is up now') | ForEach-Object { $_.Groups[1].Value })
+        Note ('the dialog boxes of game 2: ' + ($boxes -join ' '))
+        Expect ($mod -match [regex]::Escape($text)) 'the mod has the line that a dialog box of a frame of the scene takes text (kPanelQuadText)'
+        $log = WaitLog @('keyboard     : a dialog box of the game takes text\. The keyboard shows at the menu panel quad') 60
+        $kb = [regex]::Match($log, 'keyboard     : a dialog box of the game takes text\. The keyboard shows at the menu panel quad[^\r\n]*')
+        Expect $kb.Success ('the app shows its keyboard at the menu panel quad: ' + $kb.Value)
+        $appAt = $log.Length
+        Hold 'savebox'
+        $mod = WaitModLog @('controllers  : the key Enter of the app') 300
+        Start-Sleep -Seconds 15
+        $mod = ModLog
+        $log = AppLog
+        $textAt = $mod.IndexOf($text)
+        $after = if ($textAt -ge 0) { $mod.Substring($textAt) } else { '' }
+        $modKeys = @([regex]::Matches($after, 'controllers  : the key (\S+) of the app goes to the game \(WM_CHAR\)') | ForEach-Object { $_.Groups[1].Value.Trim('"') })
+        $want = @($SaveName.ToCharArray() | ForEach-Object { "$_" }) + @('Enter')
+        Note ('the keys of the app to the game: ' + ($modKeys -join ' '))
+        Expect (($modKeys -join ' ') -eq ($want -join ' ')) "the mod gave $($want -join ' ') to the game as WM_CHAR ($($modKeys.Count) keys)"
+        # The box: the callback of its controls is DialogBoxSaveMessage::ControlCallback.
+        $box = [regex]::Match($mod, 'setup box    : a dialog box is up now: [^\r\n]*the callback of its controls 00515CB0[^\r\n]*')
+        Expect $box.Success ('the box "Save Game Message" (DialogBoxSaveMessage) came up in a frame of the scene: ' + $box.Value)
+        # OK by the ray after Enter: one press on the panel, at OK.
+        $pressPattern = 'controllers  : panel quads: the right hand presses the left button at the pixel (\d+) (\d+)'
+        $deadline = (Get-Date).AddSeconds(120)
+        while (-not ($after -match $pressPattern) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 3
+            $mod = ModLog
+            $after = if ($textAt -ge 0) { $mod.Substring($textAt) } else { '' }
+        }
+        Start-Sleep -Seconds 15
+        $mod = ModLog
+        $after = if ($textAt -ge 0) { $mod.Substring($textAt) } else { '' }
+        $enterAt = $after.IndexOf('controllers  : the key Enter of the app')
+        $presses = @([regex]::Matches($after, $pressPattern))
+        $beforeEnter = @($presses | Where-Object { $_.Index -lt $enterAt }).Count
+        Expect ($enterAt -ge 0 -and $beforeEnter -eq 0) "no pull of the trigger on the keyboard was a press on the panel ($beforeEnter)"
+        $ok = @($presses | Where-Object { $_.Index -gt $enterAt })
+        $okPress = if ($ok.Count -gt 0) { $ok[0] } else { $null }
+        $okX = if ($okPress) { [int]$okPress.Groups[1].Value } else { -1 }
+        $okY = if ($okPress) { [int]$okPress.Groups[2].Value } else { -1 }
+        Expect ($okPress -and [math]::Abs($okX - $SaveOk[0]) -le 4 -and [math]::Abs($okY - $SaveOk[1]) -le 4) "the ray pressed OK of the box on the panel at the pixel $okX $okY (want $($SaveOk[0]) $($SaveOk[1])), not under the keyboard"
+        $goneAt = if ($okPress) { $after.IndexOf('setup box    : no dialog box is up now', $okPress.Index) } else { -1 }
+        $gone = if ($goneAt -ge 0) { [regex]::Match($after.Substring($goneAt), '[^\r\n]*').Value } else { '' }
+        Expect ($goneAt -gt 0) "the box went after the press on OK: $gone"        @($after -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (panel quads|the key|the left button)|xr layers    :|temple       : the Save Game Room)' }) | Select-Object -First 30 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        $want = (($ProfileName.ToCharArray() | ForEach-Object { "_$_" }) -join '')
+        # The slots of the test profile: a new slot of 0 to 13 with a saved
+        # game is the save of the box (slot 20 holds the test save).
+        $games = "$GameDir/Profiles/$want/Saved Games"
+        $listing = (AdbOut @('shell', "ls -lR '$games'")).Trim()
+        Set-Content -LiteralPath (Join-Path $Out 'saved-games.txt') -Value $listing -Encoding utf8
+        $slots = @((AdbOut @('shell', "ls '$games'")).Trim() -split '\s+' | Where-Object { $_ -match '^\d+$' -and [int]$_ -le 13 })
+        $saved = @($slots | Where-Object { (AdbOut @('shell', "ls '$games/$_'")) -match '\.sav' })
+        Note ("the slots 0 to 13 of the test profile in the emulator with a saved game: " + ($saved -join ' '))
+        $name = if ($saved.Count -gt 0) { (AdbOut @('shell', "cat '$games/$($saved[0])/SaveGame.inf'")) -replace '[^\x20-\x7E]', '' } else { '' }
+        Note "SaveGame.inf of that slot, the printable bytes: $name"
+        Expect ($saved.Count -eq 1) "the save went into a slot of the test profile $ProfileName in the emulator ($($saved -join ' '))"
+    } finally {
+        foreach ($h in $holds) { Hold $h }
+    }
+}
+
 # THE CLICKS OF THE RAY ON THE MENU PANEL QUAD in a frame of the scene
 # (-PanelClicks, -MenuClick, docs/controllers.md, section 13). Box: the class
 # of the dialog box. Points: x,y pairs of the render. Name: the hold that lets
@@ -557,6 +702,41 @@ try {
             '410 trigger right 1', '414 trigger right 0',
             '420 hold menu2done', '422 quads menu2done')
         $shift2 = 26
+        if ($SaveName -ne '') {
+            # The Save Game Room of the Temple and the box "Save Game
+            # Message" (SaveFlow): the ring of the left hand (Y, the hand 8.5
+            # cm toward the item, Y up) goes into the Temple ("enter", the
+            # slot up left of page 1), then to the Save Game Room
+            # ("room_save", the slot down right of the ring of the Temple).
+            # The test writes the places of the clicks into aim1.txt and
+            # aim2.txt during the run.
+            $f = 426
+            $s = @("$f hold ring2", "$($f + 2) button left 1", "$($f + 12) move left -0.06 0.06 0",
+                "$($f + 44) button left 0", "$($f + 54) move left 0.06 -0.06 0", "$($f + 64) hold temple2",
+                "$($f + 66) button left 1", "$($f + 76) move left 0.06 -0.06 0", "$($f + 108) button left 0",
+                "$($f + 118) move left -0.06 0.06 0", "$($f + 128) hold saveroom", "$($f + 130) eyes saveroom",
+                "$($f + 134) pointfile right aim1.txt", "$($f + 142) trigger right 1", "$($f + 152) trigger right 0",
+                "$($f + 260) eyes turned", "$($f + 264) hold aim2", "$($f + 266) pointfile right aim2.txt",
+                "$($f + 274) trigger right 1", "$($f + 284) trigger right 0", "$($f + 300) hold savebox",
+                "$($f + 302) quads savebox")
+            $f += 306
+            foreach ($k in @($SaveName.ToCharArray() | ForEach-Object { "$_" }) + @('enter')) {
+                $s += "$f point right key $k"
+                $s += "$($f + 8) trigger right 1"
+                $s += "$($f + 18) trigger right 0"
+                if ($k -eq 'enter') { $s += "$($f + 6) quads typed2" }
+                $f += 26
+            }
+            # The game keeps the box up after Enter: OK by the ray.
+            $s += "$f point right panel $($SaveOk[0]) $($SaveOk[1])"
+            $s += "$($f + 8) trigger right 1"
+            $s += "$($f + 18) trigger right 0"
+            $f += 26
+            $s += "$f hold saved2"; $s += "$($f + 2) quads saved2"; $s += "$($f + 4) eyes saved2"
+            $f += 8
+            $menuSteps += $s
+            $shift2 = $f - 400
+        }
     }
     $script = Join-Path $Out 'script.txt'
     Set-Content -LiteralPath $script -Encoding ascii -Value (@(
@@ -618,7 +798,8 @@ try {
     Adb @('shell', 'am', 'force-stop', $Package)
     Adb @('shell', 'rm', '-f', "$XrDir/report.txt", "$XrDir/*.bmp", "$XrDir/ready", "$XrDir/measured1",
         "$XrDir/measured2", "$XrDir/ended1", "$XrDir/ended2", "$XrDir/profile", "$XrDir/typed", "$XrDir/skipbox",
-        "$XrDir/clicked", "$XrDir/panel1", "$XrDir/panel1done", "$XrDir/menu2", "$XrDir/menu2done")
+        "$XrDir/clicked", "$XrDir/panel1", "$XrDir/panel1done", "$XrDir/menu2", "$XrDir/menu2done", "$XrDir/ring2", "$XrDir/temple2", "$XrDir/saveroom",
+        "$XrDir/aim2", "$XrDir/savebox", "$XrDir/saved2", "$XrDir/aim1.txt", "$XrDir/aim2.txt")
 
     Say "Copy the game folder $Game into the emulator (no Profiles, no files of the player)"
     $skipTop = @('Profiles', 'MemoryLeaks.txt', 'Scripts')
@@ -661,7 +842,7 @@ try {
     Expect ($profiles -match 'No such file') 'the copy has no Profiles folder'
     $ini = Join-Path $Out 'bwvr.ini.pushed'
     # A render of 50 percent of the eye of the test runtime: 1380 by 1104.
-    Set-Content -LiteralPath $ini -Encoding ascii -Value @('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio")
+    Set-Content -LiteralPath $ini -Encoding ascii -Value (@('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio"))
     Adb @('push', $ini, "$GameDir/bwvr.ini")
 
     # 4. The run.
@@ -722,6 +903,7 @@ try {
         # THE MAIN MENU over the land of the test save (-MenuClick, game 2).
         if ($MenuClick.Count -eq 2 -and $n -eq 2 -and $first.Success) {
             PanelClicks 'MainMenu' $MenuClick 'menu2' 'Main Menu'
+            if ($SaveName -ne '') { SaveFlow }
         }
         # The measure: the CPU time of the processes of Wine over PlaySeconds.
         $a = CpuSample $user
@@ -938,7 +1120,7 @@ try {
         # first quad is in the picture of the step before the click.
         foreach ($name in @($(if ($PanelClicks.Count -ge 2) { 'panel1' } else { 'new' }), $(if ($MenuClick.Count -eq 2) { 'menu2' } else { 'play' }))) {
             $m = [regex]::Match($report, "capture \S*/$name-0\.bmp (\d+)x(\d+) lit (\d+)")
-            Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of the screen quad after the measure of game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels (the files $name-0.bmp and $name-0.png)" } else { 'none' }))
+            Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture $name-0 of the first quad has the game (" + $(if ($name -eq 'panel1') { 'game 1, the start dialog on the menu panel quad before the clicks' } elseif ($name -eq 'menu2') { 'game 2, the Main Menu on the menu panel quad before the click' } else { "the screen quad after the measure of game $name" }) + "): " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels (the files $name-0.bmp and $name-0.png)" } else { 'none' }))
         }
     }
     # The notice (play_notice=1): with the menu hidden before the first frame

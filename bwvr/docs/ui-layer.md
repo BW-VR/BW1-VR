@@ -690,7 +690,7 @@ The biggest cost is memory, and it is small against a headset render.
 | Part | State |
 | --- | --- |
 | The panel target, the switch, the share, the census and the captures (`ui_panel=2`) | built |
-| The panel layers in the headset (`ui_panel=1`): menu and help quads | built, never run with `ui_panel=1` on the desktop, never seen in a headset |
+| The panel layers in the headset (`ui_panel=1`): menu and help quads | built. Desktop runs with the input channel (`xr_input=1`) and the emulator, never with a session of the mod on the PC, never seen in a headset |
 | The Creature panel quad | built (section 13) |
 | The subtitle card | built (section 17) |
 | The pointer, the trigger and the keyboard of the app on the panel quads of the headset app in a frame of the scene (section 5) | built, desktop runs and the emulator, never seen in a headset |
@@ -703,10 +703,14 @@ The biggest cost is memory, and it is small against a headset render.
 | The panel over the monitor copy, when the monitor copy is on | planned |
 | The launcher: the interface size row changes meaning when `ui_panel` is 1, and says so | planned |
 
-With `ui_panel=1` these are unchecked on the desktop: that eye pass 1 skips
-the panel batches cleanly, that the eye pictures lose the menus, and that a
-scripted click still works with the menu only on the panel. The code for the
-hit test does not change, so it should.
+With `ui_panel=1` and the input channel (`xr_input=1`, the Vulkan renderer of
+the mod) desktop runs show the panel quads of each frame of the scene in the
+live stream (`android.md`, "The quad layers"), the eye pictures with no
+dialog box while the panel image has it, and clicks of the ray on a dialog
+box that is only on the panel (`controllers.md`, 13.5). The emulator shows
+the panel quads over the projection layer of the app. With a session of the
+mod on the PC no run had `ui_panel=1`, so the skip of the panel batches in
+eye pass 1 is not checked there.
 
 Only a headset shows: the panel swapchain, `SetPanelTexture`, the quad layers,
 their place and size, the alpha over the world, the sRGB edges of 3.3, the

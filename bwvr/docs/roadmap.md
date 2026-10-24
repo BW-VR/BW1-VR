@@ -585,8 +585,7 @@ that moves while the Hand takes it.
   screen quad and the panel quads, with the ray, the trigger and the
   keyboard of the app on a dialog box there (`controllers.md`, sections 12
   and 13). Open in the headset app: the last pixel of the world when the
-  ray leaves the panel quads (`ui-layer.md`, 5.5), and a box that takes
-  text in a frame of the scene in a run.
+  ray leaves the panel quads (`ui-layer.md`, 5.5).
 - **P10. The tabletop mode** (play mode 3) is a test mode. Not built: a
   game camera over the table, the mouse, the wheel, the stick and the
   double click for the table, the ring and the depth key for the key color,
@@ -929,8 +928,10 @@ that moves while the Hand takes it.
   and the Citadel states are not read (`hand.md`).
 - **N14. The throw.** Not tested: a throw into a pile, and whether a thrown
   villager lives (`throw.md`).
-- **N15. The interface panel** (`ui_panel=1`). No run, on the desktop or in
-  a headset (`ui-layer.md`).
+- **N15. The interface panel** (`ui_panel=1`). Desktop runs with the input
+  channel and the emulator show the panel quads and the clicks of the ray on
+  them. No run with a session of the mod on the PC, and never seen in a
+  headset (`ui-layer.md`, section 9).
 - **N17. Headset coverage.** Quest 3 through Virtual Desktop and Steam Frame
   through Proton have game coverage. Other headsets and runtimes need tests.
 - **N18. The x64 host for Steam Frame** (`xr_bridge=1`). Not tested: all

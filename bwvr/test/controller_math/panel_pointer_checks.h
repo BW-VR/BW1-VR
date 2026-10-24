@@ -57,7 +57,7 @@ inline void PanelPointerChecks() {
   memset(t, 0, sizeof(t));
   t[0] = MenuQuad();
   {
-    // The row "Skip straight to the Creature select" of the start dialog.
+    // The row "Skip all of the Creature tutorial" of the start dialog.
     float p[3], d[3];
     PixelPoint(t[0], 2040.0f - 143.0f, 1632.0f + 23.0f, p);
     Toward(hand, p, d);

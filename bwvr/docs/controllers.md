@@ -2851,8 +2851,8 @@ takes text gets the keys of the keyboard of the app (`panel_pointer=1`,
 - The keyboard of the app at the menu panel quad (13.3) stops the ray: a
   ray on it is no hit on the panel, so a pull of the trigger on a key
   clicks nothing in the game.
-- With `xr_input=0` nothing changes. `panel_pointer=0`: in a dialog box of
-  a frame of the scene the pointer comes from the eye view, as before.
+- With `xr_input=0` nothing changes. `panel_pointer=0`: the pointer comes
+  from the eye view.
 
 ### 13.3 The keys (`panel_keys=1`)
 
@@ -2867,6 +2867,11 @@ scene takes the keys of the ring of the input channel and posts each one to
 the game window as `WM_CHAR` while a box takes text, as in 12.3.
 `panel_keys=0`: no `kPanelQuadText`, and a frame of the scene takes no key of
 the app.
+
+`panel_keys` of the mod and `panel_keyboard` of the app go together. The mod
+does not know the key of the app: with `panel_keys=1` and `panel_keyboard=0`
+the mod stops the ray at a keyboard that the app does not show. Set both to
+1 or both to 0.
 
 ### 13.4 Keys of the ini and the log
 
@@ -2926,6 +2931,23 @@ has a line for each change of `kPanelQuadText`.
   game 1 and the Main Menu of game 2 ("Continue Game") by the ray on the
   menu panel quad, in the game in Wine. Each press went to the game at its
   pixel, and each box went after it.
+- `emu_game_test.ps1 -SaveName vrsave` (the emulator): a box that takes text
+  in a frame of the scene. The game has no Save in its Esc menu (the Esc
+  menu over a game is the Main Menu). It saves in the Save Game Room of the
+  Temple: a second click on a picture of an empty slot opens the box "Save
+  Game Message" (`DialogBoxSaveMessage`, the callback of its controls
+  `0x00515CB0`) with a text line, OK and Cancel. In game 2 (the test save
+  "pen") the ring of the left hand went into the Temple and to that room,
+  and the ray clicked a picture two times. The box came up on the menu panel
+  quad, the mod set `kPanelQuadText`, and the app showed its keyboard, 1.17
+  by 0.47 m at 0, -1.08, -1.20 m. The keyboard gave `v r s a v e` and Enter,
+  the mod posted each one as `WM_CHAR`, the name is in the text line of the
+  box, and no pull of the trigger on the keyboard was a press on the panel.
+  Enter does not close this box. The ray pressed OK at the pixel 591 627,
+  the box went, and the game wrote slot 0 of the test profile of the emulator
+  (`0.sav` and `Script_0.sav`). OK is 212 pixels of the panel image above the
+  top of the keyboard (the bottom of the box is at 676, the top of the
+  keyboard at 888).
 
 ### 13.6 Not done, not proven, and what needs the headset
 
@@ -2938,9 +2960,10 @@ has a line for each change of `kPanelQuadText`.
 - Only the menu panel quad holds a dialog box. A hit on the help panel or
   the Creature panel is a pixel of the panel image too, but no box is
   there.
-- No run has had a box that takes text in a frame of the scene (the name of
-  a saved game), so `kPanelQuadText` and the keyboard at the panel quad have
-  run only in the checks.
+- A box that takes text and is taller than the box of a save can reach the
+  keyboard: the keyboard starts 336 pixels of the panel image under the
+  middle of the menu rect. No other box that takes text in a frame of the
+  scene is known.
 - Only a headset shows the aim at the panel quads, the size of the cursor of
   the game on the menu panel quad, and the place of the keyboard at the
   panel quad.

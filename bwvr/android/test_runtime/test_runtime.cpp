@@ -19,7 +19,17 @@
 //                                          the source alpha (the menu panel
 //                                          quad of the mod in a frame of the
 //                                          scene), and x, y are pixels of the
-//                                          panel image
+//                                          panel image. view: the hand goes
+//                                          to the left eye of the last
+//                                          projection layer and aims along
+//                                          its ray through the pixel x, y of
+//                                          its picture
+//   <frame> move <hand> <dx> <dy> <dz>     the hand moves by that many
+//                                          meters in the LOCAL space
+//   <frame> pointfile <hand> <name>        point as the file <name> in the
+//                                          folder of the runtime says: view,
+//                                          panel or screen, then x and y
+//                                          (the test writes it during the run)
 //   <frame> point <hand> key <word>        the aim of the hand goes to the
 //                                          middle of a key of the keyboard of
 //                                          the app (keyboard_layout.h): a
@@ -137,7 +147,7 @@ struct Step {
   std::string what;
   int hand;  // 0 left, 1 right
   int layer;
-  float a, b;
+  float a, b, c;
   std::string name;
 };
 std::vector<Step> g_script;
@@ -166,6 +176,7 @@ void LoadScript() {
                 : strcmp(layer, "keyboard") == 0 ? -2
                 : strcmp(layer, "screen") == 0   ? -3
                 : strcmp(layer, "panel") == 0    ? -4
+                : strcmp(layer, "view") == 0     ? -5
                                                  : atoi(layer);
       if (strcmp(layer, "key") == 0) {
         // The middle of the key on the keyboard of the app.
@@ -189,6 +200,11 @@ void LoadScript() {
       }
     } else if (s.what == "trigger" || s.what == "button" || s.what == "menu") {
       sscanf(rest, "%15s %f", hand, &s.a);
+    } else if (s.what == "pointfile") {
+      sscanf(rest, "%15s %63s", hand, name);
+      s.name = name;
+    } else if (s.what == "move") {
+      sscanf(rest, "%15s %f %f %f", hand, &s.a, &s.b, &s.c);
     } else if (s.what == "stick") {
       sscanf(rest, "%15s %f %f", hand, &s.a, &s.b);
     } else if (s.what == "capture" || s.what == "eyes" || s.what == "quads" ||
@@ -279,6 +295,9 @@ struct Session {
   std::vector<XrCompositionLayerQuad> last_quads;
   // The swapchains of the eyes of the projection layer of the last frame.
   std::vector<XrSwapchain> last_eyes;
+  // The views of the last projection layer, for "point <hand> view x y".
+  bool have_view = false;
+  XrCompositionLayerProjectionView last_view[2];
   long haptics = 0;
   std::vector<std::unique_ptr<Swapchain>> swapchains;
   std::vector<std::unique_ptr<Space>> spaces;
@@ -511,7 +530,51 @@ void Capture(Session* s, Swapchain* sc, const std::string& path) {
 }
 
 // THE AIM: from the hand at its place to a pixel of a quad of the last frame.
+// The aim along the ray of the left eye of the last projection layer through
+// the pixel x, y of its picture. In a room of the Temple the pixel of the
+// pointer is the end of the ray of the hand seen from the eye, so a ray of
+// the hand on the ray of the eye gives that pixel.
+void PointAtView(Session* s, int hand, float px, float py) {
+  if (!s->have_view) {
+    Fault("point at the view, the app sent no projection layer");
+    return;
+  }
+  const XrCompositionLayerProjectionView& v = s->last_view[0];
+  const float w = static_cast<float>(v.subImage.imageRect.extent.width);
+  const float h = static_cast<float>(v.subImage.imageRect.extent.height);
+  const float tl = tanf(v.fov.angleLeft), tr = tanf(v.fov.angleRight);
+  const float tu = tanf(v.fov.angleUp), td = tanf(v.fov.angleDown);
+  const float lx = tl + px / w * (tr - tl);
+  const float ly = tu - py / h * (tu - td);
+  const float lz = -1.0f;
+  const float n = sqrtf(lx * lx + ly * ly + lz * lz);
+  // The direction in the LOCAL space: v + w * t + cross(o.xyz, t), t = 2 * cross(o.xyz, v).
+  const XrQuaternionf& o = v.pose.orientation;
+  const float vx = lx / n, vy = ly / n, vz = lz / n;
+  const float cx = 2.0f * (o.y * vz - o.z * vy);
+  const float cy = 2.0f * (o.z * vx - o.x * vz);
+  const float cz = 2.0f * (o.x * vy - o.y * vx);
+  const float dx = vx + o.w * cx + (o.y * cz - o.z * cy);
+  const float dy = vy + o.w * cy + (o.z * cx - o.x * cz);
+  const float dz = vz + o.w * cz + (o.x * cy - o.y * cx);
+  // The hand goes to the eye, 1 cm ahead of it, so its ray is the ray of the
+  // eye and has no parallax.
+  Hand& hd = s->hands[hand];
+  hd.position = {v.pose.position.x + 0.01f * dx, v.pose.position.y + 0.01f * dy,
+                 v.pose.position.z + 0.01f * dz};
+  const float fx = dx, fy = dy, fz = dz;
+  const float pitch = asinf(fy);
+  const float yaw = atan2f(-fx, -fz);
+  const float qy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f);
+  const float qp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
+  hd.orientation = {qy * sp, sy * qp, -sy * sp, qy * qp};
+}
+
 void PointAt(Session* s, int hand, int layer, float px, float py) {
+  if (layer == -5) {
+    PointAtView(s, hand, px, py);
+    return;
+  }
   // The menu and the keyboard: the last quad of the size of their picture.
   // The screen: the first opaque quad.
   const int asked = layer;
@@ -604,7 +667,25 @@ void RunScript(Session* s) {
   for (const Step& st : g_script) {
     if (st.frame != s->script) continue;
     Hand& h = s->hands[st.hand];
-    if (st.what == "point") {
+    if (st.what == "pointfile") {
+      // The test wrote the place into a file of the folder of the runtime:
+      // "view x y" or "panel x y".
+      char path[512], layer[16] = {0};
+      snprintf(path, sizeof(path), "%s/%s", kFolder, st.name.c_str());
+      FILE* pf = fopen(path, "r");
+      float x = 0.0f, y = 0.0f;
+      const bool ok = pf != nullptr && fscanf(pf, "%15s %f %f", layer, &x, &y) == 3;
+      if (pf != nullptr) fclose(pf);
+      if (!ok) {
+        Fault("pointfile: no place in %s", path);
+      } else {
+        PointAt(s, st.hand, strcmp(layer, "view") == 0 ? -5 : strcmp(layer, "panel") == 0 ? -4 : -3, x, y);
+        const Hand& hp = s->hands[st.hand];
+        Report("frame %ld point %d %s %.0f %.0f pose %.4f %.4f %.4f %.4f %.4f %.4f %.4f", s->frame,
+               st.hand, layer, x, y, hp.position.x, hp.position.y, hp.position.z,
+               hp.orientation.x, hp.orientation.y, hp.orientation.z, hp.orientation.w);
+      }
+    } else if (st.what == "point") {
       PointAt(s, st.hand, st.layer, st.a, st.b);
       const Hand& hp = s->hands[st.hand];
       Report("frame %ld point %d %d %.0f %.0f pose %.4f %.4f %.4f %.4f %.4f %.4f %.4f", s->frame,
@@ -613,6 +694,12 @@ void RunScript(Session* s) {
     } else if (st.what == "trigger") {
       h.trigger = st.a != 0.0f;
       Report("frame %ld trigger %d %d", s->frame, st.hand, h.trigger ? 1 : 0);
+    } else if (st.what == "move") {
+      h.position.x += st.a;
+      h.position.y += st.b;
+      h.position.z += st.c;
+      Report("frame %ld move %d to %.4f %.4f %.4f", s->frame, st.hand, h.position.x,
+             h.position.y, h.position.z);
     } else if (st.what == "button") {
       h.button = st.a != 0.0f;
       Report("frame %ld button %d %d", s->frame, st.hand, h.button ? 1 : 0);
@@ -1291,6 +1378,8 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
         if (v.subImage.imageArrayIndex != 0) Fault("frame %ld: a view of a projection layer of array index %u", s->frame, v.subImage.imageArrayIndex);
         if (!(v.fov.angleLeft < v.fov.angleRight) || !(v.fov.angleDown < v.fov.angleUp)) Fault("frame %ld: the angles of a view of a projection layer are empty", s->frame);
         s->last_eyes.push_back(v.subImage.swapchain);
+        s->last_view[e] = v;
+        s->have_view = true;
         char part[256];
         snprintf(part, sizeof(part), " eye %u pose %.4f %.4f %.4f %.4f %.4f %.4f %.4f fov %.4f %.4f %.4f %.4f rect %d %d %dx%d",
                  e, v.pose.position.x, v.pose.position.y, v.pose.position.z, v.pose.orientation.x,

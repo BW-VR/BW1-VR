@@ -1432,8 +1432,8 @@ ARM (`static_assert` of each size and offset): `kCard` 80 bytes,
 `kCardPicture` 24 bytes and the pixels, `kPanel` 176 bytes, `kWindow` 136
 bytes. The field `visible` of a quad of `kPanel` has the bits
 `kPanelQuadShows` and `kPanelQuadText` (a dialog box on the menu panel quad
-takes text, "The dialog boxes by the controllers"). The stream has version 2: a stream with no layer records plays with
-no quad layer of the mod.
+takes text, "The dialog boxes by the controllers"). The stream has version
+2: a stream with no layer records plays with no quad layer of the mod.
 
 **The app** (`stream_layers=1`, the default). The player takes the layer
 records of a frame, and they go with the picture of the frame at its
@@ -1784,6 +1784,9 @@ quad is about 80 by 60 degrees (the menu rect at 16 pixels a degree), and the
 box is a small part of it in its middle, so the keyboard is not under the
 whole quad. The mod knows that quad too, and a ray on the keyboard is no hit
 on the panel. `panel_keyboard=0`: no keyboard in a frame of the scene.
+`panel_keyboard` of the app and `panel_keys` of the mod go together: with
+`panel_keys=1` and `panel_keyboard=0` the mod stops the ray at a keyboard
+that the app does not show. Set both to 1 or both to 0.
 
 The user chose a keyboard of the app over `XR_META_virtual_keyboard`, so it
 works on each runtime, the Quest 3 and the Steam Frame alike.
@@ -1828,7 +1831,12 @@ quad. The mod: `controllers  :` and `vk stream    :` lines of
   and the pixels of the panel image). With `-TestSave <name>` the test puts
   the test save into slot 20 of the new profile before game 2, and with
   `-MenuClick x,y` the runtime clicks that pixel of the Main Menu of game 2
-  on the menu panel quad.
+  on the menu panel quad. With `-SaveName <name>` game 2 then goes into the
+  Save Game Room of the Temple by the ring (`move <hand> dx dy dz` and the
+  button Y of the runtime), the runtime clicks a picture of an empty slot two
+  times along the ray of the eye (`pointfile <hand> <file>` with `view x y`),
+  the keyboard of the app at the menu panel quad types the name and Enter,
+  and the ray clicks OK of the box.
 
 **What the emulator shows** (`-NewProfile -ProfileOk 480,670 -SceneEyes
 -SkipClick 547,575 -TestSave pen -PlaySeconds 60`, a render of 1380 by
@@ -1883,16 +1891,27 @@ checks, 0 failed):
   left button of the game went down, and the Main Menu went at frame 676 of
   the scene. The eye pictures of the projection layer after the measure have
   the land.
+- Game 2 with `-SaveName vrsave`: the ring of the left hand went into the
+  Temple and to the Save Game Room, and two clicks of the ray on a picture of
+  an empty slot opened the box "Save Game Message" on the menu panel quad.
+  The mod set `kPanelQuadText`, and the app showed its keyboard at the menu
+  panel quad, 1.17 by 0.47 m at 0, -1.08, -1.20 m, turned 10 degrees. The keys
+  `v r s a v e` and Enter went to the game as `WM_CHAR`, and no pull of the
+  trigger on the keyboard was a press on the panel. The ray pressed OK at the
+  pixel 591 627, 212 pixels of the panel image above the top of the keyboard,
+  the box went, and the game wrote slot 0 of the test profile in the
+  emulator. 156 checks, 0 failed.
 
 **Not shown yet:** the dialog boxes in a headset (the aim at the screen
 quad, at the panel quads and at the keyboard, the size of the cursor of the
-game), a double click in a list of the front end, and a box that takes
-text in a frame of the scene (the keyboard at the menu panel quad).
+game, the keyboard at the menu panel quad), and a double click in a list of
+the front end.
 
 **Keys.** `screen_pointer`, `screen_keys`, `panel_pointer` and `panel_keys`
 of the mod and `screen_keyboard` and `panel_keyboard` of the app have 1 as
-the default, the value of a run, so "Play" does not write them. None has a test key: the mod with `xr_input=1`
-has no hotkeys, and the app reads its keys at its start.
+the default, the value of a run, so "Play" does not write them. None has a
+test key: the mod with `xr_input=1` has no hotkeys, and the app reads its
+keys at its start.
 
 ## No Vulkan device of the mod
 

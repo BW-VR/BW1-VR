@@ -2753,10 +2753,10 @@ those of section 3.6. `vk stream    :` has a line for each change of
 
 ### 12.5 Tests
 
-- `.\dev.ps1 build`: the checks of `screen_pointer_checks.h` (a ray against
-  a quad: the center, a corner, past the edge, from behind, parallel, a quad
-  behind the hand, a turned quad; the aim of `AimAlong`; the pixel of a hit;
-  the hand that points; the press on the quad).
+- `.\dev.ps1 build`: the checks of `screen_pointer_checks.h`: a ray against
+  a quad (the center, a corner, past the edge, from behind, parallel, a quad
+  behind the hand, a turned quad), the aim of `AimAlong`, the pixel of a hit,
+  the hand that points and the press on the quad.
 - `screen_ray_run.ps1` (a desk run): a new game with the logos, `intro_vr=0`,
   `intro_skip=0` and `xr_input=1`. The test writer (`bwvr_input_writer
   script`) waits for the line of the log that names `SkipBox`, aims the right
@@ -2766,17 +2766,15 @@ those of section 3.6. `vk stream    :` has a line for each change of
   With `screen_pointer=1` (a render of 4080 by 3264): the mod took the press
   on the quad at the pixel 1897 1655, the left button of the game went down
   and up, the Lionhead logo ended on it, and the frames of the scene came
-  with the start dialog over them (frame 450 of the scene 14.0 s after the
+  with the start dialog over them (frame 450 of the scene 15.2 s after the
   start of the game process). With `screen_pointer=0`: no press reached the
   game, and the logo played to its end (frame 450 of the scene 43.0 s after
   the start). The writer and the mod: the left button down once, one pulse
-  of the mod back through the ring of the events. In the A, B, A runs with
-  `xr_input=0` (the build before, this build, the build before, the test
-  save "pen", the scripted controller still, 60 s each) the frame time is
-  1.29 ms in each run and the scene 1.12 ms: the same within the noise.
+  of the mod back through the ring of the events.
 - `emu_game_test.ps1 -NewProfile` (the emulator, `android.md`, "The dialog
-  boxes by the controllers"): the keyboard of the app and the click on the
-  start dialog in the game in Wine.
+  boxes by the controllers"): the keyboard of the app types the name of a new
+  profile, the ray clicks OK of that dialog, and the ray clicks the start
+  dialog over the Lionhead logo, in the game in Wine.
 
 ### 12.6 Not done, not proven, and what needs the headset
 

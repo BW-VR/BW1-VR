@@ -4,6 +4,7 @@
 
 #include <mutex>
 
+#include "../../src/mod/controller_math.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "app_log.h"
 
@@ -1063,7 +1064,8 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     ++keyboard_frames_;
   }
   // THE MENU AND THE CURSOR, over each layer of the mod. The cursor also
-  // shows on the keyboard with no menu.
+  // shows on the keyboard with no menu: with the turn of the keyboard, 4 mm
+  // in front of it along its normal.
   if (frame_.shouldRender && show_cursor && cursor_written_ && !menu_shown_) {
     CopyLayer(&cursor_);
     XrCompositionLayerQuad& c = quads[used++];
@@ -1073,8 +1075,13 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     c.subImage.swapchain = cursor_.swapchain;
     c.subImage.imageRect.extent = {static_cast<int32_t>(cursor_.width),
                                    static_cast<int32_t>(cursor_.height)};
-    c.pose.orientation.w = 1.0f;
-    c.pose.position = {cursor_point[0], cursor_point[1], cursor_point[2] + 0.004f};
+    const float* q = keyboard_orientation_;
+    const float front[3] = {0.0f, 0.0f, 0.004f};
+    float ahead[3];
+    controller_math::QuatRotate(q, front, ahead);
+    c.pose.orientation = {q[0], q[1], q[2], q[3]};
+    c.pose.position = {cursor_point[0] + ahead[0], cursor_point[1] + ahead[1],
+                       cursor_point[2] + ahead[2]};
     c.size = {cursor_size, cursor_size};
     layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&c);
   }

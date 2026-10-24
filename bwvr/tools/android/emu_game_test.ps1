@@ -107,6 +107,13 @@
     of the profile and the value Profile of the registry of the prefix after
     the game.
 
+.PARAMETER ProfileOk
+    With -NewProfile: x,y of the button OK of the dialog of a new profile on
+    the render. After the name the runtime points at that pixel of the
+    screen quad and pulls the trigger, in place of Enter: a control of the
+    box takes the click of the ray. The test checks the press on the quad
+    and that the dialog goes after it.
+
 .PARAMETER SkipClick
     With -NewProfile: x,y of a row of the start dialog of a new game
     (SkipBox) on the render. When the log of the mod names that dialog over
@@ -138,6 +145,7 @@ param(
     [switch]$NewProfile,
     [string]$ProfileName = 'bwvrtest',
     [int[]]$SkipClick = @(),
+    [int[]]$ProfileOk = @(),
     [string]$TestSave = '',
     [switch]$Keep
 )
@@ -292,21 +300,34 @@ function ProfileDialog([int]$PlayAt) {
     $kb = [regex]::Match($log, 'keyboard     : a dialog box of the game takes text\. The keyboard shows, [^\r\n]*')
     Expect $kb.Success ('the app shows its keyboard: ' + $kb.Value)
     Hold 'profile'
-    $keys = $ProfileName.Length + 1
-    $mod = WaitModLog @('controllers  : the key Enter of the app goes to the game') 300
+    $ok = $ProfileOk.Count -eq 2
+    $keys = $ProfileName.Length + $(if ($ok) { 0 } else { 1 })
+    # The end of the dialog: Enter of the keyboard, or the press of the ray
+    # on OK.
+    $endLine = if ($ok) { 'controllers  : screen quad: the right trigger presses at the pixel' } else { 'controllers  : the key Enter of the app goes to the game' }
+    $mod = WaitModLog @([regex]::Escape($endLine)) 300
     Start-Sleep -Seconds 10
     $mod = ModLog
     $log = AppLog
     $appKeys = @([regex]::Matches($log.Substring([math]::Min($PlayAt, $log.Length)), 'keyboard     : the key (\S+) goes to the mod') | ForEach-Object { $_.Groups[1].Value })
     Note ('the keys of the app: ' + ($appKeys -join ' '))
-    Expect ($appKeys.Count -eq $keys -and (($appKeys | Select-Object -First $ProfileName.Length) -join '') -eq $ProfileName -and $appKeys[-1] -eq 'Enter') "the keyboard of the app gave $ProfileName and Enter to the mod ($($appKeys.Count) keys)"
+    $wantKeys = @($ProfileName.ToCharArray() | ForEach-Object { "$_" }) + $(if ($ok) { @() } else { @('Enter') })
+    Expect ($appKeys.Count -eq $keys -and ($appKeys -join ' ') -eq ($wantKeys -join ' ')) "the keyboard of the app gave $($wantKeys -join ' ') to the mod ($($appKeys.Count) keys)"
     $modKeys = @($mod -split "`r?`n" | Where-Object { $_ -match '^controllers  : the key .* of the app goes to the game \(WM_CHAR\)' })
     $modKeys | Select-Object -First 3 | ForEach-Object { Note ('bwvr.log: ' + $_) }
     Expect ($modKeys.Count -eq $keys) "the mod gave each key to the game as WM_CHAR ($($modKeys.Count) of $keys)"
-    $boxLines = @($mod -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : screen quad|vk stream    : screen frame \d+: (a dialog box takes|no dialog box takes))' })
+    $boxLines = @($mod -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (screen quad|the left button)|vk stream    : screen frame \d+: (a dialog box takes|no dialog box takes))' })
     $boxLines | ForEach-Object { Note ('bwvr.log: ' + $_) }
-    $after = [regex]::Match($mod, 'setup box    : no dialog box is up now[^\r\n]*')
-    Expect ($after.Success -and $mod.IndexOf($after.Value) -gt $mod.IndexOf('the key Enter of the app goes to the game')) "the dialog of a new profile went after Enter: $($after.Value)"
+    $endAt = $mod.IndexOf($endLine)
+    if ($ok) {
+        $press = [regex]::Match($mod, 'controllers  : screen quad: the right trigger presses at the pixel [^\r\n]*')
+        Expect $press.Success ('the ray pressed on OK of the dialog on the screen quad: ' + $press.Value)
+        $down = $mod.IndexOf('controllers  : the left button is down', [math]::Max(0, $endAt))
+        Expect ($endAt -ge 0 -and $down -gt $endAt) 'the trigger on OK went to the game as the left button'
+    }
+    $afterAt = if ($endAt -ge 0) { $mod.IndexOf('setup box    : no dialog box is up now', $endAt) } else { -1 }
+    $after = if ($afterAt -ge 0) { [regex]::Match($mod.Substring($afterAt), 'setup box    : no dialog box is up now[^\r\n]*').Value } else { '' }
+    Expect ($afterAt -gt $endAt) ("the dialog of a new profile went after " + $(if ($ok) { 'the click of the ray on OK' } else { 'Enter' }) + ": $after")
     Hold 'typed'
     $profiles = (AdbOut @('shell', 'ls', "$GameDir/Profiles")).Trim()
     Note "the folder Profiles of the game folder of the app: $profiles"
@@ -317,12 +338,14 @@ function ProfileDialog([int]$PlayAt) {
         $mod = WaitModLog @('setup box    : the dialog box SkipBox is up now') 300
         Expect ($mod -match 'setup box    : the dialog box SkipBox is up now') 'the mod names the start dialog of a new game (SkipBox)'
         Hold 'skipbox'
-        $mod = WaitModLog @('controllers  : screen quad: the right trigger presses') 120
         $log = WaitLog @('game         : the frames of the scene start') 180 $PlayAt
         $mod = ModLog
-        $press = [regex]::Match($mod, 'controllers  : screen quad: the right trigger presses at the pixel [^\r\n]*')
+        # The press after the line that names SkipBox (the press on OK of the
+        # dialog of a new profile comes before it).
+        $skipAt = [math]::Max(0, $mod.IndexOf('setup box    : the dialog box SkipBox is up now'))
+        $press = [regex]::Match($mod.Substring($skipAt), 'controllers  : screen quad: the right trigger presses at the pixel [^\r\n]*')
         Expect $press.Success ('the ray pressed on the start dialog on the screen quad: ' + $press.Value)
-        Expect ($mod -match 'controllers  : the left button is down') 'the trigger went to the game as the left button'
+        Expect ($mod.IndexOf('controllers  : the left button is down', $skipAt) -gt $skipAt) 'the trigger went to the game as the left button'
         $scene = [regex]::Match($log.Substring([math]::Min($PlayAt, $log.Length)), 'game         : the frames of the scene start at frame \d+, ([\d.]+) s after Play')
         Expect $scene.Success ('the click ended the Lionhead logo, and the frames of the scene came: ' + $scene.Value)
         @($mod -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (screen quad|the left button|a dialog box))' }) | Select-Object -Last 8 | ForEach-Object { Note ('bwvr.log: ' + $_) }
@@ -413,9 +436,18 @@ try {
         $f = 45
         $profileSteps += "$f hold profile"; $f += 2
         $profileSteps += "$f quads profilebox"; $f += 4
-        $keys = @($ProfileName.ToCharArray() | ForEach-Object { "$_" }) + @('enter')
+        $keys = @($ProfileName.ToCharArray() | ForEach-Object { "$_" })
+        if ($ProfileOk.Count -ne 2) { $keys += @('enter') }
         foreach ($k in $keys) {
             $profileSteps += "$f point right key $k"
+            $profileSteps += "$($f + 8) trigger right 1"
+            $profileSteps += "$($f + 12) trigger right 0"
+            $f += 20
+        }
+        if ($ProfileOk.Count -eq 2) {
+            # The name is in the field: a picture, then OK by the ray.
+            $profileSteps += "$f quads named"; $f += 4
+            $profileSteps += "$f point right screen $($ProfileOk[0]) $($ProfileOk[1])"
             $profileSteps += "$($f + 8) trigger right 1"
             $profileSteps += "$($f + 12) trigger right 0"
             $f += 20

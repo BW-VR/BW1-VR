@@ -1757,7 +1757,8 @@ the screen quad, its top is 5 cm under the bottom of the screen quad, and it
 turns about its x axis so that its front faces the origin of the LOCAL space.
 The hand that pulled its trigger last points, as on the menu, the key under
 the ray is lit (a short pulse at each new key), the cursor of the app shows
-at the hit, and the trigger types the key. The key goes to the mod through
+at the hit (with the turn of the keyboard, 4 mm in front of it along its
+normal), and the trigger types the key. The key goes to the mod through
 the ring of the keys of the input channel ("The input channel"), and the mod
 posts it to the game window as `WM_CHAR`, as Windows gives the game a key of
 a keyboard. The mod takes the trigger only on the screen quad, so a press on
@@ -1788,13 +1789,15 @@ The mod: `controllers  :` and `vk stream    :` lines of `controllers.md`,
   names `NewProfileBox` and the `kScreen` asks for the keyboard, the
   runtime points at the keys of `bwvrtest` and at Enter, and pulls the
   trigger on each (`point <hand> key <word>` of the runtime). With
-  `-SkipClick x,y` it then clicks the start dialog on the screen quad. With
-  `-TestSave <name>` the test puts the test save into slot 20 of the new
-  profile before game 2.
+  `-ProfileOk x,y` it then clicks OK of the dialog on the screen quad in
+  place of Enter. With `-SkipClick x,y` it then clicks the start dialog on
+  the screen quad. With `-TestSave <name>` the test puts the test save into
+  slot 20 of the new profile before game 2.
 
-**What the emulator shows** (`-NewProfile -SceneEyes -SkipClick 547,575
--TestSave pen -PlaySeconds 60`, a render of 1380 by 1104, 135 checks, 0
-failed):
+**What the emulator shows** (`-NewProfile -ProfileOk 480,670 -SceneEyes
+-SkipClick 547,575 -TestSave pen -PlaySeconds 60`, a render of 1380 by
+1104, 137 checks, 0 failed, and the same run with Enter in place of OK, 135
+checks, 0 failed):
 
 - The dialog of a new profile came at FinishFrame 3066, after the logos and
   the video before the intro. The `kScreen` asked for the keyboard, and the
@@ -1802,22 +1805,27 @@ failed):
   head. A paint of the keyboard takes 2.7 to 5 ms.
 - The game draws the dialog and its cursor in the picture of the screen
   quad, and the cursor is at the hit of the ray.
-- The keyboard gave `b w v r t e s t` and Enter to the mod (9 keys, one for
-  each pull of the trigger, about 0.3 s apart), the mod posted each one as
-  `WM_CHAR`, and the dialog went after Enter. Each pull of the trigger on
-  the keyboard was "a press with the ray off the quad" for the mod: no
-  click in the game. The game made the folder `Profiles\_b_w_v_r_t_e_s_t`
-  in the game folder of the app, and `user.reg` of the prefix has the value
-  `Profile` after the game.
+- The keyboard gave `b w v r t e s t` to the mod (8 keys, one for each pull
+  of the trigger, about 0.3 s apart), the mod posted each one as `WM_CHAR`,
+  and the name is in the field of the dialog in the picture. Each pull of
+  the trigger on the keyboard was "a press with the ray off the quad" for
+  the mod: no click in the game.
+- The ray pressed at the pixel 480 670 (OK of the dialog), the left button
+  of the game went down and up, and the dialog went ("setup box : no dialog
+  box is up now"): a control of the box took the click of the ray. In the
+  run with Enter the dialog went after the key Enter of the keyboard.
+- The game made the folder `Profiles\_b_w_v_r_t_e_s_t` in the game folder
+  of the app, and `user.reg` of the prefix has the value `Profile` after
+  the game.
 - The start dialog of a new game (`SkipBox`) came over the Lionhead logo.
   The ray pressed at the pixel 547 575, the left button of the game went
-  down, the logo ended, and the frames of the scene came 166 s after Play
-  (most of it the video before the intro and the typing), with the start
-  dialog over the land. The runtime read back the eye pictures of the
+  down, the logo ended, and the frames of the scene came 166 to 182 s after
+  Play (most of it the video before the intro and the typing), with the
+  start dialog over the land. The runtime read back the eye pictures of the
   projection layer with the land in them.
 - Game 2 ("Play in VR") continued the test save "pen" in slot 20 of the
   profile: the Main Menu of the game over the land of the save, the frames
-  of the scene 56.7 s after Play, and the eye pictures of the land.
+  of the scene 57 s after Play, and the eye pictures of the land.
 - The frame rates and the pace: see "The pace of the frames". The
   processes of Wine took 97 percent of one CPU in game 1 (the scene with
   the start dialog) and 68 percent in game 2.

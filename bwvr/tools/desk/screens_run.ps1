@@ -34,8 +34,9 @@
 # screen frame in each run. 0 (the default): no skip. -TestFrame N
 # (vk_scene_test_frame): the pictures of the frame N of the scene, the
 # pictures of the PC for emu_xr_test.ps1 -Live. Example, the switch at the
-# end of the Lionhead logo: -SkipAt 8000 -Attach 8800 -Most 350 -TestFrame
-# 60 -More @{ intro_vr = 0 }.
+# end of the Lionhead logo: -SkipAt 8000 -Attach 8800 -Last 999999 -Most 350
+# -TestFrame 60 -More @{ intro_vr = 0 }. -Last must be above -Attach: the
+# reader leaves at the screen frame -Last.
 #
 # -More @{...}: more ini keys, for example vk_device = 0 or
 # vk_stream_screens = 0.
@@ -58,6 +59,10 @@ param(
     [hashtable]$More = @{}
 )
 $ErrorActionPreference = 'Continue'
+if ($Last -le $Attach) {
+    "SCREENS RUN NOT RUN: -Last $Last is not above -Attach $Attach, so the reader leaves at its first frame. Give a -Last above -Attach (with -Most, for example -Last 999999)"
+    exit 2
+}
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $sp 'game.ps1')
 $writer = Join-Path $sp '..\..\build\test\input_writer\Release\bwvr_input_writer.exe'

@@ -1611,8 +1611,9 @@ has "the screens with no scene end at screen frame 7802, in an eye pass of
 the intro" at the first eye pass of the intro (`VkStreamScreenStop`).
 
 **The switch to the frames of the scene** (`screens_run.ps1 -SkipAt 8000
--Attach 8800 -Most 350 -TestFrame 60`, `intro_vr=0`): a press of the test at
-frame 8000 of the intro skips the Lionhead logo, and the frames of the scene
+-Attach 8800 -Last 999999 -Most 350 -TestFrame 60`, `intro_vr=0`): a press
+of the test at frame 8000 of the intro skips the Lionhead logo, and the
+frames of the scene
 start after screen frame 8965. The capture has 165 screen frames and 185
 frames of the scene (0 to 184, each with a `kView` for a projection layer
 and the panel quads). One screen frame has no `kScreen` and no walk: the

@@ -414,9 +414,10 @@ function PushPlace([string]$Name, [string]$Text) {
 # saves in the Temple: a second click on a picture of a slot with no saved
 # game opens that box. The ring of the left hand goes into the Temple and to
 # the room. -SavePicture is the pixel of a picture of the view of that room
-# at its rest pose, and the runtime aims along the ray of the eye through it. The first click turns the camera to the
-# picture, and the second click, in the middle of the view, opens the box.
-# The keys of the name and Enter come from the keyboard of the app.
+# at its rest pose, and the runtime aims along the ray of the eye through
+# it. The first click turns the camera to the picture, and the second
+# click, in the middle of the view, opens the box. The keys of the name and
+# Enter come from the keyboard of the app.
 function SaveFlow {
     Say "The box of a save in a frame of the scene: the keyboard of the app types $SaveName"
     $holds = @('ring2', 'temple2', 'saveroom', 'aim2', 'savebox', 'saved2')
@@ -502,7 +503,8 @@ function SaveFlow {
         Expect ($okPress -and [math]::Abs($okX - $SaveOk[0]) -le 4 -and [math]::Abs($okY - $SaveOk[1]) -le 4) "the ray pressed OK of the box on the panel at the pixel $okX $okY (want $($SaveOk[0]) $($SaveOk[1])), not under the keyboard"
         $goneAt = if ($okPress) { $after.IndexOf('setup box    : no dialog box is up now', $okPress.Index) } else { -1 }
         $gone = if ($goneAt -ge 0) { [regex]::Match($after.Substring($goneAt), '[^\r\n]*').Value } else { '' }
-        Expect ($goneAt -gt 0) "the box went after the press on OK: $gone"        @($after -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (panel quads|the key|the left button)|xr layers    :|temple       : the Save Game Room)' }) | Select-Object -First 30 | ForEach-Object { Note ('bwvr.log: ' + $_) }
+        Expect ($goneAt -gt 0) "the box went after the press on OK: $gone"
+        @($after -split "`r?`n" | Where-Object { $_ -match '^(setup box    :|controllers  : (panel quads|the key|the left button)|xr layers    :|temple       : the Save Game Room)' }) | Select-Object -First 30 | ForEach-Object { Note ('bwvr.log: ' + $_) }
         $want = (($ProfileName.ToCharArray() | ForEach-Object { "_$_" }) -join '')
         # The slots of the test profile: a new slot of 0 to 13 with a saved
         # game is the save of the box (slot 20 holds the test save).
@@ -514,6 +516,7 @@ function SaveFlow {
         Note ("the slots 0 to 13 of the test profile in the emulator with a saved game: " + ($saved -join ' '))
         $name = if ($saved.Count -gt 0) { (AdbOut @('shell', "cat '$games/$($saved[0])/SaveGame.inf'")) -replace '[^\x20-\x7E]', '' } else { '' }
         Note "SaveGame.inf of that slot, the printable bytes: $name"
+        Expect ($name -match [regex]::Escape($SaveName)) "SaveGame.inf of that slot holds the name $SaveName"
         Expect ($saved.Count -eq 1) "the save went into a slot of the test profile $ProfileName in the emulator ($($saved -join ' '))"
     } finally {
         foreach ($h in $holds) { Hold $h }

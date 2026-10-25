@@ -403,10 +403,12 @@ void Deliver() {
   const size_t n = b.size() - 8;
   if (g_unit_record) g_record.insert(g_record.end(), unit, unit + n);
   if (g_unit_live && g_live.reader) {
-    LARGE_INTEGER start;
-    QueryPerformanceCounter(&start);
+    // time_log=1: the time of the write for the line of the times.
+    LARGE_INTEGER start = {};
+    const bool timed = TimeLogOn();
+    if (timed) QueryPerformanceCounter(&start);
     LivePut(g_unit_frame, unit, static_cast<uint32_t>(n), g_unit_keep);
-    TimeLogStream(MsSince(start));
+    if (timed) TimeLogStream(MsSince(start));
   }
 }
 

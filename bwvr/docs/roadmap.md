@@ -964,17 +964,18 @@ that moves while the Hand takes it.
   thread (`backend.md`).
 - **N20. 120 frames a second in the headset app on a Quest 3 with no PC.**
   The goal: the game at 120 frames a second in VR in each situation of the
-  game. A Quest 3 with the profile of the player asked for 4096 by 4291 for
-  each eye, the game made about 31 frames a second in a scene, and the app
-  showed about 10 pictures a second. Now the size of the eyes has a cap at
-  the panel of a Quest 3 (`eye_size_max=1`, `android.md`, "The size of the
-  eye pictures"), and the app and the mod log each 10 s where the time of a
-  frame goes (`time_log=1`, `android.md`, "The time log of the app",
-  `backend.md`, "The time log of the mod"). The emulator shows both. Next:
-  a run in the headset with the profile of the player, to read the lines
+  game. The size of the eyes has a cap at the panel of a Quest 3
+  (`eye_size_max=1`, `android.md`, "The size of the eye pictures"), and the
+  app and the mod log each 10 s where the time of a frame goes
+  (`time_log=1`, `android.md`, "The time log of the app", `backend.md`,
+  "The time log of the mod"). The emulator shows both. Next: a run in the
+  headset with the profile of the player in the scene of the save, at 72,
+  90 and 120 Hz and at `resolution_pct` 50, 75 and 100, to read the lines
   `time` and `time log`: the time of the GPU, the waits in `xrWaitFrame`
   and for the GPU, the CPU time of the main thread of the game under Box64,
   and the load of the cores. The step after it comes from those numbers.
+  Before a merge to main: the desk run on the PC (the build before, the new
+  build, and the new build with `time_log=0`).
   Open: why the Quest 3 asks for 4096 by 4291, the stop of the game 15 s
   after the load of a saved game (the line of a stop of the time log names
   the state of each thread), and a way to find the hot code of the game

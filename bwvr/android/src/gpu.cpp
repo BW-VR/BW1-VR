@@ -176,7 +176,10 @@ VkCommandBuffer GpuBegin(Gpu* gpu) {
   vkBeginCommandBuffer(gpu->cmd, &begin);
   if (gpu->query != VK_NULL_HANDLE) {
     vkCmdResetQueryPool(gpu->cmd, gpu->query, 0, 2);
-    vkCmdWriteTimestamp(gpu->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu->query, 0);
+    // At the bottom of the pipe: the stamp comes when the work before it on
+    // the queue (the walk of the renderer) is done, so the time of the walk
+    // is not in the time of this command buffer too.
+    vkCmdWriteTimestamp(gpu->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->query, 0);
   }
   return gpu->cmd;
 }

@@ -7,8 +7,10 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <string>
 
 #include "../../src/mod/vk_scene.h"
@@ -19,7 +21,14 @@ namespace {
 namespace tl = time_log_math;
 namespace ps = proc_stat;
 
-bool g_name_threads = false;
+// Set by the thread of the session, read by each thread that starts.
+std::atomic<bool> g_name_threads{false};
+
+double ClockMs() {
+  timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
 
 // A small file of /proc as text, or "" when it cannot be read.
 std::string ReadSmall(const char* path) {
@@ -80,12 +89,14 @@ const char* CauseName(int c) {
 }  // namespace
 
 void TimeLogNameThread(const char* name) {
-  if (g_name_threads) pthread_setname_np(pthread_self(), name);
+  if (g_name_threads.load()) pthread_setname_np(pthread_self(), name);
 }
 
 void TimeLog::Start(bool on) {
   on_ = on;
-  g_name_threads = on;
+  g_name_threads.store(on);
+  // The renderer adds up the times of the GPU of its walks only for this log.
+  VkSceneSetGpuTake(on);
   const long hz = sysconf(_SC_CLK_TCK);
   ticks_per_second_ = hz > 0 ? hz : 100;
   AppLog("time         : time_log=%d. %s", on ? 1 : 0,
@@ -337,7 +348,9 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
          static_cast<unsigned long long>(xr_.busy.count), 100.0 * gpu_ms / (seconds * 1000.0));
   // THE THREADS AND THE CORES.
   Sample now;
+  const double read_start = ClockMs();
   Read(&now, now_ms);
+  const double read_ms = ClockMs() - read_start;
   if (last_.ms >= 0.0) {
     const double s = (now.ms - last_.ms) / 1000.0;
     ThreadLines(last_, now, "each 10 s");
@@ -350,7 +363,8 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
     for (const ps::Cpu& c : now.cpus) {
       if (c.index < 0) continue;
       for (const ps::Cpu& b : last_.cpus) {
-        if (b.index != c.index) continue;
+        // A core that went off and on again can have smaller counts.
+        if (b.index != c.index || c.total < b.total || c.busy < b.busy) continue;
         const uint64_t total = c.total - b.total;
         const double pct = total > 0 ? 100.0 * (c.busy - b.busy) / total : 0.0;
         char part[16];
@@ -363,11 +377,12 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
     }
     AppLog("time         : the processes in cores: the game %.2f, the app %.2f, the other "
            "processes of the user of the app (Wine) %.2f. The cores: %d, %.2f of them busy "
-           "in all, %d busy for half the time or more, each in percent: %s",
+           "in all, %d busy for half the time or more, each in percent: %s. The read of "
+           "/proc took %.2f ms",
            last_.game.empty() ? 0.0 : cores(last_.game_ticks, now.game_ticks),
            cores(last_.app_ticks, now.app_ticks),
            cores(last_.other_ticks, now.other_ticks), count, busy, over_half,
-           each.empty() ? "none" : each.c_str());
+           each.empty() ? "none" : each.c_str(), read_ms);
   }
   before_ = last_;
   last_ = now;
@@ -380,14 +395,16 @@ void TimeLog::StopLine(double now_ms, double arrival_ms, uint64_t last_frame) {
   // old, so the percents are of a time.
   const Sample& base = (now_ms - last_.ms < 2000.0 && before_.ms >= 0.0) ? before_ : last_;
   const double seconds = (now.ms - base.ms) / 1000.0;
-  // The threads of the game, at most 24 (a line of the log has 2048
-  // characters at most).
-  const std::vector<ps::Load> loads = ps::Top(Loads(base, now), 64);
-  int listed = 0;
+  // The threads of the game alone, then the first 24 (a line of the log has
+  // 2048 characters at most).
+  std::vector<ps::Load> game;
+  for (const ps::Load& l : Loads(base, now)) {
+    if (l.game) game.push_back(l);
+  }
+  const size_t count = game.size();
+  const std::vector<ps::Load> loads = ps::Top(game, 24);
   std::string list;
   for (const ps::Load& l : loads) {
-    if (!l.game || listed >= 24) continue;
-    ++listed;
     char part[160];
     snprintf(part, sizeof(part), "%s%s %d%s %c %.1f (%.1f + %.1f) core %d",
              list.empty() ? "" : ", ", l.now.name.c_str(), l.now.id,
@@ -399,9 +416,10 @@ void TimeLog::StopLine(double now_ms, double arrival_ms, uint64_t last_frame) {
   }
   AppLog("time         : no new frame of the game came to the reader for %.1f s (the newest "
          "frame that the app played is frame %llu). The threads of the game in the last "
-         "%.1f s, the state and the percent of one core (user + system): %s",
+         "%.1f s, the state and the percent of one core (user + system), the first %zu "
+         "of %zu: %s",
          (now_ms - arrival_ms) / 1000.0, static_cast<unsigned long long>(last_frame), seconds,
-         list.empty() ? "none (no process of the game)" : list.c_str());
+         loads.size(), count, list.empty() ? "none (no process of the game)" : list.c_str());
 }
 
 void TimeLog::Tick(double now_ms, uint64_t arrived, double arrival_ms, uint64_t last_frame) {

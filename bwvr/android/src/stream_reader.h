@@ -46,7 +46,9 @@ class StreamReader {
   size_t LimitBytes() const { return whole_frames_ > 0 ? queue_max_bytes_ : 0; }
   // THE TIME LOG (time_log.h): the frames that the thread took from the ring
   // since its start, and the clock (CLOCK_MONOTONIC, ms) at the newest one.
-  // They do not wait for the thread of the session.
+  // They do not wait for the thread of the session. Only after SetTimeLog
+  // (true), before Start: else they stay 0 and the thread reads no clock.
+  void SetTimeLog(bool on) { time_log_ = on; }
   uint64_t Arrived() const { return arrived_.load(std::memory_order_relaxed); }
   double LastArrivalMs() const { return last_arrival_ms_.load(std::memory_order_relaxed); }
 
@@ -74,6 +76,7 @@ class StreamReader {
   uint64_t takes_ = 0;  // the calls of TakeAll: the session takes frames
   size_t most_bytes_ = 0;
   pid_t feed_ = 0;
+  bool time_log_ = false;
   std::atomic<uint64_t> arrived_{0};
   std::atomic<double> last_arrival_ms_{0.0};
 };

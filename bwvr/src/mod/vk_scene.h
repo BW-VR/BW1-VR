@@ -207,6 +207,9 @@ struct VkSceneGpuTime {
   double fence_wait_most_ms;
 };
 void VkSceneTakeGpuTime(VkSceneGpuTime* out);
+// The counts of VkSceneTakeGpuTime add up only after a call with true (the
+// time log of the headset app). The mod never makes the call.
+void VkSceneSetGpuTake(bool on);
 // vk_black_check of bwvr.ini, backend=vulkan, a test aid: 1 (the default)
 // 16 by 16 points of each eye picture go to the CPU, and a black picture
 // gives a line of the log with what its walk drew. 0: no check.

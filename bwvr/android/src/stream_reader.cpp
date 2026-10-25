@@ -242,7 +242,7 @@ void StreamReader::Run() {
       used += len;
       ++frames;
       bytes += len;
-      {
+      if (time_log_) {
         timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
         last_arrival_ms_.store(now.tv_sec * 1000.0 + now.tv_nsec / 1e6,

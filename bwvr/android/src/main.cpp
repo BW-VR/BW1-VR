@@ -489,6 +489,7 @@ void StartLiveReader(App* app) {
   const size_t queue_bytes =
       app->live_whole > 0 ? static_cast<size_t>(queue_mb > 0 ? queue_mb : 0) << 20
                           : static_cast<size_t>(64u << 20);
+  app->live_reader.SetTimeLog(app->time.On());
   app->live_reader.Start(ring, app->live_whole, queue_bytes);
 }
 
@@ -1174,6 +1175,11 @@ void android_main(android_app* android) {
   AppLog("app          : the folder of the app is %s", app.folder.c_str());
 
   Load(&app);
+  // time_log=1 (the default): while the game runs, each 10 s the lines of the
+  // times (time_log.h). 0: no lines. Before the threads of Wine and of the
+  // paint start, so they get their names.
+  app.time.Start(app.ini.GetInt("bwvr", "time_log", 1) != 0);
+  TimeLogNameThread("bwvr main");
   // WINE: the thread unpacks the tree of the APK into the internal folder of
   // the app, makes the prefix and, with wine_probe=1, runs the test program
   // of the game folder. wine_setup=0: no Wine, as an APK with no Wine tree.
@@ -1219,11 +1225,7 @@ void android_main(android_app* android) {
   // from the runtime has a cap, the panel of a Quest 3 (2064 by 2208) with the
   // aspect of the runtime (eye_size.h). 0: the size of the runtime.
   app.xr.SetEyeSizeMax(app.ini.GetInt("bwvr", "eye_size_max", 1));
-  // time_log=1 (the default): while the game runs, each 10 s the lines of the
-  // times (time_log.h). 0: no lines.
-  app.time.Start(app.ini.GetInt("bwvr", "time_log", 1) != 0);
   app.xr.SetTimeLog(app.time.On());
-  TimeLogNameThread("bwvr main");
   // stream_projection=1 (the default): a picture of the renderer with the
   // values of the projection layer of the mod for its frame shows in a
   // projection layer. 0: each picture shows on the stereo screen.

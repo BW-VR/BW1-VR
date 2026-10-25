@@ -1651,8 +1651,9 @@ time log     : 10.0 s, 250 frames of the game (25.0 a second), 0 of them present
   in the next frame. So the parts of one frame can be longer than the frame,
   and its rest is then 0.
 
-The line costs some reads of the clock in a frame. `time_log=0`: no read of
-the clock and no line. There is no test key: the headset is tested through
+The line costs some reads of the clock in a frame: at each walk, at each
+present and around each write of the stream. `time_log=0`: no read of the
+clock for the log and no line. There is no test key: the headset is tested through
 `bwvr.ini`, and the line changes nothing in the game. The headset app has a
 time log of its own with the same key (`android.md`, "The time log of the
 app").

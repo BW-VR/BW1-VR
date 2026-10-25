@@ -2452,17 +2452,21 @@ the pictures of the game comes from that value: the app writes it as
 `settings_table.h`), and the swapchains of the projection layer, of the
 panel image and of the screen quad have the size of the picture of the
 renderer, which is the size of the render. A Quest 3 with the profile of
-the player asked for 4096 by 4291 at each start after the first start of
-a day, which asked for 1680 by 1760. `debug.oculus.textureWidth` and
-`textureHeight` were empty. The cause is not known. With no cap that gives
-a render of 4096 by 4096 (the most of `ScaleToPixels`), two swapchains of
-4096 by 4096 and a panel image of 4096 by 4096.
+the player can ask for 4096 by 4291 (and at other starts for 1680 by
+1760), with no value in `debug.oculus.textureWidth` and `textureHeight`.
+The cause is not known. With no cap that size gives a render of 4096 by
+4096 (the most of `ScaleToPixels`), two swapchains of 4096 by 4096 and a
+panel image of 4096 by 4096.
 
 **The cap** (`eye_size_max`, `eye_size.h`, `XrApp::MakeInstance`).
 `eye_size_max=1` (the default): the app takes the largest size with the
 aspect of the runtime that fits in the panel of a Quest 3, 2064 by 2208 for
 each eye. A size that fits stays as it is, and the cap never makes a size
-larger. 4096 by 4291 gives 2064 by 2162. `eye_size_max=0`: the size of the
+larger. 4096 by 4291 gives 2064 by 2162. Each headset gets this cap, not
+only a Quest 3: the app does not read the size of the panel of the
+headset. A headset with a panel larger than 2064 by 2208 gets a smaller
+size than its panel, and needs `eye_size_max=0` or a higher
+`resolution_pct`. `eye_size_max=0`: the size of the
 runtime, with no cap. The size after the cap goes to `headset_width` and
 `headset_height`, to the menu ("Resolution scale") and to the size of an
 eye in the slot of the input channel. `resolution_pct` is a percentage of
@@ -2540,12 +2544,16 @@ the mod").
    command buffer: a walk of the renderer (`VkSceneTakeGpuTime`), a command
    buffer of the app (`Gpu::busy`), a picture (the walks and the command
    buffers of the 10 s over the pictures), and the percent of the time that
-   the GPU worked for the app.
+   the GPU worked for the app. The timestamp at the start of a command
+   buffer of the app is at the bottom of the pipe, so it comes after the
+   walk before it on the queue, and the time of the walk is not counted two
+   times.
 4. **The threads** of the game process and of the app: the first 8 by
    their CPU time in the 10 s, each with its name, its id, the percent of
    one core (user and system), the core that it ran on last and its state.
    The app finds the game process in `/proc`: the process of the user of the
    app with the name `runblack.exe` (its parent is 1, "Play in the app").
+   The line of a stop lists the threads of the game alone, the first 24.
    **The main thread of the game** is the thread whose id is the id of the
    process, with the name `runblack.exe`. The log marks it "(the main
    thread)". In each window of the runs in the emulator it has the most
@@ -2558,8 +2566,10 @@ the mod").
 5. **The processes and the cores**: the CPU time of the game process, of the
    app and of the other processes of the user of the app (Wine) in cores,
    and the busy time of each core from `/proc/stat`, with the count of the
-   cores busy for half the time or more. When the app cannot read
-   `/proc/stat`, the log says so one time.
+   cores busy for half the time or more. A core with a count that went down
+   (a core that went off) is not in the line. When the app cannot read
+   `/proc/stat`, the log says so one time. The line ends with the time of
+   the read of `/proc` on the thread of the session.
 
 **The stop of the game.** When no new frame of the game came for 5 s, one
 line names each thread of the game with its state (R runs, S sleeps, D
@@ -2569,10 +2579,13 @@ last is frame N). The threads of the game ...". So a frame that does not
 end, with a thread at 100 percent in the kernel, shows in one line. A load
 of the game can also give the line.
 
-**The cost.** Some reads of the clock in a frame of the session, two
-timestamps in each command buffer of the app, and one read of `/proc` each
-10 s (about 30 small files). `time_log=0`: no line, no timestamp, no read of
-`/proc` and no name of a thread of the app. There is no test key.
+**The cost.** Some reads of the clock in a frame of the session and one in
+each frame that the reader takes, two timestamps in each command buffer of
+the app, and one read of `/proc` each 10 s on the thread of the session.
+`time_log=0`: no line, no timestamp, no read of the clock for the log, no
+read of `/proc` and no name of a thread of the app. The key is read before
+the threads of the app start, so each of them gets its name. There is no
+test key.
 
 **What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
 480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90`, 170
@@ -2598,12 +2611,9 @@ window. While the test runtime reads back a picture, it holds a frame of the
 session for some seconds: then a window has, for example, "563 in
 xrWaitFrame or xrEndFrame" and fewer pictures, while the reader still takes
 each frame of the game. In the emulator the game, the app and Wine use less
-than one core in all. No run of the emulator had a stop of the game, so the
-line of a stop came in no test with its last rule (the reader). With
-`-TimeLog 0` neither log has a line of the times, in both games. That run
-also had `profile_sample_outside=1000` (150 checks, 1 failed: the frames of
-the scene came at 1 to 2 a second, and the short press of the menu button
-in game 2 did not reach the mod, see "The hot code under Box64").
+than one core in all. The emulator gives no stop of the game, so no test
+shows the line of a stop. With `-TimeLog 0` neither log has a line of the
+times.
 
 **Not shown yet:** the lines in a headset: the time of the GPU of a Quest 3,
 the waits of the runtime of Meta, the threads under Box64, the load of the
@@ -2626,8 +2636,8 @@ not the address of the code that runs:
   emulator, and the context keeps the values of the last system call.
 - So a sample of a thread in a system call has the right place and a right
   stack (the callers of a wait), and a sample of a thread in the code of the
-  game has the place of its last system call. Both are in `ntdll.dll`, and
-  the report cannot tell them apart.
+  game has the place of its last system call. Both are in `ntdll.dll` or
+  `win32u.dll`, and the report cannot tell them apart.
 
 The options of Box64 (`docs/USAGE.md` of Box64 0.4.4):
 
@@ -2637,7 +2647,11 @@ The options of Box64 (`docs/USAGE.md` of Box64 0.4.4):
   not there either.
 - `BOX64_DYNAREC_LOG`, `BOX64_DYNAREC_DUMP` and `BOX64_DYNAREC_DUMP_RANGE`
   are in WowBox64. They log the translation of each block, not where the
-  time goes, and they cost much time.
+  time goes, and they cost time only when a block is translated. A dump of
+  the native addresses of the blocks with samples of the native PC
+  (`simpleperf`, if Meta Horizon OS has it) could map the hot ARM code to
+  x86 code with no patch. Not known: if the dump gives the native
+  addresses under WowBox64.
 - `BOX64_PROFILE` is a set of options (safe, fast), not a profiler.
 
 So no way gives the x86 address of the hot code under Box64 yet. What the
@@ -2646,10 +2660,14 @@ which work under Box64), the time log of the app (the CPU time of each
 thread of the game and of each core), and the samples of the system calls.
 Ways to try in a later step:
 
-- A patch of `wowbox64.dll` (our build of Box64, `build_box64.ps1 -Mingw`)
-  that writes the x86 address of each block at its start into the context of
-  the CPU area: then `profile_sample` gives the block that runs, at the cost
-  of one store at each block.
+- A patch of `BTCpuGetContext` of `wowbox64.dll` (our build of Box64,
+  `build_box64.ps1 -Mingw`): for a thread that is stopped in translated
+  code, it turns the native PC into the x86 `Eip` with
+  `FindDynablockFromNativeAddress` (`custommem.c`) and `getX64Address`
+  (`dynarec/dynablock.c`). Then `profile_sample` gives the x86 code that
+  runs, and a block that runs costs nothing more.
+- A patch that writes the x86 address of each block at its start into the
+  context of the CPU area, at the cost of one store at each block.
 - A patch that writes the perf map of the blocks under WoW64, with
   `simpleperf` of the headset for the samples of the ARM code. Not known: if
   `simpleperf` of Meta Horizon OS reads such a map.

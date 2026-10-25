@@ -341,6 +341,12 @@ function There([string]$Path) {
     [Console]::Out.WriteLine("NOT COPIED: adb gave no answer for $Path ($a)")
     exit 4
 }
+# The text of adb push on one line. adb writes its report to stderr, and
+# Out-String of a stderr record wraps the text at the width of the console,
+# so a long path can break the words "1 file pushed".
+function Push([string]$From, [string]$To) {
+    return (@(& $Adb @dev push $From $To 2>&1 | ForEach-Object { "$_" }) -join ' ').Trim()
+}
 if (-not (There "$dest/runblack.exe")) {
     Stop-Profile "the game folder of the app on $Serial has no runblack.exe. Copy the game first (push_game.ps1)" 4
 }
@@ -384,8 +390,8 @@ if ($batch.Count) { & $Adb @dev shell ($batch -join '; ') | Out-Null }
 $bad = 0
 foreach ($f in $files) {
     $rel = $f.Rel.Replace('\', '/')
-    $o = & $Adb @dev push $f.Path "$dest/$rel" 2>&1 | Out-String
-    if ($o -notmatch '1 file pushed') { $bad++; "FAULT $rel : $($o.Trim())" }
+    $o = Push $f.Path "$dest/$rel"
+    if ($o -notmatch '1 file pushed') { $bad++; "FAULT $rel : $o" }
 }
 if ($bad -gt 0) { Stop-Profile "$bad files did not go to the device. The app has no bwvr-profile.reg, so it imports nothing" 6 }
 # The same as emu_game_test.ps1 does for a test save: each one may read and
@@ -394,8 +400,8 @@ $mode = (& $Adb @dev shell "chmod -R a+rwX $(Sh "$dest/Profiles/$folder") 2>&1; 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("bwvr-profile-" + [Guid]::NewGuid().ToString('N') + '.reg')
 try {
     [IO.File]::WriteAllText($tmp, $regText, [Text.Encoding]::ASCII)
-    $o = & $Adb @dev push $tmp "$dest/bwvr-profile.reg" 2>&1 | Out-String
+    $o = Push $tmp "$dest/bwvr-profile.reg"
 } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-if ($o -notmatch '1 file pushed') { Stop-Profile "bwvr-profile.reg did not go to the device: $($o.Trim())" 6 }
+if ($o -notmatch '1 file pushed') { Stop-Profile "bwvr-profile.reg did not go to the device: $o" 6 }
 "{0:N0} s. chmod of the profile folder: $mode" -f ((Get-Date) - $t0).TotalSeconds
 "COPIED. The profile $profileName ($folder, $($files.Count) files and bwvr-profile.reg) is in the game folder of the app on $Serial. Play imports its values"

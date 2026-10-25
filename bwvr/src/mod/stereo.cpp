@@ -72,6 +72,7 @@
 #include "d3d7_thread.h"
 #include "fast_transform.h"
 #include "thread_wait.h"
+#include "time_log.h"
 #include "ddraw_census.h"
 #include "foveation_math.h"
 #include "vk_scene.h"
@@ -1771,6 +1772,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     if (raw_time != nullptr) *raw_time = (eye == 0) ? saved_raw_time : 0;
 
     QueryPerformanceCounter(&t2);
+    TimeLogWalk(true);
     SceneSampleWalk(true);
     HandDirectPassBegin(eye);
     OverlayPassEye(eye);
@@ -1822,6 +1824,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     HandDirectPassDone(eye);
     SceneSampleWalk(false);
     QueryPerformanceCounter(&t3);
+    TimeLogWalk(false);
     // This eye pass is over. Nothing after it may put its camera back.
     g_eye_placement = kEyeNotPlaced;
     g_pass_eye = -1;

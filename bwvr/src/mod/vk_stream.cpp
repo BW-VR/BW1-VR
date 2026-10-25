@@ -17,6 +17,7 @@
 #include "screen_quad_math.h"
 #include "stream_ring.h"
 #include "stream_split.h"
+#include "time_log.h"
 #include "ui_panel.h"
 #include "vk_prim_math.h"
 #include "vk_scene.h"
@@ -402,7 +403,10 @@ void Deliver() {
   const size_t n = b.size() - 8;
   if (g_unit_record) g_record.insert(g_record.end(), unit, unit + n);
   if (g_unit_live && g_live.reader) {
+    LARGE_INTEGER start;
+    QueryPerformanceCounter(&start);
     LivePut(g_unit_frame, unit, static_cast<uint32_t>(n), g_unit_keep);
+    TimeLogStream(MsSince(start));
   }
 }
 

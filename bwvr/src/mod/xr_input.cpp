@@ -9,6 +9,7 @@
 #include "../common/input_channel.h"
 #include "frame_pace_math.h"
 #include "thread_wait.h"
+#include "time_log.h"
 #include "xr_input.h"
 #include "xr_input_math.h"
 #include "view_layer_math.h"
@@ -350,6 +351,7 @@ bool XrInputPace() {
   }
   fp::End(&g_pace, now);
   const double ms = (now - start) / 1e6;
+  TimeLogPace(ms);
   ++g_pace_waits;
   g_pace_ms += ms;
   if (ms > g_pace_ms_most) g_pace_ms_most = ms;

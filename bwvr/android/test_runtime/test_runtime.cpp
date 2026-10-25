@@ -70,6 +70,11 @@
 // rate, and the app gets XrEventDataDisplayRefreshRateChangedFB. A request
 // for 0 goes back to 72 Hz.
 //
+// THE SIZE OF THE EYES. The runtime asks for 2064 by 2208 for each eye, the
+// panel of a Quest 3. The file eyes.txt in the folder of the runtime can give
+// another size (for example "4096 4291", the size that a Quest 3 asked for).
+// The largest size of an eye stays 4096 by 4096.
+//
 // <frame> is a frame of the script. The script counts the frames of the
 // session, but it stops at a hold, so after a hold the frames of the script
 // are behind the frames of the session. A line of the report has the frame
@@ -319,6 +324,9 @@ std::vector<XrSessionState> g_events;
 // a change that the app did not poll yet (from, to).
 bool g_rates_read = false;
 std::vector<float> g_rates;
+bool g_eyes_read = false;
+uint32_t g_eye_width = 2064;
+uint32_t g_eye_height = 2208;
 bool g_rate_enabled = false;  // the instance has XR_FB_display_refresh_rate
 constexpr float kDefaultRate = 72.0f;
 float g_rate = kDefaultRate;
@@ -765,6 +773,24 @@ int HandOf(Instance* in, XrPath subaction) {
 XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name,
                                         PFN_xrVoidFunction* function);
 
+// The size of eyes.txt, or 2064 by 2208.
+void ReadEyes() {
+  if (g_eyes_read) return;
+  g_eyes_read = true;
+  char path[256];
+  snprintf(path, sizeof(path), "%s/eyes.txt", kFolder);
+  FILE* f = fopen(path, "r");
+  if (f != nullptr) {
+    unsigned w = 0, h = 0;
+    if (fscanf(f, "%u %u", &w, &h) == 2 && w > 0 && h > 0) {
+      g_eye_width = w;
+      g_eye_height = h;
+    }
+    fclose(f);
+  }
+  Report("note the eyes ask for %ux%u", g_eye_width, g_eye_height);
+}
+
 // The rates of rates.txt, or 72, 80, 90 and 120 Hz.
 void ReadRates() {
   if (g_rates_read) return;
@@ -906,10 +932,11 @@ XrResult XRAPI_CALL EnumerateViewConfigurationViews(XrInstance, XrSystemId, XrVi
                                                     XrViewConfigurationView* out) {
   *count = 2;
   if (capacity == 0) return XR_SUCCESS;
+  ReadEyes();
   for (uint32_t i = 0; i < 2 && i < capacity; ++i) {
-    // The numbers of a Quest 3.
-    out[i].recommendedImageRectWidth = 2064;
-    out[i].recommendedImageRectHeight = 2208;
+    // The numbers of a Quest 3, or the size of eyes.txt.
+    out[i].recommendedImageRectWidth = g_eye_width;
+    out[i].recommendedImageRectHeight = g_eye_height;
     out[i].maxImageRectWidth = 4096;
     out[i].maxImageRectHeight = 4096;
     out[i].recommendedSwapchainSampleCount = 1;

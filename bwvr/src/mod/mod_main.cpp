@@ -30,6 +30,7 @@
 #include "d3d7_thread.h"
 #include "fast_transform.h"
 #include "thread_wait.h"
+#include "time_log.h"
 #include "ddraw_census.h"
 #include "vk_core.h"
 #include "vk_scene.h"
@@ -380,6 +381,7 @@ int g_anisotropy = 16;
 int g_profile = 0;
 bool g_headless_grab = false;
 bool g_skip_desktop = true;
+bool g_time_log = true;  // time_log
 int g_capture_seconds = 0;
 // Things inside Process3dEngine that step state rather than draw. They
 // must run once a frame, not once an eye. See pass_guard.cpp.
@@ -1553,6 +1555,10 @@ void ReadSettings() {
   // frame of the session of the app. 0: no wait.
   g_xr_input.pace =
       GetPrivateProfileIntA("bwvr", "vk_pace", 0, path) != 0 ? 1 : 0;
+  // THE TIME LOG (time_log.h, docs/backend.md, "The time log of the mod").
+  // time_log=1: each 10 s one line with the parts of a frame of the game. 0:
+  // no line.
+  g_time_log = GetPrivateProfileIntA("bwvr", "time_log", 1, path) != 0;
   if (g_xr_input.mode != 0) g_stereo_headless = true;
   // THE QUAD LAYERS FOR THE HEADSET APP (xr_layers.h, docs/android.md, "The
   // quad layers"). xr_input_layers=1: with xr_input=1 the interface goes as
@@ -1900,6 +1906,7 @@ void StartVrStep() {
     StereoSetFakeFov(g_fake_head_fov);
     // The input channel takes the place of the session and of the fake
     // sources, at the same places.
+    TimeLogSetOn(g_time_log);
     XrInputSetOptions(g_xr_input);
     XrInputStart(g_dir);
     XrLayersSetOptions(g_xr_layers, XrInputOn());
@@ -2472,6 +2479,8 @@ void __cdecl h_FinishFrame() {
   // FinishFrame reads the pointer of the game.
   if (!in_pass && !IntroInPass()) ControllersScreenApply();
   o_FinishFrame();
+  // The present of the game was in this FinishFrame (time_log.h).
+  TimeLogPresent();
   UiBarsEnd(bars);
   ++g_frame;
   // The next reader of the input channel reads a new slot.

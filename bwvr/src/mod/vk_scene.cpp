@@ -410,6 +410,8 @@ uint64_t g_reused = 0;           // for the report
 uint64_t g_ring_stages = 0;
 uint64_t g_fence_waits = 0;      // walks that waited for the fence of their slot
 uint64_t g_fence_wait_ticks = 0;
+// The same times for VkSceneTakeGpuTime, with the most of one walk.
+VkSceneGpuTime g_take = {};
 // The descriptor sets: in use now, and made since the start, against the
 // room of the pool (kMaxTextures * 8).
 int64_t g_sets_live = 0;
@@ -2791,6 +2793,15 @@ void BeginOnWorker(const void* data) {
     QueryPerformanceCounter(&t1);
     ++g_fence_waits;
     g_fence_wait_ticks += static_cast<uint64_t>(t1.QuadPart - t0.QuadPart);
+    {
+      LARGE_INTEGER hz;
+      QueryPerformanceFrequency(&hz);
+      const double ms = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 /
+                        static_cast<double>(hz.QuadPart);
+      ++g_take.fence_waits;
+      g_take.fence_wait_ms += ms;
+      if (ms > g_take.fence_wait_most_ms) g_take.fence_wait_most_ms = ms;
+    }
   }
   BlackCheckRead(s);
   f.vkResetFences(device, 1, &s.fence);
@@ -2812,6 +2823,10 @@ void BeginOnWorker(const void* data) {
       if (static_cast<double>(ticks) * vk::Get().timestamp_ns < 1e8) {
         g_gpu_ticks += ticks;
         ++g_gpu_walks;
+        const double ms = static_cast<double>(ticks) * vk::Get().timestamp_ns * 1e-6;
+        ++g_take.walks;
+        g_take.ms += ms;
+        if (ms > g_take.most_ms) g_take.most_ms = ms;
       } else {
         if (g_gpu_odd_said < 4) {
           ++g_gpu_odd_said;
@@ -4395,6 +4410,11 @@ bool VkSceneLastPicture(uint64_t* image, uint32_t* layer, uint32_t* width,
   *width = g_last_width;
   *height = g_last_height;
   return true;
+}
+
+void VkSceneTakeGpuTime(VkSceneGpuTime* out) {
+  *out = g_take;
+  g_take = VkSceneGpuTime();
 }
 
 void VkSceneCounts(uint64_t* walks, uint64_t* draws, uint64_t* clears,

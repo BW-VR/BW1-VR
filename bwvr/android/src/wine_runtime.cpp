@@ -237,6 +237,7 @@ bool WineRuntime::PutModFiles() {
 }
 
 void WineRuntime::RunGame(Game game) {
+  TimeLogNameThread("bwvr game");
   if (!PutModFiles()) {
     EndGame(-1, "the files of the mod are not in the prefix");
     return;
@@ -330,6 +331,7 @@ void WineRuntime::RunGame(Game game) {
 }
 
 void WineRuntime::Run() {
+  TimeLogNameThread("bwvr wine");
   bool found = false;
   const std::string apk_id = wine_rules::Trim(ReadAsset(assets_, "wine/" + abi_ + ".id", &found));
   if (!found || apk_id.empty()) {

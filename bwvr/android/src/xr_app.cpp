@@ -1,12 +1,15 @@
 #include "xr_app.h"
 
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <mutex>
 
 #include "../../src/mod/controller_math.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "app_log.h"
+#include "eye_size.h"
 
 namespace {
 
@@ -37,6 +40,12 @@ T Proc(XrInstance instance, const char* name) {
 std::recursive_mutex g_queue_lock;
 void LockQueue() { g_queue_lock.lock(); }
 void UnlockQueue() { g_queue_lock.unlock(); }
+
+double ClockMs() {
+  timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
 
 XrPath Path(XrInstance instance, const char* text) {
   XrPath path = XR_NULL_PATH;
@@ -146,10 +155,32 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
                                     XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
                                     views, &views, view.data());
   if (views > 0) {
-    eye_width_ = view[0].recommendedImageRectWidth;
-    eye_height_ = view[0].recommendedImageRectHeight;
-    AppLog("xr           : the headset asks for %u by %u for each eye",
-           eye_width_, eye_height_);
+    // THE CAP OF THE SIZE OF THE EYE PICTURES (eye_size_max, eye_size.h).
+    const uint32_t w = view[0].recommendedImageRectWidth;
+    const uint32_t h = view[0].recommendedImageRectHeight;
+    const eye_size::Size size = eye_size::FromKey(eye_size_max_, w, h);
+    eye_width_ = size.width;
+    eye_height_ = size.height;
+    char cap[200];
+    if (eye_size_max_ == 0) {
+      snprintf(cap, sizeof(cap), "eye_size_max=0: no cap, the app takes %u by %u",
+               eye_width_, eye_height_);
+    } else if (size.capped) {
+      snprintf(cap, sizeof(cap),
+               "eye_size_max=%d: the app takes %u by %u, the panel of a Quest 3 (%u by "
+               "%u) with the aspect of the headset",
+               eye_size_max_, eye_width_, eye_height_, eye_size::kPanelWidth,
+               eye_size::kPanelHeight);
+    } else {
+      snprintf(cap, sizeof(cap),
+               "eye_size_max=%d: the size fits in the panel of a Quest 3 (%u by %u), so "
+               "the app takes %u by %u",
+               eye_size_max_, eye_size::kPanelWidth, eye_size::kPanelHeight, eye_width_,
+               eye_height_);
+    }
+    AppLog("xr           : the headset asks for %u by %u for each eye (at most %u by %u). "
+           "%s",
+           w, h, view[0].maxImageRectWidth, view[0].maxImageRectHeight, cap);
   }
 
   uint32_t modes = 0;
@@ -330,7 +361,9 @@ bool XrApp::MakeVulkan() {
     AppLog("xr           : the Vulkan device gave %d", static_cast<int>(vr));
     return false;
   }
-  return GpuFinish(&gpu_);
+  if (!GpuFinish(&gpu_)) return false;
+  if (time_log_) GpuTimingStart(&gpu_);
+  return true;
 }
 
 bool XrApp::MakeSession() {
@@ -744,7 +777,14 @@ void XrApp::PollEvents(bool* quit) {
 bool XrApp::BeginFrame(XrInput* input) {
   XrFrameWaitInfo wait = {XR_TYPE_FRAME_WAIT_INFO};
   frame_ = {XR_TYPE_FRAME_STATE};
+  const double wait_start = time_log_ ? ClockMs() : 0.0;
+  wait_end_ms_ = -1.0;
   if (!Ok(xrWaitFrame(session_, &wait, &frame_), "xrWaitFrame")) return false;
+  if (time_log_) {
+    wait_end_ms_ = ClockMs();
+    last_wait_ms_ = wait_end_ms_ - wait_start;
+    times_.wait.Add(last_wait_ms_);
+  }
   XrFrameBeginInfo begin = {XR_TYPE_FRAME_BEGIN_INFO};
   if (!Ok(xrBeginFrame(session_, &begin), "xrBeginFrame")) return false;
 
@@ -1205,7 +1245,22 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   end.environmentBlendMode = blend_;
   end.layerCount = count;
   end.layers = layers;
+  const double end_start = time_log_ ? ClockMs() : 0.0;
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
+  if (time_log_ && wait_end_ms_ >= 0.0) {
+    const double now = ClockMs();
+    times_.end.Add(now - end_start);
+    times_.work.Add(now - wait_end_ms_);
+  }
+}
+
+void XrApp::TakeTimes(FrameTimes* out) {
+  *out = times_;
+  out->fence_wait = gpu_.fence_wait;
+  out->busy = gpu_.busy;
+  times_ = FrameTimes();
+  gpu_.fence_wait.Reset();
+  gpu_.busy.Reset();
 }
 
 void XrApp::SetKeyboardPixels(const std::vector<uint8_t>& rgba, uint32_t width,

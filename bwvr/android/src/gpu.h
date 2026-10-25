@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <vulkan/vulkan.h>
 
+#include "../../src/mod/time_log_math.h"
+
 struct Gpu {
   VkInstance instance = VK_NULL_HANDLE;
   VkPhysicalDevice physical = VK_NULL_HANDLE;
@@ -19,10 +21,25 @@ struct Gpu {
   VkCommandBuffer cmd = VK_NULL_HANDLE;
   VkFence fence = VK_NULL_HANDLE;
   VkPhysicalDeviceMemoryProperties memory = {};
+  // THE TIME LOG (time_log=1, GpuTimingStart): the wait of GpuBegin for the
+  // fence of the last submit, and the time of the GPU of each command buffer
+  // (a timestamp at its start and at its end). The caller takes the stats and
+  // sets them back.
+  VkQueryPool query = VK_NULL_HANDLE;
+  bool query_written = false;
+  double timestamp_ns = 0.0;  // the ns of a tick of a timestamp
+  uint64_t timestamp_mask = 0;  // the valid bits of a timestamp of the queue
+  bool timing = false;
+  time_log_math::Stat fence_wait;  // ms of the waits of GpuBegin
+  time_log_math::Stat busy;        // ms of the GPU of each command buffer
 };
 
 // The pool, the command buffer and the fence of a Gpu with a device.
 bool GpuFinish(Gpu* gpu);
+// THE TIME LOG: after GpuFinish, the timestamps of each command buffer and
+// the time of the waits of GpuBegin. False (with a line of the log) when the
+// queue has no timestamps: then only the waits count.
+bool GpuTimingStart(Gpu* gpu);
 // Destroys what GpuFinish made. The device and the instance stay.
 void GpuRelease(Gpu* gpu);
 

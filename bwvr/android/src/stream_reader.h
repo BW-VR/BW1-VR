@@ -44,6 +44,11 @@ class StreamReader {
   // The most bytes that waited in the queue, and the limit (0: none).
   size_t MostBytes();
   size_t LimitBytes() const { return whole_frames_ > 0 ? queue_max_bytes_ : 0; }
+  // THE TIME LOG (time_log.h): the frames that the thread took from the ring
+  // since its start, and the clock (CLOCK_MONOTONIC, ms) at the newest one.
+  // They do not wait for the thread of the session.
+  uint64_t Arrived() const { return arrived_.load(std::memory_order_relaxed); }
+  double LastArrivalMs() const { return last_arrival_ms_.load(std::memory_order_relaxed); }
 
   // A TEST AID (stream_live_feed=1): a child process writes the frames of
   // the stream file feed into the ring as the mod does, so the reader takes
@@ -69,4 +74,6 @@ class StreamReader {
   uint64_t takes_ = 0;  // the calls of TakeAll: the session takes frames
   size_t most_bytes_ = 0;
   pid_t feed_ = 0;
+  std::atomic<uint64_t> arrived_{0};
+  std::atomic<double> last_arrival_ms_{0.0};
 };

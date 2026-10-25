@@ -115,6 +115,7 @@ bool MenuPainter::TakeKeyboard(std::vector<uint8_t>* pixels) {
 void MenuPainter::Run(JavaVM* vm) {
   JNIEnv* env = nullptr;
   vm->AttachCurrentThread(&env, nullptr);
+  TimeLogNameThread("bwvr painter");
   Canvas2D canvas;
   Canvas2D cursor;
   Canvas2D keyboard;

@@ -62,6 +62,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/render_thread.cpp`, `render_thread_ring.h` | The hooks of the Direct3D 9 device, and the render thread (`render_thread`) |
 | `src/mod/fast_transform.cpp`, `fast_transform_math.h` | The two vertex loops of the engine with SSE (`fast_transform`) |
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`) |
+| `src/mod/time_log.cpp`, `time_log_math.h` | The time log: each 10 s the parts of a frame of the game (`time_log`). The math checks are in `test/controller_math/time_log_checks.h` |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`) |
 | `src/mod/crash_report.cpp` | The report of a crash in the log, and the dump `bwvr-crash.dmp` (`crash_report`) |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
@@ -1613,6 +1614,48 @@ multisampling stayed at 4x in that run: `AntiAliasing = 0` in
 walks, Direct3D 9 and the kernel are about 2.9 ms of a frame over the island
 with DXVK, against about 6 ms for the driver of AMD with one walk. "DXVK under
 dxwrapper" has how the mod uses it.
+
+**Under Box64.** In the headset app the 32 bit code runs in `wowbox64.dll`
+of Box64, and a sample does not give the x86 address of the code that runs:
+see `android.md`, "The hot code under Box64".
+
+### The time log of the mod
+
+`time_log=1` (the default, `time_log.cpp`, the rules in `time_log_math.h`)
+writes one line each 10 s to `bwvr.log`, with the mean and the most of the
+parts of a frame of the game in those 10 s:
+
+```
+time log     : 10.0 s, 250 frames of the game (25.0 a second), 0 of them presented in a scene walk. A frame in ms, the mean and the most: the frame 40.01 and 43.21, the scene walk 0.00 and 0.00, the write of the stream 0.19 and 0.96, the wait of the pace 0.00 and 0.00, the rest 39.82 and 43.07
+```
+
+- **The frame**: the time from one present of the game to the next, the end
+  of one `FinishFrame` of the game to the end of the next (`h_FinishFrame`,
+  `mod_main.cpp`). With `one_walk=1` a frame of the scene has one
+  `FinishFrame`, in its walk, so these frames are the frames of the live
+  stream that the headset app counts. With two walks a frame of the scene
+  has two presents. A frame with no scene (a logo, a video, the front end, a
+  dialog box) has one. "presented in a scene walk" counts the presents in a
+  walk.
+- **The scene walk**: the eye passes of `stereo.cpp`. A present in a walk
+  splits it: the part before the present is in the frame that ends there,
+  the part after it is in the next frame.
+- **The write of the stream**: the copy of a frame into the ring of the
+  live stream, with its wait for room (`LivePut` of `vk_stream.cpp`). The
+  records of a frame collect during its walk, so their time is in the walk.
+- **The wait of the pace**: the wait of `vk_pace=1` (`XrInputPace`,
+  `xr_input.cpp`, `android.md`, "The pace of the frames").
+- **The rest**: the frame less these parts, not below 0: the logic of the
+  game, the frame work of the mod and each other call. The write of a frame
+  of the scene and the end of its walk come after its present, so they are
+  in the next frame. So the parts of one frame can be longer than the frame,
+  and its rest is then 0.
+
+The line costs some reads of the clock in a frame. `time_log=0`: no read of
+the clock and no line. There is no test key: the headset is tested through
+`bwvr.ini`, and the line changes nothing in the game. The headset app has a
+time log of its own with the same key (`android.md`, "The time log of the
+app").
 
 ### Draw calls with one state
 
@@ -5320,6 +5363,7 @@ keys that the launcher sets.
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
+| `time_log` | 1 | 1: each 10 s one line in `bwvr.log` with the mean and the most of the frame, the scene walk, the write of the live stream, the wait of the pace and the rest. 0: no line. There is no test key. See "The time log of the mod" |
 | `one_walk_marks`, `one_walk_marks_test_frame` | 1, 0 | See "The cards and the marks of the mod" |
 | `skip_desktop_present` | 1 | See "The copy to the monitor" |
 | `blt_texture_copy` | 1 | 1: the mod makes a copy with a texture and no stretch itself. 0: each copy goes to dxwrapper. See "The copy to the monitor" |

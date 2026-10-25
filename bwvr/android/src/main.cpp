@@ -47,6 +47,7 @@
 #include "../../src/mod/vk_scene.h"
 #include "scene_player.h"
 #include "stream_reader.h"
+#include "time_log.h"
 #include "wine_runtime.h"
 #include "xr_app.h"
 
@@ -157,6 +158,8 @@ struct App {
   // THE DISPLAY RATE (display_hz): the value of the row at the last request
   // to the runtime. 0: no request yet, or a request for no rate.
   int display_asked = 0;
+  // THE TIME LOG (time_log=1, time_log.h).
+  TimeLog time;
 };
 
 // The renderer of the mod takes one device in a process (see android_main).
@@ -403,6 +406,7 @@ void PlayLive(App* app) {
   if (ms > app->live_play_most) app->live_play_most = ms;
   ++app->live_pictures;
   app->live_last_ms = NowMs();
+  if (app->game_on) app->time.Batch(app->live_last_ms, n, ms, app->xr.LastWaitMs());
   ShowPicture(app);
   GameFrames(app);
 }
@@ -659,6 +663,7 @@ void Play(App* app, bool new_game) {
   app->play_clock = ClockNow();
   app->first_frame = false;
   app->game_on = true;
+  app->time.GameStarts(app->play_ms);
   app->menu.SetGameRunning(true);
   app->menu_over_game = true;
   ShowMenuOverGame(app, false);
@@ -706,6 +711,7 @@ void GameTick(App* app) {
   std::string why;
   if (app->wine.State(&code, &why) != WineRuntime::GameState::kEnded) return;
   app->game_on = false;
+  app->time.GameEnds();
   app->menu.SetGameRunning(false);
   ShowMenuOverGame(app, true);
   // The last picture of the game goes out of the layers.
@@ -1209,6 +1215,15 @@ void android_main(android_app* android) {
   }
 
   app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
+  // eye_size_max=1 (the default): the size of the eyes that the app takes
+  // from the runtime has a cap, the panel of a Quest 3 (2064 by 2208) with the
+  // aspect of the runtime (eye_size.h). 0: the size of the runtime.
+  app.xr.SetEyeSizeMax(app.ini.GetInt("bwvr", "eye_size_max", 1));
+  // time_log=1 (the default): while the game runs, each 10 s the lines of the
+  // times (time_log.h). 0: no lines.
+  app.time.Start(app.ini.GetInt("bwvr", "time_log", 1) != 0);
+  app.xr.SetTimeLog(app.time.On());
+  TimeLogNameThread("bwvr main");
   // stream_projection=1 (the default): a picture of the renderer with the
   // values of the projection layer of the mod for its frame shows in a
   // projection layer. 0: each picture shows on the stereo screen.
@@ -1396,6 +1411,17 @@ void android_main(android_app* android) {
       Paint(&app);
       app.xr.EndFrame(quad.center, menu_size, show_cursor, cursor,
                       kCursorMeters);
+      // THE TIME LOG of this frame of the session.
+      if (app.time.On()) {
+        XrApp::FrameTimes times;
+        app.xr.TakeTimes(&times);
+        if (app.game_on) {
+          const double now = NowMs();
+          app.time.SessionFrame(now, times);
+          app.time.Tick(now, app.live_reader.Arrived(),
+                        app.first_frame ? app.live_reader.LastArrivalMs() : 0.0, app.live_last);
+        }
+      }
     } else {
       // With no session the loop runs each 5 ms for the live stream.
       if (app.live) PlayLive(&app);

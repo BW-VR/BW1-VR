@@ -75,6 +75,16 @@ Summary:
   stream and takes the head and the hands from the input channel. The menu
   button shows the menu over the game with "Quit game" (see "Play in the
   app").
+- **The size of the eye pictures** has a cap: the panel of a Quest 3, 2064
+  by 2208, with the aspect of the runtime (`eye_size_max=1`). So a runtime
+  that asks for 4096 by 4291 does not make the render, the swapchains and
+  the panel image 4096 by 4096 (see "The size of the eye pictures").
+- **The time log.** While the game runs, the app and the mod log each 10 s
+  where the time of a frame goes: the frames and the pictures, the CPU and
+  the GPU, each thread of the game and of the app, and each core
+  (`time_log=1`, see "The time log of the app"). Under Box64 no way gives
+  the x86 address of the hot code of the game yet (see "The hot code under
+  Box64").
 
 ## Source files of this area
 
@@ -142,6 +152,10 @@ Summary:
 | `android/src/play_rules.h` | The rules of "Play": the keys of a run, the files of the mod, the registry of the game, the environment and the command line of the game, the input of the mod while the menu shows over the game. No Android code |
 | `test/controller_math/play_rules_checks.h` | The math checks of `play_rules.h` and of "Quit game" in the menu |
 | `tools/android/emu_game_test.ps1` | The game from the menu of the app in the Android emulator, with the test runtime |
+| `android/src/eye_size.h` | The cap of the size of the eyes that the app takes from the runtime (`eye_size_max`). No Android code |
+| `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
+| `src/mod/time_log.cpp`, `src/mod/time_log_math.h` | The time log of the mod, and the stats and the rules that the app uses too. No Windows code in the header |
+| `test/controller_math/time_log_checks.h` | The math checks of the cap, of the lines of `/proc` and of the parts of a frame |
 
 ## Build the APK
 
@@ -290,9 +304,10 @@ registry of the game, not in the ini: `Menu::RenderSize` gives `ScreenW` and
 `ScreenH` for it.
 
 At each start in a headset the app writes `headset_width` and
-`headset_height` (what the headset asks for, for each eye) to `bwvr.ini`, as
-the mod does on the PC. So the size of the render on the row "Resolution
-scale" fits the headset.
+`headset_height` (what the headset asks for, for each eye, after the cap of
+`eye_size_max`, see "The size of the eye pictures") to `bwvr.ini`, as the
+mod does on the PC. So the size of the render on the row "Resolution scale"
+fits the headset.
 
 **The controls in the headset.** Point at a row with a controller: the row
 gets the highlight and the controller gives a short pulse. The trigger
@@ -413,9 +428,10 @@ that runs ends with it.
 the mod, the end of `reg import`, the command line, the first frame of the
 game and its time after "Play", the frame rate of the game each 10 s (from
 the frame numbers of the mod in the live stream), the menu over the game,
-Quit game, and the exit code. The log of the mod is `bwvr.log` in the game
-folder, as on the PC, and `wine.log` in the folder of the app has the
-output of Wine.
+Quit game, and the exit code. With `time_log=1` the lines `time` each 10 s
+say where the time of a frame goes ("The time log of the app"). The log of
+the mod is `bwvr.log` in the game folder, as on the PC, and `wine.log` in
+the folder of the app has the output of Wine.
 
 **The test in the emulator** (`emu_game_test.ps1`). The AVD `bwvr_xr_test`
 with the test runtime (a head that stands still), `-gpu host` and 4096 MB.
@@ -958,6 +974,10 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    with no walks, the rules of `SendCard`, of a panel quad, of the walls and
    of the columns of the cut scene window, and the order of the layers of
    `BuildFrame`), and the screens with no scene (`screen_quad_checks.h`),
+   and the time log (`time_log_checks.h`: the cap of the size of the eyes
+   and the render from it, the lines of `/proc/<pid>/task/<tid>/stat` and
+   of `/proc/stat`, the first 8 threads, the parts of a frame of the mod and
+   the cause of a frame that did not show),
    and the rules of Wine (`wine_rules_checks.h`: the DLLs
    that stay out, the paths of each ABI, the build id, the environment of a
    program, the seed of `user.reg`, the marker of the prefix and the copy
@@ -2421,6 +2441,230 @@ does not list the extension.
 power and the heat of a Quest 3 at each rate, and the frames of the game
 in Wine under Box64 at each rate. A runtime with no extension on a real
 headset (the Steam Frame).
+
+## The size of the eye pictures
+
+The runtime gives the size of an eye that it asks for
+(`recommendedImageRectWidth` and `recommendedImageRectHeight`). Each size of
+the pictures of the game comes from that value: the app writes it as
+`headset_width` and `headset_height`, the render of the game is
+`resolution_pct` of its larger side (`Menu::RenderSize`, `ScaleToPixels` of
+`settings_table.h`), and the swapchains of the projection layer, of the
+panel image and of the screen quad have the size of the picture of the
+renderer, which is the size of the render. A Quest 3 with the profile of
+the player asked for 4096 by 4291 at each start after the first start of
+a day, which asked for 1680 by 1760. `debug.oculus.textureWidth` and
+`textureHeight` were empty. The cause is not known. With no cap that gives
+a render of 4096 by 4096 (the most of `ScaleToPixels`), two swapchains of
+4096 by 4096 and a panel image of 4096 by 4096.
+
+**The cap** (`eye_size_max`, `eye_size.h`, `XrApp::MakeInstance`).
+`eye_size_max=1` (the default): the app takes the largest size with the
+aspect of the runtime that fits in the panel of a Quest 3, 2064 by 2208 for
+each eye. A size that fits stays as it is, and the cap never makes a size
+larger. 4096 by 4291 gives 2064 by 2162. `eye_size_max=0`: the size of the
+runtime, with no cap. The size after the cap goes to `headset_width` and
+`headset_height`, to the menu ("Resolution scale") and to the size of an
+eye in the slot of the input channel. `resolution_pct` is a percentage of
+the size after the cap: 100 percent of 2064 by 2162 is a render of 2702 by
+2162 with one walk, 50 percent is 1350 by 1080. The key is not a row of
+`settings_table.h` and not a retired key, so a save keeps it. There is no
+test key: the app reads it at its start and has no hotkeys.
+
+**No second cap.** The swapchains of the projection layer (`MakeEyes`), of
+the panel image and of the screen quad have the size of the picture of the
+renderer, and the stereo screen has half of it. The picture has the size of
+the render of the game. So the cap of the size of the eyes caps each of
+them, and a cap of a swapchain would only make a picture of the render
+smaller. A render larger than the panel comes only from a `resolution_pct`
+above 100.
+
+**The log.** One line with the value of the runtime and the value after the
+cap:
+
+```
+xr           : the headset asks for 4096 by 4291 for each eye (at most 4096 by 4096). eye_size_max=1: the app takes 2064 by 2162, the panel of a Quest 3 (2064 by 2208) with the aspect of the headset
+```
+
+**The test runtime** asks for 2064 by 2208, or for the size in `eyes.txt`
+of its folder (`emu_game_test.ps1 -EyeSize 4096,4291`). `emu_game_test.ps1`
+checks the line of the log, `headset_width` and `headset_height` in
+`bwvr.ini`, the render of each game and its registry, the swapchains of the
+projection layer, of the panel image and of the screen quad, and that the
+runtime made no swapchain larger than the render or the menu.
+
+**What the emulator shows** (`emu_game_test.ps1 -ProfileFrom <a test
+profile of the emulator> -EyeSize 4096,4291 -PlaySeconds 60`, 168 checks, 0
+failed): the line of the log with 4096 by 4291 and 2064 by 2162,
+`headset_width=2064` and `headset_height=2162` in `bwvr.ini` at the start of
+each game, a render of 1350 by 1080 in both games (and `ScreenW`, `ScreenH`
+of the registry), the swapchains of the projection layer, of the panel
+image and of the screen quad of 1350 by 1080, and no swapchain larger than
+the menu (1600 by 1200). The first slot that the mod reads has "the headset
+asks for 2064 by 2162". With `-EyeSizeMax 0` (168 checks, 0 failed) the app
+takes 4096 by 4291, the render and the three swapchains are 2682 by 2146,
+and the slot has 4096 by 4291. With the size of the panel
+(`-EyeSize` not given) the render stays 1380 by 1104 (170 checks, 0 failed).
+The GPU of the emulator (the GPU of the PC) does not show what the size
+costs in a headset: a walk of the renderer in the test save took 0.23 ms
+with the cap and 0.60 ms with no cap.
+
+**Not shown yet:** the cap in a headset, and why the Quest 3 asks for 4096
+by 4291.
+
+## The time log of the app
+
+`time_log=1` (the default, `time_log.cpp`, the parse of `/proc` in
+`proc_stat.h`, the rules in `src/mod/time_log_math.h`). While the game runs,
+each 10 s the app writes five lines `time` to `bwvr-quest.log`. The mod
+writes a line of its own with the same key (`backend.md`, "The time log of
+the mod").
+
+1. **The frames.** The frames of the game a second (each frame that came
+   through the live stream), the pictures of the app a second, the frames
+   of the session a second, and why a frame of the game did not show. A
+   frame that a newer frame replaced before the app took it did not show,
+   because the app was still at the picture before. Of the time since that
+   picture the largest part gives the cause: the app waited for the GPU
+   (the fences of its copies and of the walks of the renderer), it waited
+   in `xrWaitFrame`, or its CPU worked (`CauseOf`). A frame of the session
+   with no new frame of the game shows the picture before again: no new
+   frame came.
+2. **The CPU of the app**, the mean and the most in ms: the play of a
+   picture (the records of a batch into the renderer), the wait in
+   `xrWaitFrame`, the time from the end of `xrWaitFrame` to the end of
+   `xrEndFrame`, a wait of a copy for the GPU (`GpuBegin` waits for the
+   fence of the last command buffer of the app), and a wait of a walk for
+   the GPU (the renderer waits for the fence of its slot).
+3. **The GPU** in ms, from timestamps at the start and at the end of each
+   command buffer: a walk of the renderer (`VkSceneTakeGpuTime`), a command
+   buffer of the app (`Gpu::busy`), a picture (the walks and the command
+   buffers of the 10 s over the pictures), and the percent of the time that
+   the GPU worked for the app.
+4. **The threads** of the game process and of the app: the first 8 by
+   their CPU time in the 10 s, each with its name, its id, the percent of
+   one core (user and system), the core that it ran on last and its state.
+   The app finds the game process in `/proc`: the process of the user of the
+   app with the name `runblack.exe` (its parent is 1, "Play in the app").
+   **The main thread of the game** is the thread whose id is the id of the
+   process, with the name `runblack.exe`. The log marks it "(the main
+   thread)". In each window of the runs in the emulator it has the most
+   CPU time of the game: it runs the loop of the game and the frames of the
+   mod. Wine gives the other
+   threads the names of their descriptions (`wine_dsound_mix`,
+   `wine_dinput_wor`). With `time_log=1` the app names its own threads:
+   `bwvr main` (the loop of the session), `bwvr reader` (the live stream),
+   `bwvr painter`, `bwvr wine` and `bwvr game`.
+5. **The processes and the cores**: the CPU time of the game process, of the
+   app and of the other processes of the user of the app (Wine) in cores,
+   and the busy time of each core from `/proc/stat`, with the count of the
+   cores busy for half the time or more. When the app cannot read
+   `/proc/stat`, the log says so one time.
+
+**The stop of the game.** When no new frame of the game came for 5 s, one
+line names each thread of the game with its state (R runs, S sleeps, D
+waits in the kernel), its percent of one core (user and system) since the
+last window and its core: "time : no new frame of the game for 5.0 s (the
+last is frame N). The threads of the game ...". So a frame that does not
+end, with a thread at 100 percent in the kernel, shows in one line. A load
+of the game can also give the line.
+
+**The cost.** Some reads of the clock in a frame of the session, two
+timestamps in each command buffer of the app, and one read of `/proc` each
+10 s (about 30 small files). `time_log=0`: no line, no timestamp, no read of
+`/proc` and no name of a thread of the app. There is no test key.
+
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90`, 170
+checks, 0 failed, Wine of x86_64 with no Box64, the test runtime at 72 Hz,
+4 cores). In each game the app logged its lines each 10 s over the whole
+game (28 lines over 312.5 s of game 1), and the mod its line (29 lines over
+290 s). The frames a second of the game fit: 42.4 in the app (12838 frames
+in 302.5 s) and 42.9 in the mod (12440 frames in 290 s) in game 1, 58.4 and
+59.6 in game 2. In the test save (game 2, a render of 1380 by 1104) a window
+of 10 s has:
+
+```
+time         : 10.0 s to frame 887: the game 68.0 frames a second (681 frames came), the app took 681 frames and made 68.0 pictures a second (681), 68.0 frames of the session a second. 0 frames of the game did not show ...
+time         : the CPU of the app in ms, the mean and the most: the play of a picture 2.15 and 4.19, the wait in xrWaitFrame 10.58 and 12.72, from the end of xrWaitFrame to the end of xrEndFrame 4.10 and 6.10, in xrEndFrame 0.02 and 0.51, a wait of a copy for the GPU 0.30 and 1.68 (2043 waits), a wait of a walk for the GPU 0.00 and 0.00 (0 waits)
+time         : the GPU in ms: a picture 0.32 as a mean ..., a walk of the renderer 0.24 and 0.24 at most (681 walks), a command buffer of the app 0.03 and 0.03 at most (2043). The GPU worked 2.2 percent of the time for the app
+time         : each 10 s, the threads in 10.0 s, ...: game runblack.exe 6171 (the main thread) 38.5 (1.4 + 37.1) core 0 R, app bwvr main 4524 27.6 (13.4 + 14.2) core 2 R, app bwvr reader 4752 7.6 (0.7 + 6.9) core 0 S, game AudioTrack 6548 1.2 ...
+time         : the processes in cores: the game 0.42, the app 0.36, the other processes of the user of the app (Wine) 0.11. The cores: 4, 0.68 of them busy in all, ...
+time log     : 10.0 s, 675 frames of the game (67.5 a second), 675 of them presented in a scene walk. A frame in ms, the mean and the most: the frame 14.82 and 20.21, the scene walk 5.49 and 11.96, the write of the stream 0.13 and 0.88, the wait of the pace 6.55 and 11.51, the rest 2.65 and 9.95
+```
+
+The main thread of the game has the most CPU time of the game in each
+window. While the test runtime reads back a picture, it holds a frame of the
+session for some seconds: then a window has, for example, "563 in
+xrWaitFrame or xrEndFrame" and fewer pictures, while the reader still takes
+each frame of the game. In the emulator the game, the app and Wine use less
+than one core in all. No run of the emulator had a stop of the game, so the
+line of a stop came in no test with its last rule (the reader). With
+`-TimeLog 0` neither log has a line of the times, in both games. That run
+also had `profile_sample_outside=1000` (150 checks, 1 failed: the frames of
+the scene came at 1 to 2 a second, and the short press of the menu button
+in game 2 did not reach the mod, see "The hot code under Box64").
+
+**Not shown yet:** the lines in a headset: the time of the GPU of a Quest 3,
+the waits of the runtime of Meta, the threads under Box64, the load of the
+cores, and the line of a stop of the game.
+
+## The hot code under Box64
+
+`profile_sample` and `profile_sample_outside` (`backend.md`, "Where the
+time of the scene walk goes") stop the frame thread and read the address of
+its next instruction with `GetThreadContext`. Under Box64 this address is
+not the address of the code that runs:
+
+- In the WoW64 of Wine the context of a 32 bit thread is the context in the
+  CPU area of its TEB (`ThreadWow64Context`). `BTCpuGetContext` of
+  `wowbox64.dll` reads it there (`wine/wow64/wowbox64.c` of Box64 0.4.4).
+- Box64 writes that context only at a system call of the 32 bit code (the
+  BOP of `EmitInterruptionImpl`): `Eip` is then the return address of the
+  call in the 32 bit `ntdll.dll`. While the thread runs translated x86 code,
+  its x86 registers are in the registers of the CPU and in the struct of the
+  emulator, and the context keeps the values of the last system call.
+- So a sample of a thread in a system call has the right place and a right
+  stack (the callers of a wait), and a sample of a thread in the code of the
+  game has the place of its last system call. Both are in `ntdll.dll`, and
+  the report cannot tell them apart.
+
+The options of Box64 (`docs/USAGE.md` of Box64 0.4.4):
+
+- `BOX64_DYNAREC_PERFMAP` writes the map of the translated blocks for
+  `perf`. In the build of `wowbox64.dll` (`_WIN32`) `writePerfMap` is empty,
+  and the option is not "Available in WowBox64". `BOX64_DYNAREC_GDBJIT` is
+  not there either.
+- `BOX64_DYNAREC_LOG`, `BOX64_DYNAREC_DUMP` and `BOX64_DYNAREC_DUMP_RANGE`
+  are in WowBox64. They log the translation of each block, not where the
+  time goes, and they cost much time.
+- `BOX64_PROFILE` is a set of options (safe, fast), not a profiler.
+
+So no way gives the x86 address of the hot code under Box64 yet. What the
+log gives now: the time log of the mod (the parts of a frame by clock reads,
+which work under Box64), the time log of the app (the CPU time of each
+thread of the game and of each core), and the samples of the system calls.
+Ways to try in a later step:
+
+- A patch of `wowbox64.dll` (our build of Box64, `build_box64.ps1 -Mingw`)
+  that writes the x86 address of each block at its start into the context of
+  the CPU area: then `profile_sample` gives the block that runs, at the cost
+  of one store at each block.
+- A patch that writes the perf map of the blocks under WoW64, with
+  `simpleperf` of the headset for the samples of the ARM code. Not known: if
+  `simpleperf` of Meta Horizon OS reads such a map.
+
+**What the emulator shows** (Wine of x86_64 with `wow64cpu.dll`, no Box64,
+`profile_sample_outside=1000`, a render of 2682 by 2146): the samples have
+x86 addresses of the game and of the mod, with callers on the stack
+(`runblack.exe+0x419F21`, `DDRAW.dll+0x12708B`). Of 10604 samples in 449
+frames 72.9 percent were in `win32u.dll` and 26.1 percent in `ntdll.dll`. A
+stop in Wine is slow: the samples held the frame thread 24.5 ms in a frame
+of 45 ms, and the frames of the scene came at 1 to 22 a second in place of
+about 50. Under Box64 the same sampler gives the address of the last system
+call, as the source says. The emulator of the tests is x86_64, so it has no
+Box64: no run under Box64 was made. A run of `profile_sample_outside` on a
+Quest 3 would show it.
 
 ## Wine in the app
 

@@ -197,6 +197,37 @@
     registry of the prefix, that no game shows the dialog of a new profile,
     and that game 2 loads the saved game of slot 20 of the profile.
 
+.PARAMETER EyeSize
+    width,height: the size of an eye that the test runtime asks for (the
+    file eyes.txt of the runtime), for example 4096,4291, the size that a
+    Quest 3 asked for. 2064,2208 by default (the panel of a Quest 3).
+
+.PARAMETER EyeSizeMax
+    The value of eye_size_max in bwvr.ini (docs/android.md, "The size of the
+    eye pictures"): 1 caps the size of the runtime at the panel of a Quest 3
+    with the aspect of the runtime, 0 takes the size of the runtime. -1 (the
+    default): no key, and the app has the cap of its default. The test
+    checks the log line with the size of the runtime and the size that the
+    app takes, headset_width and headset_height in bwvr.ini, the render of
+    each game, the swapchains of the projection layer, of the panel image
+    and of the screen quad, and that the runtime made no swapchain larger
+    than the render or the menu.
+
+.PARAMETER TimeLog
+    The value of time_log in bwvr.ini (docs/android.md, "The time log of the
+    app", and docs/backend.md, "The time log of the mod"). -1 (the default):
+    no key, and the app and the mod have the time log of their default. The
+    test checks the lines "time" of the app and "time log" of the mod in
+    each game: one each 10 s, the frames of the game a second in both logs
+    against each other, the lines of the threads with the main thread of the
+    game, and the line of the cores. 0: the test checks that no such line
+    is there.
+
+.PARAMETER IniExtra
+    More lines for bwvr.ini, for example 'profile_sample_outside=1000'. A
+    key that the save of the menu deletes (kRetiredKeys) does not reach the
+    game.
+
 .PARAMETER Keep
     Leaves the emulator on at the end, with the app and the copy of the
     game in it.
@@ -224,6 +255,10 @@ param(
     [ValidateSet(0, 72, 80, 90, 120)][int]$DisplayHz = 0,
     [string]$PullProfile = '',
     [string]$ProfileFrom = '',
+    [int[]]$EyeSize = @(),
+    [ValidateSet(-1, 0, 1)][int]$EyeSizeMax = -1,
+    [ValidateSet(-1, 0, 1)][int]$TimeLog = -1,
+    [string[]]$IniExtra = @(),
     [switch]$Keep
 )
 
@@ -256,6 +291,7 @@ if (-not (Test-Path -LiteralPath $Apk)) { Stop-Android "There is no APK at:`n$Ap
 if ($PullProfile -ne '' -and -not $NewProfile) { Stop-Android '-PullProfile needs -NewProfile: the test pulls the profile that game 1 makes.' }
 # The test deletes no folder that the caller names: -PullProfile must be new.
 if ($PullProfile -ne '' -and (Test-Path -LiteralPath $PullProfile)) { Stop-Android "$PullProfile is there. Give a folder that is not there: the test writes the pulled profile into a new folder." }
+if ($EyeSize.Count -ne 0 -and $EyeSize.Count -ne 2) { Stop-Android '-EyeSize needs two numbers: width,height.' }
 if ($ProfileFrom -ne '') {
     if ($NewProfile) { Stop-Android '-ProfileFrom and -NewProfile do not go together: the game folder of the app gets the profile of -ProfileFrom.' }
     if (-not (Test-Path -LiteralPath (Join-Path $ProfileFrom 'user.reg'))) { Stop-Android "There is no user.reg in $ProfileFrom. Make the folder with -NewProfile -PullProfile." }
@@ -619,6 +655,96 @@ function PanelClicks([string]$Box, [int[]]$Points, [string]$Name, [string]$What)
     Hold ($Name + 'done')
 }
 
+# THE SIZE OF THE EYE PICTURES (eye_size.h): the size that the app takes
+# from the size of the runtime, and the render of the game from it
+# (ScaleToPixels of settings_table.h, with resolution_pct=50, no margin and
+# one walk with a guard of 25 percent).
+function EyeCap([int]$W, [int]$H, [int]$Key) {
+    if ($Key -eq 0 -or $W -le 0 -or $H -le 0 -or ($W -le 2064 -and $H -le 2208)) { return @($W, $H) }
+    if ([int64]2064 * $H -le [int64]2208 * $W) {
+        $h2 = [int][math]::Floor(([int64]$H * 2064 + [math]::Floor($W / 2)) / $W)
+        return @(2064, [math]::Min($h2, 2208))
+    }
+    $w2 = [int][math]::Floor(([int64]$W * 2208 + [math]::Floor($H / 2)) / $H)
+    return @([math]::Min($w2, 2064), 2208)
+}
+function MulDivRound([int]$N, [int]$Num, [int]$Den) { return [int][math]::Floor(([int64]$N * $Num + [math]::Floor($Den / 2)) / $Den) }
+function RenderOf([int]$W, [int]$H) {
+    $side = [math]::Max($W, $H)
+    $p = MulDivRound $side 50 100
+    $p = [int]([math]::Floor($p / 2) * 2)
+    $p = [math]::Max(640, [math]::Min(4096, $p))
+    $wide = MulDivRound $p 125 100
+    $wide = [int]([math]::Floor($wide / 2) * 2)
+    return @([math]::Min(4096, $wide), $p)
+}
+function Num([string]$Text) { return [double]::Parse($Text, [Globalization.CultureInfo]::InvariantCulture) }
+$runtimeEyes = if ($EyeSize.Count -eq 2) { $EyeSize } else { @(2064, 2208) }
+$wantEyes = EyeCap $runtimeEyes[0] $runtimeEyes[1] $(if ($EyeSizeMax -eq 0) { 0 } else { 1 })
+$wantRender = RenderOf $wantEyes[0] $wantEyes[1]
+
+# THE TIME LOG of one game (-TimeLog): the lines of the app in the part of
+# its log of this game, and the lines of the mod in its log of this game.
+function TimeChecks([int]$N, [string]$Part, [string]$ModLog, [double]$GameSeconds) {
+    $appLines = @([regex]::Matches($Part, 'time         : ([\d.]+) s to frame (\d+): the game ([\d.]+) frames a second \((\d+) frames came\), the app took (\d+) frames and made ([\d.]+) pictures a second \((\d+)\), ([\d.]+) frames of the session a second\. (\d+) frames of the game did not show because the app was still at the picture before: (\d+) while it waited for the GPU, (\d+) in xrWaitFrame or xrEndFrame, (\d+) while the CPU of the app worked\. (\d+) frames of the session had no new frame of the game'))
+    $modLines = @([regex]::Matches($ModLog, 'time log     : ([\d.]+) s, (\d+) frames of the game \(([\d.]+) a second\), (\d+) of them presented in a scene walk\. A frame in ms, the mean and the most: the frame ([\d.]+) and ([\d.]+), the scene walk ([\d.]+) and ([\d.]+), the write of the stream ([\d.]+) and ([\d.]+), the wait of the pace ([\d.]+) and ([\d.]+), the rest ([\d.]+) and ([\d.]+)'))
+    if ($TimeLog -eq 0) {
+        Expect ($Part -notmatch 'time         : [\d.]+ s to frame' -and $Part -notmatch 'time         : each 10 s') "game $N with time_log=0: the app has no line of the times"
+        Expect ($ModLog -match 'time log     : time_log=0\. No line of the times' -and $modLines.Count -eq 0) "game $N with time_log=0: the mod has time_log=0 and no line of the times"
+        return
+    }
+    $appLines | Select-Object -First 3 | ForEach-Object { Note ('bwvr-quest.log: ' + $_.Value) }
+    @([regex]::Matches($Part, 'time         : (the CPU of the app|the GPU in ms|each 10 s, the threads|the processes in cores|the game is the process|no new frame of the game)[^\r\n]*') | Select-Object -First 8) | ForEach-Object { Note ('bwvr-quest.log: ' + $_.Value) }
+    $modLines | Select-Object -First 3 | ForEach-Object { Note ('bwvr.log: ' + $_.Value) }
+    # One line each 10 s: the windows are 10 s or a little longer (a frame of
+    # the session that the test runtime holds for a read back makes one
+    # longer), and they cover the time of the game from Play to its end, less
+    # the last window, which no line ends.
+    $appSum = 0.0; $appShort = 0
+    foreach ($l in $appLines) { $sec = Num $l.Groups[1].Value; $appSum += $sec; if ($sec -lt 9.9) { $appShort++ } }
+    Expect ($appLines.Count -gt 0 -and $appShort -eq 0 -and $appSum -ge $GameSeconds - 25.0) ("game $N`: the app logged the times each 10 s: $($appLines.Count) lines over {0:N1} s of the {1:N1} s of the game, $appShort windows shorter than 10 s" -f $appSum, $GameSeconds)
+    $bad = @($appLines | Where-Object {
+        $took = [int64]$_.Groups[5].Value; $pictures = [int64]$_.Groups[7].Value; $skipped = [int64]$_.Groups[9].Value
+        $took -ne $pictures + $skipped -or $skipped -ne [int64]$_.Groups[10].Value + [int64]$_.Groups[11].Value + [int64]$_.Groups[12].Value })
+    Expect ($appLines.Count -gt 0 -and $bad.Count -eq 0) "game $N`: in each line of the app the frames that the app took are the pictures and the frames that did not show, and the causes add up ($($bad.Count) lines that do not)"
+    Expect ($Part -match 'time         : the CPU of the app in ms, the mean and the most: the play of a picture [\d.]+ and [\d.]+, the wait in xrWaitFrame [\d.]+ and [\d.]+, from the end of xrWaitFrame to the end of xrEndFrame [\d.]+ and [\d.]+, in xrEndFrame [\d.]+ and [\d.]+') "game $N`: the app logged the CPU times (the play, xrWaitFrame, xrWaitFrame to xrEndFrame, xrEndFrame, the waits for the GPU)"
+    $gpu = @([regex]::Matches($Part, 'time         : the GPU in ms: a picture ([\d.]+) as a mean [^\r\n]*?a walk of the renderer ([\d.]+) and ([\d.]+) at most \((\d+) walks\), a command buffer of the app ([\d.]+) and ([\d.]+) at most \((\d+)\)'))
+    $gpuWalks = @($gpu | Where-Object { [int64]$_.Groups[4].Value -gt 0 -and [int64]$_.Groups[7].Value -gt 0 })
+    Expect ($gpuWalks.Count -gt 0) "game $N`: the app logged the time of the GPU from the timestamps of the walks and of its command buffers ($($gpuWalks.Count) of $($gpu.Count) lines with both)"
+    $threads = [regex]::Match($Part, 'time         : each 10 s, the threads in [^\r\n]*')
+    $anyMain = [regex]::Match($Part, 'time         : each 10 s, the threads in [^\r\n]*game runblack\.exe (\d+) \(the main thread\) ([\d.]+)')
+    Expect ($threads.Success -and $anyMain.Success) ("game $N`: the lines of the threads name the main thread of the game: " + $(if ($anyMain.Success) { "runblack.exe $($anyMain.Groups[1].Value), $($anyMain.Groups[2].Value) percent of one core" } else { 'none' }))
+    $found = [regex]::Match($Part, 'time         : the game is the process (\d+) \(([^)]*)\)')
+    Expect ($found.Success -and $anyMain.Success -and $found.Groups[1].Value -eq $anyMain.Groups[1].Value) "game $N`: the app found the process of the game, and its main thread has its id ($($found.Groups[1].Value))"
+    $cores = [regex]::Match($Part, 'time         : the processes in cores: the game ([\d.]+), the app ([\d.]+), the other processes of the user of the app \(Wine\) ([\d.]+)\. The cores: (\d+), ([\d.]+) of them busy')
+    Expect ($cores.Success -and [int]$cores.Groups[4].Value -gt 0) ("game $N`: the app logged the load of the processes and of the cores: " + $cores.Value)
+    Expect ($ModLog -match 'time log     : time_log=1\. Each 10 s one line') "game $N`: the mod has time_log=1"
+    # The mod starts some seconds after Play, and its last window has no line.
+    $modSum = 0.0; $modShort = 0
+    foreach ($l in $modLines) { $sec = Num $l.Groups[1].Value; $modSum += $sec; if ($sec -lt 9.9) { $modShort++ } }
+    Expect ($modLines.Count -gt 0 -and $modShort -eq 0 -and $modSum -ge $GameSeconds - 35.0) ("game $N`: the mod logged the parts of a frame each 10 s: $($modLines.Count) lines over {0:N1} s, $modShort windows shorter than 10 s" -f $modSum)
+    # The parts of a frame: the frames of a line take its time, and the
+    # parts with the rest are the frame (the rest is not below 0).
+    $badMod = @($modLines | Where-Object {
+        $sec = Num $_.Groups[1].Value; $frames = [int64]$_.Groups[2].Value; $mean = Num $_.Groups[5].Value
+        $parts = (Num $_.Groups[7].Value) + (Num $_.Groups[9].Value) + (Num $_.Groups[11].Value) + (Num $_.Groups[13].Value)
+        $frames -le 0 -or [math]::Abs($frames * $mean - $sec * 1000.0) -gt $sec * 1000.0 * 0.05 + 50.0 -or $parts -lt $mean * 0.98 - 0.05 })
+    Expect ($modLines.Count -gt 0 -and $badMod.Count -eq 0) "game $N`: in each line of the mod the frames fill the time of the line, and the parts with the rest are the frame or more ($($badMod.Count) lines that do not)"
+    # THE TWO LOGS FIT: the frames of the game a second in the lines of the
+    # app and of the mod, as the frames of all lines over their time. The
+    # windows of the two logs do not start at the same time, and a window of
+    # the app is longer while the test runtime holds a frame for a read back,
+    # so single lines do not match.
+    $appFrames = 0.0; $appTime = 0.0
+    foreach ($l in $appLines) { if ([int64]$l.Groups[4].Value -gt 0) { $appFrames += [int64]$l.Groups[4].Value; $appTime += Num $l.Groups[1].Value } }
+    $modFrames = 0.0; $modTime = 0.0
+    foreach ($l in $modLines) { $modFrames += [int64]$l.Groups[2].Value; $modTime += Num $l.Groups[1].Value }
+    $ra = if ($appTime -gt 0) { $appFrames / $appTime } else { 0.0 }
+    $rm = if ($modTime -gt 0) { $modFrames / $modTime } else { 0.0 }
+    Note ("game $N`: the frames of the game a second, app: " + (@($appLines | ForEach-Object { $_.Groups[3].Value }) -join ' ') + "; mod: " + (@($modLines | ForEach-Object { $_.Groups[3].Value }) -join ' '))
+    Expect ($appTime -gt 0 -and $modTime -gt 0 -and [math]::Abs($ra - $rm) -le 0.1 * $rm + 2.0) ("game $N`: the frames a second of the game fit in both logs: {0:N1} in the app ({1} frames in {2:N1} s) and {3:N1} in the mod ({4} frames in {5:N1} s)" -f $ra, $appFrames, $appTime, $rm, $modFrames, $modTime)
+}
+
 # 1. The test runtime.
 Say 'Build the OpenXR test runtime for x86_64'
 $runtimeBuild = Join-Path $Bwvr 'build-android\test-runtime'
@@ -831,6 +957,14 @@ try {
             "$([int]$m.Groups[1].Value + $shift) $($m.Groups[2].Value)"
         }))
     Adb @('push', $script, "$XrDir/script.txt")
+    # THE SIZE OF THE EYES of the runtime (-EyeSize).
+    Adb @('shell', 'rm', '-f', "$XrDir/eyes.txt")
+    if ($EyeSize.Count -eq 2) {
+        $eyes = Join-Path $Out 'eyes.txt'
+        Set-Content -LiteralPath $eyes -Encoding ascii -Value "$($EyeSize[0]) $($EyeSize[1])"
+        Adb @('push', $eyes, "$XrDir/eyes.txt")
+        Adb @('shell', 'chmod', '644', "$XrDir/eyes.txt")
+    }
     Adb @('shell', 'chmod', '777', $XrDir)
     Adb @('shell', 'chmod', '755', "$XrDir/libbwvr_test_runtime.so")
     Adb @('shell', 'chmod', '644', "$XrDir/script.txt")
@@ -898,6 +1032,9 @@ try {
     # A render of 50 percent of the eye of the test runtime: 1380 by 1104.
     $iniLines = @('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio")
     if ($DisplayHz -gt 0) { $iniLines += "display_hz=$DisplayHz" }
+    if ($EyeSizeMax -ge 0) { $iniLines += "eye_size_max=$EyeSizeMax" }
+    if ($TimeLog -ge 0) { $iniLines += "time_log=$TimeLog" }
+    $iniLines += $IniExtra
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$GameDir/bwvr.ini")
     # -ProfileFrom: the profile of an earlier run of the emulator goes in as
@@ -975,6 +1112,11 @@ try {
         Expect ($part -match 'game         : ddraw\.dll of the APK \(\d+ bytes\) is in \S+/drive_c/windows/syswow64') "the ddraw.dll of the APK is in syswow64 of the prefix"
         $reg = [regex]::Match($part, 'game         : reg import of C:\\bwvr\\game\.reg ended with (-?\d+) after ([\d.]+) s: GameDir G:\\, ScreenW (\d+), ScreenH (\d+)')
         Expect ($reg.Success -and $reg.Groups[1].Value -eq '0') ('reg import of the registry of the game: ' + $reg.Value)
+        # THE RENDER from the size of the eyes after the cap (eye_size_max).
+        $render = [regex]::Match($part, "game         : $([regex]::Escape($r.Name)) at [\d:]+, the render (\d+) by (\d+)")
+        Expect ($render.Success -and [int]$render.Groups[1].Value -eq $wantRender[0] -and [int]$render.Groups[2].Value -eq $wantRender[1] -and
+            $reg.Success -and [int]$reg.Groups[3].Value -eq $wantRender[0] -and [int]$reg.Groups[4].Value -eq $wantRender[1]) ("the render of game $n and ScreenW, ScreenH of its registry are $($wantRender[0]) by $($wantRender[1]), 50 percent of $($wantEyes[0]) by $($wantEyes[1]): " + $render.Value)
+        Expect ($iniText -match "(?m)^headset_width=$($wantEyes[0])\r?$" -and $iniText -match "(?m)^headset_height=$($wantEyes[1])\r?$") "bwvr.ini at the start of game $n has headset_width=$($wantEyes[0]) and headset_height=$($wantEyes[1])"
         if ($WineAudio -eq 1) {
             Expect ($part -match 'game         : reg import of .* and the audio driver aaudio \(wine_audio=1\)') "the registry of game $n has the audio driver aaudio"
         } else {
@@ -1150,6 +1292,12 @@ try {
         } else {
             Expect ($escLines.Count -ge 1) "game 2: the mod got the short press of the menu button ($($escLines.Count) lines of the mod)"
         }
+        # THE TIME LOG of this game: from Play to the end of the game.
+        $endTime = [regex]::Match($part, 'game         : the game ended with the exit code -?\d+ at [\d:]+ \([^)]*\), ([\d.]+) s after Play')
+        $gameSeconds = if ($endTime.Success) { Num $endTime.Groups[1].Value } else { $PlaySeconds }
+        $gameEnd = $part.IndexOf('game         : the game ended with the exit code')
+        $gamePart = if ($gameEnd -ge 0) { $part.Substring(0, $gameEnd) } else { $part }
+        TimeChecks $n $gamePart $modLogNow $gameSeconds
         Adb @('pull', "$AppDir/wine.log", (Join-Path $Out "wine-game$n.log"))
         # The sound of this game: the stream of wineaaudio in wine.log, and
         # QMixer in the log of the mod.
@@ -1402,6 +1550,31 @@ try {
 
     Expect ($logcat -notmatch 'JNI DETECTED ERROR' -and $logcat -notmatch 'Fatal signal' -and $logcat -notmatch 'FATAL EXCEPTION') 'logcat has no JNI error and no crash'
     Expect ($log -match 'app          : the app ends') 'the app ended after the runtime ended the session'
+    # THE SIZE OF THE EYE PICTURES (eye_size_max): the size of the runtime,
+    # the size that the app takes, and the swapchains.
+    $cap = [regex]::Match($log, 'xr           : the headset asks for (\d+) by (\d+) for each eye \(at most (\d+) by (\d+)\)\. eye_size_max=(\d+): [^\r\n]*?the app takes (\d+) by (\d+)[^\r\n]*')
+    Note $cap.Value
+    Expect ($cap.Success -and [int]$cap.Groups[1].Value -eq $runtimeEyes[0] -and [int]$cap.Groups[2].Value -eq $runtimeEyes[1] -and
+        [int]$cap.Groups[6].Value -eq $wantEyes[0] -and [int]$cap.Groups[7].Value -eq $wantEyes[1]) "the log has the size of the runtime ($($runtimeEyes[0]) by $($runtimeEyes[1])) and the size that the app takes ($($wantEyes[0]) by $($wantEyes[1])) in one line"
+    $wantKey = if ($EyeSizeMax -eq 0) { '0' } else { '1' }
+    Expect ($cap.Success -and $cap.Groups[5].Value -eq $wantKey) "the line names eye_size_max=$wantKey"
+    Expect ($report -match "note the eyes ask for $($runtimeEyes[0])x$($runtimeEyes[1])") "the test runtime asked for $($runtimeEyes[0]) by $($runtimeEyes[1])"
+    foreach ($s in @(
+            @{ P = 'a projection layer of two swapchains of (\d+) by (\d+)'; What = 'the projection layer' },
+            @{ P = 'a swapchain of (\d+) by (\d+) for the panel image'; What = 'the panel image' },
+            @{ P = 'a swapchain of (\d+) by (\d+) for the screen quad'; What = 'the screen quad' })) {
+        $m = [regex]::Match($log, 'xr           : ' + $s.P)
+        if ($m.Success) {
+            Expect ([int]$m.Groups[1].Value -eq $wantRender[0] -and [int]$m.Groups[2].Value -eq $wantRender[1]) "the swapchain of $($s.What) has the size of the render, $($wantRender[0]) by $($wantRender[1]) ($($m.Groups[1].Value) by $($m.Groups[2].Value))"
+        } else {
+            Note "the app made no swapchain of $($s.What)"
+        }
+    }
+    $made = @([regex]::Matches($report, 'call xrCreateSwapchain (\d+)x(\d+)'))
+    $mostW = 0; $mostH = 0
+    foreach ($m in $made) { $mostW = [math]::Max($mostW, [int]$m.Groups[1].Value); $mostH = [math]::Max($mostH, [int]$m.Groups[2].Value) }
+    $allowW = [math]::Max($wantRender[0], 1600); $allowH = [math]::Max($wantRender[1], 1200)
+    Expect ($made.Count -gt 0 -and $mostW -le $allowW -and $mostH -le $allowH) "the runtime made $($made.Count) swapchains, the widest $mostW and the highest $mostH pixels: none is larger than the render ($($wantRender[0]) by $($wantRender[1])) or the menu (1600 by 1200)"
     foreach ($n in 1, 2) {
         if ($results.ContainsKey("first$n")) { Note ("game {0}: the first frame {1} s after Play, the frame rate {2}, the CPU load of Wine {3:N0} %" -f $n, $results["first$n"], ($results["rates$n"] -join ' '), $results["cpu$n"].Wine) }
     }

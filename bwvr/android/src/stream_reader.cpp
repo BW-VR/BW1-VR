@@ -109,6 +109,7 @@ bool StreamReader::TakeAll(std::vector<QueuedFrame>* frames) {
 }
 
 void* StreamReader::Main(void* self) {
+  TimeLogNameThread("bwvr reader");
   static_cast<StreamReader*>(self)->Run();
   return nullptr;
 }
@@ -241,6 +242,13 @@ void StreamReader::Run() {
       used += len;
       ++frames;
       bytes += len;
+      {
+        timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        last_arrival_ms_.store(now.tv_sec * 1000.0 + now.tv_nsec / 1e6,
+                               std::memory_order_relaxed);
+        arrived_.fetch_add(1, std::memory_order_relaxed);
+      }
       pthread_mutex_lock(&lock_);
       // THE LIMIT: a queue that the session does not take (a session that
       // does not run) is cleared, and the reader leaves the ring.

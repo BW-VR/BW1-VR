@@ -190,6 +190,23 @@ void VkSceneSetKeepPicture(int on);
 void VkSceneCounts(uint64_t* walks, uint64_t* draws, uint64_t* clears,
                    uint64_t* kept, uint64_t* whole);
 void VkSceneKeepPictureToggle(const char* keys);
+// THE TIME OF THE GPU FOR THE TIME LOG OF THE HEADSET APP (time_log,
+// docs/android.md, "The time log of the app"), on the thread of the walks:
+// since the last call, the walks with a time of the GPU (the timestamps at
+// the start and at the end of the command buffer of a walk), the sum and the
+// most of those times in ms, and the time that the walks waited on the CPU
+// for the fence of their slot (the GPU was not done with the walk two walks
+// before), its sum and its most in ms. The counts start again at each call.
+// The report of 450 frames has counts of its own.
+struct VkSceneGpuTime {
+  uint64_t walks;
+  double ms;
+  double most_ms;
+  uint64_t fence_waits;
+  double fence_wait_ms;
+  double fence_wait_most_ms;
+};
+void VkSceneTakeGpuTime(VkSceneGpuTime* out);
 // vk_black_check of bwvr.ini, backend=vulkan, a test aid: 1 (the default)
 // 16 by 16 points of each eye picture go to the CPU, and a black picture
 // gives a line of the log with what its walk drew. 0: no check.

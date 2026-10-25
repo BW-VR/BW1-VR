@@ -23,6 +23,7 @@
 #include "../../src/common/input_channel.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
+#include "../../src/mod/time_log_math.h"
 #include "../../src/mod/vk_core.h"
 #include "gpu.h"
 
@@ -51,9 +52,36 @@ class XrApp {
   void PollEvents(bool* quit);
   bool Running() const { return running_; }
 
-  // What the headset asks for, for each eye.
+  // What the headset asks for, for each eye, after the cap of eye_size_max
+  // (eye_size.h, docs/android.md, "The size of the eye pictures"). The app
+  // writes it as headset_width and headset_height, and the render of the
+  // game, the swapchains of the projection layer, the panel image and the
+  // screen quad take their size from it.
   uint32_t EyeWidth() const { return eye_width_; }
   uint32_t EyeHeight() const { return eye_height_; }
+  // eye_size_max of bwvr.ini, before Start: 1 (the default) caps the size of
+  // the runtime at the panel of a Quest 3 (2064 by 2208) with the aspect of
+  // the runtime. 0: the size of the runtime, with no cap.
+  void SetEyeSizeMax(int key) { eye_size_max_ = key; }
+
+  // THE TIME LOG (time_log, docs/android.md, "The time log of the app").
+  // Before Start: the clock reads of the frames, the waits of the copies for
+  // the GPU and the timestamps of the command buffers of the app. TakeTimes
+  // gives the stats since its last call and sets them back: the wait in
+  // xrWaitFrame, the time from the end of xrWaitFrame to the end of
+  // xrEndFrame, the time in xrEndFrame, the waits of the app for the fence of
+  // its last copy, and the time of the GPU of each command buffer of the app.
+  struct FrameTimes {
+    time_log_math::Stat wait;
+    time_log_math::Stat work;
+    time_log_math::Stat end;
+    time_log_math::Stat fence_wait;
+    time_log_math::Stat busy;
+  };
+  void SetTimeLog(bool on) { time_log_ = on; }
+  void TakeTimes(FrameTimes* out);
+  // The wait in xrWaitFrame of this frame, in ms.
+  double LastWaitMs() const { return last_wait_ms_; }
   const std::string& RuntimeName() const { return runtime_name_; }
 
   // THE DISPLAY RATE (XR_FB_display_refresh_rate, docs/android.md, "The
@@ -340,7 +368,13 @@ class XrApp {
   int64_t format_ = 0;
   uint32_t eye_width_ = 0;
   uint32_t eye_height_ = 0;
+  int eye_size_max_ = 1;
   std::string runtime_name_;
+  // THE TIME LOG.
+  bool time_log_ = false;
+  FrameTimes times_;
+  double wait_end_ms_ = -1.0;  // the clock at the end of xrWaitFrame of this frame
+  double last_wait_ms_ = 0.0;
 
   // THE DISPLAY RATE.
   void ReadDisplayRates();

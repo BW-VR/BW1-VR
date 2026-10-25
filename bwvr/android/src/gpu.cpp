@@ -1,5 +1,7 @@
 #include "gpu.h"
 
+#include <time.h>
+
 #include "app_log.h"
 
 namespace {
@@ -14,7 +16,49 @@ uint32_t FindMemory(const Gpu& gpu, uint32_t bits, VkMemoryPropertyFlags want) {
   return UINT32_MAX;
 }
 
+double NowMs() {
+  timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
 }  // namespace
+
+bool GpuTimingStart(Gpu* gpu) {
+  gpu->timing = true;
+  VkPhysicalDeviceProperties p;
+  vkGetPhysicalDeviceProperties(gpu->physical, &p);
+  uint32_t families = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(gpu->physical, &families, nullptr);
+  uint32_t bits = 0;
+  if (gpu->queue_family < families) {
+    VkQueueFamilyProperties family[32];
+    uint32_t n = families < 32 ? families : 32;
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu->physical, &n, family);
+    if (gpu->queue_family < n) bits = family[gpu->queue_family].timestampValidBits;
+  }
+  if (bits == 0 || p.limits.timestampPeriod <= 0.0f) {
+    AppLog("gpu          : time_log=1, but the queue has no timestamps (%u valid bits, "
+           "%.3f ns a tick). The log has no time of the GPU of the app",
+           bits, p.limits.timestampPeriod);
+    return false;
+  }
+  VkQueryPoolCreateInfo info = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+  info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+  info.queryCount = 2;
+  if (vkCreateQueryPool(gpu->device, &info, nullptr, &gpu->query) != VK_SUCCESS) {
+    gpu->query = VK_NULL_HANDLE;
+    AppLog("gpu          : time_log=1, but vkCreateQueryPool failed. The log has no "
+           "time of the GPU of the app");
+    return false;
+  }
+  gpu->timestamp_ns = p.limits.timestampPeriod;
+  gpu->timestamp_mask = bits >= 64 ? ~0ull : (1ull << bits) - 1;
+  AppLog("gpu          : time_log=1. Each command buffer of the app has a timestamp at "
+         "its start and at its end (%u valid bits, %.3f ns a tick)",
+         bits, p.limits.timestampPeriod);
+  return true;
+}
 
 bool GpuFinish(Gpu* gpu) {
   vkGetPhysicalDeviceMemoryProperties(gpu->physical, &gpu->memory);
@@ -53,6 +97,9 @@ void GpuRelease(Gpu* gpu) {
   if (gpu->device == VK_NULL_HANDLE) return;
   vkDeviceWaitIdle(gpu->device);
   if (gpu->fence != VK_NULL_HANDLE) vkDestroyFence(gpu->device, gpu->fence, nullptr);
+  if (gpu->query != VK_NULL_HANDLE) vkDestroyQueryPool(gpu->device, gpu->query, nullptr);
+  gpu->query = VK_NULL_HANDLE;
+  gpu->query_written = false;
   if (gpu->pool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(gpu->device, gpu->pool, nullptr);
   }
@@ -101,15 +148,44 @@ void FreeStaging(Gpu* gpu, Staging* s) {
 }
 
 VkCommandBuffer GpuBegin(Gpu* gpu) {
-  vkWaitForFences(gpu->device, 1, &gpu->fence, VK_TRUE, UINT64_MAX);
+  if (gpu->timing) {
+    const double start = NowMs();
+    vkWaitForFences(gpu->device, 1, &gpu->fence, VK_TRUE, UINT64_MAX);
+    gpu->fence_wait.Add(NowMs() - start);
+  } else {
+    vkWaitForFences(gpu->device, 1, &gpu->fence, VK_TRUE, UINT64_MAX);
+  }
+  // The timestamps of the last submit: the fence says that the GPU is done.
+  if (gpu->query_written) {
+    gpu->query_written = false;
+    uint64_t stamps[4] = {0, 0, 0, 0};
+    if (vkGetQueryPoolResults(gpu->device, gpu->query, 0, 2, sizeof(stamps), stamps,
+                              2 * sizeof(uint64_t),
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ==
+            VK_SUCCESS &&
+        stamps[1] != 0 && stamps[3] != 0) {
+      const uint64_t ticks = (stamps[2] - stamps[0]) & gpu->timestamp_mask;
+      const double ms = static_cast<double>(ticks) * gpu->timestamp_ns * 1e-6;
+      // A time over 100 ms is not the time of one command buffer.
+      if (ms < 100.0) gpu->busy.Add(ms);
+    }
+  }
   vkResetCommandBuffer(gpu->cmd, 0);
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(gpu->cmd, &begin);
+  if (gpu->query != VK_NULL_HANDLE) {
+    vkCmdResetQueryPool(gpu->cmd, gpu->query, 0, 2);
+    vkCmdWriteTimestamp(gpu->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu->query, 0);
+  }
   return gpu->cmd;
 }
 
 bool GpuSubmit(Gpu* gpu, VkSemaphore wait, VkSemaphore signal) {
+  if (gpu->query != VK_NULL_HANDLE) {
+    vkCmdWriteTimestamp(gpu->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->query, 1);
+    gpu->query_written = true;
+  }
   vkEndCommandBuffer(gpu->cmd);
   vkResetFences(gpu->device, 1, &gpu->fence);
   const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TRANSFER_BIT;

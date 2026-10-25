@@ -2937,10 +2937,17 @@ The game is a program of 2001 and uses x87 for its floating point, so
 much, and if the picture of the game changes.
 
 **What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
-480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90`, both
-games, once with no key and once with `-Wow64Cpu fex -FexEnv
-FEX_SILENTLOG=0`): RESULTS. The emulator runs the x86_64 tree with
-`wow64cpu.dll`, so FEX cannot run there.
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
+-Wow64Cpu fex -FexEnv FEX_SILENTLOG=0`, 188 checks, 0 failed): in both
+games the app logged "wow64_cpu=fex. x86_64: the 32 bit code runs natively
+through wow64cpu.dll of Wine. The key does nothing here", the line of `reg
+import` has "no CPU value", the save of the menu kept `wow64_cpu=fex` in
+`bwvr.ini`, the app logged that `fex_env` does not go to the game, and
+`/proc/<pid>/environ` of `runblack.exe` (29 variables) has no variable of
+FEX. The game ran as with no key: the new game and the test save `pen`
+(43.5 and 59.4 frames a second of the game in the log of the app). The
+emulator runs the x86_64 tree with `wow64cpu.dll`, so FEX cannot run
+there.
 
 **Only a headset can show** if FEX runs the game: the load of
 `libwow64fex.dll` in `runblack.exe`, the speed, the stop of the game after
@@ -3041,7 +3048,7 @@ Each tree has the three files of the audio driver: `wineaaudio.drv` of
 i386 and of the ABI, and `wineaaudio.so` (it needs `libaaudio.so` of
 Android). `pack_wine.sh` and `check_apk.ps1` check them. The PE DLLs of
 ARM64 have the file alignment of 64 KB, so the ARM64 tree is larger. With
-both trees and the files of the mod the APK is APKSIZE.
+both trees and the files of the mod the APK is 206.8 MB (216,848,430 bytes).
 
 **The APK.** `build_apk.ps1` puts the tree of each ABI that has one into
 the APK as `assets/wine/<abi>.tar` (the method deflate) and

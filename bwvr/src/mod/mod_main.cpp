@@ -122,6 +122,10 @@ void NoteDepthInstall();
 void IntroSkipFrame(uintptr_t caller, bwvr::XrScreen* screen);
 // hang_watch.cpp: the watch of the frame thread (hang_watch, a test key).
 void HangWatchFrame();
+// stall_watch.cpp: the module list at a stall (stall_modules, stall_addrs)
+// and the test spin (test_stall_ms).
+void StallWatchStart(bool on, const char* addrs, int test_stall_ms);
+void StallWatchFrame();
 // controllers.cpp
 void ControllerHintsSetOptions(bool on, const char* forced_profile);
 bool ControllerHintsInstall();
@@ -382,6 +386,9 @@ int g_profile = 0;
 bool g_headless_grab = false;
 bool g_skip_desktop = true;
 bool g_time_log = true;  // time_log
+bool g_stall_modules = true;  // stall_modules
+char g_stall_addrs[512] = "";  // stall_addrs
+int g_test_stall_ms = 0;  // test_stall_ms
 int g_capture_seconds = 0;
 // Things inside Process3dEngine that step state rather than draw. They
 // must run once a frame, not once an eye. See pass_guard.cpp.
@@ -1559,6 +1566,15 @@ void ReadSettings() {
   // time_log=1: each 10 s one line with the parts of a frame of the game. 0:
   // no line.
   g_time_log = GetPrivateProfileIntA("bwvr", "time_log", 1, path) != 0;
+  // THE MODULE LIST AT A STALL (stall_watch.cpp, docs/backend.md, "The
+  // module list at a stall"). stall_modules=1: when no frame ends for 5 s,
+  // the log gets the modules of the process and the regions of the
+  // addresses of stall_addrs. 0: no watch. test_stall_ms=N: a test aid, the
+  // frame thread spins N ms one time, 20 s after the first scene walk.
+  g_stall_modules = GetPrivateProfileIntA("bwvr", "stall_modules", 1, path) != 0;
+  GetPrivateProfileStringA("bwvr", "stall_addrs", "", g_stall_addrs, sizeof(g_stall_addrs),
+                           path);
+  g_test_stall_ms = static_cast<int>(GetPrivateProfileIntA("bwvr", "test_stall_ms", 0, path));
   if (g_xr_input.mode != 0) g_stereo_headless = true;
   // THE QUAD LAYERS FOR THE HEADSET APP (xr_layers.h, docs/android.md, "The
   // quad layers"). xr_input_layers=1: with xr_input=1 the interface goes as
@@ -1794,6 +1810,29 @@ void ReadSettings() {
 
 void ModLogNowhere(const char* format, ...);
 double MsSince(const LARGE_INTEGER& start);
+
+// THE VARIABLES OF BOX64 that reached the game (docs/android.md, "The
+// variables of Box64"). wowbox64.dll of the headset app reads its settings
+// from this environment. One line with each variable that starts with
+// BOX64_, so the log shows what the app gave to the game.
+void LogBox64Environment() {
+  char* block = GetEnvironmentStringsA();
+  if (block == nullptr) return;
+  char list[1024];
+  list[0] = 0;
+  int count = 0;
+  for (const char* e = block; *e != 0; e += strlen(e) + 1) {
+    if (strncmp(e, "BOX64_", 6) != 0) continue;
+    if (strlen(list) + strlen(e) + 3 < sizeof(list)) {
+      if (count > 0) strcat_s(list, ", ");
+      strcat_s(list, e);
+    }
+    ++count;
+  }
+  FreeEnvironmentStringsA(block);
+  ModLog("box64        : the environment of the game has %d variables of Box64%s%s", count,
+         count > 0 ? ": " : "", list);
+}
 void StartVrFromThread();
 void VrSessionRuns(bwvr::XrScreen* screen, uint32_t width, uint32_t height);
 
@@ -1907,6 +1946,8 @@ void StartVrStep() {
     // The input channel takes the place of the session and of the fake
     // sources, at the same places.
     TimeLogSetOn(g_time_log);
+    StallWatchStart(g_stall_modules, g_stall_addrs, g_test_stall_ms);
+    LogBox64Environment();
     XrInputSetOptions(g_xr_input);
     XrInputStart(g_dir);
     XrLayersSetOptions(g_xr_layers, XrInputOn());
@@ -2529,6 +2570,8 @@ void __cdecl h_FinishFrame() {
   // The watch of the frame thread counts each frame, also of the logos
   // (hang_watch, a test key).
   HangWatchFrame();
+  // The watch of a stall counts each frame too (stall_modules).
+  StallWatchFrame();
 
   // The logos at the start of the game end on a press of a controller
   // button. The caller of FinishFrame says which logo plays.

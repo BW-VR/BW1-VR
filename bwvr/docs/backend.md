@@ -64,6 +64,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`) |
 | `src/mod/time_log.cpp`, `time_log_math.h` | The time log: each 10 s the parts of a frame of the game (`time_log`). The math checks are in `test/controller_math/time_log_checks.h` |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`) |
+| `src/mod/stall_watch.cpp`, `stall_math.h` | The module list at a stall (`stall_modules`, `stall_addrs`), and the test spin (`test_stall_ms`). The math checks are in `test/controller_math/stall_checks.h` |
 | `src/mod/crash_report.cpp` | The report of a crash in the log, and the dump `bwvr-crash.dmp` (`crash_report`) |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
@@ -1522,6 +1523,74 @@ while the frame thread makes frames. With each of the two values a fault
 that no handler takes writes its code, its place and the return addresses
 on the stack of its thread (a stack overflow shows the calls that repeat),
 and the frame thread keeps 64 KiB of its stack for that line.
+
+### The module list at a stall
+
+In the headset app the game can stop: no frame ends, and the main thread
+of the game runs (`android.md`, "The time log of the app"). A line of the
+log of Wine can then name an address, for example the critical section of
+a line "RtlpWaitForCriticalSection section 000000007AF441E8". Only the
+process of the game knows what is at that address.
+
+`stall_modules=1` (the default, `stall_watch.cpp`, the rules in
+`stall_math.h`) starts a small thread of the mod that sleeps 500 ms at a
+time and looks at the count of the frames that ended (`h_FinishFrame`, also
+of the logos and the dialog boxes). When the count stays the same for 5 s,
+the thread writes one time for that stall:
+
+- one line with the number of the stall and the count of the frames, then
+  one line for each module of the process (`K32EnumProcessModules`,
+  `K32GetModuleInformation`, `GetModuleFileNameA`): the base, the end, the
+  size and the path, sorted by base.
+- for each address of `stall_addrs` one line with the result of
+  `VirtualQuery`: the region, the allocation base, the state, the
+  protection and the type, and the module of the list that holds it, with
+  the offset in it, or "It is in no module".
+
+```
+stall        : stall 1: no frame of the game ended for 5 s (after 3475 frames). The 54 modules of the process, sorted by base, and 2 addresses of stall_addrs
+stall        : module 0x00400000 to 0x00FC6000 (0xBC6000 bytes) G:\runblack.exe
+stall        : module 0x7BC30000 to 0x7BEA6000 (0x276000 bytes) C:\windows\system32\kernelbase.dll
+stall        : the address 0x7AF441E8: VirtualQuery gives the region 0x7AF44000 to 0x7B563000 (0x61F000 bytes), the allocation base 0x7AC60000, the state MEM_COMMIT, the protection 0x2, the type MEM_IMAGE. It is in the module C:\windows\system32\shell32.dll+0x2E41E8
+```
+
+These lines are of the emulator (the x86_64 Wine of the APK with
+`wow64cpu.dll`). There the address of the lock line of the Quest is in the
+read only data of `shell32.dll`. The DLLs of i386 of the Wine tree of
+arm64-v8a can have other bases, so only the list of a stop on the Quest can
+name that address there.
+
+A new frame ends the stall, and the next stall writes again. The first 10
+stalls of a game get the whole list. Each later stall gets one line, so a
+game that stops again and again does not fill the log. The thread does
+nothing else: it does not stop or read a thread of the game. The frame
+thread only adds 1 to the count at the end of each frame. The log can need a
+lock that the stopped thread holds: then the list does not come, and the
+game is as it is with no watch. `stall_modules=0`: no thread and no count.
+`stall_addrs` (empty by default) has hexadecimal addresses with spaces or
+commas between them, with or without `0x`, with up to 16 digits as Wine
+writes them, at most 16 addresses of 32 bits. A word that is not such an
+address gives one line and does not count. There is no test key: the
+headset app has no hot keys of the mod, and the list changes nothing in
+the game.
+
+**The test spin.** `test_stall_ms=N` (a test aid, 0 by default): the frame
+thread spins N ms, one time, 20 s after the first scene walk of the game
+(`StallTestWalk` at the end of a scene walk of `stereo.cpp`). A spin and not
+a sleep, so the thread is in the state R, as the main thread of the game at
+a stop on the Quest. The log has a line at the start and at the end of the
+spin. With 0 the end of a scene walk makes no read of the clock for it.
+
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile ... -TestSave
+pen -PlaySeconds 90 -TestStallMs 8000 -StallAddrs '7B001000
+000000007AF441E8'`, both games): the spin came 20 s after the first scene
+walk and took 8000 ms. 5 s into it the app logged the line of a stop with
+the main thread in the state R, the mod logged one list of 54 modules,
+sorted by base, with `runblack.exe` at 0x00400000 and the `ddraw.dll` of
+the mod, and a line of `VirtualQuery` for each address with the module of
+the list that holds it. After the spin the frames came again to the app.
+The load of the test save gave no stall of 5 s. With `-StallModules 0` the
+mod has no watch and no list at the spin.
 
 **The report of a crash.** `crash_report=1` (the default, `crash_report.cpp`)
 puts an unhandled exception filter of the mod in place when the DLL loads. A
@@ -5339,6 +5408,9 @@ keys that the launcher sets.
 | `fast_transform` | 1 | 1: the two vertex loops of the engine run with SSE, with the bits of the game. 0: on the x87 unit. See "The vertex loops with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `hang_watch` | 0 | A test key: 1 the place of the frame thread when it makes no frame for 8 s, 2 each 8 s. With each of the two the place of a fault. See "The watch of the frame thread" |
+| `stall_modules` | 1 | 1: when no frame of the game ends for 5 s, the log gets the modules of the process and the regions of the addresses of `stall_addrs`, one time for each stall. 0: no watch. There is no test key. See "The module list at a stall" |
+| `stall_addrs` | (empty) | Hexadecimal addresses for the lines of `VirtualQuery` at a stall. See "The module list at a stall" |
+| `test_stall_ms` | 0 | A test aid: the frame thread spins that many ms, one time, 20 s after the first scene walk. See "The module list at a stall" |
 | `crash_report` | 1 | 1: a fault that no handler takes writes a report to the log and the dump `bwvr-crash.dmp`. 0: no report and no dump. See "The report of a crash" |
 | `crash_test_frame` | 0 | A test key of the desktop runs: the frame of `FinishFrame` at which the mod writes to address 0. See "The report of a crash" |
 | `vk_lines` | 1 | With `backend=vulkan`: 1 a draw of points or lines becomes triangles of 1 pixel across, 0 it is not drawn. See "The backend of the mod on Vulkan" |

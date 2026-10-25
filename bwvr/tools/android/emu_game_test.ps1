@@ -223,6 +223,39 @@
     game, and the line of the cores. 0: the test checks that no such line
     is there.
 
+.PARAMETER TestStallMs
+    The value of test_stall_ms in bwvr.ini (docs/backend.md, "The module
+    list at a stall"): the frame thread of the mod spins that many ms, one
+    time, 20 s after the first scene walk of each game. 0 (the default): no
+    key. In each game with the spin the test checks the lines of the spin,
+    the line of a stop of the app (time_log=1), that frames come again
+    after it, and with stall_modules=1 the module list of the mod and the
+    line of each address of -StallAddrs, with its module from the list.
+    Game 2 (the test save) must have the spin.
+
+.PARAMETER StallAddrs
+    The value of stall_addrs in bwvr.ini: hexadecimal addresses with spaces
+    between them. Empty (the default): no key.
+
+.PARAMETER StallModules
+    The value of stall_modules in bwvr.ini: 1 the module list at a stall,
+    0 none (the test checks that the mod logs no list). -1 (the default): no
+    key, and the mod has the list of its default.
+
+.PARAMETER Box64StrongMem
+    The value of box64_strongmem in bwvr.ini (docs/android.md, "The
+    variables of Box64"): 0 to 3. -1 (the default): no key. With this or
+    -Box64Env the test checks the line of the app with the variables that
+    the game gets, a line for each word of box64_env that does not go, the
+    line of the mod with the variables of Box64 in the environment of the
+    game, and the environment of runblack.exe (/proc/<pid>/environ, as
+    root). The emulator has no Box64, so no test shows what Box64 does with
+    them.
+
+.PARAMETER Box64Env
+    The value of box64_env in bwvr.ini, for example
+    'BOX64_DYNAREC_BIGBLOCK=0 FOO=1'. Empty (the default): no key.
+
 .PARAMETER IniExtra
     More lines for bwvr.ini, for example 'profile_sample_outside=1000'. A
     key that the save of the menu deletes (kRetiredKeys) does not reach the
@@ -258,6 +291,11 @@ param(
     [int[]]$EyeSize = @(),
     [ValidateSet(-1, 0, 1)][int]$EyeSizeMax = -1,
     [ValidateSet(-1, 0, 1)][int]$TimeLog = -1,
+    [int]$TestStallMs = 0,
+    [string]$StallAddrs = '',
+    [ValidateSet(-1, 0, 1)][int]$StallModules = -1,
+    [ValidateSet(-1, 0, 1, 2, 3)][int]$Box64StrongMem = -1,
+    [string]$Box64Env = '',
     [string[]]$IniExtra = @(),
     [switch]$Keep
 )
@@ -745,6 +783,92 @@ function TimeChecks([int]$N, [string]$Part, [string]$ModLog, [double]$GameSecond
     Expect ($appTime -gt 0 -and $modTime -gt 0 -and [math]::Abs($ra - $rm) -le 0.1 * $rm + 2.0) ("game $N`: the frames a second of the game fit in both logs: {0:N1} in the app ({1} frames in {2:N1} s) and {3:N1} in the mod ({4} frames in {5:N1} s)" -f $ra, $appFrames, $appTime, $rm, $modFrames, $modTime)
 }
 
+# THE MODULE LIST AT A STALL AND THE TEST SPIN of one game (-TestStallMs,
+# -StallAddrs, -StallModules): the part of the log of the app of this game,
+# and the log of the mod of this game.
+function StallChecks([int]$N, [string]$Part, [string]$ModLog) {
+    if ($StallModules -eq 0) {
+        Expect ($ModLog -match 'stall        : stall_modules=0\. No module list at a stall' -and $ModLog -notmatch 'stall        : (stall \d+:|module 0x)') "game $N with stall_modules=0: the mod has no watch and no module list"
+    } else {
+        Expect ($ModLog -match 'stall        : stall_modules=1\. When no frame of the game ends for 5 s') "game $N`: the mod has stall_modules=1"
+    }
+    if ($TestStallMs -le 0) { return }
+    $spin = [regex]::Match($ModLog, "stall        : test_stall_ms=$TestStallMs`: the frame thread spins now")
+    $ended = [regex]::Match($ModLog, "stall        : test_stall_ms=$TestStallMs`: the spin ended after (\d+) ms")
+    if (-not $spin.Success) {
+        Note "game $N had no spin of test_stall_ms (no 20 s of scene walks)"
+        Expect ($N -ne 2) 'game 2 (the test save) had the spin of test_stall_ms'
+        return
+    }
+    Expect ($ended.Success -and [int]$ended.Groups[1].Value -ge $TestStallMs) ("game $N`: the frame thread of the mod spun $TestStallMs ms: " + $ended.Value)
+    $stop = [regex]::Match($Part, 'time         : no new frame of the game came to the reader for ([\d.]+) s[^\r\n]*')
+    Expect ($stop.Success -and $stop.Value -match 'runblack\.exe \d+ \(the main thread\) R ') ("game $N`: the app logged the line of a stop, with the main thread in the state R: " + $(if ($stop.Success) { $stop.Value.Substring(0, [math]::Min(300, $stop.Value.Length)) } else { 'none' }))
+    $after = if ($stop.Success) { $Part.Substring($stop.Index) } else { '' }
+    Expect ($after -match 'live         : frames come') "game $N`: frames came again to the app after the stop"
+    $modAfter = if ($ended.Success) { $ModLog.Substring($ended.Index) } else { '' }
+    $tl = [regex]::Match($modAfter, 'time log     : [\d.]+ s, (\d+) frames of the game')
+    Expect ($tl.Success -and [int]$tl.Groups[1].Value -gt 0) ("game $N`: the game made frames after the spin: " + $tl.Value)
+    $lists = @([regex]::Matches($ModLog, 'stall        : stall (\d+): no frame of the game ended for 5 s \(after (\d+) frames\)\. The (\d+) modules of the process'))
+    if ($StallModules -eq 0) {
+        Expect ($lists.Count -eq 0) "game $N with stall_modules=0: no module list at the spin"
+        return
+    }
+    $spinList = @($lists | Where-Object { $_.Index -gt $spin.Index -and $_.Index -lt $ended.Index })
+    Expect ($spinList.Count -eq 1) ("game $N`: the mod logged one module list during the spin: " + $(if ($spinList.Count) { $spinList[0].Value } else { "none of $($lists.Count) lists" }))
+    if ($spinList.Count -eq 0) { return }
+    $want = [int]$spinList[0].Groups[3].Value
+    $listPart = $ModLog.Substring($spinList[0].Index)
+    $mods = @([regex]::Matches($listPart, 'stall        : module 0x([0-9A-F]{8}) to 0x([0-9A-F]{8}) \(0x[0-9A-F]+ bytes\) ([^\r\n]+)') | Select-Object -First $want | ForEach-Object {
+        @{ Base = [Convert]::ToUInt32($_.Groups[1].Value, 16); End = [Convert]::ToUInt32($_.Groups[2].Value, 16); Name = $_.Groups[3].Value.Trim() } })
+    $sorted = $true
+    for ($i = 1; $i -lt $mods.Count; $i++) { if ($mods[$i].Base -lt $mods[$i - 1].Base) { $sorted = $false } }
+    Expect ($want -gt 0 -and $mods.Count -eq $want -and $sorted) "game $N`: the list has $want modules, sorted by base ($($mods.Count) module lines)"
+    Expect (@($mods | Where-Object { $_.Name -match 'runblack\.exe$' }).Count -eq 1 -and @($mods | Where-Object { $_.Name -match '(?i)ddraw\.dll$' }).Count -eq 1) "game $N`: the list has runblack.exe and ddraw.dll"
+    $mods | Where-Object { $_.Name -match '(?i)(runblack\.exe|ddraw\.dll|kernelbase\.dll|ntdll\.dll)$' } | ForEach-Object { Note ('bwvr.log: module 0x{0:X8} to 0x{1:X8} {2}' -f $_.Base, $_.End, $_.Name) }
+    $inAny = 0
+    foreach ($w in @($StallAddrs -split '[ ,]+' | Where-Object { $_ -ne '' })) {
+        $value = [Convert]::ToUInt64(($w -replace '^0[xX]', ''), 16)
+        $hex = '0x{0:X8}' -f $value
+        $line = [regex]::Match($listPart, "stall        : the address $hex`: VirtualQuery gives the region [^\r\n]*")
+        $holder = @($mods | Where-Object { $value -ge $_.Base -and $value -lt $_.End }) | Select-Object -First 1
+        $named = if ($holder) { "It is in the module $([regex]::Escape($holder.Name))\+0x" } else { 'It is in no module' }
+        if ($holder) { $inAny++ }
+        Expect ($line.Success -and $line.Value -match $named) ("game $N`: the line of the address $hex names " + $(if ($holder) { $holder.Name } else { 'no module' }) + ' as the list does: ' + $line.Value)
+    }
+    if ($StallAddrs -ne '') { Expect ($inAny -ge 1) "game $N`: an address of -StallAddrs is in a DLL of the run ($inAny)" }
+}
+
+# THE VARIABLES OF BOX64 of one game (-Box64StrongMem, -Box64Env): the
+# line of the app, the line of the mod, and the environment of runblack.exe.
+function Box64Checks([int]$N, [string]$Part, [string]$ModLog, [string]$Environ) {
+    if ($Box64StrongMem -lt 0 -and $Box64Env -eq '') { return }
+    $strong = [math]::Max(0, $Box64StrongMem)
+    $want = @()
+    if ($strong -ge 1) { $want += "BOX64_DYNAREC_STRONGMEM=$strong" }
+    $notWant = @()
+    foreach ($w in @($Box64Env -split '\s+' | Where-Object { $_ -ne '' })) {
+        if ($w -cmatch '^BOX64_[A-Z0-9_]+=' -and $want -notcontains $w) { $want += $w } else { $notWant += $w }
+    }
+    $app = [regex]::Match($Part, 'game         : box64_strongmem=(\d), box64_env="([^"]*)"\. The game gets ([^\r\n]*)')
+    $given = if ($app.Success) { $app.Groups[3].Value } else { '' }
+    Expect ($app.Success -and [int]$app.Groups[1].Value -eq $strong -and $app.Groups[2].Value -eq $Box64Env -and @($want | Where-Object { $given -notmatch [regex]::Escape($_) }).Count -eq 0) ("game $N`: the app logged the variables of Box64 for the game: " + $app.Value)
+    foreach ($w in $notWant) {
+        Expect ($Part -match "game         : box64_env: $([regex]::Escape($w)) \(") "game $N`: the app logged that $w does not go to the game"
+        Expect ($given -notmatch [regex]::Escape($w)) "game $N`: $w is not in the variables of the game"
+    }
+    $mod = [regex]::Match($ModLog, 'box64        : the environment of the game has (\d+) variables of Box64(: ([^\r\n]*))?')
+    $modList = if ($mod.Success) { $mod.Groups[3].Value } else { '' }
+    Expect ($mod.Success -and [int]$mod.Groups[1].Value -eq $want.Count -and @($want | Where-Object { $modList -notmatch [regex]::Escape($_) }).Count -eq 0) ("game $N`: the mod in runblack.exe has the variables in its environment: " + $mod.Value)
+    $vars = @($Environ -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    $box = @($vars | Where-Object { $_ -like 'BOX64_*' })
+    Note ("game $N`: /proc/<pid>/environ of runblack.exe has $($vars.Count) variables, of Box64: " + ($box -join ' '))
+    Expect ($vars.Count -gt 0 -and @($want | Where-Object { $vars -notcontains $_ }).Count -eq 0 -and $box.Count -eq $want.Count) "game $N`: the environment of runblack.exe has each variable of Box64 ($($want -join ' '))"
+    foreach ($w in $notWant) {
+        $name = ($w -split '=')[0]
+        Expect (@($vars | Where-Object { $_ -like "$name=*" }).Count -eq 0) "game $N`: the environment of runblack.exe has no $name"
+    }
+}
+
 # 1. The test runtime.
 Say 'Build the OpenXR test runtime for x86_64'
 $runtimeBuild = Join-Path $Bwvr 'build-android\test-runtime'
@@ -1034,6 +1158,11 @@ try {
     if ($DisplayHz -gt 0) { $iniLines += "display_hz=$DisplayHz" }
     if ($EyeSizeMax -ge 0) { $iniLines += "eye_size_max=$EyeSizeMax" }
     if ($TimeLog -ge 0) { $iniLines += "time_log=$TimeLog" }
+    if ($TestStallMs -gt 0) { $iniLines += "test_stall_ms=$TestStallMs" }
+    if ($StallAddrs -ne '') { $iniLines += "stall_addrs=$StallAddrs" }
+    if ($StallModules -ge 0) { $iniLines += "stall_modules=$StallModules" }
+    if ($Box64StrongMem -ge 0) { $iniLines += "box64_strongmem=$Box64StrongMem" }
+    if ($Box64Env -ne '') { $iniLines += "box64_env=$Box64Env" }
     $iniLines += $IniExtra
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$GameDir/bwvr.ini")
@@ -1186,6 +1315,13 @@ try {
         Note "the app started the process $started ($startedName). runblack.exe is $game, its parent is $gameParent ($parentName)"
         $results["tree$n"] = "the app started $started ($startedName), runblack.exe $game has the parent $gameParent ($parentName)"
         Expect ($started -ne '' -and $byPid.ContainsKey($started)) "the log names the process that the app started, and it runs ($started, $startedName)"
+        # The environment of runblack.exe, as root, for the checks of the
+        # variables of Box64.
+        $environ = ''
+        if ($game -and ($Box64StrongMem -ge 0 -or $Box64Env -ne '')) {
+            $environ = AdbOut @('shell', "cat /proc/$game/environ | tr '\0' '\n'")
+            Set-Content -LiteralPath (Join-Path $Out "environ-game$n.txt") -Value $environ -Encoding utf8
+        }
         Hold "measured$n"
         # The eye pictures (the read back takes a time), then the menu over
         # the game, and Quit game.
@@ -1298,6 +1434,8 @@ try {
         $gameEnd = $part.IndexOf('game         : the game ended with the exit code')
         $gamePart = if ($gameEnd -ge 0) { $part.Substring(0, $gameEnd) } else { $part }
         TimeChecks $n $gamePart $modLogNow $gameSeconds
+        StallChecks $n $gamePart $modLogNow
+        Box64Checks $n $gamePart $modLogNow $environ
         Adb @('pull', "$AppDir/wine.log", (Join-Path $Out "wine-game$n.log"))
         # The sound of this game: the stream of wineaaudio in wine.log, and
         # QMixer in the log of the mod.

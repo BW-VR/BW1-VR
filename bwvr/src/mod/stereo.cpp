@@ -96,6 +96,9 @@ void XrHoldToggle(const char* keys);
 bool VulkanOnly();
 // mod_main.cpp: a line of the log with the DLLs of Direct3D in the process.
 void LogDirect3DModules(const char* when);
+// stall_watch.cpp: the test spin of test_stall_ms, at the end of a scene
+// walk.
+void StallTestWalk();
 
 extern void ModLog(const char* format, ...);
 
@@ -1825,6 +1828,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     SceneSampleWalk(false);
     QueryPerformanceCounter(&t3);
     TimeLogWalk(false);
+    // The test spin of test_stall_ms (stall_watch.cpp).
+    StallTestWalk();
     // This eye pass is over. Nothing after it may put its camera back.
     g_eye_placement = kEyeNotPlaced;
     g_pass_eye = -1;

@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -118,14 +119,87 @@ inline std::string GameRegistry(int width, int height, bool audio) {
 // builtin DirectDraw in the tree ("Only Vulkan").
 constexpr char kGameOverrides[] = "WINEDLLOVERRIDES=mscoree,mshtml=;ddraw=n";
 
+// THE VARIABLES OF BOX64 FOR THE GAME (docs/android.md, "The variables of
+// Box64"). wowbox64.dll reads its settings from the Windows environment of
+// its process (LoadEnvVariables of Box64 0.4.4, GetEnvironmentVariableA),
+// and only the settings that are "available in WowBox64". It reads no
+// box64rc file under Windows. Wine gives the Unix environment of the loader
+// to the Windows environment of start.exe, and start.exe gives it to
+// runblack.exe. So only the game gets them: reg import, wineserver and
+// wineboot start with the environment of each program.
+//
+//   box64_strongmem=0  no variable (the default)
+//   box64_strongmem=1 to 3  BOX64_DYNAREC_STRONGMEM=<n>: memory barriers for
+//                    the strong memory order of x86 (1 at writes, 2 also at
+//                    SIMD instructions, 3 also more often)
+//   box64_env        more variables: NAME=VALUE with spaces between them.
+//                    Only names that start with BOX64_ go to the game.
+constexpr char kStrongMemName[] = "BOX64_DYNAREC_STRONGMEM";
+constexpr int kStrongMemMost = 3;
+
+struct Box64Env {
+  std::vector<std::string> vars;     // NAME=VALUE for the game, in order
+  std::vector<std::string> refused;  // each word of box64_env that does not go, with why
+};
+
+inline bool IsBox64Name(const std::string& name) {
+  if (name.compare(0, 6, "BOX64_") != 0 || name.size() == 6) return false;
+  for (char c : name) {
+    if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) return false;
+  }
+  return true;
+}
+
+inline Box64Env Box64Vars(int strongmem, const std::string& extra) {
+  Box64Env out;
+  std::vector<std::string> names;
+  if (strongmem >= 1 && strongmem <= kStrongMemMost) {
+    out.vars.push_back(std::string(kStrongMemName) + "=" + std::to_string(strongmem));
+    names.push_back(kStrongMemName);
+  }
+  size_t at = 0;
+  while (at < extra.size()) {
+    while (at < extra.size() && (extra[at] == ' ' || extra[at] == '\t')) ++at;
+    size_t end = at;
+    while (end < extra.size() && extra[end] != ' ' && extra[end] != '\t') ++end;
+    if (end == at) break;
+    const std::string word = extra.substr(at, end - at);
+    at = end;
+    const size_t eq = word.find('=');
+    const std::string name = eq == std::string::npos ? word : word.substr(0, eq);
+    if (eq == std::string::npos) {
+      out.refused.push_back(word + " (no =VALUE)");
+    } else if (!IsBox64Name(name)) {
+      out.refused.push_back(word + " (the name does not start with BOX64_)");
+    } else if (std::find(names.begin(), names.end(), name) != names.end()) {
+      out.refused.push_back(word + (name == kStrongMemName && strongmem >= 1
+                                        ? " (box64_strongmem sets it)"
+                                        : " (the name comes two times)"));
+    } else {
+      out.vars.push_back(word);
+      names.push_back(name);
+    }
+  }
+  return out;
+}
+
 // The environment of the game: the environment of a program in Wine with
-// kGameOverrides in place of its overrides.
-inline std::vector<std::string> GameEnvironment(const std::vector<std::string>& env) {
+// kGameOverrides in place of its overrides, and the variables of Box64
+// (Box64Vars) in place of an inherited variable with the same name.
+inline std::vector<std::string> GameEnvironment(const std::vector<std::string>& env,
+                                                const std::vector<std::string>& box64 = {}) {
   std::vector<std::string> out;
   for (const std::string& e : env) {
-    if (e.compare(0, 17, "WINEDLLOVERRIDES=") != 0) out.push_back(e);
+    if (e.compare(0, 17, "WINEDLLOVERRIDES=") == 0) continue;
+    bool replaced = false;
+    for (const std::string& v : box64) {
+      const size_t eq = v.find('=');
+      if (eq != std::string::npos && e.compare(0, eq + 1, v, 0, eq + 1) == 0) replaced = true;
+    }
+    if (!replaced) out.push_back(e);
   }
   out.push_back(kGameOverrides);
+  for (const std::string& v : box64) out.push_back(v);
   return out;
 }
 

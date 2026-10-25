@@ -976,10 +976,19 @@ that moves while the Hand takes it.
   and the load of the cores. The step after it comes from those numbers.
   Before a merge to main: the desk run on the PC (the build before, the new
   build, and the new build with `time_log=0`).
-  Open: why the Quest 3 asks for 4096 by 4291, the stop of the game 15 s
-  after the load of a saved game (the line of a stop of the time log names
-  the state of each thread), and a way to find the hot code of the game
-  under Box64 (`android.md`, "The hot code under Box64": no way works yet).
+  Open: why the Quest 3 asks for 4096 by 4291, and a way to find the hot
+  code of the game under Box64 (`android.md`, "The hot code under Box64":
+  no way works yet).
+  **The stop of the game** about 10 s after the load of a saved game on the
+  Quest: the main thread of the game runs at one core, and `wine.log` has a
+  line "RtlpWaitForCriticalSection section 000000007AF441E8". Next run in
+  the headset: the module list of the mod at the stop (`stall_modules=1`,
+  `backend.md`, "The module list at a stall") with
+  `stall_addrs=7AF441E8`, to name the module or the heap of that section,
+  and a try of the row "Strict memory order of the game (Box64, slower)"
+  at 1, 2 and 3 (`box64_strongmem`, `android.md`, "The variables of
+  Box64"), to see if the memory order of Box64 is the cause. Not proven:
+  the cause.
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

@@ -82,6 +82,10 @@ class WineRuntime {
     std::string profile_reg;
     std::string profile_stamp;
     std::string profile_name;
+    // The variables of Box64 for the game (play_rules.h, Box64Vars):
+    // box64_strongmem of the menu and box64_env of bwvr.ini.
+    int box64_strongmem = 0;
+    std::string box64_env;
   };
   enum class GameState { kIdle, kStarting, kRunning, kEnded };
   bool Ready() const { return ready_; }

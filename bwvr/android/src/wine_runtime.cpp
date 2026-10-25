@@ -306,7 +306,18 @@ void WineRuntime::RunGame(Game game) {
     std::lock_guard<std::mutex> hold(lock_);
     state_ = GameState::kRunning;
   }
-  const std::vector<std::string> env = play_rules::GameEnvironment(env_);
+  // THE VARIABLES OF BOX64 (play_rules.h, Box64Vars): only for the game.
+  const play_rules::Box64Env box64 = play_rules::Box64Vars(game.box64_strongmem, game.box64_env);
+  std::string given;
+  for (const std::string& v : box64.vars) given += (given.empty() ? "" : " ") + v;
+  AppLog("game         : box64_strongmem=%d, box64_env=\"%s\". The game gets %s%s",
+         game.box64_strongmem, game.box64_env.c_str(),
+         given.empty() ? "no variable of Box64" : "the variables of Box64 ",
+         given.c_str());
+  for (const std::string& r : box64.refused) {
+    AppLog("game         : box64_env: %s does not go to the game", r.c_str());
+  }
+  const std::vector<std::string> env = play_rules::GameEnvironment(env_, box64.vars);
   const std::vector<std::string> args = play_rules::GameArgs(paths_.loader, game.new_game);
   AppLog("game         : start %s%s in Wine, in the folder %s, with %s", play_rules::kGameExe,
          game.new_game ? " -NEWGAME" : "", game_.c_str(), play_rules::kGameOverrides);

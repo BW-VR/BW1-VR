@@ -85,6 +85,14 @@ Summary:
   (`time_log=1`, see "The time log of the app"). Under Box64 no way gives
   the x86 address of the hot code of the game yet (see "The hot code under
   Box64").
+- **A stop of the game.** When no frame of the game ends for 5 s, the mod
+  writes the modules of the game process and the regions of the addresses
+  of `stall_addrs` to its log (`stall_modules=1`, `backend.md`, "The module
+  list at a stall"), so an address of a lock line of Wine can be named.
+- **The variables of Box64.** The row "Strict memory order of the game
+  (Box64, slower)" of the page "Testing" (`box64_strongmem`) and the key
+  `box64_env` give variables of Box64 to the game alone (see "The variables
+  of Box64").
 
 ## Source files of this area
 
@@ -149,8 +157,9 @@ Summary:
 | `tools/android/pack_wine.sh` | The Wine tree of the APK for each ABI, with its checks |
 | `tools/android/build_box64.ps1` | The build of Box64 and of `wowbox64.dll` |
 | `tools/android/emu_wine_test.ps1` | The test of Wine in the app in the Android emulator |
-| `android/src/play_rules.h` | The rules of "Play": the keys of a run, the files of the mod, the registry of the game, the environment and the command line of the game, the input of the mod while the menu shows over the game. No Android code |
+| `android/src/play_rules.h` | The rules of "Play": the keys of a run, the files of the mod, the registry of the game, the environment and the command line of the game, the variables of Box64 for the game (`Box64Vars`), the input of the mod while the menu shows over the game. No Android code |
 | `test/controller_math/play_rules_checks.h` | The math checks of `play_rules.h` and of "Quit game" in the menu |
+| `test/controller_math/stall_checks.h` | The math checks of the filter of `box64_env`, of the environment of the game with the variables of Box64, of the row of the memory order of Box64, and of `stall_math.h` of the mod |
 | `tools/android/emu_game_test.ps1` | The game from the menu of the app in the Android emulator, with the test runtime |
 | `android/src/eye_size.h` | The cap of the size of the eyes that the app takes from the runtime (`eye_size_max`). No Android code |
 | `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
@@ -278,7 +287,8 @@ shadow, as the text of the game has.
   its value for a slider, the name of the item in a dark box for a list.
   "Back" is a button at the end. The page "Performance" also has the row
   "Display rate" of the app when the runtime gives display rates (see "The
-  display rate").
+  display rate"). The page "Testing" also has the row "Strict memory order
+  of the game (Box64, slower)" of the app (see "The variables of Box64").
 - **The help.** Below the rows, the help text of the row with the highlight,
   the same text as the tooltip of the launcher. The help of a group names
   the settings on its page.
@@ -982,7 +992,10 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    that stay out, the paths of each ABI, the build id, the environment of a
    program, the seed of `user.reg`, the marker of the prefix and the copy
    of the CPU DLL, the headers of the tar file and the names that stay in
-   the tree).
+   the tree), and the variables of Box64 and the stall (`stall_checks.h`:
+   the filter of `box64_env`, the environment of the game, the row of the
+   memory order of Box64, the parse of `stall_addrs`, the watch of a stall
+   and the time of the test spin).
 7. **In a headset** (only a headset can show it): install the APK with
    `adb install -r`, start it from "Unknown sources", and read the log. Look
    for the lines `xr           : runtime`, `the headset asks for` and `the
@@ -2577,7 +2590,12 @@ waits in the kernel), its percent of one core (user and system) since the
 last window and its core: "time : no new frame of the game for 5.0 s (the
 last is frame N). The threads of the game ...". So a frame that does not
 end, with a thread at 100 percent in the kernel, shows in one line. A load
-of the game can also give the line.
+of the game can also give the line. At the same stop the mod writes the
+modules of the game process to `bwvr.log` (`stall_modules=1`,
+`backend.md`, "The module list at a stall"), so an address of a line
+"RtlpWaitForCriticalSection" of `wine.log` can be named: put it into
+`stall_addrs` of `bwvr.ini`, and the next stop gives its region and its
+module.
 
 **The cost.** Some reads of the clock in a frame of the session and one in
 each frame that the reader takes, two timestamps in each command buffer of
@@ -2611,9 +2629,12 @@ window. While the test runtime reads back a picture, it holds a frame of the
 session for some seconds: then a window has, for example, "563 in
 xrWaitFrame or xrEndFrame" and fewer pictures, while the reader still takes
 each frame of the game. In the emulator the game, the app and Wine use less
-than one core in all. The emulator gives no stop of the game, so no test
-shows the line of a stop. With `-TimeLog 0` neither log has a line of the
-times.
+than one core in all. With `-TestStallMs 8000` (`test_stall_ms` of the mod,
+`backend.md`, "The module list at a stall") the frame thread of the mod
+spins 8 s, and the line of a stop comes after 5 s of it: "no new frame of
+the game came to the reader for 5.0 s ... runblack.exe 6183 (the main
+thread) R 62.9 (1.5 + 61.5)". After the spin the frames come again ("live
+: frames come"). With `-TimeLog 0` neither log has a line of the times.
 
 **Not shown yet:** the lines in a headset: the time of the GPU of a Quest 3,
 the waits of the runtime of Meta, the threads under Box64, the load of the
@@ -2683,6 +2704,62 @@ about 50. Under Box64 the same sampler gives the address of the last system
 call, as the source says. The emulator of the tests is x86_64, so it has no
 Box64: no run under Box64 was made. A run of `profile_sample_outside` on a
 Quest 3 would show it.
+
+## The variables of Box64
+
+The x86 code of the game runs in `wowbox64.dll` of Box64 on the ARM CPU of a
+headset. Two keys of the app give variables of Box64 to the game
+(`play_rules.h`, `Box64Vars`, `GameEnvironment`):
+
+- `box64_strongmem` (0 by default): the row "Strict memory order of the
+  game (Box64, slower)" of the page "Testing" of the menu. Off (0): no
+  variable. 1 to 3: `BOX64_DYNAREC_STRONGMEM=<n>`. An x86 CPU keeps the
+  order of the reads and the writes of memory between threads, and an ARM
+  CPU does not. The dynarec of Box64 then adds memory barriers: 1 at the
+  writes to memory, 2 also at the SIMD instructions, 3 also more often. The
+  game runs slower with each step. Code of the game or of a DLL that gives
+  data to another thread with no lock needs that order, and a fault there
+  can stop the game. Not known: if the stop of the game on the Quest comes
+  from that. The change counts at the next "Play".
+- `box64_env` (empty by default, only in `bwvr.ini`): more variables,
+  `NAME=VALUE` with spaces between them, for example
+  `box64_env=BOX64_DYNAREC_BIGBLOCK=0 BOX64_DYNAREC_SAFEFLAGS=2`. Only a name
+  that starts with `BOX64_` and has only capitals, digits and `_` goes to
+  the game, each name one time. Each other word gives one line "box64_env:
+  ... does not go to the game". With `box64_strongmem` 1 to 3 the key sets
+  `BOX64_DYNAREC_STRONGMEM`, and `box64_env` does not.
+
+**How WowBox64 reads them** (the source of Box64 0.4.4): `BTCpuProcessInit`
+of `wine/wow64/wowbox64.c` calls `LoadEnvVariables` (`src/tools/env.c`),
+which reads each variable with `GetEnvironmentVariableA`: the Windows
+environment of the process. It reads only the variables that are
+"available in WowBox64" (the column `wine` of `src/include/env.h`):
+`BOX64_DYNAREC_STRONGMEM` (0 to 4) and `BOX64_DYNAREC_BIGBLOCK` are. Under
+Windows it reads no box64rc file (`InitializeEnvFiles` has no part for
+`_WIN32`). It writes each variable that it takes to `wine.log`: a line
+"BOX64ENV: Variables overridden:", then one line for each variable.
+
+**The way to the game.** The app puts the variables into the environment of
+the loader of Wine that starts the game alone, not of `reg import`,
+`wineserver` or `wineboot`. Wine gives that environment to `start.exe`, and
+`start.exe` to `runblack.exe`. The log of the app has one line at the start
+of the game, "game : box64_strongmem=N, box64_env="...". The game gets
+...". At its start the mod writes the variables of Box64 of its own
+environment: "box64 : the environment of the game has N variables of
+Box64: ...". On a headset `wine.log` also has the lines of WowBox64.
+
+**What the emulator shows** (`emu_game_test.ps1 ... -Box64StrongMem 2
+-Box64Env 'BOX64_DYNAREC_BIGBLOCK=0 FOO=1'`, both games): the save of the
+menu kept `box64_strongmem=2`. The app logged "The game gets the variables
+of Box64 BOX64_DYNAREC_STRONGMEM=2 BOX64_DYNAREC_BIGBLOCK=0" and "box64_env:
+FOO=1 (the name does not start with BOX64_) does not go to the game". The
+mod in `runblack.exe` logged "the environment of the game has 2 variables
+of Box64: BOX64_DYNAREC_STRONGMEM=2, BOX64_DYNAREC_BIGBLOCK=0", and
+`/proc/<pid>/environ` of `runblack.exe` (read as root by the test) has the
+two variables and no `FOO`. The emulator runs the x86_64 Wine with
+`wow64cpu.dll` and no Box64, so only a headset can show what Box64 does
+with the variables: the lines of WowBox64 in `wine.log`, the speed, and if
+the game still stops.
 
 ## Wine in the app
 

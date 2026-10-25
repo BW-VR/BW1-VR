@@ -655,6 +655,11 @@ void Play(App* app, bool new_game) {
   game.new_game = new_game;
   app->menu.RenderSize(&game.width, &game.height);
   TakeProfile(app, &game);
+  // box64_strongmem (the row of the page Testing) and box64_env (bwvr.ini
+  // only): the variables of Box64 for the game. 0 and empty (the
+  // defaults): no variable.
+  game.box64_strongmem = app->menu.StrongMem();
+  game.box64_env = app->ini.Get("bwvr", "box64_env", "");
   if (!app->wine.StartGame(game)) {
     app->status = "Saved. A game runs already.";
     AppLog("menu         : %s. A game runs already", name);

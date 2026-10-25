@@ -32,6 +32,7 @@ enum class ItemKind {
   kSave,     // "Save Config"
   kSetting,  // a row of the table
   kDisplayRate,  // "Display rate": a row of the app, not of the table
+  kStrongMem,    // the memory order of Box64 (box64_strongmem): a row of the app
   kBack,     // back to the main page
   kQuit,     // "Quit game": while the game runs, above Exit
   kExit,     // "Exit": ends the app
@@ -95,6 +96,8 @@ class Menu {
     }
     display_wanted_ = ini.GetInt("bwvr", "display_hz", 0);
     display_hz_ = display_rate::Checked(display_wanted_, display_rates_);
+    strongmem_ = ini.GetInt("bwvr", "box64_strongmem", 0);
+    if (strongmem_ < 0 || strongmem_ > kStrongMemMost) strongmem_ = 0;
     headset_width_ = ini.GetInt("bwvr", "headset_width", 2064);
     headset_height_ = ini.GetInt("bwvr", "headset_height", 2208);
     guard_pct_ = ini.GetInt("bwvr", "one_walk_guard_pct", 25);
@@ -130,6 +133,7 @@ class Menu {
     // The display rate, only when the runtime gives rates: with no row the
     // key stays as it is.
     if (HasDisplayRow()) ini->SetInt("bwvr", "display_hz", display_hz_);
+    ini->SetInt("bwvr", "box64_strongmem", strongmem_);
     // The keys with one right answer. The renderer Vulkan has no bridge of
     // Direct3D 9.
     ini->Remove("bwvr", "gpu_bridge");
@@ -185,6 +189,12 @@ class Menu {
   int DisplayHz() const { return display_hz_; }
   // display_hz of bwvr.ini at the load.
   int DisplayWanted() const { return display_wanted_; }
+
+  // THE MEMORY ORDER OF BOX64 (box64_strongmem, play_rules.h, Box64Vars):
+  // the row of the page "Testing". 0 (the default): Box64 gets no variable.
+  // 1 to 3: BOX64_DYNAREC_STRONGMEM for the game, at the next Play.
+  static constexpr int kStrongMemMost = 3;
+  int StrongMem() const { return strongmem_; }
 
   // THE GAME. While the game runs, the main page has no "Play in VR" and no
   // "Play, new game", and "Quit game" is above "Exit" at the bottom. A
@@ -254,6 +264,7 @@ class Menu {
     if (IsRateGroup(group_) && HasDisplayRow()) {
       items.push_back({ItemKind::kDisplayRate, -1});
     }
+    if (IsTestGroup(group_)) items.push_back({ItemKind::kStrongMem, -1});
     items.push_back({ItemKind::kBack, -1});
     return items;
   }
@@ -280,6 +291,8 @@ class Menu {
         return "Exit";
       case ItemKind::kDisplayRate:
         return "Display rate";
+      case ItemKind::kStrongMem:
+        return "Strict memory order of the game (Box64, slower)";
       case ItemKind::kGroup:
       case ItemKind::kSetting:
         return st::kSettings[item.index].label;
@@ -293,6 +306,7 @@ class Menu {
     if (item.kind == ItemKind::kDisplayRate) {
       return display_hz_ > 0 ? std::to_string(display_hz_) + " Hz" : "Headset default";
     }
+    if (item.kind == ItemKind::kStrongMem) return StrongMemText(strongmem_);
     if (item.kind != ItemKind::kSetting) return "";
     const int i = item.index;
     const st::Setting& s = st::kSettings[i];
@@ -345,6 +359,10 @@ class Menu {
       }
       if (IsRateGroup(item.index) && HasDisplayRow()) {
         text += first ? "Display rate" : ", Display rate";
+        first = false;
+      }
+      if (IsTestGroup(item.index)) {
+        text += std::string(first ? "" : ", ") + Label({ItemKind::kStrongMem, -1});
       }
       return text + ".";
     }
@@ -369,6 +387,13 @@ class Menu {
                "smoother head motion. It costs more power and heat. The game itself "
                "can make fewer frames than the rate. Headset default: the app asks "
                "for no rate. The change counts at once.";
+      case ItemKind::kStrongMem:
+        return "Box64 runs the x86 code of the game on the ARM CPU of the headset. An x86 "
+               "CPU keeps the order of the reads and the writes of memory between threads, "
+               "and an ARM CPU does not. Code that needs that order can stop the game, for "
+               "example some seconds after a load. 1 to 3 add more memory barriers "
+               "(BOX64_DYNAREC_STRONGMEM): this can stop the game from hanging, and the "
+               "game runs slower. Off: no barriers. The change counts at the next Play.";
       default:
         return "";
     }
@@ -417,6 +442,13 @@ class Menu {
         changed_ = true;
         ++revision_;
       }
+      return;
+    }
+    if (item.kind == ItemKind::kStrongMem) {
+      // A list: it goes round.
+      strongmem_ = (strongmem_ + direction + kStrongMemMost + 1) % (kStrongMemMost + 1);
+      changed_ = true;
+      ++revision_;
       return;
     }
     if (item.kind != ItemKind::kSetting) return;
@@ -502,6 +534,7 @@ class Menu {
         return Action::kNone;
       case ItemKind::kSetting:
       case ItemKind::kDisplayRate:
+      case ItemKind::kStrongMem:
         Step(1);
         return Action::kNone;
     }
@@ -550,6 +583,23 @@ class Menu {
            strcmp(st::kSettings[group].label, "Performance") == 0;
   }
 
+  // The row of the memory order of Box64 is on the page of the group
+  // "Testing".
+  static bool IsTestGroup(int group) {
+    return group >= 0 && group < st::kSettingCount &&
+           st::kSettings[group].kind == st::kGroup &&
+           strcmp(st::kSettings[group].label, "Testing") == 0;
+  }
+
+  static std::string StrongMemText(int value) {
+    switch (value) {
+      case 1: return "1: at writes";
+      case 2: return "2: also SIMD";
+      case 3: return "3: most";
+      default: return "Off";
+    }
+  }
+
   static bool GroupHasRows(int group) {
     for (int i = group + 1; i < st::kSettingCount; ++i) {
       if (st::kSettings[i].kind == st::kGroup) return false;
@@ -569,6 +619,7 @@ class Menu {
   std::vector<int> display_rates_;
   int display_wanted_ = 0;
   int display_hz_ = 0;
+  int strongmem_ = 0;
   bool game_running_ = false;
   std::string notice_;
   std::string profile_;

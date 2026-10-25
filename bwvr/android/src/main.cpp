@@ -660,6 +660,12 @@ void Play(App* app, bool new_game) {
   // defaults): no variable.
   game.box64_strongmem = app->menu.StrongMem();
   game.box64_env = app->ini.Get("bwvr", "box64_env", "");
+  // wow64_cpu (the row of the page Testing): box64 (the default) or fex,
+  // the CPU of the 32 bit code on arm64-v8a. fex_env (bwvr.ini only): the
+  // variables of FEX for the game, with wow64_cpu=fex. Empty (the default):
+  // no variable.
+  game.cpu = app->menu.Wow64Cpu();
+  game.fex_env = app->ini.Get("bwvr", "fex_env", "");
   if (!app->wine.StartGame(game)) {
     app->status = "Saved. A game runs already.";
     AppLog("menu         : %s. A game runs already", name);
@@ -1135,6 +1141,10 @@ void Load(App* app) {
   app->game = FindGameFolder(app->folder);
   app->ini.Parse(ReadTextFile(app->game.ini_path));
   app->menu.Load(app->ini);
+  // wow64_cpu (the row "Translator of the game" of the page Testing) chooses
+  // the CPU DLL only on arm64-v8a. On x86_64 the row says that it does
+  // nothing.
+  app->menu.SetCpuChoiceCounts(wine_rules::HasCpuChoice(WineRuntime::Abi()));
   app->capture = app->ini.GetInt("bwvr", "menu_capture", 0) != 0;
   if (app->capture) {
     AppLog("menu         : menu_capture=1. Each paint of the menu goes to "

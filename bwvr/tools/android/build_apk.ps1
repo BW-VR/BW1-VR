@@ -16,7 +16,8 @@
     WINE. When bwvr/out/android/wine has the Wine tree of an ABI
     (<abi>.tar and <abi>.id of pack_wine.sh), the APK carries it as
     assets/wine/<abi>.tar (compressed) and assets/wine/<abi>.id, with the
-    license texts of Wine, FreeType and Box64 in assets/licenses. A device
+    license texts of Wine, FreeType, Box64 and FEX (each fex*.txt) in
+    assets/licenses. A device
     unpacks only the tree of its own ABI. With a Wine tree the
     targetSdkVersion is 28: Android lets an app with 29 or later run no
     program of its own folder (docs/android.md, "Wine in the app"). With no
@@ -151,6 +152,16 @@ if ($wineAbis.Count -gt 0) {
         $text = Join-Path $wineDir "licenses\$name.txt"
         if (-not (Test-Path -LiteralPath $text)) { Stop-Android "There is no license text $text. Run pack_wine.sh again." }
         Copy-Item -LiteralPath $text -Destination (Join-Path $assets "licenses\$name.txt")
+    }
+    # FEX (libwow64fex.dll of the tree of arm64-v8a): fex.txt and the texts of
+    # the parts of its source in the DLL (build_fex.ps1).
+    if ($wineAbis -contains 'arm64-v8a') {
+        $fexTexts = @(Get-ChildItem -LiteralPath (Join-Path $wineDir 'licenses') -Filter 'fex*.txt' -File)
+        if (@($fexTexts | Where-Object { $_.Name -eq 'fex.txt' }).Count -eq 0) {
+            Stop-Android "There is no license text of FEX in $wineDir\licenses. Run build_fex.ps1 and pack_wine.sh again."
+        }
+        foreach ($t in $fexTexts) { Copy-Item -LiteralPath $t.FullName -Destination (Join-Path $assets ('licenses\' + $t.Name)) }
+        Note ('the license texts of FEX: ' + (($fexTexts | ForEach-Object { $_.Name }) -join ', '))
     }
 }
 Note "targetSdkVersion $targetSdk"

@@ -27,8 +27,11 @@
         library: patch 0003 of wine-patches), and none of the DLLs
         that stay out (kLeftOutNames and kLeftOutPrefix of
         android/src/wine_rules.h). With a tree the targetSdkVersion is 28
-        and the license texts of Wine and FreeType (and Box64 for
+        and the license texts of Wine and FreeType (and Box64 and FEX for
         arm64-v8a) are in the APK. With none it is 32.
+      - The tree of arm64-v8a has the two CPU DLLs of the key wow64_cpu,
+        wowbox64.dll and libwow64fex.dll, each a PE file for ARM64 with
+        the name BTCpuProcessInit.
     It ends with exit code 1 and the list of the faults when a check fails.
 
 .PARAMETER Apk
@@ -203,7 +206,30 @@ foreach ($abi in $wineAbis) {
     $inf = (& $bsdtar -xOf $tarFile 'share/wine/wine.inf' 2>$null | Out-String)
     Expect ($inf -match [regex]::Escape("HKLM,Software\Microsoft\Wow64\x86,,,`"$cpu`"")) "wine.inf of $abi makes $cpu the CPU of the 32 bit code"
     Expect ($names -contains 'assets/licenses/wine.txt' -and $names -contains 'assets/licenses/freetype.txt') "the license texts of Wine and FreeType are in the APK"
-    if ($abi -eq 'arm64-v8a') { Expect ($names -contains 'assets/licenses/box64.txt') 'the license text of Box64 is in the APK' }
+    if ($abi -eq 'arm64-v8a') {
+        Expect ($names -contains 'assets/licenses/box64.txt') 'the license text of Box64 is in the APK'
+        Expect ($names -contains 'assets/licenses/fex.txt') ('the license texts of FEX are in the APK (' +
+            (@($names | Where-Object { $_ -match '^assets/licenses/fex' } | ForEach-Object { $_.Substring(16) }) -join ', ') + ')')
+        # THE TWO CPU DLLS (wow64_cpu, wine_rules.h): wowbox64.dll of Box64 and
+        # libwow64fex.dll of FEX, each a PE file for ARM64 with the entry
+        # BTCpuProcessInit of the CPU interface of the WoW64 of Wine.
+        foreach ($dll in @('wowbox64.dll', 'libwow64fex.dll')) {
+            $inTree = "$abi/lib/wine/aarch64-windows/$dll"
+            Expect ($list -contains $inTree) "the Wine tree of $abi has $inTree"
+            & $bsdtar -xf $tarFile -C $wineDir $inTree 2>$null
+            $file = Join-Path $wineDir $inTree
+            $machine = ''
+            $entry = $false
+            if (Test-Path -LiteralPath $file) {
+                $pe = [IO.File]::ReadAllBytes($file)
+                $at = [BitConverter]::ToInt32($pe, 0x3C)
+                if ($pe.Length -gt $at + 6 -and [BitConverter]::ToUInt32($pe, $at) -eq 0x4550) { $machine = '0x{0:x}' -f [BitConverter]::ToUInt16($pe, $at + 4) }
+                $entry = [Text.Encoding]::ASCII.GetString($pe).Contains("BTCpuProcessInit`0")
+            }
+            Expect ($machine -eq '0xaa64') "$dll of $abi is a PE file for ARM64 (machine $machine)"
+            Expect $entry "$dll of $abi has the name BTCpuProcessInit of the CPU interface of WoW64"
+        }
+    }
 }
 if (Test-Path -LiteralPath $wineDir) { Remove-Item -LiteralPath $wineDir -Recurse -Force }
 if ($wineAbis.Count -eq 0) { Write-Host '   note  the APK has no Wine tree' }

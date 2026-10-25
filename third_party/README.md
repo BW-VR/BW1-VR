@@ -65,7 +65,8 @@ text of each one in `assets/licenses/`.
 | --- | --- | --- | --- | --- |
 | Wine | The Wine tree of each ABI (`assets/wine/<abi>.tar`): the loader, `wineserver`, the Unix libraries and the PE DLLs of Wine, built by `bwvr/tools/android/build_wine.sh` and `pack_wine.sh`. `build_wine.sh` applies the patches of `bwvr/tools/android/wine-patches/`, and `pack_wine.sh` adds one line to `wine.inf` (the CPU DLL of the 32 bit code) | 11.0, `wine-11.0.tar.xz`, SHA-256 `c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701` | LGPL-2.1 or later (`COPYING.LIB`, in the APK as `assets/licenses/wine.txt`). The patches of `wine-patches/` change the source of Wine, so they are under the license of Wine too: LGPL-2.1 or later | the source release of https://www.winehq.org |
 | FreeType | `libfreetype.so` in each Wine tree, for the TrueType fonts of Wine. Built by `build_wine.sh` with no HarfBuzz, PNG, Brotli or bzip2 | 2.13.3, `freetype-2.13.3.tar.xz`, SHA-256 `0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289` | the FreeType License, FTL (`docs/FTL.TXT`, in the APK as `assets/licenses/freetype.txt`). FreeType is also under GPL-2.0, and the mod takes the FTL | the release archive of https://freetype.org (its signature `.sig` is beside it in the work folder, not checked with a key) |
-| Box64 | `wowbox64.dll` in the Wine tree of `arm64-v8a`: the CPU of the 32 bit x86 code. Built by `bwvr/tools/android/build_box64.ps1 -Mingw` | v0.4.4, `box64-v0.4.4.tar.gz`, SHA-256 `99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029` | MIT (`LICENSE`, in the APK as `assets/licenses/box64.txt`) | https://github.com/ptitSeb/box64 |
+| Box64 | `wowbox64.dll` in the Wine tree of `arm64-v8a`: the CPU of the 32 bit x86 code with `wow64_cpu=box64` (the default). Built by `bwvr/tools/android/build_box64.ps1 -Mingw` | v0.4.4, `box64-v0.4.4.tar.gz`, SHA-256 `99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029` | MIT (`LICENSE`, in the APK as `assets/licenses/box64.txt`) | https://github.com/ptitSeb/box64 |
+| FEX | `libwow64fex.dll` in the Wine tree of `arm64-v8a`: the CPU of the 32 bit x86 code with `wow64_cpu=fex`. Built by `bwvr/tools/android/build_fex.ps1` with llvm-mingw | FEX-2610, a clone of the tag `FEX-2610` (commit `14c92681f4d62cf84d901460e0358de09c8847a7`) with its submodules | MIT (`LICENSE`, in the APK as `assets/licenses/fex.txt`). The DLL also holds parts of the source of FEX under their own licenses, each in the APK as `assets/licenses/fex_<part>.txt`: fmt (MIT), xxhash (BSD-2-Clause), rpmalloc (public domain, or the permissive license of its `LICENSE`), range-v3 (BSL-1.0), unordered_dense (MIT), tiny-json (MIT), SoftFloat-3e (BSD-3-Clause, the comment at the head of its source files), cephes (BSD), cpp-optparse (MIT), and the files of musl in the CRT of FEX (MIT, `fex_musl.txt` has their copyright lines) | https://github.com/FEX-Emu/FEX |
 
 An APK with Wine also carries the files of the mod for "Play"
 (`assets/mod/ddraw.dll` and `openxr_loader.dll`, the build of `.\dev.ps1
@@ -76,7 +77,10 @@ are `bwvr/installer/Notices.txt`, in the APK as
 files of the mod never go without it.
 
 The tools of the build go into no APK: the Android NDK r27d for Linux and
-llvm-mingw 20261006 (Apache-2.0 with LLVM exceptions).
+llvm-mingw 20261006 (Apache-2.0 with LLVM exceptions). `wowbox64.dll` and
+`libwow64fex.dll` link parts of the runtime of llvm-mingw statically
+(libc++, libc++abi, libunwind, the builtins of compiler-rt). The LLVM
+exceptions ask for no notice for such parts in a compiled program.
 
 Open before a publication of an APK with Wine: the LGPL asks for an offer
 of the source of the exact Wine that the APK carries, with the patches, the

@@ -64,7 +64,8 @@ Summary:
   screen and the renderer of the mod. It has no fallback to Direct3D,
   DirectDraw or another graphics interface (see "Only Vulkan").
 - **Wine.** The APK carries Wine 11.0 in the WoW64 mode for each ABI, with
-  `wowbox64.dll` of Box64 as the CPU of the 32 bit x86 code on ARM64. At its
+  `wowbox64.dll` of Box64 and `libwow64fex.dll` of FEX as the CPUs of the 32
+  bit x86 code on ARM64. At its
   start the app unpacks the tree of its ABI into its internal folder, makes
   a Wine prefix and links the drive `G:` to the game folder. In the emulator
   it runs a 32 bit test program in Wine (see "Wine in the app").
@@ -94,6 +95,11 @@ Summary:
   (Box64, slower)" of the page "Testing" (`box64_strongmem`) and the key
   `box64_env` give variables of Box64 to the game alone (see "The variables
   of Box64").
+- **FEX.** The row "Translator of the game (Box64 or FEX)" of the page
+  "Testing" (`wow64_cpu`, `box64` by default) chooses the CPU DLL of the 32
+  bit code on arm64-v8a: `wowbox64.dll` of Box64 or `libwow64fex.dll` of
+  FEX-2610. The key `fex_env` gives variables of FEX to the game. On x86_64
+  the row does nothing (see "FEX as the CPU of the 32 bit code").
 
 ## Source files of this area
 
@@ -151,16 +157,18 @@ Summary:
 | `tools/desk/live_stream_run.ps1` | A desktop run with the live stream and the test reader of the PC |
 | `tools/android/android_env.ps1` | Finds the SDK, the NDK and the JDK |
 | `android/src/wine_runtime.cpp` | Wine in the app: the thread of the setup (the unpack of the tree, the prefix, the drive of the game folder), the start of a program in Wine, `wineserver -k` at the end |
-| `android/src/wine_rules.h` | The rules of Wine in the app: the DLLs that stay out of the tree, the paths, the environment, the build id, the seed of `user.reg`, the reader of the tar file. No Android code |
+| `android/src/wine_rules.h` | The rules of Wine in the app: the DLLs that stay out of the tree, the paths, the CPU DLLs and the choice of `wow64_cpu`, the environment, the build id, the seed of `user.reg`, the reader of the tar file. No Android code |
 | `test/wine_probe/main.cpp` | The test program of Wine (`bwvr_wine_probe.exe`), a 32 bit console program with no game code |
 | `tools/android/build_wine.sh` | The build of FreeType and Wine for each ABI, in a Linux of WSL2 |
 | `tools/android/wine-patches/` | The patches of the source of Wine |
 | `tools/android/pack_wine.sh` | The Wine tree of the APK for each ABI, with its checks |
 | `tools/android/build_box64.ps1` | The build of Box64 and of `wowbox64.dll` |
+| `tools/android/build_fex.ps1` | The build of `libwow64fex.dll` of FEX, with its license texts |
 | `tools/android/emu_wine_test.ps1` | The test of Wine in the app in the Android emulator |
-| `android/src/play_rules.h` | The rules of "Play": the keys of a run, the files of the mod, the registry of the game, the environment and the command line of the game, the variables of Box64 for the game (`Box64Vars`), the input of the mod while the menu shows over the game. No Android code |
+| `android/src/play_rules.h` | The rules of "Play": the keys of a run, the files of the mod, the registry of the game with the CPU DLL, the environment and the command line of the game, the variables of Box64 and of FEX for the game (`Box64Vars`, `FexVars`, `CpuVars`), the input of the mod while the menu shows over the game. No Android code |
 | `test/controller_math/play_rules_checks.h` | The math checks of `play_rules.h` and of "Quit game" in the menu |
 | `test/controller_math/stall_checks.h` | The math checks of the filter of `box64_env`, of the environment of the game with the variables of Box64, of the row of the memory order of Box64, and of `stall_math.h` of the mod |
+| `test/controller_math/wow64_cpu_checks.h` | The math checks of the choice of the CPU DLL (`wow64_cpu`), of its value in the registry of the game, of the filter of `fex_env`, and of the row "Translator of the game (Box64 or FEX)" |
 | `tools/android/emu_game_test.ps1` | The game from the menu of the app in the Android emulator, with the test runtime |
 | `android/src/eye_size.h` | The cap of the size of the eyes that the app takes from the runtime (`eye_size_max`). No Android code |
 | `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
@@ -288,8 +296,10 @@ shadow, as the text of the game has.
   its value for a slider, the name of the item in a dark box for a list.
   "Back" is a button at the end. The page "Performance" also has the row
   "Display rate" of the app when the runtime gives display rates (see "The
-  display rate"). The page "Testing" also has the row "Strict memory order
-  of the game (Box64, slower)" of the app (see "The variables of Box64").
+  display rate"). The page "Testing" also has the rows "Translator of the
+  game (Box64 or FEX)" (see "FEX as the CPU of the 32 bit code") and
+  "Strict memory order of the game (Box64, slower)" (see "The variables of
+  Box64") of the app.
 - **The help.** Below the rows, the help text of the row with the highlight,
   the same text as the tooltip of the launcher. The help of a group names
   the settings on its page.
@@ -773,7 +783,7 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
 
 ## Test the APK
 
-1. **With no device** (`check_apk.ps1`, 72 checks with both Wine trees):
+1. **With no device** (`check_apk.ps1`, 79 checks with both Wine trees):
    the signature, the
    manifest (the package, the SDK levels, the categories of an immersive app
    of Meta and of OpenXR, the permissions and the queries of the loader, the
@@ -793,7 +803,10 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    the ABI in the tree and in `wine.inf`, `libfreetype.so`, `tahoma.ttf`,
    the audio driver (`wineaaudio.drv` of i386 and of the ABI, and
    `wineaaudio.so`), none of the DLLs that stay out, and the license texts of Wine, FreeType
-   and Box64. With a tree `targetSdkVersion` must be 28, with none 32.
+   and Box64. The tree of arm64-v8a has both CPU DLLs (`wowbox64.dll` and
+   `libwow64fex.dll`), each a PE file for ARM64 with the name
+   `BTCpuProcessInit`, and the license texts of FEX (`fex*.txt`) are in the
+   APK. With a tree `targetSdkVersion` must be 28, with none 32.
 2. **In the Android emulator** (`emu_test.ps1`, 19 checks): the same APK on
    an x86_64 image of Android 14 with no window, port 5584, a cold boot. The
    script deletes the folder of the app, installs the APK, starts it one
@@ -2733,6 +2746,9 @@ headset. Two keys of the app give variables of Box64 to the game
   ... does not go to the game". With `box64_strongmem` 1 to 3 the key sets
   `BOX64_DYNAREC_STRONGMEM`, and `box64_env` does not.
 
+Both keys go to the game only with `wow64_cpu=box64` (the default, see "FEX
+as the CPU of the 32 bit code"), and on x86_64.
+
 **How WowBox64 reads them** (the source of Box64 0.4.4): `BTCpuProcessInit`
 of `wine/wow64/wowbox64.c` calls `LoadEnvVariables` (`src/tools/env.c`),
 which reads each variable with `GetEnvironmentVariableA`: the Windows
@@ -2767,6 +2783,169 @@ two variables and no `FOO`. The emulator runs the x86_64 Wine with
 `wow64cpu.dll` and no Box64, so only a headset can show what Box64 does
 with the variables: the lines of WowBox64 in `wine.log`, the speed, and if
 the game still stops.
+
+## FEX as the CPU of the 32 bit code
+
+The tree of arm64-v8a has two CPU DLLs for the 32 bit x86 code of the game:
+`wowbox64.dll` of Box64 and `libwow64fex.dll` of FEX. FEX is the translator
+of x86 code that Valve uses for the Steam Frame. Its WoW64 DLL is a CPU of
+the WoW64 of Wine on ARM64, as `wowbox64.dll` is: a DLL for Windows on
+ARM64 with the `BTCpu` functions of the CPU interface. The key `wow64_cpu`
+chooses one of them (`wine_rules.h`, `Cpu`, `play_rules.h`, `FexVars`).
+
+**The build** (`bwvr/tools/android/build_fex.ps1 -Source <FEX source>
+-Mingw <bin folder of llvm-mingw>`). The source of FEX is not in the repo.
+The script takes a clone of a release tag with its submodules (for example
+`local/third-party-src/FEX-2610`), and stops when a part of the source that
+goes into the DLL is not there. It configures FEX with the toolchain file
+of FEX for mingw (`Data/CMake/toolchain_mingw.cmake`, the triple
+`aarch64-w64-mingw32`) and the options of the Wine DLL build of FEX
+(`.github/workflows/wine_build`: `Release`, no LTO, no assertions, no
+tests, `TUNE_ARCH=generic`, `TUNE_CPU=none`), and it builds the target
+`wow64fex` with the Ninja of the Android SDK in
+`bwvr/build-android/fex-wow64`. The build runs `python3` (the generator of
+the options) and `dd` (the mark of a builtin DLL of Wine in the PE header).
+The script takes the `python3` of llvm-mingw and the `dd` of Git for
+Windows. It downloads nothing. It writes a copy with no debug data to
+`bwvr/out/android/fex/libwow64fex.dll`, and the license texts to
+`bwvr/out/android/fex/licenses`: `fex.txt` (MIT) and one `fex_<part>.txt`
+for each part of the source in the DLL (fmt, xxhash, rpmalloc, range-v3,
+unordered_dense, tiny-json, SoftFloat-3e, cephes, cpp-optparse, and the
+copyright lines of the files of musl in the CRT of FEX). With FEX-2610 and
+llvm-mingw 20261006 the clean build takes 19 s, and the DLL is a PE file
+for ARM64 (machine 0xAA64) of 4,976,640 bytes with 22 exports `BTCpu...`
+and `__wine_get_unix_opcode`. It imports only `ntdll.dll` and `wow64.dll`.
+The PE header has the time of the link, so each build gives other bytes.
+
+`pack_wine.sh` puts the DLL into `aarch64-windows` of the tree beside
+`wowbox64.dll`, and the license texts into `bwvr/out/android/wine/licenses`.
+`build_apk.ps1` puts each `fex*.txt` into `assets/licenses/`. `check_apk.ps1`
+checks that the tree has both DLLs, that each is a PE file for ARM64 with
+the name `BTCpuProcessInit`, and that `fex.txt` is in the APK.
+
+**One import of FEX that Wine 11.0 does not have.** `pack_wine.sh` lists
+each function that a CPU DLL imports and that the tree does not export.
+For `wowbox64.dll` there is none. For `libwow64fex.dll` there is one:
+`ntdll.dll.RtlWow64SuspendThread`. Wine gives such an import a stub, and a
+call of the stub stops the program with an exception. FEX calls it only in
+`BTCpuThreadTerm` when a thread ends another thread (`TerminateThread`),
+not when a thread ends itself. Not known: if the game or one of its DLLs
+calls `TerminateThread` on another thread.
+
+**The Unix library of FEX** (`libwow64fex.so` of `Source/Windows/UnixLib`)
+is not in the tree. FEX loads it when it is there, and works with no such
+library. With no library FEX has no hardware TSO (a mode of some ARM CPUs
+that are not in a Quest), no name of its memory regions, and no file
+mapping of the code cache. The code cache is off by default.
+
+**The switch** (`wow64_cpu`, the row "Translator of the game (Box64 or
+FEX)" of the page "Testing", above the row of the memory order of Box64):
+
+- `box64` (the default): `wowbox64.dll`.
+- `fex`: `libwow64fex.dll`.
+
+A step or the trigger gives the other value. The help says what each one
+is. The save writes `wow64_cpu=box64` or `wow64_cpu=fex`. Each other value
+of the key is `box64`. The change counts at the next "Play".
+
+At the setup of Wine the app copies both CPU DLLs of the tree into
+`system32` of the prefix (a new prefix, and a prefix of another tree).
+`wine.inf` keeps `wowbox64.dll` as the default value of
+`HKLM\Software\Microsoft\Wow64\x86`, so wineboot runs with Box64. At each
+"Play" on arm64-v8a the app writes the value of the choice into `game.reg`
+(`play_rules.h`, `GameRegistry`), before the known DLLs and the audio
+driver of the same import:
+
+```
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Wow64\x86]
+@="libwow64fex.dll"
+```
+
+This is the registry of the Wine prefix in the app, not of a PC. With
+`box64` the value is `wowbox64.dll`, the value of `wine.inf`. The WoW64 of
+Wine reads the value at the start of each 32 bit process
+(`get_cpu_dll_name` of `dlls/wow64/syscall.c`, with `KEY_WOW64_64KEY`), so
+`runblack.exe` gets the DLL of the choice. When `system32` has no file of
+the choice, the app copies the CPU DLLs again before the import. The log of
+the app has one line at the start of the game: "game : wow64_cpu=fex. The
+CPU of the 32 bit code of the game is libwow64fex.dll of FEX", and the line
+of `reg import` names the value.
+
+On x86_64 (the emulator) the 32 bit code runs natively through
+`wow64cpu.dll` of Wine. The key does nothing there: `game.reg` has no key
+`Wow64\x86`, the game gets the variables of Box64 as with `box64`, the value
+of the row has "(no effect here)", and its help says that the row does
+nothing on this device. The log says "game : wow64_cpu=fex. x86_64: the 32
+bit code runs natively through wow64cpu.dll of Wine. The key does nothing
+here".
+
+**The variables of FEX** (`fex_env`, empty by default, only in `bwvr.ini`):
+`NAME=VALUE` with spaces between them, for example
+`fex_env=FEX_X87REDUCEDPRECISION=1 FEX_SILENTLOG=0`. Only a name that starts
+with `FEX_` and has only capitals, digits and `_` goes to the game, each
+name one time. Each other word gives one line "fex_env: ... does not go to
+the game". The variables take the way of the variables of Box64 (see "The
+variables of Box64"): the environment of the loader of Wine that starts the
+game. With `wow64_cpu=fex` only `fex_env` goes to the game, and the log
+says that `box64_strongmem` and `box64_env` do not go. With `box64` only
+the variables of Box64 go, and a `fex_env` with a value gives the line
+"fex_env=... does not go to the game: the CPU is not FEX".
+
+**How FEX reads its settings** (the source of FEX-2610).
+`BTCpuProcessInit` of `Source/Windows/WOW64/Module.cpp` calls
+`FEX::Config::LoadConfig` (`Source/Common/Config.cpp`) with the Windows
+environment of the process. The layers, the last one wins: the global and
+the main config file (`Config.json`, the main one in `.fex-emu` of the home
+folder that Wine gives in `WINEHOMEDIR`, or in `.config/fex-emu`), the
+config file of the program (`AppConfig/runblack.exe.json`), the file of
+`FEX_APP_CONFIG`, then the environment. In the environment a
+variable `FEX_<OPTION>` sets the option `<OPTION>` (`EnvLoader`). So the
+environment is enough, and the app writes no config file. The prefix of the
+app has no config file of FEX.
+
+**How FEX reports itself.** By default FEX writes no log
+(`FEX_SILENTLOG=1`). With `FEX_SILENTLOG=0` in `fex_env` it writes its
+messages through `__wine_dbg_output` of Wine to stderr, so they are in
+`wine.log`: a letter of the level, the thread and the text, for example
+"I 1F4 Terminating ...". FEX writes no line with its version at the start.
+`wine_debug=+loaddll` makes Wine log the load of `libwow64fex.dll`. The
+CPUID leaf 0x40000000 of the x86 code gives "FEXIFEXIEMU", and the leaf
+0x40000001 with the sub-leaves 1 and 2 gives the version of FEX
+("FEX-2610").
+
+**The settings of FEX that can matter for this game** (the names of the
+environment, the defaults of `FEXCore/Source/Interface/Config/Config.json.in`
+of FEX-2610. A value 1 is on, 0 is off):
+
+| Variable | Default | What it does, and what it costs |
+| --- | --- | --- |
+| `FEX_TSOENABLED` | 1 | The memory order of x86 (TSO): each load and store of the x86 code is an ordered access of ARM. It costs time at each access. 0 is faster, and the source says that 0 "is highly likely to break any multithreaded application". The Quest has no hardware TSO, so FEX always emulates it |
+| `FEX_VECTORTSOENABLED` | 0 | With TSO, also the loads and stores of the vector registers (SSE) are ordered. 1 costs more time at each such access |
+| `FEX_MEMCPYSETTSOENABLED` | 0 | With TSO, also `REP MOVS` and `REP STOS` are ordered. 1 costs more time at each copy and fill |
+| `FEX_HALFBARRIERTSOENABLED` | 1 | With TSO, an unaligned load or store gets a half barrier after a fault, in place of a full atomic. The source says that an aligned access of the same code then is not atomic |
+| `FEX_STRICTINPROCESSSPLITLOCKS` | 0 | A global lock for an unaligned atomic that crosses 16 bytes or a cache line. 1 is safer and slower |
+| `FEX_VOLATILEMETADATA` | 1 | Uses the volatile metadata of a PE file (of newer compilers of Microsoft) to skip TSO where the code does not need it. A file with no such data gets TSO as set |
+| `FEX_EXTENDEDVOLATILEMETADATA` | empty | A list of modules (and ranges) with no TSO, for WoW64, for example `runblack.exe`. Faster for that code, and a fault of the memory order there is possible |
+| `FEX_SMCCHECKS` | `mtrack` | The checks of code that changes (self-modifying code): `mtrack` watches the pages of translated code and translates again after a write, `full` checks the code before each run (slow), `none` makes no check (fast, and code that changes runs old). The value is a word: each other value gives `none` |
+| `FEX_MULTIBLOCK` | 1 | A block of translated code can hold more than one x86 block. 1 gives faster code, and the source says that it "can cause long JIT compilation times and stutter". 0 gives smaller blocks |
+| `FEX_MAXINST` | 5000 | The most x86 instructions in one block |
+| `FEX_X87REDUCEDPRECISION` | 0 | 0: the x87 instructions run with 80 bit precision in software (SoftFloat-3e), which is slow. 1: 64 bit precision with the floating point of ARM, which is faster. The source says that 1 "may result in rendering bugs" |
+| `FEX_SILENTLOG` | 1 | 0: the messages of FEX go to `wine.log` |
+
+The game is a program of 2001 and uses x87 for its floating point, so
+`FEX_X87REDUCEDPRECISION=1` can matter much for the speed. Not known: how
+much, and if the picture of the game changes.
+
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90`, both
+games, once with no key and once with `-Wow64Cpu fex -FexEnv
+FEX_SILENTLOG=0`): RESULTS. The emulator runs the x86_64 tree with
+`wow64cpu.dll`, so FEX cannot run there.
+
+**Only a headset can show** if FEX runs the game: the load of
+`libwow64fex.dll` in `runblack.exe`, the speed, the stop of the game after
+the load of a save, a call of the missing `RtlWow64SuspendThread`, and the
+effect of the settings above.
 
 ## Wine in the app
 
@@ -2840,7 +3019,8 @@ out:
 | `notepad`, `wordpad`, `write`, `winemine`, `winhlp32`, `iexplore`, `winefile` | programs with a window for a person at a desktop. A game does not start them |
 
 `wineandroid.drv` is not built. The tree of arm64-v8a also gets
-`wowbox64.dll` in `aarch64-windows`. In both trees `pack_wine.sh` adds the
+`wowbox64.dll` and `libwow64fex.dll` in `aarch64-windows` (see "FEX as the
+CPU of the 32 bit code"). In both trees `pack_wine.sh` adds the
 default value of `HKLM\Software\Microsoft\Wow64\x86` (the CPU of the 32 bit
 code: `wowbox64.dll` and `wow64cpu.dll`) to the section `[Wow64]` of
 `wine.inf`. wineboot reads that section in a 64 bit process before it runs
@@ -2855,19 +3035,19 @@ links (`pack_wine.sh` checks it), and the app takes none from the tar file.
 | install of `x86_64` | | 514,308,971 | |
 | tree of `x86_64` | 1592 | 359,945,233 | `assets/wine/x86_64.tar`, 360,826,880 bytes, compressed |
 | install of `aarch64` | | 811,051,089 | |
-| tree of `arm64-v8a` | 1590 | 632,832,097 | `assets/wine/arm64-v8a.tar`, 633,712,640 bytes, compressed |
+| tree of `arm64-v8a` | 1591 | 637,808,737 | `assets/wine/arm64-v8a.tar`, 638,689,280 bytes, compressed |
 
 Each tree has the three files of the audio driver: `wineaaudio.drv` of
 i386 and of the ABI, and `wineaaudio.so` (it needs `libaaudio.so` of
 Android). `pack_wine.sh` and `check_apk.ps1` check them. The PE DLLs of
 ARM64 have the file alignment of 64 KB, so the ARM64 tree is larger. With
-both trees and the files of the mod the APK is 205.4 MB (215,368,922
-bytes).
+both trees and the files of the mod the APK is APKSIZE.
 
 **The APK.** `build_apk.ps1` puts the tree of each ABI that has one into
 the APK as `assets/wine/<abi>.tar` (the method deflate) and
 `assets/wine/<abi>.id`, with the license texts of Wine (LGPL-2.1),
-FreeType (FTL) and Box64 (MIT) in `assets/licenses/`
+FreeType (FTL), Box64 (MIT) and FEX (MIT, with the texts of the parts of
+its source, `fex*.txt`) in `assets/licenses/`
 (`third_party/README.md`). The asset manager of Android inflates a tar as a
 stream, and the app reads only the tree of its own ABI. With no tree the APK
 has no Wine and `targetSdkVersion` 32, and the log of the build says so for
@@ -2914,12 +3094,13 @@ loop and the menu do not wait):
    and `Audio` = `aaudio` (the audio driver of patch 0003. With
    `wine_audio=0` in `bwvr.ini` there is no `Audio` value, so a program has
    no sound), puts
-   `wowbox64.dll` into `system32` on arm64-v8a, then runs
+   `wowbox64.dll` and `libwow64fex.dll` into `system32` on arm64-v8a, then runs
    `wine wineboot --init` and `wineserver -w`. The log has the time of each.
    The last step of a good prefix writes the marker: the build id of the
    tree. So a wineboot that stopped (the end of the app) or failed gives a
    new prefix at the next start. A prefix with the marker of another tree
-   stays, and on arm64-v8a it gets the `wowbox64.dll` of the new tree.
+   stays, and on arm64-v8a it gets the `wowbox64.dll` and the
+   `libwow64fex.dll` of the new tree.
 5. The drive `G:` of the prefix (`dosdevices/g:`) is a link to the game
    folder of the app.
 
@@ -3157,8 +3338,11 @@ Android. The plan, in steps:
    builds it. With Box64 v0.4.4 and llvm-mingw 20261006 it is a DLL for
    ARM64 (machine 0xAA64) of 4.5 MB with the 13 exports `BTCpu...` of the
    CPU interface of the WoW64 of Wine, and it imports only `ntdll.dll` and
-   `wow64.dll`. It goes into the Wine tree of arm64-v8a. It did not run
-   yet.
+   `wow64.dll`. It goes into the Wine tree of arm64-v8a.
+
+   The other CPU for the 32 bit code is `libwow64fex.dll` of FEX-2610
+   (`build_fex.ps1`, the key `wow64_cpu`, see "FEX as the CPU of the 32 bit
+   code"). It did not run yet.
 
    The fall back is an x86_64 Wine in the WoW64 mode under the Linux
    program box64, with the x86_64 libraries of glibc that it needs.

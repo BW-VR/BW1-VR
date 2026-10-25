@@ -3589,6 +3589,7 @@ void CreatureChecks() {
 #include "panel_pointer_checks.h"
 #include "time_log_checks.h"
 #include "stall_checks.h"
+#include "wow64_cpu_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4022,6 +4023,7 @@ int main() {
   panel_pointer_checks::PanelPointerChecks();
   time_log_checks::TimeLogChecks();
   stall_checks::StallChecks();
+  wow64_cpu_checks::Wow64CpuChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

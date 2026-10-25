@@ -259,6 +259,21 @@
     The value of box64_env in bwvr.ini, for example
     'BOX64_DYNAREC_BIGBLOCK=0 FOO=1'. Empty (the default): no key.
 
+.PARAMETER Wow64Cpu
+    The value of wow64_cpu in bwvr.ini (docs/android.md, "FEX as the CPU
+    of the 32 bit code"): box64 or fex. Empty (the default): no key. The
+    emulator runs the tree of x86_64, so the key does nothing there. In
+    each case the test checks the line of the app with the choice (on
+    x86_64: the 32 bit code runs natively through wow64cpu.dll), that
+    game.reg has no CPU value, and that the save of the menu keeps the
+    value in bwvr.ini.
+
+.PARAMETER FexEnv
+    The value of fex_env in bwvr.ini, for example 'FEX_SILENTLOG=0'. Empty
+    (the default): no key. On x86_64 the test checks that the app logs
+    that fex_env does not go to the game, and that the environment of
+    runblack.exe has no variable of FEX.
+
 .PARAMETER IniExtra
     More lines for bwvr.ini, for example 'profile_sample_outside=1000'. A
     key that the save of the menu deletes (kRetiredKeys) does not reach the
@@ -299,6 +314,8 @@ param(
     [ValidateSet(-1, 0, 1)][int]$StallModules = -1,
     [ValidateSet(-1, 0, 1, 2, 3)][int]$Box64StrongMem = -1,
     [string]$Box64Env = '',
+    [ValidateSet('', 'box64', 'fex')][string]$Wow64Cpu = '',
+    [string]$FexEnv = '',
     [string[]]$IniExtra = @(),
     [switch]$Keep
 )
@@ -886,6 +903,30 @@ function Box64Checks([int]$N, [string]$Part, [string]$ModLog, [string]$Environ) 
     }
 }
 
+# THE CPU OF THE 32 BIT CODE of one game (-Wow64Cpu, -FexEnv). The emulator
+# runs the tree of x86_64: wow64_cpu does nothing, game.reg has no CPU
+# value, and fex_env does not go to the game.
+function CpuChecks([int]$N, [string]$Part, [string]$Environ, [string]$IniText) {
+    $want = if ($Wow64Cpu -eq 'fex') { 'fex' } else { 'box64' }
+    $app = [regex]::Match($Part, 'game         : wow64_cpu=(\w+)\. x86_64: the 32 bit code runs natively through wow64cpu\.dll of Wine([^\r\n]*)')
+    Expect ($app.Success -and $app.Groups[1].Value -eq $want) ("game $N`: the app logged the choice wow64_cpu=$want and the CPU wow64cpu.dll of x86_64: " + $app.Value)
+    if ($want -eq 'fex') {
+        Expect ($app.Groups[2].Value -match 'The key does nothing here, and the game gets the variables of Box64 as with wow64_cpu=box64') "game $N`: the app logged that wow64_cpu=fex does nothing on x86_64"
+    }
+    Expect ($Part -match 'game         : reg import of C:\\bwvr\\game\.reg ended with 0 after [\d.]+ s: [^\r\n]*KnownDLLs, no CPU value, and ') "game $N`: game.reg has no CPU value on x86_64 (no key Wow64\x86)"
+    Expect ($Part -notmatch 'game         : (fex_env="[^"]*"\. The game gets|box64_strongmem=\d+ and box64_env="[^"]*" do not go)') "game $N`: the game gets the variables of Box64, not of FEX"
+    if ($Wow64Cpu -ne '') {
+        Expect ($IniText -match "(?m)^wow64_cpu=$want\r?$") "game $N`: the save of the menu kept wow64_cpu=$want in bwvr.ini"
+    }
+    if ($FexEnv -ne '') {
+        Expect ($Part -match ('game         : fex_env="' + [regex]::Escape($FexEnv) + '" does not go to the game: the CPU is not FEX')) "game $N`: the app logged that fex_env does not go to the game"
+        $vars = @($Environ -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+        $fex = @($vars | Where-Object { $_ -like 'FEX_*' })
+        Note ("game $N`: /proc/<pid>/environ of runblack.exe has $($vars.Count) variables, of FEX: " + ($fex -join ' '))
+        Expect ($vars.Count -gt 0 -and $fex.Count -eq 0) "game $N`: the environment of runblack.exe has no variable of FEX"
+    }
+}
+
 # 1. The test runtime.
 Say 'Build the OpenXR test runtime for x86_64'
 $runtimeBuild = Join-Path $Bwvr 'build-android\test-runtime'
@@ -1180,6 +1221,8 @@ try {
     if ($StallModules -ge 0) { $iniLines += "stall_modules=$StallModules" }
     if ($Box64StrongMem -ge 0) { $iniLines += "box64_strongmem=$Box64StrongMem" }
     if ($Box64Env -ne '') { $iniLines += "box64_env=$Box64Env" }
+    if ($Wow64Cpu -ne '') { $iniLines += "wow64_cpu=$Wow64Cpu" }
+    if ($FexEnv -ne '') { $iniLines += "fex_env=$FexEnv" }
     $iniLines += $IniExtra
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$GameDir/bwvr.ini")
@@ -1335,7 +1378,7 @@ try {
         # The environment of runblack.exe, as root, for the checks of the
         # variables of Box64.
         $environ = ''
-        if ($game -and ($Box64StrongMem -ge 0 -or $Box64Env -ne '')) {
+        if ($game -and ($Box64StrongMem -ge 0 -or $Box64Env -ne '' -or $FexEnv -ne '')) {
             $environ = AdbOut @('shell', "cat /proc/$game/environ | tr '\0' '\n'")
             Set-Content -LiteralPath (Join-Path $Out "environ-game$n.txt") -Value $environ -Encoding utf8
         }
@@ -1453,6 +1496,7 @@ try {
         TimeChecks $n $gamePart $modLogNow $gameSeconds
         StallChecks $n $gamePart $modLogNow
         Box64Checks $n $gamePart $modLogNow $environ
+        CpuChecks $n $gamePart $environ $iniText
         Adb @('pull', "$AppDir/wine.log", (Join-Path $Out "wine-game$n.log"))
         # The sound of this game: the stream of wineaaudio in wine.log, and
         # QMixer in the log of the mod.

@@ -7,7 +7,8 @@
 //      when the tree is not there or has another build id.
 //   2. makes the Wine prefix with wineboot when the prefix has no marker (a
 //      new app, or a wineboot that stopped or failed): no display driver of
-//      Wine (user.reg), the CPU DLL for x86 in system32 (arm64-v8a).
+//      Wine (user.reg), the CPU DLLs for x86 in system32 (arm64-v8a:
+//      wowbox64.dll and libwow64fex.dll).
 //   3. links the drive G: of the prefix to the game folder.
 //   4. with wine_probe=1 runs the test program bwvr_wine_probe.exe of the
 //      game folder one time.
@@ -86,6 +87,11 @@ class WineRuntime {
     // box64_strongmem of the menu and box64_env of bwvr.ini.
     int box64_strongmem = 0;
     std::string box64_env;
+    // The CPU of the 32 bit code on arm64-v8a (wine_rules.h, Cpu): wow64_cpu
+    // of the menu. And the variables of FEX for the game (play_rules.h,
+    // FexVars): fex_env of bwvr.ini.
+    wine_rules::Cpu cpu = wine_rules::Cpu::kBox64;
+    std::string fex_env;
   };
   enum class GameState { kIdle, kStarting, kRunning, kEnded };
   bool Ready() const { return ready_; }
@@ -119,6 +125,9 @@ class WineRuntime {
             const std::vector<std::string>* env = nullptr, bool say_pid = false);
   void RunGame(Game game);
   bool PutModFiles();
+  // Copies the CPU DLLs of the tree (wine_rules.h, CopiedCpuDlls) into
+  // system32 of the prefix. False at a fault.
+  bool CopyCpuDlls();
   void EndGame(int code, const std::string& why);
 
   AAssetManager* assets_ = nullptr;

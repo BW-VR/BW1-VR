@@ -89,8 +89,11 @@ constexpr char kGameExe[] = "G:\\runblack.exe";
 // files of the mod. Then the audio driver of Wine (wine_audio), so a prefix
 // of an older tree gets it too: audio gives "Audio" = "aaudio", and no audio
 // deletes the value (mmdevapi then finds no driver, and the game has no
-// sound).
-inline std::string GameRegistry(int width, int height, bool audio) {
+// sound). cpu_dll (wine_rules.h, GameCpuDll, only on arm64-v8a): the default
+// value of HKLM\Software\Microsoft\Wow64\x86, the CPU DLL of the 32 bit code
+// of the game. Empty: no such key in the file (x86_64).
+inline std::string GameRegistry(int width, int height, bool audio,
+                                const std::string& cpu_dll = std::string()) {
   char dwords[256];
   snprintf(dwords, sizeof(dwords),
            "\"ScreenW\"=dword:%08x\r\n\"ScreenH\"=dword:%08x\r\n"
@@ -107,6 +110,9 @@ inline std::string GameRegistry(int width, int height, bool audio) {
     std::string name = f;
     name.resize(name.find('.'));
     text += "\"bwvr_" + name + "\"=\"" + f + "\"\r\n";
+  }
+  if (!cpu_dll.empty()) {
+    text += "\r\n[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Wow64\\x86]\r\n@=\"" + cpu_dll + "\"\r\n";
   }
   text += "\r\n[HKEY_CURRENT_USER\\Software\\Wine\\Drivers]\r\n";
   text += audio ? "\"Audio\"=\"" + std::string(wine_rules::kAudioDriver) + "\"\r\n"
@@ -142,26 +148,31 @@ constexpr char kGameOverrides[] = "WINEDLLOVERRIDES=mscoree,mshtml=;ddraw=n";
 constexpr char kStrongMemName[] = "BOX64_DYNAREC_STRONGMEM";
 constexpr int kStrongMemMost = 3;
 
-struct Box64Env {
+// The variables of a translator for the game: the variables that go, and
+// each word of the key that does not go.
+struct EnvVars {
   std::vector<std::string> vars;     // NAME=VALUE for the game, in order
-  std::vector<std::string> refused;  // each word of box64_env that does not go, with why
+  std::vector<std::string> refused;  // each word of the key that does not go, with why
 };
+using Box64Env = EnvVars;
 
-inline bool IsBox64Name(const std::string& name) {
-  if (name.compare(0, 6, "BOX64_") != 0 || name.size() == 6) return false;
+// A name of the translator: the prefix, then at least one character, and
+// only capitals, digits and "_".
+inline bool IsVarName(const std::string& name, const std::string& prefix) {
+  if (name.compare(0, prefix.size(), prefix) != 0 || name.size() == prefix.size()) return false;
   for (char c : name) {
     if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) return false;
   }
   return true;
 }
+inline bool IsBox64Name(const std::string& name) { return IsVarName(name, "BOX64_"); }
 
-inline Box64Env Box64Vars(int strongmem, const std::string& extra) {
-  Box64Env out;
-  std::vector<std::string> names;
-  if (strongmem >= 1 && strongmem <= kStrongMemMost) {
-    out.vars.push_back(std::string(kStrongMemName) + "=" + std::to_string(strongmem));
-    names.push_back(kStrongMemName);
-  }
+// The words of a key (NAME=VALUE with spaces or tabs between them) into out.
+// names: the names that go already. set_name and set_by: a name that a row
+// of the menu sets, and that row, for the text of a refused word.
+inline void AddVarWords(const std::string& extra, const std::string& prefix,
+                        std::vector<std::string>* names, const std::string& set_name,
+                        const char* set_by, EnvVars* out) {
   size_t at = 0;
   while (at < extra.size()) {
     while (at < extra.size() && (extra[at] == ' ' || extra[at] == '\t')) ++at;
@@ -173,24 +184,59 @@ inline Box64Env Box64Vars(int strongmem, const std::string& extra) {
     const size_t eq = word.find('=');
     const std::string name = eq == std::string::npos ? word : word.substr(0, eq);
     if (eq == std::string::npos) {
-      out.refused.push_back(word + " (no =VALUE)");
-    } else if (!IsBox64Name(name)) {
-      out.refused.push_back(word + " (the name does not start with BOX64_)");
-    } else if (std::find(names.begin(), names.end(), name) != names.end()) {
-      out.refused.push_back(word + (name == kStrongMemName && strongmem >= 1
-                                        ? " (box64_strongmem sets it)"
-                                        : " (the name comes two times)"));
+      out->refused.push_back(word + " (no =VALUE)");
+    } else if (!IsVarName(name, prefix)) {
+      out->refused.push_back(word + " (the name does not start with " + prefix + ")");
+    } else if (std::find(names->begin(), names->end(), name) != names->end()) {
+      out->refused.push_back(word + (!set_name.empty() && name == set_name
+                                         ? std::string(" (") + set_by + " sets it)"
+                                         : std::string(" (the name comes two times)")));
     } else {
-      out.vars.push_back(word);
-      names.push_back(name);
+      out->vars.push_back(word);
+      names->push_back(name);
     }
   }
+}
+
+inline Box64Env Box64Vars(int strongmem, const std::string& extra) {
+  Box64Env out;
+  std::vector<std::string> names;
+  std::string set_name;
+  if (strongmem >= 1 && strongmem <= kStrongMemMost) {
+    out.vars.push_back(std::string(kStrongMemName) + "=" + std::to_string(strongmem));
+    names.push_back(kStrongMemName);
+    set_name = kStrongMemName;
+  }
+  AddVarWords(extra, "BOX64_", &names, set_name, "box64_strongmem", &out);
   return out;
 }
 
+// THE VARIABLES OF FEX FOR THE GAME (docs/android.md, "FEX as the CPU of the
+// 32 bit code"). libwow64fex.dll reads its settings at BTCpuProcessInit
+// (FEX::Config::LoadConfig of FEX-2610): the config files of FEX, then the
+// Windows environment of its process, in which a variable FEX_<NAME> sets
+// the option <NAME> (EnvLoader of Source/Common/Config.cpp). The variables
+// take the same way to the game as the variables of Box64.
+//   fex_env  NAME=VALUE with spaces between them. Only names that start
+//            with FEX_ go to the game. Empty by default: no variable.
+inline EnvVars FexVars(const std::string& extra) {
+  EnvVars out;
+  std::vector<std::string> names;
+  AddVarWords(extra, "FEX_", &names, std::string(), "", &out);
+  return out;
+}
+
+// The variables for the CPU of the game: with Box64 box64_strongmem and
+// box64_env, with FEX fex_env. The keys of the other translator give no
+// variable.
+inline EnvVars CpuVars(wine_rules::Cpu cpu, int strongmem, const std::string& box64_env,
+                       const std::string& fex_env) {
+  return cpu == wine_rules::Cpu::kFex ? FexVars(fex_env) : Box64Vars(strongmem, box64_env);
+}
+
 // The environment of the game: the environment of a program in Wine with
-// kGameOverrides in place of its overrides, and the variables of Box64
-// (Box64Vars) in place of an inherited variable with the same name.
+// kGameOverrides in place of its overrides, and the variables of the
+// translator (CpuVars) in place of an inherited variable with the same name.
 inline std::vector<std::string> GameEnvironment(const std::vector<std::string>& env,
                                                 const std::vector<std::string>& box64 = {}) {
   std::vector<std::string> out;

@@ -33,6 +33,7 @@ enum class ItemKind {
   kSave,     // "Save Config"
   kSetting,  // a row of the table
   kDisplayRate,  // "Display rate": a row of the app, not of the table
+  kWow64Cpu,     // the translator of the game (wow64_cpu): a row of the app
   kStrongMem,    // the memory order of Box64 (box64_strongmem): a row of the app
   kBack,     // back to the main page
   kQuit,     // "Quit game": while the game runs, above Exit
@@ -99,6 +100,7 @@ class Menu {
     display_hz_ = display_rate::Checked(display_wanted_, display_rates_);
     strongmem_ = ini.GetInt("bwvr", "box64_strongmem", 0);
     if (strongmem_ < 0 || strongmem_ > play_rules::kStrongMemMost) strongmem_ = 0;
+    wow64_cpu_ = wine_rules::ParseCpu(ini.Get("bwvr", "wow64_cpu", "box64"));
     headset_width_ = ini.GetInt("bwvr", "headset_width", 2064);
     headset_height_ = ini.GetInt("bwvr", "headset_height", 2208);
     guard_pct_ = ini.GetInt("bwvr", "one_walk_guard_pct", 25);
@@ -135,6 +137,7 @@ class Menu {
     // key stays as it is.
     if (HasDisplayRow()) ini->SetInt("bwvr", "display_hz", display_hz_);
     ini->SetInt("bwvr", "box64_strongmem", strongmem_);
+    ini->Set("bwvr", "wow64_cpu", wine_rules::CpuKey(wow64_cpu_));
     // The keys with one right answer. The renderer Vulkan has no bridge of
     // Direct3D 9.
     ini->Remove("bwvr", "gpu_bridge");
@@ -195,6 +198,18 @@ class Menu {
   // the row of the page "Testing". 0 (the default): Box64 gets no variable.
   // 1 to 3: BOX64_DYNAREC_STRONGMEM for the game, at the next Play.
   int StrongMem() const { return strongmem_; }
+
+  // THE TRANSLATOR OF THE GAME (wow64_cpu, wine_rules.h, Cpu): the row of the
+  // page "Testing". Box64 (the default) or FEX, at the next Play. The app
+  // tells the menu if the choice counts on its ABI (arm64-v8a). Where it
+  // does not count, the row says so.
+  wine_rules::Cpu Wow64Cpu() const { return wow64_cpu_; }
+  void SetCpuChoiceCounts(bool counts) {
+    if (counts == cpu_choice_counts_) return;
+    cpu_choice_counts_ = counts;
+    ++revision_;
+  }
+  bool CpuChoiceCounts() const { return cpu_choice_counts_; }
 
   // THE GAME. While the game runs, the main page has no "Play in VR" and no
   // "Play, new game", and "Quit game" is above "Exit" at the bottom. A
@@ -264,7 +279,10 @@ class Menu {
     if (IsRateGroup(group_) && HasDisplayRow()) {
       items.push_back({ItemKind::kDisplayRate, -1});
     }
-    if (IsTestGroup(group_)) items.push_back({ItemKind::kStrongMem, -1});
+    if (IsTestGroup(group_)) {
+      items.push_back({ItemKind::kWow64Cpu, -1});
+      items.push_back({ItemKind::kStrongMem, -1});
+    }
     items.push_back({ItemKind::kBack, -1});
     return items;
   }
@@ -291,6 +309,8 @@ class Menu {
         return "Exit";
       case ItemKind::kDisplayRate:
         return "Display rate";
+      case ItemKind::kWow64Cpu:
+        return "Translator of the game (Box64 or FEX)";
       case ItemKind::kStrongMem:
         return "Strict memory order of the game (Box64, slower)";
       case ItemKind::kGroup:
@@ -307,6 +327,10 @@ class Menu {
       return display_hz_ > 0 ? std::to_string(display_hz_) + " Hz" : "Headset default";
     }
     if (item.kind == ItemKind::kStrongMem) return StrongMemText(strongmem_);
+    if (item.kind == ItemKind::kWow64Cpu) {
+      const char* name = wow64_cpu_ == wine_rules::Cpu::kFex ? "FEX" : "Box64";
+      return cpu_choice_counts_ ? name : std::string(name) + " (no effect here)";
+    }
     if (item.kind != ItemKind::kSetting) return "";
     const int i = item.index;
     const st::Setting& s = st::kSettings[i];
@@ -362,7 +386,8 @@ class Menu {
         first = false;
       }
       if (IsTestGroup(item.index)) {
-        text += std::string(first ? "" : ", ") + Label({ItemKind::kStrongMem, -1});
+        text += std::string(first ? "" : ", ") + Label({ItemKind::kWow64Cpu, -1}) + ", " +
+                Label({ItemKind::kStrongMem, -1});
       }
       return text + ".";
     }
@@ -387,13 +412,25 @@ class Menu {
                "smoother head motion. It costs more power and heat. The game itself "
                "can make fewer frames than the rate. Headset default: the app asks "
                "for no rate. The change counts at once.";
+      case ItemKind::kWow64Cpu:
+        return std::string(
+                   "The translator changes the x86 code of the game into code for the ARM CPU "
+                   "of the headset. Box64 (wowbox64.dll) is the default. FEX (libwow64fex.dll) "
+                   "is the translator that Valve uses for the Steam Frame. Try FEX when the game "
+                   "hangs or is slow with Box64. The strict memory order of the next row and "
+                   "box64_env count only with Box64, and fex_env only with FEX. The change "
+                   "counts at the next Play.") +
+               (cpu_choice_counts_ ? ""
+                                   : " This device runs the x86 code directly (wow64cpu.dll "
+                                     "of Wine), so this row does nothing here.");
       case ItemKind::kStrongMem:
         return "Box64 runs the x86 code of the game on the ARM CPU of the headset. An x86 "
                "CPU keeps the order of the reads and the writes of memory between threads, "
                "and an ARM CPU does not. Code that needs that order can stop the game, for "
                "example some seconds after a load. 1 to 3 add more memory barriers "
                "(BOX64_DYNAREC_STRONGMEM): this can stop the game from hanging, and the "
-               "game runs slower. Off: no barriers. The change counts at the next Play.";
+               "game runs slower. Off: no barriers. Only with the translator Box64. The "
+               "change counts at the next Play.";
       default:
         return "";
     }
@@ -442,6 +479,14 @@ class Menu {
         changed_ = true;
         ++revision_;
       }
+      return;
+    }
+    if (item.kind == ItemKind::kWow64Cpu) {
+      // Two values: each step gives the other one.
+      wow64_cpu_ = wow64_cpu_ == wine_rules::Cpu::kFex ? wine_rules::Cpu::kBox64
+                                                       : wine_rules::Cpu::kFex;
+      changed_ = true;
+      ++revision_;
       return;
     }
     if (item.kind == ItemKind::kStrongMem) {
@@ -535,6 +580,7 @@ class Menu {
         return Action::kNone;
       case ItemKind::kSetting:
       case ItemKind::kDisplayRate:
+      case ItemKind::kWow64Cpu:
       case ItemKind::kStrongMem:
         Step(1);
         return Action::kNone;
@@ -584,8 +630,8 @@ class Menu {
            strcmp(st::kSettings[group].label, "Performance") == 0;
   }
 
-  // The row of the memory order of Box64 is on the page of the group
-  // "Testing".
+  // The rows of the translator and of the memory order of Box64 are on the
+  // page of the group "Testing".
   static bool IsTestGroup(int group) {
     return group >= 0 && group < st::kSettingCount &&
            st::kSettings[group].kind == st::kGroup &&
@@ -621,6 +667,8 @@ class Menu {
   int display_wanted_ = 0;
   int display_hz_ = 0;
   int strongmem_ = 0;
+  wine_rules::Cpu wow64_cpu_ = wine_rules::Cpu::kBox64;
+  bool cpu_choice_counts_ = true;
   bool game_running_ = false;
   std::string notice_;
   std::string profile_;

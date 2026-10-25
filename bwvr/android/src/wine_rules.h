@@ -82,6 +82,53 @@ inline const char* CpuDll(const std::string& abi) {
 // prefix (a DLL that is not a part of Wine).
 inline bool CopiesCpuDll(const std::string& abi) { return abi == "arm64-v8a"; }
 
+// THE CHOICE OF THE CPU ON ARM64 (wow64_cpu, docs/android.md, "FEX as the
+// CPU of the 32 bit code"). The tree of arm64-v8a has two CPU DLLs for the
+// 32 bit x86 code: wowbox64.dll of Box64 and libwow64fex.dll of FEX. The app
+// copies both into system32 of the prefix, and before each start of the game
+// it writes the name of the choice as the default value of
+// HKLM\Software\Microsoft\Wow64\x86 (play_rules.h, GameRegistry). The WoW64
+// of Wine reads that value at the start of each 32 bit process
+// (get_cpu_dll_name of dlls/wow64/syscall.c). On x86_64 the 32 bit code runs
+// natively through wow64cpu.dll, and the key does nothing.
+//   wow64_cpu=box64  wowbox64.dll (the default)
+//   wow64_cpu=fex    libwow64fex.dll
+enum class Cpu { kBox64, kFex };
+constexpr char kFexDll[] = "libwow64fex.dll";
+
+// The value of wow64_cpu: "fex" (no case, no white space at the ends) is
+// FEX, each other value is Box64.
+inline Cpu ParseCpu(const std::string& text) {
+  std::string t;
+  for (char c : text) {
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') t += c;
+  }
+  return Lower(t) == "fex" ? Cpu::kFex : Cpu::kBox64;
+}
+inline const char* CpuKey(Cpu cpu) { return cpu == Cpu::kFex ? "fex" : "box64"; }
+
+// True for an ABI where wow64_cpu chooses the CPU DLL.
+inline bool HasCpuChoice(const std::string& abi) { return abi == "arm64-v8a"; }
+
+// The CPU of the game: the choice on arm64-v8a, Box64 on each other ABI, so
+// the game there gets the variables of Box64 as with wow64_cpu=box64.
+inline Cpu GameCpu(const std::string& abi, Cpu chosen) {
+  return HasCpuChoice(abi) ? chosen : Cpu::kBox64;
+}
+
+// The CPU DLL of the game: the choice on arm64-v8a, else CpuDll.
+inline const char* GameCpuDll(const std::string& abi, Cpu chosen) {
+  if (!HasCpuChoice(abi)) return CpuDll(abi);
+  return chosen == Cpu::kFex ? kFexDll : CpuDll(abi);
+}
+
+// The CPU DLLs that the app copies from the tree into system32 of the
+// prefix: both DLLs on arm64-v8a, none on x86_64.
+inline std::vector<std::string> CopiedCpuDlls(const std::string& abi) {
+  if (!CopiesCpuDll(abi)) return {};
+  return {CpuDll(abi), kFexDll};
+}
+
 // The drive of the game folder in Wine.
 constexpr char kGameDrive[] = "g:";
 // The test program (wine_probe=1) in the game folder, and its result file.
@@ -100,6 +147,7 @@ struct Paths {
   std::string libs;      // <abi>/lib: libfreetype.so
   std::string dlls;      // <abi>/lib/wine: a folder for each architecture
   std::string cpu_dll;   // the CPU DLL in the tree (arm64-v8a only)
+  std::string cpu_dir;   // the folder of the CPU DLLs in the tree (arm64-v8a only)
   std::string prefix;    // the Wine prefix
   std::string prefix_id; // the marker of a whole prefix: the build id of its tree
   std::string user_reg;  // user.reg of the prefix
@@ -122,7 +170,8 @@ inline Paths MakePaths(const std::string& files, const std::string& app_folder,
   p.dlls = p.libs + "/wine";
   p.loader = p.dlls + "/" + arch + "-unix/wine";
   p.server = p.tree + "/" + abi + "/bin/wineserver";
-  p.cpu_dll = CopiesCpuDll(abi) ? p.dlls + "/" + arch + "-windows/" + CpuDll(abi) : "";
+  p.cpu_dir = CopiesCpuDll(abi) ? p.dlls + "/" + arch + "-windows" : "";
+  p.cpu_dll = CopiesCpuDll(abi) ? p.cpu_dir + "/" + CpuDll(abi) : "";
   p.prefix = files + "/prefix";
   p.prefix_id = p.prefix + "/bwvr-prefix-id.txt";
   p.user_reg = p.prefix + "/user.reg";
@@ -152,9 +201,9 @@ inline bool NeedsUnpack(const std::string& installed_id, const std::string& apk_
 // stopped or failed gives a new prefix.
 inline bool NeedsPrefix(const std::string& marker) { return Trim(marker).empty(); }
 
-// True when the CPU DLL of the tree goes into system32 of a prefix that is
-// there: the prefix was made with a tree of another build. A new prefix gets
-// it before its wineboot.
+// True when the CPU DLLs of the tree (CopiedCpuDlls) go into system32 of a
+// prefix that is there: the prefix was made with a tree of another build. A
+// new prefix gets them before its wineboot.
 inline bool NeedsCpuCopy(const std::string& abi, const std::string& marker,
                          const std::string& tree_id) {
   return CopiesCpuDll(abi) && Trim(marker) != Trim(tree_id);

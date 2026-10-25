@@ -236,11 +236,50 @@ bool WineRuntime::PutModFiles() {
   return true;
 }
 
+bool WineRuntime::CopyCpuDlls() {
+  const std::vector<std::string> dlls = wine_rules::CopiedCpuDlls(abi_);
+  if (dlls.empty()) return true;
+  if (!MakeDirs(paths_.system32)) return Fault("cannot make " + paths_.system32);
+  for (const std::string& dll : dlls) {
+    if (!CopyFile(paths_.cpu_dir + "/" + dll, paths_.system32 + "/" + dll)) {
+      return Fault("cannot copy " + dll + " into system32");
+    }
+    AppLog("wine         : %s of the tree is in system32 of the prefix", dll.c_str());
+  }
+  return true;
+}
+
 void WineRuntime::RunGame(Game game) {
   TimeLogNameThread("bwvr game");
   if (!PutModFiles()) {
     EndGame(-1, "the files of the mod are not in the prefix");
     return;
+  }
+  // THE CPU OF THE 32 BIT CODE (wine_rules.h, Cpu): on arm64-v8a the DLL of
+  // the choice is in system32, and game.reg makes it the default value of
+  // HKLM\Software\Microsoft\Wow64\x86. On x86_64 wow64_cpu does nothing.
+  const bool choice = wine_rules::HasCpuChoice(abi_);
+  const wine_rules::Cpu cpu = wine_rules::GameCpu(abi_, game.cpu);
+  const std::string cpu_dll = wine_rules::GameCpuDll(abi_, game.cpu);
+  if (choice) {
+    AppLog("game         : wow64_cpu=%s. The CPU of the 32 bit code of the game is %s of %s",
+           wine_rules::CpuKey(game.cpu), cpu_dll.c_str(),
+           cpu == wine_rules::Cpu::kFex ? "FEX" : "Box64");
+    if (!Exists(paths_.system32 + "/" + cpu_dll)) {
+      AppLog("game         : system32 of the prefix has no %s. Copy the CPU DLLs of the tree",
+             cpu_dll.c_str());
+      if (!CopyCpuDlls()) {
+        EndGame(-1, "the CPU DLL " + cpu_dll + " is not in the prefix");
+        return;
+      }
+    }
+  } else {
+    AppLog("game         : wow64_cpu=%s. %s: the 32 bit code runs natively through %s of Wine%s",
+           wine_rules::CpuKey(game.cpu), abi_.c_str(), cpu_dll.c_str(),
+           game.cpu == wine_rules::Cpu::kFex
+               ? ". The key does nothing here, and the game gets the variables of Box64 as "
+                 "with wow64_cpu=box64"
+               : "");
   }
   // The registry of the game, at each start, so a change of the menu counts.
   const std::string folder = play_rules::AppFolder(paths_.prefix);
@@ -248,7 +287,8 @@ void WineRuntime::RunGame(Game game) {
   // The values of the profile of the PC go after the registry of the game,
   // in the same import.
   if (!MakeDirs(folder) ||
-      !WriteTextFile(reg_file, play_rules::GameRegistry(game.width, game.height, options_.audio) +
+      !WriteTextFile(reg_file, play_rules::GameRegistry(game.width, game.height, options_.audio,
+                                                        choice ? cpu_dll : std::string()) +
                                    game.profile_reg)) {
     AppLog("game         : cannot write %s", reg_file.c_str());
     EndGame(-1, "the registry file of the game cannot be written");
@@ -258,9 +298,10 @@ void WineRuntime::RunGame(Game game) {
   const int reg = Spawn({paths_.loader, "reg", "import", play_rules::kRegFileWine}, 120, &ms,
                         &game_stop_);
   AppLog("game         : reg import of %s ended with %d after %.1f s: GameDir %s, ScreenW %d, "
-         "ScreenH %d, FullScreen 0, ScreenD 32, the files of the mod as KnownDLLs, and %s",
+         "ScreenH %d, FullScreen 0, ScreenD 32, the files of the mod as KnownDLLs, %s%s, and %s",
          play_rules::kRegFileWine, reg, ms / 1000.0, play_rules::kGameDir, game.width,
-         game.height,
+         game.height, choice ? "HKLM\\Software\\Microsoft\\Wow64\\x86 = " : "no CPU value",
+         choice ? cpu_dll.c_str() : "",
          options_.audio ? "the audio driver aaudio (wine_audio=1)"
                         : "no audio driver (wine_audio=0)");
   if (!game.profile_reg.empty()) {
@@ -306,18 +347,35 @@ void WineRuntime::RunGame(Game game) {
     std::lock_guard<std::mutex> hold(lock_);
     state_ = GameState::kRunning;
   }
-  // THE VARIABLES OF BOX64 (play_rules.h, Box64Vars): only for the game.
-  const play_rules::Box64Env box64 = play_rules::Box64Vars(game.box64_strongmem, game.box64_env);
+  // THE VARIABLES OF THE TRANSLATOR (play_rules.h, CpuVars): only for the
+  // game. Box64 gets box64_strongmem and box64_env, FEX gets fex_env.
+  const play_rules::EnvVars vars =
+      play_rules::CpuVars(cpu, game.box64_strongmem, game.box64_env, game.fex_env);
   std::string given;
-  for (const std::string& v : box64.vars) given += (given.empty() ? "" : " ") + v;
-  AppLog("game         : box64_strongmem=%d, box64_env=\"%s\". The game gets %s%s",
-         game.box64_strongmem, game.box64_env.c_str(),
-         given.empty() ? "no variable of Box64" : "the variables of Box64 ",
-         given.c_str());
-  for (const std::string& r : box64.refused) {
-    AppLog("game         : box64_env: %s does not go to the game", r.c_str());
+  for (const std::string& v : vars.vars) given += (given.empty() ? "" : " ") + v;
+  if (cpu == wine_rules::Cpu::kFex) {
+    AppLog("game         : fex_env=\"%s\". The game gets %s%s", game.fex_env.c_str(),
+           given.empty() ? "no variable of FEX" : "the variables of FEX ", given.c_str());
+    for (const std::string& r : vars.refused) {
+      AppLog("game         : fex_env: %s does not go to the game", r.c_str());
+    }
+    AppLog("game         : box64_strongmem=%d and box64_env=\"%s\" do not go to the game: "
+           "the CPU is FEX",
+           game.box64_strongmem, game.box64_env.c_str());
+  } else {
+    AppLog("game         : box64_strongmem=%d, box64_env=\"%s\". The game gets %s%s",
+           game.box64_strongmem, game.box64_env.c_str(),
+           given.empty() ? "no variable of Box64" : "the variables of Box64 ",
+           given.c_str());
+    for (const std::string& r : vars.refused) {
+      AppLog("game         : box64_env: %s does not go to the game", r.c_str());
+    }
+    if (!wine_rules::Trim(game.fex_env).empty()) {
+      AppLog("game         : fex_env=\"%s\" does not go to the game: the CPU is not FEX",
+             game.fex_env.c_str());
+    }
   }
-  const std::vector<std::string> env = play_rules::GameEnvironment(env_, box64.vars);
+  const std::vector<std::string> env = play_rules::GameEnvironment(env_, vars.vars);
   const std::vector<std::string> args = play_rules::GameArgs(paths_.loader, game.new_game);
   AppLog("game         : start %s%s in Wine, in the folder %s, with %s", play_rules::kGameExe,
          game.new_game ? " -NEWGAME" : "", game_.c_str(), play_rules::kGameOverrides);
@@ -375,13 +433,9 @@ void WineRuntime::Run() {
   }
   if (stop_) return;
   if (wine_rules::NeedsCpuCopy(abi_, made, apk_id)) {
-    const std::string dll = paths_.system32 + "/" + wine_rules::CpuDll(abi_);
-    if (!MakeDirs(paths_.system32) || !CopyFile(paths_.cpu_dll, dll)) {
-      Fault("cannot copy " + std::string(wine_rules::CpuDll(abi_)) + " into system32");
-      return;
-    }
-    AppLog("wine         : %s of the tree %s is in system32 of the prefix",
-           wine_rules::CpuDll(abi_), apk_id.c_str());
+    AppLog("wine         : the prefix is of another tree. It gets the CPU DLLs of the tree %s",
+           apk_id.c_str());
+    if (!CopyCpuDlls()) return;
   }
   if (made != apk_id) {
     if (!WriteTextFile(paths_.prefix_id, apk_id + "\n")) {
@@ -481,8 +535,8 @@ bool WineRuntime::CheckTree() {
   for (const std::string& f : need) {
     if (!Exists(f)) return Fault("the tree has no " + f.substr(paths_.tree.size() + 1));
   }
-  if (!paths_.cpu_dll.empty() && !Exists(paths_.cpu_dll)) {
-    return Fault("the tree has no " + std::string(wine_rules::CpuDll(abi_)));
+  for (const std::string& dll : wine_rules::CopiedCpuDlls(abi_)) {
+    if (!Exists(paths_.cpu_dir + "/" + dll)) return Fault("the tree has no " + dll);
   }
   const std::string& lib = paths_.dlls;
   DIR* top = opendir(lib.c_str());
@@ -515,14 +569,10 @@ bool WineRuntime::MakePrefix(const std::string& tree_id) {
   AppLog("wine         : user.reg of the prefix: no display driver, %s",
          options_.audio ? "the audio driver aaudio (wine_audio=1)"
                         : "no audio driver (wine_audio=0)");
-  // The CPU DLL of ARM64 must be in system32 before wineboot: wineboot
-  // runs the 32 bit part of wine.inf in a 32 bit process.
-  if (wine_rules::CopiesCpuDll(abi_)) {
-    const std::string dll = paths_.system32 + "/" + wine_rules::CpuDll(abi_);
-    if (!MakeDirs(paths_.system32) || !CopyFile(paths_.cpu_dll, dll)) {
-      return Fault("cannot copy " + std::string(wine_rules::CpuDll(abi_)) + " into system32");
-    }
-  }
+  // The CPU DLLs of ARM64 must be in system32 before wineboot: wineboot
+  // runs the 32 bit part of wine.inf in a 32 bit process, with the CPU of
+  // wine.inf (wowbox64.dll).
+  if (!CopyCpuDlls()) return false;
   double boot_ms = 0.0, wait_ms = 0.0;
   const int boot = Spawn({paths_.loader, "wineboot", "--init"}, 900, &boot_ms, &stop_);
   AppLog("wine         : wineboot --init ended with %d after %.1f s", boot, boot_ms / 1000.0);

@@ -15,15 +15,19 @@
 #     the import libraries (.a), the shell scripts of bin (they need
 #     /bin/sh, and the app starts the loader itself), and some programs with
 #     a window that a game does not use (kProgramsOut below).
-#   - puts wowbox64.dll of build_box64.ps1 into aarch64-windows (aarch64).
+#   - puts wowbox64.dll of build_box64.ps1 and libwow64fex.dll of
+#     build_fex.ps1 into aarch64-windows (aarch64): the two CPU DLLs of the
+#     32 bit code that the key wow64_cpu of the app chooses from.
 #   - adds the default value of HKLM\Software\Microsoft\Wow64\x86 (the CPU
 #     DLL of the 32 bit code, CpuDll of wine_rules.h) to the section [Wow64]
 #     of wine.inf, which wineboot reads before the 32 bit part of the prefix.
 #   - strips each ELF file.
-#   - checks the machine of each ELF file and of each PE file.
+#   - checks the machine of each ELF file and of each PE file, and lists the
+#     imports of each CPU DLL that the tree does not export.
 #   - writes into bwvr/out/android/wine: <apk abi>.tar (ustar, the tree),
 #     <apk abi>.id (the build id: a hash of the names and the bytes of the
-#     tree), <apk abi>-files.txt, <apk abi>-left-out.txt and licenses/.
+#     tree), <apk abi>-files.txt, <apk abi>-left-out.txt and licenses/ (Wine,
+#     FreeType, and for aarch64 Box64 and each fex*.txt of build_fex.ps1).
 # It ends with exit code 1 when a check fails.
 set -u
 W=${1:?the work folder}
@@ -44,9 +48,14 @@ S=$W/pack/$APK_ABI
 [ -x "$FROM/$APK_ABI/lib/wine/$ABI-unix/wine" ] || { echo "There is no Wine in $FROM. Run build_wine.sh first."; exit 1; }
 WOWBOX=$BWVR/out/android/box64/wowbox64.dll
 BOX64_LICENSE=$BWVR/out/android/box64/LICENSE
+FEX_DLL=$BWVR/out/android/fex/libwow64fex.dll
+FEX_LICENSES=$BWVR/out/android/fex/licenses
 if [ "$ABI" = aarch64 ]; then
   for f in "$WOWBOX" "$BOX64_LICENSE"; do
     [ -f "$f" ] || { echo "There is no $f. Run build_box64.ps1 -Mingw first."; exit 1; }
+  done
+  for f in "$FEX_DLL" "$FEX_LICENSES/fex.txt"; do
+    [ -f "$f" ] || { echo "There is no $f. Run build_fex.ps1 first."; exit 1; }
   done
 fi
 # Programs of Wine with a window, for a person at a desktop. A game does
@@ -90,6 +99,7 @@ echo "   left out: $(wc -l < "$LEFT") files and folders (see $(basename "$LEFT")
 
 if [ "$ABI" = aarch64 ]; then
   cp "$WOWBOX" "$S/$APK_ABI/lib/wine/aarch64-windows/wowbox64.dll"
+  cp "$FEX_DLL" "$S/$APK_ABI/lib/wine/aarch64-windows/libwow64fex.dll"
 fi
 INF=$S/share/wine/wine.inf
 LINE="HKLM,Software\\Microsoft\\Wow64\\x86,,,\"$CPU\""
@@ -132,9 +142,28 @@ for f in "$APK_ABI/lib/wine/$ABI-unix/wine" "$APK_ABI/bin/wineserver" \
   [ -e "$S/$f" ] || fault "the tree has no $f"
 done
 if [ "$ABI" = aarch64 ]; then
-  echo "   wowbox64.dll: $("$MINGW/llvm-objdump" -f "$S/$APK_ABI/lib/wine/aarch64-windows/wowbox64.dll" | grep -o 'file format [^ ]*'), imports:" \
-    $("$MINGW/llvm-objdump" -p "$S/$APK_ABI/lib/wine/aarch64-windows/wowbox64.dll" | sed -n 's/.*DLL Name: //p') \
-    ", exports BTCpu:" $("$MINGW/llvm-objdump" -p "$S/$APK_ABI/lib/wine/aarch64-windows/wowbox64.dll" | grep -c 'BTCpu')
+  # Each CPU DLL: its format, its imports, its exports BTCpu, and each
+  # function that it imports from a DLL of the tree and that the tree does
+  # not export. Wine gives such an import a stub, which stops the program at
+  # a call of it.
+  W64=$S/$APK_ABI/lib/wine/aarch64-windows
+  for cpu in wowbox64.dll libwow64fex.dll; do
+    [ -e "$W64/$cpu" ] || { fault "the tree has no $APK_ABI/lib/wine/aarch64-windows/$cpu"; continue; }
+    fmt=$("$MINGW/llvm-objdump" -f "$W64/$cpu" | grep -o 'file format [^ ]*' | cut -d' ' -f3)
+    [ "$fmt" = coff-arm64 ] || fault "$cpu is $fmt, not coff-arm64"
+    "$MINGW/llvm-objdump" -p "$W64/$cpu" > "$W/pack/$cpu.txt"
+    missing=""
+    for d in $(sed -n 's/.*DLL Name: //p' "$W/pack/$cpu.txt" | tr 'A-Z' 'a-z'); do
+      "$MINGW/llvm-objdump" -p "$W64/$d" | sed -n '/Export Table:/,/^$/p' |
+        awk 'NF >= 3 && $1 ~ /^[0-9]+$/ { print $NF }' | LC_ALL=C sort -u > "$W/pack/exports-$d.txt"
+      for n in $(awk -v want="$d" '/DLL Name:/ { dll = tolower($3) } NF == 2 && $1 ~ /^[0-9]+$/ && dll == want { print $2 }' \
+                   "$W/pack/$cpu.txt" | LC_ALL=C sort -u | LC_ALL=C comm -23 - "$W/pack/exports-$d.txt"); do
+        missing="$missing $d.$n"
+      done
+    done
+    echo "   $cpu: $fmt, imports:" $(sed -n 's/.*DLL Name: //p' "$W/pack/$cpu.txt") \
+      "- exports BTCpu: $(grep -c 'BTCpu' "$W/pack/$cpu.txt") - imports that the tree does not export:${missing:- none}"
+  done
 fi
 echo "   the fonts:" $(cd "$S/share/wine/fonts" && ls)
 # The app takes only files and folders from the tar file (wine_runtime.cpp).
@@ -153,7 +182,11 @@ tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 --no-recursion
 echo "$ID" > "$OUT/$APK_ABI.id"
 cp "$W/install/$ABI/COPYING.LIB" "$OUT/licenses/wine.txt"
 cp "$W/install/$ABI/FTL.TXT" "$OUT/licenses/freetype.txt"
-[ "$ABI" = aarch64 ] && cp "$BOX64_LICENSE" "$OUT/licenses/box64.txt"
+if [ "$ABI" = aarch64 ]; then
+  cp "$BOX64_LICENSE" "$OUT/licenses/box64.txt"
+  rm -f "$OUT"/licenses/fex*.txt
+  cp "$FEX_LICENSES"/fex*.txt "$OUT/licenses/"
+fi
 echo "   build id $ID"
 echo "   the tree: $(find . -type f | wc -l) files, $(find . -type l | wc -l) links, $(du -sb . | cut -f1) bytes"
 echo "   $OUT/$APK_ABI.tar: $(stat -c %s "$OUT/$APK_ABI.tar") bytes"

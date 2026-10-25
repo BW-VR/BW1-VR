@@ -979,16 +979,21 @@ that moves while the Hand takes it.
   Open: why the Quest 3 asks for 4096 by 4291, and a way to find the hot
   code of the game under Box64 (`android.md`, "The hot code under Box64":
   no way works yet).
-  **The stop of the game** about 10 s after the load of a saved game on the
-  Quest: the main thread of the game runs at one core, and `wine.log` has a
-  line "RtlpWaitForCriticalSection section 000000007AF441E8". Next run in
-  the headset: the module list of the mod at the stop (`stall_modules=1`,
-  `backend.md`, "The module list at a stall") with
-  `stall_addrs=7AF441E8`, to name the module or the heap of that section,
-  and a try of the row "Strict memory order of the game (Box64, slower)"
-  at 1, 2 and 3 (`box64_strongmem`, `android.md`, "The variables of
-  Box64"), to see if the memory order of Box64 is the cause. Not proven:
-  the cause.
+  **The stop of the game** 6 to 15 s after the load of a saved game on the
+  Quest: the main thread of the game runs at 99 percent of one core in user
+  mode, and `wine.log` names the critical section 0x7AF441E8 in each stop:
+  `box64_context.mutex_dyndump` of `wowbox64.dll` (RVA 0x4741E8), the lock
+  of Box64 for the translation of a block of x86 code. The other threads
+  wait for it. With `BOX64_DYNAREC_STRONGMEM=3`, `BOX64_DYNAREC_BIGBLOCK=0`
+  and `BOX64_DYNAREC_LOG=1` the game stops too, and the log of Box64 has no
+  message of an abort or of a repeat. Next run in the headset: the same
+  save with the row "Translator of the game (Box64 or FEX)" at FEX
+  (`wow64_cpu=fex`, `android.md`, "FEX as the CPU of the 32 bit code"),
+  with `fex_env=FEX_SILENTLOG=0` for the lines of FEX in `wine.log`, then
+  the frame rate with `FEX_X87REDUCEDPRECISION=1`. Not known: if FEX runs
+  the game, and if the game calls `TerminateThread` on another thread
+  (FEX imports `RtlWow64SuspendThread` for that case, and Wine 11.0 does
+  not have it).
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

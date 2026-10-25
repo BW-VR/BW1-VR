@@ -2727,8 +2727,11 @@ Steam Frame.
   so the test program in such a prefix has no sound.
 - The APK has no permission `INTERNET`, so Wine makes no socket
   ("WSASocketW Failed to create socket, this requires special
-  permissions"). The mod answers the check of the game for an internet
-  connection itself (`net_check=0`).
+  permissions"). The network part of Wine cannot read the network cards
+  of the headset ("nsi: bind failed, errno 13"), and a check of the
+  network cards waits forever. The mod answers the whole check of the game
+  for an internet connection with "no connection" (`net_check_skip=1`,
+  `intro.md`, "The internet check").
 - A tree of another build gets a new unpack, and the prefix with its
   marker stays. wineboot updates a prefix when `wine.inf` is newer than the
   prefix (`update_wineprefix`), but no test ran a new tree over an old

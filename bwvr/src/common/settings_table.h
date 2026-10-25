@@ -305,6 +305,12 @@ inline const Setting kSettings[] = {
      "lines again, delete bwvr-hint-counts.ini in the game folder."},
 
     {kGroup, nullptr, "Testing", nullptr, 0, nullptr},
+    {kBool, "net_check_skip", "Tell the game that there is no internet",
+     nullptr, 1,
+     "After the logos the game checks for an internet connection. Its "
+     "online features have no server now. In the headset this check can "
+     "stop the game on the loading screen. On: the mod tells the game at "
+     "once that there is no connection. Off: the game does its own check."},
     {kBool, "test_keys", "Test keys", nullptr, 0,
      "Turns on the keys for tests. Each key changes one rule of the mod "
      "while you play, so that you can compare, and the readme lists them. "

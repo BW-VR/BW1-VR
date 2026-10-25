@@ -37,6 +37,25 @@ is built, and no test has proven it.
 
 ### Faults in play
 
+- **Q1. The game with the profile of a player in a Quest 3: check it in the
+  headset.** The game with the profile of the PC stopped on the loading
+  screen. The last line of the game was its check for an internet
+  connection (`LHCheckForInternetConnection`). The network part of Wine
+  cannot read the network cards on the headset ("nsi: bind failed, errno
+  13"), and the main thread of the game waits forever. A new profile does
+  not come to this check, because its dialog comes first. The mod now
+  answers the whole check with "no connection" (`net_check_skip=1`, the
+  setting "Tell the game that there is no internet", `intro.md`, "The
+  internet check"). Not run in the headset.
+
+  Check in the headset, with the profile of the PC:
+  - that the game goes from the loading screen to the Main Menu,
+  - that `bwvr.log` has the line "The mod answered: no connection, with no
+    check",
+  - that slot 0 or slot 20 of the profile loads,
+  - that "Tell the game that there is no internet" is on in the page
+    Testing of the menu.
+
 - **B2. A catch at once: check it in a headset.** A press of the grip on
   an object that moves (it falls, flies or rolls) puts the object in the
   hand from the first frame after the press. The game sends its pick up at
@@ -816,7 +835,7 @@ that moves while the Hand takes it.
     the PC (the values of the registry and the files) to the game folder of
     the app, and "Play" imports its values into the registry of the prefix
     one time for each copy (`pc_profile`, `android.md`, "The profile of
-    the PC"). Open: the profile of a player in a headset, the sound in a
+    the PC"). Open: the profile of a player in a headset (Q1), the sound in a
     headset (the audio driver `wineaaudio` of patch 0003 gives the sound of
     Wine to AAudio, `audio.md`, "In Wine on Android"), the pace of the
     frames with `vk_device=0` in a headset (`vk_pace`, `android.md`, "The

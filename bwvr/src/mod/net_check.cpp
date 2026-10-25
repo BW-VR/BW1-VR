@@ -34,6 +34,23 @@
 // RasEnumDevicesA. For each of them it gets an answer function of the mod.
 // Each other name goes to the real GetProcAddress. This writes one pointer,
 // loads no DLL, and is safe before the game starts.
+//
+// THE WHOLE CHECK (net_check_skip=1, the default). After the answers above,
+// LHCheckForInternetConnection asks Windows for the network cards
+// (inetmib1.dll, snmpapi.dll) and for the names of its servers. In Wine on
+// the headset the network part of Wine cannot read the network cards
+// ("nsi: bind failed, errno 13"), and the main thread waits forever on the
+// loading screen. So the mod answers the whole function: no connection, at
+// once. The function is bool LHCheckForInternetConnection(char option). It
+// keeps its option in the exported byte CheckInternetConnectionOptions, and
+// the option 2 makes the plain function answer false with no check. The
+// answer of the mod keeps the option in the byte too and gives false.
+// runblack.exe imports the function by name from LHMultiplayerR.dll, so the
+// mod writes its answer in that import slot of runblack.exe.
+//
+//     net_check_skip=1   the mod answers the whole check: no connection
+//     net_check_skip=0   the check of the game runs, with the answers of
+//                        net_check
 
 #include <windows.h>
 #include <stdint.h>
@@ -50,6 +67,29 @@ bool g_installed = false;
 bool g_missing_logged = false;
 volatile LONG g_connection_answers = 0;
 volatile LONG g_device_answers = 0;
+volatile LONG g_check_answers = 0;
+
+const char kCheckName[] = "?LHCheckForInternetConnection@@YA_ND@Z";
+const char kOptionName[] = "?CheckInternetConnectionOptions@@3DA";
+
+// LHCheckForInternetConnection: no connection, at once. The game reads the
+// option byte again later, so it gets the value that the plain function
+// writes.
+bool __cdecl NoInternet(char option) {
+  const HMODULE multiplayer = GetModuleHandleA("LHMultiplayerR.dll");
+  char* options =
+      multiplayer != nullptr
+          ? reinterpret_cast<char*>(GetProcAddress(multiplayer, kOptionName))
+          : nullptr;
+  if (options != nullptr) *options = option;
+  if (InterlockedIncrement(&g_check_answers) == 1) {
+    ModLog("net check    : the game asked for an internet connection "
+           "(LHCheckForInternetConnection, option %d). The mod answered: no "
+           "connection, with no check (net_check_skip=1)",
+           static_cast<int>(option));
+  }
+  return false;
+}
 
 // RasEnumConnectionsA: no connection. The caller gives the size of its buffer
 // in *bytes and gets the size that is needed, which is 0.
@@ -172,4 +212,50 @@ void NetCheckInstall(bool own_answer) {
   ModLog("net check    : the mod answers the game's check for an internet "
          "connection itself: no connection and no modem (net_check=0). The "
          "game cannot wait for the Remote Access service of Windows");
+}
+
+// Puts the answer of the mod for the whole check in the import slot of
+// runblack.exe. This can run more than one time. A call writes the slot
+// only when it does not hold the answer of the mod.
+void NetCheckSkipInstall(bool skip) {
+  static bool logged = false;
+  if (!skip) {
+    if (!logged) {
+      logged = true;
+      ModLog("net check    : net_check_skip=0. The check of the game for an "
+             "internet connection runs, with the answers of net_check");
+    }
+    return;
+  }
+  void** slot = ImportSlotOf(GetModuleHandleA(nullptr), "LHMultiplayerR.dll",
+                             kCheckName);
+  if (slot == nullptr) {
+    if (!logged) {
+      logged = true;
+      ModLog("net check    : runblack.exe has no import of "
+             "LHCheckForInternetConnection, so the check of the game stays "
+             "as it is");
+    }
+    return;
+  }
+  if (*slot == reinterpret_cast<void*>(&NoInternet)) return;
+  DWORD old = 0;
+  if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) {
+    if (!logged) {
+      logged = true;
+      ModLog("net check    : the import slot of LHCheckForInternetConnection "
+             "cannot be written (error %lu), so the check of the game stays "
+             "as it is",
+             GetLastError());
+    }
+    return;
+  }
+  *slot = reinterpret_cast<void*>(&NoInternet);
+  VirtualProtect(slot, sizeof(void*), old, &old);
+  if (!logged) {
+    logged = true;
+    ModLog("net check    : the mod answers the whole check of the game for an "
+           "internet connection: no connection, with no check of the network "
+           "cards (net_check_skip=1)");
+  }
 }

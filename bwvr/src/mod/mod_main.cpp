@@ -267,6 +267,7 @@ void Depth24SetWanted(bool on);
 void Depth24Install();
 // net_check.cpp: the game's check for an internet connection.
 void NetCheckInstall(bool own_answer);
+void NetCheckSkipInstall(bool skip);
 // dx_check.cpp: the game's check for DirectX 7.
 void DxCheckInstall(bool own_answer);
 // file_read_ahead.cpp: the read ahead of the files of LHFile.
@@ -554,6 +555,8 @@ float g_head_units_per_meter = 7.5f;
 int g_near_plane_cm = 5;
 // The mod answers the game's check for an internet connection (net_check.cpp).
 bool g_net_check_own = true;
+// The mod answers the whole check with no connection (net_check.cpp).
+bool g_net_check_skip = true;
 // The mod answers the game's check for DirectX 7 (dx_check.cpp).
 bool g_dx_check_own = true;
 int g_near_plane_cm_16 = 10;
@@ -2789,6 +2792,9 @@ void EarlyHooks() {
   // turned off too.
   g_net_check_own = GetPrivateProfileIntA("bwvr", "net_check", 0, path) == 0;
   NetCheckInstall(g_net_check_own);
+  g_net_check_skip =
+      GetPrivateProfileIntA("bwvr", "net_check_skip", 1, path) != 0;
+  NetCheckSkipInstall(g_net_check_skip);
   // The check of the game for DirectX 7 stops the game with no administrator
   // rights. It comes before the backend loads.
   g_dx_check_own = GetPrivateProfileIntA("bwvr", "dx_check", 0, path) == 0;
@@ -2887,6 +2893,7 @@ void Startup() {
   ModLog("");
   // A second try, if LHMultiplayerR.dll was not loaded at the first one.
   NetCheckInstall(g_net_check_own);
+  NetCheckSkipInstall(g_net_check_skip);
   DxCheckInstall(g_dx_check_own);
 
   ReadSettings();

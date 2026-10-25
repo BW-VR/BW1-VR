@@ -24,9 +24,10 @@ from the code and not confirmed by a run.
   show while a hand moves (`intro_hand_show`).
 - A press of a trigger or of A, B, X or Y skips the logos and the intro (the
   skip, `intro_skip`, on by default).
-- The mod answers the game's check for an internet connection itself, so a PC
-  whose Windows service `RasMan` does not answer can start the game
-  (`net_check`).
+- The mod answers the game's check for an internet connection itself: no
+  connection, at once. So a PC whose Windows service `RasMan` does not
+  answer and Wine on the headset can start the game (`net_check_skip`,
+  `net_check`).
 - The mod answers the game's check for DirectX 7 itself, so the game starts
   with no administrator rights (`dx_check`).
 
@@ -48,7 +49,7 @@ DirectX check), with small parts in
 | Why the intro is flat without the hook | What the mod does when `intro_vr=0` |
 | The intro in stereo | The design and the code that is built |
 | The skip | The press that ends the logos and the intro |
-| The internet check | The `RasMan` stop and the answer of the mod (`net_check`) |
+| The internet check | The `RasMan` stop, the stop in Wine on the headset, and the answer of the mod (`net_check_skip`, `net_check`) |
 | The DirectX check | The check that stops the game with no administrator rights, and the answer of the mod (`dx_check`) |
 | Open work | What is open |
 
@@ -885,6 +886,34 @@ connections.
 **The log.** One line at the start says which way is on. The first time the game
 asks, two more lines say "the game asked Windows for its dial-up and VPN
 connections ... The mod answered: none" and the same for its modems.
+
+**The whole check (`net_check_skip`).** After the answers about the
+connections and the modems, `LHCheckForInternetConnection` asks Windows for
+the network cards (`inetmib1.dll` and `snmpapi.dll`) and then for the names
+of the servers of the game. In Wine on a Quest 3 the network part of Wine
+cannot read the network cards ("nsi: bind failed, errno 13" in `wine.log`).
+The main thread then waits forever, and the game stays on the loading
+screen. A new profile does not come to this check, because the dialog of a
+new profile comes first. The profile of a player comes to it.
+
+The function is `bool LHCheckForInternetConnection(char option)`. It keeps
+its option in the exported byte `CheckInternetConnectionOptions`. With the
+option 2 the plain function gives false with no check, and with the option
+1 it gives true with no check. `runblack.exe` imports the function by name
+from `LHMultiplayerR.dll`. With `net_check_skip=1` the mod writes its own
+function in that import slot of `runblack.exe`. It keeps the option in the
+byte, as the plain function does, and gives false: no connection. The mod
+writes the slot before the game starts (`EarlyHooks`) and again at the
+start of the mod (`Startup`), when the slot does not hold its function.
+Then no part of the check runs, also not the answers of `net_check`.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `net_check_skip` | 1 | 1: the mod answers the whole check: no connection, at once. 0: the check of the game runs, with the answers of `net_check`. The setting "Tell the game that there is no internet" on the page Testing |
+
+The log has one line at the start, and one line with the option of the
+game the first time that the game asks: "The mod answered: no connection,
+with no check (net_check_skip=1)".
 
 **To get a PC out of this state** without the mod: start Windows again, or start
 the service "Remote Access Connection Manager" again as an administrator.

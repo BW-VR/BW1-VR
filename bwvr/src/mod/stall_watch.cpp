@@ -6,13 +6,14 @@
 // "RtlpWaitForCriticalSection" line), and only the map of the process says
 // what holds it. With stall_modules=1 a small thread of the mod looks at the
 // count of the frames each 500 ms. When the count stays the same for 5 s,
-// the thread writes one time the modules of this process (the name, the
-// base and the size, sorted by base) and the result of VirtualQuery for each
-// address of stall_addrs, with the module that holds it. It does nothing
-// else: it does not stop or read a thread. The frame thread only adds 1 to
-// the count at the end of each frame.
+// the thread writes one time the result of VirtualQuery and the mapped file
+// for each address of stall_addrs, then the modules of the 32 bit part of
+// this process (the path, the base and the size, sorted by base), and the
+// module that holds each address. It does nothing else: it does not stop or
+// read a thread. The frame thread only adds 1 to the count at the end of
+// each frame. At its start the thread writes the same lines one time.
 //
-// The log can need a lock that the stopped thread holds. Then the list does
+// The log can need a lock that the stopped thread holds. Then the lines do
 // not come, and the game is as it is with no watch.
 //
 //   stall_modules=1  the watch (the default)
@@ -64,11 +65,54 @@ const char* TypeName(DWORD type) {
   }
 }
 
+// The lines of a stall. stall 0 is the report at the start of the watch.
+// The calls are the ones of a stall, so Box64 has their code translated
+// before a stall: a first translation at a stall can wait for a lock of
+// Box64 that the stopped thread holds. The lines of the addresses come
+// first, because they need only VirtualQuery and the mapped file
+// (NtQueryVirtualMemory). The module list reads the list of the loader in
+// the PEB (the K32 functions of Wine) and needs no loader lock.
+// GetModuleFileNameA takes the loader lock, so the list does not use it.
 void Report(int stall, LONG frames) {
   static HMODULE handles[kMaxModules];
   static scene_sample::Module modules[kMaxModules];
   static char names[kMaxModules][MAX_PATH];
   static char sorted[kMaxModules][MAX_PATH];
+  if (stall == 0) {
+    ModLog("stall        : at the start: the lines of a stall one time now, so that their "
+           "code is ready before a stall. %d addresses of stall_addrs", g_addr_count);
+  } else {
+    ModLog("stall        : stall %d: no frame of the game ended for %u s (after %ld frames). "
+           "%d addresses of stall_addrs, then the modules of the process",
+           stall, stall_math::kStallMs / 1000, frames, g_addr_count);
+  }
+  for (int a = 0; a < g_addr_count; ++a) {
+    const uint32_t address = g_addrs[a];
+    LPVOID at = reinterpret_cast<LPVOID>(static_cast<uintptr_t>(address));
+    char mapped[MAX_PATH + 64];
+    char file[MAX_PATH];
+    if (K32GetMappedFileNameA(GetCurrentProcess(), at, file, MAX_PATH) != 0) {
+      sprintf_s(mapped, "The mapped file: %s", file);
+    } else {
+      sprintf_s(mapped, "No mapped file (error %lu)", GetLastError());
+    }
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(at, &mbi, sizeof(mbi)) == 0) {
+      ModLog("stall        : the address 0x%08X: VirtualQuery fails (error %lu). %s", address,
+             GetLastError(), mapped);
+      continue;
+    }
+    const uint32_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mbi.BaseAddress));
+    const uint32_t alloc = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mbi.AllocationBase));
+    ModLog("stall        : the address 0x%08X: VirtualQuery gives the region 0x%08X to 0x%08X "
+           "(0x%X bytes), the allocation base 0x%08X, the state %s, the protection 0x%lX, "
+           "the type %s. %s",
+           address, base, base + static_cast<uint32_t>(mbi.RegionSize),
+           static_cast<uint32_t>(mbi.RegionSize), alloc, StateName(mbi.State), mbi.Protect,
+           TypeName(mbi.Type), mapped);
+  }
+  // The modules of the loader of the 32 bit part of the process. The 64 bit
+  // modules (ntdll.dll of the CPU, wow64.dll, wowbox64.dll) are not in it.
   DWORD bytes = 0;
   int count = 0;
   if (K32EnumProcessModules(GetCurrentProcess(), handles, sizeof(handles), &bytes)) {
@@ -83,15 +127,16 @@ void Report(int stall, LONG frames) {
     }
     modules[n].base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(info.lpBaseOfDll));
     modules[n].size = info.SizeOfImage;
-    if (GetModuleFileNameA(handles[i], names[n], MAX_PATH) == 0) strcpy_s(names[n], "?");
+    if (K32GetModuleFileNameExA(GetCurrentProcess(), handles[i], names[n], MAX_PATH) == 0) {
+      strcpy_s(names[n], "?");
+    }
     ++n;
   }
   int order[kMaxModules];
   scene_sample::SortModules(modules, n, order);
   for (int i = 0; i < n; ++i) strcpy_s(sorted[i], names[order[i]]);
-  ModLog("stall        : stall %d: no frame of the game ended for %u s (after %ld frames). "
-         "The %d modules of the process, sorted by base, and %d addresses of stall_addrs",
-         stall, stall_math::kStallMs / 1000, frames, n, g_addr_count);
+  ModLog("stall        : %s: the %d modules of the 32 bit part of the process, sorted by base",
+         stall == 0 ? "at the start" : "the stall", n);
   for (int i = 0; i < n; ++i) {
     ModLog("stall        : module 0x%08X to 0x%08X (0x%X bytes) %s", modules[i].base,
            modules[i].base + modules[i].size, modules[i].size, sorted[i]);
@@ -99,31 +144,17 @@ void Report(int stall, LONG frames) {
   for (int a = 0; a < g_addr_count; ++a) {
     const uint32_t address = g_addrs[a];
     const int m = scene_sample::ModuleOf(address, modules, n);
-    char in[MAX_PATH + 64];
     if (m >= 0) {
-      sprintf_s(in, "It is in the module %s+0x%X", sorted[m], address - modules[m].base);
+      ModLog("stall        : the address 0x%08X is in the module %s+0x%X", address, sorted[m],
+             address - modules[m].base);
     } else {
-      strcpy_s(in, "It is in no module");
+      ModLog("stall        : the address 0x%08X is in no module of the list", address);
     }
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(static_cast<uintptr_t>(address)), &mbi,
-                     sizeof(mbi)) == 0) {
-      ModLog("stall        : the address 0x%08X: VirtualQuery fails (error %lu). %s", address,
-             GetLastError(), in);
-      continue;
-    }
-    const uint32_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mbi.BaseAddress));
-    const uint32_t alloc = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mbi.AllocationBase));
-    ModLog("stall        : the address 0x%08X: VirtualQuery gives the region 0x%08X to 0x%08X "
-           "(0x%X bytes), the allocation base 0x%08X, the state %s, the protection 0x%lX, "
-           "the type %s. %s",
-           address, base, base + static_cast<uint32_t>(mbi.RegionSize),
-           static_cast<uint32_t>(mbi.RegionSize), alloc, StateName(mbi.State), mbi.Protect,
-           TypeName(mbi.Type), in);
   }
 }
 
 DWORD WINAPI WatchThread(LPVOID) {
+  Report(0, 0);
   stall_math::Watch watch;
   int stalls = 0;
   for (;;) {

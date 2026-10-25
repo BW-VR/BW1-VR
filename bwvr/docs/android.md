@@ -86,9 +86,10 @@ Summary:
   the x86 address of the hot code of the game yet (see "The hot code under
   Box64").
 - **A stop of the game.** When no frame of the game ends for 5 s, the mod
-  writes the modules of the game process and the regions of the addresses
-  of `stall_addrs` to its log (`stall_modules=1`, `backend.md`, "The module
-  list at a stall"), so an address of a lock line of Wine can be named.
+  writes the region and the mapped file of each address of `stall_addrs`
+  and the 32 bit modules of the game process to its log (`stall_modules=1`,
+  `backend.md`, "The module list at a stall"), so an address of a lock line
+  of Wine can be named.
 - **The variables of Box64.** The row "Strict memory order of the game
   (Box64, slower)" of the page "Testing" (`box64_strongmem`) and the key
   `box64_env` give variables of Box64 to the game alone (see "The variables
@@ -2591,11 +2592,11 @@ last window and its core: "time : no new frame of the game for 5.0 s (the
 last is frame N). The threads of the game ...". So a frame that does not
 end, with a thread at 100 percent in the kernel, shows in one line. A load
 of the game can also give the line. At the same stop the mod writes the
-modules of the game process to `bwvr.log` (`stall_modules=1`,
+32 bit modules of the game process to `bwvr.log` (`stall_modules=1`,
 `backend.md`, "The module list at a stall"), so an address of a line
 "RtlpWaitForCriticalSection" of `wine.log` can be named: put it into
-`stall_addrs` of `bwvr.ini`, and the next stop gives its region and its
-module.
+`stall_addrs` of `bwvr.ini`, and the next stop gives its region, its
+allocation base, its mapped file and its module.
 
 **The cost.** Some reads of the clock in a frame of the session and one in
 each frame that the reader takes, two timestamps in each command buffer of
@@ -2632,8 +2633,8 @@ each frame of the game. In the emulator the game, the app and Wine use less
 than one core in all. With `-TestStallMs 8000` (`test_stall_ms` of the mod,
 `backend.md`, "The module list at a stall") the frame thread of the mod
 spins 8 s, and the line of a stop comes after 5 s of it: "no new frame of
-the game came to the reader for 5.0 s ... runblack.exe 6183 (the main
-thread) R 62.9 (1.5 + 61.5)". After the spin the frames come again ("live
+the game came to the reader for 5.0 s ... runblack.exe <id> (the main
+thread) R ...". After the spin the frames come again ("live
 : frames come"). With `-TimeLog 0` neither log has a line of the times.
 
 **Not shown yet:** the lines in a headset: the time of the GPU of a Quest 3,
@@ -2717,7 +2718,10 @@ headset. Two keys of the app give variables of Box64 to the game
   order of the reads and the writes of memory between threads, and an ARM
   CPU does not. The dynarec of Box64 then adds memory barriers: 1 at the
   writes to memory, 2 also at the SIMD instructions, 3 also more often. The
-  game runs slower with each step. Code of the game or of a DLL that gives
+  game runs slower with each step. Box64 also takes 4, a model of the whole
+  x86 order in the way of QEMU ("for evaluation purposes" in the
+  `docs/USAGE.md` of Box64). The row ends at 3:
+  `box64_env=BOX64_DYNAREC_STRONGMEM=4` with `box64_strongmem=0` gives 4. Code of the game or of a DLL that gives
   data to another thread with no lock needs that order, and a fault there
   can stop the game. Not known: if the stop of the game on the Quest comes
   from that. The change counts at the next "Play".
@@ -2740,9 +2744,12 @@ Windows it reads no box64rc file (`InitializeEnvFiles` has no part for
 "BOX64ENV: Variables overridden:", then one line for each variable.
 
 **The way to the game.** The app puts the variables into the environment of
-the loader of Wine that starts the game alone, not of `reg import`,
-`wineserver` or `wineboot`. Wine gives that environment to `start.exe`, and
-`start.exe` to `runblack.exe`. The log of the app has one line at the start
+the loader of Wine that starts the game, not of `reg import`, `wineserver
+-w` or `wineboot`. Wine gives that environment to `start.exe`, and
+`start.exe` to `runblack.exe`. The server of `reg import` ended at
+`wineserver -w`, so the loader of the game also starts a new wine server
+(see "Play in the app"), and that server gets the variables too. It is a
+program of the ABI with no Box64, so they change nothing there. The log of the app has one line at the start
 of the game, "game : box64_strongmem=N, box64_env="...". The game gets
 ...". At its start the mod writes the variables of Box64 of its own
 environment: "box64 : the environment of the game has N variables of

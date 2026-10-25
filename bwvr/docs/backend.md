@@ -1538,41 +1538,83 @@ time and looks at the count of the frames that ended (`h_FinishFrame`, also
 of the logos and the dialog boxes). When the count stays the same for 5 s,
 the thread writes one time for that stall:
 
-- one line with the number of the stall and the count of the frames, then
-  one line for each module of the process (`K32EnumProcessModules`,
-  `K32GetModuleInformation`, `GetModuleFileNameA`): the base, the end, the
-  size and the path, sorted by base.
-- for each address of `stall_addrs` one line with the result of
-  `VirtualQuery`: the region, the allocation base, the state, the
-  protection and the type, and the module of the list that holds it, with
-  the offset in it, or "It is in no module".
+1. one line with the number of the stall and the count of the frames.
+2. for each address of `stall_addrs` one line with the result of
+   `VirtualQuery` (the region, the allocation base, the state, the
+   protection and the type) and the mapped file of the address
+   (`K32GetMappedFileNameA`), or "No mapped file". The region of
+   `VirtualQuery` starts at the page of the address. The allocation base
+   is the start of the whole allocation or image, and it is the value to
+   use: the offset of the address in a DLL is the address less the
+   allocation base.
+3. one line for each module of the 32 bit part of the process
+   (`K32EnumProcessModules`, `K32GetModuleInformation`,
+   `K32GetModuleFileNameExA`): the base, the end, the size and the path,
+   sorted by base.
+4. for each address one line with the module of the list that holds it,
+   with the offset in it, or "is in no module of the list".
+
+The lines have this form (with the values of a stop in the emulator, the
+mapped file left out):
 
 ```
-stall        : stall 1: no frame of the game ended for 5 s (after 3475 frames). The 54 modules of the process, sorted by base, and 2 addresses of stall_addrs
+stall        : stall 1: no frame of the game ended for 5 s (after 3475 frames). 2 addresses of stall_addrs, then the modules of the process
+stall        : the address 0x7AF441E8: VirtualQuery gives the region 0x7AF44000 to 0x7B563000 (0x61F000 bytes), the allocation base 0x7AC60000, the state MEM_COMMIT, the protection 0x2, the type MEM_IMAGE. The mapped file: ...
+stall        : the stall: the 54 modules of the 32 bit part of the process, sorted by base
 stall        : module 0x00400000 to 0x00FC6000 (0xBC6000 bytes) G:\runblack.exe
 stall        : module 0x7BC30000 to 0x7BEA6000 (0x276000 bytes) C:\windows\system32\kernelbase.dll
-stall        : the address 0x7AF441E8: VirtualQuery gives the region 0x7AF44000 to 0x7B563000 (0x61F000 bytes), the allocation base 0x7AC60000, the state MEM_COMMIT, the protection 0x2, the type MEM_IMAGE. It is in the module C:\windows\system32\shell32.dll+0x2E41E8
+stall        : the address 0x7AF441E8 is in the module C:\windows\system32\shell32.dll+0x2E41E8
 ```
 
-These lines are of the emulator (the x86_64 Wine of the APK with
-`wow64cpu.dll`). There the address of the lock line of the Quest is in the
-read only data of `shell32.dll`. The DLLs of i386 of the Wine tree of
-arm64-v8a can have other bases, so only the list of a stop on the Quest can
-name that address there.
+In the emulator (the x86_64 Wine of the APK with `wow64cpu.dll`) the address
+of the lock line of the Quest is in the read only data of `shell32.dll`. The
+DLLs of i386 of the Wine tree of arm64-v8a can have other bases, and the
+Quest has `wowbox64.dll` in the low 4 GB, so only the lines of a stop on
+the Quest can name that address there.
+
+**Only the 32 bit modules.** `runblack.exe` is a 32 bit process in the
+WoW64 of Wine. The list of the loader of its 32 bit part has only the 32
+bit modules. The 64 bit modules of the process (`ntdll.dll` of the CPU,
+`wow64.dll` and, on a headset, `wowbox64.dll` of Box64) are not in it. A
+lock of 64 bit code can be an address of a lock line of Wine too, for
+example the critical sections of Box64 (`mutex_prot` and `mutex_blocks` of
+`custommem.c`, `mutex_dyndump` of `dynablock.c`, the critical sections of
+`box64_context` that `BTCpuProcessInit` makes). `wowbox64.dll` must be in
+the low 4 GB of the address space (`BTCpuProcessInit` stops when its code is
+above), so such an address is an address of 32 bits, and `VirtualQuery` and
+the mapped file of line 2 name its region and its file also when the module
+list does not have it.
+
+**The locks.** The lines of a stall must not wait for a lock that the
+stopped thread can hold:
+
+- The order of the lines: the lines of the addresses need only
+  `VirtualQuery` and the mapped file (`NtQueryVirtualMemory`), so they come
+  first.
+- The loader lock: `GetModuleFileNameA` takes it. The list uses the K32
+  functions, which read the list of the loader in the PEB with
+  `ReadProcessMemory` in Wine 11.0 (`dlls/kernelbase/debug.c`) and take no
+  loader lock.
+- The locks of Box64: under Box64 the first call of a code translates it,
+  and a translation can wait for a lock of Box64 (`mutex_dyndump`,
+  `mutex_prot`) that the stopped thread holds. So the thread writes the
+  same lines one time at its start, with the words "at the start", and the
+  code of the calls is then translated before a stall.
+- The log: a line of the log can need a lock that the stopped thread
+  holds. Then the lines do not come, and the game is as it is with no
+  watch.
 
 A new frame ends the stall, and the next stall writes again. The first 10
-stalls of a game get the whole list. Each later stall gets one line, so a
-game that stops again and again does not fill the log. The thread does
-nothing else: it does not stop or read a thread of the game. The frame
-thread only adds 1 to the count at the end of each frame. The log can need a
-lock that the stopped thread holds: then the list does not come, and the
-game is as it is with no watch. `stall_modules=0`: no thread and no count.
-`stall_addrs` (empty by default) has hexadecimal addresses with spaces or
-commas between them, with or without `0x`, with up to 16 digits as Wine
-writes them, at most 16 addresses of 32 bits. A word that is not such an
-address gives one line and does not count. There is no test key: the
-headset app has no hot keys of the mod, and the list changes nothing in
-the game.
+stalls of a game get the lines. Each later stall gets one line, so a game
+that stops again and again does not fill the log. The thread does nothing
+else: it does not stop or read a thread of the game. The frame thread only
+adds 1 to the count at the end of each frame. `stall_modules=0`: no thread,
+no count and no lines at the start. `stall_addrs` (empty by default) has
+hexadecimal addresses with spaces or commas between them, with or without
+`0x`, with up to 16 digits as Wine writes them, at most 16 addresses of 32
+bits. A word that is not such an address gives one line and does not count.
+There is no test key: the headset app has no hot keys of the mod, and the
+lines change nothing in the game.
 
 **The test spin.** `test_stall_ms=N` (a test aid, 0 by default): the frame
 thread spins N ms, one time, 20 s after the first scene walk of the game
@@ -1585,12 +1627,14 @@ spin. With 0 the end of a scene walk makes no read of the clock for it.
 pen -PlaySeconds 90 -TestStallMs 8000 -StallAddrs '7B001000
 000000007AF441E8'`, both games): the spin came 20 s after the first scene
 walk and took 8000 ms. 5 s into it the app logged the line of a stop with
-the main thread in the state R, the mod logged one list of 54 modules,
-sorted by base, with `runblack.exe` at 0x00400000 and the `ddraw.dll` of
-the mod, and a line of `VirtualQuery` for each address with the module of
-the list that holds it. After the spin the frames came again to the app.
-The load of the test save gave no stall of 5 s. With `-StallModules 0` the
-mod has no watch and no list at the spin.
+the main thread in the state R, and the mod logged one report: the lines of
+the addresses, a list of 54 modules, sorted by base, with `runblack.exe` at
+0x00400000 and the `ddraw.dll` of the mod, and the module of each address.
+After the spin the frames came again to the app. The load of the test save
+gave no stall of 5 s. The test also checks the report at the start of the
+watch, the lines of the addresses before the module lines, and the mapped
+file `shell32.dll` of 0x7AF441E8. With `-StallModules 0` the mod has no
+watch, no report at the start and no list at the spin.
 
 **The report of a crash.** `crash_report=1` (the default, `crash_report.cpp`)
 puts an unhandled exception filter of the mod in place when the DLL loads. A

@@ -229,9 +229,12 @@
     time, 20 s after the first scene walk of each game. 0 (the default): no
     key. In each game with the spin the test checks the lines of the spin,
     the line of a stop of the app (time_log=1), that frames come again
-    after it, and with stall_modules=1 the module list of the mod and the
-    line of each address of -StallAddrs, with its module from the list.
-    Game 2 (the test save) must have the spin.
+    after it, and with stall_modules=1 the report of the mod at the stall:
+    the line of VirtualQuery and the mapped file of each address of
+    -StallAddrs before the module lines (shell32.dll for 0x7AF441E8 in the
+    emulator), the module list, and the module of each address as the list
+    has it. With stall_modules=1 each game also checks the report at the
+    start of the watch. Game 2 (the test save) must have the spin.
 
 .PARAMETER StallAddrs
     The value of stall_addrs in bwvr.ini: hexadecimal addresses with spaces
@@ -788,9 +791,14 @@ function TimeChecks([int]$N, [string]$Part, [string]$ModLog, [double]$GameSecond
 # and the log of the mod of this game.
 function StallChecks([int]$N, [string]$Part, [string]$ModLog) {
     if ($StallModules -eq 0) {
-        Expect ($ModLog -match 'stall        : stall_modules=0\. No module list at a stall' -and $ModLog -notmatch 'stall        : (stall \d+:|module 0x)') "game $N with stall_modules=0: the mod has no watch and no module list"
+        Expect ($ModLog -match 'stall        : stall_modules=0\. No module list at a stall' -and $ModLog -notmatch 'stall        : (at the start|stall \d+:|module 0x|the address 0x)') "game $N with stall_modules=0: the mod has no watch, no report at the start and no module list"
     } else {
         Expect ($ModLog -match 'stall        : stall_modules=1\. When no frame of the game ends for 5 s') "game $N`: the mod has stall_modules=1"
+        # The report at the start of the watch, so the code of its calls
+        # is ready before a stall.
+        $startAt = [regex]::Match($ModLog, 'stall        : at the start: the lines of a stall one time now')
+        $startList = [regex]::Match($ModLog, 'stall        : at the start: the (\d+) modules of the 32 bit part of the process, sorted by base')
+        Expect ($startAt.Success -and $startList.Success -and $startList.Index -gt $startAt.Index -and [int]$startList.Groups[1].Value -gt 0) ("game $N`: the mod wrote the report one time at the start of the watch: " + $startList.Value)
     }
     if ($TestStallMs -le 0) { return }
     $spin = [regex]::Match($ModLog, "stall        : test_stall_ms=$TestStallMs`: the frame thread spins now")
@@ -808,17 +816,19 @@ function StallChecks([int]$N, [string]$Part, [string]$ModLog) {
     $modAfter = if ($ended.Success) { $ModLog.Substring($ended.Index) } else { '' }
     $tl = [regex]::Match($modAfter, 'time log     : [\d.]+ s, (\d+) frames of the game')
     Expect ($tl.Success -and [int]$tl.Groups[1].Value -gt 0) ("game $N`: the game made frames after the spin: " + $tl.Value)
-    $lists = @([regex]::Matches($ModLog, 'stall        : stall (\d+): no frame of the game ended for 5 s \(after (\d+) frames\)\. The (\d+) modules of the process'))
+    $lists = @([regex]::Matches($ModLog, 'stall        : stall (\d+): no frame of the game ended for 5 s \(after (\d+) frames\)\. (\d+) addresses of stall_addrs, then the modules of the process'))
     if ($StallModules -eq 0) {
         Expect ($lists.Count -eq 0) "game $N with stall_modules=0: no module list at the spin"
         return
     }
     $spinList = @($lists | Where-Object { $_.Index -gt $spin.Index -and $_.Index -lt $ended.Index })
-    Expect ($spinList.Count -eq 1) ("game $N`: the mod logged one module list during the spin: " + $(if ($spinList.Count) { $spinList[0].Value } else { "none of $($lists.Count) lists" }))
+    Expect ($spinList.Count -eq 1) ("game $N`: the mod logged one report of a stall during the spin: " + $(if ($spinList.Count) { $spinList[0].Value } else { "none of $($lists.Count) reports" }))
     if ($spinList.Count -eq 0) { return }
-    $want = [int]$spinList[0].Groups[3].Value
     $listPart = $ModLog.Substring($spinList[0].Index)
-    $mods = @([regex]::Matches($listPart, 'stall        : module 0x([0-9A-F]{8}) to 0x([0-9A-F]{8}) \(0x[0-9A-F]+ bytes\) ([^\r\n]+)') | Select-Object -First $want | ForEach-Object {
+    $count = [regex]::Match($listPart, 'stall        : the stall: the (\d+) modules of the 32 bit part of the process, sorted by base')
+    $want = if ($count.Success) { [int]$count.Groups[1].Value } else { 0 }
+    $modPart = if ($count.Success) { $listPart.Substring($count.Index) } else { '' }
+    $mods = @([regex]::Matches($modPart, 'stall        : module 0x([0-9A-F]{8}) to 0x([0-9A-F]{8}) \(0x[0-9A-F]+ bytes\) ([^\r\n]+)') | Select-Object -First $want | ForEach-Object {
         @{ Base = [Convert]::ToUInt32($_.Groups[1].Value, 16); End = [Convert]::ToUInt32($_.Groups[2].Value, 16); Name = $_.Groups[3].Value.Trim() } })
     $sorted = $true
     for ($i = 1; $i -lt $mods.Count; $i++) { if ($mods[$i].Base -lt $mods[$i - 1].Base) { $sorted = $false } }
@@ -829,11 +839,18 @@ function StallChecks([int]$N, [string]$Part, [string]$ModLog) {
     foreach ($w in @($StallAddrs -split '[ ,]+' | Where-Object { $_ -ne '' })) {
         $value = [Convert]::ToUInt64(($w -replace '^0[xX]', ''), 16)
         $hex = '0x{0:X8}' -f $value
+        # The line of VirtualQuery and the mapped file comes before the
+        # module lines, the line of the module after them.
         $line = [regex]::Match($listPart, "stall        : the address $hex`: VirtualQuery gives the region [^\r\n]*")
+        Expect ($line.Success -and $count.Success -and $line.Index -lt $count.Index -and $line.Value -match '(The mapped file: |No mapped file)') ("game $N`: the line of VirtualQuery of $hex comes before the module lines, with the mapped file: " + $line.Value)
+        if ($value -eq 0x7AF441E8) {
+            Expect ($line.Value -match '(?i)The mapped file: [^\r\n]*shell32\.dll') "game $N`: the mapped file of $hex is shell32.dll (the emulator)"
+        }
         $holder = @($mods | Where-Object { $value -ge $_.Base -and $value -lt $_.End }) | Select-Object -First 1
-        $named = if ($holder) { "It is in the module $([regex]::Escape($holder.Name))\+0x" } else { 'It is in no module' }
+        $named = if ($holder) { "stall        : the address $hex is in the module $([regex]::Escape($holder.Name))\+0x" } else { "stall        : the address $hex is in no module of the list" }
         if ($holder) { $inAny++ }
-        Expect ($line.Success -and $line.Value -match $named) ("game $N`: the line of the address $hex names " + $(if ($holder) { $holder.Name } else { 'no module' }) + ' as the list does: ' + $line.Value)
+        $in = [regex]::Match($modPart, $named + '[^\r\n]*')
+        Expect $in.Success ("game $N`: after the list the mod names " + $(if ($holder) { $holder.Name } else { 'no module' }) + " for $hex as the list does: " + $in.Value)
     }
     if ($StallAddrs -ne '') { Expect ($inAny -ge 1) "game $N`: an address of -StallAddrs is in a DLL of the run ($inAny)" }
 }

@@ -19,6 +19,7 @@
 #include "../../src/common/ini_text.h"
 #include "../../src/common/settings_table.h"
 #include "display_rate.h"
+#include "play_rules.h"
 
 namespace menu_model {
 
@@ -97,7 +98,7 @@ class Menu {
     display_wanted_ = ini.GetInt("bwvr", "display_hz", 0);
     display_hz_ = display_rate::Checked(display_wanted_, display_rates_);
     strongmem_ = ini.GetInt("bwvr", "box64_strongmem", 0);
-    if (strongmem_ < 0 || strongmem_ > kStrongMemMost) strongmem_ = 0;
+    if (strongmem_ < 0 || strongmem_ > play_rules::kStrongMemMost) strongmem_ = 0;
     headset_width_ = ini.GetInt("bwvr", "headset_width", 2064);
     headset_height_ = ini.GetInt("bwvr", "headset_height", 2208);
     guard_pct_ = ini.GetInt("bwvr", "one_walk_guard_pct", 25);
@@ -193,7 +194,6 @@ class Menu {
   // THE MEMORY ORDER OF BOX64 (box64_strongmem, play_rules.h, Box64Vars):
   // the row of the page "Testing". 0 (the default): Box64 gets no variable.
   // 1 to 3: BOX64_DYNAREC_STRONGMEM for the game, at the next Play.
-  static constexpr int kStrongMemMost = 3;
   int StrongMem() const { return strongmem_; }
 
   // THE GAME. While the game runs, the main page has no "Play in VR" and no
@@ -446,7 +446,8 @@ class Menu {
     }
     if (item.kind == ItemKind::kStrongMem) {
       // A list: it goes round.
-      strongmem_ = (strongmem_ + direction + kStrongMemMost + 1) % (kStrongMemMost + 1);
+      const int values = play_rules::kStrongMemMost + 1;
+      strongmem_ = (strongmem_ + direction + values) % values;
       changed_ = true;
       ++revision_;
       return;

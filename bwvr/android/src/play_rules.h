@@ -125,13 +125,18 @@ constexpr char kGameOverrides[] = "WINEDLLOVERRIDES=mscoree,mshtml=;ddraw=n";
 // and only the settings that are "available in WowBox64". It reads no
 // box64rc file under Windows. Wine gives the Unix environment of the loader
 // to the Windows environment of start.exe, and start.exe gives it to
-// runblack.exe. So only the game gets them: reg import, wineserver and
-// wineboot start with the environment of each program.
+// runblack.exe. reg import, wineserver -w and wineboot start with the
+// environment of each program, so they do not get them. The loader of the
+// game also starts the wine server of the game (the server before it ended
+// at wineserver -w), so that server gets them too. It has no Box64, so they
+// change nothing there.
 //
 //   box64_strongmem=0  no variable (the default)
 //   box64_strongmem=1 to 3  BOX64_DYNAREC_STRONGMEM=<n>: memory barriers for
 //                    the strong memory order of x86 (1 at writes, 2 also at
-//                    SIMD instructions, 3 also more often)
+//                    SIMD instructions, 3 also more often). Box64 also has
+//                    4 (a model of the whole x86 order), which only
+//                    box64_env gives
 //   box64_env        more variables: NAME=VALUE with spaces between them.
 //                    Only names that start with BOX64_ go to the game.
 constexpr char kStrongMemName[] = "BOX64_DYNAREC_STRONGMEM";

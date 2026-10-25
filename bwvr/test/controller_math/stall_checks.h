@@ -94,8 +94,8 @@ inline void Box64Checks() {
         "FOO=1 does not go, with one line", static_cast<double>(e.refused.size()), 1);
   e = pr::Box64Vars(0, "\tBOX64_LOG=1  box64_log=1 BOX64_=1 BOX64_X BOX64_LOG=2 WINEDEBUG=+all ");
   Check(e.vars.size() == 1 && e.vars[0] == "BOX64_LOG=1" && e.refused.size() == 5,
-        "only BOX64_ and capitals, a name with =VALUE, one time; tabs and spaces between "
-        "the words",
+        "only BOX64_ and capitals, a name with =VALUE, one time. Tabs and spaces go "
+        "between the words",
         static_cast<double>(e.refused.size()), 5);
   e = pr::Box64Vars(0, "BOX64_DYNAREC_STRONGMEM=1");
   Check(e.vars.size() == 1 && e.vars[0] == "BOX64_DYNAREC_STRONGMEM=1",

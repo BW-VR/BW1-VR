@@ -54,6 +54,7 @@
 #include "scene_player.h"
 #include "stream_reader.h"
 #include "time_log.h"
+#include "walk_probe.h"
 #include "wine_runtime.h"
 #include "xr_app.h"
 
@@ -142,6 +143,7 @@ struct App {
   std::atomic<bool> play_stop{false};
   std::mutex play_stats_lock;
   PlayStats play_stats;
+  int gpu_depth = 1;  // frame_loop_gpu_depth, read at each Play
 
   // THE INPUT CHANNEL (input_live=1, docs/android.md, "The input channel").
   InputLive input_live;
@@ -489,6 +491,7 @@ bool PlayLive(App* app) {
   // them, as the old loop waits for the GPU before each copy.
   app->xr.OldLoopSync(true);
   const double ms = PlayBatch(app, live);
+  WalkProbeInstall();
   app->xr.OldLoopSync(false);
   if (app->game_on) {
     app->time.Batch(live->last_ms, live->batch.size(), ms, app->xr.LastWaitMs());
@@ -597,7 +600,19 @@ void* PlayThread(void* arg) {
   LivePlay* live = &app->live_play;
   double before_total = 0.0, before_gpu = 0.0, before_queue = 0.0;
   double cpu_at = ThreadCpuMs();
+  const int depth = app->gpu_depth;
   while (!app->play_stop.load()) {
+    // THE QUEUE AT THE GPU (frame_loop_gpu_depth): no new play while the GPU
+    // has `depth` pictures that are not finished. The reader keeps the frames
+    // of the game meanwhile, so the next batch has the newest one.
+    double gate_ms = -1.0;
+    if (depth > 0) {
+      const double gate_start = NowMs();
+      bool waited_gpu = false;
+      while (!app->play_stop.load() && !app->ring.WaitGpu(depth, 5000000ull)) waited_gpu = true;
+      if (waited_gpu) gate_ms = NowMs() - gate_start;
+      if (app->play_stop.load()) break;
+    }
     if (!app->live_reader.WaitAll(&live->batch, 50)) {
       QuietCheck(app, live);
       continue;
@@ -605,12 +620,20 @@ void* PlayThread(void* arg) {
     const double start = NowMs();
     const size_t n = live->batch.size();
     const double ms = PlayBatch(app, live);
+    WalkProbeInstall();
     const double waited = WriteSlot(app, *live);
     if (!timing) continue;
     PlayStats s;
     s.pictures = 1;
     s.frames = n;
     s.play.Add(ms);
+    if (gate_ms >= 0.0) {
+      s.gate.Add(gate_ms);
+      if (n > 1) s.gate_dropped += n - 1;
+      // The frames of the batch came while the play thread waited for the GPU.
+      before_total += gate_ms;
+      before_gpu += gate_ms;
+    }
     VkSceneGpuTime g;
     VkSceneTakeGpuTime(&g);
     s.walk_gpu.count = g.walks;
@@ -982,6 +1005,18 @@ void Play(App* app, bool new_game) {
                         "of the session, and its layer shows the image before");
   }
   app->xr.SetImageWait(image_wait);
+  // frame_loop_gpu_depth (1 by default): the play thread starts the play of a
+  // new picture only while fewer pictures than this are not finished on the
+  // GPU. 0: no limit, the play thread plays each batch at once.
+  app->gpu_depth = frame_loop::GpuDepth(app->ini.GetInt("bwvr", "frame_loop_gpu_depth", 1));
+  app->time.SetGpuDepth(app->gpu_depth);
+  if (loop) {
+    AppLog("game         : frame_loop_gpu_depth=%d. %s", app->gpu_depth,
+           app->gpu_depth > 0
+               ? "The play thread starts a new picture only while fewer pictures than that are "
+                 "not finished on the GPU, and then plays the newest frame of the game"
+               : "No limit: the play thread plays each batch of frames at once");
+  }
   app->xr.SetFrameLoop(loop);
   if (loop) {
     StartPlayThread(app);
@@ -1553,6 +1588,27 @@ void android_main(android_app* android) {
   }
 
   app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
+  // xr_layer_rect=1 and xr_staging_direct=1 (the defaults): the pixels of the
+  // CPU of the layers with the frame loop (XrApp::SetLayerRect,
+  // SetStagingDirect).
+  const bool layer_rect = app.ini.GetInt("bwvr", "xr_layer_rect", 1) != 0;
+  const bool staging_direct = app.ini.GetInt("bwvr", "xr_staging_direct", 1) != 0;
+  app.xr.SetLayerRect(layer_rect);
+  app.xr.SetStagingDirect(staging_direct);
+  AppLog("xr           : xr_layer_rect=%d, xr_staging_direct=%d. %s, and %s", layer_rect ? 1 : 0,
+         staging_direct ? 1 : 0,
+         layer_rect ? "A card copies only the rect that its quad shows"
+                    : "A card copies its whole image",
+         staging_direct ? "new pixels of the CPU go straight into a free staging buffer"
+                        : "new pixels of the CPU go into a copy in memory first");
+  // gpu_parts=1 (the default): the GPU parts of the walk in the time log
+  // (walk_probe.h). 0, or time_log=0: the table of the renderer stays as it
+  // is.
+  WalkProbeSetOn(walk_parts::On(app.ini.GetInt("bwvr", "gpu_parts", 1)) && app.time.On());
+  if (!WalkProbeOn()) {
+    AppLog("gpu parts    : gpu_parts=%d, time_log=%d. The time log has no GPU parts of the walk",
+           app.ini.GetInt("bwvr", "gpu_parts", 1), app.time.On() ? 1 : 0);
+  }
   // frame_loop_queues=2 (the default): with the frame loop the renderer has
   // a queue of its own when the device has one. 1: one queue for all.
   app.xr.SetQueues(app.ini.GetInt("bwvr", "frame_loop_queues", 2));

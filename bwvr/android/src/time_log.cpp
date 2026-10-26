@@ -15,11 +15,39 @@
 
 #include "../../src/mod/vk_scene.h"
 #include "app_log.h"
+#include "walk_probe.h"
 
 namespace {
 
 namespace tl = time_log_math;
 namespace ps = proc_stat;
+namespace wp = walk_parts;
+
+// THE GPU PARTS OF THE WALK: the name of a pass by its key, and of a part
+// between the passes.
+std::string PassName(const wp::PassKey& k) {
+  char text[160];
+  snprintf(text, sizeof(text), "a pass of %s, %u by %u, %s%s",
+           k.views == 0 ? "one layer" : (k.views == 1 ? "one eye" : "both eyes"), k.width,
+           k.height, k.clear ? "cleared" : "loaded", k.rate ? ", with the map of the rates" : "");
+  return text;
+}
+const char* GapName(int g) {
+  switch (g) {
+    case wp::kUploads: return "the uploads";
+    case wp::kCopies: return "the copies and blits between the passes";
+    case wp::kReadBacks: return "the read backs";
+    case wp::kBarriers: return "the barriers, the start and the end";
+    case wp::kAfterLimit: return "the rest after 48 timestamps";
+    default: return "the passes of other keys";
+  }
+}
+// THE PARTS OF THE LAYERS, in the order of XrApp::LayerPart.
+const char* const kLayerPartNames[XrApp::kParts] = {
+    "the begin of the command buffer", "the eye pictures", "the panel image", "the cards",
+    "the walls", "the screen quad", "the keyboard", "the cursor", "the menu",
+    "the pixels of the CPU into the staging buffers", "the lines of the log", "the rest",
+    "the swapchains and the submit"};
 
 // Set by the thread of the session, read by each thread that starts.
 std::atomic<bool> g_name_threads{false};
@@ -125,6 +153,8 @@ void TimeLog::GameStarts(double now_ms) {
   // The play thread starts after this call, so the renderer is free here.
   VkSceneGpuTime drop;
   VkSceneTakeGpuTime(&drop);
+  walk_parts::Totals parts;
+  WalkProbeTake(&parts);
 }
 
 void TimeLog::GameEnds() { game_on_ = false; }
@@ -139,6 +169,8 @@ void TimeLog::ResetWindow(double now_ms) {
   walk_wait_.Reset();
   dropped_ = replaced_ = 0;
   slot_wait_.Reset();
+  gate_.Reset();
+  gate_dropped_ = 0;
   play_cpu_ms_ = 0.0;
   age_.Reset();
 }
@@ -152,6 +184,8 @@ void TimeLog::Play(const PlayStats& s) {
   walk_gpu_.Merge(s.walk_gpu);
   walk_wait_.Merge(s.walk_wait);
   slot_wait_.Merge(s.slot_wait);
+  gate_.Merge(s.gate);
+  gate_dropped_ += s.gate_dropped;
   xr_.busy.Merge(s.busy);
   dropped_ += s.dropped;
   replaced_ += s.replaced;
@@ -218,6 +252,15 @@ void TimeLog::SessionFrame(double now_ms, const XrApp::FrameTimes& t) {
   xr_.age_ms.Merge(t.age_ms);
   xr_.latency_ms.Merge(t.latency_ms);
   xr_.arrival_ms.Merge(t.arrival_ms);
+  for (int k = 0; k < XrApp::kParts; ++k) {
+    xr_.parts[k].Merge(t.parts[k]);
+    xr_.part_cpu[k].Merge(t.part_cpu[k]);
+  }
+  xr_.staged += t.staged;
+  xr_.staged_bytes += t.staged_bytes;
+  xr_.staged_rects += t.staged_rects;
+  xr_.direct += t.direct;
+  xr_.direct_bytes += t.direct_bytes;
   if (frame_loop_) {
     if (!fresh_) ++no_new_;
     fresh_ = false;
@@ -450,6 +493,69 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
          pictures_ > 0 ? gpu_ms / pictures_ : 0.0, walk_gpu_.Mean(), walk_gpu_.most,
          static_cast<unsigned long long>(walk_gpu_.count), xr_.busy.Mean(), xr_.busy.most,
          static_cast<unsigned long long>(xr_.busy.count), 100.0 * gpu_ms / (seconds * 1000.0));
+  // THE PARTS OF THE LAYERS of the thread of the session (the step "the
+  // layers" is their sum but the swapchains), the clock and the CPU time of
+  // the thread.
+  {
+    std::string list;
+    double sum = 0.0;
+    for (int k = 0; k < XrApp::kPartSwapchain; ++k) {
+      char part[160];
+      snprintf(part, sizeof(part), "%s%s %.2f and %.2f (CPU %.2f)", list.empty() ? "" : ", ",
+               kLayerPartNames[k], xr_.parts[k].Mean(), xr_.parts[k].most,
+               xr_.part_cpu[k].Mean());
+      list += part;
+      sum += xr_.parts[k].Mean();
+    }
+    AppLog("time         : the parts of the layers in a frame of the session, ms, the mean and "
+           "the most, with the CPU time of the thread as a mean: %s. In all %.2f. The pixels of "
+           "the CPU: %llu copies from a copy in memory into a staging buffer (%.1f MB, %llu of "
+           "them a rect), %llu writes straight into a staging buffer (%.1f MB)",
+           list.c_str(), sum, static_cast<unsigned long long>(xr_.staged),
+           xr_.staged_bytes / 1048576.0, static_cast<unsigned long long>(xr_.staged_rects),
+           static_cast<unsigned long long>(xr_.direct), xr_.direct_bytes / 1048576.0);
+  }
+  // THE QUEUE AT THE GPU of the play thread (frame_loop_gpu_depth).
+  if (frame_loop_) {
+    AppLog("time         : the queue at the GPU: frame_loop_gpu_depth=%d, %llu waits of the play "
+           "thread for the GPU before a play, %.2f ms as a mean and %.2f at most, %llu frames "
+           "of the game that did not show after such a wait (the play took the newest)",
+           gpu_depth_, static_cast<unsigned long long>(gate_.count), gate_.Mean(), gate_.most,
+           static_cast<unsigned long long>(gate_dropped_));
+  }
+  // THE GPU PARTS OF THE WALK (gpu_parts=1).
+  if (WalkProbeOn()) {
+    wp::Totals t;
+    WalkProbeTake(&t);
+    const double walks = t.Walks() > 0 ? static_cast<double>(t.Walks()) : 1.0;
+    std::string list;
+    for (int k = 0; k < t.Keys(); ++k) {
+      const wp::PartStat& s = t.Pass(k);
+      if (s.count == 0) continue;
+      char part[256];
+      snprintf(part, sizeof(part), "%s%s: %.1f a walk, %.2f and %.2f, %.0f draws a walk",
+               list.empty() ? "" : ", ", PassName(t.Key(k)).c_str(), s.count / walks,
+               s.ms / walks, s.most, s.draws / walks);
+      list += part;
+    }
+    for (int g = 0; g < wp::kGaps; ++g) {
+      const wp::PartStat& s = t.GapStat(g);
+      if (s.count == 0) continue;
+      char part[200];
+      snprintf(part, sizeof(part), "%s%s: %.1f a walk, %.2f and %.2f", list.empty() ? "" : ", ",
+               GapName(g), s.count / walks, s.ms / walks, s.most);
+      list += part;
+    }
+    const wp::Counts& c = t.CountsOf();
+    AppLog("time         : the GPU parts of the walk in ms (gpu_parts=1), the mean in a walk and "
+           "the most in one walk, %llu walks (%llu with no time): %s. In all %.2f in a walk. In "
+           "a walk: %.1f passes, %.0f draws, %.0f pipelines, %.0f bindings of descriptor sets, "
+           "%.0f descriptor writes, %.1f uploads of %.2f MB",
+           static_cast<unsigned long long>(t.Walks()), static_cast<unsigned long long>(t.Untimed()),
+           list.empty() ? "none" : list.c_str(), t.TotalMs() / walks, c.passes / walks,
+           c.draws / walks, c.pipelines / walks, c.sets / walks, c.writes / walks,
+           c.uploads / walks, c.upload_bytes / walks / 1048576.0);
+  }
   // THE THREADS AND THE CORES.
   Sample now;
   const double read_start = ClockMs();

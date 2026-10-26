@@ -144,6 +144,8 @@ void GpuSetRing(Gpu* gpu, bool on) {
 
 bool GpuSerialDone(Gpu* gpu, uint64_t serial) {
   if (frame_loop::SerialDone(serial, gpu->done_serial)) return true;
+  // A serial that no submit has yet: a copy of this frame reads the buffer.
+  if (serial > gpu->serial) return false;
   for (const Gpu::RingEntry& e : gpu->ring_entries) {
     if (e.serial != serial) continue;
     if (vkGetFenceStatus(gpu->device, e.fence) != VK_SUCCESS) return false;

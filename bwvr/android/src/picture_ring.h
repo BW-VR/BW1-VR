@@ -133,6 +133,12 @@ class PictureRing {
   bool CopyScreen(int i, VkImage source, uint32_t layer, uint32_t width, uint32_t height);
   // The submit of the copies with the fence of the slot. The slot is ready.
   void EndWrite(int i);
+  // THE QUEUE AT THE GPU (frame_loop_gpu_depth): true when fewer than `depth`
+  // slots have copies that the GPU did not finish. The fence of a slot comes
+  // after the walks of its picture on the queue, so a finished slot has a
+  // finished picture. Else it waits up to timeout_ns for one of them, and
+  // gives the result after the wait. The play thread alone calls it.
+  bool WaitGpu(int depth, uint64_t timeout_ns);
 
   // THE SESSION, once in each frame of the session: the newest picture that
   // the GPU finished, or null when no new picture is finished. The picture

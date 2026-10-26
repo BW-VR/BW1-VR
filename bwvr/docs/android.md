@@ -112,7 +112,7 @@ Summary:
 | `android/src/flat_view.cpp` | The menu in the window with no headset |
 | `android/src/gpu.cpp` | The Vulkan device, the staging buffers, the copies, and the ring of the command buffers of the session (`frame_loop=1`) |
 | `android/src/picture_ring.cpp` | The ring of the pictures of the game of the frame loop: the images of the slots, the copies of the play thread, the fences, the newest finished slot for the session |
-| `android/src/frame_loop.h` | The rules of the frame loop: the slots of the ring of the pictures, the drop of a picture, the ring of the command buffers, the serials of the submits, the age of the shown picture. No Android code |
+| `android/src/frame_loop.h` | The rules of the frame loop: the slots of the ring of the pictures, the drop of a picture, the ring of the command buffers, the serials of the submits, the age of the shown picture, the queue at the GPU, the direct writes and the rect of a copy of the pixels of the CPU. No Android code |
 | `test/controller_math/frame_loop_checks.h` | The math checks of `frame_loop.h` and of the row "The headset gets each frame (no wait for the GPU)" |
 | `android/src/canvas.cpp` | A picture of the CPU drawn with `android.graphics.Canvas` through JNI |
 | `android/src/menu_model.h` | The menu: the pages, the rows, the values, the input, the save. No Android code |
@@ -177,6 +177,8 @@ Summary:
 | `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
 | `src/mod/time_log.cpp`, `src/mod/time_log_math.h` | The time log of the mod, and the stats and the rules that the app uses too. No Windows code in the header |
 | `test/controller_math/time_log_checks.h` | The math checks of the cap, of the lines of `/proc` and of the parts of a frame |
+| `android/src/walk_probe.cpp`, `android/src/walk_parts.h` | The GPU parts of the walk (`gpu_parts`): the functions of the app in the table of the renderer, the timestamps at the bounds of the passes, and the counts. `walk_parts.h` has the rules of the parts and no Vulkan code |
+| `test/controller_math/walk_parts_checks.h` | The math checks of `walk_parts.h` |
 
 ## Build the APK
 
@@ -2582,9 +2584,9 @@ its `bwvr.ini` or the row.
   reader (`StreamReader::WaitAll`), plays the batch into the renderer with
   the rules of the old loop (`PlayBatch`, "The live stream"), and puts the
   picture into a slot of the ring (`WriteSlot`). Then it takes the next
-  batch at once. While it runs, it is the only thread that uses the
-  renderer. The end of the game ends it (a join), and the thread of the
-  session has the renderer again.
+  batch, after the queue at the GPU lets it. While it runs, it is the only
+  thread that uses the renderer. The end of the game ends it (a join), and
+  the thread of the session has the renderer again.
 - **The thread of the session** (`bwvr main`). `xrWaitFrame`,
   `xrBeginFrame`, the newest finished picture of the ring (`TakePicture`),
   the slot of the input channel, the menu, the copies of the frame into the
@@ -2628,6 +2630,22 @@ such a screen), and the frame number of the game.
   a later frame. A layer keeps its image until the new picture gives it a
   new source.
 
+**The queue at the GPU** (`frame_loop_gpu_depth` in `bwvr.ini`, read at
+each Play, 1 by default, the rules in `frame_loop.h`, `PictureRing::WaitGpu`).
+Before the play of a batch the play thread counts the slots whose copies
+the GPU did not finish. The copies of a slot come after the walks of its
+picture on the same queue, so that is the count of the pictures that are
+not finished on the GPU. While the count is at the key or more, the play
+thread waits on the CPU for one of the fences of those slots, in steps of
+5 ms. The reader keeps the frames of the game meanwhile, so the next batch
+has the newest frame, and the play of a batch plays the walks of its newest
+frame ("The live stream"): the older frames do not show. So with 1 the GPU
+has at most one picture of the game that is not finished, and a new picture
+starts its play with the newest frame of the game when the GPU is free. The
+session never waits for it. `frame_loop_gpu_depth=0`: no limit, the play
+thread plays each batch at once, and the GPU can have each slot of the ring
+in its queue. The log at Play: "game : frame_loop_gpu_depth=1. ...".
+
 **The poses.** A picture goes out with the `kView` of its own frame: the
 poses that the game drew it with. The runtime reprojects it to the pose of
 the head at the display time, which is the normal work of the runtime. The
@@ -2663,12 +2681,28 @@ finish it, the ring gets a new command buffer in its place, so the CPU does
 not wait. Only a ring of 16 unfinished command buffers waits, and a ring
 that cannot make a new command buffer (the log says so) waits for its
 oldest one. With no command buffer at all the frame copies nothing. With
-no play thread (`pthread_create` failed) the game has the old loop. The pixels of
-the CPU (the menu, the cursor, the cards, the keyboard, the walls and a
-screen with the pixels of the CPU) go into a copy in memory. They go into
-the staging buffer only when the GPU finished the last copy of that buffer
-(each submit has a serial, `GpuSerialDone`). Until then the layer keeps its
-image.
+no play thread (`pthread_create` failed) the game has the old loop.
+
+**The pixels of the CPU** (the menu, the cursor, the cards, the keyboard,
+the walls and a screen with the pixels of the CPU, `XrApp::PixelsFor`). Each
+submit has a serial, and a staging buffer has the serial of the last submit
+that read it (`GpuSerialDone`, a serial that no submit has yet is not
+finished).
+
+- `xr_staging_direct=1` (read at the start of the app, the default): new
+  pixels go straight into the staging buffer when the GPU finished its last
+  copy and no copy in memory waits. Then the copy of the layer in the next
+  frame has no `memcpy`. Else they go into a copy in memory, as with 0.
+- `xr_staging_direct=0`: new pixels go into a copy in memory. The copy of
+  the layer puts them into the staging buffer only when the GPU finished the
+  last copy of that buffer. Until then the layer keeps its image.
+- `xr_layer_rect=1` (read at the start of the app, the default): a card
+  copies only its rect, into the staging buffer and from there into the
+  swapchain image, because its quad shows only that rect
+  (`frame_loop::CopyRect`). `xr_layer_rect=0`: a card copies its whole
+  image. The other layers copy the whole image with each value.
+
+The log at the start: "xr : xr_layer_rect=1, xr_staging_direct=1. ...".
 
 **The two queues** (`frame_loop_queues` in `bwvr.ini`, read at the start
 of the app, 2 by default). On one queue the GPU does the work in the order
@@ -2736,14 +2770,20 @@ frame for a staging buffer. The time log has the lines of the play thread
 - `.\dev.ps1 build`: the checks of `frame_loop_checks.h` (the choice of the
   newest finished picture, the drop rule, the end of a game, 300 frames
   with no write into the shown slot and no older picture, the ring of the
-  command buffers, the serials, the age, the row and its save).
+  command buffers, the serials, the age, the queue at the GPU with a loop
+  of 30 steps, the direct writes, the rect of a copy, the row and its
+  save).
 - `emu_game_test.ps1 -FrameLoop 1` and `-FrameLoop 0`: the line of the key
   at each Play, and with `time_log=1` the lines of the play thread, the age
   of the shown picture, no wait of a copy of the session for the GPU, no
   wait of a full ring, and the frames of the session a second near the
   display rate (the median of the lines at 0.9 of the rate or more) with
   the new loop. With the old loop the lines say that there is no play
-  thread, and there is no ring of command buffers.
+  thread, and there is no ring of command buffers. In each window the line
+  of the parts of the layers adds up to the step of the layers, the new
+  loop has the line of the queue at the GPU with the key of Play (with
+  `-IniExtra frame_loop_gpu_depth=0` no wait), and the line of the GPU
+  parts of the walk has timed walks with passes and draws.
 
 The test runtime lists XR_KHR_convert_timespec_time (an XrTime of it is
 `CLOCK_MONOTONIC` in ns), so the emulator has the age of the shown picture
@@ -2814,7 +2854,7 @@ the GPU is busy, and the latency that the player feels.
 
 `time_log=1` (the default, `time_log.cpp`, the parse of `/proc` in
 `proc_stat.h`, the rules in `src/mod/time_log_math.h`). While the game runs,
-each 10 s the app writes six lines `time` to `bwvr-quest.log`. The mod
+each 10 s the app writes the lines `time` to `bwvr-quest.log`. The mod
 writes a line of its own with the same key (`backend.md`, "The time log of
 the mod").
 
@@ -2877,6 +2917,27 @@ the mod").
    buffer of the app is at the bottom of the pipe, so it comes after the
    walk before it on the queue, and the time of the walk is not counted two
    times.
+   **The parts of the layers** (one more line): the step "the layers" of
+   the line of the steps in its parts, each the mean and the most in ms of
+   a frame of the session, with the CPU time of the thread of the session
+   as a mean (`CLOCK_THREAD_CPUTIME_ID`): the begin of the command buffer
+   of the frame (`GpuBegin`), the records of the copies of the eye pictures
+   (also of the stereo screen), the panel image, the cards, the walls, the
+   screen quad, the keyboard, the cursor, the menu, the copies of the
+   pixels of the CPU into the staging buffers (`memcpy`), the lines of the
+   log of a new picture, and the rest (the order and the quads of the
+   layers). The calls of the swapchains and the submit are not in the
+   parts: they are steps of their own. "In all" is the sum of the parts. At
+   the end: the copies from a copy in memory into a staging buffer with
+   their MB (and of them the copies of a rect), and the writes straight
+   into a staging buffer ("The frame loop", "The pixels of the CPU").
+   **The queue at the GPU** (one more line with `frame_loop=1`): the key
+   `frame_loop_gpu_depth`, the waits of the play thread for the GPU before
+   a play (the count, the mean and the most in ms), and the frames of the
+   game that did not show after such a wait. Such a wait counts as a wait
+   for the GPU in the cause of the frames that did not show (line 1).
+   **The GPU parts of the walk** (one more line with `gpu_parts=1`, "The
+   GPU parts of the walk").
 4. **The threads** of the game process and of the app: the first 8 by
    their CPU time in the 10 s, each with its name, its id, the percent of
    one core (user and system), the core that it ran on last and its state.
@@ -2919,7 +2980,9 @@ each frame that the reader takes, two timestamps in each command buffer of
 the app, and one read of `/proc` each 10 s on the thread of the session.
 With `frame_loop=1` also some reads of the clock and one of the CPU time of
 the play thread for each picture, and two reads of the clock when the lock
-of the queue is not free at once.
+of the queue is not free at once. The parts of the layers read the clock and
+the CPU time of the thread at each change of the part, about 10 to 30 times
+in a frame of the session.
 `time_log=0`: no line, no timestamp, no read of the clock for the log, no
 read of `/proc` and no name of a thread of the app. The key is read before
 the threads of the app start, so each of them gets its name. There is no
@@ -2959,6 +3022,63 @@ thread) R ...". After the spin the frames come again ("live
 **Not shown yet:** the lines in a headset: the time of the GPU of a Quest 3,
 the waits of the runtime of Meta, the threads under Box64, the load of the
 cores, and the line of a stop of the game.
+
+## The GPU parts of the walk
+
+`gpu_parts=1` (read at the start of the app, the default, `walk_probe.cpp`,
+the rules in `walk_parts.h`, only with `time_log=1`). The renderer of the
+mod (`vk_scene.cpp`, the same code as on the PC) calls Vulkan through the
+table `vk::f` of `vk_core.cpp`. After the first play of a batch that started
+the renderer, the app puts its own functions into some entries of that table
+on the thread that plays (`WalkProbeInstall`). Each of them counts and then
+calls the function of the driver. The code of the mod does not change.
+
+- **The timestamps.** Each command buffer of the renderer gets a timestamp
+  at its start, before each `vkCmdBeginRendering`, after each
+  `vkCmdEndRendering` and before its end (`VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT`,
+  in a query pool of the app, up to 48 in a command buffer). So no
+  timestamp is in a pass. A part is the time between two timestamps that
+  follow.
+- **The parts.** A pass has the key of its start: one layer, one eye or both
+  eyes (the bits of the view mask), its size, cleared or loaded, and with
+  or with no map of the rates (foveated rendering). For example the outer
+  image and the centre image of `fovea_res`, their composition into the eye
+  picture, and the panel image are passes of their own keys. A part between
+  two passes has the kind of the most costly command in it: the uploads
+  (`vkCmdCopyBufferToImage`), the copies and blits (for example the picture
+  of the walk before), the read backs (`vkCmdCopyImageToBuffer`), or only
+  barriers. The command buffer of the uploads of a walk is one part of
+  uploads. After 48 timestamps the rest of a command buffer is one part.
+- **The counts** of a command buffer: the passes, the draws, the bindings of
+  pipelines and of descriptor sets, the descriptor writes
+  (`vkUpdateDescriptorSets` while a command buffer of the renderer records),
+  and the regions of the uploads with their texels (4 bytes each).
+- **The results.** When the renderer begins a command buffer again, it
+  waited for its fence, so the app reads the timestamps of the last submit
+  of that command buffer then, with no wait. Only a submit of a walk gives
+  parts: a command buffer with one pass or more, and the command buffer of
+  its uploads in the same submit. A one-time command buffer of
+  `vk_core.cpp` or a read back alone gives nothing. The app follows 16
+  command buffers. With more, the one that began least recently goes.
+
+The line each 10 s: "time : the GPU parts of the walk in ms (gpu_parts=1),
+the mean in a walk and the most in one walk, N walks (M with no time): ...",
+for each key of a pass the count in a walk, the mean in a walk and the most
+in one walk in ms and the draws in a walk, then the parts between the
+passes, the sum of the parts in a walk, and the counts of a walk. The sum is
+a little more than the walk of the line of the GPU: the timestamps of the
+renderer are inside those of the app, and the uploads have a command buffer
+of their own.
+
+**The cost.** 2 timestamps for each pass and 2 for each command buffer, and a
+count in each call of the table that the app takes. Each timestamp waits for
+the work before it on the GPU, but a pass ends there anyway.
+`gpu_parts=0`: the table of the renderer stays as it is, and there is no
+line. The log at the start: "gpu parts : gpu_parts=1. ..." at the first
+install, or "gpu parts : gpu_parts=0, time_log=1. ..." with no parts.
+
+**Not shown yet:** the parts in a Quest 3, and the cost of the timestamps on
+its GPU (compare the walk of the line of the GPU with `gpu_parts` 1 and 0).
 
 ## The hot code under Box64
 

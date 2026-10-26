@@ -42,7 +42,14 @@ struct PlayStats {
   uint64_t dropped = 0;   // pictures that the play thread dropped (no free slot)
   uint64_t replaced = 0;  // pictures that a newer picture replaced before a frame of the session
   double cpu_ms = 0.0;    // the CPU time of the play thread
+  // THE QUEUE AT THE GPU (frame_loop_gpu_depth): the waits of the play thread
+  // for the GPU before a play, and the frames of the game that the batch after
+  // such a wait did not show (it plays the newest).
+  time_log_math::Stat gate;
+  uint64_t gate_dropped = 0;
   void Merge(const PlayStats& o) {
+    gate.Merge(o.gate);
+    gate_dropped += o.gate_dropped;
     pictures += o.pictures;
     frames += o.frames;
     for (int i = 0; i < 3; ++i) skipped[i] += o.skipped[i];
@@ -72,6 +79,8 @@ class TimeLog {
   // the frames that did not show (Play), and the log names the play thread.
   // Off: the thread of the session gives them (Batch).
   void SetFrameLoop(bool on) { frame_loop_ = on; }
+  // frame_loop_gpu_depth of this game, for the line of the frame loop.
+  void SetGpuDepth(int depth) { gpu_depth_ = depth; }
   // frame_loop=1: the stats of the play thread, at each frame of the session.
   void Play(const PlayStats& stats);
   // At each frame of the session while the game runs, before SessionFrame:
@@ -122,6 +131,9 @@ class TimeLog {
   uint64_t dropped_ = 0;
   uint64_t replaced_ = 0;
   time_log_math::Stat slot_wait_;
+  time_log_math::Stat gate_;
+  uint64_t gate_dropped_ = 0;
+  int gpu_depth_ = 0;
   double play_cpu_ms_ = 0.0;
   bool fresh_ = false;
   bool any_shown_ = false;

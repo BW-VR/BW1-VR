@@ -976,10 +976,20 @@ that moves while the Hand takes it.
   GPU)", `android.md`, "The frame loop"), the renderer has a second queue
   with a lower priority (`frame_loop_queues=2`), and the session does not
   wait for a swapchain image that is not free (`frame_loop_image_wait=0`).
-  Next in the headset: the frames of the session a second, the line of the
-  steps of the thread of the session, the age of the shown picture in ms,
-  and the judder and the latency that the player feels, with `frame_loop=1`
-  and `frame_loop=0`, with and with no `fovea_res`. Then a run in the
+  The play thread keeps at most one picture at the GPU that is not finished
+  (`frame_loop_gpu_depth=1`), and then plays the newest frame of the game.
+  The time log splits the step "the layers" of the thread of the session
+  into its parts, with the CPU time of the thread, and gives the GPU parts
+  of the walk with the counts of a walk (`gpu_parts=1`, `android.md`, "The
+  GPU parts of the walk"). In a Quest 3 with FEX and `frame_loop=1` the
+  session made 50 to 64 frames a second at 72 Hz: the step "the layers"
+  took 7 to 25 ms of a frame, nearly all of it CPU time of the thread in
+  the kernel, the GPU was 75 to 99 percent busy, and a walk took 10 to 16
+  ms of the GPU also with `fovea_res=1`. Next in the headset: the line of
+  the parts of the layers (which part takes the time), the GPU parts of the
+  walk, the frames of the session a second and the age of the shown picture
+  with `frame_loop_gpu_depth` 1 and 0, and the judder and the latency that
+  the player feels. Then the largest part gets a fix. Then a run in the
   headset with the profile of the player in the scene of the save, at 72,
   90 and 120 Hz and at `resolution_pct` 50, 75 and 100, to read the lines
   `time` and `time log`: the time of the GPU, the waits in `xrWaitFrame`

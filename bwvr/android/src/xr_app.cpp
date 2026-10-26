@@ -40,6 +40,13 @@ double ClockMs() {
   return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
 
+// The CPU time of this thread in ms.
+double ThreadCpuMs() {
+  timespec t;
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
 // The lock of the queue that the renderer of the mod and the app share
 // (vk::External::lock). With frame_loop=1 the play thread (the renderer and
 // the copies into the ring of the pictures) and the session submit from two
@@ -719,21 +726,33 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
                      &layer->staging);
 }
 
-void XrApp::SetPixels(Layer* layer, const std::vector<uint8_t>& rgba) {
-  const size_t bytes = static_cast<size_t>(layer->width) * layer->height * 4;
-  if (rgba.size() < bytes || layer->staging.mapped == nullptr) return;
-  uint8_t* out = nullptr;
-  if (frame_loop_) {
-    // The GPU may still copy the staging buffer, so the pixels wait in
-    // memory for the next copy (CopyLayer).
-    layer->mirror.resize(bytes);
-    layer->dirty = true;
-    out = layer->mirror.data();
-  } else {
+uint8_t* XrApp::PixelsFor(Layer* layer, size_t bytes) {
+  if (layer->staging.mapped == nullptr) return nullptr;
+  if (!frame_loop_) {
     // The GPU may still copy the buffer of the frame before.
     vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
-    out = static_cast<uint8_t*>(layer->staging.mapped);
+    return static_cast<uint8_t*>(layer->staging.mapped);
   }
+  if (frame_loop::Direct(staging_direct_, layer->dirty,
+                         GpuSerialDone(&gpu_, layer->staging_serial))) {
+    if (time_log_) {
+      ++times_.direct;
+      times_.direct_bytes += bytes;
+    }
+    return static_cast<uint8_t*>(layer->staging.mapped);
+  }
+  // The GPU may still copy the staging buffer, so the pixels wait in memory
+  // for the next copy (CopyLayer).
+  layer->mirror.resize(static_cast<size_t>(layer->staging.size));
+  layer->dirty = true;
+  return layer->mirror.data();
+}
+
+void XrApp::SetPixels(Layer* layer, const std::vector<uint8_t>& rgba) {
+  const size_t bytes = static_cast<size_t>(layer->width) * layer->height * 4;
+  if (rgba.size() < bytes || layer->staging.size < bytes) return;
+  uint8_t* out = PixelsFor(layer, bytes);
+  if (out == nullptr) return;
   if (!layer->swap_red_blue) {
     memcpy(out, rgba.data(), bytes);
     return;
@@ -773,6 +792,9 @@ void XrApp::CopyLayer(Layer* layer) {
   // With no command buffer (the ring could not make one) the frame copies
   // nothing.
   if (frame_loop_ && FrameCommands() == VK_NULL_HANDLE) return;
+  // A card with xr_layer_rect=1: only the rect that its quad shows.
+  const frame_loop::Rect rect =
+      frame_loop::CopyRect(frame_loop_ && layer_rect_, layer->rect, layer->width, layer->height);
   if (frame_loop_ && layer->dirty) {
     // New pixels go into the staging buffer only when the GPU finished the
     // last copy of it. Until then the layer keeps its image.
@@ -780,10 +802,28 @@ void XrApp::CopyLayer(Layer* layer) {
       ++staging_skips_;
       return;
     }
-    const size_t n = layer->mirror.size() < layer->staging.size
-                         ? layer->mirror.size()
-                         : static_cast<size_t>(layer->staging.size);
-    memcpy(layer->staging.mapped, layer->mirror.data(), n);
+    const int before = PartTo(kPartStaging);
+    uint8_t* to = static_cast<uint8_t*>(layer->staging.mapped);
+    const uint8_t* from = layer->mirror.data();
+    size_t bytes = 0;
+    if (rect.width == layer->width && rect.height == layer->height) {
+      bytes = layer->mirror.size() < layer->staging.size ? layer->mirror.size()
+                                                          : static_cast<size_t>(layer->staging.size);
+      memcpy(to, from, bytes);
+    } else {
+      const size_t row = static_cast<size_t>(rect.width) * 4;
+      for (uint32_t r = 0; r < rect.height; ++r) {
+        const size_t at = (static_cast<size_t>(rect.y + r) * layer->width + rect.x) * 4;
+        memcpy(to + at, from + at, row);
+      }
+      bytes = row * rect.height;
+      if (time_log_) ++times_.staged_rects;
+    }
+    if (time_log_) {
+      ++times_.staged;
+      times_.staged_bytes += bytes;
+    }
+    PartTo(before);
     layer->dirty = false;
   }
   uint32_t index = 0;
@@ -797,7 +837,19 @@ void XrApp::CopyLayer(Layer* layer) {
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
                  VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                  VK_PIPELINE_STAGE_TRANSFER_BIT);
-    CopyToImage(cmd, layer->staging, image, layer->width, layer->height);
+    if (rect.width == layer->width && rect.height == layer->height) {
+      CopyToImage(cmd, layer->staging, image, layer->width, layer->height);
+    } else {
+      VkBufferImageCopy region = {};
+      region.bufferOffset = (static_cast<VkDeviceSize>(rect.y) * layer->width + rect.x) * 4;
+      region.bufferRowLength = layer->width;
+      region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      region.imageSubresource.layerCount = 1;
+      region.imageOffset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y), 0};
+      region.imageExtent = {rect.width, rect.height, 1};
+      vkCmdCopyBufferToImage(cmd, layer->staging.buffer, image,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    }
     ImageBarrier(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                  VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -813,7 +865,9 @@ void XrApp::CopyLayer(Layer* layer) {
   }
   // The renderer submits to the same queue.
   LockQueue();
+  const int before = PartTo(kPartBegin);
   VkCommandBuffer cmd = GpuBegin(&gpu_);
+  PartTo(before);
   ImageBarrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
                VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -826,6 +880,7 @@ void XrApp::CopyLayer(Layer* layer) {
                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                VK_PIPELINE_STAGE_TRANSFER_BIT,
                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  const int outer = PartTo(kPartSwapchain);
   const double submit_start = time_log_ ? ClockMs() : 0.0;
   GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
   const double release_start = time_log_ ? ClockMs() : 0.0;
@@ -837,17 +892,36 @@ void XrApp::CopyLayer(Layer* layer) {
     step_ms_[kStepSubmit] += release_start - submit_start;
     step_ms_[kStepRelease] += now - release_start;
   }
+  PartTo(outer);
   layer->released = layer->revision;
   ++copies_;
 }
 
+int XrApp::PartTo(int part) {
+  const int before = part_;
+  if (!parts_on_ || part == part_) return before;
+  const double now = ClockMs();
+  const double cpu = ThreadCpuMs();
+  part_ms_[part_] += now - part_at_;
+  part_cpu_ms_[part_] += cpu - part_cpu_at_;
+  part_at_ = now;
+  part_cpu_at_ = cpu;
+  part_ = part;
+  return before;
+}
+
 VkCommandBuffer XrApp::FrameCommands() {
-  if (frame_cmd_ == VK_NULL_HANDLE) frame_cmd_ = GpuBegin(&gpu_);
+  if (frame_cmd_ == VK_NULL_HANDLE) {
+    const int before = PartTo(kPartBegin);
+    frame_cmd_ = GpuBegin(&gpu_);
+    PartTo(before);
+  }
   return frame_cmd_;
 }
 
 void XrApp::SubmitFrame() {
   if (frame_cmd_ == VK_NULL_HANDLE) return;
+  PartTo(kPartSwapchain);
   const double submit_start = time_log_ ? ClockMs() : 0.0;
   LockQueue();
   GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
@@ -865,6 +939,12 @@ void XrApp::SubmitFrame() {
 }
 
 bool XrApp::NextImage(Layer* layer, bool block, uint32_t* index) {
+  // The calls of the swapchain have steps of their own.
+  struct Back {
+    XrApp* app;
+    int part;
+    ~Back() { app->PartTo(part); }
+  } back = {this, PartTo(kPartSwapchain)};
   const double start = time_log_ ? ClockMs() : 0.0;
   if (layer->pending < 0) {
     uint32_t i = 0;
@@ -1127,6 +1207,14 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   // The steps of the swapchains so far belong to this call too.
   const double before_steps = step_ms_[kStepAcquire] + step_ms_[kStepImageWait] +
                               step_ms_[kStepSubmit] + step_ms_[kStepRelease];
+  // THE PARTS OF THE LAYERS: the clock of the parts starts here.
+  parts_on_ = time_log_;
+  if (parts_on_) {
+    for (int k = 0; k < kParts; ++k) part_ms_[k] = part_cpu_ms_[k] = 0.0;
+    part_ = kPartRest;
+    part_at_ = end_frame_start;
+    part_cpu_at_ = ThreadCpuMs();
+  }
   // The quads: the two of the stereo screen or the quad layers of the mod
   // (ql::kMostLayers), then the keyboard, the menu and the cursor.
   constexpr int kQuads = ql::kMostLayers + 3;
@@ -1157,6 +1245,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   bool world = false;
   bool window = false;
   if (want_world || want_window) {
+    PartTo(kPartEyes);
     for (int eye = 0; eye < 2; ++eye) {
       // The values go with the picture of the image that the eye released.
       if (CopyScreen(&eyes_, eye)) {
@@ -1171,14 +1260,17 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     world = want_world && view_shown_[0] && view_shown_[1];
     window = !world && want_window && eyes_.layer[0].released > 0 &&
              eyes_.layer[1].released > 0 && ql::AsScreen(shown_layers_);
+    PartTo(kPartRest);
   }
   if (world) {
     // One line for each new picture of the layer: the frame of the mod of its
     // values.
     if (!said_projection_ || shown_view_[0].frame != said_frame_) {
       said_frame_ = shown_view_[0].frame;
+      PartTo(kPartLog);
       AppLog("xr           : the projection layer shows the picture of frame %llu",
              static_cast<unsigned long long>(said_frame_));
+      PartTo(kPartRest);
     }
     for (int eye = 0; eye < 2; ++eye) {
       const scene_stream::ViewEye& e = shown_view_[eye].eyes[eye];
@@ -1221,6 +1313,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     bool panel_ok = false;
     if (world && f.panel && panel_source_ != VK_NULL_HANDLE &&
         panel_width_ == f.panel_body.width && panel_height_ == f.panel_body.height) {
+      PartTo(kPartPanel);
       if (Made(panel_) &&
           (panel_.layer[0].width != panel_width_ || panel_.layer[0].height != panel_height_)) {
         // The GPU may still copy into the swapchain or the image between.
@@ -1247,6 +1340,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         }
         panel_ok = panel_shown_;
       }
+      PartTo(kPartRest);
     }
     bool card_ok[bwvr::kCards];
     for (int c = 0; c < bwvr::kCards; ++c) {
@@ -1279,7 +1373,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         }
       } else if (r.kind == ql::kLayerCard) {
         Card& k = cards_[r.index];
+        PartTo(kPartCards);
         CopyLayer(&k.layer);
+        PartTo(kPartRest);
         if (k.layer.released == 0) continue;
         swapchain = k.layer.swapchain;
         ++k.frames;
@@ -1290,6 +1386,11 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                  s.size[0], s.size[1]);
         }
       } else if (r.kind == ql::kLayerWall) {
+        PartTo(kPartWalls);
+        struct Rest {
+          XrApp* app;
+          ~Rest() { app->PartTo(kPartRest); }
+        } rest = {this};
         if (wall_.swapchain == XR_NULL_HANDLE && !wall_failed_) {
           if (!MakeLayer(&wall_, ql::kWallPixels, ql::kWallPixels)) {
             wall_failed_ = true;
@@ -1353,8 +1454,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       // One line for each new picture of the window: the frame of the mod.
       if (said_window_frame_ != shown_frame_) {
         said_window_frame_ = shown_frame_;
+        PartTo(kPartLog);
         AppLog("xr           : the cut scene window shows the picture of frame %llu",
                static_cast<unsigned long long>(shown_frame_));
+        PartTo(kPartRest);
       }
       if (!said_window_) {
         said_window_ = true;
@@ -1381,7 +1484,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     const float width = 2.6f;
     const float height = width * screen_.layer[0].height / screen_.layer[0].width;
     for (int eye = 0; eye < 2; ++eye) {
+      PartTo(kPartEyes);
       CopyScreen(&screen_, eye);
+      PartTo(kPartRest);
       XrCompositionLayerQuad& q = quads[used++];
       q.space = local_;
       q.eyeVisibility = eye == 0 ? XR_EYE_VISIBILITY_LEFT : XR_EYE_VISIBILITY_RIGHT;
@@ -1401,6 +1506,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     // picture (xr_copy_on_change).
     XrSwapchain swapchain = XR_NULL_HANDLE;
     uint32_t w = 0, h = 0;
+    PartTo(kPartScreen);
     if (flat_cpu_) {
       CopyLayer(&flat_pixels_);
       if (flat_pixels_.released > 0) {
@@ -1416,6 +1522,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         h = flat_.layer[0].height;
       }
     }
+    PartTo(kPartRest);
     quad_layer_math::QuadSpec s;
     if (swapchain != XR_NULL_HANDLE && screen_quad_math::Spec(flat_body_, w, h, &s)) {
       XrCompositionLayerQuad& q = quads[used++];
@@ -1454,7 +1561,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   }
   // THE KEYBOARD OF THE APP under the screen quad.
   if (frame_.shouldRender && keyboard_shown_ && keyboard_written_ && !keyboard_failed_) {
+    PartTo(kPartKeyboard);
     CopyLayer(&keyboard_);
+    PartTo(kPartRest);
     XrCompositionLayerQuad& q = quads[used++];
     q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     q.space = local_;
@@ -1473,7 +1582,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   // shows on the keyboard with no menu: with the turn of the keyboard, 4 mm
   // in front of it along its normal.
   if (frame_.shouldRender && show_cursor && cursor_written_ && !menu_shown_) {
+    PartTo(kPartCursor);
     CopyLayer(&cursor_);
+    PartTo(kPartRest);
     XrCompositionLayerQuad& c = quads[used++];
     c.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     c.space = local_;
@@ -1492,7 +1603,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&c);
   }
   if (frame_.shouldRender && menu_written_ && menu_shown_) {
+    PartTo(kPartMenu);
     CopyLayer(&menu_);
+    PartTo(kPartRest);
     XrCompositionLayerQuad& q = quads[used++];
     q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     q.space = local_;
@@ -1505,7 +1618,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     q.size = {menu_size[0], menu_size[1]};
     layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);
     if (show_cursor && cursor_written_) {
+      PartTo(kPartCursor);
       CopyLayer(&cursor_);
+      PartTo(kPartRest);
       XrCompositionLayerQuad& c = quads[used++];
       c.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
       c.space = local_;
@@ -1528,7 +1643,15 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   // THE FRAME LOOP: the copies of this frame go to the GPU in one submit,
   // and their swapchain images go back to the runtime, before xrEndFrame.
   SubmitFrame();
+  PartTo(kPartSwapchain);
   const double end_start = time_log_ ? ClockMs() : 0.0;
+  if (parts_on_) {
+    parts_on_ = false;
+    for (int k = 0; k < kParts; ++k) {
+      times_.parts[k].Add(part_ms_[k]);
+      times_.part_cpu[k].Add(part_cpu_ms_[k]);
+    }
+  }
   LockQueue();
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
   UnlockQueue();
@@ -1720,19 +1843,12 @@ bool XrApp::TakeCard(int index, const scene_stream::CardBody& body,
            body.texture_width, body.texture_height);
   }
   if (k.picture == body.picture && memcmp(k.rect, body.rect, sizeof(k.rect)) == 0) return true;
-  if (k.layer.staging.mapped == nullptr) return false;
-  uint8_t* out = nullptr;
-  if (frame_loop_) {
-    // The GPU may still copy the staging buffer, so the picture goes into the
-    // copy in memory, and CopyLayer puts it into the staging buffer.
-    k.layer.mirror.resize(static_cast<size_t>(k.layer.staging.size));
-    k.layer.dirty = true;
-    out = k.layer.mirror.data();
-  } else {
-    // The GPU may still copy the buffer of the frame before.
-    vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
-    out = static_cast<uint8_t*>(k.layer.staging.mapped);
-  }
+  // The picture goes straight into the staging buffer when it is free, else
+  // into the copy in memory, and CopyLayer puts it into the staging buffer
+  // (PixelsFor). Its quad shows only its rect (xr_layer_rect=1).
+  uint8_t* out = PixelsFor(&k.layer, static_cast<size_t>(w) * h * 4);
+  if (out == nullptr) return false;
+  memcpy(k.layer.rect, body.rect, sizeof(k.layer.rect));
   const std::vector<uint8_t>& in = pictures.Pixels(index);
   const size_t row = static_cast<size_t>(w) * 4;
   for (int32_t r = 0; r < h; ++r) {
@@ -1972,7 +2088,9 @@ bool XrApp::CopyImage(Screen* screen, int index, VkImage source,
   if (!NextImage(layer, true, &image)) return false;
   const VkImage target = layer->images[image].image;
   LockQueue();
+  const int before = PartTo(kPartBegin);
   VkCommandBuffer cmd = GpuBegin(&gpu_);
+  PartTo(before);
   VkImageMemoryBarrier b[2] = {{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER},
                                {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}};
   // The layer of the image of the renderer: from a color attachment to a
@@ -2033,6 +2151,7 @@ bool XrApp::CopyImage(Screen* screen, int index, VkImage source,
                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  const int outer = PartTo(kPartSwapchain);
   const double submit_start = time_log_ ? ClockMs() : 0.0;
   GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
   const double release_start = time_log_ ? ClockMs() : 0.0;
@@ -2044,6 +2163,7 @@ bool XrApp::CopyImage(Screen* screen, int index, VkImage source,
     step_ms_[kStepSubmit] += release_start - submit_start;
     step_ms_[kStepRelease] += now - release_start;
   }
+  PartTo(outer);
   layer->released = layer->revision;
   ++copies_;
   ++screen->copies[index];

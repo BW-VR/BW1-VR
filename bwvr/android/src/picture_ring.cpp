@@ -367,6 +367,22 @@ void PictureRing::EndWrite(int i) {
   }
 }
 
+bool PictureRing::WaitGpu(int depth, uint64_t timeout_ns) {
+  // Only the play thread resets a fence and sets `submitted`.
+  const auto busy = [&](VkFence* fences) {
+    int n = 0;
+    for (Slot& s : slots_) {
+      if (s.submitted && vkGetFenceStatus(device_, s.fence) != VK_SUCCESS) fences[n++] = s.fence;
+    }
+    return n;
+  };
+  VkFence fences[frame_loop::kSlots];
+  const int n = busy(fences);
+  if (frame_loop::MayPlay(depth, n)) return true;
+  vkWaitForFences(device_, static_cast<uint32_t>(n), fences, VK_FALSE, timeout_ns);
+  return frame_loop::MayPlay(depth, busy(fences));
+}
+
 const Picture* PictureRing::Take(uint64_t session_serial) {
   std::lock_guard<std::mutex> g(lock_);
   const int before = ring_.Shown();

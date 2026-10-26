@@ -179,4 +179,49 @@ inline bool SerialDone(uint64_t serial, uint64_t done) { return serial <= done; 
 // shows a new picture, one more in each later frame with the same picture.
 inline uint64_t NextAge(uint64_t age, bool fresh) { return fresh ? 0 : age + 1; }
 
+// THE QUEUE AT THE GPU (frame_loop_gpu_depth of bwvr.ini, 1 by default). The
+// play thread starts the play of a new picture only while fewer than `depth`
+// pictures are not finished on the GPU. Until then the reader keeps the
+// frames of the game, and the next batch has the newest of them. 0 (or a
+// value below 0) is no limit: the play thread plays each batch at once.
+inline int GpuDepth(int key) { return key > 0 ? key : 0; }
+inline bool MayPlay(int depth, int unfinished) { return depth <= 0 || unfinished < depth; }
+
+// THE PIXELS OF THE CPU of a layer (XrApp::PixelsFor). With
+// xr_staging_direct=1 (key) new pixels go straight into the staging buffer
+// when no copy in memory waits (dirty) and the GPU finished the last copy of
+// the buffer (done). Else they go into the copy in memory.
+inline bool Direct(bool key, bool dirty, bool done) { return key && !dirty && done; }
+
+// THE RECT OF A COPY of the pixels of the CPU (xr_layer_rect of bwvr.ini, 1
+// by default): the rect x, y, width, height of the image of width by height
+// that the quad shows, cut to the image. The whole image when the key is off,
+// when the rect has no width or no height, or when no part of it is in the
+// image.
+struct Rect {
+  uint32_t x = 0;
+  uint32_t y = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+};
+inline Rect CopyRect(bool key, const int32_t rect[4], uint32_t width, uint32_t height) {
+  Rect whole;
+  whole.width = width;
+  whole.height = height;
+  if (!key || rect[2] <= 0 || rect[3] <= 0) return whole;
+  const int64_t x0 = rect[0] < 0 ? 0 : rect[0];
+  const int64_t y0 = rect[1] < 0 ? 0 : rect[1];
+  int64_t x1 = static_cast<int64_t>(rect[0]) + rect[2];
+  int64_t y1 = static_cast<int64_t>(rect[1]) + rect[3];
+  if (x1 > width) x1 = width;
+  if (y1 > height) y1 = height;
+  if (x1 <= x0 || y1 <= y0) return whole;
+  Rect r;
+  r.x = static_cast<uint32_t>(x0);
+  r.y = static_cast<uint32_t>(y0);
+  r.width = static_cast<uint32_t>(x1 - x0);
+  r.height = static_cast<uint32_t>(y1 - y0);
+  return r;
+}
+
 }  // namespace frame_loop

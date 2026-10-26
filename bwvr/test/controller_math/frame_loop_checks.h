@@ -238,9 +238,66 @@ inline void MenuRowChecks() {
         out.GetInt("bwvr", "frame_loop", -1), 1);
 }
 
+// THE QUEUE AT THE GPU, the direct writes and the rect of a copy.
+inline void GpuQueueChecks() {
+  namespace fl = frame_loop;
+  printf("\nThe queue at the GPU and the pixels of the CPU of the frame loop\n");
+  Check(fl::GpuDepth(1) == 1 && fl::GpuDepth(0) == 0 && fl::GpuDepth(-3) == 0 &&
+            fl::GpuDepth(2) == 2,
+        "frame_loop_gpu_depth: 1 and 2 stay, 0 and below are no limit", fl::GpuDepth(-3), 0);
+  Check(fl::MayPlay(1, 0) && !fl::MayPlay(1, 1) && !fl::MayPlay(1, 2),
+        "depth 1: a play only when no picture is unfinished on the GPU", 0, 0);
+  Check(fl::MayPlay(2, 1) && !fl::MayPlay(2, 2), "depth 2: a play with one unfinished picture",
+        0, 0);
+  Check(fl::MayPlay(0, 0) && fl::MayPlay(0, 3), "depth 0: each play at once (the old way)", 0, 0);
+  // A loop of the play thread with depth 1: the GPU takes 3 steps of the
+  // loop for each picture. It never has two unfinished pictures.
+  int unfinished = 0, left = 0, plays = 0, most = 0;
+  for (int step = 0; step < 30; ++step) {
+    if (left > 0 && --left == 0) unfinished = 0;
+    if (fl::MayPlay(1, unfinished)) {
+      ++plays;
+      unfinished = 1;
+      left = 3;
+    }
+    if (unfinished > most) most = unfinished;
+  }
+  Check(most == 1 && plays == 10, "30 steps with a GPU of 3 steps a picture: 10 plays, 1 unfinished at most",
+        plays, 10);
+  Check(fl::Direct(true, false, true), "direct: a free staging buffer with no copy in memory waiting",
+        0, 0);
+  Check(!fl::Direct(true, true, true), "not direct when a copy in memory waits (it is older)", 0, 0);
+  Check(!fl::Direct(true, false, false), "not direct while the GPU copies the staging buffer", 0, 0);
+  Check(!fl::Direct(false, false, true), "xr_staging_direct=0: never direct (the old way)", 0, 0);
+
+  const int32_t card[4] = {10, 20, 357, 86};
+  fl::Rect r = fl::CopyRect(true, card, 768, 320);
+  Check(r.x == 10 && r.y == 20 && r.width == 357 && r.height == 86,
+        "a card of 768 by 320 copies its rect 357 by 86 at 10, 20", r.width, 357);
+  r = fl::CopyRect(false, card, 768, 320);
+  Check(r.x == 0 && r.y == 0 && r.width == 768 && r.height == 320,
+        "xr_layer_rect=0: the whole image (the old way)", r.width, 768);
+  const int32_t none[4] = {0, 0, 0, 0};
+  r = fl::CopyRect(true, none, 64, 32);
+  Check(r.width == 64 && r.height == 32, "a layer with no rect: the whole image", r.width, 64);
+  const int32_t over[4] = {700, 300, 200, 100};
+  r = fl::CopyRect(true, over, 768, 320);
+  Check(r.x == 700 && r.y == 300 && r.width == 68 && r.height == 20,
+        "a rect over the edge is cut to the image", r.width, 68);
+  const int32_t out[4] = {800, 0, 10, 10};
+  r = fl::CopyRect(true, out, 768, 320);
+  Check(r.width == 768 && r.height == 320, "a rect outside the image: the whole image", r.width,
+        768);
+  const int32_t neg[4] = {-5, -5, 20, 20};
+  r = fl::CopyRect(true, neg, 768, 320);
+  Check(r.x == 0 && r.y == 0 && r.width == 15 && r.height == 15,
+        "a rect that starts before the image is cut too", r.width, 15);
+}
+
 inline void FrameLoopChecks() {
   RingChecks();
   CommandRingChecks();
+  GpuQueueChecks();
   MenuRowChecks();
 }
 

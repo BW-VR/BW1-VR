@@ -3591,6 +3591,7 @@ void CreatureChecks() {
 #include "stall_checks.h"
 #include "wow64_cpu_checks.h"
 #include "frame_loop_checks.h"
+#include "walk_parts_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4026,6 +4027,7 @@ int main() {
   stall_checks::StallChecks();
   wow64_cpu_checks::Wow64CpuChecks();
   frame_loop_checks::FrameLoopChecks();
+  walk_parts_checks::WalkPartsChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

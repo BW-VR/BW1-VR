@@ -819,6 +819,38 @@ function TimeChecks([int]$N, [string]$Part, [string]$ModLog, [double]$GameSecond
     $gpu = @([regex]::Matches($Part, 'time         : the GPU in ms: a picture ([\d.]+) as a mean [^\r\n]*?a walk of the renderer ([\d.]+) and ([\d.]+) at most \((\d+) walks\), a command buffer of the app ([\d.]+) and ([\d.]+) at most \((\d+)\)'))
     $gpuWalks = @($gpu | Where-Object { [int64]$_.Groups[4].Value -gt 0 -and [int64]$_.Groups[7].Value -gt 0 })
     Expect ($gpuWalks.Count -gt 0) "game $N`: the app logged the time of the GPU from the timestamps of the walks and of its command buffers ($($gpuWalks.Count) of $($gpu.Count) lines with both)"
+    # THE PARTS OF THE LAYERS: a line in each window, and the parts add up to
+    # the step "the layers" of the same window.
+    $partLines = @([regex]::Matches($Part, 'time         : the parts of the layers in a frame of the session, ms, the mean and the most, with the CPU time of the thread as a mean: ([^\r\n]*?)\. In all ([\d.]+)\. The pixels of the CPU: (\d+) copies from a copy in memory into a staging buffer \(([\d.]+) MB, (\d+) of them a rect\), (\d+) writes straight into a staging buffer \(([\d.]+) MB\)'))
+    Expect ($partLines.Count -eq $appLines.Count -and $partLines.Count -gt 0) "game $N`: each window has the line of the parts of the layers ($($partLines.Count) of $($appLines.Count) lines)"
+    $partsOff = 0
+    for ($i = 0; $i -lt [math]::Min($partLines.Count, $stepLines.Count); $i++) {
+        $sum = Num $partLines[$i].Groups[2].Value; $layers = Num $stepLines[$i].Groups[7].Value
+        if ([math]::Abs($sum - $layers) -gt 0.1 + 0.1 * $layers) { $partsOff++ }
+    }
+    Expect ($partLines.Count -gt 0 -and $partsOff -eq 0) "game $N`: in each window the parts of the layers add up to the step of the layers ($partsOff windows that do not)"
+    $partLines | Select-Object -Last 2 | ForEach-Object { Note ('bwvr-quest.log: ' + $_.Value) }
+    # THE QUEUE AT THE GPU (frame_loop_gpu_depth): the key at Play, and a line
+    # in each window of the frame loop.
+    $depthKey = [regex]::Match($Part, 'game         : frame_loop_gpu_depth=(\d+)\. ')
+    if ($wantLoop -eq 1) {
+        $queueLines = @([regex]::Matches($Part, 'time         : the queue at the GPU: frame_loop_gpu_depth=(\d+), (\d+) waits of the play thread for the GPU before a play, ([\d.]+) ms as a mean and ([\d.]+) at most, (\d+) frames of the game that did not show after such a wait'))
+        $badDepth = @($queueLines | Where-Object { -not $depthKey.Success -or $_.Groups[1].Value -ne $depthKey.Groups[1].Value })
+        Expect ($depthKey.Success -and $queueLines.Count -eq $appLines.Count -and $queueLines.Count -gt 0 -and $badDepth.Count -eq 0) ("game $N`: the app logged frame_loop_gpu_depth at Play and the queue at the GPU in each window: " + $(if ($depthKey.Success) { "depth $($depthKey.Groups[1].Value), " } else { '' }) + "$($queueLines.Count) of $($appLines.Count) lines")
+        $waits = 0; $gateDropped = 0
+        foreach ($l in $queueLines) { $waits += [int64]$l.Groups[2].Value; $gateDropped += [int64]$l.Groups[5].Value }
+        Note "game $N`: the queue at the GPU: $waits waits of the play thread for the GPU, $gateDropped frames that did not show after a wait"
+        if ($depthKey.Success -and $depthKey.Groups[1].Value -eq '0') {
+            Expect ($waits -eq 0) "game $N with frame_loop_gpu_depth=0: the play thread never waited for the GPU before a play ($waits waits)"
+        }
+    }
+    # THE GPU PARTS OF THE WALK (gpu_parts=1, the default): a line in each
+    # window, with walks, passes and draws.
+    $partsKey = [regex]::Match($Part, 'gpu parts    : gpu_parts=1\. ')
+    $gpuParts = @([regex]::Matches($Part, 'time         : the GPU parts of the walk in ms \(gpu_parts=1\), the mean in a walk and the most in one walk, (\d+) walks \((\d+) with no time\): ([^\r\n]*?)\. In all ([\d.]+) in a walk\. In a walk: ([\d.]+) passes, (\d+) draws, (\d+) pipelines, (\d+) bindings of descriptor sets, (\d+) descriptor writes, ([\d.]+) uploads of ([\d.]+) MB'))
+    $timed = @($gpuParts | Where-Object { [int64]$_.Groups[1].Value -gt [int64]$_.Groups[2].Value -and (Num $_.Groups[5].Value) -gt 0 -and [int64]$_.Groups[6].Value -gt 0 -and (Num $_.Groups[4].Value) -gt 0 })
+    Expect ($partsKey.Success -and $gpuParts.Count -eq $appLines.Count -and $timed.Count -gt 0) "game $N`: the app logged the GPU parts of the walk in each window ($($gpuParts.Count) of $($appLines.Count) lines, $($timed.Count) with timed walks, passes and draws)"
+    $gpuParts | Select-Object -Last 2 | ForEach-Object { Note ('bwvr-quest.log: ' + $_.Value) }
     $threads = [regex]::Match($Part, 'time         : each 10 s, the threads in [^\r\n]*')
     $anyMain = [regex]::Match($Part, 'time         : each 10 s, the threads in [^\r\n]*game runblack\.exe (\d+) \(the main thread\) ([\d.]+)')
     Expect ($threads.Success -and $anyMain.Success) ("game $N`: the lines of the threads name the main thread of the game: " + $(if ($anyMain.Success) { "runblack.exe $($anyMain.Groups[1].Value), $($anyMain.Groups[2].Value) percent of one core" } else { 'none' }))

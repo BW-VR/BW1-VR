@@ -93,6 +93,26 @@ class XrApp {
     kStepLock,       // of them, the waits for the lock of the queue
     kSteps
   };
+  // THE PARTS OF THE LAYERS (kStepLayers), each the sum in ms of one frame,
+  // the time of the clock and the CPU time of the thread of the session.
+  // kPartSwapchain is the time of the steps of the swapchains and of the
+  // submit in the layers, which the step line has as steps of their own.
+  enum LayerPart {
+    kPartBegin,      // the begin of the command buffer of the frame (GpuBegin)
+    kPartEyes,       // the records of the copies of the eye pictures
+    kPartPanel,      // the panel image
+    kPartCards,      // the cards
+    kPartWalls,      // the walls of the cut scene window
+    kPartScreen,     // the screen quad
+    kPartKeyboard,   // the keyboard of the app
+    kPartCursor,     // the cursor
+    kPartMenu,       // the menu
+    kPartStaging,    // the copies of pixels of the CPU into a staging buffer (memcpy)
+    kPartLog,        // the lines of the log of a new picture
+    kPartRest,       // the rest: the order, the quads and the projection layer
+    kPartSwapchain,  // not a part of kStepLayers
+    kParts
+  };
   struct FrameTimes {
     time_log_math::Stat wait;
     time_log_math::Stat work;
@@ -110,6 +130,18 @@ class XrApp {
     time_log_math::Stat age_ms;
     time_log_math::Stat latency_ms;
     time_log_math::Stat arrival_ms;
+    // THE PARTS OF THE LAYERS in each frame: the clock and the CPU time of
+    // the thread. The pixels of the CPU: the copies from the copy in memory
+    // into a staging buffer (with their bytes and the count of copies of a
+    // rect), and the writes straight into a staging buffer
+    // (xr_staging_direct=1).
+    time_log_math::Stat parts[kParts];
+    time_log_math::Stat part_cpu[kParts];
+    uint64_t staged = 0;
+    uint64_t staged_bytes = 0;
+    uint64_t staged_rects = 0;
+    uint64_t direct = 0;
+    uint64_t direct_bytes = 0;
   };
   // The time of one step of main.cpp in this frame (a clock pair).
   void AddStep(Step step, double ms) {
@@ -123,6 +155,18 @@ class XrApp {
   // fresh: this frame shows it first.
   void ShownPicture(double play_start_ms, double arrival_ms, bool fresh);
   void SetTimeLog(bool on) { time_log_ = on; }
+  // THE PIXELS OF THE CPU of the layers with the frame loop (docs/android.md,
+  // "The frame loop"), before Start.
+  // xr_layer_rect=1 (the default): a card copies only its rect into the
+  // staging buffer and into the swapchain image, because its quad shows only
+  // that rect. 0: the whole image.
+  // xr_staging_direct=1 (the default): new pixels go straight into the
+  // staging buffer when the GPU finished its last copy and no copy in memory
+  // waits, so the layers step has no memcpy for them. 0: the pixels go into
+  // the copy in memory, and the layers step copies them into the staging
+  // buffer.
+  void SetLayerRect(bool on) { layer_rect_ = on; }
+  void SetStagingDirect(bool on) { staging_direct_ = on; }
   void TakeTimes(FrameTimes* out);
   // The wait in xrWaitFrame of this frame, in ms.
   double LastWaitMs() const { return last_wait_ms_; }
@@ -372,6 +416,9 @@ class XrApp {
     std::vector<uint8_t> mirror;
     bool dirty = false;
     uint64_t staging_serial = 0;
+    // The rect of the pixels that the quad shows (a card, xr_layer_rect=1),
+    // x, y, width and height. A width of 0 is the whole image.
+    int32_t rect[4] = {0, 0, 0, 0};
     // An image that the app acquired and the runtime did not give free yet
     // (frame_loop_image_wait=0), or -1.
     int pending = -1;
@@ -391,6 +438,13 @@ class XrApp {
   bool MakeLayer(Layer* layer, uint32_t width, uint32_t height,
                  bool staging = true);
   void CopyLayer(Layer* layer);
+  // The pixels of a layer: straight into its staging buffer when it is free
+  // (xr_staging_direct=1), else into its copy in memory. Null when the layer
+  // has no staging buffer.
+  uint8_t* PixelsFor(Layer* layer, size_t bytes);
+  // THE PARTS OF THE LAYERS: the part that the time goes to from now on. The
+  // result is the part before. Nothing with time_log=0.
+  int PartTo(int part);
   // THE FRAME LOOP: the command buffer of this frame (begun at its first
   // use), the swapchain images to release after its submit, and the submit
   // with the releases before xrEndFrame.
@@ -530,6 +584,14 @@ class XrApp {
   bool time_log_ = false;
   FrameTimes times_;
   double step_ms_[kSteps] = {};
+  bool parts_on_ = false;  // in EndFrame with time_log=1
+  int part_ = kPartRest;
+  double part_at_ = 0.0;
+  double part_cpu_at_ = 0.0;
+  double part_ms_[kParts] = {};
+  double part_cpu_ms_[kParts] = {};
+  bool layer_rect_ = true;
+  bool staging_direct_ = true;
   uint64_t not_ready_ = 0;
   // XR_KHR_convert_timespec_time: the display time on CLOCK_MONOTONIC.
   PFN_xrConvertTimeToTimespecTimeKHR to_timespec_ = nullptr;

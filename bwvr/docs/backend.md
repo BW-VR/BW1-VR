@@ -1771,6 +1771,68 @@ clock for the log and no line. There is no test key: the headset is tested throu
 time log of its own with the same key (`android.md`, "The time log of the
 app").
 
+### The parts of the scene walk
+
+`walk_parts=1` (a test aid, 0 is the default, `walk_parts.cpp`, the rules in
+`walk_parts_math.h`) times the parts of the scene walk with the clock. The
+sampler of `profile_sample` does not work under a translator of the code
+(FEX on the Quest): it gives the place of the last call of the system. So
+each timed function gets a hook of MinHook to a stub of its own. The stub
+keeps each register and the flags, reads `QueryPerformanceCounter`, puts
+the address of an exit stub in the place of the return address on the
+stack, and jumps to the function. The exit stub reads the clock, closes
+the timer and jumps to the return address of the caller. So a stub does not
+need the arguments or the calling convention of the function. The exit
+stub uses integers only, because the x87 unit can hold the value that the
+function returns.
+
+- **What it times.** About 60 functions of the call tree of
+  `GGame::Process3dEngine` (`0x0054DA80`): each function of the game that
+  it calls, the land (`fn_007FF610`) and the sea (`fn_00879930`) with some
+  of their callees, the parts of `LH3DRender::FinishFrame`, the three mesh
+  loops (`fn_00856D40`, `fn_0085AB10`, `fn_0084BA90`), `LH3DSprite::Draw`
+  and the draw calls of the engine. Also each function of the two lists of
+  the engine that `FinishFrame` calls: the draws of the z sorter (the
+  entries at `0x00EDDD30`, the count at `0x00EE9D34`) and the callbacks of
+  the table at `0x00EC8170`. The scan of the lists is at the start and with
+  each report, so a new kind of draw gets a timer from the next report on.
+  Below the game it times the methods of the device and of the surfaces of
+  the backend that a walk calls (dxwrapper, or the device of the mod), the
+  Vulkan renderer of the mod (`VkScene*`), the record of the stream
+  (`VkStream*`) and the SSE loops of `fast_transform`.
+- **A function that the mod hooks already** gets its timer on the hook of
+  the mod. Its line says "with the hook of the mod", and its time has the
+  work of that hook in it.
+- **Only the frame thread in a scene walk counts.** A call on another
+  thread, or outside a walk, goes through the stub with no read of the
+  clock. The hooks come at the third walk, when the device of the game is
+  made. A frame is the walks from one present to the next.
+- **The exclusive time** of a timer is its time less the time of each timer
+  that it calls. Timer 0 is the walk itself, so its exclusive time is the
+  part of the walk that no timer covers. The sum of all exclusive times is
+  the walk. A function inside itself counts its inclusive time one time.
+- **The cost.** At the start the mod calls a probe function 20000 times
+  without and with a timer, and the log gives the cost of one timed call.
+  Each block gives the timed calls of a frame and their cost in ms. The cost
+  of the timers inside a function is in its inclusive time, and the cost of
+  the timers is in the walk.
+
+```
+walk parts   : walk_parts=1. 68 timers in the scene walks of the frame thread (0 of them from the lists of the engine), 68 of them on. One timed call costs 67 ns (20000 calls of a probe with and without a timer). Each 10 s the lines of the parts of the walk
+walk parts   : 10.0 s, 6302 frames with a scene walk. The walk in a frame, ms, the mean and the most: 1.41 and 4.18. The timed functions 1.21 ms (85.5 percent of the walk), outside each timer 0.21 ms (14.5 percent). 4001 timed calls in a frame (most 4005), at 67 ns for each call about 0.27 ms (18.9 percent of the walk)
+walk parts   :  1. 0x597DC570 VkSceneDraw, the Vulkan renderer of the mod: calls in a frame 358.9 (most 359), exclusive ms 0.291 and 1.017, inclusive ms 0.291 and 1.018
+walk parts   :  2. 0x0082F460 LH3DRender::FinishFrame (with the hook of the mod): calls in a frame 1.0 (most 1), exclusive ms 0.258 and 0.446, inclusive ms 0.436 and 0.679
+```
+
+The lines of the timers are in the order of the mean exclusive time, and
+each timer with a call in the 10 s has a line. `walk_parts=2` leaves out
+the timers on each call of the device and of the Vulkan renderer (about
+3000 of the 4000 timed calls of a frame), so the cost is smaller and the
+time of those calls is in their callers. `walk_parts_add=0x...,0x...` gives
+more functions to time, by address, with no new build. In a headset
+session, set the key in `bwvr.ini`. A save of the menu of the headset app
+keeps it.
+
 ### Draw calls with one state
 
 The cost of a frame follows the count of the draw calls. The mod can give two
@@ -2617,6 +2679,82 @@ what the game wrote, and the log has the count of the meshes and of the
 vertices that differ (`fast transform: check` lines, and the first 12
 vertices that differ). A desktop run at the start of a new game compared 10.8
 million vertices in each window of 450 frames, and 0 differed.
+
+## The vertex loop of the land with SSE
+
+`GLandscape::Draw` (`0x005E42E0`) draws the land in two calls,
+`fn_007FF4F0` and `LH3DIsland::Draw` (`fn_007FF610`). Each one calls
+`fn_00874AA0` for each patch of the land in the view (27 to 140 patches in a
+frame). `fn_00874AA0` (`__thiscall`, the patch in ecx):
+
+- **The input.** The patch has 17 by 17 cells of 8 bytes: a color word (bits
+  0 to 23 the specular color, bits 24 to 31 the index of the diffuse color
+  in the table at `0x00EDD90C`) and a height byte. A far patch uses each
+  2nd, 4th, 8th or 16th cell (the step, `1 << (patch + 0x930)`). The place
+  of the patch is at `+0x90C` and `+0x910`, the camera matrix of the land at
+  `0x00EA9E40` (rows of 3), the projection at `0x00E839E0` to `0x00E839F4`
+  and the clamp to the screen at `0x00C2AB00`.
+- **The vertex loop.** For each cell of the grid: the height (3 or less is
+  the sea, at the height 0), the 3x4 matrix, the fog (`+0x940`: none, a
+  constant, or by the depth with the values at `0x00C37214` to
+  `0x00C37228`), the clip flags in `LH3DP3::Table0` when the patch is at the
+  edge of the view (`+0x91C`), and the projection to a `D3DTLVERTEX` of
+  `LH3DP3::Table1`. All on the x87 unit, with an `fcomp` and an `fnstsw` for
+  each comparison and a division for each vertex. The coordinates and the
+  texture coordinates are sums of the step, one add for each cell.
+- **The rest.** `fn_00876910` (no clip) or `fn_00875C60` (clip) builds the
+  triangles into `g_TriangleList` (`0x00EA5DE0`): a test of the back face of
+  each triangle on the screen, and the joins to a patch with another step.
+  Then the material and `LH3DRender::DrawTriangle`. Some patches (by the
+  values at `+0x928` and `+0x938`) have more passes over their vertices
+  after that draw: other texture coordinates, an alpha by the place, and
+  more draws (`fn_008790F0`).
+
+**The paths of the game.** At the start of the renderer `fn_007AC9E0` sets
+the flag `0x00EA9EB4` from the class of the CPU (`fn_008A2610`, CPUID 1): 1
+only for the family 15 with SSE2. With the flag the engine has code of its
+own with SSE for a patch (`fn_007A1800`), for the triangles of a patch, for
+the clip of a triangle and for the sprites. So an AMD CPU of the family 15
+and up takes the SSE path of the game, and an Intel CPU of the family 6 and
+the Quest under FEX take the x87 path. The loops of `fn_00856D40`,
+`fn_0085AB10` and `fn_0084BA90` have no SSE path in the game ("The vertex
+loops with SSE").
+
+`land_fast=1` (the default) makes the vertex loop of the x87 path with SSE,
+four cells of a row at a time (`land_fast_math.h`, `land_fast.cpp`). A jump
+at the start of the loop (`0x00874B40`) goes to a stub. The stub keeps each
+register, and goes on at the code after the loop (`0x00875308`) when the
+SSE loop did the work. The code after the loop reads only the patch and the
+step, so the rest of `fn_00874AA0` is the code of the game. The SSE loop
+runs with the same rules for the same bits as the loops of
+`fast_transform`: the x87 unit at 24 bits and rounding to the nearest, MXCSR
+with no flush to zero while the loop runs. The checks of
+`bwvr/test/controller_math` compare the bits of the SSE loop with a scalar
+reference for 60 patches with each step, each fog, the clip and the sea.
+`land_fast=0` runs the loop of the game, with no hook.
+
+`land_fast=2` (a test aid) runs the loop of the game, and the SSE loop makes
+a copy. A hook at the code after the loop compares the copy with what the
+game wrote, and each 10 s the log has the count of the vertices that
+differ, the largest difference of each float, and the words that differ
+(`land fast` lines, and the first 12 vertices that differ). A desktop run in
+the test save `temple` with `game_sse_path=0` compared 480 million vertices
+in 50 s, and 0 differed.
+
+`game_sse_path` (a test key) sets the flag after `fn_007AC9E0`: -1 (the
+default) the game chooses, 0 the x87 paths on each CPU (so a desktop run on
+an AMD CPU shows the loop of the mod), 1 the SSE paths of the game.
+
+In a desktop run (`bench_run.ps1`, the test save `temple`, an AMD CPU,
+`game_sse_path=0`, `walk_parts=1`) the exclusive time of `fn_00874AA0` is
+0.073 ms in a frame with `land_fast=1` and 0.088 ms with `land_fast=0` (27
+patches), 0.192 and 0.228 ms in the window with 64 patches. The x87 unit of
+a PC is fast, and only the Quest under FEX shows the gain that counts.
+
+- Only a headset shows the time of the land under FEX with `land_fast=1`.
+- Not tried: `game_sse_path=1` on the Quest. It gives the SSE paths of the
+  game for the land, the triangles of a patch, the clip and the sprites.
+  Not known: whether that code of the game runs under FEX.
 
 ## The thread of Direct3D 7
 
@@ -4038,7 +4176,7 @@ gets, and it also stores that camera: the position at `0x00EA1DB8` and the focus
 | `HandStateCamera::Update` | Drags the land relative to the focus |
 | `GCamera::Update` | In some modes takes the stored camera back as its start point |
 | `GScript::StoreCameraDetails`, `GScript::GetCameraFocus` | Scripts save and restore the camera |
-| `fn_005E5CD0` (sky and cloud module) | Recomputes whenever the stored camera moves by more than 1 unit |
+| `fn_005E5CD0` (the draw of the objects on the land) | Makes the list of the objects to draw again when the stored camera moves by more than 1 unit |
 | `Tree::PreDraw`, `HelpSystem::SendFOVObject`, `PowerSpinRunner::Update` | Various |
 
 So after every `UpdateCamera` call, `head_camera.cpp` writes the camera that the
@@ -5508,6 +5646,8 @@ keys that the launcher sets.
 | `vk_only`, `vk_only_test` | 1, 0 | `vk_only=1`: in a session with Vulkan, a walk of one walk with the eyes of the Vulkan renderer goes to the renderer alone, and the D3D7 thread gives no draw of it to dxwrapper. 0: Direct3D 9 draws each walk too. A test key: Shift U. `vk_only_test=1` (a test key) does the same on the desktop. See "The Vulkan renderer" |
 | `vk_upload_queue`, `vk_scene_reread_test` | 1, 0 | `vk_upload_queue=1`: the copy of a texture that a walk reads again goes to the GPU in the submit of the walk, with no wait of the D3D7 thread. 0: each copy goes to the GPU at once with a wait. A test key: Shift I. `vk_scene_reread_test=N` (a test key) reads N textures again in each walk, in turn. See "The Vulkan renderer" |
 | `fast_transform` | 1 | 1: the two vertex loops of the engine run with SSE, with the bits of the game. 0: on the x87 unit. See "The vertex loops with SSE" |
+| `land_fast` | 1 | 1: the vertex loop of the land on the x87 path runs with SSE, with the bits of the game. 0: on the x87 unit, with no hook. 2: a test aid, the compare. See "The vertex loop of the land with SSE" |
+| `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `hang_watch` | 0 | A test key: 1 the place of the frame thread when it makes no frame for 8 s, 2 each 8 s. With each of the two the place of a fault. See "The watch of the frame thread" |
 | `stall_modules` | 1 | 1: when no frame of the game ends for 5 s, the log gets the modules of the process and the regions of the addresses of `stall_addrs`, one time for each stall. 0: no watch. There is no test key. See "The module list at a stall" |
@@ -5536,6 +5676,7 @@ keys that the launcher sets.
 | `fovea_res` | 0 | 1 each eye picture of the Vulkan renderer comes from an outer image and a centre image with their own resolutions. A test key: Shift P. See "Foveated resolution" |
 | `fovea_res_outer_pct`, `fovea_res_center_pct`, `fovea_res_center_deg` | 50, 100, 25 | The resolution of the outer image and of the centre image in percent on each side, and the degrees of the centre on each side. See "Foveated resolution" |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
+| `walk_parts`, `walk_parts_add` | 0, empty | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. See "The parts of the scene walk" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
 | `time_log` | 1 | 1: each 10 s one line in `bwvr.log` with the mean and the most of the frame, the scene walk, the write of the live stream, the wait of the pace and the rest. 0: no line. There is no test key. See "The time log of the mod" |

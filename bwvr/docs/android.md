@@ -178,7 +178,7 @@ Summary:
 | `src/mod/time_log.cpp`, `src/mod/time_log_math.h` | The time log of the mod, and the stats and the rules that the app uses too. No Windows code in the header |
 | `test/controller_math/time_log_checks.h` | The math checks of the cap, of the lines of `/proc` and of the parts of a frame |
 | `android/src/walk_probe.cpp`, `android/src/walk_parts.h` | The GPU parts of the walk (`gpu_parts`): the functions of the app in the table of the renderer, the timestamps at the bounds of the passes, and the counts. `walk_parts.h` has the rules of the parts and no Vulkan code |
-| `test/controller_math/walk_parts_checks.h` | The math checks of `walk_parts.h` |
+| `test/controller_math/gpu_parts_checks.h` | The math checks of `walk_parts.h` |
 
 ## Build the APK
 

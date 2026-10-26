@@ -1,144 +1,149 @@
-// The GPU parts of the walk of the headset app, a test
-// (android/src/walk_parts.h). main.cpp includes this file after Check and
+// The parts of the scene walk, a test: the stack of the open timers, the
+// inclusive and the exclusive time, the window, the order and the lines
+// (src/mod/walk_parts_math.h). main.cpp includes this file after Check and
 // Near, just before main.
 #pragma once
 
-#include "../../android/src/walk_parts.h"
+#include <stdint.h>
+#include <string.h>
+
+#include "../../src/mod/walk_parts_math.h"
 
 namespace walk_parts_checks {
 
-inline bool Close(double a, double b, double tolerance) {
-  return a - b <= tolerance && b - a <= tolerance;
-}
-
 inline void WalkPartsChecks() {
-  namespace wp = walk_parts;
-  printf("\nThe GPU parts of the walk\n");
-  Check(wp::ViewCount(0) == 0 && wp::ViewCount(3) == 2 && wp::ViewCount(2) == 1,
-        "the views of a view mask: 0, 3 and 2 give 0, 2 and 1", wp::ViewCount(3), 2);
-  Check(wp::On(1) && !wp::On(0), "gpu_parts: 1 is on, 0 is off", 0, 0);
+  namespace wp = walk_parts_math;
+  printf("\nThe parts of the scene walk (walk_parts)\n");
 
-  // A WALK: the start, the uploads, a pass of the eyes with 3 draws, a blit,
-  // a pass of the panel with 1 draw, the end.
-  wp::Recording r;
-  uint32_t m = 99;
-  Check(r.Begin(&m) && m == 0, "the begin of a command buffer: timestamp 0", m, 0);
-  r.Upload(2, 100);
-  wp::PassKey eyes;
-  eyes.views = 2;
-  eyes.width = 2200;
-  eyes.height = 1760;
-  eyes.clear = true;
-  eyes.rate = true;
-  Check(r.PassBegin(eyes, &m) && m == 1, "the start of the pass of the eyes: timestamp 1", m, 1);
-  r.Draw();
-  r.Draw();
-  r.Draw();
-  r.Pipeline();
-  r.Sets();
-  r.Writes(4);
-  r.Upload(1, 1);  // in a pass: a count, but the pass stays a pass
-  Check(r.PassEnd(&m) && m == 2, "the end of the pass: timestamp 2", m, 2);
-  r.ReadBack();
-  r.Copy();
-  wp::PassKey panel;
-  panel.width = 2200;
-  panel.height = 1760;
-  Check(r.PassBegin(panel, &m) && m == 3, "the pass of the panel: timestamp 3", m, 3);
-  r.Draw();
-  Check(r.PassEnd(&m) && m == 4, "its end: timestamp 4", m, 4);
-  Check(r.End(&m) && m == 5 && r.Marks() == 6, "the end of the command buffer: timestamp 5, 6 in all",
-        r.Marks(), 6);
-  Check(!r.PartAt(0).pass && r.PartAt(0).gap == wp::kUploads,
-        "part 0 (the start to the pass) has the uploads", r.PartAt(0).gap, wp::kUploads);
-  Check(r.PartAt(1).pass && r.PartAt(1).key.Same(eyes) && r.PartAt(1).draws == 3,
-        "part 1 is the pass of the eyes with 3 draws", static_cast<double>(r.PartAt(1).draws), 3);
-  Check(!r.PartAt(2).pass && r.PartAt(2).gap == wp::kCopies,
-        "part 2 has a read back and a blit: a copy is the more costly kind", r.PartAt(2).gap,
-        wp::kCopies);
-  Check(r.PartAt(3).pass && r.PartAt(3).key.Same(panel) && r.PartAt(3).draws == 1,
-        "part 3 is the pass of the panel", static_cast<double>(r.PartAt(3).draws), 1);
-  Check(!r.PartAt(4).pass && r.PartAt(4).gap == wp::kBarriers,
-        "part 4 (the pass to the end) has only barriers", r.PartAt(4).gap, wp::kBarriers);
-  const wp::Counts& c = r.CountsOf();
-  Check(c.passes == 2 && c.draws == 4 && c.pipelines == 1 && c.sets == 1 && c.writes == 4 &&
-            c.uploads == 3 && c.upload_bytes == 404,
-        "the counts: 2 passes, 4 draws, 1 pipeline, 1 binding, 4 writes, 3 uploads of 404 bytes",
-        static_cast<double>(c.upload_bytes), 404);
+  // A walk of 100 ticks: timer 1 from 10 to 60 with timer 2 inside it from
+  // 20 to 50, and timer 3 from 70 to 90. The return addresses are on a stack
+  // that grows down: the slot of an inner call is below the slot of its
+  // caller.
+  static wp::Stack s;
+  s = wp::Stack();
+  bool pushed = s.Push(0, 0, 0, 0);
+  Check(pushed && s.depth == 1, "the walk opens", s.depth, 1);
+  pushed = s.Push(1, 10, 0x401000, 0x1000);
+  Check(pushed && s.depth == 2, "timer 1 opens", s.depth, 2);
+  pushed = s.Push(2, 20, 0x402000, 0x0F00);
+  Check(pushed && s.depth == 3, "timer 2 opens inside timer 1", s.depth, 3);
+  // Timer 2 is __stdcall with 8 bytes of arguments: the stack place after
+  // its return is its slot + 4 + 8.
+  uint32_t ret = s.Return(50, 0x0F00 + 12);
+  Check(ret == 0x402000 && s.depth == 2, "the return of timer 2 gives its return address",
+        static_cast<double>(ret), 0x402000);
+  ret = s.Return(60, 0x1000 + 4);
+  Check(ret == 0x401000 && s.depth == 1, "the return of timer 1 gives its return address",
+        static_cast<double>(ret), 0x401000);
+  s.Push(3, 70, 0x403000, 0x1000);
+  s.Return(90, 0x1004);
+  s.CloseTop(100);
+  Check(s.depth == 0, "the walk closes", s.depth, 0);
+  Check(s.incl[1] == 50 && s.excl[1] == 20, "timer 1: inclusive 50, exclusive 50 - 30",
+        static_cast<double>(s.excl[1]), 20);
+  Check(s.incl[2] == 30 && s.excl[2] == 30, "timer 2: inclusive and exclusive 30",
+        static_cast<double>(s.excl[2]), 30);
+  Check(s.incl[0] == 100 && s.excl[0] == 30, "the walk: 100, and 30 outside each timer",
+        static_cast<double>(s.excl[0]), 30);
+  int64_t sum = 0;
+  for (int i = 0; i < 4; ++i) sum += s.excl[i];
+  Check(sum == 100, "the sum of the exclusive times is the walk", static_cast<double>(sum), 100);
+  Check(s.calls[1] == 1 && s.calls[2] == 1 && s.calls[3] == 1, "one call of each timer",
+        s.calls[3], 1);
 
-  // THE TOTALS of two walks, and a command buffer of uploads (no walk).
-  wp::Totals t;
-  const double ms1[5] = {0.5, 4.0, 0.25, 1.0, 0.25};
-  const double ms2[5] = {1.5, 6.0, 0.25, 1.0, 0.25};
-  t.Add(r, ms1);
-  t.Add(r, ms2);
-  wp::Recording up;
-  up.Begin(&m);
-  up.Upload(5, 10);
-  up.End(&m);
-  const double ms3[1] = {2.0};
-  t.Add(up, ms3);
-  Check(t.Walks() == 2 && t.Untimed() == 0, "two walks: the command buffer of uploads is no walk",
-        static_cast<double>(t.Walks()), 2);
-  Check(t.Keys() == 2 && t.Key(0).Same(eyes) && t.Key(1).Same(panel),
-        "two keys of passes, in the order they came", t.Keys(), 2);
-  Check(Close(t.Pass(0).ms, 10.0, 1e-9) && Close(t.Pass(0).most, 6.0, 1e-9) &&
-            t.Pass(0).count == 2 && t.Pass(0).draws == 6,
-        "the pass of the eyes: 10 ms in all, 6 at most in a walk, 2 passes, 6 draws",
-        t.Pass(0).ms, 10.0);
-  Check(Close(t.GapStat(wp::kUploads).ms, 4.0, 1e-9) && Close(t.GapStat(wp::kUploads).most, 2.0, 1e-9),
-        "the uploads: 0.5 + 1.5 in the walks and 2 in their own command buffer, 2 at most",
-        t.GapStat(wp::kUploads).ms, 4.0);
-  Check(Close(t.TotalMs(), 17.0, 1e-9),
-        "the sum of each part: 6 + 9 + 2", t.TotalMs(), 17.0);
-  Check(t.CountsOf().uploads == 2 * 3 + 5 && t.CountsOf().draws == 8,
-        "the counts add up over the command buffers", static_cast<double>(t.CountsOf().uploads),
-        11);
-  t.Add(r, nullptr);
-  Check(t.Walks() == 3 && t.Untimed() == 1 && Close(t.Pass(0).ms, 10.0, 1e-9),
-        "a walk with no times counts, and adds no time", static_cast<double>(t.Untimed()), 1);
-  t.Reset();
-  Check(t.Walks() == 0 && t.Pass(0).count == 0 && t.Keys() == 2 && t.CountsOf().draws == 0,
-        "a reset: no walk, and the keys keep their places", t.Keys(), 2);
+  // A timer inside itself: its inclusive time counts one time, its
+  // exclusive time is each part outside the inner call.
+  s = wp::Stack();
+  s.Push(0, 0, 0, 0);
+  s.Push(5, 0, 0x405000, 0x1000);
+  s.Push(5, 10, 0x405100, 0x0F00);
+  s.Return(30, 0x0F04);
+  s.Return(40, 0x1004);
+  s.CloseTop(40);
+  Check(s.incl[5] == 40 && s.excl[5] == 40 && s.calls[5] == 2,
+        "a timer inside itself: inclusive 40 (not 60), exclusive 40, two calls",
+        static_cast<double>(s.incl[5]), 40);
 
-  // THE LIMIT of the timestamps: after 47 the rest is one part, and End has
-  // the last one.
-  wp::Recording big;
-  big.Begin(&m);
-  uint32_t got = 1;
-  for (int i = 0; i < 40; ++i) {
-    if (big.PassBegin(eyes, &m)) ++got;
-    big.Draw();
-    if (big.PassEnd(&m)) ++got;
-  }
-  Check(got == wp::kMostMarks - 1, "47 timestamps before the end of a long command buffer", got,
-        wp::kMostMarks - 1);
-  Check(big.End(&m) && m == wp::kMostMarks - 1 && big.Marks() == wp::kMostMarks,
-        "the end takes the last timestamp", big.Marks(), wp::kMostMarks);
-  const wp::Part& last = big.PartAt(wp::kMostMarks - 2);
-  Check(!last.pass && last.gap == wp::kAfterLimit && last.draws > 0,
-        "the last part is the rest after the limit, with its draws", last.gap, wp::kAfterLimit);
-  Check(big.CountsOf().passes == 40 && big.CountsOf().draws == 40,
-        "the counts have each pass and each draw after the limit too",
-        static_cast<double>(big.CountsOf().draws), 40);
+  // A call that no return closed (a long jump): the return of its caller
+  // finds the caller by its slot, and the lost call has no time.
+  s = wp::Stack();
+  s.Push(0, 0, 0, 0);
+  s.Push(1, 0, 0x401000, 0x1000);
+  s.Push(2, 5, 0x402000, 0x0800);
+  ret = s.Return(20, 0x1004);
+  Check(ret == 0x401000 && s.depth == 1 && s.lost == 1,
+        "a lost call: the return of its caller closes the caller", static_cast<double>(s.lost),
+        1);
+  Check(s.incl[2] == 0 && s.excl[1] == 20, "the lost call has no time, its caller has 20",
+        static_cast<double>(s.excl[1]), 20);
+  Check(s.nest[2] == 0, "the lost call is not open", s.nest[2], 0);
+  // A return with no open call of a function gives 0. The walk itself has
+  // no return address.
+  ret = s.Return(30, 0x2000);
+  Check(ret == 0 && s.depth == 1, "a return with only the walk open gives 0",
+        static_cast<double>(ret), 0);
+  // A full stack does not time the call.
+  s = wp::Stack();
+  bool all = true;
+  for (int i = 0; i < wp::kMaxDepth; ++i) all = all && s.Push(1, i, 1, 0x1000 - 16 * i);
+  Check(all && !s.Push(1, 99, 1, 0x100), "the stack takes kMaxDepth calls and no more", s.depth,
+        wp::kMaxDepth);
 
-  // MORE KEYS than the totals keep: they go into the passes of other keys.
-  wp::Totals many;
-  for (uint32_t k = 0; k < wp::kMostPassKeys + 2; ++k) {
-    wp::Recording one;
-    one.Begin(&m);
-    wp::PassKey key;
-    key.width = 100 + k;
-    one.PassBegin(key, &m);
-    one.PassEnd(&m);
-    one.End(&m);
-    const double ms[3] = {0.0, 1.0, 0.0};
-    many.Add(one, ms);
-  }
-  Check(many.Keys() == wp::kMostPassKeys && many.GapStat(wp::kOtherPasses).count == 2 &&
-            Close(many.GapStat(wp::kOtherPasses).ms, 2.0, 1e-9),
-        "12 keys: 10 keep their own place, 2 go into the passes of other keys",
-        static_cast<double>(many.GapStat(wp::kOtherPasses).count), 2);
+  // The window: two frames, ms_per_tick 0.001 (a clock of 1 MHz).
+  static wp::Window w;
+  w = wp::Window();
+  w.ms_per_tick = 0.001;
+  s = wp::Stack();
+  s.calls[0] = 1;
+  s.incl[0] = 10000;
+  s.excl[0] = 1000;
+  s.calls[1] = 2;
+  s.incl[1] = 6000;
+  s.excl[1] = 6000;
+  s.calls[2] = 10;
+  s.incl[2] = 3000;
+  s.excl[2] = 3000;
+  w.AddFrame(s, 3);
+  s.NewFrame();
+  Check(s.calls[1] == 0 && s.incl[1] == 0, "a new frame has no sums", s.calls[1], 0);
+  s.calls[0] = 1;
+  s.incl[0] = 14000;
+  s.excl[0] = 1000;
+  s.calls[2] = 20;
+  s.incl[2] = 13000;
+  s.excl[2] = 13000;
+  w.AddFrame(s, 3);
+  Check(w.frames == 2, "two frames", static_cast<double>(w.frames), 2);
+  Near("the walk: a mean of 12 ms", w.Ms(w.incl[0].Mean()), 12.0, 1e-9);
+  Near("the walk: the most 14 ms", w.Ms(w.incl[0].most), 14.0, 1e-9);
+  Near("timer 1: a mean of 3 ms (6 and 0)", w.Ms(w.excl[1].Mean()), 3.0, 1e-9);
+  Near("timer 2: a mean of 8 ms", w.Ms(w.excl[2].Mean()), 8.0, 1e-9);
+  Near("the timed functions: 11 ms of 12", w.TimedMs(3), 11.0, 1e-9);
+  Near("the timed calls: a mean of 16 in a frame", w.pairs.Mean(), 16.0, 1e-9);
+  int ids[wp::kMaxTimers];
+  const int n = wp::Order(w, 3, ids);
+  Check(n == 2 && ids[0] == 2 && ids[1] == 1, "the order: timer 2 (8 ms), then timer 1 (3 ms)",
+        ids[0], 2);
+  char line[512];
+  wp::HeadLine(line, sizeof(line), w, 3, 10.0, 100.0);
+  Check(strstr(line, "2 frames with a scene walk") != nullptr &&
+            strstr(line, "12.00 and 14.00") != nullptr &&
+            strstr(line, "11.00 ms (91.7 percent") != nullptr &&
+            strstr(line, "outside each timer 1.00 ms (8.3 percent)") != nullptr &&
+            strstr(line, "16 timed calls in a frame (most 20), at 100 ns for each call about "
+                         "0.00 ms") != nullptr,
+        "the head line has the walk, the share of the timers and their cost", 0, 0);
+  wp::TimerLine(line, sizeof(line), w, 2, 1, 0x007FF610, "the land");
+  Check(strcmp(line, " 1. 0x007FF610 the land: calls in a frame 15.0 (most 20), exclusive ms "
+                     "8.000 and 13.000, inclusive ms 8.000 and 13.000") == 0,
+        "the line of a timer", 0, 0);
+  // The sums are in ticks: a rate that comes at the end of the window (the
+  // TSC) changes each ms of the window.
+  w.ms_per_tick = 0.0005;
+  Near("a rate at the end of the window: the walk 6 ms", w.Ms(w.incl[0].Mean()), 6.0, 1e-9);
+  Near("a rate at the end of the window: the timed functions 5.5 ms", w.TimedMs(3), 5.5, 1e-9);
+  w.Reset();
+  Check(w.frames == 0 && w.ms_per_tick == 0.0005, "a reset keeps the tick", 0, 0);
 }
 
 }  // namespace walk_parts_checks

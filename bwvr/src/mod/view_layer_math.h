@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "../common/input_channel.h"
 #include "../vr/xr_screen.h"
 #include "scene_stream.h"
 
@@ -104,16 +105,28 @@ inline bool ShowsProjection(const ss::ViewBody& v) {
 // of a frame with no kView has no view.
 class PictureView {
  public:
-  void OnFrame() { frame_has_view_ = false; }
+  void OnFrame() {
+    frame_has_view_ = false;
+    frame_has_world_ = false;
+  }
   void OnView(const ss::ViewBody& v) {
     frame_view_ = v;
     frame_has_view_ = true;
+    frame_has_world_ = false;
+  }
+  // The place of the player of the frame after the ViewBody of its kView
+  // (motion_comp_math.h), after OnView.
+  void OnWorld(const input_channel::World& w) {
+    frame_world_ = w;
+    frame_has_world_ = frame_has_view_;
   }
   // ends_frame: stream_split::WalkEndsFrame of the state of the kWalkEnd.
   void OnWalkEnd(bool ends_frame) {
     if (!ends_frame) return;
     has_view_ = frame_has_view_;
     if (has_view_) view_ = frame_view_;
+    has_world_ = frame_has_world_;
+    if (has_world_) world_ = frame_world_;
     ++pictures_;
   }
   // The view of the last picture. False when that picture has none.
@@ -122,14 +135,25 @@ class PictureView {
     *out = view_;
     return true;
   }
+  // The place of the player of the last picture. False when that picture
+  // has none.
+  bool GetWorld(input_channel::World* out) const {
+    if (!has_world_) return false;
+    *out = world_;
+    return true;
+  }
   // The count of the pictures that ended.
   uint64_t Pictures() const { return pictures_; }
 
  private:
   ss::ViewBody frame_view_ = {};
   bool frame_has_view_ = false;
+  input_channel::World frame_world_ = {};
+  bool frame_has_world_ = false;
   ss::ViewBody view_ = {};
   bool has_view_ = false;
+  input_channel::World world_ = {};
+  bool has_world_ = false;
   uint64_t pictures_ = 0;
 };
 

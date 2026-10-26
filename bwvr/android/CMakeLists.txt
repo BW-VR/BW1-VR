@@ -56,6 +56,7 @@ add_library(bwvr_quest SHARED
     src/picture_ring.cpp
     src/menu_paint.cpp
     src/menu_painter.cpp
+    src/motion_comp.cpp
     src/scene_host.cpp
     src/scene_player.cpp
     src/stream_reader.cpp

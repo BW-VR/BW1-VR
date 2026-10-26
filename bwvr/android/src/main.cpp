@@ -134,6 +134,12 @@ struct App {
   uint64_t shown_last = 0;  // the newest frame of the game of the shown picture
   double shown_play_ms = 0.0;  // the start of the play of the shown picture
   double shown_arrival_ms = 0.0;  // the arrival of its newest frame in the app
+  // The other times of the shown picture for the parts of its age
+  // (frame_loop::AgeTimes): its copies into the ring, its take by the session,
+  // and the slot of the input of its frame.
+  double shown_ready_ms = 0.0;
+  double shown_taken_ms = 0.0;
+  uint32_t shown_input_frame = 0;
 
   // THE FRAME LOOP (frame_loop=1, frame_loop.h): from Play to the end of the
   // game the play thread plays the batches into the ring of the pictures.
@@ -238,6 +244,7 @@ void GatherPicture(App* app, uint64_t screen_have, Picture* p) {
   // The values of the projection layer of the frame of this picture, and
   // the quad layers of that frame (stream_layers=1).
   p->have_view = StreamPictureView(&p->view);
+  p->have_world = StreamPictureWorld(&p->world);
   p->layers = app->xr.LayersOn() ? &StreamPictureLayers() : &kNoLayers;
   p->cards = &StreamCardPictures();
   // The panel quads show the panel image of the renderer of this frame.
@@ -282,6 +289,7 @@ bool ShowEyes(App* app, const Picture& p) {
     app->xr.MarkScreenChanged();
   }
   app->xr.SetScreenView(has, p.view);
+  app->xr.SetScreenWorld(has && p.have_world, p.world);
   if (layers.panel && p.panel == VK_NULL_HANDLE && !app->said_no_panel) {
     app->said_no_panel = true;
     AppLog("xr           : the mod gives panel quads, but the renderer has no panel "
@@ -504,6 +512,9 @@ bool PlayLive(App* app) {
   app->shown_last = live->last;
   app->shown_play_ms = live->play_start_ms;
   app->shown_arrival_ms = live->arrival_ms;
+  app->shown_ready_ms = live->last_ms;
+  app->shown_taken_ms = NowMs();
+  app->shown_input_frame = p.have_view ? p.view.input_frame : 0u;
   GameFrames(app, live->last, live->pictures);
   return true;
 }
@@ -562,6 +573,8 @@ double WriteSlot(App* app, const LivePlay& live) {
     p.height = g.height;
     p.have_view = g.have_view;
     p.view = g.view;
+    p.have_world = g.have_world;
+    p.world = g.world;
     s.layers = *g.layers;
     p.layers = &s.layers;
     // The pictures of the cards change seldom: a copy only after a change.
@@ -577,6 +590,7 @@ double WriteSlot(App* app, const LivePlay& live) {
       p.panel = s.panel.image;
     }
   }
+  p.ready_ms = NowMs();
   app->ring.EndWrite(i);
   return waited;
 }
@@ -700,12 +714,17 @@ bool TakePicture(App* app) {
   app->shown_last = p->last_frame;
   app->shown_play_ms = p->play_start_ms;
   app->shown_arrival_ms = p->arrival_ms;
+  app->shown_ready_ms = p->ready_ms;
+  app->shown_taken_ms = NowMs();
+  app->shown_input_frame = p->have_view ? p->view.input_frame : 0u;
   GameFrames(app, p->last_frame, p->pictures);
   return true;
 }
 
 void Save(App* app) {
   app->menu.Store(&app->ini);
+  // motion_comp takes the new value at once (the A/B of the menu).
+  app->xr.Motion().SetMode(app->ini.GetInt("bwvr", "motion_comp", app->xr.Motion().Mode()));
   if (WriteTextFile(app->game.ini_path, app->ini.Text())) {
     app->menu.MarkSaved();
     app->status = "Saved.";
@@ -1616,6 +1635,18 @@ void android_main(android_app* android) {
   }
 
   app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
+  // THE MOTION OF THE STICK (motion_comp.h). The menu of the app changes
+  // motion_comp while the game runs (Save).
+  {
+    MotionComp::Keys k;
+    k.mode = app.ini.GetInt("bwvr", "motion_comp", k.mode);
+    k.depth_cm = app.ini.GetInt("bwvr", "motion_comp_depth_cm", k.depth_cm);
+    k.most_cm = app.ini.GetInt("bwvr", "motion_comp_most_cm", k.most_cm);
+    k.most_deg = app.ini.GetInt("bwvr", "motion_comp_most_deg", k.most_deg);
+    k.most_scale_pct = app.ini.GetInt("bwvr", "motion_comp_most_scale_pct", k.most_scale_pct);
+    k.predict_ms = app.ini.GetInt("bwvr", "motion_comp_predict_ms", k.predict_ms);
+    app.xr.Motion().SetKeys(k);
+  }
   // xr_layer_rect (0 by default) and xr_staging_direct (1 by default): the
   // pixels of the CPU of the layers with the frame loop (XrApp::SetLayerRect,
   // SetStagingDirect).
@@ -1832,12 +1863,17 @@ void android_main(android_app* android) {
       step(XrApp::kStepUi);
       // The input of the mod: after xrSyncActions of BeginFrame, with the
       // views of xrLocateViews at the display time of this frame.
+      float sticks[2][2] = {};  // the sticks that the mod gets in this frame
       if (app.input_live.On()) {
         input_channel::SlotData slot;
         app.xr.InputSlot(&slot);
         if (app.game_on) {
           play_rules::MaskInput(&slot, app.menu_over_game);
           if (!app.menu_over_game) play_rules::ApplyMenuBits(&slot, app.menu_step);
+        }
+        for (int h = 0; h < 2; ++h) {
+          sticks[h][0] = slot.hands[h].stick[0];
+          sticks[h][1] = slot.hands[h].stick[1];
         }
         app.input_live.Write(&slot);
         app.input_live.PlayPulses(&app.xr);
@@ -1855,7 +1891,19 @@ void android_main(android_app* android) {
         step(XrApp::kStepPlay);
       }
       // THE AGE of the shown picture at the display time of this frame.
-      if (app.game_on && app.first_frame) app.xr.ShownPicture(app.shown_play_ms, app.shown_arrival_ms, fresh);
+      if (app.game_on && app.first_frame) {
+        app.xr.ShownPicture(app.shown_play_ms, app.shown_arrival_ms, fresh);
+        app.xr.ShownParts(app.input_live.SlotMs(app.shown_input_frame), app.shown_ready_ms,
+                          app.shown_taken_ms);
+      }
+      // THE PLACE OF THE PLAYER NOW for the views of this frame (motion_comp,
+      // docs/android.md, "The motion of the stick"): the newest place that
+      // the mod wrote into the input channel, after the take of the picture.
+      {
+        input_channel::World world;
+        const bool has = app.input_live.ReadWorld(&world);
+        app.xr.Motion().FrameNow(has, world, sticks, app.xr.DisplayTime());
+      }
       UpdateKeyboard(&app);
       bool show_cursor = false;
       float cursor[3] = {0, 0, 0};

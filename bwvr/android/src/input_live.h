@@ -34,8 +34,19 @@ class InputLive {
   void WriteNoInput();
   void Stop();
   bool On() const { return file_ != nullptr; }
+  // THE PLACE OF THE PLAYER that the mod wrote last (input_channel::World,
+  // docs/android.md, "The motion of the stick"). False when the channel is
+  // not open or each read was torn.
+  bool ReadWorld(input_channel::World* out) const;
+  // The time (CLOCK_MONOTONIC, ms) of the write of the slot with this frame
+  // (SlotData::frame), for the parts of the age of a picture. 0 when the
+  // slot is not among the last kSlotTimes slots.
+  double SlotMs(uint32_t frame) const;
+  static constexpr uint32_t kSlotTimes = 256;  // a power of two
 
  private:
+  uint32_t slot_frame_[kSlotTimes] = {};
+  double slot_ms_[kSlotTimes] = {};
   input_channel::File* file_ = nullptr;
   int fd_ = -1;
   std::string path_;

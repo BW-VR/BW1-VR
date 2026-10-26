@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "../../src/common/input_channel.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/screen_quad_math.h"
@@ -40,6 +41,10 @@ void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result);
 // frame of that picture (src/mod/view_layer_math.h, PictureView). False when
 // the frame of that picture has none.
 bool StreamPictureView(scene_stream::ViewBody* out);
+// The place of the player in the world of the frame of that picture (the
+// World after the ViewBody of its kView, motion_comp_math.h). False when the
+// frame of that picture has none.
+bool StreamPictureWorld(input_channel::World* out);
 
 // THE QUAD LAYERS OF THE LAST PICTURE: the cards, the panel quads and the cut
 // scene window of the frame of that picture (src/mod/quad_layer_math.h,

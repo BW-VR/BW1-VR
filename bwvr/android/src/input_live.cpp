@@ -56,6 +56,10 @@ bool InputLive::Start(const std::string& path, uint32_t test_pulse) {
   }
   Write(&none);
   no_input_ = true;
+  // The place of the player of an earlier run is not for now. The mod of this
+  // run starts after the app, so the app can write the slot of the mod here.
+  const ic::World no_world = {};
+  ic::WriteWorld(&file_->world, no_world);
   // A pulse of an earlier run is not for now.
   const uint32_t old = ic::DropOldEvents(file_);
   AppLog("input        : input_live=1. Each frame of the session writes the "
@@ -70,6 +74,10 @@ void InputLive::Write(ic::SlotData* slot) {
   if (file_ == nullptr) return;
   slot->frame = ++slots_;
   ic::Write(&file_->slot, *slot);
+  timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  slot_frame_[slots_ & (kSlotTimes - 1)] = slots_;
+  slot_ms_[slots_ & (kSlotTimes - 1)] = now.tv_sec * 1000.0 + now.tv_nsec / 1e6;
   last_ = *slot;
   no_input_ = false;
   if (test_pulse_ > 0 && slots_ == test_pulse_) {
@@ -146,6 +154,17 @@ void InputLive::PlayPulses(XrApp* xr) {
              events[i].frame);
     }
   }
+}
+
+bool InputLive::ReadWorld(ic::World* out) const {
+  if (file_ == nullptr) return false;
+  return ic::ReadWorld(&file_->world, out, 8);
+}
+
+double InputLive::SlotMs(uint32_t frame) const {
+  if (frame == 0) return 0.0;
+  const uint32_t i = frame & (kSlotTimes - 1);
+  return slot_frame_[i] == frame ? slot_ms_[i] : 0.0;
 }
 
 bool InputLive::PushKey(uint32_t code) {

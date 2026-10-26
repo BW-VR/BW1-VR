@@ -583,6 +583,10 @@ struct WalkCheck {
 } g_walk_check;
 uint64_t g_walks = 0;
 uint64_t g_walk_moves = 0;
+// The move of the waist point by the walk of this frame, in game units a
+// second, and the push of the stick of that move (TabletopGodWalkRate).
+float g_walk_rate[3] = {0.0f, 0.0f, 0.0f};
+float g_walk_rate_share = 0.0f;
 double g_walk_seconds = 0.0;
 int g_walk_logs = 0;
 const int kMaxWalkLogs = 120;
@@ -2089,6 +2093,9 @@ void StopWalk(const char* cause, bool view_stays) {
 // The log has one line for the start of a walk, one for its end, and one for
 // the check kWalkCheckFrames frames later.
 void ApplyGodWalk(double frame_seconds) {
+  // A frame with no move of the walk has no speed of the walk.
+  g_walk_rate[0] = g_walk_rate[1] = g_walk_rate[2] = 0.0f;
+  g_walk_rate_share = 0.0f;
   const bool fresh = g_walk.fresh;
   const float push[2] = {fresh ? g_walk.push[0] : 0.0f,
                          fresh ? g_walk.push[1] : 0.0f};
@@ -2317,6 +2324,14 @@ void ApplyGodWalk(double frame_seconds) {
   }
   // The head moves over the land, and a hill there stays below it.
   g_walk.sunk += ZoomClearHead(&next, room, head);
+  // The speed of the move of this frame over the land, for the motion of
+  // the stick in the headset app (TabletopGodWalkRate).
+  if (seconds > 0.0f) {
+    for (int i = 0; i < 3; ++i) {
+      g_walk_rate[i] = (next.center[i] - pose.center[i]) / seconds;
+    }
+    g_walk_rate_share = sqrtf(push[0] * push[0] + push[1] * push[1]);
+  }
   for (int i = 0; i < 3; ++i) g_center[i] = next.center[i];
   g_scale = next.scale;
   Derive();
@@ -2818,6 +2833,8 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
   g_live = false;
   g_owned = false;
   g_god_hold = false;
+  g_walk_rate[0] = g_walk_rate[1] = g_walk_rate[2] = 0.0f;
+  g_walk_rate_share = 0.0f;
   if (!g_installed || !g_on) return false;
   // The Temple and the other rooms draw from a camera of their own.
   if (!GameCameraPlain()) {
@@ -3692,6 +3709,17 @@ int TabletopGodMoveStick() {
 }
 
 bool TabletopMoveAllowed() { return (CameraFeatures() & kFeatureDrag) != 0; }
+
+// THE SPEED OF THE WALK of the main camera call of this frame, for the motion
+// of the stick in the headset app (motion_comp_math.h): the move of the
+// waist point in game units a second, and the push of the stick, 0 to 1.
+// False when the walk did not move the view in this frame.
+bool TabletopGodWalkRate(float velocity[3], float* share) {
+  if (!(g_walk_rate_share > 0.0f) || !g_live) return false;
+  for (int i = 0; i < 3; ++i) velocity[i] = g_walk_rate[i];
+  *share = g_walk_rate_share;
+  return true;
+}
 
 bool TabletopGodWalk(const float push[2], const float* aim, float boost,
                      float climb, bool path) {

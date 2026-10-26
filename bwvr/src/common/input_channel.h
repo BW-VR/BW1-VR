@@ -37,6 +37,14 @@
 // 1: a mod that does not read the keys and an app that writes none use the
 // file as before.
 //
+// THE PLACE OF THE PLAYER (World, docs/android.md, "The motion of the
+// stick"). A second slot goes the other way: the mod writes the place of the
+// player in the world of each frame (motion_comp_math.h), and the session of
+// the app reads the newest one. The rules are those of the slot, with the mod
+// as the writer. It is in the tail of the file, so the version stays 1: an
+// app that does not read it and a mod that does not write it use the file as
+// before, and a slot that the mod never wrote has no kWorldValid.
+//
 // THE BARRIERS. x86 has TSO, but in the headset the mod runs in Box64 on
 // ARM, and ARM has a weak memory model. The interlocked calls of MSVC are
 // lock cmpxchg and xchg, which are full barriers that Box64 translates with
@@ -62,6 +70,7 @@ constexpr uint32_t kEventsOffset = 1024;
 constexpr uint32_t kEvents = 64;  // a power of two
 constexpr uint32_t kKeysOffset = 2048;
 constexpr uint32_t kKeys = 32;  // a power of two
+constexpr uint32_t kWorldOffset = 2304;  // after the ring of the keys
 constexpr uint32_t kProfileChars = 64;
 
 // The bits of Hand::flags.
@@ -153,6 +162,38 @@ struct KeyEvent {
 };
 static_assert(sizeof(KeyEvent) == 8, "KeyEvent");
 
+// The bits of World::flags.
+constexpr uint32_t kWorldValid = 1u << 0;  // the map is the map of the main camera call of the frame
+constexpr uint32_t kWorldWalk = 1u << 1;   // the walk with the stick moved the view in the frame
+
+// THE PLACE OF THE PLAYER in the world of one frame of the mod
+// (motion_comp_math.h, Map): world = linear * local + offset, from meters of
+// the LOCAL space to game units. The kView of the frame in the live stream
+// has the same values after its ViewBody (scene_stream.h).
+struct World {
+  uint32_t flags;          // kWorldValid, kWorldWalk
+  uint32_t input_frame;    // SlotData::frame of the input of the frame
+  uint64_t frame;          // the frame of the controllers
+  int64_t display_time;    // ns, the display time of the input of the frame
+  float linear[9];         // row major
+  float offset[3];
+  float walk_velocity[3];  // game units a second: the move of offset by the walk of the frame
+  int32_t walk_hand;       // the hand of the stick of the walk: 0 left, 1 right, -1 none
+  float walk_share;        // the push of that stick in the frame, 0 to 1 (walk_math::Push)
+  float walk_dead;         // the dead zone and the full push of that stick
+  float walk_full;
+  uint32_t reserved;
+};
+static_assert(offsetof(World, frame) == 8 && offsetof(World, linear) == 24, "World");
+static_assert(offsetof(World, walk_hand) == 84 && sizeof(World) == 104, "World size");
+
+struct WorldSlot {
+  uint32_t seq;  // odd while the mod writes
+  uint32_t pad;
+  World data;
+};
+static_assert(sizeof(WorldSlot) == 112, "WorldSlot");
+
 struct Head {
   uint32_t magic;          // kMagic when the head is whole
   uint32_t version;        // kVersion
@@ -186,12 +227,14 @@ struct File {
   uint8_t pad[kEventsOffset - kSlotOffset - sizeof(Slot)];
   Event events[kEvents];  // the keys follow the events at once
   KeyEvent keys[kKeys];
-  uint8_t tail[kFileBytes - kKeysOffset - kKeys * sizeof(KeyEvent)];
+  WorldSlot world;  // after the keys at once
+  uint8_t tail[kFileBytes - kWorldOffset - sizeof(WorldSlot)];
 };
 static_assert(sizeof(File) == kFileBytes, "File");
 static_assert(offsetof(File, slot) == kSlotOffset, "File slot");
 static_assert(offsetof(File, events) == kEventsOffset, "File events");
 static_assert(offsetof(File, keys) == kKeysOffset, "File keys");
+static_assert(offsetof(File, world) == kWorldOffset, "File world");
 
 // THE INDICES between the processes.
 inline uint32_t LoadAcquire(const uint32_t* p) {
@@ -278,6 +321,30 @@ inline bool Read(const Slot* s, SlotData* out, int tries, uint32_t* torn) {
   for (int i = 0; i < tries; ++i) {
     if (TryRead(s, out)) return true;
     ++*torn;
+  }
+  return false;
+}
+
+// THE PLACE OF THE PLAYER: the mod writes, the app reads, with the rules of
+// the slot.
+// A sequence that a writer of an earlier run left odd becomes odd again, so
+// the next even sequence is whole.
+inline void WriteWorld(WorldSlot* s, const World& data) {
+  const uint32_t odd = (s->seq + 1u) | 1u;
+  StoreRelease(&s->seq, odd);
+  FullFence();
+  memcpy(&s->data, &data, sizeof(data));
+  StoreRelease(&s->seq, odd + 1u);  // even, after the data
+}
+// Up to tries tries. False when each try was torn or the writer writes now,
+// and then *out is not whole.
+inline bool ReadWorld(const WorldSlot* s, World* out, int tries) {
+  for (int i = 0; i < tries; ++i) {
+    const uint32_t begin = LoadAcquire(&s->seq);
+    if ((begin & 1u) != 0) continue;
+    memcpy(out, &s->data, sizeof(*out));
+    FullFence();
+    if (LoadAcquire(&s->seq) == begin) return true;
   }
   return false;
 }

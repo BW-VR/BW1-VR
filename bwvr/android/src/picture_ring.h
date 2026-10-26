@@ -20,6 +20,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include "../../src/common/input_channel.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/screen_quad_math.h"
@@ -54,6 +55,9 @@ struct Picture {
   uint32_t height = 0;
   bool have_view = false;
   scene_stream::ViewBody view = {};  // view.frame also when have_view is false
+  // The place of the player in the world of the frame (motion_comp_math.h).
+  bool have_world = false;
+  input_channel::World world = {};
   const quad_layer_math::FrameLayers* layers = nullptr;
   const quad_layer_math::AppPictures* cards = nullptr;
   VkImage panel = VK_NULL_HANDLE;  // the panel image of the picture, or none
@@ -66,6 +70,7 @@ struct Picture {
   uint64_t pictures = 0;
   double play_start_ms = 0.0;  // CLOCK_MONOTONIC at the start of the play of its batch
   double arrival_ms = 0.0;     // and at the arrival of the newest frame of the batch
+  double ready_ms = 0.0;       // and at the submit of its copies into a slot of the ring
 };
 
 class PictureRing {

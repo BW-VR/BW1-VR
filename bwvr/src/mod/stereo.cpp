@@ -85,6 +85,7 @@
 #include "scene_sample.h"
 #include "ui_panel.h"
 #include "view_layer_math.h"
+#include "motion_world.h"
 #include "vk_stream.h"
 #include "xr_input.h"
 #include "xr_layers.h"
@@ -1564,7 +1565,14 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     if (!StereoDisplayTime(&layer.display_time, &period)) layer.display_time = 0;
     layer.input_frame = channel ? XrInputSlotFrame() : 0u;
     const scene_stream::ViewBody view = view_layer_math::MakeView(layer);
-    if (channel && VkStreamOn()) VkStreamView(view);
+    // The place of the player in the world of this frame goes with the view
+    // and into the input channel (motion_world.h).
+    input_channel::World world;
+    MotionWorldOfFrame(layer.frame, layer.input_frame, layer.display_time,
+                       view_layer_math::ShowsProjection(view) && layer.render_pose,
+                       &world);
+    if (channel && VkStreamOn()) VkStreamView(view, &world);
+    if (channel) XrInputWriteWorld(world);
     XrInputRecordView(view, to_headset ? 0 : (channel ? 2 : 1));
   }
   // FOVEATED RENDERING: the gaze of an eye tracker is the centre of the

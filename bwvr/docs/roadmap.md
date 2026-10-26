@@ -1180,6 +1180,18 @@ that moves while the Hand takes it.
   `controllers.md`, 5.7). No headset session yet. Only a headset shows how
   the choice of the press feels, and whether the boost of 5 times is a good
   speed.
+- **N28. The motion of the stick in the headset app: check it in a
+  headset.** Each picture of the game shows at the place in the world where
+  the game drew it, seen from the newest place of the player, and with
+  `motion_comp=2` that place goes on with the walk of the stick to the
+  display time (`android.md`, "The motion of the stick"). The time log has
+  the parts of the age of a new picture ("The time log of the app"). Next in
+  the headset: a walk with the stick with `motion_comp` 0, 1 and 2 (the row
+  "Picture follows the stick (headset app)"), `motion_comp_depth_cm` 100 and
+  0, and the line of the parts of the age, to find the part that makes the
+  age of about 85 ms. Not built: the depth of the picture for the runtime
+  (`XR_KHR_composition_layer_depth`), which needs the swapchains of the
+  depth and a copy of the depth in the ring.
 
 ### The repo, the release and the tools
 

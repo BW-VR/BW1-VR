@@ -998,6 +998,7 @@ double XrApp::DisplayTimeMs() const {
 }
 
 void XrApp::ShownPicture(double play_start_ms, double arrival_ms, bool fresh) {
+  age_pending_ = false;
   if (!time_log_ || play_start_ms <= 0.0) return;
   const double display = DisplayTimeMs();
   if (display < 0.0) return;
@@ -1005,6 +1006,18 @@ void XrApp::ShownPicture(double play_start_ms, double arrival_ms, bool fresh) {
   if (!fresh) return;
   times_.latency_ms.Add(display - play_start_ms);
   if (arrival_ms > 0.0) times_.arrival_ms.Add(display - arrival_ms);
+  age_times_ = frame_loop::AgeTimes();
+  age_times_.arrival = arrival_ms;
+  age_times_.play = play_start_ms;
+  age_times_.display = display;
+  age_pending_ = true;
+}
+
+void XrApp::ShownParts(double input_ms, double ready_ms, double taken_ms) {
+  if (!age_pending_) return;
+  age_times_.input = input_ms;
+  age_times_.ready = ready_ms;
+  age_times_.taken = taken_ms;
 }
 
 std::vector<XrApp::Layer*> XrApp::StagingLayers() {
@@ -1269,6 +1282,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (CopyScreen(&eyes_, eye)) {
         shown_view_[eye] = newest_view_;
         view_shown_[eye] = view_newest_;
+        motion_.TakeNewest(eye);
         if (eye == 0) {
           shown_layers_ = newest_layers_;
           shown_frame_ = newest_frame_;
@@ -1281,21 +1295,37 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     PartTo(kPartRest);
   }
   if (world) {
+    // THE POSES OF THE VIEWS: the poses of the picture of each eye, with the
+    // difference of the place of the player since its frame (motion_comp).
+    float pose_position[2][3], pose_orientation[2][4];
+    for (int eye = 0; eye < 2; ++eye) {
+      const scene_stream::ViewEye& e = shown_view_[eye].eyes[eye];
+      const scene_stream::ViewEye* both = shown_view_[eye].eyes;
+      const float head[3] = {(both[0].position[0] + both[1].position[0]) * 0.5f,
+                             (both[0].position[1] + both[1].position[1]) * 0.5f,
+                             (both[0].position[2] + both[1].position[2]) * 0.5f};
+      memcpy(pose_position[eye], e.position, sizeof(pose_position[eye]));
+      memcpy(pose_orientation[eye], e.orientation, sizeof(pose_orientation[eye]));
+      motion_.View(eye, head, pose_position[eye], pose_orientation[eye]);
+    }
     // One line for each new picture of the layer: the frame of the mod of its
-    // values.
+    // values, and the difference of the place of the player.
     if (!said_projection_ || shown_view_[0].frame != said_frame_) {
       said_frame_ = shown_view_[0].frame;
       PartTo(kPartLog);
-      AppLog("xr           : the projection layer shows the picture of frame %llu",
-             static_cast<unsigned long long>(said_frame_));
+      char motion[320];
+      motion_.Describe(motion, sizeof(motion));
+      AppLog("xr           : the projection layer shows the picture of frame %llu%s",
+             static_cast<unsigned long long>(said_frame_), motion);
       PartTo(kPartRest);
     }
     for (int eye = 0; eye < 2; ++eye) {
       const scene_stream::ViewEye& e = shown_view_[eye].eyes[eye];
       XrCompositionLayerProjectionView& v = views[eye];
-      v.pose.position = {e.position[0], e.position[1], e.position[2]};
-      v.pose.orientation = {e.orientation[0], e.orientation[1], e.orientation[2],
-                            e.orientation[3]};
+      const float* p = pose_position[eye];
+      const float* q = pose_orientation[eye];
+      v.pose.position = {p[0], p[1], p[2]};
+      v.pose.orientation = {q[0], q[1], q[2], q[3]};
       v.fov = {e.fov[0], e.fov[1], e.fov[2], e.fov[3]};
       v.subImage.swapchain = eyes_.layer[eye].swapchain;
       v.subImage.imageRect.offset = {0, 0};
@@ -1678,6 +1708,18 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   LockQueue();
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
   UnlockQueue();
+  // THE PARTS OF THE AGE of a new picture of this frame, and the lines of
+  // the motion of the stick and of the parts each 10 s.
+  if (time_log_) {
+    const double now = ClockMs();
+    if (age_pending_) {
+      age_pending_ = false;
+      age_times_.ended = now;
+      age_.Add(age_times_);
+    }
+    age_.Tick(now, true);
+    motion_.Tick(now, true);
+  }
   if (time_log_ && wait_end_ms_ >= 0.0) {
     const double now = ClockMs();
     times_.end.Add(now - end_start);

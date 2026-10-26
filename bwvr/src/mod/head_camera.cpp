@@ -98,6 +98,7 @@ const uintptr_t kBillboardHeadingOffset = 0x008C78D8;
 
 // head_pose.cpp
 bool HeadPoseCurrent(float matrix_out[9], float translation_out[3]);
+bool HeadPoseOrigin(float position_out[3], float rotation_out[4]);
 // tabletop.cpp: the table takes the main call of a frame. It gives the camera
 // to put the head on, and the gain for the lean. See docs/tabletop.md, "The table camera".
 bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
@@ -157,6 +158,14 @@ float Length(const float a[3]) { return sqrtf(Dot(a, a)); }
 // the player looks around, the Hand and the subtitles, stays put in this.
 float g_stage_basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 bool g_have_stage = false;
+// The camera with no head, the game units of a meter of the lean and the
+// recenter pose of the main call of the frame g_map_frame, for the map of the
+// room to the world (motion_comp_math.h).
+float g_map_camera[3] = {0.0f, 0.0f, 0.0f};
+float g_map_units = 1.0f;
+float g_map_origin[3] = {0.0f, 0.0f, 0.0f};
+float g_map_rotation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+uint64_t g_map_frame = 0xFFFFFFFFFFFFFFFFull;
 // Whether the Hand stays where it is in the room when the player turns their
 // head, rather than sweeping across the world with the view. pointer_map.cpp
 // does the work, by moving the cursor. See HeadCameraSetHandAnchored.
@@ -594,6 +603,13 @@ void PlaceCamera(const float* position, const float* focus, bool intro,
     ++g_main_serial;
     memcpy(g_stage_basis, basis_level, sizeof(g_stage_basis));
     g_have_stage = true;
+    // The map of the room to the world of this frame (HeadCameraWorldMap),
+    // with the origin of the lean of this call.
+    memcpy(g_map_camera, position, sizeof(g_map_camera));
+    g_map_units = lean_gain * HeadPoseScale();
+    g_map_frame = HeadPoseOrigin(g_map_origin, g_map_rotation)
+                      ? g_frame
+                      : 0xFFFFFFFFFFFFFFFFull;
     memcpy(g_frame_head, h, sizeof(g_frame_head));
     memcpy(g_frame_lean, lean, sizeof(g_frame_lean));
     g_frame_head_frame = g_frame;
@@ -816,6 +832,24 @@ void HeadCameraRoomGameView(bool on) { g_room_game_view = on; }
 // The main camera call of this frame came, with the head or in a flat frame.
 // Asked before the scene walk.
 bool HeadCameraFrameRecorded() { return g_recorded_frame == g_frame; }
+
+// THE MAP OF THE ROOM TO THE WORLD of this frame (motion_comp_math.h,
+// MakeMap): the camera of the main call with no head, the levelled basis of
+// the room, the game units of a meter of the lean (the lean gain times
+// HeadPoseScale) and the recenter pose of head_pose.cpp at the main call.
+// The camera of the main call is camera + basis * lean * gain. False before
+// the main call of this frame, in a flat frame of the cut scene window, and
+// when the head had no recenter pose at the main call.
+bool HeadCameraWorldMap(float camera[3], float basis[9], float* units, float origin[3],
+                        float rotation[4]) {
+  if (g_map_frame != g_frame || CutsceneWindowFlat()) return false;
+  for (int i = 0; i < 3; ++i) camera[i] = g_map_camera[i];
+  for (int i = 0; i < 9; ++i) basis[i] = g_stage_basis[i];
+  for (int i = 0; i < 3; ++i) origin[i] = g_map_origin[i];
+  for (int i = 0; i < 4; ++i) rotation[i] = g_map_rotation[i];
+  *units = g_map_units;
+  return true;
+}
 
 
 void HeadCameraInstall() {

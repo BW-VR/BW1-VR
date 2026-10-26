@@ -520,6 +520,11 @@ void XrInputHaptic(int index, float amplitude, float seconds) {
 
 uint32_t XrInputSlotFrame() { return g_have_slot ? g_slot_frame : 0u; }
 
+void XrInputWriteWorld(const ic::World& world) {
+  if (g_chan == nullptr) return;
+  ic::WriteWorld(&g_chan->world, world);
+}
+
 uint32_t XrInputTakeKeys(uint32_t* codes, uint32_t max) {
   if (g_chan == nullptr || max == 0) return 0;
   ic::KeyEvent keys[ic::kKeys];

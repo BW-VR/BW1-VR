@@ -27,7 +27,9 @@
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/time_log_math.h"
 #include "../../src/mod/vk_core.h"
+#include "frame_loop.h"
 #include "gpu.h"
+#include "motion_comp.h"
 
 // The state of the controllers of one frame. Index 0 is the left hand, 1
 // the right hand.
@@ -156,6 +158,10 @@ class XrApp {
   // newest frame came at arrival_ms (CLOCK_MONOTONIC, 0: not known), and
   // fresh: this frame shows it first.
   void ShownPicture(double play_start_ms, double arrival_ms, bool fresh);
+  // The other times of a new picture of this frame (frame_loop::AgeTimes),
+  // after ShownPicture: the parts of its age go into the time log at the end
+  // of xrEndFrame.
+  void ShownParts(double input_ms, double ready_ms, double taken_ms);
   void SetTimeLog(bool on) { time_log_ = on; }
   // THE PIXELS OF THE CPU of the layers with the frame loop (docs/android.md,
   // "The frame loop"), before Start.
@@ -267,6 +273,16 @@ class XrApp {
   // none, and then it shows on the stereo screen.
   // view.frame is the frame of the mod of the picture also when has is false.
   void SetScreenView(bool has, const scene_stream::ViewBody& view);
+  // THE MOTION OF THE STICK (motion_comp.h): the place of the player of the
+  // newest picture (after SetScreenView), and the keys and the newest place
+  // of the mod for each frame of the session.
+  void SetScreenWorld(bool has, const input_channel::World& world) {
+    motion_.SetNewest(has, world);
+  }
+  MotionComp& Motion() { return motion_; }
+  // The display time of this frame of the session (ns, the clock of the
+  // runtime).
+  int64_t DisplayTime() const { return frame_.predictedDisplayTime; }
   // xr_copy_on_change (1 is the default): true, a layer gets a new image of
   // its swapchain only when its picture changed, and the runtime shows the
   // last released image. false, each frame copies each layer. Before Start.
@@ -704,4 +720,10 @@ class XrApp {
   VkImage screen_source_ = VK_NULL_HANDLE;
   uint32_t source_width_ = 0;
   uint32_t source_height_ = 0;
+  // The motion of the stick, and the parts of the age of the new picture of
+  // this frame (age_pending_) for the time log.
+  MotionComp motion_;
+  PictureAge age_;
+  frame_loop::AgeTimes age_times_;
+  bool age_pending_ = false;
 };

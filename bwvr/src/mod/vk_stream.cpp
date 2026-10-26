@@ -818,9 +818,18 @@ void VkStreamPanelBind(bool panel) {
   g_writer.Record(ss::kPanelBind, &v, sizeof(v));
 }
 
-void VkStreamView(const ss::ViewBody& view) {
+void VkStreamView(const ss::ViewBody& view, const input_channel::World* world) {
   if (!g_unit_open) return;
-  g_writer.Record(ss::kView, &view, sizeof(view));
+  if (world == nullptr) {
+    g_writer.Record(ss::kView, &view, sizeof(view));
+    return;
+  }
+  // The place of the player of the frame after the ViewBody (scene_stream.h,
+  // kView). A reader that reads only the ViewBody reads the record as before.
+  uint8_t body[sizeof(view) + sizeof(*world)];
+  memcpy(body, &view, sizeof(view));
+  memcpy(body + sizeof(view), world, sizeof(*world));
+  g_writer.Record(ss::kView, body, sizeof(body));
 }
 
 void VkStreamSetLayers(bool on) { g_end_at_layers = on; }

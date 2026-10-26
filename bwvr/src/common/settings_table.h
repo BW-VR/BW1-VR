@@ -335,6 +335,16 @@ inline const Setting kSettings[] = {
      "online features have no server now. In the headset this check can "
      "stop the game on the loading screen. On: the mod tells the game at "
      "once that there is no connection. Off: the game does its own check."},
+    {kValues, "motion_comp", "Picture follows the stick (headset app)",
+     "Off=0|Newest place=1|Newest place and walk=2", 2,
+     "Only the headset app uses this. When the game gives a picture late, "
+     "the headset shows a picture again. Off: that picture shows from the "
+     "place of the player when the game drew it, so a walk with the stick "
+     "stutters. Newest place: the picture shows at its place in the world, "
+     "seen from the newest place of the player that the mod gave. Newest "
+     "place and walk: the same, and that place goes on with the walk of the "
+     "stick to the time when the headset shows the picture. The menu of the "
+     "app changes it at once with Save."},
     {kBool, "test_keys", "Test keys", nullptr, 0,
      "Turns on the keys for tests. Each key changes one rule of the mod "
      "while you play, so that you can compare, and the readme lists them. "

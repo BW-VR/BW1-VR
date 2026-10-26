@@ -170,7 +170,10 @@ struct SurfaceBody {
 // src/vr/xr_screen.h): SetProjection, SetRenderHalfAngle, SetRenderPose,
 // the size of the eye pictures, and the angles of view that the layer gets
 // from them (LayerFov). The record is in the frame of its eye pictures: after
-// kFrame and before the first walk.
+// kFrame and before the first walk. After the ViewBody the record can have
+// an input_channel::World, the place of the player in the world of the frame
+// (motion_comp_math.h). A reader that takes only the ViewBody reads the
+// record as before.
 //
 // The bits of ViewBody::flags.
 constexpr uint32_t kViewProjection = 1u << 0;  // SetProjection(true): a projection layer, not a screen

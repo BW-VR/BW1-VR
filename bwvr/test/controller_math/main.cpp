@@ -3601,6 +3601,7 @@ void CreatureChecks() {
 #include "stall_checks.h"
 #include "wow64_cpu_checks.h"
 #include "frame_loop_checks.h"
+#include "motion_comp_checks.h"
 #include "gpu_parts_checks.h"
 #include "update_checks.h"
 #include "refresh_rate_checks.h"
@@ -4060,6 +4061,8 @@ int main() {
   large_block_checks::LargeBlockChecks();
   render_chain_checks::RenderChainChecks();
   sse_parts_checks::SsePartsChecks();
+  // Last: it recenters the head of head_pose.cpp.
+  motion_comp_checks::MotionCompChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

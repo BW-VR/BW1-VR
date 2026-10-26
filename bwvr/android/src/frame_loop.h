@@ -188,6 +188,44 @@ inline bool OnceSetValid(uint32_t set_width, uint32_t set_height, uint64_t set_c
 // shows a new picture, one more in each later frame with the same picture.
 inline uint64_t NextAge(uint64_t age, bool fresh) { return fresh ? 0 : age + 1; }
 
+// THE PARTS OF THE AGE OF A NEW PICTURE (the time log, docs/android.md, "The
+// time log of the app"). The times of one picture on CLOCK_MONOTONIC in ms,
+// 0 where a time is not known:
+//   input    the app wrote the slot of the input channel that the frame of
+//            the mod read
+//   arrival  the newest frame of the picture came to the reader of the app
+//   play     the play of its batch started
+//   ready    the copies of the picture into a slot of the ring went to the
+//            GPU (the old loop: the end of the play)
+//   taken    the session took the picture
+//   ended    xrEndFrame of the frame that shows it first returned
+//   display  the display time of that frame
+struct AgeTimes {
+  double input = 0.0;
+  double arrival = 0.0;
+  double play = 0.0;
+  double ready = 0.0;
+  double taken = 0.0;
+  double ended = 0.0;
+  double display = 0.0;
+};
+// The parts from one time to the next: 0 the game (the input to the
+// arrival: the frame of the mod, its walks and the handover), 1 the reader
+// (to the play), 2 the play (to the copies into the slot), 3 the ring (the
+// GPU and the wait for a frame of the session), 4 the session (to the end of
+// xrEndFrame), 5 the runtime (to the display time). A part with a time that
+// is not known is -1. The result is the age from the input to the display
+// time, or -1 when one of the two is not known.
+constexpr int kAgeParts = 6;
+inline double AgeParts(const AgeTimes& t, double parts[kAgeParts]) {
+  const double at[kAgeParts + 1] = {t.input, t.arrival, t.play, t.ready,
+                                    t.taken, t.ended,   t.display};
+  for (int i = 0; i < kAgeParts; ++i) {
+    parts[i] = at[i] > 0.0 && at[i + 1] > 0.0 ? at[i + 1] - at[i] : -1.0;
+  }
+  return t.input > 0.0 && t.display > 0.0 ? t.display - t.input : -1.0;
+}
+
 // THE QUEUE AT THE GPU (frame_loop_gpu_depth of bwvr.ini, 1 by default). The
 // play thread starts the play of a new picture only while fewer than `depth`
 // pictures are not finished on the GPU. Until then the reader keeps the

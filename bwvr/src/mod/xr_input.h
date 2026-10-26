@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 
+#include "../common/input_channel.h"
 #include "../vr/xr_screen.h"
 #include "scene_stream.h"
 
@@ -80,6 +81,10 @@ void XrInputHaptic(int index, float amplitude, float seconds);
 
 // The frame of the slot of the last latch (SlotData::frame). 0 with no slot.
 uint32_t XrInputSlotFrame();
+
+// THE PLACE OF THE PLAYER of this frame (motion_world.h) into the slot of the
+// mod in the channel, once a frame from stereo.cpp.
+void XrInputWriteWorld(const input_channel::World& world);
 
 // THE KEYS of the keyboard of the app (the ring of the keys of the input
 // channel), up to max, in their order: a character, or input_channel::kKeyBack

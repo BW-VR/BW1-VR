@@ -6267,3 +6267,12 @@ unsigned ControllersButtonBits(unsigned* awake) {
   }
   return bits;
 }
+
+// THE STICK OF THE WALK, for the motion of the stick in the headset app
+// (motion_comp_math.h): the hand whose stick walks (PumpWalk), and the dead
+// zone and the full push of walk_math::Push there.
+void ControllersWalkStick(int* hand, float* dead, float* full) {
+  *hand = OtherIndex();
+  *dead = kStickBack;
+  *full = kStickFull;
+}

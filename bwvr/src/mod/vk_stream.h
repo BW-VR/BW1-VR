@@ -36,6 +36,7 @@
 
 #include <stdint.h>
 
+#include "../common/input_channel.h"
 #include "scene_stream.h"
 
 void VkStreamSetOptions(int record_frame, int frames, int live, int drop_us,
@@ -71,8 +72,9 @@ void VkStreamPanelBind(bool panel);
 void VkStreamWritten(void* surface);
 // THE PROJECTION LAYER of the frame for the headset app (kView,
 // view_layer_math.h). stereo.cpp gives it with xr_input=1, after
-// VkSceneFrame and before the walks of the frame.
-void VkStreamView(const scene_stream::ViewBody& view);
+// VkSceneFrame and before the walks of the frame. world: the place of the
+// player of the frame (motion_world.h) after the ViewBody, or null for none.
+void VkStreamView(const scene_stream::ViewBody& view, const input_channel::World* world);
 // THE QUAD LAYERS of the frame for the headset app (kCard, kCardPicture,
 // kPanel, kWindow, quad_layer_math.h). VkStreamSetLayers(true), with
 // xr_input=1 and xr_input_layers=1: the first walk with both eyes does not

@@ -114,6 +114,10 @@ Summary:
 | `android/src/picture_ring.cpp` | The ring of the pictures of the game of the frame loop: the images of the slots, the copies of the play thread, the fences, the newest finished slot for the session |
 | `android/src/frame_loop.h` | The rules of the frame loop: the slots of the ring of the pictures, the drop of a picture, the ring of the command buffers, the serials of the submits, the age of the shown picture, the queue at the GPU, the direct writes and the rect of a copy of the pixels of the CPU. No Android code |
 | `test/controller_math/frame_loop_checks.h` | The math checks of `frame_loop.h` and of the row "The headset gets each frame (no wait for the GPU)" |
+| `android/src/motion_comp.cpp` | The motion of the stick in the projection layer (`motion_comp`), and the parts of the age of a new picture for the time log |
+| `src/mod/motion_comp_math.h` | The map of the room to the world of a frame, the difference of two maps, the pose of a view with the difference, the prediction of the walk. No Windows code |
+| `src/mod/motion_world.cpp` | The place of the player in the world of each frame in the mod, into the `kView` of the frame and into the input channel |
+| `test/controller_math/motion_comp_checks.h` | The math checks of `motion_comp_math.h`, of the slot of the place of the player in the input channel, of the place of a picture and of the parts of the age |
 | `android/src/canvas.cpp` | A picture of the CPU drawn with `android.graphics.Canvas` through JNI |
 | `android/src/menu_model.h` | The menu: the pages, the rows, the values, the input, the save. No Android code |
 | `android/src/display_rate.h` | The display rate: the rates of the row from the rates of the runtime, the fall back of `display_hz`, the steps of the row. No Android code |
@@ -1379,7 +1383,8 @@ ring of the live stream.
 
 **The file.** A head (a magic, a version, the size, the offsets, the
 sessions of the two sides and the indices), at 256 the slot of the newest
-input, at 1024 a ring of 64 events, and at 2048 a ring of 32 keys. Each part has one layout on 32 bit
+input, at 1024 a ring of 64 events, at 2048 a ring of 32 keys, and at 2304
+the slot of the place of the player. Each part has one layout on 32 bit
 x86 and on 64 bit ARM (`static_assert` of each size and offset).
 
 **The slot.** One writer (the app) and one reader (the mod). The writer
@@ -1419,6 +1424,15 @@ it. At its start the mod drops the keys of an earlier run. The ring and its
 indices are in fields of the head and of the tail that were reserved, so
 the version stays 1: a mod that reads no keys and an app that writes none
 use the file as before.
+
+**The place of the player.** A second slot goes the other way: in each
+frame the mod writes the place of the player in the world
+(`input_channel::World`, "The motion of the stick") with the rules of the
+slot, the mod as the writer, and the session of the app reads the newest
+one. It is in the tail of the file, so the version stays 1, and a slot that
+no mod wrote has no map. A writer that stopped in a write leaves an odd
+sequence: the next write makes it odd again and then even. At its start the
+app writes a slot with no map, so the map of an earlier run does not count.
 
 **The mod** (`xr_input=1`, `src/mod/xr_input.cpp`). The mod starts no OpenXR
 session, and the frame runs as with `stereo_headless=1`: it waits for no
@@ -1557,8 +1571,10 @@ layer: two swapchains of the size of the picture of the renderer, each eye
 with the pose and the angles of view of the mod, the menu and the cursor as
 quads over it. A swapchain gets a new image only for a new picture
 (`xr_copy_on_change`), and the values go with the image that an eye
-released. The app adds no motion: no smoothing and no prediction of the
-pose. A picture with no view shows on the stereo screen, and the log says so
+released. The app adds no smoothing. With `motion_comp=0` each view has the
+pose of its picture. With 1 and 2 (the default) the pose of each view has the
+difference of the place of the player since the frame of its picture ("The
+motion of the stick"). A picture with no view shows on the stereo screen, and the log says so
 one time. `stream_projection=0`: each picture shows on the stereo screen.
 `stream_projection` has no test key: the app reads it at its start, and the
 app has no hotkeys. When the app cannot make the swapchains of the layer, it
@@ -1627,6 +1643,145 @@ the run with the game in Wine.
 - After a recenter of the LOCAL space the frames that the mod drew before
   the recenter go out with the poses of the space before, until the frame of
   the new input comes.
+
+## The motion of the stick
+
+When the game gives no new picture in time, the headset shows the picture
+before again. The runtime turns that picture to the head, but it does not
+move it with the walk of the stick, the turn of the view or the grab of the
+world. So a walk with the stick stutters: the view stops for a refresh and
+jumps at the next one. The app shows each picture at the place in the world
+where the game drew it, seen from the place of the player now
+(`motion_comp`, `android/src/motion_comp.cpp`, the math in
+`src/mod/motion_comp_math.h`).
+
+**The place of the player** (`input_channel::World`). For each frame the mod
+gives the map of the LOCAL space to the world of the game that the camera of
+the frame used (`src/mod/motion_world.cpp`, `HeadCameraWorldMap` of
+`head_camera.cpp`):
+
+```
+world = camera + units * L * F * R(origin)^-1 * (local - origin)
+```
+
+| Symbol | Meaning |
+| --- | --- |
+| `camera` | the camera of the main camera call with no head: in the God view and on the table the recenter pose in the world, else the camera of the game |
+| `L` | the levelled basis of the room: world up and the heading of the camera |
+| `F` | diag(1, 1, -1), from the right handed LOCAL space to the left handed world |
+| `origin` | the recenter pose of `head_pose.cpp` in the LOCAL space at the main call |
+| `units` | game units for a meter of the room: the lean gain of the main call times `HeadPoseScale` |
+
+The camera of the frame is the map of the head of the frame, so the eye
+pictures of a frame show the world as its map puts it in the room. The map
+goes after the `ViewBody` of the `kView` of its frame in the live stream
+("The projection layer"), and the newest map goes into the input channel
+("The input channel", "The place of the player"). It also has the walk of
+the frame: the speed of the move of the waist point in game units a second
+(`TabletopGodWalkRate` of `tabletop.cpp`), the hand of the stick of the
+walk, its push, and the dead zone and the full push of that stick
+(`ControllersWalkStick`). A frame with no projection layer, a flat frame of
+the cut scene window and a frame with no recenter pose have no map.
+
+**The map now.** At each frame of the session, after the take of the
+picture, the app reads the newest map of the input channel. When the channel
+is behind the newest picture (the frame of the picture came after the read)
+or more than 600 frames ahead of it (a channel of an earlier game), the map
+of the newest picture is the map now. With `motion_comp=2` the map now goes
+on with the walk of its frame to the display time of the frame of the
+session: the speed of the walk times the push of the stick now over the push
+of the frame, for the time from the display time of the input of the frame
+to the display time now, at most `motion_comp_predict_ms`. The push now is
+the push of the stick that the mod gets in this frame of the session, with
+the dead zone and the curve of the mod (`walk_math::Push`). A stick in its
+dead zone gives no prediction, so the prediction stops in the frame of the
+session in which the stick comes back.
+
+**The pose of a view.** The difference of the map now and the map of the
+picture of each eye takes a point of the LOCAL space of the picture to the
+LOCAL space now. The eye of the picture goes to its place with the
+difference, and its orientation turns by the turn of the difference. A
+runtime with no depth of the picture turns a projection layer to the head
+and does not move it: for it a picture is as far as the horizon. So the view
+also turns so that the point `motion_comp_depth_cm` (100) in front of the eye
+shows in its direction now. A step of 2 cm to the side then turns the view by
+1.15 degrees. The land at that distance shows at its place, nearer land
+moves a little less than it must, and the horizon moves a little. With 0 only
+the eye moves, for a runtime with the depth of the picture.
+
+**What stays.** Two maps with the same bytes give no difference, and the
+views keep the poses of the picture to the bit: a still stick gives the same
+layer as `motion_comp=0`. A difference over a limit is a cut of the view (a
+teleport, a snap turn, a zoom step, a recenter, a new place at a camera of
+the game), and the picture shows as the game drew it: a step at the head of
+`motion_comp_most_cm` (50), a turn of `motion_comp_most_deg` (10), or a
+change of the scale of `motion_comp_most_scale_pct` (25). The panel quads,
+the cards and the cut scene window hang in the room or at the hands, not in
+the world, so they keep their poses. The screen quad and the stereo screen
+show no world.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `motion_comp` | 2 | 0: each view has the pose of its picture. 1: the difference to the newest map of the mod. 2: the same, and the newest map goes on with the walk of the stick to the display time. The row "Picture follows the stick (headset app)" of the page "Testing". A Save of the menu while the game runs changes it at once |
+| `motion_comp_depth_cm` | 100 | The distance of the turn of a view for a step. 0: no turn for a step |
+| `motion_comp_most_cm` | 50 | The limit of the step at the head |
+| `motion_comp_most_deg` | 10 | The limit of the turn |
+| `motion_comp_most_scale_pct` | 25 | The limit of the change of the scale |
+| `motion_comp_predict_ms` | 50 | The longest prediction of the walk |
+
+The keys are in `bwvr.ini` of the game folder, read at the start of the app.
+The app has no test keys: the row of the menu is the A/B of `motion_comp`.
+
+**The log.** At the start "motion : motion_comp=2: ...", and at a change in
+the menu "motion : motion_comp is now 0 (it was 2): ...". The line of each
+new picture of the projection layer has the difference of the left eye in
+that frame:
+
+```
+xr           : the projection layer shows the picture of frame 3012, with a difference of 1.952 cm and 0.000 degrees at the head and a scale of 1.0000 to the place of the player in frame 3013, 13.9 ms of the walk ahead (motion_comp=2)
+xr           : the projection layer shows the picture of frame 3101, with a difference of 0.000 cm and 0.000 degrees to the place of the player in frame 3101 (motion_comp=2)
+```
+
+With `time_log=1` each 10 s: "motion : 10.0 s, motion_comp=2: N frames of
+the projection layer ...": the frames with the map now from the input
+channel, with no difference, with a difference (the step at the head and the
+turn, the mean and the most), over the limits, with no map, and with the
+walk ahead (the mean and the most in ms).
+
+**The tests.** `.\dev.ps1 build`: the checks of `motion_comp_checks.h`. The
+map of the head is the camera of the main call with the real
+`head_pose.cpp`, and the turn of the map times the head is the basis of the
+camera. A still player gives the identity, and the pose of a view keeps its
+bits. A step of the stick of 12.4 cm gives a step of 12.4 cm at the head and
+no turn, and the head goes back by the step in the LOCAL space. A turn of 4
+degrees about the head gives no step at the head and a turn of 4 degrees. A
+snap turn of 30 degrees, a teleport of 3 m and a zoom step of 1.5 times are
+cuts. The prediction: 20 ms at a full push of 150 units a second is 3 units,
+half the push 1.5 units, at most 50 ms, and none with the stick of the walk
+in its dead zone, with `motion_comp=1` or with a display time before the
+map. `emu_game_test.ps1 -StickFrames N`: in game 2, after its pictures, the
+left stick pushes forward for N frames of the script and is then still for
+80 frames, and the test checks the lines of the new pictures.
+
+**Not shown yet:** a headset. Only a headset shows the stutter of a walk
+that the player sees with each value of `motion_comp`, the distance of
+`motion_comp_depth_cm` that keeps the land still in a step, how the runtime
+of Meta shows a projection layer with a pose that is not at the head, and
+the feel of the prediction at the stop of a walk.
+
+**Known limits:**
+
+- The runtime gets no depth of the picture (`XR_KHR_composition_layer_depth`):
+  the app asks for no such extension, makes no swapchain of the depth, and
+  the ring has no copy of the depth. So a step shows exactly at one distance
+  only.
+- The prediction follows only the walk with the stick. A grab of the world,
+  the smooth zoom and a turn of two hands show from the newest map of the
+  mod, with no prediction.
+- At the stop of a walk the prediction stops at once, and the newest map of
+  the mod can still be behind the place of the stop by the frames in the
+  pipe. Then the view stops a little behind and comes to the place of the
+  stop with the next frames of the mod.
 
 ## The quad layers
 
@@ -2681,9 +2836,12 @@ in its queue. The log at Play: "game : frame_loop_gpu_depth=1. ...".
 
 **The poses.** A picture goes out with the `kView` of its own frame: the
 poses that the game drew it with. The runtime reprojects it to the pose of
-the head at the display time, which is the normal work of the runtime. The
-app adds no motion. A picture that shows in more than one frame of the
-session has the same poses in each of them.
+the head at the display time, which is the normal work of the runtime. With
+`motion_comp=0` a picture that shows in more than one frame of the session
+has the same poses in each of them. With 1 and 2 each frame of the session
+gives the poses the difference of the place of the player since the frame of
+the picture ("The motion of the stick"), so a picture that shows again is at
+its place in the world.
 
 **One copy into each swapchain.** The copy of the session from a slot into
 a swapchain image of the projection layer is one `vkCmdCopyImage`, with no
@@ -2978,6 +3136,20 @@ the mod").
    the most over each frame, and over the frames that show a new picture
    (the latency of a new picture). With no such extension the line says
    that there is no display time.
+   **The parts of the age of a new picture** (one more line, with the
+   display time): the mean and the most in ms over the new pictures
+   (`frame_loop::AgeParts`): the game (from the write of the slot of the
+   input channel that the frame of the mod read, `SlotData::frame` of its
+   `kView`, to the arrival of the newest frame of the picture in the
+   reader: the frame of the mod, its walks and the handover), the reader
+   (to the start of the play), the play (to the submit of the copies into a
+   slot of the ring, in the old loop to the end of the play), the GPU and
+   the wait in the ring (to the take of the session), the session (to the
+   end of `xrEndFrame`), and the runtime (to the display time). At the end
+   the age from the input to the display time. A picture with no `kView` or
+   a slot that the app does not know any more has no part of the game and
+   no age.
+   **The motion of the stick** (one more line, "The motion of the stick").
 3. **The GPU** in ms, from timestamps at the start and at the end of each
    command buffer: a walk of the renderer (`VkSceneTakeGpuTime`), a command
    buffer of the app (`Gpu::busy`, with `frame_loop=1` also the copies of

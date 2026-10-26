@@ -214,6 +214,12 @@ class Player {
         ss::ViewBody v;
         if (!ss::Body(body, bytes, &v)) break;
         view_.OnView(v);
+        // The place of the player of the frame after the ViewBody.
+        if (bytes >= sizeof(v) + sizeof(input_channel::World)) {
+          input_channel::World w;
+          memcpy(&w, body + sizeof(v), sizeof(w));
+          view_.OnWorld(w);
+        }
         ++result_->views;
         break;
       }
@@ -364,6 +370,10 @@ Player* ThePlayer(PlayResult* result) {
 
 bool StreamPictureView(scene_stream::ViewBody* out) {
   return ThePlayer(nullptr)->View().Get(out);
+}
+
+bool StreamPictureWorld(input_channel::World* out) {
+  return ThePlayer(nullptr)->View().GetWorld(out);
 }
 
 const quad_layer_math::FrameLayers& StreamPictureLayers() {

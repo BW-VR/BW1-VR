@@ -286,6 +286,15 @@
     0.9 of the rate or more). With the old loop it checks that the lines say
     that there is no play thread.
 
+.PARAMETER StickFrames
+    In game 2, after its measure and its pictures: the stick of the left
+    hand pushes forward for this many frames of the script, then it is still
+    for 80 frames (the walk with the stick of the God view, docs/god-view.md,
+    5.7). The test checks the lines of the motion of the stick of the app
+    (docs/android.md, "The motion of the stick"): with motion_comp=1 or 2 a
+    picture with a difference and a picture with none, with motion_comp=0 no
+    difference. 0 (the default): no stick.
+
 .PARAMETER IniExtra
     More lines for bwvr.ini, for example 'profile_sample_outside=1000'. A
     key that the save of the menu deletes (kRetiredKeys) does not reach the
@@ -329,6 +338,7 @@ param(
     [ValidateSet('', 'box64', 'fex')][string]$Wow64Cpu = '',
     [string]$FexEnv = '',
     [ValidateSet(-1, 0, 1)][int]$FrameLoop = -1,
+    [int]$StickFrames = 0,
     [string[]]$IniExtra = @(),
     [switch]$Keep
 )
@@ -1184,6 +1194,14 @@ try {
             $shift2 = $f - 400
         }
     }
+    # -StickFrames: the walk with the left stick in game 2, after its
+    # pictures. The steps of game 2 after it move by $stickShift.
+    $stickSteps = @()
+    $stickShift = 0
+    if ($StickFrames -gt 0) {
+        $stickSteps = @('404 stick left 0 1', "$(404 + $StickFrames) stick left 0 0")
+        $stickShift = $StickFrames + 80
+    }
     $script = Join-Path $Out 'script.txt'
     Set-Content -LiteralPath $script -Encoding ascii -Value (@(
         '10 hold ready',
@@ -1204,7 +1222,7 @@ try {
         '370 capture after1',
         '380 point right menu 800 227', '390 trigger right 1', '394 trigger right 0') + $menuSteps + @(@(
         '400 hold measured2',
-        $(if ($SceneEyes) { '401 eyes play' } else { '' }), '402 quads play',
+        $(if ($SceneEyes) { '401 eyes play' } else { '' }), '402 quads play') + $stickSteps + @(
         # Game 2: a short press (6 frames) goes to the mod at its release,
         # then show and Quit game.
         '410 menu left 1', '416 menu left 0',
@@ -1214,9 +1232,14 @@ try {
         '610 hold ended2',
         '620 capture after2',
         '640 exit') | ForEach-Object {
-            # The steps of game 2 move by $shift2 (-MenuClick).
+            # The steps of game 2 move by $shift2 (-MenuClick), and the steps
+            # after the walk with the stick by $stickShift.
             $m = [regex]::Match($_, '^(\d+) (.*)$')
-            if ($m.Success) { "$([int]$m.Groups[1].Value + $shift2) $($m.Groups[2].Value)" } else { $_ }
+            if ($m.Success) {
+                $at = [int]$m.Groups[1].Value
+                if ($at -ge 410) { $at += $stickShift }
+                "$($at + $shift2) $($m.Groups[2].Value)"
+            } else { $_ }
         }) | Where-Object { $_ -ne '' } | ForEach-Object {
             # The steps after the dialog of a new profile move by $shift.
             $m = [regex]::Match($_, '^(\d+) (.*)$')
@@ -1699,6 +1722,21 @@ try {
                 $m = [regex]::Match($report, "capture \S*/$name-p$eye\.bmp (\d+)x(\d+) lit (\d+)")
                 Expect ($m.Success -and [int64]$m.Groups[3].Value -gt 1000) ("the picture of eye $eye of the projection layer in game $name has the game: " + $(if ($m.Success) { "$($m.Groups[1].Value) by $($m.Groups[2].Value), $($m.Groups[3].Value) lit pixels" } else { 'none' }))
             }
+        }
+    }
+    # THE MOTION OF THE STICK (-StickFrames): the line of each new picture
+    # has the difference of the place of the player.
+    if ($StickFrames -gt 0) {
+        $mode = [regex]::Match($log, 'motion       : motion_comp=(\d)')
+        Expect $mode.Success "the app logged motion_comp at its start"
+        $diffs = @([regex]::Matches($log, 'the projection layer shows the picture of frame \d+, with a difference of ([0-9.]+) cm and ([0-9.]+) degrees'))
+        $moved = @($diffs | Where-Object { [double]$_.Groups[1].Value -gt 0.0 -or [double]$_.Groups[2].Value -gt 0.0 }).Count
+        $still = $diffs.Count - $moved
+        Note "the motion of the stick: $($diffs.Count) pictures with a difference in the line, $moved of them not 0, $still of them 0"
+        if ($mode.Success -and $mode.Groups[1].Value -ne '0') {
+            Expect ($moved -gt 0 -and $still -gt 0) "motion_comp=$($mode.Groups[1].Value): pictures with a difference while the stick walks ($moved) and pictures with none while it is still ($still)"
+        } elseif ($mode.Success) {
+            Expect ($diffs.Count -eq 0) "motion_comp=0: no picture has a difference ($($diffs.Count))"
         }
     }
     # THE SCREEN QUAD of the frames with no scene (stream_screen=1): the

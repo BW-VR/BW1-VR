@@ -73,6 +73,7 @@ add_library(bwvr_mod SHARED
     fight_marks.cpp
     controllers.cpp
     xr_input.cpp
+    motion_world.cpp
     xr_layers.cpp
     setup_box.cpp
     controller_hints.cpp

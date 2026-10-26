@@ -860,6 +860,7 @@ void XrApp::CopyLayer(Layer* layer) {
     to_release_.push_back(layer->swapchain);
     layer->staging_serial = GpuNextSerial(gpu_);
     layer->released = layer->revision;
+    memcpy(layer->released_rect, layer->rect, sizeof(layer->rect));
     ++copies_;
     return;
   }
@@ -1377,6 +1378,11 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         CopyLayer(&k.layer);
         PartTo(kPartRest);
         if (k.layer.released == 0) continue;
+        // xr_layer_rect=1: the released image must have the rect of the quad.
+        if (!frame_loop::RectShows(frame_loop_ && layer_rect_, k.layer.released_rect,
+                                   f.cards[r.index].rect)) {
+          continue;
+        }
         swapchain = k.layer.swapchain;
         ++k.frames;
         if (!k.said) {

@@ -31,6 +31,7 @@ std::atomic<bool> g_on{true};
 bool g_said = false;
 vk::Functions g_real = {};
 VkQueryPool g_pool = VK_NULL_HANDLE;
+VkDevice g_pool_device = VK_NULL_HANDLE;  // the device of g_pool
 double g_tick_ns = 0.0;
 uint64_t g_mask = 0;
 
@@ -49,11 +50,13 @@ Entry* Find(VkCommandBuffer cb, bool make) {
     return g_last = &e;
   }
   // A full table: the entry that began least recently and does not record
-  // now goes (a one-time command buffer of vk_core.cpp, for example).
+  // now goes (a one-time command buffer of vk_core.cpp, for example). An
+  // entry of a submitted walk stays: the GPU can still write its timestamps.
   Entry* old = nullptr;
   for (int i = 0; i < g_count; ++i) {
     Entry& e = g_entries[i];
-    if (!e.open && (old == nullptr || e.used < old->used)) old = &e;
+    if (e.open || (e.recorded && e.submitted)) continue;
+    if (old == nullptr || e.used < old->used) old = &e;
   }
   if (old == nullptr) return nullptr;
   if (g_current == old) g_current = nullptr;
@@ -260,7 +263,15 @@ void WalkProbeInstall() {
   // call on another thread finds a valid function in each entry.
   g_real = f;
   const vk::Core& core = vk::Get();
+  // A new device of the renderer: the pool and the entries of the old one
+  // are gone with it.
+  if (g_pool != VK_NULL_HANDLE && g_pool_device != core.device) {
+    g_pool = VK_NULL_HANDLE;
+    g_count = 0;
+    g_last = g_current = nullptr;
+  }
   if (g_pool == VK_NULL_HANDLE && core.timestamp_ns > 0.0f) {
+    g_pool_device = core.device;
     VkQueryPoolCreateInfo info = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
     info.queryType = VK_QUERY_TYPE_TIMESTAMP;
     info.queryCount = kEntries * wp::kMostMarks;

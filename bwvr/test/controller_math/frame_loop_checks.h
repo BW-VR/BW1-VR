@@ -288,6 +288,14 @@ inline void GpuQueueChecks() {
   r = fl::CopyRect(true, out, 768, 320);
   Check(r.width == 768 && r.height == 320, "a rect outside the image: the whole image", r.width,
         768);
+  // A card shows only when the released image has the rect of its quad.
+  const int32_t moved[4] = {12, 20, 357, 86};
+  Check(fl::RectShows(true, card, card), "the released image has the rect: the card shows", 0, 0);
+  Check(!fl::RectShows(true, card, moved),
+        "a new rect with no copy yet: the card does not show (its image has the old rect)", 0, 0);
+  Check(!fl::RectShows(true, none, card), "no image released yet: the card does not show", 0, 0);
+  Check(fl::RectShows(false, none, card), "xr_layer_rect=0: the rect is no condition (the old way)",
+        0, 0);
   const int32_t neg[4] = {-5, -5, 20, 20};
   r = fl::CopyRect(true, neg, 768, 320);
   Check(r.x == 0 && r.y == 0 && r.width == 15 && r.height == 15,

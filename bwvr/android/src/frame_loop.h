@@ -198,6 +198,17 @@ inline bool Direct(bool key, bool dirty, bool done) { return key && !dirty && do
 // that the quad shows, cut to the image. The whole image when the key is off,
 // when the rect has no width or no height, or when no part of it is in the
 // image.
+// A card with xr_layer_rect=1 (key) shows only when the image that its
+// swapchain released has the rect of its quad: a copy of a rect leaves the
+// rest of the image undefined, and a copy that did not happen (a busy staging
+// buffer or swapchain image) leaves the rect of the picture before.
+inline bool RectShows(bool key, const int32_t released[4], const int32_t rect[4]) {
+  if (!key) return true;
+  for (int i = 0; i < 4; ++i) {
+    if (released[i] != rect[i]) return false;
+  }
+  return true;
+}
 struct Rect {
   uint32_t x = 0;
   uint32_t y = 0;

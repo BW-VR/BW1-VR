@@ -157,9 +157,10 @@ class XrApp {
   void SetTimeLog(bool on) { time_log_ = on; }
   // THE PIXELS OF THE CPU of the layers with the frame loop (docs/android.md,
   // "The frame loop"), before Start.
-  // xr_layer_rect=1 (the default): a card copies only its rect into the
-  // staging buffer and into the swapchain image, because its quad shows only
-  // that rect. 0: the whole image.
+  // xr_layer_rect=1: a card copies only its rect into the staging buffer and
+  // into the swapchain image, because its quad shows only that rect, and it
+  // shows only when the released image has that rect. 0 (the default): the
+  // whole image. No run has shown a copy of a rect yet.
   // xr_staging_direct=1 (the default): new pixels go straight into the
   // staging buffer when the GPU finished its last copy and no copy in memory
   // waits, so the layers step has no memcpy for them. 0: the pixels go into
@@ -419,6 +420,8 @@ class XrApp {
     // The rect of the pixels that the quad shows (a card, xr_layer_rect=1),
     // x, y, width and height. A width of 0 is the whole image.
     int32_t rect[4] = {0, 0, 0, 0};
+    // The rect of the image that the app released last (frame_loop::RectShows).
+    int32_t released_rect[4] = {0, 0, 0, 0};
     // An image that the app acquired and the runtime did not give free yet
     // (frame_loop_image_wait=0), or -1.
     int pending = -1;
@@ -590,7 +593,7 @@ class XrApp {
   double part_cpu_at_ = 0.0;
   double part_ms_[kParts] = {};
   double part_cpu_ms_[kParts] = {};
-  bool layer_rect_ = true;
+  bool layer_rect_ = false;
   bool staging_direct_ = true;
   uint64_t not_ready_ = 0;
   // XR_KHR_convert_timespec_time: the display time on CLOCK_MONOTONIC.

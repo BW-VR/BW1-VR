@@ -137,8 +137,10 @@ class PictureRing {
   // slots have copies that the GPU did not finish. The fence of a slot comes
   // after the walks of its picture on the queue, so a finished slot has a
   // finished picture. Else it waits up to timeout_ns for one of them, and
-  // gives the result after the wait. The play thread alone calls it.
-  bool WaitGpu(int depth, uint64_t timeout_ns);
+  // gives the result after the wait. *waited: true when the call found
+  // `depth` unfinished slots or more (it waited). The play thread alone
+  // calls it.
+  bool WaitGpu(int depth, uint64_t timeout_ns, bool* waited);
 
   // THE SESSION, once in each frame of the session: the newest picture that
   // the GPU finished, or null when no new picture is finished. The picture

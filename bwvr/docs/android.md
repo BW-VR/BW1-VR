@@ -2696,13 +2696,18 @@ finished).
 - `xr_staging_direct=0`: new pixels go into a copy in memory. The copy of
   the layer puts them into the staging buffer only when the GPU finished the
   last copy of that buffer. Until then the layer keeps its image.
-- `xr_layer_rect=1` (read at the start of the app, the default): a card
-  copies only its rect, into the staging buffer and from there into the
-  swapchain image, because its quad shows only that rect
-  (`frame_loop::CopyRect`). `xr_layer_rect=0`: a card copies its whole
-  image. The other layers copy the whole image with each value.
+- `xr_layer_rect=1` (read at the start of the app): a card copies only its
+  rect, into the staging buffer and from there into the swapchain image,
+  because its quad shows only that rect (`frame_loop::CopyRect`). The rest
+  of the image is undefined, so the quad of a card shows only when the
+  image that its swapchain released has the rect of the quad
+  (`frame_loop::RectShows`). A new rect whose copy did not happen yet (a
+  busy staging buffer or swapchain image) hides the card for that frame.
+  `xr_layer_rect=0` (the default): a card copies its whole image. No run
+  of the emulator has a card, so no run has shown a copy of a rect yet. The
+  other layers copy the whole image with each value.
 
-The log at the start: "xr : xr_layer_rect=1, xr_staging_direct=1. ...".
+The log at the start: "xr : xr_layer_rect=0, xr_staging_direct=1. ...".
 
 **The two queues** (`frame_loop_queues` in `bwvr.ini`, read at the start
 of the app, 2 by default). On one queue the GPU does the work in the order

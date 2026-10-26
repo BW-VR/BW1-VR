@@ -367,7 +367,8 @@ void PictureRing::EndWrite(int i) {
   }
 }
 
-bool PictureRing::WaitGpu(int depth, uint64_t timeout_ns) {
+bool PictureRing::WaitGpu(int depth, uint64_t timeout_ns, bool* waited) {
+  *waited = false;
   // Only the play thread resets a fence and sets `submitted`.
   const auto busy = [&](VkFence* fences) {
     int n = 0;
@@ -379,6 +380,7 @@ bool PictureRing::WaitGpu(int depth, uint64_t timeout_ns) {
   VkFence fences[frame_loop::kSlots];
   const int n = busy(fences);
   if (frame_loop::MayPlay(depth, n)) return true;
+  *waited = true;
   vkWaitForFences(device_, static_cast<uint32_t>(n), fences, VK_FALSE, timeout_ns);
   return frame_loop::MayPlay(depth, busy(fences));
 }

@@ -607,9 +607,15 @@ void* PlayThread(void* arg) {
     // of the game meanwhile, so the next batch has the newest one.
     double gate_ms = -1.0;
     if (depth > 0) {
+      // Each wait counts, also one that ends in the first call.
       const double gate_start = NowMs();
       bool waited_gpu = false;
-      while (!app->play_stop.load() && !app->ring.WaitGpu(depth, 5000000ull)) waited_gpu = true;
+      for (;;) {
+        bool waited = false;
+        const bool may = app->ring.WaitGpu(depth, 5000000ull, &waited);
+        if (waited) waited_gpu = true;
+        if (may || app->play_stop.load()) break;
+      }
       if (waited_gpu) gate_ms = NowMs() - gate_start;
       if (app->play_stop.load()) break;
     }
@@ -1588,10 +1594,10 @@ void android_main(android_app* android) {
   }
 
   app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
-  // xr_layer_rect=1 and xr_staging_direct=1 (the defaults): the pixels of the
-  // CPU of the layers with the frame loop (XrApp::SetLayerRect,
+  // xr_layer_rect (0 by default) and xr_staging_direct (1 by default): the
+  // pixels of the CPU of the layers with the frame loop (XrApp::SetLayerRect,
   // SetStagingDirect).
-  const bool layer_rect = app.ini.GetInt("bwvr", "xr_layer_rect", 1) != 0;
+  const bool layer_rect = app.ini.GetInt("bwvr", "xr_layer_rect", 0) != 0;
   const bool staging_direct = app.ini.GetInt("bwvr", "xr_staging_direct", 1) != 0;
   app.xr.SetLayerRect(layer_rect);
   app.xr.SetStagingDirect(staging_direct);

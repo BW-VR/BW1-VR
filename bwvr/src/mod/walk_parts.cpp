@@ -338,11 +338,18 @@ bool Known(uint32_t address) {
 bool IsTrampolineOf(uint32_t t, uint32_t target) {
   MEMORY_BASIC_INFORMATION mbi = {};
   if (VirtualQuery(reinterpret_cast<const void*>(t), &mbi, sizeof(mbi)) == 0 ||
-      mbi.Type != MEM_PRIVATE || IsBadReadPtr(reinterpret_cast<const void*>(t), 37)) {
+      mbi.Type != MEM_PRIVATE || mbi.State != MEM_COMMIT ||
+      (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) == 0 ||
+      (mbi.Protect & PAGE_GUARD) != 0) {
     return false;
   }
+  // A trampoline can be the last one of a block of MinHook, so the bytes
+  // after it can be past the end of the memory.
+  const uint32_t end = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mbi.BaseAddress)) +
+                       static_cast<uint32_t>(mbi.RegionSize);
+  const int room = static_cast<int>(end - t);
   const uint8_t* b = reinterpret_cast<const uint8_t*>(t);
-  for (int j = 0; j < 32; ++j) {
+  for (int j = 0; j < 32 && j + 5 <= room; ++j) {
     if (b[j] != 0xE9) continue;
     int32_t rel = 0;
     memcpy(&rel, b + j + 1, 4);
@@ -407,15 +414,16 @@ bool Add(uint32_t address, const char* name, int group, bool quiet = false) {
     // The hook of the mod is a jump at the start of the code.
     const uint8_t* code = reinterpret_cast<const uint8_t*>(address);
     uint32_t trampoline = 0;
+    int32_t rel = 0;
     if (!IsBadReadPtr(code, 5) && code[0] == 0xE9) {
-      int32_t rel = 0;
       memcpy(&rel, code + 1, 4);
       trampoline = FindTrampoline(address + 5 + static_cast<uint32_t>(rel), address);
     }
     if (trampoline == 0 || Known(trampoline)) {
       ModLog("walk parts   : no timer on %s at 0x%08X: the mod hooks it, and the trampoline "
-             "of that hook is not found",
-             name, static_cast<unsigned>(address));
+             "of that hook is not found in the hook at 0x%08X",
+             name, static_cast<unsigned>(address),
+             static_cast<unsigned>(address + 5 + static_cast<uint32_t>(rel)));
       return false;
     }
     at = trampoline;

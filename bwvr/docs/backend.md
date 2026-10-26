@@ -70,6 +70,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/block_watch.cpp`, `large_block_math.h` | The large blocks of the heap and of VirtualAlloc with their places, for the line of the address space (`memory_blocks`) |
 | `src/mod/memory_watch.cpp` | The line of the address space each 20 s, on a thread of its own (`memory_log`, `address_space_math.h`) |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
+| `src/mod/render_chain.cpp`, `render_chain_math.h` | The way of a draw to the headset app: the calls that change nothing, the thread of the stream, the table of the surfaces, and the times of the steps (`vk_state_skip`, `vk_stream_worker`, `vk_stream_surface_cache`, `render_chain_time`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
 | `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
 | `src/common/exe_check.h`, `version.h` | The build check and the product name |
@@ -3860,6 +3861,166 @@ start of `Process3dEngine` before its first read of the input channel, and
 a frame with no scene at the end of `h_FinishFrame`. The present of
 `vk_ddraw.cpp` does not wait. With `vk_pace=0` nothing paces the frames.
 
+### The way of a draw to the headset app
+
+In the headset the game runs in Wine (`vk_device=0`, `vk_stream_live=1`).
+A draw of the game goes on the frame thread through these steps of the mod,
+and no step has dxwrapper or Direct3D 9 (`vulkan_strict=1`):
+
+1. The device of the mod (`vk_ddraw.cpp`) keeps the state of Direct3D 7 for
+   its Get methods and gives each call to the renderer of the mod.
+2. The renderer of the mod (`vk_scene.cpp`) with no Vulkan device keeps
+   only the counts of the panel quads ("No Vulkan device of the mod").
+3. The record of the stream (`vk_stream.cpp`) copies each call, with the
+   vertices and the indices of each draw, into the records of the frame.
+4. At the end of the walk with both eyes the records of the frame go into
+   the ring (`android.md`, "The live stream").
+
+The app reads the ring on a thread of its own and records the command
+buffers on its play thread, with native code of ARM. So the record of the
+command buffers is not in the process of the game. The draws of the game
+come with their vertices in the memory of the game (`DrawPrimitive` and
+`DrawIndexedPrimitive` with no vertex buffer), so the device makes no lock
+and no copy of a buffer for a draw. The one copy of the vertices on the
+frame thread is the copy into the records: the game uses its buffers again
+for the next draw.
+
+The rules are in `render_chain_math.h` (checks in
+`test/controller_math/render_chain_checks.h`). `render_chain.cpp` reads the
+keys from `bwvr.ini` at the install of the backend, and the log has one
+line for each key ("render chain : vk_state_skip=1. ...").
+
+**No call that changes nothing** (`vk_state_skip`, 1 is the default). A
+render state, a stage state or a texture that has the value of the device
+does not go to the renderer and to the stream. Each walk of the renderer
+and of the stream starts with the whole state of the device
+(`VkSceneWalkBegin`, the record `kWalkBegin`), and each change goes to
+them. So their state is the value of the device at each draw. A state
+block sets its states through the same methods. `D3DTSS_ADDRESS` also sets
+the address modes of u and of v, so it changes nothing only when all three
+have the value. A texture goes again after each write of the game into a
+surface (a `Lock` for a write, a `Blt`): the stream sends the pixels of a
+written surface at its next use as a texture. `vk_state_skip=0`: each call
+goes.
+
+**The copy into the ring on a thread of the stream** (`vk_stream_worker`, 1
+is the default). The frame thread gives the whole frame to a thread of the
+stream with a swap of two writers, so the bytes are not copied again, and
+goes on with the game. That thread puts the frame into the ring, with the
+waits for room and the drops of "A full ring" (`android.md`). The two
+threads wait on a condition variable, which Wine makes with a wait on an
+address of the process. They do not use an event: an event is an object of
+the server of Wine, and each wake of it is a call to that server. There is
+one
+frame at a time: before it gives the next frame, and at the start of each
+frame of the game, the frame thread waits until the thread of the stream is
+done. So the frames go into the ring in their order. When the thread cannot
+start, the log says so and the frame thread puts each frame.
+The time log counts the time of the frame thread for the ring as "the write
+of the stream": with the thread of the stream that is the wait for it and
+the give. `vk_stream_worker=0`: the frame thread puts each frame.
+
+**The surfaces in a table** (`vk_stream_surface_cache`, 1 is the default).
+Before each record that names a surface (a texture, a render target, the
+start of a walk), the stream finds if it has the surface with its pixels.
+A table with 512 places holds the surfaces that it has with their pixels.
+A write of the game takes a surface out of the table, and a frame with the
+whole state clears it. A find that the table does not answer goes to the
+two sets of the stream. `vk_stream_surface_cache=0`: each find
+goes to the two sets.
+
+**The test keys** (`test_keys=1`, the debug page with `debug_menu=1`,
+group "Render"): Ctrl Shift 8 changes `vk_state_skip` from the next call,
+Ctrl Shift 9 changes `vk_stream_worker` from the next frame of the stream,
+and Ctrl Shift 0 changes `vk_stream_surface_cache` from the next find. Each
+has a long pulse for 1 and a short pulse for 0, and a line of the log.
+
+**The counts and the times** (the report of each 450 frames). The line
+"render chain : vk_state_skip=1. A frame: ..." has the calls of the device
+of a frame of each kind, the calls with the value of the device, and the
+calls that did not go to the renderer. The line "render chain : the
+stream, a frame: ..." has the bytes of the records into the ring, of the
+vertices and of the indices, the frames on the thread of the stream, the
+waits of the frame thread for it, and the finds that the table answered.
+`render_chain_time=1` (0 is the default, a test aid) adds two lines with the
+time of the frame thread in each step, read with the clock of the CPU
+(RDTSC, under FEX the counter of the ARM timer): the scene walk, the own
+time of the device, the own time of the renderer, the record of the stream,
+the copy into the ring on the frame thread, and the copy on the thread of
+the stream. The time of the device includes the renderer, and the time of
+the renderer includes the stream, so each own time is the time less the
+step in it. The log names the cost of two reads of the clock. A scope of
+the device in a state block is in the time of the state block.
+
+**What the walk parts of the Quest say** (`walk_parts=1`, a Quest 3 with
+FEX, a window of 563 frames with a walk of 10.0 ms): the steps of the mod
+had about 1.8 ms of exclusive time of the walk, with the cost of the
+timers in it (118 ns for each timed call). The most: the record of a draw
+(`VkStreamDraw`, 695 calls in a frame, 0.54 ms), the record of a texture
+(`VkStreamTexture`, 291 calls, 0.18 ms, the two sets of the surfaces), the
+hook of the mod on `LH3DRender::DrawTriangle` (0.16 ms) and the methods of
+the device (0.13 ms for each of `SetRenderState` and
+`DrawIndexedPrimitive`). The time log of the Quest has 0.24 to 0.54 ms for
+the write of the stream in a frame, and up to 8.5 ms for one frame.
+
+**Desktop runs** (`live_stream_run.ps1` in the test save "pen",
+`backend=vulkan`, a Radeon RX 7900 XTX, render 4080 by 3264, the keys at 1
+and at 0, with `render_chain_time=1` and with 0). Each run: "LIVE STREAM
+VERIFIED", each frame of the record has the same bytes in the ring. A frame
+has 400 draws, 685 render states, 242 stage states, 155 textures and 3
+other calls of the device. No render state and no texture has the value of
+the device (the game keeps its own state, `LH3DRender::SetRenderState`), and
+88 stage states have it, so `vk_state_skip=1` gives the renderer 88 calls
+less in a frame, and the records of a frame have 765 KB in place of 767 KB.
+The table of the surfaces answers 59400 of 63900 finds in a window of 450
+frames. In the windows with the reader, ms a frame on the frame thread:
+
+| | The keys at 1 | The keys at 0 |
+| --- | --- | --- |
+| The scene walk | 1.348 to 1.358 | 1.344 to 1.356 |
+| The record of the stream | 0.076 | 0.066 to 0.068 |
+| The copy into the ring on the frame thread | 0.004 | 0.034 to 0.035 |
+| The copy on the thread of the stream | 0.042 | none |
+| The write of the stream at most (time log, the frame with the whole state) | 2.47 | 5.65 |
+
+On the PC the record of the stream with the keys at 1 took 0.01 ms more
+in a frame than with the keys at 0.
+
+The frame with the whole state (14.4 MB, 59 surfaces) took 3.8 to 4.3 ms in
+the copy into the ring in each run. With the thread of the stream the frame
+thread waited for it two times. On the PC the renderer with its Vulkan
+device has the most time of the mod in the walk (0.51 to 0.58 ms), and with
+`vk_device=0` in the headset it records no command. The eye pictures of
+frame 2996 of the keys at 1 and at 0 differ in 0.001 to 0.019 percent of
+the pixels by more than 24 levels, as two runs with the same keys (0.001 to
+0.014 percent).
+
+**Runs in the emulator** (`emu_game_test.ps1 -TestSave pen -FrameLoop 1`,
+the game in Wine of x86_64 with no FEX, `render_chain_time=1`, the keys at 1
+and at 0, 204 checks and 0 failed in each run). Ms a frame on the frame
+thread, the windows of 450 frames:
+
+| | The keys at 1 | The keys at 0 |
+| --- | --- | --- |
+| Game 1 (a new game, 1474 draws, 1.8 MB of records a frame): the record of the stream | 0.298 to 0.317 | 0.363 to 0.369 |
+| Game 1: the copy into the ring on the frame thread | 0.069 to 0.220 | 0.230 to 0.253 |
+| Game 1: the steps of the mod | 0.56 to 0.70 | 0.79 to 0.81 |
+| Game 2 (the save "pen", 332 draws, 760 KB): the record of the stream | 0.115 to 0.143 | 0.125 to 0.136 |
+| Game 2: the copy into the ring on the frame thread | 0.155 to 0.184 | 0.163 to 0.172 |
+| Game 2: the steps of the mod | 0.34 to 0.40 | 0.36 to 0.37 |
+
+The scene walk is 16 to 20 ms in game 1 and 4.3 to 8.2 ms in game 2, so
+the steps of the mod are 3 to 8 percent of it. The table of the surfaces
+answers 285300 of 286200 finds in game 1. In game 2 the give of a frame to
+the thread of the stream costs the frame thread as much as the copy of 760
+KB. The clock of the CPU in the emulator gives 3450 to 4850 MHz against the
+performance counter in some windows, so the times of the emulator are
+rough.
+
+**Only the headset can show** the time of the steps under FEX with the keys
+at 1 and at 0 (`render_chain_time=1`), the frames a second, and the
+stutters when the player moves with the stick.
+
 ## Foveated rendering
 
 `foveation` (0 is the default, a test key: Shift O, the launcher row "Fewer
@@ -5681,6 +5842,9 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift Period | `test_keys=1` | On the hint card, the lines of the walk with the stick and of A show only while they can move the player, or the card has no line for the walk and the line of A shows in each case. A long pulse and a short pulse (`prompt_moves`, `controller-hints.md`, 9.4) | Interface, Prompt moves |
 | Ctrl Shift H | `test_keys=1` | In the God view the Creature turns to and looks at the head of the player, or at the game's own camera. A long pulse and a short pulse (`creature_player_head`, `creature.md`, 5.4). Shift H with Ctrl up is a key of the render | None |
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw | Render, Frame send |
+| Ctrl Shift 8 | `test_keys=1` | With `backend=vulkan`: a render state, a stage state or a texture with the value of the device of the mod does not go to the renderer and the stream, or each call goes, from the next call. A long pulse and a short pulse (`vk_state_skip`, "The way of a draw to the headset app"). The game has no key with 8, 9 or 0 | Render, State skip |
+| Ctrl Shift 9 | `test_keys=1` | A frame of the live stream goes into the ring on a thread of the stream, or on the frame thread, from the next frame of the stream. A long pulse and a short pulse (`vk_stream_worker`, "The way of a draw to the headset app") | Render, Stream thread |
+| Ctrl Shift 0 | `test_keys=1` | The stream finds a surface that it has with its pixels in a table, or in its two sets, from the next find. A long pulse and a short pulse (`vk_stream_surface_cache`, "The way of a draw to the headset app") | Render, Surface table |
 | Menu key | `test_keys=1` | One walk for both eyes on and off (see "One walk for both eyes"). The key beside the right Ctrl key that opens a context menu. Ctrl and Shift must be up | Render, One walk |
 | Ctrl Shift Right bracket | `test_keys=1` | In one walk: a speech bubble or the name of a villager as a card, the glow at the Hand's point and a halo are drawn for each eye by itself, or the right eye gets them as each other batch. A long pulse and a short pulse (`one_walk_marks`, "The cards and the marks of the mod"). The right square bracket key is two keys right of the P key on a US keyboard | Picture, Walk marks |
 | Ctrl Shift N | `test_keys=1` | A note of the game over a thing (the percent of a lesson over the Creature) has the depth of its place, or the interface depth. A long pulse and a short pulse (`note_depth`, `ui-layer.md`, section 19). | Interface, Note depth |
@@ -5832,6 +5996,10 @@ keys that the launcher sets.
 | `vk_stream_live` | 0 | With `backend=vulkan`: 1 the mod makes the ring `bwvr-stream.ring` (32 MB) beside `runblack.exe`, and when a reader asks, each frame of the walks goes into it for the headset app. 0: no ring. The launcher removes the key on each save. The file holds pixels of the game. See `android.md`, "The live stream" |
 | `vk_stream_live_drop_us` | 0 | With `vk_stream_live=1`: the wait in microseconds for room in the ring for a frame before the writer drops it. 0: a drop with no wait. 4000: a wait of 4 ms. The frame thread spins no longer than this. The launcher removes the key on each save. See `android.md`, "The live stream" |
 | `vk_stream_live_drop` | 1 | With `vk_stream_live=1`: 1 a dropped frame keeps its records of state and loses its walks, and a whole frame leaves 4 MB of the ring for the state. 0: a frame with a record of a surface never drops, and a frame with none drops whole. The launcher removes the key on each save. See `android.md`, "The live stream" |
+| `vk_state_skip` | 1 | With `backend=vulkan`: 1 a render state, a stage state or a texture that has the value of the device of the mod does not go to the renderer and the stream. 0: each call goes. A test key: Ctrl Shift 8. See "The way of a draw to the headset app" |
+| `vk_stream_worker` | 1 | With `vk_stream_live=1`: 1 a frame goes into the ring on a thread of the stream. 0: on the frame thread. A test key: Ctrl Shift 9. See "The way of a draw to the headset app" |
+| `vk_stream_surface_cache` | 1 | With `vk_stream_live=1` or `vk_stream_record`: 1 the stream finds a surface that it has with its pixels in a table. 0: in its two sets. A test key: Ctrl Shift 0. See "The way of a draw to the headset app" |
+| `render_chain_time` | 0 | A test aid, with `backend=vulkan`: 1 the report of each 450 frames has the times of the steps of the mod on the frame thread. See "The way of a draw to the headset app" |
 | `vk_stream_live_end` | 1 | With `vk_stream_live=1` or `vk_stream_record`: 1 a frame goes into the ring and the record at the end of its first walk with both eyes, and a later walk of the frame goes at the start of the next frame. 0: at the start of the next frame of the game. The launcher removes the key on each save. See `android.md`, "The live stream" |
 | `xr_vulkan` | 0 | 0: the OpenXR session has Direct3D 11. 1: the session has Vulkan, and the Vulkan renderer draws with its device. When it cannot start, the next try has Direct3D 11. There is no test key: the choice is made at the start. See "The session with Vulkan" |
 | `vk_eyes` | 1 | With `xr_vulkan=1`: 1 the eye pictures of a frame of one walk come from the Vulkan renderer, 0 from Direct3D 9. `backend=vulkan` sets `xr_vulkan=1` and `vk_eyes=1`. A test key: Shift C. See "The session with Vulkan" |

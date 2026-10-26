@@ -1192,7 +1192,11 @@ also a later walk of the same frame, goes at the start of the next frame
 (the tail), in its order. The walks of "pen" have no record after that
 walk.
 `vk_stream_live_end=0`: a frame goes at the start of the next frame of the
-game. A record (`vk_stream_record`) and the live stream get the same bytes
+game. With `vk_stream_worker=1` (the default) a thread of the stream makes
+the copy into the ring and its waits for room. The frame thread waits for
+that thread only at the start of the next frame of the game and before it
+gives the next frame (`backend.md`, "The way of a draw to the headset
+app"). A record (`vk_stream_record`) and the live stream get the same bytes
 for a frame, and the first frame of a record has the whole state for both.
 With no reader the mod puts no frame into the ring and reads no surface for
 it.

@@ -1106,6 +1106,19 @@ that moves while the Hand takes it.
   walk, the counts of the renderer in the line of the GPU parts, and the
   parts "the eye pictures" and "the panel image", with the five keys at 1
   and at 0.
+  **The way of a draw to the app.** The device of the mod gives no call
+  that changes nothing to the renderer and the stream, a thread of the
+  stream puts each frame into the ring, and a table finds the surfaces of
+  the stream (`vk_state_skip`, `vk_stream_worker`,
+  `vk_stream_surface_cache`, `backend.md`, "The way of a draw to the
+  headset app"). Next in the headset: the lines `render chain` with
+  `render_chain_time=1` and the three keys at 1 and at 0, the time log, and
+  the stutters with the stick. Then the next steps from those numbers: the
+  pixels of a 16 bit texture in the stream as they are (half the bytes and
+  no conversion on the frame thread, a change of the app), and the state
+  of the stream (`StreamState`, 40 bytes and six calls) in a record only
+  when it changes, not in each draw (a change of the stream and of the
+  app).
   **The stop of the game** 6 to 15 s after the load of a saved game on the
   Quest: the main thread of the game runs at 99 percent of one core in user
   mode, and `wine.log` names the critical section 0x7AF441E8 in each stop:

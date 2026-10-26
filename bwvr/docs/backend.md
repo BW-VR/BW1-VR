@@ -2680,6 +2680,82 @@ vertices that differ (`fast transform: check` lines, and the first 12
 vertices that differ). A desktop run at the start of a new game compared 10.8
 million vertices in each window of 450 frames, and 0 differed.
 
+## The vertex loop of the land with SSE
+
+`GLandscape::Draw` (`0x005E42E0`) draws the land in two calls,
+`fn_007FF4F0` and `LH3DIsland::Draw` (`fn_007FF610`). Each one calls
+`fn_00874AA0` for each patch of the land in the view (27 to 140 patches in a
+frame). `fn_00874AA0` (`__thiscall`, the patch in ecx):
+
+- **The input.** The patch has 17 by 17 cells of 8 bytes: a color word (bits
+  0 to 23 the specular color, bits 24 to 31 the index of the diffuse color
+  in the table at `0x00EDD90C`) and a height byte. A far patch uses each
+  2nd, 4th, 8th or 16th cell (the step, `1 << (patch + 0x930)`). The place
+  of the patch is at `+0x90C` and `+0x910`, the camera matrix of the land at
+  `0x00EA9E40` (rows of 3), the projection at `0x00E839E0` to `0x00E839F4`
+  and the clamp to the screen at `0x00C2AB00`.
+- **The vertex loop.** For each cell of the grid: the height (3 or less is
+  the sea, at the height 0), the 3x4 matrix, the fog (`+0x940`: none, a
+  constant, or by the depth with the values at `0x00C37214` to
+  `0x00C37228`), the clip flags in `LH3DP3::Table0` when the patch is at the
+  edge of the view (`+0x91C`), and the projection to a `D3DTLVERTEX` of
+  `LH3DP3::Table1`. All on the x87 unit, with an `fcomp` and an `fnstsw` for
+  each comparison and a division for each vertex. The coordinates and the
+  texture coordinates are sums of the step, one add for each cell.
+- **The rest.** `fn_00876910` (no clip) or `fn_00875C60` (clip) builds the
+  triangles into `g_TriangleList` (`0x00EA5DE0`): a test of the back face of
+  each triangle on the screen, and the joins to a patch with another step.
+  Then the material and `LH3DRender::DrawTriangle`. Some patches (by the
+  values at `+0x928` and `+0x938`) have more passes over their vertices
+  after that draw: other texture coordinates, an alpha by the place, and
+  more draws (`fn_008790F0`).
+
+**The paths of the game.** At the start of the renderer `fn_007AC9E0` sets
+the flag `0x00EA9EB4` from the class of the CPU (`fn_008A2610`, CPUID 1): 1
+only for the family 15 with SSE2. With the flag the engine has code of its
+own with SSE for a patch (`fn_007A1800`), for the triangles of a patch, for
+the clip of a triangle and for the sprites. So an AMD CPU of the family 15
+and up takes the SSE path of the game, and an Intel CPU of the family 6 and
+the Quest under FEX take the x87 path. The loops of `fn_00856D40`,
+`fn_0085AB10` and `fn_0084BA90` have no SSE path in the game ("The vertex
+loops with SSE").
+
+`land_fast=1` (the default) makes the vertex loop of the x87 path with SSE,
+four cells of a row at a time (`land_fast_math.h`, `land_fast.cpp`). A jump
+at the start of the loop (`0x00874B40`) goes to a stub. The stub keeps each
+register, and goes on at the code after the loop (`0x00875308`) when the
+SSE loop did the work. The code after the loop reads only the patch and the
+step, so the rest of `fn_00874AA0` is the code of the game. The SSE loop
+runs with the same rules for the same bits as the loops of
+`fast_transform`: the x87 unit at 24 bits and rounding to the nearest, MXCSR
+with no flush to zero while the loop runs. The checks of
+`bwvr/test/controller_math` compare the bits of the SSE loop with a scalar
+reference for 60 patches with each step, each fog, the clip and the sea.
+`land_fast=0` runs the loop of the game, with no hook.
+
+`land_fast=2` (a test aid) runs the loop of the game, and the SSE loop makes
+a copy. A hook at the code after the loop compares the copy with what the
+game wrote, and each 10 s the log has the count of the vertices that
+differ, the largest difference of each float, and the words that differ
+(`land fast` lines, and the first 12 vertices that differ). A desktop run in
+the test save `temple` with `game_sse_path=0` compared 480 million vertices
+in 50 s, and 0 differed.
+
+`game_sse_path` (a test key) sets the flag after `fn_007AC9E0`: -1 (the
+default) the game chooses, 0 the x87 paths on each CPU (so a desktop run on
+an AMD CPU shows the loop of the mod), 1 the SSE paths of the game.
+
+In a desktop run (`bench_run.ps1`, the test save `temple`, an AMD CPU,
+`game_sse_path=0`, `walk_parts=1`) the exclusive time of `fn_00874AA0` is
+0.073 ms in a frame with `land_fast=1` and 0.088 ms with `land_fast=0` (27
+patches), 0.192 and 0.228 ms in the window with 64 patches. The x87 unit of
+a PC is fast, and only the Quest under FEX shows the gain that counts.
+
+- Only a headset shows the time of the land under FEX with `land_fast=1`.
+- Not tried: `game_sse_path=1` on the Quest. It gives the SSE paths of the
+  game for the land, the triangles of a patch, the clip and the sprites.
+  Not known: whether that code of the game runs under FEX.
+
 ## The thread of Direct3D 7
 
 In a walk the frame thread calls the Direct3D 7 device of dxwrapper about
@@ -4042,7 +4118,7 @@ gets, and it also stores that camera: the position at `0x00EA1DB8` and the focus
 | `HandStateCamera::Update` | Drags the land relative to the focus |
 | `GCamera::Update` | In some modes takes the stored camera back as its start point |
 | `GScript::StoreCameraDetails`, `GScript::GetCameraFocus` | Scripts save and restore the camera |
-| `fn_005E5CD0` (sky and cloud module) | Recomputes whenever the stored camera moves by more than 1 unit |
+| `fn_005E5CD0` (the draw of the objects on the land) | Makes the list of the objects to draw again when the stored camera moves by more than 1 unit |
 | `Tree::PreDraw`, `HelpSystem::SendFOVObject`, `PowerSpinRunner::Update` | Various |
 
 So after every `UpdateCamera` call, `head_camera.cpp` writes the camera that the
@@ -5512,6 +5588,8 @@ keys that the launcher sets.
 | `vk_only`, `vk_only_test` | 1, 0 | `vk_only=1`: in a session with Vulkan, a walk of one walk with the eyes of the Vulkan renderer goes to the renderer alone, and the D3D7 thread gives no draw of it to dxwrapper. 0: Direct3D 9 draws each walk too. A test key: Shift U. `vk_only_test=1` (a test key) does the same on the desktop. See "The Vulkan renderer" |
 | `vk_upload_queue`, `vk_scene_reread_test` | 1, 0 | `vk_upload_queue=1`: the copy of a texture that a walk reads again goes to the GPU in the submit of the walk, with no wait of the D3D7 thread. 0: each copy goes to the GPU at once with a wait. A test key: Shift I. `vk_scene_reread_test=N` (a test key) reads N textures again in each walk, in turn. See "The Vulkan renderer" |
 | `fast_transform` | 1 | 1: the two vertex loops of the engine run with SSE, with the bits of the game. 0: on the x87 unit. See "The vertex loops with SSE" |
+| `land_fast` | 1 | 1: the vertex loop of the land on the x87 path runs with SSE, with the bits of the game. 0: on the x87 unit, with no hook. 2: a test aid, the compare. See "The vertex loop of the land with SSE" |
+| `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `hang_watch` | 0 | A test key: 1 the place of the frame thread when it makes no frame for 8 s, 2 each 8 s. With each of the two the place of a fault. See "The watch of the frame thread" |
 | `stall_modules` | 1 | 1: when no frame of the game ends for 5 s, the log gets the modules of the process and the regions of the addresses of `stall_addrs`, one time for each stall. 0: no watch. There is no test key. See "The module list at a stall" |

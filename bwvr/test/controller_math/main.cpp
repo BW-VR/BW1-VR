@@ -3564,6 +3564,7 @@ void CreatureChecks() {
 #include "scene_sample_checks.h"
 #include "render_thread_checks.h"
 #include "fast_transform_checks.h"
+#include "land_fast_checks.h"
 #include "vk_scene_checks.h"
 #include "vk_texture_checks.h"
 #include "vk_prim_checks.h"
@@ -4000,6 +4001,7 @@ int main() {
   scene_sample_checks::SceneSampleChecks();
   render_thread_checks::RenderThreadChecks();
   fast_transform_checks::FastTransformChecks();
+  land_fast_checks::LandFastChecks();
   vk_scene_checks::VkSceneChecks();
   vk_texture_checks::VkTextureChecks();
   vk_prim_checks::VkPrimChecks();

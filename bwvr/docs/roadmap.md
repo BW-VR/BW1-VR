@@ -1005,6 +1005,15 @@ that moves while the Hand takes it.
   the game, and if the game calls `TerminateThread` on another thread
   (FEX imports `RtlWow64SuspendThread` for that case, and Wine 11.0 does
   not have it).
+- **N21. The scene walk of the game under FEX.** On the Quest the game
+  takes the x87 paths of the engine (`backend.md`, "The vertex loop of the
+  land with SSE"). `land_fast=1` makes the vertex loop of the land with SSE.
+  Next in the headset: the `walk parts` lines with `land_fast=1` and 0, and
+  with `game_sse_path=1` (the SSE paths of the game). Open: the exclusive
+  time of `fn_005E5CD0` (4.5 to 8 ms on the Quest) is in its scan of the
+  objects near the camera and in the draw methods of the objects on the
+  land (the entry `+0x610` of each vtable), which no timer has yet, and `fn_00876910` (the triangles of a patch) is still x87
+  code.
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

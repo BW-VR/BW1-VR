@@ -29,6 +29,7 @@
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
 #include "fast_transform.h"
+#include "land_fast.h"
 #include "thread_wait.h"
 #include "time_log.h"
 #include "walk_parts.h"
@@ -620,6 +621,8 @@ int g_render_thread_buffers = 1;
 int g_render_thread_right_eye = 1;
 int g_fast_transform = 1;
 int g_fast_transform_check = 0;
+int g_land_fast = 1;
+int g_game_sse_path = -1;
 int g_d3d7_count = 0;
 int g_d3d7_thread = 1;
 int g_d3d7_thread_merge = 1;
@@ -1650,6 +1653,10 @@ void ReadSettings() {
   g_fast_transform_check =
       GetPrivateProfileIntA("bwvr", "fast_transform_check", 0, path) != 0 ? 1
                                                                         : 0;
+  g_land_fast = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "land_fast", 1, path));
+  g_game_sse_path = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "game_sse_path", -1, path));
   g_d3d7_count =
       GetPrivateProfileIntA("bwvr", "d3d7_count", 0, path) != 0 ? 1 : 0;
   g_d3d7_thread =
@@ -2115,6 +2122,8 @@ void StartVrStep() {
     FastTransformSetOptions(g_fast_transform);
     FastTransformSetCheck(g_fast_transform_check);
     FastTransformInstall();
+    LandFastSetOptions(g_land_fast, g_game_sse_path);
+    LandFastInstall();
     D3D7CountSetOptions(g_d3d7_count);
     if (!g_vulkan_only) {
       D3D7ThreadSetOptions(g_d3d7_thread);

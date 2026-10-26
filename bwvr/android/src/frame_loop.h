@@ -175,6 +175,15 @@ class CommandRing {
 // last submit that read it is finished, so the CPU never waits for it.
 inline bool SerialDone(uint64_t serial, uint64_t done) { return serial <= done; }
 
+// THE COPIES RECORDED ONE TIME (xr_copy_once): the entries of a set name
+// images of the ring of the pictures. They stay valid only while their
+// source has the size of the set and the ring made and freed no image since
+// the entries were recorded: a new image can have the handle of a freed one.
+inline bool OnceSetValid(uint32_t set_width, uint32_t set_height, uint64_t set_changes,
+                         uint32_t width, uint32_t height, uint64_t changes) {
+  return set_width == width && set_height == height && set_changes == changes;
+}
+
 // THE AGE OF THE SHOWN PICTURE in frames of the session: 0 in the frame that
 // shows a new picture, one more in each later frame with the same picture.
 inline uint64_t NextAge(uint64_t age, bool fresh) { return fresh ? 0 : age + 1; }

@@ -560,7 +560,7 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
            "%.0f descriptor writes, %.1f uploads of %.2f MB. The renderer in a walk: %.0f draws "
            "of the game, %.0f draw commands, %.0f draws with another place (the sort), %.0f "
            "draws in draws of the merge, %.0f binds and states left out (bound already), %llu "
-           "merges with no room",
+           "draws that a merge left alone (no room in the ring)",
            static_cast<unsigned long long>(t.Walks()), static_cast<unsigned long long>(t.Untimed()),
            list.empty() ? "none" : list.c_str(), t.TotalMs() / walks, c.passes / walks,
            c.draws / walks, c.pipelines / walks, c.sets / walks, c.writes / walks,

@@ -3241,7 +3241,9 @@ draw in the ring at a full vertex. The renderer writes the indices of the one
 draw into the ring of the slot (32 bit, each index plus the place of the
 vertices of its draw), and the GPU draws its triangles in the order of the
 draws, so the picture is the same. A list draws full triangles only, as in
-Direct3D. With no room in the ring the draws go in one by one.
+Direct3D. With no room in the ring the draws go in one by one, and the
+counts have those draws. The indices of a draw of the merge are 4 bytes
+each, a second copy in the ring, so a walk uses more of the ring of 32 MiB.
 `vk_draw_merge=0`: each draw of the game is a draw.
 
 **The counts.** The report of each 450 frames has a line "vk scene :

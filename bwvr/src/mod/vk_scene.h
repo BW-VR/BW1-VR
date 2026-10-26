@@ -196,7 +196,8 @@ void VkSceneKeepPictureToggle(const char* keys);
 // went into a command buffer of a walk with no foveated resolution.
 // commands: the vkCmdDraw and vkCmdDrawIndexed calls for them. moved: the
 // draws that the sort gave another place. joined: the draws in a draw of the
-// merge. no_room: the merges that the ring had no room for. skipped: the
+// merge. no_room: the draws that a merge left alone, because the ring had
+// no room for its indices. skipped: the
 // binds and the dynamic states that the renderer left out, because the
 // command buffer had the same value.
 struct VkSceneDrawCount {

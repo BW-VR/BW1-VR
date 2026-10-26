@@ -630,7 +630,7 @@ uint64_t g_dc_draws = 0;     // draws of the game into the command buffer
 uint64_t g_dc_commands = 0;  // vkCmdDraw and vkCmdDrawIndexed for them
 uint64_t g_dc_moved = 0;     // draws that the sort gave another place
 uint64_t g_dc_joined = 0;    // draws in a draw of the merge
-uint64_t g_dc_no_room = 0;   // merges that the ring had no room for
+uint64_t g_dc_no_room = 0;   // draws that a merge left alone: no room in the ring
 // The counts at the end of the last walk, for VkSceneDrawCounts.
 SRWLOCK g_dc_lock = SRWLOCK_INIT;
 VkSceneDrawCount g_dc_shown = {};
@@ -2271,7 +2271,7 @@ void FlushDraws() {
         i = end;
         continue;
       }
-      ++g_dc_no_room;
+      g_dc_no_room += end - i;
     }
     PlayDraw(s, g_queue[order[i]]);
     ++i;
@@ -4721,7 +4721,8 @@ void VkSceneReport(uint64_t frames) {
     ModLog("vk scene     : vk_bind_skip=%d, vk_draw_sort=%d, vk_draw_merge=%d. "
            "A walk: %.1f draws of the game, %.1f draw commands, %.1f draws "
            "with another place, %.1f draws in draws of the merge, %.1f binds "
-           "and states left out. %llu merges with no room in the ring",
+           "and states left out. %llu draws that a merge left alone (no room "
+           "in the ring)",
            g_bind_skip ? 1 : 0, g_draw_sort ? 1 : 0, g_draw_merge ? 1 : 0,
            (now.draws - s_last.draws) / walks,
            (now.commands - s_last.commands) / walks,

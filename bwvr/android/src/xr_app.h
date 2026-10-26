@@ -498,6 +498,7 @@ class XrApp {
     };
     std::vector<Once> once;
     uint32_t once_width = 0, once_height = 0;
+    uint64_t once_changes = 0;  // PictureRingImageChanges at the record of the entries
   };
   // The swapchains of the set are made.
   static bool Made(const Screen& screen) { return screen.layer[0].swapchain != XR_NULL_HANDLE; }

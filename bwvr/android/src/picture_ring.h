@@ -27,6 +27,10 @@
 #include "frame_loop.h"
 #include "gpu.h"
 
+// The images that the rings of the pictures made or freed since the start,
+// any thread (frame_loop::OnceSetValid).
+uint64_t PictureRingImageChanges();
+
 // A PICTURE OF THE GAME as the session shows it (main.cpp, ShowPicture).
 // In the old loop it points at the renderer and at the player of the stream.
 // In a slot of the ring it points at the copies of the slot.

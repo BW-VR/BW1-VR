@@ -12,6 +12,7 @@
 #include "../../src/mod/screen_quad_math.h"
 #include "app_log.h"
 #include "eye_size.h"
+#include "picture_ring.h"
 
 // The game folder that the app gives to the renderer (scene_host.cpp).
 const char* VkPlatformFolder();
@@ -2325,13 +2326,17 @@ void XrApp::ReadCopyKeys() {
 // records the copy in the frame.
 VkCommandBuffer XrApp::OnceCopy(Screen* screen, VkImage source, uint32_t source_layer,
                                 uint32_t width, uint32_t height, VkImage target) {
-  // The ring of the pictures makes the images of a slot again at a new size.
-  // So a source of another size frees the entries, and no entry can name an
-  // image that the ring freed.
-  if (width != screen->once_width || height != screen->once_height) {
+  // The ring of the pictures makes the images of a slot again at a new size,
+  // also for a slot that the session never took. So the entries go when the
+  // source has another size or the ring made or freed an image since their
+  // record, and no entry can name an image that the ring freed.
+  const uint64_t changes = PictureRingImageChanges();
+  if (!frame_loop::OnceSetValid(screen->once_width, screen->once_height, screen->once_changes,
+                                width, height, changes)) {
     FreeOnce(screen);
     screen->once_width = width;
     screen->once_height = height;
+    screen->once_changes = changes;
   }
   for (const Screen::Once& o : screen->once) {
     if (o.source == source && o.layer == source_layer && o.target == target &&

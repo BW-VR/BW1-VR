@@ -2,10 +2,14 @@
 
 #include <time.h>
 
+#include <atomic>
+
 #include "app_log.h"
 #include "xr_app.h"
 
 namespace {
+
+std::atomic<uint64_t> g_image_changes{0};
 
 double NowMs() {
   timespec t;
@@ -140,14 +144,20 @@ bool PictureRing::MakeImage(Image* image, uint32_t width, uint32_t height, uint3
     return false;
   }
   vkBindImageMemory(device_, image->image, image->memory, 0);
+  g_image_changes.fetch_add(1, std::memory_order_release);
   image->width = width;
   image->height = height;
   image->layers = layers;
   return true;
 }
 
+uint64_t PictureRingImageChanges() { return g_image_changes.load(std::memory_order_acquire); }
+
 void PictureRing::FreeImage(Image* image) {
-  if (image->image != VK_NULL_HANDLE) vkDestroyImage(device_, image->image, nullptr);
+  if (image->image != VK_NULL_HANDLE) {
+    vkDestroyImage(device_, image->image, nullptr);
+    g_image_changes.fetch_add(1, std::memory_order_release);
+  }
   if (image->memory != VK_NULL_HANDLE) vkFreeMemory(device_, image->memory, nullptr);
   *image = Image();
 }

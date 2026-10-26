@@ -302,8 +302,22 @@ inline void GpuQueueChecks() {
         "a rect that starts before the image is cut too", r.width, 15);
 }
 
+// The copies recorded one time (xr_copy_once): when a set of entries stays.
+inline void OnceSetChecks() {
+  using frame_loop::OnceSetValid;
+  Check(OnceSetValid(1380, 1104, 3, 1380, 1104, 3),
+        "a set stays with the same size and no new image of the ring", 1, 1);
+  Check(!OnceSetValid(1380, 1104, 3, 1380, 1104, 5),
+        "a set goes when the ring made or freed an image, also at the same size "
+        "(a slot that went to another size and back)", 0, 0);
+  Check(!OnceSetValid(1380, 1104, 3, 1024, 1104, 3), "a set goes at another width", 0, 0);
+  Check(!OnceSetValid(1380, 1104, 3, 1380, 800, 3), "a set goes at another height", 0, 0);
+  Check(!OnceSetValid(0, 0, 0, 1380, 1104, 0), "an empty set takes the first size", 0, 0);
+}
+
 inline void FrameLoopChecks() {
   RingChecks();
+  OnceSetChecks();
   CommandRingChecks();
   GpuQueueChecks();
   MenuRowChecks();

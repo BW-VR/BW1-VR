@@ -2692,8 +2692,11 @@ xr_pool_reset=1. ...".
   panel image) is a secondary command buffer that the session records one
   time, with its barriers, for each image of a slot, layer and swapchain
   image. Each frame then runs it with `vkCmdExecuteCommands`. The entries
-  of a set go when its source has another size (the ring makes the images
-  of a slot again at a new size), when its swapchains go, and at each start
+  of a set go when its source has another size, when the ring of the
+  pictures made or freed an image since their record (the ring makes the
+  images of a slot again at a new size, also for a slot that the session
+  never took, and a new image can have the handle of a freed one,
+  `frame_loop::OnceSetValid`), when its swapchains go, and at each start
   and end of the frame loop. A free waits for the idle queue of the
   session. A set has up to 48 entries, and a copy with no free entry is
   recorded in its frame. At the end of the app the log has "xr : the copies

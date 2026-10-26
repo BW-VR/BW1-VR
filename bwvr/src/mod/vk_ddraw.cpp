@@ -41,6 +41,7 @@
 #include <string.h>
 
 #include "../proxy/ddraw_proxy.h"
+#include "render_chain.h"
 #include "vk_core.h"
 #include "vk_ddraw.h"
 #include "vk_fallback.h"
@@ -106,6 +107,17 @@ void LogInterface(const char* who, REFIID id) {
 // surface). Its pixels are not the picture of the walks. The first 48 go
 // into the log with the address of the caller in the game.
 volatile LONG g_target_writes = 0;
+
+// THE WRITES OF THE GAME INTO A SURFACE (vk_state_skip, render_chain.h). The
+// count of each write, so a SetTexture after a write goes to the renderer
+// and the stream: the stream sends the pixels of a written surface at its
+// next use as a texture.
+volatile LONG g_surface_writes = 0;
+
+void SurfaceWritten(void* surface) {
+  InterlockedIncrement(&g_surface_writes);
+  VkSceneSurfaceWritten(surface);
+}
 
 void LogTargetWrite(const char* how, const RECT* rect, DWORD flags,
                     void* caller) {
@@ -613,13 +625,21 @@ class Device : public IDirect3DDevice7 {
   STDMETHOD(BeginScene)() override {
     if (in_scene_) return D3DERR_SCENE_IN_SCENE;
     in_scene_ = true;
+    RenderChainWalkBegin();
+    ChainDeviceScope chain(render_chain_math::kOther);
+    ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kOther);
     VkSceneWalkBegin(this);
     return D3D_OK;
   }
   STDMETHOD(EndScene)() override {
     if (!in_scene_) return D3DERR_SCENE_NOT_IN_SCENE;
     in_scene_ = false;
-    VkSceneWalkEnd();
+    {
+      ChainDeviceScope chain(render_chain_math::kOther);
+      ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kOther);
+      VkSceneWalkEnd();
+    }
+    RenderChainWalkEnd();
     return D3D_OK;
   }
   STDMETHOD(GetDirect3D)(LPDIRECT3D7* out) override;
@@ -639,6 +659,8 @@ class Device : public IDirect3DDevice7 {
   }
   STDMETHOD(Clear)(DWORD count, LPD3DRECT rects, DWORD flags, D3DCOLOR color,
                    D3DVALUE z, DWORD) override {
+    ChainDeviceScope chain(render_chain_math::kOther);
+    ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kOther);
     VkSceneClear(count, rects, flags, color, z);
     return D3D_OK;
   }
@@ -657,7 +679,9 @@ class Device : public IDirect3DDevice7 {
   }
   STDMETHOD(SetViewport)(LPD3DVIEWPORT7 v) override {
     if (v == nullptr) return DDERR_INVALIDPARAMS;
+    ChainDeviceScope chain(render_chain_math::kOther);
     viewport_ = *v;
+    ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kOther);
     VkSceneViewport(v);
     return D3D_OK;
   }
@@ -707,11 +731,22 @@ class Device : public IDirect3DDevice7 {
   }
   STDMETHOD(SetRenderState)(D3DRENDERSTATETYPE type, DWORD value) override {
     if (static_cast<uint32_t>(type) >= kStates) return DDERR_INVALIDPARAMS;
+    ChainDeviceScope chain(render_chain_math::kRenderState);
     if (recording_ != nullptr) {
       recording_->rs[type] = value;
       recording_->rs_set[type] = true;
     }
+    // vk_state_skip=1: the renderer and the stream have the value of the
+    // device, and a walk starts with the whole state of the device.
+    if (render_chain_math::SkipRenderState(rs_[type], value)) {
+      ++g_chain.same[render_chain_math::kRenderState];
+      if (g_chain_state_skip) {
+        ++g_chain.skipped[render_chain_math::kRenderState];
+        return D3D_OK;
+      }
+    }
     rs_[type] = value;
+    ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kRenderState);
     VkSceneRenderState(type, value);
     return D3D_OK;
   }
@@ -738,12 +773,14 @@ class Device : public IDirect3DDevice7 {
   STDMETHOD(PreLoad)(LPDIRECTDRAWSURFACE7) override { return D3D_OK; }
   STDMETHOD(DrawPrimitive)(D3DPRIMITIVETYPE type, DWORD fvf, LPVOID vertices,
                            DWORD count, DWORD) override {
+    ChainDeviceScope chain(render_chain_math::kDraw);
     DrawTriangles(type, fvf, vertices, count, nullptr, 0);
     return D3D_OK;
   }
   STDMETHOD(DrawIndexedPrimitive)(D3DPRIMITIVETYPE type, DWORD fvf,
                                   LPVOID vertices, DWORD count, LPWORD indices,
                                   DWORD index_count, DWORD) override {
+    ChainDeviceScope chain(render_chain_math::kDraw);
     DrawTriangles(type, fvf, vertices, count, indices, index_count);
     return D3D_OK;
   }
@@ -783,13 +820,27 @@ class Device : public IDirect3DDevice7 {
   }
   STDMETHOD(SetTexture)(DWORD stage, LPDIRECTDRAWSURFACE7 s) override {
     if (stage >= kStages) return DDERR_INVALIDPARAMS;
+    ChainDeviceScope chain(render_chain_math::kTexture);
     if (recording_ != nullptr) {
       recording_->texture[stage] = s;
       recording_->texture_set[stage] = true;
     }
+    // vk_state_skip=1: the stage has the surface, and no surface got a
+    // write since the renderer and the stream got it.
+    const uint32_t writes = static_cast<uint32_t>(g_surface_writes);
+    if (render_chain_math::SkipTexture(textures_[stage], s, writes,
+                                       texture_writes_[stage])) {
+      ++g_chain.same[render_chain_math::kTexture];
+      if (g_chain_state_skip) {
+        ++g_chain.skipped[render_chain_math::kTexture];
+        return D3D_OK;
+      }
+    }
     if (s != nullptr) s->AddRef();
     if (textures_[stage] != nullptr) textures_[stage]->Release();
     textures_[stage] = s;
+    texture_writes_[stage] = writes;
+    ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kTexture);
     VkSceneTexture(stage, s);
     return D3D_OK;
   }
@@ -807,9 +858,21 @@ class Device : public IDirect3DDevice7 {
     if (stage >= kStages || static_cast<uint32_t>(type) >= kStageStates) {
       return DDERR_INVALIDPARAMS;
     }
+    ChainDeviceScope chain(render_chain_math::kStageState);
     if (recording_ != nullptr) {
       recording_->ts[stage][type] = value;
       recording_->ts_set[stage][type] = true;
+    }
+    // vk_state_skip=1, as for a render state. D3DTSS_ADDRESS changes
+    // nothing only when the address modes of u and of v have the value too.
+    if (render_chain_math::SkipStageState(
+            reinterpret_cast<const uint32_t*>(ts_[stage]), kStageStates,
+            static_cast<uint32_t>(type), value)) {
+      ++g_chain.same[render_chain_math::kStageState];
+      if (g_chain_state_skip) {
+        ++g_chain.skipped[render_chain_math::kStageState];
+        return D3D_OK;
+      }
     }
     ts_[stage][type] = value;
     // In Direct3D 7 D3DTSS_ADDRESS sets the mode of u and of v.
@@ -817,6 +880,7 @@ class Device : public IDirect3DDevice7 {
       ts_[stage][D3DTSS_ADDRESSU] = value;
       ts_[stage][D3DTSS_ADDRESSV] = value;
     }
+    ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kStageState);
     VkSceneStageState(stage, type, value);
     return D3D_OK;
   }
@@ -827,6 +891,7 @@ class Device : public IDirect3DDevice7 {
   STDMETHOD(ApplyStateBlock)(DWORD handle) override {
     Block* b = BlockOf(handle);
     if (b == nullptr) return D3DERR_INVALIDSTATEBLOCK;
+    ChainDeviceScope chain(render_chain_math::kOther);
     for (uint32_t i = 0; i < kStates; ++i) {
       if (b->rs_set[i]) {
         SetRenderState(static_cast<D3DRENDERSTATETYPE>(i), b->rs[i]);
@@ -953,12 +1018,14 @@ class Device : public IDirect3DDevice7 {
       if (cull != D3DCULL_NONE) {
         VkSceneRenderState(D3DRENDERSTATE_CULLMODE, D3DCULL_NONE);
       }
+      ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kDraw);
       VkSceneDraw(D3DPT_TRIANGLELIST, fvf, prim_, made, nullptr, 0);
       if (cull != D3DCULL_NONE) {
         VkSceneRenderState(D3DRENDERSTATE_CULLMODE, cull);
       }
       return;
     }
+    ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kDraw);
     VkSceneDraw(type, fvf, vertices, count, indices, index_count);
   }
   D3DMATRIX* Transform(D3DTRANSFORMSTATETYPE type) {
@@ -999,6 +1066,9 @@ class Device : public IDirect3DDevice7 {
   DWORD rs_[kStates] = {};
   DWORD ts_[kStages][kStageStates] = {};
   IDirectDrawSurface7* textures_[kStages] = {};
+  // The count of the writes of the surfaces at the last SetTexture of each
+  // stage that went to the renderer (vk_state_skip).
+  uint32_t texture_writes_[kStages] = {};
   D3DVIEWPORT7 viewport_ = {};
   D3DMATERIAL7 material_ = {};
   D3DLIGHT7 lights_[kLights] = {};
@@ -1593,7 +1663,7 @@ HRESULT Surface::Lock(LPRECT rect, LPDDSURFACEDESC2 out, DWORD flags,
 HRESULT Surface::Unlock(LPRECT) {
   // The renderer reads a texture again at its next use when the game wrote
   // it.
-  if (locked_write_) VkSceneSurfaceWritten(this);
+  if (locked_write_) SurfaceWritten(this);
   locked_write_ = false;
   return DD_OK;
 }
@@ -1732,7 +1802,7 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
         Store(bits + y * pitch_ + x * bpp, bpp, fx->dwFillColor);
       }
     }
-    VkSceneSurfaceWritten(this);
+    SurfaceWritten(this);
     return DD_OK;
   }
   Surface* from = static_cast<Surface*>(from_s);
@@ -1773,7 +1843,7 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
     }
     memcpy(dst, src, bytes_);
     InterlockedIncrement(&g_copy_blts);
-    VkSceneSurfaceWritten(this);
+    SurfaceWritten(this);
     return DD_OK;
   }
   const bool same = sbpp == dbpp && sp.dwRBitMask == dp.dwRBitMask &&
@@ -1788,7 +1858,7 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
              static_cast<size_t>(dw) * dbpp);
     }
     InterlockedIncrement(&g_copy_blts);
-    VkSceneSurfaceWritten(this);
+    SurfaceWritten(this);
     return DD_OK;
   }
   const Packer packer(dp);
@@ -1814,7 +1884,7 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
       }
     }
     InterlockedIncrement(&g_dxt_blts);
-    VkSceneSurfaceWritten(this);
+    SurfaceWritten(this);
     return DD_OK;
   }
   // THE OTHER COPIES: the nearest pixel of the source, read with the
@@ -1859,7 +1929,7 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
     }
   }
   InterlockedIncrement(blocks ? &g_dxt_blts : &g_copy_blts);
-  VkSceneSurfaceWritten(this);
+  SurfaceWritten(this);
   return DD_OK;
 }
 
@@ -1878,6 +1948,8 @@ HRESULT Surface::BltFast(DWORD x, DWORD y, LPDIRECTDRAWSURFACE7 from,
 
 void Surface::Present() {
   InterlockedIncrement(&g_presents);
+  // The test keys of the way of a draw (render_chain.cpp), one time a frame.
+  RenderChainFrame();
   HWND window = clipper_ != nullptr ? clipper_->window() : nullptr;
   if (window == nullptr) window = draw_->window();
   if (window == nullptr) return;
@@ -2098,6 +2170,7 @@ void VkDdrawInstall(int lines) {
   hooks.create = &Create;
   ProxySetCreateHooks(hooks);
   VkSceneSetDirect(true);
+  RenderChainInstall();
   ModLog("vk ddraw     : backend=vulkan. DirectDraw 7 and Direct3D 7 of the "
          "mod, with the Vulkan renderer, and no dxwrapper and no Direct3D 9");
 }
@@ -2127,4 +2200,5 @@ void VkDdrawReport(unsigned long long frames) {
     g_unmade[i].count = 0;
   }
   ReleaseSRWLockExclusive(&g_unmade_lock);
+  RenderChainReport(frames);
 }

@@ -9,11 +9,13 @@
 #include <stdlib.h>
 
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "../common/bw_addresses.h"
 #include "one_walk.h"
 #include "quad_layer_math.h"
+#include "render_chain.h"
 #include "screen_quad_math.h"
 #include "stream_ring.h"
 #include "stream_split.h"
@@ -74,6 +76,11 @@ bool g_was_on = false;
 // pixels went in.
 std::set<uint64_t> g_known;
 std::set<uint64_t> g_with_pixels;
+// The ids of g_with_pixels in a table (vk_stream_surface_cache=1,
+// render_chain_math.h). Each write and each clear of the sets changes the
+// table too, also with the key at 0, so the key can change while the game
+// runs.
+render_chain_math::SurfaceCache g_surface_cache;
 
 // THE RING (vk_stream_live, stream_ring.h).
 struct Live {
@@ -113,6 +120,32 @@ struct Live {
 };
 Live g_live;
 LARGE_INTEGER g_ticks = {};
+
+// THE THREAD OF THE STREAM (vk_stream_worker=1, render_chain.h). The frame
+// thread gives a whole frame to the thread of the stream with a swap of the
+// writers, so the bytes of the frame are not copied again, and goes on with
+// the game. The thread puts the frame into the ring (LivePut). One frame at a
+// time: before the next frame, and before LiveFrame reads the state of the
+// ring, the frame thread waits until the thread is done. So the frames go
+// into the ring in their order, and only one thread uses g_live at a time.
+//
+// The two threads wait on a condition variable of Windows. Wine makes it
+// with a wait on an address of the process (a futex of Linux). An event is
+// an object of the server of Wine, and each wake of it is a call to that
+// server, so the frame thread would pay for that call in each frame.
+struct Worker {
+  HANDLE thread = nullptr;
+  SRWLOCK lock = SRWLOCK_INIT;
+  CONDITION_VARIABLE changed = CONDITION_VARIABLE_INIT;  // busy changed
+  bool failed = false;
+  volatile LONG busy = 0;  // 1 from the give to the end of LivePut
+  ss::Writer writer;       // the frame of the thread
+  uint64_t frame = 0;
+  bool keep = false;
+  uint64_t put_ticks = 0;  // the ticks of LivePut (render_chain_time=1)
+  bool counted = true;     // put_ticks is in the counts of the chain
+};
+Worker g_worker;
 
 // THE SCREENS WITH NO SCENE (vk_stream_screens, screen_quad_math.h).
 struct Screens {
@@ -171,8 +204,16 @@ ss::StreamState State() {
 void Surface(void* surface, bool pixels) {
   if (surface == nullptr) return;
   const uint64_t id = Id(surface);
+  // vk_stream_surface_cache=1: the table has each surface that the stream
+  // has with its pixels.
+  ++g_chain_stream.finds;
+  if (g_chain_surface_cache && g_surface_cache.Has(id)) {
+    ++g_chain_stream.cache_hits;
+    return;
+  }
   const bool known = g_known.count(id) != 0;
   const bool have = g_with_pixels.count(id) != 0;
+  if (have) g_surface_cache.Put(id);
   if (known && (!pixels || have)) return;
   ss::SurfaceBody body = {};
   body.surface = id;
@@ -188,6 +229,7 @@ void Surface(void* surface, bool pixels) {
     if (g_unit_record) g_surface_bytes += bytes;
     free(rgba);
     g_with_pixels.insert(id);
+    g_surface_cache.Put(id);
   } else {
     g_writer.Record(ss::kSurface, &body, sizeof(body));
   }
@@ -396,19 +438,110 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
   }
 }
 
+DWORD WINAPI WorkerMain(void*) {
+  for (;;) {
+    AcquireSRWLockExclusive(&g_worker.lock);
+    while (g_worker.busy == 0) {
+      SleepConditionVariableSRW(&g_worker.changed, &g_worker.lock, INFINITE, 0);
+    }
+    ReleaseSRWLockExclusive(&g_worker.lock);
+    const std::vector<uint8_t>& b = g_worker.writer.Bytes();
+    const uint64_t start = g_chain_time ? __rdtsc() : 0;
+    LivePut(g_worker.frame, b.data() + 8, static_cast<uint32_t>(b.size() - 8),
+            g_worker.keep);
+    g_worker.put_ticks = start != 0 ? render_chain_math::Elapsed(start, __rdtsc()) : 0;
+    AcquireSRWLockExclusive(&g_worker.lock);
+    InterlockedExchange(&g_worker.busy, 0);
+    ReleaseSRWLockExclusive(&g_worker.lock);
+    WakeAllConditionVariable(&g_worker.changed);
+  }
+}
+
+bool StartWorker() {
+  if (g_worker.thread != nullptr) return true;
+  if (g_worker.failed) return false;
+  g_worker.thread = CreateThread(nullptr, 0, &WorkerMain, nullptr, 0, nullptr);
+  if (g_worker.thread == nullptr) {
+    g_worker.failed = true;
+    ModLog("vk stream    : vk_stream_worker=1, but the thread of the stream "
+           "cannot start (error %lu). The frames go into the ring on the frame "
+           "thread",
+           GetLastError());
+    return false;
+  }
+  ModLog("vk stream    : the thread of the stream started. The frames of the "
+         "live stream go into the ring on it (vk_stream_worker=1)");
+  return true;
+}
+
+// The frame thread waits until the thread of the stream has put its frame
+// into the ring. The ticks of the wait (render_chain_time=1).
+uint64_t WaitWorker() {
+  if (g_worker.thread == nullptr) return 0;
+  uint64_t waited = 0;
+  if (InterlockedCompareExchange(&g_worker.busy, 0, 0) != 0) {
+    ++g_chain_stream.waits;
+    const uint64_t start = g_chain_time ? __rdtsc() : 0;
+    AcquireSRWLockExclusive(&g_worker.lock);
+    while (g_worker.busy != 0) {
+      SleepConditionVariableSRW(&g_worker.changed, &g_worker.lock, INFINITE, 0);
+    }
+    ReleaseSRWLockExclusive(&g_worker.lock);
+    if (start != 0) waited = render_chain_math::Elapsed(start, __rdtsc());
+    g_chain_stream.wait_ticks += waited;
+  }
+  if (!g_worker.counted) {
+    g_worker.counted = true;
+    g_chain_stream.put_ticks += g_worker.put_ticks;
+  }
+  return waited;
+}
+
+// The frame in g_writer goes to the thread of the stream. False when the
+// thread cannot start: the frame thread puts the frame.
+bool GiveWorker(uint64_t frame, bool keep) {
+  if (!StartWorker()) return false;
+  WaitWorker();
+  std::swap(g_writer, g_worker.writer);
+  g_writer.Clear();
+  g_worker.frame = frame;
+  g_worker.keep = keep;
+  g_worker.counted = false;
+  AcquireSRWLockExclusive(&g_worker.lock);
+  InterlockedExchange(&g_worker.busy, 1);
+  ReleaseSRWLockExclusive(&g_worker.lock);
+  WakeAllConditionVariable(&g_worker.changed);
+  ++g_chain_stream.worker_frames;
+  return true;
+}
+
 // The frame in g_writer is whole: it goes to the record and to the ring.
 void Deliver() {
+  // The time of the frame thread for the ring: the wait for the frame
+  // before, and the copy or the give.
+  const uint64_t chain_start = g_chain_time ? __rdtsc() : 0;
+  LARGE_INTEGER start = {};
+  const bool timed = TimeLogOn();
+  if (timed) QueryPerformanceCounter(&start);
+  WaitWorker();
   const std::vector<uint8_t>& b = g_writer.Bytes();
   const uint8_t* unit = b.data() + 8;  // after the head of a stream
   const size_t n = b.size() - 8;
   if (g_unit_record) g_record.insert(g_record.end(), unit, unit + n);
   if (g_unit_live && g_live.reader) {
+    ++g_chain_stream.frames;
+    g_chain_stream.record_bytes += n;
+    // vk_stream_worker=1: the thread of the stream puts the frame.
+    if (!g_chain_worker || !GiveWorker(g_unit_frame, g_unit_keep)) {
+      LivePut(g_unit_frame, unit, static_cast<uint32_t>(n), g_unit_keep);
+    }
     // time_log=1: the time of the write for the line of the times.
-    LARGE_INTEGER start = {};
-    const bool timed = TimeLogOn();
-    if (timed) QueryPerformanceCounter(&start);
-    LivePut(g_unit_frame, unit, static_cast<uint32_t>(n), g_unit_keep);
     if (timed) TimeLogStream(MsSince(start));
+  }
+  if (chain_start != 0) {
+    const uint64_t ticks = render_chain_math::Elapsed(chain_start, __rdtsc());
+    g_chain.ticks[render_chain_math::kHandover][render_chain_math::kOther] += ticks;
+    if (g_chain_device_depth > 0) g_chain.handover_in_device += ticks;
   }
 }
 
@@ -416,6 +549,9 @@ void Deliver() {
 // frame must have the whole state.
 bool LiveFrame(uint64_t frame, bool* reset) {
   if (!g_live.want) return false;
+  // The thread of the stream has the frame before in the ring, so g_live is
+  // of this thread alone now.
+  g_chain.ticks[render_chain_math::kHandover][render_chain_math::kOther] += WaitWorker();
   if (!g_live.tried && !LiveOpen()) g_live.want = false;
   if (g_live.head == nullptr) return false;
   sr::Head* h = g_live.head;
@@ -535,6 +671,7 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
     // a frame that the reader or the record does not have.
     g_known.clear();
     g_with_pixels.clear();
+    g_surface_cache.Clear();
     g_sent_pictures.Reset();
     g_writer.Record(ss::kStart, &g_options, sizeof(g_options));
     g_unit_keep = true;
@@ -561,6 +698,7 @@ void VkStreamGaze(bool valid, float gx, float gy) {
 
 void VkStreamWalkBegin(void* device7) {
   if (device7 == nullptr) return;
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kOther);
   IDirect3DDevice7* d = static_cast<IDirect3DDevice7*>(device7);
   ss::WalkBeginBody body = {};
   body.device = Id(device7);
@@ -612,16 +750,19 @@ void VkStreamWalkEnd() {
 }
 
 void VkStreamRenderState(uint32_t state, uint32_t value) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kRenderState);
   const uint32_t body[2] = {state, value};
   g_writer.Record(ss::kRenderState, body, sizeof(body));
 }
 
 void VkStreamStageState(uint32_t stage, uint32_t type, uint32_t value) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kStageState);
   const uint32_t body[3] = {stage, type, value};
   g_writer.Record(ss::kStageState, body, sizeof(body));
 }
 
 void VkStreamTexture(uint32_t stage, void* surface) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kTexture);
   Surface(surface, true);
   const ss::TextureBody body = {stage, 0, Id(surface)};
   g_writer.Record(ss::kTexture, &body, sizeof(body));
@@ -630,6 +771,7 @@ void VkStreamTexture(uint32_t stage, void* surface) {
 void VkStreamDraw(uint32_t type, uint32_t fvf, const void* vertices,
                   uint32_t vertex_count, const uint16_t* indices,
                   uint32_t index_count) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kDraw);
   ss::DrawBody body = {};
   body.state = State();
   body.type = type;
@@ -638,12 +780,15 @@ void VkStreamDraw(uint32_t type, uint32_t fvf, const void* vertices,
   body.index_count = indices != nullptr ? index_count : 0;
   body.vertex_bytes = vk_prim_math::FvfStride(fvf) * vertex_count;
   if (vertices == nullptr) body.vertex_bytes = 0;
+  g_chain_stream.vertex_bytes += body.vertex_bytes;
+  g_chain_stream.index_bytes += body.index_count * 2;
   g_writer.Record(ss::kDraw, &body, sizeof(body), vertices, body.vertex_bytes,
                   indices, body.index_count * 2);
   if (g_unit_record) ++g_draws;
 }
 
 void VkStreamTarget(void* surface) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kOther);
   Surface(surface, false);
   ss::TargetBody body = {};
   body.state = State();
@@ -654,6 +799,7 @@ void VkStreamTarget(void* surface) {
 
 void VkStreamViewport(const void* viewport7) {
   if (viewport7 == nullptr) return;
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kOther);
   const D3DVIEWPORT7* v = static_cast<const D3DVIEWPORT7*>(viewport7);
   ss::ViewportBody body = {v->dwX, v->dwY, v->dwWidth, v->dwHeight, v->dvMinZ, v->dvMaxZ};
   g_writer.Record(ss::kViewport, &body, sizeof(body));
@@ -661,6 +807,7 @@ void VkStreamViewport(const void* viewport7) {
 
 void VkStreamClear(uint32_t count, const void* rects, uint32_t flags,
                    uint32_t color, float z) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kOther);
   ss::ClearBody body = {rects != nullptr ? count : 0, flags, color, z};
   g_writer.Record(ss::kClear, &body, sizeof(body), rects,
                   body.count * static_cast<uint32_t>(sizeof(D3DRECT)));
@@ -704,6 +851,7 @@ void VkStreamWritten(void* surface) {
   if (surface == nullptr) return;
   Surface(surface, false);
   g_with_pixels.erase(Id(surface));
+  g_surface_cache.Drop(Id(surface));
   const uint64_t id = Id(surface);
   g_writer.Record(ss::kWritten, &id, sizeof(id));
   g_unit_keep = true;

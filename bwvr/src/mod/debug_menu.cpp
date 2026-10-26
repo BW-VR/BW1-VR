@@ -167,6 +167,13 @@ int XrHoldValue();
 void XrHoldToggle(const char* by);
 int FileReadAheadValue();
 void FileReadAheadToggle(const char* by);
+// The way of a draw to the headset app (render_chain.cpp).
+int RenderChainStateSkipValue();
+void RenderChainStateSkipToggle(const char* by);
+int RenderChainWorkerValue();
+void RenderChainWorkerToggle(const char* by);
+int RenderChainSurfaceCacheValue();
+void RenderChainSurfaceCacheToggle(const char* by);
 // The Hand (hand_direct.cpp, hand_exact.cpp, hand_feel.cpp, hand_model.cpp,
 // target_glow.cpp, take_stream.cpp, forest_take.cpp).
 int HandDirectReleaseAtOnceValue();
@@ -431,6 +438,15 @@ const Switch kSwitches[] = {
     {kGroupRender, L"Late end", L"End of walk does not wait",
      "render_thread_late_end", RenderThreadLateEndValue,
      RenderThreadLateEndToggle, L"wait|no wait"},
+    {kGroupRender, L"State skip", L"No call that changes nothing",
+     "vk_state_skip", RenderChainStateSkipValue, RenderChainStateSkipToggle,
+     L"off|on"},
+    {kGroupRender, L"Stream thread", L"Frame into the ring on own thread",
+     "vk_stream_worker", RenderChainWorkerValue, RenderChainWorkerToggle,
+     L"frame|own"},
+    {kGroupRender, L"Surface table", L"Stream finds surfaces in a table",
+     "vk_stream_surface_cache", RenderChainSurfaceCacheValue,
+     RenderChainSurfaceCacheToggle, L"sets|table"},
 
     // Interface
     {kGroupInterface, L"UI layer", L"Interface on its own layer", "ui_panel",

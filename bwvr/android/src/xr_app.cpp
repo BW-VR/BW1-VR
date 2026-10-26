@@ -1,7 +1,9 @@
 #include "xr_app.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/system_properties.h>
 #include <time.h>
 
 #include <mutex>
@@ -119,7 +121,17 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   xrEnumerateInstanceExtensionProperties(nullptr, count, &count,
                                          extensions.data());
   bool vulkan2 = false, android = false;
+  // THE FOVEATION OF THE RUNTIME (docs/android.md, "The sharpness of the
+  // middle"): the extensions for a log line. The app uses none of them.
+  static const char* const kFoveation[] = {
+      "XR_FB_foveation",       "XR_FB_foveation_configuration",
+      "XR_FB_foveation_vulkan", "XR_META_foveation_eye_tracked",
+      "XR_FB_swapchain_update_state", "XR_FB_composition_layer_settings"};
+  bool foveation[6] = {};
   for (const XrExtensionProperties& e : extensions) {
+    for (int i = 0; i < 6; ++i) {
+      if (strcmp(e.extensionName, kFoveation[i]) == 0) foveation[i] = true;
+    }
     if (strcmp(e.extensionName, XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME) == 0) {
       vulkan2 = true;
     }
@@ -137,6 +149,16 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
          "display rate: %s",
          count, vulkan2 ? "yes" : "no", android ? "yes" : "no",
          display_rate_ext_ ? "yes" : "no");
+  {
+    char list[256] = "";
+    size_t at = 0;
+    for (int i = 0; i < 6 && at < sizeof(list); ++i) {
+      at += snprintf(list + at, sizeof(list) - at, "%s%s %s", i == 0 ? "" : ", ",
+                     kFoveation[i], foveation[i] ? "yes" : "no");
+    }
+    AppLog("xr           : the extensions of the runtime for foveation and the filter of "
+           "the layers: %s", list);
+  }
   if (!vulkan2 || !android) return false;
 
   // XR_FB_display_refresh_rate only when the runtime lists it. A runtime with
@@ -183,6 +205,44 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   XrSystemProperties sp = {XR_TYPE_SYSTEM_PROPERTIES};
   xrGetSystemProperties(instance_, system_, &sp);
   AppLog("xr           : system %s, vendor 0x%X", sp.systemName, sp.vendorId);
+  // THE SIZE OF THE RUNTIME (docs/android.md, "The size of the eye
+  // pictures"): the values that can explain the size that it asks for.
+  AppLog("xr           : the system: swapchains of at most %u by %u, at most %u layers, "
+         "orientation tracking %s, position tracking %s",
+         sp.graphicsProperties.maxSwapchainImageWidth,
+         sp.graphicsProperties.maxSwapchainImageHeight, sp.graphicsProperties.maxLayerCount,
+         sp.trackingProperties.orientationTracking ? "yes" : "no",
+         sp.trackingProperties.positionTracking ? "yes" : "no");
+  {
+    uint32_t types = 0;
+    xrEnumerateViewConfigurations(instance_, system_, 0, &types, nullptr);
+    std::vector<XrViewConfigurationType> type(types);
+    if (types > 0) xrEnumerateViewConfigurations(instance_, system_, types, &types, type.data());
+    char list[160] = "";
+    size_t at = 0;
+    for (uint32_t i = 0; i < types && at < sizeof(list); ++i) {
+      at += snprintf(list + at, sizeof(list) - at, "%s%d", i == 0 ? "" : ", ",
+                     static_cast<int>(type[i]));
+    }
+    // The properties of Android that a tool of the headset can set for the
+    // size of the eyes (empty: not set).
+    static const char* const kProps[] = {"debug.oculus.textureWidth",
+                                         "debug.oculus.textureHeight",
+                                         "debug.oculus.refreshRate",
+                                         "debug.oculus.foveation.level",
+                                         "debug.oculus.gpuLevel", "debug.oculus.cpuLevel"};
+    char props[512] = "";
+    size_t pat = 0;
+    for (int i = 0; i < 6 && pat < sizeof(props); ++i) {
+      char value[PROP_VALUE_MAX] = "";
+      __system_property_get(kProps[i], value);
+      pat += snprintf(props + pat, sizeof(props) - pat, "%s%s=%s", i == 0 ? "" : ", ",
+                      kProps[i], value[0] != 0 ? value : "(empty)");
+    }
+    AppLog("xr           : the view configurations of the runtime: %s. The properties of "
+           "the system: %s",
+           types > 0 ? list : "none", props);
+  }
 
   uint32_t views = 0;
   xrEnumerateViewConfigurationViews(instance_, system_,
@@ -220,6 +280,15 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
     AppLog("xr           : the headset asks for %u by %u for each eye (at most %u by %u). "
            "%s",
            w, h, view[0].maxImageRectWidth, view[0].maxImageRectHeight, cap);
+    asked_width_ = w;
+    asked_height_ = h;
+    for (uint32_t i = 0; i < views; ++i) {
+      AppLog("xr           : view %u of the runtime: %u by %u (at most %u by %u), %u "
+             "samples (at most %u)",
+             i, view[i].recommendedImageRectWidth, view[i].recommendedImageRectHeight,
+             view[i].maxImageRectWidth, view[i].maxImageRectHeight,
+             view[i].recommendedSwapchainSampleCount, view[i].maxSwapchainSampleCount);
+    }
   }
 
   uint32_t modes = 0;
@@ -358,6 +427,40 @@ bool XrApp::MakeVulkan() {
                              "synchronization2 or multiview)",
          max_anisotropy_,
          shading_rate_ ? "yes" : "no");
+  // THE FOVEATION OF THE GPU (docs/android.md, "The sharpness of the
+  // middle"): a fragment density map, for a log line. The renderer uses none.
+  {
+    bool density = false, density2 = false, offset = false;
+    for (const VkExtensionProperties& e : extensions) {
+      if (strcmp(e.extensionName, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME) == 0) density = true;
+      if (strcmp(e.extensionName, VK_EXT_FRAGMENT_DENSITY_MAP_2_EXTENSION_NAME) == 0) density2 = true;
+      if (strcmp(e.extensionName, "VK_QCOM_fragment_density_map_offset") == 0) offset = true;
+    }
+    VkPhysicalDeviceFragmentDensityMapFeaturesEXT map = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
+    VkPhysicalDeviceFragmentDensityMapPropertiesEXT map_size = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT};
+    if (density && properties.apiVersion >= VK_API_VERSION_1_1) {
+      VkPhysicalDeviceFeatures2 query = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+      query.pNext = &map;
+      vkGetPhysicalDeviceFeatures2(gpu_.physical, &query);
+      VkPhysicalDeviceProperties2 props = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+      props.pNext = &map_size;
+      vkGetPhysicalDeviceProperties2(gpu_.physical, &props);
+    }
+    AppLog("xr           : the GPU for foveated rendering: VK_KHR_fragment_shading_rate %s, "
+           "VK_EXT_fragment_density_map %s (the map %s, images with no subsamples %s, "
+           "texels of %u by %u to %u by %u pixels), VK_EXT_fragment_density_map2 %s, "
+           "VK_QCOM_fragment_density_map_offset %s",
+           rate_extension ? "yes" : "no", density ? "yes" : "no",
+           map.fragmentDensityMap ? "yes" : "no",
+           map.fragmentDensityMapNonSubsampledImages ? "yes" : "no",
+           map_size.minFragmentDensityTexelSize.width,
+           map_size.minFragmentDensityTexelSize.height,
+           map_size.maxFragmentDensityTexelSize.width,
+           map_size.maxFragmentDensityTexelSize.height, density2 ? "yes" : "no",
+           offset ? "yes" : "no");
+  }
 
   // THE TWO QUEUES (frame_loop_queues=2): the session on the first with the
   // higher priority, the renderer on the second. The timeline semaphore of
@@ -1242,7 +1345,12 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
       {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
   XrCompositionLayerProjection projection = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-  const XrCompositionLayerBaseHeader* layers[kQuads + 1];
+  // THE CENTRE LAYER (fovea_res_layer=1): a second projection layer.
+  XrCompositionLayerProjectionView center_views[2] = {
+      {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
+      {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
+  XrCompositionLayerProjection center = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+  const XrCompositionLayerBaseHeader* layers[kQuads + 2];
   uint32_t count = 0;
   int used = 0;  // the quads in use
   // THE PROJECTION LAYER of the renderer, behind the menu: each eye with the
@@ -1269,6 +1377,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (CopyScreen(&eyes_, eye)) {
         shown_view_[eye] = newest_view_;
         view_shown_[eye] = view_newest_;
+        shown_atlas_[eye] = newest_atlas_;
         if (eye == 0) {
           shown_layers_ = newest_layers_;
           shown_frame_ = newest_frame_;
@@ -1302,6 +1411,24 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       v.subImage.imageRect.extent = {static_cast<int32_t>(eyes_.layer[eye].width),
                                      static_cast<int32_t>(eyes_.layer[eye].height)};
       v.subImage.imageArrayIndex = 0;
+      // THE MIDDLE AS ITS OWN LAYER: the layer of the whole view shows the
+      // outer image, and the centre layer the centre image of the same image
+      // of the swapchain, at the same pose, over the part of the view of its
+      // rect (fovea_res_math::CenterFov).
+      const fovea_res_math::Atlas& a = shown_atlas_[eye];
+      if (a.on) {
+        v.subImage.imageRect.offset = {a.outer[0], a.outer[1]};
+        v.subImage.imageRect.extent = {a.outer[2], a.outer[3]};
+        XrCompositionLayerProjectionView& c = center_views[eye];
+        c.pose = v.pose;
+        float fov[4];
+        fovea_res_math::CenterFov(e.fov, a.view, fov);
+        c.fov = {fov[0], fov[1], fov[2], fov[3]};
+        c.subImage.swapchain = v.subImage.swapchain;
+        c.subImage.imageRect.offset = {a.center[0], a.center[1]};
+        c.subImage.imageRect.extent = {a.center[2], a.center[3]};
+        c.subImage.imageArrayIndex = 0;
+      }
     }
     projection.layerFlags = 0;
     projection.space = local_;
@@ -1309,6 +1436,33 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     projection.views = views;
     layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
     ++projection_frames_;
+    // The centre layer only when both eyes have it. Its alpha goes to 0 at its
+    // edge, and its colors have no alpha in them.
+    if (shown_atlas_[0].on && shown_atlas_[1].on) {
+      center.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                          XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+      center.space = local_;
+      center.viewCount = 2;
+      center.views = center_views;
+      layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&center);
+      ++center_frames_;
+      if (!said_center_) {
+        said_center_ = true;
+        const fovea_res_math::Atlas& a = shown_atlas_[0];
+        AppLog("xr           : the centre of fovea_res goes out as a projection layer of "
+               "its own over the projection layer (fovea_res_layer=1): the outer image at "
+               "%d %d, %d by %d, and the centre image at %d %d, %d by %d of the swapchain, "
+               "the angles of view of the centre %.4f %.4f %.4f %.4f",
+               a.outer[0], a.outer[1], a.outer[2], a.outer[3], a.center[0], a.center[1],
+               a.center[2], a.center[3], center_views[0].fov.angleLeft,
+               center_views[0].fov.angleRight, center_views[0].fov.angleUp,
+               center_views[0].fov.angleDown);
+      }
+    }
+    if (!said_sharp_) {
+      said_sharp_ = true;
+      LogSharpness(shown_view_[0], shown_atlas_[0]);
+    }
     if (!said_projection_) {
       said_projection_ = true;
       const scene_stream::ViewBody& b = shown_view_[0];
@@ -1441,6 +1595,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         walls = true;
       } else if (r.kind == ql::kLayerEye) {
         swapchain = eyes_.layer[r.index].swapchain;
+        // With an atlas (fovea_res_layer=1) the window shows the same columns
+        // of the outer image.
+        fovea_res_math::OuterRect(shown_atlas_[r.index], eyes_.layer[0].width,
+                                  eyes_.layer[0].height, s.rect, s.rect);
       }
       XrCompositionLayerQuad& q = quads[used++];
       q.layerFlags = s.flags;
@@ -1956,7 +2114,85 @@ bool XrApp::MakeEyes(uint32_t width, uint32_t height) {
   }
   AppLog("xr           : a projection layer of two swapchains of %u by %u for "
          "the pictures of the renderer (stream_projection=1)", width, height);
+  LogViewSizes("at the first picture of the projection layer");
   return true;
+}
+
+// The size that the runtime asks for now, in the session, against the size
+// at the start of the app, and the display rate now: the runtime can give
+// another size at another start (docs/android.md, "The size of the eye
+// pictures").
+void XrApp::LogViewSizes(const char* when) {
+  uint32_t views = 0;
+  xrEnumerateViewConfigurationViews(instance_, system_, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+                                    0, &views, nullptr);
+  std::vector<XrViewConfigurationView> view(views, {XR_TYPE_VIEW_CONFIGURATION_VIEW});
+  if (views == 0 ||
+      XR_FAILED(xrEnumerateViewConfigurationViews(instance_, system_,
+                                                  XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+                                                  views, &views, view.data()))) {
+    return;
+  }
+  float hz = 0.0f;
+  if (get_rate_ != nullptr && session_ != XR_NULL_HANDLE) get_rate_(session_, &hz);
+  const uint32_t w = view[0].recommendedImageRectWidth;
+  const uint32_t h = view[0].recommendedImageRectHeight;
+  AppLog("xr           : %s the headset asks for %u by %u for each eye (at most %u by %u), "
+         "%s the size at the start of the app (%u by %u). The display rate is %.2f Hz",
+         when, w, h, view[0].maxImageRectWidth, view[0].maxImageRectHeight,
+         w == asked_width_ && h == asked_height_ ? "the same as" : "not",
+         asked_width_, asked_height_, hz);
+}
+
+// THE SHARPNESS OF THE MIDDLE (docs/android.md, "The sharpness of the
+// middle"): one line at the first picture of the projection layer. For each
+// step from the render to the panel, the pixels for each unit of tangent
+// across, and how many pixels of the panel one pixel covers in the middle of
+// the lens (eye_size.h). The view of the left eye of the runtime gives the
+// span of the panel.
+void XrApp::LogSharpness(const scene_stream::ViewBody& b, const fovea_res_math::Atlas& atlas) {
+  namespace es = eye_size;
+  XrViewLocateInfo locate = {XR_TYPE_VIEW_LOCATE_INFO};
+  locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+  locate.displayTime = frame_.predictedDisplayTime;
+  locate.space = local_;
+  XrViewState state = {XR_TYPE_VIEW_STATE};
+  XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+  uint32_t found = 0;
+  if (frame_.predictedDisplayTime == 0 ||
+      XR_FAILED(xrLocateViews(session_, &locate, &state, 2, &found, views)) || found != 2) {
+    return;
+  }
+  const float panel = es::PanelMiddle(es::kPanelWidth, tanf(views[0].fov.angleLeft),
+                                      tanf(views[0].fov.angleRight));
+  const float mean = es::PixelsPerTangent(static_cast<float>(es::kPanelWidth),
+                                          tanf(views[0].fov.angleLeft),
+                                          tanf(views[0].fov.angleRight));
+  const float picture = es::PixelsPerTangent(static_cast<float>(b.width),
+                                             tanf(b.eyes[0].fov[0]), tanf(b.eyes[0].fov[1]));
+  char steps[512];
+  if (atlas.mres) {
+    const float outer = picture * atlas.outer_scale, center = picture * atlas.center_scale;
+    snprintf(steps, sizeof(steps),
+             "the outer image %.0f (%.2f), the centre image %.0f (%.2f), %s",
+             outer, es::PanelPerPixel(panel, outer), center, es::PanelPerPixel(panel, center),
+             atlas.on ? "each image a layer of its own in the swapchain, copied pixel for pixel "
+                        "(fovea_res_layer=1)"
+                      : "the eye picture from the two with a linear filter, at the size of the "
+                        "render (fovea_res_layer=0)");
+  } else {
+    snprintf(steps, sizeof(steps), "no foveated resolution");
+  }
+  AppLog("xr           : the sharpness of the middle, in pixels for a unit of tangent across "
+         "(and the pixels of the panel that one pixel covers in the middle of the lens): the "
+         "panel %.0f in the middle (the mean %.0f, the view of the left eye %.3f to %.3f "
+         "radians), the render and the eye picture %u by %u %.0f (%.2f), %s. The swapchains of "
+         "%u by %u take a copy of the eye picture with no filter. The compositor samples them. "
+         "The textures: an anisotropic filter of up to %.0f, the mip level from the pixels of "
+         "each image",
+         panel, mean, views[0].fov.angleLeft, views[0].fov.angleRight, b.width, b.height,
+         picture, es::PanelPerPixel(panel, picture), steps, eyes_.layer[0].width,
+         eyes_.layer[0].height, max_anisotropy_);
 }
 
 // A set that cannot be made frees each part that it made, and the app does
@@ -2078,6 +2314,13 @@ void XrApp::MarkScreenChanged() {
 // One eye of the picture of the renderer into the next image of its
 // swapchain.
 bool XrApp::CopyScreen(Screen* screen, int eye) {
+  // The stereo screen shows the whole view: with an atlas (fovea_res_layer=1)
+  // the outer image at the top left of the picture.
+  if (screen == &screen_ && newest_atlas_.on) {
+    return CopyImage(screen, eye, screen_source_, static_cast<uint32_t>(eye),
+                     static_cast<uint32_t>(newest_atlas_.outer[2]),
+                     static_cast<uint32_t>(newest_atlas_.outer[3]));
+  }
   return CopyImage(screen, eye, screen_source_, static_cast<uint32_t>(eye),
                    source_width_, source_height_);
 }

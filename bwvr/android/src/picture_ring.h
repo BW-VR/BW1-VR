@@ -20,6 +20,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include "../../src/mod/fovea_res_math.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/screen_quad_math.h"
@@ -54,6 +55,9 @@ struct Picture {
   uint32_t height = 0;
   bool have_view = false;
   scene_stream::ViewBody view = {};  // view.frame also when have_view is false
+  // The rects of the outer and the centre image in the eye picture
+  // (fovea_res_layer=1, VkSceneEyesAtlas).
+  fovea_res_math::Atlas atlas = {};
   const quad_layer_math::FrameLayers* layers = nullptr;
   const quad_layer_math::AppPictures* cards = nullptr;
   VkImage panel = VK_NULL_HANDLE;  // the panel image of the picture, or none

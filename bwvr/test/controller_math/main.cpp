@@ -3578,6 +3578,7 @@ void CreatureChecks() {
 #include "vk_draw_checks.h"
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
+#include "sharp_checks.h"
 #include "menu_checks.h"
 #include "display_rate_checks.h"
 #include "vk_platform_checks.h"
@@ -4030,6 +4031,7 @@ int main() {
   vk_draw_checks::VkDrawChecks();
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
+  sharp_checks::SharpChecks();
   menu_checks::AllMenuChecks();
   display_rate_checks::DisplayRateChecks();
   vk_platform_checks::VkPlatformChecks();

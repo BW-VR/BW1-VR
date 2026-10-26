@@ -80,6 +80,11 @@ Summary:
   by 2208, with the aspect of the runtime (`eye_size_max=1`). So a runtime
   that asks for 4096 by 4291 does not make the render, the swapchains and
   the panel image 4096 by 4096 (see "The size of the eye pictures").
+- **The sharpness of the middle.** One line of the log gives the pixels of
+  each step from the render to the panel. With `fovea_res=1` and
+  `fovea_res_layer=1` the centre image of foveated resolution is a
+  projection layer of its own, so a centre of about 200 percent reaches the
+  panel in the middle of the lens (see "The sharpness of the middle").
 - **The time log.** While the game runs, the app and the mod log each 10 s
   where the time of a frame goes: the frames and the pictures, the CPU and
   the GPU, each thread of the game and of the app, and each core
@@ -173,7 +178,8 @@ Summary:
 | `test/controller_math/stall_checks.h` | The math checks of the filter of `box64_env`, of the environment of the game with the variables of Box64, of the row of the memory order of Box64, and of `stall_math.h` of the mod |
 | `test/controller_math/wow64_cpu_checks.h` | The math checks of the choice of the CPU DLL (`wow64_cpu`), of its value in the registry of the game, of the filter of `fex_env`, and of the row "Translator of the game (Box64 or FEX)" |
 | `tools/android/emu_game_test.ps1` | The game from the menu of the app in the Android emulator, with the test runtime |
-| `android/src/eye_size.h` | The cap of the size of the eyes that the app takes from the runtime (`eye_size_max`). No Android code |
+| `android/src/eye_size.h` | The cap of the size of the eyes that the app takes from the runtime (`eye_size_max`), and the pixels of the panel in the middle of the lens for the line of the sharpness. No Android code |
+| `test/controller_math/sharp_checks.h` | The math checks of the middle as its own layer (`fovea_res_math.h`: `PackAtlas`, `CenterFov`, `OuterRect`) and of the sharpness of the middle (`eye_size.h`) |
 | `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
 | `src/mod/time_log.cpp`, `src/mod/time_log_math.h` | The time log of the mod, and the stats and the rules that the app uses too. No Windows code in the header |
 | `test/controller_math/time_log_checks.h` | The math checks of the cap, of the lines of `/proc` and of the parts of a frame |
@@ -2559,6 +2565,23 @@ cap:
 xr           : the headset asks for 4096 by 4291 for each eye (at most 4096 by 4096). eye_size_max=1: the app takes 2064 by 2162, the panel of a Quest 3 (2064 by 2208) with the aspect of the headset
 ```
 
+**The values that can explain the size.** A Quest 3 with the same build and
+the same runtime (Oculus 209.147.0) asked for 1680 by 1760 at four starts
+and for 4096 by 4291 at one, each time with at most 8192 by 8192. The
+cause is not known, so the app logs at its start:
+
+- the system: the largest swapchain, the most layers, and the tracking,
+- each view of the runtime: the size that it asks for, the largest size,
+  and the samples,
+- the view configurations of the runtime, and the properties of Android
+  that a tool of the headset can set (`debug.oculus.textureWidth`,
+  `textureHeight`, `refreshRate`, `foveation.level`, `gpuLevel`,
+  `cpuLevel`, "(empty)" when not set),
+
+and at the first picture of the projection layer, in the session, the size
+that the runtime asks for then, if it is the size of the start, and the
+display rate then. The cap does not change until a log shows the cause.
+
 **The test runtime** asks for 2064 by 2208, or for the size in `eyes.txt`
 of its folder (`emu_game_test.ps1 -EyeSize 4096,4291`). `emu_game_test.ps1`
 checks the line of the log, `headset_width` and `headset_height` in
@@ -2584,6 +2607,104 @@ with the cap and 0.60 ms with no cap.
 
 **Not shown yet:** the cap in a headset, and why the Quest 3 asks for 4096
 by 4291.
+
+## The sharpness of the middle
+
+A projection layer maps its pixels linearly onto the tangents of its angles
+of view, so the sharpness of each image on the way to the panel is its
+pixels for a unit of tangent. The lens makes the middle of the panel denser
+than its mean: in the middle of the lens a unit of tangent has about 1.3
+times the mean pixels of the panel on each side (`eye_size::kLensMiddle`).
+The table has the values of a Quest 3 that asks for 1680 by 1760 (the view
+of the left eye -0.942 to 0.698 radians across, the render 2200 by 1760 of
+one walk, the half angle 60.74 degrees of the game):
+
+| Step | Pixels for a unit of tangent across | Pixels of the panel for one pixel, in the middle |
+| --- | --- | --- |
+| The panel in the middle of the lens | 1212 (the mean 934) | 1 |
+| The render of the game and the eye picture | 616 | 1.97 |
+| `fovea_res`: the outer image at 20 percent | 123 | 9.8 |
+| `fovea_res`: the centre image at 200 percent | 1232 | 0.98 |
+| `fovea_res_layer=0`: the centre in the eye picture, with a linear filter | 616 | 1.97 |
+| `fovea_res_layer=1`: the centre layer, pixel for pixel | 1232 | 0.98 |
+| The copies into the ring and into the swapchains | the same as the eye picture, no filter | |
+
+A start that asks for 4096 by 4291 has a render of 2702 by 2162: 757
+pixels, 1.60 pixels of the panel for one pixel.
+
+So the eye picture limits the middle. With `fovea_res_layer=0` a centre of
+200 percent goes into the eye picture at the size of the render
+(`ComposeMres` of `vk_scene.cpp`), and the headset gets no more pixels than
+the render has: the player sees a smoother middle, not a sharper one. With
+`fovea_res_layer=1` the centre image is a projection layer of its own
+(`backend.md`, "The middle as its own layer"), and a centre of about 200
+percent reaches the panel in the middle of the lens.
+
+**Why a layer of its own.** A swapchain larger than the panel, with fewer
+pixels at the edge, needs an eye picture of the size of the middle, about 2
+times the render on each side: 4 times the pixels for the eye picture, for
+the copy into the ring and for the copy into the swapchains, also where the
+outer image has few pixels. The centre layer has the pixels of the centre
+image only. Its eye picture keeps the size of the render, and the renderer
+draws the two images into it at their own size, pixel for pixel, in place
+of a draw of the whole eye picture from them. The compositor blends one more
+layer over the part of the view of the centre.
+
+**The foveation of the headset.** The log has the extensions of the
+runtime (`XR_FB_foveation`, `XR_FB_foveation_configuration`,
+`XR_FB_foveation_vulkan`, `XR_META_foveation_eye_tracked`,
+`XR_FB_swapchain_update_state`, `XR_FB_composition_layer_settings`) and of
+the GPU (`VK_KHR_fragment_shading_rate`, `VK_EXT_fragment_density_map` with
+its features and the size of its texels, `VK_EXT_fragment_density_map2`,
+`VK_QCOM_fragment_density_map_offset`). `XR_FB_foveation` acts on a render
+pass that draws into an image of a swapchain. The renderer draws into
+images of its own, and the app copies them into the swapchains, so it
+cannot act on the eye pictures. `VK_EXT_fragment_density_map` acts on a
+render pass of the renderer, but the GPU of the PC (Radeon RX 7900 XTX) and
+the emulator have none, so no run can show it. The emulator has no shading
+rate attachment either (`foveation`). The Quest 3 has a shading rate
+attachment. The outer image of `fovea_res` already has fewer pixels at the
+edge.
+
+**The textures.** The renderer of the app has an anisotropic filter of up
+to 16 (the log of the Quest: "filtering : anisotropic 16x, min=1 mag=1"),
+and a mip chain for each texture. The mip level comes from the pixels of
+the image of the draw, so the centre image at 200 percent takes the finer
+level. No texture is blurred by the filter, so there is no key for the
+filter.
+
+**The log.** One line at the first picture of the projection layer:
+
+```
+xr           : the sharpness of the middle, in pixels for a unit of tangent across (and the pixels of the panel that one pixel covers in the middle of the lens): the panel 1096 in the middle (the mean 843, the view of the left eye -0.942 to 0.820 radians), the render and the eye picture 1380 by 1104 387 (2.83), the outer image 155 (7.09), the centre image 773 (1.42), each image a layer of its own in the swapchain, copied pixel for pixel (fovea_res_layer=1). ...
+```
+
+With `fovea_res_layer=1` one more line says where the two images are in
+the swapchain and gives the angles of view of the centre layer.
+
+**The test runtime** reports the projection layers of a frame in one line
+(`projection` with the views of the first layer, then `projection flags N`
+with the views of each other layer), and its script aims with the views of
+the first projection layer. Each view of each layer gives a picture of the
+word `eyes` (`-p0` to `-p3` with the centre layer).
+
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
+-FrameLoop 1` with `fovea_res=1`, `fovea_res_outer_pct=40`,
+`fovea_res_center_pct=200`, `fovea_res_center_deg=22`,
+`fovea_res_center_down_deg=9`, render 1380 by 1104): 204 checks, 0 failed,
+with `fovea_res_layer` 1 and 0. With 1 the eye picture has the outer image
+of 552 by 442 at 0 0 and the centre image of 624 by 624 at 552 0, and each
+frame with a picture has two projection layers: the outer rect with the
+angles of the view, and the centre rect with the flags 6 (the blend of the
+source alpha, colors not multiplied) and the angles -0.3858 0.3814 0.2410
+-0.5115. A crop of the middle at the same zoom (300 by 300 pixels of the
+centre image, and the same part of the eye picture of 0 scaled by 2) has a
+mean gradient of the luma of 12.07 with 1 and 8.34 with 0 in game 1, and
+3.63 and 2.75 in game 2. The GPU of the emulator takes 0.24 to 0.44 ms for
+a walk in the test save with 1 and 0.24 to 0.41 ms with 0: at this render
+the difference is in the noise. Not shown: the blend of the compositor of a
+Quest 3, the GPU time in a Quest 3, and the sharpness through the lens.
 
 ## The frame loop
 

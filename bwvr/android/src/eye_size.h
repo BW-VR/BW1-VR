@@ -1,5 +1,5 @@
 // THE SIZE OF THE EYE PICTURES (eye_size_max, docs/android.md, "The size of
-// the eye pictures"). No Android code.
+// the eye pictures") and the sharpness of the middle. No Android code.
 //
 // The runtime gives the size of an eye that it asks for
 // (recommendedImageRectWidth and recommendedImageRectHeight). The app writes
@@ -60,6 +60,34 @@ inline Size Cap(uint32_t width, uint32_t height, uint32_t max_width, uint32_t ma
 inline Size FromKey(int eye_size_max, uint32_t width, uint32_t height) {
   if (eye_size_max == 0) return Cap(width, height, 0, 0);
   return Cap(width, height, kPanelWidth, kPanelHeight);
+}
+
+// THE SHARPNESS OF THE MIDDLE (docs/android.md, "The sharpness of the
+// middle"). A projection layer maps its pixels linearly onto the tangents of
+// its angles of view, so the sharpness of each image is its pixels for each
+// unit of tangent. The lens makes the middle of the panel denser than its
+// mean: in the middle of the lens one unit of tangent has about kLensMiddle
+// times the mean pixels of the panel on each side (a Quest 3).
+constexpr float kLensMiddle = 1.3f;
+
+// The pixels for each unit of tangent of `pixels` across the tangents tan_a
+// to tan_b. 0 for an empty span.
+inline float PixelsPerTangent(float pixels, float tan_a, float tan_b) {
+  const float span = tan_b - tan_a;
+  return span > 0.0f ? pixels / span : 0.0f;
+}
+
+// The pixels of the panel for each unit of tangent in the middle of the lens:
+// the panel across the view of the eye, times kLensMiddle.
+inline float PanelMiddle(uint32_t panel_pixels, float tan_a, float tan_b) {
+  return kLensMiddle * PixelsPerTangent(static_cast<float>(panel_pixels), tan_a, tan_b);
+}
+
+// How many pixels of the panel one pixel of an image covers on each side in
+// the middle of the lens. Above 1 the image limits the sharpness. 0 when the
+// image has no pixels.
+inline float PanelPerPixel(float panel_per_tangent, float image_per_tangent) {
+  return image_per_tangent > 0.0f ? panel_per_tangent / image_per_tangent : 0.0f;
 }
 
 }  // namespace eye_size

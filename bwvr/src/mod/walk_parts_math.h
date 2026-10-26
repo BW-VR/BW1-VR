@@ -126,10 +126,13 @@ struct Stack {
 // The mean and the most of each timer in the frames of a window.
 struct Window {
   uint64_t frames = 0;
+  // The ms of a tick of the clock of the timers. The sums are in ticks, so
+  // the rate can come at the end of the window (the TSC, which the
+  // performance counter of the system measures over the window).
   double ms_per_tick = 0.0;
   time_log_math::Stat calls[kMaxTimers];
-  time_log_math::Stat incl[kMaxTimers];
-  time_log_math::Stat excl[kMaxTimers];
+  time_log_math::Stat incl[kMaxTimers];  // ticks
+  time_log_math::Stat excl[kMaxTimers];  // ticks
   time_log_math::Stat pairs;  // the timed calls of a frame, timer 0 not counted
 
   // The frame of `s` ends: its sums go into the window.
@@ -138,8 +141,8 @@ struct Window {
     uint32_t n = 0;
     for (int i = 0; i < timers && i < kMaxTimers; ++i) {
       calls[i].Add(static_cast<double>(s.calls[i]));
-      incl[i].Add(static_cast<double>(s.incl[i]) * ms_per_tick);
-      excl[i].Add(static_cast<double>(s.excl[i]) * ms_per_tick);
+      incl[i].Add(static_cast<double>(s.incl[i]));
+      excl[i].Add(static_cast<double>(s.excl[i]));
       if (i > 0) n += s.calls[i];
     }
     pairs.Add(static_cast<double>(n));
@@ -151,11 +154,13 @@ struct Window {
     ms_per_tick = m;
   }
 
+  double Ms(double ticks) const { return ticks * ms_per_tick; }
+
   // The mean exclusive ms in a frame of all timers but timer 0.
   double TimedMs(int timers) const {
     double sum = 0.0;
     for (int i = 1; i < timers && i < kMaxTimers; ++i) sum += excl[i].Mean();
-    return sum;
+    return Ms(sum);
   }
 };
 
@@ -188,9 +193,9 @@ inline double Percent(double part, double whole) {
 // the start.
 inline int HeadLine(char* out, size_t size, const Window& w, int timers, double seconds,
                     double pair_ns) {
-  const double walk = w.incl[0].Mean();
+  const double walk = w.Ms(w.incl[0].Mean());
   const double timed = w.TimedMs(timers);
-  const double outside = w.excl[0].Mean();
+  const double outside = w.Ms(w.excl[0].Mean());
   const double cost = w.pairs.Mean() * pair_ns / 1.0e6;
   return snprintf(out, size,
                   "%.1f s, %llu frames with a scene walk. The walk in a frame, ms, the mean "
@@ -198,7 +203,7 @@ inline int HeadLine(char* out, size_t size, const Window& w, int timers, double 
                   "the walk), outside each timer %.2f ms (%.1f percent). %.0f timed calls in "
                   "a frame (most %.0f), at %.0f ns for each call about %.2f ms (%.1f percent "
                   "of the walk)",
-                  seconds, static_cast<unsigned long long>(w.frames), walk, w.incl[0].most, timed,
+                  seconds, static_cast<unsigned long long>(w.frames), walk, w.Ms(w.incl[0].most), timed,
                   Percent(timed, walk), outside, Percent(outside, walk), w.pairs.Mean(),
                   w.pairs.most, pair_ns, cost, Percent(cost, walk));
 }
@@ -210,8 +215,9 @@ inline int TimerLine(char* out, size_t size, const Window& w, int id, int rank,
   return snprintf(out, size,
                   "%2d. 0x%08X %s: calls in a frame %.1f (most %.0f), exclusive ms %.3f and "
                   "%.3f, inclusive ms %.3f and %.3f",
-                  rank, address, name, w.calls[id].Mean(), w.calls[id].most, w.excl[id].Mean(),
-                  w.excl[id].most, w.incl[id].Mean(), w.incl[id].most);
+                  rank, address, name, w.calls[id].Mean(), w.calls[id].most,
+                  w.Ms(w.excl[id].Mean()), w.Ms(w.excl[id].most), w.Ms(w.incl[id].Mean()),
+                  w.Ms(w.incl[id].most));
 }
 
 }  // namespace walk_parts_math

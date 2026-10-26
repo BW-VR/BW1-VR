@@ -114,10 +114,10 @@ inline void WalkPartsChecks() {
   s.excl[2] = 13000;
   w.AddFrame(s, 3);
   Check(w.frames == 2, "two frames", static_cast<double>(w.frames), 2);
-  Near("the walk: a mean of 12 ms", w.incl[0].Mean(), 12.0, 1e-9);
-  Near("the walk: the most 14 ms", w.incl[0].most, 14.0, 1e-9);
-  Near("timer 1: a mean of 3 ms (6 and 0)", w.excl[1].Mean(), 3.0, 1e-9);
-  Near("timer 2: a mean of 8 ms", w.excl[2].Mean(), 8.0, 1e-9);
+  Near("the walk: a mean of 12 ms", w.Ms(w.incl[0].Mean()), 12.0, 1e-9);
+  Near("the walk: the most 14 ms", w.Ms(w.incl[0].most), 14.0, 1e-9);
+  Near("timer 1: a mean of 3 ms (6 and 0)", w.Ms(w.excl[1].Mean()), 3.0, 1e-9);
+  Near("timer 2: a mean of 8 ms", w.Ms(w.excl[2].Mean()), 8.0, 1e-9);
   Near("the timed functions: 11 ms of 12", w.TimedMs(3), 11.0, 1e-9);
   Near("the timed calls: a mean of 16 in a frame", w.pairs.Mean(), 16.0, 1e-9);
   int ids[wp::kMaxTimers];
@@ -137,8 +137,13 @@ inline void WalkPartsChecks() {
   Check(strcmp(line, " 1. 0x007FF610 the land: calls in a frame 15.0 (most 20), exclusive ms "
                      "8.000 and 13.000, inclusive ms 8.000 and 13.000") == 0,
         "the line of a timer", 0, 0);
+  // The sums are in ticks: a rate that comes at the end of the window (the
+  // TSC) changes each ms of the window.
+  w.ms_per_tick = 0.0005;
+  Near("a rate at the end of the window: the walk 6 ms", w.Ms(w.incl[0].Mean()), 6.0, 1e-9);
+  Near("a rate at the end of the window: the timed functions 5.5 ms", w.TimedMs(3), 5.5, 1e-9);
   w.Reset();
-  Check(w.frames == 0 && w.ms_per_tick == 0.001, "a reset keeps the tick", 0, 0);
+  Check(w.frames == 0 && w.ms_per_tick == 0.0005, "a reset keeps the tick", 0, 0);
 }
 
 }  // namespace walk_parts_checks

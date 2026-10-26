@@ -388,6 +388,7 @@ bool g_headless_grab = false;
 bool g_skip_desktop = true;
 bool g_time_log = true;  // time_log
 int g_walk_parts = 0;  // walk_parts
+int g_walk_parts_clock = 1;  // walk_parts_clock
 char g_walk_parts_add[512] = "";  // walk_parts_add
 bool g_stall_modules = true;  // stall_modules
 char g_stall_addrs[512] = "";  // stall_addrs
@@ -1573,8 +1574,10 @@ void ReadSettings() {
   // the scene walk"), a test aid. walk_parts=0: no hook and no line. 1: each
   // 10 s the times of the timed functions of the walk. 2: the same with no
   // timer on each call of the device and of the renderer. walk_parts_add:
-  // more addresses of functions to time.
+  // more addresses of functions to time. walk_parts_clock=1: the timers read
+  // the time stamp counter of the CPU. 0: QueryPerformanceCounter.
   g_walk_parts = GetPrivateProfileIntA("bwvr", "walk_parts", 0, path);
+  g_walk_parts_clock = GetPrivateProfileIntA("bwvr", "walk_parts_clock", 1, path);
   GetPrivateProfileStringA("bwvr", "walk_parts_add", "", g_walk_parts_add,
                            sizeof(g_walk_parts_add), path);
   // THE MODULE LIST AT A STALL (stall_watch.cpp, docs/backend.md, "The
@@ -1957,7 +1960,7 @@ void StartVrStep() {
     // The input channel takes the place of the session and of the fake
     // sources, at the same places.
     TimeLogSetOn(g_time_log);
-    WalkPartsSetOptions(g_walk_parts, g_walk_parts_add);
+    WalkPartsSetOptions(g_walk_parts, g_walk_parts_clock, g_walk_parts_add);
     StallWatchStart(g_stall_modules, g_stall_addrs, g_test_stall_ms);
     LogBox64Environment();
     XrInputSetOptions(g_xr_input);

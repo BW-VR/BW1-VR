@@ -8,9 +8,10 @@
 
 // mod_main.cpp, at the start. mode: walk_parts=0 (the default) no hook and no
 // line. 1: each timer. 2: no timer on each call of the device and of the
-// Vulkan renderer. `add` is walk_parts_add: more addresses of functions to
-// time, with a comma between them, or empty.
-void WalkPartsSetOptions(int mode, const char* add);
+// Vulkan renderer. `clock` is walk_parts_clock: 1 the time stamp counter of
+// the CPU, 0 QueryPerformanceCounter. `add` is walk_parts_add: more
+// addresses of functions to time, with a comma between them, or empty.
+void WalkPartsSetOptions(int mode, int clock, const char* add);
 bool WalkPartsOn();
 // stereo.cpp, beside TimeLogWalk: a scene walk starts and ends. The first
 // walks make the hooks.

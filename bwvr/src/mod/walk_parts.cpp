@@ -27,10 +27,15 @@
 //                     Vulkan renderer of the mod
 //   walk_parts_add    more addresses to time, for example
 //                     walk_parts_add=0x007FF610,0x00879930
+//   walk_parts_clock  1 (the default): the clock of the timers is the time
+//                     stamp counter of the CPU, and the performance counter
+//                     gives its rate over each window. 0: each timer reads
+//                     QueryPerformanceCounter
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d.h>
+#include <intrin.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,8 +182,11 @@ bool g_frame_has_walk = false;
 unsigned long g_thread = 0;
 uint64_t g_walks = 0;
 uint32_t g_presents = 0;
-int64_t g_window_start = 0;
+int g_clock = 1;             // walk_parts_clock
+int64_t g_window_start = 0;  // the clock of the timers at the start of the window
+int64_t g_window_qpc = 0;    // the performance counter at the start of the window
 double g_pair_ns = 0.0;
+double g_tick_mhz = 0.0;  // the rate of the clock of the timers, from the measure
 LARGE_INTEGER g_hz = {};
 
 Timer g_timers[wp::kMaxTimers];
@@ -188,10 +196,25 @@ wp::Window g_window;
 uint8_t* g_stubs = nullptr;
 const int kStubBytes = 10;
 
-int64_t Now() {
+int64_t Qpc() {
   LARGE_INTEGER t;
   QueryPerformanceCounter(&t);
   return t.QuadPart;
+}
+
+// The clock of the timers. walk_parts_clock=1: the time stamp counter of the
+// CPU (RDTSC, under FEX the counter of the ARM timer), with no call of the
+// system. QueryPerformanceCounter of Wine can be a call of the system, and a
+// timer pair then costs more than most functions that it times. 0: the
+// performance counter.
+int64_t Now() {
+  if (g_clock == 1) return static_cast<int64_t>(__rdtsc());
+  return Qpc();
+}
+
+// The ms of the performance counter from `q0` to `q1`.
+double QpcMs(int64_t q0, int64_t q1) {
+  return static_cast<double>(q1 - q0) * 1000.0 / static_cast<double>(g_hz.QuadPart);
 }
 
 void __cdecl ExitThunk();
@@ -413,6 +436,8 @@ void AddTable(void* object, const Slot* slots, int count) {
 double MeasureCost() {
   const int kCalls = 20000;
   int (*volatile probe)(int) = &CostProbe;
+  const int64_t q_start = Qpc();
+  const int64_t n_start = Now();
   int64_t t0 = Now();
   for (int i = 0; i < kCalls; ++i) probe(i);
   const int64_t bare = Now() - t0;
@@ -433,12 +458,19 @@ double MeasureCost() {
   for (int i = 0; i < kCalls; ++i) probe(i);
   const int64_t timed = Now() - t0;
   g_calibrate = false;
+  const int64_t n_end = Now();
+  const int64_t q_end = Qpc();
   MH_DisableHook(reinterpret_cast<void*>(&CostProbe));
   MH_RemoveHook(reinterpret_cast<void*>(&CostProbe));
   g_timers[id] = Timer();
   g_stack.NewFrame();
-  const double ns = static_cast<double>(timed - bare) * 1.0e9 /
-                    static_cast<double>(g_hz.QuadPart) / kCalls;
+  // The rate of the clock of the timers over the measure.
+  const double span_ms = QpcMs(q_start, q_end);
+  if (n_end > n_start && span_ms > 0.0) {
+    g_tick_mhz = static_cast<double>(n_end - n_start) / span_ms / 1000.0;
+  }
+  if (g_tick_mhz <= 0.0) return 0.0;
+  const double ns = static_cast<double>(timed - bare) * 1000.0 / g_tick_mhz / kCalls;
   return ns > 0.0 ? ns : 0.0;
 }
 
@@ -522,9 +554,14 @@ void Install() {
          g_mode, g_count - 1, listed, enabled, g_pair_ns, 20000);
 }
 
-void Report(int64_t now) {
-  const double seconds = static_cast<double>(now - g_window_start) /
-                         static_cast<double>(g_hz.QuadPart);
+void Report(int64_t now, int64_t qpc) {
+  const double ms = QpcMs(g_window_qpc, qpc);
+  const double seconds = ms / 1000.0;
+  // The rate of the clock of the timers over the window. The rate of the
+  // performance counter is its frequency.
+  if (g_clock == 1 && now > g_window_start) {
+    g_window.ms_per_tick = ms / static_cast<double>(now - g_window_start);
+  }
   char line[512];
   wp::HeadLine(line, sizeof(line), g_window, g_count, seconds, g_pair_ns);
   ModLog("walk parts   : %s", line);
@@ -547,20 +584,24 @@ void Report(int64_t now) {
     ModLog("walk parts   : %d more timers from the lists of the engine, %d of them on", more, on);
   }
   g_window_start = Now();
+  g_window_qpc = Qpc();
 }
 
 }  // namespace
 
-void WalkPartsSetOptions(int mode, const char* add) {
+void WalkPartsSetOptions(int mode, int clock, const char* add) {
   g_mode = (mode == 1 || mode == 2) ? mode : 0;
+  g_clock = clock == 0 ? 0 : 1;
   g_add[0] = 0;
   if (add != nullptr) strncpy_s(g_add, sizeof(g_add), add, _TRUNCATE);
   QueryPerformanceFrequency(&g_hz);
   g_window.ms_per_tick = g_hz.QuadPart > 0 ? 1000.0 / static_cast<double>(g_hz.QuadPart) : 0.0;
   if (g_mode != 0) {
-    ModLog("walk parts   : walk_parts=%d, walk_parts_add=%s. The hooks come at the third "
-           "scene walk",
-           g_mode, g_add[0] != 0 ? g_add : "(none)");
+    ModLog("walk parts   : walk_parts=%d, walk_parts_clock=%d (%s), walk_parts_add=%s. The "
+           "hooks come at the third scene walk",
+           g_mode, g_clock,
+           g_clock == 1 ? "the time stamp counter of the CPU" : "QueryPerformanceCounter",
+           g_add[0] != 0 ? g_add : "(none)");
   }
 }
 
@@ -573,7 +614,9 @@ void WalkPartsWalk(bool begin) {
       if (++g_walks < 3) return;
       g_thread = ThisThreadId();
       Install();
+      if (g_tick_mhz > 0.0) g_window.ms_per_tick = 1.0 / (g_tick_mhz * 1000.0);
       g_window_start = Now();
+      g_window_qpc = Qpc();
     }
     if (g_failed || ThisThreadId() != g_thread) return;
     const int64_t now = Now();
@@ -582,10 +625,9 @@ void WalkPartsWalk(bool begin) {
       g_stack.NewFrame();
       g_presents = 0;
       g_frame_has_walk = false;
-      if (static_cast<double>(now - g_window_start) * g_window.ms_per_tick >=
-              time_log_math::kWindowMs &&
-          g_window.frames > 0) {
-        Report(now);
+      const int64_t qpc = Qpc();
+      if (QpcMs(g_window_qpc, qpc) >= time_log_math::kWindowMs && g_window.frames > 0) {
+        Report(now, qpc);
       }
     }
     g_stack.Push(0, Now(), 0, 0);

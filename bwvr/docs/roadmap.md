@@ -1143,6 +1143,14 @@ that moves while the Hand takes it.
   objects near the camera and in the draw methods of the objects on the
   land (the entry `+0x610` of each vtable), which no timer has yet, and `fn_00876910` (the triangles of a patch) is still x87
   code.
+- **N24. The SSE paths of the game, one at a time, in the headset**
+  (`game_sse_parts`, `game_sse_check`, `backend.md`, "The SSE paths of the
+  game, one at a time"). On the PC each of the 13 parts with its SSE path
+  gives the picture of the x87 path, and the compare shows only rounding.
+  Next on the Quest: `game_sse_parts=4095` with `game_sse_check=1` for the
+  part that gives the large polygons under FEX, then each bit alone with
+  `walk_parts=1` in the order of the doc. Open: the time of each path
+  under FEX.
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

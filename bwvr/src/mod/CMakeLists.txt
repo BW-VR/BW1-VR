@@ -37,6 +37,7 @@ add_library(bwvr_mod SHARED
     land_fast.cpp
     object_timer.cpp
     land_objects.cpp
+    game_sse_parts.cpp
     d3d7_count.cpp
     d3d7_thread.cpp
     thread_wait.cpp

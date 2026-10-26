@@ -2917,9 +2917,137 @@ patches), 0.192 and 0.228 ms in the window with 64 patches. The x87 unit of
 a PC is fast, and only the Quest under FEX shows the gain that counts.
 
 - Only a headset shows the time of the land under FEX with `land_fast=1`.
-- Not tried: `game_sse_path=1` on the Quest. It gives the SSE paths of the
-  game for the land, the triangles of a patch, the clip and the sprites.
-  Not known: whether that code of the game runs under FEX.
+- On the Quest `game_sse_path=1` gives large polygons across the view, and
+  the game is slower. "The SSE paths of the game, one at a time" turns on
+  each SSE path of the game alone.
+
+## The SSE paths of the game, one at a time
+
+`game_sse_parts` (`game_sse_parts.cpp`, `game_sse_parts_math.h`) gives
+each SSE path of the game a bit of its own. `fn_007ACA00` sets the flag
+`0x00EA9EB4` (through `fn_007AC9E0`) and the flag `0x00E83A20` from the
+class of the CPU: 1 only for the family 15 with SSE2. For the classes from
+0x80 up (a CPU of the family 6 with SSE2, and the Quest under FEX) it also
+sets the flush to zero of MXCSR (MXCSR 0x00009F80 on the Quest). Each
+function below starts with a test of its flag: when the flag is not 0, it
+calls code of its own with SSE and returns. The flag `0x00E83A30` has one
+more reader, a debug draw in `fn_005F89F0` that also needs the flag
+`0x00C37C00`, so it is no part.
+
+| Bit | The part | The function, its reader | The SSE code | Compare |
+| --- | --- | --- | --- | --- |
+| 1 | a patch of the land | `fn_00874AA0`, `0x00874AA6` | `fn_007A1800` | yes |
+| 2 | the triangles of a patch | `fn_00876910`, `0x00876913` | `fn_007AA8F0` | yes |
+| 4 | the triangles of a patch with clip | `fn_00875C60`, `0x00875C63` | `fn_007A98B0` | yes |
+| 8 | the clip of a triangle | `fn_0081A760`, `0x0081A760` and `0x0081A97D` | `fn_007A3A50` | yes |
+| 16 | the new vertex of a clip | `fn_0081DD90`, `0x0081DD96` | `fn_007A1480` | yes |
+| 32 | a sprite | `LH3DSprite::Draw` `fn_00840530`, `0x00840530` | `fn_007A8DB0` | no |
+| 64 | the test of a bounding sphere on the screen | `fn_00868C80`, `0x00868C82` | `fn_007AC640` | no |
+| 128 | the light of the land at a point | `fn_00801C90`, `0x00801C90` | `fn_007A3EC0` | yes |
+| 256 | the light of the land at a cell | `fn_00802120`, `0x00802120` | `fn_007A4170` | yes |
+| 512 | a tile of a texture of the land | `fn_008732C0`, `0x008732C3` | `fn_007AB4B0` | no |
+| 1024 | the blend of four tiles of a texture of the land | `fn_00871850`, `0x00871850` | `fn_007ABF90` | no |
+| 2048 | the spans of a byte map | `fn_00874440`, `0x00874446` | `fn_007AC4D0` | no |
+| 4096 | float to integer (flag `0x00E83A20`) | `fn_007A1400`, `0x007A1400` | `0x007A1414` | yes |
+
+The SSE clip of a triangle (`fn_007A3A50`) calls the SSE new vertex
+(`fn_007A1480`) itself. So bit 16 changes only the new vertices of the x87
+clip. The SSE code of a patch (`fn_007A1800`) calls the builders of the
+triangles at `0x007A2D14` and `0x007A2D23`, and they take the path of their
+own bit.
+
+**The patch.** `game_sse_parts=0` (the default) changes no code: each part
+reads the flag of the game (the class of the CPU, and `game_sse_path`).
+Another value is a sum of bits, and -1 is each part. Then the mod writes the
+address of a flag of its own into each reader, at the start of the hooks
+and before each other hook of the mod. A hook of MinHook on such a function
+(`sprite_up.cpp`, `hand_direct.cpp`, the timers of `walk_parts`) copies the
+patched reader into its trampoline. The flags of the mod change only at the
+end of a frame, so each eye pass of a frame has the same paths. A part with
+its bit takes its SSE path, and a part with no bit its x87 path, on each
+CPU. The log has one line for each part at the start (`game sse` lines).
+
+**The test key** (with `test_keys=1` and no compare): Ctrl, Shift and the
+backslash key (`VK_OEM_5`) change from the end of the frame between the
+mask and the flags of the game.
+
+**The compare.** `game_sse_check=1` (a test aid) runs each part of the mask
+two times on the same input: first with the flag 0 (the x87 path), then
+with the flag 1 (the SSE path). Between the two runs the hook puts back
+each global that the first run changed: the new vertex and its clip flags
+(bit 16), the count of the indices of the list `0x00EA9EA4`, the count of
+the vertices `0x00EA9EA8` and the flag `0x00EA9EB8` (bits 2, 4 and 8). The
+output of the SSE path stays. The light of the land gets two colors of its
+own for the x87 run. Float to integer runs the x87 path on a copy of ST0,
+and its compare uses no x87 register. The land is different: the SSE code
+of a patch does the work of the whole `fn_00874AA0` with its draws. So a
+stub at the two calls of the builders in `fn_007A1800` compares Table1 and
+Table0 at that moment with the vertices of `land_fast_math::Grid`, which
+gives the bits of the x87 loop of the game (land fast, `land_fast=2`) when
+the x87 unit has 24 bits and rounds to the nearest. The sprite, the sphere
+on the screen, the tiles and the spans draw, call a method of an object or
+change the state of the game, so they have no compare. Each 10 s the log
+has a line for each part: the calls, the calls that differ, the vertices
+and the values that differ, the largest difference of each float, the clip
+flags, the counts and the indices that differ, and the vertex with the
+largest difference. Float to integer also counts the differences for a
+value of 2^31 or more in size: the x87 path gives the low 32 bits of a 64
+bit integer, the SSE path 0x80000000. The x87 code writes no z for a new
+vertex that stays clipped, so that z is a value of before: the compare
+counts it apart ("z of clipped vertices"). The first 8 vertices that
+differ have a line of their own. The compare runs each part two times, so
+a run with it is no measure of the speed.
+
+**On the PC.** Desktop runs in the test save `temple` (an AMD CPU, about
+340 frames a second, 60 s each), one bit at a time with
+`game_sse_check=1`. The calls in a frame are for both eye passes. No run
+had large polygons, and the eye pictures of each bit look as the pictures
+of the x87 paths (`game_sse_path=0`).
+
+| Bit | Calls in a frame | The compare |
+| --- | --- | --- |
+| 1 | 54 | Each patch differs. x and y up to 0.004 pixels, rhw up to 0.0002, the same colors and texture coordinates. The SSE code sets more bits of the clip flags of a vertex that is off the screen (0x36 or 0x3E where the x87 loop sets 0x34) |
+| 2 | 37 | 0 differ (144000 calls in 10 s) |
+| 4 | 18 | x up to 0.0007 pixels, rhw up to 8e-6 in the new vertices of the clip |
+| 8 | 600 | x up to 0.44 pixels at a pixel of about 2900, rhw up to 0.01 in a vertex that stays clipped. The same counts and indices |
+| 16 | 1200 | x up to 0.008 pixels, w up to 0.01 in a vertex that stays clipped |
+| 32 | 175 | no compare |
+| 64 | 747 | no compare |
+| 128 | 140 | 0 differ (560000 calls in 10 s) |
+| 256 | 499 | Each call differs only in the alpha of the second color: 0 on the x87 path, 0xFF on the SSE path |
+| 512, 1024, 2048 | 0 in the scene walk of the run | no compare (no call) |
+| 4096 | 18650 | 0 differ for a value of less than 2^31 in size. About 2.8 percent of the calls have an infinity: the x87 path gives 0, the SSE path -2147483648 |
+
+The times of `walk_parts` in a frame of the same view, with each SSE path
+(`game_sse_parts=-1` as 8191) and with each x87 path (`game_sse_path=0`,
+`land_fast=1`): the scene walk 2.55 ms and 2.74 ms. Inclusive:
+`fn_00874AA0` 0.232 and 0.403 ms, `fn_00875C60` 0.041 and 0.101 ms,
+`fn_0081A760` 0.015 and 0.106 ms (218 and 903 calls, the x87 clip calls
+itself), `fn_00876910` 0.063 and 0.078 ms, `fn_00868C80` 0.035 and 0.039
+ms, `fn_00802120` 0.019 and 0.022 ms, `LH3DSprite::Draw` 0.034 and 0.038
+ms, `fn_00801C90` 0.006 and 0.009 ms. Float to integer is 0.38 ms on both
+paths (a timer costs 34 ns, and 18650 calls). The x87 unit of the PC is
+fast, so only the Quest shows the gain.
+
+The MXCSR of the game is 0x00009F80 on the PC and on the Quest: the class
+of each of the two CPUs sets the flush to zero. So the MXCSR is not the
+cause of the fault on the Quest, and the mod has no key for it.
+
+**The order of the test on the Quest.** First `game_sse_parts=4095`
+(each part with the flag `0x00EA9EB4`, as `game_sse_path=1`) with
+`game_sse_check=1`: the large polygons come again, and the `game sse`
+lines name each part with a compare whose output differs under FEX. Then
+each bit alone with `game_sse_check=0` and `walk_parts=1`, for the time:
+4096, 2, 384 (128 and 256), 1, 4, 8, 16, 32, 64, 3584 (512, 1024 and
+2048). Then the sum of the bits that give the same picture and less time.
+
+- Only a headset shows the parts under FEX: the differences of the compare,
+  the large polygons and the time of each path.
+- The emulator runs the 32 bit code of the game natively (x86_64, no FEX),
+  so it cannot show the fault of FEX.
+- Not known: which part gives the large polygons on the Quest, and whether
+  the sprite, the sphere on the screen, the tiles or the spans (no compare)
+  are in it.
 
 ## The objects on the land
 
@@ -6140,6 +6268,8 @@ keys that the launcher sets.
 | `land_objects_threads` | 0 | 0: one thread. N: N worker threads make the test of the view of the objects before their draws. A test key: Ctrl Shift F9. See "The objects on the land" |
 | `object_timer`, `object_timer_sites` | 0, empty | A test aid. 1: in the play, each 10 s the time of the draw of the objects and of each class and method of the objects. `object_timer_sites` gives more calls to time. A test key: Ctrl Shift F7. See "The timer of the objects" |
 | `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
+| `game_sse_parts` | 0 | 0: each part reads the flag of the game. A sum of bits: the parts with their bit take the SSE path of the game, the others the x87 path. -1: each part. A test key: Ctrl, Shift and the backslash key. See "The SSE paths of the game, one at a time" |
+| `game_sse_check` | 0 | A test aid. 1: each part of `game_sse_parts` with a compare runs on both paths, and the log has the differences. See "The SSE paths of the game, one at a time" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `crash_log` | 1 | 1: the log gets the first 8 C++ exceptions, an end of the game in `abort`, `terminate` or `_amsg_exit`, and a fault that no handler takes, each with the return addresses on its stack. 0: no line. See "The crash log" |
 | `crash_log_test`, `crash_log_caught_test` | 0, 0 | Test keys: at the frame N the frame thread throws a C++ exception that the mod does not catch (the game ends), or that the mod catches. See "The crash log" |

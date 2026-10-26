@@ -340,6 +340,17 @@ inline const Setting kSettings[] = {
      "while you play, so that you can compare, and the readme lists them. "
      "F12 saves a picture of each eye in the game folder. A player does "
      "not need this."},
+    {kInt, "game_sse_parts", "SSE paths of the game (bits)", nullptr, 0,
+     "A test of the speed. The game has code with SSE of its own for 13 "
+     "parts of its work. 0: the game chooses by the CPU, and the headset "
+     "gets the x87 code. Another number is a sum of bits, one bit for each "
+     "part: the parts with their bit get the SSE code of the game, the other "
+     "parts the x87 code. 1 is the land, 2 and 4 the triangles of the land, "
+     "8 and 16 the clip, 32 the sprites, 64 the test of an object on the "
+     "screen, 128 and 256 the light of the land, 512 and 1024 the textures "
+     "of the land, 2048 a map, 4096 the change of a number to an integer. "
+     "The doc backend.md of the mod lists them. A player does not need "
+     "this. The change counts from the next start."},
     {kBool, "debug_menu", "Debug menu", nullptr, 0,
      "Adds the item Debug to the ring of your left hand. It opens pages "
      "with the switches of the test keys, and a choice changes a switch at "

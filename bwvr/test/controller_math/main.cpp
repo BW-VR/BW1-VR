@@ -3607,6 +3607,7 @@ void CreatureChecks() {
 #include "address_space_checks.h"
 #include "large_block_checks.h"
 #include "render_chain_checks.h"
+#include "sse_parts_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4058,6 +4059,7 @@ int main() {
   address_space_checks::AddressSpaceChecks();
   large_block_checks::LargeBlockChecks();
   render_chain_checks::RenderChainChecks();
+  sse_parts_checks::SsePartsChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

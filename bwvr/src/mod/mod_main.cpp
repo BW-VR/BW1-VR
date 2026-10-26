@@ -30,6 +30,7 @@
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
 #include "fast_transform.h"
+#include "game_sse_parts.h"
 #include "land_fast.h"
 #include "land_objects.h"
 #include "object_timer.h"
@@ -641,6 +642,8 @@ int g_object_timer = 0;
 int g_land_objects = 1;
 int g_land_objects_threads = 0;
 char g_object_timer_sites[512] = "";
+int g_game_sse_parts = 0;  // game_sse_parts, game_sse_parts.h
+int g_game_sse_check = 0;  // game_sse_check
 int g_d3d7_count = 0;
 int g_d3d7_thread = 1;
 int g_d3d7_thread_merge = 1;
@@ -1700,6 +1703,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "object_timer", 0, path));
   GetPrivateProfileStringA("bwvr", "object_timer_sites", "", g_object_timer_sites,
                            sizeof(g_object_timer_sites), path);
+  g_game_sse_parts = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "game_sse_parts", 0, path));
+  g_game_sse_check = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "game_sse_check", 0, path));
   g_d3d7_count =
       GetPrivateProfileIntA("bwvr", "d3d7_count", 0, path) != 0 ? 1 : 0;
   g_d3d7_thread =
@@ -2631,6 +2638,7 @@ void __cdecl h_FinishFrame() {
   WalkPartsPresent();
   ObjectTimerFrame();
   LandObjectsFrame();
+  GameSsePartsFrame();
   UiBarsEnd(bars);
   ++g_frame;
   // The next reader of the input channel reads a new slot.
@@ -3074,6 +3082,10 @@ void Startup() {
   // The crash log: before each other hook, so an end of the game in its C
   // runtime has a line from the start (hang_watch.cpp).
   CrashLogInstall();
+  // Before each other hook: a hook on a function of a part then copies the
+  // patched reader of its flag (game_sse_parts.h).
+  GameSsePartsSetOptions(g_game_sse_parts, g_game_sse_check, g_test_keys);
+  GameSsePartsInstall();
   // Before the game makes its window, so the log has each call from the start.
   if (g_cursor_trace) CursorTraceInstall();
   // Before the game reads its profile, so the guard has each write.

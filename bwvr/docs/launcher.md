@@ -252,6 +252,7 @@ See `controllers.md` for the full controls.
 | --- | --- | --- |
 | Tell the game that there is no internet | on | Key `net_check_skip`. After the logos the game checks for an internet connection. In the headset this check can stop the game on the loading screen. On: the mod tells the game at once that there is no connection. Off: the game does its own check (`intro.md`, "The internet check"). |
 | Test keys | off | Key `test_keys`. Turns on the keys for tests. Each key changes one rule of the mod while the game runs, for a comparison. `backend.md` ("Keys for v1.0") and the player readme list them. F12 saves a picture of each eye in the game folder. A player does not need this. |
+| SSE paths of the game (bits) | 0 | Key `game_sse_parts`. A test of the speed. 0: the game chooses its SSE paths by the CPU. Another number is a sum of bits: each part of the game with its bit takes the SSE code of the game, each other part the x87 code (`backend.md`, "The SSE paths of the game, one at a time"). A player does not need this. |
 | Debug menu | off | Key `debug_menu`. The ring of the left hand gets the item Debug, with pages of the switches of the test keys. A choice changes a switch at once, so a comparison needs no keyboard (`controllers.md`, 10.8). It does not need "Test keys". A player does not need this. |
 
 F11 makes the direction of your head straight ahead. This key is always on.

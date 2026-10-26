@@ -206,10 +206,12 @@ double g_tick_mhz = 0.0;  // the rate of the clock of the timers, from the measu
 LARGE_INTEGER g_hz = {};
 
 Timer g_timers[wp::kMaxTimers];
-// Timer 0 is the scene walk, timer 1 the hook of the mod on FinishFrame.
-const int kHookTimer = 1;
-int g_count = 2;
-int g_hook_open = -1;  // the place of the open call of timer 1 on the stack, or -1
+// Timer 0 is the scene walk. The timers from kFirstHookTimer on are the hooks
+// of the mod that time themselves (WalkPartsScope), and the timers with stubs
+// come after them.
+const int kFirstHookTimer = 1;
+const int kFirstStubTimer = kFirstHookTimer + kWalkHookCount;
+int g_count = kFirstStubTimer;
 wp::Stack g_stack;
 wp::Window g_window;
 uint8_t* g_stubs = nullptr;
@@ -326,7 +328,7 @@ void MakeStub(int id) {
 }
 
 bool Known(uint32_t address) {
-  for (int i = 2; i < g_count; ++i) {
+  for (int i = kFirstStubTimer; i < g_count; ++i) {
     if (g_timers[i].address == address || g_timers[i].shown == address) return true;
   }
   return false;
@@ -585,9 +587,19 @@ void Install() {
   g_timers[0].shown = static_cast<uint32_t>(bw::game::kProcess3dEngine);
   _snprintf_s(g_timers[0].name, sizeof(g_timers[0].name), _TRUNCATE,
               "the scene walk, outside each timer");
-  g_timers[kHookTimer].shown = 0x0082F460;
-  _snprintf_s(g_timers[kHookTimer].name, sizeof(g_timers[kHookTimer].name), _TRUNCATE,
-              "h_FinishFrame, the hook of the mod on LH3DRender::FinishFrame");
+  {
+    const uint32_t shown[kWalkHookCount] = {0x0082F460, 0x0082F810, 0x0082A500, 0x0082A5B0};
+    const char* const names[kWalkHookCount] = {
+        "h_FinishFrame, the hook of the mod on LH3DRender::FinishFrame",
+        "h_DrawTriangle, the hook of the mod on LH3DRender::DrawTriangle",
+        "h_DrawAndClip, the hook of the mod on DrawAndClip",
+        "h_DrawAndClip2D, the hook of the mod on DrawAndClip2D"};
+    for (int h = 0; h < kWalkHookCount; ++h) {
+      Timer& t = g_timers[kFirstHookTimer + h];
+      t.shown = shown[h];
+      _snprintf_s(t.name, sizeof(t.name), _TRUNCATE, "%s", names[h]);
+    }
+  }
   for (const Fn& f : kGameFns) Add(f.address, f.name, f.group);
   // The calls of the hook of the mod on FinishFrame.
   struct ModFn {
@@ -666,7 +678,7 @@ void Install() {
     Add(a, name, kGame);
   }
   const int listed = ScanLists();
-  const int enabled = EnableFrom(2);
+  const int enabled = EnableFrom(kFirstStubTimer);
   g_pair_ns = MeasureCost();
   ModLog("walk parts   : walk_parts=%d. %d timers in the scene walks of the frame thread (%d "
          "of them from the lists of the engine), %d of them on. One timed call costs %.0f ns "
@@ -763,21 +775,23 @@ void WalkPartsWalk(bool begin) {
   g_frame_has_walk = true;
 }
 
-void WalkPartsHookBegin() {
-  g_hook_open = -1;
-  if (!g_in_walk || ThisThreadId() != g_thread) return;
-  if (g_stack.Push(kHookTimer, Now(), 0, 0)) g_hook_open = g_stack.depth - 1;
+int WalkPartsHookBegin(int hook) {
+  if (!g_in_walk || hook < 0 || hook >= kWalkHookCount || ThisThreadId() != g_thread) {
+    return -1;
+  }
+  return g_stack.Push(kFirstHookTimer + hook, Now(), 0, 0) ? g_stack.depth - 1 : -1;
 }
 
-void WalkPartsHookEnd() {
-  if (g_hook_open < 0) return;
-  if (g_in_walk && g_stack.depth > g_hook_open &&
-      g_stack.open[g_hook_open].id == kHookTimer) {
-    const int64_t now = Now();
-    while (g_stack.depth - 1 > g_hook_open) g_stack.DropTop();
-    g_stack.CloseTop(now);
+void WalkPartsHookEnd(int open) {
+  if (open < 0 || !g_in_walk || ThisThreadId() != g_thread) return;
+  const int id = g_stack.depth > open ? g_stack.open[open].id : -1;
+  if (id < kFirstHookTimer || id >= kFirstHookTimer + kWalkHookCount ||
+      g_stack.open[open].slot != 0) {
+    return;
   }
-  g_hook_open = -1;
+  const int64_t now = Now();
+  while (g_stack.depth - 1 > open) g_stack.DropTop();
+  g_stack.CloseTop(now);
 }
 
 void WalkPartsPresent() {

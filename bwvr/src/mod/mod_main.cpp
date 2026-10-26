@@ -2523,10 +2523,7 @@ void __cdecl h_FinishFrame() {
   }
   // The time of this hook in a scene walk (walk_parts, a test aid). The hook
   // reads its return address, so a timer cannot use a stub here.
-  struct WalkPartsHook {
-    WalkPartsHook() { WalkPartsHookBegin(); }
-    ~WalkPartsHook() { WalkPartsHookEnd(); }
-  } walk_parts_hook;
+  WalkPartsScope walk_parts_scope(kWalkHookFinishFrame);
   g_frame_thread = GetCurrentThreadId();
   // Only reads, and only with the table. See tabletop.cpp.
   TabletopCountLists();

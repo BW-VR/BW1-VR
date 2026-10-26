@@ -16,10 +16,25 @@ bool WalkPartsOn();
 // stereo.cpp, beside TimeLogWalk: a scene walk starts and ends. The first
 // walks make the hooks.
 void WalkPartsWalk(bool begin);
-// h_FinishFrame: the work of the hook of the mod on LH3DRender::FinishFrame in
-// a walk. The hook reads its return address, so it gets no stub of a timer:
-// these two calls time it.
-void WalkPartsHookBegin();
-void WalkPartsHookEnd();
+// THE HOOKS OF THE MOD THAT READ THEIR RETURN ADDRESS. A stub of a timer would
+// change it, so each of these hooks times itself with a WalkPartsScope.
+enum WalkPartsHook {
+  kWalkHookFinishFrame = 0,  // h_FinishFrame, mod_main.cpp
+  kWalkHookDrawTriangle,     // h_DrawTriangle, draw_hooks.cpp
+  kWalkHookDrawAndClip,      // h_DrawAndClip, draw_hooks.cpp
+  kWalkHookDrawAndClip2D,    // h_DrawAndClip2D, draw_hooks.cpp
+  kWalkHookCount
+};
+// The call of the hook starts. Gives the place of its timer on the stack of
+// the timers, or -1 when no timer runs.
+int WalkPartsHookBegin(int hook);
+void WalkPartsHookEnd(int open);
+struct WalkPartsScope {
+  explicit WalkPartsScope(int hook) : open(WalkPartsHookBegin(hook)) {}
+  ~WalkPartsScope() { WalkPartsHookEnd(open); }
+  WalkPartsScope(const WalkPartsScope&) = delete;
+  WalkPartsScope& operator=(const WalkPartsScope&) = delete;
+  int open;
+};
 // h_FinishFrame, beside TimeLogPresent: the present of a frame.
 void WalkPartsPresent();

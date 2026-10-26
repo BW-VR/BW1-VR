@@ -101,6 +101,7 @@
 #include "note_depth.h"
 #include "subtitle_card_math.h"
 #include "ui_panel.h"
+#include "walk_parts.h"
 
 extern void ModLog(const char* format, ...);
 void ControllersGesturePulse(float amplitude, float seconds);
@@ -2619,6 +2620,9 @@ void DrawAdvisor(void* verts, uint32_t count,
 
 void __cdecl h_DrawAndClip(D3DPRIMITIVETYPE type, uint32_t fvf, void* verts,
                            uint32_t count, uint16_t* idx, uint32_t n) {
+  // The time of this hook (walk_parts). It reads its return address, so a
+  // timer cannot use a stub here.
+  WalkPartsScope walk_parts_scope(kWalkHookDrawAndClip);
   const uint32_t outer = g_caller;
   g_caller = reinterpret_cast<uint32_t>(_ReturnAddress());
   // A mesh that the engine clips comes this way. The mesh of a target of the
@@ -2643,6 +2647,7 @@ void __cdecl h_DrawAndClip(D3DPRIMITIVETYPE type, uint32_t fvf, void* verts,
 
 void __cdecl h_DrawAndClip2D(D3DPRIMITIVETYPE type, uint32_t fvf, void* verts,
                              uint32_t count, uint16_t* idx, uint32_t n) {
+  WalkPartsScope walk_parts_scope(kWalkHookDrawAndClip2D);
   const uint32_t outer = g_caller;
   g_caller = reinterpret_cast<uint32_t>(_ReturnAddress());
   DrawInterface(o_DrawAndClip2D, type, fvf, verts, count, idx, n);
@@ -2658,6 +2663,9 @@ void __cdecl h_DrawAndClip2D(D3DPRIMITIVETYPE type, uint32_t fvf, void* verts,
 // those first vertices tracks the nearest geometry closely enough to aim at.
 void __fastcall h_DrawTriangle(void* verts, uint32_t count, uint16_t* idx,
                                uint32_t n) {
+  // The time of this hook (walk_parts). It reads its return address, so a
+  // timer cannot use a stub here.
+  WalkPartsScope walk_parts_scope(kWalkHookDrawTriangle);
   // World geometry never goes to the interface panel.
   PanelRelease();
   // The mesh of a target of the Hand gets its glow (target_glow.cpp).

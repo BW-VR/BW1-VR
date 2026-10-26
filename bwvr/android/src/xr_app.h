@@ -269,8 +269,17 @@ class XrApp {
   // the ring. The quad copies from the shown slot only, which the play thread
   // does not write. The picture does not change, so the quad gets no copy.
   void MoveScreenQuadImage(VkImage image) {
-    if (flat_on_ && !flat_cpu_ && image != VK_NULL_HANDLE) flat_source_ = image;
+    if (flat_on_ && !flat_cpu_ && image != VK_NULL_HANDLE) {
+      flat_source_ = image;
+      flat_frozen_ = false;
+    }
   }
+  // THE FRAME LOOP: the session leaves the shown slot (a new slot, or the end
+  // of the game). No layer copies again from an image of that slot: the
+  // play thread can write it, or it can go. A layer keeps its image until a
+  // new source (SetScreenSource, MarkScreenChanged, the panel of
+  // SetScreenLayers, SetScreenQuadImage, MoveScreenQuadImage).
+  void FreezeSlotSources() { eyes_frozen_ = panel_frozen_ = flat_frozen_ = true; }
   // The pictures of the world come again, or the game ended.
   void ClearScreenQuad() { flat_on_ = false; }
   bool ScreenQuadShown() const { return flat_on_; }
@@ -391,6 +400,9 @@ class XrApp {
   std::vector<Layer*> StagingLayers();
   bool frame_loop_ = false;
   bool image_wait_ = false;
+  bool eyes_frozen_ = false;   // screen_source_ is in a slot that the session left
+  bool panel_frozen_ = false;  // panel_source_ too
+  bool flat_frozen_ = false;   // flat_source_ too
   int queues_wanted_ = 2;
   VkQueue queue2_ = VK_NULL_HANDLE;
   bool renderer_second_ = false;

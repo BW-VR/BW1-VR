@@ -662,6 +662,9 @@ void StopPlayThread(App* app) {
 bool TakePicture(App* app) {
   const Picture* p = app->ring.Take(app->xr.SessionSerial());
   if (p == nullptr) return false;
+  // The slot before is free now: no layer copies from it again. The new
+  // picture gives the new sources.
+  app->xr.FreezeSlotSources();
   ShowPicture(app, *p);
   app->shown_last = p->last_frame;
   app->shown_play_ms = p->play_start_ms;
@@ -980,7 +983,15 @@ void Play(App* app, bool new_game) {
   }
   app->xr.SetImageWait(image_wait);
   app->xr.SetFrameLoop(loop);
-  if (loop) StartPlayThread(app);
+  if (loop) {
+    StartPlayThread(app);
+    // With no play thread the thread of the session plays: the old loop.
+    if (!app->play_running) {
+      app->xr.SetFrameLoop(false);
+      app->time.SetFrameLoop(false);
+      AppLog("game         : no play thread, so this game has the old loop");
+    }
+  }
 }
 
 // THE MENU BUTTON at each frame of the session while the game runs
@@ -1025,6 +1036,7 @@ void GameTick(App* app) {
   // renderer again, and no slot of the ring shows.
   if (app->play_running) {
     StopPlayThread(app);
+    app->xr.FreezeSlotSources();
     app->ring.Clear(app->xr.SessionSerial());
   }
   app->xr.SetFrameLoop(false);

@@ -46,22 +46,38 @@ VkCommandBuffer RingBegin(Gpu* gpu) {
     const Gpu::RingEntry& e = gpu->ring_entries[next];
     next_done = e.serial == 0 || vkGetFenceStatus(gpu->device, e.fence) == VK_SUCCESS;
   }
-  const frame_loop::CommandPick pick = gpu->ring_order.Pick(next_done);
-  if (pick.grow) {
-    Gpu::RingEntry e;
+  // A new entry is made before the pick. When it cannot be made, the ring
+  // does not grow and waits for its least recently used entry.
+  Gpu::RingEntry made;
+  bool can_grow = true;
+  if (gpu->ring_order.WillGrow(next_done)) {
     VkCommandBufferAllocateInfo alloc = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     alloc.commandPool = gpu->pool;
     alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
     VkFenceCreateInfo fence = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    if (vkAllocateCommandBuffers(gpu->device, &alloc, &e.cmd) != VK_SUCCESS ||
-        vkCreateFence(gpu->device, &fence, nullptr, &e.fence) != VK_SUCCESS) {
-      AppLog("gpu          : the ring of command buffers cannot grow (vkAllocateCommandBuffers "
-             "or vkCreateFence)");
+    if (vkAllocateCommandBuffers(gpu->device, &alloc, &made.cmd) != VK_SUCCESS) {
+      made.cmd = VK_NULL_HANDLE;
+    } else if (vkCreateFence(gpu->device, &fence, nullptr, &made.fence) != VK_SUCCESS) {
+      made.fence = VK_NULL_HANDLE;
+      vkFreeCommandBuffers(gpu->device, gpu->pool, 1, &made.cmd);
+      made.cmd = VK_NULL_HANDLE;
     }
-    e.query = gpu->ring_queries++;
-    gpu->ring_entries.insert(gpu->ring_entries.begin() + pick.index, e);
+    can_grow = made.cmd != VK_NULL_HANDLE;
+    if (!can_grow) {
+      AppLog("gpu          : the ring of command buffers cannot grow (vkAllocateCommandBuffers "
+             "or vkCreateFence)%s",
+             gpu->ring_order.Count() > 0 ? ", so it waits for its oldest entry"
+                                         : ", and it has no entry. The copies of the frame "
+                                           "do not go out");
+    }
+  }
+  const frame_loop::CommandPick pick = gpu->ring_order.Pick(next_done, can_grow);
+  if (pick.index < 0) return VK_NULL_HANDLE;
+  if (pick.grow) {
+    made.query = gpu->ring_queries++;
+    gpu->ring_entries.insert(gpu->ring_entries.begin() + pick.index, made);
     if (gpu->ring_order.Count() > 1) ++gpu->ring_grows;
   }
   Gpu::RingEntry& e = gpu->ring_entries[pick.index];

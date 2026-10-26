@@ -159,6 +159,18 @@ inline void CommandRingChecks() {
   }
   Check(grows == 3 && waits == 0 && d.Count() == 3,
         "1000 picks, the GPU behind for the first three: 3 entries, no wait", grows, 3);
+  // A new entry that the caller could not make: no growth, a wait for the
+  // least recently used entry, or no entry at all.
+  fl::CommandRing e(4);
+  Check(e.WillGrow(true) && e.Pick(true, false).index == -1 && e.Count() == 0,
+        "no entry and none can be made: index -1, the ring stays empty", e.Count(), 0);
+  e.Pick(true);
+  Check(e.WillGrow(false) && !e.WillGrow(true), "one entry: it grows only when the GPU is "
+        "not done", 0, 0);
+  fl::CommandPick f = e.Pick(false, false);
+  Check(!f.grow && f.wait && f.index == 0 && e.Count() == 1,
+        "the GPU is not done and no entry can be made: a wait for the entry, no growth",
+        e.Count(), 1);
 
   Check(fl::SerialDone(5, 5) && fl::SerialDone(4, 5) && !fl::SerialDone(6, 5),
         "a serial at or below the finished serial is finished", 0, 0);

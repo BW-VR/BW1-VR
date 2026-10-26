@@ -135,11 +135,23 @@ class CommandRing {
   int Most() const { return most_; }
   // The entry that the next Pick checks: the least recently used.
   int Next() const { return next_; }
+  // True when Pick(next_done) gives a new entry, so the caller can make its
+  // command buffer and its fence first.
+  bool WillGrow(bool next_done) const {
+    return count_ == 0 || (!next_done && count_ < most_);
+  }
   // next_done: the GPU finished the entry Next(), or it has no submit yet.
-  CommandPick Pick(bool next_done) {
+  // can_grow: false when the caller could not make a new entry. Then the
+  // least recently used entry comes with a wait. With no entry at all the
+  // index is -1.
+  CommandPick Pick(bool next_done, bool can_grow = true) {
     CommandPick p;
     p.index = next_;
-    if (count_ == 0 || (!next_done && count_ < most_)) {
+    if (!can_grow && count_ == 0) {
+      p.index = -1;
+      return p;
+    }
+    if (can_grow && WillGrow(next_done)) {
       // The new entry is the most recently used. The old entry at the index
       // moves up by one and stays the least recently used.
       p.grow = true;

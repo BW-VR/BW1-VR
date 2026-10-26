@@ -770,6 +770,9 @@ bool XrApp::LayerChanged(Layer* layer) {
 // takes a released image in the layout of a color attachment.
 void XrApp::CopyLayer(Layer* layer) {
   if (!LayerChanged(layer)) return;
+  // With no command buffer (the ring could not make one) the frame copies
+  // nothing.
+  if (frame_loop_ && FrameCommands() == VK_NULL_HANDLE) return;
   if (frame_loop_ && layer->dirty) {
     // New pixels go into the staging buffer only when the GPU finished the
     // last copy of it. Until then the layer keeps its image.
@@ -1597,6 +1600,7 @@ void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
     if (layers.card[c]) TakeCard(c, layers.cards[c], pictures);
   }
   panel_source_ = layers.panel ? panel : VK_NULL_HANDLE;
+  panel_frozen_ = false;
   panel_width_ = panel_width;
   panel_height_ = panel_height;
   // A new picture has a new panel image.
@@ -1631,6 +1635,7 @@ void XrApp::SetScreenQuadImage(const scene_stream::ScreenBody& body, VkImage ima
   flat_body_ = body;
   flat_cpu_ = false;
   flat_source_ = image;
+  flat_frozen_ = false;
   flat_layer_ = layer;
   flat_width_ = image_width;
   flat_height_ = image_height;
@@ -1921,11 +1926,13 @@ void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
   screen_source_ = image;
   source_width_ = image_width;
   source_height_ = image_height;
+  eyes_frozen_ = false;
 }
 
 void XrApp::MarkScreenChanged() {
   for (Layer& l : screen_.layer) ++l.revision;
   for (Layer& l : eyes_.layer) ++l.revision;
+  eyes_frozen_ = false;
 }
 
 // One eye of the picture of the renderer into the next image of its
@@ -1938,6 +1945,11 @@ bool XrApp::CopyScreen(Screen* screen, int eye) {
 bool XrApp::CopyImage(Screen* screen, int index, VkImage source,
                       uint32_t source_layer, uint32_t source_width,
                       uint32_t source_height) {
+  // A source in a slot that the session left gives no copy (FreezeSlotSources).
+  const bool frozen = (screen == &panel_) ? panel_frozen_
+                      : (screen == &flat_) ? flat_frozen_
+                                           : eyes_frozen_;
+  if (frozen) return false;
   if (frame_loop_) {
     return CopySlot(screen, index, source, source_layer, source_width, source_height);
   }
@@ -2059,10 +2071,13 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
       return false;
     }
   }
+  // With no command buffer (the ring could not make one) the frame copies
+  // nothing.
+  VkCommandBuffer cmd = FrameCommands();
+  if (cmd == VK_NULL_HANDLE) return false;
   uint32_t image = 0;
   if (!NextImage(layer, image_wait_, &image)) return false;
   const VkImage target = layer->images[image].image;
-  VkCommandBuffer cmd = FrameCommands();
   // The slot is a transfer source already: the last barrier of the play
   // thread made its bytes visible to each later transfer of its queue. On
   // the second queue the session saw the fence of the slot, and this

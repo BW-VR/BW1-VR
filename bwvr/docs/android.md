@@ -2622,6 +2622,11 @@ such a screen), and the frame number of the game.
   that the GPU did not finish never holds a frame of the session.
 - The play thread never writes the shown slot, and the session never shows
   an older picture than the shown one (the math checks).
+- When the session leaves a slot (it takes a new slot, or the game ends),
+  no layer copies again from an image of that slot (`FreezeSlotSources`),
+  also with `xr_copy_on_change=0` or with a swapchain image that waits for
+  a later frame. A layer keeps its image until the new picture gives it a
+  new source.
 
 **The poses.** A picture goes out with the `kView` of its own frame: the
 poses that the game drew it with. The runtime reprojects it to the pose of
@@ -2655,7 +2660,10 @@ before `xrEndFrame`, and then releases the swapchain images. The command
 buffers go round, the least recently used first, up to 16. The fence of a
 command buffer is checked only when it comes again. When the GPU did not
 finish it, the ring gets a new command buffer in its place, so the CPU does
-not wait. Only a ring of 16 unfinished command buffers waits. The pixels of
+not wait. Only a ring of 16 unfinished command buffers waits, and a ring
+that cannot make a new command buffer (the log says so) waits for its
+oldest one. With no command buffer at all the frame copies nothing. With
+no play thread (`pthread_create` failed) the game has the old loop. The pixels of
 the CPU (the menu, the cursor, the cards, the keyboard, the walls and a
 screen with the pixels of the CPU) go into a copy in memory. They go into
 the staging buffer only when the GPU finished the last copy of that buffer

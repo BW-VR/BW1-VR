@@ -845,11 +845,13 @@ function TimeChecks([int]$N, [string]$Part, [string]$ModLog, [double]$GameSecond
         }
     }
     # THE GPU PARTS OF THE WALK (gpu_parts=1, the default): a line in each
-    # window, with walks, passes and draws.
+    # window, with walks, passes and draws. The line of the key comes at the
+    # first install in the process, so only game 1 has it.
     $partsKey = [regex]::Match($Part, 'gpu parts    : gpu_parts=1\. ')
+    $keyOk = $partsKey.Success -or $N -gt 1
     $gpuParts = @([regex]::Matches($Part, 'time         : the GPU parts of the walk in ms \(gpu_parts=1\), the mean in a walk and the most in one walk, (\d+) walks \((\d+) with no time\): ([^\r\n]*?)\. In all ([\d.]+) in a walk\. In a walk: ([\d.]+) passes, (\d+) draws, (\d+) pipelines, (\d+) bindings of descriptor sets, (\d+) descriptor writes, ([\d.]+) uploads of ([\d.]+) MB'))
     $timed = @($gpuParts | Where-Object { [int64]$_.Groups[1].Value -gt [int64]$_.Groups[2].Value -and (Num $_.Groups[5].Value) -gt 0 -and [int64]$_.Groups[6].Value -gt 0 -and (Num $_.Groups[4].Value) -gt 0 })
-    Expect ($partsKey.Success -and $gpuParts.Count -eq $appLines.Count -and $timed.Count -gt 0) "game $N`: the app logged the GPU parts of the walk in each window ($($gpuParts.Count) of $($appLines.Count) lines, $($timed.Count) with timed walks, passes and draws)"
+    Expect ($keyOk -and $gpuParts.Count -eq $appLines.Count -and $timed.Count -gt 0) "game $N`: the app logged the GPU parts of the walk in each window ($($gpuParts.Count) of $($appLines.Count) lines, $($timed.Count) with timed walks, passes and draws)"
     $gpuParts | Select-Object -Last 2 | ForEach-Object { Note ('bwvr-quest.log: ' + $_.Value) }
     $threads = [regex]::Match($Part, 'time         : each 10 s, the threads in [^\r\n]*')
     $anyMain = [regex]::Match($Part, 'time         : each 10 s, the threads in [^\r\n]*game runblack\.exe (\d+) \(the main thread\) ([\d.]+)')

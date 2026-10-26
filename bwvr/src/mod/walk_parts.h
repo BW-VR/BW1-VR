@@ -16,5 +16,10 @@ bool WalkPartsOn();
 // stereo.cpp, beside TimeLogWalk: a scene walk starts and ends. The first
 // walks make the hooks.
 void WalkPartsWalk(bool begin);
+// h_FinishFrame: the work of the hook of the mod on LH3DRender::FinishFrame in
+// a walk. The hook reads its return address, so it gets no stub of a timer:
+// these two calls time it.
+void WalkPartsHookBegin();
+void WalkPartsHookEnd();
 // h_FinishFrame, beside TimeLogPresent: the present of a frame.
 void WalkPartsPresent();

@@ -2521,6 +2521,12 @@ void __cdecl h_FinishFrame() {
     o_FinishFrame();
     return;
   }
+  // The time of this hook in a scene walk (walk_parts, a test aid). The hook
+  // reads its return address, so a timer cannot use a stub here.
+  struct WalkPartsHook {
+    WalkPartsHook() { WalkPartsHookBegin(); }
+    ~WalkPartsHook() { WalkPartsHookEnd(); }
+  } walk_parts_hook;
   g_frame_thread = GetCurrentThreadId();
   // Only reads, and only with the table. See tabletop.cpp.
   TabletopCountLists();
@@ -3180,10 +3186,6 @@ void EndOfDll(bool process_ends) {
 }
 
 }  // namespace
-
-// walk_parts.cpp: the trampoline of the hook of LH3DRender::FinishFrame, the
-// code of the game alone, or nullptr before the hook.
-void* ModFinishFrameGame() { return reinterpret_cast<void*>(o_FinishFrame); }
 
 // The test key of xr_vulkan_upload (stereo.cpp, Shift Z). It changes the
 // key for the next session too.

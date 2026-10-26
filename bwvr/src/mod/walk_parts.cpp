@@ -12,9 +12,13 @@
 // function. The exit code uses integers only: the x87 unit can hold the value
 // that the function returns.
 //
-// A function that the mod hooks already gets its timer on the hook of the
-// mod: the jump at the start of the function goes to that hook. The time of
-// the timer then has the work of the hook of the mod in it.
+// The function that a stub times sees the address of ExitThunk as its return
+// address. The code of the game does not read it, but some hooks of the mod
+// do (_ReturnAddress). So a function that the mod hooks already gets its
+// timer on the trampoline of that hook (FindTrampoline): the code of the game
+// alone. The time of the hook of the mod is then in the time of its caller.
+// The hook of the mod on FinishFrame has a timer of its own in its code
+// (WalkPartsHookBegin).
 //
 // Only the frame thread in a scene walk counts. A call on another thread, or
 // outside a walk, goes through the stub with no clock read. The hooks come at
@@ -50,8 +54,20 @@
 #include "walk_parts_math.h"
 
 void ModLog(const char* format, ...);
-// mod_main.cpp: the trampoline of the hook of FinishFrame.
-void* ModFinishFrameGame();
+// The calls of the hook of the mod on FinishFrame (mod_main.cpp), which get
+// timers of their own.
+float UiBarsBegin();
+void UiBarsEnd(float saved);
+void UiPanelBeforeFinish(bool in_stereo_pass);
+void UiPanelAfterFinish(bool in_stereo_pass, uint64_t frame);
+void ControllersScreenApply();
+void XrInputNewFrame();
+void AudioFrame();
+void SetupBoxWatchFrame(uint64_t finish_frame);
+void GpuBridgeResume();
+void HangWatchFrame();
+void StallWatchFrame();
+void TabletopCountLists();
 
 namespace {
 
@@ -190,7 +206,10 @@ double g_tick_mhz = 0.0;  // the rate of the clock of the timers, from the measu
 LARGE_INTEGER g_hz = {};
 
 Timer g_timers[wp::kMaxTimers];
-int g_count = 1;  // timer 0 is the scene walk
+// Timer 0 is the scene walk, timer 1 the hook of the mod on FinishFrame.
+const int kHookTimer = 1;
+int g_count = 2;
+int g_hook_open = -1;  // the place of the open call of timer 1 on the stack, or -1
 wp::Stack g_stack;
 wp::Window g_window;
 uint8_t* g_stubs = nullptr;
@@ -307,54 +326,116 @@ void MakeStub(int id) {
 }
 
 bool Known(uint32_t address) {
-  for (int i = 1; i < g_count; ++i) {
+  for (int i = 2; i < g_count; ++i) {
     if (g_timers[i].address == address || g_timers[i].shown == address) return true;
   }
   return false;
 }
 
+// True when the code at `t` is a trampoline of MinHook for `target`: memory
+// of no module, with a jump back into `target` 5 to 32 bytes after its start
+// in its first 32 bytes.
+bool IsTrampolineOf(uint32_t t, uint32_t target) {
+  MEMORY_BASIC_INFORMATION mbi = {};
+  if (VirtualQuery(reinterpret_cast<const void*>(t), &mbi, sizeof(mbi)) == 0 ||
+      mbi.Type != MEM_PRIVATE || IsBadReadPtr(reinterpret_cast<const void*>(t), 37)) {
+    return false;
+  }
+  const uint8_t* b = reinterpret_cast<const uint8_t*>(t);
+  for (int j = 0; j < 32; ++j) {
+    if (b[j] != 0xE9) continue;
+    int32_t rel = 0;
+    memcpy(&rel, b + j + 1, 4);
+    const uint32_t dest = t + j + 5 + static_cast<uint32_t>(rel);
+    if (dest >= target + 5 && dest <= target + 32) return true;
+  }
+  return false;
+}
+
+// THE CODE OF THE GAME UNDER A HOOK OF THE MOD. A stub on the hook of the mod
+// itself would change the return address that the hook reads, and some hooks
+// of the mod act on it (_ReturnAddress). So the timer goes on the trampoline
+// of MinHook, which the hook calls for the code of the game. The hook reads
+// the address of the trampoline from a variable of the mod (o_ and the name of
+// the function). The search reads each 4 bytes of the first 2 KiB of the code
+// of the hook as an address in the image of the mod, and takes the value
+// there when it is a trampoline of `target`. 0 when there is none.
+uint32_t FindTrampoline(uint32_t hook, uint32_t target) {
+  HMODULE mod = nullptr;
+  if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<LPCSTR>(hook), &mod)) {
+    return 0;
+  }
+  const uint8_t* base = reinterpret_cast<const uint8_t*>(mod);
+  const IMAGE_NT_HEADERS* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+      base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+  const uint32_t lo = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(base));
+  const uint32_t hi = lo + nt->OptionalHeader.SizeOfImage;
+  const uint8_t* code = reinterpret_cast<const uint8_t*>(hook);
+  for (int i = 0; i < 2048; ++i) {
+    if (IsBadReadPtr(code + i, 4)) break;
+    uint32_t v = 0;
+    memcpy(&v, code + i, 4);
+    if (v < lo || v + 4 > hi || (v & 3) != 0) continue;
+    if (IsBadReadPtr(reinterpret_cast<const void*>(v), 4)) continue;
+    const uint32_t t = *reinterpret_cast<const uint32_t*>(v);
+    if (t != 0 && IsTrampolineOf(t, target)) return t;
+  }
+  return 0;
+}
+
 // A timer on the code at `address`. When the mod hooks that code already, the
-// timer goes on the hook of the mod. Gives false and a line when there is no
-// timer.
+// timer goes on the trampoline of that hook (the code of the game alone).
+// Gives false and a line when there is no timer.
 bool Add(uint32_t address, const char* name, int group, bool quiet = false) {
   if (group == kEach && g_mode == 2) return false;
   if (g_count >= wp::kMaxTimers - 1) return false;
   if (address == 0) return false;
+  if (Known(address)) {
+    if (quiet) return false;
+    ModLog("walk parts   : %s at 0x%08X has a timer already. No timer", name,
+           static_cast<unsigned>(address));
+    return false;
+  }
   uint32_t at = address;
-  bool on_hook = false;
-  MH_STATUS st = MH_ERROR_ALREADY_CREATED;
-  for (int hop = 0; hop < 3; ++hop) {
-    if (Known(at)) {
-      if (quiet) return false;
-      ModLog("walk parts   : %s at 0x%08X has the code of a timer already. No timer", name,
-             static_cast<unsigned>(address));
+  bool under_hook = false;
+  void* original = nullptr;
+  MH_STATUS st =
+      MH_CreateHook(reinterpret_cast<void*>(at), g_stubs + g_count * kStubBytes, &original);
+  if (st == MH_ERROR_ALREADY_CREATED) {
+    // The hook of the mod is a jump at the start of the code.
+    const uint8_t* code = reinterpret_cast<const uint8_t*>(address);
+    uint32_t trampoline = 0;
+    if (!IsBadReadPtr(code, 5) && code[0] == 0xE9) {
+      int32_t rel = 0;
+      memcpy(&rel, code + 1, 4);
+      trampoline = FindTrampoline(address + 5 + static_cast<uint32_t>(rel), address);
+    }
+    if (trampoline == 0 || Known(trampoline)) {
+      ModLog("walk parts   : no timer on %s at 0x%08X: the mod hooks it, and the trampoline "
+             "of that hook is not found",
+             name, static_cast<unsigned>(address));
       return false;
     }
-    void* original = nullptr;
+    at = trampoline;
+    under_hook = true;
     st = MH_CreateHook(reinterpret_cast<void*>(at), g_stubs + g_count * kStubBytes, &original);
-    if (st == MH_OK) {
-      Timer& t = g_timers[g_count];
-      t.address = at;
-      t.shown = address;
-      t.original = original;
-      _snprintf_s(t.name, sizeof(t.name), _TRUNCATE, "%s%s", name,
-                  on_hook ? " (with the hook of the mod)" : "");
-      MakeStub(g_count);
-      ++g_count;
-      return true;
-    }
-    if (st != MH_ERROR_ALREADY_CREATED) break;
-    // The hook of the mod is a jump at the start of the code.
-    const uint8_t* code = reinterpret_cast<const uint8_t*>(at);
-    if (IsBadReadPtr(code, 5) || code[0] != 0xE9) break;
-    int32_t rel = 0;
-    memcpy(&rel, code + 1, 4);
-    at = static_cast<uint32_t>(at + 5 + rel);
-    on_hook = true;
   }
-  ModLog("walk parts   : no timer on %s at 0x%08X (%s)", name, static_cast<unsigned>(address),
-         MH_StatusToString(st));
-  return false;
+  if (st != MH_OK) {
+    ModLog("walk parts   : no timer on %s at 0x%08X (%s)", name, static_cast<unsigned>(address),
+           MH_StatusToString(st));
+    return false;
+  }
+  Timer& t = g_timers[g_count];
+  t.address = at;
+  t.shown = address;
+  t.original = original;
+  _snprintf_s(t.name, sizeof(t.name), _TRUNCATE, "%s%s", name,
+              under_hook ? " (the code of the game under a hook of the mod)" : "");
+  MakeStub(g_count);
+  ++g_count;
+  return true;
 }
 
 // THE LISTS OF THE ENGINE. The z sorter (LH3DZSorter::NewZObject, 0x0083F310)
@@ -432,15 +513,12 @@ void AddTable(void* object, const Slot* slots, int count) {
 }
 
 // The cost of one timed call: the time of calls of CostProbe with a timer,
-// less the time of the same calls with no timer.
+// less the time of the same calls through the trampoline, with no timer. The
+// least time of 5 rounds of each counts, so a stop of the thread by the
+// system in one round does not count.
 double MeasureCost() {
   const int kCalls = 20000;
-  int (*volatile probe)(int) = &CostProbe;
-  const int64_t q_start = Qpc();
-  const int64_t n_start = Now();
-  int64_t t0 = Now();
-  for (int i = 0; i < kCalls; ++i) probe(i);
-  const int64_t bare = Now() - t0;
+  const int kRounds = 5;
   const int id = g_count;
   void* original = nullptr;
   if (MH_CreateHook(reinterpret_cast<void*>(&CostProbe), g_stubs + id * kStubBytes,
@@ -453,11 +531,24 @@ double MeasureCost() {
     MH_RemoveHook(reinterpret_cast<void*>(&CostProbe));
     return 0.0;
   }
-  g_calibrate = true;
-  t0 = Now();
-  for (int i = 0; i < kCalls; ++i) probe(i);
-  const int64_t timed = Now() - t0;
-  g_calibrate = false;
+  int (*volatile probe)(int) = &CostProbe;
+  int (*volatile bare_probe)(int) = reinterpret_cast<int (*)(int)>(original);
+  const int64_t q_start = Qpc();
+  const int64_t n_start = Now();
+  int64_t bare = INT64_MAX;
+  int64_t timed = INT64_MAX;
+  for (int r = 0; r < kRounds; ++r) {
+    int64_t t0 = Now();
+    for (int i = 0; i < kCalls; ++i) bare_probe(i);
+    int64_t t = Now() - t0;
+    if (t < bare) bare = t;
+    g_calibrate = true;
+    t0 = Now();
+    for (int i = 0; i < kCalls; ++i) probe(i);
+    t = Now() - t0;
+    g_calibrate = false;
+    if (t < timed) timed = t;
+  }
   const int64_t n_end = Now();
   const int64_t q_end = Qpc();
   MH_DisableHook(reinterpret_cast<void*>(&CostProbe));
@@ -473,7 +564,6 @@ double MeasureCost() {
   const double ns = static_cast<double>(timed - bare) * 1000.0 / g_tick_mhz / kCalls;
   return ns > 0.0 ? ns : 0.0;
 }
-
 void Install() {
   g_installed = true;
   g_stubs = static_cast<uint8_t*>(VirtualAlloc(nullptr, wp::kMaxTimers * kStubBytes,
@@ -487,11 +577,34 @@ void Install() {
   g_timers[0].shown = static_cast<uint32_t>(bw::game::kProcess3dEngine);
   _snprintf_s(g_timers[0].name, sizeof(g_timers[0].name), _TRUNCATE,
               "the scene walk, outside each timer");
+  g_timers[kHookTimer].shown = 0x0082F460;
+  _snprintf_s(g_timers[kHookTimer].name, sizeof(g_timers[kHookTimer].name), _TRUNCATE,
+              "h_FinishFrame, the hook of the mod on LH3DRender::FinishFrame");
   for (const Fn& f : kGameFns) Add(f.address, f.name, f.group);
-  // The mod hooks FinishFrame, so its timer has the work of that hook. The
-  // trampoline of the hook is the code of the game alone.
-  Add(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ModFinishFrameGame())),
-      "LH3DRender::FinishFrame, the code of the game alone", kGame);
+  // The calls of the hook of the mod on FinishFrame.
+  struct ModFn {
+    void* fn;
+    const char* name;
+  };
+  const ModFn kHookFns[] = {
+      {reinterpret_cast<void*>(&TabletopCountLists), "TabletopCountLists, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&UiBarsBegin), "UiBarsBegin, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&UiBarsEnd), "UiBarsEnd, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&UiPanelBeforeFinish), "UiPanelBeforeFinish, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&UiPanelAfterFinish), "UiPanelAfterFinish, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&ControllersScreenApply),
+       "ControllersScreenApply, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&XrInputNewFrame), "XrInputNewFrame, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&AudioFrame), "AudioFrame, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&SetupBoxWatchFrame), "SetupBoxWatchFrame, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&GpuBridgeResume), "GpuBridgeResume, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&HangWatchFrame), "HangWatchFrame, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&StallWatchFrame), "StallWatchFrame, in h_FinishFrame"},
+      {reinterpret_cast<void*>(&VkStreamScreen), "VkStreamScreen, in h_FinishFrame"},
+  };
+  for (const ModFn& m : kHookFns) {
+    Add(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m.fn)), m.name, kGame);
+  }
   // The Vulkan renderer of the mod and the stream of the walks.
   Add(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&VkSceneDraw)),
       "VkSceneDraw, the Vulkan renderer of the mod", kEach);
@@ -545,13 +658,13 @@ void Install() {
     Add(a, name, kGame);
   }
   const int listed = ScanLists();
-  const int enabled = EnableFrom(1);
+  const int enabled = EnableFrom(2);
   g_pair_ns = MeasureCost();
   ModLog("walk parts   : walk_parts=%d. %d timers in the scene walks of the frame thread (%d "
          "of them from the lists of the engine), %d of them on. One timed call costs %.0f ns "
-         "(%d calls of a probe with and without a timer). Each 10 s the lines of the parts "
-         "of the walk",
-         g_mode, g_count - 1, listed, enabled, g_pair_ns, 20000);
+         "(the least of 5 rounds of 20000 calls of a probe with and without a timer). The "
+         "clock of the timers runs at %.3f MHz. Each 10 s the lines of the parts of the walk",
+         g_mode, g_count - 1, listed, enabled, g_pair_ns, g_tick_mhz);
 }
 
 void Report(int64_t now, int64_t qpc) {
@@ -640,6 +753,23 @@ void WalkPartsWalk(bool begin) {
   if (g_stack.depth == 1) g_stack.CloseTop(now);
   g_in_walk = false;
   g_frame_has_walk = true;
+}
+
+void WalkPartsHookBegin() {
+  g_hook_open = -1;
+  if (!g_in_walk || ThisThreadId() != g_thread) return;
+  if (g_stack.Push(kHookTimer, Now(), 0, 0)) g_hook_open = g_stack.depth - 1;
+}
+
+void WalkPartsHookEnd() {
+  if (g_hook_open < 0) return;
+  if (g_in_walk && g_stack.depth > g_hook_open &&
+      g_stack.open[g_hook_open].id == kHookTimer) {
+    const int64_t now = Now();
+    while (g_stack.depth - 1 > g_hook_open) g_stack.DropTop();
+    g_stack.CloseTop(now);
+  }
+  g_hook_open = -1;
 }
 
 void WalkPartsPresent() {

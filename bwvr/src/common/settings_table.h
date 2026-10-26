@@ -304,6 +304,13 @@ inline const Setting kSettings[] = {
      "tutorial, each line shows. Always: each line always shows. To show all "
      "lines again, delete bwvr-hint-counts.ini in the game folder."},
 
+    {kGroup, nullptr, "Launcher", nullptr, 0, nullptr},
+    {kBool, "update_check", "Check for updates", nullptr, 1,
+     "Each time the launcher opens, it asks GitHub for the latest version "
+     "of the mod. When a newer version is out, the line at the bottom of "
+     "the window says so. Click that line to open the page of the new "
+     "version in your browser. Off: the launcher does not ask."},
+
     {kGroup, nullptr, "Testing", nullptr, 0, nullptr},
     {kBool, "net_check_skip", "Tell the game that there is no internet",
      nullptr, 1,
@@ -316,6 +323,11 @@ inline const Setting kSettings[] = {
      "while you play, so that you can compare, and the readme lists them. "
      "F12 saves a picture of each eye in the game folder. A player does "
      "not need this."},
+    {kBool, "debug_menu", "Debug menu", nullptr, 0,
+     "Adds the item Debug to the ring of your left hand. It opens pages "
+     "with the switches of the test keys, and a choice changes a switch at "
+     "once. So you can compare in the headset with no keyboard. It does "
+     "not need the test keys. A player does not need this."},
 };
 
 
@@ -584,6 +596,12 @@ inline void ScaleToPixels(int percent, int headset_width, int headset_height,
 inline bool OnlyDirect3D9(const char* key) {
   return key != nullptr &&
          (strcmp(key, "d3d9_backend") == 0 || strcmp(key, "xr_vulkan") == 0);
+}
+
+// The rows that only the launcher on the PC uses. The menu of the headset app
+// does not show them.
+inline bool OnlyLauncher(const char* key) {
+  return key != nullptr && strcmp(key, "update_check") == 0;
 }
 
 }  // namespace bwvr_settings

@@ -25,6 +25,7 @@
 #include "build_id.h"
 #include "../vr/xr_screen.h"
 #include "controllers.h"
+#include "debug_menu.h"
 #include "frame_profile.h"
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
@@ -685,6 +686,9 @@ bool g_vulkan_only = false;
 
 // xr_hold_ms: the hold of the last frame (XrScreen::SetHoldMs).
 int g_xr_hold_ms = 30;
+// refresh_rate_hz: the refresh rate that the mod asks the headset for
+// (XrScreen::SetRefreshRate). 0 asks for none, -1 for the highest.
+int g_refresh_rate_hz = 0;
 int g_render_thread_late_end = 1;
 int g_thread_wait = 1;
 int g_test_cores = 0;
@@ -1734,6 +1738,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "xr_vulkan_upload", 1, path) != 0 ? 1 : 0;
   g_xr_hold_ms = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "xr_hold_ms", 30, path));
+  g_refresh_rate_hz = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "refresh_rate_hz", 0, path));
+  if (g_refresh_rate_hz < -1) g_refresh_rate_hz = 0;
+  if (g_refresh_rate_hz > 1000) g_refresh_rate_hz = 1000;
   g_render_thread_late_end =
       GetPrivateProfileIntA("bwvr", "render_thread_late_end", 1, path) != 0
           ? 1
@@ -1827,6 +1835,13 @@ void ReadSettings() {
          g_vr_enabled ? 1 : 0, g_stereo ? 1 : 0, g_width, g_distance);
   ModLog("settings     : eye separation %.3f world units, interface shift "
          "%.0f px", g_separation, g_ui_shift);
+  ModLog("refresh rate : refresh_rate_hz=%d. %s", g_refresh_rate_hz,
+         g_refresh_rate_hz == 0
+             ? "The mod asks the headset for no refresh rate"
+         : g_refresh_rate_hz < 0
+             ? "The mod asks the headset for its highest refresh rate"
+             : "The mod asks the headset for this refresh rate, or for the "
+               "nearest higher one");
 }
 
 void ModLogNowhere(const char* format, ...);
@@ -1925,7 +1940,7 @@ void StartVrStep() {
     SpriteUpSet(g_sprite_world_up, g_sprite_test_frame, g_sprite_test_trace);
     SpriteUpInstall();
     SpiritAnchorSetEnabled(g_spirit_anchor);
-    SpiritAnchorSetWorldSize(g_spirit_world_size, g_test_keys,
+    SpiritAnchorSetWorldSize(g_spirit_world_size, TestSwitchesOn(),
                              g_spirit_world_size_test,
                              g_spirit_point_world_test);
     SpiritAnchorInstall();
@@ -2245,6 +2260,7 @@ void StartVrStep() {
   screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
   screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
   screen->SetHoldMs(g_xr_hold_ms);
+  screen->SetRefreshRate(g_refresh_rate_hz);
   screen->SetPlacement(g_distance, g_width);
   screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
   // Only the first failure and every tenth after it reach the log. A message
@@ -2370,6 +2386,7 @@ void StartVrFromThread() {
   } else {
     screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
     screen->SetHoldMs(g_xr_hold_ms);
+    screen->SetRefreshRate(g_refresh_rate_hz);
     screen->SetPlacement(g_distance, g_width);
     screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
     screen->SetLog(&ModLog);
@@ -2883,7 +2900,7 @@ void EarlyHooks() {
   // turned off too.
   FileReadAheadInstall(
       GetPrivateProfileIntA("bwvr", "file_read_ahead", 1, path) != 0,
-      GetPrivateProfileIntA("bwvr", "test_keys", 0, path) != 0);
+      TestSwitchesOn());
   // On by default from version 1.1.0. Read here because the device hooks of
   // the bridge need it.
   Depth24SetWanted(GetPrivateProfileIntA("bwvr", "depth24", 1, path) != 0);
@@ -2956,12 +2973,12 @@ void EarlyHooks() {
   }
 
   // With frame_send=2 a second thread makes calls on the device of the
-  // backend, and the render thread is a second thread too. A test key can
-  // choose each of them in a session.
+  // backend, and the render thread is a second thread too. A test key or the
+  // debug page can choose each of them in a session.
   GpuBridgeWantTwoThreads(
       GetPrivateProfileIntA("bwvr", "frame_send", 0, path) == 2 ||
       GetPrivateProfileIntA("bwvr", "render_thread", 0, path) != 0 ||
-      GetPrivateProfileIntA("bwvr", "test_keys", 0, path) != 0);
+      TestSwitchesOn());
   GpuBridgeSetEnabled(true);
   GpuBridgeInstall();
 }
@@ -3209,6 +3226,12 @@ void XrVulkanUploadToggle(const char* keys) {
 // backend=vulkan with vulkan_only=1 (docs/backend.md, "Only Vulkan").
 bool VulkanOnly() { return g_vulkan_only; }
 
+// The value of xr_vulkan_upload for the debug page. With vulkan_only=1 there
+// is no relay of Direct3D 11 to change to.
+int XrVulkanUploadValue() {
+  return g_vulkan_only ? kDebugCannot : g_xr_vulkan_upload != 0 ? 1 : 0;
+}
+
 // A TEST AID for vulkan_only: which DLLs of Direct3D and of dxwrapper are in
 // the process. The OpenXR runtime and the driver can load some of them
 // themselves.
@@ -3256,6 +3279,12 @@ void XrHoldToggle(const char* keys) {
   g_screen->SetHoldMs(now);
   ControllersGesturePulse(0.5f, now > 0 ? 0.30f : 0.08f);
   ModLog("test key     : %s, xr_hold_ms is %d now", keys, now);
+}
+
+// The value of xr_hold_ms for the debug page, in ms.
+int XrHoldValue() {
+  if (g_screen == nullptr) return kDebugCannot;
+  return g_screen->HoldMs();
 }
 
 void ModLog(const char* format, ...) {

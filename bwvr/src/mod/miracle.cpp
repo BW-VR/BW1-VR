@@ -769,6 +769,23 @@ void Init() {
   }
 }
 
+}  // namespace
+
+// The switch of the debug page (debug_menu.h).
+void MiracleHandChange(const char* by) {
+  Init();
+  g_settings.on = !g_settings.on;
+  ControllersGesturePulse(0.5f, g_settings.on ? 0.24f : 0.08f);
+  LogKeys(by);
+}
+
+int MiracleHandValue() {
+  Init();
+  return g_settings.on ? 1 : 0;
+}
+
+namespace {
+
 // THE A/B KEY (test_keys=1): Ctrl with the 8 key of the number pad changes
 // miracle_hand. The pointing controller gives a long pulse for 1 and a short
 // pulse for 0. Only while a window of the game is in front.
@@ -784,9 +801,7 @@ void PollKey() {
   const HWND window = GetForegroundWindow();
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  g_settings.on = !g_settings.on;
-  ControllersGesturePulse(0.5f, g_settings.on ? 0.24f : 0.08f);
-  LogKeys("Ctrl and numpad 8");
+  MiracleHandChange("Ctrl and numpad 8");
 }
 
 // --- the test seeds ---------------------------------------------------------
@@ -1029,6 +1044,24 @@ void MiracleFrame() {
   const bool have = any && Active(&f);
   g_have = have;
   g_now = f;
+  // THE CHARGE (world_haptics, haptics.cpp). The press of a miracle that
+  // casts at the release (a throw or a circle) starts the interface action
+  // 8, and the miracle charges until the release. The Hand feels a short
+  // build up at the start of the charge. The game's own effect of the cast
+  // then gives the pulse of the cast.
+  {
+    static bool charge_was = false;
+    const bool charge = have && f.seed != nullptr && f.action == 8;
+    if (charge && !charge_was) {
+      if (Log()) {
+        ModLog("miracle      : %s charges (interface action 8), and the Hand "
+               "feels the build up (world_haptics=%d), frame %llu",
+               SeedName(f.info.type), HapticsWorldOn(), g_frame);
+      }
+      HapticsWorldStart(haptics_math::kPatternCharge, 2);
+    }
+    charge_was = charge;
+  }
   if (have && f.seed != nullptr) ++g_frames_miracle;
   if (have && f.one_off) ++g_frames_seed;
   // WHERE THE MIRACLE IS: the Hand of the game against the point of the real

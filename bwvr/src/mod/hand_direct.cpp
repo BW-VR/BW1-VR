@@ -128,15 +128,19 @@
 #include "controller_math.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "creature_look.h"
 #include "creature_stay.h"
+#include "debug_menu.h"
 #include "far_choice_math.h"
 #include "far_grab.h"
 #include "fight_math.h"
 #include "take_stream.h"
 #include "forest_take.h"
+#include "hand_feel_math.h"
 #include "haptics.h"
 #include "miracle.h"
 #include "village.h"
+#include "village_math.h"
 #include "near_math.h"
 #include "table_math.h"
 #include "throw_physics.h"
@@ -1190,6 +1194,9 @@ int g_script_view = 1;
 // if the rotate arrow shows, gets the moves of the God view (h_ScriptHandState
 // and h_ScriptArrows).
 int g_script_moves = 1;
+// villager_look_head: a script that turns a villager to the camera turns him
+// to the head (h_ScriptFocus).
+int g_look_head = 1;
 bool g_script_on = true;
 bool g_script_key_down = false;
 void ScriptPlayerInstall();
@@ -2646,6 +2653,8 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
     return;
   }
   const float before = *reinterpret_cast<const float*>(state + kStateTotal);
+  const int32_t time_before =
+      *reinterpret_cast<const int32_t*>(state + kStateTime);
   const bool first = g_touch_frame != g_frame;
   TouchFrame(state, hand, dt);
   const bool entered = first && g_touch_entered;
@@ -2658,6 +2667,15 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
   g_creature_total = after;
   const bool slap = after < before - 0.05f;
   const bool stroke = after > before + 0.05f;
+  // THE PURR (world_haptics): the game played a stroke. A stroke adds 0.1 to
+  // the total and sets the time in the state to 0 (0x005B226C). The time
+  // also shows a stroke when the total is at its top of 1. The hand of the
+  // stroke feels it.
+  const int32_t time_after =
+      *reinterpret_cast<const int32_t*>(state + kStateTime);
+  if (!slap && (stroke || time_after < time_before)) {
+    HapticsWorldStart(haptics_math::kPatternPurr, 2);
+  }
   const float slap_mps = SlapMps();
   const float s = 15.0f * CreatureSize(hand);
   // The motion of the hand in the room, as a unit: right, up and forward.
@@ -3378,6 +3396,277 @@ bool StepSendsPackets(uint8_t* face) {
   return true;
 }
 
+void SetRule(int rule);
+
+// The pulses of a step of far_grab_choice (HandDirectFarChoiceChange).
+const float kChoicePulseSeconds = 0.08f;
+const float kChoiceLongPulseSeconds = 0.40f;
+// From the start of a pulse to the start of the next one.
+const ULONGLONG kChoicePulseStepMs = 250;
+
+}  // namespace
+
+// THE SWITCHES OF THE TEST KEYS (debug_menu.h). Each change function makes
+// the change of a test key below, and the debug page calls it too. Each value
+// function gives the value now, or kDebugCannot when the direct hand is not
+// in.
+
+// The star key of the number pad: release_at_once.
+void HandDirectReleaseAtOnceChange(const char* by) {
+  g_turn_on = !g_turn_on;
+  ControllersGesturePulse(0.5f, g_turn_on ? 0.30f : 0.08f);
+  ModLog("hand throw   : %s: the release at once is %s, frame "
+         "%llu. %s", by, g_turn_on ? "ON" : "OFF", g_frame,
+         g_turn_on ? "A game turn runs at once after a release, and the grip "
+                     "opens on a fast fall"
+                   : "A release waits for the next game turn, and the grip "
+                     "opens only below 35%");
+}
+int HandDirectReleaseAtOnceValue() {
+  return g_installed ? (g_turn_on ? 1 : 0) : kDebugCannot;
+}
+
+// Ctrl and Page Up: catch_moving goes from 3 to 2 to 1 to 0 and back to 3.
+void HandDirectCatchMovingChange(const char* by) {
+  g_catch_on = g_catch_on == near_math::kCatchOff ? near_math::kCatchOpen
+                                                  : g_catch_on - 1;
+  g_catch_logged = nullptr;
+  g_wide_catch_logged = nullptr;
+  ControllersGesturePulse(0.5f, g_catch_on == near_math::kCatchOpen   ? 0.45f
+                                : g_catch_on == near_math::kCatchRest ? 0.30f
+                                : g_catch_on == near_math::kCatchPick ? 0.15f
+                                                                      : 0.08f);
+  ModLog("hand pick    : %s: catch_moving is %d now, frame %llu. %s", by,
+         g_catch_on, g_frame,
+         g_catch_on == near_math::kCatchOpen
+             ? "An object that moves has the reach that it has at rest and "
+               "the extra reach. An object that fell from a still hand has "
+               "no guard, and the guard of a throw ends when the grip is "
+               "fully open"
+         : g_catch_on == near_math::kCatchRest
+             ? "An object that moves has the reach that it has at rest and "
+               "the extra reach. An object that fell from a still hand has "
+               "no guard, and a throw has the guard for the whole of "
+               "catch_grace_ms"
+         : g_catch_on == near_math::kCatchPick
+             ? "An object that moves has the extra reach on the reach of the "
+               "pick only, and each object that you let go has the guard"
+             : "Each object has the same reach, moving or still");
+}
+int HandDirectCatchMovingValue() {
+  return g_installed ? g_catch_on : kDebugCannot;
+}
+
+// Ctrl, Shift and Page Up: hand_wide_pick_cm goes between its value and 0.
+void HandDirectWidePickChange(const char* by) {
+  static int saved = 0;
+  if (g_wide_cm > 0) {
+    saved = g_wide_cm;
+    g_wide_cm = 0;
+  } else {
+    g_wide_cm = saved > 0 ? saved : near_math::kWideCm;
+  }
+  g_wide_logged = nullptr;
+  ControllersGesturePulse(0.5f, g_wide_cm > 0 ? 0.30f : 0.08f);
+  ModLog("hand pick    : %s: hand_wide_pick_cm is %d now, "
+         "frame %llu. %s", by, g_wide_cm, g_frame,
+         g_wide_cm > 0
+             ? "A holdable object up to that gap is the target when nothing "
+               "is nearer"
+             : "The wide reach is off: a gap between the reach of the pick "
+               "and the far grab has no target");
+}
+int HandDirectWidePickValue() {
+  return g_installed ? g_wide_cm : kDebugCannot;
+}
+
+// Ctrl and Delete: far_grab_choice goes from 2 to 3 to 4 to 0 to 1 and back
+// to 2. PollChoiceKey plays the short pulses on the frames after the change.
+void HandDirectFarChoiceChange(const char* by) {
+  FarGrabSetChoice(FarGrabChoice() >= far_choice_math::kChoiceMost
+                       ? 0
+                       : FarGrabChoice() + 1);
+  g_choice_pulses = FarGrabChoice();
+  g_choice_pulse_tick = GetTickCount64();
+  if (FarGrabChoice() == 0) {
+    ControllersGesturePulse(0.5f, kChoiceLongPulseSeconds);
+  }
+  ModLog("far grab    : %s: far_grab_choice is %d now, frame "
+         "%llu. %s", by, FarGrabChoice(), g_frame,
+         FarGrabChoiceWords(FarGrabChoice()));
+}
+int HandDirectFarChoiceValue() {
+  return g_installed && FarGrabOn() ? FarGrabChoice() : kDebugCannot;
+}
+
+// Ctrl and Backspace: far_grab_stay goes between 1 and 0.
+void HandDirectFarStayChange(const char* by) {
+  FarGrabSetStay(FarGrabStay() != 0 ? 0 : 1);
+  ControllersGesturePulse(0.5f, FarGrabStay() != 0 ? 0.30f : 0.08f);
+  ModLog("far grab    : %s: far_grab_stay is %d now, frame "
+         "%llu. %s", by, FarGrabStay(), g_frame,
+         FarGrabStayWords(FarGrabStay()));
+}
+int HandDirectFarStayValue() {
+  return g_installed && FarGrabOn() ? FarGrabStay() : kDebugCannot;
+}
+
+// Shift and Backspace: far_take_carry goes between 1 and 0.
+void HandDirectTakeCarryChange(const char* by) {
+  FarGrabSetTakeCarry(FarGrabTakeCarry() != 0 ? 0 : 1);
+  ControllersGesturePulse(0.5f, FarGrabTakeCarry() != 0 ? 0.30f : 0.08f);
+  ModLog("far grab    : %s: far_take_carry is %d now, frame "
+         "%llu. %s", by, FarGrabTakeCarry(), g_frame,
+         FarGrabTakeCarryWords(FarGrabTakeCarry()));
+}
+int HandDirectTakeCarryValue() {
+  return g_installed && FarGrabOn() ? FarGrabTakeCarry() : kDebugCannot;
+}
+
+// Ctrl and the point key of the number pad: scroll_draw goes between 1 and 0.
+void HandDirectScrollDrawChange(const char* by) {
+  g_scroll_draw = !g_scroll_draw;
+  ControllersGesturePulse(0.5f, g_scroll_draw ? 0.30f : 0.08f);
+  ModLog("hand scroll  : %s: scroll_draw is %d, frame "
+         "%llu. %s", by, g_scroll_draw ? 1 : 0, g_frame,
+         g_scroll_draw ? "Each scroll that the game draws is a candidate, "
+                         "with the reach of scroll_reach_cm"
+                       : "A scroll is a candidate only when the game's pick "
+                         "offers it, with the reach of each object");
+}
+int HandDirectScrollDrawValue() {
+  return g_installed ? (g_scroll_draw ? 1 : 0) : kDebugCannot;
+}
+
+// Ctrl and the 7 key of the number pad: a script that asks about the camera
+// gets the player, or the game's camera. Nothing changes when the hooks of
+// the scripts are not in.
+void HandDirectScriptPlayerChange(const char* by) {
+  if (!g_script_hooked) return;
+  g_script_on = !g_script_on;
+  ControllersGesturePulse(0.5f, g_script_on ? 0.30f : 0.08f);
+  if (g_script_on) {
+    ModLog("scripts      : %s: a script that asks about the "
+           "camera gets the player again (script_distance=%d, "
+           "script_view=%d, script_camera_moves=%d, "
+           "villager_look_head=%d), frame %llu", by,
+           g_script_distance, g_script_view, g_script_moves, g_look_head,
+           g_frame);
+  } else {
+    ModLog("scripts      : %s: a script that asks about the "
+           "camera gets the game's camera, as with script_distance=0, "
+           "script_view=0, script_camera_moves=0 and villager_look_head=0, "
+           "frame %llu", by, g_frame);
+  }
+}
+int HandDirectScriptPlayerValue() {
+  return g_script_hooked ? (g_script_on ? 1 : 0) : kDebugCannot;
+}
+
+// Ctrl and the 9 key of the number pad: creature_palm_point goes between 1
+// and 0.
+void HandDirectPalmPointChange(const char* by) {
+  g_palm_point = !g_palm_point;
+  ControllersGesturePulse(0.5f, g_palm_point ? 0.30f : 0.08f);
+  ModLog("hand creature: %s: creature_palm_point is %d, "
+         "frame %llu. %s", by, g_palm_point ? 1 : 0, g_frame,
+         g_palm_point ? "The point of the flat hand of a stroke is the palm"
+                      : "The point of the flat hand of a stroke is the tip "
+                        "of the index finger");
+}
+int HandDirectPalmPointValue() {
+  return g_installed ? (g_palm_point ? 1 : 0) : kDebugCannot;
+}
+
+// Ctrl and the 3 key of the number pad: the limits of the hand of a stroke
+// go between the limits of the ini (0) and the fixed limits (1).
+void HandDirectStrokeLimitsChange(const char* by) {
+  g_stroke_limits_before = !g_stroke_limits_before;
+  float finger_below = 0.0f, flat_above = 0.0f;
+  StrokeLimitsNow(&finger_below, &flat_above);
+  ControllersGesturePulse(0.5f, g_stroke_limits_before ? 0.08f : 0.30f);
+  ModLog("hand creature: %s: the hand of a stroke is the "
+         "finger below %.2f of the hand's length and the flat hand over "
+         "%.2f, and a stroke starts with the flat hand from %.2f (%s), "
+         "frame %llu", by, finger_below, flat_above,
+         0.5f * (finger_below + flat_above),
+         g_stroke_limits_before
+             ? "the fixed limits of the test key"
+             : "creature_finger_below_pct and creature_flat_above_pct",
+         g_frame);
+}
+int HandDirectStrokeLimitsValue() {
+  return g_installed ? (g_stroke_limits_before ? 1 : 0) : kDebugCannot;
+}
+
+// The 9 key of the number pad: the next speed of a slap. The value is 0 for
+// the speed of the ini, and 1 to 4 for 0.7, 1.0, 1.3 and 1.6 m/s.
+void HandDirectSlapChange(const char* by) {
+  g_slap_key = (g_slap_key + 1) % 4;
+  ControllersGesturePulse(0.5f, 0.08f * (g_slap_key + 1));
+  ModLog("hand creature: %s: a slap needs %.1f m/s now, and a hard "
+         "slap %.2f m/s (creature_slap_mps is %.2f in the ini), frame %llu",
+         by, SlapMps(), 1.8f * SlapMps(), ControllersCreatureSlapMps(),
+         g_frame);
+}
+int HandDirectSlapValue() {
+  return g_installed ? g_slap_key + 1 : kDebugCannot;
+}
+
+// The 3 key of the number pad: the next value of creature_stroke_hand.
+void HandDirectStrokeHandChange(const char* by) {
+  g_stroke_mode = (g_stroke_mode + 1) % 4;
+  ControllersGesturePulse(0.5f, 0.08f * (g_stroke_mode + 1));
+  ModLog("hand creature: %s: creature_stroke_hand is %d now: %s. A "
+         "slap needs %.2f m/s, frame %llu", by, g_stroke_mode,
+         g_stroke_mode == 0   ? "the hand of a stroke follows the size of "
+                                "the Creature"
+         : g_stroke_mode == 1 ? "the flat hand"
+         : g_stroke_mode == 2 ? "the index finger"
+                              : "the fist stroke: a fist while the grip is "
+                                "closed, and the speed of the grip only",
+         SlapMps(), g_frame);
+}
+int HandDirectStrokeHandValue() {
+  return g_installed ? g_stroke_mode : kDebugCannot;
+}
+
+// The 7 key of the number pad: hand_glow_idle goes between 1 and 0.
+void HandDirectGlowIdleChange(const char* by) {
+  g_glow_idle = !g_glow_idle;
+  ControllersGesturePulse(0.5f, g_glow_idle ? 0.08f : 0.30f);
+  ModLog("hand glow    : %s: hand_glow_idle is %d, frame %llu. %s", by,
+         g_glow_idle ? 1 : 0, g_frame,
+         g_glow_idle ? "The glow shows on each frame, pale blue with no "
+                       "target"
+                     : "The glow shows only while a press of the grip has "
+                       "a target at the Hand's point");
+}
+int HandDirectGlowIdleValue() {
+  return g_installed ? (g_glow_idle ? 1 : 0) : kDebugCannot;
+}
+
+// The point key of the number pad: near_rule goes between 2 (one target) and
+// the old rule. With near_rule=0 or 1 in the ini, between that rule and 2.
+void HandDirectNearRuleChange(const char* by) {
+  SetRule(g_rule == 2 ? (g_rule_ini < 2 ? g_rule_ini : 1) : 2);
+  ControllersGesturePulse(0.5f, g_one_target ? 0.30f : 0.08f);
+  ModLog("hand pick    : %s: near_rule is %d, frame %llu. %s", by,
+         g_rule, g_frame,
+         g_one_target
+             ? "One target: the pick record holds only the object with the "
+               "halo, and the game's search at the palm is off"
+             : g_near_rule
+                   ? "The nearest body within the reach, the game's pick at "
+                     "the pixel for an object that is not near, and the "
+                     "game's search at the palm"
+                   : "The pick has a reach of 60 percent of the Hand's "
+                     "length");
+}
+int HandDirectNearRuleValue() { return g_installed ? g_rule : kDebugCannot; }
+
+namespace {
+
 // THE A/B KEY (docs/throw.md, "The release at once"). With test_keys=1, the
 // star key of the number pad turns the release at once off and on while the
 // game runs: the game turn after a release, and the fast opening of the grip
@@ -3399,14 +3688,7 @@ void PollReleaseKey() {
   DWORD process = 0;
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  g_turn_on = !g_turn_on;
-  ControllersGesturePulse(0.5f, g_turn_on ? 0.30f : 0.08f);
-  ModLog("hand throw   : the star key: the release at once is %s, frame "
-         "%llu. %s", g_turn_on ? "ON" : "OFF", g_frame,
-         g_turn_on ? "A game turn runs at once after a release, and the grip "
-                     "opens on a fast fall"
-                   : "A release waits for the next game turn, and the grip "
-                     "opens only below 35%");
+  HandDirectReleaseAtOnceChange("the star key");
 }
 
 // THE A/B KEY of the pick at the glow (docs/grab.md, "One point for each
@@ -3434,30 +3716,7 @@ void PollCatchKey() {
   DWORD process = 0;
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  g_catch_on = g_catch_on == near_math::kCatchOff ? near_math::kCatchOpen
-                                                  : g_catch_on - 1;
-  g_catch_logged = nullptr;
-  g_wide_catch_logged = nullptr;
-  ControllersGesturePulse(0.5f, g_catch_on == near_math::kCatchOpen   ? 0.45f
-                                : g_catch_on == near_math::kCatchRest ? 0.30f
-                                : g_catch_on == near_math::kCatchPick ? 0.15f
-                                                                      : 0.08f);
-  ModLog("hand pick    : Ctrl and Page Up: catch_moving is %d now, frame %llu. %s",
-         g_catch_on, g_frame,
-         g_catch_on == near_math::kCatchOpen
-             ? "An object that moves has the reach that it has at rest and "
-               "the extra reach. An object that fell from a still hand has "
-               "no guard, and the guard of a throw ends when the grip is "
-               "fully open"
-         : g_catch_on == near_math::kCatchRest
-             ? "An object that moves has the reach that it has at rest and "
-               "the extra reach. An object that fell from a still hand has "
-               "no guard, and a throw has the guard for the whole of "
-               "catch_grace_ms"
-         : g_catch_on == near_math::kCatchPick
-             ? "An object that moves has the extra reach on the reach of the "
-               "pick only, and each object that you let go has the guard"
-             : "Each object has the same reach, moving or still");
+  HandDirectCatchMovingChange("Ctrl and Page Up");
 }
 
 // The test key Ctrl Shift Page Up: hand_wide_pick_cm goes between its value
@@ -3474,22 +3733,7 @@ void PollWideKey() {
   DWORD process = 0;
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  static int saved = 0;
-  if (g_wide_cm > 0) {
-    saved = g_wide_cm;
-    g_wide_cm = 0;
-  } else {
-    g_wide_cm = saved > 0 ? saved : near_math::kWideCm;
-  }
-  g_wide_logged = nullptr;
-  ControllersGesturePulse(0.5f, g_wide_cm > 0 ? 0.30f : 0.08f);
-  ModLog("hand pick    : Ctrl, Shift and Page Up: hand_wide_pick_cm is %d now, "
-         "frame %llu. %s", g_wide_cm, g_frame,
-         g_wide_cm > 0
-             ? "A holdable object up to that gap is the target when nothing "
-               "is nearer"
-             : "The wide reach is off: a gap between the reach of the pick "
-               "and the far grab has no target");
+  HandDirectWidePickChange("Ctrl, Shift and Page Up");
 }
 
 // THE A/B KEY OF THE CHOICE OF A FAR TARGET (test_keys=1): Ctrl with the Delete
@@ -3498,37 +3742,25 @@ void PollWideKey() {
 // pulse for each unit of the value, and one long pulse for 0: a hand can count
 // pulses, and it cannot tell five lengths apart. The key is read once a frame,
 // only while a window of the game is in front, and the mod does not take it
-// from the game.
-const float kChoicePulseSeconds = 0.08f;
-const float kChoiceLongPulseSeconds = 0.40f;
-// From the start of a pulse to the start of the next one.
-const ULONGLONG kChoicePulseStepMs = 250;
+// from the game. The pulses play also after a change from the debug page, so
+// they play before the test of test_keys.
 void PollChoiceKey() {
-  if (!g_release_key) return;
-  // Shift must be up: Ctrl, Shift and Delete is the key of god_zoom_about.
-  const bool down = (GetAsyncKeyState(VK_DELETE) & 0x8000) != 0 &&
-                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
-                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
-  const bool pressed = down && !g_choice_key_down;
-  g_choice_key_down = down;
-  const ULONGLONG now = GetTickCount64();
-  if (pressed) {
-    HWND window = GetForegroundWindow();
-    DWORD process = 0;
-    if (window != nullptr) GetWindowThreadProcessId(window, &process);
-    if (process != GetCurrentProcessId()) return;
-    FarGrabSetChoice(FarGrabChoice() >= far_choice_math::kChoiceMost
-                         ? 0
-                         : FarGrabChoice() + 1);
-    g_choice_pulses = FarGrabChoice();
-    g_choice_pulse_tick = now;
-    if (FarGrabChoice() == 0) {
-      ControllersGesturePulse(0.5f, kChoiceLongPulseSeconds);
+  if (g_release_key) {
+    // Shift must be up: Ctrl, Shift and Delete is the key of god_zoom_about.
+    const bool down = (GetAsyncKeyState(VK_DELETE) & 0x8000) != 0 &&
+                      (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                      (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
+    const bool pressed = down && !g_choice_key_down;
+    g_choice_key_down = down;
+    if (pressed) {
+      HWND window = GetForegroundWindow();
+      DWORD process = 0;
+      if (window != nullptr) GetWindowThreadProcessId(window, &process);
+      if (process != GetCurrentProcessId()) return;
+      HandDirectFarChoiceChange("Ctrl and Delete");
     }
-    ModLog("far grab    : Ctrl and Delete: far_grab_choice is %d now, frame "
-           "%llu. %s", FarGrabChoice(), g_frame,
-           FarGrabChoiceWords(FarGrabChoice()));
   }
+  const ULONGLONG now = GetTickCount64();
   if (g_choice_pulses > 0 && now >= g_choice_pulse_tick) {
     --g_choice_pulses;
     g_choice_pulse_tick = now + kChoicePulseStepMs;
@@ -3553,10 +3785,7 @@ void PollStayKey() {
   DWORD process = 0;
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  FarGrabSetStay(FarGrabStay() != 0 ? 0 : 1);
-  ControllersGesturePulse(0.5f, FarGrabStay() != 0 ? 0.30f : 0.08f);
-  ModLog("far grab    : Ctrl and Backspace: far_grab_stay is %d now, frame "
-         "%llu. %s", FarGrabStay(), g_frame, FarGrabStayWords(FarGrabStay()));
+  HandDirectFarStayChange("Ctrl and Backspace");
 }
 
 // THE A/B KEY OF A TAKE WHOSE SOURCE GOES AWAY (test_keys=1): Shift with the
@@ -3575,11 +3804,7 @@ void PollTakeCarryKey() {
   DWORD process = 0;
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  FarGrabSetTakeCarry(FarGrabTakeCarry() != 0 ? 0 : 1);
-  ControllersGesturePulse(0.5f, FarGrabTakeCarry() != 0 ? 0.30f : 0.08f);
-  ModLog("far grab    : Shift and Backspace: far_take_carry is %d now, frame "
-         "%llu. %s", FarGrabTakeCarry(), g_frame,
-         FarGrabTakeCarryWords(FarGrabTakeCarry()));
+  HandDirectTakeCarryChange("Shift and Backspace");
 }
 
 
@@ -3653,101 +3878,14 @@ void PollNearKey() {
   DWORD process = 0;
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  if (scroll_pressed) {
-    g_scroll_draw = !g_scroll_draw;
-    ControllersGesturePulse(0.5f, g_scroll_draw ? 0.30f : 0.08f);
-    ModLog("hand scroll  : Ctrl and the point key: scroll_draw is %d, frame "
-           "%llu. %s", g_scroll_draw ? 1 : 0, g_frame,
-           g_scroll_draw ? "Each scroll that the game draws is a candidate, "
-                           "with the reach of scroll_reach_cm"
-                         : "A scroll is a candidate only when the game's pick "
-                           "offers it, with the reach of each object");
-  }
-  if (script_pressed) {
-    g_script_on = !g_script_on;
-    ControllersGesturePulse(0.5f, g_script_on ? 0.30f : 0.08f);
-    if (g_script_on) {
-      ModLog("scripts      : Ctrl and the 7 key: a script that asks about the "
-             "camera gets the player again (script_distance=%d, "
-             "script_view=%d, script_camera_moves=%d), frame %llu",
-             g_script_distance, g_script_view, g_script_moves, g_frame);
-    } else {
-      ModLog("scripts      : Ctrl and the 7 key: a script that asks about the "
-             "camera gets the game's camera, as with script_distance=0, "
-             "script_view=0 and script_camera_moves=0, frame %llu", g_frame);
-    }
-  }
-  if (palm_pressed) {
-    g_palm_point = !g_palm_point;
-    ControllersGesturePulse(0.5f, g_palm_point ? 0.30f : 0.08f);
-    ModLog("hand creature: Ctrl and the 9 key: creature_palm_point is %d, "
-           "frame %llu. %s", g_palm_point ? 1 : 0, g_frame,
-           g_palm_point ? "The point of the flat hand of a stroke is the palm"
-                        : "The point of the flat hand of a stroke is the tip "
-                          "of the index finger");
-  }
-  if (limit_pressed) {
-    g_stroke_limits_before = !g_stroke_limits_before;
-    float finger_below = 0.0f, flat_above = 0.0f;
-    StrokeLimitsNow(&finger_below, &flat_above);
-    ControllersGesturePulse(0.5f, g_stroke_limits_before ? 0.08f : 0.30f);
-    ModLog("hand creature: Ctrl and the 3 key: the hand of a stroke is the "
-           "finger below %.2f of the hand's length and the flat hand over "
-           "%.2f, and a stroke starts with the flat hand from %.2f (%s), "
-           "frame %llu", finger_below, flat_above,
-           0.5f * (finger_below + flat_above),
-           g_stroke_limits_before
-               ? "the fixed limits of the test key"
-               : "creature_finger_below_pct and creature_flat_above_pct",
-           g_frame);
-  }
-  if (slap_pressed) {
-    g_slap_key = (g_slap_key + 1) % 4;
-    ControllersGesturePulse(0.5f, 0.08f * (g_slap_key + 1));
-    ModLog("hand creature: the 9 key: a slap needs %.1f m/s now, and a hard "
-           "slap %.2f m/s (creature_slap_mps is %.2f in the ini), frame %llu",
-           SlapMps(), 1.8f * SlapMps(), ControllersCreatureSlapMps(),
-           g_frame);
-  }
-  if (stroke_pressed) {
-    g_stroke_mode = (g_stroke_mode + 1) % 4;
-    ControllersGesturePulse(0.5f, 0.08f * (g_stroke_mode + 1));
-    ModLog("hand creature: the 3 key: creature_stroke_hand is %d now: %s. A "
-           "slap needs %.2f m/s, frame %llu", g_stroke_mode,
-           g_stroke_mode == 0   ? "the hand of a stroke follows the size of "
-                                  "the Creature"
-           : g_stroke_mode == 1 ? "the flat hand"
-           : g_stroke_mode == 2 ? "the index finger"
-                                : "the fist stroke: a fist while the grip is "
-                                  "closed, and the speed of the grip only",
-           SlapMps(), g_frame);
-  }
-  if (glow_pressed) {
-    g_glow_idle = !g_glow_idle;
-    ControllersGesturePulse(0.5f, g_glow_idle ? 0.08f : 0.30f);
-    ModLog("hand glow    : the 7 key: hand_glow_idle is %d, frame %llu. %s",
-           g_glow_idle ? 1 : 0, g_frame,
-           g_glow_idle ? "The glow shows on each frame, pale blue with no "
-                         "target"
-                       : "The glow shows only while a press of the grip has "
-                         "a target at the Hand's point");
-  }
-  if (!pressed) return;
-  // Between one target and the old rule. With near_rule=0 or
-  // 1 in the ini, between that rule and one target.
-  SetRule(g_rule == 2 ? (g_rule_ini < 2 ? g_rule_ini : 1) : 2);
-  ControllersGesturePulse(0.5f, g_one_target ? 0.30f : 0.08f);
-  ModLog("hand pick    : the point key: near_rule is %d, frame %llu. %s",
-         g_rule, g_frame,
-         g_one_target
-             ? "One target: the pick record holds only the object with the "
-               "halo, and the game's search at the palm is off"
-             : g_near_rule
-                   ? "The nearest body within the reach, the game's pick at "
-                     "the pixel for an object that is not near, and the "
-                     "game's search at the palm"
-                   : "The pick has a reach of 60 percent of the Hand's "
-                     "length");
+  if (scroll_pressed) HandDirectScrollDrawChange("Ctrl and the point key");
+  if (script_pressed) HandDirectScriptPlayerChange("Ctrl and the 7 key");
+  if (palm_pressed) HandDirectPalmPointChange("Ctrl and the 9 key");
+  if (limit_pressed) HandDirectStrokeLimitsChange("Ctrl and the 3 key");
+  if (slap_pressed) HandDirectSlapChange("the 9 key");
+  if (stroke_pressed) HandDirectStrokeHandChange("the 3 key");
+  if (glow_pressed) HandDirectGlowIdleChange("the 7 key");
+  if (pressed) HandDirectNearRuleChange("the point key");
 }
 
 // Once a frame: how long the Hand kept the object after the release action.
@@ -6642,6 +6780,42 @@ void WatchRootsPiles() {
     for (int i = 0; i < 3; ++i) at[i] = origin[i];
     moved = true;
   }
+  // THE THUMP OF A TREE THAT THE HAND PULLS OUT (world_haptics). A new roots
+  // pile is the moment at which the Tug of the game breaks the roots. Only
+  // for a tree in the Hand or in the glide of the far grab: the Creature also
+  // pulls trees out. The size of the tree in the room gives the strength.
+  if (added) {
+    void* held = g_hand != nullptr
+                     ? *reinterpret_cast<void* const*>(g_hand + kHandHeld)
+                     : nullptr;
+    void* tree = nullptr;
+    if (held != nullptr && !IsBadReadPtr(held, 0x70) && IsTreeObject(held) &&
+        !IsForest(held)) {
+      tree = held;
+    } else {
+      void* glide = nullptr;
+      float from[3];
+      if (FarGrabGlideOrigin(&glide, from) && glide != nullptr &&
+          IsTreeObject(glide)) {
+        tree = glide;
+      }
+    }
+    if (tree != nullptr) {
+      const float units = RoomUnits();
+      const float radius_cm =
+          units > 0.0f ? Radius2D(tree) / units * 100.0f : 0.0f;
+      const float strength = haptics_math::ThumpBySize(radius_cm);
+      static int thump_logs = 0;
+      if (thump_logs < 40) {
+        ++thump_logs;
+        ModLog("hand tree    : the tree %p comes out of the land. Its body "
+               "has a radius of %.1f cm of the room, so the thump has a "
+               "strength of %.2f (world_haptics=%d), frame %llu", tree,
+               radius_cm, strength, HapticsWorldOn(), g_frame);
+      }
+      HapticsWorld(2, haptics_math::kThump, strength);
+    }
+  }
   if (g_tree_logs >= 80) return;
   ++g_tree_logs;
   if (moved) {
@@ -7437,6 +7611,7 @@ void InstallNear() {
                "acts on is nearer"
              : "The reach of the Creature at the Hand is hand_pick_cm");
   CreatureStayInstall();
+  CreatureLookInstall();
   g_creature_bone = IniKey("creature_bone", 1) != 0;
   ModLog("hand creature: creature_bone=%d. %s", g_creature_bone ? 1 : 0,
          g_creature_bone
@@ -7630,11 +7805,11 @@ void HandDirectInstallTable() {
            g_far_test_take_gone);
   }
   // A GAME TURN NOW: release_at_once=0 leaves the game turns as they are.
-  // With test_keys=1 the hook goes in for both values, so the A/B key can
-  // turn the release at once on.
+  // With test_keys=1 or debug_menu=1 the hook goes in for both values, so the
+  // A/B key and the debug page can turn the release at once on.
   g_turn_on = IniKey("release_at_once", 1) != 0;
   g_release_key = IniKey("test_keys", 0) != 0;
-  if (g_turn_on || g_release_key) {
+  if (g_turn_on || TestSwitchesOn()) {
     g_turn_hooked = Hook(kDoATurn, reinterpret_cast<void*>(&h_DoATurn),
                          reinterpret_cast<void**>(&o_DoATurn),
                          "GGame::LocalTimerSaysDoATurn (a game turn at once "
@@ -7797,14 +7972,18 @@ void LatchPlayer() {
   g_player = p;
 }
 
-// True when the player stands for the camera of a script at this moment.
-bool ScriptPlayerNow() {
-  if (!g_script_on || !g_player.valid) return false;
+// True when the view of the player is at the place of the game camera at this
+// moment, with each answer of the player on or off.
+bool ScriptPlayerStands() {
+  if (!g_player.valid) return false;
   return near_math::PlayerIsCamera(true, TabletopGodOwnsView(),
                                    ScriptCameraOwnerNow(),
                                    CutsceneWindowBarsUp(),
                                    ComfortCameraGameMoves());
 }
+
+// True when the player stands for the camera of a script at this moment.
+bool ScriptPlayerNow() { return g_script_on && ScriptPlayerStands(); }
 
 bool ScriptCameraOut() {
   const uint8_t* game = *reinterpret_cast<const uint8_t* const*>(kScriptGame);
@@ -7934,6 +8113,199 @@ void __cdecl h_ScriptThingSees() {
   o_ScriptThingSees();
   for (int i = 0; i < 3; ++i) camera[i] = keep[i];
   ++g_script_answers;
+}
+
+// A THING THAT A SCRIPT TURNS TO THE CAMERA (villager_look_head) [V].
+// - GScript::SetFocus 0x006F90B0 is the word SET_FOCUS (native 34). It takes
+//   a thing and a point, which come off the stack as z, y, x, then the thing.
+//   For an object it calls slot 0x510: Object::SetFocus 0x006393A0 for a
+//   villager, which turns the whole body to the point on the map
+//   (LH3DMath::GetYAngle, then slot 0x524). A villager has no turn of the
+//   head and no pitch. For the Creature it is Creature::SetFocus 0x004F6760,
+//   and for a group each thing of the group.
+// - challenge.chl has SET_FOCUS with the point of "camera position" at 174
+//   places. 146 are in a cut scene, which keeps the camera of the story. The
+//   28 others turn a person of a quest to the player while the player has the
+//   view: for example the person at a scroll, who waves to the player
+//   (CreatureDevelopmentHighlightNotify), the Shaolin monk, the guards of the
+//   slavers and the man of the throwing stones.
+// - In the God view the engine camera is the game's own camera, 257 units
+//   from the player on the map (docs/god-view.md, section 16.2). So the
+//   villager turns to a point far behind the player.
+// With villager_look_head=1, while the player stands for the camera, a point
+// that is the engine camera to the last bit becomes the head. The game does
+// the turn. Ctrl and the 7 key of the number pad change it with the other
+// answers of the player (g_script_on).
+const uintptr_t kScriptFocus = 0x006F90B0;
+ScriptWordFn o_ScriptFocus = nullptr;
+// GameThingWithPos: the place on the map at +0x14 (x) and +0x18 (z), each
+// an int of 1/6553.6 unit (the 0.00015258789 at 0x008AA3A4).
+const int kThingMapX = 0x14;
+const int kThingMapZ = 0x18;
+const float kMapUnit = 0.00015258789f;
+const int kThingGameAngle = 0x5C;  // uint16, the heading of a Mobile
+const int kSlotIsCreature = 0x34;
+const int kSlotIsVillager = 0x2C8;  // thiscall (int), ret 4
+const int kSlotIsContainer = 0x3F8;
+typedef int(__fastcall* ThingAskFn)(void* self, void* unused);
+typedef int(__fastcall* ThingAskIntFn)(void* self, void* unused, int value);
+uint64_t g_look_turns = 0;   // the turns to the head of this report window
+uint64_t g_look_camera = 0;  // the turns to the game camera, at 0 or off
+uint64_t g_look_story = 0;   // the turns to the camera of a cut scene
+uint32_t g_look_said = 0;    // the script id of the thing that the log named
+int g_look_said_head = -1;   // and whether it turned to the head
+int g_look_logs = 0;
+const int kMaxLookLogs = 24;
+
+void* ScriptThingSlot(void* thing, int slot) {
+  if (thing == nullptr || IsBadReadPtr(thing, 4)) return nullptr;
+  void* const* table = *reinterpret_cast<void* const* const*>(thing);
+  if (table == nullptr || IsBadReadPtr(table + slot / 4, 4)) return nullptr;
+  return table[slot / 4];
+}
+
+const char* ScriptThingKind(void* thing) {
+  void* slot = ScriptThingSlot(thing, kSlotIsContainer);
+  if (slot != nullptr &&
+      reinterpret_cast<ThingAskFn>(slot)(thing, nullptr) != 0) {
+    return "a group of things";
+  }
+  slot = ScriptThingSlot(thing, kSlotIsCreature);
+  if (slot != nullptr &&
+      reinterpret_cast<ThingAskFn>(slot)(thing, nullptr) != 0) {
+    return "the Creature";
+  }
+  slot = ScriptThingSlot(thing, kSlotIsVillager);
+  if (slot != nullptr &&
+      reinterpret_cast<ThingAskIntFn>(slot)(thing, nullptr, 0) != 0) {
+    return "a villager";
+  }
+  return "a thing";
+}
+
+// The thing of a script id, as GScript::GetScriptGameThing 0x0070D220
+// finds it: the BaseInfo of the id in the table at 0x00D967F8 (20 bytes each,
+// ids 1 to 0x1FF). The mod reads it with BaseInfo::GetBase 0x00436B80 only:
+// GetScriptGameThing also gives the thing to the script that runs.
+const uintptr_t kScriptThings = 0x00D967F8;
+const uintptr_t kBaseInfoGetBase = 0x00436B80;  // thiscall (), the object
+typedef void*(__fastcall* GetBaseFn)(void* self, void* unused);
+void* ScriptThingOf(uint32_t id) {
+  if (id == 0 || id > 0x1FF) return nullptr;
+  void* info = reinterpret_cast<void*>(kScriptThings + id * 20);
+  void* thing = reinterpret_cast<GetBaseFn>(kBaseInfoGetBase)(info, nullptr);
+  if (thing == nullptr || IsBadReadPtr(thing, kThingGameAngle + 2)) {
+    return nullptr;
+  }
+  return thing;
+}
+
+// One line for a turn to the camera: where the thing is, where your head and
+// the game camera are from it, and where the game turned a villager.
+// said: 1 the head, 0 the game camera, 2 the game camera of a cut scene.
+void LookLog(const char* who, void* thing, const char* what,
+             const float game_camera[3], int said) {
+  const uint8_t* bytes = static_cast<const uint8_t*>(thing);
+  const float x =
+      *reinterpret_cast<const int32_t*>(bytes + kThingMapX) * kMapUnit;
+  const float z =
+      *reinterpret_cast<const int32_t*>(bytes + kThingMapZ) * kMapUnit;
+  const char* kind = ScriptThingKind(thing);
+  char faces[64] = "";
+  if (strcmp(kind, "a villager") == 0) {
+    const float now = village_math::GameAngleDegrees(
+        *reinterpret_cast<const uint16_t*>(bytes + kThingGameAngle));
+    _snprintf_s(faces, sizeof(faces), _TRUNCATE,
+                " The game turned him to %.1f degrees.", now);
+  }
+  const float to_camera =
+      village_math::FocusYAngle(x, z, game_camera[0], game_camera[2]) *
+      57.2957795f;
+  if (!g_player.valid) {
+    ModLog("villager look: %s %s (%s) at %.1f %.1f on the map to the "
+           "camera. It turns to the game camera at %.1f %.1f %.1f, at %.1f "
+           "degrees: the God view did not draw the last frame.%s Frame %llu",
+           who, kind, what, x, z, game_camera[0], game_camera[1],
+           game_camera[2], to_camera, faces, g_frame);
+    return;
+  }
+  const float* at = g_player.points.head_at;
+  const float to_head =
+      village_math::FocusYAngle(x, z, at[0], at[2]) * 57.2957795f;
+  const float hx = at[0] - x, hz = at[2] - z;
+  ModLog("villager look: %s %s (%s) at %.1f %.1f on the map to the camera. "
+         "%s Your head is at %.1f %.1f %.1f, %.1f units away on the map, at "
+         "%.1f degrees. The game camera is at %.1f %.1f %.1f, at %.1f "
+         "degrees, %.1f degrees from your head.%s (villager_look_head=%d), "
+         "frame %llu",
+         who, kind, what, x, z,
+         said == 1   ? "It turns to your head."
+         : said == 2 ? "It turns to the game camera: a cut scene, or the "
+                       "game moves its own camera."
+                     : "It turns to the game camera.",
+         at[0], at[1], at[2], sqrtf(hx * hx + hz * hz), to_head,
+         game_camera[0], game_camera[1], game_camera[2], to_camera,
+         village_math::TurnDegrees(to_head, to_camera), faces,
+         g_look_head != 0 && g_script_on ? 1 : 0, g_frame);
+}
+
+void __cdecl h_ScriptFocus() {
+  uint8_t* machine = *reinterpret_cast<uint8_t* const*>(kScriptMachine);
+  if (machine == nullptr) {
+    o_ScriptFocus();
+    return;
+  }
+  const ScriptPopFn pop = reinterpret_cast<ScriptPopFn>(kScriptPop);
+  const ScriptPushFn push = reinterpret_cast<ScriptPushFn>(kScriptPush);
+  uint32_t v[4];
+  int t[4];
+  for (int i = 0; i < 4; ++i) {
+    t[i] = 0;
+    v[i] = pop(machine, nullptr, &t[i]);
+  }
+  const uint32_t* camera =
+      reinterpret_cast<const uint32_t*>(bw::tech::kCameraPos);
+  const unsigned point_bits[3] = {v[2], v[1], v[0]};
+  const unsigned camera_bits[3] = {camera[0], camera[1], camera[2]};
+  const bool is_camera = point_bits[0] == camera_bits[0] &&
+                         point_bits[1] == camera_bits[1] &&
+                         point_bits[2] == camera_bits[2];
+  const bool player = is_camera && ScriptPlayerStands();
+  const bool head = village_math::FocusOnHead(
+      g_look_head != 0 && g_script_on, player, point_bits, camera_bits);
+  float game_camera[3];
+  memcpy(game_camera, camera, sizeof(game_camera));
+  if (head) {
+    memcpy(&v[2], &g_player.points.head_at[0], 4);
+    memcpy(&v[1], &g_player.points.head_at[1], 4);
+    memcpy(&v[0], &g_player.points.head_at[2], 4);
+  }
+  for (int i = 3; i >= 0; --i) push(machine, nullptr, v[i], t[i]);
+  o_ScriptFocus();
+  if (!is_camera) return;
+  if (!player) {
+    // A cut scene, or the game moves its own camera: the game's camera is
+    // right, as in the plain game.
+    ++g_look_story;
+  } else if (head) {
+    ++g_look_turns;
+  } else {
+    ++g_look_camera;
+  }
+  const int said = !player ? 2 : head ? 1 : 0;
+  if ((v[3] == g_look_said && said == g_look_said_head) ||
+      g_look_logs >= kMaxLookLogs) {
+    return;
+  }
+  void* thing = ScriptThingOf(v[3]);
+  if (thing == nullptr) return;
+  g_look_said = v[3];
+  g_look_said_head = said;
+  ++g_look_logs;
+  char what[48];
+  _snprintf_s(what, sizeof(what), _TRUNCATE, "script thing %u",
+              static_cast<unsigned>(v[3]));
+  LookLog("a script turns", thing, what, game_camera, said);
 }
 
 // The moves of the God view, at the moment of the word.
@@ -8073,6 +8445,31 @@ void ScriptPlayerInstall() {
   }
   if (!distance) g_script_distance = 0;
   if (!view) g_script_view = 0;
+  // The word that turns a thing to a point (villager_look_head).
+  g_look_head = IniKey("villager_look_head", 1) != 0 ? 1 : 0;
+  static const uint8_t kFocusBytes[14] = {0x83, 0xEC, 0x10, 0x56, 0x8B,
+                                          0x35, 0x10, 0x5C, 0xD9, 0x00,
+                                          0x8D, 0x44, 0x24, 0x04};
+  bool focus = false;
+  if (!ScriptBytes(kScriptFocus, kFocusBytes, sizeof(kFocusBytes)) ||
+      !ScriptBytes(kScriptThing, kThingBytes, sizeof(kThingBytes))) {
+    ModLog("hooks        : GScript::SetFocus at 0x%08X does not have the "
+           "bytes of the disassembly, so a script turns a villager to the "
+           "game's camera", static_cast<unsigned>(kScriptFocus));
+  } else {
+    focus = Hook(kScriptFocus, reinterpret_cast<void*>(&h_ScriptFocus),
+                 reinterpret_cast<void**>(&o_ScriptFocus),
+                 "GScript::SetFocus (a villager turns to the head)");
+  }
+  if (!focus) g_look_head = 0;
+  ModLog("scripts      : villager_look_head=%d. %s", g_look_head,
+         g_look_head != 0
+             ? "In the God view a script that turns a villager to the camera "
+               "turns him to your head. In a cut scene, and while the game "
+               "moves its own camera, he turns to the game's camera. 0 turns "
+               "him to the game's camera"
+             : "A script that turns a villager to the camera turns him to "
+               "the game's camera");
   // The two words that ask how the player moves the camera.
   static const uint8_t kHandStateBytes[17] = {
       0x8B, 0x0D, 0x5C, 0x19, 0xD0, 0x00, 0xE8, 0x15, 0x61,
@@ -8109,7 +8506,7 @@ void ScriptPlayerInstall() {
                "a turn shows the rotate arrow. 0 gives the game's answers"
              : "A script that asks how you hold the land, or if the rotate "
                "arrow shows, gets the game's answer");
-  g_script_hooked = distance || view || moves;
+  g_script_hooked = distance || view || moves || focus;
   if (!g_script_hooked) return;
   ModLog("scripts      : script_distance=%d, script_view=%d. In the God view "
          "a script of the game that asks about the camera gets the player. "
@@ -8458,26 +8855,42 @@ int HandDirectTreeVerdict() {
   return g_tree_hint != 0 ? g_tree_verdict : -1;
 }
 
-// The A/B key of the roots pile (test_keys=1, Ctrl, Shift and Page Down).
-void HandDirectRootsToggle() {
+// The A/B key of the roots pile (test_keys=1, Ctrl, Shift and Page Down),
+// and its switch of the debug page (debug_menu.h).
+void HandDirectRootsToggle(const char* by) {
   ReadTreeHintKey();
   g_roots_at_tree = g_roots_at_tree != 0 ? 0 : 1;
   ControllersGesturePulse(0.5f, g_roots_at_tree != 0 ? 0.24f : 0.08f);
-  ModLog("test key     : Ctrl, Shift and Page Down: far_roots_at_tree is %d now "
-         "(%s)", g_roots_at_tree,
+  ModLog("test key     : %s: far_roots_at_tree is %d now "
+         "(%s)", by, g_roots_at_tree,
          g_roots_at_tree != 0 ? "the roots pile stands at the roots"
                               : "the roots pile stays on the way of the glide");
 }
+void HandDirectRootsToggle() {
+  HandDirectRootsToggle("Ctrl, Shift and Page Down");
+}
+int HandDirectRootsValue() {
+  ReadTreeHintKey();
+  return g_installed ? g_roots_at_tree : kDebugCannot;
+}
 
-// The A/B key of the card (test_keys=1, Ctrl and Page Down).
-void HandDirectTreeHintToggle() {
+// The A/B key of the card (test_keys=1, Ctrl and Page Down), and its switch
+// of the debug page (debug_menu.h).
+void HandDirectTreeHintToggle(const char* by) {
   ReadTreeHintKey();
   g_tree_hint = g_tree_hint != 0 ? 0 : 1;
   ControllersGesturePulse(0.5f, g_tree_hint != 0 ? 0.24f : 0.08f);
-  ModLog("test key     : Ctrl and Page Down: tree_plant_hint is %d now (%s)",
+  ModLog("test key     : %s: tree_plant_hint is %d now (%s)", by,
          g_tree_hint, g_tree_hint != 0 ? "the card says what the opening of "
                                          "the grip does with a tree"
                                        : "the card shows the text of the game");
+}
+void HandDirectTreeHintToggle() {
+  HandDirectTreeHintToggle("Ctrl and Page Down");
+}
+int HandDirectTreeHintValue() {
+  ReadTreeHintKey();
+  return g_installed ? g_tree_hint : kDebugCannot;
 }
 
 // For overlay.cpp: the hand of a stroke of the Creature, and what the tickle
@@ -8746,6 +9159,19 @@ void HandDirectPassBegin(int eye) {
   if (g_active && g_near_pick && g_choice != nullptr) Inject();
 }
 
+// THE BEAT OF A LIVING THING IN THE HAND (world_haptics, haptics.cpp): a
+// villager, a quest character or an animal that the Hand holds, by the
+// game's own test IsLiving. Once a frame, after the first eye pass.
+void LivingHoldFrame() {
+  void* held = g_hand != nullptr
+                   ? *reinterpret_cast<void* const*>(g_hand + kHandHeld)
+                   : nullptr;
+  const bool living = held != nullptr && State(g_hand) == kStateHolding &&
+                      !IsBadReadPtr(held, 0x70) && !IsCreatureObject(held) &&
+                      IsLivingThing(held);
+  HapticsWorldHold(living);
+}
+
 void HandDirectPassDone(int eye) {
   g_eye = -1;
   if (!g_active) return;
@@ -8759,6 +9185,7 @@ void HandDirectPassDone(int eye) {
     ForestTakeSelect();
     LogFetch();
     TreeReleaseFrame();
+    LivingHoldFrame();
     LogCheck();
     LogPickState();
   }
@@ -8966,6 +9393,38 @@ bool HandDirectIsTree(void* object) {
   return object != nullptr && IsTreeObject(object);
 }
 
+// The box of the mesh of a candidate in the world, through the matrix of the
+// draw as it is: the rows hold the turn and the scale, as for a scroll
+// (BoxBall). The middle, the three axes of length 1 in rows, and half the
+// size along each. False with no box.
+bool MeshBox(const Candidate& c, float middle[3], float axis[9],
+             float half[3]) {
+  if (c.model == nullptr) return false;
+  void** table = *reinterpret_cast<void** const*>(c.model);
+  const uint8_t* box =
+      reinterpret_cast<MeshBoxFn>(table[kMeshBox / 4])(c.model, nullptr);
+  if (box == nullptr) return false;
+  const float* mid = reinterpret_cast<const float*>(box + kBoxMiddle);
+  const float* size = reinterpret_cast<const float*>(box + kBoxHalf);
+  const float* rows = reinterpret_cast<const float*>(c.model + kMeshRows);
+  for (int k = 0; k < 3; ++k) middle[k] = c.position[k];
+  for (int j = 0; j < 3; ++j) {
+    const float* row = rows + j * 3;
+    const float length =
+        sqrtf(row[0] * row[0] + row[1] * row[1] + row[2] * row[2]);
+    if (!(length > 1e-4f && length < 1e4f) || !(mid[j] == mid[j]) ||
+        !(size[j] > 0.0f && size[j] < 1e5f)) {
+      return false;
+    }
+    for (int k = 0; k < 3; ++k) {
+      axis[j * 3 + k] = row[k] / length;
+      middle[k] += mid[j] * row[k];
+    }
+    half[j] = size[j] * length;
+  }
+  return true;
+}
+
 // For hand_feel.cpp (docs/hand-model.md, "Hands that react to the world"): the
 // body of a candidate of the last first eye pass, as the choice measures it.
 // kind 0 is an upright cylinder from the point of the object, 1 a tree (the
@@ -8989,6 +9448,35 @@ bool HandDirectFeelBody(int index, void** object, float base[3], float* radius,
     *radius = capsule.radius;
     *height = capsule.height;
     *kind = 2;
+    // THE BOX OF THE MESH OF A CREATURE. The capsule of the choice stands
+    // up from the body bone, and a Creature on four legs is longer than it
+    // is wide. The box of its mesh, through the matrix of the draw with the
+    // scale in its rows, has the length of the body. So a finger meets the
+    // flank and the back that the player sees. With no box the capsule
+    // stays.
+    float middle[3], box_axis[9], box_half[3];
+    if (MeshBox(c, middle, box_axis, box_half)) {
+      static int said = 0;
+      if (said < 3) {
+        ++said;
+        ModLog("hand feel    : the Creature %p has the box of its mesh as its "
+               "body for the fingers: the middle %.2f %.2f %.2f, half sizes "
+               "%.2f %.2f %.2f. Its capsule has a radius of %.2f and a height "
+               "of %.2f from %.2f %.2f %.2f",
+               c.object, middle[0], middle[1], middle[2], box_half[0],
+               box_half[1], box_half[2], capsule.radius, capsule.height,
+               capsule.base[0], capsule.base[1], capsule.base[2]);
+      }
+      for (int i = 0; i < 3; ++i) {
+        base[i] = middle[i];
+        half[i] = box_half[i];
+      }
+      for (int i = 0; i < 9; ++i) axis[i] = box_axis[i];
+      float most = box_half[0] > box_half[2] ? box_half[0] : box_half[2];
+      *radius = most;
+      *height = 2.0f * box_half[1];
+      *kind = 4;
+    }
     return true;
   }
   if (IsScrollObject(c.object)) {
@@ -9092,6 +9580,28 @@ namespace {
 //   hold    The Hand's point goes to the nearest object that the Hand can
 //           hold, within 2 m of the room. The test key seek_class has a
 //           class for each word "hold" in its turn ("Rock,Villager").
+//   feel    The Hand's point goes beside the body that hand feel gives the
+//           nearest object of a class, within 2 m of the room
+//           (docs/hand-model.md, "Hands that react to the world"). The test
+//           key seek_feel has one entry for each word "feel" in its turn:
+//           "Class,height,gap|Class,height,gap", with the height on the body
+//           in percent from its bottom and the gap from its surface in cm of
+//           the room (less than 0 is inside). The point is on the level line
+//           from the body to the camera. "any" takes each class, and
+//           "house" an Abode with a radius of less than 5 units (a field
+//           and a store are larger). A fourth
+//           number of 1 or -1 puts the point at one side of the body or at
+//           the other, across the line to the camera.
+//   gofeel  The God view teleports: the head goes over the land 50 cm of
+//           the room before the side of the body of the nearest object of
+//           the class of the next entry of seek_feel, within 30 m of the
+//           room, in the view. The hand does not move.
+//   gosea   The God view teleports: the head goes over the land 60 cm of the
+//           room before the nearest point of the sea in the view, within 30
+//           m of the room. The hand does not move.
+//   sea     The Hand's point goes 2 cm of the room over the nearest point of
+//           the sea, within 2 m of the room (seek_sea_cm gives a different
+//           height).
 enum {
   kPlanNone = 0, kPlanScroll, kPlanAir, kPlanCrown, kPlanPalm, kPlanCreature,
   kPlanCreaturePalm, kPlanGo, kPlanPicture, kPlanScrolls, kPlanGoSite,
@@ -9101,13 +9611,16 @@ enum {
   kPlanDoor, kPlanPost,
   kPlanHold,
   // The Workshop and the base of a tree (village.cpp).
-  kPlanGoShop, kPlanShop, kPlanTreeBase
+  kPlanGoShop, kPlanShop, kPlanTreeBase,
+  // The bodies of hand feel and the sea (hand_feel.cpp).
+  kPlanFeel, kPlanGoSea, kPlanSea, kPlanGoFeel
 };
 int g_plan[16];
 int g_plan_count = -1;
 int g_plan_used = 0;
 int g_plan_go_used = 0;
 int g_plan_picture_used = 0;
+int g_plan_feel_used = 0;
 
 // The numbers of one group of a test key such as "a,b;c,d": the group at
 // index, count numbers with commas between them. False with no such group.
@@ -9187,6 +9700,10 @@ int PlanCount() {
                      : n == 4 && strncmp(at, "shop", 4) == 0   ? kPlanShop
                      : n == 2 && strncmp(at, "up", 2) == 0     ? kPlanUp
                      : n == 4 && strncmp(at, "hold", 4) == 0   ? kPlanHold
+                     : n == 4 && strncmp(at, "feel", 4) == 0   ? kPlanFeel
+                     : n == 6 && strncmp(at, "gofeel", 6) == 0 ? kPlanGoFeel
+                     : n == 5 && strncmp(at, "gosea", 5) == 0  ? kPlanGoSea
+                     : n == 3 && strncmp(at, "sea", 3) == 0    ? kPlanSea
                      : n == 4 && strncmp(at, "down", 4) == 0   ? kPlanDown
                                                                 : kPlanNone;
     if (word != kPlanNone) g_plan[g_plan_count++] = word;
@@ -9250,6 +9767,83 @@ void PlanCensus(const float point[3], void* status, float units) {
            units > 0.0f ? old.gap / units * 100.0f : 0.0f, c.position[0],
            c.position[1], c.position[2], body.radius, body.height);
   }
+}
+
+// THE SEA for the words gosea and sea: the land height at a point, with 0 for
+// the sea, as hand_feel.cpp reads it.
+bool IsSea(float x, float z) {
+  if (!(x > 0.0f && x < 5119.0f && z > 0.0f && z < 5119.0f)) return false;
+  const int32_t coords[3] = {static_cast<int32_t>(x * kMapScale),
+                             static_cast<int32_t>(z * kMapScale), 0};
+  const float y = reinterpret_cast<GetAltitudeFn>(kGetAltitude)(coords);
+  return !(y > 0.0f);
+}
+
+// The nearest point of the sea from a point, on rings of 32 points each
+// `step` units, out to `limit` units. With `back` > 0 the point that is
+// `back` units before it toward the camera must be land.
+bool NearestSea(const float from[3], float step, float limit, float back,
+                float out[3]) {
+  const float* camera = Camera();
+  for (float r = step; r <= limit; r += step) {
+    for (int a = 0; a < 32; ++a) {
+      const float angle = 6.2831853f * static_cast<float>(a) / 32.0f;
+      const float x = from[0] + r * cosf(angle);
+      const float z = from[2] + r * sinf(angle);
+      if (!IsSea(x, z)) continue;
+      if (back > 0.0f) {
+        const float d[2] = {x - camera[0], z - camera[2]};
+        const float flat = sqrtf(d[0] * d[0] + d[1] * d[1]);
+        if (!(flat > 0.01f)) continue;
+        const float bx = x - d[0] / flat * back, bz = z - d[1] / flat * back;
+        if (IsSea(bx, bz)) continue;
+        // In the view: the sea point is in front of the camera.
+        const float view[2] = {g_target[0] - camera[0], g_target[2] - camera[2]};
+        if (d[0] * view[0] + d[1] * view[1] <= 0.0f) continue;
+      }
+      out[0] = x;
+      out[1] = 0.0f;
+      out[2] = z;
+      return true;
+    }
+  }
+  return false;
+}
+
+// THE WORD feel: the entry of the test key seek_feel for this word.
+bool FeelEntry(int index, char* cls, size_t size, float* height_pct,
+               float* gap_cm, int* side = nullptr) {
+  char path[MAX_PATH], text[400] = "";
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || (slash - path) + 10 >= MAX_PATH) return false;
+  slash[1] = 0;
+  strcat_s(path, "bwvr.ini");
+  GetPrivateProfileStringA("bwvr", "seek_feel", "", text, sizeof(text), path);
+  const char* at = text;
+  for (int i = 0; i < index; ++i) {
+    at = strchr(at, '|');
+    if (at == nullptr) return false;
+    ++at;
+  }
+  const char* comma = strchr(at, ',');
+  if (comma == nullptr) return false;
+  size_t n = static_cast<size_t>(comma - at);
+  if (n >= size) n = size - 1;
+  memcpy(cls, at, n);
+  cls[n] = 0;
+  char* end = nullptr;
+  *height_pct = static_cast<float>(strtod(comma + 1, &end));
+  if (end == comma + 1 || *end != ',') return false;
+  char* after = nullptr;
+  *gap_cm = static_cast<float>(strtod(end + 1, &after));
+  if (side != nullptr) {
+    *side = 0;
+    if (after != nullptr && *after == ',') {
+      *side = static_cast<int>(strtol(after + 1, nullptr, 10));
+    }
+  }
+  return true;
 }
 
 // One place of the plan. False when the candidates have no such place.
@@ -9378,6 +9972,209 @@ bool PlanPoint(int word, float out[3]) {
            units > 0.0f ? Distance(out, g_target) / units * 100.0f : 0.0f,
            g_frame);
     PlanCensus(out, status, units);
+    return true;
+  }
+  if (word == kPlanGoFeel) {
+    char cls[48] = "";
+    float height_pct = 0.0f, gap_cm = 0.0f;
+    const int entry = g_plan_feel_used++;
+    if (!FeelEntry(entry, cls, sizeof(cls), &height_pct, &gap_cm)) {
+      ModLog("hand pick    : seek plan: gofeel. The test key seek_feel has no "
+             "entry %d, frame %llu", entry, g_frame);
+      return false;
+    }
+    const bool any = strcmp(cls, "any") == 0;
+    const bool house = strcmp(cls, "house") == 0;
+    const float* camera = Camera();
+    const float view[2] = {g_target[0] - camera[0], g_target[2] - camera[2]};
+    int found = -1;
+    float best = 30.0f * units;
+    for (int i = 0; i < g_candidate_count; ++i) {
+      const Candidate& c = g_candidates[i];
+      if (!any && strcmp(ClassName(c.object), house ? "Abode" : cls) != 0) {
+        continue;
+      }
+      if (house) {
+        void* object = nullptr;
+        hand_feel::Body b;
+        if (!HandDirectFeelBody(i, &object, b.base, &b.radius, &b.height,
+                                &b.kind, b.axis, b.half) ||
+            b.kind != hand_feel::kBox || !(b.radius < 5.0f)) {
+          continue;
+        }
+      }
+      const float d[2] = {c.position[0] - camera[0], c.position[2] - camera[2]};
+      if (d[0] * view[0] + d[1] * view[1] <= 0.0f) continue;
+      const float span = sqrtf(d[0] * d[0] + d[1] * d[1]);
+      if (span < best) {
+        best = span;
+        found = i;
+      }
+    }
+    if (found < 0) {
+      ModLog("hand pick    : seek plan: gofeel %s. No such object in the view "
+             "within 30 m of the room (%d candidates), frame %llu", cls,
+             g_candidate_count, g_frame);
+      return false;
+    }
+    const float* at = g_candidates[found].position;
+    const float d[2] = {at[0] - camera[0], at[2] - camera[2]};
+    const float flat = sqrtf(d[0] * d[0] + d[1] * d[1]);
+    // 50 cm of the room before the side of its body, so the head is not in
+    // a house that is larger than the room at a zoom in.
+    float back = 0.5f * units;
+    {
+      void* object = nullptr;
+      hand_feel::Body b;
+      if (HandDirectFeelBody(found, &object, b.base, &b.radius, &b.height,
+                             &b.kind, b.axis, b.half)) {
+        back += b.radius;
+      }
+    }
+    const float target[3] = {at[0] - d[0] / flat * back, 0.0f,
+                             at[2] - d[1] / flat * back};
+    const bool went = TabletopGodTeleport(target);
+    ModLog("hand pick    : seek plan: gofeel %s. The nearest one in the view "
+           "is %p at %.1f %.1f %.1f, %.1f m of the room from the camera. %s "
+           "%.1f %.1f, frame %llu", cls, g_candidates[found].object, at[0],
+           at[1], at[2], units > 0.0f ? best / units : 0.0f,
+           went ? "The God view teleports: the head goes over the land at"
+                : "The God view does not own the view, so no teleport to",
+           target[0], target[2], g_frame);
+    return false;
+  }
+  if (word == kPlanFeel) {
+    char cls[48] = "";
+    float height_pct = 50.0f, gap_cm = 1.0f;
+    int side = 0;
+    const int entry = g_plan_feel_used++;
+    if (!FeelEntry(entry, cls, sizeof(cls), &height_pct, &gap_cm, &side)) {
+      ModLog("hand pick    : seek plan: feel. The test key seek_feel has no "
+             "entry %d, frame %llu", entry, g_frame);
+      return false;
+    }
+    const bool any = strcmp(cls, "any") == 0;
+    // "house": an Abode with a radius of less than 5 units. A field and a
+    // store are larger.
+    const bool house = strcmp(cls, "house") == 0;
+    int found = -1;
+    float best = limit;
+    hand_feel::Body body;
+    for (int i = 0; i < g_candidate_count; ++i) {
+      const Candidate& c = g_candidates[i];
+      const char* name = ClassName(c.object);
+      if (!any && strcmp(name, house ? "Abode" : cls) != 0) continue;
+      const float d = Distance(c.position, g_target);
+      if (!(d < best)) continue;
+      void* object = nullptr;
+      hand_feel::Body b;
+      if (!HandDirectFeelBody(i, &object, b.base, &b.radius, &b.height,
+                              &b.kind, b.axis, b.half) ||
+          b.kind == hand_feel::kBall) {
+        continue;
+      }
+      if (house && !(b.kind == hand_feel::kBox && b.radius < 5.0f)) {
+        continue;
+      }
+      best = d;
+      found = i;
+      body = b;
+    }
+    if (found < 0) {
+      ModLog("hand pick    : seek plan: feel %s. No such object with a body "
+             "within 2 m of the room of the Hand (%d candidates), frame %llu",
+             cls, g_candidate_count, g_frame);
+      return false;
+    }
+    // The bottom and the top of the body, and its middle on the land.
+    float bottom = body.base[1], top = body.base[1] + body.height;
+    if (body.kind == hand_feel::kBox) {
+      float extent = 0.0f;
+      for (int j = 0; j < 3; ++j) {
+        extent += fabsf(body.axis[j * 3 + 1]) * body.half[j];
+      }
+      bottom = body.base[1] - extent;
+      top = body.base[1] + extent;
+    }
+    const float y = bottom + 0.01f * height_pct * (top - bottom);
+    const float* camera = Camera();
+    float dir[2] = {camera[0] - body.base[0], camera[2] - body.base[2]};
+    const float flat = sqrtf(dir[0] * dir[0] + dir[1] * dir[1]);
+    if (!(flat > 0.01f)) return false;
+    dir[0] /= flat;
+    dir[1] /= flat;
+    // A side of 1 or -1 puts the point at one side of the body or at the
+    // other, across the line to the camera, so a picture shows the contact
+    // from the side.
+    if (side != 0) {
+      const float turned[2] = {dir[1] * side, -dir[0] * side};
+      dir[0] = turned[0];
+      dir[1] = turned[1];
+    }
+    // The surface: the first point of the line out of the body.
+    const auto at = [&](float t, float p[3]) {
+      p[0] = body.base[0] + dir[0] * t;
+      p[1] = y;
+      p[2] = body.base[2] + dir[1] * t;
+    };
+    float inside = 0.0f, outside = 4.0f * (body.radius + body.height) + 10.0f;
+    for (int k = 0; k < 40; ++k) {
+      const float middle = 0.5f * (inside + outside);
+      float p[3];
+      at(middle, p);
+      if (hand_feel::BodyGapAt(body, p) > 1e-3f) {
+        outside = middle;
+      } else {
+        inside = middle;
+      }
+    }
+    at(outside + gap_cm * 0.01f * units, out);
+    ModLog("hand pick    : seek plan: feel %s. The Hand's point goes %.1f cm "
+           "of the room %s the body of %p (%s, kind %d: radius %.2f, height "
+           "%.2f, half %.2f %.2f %.2f, at %.2f %.2f %.2f), at %.0f percent of "
+           "its height, to %.2f %.2f %.2f. The surface is %.2f units from "
+           "the middle, frame %llu",
+           cls, fabsf(gap_cm), gap_cm < 0.0f ? "inside" : "outside",
+           g_candidates[found].object, ClassName(g_candidates[found].object),
+           body.kind, body.radius, body.height, body.half[0], body.half[1],
+           body.half[2], body.base[0], body.base[1], body.base[2], height_pct,
+           out[0], out[1], out[2], outside, g_frame);
+    return true;
+  }
+  if (word == kPlanGoSea || word == kPlanSea) {
+    float sea[3];
+    const bool go = word == kPlanGoSea;
+    const float back = go ? 0.6f * units : 0.0f;
+    if (!NearestSea(g_target, go ? 0.1f * units : 0.02f * units,
+                    go ? 30.0f * units : limit, back, sea)) {
+      ModLog("hand pick    : seek plan: %s. No sea within %.0f m of the room "
+             "of the Hand, frame %llu", go ? "gosea" : "sea", go ? 30.0 : 2.0,
+             g_frame);
+      return false;
+    }
+    if (go) {
+      const float* camera = Camera();
+      const float d[2] = {sea[0] - camera[0], sea[2] - camera[2]};
+      const float flat = sqrtf(d[0] * d[0] + d[1] * d[1]);
+      const float target[3] = {sea[0] - d[0] / flat * back, 0.0f,
+                               sea[2] - d[1] / flat * back};
+      const bool went = TabletopGodTeleport(target);
+      ModLog("hand pick    : seek plan: gosea. The nearest sea in the view is "
+             "at %.1f %.1f. %s %.1f %.1f, frame %llu", sea[0], sea[2],
+             went ? "The God view teleports: the head goes over the land at"
+                  : "The God view does not own the view, so no teleport to",
+             target[0], target[2], g_frame);
+      return false;
+    }
+    static const int sea_cm = TestKey("seek_sea_cm");
+    out[0] = sea[0];
+    out[1] = (sea_cm > 0 ? sea_cm : 2) * 0.01f * units;
+    out[2] = sea[2];
+    ModLog("hand pick    : seek plan: sea. The Hand's point goes to %.2f %.2f "
+           "%.2f over the sea, %.1f cm of the room from where it is, frame "
+           "%llu", out[0], out[1], out[2],
+           units > 0.0f ? Distance(out, g_target) / units * 100.0f : 0.0f,
+           g_frame);
     return true;
   }
   if (word == kPlanUp || word == kPlanDown) {
@@ -10482,6 +11279,17 @@ uint64_t HandDirectTakeScriptAnswers() {
 // Once a report window.
 void HandDirectReport() {
   ForestTakeReport();
+  if (g_look_turns != 0 || g_look_camera != 0 || g_look_story != 0) {
+    ModLog("villager look: a script turned a thing to the camera %llu times: "
+           "%llu times to your head, %llu times to the game camera in the "
+           "God view, and %llu times to the game camera in a cut scene or "
+           "while the game moved its own camera (villager_look_head=%d)",
+           g_look_turns + g_look_camera + g_look_story, g_look_turns,
+           g_look_camera, g_look_story, g_look_head);
+    g_look_turns = 0;
+    g_look_camera = 0;
+    g_look_story = 0;
+  }
   if (g_moves_answers != 0) {
     ModLog("scripts      : %llu answers to a script that asked how you hold "
            "the land or if the rotate arrow shows came from the moves of the "

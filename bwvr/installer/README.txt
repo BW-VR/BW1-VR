@@ -74,6 +74,14 @@ green tick and "Ready" show that each check passed. A red warning
 shows the first problem and what to do. Hold the pointer over the
 line to see each check.
 
+Each time the launcher opens, it asks GitHub for the latest version
+of the mod. When a newer version is out and the PC is ready, the line
+at the bottom is blue and says so. Click the line to open the page of
+the new version in your browser. With no network, the launcher says
+nothing about updates. The ask sends only the version of the
+launcher. To stop the ask, clear "Check for updates" in the group
+Launcher, or set update_check=0 in bwvr.ini.
+
 If a start with the renderer Vulkan fails, the next start uses
 Direct3D 9. The launcher then shows "Direct3D 9" in the row
 "Renderer", and a red warning. To try Vulkan again, set "Renderer" to
@@ -107,7 +115,7 @@ still view of the logo.
 THE SETTINGS
 ------------
 
-The launcher shows five groups.
+These are some of the groups of the launcher.
 
   Picture         How big a picture each eye gets, a margin around
                   the view, how sharp the textures are, and how far
@@ -125,6 +133,10 @@ The launcher shows five groups.
 
   Controllers     The glow at the Hand, the grab of the world, and the
                   lines of the hint cards.
+
+  Launcher        "Check for updates": the launcher asks GitHub for
+                  the latest version each time it opens (see HOW TO
+                  START).
 
   Testing         One box, which turns on keys for tests. The box
                   is off, and a player does not need it.
@@ -166,14 +178,20 @@ the grip, and the hands change with your alignment, as the Hand of
 the game does. Set hand_model=0 in bwvr.ini for plain hands.
 
 The fingers also react to the world. When you put a hand down on the
-land, each finger bends until it rests on it. When your finger tip
-comes to a thing that the grip can take, the hand takes the form of
-the thing: a claw for a villager, an open hand for a tree. In your
-hand the fingers close on the thing, and a tree lies with its trunk
-on your palm. A small thing, for example a rock or a mushroom when you
+land, each finger bends until it rests on it. A finger tip that meets
+the land or a wall bends at its outer joints, and a flat hand on the
+land spreads its fingers a little. The fingers also rest on a house,
+a tree, a rock, a villager, an animal and your Creature, and a
+villager that walks into your hand bends your fingers. Your fingers
+go into the sea. When your finger tip comes to a thing that the grip
+can take, the hand takes the form of the thing: a claw for a
+villager, an open hand for a tree. In your hand the fingers close on
+the thing, the thumb goes round it, and a tree lies with its trunk on
+your palm. A small thing, for example a rock or a mushroom when you
 are zoomed out, is held between your thumb and your index finger. Set
-hand_pinch=0 in bwvr.ini to hold it in your fist. Set hand_feel=0 for
-fingers that follow the trigger and the grip only.
+hand_pinch=0 in bwvr.ini to hold it in your fist. Set
+hand_feel_bodies=0 for fingers that do not react to things, and
+hand_feel=0 for fingers that follow the trigger and the grip only.
 
   Stick up, down      Zoom out or in one step: up makes the world
                       smaller, down makes it larger. "Stick forward"
@@ -312,6 +330,9 @@ still:
   Number pad keys     Switch between two ways of one behavior, while
                       you play. See TEST KEYS OF THE NUMBER PAD.
 
+With "Debug menu" on, the ring has the same switches on its debug
+page, so you can change them in the headset (see THE RING).
+
 
 MOTION CONTROLLERS
 ------------------
@@ -445,13 +466,25 @@ top and clockwise. The words are temple, enter, creature, town, land,
 leash_learning, leash_compassion, leash_aggression, leash_next,
 leash_previous, mark_set, mark_go, mark_back, pause, slower, faster,
 help, names, details, save, load, playground, hall, room_creature,
-room_challenge, room_save, room_options, room_library, leave, more
-and none. Set radial_menu=0 for no ring. With button_layout=0 the
+room_challenge, room_save, room_options, room_library, leave, more,
+debug and none. Set radial_menu=0 for no ring. With button_layout=0 the
 ring opens with X and with the left stick: set radial_menu_stick=0
 for the ring with X only, or radial_menu_button=0 for the ring with
 the stick only. Set radial_menu_reach_cm to change how far your hand
 moves to pick an item (5), and radial_menu_size_pct for the size of
 the ring (100).
+
+The debug page is for tests. Turn on "Debug menu" in the launcher
+(debug_menu=1), and the ring gets the item Debug. On the second page
+it takes the place of the help of the game, and in the Temple it
+takes the empty slot. Keep your hand on Debug for a moment to get the
+groups: View, Picture, Render, Interface, Hand, Throw, Creature,
+Sound and Temple. Keep your hand on a group to get its switches. Each
+switch shows its value now, for example "One walk" with "on" under
+it. Choose a switch, and it changes at once, as its test key does.
+For 30 seconds after a choice, the ring opens on the same page again.
+Back goes to the page before. A switch that cannot change now is not
+on the page. The debug page does not need "Test keys".
 
 
 THE TEMPLE
@@ -686,6 +719,10 @@ the cut scene, as in the game. Set script_distance=0 and script_view=0
 in bwvr.ini if a quest must see only the camera of the game, far
 behind you.
 
+When a quest turns a villager to you, he turns his body to your
+head. Set villager_look_head=0 in bwvr.ini to turn him to the
+camera of the game, far behind you.
+
 
 THE FAR GRAB
 ------------
@@ -909,6 +946,11 @@ creature_hold_stay_ms in bwvr.ini to change the time of the hold, in
 milliseconds (350). Set creature_stay_look=0 if your Creature must not
 look at your hand.
 
+Your Creature looks at you. When it waves at you, prays to you, shows
+you how it feels or follows you, its head turns to your head, so you
+get eye contact. Set creature_look_head=0 in bwvr.ini to make it look
+at the game camera, which is high in the sky above you.
+
 While the leash is on your Creature, the trigger commands it. Point
 your hand at an object: the object gets a green halo. Press the
 trigger, and your Creature goes to the object and acts on it. An object
@@ -992,6 +1034,16 @@ that is still gives no pulse. Set haptics_pct in bwvr.ini to change
 the strength: 100 is the default, 50 is half, and 0 turns the pulses
 off.
 
+The hand also feels the world that it touches. Your Creature purrs
+in the hand when the game counts a stroke. A villager or an animal
+in the Hand has a light heartbeat. The land gives a faint texture
+while it moves under your grip, and it stops when the land stops. A
+thrown object that lands, and a tree that you pull out, give one
+thump. A miracle that charges gives a short build up, and each piece
+of a take from a pile gives a tick. These pulses never cover the
+pulse of a new target or a lock. Set world_haptics=0 in bwvr.ini to
+turn them off.
+
 
 TABLETOP
 --------
@@ -1018,9 +1070,9 @@ does not need them.
   Ctrl 5    The four rules of the aim of the trigger
             (creature_command_rule). One short pulse for each
             unit of the value.
-  Ctrl 7    The three rules for what a quest sees
-            (script_distance, script_view and
-            script_camera_moves).
+  Ctrl 7    The four rules for what a quest sees
+            (script_distance, script_view,
+            script_camera_moves and villager_look_head).
   Ctrl 8    The two ways to cast a miracle (miracle_hand).
   .         The rule "near objects win" and the pick of the Hand
             (far_grab_near_cm).
@@ -1118,6 +1170,12 @@ the two pictures then do not join.
 
 The frame rate drops in busy scenes. If it gets too low, lower the
 resolution scale, or bring the model detail distance in.
+
+The mod uses the refresh rate that you set for the headset. To ask
+the headset for a different rate, set refresh_rate_hz in bwvr.ini to
+a rate in Hz, or to -1 for the highest rate of the headset. The log
+gives the rates of the headset and the frame rate that the runtime
+gives the game.
 
 The edge of the view can show black when you turn your head fast. Set
 "Margin around the view" in the launcher (key fov_margin_pct). The

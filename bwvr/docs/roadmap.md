@@ -453,6 +453,12 @@ that moves while the Hand takes it.
     Creature too,
   - a tree, a house or a pile is still easy to take or to tap: with the
     Hand's point in it, or with the aim on no far target.
+- **P2. The Creature looks at the player: check it in the headset.** Where a
+  plan of the Creature looks at the camera of the player, the Creature looks
+  at the player's head (`creature_look_head=1`, `creature.md`, section 5.4).
+  Desktop runs show the angles of the game. They do not show that the head
+  of a small Creature turns visibly on the screen. Check in a headset that
+  the eyes meet the player's eyes, with a larger Creature near the player.
 - **P2. The stay of the Creature: test it in the headset.** A grip from a
   distance that stays closed on the Creature makes it stop and stay until
   the grip opens. A short grip changes the leash when it opens
@@ -655,6 +661,16 @@ that moves while the Hand takes it.
     overlay of Virtual Desktop on (the latency of the network and the frames
     that the headset drops), and a session with `xr_vulkan=0` and
     `backend=dxwrapper` for a comparison.
+  - **About 100 frames a second at 120 Hz with Virtual Desktop.** The
+    runtime says that the display has 120 Hz, and it takes a frame each 10
+    ms. The frame of the mod is ready about 6 ms before that with
+    `backend=vulkan` (`backend.md`, "The refresh rate of the headset"). So
+    the cap is in the runtime. Next steps: a session that reads the lines
+    `refresh rate :` and `display      :`, a session with
+    `refresh_rate_hz=-1`, and `bwvr-xrtest 30 vulkan hz=-1` for the pace of
+    the runtime with no game. Then a session with a smaller render size,
+    and one with the performance overlay of Virtual Desktop on (the time of
+    the encoder).
   - **The wait at the stop of a sound.** The mod skips the 20 ms that
     the audio DLL waits on the frame thread at the stop of a sound
     (`audio_stop_wait=0`, `audio.md`, 7.6). In a desktop run the worst frame
@@ -905,9 +921,13 @@ that moves while the Hand takes it.
     one state"). With one walk, each of its 1580 to 2610 state calls in a
     frame changes a value. The texture filter of the mod adds about 4 calls
     in a frame.
-- **N2. The hands that react.** The part for bodies that the hand passes
-  is built and off (`hand_feel_bodies`): no picture proves it. Not shown: a
-  tree taken with the palm to the side. The idle wave is off
+- **N2. The hands that react.** Not shown on the desktop: a rock and the
+  crown of a tree as a body, a villager that walks into a still hand, and a
+  tree taken with the palm to the side, and a picture from the side of a
+  finger tip that bends at a wall. The box of the Creature does not follow
+  its animation, and the box of a hut with its roof down to the land stops a
+  finger in the air before the roof. The thumb does not go round the trunk of a tree in
+  the Hand: the open thumb is in the trunk. The idle wave is off
   (`hand_feel_idle`).
 - **N3. The hand model.** The game's finger animations are not played (a
   pose is a curl for each finger). The shadow of the Hand on the land has
@@ -1041,6 +1061,13 @@ that moves while the Hand takes it.
   head motion, the power and the heat of a Quest 3, the frames of the game
   under Box64), and a runtime with no `XR_FB_display_refresh_rate` on a
   real headset (the Steam Frame).
+- **N22. Haptics from the world: check it in a headset.** With
+  `world_haptics=1` the hand feels the purr of a stroke, the beat of a
+  living thing in the Hand, the land under a grip, the thump of a landing
+  and of a tree that comes out, the charge of a miracle and the pieces of a
+  take (`hand-model.md`, "Haptics from the world"). Only a headset shows
+  how each pattern feels, and whether a new target and a lock stay clear.
+  The mod reads no type of the ground, so rock and grass feel the same.
 
 ### The repo, the release and the tools
 
@@ -1089,6 +1116,9 @@ that moves while the Hand takes it.
   6.2). A grip from a distance in the walk of `-Kind tie` can show it.
 - **R10. Two test keys on one key.** Ctrl and the 9 key of the number pad is
   the test key of `creature_palm_point` (`hand_direct.cpp`) and of the take
-  from a forest (`forest_take.cpp`). The keys of the keyboard that no code
-  of the game or of the mod reads are few: a new test key needs a search
-  first (`backend.md`, the hotkey table).
+  from a forest (`forest_take.cpp`). Ctrl and the 1 key of the number pad
+  is the test key of the ways of the ring (`radial_menu.cpp`) and of
+  `god_camera_at` (`stereo.cpp`). The debug page of the ring has one item for
+  each of the four. The keys of the keyboard that no code of the game or of
+  the mod reads are few: a new test key needs a search first (`backend.md`,
+  the hotkey table).

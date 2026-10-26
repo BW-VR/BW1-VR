@@ -58,6 +58,7 @@
 #include <string.h>
 
 #include "../common/bw_addresses.h"
+#include "debug_menu.h"
 #include "hand_model.h"
 
 extern void ModLog(const char* format, ...);
@@ -68,6 +69,9 @@ void* HandDirectHand(bool* active);
 // script of the fake controller uses.
 void ControllersGesturePulse(float amplitude, float seconds);
 uint64_t ControllersFrameCount();
+// This file: the switches of the test keys (below the namespace).
+void HandModelSwapChange(const char* by);
+void HandModelLookChange(const char* by);
 
 namespace {
 
@@ -849,8 +853,8 @@ void PollKeys() {
   DWORD process = 0;
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  if (swap_pressed) SwapModel("Ctrl and the minus key");
-  if (look_pressed) StepLook("Shift and the minus key");
+  if (swap_pressed) HandModelSwapChange("Ctrl and the minus key");
+  if (look_pressed) HandModelLookChange("Shift and the minus key");
 }
 
 // The light position and the color of the Hand of the game, for this frame.
@@ -1262,6 +1266,33 @@ int FillHand(const Built& built, const float camera[12], float near_plane,
 
 }  // namespace
 
+// THE SWITCHES OF THE TEST KEYS (debug_menu.h). Ctrl and the minus key of the
+// number pad: the next hands. The value is 0 for the low poly hands, 1 for
+// the mesh of the game and 2 for the mesh of the file. Without the mesh of
+// the game nothing changes.
+void HandModelSwapChange(const char* by) {
+  Load();
+  if (!g_ready) return;
+  SwapModel(by);
+}
+int HandModelSwapValue() {
+  Load();
+  return g_ready ? g_mode : kDebugCannot;
+}
+
+// Shift and the minus key of the number pad: the next look. The value is 0
+// for the alignment of the player, then 1 evil, 2 neutral and 3 good. With
+// the low poly hands the look shows nothing.
+void HandModelLookChange(const char* by) {
+  Load();
+  if (!g_ready) return;
+  StepLook(by);
+}
+int HandModelLookValue() {
+  Load();
+  return g_ready && g_mode != kModeLowPoly ? g_look_step : kDebugCannot;
+}
+
 bool HandModelActive() {
   Load();
   return g_ready && g_mode != kModeLowPoly;
@@ -1353,6 +1384,37 @@ bool HandModelFingerJoints(int finger, float curl, float spread,
                            float joints[overlay_math::kJoints + 1][3]) {
   if (finger < 0 || finger >= hm::kFingers || !HandModelActive()) return false;
   hm::MeshFingerJointsSpread(g_skeleton, g_place, finger, curl, spread, joints);
+  return true;
+}
+
+// THE FOLD LIMIT of the outer joints of each finger of the mesh in use
+// (hand_model_math.h, OuterFoldLimit), made again when the mesh changes.
+float HandModelOuterLimit(int finger) {
+  static const float* made_for = nullptr;
+  static float limit[hm::kFingers] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+  if (finger < 0 || finger >= hm::kFingers || !HandModelActive()) return 1.0f;
+  if (made_for != g_mesh.base) {
+    made_for = g_mesh.base;
+    for (int f = 0; f < hm::kFingers; ++f) {
+      limit[f] = hm::OuterFoldLimit(g_skeleton, f, g_mesh.vertices,
+                                    g_mesh.base, g_mesh.bone, g_mesh.weight,
+                                    g_mesh.triangles, g_mesh.index);
+    }
+    ModLog("hand model   : the outer joints of the mesh bend with no fold of "
+           "the skin (no triangle of a joint turned more than %.0f degrees) "
+           "up to %.2f %.2f %.2f %.2f %.2f of their full bend, thumb to "
+           "little finger", hm::kFoldDeg, limit[0], limit[1], limit[2],
+           limit[3], limit[4]);
+  }
+  return limit[finger];
+}
+
+bool HandModelFingerJointsPose(int finger, float curl, float outer,
+                               float spread, float thumb_turn,
+                               float joints[overlay_math::kJoints + 1][3]) {
+  if (finger < 0 || finger >= hm::kFingers || !HandModelActive()) return false;
+  hm::MeshFingerJointsPose(g_skeleton, g_place, finger, curl, outer, spread,
+                           thumb_turn, joints);
   return true;
 }
 

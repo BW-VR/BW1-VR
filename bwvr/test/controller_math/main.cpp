@@ -3538,12 +3538,15 @@ void CreatureChecks() {
 #include "spawn_checks.h"
 #include "spirit_size_checks.h"
 #include "stay_checks.h"
+#include "look_checks.h"
 #include "ring_checks.h"
+#include "debug_menu_checks.h"
 #include "teleport_checks.h"
 #include "sky_checks.h"
 #include "sprite_checks.h"
 #include "feel_checks.h"
 #include "pinch_checks.h"
+#include "feel_shape_checks.h"
 #include "temple_checks.h"
 #include "take_stream_checks.h"
 #include "eye_luma_checks.h"
@@ -3595,6 +3598,8 @@ void CreatureChecks() {
 #include "wow64_cpu_checks.h"
 #include "frame_loop_checks.h"
 #include "gpu_parts_checks.h"
+#include "update_checks.h"
+#include "refresh_rate_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3975,6 +3980,7 @@ int main() {
   aim_checks::AimChecks();
   miracle_checks::MiracleChecks();
   ring_checks::RingChecks();
+  debug_menu_checks::DebugMenuChecks();
   teleport_checks::TeleportChecks();
   sky_checks::SkyChecks();
   sprite_checks::SpriteChecks();
@@ -3982,6 +3988,7 @@ int main() {
   forest_checks::ForestGripChecks();
   feel_checks::FeelChecks();
   pinch_checks::PinchChecks();
+  feel_shape_checks::FeelShapeChecks();
   temple_checks::TempleChecks();
   eye_luma_checks::EyeLumaChecks();
   land_light_checks::LandLightChecks();
@@ -3989,6 +3996,7 @@ int main() {
   tree_body_checks::TreeBodyChecks();
   zoom_checks::ZoomChecks();
   stay_checks::StayChecks();
+  look_checks::LookChecks();
   text_click_checks::TextClickChecks();
   script_frame_checks::ScriptFrameChecks();
   frame_stats_checks::FrameStatsChecks();
@@ -4034,6 +4042,8 @@ int main() {
   wow64_cpu_checks::Wow64CpuChecks();
   frame_loop_checks::FrameLoopChecks();
   gpu_parts_checks::GpuPartsChecks();
+  update_checks::UpdateChecks();
+  refresh_rate_checks::RefreshRateChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

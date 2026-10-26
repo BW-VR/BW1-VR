@@ -70,6 +70,9 @@
 // rate, and the app gets XrEventDataDisplayRefreshRateChangedFB. A request
 // for 0 goes back to 72 Hz.
 //
+// THE TIME. An XrTime of the runtime is CLOCK_MONOTONIC in ns, and
+// XR_KHR_convert_timespec_time gives it as a timespec.
+//
 // THE SIZE OF THE EYES. The runtime asks for 2064 by 2208 for each eye, the
 // panel of a Quest 3. The file eyes.txt in the folder of the runtime can give
 // another size (for example "4096 4291", the size that a Quest 3 asked for).
@@ -113,6 +116,7 @@
 
 #define XR_USE_PLATFORM_ANDROID
 #define XR_USE_GRAPHICS_API_VULKAN
+#define XR_USE_TIMESPEC
 #include <jni.h>
 #include <vulkan/vulkan.h>
 #include <openxr/openxr.h>
@@ -829,8 +833,9 @@ XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(
                                  XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
                                  XR_KHR_LOADER_INIT_EXTENSION_NAME,
                                  XR_KHR_LOADER_INIT_ANDROID_EXTENSION_NAME,
+                                 XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME,
                                  XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME};
-  const uint32_t n = g_rates.empty() ? 4 : 5;
+  const uint32_t n = g_rates.empty() ? 5 : 6;
   *count = n;
   if (capacity == 0) return XR_SUCCESS;
   if (capacity < n) return XR_ERROR_SIZE_INSUFFICIENT;
@@ -838,6 +843,12 @@ XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(
     strcpy(out[i].extensionName, kNames[i]);
     out[i].extensionVersion = 1;
   }
+  return XR_SUCCESS;
+}
+
+XrResult XRAPI_CALL ConvertTimeToTimespecTime(XrInstance, XrTime time, struct timespec* out) {
+  out->tv_sec = static_cast<time_t>(time / 1000000000);
+  out->tv_nsec = static_cast<long>(time % 1000000000);
   return XR_SUCCESS;
 }
 
@@ -1678,6 +1689,7 @@ XrResult XRAPI_CALL GetInstanceProcAddr(XrInstance instance, const char* name, P
       BWVR_XR("xrWaitFrame", WaitFrame),
       BWVR_XR("xrBeginFrame", BeginFrame),
       BWVR_XR("xrEndFrame", EndFrame),
+      BWVR_XR("xrConvertTimeToTimespecTimeKHR", ConvertTimeToTimespecTime),
   };
   // The functions of an extension only for an instance that enabled it.
   static const Entry kRateTable[] = {

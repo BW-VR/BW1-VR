@@ -22,7 +22,122 @@ double NowMs() {
   return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
 
+// The two timestamps at `first` of a pool into the time of the GPU of a
+// command buffer that the GPU finished.
+void TakeStamps(Gpu* gpu, VkQueryPool pool, uint32_t first) {
+  uint64_t stamps[4] = {0, 0, 0, 0};
+  if (vkGetQueryPoolResults(gpu->device, pool, first, 2, sizeof(stamps), stamps,
+                            2 * sizeof(uint64_t),
+                            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ==
+          VK_SUCCESS &&
+      stamps[1] != 0 && stamps[3] != 0) {
+    const uint64_t ticks = (stamps[2] - stamps[0]) & gpu->timestamp_mask;
+    const double ms = static_cast<double>(ticks) * gpu->timestamp_ns * 1e-6;
+    // A time over 100 ms is not the time of one command buffer.
+    if (ms < 100.0) gpu->busy.Add(ms);
+  }
+}
+
+// THE RING: the next entry, with no wait while the ring can grow.
+VkCommandBuffer RingBegin(Gpu* gpu) {
+  const int next = gpu->ring_order.Next();
+  bool next_done = true;
+  if (gpu->ring_order.Count() > 0) {
+    const Gpu::RingEntry& e = gpu->ring_entries[next];
+    next_done = e.serial == 0 || vkGetFenceStatus(gpu->device, e.fence) == VK_SUCCESS;
+  }
+  const frame_loop::CommandPick pick = gpu->ring_order.Pick(next_done);
+  if (pick.grow) {
+    Gpu::RingEntry e;
+    VkCommandBufferAllocateInfo alloc = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc.commandPool = gpu->pool;
+    alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc.commandBufferCount = 1;
+    VkFenceCreateInfo fence = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    if (vkAllocateCommandBuffers(gpu->device, &alloc, &e.cmd) != VK_SUCCESS ||
+        vkCreateFence(gpu->device, &fence, nullptr, &e.fence) != VK_SUCCESS) {
+      AppLog("gpu          : the ring of command buffers cannot grow (vkAllocateCommandBuffers "
+             "or vkCreateFence)");
+    }
+    e.query = gpu->ring_queries++;
+    gpu->ring_entries.insert(gpu->ring_entries.begin() + pick.index, e);
+    if (gpu->ring_order.Count() > 1) ++gpu->ring_grows;
+  }
+  Gpu::RingEntry& e = gpu->ring_entries[pick.index];
+  if (pick.wait) {
+    ++gpu->ring_waits;
+    const double start = gpu->timing ? NowMs() : 0.0;
+    vkWaitForFences(gpu->device, 1, &e.fence, VK_TRUE, UINT64_MAX);
+    if (gpu->timing) gpu->fence_wait.Add(NowMs() - start);
+  }
+  // The GPU finished the last submit of this entry.
+  if (e.serial > gpu->done_serial) gpu->done_serial = e.serial;
+  if (e.query_written) {
+    e.query_written = false;
+    TakeStamps(gpu, gpu->ring_query, 2 * e.query);
+  }
+  gpu->ring_current = pick.index;
+  vkResetCommandBuffer(e.cmd, 0);
+  VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(e.cmd, &begin);
+  if (gpu->ring_query != VK_NULL_HANDLE) {
+    vkCmdResetQueryPool(e.cmd, gpu->ring_query, 2 * e.query, 2);
+    // At the bottom of the pipe, as GpuBegin with no ring.
+    vkCmdWriteTimestamp(e.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->ring_query,
+                        2 * e.query);
+  }
+  return e.cmd;
+}
+
 }  // namespace
+
+void GpuSetRing(Gpu* gpu, bool on) {
+  if (on == gpu->ring || gpu->device == VK_NULL_HANDLE) return;
+  vkDeviceWaitIdle(gpu->device);
+  if (on) {
+    gpu->ring = true;
+    gpu->ring_current = -1;
+    if (gpu->query != VK_NULL_HANDLE && gpu->ring_query == VK_NULL_HANDLE) {
+      VkQueryPoolCreateInfo info = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+      info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+      info.queryCount = 2 * static_cast<uint32_t>(gpu->ring_order.Most());
+      if (vkCreateQueryPool(gpu->device, &info, nullptr, &gpu->ring_query) != VK_SUCCESS) {
+        gpu->ring_query = VK_NULL_HANDLE;
+      }
+    }
+    AppLog("gpu          : the ring of command buffers is on (up to %d). A copy of the "
+           "session does not wait on the CPU for the GPU",
+           gpu->ring_order.Most());
+    return;
+  }
+  // The GPU is idle, so each submit of the ring is finished.
+  for (Gpu::RingEntry& e : gpu->ring_entries) {
+    if (e.query_written) TakeStamps(gpu, gpu->ring_query, 2 * e.query);
+    e.query_written = false;
+  }
+  gpu->done_serial = gpu->serial;
+  gpu->ring = false;
+  gpu->ring_current = -1;
+  AppLog("gpu          : the ring of command buffers is off: %zu entries, %llu new entries "
+         "because the GPU was not done, %llu waits of a full ring",
+         gpu->ring_entries.size(), static_cast<unsigned long long>(gpu->ring_grows),
+         static_cast<unsigned long long>(gpu->ring_waits));
+}
+
+bool GpuSerialDone(Gpu* gpu, uint64_t serial) {
+  if (frame_loop::SerialDone(serial, gpu->done_serial)) return true;
+  for (const Gpu::RingEntry& e : gpu->ring_entries) {
+    if (e.serial != serial) continue;
+    if (vkGetFenceStatus(gpu->device, e.fence) != VK_SUCCESS) return false;
+    gpu->done_serial = serial;
+    return true;
+  }
+  // No entry has the serial any more: a later begin used its entry again
+  // after its fence, so the GPU finished it.
+  return true;
+}
 
 bool GpuTimingStart(Gpu* gpu) {
   gpu->timing = true;
@@ -99,6 +214,17 @@ void GpuRelease(Gpu* gpu) {
   if (gpu->fence != VK_NULL_HANDLE) vkDestroyFence(gpu->device, gpu->fence, nullptr);
   if (gpu->query != VK_NULL_HANDLE) vkDestroyQueryPool(gpu->device, gpu->query, nullptr);
   gpu->query = VK_NULL_HANDLE;
+  for (Gpu::RingEntry& e : gpu->ring_entries) {
+    if (e.fence != VK_NULL_HANDLE) vkDestroyFence(gpu->device, e.fence, nullptr);
+  }
+  gpu->ring_entries.clear();
+  if (gpu->ring_query != VK_NULL_HANDLE) {
+    vkDestroyQueryPool(gpu->device, gpu->ring_query, nullptr);
+  }
+  gpu->ring_query = VK_NULL_HANDLE;
+  gpu->ring = false;
+  if (gpu->timeline != VK_NULL_HANDLE) vkDestroySemaphore(gpu->device, gpu->timeline, nullptr);
+  gpu->timeline = VK_NULL_HANDLE;
   gpu->query_written = false;
   if (gpu->pool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(gpu->device, gpu->pool, nullptr);
@@ -148,6 +274,7 @@ void FreeStaging(Gpu* gpu, Staging* s) {
 }
 
 VkCommandBuffer GpuBegin(Gpu* gpu) {
+  if (gpu->ring) return RingBegin(gpu);
   if (gpu->timing) {
     const double start = NowMs();
     vkWaitForFences(gpu->device, 1, &gpu->fence, VK_TRUE, UINT64_MAX);
@@ -158,17 +285,7 @@ VkCommandBuffer GpuBegin(Gpu* gpu) {
   // The timestamps of the last submit: the fence says that the GPU is done.
   if (gpu->query_written) {
     gpu->query_written = false;
-    uint64_t stamps[4] = {0, 0, 0, 0};
-    if (vkGetQueryPoolResults(gpu->device, gpu->query, 0, 2, sizeof(stamps), stamps,
-                              2 * sizeof(uint64_t),
-                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ==
-            VK_SUCCESS &&
-        stamps[1] != 0 && stamps[3] != 0) {
-      const uint64_t ticks = (stamps[2] - stamps[0]) & gpu->timestamp_mask;
-      const double ms = static_cast<double>(ticks) * gpu->timestamp_ns * 1e-6;
-      // A time over 100 ms is not the time of one command buffer.
-      if (ms < 100.0) gpu->busy.Add(ms);
-    }
+    TakeStamps(gpu, gpu->query, 0);
   }
   vkResetCommandBuffer(gpu->cmd, 0);
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -185,6 +302,34 @@ VkCommandBuffer GpuBegin(Gpu* gpu) {
 }
 
 bool GpuSubmit(Gpu* gpu, VkSemaphore wait, VkSemaphore signal) {
+  if (gpu->ring) {
+    // The ring is only for the session of the headset: no semaphore of a
+    // window.
+    if (gpu->ring_current < 0) return false;
+    Gpu::RingEntry& e = gpu->ring_entries[gpu->ring_current];
+    gpu->ring_current = -1;
+    if (gpu->ring_query != VK_NULL_HANDLE) {
+      vkCmdWriteTimestamp(e.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->ring_query,
+                          2 * e.query + 1);
+      e.query_written = true;
+    }
+    vkEndCommandBuffer(e.cmd);
+    vkResetFences(gpu->device, 1, &e.fence);
+    e.serial = ++gpu->serial;
+    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &e.cmd;
+    // The timeline of the session gets the serial (frame_loop_queues=2).
+    VkTimelineSemaphoreSubmitInfo values = {VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO};
+    if (gpu->timeline != VK_NULL_HANDLE) {
+      values.signalSemaphoreValueCount = 1;
+      values.pSignalSemaphoreValues = &e.serial;
+      submit.pNext = &values;
+      submit.signalSemaphoreCount = 1;
+      submit.pSignalSemaphores = &gpu->timeline;
+    }
+    return vkQueueSubmit(gpu->queue, 1, &submit, e.fence) == VK_SUCCESS;
+  }
   if (gpu->query != VK_NULL_HANDLE) {
     vkCmdWriteTimestamp(gpu->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->query, 1);
     gpu->query_written = true;

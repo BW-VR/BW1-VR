@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include <vulkan/vulkan.h>
 
+#include <vector>
+
+#include "frame_loop.h"
 #include "../../src/mod/time_log_math.h"
 
 struct Gpu {
@@ -32,6 +35,33 @@ struct Gpu {
   bool timing = false;
   time_log_math::Stat fence_wait;  // ms of the waits of GpuBegin
   time_log_math::Stat busy;        // ms of the GPU of each command buffer
+
+  // THE RING OF COMMAND BUFFERS (frame_loop=1, GpuRingStart, frame_loop.h,
+  // CommandRing). Each GpuBegin takes the least recently used entry when
+  // its fence says that the GPU finished it, else a new entry. So GpuBegin
+  // does not wait on the CPU. Each submit has a serial, and GpuSerialDone
+  // says if the GPU finished it.
+  struct RingEntry {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    uint32_t query = 0;      // its two timestamps in ring_query
+    uint64_t serial = 0;     // the serial of its last submit, 0: none
+    bool query_written = false;
+  };
+  bool ring = false;
+  frame_loop::CommandRing ring_order{16};
+  std::vector<RingEntry> ring_entries;
+  int ring_current = -1;   // the entry of the open command buffer
+  uint64_t serial = 0;     // the serial of the last submit
+  uint64_t done_serial = 0;  // the GPU finished each submit up to this serial
+  VkQueryPool ring_query = VK_NULL_HANDLE;
+  uint32_t ring_queries = 0;  // the entries that have their timestamps
+  uint64_t ring_grows = 0;    // new entries because the GPU was not done
+  uint64_t ring_waits = 0;    // waits of a full ring
+  // THE TWO QUEUES (frame_loop_queues=2): a timeline semaphore that each
+  // submit of the ring signals with its serial, so a submit of another queue
+  // can wait on the GPU for a copy of the session. VK_NULL_HANDLE: none.
+  VkSemaphore timeline = VK_NULL_HANDLE;
 };
 
 // The pool, the command buffer and the fence of a Gpu with a device.
@@ -42,6 +72,16 @@ bool GpuFinish(Gpu* gpu);
 bool GpuTimingStart(Gpu* gpu);
 // Destroys what GpuFinish made. The device and the instance stay.
 void GpuRelease(Gpu* gpu);
+// THE RING (frame_loop=1). On: GpuBegin and GpuSubmit use the ring of
+// command buffers. Off: the one command buffer and its fence again. Each
+// change waits until the device is idle. The caller holds the lock of the
+// queue.
+void GpuSetRing(Gpu* gpu, bool on);
+// True when the GPU finished the submit of this serial. It reads the fence
+// of the entry of the serial, and never waits.
+bool GpuSerialDone(Gpu* gpu, uint64_t serial);
+// The serial that the next GpuSubmit gives.
+inline uint64_t GpuNextSerial(const Gpu& gpu) { return gpu.serial + 1; }
 
 // A buffer that the CPU writes and the GPU reads.
 struct Staging {
@@ -54,7 +94,8 @@ bool MakeStaging(Gpu* gpu, VkDeviceSize size, Staging* out);
 void FreeStaging(Gpu* gpu, Staging* staging);
 
 // A begin of the command buffer of the Gpu. Each recording waits first for
-// the last submit, so the app has one frame on the GPU at most.
+// the last submit, so the app has one frame on the GPU at most. With the
+// ring: the next entry of the ring, with no wait.
 VkCommandBuffer GpuBegin(Gpu* gpu);
 // The end and the submit of the command buffer. wait and signal are
 // semaphores of a swapchain of a window, or null.

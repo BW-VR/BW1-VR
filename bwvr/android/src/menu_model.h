@@ -19,6 +19,7 @@
 #include "../../src/common/ini_text.h"
 #include "../../src/common/settings_table.h"
 #include "display_rate.h"
+#include "frame_loop.h"
 #include "play_rules.h"
 
 namespace menu_model {
@@ -33,6 +34,7 @@ enum class ItemKind {
   kSave,     // "Save Config"
   kSetting,  // a row of the table
   kDisplayRate,  // "Display rate": a row of the app, not of the table
+  kFrameLoop,    // the frame loop of the headset (frame_loop): a row of the app
   kWow64Cpu,     // the translator of the game (wow64_cpu): a row of the app
   kStrongMem,    // the memory order of Box64 (box64_strongmem): a row of the app
   kBack,     // back to the main page
@@ -101,6 +103,7 @@ class Menu {
     strongmem_ = ini.GetInt("bwvr", "box64_strongmem", 0);
     if (strongmem_ < 0 || strongmem_ > play_rules::kStrongMemMost) strongmem_ = 0;
     wow64_cpu_ = wine_rules::ParseCpu(ini.Get("bwvr", "wow64_cpu", "box64"));
+    frame_loop_ = frame_loop::On(ini.GetInt("bwvr", "frame_loop", 1)) ? 1 : 0;
     headset_width_ = ini.GetInt("bwvr", "headset_width", 2064);
     headset_height_ = ini.GetInt("bwvr", "headset_height", 2208);
     guard_pct_ = ini.GetInt("bwvr", "one_walk_guard_pct", 25);
@@ -138,6 +141,7 @@ class Menu {
     if (HasDisplayRow()) ini->SetInt("bwvr", "display_hz", display_hz_);
     ini->SetInt("bwvr", "box64_strongmem", strongmem_);
     ini->Set("bwvr", "wow64_cpu", wine_rules::CpuKey(wow64_cpu_));
+    ini->SetInt("bwvr", "frame_loop", frame_loop_);
     // The keys with one right answer. The renderer Vulkan has no bridge of
     // Direct3D 9.
     ini->Remove("bwvr", "gpu_bridge");
@@ -198,6 +202,11 @@ class Menu {
   // the row of the page "Testing". 0 (the default): Box64 gets no variable.
   // 1 to 3: BOX64_DYNAREC_STRONGMEM for the game, at the next Play.
   int StrongMem() const { return strongmem_; }
+
+  // THE FRAME LOOP (frame_loop, frame_loop.h): the row of the page "Testing".
+  // 1 (the default): the new loop. 0: the old loop. The app reads it at the
+  // start of Play.
+  int FrameLoop() const { return frame_loop_; }
 
   // THE TRANSLATOR OF THE GAME (wow64_cpu, wine_rules.h, Cpu): the row of the
   // page "Testing". Box64 (the default) or FEX, at the next Play. The app
@@ -280,6 +289,7 @@ class Menu {
       items.push_back({ItemKind::kDisplayRate, -1});
     }
     if (IsTestGroup(group_)) {
+      items.push_back({ItemKind::kFrameLoop, -1});
       items.push_back({ItemKind::kWow64Cpu, -1});
       items.push_back({ItemKind::kStrongMem, -1});
     }
@@ -309,6 +319,8 @@ class Menu {
         return "Exit";
       case ItemKind::kDisplayRate:
         return "Display rate";
+      case ItemKind::kFrameLoop:
+        return "The headset gets each frame (no wait for the GPU)";
       case ItemKind::kWow64Cpu:
         return "Translator of the game (Box64 or FEX)";
       case ItemKind::kStrongMem:
@@ -327,6 +339,7 @@ class Menu {
       return display_hz_ > 0 ? std::to_string(display_hz_) + " Hz" : "Headset default";
     }
     if (item.kind == ItemKind::kStrongMem) return StrongMemText(strongmem_);
+    if (item.kind == ItemKind::kFrameLoop) return frame_loop_ != 0 ? "On" : "Off";
     if (item.kind == ItemKind::kWow64Cpu) {
       const char* name = wow64_cpu_ == wine_rules::Cpu::kFex ? "FEX" : "Box64";
       return cpu_choice_counts_ ? name : std::string(name) + " (no effect here)";
@@ -386,8 +399,8 @@ class Menu {
         first = false;
       }
       if (IsTestGroup(item.index)) {
-        text += std::string(first ? "" : ", ") + Label({ItemKind::kWow64Cpu, -1}) + ", " +
-                Label({ItemKind::kStrongMem, -1});
+        text += std::string(first ? "" : ", ") + Label({ItemKind::kFrameLoop, -1}) + ", " +
+                Label({ItemKind::kWow64Cpu, -1}) + ", " + Label({ItemKind::kStrongMem, -1});
       }
       return text + ".";
     }
@@ -412,6 +425,14 @@ class Menu {
                "smoother head motion. It costs more power and heat. The game itself "
                "can make fewer frames than the rate. Headset default: the app asks "
                "for no rate. The change counts at once.";
+      case ItemKind::kFrameLoop:
+        return "On: a thread of its own plays each picture of the game, and the headset "
+               "gets a frame at each refresh of its display, also when the game or the GPU "
+               "is slower. The headset shows the newest finished picture, and it shows it "
+               "again until the next one is finished. Off: the old way. The app plays each "
+               "picture and waits for the GPU before each copy, so the headset can get "
+               "fewer frames than its display rate and show a picture again. The change "
+               "counts at the next Play.";
       case ItemKind::kWow64Cpu:
         return std::string(
                    "The translator changes the x86 code of the game into code for the ARM CPU "
@@ -479,6 +500,13 @@ class Menu {
         changed_ = true;
         ++revision_;
       }
+      return;
+    }
+    if (item.kind == ItemKind::kFrameLoop) {
+      // Two values: each step gives the other one.
+      frame_loop_ = frame_loop_ != 0 ? 0 : 1;
+      changed_ = true;
+      ++revision_;
       return;
     }
     if (item.kind == ItemKind::kWow64Cpu) {
@@ -580,6 +608,7 @@ class Menu {
         return Action::kNone;
       case ItemKind::kSetting:
       case ItemKind::kDisplayRate:
+      case ItemKind::kFrameLoop:
       case ItemKind::kWow64Cpu:
       case ItemKind::kStrongMem:
         Step(1);
@@ -630,8 +659,8 @@ class Menu {
            strcmp(st::kSettings[group].label, "Performance") == 0;
   }
 
-  // The rows of the translator and of the memory order of Box64 are on the
-  // page of the group "Testing".
+  // The rows of the frame loop, of the translator and of the memory order of
+  // Box64 are on the page of the group "Testing".
   static bool IsTestGroup(int group) {
     return group >= 0 && group < st::kSettingCount &&
            st::kSettings[group].kind == st::kGroup &&
@@ -667,6 +696,7 @@ class Menu {
   int display_wanted_ = 0;
   int display_hz_ = 0;
   int strongmem_ = 0;
+  int frame_loop_ = 1;
   wine_rules::Cpu wow64_cpu_ = wine_rules::Cpu::kBox64;
   bool cpu_choice_counts_ = true;
   bool game_running_ = false;

@@ -78,11 +78,14 @@ bool EndsWithExe(const std::string& text) {
   return strcasecmp(text.c_str() + text.size() - n, want) == 0;
 }
 
-const char* CauseName(int c) {
+// The causes of time_log_math::Cause. With the frame loop the play thread
+// makes the pictures, and its waits are for the GPU and for the lock of the
+// queue.
+const char* CauseName(int c, bool frame_loop) {
   switch (c) {
     case 0: return "the GPU";
-    case 1: return "xrWaitFrame or xrEndFrame";
-    default: return "the CPU of the app";
+    case 1: return frame_loop ? "the wait for the lock of the queue" : "xrWaitFrame or xrEndFrame";
+    default: return frame_loop ? "the play thread" : "the CPU of the app";
   }
 }
 
@@ -115,7 +118,11 @@ void TimeLog::GameStarts(double now_ms) {
   arrived_set_ = false;
   stop_said_for_ = -1.0;
   last_end_ms_ = -1.0;
+  any_shown_ = false;
+  age_now_ = 0;
+  fresh_ = false;
   ResetWindow(now_ms);
+  // The play thread starts after this call, so the renderer is free here.
   VkSceneGpuTime drop;
   VkSceneTakeGpuTime(&drop);
 }
@@ -130,6 +137,33 @@ void TimeLog::ResetWindow(double now_ms) {
   xr_ = XrApp::FrameTimes();
   walk_gpu_.Reset();
   walk_wait_.Reset();
+  dropped_ = replaced_ = 0;
+  slot_wait_.Reset();
+  play_cpu_ms_ = 0.0;
+  age_.Reset();
+}
+
+void TimeLog::Play(const PlayStats& s) {
+  if (!on_ || !game_on_) return;
+  pictures_ += s.pictures;
+  frames_ += s.frames;
+  for (int i = 0; i < 3; ++i) skipped_[i] += s.skipped[i];
+  play_.Merge(s.play);
+  walk_gpu_.Merge(s.walk_gpu);
+  walk_wait_.Merge(s.walk_wait);
+  slot_wait_.Merge(s.slot_wait);
+  xr_.busy.Merge(s.busy);
+  dropped_ += s.dropped;
+  replaced_ += s.replaced;
+  play_cpu_ms_ += s.cpu_ms;
+}
+
+void TimeLog::Shown(bool fresh) {
+  if (!on_ || !game_on_) return;
+  fresh_ = fresh;
+  if (fresh) any_shown_ = true;
+  age_now_ = frame_loop::NextAge(age_now_, fresh);
+  if (any_shown_) age_.Add(static_cast<double>(age_now_));
 }
 
 // The times of the GPU of the renderer since the last call: the walks and
@@ -169,13 +203,27 @@ void TimeLog::Batch(double now_ms, size_t frames, double play_ms, double wait_ms
 
 void TimeLog::SessionFrame(double now_ms, const XrApp::FrameTimes& t) {
   if (!on_ || !game_on_) return;
-  TakeRenderer();
+  // With the frame loop the renderer belongs to the play thread, which gives
+  // its times (Play).
+  if (!frame_loop_) TakeRenderer();
   ++session_frames_;
   xr_.wait.Merge(t.wait);
   xr_.work.Merge(t.work);
   xr_.end.Merge(t.end);
   xr_.fence_wait.Merge(t.fence_wait);
   xr_.busy.Merge(t.busy);
+  for (int k = 0; k < XrApp::kSteps; ++k) xr_.steps[k].Merge(t.steps[k]);
+  xr_.acquires += t.acquires;
+  xr_.not_ready += t.not_ready;
+  xr_.age_ms.Merge(t.age_ms);
+  xr_.latency_ms.Merge(t.latency_ms);
+  xr_.arrival_ms.Merge(t.arrival_ms);
+  if (frame_loop_) {
+    if (!fresh_) ++no_new_;
+    fresh_ = false;
+    last_end_ms_ = now_ms;
+    return;
+  }
   since_gpu_ += t.fence_wait.sum;
   // xrEndFrame comes after the batch of this frame, so it counts for the
   // next batch.
@@ -319,25 +367,81 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
          "came), the app took %llu frames and made %.1f pictures a second (%llu), %.1f "
          "frames of the session a second. %llu frames of the game did not show because "
          "the app was still at the picture before: %llu while it waited for %s, %llu in "
-         "%s, %llu while %s worked. %llu frames of the session had no new frame of the game",
+         "%s, %llu while %s worked. %llu frames of the session had no new frame of the game. "
+         "%llu pictures that the play thread dropped (no free slot of the ring), %llu "
+         "pictures that a newer picture replaced before a frame of the session",
          seconds, static_cast<unsigned long long>(last_frame), came / seconds,
          static_cast<unsigned long long>(came), static_cast<unsigned long long>(frames_),
          pictures_ / seconds,
          static_cast<unsigned long long>(pictures_), session_frames_ / seconds,
          static_cast<unsigned long long>(skipped), static_cast<unsigned long long>(skipped_[0]),
-         CauseName(0), static_cast<unsigned long long>(skipped_[1]), CauseName(1),
-         static_cast<unsigned long long>(skipped_[2]), CauseName(2),
-         static_cast<unsigned long long>(no_new_));
+         CauseName(0, frame_loop_), static_cast<unsigned long long>(skipped_[1]),
+         CauseName(1, frame_loop_), static_cast<unsigned long long>(skipped_[2]),
+         CauseName(2, frame_loop_), static_cast<unsigned long long>(no_new_),
+         static_cast<unsigned long long>(dropped_), static_cast<unsigned long long>(replaced_));
+  // THE PLAY THREAD (frame_loop=1): its CPU time for each picture and as a
+  // part of one core, and its waits for a slot of the ring.
+  char play_text[256];
+  if (frame_loop_) {
+    snprintf(play_text, sizeof(play_text),
+             "The play thread: %.2f ms of CPU a picture, %.1f percent of one core, a wait for "
+             "a slot of the ring %.2f and %.2f (%llu waits).",
+             pictures_ > 0 ? play_cpu_ms_ / pictures_ : 0.0,
+             100.0 * play_cpu_ms_ / (seconds * 1000.0), slot_wait_.Mean(), slot_wait_.most,
+             static_cast<unsigned long long>(slot_wait_.count));
+  } else {
+    snprintf(play_text, sizeof(play_text),
+             "No play thread (frame_loop=0): the thread of the session plays the pictures.");
+  }
   AppLog("time         : the CPU of the app in ms, the mean and the most: the play of a "
          "picture %.2f and %.2f, the wait in xrWaitFrame %.2f and %.2f, from the end of "
          "xrWaitFrame to the end of xrEndFrame %.2f and %.2f, in xrEndFrame %.2f and %.2f, "
          "a wait of a copy for the GPU "
          "%.2f and %.2f (%llu waits), a wait of a walk for the GPU %.2f and %.2f (%llu "
-         "waits)",
+         "waits). %s The age of the shown picture in frames of the session: %.2f as a mean "
+         "and %.0f at most",
          play_.Mean(), play_.most, xr_.wait.Mean(), xr_.wait.most, xr_.work.Mean(),
          xr_.work.most, xr_.end.Mean(), xr_.end.most, xr_.fence_wait.Mean(), xr_.fence_wait.most,
          static_cast<unsigned long long>(xr_.fence_wait.count), walk_wait_.Mean(),
-         walk_wait_.most, static_cast<unsigned long long>(walk_wait_.count));
+         walk_wait_.most, static_cast<unsigned long long>(walk_wait_.count), play_text,
+         age_.Mean(), age_.most);
+  // THE STEPS of the thread of the session in a frame, and the age of the
+  // shown picture in ms.
+  const auto& st = xr_.steps;
+  char age[384];
+  if (xr_.age_ms.count > 0) {
+    snprintf(age, sizeof(age),
+             "%.1f ms as a mean and %.1f at most in each frame, %.1f ms as a mean and %.1f at "
+             "most in the frame that shows a new picture (%llu). From the arrival of the newest "
+             "frame of a new picture in the app to the display time: %.1f ms as a mean and %.1f "
+             "at most",
+             xr_.age_ms.Mean(), xr_.age_ms.most, xr_.latency_ms.Mean(), xr_.latency_ms.most,
+             static_cast<unsigned long long>(xr_.latency_ms.count), xr_.arrival_ms.Mean(),
+             xr_.arrival_ms.most);
+  } else {
+    snprintf(age, sizeof(age), "none (no display time on the clock of the app, or no picture)");
+  }
+  AppLog("time         : the thread of the session from the end of xrWaitFrame to the end of "
+         "xrEndFrame, ms in a frame, the mean and the most: xrBeginFrame %.2f and %.2f, the "
+         "actions and the poses %.2f and %.2f, the input channel %.2f and %.2f, the picture of "
+         "the ring %.2f and %.2f, the play of a batch %.2f and %.2f, the menu and the "
+         "controllers %.2f and %.2f, the layers %.2f and %.2f, xrAcquireSwapchainImage %.2f and "
+         "%.2f (%llu calls), xrWaitSwapchainImage %.2f and %.2f (%llu images not free at "
+         "once), the submit of the copies %.2f and %.2f, xrReleaseSwapchainImage %.2f and %.2f, "
+         "xrEndFrame %.2f and %.2f. Of them the waits for the lock of the queue %.2f and %.2f. "
+         "The age of the shown picture from the start of its play to the display time: %s",
+         st[XrApp::kStepBegin].Mean(), st[XrApp::kStepBegin].most,
+         st[XrApp::kStepActions].Mean(), st[XrApp::kStepActions].most,
+         st[XrApp::kStepSlot].Mean(), st[XrApp::kStepSlot].most, st[XrApp::kStepTake].Mean(),
+         st[XrApp::kStepTake].most, st[XrApp::kStepPlay].Mean(), st[XrApp::kStepPlay].most,
+         st[XrApp::kStepUi].Mean(), st[XrApp::kStepUi].most, st[XrApp::kStepLayers].Mean(),
+         st[XrApp::kStepLayers].most, st[XrApp::kStepAcquire].Mean(),
+         st[XrApp::kStepAcquire].most, static_cast<unsigned long long>(xr_.acquires),
+         st[XrApp::kStepImageWait].Mean(), st[XrApp::kStepImageWait].most,
+         static_cast<unsigned long long>(xr_.not_ready), st[XrApp::kStepSubmit].Mean(),
+         st[XrApp::kStepSubmit].most, st[XrApp::kStepRelease].Mean(),
+         st[XrApp::kStepRelease].most, st[XrApp::kStepEnd].Mean(), st[XrApp::kStepEnd].most,
+         st[XrApp::kStepLock].Mean(), st[XrApp::kStepLock].most, age);
   const double gpu_ms = walk_gpu_.sum + xr_.busy.sum;
   AppLog("time         : the GPU in ms: a picture %.2f as a mean (the walks and the command "
          "buffers of the app over the pictures), a walk of the renderer %.2f and %.2f at "

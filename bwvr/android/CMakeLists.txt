@@ -53,6 +53,7 @@ add_library(bwvr_quest SHARED
     src/game_folder.cpp
     src/input_live.cpp
     src/gpu.cpp
+    src/picture_ring.cpp
     src/menu_paint.cpp
     src/menu_painter.cpp
     src/scene_host.cpp

@@ -968,7 +968,18 @@ that moves while the Hand takes it.
   (`eye_size_max=1`, `android.md`, "The size of the eye pictures"), and the
   app and the mod log each 10 s where the time of a frame goes
   (`time_log=1`, `android.md`, "The time log of the app", `backend.md`,
-  "The time log of the mod"). The emulator shows both. Next: a run in the
+  "The time log of the mod"). The emulator shows both. The thread of the
+  session makes its frames at the display rate with no wait for the play
+  of a picture or for the GPU: a play thread plays each picture into a ring
+  of 3 slots, and each frame of the session shows the newest finished one
+  (`frame_loop=1`, the row "The headset gets each frame (no wait for the
+  GPU)", `android.md`, "The frame loop"), the renderer has a second queue
+  with a lower priority (`frame_loop_queues=2`), and the session does not
+  wait for a swapchain image that is not free (`frame_loop_image_wait=0`).
+  Next in the headset: the frames of the session a second, the line of the
+  steps of the thread of the session, the age of the shown picture in ms,
+  and the judder and the latency that the player feels, with `frame_loop=1`
+  and `frame_loop=0`, with and with no `fovea_res`. Then a run in the
   headset with the profile of the player in the scene of the save, at 72,
   90 and 120 Hz and at `resolution_pct` 50, 75 and 100, to read the lines
   `time` and `time log`: the time of the GPU, the waits in `xrWaitFrame`

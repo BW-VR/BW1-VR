@@ -24,6 +24,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <pthread.h>
+
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -32,12 +36,14 @@
 #include "build_id.h"
 #include "display_rate.h"
 #include "flat_view.h"
+#include "frame_loop.h"
 #include "game_folder.h"
 #include "input_live.h"
 #include "keyboard_layout.h"
 #include "menu_layout.h"
 #include "menu_model.h"
 #include "menu_painter.h"
+#include "picture_ring.h"
 #include "play_rules.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "../../src/mod/stream_ring.h"
@@ -61,6 +67,28 @@ using menu_model::Menu;
 constexpr float kCursorMeters = 0.03f;
 // The picture of the cursor (menu_painter.cpp).
 constexpr uint32_t kCursorPixels = 64;
+
+// THE PLAY OF THE LIVE STREAM (PlayBatch): the batch, the counts and the
+// state of the play. The thread that plays the renderer has it: the thread
+// of the session in the old loop, the play thread with frame_loop=1.
+struct LivePlay {
+  PlayResult result;
+  std::vector<QueuedFrame> batch;
+  std::vector<uint8_t> state;
+  int32_t test_frame = 0;  // vk_scene_test_frame of the last kStart
+  uint64_t frames = 0;     // the frames played since frames came
+  uint64_t skipped = 0;    // the frames with no walks: a newer frame replaced them
+  uint64_t pictures = 0;   // the batches: one new picture each
+  uint64_t first = 0;
+  uint64_t last = 0;
+  double last_ms = 0.0;  // the time of the last frame
+  double play_ms = 0.0;
+  double play_most = 0.0;
+  bool quiet = true;  // no frame came for 1 s
+  int space = -1;  // the last frame of the stream: 1 a screen frame, 0 a frame of the scene
+  double play_start_ms = 0.0;  // the start of the play of the last batch
+  double arrival_ms = 0.0;     // the arrival of the newest frame of the last batch (time_log=1)
+};
 
 struct App {
   android_app* android = nullptr;
@@ -100,20 +128,20 @@ struct App {
   // THE LIVE STREAM (stream_live=1, docs/android.md, "The live stream").
   bool live = false;
   StreamReader live_reader;
-  PlayResult live_result;
-  std::vector<QueuedFrame> live_batch;
   size_t live_whole = 3;  // stream_live_frames
-  std::vector<uint8_t> live_state;
-  int32_t live_test_frame = 0;  // vk_scene_test_frame of the last kStart
-  uint64_t live_frames = 0;    // the frames played since frames came
-  uint64_t live_skipped = 0;   // the frames with no walks: a newer frame replaced them
-  uint64_t live_pictures = 0;  // the batches: one new picture each
-  uint64_t live_first = 0;
-  uint64_t live_last = 0;
-  double live_last_ms = 0.0;  // the time of the last frame
-  double live_play_ms = 0.0;
-  double live_play_most = 0.0;
-  bool live_quiet = true;  // no frame came for 1 s
+  LivePlay live_play;
+  uint64_t shown_last = 0;  // the newest frame of the game of the shown picture
+  double shown_play_ms = 0.0;  // the start of the play of the shown picture
+  double shown_arrival_ms = 0.0;  // the arrival of its newest frame in the app
+
+  // THE FRAME LOOP (frame_loop=1, frame_loop.h): from Play to the end of the
+  // game the play thread plays the batches into the ring of the pictures.
+  PictureRing ring;
+  pthread_t play_thread = {};
+  bool play_running = false;
+  std::atomic<bool> play_stop{false};
+  std::mutex play_stats_lock;
+  PlayStats play_stats;
 
   // THE INPUT CHANNEL (input_live=1, docs/android.md, "The input channel").
   InputLive input_live;
@@ -143,7 +171,6 @@ struct App {
   // went to the quad.
   uint64_t screen_pictures = 0;
   bool said_no_screen = false;
-  int live_space = -1;  // the last frame of the stream: 1 a screen frame, 0 a frame of the scene
   // THE KEYBOARD OF THE APP (screen_keyboard=1): it shows while the newest
   // screen picture has a dialog box of the game that takes text.
   bool keyboard_on = true;     // screen_keyboard
@@ -171,55 +198,92 @@ double NowMs() {
   return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
 
-// The last eye picture of the renderer (VkSceneEyes) in the session: in the
-// projection layer with the values of the mod for its frame (kView,
-// stream_projection=1), else on the stereo screen. A new picture in the same
-// image gets a new revision, so the swapchains copy it.
-bool ShowEyes(App* app) {
-  if (!app->xr_on) return false;
-  uint64_t image = 0;
-  uint32_t w = 0, h = 0;
-  if (!VkSceneEyes(&image, &w, &h)) return false;
-  if (!app->xr.HasScreen() && !app->xr.MakeScreen(w / 2, h / 2)) return false;
-  // The values of the projection layer of the frame of this picture. With
-  // no swapchains of the projection layer (MakeEyes failed one time) the
-  // picture shows on the stereo screen.
-  scene_stream::ViewBody view = {};
-  const bool have_view = StreamPictureView(&view);
-  const bool has = app->xr.ProjectionOn() && have_view &&
-                   view_layer_math::ShowsProjection(view);
-  // THE QUAD LAYERS of the frame of this picture (stream_layers=1). A frame
-  // of the cut scene window as a screen shows on the swapchains of the eyes
-  // too.
+// THE PICTURE OF THE RENDERER after a batch: what the session shows. The old
+// loop gathers it on the thread of the session and shows it at once
+// (PlayLive). The play thread (frame_loop=1) gathers it into a slot of the
+// ring of the pictures (WriteSlot). A screen picture is read only when its
+// count is not screen_have, the count that the receiver has.
+void GatherPicture(App* app, uint64_t screen_have, Picture* p) {
+  namespace sq = screen_quad_math;
   static const quad_layer_math::FrameLayers kNoLayers;
-  const quad_layer_math::FrameLayers& layers =
-      app->xr.LayersOn() ? StreamPictureLayers() : kNoLayers;
+  *p = Picture();
+  const sq::ScreenPicture& s = StreamScreen();
+  p->last = s.LastPicture();
+  if (!app->xr_on) return;
+  if (p->last == sq::Last::kScreen && app->xr.ScreenQuadOn()) {
+    p->screen_pictures = s.Pictures();
+    if (p->screen_pictures == screen_have) return;
+    p->screen_body = s.Get();
+    const scene_stream::ScreenBody& b = p->screen_body;
+    if ((b.flags & scene_stream::kScreenCpu) != 0) {
+      p->screen_cpu = true;
+      p->screen_ok = StreamSurfacePixels(b.surface, &p->screen_rgba, &p->screen_width,
+                                         &p->screen_height);
+    } else {
+      uint64_t image = 0;
+      p->screen_ok = VkSceneLastPicture(&image, &p->screen_layer, &p->screen_width,
+                                        &p->screen_height);
+      p->screen_image = reinterpret_cast<VkImage>(image);
+    }
+    return;
+  }
+  uint64_t image = 0;
+  p->eyes_ok = VkSceneEyes(&image, &p->width, &p->height);
+  if (!p->eyes_ok) return;
+  p->eyes = reinterpret_cast<VkImage>(image);
+  // The values of the projection layer of the frame of this picture, and
+  // the quad layers of that frame (stream_layers=1).
+  p->have_view = StreamPictureView(&p->view);
+  p->layers = app->xr.LayersOn() ? &StreamPictureLayers() : &kNoLayers;
+  p->cards = &StreamCardPictures();
+  // The panel quads show the panel image of the renderer of this frame.
+  uint64_t panel = 0;
+  if (p->layers->panel && VkScenePanelFor(p->width, p->height, &panel)) {
+    p->panel = reinterpret_cast<VkImage>(panel);
+  }
+}
+
+// The eye picture of a Picture in the session: in the projection layer with
+// the values of the mod for its frame (kView, stream_projection=1), else on
+// the stereo screen. A new picture in the same image gets a new revision, so
+// the swapchains copy it.
+bool ShowEyes(App* app, const Picture& p) {
+  if (!app->xr_on) return false;
+  if (!p.eyes_ok) return false;
+  const uint32_t w = p.width, h = p.height;
+  if (!app->xr.HasScreen() && !app->xr.MakeScreen(w / 2, h / 2)) return false;
+  // With no swapchains of the projection layer (MakeEyes failed one time)
+  // the picture shows on the stereo screen.
+  const bool has = app->xr.ProjectionOn() && p.have_view &&
+                   view_layer_math::ShowsProjection(p.view);
+  // A frame of the cut scene window as a screen shows on the swapchains of
+  // the eyes too.
+  const quad_layer_math::FrameLayers& layers = *p.layers;
   const bool window = app->xr.ProjectionOn() && quad_layer_math::AsScreen(layers);
   if ((has || window) && !app->xr.HasEyes()) app->xr.MakeEyes(w, h);
-  if (has && (view.width != w || view.height != h) && !app->said_view_size) {
+  if (has && (p.view.width != w || p.view.height != h) && !app->said_view_size) {
     app->said_view_size = true;
     AppLog("xr           : the mod gives the angles of view for pictures of %u by "
            "%u, and the picture of the renderer has %u by %u",
-           view.width, view.height, w, h);
+           p.view.width, p.view.height, w, h);
   }
-  const VkImage now = reinterpret_cast<VkImage>(image);
-  if (now != app->screen_image) {
-    app->xr.SetScreenSource(now, w, h);
-    app->screen_image = now;
+  if (p.from_ring) {
+    // Each slot is a new picture.
+    app->xr.SetScreenSource(p.eyes, w, h);
+    app->screen_image = VK_NULL_HANDLE;
+  } else if (p.eyes != app->screen_image) {
+    app->xr.SetScreenSource(p.eyes, w, h);
+    app->screen_image = p.eyes;
   } else {
     app->xr.MarkScreenChanged();
   }
-  app->xr.SetScreenView(has, view);
-  // The panel quads show the panel image of the renderer of this frame.
-  uint64_t panel = 0;
-  if (layers.panel && !VkScenePanelFor(w, h, &panel)) panel = 0;
-  if (layers.panel && panel == 0 && !app->said_no_panel) {
+  app->xr.SetScreenView(has, p.view);
+  if (layers.panel && p.panel == VK_NULL_HANDLE && !app->said_no_panel) {
     app->said_no_panel = true;
     AppLog("xr           : the mod gives panel quads, but the renderer has no panel "
            "image of %u by %u for the picture. The panel quads do not show", w, h);
   }
-  app->xr.SetScreenLayers(layers, StreamCardPictures(), reinterpret_cast<VkImage>(panel), w,
-                          h);
+  app->xr.SetScreenLayers(layers, *p.cards, p.panel, w, h);
   return true;
 }
 
@@ -227,26 +291,23 @@ bool ShowEyes(App* app) {
 // scene"): the newest screen picture of the stream on the quad of its kScreen,
 // the picture of the last walk of the renderer or the pixels of the CPU of
 // the render target. False when the renderer has no picture for it.
-bool ShowScreen(App* app) {
+bool ShowScreen(App* app, const Picture& p) {
   if (!app->xr_on) return false;
-  const screen_quad_math::ScreenPicture& s = StreamScreen();
-  if (s.Pictures() == app->screen_pictures) return true;
-  app->screen_pictures = s.Pictures();
-  const scene_stream::ScreenBody& b = s.Get();
-  if ((b.flags & scene_stream::kScreenCpu) != 0) {
-    const std::vector<uint8_t>* rgba = nullptr;
-    uint32_t w = 0, h = 0;
-    if (StreamSurfacePixels(b.surface, &rgba, &w, &h)) {
-      app->xr.SetScreenQuadPixels(b, *rgba, w, h);
-      return true;
+  if (p.screen_pictures == app->screen_pictures) {
+    // A slot of the ring holds the screen picture in an image of its own.
+    if (p.from_ring && p.screen_ok && !p.screen_cpu) app->xr.MoveScreenQuadImage(p.screen_image);
+    return true;
+  }
+  app->screen_pictures = p.screen_pictures;
+  const scene_stream::ScreenBody& b = p.screen_body;
+  if (p.screen_ok) {
+    if (p.screen_cpu) {
+      app->xr.SetScreenQuadPixels(b, *p.screen_rgba, p.screen_width, p.screen_height);
+    } else {
+      app->xr.SetScreenQuadImage(b, p.screen_image, p.screen_layer, p.screen_width,
+                                 p.screen_height);
     }
-  } else {
-    uint64_t image = 0;
-    uint32_t layer = 0, w = 0, h = 0;
-    if (VkSceneLastPicture(&image, &layer, &w, &h)) {
-      app->xr.SetScreenQuadImage(b, reinterpret_cast<VkImage>(image), layer, w, h);
-      return true;
-    }
+    return true;
   }
   if (!app->said_no_screen) {
     app->said_no_screen = true;
@@ -262,34 +323,33 @@ bool ShowScreen(App* app) {
 // The newest picture of the stream: a screen on the screen quad, or the
 // world in the projection layer, on the stereo screen or in the cut scene
 // window (ShowEyes).
-bool ShowPicture(App* app) {
+bool ShowPicture(App* app, const Picture& p) {
   namespace sq = screen_quad_math;
-  const sq::Last last = StreamScreen().LastPicture();
-  if (last == sq::Last::kScreen && app->xr.ScreenQuadOn()) return ShowScreen(app);
-  if (last == sq::Last::kWorld) app->xr.ClearScreenQuad();
-  return ShowEyes(app);
+  if (p.last == sq::Last::kScreen && app->xr.ScreenQuadOn()) return ShowScreen(app, p);
+  if (p.last == sq::Last::kWorld) app->xr.ClearScreenQuad();
+  return ShowEyes(app, p);
 }
 
-void LiveSummary(App* app, const char* why) {
-  const PlayResult& r = app->live_result;
+void LiveSummary(App* app, const LivePlay& live, const char* why) {
+  const PlayResult& r = live.result;
   AppLog("live         : %s: %llu frames played and %llu skipped (frames %llu to "
          "%llu), %llu pictures. In all %llu records, %llu walks, %llu draws, "
          "%llu surfaces, %llu of an unknown kind%s. The play of a picture took "
          "%.1f ms as a mean and %.1f ms at most. The queue held %zu bytes at "
          "most (the limit is %zu bytes, 0 is none)",
-         why, static_cast<unsigned long long>(app->live_frames),
-         static_cast<unsigned long long>(app->live_skipped),
-         static_cast<unsigned long long>(app->live_first),
-         static_cast<unsigned long long>(app->live_last),
-         static_cast<unsigned long long>(app->live_pictures),
+         why, static_cast<unsigned long long>(live.frames),
+         static_cast<unsigned long long>(live.skipped),
+         static_cast<unsigned long long>(live.first),
+         static_cast<unsigned long long>(live.last),
+         static_cast<unsigned long long>(live.pictures),
          static_cast<unsigned long long>(r.records),
          static_cast<unsigned long long>(r.walks),
          static_cast<unsigned long long>(r.draws),
          static_cast<unsigned long long>(r.surfaces),
          static_cast<unsigned long long>(r.unknown),
          r.broken ? ", a frame stops in a record" : "",
-         app->live_pictures > 0 ? app->live_play_ms / app->live_pictures : 0.0,
-         app->live_play_most, app->live_reader.MostBytes(),
+         live.pictures > 0 ? live.play_ms / live.pictures : 0.0,
+         live.play_most, app->live_reader.MostBytes(),
          app->live_reader.LimitBytes());
 }
 
@@ -297,17 +357,19 @@ void ShowNotice(App* app);
 
 // While a game runs: the first frame of the game after Play, and the frame
 // rate of the game each 10 s, from the frame numbers of the mod in the live
-// stream. With vk_device=0 nothing paces the frames of the game.
-void GameFrames(App* app) {
+// stream (last, the newest frame of the shown picture). With vk_device=0
+// nothing paces the frames of the game. pictures: the pictures of the play
+// since frames came.
+void GameFrames(App* app, uint64_t last, uint64_t pictures) {
   if (!app->game_on) return;
   const double now = NowMs();
   if (!app->first_frame) {
     app->first_frame = true;
-    app->rate_frame = app->live_last;
+    app->rate_frame = last;
     app->rate_ms = now;
     AppLog("game         : the first frame of the game (frame %llu%s) came %.1f s after Play",
-           static_cast<unsigned long long>(app->live_last),
-           screen_quad_math::IsScreenFrame(app->live_last) ? ", a screen with no scene" : "",
+           static_cast<unsigned long long>(last),
+           screen_quad_math::IsScreenFrame(last) ? ", a screen with no scene" : "",
            (now - app->play_ms) / 1000.0);
     app->status = "The game runs (started " + app->play_clock + ").";
     ShowNotice(app);
@@ -316,99 +378,296 @@ void GameFrames(App* app) {
   // The screen frames have numbers of their own (screen_quad_math.h), so the
   // rate starts again when the frames of the scene start or stop.
   if (screen_quad_math::IsScreenFrame(app->rate_frame) !=
-      screen_quad_math::IsScreenFrame(app->live_last)) {
+      screen_quad_math::IsScreenFrame(last)) {
     AppLog("game         : %s at frame %llu, %.1f s after Play",
-           screen_quad_math::IsScreenFrame(app->live_last)
+           screen_quad_math::IsScreenFrame(last)
                ? "the screens with no scene start"
                : "the frames of the scene start",
-           static_cast<unsigned long long>(app->live_last), (now - app->play_ms) / 1000.0);
-    app->rate_frame = app->live_last;
+           static_cast<unsigned long long>(last), (now - app->play_ms) / 1000.0);
+    app->rate_frame = last;
     app->rate_ms = now;
     return;
   }
   if (now - app->rate_ms < 10000.0) return;
   AppLog("game         : frame %llu, %.1f frames a second in the last %.1f s, %llu pictures "
          "of the app since frames came",
-         static_cast<unsigned long long>(app->live_last),
-         play_rules::FramesPerSecond(app->rate_frame, app->rate_ms, app->live_last, now),
-         (now - app->rate_ms) / 1000.0, static_cast<unsigned long long>(app->live_pictures));
-  app->rate_frame = app->live_last;
+         static_cast<unsigned long long>(last),
+         play_rules::FramesPerSecond(app->rate_frame, app->rate_ms, last, now),
+         (now - app->rate_ms) / 1000.0, static_cast<unsigned long long>(pictures));
+  app->rate_frame = last;
   app->rate_ms = now;
 }
 
-// The frames of the live stream into the renderer, at each frame of the
-// session. The renderer is not thread safe, so only this thread plays. The
-// batch is each frame that waits. With stream_live_frames=N (N > 0) the app
-// plays the walks of the newest frame and of each frame with a picture of a
-// test, and only the records of state of the other frames (stream_split.h).
-// With 0 it plays each frame that changes a surface or the options, each
-// frame with a picture of a test and the newest frame (stream_ring.h,
-// PlayInBatch). The stereo screen gets one new picture.
-void PlayLive(App* app) {
-  if (!app->live_reader.TakeAll(&app->live_batch)) {
-    if (!app->live_quiet && NowMs() - app->live_last_ms > 1000.0) {
-      LiveSummary(app, "no new frame for 1 s");
-      app->live_quiet = true;
-    }
-    return;
-  }
+// The frames of the batch of `live` into the renderer. The renderer is not
+// thread safe, so one thread plays: the thread of the session (the old
+// loop) or the play thread (frame_loop=1), never both. The batch is each
+// frame that waits. With stream_live_frames=N (N > 0) the app plays the
+// walks of the newest frame and of each frame with a picture of a test, and
+// only the records of state of the other frames (stream_split.h). With 0 it
+// plays each frame that changes a surface or the options, each frame with a
+// picture of a test and the newest frame (stream_ring.h, PlayInBatch). The
+// result is the ms of the play.
+double PlayBatch(App* app, LivePlay* live) {
   const double start = NowMs();
-  const size_t n = app->live_batch.size();
+  live->play_start_ms = start;
+  live->arrival_ms = live->batch.empty() ? 0.0 : live->batch.back().arrival_ms;
+  const size_t n = live->batch.size();
   for (size_t i = 0; i < n; ++i) {
-    QueuedFrame& q = app->live_batch[i];
+    QueuedFrame& q = live->batch[i];
     const std::vector<uint8_t>& f = q.bytes;
     const stream_ring::UnitInfo u = stream_ring::Inspect(f.data(), f.size());
-    if (u.start) app->live_test_frame = u.test_frame;
-    if (app->live_quiet) {
+    if (u.start) live->test_frame = u.test_frame;
+    if (live->quiet) {
       AppLog("live         : frames come. The first is frame %llu%s",
              static_cast<unsigned long long>(u.frame),
              u.start ? ", with the whole state" : "");
-      app->live_quiet = false;
-      app->live_frames = app->live_skipped = app->live_pictures = 0;
-      app->live_first = u.frame;
-      app->live_play_ms = app->live_play_most = 0.0;
+      live->quiet = false;
+      live->frames = live->skipped = live->pictures = 0;
+      live->first = u.frame;
+      live->play_ms = live->play_most = 0.0;
     }
-    app->live_last = u.frame;
+    live->last = u.frame;
     // The screen frames have numbers of their own (screen_quad_math.h): one
     // line when the frames go from the screens to the scene or back.
     const int space = screen_quad_math::IsScreenFrame(u.frame) ? 1 : 0;
-    if (app->live_space >= 0 && space != app->live_space) {
+    if (live->space >= 0 && space != live->space) {
       AppLog("live         : %s at frame %llu",
              space != 0 ? "the screens with no scene start" : "the frames of the scene start",
              static_cast<unsigned long long>(u.frame));
     }
-    app->live_space = space;
+    live->space = space;
     if (app->live_whole == 0) {
-      if (!stream_ring::PlayInBatch(u, i + 1 == n, app->live_test_frame)) {
-        ++app->live_skipped;
+      if (!stream_ring::PlayInBatch(u, i + 1 == n, live->test_frame)) {
+        ++live->skipped;
         continue;
       }
-      PlayStreamRecords(f.data(), f.size(), &app->live_result);
-      ++app->live_frames;
+      PlayStreamRecords(f.data(), f.size(), &live->result);
+      ++live->frames;
       continue;
     }
     if (q.whole && stream_split::KeepWalks(i, n, 1, q.picture)) {
-      PlayStreamRecords(f.data(), f.size(), &app->live_result);
-      ++app->live_frames;
+      PlayStreamRecords(f.data(), f.size(), &live->result);
+      ++live->frames;
       continue;
     }
     // A frame that a newer frame replaces: its records of state, no walks.
     if (q.whole) {
-      stream_split::StateOnly(f.data(), f.size(), &app->live_state);
-      PlayStreamRecords(app->live_state.data(), app->live_state.size(), &app->live_result);
+      stream_split::StateOnly(f.data(), f.size(), &live->state);
+      PlayStreamRecords(live->state.data(), live->state.size(), &live->result);
     } else {
-      PlayStreamRecords(f.data(), f.size(), &app->live_result);
+      PlayStreamRecords(f.data(), f.size(), &live->result);
     }
-    ++app->live_skipped;
+    ++live->skipped;
   }
   const double ms = NowMs() - start;
-  app->live_play_ms += ms;
-  if (ms > app->live_play_most) app->live_play_most = ms;
-  ++app->live_pictures;
-  app->live_last_ms = NowMs();
-  if (app->game_on) app->time.Batch(app->live_last_ms, n, ms, app->xr.LastWaitMs());
-  ShowPicture(app);
-  GameFrames(app);
+  live->play_ms += ms;
+  if (ms > live->play_most) live->play_most = ms;
+  ++live->pictures;
+  live->last_ms = NowMs();
+  return ms;
+}
+
+// One line with the counts when no frame came for 1 s.
+void QuietCheck(App* app, LivePlay* live) {
+  if (!live->quiet && NowMs() - live->last_ms > 1000.0) {
+    LiveSummary(app, *live, "no new frame for 1 s");
+    live->quiet = true;
+  }
+}
+
+// THE OLD LOOP (frame_loop=0, and with no game): at each frame of the
+// session the thread of the session plays the batch and shows its picture.
+// True when this frame has a new picture.
+bool PlayLive(App* app) {
+  LivePlay* live = &app->live_play;
+  if (!app->live_reader.TakeAll(&live->batch)) {
+    QuietCheck(app, live);
+    return false;
+  }
+  // A renderer on the second queue (frame_loop_queues=2): the CPU waits for
+  // the copies of the session before the walks and for the walks after
+  // them, as the old loop waits for the GPU before each copy.
+  app->xr.OldLoopSync(true);
+  const double ms = PlayBatch(app, live);
+  app->xr.OldLoopSync(false);
+  if (app->game_on) {
+    app->time.Batch(live->last_ms, live->batch.size(), ms, app->xr.LastWaitMs());
+  }
+  Picture p;
+  GatherPicture(app, app->screen_pictures, &p);
+  ShowPicture(app, p);
+  app->shown_last = live->last;
+  app->shown_play_ms = live->play_start_ms;
+  app->shown_arrival_ms = live->arrival_ms;
+  GameFrames(app, live->last, live->pictures);
+  return true;
+}
+
+// THE FRAME LOOP (frame_loop=1, docs/android.md, "The frame loop").
+//
+// THE PLAY THREAD: the picture of the renderer after a batch into a slot of
+// the ring of the pictures (picture_ring.h), with copies of the values that
+// the session needs. A screen picture goes into the slot only when the slot
+// does not hold it yet. The result is the ms that the play thread waited for
+// the fence of the slot.
+double WriteSlot(App* app, const LivePlay& live) {
+  namespace sq = screen_quad_math;
+  double waited = 0.0;
+  const int i = app->ring.BeginWrite(&waited);
+  if (i < 0) return waited;
+  PictureRing::Slot& s = app->ring.At(i);
+  Picture g;
+  GatherPicture(app, s.screen_held, &g);
+  Picture& p = s.picture;
+  p = Picture();
+  p.from_ring = true;
+  p.last = g.last;
+  p.last_frame = live.last;
+  p.pictures = live.pictures;
+  p.play_start_ms = live.play_start_ms;
+  p.arrival_ms = live.arrival_ms;
+  if (g.last == sq::Last::kScreen && app->xr.ScreenQuadOn()) {
+    p.screen_pictures = g.screen_pictures;
+    if (g.screen_pictures != s.screen_held) {
+      s.screen_held = g.screen_pictures;
+      s.screen_body = g.screen_body;
+      s.screen_cpu = g.screen_cpu;
+      s.screen_width = g.screen_width;
+      s.screen_height = g.screen_height;
+      s.screen_ok = g.screen_ok;
+      if (g.screen_ok && g.screen_cpu) {
+        s.screen_rgba = *g.screen_rgba;
+      } else if (g.screen_ok) {
+        s.screen_ok = app->ring.CopyScreen(i, g.screen_image, g.screen_layer, g.screen_width,
+                                           g.screen_height);
+      }
+    }
+    p.screen_body = s.screen_body;
+    p.screen_ok = s.screen_ok;
+    p.screen_cpu = s.screen_cpu;
+    p.screen_rgba = &s.screen_rgba;
+    p.screen_image = s.screen.image;
+    p.screen_layer = 0;
+    p.screen_width = s.screen_width;
+    p.screen_height = s.screen_height;
+  } else if (g.eyes_ok) {
+    p.eyes_ok = app->ring.CopyEyes(i, g.eyes, g.width, g.height);
+    p.eyes = s.eyes.image;
+    p.width = g.width;
+    p.height = g.height;
+    p.have_view = g.have_view;
+    p.view = g.view;
+    s.layers = *g.layers;
+    p.layers = &s.layers;
+    // The pictures of the cards change seldom: a copy only after a change.
+    bool same = true;
+    for (int c = 0; c < bwvr::kCards; ++c) {
+      if (s.cards.Hash(c) != g.cards->Hash(c) || s.cards.Count(c) != g.cards->Count(c)) {
+        same = false;
+      }
+    }
+    if (!same) s.cards = *g.cards;
+    p.cards = &s.cards;
+    if (g.panel != VK_NULL_HANDLE && app->ring.CopyPanel(i, g.panel, g.width, g.height)) {
+      p.panel = s.panel.image;
+    }
+  }
+  app->ring.EndWrite(i);
+  return waited;
+}
+
+double ThreadCpuMs() {
+  timespec t;
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
+// The play thread takes each batch of the reader as it comes, plays it into
+// the renderer and writes its picture into a slot. It never holds the thread
+// of the session. With time_log=1 it gives its stats to the session
+// (PlayStats): the frames of a batch but the newest did not show, by the
+// largest part of the time of the picture before: its waits for the GPU (the
+// fence of a slot of the renderer or of the ring), its waits for the lock of
+// the queue, or its own work.
+void* PlayThread(void* arg) {
+  App* app = static_cast<App*>(arg);
+  TimeLogNameThread("bwvr play");
+  const bool timing = app->time.On();
+  XrApp::TimeQueueWaits(timing);
+  LivePlay* live = &app->live_play;
+  double before_total = 0.0, before_gpu = 0.0, before_queue = 0.0;
+  double cpu_at = ThreadCpuMs();
+  while (!app->play_stop.load()) {
+    if (!app->live_reader.WaitAll(&live->batch, 50)) {
+      QuietCheck(app, live);
+      continue;
+    }
+    const double start = NowMs();
+    const size_t n = live->batch.size();
+    const double ms = PlayBatch(app, live);
+    const double waited = WriteSlot(app, *live);
+    if (!timing) continue;
+    PlayStats s;
+    s.pictures = 1;
+    s.frames = n;
+    s.play.Add(ms);
+    VkSceneGpuTime g;
+    VkSceneTakeGpuTime(&g);
+    s.walk_gpu.count = g.walks;
+    s.walk_gpu.sum = g.ms;
+    s.walk_gpu.most = g.most_ms;
+    s.walk_wait.count = g.fence_waits;
+    s.walk_wait.sum = g.fence_wait_ms;
+    s.walk_wait.most = g.fence_wait_most_ms;
+    if (n > 1) {
+      const time_log_math::Cause c =
+          time_log_math::CauseOf(before_total, before_gpu, before_queue);
+      s.skipped[static_cast<int>(c)] += n - 1;
+    }
+    const double cpu = ThreadCpuMs();
+    s.cpu_ms = cpu - cpu_at;
+    cpu_at = cpu;
+    before_total = NowMs() - start;
+    before_gpu = g.fence_wait_ms + waited;
+    before_queue = XrApp::TakeQueueWaitMs();
+    std::lock_guard<std::mutex> lock(app->play_stats_lock);
+    app->play_stats.Merge(s);
+  }
+  XrApp::TimeQueueWaits(false);
+  return nullptr;
+}
+
+void StartPlayThread(App* app) {
+  if (app->play_running) return;
+  app->play_stop.store(false);
+  {
+    std::lock_guard<std::mutex> lock(app->play_stats_lock);
+    app->play_stats = PlayStats();
+  }
+  app->play_running = pthread_create(&app->play_thread, nullptr, &PlayThread, app) == 0;
+  if (!app->play_running) AppLog("game         : the play thread did not start");
+}
+
+// The thread of the session owns the renderer again after the join.
+void StopPlayThread(App* app) {
+  if (!app->play_running) return;
+  app->play_stop.store(true);
+  pthread_join(app->play_thread, nullptr);
+  app->play_running = false;
+}
+
+// THE SESSION: the newest picture of the ring that the GPU finished, at each
+// frame of the session. True when it is a new picture. With none the
+// session shows the picture before again.
+bool TakePicture(App* app) {
+  const Picture* p = app->ring.Take(app->xr.SessionSerial());
+  if (p == nullptr) return false;
+  ShowPicture(app, *p);
+  app->shown_last = p->last_frame;
+  app->shown_play_ms = p->play_start_ms;
+  app->shown_arrival_ms = p->arrival_ms;
+  GameFrames(app, p->last_frame, p->pictures);
+  return true;
 }
 
 void Save(App* app) {
@@ -450,6 +709,14 @@ bool StartRenderer(App* app, const char* what) {
                "with the screen of the PC"
              : "No screen quad: a frame with no scene of the mod does not show");
   if (app->xr_on && app->xr.Renderer13()) {
+    // THE QUEUE OF THE RENDERER: the second queue with the frame loop
+    // (frame_loop=1 and frame_loop_queues=2), to the end of the process.
+    app->xr.SetRendererSecondQueue(frame_loop::On(app->menu.FrameLoop()));
+    AppLog("xr           : the renderer of the mod takes queue %d%s",
+           app->xr.RendererOnSecondQueue() ? 1 : 0,
+           app->xr.RendererOnSecondQueue()
+               ? " (frame_loop=1, frame_loop_queues=2), and the session queue 0"
+               : ", the queue of the session");
     vk::External device;
     app->xr.RendererDevice(&device);
     vk::UseExternal(device);
@@ -683,6 +950,37 @@ void Play(App* app, bool new_game) {
   if (app->play_notice) AppLog("game         : play_notice=1. The quad of the menu shows a notice until the first frame of the game");
   AppLog("game         : %s at %s, the render %d by %d", name, app->play_clock.c_str(),
          game.width, game.height);
+  // THE FRAME LOOP (frame_loop, the row of the page Testing), at each Play.
+  // 1: the play thread plays the pictures into the ring, and the session
+  // shows the newest finished one. 0: the old loop.
+  bool loop = frame_loop::On(app->menu.FrameLoop());
+  if (loop && !app->ring.Start(app->xr.SessionGpu(), app->xr.RendererQueue(),
+                               app->xr.SessionTimeline(), app->xr.SwapRedBlue())) {
+    loop = false;
+  }
+  AppLog("game         : frame_loop=%d. %s", app->menu.FrameLoop(),
+         loop ? "A play thread plays each picture of the game into a ring of 3 slots, and "
+                "each frame of the session shows the newest slot that the GPU finished, with "
+                "no wait on the CPU for the GPU"
+              : app->menu.FrameLoop() != 0
+                    ? "The app has no ring of the pictures, so the thread of the session plays "
+                      "the pictures (the old loop)"
+                    : "The thread of the session plays the pictures and waits for the GPU "
+                      "before each copy (the old loop)");
+  app->time.SetFrameLoop(loop);
+  // frame_loop_image_wait (0 by default): with the frame loop the session
+  // does not wait for a swapchain image that the runtime does not give free
+  // at once. 1: it waits, as the old loop.
+  const bool image_wait = app->ini.GetInt("bwvr", "frame_loop_image_wait", 0) != 0;
+  if (loop) {
+    AppLog("game         : frame_loop_image_wait=%d. %s", image_wait ? 1 : 0,
+           image_wait ? "The session waits for each swapchain image"
+                      : "A swapchain image that is not free at once waits for the next frame "
+                        "of the session, and its layer shows the image before");
+  }
+  app->xr.SetImageWait(image_wait);
+  app->xr.SetFrameLoop(loop);
+  if (loop) StartPlayThread(app);
 }
 
 // THE MENU BUTTON at each frame of the session while the game runs
@@ -723,6 +1021,13 @@ void GameTick(App* app) {
   std::string why;
   if (app->wine.State(&code, &why) != WineRuntime::GameState::kEnded) return;
   app->game_on = false;
+  // THE FRAME LOOP ends with the game: the thread of the session owns the
+  // renderer again, and no slot of the ring shows.
+  if (app->play_running) {
+    StopPlayThread(app);
+    app->ring.Clear(app->xr.SessionSerial());
+  }
+  app->xr.SetFrameLoop(false);
   app->time.GameEnds();
   app->menu.SetGameRunning(false);
   ShowMenuOverGame(app, true);
@@ -1236,6 +1541,9 @@ void android_main(android_app* android) {
   }
 
   app.xr.SetCopyOnChange(app.ini.GetInt("bwvr", "xr_copy_on_change", 1) != 0);
+  // frame_loop_queues=2 (the default): with the frame loop the renderer has
+  // a queue of its own when the device has one. 1: one queue for all.
+  app.xr.SetQueues(app.ini.GetInt("bwvr", "frame_loop_queues", 2));
   // eye_size_max=1 (the default): the size of the eyes that the app takes
   // from the runtime has a cap, the panel of a Quest 3 (2064 by 2208) with the
   // aspect of the runtime (eye_size.h). 0: the size of the runtime.
@@ -1346,7 +1654,10 @@ void android_main(android_app* android) {
   // into the game folder (docs/android.md, "The stream of the walks").
   if (replay) {
     PlayStreamFile(app.game.folder + "/bwvr-stream.bin", app.game.folder);
-    if (app.xr_on && !ShowPicture(&app)) {
+    app.xr.OldLoopSync(false);
+    Picture picture;
+    if (app.xr_on) GatherPicture(&app, app.screen_pictures, &picture);
+    if (app.xr_on && !ShowPicture(&app, picture)) {
       AppLog("replay       : no picture of the renderer for the session");
     }
   }
@@ -1407,7 +1718,17 @@ void android_main(android_app* android) {
       ApplyDisplayRate(&app);
       XrInput input;
       if (!app.xr.BeginFrame(&input)) continue;
+      // THE STEPS of this frame for the time log (XrApp::Step).
+      const bool steps = app.time.On();
+      double step_at = steps ? NowMs() : 0.0;
+      const auto step = [&](XrApp::Step which) {
+        if (!steps) return;
+        const double now = NowMs();
+        app.xr.AddStep(which, now - step_at);
+        step_at = now;
+      };
       MenuButton(&app, input);
+      step(XrApp::kStepUi);
       // The input of the mod: after xrSyncActions of BeginFrame, with the
       // views of xrLocateViews at the display time of this frame.
       if (app.input_live.On()) {
@@ -1420,12 +1741,26 @@ void android_main(android_app* android) {
         app.input_live.Write(&slot);
         app.input_live.PlayPulses(&app.xr);
       }
-      if (app.live) PlayLive(&app);
+      step(XrApp::kStepSlot);
+      // THE PICTURE OF THIS FRAME at the place of the play of the old loop:
+      // with frame_loop=1 the newest picture of the ring that the GPU
+      // finished, else the play of the batch on this thread.
+      bool fresh = false;
+      if (app.play_running) {
+        fresh = TakePicture(&app);
+        step(XrApp::kStepTake);
+      } else if (app.live) {
+        fresh = PlayLive(&app);
+        step(XrApp::kStepPlay);
+      }
+      // THE AGE of the shown picture at the display time of this frame.
+      if (app.game_on && app.first_frame) app.xr.ShownPicture(app.shown_play_ms, app.shown_arrival_ms, fresh);
       UpdateKeyboard(&app);
       bool show_cursor = false;
       float cursor[3] = {0, 0, 0};
       OnControllers(&app, input, &show_cursor, cursor);
       Paint(&app);
+      step(XrApp::kStepUi);
       app.xr.EndFrame(quad.center, menu_size, show_cursor, cursor,
                       kCursorMeters);
       // THE TIME LOG of this frame of the session.
@@ -1434,9 +1769,25 @@ void android_main(android_app* android) {
         app.xr.TakeTimes(&times);
         if (app.game_on) {
           const double now = NowMs();
+          if (app.play_running) {
+            PlayStats s;
+            {
+              std::lock_guard<std::mutex> lock(app.play_stats_lock);
+              s = app.play_stats;
+              app.play_stats = PlayStats();
+            }
+            PictureRing::Stats r;
+            app.ring.TakeStats(&r);
+            s.slot_wait.Merge(r.slot_wait);
+            s.busy.Merge(r.busy);
+            s.dropped += r.dropped;
+            s.replaced += r.replaced;
+            app.time.Play(s);
+          }
+          app.time.Shown(fresh);
           app.time.SessionFrame(now, times);
           app.time.Tick(now, app.live_reader.Arrived(),
-                        app.first_frame ? app.live_reader.LastArrivalMs() : 0.0, app.live_last);
+                        app.first_frame ? app.live_reader.LastArrivalMs() : 0.0, app.shown_last);
         }
       }
     } else {
@@ -1448,15 +1799,17 @@ void android_main(android_app* android) {
     }
   }
 
+  StopPlayThread(&app);
   if (app.live) {
     app.live_reader.Stop();
-    if (!app.live_quiet) LiveSummary(&app, "the app ends");
+    if (!app.live_play.quiet) LiveSummary(&app, app.live_play, "the app ends");
   }
   app.input_live.WriteNoInput();
   app.input_live.Stop();
   if (app.game_on) AppLog("game         : the app ends, so the game ends");
   app.wine.Stop();
   AppLog("app          : the app ends");
+  app.ring.Stop();
   if (app.xr_on) app.xr.Stop();
   app.flat.Stop();
   app.painter.Stop();

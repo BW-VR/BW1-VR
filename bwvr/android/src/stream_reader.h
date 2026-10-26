@@ -1,9 +1,11 @@
 // THE READER OF THE LIVE STREAM OF THE WALKS (docs/android.md, "The live
 // stream"). A thread maps the ring file of the mod (src/mod/stream_ring.h)
 // with MAP_SHARED, asks the writer for the whole state, and takes each whole
-// frame that waits in the ring into a queue. At each frame of the session the
-// thread of the session takes the whole queue (a batch) and gives its frames
-// to the renderer (scene_player.h), because the renderer is not thread safe.
+// frame that waits in the ring into a queue. One thread takes the whole queue
+// (a batch) and gives its frames to the renderer (scene_player.h), because
+// the renderer is not thread safe: the play thread as soon as frames come
+// (frame_loop=1, WaitAll), else the thread of the session at each of its
+// frames.
 // With stream_live_frames=N the queue keeps the newest N frames whole, and
 // each older frame keeps only its records of state (stream_split.h).
 #pragma once
@@ -25,6 +27,7 @@ struct QueuedFrame {
   bool picture = false;  // a picture of a test (vk_scene_test_frame or F12)
   bool start = false;    // a kStart record
   int32_t test_frame = 0;
+  double arrival_ms = 0.0;  // CLOCK_MONOTONIC when the reader took it (time_log=1), else 0
 };
 
 class StreamReader {
@@ -41,6 +44,9 @@ class StreamReader {
   void Stop();
   // Each frame that waits, the oldest first, or false when none waits.
   bool TakeAll(std::vector<QueuedFrame>* frames);
+  // THE PLAY THREAD (frame_loop=1): as TakeAll, but when no frame waits it
+  // waits up to timeout_ms for the next frame of the ring.
+  bool WaitAll(std::vector<QueuedFrame>* frames, int timeout_ms);
   // The most bytes that waited in the queue, and the limit (0: none).
   size_t MostBytes();
   size_t LimitBytes() const { return whole_frames_ > 0 ? queue_max_bytes_ : 0; }
@@ -72,6 +78,7 @@ class StreamReader {
   bool started_ = false;
   std::atomic<bool> stop_{false};
   pthread_mutex_t lock_ = PTHREAD_MUTEX_INITIALIZER;
+  pthread_cond_t arrived_cond_ = PTHREAD_COND_INITIALIZER;  // a frame went into the queue
   std::deque<QueuedFrame> queue_;
   uint64_t takes_ = 0;  // the calls of TakeAll: the session takes frames
   size_t most_bytes_ = 0;

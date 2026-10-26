@@ -108,6 +108,22 @@ bool StreamReader::TakeAll(std::vector<QueuedFrame>* frames) {
   return !frames->empty();
 }
 
+bool StreamReader::WaitAll(std::vector<QueuedFrame>* frames, int timeout_ms) {
+  pthread_mutex_lock(&lock_);
+  if (queue_.empty() && timeout_ms > 0) {
+    timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_nsec += static_cast<long>(timeout_ms % 1000) * 1000000L;
+    until.tv_sec += timeout_ms / 1000 + until.tv_nsec / 1000000000L;
+    until.tv_nsec %= 1000000000L;
+    while (queue_.empty() && !stop_) {
+      if (pthread_cond_timedwait(&arrived_cond_, &lock_, &until) != 0) break;
+    }
+  }
+  pthread_mutex_unlock(&lock_);
+  return TakeAll(frames);
+}
+
 void* StreamReader::Main(void* self) {
   TimeLogNameThread("bwvr reader");
   static_cast<StreamReader*>(self)->Run();
@@ -245,6 +261,7 @@ void StreamReader::Run() {
       if (time_log_) {
         timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
+        q.arrival_ms = now.tv_sec * 1000.0 + now.tv_nsec / 1e6;
         last_arrival_ms_.store(now.tv_sec * 1000.0 + now.tv_nsec / 1e6,
                                std::memory_order_relaxed);
         arrived_.fetch_add(1, std::memory_order_relaxed);
@@ -288,6 +305,7 @@ void StreamReader::Run() {
       if (queue_.size() > queue_most) queue_most = queue_.size();
       if (queue_bytes_ > queue_most_bytes) queue_most_bytes = queue_bytes_;
       most_bytes_ = queue_most_bytes;
+      pthread_cond_broadcast(&arrived_cond_);
       pthread_mutex_unlock(&lock_);
     }
     if (state == State::kRead) pending.erase(pending.begin(), pending.begin() + used);

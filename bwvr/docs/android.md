@@ -107,10 +107,13 @@ Summary:
 | --- | --- |
 | `android/AndroidManifest.xml` | The manifest: the native activity, the categories of an immersive app, the permissions and the queries of the OpenXR loader |
 | `android/CMakeLists.txt` | `libbwvr_quest.so` with the toolchain of the NDK |
-| `android/src/main.cpp` | `android_main`: the folder of the app, the event loop, the input of the controllers, of the keys and of a touch, the save |
+| `android/src/main.cpp` | `android_main`: the folder of the app, the event loop, the input of the controllers, of the keys and of a touch, the save, the play of the live stream and the play thread of the frame loop |
 | `android/src/xr_app.cpp` | The OpenXR session: the loader, the instance, Vulkan through the runtime, the actions, the two quads |
 | `android/src/flat_view.cpp` | The menu in the window with no headset |
-| `android/src/gpu.cpp` | The Vulkan device, the staging buffers and the copies |
+| `android/src/gpu.cpp` | The Vulkan device, the staging buffers, the copies, and the ring of the command buffers of the session (`frame_loop=1`) |
+| `android/src/picture_ring.cpp` | The ring of the pictures of the game of the frame loop: the images of the slots, the copies of the play thread, the fences, the newest finished slot for the session |
+| `android/src/frame_loop.h` | The rules of the frame loop: the slots of the ring of the pictures, the drop of a picture, the ring of the command buffers, the serials of the submits, the age of the shown picture. No Android code |
+| `test/controller_math/frame_loop_checks.h` | The math checks of `frame_loop.h` and of the row "The headset gets each frame (no wait for the GPU)" |
 | `android/src/canvas.cpp` | A picture of the CPU drawn with `android.graphics.Canvas` through JNI |
 | `android/src/menu_model.h` | The menu: the pages, the rows, the values, the input, the save. No Android code |
 | `android/src/display_rate.h` | The display rate: the rates of the row from the rates of the runtime, the fall back of `display_hz`, the steps of the row. No Android code |
@@ -419,7 +422,8 @@ sees only black. `play_notice=0`: no quad until the first frame.
 
 **While the game runs** the menu quad and the cursor do not go out, and the
 app shows the frames of the live stream in the projection layer and the
-quad layers. A hold of the menu button of the left controller for
+quad layers (with `frame_loop=1`, the default, through the play thread and
+the ring of the pictures, "The frame loop"). A hold of the menu button of the left controller for
 `play_menu_hold_ms` (1000 by default) shows the menu over the game, and a
 press of the menu button, or B or Y on the main page, hides it. With
 `button_layout=1` the menu button is the one button of the menu of the game
@@ -1225,10 +1229,13 @@ of the app, `stream_reader.cpp`). A thread waits for the ring file with a
 whole head, asks for the whole state, and takes each frame of the ring into
 a queue at once. The queue keeps the newest `stream_live_frames` frames
 whole (3 by default), and each older frame keeps only its records of state
-(`KeepWalks`, `stream_split.h`). At each frame of the session the loop of
-the app takes the whole queue (a batch) and gives its frames to the renderer
-(the renderer is not thread safe), through the same player as the file
-(`PlayStreamRecords`, `scene_player.cpp`). It plays the walks of the newest
+(`KeepWalks`, `stream_split.h`). The thread that plays takes the whole queue
+(a batch) and gives its frames to the renderer (the renderer is not thread
+safe, so one thread plays), through the same player as the file
+(`PlayStreamRecords`, `scene_player.cpp`): from Play to the end of a game
+with `frame_loop=1` the play thread, as soon as frames come ("The frame
+loop"), else the loop of the session at each of its frames. It plays the
+walks of the newest
 frame and of each frame with a picture of a test (`vk_scene_test_frame` of
 the stream, or F12), and only the records of state of the other frames (the
 log counts them as skipped). So the picture is at most one batch late, and
@@ -2543,11 +2550,263 @@ with the cap and 0.60 ms with no cap.
 **Not shown yet:** the cap in a headset, and why the Quest 3 asks for 4096
 by 4291.
 
+## The frame loop
+
+A frame of the session that comes late makes the runtime show a picture
+again, and the player sees judder. So the thread of the session must call
+`xrWaitFrame`, `xrBeginFrame` and `xrEndFrame` at the display rate of the
+headset, also when the game, the play of a picture or the GPU is slower.
+The key `frame_loop` in `bwvr.ini` (`frame_loop.h`, `picture_ring.cpp`,
+`PlayThread` and `TakePicture` of `main.cpp`):
+
+- `frame_loop=1` (the default): the new loop. A play thread plays each
+  picture of the game into a ring of pictures, and the thread of the
+  session shows the newest picture that the GPU finished. No thread of the
+  session waits on the CPU for GPU work of a picture of the game.
+- `frame_loop=0`: the old loop. At each frame of the session the thread of
+  the session plays the batch of the live stream into the renderer, copies
+  the picture into the swapchains, and before each copy waits on the CPU
+  for the fence of the command buffer before it (`GpuBegin`).
+
+The row "The headset gets each frame (no wait for the GPU)" on the page
+"Testing" sets the key (On is 1), with a help text. A save writes it. The
+app reads it at the start of each Play, and the new loop runs from Play to
+the end of that game. With no game the app has the old loop. The key is not
+a row of `settings_table.h`, so the launcher of the PC does not show it. It
+has no test key: the app has no hotkeys, and the headset is tested through
+its `bwvr.ini` or the row.
+
+**The threads.**
+
+- **The play thread** (`bwvr play`). It waits up to 50 ms for frames of the
+  reader (`StreamReader::WaitAll`), plays the batch into the renderer with
+  the rules of the old loop (`PlayBatch`, "The live stream"), and puts the
+  picture into a slot of the ring (`WriteSlot`). Then it takes the next
+  batch at once. While it runs, it is the only thread that uses the
+  renderer. The end of the game ends it (a join), and the thread of the
+  session has the renderer again.
+- **The thread of the session** (`bwvr main`). `xrWaitFrame`,
+  `xrBeginFrame`, the newest finished picture of the ring (`TakePicture`),
+  the slot of the input channel, the menu, the copies of the frame into the
+  swapchains in one command buffer, and `xrEndFrame` with the poses of the
+  shown picture. It does not play and does not wait for the play thread.
+
+**The ring of the pictures** (`PictureRing`, the rules in `frame_loop.h`,
+`Ring`). Three slots. A slot has an image of the eye pictures (a layer for
+each eye, at the size of the picture), and when a picture needs them an
+image of the panel image and an image of the screen picture. The images
+have the byte order of the swapchains: `R8G8B8A8_UNORM`, or
+`B8G8R8A8_UNORM` when the swapchains have blue first. A slot also has the
+values of its frame: the `kView` (the poses and the angles of the views
+that the picture was drawn with), the quad layers, the pictures of the
+cards, the screen of a frame with no scene (with the pixels of the CPU of
+such a screen), and the frame number of the game.
+
+- The play thread records the copies from the images of the renderer into
+  the slot in one command buffer of the slot, and submits it with the fence
+  of the slot. The renderer draws each walk into the next of two targets, so
+  a picture stays in its target only until the walk after the next one. The
+  copy comes right after the batch, before the next walk. With the same
+  byte order it is one `vkCmdCopyImage` of both layers, with blue first a
+  blit of the same size. A screen picture goes into a slot only when the
+  slot does not hold that screen picture yet.
+- The play thread takes a free slot. With no free slot it takes the oldest
+  ready slot that no frame showed: that picture never shows, and the time
+  log counts it as dropped. It waits for the fence of that slot only when
+  the GPU did not finish its copies. The session never waits for it.
+- At each frame the session takes the newest ready slot whose fence is
+  signaled (`vkGetFenceStatus`, no wait) and that is newer than the shown
+  slot. The shown slot before is free again, and so is each older ready
+  slot: a newer picture replaced it, and the time log counts it. With no
+  new finished picture the session shows the shown slot again. A picture
+  that the GPU did not finish never holds a frame of the session.
+- The play thread never writes the shown slot, and the session never shows
+  an older picture than the shown one (the math checks).
+
+**The poses.** A picture goes out with the `kView` of its own frame: the
+poses that the game drew it with. The runtime reprojects it to the pose of
+the head at the display time, which is the normal work of the runtime. The
+app adds no motion. A picture that shows in more than one frame of the
+session has the same poses in each of them.
+
+**One copy into each swapchain.** The copy of the session from a slot into
+a swapchain image of the projection layer is one `vkCmdCopyImage`, with no
+image between: the slot has the size and the byte order of the swapchain,
+and a copy keeps the bytes also in a swapchain with an sRGB format. The
+panel image and the screen picture go the same way. Only the stereo screen
+(half the size) has a blit into an image between and then a copy. So each
+eye has two copies in all, one on the play thread into the slot and one on
+the session into the swapchain, the same count as the old loop (a blit into
+the image between and a copy). A copy straight from the target of the
+renderer into the swapchain does not fit the ring: the walk after the next
+writes the target again while the session can still show its picture. The
+walk cannot draw into a swapchain image either: the renderer of the mod
+chooses its own two targets (`vk_scene.cpp`, the same code as on the PC). A
+swapchain for each slot would give each eye three swapchains of about three
+images each in place of one swapchain and three images of the slots (at a
+render of 2702 by 2162 about 400 MB in place of about 270 MB), and calls of
+the swapchains on two threads.
+
+**The copies of the session with no wait** (`gpu.cpp`, `GpuSetRing`, the
+rules in `frame_loop.h`, `CommandRing`). In a frame the session records
+each copy (the eyes, the panel, the screen quad, the cards, the walls, the
+keyboard, the menu and the cursor) into one command buffer, submits it
+before `xrEndFrame`, and then releases the swapchain images. The command
+buffers go round, the least recently used first, up to 16. The fence of a
+command buffer is checked only when it comes again. When the GPU did not
+finish it, the ring gets a new command buffer in its place, so the CPU does
+not wait. Only a ring of 16 unfinished command buffers waits. The pixels of
+the CPU (the menu, the cursor, the cards, the keyboard, the walls and a
+screen with the pixels of the CPU) go into a copy in memory. They go into
+the staging buffer only when the GPU finished the last copy of that buffer
+(each submit has a serial, `GpuSerialDone`). Until then the layer keeps its
+image.
+
+**The two queues** (`frame_loop_queues` in `bwvr.ini`, read at the start
+of the app, 2 by default). On one queue the GPU does the work in the order
+of the submits, so a copy of the session waits on the GPU behind each walk
+that the play thread submitted before it, and the runtime gets the picture
+of the frame only after that walk. With `frame_loop_queues=2`, when the
+queue family has two queues or more and the device has timeline
+semaphores, the device gets two queues: the session and the runtime take
+queue 0 with the priority 1.0, and the renderer of the mod and the copies
+of the play thread take queue 1 with the priority 0.5. The renderer gets
+its queue at its start (the first Play, or the start of the app with
+`stream_live=1`): queue 1 when `frame_loop` is 1 then, and it keeps it to
+the end of the process.
+
+- A slot goes from queue 1 to the session when the session saw its fence
+  signaled. The copy of the session has a barrier that makes the bytes of
+  the slot visible to it.
+- Each submit of the session signals a timeline semaphore with its serial.
+  When the session takes a new slot, the slot shown before gets the serial
+  of the last submit of the session, which has each copy from it. A write
+  of the play thread into that slot waits on the GPU for that serial (no
+  wait on the CPU).
+- The old loop with the renderer on queue 1 (no game, a test aid, or a
+  later Play with `frame_loop=0`): before the play of a batch the CPU waits
+  for the fence of the last copy of the session, and after the play for
+  the walks (`vkQueueWaitIdle` of queue 1), as the old loop waits for the
+  GPU before each copy.
+
+`frame_loop_queues=1`, or a family with one queue: one queue for all, as
+above. The log at the start: "xr : frame_loop_queues=2. The family of the
+queue has N queues. ..." and "xr : the renderer of the mod takes queue 1".
+
+**A swapchain image that is not free** (`frame_loop_image_wait` in
+`bwvr.ini`, read at each Play, 0 by default). With the frame loop the
+session asks for the next image of a swapchain with a timeout of 0
+(`xrWaitSwapchainImage`). When the runtime still uses that image, the
+image stays acquired, the layer shows its image before, and the next frame
+asks for the same image again. So the session does not wait for the
+compositor. `frame_loop_image_wait=1`: the session waits for each image, as
+the old loop does.
+
+**The lock of the queue.** The renderer, the copies of the play thread and
+the session use one lock for the queues (`LockQueue` of `xr_app.cpp`). The
+session holds it for each submit and for `xrBeginFrame`, `xrEndFrame`,
+`xrAcquireSwapchainImage` and `xrReleaseSwapchainImage`, the calls in which
+the runtime can use the queue (XR_KHR_vulkan_enable2). It does not hold it
+in `xrWaitFrame` or in `xrWaitSwapchainImage`. A wait for the device to be
+idle (a new size of an image) holds it too, and with one lock that wait
+has each queue.
+
+**The log.** At each Play "game : frame_loop=1. A play thread plays each
+picture of the game into a ring of 3 slots ...", at the first Play "ring :
+a ring of 3 slots ...", one line for each image of a slot ("ring : slot 0:
+an image of 1380 by 1104 with 2 layers for the eye pictures (11.6 MB)"),
+"gpu : the ring of command buffers is on (up to 16)" at Play, and at the end
+of the game "gpu : the ring of command buffers is off: N entries, M new
+entries because the GPU was not done, K waits of a full ring". At the end
+of the app "ring : the ring of the pictures ends" with the dropped and the
+replaced pictures, and a line when copies of pixels of the CPU waited a
+frame for a staging buffer. The time log has the lines of the play thread
+("The time log of the app").
+
+**The tests.**
+
+- `.\dev.ps1 build`: the checks of `frame_loop_checks.h` (the choice of the
+  newest finished picture, the drop rule, the end of a game, 300 frames
+  with no write into the shown slot and no older picture, the ring of the
+  command buffers, the serials, the age, the row and its save).
+- `emu_game_test.ps1 -FrameLoop 1` and `-FrameLoop 0`: the line of the key
+  at each Play, and with `time_log=1` the lines of the play thread, the age
+  of the shown picture, no wait of a copy of the session for the GPU, no
+  wait of a full ring, and the frames of the session a second near the
+  display rate (the median of the lines at 0.9 of the rate or more) with
+  the new loop. With the old loop the lines say that there is no play
+  thread, and there is no ring of command buffers.
+
+The test runtime lists XR_KHR_convert_timespec_time (an XrTime of it is
+`CLOCK_MONOTONIC` in ns), so the emulator has the age of the shown picture
+in ms.
+
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90`, Wine
+of x86_64, the test runtime at 72 Hz, a render of 1380 by 1104). The device
+of the emulator has a family with 2 queues, so the renderer has queue 1. The
+test runtime gives a frame about each 14.5 ms (68.8 frames a second) at
+72 Hz. In the test save (game 2), in the windows of 10 s with no read back
+of a picture:
+
+| | `frame_loop=1` (196 checks, 0 failed) | `frame_loop=0` (192 checks, 0 failed) |
+| --- | --- | --- |
+| frames of the game, pictures of the app, frames of the session a second | 68.7, 68.7, 68.7 | 68.8, 68.8, 68.8 |
+| from the end of `xrWaitFrame` to the end of `xrEndFrame`, mean | 0.64 to 0.65 ms | 3.55 to 3.57 ms |
+| of it the play of a batch, the layers, the submit | 0, 0.29 to 0.30, 0.12 ms | 1.95 to 1.96, 1.05, 0.36 ms |
+| waits of a copy of the session for the GPU in 10 s | 0 | 2061 to 2067 |
+| the play thread | 2.32 to 2.34 ms of CPU a picture, 16 percent of one core | none |
+| from the start of the play to the display time of a new picture | 21.7 to 21.9 ms | 13.8 ms |
+| from the arrival of its frame in the app to the display time | 21.9 to 22.0 ms | 21.3 to 21.6 ms |
+
+So the latency of a picture from its frame of the game is the same in both
+loops in the emulator (0.4 to 0.6 ms more with the frame loop). With the
+frame loop the picture waits in the ring for the next frame of the session,
+and in the old loop the frame waits in the queue of the reader. The
+pictures of the eyes that the runtime read back have the game in both runs
+(game 1 and game 2, both eyes). Over game 1 (the logos, the video, the
+dialog of a new profile and the land) the median of the frames of the
+session a second is 68.7 with each loop. In the frames of the session that
+the test runtime holds for a read back the play thread waits for the lock
+of the queue, so those windows have few pictures in both loops.
+
+**Not shown yet:** only a headset can show the effect on the judder: the
+frames of the session a second at the display rate of a Quest 3 with its
+GPU, the waits of the runtime of Meta in `xrWaitFrame` and `xrEndFrame`,
+the CPU time of the play thread next to the game under Wine with FEX or
+Box64, and the memory of the ring at the render of the headset. Also only
+a headset can show if the second queue with its lower priority keeps the
+copies of the session from a wait behind a walk on its GPU, how the
+runtime of Meta answers `xrWaitSwapchainImage` with a timeout of 0, which
+step of the line of the steps takes the time of a frame of the session when
+the GPU is busy, and the latency that the player feels.
+
+**Known limits:**
+
+- The ring needs memory of the GPU: three images of the eye pictures (and
+  of the panel image when the mod gives panel quads) at the size of the
+  render, at 2702 by 2162 about 67 MB for each slot with a panel. The old
+  loop has one image between for each set of swapchains in place of them.
+- The test runtime of the emulator holds a frame of the session for some
+  seconds while it reads back a picture. The session then holds the lock of
+  the queue in `xrEndFrame`, so the play thread waits too, and the frames of
+  the game in that time do not show.
+- A screen picture with the pixels of the CPU is a copy in memory in each
+  slot that shows it (5.8 MB at 1380 by 1104).
+- With `frame_loop_image_wait=0` each eye takes its new picture when its
+  own swapchain image is free, so for a frame the two eyes can show two
+  pictures, each with its own poses.
+- The renderer keeps the queue of its start. After a start with
+  `frame_loop=1` and two queues, a game with `frame_loop=0` has the old
+  loop with the CPU waits of "The two queues", not the old loop on one
+  queue. A new start of the app with `frame_loop=0` gives the old loop on
+  one queue.
+
 ## The time log of the app
 
 `time_log=1` (the default, `time_log.cpp`, the parse of `/proc` in
 `proc_stat.h`, the rules in `src/mod/time_log_math.h`). While the game runs,
-each 10 s the app writes five lines `time` to `bwvr-quest.log`. The mod
+each 10 s the app writes six lines `time` to `bwvr-quest.log`. The mod
 writes a line of its own with the same key (`backend.md`, "The time log of
 the mod").
 
@@ -2556,20 +2815,55 @@ the mod").
    of the session a second, and why a frame of the game did not show. A
    frame that a newer frame replaced before the app took it did not show,
    because the app was still at the picture before. Of the time since that
-   picture the largest part gives the cause: the app waited for the GPU
-   (the fences of its copies and of the walks of the renderer), it waited
-   in `xrWaitFrame`, or its CPU worked (`CauseOf`). A frame of the session
+   picture the largest part gives the cause (`CauseOf`). In the old loop
+   (`frame_loop=0`, "The frame loop") the thread of the session plays: it
+   waited for the GPU (the fences of its copies and of the walks of the
+   renderer), it waited in `xrWaitFrame` or `xrEndFrame`, or its CPU
+   worked. With `frame_loop=1` the play thread plays, and the time is of
+   the picture before on the play thread: it waited for the GPU (the fences
+   of the walks of the renderer and of a slot of the ring), it waited for
+   the lock of the queue, or the play thread worked. A frame of the session
    with no new frame of the game shows the picture before again: no new
-   frame came.
+   frame came. At the end of the line: the pictures that the play thread
+   dropped because the ring had no free slot, and the pictures that a newer
+   finished picture replaced before a frame of the session showed them
+   (both 0 in the old loop).
 2. **The CPU of the app**, the mean and the most in ms: the play of a
    picture (the records of a batch into the renderer), the wait in
    `xrWaitFrame`, the time from the end of `xrWaitFrame` to the end of
-   `xrEndFrame`, a wait of a copy for the GPU (`GpuBegin` waits for the
-   fence of the last command buffer of the app), and a wait of a walk for
-   the GPU (the renderer waits for the fence of its slot).
+   `xrEndFrame`, a wait of a copy for the GPU (the old loop: `GpuBegin`
+   waits for the fence of the last command buffer of the app, and with
+   `frame_loop=1` only a full ring of command buffers waits), and a wait of
+   a walk for the GPU (the renderer waits for the fence of its slot). Then
+   the play thread (`frame_loop=1`): its CPU time for each picture and in
+   percent of one core (`CLOCK_THREAD_CPUTIME_ID`), and its waits for the
+   fence of a slot of the ring. In the old loop the line says that there is
+   no play thread. At the end: the age of the shown picture in frames of
+   the session, the mean and the most (0 in a frame with a new picture, one
+   more in each later frame that shows the same picture).
+   **The steps of the thread of the session** (one more line): the sum in
+   ms of each step in a frame from the end of `xrWaitFrame` to the end of
+   `xrEndFrame`, the mean and the most: `xrBeginFrame`, the actions and the
+   poses (`xrSyncActions`, `xrLocateSpace`), the slot of the input channel
+   (`xrLocateViews`) and the pulses, the picture of the ring
+   (`frame_loop=1`), the play of a batch (the old loop), the menu and the
+   controllers (the menu button, the keyboard, the ray, the paint), the
+   layers (the rest of `EndFrame`: the records of the copies and the
+   layers), `xrAcquireSwapchainImage` (with the count of the calls),
+   `xrWaitSwapchainImage` (with the count of the images that were not free
+   at once, `frame_loop_image_wait=0`), the submit of the copies,
+   `xrReleaseSwapchainImage` and `xrEndFrame`, and of them the waits for
+   the lock of the queues. Then the age of the shown picture in ms, from
+   the start of the play of its batch to the display time of the frame
+   (`predictedDisplayTime` on `CLOCK_MONOTONIC` through
+   XR_KHR_convert_timespec_time, when the runtime lists it): the mean and
+   the most over each frame, and over the frames that show a new picture
+   (the latency of a new picture). With no such extension the line says
+   that there is no display time.
 3. **The GPU** in ms, from timestamps at the start and at the end of each
    command buffer: a walk of the renderer (`VkSceneTakeGpuTime`), a command
-   buffer of the app (`Gpu::busy`), a picture (the walks and the command
+   buffer of the app (`Gpu::busy`, with `frame_loop=1` also the copies of
+   the play thread into the slots), a picture (the walks and the command
    buffers of the 10 s over the pictures), and the percent of the time that
    the GPU worked for the app. The timestamp at the start of a command
    buffer of the app is at the bottom of the pipe, so it comes after the
@@ -2589,7 +2883,8 @@ the mod").
    threads the names of their descriptions (`wine_dsound_mix`,
    `wine_dinput_wor`). With `time_log=1` the app names its own threads:
    `bwvr main` (the loop of the session), `bwvr reader` (the live stream),
-   `bwvr painter`, `bwvr wine` and `bwvr game`.
+   `bwvr play` (the play thread of `frame_loop=1`), `bwvr painter`, `bwvr
+   wine` and `bwvr game`.
 5. **The processes and the cores**: the CPU time of the game process, of the
    app and of the other processes of the user of the app (Wine) in cores,
    and the busy time of each core from `/proc/stat`, with the count of the
@@ -2614,6 +2909,9 @@ allocation base, its mapped file and its module.
 **The cost.** Some reads of the clock in a frame of the session and one in
 each frame that the reader takes, two timestamps in each command buffer of
 the app, and one read of `/proc` each 10 s on the thread of the session.
+With `frame_loop=1` also some reads of the clock and one of the CPU time of
+the play thread for each picture, and two reads of the clock when the lock
+of the queue is not free at once.
 `time_log=0`: no line, no timestamp, no read of the clock for the log, no
 read of `/proc` and no name of a thread of the app. The key is read before
 the threads of the app start, so each of them gets its name. There is no

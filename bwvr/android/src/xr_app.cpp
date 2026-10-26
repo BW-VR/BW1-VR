@@ -34,18 +34,30 @@ T Proc(XrInstance instance, const char* name) {
   return reinterpret_cast<T>(f);
 }
 
-// The lock of the queue that the renderer of the mod and the app share
-// (vk::External::lock). The app draws and submits on one thread, so the lock
-// only keeps the rule of the renderer.
-std::recursive_mutex g_queue_lock;
-void LockQueue() { g_queue_lock.lock(); }
-void UnlockQueue() { g_queue_lock.unlock(); }
-
 double ClockMs() {
   timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
   return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
+
+// The lock of the queue that the renderer of the mod and the app share
+// (vk::External::lock). With frame_loop=1 the play thread (the renderer and
+// the copies into the ring of the pictures) and the session submit from two
+// threads. A thread with TimeQueueWaits(true) adds up its waits for the lock.
+std::recursive_mutex g_queue_lock;
+thread_local bool t_time_lock = false;
+thread_local double t_lock_wait_ms = 0.0;
+void LockQueue() {
+  if (!t_time_lock) {
+    g_queue_lock.lock();
+    return;
+  }
+  if (g_queue_lock.try_lock()) return;
+  const double start = ClockMs();
+  g_queue_lock.lock();
+  t_lock_wait_ms += ClockMs() - start;
+}
+void UnlockQueue() { g_queue_lock.unlock(); }
 
 XrPath Path(XrInstance instance, const char* text) {
   XrPath path = XR_NULL_PATH;
@@ -104,6 +116,9 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
     if (strcmp(e.extensionName, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME) == 0) {
       display_rate_ext_ = true;
     }
+    if (strcmp(e.extensionName, XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME) == 0) {
+      timespec_ext_ = true;
+    }
   }
   AppLog("xr           : the runtime has %u extensions. Vulkan 2: %s, Android: %s, "
          "display rate: %s",
@@ -113,9 +128,13 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
 
   // XR_FB_display_refresh_rate only when the runtime lists it. A runtime with
   // none (for example Lepton of the Steam Frame) uses its own rate.
-  const char* names[] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
-                         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
-                         XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME};
+  // XR_KHR_convert_timespec_time only when the runtime lists it: the time
+  // log takes the display time of a frame on CLOCK_MONOTONIC from it.
+  const char* names[4] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
+                          XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};
+  uint32_t name_count = 2;
+  if (display_rate_ext_) names[name_count++] = XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME;
+  if (timespec_ext_) names[name_count++] = XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME;
   XrInstanceCreateInfoAndroidKHR android_info = {
       XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
   android_info.applicationVM = activity->vm;
@@ -126,9 +145,16 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   info.applicationInfo.applicationVersion = 1;
   strcpy(info.applicationInfo.engineName, "bwvr");
   info.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 34);
-  info.enabledExtensionCount = display_rate_ext_ ? 3 : 2;
+  info.enabledExtensionCount = name_count;
   info.enabledExtensionNames = names;
   if (!Ok(xrCreateInstance(&info, &instance_), "xrCreateInstance")) return false;
+  if (timespec_ext_) {
+    to_timespec_ = Proc<PFN_xrConvertTimeToTimespecTimeKHR>(instance_,
+                                                            "xrConvertTimeToTimespecTimeKHR");
+  }
+  AppLog("xr           : XR_KHR_convert_timespec_time: %s",
+         to_timespec_ != nullptr ? "yes. The time log has the age of the shown picture in ms"
+                                 : "no. The time log has no age of the shown picture in ms");
 
   XrInstanceProperties properties = {XR_TYPE_INSTANCE_PROPERTIES};
   xrGetInstanceProperties(instance_, &properties);
@@ -263,6 +289,7 @@ bool XrApp::MakeVulkan() {
     }
   }
   if (gpu_.queue_family == UINT32_MAX) return false;
+  const uint32_t family_queues = family[gpu_.queue_family].queueCount;
 
   // THE FEATURES OF THE RENDERER OF THE MOD, as the session of the PC asks
   // for them (xr_screen.cpp): dynamic rendering, synchronization2,
@@ -319,11 +346,30 @@ bool XrApp::MakeVulkan() {
          max_anisotropy_,
          shading_rate_ ? "yes" : "no");
 
-  const float priority = 1.0f;
+  // THE TWO QUEUES (frame_loop_queues=2): the session on the first with the
+  // higher priority, the renderer on the second. The timeline semaphore of
+  // the session lets the second queue wait on the GPU for a copy of the
+  // session.
+  VkPhysicalDeviceVulkan12Features have12 = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+  if (properties.apiVersion >= VK_API_VERSION_1_3) {
+    VkPhysicalDeviceFeatures2 query = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    query.pNext = &have12;
+    vkGetPhysicalDeviceFeatures2(gpu_.physical, &query);
+  }
+  const bool two = renderer13_ && queues_wanted_ >= 2 && family_queues >= 2 &&
+                   have12.timelineSemaphore;
+  AppLog("xr           : frame_loop_queues=%d. The family of the queue has %u queues%s. %s",
+         queues_wanted_, family_queues,
+         have12.timelineSemaphore ? "" : ", and the device has no timeline semaphores",
+         two ? "The session takes queue 0 (priority 1.0), the renderer of the mod with the "
+               "frame loop queue 1 (priority 0.5)"
+             : "One queue for the session and the renderer");
+  const float priorities[2] = {1.0f, 0.5f};
   VkDeviceQueueCreateInfo queue = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
   queue.queueFamilyIndex = gpu_.queue_family;
-  queue.queueCount = 1;
-  queue.pQueuePriorities = &priority;
+  queue.queueCount = two ? 2 : 1;
+  queue.pQueuePriorities = priorities;
   VkPhysicalDeviceVulkan13Features want13 = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
   want13.dynamicRendering = VK_TRUE;
@@ -331,7 +377,15 @@ bool XrApp::MakeVulkan() {
   VkPhysicalDeviceVulkan11Features want11 = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
   want11.multiview = VK_TRUE;
-  want13.pNext = &want11;
+  VkPhysicalDeviceVulkan12Features want12 = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+  want12.timelineSemaphore = VK_TRUE;
+  if (two) {
+    want13.pNext = &want12;
+    want12.pNext = &want11;
+  } else {
+    want13.pNext = &want11;
+  }
   VkPhysicalDeviceFragmentShadingRateFeaturesKHR want_rate = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
   want_rate.attachmentFragmentShadingRate = VK_TRUE;
@@ -363,6 +417,20 @@ bool XrApp::MakeVulkan() {
   }
   if (!GpuFinish(&gpu_)) return false;
   if (time_log_) GpuTimingStart(&gpu_);
+  if (two) {
+    vkGetDeviceQueue(gpu_.device, gpu_.queue_family, 1, &queue2_);
+    VkSemaphoreTypeCreateInfo type = {VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
+    type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    type.initialValue = 0;
+    VkSemaphoreCreateInfo info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    info.pNext = &type;
+    if (vkCreateSemaphore(gpu_.device, &info, nullptr, &gpu_.timeline) != VK_SUCCESS) {
+      gpu_.timeline = VK_NULL_HANDLE;
+      queue2_ = VK_NULL_HANDLE;
+      AppLog("xr           : vkCreateSemaphore of the timeline failed, so the renderer "
+             "takes the queue of the session");
+    }
+  }
   return true;
 }
 
@@ -654,9 +722,18 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
 void XrApp::SetPixels(Layer* layer, const std::vector<uint8_t>& rgba) {
   const size_t bytes = static_cast<size_t>(layer->width) * layer->height * 4;
   if (rgba.size() < bytes || layer->staging.mapped == nullptr) return;
-  // The GPU may still copy the buffer of the frame before.
-  vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
-  uint8_t* out = static_cast<uint8_t*>(layer->staging.mapped);
+  uint8_t* out = nullptr;
+  if (frame_loop_) {
+    // The GPU may still copy the staging buffer, so the pixels wait in
+    // memory for the next copy (CopyLayer).
+    layer->mirror.resize(bytes);
+    layer->dirty = true;
+    out = layer->mirror.data();
+  } else {
+    // The GPU may still copy the buffer of the frame before.
+    vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
+    out = static_cast<uint8_t*>(layer->staging.mapped);
+  }
   if (!layer->swap_red_blue) {
     memcpy(out, rgba.data(), bytes);
     return;
@@ -693,16 +770,44 @@ bool XrApp::LayerChanged(Layer* layer) {
 // takes a released image in the layout of a color attachment.
 void XrApp::CopyLayer(Layer* layer) {
   if (!LayerChanged(layer)) return;
+  if (frame_loop_ && layer->dirty) {
+    // New pixels go into the staging buffer only when the GPU finished the
+    // last copy of it. Until then the layer keeps its image.
+    if (!GpuSerialDone(&gpu_, layer->staging_serial)) {
+      ++staging_skips_;
+      return;
+    }
+    const size_t n = layer->mirror.size() < layer->staging.size
+                         ? layer->mirror.size()
+                         : static_cast<size_t>(layer->staging.size);
+    memcpy(layer->staging.mapped, layer->mirror.data(), n);
+    layer->dirty = false;
+  }
   uint32_t index = 0;
-  XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-  if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &index),
-          "xrAcquireSwapchainImage")) {
+  if (!NextImage(layer, !frame_loop_ || image_wait_, &index)) return;
+  const VkImage image = layer->images[index].image;
+  if (frame_loop_) {
+    // Into the command buffer of the frame, which SubmitFrame submits before
+    // the release.
+    VkCommandBuffer cmd = FrameCommands();
+    ImageBarrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT);
+    CopyToImage(cmd, layer->staging, image, layer->width, layer->height);
+    ImageBarrier(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                 VK_ACCESS_TRANSFER_WRITE_BIT,
+                 VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                 VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    to_release_.push_back(layer->swapchain);
+    layer->staging_serial = GpuNextSerial(gpu_);
+    layer->released = layer->revision;
+    ++copies_;
     return;
   }
-  XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
-  wait.timeout = XR_INFINITE_DURATION;
-  xrWaitSwapchainImage(layer->swapchain, &wait);
-  const VkImage image = layer->images[index].image;
   // The renderer submits to the same queue.
   LockQueue();
   VkCommandBuffer cmd = GpuBegin(&gpu_);
@@ -718,12 +823,157 @@ void XrApp::CopyLayer(Layer* layer) {
                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                VK_PIPELINE_STAGE_TRANSFER_BIT,
                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  const double submit_start = time_log_ ? ClockMs() : 0.0;
   GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
-  UnlockQueue();
+  const double release_start = time_log_ ? ClockMs() : 0.0;
   XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
   xrReleaseSwapchainImage(layer->swapchain, &release);
+  UnlockQueue();
+  if (time_log_) {
+    const double now = ClockMs();
+    step_ms_[kStepSubmit] += release_start - submit_start;
+    step_ms_[kStepRelease] += now - release_start;
+  }
   layer->released = layer->revision;
   ++copies_;
+}
+
+VkCommandBuffer XrApp::FrameCommands() {
+  if (frame_cmd_ == VK_NULL_HANDLE) frame_cmd_ = GpuBegin(&gpu_);
+  return frame_cmd_;
+}
+
+void XrApp::SubmitFrame() {
+  if (frame_cmd_ == VK_NULL_HANDLE) return;
+  const double submit_start = time_log_ ? ClockMs() : 0.0;
+  LockQueue();
+  GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
+  const double release_start = time_log_ ? ClockMs() : 0.0;
+  XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+  for (XrSwapchain s : to_release_) xrReleaseSwapchainImage(s, &release);
+  UnlockQueue();
+  if (time_log_) {
+    const double now = ClockMs();
+    step_ms_[kStepSubmit] += release_start - submit_start;
+    step_ms_[kStepRelease] += now - release_start;
+  }
+  to_release_.clear();
+  frame_cmd_ = VK_NULL_HANDLE;
+}
+
+bool XrApp::NextImage(Layer* layer, bool block, uint32_t* index) {
+  const double start = time_log_ ? ClockMs() : 0.0;
+  if (layer->pending < 0) {
+    uint32_t i = 0;
+    XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    LockQueue();
+    const bool acquired = Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &i),
+                             "xrAcquireSwapchainImage");
+    UnlockQueue();
+    if (time_log_) ++times_.acquires;
+    if (!acquired) return false;
+    layer->pending = static_cast<int>(i);
+  }
+  const double wait_start = time_log_ ? ClockMs() : 0.0;
+  // With no block the runtime gives the image at once or says that it is
+  // still busy (XR_TIMEOUT_EXPIRED). Then the image stays acquired, and the
+  // next call waits for the same image again.
+  XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+  wait.timeout = block ? XR_INFINITE_DURATION : 0;
+  const XrResult waited = xrWaitSwapchainImage(layer->swapchain, &wait);
+  if (time_log_) {
+    const double now = ClockMs();
+    step_ms_[kStepAcquire] += wait_start - start;
+    step_ms_[kStepImageWait] += now - wait_start;
+  }
+  if (waited == XR_TIMEOUT_EXPIRED) {
+    ++not_ready_;
+    if (time_log_) ++times_.not_ready;
+    return false;
+  }
+  if (XR_FAILED(waited)) {
+    Ok(waited, "xrWaitSwapchainImage");
+    return false;
+  }
+  *index = static_cast<uint32_t>(layer->pending);
+  layer->pending = -1;
+  return true;
+}
+
+double XrApp::DisplayTimeMs() const {
+  if (to_timespec_ == nullptr) return -1.0;
+  timespec t = {};
+  if (XR_FAILED(to_timespec_(instance_, frame_.predictedDisplayTime, &t))) return -1.0;
+  return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
+void XrApp::ShownPicture(double play_start_ms, double arrival_ms, bool fresh) {
+  if (!time_log_ || play_start_ms <= 0.0) return;
+  const double display = DisplayTimeMs();
+  if (display < 0.0) return;
+  times_.age_ms.Add(display - play_start_ms);
+  if (!fresh) return;
+  times_.latency_ms.Add(display - play_start_ms);
+  if (arrival_ms > 0.0) times_.arrival_ms.Add(display - arrival_ms);
+}
+
+std::vector<XrApp::Layer*> XrApp::StagingLayers() {
+  std::vector<Layer*> all = {&menu_, &cursor_, &keyboard_, &wall_, &flat_pixels_};
+  for (Card& k : cards_) all.push_back(&k.layer);
+  return all;
+}
+
+void XrApp::SetFrameLoop(bool on) {
+  if (on == frame_loop_ || gpu_.device == VK_NULL_HANDLE) return;
+  SubmitFrame();
+  LockQueue();
+  GpuSetRing(&gpu_, on);
+  UnlockQueue();
+  // The device is idle. Off: the newest pixels go into the staging buffers.
+  // On: the copies in memory start empty, and the next pixels fill them (a
+  // read of a staging buffer can be slow). A card writes only its rect, and
+  // its quad shows only that rect.
+  for (Layer* l : StagingLayers()) {
+    if (l->staging.mapped == nullptr) continue;
+    if (!on && l->dirty) {
+      const size_t n = l->mirror.size() < l->staging.size ? l->mirror.size()
+                                                         : static_cast<size_t>(l->staging.size);
+      memcpy(l->staging.mapped, l->mirror.data(), n);
+    }
+    std::vector<uint8_t>().swap(l->mirror);
+    l->dirty = false;
+    l->staging_serial = 0;
+  }
+  frame_loop_ = on;
+}
+
+bool XrApp::SwapRedBlue() const {
+  return format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_B8G8R8A8_UNORM;
+}
+
+void XrApp::OldLoopSync(bool before) {
+  if (!renderer_second_) return;
+  if (before) {
+    vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
+    if (gpu_.ring) {
+      LockQueue();
+      vkQueueWaitIdle(gpu_.queue);
+      UnlockQueue();
+    }
+    return;
+  }
+  LockQueue();
+  vkQueueWaitIdle(queue2_);
+  UnlockQueue();
+}
+
+void XrApp::QueueLock() { LockQueue(); }
+void XrApp::QueueUnlock() { UnlockQueue(); }
+void XrApp::TimeQueueWaits(bool on) { t_time_lock = on; }
+double XrApp::TakeQueueWaitMs() {
+  const double ms = t_lock_wait_ms;
+  t_lock_wait_ms = 0.0;
+  return ms;
 }
 
 void XrApp::PollEvents(bool* quit) {
@@ -785,8 +1035,29 @@ bool XrApp::BeginFrame(XrInput* input) {
     last_wait_ms_ = wait_end_ms_ - wait_start;
     times_.wait.Add(last_wait_ms_);
   }
+  // THE STEPS of this frame (the time log): from here to the end of
+  // xrEndFrame. The thread of the session adds up its waits for the lock.
+  for (double& ms : step_ms_) ms = 0.0;
+  if (time_log_) {
+    TimeQueueWaits(true);
+    TakeQueueWaitMs();
+  }
+  const double begin_start = time_log_ ? ClockMs() : 0.0;
   XrFrameBeginInfo begin = {XR_TYPE_FRAME_BEGIN_INFO};
-  if (!Ok(xrBeginFrame(session_, &begin), "xrBeginFrame")) return false;
+  LockQueue();
+  const bool begun = Ok(xrBeginFrame(session_, &begin), "xrBeginFrame");
+  UnlockQueue();
+  const double actions_start = time_log_ ? ClockMs() : 0.0;
+  if (time_log_) step_ms_[kStepBegin] = actions_start - begin_start;
+  if (!begun) return false;
+  // The time of the actions and the poses, at each return below.
+  struct ActionsTimer {
+    XrApp* app;
+    double start;
+    ~ActionsTimer() {
+      if (app->time_log_) app->step_ms_[kStepActions] += ClockMs() - start;
+    }
+  } actions_timer{this, actions_start};
 
   *input = XrInput();
   synced_ = false;
@@ -849,6 +1120,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                      bool show_cursor, const float cursor_point[3],
                      float cursor_size) {
   namespace ql = quad_layer_math;
+  const double end_frame_start = time_log_ ? ClockMs() : 0.0;
+  // The steps of the swapchains so far belong to this call too.
+  const double before_steps = step_ms_[kStepAcquire] + step_ms_[kStepImageWait] +
+                              step_ms_[kStepSubmit] + step_ms_[kStepRelease];
   // The quads: the two of the stereo screen or the quad layers of the mod
   // (ql::kMostLayers), then the keyboard, the menu and the cursor.
   constexpr int kQuads = ql::kMostLayers + 3;
@@ -943,14 +1218,16 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     bool panel_ok = false;
     if (world && f.panel && panel_source_ != VK_NULL_HANDLE &&
         panel_width_ == f.panel_body.width && panel_height_ == f.panel_body.height) {
-      if (panel_.between != VK_NULL_HANDLE &&
+      if (Made(panel_) &&
           (panel_.layer[0].width != panel_width_ || panel_.layer[0].height != panel_height_)) {
         // The GPU may still copy into the swapchain or the image between.
+        LockQueue();
         vkDeviceWaitIdle(gpu_.device);
+        UnlockQueue();
         FreeScreenSet(&panel_);
         panel_shown_ = false;
       }
-      if (panel_.between == VK_NULL_HANDLE && !panel_.failed) {
+      if (!Made(panel_) && !panel_.failed) {
         const char* why = "";
         if (MakeScreenSet(&panel_, panel_width_, panel_height_, &why, 1)) {
           AppLog("xr           : a swapchain of %u by %u for the panel image of the "
@@ -961,7 +1238,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                  panel_height_, why);
         }
       }
-      if (panel_.between != VK_NULL_HANDLE) {
+      if (Made(panel_)) {
         if (CopyImage(&panel_, 0, panel_source_, 0, panel_width_, panel_height_)) {
           panel_shown_ = true;
         }
@@ -1128,7 +1405,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         w = flat_pixels_.width;
         h = flat_pixels_.height;
       }
-    } else if (flat_.between != VK_NULL_HANDLE && flat_source_ != VK_NULL_HANDLE) {
+    } else if (Made(flat_) && flat_source_ != VK_NULL_HANDLE) {
       CopyImage(&flat_, 0, flat_source_, flat_layer_, flat_width_, flat_height_);
       if (flat_.layer[0].released > 0) {
         swapchain = flat_.layer[0].swapchain;
@@ -1245,12 +1522,24 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   end.environmentBlendMode = blend_;
   end.layerCount = count;
   end.layers = layers;
+  // THE FRAME LOOP: the copies of this frame go to the GPU in one submit,
+  // and their swapchain images go back to the runtime, before xrEndFrame.
+  SubmitFrame();
   const double end_start = time_log_ ? ClockMs() : 0.0;
+  LockQueue();
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
+  UnlockQueue();
   if (time_log_ && wait_end_ms_ >= 0.0) {
     const double now = ClockMs();
     times_.end.Add(now - end_start);
     times_.work.Add(now - wait_end_ms_);
+    step_ms_[kStepEnd] = now - end_start;
+    const double swapchain_steps = step_ms_[kStepAcquire] + step_ms_[kStepImageWait] +
+                                   step_ms_[kStepSubmit] + step_ms_[kStepRelease] -
+                                   before_steps;
+    step_ms_[kStepLayers] = (end_start - end_frame_start) - swapchain_steps;
+    step_ms_[kStepLock] = TakeQueueWaitMs();
+    for (int k = 0; k < kSteps; ++k) times_.steps[k].Add(step_ms_[k]);
   }
 }
 
@@ -1320,13 +1609,15 @@ void XrApp::SetScreenQuadImage(const scene_stream::ScreenBody& body, VkImage ima
     return;
   }
   // A picture of a new size needs a new swapchain.
-  if (flat_.between != VK_NULL_HANDLE &&
+  if (Made(flat_) &&
       (flat_.layer[0].width != image_width || flat_.layer[0].height != image_height)) {
     // The GPU may still copy into the swapchain or the image between.
+    LockQueue();
     vkDeviceWaitIdle(gpu_.device);
+    UnlockQueue();
     FreeScreenSet(&flat_);
   }
-  if (flat_.between == VK_NULL_HANDLE) {
+  if (!Made(flat_)) {
     if (flat_.failed) return;
     const char* why = "";
     if (!MakeScreenSet(&flat_, image_width, image_height, &why, 1)) {
@@ -1357,7 +1648,9 @@ void XrApp::SetScreenQuadPixels(const scene_stream::ScreenBody& body,
   }
   if (flat_pixels_.swapchain != XR_NULL_HANDLE &&
       (flat_pixels_.width != width || flat_pixels_.height != height)) {
+    LockQueue();
     vkDeviceWaitIdle(gpu_.device);
+    UnlockQueue();
     FreeStaging(&gpu_, &flat_pixels_.staging);
     xrDestroySwapchain(flat_pixels_.swapchain);
     flat_pixels_ = Layer();
@@ -1400,7 +1693,9 @@ bool XrApp::TakeCard(int index, const scene_stream::CardBody& body,
   // A picture of a new size needs a new swapchain.
   if (k.layer.swapchain != XR_NULL_HANDLE &&
       (k.layer.width != body.texture_width || k.layer.height != body.texture_height)) {
+    LockQueue();
     vkDeviceWaitIdle(gpu_.device);
+    UnlockQueue();
     FreeStaging(&gpu_, &k.layer.staging);
     xrDestroySwapchain(k.layer.swapchain);
     k.layer = Layer();
@@ -1420,10 +1715,19 @@ bool XrApp::TakeCard(int index, const scene_stream::CardBody& body,
            body.texture_width, body.texture_height);
   }
   if (k.picture == body.picture && memcmp(k.rect, body.rect, sizeof(k.rect)) == 0) return true;
-  // The GPU may still copy the buffer of the frame before.
-  vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
-  uint8_t* out = static_cast<uint8_t*>(k.layer.staging.mapped);
-  if (out == nullptr) return false;
+  if (k.layer.staging.mapped == nullptr) return false;
+  uint8_t* out = nullptr;
+  if (frame_loop_) {
+    // The GPU may still copy the staging buffer, so the picture goes into the
+    // copy in memory, and CopyLayer puts it into the staging buffer.
+    k.layer.mirror.resize(static_cast<size_t>(k.layer.staging.size));
+    k.layer.dirty = true;
+    out = k.layer.mirror.data();
+  } else {
+    // The GPU may still copy the buffer of the frame before.
+    vkWaitForFences(gpu_.device, 1, &gpu_.fence, VK_TRUE, UINT64_MAX);
+    out = static_cast<uint8_t*>(k.layer.staging.mapped);
+  }
   const std::vector<uint8_t>& in = pictures.Pixels(index);
   const size_t row = static_cast<size_t>(w) * 4;
   for (int32_t r = 0; r < h; ++r) {
@@ -1473,7 +1777,7 @@ void XrApp::RendererDevice(vk::External* out) {
   out->physical = gpu_.physical;
   out->device = gpu_.device;
   out->queue_family = gpu_.queue_family;
-  out->queue_index = 0;
+  out->queue_index = renderer_second_ ? 1 : 0;
   out->max_anisotropy = max_anisotropy_;
   // The renderer writes the bytes of the game, which are sRGB, into an image
   // of UNORM, as on the PC. The copy into the quads keeps the bytes.
@@ -1526,6 +1830,15 @@ bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
       return fail("the runtime gave no swapchain (xrCreateSwapchain)");
     }
   }
+  // The frame loop copies a slot of the same size with no image between.
+  if (frame_loop_) return true;
+  if (!MakeBetween(screen, why)) return fail(*why);
+  return true;
+}
+
+bool XrApp::MakeBetween(Screen* screen, const char** why) {
+  const uint32_t width = screen->layer[0].width;
+  const uint32_t height = screen->layer[0].height;
   // The picture of the renderer goes into an image of its own format at the
   // size of the swapchains first (a blit), then into the swapchain with a
   // copy, which keeps the bytes also when the swapchain has an sRGB format.
@@ -1541,6 +1854,12 @@ bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
   info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  auto fail = [&](const char* reason) {
+    if (screen->between != VK_NULL_HANDLE) vkDestroyImage(gpu_.device, screen->between, nullptr);
+    screen->between = VK_NULL_HANDLE;
+    *why = reason;
+    return false;
+  };
   if (vkCreateImage(gpu_.device, &info, nullptr, &screen->between) != VK_SUCCESS) {
     screen->between = VK_NULL_HANDLE;
     return fail("the image between the renderer and the swapchains (vkCreateImage)");
@@ -1577,6 +1896,7 @@ void XrApp::FreeScreenSet(Screen* screen) {
     FreeStaging(&gpu_, &l.staging);
     if (l.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(l.swapchain);
     l.swapchain = XR_NULL_HANDLE;
+    l.pending = -1;
   }
   if (screen->between != VK_NULL_HANDLE) {
     vkDestroyImage(gpu_.device, screen->between, nullptr);
@@ -1618,18 +1938,26 @@ bool XrApp::CopyScreen(Screen* screen, int eye) {
 bool XrApp::CopyImage(Screen* screen, int index, VkImage source,
                       uint32_t source_layer, uint32_t source_width,
                       uint32_t source_height) {
+  if (frame_loop_) {
+    return CopySlot(screen, index, source, source_layer, source_width, source_height);
+  }
   Layer* layer = &screen->layer[index];
   if (!LayerChanged(layer)) return false;
+  if (screen->between == VK_NULL_HANDLE) {
+    // A set that the frame loop made has no image between.
+    const char* why = "";
+    if (!MakeBetween(screen, &why)) {
+      if (!screen->between_said) {
+        screen->between_said = true;
+        AppLog("xr           : no image between for a copy of %u by %u: %s", layer->width,
+               layer->height, why);
+      }
+      return false;
+    }
+  }
   VkImage between = screen->between;
   uint32_t image = 0;
-  XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-  if (!Ok(xrAcquireSwapchainImage(layer->swapchain, &acquire, &image),
-          "xrAcquireSwapchainImage")) {
-    return false;
-  }
-  XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
-  wait.timeout = XR_INFINITE_DURATION;
-  xrWaitSwapchainImage(layer->swapchain, &wait);
+  if (!NextImage(layer, true, &image)) return false;
   const VkImage target = layer->images[image].image;
   LockQueue();
   VkCommandBuffer cmd = GpuBegin(&gpu_);
@@ -1693,10 +2021,103 @@ bool XrApp::CopyImage(Screen* screen, int index, VkImage source,
                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  const double submit_start = time_log_ ? ClockMs() : 0.0;
   GpuSubmit(&gpu_, VK_NULL_HANDLE, VK_NULL_HANDLE);
-  UnlockQueue();
+  const double release_start = time_log_ ? ClockMs() : 0.0;
   XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
   xrReleaseSwapchainImage(layer->swapchain, &release);
+  UnlockQueue();
+  if (time_log_) {
+    const double now = ClockMs();
+    step_ms_[kStepSubmit] += release_start - submit_start;
+    step_ms_[kStepRelease] += now - release_start;
+  }
+  layer->released = layer->revision;
+  ++copies_;
+  ++screen->copies[index];
+  return true;
+}
+
+// ONE COPY FOR EACH EYE. The play thread put the picture into the slot in the
+// byte order of the swapchain, at the size of the picture. A swapchain of
+// that size takes it with one copy, which keeps the bytes also when the
+// swapchain has an sRGB format. Only a swapchain of another size (the stereo
+// screen of half the size) needs a blit into the image between first.
+bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_layer,
+                     uint32_t source_width, uint32_t source_height) {
+  Layer* layer = &screen->layer[index];
+  if (!LayerChanged(layer)) return false;
+  const bool same = source_width == layer->width && source_height == layer->height;
+  if (!same && screen->between == VK_NULL_HANDLE) {
+    const char* why = "";
+    if (!MakeBetween(screen, &why)) {
+      if (!screen->between_said) {
+        screen->between_said = true;
+        AppLog("xr           : no image between for a copy of %u by %u into %u by %u: %s",
+               source_width, source_height, layer->width, layer->height, why);
+      }
+      return false;
+    }
+  }
+  uint32_t image = 0;
+  if (!NextImage(layer, image_wait_, &image)) return false;
+  const VkImage target = layer->images[image].image;
+  VkCommandBuffer cmd = FrameCommands();
+  // The slot is a transfer source already: the last barrier of the play
+  // thread made its bytes visible to each later transfer of its queue. On
+  // the second queue the session saw the fence of the slot, and this
+  // barrier makes the bytes visible to its copy.
+  if (renderer_second_) {
+    VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    b.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = source;
+    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, source_layer, 1};
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+  }
+  ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT);
+  VkImageCopy copy = {};
+  copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copy.extent = {layer->width, layer->height, 1};
+  if (same) {
+    copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, source_layer, 1};
+    vkCmdCopyImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  } else {
+    // A copy of this frame or of a frame before may still read the image
+    // between, so the barrier waits for the transfers before it.
+    ImageBarrier(cmd, screen->between, VK_IMAGE_LAYOUT_UNDEFINED,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT);
+    VkImageBlit blit = {};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, source_layer, 1};
+    blit.srcOffsets[1] = {static_cast<int32_t>(source_width),
+                          static_cast<int32_t>(source_height), 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.dstOffsets[1] = {static_cast<int32_t>(layer->width),
+                          static_cast<int32_t>(layer->height), 1};
+    vkCmdBlitImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, screen->between,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+    ImageBarrier(cmd, screen->between, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                 VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT);
+    copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    vkCmdCopyImage(cmd, screen->between, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  }
+  ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+               VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  to_release_.push_back(layer->swapchain);
   layer->released = layer->revision;
   ++copies_;
   ++screen->copies[index];
@@ -1889,6 +2310,17 @@ void XrApp::Pulse(int hand) {
 }
 
 void XrApp::Stop() {
+  SubmitFrame();
+  if (not_ready_ > 0) {
+    AppLog("xr           : frame_loop=1: %llu times a swapchain image was not free at once, "
+           "and the layer showed its image before (frame_loop_image_wait=0)",
+           static_cast<unsigned long long>(not_ready_));
+  }
+  if (staging_skips_ > 0) {
+    AppLog("xr           : frame_loop=1: %llu copies of pixels of the CPU waited a frame or "
+           "more, because the GPU did not finish the copy of their staging buffer before",
+           static_cast<unsigned long long>(staging_skips_));
+  }
   if (copies_ + copies_skipped_ > 0) {
     AppLog("xr           : %llu copies into the layers, %llu skipped because "
            "the picture did not change (xr_copy_on_change=%d)",

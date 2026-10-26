@@ -274,6 +274,18 @@
     that fex_env does not go to the game, and that the environment of
     runblack.exe has no variable of FEX.
 
+.PARAMETER FrameLoop
+    The value of frame_loop in bwvr.ini (docs/android.md, "The frame loop"):
+    1 is the new loop (the play thread and the ring of the pictures), 0 the
+    old loop. -1 (the default): no key, and the app has the new loop. The
+    test checks the line of the key at each Play. With time_log=1 and the
+    new loop it checks the ring of the command buffers (no wait of a full
+    ring, no wait of a copy of the session for the GPU), the line of the
+    play thread, the age of the shown picture, and that the frames of the
+    session a second are near the display rate (the median of the lines at
+    0.9 of the rate or more). With the old loop it checks that the lines say
+    that there is no play thread.
+
 .PARAMETER IniExtra
     More lines for bwvr.ini, for example 'profile_sample_outside=1000'. A
     key that the save of the menu deletes (kRetiredKeys) does not reach the
@@ -316,6 +328,7 @@ param(
     [string]$Box64Env = '',
     [ValidateSet('', 'box64', 'fex')][string]$Wow64Cpu = '',
     [string]$FexEnv = '',
+    [ValidateSet(-1, 0, 1)][int]$FrameLoop = -1,
     [string[]]$IniExtra = @(),
     [switch]$Keep
 )
@@ -744,7 +757,10 @@ $wantRender = RenderOf $wantEyes[0] $wantEyes[1]
 # THE TIME LOG of one game (-TimeLog): the lines of the app in the part of
 # its log of this game, and the lines of the mod in its log of this game.
 function TimeChecks([int]$N, [string]$Part, [string]$ModLog, [double]$GameSeconds) {
-    $appLines = @([regex]::Matches($Part, 'time         : ([\d.]+) s to frame (\d+): the game ([\d.]+) frames a second \((\d+) frames came\), the app took (\d+) frames and made ([\d.]+) pictures a second \((\d+)\), ([\d.]+) frames of the session a second\. (\d+) frames of the game did not show because the app was still at the picture before: (\d+) while it waited for the GPU, (\d+) in xrWaitFrame or xrEndFrame, (\d+) while the CPU of the app worked\. (\d+) frames of the session had no new frame of the game'))
+    $appLines = @([regex]::Matches($Part, 'time         : ([\d.]+) s to frame (\d+): the game ([\d.]+) frames a second \((\d+) frames came\), the app took (\d+) frames and made ([\d.]+) pictures a second \((\d+)\), ([\d.]+) frames of the session a second\. (\d+) frames of the game did not show because the app was still at the picture before: (\d+) while it waited for the GPU, (\d+) in (?:xrWaitFrame or xrEndFrame|the wait for the lock of the queue), (\d+) while (?:the CPU of the app|the play thread) worked\. (\d+) frames of the session had no new frame of the game\. (\d+) pictures that the play thread dropped \(no free slot of the ring\), (\d+) pictures that a newer picture replaced before a frame of the session'))
+    # THE FRAME LOOP (-FrameLoop): the key at Play.
+    $wantLoop = if ($FrameLoop -eq 0) { 0 } else { 1 }
+    Expect ($Part -match "game         : frame_loop=$wantLoop\. ") "game $N`: the app logged frame_loop=$wantLoop at Play"
     $modLines = @([regex]::Matches($ModLog, 'time log     : ([\d.]+) s, (\d+) frames of the game \(([\d.]+) a second\), (\d+) of them presented in a scene walk\. A frame in ms, the mean and the most: the frame ([\d.]+) and ([\d.]+), the scene walk ([\d.]+) and ([\d.]+), the write of the stream ([\d.]+) and ([\d.]+), the wait of the pace ([\d.]+) and ([\d.]+), the rest ([\d.]+) and ([\d.]+)'))
     if ($TimeLog -eq 0) {
         Expect ($Part -notmatch 'time         : [\d.]+ s to frame' -and $Part -notmatch 'time         : each 10 s') "game $N with time_log=0: the app has no line of the times"
@@ -766,6 +782,40 @@ function TimeChecks([int]$N, [string]$Part, [string]$ModLog, [double]$GameSecond
         $took -ne $pictures + $skipped -or $skipped -ne [int64]$_.Groups[10].Value + [int64]$_.Groups[11].Value + [int64]$_.Groups[12].Value })
     Expect ($appLines.Count -gt 0 -and $bad.Count -eq 0) "game $N`: in each line of the app the frames that the app took are the pictures and the frames that did not show, and the causes add up ($($bad.Count) lines that do not)"
     Expect ($Part -match 'time         : the CPU of the app in ms, the mean and the most: the play of a picture [\d.]+ and [\d.]+, the wait in xrWaitFrame [\d.]+ and [\d.]+, from the end of xrWaitFrame to the end of xrEndFrame [\d.]+ and [\d.]+, in xrEndFrame [\d.]+ and [\d.]+') "game $N`: the app logged the CPU times (the play, xrWaitFrame, xrWaitFrame to xrEndFrame, xrEndFrame, the waits for the GPU)"
+    # THE FRAME LOOP in the lines of the times.
+    $cpuLines = @([regex]::Matches($Part, 'time         : the CPU of the app in ms, [^\r\n]*?a wait of a copy for the GPU ([\d.]+) and ([\d.]+) \((\d+) waits\), a wait of a walk for the GPU [\d.]+ and [\d.]+ \(\d+ waits\)\. ([^\r\n]*?) The age of the shown picture in frames of the session: ([\d.]+) as a mean and (\d+) at most'))
+    $rate = if ($DisplayHz -gt 0) { $DisplayHz } else { 72 }
+    $sessionRates = @($appLines | ForEach-Object { Num $_.Groups[8].Value } | Sort-Object)
+    $median = if ($sessionRates.Count -gt 0) { $sessionRates[[int][math]::Floor($sessionRates.Count / 2)] } else { 0.0 }
+    $dropped = 0; $replaced = 0
+    foreach ($l in $appLines) { $dropped += [int64]$l.Groups[14].Value; $replaced += [int64]$l.Groups[15].Value }
+    Note ("game $N`: the frames of the session a second: " + (@($appLines | ForEach-Object { $_.Groups[8].Value }) -join ' ') + "; the pictures of the app a second: " + (@($appLines | ForEach-Object { $_.Groups[6].Value }) -join ' ') + "; $dropped pictures dropped by the play thread, $replaced replaced before a frame of the session")
+    Note ("game $N`: the age of the shown picture, the mean and the most: " + (@($cpuLines | ForEach-Object { "$($_.Groups[5].Value)/$($_.Groups[6].Value)" }) -join ' '))
+    Expect ($cpuLines.Count -eq $appLines.Count -and $cpuLines.Count -gt 0) "game $N`: each line of the CPU has the age of the shown picture ($($cpuLines.Count) of $($appLines.Count) lines)"
+    # THE STEPS of the thread of the session, and the age of the shown
+    # picture in ms (the test runtime has XR_KHR_convert_timespec_time).
+    $stepLines = @([regex]::Matches($Part, 'time         : the thread of the session from the end of xrWaitFrame to the end of xrEndFrame, ms in a frame, the mean and the most: xrBeginFrame ([\d.]+) and [\d.]+, the actions and the poses ([\d.]+) and [\d.]+, the input channel ([\d.]+) and [\d.]+, the picture of the ring ([\d.]+) and [\d.]+, the play of a batch ([\d.]+) and [\d.]+, the menu and the controllers ([\d.]+) and [\d.]+, the layers ([\d.]+) and [\d.]+, xrAcquireSwapchainImage ([\d.]+) and [\d.]+ \((\d+) calls\), xrWaitSwapchainImage ([\d.]+) and ([\d.]+) \((\d+) images not free at once\), the submit of the copies ([\d.]+) and [\d.]+, xrReleaseSwapchainImage ([\d.]+) and [\d.]+, xrEndFrame ([\d.]+) and [\d.]+\. Of them the waits for the lock of the queue ([\d.]+) and ([\d.]+)\. The age of the shown picture from the start of its play to the display time: ([^\r\n]*)'))
+    Expect ($stepLines.Count -eq $appLines.Count -and $stepLines.Count -gt 0) "game $N`: each window has the line of the steps of the thread of the session ($($stepLines.Count) of $($appLines.Count) lines)"
+    $ages = @($stepLines | ForEach-Object { [regex]::Match($_.Groups[18].Value, '^([\d.]+) ms as a mean and ([\d.]+) at most in each frame, ([\d.]+) ms as a mean and ([\d.]+) at most in the frame that shows a new picture \((\d+)\)\. From the arrival of the newest frame of a new picture in the app to the display time: ([\d.]+) ms as a mean and ([\d.]+) at most') } | Where-Object { $_.Success })
+    Note ("game $N`: the steps in ms as a mean, xrBeginFrame/actions/channel/ring/play/ui/layers/acquire/image wait/submit/release/xrEndFrame/lock: " + (@($stepLines | Select-Object -Last 3 | ForEach-Object { $l = $_; (@(1, 2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16) | ForEach-Object { $l.Groups[$_].Value }) -join '/' }) -join '; '))
+    Note ("game $N`: the age of the shown picture in ms, the means in each frame / for a new picture from the start of its play / from the arrival of its frame: " + (@($ages | ForEach-Object { "$($_.Groups[1].Value)/$($_.Groups[3].Value)/$($_.Groups[6].Value)" }) -join ' '))
+    Expect ($ages.Count -gt 0) "game $N`: the lines have the age of the shown picture in ms ($($ages.Count) lines with a display time)"
+    if ($wantLoop -eq 1) {
+        $play = @($cpuLines | ForEach-Object { [regex]::Match($_.Groups[4].Value, '^The play thread: ([\d.]+) ms of CPU a picture, ([\d.]+) percent of one core, a wait for a slot of the ring ([\d.]+) and ([\d.]+) \((\d+) waits\)\.$') } | Where-Object { $_.Success })
+        Note ("game $N`: the play thread, ms of CPU a picture and percent of one core: " + (@($play | ForEach-Object { "$($_.Groups[1].Value)/$($_.Groups[2].Value)" }) -join ' '))
+        Expect ($play.Count -eq $cpuLines.Count -and $play.Count -gt 0) "game $N`: each line of the CPU has the CPU time of the play thread ($($play.Count) lines)"
+        $copyWaits = 0
+        foreach ($l in $cpuLines) { $copyWaits += [int64]$l.Groups[3].Value }
+        Expect ($copyWaits -eq 0) "game $N`: no copy of the session waited for the GPU ($copyWaits waits)"
+        $ringOff = [regex]::Match($Part, 'gpu          : the ring of command buffers is off: (\d+) entries, (\d+) new entries because the GPU was not done, (\d+) waits of a full ring')
+        Expect ($Part -match 'gpu          : the ring of command buffers is on' -and $ringOff.Success -and [int64]$ringOff.Groups[3].Value -eq 0) ("game $N`: the ring of command buffers was on, and no full ring waited" + $(if ($ringOff.Success) { ": $($ringOff.Groups[1].Value) entries, $($ringOff.Groups[2].Value) new entries because the GPU was not done" } else { '' }))
+        Expect ($median -ge 0.9 * $rate) ("game $N`: the frames of the session a second are near the display rate of $rate Hz: the median of $($sessionRates.Count) lines is {0:N1}" -f $median)
+    } else {
+        $none = @($cpuLines | Where-Object { $_.Groups[4].Value -eq 'No play thread (frame_loop=0): the thread of the session plays the pictures.' })
+        Expect ($none.Count -eq $cpuLines.Count -and $none.Count -gt 0) "game $N`: each line of the CPU says that there is no play thread ($($none.Count) lines)"
+        Expect ($Part -notmatch 'gpu          : the ring of command buffers is on' -and $dropped -eq 0 -and $replaced -eq 0) "game $N`: the old loop has no ring of command buffers and no picture in a ring"
+        Note ("game $N`: the old loop, the median of the frames of the session a second is {0:N1}" -f $median)
+    }
     $gpu = @([regex]::Matches($Part, 'time         : the GPU in ms: a picture ([\d.]+) as a mean [^\r\n]*?a walk of the renderer ([\d.]+) and ([\d.]+) at most \((\d+) walks\), a command buffer of the app ([\d.]+) and ([\d.]+) at most \((\d+)\)'))
     $gpuWalks = @($gpu | Where-Object { [int64]$_.Groups[4].Value -gt 0 -and [int64]$_.Groups[7].Value -gt 0 })
     Expect ($gpuWalks.Count -gt 0) "game $N`: the app logged the time of the GPU from the timestamps of the walks and of its command buffers ($($gpuWalks.Count) of $($gpu.Count) lines with both)"
@@ -1223,6 +1273,7 @@ try {
     if ($Box64Env -ne '') { $iniLines += "box64_env=$Box64Env" }
     if ($Wow64Cpu -ne '') { $iniLines += "wow64_cpu=$Wow64Cpu" }
     if ($FexEnv -ne '') { $iniLines += "fex_env=$FexEnv" }
+    if ($FrameLoop -ge 0) { $iniLines += "frame_loop=$FrameLoop" }
     $iniLines += $IniExtra
     Set-Content -LiteralPath $ini -Encoding ascii -Value $iniLines
     Adb @('push', $ini, "$GameDir/bwvr.ini")

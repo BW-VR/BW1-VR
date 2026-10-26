@@ -15,7 +15,9 @@
 
 #define XR_USE_PLATFORM_ANDROID
 #define XR_USE_GRAPHICS_API_VULKAN
+#define XR_USE_TIMESPEC
 #include <jni.h>
+#include <time.h>
 #include <vulkan/vulkan.h>
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -71,13 +73,55 @@ class XrApp {
   // xrWaitFrame, the time from the end of xrWaitFrame to the end of
   // xrEndFrame, the time in xrEndFrame, the waits of the app for the fence of
   // its last copy, and the time of the GPU of each command buffer of the app.
+  // THE STEPS of a frame of the session from the end of xrWaitFrame to the
+  // end of xrEndFrame, each the sum in ms of one frame (AddStep for the
+  // steps of main.cpp). kLock is the part of the other steps that waited
+  // for the lock of the queue.
+  enum Step {
+    kStepBegin,      // xrBeginFrame
+    kStepActions,    // xrSyncActions, the states and the poses of the actions
+    kStepTake,       // the picture of the ring of the pictures (frame_loop=1)
+    kStepSlot,       // the slot of the input channel (xrLocateViews) and the pulses
+    kStepUi,         // the menu button, the keyboard, the controllers, the paint
+    kStepPlay,       // the play of a batch on this thread (the old loop)
+    kStepLayers,     // the rest of EndFrame: the records of the copies, the layers
+    kStepAcquire,    // xrAcquireSwapchainImage
+    kStepImageWait,  // xrWaitSwapchainImage
+    kStepSubmit,     // vkQueueSubmit of the copies
+    kStepRelease,    // xrReleaseSwapchainImage
+    kStepEnd,        // xrEndFrame
+    kStepLock,       // of them, the waits for the lock of the queue
+    kSteps
+  };
   struct FrameTimes {
     time_log_math::Stat wait;
     time_log_math::Stat work;
     time_log_math::Stat end;
     time_log_math::Stat fence_wait;
     time_log_math::Stat busy;
+    time_log_math::Stat steps[kSteps];
+    uint64_t acquires = 0;     // xrAcquireSwapchainImage calls
+    uint64_t not_ready = 0;    // swapchain images that were not free yet (no wait)
+    // THE AGE of the shown picture in ms, from the start of its play to the
+    // display time of the frame, in each frame (age_ms) and in the frame
+    // that shows it first (latency_ms), and from the arrival of its newest
+    // frame in the app to the display time of that frame (arrival_ms).
+    // Only with XR_KHR_convert_timespec_time.
+    time_log_math::Stat age_ms;
+    time_log_math::Stat latency_ms;
+    time_log_math::Stat arrival_ms;
   };
+  // The time of one step of main.cpp in this frame (a clock pair).
+  void AddStep(Step step, double ms) {
+    if (time_log_) step_ms_[step] += ms;
+  }
+  // The display time of this frame on CLOCK_MONOTONIC in ms, or a negative
+  // value when the runtime has no XR_KHR_convert_timespec_time.
+  double DisplayTimeMs() const;
+  // The shown picture of this frame started its play at play_start_ms, its
+  // newest frame came at arrival_ms (CLOCK_MONOTONIC, 0: not known), and
+  // fresh: this frame shows it first.
+  void ShownPicture(double play_start_ms, double arrival_ms, bool fresh);
   void SetTimeLog(bool on) { time_log_ = on; }
   void TakeTimes(FrameTimes* out);
   // The wait in xrWaitFrame of this frame, in ms.
@@ -154,7 +198,7 @@ class XrApp {
   // next frames copy it into the quads, because a quad copies only a
   // picture of a new revision.
   void MarkScreenChanged();
-  bool HasScreen() const { return screen_.between != VK_NULL_HANDLE; }
+  bool HasScreen() const { return Made(screen_); }
 
   // THE PROJECTION LAYER (stream_projection, docs/android.md, "The
   // projection layer"). On (1, the default): a picture of the renderer with
@@ -170,7 +214,7 @@ class XrApp {
   // the picture of the renderer). After one fault it gives false with no new
   // try, and the pictures show on the stereo screen.
   bool MakeEyes(uint32_t width, uint32_t height);
-  bool HasEyes() const { return eyes_.between != VK_NULL_HANDLE; }
+  bool HasEyes() const { return Made(eyes_); }
   // The values of the projection layer of the newest picture (after
   // SetScreenSource or MarkScreenChanged). has: false when that picture has
   // none, and then it shows on the stereo screen.
@@ -221,6 +265,12 @@ class XrApp {
   void SetScreenQuadPixels(const scene_stream::ScreenBody& body,
                            const std::vector<uint8_t>& rgba, uint32_t width,
                            uint32_t height);
+  // THE FRAME LOOP: the same screen picture in the image of another slot of
+  // the ring. The quad copies from the shown slot only, which the play thread
+  // does not write. The picture does not change, so the quad gets no copy.
+  void MoveScreenQuadImage(VkImage image) {
+    if (flat_on_ && !flat_cpu_ && image != VK_NULL_HANDLE) flat_source_ = image;
+  }
   // The pictures of the world come again, or the game ended.
   void ClearScreenQuad() { flat_on_ = false; }
   bool ScreenQuadShown() const { return flat_on_; }
@@ -230,6 +280,61 @@ class XrApp {
   // showed the menu panel quad of the mod with kPanelQuadText (a dialog box of
   // the game in a frame of the scene takes text), with its pose and its size.
   bool PanelTextQuad(float position[3], float orientation[4], float size[2]) const;
+
+  // THE FRAME LOOP (frame_loop, frame_loop.h, docs/android.md, "The frame
+  // loop"). On (from Play to the end of a game with frame_loop=1): the
+  // copies of a frame go into one command buffer of the ring of command
+  // buffers (gpu.h), with no wait on the CPU for the GPU. The pixels of the
+  // CPU go into a copy in memory, and into the staging buffer only when the
+  // GPU finished the last copy of that buffer. The sources of the pictures
+  // (SetScreenSource, the panel image, SetScreenQuadImage) are the images
+  // of a slot of the ring of the pictures: in the layout of a transfer
+  // source, with the bytes in the order of the swapchains. Off: the old
+  // loop. Each change waits until the device is idle.
+  void SetFrameLoop(bool on);
+  bool FrameLoop() const { return frame_loop_; }
+  // frame_loop_image_wait (0 by default): with the frame loop a swapchain
+  // image that the runtime does not give free at once (xrWaitSwapchainImage
+  // with a timeout of 0) stays acquired, and the next frame tries it again.
+  // The layer shows its image before until then. 1: the session waits for
+  // the image, as the old loop does.
+  void SetImageWait(bool wait) { image_wait_ = wait; }
+  // The swapchains have blue first (the slots of the ring take that order).
+  bool SwapRedBlue() const;
+  // THE LOCK OF THE QUEUE that the renderer, the play thread and the session
+  // share. The session holds it for each submit and for each call of
+  // OpenXR that can use the queue (xrBeginFrame, xrEndFrame,
+  // xrAcquireSwapchainImage, xrReleaseSwapchainImage, XR_KHR_vulkan_enable2).
+  static void QueueLock();
+  static void QueueUnlock();
+  // THE TIME LOG of a thread: TimeQueueWaits(true) on a thread measures its
+  // waits for the lock, and TakeQueueWaitMs gives their sum since its last
+  // call on that thread.
+  static void TimeQueueWaits(bool on);
+  static double TakeQueueWaitMs();
+  // The Gpu of the session, for the ring of the pictures (picture_ring.h).
+  const Gpu& SessionGpu() const { return gpu_; }
+  // THE TWO QUEUES (frame_loop_queues, before Start, 2 by default). 2: when
+  // the queue family has two queues or more, the device gets two, the
+  // session the first (with the higher priority) and the renderer of the
+  // mod with the play thread the second, so a copy of the session does not
+  // wait on the GPU behind a walk. 1: one queue for all.
+  void SetQueues(int count) { queues_wanted_ = count; }
+  bool TwoQueues() const { return queue2_ != VK_NULL_HANDLE; }
+  // Before RendererDevice: the renderer takes the second queue (with the
+  // frame loop, when the device has it). It keeps it to the end of the
+  // process.
+  void SetRendererSecondQueue(bool second) { renderer_second_ = second && TwoQueues(); }
+  bool RendererOnSecondQueue() const { return renderer_second_; }
+  VkQueue RendererQueue() const { return renderer_second_ ? queue2_ : gpu_.queue; }
+  // The serial of the last submit of the session, and its timeline (or
+  // none): a submit on the second queue waits on the GPU for it.
+  uint64_t SessionSerial() const { return gpu_.serial; }
+  VkSemaphore SessionTimeline() const { return renderer_second_ ? gpu_.timeline : VK_NULL_HANDLE; }
+  // THE OLD LOOP with the renderer on the second queue: before the play of a
+  // batch the CPU waits for the last copy of the session, and after it for
+  // the walks (vkQueueWaitIdle of the second queue). Nothing with one queue.
+  void OldLoopSync(bool before);
 
   // THE KEYBOARD OF THE APP (screen_keyboard, docs/android.md, "The keyboard
   // of the app"): one quad for both eyes with the picture of the keyboard
@@ -252,7 +357,20 @@ class XrApp {
     // the app released. 0: no image is released yet.
     unsigned revision = 1;
     unsigned released = 0;
+    // THE FRAME LOOP: the pixels for the staging buffer (dirty: newer than
+    // the staging buffer), and the serial of the last submit that read the
+    // staging buffer.
+    std::vector<uint8_t> mirror;
+    bool dirty = false;
+    uint64_t staging_serial = 0;
+    // An image that the app acquired and the runtime did not give free yet
+    // (frame_loop_image_wait=0), or -1.
+    int pending = -1;
   };
+  // The next image of the swapchain of a layer, free for a copy, into
+  // *index. block: wait for it. With no block a busy image stays acquired
+  // (Layer::pending), and the result is false.
+  bool NextImage(Layer* layer, bool block, uint32_t* index);
   // True when the layer needs a new image in this frame. Else it counts a
   // skipped copy.
   bool LayerChanged(Layer* layer);
@@ -264,6 +382,21 @@ class XrApp {
   bool MakeLayer(Layer* layer, uint32_t width, uint32_t height,
                  bool staging = true);
   void CopyLayer(Layer* layer);
+  // THE FRAME LOOP: the command buffer of this frame (begun at its first
+  // use), the swapchain images to release after its submit, and the submit
+  // with the releases before xrEndFrame.
+  VkCommandBuffer FrameCommands();
+  void SubmitFrame();
+  // The layers with a staging buffer, for a change of the frame loop.
+  std::vector<Layer*> StagingLayers();
+  bool frame_loop_ = false;
+  bool image_wait_ = false;
+  int queues_wanted_ = 2;
+  VkQueue queue2_ = VK_NULL_HANDLE;
+  bool renderer_second_ = false;
+  VkCommandBuffer frame_cmd_ = VK_NULL_HANDLE;
+  std::vector<XrSwapchain> to_release_;
+  uint64_t staging_skips_ = 0;  // copies that waited a frame for a staging buffer
   // THE EYE PICTURES OF THE RENDERER in two swapchains: the stereo screen (two
   // quads), or the projection layer.
   struct Screen {
@@ -272,11 +405,22 @@ class XrApp {
     VkDeviceMemory between_memory = VK_NULL_HANDLE;
     uint64_t copies[2] = {0, 0};  // the copies of each eye
     bool failed = false;  // the set could not be made, and the app does not try again
+    bool between_said = false;  // the log said that the image between cannot be made
   };
+  // The swapchains of the set are made.
+  static bool Made(const Screen& screen) { return screen.layer[0].swapchain != XR_NULL_HANDLE; }
   // False with the reason in *why, and then the set has no part. count: the
-  // swapchains of the set (2 for the eyes, 1 for the panel).
+  // swapchains of the set (2 for the eyes, 1 for the panel). With the frame
+  // loop the set has no image between: a copy of the same size needs none,
+  // and MakeBetween makes it at the first copy of another size.
   bool MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
                      const char** why, int count = 2);
+  bool MakeBetween(Screen* screen, const char** why);
+  // THE FRAME LOOP: a copy from an image of a slot of the ring (the layout
+  // of a transfer source, the bytes in the order of the swapchain) into the
+  // command buffer of the frame.
+  bool CopySlot(Screen* screen, int index, VkImage source, uint32_t source_layer,
+                uint32_t source_width, uint32_t source_height);
   void FreeScreenSet(Screen* screen);
   // One eye of the picture of the renderer into the next image of its
   // swapchain. True when the eye released a new image in this call.
@@ -373,6 +517,11 @@ class XrApp {
   // THE TIME LOG.
   bool time_log_ = false;
   FrameTimes times_;
+  double step_ms_[kSteps] = {};
+  uint64_t not_ready_ = 0;
+  // XR_KHR_convert_timespec_time: the display time on CLOCK_MONOTONIC.
+  PFN_xrConvertTimeToTimespecTimeKHR to_timespec_ = nullptr;
+  bool timespec_ext_ = false;
   double wait_end_ms_ = -1.0;  // the clock at the end of xrWaitFrame of this frame
   double last_wait_ms_ = 0.0;
 

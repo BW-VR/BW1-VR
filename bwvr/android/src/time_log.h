@@ -20,8 +20,42 @@
 #include <vector>
 
 #include "../../src/mod/time_log_math.h"
+#include "frame_loop.h"
 #include "proc_stat.h"
 #include "xr_app.h"
+
+// THE PLAY THREAD (frame_loop=1, docs/android.md, "The frame loop"): what it
+// did since the last call of TimeLog::Play. The thread of the session takes
+// it in each of its frames.
+struct PlayStats {
+  uint64_t pictures = 0;  // the batches, each one picture
+  uint64_t frames = 0;    // the frames of the game in them
+  // The frames of a batch but the newest did not show, by the cause of the
+  // time of the picture before (time_log_math::Cause): the GPU, the wait
+  // for the lock of the queue, the work of the play thread.
+  uint64_t skipped[3] = {0, 0, 0};
+  time_log_math::Stat play;       // ms of the play of a batch
+  time_log_math::Stat walk_gpu;   // the GPU time of each walk of the renderer
+  time_log_math::Stat walk_wait;  // the waits of the walks for the fence of their slot
+  time_log_math::Stat slot_wait;  // the waits for the fence of a slot of the ring
+  time_log_math::Stat busy;       // the GPU time of the copies into the slots
+  uint64_t dropped = 0;   // pictures that the play thread dropped (no free slot)
+  uint64_t replaced = 0;  // pictures that a newer picture replaced before a frame of the session
+  double cpu_ms = 0.0;    // the CPU time of the play thread
+  void Merge(const PlayStats& o) {
+    pictures += o.pictures;
+    frames += o.frames;
+    for (int i = 0; i < 3; ++i) skipped[i] += o.skipped[i];
+    play.Merge(o.play);
+    walk_gpu.Merge(o.walk_gpu);
+    walk_wait.Merge(o.walk_wait);
+    slot_wait.Merge(o.slot_wait);
+    busy.Merge(o.busy);
+    dropped += o.dropped;
+    replaced += o.replaced;
+    cpu_ms += o.cpu_ms;
+  }
+};
 
 class TimeLog {
  public:
@@ -33,6 +67,17 @@ class TimeLog {
   // process (runblack.exe) at the next window.
   void GameStarts(double now_ms);
   void GameEnds();
+  // THE FRAME LOOP at Play, before the play thread starts. On: the play
+  // thread gives the batches, the times of the renderer and the causes of
+  // the frames that did not show (Play), and the log names the play thread.
+  // Off: the thread of the session gives them (Batch).
+  void SetFrameLoop(bool on) { frame_loop_ = on; }
+  // frame_loop=1: the stats of the play thread, at each frame of the session.
+  void Play(const PlayStats& stats);
+  // At each frame of the session while the game runs, before SessionFrame:
+  // fresh, the frame shows a new picture of the game. It gives the age of
+  // the shown picture in frames of the session.
+  void Shown(bool fresh);
 
   // PlayLive, after the play of a batch: `frames` frames of the game in one
   // frame of the session, the play took `play_ms` on the CPU, and the wait in
@@ -72,6 +117,16 @@ class TimeLog {
 
   bool on_ = false;
   bool game_on_ = false;
+  bool frame_loop_ = false;
+  // THE FRAME LOOP AND THE AGE in the window.
+  uint64_t dropped_ = 0;
+  uint64_t replaced_ = 0;
+  time_log_math::Stat slot_wait_;
+  double play_cpu_ms_ = 0.0;
+  bool fresh_ = false;
+  bool any_shown_ = false;
+  uint64_t age_now_ = 0;
+  time_log_math::Stat age_;
   long ticks_per_second_ = 100;
   int game_pid_ = 0;
   int said_no_stat_ = 0;  // 1: the log said that /proc/stat cannot be read

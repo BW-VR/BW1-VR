@@ -73,6 +73,7 @@
 #include "fast_transform.h"
 #include "thread_wait.h"
 #include "time_log.h"
+#include "walk_parts.h"
 #include "ddraw_census.h"
 #include "foveation_math.h"
 #include "vk_scene.h"
@@ -1776,6 +1777,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
 
     QueryPerformanceCounter(&t2);
     TimeLogWalk(true);
+    WalkPartsWalk(true);
     SceneSampleWalk(true);
     HandDirectPassBegin(eye);
     OverlayPassEye(eye);
@@ -1827,6 +1829,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     HandDirectPassDone(eye);
     SceneSampleWalk(false);
     QueryPerformanceCounter(&t3);
+    WalkPartsWalk(false);
     TimeLogWalk(false);
     // The test spin of test_stall_ms (stall_watch.cpp).
     StallTestWalk();

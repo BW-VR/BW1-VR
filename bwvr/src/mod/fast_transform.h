@@ -16,3 +16,6 @@ void FastTransformSet(bool on);
 // The test key: fast_transform goes between 1 and 0.
 void FastTransformToggle(const char* keys);
 void FastTransformReport(uint64_t frames);
+// walk_parts.cpp: the function of the SSE loop `i` (0 to 3) and its name, or
+// nullptr for an `i` out of the range.
+void* FastTransformLoop(int i, const char** name);

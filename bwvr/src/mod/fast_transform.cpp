@@ -560,6 +560,19 @@ bool FastTransformOn() { return g_on; }
 
 void FastTransformSet(bool on) { g_on = on; }
 
+void* FastTransformLoop(int i, const char** name) {
+  static const char* const kNames[4] = {"FastClip, the SSE loop of the mod in fn_00856D40",
+                                        "FastLit, the SSE loop of the mod in fn_0085AB10",
+                                        "FastLitClip, the SSE loop of the mod in fn_0084BA90",
+                                        "FastGroup, the SSE loop of the mod in fn_0084BA90"};
+  void* const fns[4] = {reinterpret_cast<void*>(&FastClip), reinterpret_cast<void*>(&FastLit),
+                        reinterpret_cast<void*>(&FastLitClip),
+                        reinterpret_cast<void*>(&FastGroup)};
+  if (i < 0 || i >= 4) return nullptr;
+  if (name != nullptr) *name = kNames[i];
+  return fns[i];
+}
+
 void FastTransformToggle(const char* keys) {
   g_on = !g_on;
   ControllersGesturePulse(0.5f, g_on ? 0.30f : 0.08f);

@@ -1771,6 +1771,68 @@ clock for the log and no line. There is no test key: the headset is tested throu
 time log of its own with the same key (`android.md`, "The time log of the
 app").
 
+### The parts of the scene walk
+
+`walk_parts=1` (a test aid, 0 is the default, `walk_parts.cpp`, the rules in
+`walk_parts_math.h`) times the parts of the scene walk with the clock. The
+sampler of `profile_sample` does not work under a translator of the code
+(FEX on the Quest): it gives the place of the last call of the system. So
+each timed function gets a hook of MinHook to a stub of its own. The stub
+keeps each register and the flags, reads `QueryPerformanceCounter`, puts
+the address of an exit stub in the place of the return address on the
+stack, and jumps to the function. The exit stub reads the clock, closes
+the timer and jumps to the return address of the caller. So a stub does not
+need the arguments or the calling convention of the function. The exit
+stub uses integers only, because the x87 unit can hold the value that the
+function returns.
+
+- **What it times.** About 60 functions of the call tree of
+  `GGame::Process3dEngine` (`0x0054DA80`): each function of the game that
+  it calls, the land (`fn_007FF610`) and the sea (`fn_00879930`) with some
+  of their callees, the parts of `LH3DRender::FinishFrame`, the three mesh
+  loops (`fn_00856D40`, `fn_0085AB10`, `fn_0084BA90`), `LH3DSprite::Draw`
+  and the draw calls of the engine. Also each function of the two lists of
+  the engine that `FinishFrame` calls: the draws of the z sorter (the
+  entries at `0x00EDDD30`, the count at `0x00EE9D34`) and the callbacks of
+  the table at `0x00EC8170`. The scan of the lists is at the start and with
+  each report, so a new kind of draw gets a timer from the next report on.
+  Below the game it times the methods of the device and of the surfaces of
+  the backend that a walk calls (dxwrapper, or the device of the mod), the
+  Vulkan renderer of the mod (`VkScene*`), the record of the stream
+  (`VkStream*`) and the SSE loops of `fast_transform`.
+- **A function that the mod hooks already** gets its timer on the hook of
+  the mod. Its line says "with the hook of the mod", and its time has the
+  work of that hook in it.
+- **Only the frame thread in a scene walk counts.** A call on another
+  thread, or outside a walk, goes through the stub with no read of the
+  clock. The hooks come at the third walk, when the device of the game is
+  made. A frame is the walks from one present to the next.
+- **The exclusive time** of a timer is its time less the time of each timer
+  that it calls. Timer 0 is the walk itself, so its exclusive time is the
+  part of the walk that no timer covers. The sum of all exclusive times is
+  the walk. A function inside itself counts its inclusive time one time.
+- **The cost.** At the start the mod calls a probe function 20000 times
+  without and with a timer, and the log gives the cost of one timed call.
+  Each block gives the timed calls of a frame and their cost in ms. The cost
+  of the timers inside a function is in its inclusive time, and the cost of
+  the timers is in the walk.
+
+```
+walk parts   : walk_parts=1. 68 timers in the scene walks of the frame thread (0 of them from the lists of the engine), 68 of them on. One timed call costs 67 ns (20000 calls of a probe with and without a timer). Each 10 s the lines of the parts of the walk
+walk parts   : 10.0 s, 6302 frames with a scene walk. The walk in a frame, ms, the mean and the most: 1.41 and 4.18. The timed functions 1.21 ms (85.5 percent of the walk), outside each timer 0.21 ms (14.5 percent). 4001 timed calls in a frame (most 4005), at 67 ns for each call about 0.27 ms (18.9 percent of the walk)
+walk parts   :  1. 0x597DC570 VkSceneDraw, the Vulkan renderer of the mod: calls in a frame 358.9 (most 359), exclusive ms 0.291 and 1.017, inclusive ms 0.291 and 1.018
+walk parts   :  2. 0x0082F460 LH3DRender::FinishFrame (with the hook of the mod): calls in a frame 1.0 (most 1), exclusive ms 0.258 and 0.446, inclusive ms 0.436 and 0.679
+```
+
+The lines of the timers are in the order of the mean exclusive time, and
+each timer with a call in the 10 s has a line. `walk_parts=2` leaves out
+the timers on each call of the device and of the Vulkan renderer (about
+3000 of the 4000 timed calls of a frame), so the cost is smaller and the
+time of those calls is in their callers. `walk_parts_add=0x...,0x...` gives
+more functions to time, by address, with no new build. In a headset
+session, set the key in `bwvr.ini`. A save of the menu of the headset app
+keeps it.
+
 ### Draw calls with one state
 
 The cost of a frame follows the count of the draw calls. The mod can give two
@@ -5478,6 +5540,7 @@ keys that the launcher sets.
 | `fovea_res` | 0 | 1 each eye picture of the Vulkan renderer comes from an outer image and a centre image with their own resolutions. A test key: Shift P. See "Foveated resolution" |
 | `fovea_res_outer_pct`, `fovea_res_center_pct`, `fovea_res_center_deg` | 50, 100, 25 | The resolution of the outer image and of the centre image in percent on each side, and the degrees of the centre on each side. See "Foveated resolution" |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
+| `walk_parts`, `walk_parts_add` | 0, empty | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. See "The parts of the scene walk" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
 | `time_log` | 1 | 1: each 10 s one line in `bwvr.log` with the mean and the most of the frame, the scene walk, the write of the live stream, the wait of the pace and the rest. 0: no line. There is no test key. See "The time log of the mod" |

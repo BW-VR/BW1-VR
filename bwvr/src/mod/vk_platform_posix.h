@@ -27,6 +27,9 @@
 #include <unistd.h>
 
 // DWORD, LONG, HRESULT, and the parts of Direct3D 7 and DirectDraw 7.
+#include <string>
+
+#include "../common/ini_text.h"
 #include "vk_d3d7_posix.h"
 
 // ---- Windows ----------------------------------------------------------------
@@ -177,6 +180,21 @@ inline DWORD GetModuleFileNameA(HMODULE, char* path, DWORD size) {
   // The renderer cuts the name after the last backslash.
   snprintf(path, size, "%s\\bwvr", VkPlatformFolder());
   return static_cast<DWORD>(strlen(path));
+}
+// A key of the ini file at path (the renderer reads bwvr.ini of the game
+// folder for its own keys). fallback when the file or the key is not there.
+inline unsigned GetPrivateProfileIntA(const char* section, const char* key,
+                                      int fallback, const char* path) {
+  FILE* file = nullptr;
+  if (fopen_s(&file, path, "rb") != 0) return static_cast<unsigned>(fallback);
+  std::string text;
+  char part[4096];
+  size_t n = 0;
+  while ((n = fread(part, 1, sizeof(part), file)) > 0) text.append(part, n);
+  fclose(file);
+  bwvr_ini::IniText ini;
+  ini.Parse(text);
+  return static_cast<unsigned>(ini.GetInt(section, key, fallback));
 }
 
 // The loader of Vulkan. The renderer asks for vulkan-1.dll, the name of

@@ -547,14 +547,29 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
       list += part;
     }
     const wp::Counts& c = t.CountsOf();
+    // The counts of the renderer since the line before (vk_bind_skip,
+    // vk_draw_sort, vk_draw_merge), for each walk of the renderer.
+    VkSceneDrawCount now;
+    VkSceneDrawCounts(&now);
+    static VkSceneDrawCount was = {};  // the line before
+    const double rw =
+        now.walks > was.walks ? static_cast<double>(now.walks - was.walks) : 1.0;
     AppLog("time         : the GPU parts of the walk in ms (gpu_parts=1), the mean in a walk and "
            "the most in one walk, %llu walks (%llu with no time): %s. In all %.2f in a walk. In "
            "a walk: %.1f passes, %.0f draws, %.0f pipelines, %.0f bindings of descriptor sets, "
-           "%.0f descriptor writes, %.1f uploads of %.2f MB",
+           "%.0f descriptor writes, %.1f uploads of %.2f MB. The renderer in a walk: %.0f draws "
+           "of the game, %.0f draw commands, %.0f draws with another place (the sort), %.0f "
+           "draws in draws of the merge, %.0f binds and states left out (bound already), %llu "
+           "merges with no room",
            static_cast<unsigned long long>(t.Walks()), static_cast<unsigned long long>(t.Untimed()),
            list.empty() ? "none" : list.c_str(), t.TotalMs() / walks, c.passes / walks,
            c.draws / walks, c.pipelines / walks, c.sets / walks, c.writes / walks,
-           c.uploads / walks, c.upload_bytes / walks / 1048576.0);
+           c.uploads / walks, c.upload_bytes / walks / 1048576.0,
+           (now.draws - was.draws) / rw, (now.commands - was.commands) / rw,
+           (now.moved - was.moved) / rw, (now.joined - was.joined) / rw,
+           (now.skipped - was.skipped) / rw,
+           static_cast<unsigned long long>(now.no_room - was.no_room));
+    was = now;
   }
   // THE THREADS AND THE CORES.
   Sample now;

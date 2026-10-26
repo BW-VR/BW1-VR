@@ -2683,6 +2683,35 @@ that cannot make a new command buffer (the log says so) waits for its
 oldest one. With no command buffer at all the frame copies nothing. With
 no play thread (`pthread_create` failed) the game has the old loop.
 
+The keys of the copies of the session are in `bwvr.ini` of the game folder,
+read at the first Play with the frame loop. The log: "xr : xr_copy_once=1,
+xr_pool_reset=1. ...".
+
+- `xr_copy_once=1` (the default): a copy of the same size from a slot of
+  the ring into a swapchain image (the eyes of the projection layer, the
+  panel image) is a secondary command buffer that the session records one
+  time, with its barriers, for each image of a slot, layer and swapchain
+  image. Each frame then runs it with `vkCmdExecuteCommands`. The entries
+  of a set go when its source has another size (the ring makes the images
+  of a slot again at a new size), when its swapchains go, and at each start
+  and end of the frame loop. A free waits for the idle queue of the
+  session. A set has up to 48 entries, and a copy with no free entry is
+  recorded in its frame. At the end of the app the log has "xr : the copies
+  recorded one time (xr_copy_once=1): N secondary command buffers recorded,
+  M copies ran one of them, ...". `xr_copy_once=0`: each frame records the
+  barriers and the copies.
+- `xr_pool_reset=1` (the default): each new command buffer of the ring has a
+  command pool of its own, with no reset of one command buffer, and its
+  begin resets that pool (`vkResetCommandPool`), as the renderer does with
+  the command buffers of its walks. `xr_pool_reset=0`: the command buffers
+  of the ring are of one pool, and each begin resets its command buffer
+  (`vkResetCommandBuffer`).
+
+**Not shown yet:** the time of "the eye pictures" and "the panel image" in
+the parts of the layers in a Quest 3 with these keys at 1 and at 0. In the
+emulator both parts take less than 0.1 ms also with the keys at 0, so only
+the Quest shows if one of the two removes the CPU time in the kernel.
+
 **The pixels of the CPU** (the menu, the cursor, the cards, the keyboard,
 the walls and a screen with the pixels of the CPU, `XrApp::PixelsFor`). Each
 submit has a serial, and a staging buffer has the serial of the last submit
@@ -3057,7 +3086,12 @@ calls the function of the driver. The code of the mod does not change.
 - **The counts** of a command buffer: the passes, the draws, the bindings of
   pipelines and of descriptor sets, the descriptor writes
   (`vkUpdateDescriptorSets` while a command buffer of the renderer records),
-  and the regions of the uploads with their texels (4 bytes each).
+  and the regions of the uploads with their texels (4 bytes each). The
+  renderer gives its own counts of a walk too (`VkSceneDrawCounts`): the
+  draws of the game, the draw commands after the merge, the draws that the
+  sort moved, the draws in draws of the merge, and the binds and states that
+  it left out because they were bound (`backend.md`, "Fewer state changes
+  and fewer draws").
 - **The results.** When the renderer begins a command buffer again, it
   waited for its fence, so the app reads the timestamps of the last submit
   of that command buffer then, with no wait. Only a submit of a walk gives
@@ -3070,7 +3104,9 @@ The line each 10 s: "time : the GPU parts of the walk in ms (gpu_parts=1),
 the mean in a walk and the most in one walk, N walks (M with no time): ...",
 for each key of a pass the count in a walk, the mean in a walk and the most
 in one walk in ms and the draws in a walk, then the parts between the
-passes, the sum of the parts in a walk, and the counts of a walk. The sum is
+passes, the sum of the parts in a walk, the counts of a walk, and the counts
+of the renderer in a walk ("The renderer in a walk: N draws of the game, M
+draw commands, ..."). The sum is
 a little more than the walk of the line of the GPU: the timestamps of the
 renderer are inside those of the app, and the uploads have a command buffer
 of their own.

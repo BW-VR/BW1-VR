@@ -43,12 +43,20 @@ struct Gpu {
   // says if the GPU finished it.
   struct RingEntry {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
+    // xr_pool_reset=1: the command pool of this entry alone, with no reset of
+    // one command buffer. Null: cmd is of `pool`.
+    VkCommandPool pool = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     uint32_t query = 0;      // its two timestamps in ring_query
     uint64_t serial = 0;     // the serial of its last submit, 0: none
     bool query_written = false;
   };
   bool ring = false;
+  // xr_pool_reset (1 by default): a new entry of the ring gets a command pool
+  // of its own, and its begin resets that pool (vkResetCommandPool). 0: the
+  // command buffer of an entry is of `pool`, and its begin resets the
+  // command buffer (vkResetCommandBuffer).
+  bool pool_reset = true;
   frame_loop::CommandRing ring_order{16};
   std::vector<RingEntry> ring_entries;
   int ring_current = -1;   // the entry of the open command buffer

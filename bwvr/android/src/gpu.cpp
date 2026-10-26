@@ -51,8 +51,20 @@ VkCommandBuffer RingBegin(Gpu* gpu) {
   Gpu::RingEntry made;
   bool can_grow = true;
   if (gpu->ring_order.WillGrow(next_done)) {
+    // xr_pool_reset=1: a pool for the entry alone. A pool with no reset of
+    // one command buffer lets the driver keep the memory of its commands for
+    // the next begin.
+    if (gpu->pool_reset) {
+      VkCommandPoolCreateInfo pool = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+      pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+      pool.queueFamilyIndex = gpu->queue_family;
+      if (vkCreateCommandPool(gpu->device, &pool, nullptr, &made.pool) != VK_SUCCESS) {
+        made.pool = VK_NULL_HANDLE;
+      }
+    }
+    const VkCommandPool from = made.pool != VK_NULL_HANDLE ? made.pool : gpu->pool;
     VkCommandBufferAllocateInfo alloc = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    alloc.commandPool = gpu->pool;
+    alloc.commandPool = from;
     alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
     VkFenceCreateInfo fence = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
@@ -61,8 +73,12 @@ VkCommandBuffer RingBegin(Gpu* gpu) {
       made.cmd = VK_NULL_HANDLE;
     } else if (vkCreateFence(gpu->device, &fence, nullptr, &made.fence) != VK_SUCCESS) {
       made.fence = VK_NULL_HANDLE;
-      vkFreeCommandBuffers(gpu->device, gpu->pool, 1, &made.cmd);
+      vkFreeCommandBuffers(gpu->device, from, 1, &made.cmd);
       made.cmd = VK_NULL_HANDLE;
+    }
+    if (made.cmd == VK_NULL_HANDLE && made.pool != VK_NULL_HANDLE) {
+      vkDestroyCommandPool(gpu->device, made.pool, nullptr);
+      made.pool = VK_NULL_HANDLE;
     }
     can_grow = made.cmd != VK_NULL_HANDLE;
     if (!can_grow) {
@@ -94,7 +110,11 @@ VkCommandBuffer RingBegin(Gpu* gpu) {
     TakeStamps(gpu, gpu->ring_query, 2 * e.query);
   }
   gpu->ring_current = pick.index;
-  vkResetCommandBuffer(e.cmd, 0);
+  if (e.pool != VK_NULL_HANDLE) {
+    vkResetCommandPool(gpu->device, e.pool, 0);
+  } else {
+    vkResetCommandBuffer(e.cmd, 0);
+  }
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(e.cmd, &begin);
@@ -234,6 +254,7 @@ void GpuRelease(Gpu* gpu) {
   gpu->query = VK_NULL_HANDLE;
   for (Gpu::RingEntry& e : gpu->ring_entries) {
     if (e.fence != VK_NULL_HANDLE) vkDestroyFence(gpu->device, e.fence, nullptr);
+    if (e.pool != VK_NULL_HANDLE) vkDestroyCommandPool(gpu->device, e.pool, nullptr);
   }
   gpu->ring_entries.clear();
   if (gpu->ring_query != VK_NULL_HANDLE) {

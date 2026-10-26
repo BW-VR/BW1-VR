@@ -190,6 +190,25 @@ void VkSceneSetKeepPicture(int on);
 void VkSceneCounts(uint64_t* walks, uint64_t* draws, uint64_t* clears,
                    uint64_t* kept, uint64_t* whole);
 void VkSceneKeepPictureToggle(const char* keys);
+// FEWER STATE CHANGES AND FEWER DRAWS (vk_bind_skip, vk_draw_sort,
+// vk_draw_merge, docs/backend.md): the counts since the start, as the end of
+// the last walk left them. Any thread. draws: the draws of the game that
+// went into a command buffer of a walk with no foveated resolution.
+// commands: the vkCmdDraw and vkCmdDrawIndexed calls for them. moved: the
+// draws that the sort gave another place. joined: the draws in a draw of the
+// merge. no_room: the merges that the ring had no room for. skipped: the
+// binds and the dynamic states that the renderer left out, because the
+// command buffer had the same value.
+struct VkSceneDrawCount {
+  uint64_t walks;
+  uint64_t draws;
+  uint64_t commands;
+  uint64_t moved;
+  uint64_t joined;
+  uint64_t no_room;
+  uint64_t skipped;
+};
+void VkSceneDrawCounts(VkSceneDrawCount* out);
 // THE TIME OF THE GPU FOR THE TIME LOG OF THE HEADSET APP (time_log,
 // docs/android.md, "The time log of the app"), on the thread of the walks:
 // since the last call, the walks with a time of the GPU (the timestamps at

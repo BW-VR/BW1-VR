@@ -3057,6 +3057,64 @@ both renderers. A run in the start dialog with the scripted controller
 view: 0.18 percent of the pixels of the left eye and 0.20 percent of the
 right eye differ, and 0.3 percent in a box around the hand, on its edges.
 
+### Fewer state changes and fewer draws
+
+The rules are in `vk_draw_math.h` (no Vulkan, checks in
+`test/controller_math/vk_draw_checks.h`). The renderer reads the three keys
+from `bwvr.ini` at the first walk: in the folder of `runblack.exe` on the PC,
+in the game folder in the headset app. The log has one line with the values
+("vk scene : vk_bind_skip=1, vk_draw_sort=1, vk_draw_merge=1. ...").
+
+**No bind of a state that is bound** (`vk_bind_skip`, 1 is the default). The
+renderer keeps the state that the command buffer of the walk has bound: the
+pipeline, the two descriptor sets, the vertex buffers with their offsets, the
+index buffer, the push constants, the viewport, the scissor rect and each
+dynamic state of a draw (cull mode, front face, depth test, depth write,
+depth compare, topology). A bind of the same value again is left out. The
+state starts empty with each command buffer. Each bind of the walk goes
+through this state, also the binds of foveated resolution. All pipelines of
+the renderer have the same dynamic states, so a bind of a pipeline keeps the
+dynamic states. `vk_bind_skip=0`: each draw binds each state, as the plain
+renderer does.
+
+**The draws wait** (when `vk_draw_sort` or `vk_draw_merge` is 1). A draw of
+a walk with no foveated resolution goes into a queue, not into the command
+buffer. The queue goes into the command buffer before each command that is
+not a draw: a clear, a new viewport or scissor rect, the change between the
+eyes and the panel, the copy of the picture of the walk before, and the end
+of the walk. So a draw never moves past such a command. The draws of
+foveated resolution keep their order (they are records of their own).
+
+**The sort** (`vk_draw_sort`, 1 is the default). In the queue a row of
+draws that may move gets a stable sort by pipeline and descriptor sets. A
+draw may move when it has no blend, a depth test of LESS or LESSEQUAL and a
+depth write: then each pixel shows the nearest draw in each order. A draw
+with blend, with no depth write or with another test (the sky, the water,
+the effects, the interface, the alpha) keeps its place, and no draw moves
+past it. Two draws with the same key keep their order. Only two draws at
+the same depth in the same pixel can show another draw after the sort.
+`vk_draw_sort=0`: the draws keep the order of the game.
+
+**The merge** (`vk_draw_merge`, 1 is the default). Draws that follow in the
+queue (after the sort) become one draw when they have the same pipeline,
+descriptor set, dynamic states and push constants, are triangle lists with
+no texture stage 1, and their vertices come after the vertices of the first
+draw in the ring at a full vertex. The renderer writes the indices of the one
+draw into the ring of the slot (32 bit, each index plus the place of the
+vertices of its draw), and the GPU draws its triangles in the order of the
+draws, so the picture is the same. A list draws full triangles only, as in
+Direct3D. With no room in the ring the draws go in one by one.
+`vk_draw_merge=0`: each draw of the game is a draw.
+
+**The counts.** The report of each 450 frames has a line "vk scene :
+vk_bind_skip=1, ... A walk: N draws of the game, M draw commands, K draws
+with another place, J draws in draws of the merge, L binds and states left
+out". The headset app has the same counts in the line of the GPU parts of
+the walk (`android.md`, "The GPU parts of the walk").
+
+**Not shown yet:** the GPU time of a walk with the keys at 1 and at 0 in a
+Quest 3. Only the Quest shows the GPU time that counts.
+
 ## The backend of the mod on Vulkan
 
 `backend=vulkan` (`vk_ddraw.cpp`) makes DirectDraw 7 and Direct3D 7 in the

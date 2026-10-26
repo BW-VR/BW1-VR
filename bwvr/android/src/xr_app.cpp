@@ -5,11 +5,16 @@
 #include <time.h>
 
 #include <mutex>
+#include <string>
 
+#include "../../src/common/ini_text.h"
 #include "../../src/mod/controller_math.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "app_log.h"
 #include "eye_size.h"
+
+// The game folder that the app gives to the renderer (scene_host.cpp).
+const char* VkPlatformFolder();
 
 namespace {
 
@@ -1010,9 +1015,13 @@ std::vector<XrApp::Layer*> XrApp::StagingLayers() {
 void XrApp::SetFrameLoop(bool on) {
   if (on == frame_loop_ || gpu_.device == VK_NULL_HANDLE) return;
   SubmitFrame();
+  if (on) ReadCopyKeys();
   LockQueue();
   GpuSetRing(&gpu_, on);
   UnlockQueue();
+  // The device is idle: the copies recorded one time go. The sources of the
+  // ring of the pictures can change before the next frame loop.
+  for (Screen* s : {&eyes_, &screen_, &panel_, &flat_}) FreeOnce(s);
   // The device is idle. Off: the newest pixels go into the staging buffers.
   // On: the copies in memory start empty, and the next pixels fill them (a
   // read of a staging buffer can be slow). A card writes only its rect, and
@@ -2019,6 +2028,7 @@ bool XrApp::MakeBetween(Screen* screen, const char** why) {
 }
 
 void XrApp::FreeScreenSet(Screen* screen) {
+  FreeOnce(screen);
   for (Layer& l : screen->layer) {
     FreeStaging(&gpu_, &l.staging);
     if (l.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(l.swapchain);
@@ -2204,6 +2214,21 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
   uint32_t image = 0;
   if (!NextImage(layer, image_wait_, &image)) return false;
   const VkImage target = layer->images[image].image;
+  // xr_copy_once=1: the copy of the same size that CopySlot records below,
+  // recorded one time.
+  if (same && copy_once_) {
+    const VkCommandBuffer once =
+        OnceCopy(screen, source, source_layer, source_width, source_height, target);
+    if (once != VK_NULL_HANDLE) {
+      vkCmdExecuteCommands(cmd, 1, &once);
+      ++once_run_;
+      to_release_.push_back(layer->swapchain);
+      layer->released = layer->revision;
+      ++copies_;
+      ++screen->copies[index];
+      return true;
+    }
+  }
   // The slot is a transfer source already: the last barrier of the play
   // thread made its bytes visible to each later transfer of its queue. On
   // the second queue the session saw the fence of the slot, and this
@@ -2263,6 +2288,127 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
   ++copies_;
   ++screen->copies[index];
   return true;
+}
+
+// The keys of the copies of the session in bwvr.ini of the game folder (the
+// folder that the app gives to the renderer).
+void XrApp::ReadCopyKeys() {
+  if (copy_keys_read_) return;
+  copy_keys_read_ = true;
+  std::string text;
+  const std::string path = std::string(VkPlatformFolder()) + "/bwvr.ini";
+  if (FILE* file = fopen(path.c_str(), "rb")) {
+    char part[4096];
+    size_t n = 0;
+    while ((n = fread(part, 1, sizeof(part), file)) > 0) text.append(part, n);
+    fclose(file);
+  }
+  bwvr_ini::IniText ini;
+  ini.Parse(text);
+  copy_once_ = ini.GetInt("bwvr", "xr_copy_once", 1) != 0;
+  gpu_.pool_reset = ini.GetInt("bwvr", "xr_pool_reset", 1) != 0;
+  AppLog("xr           : xr_copy_once=%d, xr_pool_reset=%d. %s, and %s",
+         copy_once_ ? 1 : 0, gpu_.pool_reset ? 1 : 0,
+         copy_once_ ? "Each copy of the same size from a slot of the ring into a "
+                      "swapchain image is recorded one time"
+                    : "The copies from the slots of the ring are recorded in each frame",
+         gpu_.pool_reset ? "each command buffer of the ring of the session has a command "
+                           "pool of its own (vkResetCommandPool)"
+                         : "the command buffers of the ring of the session are of one "
+                           "pool (vkResetCommandBuffer)");
+}
+
+// The secondary command buffer with the copy of `source` (layer
+// source_layer, width by height, a transfer source) into the swapchain image
+// `target` of the same size, with the barriers of CopySlot. Null when the set
+// has no free entry or the command buffer cannot be made: then CopySlot
+// records the copy in the frame.
+VkCommandBuffer XrApp::OnceCopy(Screen* screen, VkImage source, uint32_t source_layer,
+                                uint32_t width, uint32_t height, VkImage target) {
+  // The ring of the pictures makes the images of a slot again at a new size.
+  // So a source of another size frees the entries, and no entry can name an
+  // image that the ring freed.
+  if (width != screen->once_width || height != screen->once_height) {
+    FreeOnce(screen);
+    screen->once_width = width;
+    screen->once_height = height;
+  }
+  for (const Screen::Once& o : screen->once) {
+    if (o.source == source && o.layer == source_layer && o.target == target &&
+        o.second == renderer_second_) {
+      return o.cmd;
+    }
+  }
+  // 3 slots, 2 layers and up to 8 swapchain images.
+  constexpr size_t kMostOnce = 48;
+  if (screen->once.size() >= kMostOnce) {
+    ++once_full_;
+    return VK_NULL_HANDLE;
+  }
+  VkCommandBufferAllocateInfo alloc = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  alloc.commandPool = gpu_.pool;
+  alloc.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+  alloc.commandBufferCount = 1;
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
+  if (vkAllocateCommandBuffers(gpu_.device, &alloc, &cmd) != VK_SUCCESS) {
+    ++once_full_;
+    return VK_NULL_HANDLE;
+  }
+  VkCommandBufferInheritanceInfo inherit = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO};
+  VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  // The command buffers of the ring that run it can be on the GPU at the
+  // same time.
+  begin.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+  begin.pInheritanceInfo = &inherit;
+  vkBeginCommandBuffer(cmd, &begin);
+  if (renderer_second_) {
+    VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    b.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = source;
+    b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, source_layer, 1};
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+  }
+  ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT);
+  VkImageCopy copy = {};
+  copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, source_layer, 1};
+  copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copy.extent = {width, height, 1};
+  vkCmdCopyImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+               VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+    vkFreeCommandBuffers(gpu_.device, gpu_.pool, 1, &cmd);
+    ++once_full_;
+    return VK_NULL_HANDLE;
+  }
+  screen->once.push_back({source, source_layer, target, renderer_second_, cmd});
+  ++once_made_;
+  return cmd;
+}
+
+// The entries of a set go. The GPU can still run them, so the queue of the
+// session is idle first. A command buffer of the frame that is open has no
+// entry of this set: a set frees its entries only before its own copy.
+void XrApp::FreeOnce(Screen* screen) {
+  if (screen->once.empty()) return;
+  LockQueue();
+  vkQueueWaitIdle(gpu_.queue);
+  UnlockQueue();
+  for (const Screen::Once& o : screen->once) {
+    vkFreeCommandBuffers(gpu_.device, gpu_.pool, 1, &o.cmd);
+  }
+  screen->once.clear();
+  ++once_frees_;
 }
 
 void XrApp::PulseWith(int hand, float amplitude, float seconds) {
@@ -2520,6 +2666,15 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(flat_frames_),
            static_cast<unsigned long long>(flat_.copies[0]),
            static_cast<unsigned long long>(flat_pixels_.revision - 1));
+  }
+  if (once_made_ + once_full_ > 0) {
+    AppLog("xr           : the copies recorded one time (xr_copy_once=%d): %llu secondary "
+           "command buffers recorded, %llu copies ran one of them, %llu frees of the entries "
+           "of a set, %llu copies recorded in their frame because a set had no free entry",
+           copy_once_ ? 1 : 0, static_cast<unsigned long long>(once_made_),
+           static_cast<unsigned long long>(once_run_),
+           static_cast<unsigned long long>(once_frees_),
+           static_cast<unsigned long long>(once_full_));
   }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   FreeLayers();

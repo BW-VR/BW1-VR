@@ -456,6 +456,16 @@ class XrApp {
   // The layers with a staging buffer, for a change of the frame loop.
   std::vector<Layer*> StagingLayers();
   bool frame_loop_ = false;
+  // xr_copy_once (1 by default, read at the start of the frame loop from
+  // bwvr.ini of the game folder): CopySlot records each copy of the same
+  // size one time and then runs it with vkCmdExecuteCommands. 0: CopySlot
+  // records the barriers and the copy in each frame.
+  bool copy_once_ = true;
+  bool copy_keys_read_ = false;
+  uint64_t once_made_ = 0;   // secondary command buffers recorded
+  uint64_t once_run_ = 0;    // copies that ran one of them
+  uint64_t once_frees_ = 0;  // frees of the entries of a set
+  uint64_t once_full_ = 0;   // copies with no free entry, recorded in the frame
   bool image_wait_ = false;
   bool eyes_frozen_ = false;   // screen_source_ is in a slot that the session left
   bool panel_frozen_ = false;  // panel_source_ too
@@ -475,6 +485,19 @@ class XrApp {
     uint64_t copies[2] = {0, 0};  // the copies of each eye
     bool failed = false;  // the set could not be made, and the app does not try again
     bool between_said = false;  // the log said that the image between cannot be made
+    // THE COPIES RECORDED ONE TIME (xr_copy_once=1): for each source image,
+    // layer of the source and swapchain image, a secondary command buffer
+    // with the copy of the same size (CopySlot). The entries are for sources
+    // of one size (once_width by once_height).
+    struct Once {
+      VkImage source;
+      uint32_t layer;
+      VkImage target;
+      bool second;  // with the barrier of the second queue
+      VkCommandBuffer cmd;
+    };
+    std::vector<Once> once;
+    uint32_t once_width = 0, once_height = 0;
   };
   // The swapchains of the set are made.
   static bool Made(const Screen& screen) { return screen.layer[0].swapchain != XR_NULL_HANDLE; }
@@ -485,6 +508,12 @@ class XrApp {
   bool MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
                      const char** why, int count = 2);
   bool MakeBetween(Screen* screen, const char** why);
+  // xr_copy_once: the keys, the secondary command buffer of a copy (null:
+  // CopySlot records it), and the free of the entries of a set.
+  void ReadCopyKeys();
+  VkCommandBuffer OnceCopy(Screen* screen, VkImage source, uint32_t source_layer,
+                           uint32_t width, uint32_t height, VkImage target);
+  void FreeOnce(Screen* screen);
   // THE FRAME LOOP: a copy from an image of a slot of the ring (the layout
   // of a transfer source, the bytes in the order of the swapchain) into the
   // command buffer of the frame.

@@ -136,6 +136,7 @@
 #include "../common/bw_addresses.h"
 #include "fovea_res_math.h"
 #include "foveation_math.h"
+#include "vk_draw_math.h"
 #include "vk_scene_math.h"
 #include "vk_texture_math.h"
 #include "vk_scene_frag.h"
@@ -574,6 +575,10 @@ struct MresRecord {
   DrawPush push;
   VkDeviceSize vertex_at, uv1_at, index_at;
   uint32_t vertex_count, index_count;
+  uint32_t wide;  // 1: 32 bit indices (a draw of the merge), 0: 16 bit
+  // A draw in g_queue with indices: their copy in g_queue_indices, at this
+  // place. The ring is memory that the CPU writes and does not read.
+  uint32_t queue_index;
   float viewport[4];  // x, y, width, height of the viewport of the game
   // The rect of its vertices in pixels of the game, x0, y0, x1, y1, with
   // the move of the right eye. The pass of the centre image leaves out a
@@ -595,6 +600,48 @@ uint64_t g_mres_draws = 0;  // draws of the walks
 uint64_t g_mres_center_draws = 0;  // of them in the centre image
 uint64_t g_fovea_marks = 0;  // walks with the marks of the test
 uint64_t g_gaze_frames = 0;
+
+// FEWER STATE CHANGES AND FEWER DRAWS (vk_draw_math.h, docs/backend.md).
+// vk_bind_skip=1: the renderer keeps the state that the command buffer of
+// the walk has bound (g_bound), and leaves out a bind of the same value.
+// vk_draw_sort=1 and vk_draw_merge=1: the draws of a rendering wait in
+// g_queue until a command that is not a draw (a clear, a viewport, the end
+// of the rendering). Then the draws that may move get a sort by pipeline
+// and descriptor sets, and draws in a row with the same state become one
+// draw. With both keys at 0 each draw goes into the command buffer at once.
+// The keys of bwvr.ini, read at the first walk (ReadDrawKeys).
+bool g_draw_keys_read = false;
+bool g_bind_skip = true;
+bool g_draw_sort = true;
+bool g_draw_merge = true;
+// For the walk now.
+bool g_walk_sort = false;
+bool g_walk_merge = false;
+bool g_walk_queue = false;
+vk_draw_math::BoundState g_bound;
+std::vector<MresRecord> g_queue;
+std::vector<vk_draw_math::Draw> g_queue_facts;
+std::vector<uint32_t> g_queue_order;
+std::vector<uint16_t> g_queue_indices;
+// The counts since the start (VkSceneDrawCounts). The report of 450 frames
+// sets g_walks to 0, so the walks have a count of their own.
+uint64_t g_dc_walks = 0;
+uint64_t g_dc_draws = 0;     // draws of the game into the command buffer
+uint64_t g_dc_commands = 0;  // vkCmdDraw and vkCmdDrawIndexed for them
+uint64_t g_dc_moved = 0;     // draws that the sort gave another place
+uint64_t g_dc_joined = 0;    // draws in a draw of the merge
+uint64_t g_dc_no_room = 0;   // merges that the ring had no room for
+// The counts at the end of the last walk, for VkSceneDrawCounts.
+SRWLOCK g_dc_lock = SRWLOCK_INIT;
+VkSceneDrawCount g_dc_shown = {};
+
+// A bind of the value v into the slot of g_bound: false when the command
+// buffer has that value bound.
+template <typename T>
+bool Need(vk_draw_math::StateSlot slot, const T& v) {
+  return g_bound.Need(slot, &v, sizeof(v));
+}
+void FlushDraws();
 
 bool Fail(const char* what) {
   ModLog("vk scene     : %s failed. The Vulkan renderer stops", what);
@@ -1678,6 +1725,21 @@ bool InTarget(const vk_scene_math::Rect& r, VkRect2D* out) {
   return true;
 }
 
+// The viewport and the scissor rect of the command buffer of the walk. A new
+// value first puts the draws that wait into the command buffer: they have
+// the value before.
+void SetViewport(VkCommandBuffer cb, const VkViewport& viewport) {
+  if (!Need(vk_draw_math::kViewport, viewport)) return;
+  FlushDraws();
+  f.vkCmdSetViewport(cb, 0, 1, &viewport);
+}
+
+void SetScissor(VkCommandBuffer cb, const VkRect2D& scissor) {
+  if (!Need(vk_draw_math::kScissor, scissor)) return;
+  FlushDraws();
+  f.vkCmdSetScissor(cb, 0, 1, &scissor);
+}
+
 // The viewport of Direct3D 7 as the viewport and the scissor rect of Vulkan.
 // The vertex shader gives the clip position in that viewport, so a vertex
 // comes to its pixel of the target, and the scissor rect cuts each pixel
@@ -1688,11 +1750,11 @@ void SetViewportState(VkCommandBuffer cb) {
       static_cast<float>(v.dwX), static_cast<float>(v.dwY),
       static_cast<float>(v.dwWidth), static_cast<float>(v.dwHeight), 0.0f,
       1.0f};
-  f.vkCmdSetViewport(cb, 0, 1, &viewport);
+  SetViewport(cb, viewport);
   VkRect2D scissor = {{0, 0}, {0, 0}};
   InTarget(vk_scene_math::ViewportRect(v.dwX, v.dwY, v.dwWidth, v.dwHeight),
            &scissor);
-  f.vkCmdSetScissor(cb, 0, 1, &scissor);
+  SetScissor(cb, scissor);
 }
 
 // True when a draw or a clear goes to another target than the image of the
@@ -1708,6 +1770,7 @@ bool ForPanel() { return g_walk_follow && g_walk_panel && g_draw_panel; }
 // eyes. The dynamic states stay.
 void UsePanel(bool panel) {
   if (panel == g_rendering_panel) return;
+  FlushDraws();
   const VkCommandBuffer cb = g_slots[g_slot].cb;
   // With foveated resolution only the rendering of the panel is open in a
   // walk: the draws of the eyes are records.
@@ -1742,6 +1805,7 @@ void KeepPicture() {
   const vk::Image& from = g_colors[before];
   const vk::Image& to = Target();
   if (from.width != to.width || from.height != to.height) return;
+  FlushDraws();
   const VkCommandBuffer cb = g_slots[g_slot].cb;
   f.vkCmdEndRendering(cb);
   vk::Barrier(cb, from.image, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1797,6 +1861,8 @@ void ViewportOnWorker(const void* data) {
 // for the color and the depth that the flags name.
 void ClearOnWorker(const void* data) {
   if (!g_recording || !g_walk_follow) return;
+  // The draws before the clear go into the command buffer first.
+  FlushDraws();
   // The clear of the panel target is the first rendering of the panel.
   if (ForPanel()) {
     ++g_clears_panel;
@@ -2032,25 +2098,59 @@ void DrawStates(VkCommandBuffer cb, uint32_t cull, uint32_t zenable,
                 uint32_t zwrite, uint32_t zfunc, uint32_t type) {
   // D3DCULL_: 1 none, 2 clockwise, 3 counter-clockwise. The device culls the
   // faces of that turn on the screen. y goes down on both screens.
-  f.vkCmdSetCullMode(cb, cull == 2 || cull == 3 ? VK_CULL_MODE_BACK_BIT
-                                                : VK_CULL_MODE_NONE);
-  f.vkCmdSetFrontFace(cb, cull == 2 ? VK_FRONT_FACE_COUNTER_CLOCKWISE
-                                    : VK_FRONT_FACE_CLOCKWISE);
-  f.vkCmdSetDepthTestEnable(cb, zenable != 0 ? VK_TRUE : VK_FALSE);
-  f.vkCmdSetDepthWriteEnable(cb, zenable != 0 && zwrite != 0 ? VK_TRUE
-                                                             : VK_FALSE);
+  namespace dm = vk_draw_math;
+  const VkCullModeFlags cull_mode =
+      cull == 2 || cull == 3 ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
+  if (Need(dm::kCullMode, cull_mode)) f.vkCmdSetCullMode(cb, cull_mode);
+  const VkFrontFace front = cull == 2 ? VK_FRONT_FACE_COUNTER_CLOCKWISE
+                                      : VK_FRONT_FACE_CLOCKWISE;
+  if (Need(dm::kFrontFace, front)) f.vkCmdSetFrontFace(cb, front);
+  const VkBool32 test = zenable != 0 ? VK_TRUE : VK_FALSE;
+  if (Need(dm::kDepthTest, test)) f.vkCmdSetDepthTestEnable(cb, test);
+  const VkBool32 write = zenable != 0 && zwrite != 0 ? VK_TRUE : VK_FALSE;
+  if (Need(dm::kDepthWrite, write)) f.vkCmdSetDepthWriteEnable(cb, write);
   static const VkCompareOp kCompare[9] = {
       VK_COMPARE_OP_LESS_OR_EQUAL, VK_COMPARE_OP_NEVER,
       VK_COMPARE_OP_LESS,          VK_COMPARE_OP_EQUAL,
       VK_COMPARE_OP_LESS_OR_EQUAL, VK_COMPARE_OP_GREATER,
       VK_COMPARE_OP_NOT_EQUAL,     VK_COMPARE_OP_GREATER_OR_EQUAL,
       VK_COMPARE_OP_ALWAYS};
-  f.vkCmdSetDepthCompareOp(cb, kCompare[zfunc <= 8 ? zfunc : 0]);
+  const VkCompareOp compare = kCompare[zfunc <= 8 ? zfunc : 0];
+  if (Need(dm::kDepthCompare, compare)) f.vkCmdSetDepthCompareOp(cb, compare);
   // D3DPT_: 4 list, 5 strip, 6 fan.
-  f.vkCmdSetPrimitiveTopology(cb,
-                              type == 5   ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
-                              : type == 6 ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN
-                                          : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+  const VkPrimitiveTopology topology =
+      type == 5   ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+      : type == 6 ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN
+                  : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  if (Need(dm::kTopology, topology)) {
+    f.vkCmdSetPrimitiveTopology(cb, topology);
+  }
+}
+
+void BindPipeline(VkCommandBuffer cb, VkPipeline pipeline) {
+  if (Need(vk_draw_math::kPipeline, pipeline)) {
+    f.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+  }
+}
+
+void PushDraw(VkCommandBuffer cb, const DrawPush& push) {
+  if (Need(vk_draw_math::kPush, push)) {
+    f.vkCmdPushConstants(cb, g_layout,
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                         0, sizeof(push), &push);
+  }
+}
+
+void BindIndices(VkCommandBuffer cb, VkBuffer buffer, VkDeviceSize at,
+                 VkIndexType type) {
+  struct {
+    VkBuffer buffer;
+    VkDeviceSize at;
+    uint64_t type;
+  } v = {buffer, at, static_cast<uint64_t>(type)};
+  if (Need(vk_draw_math::kIndices, v)) {
+    f.vkCmdBindIndexBuffer(cb, buffer, at, type);
+  }
 }
 
 // Vertices of the format 0x1C4 into the ring of the slot. UINT64_MAX when
@@ -2059,6 +2159,7 @@ void DrawStates(VkCommandBuffer cb, uint32_t cull, uint32_t zenable,
 // null, and set 1 is then the set of stage 0.
 void BindSets(VkCommandBuffer cb, VkDescriptorSet set, VkDescriptorSet set1) {
   const VkDescriptorSet sets[2] = {set, set1 != VK_NULL_HANDLE ? set1 : set};
+  if (!Need(vk_draw_math::kSets, sets)) return;
   f.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0,
                             2, sets, 0, nullptr);
 }
@@ -2070,7 +2171,140 @@ void BindVertices(VkCommandBuffer cb, const Slot& s, VkDeviceSize vertex_at,
                   VkDeviceSize uv1_at) {
   const VkBuffer buffers[2] = {s.ring.buffer, s.ring.buffer};
   const VkDeviceSize offsets[2] = {vertex_at, uv1_at};
+  struct {
+    VkBuffer buffer;
+    VkDeviceSize at[2];
+  } v = {s.ring.buffer, {vertex_at, uv1_at}};
+  if (!Need(vk_draw_math::kVertices, v)) return;
   f.vkCmdBindVertexBuffers(cb, 0, 2, buffers, offsets);
+}
+
+// One draw into the command buffer of the walk, with the binds that it
+// needs.
+void PlayDraw(const Slot& s, const MresRecord& r) {
+  const VkCommandBuffer cb = s.cb;
+  BindPipeline(cb, r.pipeline);
+  BindSets(cb, r.set, r.set1);
+  DrawStates(cb, r.cull, r.zenable, r.zwrite, r.zfunc, r.type);
+  PushDraw(cb, r.push);
+  BindVertices(cb, s, r.vertex_at, r.uv1_at);
+  if (r.index_count > 0) {
+    BindIndices(cb, s.ring.buffer, r.index_at,
+                r.wide != 0 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
+    f.vkCmdDrawIndexed(cb, r.index_count, 1, 0, 0, 0);
+  } else {
+    f.vkCmdDraw(cb, r.vertex_count, 1, 0, 0);
+  }
+  ++g_dc_commands;
+}
+
+vk_draw_math::Draw FactsOf(const MresRecord& r) {
+  vk_draw_math::Draw d = {};
+  memcpy(&d.pipeline, &r.pipeline, sizeof(r.pipeline));
+  memcpy(&d.set, &r.set, sizeof(r.set));
+  memcpy(&d.set1, &r.set1, sizeof(r.set1));
+  d.blend = r.blend;
+  d.cull = r.cull;
+  d.zenable = r.zenable;
+  d.zwrite = r.zwrite;
+  d.zfunc = r.zfunc;
+  d.type = r.type;
+  d.push = &r.push;
+  d.push_bytes = sizeof(r.push);
+  d.vertex_at = r.vertex_at;
+  d.uv1_at = r.uv1_at;
+  d.index_at = r.index_at;
+  d.vertex_count = r.vertex_count;
+  d.index_count = r.index_count;
+  return d;
+}
+
+// The draws that wait (g_queue) into the command buffer of the walk: the
+// sort (vk_draw_sort), then the merge (vk_draw_merge). A draw of the merge
+// has 32 bit indices in the ring of the slot, from the vertices of its
+// first draw. With no room in the ring the draws go in one by one.
+void FlushDraws() {
+  if (g_queue.empty()) return;
+  namespace dm = vk_draw_math;
+  Slot& s = g_slots[g_slot];
+  const uint32_t n = static_cast<uint32_t>(g_queue.size());
+  g_queue_facts.resize(n);
+  g_queue_order.resize(n);
+  for (uint32_t i = 0; i < n; ++i) g_queue_facts[i] = FactsOf(g_queue[i]);
+  g_dc_moved += dm::SortDraws(g_queue_facts.data(), n, g_walk_sort,
+                              g_queue_order.data());
+  const uint32_t* order = g_queue_order.data();
+  uint8_t* ring = static_cast<uint8_t*>(s.ring.mapped);
+  uint32_t i = 0;
+  while (i < n) {
+    const dm::Draw& first = g_queue_facts[order[i]];
+    uint32_t end = i + 1;
+    uint32_t indices = dm::ListIndices(first);
+    if (g_walk_merge) {
+      while (end < n && dm::CanJoin(first, g_queue_facts[order[end]])) {
+        indices += dm::ListIndices(g_queue_facts[order[end]]);
+        ++end;
+      }
+    }
+    if (end - i >= 2) {
+      const VkDeviceSize at = (s.used + 3) & ~3ull;
+      const VkDeviceSize bytes = static_cast<VkDeviceSize>(indices) * 4;
+      if (at + bytes <= kRingBytes) {
+        uint32_t* out = reinterpret_cast<uint32_t*>(ring + at);
+        for (uint32_t k = i; k < end; ++k) {
+          const dm::Draw& d = g_queue_facts[order[k]];
+          const uint16_t* from =
+              d.index_count > 0
+                  ? g_queue_indices.data() + g_queue[order[k]].queue_index
+                  : nullptr;
+          dm::JoinIndices(first, d, from, out);
+          out += dm::ListIndices(d);
+        }
+        s.used = (at + bytes + 31) & ~31ull;
+        MresRecord m = g_queue[order[i]];
+        m.uv1_at = m.vertex_at;
+        m.index_at = at;
+        m.index_count = indices;
+        m.wide = 1;
+        PlayDraw(s, m);
+        g_dc_joined += end - i;
+        i = end;
+        continue;
+      }
+      ++g_dc_no_room;
+    }
+    PlayDraw(s, g_queue[order[i]]);
+    ++i;
+  }
+  g_queue.clear();
+  g_queue_indices.clear();
+}
+
+// The keys vk_bind_skip, vk_draw_sort and vk_draw_merge of bwvr.ini in the
+// folder of runblack.exe (the game folder in the app), at the first walk.
+void ReadDrawKeys() {
+  if (g_draw_keys_read) return;
+  g_draw_keys_read = true;
+  char path[MAX_PATH] = "";
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash != nullptr && strlen(path) + 9 < MAX_PATH) {
+    slash[1] = 0;
+    strcat_s(path, "bwvr.ini");
+    g_bind_skip = GetPrivateProfileIntA("bwvr", "vk_bind_skip", 1, path) != 0;
+    g_draw_sort = GetPrivateProfileIntA("bwvr", "vk_draw_sort", 1, path) != 0;
+    g_draw_merge = GetPrivateProfileIntA("bwvr", "vk_draw_merge", 1, path) != 0;
+  }
+  ModLog("vk scene     : vk_bind_skip=%d, vk_draw_sort=%d, vk_draw_merge=%d. "
+         "%s, %s, %s",
+         g_bind_skip ? 1 : 0, g_draw_sort ? 1 : 0, g_draw_merge ? 1 : 0,
+         g_bind_skip ? "A bind of a state that is bound is left out"
+                     : "Each draw binds all its states",
+         g_draw_sort ? "the opaque draws with a depth write get a sort by "
+                       "pipeline and descriptor sets"
+                     : "the draws keep the order of the game",
+         g_draw_merge ? "draws in a row with the same state become one draw"
+                      : "each draw of the game is a draw");
 }
 
 VkDeviceSize RingVertices(Slot& s, const void* data, VkDeviceSize bytes) {
@@ -2263,11 +2497,11 @@ void PlayMres(Slot& s) {
                                      (r.viewport[1] - oy) * sy,
                                      r.viewport[2] * sx, r.viewport[3] * sy,
                                      0.0f, 1.0f};
-        f.vkCmdSetViewport(cb, 0, 1, &viewport);
+        SetViewport(cb, viewport);
         VkRect2D scissor = {{0, 0}, {0, 0}};
         in_view = PassScissor(r.viewport, ox, oy, sx, sy, used_w, used_h,
                               &scissor);
-        if (in_view) f.vkCmdSetScissor(cb, 0, 1, &scissor);
+        if (in_view) SetScissor(cb, scissor);
       }
       if (!in_view) {
         ++out_of_view[pass];
@@ -2283,7 +2517,7 @@ void PlayMres(Slot& s) {
       ++drawn[pass];
       ++(pass == 1 ? g_mres_center_draws : g_mres_draws);
       if (r.pipeline != last_pipeline) {
-        f.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, r.pipeline);
+        BindPipeline(cb, r.pipeline);
         last_pipeline = r.pipeline;
       }
       if (r.set != last_set || r.set1 != last_set1) {
@@ -2292,13 +2526,10 @@ void PlayMres(Slot& s) {
         last_set1 = r.set1;
       }
       DrawStates(cb, r.cull, r.zenable, r.zwrite, r.zfunc, r.type);
-      f.vkCmdPushConstants(
-          cb, g_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-          0, sizeof(r.push), &r.push);
+      PushDraw(cb, r.push);
       BindVertices(cb, s, r.vertex_at, r.uv1_at);
       if (r.index_count > 0) {
-        f.vkCmdBindIndexBuffer(cb, s.ring.buffer, r.index_at,
-                               VK_INDEX_TYPE_UINT16);
+        BindIndices(cb, s.ring.buffer, r.index_at, VK_INDEX_TYPE_UINT16);
         f.vkCmdDrawIndexed(cb, r.index_count, 1, 0, 0, 0);
       } else {
         f.vkCmdDraw(cb, r.vertex_count, 1, 0, 0);
@@ -2472,9 +2703,9 @@ void ComposeMres(Slot& s) {
   BeginRenderingOf(cb, Target(), g_depth, 3u, false, false);
   const VkViewport viewport = {0.0f, 0.0f, static_cast<float>(width),
                                static_cast<float>(height), 0.0f, 1.0f};
-  f.vkCmdSetViewport(cb, 0, 1, &viewport);
+  SetViewport(cb, viewport);
   const VkRect2D scissor = {{0, 0}, {width, height}};
-  f.vkCmdSetScissor(cb, 0, 1, &scissor);
+  SetScissor(cb, scissor);
   DrawStates(cb, D3DCULL_NONE, 0, 0, D3DCMP_ALWAYS, D3DPT_TRIANGLELIST);
   const VkPipeline opaque = Pipeline(0);
   const VkPipeline blended =
@@ -2530,11 +2761,9 @@ void ComposeMres(Slot& s) {
     if (outer_set == VK_NULL_HANDLE || center_set == VK_NULL_HANDLE) continue;
     VkDeviceSize at = RingVertices(s, outer, sizeof(outer));
     if (at == UINT64_MAX) continue;
-    f.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, opaque);
+    BindPipeline(cb, opaque);
     BindSets(cb, outer_set, VK_NULL_HANDLE);
-    f.vkCmdPushConstants(cb, g_layout,
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                         0, sizeof(push), &push);
+    PushDraw(cb, push);
     BindVertices(cb, s, at, at);
     f.vkCmdDraw(cb, 6, 1, 0, 0);
     // The centre with its soft edge.
@@ -2563,11 +2792,9 @@ void ComposeMres(Slot& s) {
     at = RingVertices(s, center, sizeof(center));
     if (at == UINT64_MAX) continue;
     push.ops[0] = 2u | 2u << 8;  // the texture alone
-    f.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, blended);
+    BindPipeline(cb, blended);
     BindSets(cb, center_set, VK_NULL_HANDLE);
-    f.vkCmdPushConstants(cb, g_layout,
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                         0, sizeof(push), &push);
+    PushDraw(cb, push);
     BindVertices(cb, s, at, at);
     f.vkCmdDraw(cb, 54, 1, 0, 0);
   }
@@ -2870,6 +3097,15 @@ void BeginOnWorker(const void* data) {
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   f.vkBeginCommandBuffer(s.cb, &begin);
+  // A new command buffer has no bound state, and no draw waits.
+  ReadDrawKeys();
+  g_bound.SetOn(g_bind_skip);
+  g_bound.Reset();
+  g_queue.clear();
+  g_queue_indices.clear();
+  g_walk_sort = g_draw_sort;
+  g_walk_merge = g_draw_merge;
+  g_walk_queue = g_walk_sort || g_walk_merge;
   if (s.query != VK_NULL_HANDLE) {
     f.vkCmdResetQueryPool(s.cb, s.query, 0, 2);
     f.vkCmdWriteTimestamp2(s.cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -2950,9 +3186,9 @@ void BeginOnWorker(const void* data) {
                                  static_cast<float>(Target().width),
                                  static_cast<float>(Target().height), 0.0f,
                                  1.0f};
-    f.vkCmdSetViewport(s.cb, 0, 1, &viewport);
+    SetViewport(s.cb, viewport);
     const VkRect2D scissor = {{0, 0}, {Target().width, Target().height}};
-    f.vkCmdSetScissor(s.cb, 0, 1, &scissor);
+    SetScissor(s.cb, scissor);
   }
   g_recording = true;
   g_picture = seed->picture;
@@ -3091,10 +3327,24 @@ void EndOnWorker(const void*) {
     return;
   }
   if (!g_recording) return;
+  FlushDraws();
   if (g_walk_show && g_walk_fovea) DrawFoveaMarks();
   // A walk with no draw and no clear for the eyes keeps the picture too.
   KeepPicture();
+  FlushDraws();
   g_recording = false;
+  {
+    const uint64_t skipped = g_bound.SkippedAll();
+    AcquireSRWLockExclusive(&g_dc_lock);
+    g_dc_shown.walks = ++g_dc_walks;
+    g_dc_shown.draws = g_dc_draws;
+    g_dc_shown.commands = g_dc_commands;
+    g_dc_shown.moved = g_dc_moved;
+    g_dc_shown.joined = g_dc_joined;
+    g_dc_shown.no_room = g_dc_no_room;
+    g_dc_shown.skipped = skipped;
+    ReleaseSRWLockExclusive(&g_dc_lock);
+  }
   Slot& s = g_slots[g_slot];
   if (g_walk_mres) {
     if (g_rendering_panel) f.vkCmdEndRendering(s.cb);
@@ -3724,26 +3974,26 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
   push.fog_color[1] = static_cast<float>((fog >> 8) & 255) / 255.0f;
   push.fog_color[2] = static_cast<float>(fog & 255) / 255.0f;
   push.fog_color[3] = 1.0f;
+  MresRecord r = {};
+  r.clear = -1;
+  r.pipeline = pipeline;
+  r.blend = blend;
+  r.set = set;
+  r.set1 = set1;
+  r.cull = rs[D3DRENDERSTATE_CULLMODE];
+  r.zenable = rs[D3DRENDERSTATE_ZENABLE];
+  r.zwrite = rs[D3DRENDERSTATE_ZWRITEENABLE];
+  r.zfunc = rs[D3DRENDERSTATE_ZFUNC];
+  r.type = type;
+  r.push = push;
+  r.vertex_at = vertex_at;
+  r.uv1_at = uv1_at;
+  r.index_at = index_at;
+  r.vertex_count = vertex_count;
+  r.index_count = index_count;
   // FOVEATED RESOLUTION: a draw of the eyes is a record until the end of
   // the walk.
   if (g_walk_mres && !panel) {
-    MresRecord r = {};
-    r.clear = -1;
-    r.pipeline = pipeline;
-    r.blend = blend;
-    r.set = set;
-    r.set1 = set1;
-    r.cull = rs[D3DRENDERSTATE_CULLMODE];
-    r.zenable = rs[D3DRENDERSTATE_ZENABLE];
-    r.zwrite = rs[D3DRENDERSTATE_ZWRITEENABLE];
-    r.zfunc = rs[D3DRENDERSTATE_ZFUNC];
-    r.type = type;
-    r.push = push;
-    r.vertex_at = vertex_at;
-    r.uv1_at = uv1_at;
-    r.index_at = index_at;
-    r.vertex_count = vertex_count;
-    r.index_count = index_count;
     if (g_walk_follow) {
       r.viewport[0] = static_cast<float>(g_viewport.dwX);
       r.viewport[1] = static_cast<float>(g_viewport.dwY);
@@ -3775,22 +4025,20 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
   UsePanel(panel);
   if (panel) ++g_panel_draws;
   if (!panel) KeepPicture();
-  VkCommandBuffer cb = s.cb;
-  f.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-  BindSets(cb, set, set1);
-  DrawStates(cb, rs[D3DRENDERSTATE_CULLMODE], rs[D3DRENDERSTATE_ZENABLE],
-             rs[D3DRENDERSTATE_ZWRITEENABLE], rs[D3DRENDERSTATE_ZFUNC], type);
-  f.vkCmdPushConstants(cb, g_layout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(push), &push);
-  BindVertices(cb, s, vertex_at, uv1_at);
-  if (index_count > 0) {
-    f.vkCmdBindIndexBuffer(cb, s.ring.buffer, index_at, VK_INDEX_TYPE_UINT16);
-    f.vkCmdDrawIndexed(cb, index_count, 1, 0, 0, 0);
-  } else {
-    f.vkCmdDraw(cb, vertex_count, 1, 0, 0);
-  }
+  ++g_dc_draws;
   ++g_draws;
+  // The draw waits for the sort and the merge (FlushDraws), or goes into the
+  // command buffer now.
+  if (g_walk_queue) {
+    if (g_walk_merge && index_count > 0) {
+      r.queue_index = static_cast<uint32_t>(g_queue_indices.size());
+      g_queue_indices.insert(g_queue_indices.end(), indices,
+                             indices + index_count);
+    }
+    g_queue.push_back(r);
+    return;
+  }
+  PlayDraw(s, r);
 }
 
 void VkSceneSetPanel(int on) {
@@ -4453,9 +4701,36 @@ void VkSceneSurfaceWritten(void* surface) {
   ReleaseSRWLockExclusive(&g_texture_lock);
 }
 
+void VkSceneDrawCounts(VkSceneDrawCount* out) {
+  AcquireSRWLockExclusive(&g_dc_lock);
+  *out = g_dc_shown;
+  ReleaseSRWLockExclusive(&g_dc_lock);
+}
+
 void VkSceneReport(uint64_t frames) {
   if (g_mode == 0 || frames == 0) return;
   const double per = static_cast<double>(frames);
+  {
+    // FEWER STATE CHANGES AND FEWER DRAWS: the counts since the last report.
+    static VkSceneDrawCount s_last = {};
+    VkSceneDrawCount now;
+    VkSceneDrawCounts(&now);
+    const double walks =
+        now.walks > s_last.walks ? static_cast<double>(now.walks - s_last.walks)
+                                 : 1.0;
+    ModLog("vk scene     : vk_bind_skip=%d, vk_draw_sort=%d, vk_draw_merge=%d. "
+           "A walk: %.1f draws of the game, %.1f draw commands, %.1f draws "
+           "with another place, %.1f draws in draws of the merge, %.1f binds "
+           "and states left out. %llu merges with no room in the ring",
+           g_bind_skip ? 1 : 0, g_draw_sort ? 1 : 0, g_draw_merge ? 1 : 0,
+           (now.draws - s_last.draws) / walks,
+           (now.commands - s_last.commands) / walks,
+           (now.moved - s_last.moved) / walks,
+           (now.joined - s_last.joined) / walks,
+           (now.skipped - s_last.skipped) / walks,
+           static_cast<unsigned long long>(now.no_room - s_last.no_room));
+    s_last = now;
+  }
 #ifdef _WIN32
   // vk_device=0: the proof that no part of the process loaded Vulkan.
   if (!g_device) {

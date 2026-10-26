@@ -3567,6 +3567,7 @@ void CreatureChecks() {
 #include "vk_scene_checks.h"
 #include "vk_texture_checks.h"
 #include "vk_prim_checks.h"
+#include "vk_draw_checks.h"
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
 #include "menu_checks.h"
@@ -4003,6 +4004,7 @@ int main() {
   vk_scene_checks::VkSceneChecks();
   vk_texture_checks::VkTextureChecks();
   vk_prim_checks::VkPrimChecks();
+  vk_draw_checks::VkDrawChecks();
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
   menu_checks::AllMenuChecks();

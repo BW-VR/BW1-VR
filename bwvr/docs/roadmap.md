@@ -1000,6 +1000,16 @@ that moves while the Hand takes it.
   Open: why the Quest 3 asks for 4096 by 4291, and a way to find the hot
   code of the game under Box64 (`android.md`, "The hot code under Box64":
   no way works yet).
+  **The draws and the copies of the session.** The renderer leaves out each
+  bind of a state that is bound, sorts the opaque draws and merges draws
+  with one state (`vk_bind_skip`, `vk_draw_sort`, `vk_draw_merge`,
+  `backend.md`, "Fewer state changes and fewer draws"), and the session
+  records each copy of the same size one time and gives each command buffer
+  of its ring a pool of its own (`xr_copy_once`, `xr_pool_reset`,
+  `android.md`, "The frame loop"). Next in the headset: the GPU time of a
+  walk, the counts of the renderer in the line of the GPU parts, and the
+  parts "the eye pictures" and "the panel image", with the five keys at 1
+  and at 0.
   **The stop of the game** 6 to 15 s after the load of a saved game on the
   Quest: the main thread of the game runs at 99 percent of one core in user
   mode, and `wine.log` names the critical section 0x7AF441E8 in each stop:

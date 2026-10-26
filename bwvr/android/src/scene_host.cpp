@@ -40,6 +40,9 @@ void ModLog(const char* format, ...) {
 
 // The pulse of a test key. The app has no test keys of the game.
 void ControllersGesturePulse(float, float) {}
+// The headset app has no Direct3D 9: it draws with Vulkan alone. Only the
+// values of the debug page of the mod read this.
+bool VulkanOnly() { return true; }
 
 int StereoPassEye() { return g_state.pass_eye; }
 int IntroPassEye() { return g_state.intro_eye; }

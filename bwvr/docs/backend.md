@@ -2921,6 +2921,140 @@ a PC is fast, and only the Quest under FEX shows the gain that counts.
   game for the land, the triangles of a patch, the clip and the sprites.
   Not known: whether that code of the game runs under FEX.
 
+## The objects on the land
+
+`fn_005E5CD0` (in `GLandscape::Draw`) draws the objects on the land. It
+keeps a list of up to 2999 objects from the cells of the map near the camera
+(`0x00D1D28C`, the count at `0x00D20198`), and calls the draw of each object
+(the entry `+0x610` of its vtable). On the Quest it takes 4.5 to 8 ms of its
+own code in a frame, with the mesh loops of the engine timed apart. Its own
+loops are small: the time is in the methods that it calls.
+
+### The timer of the objects
+
+`object_timer=1` (a test aid, 0 is the default, `object_timer.cpp`, the
+rules in `object_timer_math.h`) times the calls of `fn_005E5CD0` and of the
+objects. A timer goes on a call, not on the start of a function: the mod
+writes a call of a stub of its own in the place of the call of the game (5
+or 6 bytes), or the address of a stub in an entry of a vtable. The stub does
+what the bytes of the game did, puts the address of an exit stub in the
+place of the return address, and jumps to the function. The timers read the
+time stamp counter of the CPU.
+
+- **What it times.** The call of `fn_005E5CD0` in `GLandscape::Draw`
+  (`0x005E4EDD`), the draw of each class of object (one line for each
+  vtable, with the name of its draw), the tests of the 3D part of an object
+  (the object at `+0x40`: vtable `+0x74`, `+0xB0`, `+0x1A8`), the entries
+  `+0x34`, `+0x38` and `+0x100` of the vtables of the 3D parts of the objects
+  in the list, and the calls of `object_timer_sites` (a call `E8`, `FF 15`,
+  `FF /2` with a 32-bit displacement, or a `mov` of 2 bytes and a call with
+  an 8-bit displacement). A timer counts only on the frame thread, in the
+  call of `fn_005E5CD0`.
+- **No stop of the other threads.** The frame thread writes the timers at
+  the end of a frame (`FinishFrame`), when it is not in a timed call. The
+  draw of the objects runs only on the frame thread. MinHook is not used,
+  so no other thread stops.
+- **The start.** The timers come in the play: when the list of the objects
+  has objects at the end of 300 frames in a row. So they never come in the
+  load. With `test_keys=1`, Ctrl Shift F7 starts and stops them, and the
+  stop writes the bytes of the game back.
+- **The lines.** Each 10 s, `object timer` lines: the time of
+  `fn_005E5CD0` and of its own code, the count of the objects in its list,
+  the timed calls and their cost (a probe at the start measures one timed
+  call), then the 40 timers with the most exclusive time: the calls in a
+  frame, and the exclusive and inclusive ms in a frame, the mean and the
+  most.
+
+A desktop run (`bench_run.ps1`, the test save `temple`, an AMD CPU,
+`game_sse_path=0`, 1311 objects in the list, the village in view) gives
+`fn_005E5CD0` 1.6 to 1.9 ms in a frame:
+
+| The call | Calls in a frame | Exclusive ms | What it does |
+| --- | --- | --- | --- |
+| `fn_00815A70` (vtable `+0x100` of a 3D part), its own code with `fn_0080DB30` (vtable `+0x108`) | 900 | 0.40 | The draw of a 3D part: the test of the view, the detail by the distance, the fog, the matrix of the part and the camera (`fn_007FAFF0`), then the meshes, or an entry in the z sorter |
+| `fn_00856D40`, `fn_0085AB10` (the mesh loops of `fast_transform`) | 790, 180 | 0.38, 0.16 | The vertices, the triangles and the draw of a mesh |
+| `fn_0080F700` (vtable `+0x144` of a 3D part) | 12.6 | 0.41 | A part with a reflection map: `fn_00852C40` for each mesh. Of it 0.38 ms are in 2.8 calls of `fn_0082A830` (a clamp of the vertices and `IDirect3DDevice7::DrawIndexedPrimitive` of the mod with the vertex format `0x2C4`, two sets of texture coordinates), about 0.13 ms for each call |
+| `Tree::Draw` (`0x0074AB00`) and `fn_0063B5D0` | 720 | 0.11, 0.08 | The light of the land under the tree, the fog, the scale of the tree in the matrix of its part, then the draw of the part |
+| `LH3DBoundingBox::CheckRegionOnScreen` (`fn_00868C80`) | 900 | 0.07 | The test of the view of a part (below) |
+| `fn_0080B480` (vtable `+0x34` of a 3D part) | 890 | 0.03 to 0.06 | The detail of a part by its distance |
+| The other classes (`Villager::Draw`, `Abode::Draw`, `Rock::Draw` and 40 more) | 1 to 40 each | 0.02 or less each | |
+
+The x87 unit of a PC is fast. Under FEX the x87 code of the game is slow
+and the SSE code of the mod is fast, so only the lines of a Quest give the
+order of the parts there.
+
+### The objects with SSE
+
+`land_objects=1` (the default, `land_objects.cpp`, the math in
+`land_objects_math.h`) makes two parts of this work with SSE, with the bits
+of the game:
+
+- **The vertex loop of the reflection meshes.** `fn_00852C40` makes each
+  vertex of a mesh with a reflection map on the x87 unit: the matrix, the
+  light, the place in the reflection map (two rows from the normal, made for
+  each mesh), the clip flags and the projection, to a vertex of 40 bytes in
+  `LH3DP3::Table1`. A stub at the start of its loop with one matrix
+  (`0x00852EEC`) runs the SSE loop, four vertices at a time, and goes on at
+  the code after the loop (`0x00853672`). The loop with a matrix for each
+  group of vertices stays the code of the game.
+- **The test of the view of a 3D part** (`fn_00868C80`). It tests the sphere
+  of the bounds of a mesh against the near plane, the eye and the screen,
+  and writes `0x00EA1AF4` (the depth), `0x00C37EA0` (the radius),
+  `0x00EA1AF0` (in the view) and `0x00EA1AD0` (the pick pixel is on it),
+  then calls the entry `+0xA0` of the part. `hand_direct.cpp` hooks the
+  start of the function, so the stub of the mod is at the start of its
+  path of the x87 unit (`0x00868CA2`). The stub writes the globals in the
+  order of the game, calls `+0xA0` with the `edx` of the game, and goes to
+  the end of the game with its return value.
+
+The SSE code runs only while the x87 unit has the precision of 24 bits and
+rounds to the nearest. MXCSR is set to round to the nearest with no flush
+to zero while it runs. `land_objects=0` runs the code of the game.
+`land_objects=2` (a test aid) runs the code of the game and compares the
+SSE code with it: the vertices after the loop, and the end, the return
+value and the globals at each of the four ends of the test of the view.
+Each 10 s the `land objects` lines give the counts and the largest
+differences. With `test_keys=1`, Ctrl Shift F8 steps `land_objects`
+through 1, 0 and 2.
+
+In two desktop runs with `land_objects=2` the compare had 6.1 million
+vertices of 28 900 meshes (at most 352 vertices in a mesh) and, in one of
+the runs, 16.7 million tests of the view, and no bit differed.
+
+### The work before the draws on more threads
+
+`land_objects_threads=N` (0 is the default: one thread, the frame thread)
+starts N worker threads. At the start of `fn_005E5CD0` (a hook of MinHook)
+the workers and the frame thread make the test of the view of each object
+of the list, before the draws. The test of one object reads only that
+object, its 3D part (`+0x40`), its mesh (`+0x7C` of the part, when the entry
+`+0xF8` of its vtable is `fn_007F9E70`) and the camera. A tree scales the
+entries `+0x20` and `+0x28` of the matrix of its part for its draw
+(`Tree::Draw`, when the bits `0x3C0` of `+0x5C` are 0), so the work before
+the draws does the same for a tree. In the draw the stub takes this result
+only when the bounds, the 13 values of the part and the globals of the
+camera have the same bits as before the draws. Else it makes the test
+itself. So each draw and each call of `+0xA0` stays at its place, in the
+order of the game. A fault in the work of a worker drops the result of that
+object. The SSE loop of a mesh with 512 vertices or more goes in parts to
+the threads too. A worker waits with `WaitOnAddress`. With `test_keys=1`,
+Ctrl Shift F9 switches the threads off and on (2 threads when the key is
+0).
+
+In a desktop run with `land_objects_threads=2` 84 percent of the tests of
+the view in the village took the result of the work before the draws, and
+the work before the draws took 0.024 ms of the frame thread in a frame for
+1300 objects.
+
+- Only a headset shows the time of the objects under FEX with
+  `land_objects=1` and with `land_objects_threads=2`: the `object timer`
+  lines with `object_timer=1`.
+- Not known: the cost of the wake of a worker under Wine and FEX on the
+  Quest. When it is more than the gain, `land_objects_threads=0` is the
+  better value.
+- Open: `fn_0082A830` with the vertex format `0x2C4` takes about 0.13 ms for
+  each draw on the PC, most of it in `DrawIndexedPrimitive` of the mod.
+
 ## The thread of Direct3D 7
 
 In a walk the frame thread calls the Direct3D 7 device of dxwrapper about
@@ -6010,6 +6144,9 @@ keys that the launcher sets.
 | `vk_upload_queue`, `vk_scene_reread_test` | 1, 0 | `vk_upload_queue=1`: the copy of a texture that a walk reads again goes to the GPU in the submit of the walk, with no wait of the D3D7 thread. 0: each copy goes to the GPU at once with a wait. A test key: Shift I. `vk_scene_reread_test=N` (a test key) reads N textures again in each walk, in turn. See "The Vulkan renderer" |
 | `fast_transform` | 1 | 1: the two vertex loops of the engine run with SSE, with the bits of the game. 0: on the x87 unit. See "The vertex loops with SSE" |
 | `land_fast` | 1 | 1: the vertex loop of the land on the x87 path runs with SSE, with the bits of the game. 0: on the x87 unit, with no hook. 2: a test aid, the compare. See "The vertex loop of the land with SSE" |
+| `land_objects` | 1 | 1: the vertex loop of the reflection meshes and the test of the view of the 3D parts run with SSE, with the bits of the game. 0: the code of the game. 2: a test aid, the compare. A test key: Ctrl Shift F8. See "The objects on the land" |
+| `land_objects_threads` | 0 | 0: one thread. N: N worker threads make the test of the view of the objects before their draws. A test key: Ctrl Shift F9. See "The objects on the land" |
+| `object_timer`, `object_timer_sites` | 0, empty | A test aid. 1: in the play, each 10 s the time of the draw of the objects and of each class and method of the objects. `object_timer_sites` gives more calls to time. A test key: Ctrl Shift F7. See "The timer of the objects" |
 | `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `crash_log` | 1 | 1: the log gets the first 8 C++ exceptions, an end of the game in `abort`, `terminate` or `_amsg_exit`, and a fault that no handler takes, each with the return addresses on its stack. 0: no line. See "The crash log" |

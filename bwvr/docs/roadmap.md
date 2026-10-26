@@ -1150,6 +1150,14 @@ that moves while the Hand takes it.
   head motion, the power and the heat of a Quest 3, the frames of the game
   under Box64), and a runtime with no `XR_FB_display_refresh_rate` on a
   real headset (the Steam Frame).
+- **N23. The objects on the land under FEX.** `fn_005E5CD0` draws the
+  objects on the land (`backend.md`, "The objects on the land").
+  `land_objects=1` makes the vertex loop of the reflection meshes and the
+  test of the view of the 3D parts with SSE, and `land_objects_threads=N`
+  makes the test of the view of each object before the draws on N worker
+  threads. Next in the headset: the `object timer` lines (`object_timer=1`)
+  with `land_objects=1` and 0, and with `land_objects_threads=2` and 0.
+  Then a fast version of the part that the lines of the Quest show first.
 - **N22. Haptics from the world: check it in a headset.** With
   `world_haptics=1` the hand feels the purr of a stroke, the beat of a
   living thing in the Hand, the land under a grip, the thump of a landing

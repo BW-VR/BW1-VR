@@ -31,6 +31,8 @@
 #include "d3d7_thread.h"
 #include "fast_transform.h"
 #include "land_fast.h"
+#include "land_objects.h"
+#include "object_timer.h"
 #include "thread_wait.h"
 #include "time_log.h"
 #include "walk_parts.h"
@@ -635,6 +637,10 @@ int g_fast_transform = 1;
 int g_fast_transform_check = 0;
 int g_land_fast = 1;
 int g_game_sse_path = -1;
+int g_object_timer = 0;
+int g_land_objects = 1;
+int g_land_objects_threads = 0;
+char g_object_timer_sites[512] = "";
 int g_d3d7_count = 0;
 int g_d3d7_thread = 1;
 int g_d3d7_thread_merge = 1;
@@ -1684,6 +1690,16 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "land_fast", 1, path));
   g_game_sse_path = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "game_sse_path", -1, path));
+  // The objects on the land with SSE and worker threads (land_objects.h).
+  g_land_objects = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "land_objects", 1, path));
+  g_land_objects_threads = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "land_objects_threads", 0, path));
+  // The timer of the objects on the land (object_timer.h), a test aid.
+  g_object_timer = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "object_timer", 0, path));
+  GetPrivateProfileStringA("bwvr", "object_timer_sites", "", g_object_timer_sites,
+                           sizeof(g_object_timer_sites), path);
   g_d3d7_count =
       GetPrivateProfileIntA("bwvr", "d3d7_count", 0, path) != 0 ? 1 : 0;
   g_d3d7_thread =
@@ -2168,6 +2184,9 @@ void StartVrStep() {
     FastTransformInstall();
     LandFastSetOptions(g_land_fast, g_game_sse_path);
     LandFastInstall();
+    LandObjectsSetOptions(g_land_objects, g_land_objects_threads, g_test_keys);
+    LandObjectsInstall();
+    ObjectTimerSetOptions(g_object_timer, g_object_timer_sites, g_test_keys);
     D3D7CountSetOptions(g_d3d7_count);
     if (!g_vulkan_only) {
       D3D7ThreadSetOptions(g_d3d7_thread);
@@ -2610,6 +2629,8 @@ void __cdecl h_FinishFrame() {
   // The present of the game was in this FinishFrame (time_log.h).
   TimeLogPresent();
   WalkPartsPresent();
+  ObjectTimerFrame();
+  LandObjectsFrame();
   UiBarsEnd(bars);
   ++g_frame;
   // The next reader of the input channel reads a new slot.

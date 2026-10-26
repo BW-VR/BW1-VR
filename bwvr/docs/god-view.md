@@ -363,8 +363,20 @@ and the ground limits added.
   section 3). At a limit the land stops and does not jump. The height of the
   waist point is the height of the press plus the rise of the hand.
 - Both grips: the land turns about up with the hands and scales with their
-  spread, about the land point under the middle of the hands. The height of
-  the press stays, so two hands move the land only across.
+  spread, about the land point under the middle of the hands. Two hands move
+  the land only across. With `controls=0` the height of the table center of
+  the press stays, so land at a different height goes up or down in the room
+  with the zoom. With `controls=1` (`controllers.md`, 5.7) the land under the
+  head at the press keeps its height in the room
+  (`C.y = H - (H - C_a.y) * s / s_a`, `TableGrabSolve` with a level), so the
+  zoom does not lift or drop the player. With `controls=1` the hand that
+  holds on after the other grip opens moves the land only across, until
+  both grips are open (`GrabVertical`), so a zoom in steps keeps the height
+  too. A grab that starts with one hand moves the land up and down. With
+  each value of `controls` the
+  log names the land under the head at the anchor (`grab : two hands, the
+  land under your head is at ...`) and, when the grips settle, how far that
+  land is below the head now and at the anchor.
 - The solve is from the press every time, so a head that moves with still
   hands moves nothing, and nothing moves after the release.
 - The scale stays between 7.5 and `god_far_units_per_meter`. The mouse pan
@@ -728,6 +740,43 @@ event.
   has one line for a refused push.
 - **The other stick** keeps its jobs. The stick of the pointing hand turns
   and zooms, also during a walk.
+- **The boost** (`controls=1`, `controllers.md`, 5.7). The trigger of the
+  hand of the stick makes the walk faster while it is pulled. The factor of
+  the speed is 1 up to 10 percent of the pull, `move_stick_boost_pct` / 100
+  (5 by default) from 95 percent, and a straight line between the two
+  (`Boost` in `walk_math.h`). The trigger is the player's own input, and the
+  walk stops in the frame in which the stick comes back, as with no boost.
+  The line of the end of a walk gives the largest factor of the walk. With
+  `controls=0` the trigger of that hand has no job.
+- **The path of a flight** (`controls=1` and `move_stick_path=1`). The view
+  keeps its height in the world while the stick walks: there is no follow
+  of the land, so the view does not go up and down over hills. When the
+  land under the head would come nearer than 10 cm below the head, the step
+  ends before that place (`PathShare` in `walk_math.h`): the player hits the
+  hill. A step that brings the land no nearer goes on, so the player can
+  turn away or climb with the tilt. The line of the end of a walk counts
+  the frames in which the land stopped the step. With `test_keys=1`, Ctrl,
+  Shift and the grave accent key (on a German keyboard the key with the
+  letter O with two dots) change `move_stick_path`. With
+  `controls=0`, or with `move_stick_path=0`, the walk follows the land as
+  `move_stick_follow_land` says.
+- **The climb** (`controls=1` and `move_stick_climb=1`). The tilt of the
+  controller of the stick moves the player up and down while the stick
+  pushes forward, at the speed of the walk (with the boost). The share is 0
+  within 10 degrees of level, and it grows in a straight line to 1 at
+  straight up (`ClimbShare` in `walk_math.h`). A push back climbs the other
+  way. The land under the head stays between 10 cm and 2.5 m below the
+  head. A descent stops at 10 cm. A climb past 2.5 m goes on as a zoom out
+  about the land under the head: that land stays 2.5 m below the head, and
+  the world gets smaller as if the head went up by the rest
+  (`Climb` in `walk_math.h`, ratio = (2.5 m + rest) / 2.5 m). The zoom keeps
+  to the game's switch of the zoom and to the scale limits. The climb never
+  zooms in. With `move_stick_path=0` the follow of the land acts in a
+  climb, so on a slope the land under the head can be some cm past 2.5 m
+  for a moment. The line of
+  the end of a walk gives the climb and the zoom of the walk. With
+  `test_keys=1`, Ctrl, Shift and the backslash key change
+  `move_stick_climb` (on a German keyboard the key with the caret).
 - **Comfort.** A walk with a stick makes some players ill. The grab and the
   teleport move the player with no such motion. `move_stick=0`, and the
   choice "Off" of the launcher, turn the walk off.
@@ -736,6 +785,9 @@ event.
 | --- | --- | --- |
 | `move_stick` | 1 | 0: the stick does not move the player. 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Move with the other stick" |
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
+| `move_stick_boost_pct` | 500 | With `controls=1`: the speed at a full pull of the trigger of the hand of the stick, in percent of the speed with no trigger, 100 to 2000 |
+| `move_stick_path` | 1 | With `controls=1`: 1 the flight keeps its height and stops at the land, with no follow of the land. 0 the walk follows the land as `move_stick_follow_land` says |
+| `move_stick_climb` | 1 | With `controls=1`: 1 the tilt of the controller of the stick moves the player up and down, and past the top limit the world gets smaller. 0 the walk keeps the height |
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
 | `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. The launcher row "Walk follows the land" |
 | `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk (at most 2000 lines in a game) |
@@ -865,13 +917,16 @@ try rotating first." after three seconds and starts again.
 The story plays at the life size scale, as in the immersive mode. When the
 player's camera is back, the God view is built again at the game camera, with
 the last scale and the last ground height (section 15). Ctrl F11 and a new
-land build it again the same way.
+land build it again the same way. The move of a story starts at the head of
+the player, not at the game camera of the God view (section 17).
 
 **Cut scenes.** A cut scene does not play in the full view. While the cinema
 bars of the game are up, the view closes to a screen 2 m ahead, and the game
 shows its cut scene there as play mode 1 does (`cutscene-window.md`). The God
 view stands aside for those frames in the same way, and it is built again in
-the same way when the cut scene ends. The rule above is for a story camera
+the same way when the cut scene ends. Before the first frame in the window,
+while the story waits for its bars and the walls close, the God view keeps
+its view with no move (`cutscene_hold`, `cutscene-window.md`, section 3). The rule above is for a story camera
 with no bars, for example a camera that follows the Creature.
 `cutscene_window=0` gives that rule to cut scenes too.
 
@@ -902,6 +957,11 @@ God view keeps to the same bits:
   (`TabletopGrabAllows`, called by `world_grab.cpp`).
 - A snap turn needs bit 2 (`MayTurn` in `comfort_camera.cpp`).
 - The mouse double click needs bit 0x10, because it is the jump of the game.
+- While bit 8 is off the player cannot come nearer to an object, so the far
+  grab has no range limit then (`far_grab_still_m`, `grab.md`, "The range in a
+  view that the game holds still"). The fireball challenge of Land 2 holds the
+  view still with its seeds 37 units from the game camera, and the God view
+  puts the player at the huts of the target, more than 200 units away.
 
 **The interface levels** [V: the disassembly and
 `Scripts\Quests\challenge.chl`]. A script sets all the bits at one time with
@@ -1165,6 +1225,20 @@ stays the same at every zoom. The fog ends at 900 units, which is 40 m of the
 room at a gain of 3 (22.5 units per meter). Past that the fog would cover the
 island, so it goes off, as on the table.
 
+**The reflection in the water.** With `0x00E9CD8C` set, `fn_007FF4F0` draws
+the blocks of the land again with the heights times -1, under the sea. It
+draws no object. After it, at each gain, `GLandscape::Draw` draws the mesh
+of the player's Hand once more, pale, under the water, and the Creature when
+it is near the sea (`0x005E4914` to `0x005E4B26`). With the controls of the
+mod the game's Hand is hidden, and in place of its reflection the overlay
+draws both hands of the mod there, mirrored at the sea, in the color of the
+game's reflection (`hand_reflection`, [hand.md](hand.md), "The reflection of
+the hands"). The ring of the leash has no reflection in the game. The icon of the kind of leash of the game's interface is a small
+leash at a fixed place in front of the head. While the ring of the leash is
+on the wrist of the hand that does not point, the mod hides that icon
+(`leash_icon_hide`, [grab.md](grab.md), "The leash at the mod's hand"), so
+no ring in the water moves with the head.
+
 **The near plane.** `LandFeature::GetNearClipping` `0x005E2F30` gives 3.5
 units for a camera 20 units or more over the land. At the life size scale that
 is 47 cm, and it would cut away a real hand in front of the eyes. A hook on
@@ -1301,6 +1375,7 @@ the walk with the stick are in section 5.7.
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
+| `story_start_at_head` | 1 | 1: when a script takes the camera, the game camera goes to the head, so the move of the story starts there (section 17). 0: the move starts at the game camera of the God view |
 | `god_spawn` | 1 | 1: the player goes where the game puts its own camera (section 15). 0: the view is built at the start, a load and the end of a story only, with the focus under the recenter pose |
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
 | `god_camera_at` | 1 | 1: the game camera is over the land point under the head. 0: over the recenter place (section 7). Ctrl and Numpad 1 change it with `test_keys=1` |
@@ -1358,6 +1433,7 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | `src/mod/controllers.cpp` | The sticks (`PumpStick`, and `PumpWalk` for the walk), the layout of the buttons (`ButtonLayout`), the menu button (`PumpEsc`), the pointer mode while a dialog box is up (`DirectHandNow`, `ControllersMenuRay`), the grip points and the fake left hand |
 | `src/mod/script_camera.cpp` | `ScriptCameraStoryOwns`, and `ScriptCameraOwnerNow` for the scripts |
 | `src/mod/hand_direct.cpp`, `near_math.h` | The player that a script sees: the hooks on the six script words, the latch of the player and the test of section 16.4 (`ScriptPlayerNow`, `PlayerDistance`, `PlayerIsCamera`, `HeadSees`), and the camera moves of section 16.6 (`ScriptMoveAnswer`, `ScriptHandState`, `ScriptArrows`, `HelpRecent`) |
+| `src/mod/story_start.cpp`, `story_start_math.h` | The start of a story at the head: the hook on `GScript::StartCameraControl` and the camera at the head (section 17) |
 | `src/mod/cutscene_window.cpp`, `cutscene_window_math.h` | The cut scene window: the signal, the state of each frame, the screen and the walls (`cutscene-window.md`) |
 | `src/mod/mod_main.cpp`, `src/launcher/launcher.cpp` | The play modes, the default, and the keys |
 
@@ -2518,8 +2594,11 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   another god in front of the camera. Each place is in a cut scene. Not
   changed.
 - **The other readers of the engine camera** in the game logic (184
-  instructions read `LH3DTech::g_camera`): the villagers, the Creature and
-  the sounds. The sound has its own work (`audio.md`).
+  instructions read `LH3DTech::g_camera`): the villagers and the sounds. The
+  sound has its own work (`audio.md`). The Creature reads the camera of the
+  player from its `GInterfaceStatus`, and in the God view it gets the head
+  while the player stands for the camera (`creature.md`, sections 1.9 and
+  5.4).
 - **The Temple key, a load and a bookmark** have no run with a script test.
 - **The camera moves** (16.6). No run has the step of the zoom of the Gods'
   Playground, which waits for the hold of both buttons. The pointer at a
@@ -2529,3 +2608,81 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   the Island Keeper of the Gods' Playground, the mother of `FollowUs`. It can
   also show if the nearest hand is the right point for a real player, and if
   a script that deletes a thing behind the head is good in VR.
+
+## 17. A story starts at the head
+
+The code is in `story_start.cpp` and `story_start_math.h`.
+
+### 17.1 Why
+
+The game camera of the God view is 400 units from the player and about 300
+units above the land (section 7). A script takes the camera with
+`START_CAMERA_CONTROL` (`GScript::StartCameraControl` `0x006ECCA0`), which
+pushes `CameraModeScript`. Then `MOVE_CAMERA_POSITION` and
+`MOVE_CAMERA_FOCUS` ease the six Zoomers of `GCamera` from where they are
+(`CameraModeScript::MoveCameraPosition` `0x004616F0` calls
+`Zoomer::SetDestinationWithSpeedAndTime` `0x00407D60`) [V]. So the move of a
+story starts far above the player. The scroll of a silver quest is an
+example: its script flies the camera to the scroll for about 8 s, and the
+cinema bars come only after that. In the plain game the move starts at the
+camera of the player, which shows what the player saw.
+
+### 17.2 The rule
+
+- A hook on `GScript::StartCameraControl` reads the top camera mode before
+  and after the call. When the call pushed `CameraModeScript` over a mode of
+  the player, and the God view owned the last frame, the mod puts the six
+  Zoomers at the head of that frame with `Zoomer::SetPosition`
+  `0x00441AC0`: the position at the render head in the world, and the focus
+  one meter of the room ahead of it along the forward axis of the head, at
+  least 10 units (`story_start_math::StartPose`).
+- The next move of the script then starts at the head. A cut of the script
+  (`SET_CAMERA_POSITION`) still cuts.
+- A script that takes the camera again in its story changes nothing: a
+  story mode was on top already.
+- The rule is the same with the cut scene window and with "Around you"
+  (`cutscene_immersive=1`). With the window, the hold of the God view comes
+  first (`cutscene-window.md`, section 3). A story camera that waits longer
+  than `cutscene_hold_wait_ms` for its bars then shows a move that starts at
+  the head.
+- At the start the view goes from the scale of the God view to the life size
+  scale in one cut, at the place of the head. The move of the story comes
+  after the cut.
+- A script that keeps the camera after `START_CAMERA_CONTROL` to put it back
+  at its end keeps the camera at the head. The God view is then built at the
+  land that the head looked at (section 15.4), and not at its place of
+  before the story (section 15.5).
+
+### 17.3 The keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `story_start_at_head` | 1 | 1 is this section. 0 leaves the game camera where the God view put it |
+
+With `test_keys=1`, Ctrl, Shift and S change it. It acts at the next story.
+
+The tag is `story start`. At the start one line gives the key. Each story
+start has one line with the camera of the game before and after the write.
+The three frames after it each have a line with the camera of the game and
+its distance from the head of the start. The report has the count of the
+starts.
+
+### 17.4 Tests and what needs the headset
+
+The math test (`story_start_checks.h`) covers the rule (each condition) and
+the camera at the head: the position, the focus 100 units ahead at 100 units
+a meter, the pitch and the heading of the head, the least distance at the
+life size scale, a head with no forward axis, and a value that is not a
+number.
+
+A desktop run of a new game on Land 1 (`throw_queue.ps1 -Runs land
+-NewGame`) shows the start of the first story: the script took the camera
+at 1486.3 26.7 1973.7, and the mod put it at the head at 1462.1 60.0 2032.3,
+71.6 units away. In the three frames after it the camera of the game was
+0.0 units from the head. The story ran to its end, and the God view was
+built again at the game camera.
+
+- **Only the headset can show** whether the cut to the life size scale at
+  the head, and the move after it, feel right. Not run: the scroll of a
+  silver quest, a story with the cut scene window that waits for its bars,
+  and a script that puts the camera back at its end.

@@ -5,6 +5,8 @@
 #   creature_recipe.ps1 -Name x2 -Dll <dll> -Set "creature_stroke_hand=3"
 #   creature_recipe.ps1 -Name x3 -Dll <dll> -Kind leash
 #   creature_recipe.ps1 -Name x4 -Dll <dll> -Kind stay
+#   creature_recipe.ps1 -Name x15 -Dll <dll> -Kind turn
+#   creature_recipe.ps1 -Name x16 -Dll <dll> -Kind turn -Set "creature_player_head=0"
 #   creature_recipe.ps1 -Name x5 -Dll <dll> -Kind stay -Set "creature_hold_stay=0"
 #   creature_recipe.ps1 -Name x6 -Dll <dll> -Kind tie
 #   creature_recipe.ps1 -Name x7 -Dll <dll> -Kind click
@@ -16,6 +18,8 @@
 #   creature_recipe.ps1 -Name x14 -Dll <dll> -Kind giftfree
 #   creature_recipe.ps1 -Name x15 -Dll <dll> -Kind look
 #   creature_recipe.ps1 -Name x16 -Dll <dll> -Kind look -Set "creature_look_head=0"
+#   (-Kind look sets creature_player_head=0, so that creature_look.cpp has the
+#   hook of Creature::LookAtCamera: docs/creature.md, section 5.6)
 #
 #   creature_recipe.ps1 -Name x9 -Dll <dll> -Kind leash -NewGame
 #
@@ -78,6 +82,15 @@
 #   door between the grips, so the run does not show a stay that stops a
 #   walk. With creature_hold_stay=0 each close of the grip is a leash click,
 #   and no grip makes the Creature stay.
+# -Kind turn:
+#   Where the Creature turns to and looks (creature_player_head,
+#   bwvr/docs/creature.md, section 5.4). Two zoom steps in move the view, so
+#   the God view puts the game camera 400 units from the land under the head.
+#   Then the hand aims at the Creature from a distance and holds the grip for
+#   300 frames: the Creature turns to the camera of the player. The log line
+#   "creature head: the Creature turns to the player" gives the point of the
+#   turn and the game's camera. With -Set "creature_player_head=0" the point
+#   is the game's camera.
 # -Kind gift:
 #   The gift of an object to the Creature, with the leash on
 #   (bwvr/docs/creature.md, section 2.9). After two zoom steps in: the grip
@@ -94,7 +107,7 @@
 # -Kind giftfree:
 #   The same with no leash.
 # -Kind look:
-#   The Creature looks at the player (bwvr/docs/creature.md, section 5.4).
+#   The Creature looks at the player (bwvr/docs/creature.md, section 5.5).
 #   A look comes from a plan of the Creature. The steps of -Kind state come
 #   first: the strokes, the slaps and a stay of 300 frames. After the
 #   slaps the Creature shows the player how it feels (a plan that looks at
@@ -189,6 +202,9 @@ if ($Kind -eq 'stay') {
              'aimfar@1335+1 grip@1345+200 ' +
              'aimfar@1700+1 grip@1720+6 aimfar@1820+1 grip@1840+6 ' +
              'aimfar@1950+1 grip@1970+40 shot@2200+1'
+} elseif ($Kind -eq 'turn') {
+    $steps = 'stick_up@800+10 stick_up@830+10 look@860+1500 point@900+1 aimfar@930+1 ' +
+             'grip@950+300 shot@1400+1'
 } elseif ($Kind -eq 'leash') {
     $steps = 'look@800+1200 point@860+1 aimfar@890+1 shot@900+1 grip@910+6 shot@950+1 ' +
              'trigger@980+6 aimfar@1060+1 grip@1080+6 aimfar@1160+1 grip@1180+300'
@@ -196,7 +212,7 @@ if ($Kind -eq 'stay') {
     $new = 80
     # The keys of -Set come after these in the list, so -Set can give a
     # different lean.
-    $keys = "fake_head_right_cm=-60;$keys"
+    $keys = "fake_head_right_cm=-60;creature_player_head=0;$keys"
     $steps = 'stick_up@800+10 stick_up@830+10 look@860+2200 point@900+1 seek@930+1 grip@936+800 ' +
              'nudge@1260+1 nudge@1310+1 nudge@1360+1 nudge@1410+1 ' +
              'rot@1460+1 rot@1530+1 slap@1580+1 slap@1660+1 ' +
@@ -269,6 +285,7 @@ if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
 $pattern = '^hand creature: (the body of|a press|the Creature state|the hand of|a stroke|a slap|a hard slap|the press ends)|' +
            '^hand pick    : the target is|^hand press   : the grip pressed on|' +
            '^far grab    : (the grip closed|the grip opened|the hand cannot)|^creature stay: |' +
+           '^creature head: (the Creature turns|the Creature looks|creature_player_head|Ctrl)|' +
            '^creature cmd : (the leash|a short press|a double press|the trigger opens|test: aimcmd)|' +
            '^creature look: |^text click   : |^hint card    : (frame \d+, the game gives its prompt|the prompt of a text)|' +
            '^controllers  : the left button press started off view|' +

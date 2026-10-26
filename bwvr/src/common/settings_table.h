@@ -276,6 +276,18 @@ inline const Setting kSettings[] = {
      "and long is 0.2 seconds. Some people find a jump easier with a blink."},
 
     {kGroup, nullptr, "Controllers", nullptr, 0, nullptr},
+    {kValues, "controls", "Controls", "Default=0|Trigger is grab=1", 0,
+     "Default: the trigger of your Hand clicks, and its grip takes things. "
+     "The grip of your other hand moves the world. Trigger is grab: the grips "
+     "of both hands only move the world. Hold both grips to turn the world "
+     "and to make it larger or smaller, and your height above the land "
+     "stays. The trigger of your Hand takes a thing at once, also from a "
+     "distance: point, hold the trigger and pull. Where nothing can be "
+     "taken, a press of the trigger clicks. Pull the trigger of your other "
+     "hand while you move with its stick to move faster, and tilt that "
+     "controller up or down to fly up or down. Its X puts the leash on your "
+     "Creature and gives the next kind, and a shake of that hand takes the "
+     "leash off."},
     // Not offered: the Hand is the real hand. The pointer stays in the mod
     // for a dialog box and for tests (controller_hand=0).
     // {kValues, "controller_hand", "Hand", "Direct hand=1|Pointer=0", 1,
@@ -287,6 +299,11 @@ inline const Setting kSettings[] = {
      "in the options of the game chooses it. Right or Left: the controller "
      "of that hand is the Hand. The other controller grabs the world, moves "
      "you with its stick and opens the ring."},
+    {kSlider, "hand_real_cm", "Your hand length", "14|26|1| cm", 19,
+     "The length of your real hand, from the wrist to the tip of the middle "
+     "finger. Your hands in the game have this length, so they are the size "
+     "of your own hands, and so has the ring of the leash. "
+     "Measure your hand and set the value here."},
     {kBool, "hand_glow", "Glow at the Hand's point", nullptr, 0,
      "A small glow at the tip of the index finger shows the point of the "
      "Hand that picks up and clicks. It shows while a press of the grip "

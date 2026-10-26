@@ -321,6 +321,21 @@ still:
   Shift Menu key      Change the walk with the left stick: where your
                       head faces, where the controller points, or off
                       (move_stick).
+  Ctrl Shift '        Change the controls: as set in the launcher,
+                      or the other choice of "Controls" (key
+                      controls). The ' key is the key with the
+                      letter A with two dots on a German keyboard.
+  Ctrl Shift Num 0    Change the flight with the left stick: at one
+                      height and stopped by the land, or along the
+                      land (move_stick_path).
+  Ctrl Shift \        Turn the flight up and down by the tilt of the
+                      left controller on and off (move_stick_climb).
+                      The \ key is the key with the caret on a German
+                      keyboard.
+  Ctrl Shift /        Change the leash buttons of "Trigger is grab":
+                      X and a shake of the left hand, or the right
+                      hand (key left_leash). The / key is the key
+                      with the number sign on a German keyboard.
   Ctrl Shift Comma    Change the switch of the game that the teleport
                       keeps to: the drag of the land, or the double
                       click jump (teleport_switch).
@@ -350,6 +365,41 @@ left controller is the Hand, and the controls below change sides: the
 left trigger, grip, stick, X and Y do the jobs of the right trigger,
 grip, stick, A and B. The right controller does the jobs of the left
 controller. The left menu button opens the game menu with each hand.
+
+The list below is for the choice "Default" of "Controls" in the
+launcher. The choice "Trigger is grab" (key controls=1) changes these
+controls:
+
+  Both grips          Each grip grabs the land and pulls it. Hold both
+                      grips, then turn or spread your hands to turn
+                      and zoom. Your height above the land stays.
+  Right trigger       Point at a thing, or put the glow of your Hand on
+                      it, and close the trigger: you take it. Pull to
+                      fetch a thing from a distance. Keep the trigger
+                      closed to carry, and open it to let go or to
+                      throw. Where nothing can be taken, a press of
+                      the trigger is a click.
+  Left trigger        Pull it while you move with the left stick to
+                      move faster (key move_stick_boost_pct).
+  Left stick          You fly at one height and do not follow the
+                      land. A hill stops you: fly up over it (key
+                      move_stick_path).
+  Tilt left hand      Point the left controller up or down while you
+                      push the left stick forward to fly up or down.
+                      When you fly up past the highest place, the
+                      world gets smaller (key move_stick_climb).
+  X                   Put the leash on your Creature. Press it again
+                      for the next kind of leash. A leash that is
+                      tied to a thing comes back to your Hand.
+  Shake left hand     Take the leash off. The leash is at your left
+                      wrist.
+  Left trigger        With the leash on, point the left controller at a
+                      thing or at the land and press the trigger: your
+                      Creature goes there. Hold it to aim with the arc.
+                      Your right hand can hold a thing meanwhile.
+
+When you let go of one grip while you zoom, your height stays until
+you let go of both grips.
 
   Trigger             The left mouse button: drag the land, and click
                       on things.
@@ -770,7 +820,9 @@ far_grab_creature=0 to choose your Creature by the point at its feet.
 
 A far object must be near you: at most 2 m of your room from your
 head, along the floor. Set far_grab_max_m in bwvr.ini to change this
-distance. The value 0 gives no limit.
+distance. The value 0 gives no limit. When the game holds your view
+still, as in the fireball challenge of Land 2, a far object can be at
+any distance. Set far_grab_still_m=-1 to keep the limit then.
 
 A pile of food or wood of a store, a field and a fish farm are far
 targets too. Point at one and keep the grip closed to collect from a
@@ -870,8 +922,10 @@ see it, about 30 cm across. Moves of the Hand without B do not draw.
 
 A miracle from a reward or a dispenser is a bubble on the land. Close
 the grip on the bubble to carry it. Then press the trigger to use it.
-A short press of the grip on the bubble uses it at once. The card on
-your hand shows these controls.
+A short press of the grip on the bubble uses it at once. A quick press
+of the trigger with your hand on the bubble uses it too, also while
+your Creature is on the leash. The card on your hand shows these
+controls.
 
 A miracle in your Hand is at your real hand. The card on your hand
 says what the grip does with it:
@@ -965,6 +1019,12 @@ place for a moment. The sea is not a place for this: the ring is red
 there. The grip does not send the Creature. To stroke or slap, put your
 hand on the Creature. Set creature_command=0 to turn the commands of
 the trigger off. The grip on the land then sends the Creature.
+
+A miracle bubble from a reward or a dispenser is no target of a
+command. Put your hand on the bubble and press the trigger quickly:
+the miracle goes into your Hand, as with no leash. Your Creature
+stays on the leash. Set leash_miracle_tap=0 in bwvr.ini if a press
+on the bubble must send your Creature to it, as in the original game.
 
 A press of the trigger is one of two things. A quick press on an
 object with a halo makes your Creature act on that object. So does a

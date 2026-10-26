@@ -61,6 +61,7 @@ add_library(bwvr_mod SHARED
     game_start.cpp
     comfort_camera.cpp
     script_camera.cpp
+    story_start.cpp
     cutscene_window.cpp
     sky_detail.cpp
     sprite_up.cpp
@@ -82,12 +83,14 @@ add_library(bwvr_mod SHARED
     hand_model_file.cpp
     hand_feel.cpp
     far_grab.cpp
+    left_hold.cpp
     take_stream.cpp
     forest_take.cpp
     tree_body.cpp
     creature_command.cpp
     creature_stay.cpp
     creature_look.cpp
+    creature_head.cpp
     miracle.cpp
     village.cpp
     radial_menu.cpp
@@ -104,6 +107,8 @@ add_library(bwvr_mod SHARED
     file_read_ahead.cpp
     hang_watch.cpp
     stall_watch.cpp
+    memory_watch.cpp
+    block_watch.cpp
     gesture_air.cpp
     audio_listener.cpp
     audio_rolloff.cpp

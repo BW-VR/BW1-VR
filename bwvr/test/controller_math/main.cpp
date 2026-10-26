@@ -3530,6 +3530,7 @@ void CreatureChecks() {
 #include "polish_checks.h"
 #include "throw_checks.h"
 #include "window_checks.h"
+#include "story_start_checks.h"
 #include "intro_skip_checks.h"
 #include "intro_motion_checks.h"
 #include "eye_clean_checks.h"
@@ -3539,6 +3540,7 @@ void CreatureChecks() {
 #include "spirit_size_checks.h"
 #include "stay_checks.h"
 #include "look_checks.h"
+#include "head_checks.h"
 #include "ring_checks.h"
 #include "debug_menu_checks.h"
 #include "teleport_checks.h"
@@ -3600,6 +3602,8 @@ void CreatureChecks() {
 #include "gpu_parts_checks.h"
 #include "update_checks.h"
 #include "refresh_rate_checks.h"
+#include "address_space_checks.h"
+#include "large_block_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3969,6 +3973,7 @@ int main() {
   command_checks::CommandChecks();
   command_checks::LiveChecks();
   window_checks::WindowChecks();
+  story_start_checks::StoryStartChecks();
   intro_skip_checks::IntroSkipChecks();
   intro_motion_checks::IntroMotionChecks();
   eye_clean_checks::EyeCleanChecks();
@@ -3997,6 +4002,7 @@ int main() {
   zoom_checks::ZoomChecks();
   stay_checks::StayChecks();
   look_checks::LookChecks();
+  head_checks::HeadChecks();
   text_click_checks::TextClickChecks();
   script_frame_checks::ScriptFrameChecks();
   frame_stats_checks::FrameStatsChecks();
@@ -4044,6 +4050,8 @@ int main() {
   gpu_parts_checks::GpuPartsChecks();
   update_checks::UpdateChecks();
   refresh_rate_checks::RefreshRateChecks();
+  address_space_checks::AddressSpaceChecks();
+  large_block_checks::LargeBlockChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

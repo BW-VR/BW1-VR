@@ -380,6 +380,15 @@ void CreatureLookInstall() {
   if (g_ready) return;
   g_ready = true;
   g_mode = look_math::ClampMode(IniInt("creature_look_head", 1));
+  // Only one module hooks Creature::LookAtCamera (docs/creature.md, "One
+  // hook of Creature::LookAtCamera"). With creature_player_head=1 at the
+  // start creature_head.cpp has it, and this module installs no hook.
+  if (IniInt("creature_player_head", 1) != 0) {
+    g_mode = look_math::kModeCamera;
+    ModLog("creature look: creature_player_head=1, so creature_head.cpp "
+           "hooks Creature::LookAtCamera, and creature_look_head is not used");
+    return;
+  }
   ModLog("creature look: creature_look_head=%d. %s", g_mode,
          g_mode == look_math::kModeHead
              ? "Where a plan of the Creature looks at the camera of the "

@@ -343,6 +343,13 @@ inline float FlatHeading(const float v[3]) { return atan2f(v[0], v[2]); }
 // too, so a still hand moves nothing. Two hands keep the height of the press.
 // GodGroundHeight keeps the result inside the ground limits.
 //
+// With a level (controls=1, the land under the head at the press), two hands
+// keep that world height at its height in the room while they zoom:
+// C.y = H - (H - C_a.y) * s / s_a. So the land under the head stays at the
+// same distance below the head, and a zoom does not lift or drop the player.
+// With no level, two hands keep C.y of the press, and land that is not at
+// that height goes up or down in the room with the zoom.
+//
 // theta and k hold their last values (the ones passed in) when the turn or
 // the zoom is off, or when a spread is below min_spread, where its heading is
 // noise. So they freeze, and they never jump.
@@ -350,7 +357,8 @@ inline void TableGrabSolve(const TableGrab& a, const float table_room[3],
                            const float middle[3], const float spread[3],
                            bool turn, bool zoom, float min_spread, float low,
                            float high, float* theta_io, float* k_io,
-                           TablePose* out, bool vertical = false) {
+                           TablePose* out, bool vertical = false,
+                           const float* level = nullptr) {
   float theta = *theta_io;
   float k = *k_io;
   if (a.hands == 2) {
@@ -393,6 +401,18 @@ inline void TableGrabSolve(const TableGrab& a, const float table_room[3],
   if (vertical && a.hands == 1) {
     out->center[1] = a.pose.center[1] - scale * (middle[1] - a.middle[1]);
   }
+  if (level != nullptr && a.hands == 2 && a.pose.scale > 0.0f) {
+    out->center[1] = *level - (*level - a.pose.center[1]) * scale / a.pose.scale;
+  }
+}
+
+// THE HEIGHT OF ONE HAND (docs/god-view.md, 5.1). In the God view one hand
+// moves the land up and down. With level_after_two (controls=1) a hand that
+// holds on after the other hand let go of a two hand grab moves the land
+// only across, until both grips are open. So a zoom in steps, with one grip
+// that opens and closes again, never lifts or drops the player.
+inline bool GrabVertical(bool god, bool level_after_two, bool had_two) {
+  return god && !(level_after_two && had_two);
 }
 
 // THE EARS ON THE TABLE (docs/tabletop.md, "The ears on the table").

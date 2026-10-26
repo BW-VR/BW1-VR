@@ -747,7 +747,144 @@ inline void PressHoldChecks() {
   }
 }
 
+// THE TRIGGER OF controls=1 (controller_math.h, FlyPressButton): 0 is the
+// left button and 1 the right button of the game.
+inline void FlyPressChecks() {
+  using controller_math::FlyPressButton;
+  printf("\nThe trigger of controls=1\n");
+  Check(FlyPressButton(true, false, false, false, true) == 0,
+        "a press where nothing can be taken is the left button, a click",
+        FlyPressButton(true, false, false, false, true), 0);
+  Check(FlyPressButton(true, false, false, false, false) == 1,
+        "a press on a target near the Hand is the right button, a take",
+        FlyPressButton(true, false, false, false, false), 1);
+  Check(FlyPressButton(true, false, false, true, true) == 1,
+        "a press with a far target is the right button, a far grab",
+        FlyPressButton(true, false, false, true, true), 1);
+  Check(FlyPressButton(true, true, false, true, false) == 0,
+        "a text that waits for a click takes the press before a target",
+        FlyPressButton(true, true, false, true, false), 0);
+  Check(FlyPressButton(true, false, true, true, false) == 0,
+        "a Creature command takes the press before a target",
+        FlyPressButton(true, false, true, true, false), 0);
+  Check(FlyPressButton(false, false, false, false, false) == 0,
+        "with no Hand of the controller the press is the left button",
+        FlyPressButton(false, false, false, false, false), 0);
+}
+
+// THE TAKE WITH THE TRIGGER OF THE OTHER HAND (controller_math.h,
+// LeftTakeStep).
+inline void LeftTakeChecks() {
+  using namespace controller_math;
+  printf("\nThe take with the trigger of the other hand\n");
+  LeftTake t;
+  LeftTakeIn in = {true, false, false, false, false, false, false, 10};
+  LeftTakeOut o = LeftTakeStep(&t, in);
+  Check(o.borrow && o.hold_up && t.state == kLeftProbe,
+        "a press borrows the Hand and holds its trigger open for the probe",
+        t.state, kLeftProbe);
+  in.frame = 12;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftProbe, "the probe lasts kLeftProbeFrames frames",
+        t.state, kLeftProbe);
+  in.frame = 13;
+  in.target = true;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftTake && o.borrow && !o.hold_up,
+        "a target at the borrowed Hand gives the take", t.state, kLeftTake);
+  in.down = false;
+  in.busy = true;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftTake && o.borrow,
+        "the Hand stays while it still carries or lets go", t.state,
+        kLeftTake);
+  in.busy = false;
+  o = LeftTakeStep(&t, in);
+  Check(t.state == kLeftIdle && !o.borrow, "then the Hand goes back",
+        t.state, kLeftIdle);
+  // No target, the leash on: a command.
+  LeftTake c;
+  LeftTakeIn ci = {true, false, false, true, false, false, false, 20};
+  LeftTakeStep(&c, ci);
+  ci.frame = 23;
+  o = LeftTakeStep(&c, ci);
+  Check(c.state == kLeftCommand && o.command && !o.borrow,
+        "with no target and the leash on, the press commands", c.state,
+        kLeftCommand);
+  // No target, no leash: nothing until it opens.
+  LeftTake n;
+  LeftTakeIn ni = {true, false, false, false, false, false, false, 30};
+  LeftTakeStep(&n, ni);
+  ni.frame = 33;
+  o = LeftTakeStep(&n, ni);
+  Check(n.state == kLeftNone && !o.command && !o.borrow,
+        "with no target and no leash, the press does nothing", n.state,
+        kLeftNone);
+  // The carry (left_hold=1): the parked object stays in the other hand, the
+  // Hand goes back, and the opening of the trigger lets the object go.
+  LeftTake k;
+  LeftTakeIn ki = {true, false, true, false, false, false, false, 60};
+  LeftTakeStep(&k, ki);
+  ki.frame = 63;
+  LeftTakeStep(&k, ki);
+  Check(k.state == kLeftTake, "a take before the park", k.state, kLeftTake);
+  ki.parked = true;
+  ki.busy = false;
+  o = LeftTakeStep(&k, ki);
+  Check(k.state == kLeftCarry && !o.borrow && !o.drop,
+        "the park gives the carry, and the Hand goes back", k.state,
+        kLeftCarry);
+  ki.busy = true;
+  o = LeftTakeStep(&k, ki);
+  Check(k.state == kLeftCarry && !o.borrow,
+        "the carry stays while the Hand takes something else", k.state,
+        kLeftCarry);
+  ki.down = false;
+  o = LeftTakeStep(&k, ki);
+  Check(k.state == kLeftIdle && o.drop,
+        "the opening of the trigger lets the carried object go", o.drop ? 1 : 0,
+        1);
+  // The take from the side: the Hand is busy, and an object is at the palm
+  // of the other hand.
+  LeftTake sd;
+  LeftTakeIn si = {true, false, false, false, true, false, true, 70};
+  o = LeftTakeStep(&sd, si);
+  Check(sd.state == kLeftSide && o.side_take && !o.borrow,
+        "a press while the Hand is busy takes from the side, with no borrow",
+        sd.state, kLeftSide);
+  si.parked = true;
+  o = LeftTakeStep(&sd, si);
+  Check(sd.state == kLeftCarry && !o.side_take,
+        "the park of the take from the side gives the carry", sd.state,
+        kLeftCarry);
+  // The Hand is busy at the press: no probe.
+  LeftTake h;
+  LeftTakeIn hi = {true, false, true, true, true, false, false, 50};
+  o = LeftTakeStep(&h, hi);
+  Check(h.state == kLeftCommand && o.command && !o.borrow,
+        "a press while the Hand holds an object commands and borrows nothing",
+        h.state, kLeftCommand);
+  LeftTake h2;
+  hi.leash_on = false;
+  o = LeftTakeStep(&h2, hi);
+  Check(h2.state == kLeftNone && !o.borrow,
+        "without the leash such a press does nothing", h2.state, kLeftNone);
+  // The stick walks: the boost.
+  LeftTake b;
+  LeftTakeIn bi = {true, true, true, true, false, false, false, 40};
+  o = LeftTakeStep(&b, bi);
+  Check(b.state == kLeftBoost && o.boost && !o.borrow,
+        "a press while the stick walks is the boost", b.state, kLeftBoost);
+}
+
 inline void GripRuleChecks() {
+  LeftTakeChecks();
+  FlyPressChecks();
+  Check(controller_math::OtherPressCommands(false),
+        "a press of the other trigger with the stick at rest commands", 1, 1);
+  Check(!controller_math::OtherPressCommands(true),
+        "a press of the other trigger while the stick walks is the boost", 0,
+        0);
   TakeRuleChecks();
   FarTakeChecks();
   LevelChecks();

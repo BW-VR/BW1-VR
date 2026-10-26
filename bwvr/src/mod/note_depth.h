@@ -8,7 +8,7 @@
 // and note_depth_test_frame.
 void NoteDepthSetOptions(int on, const char* test_frames, int test_frame);
 void NoteDepthInstall();
-// The test key (Ctrl, Shift and the apostrophe key in play, test_keys=1).
+// The test key (Ctrl, Shift and N in play, test_keys=1).
 void NoteDepthToggle(const char* cause);
 // The value of note_depth for the debug page, or kDebugCannot.
 int NoteDepthValue();

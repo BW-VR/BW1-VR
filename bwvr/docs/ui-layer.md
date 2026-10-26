@@ -1086,7 +1086,7 @@ of the game takes the flat path then.
 | --- | --- | --- |
 | `hint_hand_depth` | 1 | 1: a tooltip or a hint of the game at the game's Hand has the depth of the Hand. 0: the same pixel in both eyes |
 
-With `test_keys=1`, Ctrl, Shift and the slash key change `hint_hand_depth` in
+With `test_keys=1`, Ctrl, Shift and T change `hint_hand_depth` in
 play, with a long pulse for 1 and a short pulse for 0. Test keys for the
 desktop runs:
 
@@ -1740,7 +1740,7 @@ behind the head of the Creature does not show, as in the plain game.
 | --- | --- | --- |
 | `note_depth` | 1 | 1: a note of the game over a thing has the depth of its place. 0: the interface depth |
 
-With `test_keys=1`, Ctrl, Shift and the apostrophe key change `note_depth` in
+With `test_keys=1`, Ctrl, Shift and N change `note_depth` in
 play. The pointing hand gets a long pulse for 1 and a short pulse for 0.
 
 Test keys for the desktop runs:

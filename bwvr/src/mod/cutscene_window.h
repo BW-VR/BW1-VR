@@ -13,6 +13,12 @@ bool CutsceneWindowFlat();
 // the game. It can change in a game turn, between two frames.
 bool CutsceneWindowBarsUp();
 
+// THE HOLD OF THE GOD VIEW (cutscene_hold). tabletop.cpp asks once a frame,
+// at the main camera call, with the owner of the camera of that call. True
+// while the God view keeps the view of the frame before: a story camera owns
+// the view, and the window is not closed yet (window_math::HoldGod).
+bool CutsceneWindowHoldsGod(bool story_owns);
+
 // stereo.cpp gives the head of each frame, in the LOCAL space of the runtime:
 // the middle of the two eyes and the orientation. The screen goes ahead of
 // this head when a cut scene starts.
@@ -83,12 +89,14 @@ void CutsceneWindowStage(bool to_headset, uint64_t frame, float ipd);
 uint64_t CutsceneWindowEndFrame(uint64_t frame);
 
 // The test keys (with test_keys=1). Numpad 0: the window off and on. Numpad
-// 1: the depth limit off and on.
+// 1: the depth limit off and on. Shift S: the hold of the God view off and
+// on. `keys` names the keys for the log.
 void CutsceneWindowToggle();
 void CutsceneWindowDepthToggle();
 // The values of these keys for the debug page: cutscene_window (0 or 1) and
 // cutscene_depth (0, 1 or 2).
 int CutsceneWindowValue();
 int CutsceneWindowDepthValue();
+void CutsceneWindowHoldToggle(const char* keys);
 
 void CutsceneWindowReport();

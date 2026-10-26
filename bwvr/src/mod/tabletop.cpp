@@ -117,6 +117,9 @@ void ComfortCameraBlink();
 bool ScriptCameraStoryOwns();
 // cutscene_window.cpp: this frame draws on the screen of the cut scene window.
 bool CutsceneWindowFlat();
+// cutscene_window.cpp: a story camera owns the view, and the God view keeps
+// its view until the window is closed (cutscene_hold).
+bool CutsceneWindowHoldsGod(bool story_owns);
 // hand_direct.cpp: the answers that the scripts of the game got from the
 // player since the last call (docs/god-view.md, "The player that a script
 // sees").
@@ -420,6 +423,9 @@ void StopZoomHold(const char* cause, bool view_stays);
 float g_god_last_scale = 0.0f;
 // A story holds the camera, and the God view stands aside.
 bool g_god_story = false;
+// A story holds the camera, and the God view keeps its view until the cut
+// scene window is closed (cutscene_hold). Nothing moves the view then.
+bool g_god_hold = false;
 // Goes up each time the player moves the God view: a step or a grab. The game
 // camera is written once for each value (TabletopGodGameCamera).
 uint64_t g_god_version = 0;
@@ -516,6 +522,13 @@ uint64_t g_clears = 0;
 // the land under the head was below the head at the start.
 struct WalkHold {
   float push[2] = {0.0f, 0.0f};
+  float boost = 1.0f;  // the factor of the speed of the request (controls=1)
+  float boost_most = 1.0f;  // the largest factor in the walk, for the log
+  float climb = 0.0f;       // the share of the climb of the request
+  bool keep_path = false;   // the flight keeps its path (move_stick_path)
+  uint64_t hits = 0;        // frames in which the land stopped the step
+  float climbed = 0.0f;     // the climb of the walk over the land, m of room
+  float zoomed = 1.0f;      // the zoom out of the climb, new scale over old
   bool fresh = false;
   bool have_aim = false;
   float aim[2] = {0.0f, 1.0f};
@@ -2010,20 +2023,39 @@ void StopWalk(const char* cause, bool view_stays) {
               g_walk.frame_most * 1000.0f, g_walk.step_least * 100.0f,
               g_walk.step_most * 100.0f);
   }
+  char boosted[512] = "";
+  if (g_walk.boost_most > 1.0f) {
+    sprintf_s(boosted, " The trigger made the walk at most %.2f times as fast "
+              "(controls=1).", g_walk.boost_most);
+  }
+  if (g_walk.hits != 0) {
+    const size_t used = strlen(boosted);
+    sprintf_s(boosted + used, sizeof(boosted) - used,
+              " The land stopped the step on %llu frames (move_stick_path=1).",
+              g_walk.hits);
+  }
+  if (g_walk.climbed != 0.0f || g_walk.zoomed != 1.0f) {
+    const size_t used = strlen(boosted);
+    sprintf_s(boosted + used, sizeof(boosted) - used,
+              " The tilt of the controller moved the head %.1f cm up over "
+              "the land, and the climb past the top made the world %.3f "
+              "times smaller (controls=1).", g_walk.climbed * 100.0f,
+              g_walk.zoomed);
+  }
   ModLog("god view     : the walk with the stick stopped (%s). You went %.2f "
          "units over the land, which is %.2f cm of the room, %.1f degrees to "
          "the %s of straight ahead in the room. The land under your head was "
          "at %.1f %.1f and is at %.1f %.1f. The stick was pushed for %.3f s, "
          "which gives %.1f cm of the room each second, and the view moved on "
          "%llu of %llu frames (move_stick=%d, %.2f to %.2f units per "
-         "meter), frame %llu.%s%s%s%s%s",
+         "meter), frame %llu.%s%s%s%s%s%s",
          cause, sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
          degrees < -0.05f ? "left" : "right", g_walk.start_under[0],
          g_walk.start_under[1], g_walk.under[0], g_walk.under[1],
          g_walk.seconds,
          g_walk.seconds > 0.0 ? g_walk.path * 100.0f / g_walk.seconds : 0.0,
          g_walk.moved, g_walk.frames, g_walk.rule, g_walk.start_scale, g_scale,
-         ControllersFrameCount(), hill, blind, land, even, late);
+         ControllersFrameCount(), hill, blind, land, even, late, boosted);
 }
 
 // THE WALK WITH THE STICK (move_stick, docs/god-view.md, "The walk with the
@@ -2062,9 +2094,13 @@ void ApplyGodWalk(double frame_seconds) {
                          fresh ? g_walk.push[1] : 0.0f};
   const bool have_aim = fresh && g_walk.have_aim;
   const float aim[2] = {g_walk.aim[0], g_walk.aim[1]};
+  const float boost = fresh ? g_walk.boost : 1.0f;
+  const float climb = fresh ? g_walk.climb : 0.0f;
   g_walk.fresh = false;
   g_walk.have_aim = false;
   g_walk.push[0] = g_walk.push[1] = 0.0f;
+  g_walk.boost = 1.0f;
+  g_walk.climb = 0.0f;
   if (g_walk_check.frames_left > 0 && --g_walk_check.frames_left == 0 &&
       WalkLog()) {
     float eye[3];
@@ -2140,6 +2176,10 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.rose = g_walk.fell = 0.0f;
     g_walk.shown_at = g_walk.period = 0;
     g_walk.shown = g_walk.late = 0;
+    g_walk.boost_most = 1.0f;
+    g_walk.climbed = 0.0f;
+    g_walk.zoomed = 1.0f;
+    g_walk.hits = 0;
     g_walk.have_below = pose.scale > 0.0f;
     g_walk.start_below = g_walk.below =
         g_walk.have_below
@@ -2184,17 +2224,41 @@ void ApplyGodWalk(double frame_seconds) {
     forward[1] = g_walk.forward[1];
   }
   float speed[2], step[2];
-  walk_math::Speed(forward, push, g_settings.move_stick_speed_cm * 0.01f,
-                   speed);
+  if (boost > g_walk.boost_most) g_walk.boost_most = boost;
+  walk_math::Speed(forward, push,
+                   g_settings.move_stick_speed_cm * 0.01f * boost, speed);
   walk_math::Step(speed, seconds, step);
   // In a frame with no time, nothing moves.
   if (step[0] == 0.0f && step[1] == 0.0f) return;
   TablePose next;
+  // THE PATH OF A FLIGHT (controls=1, move_stick_path=1, walk_math.h,
+  // PathShare). The view keeps its height in the world, and the step ends
+  // where the land under the head would come nearer than kGroundNearest
+  // below the head: the player hits a hill and does not glide over it.
+  const bool path = g_walk.keep_path;
+  if (path && pose.scale > 0.0f) {
+    const auto below = [&](float t) {
+      const float part[2] = {step[0] * t, step[1] * t};
+      TablePose at;
+      walk_math::Walk(pose, part, &at);
+      return head[1] - GroundInRoom(at, room, LandUnderHead(at, room, head));
+    };
+    const float share = walk_math::PathShare(below, kGroundNearest);
+    if (share < 1.0f) {
+      ++g_walk.hits;
+      step[0] *= share;
+      step[1] *= share;
+    }
+  }
   walk_math::Walk(pose, step, &next);
   // The waist point stays on the map, as for a grab.
   next.center[0] = ClampCenter(next.center[0]);
   next.center[2] = ClampCenter(next.center[2]);
-  if (next.center[0] == g_center[0] && next.center[2] == g_center[2]) return;
+  // A step that the land stopped can still climb.
+  if (next.center[0] == g_center[0] && next.center[2] == g_center[2] &&
+      climb == 0.0f) {
+    return;
+  }
   float took[2];
   walk_math::InRoom(pose, next.center[0] - pose.center[0],
                     next.center[2] - pose.center[2], took);
@@ -2208,7 +2272,7 @@ void ApplyGodWalk(double frame_seconds) {
   // walk_math.h, and the view goes up or down by the change of its output,
   // so the filtered land keeps its height in the room. The filter starts
   // again when something else moved the view since the last frame of a walk.
-  if (g_settings.move_stick_follow_land != 0 && next.scale > 0.0f) {
+  if (g_settings.move_stick_follow_land != 0 && !path && next.scale > 0.0f) {
     if (!g_follow.have || g_follow.version != g_god_version) {
       walk_math::FollowStart(LandUnderHead(pose, room, head), &g_follow.land);
       g_follow.have = true;
@@ -2223,9 +2287,38 @@ void ApplyGodWalk(double frame_seconds) {
       g_walk.fell -= rise / next.scale;
     }
   }
+  // THE CLIMB (controls=1, walk_math.h, Climb). The tilt of the controller
+  // of the stick moves the head up or down over the land while the stick
+  // pushes forward, at the speed of the walk. Past the top limit of the
+  // ground the climb goes on as a zoom out about the land under the head,
+  // so that land stays at the limit below the head and the world gets
+  // smaller. A descent stops at the bottom limit.
+  if (climb != 0.0f && next.scale > 0.0f) {
+    const float rise = climb * push[1] *
+                       g_settings.move_stick_speed_cm * 0.01f * boost *
+                       seconds;
+    const float land = LandUnderHead(next, room, head);
+    const float below = head[1] - GroundInRoom(next, room, land);
+    const walk_math::ClimbStep up = walk_math::Climb(
+        below, rise, kGroundNearest, kGroundFarthest);
+    next.center[1] += up.lift * next.scale;
+    g_walk.climbed += up.lift;
+    // The zoom keeps to the game's switch of the zoom, as the zoom of the
+    // stick does (the tutorial turns it on at its own step).
+    if (up.ratio != 1.0f && (CameraFeatures() & kFeatureZoom) != 0) {
+      TablePose zoomed;
+      const float used = GodZoom(next, room, head, land, up.ratio,
+                                 GodLowest(), GodHighest(), &zoomed);
+      next = zoomed;
+      next.center[0] = ClampCenter(next.center[0]);
+      next.center[2] = ClampCenter(next.center[2]);
+      g_walk.zoomed *= used;
+    }
+  }
   // The head moves over the land, and a hill there stays below it.
   g_walk.sunk += ZoomClearHead(&next, room, head);
   for (int i = 0; i < 3; ++i) g_center[i] = next.center[i];
+  g_scale = next.scale;
   Derive();
   ++g_serial;
   ++g_god_version;
@@ -2724,6 +2817,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
                     float* lean_gain) {
   g_live = false;
   g_owned = false;
+  g_god_hold = false;
   if (!g_installed || !g_on) return false;
   // The Temple and the other rooms draw from a camera of their own.
   if (!GameCameraPlain()) {
@@ -2751,7 +2845,33 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
     // frame the game camera goes to a screen in the room, and head_camera.cpp
     // makes this call only so that the God view lets go of the frame.
     const bool window = CutsceneWindowFlat();
-    if (ScriptCameraStoryOwns() || window) {
+    const bool story = ScriptCameraStoryOwns();
+    // THE HOLD (cutscene_hold). A story camera starts at the game camera of
+    // the God view, 400 units from the player and far above the land. While
+    // the story waits for its bars and while the walls of the window close,
+    // the God view keeps the view of the frame before, with no step of the
+    // player. The walls then close over the land that the player saw.
+    g_god_hold = g_have_table && CutsceneWindowHoldsGod(story);
+    if (g_god_hold) {
+      g_god_zoom = g_god_ground = g_god_turn = 0;
+      StopZoomHold("a story takes the camera", false);
+      StopWalk("a story takes the camera", false);
+      g_tele.pending = false;
+      g_spawn.pending = false;
+      g_spawn.again = false;
+      g_pan = {};
+      g_god_clock = Seconds();
+      g_god_display = ModDisplaySeconds();
+      for (int i = 0; i < 3; ++i) {
+        position_out[i] = g_origin[i];
+        focus_out[i] = g_origin[i] + g_basis[i * 3 + 2] * g_focus_distance;
+      }
+      *lean_gain = LeanGain(g_scale, HeadPoseScale());
+      g_live = true;
+      g_owned = true;
+      return true;
+    }
+    if (story || window) {
       if (!g_god_story) {
         g_god_story = true;
         ModLog("god view     : %s, so the God view stands aside until your "
@@ -2967,6 +3087,12 @@ bool TabletopPose(TablePose* pose, float table_room[3], float* lowest_scale,
 void TabletopMove(const TablePose& pose) {
   if (!g_installed || !g_have_table) return;
   if (!(pose.scale > 0.0f) || !(pose.heading == pose.heading)) return;
+  // The God view keeps its view while a story takes the camera. The serial
+  // goes up, so the grab anchors again when the view is free.
+  if (g_god_hold) {
+    ++g_serial;
+    return;
+  }
   if ((CameraFeatures() & kFeatureDrag) == 0) {
     ++g_serial;
     ++g_switch_refused;
@@ -3567,7 +3693,8 @@ int TabletopGodMoveStick() {
 
 bool TabletopMoveAllowed() { return (CameraFeatures() & kFeatureDrag) != 0; }
 
-bool TabletopGodWalk(const float push[2], const float* aim) {
+bool TabletopGodWalk(const float push[2], const float* aim, float boost,
+                     float climb, bool path) {
   if (TabletopGodMoveStick() == walk_math::kRuleOff || !TabletopGodOwnsView()) {
     return false;
   }
@@ -3585,6 +3712,9 @@ bool TabletopGodWalk(const float push[2], const float* aim) {
   }
   g_walk.push[0] = push[0];
   g_walk.push[1] = push[1];
+  g_walk.boost = boost >= 1.0f ? boost : 1.0f;
+  g_walk.climb = climb == climb ? climb : 0.0f;
+  g_walk.keep_path = path;
   g_walk.have_aim = aim != nullptr;
   if (aim != nullptr) {
     g_walk.aim[0] = aim[0];

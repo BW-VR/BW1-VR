@@ -216,6 +216,11 @@ the smaller of the two.
 - The button stays down for more than 224 ms: the game picks the seed up as
   an object. The Hand carries it in the Holding state.
 
+With the leash on the Hand, the click sends the Creature to the seed and
+sends no tap. With `leash_miracle_tap=1` the mod gives the click the tap
+back, and the seed is no target of a command (`creature.md`, section 4.1,
+"A miracle on the land").
+
 Packet `0x20` runs `FUN_005DA650` and then `OneOffSpellSeed::InterfaceTap`
 `0x0072A640`. That calls `CreateSpellIntoHand` `0x0072A730`: it needs
 `IsHandReadyForObject`, makes a `SpellSeed`, puts it in the Hand

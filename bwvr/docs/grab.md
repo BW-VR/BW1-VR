@@ -796,8 +796,96 @@ each of these is true:
   hidden.
 
 In each other case the game's point stays, and the log says why (8 lines at
-most). The hook goes in only when the first 13 bytes of the function are the
-bytes of the disassembly. `leash_at_palm=0` leaves the hook out. Tag `leash`
+most).
+
+With `controls=1` and `left_leash=1` the leash is a job of the hand that
+does not point (`controllers.md`, 5.7). The hook then writes the middle of
+the wrist of that hand, as the overlay drew it (`OverlayOtherWrist`,
+`overlay_math::kWristPoint`), for a leash on the Hand. The log line says
+`the rope ends at the wrist of the hand that does not point`.
+
+**The ring of the leash.** For the kind of leash of the Temple, the game draws
+a turning ring of the mesh `Data\MISC\leash.l3d` and a glow over the wrist of
+its Hand [R]. The ring stays at the Hand while the leash is off the Creature
+and while the Hand holds a miracle. The ring is the ring of a post of the
+leash at the Temple: each `LeashObj` of the `TempleLeash`
+(`CitadelHeart::CreateLeashes`) has a ring at `+0x5C` and a sprite at `+0x70`.
+`CitadelHeart::DrawNow` calls `fn_00466730` (thiscall, the `CitadelHeart`, no
+arguments), which turns the three rings at their posts. For the kind of leash
+of the `TempleLeash` (`CitadelHeart+0xE4`, its first value), it puts the ring
+at the wrist bone of the game's Hand instead, when the heart is the heart of
+the local player, the Creature of that player has that kind
+(`Creature+0x1108`, a slot for each kind from 1), the float at `+0x9C` of the
+object at `CitadelHeart+0x40` is 1, and the mesh of the Hand has 0 at `+0xAC`.
+It puts it there with the angles of the first matrix of the pose of the Hand's
+mesh (`CHand+0x482C`, then `+0x80`, `LHMatrix::GetYXZ`), its place, and an
+offset and a size from the size of the mesh (`+0x44` times 173.5) [V]. The
+glow takes the same place.
+
+With `left_leash=1` and `leash_ring_left=1`, while the controller places the
+Hand, a hook of `fn_00466730` makes the same tests (`RingAtHand`). For a call
+that puts the ring at the Hand it gives the function a wrist bone of its own,
+and after the call puts back the matrix of the pose and the size of the mesh.
+The ring lies across the z axis of the bone, so the z axis of that bone goes
+along the other hand (the overlay's hand, `OverlayFreeWrist`), and the ring
+goes around the wrist. The size of the mesh for the call makes the radius of
+the ring 0.17 of the length of the hand. Its place is the middle of the wrist,
+0.04 of the length of the hand toward the knuckles, less the offset of the
+game. The hook measures that offset at the ring after each call, in the frame
+of the bone, for the next call. So the game puts its own ring and glow around
+the wrist of the other hand, with its size and its look. The hook goes in only
+when the first 11 bytes of the function are the bytes of the disassembly. The
+log line says `the game puts the ring of the leash around the wrist of the
+hand that does not point`, with the distance of the ring from the place that
+the hook wants. Tag `leash` also gives one line for each change of the leash
+on the Creature: `the ring stays around the wrist of the hand that does not
+point`. `leash_ring_left=0` leaves the ring at the game's Hand.
+
+**The icon of the kind of leash.** The interface of the game keeps a list of
+`DisplayGesture` items (`0x00D4EAC8`, the count at `0x00D4EAD0`).
+`fn_0068ABA0` makes the list again from the "looking for" list of
+`GInterface::ProcessPowerUpSystem` when that list changes: 24 rows of 16
+bytes, one for each type of gesture, with the order, the kind of spell
+seed, the kind of leash and the level of the power up [V]. An item has the
+type of its gesture at `+0x0C`, the kind of spell seed at `+0x10`, the kind
+of leash at `+0x14` (-1 for none), the level at `+0x18` and the order at
+`+0x34`. `fn_0068AA60` puts each item on the sorted list with the draw
+`fn_0068B480`. That draw calls `fn_0068B7E0` (thiscall, the item, the kind
+of spell seed and the kind of leash, `ret 8`), then the sprite of the
+gesture. For a kind of leash that is not -1, `fn_0068B7E0` draws the small
+leash mesh of that kind (`fn_004645A0`, kinds 1 to 3) with a camera of its
+own at the lower right of the view, and puts the camera back
+(`fn_0068B7D0`). For a kind of spell seed it draws the spell seed. Two
+places make items with a kind of leash [V]:
+
+- `ProcessPowerUpSystem` at `0x005CFA0F`: order 2, the gesture at
+  `0x00DA0590`, and the kind of leash that is on. A match of that gesture
+  puts the leash on or takes it off.
+- `GInterface::DoLeashSelectionSystem` at `0x005D0362`: order 3 plus the
+  kind, the gesture of that kind (`0x00DA0598` and on), one for each kind
+  that is not on. A match changes the kind of leash.
+
+In each eye the leash mesh is at a fixed place to the lower right of the
+view, so it moves with the player, and over the sea it looks like a ring in
+the water. The ring of the leash at the wrist shows that the leash is on.
+With `leash_icon_hide=1`, a hook of `fn_0068B7E0` skips the call for an item
+with a kind of leash while the game puts the ring around the wrist of the
+hand that does not point (`left_leash=1`, `leash_ring_left=1`). The sprite
+of the gesture stays, and an item with no kind of leash stays. The decision
+is latched once a frame, so both eyes agree. The hook goes in only when the
+first 13 bytes of the function are the bytes of the disassembly. The log
+line `the game draws the icon of the kind of leash` comes one time for each
+order, with the kind, the gesture and whether the icon is hidden.
+`leash_icon_hide=0` draws the icon as the game does. With `test_keys=1`,
+Ctrl, Shift and L change the value: a long pulse for 1 and a short pulse
+for 0. The test key `leash_icon_test` gives a frame of the mod at which the
+value changes, as the key does. The ring of the leash at the wrist has no
+reflection in the water ([hand.md](hand.md), "The reflection of the hands"). Only a
+headset shows whether the view over the sea now has no ring that moves with
+the head.
+
+The hook of the rope goes in only when the first 13 bytes of its function
+are the bytes of the disassembly. `leash_at_palm=0` leaves that hook out. Tag `leash`
 gives one line each time the leash comes on, with the palm, the distance from
 the game's point to it, and how far that point is below it. No desktop run can
 put the leash on from a new game.
@@ -1599,6 +1687,36 @@ last frame stays to 15 cm more (`FarInRange`, `kFarRangeKeepM`), so a small move
 of the head does not turn the target off and on. `far_grab_max_m=0` gives no
 limit. An object past the range gets no halo and no lock.
 
+**The range in a view that the game holds still.** While the game's switch for
+the drag of the land is off (bit 8 of `CameraHelp::EnabledFeatures`,
+`god-view.md`, section 7), the player cannot move the view: no grab of the
+land, no walk with the stick and no teleport. Then the range is
+`far_grab_still_m` (0, no limit). The mouse of the plain game reaches each
+object on the screen, and the player of the plain game does not need to move
+there either. `far_test_still_view` and the log line of the change are in
+"The keys".
+
+The fireball challenge of Land 2 needs it [V: `Scripts\Quests\challenge.chl`,
+the scripts `FireBallChallenge` and `Fireball`, source file
+`Land2FireballChallenge.txt`]:
+
+- The script turns all camera controls off with the interface level 12, and
+  it turns them on again only at its end.
+- It puts three one-off seeds of Fireball on the land at 3246.6 3165.7, 37
+  units from its camera at 3217.2 45.2 3189.6. The camera looks at the huts
+  of the target at 3413.2 1.9 3017.7, 264 units away. The plain game shows
+  the seeds at the bottom of the screen and the huts far away.
+- The hand demo of the script (`Fireball`) puts a fourth Fireball in the
+  Hand at the end of the cut scene. No seed is used for it.
+- The challenge waits until the three seeds are gone from the land and the
+  Hand is empty for 6 s, or until three huts are damaged. A fireball that
+  hits only the land does not end it.
+- The God view puts the look point of the camera in front of the head
+  (`god-view.md`, section 15.4), which is the place of the huts. At 12.9
+  units for each meter the seeds are then 215 units away, which is 16.7 m.
+  With the range of 2 m no seed was a far target, and the challenge could not
+  end.
+
 **Classes of far targets.**
 
 - A holdable object, including a single `Tree`. The fetch gives that object.
@@ -2264,6 +2382,7 @@ not jump.
 | `far_grab_sign` | 1 | 1: a signpost is in the last rank: it takes the halo only when the aim is on it and on no other target, or when no other target is in the cone (`far_grab_choice` 2 and 4). 0: a signpost is a scroll of the first rank |
 | `far_grab_pull` | 80 | The speed of the pull, in cm/s |
 | `far_grab_max_m` | 2.0 | The range: a target is at most this far from the head, in meters of the room along the floor. 0 gives no limit |
+| `far_grab_still_m` | 0 | The range while the game holds the view still: its switch for the drag of the land is off (see "The range in a view that the game holds still"). 0 gives no limit. Less than 0 keeps `far_grab_max_m`. Test key: Shift and A |
 | `far_grab_near_cm`, `far_grab_near_out_cm`, `far_grab_beside_loose` | 10, 15, 1 | See "Near objects win" |
 | `far_touch` | 1 | 1 makes a scroll in the aim a far target that the grip activates |
 | `far_leash` | 1 | The leash click on the player's own Creature at a distance (see [creature.md](creature.md)) |
@@ -2283,9 +2402,16 @@ the log has a line. Ctrl with the Backspace key changes `far_grab_stay` between
 both keys. Shift with the Backspace key, with Ctrl up, changes `far_take_carry`
 between 1 and 0, with the same pulses. Ctrl and Shift with the minus key of
 the row of digits change `take_stream` between 1 and 0, with the same pulses.
-The change applies from the next frame, also in a take that runs.
+The change applies from the next frame, also in a take that runs. Shift and
+A, with Ctrl up, change the range of a view that the game holds still between
+`far_grab_still_m` and `far_grab_max_m`, with the same pulses. With
+`far_grab_still_m` less than 0, the key gives no limit.
 
 Test keys for the desktop runs only:
+
+- `far_test_still_view=N`: at frame N the test writes 0 to the camera
+  switches of the game, as the interface level 12 of a script does. The game
+  then holds the view still.
 
 - `far_test_influence=1`: every land point is inside the influence.
 - `far_test_no_trees=1`: no tree is a far target.
@@ -2349,7 +2475,9 @@ the object moved while the lock held, a locked target that goes in or out of the
 influence, a target that the game deleted ("the target is gone", with what the
 far grab does with a closed grip then), and how often
 the locked target went to the pick. "the grip closed on the scroll", "the far
-touch is over", "the forest P gave the new object Q". Tag `take stream`: the
+touch is over", "the forest P gave the new object Q". "the game holds the view
+still" and "the player can move the view again" with the range of a far target
+then (40 lines in a session). Tag `take stream`: the
 start and the end of the stream of a take at a distance ("The stream of a take
 at a distance"). Tag `hand throw`: the
 speed sent and the landing of the real throw. Tag `hand glow` and tag `overlay`:
@@ -2537,7 +2665,17 @@ in a new game, with the dialog recipe of [god-view.md](god-view.md), section
 gets the Hand (`fake_controller_play_frame=2750`, `aim_queue.ps1` and
 `throw_queue.ps1` in `bwvr/tools/desk`).
 
-**Not shown in a run:** a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
+The range in a view that the game holds still: the far fetch of
+`verify_build.ps1` in the test save `pen`, with `far_grab_max_m=0.5` and
+`far_test_still_view=2900`. The test key writes 0 to the camera switches, the
+log says that the game holds the view still, and a press of A is refused.
+With `far_grab_still_m=0` the word `aimfar` takes a rock 3.86 m of the room
+from the Hand, and the lock, the pull and the fetch put it in the Hand. With
+`far_grab_still_m=-1` no object is in the range of 0.5 m, and nothing is
+fetched.
+
+**Not shown in a run:** the fireball challenge of Land 2 itself (no test save
+is there), the test key Shift A, a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
 influence, a villager in the sea, the tether and the halo during a take at a
 distance, a take at a distance from a pile that the game deletes (the runs
 make that case with the test key and a pile of the store), a `Field` as a
@@ -2548,7 +2686,9 @@ land outside the influence, a multiplayer game, a fetch of a villager, a
 Creature or a building, the haptics on a real controller, and the look of the
 halo against open land (the pen is a slope).
 
-**Needs the headset.** Whether 2 m is the right range. Whether the body, the size term and the bias of 3 degrees pick the villager that the hand points at in a crowd, in the quest to save the children. Whether the Creature, a miracle and a signpost are easy to choose with the real aim, and whether a signpost in the last rank is still easy to choose with the aim on it. Whether the cone of 8
+**Needs the headset.** Whether 2 m is the right range. Whether a seed of the
+fireball challenge of Land 2, 16.7 m away at 12.9 units for each meter, is easy
+to aim at with no range limit. Whether the body, the size term and the bias of 3 degrees pick the villager that the hand points at in a crowd, in the quest to save the children. Whether the Creature, a miracle and a signpost are easy to choose with the real aim, and whether a signpost in the last rank is still easy to choose with the aim on it. Whether the cone of 8
 degrees feels right with the real aim pose. Whether the pull at 0.8 m/s or 12 cm
 is easy to do and does not fire by accident. Whether the glide time reads well.
 Whether a take at a distance reads well: the halo, the tether and the count at

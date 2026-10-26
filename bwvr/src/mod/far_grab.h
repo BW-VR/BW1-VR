@@ -13,7 +13,11 @@ struct FarGrabSettings {
   float max_m = 2.0f;      // far_grab_max_m: a target is at most this far from
                            // the head, in meters of the room along the floor.
                            // 0 gives no limit
-  int choice = 2;          // far_grab_choice: 0 one point of the object, 1 its
+  float still_m = 0.0f;    // far_grab_still_m: the range while the game holds
+                           // the view still (its switch for the drag of the
+                           // land is off). 0 gives no limit. Less than 0
+                           // keeps far_grab_max_m
+  int choice = 2;         // far_grab_choice: 0 one point of the object, 1 its
                            // body with a bias for a living thing, 2 its body
                            // with ranks, 3 balls, 4 balls with ranks
                            // (far_choice_math.h)
@@ -43,9 +47,14 @@ bool FarGrabThrowLaw();
 // The cone of the selection, in degrees.
 float FarGrabSelectDeg();
 float FarGrabKeepDeg();
-// far_grab_max_m: the range from the head, in meters of the room. 0 for no
-// limit.
+// The range from the head now, in meters of the room. 0 for no limit. It is
+// far_grab_max_m, and far_grab_still_m while the game holds the view still
+// (FarFrame::still, latched once a frame).
 float FarGrabMaxMeters();
+// far_grab_still_m: true while the range of a view that the game holds still
+// applies. The test key (Shift A) changes it while the game runs.
+bool FarGrabStillOn();
+void FarGrabStillToggle(const char* key);
 // far_grab_choice: 0 to 4. The test key changes it while the game runs.
 int FarGrabChoice();
 void FarGrabSetChoice(int choice);
@@ -87,6 +96,9 @@ struct FarFrame {
   int32_t hand_state;       // CHand+0x4878
   void* take;               // the source of the game's bulk take now, or
                             // the totem that the Hand moves, or null
+  bool still;               // the game holds the view still: its switch for
+                            // the drag of the land is off, so the player
+                            // cannot move (TabletopMoveAllowed)
 };
 void FarGrabFrame(const FarFrame& frame);
 
@@ -170,6 +182,9 @@ bool FarGrabPumpGrip(bool grip, bool ok, bool hand);
 // True while the press of the fetch goes to the game, so it needs no pixel in
 // view: the hand is near the head after a pull.
 bool FarGrabPressing();
+// For controllers.cpp (controls=1): the aim has a far target now, and a
+// press that closes now locks it.
+bool FarGrabHasTarget();
 
 // For overlay.cpp and hand_glow.cpp: what to draw on this frame. hand_glow.cpp
 // draws the halo around the target, and overlay.cpp draws the tether. Nothing

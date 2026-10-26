@@ -520,6 +520,78 @@ inline void HandModelChecks() {
        0.0);
   Near("a name with one digit is no bone", hm::BoneOfName("b7_middle0"), -1.0,
        0.0);
+
+  // THE REFLECTION IN THE WATER (overlay_math.h, MirrorCameraY). A camera
+  // that is turned 30 degrees about y and 50 degrees down, at 1250 8 2150.
+  {
+    const float yaw = 0.5236f, pitch = -0.8727f;
+    const float cy = cosf(yaw), sy = sinf(yaw), cp = cosf(pitch),
+                sp = sinf(pitch);
+    // The rows of the world to camera turn: right, up and forward.
+    const float right[3] = {cy, 0.0f, -sy};
+    const float forward[3] = {sy * cp, sp, cy * cp};
+    const float up[3] = {right[1] * forward[2] - right[2] * forward[1],
+                         right[2] * forward[0] - right[0] * forward[2],
+                         right[0] * forward[1] - right[1] * forward[0]};
+    const float eye[3] = {1250.0f, 8.0f, 2150.0f};
+    float m[12];
+    for (int i = 0; i < 3; ++i) {
+      m[i * 3 + 0] = right[i];
+      m[i * 3 + 1] = up[i];
+      m[i * 3 + 2] = forward[i];
+    }
+    for (int k = 0; k < 3; ++k) {
+      const float* axis = k == 0 ? right : (k == 1 ? up : forward);
+      m[9 + k] = -(axis[0] * eye[0] + axis[1] * eye[1] + axis[2] * eye[2]);
+    }
+    const float points[3][3] = {{1251.3f, 5.7f, 2152.8f},
+                                {1244.1f, 4.2f, 2147.0f},
+                                {1300.0f, -3.0f, 2100.0f}};
+    const float planes[2] = {0.0f, 2.5f};
+    double worst = 0.0;
+    for (int k = 0; k < 2; ++k) {
+      float mirror[12];
+      om::MirrorCameraY(m, planes[k], mirror);
+      for (int p = 0; p < 3; ++p) {
+        const float flipped[3] = {points[p][0],
+                                  2.0f * planes[k] - points[p][1],
+                                  points[p][2]};
+        float a[3], b[3];
+        om::ToCamera(mirror, points[p], a);
+        om::ToCamera(m, flipped, b);
+        const double gap = Gap(a, b);
+        if (gap > worst) worst = gap;
+      }
+    }
+    Near("the mirrored camera puts a point where the plain camera puts its "
+         "mirror image at the plane, for the planes 0 and 2.5",
+         worst, 0.0, 1e-3);
+    float mirror[12];
+    om::MirrorCameraY(m, 0.0f, mirror);
+    const float turn[9] = {m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7],
+                           m[8]};
+    const float flipped_turn[9] = {mirror[0], mirror[1], mirror[2],
+                                   mirror[3], mirror[4], mirror[5],
+                                   mirror[6], mirror[7], mirror[8]};
+    Near("the turn of the camera keeps the lengths", fabs(hm::Det3(turn)),
+         1.0, 1e-4);
+    Near("the mirror changes the sign of the determinant of the turn, so the "
+         "triangles turn the other way",
+         hm::Det3(flipped_turn) + hm::Det3(turn), 0.0, 1e-4);
+    float on_plane[3], same[3];
+    const float water[3] = {1260.0f, 0.0f, 2160.0f};
+    om::ToCamera(m, water, on_plane);
+    om::ToCamera(mirror, water, same);
+    Near("a point on the water stays where it is", Gap(on_plane, same), 0.0,
+         1e-3);
+    // The reflection of a hand 4 units over the water is 4 units under it,
+    // so it is farther from an eye that is over the water.
+    float real[3], image[3];
+    om::ToCamera(m, points[0], real);
+    om::ToCamera(mirror, points[0], image);
+    Check(image[2] > real[2], "the reflection is farther from the eye than "
+          "the hand", image[2], real[2]);
+  }
 }
 
 }  // namespace hand_model_checks

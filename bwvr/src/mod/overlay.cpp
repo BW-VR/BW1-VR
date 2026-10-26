@@ -258,6 +258,11 @@ bool g_said_failed = false;
 uint64_t g_frame = 0;
 int g_eye = -1;
 uint64_t g_asked_frame[2] = {0, 0};
+// The reflection of the hands: the frame of each eye, and the counts of a
+// report window.
+uint64_t g_reflected_frame[2] = {0, 0};
+uint64_t g_reflections = 0;
+uint64_t g_reflection_triangles = 0;
 uint64_t g_drawn_frame[2] = {0, 0};
 
 // For the log: the hands of this frame.
@@ -267,6 +272,9 @@ float g_index_tip[kHands][3];
 float g_trigger[kHands] = {0.0f, 0.0f};
 float g_squeeze[kHands] = {0.0f, 0.0f};
 int g_pointing = 1;
+// The hand of the leash. It is the other hand, also while the trigger of
+// that hand borrows the pointer for a take (controllers.cpp, left_take).
+int g_free_hand = 0;
 float g_units_per_meter = 0.0f;
 float g_length = 0.0f;
 // The index tip on the screen in each eye, for each hand.
@@ -573,6 +581,7 @@ bool BuildFrame() {
     }
   }
   g_pointing = hands.pointing;
+  g_free_hand = hands.free_hand;
   g_units_per_meter = hands.units_per_meter;
   g_length = ControllersHandCm() * 0.01f * ControllersHandScalePct() * 0.01f *
              hands.units_per_meter;
@@ -1141,6 +1150,57 @@ int OverlayEyeTriangles(int eye) {
   return eye == 0 || eye == 1 ? g_eye_triangles[eye] : 0;
 }
 
+bool OverlayOtherWrist(float out[3]) {
+  const int hand = g_free_hand;
+  if (hand < 0 || hand >= kHands) return false;
+  const HandPlace& place = g_hand_place[hand];
+  if (!place.have || g_frame > place.frame + 1) return false;
+  overlay_math::PlacePoint(place.position, place.rotation, place.length,
+                           hand == 0, overlay_math::kWristPoint, out);
+  return true;
+}
+
+// The wrist of the hand that does not point in the world, for the ring of
+// the leash (hand_direct.cpp): the middle of the wrist, the axes of the hand
+// (rows: across the palm, along the fingers, out of the palm) and the length
+// of the hand. False while that hand was not drawn, or while it points and
+// pointing is false.
+bool OverlayFreeWrist(float point[3], float axes[9], float* length,
+                      bool pointing) {
+  const int hand = g_free_hand;
+  if (hand < 0 || hand >= kHands || (hand == g_pointing && !pointing)) {
+    return false;
+  }
+  const HandPlace& place = g_hand_place[hand];
+  if (!place.have || g_frame > place.frame + 1) return false;
+  overlay_math::PlacePoint(place.position, place.rotation, place.length,
+                           hand == 0, overlay_math::kWristPoint, point);
+  for (int axis = 0; axis < 3; ++axis) {
+    for (int r = 0; r < 3; ++r) axes[axis * 3 + r] = place.rotation[r * 3 + axis];
+  }
+  *length = place.length;
+  return true;
+}
+
+// The tip of the index finger of the hand that does not point, at rest, in
+// the world (left_hold.cpp, the glow of the other hand), and the length of
+// the hand. False while that hand was not drawn.
+bool OverlayFreeTip(float out[3], float* length) {
+  const int hand = g_free_hand;
+  if (hand < 0 || hand >= kHands) return false;
+  const HandPlace& place = g_hand_place[hand];
+  if (!place.have || g_frame > place.frame + 1) return false;
+  float tip[3];
+  overlay_math::FingerTip(1, overlay_math::kRestCurl, tip);
+  overlay_math::PlacePoint(place.position, place.rotation, place.length,
+                           hand == 0, tip, out);
+  *length = place.length;
+  return true;
+}
+
+// The hand that does not point is the left hand (left_hold.cpp).
+bool OverlayFreeHandLeft() { return g_free_hand == 0; }
+
 // For a source that aims with a hand (0 the left hand, 1 the right hand), for
 // example a Creature command: the hand takes the point pose. Call it in each
 // frame of the aim. The pose ends one frame after the last call.
@@ -1345,8 +1405,46 @@ void OverlayDraw() {
   }
 }
 
+// hand_exact.cpp, in place of the game's reflection of its hidden Hand
+// (GLandscape::Draw, 0x005E4985): the reflection of the hands of the mod in
+// the water, in each eye pass at most once a frame. Only the mesh hands of
+// hand_model.cpp have a reflection. True when a hand was drawn.
+bool OverlayDrawReflection() {
+  if (!g_mesh_hands) return false;
+  const int eye = g_eye;
+  if (eye < 0 || eye > 1 || g_reflected_frame[eye] == g_frame) return false;
+  g_reflected_frame[eye] = g_frame;
+  IDirect3DDevice7* device =
+      *reinterpret_cast<IDirect3DDevice7* const*>(
+          bw::render::kDirect3DDevice7);
+  if (device == nullptr) return false;
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(
+          bw::tech::kInfoTransform);
+  const float near_plane =
+      *reinterpret_cast<const float*>(bw::tech::kNearPlane);
+  const float hx = info->half_res_x, hy = info->half_res_y;
+  if (!(near_plane > 0.0f) || !(hx > 0.0f) || !(hy > 0.0f)) return false;
+  float m[12];
+  OverlayEyeMatrix(m);
+  const int drawn = HandModelDrawReflection(device, m, near_plane, hx, hy);
+  if (drawn > 0) {
+    ++g_reflections;
+    g_reflection_triangles += static_cast<uint64_t>(drawn);
+  }
+  return drawn > 0;
+}
+
 // Once a report window.
 void OverlayReport() {
+  if (g_reflections > 0) {
+    ModLog("overlay      : the reflection of the hands in the water is drawn "
+           "in %llu eye passes, %.0f triangles a pass",
+           g_reflections,
+           static_cast<double>(g_reflection_triangles) /
+               static_cast<double>(g_reflections));
+    g_reflections = g_reflection_triangles = 0;
+  }
   HandModelReport();
   HandFeelReport();
   if (g_drawn == 0 && g_nothing == 0 && g_failed == 0) return;

@@ -430,4 +430,24 @@ inline float SettleShare(float t) {
   return 1.0f - u * u * (3.0f - 2.0f * u);
 }
 
+// THE TAKE FROM THE SIDE (left_hold.cpp): the place of the origin of an
+// object in the frame of the wrist of a hand, so that the ball of its body
+// touches the palm as the held object of the Hand does (HoldCenter). The
+// frame of the wrist has its origin at kWristPoint and the axes of the hand
+// (across the palm, along the fingers, out of the palm) in world units, with
+// x mirrored for a left hand, as PlacePoint does. radius is the radius of the
+// ball in world units, and up is the up axis of the object in that frame
+// (unit length): the middle of the ball is that far up from the origin.
+inline void WristHoldPlace(float radius, float length, bool left,
+                           const float up[3], float out[3]) {
+  float center[3];
+  overlay_math::HoldCenter(length > 0.0f ? radius / length : 0.0f, center);
+  const float side = left ? -1.0f : 1.0f;
+  const float middle[3] = {
+      side * (center[0] - overlay_math::kWristPoint[0]) * length,
+      (center[1] - overlay_math::kWristPoint[1]) * length,
+      (center[2] - overlay_math::kWristPoint[2]) * length};
+  for (int i = 0; i < 3; ++i) out[i] = middle[i] - radius * up[i];
+}
+
 }  // namespace hand_exact_math

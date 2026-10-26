@@ -3067,8 +3067,8 @@ void UiDepthSetHintHandDepth(int on, int test_frame) {
   }
 }
 
-// The test key (Ctrl, Shift and the slash key, test_keys=1). A long pulse for
-// 1 and a short pulse for 0.
+// The test key (Ctrl, Shift and T, test_keys=1). A long pulse for 1 and a
+// short pulse for 0.
 void UiDepthToggleHintHandDepth(const char* cause) {
   g_hint_hand_depth = g_hint_hand_depth != 0 ? 0 : 1;
   ControllersGesturePulse(0.5f, g_hint_hand_depth != 0 ? 0.30f : 0.08f);

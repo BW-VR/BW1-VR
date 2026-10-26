@@ -11,6 +11,11 @@
 //
 // THE RANGE. A target is at most far_grab_max_m meters of the room from the
 // head, along the floor (2 m). hand_direct.cpp applies it in the selection.
+// While the game holds the view still, the range is far_grab_still_m (no
+// limit). A script can turn all camera controls off (the interface level 12
+// of the fireball challenge of Land 2), and the player then cannot come
+// nearer to an object that the script put in the shot of the game camera.
+// The mouse of the plain game reaches each object on the screen.
 //
 // A BULK SOURCE (a pile of a store, a field, a fish farm) is a target too.
 // It needs no pull: the grip that closes on it starts the game's bulk take at
@@ -97,6 +102,8 @@ extern void ModLog(const char* format, ...);
 // hand_direct.cpp: the leash click on the player's own Creature (packet
 // 0x5F), with no press of the game. False when the game would not take it.
 bool HandDirectLeashClick(void* creature);
+// controllers.cpp: a pulse of the pointing controller, for the test key.
+void ControllersGesturePulse(float amplitude, float seconds);
 // hand_exact.cpp: a call after CHand::PrepareForDrawing.
 bool HandExactAddPrepareHook(void (*hook)(void* hand));
 // hand_direct.cpp: the CHand, and whether the controller places it now.
@@ -129,6 +136,14 @@ const int kObjectMesh = 0x40;
 const int kMeshTranslation = 0x38;
 
 FarGrabSettings g_set;
+// THE VIEW THAT THE GAME HOLDS STILL. g_still is FarFrame::still of this
+// frame. g_still_on is far_grab_still_m 0 or more, and the test key changes
+// it. g_still_m is the range then, 0 for no limit.
+bool g_still = false;
+bool g_still_on = true;
+float g_still_m = 0.0f;
+int g_still_logs = 0;
+const int kMaxStillLogs = 40;
 bool g_installed = false;
 bool g_hooked = false;
 
@@ -376,6 +391,20 @@ void GlidePrepare(void* hand) {
   }
 }
 
+// What far_grab_still_m does now, for the log.
+const char* FarGrabStillWords() {
+  if (!g_still_on) {
+    return "While the game holds the view still, a far target stays in the "
+           "range of far_grab_max_m";
+  }
+  return g_still_m > 0.0f
+             ? "While the game holds the view still (its switch for the drag "
+               "of the land is off), a far target has this range"
+             : "While the game holds the view still (its switch for the drag "
+               "of the land is off), a far target can be at any distance, as "
+               "the mouse of the plain game reaches each object on the screen";
+}
+
 }  // namespace
 
 void FarGrabSetOptions(const FarGrabSettings& settings) {
@@ -389,6 +418,10 @@ void FarGrabSetOptions(const FarGrabSettings& settings) {
   if (!(g_set.max_m > 0.0f)) g_set.max_m = 0.0f;
   if (g_set.max_m > 0.0f && g_set.max_m < 0.5f) g_set.max_m = 0.5f;
   if (g_set.max_m > 100.0f) g_set.max_m = 100.0f;
+  g_still_on = g_set.still_m >= 0.0f;
+  g_still_m = g_still_on ? g_set.still_m : 0.0f;
+  if (g_still_m > 0.0f && g_still_m < 0.5f) g_still_m = 0.5f;
+  if (g_still_m > 100.0f) g_still_m = 100.0f;
   g_set.choice = far_choice_math::ClampChoice(g_set.choice);
   if (!(g_set.living_deg >= 0.5f)) g_set.living_deg = 0.5f;
   if (g_set.living_deg > 20.0f) g_set.living_deg = 20.0f;
@@ -430,6 +463,8 @@ void FarGrabSetOptions(const FarGrabSettings& settings) {
       ModLog("far grab    : far_grab_max_m=0, so a target can be at any "
              "distance");
     }
+    ModLog("far grab    : far_grab_still_m=%.2f. %s", g_set.still_m,
+           FarGrabStillWords());
   }
 }
 
@@ -437,7 +472,18 @@ bool FarGrabOn() { return g_set.on; }
 bool FarGrabThrowLaw() { return g_set.throw_law; }
 float FarGrabSelectDeg() { return static_cast<float>(g_set.cone_deg); }
 float FarGrabKeepDeg() { return static_cast<float>(g_set.cone_deg + 6); }
-float FarGrabMaxMeters() { return g_set.max_m; }
+float FarGrabMaxMeters() {
+  return g_still && g_still_on ? g_still_m : g_set.max_m;
+}
+bool FarGrabStillOn() { return g_still_on; }
+void FarGrabStillToggle(const char* key) {
+  g_still_on = !g_still_on;
+  if (g_still_on && g_set.still_m < 0.0f) g_still_m = 0.0f;
+  ControllersGesturePulse(0.5f, g_still_on ? 0.30f : 0.08f);
+  ModLog("far grab    : test key %s: the range of a view that the game holds "
+         "still is %s now, frame %llu. %s", key, g_still_on ? "on" : "off",
+         g_f.frame, FarGrabStillWords());
+}
 int FarGrabChoice() { return g_set.choice; }
 void FarGrabSetChoice(int choice) {
   g_set.choice = far_choice_math::ClampChoice(choice);
@@ -517,6 +563,26 @@ void FarGrabFrame(const FarFrame& f) {
   g_have_frame = true;
   CreatureStayFrame(f.now, f.frame);
   CreatureLookFrame(f.now, f.frame);
+  // THE VIEW THAT THE GAME HOLDS STILL, latched for the selection of this
+  // frame. A log line for each change.
+  if (f.still != g_still) {
+    g_still = f.still;
+    if (g_still_logs < kMaxStillLogs) {
+      ++g_still_logs;
+      if (g_still) {
+        ModLog("far grab    : the game holds the view still (its switch for "
+               "the drag of the land is off), so the range of a far target "
+               "is %s, frame %llu",
+               !g_still_on       ? "far_grab_max_m (far_grab_still_m is off)"
+               : g_still_m > 0.0f ? "far_grab_still_m"
+                                  : "no limit (far_grab_still_m=0)",
+               f.frame);
+      } else {
+        ModLog("far grab    : the player can move the view again, so the "
+               "range of a far target is far_grab_max_m, frame %llu", f.frame);
+      }
+    }
+  }
   // A glide that never started: the Hand did not hold the object.
   if (g_glide.armed && !g_glide.started &&
       f.now - g_glide.armed_at > kGlideWaitSeconds &&
@@ -1006,6 +1072,10 @@ bool FarGrabPumpGrip(bool grip, bool ok, bool hand) {
 }
 
 bool FarGrabPressing() { return g_state == kFetch; }
+
+bool FarGrabHasTarget() {
+  return g_set.on && g_state == kAim && g_have_pick;
+}
 
 bool FarGrabDrawState(FarDraw* out) {
   if (!g_set.on || !g_have_frame || !g_have_pick || g_state == kIdle) {

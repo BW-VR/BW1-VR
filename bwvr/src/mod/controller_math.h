@@ -966,6 +966,157 @@ inline bool GripPressGuarded(bool guard_on, bool closed, int phase,
          since_close_ms < kGripGuardMs;
 }
 
+// THE TRIGGER OF controls=1 (docs/controllers.md, "5.7 The control
+// schemes"). The grips of both hands only grab the world. So the trigger of
+// the pointing hand is the left button and the right button of the game. The
+// press decides which, and the trigger keeps that button until it opens:
+//
+//   0. The controller does not place the Hand (a menu of the game, a load):
+//      the left button, as with controls=0.
+//   1. A text of the game waits for a click: the left button, the click.
+//   2. The leash is on the Hand, and the trigger commands the Creature: the
+//      left button, which the command takes (creature_command.cpp).
+//   3. The far grab has a target, or the Hand is not free (it holds a thing,
+//      it is not in its Normal state, or it is on or near an object that a
+//      press acts on): the right button. It takes, carries, throws, taps,
+//      strokes and casts, as the grip does with controls=0.
+//   4. Else the left button: a short press is a click of the game.
+//
+// So a press on a target takes it at once, with no wait for a tap time, and
+// a press where nothing can be taken clicks. Returns 0 for the left button
+// and 1 for the right button.
+// THE TRIGGER OF THE OTHER HAND with left_leash=1. A press while the stick
+// of that hand walks is the boost of the walk. Each other press commands the
+// Creature. The press keeps its job until the trigger opens.
+inline bool OtherPressCommands(bool stick_walks) { return !stick_walks; }
+
+// THE TAKE WITH THE TRIGGER OF THE OTHER HAND (controls=1, left_take=1). The
+// game has one Hand. A press of the trigger of the other hand borrows it:
+//
+//   - the stick of that hand walks at the press: the boost, until it opens;
+//   - the Hand is busy at the press (it holds an object, or its own trigger
+//     is down): no take. The press commands the Creature with the leash on,
+//     else it does nothing;
+//   - else the probe: the Hand goes to that controller, and for
+//     kLeftProbeFrames frames the pick of the mod looks there, and the press
+//     reaches nothing (hold_up keeps the trigger of the Hand open);
+//   - a target there (an object at the Hand's point or a far target): the
+//     take. The Hand stays at that controller while the trigger is down and
+//     while the Hand still carries or lets go (busy);
+//   - no target, the leash on: the Hand goes back, and the press commands
+//     the Creature;
+//   - no target, no leash: the Hand goes back, and the press does nothing.
+//
+// With left_hold=1 the take ends in the carry: once the Hand holds the
+// object, the mod parks it in the other hand (left_hold.cpp, parked), and the
+// Hand goes back. The object stays in that hand while the trigger is down,
+// and the opening of the trigger lets it go (drop). While the Hand is busy,
+// a press with an object that the Hand can hold at the palm of the other
+// hand (side_target) is the take from the side: the mod takes the object
+// for the other hand with no borrow of the Hand (side_take), and the park
+// gives the carry.
+enum LeftTakeState {
+  kLeftIdle,
+  kLeftBoost,
+  kLeftProbe,
+  kLeftTake,
+  kLeftCommand,
+  kLeftNone,
+  kLeftCarry,
+  kLeftSide,
+};
+const uint64_t kLeftProbeFrames = 3;
+
+struct LeftTake {
+  int state = kLeftIdle;
+  uint64_t probe_frame = 0;
+};
+
+struct LeftTakeIn {
+  bool down;         // the trigger of the other hand
+  bool stick_walks;  // the stick of that hand walks now
+  bool target;       // the pick has a target at the borrowed Hand
+  bool leash_on;     // the leash is on the Hand
+  bool busy;         // the Hand holds an object, or its trigger is down
+  bool parked;       // the other hand carries the object of the take now
+  bool side_target;  // an object to hold at the palm of the other hand
+  uint64_t frame;    // the controllers frame
+};
+
+struct LeftTakeOut {
+  bool borrow;   // the Hand is at the controller of the other hand
+  bool hold_up;  // the trigger of the Hand reads as open (the probe)
+  bool command;  // the trigger of the other hand commands the Creature
+  bool boost;    // the trigger of the other hand is the boost of the walk
+  bool drop;     // the other hand lets go of the object that it carries
+  bool side_take;  // take the object at the palm for the other hand
+};
+
+inline LeftTakeOut LeftTakeStep(LeftTake* t, const LeftTakeIn& in) {
+  bool drop = false;
+  switch (t->state) {
+    case kLeftIdle:
+      if (in.down) {
+        if (in.stick_walks) {
+          t->state = kLeftBoost;
+        } else if (in.busy) {
+          t->state = in.side_target ? kLeftSide
+                                    : (in.leash_on ? kLeftCommand : kLeftNone);
+        } else {
+          t->state = kLeftProbe;
+          t->probe_frame = in.frame;
+        }
+      }
+      break;
+    case kLeftProbe:
+      if (!in.down) {
+        t->state = kLeftIdle;
+      } else if (in.frame >= t->probe_frame + kLeftProbeFrames) {
+        t->state = in.target ? kLeftTake
+                             : (in.leash_on ? kLeftCommand : kLeftNone);
+      }
+      break;
+    case kLeftTake:
+      if (in.parked) {
+        t->state = kLeftCarry;
+      } else if (!in.down && !in.busy) {
+        t->state = kLeftIdle;
+      }
+      break;
+    case kLeftSide:
+      if (in.parked) {
+        t->state = kLeftCarry;
+      } else if (!in.down) {
+        t->state = kLeftIdle;
+      }
+      break;
+    case kLeftCarry:
+      if (!in.down || !in.parked) {
+        t->state = kLeftIdle;
+        if (in.parked) drop = true;
+      }
+      break;
+    default:  // the boost, the command, nothing: until the trigger opens
+      if (!in.down) t->state = kLeftIdle;
+      break;
+  }
+  LeftTakeOut out;
+  out.borrow = t->state == kLeftProbe || t->state == kLeftTake;
+  out.hold_up = t->state == kLeftProbe;
+  out.command = t->state == kLeftCommand;
+  out.boost = t->state == kLeftBoost;
+  out.drop = drop;
+  out.side_take = t->state == kLeftSide;
+  return out;
+}
+
+inline int FlyPressButton(bool placed, bool text_waits, bool command,
+                          bool far_target, bool hand_free) {
+  if (!placed || text_waits || command) return 0;
+  if (far_target || !hand_free) return 1;
+  return 0;
+}
+
 // THE GRAB OF THE WORLD. See docs/god-view.md, "5.1 The grab of the land".
 //
 // A point a in the room is the world point C + L * a, with C the game camera

@@ -75,7 +75,29 @@ inline int Path(float mps, const float (*points)[3], const double* leg_s,
   return shakes;
 }
 
+// THE BUTTON OF THE LEASH (creature_command_math.h, LeashButton).
+inline void LeashButtonChecks() {
+  using namespace command_math;
+  printf("\nThe button of the leash\n");
+  Check(LeashButton(false, false, false, false) == kLeashButtonNone,
+        "with no Creature the button does nothing",
+        LeashButton(false, false, false, false), kLeashButtonNone);
+  Check(LeashButton(true, false, false, false) == kLeashButtonClick,
+        "with the leash off the button puts it on",
+        LeashButton(true, false, false, false), kLeashButtonClick);
+  Check(LeashButton(true, false, true, true) == kLeashButtonNext,
+        "with the leash on the Creature the button gives the next kind",
+        LeashButton(true, false, true, true), kLeashButtonNext);
+  Check(LeashButton(true, true, true, true) == kLeashButtonClick,
+        "with the leash tied to an object the button brings it back",
+        LeashButton(true, true, true, true), kLeashButtonClick);
+  Check(LeashButton(true, false, true, false) == kLeashButtonNone,
+        "a leash that is not on the Creature of the player stays",
+        LeashButton(true, false, true, false), kLeashButtonNone);
+}
+
 inline void CommandChecks() {
+  LeashButtonChecks();
   using namespace command_math;
   printf("\nThe Creature commands: the shake and the release\n");
   const float kMps = 0.6f;  // the default of leash_shake_mps

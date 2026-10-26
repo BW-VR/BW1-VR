@@ -577,4 +577,23 @@ inline bool DoublePress(double press_s, double first_press_s, double window_s,
   return press_s >= first_press_s && press_s - first_press_s <= window_s;
 }
 
+// THE BUTTON OF THE LEASH (controls=1 with left_leash=1, X on the hand that
+// does not point). creature: the player has a Creature. tied: the leash is
+// tied to an object. on: a leash of this status is on. mine: the leash is on
+// the Creature of the player.
+//
+//   no Creature            nothing
+//   the leash is tied      the leash click: it comes back to the Hand
+//   on, on the Creature    the next kind of the leash
+//   on, not on it          nothing
+//   off                    the leash click: it goes on the Creature
+enum LeashButtonAct { kLeashButtonNone, kLeashButtonClick, kLeashButtonNext };
+
+inline int LeashButton(bool creature, bool tied, bool on, bool mine) {
+  if (!creature) return kLeashButtonNone;
+  if (tied) return kLeashButtonClick;
+  if (on) return mine ? kLeashButtonNext : kLeashButtonNone;
+  return kLeashButtonClick;
+}
+
 }  // namespace command_math

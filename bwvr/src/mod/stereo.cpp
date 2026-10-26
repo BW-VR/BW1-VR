@@ -67,9 +67,11 @@
 #include "bubble_card.h"
 #include "note_depth.h"
 #include "cutscene_window.h"
+#include "story_start.h"
 #include "frame_profile.h"
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
+#include "far_grab.h"
 #include "fast_transform.h"
 #include "thread_wait.h"
 #include "time_log.h"
@@ -678,8 +680,8 @@ float FrameSeparation() {
 // Shift 8, Shift 9, Shift F, Shift G, Shift H, Shift J, Shift K, Shift L,
 // Shift M, Shift N, Shift B, Shift V, Shift C, Shift X, Shift Z, Shift Y,
 // Shift U, Shift I, Shift O, Shift P, Shift T, Shift W, Shift Q, Shift E,
-// Shift R, Shift D
-static const int kShiftKeys = 26;
+// Shift R, Shift D, Shift S, Shift A
+static const int kShiftKeys = 28;
 static volatile LONG g_shift_key[kShiftKeys] = {};
 static DWORD g_shift_key_at[kShiftKeys] = {};
 static HHOOK g_message_hook = nullptr;
@@ -712,6 +714,8 @@ static int ShiftKeyIndex(WPARAM key) {
          : key == 'E' ? 23
          : key == 'R' ? 24
          : key == 'D' ? 25
+         : key == 'S' ? 26
+         : key == 'A' ? 27
                       : -1;
 }
 
@@ -842,6 +846,11 @@ bool D3D9KeyHere(const char* keys) {
 //   Shift D     with backend=vulkan the window of the game gets the picture
 //               through a swapchain of Vulkan, or through the CPU and GDI
 //               (vk_window, vk_window.cpp)
+//   Shift S     when a story takes the camera, the God view keeps its view
+//               until the cut scene window is closed, or the full view
+//               shows the story camera (cutscene_hold, cutscene_window.cpp)
+//   Ctrl Shift S  the move of a story starts at the head, or at the camera
+//               of the game (story_start_at_head, story_start.cpp)
 //   Ctrl Shift Numpad Slash  the mod waits for the GPU after each eye pass,
 //               one time a frame, or one time a frame on a second thread
 //               that also gives the frame to the runtime (frame_send,
@@ -865,12 +874,12 @@ bool D3D9KeyHere(const char* keys) {
 // values chosen. The ini keys stay, except the ones the launcher rewrites on
 // every save. See launcher.cpp, kRetiredKeys.
 void PollHotkeys() {
-  const int kKeys = 11;
+  const int kKeys = 12;
   static bool down[kKeys] = {false, false, false, false, false, false,
-                             false, false, false, false, false};
+                             false, false, false, false, false, false};
   const int keys[kKeys] = {VK_F11,    VK_F12,    VK_NUMPAD0, VK_NUMPAD1,
                            VK_INSERT, VK_DELETE, VK_HOME,    VK_CANCEL,
-                           VK_MULTIPLY, VK_NEXT, VK_DIVIDE};
+                           VK_MULTIPLY, VK_NEXT, VK_DIVIDE, 'S'};
   bool now[kKeys];
   for (int i = 0; i < kKeys; ++i) {
     now[i] = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
@@ -967,6 +976,12 @@ void PollHotkeys() {
     // key of the throw (throw_physics.cpp).
     if (g_test_keys && now[10] && !down[10] && ctrl && shift) {
       FrameSendCycle("Ctrl, Shift and the slash key of the number pad");
+    }
+    // An A/B of the start of a story at the head (docs/god-view.md, "A
+    // story starts at the head"). Shift and S with no Ctrl is the key of
+    // cutscene_hold (cutscene_window.cpp).
+    if (g_test_keys && now[11] && !down[11] && ctrl && shift) {
+      StoryStartToggle("Ctrl, Shift and S");
     }
   }
   // Kept up to date without focus too, so a key that is already down when
@@ -1080,6 +1095,16 @@ void PollHotkeys() {
   if (InterlockedExchange(&g_shift_key[25], 0) != 0) {
     VkWindowToggle("Shift and D");
   }
+  // An A/B of the hold of the God view when a story takes the camera
+  // (docs/cutscene-window.md, "The sequence").
+  if (InterlockedExchange(&g_shift_key[26], 0) != 0) {
+    CutsceneWindowHoldToggle("Shift and S");
+  }
+  // An A/B of the range of the far grab while the game holds the view still
+  // (docs/grab.md, "The range").
+  if (InterlockedExchange(&g_shift_key[27], 0) != 0) {
+    FarGrabStillToggle("Shift and A");
+  }
   // An A/B of the read ahead of the subtitle card (docs/ui-layer.md, "The
   // subtitle card"). Ctrl Shift Pause is the key of throw_land_rest
   // (throw_physics.cpp), and the right square bracket is the key of
@@ -1111,23 +1136,23 @@ void PollHotkeys() {
   }
   marks_down = marks_now;
   // An A/B of the depth of a note of the game over a thing (note_depth.cpp,
-  // docs/ui-layer.md, section 19). The apostrophe key (VK_OEM_7) has no other
-  // test key.
+  // docs/ui-layer.md, section 19). The letter N with Ctrl and Shift has no
+  // other test key. The render key Shift N needs Ctrl up.
   static bool note_down = false;
   const bool note_now =
-      (GetAsyncKeyState(VK_OEM_7) & 0x8000) != 0 && ctrl && shift;
+      (GetAsyncKeyState('N') & 0x8000) != 0 && ctrl && shift;
   if (g_test_keys && note_now && !note_down && GameHasFocus()) {
-    NoteDepthToggle("Ctrl, Shift and the apostrophe key");
+    NoteDepthToggle("Ctrl, Shift and N");
   }
   note_down = note_now;
   // An A/B of the depth of a hint of the game at the game's Hand
-  // (hint_hand_depth, docs/ui-layer.md, section 15.6). The slash key of the
-  // main keyboard (VK_OEM_2) has no other test key.
+  // (hint_hand_depth, docs/ui-layer.md, section 15.6). The letter T with Ctrl
+  // and Shift has no other test key. The render key Shift T needs Ctrl up.
   static bool hint_down = false;
   const bool hint_now =
-      (GetAsyncKeyState(VK_OEM_2) & 0x8000) != 0 && ctrl && shift;
+      (GetAsyncKeyState('T') & 0x8000) != 0 && ctrl && shift;
   if (g_test_keys && hint_now && !hint_down && GameHasFocus()) {
-    UiDepthToggleHintHandDepth("Ctrl, Shift and the slash key");
+    UiDepthToggleHintHandDepth("Ctrl, Shift and T");
   }
   hint_down = hint_now;
 }
@@ -2122,6 +2147,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     const uint64_t save = CutsceneWindowEndFrame(g_frames);
     if (save != 0) EyeCaptureArmNow(save);
   }
+  StoryStartFrame(g_frames);
 
   if (profile) {
     FrameProfileStereoFrame(ControllersFrameCount());
@@ -2254,6 +2280,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     ComfortCameraReport();
     ScriptCameraReport();
     CutsceneWindowReport();
+    StoryStartReport();
     UiDepthReportHelp();
     UiPanelReport();
     SkyDetailReport();

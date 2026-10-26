@@ -64,9 +64,11 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/fast_transform.cpp`, `fast_transform_math.h` | The two vertex loops of the engine with SSE (`fast_transform`) |
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`) |
 | `src/mod/time_log.cpp`, `time_log_math.h` | The time log: each 10 s the parts of a frame of the game (`time_log`). The math checks are in `test/controller_math/time_log_checks.h` |
-| `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`) |
+| `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`). The crash log: the C++ exceptions and each end of the game in its C runtime (`crash_log`) |
 | `src/mod/stall_watch.cpp`, `stall_math.h` | The module list at a stall (`stall_modules`, `stall_addrs`), and the test spin (`test_stall_ms`). The math checks are in `test/controller_math/stall_checks.h` |
 | `src/mod/crash_report.cpp` | The report of a crash in the log, and the dump `bwvr-crash.dmp` (`crash_report`) |
+| `src/mod/block_watch.cpp`, `large_block_math.h` | The large blocks of the heap and of VirtualAlloc with their places, for the line of the address space (`memory_blocks`) |
+| `src/mod/memory_watch.cpp` | The line of the address space each 20 s, on a thread of its own (`memory_log`, `address_space_math.h`) |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
 | `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
@@ -1523,7 +1525,97 @@ needs no lock of the loader. `hang_watch=2` writes the place each 8 s, also
 while the frame thread makes frames. With each of the two values a fault
 that no handler takes writes its code, its place and the return addresses
 on the stack of its thread (a stack overflow shows the calls that repeat),
-and the frame thread keeps 64 KiB of its stack for that line.
+and the frame thread keeps 64 KiB of its stack for that line. Then the
+filter that was there before gets the fault.
+
+**The crash log.** The C runtime of the game (Visual C++ 6) ends the game
+with the box "abnormal program termination" in `abort` (`0x007C9849`). A
+C++ exception that no code catches, on any thread, comes there: the
+unhandled exception filter of the game (`0x007D5160`) calls `terminate`
+(`0x007D480C`), and `terminate` calls `abort`. The C++ exceptions of the mod
+and of the runtimes have the same code (`0xE06D7363`), so they come there
+too. A box with an error number (R6025 is a pure virtual call) comes from
+`_amsg_exit` (`0x007CA5A7`). Each of these ends the game with no line in
+the log and with no dump. So with `crash_log=1` (the default,
+`hang_watch.cpp`):
+
+- A vectored handler writes the first 8 C++ exceptions: the type, the text
+  of a class of the standard library, the thread, the frame and the return
+  addresses on the stack of the throw. It only reads, so a handler of the
+  game or of the mod still catches the exception.
+- Hooks of `abort`, `terminate` and `_amsg_exit` write the caller, the
+  thread, the count of the C++ exceptions, the type of the last one and the
+  return addresses on 16 KiB of the stack, so the frames of the throw are in
+  the line. Then the function of the game runs as before.
+- A filter writes a fault that no handler takes (for example an access
+  violation, with its address), and then gives it to the filter that was
+  there before.
+
+The names of the modules are read at the first frame and each 1800 frames.
+The return addresses are "module+offset": `runblack.exe+0x...` is the
+address `0x00400000` plus the offset for `bwvr/tools/disasm.py`, and
+`ddraw.dll+0x...` is an address of the mod for its PDB. `crash_log=0`
+installs nothing, and the game ends with no line. Two test keys prove the
+lines: `crash_log_caught_test=N` throws a C++ exception at the frame N of
+the frame thread and catches it, and `crash_log_test=N` throws one that the
+mod does not catch, so the game ends.
+
+**The address space.** `runblack.exe` is a 32 bit program with no flag for
+a large address space, so the process has 2 GiB of addresses. The game, the
+mod, dxwrapper, Direct3D 9 and 11, the Vulkan driver and the OpenXR runtime
+share them. The images of the modules take about 320 MB in a headset session
+with `backend=vulkan` (the AMD Vulkan driver is loaded two times, about 85 MB
+each). When no free run of addresses is large enough, an allocation fails.
+The game then writes to the null pointer of `malloc` in `LH3DMem::Alloc`
+(`0x00842D4A`, an access violation), and an allocation of the mod gives
+`std::bad_alloc`.
+
+With `memory_log=N` (20 is the default, `memory_watch.cpp`) a thread of its
+own walks the address space with `VirtualQuery` each N seconds and writes a
+line "memory": the use by kind (image, mapped, private) and by state
+(committed, reserved), the free blocks of 64 KiB and the largest free run,
+the private bytes, the heap of the game (`LH3DMem::g_current_amount`
+`0x00EF654C` and its count of blocks), the largest four private allocations,
+and the change since the first line and per minute. The sums are in
+`address_space_math.h`. A walk takes some milliseconds, so it is not on the
+frame thread, and it only reads. When the largest free run is under 64 MB,
+one more line says so. `memory_log=0` writes no line.
+
+**The large blocks.** With `memory_blocks=1` (the default, `block_watch.cpp`)
+hooks of ntdll count each block while it lives: the blocks of 256 KB or more
+of each heap (`RtlAllocateHeap`, `RtlReAllocateHeap`, `RtlFreeHeap`, so
+`HeapAlloc`, `malloc` and `new` of each C runtime), and the regions of 64 KB
+or more of `VirtualAlloc` (`NtAllocateVirtualMemory` with `MEM_RESERVE`,
+`NtFreeVirtualMemory` with `MEM_RELEASE`), also of a driver. A region that a
+heap makes inside a call of the heap is a segment of that heap, and not a
+region of `VirtualAlloc`. The pages that a heap commits inside a call (and
+gives back with `MEM_DECOMMIT` or a release) count for that heap, and a
+commit also counts for the place of the outer call of the heap. A heap
+commits pages when its free room is used up, so a place that makes many
+small blocks that live shows there, as a sample. Three slots of `TlsAlloc`
+hold the depth of the hooks, the heap and the outer call on each thread. The
+hooks read and write them in the TEB: `__declspec(thread)` faults on a new
+thread before it has its static TLS, and `TlsGetValue` sets the last error. A block gets a
+place: the first 4 return addresses on the stack of the call outside ntdll,
+KernelBase and kernel32. The stack is read from the return address of the
+call up, and a word counts when it is in an image with code and the bytes
+before it end with a call. A word that only looks like a return address can
+pass. After each line of the address space come: a line of the private
+allocations that no hook saw (a region that the kernel maps for a driver,
+for example the pages of the GPU that the CPU can see, a region from before
+the hooks, or a region under 64 KB), with the new ones since the line
+before. Then a line of the live large blocks and the segments of the heaps,
+up to 4 lines of the heaps that committed the most pages since the line
+before (the process heap is the heap of the C runtime of the mod, and
+`__crtheap` `0x00FACCA8` is the heap of the C runtime of the game), up to 6
+lines of the places with the most growth of pages, and up to 4 lines of the
+places with the most live bytes. Each place has its calls as
+"module+offset". Blocks from before
+the start of the mod are not counted, and `HeapDestroy` frees blocks with no
+hook: a new block at the same address takes the old one out of its place. A
+small block costs a compare in the hook, a large block a walk of the stack,
+and a free a look in the table with no lock. `memory_blocks=0` installs no
+hook.
 
 ### The module list at a stall
 
@@ -3194,6 +3286,21 @@ of the operations and the inputs of texture stages 0 and 1, the blend and a
 texture ("vk scene : states N"). A line with a texture on stage 1 says
 whether the renderer makes that stage ("The second stage"). A line with "A
 complement input" names a draw with an input of 1 minus a colour.
+
+**The command buffer of a single job** (`vk_once_reuse`, 1 is the default,
+`vk_core.cpp`). An upload of a texture with a wait, the copy of a part of the
+panel for a card in the headset (`VkScenePanelReadHalf`, one in each frame
+that shows a card) and the picture of a test are single jobs: `BeginOnce`
+gives a command buffer, and `EndOnce` submits it, waits for the GPU and
+resets the pool. With 1 each job has the same command buffer, which the
+reset of the pool puts back into its first state. With 0 each job allocates
+a new command buffer. The reset of a pool does not free its command
+buffers, so each of them keeps its memory in the heap of the driver: in a
+headset session with the cards the process heap grew by about 100 MB a
+minute through `amdvlk32.dll`, until the address space of 2 GiB was full
+(`memory_blocks`, "The large blocks"). The line "vk scene" of each window
+gives the count of the command buffers of single jobs in the session. There
+is no test key: the difference is only in the memory over minutes.
 
 **The second stage** (`vk_stage1`, 1 is the default). With `backend=vulkan`
 the game adds a second texture with texture stage 1 for some draws:
@@ -5567,15 +5674,23 @@ calls the same change function as the key. "None" is a key with no item.
 | Shift P | `test_keys=1` | Foveated resolution goes on and off, from the next walk. A long pulse and a short pulse (`fovea_res`, "Foveated resolution"). Ctrl must be up | Render, Fovea images |
 | Shift T | `test_keys=1` | With `backend=vulkan`: a walk with no clear of the whole target starts with the picture of the walk before, or black, from the next walk. A long pulse and a short pulse (`vk_keep_picture`, "The picture of the walk before"). Ctrl must be up | Picture, Keep picture |
 | Shift E | `test_keys=1` | With the Vulkan renderer: a draw with a texture on texture stage 1 gets that stage (the light maps of the Temple), or the renderer makes stage 0 alone, from the next walk. A long pulse and a short pulse (`vk_stage1`, "The second stage"). Ctrl must be up | Picture, Stage 1 |
+| Shift A | `test_keys=1` | While the game holds the view still (its switch for the drag of the land is off), a far target can be at any distance, or it has the range of `far_grab_max_m`. A long pulse and a short pulse (`far_grab_still_m`, `grab.md`, "The range in a view that the game holds still"). Ctrl must be up | None |
 | Shift Q | `test_keys=1` | The read ahead of the files of LHFile goes on and off, from the next call on each file. The log has the line `read ahead   : test key` (`file_read_ahead`, "The read ahead of the files of the game"). Ctrl must be up | Render, Read ahead |
 | Ctrl Shift Semicolon | `test_keys=1` | The copy of the subtitle card is read at the start of a later frame with no wait, or after the eye passes of its frame with a wait for the GPU. A long pulse and a short pulse (`subtitle_read_ahead`, `ui-layer.md`, 17.2). The right square bracket key is right of the left one. `subtitle_read_ahead_test_seconds=N` makes the same change each N seconds | Interface, Subtitle copy |
 | Ctrl Shift Comma | `test_keys=1` | The press of A for the teleport keeps to the game's switch for the drag of the land, as the walk with the stick, or to the switch of the double click jump. A long pulse and a short pulse (`teleport_switch`, `god-view.md`, section 14.1) | View, Jump switch |
 | Ctrl Shift Period | `test_keys=1` | On the hint card, the lines of the walk with the stick and of A show only while they can move the player, or the card has no line for the walk and the line of A shows in each case. A long pulse and a short pulse (`prompt_moves`, `controller-hints.md`, 9.4) | Interface, Prompt moves |
+| Ctrl Shift H | `test_keys=1` | In the God view the Creature turns to and looks at the head of the player, or at the game's own camera. A long pulse and a short pulse (`creature_player_head`, `creature.md`, 5.4). Shift H with Ctrl up is a key of the render | None |
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw | Render, Frame send |
 | Menu key | `test_keys=1` | One walk for both eyes on and off (see "One walk for both eyes"). The key beside the right Ctrl key that opens a context menu. Ctrl and Shift must be up | Render, One walk |
 | Ctrl Shift Right bracket | `test_keys=1` | In one walk: a speech bubble or the name of a villager as a card, the glow at the Hand's point and a halo are drawn for each eye by itself, or the right eye gets them as each other batch. A long pulse and a short pulse (`one_walk_marks`, "The cards and the marks of the mod"). The right square bracket key is two keys right of the P key on a US keyboard | Picture, Walk marks |
-| Ctrl Shift Apostrophe | `test_keys=1` | A note of the game over a thing (the percent of a lesson over the Creature) has the depth of its place, or the interface depth. A long pulse and a short pulse (`note_depth`, `ui-layer.md`, section 19). The apostrophe key is right of the semicolon key on a US keyboard | Interface, Note depth |
-| Ctrl Shift Slash | `test_keys=1` | A tooltip or a hint of the game at the game's Hand, while the game places the Hand, has the depth of the Hand, or the same pixel in both eyes. A long pulse and a short pulse (`hint_hand_depth`, `ui-layer.md`, section 15.6). The slash key is the key of the main keyboard left of the right Shift key on a US keyboard | Interface, Hint depth |
+| Ctrl Shift N | `test_keys=1` | A note of the game over a thing (the percent of a lesson over the Creature) has the depth of its place, or the interface depth. A long pulse and a short pulse (`note_depth`, `ui-layer.md`, section 19). | Interface, Note depth |
+| Ctrl Shift Numpad 0 | `test_keys=1` | With `controls=1`: the flight with the stick keeps its height and stops at the land, or it follows the land. A long pulse and a short pulse on the other controller (`move_stick_path`, `god-view.md`, 5.7) | None |
+| Ctrl Shift Backslash | `test_keys=1` | With `controls=1`: the tilt of the controller of the stick moves the player up and down in the walk, or the walk keeps the height. A long pulse and a short pulse on the other controller (`move_stick_climb`, `god-view.md`, 5.7). On a German keyboard the key is the key with the caret | None |
+| Ctrl Shift T | `test_keys=1` | A tooltip or a hint of the game at the game's Hand, while the game places the Hand, has the depth of the Hand, or the same pixel in both eyes. A long pulse and a short pulse (`hint_hand_depth`, `ui-layer.md`, section 15.6). | Interface, Hint depth |
+| Ctrl Shift Apostrophe | `test_keys=1` | The control scheme: the plain controls, or the grips only grab the world and the trigger is both buttons of the game. A long pulse and a short pulse on both controllers (`controls`, `controllers.md`, 5.7). On a German keyboard the key is the key with the letter A with two dots | None |
+| Ctrl Shift Slash | `test_keys=1` | With `controls=1`: the leash on X of the hand that does not point and its shake, or the leash on the pointing hand. A long pulse and a short pulse on the other controller (`left_leash`, `controllers.md`, 5.7). On a German keyboard the key is the key with the number sign | None |
+| Ctrl Shift L | `test_keys=1` | While the ring of the leash is on the wrist of the hand that does not point, the icon of the kind of leash at the lower right of the view is hidden, or the game draws it. A long pulse and a short pulse (`leash_icon_hide`, `grab.md`, "The leash at the mod's hand") | None |
+| Ctrl Shift D | `test_keys=1` | While the mesh of the game's Hand is hidden, the water shows both hands of the mod, the game's Hand, or no hand: the value steps from 2 to 0 to 1 and back. A long pulse, a short pulse and a pulse of middle length (`hand_reflection`, `hand.md`, "The reflection of the hands") | None |
 | Ctrl Menu key | `test_keys=1` | The layout of the buttons of the hand that does not point. The menu button of the left controller opens the game menu, Y opens the ring and the stick does not drive the ring, or Y opens the game menu and X and the stick open the ring. A long pulse and a short pulse on that hand (`button_layout`, `controllers.md`, 5.1). Shift must be up | View, Button layout |
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up | View, Stick walk |
 
@@ -5729,6 +5844,10 @@ keys that the launcher sets.
 | `land_fast` | 1 | 1: the vertex loop of the land on the x87 path runs with SSE, with the bits of the game. 0: on the x87 unit, with no hook. 2: a test aid, the compare. See "The vertex loop of the land with SSE" |
 | `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
+| `crash_log` | 1 | 1: the log gets the first 8 C++ exceptions, an end of the game in `abort`, `terminate` or `_amsg_exit`, and a fault that no handler takes, each with the return addresses on its stack. 0: no line. See "The crash log" |
+| `crash_log_test`, `crash_log_caught_test` | 0, 0 | Test keys: at the frame N the frame thread throws a C++ exception that the mod does not catch (the game ends), or that the mod catches. See "The crash log" |
+| `memory_log` | 20 | Each N seconds a line of the use of the address space of 2 GiB, the largest free run and the heap of the game. 0: no line. See "The address space" |
+| `memory_blocks` | 1 | 1: the line of the address space also gives the private allocations that no hook saw, the live large blocks of the heaps (256 KB or more) and of VirtualAlloc (64 KB or more), the pages that each heap commits, and the places with the most growth and the most bytes. 0: no hook. See "The large blocks" |
 | `hang_watch` | 0 | A test key: 1 the place of the frame thread when it makes no frame for 8 s, 2 each 8 s. With each of the two the place of a fault. See "The watch of the frame thread" |
 | `stall_modules` | 1 | 1: when no frame of the game ends for 5 s, the log gets the modules of the process and the regions of the addresses of `stall_addrs`, one time for each stall. 0: no watch. There is no test key. See "The module list at a stall" |
 | `stall_addrs` | (empty) | Hexadecimal addresses for the lines of `VirtualQuery` at a stall. See "The module list at a stall" |
@@ -5739,6 +5858,7 @@ keys that the launcher sets.
 | `vk_keep_picture` | 1 | With `backend=vulkan`: 1 a walk with no clear of the whole target before its first draw starts with the picture of the walk before, and the intro in stereo keeps the picture of each eye. 0 each walk starts black. A test key: Shift T. See "The picture of the walk before" |
 | `vk_black_check` | 1 | With `backend=vulkan`, a test aid: 1 checks 16 by 16 points of each eye picture, and a black picture gives a line of the log with what its walk drew. 0 no check. See "The check for a black picture" |
 | `vk_untextured` | 1 | With `backend=vulkan` or the Vulkan eyes: 1 a stage 0 with no texture gives the diffuse color for an operation with the texture as an argument, as Direct3D does. 0 it reads a white texel with an alpha of 1. A test key: Shift R. See "A stage with no texture" |
+| `vk_once_reuse` | 1 | With the Vulkan renderer: 1 each single job (an upload with a wait, a copy of the panel for a card) has the same command buffer. 0 each job allocates a new command buffer that the pool keeps, and the heap of the driver grows. No test key. See "The command buffer of a single job" |
 | `vk_stage1` | 1 | With the Vulkan renderer: 1 a draw with a color operation and a texture on texture stage 1 gets that stage, for example the light maps of the Temple. 0 the renderer makes stage 0 alone. A test key: Shift E. See "The second stage" |
 | `vk_present_late` | 1 | With `backend=vulkan` and the way through the CPU (`vk_window=0`): 1 the window on the monitor shows the picture of the present before, with no wait for the GPU, 0 each present waits for its own picture. See "The backend of the mod on Vulkan" |
 | `vulkan_only` | 1 | With `backend=vulkan`: 1 no part for Direct3D 9 starts, and the session with Vulkan has no Direct3D 11 device. 0 these parts start, with no Direct3D 9 to use. There is no test key: the choice is made at the start. See "Only Vulkan" |

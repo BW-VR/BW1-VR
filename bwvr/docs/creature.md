@@ -46,6 +46,9 @@ Other docs:
 - In a fight of Creatures, the grip with the Hand at a Creature is the
   attack or the block of the game, at the place of the body that is nearest
   to the Hand. The marks of the fight show at their place on the body.
+- In the God view the Creature turns to the head of the player, looks at it
+  and measures the player from it, where the game would give its own camera
+  high over the land (`creature_player_head=1`).
 
 ## 1. How the plain game does it
 
@@ -241,7 +244,12 @@ With the leash on the Hand, `ValidAsInterfaceTarget` (slot `0x6F0`) at 1 and
 `ValidAsInterfaceLeashTarget` (slot `0x6F4`) not 0, it calls `fn_005D4180`
 (thiscall on `GInterface`, the object, `ret 4`), which sends packet `0x5D`.
 Else the object gets its own tap (packet `0x20`). Both slots give 1 for
-`Object`, so almost each object is a target. A press of the grip on an object
+`Object`, so almost each object is a target. A miracle on the land
+(`OneOffSpellSeed`) keeps the slots of `Object` [V]. So in the plain game a
+short click on it with the leash on the Hand sends the Creature to it, and
+the miracle does not go into the Hand. `fn_005D3930` sends the tap only when
+`fn_005D4180` gives 0, and `fn_005D3930` is the one caller of `fn_005D4180`
+(`0x005D39A6`). A press of the grip on an object
 outside the influence goes from `fn_005D1740` (`0x005D17A5`, the influence
 `+0x48` is 0 and slot `0x714` gives 1) to `fn_005D3930`, which sends the
 packet.
@@ -390,7 +398,8 @@ buffer of the `LH3DCreature` and closes the particle effects of the Creature
 (`LH3DCreature::StartTurningAction`). Else `fn_0048F710` ends the animations
 and calls `LH3DCreature::StopMoving`, and the turn starts when the action of
 the body is over (`+0x523C`, read in `LH3DCreature::StateSet`). Then
-`Creature+0x3CC` is 1.
+`Creature+0x3CC` is 1. Section 1.9 says where that camera comes from. In
+the God view the mod gives the head there (section 5.4).
 
 **The Creature stays.** `Creature::ProcessState` (`0x00472DC0`) tests bit
 `0x10` at `0x00472F77`. With the bit set it writes 1 to
@@ -526,7 +535,62 @@ Creature walk to the Hand when it is farther from the Hand than the rope is
 long (`0x0047316D`). The rest of the mind of the Creature was not read for
 the leash.
 
-### 1.9 The look of the Creature [V]
+### 1.9 The camera of the player [V for the calls, I for what they decide]
+
+**Where the value comes from.** `GInterface::Process` calls `fn_005D2250` in
+each game turn. It reads the engine camera (`LH3DTech::g_camera`
+`0x00EA1DB8` and its focus `0x00EA1DC4`), the land point under the pointer
+and the place of the Hand. When the camera changed, it sends packet `0x15`
+(all of them) or `0x17` (the camera only). Packet `0x16` has no camera. The
+handlers (`fn_005DBFB0` and `fn_005DC0D0`, through `fn_005DBF40` and
+`fn_005DBF90`) copy the camera to the `GInterfaceStatus` of the player: the
+place at `+0xB0` and the focus at `+0xBC`.
+
+**Which status.** `Creature::GetNearestCameraInterfaceStatus` (`0x0047D640`)
+gives the status of the player of the Creature that has its camera nearest
+to the body. For a Creature with no player it gives
+`GGame::MyInterfaceStatus` in a game for one player, and null in a game for
+more than one player.
+
+**The readers.** The function has 22 calls, all in the code of the Creature
+and one in the code of a Totem. Each one reads the camera at `+0xB0`.
+
+| Reader | What it decides |
+| --- | --- |
+| `Creature::GoIntoStateOfFinishingAction` `0x00477B20` | The turn of the locked select: a press on the Creature and the stay (section 1.7) |
+| `Creature::LookAtCamera` `0x004D1A30` | The look point: the place on the map and the height above the land. `Creature::LookAtPlayer` `0x004D1420` calls it when the Hand is not the point, and 65 places use it as the target of a look of a sub action |
+| The sub actions at `0x00502C70`, `0x00502E70`, `0x00503DE0`, `0x00503EC0` and `0x00508250` | A turn to the camera: the line from the body to the camera, then `fn_004F00E0` (`LH3DCreature::StopMoving` and `LH3DCreature::StartTurningAction`) |
+| The sub action at `0x00503C60` | Whether the Creature faces the camera (`Creature::IsDirectionClose`), with the distance on the map |
+| `CreatureAgenda::ConstructSubActionsForLookAtCameraInWideScreen`, `ForPointAtCamera`, `ForThrowAtCamera`, `ForPointOutHighlight` | The steps of a look, a point and a throw at the camera |
+| `fn_0047E1B0` (2 calls) | The steps of a look at the camera, in an agenda with a random choice |
+| The actions at `0x004C3D80` and `0x004C4000` | The distance in metres from the camera, in the choice of an action |
+| `fn_0047AEE0` (`Creature::IsCreatureAwayFromHand`) | A ray from the camera to its focus |
+| `TotemStatue::DoesTotemBelongToATownWhichIsVeryImpressedIndeed` | The town nearest to the camera |
+
+So the camera of the player decides where the Creature turns (the locked
+select and the sub actions), where it looks, where it points and throws,
+and how far it thinks the player is. The readers that were read do not send
+the Creature to walk to the camera. The sub actions that the four agenda
+functions add were not traced, so a walk among them is not known.
+
+**The engine camera in the Creature code.** Some functions of the Creature
+read `LH3DTech::g_camera` directly: `fn_00483290` (a footstep: its sound and
+its effect, from `LH3DCreature::PrepareForDrawing` and the `ForceAct`
+functions), the code at `0x00488995` and `0x0048C261` (a sound and its
+distance), `LH3DCreature::DrawFightSparkles` (the draw),
+`HandStateCreature::Enter` and `Update` (the Hand, section 1.1) and
+`CreatureRoomCamera::UpdateMain` (the room of the Creature in the Temple).
+None of them decides a turn, a look or a walk. `Villager::ChildAtCreche`
+reads it too, for the distance of a sound of the children at a creche.
+
+**In the God view.** The game's own camera is 400 units from the land under
+the head of the player, 50 degrees above it, back along the heading of the
+view (`god-view.md`, section 7). That is about 306 units above the land and
+257 units back on the map. With that camera the Creature turns to a point
+behind the player, looks up into the sky, and measures the player 257 units
+too far. Section 5.4 gives the head in its place.
+
+### 1.10 The look of the Creature [V]
 
 **The look point.** The head of the Creature turns to a point of the world:
 the look point at `LH3DCreature+0x48C0`. `fn_00482C90` writes it (section
@@ -983,6 +1047,15 @@ Hand, and the Hand is empty in its Normal state. It is off with
 `controller_swap_buttons=1`, where the trigger does the work of the grip.
 With no leash, the trigger does what it does in the plain game.
 
+With `controls=1` and `left_leash=1` the trigger of the hand that does not
+point commands, and it aims with that controller (`controllers.md`, 5.7).
+The Hand of the game may then hold an object or touch the Creature: the
+handlers of packets `0x5D` and `0x5E` have no test of the Hand (section
+1.4). The object at the Hand's point is no target of a command then. The
+code is `ControllersCommandInput`, `ControllersCommandRay` and
+`ControllersCommandAllowed` in `controllers.cpp`, and the second cone of the
+pick in `hand_direct.cpp` (`g_cmd_offer`).
+
 ### 4.1 What the trigger does
 
 | The trigger, with the leash on the Hand | What it does |
@@ -999,6 +1072,7 @@ With no leash, the trigger does what it does in the plain game.
 | A hold: a later release | It acts on what shows at the release: the object with the halo (packet `0x5D`), or the land point of the ring (packet `0x5E`) |
 | A hold that ends on your Creature | The leash click, only when the press started on the Creature and is shorter than 450 ms. A press that started on the land or on an object does not take the Creature as a target, so the ring can go past it |
 | A press while the game's pick has the Creature under the Hand | Not a command. The press goes to the game: the stroke, the slap and the short press that changes the leash |
+| A press with the Hand on a miracle on the land (`leash_miracle_tap=1`) | Not a command. The press goes to the game, as with no leash: a short press taps the miracle, and it goes into the Hand. A longer press takes the miracle as an object. See "A miracle on the land" below |
 | A release with the aim off the target, on the sky, on the sea or off the map | Nothing |
 | A drag of the land | None. The trigger of a command does not reach the game. The grip of the other hand, the stick and the teleport move the player |
 
@@ -1020,6 +1094,37 @@ the Hand and `creature_command=1`. It clears the pick lock and gives 1, as the
 game does after the packet. The mouse gets the game's function. The reason: a
 grip from a distance that misses its target would send the Creature to the
 land under the Hand.
+
+**A miracle on the land** (`leash_miracle_tap=1`, the default). A
+`OneOffSpellSeed` is the bubble of a reward or of a dispenser. With the
+leash on the Hand, the trigger on the bubble makes the miracle active, as
+with no leash. The leash stays on.
+
+- A `OneOffSpellSeed` is no target of a command (`ValidTarget`): it gets no
+  halo, and the aim goes past it.
+- The Hand is on the bubble when the object under the Hand
+  (`GInterface+0x3C8`), the object of the next pick record (`+0x400`) or
+  the object at the Hand's point is a `OneOffSpellSeed` (`SeedAtHand`).
+  Then a press goes to the game, and the cone, the halo and the prompts of
+  a command are off.
+- The game's click (`fn_005D3930`) calls `fn_005D4180` first. A hook on
+  `fn_005D4180` gives 0 for a `OneOffSpellSeed` while the controller places
+  the Hand, and sends no packet. Then the click sends the tap (packet
+  `0x20`), and `OneOffSpellSeed::InterfaceTap` puts the miracle in the Hand.
+  The hook is not on `fn_005D3930`, because `hand_direct.cpp` tests the
+  first bytes of that function before its own click on a scroll.
+- The hook acts also with `creature_command=0` and with `left_leash=1`: then
+  the trigger of the Hand goes to the game, and the game's click would send
+  the Creature. The mouse gets the game's function.
+
+With `leash_miracle_tap=0` the bubble is a target of a command, as in the
+plain game: the trigger sends the Creature to it. The test key is Ctrl with
+the decimal key of the number pad (section 4.5).
+
+```
+creature cmd : a click on the miracle 05705750 with the leash on the Hand. The Creature does not go to it, and the game's click taps it (packet 0x20) (leash_miracle_tap=1), frame 475
+creature cmd : 1 clicks on a miracle with the leash on the Hand were taps of the miracle (leash_miracle_tap=1)
+```
 
 ### 4.2 The land aim and a tap
 
@@ -1184,6 +1289,7 @@ With the mouse, the game's own test acts.
 | `far_grab_choice`, `far_grab_stay` | 2, 1 | The choice among the objects in the cone, and the target that stays (section 4.3, and `grab.md`). Test keys: Ctrl and Delete, Ctrl and Backspace |
 | `creature_command_behind_cm` | 30 | The land in front wins past this many cm of the room, plus 20 percent of the distance. -1 turns the rule off |
 | `creature_command_double_ms` | 500 | The time of a double press (section 5.2). 0 turns the double press off |
+| `leash_miracle_tap` | 1 | 1: with the leash on the Hand, a press with the Hand on a miracle on the land taps it, and a miracle on the land is no target of a command (section 4.1). 0: the trigger sends the Creature to the miracle, as in the plain game |
 | `teleport_reach_m`, `teleport_ring_cm` | 10, 11 | The arc and the ring of the land aim. See `god-view.md` |
 
 **The A/B key.** With `test_keys=1`, Ctrl with the 5 key of the number pad
@@ -1191,6 +1297,12 @@ changes `creature_command_rule` from 4 to 3 to 2 to 1 and back while the game
 runs. The pointing controller gives one short pulse for each unit of the
 value (four for 4, one for 1), and the log has a line. The keys of the aim
 trim (numpad 8, 2, 4, 6 and 5) do not act while Ctrl is down.
+
+Ctrl with the decimal key of the number pad, with Shift up, changes
+`leash_miracle_tap` between 1 and 0. The pointing controller gives a long
+pulse for 1 and a short pulse for 0, and the log has a line. With
+`test_keys=1` the hook of section 4.1 is there also when the game starts with
+`leash_miracle_tap=0`.
 
 **Test keys for the desktop runs only:**
 
@@ -1348,7 +1460,9 @@ A short grip on your Creature from a distance takes the leash back too (kind
 3 of `near_math::LeashClick`). It sends the leash click.
 
 Each object that is a target of a command passes the tests of the double
-click, except a `OneOffSpellSeed`. So the same objects can take the leash.
+click. So the same objects can take the leash. With `leash_miracle_tap=0` a
+`OneOffSpellSeed` is a target of a command too, and the double press does not
+tie the leash to it, as the game's double click does not.
 
 The card (`AddPromptTwice` in `hint_card.cpp`) has two lines for an object
 that can take the leash: "Trigger Send the Creature" and "Trigger x2 Tie the
@@ -1419,13 +1533,14 @@ The reasons for the rule:
   keeps the same stay.
 
 **What the Creature does** is the game's own (section 1.7). It stops, it
-turns to the camera of the player, and when the action of its body is over
-it plays the animation of what it thinks of. The game can show a line of the
-Creature help. After the end it starts the action of its plan again. In
-desktop runs a Creature that the stay stopped in a walk (step 0 of 4 of its
-plan) went on with the same walk. A Creature with no plan chose one by
-itself. A Creature at the last step of its plan (step 3 of 4) had no plan
-after the stay, and it chose a new one some seconds later.
+turns to the camera of the player (in the God view the head, section 5.4),
+and when the action of its body is over it plays the animation of what it
+thinks of. The game can show a line of the Creature help. After the end it
+starts the action of its plan again. In desktop runs a Creature that the
+stay stopped in a walk (step 0 of 4 of its plan) went on with the same walk.
+A Creature with no plan chose one by itself. A Creature at the last step of
+its plan (step 3 of 4) had no plan after the stay, and it chose a new one
+some seconds later.
 
 **The times** in desktop runs at 60 frames a second. The game has the
 Creature in its locked select 35 to 130 ms after packet `0x1B`: the packet
@@ -1490,17 +1605,86 @@ creature stay: the game let the Creature go, 107 ms after the packet. Its mind r
 creature stay: the Creature goes on: 206 ms after the stay it is at 1902.88 2519.79, 0.72 units from the place of its stay. Its plan did not change: desire 23, action 81, step 0 of 4, frame 1565
 ```
 
-### 5.4 The Creature looks at the player (`creature_look_head`)
+### 5.4 The Creature turns to the head
+
+In the God view the Creature turns to the head of the player, looks at it,
+points and throws at it, and measures how far the player is from it. The
+game would give its own camera there, which is 400 units from the player and
+about 300 units above the land (section 1.9). The code is in
+`creature_head.cpp`, with the pure rules in `creature_head_math.h`.
+
+**The way of the game.** Each reader of section 1.9 reads the camera at
+`GInterfaceStatus+0xB0`. With the mouse that camera is the eye of the
+player, so the Creature faces the screen. In the God view the eye of the
+player is the head. So for the time of the code of the Creature, the camera
+of the local `GInterfaceStatus` holds the head, and at the end of that code
+the value of the game comes back:
+
+- `Creature::ProcessState` (slot of the vtable at `0x008CCE30`): the mind,
+  the plan, the agenda and the sub actions of each Creature, once a game
+  turn.
+- `Creature::GoIntoStateOfFinishingAction`: the turn of the locked select,
+  from the packet `0x1B` of a press or of the stay.
+- `Creature::LookAtCamera`: the look point, where a sub action asks for it.
+
+A hook on `Creature::GetNearestCameraInterfaceStatus` counts each read of
+the local camera, and a read outside of these three is in the report line.
+The interface, the spells, the sound and the scripts read the value of the
+game, because the field holds the head only inside the code of the
+Creature. The focus at `+0xBC` and the place of the Hand at `+0xC8` do not
+change. The head is the latch of the last frame (`HandDirectPlayerHead` in
+`hand_direct.cpp`, `god-view.md`, section 16.4).
+
+**When.** The head goes in only while the player stands for the camera
+(`god-view.md`, section 16.4). In a story, while the cinema bars are up,
+while the game moves its own camera to a new place, in a Temple room and in
+the other play modes, the Creature reads the camera of the game, as in the
+plain game.
+
+**What does not change.** The functions of section 1.9 that read the
+engine camera directly (a sound, a footstep, the draw) keep it. A Creature
+of a different player reads the camera of its own player, as in the game.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `creature_player_head` | 1 | 1: in the God view the camera of the player that the Creature reads is the head. 0: the game's own camera |
+
+When a function does not have the bytes of the disassembly, the mod hooks
+none of them, the key is 0, and a line with the tag `hooks` says so.
+
+**The A/B key.** With `test_keys=1`, Ctrl, Shift and H change
+`creature_player_head` between 1 and 0 while the game runs. The pointing
+controller gives a long pulse for 1 and a short pulse for 0, and the log has
+a line. The key works only when the game starts with
+`creature_player_head=1` (section 5.6).
+
+**The log.** The tag `creature head` has the key at the start, one line for
+each turn of the locked select, and one line when the source of a look
+changes:
+
+```
+creature head: creature_player_head: creature_player_head=1. In the God view the Creature turns to, looks at, points at and measures the head of the player, where the game has its own camera. [...]
+creature head: the Creature turns to the player (GoIntoStateOfFinishingAction). It turns to 1858.8 55.3 2528.7, the head of the player (creature_player_head=1): 38.7 units from its body on the map and 25.8 above its base. The game's camera is at 1609.3 334.3 2590.8: 295.8 units on the map and 304.8 above the base. The turn to the head is 0.9 degrees from the turn to the game's camera. The body is at 1896.5 29.5 2520.1, frame 379
+creature head: the Creature looks at the camera of the player (LookAtCamera): at 1858.8 55.3 2528.7, the head of the player (creature_player_head=1). That is 38.7 units from its body on the map and 25.8 above its base, frame 931
+creature head: the Creature read the camera of the player 18 times: 18 times the head, 0 times the game's camera (0 of them with creature_player_head=0), 0 times outside the Creature code. Turns of the locked select: 0. Looks at the camera: 2
+```
+
+With the game's camera the line says why: `creature_player_head=0`, or the
+reason of section 16.4 of `god-view.md`, for example "a story has the
+camera".
+
+### 5.5 The Creature looks at the player (`creature_look_head`)
 
 In VR the picture does not come from the game camera. In the God view the
 game camera is 400 units from the land under the head and 50 degrees above
 it (`god-view.md`, section 7). So a Creature that looks at the camera looks
 at the sky over the player. The head of the player is a real place in the
 world. With `creature_look_head=1` the Creature looks at that place, and the
-player gets eye contact.
+player gets eye contact. This section is used only with
+`creature_player_head=0` (section 5.6).
 
 **The way of the game.** Each plan of the Creature that looks at the player
-has the look function `Creature::LookAtCamera` (section 1.9). The code in
+has the look function `Creature::LookAtCamera` (section 1.10). The code in
 `creature_look.cpp` hooks that function. The game function runs first and
 writes the place of its camera. When it gives 1, the camera is the camera of
 the local player, and the head is known, the hook writes the place of the
@@ -1528,8 +1712,9 @@ These looks do not change:
 | --- | --- | --- |
 | `creature_look_head` | 1 | 1: where a plan of the Creature looks at the camera of the player, the Creature looks at the player's head. 0: it looks at the game camera |
 
-The hook is also on with 0. It then changes nothing, and it gives the lines
-of the log for a comparison. There is no keyboard test key.
+With `creature_player_head=0` the hook is also on with
+`creature_look_head=0`. It then changes nothing, and it gives the lines of
+the log for a comparison. There is no keyboard test key.
 
 **The log.** The tag `creature look` has one line for each change, and no
 line for a frame:
@@ -1547,12 +1732,12 @@ line for a frame:
 
 The eyes are at the base of the body and 15 times the scale higher. Their
 direction is the heading of the body plus the yaw of the head, and the pitch
-of the head (section 1.9). The start line also gives the frames of the
+of the head (section 1.10). The start line also gives the frames of the
 animations that show the turn of the head (`Morphable::GetAnim` 0x4B and 0x4C,
 read by `LH3DCreature::UpdateBuffers`).
 
-**What the desktop runs show** (`creature_recipe.ps1 -Kind look`, the test
-save `temple`, Vulkan). After the slaps the Creature shows how it feels
+**What the desktop runs show** (`creature_recipe.ps1 -Kind look`, which sets
+`creature_player_head=0`, the test save `temple`, Vulkan). After the slaps the Creature shows how it feels
 (desire 18, action 23, a plan with `Creature::LookAtCamera`), and the stay
 starts the plan again at frame 1440 of the log. Later a short look of 400 ms
 comes (desire 9, action 169). The game camera is at 1594.8 314.4 2532.6, and
@@ -1579,6 +1764,22 @@ same, although the angles of the game differ by 46 degrees of yaw and 34
 degrees of pitch. How much the look animations turn the head on the screen
 was not measured. Only a headset can show the eye contact, with a larger
 Creature near the player.
+
+### 5.6 One hook of Creature::LookAtCamera
+
+Sections 5.4 and 5.5 both change `Creature::LookAtCamera` (`0x004D1A30`).
+MinHook takes only one hook on one function, so only one of the two modules
+hooks it. The value of `creature_player_head` at the start decides:
+
+| `creature_player_head` at the start | Hooks | `creature_look_head` | Ctrl, Shift and H |
+| --- | --- | --- | --- |
+| 1 (the default) | `creature_head.cpp` hooks its four functions (section 5.4). `creature_look.cpp` hooks nothing | Not used | Changes `creature_player_head` between 1 and 0 |
+| 0 | `creature_look.cpp` hooks `Creature::LookAtCamera` (section 5.5). `creature_head.cpp` hooks nothing | 1: the look at the head. 0: the game camera | Does nothing |
+
+With 1 the look at the camera of the player also gets the head, because
+`creature_head.cpp` gives the head to `Creature::LookAtCamera`. A change of
+the key while the game runs counts from the next start. The log says at the
+start which module has the hook (`creature head` and `creature look`).
 
 
 ## 6. A fight of Creatures
@@ -1769,6 +1970,13 @@ The math tests are in `bwvr/test/controller_math/` and run with
   no stay), a hand that is lost before and in a stay, a key that changes
   while the grip is closed, the wait of the end (`EndNow`), and the distance
   and the watch for the log (`GoesOn`, `WatchDone`).
+- The camera of the player (`head_checks.h`): `creature_player_head`, the
+  head only while the player stands for the camera and only with a head that
+  is a number, the game's value that comes back and a packet that came in
+  between, and the turn of the locked select with the game's camera of the
+  God view (a Creature ahead turns the same way, a Creature 100 units to the
+  side turns 68.7 degrees from the head, the camera is 306 units above the
+  base, and a point within 2 units on x and z gives no turn).
 - The near target is in `far_checks.h` (see `grab.md`).
 - A fight (`fight_checks.h`): the ray of a press from a Hand at the side of
   the body, at the legs, over the head, in the body and on the axis, a body
@@ -1803,6 +2011,7 @@ Two scripts in `bwvr/tools/desk/` reach the Creature of the player:
 creature_recipe.ps1 -Name <run> -Dll <dll>
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind leash
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind stay
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind turn
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind tie
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind click
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind walk
@@ -1823,6 +2032,24 @@ The kind `state` (the default) does these steps:
    `fake_controller_rots=-112,1,0 8,1,0` is a turn of 120 degrees).
 4. `aimfar` aims the hand at the Creature, and the grip for 300 frames makes
    the Creature stay. No Creature state starts.
+
+The kind `turn` shows where the Creature turns to and looks (section 5.4).
+Two zoom steps in (44 units a meter) move the view, so the God view puts the
+game camera 400 units from the land under the head. Then a grip of 300
+frames after an `aimfar` makes the Creature stay, and the game turns it to
+the camera of the player. What the runs show:
+
+| The run | The turn and the look | The reads of the camera in the code of the Creature |
+| --- | --- | --- |
+| `turn` | The head, 1858.8 55.3 2528.7: 38.7 units from the body on the map and 25.8 above its base | 324, each one the head, none outside that code |
+| `turn`, `creature_player_head=0` | The game's camera, 1609.2 334.3 2590.8: 295.8 units on the map and 304.8 above the base | 324, each one the game's camera |
+
+The two turns are 0.9 degrees apart, because the Creature is ahead of the
+head and the game's camera is behind the head. The look differs by 279
+units in height. In the test save the game's camera stays where the save
+put it until the view moves: 5.5 units from the Creature at the door and 3
+units above its base. So the kind `stay` gives the head and that camera (508
+reads, each one the head).
 
 The kind `leash` stays at 100 units a meter: the grip from a distance (on), a
 short press of the trigger with the aim on the Creature (off), the grip (on),
@@ -1973,8 +2200,9 @@ now"), and the Creature state ends.
   the arc meets no land".
 - Whether 350 ms is the right hold time for a real grip: a short grip must
   not start a stay, and a hold must not feel late.
-- Where the Creature turns to in a stay in the God view. The game turns it
-  to the place of the game camera.
+- Whether the Creature that turns to the head and looks at it reads well in
+  the God view (section 5.4), after a cut scene, and in the quests in which
+  the Creature does what the player shows, for example the Creche of Land 2.
 - Whether the head of the Creature follows the real hand well when the hand
   is far from it.
 - Whether the animation of what the Creature thinks of, and the line of the
@@ -2025,6 +2253,11 @@ now"), and the Creature state ends.
 - **The stay, with no run.** No run had: a start that the game refuses, a
   grip that closes again before the end packet, a Creature that is not ready
   5 s after the open, `creature_stay_look=0`, and the test key.
+- **The head as the camera of the player, with no run** (section 5.4): a
+  story or a cut scene (the Creature must read the camera of the story), a
+  point or a throw at the player, a Creature of a different player, a game
+  for more than one player, and the test key. The sub actions that the
+  agenda functions of section 1.9 add were not traced.
 - **A sailor in the sea, an object 15 to 35 cm from the Hand in the aim, a
   forest in the cone with the list of 128, and the green halo on a red far
   target** have no run with an owned Creature on a leash.

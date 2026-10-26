@@ -147,6 +147,8 @@ struct ControllerHintState {
   bool owns;            // the controller owns the pointer now
   bool left_handed;     // the left hand points
   bool swap_buttons;    // the trigger is the right button, the grip the left
+  bool fly;             // controls=1: the trigger is both buttons, the grips
+                        // grab the world
   int gesture_button;   // 0 off, 1 the second face button, 2 the stick click
   bool world_grab;      // the grip of the other hand grabs the world
   int ring;             // 0 no ring, 1 a button opens it, 2 only the stick
@@ -168,6 +170,42 @@ bool ControllersWalkPossible();
 // the second face button opens the game menu, the first one opens the ring,
 // and the stick can drive the ring.
 int ControllersButtonLayout();
+
+// THE CONTROL SCHEME (controls, docs/controllers.md, "5.7 The control
+// schemes"). True for controls=1: the grips of both hands only grab the
+// world, the trigger of the pointing hand is the left and the right button of
+// the game, and the trigger of the other hand makes the walk faster.
+bool ControllersFly();
+// The test key of controls (Ctrl, Shift and the apostrophe key, with
+// test_keys=1), and the word "controlskey" of the scripted controller.
+void ControllersControlsToggle(const char* by);
+// controls=1 with left_leash=1: X of the hand that does not point is the
+// button of the leash, and a shake of that hand takes the leash off
+// (docs/controllers.md, 5.7). The test key (Ctrl, Shift and the slash key,
+// with test_keys=1) changes left_leash.
+bool ControllersLeftLeash();
+// The test key of move_stick_climb (Ctrl, Shift and the backslash key, with
+// test_keys=1): the tilt of the controller of the stick moves the player up
+// and down in the walk with controls=1.
+void ControllersClimbToggle(const char* by);
+// The test key of move_stick_path (Ctrl, Shift and the grave accent key, with
+// test_keys=1): with controls=1 the flight keeps its height and stops at the
+// land, or it follows the land.
+void ControllersPathToggle(const char* by);
+void ControllersLeftLeashToggle(const char* by);
+// The test key of left_take (Ctrl, Shift and the less than key, with
+// test_keys=1): with controls=1 the trigger of the hand that does not point
+// takes as the trigger of the pointing hand does (docs/controllers.md, 5.7).
+void ControllersLeftTakeToggle(const char* by);
+// The test key of left_hold (Ctrl, Shift and the decimal key of the number
+// pad, with test_keys=1) and the word "holdkey" of the scripted controller:
+// with controls=1 an object that the trigger of the other hand takes stays
+// in that hand (docs/controllers.md, 5.7).
+void ControllersLeftHoldToggle(const char* by);
+// The grip point of the hand that does not point in the room, in game units
+// as ControllerDirectMotion gives the grip of the pointing hand. False while
+// that hand is not tracked or the direct hand does not act.
+bool ControllersOtherMotion(float grip_room_out[3]);
 // The test key of button_layout (Ctrl and the Menu key, with test_keys=1),
 // and the word "layoutkey" of the scripted controller.
 void ControllersButtonLayoutToggle(const char* by);
@@ -185,6 +223,7 @@ struct OverlayHand {
 struct OverlayHands {
   OverlayHand hand[2];     // 0 the left hand, 1 the right hand
   int pointing;            // the hand that holds the pointer
+  int free_hand;           // the hand of the leash and the walk
   float units_per_meter;   // world units in a meter of the room, at the scale now
   unsigned long long frame;  // the controllers frame
 };
@@ -211,6 +250,16 @@ struct TeleportInput {
   unsigned long long frame;  // the controllers frame
 };
 bool ControllersTeleportInput(TeleportInput* out);
+// THE AIM OF THE COMMANDS OF THE CREATURE (docs/creature.md, section 4). With
+// left_leash=1 and controls=1 it is the aim of the hand that does not point,
+// else the aim of the pointing hand, as ControllersTeleportInput and
+// ControllersFarRay give it.
+bool ControllersCommandInput(TeleportInput* out);
+// The commands of the Creature may start now. With left_leash=1 the pointing
+// trigger may be down, else the rule of ControllersFarAllowed.
+bool ControllersCommandAllowed(const char** why);
+bool ControllersCommandRay(float origin[3], float direction[3], float* units,
+                           float eye[3]);
 
 // The ray of the pointing hand while a dialog box is up and the controller
 // owns the pointer. The two ends are in the world. False when none is drawn.

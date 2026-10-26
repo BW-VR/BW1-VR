@@ -91,6 +91,102 @@ inline void Speed(const float forward[2], const float push[2], float top,
   out[1] = top * (push[1] * forward[1] + push[0] * right[1]);
 }
 
+// THE BOOST (controls=1). The trigger of the hand of the stick makes the walk
+// faster while the player pulls it. The factor of the speed is 1 below
+// kBoostDead and `most` from kBoostFull, with a straight line between the
+// two. So a light touch of the trigger does not change the speed, and the
+// walk is never slower than with no trigger. A `most` below 1 counts as 1.
+const float kBoostDead = 0.1f;
+const float kBoostFull = 0.95f;
+
+inline float Boost(float trigger, float most) {
+  if (!(most > 1.0f)) return 1.0f;
+  const float share = zoom_math::StickShare(trigger, kBoostDead, kBoostFull);
+  return 1.0f + (most - 1.0f) * share;
+}
+
+// THE CLIMB (controls=1, move_stick_climb=1). The tilt of the controller of
+// the stick moves the player up and down while the stick pushes forward. up
+// is the up part of the unit direction in which that controller points, the
+// sine of its pitch. Within kClimbDead of level the share is 0, so a flight
+// straight ahead is easy. Past it the share grows in a straight line to 1
+// (or -1) at straight up (or down). A push back climbs the other way.
+const float kClimbDead = 0.1736f;  // the sine of 10 degrees
+
+inline float ClimbShare(float up) {
+  if (!(up == up)) return 0.0f;
+  const float a = fabsf(up);
+  if (!(a > kClimbDead)) return 0.0f;
+  float share = (a - kClimbDead) / (1.0f - kClimbDead);
+  if (share > 1.0f) share = 1.0f;
+  return up < 0.0f ? -share : share;
+}
+
+// ONE FRAME OF THE CLIMB AT THE LIMITS OF THE GROUND. below is how far the
+// land under the head is below the head, and rise the climb of the frame,
+// both in meters of the room (up is more than 0). The land stays between
+// nearest and farthest below the head:
+//
+//   - lift is how far the head goes up over the land in the room. The view
+//     moves the land down by it.
+//   - a climb past farthest goes on as a zoom out about the land under the
+//     head: ratio is the new scale over the old one. The land stays at
+//     farthest below the head, and the world gets smaller as if the head
+//     went up by the rest: ratio = (top + rest) / top.
+//   - a descent stops at nearest. It never zooms in.
+struct ClimbStep {
+  float lift;
+  float ratio;
+};
+
+inline ClimbStep Climb(float below, float rise, float nearest,
+                       float farthest) {
+  ClimbStep out = {0.0f, 1.0f};
+  if (!(rise == rise) || !(below == below)) return out;
+  if (rise > 0.0f) {
+    float room = farthest - below;
+    if (room < 0.0f) room = 0.0f;
+    if (rise <= room) {
+      out.lift = rise;
+      return out;
+    }
+    out.lift = room;
+    const float top = below + room;
+    if (top > 0.0f) out.ratio = (top + rise - room) / top;
+  } else if (rise < 0.0f) {
+    float room = below - nearest;
+    if (room < 0.0f) room = 0.0f;
+    out.lift = rise < -room ? -room : rise;
+  }
+  return out;
+}
+
+// THE PATH OF A FLIGHT (controls=1, move_stick_path=1). The view keeps its
+// height in the world, so the land under the head comes nearer on a hill.
+// When it would come nearer than `nearest` below the head, the step ends
+// before that place: the player hits the land. below(t) is how far the land
+// under the head is below the head after the share t of the step, in meters
+// of the room. Returns the share of the step to take, 0 to 1. A start that
+// is already nearer than `nearest` may take the step only when the step
+// does not bring the land nearer.
+template <typename Below>
+inline float PathShare(Below below, float nearest) {
+  const float end = below(1.0f);
+  if (end >= nearest) return 1.0f;
+  const float start = below(0.0f);
+  if (!(start >= nearest)) return end >= start ? 1.0f : 0.0f;
+  float low = 0.0f, high = 1.0f;
+  for (int i = 0; i < 10; ++i) {
+    const float mid = 0.5f * (low + high);
+    if (below(mid) >= nearest) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+}
+
 // THE STEP OF ONE FRAME, in meters of the room: the speed times the time of
 // the frame (zoom_math::FrameSeconds gives that time, with its cap). A time
 // that is not above 0 gives no step.

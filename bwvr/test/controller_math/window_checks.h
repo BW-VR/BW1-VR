@@ -28,6 +28,50 @@ inline void WindowChecks() {
   Check(!Wanted(false, true, true, 3.5f, 3.0f),
         "a story camera that stays past the limit: the window goes", 0, 0);
 
+  // THE HOLD OF THE GOD VIEW.
+  Check(HoldGod(true, true, true, false, false, 0.03f, 1.0f),
+        "a story took the camera and the bars are not up yet: the God view "
+        "holds", 1, 1);
+  Check(HoldGod(true, true, true, true, false, 5.0f, 1.0f),
+        "the walls close: the God view holds, also after the wait", 1, 1);
+  Check(!HoldGod(true, true, true, false, false, 1.5f, 1.0f),
+        "a story camera with no bars after the wait: the full view gets it",
+        0, 0);
+  Check(!HoldGod(true, true, true, true, true, 0.0f, 1.0f),
+        "a flat frame: the window shows the story, no hold", 0, 0);
+  Check(!HoldGod(true, true, false, true, false, 0.0f, 1.0f),
+        "the bars are up with the camera of the player: no hold", 0, 0);
+  Check(!HoldGod(false, true, true, true, false, 0.0f, 1.0f),
+        "cutscene_hold=0: no hold", 0, 0);
+  Check(!HoldGod(true, false, true, false, false, 0.0f, 1.0f),
+        "the window is off: no hold, and no wait for the bars", 0, 0);
+  Check(!HoldGod(true, true, true, false, false, 0.0f, 0.0f),
+        "a wait of 0: the God view holds only while the walls close", 0, 0);
+  {
+    // A story of the scroll of the Creche: the story takes the camera, the
+    // bars come up 4 frames later, and the walls close in 0.5 s at 120
+    // frames a second. The God view holds in each frame until the first
+    // flat frame, and never after it.
+    const float dt = 1.0f / 120.0f;
+    State s = {false, 1.0f};
+    bool wanted = false, held_all = true, held_flat = false;
+    float since_story = 0.0f;
+    for (int frame = 0; frame < 200; ++frame) {
+      const bool bars = frame >= 4;
+      if (!HoldGod(true, true, true, wanted, s.flat, since_story, 1.0f)) {
+        if (!s.flat) held_all = false;
+      } else if (s.flat) {
+        held_flat = true;
+      }
+      wanted = Wanted(bars, wanted, true, 0.0f, 3.0f);
+      Step(&s, wanted, dt, 0.5f);
+      since_story += dt;
+    }
+    Check(held_all && !held_flat && s.flat,
+          "the scroll of the Creche: the God view holds until the window is "
+          "flat", held_all && !held_flat ? 1 : 0, 1);
+  }
+
   // THE STATE, at 90 frames a second and a change of half a second.
   {
     const float dt = 1.0f / 90.0f;

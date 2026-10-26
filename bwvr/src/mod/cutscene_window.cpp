@@ -149,11 +149,15 @@ struct Settings {
   // A test: from this frame on the mod reads the cinema bars as up. 0 is no
   // change.
   uint64_t test_bars;  // cutscene_window_test_bars
+  // The God view keeps its view while a story takes the camera and the walls
+  // close (window_math::HoldGod).
+  bool hold;          // cutscene_hold
+  float hold_wait;    // cutscene_hold_wait_ms, in seconds
 };
 Settings g_set = {false, true, true, 2.0f, 2.6f,          0.5f, 3.0f,
                   false, 0,    0,    true, kDepthNearest, 0.0f, 0,
                   0,     true, 1.4f, 0,    1,
-                  true,  true, 1.33f, 0};
+                  true,  true, 1.33f, 0,   true, 1.0f};
 
 window_math::State g_state = {false, 1.0f};
 bool g_wanted = false;
@@ -203,6 +207,12 @@ LARGE_INTEGER g_frequency = {0};
 LARGE_INTEGER g_last = {0};
 // Seconds since the bars were up.
 float g_since_bars = 1000.0f;
+// Seconds since a story camera took the view, at the end of the last frame.
+// 0 while no story camera owns the view, so the main camera call of the
+// first frame of a story reads 0.
+float g_since_story = 0.0f;
+// The God view held its view in the last frame (CutsceneWindowHoldsGod).
+bool g_said_hold = false;
 
 // The last values, so each change gives one log line.
 int g_said_bars = -2;
@@ -361,10 +371,20 @@ void ReadSettings() {
   g_set.test_bars =
       static_cast<uint64_t>(limit(number("cutscene_window_test_bars", 0), 0,
                                   100000000));
+  g_set.hold = number("cutscene_hold", 1) != 0;
+  g_set.hold_wait =
+      limit(number("cutscene_hold_wait_ms", 1000), 0, 5000) / 1000.0f;
   if (!g_set.god) return;
   ModLog("cut scene    : cutscene_window=%d. %s", g_set.on ? 1 : 0,
          g_set.on ? "In the God view a cut scene plays on a screen in the room"
                   : "A cut scene plays in the full view, with held shots");
+  ModLog("cut scene    : cutscene_hold=%d. %s", g_set.hold ? 1 : 0,
+         g_set.hold
+             ? "When a story takes the camera, the God view keeps its view "
+               "until the window is closed, and it waits for the bars for "
+               "cutscene_hold_wait_ms"
+             : "When a story takes the camera, the full view shows the story "
+               "camera until the window is closed");
   ModLog("cut scene    : the screen is %.2f m wide, %.2f m ahead of %s. The "
          "view closes and opens in %.0f ms.", g_set.width, g_set.distance,
          g_set.face_head ? "the head at the start of the cut scene "
@@ -791,6 +811,41 @@ bool CutsceneWindowFlat() { return g_state.flat; }
 // turn, before the frame that closes the view to the window.
 bool CutsceneWindowBarsUp() { return ReadBars() == 1; }
 
+// THE HOLD OF THE GOD VIEW (window_math::HoldGod). tabletop.cpp asks once a
+// frame, at the main camera call. The state of the window and the time of the
+// story are the values of the end of the last frame.
+bool CutsceneWindowHoldsGod(bool story_owns) {
+  ReadSettings();
+  const bool hold = window_math::HoldGod(
+      g_set.hold, g_set.on && g_set.god, story_owns, g_wanted, g_state.flat,
+      g_since_story, g_set.hold_wait);
+  if (hold != g_said_hold) {
+    g_said_hold = hold;
+    if (Say()) {
+      if (hold) {
+        ModLog("cut scene    : a story camera owns the view, so the God view "
+               "keeps its view until the window is closed (cutscene_hold=1)");
+      } else {
+        ModLog("cut scene    : the God view does not keep its view now (%s)",
+               g_state.flat      ? "the window is closed"
+               : !story_owns     ? "the story camera is gone"
+                                 : "no bars came in cutscene_hold_wait_ms");
+      }
+    }
+  }
+  return hold;
+}
+
+void CutsceneWindowHoldToggle(const char* keys) {
+  ReadSettings();
+  g_set.hold = !g_set.hold;
+  ModLog("test key     : %s: cutscene_hold=%d. %s", keys, g_set.hold ? 1 : 0,
+         g_set.hold ? "When a story takes the camera, the God view keeps its "
+                      "view until the window is closed"
+                    : "When a story takes the camera, the full view shows the "
+                      "story camera until the window is closed");
+}
+
 void CutsceneWindowHead(const float center[3], const float orientation[4]) {
   for (int i = 0; i < 3; ++i) g_head[i] = center[i];
   for (int i = 0; i < 4; ++i) g_head_turn[i] = orientation[i];
@@ -1187,6 +1242,11 @@ uint64_t CutsceneWindowEndFrame(uint64_t frame) {
     g_since_bars = 0.0f;
   } else if (g_since_bars < 1000.0f) {
     g_since_bars += dt;
+  }
+  if (!story) {
+    g_since_story = 0.0f;
+  } else if (g_since_story < 1000.0f) {
+    g_since_story += dt;
   }
   // The window needs the God view and a head on the camera. A flat frame
   // has no head on the camera, and it is still the window.

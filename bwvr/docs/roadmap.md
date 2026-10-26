@@ -309,8 +309,15 @@ is built, and no test has proven it.
   tutorial of Land 1 from the walk to the village to the texts after the zoom
   lesson. Still open:
   - The end of the build of the Temple, the missionaries and the lessons of
-    Land 2 (the gestures, the shield, the fireball) have no run and no
-    session.
+    Land 2 (the gestures, the shield) have no run and no session.
+  - The fireball challenge of Land 2 holds the view still, and its three
+    seeds are more than 200 units from the place of the God view. The far
+    grab has no range limit while the game holds the view still
+    (`far_grab_still_m`, `grab.md`, "The range in a view that the game holds
+    still"). Check in a headset that the far grab fetches each seed from
+    there, that a throw reaches the huts, and that the challenge ends. The
+    shield challenge holds the view still too: check that its seeds are in
+    reach.
   - The lessons of the Gods' Playground after the step of the turn have no
     run. A desktop run shows the first walk of the Island Keeper and the step
     of the turn only with `script_view=0`. With `script_view=1` the Keeper did
@@ -362,6 +369,21 @@ is built, and no test has proven it.
   To decide: a halo or a line of the card that shows which objects the
   grip takes, a longer range of the grab while the leash is on, or no
   change.
+- **B36. The address space of 2 GiB runs full: check the fix in a
+  headset.** Headset sessions with `backend=vulkan` ended after 7 to 16
+  minutes, when the 2 GiB of addresses of `runblack.exe` were full
+  (`backend.md`, "The address space"): `malloc` gave a null pointer in
+  `LH3DMem::Alloc` (`0x00842D4A`), or the game faulted at a save. The lines
+  of `memory_blocks=1` showed the cause: the process heap grew by about 680
+  MB in 15 minutes through `amdvlk32.dll`, the large blocks and the private
+  allocations that no hook saw stayed the same. `BeginOnce` of `vk_core.cpp`
+  allocated a new command buffer for each single job, and the reset of the
+  pool does not free it. A copy of the panel for a card in the headset is a
+  single job in each frame. `vk_once_reuse=1`
+  gives each job the same command buffer. To see in a headset: the line
+  "memory" stays near its value after the load, and the process heap does
+  not grow, in a session of 30 minutes or more.
+
 - **B32. A fight of Creatures: test the grip and the marks in the
   headset.** The grip with the Hand at a Creature is the attack or the
   block of the game, at the place of the body that is nearest to the Hand
@@ -370,14 +392,14 @@ is built, and no test has proven it.
   checks and the code show it (`creature.md`, section 6). To see in the
   headset: the attack and the block act at the first grip, and the stars
   sit on the body in both eyes.
-- **B33. The note over a Creature that learns: check it in a headset.** The
+- **B37. The note over a Creature that learns: check it in a headset.** The
   yellow percent of a lesson over the Creature has the depth of the
   Creature in both eyes (`note_depth=1`, `ui-layer.md`, section 19). Desktop
   runs with the test key `note_test` show it with both renderers. No run and
   no session has a note that the game made by itself, from a miracle that
   the Creature sees. To see in the headset: the note shows one time, over
   the head of the Creature.
-- **B34. A hint at the game's Hand: check it in a headset.** While the game
+- **B38. A hint at the game's Hand: check it in a headset.** While the game
   places the Hand (the mouse, or controllers that are not tracked), a
   tooltip or a hint of the game at the Hand has the depth of the Hand in
   both eyes (`hint_hand_depth=1`, `ui-layer.md`, section 15.6). Desktop runs
@@ -385,6 +407,37 @@ is built, and no test has proven it.
   walks. No run had a real tooltip of a thing under the Hand in that state.
   Only a headset can show that the yellow text at the Hand then shows one
   time.
+- **B33. The water with the leash on: test it in the headset.** While the
+  ring of the leash is on the left wrist, the icon of the kind of leash at
+  the lower right of the view is hidden (`leash_icon_hide=1`, test key Ctrl
+  Shift L, `grab.md`, "The leash at the mod's hand"). The water shows both
+  hands of the mod in place of the game's Hand (`hand_reflection`). No
+  desktop run has shown the icon hidden. To see in the headset: with the leash on,
+  no ring in the water moves with the head, and Ctrl Shift L shows the icon
+  again.
+- **B34. The Creature turns to the head: check it in a headset.** In the
+  God view the Creature reads the head of the player as the camera of the
+  player: its turn, its look, a point or a throw at the player, and the
+  distance to the player (`creature_player_head=1`, `creature.md`, section
+  5.4). The game's own camera there is about 300 units above the land, so
+  the Creature looked up into the sky. Desktop runs show the turn of the
+  stay and the look at the head, and each read of the camera in the code of
+  the Creature got the head. Check in a headset:
+  - that the Creature faces you and looks at your head after a stay and
+    after a cut scene,
+  - that the Creature does what you show it in the Creche quest of Land 2,
+  - that in a story the Creature looks at the camera of the story.
+
+  The A/B key is Ctrl, Shift and H. Not run: a story, a cut scene, a point
+  or a throw at the player, and a Creature of a different player.
+
+- **B35. The game ends with "abnormal program termination" after a fetch
+  of a dead tree.** In a headset session on the second island, the Hand
+  took a dead tree from a distance. About 0.3 s after the glide the game
+  ended with the box of `abort`, with no line in the log and with no dump.
+  The cause is not known. The crash log (`crash_log=1`, `backend.md`, "The
+  crash log") now writes the C++ exception and the caller of `abort`. The
+  next log of this end gives the place.
 
 B1b, B2, B4 and B11 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.
@@ -455,7 +508,8 @@ that moves while the Hand takes it.
     Hand's point in it, or with the aim on no far target.
 - **P2. The Creature looks at the player: check it in the headset.** Where a
   plan of the Creature looks at the camera of the player, the Creature looks
-  at the player's head (`creature_look_head=1`, `creature.md`, section 5.4).
+  at the player's head (`creature_look_head=1` with `creature_player_head=0`,
+  `creature.md`, sections 5.5 and 5.6).
   Desktop runs show the angles of the game. They do not show that the head
   of a small Creature turns visibly on the screen. Check in a headset that
   the eyes meet the player's eyes, with a larger Creature near the player.
@@ -467,8 +521,8 @@ that moves while the Hand takes it.
   Desktop runs show it with a Creature that stands and with a Creature that
   walks. Check in a headset:
   - the hold time of 350 ms with a real grip (`creature_hold_stay_ms`),
-  - where the Creature turns to, and how its head follows the real hand
-    (`creature_stay_look`),
+  - that the Creature turns to your head (B34), and how its head follows
+    the real hand (`creature_stay_look`),
   - whether the halo, the pulse and the card show well that the stay is on.
 
   The leash click, the stay and a command act on the Creature of the local
@@ -591,6 +645,28 @@ that moves while the Hand takes it.
   around the player, with no window and with the camera of the game and all
   its motion (`script_camera=0`). The window stays the default. No run has
   shown it: a desktop run has no head to feel the motion.
+- **P18. The hold of the God view at the start of a story: run it and check
+  it in a headset.** When a story takes the camera (a tap on a scroll), the
+  God view keeps its view until the cut scene window is closed
+  (`cutscene_hold=1`, `cutscene-window.md`, section 3). The story camera
+  starts at the game camera of the God view, about 300 units above the land,
+  and the player saw that camera for the 0.5 s of the enter. The math checks
+  have the rule. Not run: a desktop run of a story (the story of the scroll
+  of the Creche, or the story to the pen) that shows the lines of the hold
+  and no frame of the story camera before the first flat frame. Check in a
+  headset that the walls close over the land with no jump, at the scroll of
+  the Creche, and compare with Shift S (`test_keys=1`). The scroll of a silver
+  quest moves the camera for about 8 s before its bars, so the hold ends
+  after `cutscene_hold_wait_ms` (1000) and the full view shows the move,
+  which starts at the head (P19). The hold needs the window: with "Around
+  you" it does not act.
+- **P19. A story starts at the head: check it in a headset.** When a script
+  takes the camera in the God view, the game camera goes to the head, so the
+  move of the story starts there and not 300 units above the player
+  (`story_start_at_head=1`, `god-view.md`, section 17). Check in a headset,
+  with "Around you" and with the window: the scroll of a silver quest, the
+  cut to the life size scale at the head, and the move after it. The A/B key
+  is Ctrl, Shift and S.
 - **P5. Hand tracking.** The player plays with the hands and no
   controllers: the Hand follows the real hand and its fingers, one to one,
   as it follows a controller. First find what the headset gives to the
@@ -1068,6 +1144,10 @@ that moves while the Hand takes it.
   take (`hand-model.md`, "Haptics from the world"). Only a headset shows
   how each pattern feels, and whether a new target and a lock stay clear.
   The mod reads no type of the ground, so rock and grass feel the same.
+- **N23. The control scheme "Trigger is grab"** (`controls=1`,
+  `controllers.md`, 5.7). No headset session yet. Only a headset shows how
+  the choice of the press feels, and whether the boost of 5 times is a good
+  speed.
 
 ### The repo, the release and the tools
 

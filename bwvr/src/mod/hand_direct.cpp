@@ -129,6 +129,7 @@
 #include "controllers.h"
 #include "creature_command.h"
 #include "creature_look.h"
+#include "creature_head.h"
 #include "creature_stay.h"
 #include "debug_menu.h"
 #include "far_choice_math.h"
@@ -173,6 +174,9 @@ float TabletopViewScale();
 // tabletop.cpp: true while the table or the God view owns the view.
 bool TabletopOwnsView();
 bool TabletopGodOwnsView();
+// tabletop.cpp: true while the game's switch for the drag of the land is on,
+// so the player can move the view.
+bool TabletopMoveAllowed();
 // head_camera.cpp: the rotation and the position that the scene was drawn
 // from, in the world.
 bool HeadCameraRenderBasis(float basis_out[9], float position_out[3]);
@@ -210,6 +214,11 @@ bool HandExactPalm(float out[3], uint64_t* frame, int32_t* state);
 // controllers.cpp: the grab from a distance (docs/grab.md, "The grab from a
 // distance"). The aim ray in the world, and whether the pointing hand may act
 // on a far object now.
+// overlay.cpp: the middle of the wrist of the hand that does not point, as
+// it was drawn last. False when it was not drawn in the last two frames.
+bool OverlayOtherWrist(float out[3]);
+bool OverlayFreeWrist(float point[3], float axes[9], float* length,
+                      bool pointing);
 bool ControllersFarRay(float origin[3], float direction[3],
                        float* units_per_meter, float eye[3]);
 bool ControllersFarAllowed(const char** why);
@@ -784,6 +793,14 @@ void* g_far_debug_object = nullptr;
 int g_far_debug_frames = 0;
 float g_far_offer_deg = 12.0f;
 uint64_t g_far_offers = 0;
+// THE CONE OF THE COMMANDS ON THE OTHER HAND (left_leash=1): the commands of
+// the Creature aim with the hand that does not point, so the objects in the
+// cone of its aim ray go to the pick too (creature_command.cpp).
+bool g_cmd_offer = false;
+float g_cmd_origin[3] = {0.0f, 0.0f, 0.0f};
+float g_cmd_direction[3] = {0.0f, 0.0f, 1.0f};
+float g_cmd_units = 0.0f;
+uint64_t g_cmd_offers = 0;
 uint64_t g_far_land_writes = 0;
 bool g_said_multiplayer = false;
 bool FarTargetLives();
@@ -3298,8 +3315,8 @@ int __fastcall h_SendObjectDrawCollision(void* self, void* unused,
 int __fastcall h_ScreenTest(const void* bounds, void* unused,
                             const uint8_t* object) {
   const int result = o_ScreenTest(bounds, unused, object);
-  if ((!g_near_pick && !g_far_offer) || g_eye != 0 || result == 0 ||
-      object == nullptr) {
+  if ((!g_near_pick && !g_far_offer && !g_cmd_offer) || g_eye != 0 ||
+      result == 0 || object == nullptr) {
     return result;
   }
   int32_t* under = reinterpret_cast<int32_t*>(kPickUnder);
@@ -3340,6 +3357,22 @@ int __fastcall h_ScreenTest(const void* bounds, void* unused,
     if (s.valid && s.te <= g_far_offer_deg) {
       *under = 1;
       ++g_far_offers;
+      return result;
+    }
+  }
+  // THE CONE OF THE COMMANDS ON THE OTHER HAND, with the same rule.
+  if (g_cmd_offer) {
+    const float cx = at[0] - g_cmd_origin[0], cy = at[1] - g_cmd_origin[1],
+                cz = at[2] - g_cmd_origin[2];
+    float hand_m = sqrtf(cx * cx + cy * cy + cz * cz) / g_cmd_units;
+    if (hand_m < controller_math::kFarMinHandM) {
+      hand_m = controller_math::kFarMinHandM;
+    }
+    const controller_math::FarScore s = controller_math::FarConeScore(
+        g_cmd_origin, g_cmd_direction, at, 0.0f, hand_m);
+    if (s.valid && s.te <= FarGrabSelectDeg() + 4.0f) {
+      *under = 1;
+      ++g_cmd_offers;
     }
   }
   return result;
@@ -6443,6 +6476,353 @@ int __fastcall h_PickStep(void* self, void* unused) {
 // once a frame, so each call of a frame gets the same point. With the mouse,
 // with the game's mesh shown, for the leash of another player and for a leash
 // that is tied to an object, the game's point stays.
+uint64_t g_leash_wrist_last = 0;
+int g_leash_wrist_logs = 0;
+
+// THE RING OF THE LEASH ON THE OTHER HAND (left_leash=1, leash_ring_left=1):
+// the controller places the Hand, and the leash is a job of the other hand.
+// The game shows the ring at its Hand for the kind of leash of the Temple,
+// also while the leash is off the Creature and while the Hand holds a
+// miracle (RingAtHand). So no state of the leash and no state of the Hand
+// counts here.
+bool LeashRingLeft() {
+  return ControllersLeftLeash() && g_owns && g_hand != nullptr;
+}
+
+// THE RING OF THE LEASH (docs/grab.md, "The leash at the mod's hand"). For
+// the kind of leash of the Temple, the game draws a ring of the mesh
+// Data\MISC\leash.l3d and a glow at the wrist of its Hand, also while the
+// leash is off the Creature (RingAtHand).
+// CitadelHeart::DrawNow calls fn_00466730 (thiscall, the CitadelHeart, no
+// arguments) for the three rings at the posts of the leash in the Temple.
+// For the kind of leash that is on the Hand, that function puts the ring at
+// the wrist bone of the game's Hand: the turn of the first matrix of the
+// pose of the Hand's mesh (CHand+0x482C, then +0x80), its place, and an
+// offset and a size from the size of the mesh (+0x44). The ring lies across
+// the z axis of that bone.
+//
+// With the leash on the other hand (left_leash=1, leash_ring_left=1), the
+// mod gives the function a bone of its own for the call, and puts the pose
+// and the size back after the call. Its z axis is along the other hand, so
+// the ring goes around the wrist. Its size makes the ring kRingRadiusShare of
+// the length of the hand. Its place is the middle of the wrist, moved
+// kRingToKnuckles toward the knuckles, less the
+// offset of the game, measured at the ring after each call in the frame of
+// the bone. So the game puts its own ring and glow around the wrist of the
+// other hand. The hook changes the bone only for the call that puts the ring
+// at the Hand (RingAtHand), so the offset never comes from a ring at a post.
+// leash_ring_left=0 leaves the ring at the game's Hand.
+const uintptr_t kDrawLeashRings = 0x00466730;
+const int kHandMeshObject = 0x482C;
+const int kMeshPose = 0x80;
+const int kMeshSize = 0x44;
+const float kRingSizeUnits = 173.529f;  // the game: the size of the mesh * this
+const float kRingMeshRadius = 1.063f;   // leash.l3d: the half width in x and y
+const float kRingRadiusShare = 0.17f;   // of the length of the hand
+// From the middle of the wrist toward the knuckles, a share of the length of
+// the hand, so the ring lies on the skin and not over the end of the mesh.
+const float kRingToKnuckles = 0.04f;
+const int kHeartLeashes = 0xE4;         // CitadelHeart: its TempleLeash
+const int kHeartPlayer = 0x1C;          // CitadelHeart vtable: its GPlayer
+const int kHeartObject = 0x40;          // CitadelHeart: an object with
+const int kHeartObjectOn = 0x9C;        // a float, 1 when the rings turn
+const int kCreatureLeashes = 0x1108;    // Creature: a slot for each kind from 1
+const int kMeshNoRing = 0xAC;           // the mesh of the Hand: 0 for a ring
+const int kLeashRing = 0x5C;            // LeashObj: its ring
+typedef void(__fastcall* DrawRingsFn)(void* self, void* unused);
+DrawRingsFn o_DrawLeashRings = nullptr;
+bool g_leash_ring_left = true;  // leash_ring_left
+uint64_t g_ring_left_calls = 0;
+bool g_ring_left_said = false;
+int g_ring_leash_on = -1;  // the leash on the Creature at the last call
+int g_ring_leash_logs = 0;
+// The offset of the ring from the bone, in the frame of the bone, from the
+// last call.
+float g_ring_offset[3] = {0.0f, 0.0f, 0.0f};
+
+// The mesh of the game's Hand, or null.
+uint8_t* HandMeshObject() {
+  if (g_hand == nullptr) return nullptr;
+  uint8_t* const* link =
+      reinterpret_cast<uint8_t* const*>(g_hand + kHandMeshObject);
+  if (IsBadReadPtr(link, sizeof(void*)) || *link == nullptr ||
+      IsBadWritePtr(*link + kMeshSize, sizeof(float)) ||
+      IsBadReadPtr(*link + kMeshPose, sizeof(void*))) {
+    return nullptr;
+  }
+  return *link;
+}
+
+// The ring of the kind of leash that is on the Hand, after the call, or null.
+float* RingMatrix(void* heart) {
+  const uint8_t* const* temple = reinterpret_cast<const uint8_t* const*>(
+      static_cast<uint8_t*>(heart) + kHeartLeashes);
+  if (IsBadReadPtr(temple, sizeof(void*)) || *temple == nullptr ||
+      IsBadReadPtr(*temple, 16)) {
+    return nullptr;
+  }
+  const int kind = *reinterpret_cast<const int32_t*>(*temple);
+  if (kind < 0 || kind > 2) return nullptr;
+  const uint8_t* leash = *reinterpret_cast<const uint8_t* const*>(
+      *temple + 4 + kind * 4);
+  if (leash == nullptr || IsBadReadPtr(leash + kLeashRing, sizeof(void*))) {
+    return nullptr;
+  }
+  uint8_t* ring = *reinterpret_cast<uint8_t* const*>(leash + kLeashRing);
+  if (ring == nullptr || IsBadWritePtr(ring + 0x14, 12 * sizeof(float))) {
+    return nullptr;
+  }
+  return reinterpret_cast<float*>(ring + 0x14);
+}
+
+// True when fn_00466730 puts the ring of this CitadelHeart at the Hand, with
+// the tests of the function: the float at +0x9C of the object at +0x40 is 1
+// (0x00466764), the GPlayer of the heart has a Creature (+0xA4C) with the
+// kind of leash of the TempleLeash (0x004667B0), that GPlayer is the local
+// player (0x004669D1), and the mesh of the Hand has 0 at +0xAC (0x004669F0).
+// The heart of each other player keeps its ring at its post, and the hook
+// does not measure an offset there.
+bool RingAtHand(void* heart, const uint8_t* mesh) {
+  uint8_t* const h = static_cast<uint8_t*>(heart);
+  if (IsBadReadPtr(h, kHeartLeashes + 4) ||
+      IsBadReadPtr(mesh + kMeshNoRing, sizeof(int32_t)) ||
+      *reinterpret_cast<const int32_t*>(mesh + kMeshNoRing) != 0) {
+    return false;
+  }
+  const uint8_t* object = *reinterpret_cast<uint8_t* const*>(h + kHeartObject);
+  if (object == nullptr || IsBadReadPtr(object + kHeartObjectOn, 4) ||
+      *reinterpret_cast<const float*>(object + kHeartObjectOn) != 1.0f) {
+    return false;
+  }
+  const uint8_t* temple = *reinterpret_cast<uint8_t* const*>(h + kHeartLeashes);
+  if (temple == nullptr || IsBadReadPtr(temple, 4)) return false;
+  const int kind = *reinterpret_cast<const int32_t*>(temple);
+  if (kind < 0 || kind > 2) return false;
+  const uint8_t* player = static_cast<const uint8_t*>(
+      reinterpret_cast<GetPlayerFn>(VTable(heart)[kHeartPlayer / 4])(heart,
+                                                                     nullptr));
+  if (player == nullptr || player != LocalPlayer()) return false;
+  const uint8_t* creature =
+      *reinterpret_cast<uint8_t* const*>(player + kPlayerCreature);
+  if (creature == nullptr ||
+      IsBadReadPtr(creature + kCreatureLeashes, 4 * sizeof(void*))) {
+    return false;
+  }
+  return *reinterpret_cast<void* const*>(creature + kCreatureLeashes +
+                                         4 * (kind + 1)) != nullptr;
+}
+
+void __fastcall h_DrawLeashRings(void* self, void* unused) {
+  float* bone = nullptr;
+  uint8_t* mesh = nullptr;
+  float saved[12], saved_size = 0.0f;
+  float wrist[3], axes[9], length = 0.0f;
+  if (g_leash_ring_left && LeashRingLeft() &&
+      OverlayFreeWrist(wrist, axes, &length, false) && length > 0.0f) {
+    mesh = HandMeshObject();
+    if (mesh != nullptr && !RingAtHand(self, mesh)) mesh = nullptr;
+    if (mesh != nullptr) {
+      float* const pose = *reinterpret_cast<float* const*>(mesh + kMeshPose);
+      if (pose != nullptr && !IsBadWritePtr(pose, 12 * sizeof(float))) {
+        bone = pose;
+      }
+    }
+  }
+  float rows[9];
+  if (bone != nullptr) {
+    memcpy(saved, bone, sizeof(saved));
+    saved_size = *reinterpret_cast<float*>(mesh + kMeshSize);
+    // z along the hand, x across the palm, y = z cross x.
+    float z[3] = {axes[3], axes[4], axes[5]};
+    float x[3] = {axes[0], axes[1], axes[2]};
+    const float zl = sqrtf(z[0] * z[0] + z[1] * z[1] + z[2] * z[2]);
+    if (zl > 1e-6f) {
+      for (int i = 0; i < 3; ++i) z[i] /= zl;
+      const float d = x[0] * z[0] + x[1] * z[1] + x[2] * z[2];
+      for (int i = 0; i < 3; ++i) x[i] -= d * z[i];
+      const float xl = sqrtf(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+      if (xl > 1e-6f) {
+        for (int i = 0; i < 3; ++i) x[i] /= xl;
+        const float y[3] = {z[1] * x[2] - z[2] * x[1],
+                            z[2] * x[0] - z[0] * x[2],
+                            z[0] * x[1] - z[1] * x[0]};
+        for (int i = 0; i < 3; ++i) {
+          rows[i] = x[i];
+          rows[3 + i] = y[i];
+          rows[6 + i] = z[i];
+        }
+        memcpy(bone, rows, sizeof(rows));
+        // The knuckles are at a smaller y of the hand than the wrist
+        // (overlay_math.h, kWristPoint).
+        for (int i = 0; i < 3; ++i) wrist[i] -= kRingToKnuckles * length * z[i];
+        for (int i = 0; i < 3; ++i) {
+          bone[9 + i] = wrist[i] - (rows[i] * g_ring_offset[0] +
+                                    rows[3 + i] * g_ring_offset[1] +
+                                    rows[6 + i] * g_ring_offset[2]);
+        }
+        // The ring of the game has the radius 0.5 * size * 173.5 * 1.063.
+        *reinterpret_cast<float*>(mesh + kMeshSize) =
+            2.0f * kRingRadiusShare * length /
+            (kRingSizeUnits * kRingMeshRadius);
+      } else {
+        bone = nullptr;
+      }
+    } else {
+      bone = nullptr;
+    }
+  }
+  o_DrawLeashRings(self, unused);
+  if (bone == nullptr) return;
+  // The offset of the game, in the frame of the bone, for the next call.
+  const float* ring = RingMatrix(self);
+  if (ring != nullptr) {
+    const float gap[3] = {ring[9] - bone[9], ring[10] - bone[10],
+                          ring[11] - bone[11]};
+    for (int a = 0; a < 3; ++a) {
+      g_ring_offset[a] = rows[a * 3] * gap[0] + rows[a * 3 + 1] * gap[1] +
+                         rows[a * 3 + 2] * gap[2];
+    }
+  }
+  memcpy(bone, saved, sizeof(saved));
+  *reinterpret_cast<float*>(mesh + kMeshSize) = saved_size;
+  ++g_ring_left_calls;
+  if (!g_ring_left_said && ring != nullptr && g_ring_left_calls > 2) {
+    g_ring_left_said = true;
+    const float gap[3] = {ring[9] - wrist[0], ring[10] - wrist[1],
+                          ring[11] - wrist[2]};
+    ModLog("leash        : the game puts the ring of the leash around the "
+           "wrist of the hand that does not point, %.1f %.1f %.1f, %.2f "
+           "units from its middle, %.2f units across for a hand of %.2f "
+           "units (left_leash=1, leash_ring_left=1), frame %llu", wrist[0],
+           wrist[1], wrist[2],
+           sqrtf(gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]),
+           2.0f * kRingRadiusShare * length, length, g_frame);
+  }
+  // One line for each change of the leash on the Creature, so a run shows
+  // that the ring stays at the other hand when the leash comes off.
+  const uint8_t* status =
+      g_face != nullptr
+          ? *reinterpret_cast<uint8_t* const*>(g_face + kFaceStatus)
+          : nullptr;
+  const uint8_t* leash =
+      status != nullptr
+          ? *reinterpret_cast<uint8_t* const*>(status + kStatusLeash)
+          : nullptr;
+  const int on = leash != nullptr &&
+                 *reinterpret_cast<const int32_t*>(leash + kLeashOn) != 0;
+  if (ring != nullptr && on != g_ring_leash_on && g_ring_leash_logs < 8) {
+    ++g_ring_leash_logs;
+    const float gap[3] = {ring[9] - wrist[0], ring[10] - wrist[1],
+                          ring[11] - wrist[2]};
+    ModLog("leash        : the leash is %s the Creature, and the ring stays "
+           "around the wrist of the hand that does not point, %.2f units "
+           "from its middle, frame %llu", on ? "on" : "off",
+           sqrtf(gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]),
+           g_frame);
+  }
+  g_ring_leash_on = on;
+}
+
+// THE ICON OF THE KIND OF LEASH (docs/grab.md, "The leash at the mod's
+// hand"). The interface of the game keeps a list of DisplayGesture items
+// (0x00D4EAC8, the count at 0x00D4EAD0). fn_0068AA60 puts each item on the
+// sorted list with the draw fn_0068B480. That draw calls fn_0068B7E0
+// (thiscall, the item, its kind of spell seed +0x10 and its kind of leash
+// +0x14, ret 8), then the sprite of the gesture. For a kind of leash that is
+// not -1, fn_0068B7E0 draws the small leash mesh of that kind (fn_004645A0)
+// with a camera of its own at the lower right of the view, and puts the
+// camera back (fn_0068B7D0). ProcessPowerUpSystem gives an item with the kind
+// of leash that is on (order 2, 0x005CFA0F), and DoLeashSelectionSystem one
+// for each other kind (order 3 + the kind, 0x005D0362).
+//
+// In the headset that leash is at one place in front of the head. While the
+// game puts the ring of the leash around the wrist of the hand that does not
+// point (left_leash=1, leash_ring_left=1), the ring shows that the leash is
+// on, and leash_icon_hide=1 skips the call for an item with a kind of leash.
+// The sprite of the gesture stays. The decision is latched once a frame, so
+// both eyes agree. leash_icon_hide=0 draws the icon as the game does.
+const uintptr_t kDrawGestureIcon = 0x0068B7E0;
+const int kGestureOrder = 0x34;
+const int kGestureType = 0x0C;
+typedef void(__fastcall* DrawGestureIconFn)(void* self, void* unused,
+                                            int seed, int leash);
+DrawGestureIconFn o_DrawGestureIcon = nullptr;
+bool g_rings_hooked = false;
+bool g_icon_hide_live = true;  // leash_icon_hide, the test key changes it
+bool g_icon_key_down = false;
+uint64_t g_icon_test_frame = 0;  // leash_icon_test
+uint64_t g_icon_frame = ~0ull;
+bool g_icon_hide_now = false;
+uint64_t g_icon_skips = 0;
+uint32_t g_icon_said = 0;  // a bit for each order that the log has
+
+void __fastcall h_DrawGestureIcon(void* self, void* unused, int seed,
+                                  int leash) {
+  if (leash != -1 && self != nullptr) {
+    if (g_frame != g_icon_frame) {
+      g_icon_frame = g_frame;
+      g_icon_hide_now = g_icon_hide_live && g_rings_hooked &&
+                        g_leash_ring_left && LeashRingLeft();
+    }
+    const uint8_t* item = static_cast<const uint8_t*>(self);
+    const int order = *reinterpret_cast<const int32_t*>(item + kGestureOrder);
+    if (order >= 0 && order < 32 && (g_icon_said & (1u << order)) == 0) {
+      g_icon_said |= 1u << order;
+      ModLog("leash        : the game draws the icon of the kind of leash %d "
+             "(a DisplayGesture item, order %d, gesture %d). It is %s, "
+             "frame %llu", leash, order,
+             *reinterpret_cast<const int32_t*>(item + kGestureType),
+             g_icon_hide_now ? "hidden, because the ring of the leash is on "
+                               "the wrist of the hand that does not point"
+                             : "drawn",
+             g_frame);
+    }
+    if (g_icon_hide_now) {
+      ++g_icon_skips;
+      return;
+    }
+  }
+  o_DrawGestureIcon(self, unused, seed, leash);
+}
+
+void ToggleLeashIcon(const char* by) {
+  g_icon_hide_live = !g_icon_hide_live;
+  g_icon_frame = ~0ull;
+  ControllersGesturePulse(0.5f, g_icon_hide_live ? 0.30f : 0.08f);
+  ModLog("leash        : %s: leash_icon_hide is %d now, frame %llu. The icon "
+         "of the kind of leash is %s while the ring is on the wrist of the "
+         "hand that does not point. %llu draws skipped so far",
+         by, g_icon_hide_live ? 1 : 0, g_frame,
+         g_icon_hide_live ? "hidden" : "drawn",
+         static_cast<unsigned long long>(g_icon_skips));
+}
+
+// THE A/B KEY OF THE ICON OF THE LEASH (test_keys=1): Ctrl, Shift and L
+// change leash_icon_hide between 1 and 0. The pointing controller gives a
+// long pulse for 1 and a short pulse for 0. Shift and L without Ctrl is a key
+// of stereo.cpp. Read once a frame, only while a window of the game is in
+// front. The test key leash_icon_test gives a frame at which the value
+// changes, as the key does.
+void PollLeashIconKey() {
+  if (o_DrawGestureIcon == nullptr) return;
+  if (g_icon_test_frame > 0 && g_frame >= g_icon_test_frame) {
+    g_icon_test_frame = 0;
+    ToggleLeashIcon("the test frame (leash_icon_test)");
+  }
+  if (!g_release_key) return;
+  const bool down = (GetAsyncKeyState('L') & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool pressed = down && !g_icon_key_down;
+  g_icon_key_down = down;
+  if (!pressed) return;
+  HWND window = GetForegroundWindow();
+  DWORD process = 0;
+  if (window != nullptr) GetWindowThreadProcessId(window, &process);
+  if (process != GetCurrentProcessId()) return;
+  ToggleLeashIcon("Ctrl, Shift and L");
+}
+
 void __fastcall h_LeashStart(void* self, void* unused, float* out,
                              int from_status) {
   o_LeashStart(self, unused, out, from_status);
@@ -6457,6 +6837,28 @@ void __fastcall h_LeashStart(void* self, void* unused, float* out,
       *reinterpret_cast<uint8_t* const*>(status + kStatusLeash);
   if (leash == nullptr ||
       *reinterpret_cast<void* const*>(leash + kLeashObject) != nullptr) {
+    return;
+  }
+  // THE LEASH ON THE OTHER HAND (left_leash=1, docs/controllers.md, 5.7):
+  // X of the hand that does not point puts the leash on, and that hand
+  // commands the Creature, so the rope ends at the middle of its wrist, as
+  // the overlay drew it.
+  if (ControllersLeftLeash()) {
+    float wrist[3];
+    if (!OverlayOtherWrist(wrist)) return;
+    const bool fresh = g_frame > g_leash_wrist_last + 90;
+    g_leash_wrist_last = g_frame;
+    if (fresh && g_leash_wrist_logs < kMaxLeashLogs) {
+      ++g_leash_wrist_logs;
+      const float units = RoomUnits();
+      ModLog("leash        : the rope ends at the wrist of the hand that does "
+             "not point, %.1f %.1f %.1f, %.1f cm of the room from the wrist "
+             "bone of the game's Hand (left_leash=1), frame %llu",
+             wrist[0], wrist[1], wrist[2],
+             units > 0.0f ? Distance(out, wrist) / units * 100.0f : 0.0f,
+             g_frame);
+    }
+    for (int i = 0; i < 3; ++i) out[i] = wrist[i];
     return;
   }
   if (g_leash_frame != g_frame) {
@@ -7187,12 +7589,39 @@ void FarTestTakeGone() {
   FarGrabGone();
 }
 
+// TEST (far_test_still_view=N, for the desktop runs only): at frame N the
+// test writes 0 to the camera switches of the game (CameraHelp::
+// EnabledFeatures), as the interface level 12 of a script does. The game
+// then holds the view still, as in the fireball challenge of Land 2.
+void FarTestStillView() {
+  static const int frame = TestKey("far_test_still_view");
+  static bool done = false;
+  if (frame <= 0 || done) return;
+  if (ControllersTestFrame(frame, g_frame) < static_cast<uint64_t>(frame)) {
+    return;
+  }
+  done = true;
+  uint32_t* features = reinterpret_cast<uint32_t*>(0x009CDD6C);
+  ModLog("far grab    : test key far_test_still_view=%d: the camera switches "
+         "of the game go from 0x%X to 0, frame %llu", frame, *features,
+         g_frame);
+  *features = 0;
+}
+
 // The grab from a distance, once a frame: the facts of the frame go to
 // far_grab.cpp, and the cone and the selection latch what they need.
 void FarFrameStep(bool active) {
   g_far_ready = false;
   g_far_offer = false;
   g_far_ray = false;
+  g_cmd_offer = false;
+  if (active && ControllersLeftLeash() && CreatureCommandWantsCone()) {
+    float eye[3];
+    g_cmd_offer =
+        ControllersCommandRay(g_cmd_origin, g_cmd_direction, &g_cmd_units,
+                              eye) &&
+        g_cmd_units > 0.0f;
+  }
   FarTestTakeGone();
   // THE TARGET LIVES, or the far grab lets it go now. The mesh of a locked
   // target stays in the pick of this frame.
@@ -7202,9 +7631,11 @@ void FarFrameStep(bool active) {
     g_far_keep_model = *reinterpret_cast<uint8_t* const*>(
         static_cast<uint8_t*>(locked) + kObjectMesh);
   }
+  FarTestStillView();
   FarFrame f = {};
   f.frame = g_frame;
   f.now = NowSeconds();
+  f.still = !TabletopMoveAllowed();
   f.why = "the controller does not place the Hand";
   f.held = g_hand != nullptr
                ? *reinterpret_cast<void* const*>(g_hand + kHandHeld)
@@ -7274,9 +7705,10 @@ void FarFrameStep(bool active) {
   // ready.
   // A MIRACLE IN THE HAND (miracle.cpp) aims with the same cone: the Hand is
   // not empty then, so the far grab is not ready.
-  const bool command = f.usable && f.have_ray &&
-                       (CreatureCommandWantsCone() || MiracleWantsCone() ||
-                        ForestTakeWantsCone());
+  const bool command =
+      f.usable && f.have_ray &&
+      ((CreatureCommandWantsCone() && !ControllersLeftLeash()) ||
+       MiracleWantsCone() || ForestTakeWantsCone());
   if (!f.ready && !command) return;
   g_far_ready = f.ready;
   g_far_ray = true;
@@ -7612,6 +8044,7 @@ void InstallNear() {
              : "The reach of the Creature at the Hand is hand_pick_cm");
   CreatureStayInstall();
   CreatureLookInstall();
+  CreatureHeadInstall();
   g_creature_bone = IniKey("creature_bone", 1) != 0;
   ModLog("hand creature: creature_bone=%d. %s", g_creature_bone ? 1 : 0,
          g_creature_bone
@@ -7646,6 +8079,58 @@ void InstallNear() {
   } else {
     ModLog("hand pick    : near_rule=0, so the pick reaches 60 percent of the "
            "Hand's length");
+  }
+  g_leash_ring_left = IniKey("leash_ring_left", 1) != 0;
+  static const uint8_t kRingsBytes[11] = {0x81, 0xEC, 0xD8, 0x00, 0x00, 0x00,
+                                           0x56, 0x8B, 0xF1, 0x8B, 0x06};
+  const void* rings = reinterpret_cast<const void*>(kDrawLeashRings);
+  if (IsBadReadPtr(rings, sizeof(kRingsBytes)) ||
+      memcmp(rings, kRingsBytes, sizeof(kRingsBytes)) != 0) {
+    ModLog("hooks        : the draw of the rings of the leash at 0x%08X does "
+           "not have the bytes of the disassembly, so the ring of the leash "
+           "stays at the game's Hand",
+           static_cast<unsigned>(kDrawLeashRings));
+  } else {
+    Hook(kDrawLeashRings, reinterpret_cast<void*>(&h_DrawLeashRings),
+         reinterpret_cast<void**>(&o_DrawLeashRings),
+         "the draw of the rings of the leash (the ring on the other hand)");
+    g_rings_hooked = true;
+    ModLog("leash        : leash_ring_left=%d. %s", g_leash_ring_left ? 1 : 0,
+           g_leash_ring_left
+               ? "With left_leash=1 the game puts the ring of the leash "
+                 "around the wrist of the hand that does not point"
+               : "The ring of the leash stays at the game's Hand");
+  }
+  g_icon_hide_live = IniKey("leash_icon_hide", 1) != 0;
+  g_icon_test_frame = static_cast<uint64_t>(TestKey("leash_icon_test"));
+  const bool icon_keys = TestKey("test_keys") != 0;
+  static const uint8_t kIconBytes[13] = {0x83, 0xEC, 0x64, 0x53, 0x55,
+                                         0x56, 0x57, 0x8B, 0xF9, 0x83,
+                                         0x7F, 0x34, 0x09};
+  const void* icon = reinterpret_cast<const void*>(kDrawGestureIcon);
+  if (IsBadReadPtr(icon, sizeof(kIconBytes)) ||
+      memcmp(icon, kIconBytes, sizeof(kIconBytes)) != 0) {
+    ModLog("hooks        : the draw of the icon of a gesture at 0x%08X does "
+           "not have the bytes of the disassembly, so the game draws the "
+           "icon of the kind of leash",
+           static_cast<unsigned>(kDrawGestureIcon));
+  } else if (g_icon_hide_live || icon_keys || g_icon_test_frame > 0) {
+    // With test_keys=1 or leash_icon_test the hook goes in for both values,
+    // so the A/B can change it.
+    Hook(kDrawGestureIcon, reinterpret_cast<void*>(&h_DrawGestureIcon),
+         reinterpret_cast<void**>(&o_DrawGestureIcon),
+         "the draw of the icon of a gesture (the icon of the kind of leash)");
+    ModLog("leash        : leash_icon_hide=%d. %s%s", g_icon_hide_live ? 1 : 0,
+           g_icon_hide_live
+               ? "While the ring of the leash is on the wrist of the hand "
+                 "that does not point, the icon of the kind of leash at the "
+                 "lower right of the view is hidden"
+               : "The game draws the icon of the kind of leash at the lower "
+                 "right of the view",
+           icon_keys ? ". test_keys=1: Ctrl, Shift and L change it" : "");
+  } else {
+    ModLog("leash        : leash_icon_hide=0, so the game draws the icon of "
+           "the kind of leash at the lower right of the view");
   }
   if (!g_leash_palm) {
     ModLog("leash        : leash_at_palm=0, so the rope ends at the wrist "
@@ -8523,6 +9008,29 @@ void ScriptPlayerInstall() {
 
 }  // namespace
 
+// creature_head.cpp: the head of the player in the world, while the player
+// stands for the camera now (docs/god-view.md, "When the player stands for
+// the camera"). The latch of the last frame gives the head. why gets the
+// reason when the player does not stand for the camera.
+bool HandDirectPlayerHead(float head[3], const char** why) {
+  const bool view = TabletopGodOwnsView();
+  const int owner = ScriptCameraOwnerNow();
+  const bool bars = CutsceneWindowBarsUp();
+  const bool moves = ComfortCameraGameMoves();
+  const char* reason = nullptr;
+  if (!near_math::PlayerIsCamera(g_player.valid, view, owner, bars, moves)) {
+    reason = !g_player.valid ? "the God view did not own the last frame"
+             : !view         ? "the God view does not own the view now"
+             : owner != 0    ? "a story has the camera"
+             : bars          ? "the cinema bars are up"
+                             : "the game moves its own camera to a new place";
+  }
+  if (why != nullptr) *why = reason;
+  if (reason != nullptr) return false;
+  for (int i = 0; i < 3; ++i) head[i] = g_player.points.head_at[i];
+  return true;
+}
+
 // For the fake controller's word "seek" on the table: offer the objects
 // within 50 cm of the room of the Hand to the pick, for a few frames.
 void HandDirectWidenPick(int frames) {
@@ -8540,7 +9048,8 @@ void HandDirectWidenFar(int frames, float meters) {
 // passes.
 void HandDirectFrame() {
   ++g_frame;
-  if (g_script_hooked) LatchPlayer();
+  if (g_script_hooked || CreatureHeadHooked()) LatchPlayer();
+  CreatureHeadFrame(g_frame);
   g_candidate_count = 0;
   g_ball_count = 0;
   g_scroll_count = 0;
@@ -8589,6 +9098,7 @@ void HandDirectFrame() {
   PollChoiceKey();
   PollStayKey();
   PollTakeCarryKey();
+  PollLeashIconKey();
   TakeStreamFrame(g_frame);
   PollCatchKey();
   PollWideKey();
@@ -8970,6 +9480,8 @@ bool HandDirectHandPosition(float out[3], bool* by_controller) {
 // Normal state, empty, and over nothing it can hold, by the mod's own pick
 // and by the game's. These are from the last frame, which is the frame the
 // player saw. why says the first reason for a no.
+
+
 bool HandDirectClaimFree(const char** why) {
   if (!g_installed || !g_owns || g_hand == nullptr || g_face == nullptr) {
     *why = "the controller does not place the Hand";
@@ -9001,6 +9513,26 @@ bool HandDirectClaimFree(const char** why) {
   }
   *why = "the Hand is empty and over nothing it can hold";
   return true;
+}
+
+// For the take with the trigger of the other hand (controllers.cpp,
+// left_take): the Hand is not free for a new take. It is not in its Normal
+// state, or it holds an object.
+bool HandDirectHandBusy() {
+  if (!g_installed || !g_owns || g_hand == nullptr) return false;
+  return State(g_hand) != kStateNormal || !HandEmpty();
+}
+
+// For the take with the trigger of the other hand: the Hand is empty and in
+// its Normal state, and a press at its point acts on an object. These are
+// the tests of HandDirectClaimFree that find an object.
+bool HandDirectTakeTarget() {
+  if (!g_installed || !g_owns || g_hand == nullptr || g_face == nullptr) {
+    return false;
+  }
+  if (State(g_hand) != kStateNormal || !HandEmpty()) return false;
+  return g_choice != nullptr || g_near_blocked ||
+         *reinterpret_cast<void* const*>(g_face + kFaceObject) != nullptr;
 }
 
 // For the grip (controllers.cpp, docs/grab.md, "The grip holds"): what the
@@ -9243,6 +9775,102 @@ bool HandDirectConeBody(int index, const float point[3], float* gap,
 
 bool HandDirectTakeRuns() {
   return g_face != nullptr && TakeObject(g_face) != nullptr;
+}
+
+// For left_hold.cpp (docs/controllers.md, 5.7, "The carry of the other
+// hand"): the objects that the Hand can hold near a point, from the map of
+// the game. The candidates of the draw are only the objects near the pick of
+// the Hand, so the search walks the cells of the map instead. MapCoords::ToMap
+// (0x00603430) gives the cell: x and z of the world over 10 (the high words
+// of the MapCoords, x and z times 6553.6), the cell at GGame+0x59FC +
+// (width * x + z) * 8, x below GGame+0x59C8 and z below the width at
+// GGame+0x59C4. A cell has its first mobile object at +0 and its first fixed
+// object at +4, and Object::GetMapChild (vtable +0x53C, the cell) gives the
+// next one. The gap to an object is the smaller one of its body, a cylinder
+// from its base (near_math::BodyGap), and the ball of the box of its mesh
+// (BoxBall), so a hand in the crown of a tree reaches the tree.
+const uintptr_t kGameCells = 0x59FC;
+const uintptr_t kGameCellsZ = 0x59C4;
+const uintptr_t kGameCellsX = 0x59C8;
+const int kGetMapChild = 0x53C;
+const float kCellUnits = 10.0f;
+typedef void*(__fastcall* MapChildFn)(void* object, void* unused, void* cell);
+
+// The gap of each object that the Hand can hold in the 3 by 3 cells around
+// the point. Returns the nearest one with its gap, or null.
+void* NearestHoldableOnMap(const float point[3], float* best_gap) {
+  *best_gap = -1.0f;
+  if (g_face == nullptr) return nullptr;
+  const uint8_t* const* game_link =
+      reinterpret_cast<const uint8_t* const*>(0x00D0195C);
+  if (IsBadReadPtr(game_link, sizeof(void*)) || *game_link == nullptr) {
+    return nullptr;
+  }
+  const uint8_t* game = *game_link;
+  const uint32_t cells_x = *reinterpret_cast<const uint32_t*>(game + kGameCellsX);
+  const uint32_t cells_z = *reinterpret_cast<const uint32_t*>(game + kGameCellsZ);
+  void* status = *reinterpret_cast<void* const*>(g_face + kFaceStatus);
+  const int cx = static_cast<int>(floorf(point[0] / kCellUnits));
+  const int cz = static_cast<int>(floorf(point[2] / kCellUnits));
+  void* best = nullptr;
+  for (int x = cx - 1; x <= cx + 1; ++x) {
+    for (int z = cz - 1; z <= cz + 1; ++z) {
+      if (x < 0 || z < 0 || static_cast<uint32_t>(x) >= cells_x ||
+          static_cast<uint32_t>(z) >= cells_z) {
+        continue;
+      }
+      uint8_t* cell = const_cast<uint8_t*>(game) + kGameCells +
+                      (static_cast<uintptr_t>(cells_z) * x + z) * 8;
+      for (int list = 0; list < 2; ++list) {
+        void* object = *reinterpret_cast<void**>(cell + list * 4);
+        for (int n = 0; object != nullptr && n < 512; ++n) {
+          if (IsBadReadPtr(object, 0x48)) break;
+          void** table = VTable(object);
+          const uint8_t* model = *reinterpret_cast<uint8_t* const*>(
+              static_cast<uint8_t*>(object) + kObjectMesh);
+          if (model != nullptr && !IsCreatureObject(object) &&
+              Holdable(object, status)) {
+            const float* at =
+                reinterpret_cast<const float*>(model + kMeshTranslation);
+            const Body body = BodyOf(object);
+            float gap =
+                near_math::BodyGap(point, at, body.radius, body.height).gap;
+            // The crown of a tree is out of its body: the ball of the box of
+            // the mesh holds it.
+            Candidate c;
+            c.object = object;
+            c.model = model;
+            for (int k = 0; k < 3; ++k) c.position[k] = at[k];
+            float ball[3], ball_radius = 0.0f;
+            if (BoxBall(c, ball, &ball_radius)) {
+              const float boxed = Distance(point, ball) - ball_radius;
+              if (boxed < gap) gap = boxed;
+            }
+            if (gap < 0.0f) gap = 0.0f;
+            if (*best_gap < 0.0f || gap < *best_gap) {
+              *best_gap = gap;
+              best = object;
+            }
+          }
+          object = reinterpret_cast<MapChildFn>(table[kGetMapChild / 4])(
+              object, nullptr, cell);
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// The object that the Hand can hold whose body is nearest to a point, with a
+// gap of at most max_gap world units, and the gap of the nearest one (-1
+// with none).
+bool HandDirectHoldableAt(const float point[3], float max_gap,
+                          void** object, float* gap_out) {
+  float gap = -1.0f;
+  void* best = NearestHoldableOnMap(point, &gap);
+  if (gap_out != nullptr) *gap_out = gap;
+  *object = best != nullptr && gap <= max_gap ? best : nullptr;
+  return *object != nullptr;
 }
 
 // For miracle.cpp (docs/miracles.md, "A miracle in the Hand in the plain
@@ -11296,6 +11924,7 @@ void HandDirectReport() {
            "God view (script_camera_moves=1)", g_moves_answers);
     g_moves_answers = 0;
   }
+  CreatureHeadReport();
   if (!g_installed || g_active_frames == 0) return;
   ModLog("hand         : the controller placed the Hand on %llu frames: %llu "
          "depths, %llu poses, %llu rays, %llu picks put in, %llu far picks "

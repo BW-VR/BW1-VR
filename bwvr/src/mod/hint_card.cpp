@@ -648,6 +648,8 @@ int ContextNow() {
 // the pointing hand of a left handed player.
 int WordHand(int word) {
   if (word == kWordMenu && ControllerHintMenuOnPointing()) return kPointing;
+  // The trigger of the commands is on the other hand with left_leash=1.
+  if (word == kWordCommand) return ControllersLeftLeash() ? kOther : kPointing;
   return word == kWordMenu || word == kWordWorld || word == kWordRing ||
                  word == kWordWalk
              ? kOther
@@ -717,19 +719,19 @@ void AddPromptHold(Content cards[kHands], int word, const wchar_t* text,
 // The lines of the trigger on a target of a command: one press sends the
 // Creature, and two presses tie the leash when the leash can go on it.
 void AddCommandPrompts(Content cards[kHands]) {
-  AddPrompt(cards, kWordAction, L"Send the Creature", kToneAction,
+  AddPrompt(cards, kWordCommand, L"Send the Creature", kToneAction,
             hint_learn_math::kSkillSend);
   if (CreatureCommandCanTie()) {
-    AddPromptTwice(cards, kWordAction, L"Tie the leash", kToneAction);
+    AddPromptTwice(cards, kWordCommand, L"Tie the leash", kToneAction);
   }
 }
 
 // The lines of the trigger while the leash is tied to an object.
 void AddLeashBackPrompts(Content cards[kHands]) {
   if (CreatureCommandHint() == kCommandHintTiedCreature) {
-    AddPrompt(cards, kWordAction, L"Take the leash back", kToneAction);
+    AddPrompt(cards, kWordCommand, L"Take the leash back", kToneAction);
   } else {
-    AddPromptTwice(cards, kWordAction, L"Take the leash back", kToneAction);
+    AddPromptTwice(cards, kWordCommand, L"Take the leash back", kToneAction);
   }
 }
 
@@ -795,7 +797,7 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       // With the leash on the Hand, a short press of the trigger on the
       // Creature takes the leash off too.
       if (CreatureCommandHint() == kCommandHintCreature) {
-        AddPrompt(cards, kWordAction, L"Take the leash off", kToneAction);
+        AddPrompt(cards, kWordCommand, L"Take the leash off", kToneAction);
       }
       // With the leash on, the trigger sends the Creature to the same object.
       if (CreatureCommandHint() == kCommandHintObject) {
@@ -860,10 +862,10 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       AddLeashBackPrompts(cards);
       break;
     case kCtxLeashOff:
-      AddPrompt(cards, kWordAction, L"Take the leash off", kToneAction);
+      AddPrompt(cards, kWordCommand, L"Take the leash off", kToneAction);
       break;
     case kCtxCommandAim:
-      AddPrompt(cards, kWordAction, L"Release to send", kToneAction,
+      AddPrompt(cards, kWordCommand, L"Release to send", kToneAction,
                 hint_learn_math::kSkillSend);
       break;
     case kCtxMiracle:
@@ -895,7 +897,7 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
     }
     case kCtxLeashedLand:
       // A tap sends the Creature to the aim, and a hold shows the arc.
-      AddPrompt(cards, kWordAction, L"Send the Creature", kToneAction,
+      AddPrompt(cards, kWordCommand, L"Send the Creature", kToneAction,
                 hint_learn_math::kSkillSend);
       AddJumpPrompt(cards);
       break;

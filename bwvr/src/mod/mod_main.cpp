@@ -44,7 +44,9 @@
 #include "../proxy/ddraw_proxy.h"
 #include "render_thread.h"
 #include "tabletop.h"
+#include "story_start.h"
 #include "far_grab.h"
+#include "left_hold.h"
 #include "take_stream.h"
 #include "target_glow.h"
 #include "throw_physics.h"
@@ -123,12 +125,18 @@ void NoteDepthInstall();
 // intro_skip.cpp: a press of a controller button skips the logos at the
 // start of the game. `caller` is the address that called FinishFrame.
 void IntroSkipFrame(uintptr_t caller, bwvr::XrScreen* screen);
-// hang_watch.cpp: the watch of the frame thread (hang_watch, a test key).
+// hang_watch.cpp: the watch of the frame thread (hang_watch, a test key),
+// and the crash log (crash_log).
 void HangWatchFrame();
 // stall_watch.cpp: the module list at a stall (stall_modules, stall_addrs)
 // and the test spin (test_stall_ms).
 void StallWatchStart(bool on, const char* addrs, int test_stall_ms);
 void StallWatchFrame();
+void CrashLogInstall();
+// memory_watch.cpp: the line of the address space (memory_log).
+void MemoryWatchInstall();
+// block_watch.cpp: the places of the large blocks (memory_blocks).
+void BlockWatchInstall();
 // controllers.cpp
 void ControllerHintsSetOptions(bool on, const char* forced_profile);
 bool ControllerHintsInstall();
@@ -458,6 +466,9 @@ int g_script_close_zoom = -1;
 int g_script_cut_degrees = -1;
 int g_script_cut_percent = -1;
 bool g_script_follow = true;
+// A story starts at the head: the move of a story starts at the head of
+// the player in the God view (story_start.cpp).
+bool g_story_start_at_head = true;
 // The mouse part of a land drag is smoothed over this many milliseconds.
 int g_drag_smoothing_ms = 35;
 // The sun glare: 0 through the eye camera, 1 as the game draws it, 2 hidden.
@@ -661,6 +672,7 @@ int g_vk_keep_picture = 1;
 int g_vk_black_check = 1;
 int g_vk_untextured = 1;
 int g_vk_stage1 = 1;
+int g_vk_once_reuse = 1;  // vk_once_reuse
 // Foveated rendering (docs/backend.md, "Foveated rendering").
 int g_foveation = 0;
 int g_foveation_inner_deg = 0;
@@ -1175,6 +1187,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "script_camera_cut_percent", -1, path));
   g_script_follow =
       GetPrivateProfileIntA("bwvr", "script_camera_follow", 1, path) != 0;
+  g_story_start_at_head =
+      GetPrivateProfileIntA("bwvr", "story_start_at_head", 1, path) != 0;
   // Not in the launcher. Tests in the headset chose these values: the drag
   // smoothing, the sun glare, the cloud pole, the cinema bars and the
   // advisors.
@@ -1467,6 +1481,15 @@ void ReadSettings() {
       const double meters = atof(text);
       g_far_grab.max_m = meters > 0.0 ? static_cast<float>(meters) : 0.0f;
     }
+    // far_grab_still_m: the range while the game holds the view still (its
+    // switch for the drag of the land is off). 0 gives no limit, and less
+    // than 0 keeps far_grab_max_m (docs/grab.md, "The range").
+    {
+      char text[32];
+      GetPrivateProfileStringA("bwvr", "far_grab_still_m", "0", text,
+                               sizeof(text), path);
+      g_far_grab.still_m = static_cast<float>(atof(text));
+    }
     // The choice of a far target (docs/grab.md, "The cone and the choice").
     // far_grab_living_deg: the cone of a living thing, for the ranks of
     // far_grab_choice 2 and 4. far_grab_ball_living_deg and
@@ -1708,6 +1731,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_untextured", 1, path) != 0 ? 1 : 0;
   g_vk_stage1 =
       GetPrivateProfileIntA("bwvr", "vk_stage1", 1, path) != 0 ? 1 : 0;
+  g_vk_once_reuse =
+      GetPrivateProfileIntA("bwvr", "vk_once_reuse", 1, path) != 0 ? 1 : 0;
   g_foveation =
       static_cast<int>(GetPrivateProfileIntA("bwvr", "foveation", 0, path));
   g_foveation_inner_deg = static_cast<int>(
@@ -1871,6 +1896,7 @@ void LogBox64Environment() {
 }
 void StartVrFromThread();
 void VrSessionRuns(bwvr::XrScreen* screen, uint32_t width, uint32_t height);
+void PrepareScreen(bwvr::XrScreen* screen);
 
 // Starting the VR session needs the Direct3D device, which does not exist
 // until the game has opened it. So this runs on a frame, not in DllMain, where
@@ -1929,6 +1955,8 @@ void StartVrStep() {
                            g_script_close_zoom, g_script_cut_degrees,
                            g_script_cut_percent, g_script_follow);
     ScriptCameraInstall();
+    StoryStartSetOptions(g_story_start_at_head);
+    StoryStartInstall();
     PointerMapSetDragSmoothing(g_drag_smoothing_ms);
     PointerMapSetFakeMouse(g_fake_mouse_script, g_fake_mouse_step_px,
                            g_fake_mouse_x_pct, g_fake_mouse_y_pct);
@@ -2026,6 +2054,7 @@ void StartVrStep() {
         ThrowPhysicsSetDraw(g_throw_draw);
         ThrowPhysicsInstallEarly();
         FarGrabInstall();
+        LeftHoldInstall();
         TakeStreamSetOptions(g_take_stream, g_test_keys);
         TakeStreamInstall();
         ThrowPhysicsInstall();
@@ -2173,6 +2202,13 @@ void StartVrStep() {
     VkSceneSetBlackCheck(g_vk_black_check);
     VkSceneSetUntextured(g_vk_untextured);
     VkSceneSetStage1(g_vk_stage1);
+    vk::SetOnceReuse(g_vk_once_reuse != 0);
+    ModLog("vulkan       : vk_once_reuse=%d. %s", g_vk_once_reuse,
+           g_vk_once_reuse != 0
+               ? "Each single job (an upload, a copy for a card) has the same "
+                 "command buffer"
+               : "Each single job allocates a new command buffer, and the "
+                 "pool keeps each of them");
     VkSceneSetFoveation(g_foveation, g_foveation_inner_deg,
                         g_foveation_outer_deg, g_foveation_show);
     VkSceneSetFoveaRes(g_fovea_res, g_fovea_res_outer_pct,
@@ -2255,11 +2291,7 @@ void StartVrStep() {
   LARGE_INTEGER try_start;
   QueryPerformanceCounter(&try_start);
   bwvr::XrScreen* screen = new bwvr::XrScreen();
-  screen->UseVulkan(g_xr_vulkan != 0);
-  screen->UseD3D11(!g_vulkan_only);
-  screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
-  screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
-  screen->SetHoldMs(g_xr_hold_ms);
+  PrepareScreen(screen);
   screen->SetRefreshRate(g_refresh_rate_hz);
   screen->SetPlacement(g_distance, g_width);
   screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
@@ -2409,6 +2441,17 @@ void StartVrFromThread() {
   g_vr_fell_back = true;
   g_vr_start = vr_start_math::kOnFrameThread;
   VrStartGiveBack(screen);
+}
+
+// The options of a new screen, before its instance, for each way of the
+// tries. The thread of the tries calls it too: it reads only values that
+// the start of the mod set.
+void PrepareScreen(bwvr::XrScreen* screen) {
+  screen->UseVulkan(g_xr_vulkan != 0);
+  screen->UseD3D11(!g_vulkan_only);
+  screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
+  screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
+  screen->SetHoldMs(g_xr_hold_ms);
 }
 
 // A screen with a session that runs, from either way of the tries.
@@ -3007,6 +3050,9 @@ void Startup() {
     g_vr_enabled = false;
     return;
   }
+  // The crash log: before each other hook, so an end of the game in its C
+  // runtime has a line from the start (hang_watch.cpp).
+  CrashLogInstall();
   // Before the game makes its window, so the log has each call from the start.
   if (g_cursor_trace) CursorTraceInstall();
   // Before the game reads its profile, so the guard has each write.
@@ -3022,6 +3068,8 @@ void Startup() {
   if (status != MH_OK) g_vr_enabled = false;
   ExitPathInstall();
   Depth24Install();
+  BlockWatchInstall();
+  MemoryWatchInstall();
 }
 
 // THE END OF THE MOD.

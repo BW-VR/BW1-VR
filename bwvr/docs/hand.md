@@ -601,7 +601,7 @@ section 7 for the size of the exact Hand.
 | `hand_reach_start_cm` | 35 | The Hand follows the controller one to one up to this far from the reach anchor |
 | `hand_reach_gain` | 0 | Per meter past the start. 0 gives one to one at all distances. 215 gives the Go-Go reach: a hand 65 cm from the anchor reaches 150 units |
 | `hand_reach_anchor_down_cm` | 20 | The reach anchor is the head center at the last recenter, this far down (0 to 100) |
-| `hand_real_cm` | 19 | The length of the real hand, from the wrist to the finger tips |
+| `hand_real_cm` | 19 | The length of the real hand, from the wrist to the finger tips. The launcher row "Your hand length", 14 to 26 cm |
 | `hand_scale_pct` | 100 | The Hand's size in percent of the real hand |
 | `left_hand` | -1 | Which controller is the Hand (section 8). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller |
 | `fake_controller_points` | | Test key. A list of `right,up,forward` in cm |
@@ -827,6 +827,50 @@ The overlay then draws both of the mod's hands (see
 [hand-model.md](hand-model.md)). The shadow of the game's Hand on the land
 still draws, with the game's fingers.
 
+**The reflection of the hands** (`hand_reflection`, default 2) [V].
+After the reflection of the land, `GLandscape::Draw` draws the mesh of the
+player's Hand one more time (`0x005E4914` to `0x005E49DC`): the color
+`0x65A0A0A0` (vtable `+0x2C`), the flag `0x20` of the mesh off (`+0x58`), then
+`call [vtable + 0x118]` at `0x005E4985`, then the object at `+0x8C` of the
+mesh, and the color back. `+0x118` of the vtable `0x009A3068` is
+`fn_00813300`, the draw at once (`fn_00811010`). The result is a pale Hand
+under the water, below the real hand. The reflection setting `0x00E9CD8C`
+does not guard this draw, so it shows at each zoom. The game skips it only
+when `+0xAC` of the mesh is set (`CHand::Show` clears it), and `+0xAC` also
+turns the dynamic shadow of the mesh off (`fn_00814FD0`).
+
+A MinHook hook on `fn_00813300` takes the draw when the return address is
+`0x005E498B` and the mesh is hidden as above. Then `hand_reflection` says
+what the water shows:
+
+- **2, both hands of the mod.** In place of the game's draw, the overlay
+  draws the two mesh hands of this frame once more
+  (`OverlayDrawReflection`, `HandModelDrawReflection`). The camera of the
+  eye is mirrored at the sea, the plane y = 0 (`overlay_math::MirrorCameraY`),
+  the plane of the reflection of the land. Each corner has the color of the
+  game's reflection: the texture times the gray `0xA0`, with no light, and
+  the alpha of the corner times `0x65`. The hands write no depth. So they
+  have the place in the frame and the look of the game's reflection: the
+  mirrored land in front of them hides them, and the sea draws over them.
+  The pose is the pose of the hands of the mod, with their fingers. The low
+  poly hands of `hand_model=0` have no reflection.
+- **1, no hand.** The draw is skipped.
+- **0, the game's Hand.** The game draws its Hand, so the water shows the
+  pointing hand only, with the fingers of the game.
+
+Only a headset shows whether the reflection of the hands looks right beside
+the reflection of the land, and whether the gray and the alpha of the game
+fit the hands of the mod.
+
+The hook is made only when the first bytes of the function, the call site
+and the vtable slot are as the disassembly gave them, and only when the hook
+of the mesh is in. The other draws of the reflection pass stay: the land,
+the object at `+0x8C` and the Creature (`0x005E4ACB`, the color
+`0x65A0A0D0`).
+
+The ring of the leash has no reflection in the game. It is a sorted object of
+`CitadelHeart::DrawNow`, and no draw of the reflection pass reads it.
+
 **The held object in the palm** (`hand_hold_palm`, `hand_hold_turn`). After
 `CHand::PrepareForDrawing` wrote the object's translation (`0x0046CA50` to
 `0x0046CA97`, only in the Holding state, and not while the release physics has
@@ -922,6 +966,8 @@ game's own: the trigger and the grip do not bend the game's fingers.
 | `hand_mesh_roll_deg` | 0 | The rest turn about its fingers |
 | `hand_wrist_lock` | 1 | 1 keeps the wrist bone of the game's Hand at the real wrist in each animation |
 | `hand_hide_game` | 1 | 1 hides the mesh of the game's Hand while the controller places it, and the overlay draws both hands. 0 draws the game's Hand too |
+| `hand_reflection` | 2 | With the mesh hidden, what the water shows: 2 both hands of the mod, mirrored at the sea in the color of the game's reflection. 1 no hand. 0 the game's Hand, a pale Hand under the pointing hand only |
+| `hand_reflection_test` | | Test key. Frame numbers. At each one `hand_reflection` takes the next value, as Ctrl, Shift and D do |
 | `hand_hold_palm` | 1 | 1 puts the held object in the palm of the mod's hand. 0 leaves it at the Hand's point |
 | `hand_hold_turn` | 1 | 1 turns the held object with the hand |
 | `hand_pinch` | 1 | 1 holds a small object between the thumb and the index finger (hand-model.md). 0 puts each object in the palm |
@@ -931,7 +977,11 @@ game's own: the trigger and the grip do not bend the game's fingers.
 The keys are read from `bwvr.ini` at the start. They are not in the launcher.
 With `test_keys=1`, the minus key of the number pad shows and hides the mesh
 of the game's Hand while the game runs. The pointing controller gives a long
-pulse for hidden and a short pulse for shown.
+pulse for hidden and a short pulse for shown. Ctrl, Shift and D step
+`hand_reflection` from 2 to 0 to 1 and back, with a long pulse for 2, a
+short pulse for 0 and a pulse of middle length for 1. The log line names the
+key, the new value and the count of the draws of the game's reflection that
+the hook took.
 
 ### The log
 

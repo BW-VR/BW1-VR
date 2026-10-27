@@ -293,7 +293,9 @@
     5.7). The test checks the lines of the motion of the stick of the app
     (docs/android.md, "The motion of the stick"): with motion_comp=1 or 2 a
     picture with a difference and a picture with none, with motion_comp=0 no
-    difference. 0 (the default): no stick.
+    difference. 0 (the default): no stick. The game must have no dialog box
+    over the land then: with -TestSave give -MenuClick too, so the Main Menu
+    of game 2 goes.
 
 .PARAMETER IniExtra
     More lines for bwvr.ini, for example 'profile_sample_outside=1000'. A
@@ -1237,7 +1239,7 @@ try {
             $m = [regex]::Match($_, '^(\d+) (.*)$')
             if ($m.Success) {
                 $at = [int]$m.Groups[1].Value
-                if ($at -ge 410) { $at += $stickShift }
+                if ($at -ge 410 -and $m.Groups[2].Value -notmatch '^stick ') { $at += $stickShift }
                 "$($at + $shift2) $($m.Groups[2].Value)"
             } else { $_ }
         }) | Where-Object { $_ -ne '' } | ForEach-Object {

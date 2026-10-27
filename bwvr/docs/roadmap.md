@@ -1130,10 +1130,7 @@ that moves while the Hand takes it.
   save with the row "Translator of the game (Box64 or FEX)" at FEX
   (`wow64_cpu=fex`, `android.md`, "FEX as the CPU of the 32 bit code"),
   with `fex_env=FEX_SILENTLOG=0` for the lines of FEX in `wine.log`, then
-  the frame rate with `FEX_X87REDUCEDPRECISION=1`. Not known: if FEX runs
-  the game, and if the game calls `TerminateThread` on another thread
-  (FEX imports `RtlWow64SuspendThread` for that case, and Wine 11.0 does
-  not have it).
+  the frame rate with `FEX_X87REDUCEDPRECISION=1`.
 - **N21. The scene walk of the game under FEX.** On the Quest the game
   takes the x87 paths of the engine (`backend.md`, "The vertex loop of the
   land with SSE"). `land_fast=1` makes the vertex loop of the land with SSE.
@@ -1154,6 +1151,22 @@ that moves while the Hand takes it.
   Next on the Quest: `game_sse_parts=4095` with `game_sse_check=1` for the
   part that gives the large polygons under FEX, then the halves and the
   bits in the order of the doc. Open: the time of each path under FEX.
+- **N33. FEX and the cores of the Quest.** On a Quest 3 with FEX the main
+  thread of the game takes 87 to 89 percent of one core, and the threads of
+  the game and of the app run on the cores 3 to 5 (the line of the threads
+  of `time_log`). The app gives each second the core and the CPU time of
+  each thread (`thread_cores=1`), binds the main thread of the game, the
+  session thread and the play thread to the fast cores (`thread_bind`), and
+  gives FEX a code cache in files (`fex_disk_cache=1`, `android.md`, "The
+  cores of the headset" and "FEX as the CPU of the 32 bit code"). Next in
+  the headset: the cores and their speeds, if the binding works there, the
+  frames a second with `thread_bind` 1 and 0, the load and the stutters of
+  the second start with the code cache, and the frames a second with
+  `FEX_TSOENABLED=1 FEX_EXTENDEDVOLATILEMETADATA=runblack.exe` against
+  `FEX_TSOENABLED=0`. Open: `SuspendThread` under FEX in Wine stops a thread
+  also in the JIT, so a hook that the mod enables while other threads run
+  x86 code can hang the game (`android.md`, "FEX as the CPU of the 32 bit
+  code", the part "SuspendThread under FEX in Wine").
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

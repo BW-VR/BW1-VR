@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <ftw.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
@@ -55,6 +56,25 @@ int RemoveOne(const char* path, const struct stat*, int type, struct FTW*) {
 bool RemoveTree(const std::string& path) {
   if (!Exists(path)) return true;
   return nftw(path.c_str(), RemoveOne, 32, FTW_DEPTH | FTW_PHYS) == 0;
+}
+
+// The files and the bytes in a folder tree, for the log of the code cache of
+// FEX. Only the thread of the game calls it.
+uint64_t g_tree_files = 0;
+uint64_t g_tree_bytes = 0;
+int CountOne(const char*, const struct stat* st, int type, struct FTW*) {
+  if (type == FTW_F) {
+    ++g_tree_files;
+    g_tree_bytes += static_cast<uint64_t>(st->st_size);
+  }
+  return 0;
+}
+void TreeSize(const std::string& path, uint64_t* files, uint64_t* bytes) {
+  g_tree_files = 0;
+  g_tree_bytes = 0;
+  if (Exists(path)) nftw(path.c_str(), CountOne, 32, FTW_PHYS);
+  *files = g_tree_files;
+  *bytes = g_tree_bytes;
 }
 
 std::string ReadAsset(AAssetManager* assets, const std::string& name, bool* found) {
@@ -368,8 +388,26 @@ void WineRuntime::RunGame(Game game) {
   }
   // THE VARIABLES OF THE TRANSLATOR (play_rules.h, CpuVars): only for the
   // game. Box64 gets box64_strongmem and box64_env, FEX gets fex_env.
-  const play_rules::EnvVars vars =
-      play_rules::CpuVars(cpu, game.box64_strongmem, game.box64_env, game.fex_env);
+  const play_rules::EnvVars vars = play_rules::CpuVars(cpu, game.box64_strongmem, game.box64_env,
+                                                       game.fex_env, game.fex_disk_cache);
+  // THE CODE CACHE OF FEX (fex_disk_cache, play_rules.h, FexVars): the folder
+  // must be there, and the log gives its size before and after the game.
+  const std::string fex_cache = play_rules::FexCacheFolder(paths_.prefix);
+  const bool cache_on = cpu == wine_rules::Cpu::kFex && game.fex_disk_cache;
+  uint64_t cache_files = 0, cache_bytes = 0;
+  if (cache_on) {
+    if (!MakeDirs(fex_cache)) {
+      AppLog("game         : fex_disk_cache=1, but the folder %s cannot be made (errno %d)",
+             fex_cache.c_str(), errno);
+    }
+    TreeSize(fex_cache, &cache_files, &cache_bytes);
+    AppLog("game         : fex_disk_cache=1. FEX keeps the code that it translates in %s "
+           "(%s). Before the game the folder has %llu files, %.1f MB",
+           play_rules::kFexCacheWine, fex_cache.c_str(),
+           static_cast<unsigned long long>(cache_files), cache_bytes / 1048576.0);
+  } else if (game.fex_disk_cache) {
+    AppLog("game         : fex_disk_cache=1 does nothing: the CPU of the game is not FEX");
+  }
   std::string given;
   for (const std::string& v : vars.vars) given += (given.empty() ? "" : " ") + v;
   if (cpu == wine_rules::Cpu::kFex) {
@@ -414,6 +452,14 @@ void WineRuntime::RunGame(Game game) {
     AppLog("game         : wineserver -k ended with %d after %.0f ms. It ends runblack.exe "
            "and each other process of Wine",
            k, kill_ms);
+  }
+  if (cache_on) {
+    uint64_t files = 0, bytes = 0;
+    TreeSize(fex_cache, &files, &bytes);
+    AppLog("game         : fex_disk_cache=1. After the game the code cache of FEX has %llu "
+           "files, %.1f MB (%+.1f MB)",
+           static_cast<unsigned long long>(files), bytes / 1048576.0,
+           (static_cast<double>(bytes) - static_cast<double>(cache_bytes)) / 1048576.0);
   }
   EndGame(code, quit ? "Quit game" : "the game ended");
 }

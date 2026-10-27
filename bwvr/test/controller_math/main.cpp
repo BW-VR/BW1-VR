@@ -3601,6 +3601,7 @@ void CreatureChecks() {
 #include "walk_parts_checks.h"
 #include "stall_checks.h"
 #include "wow64_cpu_checks.h"
+#include "core_checks.h"
 #include "frame_loop_checks.h"
 #include "motion_comp_checks.h"
 #include "gpu_parts_checks.h"
@@ -4055,6 +4056,7 @@ int main() {
   walk_parts_checks::WalkPartsChecks();
   stall_checks::StallChecks();
   wow64_cpu_checks::Wow64CpuChecks();
+  core_checks::CoreChecks();
   frame_loop_checks::FrameLoopChecks();
   gpu_parts_checks::GpuPartsChecks();
   update_checks::UpdateChecks();

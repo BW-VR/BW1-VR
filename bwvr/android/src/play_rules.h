@@ -168,11 +168,13 @@ inline bool IsVarName(const std::string& name, const std::string& prefix) {
 inline bool IsBox64Name(const std::string& name) { return IsVarName(name, "BOX64_"); }
 
 // The words of a key (NAME=VALUE with spaces or tabs between them) into out.
-// names: the names that go already. set_name and set_by: a name that a row
-// of the menu sets, and that row, for the text of a refused word.
+// names: the names that go already. set_names and set_by: the names that a
+// row of the menu or a key sets, and that row or key, for the text of a
+// refused word.
 inline void AddVarWords(const std::string& extra, const std::string& prefix,
-                        std::vector<std::string>* names, const std::string& set_name,
-                        const char* set_by, EnvVars* out) {
+                        std::vector<std::string>* names,
+                        const std::vector<std::string>& set_names, const char* set_by,
+                        EnvVars* out) {
   size_t at = 0;
   while (at < extra.size()) {
     while (at < extra.size() && (extra[at] == ' ' || extra[at] == '\t')) ++at;
@@ -188,8 +190,8 @@ inline void AddVarWords(const std::string& extra, const std::string& prefix,
     } else if (!IsVarName(name, prefix)) {
       out->refused.push_back(word + " (the name does not start with " + prefix + ")");
     } else if (std::find(names->begin(), names->end(), name) != names->end()) {
-      out->refused.push_back(word + (!set_name.empty() && name == set_name
-                                         ? std::string(" (") + set_by + " sets it)"
+      const bool set = std::find(set_names.begin(), set_names.end(), name) != set_names.end();
+      out->refused.push_back(word + (set ? std::string(" (") + set_by + " sets it)"
                                          : std::string(" (the name comes two times)")));
     } else {
       out->vars.push_back(word);
@@ -201,13 +203,13 @@ inline void AddVarWords(const std::string& extra, const std::string& prefix,
 inline Box64Env Box64Vars(int strongmem, const std::string& extra) {
   Box64Env out;
   std::vector<std::string> names;
-  std::string set_name;
+  std::vector<std::string> set_names;
   if (strongmem >= 1 && strongmem <= kStrongMemMost) {
     out.vars.push_back(std::string(kStrongMemName) + "=" + std::to_string(strongmem));
     names.push_back(kStrongMemName);
-    set_name = kStrongMemName;
+    set_names.push_back(kStrongMemName);
   }
-  AddVarWords(extra, "BOX64_", &names, set_name, "box64_strongmem", &out);
+  AddVarWords(extra, "BOX64_", &names, set_names, "box64_strongmem", &out);
   return out;
 }
 
@@ -217,21 +219,43 @@ inline Box64Env Box64Vars(int strongmem, const std::string& extra) {
 // Windows environment of its process, in which a variable FEX_<NAME> sets
 // the option <NAME> (EnvLoader of Source/Common/Config.cpp). The variables
 // take the same way to the game as the variables of Box64.
-//   fex_env  NAME=VALUE with spaces between them. Only names that start
-//            with FEX_ go to the game. Empty by default: no variable.
-inline EnvVars FexVars(const std::string& extra) {
+//   fex_env         NAME=VALUE with spaces between them. Only names that
+//                   start with FEX_ go to the game. Empty by default: no
+//                   variable.
+//   fex_disk_cache  0 (the default): no variable. 1: FEX keeps the code that
+//                   it translates in files in the folder kFexCacheWine
+//                   (FEX_DISKCACHE=1 and FEX_DISKCACHEPATH, the disk cache
+//                   of FEXCore), and the next start of the game reads it
+//                   from there. fex_env cannot then set these two names.
+// The folder of the code cache of FEX, as the game sees it and in the
+// prefix. Only FEX writes into it: at its start FEX deletes each folder in
+// it that is of another build of FEX or of another CPU (PruneStaleEntries
+// of the disk cache).
+constexpr char kFexCacheWine[] = "C:\\bwvr\\fex-cache\\";
+inline std::string FexCacheFolder(const std::string& prefix) {
+  return AppFolder(prefix) + "/fex-cache";
+}
+inline EnvVars FexVars(const std::string& extra, bool disk_cache = false) {
   EnvVars out;
   std::vector<std::string> names;
-  AddVarWords(extra, "FEX_", &names, std::string(), "", &out);
+  std::vector<std::string> set_names;
+  if (disk_cache) {
+    out.vars.push_back("FEX_DISKCACHE=1");
+    out.vars.push_back(std::string("FEX_DISKCACHEPATH=") + kFexCacheWine);
+    set_names = {"FEX_DISKCACHE", "FEX_DISKCACHEPATH"};
+    names = set_names;
+  }
+  AddVarWords(extra, "FEX_", &names, set_names, "fex_disk_cache", &out);
   return out;
 }
 
 // The variables for the CPU of the game: with Box64 box64_strongmem and
-// box64_env, with FEX fex_env. The keys of the other translator give no
-// variable.
+// box64_env, with FEX fex_env and fex_disk_cache. The keys of the other
+// translator give no variable.
 inline EnvVars CpuVars(wine_rules::Cpu cpu, int strongmem, const std::string& box64_env,
-                       const std::string& fex_env) {
-  return cpu == wine_rules::Cpu::kFex ? FexVars(fex_env) : Box64Vars(strongmem, box64_env);
+                       const std::string& fex_env, bool fex_disk_cache = false) {
+  return cpu == wine_rules::Cpu::kFex ? FexVars(fex_env, fex_disk_cache)
+                                      : Box64Vars(strongmem, box64_env);
 }
 
 // The environment of the game: the environment of a program in Wine with

@@ -53,6 +53,7 @@
 #include "../../src/mod/vk_scene.h"
 #include "scene_player.h"
 #include "stream_reader.h"
+#include "thread_cores.h"
 #include "time_log.h"
 #include "walk_probe.h"
 #include "wine_runtime.h"
@@ -197,6 +198,8 @@ struct App {
   int display_asked = 0;
   // THE TIME LOG (time_log=1, time_log.h).
   TimeLog time;
+  // THE CORES OF THE HEADSET (thread_cores, thread_bind, thread_cores.h).
+  ThreadCores cores;
 };
 
 // The renderer of the mod takes one device in a process (see android_main).
@@ -614,6 +617,7 @@ double ThreadCpuMs() {
 void* PlayThread(void* arg) {
   App* app = static_cast<App*>(arg);
   TimeLogNameThread("bwvr play");
+  ThreadCores::MarkPlay();
   const bool timing = app->time.On();
   XrApp::TimeQueueWaits(timing);
   LivePlay* live = &app->live_play;
@@ -990,6 +994,9 @@ void Play(App* app, bool new_game) {
   // no variable.
   game.cpu = app->menu.Wow64Cpu();
   game.fex_env = app->ini.Get("bwvr", "fex_env", "");
+  // fex_disk_cache (bwvr.ini only, 0 by default): 1 gives FEX a code cache
+  // in files of the prefix (play_rules.h, FexVars). 0: no code cache.
+  game.fex_disk_cache = app->ini.GetInt("bwvr", "fex_disk_cache", 0) != 0;
   if (!app->wine.StartGame(game)) {
     app->status = "Saved. A game runs already.";
     AppLog("menu         : %s. A game runs already", name);
@@ -1000,6 +1007,16 @@ void Play(App* app, bool new_game) {
   app->first_frame = false;
   app->game_on = true;
   app->time.GameStarts(app->play_ms);
+  // THE CORES (core_rules.h, bwvr.ini only): thread_cores=1 logs the core
+  // and the CPU time of each thread each second, thread_bind=1 or 2 binds
+  // threads to the cores. 0 (the defaults): no line and no binding.
+  {
+    ThreadCores::Options cores;
+    cores.log = app->ini.GetInt("bwvr", "thread_cores", 0) != 0;
+    cores.bind = app->ini.GetInt("bwvr", "thread_bind", 0);
+    cores.bind_cores = app->ini.Get("bwvr", "thread_bind_cores", "");
+    app->cores.GameStarts(cores);
+  }
   app->menu.SetGameRunning(true);
   app->menu_over_game = true;
   ShowMenuOverGame(app, false);
@@ -1120,6 +1137,7 @@ void GameTick(App* app) {
   }
   app->xr.SetFrameLoop(false);
   app->time.GameEnds();
+  app->cores.GameEnds();
   app->menu.SetGameRunning(false);
   ShowMenuOverGame(app, true);
   // The last picture of the game goes out of the layers.
@@ -1591,6 +1609,7 @@ void android_main(android_app* android) {
   // paint start, so they get their names.
   app.time.Start(app.ini.GetInt("bwvr", "time_log", 1) != 0);
   TimeLogNameThread("bwvr main");
+  ThreadCores::MarkSession();
   // WINE: the thread unpacks the tree of the APK into the internal folder of
   // the app, makes the prefix and, with wine_probe=1, runs the test program
   // of the game folder. wine_setup=0: no Wine, as an APK with no Wine tree.
@@ -1949,6 +1968,7 @@ void android_main(android_app* android) {
   }
 
   StopPlayThread(&app);
+  app.cores.GameEnds();
   if (app.live) {
     app.live_reader.Stop();
     if (!app.live_play.quiet) LiveSummary(&app, app.live_play, "the app ends");

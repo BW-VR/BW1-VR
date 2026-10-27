@@ -180,7 +180,9 @@ Summary:
 | `android/src/play_rules.h` | The rules of "Play": the keys of a run, the files of the mod, the registry of the game with the CPU DLL, the environment and the command line of the game, the variables of Box64 and of FEX for the game (`Box64Vars`, `FexVars`, `CpuVars`), the input of the mod while the menu shows over the game. No Android code |
 | `test/controller_math/play_rules_checks.h` | The math checks of `play_rules.h` and of "Quit game" in the menu |
 | `test/controller_math/stall_checks.h` | The math checks of the filter of `box64_env`, of the environment of the game with the variables of Box64, of the row of the memory order of Box64, and of `stall_math.h` of the mod |
-| `test/controller_math/wow64_cpu_checks.h` | The math checks of the choice of the CPU DLL (`wow64_cpu`), of its value in the registry of the game, of the filter of `fex_env`, and of the row "Translator of the game (Box64 or FEX)" |
+| `test/controller_math/wow64_cpu_checks.h` | The math checks of the choice of the CPU DLL (`wow64_cpu`), of its value in the registry of the game, of the filter of `fex_env`, of the code cache of FEX (`fex_disk_cache`), and of the row "Translator of the game (Box64 or FEX)" |
+| `android/src/thread_cores.cpp`, `android/src/core_rules.h` | The cores of the headset (`thread_cores`, `thread_bind`): each second the core and the CPU time of each thread, and the binding of threads to the cores. `core_rules.h` has the rules and no Android code |
+| `test/controller_math/core_checks.h` | The math checks of `core_rules.h` |
 | `tools/android/emu_game_test.ps1` | The game from the menu of the app in the Android emulator, with the test runtime |
 | `android/src/eye_size.h` | The cap of the size of the eyes that the app takes from the runtime (`eye_size_max`), and the pixels of the panel in the middle of the lens for the line of the sharpness. No Android code |
 | `test/controller_math/sharp_checks.h` | The math checks of the middle as its own layer (`fovea_res_math.h`: `PackAtlas`, `CenterFov`, `OuterRect`) and of the sharpness of the middle (`eye_size.h`) |
@@ -3665,15 +3667,55 @@ each function that a CPU DLL imports and that the tree does not export.
 For `wowbox64.dll` there is none. For `libwow64fex.dll` there is one:
 `ntdll.dll.RtlWow64SuspendThread`. Wine gives such an import a stub, and a
 call of the stub stops the program with an exception. FEX calls it only in
-`BTCpuThreadTerm` when a thread ends another thread (`TerminateThread`),
-not when a thread ends itself. Not known: if the game or one of its DLLs
-calls `TerminateThread` on another thread.
+`BTCpuThreadTerm` when a thread ends another thread (`TerminateThread`):
+it stops that thread first, so that the thread holds no lock of the JIT
+when FEX frees its state. A thread that ends itself does not call it.
+`runblack.exe` and the DLLs of the game folder do not import
+`TerminateThread` (their import tables), and each line "Terminating" of FEX
+in `wine.log` of a Quest 3 is of a thread that ends itself. So the stub does
+not run in a game.
+
+**SuspendThread under FEX in Wine.** On Windows `RtlWow64SuspendThread`
+stops a thread of x86 code at a safe point: the start of a block of
+translated code (the suspend doorbell of the CPU area, which FEX reads in
+`UnlockJITContext` and at the instruction `brk #0xCAFE`). Wine 11.0 has no
+such suspend. `wow64_NtSuspendThread` (`dlls/wow64/process.c`) gives the
+call of the 32 bit code to `NtSuspendThread` as it is. It does not call
+`BTCpuSuspendLocalThread` of FEX, which also only calls `NtSuspendThread`.
+So `SuspendThread` stops a thread at each place, also in the JIT of FEX.
+Each translation of a block holds a shared lock of `CodeInvalidationMutex`
+(`CompileBlock` of `FEXCore/Source/Interface/Core/Core.cpp`). A change of
+the protection of a page with code (`VirtualProtect`, through
+`InvalidationTracker::HandleMemoryProtectionNotification`) and the fault of
+a write to a page with translated code (`HandleRWXAccessViolation`) wait
+for the unique lock of the same mutex. Each change of protection, each
+`FlushInstructionCache` and each such fault also take `ThreadCreationMutex`
+of the WoW64 module of FEX (`Source/Windows/WOW64/Module.cpp`). When a
+thread stops another thread that holds one of these locks, and then changes
+the protection of a page with code, it waits for the thread that it
+stopped, and the process hangs.
+
+MinHook does that: `MH_EnableHook`, `MH_DisableHook` and `MH_RemoveHook`
+stop each other thread of the process (`Freeze` of `hook.c`), then call
+`VirtualProtect` on the target. So each hook that the mod enables or
+disables while other threads run x86 code can hang the game under FEX, when
+one of these threads translates a block at that time. The hooks of the mod
+come in two groups at the start (see "The code that changes, on a Quest
+3"), the timers of `walk_parts=1` come at the third scene walk, and some
+hooks of the mod come and go while the game runs. Not shown: that the hangs
+in the load of the game with `walk_parts=1` on a Quest 3 come from this. A
+stop with the main thread of the game at 0 percent of a core in the line of
+a stop (`time_log`) fits it. The samplers of the mod (`hang_watch`,
+`profile_sample`) also stop the frame thread, but they change no protection
+while it is stopped.
 
 **The Unix library of FEX** (`libwow64fex.so` of `Source/Windows/UnixLib`)
 is not in the tree. FEX loads it when it is there, and works with no such
 library. With no library FEX has no hardware TSO (a mode of some ARM CPUs
 that are not in a Quest), no name of its memory regions, and no file
-mapping of the code cache. The code cache is off by default.
+mapping of the code cache. With the code cache on (`fex_disk_cache=1`, see
+"The code cache of FEX") FEX reads the files of the cache with reads of the
+file in place of a mapping.
 
 **The switch** (`wow64_cpu`, the row "Translator of the game (Box64 or
 FEX)" of the page "Testing", above the row of the memory order of Box64):
@@ -3728,6 +3770,43 @@ says that `box64_strongmem` and `box64_env` do not go. With `box64` only
 the variables of Box64 go, and a `fex_env` with a value gives the line
 "fex_env=... does not go to the game: the CPU is not FEX".
 
+**The code cache of FEX** (`fex_disk_cache`, 0 by default, only in
+`bwvr.ini`, `play_rules.h`, `FexVars`). FEX-2610 can keep the code that it
+translates in files (the disk cache of FEXCore,
+`FEXCore/Source/Interface/Core/DiskCache.cpp`), and a later start of the
+game takes each block from there in place of a new translation. The key of
+a block of a module is its offset in the module and the module (its name,
+its time stamp and its size). FEX compares a hash of the x86 code of the
+block before it uses an entry, so a block that a hook of the mod changed
+gets a new translation. The name of the folder of a cache has a hash of the
+version of the cache and of the features of the CPU. The name of the file
+has a hash of each setting of FEX that changes the translated code (for
+example `FEX_TSOENABLED` and `FEX_X87REDUCEDPRECISION`), so each set of
+`fex_env` has a cache of its own. At its start FEX deletes each folder of
+the cache of another version or of another CPU.
+
+- `fex_disk_cache=0`: no variable. FEX translates each block at each start.
+- `fex_disk_cache=1`: with `wow64_cpu=fex` the game gets `FEX_DISKCACHE=1`
+  and `FEX_DISKCACHEPATH=C:\bwvr\fex-cache\`, the folder
+  `drive_c/bwvr/fex-cache` of the prefix in the internal folder of the app.
+  The app makes the folder. `fex_env` cannot set these two names then: a
+  word with one of them gives the line "fex_env: FEX_DISKCACHE=0
+  (fex_disk_cache sets it) does not go to the game". With
+  `fex_disk_cache=0`, `fex_env` can set them.
+
+The log of the app has one line before the game, "game : fex_disk_cache=1.
+FEX keeps the code that it translates in C:\bwvr\fex-cache\ (<the folder>).
+Before the game the folder has N files, M MB", and one line with the files
+and the MB after the game. With Box64, and on x86_64, the key gives no
+variable, and the log says "fex_disk_cache=1 does nothing: the CPU of the
+game is not FEX". A thread of FEX with a low priority ("FEX:DiskCache")
+writes the new entries. The file of a cache can get to 1 GB
+(`FEX_DISKCACHEMAXFILESIZE`). The key has no test key: FEX reads it at the
+start of the game. Not known: if FEX writes and reads the files under the
+WoW64 of Wine (the two lines of the size show it), how much shorter the
+load and the stutters of new code get with a full cache, and if an entry of
+the cache can be wrong for this game.
+
 **How FEX reads its settings** (the source of FEX-2610).
 `BTCpuProcessInit` of `Source/Windows/WOW64/Module.cpp` calls
 `FEX::Config::LoadConfig` (`Source/Common/Config.cpp`) with the Windows
@@ -3756,22 +3835,91 @@ of FEX-2610. A value 1 is on, 0 is off):
 
 | Variable | Default | What it does, and what it costs |
 | --- | --- | --- |
-| `FEX_TSOENABLED` | 1 | The memory order of x86 (TSO): each load and store of the x86 code is an ordered access of ARM. It costs time at each access. 0 is faster, and the source says that 0 "is highly likely to break any multithreaded application". The Quest has no hardware TSO, so FEX always emulates it |
+| `FEX_TSOENABLED` | 1 | The memory order of x86 (TSO): each load and store of the x86 code is an ordered access of ARM. It costs time at each access. 0 is faster, and the source says that 0 "is highly likely to break any multithreaded application". The Quest has no hardware TSO, so FEX always emulates it. See "The memory order under FEX" |
 | `FEX_VECTORTSOENABLED` | 0 | With TSO, also the loads and stores of the vector registers (SSE) are ordered. 1 costs more time at each such access |
 | `FEX_MEMCPYSETTSOENABLED` | 0 | With TSO, also `REP MOVS` and `REP STOS` are ordered. 1 costs more time at each copy and fill |
 | `FEX_HALFBARRIERTSOENABLED` | 1 | With TSO, an unaligned load or store gets a half barrier after a fault, in place of a full atomic. The source says that an aligned access of the same code then is not atomic |
 | `FEX_STRICTINPROCESSSPLITLOCKS` | 0 | A global lock for an unaligned atomic that crosses 16 bytes or a cache line. 1 is safer and slower |
 | `FEX_VOLATILEMETADATA` | 1 | Uses the volatile metadata of a PE file (of newer compilers of Microsoft) to skip TSO where the code does not need it. A file with no such data gets TSO as set |
-| `FEX_EXTENDEDVOLATILEMETADATA` | empty | A list of modules (and ranges) with no TSO, for WoW64, for example `runblack.exe`. Faster for that code, and a fault of the memory order there is possible |
+| `FEX_EXTENDEDVOLATILEMETADATA` | empty | A list of modules (and ranges) with no TSO, for WoW64, for example `runblack.exe`. Faster for that code, and a fault of the memory order there is possible. The modules have `:` between them. A name must have the case of the line "Load module" of FEX in `wine.log` (`runblack.exe`, `ScriptLibraryR.dll`, `LHaudiodllR.dll`). It does nothing with `FEX_TSOENABLED=0` |
 | `FEX_SMCCHECKS` | `mtrack` | The checks of code that changes (self-modifying code): `mtrack` watches the pages of translated code and translates again after a write, `full` checks the code before each run (slow), `none` makes no check (fast, and code that changes runs old). The value is a word: each other value gives `none` |
 | `FEX_MULTIBLOCK` | 1 | A block of translated code can hold more than one x86 block. 1 gives faster code, and the source says that it "can cause long JIT compilation times and stutter". 0 gives smaller blocks |
 | `FEX_MAXINST` | 5000 | The most x86 instructions in one block |
+| `FEX_DYNAMICL1CACHE` | 1 | The first cache of each thread that finds the translated block of an x86 address at an indirect jump, a call through a pointer and a return with no entry of the call. 1 starts it small and makes it larger or smaller by its misses each second. 0 gives the largest size from the start: fewer misses, more memory |
+| `FEX_DISABLEL2CACHE` | 1 | 1: a miss of the first cache takes a lock and looks in the map of all blocks. 0: a second cache with no lock (a table for each page of x86 code) comes before the map. 0 can be faster in code with many indirect jumps, and it takes more memory |
+| `FEX_DISKCACHE` | 0 | The code cache in files. The key `fex_disk_cache` sets it (see "The code cache of FEX") |
 | `FEX_X87REDUCEDPRECISION` | 0 | 0: the x87 instructions run with 80 bit precision in software (SoftFloat-3e), which is slow. 1: 64 bit precision with the floating point of ARM, which is faster. The source says that 1 "may result in rendering bugs" |
 | `FEX_SILENTLOG` | 1 | 0: the messages of FEX go to `wine.log` |
 
 The game is a program of 2001 and uses x87 for its floating point, so
 `FEX_X87REDUCEDPRECISION=1` can matter much for the speed. Not known: how
 much, and if the picture of the game changes.
+
+**The code that changes, on a Quest 3** (`fex_env=FEX_SILENTLOG=0`, the
+lines "Add SMC interval" and "Handled self-modifying code" of FEX in
+`wine.log`). With `FEX_SMCCHECKS=mtrack` FEX protects each page with
+translated code against writes. A change of the protection of a page with
+code to a protection with write and execute gives one line "Add SMC
+interval", and FEX drops the translated code of the page. A write to a
+protected page gives one line "Handled self-modifying code", and FEX drops
+the translated code of the page. In one game of about 75 s:
+
+- 282 lines "Add SMC interval", of them 138 at the load of the DLLs of the
+  game and of the mod, and 121 at the start of the device of the game. These
+  are the hooks of the mod (MinHook makes the target writable for its jump)
+  and the patches of the mod: in `runblack.exe` (pages from 0x0042A000 to
+  0x00879000), in `ddraw.dll` of the mod (pages from 0x791E0000) and in
+  `QMIXER.dll` (0x18001000 to 0x18004000). After the start of the device:
+  one line.
+- 10 lines "Handled self-modifying code". 7 of them at the start: a write
+  at the offset 8 of a page of code that is not in a module (0x022A0000,
+  0x02980000). This fits a page of MinHook: its offset 8 is the count of
+  the used slots of the page (`usedCount` of `buffer.c`), which MinHook
+  writes for each new hook. 3 of them while the game runs, on pages of the
+  same kind at 0x09560000 and 0x09570000.
+
+So while the game runs, FEX drops translated code about 4 times in a
+minute, and in nearly each frame 0 times. The checks of the code that
+changes cost no time in a frame. `FEX_SMCCHECKS=none` gives no speed there,
+and it is a risk: a hook of the mod on code that FEX translated before
+would not work.
+
+Two other lines of FEX come while the game runs, each for one exception of
+the CPU. "Call-ret stack inbalance" (515 lines in the same game, about 7 a
+second): the stack of the return addresses of FEX ran out at a return with
+no call, and FEX sets it back. "Reconstructing context" with the code
+C0000005 (102 lines): an access violation of the x86 code at 0x7BF05C69, in
+`IsBadReadPtr` of `kernel32.dll`, which its handler catches.
+
+**The memory order under FEX** (`FEX_TSOENABLED`). The Quest 3 has no
+hardware TSO, so with `FEX_TSOENABLED=1` each load of the x86 code is a load
+with acquire and each store a store with release (an unaligned access gets
+a half barrier). With 0 each load and store is a plain access, and a thread
+can see the writes of another thread in another order than the x86 code
+wrote them. Each instruction with a lock prefix (`lock xadd`, `lock
+cmpxchg`, `xchg` with memory) stays an atomic of ARM with acquire and
+release (`ldaddal`, `casal` and `swpal` in `AtomicOps.cpp` of the JIT of
+FEX), also with 0. So the functions `Interlocked...` of Windows,
+the critical sections of Wine, and the ring of the live stream and the
+input channel of the mod (`_InterlockedExchange` and
+`_InterlockedCompareExchange` in `stream_ring.h` and `input_channel.h`) keep
+their order with 0. What can break with 0: code that gives data to another
+thread with a plain store of a flag after the data, and a plain load of the
+flag on the other side. On x86 a compiler makes a store with release and a
+load with acquire (`std::atomic` with these orders, `volatile` of MSVC,
+`__atomic_store_n` of GCC and Clang) from a plain `mov`. Such code can be
+in the 32 bit DLLs of Wine, in the code of the game and in the code of the
+mod. A fault there is rare and random: a wrong value, a lost wake or a
+hang.
+
+`FEX_TSOENABLED=1 FEX_EXTENDEDVOLATILEMETADATA=runblack.exe` gives no order
+to the code of `runblack.exe` (as with 0) and the order of x86 to each
+other module. `ddraw.dll` of the mod has the volatile metadata of MSVC (the
+line "Loaded volatile metadata for 791C0000: 357 entries" of FEX), so with
+`FEX_VOLATILEMETADATA=1` (the default) only its 357 accesses to `volatile`
+data are ordered. The cost is the order in the DLLs of Wine (for example
+the heap of `ntdll.dll` and `memcpy` of `msvcrt.dll`) and in the other DLLs
+of the game. Not known: the frames a second with each value.
 
 **What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
 480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
@@ -3784,12 +3932,117 @@ import` has "no CPU value", the save of the menu kept `wow64_cpu=fex` in
 FEX. The game ran as with no key: the new game and the test save `pen`
 (43.5 and 59.4 frames a second of the game in the log of the app). The
 emulator runs the x86_64 tree with `wow64cpu.dll`, so FEX cannot run
-there.
+there. With `-Wow64Cpu fex` and `fex_disk_cache=1` (the run of "The cores
+of the headset") the log has "fex_disk_cache=1 does nothing: the CPU of the
+game is not FEX" in each game.
 
-**Only a headset can show** if FEX runs the game: the load of
-`libwow64fex.dll` in `runblack.exe`, the speed, the stop of the game after
-the load of a save, a call of the missing `RtlWow64SuspendThread`, and the
-effect of the settings above.
+**Only a headset can show** the effect of the settings above on the
+frames a second and on the picture, if the code cache works under the WoW64
+of Wine, and if a hang of the game is a thread that `SuspendThread` stopped
+in the JIT.
+
+## The cores of the headset
+
+`thread_cores` and `thread_bind` (only in `bwvr.ini`, `thread_cores.cpp`,
+the rules in `core_rules.h`). The line of the threads of the time log ("The
+time log of the app") gives the CPU time of each thread over 10 s, and only
+the core that it ran on last. These keys give the cores each second, and
+they can bind threads to cores.
+
+While a game runs, a thread of the app ("bwvr cores") reads each second the
+line of each thread of the game process and of the app
+(`/proc/<pid>/task/<tid>/stat`, as the time log). The thread runs only with
+`thread_cores=1` or with a binding. At Play the app writes the cores of the
+device to `bwvr-quest.log`: the online cores
+(`/sys/devices/system/cpu/online`), the top speed of each core
+(`cpufreq/cpuinfo_max_freq`, 0 when the file is not there) and its capacity
+(`cpu_capacity`), the cores that the app can use (`sched_getaffinity`, and
+`Cpus_allowed_list` of `/proc/<pid>/status`), its cpuset
+(`/proc/<pid>/cpuset`), and the ids of the session thread and of the play
+thread. When the thread finds the game process, it writes the same for the
+game: "cores : the game is the process N (runblack.exe). It can use the
+cores ...".
+
+- `thread_cores=0` (the default): no line of the cores each second. Only
+  the lines of the cores of the device and of the app at Play.
+- `thread_cores=1`: each second two lines. The line of the game: the count
+  of its threads, its CPU time in cores, the sum of the CPU time of its
+  threads by the last core of each thread (an estimate, because a thread
+  can move in the second), and each thread with CPU time, the most first:
+  its name, its id, "(the main thread)", its last core and its percent of
+  one core (user + system). Then the count of the threads with no CPU time.
+  The line of the app: the first 8 threads with CPU time, with "(the
+  session thread)" and "(the play thread)". With a binding each thread also
+  has its place: `fast`, `other` or `free`. With `time_log=1` the threads of
+  the app have their names (`bwvr main`, `bwvr play`).
+
+**The binding** (`thread_bind`). The fast cores are the cores that the app
+can use with a higher top speed than the slowest of them (with no top
+speed: the capacity). `thread_bind_cores` (empty by default) gives them as
+a list of Linux, for example `thread_bind_cores=4-5`. The key threads are
+the main thread of the game (it runs the loop of the game and the frames of
+the mod), the session thread of the app (`bwvr main`) and the play thread
+of the app (`bwvr play`, `frame_loop=1`).
+
+- `thread_bind=0` (the default): no binding. Android chooses the cores.
+- `thread_bind=1`: the key threads get the fast cores, and each other
+  thread of the game and of the app gets the other cores that the app can
+  use (`sched_setaffinity` of each thread).
+- `thread_bind=2`: the key threads get the fast cores, and the other threads
+  stay as they are.
+
+There is no binding when no core of the app is faster than another and
+`thread_bind_cores` is empty, when no core of `thread_bind_cores` is a core
+of the app, or when the fast cores are each core of the app. The log says
+why. Each second the app binds the new threads. The line "thread_bind: the
+main thread of the game (N, runblack.exe) is on the fast cores 4-5 now
+(sched_getaffinity gives 4-5)" names each key thread with its cores after
+the binding. A fault of `sched_setaffinity` gives one line with its errno,
+one time for each errno. At the end of the game each thread of the app
+gets the cores of the app again. A new process and a new thread get the
+cores of the thread that starts them. So with `thread_bind=1` the processes
+that the app starts after Play (the loader of the game, the game process,
+the new wine server and the services) start on the other cores, because the
+thread of the app that starts them (`bwvr game`) is on the other cores. The
+app then binds only the threads of the game process: the main thread of the
+game to the fast cores, the other threads to the other cores. With
+`thread_bind=2` they keep the cores of the app. The keys count at the next
+Play. There is no test key: the app has no hotkeys.
+
+**The cost.** Each second about 60 reads of small files of `/proc` and two
+lines of the log on a thread of its own, and one call of `sched_setaffinity`
+for each new thread.
+
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
+-FrameLoop 1 -Wow64Cpu fex -IniExtra thread_cores=1,thread_bind=1,
+thread_bind_cores=2-3,fex_disk_cache=1`, 208 checks, 0 failed, 4 cores).
+The cores of the emulator have no top speed and no capacity (0 MHz, 0), so
+only `thread_bind_cores` gives fast cores there. The app can use the cores
+0-3, its cpuset is `/top-app`. In each game the log has "thread_bind=1. The
+fast cores 2-3 get the main thread of the game, the session thread and the
+play thread of the app. Each other thread of the game and of the app gets
+the cores 0-1", then the session thread, the play thread and the main
+thread of the game "on the fast cores 2-3 now (sched_getaffinity gives
+2-3)". The game process could use the cores 0-1 when the app found it (the
+cores of `bwvr game`). No line of a fault of `sched_setaffinity`. Of the
+482 lines of the game in the two games, 480 have the main thread of the
+game on the core 2 or 3 with the place `fast`. The other 2 are the first
+line of each game: the second in which the binding came, with the core
+from before it. Each other thread of the game with CPU time
+(`wine_dsound_mix`, `AudioTrack`) was on the core 0 or 1 with the place
+`other`. At the end of each game "24 threads of the
+app have the cores 0-3 again, 2 of them did not (a thread that ended)" (23
+threads after game 1). The frames a second of the game: 42.6 (game 1) and
+58.2 (game 2, the test save) in the log of the app. With the keys at 0
+(the same test with no key, 204 checks, 0 failed) the log has only the two lines "cores" of each
+Play (the cores of the device and of the app), no line each second and no
+binding, and the game made 43.5 and 60.6 frames a second.
+
+**Only a headset can show** the cores of a Quest 3 and their speeds, the
+cores of the cpuset of the app, if Android lets the app bind the threads of
+the game process, and if the game makes more frames a second with its main
+thread on a fast core.
 
 ## Wine in the app
 

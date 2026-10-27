@@ -101,6 +101,9 @@ class WineRuntime {
     // FexVars): fex_env of bwvr.ini.
     wine_rules::Cpu cpu = wine_rules::Cpu::kBox64;
     std::string fex_env;
+    // fex_disk_cache of bwvr.ini (play_rules.h, FexVars): FEX keeps the code
+    // that it translates in files of the prefix for the next start.
+    bool fex_disk_cache = false;
   };
   enum class GameState { kIdle, kStarting, kRunning, kEnded };
   bool Ready() const { return ready_; }

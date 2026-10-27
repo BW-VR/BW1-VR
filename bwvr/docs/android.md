@@ -1763,6 +1763,21 @@ map. `emu_game_test.ps1 -StickFrames N`: in game 2, after its pictures, the
 left stick pushes forward for N frames of the script and is then still for
 80 frames, and the test checks the lines of the new pictures.
 
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
+-FrameLoop 1 -StickFrames 144 -MenuClick 690,430`, the test runtime at 72
+Hz). The click on "Continue Game" closes the Main Menu of game 2, because a
+dialog box stops the walk. With `motion_comp=2` the mod walks for 2.080 s,
+312.04 cm of the room at 150.0 cm a second, and the view moves on 139 of 139
+frames. In that time the line of each new picture has a difference of 2.1
+to 4.4 cm at the head and no turn, with 14.0 to 15.7 ms of the walk ahead,
+and the line of the motion has 142 frames with a difference (2.671 cm as a
+mean, 8.312 at most) and 123 with the walk ahead (15.4 ms as a mean, 50.0 at
+most), no cut and no frame with no map. Before and after the walk each new
+picture has a difference of 0.000 cm (12293 of 12423 lines), and 30 frames
+after the stop the waist point is 0.000 units from its place at the stop.
+With `motion_comp=0` no line has a difference.
+
 **Not shown yet:** a headset. Only a headset shows the stutter of a walk
 that the player sees with each value of `motion_comp`, the distance of
 `motion_comp_depth_cm` that keeps the land still in a step, how the runtime
@@ -1775,8 +1790,9 @@ the feel of the prediction at the stop of a walk.
   the app asks for no such extension, makes no swapchain of the depth, and
   the ring has no copy of the depth. So a step shows exactly at one distance
   only.
-- The prediction follows only the walk with the stick. A grab of the world,
-  the smooth zoom and a turn of two hands show from the newest map of the
+- The prediction follows only the walk with the stick, and only its move
+  over the land. A grab of the world, the smooth zoom, a turn of two hands
+  and the zoom of a climb (`controls=1`) show from the newest map of the
   mod, with no prediction.
 - At the stop of a walk the prediction stops at once, and the newest map of
   the mod can still be behind the place of the stop by the frames in the
@@ -3148,7 +3164,10 @@ the mod").
    end of `xrEndFrame`), and the runtime (to the display time). At the end
    the age from the input to the display time. A picture with no `kView` or
    a slot that the app does not know any more has no part of the game and
-   no age.
+   no age. In the emulator (the test save, 72 Hz, a window of 10 s with no
+   read back) a new picture is 49.5 to 50.5 ms old as a mean: the game 24.1
+   to 25.0, the reader 0.1 to 0.2, the play 3.7 to 3.9, the GPU and the wait
+   in the ring 7.7 to 8.0, the session 0.9 to 1.0, the runtime 12.7 to 12.8.
    **The motion of the stick** (one more line, "The motion of the stick").
 3. **The GPU** in ms, from timestamps at the start and at the end of each
    command buffer: a walk of the renderer (`VkSceneTakeGpuTime`), a command

@@ -166,10 +166,12 @@ public static class IdleR {
     # back as it was.
     # THE FOLDERS OF THE GUARDS. The game writes these files in the folder of
     # the value GameDir in the registry, and that folder can be a different
-    # install or its VirtualStore (Get-BwvrPlayerFolders in game.ps1). Each
-    # guard keeps the files of that folder and of the game folder. A folder
-    # that is not there before the run gets an empty copy, so each file that
-    # the run makes in it is removed after the run.
+    # install. Windows can put them in the VirtualStore of the user
+    # (Get-BwvrPlayerFolders in game.ps1). Each guard keeps the files of each
+    # of those folders: the game folder, the GameDir folder, and the
+    # VirtualStore of each of the two. A folder that is not there before the
+    # run gets an empty copy, so each file that the run makes in it is
+    # removed after the run, and the folder too when it is then empty.
     $playerFolders = Get-BwvrPlayerFolders $game
     "the files of the player: $($playerFolders.Why)"
     $guards = @()
@@ -185,7 +187,7 @@ public static class IdleR {
             } else {
                 New-Item -ItemType Directory -Force -Path $copy | Out-Null
             }
-            $guards += @{ Live = $live; Copy = $copy; What = $part.What }
+            $guards += @{ Live = $live; Copy = $copy; What = $part.What; Was = (Test-Path -LiteralPath $live) }
         }
         $leaks = Join-Path $root 'MemoryLeaks.txt'
         $leaksKeep = Join-Path $out ('MemoryLeaks.txt.before' + $(if ($n -gt 0) { "-$n" } else { '' }))
@@ -197,30 +199,33 @@ public static class IdleR {
     $guardOk = $guards.Count -gt 0
     # THE TEST SAVE. Slot 20 is the saved game that the game continues: the
     # folder Saved Games\20 of the profile that the game uses. In its start
-    # the game reads 20.sav in the game folder. Then it changes its current
-    # folder, reads the other files of the slot, and on its exit path writes
-    # the slot in the folder of Get-BwvrPlayerFolders ($keepSlot). On most
-    # PCs the two are one folder. A test save goes into the slot of each of
-    # the two ($slots). A run touches them only after the profile guard has
-    # its copy.
+    # the game reads 20.sav in the game folder, or its VirtualStore copy. Then
+    # it changes its current folder, reads the other files of the slot, and on
+    # its exit path writes the slot in the folder of Get-BwvrPlayerFolders. On
+    # most PCs these are one folder. A test save goes into slot 20 of each
+    # profile folder of Get-BwvrSaveProfiles ($slots), so the game reads the
+    # same files in each place. A run touches them only after the profile
+    # guard has its copy.
     $slots = @()
-    $keepSlot = $null
+    $keepSlots = @()
+    $profiles = Get-BwvrSaveProfiles $playerFolders
+    "the profile folders: the game reads slot 20 in '$($profiles.Read)', it writes the exit path in '$($profiles.Later)', and each of these gets a test save: $($profiles.All -join ', ')"
     if ($Save -ne '') {
-        $used = Get-BwvrProfileFolder $game
-        $later = Get-BwvrProfileFolder $playerFolders.Folder -Make
-        if (-not $guardOk -or -not $used -or -not $later) {
-            "NOT RUN: a run with a test save needs the folder of the profile that the game uses, in the game folder and in the folder that gets the writes of the game, and the copy of the profile guard. The folders of the profile: '$used', '$later'"
+        if (-not $guardOk -or -not $profiles.Read -or -not $profiles.Later) {
+            "NOT RUN: a run with a test save needs the folder of the profile that the game reads, in the game folder or its VirtualStore, the folder of the profile that gets the writes of the game, and the copy of the profile guard. The folders of the profile: '$($profiles.Read)', '$($profiles.Later)'"
             exit 9
         }
-        $slots = @(@($used, $later) | Select-Object -Unique | ForEach-Object { Join-Path $_ 'Saved Games\20' })
+        $slots = @($profiles.All | ForEach-Object { Join-Path $_ 'Saved Games\20' })
     }
     if ($KeepSave -ne '') {
-        $used = Get-BwvrProfileFolder $playerFolders.Folder -Make
-        if (-not $guardOk -or -not $used) {
-            "NOT RUN: a run that keeps a test save needs the folder of the profile that the game writes, and the copy of the profile guard. The folder of the profile: '$used'"
+        if (-not $guardOk -or -not $profiles.Later) {
+            "NOT RUN: a run that keeps a test save needs the folder of the profile that the game writes, and the copy of the profile guard. The folder of the profile: '$($profiles.Later)'"
             exit 9
         }
-        $keepSlot = Join-Path $used 'Saved Games\20'
+        # The game writes slot 20 where it finds the files. So each profile
+        # folder can get the save, and the run keeps the slot that has the
+        # newest 20.sav.
+        $keepSlots = @(@($profiles.Later) + $profiles.All | Select-Object -Unique | ForEach-Object { Join-Path $_ 'Saved Games\20' })
     }
     $deskBefore = Get-BwvrDeskState
     $runStart = Get-Date
@@ -326,11 +331,17 @@ public static class IdleR {
             }
             Copy-Item $keep $installed -Force
             "installed dll put back: " + ((Get-FileHash $installed).Hash -eq (Get-FileHash $keep).Hash)
-            if ($KeepSave -ne '' -and $keepSlot) {
+            if ($KeepSave -ne '' -and $keepSlots.Count -gt 0) {
                 # The game writes slot 20 at the end of its loop. So the
                 # files are the saved game of the end of the run only when
-                # the game ended by itself.
-                $sav = Get-Item -LiteralPath (Join-Path $keepSlot '20.sav') -ErrorAction SilentlyContinue
+                # the game ended by itself. The slot with the newest 20.sav
+                # is the one that the game wrote.
+                $keepSlot = $keepSlots[0]
+                $sav = $null
+                foreach ($slot in $keepSlots) {
+                    $s = Get-Item -LiteralPath (Join-Path $slot '20.sav') -ErrorAction SilentlyContinue
+                    if ($s -and (-not $sav -or $s.LastWriteTime -gt $sav.LastWriteTime)) { $sav = $s; $keepSlot = $slot }
+                }
                 if (-not (Test-BwvrVerdict $testOut 'game exited on its own: True')) {
                     "test save NOT kept: the game did not end by itself, so slot 20 does not hold the saved game of the end of the run"
                 } elseif (-not $sav -or $sav.LastWriteTime -lt $runStart) {
@@ -366,6 +377,11 @@ public static class IdleR {
                 if (-not (Test-Path -LiteralPath $g.Live)) { continue }
                 $back = Restore-BwvrGuard $g.Copy $g.Live
                 "$($g.What) put back: $($back.Restored) files restored ($($back.Content) of them had different bytes, the others only a different time), $($back.Removed) new files removed, $($back.Folders) new folders removed, in $($g.Live)"
+                # A folder that the run made goes when it is empty.
+                if (-not $g.Was -and @(Get-ChildItem -LiteralPath $g.Live -Force).Count -eq 0) {
+                    [System.IO.Directory]::Delete($g.Live, $false)
+                    "the run made the folder $($g.Live), and it is removed"
+                }
             }
             foreach ($k in $leakKeeps) {
                 if (Test-Path -LiteralPath $k.Keep) {

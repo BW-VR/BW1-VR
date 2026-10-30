@@ -78,11 +78,24 @@ calls it. It keeps these rules, and a new script must keep them too:
   `MemoryLeaks.txt` with a path from its current folder. In its start that
   folder is the game folder. After the start it is the folder of the value
   `GameDir` of its key in the registry. A PC with a second install can have
-  that install there. When it is in Program Files and the game has no
-  administrator rights, Windows puts each write into the VirtualStore of the
-  user (`%LOCALAPPDATA%\VirtualStore\Program Files (x86)\...`). The guards
-  keep the files of that folder and of the game folder, and the first lines
-  of a run say where the writes go (`Get-BwvrPlayerFolders` in `game.ps1`).
+  that install there.
+- The VirtualStore. The game is a 32 bit program with no manifest. When it
+  has no administrator rights, Windows virtualizes its files in Program
+  Files, in ProgramData and in Windows. Each write that such a folder
+  refuses goes to the same path in the VirtualStore of the user:
+  `%LOCALAPPDATA%\VirtualStore` and the path with no drive, for example
+  `%LOCALAPPDATA%\VirtualStore\Program Files (x86)\Lionhead Studios
+  Ltd\Black & White`. After that, the game uses the VirtualStore copy of
+  each file that is there. This is also true for a read, and also when the
+  user can write in the folder now. So the files of the player can be in the
+  game folder, in its VirtualStore, or in both.
+- The guards keep `Profiles`, `Scripts\CreatureMind` and `MemoryLeaks.txt`
+  of each of these folders: the game folder, the folder of `GameDir`, and
+  the VirtualStore of each of the two (`Get-BwvrPlayerFolders` and
+  `Get-BwvrVirtualStore` in `game.ps1`). A folder that is not there before
+  the run gets an empty copy. After the run, each file that the run made in
+  it goes, and the folder goes too when it is then empty. The first lines of
+  a run say where the writes go and which profile folders the run uses.
 - The mod keeps the counts of the hint cards (`hint_learn=1`) in
   `bwvr-hint-counts.ini` beside `bwvr.ini`. `desk_test.ps1` gives each run
   the test key `hint_counts_test_file` with a file in the folder of the run,
@@ -470,9 +483,10 @@ player ends the game. That is a whole saved game of that moment. `desk_run.ps1`
 copies the files of slot 20 that the game wrote in the run to the folder of
 the test saves, and only then does it put the profile back. A file of the
 slot that is older than the run is a file of the player, and the script does
-not copy it. The slot is in the folder that gets the writes of the game
-after its start (the folder of `GameDir`, or its VirtualStore). In the
-VirtualStore the game cannot write `SaveGame.inf`, so a test save made there
+not copy it. The game writes the slot in each profile folder where it finds
+the files of the slot, so the script copies the slot with the newest
+`20.sav`. When the game writes into the VirtualStore of a folder that
+refuses the write, it cannot write `SaveGame.inf`. A test save made there
 has no `SaveGame.inf`, and the game loads it all the same. The guards of such
 a run are in "A run in which the game ends by itself". The last line is `SAVE MADE` or `SAVE NOT MADE`.
 
@@ -499,9 +513,13 @@ starts in its test save by default. Such a run does this:
 2. It takes the files of slot 20 out of the profile (the profile guard has
    them), and it puts the files of the test save in. It compares each file
    with the test save. When one is not the same, no game starts. The game
-   reads `20.sav` in the profile of the game folder, and the other files of
-   the slot in the folder of `GameDir` (see "What a run does to your PC").
-   When the two folders are not the same, the test save goes into both.
+   reads `20.sav` in the profile of the game folder, or in its VirtualStore
+   copy when that profile is in the VirtualStore. It reads the other files
+   of the slot in the folder of `GameDir` (see "What a run does to your
+   PC"). The test save goes into slot 20 of each profile folder in these
+   folders and in their VirtualStore (`Get-BwvrSaveProfiles` in `game.ps1`).
+   With no profile in the game folder and no profile in its VirtualStore,
+   no game starts.
 3. It starts the game with no `-NEWGAME`. The game then loads the saved game
    of slot 20 by itself. The game has no word of the command line that loads
    a saved game (`docs/backend.md`, "A test save").

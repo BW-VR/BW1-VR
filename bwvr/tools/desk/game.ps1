@@ -161,14 +161,24 @@ function Test-BwvrElevated {
 # the value GameDir of its key in the registry, which a test only reads, and
 # the writes of the exit path go there. On most PCs GameDir is the game
 # folder. A PC with a second install of the game can have the other install
-# there. When that folder is in Program Files, in ProgramData or in Windows,
-# and the game has no administrator rights, Windows puts each write of the
-# game into the VirtualStore of the user. A write that only truncates a file
-# of the install (SaveGame.inf of slot 20) then fails. The result:
-#   Folder  the folder that gets the writes of the game after its start
-#   Roots   each folder in which a test run must keep the files of the
-#           player: Folder and the game folder
-#   Why     one line that says where the writes go
+# there.
+# THE VIRTUALSTORE. The game is a 32 bit program with no manifest, so Windows
+# virtualizes its file access when it has no administrator rights. For a
+# folder in Program Files, in ProgramData or in Windows, each write that the
+# folder refuses goes to the same path in the VirtualStore of the user
+# (Get-BwvrVirtualStore). After that, the game uses the VirtualStore copy of
+# each file that is there, also for a read and also when the folder lets the
+# user write now. So the files of the player can be in the folder, in its
+# VirtualStore, or in both. A write that only truncates a file of the install
+# (SaveGame.inf of slot 20) fails in a folder that refuses the write. The
+# result:
+#   Folder     the folder that gets the writes of the game after its start
+#   Roots      each folder in which a test run must keep the files of the
+#              player: Folder, the game folder, the GameDir folder and the
+#              VirtualStore of each of the two
+#   Game       the game folder
+#   GameStore  the VirtualStore of the game folder that the game uses, or null
+#   Why        one line that says where the writes go
 function Get-BwvrPlayerFolders([string]$Game) {
     $gameFull = [System.IO.Path]::GetFullPath($Game).TrimEnd('\')
     $dir = $gameFull
@@ -177,22 +187,52 @@ function Get-BwvrPlayerFolders([string]$Game) {
         $named = [System.IO.Path]::GetFullPath("$($key.GameDir)".Trim()).TrimEnd('\')
         if (Test-Path -LiteralPath $named) { $dir = $named }
     }
+    $elevated = Test-BwvrElevated
+    $gameStore = if ($elevated) { $null } else { Get-BwvrVirtualStore $gameFull }
+    $dirStore = if ($elevated) { $null } else { Get-BwvrVirtualStore $dir }
     $folder = $dir
-    $why = "the game writes the files of the player in the game folder $dir"
-    if ($dir -ne $gameFull) {
-        $why = "after its start the game writes the files of the player in $dir, the folder of the value GameDir in the registry, and not in the game folder $gameFull"
-        $virtual = $false
-        foreach ($root in $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, $env:windir) {
-            if ($root -and $dir.StartsWith($root.TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)) { $virtual = $true }
+    $place = if ($dir -eq $gameFull) { "the game folder $dir" } else { "$dir, the folder of the value GameDir in the registry, and not in the game folder $gameFull" }
+    $why = "the game writes the files of the player in $place"
+    if ($dirStore) {
+        # The game uses the VirtualStore when the profiles are there, or when
+        # the folder refuses a write of the user.
+        $why = $null
+        if (Test-Path -LiteralPath (Join-Path $dirStore 'Profiles')) {
+            $why = "the game writes the files of the player in $dirStore, the VirtualStore of $place. The Profiles folder is there, and the game uses the VirtualStore copy of each file that is there"
+        } elseif (-not (Test-BwvrCanWrite $dir)) {
+            $why = "the game writes the files of the player in $dirStore, the VirtualStore of $place. The user cannot write in that folder"
         }
-        if ($virtual -and -not (Test-BwvrElevated)) {
-            $folder = Join-Path (Join-Path $env:LOCALAPPDATA 'VirtualStore') $dir.Substring(3)
-            $why = "after its start the game writes the files of the player in $folder, the VirtualStore of $dir (the folder of the value GameDir in the registry, in which a game with no administrator rights cannot write), and not in the game folder $gameFull"
+        if ($why) { $folder = $dirStore } else { $why = "the game writes the files of the player in $place. The user can write there, and its VirtualStore has no Profiles folder" }
+    }
+    $roots = @(@($folder, $gameFull, $dir, $gameStore, $dirStore) | Where-Object { $_ } | Select-Object -Unique)
+    return @{ Folder = $folder; Roots = $roots; Game = $gameFull; GameStore = $gameStore; Why = $why }
+}
+
+# The VirtualStore of a folder, by the rule of Windows: the path of the folder
+# with no drive, in %LOCALAPPDATA%\VirtualStore. Only a folder in Program
+# Files, in ProgramData or in Windows has one. Null for each other folder.
+function Get-BwvrVirtualStore([string]$Dir) {
+    $full = [System.IO.Path]::GetFullPath($Dir).TrimEnd('\')
+    foreach ($root in $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, $env:windir) {
+        if ($root -and $full.StartsWith($root.TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return (Join-Path (Join-Path $env:LOCALAPPDATA 'VirtualStore') $full.Substring(3))
         }
     }
-    $roots = @($folder)
-    if ($gameFull -ne $folder) { $roots += $gameFull }
-    return @{ Folder = $folder; Roots = $roots; Why = $why }
+    return $null
+}
+
+# True when this process can make a file in the folder. The test makes an
+# empty file and deletes it at once.
+function Test-BwvrCanWrite([string]$Dir) {
+    $probe = Join-Path $Dir ("bwvr-write-test-$PID.tmp")
+    try {
+        $fs = [System.IO.File]::Open($probe, 'CreateNew', 'Write', 'None')
+        $fs.Close()
+        [System.IO.File]::Delete($probe)
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 # The folder of the profile that the game uses: Profiles\<folder> of -Root.
@@ -201,8 +241,8 @@ function Get-BwvrPlayerFolders([string]$Game) {
 # Get-BwvrPlayerFolders gives. The game keeps the name of the profile in the
 # registry, which a test only reads. The folder has the name with a "_"
 # before each character. Null when the name is not there, and when the
-# profile is not in -Root (with -Make, not in -Root and not in GameDir: the
-# VirtualStore can get the profile with the first write).
+# profile is not in -Root (with -Make, not in -Root and not in GameDir or its
+# VirtualStore: the VirtualStore can get the profile with the first write).
 function Get-BwvrProfileFolder([string]$Root, [switch]$Make) {
     $key = Get-ItemProperty 'HKCU:\Software\Lionhead Studios Ltd\Black & White\LHMultiplayer' -ErrorAction SilentlyContinue
     if (-not $key -or -not $key.Profile) { return $null }
@@ -213,9 +253,34 @@ function Get-BwvrProfileFolder([string]$Root, [switch]$Make) {
     if (Test-Path -LiteralPath $path) { return $path }
     if ($Make) {
         $key = Get-ItemProperty 'HKCU:\Software\Lionhead Studios Ltd\Black & White' -ErrorAction SilentlyContinue
-        if ($key -and $key.GameDir -and (Test-Path -LiteralPath (Join-Path (Join-Path "$($key.GameDir)".Trim() 'Profiles') $folder))) { return $path }
+        if ($key -and $key.GameDir) {
+            $named = "$($key.GameDir)".Trim()
+            foreach ($dir in @($named, (Get-BwvrVirtualStore $named))) {
+                if ($dir -and (Test-Path -LiteralPath (Join-Path (Join-Path $dir 'Profiles') $folder))) { return $path }
+            }
+        }
     }
     return $null
+}
+
+# The profile folders of a run with a test save (desk_run.ps1). The result:
+#   Read   the profile whose slot 20 the game reads in its start: the profile
+#          in the VirtualStore of the game folder when it is there (the game
+#          then uses the VirtualStore copy of each file), else the profile in
+#          the game folder. Null when neither is there.
+#   Later  the profile that gets the writes of the exit path, in Folder of
+#          Get-BwvrPlayerFolders (Get-BwvrProfileFolder -Make). Can be null.
+#   All    each profile folder of the files of the player: Read, Later, and
+#          the profile in each other root. Each one gets the test save, so
+#          the game finds the same slot 20 in each place that it can read.
+function Get-BwvrSaveProfiles($Folders) {
+    $read = $null
+    if ($Folders.GameStore) { $read = Get-BwvrProfileFolder $Folders.GameStore }
+    if (-not $read) { $read = Get-BwvrProfileFolder $Folders.Game }
+    $later = Get-BwvrProfileFolder $Folders.Folder -Make
+    $all = @($read, $later)
+    foreach ($root in $Folders.Roots) { $all += Get-BwvrProfileFolder $root }
+    return @{ Read = $read; Later = $later; All = @($all | Where-Object { $_ } | Select-Object -Unique) }
 }
 
 # Removes a folder of the test saves with each file in it. It removes each

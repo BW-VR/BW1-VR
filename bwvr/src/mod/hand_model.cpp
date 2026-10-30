@@ -59,6 +59,8 @@
 
 #include "../common/bw_addresses.h"
 #include "debug_menu.h"
+#include "hand_feel.h"
+#include "hand_feel_math.h"
 #include "hand_model.h"
 
 extern void ModLog(const char* format, ...);
@@ -1153,6 +1155,11 @@ struct Corner {
 
 // The opacity of the hand that FillHand fills now (HandModelSetOpacity).
 float g_fill_opacity = 1.0f;
+// The look of the water for the hands of this draw (hand_feel_water_look):
+// on or off, and the size of the room in world units for each cm.
+bool g_water_on = false;
+float g_water_units_cm = 0.0f;
+bool g_water_shown = false;
 
 void CornerOf(const Built& built, int v, Corner* out) {
   memcpy(out->c, g_camera + v * 3, sizeof(out->c));
@@ -1161,6 +1168,17 @@ void CornerOf(const Built& built, int v, Corner* out) {
     out->color[k] = static_cast<float>((color >> (8 * k)) & 0xFFu);
   }
   out->color[3] *= g_fill_opacity;
+  // A point under the plane of the sea takes the look of the water. The
+  // land hides a point under the land, so the plane of the sea counts
+  // everywhere.
+  if (g_water_on) {
+    const float y = built.world[v * 3 + 1];
+    if (y < 0.0f) {
+      hand_feel::WaterColor(hand_feel::WaterLookAt(y, g_water_units_cm),
+                            out->color);
+      g_water_shown = true;
+    }
+  }
   out->uv[0] = g_mesh.uv[v * 2 + 0];
   out->uv[1] = g_mesh.uv[v * 2 + 1];
 }
@@ -1442,6 +1460,8 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
   }
   int n = 0;
   int end[2] = {0, 0};  // the end of the vertices of each hand
+  g_water_on = HandFeelWaterLook(&g_water_units_cm);
+  g_water_shown = false;
   for (int h = 0; h < 2; ++h) {
     if (g_built[h].valid) {
       g_fill_opacity = g_opacity[h];
@@ -1450,6 +1470,7 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
     }
     end[h] = n;
   }
+  if (g_water_shown) HandFeelWaterShown();
   if (n == 0) {
     g_draw_ticks += Now() - start;
     return 0;

@@ -118,6 +118,9 @@ struct Settings {
   bool joints = true;
   bool shape = true;
   bool sea = true;
+  bool offer = true;
+  bool water_look = true;
+  bool ripple = true;
   bool pulse = true;
   bool idle = false;
   bool pinch = true;
@@ -285,6 +288,8 @@ int g_body_logs = 0;
 const int kMaxBodyLogs = 60;
 int g_sea_logs = 0;
 const int kMaxSeaLogs = 20;
+int g_ring_logs = 0;
+const int kMaxRingLogs = 20;
 int g_approach_logs = 0;
 const int kMaxApproachLogs = 30;
 int g_hold_logs = 0;
@@ -307,6 +312,17 @@ uint64_t g_wet = 0;
 uint64_t g_land_calls = 0;
 uint64_t g_candidates_seen = 0;
 uint64_t g_view_off = 0;
+uint64_t g_rings = 0;
+// The size of the room in this frame, for the look of the water.
+float g_units_per_cm = 0.0f;
+// The points of the offer of this frame (HandFeelOfferPoints).
+uint64_t g_offer_frame = ~0ull;
+int g_offer_count = 0;
+float g_offer_point[2][3];
+float g_offer_bound[2];
+uint64_t g_water_frame = ~0ull;
+uint64_t g_offered = 0;
+uint64_t g_water_frames = 0;
 LARGE_INTEGER g_frequency = {};
 int64_t g_ticks = 0;
 int64_t g_frame_ticks = 0;
@@ -362,6 +378,9 @@ void LoadSettings() {
     g_set.joints = key("hand_feel_joints", 1) != 0;
     g_set.shape = key("hand_feel_shape", 1) != 0;
     g_set.sea = key("hand_feel_sea", 1) != 0;
+    g_set.offer = key("hand_feel_offer", 1) != 0;
+    g_set.water_look = key("hand_feel_water_look", 1) != 0;
+    g_set.ripple = key("hand_feel_ripple", 1) != 0;
     g_set.pulse = key("hand_feel_pulse", 1) != 0;
     g_set.idle = key("hand_feel_idle", 0) != 0;
     g_set.pinch = key("hand_pinch", 1) != 0;
@@ -419,6 +438,19 @@ void LoadSettings() {
                            "turn it off and on, and Ctrl, Shift and End "
                            "turn the pinch off and on"
                          : "");
+  ModLog("hand feel    : the pick gets the objects near each hand by the ball "
+         "of their box: %s. The part of a hand of the mesh in the sea has the "
+         "color of the sea: %s. A finger tip that goes into the sea starts a "
+         "ring of the game on the water: %s",
+         g_set.offer ? "yes"
+                     : "no, only by their point near the Hand's point "
+                       "(hand_feel_offer=0)",
+         !g_set.sea ? "no (hand_feel_sea=0)"
+         : g_set.water_look ? "yes"
+                            : "no (hand_feel_water_look=0)",
+         !g_set.sea ? "no (hand_feel_sea=0)"
+         : g_set.ripple ? "yes"
+                        : "no (hand_feel_ripple=0)");
 }
 
 void Toggle(const char* how) {
@@ -854,16 +886,36 @@ void Finish(const HandFeelHand& in, HandState* state,
 // THE WATER LINE (hand_feel_sea=1): whether a finger tip is in the sea, at
 // the curls of this frame.
 bool InSea(const HandFeelHand& in, bool left, const hf::World& world,
-           const float curls[hf::kFingers]) {
+           const float curls[hf::kFingers], float wet_tip[3]) {
   if (!g_set.sea || !world.land) return false;
   for (int f = 0; f < hf::kFingers; ++f) {
     float points[hf::kPoints][3], tip[3];
     hf::TableAt(g_table[f], curls[f], points);
     overlay_math::PlacePoint(in.position, in.rotation, in.length, left,
                              points[hf::kPoints - 1], tip);
-    if (hf::InWater(world.patch, tip)) return true;
+    if (hf::InWater(world.patch, tip)) {
+      for (int k = 0; k < 3; ++k) wet_tip[k] = tip[k];
+      return true;
+    }
   }
   return false;
+}
+
+// THE RING OF THE GAME on the water [V]. water_drop_cb 0x0054EEA0, stdcall
+// (the point, the growth, the color), ret 0xC. It takes a free slot of the
+// 1024 rings at 0x00EAB7C8 and only writes data: the land draw
+// (GLandscape::Draw, fn_005E5100) draws each ring as a flat sprite on the
+// water and ages it. The rain and an object that falls into the sea call it
+// with the color 0xFFFFFFFF.
+const uintptr_t kWaterDrop = 0x0054EEA0;
+typedef void(__stdcall* WaterDropFn)(const float* point, float growth,
+                                     uint32_t color);
+const float kRingHeight = 0.1f;  // the height of the ring of an object
+
+void StartRing(const float tip[3], float hand_length) {
+  const float point[3] = {tip[0], kRingHeight, tip[2]};
+  reinterpret_cast<WaterDropFn>(kWaterDrop)(point, hf::RingGrowth(hand_length),
+                                            0xFFFFFFFFu);
 }
 
 // The mask of a hand for haptics.h: bit 1 the pointing hand, bit 0 the other.
@@ -953,6 +1005,7 @@ void HandFeelCurls(const HandFeelHand& in,
   state.late = false;
   memcpy(state.position, in.position, sizeof(state.position));
   memcpy(state.rotation, in.rotation, sizeof(state.rotation));
+  if (in.units_per_meter > 0.0f) g_units_per_cm = 0.01f * in.units_per_meter;
   if (!g_set.on) return;
   const int64_t start = Now();
   float want[hf::kFingers], values[hf::kFingers];
@@ -1022,7 +1075,8 @@ void HandFeelCurls(const HandFeelHand& in,
     HapticsPulseHands(HandMask(in), haptics_math::kSurface);
   }
   // THE WATER LINE: one pulse when a finger tip goes into the sea.
-  const bool wet = InSea(in, left, world, curls);
+  float wet_tip[3] = {0.0f, 0.0f, 0.0f};
+  const bool wet = InSea(in, left, world, curls, wet_tip);
   if (wet) ++g_wet;
   if (wet != state.wet) {
     if (g_sea_logs < kMaxSeaLogs) {
@@ -1039,9 +1093,26 @@ void HandFeelCurls(const HandFeelHand& in,
   }
   // One pulse in a frame: a hand that meets the land and the water at once
   // gets the pulse of the land.
-  if (hf::MeetPulse(wet, in.dt, &state.sea_quiet) && g_set.pulse && !pulsed) {
+  // The ring of the game starts by the same rule, with or without the pulse:
+  // when a tip goes into the water and no tip of this hand was in it for
+  // 0.2 s. So a tip that stays at the water line does not start a ring in
+  // each frame.
+  const bool meet_sea = hf::MeetPulse(wet, in.dt, &state.sea_quiet);
+  if (meet_sea && g_set.pulse && !pulsed) {
     ++g_sea_pulses;
     HapticsPulseHandsClear(HandMask(in), haptics_math::kSurface);
+  }
+  if (meet_sea && g_set.ripple) {
+    StartRing(wet_tip, in.length);
+    ++g_rings;
+    if (g_ring_logs < kMaxRingLogs) {
+      ++g_ring_logs;
+      ModLog("hand feel    : a ring of the game starts on the water at %.1f "
+             "%.1f under a finger tip of the %s hand, with the growth %.2f, "
+             "frame %llu",
+             wet_tip[0], wet_tip[2], left ? "left" : "right",
+             hf::RingGrowth(in.length), g_frame);
+    }
   }
   // One line for each change of what the hand is in.
   if (in_what != state.in_what) {
@@ -1123,6 +1194,54 @@ void HandFeelCurls(const HandFeelHand& in,
            pixel[0], pixel[1], list);
   }
   CountTicks(Now() - start);
+}
+
+int HandFeelOfferPoints(float points[2][3], float bound[2]) {
+  LoadSettings();
+  if (g_offer_frame != g_frame) {
+    g_offer_frame = g_frame;
+    g_offer_count = 0;
+    if (g_set.on && g_live && g_set.bodies && g_set.offer &&
+        TabletopOwnsView()) {
+      for (int h = 0; h < kHands; ++h) {
+        const HandState& state = g_hand[h];
+        if (!state.have_place || state.frame != g_frame ||
+            !(state.length > 0.0f) || state.length > kBodiesMaxLength) {
+          continue;
+        }
+        float* point = g_offer_point[g_offer_count];
+        overlay_math::PlacePoint(state.position, state.rotation, state.length,
+                                 state.left, kCenter, point);
+        g_offer_bound[g_offer_count] = (kReach + kBodySlack) * state.length;
+        ++g_offer_count;
+      }
+    }
+  }
+  for (int i = 0; i < g_offer_count; ++i) {
+    for (int k = 0; k < 3; ++k) points[i][k] = g_offer_point[i][k];
+    bound[i] = g_offer_bound[i];
+  }
+  return g_offer_count;
+}
+
+bool HandFeelOfferOn() {
+  LoadSettings();
+  return g_set.on && g_set.bodies && g_set.offer;
+}
+
+void HandFeelOffered() { ++g_offered; }
+
+bool HandFeelWaterLook(float* units_per_cm) {
+  LoadSettings();
+  *units_per_cm = g_units_per_cm;
+  return g_set.on && g_live && g_set.sea && g_set.water_look &&
+         g_units_per_cm > 0.0f && TabletopOwnsView();
+}
+
+void HandFeelWaterShown() {
+  if (g_water_frame == g_frame) return;
+  g_water_frame = g_frame;
+  ++g_water_frames;
 }
 
 bool HandFeelHoldRange(int hand, bool mesh, float length, float hold_radius,
@@ -1525,18 +1644,22 @@ void HandFeelReport() {
          "sea in %llu hand frames. The pointing hand opened toward a target "
          "in %llu frames. %llu hold poses made, %llu hands built again with "
          "the bodies of their frame, %llu pulses of the land, %llu of a "
-         "body and %llu of the water line. %llu hand frames had no view of "
+         "body and %llu of the water line. %llu rings of the game on the "
+         "water. %llu objects went to the pick only for the bodies near a "
+         "hand, and %llu frames had the look of the water on the hands. %llu "
+         "hand frames had no view of "
          "the God view or the table. %.4f ms a frame on the CPU (the worst "
          "frame %.3f ms), %.1f land heights and %.0f candidates a frame",
          g_frames, g_live ? "on" : "off by the test key", g_land_near,
          g_body_near, g_in_land, g_in_body, g_stuck, g_outer, g_wet,
          g_approach_frames, g_hold_made, g_rebuilt, g_pulses, g_body_pulses,
-         g_sea_pulses, g_view_off, Ms(g_ticks) / frames, Ms(g_worst_ticks),
+         g_sea_pulses, g_rings, g_offered, g_water_frames, g_view_off,
+         Ms(g_ticks) / frames, Ms(g_worst_ticks),
          static_cast<double>(g_land_calls) / frames,
          static_cast<double>(g_candidates_seen) / frames);
   g_frames = g_land_near = g_body_near = g_in_land = g_in_body = 0;
   g_stuck = g_approach_frames = g_hold_made = g_pulses = g_land_calls = 0;
   g_outer = g_wet = g_rebuilt = g_body_pulses = g_sea_pulses = 0;
-  g_candidates_seen = g_view_off = 0;
+  g_candidates_seen = g_view_off = g_rings = g_offered = g_water_frames = 0;
   g_ticks = g_worst_ticks = g_frame_ticks = 0;
 }

@@ -891,6 +891,92 @@ inline bool MeetPulse(bool touching, float dt, float* quiet) {
   return pulse;
 }
 
+// --- the offer of the pick ----------------------------------------------------
+
+// THE OFFER OF THE PICK (hand_feel_offer). The game offers an object to its
+// pick when the screen test of its box finds the pick pixel in it. The mod
+// also offers an object near a hand, so that the bodies near each hand are
+// in the list of the first eye pass. The screen test gives the ball round
+// the box of the mesh: its middle in the world and its radius. An object
+// counts as near when the gap from a point to that ball is at most the
+// bound. So the wall of a large building near a hand counts, also when the
+// point of the building is far from the hand.
+inline float OfferGap(const float middle[3], float radius,
+                      const float point[3]) {
+  const float d[3] = {point[0] - middle[0], point[1] - middle[1],
+                      point[2] - middle[2]};
+  return sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) - radius;
+}
+
+// The middle and the radius of the ball of a box of the screen test: the
+// middle of the box through the rows and the translation of the matrix of
+// the object, and the radius of the box times the scale of the object.
+// False when a value is not a real number in the world.
+inline bool OfferBall(const float box_middle[3], float box_radius,
+                      const float rows[9], const float translation[3],
+                      float scale, float middle[3], float* radius) {
+  for (int k = 0; k < 3; ++k) {
+    middle[k] = translation[k];
+    for (int j = 0; j < 3; ++j) middle[k] += box_middle[j] * rows[j * 3 + k];
+    if (!(middle[k] > -100000.0f && middle[k] < 100000.0f)) return false;
+  }
+  *radius = box_radius * scale;
+  return *radius >= 0.0f && *radius < 5000.0f;
+}
+
+// --- the hand in the water ----------------------------------------------------
+
+// THE HAND IN THE WATER (hand_feel_water_look). The sea of the game writes no
+// depth, so a part of the hand under the plane of the sea shows as in the
+// air. Each point of the mesh under the plane takes a part of the color of
+// the sea, and less alpha, by its depth: none at the water line, the full
+// part at kWaterFullCm of the room under it. So the surface seems to be in
+// front of that part of the hand.
+const float kWaterFullCm = 4.0f;
+const float kWaterTint = 0.55f;    // the part of the color of the sea
+const float kWaterAlpha = 0.45f;   // the alpha at the full depth
+// The color of the sea for the hand, blue, green and red, 0 to 255.
+const float kWaterColor[3] = {120.0f, 96.0f, 40.0f};
+
+struct WaterLook {
+  float tint;   // 0 the color of the hand, 1 the color of the sea
+  float alpha;  // the factor of the alpha
+};
+
+// The look of a point at the height y over the plane of the sea, with the
+// size of the room in world units for each cm.
+inline WaterLook WaterLookAt(float y, float units_per_cm) {
+  WaterLook out = {0.0f, 1.0f};
+  if (!(y < 0.0f) || !(units_per_cm > 0.0f)) return out;
+  const float share = Clamp01(-y / (kWaterFullCm * units_per_cm));
+  out.tint = kWaterTint * share;
+  out.alpha = 1.0f - (1.0f - kWaterAlpha) * share;
+  return out;
+}
+
+// A color of a point (blue, green, red, alpha, 0 to 255) with the look.
+inline void WaterColor(const WaterLook& look, float color[4]) {
+  for (int k = 0; k < 3; ++k) {
+    color[k] += look.tint * (kWaterColor[k] - color[k]);
+  }
+  color[3] *= look.alpha;
+}
+
+// THE RING OF THE GAME on the water (hand_feel_ripple). The game starts a
+// ring when a drop of rain or an object falls into the sea (water_drop_cb).
+// A drop of rain has a growth of 0.5 to 0.8. A finger tip of a hand of the
+// real size (kHandUnits long at 100 units a meter) has 0.6, and the growth
+// goes with the length of the hand.
+const float kRingGrowth = 0.6f;
+const float kHandUnits = 19.0f;
+
+inline float RingGrowth(float hand_length) {
+  float growth = kRingGrowth * hand_length / kHandUnits;
+  if (!(growth > 0.2f)) growth = 0.2f;
+  if (growth > 5.0f) growth = 5.0f;
+  return growth;
+}
+
 // --- the idle wave ------------------------------------------------------------
 
 // THE IDLE WAVE (hand_feel_idle, off). A hand at rest moves its fingers a

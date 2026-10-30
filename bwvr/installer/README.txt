@@ -190,10 +190,14 @@ the game does. Set hand_model=0 in bwvr.ini for plain hands.
 The fingers also react to the world. When you put a hand down on the
 land, each finger bends until it rests on it. A finger tip that meets
 the land or a wall bends at its outer joints, and a flat hand on the
-land spreads its fingers a little. The fingers also rest on a house,
-a tree, a rock, a villager, an animal and your Creature, and a
-villager that walks into your hand bends your fingers. Your fingers
-go into the sea. When your finger tip comes to a thing that the grip
+land spreads its fingers a little. The fingers also rest on a house
+and the other buildings, a tree, a rock, a villager, an animal and
+your Creature, with each hand, and a villager that walks into your
+hand bends your fingers. Your fingers go into the sea. The part of
+your hand under the water takes the color of the sea, and a ring
+starts on the water where a finger tip goes in. Set
+hand_feel_water_look=0 and hand_feel_ripple=0 in bwvr.ini to turn
+these off. When your finger tip comes to a thing that the grip
 can take, the hand takes the form of the thing: a claw for a
 villager, an open hand for a tree. In your hand the fingers close on
 the thing, the thumb goes round it, and a tree lies with its trunk on

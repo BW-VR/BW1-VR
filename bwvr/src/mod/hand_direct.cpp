@@ -137,6 +137,7 @@
 #include "fight_math.h"
 #include "take_stream.h"
 #include "forest_take.h"
+#include "hand_feel.h"
 #include "hand_feel_math.h"
 #include "haptics.h"
 #include "miracle.h"
@@ -489,6 +490,9 @@ const int kObjectMesh = 0x40;
 const int kObjectFlags = 0x24;       // a byte: bits 0x04 and 0x20
 const int kObjectOtherFlags = 0x0A;  // a byte: bit 0x10
 const int kMeshTranslation = 0x38;
+// The scale of an LH3DObject: LH3DBoundingBox::CheckRegionOnScreen
+// (0x00868CA6) takes the radius of the box times this value [V].
+const int kObjectScale = 0x44;
 const int kIsInteractable = 0x190;
 const int kIsCannotBePickedUp = 0x180;
 const int kValidForPlaceInHand = 0x6FC;
@@ -3332,6 +3336,37 @@ int __fastcall h_ScreenTest(const void* bounds, void* unused,
     *under = 1;
     ++g_near_offers;
     return result;
+  }
+  // THE BODIES NEAR EACH HAND (hand_feel_offer, docs/hand-model.md, "The
+  // bodies"). The point of a large building is far from its walls, and the
+  // hand that does not point has no Hand's point. So an object also goes to
+  // the pick when the ball round the box of this test is near the Hand's
+  // point or near the middle of a hand that takes bodies. The test read the
+  // box [V]: its middle at +4 and its radius at +0x1C, through the rows of
+  // the matrix of the object at +0x14 and its scale at +0x44.
+  if (g_near_pick && HandFeelOfferOn()) {
+    float points[2][3], reach[2];
+    const int hands = HandFeelOfferPoints(points, reach);
+    const float* box = static_cast<const float*>(bounds);
+    float middle[3], radius = 0.0f;
+    if (hand_feel::OfferBall(box + 1, box[7],
+                             reinterpret_cast<const float*>(object + kMeshRows),
+                             at,
+                             *reinterpret_cast<const float*>(object +
+                                                             kObjectScale),
+                             middle, &radius)) {
+      bool near_one = hand_feel::OfferGap(middle, radius, g_target) <=
+                      sqrtf(g_near_bound_sq);
+      for (int h = 0; h < hands && !near_one; ++h) {
+        near_one = hand_feel::OfferGap(middle, radius, points[h]) <= reach[h];
+      }
+      if (near_one) {
+        *under = 1;
+        ++g_near_offers;
+        HandFeelOffered();
+        return result;
+      }
+    }
   }
   // THE LOCKED TARGET of a far grab goes to the pick on each frame, in the
   // cone or not, so the lock has its place while it moves.

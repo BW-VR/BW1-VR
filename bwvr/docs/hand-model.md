@@ -869,6 +869,46 @@ tip first goes under the plane of the sea, the hand gets the pulse `surface`,
 and the log has one line. With `hand_feel_sea=0` the sea is land at the
 height 0, and the fingers rest on the water as on rock.
 
+**What the game draws of the sea** [V]. `GLandscape::Draw` draws the sky,
+the reflection of the land (`fn_007FF4F0`), the sea (`LH3DWater::Draw`
+`0x00879930`, called at `0x005E4E8C`), the land, the rings on the water
+(`fn_005E5100` for each live ring) and then the objects. The God view and
+the table use the plain sea (backend.md, "Roll and the sea"): one quad of
+plus and minus 70000 units at the height 0 (`0x0087A090`), with the depth
+test ALWAYS (`0x0087A26D`) and no depth write (`0x0087A294`). The scanline
+sea of the flat game is the one layer of the water in screen space, and
+the mod does not use it in the God view. It has a swell and a fade with
+the distance, and nothing in it reacts to a thing in the water. So no
+layer that shows a thing in the water is missing in the VR picture. The
+sea writes no depth, and the land draws after it. So a finger under the
+plane of the sea is in front of the sea in the picture, and it shows as in
+the air. The hands of the mod draw at the end of the frame
+(`LH3DRender::FinishFrame`), with the depth test against the land and the
+objects.
+
+**The hand in the water** (`hand_feel_water_look`). Each point of the mesh
+of a hand under the plane of the sea takes a part of the color of the sea,
+and less alpha, by its depth: none at the water line, and 0.55 of the color
+and 0.45 of the alpha at 4 cm of the room under it (`hand_feel_math.h`,
+`WaterLookAt`). The draw of the hand blends by the alpha, so the sea shows
+through that part of the hand. The look is the same in both eyes and with
+both renderers, because the color is in the vertices of the hand. The land
+hides a point under the land, so the plane of the sea counts everywhere.
+It works while the God view or the table owns the view, with
+`hand_feel_sea=1`.
+
+**The ring on the water** (`hand_feel_ripple`). When a finger tip goes into
+the sea and no tip of that hand was in it for 0.2 s (the rule of the pulse
+of the water line), the mod starts a ring of the game under the tip:
+`water_drop_cb` `0x0054EEA0` [V], stdcall with the point, the growth and
+the color, `ret 0xC`. The rain and an object that falls into the sea start
+their rings with it (`0x008340FF`, `PhysicsObject::AttemptToAddSoundEvent`).
+It takes a free slot of the 1024 rings at `0x00EAB7C8` and only writes
+data. The land draw draws each ring as a flat sprite on the water, in the
+world, so the ring is right in each eye. The growth is 0.6 for a hand of
+19 units, and it goes with the length of the hand (0.2 to 5). A drop of
+rain has 0.5 to 0.8. The color is white, as for an object.
+
 The plain game puts its Hand on the point that the pick of the screen gives
 (`fn_00800C30` calls `LH3DTech::Get3DPointFromScreen`), and its land test is
 `GetAltitude`, which gives 0 for the sea. So the game's Hand stays over the
@@ -1039,6 +1079,29 @@ pass, the mod takes the bodies near each hand from the candidates of the
 pick, and the second step of the frame bends the fingers against them
 (`hand_feel_bodies_now`).
 
+**The objects near each hand** (`hand_feel_offer`). A candidate of the pick
+is an object that the draw offers to `GInterface::SendObjectDrawCollision`.
+The draw offers an object when the screen test of its box
+(`LH3DBoundingBox::CheckRegionOnScreen` `0x00868C80`) finds the pick pixel in
+it, and the mod's post hook of that test also offers an object near the
+Hand (hand.md, "A render pick, one frame late"). That test of the mod takes
+the point of the object, within about 25 units of the Hand's point at 100
+units a meter and 12 units at 13 units a meter. The point of a large
+building is far from its walls, and the hand that does not point has no
+Hand's point. So with `hand_feel_offer=1` the hook also offers an object
+when the ball round the box of the test is near the Hand's point by that
+bound, or near the middle of a hand that takes bodies by the reach of its
+bodies (0.9 hand lengths). The test reads the ball [V]: the middle of the
+box at `+4` and its radius at `+0x1C` of the box, through the rows of the
+matrix of the object at `+0x14`, its place at `+0x38` and its scale at
+`+0x44`. The game asks the mesh whether the pick pixel hits an object that
+the mod offers, so the game's own pick gets no false hit. `Abode::Draw`
+(`0x00515F70`) and `MultiMapFixed::DrawBuilding` (`0x00517F90`) read the
+flag of that test before they offer a building, as
+`Game3DObject::AddForDrawing` does for each other object. With
+`hand_feel_offer=0` only the point of the object near the Hand's point
+counts.
+
 | Object | Body |
 | --- | --- |
 | A tree | The trunk, a cylinder of a quarter of the radius to half the height, and the crown, a spheroid in the upper half |
@@ -1093,6 +1156,9 @@ make, so it is off.
 | `hand_feel_joints` | 1 | A finger that meets the world past its first joint bends at its outer joints first. 0 bends each joint by the same curl |
 | `hand_feel_shape` | 1 | The thumb turns toward the palm round the object in the Hand, and the fingers spread on a surface and round a large object. 0 gives no turn and no spread, and the thumb of a hold from the side stays out |
 | `hand_feel_sea` | 1 | The fingers go into the sea, with a pulse at the water line. 0 makes the sea land at the height 0 |
+| `hand_feel_offer` | 1 | An object goes to the pick when the ball round its box is near the Hand's point or near the middle of a hand, so the walls of a large building and the bodies near the other hand count. 0 offers an object only by its point near the Hand's point |
+| `hand_feel_water_look` | 1 | The part of a hand of the mesh under the plane of the sea takes the color of the sea and less alpha. 0 draws it as in the air |
+| `hand_feel_ripple` | 1 | A finger tip that goes into the sea starts a ring of the game on the water. 0 starts none |
 | `hand_feel_pulse` | 1 | A faint pulse when a finger first meets the land or a body |
 | `hand_hold_trunk` | 1 | A tree in the Hand has its trunk at the palm. 0 puts it at the radius of its crown |
 | `hand_pinch` | 1 | A small object in the Hand is held between the thumb and the index finger. 0 holds it in the fist |
@@ -1119,7 +1185,10 @@ The tag `hand feel`.
 - The same for a body, from the second step: the curls with the land, the
   curls with the bodies of this frame, the paths and the count of bodies.
 - One line when a finger tip goes into the sea or comes out of it (20 at
-  most).
+  most), and one when a ring of the game starts on the water: its place and
+  its growth (20 at most).
+- At the start: whether the offer of the bodies near each hand, the look of
+  the water and the ring are on.
 - One line when the pointing hand starts to take the form of a target: the
   size of the target, the frame of `can_pickup`, the curls of the form, the
   gap and the weight.
@@ -1133,8 +1202,10 @@ The tag `hand feel`.
   frames with no free curl, how often the outer joints took a bend, the hand
   frames with a tip in the sea, the frames of the approach, the hold poses,
   the hands built again in the second step, the pulses of the land, of a
-  body and of the water line, the time on the CPU and the land heights read
-  in a frame.
+  body and of the water line, the rings on the water, the objects that went
+  to the pick only for a body near a hand, the frames with the look of the
+  water on a hand, the time on the CPU and the land heights read in a
+  frame.
 - With the test key `hand_feel_log`: also the outer bend and the spread of
   each finger and the turn of the thumb.
 
@@ -1266,6 +1337,12 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
   plane of the sea.
 - The cost is under 0.04 ms a frame on the CPU at the village, and the worst
   frame is 0.24 ms.
+- The offer (`hand_feel_offer`): with the hand near the land at the Creature
+  pen, the hook gives the pick 824 more objects in 450 frames, and 0 with
+  `hand_feel_offer=0`. Hand feel then takes 0.0071
+  ms a frame on the CPU (0.0066 with 0), and the frame rate stays at 83 fps.
+- The sea with the Vulkan renderer and with dxwrapper: the eye pictures show
+  the sea, the waves at the coast and the hand over the water in both eyes.
 
 ### Limits
 
@@ -1279,7 +1356,19 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
   its box. A finger can stop a little before the thing that the player sees,
   or go a little into it.
 - A forest, a scroll, the Village Store and the Temple do not bend a finger
-  when the hand is smaller than them.
+  when the hand is smaller than them. A body is the box of the whole mesh:
+  the mod does not know the boxes of the parts of a mesh in memory (the
+  walls, the roof), so a round building and a large building with parts at
+  different heights have no body that is near their walls.
+- A hand with its palm in a body does not bend against that body. At 100
+  units a meter a house is about 10 cm across, so a hand that lies on its
+  roof often has the palm in its box.
+- The look of the water is on the mesh of the hand model only. The low poly
+  hands draw with no blend, and they go into the sea as in the air. The
+  look changes by the points of the mesh, so the water line on the hand is
+  soft over about one triangle of the mesh, and not a sharp line. The hand
+  in the water has the color of the sea and no texture of the sea and no
+  bend of the light.
 - The land patch has a point each 3.3 units for a hand of 19 units. The
   land of the game has a point each 10 units, so the patch is fine enough
   at 100 units a meter. On the table the hand is much longer than a land
@@ -1298,7 +1387,11 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
   trunk of a tree in the Hand the open thumb is in the trunk, so it stays
   open.
 
-**Open: not shown on the desktop.** A rock as a body (no run put a hand at
+**Open: not shown on the desktop.** A building as a body near either hand
+(`hand_feel_offer`), the look of the water and the ring of the game on the
+water. The word `sea` puts the Hand's point 2 cm over the water, so no
+finger tip goes into it, and `seek_sea_cm` takes only a height over the
+water. A rock as a body (no run put a hand at
 a rock), a finger at the crown of a tree, a villager or an animal that walks
 into a still hand, the Creature that comes to the hand, the spread of a flat
 hand in a picture, a real press of the test key, the approach at weights
@@ -1328,12 +1421,16 @@ picture shows a contact from above.
 8. Put a hand at the wall of a house, at a trunk, at a villager and at the
    Creature, and let a villager walk into the hand. Does a finger bend in
    the air beside the thing, or go into it (`hand_feel_bodies=0` turns it
-   off)? Does the tip bend at its outer joints (`hand_feel_joints=0`)?
+   off)? Does the tip bend at its outer joints (`hand_feel_joints=0`)? Do
+   the walls of the Workshop and of the Village Store, and a house at the
+   hand that does not point, bend a finger (`hand_feel_offer=0`)?
 9. Lay a flat hand on the land and on a wall. Does the spread of the fingers
    look right? Take a villager and a boulder. Does the thumb go round it
    (`hand_feel_shape=0`)?
 10. Put a hand into the sea. Do the fingers go into the water, and is the
-    pulse at the water line right (`hand_feel_sea=0`)?
+    pulse at the water line right (`hand_feel_sea=0`)? Does the part of the
+    hand in the water look under the surface (`hand_feel_water_look=0`), and
+    is the ring on the water the right size (`hand_feel_ripple=0`)?
 11. With `hand_feel_idle=1`: is the slow wave of the fingers wanted? It is
     motion that the player did not make.
 12. Take a small rock or mushroom, and zoom out and in with the object in the

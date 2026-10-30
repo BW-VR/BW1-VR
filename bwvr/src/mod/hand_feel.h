@@ -68,5 +68,23 @@ float HandFeelPinch(void* held, uint64_t frame, float body_radius,
 // uses them.
 void HandFeelSnapshot();
 
+// hand_direct.cpp, in the screen test of each object of the first eye pass
+// (hand_feel_offer): the middle of each hand that takes bodies in this frame,
+// and the gap from it within which a body counts, in world units. The count
+// of hands, 0 when no hand takes bodies now.
+int HandFeelOfferPoints(float points[2][3], float bound[2]);
+// True when the offer of the bodies near each hand is on (hand_feel_offer=1).
+bool HandFeelOfferOn();
+// hand_direct.cpp: an object went to the pick only for a body near a hand.
+void HandFeelOffered();
+
+// hand_model.cpp, before it fills the hands of a frame
+// (hand_feel_water_look): true when a part of a hand under the plane of the
+// sea takes the look of the water, with the size of the room in world units
+// for each cm.
+bool HandFeelWaterLook(float* units_per_cm);
+// hand_model.cpp: a part of a hand had the look of the water in this frame.
+void HandFeelWaterShown();
+
 // Once a report window.
 void HandFeelReport();

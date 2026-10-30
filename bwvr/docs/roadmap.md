@@ -904,18 +904,34 @@ that moves while the Hand takes it.
     in a frame.
 - **N2. The hands that react.** In a headset the fingers rest on objects
   that move (rocks, trees, villagers), but not on buildings, and the player
-  sees nothing of the fingers in the sea. Find why the boxes of a house do
-  not stop the fingers in play (the box size rule, the list of bodies near
-  the hand), and what the sea shows: whether a layer of the water that the
-  game draws in 2D is not in the VR picture, so the fingers go into water
-  that the player does not see. Not shown on the desktop: a rock and the
-  crown of a tree as a body, a villager that walks into a still hand, and a
-  tree taken with the palm to the side, and a picture from the side of a
-  finger tip that bends at a wall. The box of the Creature does not follow
-  its animation, and the box of a hut with its roof down to the land stops a
-  finger in the air before the roof. The thumb does not go round the trunk of a tree in
-  the Hand: the open thumb is in the trunk. The idle wave is off
-  (`hand_feel_idle`).
+  saw nothing of the fingers in the sea. The mod now offers to the pick each
+  object whose ball round its box is near the Hand's point or near the
+  middle of either hand (`hand_feel_offer`), gives the part of a hand of the
+  mesh under the sea the color of the sea (`hand_feel_water_look`), and
+  starts a ring of the game on the water where a finger tip goes in
+  (`hand_feel_ripple`). A desktop run shows the offer at work: 824 more
+  objects near the hand in 450 frames, at no measurable cost. Eye pictures
+  with Vulkan and with dxwrapper show the sea and the hand over it in both
+  eyes. Not shown yet: a hand at the wall of a house and of the Village
+  Store with `hand_feel_offer` at 1 and 0 (the recipe zooms in with
+  `stick_up`), and a finger tip in the sea with the look of the water and
+  the ring at 1 and 0 (the word `sea` puts the point over the water, and
+  `seek_sea_cm` takes no depth under it). The plain sea of the God view writes no depth, and no layer of
+  the water that shows a thing in it is missing (`hand-model.md`, "What the
+  game draws of the sea"). Not proven: why the fingers did not rest on a
+  house in the headset. The code that reads the game shows two causes: the
+  hand that does not point got only the bodies near the Hand's point, and
+  a palm in the box of a small house turns that body off. Open: a body is
+  the box of the whole mesh, and the boxes of the parts of a mesh (walls,
+  roof) are not known in memory, so a round or a large building has no
+  body at its walls when the hand is smaller than it. Not shown on the
+  desktop: a rock and the crown of a tree as a body, a villager that walks
+  into a still hand, a tree taken with the palm to the side, and a picture
+  from the side of a finger tip that bends at a wall. The box of the
+  Creature does not follow its animation, and the box of a hut with its
+  roof down to the land stops a finger in the air before the roof. The
+  thumb does not go round the trunk of a tree in the Hand: the open thumb
+  is in the trunk. The idle wave is off (`hand_feel_idle`).
 - **N3. The hand model.** The game's finger animations are not played (a
   pose is a curl for each finger). The shadow of the Hand on the land has
   the game's fingers. The textures of an edited hand file are not read.

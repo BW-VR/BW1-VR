@@ -35,6 +35,33 @@ The known faults for a player are in `bwvr/installer/README.txt`.
 The most urgent part is first. An item that says "not run" or "not shown"
 is built, and no test has proven it.
 
+### Next
+
+These three items come before the other work.
+
+- **P18. The Main Menu in the room.** The Main Menu and the other menus of
+  the front end are fixed to the head in the headset. Put them on a panel
+  that is fixed in the room, as the cut scene window is
+  (`cutscene-window.md`, `PlaceScreen` and the recenter), so that the player
+  can look at the menu and around it. The front end has its own frame loop
+  and no eye passes (`backend.md`, `FrontEnd::JustDoABox`), and the Main
+  Menu of a saved game opens over the loaded game (`backend.md`, "The Main
+  Menu of the start"). Find each path that draws a menu, and say which of
+  them the panel covers. A key keeps the menu fixed to the head.
+- **B35. A thrown tree spins fast after the release.** A strong throw of a
+  tree makes it start to turn fast about 0.5 s after the release, which
+  looks wrong. The settle (`throw_tree_settle`, `throw.md`, "The landing of
+  a tree") acts only after the tree touches the land at low speed, and a
+  tree thrown fast across the land was never shown in a run. Find whether
+  the turn starts in the flight or at the first contact (the contact on one
+  corner gives an angular momentum many times the cap of 1.5 turns a
+  second), and check rocks and other objects for the same fault.
+- **P19. A keyboard in the headset.** Some screens need text: the name of
+  the god in the first start (a new profile), and other text boxes of the
+  front end. Give the player a keyboard in VR that types into the text box
+  of the game, with the hand or a ray, in the game's own way (the keys that
+  the text box reads). Find each place of the game that asks for text.
+
 ### Faults in play
 
 - **B2. A catch at once: check it in a headset.** A press of the grip on

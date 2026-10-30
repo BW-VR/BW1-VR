@@ -859,6 +859,7 @@ return address in `fn_005D5E40`.
 | `palm_search` | 0 | 1 leaves the game's search at the palm on |
 | `target_check` | 1 | 1 drops a target that the game deleted, at the start of each frame and before the mod puts the target in the pick record (see "A target that the game deletes"). 0 puts the target of the last draw in the record with no check |
 | `fish_take` | 1 | 1 makes each fish farm in reach a candidate of the choice and a far target, so the grip takes fish ("The fish in the sea"). 0 leaves the farms out: the game does not draw them |
+| `fish_school` | 1 | 1 puts the target of a fish farm on its fish: the middle of the drawn fish, with a body 2 units past the fish, and a farm in reach is a candidate also when the draw filled the list ("The fish in the sea"). 0 puts the target at the point of the farm with a body of 5 units, and a farm is a candidate only while the list has room |
 | `hand_glow_idle` | 0 | 1 draws the glow also with no target and while the Hand holds an object |
 | `leash_at_palm` | 1 | 1 ends the rope of the leash at the palm of the mod's hand |
 
@@ -1203,71 +1204,122 @@ The mouse is as before: no change runs while no controller button is held.
 take gives a Pot of fish, with the stream `SF_MultiPickUpFoodFish.txt`
 (`FishFarm::NetworkFriendlyStartLockedSelect` `0x0052D770`). The game does not
 draw the farm (`FishFarm::Draw` `0x0052C830` is a plain `ret`), so the draw
-never offers it to the pick, and no hover gives hand mode `0xD` for it. With
-the mouse a right press over the sea finds it with the search at the palm: the
-record has no object, so `FUN_005D1330` calls `fn_005D39E0` (`0x005D13A1`),
-which takes the nearest object within 5 units of the land under the Hand. The
-press then tests slot `0x6CC` first and starts the take. The farm also says
-yes to `ValidForPlaceInHand` while it has fish, but the press never gets to
-that test. The game's hint for the right button over the land there is "Pick
-Up". An empty farm stays: `FishFarm::Process` `0x0052D130` gives it its fish
-back over time.
+never offers it to the pick, and no hover gives hand mode `0xD` for it. An
+empty farm stays: `FishFarm::Process` `0x0052D130` gives it its fish back
+over time.
 
-Each `FishFarm` is in a list of its town. The constructor (`0x0052C360`)
-takes the nearest town and puts the farm in the list at `Town+0x788` (nodes
-of 8 bytes: the next node, then the farm). The towns of a player are a list
-from `GPlayer+0xA50`, with the next town at `Town+0x75C`
-(`Town::GetNearestTownToPos` `0x0073B170`).
+The fish that the player sees are not at the point of the farm. The creation
+of the farm (`FishFarm::CallVirtualFunctionsForCreation` `0x0052CC10`) makes a
+school of 15 fish (`FishFarm+0x88`, 0x68 bytes). It looks on rings of 2, 4, 6
+... units around the point of the farm, in 32 directions, for the first
+direction where two rings one after the other are sea. The home of the school
+is there (`+0x48`): 4 units east for a farm in the open sea, farther for a
+farm near the coast. Each fish is a sprite. It swims to a point within 7
+units (`+0x58`) of the home in x and in z, and it then gets a new point
+(`fn_00824DA0`). The game draws `ftol(fill * 15)` fish, with the fill
+(`+0x64`) the food of the farm over its most food (`FishFarm::Process`). The
+landscape draws and moves the schools (`GLandscape::Draw` calls `fn_00824B90`)
+while the camera is within 300 units of the home. A tap on the water makes
+the fish within 8 units of the tap swim away.
 
-**What the mod does (`fish_take=1`).** The rule of one target turns the search
-at the palm off, so the grip on the fish did nothing. Now the mod reads the
-lists of the towns once a frame and makes each farm in reach a candidate of
-the choice, with no mesh (`OfferFishFarms` in `hand_direct.cpp`):
+With the mouse a right press over the sea goes to the search at the palm
+(`fn_005D39E0`, called at `0x005D13A1`). When the land point under the Hand is
+sea, the search asks `fn_00824B10` (at `0x005D3A79`) for a drawn fish within 2
+units of that point in x and z. With such a fish it walks the list of all
+farms (`GGame+0x205C0C`, the next farm at `FishFarm+0x7C`) for the farm of
+that school, and the press starts the take of fish (`FUN_005D1330` tests slot
+`0x6CC` first). With no such fish the search takes the nearest object within
+5 units of the land point. The farm also says yes to `ValidForPlaceInHand`
+while it has fish, but the press never gets to that test. The game's hint for
+the right button over the land there is "Pick Up".
 
-- The point of a farm is its x and z, at the height of the land there. The
-  sea gives 0.
+**What the mod does (`fish_take=1`, `fish_school=1`).** The rule of one
+target turns the search at the palm off. So once a frame the mod reads the
+game's list of farms and makes each farm in reach a candidate of the choice,
+with no mesh (`OfferFishFarms` in `hand_direct.cpp`):
+
+- The point of a farm is the middle of its drawn fish (`fish_math.h`). The
+  fish move, so the point moves with them.
+- The body is a cylinder. Its radius goes 2 units past the drawn fish that is
+  farthest from the point, so each land point where the game's own test finds
+  a fish is in the body. It goes from 5 units under the point to 10 units
+  over it. A farm with no drawn fish has the point of the farm and a body of
+  5 units (the game's 2D radius).
 - In reach is the range of the far grab from the Hand's point, plus 1 m of
   the room for the head. With `far_grab_max_m=0` each farm is a candidate.
-- The body is a cylinder of the game's 2D radius (5 units). It goes from 5
-  units under the sea to 10 units over it: the fish are in the water, and the
-  game holds the Hand 5 units over the farm in a take.
+- The draw offers the objects in the view near to far, and in the God view
+  the list of candidates holds 256. At a coast with a town in the view the
+  draw can fill the list before the farms come. A farm in reach then takes a
+  place after that limit (the list has room for 4096).
 - A grip on a farm takes fish, also when the farm says yes to
   `ValidForPlaceInHand` (`PressKind` tests the take first, as the press of the
   game does).
 
-So the Hand at the fish has the halo, the game gives hand mode `0xD`, the card
-says "Hold to collect", and the closed grip collects fish as from a pile. At a
-distance a farm is a target of the aim with no pull ("A bulk source at a
-distance"). The farm has no mesh, so it gets the halo and no glow on a mesh.
+So the Hand in the fish has the halo, the game gives hand mode `0xD`, the
+card says "Hold to collect", and the closed grip collects fish as from a pile.
+At a distance the aim at the fish has the farm as a target with no pull ("A
+bulk source at a distance"). The farm has no mesh, so it gets the halo and no
+glow on a mesh. The game's take holds the Hand over the point of the farm, and
+the stream of fish starts there.
+
+`fish_school=0` puts the target at the point of the farm, with the height of
+the land there and a body of 5 units, and a farm is a candidate only while the
+list has room. Then the fish of a farm swim mostly outside its body, and at a
+coast with a town in the view no farm is a candidate.
 
 **The hint over the land (`hint_palm_check=1`).** With the search at the palm
 off, a press over the land acts on no object. So the card does not show a
 grip hint of the game while the hand mode is the land (`GameHintTrue`,
 [controller-hints.md](controller-hints.md), 9.9). The "Pick Up" of a farm
 behind the palm does not show, and the line "Hold to collect" shows when the
-Hand's point is at the farm. `hint_palm_check=0` shows the grip hints of the
+Hand's point is in the fish. `hint_palm_check=0` shows the grip hints of the
 game over the land.
 
-Tag `hand fish`: the key at the start, and each change of the count of the
-farms, with the place of each farm and its distance from the Hand's point.
+Tag `hand fish`: the keys at the start. At each change of the count of the
+farms, one line with the count, the farms in reach and the farms in reach with
+no room, then one line for each farm (16 at most): its point, its distance
+from the Hand's point, the count of drawn fish, the middle of the fish, its
+distance from the point of the farm, and the radius of the body. After that,
+one line for each change of the farms in reach or of the farms with no room
+(60 at most), with the count of the objects that the draw offered.
 
 **Tests.** Land 1 has 13 farms in 6 towns. Five of them are in the sea west
 of the Temple of the test save `temple` (1755 to 1845, 2425 to 2505). A desktop
-run teleports the God view there (`seek_plan=go,pile`,
-`fish_test_only=1`): the Hand at a farm has it as the target, the card says
-"Hold to collect", and the closed grip takes fish for 51 game turns. A run
-that aims from 1.2 m (`aimfar`, `seek_bulk=1`) takes fish at a distance, with
-the stream from the farm. With `fish_test_off_frame` the same grip presses
-with no target, the search at the palm finds the farm, and the mod gives the
-press no object.
+run teleports the God view there. The seek word `fish` puts the Hand's point on
+the drawn fish nearest to it, from the sprites of the game and not from the
+candidates. The seek word `pile` with `fish_test_only=1` puts the Hand's point
+on the point of the candidate. A run that aims from 1.2 m (`aimfar`,
+`seek_bulk=1`) takes fish at a distance. With `fish_test_off_frame` the same
+grip presses with no target, the search at the palm finds the farm, and the
+mod gives the press no object.
 
-**Not shown on the desktop.** The game did not give its grip hint over the
-land near a farm in the desktop runs, also with `hint_palm_check=0`. Only the
-math checks (`hint_checks.h`) show the rule of `hint_palm_check`.
+In the test save `temple`, four of the five farms west of the Temple have 15
+drawn fish. Their schools are 36 to 48 units from the points of their farms,
+and three of the schools are within 6 units of each other. The bodies have a
+radius of 7.6 to 9.9 units. The fifth farm (1815, 2505) has no drawn fish.
+With `fish_school=1` the Hand's point on a fish of a school 34 units from the
+point of its farm has that farm as the target in the next frame. The game
+gives hand mode `0xD`, the card says "Hold to collect" in the same frame, the
+target pulse comes, and the farm keeps its halo. The target stays for 700
+frames while the fish swim and the Hand does not move. With `fish_school=0`
+the same point has no target: the hand mode stays the land, and the card
+says "Teleport".
 
-**Needs the headset.** Whether the body of a farm (5 units around its point,
-11 cm of the room at 44 units a meter) is easy to find with the hand. The
-farm has no mesh, so only the halo shows where it is.
+With the fake head 50 degrees down, so that the fish are in the view, the grip
+on the farm with the halo starts the bulk take of the game, and the Hand holds
+a PileFood of 33 five frames after the press.
+
+**Not shown on the desktop.** No run has shown the far take with
+`fish_school=1` or the log of a full list at a coast. The math checks
+(`fish_checks.h`) show the body: each land point where the game's test finds
+a fish is in it. The game did not give its grip hint over the land near a
+farm in the desktop runs, also with `hint_palm_check=0`. Only the math checks
+(`hint_checks.h`) show the rule of `hint_palm_check`.
+
+**Needs the headset.** Whether the body of a school (8 to 10 units around
+the middle of the fish, 18 to 23 cm of the room at 44 units a meter) is easy
+to find with the hand, and whether the halo that moves with the fish is calm
+enough.
 
 ### The log, tests and keys of the take
 

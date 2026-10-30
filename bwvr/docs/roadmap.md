@@ -124,13 +124,15 @@ These items come before the other work.
   run with no administrator rights showed it: the game saved slot 20, and
   each refused call worked on the VirtualStore copy. Check in a play that
   the Save Game Room shows the slot and loads it.
-- **B36. The fish do not respond to the Hand in a headset.** At the sea the
-  fish get no halo, the grip at the Hand takes none, and the far grab takes
-  none. Only the trigger works: a tap on the water scatters them. The take
-  of fish is built (`fish_take`, `grab.md`), and desktop runs showed it. In
-  a play of release 1.2.0 the log said that the offer of fish farms found 0
-  farms in reach. Find what the desktop runs had that the play did not:
-  the kind of fish object, the land, the distance, the scale.
+- **B36. The fish: check them in a headset.** The target of a fish farm is
+  where its fish swim, and a farm in reach is a candidate also when the draw
+  filled the list of candidates at a coast (`fish_school=1`, `grab.md`, "The
+  fish in the sea"). Desktop runs show the target, hand mode `0xD` and the
+  card "Hold to collect" at a fish 34 units from the point of its farm, and
+  the grip there takes 33 food. `fish_school=0` shows no target there.
+  Check in a headset that the fish get the halo, that the grip in the fish
+  and the far grab take fish, and that the halo that moves with the fish is
+  calm enough.
 - **B2. A catch at once: check it in a headset.** A press of the grip on
   an object that moves (it falls, flies or rolls) puts the object in the
   hand from the first frame after the press. The game sends its pick up at

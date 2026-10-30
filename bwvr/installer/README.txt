@@ -803,8 +803,10 @@ distance. Open the grip to stop. When the pile is used up while the
 grip is closed, the grip carries the bundle, and the next opening of
 the grip puts it down. With far_take_carry=0 in bwvr.ini the Hand
 lets the bundle go when such a pile is used up. To collect fish, put
-your Hand in the water where the fish are, or point at them. With
-fish_take=0 in bwvr.ini the fish are no target.
+your Hand in the water where the fish are, or point at them. The
+halo shows on the fish and moves with them. With fish_take=0 in
+bwvr.ini the fish are no target. With fish_school=0 the target is
+a point near the fish, not the fish.
 
 While you collect from a distance, the pieces of food or wood go up
 out of the pile and along a curve into your Hand. With take_stream=0

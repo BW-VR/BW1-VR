@@ -3554,6 +3554,7 @@ void CreatureChecks() {
 #include "land_light_checks.h"
 #include "tree_plant_checks.h"
 #include "tree_body_checks.h"
+#include "fish_checks.h"
 #include "text_click_checks.h"
 #include "script_frame_checks.h"
 #include "frame_stats_checks.h"
@@ -3976,6 +3977,7 @@ int main() {
   land_light_checks::LandLightChecks();
   tree_plant_checks::TreePlantChecks();
   tree_body_checks::TreeBodyChecks();
+  fish_checks::FishChecks();
   zoom_checks::ZoomChecks();
   stay_checks::StayChecks();
   look_checks::LookChecks();

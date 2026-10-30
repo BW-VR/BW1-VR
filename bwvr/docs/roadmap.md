@@ -67,9 +67,26 @@ These items come before the other work.
   them. Likely cause: the corner of the eye picture is at the edge of the
   lens, and the particle camera gets the camera of each eye. Prove it with
   an eye picture of a desktop run (an empty Hand near a Worship Site with a
-  miracle icon), then show the pictures where the player sees them, for
-  example on the card near the hand as the hints are
-  (`controller-hints.md`).
+  miracle icon).
+
+  The plan: a spell book on the hand that does not point. When the player
+  turns that hand palm up and opens it, the miracles that the player can
+  ask for now float over the palm, each one with the picture of its
+  gestures. The pointing hand plucks one out with the grip, and the Miracle
+  is in that Hand, with no gesture drawn. The pluck asks for the miracle in
+  the game's own way: the same request as the end of a chain of gestures,
+  or as a tap on a miracle icon at a Worship Site (packet `0x25` with the
+  spell seed type, `fn_00550C20`, `miracles.md`), so the game checks the
+  belief and the icon as it does for those. The list is the game's own:
+  the icons of the Worship Sites of the player that `ValidForRequestSpell`
+  allows, and the miracle "again" (`GSpellSystemInfo+0x10`). The gestures
+  stay as they are. Questions for the build:
+  - the pose that opens the book (palm up and open, how long, how it stays
+    off while the hand holds, grabs the land or opens the ring),
+  - a hint card for the book, and the haptics of a pluck,
+  - what the book shows when there is no miracle to ask for (no Worship
+    Site, no belief), and the leash gestures and the scribble,
+  - a key with the old behavior: no book.
 - **P19. A keyboard in the headset.** Some screens need text: the name of
   the god in the first start (a new profile), and other text boxes of the
   front end. Give the player a keyboard in VR that types into the text box

@@ -775,6 +775,15 @@ does not go forward, the focus distance and a ray of 2 m stay. The mouse does
 not use any of this. The log line "the menu ray meets the menu at" shows the
 distance and the pixel.
 
+**The menus in the room.** With `menu_room=1` (the default) and a headset,
+the menu is not in the eye pictures. It is on a panel that is fixed in the
+room (`ui-layer.md`, section 20). The aim ray then meets that panel, and the
+pixel under the ray is the pixel of the dialog (`MenuRoomRayPixel`). The
+drawn ray ends on the panel. A ray past the edge of the panel is off the
+view, so a press there does not reach the game. A frame with no scene that
+shows a menu (the front end) also takes the ray this way. The log line is
+"the ray meets the menu panel".
+
 **The wheel.** The stick forward past 0.7 adds 120 to `0x00E85300`, the
 DirectInput wheel sum, and the stick back adds -120. Positive counts zoom in
 (`comfort_camera.cpp`, `SetWheelScale`). The pump repeats this every 250 ms
@@ -1235,8 +1244,10 @@ controller as the button of the pointing hand.
 - **Latency.** The pointer uses the hand from the previous `BeginFrame`, like
   the head. Fast pointing can feel a little behind. The runtime does not
   reproject the Hand.
-- **Screens with no scene** (menus, loading, videos: `StereoIdle`) have no
-  head camera. The mouse is in charge there.
+- **Screens with no scene** (loading, videos: `StereoIdle`) have no head
+  camera. The mouse is in charge there. A screen with no scene that shows a
+  menu is the exception with `menu_room=1`: the ray points on the menu
+  panel in the room (`ui-layer.md`, section 20).
 - **The Vive trackpad** reports a position whenever it is touched. As the
   stick, a resting thumb could turn or zoom. A fix is to require the trackpad
   click for that profile.
@@ -1265,9 +1276,7 @@ controller as the button of the pointing hand.
    profile would need a pinch for the trigger and the grip and has no stick,
    so the snap turn, the zoom and the ring would need other inputs.
 3. The `LH3DMapCoords` layout, for the exact land march (3.2).
-4. Whether the pointer should work in screens with no scene, by a ray against
-   the quad that shows the menu.
-5. Whether a laser line or a dot at `T` helps in the pointer mode, or whether
+4. Whether a laser line or a dot at `T` helps in the pointer mode, or whether
    the Hand alone is enough. The mod draws any such mark, not the game.
 
 ## 8. The aim ray

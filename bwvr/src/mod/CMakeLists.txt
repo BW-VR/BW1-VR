@@ -15,6 +15,8 @@ add_library(bwvr_mod SHARED
     note_depth.cpp
     draw_hooks.cpp
     ui_panel.cpp
+    menu_room.cpp
+    vr_keyboard.cpp
     eye_camera.cpp
     texture_filter.cpp
     eye_capture.cpp

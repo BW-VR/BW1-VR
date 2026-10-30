@@ -60,6 +60,8 @@
 #include "frame_profile.h"
 #include "haptics.h"
 #include "hand_exact_math.h"
+#include "menu_room.h"
+#include "menu_room_math.h"
 #include "miracle.h"
 #include "note_depth.h"
 #include "radial_menu.h"
@@ -755,6 +757,9 @@ struct Pointing {
   bool have_rotation;
   float grip_rotation[9];
   float tip_offset[3];
+  // The menus in the room (menu_room.cpp): the pixel is where the aim ray
+  // meets the menu panel in the room, not a pixel of the eye view.
+  bool on_panel;
 };
 
 bwvr::HandInput g_hands[2];
@@ -1168,6 +1173,35 @@ void UpdateScript() {
 
 bool MenuUp();
 
+// The pixel of the menus in the room for the aim ray of the pointing hand
+// (menu_room.cpp). A ray that does not meet the panel gives no pixel, and
+// the pointer keeps its last one. A ray past the edge or on the keyboard is
+// off the view, so a press there does not reach the game. Returns the
+// length of the ray to the panel or the keyboard in meters, or 0.
+float PanelPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
+  p->on_panel = true;
+  float x = 0.0f, y = 0.0f, meters = 0.0f;
+  bool off = false;
+  const bool hit = MenuRoomRayPixel(hand.trigger, g_aim_p[index],
+                                    g_aim_q[index], &x, &y, &off, &meters);
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(bw::tech::kInfoTransform);
+  if (!IsBadReadPtr(info, sizeof(*info))) {
+    p->render_w = static_cast<float>(info->res_x);
+    p->render_h = static_cast<float>(info->res_y);
+  }
+  if (hit) {
+    p->x = x;
+    p->y = y;
+    p->have_pixel = true;
+    p->off_view = off;
+  } else {
+    p->have_pixel = false;
+    p->off_view = true;
+  }
+  return meters;
+}
+
 void Compute() {
   Pointing& p = g_point;
   memset(&p, 0, sizeof(p));
@@ -1191,6 +1225,15 @@ void Compute() {
              &g_logged_aim_tracked);
   LogTracked("grip", "the direct Hand stays at its last tracked point",
              p.grip_tracked, &g_logged_grip_tracked);
+
+  // THE MENUS IN THE ROOM, in a frame with no scene. No world is drawn, so
+  // the ray meets only the menu panel, in the LOCAL space of the runtime.
+  if (MenuRoomFlatNow()) {
+    // The turn of the aim, for the owner rule (ControllerMoved).
+    menu_room_math::AimForward(g_aim_q[index], p.room_direction);
+    PanelPixel(hand, index, &p);
+    return;
+  }
 
   // ONE HEAD SAMPLE. The head matrix, the lean and the head center all come
   // from the last HeadPoseUpdate. The eye is the game camera moved by that
@@ -1385,6 +1428,17 @@ void Compute() {
       p.menu_depth = true;
       room_depth = true;
     }
+  }
+
+  // THE MENUS IN THE ROOM. The pixel is where the aim ray meets the menu
+  // panel, and the drawn ray ends there.
+  if (MenuRoomSurface()) {
+    const float scale = HeadPoseScale() * (p.table ? gain : 1.0f);
+    const float meters = PanelPixel(hand, index, &p);
+    // With no panel under the ray, the drawn ray has its own length.
+    p.menu_depth = meters > 0.0f && scale > 0.0f;
+    if (p.menu_depth) p.target_distance = meters * scale;
+    return;
   }
 
   p.have_pixel = controller_math::RenderPixel(
@@ -1696,7 +1750,9 @@ bool Usable() {
   // The intro ends on a click. See intro_vr.cpp.
   if (IntroBlocksButtons()) return false;
   g_not_usable[0] = !GameInFront() && !ActsBehind();
-  g_not_usable[1] = StereoIdle();
+  // A frame with no scene leaves the hand to the mouse, but not when it
+  // shows the menus in the room.
+  g_not_usable[1] = StereoIdle() && !MenuRoomFlatNow();
   g_not_usable[2] = GetTickCount64() - g_frame_tick > 250;
   g_not_usable[3] = !g_hands[PointingIndex()].active;
   if (!g_on || !g_installed || g_owner_mode == 2) return false;
@@ -4165,10 +4221,12 @@ void ControllersGesturePulse(float amplitude, float seconds) {
 
 int ControllersGestureSizeCm() { return g_gesture.size_cm; }
 
-// Whether a hand points and its ray is known in the world. The ray can still
-// be behind the head, and then there is no pixel.
+// Whether a hand points and its ray is known in the world, or on the menus
+// in the room. The ray can still be behind the head, and then there is no
+// pixel.
 bool ControllerPointing() {
-  return g_on && g_point.have_hand && g_point.have_world;
+  return g_on && g_point.have_hand &&
+         (g_point.have_world || g_point.on_panel);
 }
 
 // Whether the aim turned more than 1 degree from where it was when the mouse

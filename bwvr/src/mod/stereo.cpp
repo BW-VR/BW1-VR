@@ -80,6 +80,7 @@
 #include "vk_window.h"
 #include "render_thread.h"
 #include "scene_sample.h"
+#include "menu_room.h"
 #include "ui_panel.h"
 
 // d3d9_backend.cpp: the start with DXVK did not fail.
@@ -1335,6 +1336,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     HeadPoseUpdate(centre, fake_orientation);
     // The subtitle card hangs in the room, so it needs the head of the frame.
     UiPanelHead(centre, fake_orientation);
+    MenuRoomHead(centre, fake_orientation);
     CutsceneWindowHead(centre, fake_orientation);
   }
   if (g_head_tracking && to_headset && g_screen->eye(0).valid &&
@@ -1388,6 +1390,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     g_head_camera_pose_ready = true;
     HeadPoseUpdate(center, g_screen->eye(0).orientation);
     UiPanelHead(center, g_screen->eye(0).orientation);
+    MenuRoomHead(center, g_screen->eye(0).orientation);
     CutsceneWindowHead(center, g_screen->eye(0).orientation);
   }
 
@@ -1502,6 +1505,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   GameStartFrame();
   // The hands of this frame, after the head pose of this frame.
   FrameFunction(kFpFnControllers, ControllersFrame);
+  // The keyboard under the menus in the room, after the ray of this frame.
+  if (MenuRoomFrame()) VrKeyboardFrame(g_frames + 1);
   FrameFunction(kFpFnHand, HandDirectFrame);
   FrameFunction(kFpFnTeleport, TeleportFrame);
   FrameFunction(kFpFnCreatureCommand, CreatureCommandFrame);
@@ -1706,7 +1711,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     if (eye == 0) UiPanelAfterFirstEye(g_frames + 1, capture_frame);
     void* ui_texture = nullptr;
     uint64_t ui_vulkan = 0;
-    if (eye == 0 && to_headset && UiPanelMode() == kUiPanelLayer) {
+    if (eye == 0 && to_headset &&
+        (UiPanelMode() == kUiPanelLayer || MenuRoomFrame())) {
       // In a session with Vulkan with vk_panel=1: the panel of the Vulkan
       // renderer (vk_scene.h), with no copy of Direct3D 9.
       if (g_screen->vulkan() && VkScenePanelOn()) {

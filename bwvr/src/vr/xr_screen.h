@@ -90,11 +90,15 @@ struct PanelQuad {
 //                      (docs/ui-layer.md, "The subtitle card")
 //   kCardRing          the ring of the hand that does not point, fixed in the
 //                      room while it is open (docs/controllers.md, "The ring")
+//   kCardKeyboard      the keyboard under the menu panel while a text box of
+//                      the game has the focus (docs/ui-layer.md, "The
+//                      keyboard in the headset"). It also shows over a screen.
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
 const int kCardRing = 3;
-const int kCards = 4;
+const int kCardKeyboard = 4;
+const int kCards = 5;
 
 // The picture of a hint card.
 const uint32_t kHintCardWidth = 768;
@@ -132,6 +136,11 @@ struct CardLayer {
 //   mask   The frame keeps its projection layer. Four black quads go over
 //           all its layers, as walls around an opening. `alpha` is how black
 //           they are, 0 to 1.
+//   rect    With `screen`: when the width is above 0, each eye quad shows
+//           only this part of its picture (x, y, width, height in pixels),
+//           and crop and edge do not count. The menus in the room use it
+//           for a frame with no scene (docs/ui-layer.md, "The menus in the
+//           room").
 struct WindowLayer {
   bool screen;
   bool mask;
@@ -144,6 +153,7 @@ struct WindowLayer {
   float wall_position[4][3];  // the center of each wall
   float wall_size[4][2];      // its width and height
   float alpha;
+  int32_t rect[4];
 };
 
 // THE VULKAN OF A SESSION WITH VULKAN (XrScreen::UseVulkan). The runtime
@@ -393,12 +403,17 @@ class XrScreen {
   // go back to the eye pictures.
   static void StageCard(int card, const CardLayer& layer);
   static bool CardFailed(int card);
+  // True after the runtime refused a frame with a quad of the interface
+  // panel. Then the menus must go back to the eye pictures.
+  static bool PanelFailed();
 
   // THE CUT SCENE WINDOW. Stage it before EndFrame, and EndFrame uses it in
   // that frame only. Static, so the mod can stage with no XrScreen at hand.
   // When the runtime gives no swapchain for the walls, the frame goes out
   // with no walls.
   static void StageWindow(const WindowLayer& layer);
+  // Takes back a window that was staged for a frame that did not begin.
+  static void DropStagedWindow();
 
   // Presents whatever was uploaded.
   void EndFrame();

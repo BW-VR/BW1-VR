@@ -73,6 +73,7 @@
 #include "cutscene_window.h"
 #include "debug_menu.h"
 #include "hint_card.h"
+#include "menu_room.h"
 #include "subtitle_card_math.h"
 #include "ui_panel.h"
 #include "vk_scene.h"
@@ -980,13 +981,18 @@ void UiPanelSetOptions(const UiPanelSettings& settings) {
   }
   g_mode = g_settings.mode;
   SubtitleReadSettings();
+  MenuRoomSetOptions(g_settings.menu_room != 0, g_settings.menu_room_test != 0,
+                     g_settings.vr_keyboard != 0,
+                     g_settings.mode == kUiPanelOff);
   if (g_settings.mode == kUiPanelOff) {
     // The subtitle card needs the panel target, and the hook that puts the
     // game's target back after the subtitle box. It needs no share: its
     // picture goes to the headset through the CPU, as the hint cards do.
+    // The menus in the room need the share: their quad takes the panel as
+    // the eyes take their pictures.
     const SubtitleSettings& sub = g_sub.set;
-    if (sub.on) {
-      GpuBridgePanelWant(true, false);
+    if (sub.on || MenuRoomEnabled()) {
+      GpuBridgePanelWant(true, MenuRoomEnabled());
       UiPanelInstallHooks();
     }
     UiDepthSetSubtitleSelfTest(sub.selftest);
@@ -1042,6 +1048,12 @@ void UiPanelSetOptions(const UiPanelSettings& settings) {
 }
 
 const UiPanelSettings& UiPanelOptions() { return g_settings; }
+
+// The menu rect in pixels of a render of w by h: ui_menu_rect, or the
+// default of docs/ui-layer.md.
+void UiPanelMenuRect(uint32_t w, uint32_t h, int out[4]) {
+  Rect(kPanelMenu, w, h, out);
+}
 
 int UiPanelMode() { return g_mode; }
 
@@ -1111,6 +1123,15 @@ void UiPanelBeginFrame(bool to_headset, bool projection, uint64_t frame,
   if (g_settings.mode == kUiPanelOff) {
     // And the subtitle card takes the help text of the frame.
     SubtitleBeginFrame(to_headset, projection, frame, capture);
+    // The menus in the room take the menus of the frame.
+    const bool menu = MenuRoomBeginFrame(to_headset, projection, frame);
+    if (MenuRoomEnabled()) {
+      if (!g_sub.set.on) {
+        GpuBridgePanelNewFrame(false);
+        UiPanelRouteFrame(kUiPanelSubtitles, false, false);
+      }
+      UiPanelRouteMenu(menu);
+    }
     return;
   }
   bool on = false;
@@ -1129,7 +1150,9 @@ void UiPanelBeginFrame(bool to_headset, bool projection, uint64_t frame,
 }
 
 void UiPanelAfterFirstEye(uint64_t frame, bool capture) {
-  if (g_settings.mode == kUiPanelOff || !capture) return;
+  if (!capture) return;
+  // With ui_panel=0 the panel of the menus in the room is saved too.
+  if (g_settings.mode == kUiPanelOff && !MenuRoomFrame()) return;
   SaveCaptures(frame);
 }
 
@@ -1176,7 +1199,12 @@ void UiPanelAfterFinish(bool in_stereo_pass, uint64_t frame) {
 bool UiPanelQuads(uint32_t render_w, uint32_t render_h,
                   bwvr::PanelQuad out[2]) {
   out[0].visible = out[1].visible = false;
-  if (g_mode != kUiPanelLayer || UiPanelFrameFailed()) return false;
+  if (UiPanelFrameFailed()) return false;
+  // With ui_panel=0, the one quad of the menus in the room.
+  if (g_settings.mode == kUiPanelOff) {
+    return MenuRoomFrame() && MenuRoomQuad(render_w, render_h, &out[0]);
+  }
+  if (g_mode != kUiPanelLayer) return false;
   if (render_w == 0 || render_h == 0) return false;
   float anchor[3], yaw[4];
   if (!HeadPoseOrigin(anchor, yaw)) return false;
@@ -1247,6 +1275,7 @@ void UiPanelHead(const float center[3], const float orientation[4]) {
 
 void UiPanelReport() {
   HintCardReport();
+  MenuRoomReport();
   if (g_settings.mode == kUiPanelOff) {
     if (g_sub.set.on) {
       SubtitleReport();

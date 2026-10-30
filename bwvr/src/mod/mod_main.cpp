@@ -46,6 +46,7 @@
 #include "target_glow.h"
 #include "throw_physics.h"
 #include "teleport.h"
+#include "menu_room.h"
 #include "ui_panel.h"
 #include "vr_start.h"
 #include "vr_start_math.h"
@@ -1024,6 +1025,15 @@ void ReadSettings() {
     // The Creature panel: 0 off, 1 fixed in the room, 2 near the Creature.
     u.creature_panel = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "creature_panel", 2, path));
+    // The menus on a panel that is fixed in the room, with ui_panel=0, and
+    // the keyboard in the headset under it. 0 keeps the menus in the eye
+    // pictures, fixed to the head. docs/ui-layer.md, "The menus in the room".
+    u.menu_room = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "menu_room", 1, path));
+    u.menu_room_test = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "menu_room_test", 0, path));
+    u.vr_keyboard = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "vr_keyboard", 1, path));
     // A rect is "x y w h" in render pixels. 0 or a bad value takes the
     // default of ui_panel.cpp.
     const char* const rect_keys[2] = {"ui_menu_rect", "ui_help_rect"};
@@ -2094,7 +2104,7 @@ void StartVrStep() {
   screen->SetHoldMs(g_xr_hold_ms);
   screen->SetRefreshRate(g_refresh_rate_hz);
   screen->SetPlacement(g_distance, g_width);
-  screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
+  screen->EnablePanel(g_stereo && UiPanelWantsSwapchain(g_ui_panel));
   // Only the first failure and every tenth after it reach the log. A message
   // every three seconds for two minutes buries everything else.
   const bool quiet =
@@ -2220,7 +2230,7 @@ void StartVrFromThread() {
     screen->SetHoldMs(g_xr_hold_ms);
     screen->SetRefreshRate(g_refresh_rate_hz);
     screen->SetPlacement(g_distance, g_width);
-    screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
+    screen->EnablePanel(g_stereo && UiPanelWantsSwapchain(g_ui_panel));
     screen->SetLog(&ModLog);
     if (!screen->StartSession(width, height, g_stereo ? 2 : 1)) {
       failed = "StartSession (the openxr line before names the call)";
@@ -2301,6 +2311,7 @@ void VrSessionRuns(bwvr::XrScreen* screen, uint32_t width, uint32_t height) {
   FrameSendSetScreen(g_screen);
   IntroSetScreen(g_screen);
   ControllersSetScreen(g_screen);
+  MenuRoomSetScreen(g_screen);
 
   if (g_vulkan_only) {
     ModLog("vr           : running, the frame reaches the headset with Vulkan, "
@@ -2454,6 +2465,10 @@ void __cdecl h_FinishFrame() {
   // headset would hold the last scene frame and show nothing else.
   if (g_stereo && g_screen->eyes() > 1 && !StereoIdle()) return;
 
+  // THE MENUS IN THE ROOM (menu_room.cpp). A frame with no scene that shows
+  // a menu goes out as a screen at the place of the menu panel.
+  const bool menu_screen = MenuRoomFlatFrame(g_frame);
+
   // The same GPU path the stereo passes use. Without it a menu at 2560x1440
   // costs 18.98 ms a frame just to read the picture back, and the readback is
   // worse on this backend than on system DirectDraw, because the render
@@ -2470,6 +2485,7 @@ void __cdecl h_FinishFrame() {
       LARGE_INTEGER t0, t1;
       QueryPerformanceCounter(&t0);
       if (!g_screen->SubmitVulkan(image, layer)) {
+        if (menu_screen) bwvr::XrScreen::DropStagedWindow();
         ModLog("vr           : the session ended at frame %llu", g_frame);
       }
       QueryPerformanceCounter(&t1);
@@ -2481,6 +2497,7 @@ void __cdecl h_FinishFrame() {
     void* texture = GpuBridgeCaptureEye(0);
     if (texture != nullptr) {
       if (!g_screen->SubmitTexture(texture)) {
+        if (menu_screen) bwvr::XrScreen::DropStagedWindow();
         ModLog("vr           : the session ended at frame %llu", g_frame);
       }
       if ((g_frame % 900) == 0) {
@@ -2505,9 +2522,13 @@ void __cdecl h_FinishFrame() {
   }
   int pitch = 0;
   const void* pixels = FrameSourceGrab(&pitch);
-  if (pixels == nullptr) return;
+  if (pixels == nullptr) {
+    if (menu_screen) bwvr::XrScreen::DropStagedWindow();
+    return;
+  }
 
   if (!g_screen->SubmitBgra(pixels, pitch)) {
+    if (menu_screen) bwvr::XrScreen::DropStagedWindow();
     ModLog("vr           : the session ended at frame %llu", g_frame);
   }
 
@@ -2891,6 +2912,7 @@ void Shutdown(const char* path) {
       FrameSendSetScreen(nullptr);
       IntroSetScreen(nullptr);
       ControllersSetScreen(nullptr);
+      MenuRoomSetScreen(nullptr);
       bwvr::XrScreen* screen = g_screen;
       g_screen = nullptr;
       screen->Stop();

@@ -39,15 +39,19 @@ is built, and no test has proven it.
 
 These items come before the other work.
 
-- **P18. The Main Menu in the room.** The Main Menu and the other menus of
-  the front end are fixed to the head in the headset. Put them on a panel
-  that is fixed in the room, as the cut scene window is
-  (`cutscene-window.md`, `PlaceScreen` and the recenter), so that the player
-  can look at the menu and around it. The front end has its own frame loop
-  and no eye passes (`backend.md`, `FrontEnd::JustDoABox`), and the Main
-  Menu of a saved game opens over the loaded game (`backend.md`, "The Main
-  Menu of the start"). Find each path that draws a menu, and say which of
-  them the panel covers. A key keeps the menu fixed to the head.
+- **P18. The menus in the room and the keyboard.** With `menu_room=1` the
+  menus of the game are on a panel that is fixed in the room, and the ray of
+  the controller points on it. With `vr_keyboard=1` a keyboard shows below
+  the panel while a text box has the focus (`ui-layer.md`, sections 20 and
+  21). Math checks prove the place, the ray and the keys. Desktop runs with
+  Vulkan and with dxwrapper show the Main Menu of a test save on the panel
+  and not in the eye pictures, and the scripted trigger on "Continue Game"
+  closes it. A desktop run types "Bw" with the keyboard into the box of a
+  save name in the Save Game Room and closes the box with Cancel. Open: a
+  run of the front end (a frame with no scene needs a headset session).
+  Check in a headset that the panel stays in the room while
+  the head turns, that the ray and the arrow of the game meet on it, the
+  front end of a first start with the name of a new god, and the keyboard.
 - **B35. A thrown object still turns fast in some throws.** Before each
   substep the mod cuts the turn of the picture to 1.5 turns a second
   (`throw_turn`, `throw.md`, "The turn of a thrown object"). In the desktop
@@ -75,11 +79,6 @@ These items come before the other work.
     `fn_0068ABA0`, `fn_0068B740`) do not show in the headset. Prove it with
     an eye picture of a desktop run.
   - The leash gestures and the scribble are not in the book.
-- **P19. A keyboard in the headset.** Some screens need text: the name of
-  the god in the first start (a new profile), and other text boxes of the
-  front end. Give the player a keyboard in VR that types into the text box
-  of the game, with the hand or a ray, in the game's own way (the keys that
-  the text box reads). Find each place of the game that asks for text.
 
 ### Faults in play
 

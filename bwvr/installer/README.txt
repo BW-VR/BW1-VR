@@ -461,6 +461,18 @@ pointing controller then points like a mouse: a thin line shows where
 it points, and the trigger clicks. Close the game menu with "Continue
 Game". The Hand comes back when the menu closes.
 
+A menu shows on a panel in the room, 1.4 m in front of you, in the
+direction that you look when the menu opens. The panel does not
+follow your head, so you can look at it and around it. If you do not
+see it, press F11, and it comes in front of you. To keep the menus in
+front of your view, set menu_room=0 in bwvr.ini.
+
+When a box of the game asks for text, for example the name of your
+god or of a saved game, a keyboard shows below the menu. Point at a
+key and pull the trigger. Shift makes the next letter a capital. The
+first letter is a capital. To turn the keyboard off, set
+vr_keyboard=0 in bwvr.ini.
+
 
 THE RING
 --------
@@ -537,8 +549,8 @@ bwvr.ini, and the value 0 turns the rule off: temple_view,
 temple_camera_screen and temple_fade_eyes.
 
 To save in the Save Game Room, click an empty picture two times and
-then click OK. The save has no message, because the text line needs
-a keyboard. To load, click the picture of the save and then Yes.
+then click OK. To give the save a message, type it on the keyboard
+below the menu. To load, click the picture of the save and then Yes.
 
 When the game is in Program Files, Windows keeps your saved games in
 AppData\Local\VirtualStore. There Windows refuses two steps of each
@@ -1208,8 +1220,8 @@ and level, whatever the camera of the game does. This keeps the
 world still when you tilt your head. The cost is that you look down
 at the land, as you would from a real place above an island.
 
-The interface stays in front of your view. Menus, subtitles, help
-text and tooltips follow your head. They do not hang in the world.
+The interface stays in front of your view. Subtitles, help text and
+tooltips follow your head. They do not hang in the world.
 
 Smoke and other particles shimmer. The game asks for new random
 numbers for each eye, so each eye gets a different jitter.

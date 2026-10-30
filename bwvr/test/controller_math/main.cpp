@@ -3583,6 +3583,7 @@ void CreatureChecks() {
 #include "learn_checks.h"
 #include "update_checks.h"
 #include "refresh_rate_checks.h"
+#include "menu_room_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4010,6 +4011,8 @@ int main() {
   learn_checks::LearnChecks();
   update_checks::UpdateChecks();
   refresh_rate_checks::RefreshRateChecks();
+  menu_room_checks::MenuRoomChecks();
+  menu_room_checks::KeyboardChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

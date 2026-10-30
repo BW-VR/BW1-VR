@@ -49,7 +49,21 @@ struct UiPanelSettings {
   int help_px_per_deg = 44;     // ui_help_px_per_deg, at a 2880 px render
   int help_rect[4] = {0, 0, 0, 0};  // ui_help_rect
   int creature_panel = kCreaturePanelNear;  // creature_panel
+  // With ui_panel=0 (docs/ui-layer.md, "The menus in the room"): 1 the
+  // menus of the game on a panel that is fixed in the room, 0 the menus in
+  // the eye pictures, fixed to the head.
+  int menu_room = 1;            // menu_room
+  int menu_room_test = 0;       // menu_room_test: the route with no headset
+  // The keyboard in the headset while a text box has the focus: 1 on, 0 off.
+  int vr_keyboard = 1;          // vr_keyboard
 };
+
+// True when the headset session needs the swapchain of the panel: the
+// interface panel (ui_panel=1), or the menus in the room (ui_panel=0 with
+// menu_room=1).
+inline bool UiPanelWantsSwapchain(const UiPanelSettings& s) {
+  return s.mode == kUiPanelLayer || (s.mode == kUiPanelOff && s.menu_room != 0);
+}
 
 // The Direct3D 9 render states of a batch, read after its draw.
 struct UiPanelStates {
@@ -103,6 +117,9 @@ void UiPanelHead(const float center[3], const float orientation[4]);
 bool UiPanelInstallHooks();
 void UiPanelRouteFrame(int mode, bool on, bool check);
 void UiPanelRouteOutside(int mode, bool on, bool check);
+// After UiPanelRouteFrame with the route of the subtitle card: the menus of
+// this frame go to the panel target too (menu_room.cpp).
+void UiPanelRouteMenu(bool on);
 bool UiPanelDrew(int kind);
 bool UiPanelFrameFailed();
 void UiPanelRelease();

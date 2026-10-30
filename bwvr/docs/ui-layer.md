@@ -39,8 +39,13 @@ Marks, as in `tabletop.md`:
 - A note of the game over a thing (the percent of a lesson over the
   Creature) stays in the eye pictures, at the depth of its place (section
   19).
-- The pointer on the panel is not built (section 5). The menus draw on the
-  panel at their own pixels, but the pointer still comes from the eye view.
+- With `ui_panel=0` and `menu_room=1` (the default), the menus of the game
+  are on a panel that is fixed in the room, and the ray of the controller
+  points on it (section 20). While a text box has the focus, a keyboard
+  shows below that panel (section 21).
+- With `ui_panel=1` the pointer on the panel is not built (section 5). The
+  menus draw on the panel at their own pixels, but the pointer still comes
+  from the eye view.
 
 ## 1. Where the interface is drawn
 
@@ -146,6 +151,10 @@ whole render target through `SubmitTexture`, the same picture to both eyes
 
 The menu text is a fixed 20 to 35 px at any render size [M, `backend.md`],
 which is about 0.8 to 1.3 degrees at 26 px per degree.
+
+A frame with no scene that shows a menu does not take these routes: with
+`menu_room=1` it goes out as a screen at the place of the menu panel
+(section 20).
 
 ## 2. Drawing the interface to its own target
 
@@ -468,7 +477,9 @@ position and yaw in the LOCAL space.
 
 ## 5. Input on the panel (planned)
 
-Not built. `ui_panel_pointer` is not in the code.
+Not built for `ui_panel=1`. `ui_panel_pointer` is not in the code. The
+menus in the room (section 20) use the ray against a quad of 5.3 and the
+rules of 5.2 for their own panel.
 
 ### 5.1 One pointer, two surfaces
 
@@ -565,7 +576,7 @@ Not built. A frame with no scene still goes out as in 1.4.
   passes counts as pass 0 for the routing of 2.4. Whether `LoadSaveBox` runs
   its FinishFrame with the callbacks on is not checked [I].
 - The pointer is on the menu panel (5.2). A controller can then point in these
-  screens (`controllers.md`, open question 5).
+  screens, as it does on the menus in the room (section 20).
 
 Only `ui_panel=2` routes a FinishFrame outside the eye passes (12.2).
 
@@ -636,8 +647,10 @@ The biggest cost is memory, and it is small against a headset render.
 | The panel layers in the headset (`ui_panel=1`): menu and help quads | built, never run with `ui_panel=1` on the desktop, never seen in a headset |
 | The Creature panel quad | built (section 13) |
 | The subtitle card | built (section 17) |
-| Input on the panel (section 5) | planned |
-| Screens with no scene on a screen quad (section 6) | planned |
+| Input on the panel (section 5) | planned for `ui_panel=1` |
+| Screens with no scene on a screen quad (section 6) | planned. A screen with a menu goes to the place of the menu panel (section 20) |
+| The menus in the room (section 20) | built, math checks. A desktop run shows the Main Menu of the start on the panel and a click through it, with Vulkan and with dxwrapper. Never seen in a headset |
+| The keyboard in the headset (section 21) | built, math checks. A desktop run types into the box of a save name and closes it with Cancel. Never seen in a headset |
 | Tabletop placement of the panels (4.4) | planned |
 | A line from the controller to the panel hit | planned |
 | The panel over the monitor copy, when the monitor copy is on | planned |
@@ -666,6 +679,8 @@ recenter, and whether Virtual Desktop composes quad layers before the encode.
 | `ui_help_px_per_deg` | 44 | help panel scale at a 2880 px tall render. It scales with the render height, as the help text does. |
 | `ui_help_rect` | 0 | the help rect in render pixels. 0 takes the default of 4.1. |
 | `creature_panel` | 2 | the Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature (section 13) |
+| `menu_room`, `menu_room_test` | 1, 0 | the menus in the room with `ui_panel=0` (section 20) |
+| `vr_keyboard` | 1 | the keyboard in the headset (section 21) |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4 |
 | `ui_scale_pct`, `hint_scale_pct`, `hint_flat`, `ui_shift_max_px`, `subtitle_lift_pct`, `subtitle_deg` | 25, 20, 1, 24, 0, 35 | the interface in the eye pictures (`backend.md`) |
 | `hint_hand_depth` | 1 | a hint of the game at the game's Hand at the depth of the Hand (section 15.6) |
@@ -721,6 +736,8 @@ card between the card and the eye pictures. Ctrl Shift F12 is the audio key.
 | `src/mod/head_pose.cpp` | `HeadPoseOrigin`, the recenter pose in the LOCAL space |
 | `src/mod/controller_math.h` | `PanelPose`, `PanelWidth`, `WorldToRoom`, `RoomToLocal`, `FacePose`, `CreaturePanelPoint`, tested in `test/controller_math` |
 | `src/mod/subtitle_card_math.h` | The pure math of the subtitle card |
+| `src/mod/menu_room.cpp`, `menu_room_math.h` | The menus in the room: the place of the panel, the route of each frame, the pointer on the panel, the frames with no scene (section 20) |
+| `src/mod/vr_keyboard.cpp`, `vr_keyboard_math.h` | The keyboard in the headset (section 21) |
 | `src/mod/eye_capture.cpp` | A 32 bit BMP with a V4 header that keeps the alpha, and the panel over a checkerboard |
 
 ### 12.2 The route of a frame
@@ -1733,3 +1750,299 @@ eye, so the note is not at the depth of the Creature there either.
   learns from a miracle of the player. The test key uses the same function
   of the game.
 - Only a headset can show that the note fuses with the Creature.
+
+## 20. The menus in the room
+
+The game draws each menu as a `SetupBox` dialog in screen space. In the eye
+pictures a menu is then fixed to the head: it turns with the head, and the
+player cannot look around it. With `menu_room=1` and a headset, the menus
+are on a panel that is fixed in the room. The code is in `menu_room.cpp`
+and `menu_room_math.h`. It works with `ui_panel=0`. With `ui_panel=1` the
+interface panel of that key has the menus.
+
+### 20.1 The paths that draw a menu [V]
+
+Each menu is a dialog of the Setup callback `0x006424E0` in
+`LH3DRender::FinishFrame` (1.2). `SetupBox::GetCurrentActiveBox`
+`0x00407ED0` returns the box that is up (`0x00C4CD20`). Two kinds of frame
+draw a menu:
+
+| Menu | The frame | Without the menus in the room |
+| --- | --- | --- |
+| The Main Menu over the loaded game at the start (`backend.md`, "A test save") | A frame with the scene: `GGame::Loop` runs `Process3dEngine`, so the eye passes run [R] | In the eye pictures, with the interface shift: fixed to the head |
+| The game menu of Esc (`MainMenu`), the options, the load and save boxes in play | A frame with the scene | The same |
+| The boxes of the front end: the profile, the name of a new god, the land, the options of the front end | A frame with no scene: `FrontEnd::JustDoABox` `0x00544F90` draws the plasma, runs `FinishFrame` with the callbacks on, and then `LHScreen::Flip` | The whole frame, flat: on the projection layer at the eye poses of the last stereo frame, or on the screen of 1.4 before the first stereo frame |
+| `DoCitadelDraw`, the loop at `0x0053CD1F` and the other loops of 1.4 that show a box | A frame with no scene | The same |
+
+The panel covers each of them. A loop with no eye passes that shows no menu
+(a loading screen, a video) keeps the route of 1.4.
+
+### 20.2 What the mod does
+
+**A frame with the scene.** `UiPanelBeginFrame` latches the route one time,
+before the eye passes (`MenuRoomBeginFrame`). When a box is up, the draws of
+the Setup callback go to the panel target in eye pass 0, and not to the eye
+pictures (`UiPanelRouteMenu` in `draw_hooks.cpp`). They draw at the pixels
+that the game gave them, and these are the pixels that the hit test of the
+box reads. The help text keeps the route of the subtitle card. After eye pass
+0 the menu rect of the target (4.1) goes out as one quad layer over the
+projection layer, as with `ui_panel=1` (`UiPanelQuads`, `MenuRoomQuad`). With
+`backend=vulkan` the quad takes the panel image of the Vulkan renderer
+(`vk_panel=1`).
+
+**A frame with no scene.** `h_FinishFrame` in `mod_main.cpp` calls
+`MenuRoomFlatFrame` before the frame goes to the headset. When a box is up
+and the Setup callback drew it, the frame goes out as a screen at the place
+of the panel: the menu rect of the flat picture, the same picture for both
+eyes (`XrScreen::StageWindow` with `WindowLayer::rect`). No eye pass runs in
+such a frame, so this function also runs the hands of the frame
+(`ControllersFrame`), the pointer (`PointerMapApply`) and the keyboard
+(section 21). `JustDoABox` makes one frame with no callbacks when a box
+opens. A frame with no draw of a menu less than 200 ms after one with a
+draw keeps the screen.
+
+The route goes back to the eye pictures, and the log says why, in these
+cases: the frame has no projection layer (the cut scene window, play mode
+1), the panel target is not shared with the headset, the session has no
+swapchain for the panel, or the runtime refused a frame with the panel
+(`XrScreen::PanelFailed`).
+
+### 20.3 The place
+
+The panel goes in front of the head in the first frame of a menu
+(`menu_room_math::PlaceMenu`):
+
+- The anchor is the head of that frame: the middle of the two eyes in the
+  LOCAL space, and the yaw of the head. The yaw comes from the right axis of
+  the head, so a head that looks down has a yaw. The panel has no roll.
+- The center of the panel is `ui_menu_distance_cm` (140) from the anchor,
+  `ui_menu_pitch_deg` (-10) below eye level. The panel turns about its own x
+  axis by the same angle, so it faces the head.
+- The panel shows the menu rect (4.1) at `ui_menu_px_per_deg` (16). The
+  default rect of 1280 by 960 pixels is then 2.35 by 1.76 m at 1.4 m. The
+  front end menu of 780 by 570 pixels is 49 degrees across.
+
+After that the panel stays at its place in the room. It never follows the
+head. A box that leads to the next box keeps the place: the menus must be
+closed for 1 s before the next menu gets a new place. A recenter (F11, or
+the headset menu) puts the panel in front of the head of that moment, as
+with the cut scene window (`cutscene-window.md`, 5.1).
+
+### 20.4 The pointer on the panel
+
+The aim ray of the pointing hand meets the panel in the LOCAL space
+(`menu_room_math::Hit`, the math of 5.3). The pixel under the ray is a
+pixel of the menu rect, so it is the pixel of the render that the game drew
+the dialog at (`Compute` in `controllers.cpp`, `MenuRoomRayPixel`). After
+that the pointer takes the path of a dialog box (`controllers.md`, 3.6): the
+trigger is the left button, and the grip is the right button. The game
+draws its own arrow at that pixel, on the panel.
+
+- A ray past the edge of the panel puts the pointer at the edge. The pointer
+  is then off the view, and a press does not reach the game.
+- A ray that does not meet the plane of the panel gives no pixel. The
+  pointer keeps its last pixel.
+- In a frame with the scene the thin ray of the hand ends on the panel. A
+  frame with no scene draws no ray, and the arrow of the game shows the
+  pointer.
+- In a frame with no scene the controller can own the pointer
+  (`ChooseOwner` in `pointer_map.cpp`, `Usable` in `controllers.cpp`). The
+  front end calls no `LHMouse::UpdateDeltaPos`, so `MenuRoomFlatFrame` calls
+  `PointerMapApply` itself. The buttons go to the game through
+  `LHScreen::Flip`, which calls `AnyWindowMessages`, the hook of the pump.
+- The head does not turn the pixel of the mouse while the menus are on the
+  panel (`LockToRoom`), because a pixel of the panel is fixed in the room.
+
+### 20.5 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `menu_room` | 1 | 1: in the headset the menus are on a panel that is fixed in the room. 0: the menus are in the eye pictures, fixed to the head |
+| `menu_room_test` | 0 | A test key: the route of a frame with the scene runs with no headset. The eye pictures lose the menus, the pointer of the scripted controller meets the panel, and a capture saves the panel (`bwvr-ui-NNNNN.bmp`, 12.4) |
+| `ui_menu_distance_cm`, `ui_menu_pitch_deg`, `ui_menu_px_per_deg`, `ui_menu_rect` | 140, -10, 16, 0 | The place, the size and the rect of the panel (section 10) |
+
+`menu_room` has no keyboard test key. With `menu_room=1` the session makes
+the panel swapchain, and the bridge makes a shared panel texture of the
+render size, also with `ui_panel=0`.
+
+The log has the tag `menu room`:
+
+```
+menu room    : menu_room=1, in the headset the menus show on a panel that is fixed in the room. vr_keyboard=1, ...
+menu room    : frame N, the menus go to the panel in the room, and not to the eye pictures
+menu room    : frame N, the menu panel goes in front of the head: 2.35 by 1.76 m, its center at x y z m, the head at x y z m with a yaw of Y degrees. It shows the rect x y w h of the W by H render
+menu room    : frame N, a frame with no scene shows a menu, so the part x y w h of its picture goes to the panel in the room, and the controller points on it
+menu room    : the ray meets the menu panel T m from the hand at U V of the panel, and the pixel is X Y
+menu room    : frame N, the menus stay in the eye pictures: <the reason>
+  openxr: a frame with no scene goes out as 2 quad layer(s) of the menus in the room, ...
+```
+
+### 20.6 Tests
+
+The math checks are in `test/controller_math/menu_room_checks.h`: the place
+for a head that looks ahead and for a head that is turned and looks down, a
+ray at the center, at a corner and past the edge, a ray from a hand that is
+not at the eye, and three rays that do not meet the panel.
+
+A desktop run in a test save with `menu_room_test=1` and
+`menu_skip_test_frame=0` keeps the Main Menu of the start up. The render is
+3600 by 2880. With `backend=vulkan` and with `backend=dxwrapper` the run
+shows the same numbers:
+
+- In frame 1 the panel goes in front of the head: 2.35 by 1.76 m, its
+  center at 0.00 -0.24 -1.38 m, the rect 1160 960 1280 960. The panel gets
+  one place.
+- 611 frames with the scene have the menu on the panel, and 610 of them
+  have the ray on the panel. The eye pictures have no Main Menu. The panel
+  capture (`bwvr-vk-panel-NNNNN.bmp` with Vulkan, `bwvr-ui-NNNNN.bmp` with
+  dxwrapper) has the menu, with the arrow of the game on "Continue Game".
+- The ray of the scripted hand meets the panel 1.12 m from the hand at
+  0.500 0.371 of the panel. That is the pixel 1800.0 1316.6, on "Continue
+  Game". The scripted trigger is down from frame 600 to frame 608. In frame
+  611 the game plays its menu click and closes the dialog. In frame 612 the
+  route goes back to the eye pictures, and the Hand comes back.
+
+With `menu_room=0` the eye pictures have the Main Menu, fixed to the head.
+The same hand then points at the pixel 1800.0 1454.4 of the view, and that
+is "Join Online Game".
+
+The box "Save Game Message" of the Save Game Room goes to the panel in the
+same way, and a click of the ray on its Cancel closes it (21.5). The desktop
+runs do not show a frame with no scene that shows a menu (the front end),
+the game menu of Esc, the options, or the load box. The invented head does
+not turn in them.
+
+Only a headset shows these: the quad of the panel and its place, that the
+panel stays in the room while the head turns, the screen of a frame with no
+scene, and that the ray and the arrow of the game meet on the panel.
+
+## 21. The keyboard in the headset
+
+Some boxes of the game ask for text. While a text box has the focus, a
+keyboard shows below the menu panel, and the ray of the pointing hand
+presses its keys. The code is in `vr_keyboard.cpp` and
+`vr_keyboard_math.h`.
+
+### 21.1 The text boxes of the game [V]
+
+A text box is a `SetupEdit` control (the table of its virtual functions is
+at `0x008AB3A0`). The control that has the focus of a box is at box +
+`0x70` (`SetupBox::SetFocusControl` `0x00409140`). These boxes make a
+`SetupEdit` (the callers of its constructor `0x0040C220`):
+
+| Box | What it asks for |
+| --- | --- |
+| `NewProfileBox` | The name of the god of a new profile, in the first start |
+| `ProfileEditor` | The name of a profile |
+| `DialogBoxSaveMessage` | The name of a saved game |
+| `LoginBox`, `RegisterBox`, `MPFELogin` | A name and a password for the online game |
+| `LobbyBox`, `GSLobbyBox`, `GatheringBox`, `ChannelBox`, `MPFEChannelSelector`, `MPFECreateGame`, `MPFEChooseConnection`, `IPSpecialDialog`, `SetupMultiplayerMain` | The games for more players: a name, a message, an address |
+| `SetupLandscapeBox`, `SetupOnlineLandscapes`, `SpellSetupBox` | The setup of a land and of the miracles of a game for more players |
+| `EditingDebugBox` | A box of the debug code |
+
+No box asks for the name of the Creature.
+
+### 21.2 How the game reads a key [V]
+
+The window procedure `GameWindowProc` `0x007DBF30` puts the character of
+each `WM_CHAR` in a queue of 16 characters at `0x00E855A0` (at `0x007DC199`,
+after `TbIME_ConvertCHAR8toCHAR16`). The box gives one character of the
+queue to the control that has the focus in each pass (`0x00408EC8`, then
+`SetupEdit::Char` `0x0040B5F0`). `WM_KEYDOWN` and `WM_KEYUP` go to
+`LHKeyboard::ProcessKeyboard` `0x007DCAF0`, which sets the last key. The
+loops of the menus give the last key to the box: `FrontEnd::JustDoABox` at
+`0x00545125` and `GGame::ProcessKey` at `0x0063F222` call `fn_00408F80`,
+which calls `SetupEdit::KeyDown` `0x0040BAF0`. `ProcessWindowMessages` calls
+`TranslateMessage`, so a key of a computer gives `WM_KEYDOWN`, `WM_CHAR` and
+`WM_KEYUP`.
+
+### 21.3 What the mod does
+
+- **When.** `vr_keyboard=1`, the menus are on the panel in the room, and the
+  control that has the focus of the active box is a `SetupEdit`. The
+  keyboard goes away when the focus goes to a different control or the box
+  closes.
+- **The place.** The keyboard card hangs from the anchor of the panel
+  (20.3): 1 m from the head, 35 degrees below eye level, tilted to face the
+  head. It is 70 cm wide (38 degrees) and 26 cm high. It is nearer than the
+  panel and below the dialog, and it is opaque. In a frame with the scene it
+  is a card over the projection layer. In a frame with no scene it is a card
+  over the screen of the menu.
+- **The keys.** Five rows: the digits and Backspace, three rows of letters
+  with Enter and Shift, and the space bar. Shift makes the next letter a
+  capital. It is on when the keyboard opens, so the first letter of a name
+  is a capital.
+- **The ray.** The keyboard is nearer than the panel, so the ray of the
+  pointing hand meets it first. The key under the ray has a highlight, and
+  the hand gets a light pulse at each new key. With the ray on the keyboard
+  the pointer of the game is off the view, so the trigger makes no click in
+  the game.
+- **A press.** A pull of the trigger past 60 percent presses the key under
+  the ray, with a pulse of 20 ms at 0.3 and a short flash of the key. The
+  trigger must go below 40 percent before the next press. A pull that
+  starts off the keys presses nothing.
+- **The key to the game.** The mod sends `WM_KEYDOWN` with the scan code of
+  the key, and then `WM_CHAR` with the character, to the window of the game
+  with `SendMessageA` on the game thread. `WM_KEYUP` follows 60 ms later. So
+  the text box gets the key as from a keyboard of a computer. Backspace
+  sends `VK_BACK` and the character 8, and Enter sends `VK_RETURN` and 13.
+
+### 21.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `vr_keyboard` | 1 | 1: the keyboard shows while a text box has the focus. 0: no keyboard |
+
+The log has the tag `keyboard`: one line when the keyboard shows, with its
+place, one line for each key that goes to the game, and one line when it
+goes away.
+
+```
+keyboard     : frame N, a text box of the game has the focus, so the keyboard shows below the menu panel, 0.70 by 0.26 m at x y z m
+keyboard     : frame N, the key A goes to the game (virtual key 0x41, character 0x41)
+keyboard     : the keyboard goes away: no text box has the focus
+```
+
+### 21.5 Tests and limits
+
+The math checks are in `test/controller_math/menu_room_checks.h`: each key
+is on the card, no two keys overlap, the center of each key finds that key,
+what each kind of key sends, the shift, and one key for each pull of the
+trigger.
+
+A desktop run shows the keyboard in the box "Save Game Message" of the Save
+Game Room, with `backend=vulkan`, the test save `temple` and
+`menu_room_test=1`:
+
+```
+temple_run.ps1 -Name kbd -Dll <dll> -Rooms "room_save@3400" -Points "0,-2,30"
+  -Set "menu_room_test=1;test_frame_rate=60;capture_every_seconds=4;aim_preset=0;temple_test_scan=10;temple_test_targets=e0 e0;fake_controller_turns=-2,-50,1 22,-40,1 -27,-36,1 -10,-18,1"
+  -Steps "point@5700+1 aimtemple@5800+1 trigger@5840+6 aimtemple@6000+1 trigger@6040+6
+          aimturn@6150+1 trigger@6190+6 aimturn@6240+1 trigger@6280+6 trigger@6320+6
+          aimturn@6370+1 trigger@6410+6 aimturn@6550+1 trigger@6600+6"
+```
+
+- Two clicks of the ray on the picture of an empty slot open the box. In
+  the same frame the panel goes in front of the head, and the keyboard shows
+  at 0.00 -0.57 -0.82 m, 0.70 by 0.26 m. The text line has the focus when
+  the box opens.
+- From the point `0,-2,30` the aims `-2,-50`, `22,-40` and `-27,-36` are
+  on B, W and Backspace. Four presses (B, W, W, Backspace) send `0x42`,
+  `0x77`, `0x77` and `0x08`. The panel capture shows "Bw" in the text line:
+  the first letter is a capital, and Backspace removes a letter.
+- Each press on the keyboard has the line `the left button press started
+  off view, so it is dropped`, so no press on a key reaches the game.
+- The aim `-10,-18` meets the panel at 0.579 0.572, the pixel 1901.5
+  1509.4, on Cancel. At the press the keyboard goes away (the text line
+  loses the focus), and the box closes 8 frames later. The run writes no
+  file in the folder of the slot.
+
+The run does not use Esc to close the box. A desktop capture does not save
+the keyboard card. The log and the text in the panel capture show the keys.
+
+- The hand does not press a key by touch. Only the ray and the trigger do.
+- Only a headset shows the card, its place under the panel, and how the
+  keys read.
+- The text box of a frame with no scene (the name of a new god) needs the
+  first start of a profile. The profile guard of the desktop scripts takes
+  a new profile away after a run, but no run has done it yet.

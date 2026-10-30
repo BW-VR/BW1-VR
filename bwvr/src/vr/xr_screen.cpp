@@ -237,14 +237,16 @@ bool g_have_staged_quad = false;
 // The cards of this frame, set by the mod before EndFrame (xr_screen.h, THE
 // CARDS).
 CardLayer g_staged_card[kCards] = {};
-bool g_have_staged_card[kCards] = {false, false, false, false};
-bool g_card_failed[kCards] = {false, false, false, false};
+bool g_have_staged_card[kCards] = {false, false, false, false, false};
+bool g_card_failed[kCards] = {false, false, false, false, false};
 const char* const kCardName[kCards] = {
     "hint card of the pointing hand", "hint card of the other hand",
-    "subtitle card", "ring"};
+    "subtitle card", "ring", "keyboard"};
 // What a card holds, for the line that says where it goes after a failure.
 const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
-                                        "items of the ring"};
+                                        "items of the ring", "keys"};
+// The runtime refused a frame with a quad of the interface panel.
+bool g_panel_refused = false;
 
 // The cut scene window of this frame, set by the mod before EndFrame
 // (xr_screen.h, THE CUT SCENE WINDOW).
@@ -526,6 +528,7 @@ struct XrScreen::Impl {
   int32_t logged_window_crop = 0;
   int32_t logged_window_edge = 0;
   bool logged_window_card = false;
+  bool logged_menu_screen = false;
   uint64_t mask_frames = 0;    // for the report
   uint64_t window_frames = 0;
 
@@ -579,12 +582,13 @@ struct XrScreen::Impl {
     XrCompositionLayerQuad walls[4];
     XrCompositionLayerQuad quads[2];
     XrCompositionLayerQuad subtitle_quad;
-    const XrCompositionLayerBaseHeader* layers[1 + kPanelQuads + kCards + 4];
+    const XrCompositionLayerBaseHeader* layers[2 + kPanelQuads + kCards + 4];
     uint32_t layer_count;
     XrTime display_time;
     bool world;               // a projection layer, and not a screen
     bool with_card[kCards];
     bool with_subtitles;      // a screen with the subtitle card
+    bool with_panel;          // a quad of the interface panel
     LARGE_INTEGER waited_at;  // the end of xrWaitFrame of this frame
     LARGE_INTEGER begun_at;   // the end of BeginFrame of this frame
     LARGE_INTEGER before;     // the start of BuildFrame
@@ -2096,6 +2100,8 @@ bool XrScreen::CardFailed(int card) {
   return card < 0 || card >= kCards || g_card_failed[card];
 }
 
+bool XrScreen::PanelFailed() { return g_panel_refused; }
+
 void XrScreen::Impl::DestroyCard(int index) {
   CardChain& chain = cards[index];
   DestroyChain(&chain.swapchain);
@@ -2252,6 +2258,8 @@ void XrScreen::StageWindow(const WindowLayer& layer) {
   g_staged_window = layer;
   g_have_staged_window = true;
 }
+
+void XrScreen::DropStagedWindow() { g_have_staged_window = false; }
 
 void XrScreen::Impl::DestroyMask() {
   DestroyChain(&mask_swapchain);
@@ -2487,6 +2495,11 @@ void XrScreen::ReportUpload(uint64_t frames) {
           s.cards[kCardRing].layers);
     s.cards[kCardRing].layers = 0;
   }
+  if (s.cards[kCardKeyboard].layers > 0) {
+    s.log("  keyboard     : %llu quad layers of the keyboard",
+          s.cards[kCardKeyboard].layers);
+    s.cards[kCardKeyboard].layers = 0;
+  }
   if (s.age_frames > 0 && s.frequency.QuadPart != 0) {
     const double to_ms = 1000.0 / static_cast<double>(s.frequency.QuadPart);
     s.log("  frame age    : from the end of xrWaitFrame to the end of "
@@ -2671,6 +2684,7 @@ bool XrScreen::BuildFrame() {
   b.display_time = s.frame_state.predictedDisplayTime;
   b.world = false;
   b.with_subtitles = false;
+  b.with_panel = false;
   for (int i = 0; i < kCards; ++i) b.with_card[i] = false;
 
   // PROJECTION, OR A SCREEN.
@@ -2789,6 +2803,7 @@ bool XrScreen::BuildFrame() {
         ++s.panel_layers[i];
       }
       if (layer_count > 1) {
+        b.with_panel = true;
         ++s.panel_frames;
         if (!s.logged_panel) {
           s.logged_panel = true;
@@ -2807,7 +2822,7 @@ bool XrScreen::BuildFrame() {
     XrCompositionLayerQuad* card_quads = b.card_quads;
     bool* with_card = b.with_card;
     const int card_order[kCards] = {kCardSubtitles, kCardHintPointing,
-                                    kCardHintOther, kCardRing};
+                                    kCardHintOther, kCardRing, kCardKeyboard};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&
@@ -2857,6 +2872,22 @@ bool XrScreen::BuildFrame() {
     edge = 0;
   }
   const int32_t shown = static_cast<int32_t>(s.width) - crop - 2 * edge;
+  // A part of each picture (the menus in the room), clamped to the picture.
+  // A rect outside the image is an error for the whole frame.
+  int32_t part[4] = {0, 0, 0, 0};
+  if (as_screen && window.rect[2] > 0 && window.rect[3] > 0) {
+    part[0] = window.rect[0] < 0 ? 0 : window.rect[0];
+    part[1] = window.rect[1] < 0 ? 0 : window.rect[1];
+    part[2] = window.rect[2];
+    part[3] = window.rect[3];
+    if (part[0] + part[2] > static_cast<int32_t>(s.width)) {
+      part[2] = static_cast<int32_t>(s.width) - part[0];
+    }
+    if (part[1] + part[3] > static_cast<int32_t>(s.height)) {
+      part[3] = static_cast<int32_t>(s.height) - part[1];
+    }
+    if (part[2] <= 0 || part[3] <= 0) part[2] = part[3] = 0;
+  }
 
   const float aspect =
       static_cast<float>(s.height) / static_cast<float>(s.width);
@@ -2872,8 +2903,13 @@ bool XrScreen::BuildFrame() {
                              : (eye == 0 ? XR_EYE_VISIBILITY_LEFT
                                          : XR_EYE_VISIBILITY_RIGHT);
     quad.subImage.swapchain = s.swapchain[eye];
-    quad.subImage.imageRect.offset = {(eye == 0 ? crop : 0) + edge, 0};
-    quad.subImage.imageRect.extent = {shown, static_cast<int32_t>(s.height)};
+    if (part[2] > 0) {
+      quad.subImage.imageRect.offset = {part[0], part[1]};
+      quad.subImage.imageRect.extent = {part[2], part[3]};
+    } else {
+      quad.subImage.imageRect.offset = {(eye == 0 ? crop : 0) + edge, 0};
+      quad.subImage.imageRect.extent = {shown, static_cast<int32_t>(s.height)};
+    }
     quad.subImage.imageArrayIndex = 0;
     if (as_screen) {
       // The screen of the cut scene window, where the mod staged it.
@@ -2896,7 +2932,17 @@ bool XrScreen::BuildFrame() {
   }
 
   if (layer_count > 0) ++presented_;
-  if (as_screen && layer_count > 0) {
+  if (as_screen && layer_count > 0 && part[2] > 0) {
+    if (!s.logged_menu_screen) {
+      s.logged_menu_screen = true;
+      s.log("  openxr: a frame with no scene goes out as %u quad layer(s) of "
+            "the menus in the room, %.2f by %.2f m at %.2f %.2f %.2f m. Each "
+            "eye shows the part %d %d %d %d of its picture", layer_count,
+            window.width, window.height, window.position[0],
+            window.position[1], window.position[2], part[0], part[1],
+            part[2], part[3]);
+    }
+  } else if (as_screen && layer_count > 0) {
     ++s.window_frames;
     if (!s.logged_window || crop != s.logged_window_crop ||
         edge != s.logged_window_edge) {
@@ -2935,6 +2981,16 @@ bool XrScreen::BuildFrame() {
             g_staged_card[kCardSubtitles].height);
     }
   }
+  // THE KEYBOARD goes over a screen too: the menus of a frame with no scene
+  // can have a text box (docs/ui-layer.md, "The keyboard in the headset").
+  if (as_screen && layer_count > 0 && g_have_staged_card[kCardKeyboard] &&
+      g_staged_card[kCardKeyboard].visible &&
+      s.SendCard(kCardKeyboard, g_staged_card[kCardKeyboard],
+                 &b.card_quads[kCardKeyboard])) {
+    layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+        &b.card_quads[kCardKeyboard]);
+    b.with_card[kCardKeyboard] = true;
+  }
   for (int i = 0; i < kCards; ++i) g_have_staged_card[i] = false;
 
   b.layer_count = layer_count;
@@ -2972,7 +3028,11 @@ void XrScreen::FinishFrame() {
       // card of that frame must not go in the next one. The newest kind goes
       // first: the ring, then the subtitle card. A frame that fails with
       // neither takes the hint cards away.
-      if (b.with_card[kCardRing]) {
+      if (b.with_card[kCardKeyboard]) {
+        g_card_failed[kCardKeyboard] = true;
+        s.log("  openxr: the runtime refused a frame with the keyboard, so "
+              "the keyboard does not show");
+      } else if (b.with_card[kCardRing]) {
         g_card_failed[kCardRing] = true;
         s.log("  openxr: the runtime refused a frame with the ring, so the "
               "ring does not show. Its items still act");
@@ -2986,7 +3046,15 @@ void XrScreen::FinishFrame() {
         g_card_failed[kCardHintOther] = true;
         s.log("  openxr: the runtime refused a frame with a hint card, so the "
               "hints stay in the eye pictures");
+      } else if (b.with_panel && !g_panel_refused) {
+        g_panel_refused = true;
+        s.log("  openxr: the runtime refused a frame with the interface "
+              "panel, so the menus go back to the eye pictures");
       }
+    } else if (b.with_card[kCardKeyboard]) {
+      g_card_failed[kCardKeyboard] = true;
+      s.log("  openxr: the runtime refused a frame of a screen with the "
+            "keyboard, so the keyboard does not show");
     } else if (b.with_subtitles) {
       // A refused frame shows nothing, so the card must not go in the next
       // one. The subtitles then stay in the picture of the window.

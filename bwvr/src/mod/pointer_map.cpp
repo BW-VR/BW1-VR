@@ -71,6 +71,7 @@
 
 #include "../common/bw_addresses.h"
 #include "MinHook.h"
+#include "menu_room.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -409,8 +410,10 @@ bool RenderSize(int* width, int* height) {
 // player dragging the land or by a cutscene, the room moves and the cursor
 // moves with it, exactly as it does on a monitor.
 void LockToRoom(float* x, float* y, bool apply) {
+  // A pixel of the menus in the room is a pixel of a panel that is fixed in
+  // the room, so the head does not turn it.
   const bool active = HeadCameraEnabled() && HeadCameraHandAnchored() &&
-                      !StereoIdle();
+                      !StereoIdle() && !MenuRoomSurface();
   float head[9];
   float lean[3];
   if (!active || !HeadPoseCurrent(head, lean)) {
@@ -1879,8 +1882,11 @@ bool ChooseOwner(bool focused, bool real_focus, bool mouse_moved) {
   const bool button_event = ControllersButtonEvent();
   const bool turned = ControllerMoved();
   const int mode = ControllersOwnerMode();
-  const bool usable = mode != 2 && focused && !StereoIdle() &&
-                      HeadCameraEnabled() && ControllerPointing();
+  // A frame with no scene has no head camera, but the menus in the room
+  // take a ray of the controller there too.
+  const bool usable = mode != 2 && focused && ControllerPointing() &&
+                      (MenuRoomFlatNow() ||
+                       (!StereoIdle() && HeadCameraEnabled()));
   // A source that holds a button keeps the pointer (see above).
   if (mode == 2) {
     SetOwner(kOwnerMouse, "mouse only");

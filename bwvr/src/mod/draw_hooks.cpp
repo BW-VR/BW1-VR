@@ -1328,6 +1328,8 @@ SetupFinishFn o_SetupFinish = nullptr;
 const uintptr_t kSetupFinish = 0x006424E0;
 int g_menu_depth = 0;  // inside the menu drawing
 uint64_t g_menu_batches = 0;
+// All the batches of the menus since the start, for menu_room.cpp.
+uint64_t g_menu_batches_all = 0;
 
 void __stdcall h_SetupFinish(void* arg) {
   ++g_menu_depth;
@@ -2182,6 +2184,9 @@ bool g_panel_outside = false;    // a FinishFrame outside the passes routes
 bool g_panel_check = false;      // this frame runs the composite check
 bool g_panel_failed = false;     // a bind failed in this frame
 bool g_panel_drew[2] = {false, false};  // kPanelMenu, kPanelHelp
+// With ui_panel=0: the menus of this frame go to the panel target, for the
+// menus in the room (menu_room.cpp). Latched with the frame.
+bool g_menu_route = false;
 
 // The census for the log. Pass 0 and outside the passes only, so each batch
 // counts once a frame.
@@ -2307,8 +2312,12 @@ bool PanelTake(int scope, DrawAndClipFn original, D3DPRIMITIVETYPE type,
                uint32_t fvf, void* verts, uint32_t count, uint16_t* idx,
                uint32_t n) {
   if (!PanelHere()) return false;
-  // The subtitle card takes the help text only. The menus stay in the eyes.
-  if (g_panel_mode == kUiPanelSubtitles && scope == kScopeMenu) return false;
+  // With ui_panel=0 the subtitle card takes the help text, and the menus in
+  // the room take the menus. Each kind that has no taker in this frame stays
+  // in the eyes.
+  if (g_panel_mode == kUiPanelSubtitles) {
+    if (scope == kScopeMenu ? !g_menu_route : !g_card_takes_help) return false;
+  }
   if (g_eye == 1) {
     if (g_panel_mode == kUiPanelTest) return false;
     ++g_census_skipped;
@@ -2453,6 +2462,7 @@ void DrawInterfaceEye(DrawAndClipFn original, D3DPRIMITIVETYPE type,
     g_widget_flat = false;
     g_widget_hint = false;
     ++g_menu_batches;
+    ++g_menu_batches_all;
     if (PanelTake(kScopeMenu, original, type, fvf, verts, count, idx, n)) {
       return;
     }
@@ -2826,6 +2836,16 @@ void UiPanelRouteFrame(int mode, bool on, bool check) {
   g_panel_drew[0] = g_panel_drew[1] = false;
   g_card_takes_help = g_panel_frame && mode == kUiPanelSubtitles;
   g_have_card_bounds = false;
+  g_menu_route = false;
+}
+
+// After UiPanelRouteFrame with kUiPanelSubtitles: the menus of this frame go
+// to the panel target too (the menus in the room, menu_room.cpp). The help
+// text keeps the route of the subtitle card.
+void UiPanelRouteMenu(bool on) {
+  if (g_panel_mode != kUiPanelSubtitles) return;
+  g_menu_route = on;
+  if (on) g_panel_frame = true;
 }
 
 // The bounds of the help text that went to the panel target in this frame
@@ -2874,6 +2894,7 @@ void UiPanelRouteOutside(int mode, bool on, bool check) {
   g_panel_check = check && g_panel_outside;
   g_panel_failed = false;
   g_panel_drew[0] = g_panel_drew[1] = false;
+  g_menu_route = false;
 }
 
 bool UiPanelDrew(int kind) {
@@ -3105,6 +3126,10 @@ void UiDepthSetHintFlat(bool on) {
 }
 
 bool UiDepthHintFlat() { return g_hint_flat; }
+
+// The count of the batches of the Setup dialogs since the start. A frame
+// that adds to it drew a menu.
+uint64_t UiDepthMenuBatches() { return g_menu_batches_all; }
 
 // How big the help layer is drawn, as a percentage of what the game asks for.
 // The range is 20 to 100.

@@ -37,7 +37,7 @@ is built, and no test has proven it.
 
 ### Next
 
-These three items come before the other work.
+These items come before the other work.
 
 - **P18. The Main Menu in the room.** The Main Menu and the other menus of
   the front end are fixed to the head in the headset. Put them on a panel
@@ -56,6 +56,20 @@ These three items come before the other work.
   the turn starts in the flight or at the first contact (the contact on one
   corner gives an angular momentum many times the cap of 1.5 turns a
   second), and check rocks and other objects for the same fault.
+- **P20. The pictures of the gestures in the headset.** The plain game shows
+  the gestures that the player can draw now in the lower right corner of the
+  screen: `GInterface::ProcessPowerUpSystem` gives the list to
+  `fn_0068ABA0`, which makes a `DisplayGesture` for each type.
+  `DisplayGesture::Init` (`0x0068AED0`) places each one in pixels of the
+  game screen, from the right edge, in the lower band, and the particle
+  system draws them with its own camera near the world origin (`fn_0068B740`
+  at `0x0068B7C5`, `tabletop.md`). In the headset the player does not see
+  them. Likely cause: the corner of the eye picture is at the edge of the
+  lens, and the particle camera gets the camera of each eye. Prove it with
+  an eye picture of a desktop run (an empty Hand near a Worship Site with a
+  miracle icon), then show the pictures where the player sees them, for
+  example on the card near the hand as the hints are
+  (`controller-hints.md`).
 - **P19. A keyboard in the headset.** Some screens need text: the name of
   the god in the first start (a new profile), and other text boxes of the
   front end. Give the player a keyboard in VR that types into the text box

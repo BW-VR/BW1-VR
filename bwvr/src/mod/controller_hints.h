@@ -42,6 +42,7 @@ enum ControllerWord {
   kWordWorld,    // the grip of the other hand: it grabs the land and moves it
   kWordRing,     // the control of the other hand that opens the ring
   kWordWalk,     // the stick of the other hand: it moves the player
+  kWordBook,     // the first face button of the other hand: the spell book
 };
 const wchar_t* ControllerHintWord(int word);
 // True when the button of the game menu is on the controller of the pointing

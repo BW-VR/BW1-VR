@@ -140,6 +140,7 @@
 #include "hand_feel_math.h"
 #include "haptics.h"
 #include "miracle.h"
+#include "spell_book.h"
 #include "village.h"
 #include "village_math.h"
 #include "near_math.h"
@@ -4098,6 +4099,9 @@ void __fastcall h_InterfaceStep(void* self, void* unused) {
     // A MIRACLE IN THE HAND: a cancel or a tap of the mod runs here, and the
     // record holds the target of the miracle.
     MiracleInterfaceStep(self);
+    // THE SPELL BOOK: the request of a miracle that the player took from the
+    // book goes to the game here (spell_book.cpp).
+    SpellBookInterfaceStep(self);
     // A SCAFFOLD IN THE HAND: the record holds the object that it joins.
     VillageKeepRecord();
     // MANY TREES FROM A FOREST: the take of the mod puts a tree in the

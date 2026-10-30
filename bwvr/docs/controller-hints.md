@@ -539,6 +539,7 @@ The labels come from one function, `BuildWords`. It follows `xr_screen.cpp`
 | world (the grip of the other hand, with `grab_world`) | Grip | Grip | Grip (not Simple) |
 | ring (the control of the other hand that opens the ring menu), `button_layout=1` | Y, or B when the left hand points | B | the stick, when only the stick opens the ring |
 | ring, `button_layout=0` | X, or A when the left hand points | A | the stick, when only the stick opens the ring |
+| book (the spell book, `spell_book=1`), `button_layout=1` | X, or A when the left hand points | none: that button sends Esc | none |
 
 The words follow the layout of the buttons in use (`button_layout`,
 `controllers.md`, 5.1). The test key of the layout builds the words again, so
@@ -734,6 +735,7 @@ once a frame, and the first match counts, in this order:
 | Context | Source | Prompt |
 | --- | --- | --- |
 | A dialog box | `ControllersMenuRay` | Trigger: "Select" |
+| The spell book is open, or the game refused a miracle of the book less than 4 s ago | `SpellBookHint` (`spell_book.cpp`) | Grip: "Take Fireball" for the miracle under the pointing hand. "Fireball: No prayer power. Villagers must worship" for a miracle that the game refuses now. "Put your hand on a miracle" with no miracle under the hand. "No miracle to ask for now" and the reason for an empty book. The reason of a refusal for 4 s. The lines stay while the book is open, and the card of the other hand does not show then (`miracles.md`, "The spell book") |
 | A room of the Temple, with the ray | `TempleCardRoom` (`temple.cpp`) | "Select" (the trigger with `temple_click=1`, else the grip), the ring word: "Rooms", the menu word: "Leave the Temple" in the hall, "Back to the hall" in other rooms |
 | The teleport aim | `TeleportAiming` | A: "Release to go" |
 | A miracle, or a one-off seed, in the Hand | `MiracleHint` (`miracle.cpp`) | The lines of `miracle.cpp`: what the grip does with this kind of miracle, why the game refused the last cast, and how to cancel (the gesture word and the shake) |
@@ -749,7 +751,7 @@ once a frame, and the first match counts, in this order:
 | A pile, a field or a fish farm | hand mode `0xD` | Grip: "Hold to collect" |
 | The Hand touches the Creature | hand mode `0x13` | Grip: "Stroke or slap" |
 | The land, with the leash on | hand mode 3 with the leash | Trigger: "Send the Creature", A: "Teleport" while a press of A can move the player |
-| The land | hand mode 3 | On the card of the other hand: the world word "Move the land" (the grip of the other hand, in the God view and on the table), the walk word "Move" (the stick of the other hand) while a push of the stick moves the player, the ring word "Ring menu", and the first time the menu word "Game menu". On the card of the pointing hand: A "Teleport" (or "Jump" with `teleport=0`) while a press of A can move the player. In the old immersive view the trigger moves the land, so Trigger: "Move the land" shows on the card of the pointing hand. |
+| The land | hand mode 3 | On the card of the other hand: the world word "Move the land" (the grip of the other hand, in the God view and on the table), the walk word "Move" (the stick of the other hand) while a push of the stick moves the player, the ring word "Ring menu", the book word "Spells" while a press can open the spell book (`SpellBookCanOpen`), and the first time the menu word "Game menu". On the card of the pointing hand: A "Teleport" (or "Jump" with `teleport=0`) while a press of A can move the player. In the old immersive view the trigger moves the land, so Trigger: "Move the land" shows on the card of the pointing hand. |
 
 **The lines of the moves** (`prompt_moves`, 1). A line says what a control
 does now, so the lines of the walk and of A show only while the control can

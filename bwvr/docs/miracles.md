@@ -27,6 +27,11 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
   A shake of the real hand or a short press of the second face button
   cancels. The trigger makes a carried seed active. The mod gives a target
   with a halo to a Creature miracle.
+- The first face button of the hand that does not point opens the spell
+  book. It shows the miracles that the player can ask for now, with the
+  pictures of their gestures. The grip of the pointing hand takes one, with
+  the game's own request. The debug switch "All miracles" gives up to 6
+  miracles with no cost in prayer power, for tests.
 
 ## Gestures in the plain game [V unless marked]
 
@@ -546,6 +551,130 @@ classes. `audio_sources.cpp` and `audio_trace.cpp` call slot `0x10` only for
 a class that is `Base` or derives from it. On the exe 553 of the 949 classes
 with RTTI derive from `Base`.
 
+### The spell book (`spell_book=1`)
+
+The code is in `src/mod/spell_book.cpp`, with the pure math in
+`spell_book_math.h`. The book shows the miracles that the player can ask for
+now, and the pointing hand takes one with the grip. No gesture is necessary.
+The gestures stay as they are.
+
+**The button.** With `button_layout=1` the first face button of the hand that
+does not point (X, or A when the left hand points) opens the book. A second
+press closes it. The book also closes when the pointing hand takes a
+miracle, when the ring opens, and when a dialog box or the game menu is up.
+The book does not open in the Temple, in a cut scene, while the ring shows,
+or while the controllers cannot act. Then the press gives the pulse
+`refused`. On an Index controller that button sends Esc, and with
+`button_layout=0` it opens the ring, so it does not open the book there.
+
+**The place.** The center of the book is 12 cm from the grip point along the
+normal of the open palm, and 2 cm up (`BookCenter`). With the palm up, the
+book is over the palm. With the palm to the side, it is between the two
+hands. The book moves with the hand, one to one. The picture faces the head
+with no roll, as the ring does. It has no motion of its own.
+
+**The list is the game's own.** An item is a miracle with an icon at a Worship
+Site of the player (`GPlayer+0xA48`, the Citadel, and its 6 sites at `+0x34`)
+whose magic type is on (slot `0xD4` of the icon). The game's test of a
+request (`fn_0064BEC0`, thiscall on the `GPlayer` with the
+`GInterfaceStatus` and the seed type) says if the player can ask for it now.
+An item that fails the test is dim, with the reason: "The Hand must be
+empty", "The miracle charges now", "No prayer power. Villagers must
+worship" or "The game refuses it now". The last miracle
+(`GInterfaceStatus+0x34`, the miracle of the gesture "again") is the first
+item. When the hand is on it, the title of the book has "(again)" after its
+name.
+
+**The picture.** Each item is a bubble with the pictures of its two gestures:
+the start of the chain (the spiral or the inverse spiral) small at the left,
+and the gesture of the miracle at the right. A dot marks where each gesture
+starts. The pictures come from the first template of each gesture type in
+`Data\Gestures.jty`, as the game holds them (`GGame+0x250064`). A miracle of
+the god has a blue bubble, and a Creature miracle an amber one. The name is
+under the bubble. The cells are 6.5 cm for up to 9 items, 5 cm for up to 16
+and 4 cm for more. The book uses the quad layer of the ring (`kCardRing`), so
+it is sharp and never double. The book draws no mesh of the game: the icons
+of a Worship Site are meshes in the world, and the bubble is a picture of
+the mod. A book with no item says "No miracle to ask for now" and the
+reason: "You have no Worship Site" or "Your Worship Site has no miracle".
+
+**The pick.** The grip point of the pointing hand within 45 percent of a cell
+of the middle of an item, and 6 cm in front of or behind the book, picks it
+(`Pick`). The item stays until the hand is 65 percent of a cell away, or 9
+cm in front or behind. The item under the hand gets a gold halo and a light
+cell. The title of the book and the card of the pointing hand name it:
+"[Grip] Take Fireball". Each new item gives the pulse `tick` on the pointing
+hand and the cue "ring move".
+
+**The take.** The grip on the picked item is the take. The book holds that
+press: the game and the grab of the world do not get it, until the grip
+opens (`GripStep`). Before the next interface step of the game, the mod
+makes the tests of the end of a chain of gestures again: the Hand is free
+(`IsHandReadyForObject`), and `fn_0064BEC0` says yes. Then it sends the same
+request: packet `0x25` with the seed type (`fn_00550C20` on the `GGame`).
+The handler of the game (`fn_005DABA0`) makes its test again and lets the
+best icon charge (`fn_0064BDB0`). So the game takes the prayer power and puts
+the Miracle in the Hand, as for the gestures. The take gives the pulse
+`activate` and the cue "ring choose". The miracle "again" goes with packet
+`0x25` too, with its seed type, and not with packet `0x26` of the gesture
+"again".
+
+**A refusal.** A grip on a dim item takes nothing. The book stays open, the
+pointing hand gets the pulse `refused`, and the card and the title of the
+book give the reason for 4 s. The game itself shows nothing for a request
+that it refuses.
+
+**The card of the other hand.** On the land with an empty Hand the card of the
+hand that does not point has "[X] Spells" (or "[A] Spells" when the left
+hand points), while a press can open the book. While the book is open, that
+card does not show.
+
+### The debug switch "All miracles" (`debug_all_miracles=1`)
+
+A switch for tests, default 0. With 1, once a second:
+
+- Each town of the player knows the magic types of the 30 miracles of the
+  game, 24 magic types in all (`Town::AddMagicTypesHeld` `0x0073D380`, the
+  function of the setup of a land and of a reward). This turns the magic type
+  on for the player and gives the Village Centre the icon, if it has a free
+  slot.
+- The Worship Site of each town gets the icons of the Village Centre
+  (`WorshipSite::AddTownSpells` `0x0077C910`, which adds only an icon that it
+  does not have).
+- Each Worship Site of the player has no limit of prayer power: the flag at
+  `+0x108`, which `WorshipSite::GetTotalChantsAvailable` reads as 1,000,000
+  chants.
+
+**The limit of 6 icons.** The Village Centre has 6 slots for miracle icons
+(`TownCentre::AddSpell` `0x00744050` at `+0xD0`, which gives a seventh miracle
+no icon). The Worship Site copies the icons of the Village Centre. So the
+switch gives each town all the magic types, but the book shows only the
+miracles that got a slot first. In the test save `temple`, with the switch
+on from the first frame, a new Worship Site gets Storm, Forest, Fireball,
+Food, Spiritual Shield and Physical Shield. Water and Heal do not show,
+although the town knows them. Every miracle in the book needs icons that do
+not come from the Village Centre (an open item of P20).
+
+A take costs no prayer power: with 0 chants in the pool, the game puts the
+Miracle in the Hand. The take does not take chants from the pool, but a
+cancel gives the chants of the miracle back to it (13000 chants for Forest).
+So the pool gets larger with each cancel while the switch is on. The switch
+needs a Worship Site of the player. With no site the log says so, and the
+book stays empty. The switch at 0 puts the flags of the sites back. The
+miracles that the towns know stay. A save of the game made while the switch
+is on keeps the miracles of the towns, the icons and the flags of the sites.
+The switch itself writes nothing to a saved game.
+
+### Where the gesture pictures of the game go
+
+The game shows the gestures that the player can draw now in the lower right
+corner of the screen (`fn_0068ABA0`, a `DisplayGesture` for each type, at
+pixels of the game screen, drawn by the particle system with its own camera,
+`fn_0068B740`). The headset does not show them. The cause is not proven. A
+likely cause is that the corner is at the edge of the lens, and that the
+particle camera gets the camera of each eye. The book shows the gestures in
+place of that corner.
+
 ## Keys
 
 | Key | Default | What it does |
@@ -559,12 +688,19 @@ with RTTI derive from `Base`.
 | `miracle_cone_deg` | 6 | The cone of the aim for a new target at a distance |
 | `miracle_keep_deg` | the cone and 4 | The target of the last frame stays to this angle |
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
+| `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
+| `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
 
 The keys are read from `bwvr.ini`. They are not in the launcher.
 
 **The A/B key**, with `test_keys=1`: Ctrl with the 8 key of the number pad
 changes `miracle_hand`. The pointing controller gives a long pulse for 1 and
 a short pulse for 0.
+
+**The debug page** (`debug_menu=1`, the group Creature): "Spell book" changes
+`spell_book`, and "All miracles" changes `debug_all_miracles`. The hand that
+does not point gives a long pulse for 1 and a short pulse for 0. These two
+switches have no key of the keyboard.
 
 Test keys for the desktop runs only (the launcher removes them):
 
@@ -573,6 +709,10 @@ Test keys for the desktop runs only (the launcher removes them):
   Hand (`OneOffSpellSeed::Create`).
 - `miracle_test_cancel`: a list of frames. At each one the mod asks for a
   cancel.
+- `spell_book_test_save`: the mod saves the first N pictures of the book as
+  `bwvr-book-NNNNN.bmp`.
+- The word `book` of the scripted controller steps the pointing hand to the
+  middle of the next item of the open book.
 
 ## The log
 
@@ -605,6 +745,23 @@ The tag `miracle` has one line for each change:
   the casts, the refusals, the cancels, the seeds used, and the writes of
   the pick record.
 
+The tag `spell book` has the book:
+
+- The keys at the start, and each change from the debug page.
+- "the book opens over the left hand", with its place, its size and the
+  miracles (a dim one has "(dim)"), and "the book closes", with the cause.
+- "the book does not open", with the cause.
+- "the pointing hand is at Fireball", and "is at no miracle of the book".
+- "the pointing hand takes Water from the book", or "... and the game
+  refuses it", with the reason.
+- "the request of Water goes to the game: packet 0x25 ...", and "the Miracle
+  Water is in the Hand, N frames after the request".
+- With `debug_all_miracles=1`: what each town now knows, the icons of its
+  Worship Site, and each site that has no limit of prayer power now.
+- One line each report window: the opens, the closes, the takes, the
+  requests, the Miracles in the Hand, the refusals and the draws of the
+  picture.
+
 ## Tests
 
 The math test (`miracle_checks.h`) covers the lines of the card for each kind
@@ -624,12 +781,44 @@ Site (Water and Food) with a power up and the power that goes back at a
 cancel. A Physical Shield with no circle gives the refusal "this miracle
 needs a circle on the land first".
 
+The math test (`spell_book_checks.h`) covers the layout of the book for 0 to
+32 items, the place of the book from the grip pose, the plane that faces the
+head, the pick with its two limits, the open and the close, and the grip
+that the book holds.
+
+The spell book has a recipe: `village_run.ps1 -Kind book` (the test save
+`temple`, a Worship Site with Water, Food and Heal, 20000 chants). It opens
+the book, steps the right hand to two items, takes the second one, cancels
+it, and then asks for a miracle with no chants (a refusal). It saves each
+picture of the book. What the recipe shows, with Vulkan and with dxwrapper:
+
+- The card of the left hand has "[X] Spells". X opens the book over the left
+  hand, 44 cm from the head: 20 by 10 cm with 3 items, 20 by 16 cm with 6.
+  The other hand gets the pulse `tick`.
+- Each step of the right hand to a new item gives a gold halo on it, the
+  pulse `tick` on the pointing hand, and the card "[Grip] Take Food".
+- The take sends packet `0x25` with the seed type in the same frame. The
+  Miracle is in the Hand 4 to 6 frames later, and the pool of the site goes
+  from 20000 to 13000 chants.
+- With 0 chants each item is dim with "No prayer power. Villagers must
+  worship". A grip gives the pulse `refused`, and the card gives the reason.
+  The game itself shows nothing.
+- The last miracle is the first item when the book opens again.
+- One picture of the book takes 3 to 6 ms to draw. The book draws it only
+  when it changes (2 or 3 times for each open).
+- With `spell_book=0`, X makes the log line of no job, and no book opens.
+- With `debug_all_miracles=1` the book has 6 miracles, and a take with 0
+  chants puts the Miracle in the Hand (see "The limit of 6 icons").
+
 A miracle that pours stays in the Hand after the pour, until its chants are
 used or the player takes it out. So a recipe with more than one seed must
 tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 `-Steps` the steps).
 
 **Not run on the desktop:**
+
+- The spell book: the close when the ring or the game menu opens, an empty
+  book, a Creature miracle in the book, and the switches of the debug page.
 
 - Teleport (the cast of Heal), and the Creature miracles other than Strong
   and Freeze.
@@ -642,6 +831,11 @@ tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 
 **Needs the headset:**
 
+- Whether the book is easy to read and to reach over the open palm, and
+  whether 12 cm from the grip is the right place.
+- Whether the quad layer of the book shows in Virtual Desktop as the ring
+  does. The eye pictures of a desktop run do not have the quad layer. A run
+  shows the picture of the book and its place in the log only.
 - Whether a real shake of 0.6 m/s takes the miracle out and a normal move
   does not.
 - Whether 400 ms is the right limit of the tap of B.

@@ -37,8 +37,8 @@
 #                shake. -Icon gives the seed type of a different icon (3 is
 #                Food, which pours as Water does).
 # The other kinds (charge, store, job, tree, throw, probe, workshop, site,
-# build, scaffold, fartake, fartotem, choice, look) have a comment at their steps
-# below.
+# build, scaffold, fartake, fartotem, choice, look, book) have a comment at
+# their steps below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -130,6 +130,26 @@ if ($Kind -eq 'totem') {
     if ($Steps -eq '') {
         $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 grip@1046+260 seek@1180+1 shot@1420+1'
     }
+} elseif ($Kind -eq 'book') {
+    # The spell book (bwvr/docs/miracles.md, "The spell book"). X opens the
+    # book over the left hand, the word "book" steps the right hand to the
+    # middle of the first item and then of the second, and the grip takes the
+    # second miracle: the game puts it in the Hand. A tap of B cancels it.
+    # Then the pool of the site has no chants, X opens the book again, the
+    # right hand goes to an item and the grip takes it: the game refuses it,
+    # and the card says why. X closes the book. Each picture of the book is
+    # saved (spell_book_test_save). -Set "debug_all_miracles=1" gives the
+    # book every miracle of the game, and -Set "spell_book=0" gives X no job.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890,1300' }
+    if ($Seconds -eq 0) { $Seconds = 60 }
+    if ($Chants -eq '20000@950') { $Chants = '20000@950 0@1340' }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 x@1000+4 shot@1012+1 book@1030+1 shot@1042+1 book@1070+1 shot@1082+1 ' +
+                 'grip@1110+30 shot@1170+1 b@1250+5 x@1380+4 book@1400+1 shot@1412+1 grip@1440+20 shot@1452+1 ' +
+                 'x@1520+4 shot@1540+1'
+    }
+    $keys = "$keys;spell_book_test_save=12"
 } elseif ($Kind -eq 'look') {
     # A villager that a script turns to the camera (bwvr/docs/village.md, "A
     # villager that a script turns to the player"). In the test save "temple"
@@ -343,6 +363,10 @@ if ($Kind -eq 'fartake') {
                '^hand bulk    : (the game|the bulk take ends|the amount in the Hand is \d+ after (10|20|30|50|100) game|test key|the take|the test key)|' +
                '^hand pick    : (seek plan|the Hand holds)|^hand press   : the grip pressed|^grip         : (?!\d)|^hand throw   : (release|the object left)|' +
                '^audio play   : .* in game (44|98),|^audio chan   : .* in game (44|98) |^audio take   :|^take stream  :'
+}
+if ($Kind -eq 'book') {
+    $pattern = '^spell book   :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +
+               '^controllers  : (the fake x|the word book|the first face button)|^haptics      : (cast|refused)|^hand         : state'
 }
 $cards = @{}
 Get-Content $log | Where-Object { $_ -match $pattern -or $_ -match '^hint card    : frame \d+, the card of the right hand: (.*?)\. \d' } | ForEach-Object {

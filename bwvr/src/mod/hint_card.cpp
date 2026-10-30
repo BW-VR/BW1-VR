@@ -116,6 +116,7 @@
 #include "hint_learn_math.h"
 #include "miracle.h"
 #include "radial_menu.h"
+#include "spell_book.h"
 #include "temple.h"
 #include "teleport.h"
 #include "text_click.h"
@@ -460,8 +461,16 @@ enum Context {
   // The Hand's point is at the door of the Temple or at a leash post, on the
   // land (temple.cpp).
   kCtxTempleLand,
+  // The spell book is open at the other hand (spell_book.cpp), or the game
+  // refused a miracle of the book a moment ago. Its lines name the miracle
+  // under the pointing hand.
+  kCtxBook,
   kContexts
 };
+// PromptStep counts the shows of each context, and it takes a context past
+// its table for no context.
+static_assert(kContexts <= hint_card_math::kMaxContexts,
+              "each context has a place in the table of PromptStep");
 
 const char* const kContextName[kContexts] = {
     "none",   "a dialog box",  "the teleport aim", "a far target",
@@ -470,7 +479,8 @@ const char* const kContextName[kContexts] = {
     "the leashed Creature", "the aim of a Creature command",
     "the land, with the leash on", "a leash that is tied to an object",
     "a miracle in the Hand", "the totem or a miracle icon",
-    "a room of the Temple", "the door of the Temple or a leash post"};
+    "a room of the Temple", "the door of the Temple or a leash post",
+    "the spell book"};
 
 // The dwell, the hold and the count of each context (PromptStep).
 const hint_card_math::PromptRule kRules[kContexts] = {
@@ -492,6 +502,7 @@ const hint_card_math::PromptRule kRules[kContexts] = {
     {0.0f, 5.0f, 4},   // village: it always shows too
     {0.5f, 6.0f, 3},   // a room of the Temple
     {0.3f, 5.0f, 4},   // the door of the Temple or a leash post
+    {0.0f, 5.0f, 4},   // the spell book: it always shows too
 };
 
 // True for a context about a thing that the Hand or the aim is on. The
@@ -511,6 +522,7 @@ bool IsTargetContext(int context) {
     case kCtxMiracle:
     case kCtxVillage:
     case kCtxTempleLand:
+    case kCtxBook:
       return true;
     default:
       return false;
@@ -611,6 +623,7 @@ int ContextNow() {
   if (TeleportAiming()) return kCtxTeleport;
   {
     MiracleLine lines[kMiracleLines];
+    if (SpellBookHint(lines) > 0) return kCtxBook;
     if (MiracleHint(lines) > 0) return kCtxMiracle;
     if (VillageHint(lines) > 0) return kCtxVillage;
     if (TempleLandHint(lines) > 0) return kCtxTempleLand;
@@ -649,7 +662,7 @@ int ContextNow() {
 int WordHand(int word) {
   if (word == kWordMenu && ControllerHintMenuOnPointing()) return kPointing;
   return word == kWordMenu || word == kWordWorld || word == kWordRing ||
-                 word == kWordWalk
+                 word == kWordWalk || word == kWordBook
              ? kOther
              : kPointing;
 }
@@ -851,6 +864,10 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       // the leashes and more) and the menu of the game.
       AddPrompt(cards, kWordRing, L"Ring menu", kToneOther,
                 hint_learn_math::kSkillRing);
+      // The spell book (spell_book.cpp), while a press can open it.
+      if (SpellBookCanOpen()) {
+        AddPrompt(cards, kWordBook, L"Spells", kToneOther);
+      }
       if (first_show) AddPrompt(cards, kWordMenu, L"Game menu", kToneOther);
       break;
     case kCtxCommand:
@@ -868,15 +885,18 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       break;
     case kCtxMiracle:
     case kCtxTempleLand:
-    case kCtxVillage: {
+    case kCtxVillage:
+    case kCtxBook: {
       // The lines come from miracle.cpp: what the grip does with this
       // miracle now, why the game refused the last cast, and the cancel. Or
       // from village.cpp: what the grip does at the totem or at a miracle
       // icon.
       MiracleLine lines[kMiracleLines];
       // Or from temple.cpp: the door of the Temple or a leash post.
+      // Or from spell_book.cpp: the miracle under the pointing hand.
       const int count = context == kCtxMiracle      ? MiracleHint(lines)
                         : context == kCtxTempleLand ? TempleLandHint(lines)
+                        : context == kCtxBook       ? SpellBookHint(lines)
                                                     : VillageHint(lines);
       for (int i = 0; i < count; ++i) {
         if (lines[i].word >= 0) {
@@ -1867,7 +1887,7 @@ void HintCardEndFrame() {
     // hint of the game, which comes a few frames later, must not change the
     // words.
     if (context != kCtxNone && context != kCtxMiracle &&
-        context != kCtxVillage &&
+        context != kCtxVillage && context != kCtxBook &&
         !(g_words != 0 && IsTargetContext(context))) {
       Content probe[kHands] = {g_game, {}};
       AddPrompts(probe, context, false);
@@ -1884,7 +1904,8 @@ void HintCardEndFrame() {
         &g_prompt_state, context, now,
         hint_card_math::TargetRule(kRules[context], target, at_once),
         hint_card_math::PromptAlways(target, at_once, g_prompts == 2) ||
-            context == kCtxMiracle || context == kCtxVillage);
+            context == kCtxMiracle || context == kCtxVillage ||
+            context == kCtxBook);
     if (shown != kCtxNone && shown != g_prompt_shown) {
       ++g_prompt_shows[shown];
     }
@@ -1902,7 +1923,7 @@ void HintCardEndFrame() {
   // The hints of the game are for the hand that points. Each prompt goes to
   // the card of the hand that holds its control.
   Content content[kHands] = {g_game, {}};
-  if (shown == kCtxMiracle || shown == kCtxVillage) {
+  if (shown == kCtxMiracle || shown == kCtxVillage || shown == kCtxBook) {
     // A MIRACLE IN THE HAND: the lines of the mod say what the controls do,
     // so the hints of the game for a button go, and one line of its text
     // stays (the name of the miracle). Then the three lines of the mod fit.
@@ -1979,6 +2000,8 @@ void HintCardEndFrame() {
   // The ring is open at the other hand, and its picture is there. The card
   // of that hand comes back when the ring closes.
   if (RadialMenuOpen()) content[kOther].count = 0;
+  // The same for the spell book over that hand.
+  if (SpellBookOpen()) content[kOther].count = 0;
   // AGAINST A FLICKER: the words of a target stay a moment after it goes,
   // when nothing else shows.
   if (g_timing != 0) {

@@ -63,6 +63,7 @@
 #include "miracle.h"
 #include "note_depth.h"
 #include "radial_menu.h"
+#include "spell_book.h"
 #include "script_frame_math.h"
 #include "temple.h"
 #include "temple_math.h"
@@ -288,6 +289,9 @@ enum FakeInput {
   // (hint_card.cpp) act on the first frame of the word.
   kTeleportKey,
   kPromptKey,
+  // The spell book: the right hand steps to the middle of the next item of
+  // the open book (spell_book.cpp).
+  kBook,
   kInputCount
 };
 
@@ -301,7 +305,8 @@ const char* const kInputName[kInputCount] = {
     "nofocus",    "deactivate",
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
-    "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey"};
+    "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
+    "book"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -1099,6 +1104,20 @@ void UpdateScript() {
     if (step.input == kPromptKey && t == step.start) {
       HintCardMovesToggle("The word promptkey");
     }
+    if (step.input == kBook && t == step.start) {
+      float local[3];
+      if (SpellBookTestItem(local)) {
+        // LOCAL space: right is +X, up is +Y, forward is -Z.
+        g_seek_cm[0] = local[0] * 100.0f;
+        g_seek_cm[1] = local[1] * 100.0f;
+        g_seek_cm[2] = -local[2] * 100.0f;
+        g_side_cm = 0.0f;
+        g_point_index = kSeekIndex;
+      } else {
+        ModLog("controllers  : the word book: the spell book is not open, "
+               "frame %llu", g_frame);
+      }
+    }
     if ((step.input == kNudge || step.input == kSlap) &&
         t == step.start) {
       const float side = step.input == kNudge ? 2.0f : 12.0f;
@@ -1125,7 +1144,7 @@ void UpdateScript() {
         i == kTouchCreature || i == kRot || i == kAimFar || i == kPull ||
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
-        i == kMoveKey) {
+        i == kMoveKey || i == kBook) {
       continue;
     }
     if (i == kPose2) {
@@ -2344,7 +2363,7 @@ void LatchEsc() {
   // The first face button has no job with button_layout=1. The log says so
   // for a press, so a log from a headset session shows why nothing happened.
   const bool idle = ButtonLayout() != 0 && !index && free_hand.active &&
-                    free_hand.primary;
+                    free_hand.primary && !SpellBookButtonOn();
   if (idle && !g_idle_before && g_idle_logs < kMaxIdleLogs) {
     ++g_idle_logs;
     ModLog("controllers  : the first face button of the %s hand is down. It "
@@ -2838,7 +2857,12 @@ void PumpButtons(ULONGLONG now) {
     // it (far_grab.cpp, PumpHold).
     const bool can_hold = usable && DirectHandNow();
     const bool ok = can_hold && ControllersFarAllowed(&why);
-    far_claim = FarGrabPumpGrip(RawDown(kRight), ok, can_hold);
+    // THE SPELL BOOK: a grip on a miracle of the open book takes it, and
+    // the game and the grab of the world do not get that press
+    // (spell_book.cpp).
+    const bool book_claim = SpellBookPumpGrip(RawDown(kRight));
+    far_claim = FarGrabPumpGrip(RawDown(kRight) && !book_claim, ok, can_hold);
+    far_claim = far_claim || book_claim;
   }
   UpdateGrab(usable, back, far_claim);
   // THE CREATURE COMMAND. While the leash is on the Hand, a press of the
@@ -3946,6 +3970,7 @@ void ControllersFrame() {
   PollLayoutKeys();
   LatchEsc();
   RadialMenuFrame();
+  SpellBookFrame();
 }
 
 namespace {
@@ -4045,6 +4070,7 @@ void ControllersHintState(ControllerHintState* out) {
   out->ring = RadialMenuHintMode();
   out->layout = ButtonLayout();
   out->walk = StickWalks();
+  out->book = SpellBookButtonOn();
   if (g_fake.mode != 0) {
     strcpy_s(out->profile, "fake");
   } else if (g_screen != nullptr) {
@@ -4115,10 +4141,15 @@ bool ControllersRingHand(RingHand* out) {
   out->face_buttons = strstr(profile, "vive") == nullptr &&
                       strstr(profile, "microsoft") == nullptr &&
                       strstr(profile, "simple") == nullptr;
+  // The first face button opens the spell book with button_layout=1. On an
+  // Index controller it sends Esc (LatchEsc).
+  out->book_face = ButtonLayout() != 0 && out->face_buttons &&
+                   strstr(profile, "index") == nullptr;
   if (!hand.active) return true;
   // The face button of the ring: the second one with button_layout=1, and
   // the first one with 0.
   out->button = ButtonLayout() != 0 ? hand.secondary : hand.primary;
+  out->book_button = out->book_face && hand.primary;
   out->stick_click = hand.stick_click;
   out->stick_live = StickLive(hand);
   out->trigger = hand.trigger;
@@ -4787,6 +4818,7 @@ void ControllersReport() {
     g_dropped = g_forced_releases = 0;
   }
   RadialMenuReport();
+  SpellBookReport();
   TempleReport();
   TextClickReport();
   if (g_god_zooms != 0 || g_god_holds != 0) {

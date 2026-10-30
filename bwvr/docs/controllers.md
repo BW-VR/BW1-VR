@@ -877,7 +877,7 @@ The words that hold a button (or the stick at full) for `frames` frames:
 | `menu` | The menu button of the right hand |
 | `stick_click` | The stick click of the right hand |
 | `stick_left`, `stick_right`, `stick_up`, `stick_down` | The stick of the right hand at full |
-| `x`, `y` | X, Y of the left hand (needs `fake_controller=2`). With `button_layout=1` Y opens the ring and X has no job. With 0 X opens the ring and Y sends Esc |
+| `x`, `y` | X, Y of the left hand (needs `fake_controller=2`). With `button_layout=1` Y opens the ring and X opens the spell book. With 0 X opens the ring and Y sends Esc |
 | `lmenu` | The menu button of the left hand: Esc |
 | `lgrip`, `ltrigger` | Grip, trigger of the left hand |
 | `gripdip` | While the word `grip` holds, the squeeze of the right grip reads 0.59 and not 1.0 for the frames of this word. One frame is a real hand that jerks away |
@@ -912,6 +912,7 @@ The words that act on the first frame of the word only:
 | `movekey` | The test key of `move_stick` acts (`god-view.md`, section 5.7) |
 | `teleportkey` | The test key of `teleport_switch` acts (`god-view.md`, section 14.6) |
 | `promptkey` | The test key of `prompt_moves` acts (`controller-hints.md`, 9.5) |
+| `book` | Steps the right hand to the middle of the next item of the open spell book (`miracles.md`, "The spell book") |
 
 The placement of the hand is in cm from the head center. Each pose word sets
 the position of the right hand until the next one.
@@ -982,7 +983,7 @@ The pointing hand is the right hand. When the left controller is the Hand
 | --- | --- |
 | Grip | Grabs the land: pull to move it across, and up or down, one to one. Both grips turn and scale the land (`god-view.md`, section 5). `grab_hand=2` also lets the grip of the pointing hand grab the land when the Hand is empty and over nothing it can hold |
 | Y (B when the left hand points) | Hold: opens the ring, and the hand picks an item (section 10) |
-| X (A when the left hand points) | No job |
+| X (A when the left hand points) | Opens and closes the spell book: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand takes one |
 | Stick | In the God view: push it to move over the land (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
 | Trigger | No job |
 | Menu button of the left controller | Esc: the game menu (3.6) |
@@ -995,14 +996,14 @@ default. Each control has one job, and one button opens the game menu.
 | --- | --- | --- |
 | The game menu (Esc) | The menu button of the left controller | The second face button of the other hand (Y, or B), and the menu button of the left controller |
 | The ring | Hold the second face button of the other hand (Y, or B) | Hold the first face button (X, or A), or push the stick and pull the trigger (`radial_menu_stick`) |
-| The first face button (X, or A) | No job. A press makes one log line | The ring |
+| The first face button (X, or A) | The spell book (`spell_book=1`). With `spell_book=0` no job, and a press makes one log line | The ring |
 | The stick of the other hand | The walk with the stick (`move_stick`) | The ring, and no walk |
 | The trigger of the other hand | No job | Chooses an item when the stick opened the ring |
 
 - **A left handed player.** The left menu button is then on the controller
   of the pointing hand. It still sends Esc: `LatchEsc` reads the menu button
   of the left controller, whichever hand points. The ring is on B of the
-  right controller, and A of the right controller has no job.
+  right controller, and A of the right controller opens the spell book.
 - **An Index controller** has no menu button that a program gets (2.3). With
   `button_layout=1` the first face button of the other hand (A) sends Esc
   there, and B opens the ring.
@@ -1043,10 +1044,12 @@ default. Each control has one job, and one button opens the game menu.
 | `gesture_size_cm` | 30 | This much hand motion is a third of the view height to the game |
 | `teleport` | 1 | 1: A makes the teleport. 0: A makes a jump |
 | `teleport_switch` | 1 | The switch of the game that the press of A keeps to. 1: the drag of the land, as the walk with the stick. 0: the double click jump (`god-view.md`, section 14.1). Not in the launcher |
-| `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button has no job, and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
+| `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button opens the spell book (`spell_book`), and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
 | `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk with the stick of the hand that does not point, in the God view: 0 off, 1 along the direction of the head, 2 along the direction of the controller, and the speed of a full push in cm of the room for each second (`god-view.md`, section 5.7). The launcher row "Move with the other stick" |
 | `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). The launcher row "Walk follows the land" |
 | `miracle_cancel_ms` | 400 | The longest press of the second face button that takes a miracle out of the Hand |
+| `spell_book` | 1 | 1: the first face button of the hand that does not point opens the spell book (`miracles.md`). 0: that button has no job. The switch "Spell book" of the debug page. Not in the launcher |
+| `debug_all_miracles` | 0 | 1: up to 6 miracles in the spell book (the slots of a Village Centre), with no cost in prayer power. For tests. The switch "All miracles" of the debug page. Not in the launcher |
 | `controller_hints` | 1 | 1 shows the controller words in the hints and the help text of the game while a controller owns the pointer. 0 leaves every hint as the game draws it (`controller-hints.md`) |
 | `text_click` | 1 | 1: while a text of the game waits for a click, its prompt shows on the hint card in each view, and a press of the trigger goes to the game as the left button: no Creature command, no seed, and with the Hand off the view too. 0: the prompt has the rule of each other hint of the left button, and the trigger keeps its other jobs (`controller-hints.md`, section 10) |
 | `hint_profile` | (none) | A test key. Forces the words of one profile, for example `valve/index_controller` |
@@ -1870,8 +1873,8 @@ The layout of the buttons [R] (a run in the test save at the Temple,
 ltrigger@930+6 y@1000+30 lpoint@1006+1 lpoint@1036+1 lmenu@1150+6
 lstick_up@1260+40 y@1330+30` and the left points `-16,-24,42 -20,-30,35`):
 
-- With `button_layout=1`: X makes the log line "the first face button of the
-  left hand is down. It has no job". The left stick moves the player and
+- With `button_layout=1` and `spell_book=0`: X makes the log line "the first
+  face button of the left hand is down. It has no job". The left stick moves the player and
   does not open the ring, and the left trigger does nothing. Y opens the
   ring, the step of the hand picks `creature`, and the release chooses it. Y
   sends no Esc. The left menu button sends Esc, and the game menu is up.
@@ -1889,7 +1892,7 @@ lstick_up@1260+40 y@1330+30` and the left points `-16,-24,42 -20,-30,35`):
 - In the Temple (`temple_run.ps1 -Rooms "room_challenge@3500" -Steps
   "x@3360+20 lstick_up@3400+40 lmenu@5300+6"`): Y with a step of the hand
   chooses `enter` on the land and `room_challenge` in the hall. In the hall X
-  has no job, and the stick does not move the player ("the God view does not
+  opens no spell book, and the stick does not move the player ("the God view does not
   own the view now"). The menu button sends Esc, and the player is in the
   hall again.
 - The word `layoutkey` changes the layout in a run: after it the stick opens

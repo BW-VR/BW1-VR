@@ -1394,6 +1394,8 @@ void RadialMenuWayChange(const char* by) {
 
 bool RadialMenuOpen() { return g_state_ready && g_state.open != kClosed; }
 
+bool RadialMenuShows() { return RadialMenuOpen() || g_fade > 0.0f; }
+
 int RadialMenuHintMode() {
   ReadSettings();
   if (!g_on) return 0;

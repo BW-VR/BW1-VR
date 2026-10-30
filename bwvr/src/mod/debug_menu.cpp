@@ -246,7 +246,7 @@ int ThrowLandRateValue();
 void ThrowLandSlowerChange(const char* by);
 void ThrowLandFasterChange(const char* by);
 // The Creature, the villagers and the miracles (creature_command.cpp,
-// creature_stay.cpp, miracle.cpp, village.cpp).
+// creature_stay.cpp, miracle.cpp, village.cpp, spell_book.cpp).
 int CreatureCommandRuleValue();
 void CreatureCommandRuleChange(const char* by);
 int CreatureStayModeValue();
@@ -257,6 +257,11 @@ int VillageTotemValue();
 void VillageTotemChange(const char* by);
 int VillageHoldValue();
 void VillageHoldChange(const char* by);
+// The spell book (spell_book.cpp).
+int SpellBookValue();
+void SpellBookChange(const char* by);
+int SpellBookAllValue();
+void SpellBookAllChange(const char* by);
 // The sound (audio_listener.cpp, audio_voices.cpp, audio_range.cpp).
 int AudioModeValue();
 void AudioCycleMode();
@@ -575,6 +580,10 @@ const Switch kSwitches[] = {
      "totem_hand", VillageTotemValue, VillageTotemChange, L"off|on"},
     {kGroupCreature, L"Hold target", L"Halo on the thing at the Hand",
      "hold_target", VillageHoldValue, VillageHoldChange, L"off|on"},
+    {kGroupCreature, L"Spell book", L"X opens the spell book", "spell_book",
+     SpellBookValue, SpellBookChange, L"off|on"},
+    {kGroupCreature, L"All miracles", L"All miracles, no cost (test)",
+     "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on"},
 
     // Sound
     {kGroupSound, L"Sound step", L"Sound of the mod, step by step", "",

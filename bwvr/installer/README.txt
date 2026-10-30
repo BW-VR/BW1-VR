@@ -424,7 +424,8 @@ controller. The left menu button opens the game menu with each hand.
                       close the ring with no choice. With the left
                       hand as the pointing hand, B opens the ring at
                       your right hand.
-  X (left hand)       No job.
+  X (left hand)       Open or close the spell book: the miracles that
+                      you can ask for now. See MIRACLES.
 
 To change the grab of the world, set "Grab the world" in the
 launcher (key grab_hand). 1 uses the grip of your other hand. 2 also
@@ -898,6 +899,23 @@ MIRACLES
 To cast a miracle, hold B and draw its gesture in the air: the same
 shape that you draw with the mouse. Draw it in front of you, as you
 see it, about 30 cm across. Moves of the Hand without B do not draw.
+
+The spell book is the other way. Press X on your left hand: a book
+opens over that hand with each miracle that your Worship Sites can
+give you now, and the pictures of its gestures. Put your right hand
+on a miracle: a gold halo shows on it, the controller ticks, and the
+card on your hand names it. Close the grip to take the miracle. The
+game takes the prayer power as for the gestures, and the Miracle
+comes into your Hand. A grey miracle is one that the game refuses
+now, and the card says why. Press X again to close the book. With the
+left hand as the pointing hand, A opens the book at your right hand.
+Set spell_book=0 in bwvr.ini to give X no job.
+
+For tests, set debug_all_miracles=1 in bwvr.ini, or use "All
+miracles" on the debug page of the ring. Then your towns know every
+miracle of the game, and your Worship Sites have no limit of prayer
+power. A village shows at most 6 miracles, so the book has 6 of them.
+A save that you make then keeps these miracles.
 
 A miracle from a reward or a dispenser is a bubble on the land. Close
 the grip on the bubble to carry it. Then press the trigger to use it.

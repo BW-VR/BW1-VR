@@ -152,6 +152,8 @@ struct ControllerHintState {
   int ring;             // 0 no ring, 1 a button opens it, 2 only the stick
   int layout;           // button_layout: 1 the menu button and Y, 0 Y and X
   bool walk;            // the stick of the other hand moves the player
+  bool book;            // the first face button of the other hand opens the
+                        // spell book (spell_book.cpp)
   char profile[64];     // of the pointing hand, "fake" for the fake controller
 };
 void ControllersHintState(ControllerHintState* out);
@@ -228,6 +230,10 @@ struct RingHand {
   bool button;        // the face button of the ring, by button_layout: Y or X,
                       // and B or A when the left hand points
   bool face_buttons;  // false for a controller with no face buttons
+  bool book_face;     // the first face button (X, or A) opens the spell book:
+                      // button_layout=1, and a controller with face buttons
+                      // that does not send Esc with it (spell_book.cpp)
+  bool book_button;   // that button is down
   bool stick_click;
   bool stick_live;    // false for a Vive pad that is not clicked
   float trigger;      // 0 to 1

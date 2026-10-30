@@ -15,6 +15,11 @@ void RadialMenuPump(unsigned long long now_ms);
 // world, and the hint card of that hand does not show.
 bool RadialMenuOpen();
 
+// True while the picture of the ring shows: the ring is open, it fades out,
+// or it shows a notice. The spell book (spell_book.cpp) shares the quad
+// layer of the ring, and it does not open while the ring shows.
+bool RadialMenuShows();
+
 // For the hints: 0 the ring is off, 1 its button opens it, 2 only the stick
 // opens it.
 int RadialMenuHintMode();

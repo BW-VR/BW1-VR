@@ -388,7 +388,7 @@ inline void CardSize(int pixels_w, int pixels_h, float pixels_per_meter,
 //      player knows it.
 //
 // With `always`, rules 2 and 3 do not apply (prompts=2).
-const int kMaxContexts = 16;
+const int kMaxContexts = 24;
 
 struct PromptRule {
   float dwell;  // seconds

@@ -57,37 +57,24 @@ These items come before the other work.
   also with the key at 1. Find what gives the villager its turn, and cut the
   turn in each step of the game. The scripted hand gives no turn at the
   release, so only a headset shows the turn that a real throw gives a tree.
-- **P20. The pictures of the gestures in the headset.** The plain game shows
-  the gestures that the player can draw now in the lower right corner of the
-  screen: `GInterface::ProcessPowerUpSystem` gives the list to
-  `fn_0068ABA0`, which makes a `DisplayGesture` for each type.
-  `DisplayGesture::Init` (`0x0068AED0`) places each one in pixels of the
-  game screen, from the right edge, in the lower band, and the particle
-  system draws them with its own camera near the world origin (`fn_0068B740`
-  at `0x0068B7C5`, `tabletop.md`). In the headset the player does not see
-  them. Likely cause: the corner of the eye picture is at the edge of the
-  lens, and the particle camera gets the camera of each eye. Prove it with
-  an eye picture of a desktop run (an empty Hand near a Worship Site with a
-  miracle icon).
-
-  The plan: a spell book on the hand that does not point. When the player
-  turns that hand palm up and opens it, the miracles that the player can
-  ask for now float over the palm, each one with the picture of its
-  gestures. The pointing hand plucks one out with the grip, and the Miracle
-  is in that Hand, with no gesture drawn. The pluck asks for the miracle in
-  the game's own way: the same request as the end of a chain of gestures,
-  or as a tap on a miracle icon at a Worship Site (packet `0x25` with the
-  spell seed type, `fn_00550C20`, `miracles.md`), so the game checks the
-  belief and the icon as it does for those. The list is the game's own:
-  the icons of the Worship Sites of the player that `ValidForRequestSpell`
-  allows, and the miracle "again" (`GSpellSystemInfo+0x10`). The gestures
-  stay as they are. Questions for the build:
-  - the pose that opens the book (palm up and open, how long, how it stays
-    off while the hand holds, grabs the land or opens the ring),
-  - a hint card for the book, and the haptics of a pluck,
-  - what the book shows when there is no miracle to ask for (no Worship
-    Site, no belief), and the leash gestures and the scribble,
-  - a key with the old behavior: no book.
+- **P20. The spell book: prove it in a headset.** X opens a spell book over
+  the hand that does not point, and the grip of the pointing hand takes a
+  miracle with the game's own request (`spell_book=1`, `debug_all_miracles`
+  for tests, `miracles.md`, "The spell book"). The recipe
+  `village_run.ps1 -Kind book` shows the open, the halo, the card, the take
+  and a refusal, with Vulkan and with dxwrapper. Open:
+  - In a headset: the place 12 cm from the grip, the size of the cells, and
+    whether the book is easy to read and to reach.
+  - `debug_all_miracles=1` gives only 6 miracles: the Village Centre has 6
+    slots for icons, and the Worship Site copies them (`miracles.md`, "The
+    limit of 6 icons"). Every miracle needs icons of the site that do not
+    come from the Village Centre (`WorshipSite::AddSpellIconIfNecessary` `0x0077C9E0`).
+  - The miracle bubble of the game: the book draws its own bubble with the
+    gestures. The icons of a Worship Site are meshes of the game.
+  - Why the corner pictures of the gestures of the game (`DisplayGesture`,
+    `fn_0068ABA0`, `fn_0068B740`) do not show in the headset. Prove it with
+    an eye picture of a desktop run.
+  - The leash gestures and the scribble are not in the book.
 - **P19. A keyboard in the headset.** Some screens need text: the name of
   the god in the first start (a new profile), and other text boxes of the
   front end. Give the player a keyboard in VR that types into the text box

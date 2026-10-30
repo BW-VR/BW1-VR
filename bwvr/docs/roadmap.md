@@ -64,6 +64,21 @@ These three items come before the other work.
 
 ### Faults in play
 
+- **B37. A save does not end in a game folder in Program Files.** With the
+  game in `C:\Program Files (x86)\...` and the profile in the VirtualStore
+  of the user, each save of a play stays as `<slot>.sav.tmp`,
+  `Script_<slot>.sav.tmp` and `SavedCreature0`, with no `<slot>.sav` and no
+  `SaveGame.inf`. A save in a game folder outside Program Files has them.
+  Find which step of the save fails (the rename of the `.tmp` files, the
+  write of `SaveGame.inf`) and whether the game can load such a slot. Check
+  whether it is the same with no mod.
+- **B36. The fish do not respond to the Hand in a headset.** At the sea the
+  fish get no halo, the grip at the Hand takes none, and the far grab takes
+  none. Only the trigger works: a tap on the water scatters them. The take
+  of fish is built (`fish_take`, `grab.md`), and desktop runs showed it. In
+  a play of release 1.2.0 the log said that the offer of fish farms found 0
+  farms in reach. Find what the desktop runs had that the play did not:
+  the kind of fish object, the land, the distance, the scale.
 - **B2. A catch at once: check it in a headset.** A press of the grip on
   an object that moves (it falls, flies or rolls) puts the object in the
   hand from the first frame after the press. The game sends its pick up at
@@ -461,12 +476,6 @@ that moves while the Hand takes it.
     Creature too,
   - a tree, a house or a pile is still easy to take or to tap: with the
     Hand's point in it, or with the aim on no far target.
-- **P2. The Creature looks at the player: check it in the headset.** Where a
-  plan of the Creature looks at the camera of the player, the Creature looks
-  at the player's head (`creature_look_head=1`, `creature.md`, section 5.4).
-  Desktop runs show the angles of the game. They do not show that the head
-  of a small Creature turns visibly on the screen. Check in a headset that
-  the eyes meet the player's eyes, with a larger Creature near the player.
 - **P2. The stay of the Creature: test it in the headset.** A grip from a
   distance that stays closed on the Creature makes it stop and stay until
   the grip opens. A short grip changes the leash when it opens
@@ -565,10 +574,10 @@ that moves while the Hand takes it.
   mesh (`target_glow=1`, `hand-model.md`, "The glow on the mesh of a
   target"). Desktop runs show it in both eyes on a rock, a villager, a bush,
   a pile and the Village Store. Open:
-  - Only a headset shows whether the strength is right by day and by night
-    (`target_glow_pct`, 45), whether the pulse and the band of light are calm
-    enough at the size of the God view, and whether a small target needs
-    more than the light on its mesh. The test key steps `target_glow`
+  - The strength of 45 (`target_glow_pct`) is right for the hover in a
+    headset. Only a headset shows whether it is right by night, whether the
+    pulse and the band of light are calm enough at the size of the God view,
+    and whether a small target needs more than the light on its mesh. The test key steps `target_glow`
     through the glow, the halo and both.
   - The Creature (`LH3DCreature::DrawNow`, `0x0048E260`) and a building in
     work (`0x00517F90`) do not draw through `Game3DObject::AddForDrawing`.
@@ -664,16 +673,17 @@ that moves while the Hand takes it.
     overlay of Virtual Desktop on (the latency of the network and the frames
     that the headset drops), and a session with `xr_vulkan=0` and
     `backend=dxwrapper` for a comparison.
-  - **About 100 frames a second at 120 Hz with Virtual Desktop.** The
-    runtime says that the display has 120 Hz, and it takes a frame each 10
-    ms. The frame of the mod is ready about 6 ms before that with
-    `backend=vulkan` (`backend.md`, "The refresh rate of the headset"). So
-    the cap is in the runtime. Next steps: a session that reads the lines
-    `refresh rate :` and `display      :`, a session with
-    `refresh_rate_hz=-1`, and `bwvr-xrtest 30 vulkan hz=-1` for the pace of
-    the runtime with no game. Then a session with a smaller render size,
-    and one with the performance overlay of Virtual Desktop on (the time of
-    the encoder).
+  - **About 100 frames a second at 120 Hz with Virtual Desktop.** The cap
+    is in the runtime. With Virtual Desktop on a Quest 3 the headset offers
+    one rate, 120 Hz (`XR_FB_display_refresh_rate`), and `xrWaitFrame` gives
+    a display period of 8.33 ms. But the display times come 10.0 ms apart
+    (99.3 to 99.6 Hz), with 0 to 2 late steps in 450 frames, and the scene
+    walks of both eyes take about 3 ms of the frame (`backend.md`, "The
+    refresh rate of the headset"). `refresh_rate_hz` cannot help, because
+    there is no other rate. Next steps: `bwvr-xrtest 30 vulkan` for the pace
+    of the runtime with no game, a session with a smaller render size, and
+    one with the performance overlay of Virtual Desktop on (the time of the
+    encoder and of the network).
   - **The wait at the stop of a sound.** The mod skips the 20 ms that
     the audio DLL waits on the frame thread at the stop of a sound
     (`audio_stop_wait=0`, `audio.md`, 7.6). In a desktop run the worst frame
@@ -850,7 +860,13 @@ that moves while the Hand takes it.
     one state"). With one walk, each of its 1580 to 2610 state calls in a
     frame changes a value. The texture filter of the mod adds about 4 calls
     in a frame.
-- **N2. The hands that react.** Not shown on the desktop: a rock and the
+- **N2. The hands that react.** In a headset the fingers rest on objects
+  that move (rocks, trees, villagers), but not on buildings, and the player
+  sees nothing of the fingers in the sea. Find why the boxes of a house do
+  not stop the fingers in play (the box size rule, the list of bodies near
+  the hand), and what the sea shows: whether a layer of the water that the
+  game draws in 2D is not in the VR picture, so the fingers go into water
+  that the player does not see. Not shown on the desktop: a rock and the
   crown of a tree as a body, a villager that walks into a still hand, and a
   tree taken with the palm to the side, and a picture from the side of a
   finger tip that bends at a wall. The box of the Creature does not follow
@@ -909,13 +925,6 @@ that moves while the Hand takes it.
   install and the uninstall of the add-on on a clean setup. The game ran
   at 42 to 44 frames a second, and the host sends each frame on the frame
   thread (`backend.md`).
-- **N19. Haptics from the world: check it in a headset.** With
-  `world_haptics=1` the hand feels the purr of a stroke, the beat of a
-  living thing in the Hand, the land under a grip, the thump of a landing
-  and of a tree that comes out, the charge of a miracle and the pieces of a
-  take (`hand-model.md`, "Haptics from the world"). Only a headset shows
-  how each pattern feels, and whether a new target and a lock stay clear.
-  The mod reads no type of the ground, so rock and grass feel the same.
 
 ### The repo, the release and the tools
 

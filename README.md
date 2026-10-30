@@ -10,6 +10,9 @@ and you reach in.
 The mod is free. If you like it, you can support the work on
 [Ko-fi](https://ko-fi.com/buckzor).
 
+Below is an introduction video to the game and the mod. Check it out!
+https://www.youtube.com/watch?v=6LNpu24--G8
+
 **Status: alpha.** Expect faults, and please report them (see
 [Report a problem](#report-a-problem)). Talk with other players and with the
 makers of the mod on [Discord](https://discord.gg/FTn8y4eypU).

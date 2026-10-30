@@ -486,8 +486,9 @@ slot that is older than the run is a file of the player, and the script does
 not copy it. The game writes the slot in each profile folder where it finds
 the files of the slot, so the script copies the slot with the newest
 `20.sav`. When the game writes into the VirtualStore of a folder that
-refuses the write, it cannot write `SaveGame.inf`. A test save made there
-has no `SaveGame.inf`, and the game loads it all the same. The guards of such
+refuses the write, it can write `SaveGame.inf` and rename `20.sav.tmp` only
+with `save_virtual_store=1` (`backend.md`, "A save in the VirtualStore"). A
+test save with no `SaveGame.inf` loads all the same. The guards of such
 a run are in "A run in which the game ends by itself". The last line is `SAVE MADE` or `SAVE NOT MADE`.
 
 A different name makes a save of your own: give `-Choice` (a row of the start

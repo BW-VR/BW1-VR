@@ -95,14 +95,17 @@ These items come before the other work.
 
 ### Faults in play
 
-- **B37. A save does not end in a game folder in Program Files.** With the
-  game in `C:\Program Files (x86)\...` and the profile in the VirtualStore
-  of the user, each save of a play stays as `<slot>.sav.tmp`,
-  `Script_<slot>.sav.tmp` and `SavedCreature0`, with no `<slot>.sav` and no
-  `SaveGame.inf`. A save in a game folder outside Program Files has them.
-  Find which step of the save fails (the rename of the `.tmp` files, the
-  write of `SaveGame.inf`) and whether the game can load such a slot. Check
-  whether it is the same with no mod.
+- **B37. A save in Program Files: check it in a play.** With no
+  administrator rights the profile is in the VirtualStore. Windows then
+  refuses two calls of each save: the write of `SaveGame.inf` (error 5, it
+  does not virtualize `.inf`) and the rename of `<slot>.sav.tmp` (error 3).
+  `save_virtual_store=1` makes these calls again on the VirtualStore copy
+  (`backend.md`, "A save in the VirtualStore"). A test program with the
+  functions of the mod showed it, but a desktop run cannot: the scripts
+  start the game with administrator rights. Check in a play that a save in
+  the Save Game Room and the save on exit make `<slot>.sav` and
+  `SaveGame.inf`, and that the Save Game Room shows the slot. The log has
+  the lines `save store`.
 - **B36. The fish do not respond to the Hand in a headset.** At the sea the
   fish get no halo, the grip at the Hand takes none, and the far grab takes
   none. Only the trigger works: a tap on the water scatters them. The take

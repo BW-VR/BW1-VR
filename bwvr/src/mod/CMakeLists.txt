@@ -96,6 +96,7 @@ add_library(bwvr_mod SHARED
     net_check.cpp
     dx_check.cpp
     file_read_ahead.cpp
+    save_store.cpp
     hang_watch.cpp
     gesture_air.cpp
     audio_listener.cpp

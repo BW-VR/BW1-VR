@@ -42,6 +42,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/draw_merge.cpp` | One draw call for a row of draw calls of the game with one state (`draw_merge`) |
 | `src/mod/present_watch.cpp` | Skips the copy to the monitor |
 | `src/mod/file_read_ahead.cpp` | The read ahead of the files of `LHFile`: a small read comes from a copy of the file (`file_read_ahead`) |
+| `src/mod/save_store.cpp`, `save_store_math.h` | The calls of a save in the VirtualStore of the user, when Windows refuses them in Program Files (`save_virtual_store`) |
 | `src/mod/stereo.cpp` | The scene walk twice, the hotkeys, the view setup |
 | `src/mod/head_camera.cpp`, `head_pose.cpp`, `eye_camera.cpp` | The head on the camera, the per eye matrix |
 | `src/mod/fov.cpp` | `LH3DTech::ChangeFov` hook |
@@ -1024,6 +1025,118 @@ the frame rate (one for each 450 frames), and the line of
 that ends with the word `exit` leaves a saved game of that frame in the
 profile folder, and `make_test_save.ps1` keeps a copy of it before the
 profile goes back.
+
+## A save in the VirtualStore
+
+The game is a 32 bit program with no manifest. When it has no administrator
+rights and its folder is in Program Files, Windows virtualizes its files. A
+write that the folder refuses goes to the same path in
+`%LOCALAPPDATA%\VirtualStore`. The profile of the player is then only in the
+VirtualStore (`tools/desk/README.md`, "What a run does to your PC").
+
+### The calls of a save [V]
+
+`SaveGameRoom::InstantSaveGame` (`0x00792FB0`) makes each save: a save of the
+Save Game Room, an auto save and the save of slot 20 on the exit path. The
+calls to Windows go through `LHOSFile`, in this order:
+
+1. `SaveGameRoom::SaveGameInfo` (`0x00792910`) writes `SaveGame.inf` of the
+   slot: the land, the name and the date. `InstantSaveGame` does not read its
+   result.
+2. `GameOSFile::SaveAllGame` (`0x00558160`) writes `<slot>.sav.tmp`.
+3. When each write worked, it deletes `<slot>.sav` (`LHOSFile::Delete`,
+   `DeleteFileA`) and renames `<slot>.sav.tmp` to `<slot>.sav`
+   (`LHOSFile::Rename`, `MoveFileA`, at `0x00558568`). Then it does the same
+   for `Script_<slot>.sav.tmp` (`0x005585DC`, `0x00558651`).
+
+`LHOSFile::Open` (`0x007BC730`) asks `LHOSFile::Exists` (`0x007BC6A0`,
+`GetFileAttributesA`) first. Mode 0 writes a file: `TRUNCATE_EXISTING` when
+the file is there, else `CREATE_ALWAYS`. Mode 1 opens a file that is there
+with `GENERIC_READ | GENERIC_WRITE` and `OPEN_ALWAYS`. Mode 2 reads.
+
+The Save Game Room shows a slot only when it can open `<slot>.sav` and then
+`SaveGame.inf` with mode 1 (`fn_00792A20`, called for each slot folder at
+`0x0079003A`). A slot with no `<slot>.sav` or no `SaveGame.inf` looks empty,
+and the player cannot load it. The load of slot 20 at the start needs only
+`20.sav` ("A test save").
+
+### What Windows refuses [R]
+
+A 32 bit test program with no manifest, started with no administrator
+rights, made the calls of a save in a folder of Program Files that was only
+in the VirtualStore:
+
+| Call | Result |
+| --- | --- |
+| `CreateFileA` of `SaveGame.inf`, mode 0 | Error 5 (`ERROR_ACCESS_DENIED`) |
+| `CreateFileA` of `SaveGame.inf`, mode 1, when the VirtualStore has the file | Error 5 |
+| `GetFileAttributesA` of that `SaveGame.inf` | Error 2: the file is not there |
+| `CreateFileA` of `0.sav.tmp` | Works. The file goes to the VirtualStore |
+| `MoveFileA` of `0.sav.tmp` to `0.sav` | Error 3 (`ERROR_PATH_NOT_FOUND`) |
+| `DeleteFileA` of `0.sav` when the VirtualStore has it | Works |
+| `FindFirstFileA` in the folder of the slot | Shows the files of the VirtualStore, `SaveGame.inf` too |
+
+Windows does not virtualize a file with the extension `.inf`. So the game can
+never write or read `SaveGame.inf` in Program Files with no administrator
+rights. The rename fails only when the folder of the slot is not in the real
+folder. In a folder that is in both places, it works.
+
+So each save of the plain game in such a profile leaves `<slot>.sav.tmp`,
+`Script_<slot>.sav.tmp` and no `SaveGame.inf`. A save over a slot that has a
+`<slot>.sav` deletes it first. The slot then looks empty, and slot 20 loses
+the game that the start loads. The mod changes none of these calls with
+`save_virtual_store=0`, so the game with the mod and that key does the same.
+
+### What the mod does
+
+`save_virtual_store=1` (the default, `save_store.cpp`, `save_store_math.h`).
+The mod puts its own functions in four calls of `LHOSFile` to Windows. It
+changes only the address in each instruction, as the read ahead does:
+
+| Address | Function | Call |
+| --- | --- | --- |
+| `0x007BC6CA` | `LHOSFile::Exists` | `GetFileAttributesA` |
+| `0x007BC79B` | `LHOSFile::Open` | `CreateFileA` |
+| `0x007BCC45` | `LHOSFile::Delete` | `DeleteFileA` |
+| `0x007BCC2A` | `LHOSFile::Rename` | `MoveFileA` |
+
+Each function makes the call of the game first. When Windows refuses it with
+error 2, 3 or 5, the process is virtualized and the file is in Program Files,
+Program Files (x86), ProgramData or Windows, the mod makes the same call
+again. The second call uses the path of the VirtualStore copy:
+`%LOCALAPPDATA%\VirtualStore` and the path of the file with no drive. A
+delete goes again only when the VirtualStore has the file. When the second
+call fails too, the game gets the first result. A call that Windows does not
+refuse stays as it is. A process with administrator rights is not
+virtualized, and the mod changes none of its calls.
+
+So `SaveGame.inf`, `<slot>.sav` and `Script_<slot>.sav` go into the
+VirtualStore beside the other files of the save, and the Save Game Room
+reads them there. The same test program with the functions of the mod made
+two saves of one slot in a folder that was only in the VirtualStore. Each
+save made `0.sav`, `Script_0.sav` and `SaveGame.inf`, and the second save
+replaced the first. The reads of the Save Game Room found both files.
+
+The log has one line at the start, and one line for each call that the mod
+made again (60 lines at most). A lookup of `GetFileAttributesA` gets no line.
+
+```
+save store   : save_virtual_store=1. Windows virtualizes the files of the game process. When Windows refuses a call of LHOSFile to a file in Program Files, ProgramData or Windows, the mod makes the call again on the copy of the file in C:\Users\<user>\AppData\Local\VirtualStore
+save store   : Windows refused CreateFileA(<slot folder>\SaveGame.inf, CREATE_ALWAYS) with error 5. The call on the VirtualStore copy worked
+save store   : Windows refused MoveFileA(<slot folder>\0.sav.tmp, <slot folder>\0.sav) with error 3. The rename in the VirtualStore worked (error 0)
+```
+
+**Known limits.**
+
+- A desktop run cannot show the save in the VirtualStore. The scripts start
+  the game from a shell with administrator rights, so the game is not
+  virtualized and writes its profile in the real game folder. The run then
+  shows only that the four calls pass with the functions of the mod. The
+  test program above shows the calls of Windows and the functions of the
+  mod.
+- A slot that a save of the plain game left with only `.tmp` files stays so.
+  The mod does not rename such files. The next save in that slot replaces
+  them.
 
 ## The depth buffer
 
@@ -5285,6 +5398,7 @@ keys that the launcher sets.
 | `skip_snapshot` | 1 | |
 | `test_keys` | 0 | The test keys |
 | `file_read_ahead` | 1 | 1: a read of less than 64 KB from a file that LHFile opens to read comes from a copy of the next 256 KB of the file. 0: each read goes to `ReadFile`, as in the plain game. A test key: Shift Q. See "The read ahead of the files of the game" |
+| `save_virtual_store` | 1 | 1: when Windows refuses a call of `LHOSFile` (exists, open, delete, rename) to a file in Program Files in a virtualized game process, the mod makes the call again on the VirtualStore copy of the file. So a save ends with `<slot>.sav` and `SaveGame.inf`. 0: each call goes to Windows as the game makes it. No test key. See "A save in the VirtualStore" |
 | `profile` | 0 | A test key. 1 is the frame cost measure with a timer on each Direct3D draw call, 2 is the measure with no such timer. See "The frame cost measure" |
 | `draw_probe`, `capture_every_seconds` | 0 | Reports and eye pictures |
 | `eye_test_luma` | 0 | A test key. 1: the log names each run of frames with one dark eye and each run of black frames. See "Testing without a headset" |

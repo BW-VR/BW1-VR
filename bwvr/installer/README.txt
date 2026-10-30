@@ -525,6 +525,12 @@ To save in the Save Game Room, click an empty picture two times and
 then click OK. The save has no message, because the text line needs
 a keyboard. To load, click the picture of the save and then Yes.
 
+When the game is in Program Files, Windows keeps your saved games in
+AppData\Local\VirtualStore. There Windows refuses two steps of each
+save of the game, and the save does not show in the Save Game Room.
+The mod does these two steps in the VirtualStore, so each save is
+complete. Set save_virtual_store=0 in bwvr.ini to turn this off.
+
 At the Temple on the land, a short press of the grip on the door goes
 into the Temple, and a short press on one of the three leash posts
 chooses that leash.

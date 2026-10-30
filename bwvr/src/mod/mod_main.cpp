@@ -257,6 +257,8 @@ void NetCheckInstall(bool own_answer);
 void DxCheckInstall(bool own_answer);
 // file_read_ahead.cpp: the read ahead of the files of LHFile.
 void FileReadAheadInstall(bool on, bool test_keys);
+// save_store.cpp: the calls of a save in the VirtualStore of the user.
+void SaveStoreInstall(bool on);
 // near_plane.cpp: the near plane of the game camera.
 void NearPlaneSetOptions(int cm_24, int cm_16);
 void NearPlaneInstall();
@@ -2668,6 +2670,10 @@ void EarlyHooks() {
   FileReadAheadInstall(
       GetPrivateProfileIntA("bwvr", "file_read_ahead", 1, path) != 0,
       TestSwitchesOn());
+  // Before the game opens its first file with LHOSFile. It works with vr
+  // turned off too.
+  SaveStoreInstall(
+      GetPrivateProfileIntA("bwvr", "save_virtual_store", 1, path) != 0);
   // On by default from version 1.1.0. Read here because the device hooks of
   // the bridge need it.
   Depth24SetWanted(GetPrivateProfileIntA("bwvr", "depth24", 1, path) != 0);

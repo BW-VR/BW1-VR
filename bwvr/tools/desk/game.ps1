@@ -169,8 +169,9 @@ function Test-BwvrElevated {
 # (Get-BwvrVirtualStore). After that, the game uses the VirtualStore copy of
 # each file that is there, also for a read and also when the folder lets the
 # user write now. So the files of the player can be in the folder, in its
-# VirtualStore, or in both. A write that only truncates a file of the install
-# (SaveGame.inf of slot 20) fails in a folder that refuses the write. The
+# VirtualStore, or in both. Windows does not virtualize a file with the
+# extension .inf, so the game needs save_virtual_store=1 of the mod for
+# SaveGame.inf there (docs/backend.md, "A save in the VirtualStore"). The
 # result:
 #   Folder     the folder that gets the writes of the game after its start
 #   Roots      each folder in which a test run must keep the files of the

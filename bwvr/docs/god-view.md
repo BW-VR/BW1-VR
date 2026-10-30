@@ -90,7 +90,7 @@ sets the flags of each mode.
 - **The camera zone.** Where a script of Land 1 keeps the camera in an area,
   for example at the Creature select, the game camera stays in that area,
   so the game does not push it back or shake the view. The player turns and
-  zooms freely and moves up to `god_zone_margin` (100) units past the edge.
+  zooms freely and moves up to `god_zone_margin` (50) units past the edge.
   There the view stops, and the game plays its sound of the block (section
   17).
 
@@ -1312,7 +1312,7 @@ the walk with the stick are in section 5.7.
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
 | `god_camera_at` | 1 | 1: the game camera is over the land point under the head. 0: over the recenter place (section 7). Ctrl and Numpad 1 change it with `test_keys=1` |
 | `god_zone` | 1 | 1: in a camera zone of a script the game camera stays in the zone, the player's place goes at most `god_zone_margin` past it, and the view does not shake (section 17). 0: the game pushes its camera back into the zone, with its sound and its shake. The debug page has the switch "Camera zone" |
-| `god_zone_margin` | 100 | How far the player's place goes past the camera zone, in world units, 0 to 2000 (section 17) |
+| `god_zone_margin` | 50 | How far the player's place goes past the camera zone, in world units, 0 to 2000 (section 17) |
 | `god_turn_keeps_focus` | 1 | 1: a snap turn alone turns the game camera about its own focus (section 7). 0: it puts the game camera over the land under the head |
 | `tilt_help_degrees` | 3 | A look of the head up or down at 20 degrees a second or faster counts as the game's tilt: one tilt event of the help for each so many degrees, one in each game turn (section 7, "The tutorial"). 0: the head sends no tilt events |
 | `turn_help_degrees` | 5 | A snap turn counts as one turn event of the help for each so many degrees, one in each game turn, so the turn lesson of the tutorial ends with one full turn (section 7, "The turn lesson"). 0: one event for a snap turn |
@@ -2627,9 +2627,9 @@ With `god_zone=1` (the default) and a zone of three points or more:
   own focus (section 7) keeps to the same rule. So the game does not push
   its camera.
 - **The player's place has a limit.** The waist point of the God view goes at
-  most `god_zone_margin` (100) units past the zone. At the start scale of 100
-  units for each meter that is 1 m of the room. At the Creature select the
-  player can stand 1 m past the edge and see the three Creatures and the
+  most `god_zone_margin` (50) units past the zone. At the start scale of 100
+  units for each meter that is 50 cm of the room. At the Creature select the
+  player can stand 50 cm past the edge and see the three Creatures and the
   Hand. The limit holds for the walk with the stick, the grab, the mouse
   pan, a zoom step, the smooth zoom and the teleport.
 - **At the limit the view stops.** A move past the limit goes to the point
@@ -2667,7 +2667,7 @@ zone" in the group View (`controllers.md`, 10.8).
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `god_zone` | 1 | 1: the God view keeps to the camera zone (17.3). 0: the game pushes its camera, with its shake |
-| `god_zone_margin` | 100 | How far the player's place goes past the zone, in world units, 0 to 2000. 0 keeps the place in the zone |
+| `god_zone_margin` | 50 | How far the player's place goes past the zone, in world units, 0 to 2000. 0 keeps the place in the zone |
 
 ### 17.5 The log
 
@@ -2677,7 +2677,7 @@ writes of the game camera that the zone changed, and the counts of each
 window of the report:
 
 ```
-camera zone  : god_zone=1. In a camera zone of a script the game camera stays in the zone, so the game does not push it back or shake the view. Your place goes at most 100 units past the zone (god_zone_margin), and a push past that plays the sound of the game
+camera zone  : god_zone=1. In a camera zone of a script the game camera stays in the zone, so the game does not push it back or shake the view. Your place goes at most 50 units past the zone (god_zone_margin), and a push past that plays the sound of the game
 camera zone  : a script set a camera zone of 20 points, x 2060.3 to 2294.7 and z 2960.1 to 3208.3, the middle at 2168.0 3099.2 (god_zone=1)
 camera zone  : the game camera stays in the zone: at 2068.5 179.4 3041.4, not at 1977.9 309.5 2980.5, looking at 2191.4 3.1 3123.8
 camera zone  : the walk with the stick asked for your place at 1979.6 2981.7, 100.4 units past the zone. It stops at 1980.0 2981.9, 100.0 units past it (the limit of god_zone_margin=100, or the place before the move)
@@ -2704,11 +2704,11 @@ again:
 $s = 'lstick_down@4700+300 shot@4900+1 shot@4960+1 lstick_up@5050+150 ' +
      'stick_right@5250+8 stick_right@5300+8 stick_up@5360+10 stick_up@5420+10 ' +
      'stick_down@5480+10 lstick_left@5550+300 shot@5800+1'
-.\bwvr\tools\desk\hand_run.ps1 -Name zone1 -Dll <dll> -Kind fixed -Steps $s -Set 'god_zone=1;test_frame_rate=60'
+.\bwvr\tools\desk\hand_run.ps1 -Name zone1 -Dll <dll> -Kind fixed -Steps $s -Set 'god_zone=1;god_zone_margin=100;test_frame_rate=60'
 .\bwvr\tools\desk\hand_run.ps1 -Name zone0 -Dll <dll> -Kind fixed -Steps $s -Set 'god_zone=0;test_frame_rate=60'
 ```
 
-With the renderer Vulkan:
+With the renderer Vulkan and `god_zone_margin=100`:
 
 | | `god_zone=1` | `god_zone=0` |
 | --- | --- | --- |

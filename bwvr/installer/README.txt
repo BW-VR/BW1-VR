@@ -256,11 +256,11 @@ buttons of the mouse.
 
 In some places of Land 1 the game keeps its camera in an area, for
 example at the Creature select. There you can turn and zoom as you
-like, and you can move about 1 m past the edge of the area. At that
+like, and you can move about 50 cm past the edge of the area. At that
 limit you stop, the game plays its sound of the block, and the view
 does not shake. Set god_zone_margin in bwvr.ini to change how far you
-can go past the edge, in units of the world (100 is 1 m at the start
-scale). Set god_zone=0 to let the game push its camera back, with its
+can go past the edge, in units of the world (the default 50 is 50 cm
+at the start scale). Set god_zone=0 to let the game push its camera back, with its
 shake of the view.
 
 Ctrl F11 turns the God view off and on. Off gives the immersive

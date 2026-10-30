@@ -911,7 +911,7 @@ void ReadSettings() {
     // zone. 0 is the game's own push and shake (docs/god-view.md, "The
     // camera zone").
     t.god_zone = number("god_zone", 1);
-    t.god_zone_margin = number("god_zone_margin", 100);
+    t.god_zone_margin = number("god_zone_margin", 50);
     // The walk with the stick of the hand that does not point: 1 moves the
     // player over the land along the direction of the head, 2 along the
     // direction in which that controller points, and 0 is off. A full push

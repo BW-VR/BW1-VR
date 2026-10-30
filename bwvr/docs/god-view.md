@@ -87,6 +87,12 @@ sets the flags of each mode.
   camera is from a thing gets the distance from the head or the nearest
   hand. A script that asks if the camera sees a thing gets the view of the
   head. In a story the script gets the camera of the story (section 16).
+- **The camera zone.** Where a script of Land 1 keeps the camera in an area,
+  for example at the Creature select, the game camera stays in that area,
+  so the game does not push it back or shake the view. The player turns and
+  zooms freely and moves up to `god_zone_margin` (100) units past the edge.
+  There the view stops, and the game plays its sound of the block (section
+  17).
 
 ## 1. The map
 
@@ -846,7 +852,8 @@ its moving flag for a camera that changes, and the interface then clears the
 gesture trail. It does not undo the game's own moves of its camera either. At
 the build the game camera stays where the game put it, and the view goes to
 it (section 15). No write happens while a script holds the input or the
-pivot, while a fight holds the camera, or while a jump flies.
+pivot, while a fight holds the camera, or while a jump flies. In a camera
+zone of a script the game camera stays in the zone (section 17).
 
 **A snap turn alone keeps the focus** (`god_turn_keeps_focus`, 1). When the
 view only turned with snap turns since the last write
@@ -1304,6 +1311,8 @@ the walk with the stick are in section 5.7.
 | `god_spawn` | 1 | 1: the player goes where the game puts its own camera (section 15). 0: the view is built at the start, a load and the end of a story only, with the focus under the recenter pose |
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
 | `god_camera_at` | 1 | 1: the game camera is over the land point under the head. 0: over the recenter place (section 7). Ctrl and Numpad 1 change it with `test_keys=1` |
+| `god_zone` | 1 | 1: in a camera zone of a script the game camera stays in the zone, the player's place goes at most `god_zone_margin` past it, and the view does not shake (section 17). 0: the game pushes its camera back into the zone, with its sound and its shake. The debug page has the switch "Camera zone" |
+| `god_zone_margin` | 100 | How far the player's place goes past the camera zone, in world units, 0 to 2000 (section 17) |
 | `god_turn_keeps_focus` | 1 | 1: a snap turn alone turns the game camera about its own focus (section 7). 0: it puts the game camera over the land under the head |
 | `tilt_help_degrees` | 3 | A look of the head up or down at 20 degrees a second or faster counts as the game's tilt: one tilt event of the help for each so many degrees, one in each game turn (section 7, "The tutorial"). 0: the head sends no tilt events |
 | `turn_help_degrees` | 5 | A snap turn counts as one turn event of the help for each so many degrees, one in each game turn, so the turn lesson of the tutorial ends with one full turn (section 7, "The turn lesson"). 0: one event for a snap turn |
@@ -1350,6 +1359,7 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
 | `src/mod/walk_math.h` | The walk with the stick: the push (`Push`), the forward direction of the head and of the controller (`HeadForward`, `AimForward`), the speed in the room (`Speed`), the step of a frame (`Step`), the view after a step (`Walk`) and the filter of the land that the view follows (`FollowStart`, `FollowStep`). All are pure functions |
 | `src/mod/tabletop.cpp`, `tabletop.h` | The God view in the table state: the place at a game camera (`PlaceGod`, `ApplyGodSpawn`), the steps (`ApplyGodSteps`), the point of a zoom (`GodZoomPoint`, `ZoomClearHead`), the smooth zoom (`TabletopGodZoomHold`, `ApplyGodZoomHold`), the walk with the stick (`TabletopGodWalk`, `ApplyGodWalk`), the mouse pan (`MousePan`), the camera switches and events, the hook on `GGame::ClearMap`, the values that follow the scale, the Hand's size, the ears and the game camera it wants |
+| `src/mod/camera_zone.cpp`, `camera_zone.h`, `camera_zone_math.h` | The camera zone of a script (section 17): the read of the zone of the game, the limit of a move (`LimitMove`), the game camera in the zone (`KeepCamera`, `PointInside`), the bump for the sound (`BumpPoint`), and the hook on the shake of the push |
 | `src/mod/near_plane.cpp` | The near plane hook, for the God view, the table and the immersive view |
 | `src/mod/teleport.cpp`, `teleport.h`, `aim_smooth.h` | The teleport: the states, the arc and the hit on the CPU, the refusals, the mouse double click, the aim filter, the log (section 14) |
 | `src/mod/comfort_camera.cpp` | The game camera write (`GodAfter`), the watch of the game's own camera moves (`WatchBefore`, `WatchAfterGame`, `WatchEnd`), the turn, the wheel, the tilt keys (`GodTiltKeys`), the game camera after a land drag (`GodDragBefore`, `GodDragAfter`), the write of the grab on the game camera (`ComfortCameraGrabMove`) and the log of the camera events (`h_Help`) |
@@ -2529,3 +2539,205 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   the Island Keeper of the Gods' Playground, the mother of `FollowUs`. It can
   also show if the nearest hand is the right point for a real player, and if
   a script that deletes a thing behind the head is good in VR.
+
+## 17. The camera zone
+
+Some steps of Land 1 keep the camera in an area of the map: the camera zone.
+The Creature select is one of them. The code is in `camera_zone.cpp`, and the
+math is in `camera_zone_math.h`.
+
+### 17.1 What the game does
+
+[V: the disassembly, `Scripts\Quests\challenge.chl` and `Data\Zones`]
+
+- **The script word.** "set camera zone" (`GScript::SetCameraZone`
+  `0x006ED890`) loads a file of `Data\Zones`. The file gives a polygon on the
+  map (`CameraModeNew3::ForceFieldPoints` `0x00C5B130`, the count at
+  `0x00C5E130`) and a height limit. The word sets
+  `CameraModeNew3::DrawForceField` `0x00C5E144`, and `0x009CE6B0` for the
+  height limit. A save holds the zone (`CameraExclusion::SaveExclusionFile`).
+- **The test.** On each update `CameraModeNew3::Update` tests the position
+  of the game camera against the polygon (`0x0045F983` to `0x0045FCE1`,
+  `CameraExclusion::InsideInclusion` `0x00455E20`). The test uses x and z
+  only. It does not test the focus.
+- **The push.** For a position outside the polygon the game looks for a
+  point in it on a ring of 50 units about the position (20 units in a mode
+  that is not 4), starting in the direction of the focus. When no point of
+  the ring is inside, it takes the nearest point of the edge. The camera and
+  its focus go there in one update. Then the game:
+  - sends the help event 0x202,
+  - starts the effect 42 of the force feedback (`GInterface::StartImmersion`),
+    which the controllers give as a pulse of 0.20 for 15 ms,
+  - plays the sound 0x2B at the camera (`fn_0042A000`, `GAudio::PlaySoundEffect`),
+  - starts a shake of 400 ms (`LH3DCameraChecker::Create` `0x00821050`, from
+    `0x0045FC89`),
+  - and pulses the force field at the edge (`LightSheet::PulseForceField`).
+- **The shake.** `LH3DTech::UpdateCamera` adds the shake to the camera that
+  it gets (`fn_008210C0` at `0x00819A0B`): a random step of up to 1 unit on
+  each axis of the position and of the focus, in each call, for 400 ms. It
+  acts while the drawn camera is within 100 units of the place of the
+  shake. The hook on `PSysGlobal::StartCameraShake` (`backend.md`, "No
+  shakes") does not see this shake, because the push calls `Create` itself.
+- **The height limit.** A camera higher than the limit goes down to it (event
+  0x203). That move has no sound and no shake.
+
+**The zones of Land 1.** `challenge.chl` names seven files. `Data\Zones` also
+has `Land1Zone1.exc` and `Land1Zone4.exc`, which no script names. No other
+land and no other script file has a camera zone.
+
+| File | x | z |
+| --- | --- | --- |
+| `Land1Begin.exc` | 1439 to 1758 | 2027 to 2421 |
+| `Land1TemplePath.exc` | 1450 to 1981 | 2089 to 2574 |
+| `Land1Building.exc` | 1308 to 2038 | 1892 to 2878 |
+| `Land1Zone2.exc` | 888 to 3013 | 1496 to 3161 |
+| `Land1Zone3.exc` | 888 to 3013 | 1496 to 3287 |
+| `Land1Choose.exc` | 2060 to 2295 | 2960 to 3208 |
+| `Land1Zone5.exc` | 888 to 4120 | 1398 to 4379 |
+
+`Land1Choose.exc` is the zone of the Creature select: 20 points, about 235
+by 250 units, with the middle at 2166 3099. The game camera of the select is
+at 2224.9 20.2 3146.3, in the zone, 35 units from its focus at the pens.
+
+### 17.2 The God view and the zone
+
+The God view puts the game camera 400 units from the land under the head, 50
+degrees above it (section 7). That is 257 units back on the map. At the
+Creature select the zone is smaller than that, so with no rule of the mod
+(`god_zone=0`) each move of the view puts the game camera out of the zone.
+On each update of a move the game then pushes its camera back, plays its
+sound and starts its shake, and the shake goes into the view of the head.
+The view does not follow the push.
+
+### 17.3 What the God view does
+
+With `god_zone=1` (the default) and a zone of three points or more:
+
+- **The game camera stays in the zone.** The land point that it looks at goes
+  into the zone, 5 units past the nearest point of the edge
+  (`PointInside`). The position comes along the line to its focus, to 5
+  units before the edge, so it keeps its direction and its pitch and comes
+  nearer to its focus (`KeepCamera`). When that leaves less than 40 units
+  across the map (`kLeastAcross`), the camera goes 40 units from its focus
+  toward the middle of the zone, with the same pitch, and looks at its
+  focus from that side. The test of the game casts a ray from the camera
+  toward its focus: with the two at one place the ray has no direction, the
+  test finds the camera outside on each update, and the game pushes it, with
+  its sound, on each update. A snap turn that turns the game camera about its
+  own focus (section 7) keeps to the same rule. So the game does not push
+  its camera.
+- **The player's place has a limit.** The waist point of the God view goes at
+  most `god_zone_margin` (100) units past the zone. At the start scale of 100
+  units for each meter that is 1 m of the room. At the Creature select the
+  player can stand 1 m past the edge and see the three Creatures and the
+  Hand. The limit holds for the walk with the stick, the grab, the mouse
+  pan, a zoom step, the smooth zoom and the teleport.
+- **At the limit the view stops.** A move past the limit goes to the point
+  of the limit nearest to the place that the move asked for (`LimitMove`).
+  So the part of the move along the edge stays, and the part out of the zone
+  goes. There is no spring back and no bounce. With the grab the land stops
+  and the hand keeps moving. A place that the game put farther out (a new
+  place of the game camera, a load) may stay as far out, and no move takes
+  it farther, so the limit never makes a jump.
+- **The turn and the zoom stay free.** A snap turn is not limited. A zoom
+  changes the scale freely. When the zoom also moves the place (the zoom
+  about the land that the head looks at, section 2), the move of the place
+  keeps to the limit.
+- **The teleport.** A target farther than the limit is not valid: the arc
+  and the ring are red ("the target is past the limit of the camera zone of
+  the game").
+- **The sound of the block.** While the player pushes past the limit, the
+  game camera goes 10 units out of the zone for one update, at most once
+  each 500 ms (`BumpPoint`). The game then plays its sound of the block,
+  gives the pulse and the force field, and moves its camera back in. The view
+  does not move with the game camera.
+- **No shake.** While the God view owns the view, the shake of the push is
+  not started (the hook on `LH3DCameraChecker::Create`, for the call from
+  `0x0045FC89` only).
+
+The height limit is not changed: a game camera above it goes down, with no
+sound and no shake.
+
+With `god_zone=0` the God view does none of this, and the game pushes its
+camera with its sound and its shake. The debug page has the switch "Camera
+zone" in the group View (`controllers.md`, 10.8).
+
+### 17.4 The keys
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `god_zone` | 1 | 1: the God view keeps to the camera zone (17.3). 0: the game pushes its camera, with its shake |
+| `god_zone_margin` | 100 | How far the player's place goes past the zone, in world units, 0 to 2000. 0 keeps the place in the zone |
+
+### 17.5 The log
+
+A line for each change of the zone, a line at the start and at the end of
+each push past the limit, a line for the first bumps and for the first
+writes of the game camera that the zone changed, and the counts of each
+window of the report:
+
+```
+camera zone  : god_zone=1. In a camera zone of a script the game camera stays in the zone, so the game does not push it back or shake the view. Your place goes at most 100 units past the zone (god_zone_margin), and a push past that plays the sound of the game
+camera zone  : a script set a camera zone of 20 points, x 2060.3 to 2294.7 and z 2960.1 to 3208.3, the middle at 2168.0 3099.2 (god_zone=1)
+camera zone  : the game camera stays in the zone: at 2068.5 179.4 3041.4, not at 1977.9 309.5 2980.5, looking at 2191.4 3.1 3123.8
+camera zone  : the walk with the stick asked for your place at 1979.6 2981.7, 100.4 units past the zone. It stops at 1980.0 2981.9, 100.0 units past it (the limit of god_zone_margin=100, or the place before the move)
+camera zone  : you push past the limit, so the game camera goes to 2062.5 3017.9, 10 units out of the zone, for one update. The game plays its sound of the block and moves its camera back in
+camera zone  : the push past the limit ended. Your place is at 2002.1 2941.1, 97.5 units past the zone
+camera zone  : god_zone=1, a zone is set. The limit stopped 177 moves in 1 pushes, and 7 bumps asked the game for its sound. The game camera was kept in the zone on 278 writes, and its land point on 217. 6 shakes of the zone were not started, and the game started 0
+```
+
+### 17.6 Tests
+
+The math test (`zone_checks.h`) covers the inside of a square and of an L,
+the distance to the edge, the limit of a move (into the margin, past it,
+along the edge, from a place far out, with no margin, and a sweep that never
+passes the margin and never moves back), a point in the zone, the game
+camera in the zone with its pitch kept, and the point of a bump.
+
+The desktop runs start in the test save `pen` (`tools/desk/README.md`), at
+the Creature select, with the zone `Land1Choose.exc`. The recipe walks with
+the stick 5 s back out of the zone, 2.5 s forward, makes two snap turns,
+two zoom steps in and one out, and walks 5 s to the side, out of the zone
+again:
+
+```powershell
+$s = 'lstick_down@4700+300 shot@4900+1 shot@4960+1 lstick_up@5050+150 ' +
+     'stick_right@5250+8 stick_right@5300+8 stick_up@5360+10 stick_up@5420+10 ' +
+     'stick_down@5480+10 lstick_left@5550+300 shot@5800+1'
+.\bwvr\tools\desk\hand_run.ps1 -Name zone1 -Dll <dll> -Kind fixed -Steps $s -Set 'god_zone=1;test_frame_rate=60'
+.\bwvr\tools\desk\hand_run.ps1 -Name zone0 -Dll <dll> -Kind fixed -Steps $s -Set 'god_zone=0;test_frame_rate=60'
+```
+
+With the renderer Vulkan:
+
+| | `god_zone=1` | `god_zone=0` |
+| --- | --- | --- |
+| The first walk out | Stops 100 units past the zone. 267.95 of 759 units | 759.78 units, to 1562 2702, 500 units out of the zone |
+| The walk to the side | Stops 100 units past the zone, 89 units | 503 units |
+| The turns and the zooms | Free | Free |
+| Shakes that the game started | 0 | 75 |
+| Shakes of the push that the mod did not start | 12, all after a bump | 0 |
+| Bumps (the push of the game, with its sound) | 17, at most one each 30 frames (500 ms) while the walk pushes past the limit | none: the game pushes on each update of a move out of the zone |
+
+The eye pictures of frames 374 and 433 of the run with `god_zone=1` are
+the same view: the place stays at the limit while the stick pushes. They
+show the force field of the game at the edge of the zone, which the bumps
+pulse.
+
+### 17.7 Not tested, and what needs the headset
+
+- With the renderer Direct3D 9 (`backend=dxwrapper\ddraw.dll`) the runs
+  drew 73 frames in 48 s and 163 frames in 90 s while a person used the PC,
+  so the recipe did not come to its steps. The zone does not touch the
+  renderer, and no run has shown it with Direct3D 9.
+- Only the headset can show whether the margin of 100 units gives a
+  comfortable view at the Creature select, whether the sound and the pulse
+  of a bump each 500 ms feel right, and how the force field looks.
+- The other zones of Land 1 have the same rule. The verify runs show the zone
+  `Land1Zone5.exc` in the test save `temple`, with no push. No run and no
+  session has shown a push at another zone.
+- `Influence::CalculatePlayerRawInfluence` and `CameraModeFollow::Update`
+  also call `InsideInclusion`. What they do with the zone is not read.
+- The two other callers of `LH3DCameraChecker::Create`
+  (`AddSoundToAtom::ModifyAtomCore` and `fn_006E63C0`) still shake the
+  view in the God view.

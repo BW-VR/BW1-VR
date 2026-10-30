@@ -76,6 +76,7 @@
 
 #include "MinHook.h"
 #include "../common/bw_addresses.h"
+#include "camera_zone.h"
 #include "debug_menu.h"
 #include "hint_card.h"
 #include "hint_learn_math.h"
@@ -1352,8 +1353,9 @@ void MousePan(bool drag) {
   TablePose next;
   TableGrabSolve(g_pan.anchor, room, hand, zero, false, false, 0.08f,
                  GodLowest(), GodHighest(), &theta, &k, &next);
-  const float x = ClampCenter(next.center[0]);
-  const float z = ClampCenter(next.center[2]);
+  float x = ClampCenter(next.center[0]);
+  float z = ClampCenter(next.center[2]);
+  CameraZoneLimitMove(g_center, &x, &z, "the mouse pan");
   if (x == g_center[0] && z == g_center[2]) return;
   g_center[0] = x;
   g_center[2] = z;
@@ -1664,7 +1666,16 @@ void ApplyGodSteps() {
 
   if (!moved) return;
   const TablePose before_all = Pose();
-  for (int i = 0; i < 3; i += 2) g_center[i] = ClampMap(pose.center[i]);
+  // A zoom and a teleport keep to the camera zone of the game. A snap turn
+  // alone does not: it turns about the head and does not move the player.
+  float place_x = ClampMap(pose.center[0]);
+  float place_z = ClampMap(pose.center[2]);
+  if (placed) {
+    CameraZoneLimitMove(g_center, &place_x, &place_z,
+                        teleport ? "the teleport" : "a zoom step");
+  }
+  g_center[0] = place_x;
+  g_center[2] = place_z;
   g_center[1] = pose.center[1];
   g_heading = Wrap(pose.heading);
   g_scale = pose.scale;
@@ -1904,7 +1915,10 @@ void ApplyGodZoomHold(double frame_seconds) {
   if (used == 1.0f) return;
   // The head moves over the land, and a hill there stays below it.
   if (g_hold.kept) g_hold.sunk += ZoomClearHead(&next, room, head);
-  for (int i = 0; i < 3; i += 2) g_center[i] = ClampMap(next.center[i]);
+  for (int i = 0; i < 3; i += 2) next.center[i] = ClampMap(next.center[i]);
+  CameraZoneLimitMove(g_center, &next.center[0], &next.center[2],
+                      "the smooth zoom");
+  for (int i = 0; i < 3; i += 2) g_center[i] = next.center[i];
   g_center[1] = next.center[1];
   g_scale = next.scale;
   Derive();
@@ -2194,6 +2208,9 @@ void ApplyGodWalk(double frame_seconds) {
   // The waist point stays on the map, as for a grab.
   next.center[0] = ClampCenter(next.center[0]);
   next.center[2] = ClampCenter(next.center[2]);
+  // And at most god_zone_margin past the camera zone of the game.
+  CameraZoneLimitMove(g_center, &next.center[0], &next.center[2],
+                      "the walk with the stick");
   if (next.center[0] == g_center[0] && next.center[2] == g_center[2]) return;
   float took[2];
   walk_math::InRoom(pose, next.center[0] - pose.center[0],
@@ -2658,6 +2675,7 @@ void TabletopInstall() {
     }
     LogZoomAbout("god view     ");
     LogMoveStick("god view     ");
+    CameraZoneInstall(g_settings.god_zone, g_settings.god_zone_margin);
     return;
   }
   Hook(kBlockCull, reinterpret_cast<void*>(&h_BlockCull),
@@ -2775,6 +2793,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
       ModLog("god view     : your camera is back, so the God view is too");
     }
     if (!GodLand()) return false;
+    CameraZoneWatch();
     // The time of this frame, for the smooth zoom and the walk. With
     // god_display_time=1 it is the time between the display times of two
     // frames of the headset, so each frame moves the view by the time
@@ -2980,12 +2999,18 @@ void TabletopMove(const TablePose& pose) {
     return;
   }
   const TablePose before = Pose();
+  float place[3] = {pose.center[0], 0.0f, pose.center[2]};
   for (int i = 0; i < 3; i += 2) {
-    float v = pose.center[i];
-    if (!(v >= 0.0f)) v = 0.0f;
-    if (v > kMapSize) v = kMapSize;
-    g_center[i] = v;
+    if (!(place[i] >= 0.0f)) place[i] = 0.0f;
+    if (place[i] > kMapSize) place[i] = kMapSize;
   }
+  // In the God view the grab keeps to the camera zone of the game. At the
+  // limit the land stops, and the hand keeps moving.
+  if (g_settings.god) {
+    CameraZoneLimitMove(g_center, &place[0], &place[2], "the grab");
+  }
+  g_center[0] = place[0];
+  g_center[2] = place[2];
   g_center[1] = 0.0f;
   if (g_settings.god && pose.center[1] == pose.center[1]) {
     g_center[1] = pose.center[1];
@@ -3255,6 +3280,7 @@ void TabletopReport() {
   if (!g_installed) return;
   if (g_settings.god) {
     GodReport();
+    CameraZoneReport();
     g_moves = 0;
     g_live_frames = g_frames = g_bracket_ends = 0;
     g_most_objects = g_most_sorted = 0;
@@ -3664,6 +3690,9 @@ bool TabletopGodGameCamera(float position[3], float focus[3],
       place[0] = under[0];
       place[1] = under[2];
     }
+    // In a camera zone of a script the land point goes into the zone, and
+    // GodAfter in comfort_camera.cpp keeps the position in it.
+    CameraZoneFocus(&place[0], &place[1]);
     // The start of a hold of the smooth zoom has its own line, with the
     // place and the scale, and so have the start and the end of a walk with
     // the stick.

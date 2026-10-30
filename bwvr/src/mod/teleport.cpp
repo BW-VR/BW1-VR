@@ -60,6 +60,7 @@
 #include <string.h>
 
 #include "aim_smooth.h"
+#include "camera_zone.h"
 #include "controller_math.h"
 #include "controllers.h"
 #include "debug_menu.h"
@@ -347,6 +348,11 @@ bool ValidTarget(Mode mode, float x, float z, float ground, const char** why) {
   }
   if (mode == kImmersive && from_center > kImmersiveRadius) {
     *why = "the target is outside the 3400 unit limit of the camera";
+    return false;
+  }
+  if (mode == kGod && !CameraZoneAllows(x, z)) {
+    *why = "the target is past the limit of the camera zone of the game "
+           "(god_zone_margin)";
     return false;
   }
   *why = "the target is land";

@@ -52,6 +52,12 @@ struct TabletopSettings {
   // Where the game camera stands (docs/god-view.md, "The game camera"): 1
   // over the land point under the head, 0 over the recenter place.
   int god_camera_at = 1;         // god_camera_at: the place of the game camera
+  // The camera zone of a script of the game (docs/god-view.md, "The camera
+  // zone"): 1 keeps the game camera in the zone with no shake, and the
+  // player's place goes at most god_zone_margin units past it. 0 lets the
+  // game push its camera back, with its shake.
+  int god_zone = 1;              // god_zone: 1 the God view keeps to it, 0 not
+  int god_zone_margin = 100;     // god_zone_margin: units past the zone
   // The walk with the stick of the hand that does not point (docs/god-view.md,
   // "The walk with the stick"): 0 is off, 1 moves along the direction of the
   // head, and 2 along the direction in which that controller points.

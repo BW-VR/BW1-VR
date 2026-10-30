@@ -47,6 +47,7 @@
 #include <stdio.h>
 
 #include "MinHook.h"
+#include "camera_zone.h"
 #include "controllers.h"
 #include "table_math.h"
 
@@ -694,7 +695,12 @@ void GodAfter(uint8_t* mode) {
   float position[3], focus[3];
   uint64_t version = 0;
   if (!TabletopGodGameCamera(position, focus, &version)) return;
-  if (version == g_god_written) return;
+  // A push of the player past the limit of a camera zone of the game: the
+  // game camera goes out of the zone for this update, so the game plays its
+  // sound of the block and moves its camera back in (camera_zone.cpp).
+  float bump[2] = {0.0f, 0.0f};
+  const bool bumped = CameraZoneTakeBump(&bump[0], &bump[1]);
+  if (version == g_god_written && !bumped) return;
   uint8_t* camera = CameraOf(mode);
   if (camera == nullptr) return;
   g_god_written = version;
@@ -714,6 +720,13 @@ void GodAfter(uint8_t* mode) {
     }
     table_math::TurnAboutFocus(focus, turned, position);
     ++g_god_focus_kept;
+  }
+  // In a camera zone of a script the game camera stays in the zone, so the
+  // game does not push it back and shake the view.
+  CameraZoneKeepCamera(focus, position);
+  if (bumped) {
+    position[0] = bump[0];
+    position[2] = bump[1];
   }
   if (PointDistance(now_position, position) < 0.01f &&
       PointDistance(now_focus, focus) < 0.01f) {

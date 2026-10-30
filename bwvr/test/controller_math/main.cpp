@@ -3536,6 +3536,7 @@ void CreatureChecks() {
 #include "draw_merge_checks.h"
 #include "bubble_card_checks.h"
 #include "spawn_checks.h"
+#include "zone_checks.h"
 #include "spirit_size_checks.h"
 #include "stay_checks.h"
 #include "look_checks.h"
@@ -3952,6 +3953,7 @@ int main() {
   draw_merge_checks::DrawMergeChecks();
   bubble_card_checks::BubbleCardChecks();
   spawn_checks::SpawnChecks();
+  zone_checks::ZoneChecks();
   spirit_size_checks::SpiritSizeChecks();
   village_checks::VillageChecks();
   aim_checks::AimChecks();

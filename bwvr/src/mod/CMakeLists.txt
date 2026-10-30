@@ -91,6 +91,7 @@ add_library(bwvr_mod SHARED
     teleport.cpp
     world_grab.cpp
     tabletop.cpp
+    camera_zone.cpp
     near_plane.cpp
     net_check.cpp
     dx_check.cpp

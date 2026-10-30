@@ -70,6 +70,9 @@ int TeleportRingValue();
 void TeleportRingChange(const char* by);
 int TeleportSwitchValue();
 void TeleportSwitchToggle(const char* by);
+// The camera zone of a script of the game (camera_zone.cpp).
+int CameraZoneValue();
+void CameraZoneToggle();
 // The interface (ui_panel.cpp, draw_hooks.cpp, bubble_card.cpp,
 // note_depth.cpp, hint_card.cpp, text_click.cpp, spirit_anchor.cpp).
 int UiPanelValue();
@@ -330,6 +333,9 @@ const Switch kSwitches[] = {
     {kGroupView, L"Jump switch", L"Game switch the teleport keeps to",
      "teleport_switch", TeleportSwitchValue, TeleportSwitchToggle,
      L"jump|drag"},
+    {kGroupView, L"Camera zone", L"God view keeps to the camera zone",
+     "god_zone", CameraZoneValue, [](const char*) { CameraZoneToggle(); },
+     L"game|view"},
     {kGroupView, L"Button layout", L"Layout of the buttons", "button_layout",
      ControllersButtonLayoutValue, ControllersButtonLayoutToggle,
      L"ring on X|ring on Y"},

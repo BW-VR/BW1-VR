@@ -21,6 +21,9 @@ object is in `grab.md`.
   object goes down as in the game (`throw_land_rest`).
 - A tree that falls comes to rest in about 1 s after its first contact
   (`throw_tree_settle`).
+- A thrown object turns at about the pace of the game. Before each substep
+  the mod cuts the turn of the picture to the game's cap of 1.5 turns a
+  second (`throw_turn`).
 - A still hand near the land sets the object down. A still hand higher up
   than `release_fall_cm` lets the object fall (see "The height of a
   release").
@@ -775,6 +778,168 @@ game's landing. Rocks and other objects are not changed.
   gone with the settle, so it can not move the candidate.
 - Only a headset shows whether a tree that stops this fast looks right, and
   whether a rolling tree on a slope still rolls.
+
+## The turn of a thrown object
+
+### What the game does [V]
+
+- **The release gives a turn.** `InitialisePhysicsFromHand` `0x00636F00`
+  writes its second argument to the angular momentum of the physics object
+  (`PhysicsObject+0x90`, which is `PhysOb+0x68`, at `0x0063701B`). That
+  argument is the second vector of packet `0x4D`. The release action
+  `0x005D4DB0` makes it from `CHand+0x48D4` times the inertia of the object
+  (`PhysOb+0x08`, an `LHMatrix` that `PhysOb::SetUpMoi` `0x007FB880` fills,
+  with its inverse at `PhysOb+0x38`). So `CHand+0x48D4` is a turn in radians
+  a second of the game's time, in the axes of the object. A function of the
+  hold (`HandStateGrain_vfunc3`, which calls `HandStateHolding::Update`)
+  writes it at `0x005B36C6`, from an `acos` of the swing of the object in the
+  Hand [I for the meaning]. The mod does not write it.
+- **The turn of a step.** `fn_007FE260` adds the torque to the momentum L,
+  and multiplies L by the turn factor (`PhysOb+0x148`). The turn is
+  `w = M^T (A L)`, with A the axes (`PhysOb+0x7C`, three rows) and M the
+  inverse of the inertia. It cuts the length of w to 3 pi radians a second
+  (1.5 turns a second), and L keeps its size.
+- **The flight has almost no torque.** The drag of the mod is 0 until the
+  first contact, and the weight acts at the center. So in the flight the
+  object keeps the turn of the release, less the turn factor. In the desktop
+  runs a tree and a rock got a small turn in the flight, less than 0.1 turns
+  a second of the picture. A villager got a large turn (see "What the
+  desktop runs show"). What gives these turns is not known.
+
+### Why a strong throw turns fast [I]
+
+This is from the code. The desktop runs show the part of the contact, not
+the part of the release (see "What the desktop runs show").
+
+The flight runs `sqrt(s) / k` steps of the game in each substep ("The real
+flight"), 5 at 100 units per meter. Each step turns the object by the turn
+of the game for 5 ms. So the picture turns 5 times as fast as the game turns
+the object: a release that the game turns at its cap is 7.5 turns a second
+in the picture. The draw shows the release matrix until the game's physics
+has the object (0.1 to 0.2 s after the release), so the fast turn starts
+then. A strong swing in the Hand gives a larger turn in the game.
+
+The first contact runs at the rate of the flight too, until the rate of the
+land comes ("The landing of a thrown object"). A contact on one corner gives
+a momentum many times the cap ("The landing of a tree"), and the object
+turns at the cap for as long as the turn factor takes to wear the momentum
+down: 2.45 s for 30 times the cap with the turn factor of the land. The
+settle of a tree acts only while the center is slow, so a tree that slides
+fast after its landing turns at the cap.
+
+### What the mod does
+
+With `throw_turn=1` (the default):
+
+1. **The turn of the release.** When the game's physics has the object, the
+   mod divides its momentum by the steps of a substep (`TurnStartFactor` in
+   `throw_math.h`). The picture then turns as fast as the game turns that
+   throw in the plain game. The direction of the turn does not change.
+2. **The cap.** Before each substep the mod works out the turn of the game
+   from the momentum, as `fn_007FE260` does (`TurnSpeedOf`). When that turn
+   times the steps of the substep is more than the cap of 3 pi radians a
+   second, the mod cuts the momentum to the cap (`TurnCutFactor`). So the
+   momentum that the cap of the game hides is gone, and after a contact the
+   turn falls from the cap at once, at the pace of the turn factor. The cut
+   acts before a substep. A contact or a torque in the steps of a substep
+   can still turn the picture faster than the cap in that substep.
+
+The flight latches the key when the game's physics has the object. The mod
+changes only the momentum. The place, the velocity, the contact and the
+damage are the game's. `throw_turn=0` keeps the game's momentum.
+
+**What the throw gives.** The turn of the release is the game's turn from
+the swing of the object in the Hand. The mod does not give the twist of the
+real hand to the throw.
+
+### What the desktop runs show
+
+The recipes `treefast`, `treeup` and `rockfast` of `throw_queue.ps1` throw a
+tree up and across the land, a tree straight up, and a rock. The top speed
+of the scripted hand is 7.2 to 8.0 m/s. `village_run.ps1 -Kind throw` throws
+a villager at 3 m/s. The runs have 60 frames a second.
+
+- **The release.** The scripted hand gives no turn: the release gave 0.00
+  radians a second in each run. So the runs do not show the factor of the
+  release (step 1 above).
+- **The flight of a tree and a rock.** The picture turns less than 0.1 times
+  a second until the first contact, with the key at 1 and at 0. The fast
+  turn starts at the first contact, 2.5 to 3.1 s after the release.
+- **The contact.** The table gives the fastest turn of the picture in one
+  game turn, in turns a second.
+
+| Throw | `throw_turn=1` | `throw_turn=0` | Substeps that the mod cut |
+| --- | --- | --- | --- |
+| Tree across the land | 1.2 | 1.0 | 0 |
+| Tree straight up | 1.8 | 2.6 | 4 |
+| Rock | 2.3 | 6.6 | 4 |
+
+- Before the cut, the picture of the rock and of the tree straight up would
+  turn 2.7 and 2.1 times a second. The tree across the land touched the land
+  at 89 units a second and the mod did not cut it.
+- After the contact the turn falls faster with the key at 1. In the next
+  game turn the rock turns 0.6 times a second, against 1.5 with the key at 0.
+  With the key at 0 the rock turns 0.4 times a second 0.5 s after the
+  contact, and the tree straight up wears its turn off in 0.5 s. Neither
+  stays at the cap for 2.45 s. The rest of the landing (`throw_land_rest`)
+  can be the cause [I].
+- In the game turn of the contact the picture turns faster than the cap with
+  the key at 1: 1.8 and 2.3 turns a second.
+- **The villager.** The game gives the villager a momentum in its flight with
+  no contact, 0.38 s after the release. In that game turn the game turns it
+  at 7.9 radians a second, and the picture turns 4.2 times a second with the
+  key at 1. The mod cut the momentum in 20 substeps, where the picture would
+  turn 6.8 times a second. The momentum comes back in the steps of each
+  substep, so the cut before a substep does not hold the cap [I]. No run has
+  a villager with the key at 0.
+- The eye pictures do not show the turn. They are still pictures, and the
+  thrown object is small at that distance.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `throw_turn` | 1 | 1: a thrown object turns as fast as the game turns it, and the mod cuts the turn of the picture to 1.5 turns a second before each substep. 0: the game's momentum, and the picture turns as many times faster as the flight runs steps of the game |
+
+The keys are read from `bwvr.ini`. The debug menu (`debug_menu=1`,
+`controllers.md`, 10.8) has the row "Throw turn" in the group of the throw:
+a long pulse for 1 and a short pulse for 0. A flight in the air keeps its
+value.
+
+### The log
+
+Tag `hand throw`, with `throw_log=1`. "The game's physics has": the turn that
+the release gave in radians a second of the game's time, the turn of the
+picture after the change, and the value of `throw_turn`. Each turn of a
+flight: the size of the momentum, the turn of the last substep in the game's
+time, and the fastest turn of the picture in that turn. The end of a flight:
+the substeps in which the mod cut the momentum, and the turn of the picture
+that the cut stopped.
+
+### Checks
+
+`ThrowChecks` covers the turn of the game from the momentum, the axes and
+the inverse of the inertia, the factor of the release at the rates 5, 1 and
+0.5, the cut at the cap, and two cases: a throw that the game turns at 1 turn
+a second shows 5 turns a second at 5 steps a substep with no change and 1
+turn a second with the change, and a momentum of 30 times the cap after a
+contact turns at the cap for 2.45 s with the game's momentum and not at all
+after the cut.
+
+### Open
+
+- The cut before a substep does not hold the cap in the substep of a
+  contact (2.3 turns a second for a rock), or for a villager that the game
+  turns in its flight (4.2 turns a second). A cut in each step of the game
+  holds it. Find what gives the villager its turn first.
+- No desktop run shows a turn of the release, so the factor of the release
+  has no run. The scripted hand gives the game no swing.
+- How large the turn of the release is with the direct hand is not known:
+  the hold of the game makes it from the swing of the object, and the mod
+  draws the object in the Hand by itself.
+- Only a headset shows whether a thrown tree now looks natural in its flight
+  and its landing, and whether a throw that turned at the game's pace looks
+  too still.
 
 ## The height of a release
 

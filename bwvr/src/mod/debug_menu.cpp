@@ -231,6 +231,8 @@ int ThrowLandValue();
 void ThrowLandChange(const char* by);
 int ThrowSettleValue();
 void ThrowSettleChange(const char* by);
+int ThrowTurnValue();
+void ThrowTurnChange(const char* by);
 int ThrowRestValue();
 void ThrowRestChange(const char* by);
 int ThrowTakeValue();
@@ -535,6 +537,8 @@ const Switch kSwitches[] = {
      ThrowLandValue, ThrowLandChange, L"game|land|flight"},
     {kGroupThrow, L"Tree settle", L"A tree that falls settles",
      "throw_tree_settle", ThrowSettleValue, ThrowSettleChange, L"off|on"},
+    {kGroupThrow, L"Throw turn", L"Turn of a thrown object at the game's pace",
+     "throw_turn", ThrowTurnValue, ThrowTurnChange, L"game|pace"},
     {kGroupThrow, L"Land rest", L"Rest after a landing", "throw_land_rest",
      ThrowRestValue, ThrowRestChange, L"off|on|spin|steep|still"},
     {kGroupThrow, L"Throw slower", L"Time factor of a throw x10",

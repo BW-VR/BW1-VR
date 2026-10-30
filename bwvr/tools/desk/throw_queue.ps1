@@ -163,6 +163,7 @@ $catchFar = "$dropBase pull@3207+3 aimfar@3262+1 grip@3266+60 pull@3276+3 shot@3
 # the head 25 degrees down, the tree on the land and the Hand are in the view
 # at each of the two sizes.
 $lookDown = 'fake_head_pitch=-25'
+$strong = 'point@2990+1 aimfar@3000+1 grip@3060+141 pull@3100+3 pull@3150+3 point@3200+1 shot@3216+1 shot@3231+1 shot@3246+1 shot@3261+1 shot@3291+1 shot@3500+1'
 $defs = @{
     dropshort = @{ Set = 'throw_land=1;release_fall_cm=15;seek_thrown=1'; Steps = $dropShort; Seconds = 80; Points = $stillPoints }
     landgrip = @{ Set = 'throw_land=1;release_fall_cm=15;seek_thrown=1;fake_head_pitch=-25'; Steps = $landGrip; Seconds = 80; Points = $stillPoints }
@@ -231,6 +232,15 @@ $defs = @{
     # A throw of about 9.5 m/s toward the sea, with no fetch after it. The
     # rock comes down on the sea about 10 m of the room from the release.
     sea = @{ Set = 'throw_land=1'; Steps = 'point@2990+1 aimfar@3000+1 grip@3060+141 pull@3100+3 pull@3150+3 point@3200+1 shot@3260+1 shot@3500+1'; Seconds = 100; Points = '0,0,100 0,0,100 -10,-10,60 -25,8,70' }
+    # STRONG THROWS (docs/throw.md, "The turn of a thrown object"). The steps
+    # of "sea": the hand jumps to the fourth point in one frame and the grip
+    # opens, a throw of about 9 m/s. Eye pictures 0.25, 0.5, 0.75, 1.0 and
+    # 1.5 s after the release. "treefast" throws a tree up and across the
+    # land, "treeup" throws a tree straight up, and "rockfast" throws a rock
+    # as "treefast" throws the tree.
+    treefast = @{ Set = 'throw_land=1;far_test_no_trees=0;far_test_tree=1'; Steps = $strong; Seconds = 100; Points = '0,0,100 0,0,100 -10,-10,60 -25,8,70' }
+    treeup = @{ Set = 'throw_land=1;far_test_no_trees=0;far_test_tree=1'; Steps = $strong; Seconds = 100; Points = '0,0,100 0,0,100 -10,-10,60 -10,14,60' }
+    rockfast = @{ Set = 'throw_land=1'; Steps = $strong; Seconds = 100; Points = '0,0,100 0,0,100 -10,-10,60 -25,8,70' }
 }
 $Runs = @($Runs | ForEach-Object { $_.Split(',') } | Where-Object { $_ -ne '' })
 foreach ($run in $Runs) {

@@ -784,6 +784,66 @@ inline float TurnKeepAfterLanding(float game_keep, bool brake_on, bool settle,
   return keep;
 }
 
+// THE TURN OF A THROWN OBJECT (throw_turn). The release gives the object an
+// angular momentum: InitialisePhysicsFromHand 0x00636F00 writes the second
+// vector of packet 0x4D to PhysOb+0x68 (0x0063701B). The release action
+// 0x005D4DB0 makes that vector from CHand+0x48D4 times the inertia of the
+// object (PhysOb+0x08, PhysOb::SetUpMoi 0x007FB880). So CHand+0x48D4 is a
+// turn in radians a second of the game's time. A function of the hold
+// (HandStateGrain_vfunc3, after HandStateHolding::Update) writes it at
+// 0x005B36C6, with an acos of the swing of the object in the Hand.
+//
+// fn_007FE260 gives the turn of a step as w = M^T (A L): L is the momentum,
+// A the axes (PhysOb+0x7C, three rows) and M the inverse of the inertia
+// (PhysOb+0x38, three rows). It cuts the length of w to kTurnCap, and the
+// momentum keeps its size (0x007FE3BF to 0x007FE413).
+//
+// The flight runs `rate` steps of the game in each substep, so the picture
+// turns `rate` times as fast as the game turns. A throw that gives the game's
+// turn of 1.5 turns a second then turns 7.5 times a second at 100 units a
+// meter. A contact on one corner gives a momentum many times the cap, and the
+// object then turns at the cap for as long as the turn factor takes to wear
+// the momentum down. So the mod divides the momentum of the release by the
+// rate of the flight (TurnStartFactor): the picture turns as fast as the game
+// turns that throw. And before each substep it cuts the momentum so that the
+// turn of the picture is kTurnCap at most (TurnCutFactor), and no momentum is
+// kept that the cap hides. The cut acts before a substep: a contact or a
+// torque in the steps of a substep can still turn the picture faster.
+const float kTurnCap = 9.424778f;  // 3 pi radians a second, 0x009A2BB0
+
+// The length of the turn w = M^T (A L) of fn_007FE260. `axes` and `inverse`
+// are 9 floats each, three rows.
+inline float TurnSpeedOf(const float axes[9], const float inverse[9],
+                         const float momentum[3]) {
+  float body[3];
+  for (int i = 0; i < 3; ++i) {
+    body[i] = axes[3 * i] * momentum[0] + axes[3 * i + 1] * momentum[1] +
+              axes[3 * i + 2] * momentum[2];
+  }
+  float w[3];
+  for (int k = 0; k < 3; ++k) {
+    w[k] = inverse[k] * body[0] + inverse[3 + k] * body[1] +
+           inverse[6 + k] * body[2];
+  }
+  return controller_math::Length(w);
+}
+
+// The factor for the momentum of the release: 1 / rate, so the turn of the
+// picture is the turn that the game gives the throw. 1 for a rate of 1 or
+// less.
+inline float TurnStartFactor(float rate) {
+  return rate > 1.0f ? 1.0f / rate : 1.0f;
+}
+
+// The factor for the momentum before a substep of `rate` steps, when the
+// game turns the object at `turn_speed` radians a second. The picture then
+// turns at `cap` radians a second at most: the answer is 1 when it does.
+inline float TurnCutFactor(float turn_speed, float rate, float cap) {
+  if (!(rate > 0.0f) || !(cap > 0.0f)) return 1.0f;
+  if (!(turn_speed * rate > cap)) return 1.0f;
+  return cap / (turn_speed * rate);
+}
+
 inline void LandBrake(const float push[3], const float velocity[3],
                       float mass, float friction, float out[3]) {
   out[0] = out[1] = out[2] = 0.0f;

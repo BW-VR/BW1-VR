@@ -148,6 +148,10 @@ const int kPointDepth = 0x24;
 const int kPointNormal = 0x40;
 const int kPointOther = 0x4C;
 const int kObTurn = 0x68;        // the angular momentum, 3 floats
+// The inverse of the inertia, three rows (PhysOb::SetUpMoi 0x007FB880), and
+// the axes of the object, three rows before the center.
+const int kObInverseInertia = 0x38;
+const int kObAxes = 0x7C;
 const int kObHitBy = 0x78;       // the PhysOb that touched this one
 const int kObPosition = 0xA0;    // the center, after the 9 floats of the axes
 const int kObVelocity = 0xDC;
@@ -241,6 +245,10 @@ float g_land_rate = 1.0f;
 float g_bounce = 0.5f;
 float g_brake = 0.6f;
 bool g_settle = true;      // throw_tree_settle: a tree that falls settles
+// THE TURN OF A THROWN OBJECT (throw_turn, throw_math.h, kTurnCap): true
+// divides the momentum of the release by the rate of the flight and keeps
+// the turn of the picture at the game's cap. false is the game's momentum.
+bool g_turn = true;
 // THE REST AFTER A LANDING (throw_land_rest, throw_math.h, kRestAll): 1 lets
 // a turn in place wear off fast, turns the brake off on steep land, and gives
 // an object that lies still its rest. 2, 3 and 4 are one of the three, and 0
@@ -371,6 +379,14 @@ struct Flight {
   int steep_steps;
   bool spin_logged;
   bool steep_logged;
+  // The turn of the object in the game turn that is open now, for the log:
+  // the largest turn of a substep in radians a second of the picture.
+  float turn_top_show;
+  // throw_turn of this flight, latched when the game's physics has the
+  // object, and the substeps in which the mod cut the momentum.
+  bool turn_rule;
+  int turn_cuts;
+  float turn_top_cut;    // the largest turn of the picture before a cut
   // A release in the glide of a far fetch: the place of the picture at the
   // release, from the place in the Hand.
   bool has_lead;
@@ -508,6 +524,25 @@ float Flat(const float a[3], const float b[3]) {
 float Gap(const float a[3], const float b[3]) {
   return sqrtf((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) +
                (a[2] - b[2]) * (a[2] - b[2]));
+}
+
+// The turn of the object in radians a second of the game's time, as
+// fn_007FE260 works it out from the momentum, before its cap.
+float TurnSpeed(const uint8_t* ob) {
+  return throw_math::TurnSpeedOf(
+      reinterpret_cast<const float*>(ob + kObAxes),
+      reinterpret_cast<const float*>(ob + kObInverseInertia),
+      reinterpret_cast<const float*>(ob + kObTurn));
+}
+
+// The turn of the picture in radians a second for a turn of the game, at
+// the rate of the flight: the game cuts its turn to kTurnCap, and with
+// throw_turn=1 the mod cuts the turn of the picture to kTurnCap.
+float TurnShown(const Flight& f, float turn_speed) {
+  const float cap = throw_math::kTurnCap;
+  float shown = (turn_speed < cap ? turn_speed : cap) * f.scale;
+  if (f.turn_rule && shown > cap) shown = cap;
+  return shown;
 }
 
 // Where the real arc meets the land. It goes along the arc in steps of 2 ms,
@@ -709,10 +744,13 @@ void EndFlight(Flight* f, const char* why) {
     ModLog("hand throw   : the flight of %p is over after %.2f s (%s). It "
            "ended %.1f units (%.2f m of the room) from the release, across "
            "the land. The game ran %d turns, %d substeps and %d steps for "
-           "it, and %d substeps touched an object. The steps took %.2f ms",
+           "it, and %d substeps touched an object. The steps took %.2f ms. "
+           "The mod cut the momentum of the turn in %d substeps, where the "
+           "picture would turn %.2f times a second at most (throw_turn=%d)",
            f->object, f->time, why, Flat(end, f->p0),
            Flat(end, f->p0) / f->s, f->turns, f->substeps, f->steps,
-           f->hit_substeps, f->step_seconds * 1000.0);
+           f->hit_substeps, f->step_seconds * 1000.0, f->turn_cuts,
+           f->turn_top_cut / 6.2831853f, f->turn_rule ? 1 : 0);
   }
   f->active = false;
   if (g_active > 0) --g_active;
@@ -765,6 +803,18 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
   f->drag = *reinterpret_cast<const float*>(ob + kObDrag);
   *reinterpret_cast<float*>(ob + kObDrag) = 0.0f;
   f->drag_off = true;
+  // THE TURN OF THE RELEASE (throw_math::TurnStartFactor). The game's
+  // physics runs f->scale steps in a substep of the flight, so the momentum
+  // of the release turns the picture that many times as fast as the game.
+  float* turn = reinterpret_cast<float*>(ob + kObTurn);
+  const float turn_given = TurnSpeed(ob);
+  f->turn_rule = g_turn;
+  f->turn_cuts = 0;
+  f->turn_top_cut = 0.0f;
+  if (f->turn_rule) {
+    const float factor = throw_math::TurnStartFactor(f->scale);
+    for (int i = 0; i < 3; ++i) turn[i] *= factor;
+  }
   f->phase = kPhysics;
   f->time = t;
   f->show = t;
@@ -777,9 +827,18 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
            "release. The game put it at %.1f %.1f %.1f, and the flight is at "
            "%.1f %.1f %.1f. Mass %.2f, radius %.2f, drag %.3f (0 until the "
            "first contact). The velocity in the game's time is %.1f %.1f "
-           "%.1f", f->object, t * 1000.0, before[0], before[1], before[2],
+           "%.1f. The release gave a turn of %.2f radians a second in the "
+           "game's time, which the picture shows at %.2f turns a second at "
+           "%.2f steps a substep. throw_turn=%d: %s", f->object,
+           t * 1000.0, before[0], before[1], before[2],
            p[0], p[1], p[2], *reinterpret_cast<const float*>(ob + kObMass),
-           radius, f->drag, velocity[0], velocity[1], velocity[2]);
+           radius, f->drag, velocity[0], velocity[1], velocity[2],
+           turn_given, TurnShown(*f, TurnSpeed(ob)) / 6.2831853f,
+           f->scale, f->turn_rule ? 1 : 0,
+           f->turn_rule ? "the momentum is divided by the steps of a "
+                          "substep, and the turn of the picture is cut to "
+                          "1.5 turns a second before each substep"
+                        : "the game's momentum");
     const float mass = *reinterpret_cast<const float*>(ob + kObMass);
     if (mass > 0.0f) {
       ++g_flight_logs;
@@ -1081,6 +1140,22 @@ int FlySubstep(Flight* f, uint8_t* ob) {
     steps = 1;
     ++f->hit_substeps;
   }
+  // THE CAP OF THE TURN (throw_math::TurnCutFactor). The picture turns at
+  // the rate of this substep times the game's turn. The momentum is cut so
+  // that this is the game's cap at most, and the momentum that the cap of
+  // the game hides is gone.
+  if (f->turn_rule) {
+    const float rate = hit ? 1.0f : f->scale;
+    const float speed = TurnSpeed(ob);
+    const float factor =
+        throw_math::TurnCutFactor(speed, rate, throw_math::kTurnCap);
+    if (factor < 1.0f) {
+      float* turn = reinterpret_cast<float*>(ob + kObTurn);
+      for (int i = 0; i < 3; ++i) turn[i] *= factor;
+      ++f->turn_cuts;
+      if (speed * rate > f->turn_top_cut) f->turn_top_cut = speed * rate;
+    }
+  }
   float* cap = reinterpret_cast<float*>(kCap);
   const float cap_before = *cap;
   *cap = 1.0e9f;
@@ -1152,6 +1227,11 @@ int FlySubstep(Flight* f, uint8_t* ob) {
                                     f->samples[f->count - 1].matrix) /
                 (done * throw_math::kSubstep)
           : 0.0f;
+  if (shown > 1e-9) {
+    const float show_rate = static_cast<float>(
+        f->turn_rate * done * throw_math::kSubstep / shown);
+    if (show_rate > f->turn_top_show) f->turn_top_show = show_rate;
+  }
   // AN OBJECT THAT LIES STILL (throw_math::LiesStill). It has a point in
   // contact, and its speed and its turn are far below the limits of the rest
   // test of the game. After kStillSeconds of that, the game gets the answer
@@ -1842,6 +1922,24 @@ void ThrowSettleChange(const char* by) {
          g_settle ? 1 : 0);
 }
 
+int ThrowTurnValue() {
+  if (!g_installed) return kDebugCannot;
+  return g_turn ? 1 : 0;
+}
+
+void ThrowTurnChange(const char* by) {
+  if (!g_installed) return;
+  g_turn = !g_turn;
+  ControllersGesturePulse(0.5f, g_turn ? 0.30f : 0.06f);
+  ModLog("hand throw   : %s: a thrown object now %s (throw_turn=%d)", by,
+         g_turn ? "turns as fast as the game turns it, and the mod cuts the "
+                  "turn of the picture to 1.5 turns a second before each "
+                  "substep"
+                : "keeps the game's momentum, and the picture turns as many "
+                  "times faster as the flight runs steps of the game",
+         g_turn ? 1 : 0);
+}
+
 int ThrowRestValue() { return g_installed ? g_rest : kDebugCannot; }
 
 void ThrowRestChange(const char* by) {
@@ -2247,6 +2345,8 @@ void ThrowPhysicsSetSlow(int slow_x10, bool trees) {
 }
 
 void ThrowPhysicsSetSettle(bool settle) { g_settle = settle; }
+
+void ThrowPhysicsSetTurn(bool turn) { g_turn = turn; }
 
 void ThrowPhysicsSetRest(int rule) {
   g_rest = rule < 0 || rule > 4 ? throw_math::kRestAll : rule;
@@ -2754,6 +2854,7 @@ void ThrowPhysicsTurnBegin() {
     ++f.turns;
     f.turn_steps = 0;
     f.turn_seconds = 0.0;
+    f.turn_top_show = 0.0f;
     for (int i = 0; i < 3; ++i) f.window[i] = f.best[i] = 0.0f;
     f.window_steps = 0;
     // THE SEARCH OF THE NEAR OBJECTS. At the start of a turn the game puts
@@ -2805,12 +2906,18 @@ void ThrowPhysicsTurnEnd() {
              "the picture, and the real time is %.3f s. The center is at "
              "%.1f %.1f %.1f, the speed is %.1f "
              "units/s in the game's time, %d points touch, the last step "
-             "gave %d", f.turns, f.object, f.turn_steps,
+             "gave %d. The angular momentum is %.1f, the turn is %.2f "
+             "radians a second in the game's time, and %.2f turns a second "
+             "of the picture at most in this turn", f.turns, f.object,
+             f.turn_steps,
              f.turn_seconds * 1000.0, f.time, f.show, now - f.t0, p[0], p[1],
              p[2],
              controller_math::Length(v),
              *reinterpret_cast<const int32_t*>(ob + kObContacts),
-             f.last_code);
+             f.last_code,
+             controller_math::Length(
+                 reinterpret_cast<const float*>(ob + kObTurn)),
+             f.turn_rate, f.turn_top_show / 6.2831853f);
     }
     // THE CHECK OF THE AXES. The game wrote the mesh matrix from the last
     // substep (fn_007FD140, the angles, then SetXYZAngles). It must be the

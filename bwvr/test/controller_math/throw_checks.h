@@ -676,6 +676,75 @@ inline void ThrowChecks() {
           steps * kSubstep, 10.0);
   }
 
+  // THE TURN OF A THROWN OBJECT (throw_turn).
+  {
+    const float axes[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    const float inverse[9] = {0.5f, 0, 0, 0, 0.25f, 0, 0, 0, 0.125f};
+    const float momentum[3] = {2.0f, 4.0f, 8.0f};
+    Near("the turn of the game is M^T (A L)",
+         TurnSpeedOf(axes, inverse, momentum), sqrt(3.0), 1e-5);
+    // Axes turned 90 degrees about the vertical: a momentum along x of the
+    // world is along z of the body.
+    const float turned[9] = {0, 0, -1, 0, 1, 0, 1, 0, 0};
+    const float along_x[3] = {8.0f, 0.0f, 0.0f};
+    Near("the axes take the momentum into the body",
+         TurnSpeedOf(turned, inverse, along_x), 1.0, 1e-5);
+    const float none[3] = {0.0f, 0.0f, 0.0f};
+    Near("no momentum gives no turn", TurnSpeedOf(axes, inverse, none), 0.0,
+         1e-9);
+    Near("the release momentum is divided by the rate of the flight",
+         TurnStartFactor(5.0f), 0.2, 1e-6);
+    Near("at the game's own rate the release momentum stays",
+         TurnStartFactor(1.0f), 1.0, 1e-6);
+    Near("a rate below 1 does not make the momentum larger",
+         TurnStartFactor(0.5f), 1.0, 1e-6);
+    Near("a turn that the picture shows below the cap stays",
+         TurnCutFactor(1.0f, 5.0f, kTurnCap), 1.0, 1e-6);
+    Near("a turn of 1 turn a second at 5 steps a substep is cut to the cap",
+         TurnCutFactor(6.2831853f, 5.0f, kTurnCap),
+         kTurnCap / (6.2831853 * 5.0), 1e-5);
+    Near("no rate gives no cut", TurnCutFactor(100.0f, 0.0f, kTurnCap), 1.0,
+         1e-6);
+    // The turn of the picture for a throw that the game turns at 1 turn a
+    // second (2 pi radians a second), at 5 steps of the game in a substep.
+    // The picture turns rate x min(game turn, cap).
+    const double rate = 5.0, given = 6.2831853;
+    const double plain = rate * (given < kTurnCap ? given : kTurnCap);
+    double game = given * TurnStartFactor(static_cast<float>(rate));
+    game *= TurnCutFactor(static_cast<float>(game), static_cast<float>(rate),
+                          kTurnCap);
+    const double picture = rate * (game < kTurnCap ? game : kTurnCap);
+    printf("  (a throw that the game turns at 1 turn a second, at 5 steps a "
+           "substep: the picture turns %.2f times a second with throw_turn=0 "
+           "and %.2f with throw_turn=1)\n", plain / 6.2831853,
+           picture / 6.2831853);
+    Near("the picture turns as fast as the game turns the throw", picture,
+         given, 1e-4);
+    Check(plain > 4.0 * given, "with no change the picture turns 5 times as "
+          "fast", plain, 4.0 * given);
+    // A contact on one corner gives 30 times the cap. At 1 step a substep
+    // and the land factor of the turn, the object turns at the cap until
+    // the factor has worn the momentum down to the cap. With the cut of each
+    // substep it turns at the cap only in that substep.
+    const double land = pow(static_cast<double>(kLandTurnKeep), kSubstep);
+    double kept = 30.0 * kTurnCap, cut = 30.0 * kTurnCap;
+    double kept_at_cap = 0.0, cut_at_cap = 0.0;
+    for (int i = 0; i < 2000; ++i) {
+      cut *= TurnCutFactor(static_cast<float>(cut), 1.0f, kTurnCap);
+      kept *= land;
+      cut *= land;
+      if (kept >= kTurnCap * 0.999) kept_at_cap += kSubstep;
+      if (cut >= kTurnCap * 0.999) cut_at_cap += kSubstep;
+    }
+    printf("  (30 times the cap after a contact: the object turns at the cap "
+           "for %.2f s with the momentum of the game and %.3f s with the "
+           "cut)\n", kept_at_cap, cut_at_cap);
+    Check(kept_at_cap > 2.0, "the momentum of the game keeps the turn at the "
+          "cap for more than 2 s", kept_at_cap, 2.0);
+    Check(cut_at_cap < 0.01, "with the cut the turn falls from the cap at "
+          "once", cut_at_cap, 0.01);
+  }
+
   // THE REST AFTER A LANDING (throw_land_rest).
   {
     Check(RestSpin(kRestAll) && RestSteep(kRestAll) && RestStill(kRestAll),

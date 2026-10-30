@@ -48,14 +48,15 @@ These items come before the other work.
   Menu of a saved game opens over the loaded game (`backend.md`, "The Main
   Menu of the start"). Find each path that draws a menu, and say which of
   them the panel covers. A key keeps the menu fixed to the head.
-- **B35. A thrown tree spins fast after the release.** A strong throw of a
-  tree makes it start to turn fast about 0.5 s after the release, which
-  looks wrong. The settle (`throw_tree_settle`, `throw.md`, "The landing of
-  a tree") acts only after the tree touches the land at low speed, and a
-  tree thrown fast across the land was never shown in a run. Find whether
-  the turn starts in the flight or at the first contact (the contact on one
-  corner gives an angular momentum many times the cap of 1.5 turns a
-  second), and check rocks and other objects for the same fault.
+- **B35. A thrown object still turns fast in some throws.** Before each
+  substep the mod cuts the turn of the picture to 1.5 turns a second
+  (`throw_turn`, `throw.md`, "The turn of a thrown object"). In the desktop
+  runs a tree and a rock turn fast only at the first contact: 1.8 and 2.3
+  turns a second with the key at 1, against 2.6 and 6.6 with the key at 0. A
+  villager turns 4.2 times a second in its flight 0.4 s after the release,
+  also with the key at 1. Find what gives the villager its turn, and cut the
+  turn in each step of the game. The scripted hand gives no turn at the
+  release, so only a headset shows the turn that a real throw gives a tree.
 - **P20. The pictures of the gestures in the headset.** The plain game shows
   the gestures that the player can draw now in the lower right corner of the
   screen: `GInterface::ProcessPowerUpSystem` gives the list to

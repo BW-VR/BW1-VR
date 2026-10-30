@@ -880,6 +880,10 @@ the flight. An object that lies on the land does not turn in place,
 and on a steep slope it goes down to flatter land. Set
 throw_land_rest=0 in bwvr.ini for a comparison.
 
+A thrown object turns in the air at about the pace of the game, not
+at the speed of the flight. Set throw_turn=0 in bwvr.ini for
+the faster turn of the physics of the game at the speed of the flight.
+
 The mod draws a thrown object between the game turns. While the
 object touches a different object, it moves at the pace of the game,
 and its picture does not stop and jump. Set throw_draw=0 in bwvr.ini

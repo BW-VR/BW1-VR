@@ -521,6 +521,7 @@ int g_throw_land_rate_x10 = 10;
 int g_throw_bounce_pct = 50;
 int g_throw_land_brake_pct = 60;
 int g_throw_tree_settle = 1;
+int g_throw_turn = 1;
 int g_throw_land_rest = 1;
 int g_throw_draw = 1;
 // The take of an object that comes to rest (throw_physics.cpp).
@@ -1379,6 +1380,12 @@ void ReadSettings() {
     // throw_tree_settle: 1 lets a tree that falls turn down fast while it
     // touches the land and is slow. 0 keeps the game's turn.
     g_throw_tree_settle = number("throw_tree_settle", 1);
+    // throw_turn: 1 lets a thrown object turn as fast as the game turns it,
+    // and cuts the turn of the picture to 1.5 turns a second before each
+    // substep. 0 keeps the game's momentum, and the
+    // picture turns as many times faster as the flight runs steps of the
+    // game.
+    g_throw_turn = number("throw_turn", 1);
     // throw_land_rest: 1 lets a turn in place of a thrown object wear off
     // fast after its landing, turns the brake of the land off on land that
     // is steeper than the brake holds, and gives an object that lies still
@@ -1856,6 +1863,7 @@ void StartVrStep() {
         ThrowPhysicsSetLanding(g_throw_land, g_throw_land_rate_x10,
                                g_throw_bounce_pct, g_throw_land_brake_pct);
         ThrowPhysicsSetSettle(g_throw_tree_settle != 0);
+        ThrowPhysicsSetTurn(g_throw_turn != 0);
         ThrowPhysicsSetRest(g_throw_land_rest);
         ThrowPhysicsSetTake(g_catch_rest_guard != 0, g_catch_rest_test);
         ThrowPhysicsSetCatch(g_catch_at_once);

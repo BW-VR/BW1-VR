@@ -35,6 +35,12 @@ void ThrowPhysicsSetLanding(int land, int rate_x10, int bounce_pct,
 // the land and is slow (docs/throw.md, "The landing of a tree"). 0 keeps the
 // game's turn.
 void ThrowPhysicsSetSettle(bool settle);
+// throw_turn: 1 lets a thrown object turn as fast as the game turns it: the
+// momentum of the release is divided by the steps of the game in a substep
+// of the flight, and the picture turns at the game's cap of 1.5 turns a
+// second at most (docs/throw.md, "The turn of a thrown object"). 0 keeps the
+// game's momentum.
+void ThrowPhysicsSetTurn(bool turn);
 // throw_land_rest: how a thrown object comes to rest after its landing
 // (docs/throw.md, "The rest after a landing"). 1: a turn in place wears off
 // fast, the brake of the land is off on land that is steeper than the brake

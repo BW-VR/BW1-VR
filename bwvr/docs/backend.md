@@ -2967,19 +2967,26 @@ end of a frame, so each eye pass of a frame has the same paths. A part with
 its bit takes its SSE path, and a part with no bit its x87 path, on each
 CPU. The log has one line for each part at the start (`game sse` lines).
 
-**The test key** (with `test_keys=1` and no compare): Ctrl, Shift and the
-backslash key (`VK_OEM_5`) change from the end of the frame between the
-mask and the flags of the game.
+**The test key** (with `test_keys=1` and no compare): Ctrl, Shift and S
+change from the end of the frame between the mask and the flags of the
+game.
 
 **The compare.** `game_sse_check=1` (a test aid) runs each part of the mask
 two times on the same input: first with the flag 0 (the x87 path), then
-with the flag 1 (the SSE path). Between the two runs the hook puts back
+with the flag 1 (the SSE path). Each run gives each part with a compare
+the flag of that run, so a part that the first run calls (the clip in a
+builder, float to integer in the light) takes the x87 path too, and in the
+second run the SSE path. A part that a compare calls runs one time. In the
+x87 run float to integer gives the result of its x87 path, also to the
+other threads. Between the two runs the hook puts back
 each global that the first run changed: the new vertex and its clip flags
 (bit 16), the count of the indices of the list `0x00EA9EA4`, the count of
 the vertices `0x00EA9EA8` and the flag `0x00EA9EB8` (bits 2, 4 and 8). The
 output of the SSE path stays. The light of the land gets two colors of its
-own for the x87 run. Float to integer runs the x87 path on a copy of ST0,
-and its compare uses no x87 register. The land is different: the SSE code
+own for the x87 run. Float to integer runs the x87 path on a copy of ST0
+and the SSE path with the edx of the caller (the SSE path keeps edx, the
+x87 path changes it), keeps its values on the stack, and its compare uses
+no x87 register. The land is different: the SSE code
 of a patch does the work of the whole `fn_00874AA0` with its draws. So a
 stub at the two calls of the builders in `fn_007A1800` compares Table1 and
 Table0 at that moment with the vertices of `land_fast_math::Grid`, which
@@ -3033,13 +3040,18 @@ The MXCSR of the game is 0x00009F80 on the PC and on the Quest: the class
 of each of the two CPUs sets the flush to zero. So the MXCSR is not the
 cause of the fault on the Quest, and the mod has no key for it.
 
-**The order of the test on the Quest.** First `game_sse_parts=4095`
-(each part with the flag `0x00EA9EB4`, as `game_sse_path=1`) with
-`game_sse_check=1`: the large polygons come again, and the `game sse`
-lines name each part with a compare whose output differs under FEX. Then
-each bit alone with `game_sse_check=0` and `walk_parts=1`, for the time:
-4096, 2, 384 (128 and 256), 1, 4, 8, 16, 32, 64, 3584 (512, 1024 and
-2048). Then the sum of the bits that give the same picture and less time.
+**The order of the test on the Quest** (`walk_parts=0`, `game_sse_path=0`,
+`land_fast=1`). First `game_sse_parts=4095` (each part with the flag
+`0x00EA9EB4`, as `game_sse_path=1`) with `game_sse_check=1`. The
+expectation: the large polygons come again, and the `game sse` lines name
+each part with a compare whose output differs under FEX. Then
+`game_sse_parts=0` as the control. Then halves with `game_sse_check=0`:
+31, then 1, 6 and 24, then single bits. When 31 is clean: 4064, then 96,
+384 and 3584. Then 4096 with the compare and without it. Bit 4096 was not
+on with `game_sse_path=1` (that key writes only `0x00EA9EB4`), so it is no
+cause of the large polygons. At the end the time of each clean bit with
+`walk_parts=1`, and the sum of the bits that give the same picture and
+less time.
 
 - Only a headset shows the parts under FEX: the differences of the compare,
   the large polygons and the time of each path.
@@ -6109,6 +6121,7 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift Slash | `test_keys=1` | With `controls=1`: the leash on X of the hand that does not point and its shake, or the leash on the pointing hand. A long pulse and a short pulse on the other controller (`left_leash`, `controllers.md`, 5.7). On a German keyboard the key is the key with the number sign | None |
 | Ctrl Shift L | `test_keys=1` | While the ring of the leash is on the wrist of the hand that does not point, the icon of the kind of leash at the lower right of the view is hidden, or the game draws it. A long pulse and a short pulse (`leash_icon_hide`, `grab.md`, "The leash at the mod's hand") | None |
 | Ctrl Shift D | `test_keys=1` | While the mesh of the game's Hand is hidden, the water shows both hands of the mod, the game's Hand, or no hand: the value steps from 2 to 0 to 1 and back. A long pulse, a short pulse and a pulse of middle length (`hand_reflection`, `hand.md`, "The reflection of the hands") | None |
+| Ctrl Shift S | `test_keys=1` | With `game_sse_parts` not 0 and `game_sse_check=0`: from the end of the frame each part of the game reads the flag of the game (the old way), or the bit of `game_sse_parts`. A line `test key` in the log ("The SSE paths of the game, one at a time") | None |
 | Ctrl Menu key | `test_keys=1` | The layout of the buttons of the hand that does not point. The menu button of the left controller opens the game menu, Y opens the ring and the stick does not drive the ring, or Y opens the game menu and X and the stick open the ring. A long pulse and a short pulse on that hand (`button_layout`, `controllers.md`, 5.1). Shift must be up | View, Button layout |
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up | View, Stick walk |
 
@@ -6268,7 +6281,7 @@ keys that the launcher sets.
 | `land_objects_threads` | 0 | 0: one thread. N: N worker threads make the test of the view of the objects before their draws. A test key: Ctrl Shift F9. See "The objects on the land" |
 | `object_timer`, `object_timer_sites` | 0, empty | A test aid. 1: in the play, each 10 s the time of the draw of the objects and of each class and method of the objects. `object_timer_sites` gives more calls to time. A test key: Ctrl Shift F7. See "The timer of the objects" |
 | `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
-| `game_sse_parts` | 0 | 0: each part reads the flag of the game. A sum of bits: the parts with their bit take the SSE path of the game, the others the x87 path. -1: each part. A test key: Ctrl, Shift and the backslash key. See "The SSE paths of the game, one at a time" |
+| `game_sse_parts` | 0 | 0: each part reads the flag of the game. A sum of bits: the parts with their bit take the SSE path of the game, the others the x87 path. -1: each part. A test key: Ctrl, Shift and S. See "The SSE paths of the game, one at a time" |
 | `game_sse_check` | 0 | A test aid. 1: each part of `game_sse_parts` with a compare runs on both paths, and the log has the differences. See "The SSE paths of the game, one at a time" |
 | `profile_gpu` | 0 | A test key. See "The GPU time" |
 | `crash_log` | 1 | 1: the log gets the first 8 C++ exceptions, an end of the game in `abort`, `terminate` or `_amsg_exit`, and a fault that no handler takes, each with the return addresses on its stack. 0: no line. See "The crash log" |

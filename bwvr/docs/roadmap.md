@@ -1146,11 +1146,14 @@ that moves while the Hand takes it.
 - **N24. The SSE paths of the game, one at a time, in the headset**
   (`game_sse_parts`, `game_sse_check`, `backend.md`, "The SSE paths of the
   game, one at a time"). On the PC each of the 13 parts with its SSE path
-  gives the picture of the x87 path, and the compare shows only rounding.
+  gives the picture of the x87 path. The compare shows rounding, and three
+  differences of the output: the SSE code of a patch (bit 1) sets more
+  clip flags of a vertex off the screen, the light at a cell (bit 256)
+  gives the alpha 0xFF to the second color (the x87 code 0), and float to
+  integer (bit 4096) gives 0x80000000 for an infinity (the x87 code 0).
   Next on the Quest: `game_sse_parts=4095` with `game_sse_check=1` for the
-  part that gives the large polygons under FEX, then each bit alone with
-  `walk_parts=1` in the order of the doc. Open: the time of each path
-  under FEX.
+  part that gives the large polygons under FEX, then the halves and the
+  bits in the order of the doc. Open: the time of each path under FEX.
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

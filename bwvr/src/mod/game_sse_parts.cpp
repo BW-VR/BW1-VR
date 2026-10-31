@@ -166,12 +166,20 @@ void LogVertex(int part, const char* what, uint32_t index, const uint32_t* want,
          got[3], got[4], got[5], got[6], got[7], got_flag);
 }
 
+// The x87 run of a compare on the frame thread: each part with a hook of
+// the compare has the flag 0, and float to integer gives the result of its
+// x87 path. Else 0.
+volatile int32_t g_x87_run = 0;
+
 // FLOAT TO INTEGER (fn_007A1400). It takes the value in ST0, pops it, and
-// gives the integer in eax. The hook copies ST0, runs the x87 path on the
-// copy and the SSE path on the value. GameSseFtolCompare uses no x87
-// register: the caller can have values on the x87 stack below ST0.
+// gives the integer in eax. Its x87 path changes ecx and edx, its SSE path
+// changes ecx and keeps edx. The hook copies ST0, runs the x87 path on the
+// copy and the SSE path on the value with the edx of the caller, and gives
+// the edx of the SSE run. Each value of the hook is on the stack, because
+// more threads call the function. GameSseFtolCompare uses no x87 register:
+// the caller can have values on the x87 stack below ST0. It gives the
+// result of the SSE path, or of the x87 path in the x87 run of a compare.
 void* g_ftol_original = nullptr;
-uint32_t g_ftol_x87 = 0;
 struct FtolSample {
   uint64_t value;
   uint32_t sse;
@@ -184,12 +192,13 @@ FtolSample g_ftol_outside;  // the first difference for a value out of the range
 int g_ftol_outside_count = 0;
 bool g_ftol_outside_logged = false;
 
-extern "C" void __cdecl GameSseFtolCompare(const uint64_t* value, uint32_t sse,
-                                           uint32_t x87) {
+extern "C" uint32_t __cdecl GameSseFtolCompare(const uint64_t* value, uint32_t sse,
+                                               uint32_t x87) {
+  const uint32_t give = g_x87_run != 0 ? x87 : sse;
   Stats& s = g_stats[kFloatToInt];
   ++s.calls;
   ++s.compared;
-  if (sse == x87) return;
+  if (sse == x87) return give;
   ++s.differ;
   if (!FtolInRange(*value)) {
     ++s.outside;
@@ -199,7 +208,7 @@ extern "C" void __cdecl GameSseFtolCompare(const uint64_t* value, uint32_t sse,
       g_ftol_outside.x87 = x87;
       g_ftol_outside_count = 1;
     }
-    return;
+    return give;
   }
   const uint32_t d = sse - x87;
   const uint32_t ad = static_cast<int32_t>(d) < 0 ? 0u - d : d;
@@ -210,34 +219,48 @@ extern "C" void __cdecl GameSseFtolCompare(const uint64_t* value, uint32_t sse,
     g_ftol_samples[n].sse = sse;
     g_ftol_samples[n].x87 = x87;
   }
+  return give;
 }
 
 __declspec(naked) void FtolCheck() {
   __asm {
+    push edx                           // [esp]: the edx of the caller
     sub esp, 8
-    fst qword ptr [esp]
+    fst qword ptr [esp]                // [esp]: the value, for the log
     fld st(0)
     mov dword ptr [g_flags + 48], 0
-    call dword ptr [g_ftol_original]
-    mov dword ptr [g_ftol_x87], eax
+    call dword ptr [g_ftol_original]   // the x87 path on the copy
+    push eax                           // [esp]: x87, [esp + 12]: the edx
+    mov edx, dword ptr [esp + 12]
     mov dword ptr [g_flags + 48], 1
-    call dword ptr [g_ftol_original]
-    push eax
-    push dword ptr [g_ftol_x87]
-    push eax
-    lea ecx, [esp + 12]
+    call dword ptr [g_ftol_original]   // the SSE path on the value
+    push edx                           // the edx of the SSE run
+    push eax                           // sse, edx, x87, the value
+    push dword ptr [esp + 8]           // x87
+    push dword ptr [esp + 4]           // sse
+    lea ecx, [esp + 20]                // the value
     push ecx
-    call GameSseFtolCompare
+    call GameSseFtolCompare            // eax: the result to give
     add esp, 12
-    pop eax
-    add esp, 8
+    pop ecx
+    pop edx
+    add esp, 16
     ret
   }
 }
 
-// A compare runs: a part that it calls runs one time, with the flag that
-// the compare set.
+// A compare runs: a part that it calls runs one time. Each run of a compare
+// sets the flag of each part with a hook of the compare (0 for the x87 run,
+// 1 for the SSE run), so a part that it calls takes the path of that run.
 bool g_busy = false;
+uint32_t g_checked_parts = 0;  // the parts with a hook of the compare
+
+void RunFlags(int32_t value) {
+  for (int part = 0; part < kPartCount; ++part) {
+    if (((g_checked_parts >> part) & 1u) != 0) g_flags[part] = value;
+  }
+  g_x87_run = value == 0 ? 1 : 0;
+}
 
 // THE LIGHT OF THE LAND (fn_00801C90 at a point, fn_00802120 at a cell):
 // cdecl (the place, the first color out, the second color out).
@@ -253,9 +276,9 @@ void LightCompare(int part, LightFn fn, const void* at, uint32_t* a, uint32_t* b
   g_busy = true;
   uint32_t want_a = *a;
   uint32_t want_b = *b;
-  g_flags[part] = 0;
+  RunFlags(0);
   fn(at, &want_a, &want_b);
-  g_flags[part] = 1;
+  RunFlags(1);
   fn(at, a, b);
   g_busy = false;
   Stats& s = g_stats[part];
@@ -303,13 +326,13 @@ void __fastcall ClipVertexCheck(uint32_t plane, uint32_t in, uint32_t out, uint3
   uint32_t before[8], want[8];
   memcpy(before, VertexAt(m), 32);
   const uint32_t before_flag = *FlagAt(m);
-  g_flags[kClipVertex] = 0;
+  RunFlags(0);
   g_clip_vertex(plane, in, out, made);
   memcpy(want, VertexAt(m), 32);
   const uint32_t want_flag = *FlagAt(m);
   memcpy(VertexAt(m), before, 32);
   *FlagAt(m) = before_flag;
-  g_flags[kClipVertex] = 1;
+  RunFlags(1);
   g_clip_vertex(plane, in, out, made);
   g_busy = false;
   Stats& s = g_stats[kClipVertex];
@@ -364,7 +387,7 @@ void ListCompare(int part, Call call) {
     return;
   }
   g_busy = true;
-  g_flags[part] = 0;
+  RunFlags(0);
   call();
   const ListState want = ReadList();
   uint32_t words = 0;
@@ -381,7 +404,7 @@ void ListCompare(int part, Call call) {
   memcpy(g_want_vertices, VertexAt(before.vertices), made * 32);
   memcpy(g_want_flags, FlagAt(before.vertices), made * 4);
   WriteList(before);
-  g_flags[part] = 1;
+  RunFlags(1);
   call();
   const ListState got = ReadList();
   g_busy = false;
@@ -628,6 +651,7 @@ void InstallChecks() {
     }
     if (ok) g_checked |= 1u << part;
   }
+  g_checked_parts = g_checked;
 }
 
 // The flags of the mod from the mask, or from the flags of the game. A part
@@ -773,16 +797,16 @@ void GameSsePartsFrame() {
   if (g_test_keys && g_check == 0) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-    const bool down = (GetAsyncKeyState(VK_OEM_5) & 0x8000) != 0 && ctrl && shift;
+    const bool down = (GetAsyncKeyState('S') & 0x8000) != 0 && ctrl && shift;
     if (down && !g_key_down && OwnWindowInFront()) {
       g_old_way = !g_old_way;
       if (g_old_way) {
-        ModLog("test key     : Ctrl, Shift and the backslash key: each part reads the "
+        ModLog("test key     : Ctrl, Shift and S: each part reads the "
                "flag of the game from the end of this frame (0x00EA9EB4 = %d, "
                "0x00E83A20 = %d)",
                Read<int32_t>(kPathFlag), Read<int32_t>(kFloatFlag));
       } else {
-        ModLog("test key     : Ctrl, Shift and the backslash key: game_sse_parts=%u "
+        ModLog("test key     : Ctrl, Shift and S: game_sse_parts=%u "
                "(0x%04X) from the end of this frame",
                g_mask, g_mask);
       }

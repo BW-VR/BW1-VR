@@ -10,7 +10,7 @@
 // game_sse_check of bwvr.ini (a test aid): 1 runs each part with its bit two
 // times, on the x87 path and on the SSE path, and the log has the largest
 // difference of the outputs. 0 (the default) no compare.
-// test_keys: Ctrl, Shift and the backslash key (VK_OEM_5) change between the
+// test_keys: Ctrl, Shift and S (no other test key has S) change between the
 // mask and the flags of the game, from the next frame.
 void GameSsePartsSetOptions(int parts, int check, bool test_keys);
 // Startup, before each other hook: a hook of the mod on a function with a

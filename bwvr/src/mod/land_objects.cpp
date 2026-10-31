@@ -458,7 +458,11 @@ void BeforePart(uint32_t first, uint32_t last) {
 
 void WorkBefore() {
   g_before_on = false;
-  if (g_mode != 1 || !g_cull_in || g_threads_on <= 0 || g_workers <= 0 || !ConstantsOk()) {
+  // With the SSE paths of the game (the flag 0x00EA9EB4, a CPU of the family
+  // 15 or game_sse_path=1) the test of the view does not come to the stub,
+  // so a result before the draws has no use.
+  if (g_mode != 1 || !g_cull_in || g_threads_on <= 0 || g_workers <= 0 || !ConstantsOk() ||
+      Read<int32_t>(0x00EA9EB4) != 0) {
     return;
   }
   int n = Read<int32_t>(kListCount);

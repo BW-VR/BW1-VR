@@ -1,5 +1,5 @@
 // THE TIMER OF THE OBJECTS ON THE LAND (object_timer.h, docs/backend.md, "The
-// timer of the objects on the land"), a test aid.
+// timer of the objects"), a test aid.
 //
 // fn_005E5CD0 draws the objects on the land. Its own loops are small. Its
 // time is in the methods of the objects that it calls through their tables
@@ -47,6 +47,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <emmintrin.h>
 #include <intrin.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -62,6 +63,53 @@ void ModLog(const char* format, ...);
 
 namespace {
 
+// THE SECTIONS OF runblack.exe, from its PE header: the code (sections that
+// execute) and the tables (sections of data that do not change, the
+// vtables). Read one time, before a worker or a timer reads them.
+struct Range {
+  uint32_t lo, hi;
+};
+Range g_code[8];
+Range g_tables[8];
+int g_code_count = 0;
+int g_tables_count = 0;
+bool g_sections_read = false;
+
+bool InRanges(const Range* r, int n, uint32_t a) {
+  for (int i = 0; i < n; ++i) {
+    if (a >= r[i].lo && a < r[i].hi) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+void ObjectTimerReadSections() {
+  if (g_sections_read) return;
+  g_sections_read = true;
+  const uint8_t* base = reinterpret_cast<const uint8_t*>(GetModuleHandleA(nullptr));
+  if (base == nullptr) return;
+  const IMAGE_NT_HEADERS* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+      base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+  const IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+  const uint32_t b = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(base));
+  for (int i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+    const DWORD c = sec[i].Characteristics;
+    const Range r = {b + sec[i].VirtualAddress, b + sec[i].VirtualAddress + sec[i].Misc.VirtualSize};
+    if ((c & IMAGE_SCN_MEM_EXECUTE) != 0) {
+      if (g_code_count < 8) g_code[g_code_count++] = r;
+    } else if ((c & IMAGE_SCN_CNT_INITIALIZED_DATA) != 0 && (c & IMAGE_SCN_MEM_WRITE) == 0) {
+      if (g_tables_count < 8) g_tables[g_tables_count++] = r;
+    }
+  }
+  _mm_mfence();
+}
+
+bool ObjectTimerGameCode(uint32_t a) { return InRanges(g_code, g_code_count, a); }
+bool ObjectTimerGameTables(uint32_t a) { return InRanges(g_tables, g_tables_count, a); }
+
+namespace {
+
 namespace ot = object_timer_math;
 namespace wp = walk_parts_math;
 
@@ -72,9 +120,8 @@ const uint32_t kList = 0x00D1D28C;       // the list, 2999 entries at most
 const int kListMost = 2999;
 const int kPlayFrames = 300;
 
-// The code and the tables of runblack.exe.
-bool InText(uint32_t a) { return a >= 0x00401000 && a < 0x008A0000; }
-bool InTables(uint32_t a) { return a >= 0x008A0000 && a < 0x00C00000; }
+bool InText(uint32_t a) { return ObjectTimerGameCode(a); }
+bool InTables(uint32_t a) { return ObjectTimerGameTables(a); }
 
 enum KeyKind { kKeySite = 0, kKeyClass, kKeyFunction };
 
@@ -97,44 +144,33 @@ const Fixed kFixed[] = {
 // The entries of the vtables of the 3D parts that get a timer.
 const uint32_t kPartSlots[] = {0x34, 0x38, 0x100};
 
-// The draw methods (vtable+0x610), with the names of bw1-decomp.
+// A draw method and its name.
 struct Name {
   uint32_t fn;
   const char* name;
 };
+// The draw methods (vtable+0x610) of the objects that the lines of the
+// village show most, with short names of the mod. Each other draw is "a
+// draw".
 const Name kDrawNames[] = {
-    {0x0051C310, "Animal::Draw"},        {0x004648B0, "Object::Draw"},
-    {0x0041F680, "Dove::Draw"},          {0x00422770, "ChessPion::Draw"},
-    {0x00518150, "MobileObject::Draw"},  {0x005FFDC0, "LandscapeVortex::Draw"},
-    {0x00518090, "MultiMapFixed::Draw"}, {0x00515F70, "Abode::Draw"},
-    {0x0051BB70, "Pot::Draw"},           {0x00519650, "SpellIcon::Draw"},
-    {0x00518690, "Feature::Draw"},       {0x0074AB00, "Tree::Draw"},
-    {0x0051BF80, "PileFood::Draw"},      {0x0051BC40, "PileWood::Draw"},
-    {0x0051ABA0, "Totem::Draw"},         {0x00518100, "SingleMapFixed::Draw"},
-    {0x00774E10, "Whale::Draw"},         {0x0076EC00, "Fragment::Draw"},
-    {0x00746A30, "TownDesireFlags::Draw"}, {0x00738960, "TotemStatue::Draw"},
-    {0x00734A70, "GStreetLantern::Draw"}, {0x0072CEA0, "PhysicalShield::Draw"},
-    {0x0072C300, "MagicShield::Draw"},   {0x00722940, "SpellDispenser::Draw"},
-    {0x00720430, "Spell::Draw"},         {0x0071F3D0, "SpecialVillager::Draw"},
-    {0x00709C60, "ScriptHighlight::Draw"}, {0x006EA5C0, "Scaffold::Draw"},
-    {0x006E6380, "Reward::Draw"},        {0x00682F20, "MagicFireBall::Draw"},
-    {0x006709F0, "PrayerIcon::Draw"},    {0x00643FD0, "PFootball::Draw"},
-    {0x0063E980, "PBall::Draw"},         {0x00609540, "GBaseOnly::Draw"},
-    {0x005FCCC0, "MagicTeleport::Draw"}, {0x00561A20, "PuzzleGrain::Draw"},
-    {0x00531610, "Football::Draw"},      {0x0052C830, "FishFarm::Draw"},
-    {0x0052AA90, "FireFly::Draw"},       {0x00528570, "Field::Draw"},
-    {0x0051CBF0, "Workshop::Draw"},      {0x0051C560, "SpellWolf::Draw"},
-    {0x0051B940, "Villager::Draw"},      {0x0051AEC0, "Living::Draw"},
-    {0x00519640, "TownCentreSpellIcon::Draw"}, {0x005193D0, "WorshipSite::Draw"},
-    {0x00519360, "WorshipTotem::Draw"},  {0x00519350, "StoragePit::Draw"},
-    {0x00518E90, "OneOffSpellSeed::Draw"}, {0x00518710, "SpellSeed::Draw"},
-    {0x005186A0, "Creed::Draw"},         {0x00517F60, "MobileStatic::Draw"},
-    {0x00517F10, "Rock::Draw"},          {0x00517910, "Creature::Draw"},
-    {0x00516870, "Ball::Draw"},          {0x00516450, "TownCentre::Draw"},
-    {0x00516320, "Windmill::Draw"},      {0x00511990, "FelledTree::Draw"},
-    {0x005107F0, "DeadTree::Draw"},      {0x00464B90, "CitadelHeart::Draw"},
-    {0x00439A90, "Bonfire::Draw"},       {0x00438F60, "BigForest::Draw"},
-    {0x004256C0, "ArenaSpellIcon::Draw"},
+    {0x0074AB00, "the draw of a tree"},
+    {0x0051B940, "the draw of a villager"},
+    {0x0071F3D0, "the draw of a special villager"},
+    {0x00515F70, "the draw of a house"},
+    {0x00516450, "the draw of a town centre"},
+    {0x00519350, "the draw of a store"},
+    {0x00517F10, "the draw of a rock"},
+    {0x00518690, "the draw of a feature"},
+    {0x00517F60, "the draw of a still object"},
+    {0x00518150, "the draw of a moving object"},
+    {0x0051C310, "the draw of an animal"},
+    {0x0041F680, "the draw of a bird"},
+    {0x00517910, "the draw of the Creature"},
+    {0x00709C60, "the draw of a highlight of a script"},
+    {0x00746A30, "the draw of the flags of a town"},
+    {0x0051BF80, "the draw of a pile of food"},
+    {0x0051BC40, "the draw of a pile of wood"},
+    {0x00528570, "the draw of a field"},
 };
 
 const char* DrawName(uint32_t fn) {
@@ -389,6 +425,9 @@ int AddCall(uint32_t at, int key, const char* name) {
 bool PutSite(int id) {
   Site& s = g_sites[id];
   if (s.on) return true;
+  // The site is in memory before a call of another thread can reach its stub
+  // (FEX can run with no TSO).
+  _mm_mfence();
   if (s.call.form == ot::kSlot) {
     const uint32_t stub = StubOf(id);
     s.on = Write(s.at, &stub, 4, false);
@@ -637,6 +676,7 @@ void ObjectTimerSetOptions(int mode, const char* sites, bool test_keys) {
   g_sites_text[0] = 0;
   if (sites != nullptr) strncpy_s(g_sites_text, sizeof(g_sites_text), sites, _TRUNCATE);
   QueryPerformanceFrequency(&g_hz);
+  ObjectTimerReadSections();
   if (g_mode != 0) {
     ModLog("object timer : object_timer=1, object_timer_sites=%s. The timers come when the list "
            "of the objects has objects at the end of %d frames in a row%s",

@@ -70,6 +70,7 @@
 #include "fast_transform_math.h"
 #include "land_objects.h"
 #include "land_objects_math.h"
+#include "object_timer.h"
 #include "thread_id.h"
 
 void ModLog(const char* format, ...);
@@ -295,10 +296,13 @@ Job g_job;
 volatile LONG g_job_seq = 0;
 volatile LONG g_job_left = 0;
 int g_workers = 0;
+// The number of the last job at the start of each worker: a new worker
+// answers only the jobs after its start, which count it in g_job_left.
+LONG g_seen_at_start[kMaxThreads + 1] = {};
 
 DWORD WINAPI Worker(void* arg) {
   const int part = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-  LONG seen = 0;
+  LONG seen = g_seen_at_start[part];
   for (;;) {
     LONG now = g_job_seq;
     while (now == seen) {
@@ -311,8 +315,11 @@ DWORD WINAPI Worker(void* arg) {
     if (part < g_job.parts) {
       _mm_setcsr(g_job.mxcsr);
       g_job.run(g_job.starts[part], g_job.starts[part + 1]);
-      InterlockedDecrement(&g_job_left);
     }
+    // Each worker answers each job, also a job with no part for it. So the
+    // frame thread starts no new job before each worker is past this one,
+    // and no worker reads the fields of the next job for this one.
+    InterlockedDecrement(&g_job_left);
   }
 }
 
@@ -334,7 +341,10 @@ void StartWorkers(int n) {
     }
   }
   while (g_workers < n) {
-    // Part 0 is the frame thread, so worker w makes part w + 1.
+    // Part 0 is the frame thread, so worker w makes part w + 1. No job runs
+    // now: the workers start on the frame thread between the frames.
+    g_seen_at_start[g_workers + 1] = g_job_seq;
+    _mm_mfence();
     HANDLE h = CreateThread(nullptr, 64 * 1024, &Worker,
                             reinterpret_cast<void*>(static_cast<intptr_t>(g_workers + 1)), 0,
                             nullptr);
@@ -362,7 +372,7 @@ int RunParts(PartFn run, uint32_t count, uint32_t least, uint32_t mxcsr) {
   g_job.run = run;
   g_job.parts = parts;
   g_job.mxcsr = mxcsr;
-  g_job_left = parts - 1;
+  g_job_left = g_workers;
   _mm_mfence();
   InterlockedIncrement(&g_job_seq);
   g_wake(const_cast<LONG*>(&g_job_seq));
@@ -412,7 +422,7 @@ volatile LONG g_faults = 0;
 
 int SlotOf(uint32_t part) { return static_cast<int>((part * 2654435761u) >> 19) & (kSlots - 1); }
 
-bool InTables(uint32_t a) { return a >= 0x008A0000 && a < 0x00C00000; }
+bool InTables(uint32_t a) { return ObjectTimerGameTables(a); }
 
 void BeforeOne(int i) {
   Before& b = g_before_list[i];
@@ -531,7 +541,13 @@ extern "C" int __cdecl LandObjectsCull(const uint8_t* bounds, uint8_t* part) {
   lo::CullGlobals g;
   FillCull(&g);
   lo::CullOut local;
-  const lo::CullOut* out = g_mode == 1 ? FindBefore(bounds, part, in, g) : nullptr;
+  // A result of the work before the draws is used only when the x87 unit
+  // has the precision and the rounding of the SSE code now too.
+  uint16_t control = 0;
+  __asm fnstcw control
+  const bool exact = fast_transform_math::Exact(control, _mm_getcsr() & ~0xE040u);
+  const lo::CullOut* out =
+      g_mode == 1 && exact ? FindBefore(bounds, part, in, g) : nullptr;
   if (out != nullptr) {
     ++g_cull_hits;
   } else {
@@ -595,12 +611,10 @@ extern "C" void __cdecl LandObjectsCullEnd(int end) {
   memcpy(&want_depth, &w.depth, 4);
   memcpy(&want_radius, &w.radius, 4);
   if (w.path == 0) want_radius = g_cull_radius_before;
-  // At the end of path 1 the game has not written 0x00EA1AF0, 0x00EA1AD0 and
-  // 0x00C37EA0 yet.
-  const bool after = end != 0;
-  if (depth != want_depth ||
-      (after && (radius != want_radius || Read<int32_t>(0x00EA1AD0) != w.under ||
-                 Read<int32_t>(0x00EA1AF0) != w.in_view))) {
+  // Each end is after the last write of the game (path 1 writes
+  // 0x00EA1AF0, 0x00EA1AD0 and 0x00C37EA0 at 0x00868DF4 to 0x00868E08).
+  if (depth != want_depth || radius != want_radius ||
+      Read<int32_t>(0x00EA1AD0) != w.under || Read<int32_t>(0x00EA1AF0) != w.in_view) {
     ++g_cmp_cull_globals;
     differ = true;
   }
@@ -875,6 +889,7 @@ void LandObjectsSetOptions(int mode, int threads, bool test_keys) {
 
 void LandObjectsInstall() {
   if (g_in || g_cull_in || (g_mode == 0 && !g_test_keys)) return;
+  ObjectTimerReadSections();
   const bool compare = g_mode == 2 || g_test_keys;
   // Each hook is queued, and one MH_ApplyQueued writes them, with one stop
   // of the other threads.

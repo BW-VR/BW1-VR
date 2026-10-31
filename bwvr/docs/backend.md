@@ -3017,10 +3017,6 @@ Each 10 s the `land objects` lines give the counts and the largest
 differences. With `test_keys=1`, Ctrl Shift F8 steps `land_objects`
 through 1, 0 and 2.
 
-In two desktop runs with `land_objects=2` the compare had 6.1 million
-vertices of 28 900 meshes (at most 352 vertices in a mesh) and, in one of
-the runs, 16.7 million tests of the view, and no bit differed.
-
 ### The work before the draws on more threads
 
 `land_objects_threads=N` (0 is the default: one thread, the frame thread)
@@ -3041,11 +3037,6 @@ object. The SSE loop of a mesh with 512 vertices or more goes in parts to
 the threads too. A worker waits with `WaitOnAddress`. With `test_keys=1`,
 Ctrl Shift F9 switches the threads off and on (2 threads when the key is
 0).
-
-In a desktop run with `land_objects_threads=2` 84 percent of the tests of
-the view in the village took the result of the work before the draws, and
-the work before the draws took 0.024 ms of the frame thread in a frame for
-1300 objects.
 
 - Only a headset shows the time of the objects under FEX with
   `land_objects=1` and with `land_objects_threads=2`: the `object timer`

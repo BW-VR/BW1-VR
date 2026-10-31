@@ -912,11 +912,11 @@ that moves while the Hand takes it.
   (`hand_feel_ripple`). A desktop run shows the offer at work: 824 more
   objects near the hand in 450 frames, at no measurable cost. Eye pictures
   with Vulkan and with dxwrapper show the sea and the hand over it in both
-  eyes. Not shown yet: a hand at the wall of a house and of the Village
-  Store with `hand_feel_offer` at 1 and 0 (the recipe zooms in with
-  `stick_up`), and a finger tip in the sea with the look of the water and
-  the ring at 1 and 0 (the word `sea` puts the point over the water, and
-  `seek_sea_cm` takes no depth under it). The plain sea of the God view writes no depth, and no layer of
+  eyes. A finger tip in the sea starts the ring of the game with
+  `hand_feel_ripple=1`, and none with 0. Not shown yet: a hand at the wall
+  of a house and of the Village Store with `hand_feel_offer` at 1 and 0 (the
+  test save `pen` has no house in the view of the seek), and the look of
+  the water in a picture. The plain sea of the God view writes no depth, and no layer of
   the water that shows a thing in it is missing (`hand-model.md`, "What the
   game draws of the sea"). Not proven: why the fingers did not rest on a
   house in the headset. The code that reads the game shows two causes: the

@@ -9758,7 +9758,7 @@ namespace {
 //           m of the room. The hand does not move.
 //   sea     The Hand's point goes 2 cm of the room over the nearest point of
 //           the sea, within 2 m of the room (seek_sea_cm gives a different
-//           height).
+//           height, and a negative value puts the point under the water).
 //   fish    The Hand's point goes to the drawn fish nearest to it, of each
 //           fish farm of the game, within 2 m of the room. The place is the
 //           sprite of the fish (DrawnFishOf), not a candidate.
@@ -10374,7 +10374,7 @@ bool PlanPoint(int word, float out[3]) {
     }
     static const int sea_cm = TestKey("seek_sea_cm");
     out[0] = sea[0];
-    out[1] = (sea_cm > 0 ? sea_cm : 2) * 0.01f * units;
+    out[1] = (sea_cm != 0 ? sea_cm : 2) * 0.01f * units;
     out[2] = sea[2];
     ModLog("hand pick    : seek plan: sea. The Hand's point goes to %.2f %.2f "
            "%.2f over the sea, %.1f cm of the room from where it is, frame "

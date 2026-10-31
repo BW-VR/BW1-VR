@@ -1303,7 +1303,8 @@ these runs (`hand_direct.cpp`):
   is an `Abode` with a radius of less than 5 units.
 - `gosea` and `sea`: the God view teleports to 60 cm of the room before the
   nearest sea in the view, and the Hand's point goes 2 cm over the nearest
-  sea.
+  sea. `seek_sea_cm` gives another height, and a value under 0 puts the
+  point under the water.
 
 The runs put the Hand's point at the side of the body of a house, a tree, a
 villager and the Creature, at a gap of 0 and 1.5 cm in the body:
@@ -1387,11 +1388,15 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
   trunk of a tree in the Hand the open thumb is in the trunk, so it stays
   open.
 
+With the Hand's point 3 cm under the water (`seek_sea_cm=-3`), a finger tip goes
+into the sea, and with `hand_feel_ripple=1` a ring of the game starts on the
+water under it in the same frame. With 0 no ring starts. The log says that the
+look of the water is on or off (`hand_feel_water_look`), but the captures do
+not show the part of the hand under the water.
+
 **Open: not shown on the desktop.** A building as a body near either hand
-(`hand_feel_offer`), the look of the water and the ring of the game on the
-water. The word `sea` puts the Hand's point 2 cm over the water, so no
-finger tip goes into it, and `seek_sea_cm` takes only a height over the
-water. A rock as a body (no run put a hand at
+(`hand_feel_offer`): the test save `pen` has no house in the view of the
+seek. The look of the water in a picture. A rock as a body (no run put a hand at
 a rock), a finger at the crown of a tree, a villager or an animal that walks
 into a still hand, the Creature that comes to the hand, the spread of a flat
 hand in a picture, a real press of the test key, the approach at weights

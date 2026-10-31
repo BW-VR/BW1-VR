@@ -132,6 +132,17 @@ try {
     }
     Set-Content -Path $ini -Value $written -Encoding ascii
 
+    # The flag LARGE_ADDRESS_AWARE of runblack.exe, as the launcher sets it
+    # before a start: large_address of the test, else of the player's ini,
+    # else 1. The flag of before the run goes back at the end.
+    $largeBefore = Get-BwvrLargeAddress $game
+    $largeWant = 1
+    $m = Select-String -LiteralPath $backup -Pattern '^\s*large_address\s*=\s*(\d+)' | Select-Object -First 1
+    if ($m) { $largeWant = [int]$m.Matches[0].Groups[1].Value }
+    if ($keys.Contains('large_address')) { $largeWant = [int]$keys['large_address'] }
+    $largeNow = Set-BwvrLargeAddress ($largeWant -ne 0) $game
+    "large address: runblack.exe had the flag $largeBefore, the run asks for large_address=$largeWant, and the flag is $largeNow now"
+
     $startArgs = @{ FilePath = (Join-Path $game 'runblack.exe'); WorkingDirectory = $game; PassThru = $true }
     if ($Args -and $Args.Trim().Length -gt 0) { $startArgs['ArgumentList'] = $Args }
     # THE WATCH. While the game runs, one line for each change of the place
@@ -182,4 +193,7 @@ finally {
     Start-Sleep -Milliseconds 500
     Copy-Item $backup $ini -Force
     "ini restored: " + ((Get-FileHash $ini).Hash -eq (Get-FileHash $backup).Hash)
+    if ($largeBefore -eq 'on' -or $largeBefore -eq 'off') {
+        "large address: the flag is $(Set-BwvrLargeAddress ($largeBefore -eq 'on') $game) again"
+    }
 }

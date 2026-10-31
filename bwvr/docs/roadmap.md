@@ -109,8 +109,9 @@ These items come before the other work.
   with the test save `pen` with each value of the two keys, one with
   dxwrapper, and `verify_build.ps1`. Then read the address space in a log
   of the faults.
-  When the address space is the cause, the only full cure is a game process
-  with `LARGE_ADDRESS_AWARE`, which needs a change of `runblack.exe`.
+  The launcher now sets `LARGE_ADDRESS_AWARE` in `runblack.exe`
+  (`large_address=1`), so the game has 4 GB. A headset play to the choice of
+  the Creature must show that the crash stops.
 - **B37. A save in Program Files: check it in a play.** With no
   administrator rights the profile is in the VirtualStore. Windows then
   refuses two calls of each save: the write of `SaveGame.inf` (error 5, it

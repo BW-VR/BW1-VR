@@ -3573,6 +3573,7 @@ void CreatureChecks() {
 #include "vk_texture_checks.h"
 #include "vk_prim_checks.h"
 #include "address_space_checks.h"
+#include "large_address_checks.h"
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
 #include "fight_checks.h"
@@ -3997,6 +3998,7 @@ int main() {
   vk_texture_checks::VkTextureChecks();
   vk_prim_checks::VkPrimChecks();
   address_space_checks::AddressSpaceChecks();
+  large_address_checks::LargeAddressChecks();
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
   fight_checks::FightChecks();

@@ -16,6 +16,11 @@ constexpr uintptr_t kImageBase = 0x00400000;
 constexpr char kExpectedSha1[] = "9c9aea96f046911ab1b7e496fae511ed5ebbfefe";
 // Its size in bytes. Every other known build has a different size.
 constexpr uint64_t kExpectedSize = 8663040;
+// SHA1 of the same file with the LARGE_ADDRESS_AWARE flag set in its PE
+// header (large_address.h). Only the one bit differs, so every address is the
+// same.
+constexpr char kExpectedSha1LargeAddress[] =
+    "2315844467e45e3d09497c3e91cb364077dfd028";
 
 namespace render {
 

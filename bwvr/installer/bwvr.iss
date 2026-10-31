@@ -5,7 +5,10 @@
 ; and then runs ISCC on this script.
 ;
 ; What this installer does NOT do:
-;   - It never ships a game file, and it never writes to one.
+;   - It never ships a game file, and it never writes to one. The launcher
+;     sets one flag in runblack.exe (large_address=1, src/common/
+;     large_address.h), so Setup gives the players the right to write that
+;     file. The uninstaller puts the original runblack.exe back.
 ;   - It never touches Profiles\ (the saved games) or Scripts\.
 ;   - It never writes the game's own HKCU values. An elevated Setup can hold
 ;     a different user's registry hive, so only the launcher, which runs as
@@ -203,6 +206,9 @@ const
   GameKey = 'SOFTWARE\Lionhead Studios Ltd\Black & White';
   { Keep in step with kGameExeSha1 in bwvr/src/common/exe_check.h. }
   GameExeSha1 = '9c9aea96f046911ab1b7e496fae511ed5ebbfefe';
+  { The same file with the flag LARGE_ADDRESS_AWARE that the launcher sets.
+    Keep in step with kExpectedSha1LargeAddress in bw_addresses.h. }
+  GameExeSha1LargeAddress = '2315844467e45e3d09497c3e91cb364077dfd028';
   GameExeSize = 8663040;
   PatchUrl = 'https://www.bwfiles.com/';
 
@@ -212,6 +218,8 @@ const
 
   { The name a ddraw.dll that belongs to the player is kept under. }
   BackupName = 'ddraw.dll.before-bwvr';
+  { The copy of the original runblack.exe that the launcher keeps. }
+  ExeBackupName = 'runblack.exe.before-bwvr';
 
   { The product name in the mod's version resource. }
   ModProductName = '{#AppName}';
@@ -332,7 +340,8 @@ begin
   end;
 
   Log(Format('Game check: %s is %d bytes, SHA-1 %s', [Exe, Size, Sha1]));
-  if (Size = GameExeSize) and (Sha1 = GameExeSha1) then
+  if (Size = GameExeSize) and
+     ((Sha1 = GameExeSha1) or (Sha1 = GameExeSha1LargeAddress)) then
   begin
     Result := GameOk;
     Exit;
@@ -612,10 +621,13 @@ begin
   else
     Log('Rights: users can make files in ' + Dir);
 
-  SetArrayLength(Files, 3);
+  { runblack.exe too: the launcher sets or clears one flag in it before each
+    start (large_address.h). }
+  SetArrayLength(Files, 4);
   Files[0] := Dir + '\bwvr.ini';
   Files[1] := Dir + '\bwvr.log';
   Files[2] := Dir + '\dxwrapper\dxwrapper.ini';
+  Files[3] := Dir + '\runblack.exe';
   for I := 0 to GetArrayLength(Files) - 1 do
   begin
     if not FileExists(Files[I]) then Continue;
@@ -712,6 +724,43 @@ begin
     Log('Uninstall: could not put ' + Backup + ' back as ddraw.dll');
 end;
 
+{ Puts the original runblack.exe back. The launcher sets the flag
+  LARGE_ADDRESS_AWARE in the file and keeps a copy of the original. The copy
+  goes back only if it is the original v1.42 file, byte for byte. }
+procedure RestoreGameExe();
+var
+  Live, Backup, Sha1: String;
+begin
+  Live := ExpandConstant('{app}\runblack.exe');
+  Backup := ExpandConstant('{app}\' + ExeBackupName);
+  if not FileExists(Backup) then Exit;
+  try
+    Sha1 := Lowercase(GetSHA1OfFile(Backup));
+  except
+    Sha1 := '';
+  end;
+  if Sha1 <> GameExeSha1 then
+  begin
+    Log('Uninstall: ' + Backup + ' is not the original runblack.exe, so it stays');
+    Exit;
+  end;
+  try
+    Sha1 := Lowercase(GetSHA1OfFile(Live));
+  except
+    Sha1 := '';
+  end;
+  if Sha1 = GameExeSha1LargeAddress then
+  begin
+    if not FileCopy(Backup, Live, False) then
+    begin
+      Log('Uninstall: could not put the original runblack.exe back');
+      Exit;
+    end;
+    Log('Uninstall: put the original runblack.exe back');
+  end;
+  DeleteFile(Backup);
+end;
+
 { Deletes the files in Dir that match Pattern. Folders stay. }
 procedure DeleteMatching(const Dir, Pattern: String);
 var
@@ -804,6 +853,7 @@ begin
   if CurUninstallStep <> usPostUninstall then Exit;
 
   RestorePlayerDdraw();
+  RestoreGameExe();
   RemoveModFiles();
   SweepVirtualStore();
   RestoreGameDisplay();

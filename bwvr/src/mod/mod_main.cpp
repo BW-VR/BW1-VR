@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "one_walk.h"
+#include "address_space.h"
 #include "MinHook.h"
 #include "../common/bw_addresses.h"
 #include "../common/exe_check.h"
@@ -2534,8 +2535,30 @@ bool CheckGameBuild() {
           : 0.0;
 
   if (report.verdict == bwvr::ExeVerdict::kSupported) {
-    ModLog("game         : runblack.exe is the v1.42 build, checked in %.0f ms",
-           ms);
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    const double space_mb =
+        (static_cast<double>(reinterpret_cast<uintptr_t>(
+             info.lpMaximumApplicationAddress)) +
+         1.0) /
+        1048576.0;
+    ModLog("game         : runblack.exe is the v1.42 build, checked in %.0f ms. "
+           "%s, so the game has %.0f MB of address space",
+           ms,
+           report.large_address
+               ? "It has the flag LARGE_ADDRESS_AWARE (large_address=1)"
+               : "It has no flag LARGE_ADDRESS_AWARE (large_address=0)",
+           space_mb);
+    // What the launcher did with the flag before this start.
+    char ini[MAX_PATH];
+    char result[160] = {0};
+    _snprintf_s(ini, MAX_PATH, _TRUNCATE, "%sbwvr.ini", g_dir);
+    GetPrivateProfileStringA("launcher", "large_address_result", "", result,
+                             sizeof(result), ini);
+    if (result[0] != 0) {
+      ModLog("game         : the launcher and the flag before this start: %s",
+             result);
+    }
     return true;
   }
   if (report.verdict == bwvr::ExeVerdict::kUnreadable) {
@@ -3050,6 +3073,13 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     // Before any hook goes in, and before a backend loads.
     const bool game_ok = CheckGameBuild();
     if (game_ok) {
+      // A test key, before the game and the drivers make their large blocks.
+      char ini[MAX_PATH];
+      lstrcpynA(ini, g_dir, MAX_PATH);
+      lstrcatA(ini, "bwvr.ini");
+      if (GetPrivateProfileIntA("bwvr", "test_high_memory", 0, ini) != 0) {
+        ReserveLowAddressSpace();
+      }
       EarlyHooks();
     } else {
       ProxyForceSystemDDraw();

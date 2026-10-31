@@ -82,6 +82,14 @@ nothing about updates. The ask sends only the version of the
 launcher. To stop the ask, clear "Check for updates" in the group
 Launcher, or set update_check=0 in bwvr.ini.
 
+Before each start, the launcher sets a flag in runblack.exe that
+gives the game 4 GB of memory space, not 2 GB. Without it, a large
+render can fill the memory space, and the game can crash. The first
+change keeps a copy of the original file as runblack.exe.before-bwvr.
+To use the original file, clear "Use 4 GB of memory" in the group
+Launcher. The launcher then puts the original file back. The
+uninstaller puts it back too.
+
 If a start with the renderer Vulkan fails, the next start uses
 Direct3D 9. The launcher then shows "Direct3D 9" in the row
 "Renderer", and a red warning. To try Vulkan again, set "Renderer" to
@@ -135,9 +143,10 @@ These are some of the groups of the launcher.
   Controllers     The glow at the Hand, the grab of the world, and the
                   lines of the hint cards.
 
-  Launcher        "Check for updates": the launcher asks GitHub for
-                  the latest version each time it opens (see HOW TO
-                  START).
+  Launcher        "Use 4 GB of memory": the launcher gives the game
+                  4 GB of memory space before each start (see HOW TO
+                  START). "Check for updates": the launcher asks
+                  GitHub for the latest version each time it opens.
 
   Testing         One box, which turns on keys for tests. The box
                   is off, and a player does not need it.

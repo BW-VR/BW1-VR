@@ -1,9 +1,10 @@
 // The address space of the process in the log (address_space.h).
 //
-// WHY. The game is a process of 32 bits with no LARGE_ADDRESS_AWARE flag, so
-// the game, the mod, the driver of the GPU and the OpenXR runtime share 2 GB
-// of address space. When no block is free, an allocation fails: a texture of
-// the renderer cannot get its pixels, and a driver can write to address 0.
+// WHY. The game is a process of 32 bits, so the game, the mod, the driver of
+// the GPU and the OpenXR runtime share 2 GB of address space, or 4 GB with
+// the flag LARGE_ADDRESS_AWARE (large_address.h). When no block is free, an
+// allocation fails: a texture of the renderer cannot get its pixels, and a
+// driver can write to address 0.
 // The line of each report window shows how near the process is to that.
 
 #define WIN32_LEAN_AND_MEAN
@@ -81,6 +82,43 @@ bool ReadAddressSpace(address_space_math::Totals* out, uint64_t* total) {
     at = next;
   }
   return out->regions > 0;
+}
+
+void ReserveLowAddressSpace() {
+  SYSTEM_INFO info;
+  GetSystemInfo(&info);
+  const uintptr_t two_gb = 0x80000000u;
+  if (reinterpret_cast<uintptr_t>(info.lpMaximumApplicationAddress) < two_gb) {
+    ModLog("high memory  : test_high_memory=1, but runblack.exe has no flag "
+           "LARGE_ADDRESS_AWARE. Nothing is reserved");
+    return;
+  }
+  uint64_t reserved = 0;
+  unsigned blocks = 0;
+  uintptr_t at = reinterpret_cast<uintptr_t>(info.lpMinimumApplicationAddress);
+  while (at < two_gb) {
+    MEMORY_BASIC_INFORMATION m;
+    if (VirtualQuery(reinterpret_cast<void*>(at), &m, sizeof(m)) == 0) break;
+    const uintptr_t base = reinterpret_cast<uintptr_t>(m.BaseAddress);
+    uintptr_t end = base + m.RegionSize;
+    if (end <= at) break;
+    if (m.State == MEM_FREE) {
+      const uintptr_t start = static_cast<uintptr_t>(
+          address_space_math::ReservedBytes(base));
+      if (end > two_gb) end = two_gb;
+      if (end > start &&
+          VirtualAlloc(reinterpret_cast<void*>(start), end - start,
+                       MEM_RESERVE, PAGE_NOACCESS) != nullptr) {
+        reserved += end - start;
+        ++blocks;
+      }
+    }
+    at = base + m.RegionSize;
+  }
+  ModLog("high memory  : test_high_memory=1. %u free blocks below 2 GB are "
+         "reserved, %.0f MB. Each allocation from now on gets an address "
+         "above 2 GB",
+         blocks, reserved / 1048576.0);
 }
 
 void AddressSpaceReport() {

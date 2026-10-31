@@ -2,11 +2,12 @@
 // docs/backend.md, "The address space"). Pure: no Windows. Checks in
 // test/controller_math/address_space_checks.h.
 //
-// runblack.exe has no LARGE_ADDRESS_AWARE flag, so the process of the game
-// has 2 GB of address space, also on a Windows of 64 bits. VirtualAlloc
-// starts each block at a multiple of 64 KB (the granularity), so a block
-// takes the address space up to the next multiple of 64 KB, and a free
-// region is of use only from its first multiple of 64 KB.
+// The process of the game has 2 GB of address space, or 4 GB on a Windows
+// of 64 bits when runblack.exe has the flag LARGE_ADDRESS_AWARE
+// (large_address.h). VirtualAlloc starts each block at a multiple of 64 KB
+// (the granularity), so a block takes the address space up to the next
+// multiple of 64 KB, and a free region is of use only from its first
+// multiple of 64 KB.
 #pragma once
 
 #include <stdint.h>

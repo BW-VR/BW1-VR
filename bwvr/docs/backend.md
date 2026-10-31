@@ -3460,13 +3460,41 @@ the first picture of a session with Vulkan that deletes the file.
 
 ### The address space
 
-`runblack.exe` (v1.42) has no `LARGE_ADDRESS_AWARE` flag (its
-characteristics are 0x10F). So the process of the game has 2 GB of address
-space, also on a Windows of 64 bits. The game, the mod, the driver of the
-GPU and the OpenXR runtime share these 2 GB. When no free block is large
-enough, an allocation fails. The mod cannot change the limit, because
-Windows reads the flag from the file of the game at the start of the
-process.
+The original `runblack.exe` (v1.42) has no `LARGE_ADDRESS_AWARE` flag (its
+characteristics are 0x10F). Its process then has 2 GB of address space,
+also on a Windows of 64 bits. The game, the mod, the driver of the GPU and
+the OpenXR runtime share these 2 GB. When no free block is large enough, an
+allocation fails. The mod cannot change the limit from inside the process,
+because Windows reads the flag from the file at the start of the process.
+
+**The flag** (`src/common/large_address.h`, with checks). The launcher row
+"Use 4 GB of memory" (`large_address`, 1 is the default) sets the flag in
+`runblack.exe` before each start. Windows of 64 bits then gives the process
+4 GB. With `large_address=0` the launcher clears the flag, and the file is
+the original again, byte for byte. The flag is bit 0x0020 of the
+characteristics. The checksum of the file is 0, so the launcher writes only
+these two bytes. Before the first change it keeps a copy of the original as
+`runblack.exe.before-bwvr`. After each change it compares the SHA-1 of the
+file with the two known values (`exe_check.h`). If the file is not one of
+them, the launcher puts the copy back. A game that runs holds its file, and
+then the launcher starts it as it is. The launcher writes the result in
+`bwvr.ini` (`[launcher] large_address_result`), and the mod writes it in
+its log with the flag and the size of the address space:
+
+```
+game         : runblack.exe is the v1.42 build, checked in 31 ms. It has the flag LARGE_ADDRESS_AWARE (large_address=1), so the game has 4096 MB of address space
+game         : the launcher and the flag before this start: changed, flag on, error 0
+```
+
+Setup gives the players the right to write `runblack.exe`, and the
+uninstaller puts the original back from the copy. The desktop scripts set
+the flag as the launcher does (`large_address` of the run, else of the
+player's ini, else 1), and put the flag of before the run back at the end.
+
+`test_high_memory=1` (a test key, 0 is the default) reserves each free
+block below 2 GB when the mod loads. Each allocation after that gets an
+address above 2 GB. A run with it shows if the game, the mod or a driver
+keeps an address in a signed number. It does nothing without the flag.
 
 **The line of each report window** (`address_space.cpp`). The report of
 each 450 frames has one line with the address space in use, the part of the
@@ -3479,7 +3507,7 @@ frame thread does not wait for it. The first window with a largest free
 block of less than 128 MB adds a line that says so:
 
 ```
-address space: <used> MB of 2048 MB in use (<modules> MB of modules, <views> MB of views, <private> MB of private memory, <committed> MB committed). <free> MB free in <n> blocks, the largest <largest> MB. <regions> regions, the walk took <ms> ms
+address space: <used> MB of <2048 or 4096> MB in use (<modules> MB of modules, <views> MB of views, <private> MB of private memory, <committed> MB committed). <free> MB free in <n> blocks, the largest <largest> MB. <regions> regions, the walk took <ms> ms
 address space: the largest free block is less than 128 MB. A large allocation of the game, of the mod or of a driver can fail now
 ```
 
@@ -3503,15 +3531,20 @@ the log counts:
   that one walk put into each ring. Device memory takes no address space of
   the process.
 
-**Open question: a fault in the driver of NVIDIA.** With `backend=vulkan`
-on an NVIDIA GPU, the game can stop at the choice of the Creature, after
-about 30 minutes of play, with a write to address 0 in `nvoglv32.dll` (the
-Vulkan driver of NVIDIA). The call of the mod is the `vkQueueSubmit` of
-`XrScreen::Impl::EndCopy` (the copy of an eye picture into the swapchain).
-The dump then fails with `0x80070008` (`ERROR_NOT_ENOUGH_MEMORY`), and two
-registers hold addresses just under 2 GB. These facts agree with a process
-that has no address space left. The line of the address space in the log
-of such a fault can prove it or not. No desktop run reached that state.
+**Open question: crashes with no address space left.** Two faults of
+players with the original file agree with a process that has no address
+space left. A headset play with the flag must show that they stop:
+
+- With `backend=vulkan` on an NVIDIA GPU, the game can stop at the choice
+  of the Creature with a write to address 0 in `nvoglv32.dll` (the Vulkan
+  driver of NVIDIA). The call of the mod is the `vkQueueSubmit` of
+  `XrScreen::Impl::EndCopy` (the copy of an eye picture into the swapchain).
+  Two registers hold addresses just under 2 GB.
+- With SteamVR and a render of 4096 by 3966, the game can stop with a read
+  of address 4 in `vrclient.dll` (the client of SteamVR in the process), on
+  a thread of SteamVR.
+
+In both, the dump fails with `0x80070008` (`ERROR_NOT_ENOUGH_MEMORY`).
 
 
 `foveation` (0 is the default, a test key: Shift O, the launcher row "Fewer

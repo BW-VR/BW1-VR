@@ -4,6 +4,9 @@
 // from the unofficial v1.42 patch. The image base cannot tell the builds
 // apart, because every Black & White executable loads at 0x00400000. So this
 // reads the file from the disk and compares its SHA-1 with the known value.
+// The launcher can set the LARGE_ADDRESS_AWARE flag in the file
+// (large_address.h). That file has a second known value, and it is the same
+// build.
 //
 // The mod and the launcher both use this file, so they always agree. The
 // installer compares the same value (see installer/bwvr.iss).
@@ -25,6 +28,7 @@ namespace bwvr {
 // One source for the value: bw_addresses.h. The installer has a copy.
 constexpr uint64_t kGameExeSize = bw::kExpectedSize;
 constexpr const char* kGameExeSha1 = bw::kExpectedSha1;
+constexpr const char* kGameExeSha1LargeAddress = bw::kExpectedSha1LargeAddress;
 
 // Builds that are known and not supported, so that a message can name them.
 struct KnownBuild {
@@ -41,13 +45,14 @@ constexpr KnownBuild kKnownBuilds[] = {
 };
 
 enum class ExeVerdict {
-  kSupported,   // the v1.42 file, byte for byte
+  kSupported,   // the v1.42 file, byte for byte, with or without the flag
   kOtherBuild,  // a different file: do not install hooks
   kUnreadable,  // the file cannot be read: do not install hooks
 };
 
 struct ExeReport {
   ExeVerdict verdict = ExeVerdict::kUnreadable;
+  bool large_address = false;  // the v1.42 file with LARGE_ADDRESS_AWARE
   uint64_t size = 0;
   char sha1[41] = {0};         // lower case hex, empty if unreadable
   const char* build = nullptr;  // a name from kKnownBuilds, or null
@@ -205,8 +210,10 @@ inline ExeReport CheckGameExe(const wchar_t* path) {
   for (const KnownBuild& known : kKnownBuilds) {
     if (strcmp(report.sha1, known.sha1) == 0) report.build = known.name;
   }
-  report.verdict = (report.size == kGameExeSize &&
-                    strcmp(report.sha1, kGameExeSha1) == 0)
+  const bool plain = strcmp(report.sha1, kGameExeSha1) == 0;
+  const bool large = strcmp(report.sha1, kGameExeSha1LargeAddress) == 0;
+  report.large_address = large;
+  report.verdict = (report.size == kGameExeSize && (plain || large))
                        ? ExeVerdict::kSupported
                        : ExeVerdict::kOtherBuild;
   return report;

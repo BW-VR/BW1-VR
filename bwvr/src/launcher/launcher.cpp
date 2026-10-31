@@ -28,6 +28,7 @@
 #include <vulkan/vulkan.h>
 
 #include "../common/exe_check.h"
+#include "../common/large_address.h"
 #include "../common/update_check.h"
 #include "../common/version.h"
 
@@ -346,6 +347,13 @@ const Setting kSettings[] = {
      "lines again, delete bwvr-hint-counts.ini in the game folder."},
 
     {kGroup, nullptr, "Launcher", nullptr, 0, nullptr},
+    {kBool, "large_address", "Use 4 GB of memory", nullptr, 1,
+     "The game is a 32 bit program. Without this, Windows gives it 2 GB of "
+     "memory space. A large render can fill it, and then the game can crash "
+     "or show white textures. On: before each start, the launcher sets a "
+     "flag in runblack.exe that gives the game 4 GB. Off: the launcher puts "
+     "the original runblack.exe back. The first change keeps a copy of the "
+     "original file as runblack.exe.before-bwvr."},
     {kBool, "update_check", "Check for updates", nullptr, 1,
      "Each time the launcher opens, it asks GitHub for the latest version "
      "of the mod. When a newer version is out, the line at the bottom of "
@@ -1664,9 +1672,36 @@ void SaveAll() {
   WriteRegistryInt("ScreenD", 32);
 }
 
+// The flag LARGE_ADDRESS_AWARE of runblack.exe (large_address.h), as the row
+// "Use 4 GB of memory" asks. If Windows refuses the change, the game starts
+// with the file as it is. The result goes into bwvr.ini, and the mod writes
+// it in its log.
+void ApplyLargeAddressSetting() {
+  wchar_t dir[MAX_PATH];
+  if (MultiByteToWideChar(CP_ACP, 0, g_game_dir, -1, dir, MAX_PATH) == 0) {
+    return;
+  }
+  wchar_t exe[MAX_PATH];
+  wchar_t backup[MAX_PATH];
+  _snwprintf_s(exe, MAX_PATH, _TRUNCATE, L"%s\\runblack.exe", dir);
+  _snwprintf_s(backup, MAX_PATH, _TRUNCATE, L"%s\\%s", dir,
+               bwvr::kGameExeBackupName);
+  const bool want = ReadIni("large_address", 1) != 0;
+  const bwvr::LargeAddressReport r = bwvr::ApplyLargeAddress(exe, backup, want);
+  static const char* const kNames[] = {"already", "changed", "not v1.42",
+                                       "no rights", "in use", "failed"};
+  char text[160];
+  _snprintf_s(text, sizeof(text), _TRUNCATE, "%s, flag %s, error %lu",
+              kNames[static_cast<int>(r.result)], r.on_now ? "on" : "off",
+              r.error);
+  WritePrivateProfileStringA("launcher", "large_address_result", text,
+                             g_ini_path);
+}
+
 // Starts runblack.exe. With `process`, the caller gets the handle of the game
 // and closes it.
 bool StartGame(const char* parameters, HANDLE* process) {
+  ApplyLargeAddressSetting();
   char exe[MAX_PATH];
   _snprintf_s(exe, sizeof(exe), _TRUNCATE, "%s\\runblack.exe", g_game_dir);
   SHELLEXECUTEINFOA info = {sizeof(info)};

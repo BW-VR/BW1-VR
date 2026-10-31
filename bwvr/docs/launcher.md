@@ -86,6 +86,13 @@ Every save also writes these:
 If Windows refuses the write (an unelevated write to `bwvr.ini` in Program
 Files fails), the status line says so and not "Saved.".
 
+Each start of the game ("Play in VR", "Play, new game", "Play, no VR") first
+sets the flag `LARGE_ADDRESS_AWARE` in `runblack.exe` as the row "Use 4 GB of
+memory" asks (`large_address`, 1 is the default). With the flag, the game
+has 4 GB of address space and not 2 GB. With 0 the launcher clears the flag,
+and the file is the original again. If Windows refuses the change, the game
+starts with the file as it is. See `backend.md`, "The address space".
+
 ## The game without VR
 
 "Play, no VR" starts the game on the monitor, for a look at what the plain

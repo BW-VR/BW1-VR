@@ -145,6 +145,50 @@ function Get-BwvrBackend {
     return ''
 }
 
+# The flag LARGE_ADDRESS_AWARE of runblack.exe, as the launcher sets it
+# (src/common/large_address.h). Get gives 'on', 'off' or 'other' (not the
+# v1.42 file). Set makes the file have the flag or not: it keeps a copy of the
+# plain file as runblack.exe.before-bwvr, writes the two bytes of the field,
+# and compares the SHA-1 after. It gives the state after the call.
+$script:BwvrExeSha1Plain = '9c9aea96f046911ab1b7e496fae511ed5ebbfefe'
+$script:BwvrExeSha1Large = '2315844467e45e3d09497c3e91cb364077dfd028'
+function Get-BwvrLargeAddress([string]$Game = (Get-BwvrGame)) {
+    $sha = (Get-FileHash -Algorithm SHA1 -LiteralPath (Join-Path $Game 'runblack.exe')).Hash.ToLower()
+    if ($sha -eq $script:BwvrExeSha1Large) { return 'on' }
+    if ($sha -eq $script:BwvrExeSha1Plain) { return 'off' }
+    return 'other'
+}
+function Set-BwvrLargeAddress([bool]$On, [string]$Game = (Get-BwvrGame)) {
+    $now = Get-BwvrLargeAddress $Game
+    $want = if ($On) { 'on' } else { 'off' }
+    if ($now -eq 'other' -or $now -eq $want) { return $now }
+    $exe = Join-Path $Game 'runblack.exe'
+    $backup = Join-Path $Game 'runblack.exe.before-bwvr'
+    $backupOk = (Test-Path -LiteralPath $backup) -and
+        ((Get-FileHash -Algorithm SHA1 -LiteralPath $backup).Hash.ToLower() -eq $script:BwvrExeSha1Plain)
+    if (-not $backupOk -and $now -eq 'off') { Copy-Item -LiteralPath $exe -Destination $backup -Force }
+    $stream = [IO.File]::Open($exe, 'Open', 'ReadWrite', 'Read')
+    try {
+        $head = New-Object byte[] 4096
+        [void]$stream.Read($head, 0, $head.Length)
+        $at = [BitConverter]::ToInt32($head, 0x3C) + 22
+        $value = [BitConverter]::ToUInt16($head, $at)
+        $value = if ($On) { $value -bor 0x20 } else { $value -band (-bnot 0x20) }
+        [void]$stream.Seek($at, 'Begin')
+        $stream.WriteByte([byte]($value -band 0xFF))
+        $stream.WriteByte([byte](($value -shr 8) -band 0xFF))
+        $stream.Flush()
+    } finally {
+        $stream.Close()
+    }
+    $after = Get-BwvrLargeAddress $Game
+    if ($after -eq 'other' -and (Test-Path -LiteralPath $backup)) {
+        Copy-Item -LiteralPath $backup -Destination $exe -Force
+        $after = Get-BwvrLargeAddress $Game
+    }
+    return $after
+}
+
 # True when this process has administrator rights (the mandatory label of
 # its token is high or more). A game that a test starts gets the same rights.
 function Test-BwvrElevated {

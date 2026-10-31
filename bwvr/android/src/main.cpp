@@ -155,10 +155,12 @@ struct App {
   bool play_game = true;         // play_game
   int play_menu_hold_ms = 1000;  // play_menu_hold_ms
   bool play_menu_press = true;   // play_menu_press
+  bool play_menu_sticks = true;  // play_menu_sticks
   bool play_notice = true;       // play_notice
   bool exit_at_end = true;       // exit_at_end
   play_rules::MenuButtonRule menu_rule;  // the menu button of this game
   play_rules::MenuStep menu_step;        // of this frame of the session
+  play_rules::StickChordRule stick_rule; // the two sticks of this game
   bool menu_mod_said = false;  // the log has the press that goes to the mod now
   bool pc_profile = true;        // pc_profile
   std::string prefix;            // the Wine prefix, empty with no internal folder
@@ -812,8 +814,9 @@ void ShowNotice(App* app) {
     if (ms > 0) {
       snprintf(text, sizeof(text),
                "The game starts in Wine. The picture of the game comes with its first "
-               "frame. Hold the left menu button for %.1f s to show the menu with "
-               "\"Quit game\".", ms / 1000.0);
+               "frame. Hold the left menu button%s for %.1f s to show the menu with "
+               "\"Quit game\".",
+               app->play_menu_sticks ? ", or the clicks of both sticks," : "", ms / 1000.0);
     } else {
       snprintf(text, sizeof(text),
                "The game starts in Wine. The picture of the game comes with its first "
@@ -1042,11 +1045,24 @@ void MenuButton(App* app, const XrInput& in) {
   if (!app->game_on) {
     app->menu_rule = play_rules::MenuButtonRule();
     app->menu_step = play_rules::MenuStep();
+    app->stick_rule = play_rules::StickChordRule();
     return;
   }
   app->menu_step = play_rules::StepMenuButton(&app->menu_rule, in.menu, NowMs(),
                                               app->menu_over_game, app->play_menu_hold_ms,
                                               app->play_menu_press);
+  const play_rules::MenuAction chord =
+      app->play_menu_sticks
+          ? play_rules::StepStickChord(&app->stick_rule, in.stick_click, NowMs(),
+                                       app->menu_over_game, app->play_menu_hold_ms)
+          : play_rules::MenuAction::kNone;
+  if (app->menu_step.action == play_rules::MenuAction::kNone &&
+      chord != play_rules::MenuAction::kNone) {
+    app->menu_step.action = chord;
+    AppLog("game         : the clicks of both sticks %s the menu over the game "
+           "(play_menu_sticks=1)",
+           chord == play_rules::MenuAction::kShow ? "show" : "hide");
+  }
   if (app->menu_step.action == play_rules::MenuAction::kShow) {
     ShowMenuOverGame(app, true);
   } else if (app->menu_step.action == play_rules::MenuAction::kHide) {
@@ -1677,6 +1693,11 @@ void android_main(android_app* android) {
   // process stays, as the system wants.
   app.exit_at_end = app.ini.GetInt("bwvr", "exit_at_end", 1) != 0;
   app.play_menu_press = app.ini.GetInt("bwvr", "play_menu_press", 1) != 0;
+  // play_menu_sticks=1: a hold of the clicks of both sticks for
+  // play_menu_hold_ms shows the menu over the game, and a press of both
+  // hides it (the Steam Frame keeps the menu button for the system). 0: only
+  // the menu button.
+  app.play_menu_sticks = app.ini.GetInt("bwvr", "play_menu_sticks", 1) != 0;
   // screen_keyboard=1 (the default): while a dialog box of the game takes
   // text, the app shows its keyboard under the screen quad, and the trigger
   // on a key gives the key to the mod. 0: no keyboard.

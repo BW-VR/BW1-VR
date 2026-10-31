@@ -1184,6 +1184,13 @@ bool XrApp::BeginFrame(XrInput* input) {
         input->menu[h] = b.isActive && b.currentState;
       }
     }
+    if (stick_click_ != XR_NULL_HANDLE) {
+      b = {XR_TYPE_ACTION_STATE_BOOLEAN};
+      get.action = stick_click_;
+      if (XR_SUCCEEDED(xrGetActionStateBoolean(session_, &get, &b))) {
+        input->stick_click[h] = b.isActive && b.currentState;
+      }
+    }
     XrActionStateVector2f v = {XR_TYPE_ACTION_STATE_VECTOR2F};
     get.action = stick_;
     if (XR_SUCCEEDED(xrGetActionStateVector2f(session_, &get, &v)) && v.isActive) {

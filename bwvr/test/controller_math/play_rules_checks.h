@@ -206,6 +206,71 @@ inline MenuRun RunMenu(play_rules::MenuButtonRule* r, int press_from, int press_
   return run;
 }
 
+// The two sticks (play_menu_sticks): slots of 14 ms. left and right give
+// the slots in which each stick is down, as [from, to).
+inline int RunChord(play_rules::StickChordRule* r, int l_from, int l_to, int r_from, int r_to,
+                    int slots, bool* over, int hold_ms, int* hides) {
+  int shows = 0;
+  for (int i = 0; i < slots; ++i) {
+    const bool click[2] = {i >= l_from && i < l_to, i >= r_from && i < r_to};
+    const play_rules::MenuAction a =
+        play_rules::StepStickChord(r, click, i * 14.0, *over, hold_ms);
+    if (a == play_rules::MenuAction::kShow) { ++shows; *over = true; }
+    if (a == play_rules::MenuAction::kHide) { ++*hides; *over = false; }
+  }
+  return shows;
+}
+
+inline void StickChordChecks() {
+  printf("\nPlay: the clicks of both sticks while the game runs\n");
+  using play_rules::StickChordRule;
+  {
+    StickChordRule r;
+    bool over = false;
+    int hides = 0;
+    const int shows = RunChord(&r, 10, 100, 12, 100, 120, &over, 1000, &hides);
+    Check(shows == 1 && over, "both sticks held for 1232 ms show the menu one time", shows, 1);
+  }
+  {
+    StickChordRule r;
+    bool over = false;
+    int hides = 0;
+    const int shows = RunChord(&r, 10, 60, 12, 60, 120, &over, 1000, &hides);
+    Check(shows == 0 && !over, "both sticks held for 672 ms show no menu", shows, 0);
+  }
+  {
+    StickChordRule r;
+    bool over = false;
+    int hides = 0;
+    const int shows = RunChord(&r, 10, 200, 300, 300, 320, &over, 1000, &hides);
+    Check(shows == 0, "one stick held for 2660 ms shows no menu", shows, 0);
+  }
+  {
+    // The time counts from the second stick: left at slot 0, right at slot
+    // 50 (700 ms later), both up at slot 100 (700 ms with both down).
+    StickChordRule r;
+    bool over = false;
+    int hides = 0;
+    const int shows = RunChord(&r, 0, 100, 50, 100, 120, &over, 1000, &hides);
+    Check(shows == 0, "the hold counts from the second stick", shows, 0);
+  }
+  {
+    // The menu shows. The next press of both hides it at once.
+    StickChordRule r;
+    bool over = true;
+    int hides = 0;
+    const int shows = RunChord(&r, 5, 8, 5, 8, 20, &over, 1000, &hides);
+    Check(hides == 1 && shows == 0 && !over, "a press of both sticks hides the menu", hides, 1);
+  }
+  {
+    StickChordRule r;
+    bool over = false;
+    int hides = 0;
+    const int shows = RunChord(&r, 10, 200, 10, 200, 220, &over, 0, &hides);
+    Check(shows == 0 && hides == 0, "play_menu_hold_ms=0: the sticks show no menu", shows, 0);
+  }
+}
+
 inline void MenuButtonChecks() {
   printf("\nPlay: the menu button while the game runs\n");
   using play_rules::MenuButtonRule;
@@ -601,6 +666,7 @@ inline void PlayRulesChecks() {
   GameStartChecks();
   MaskChecks();
   MenuButtonChecks();
+  StickChordChecks();
   QuitChecks();
   ProfileChecks();
 }

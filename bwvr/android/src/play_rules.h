@@ -316,6 +316,41 @@ struct MenuStep {
   bool mod_menu[2] = {false, false};  // the menu bit of each hand for the mod
 };
 
+// THE TWO STICKS (play_menu_sticks): a hold of the clicks of both sticks for
+// hold_ms shows the menu over the game, and the next time that both sticks
+// go down the menu hides. The Steam Frame keeps the menu button of the left
+// controller for the system (a hold centres the view), so the hold of the
+// menu button cannot open the menu there. The clicks still go to the mod.
+struct StickChordRule {
+  bool both = false;     // both sticks were down in the slot before
+  double down_ms = 0.0;  // the time when the second stick went down
+  bool taken = false;    // this chord showed or hid the menu
+};
+
+inline MenuAction StepStickChord(StickChordRule* r, const bool click[2], double now_ms,
+                                 bool menu_over_game, int hold_ms) {
+  MenuAction a = MenuAction::kNone;
+  const bool both = click[0] && click[1];
+  if (hold_ms <= 0) {
+    r->both = both;
+    return a;
+  }
+  if (both && !r->both) {
+    r->down_ms = now_ms;
+    r->taken = false;
+    if (menu_over_game) {
+      a = MenuAction::kHide;
+      r->taken = true;
+    }
+  }
+  if (both && !r->taken && !menu_over_game && now_ms - r->down_ms >= hold_ms) {
+    a = MenuAction::kShow;
+    r->taken = true;
+  }
+  r->both = both;
+  return a;
+}
+
 // One slot. down: the menu button of each hand in this slot.
 inline MenuStep StepMenuButton(MenuButtonRule* r, const bool down[2], double now_ms,
                                bool menu_over_game, int hold_ms, bool hold_back) {

@@ -40,6 +40,8 @@ struct XrInput {
   float stick[2][2] = {};
   // The menu button (the actions of the mod, SetInputLive).
   bool menu[2] = {false, false};
+  // The click of each stick (the actions of the mod, SetInputLive).
+  bool stick_click[2] = {false, false};
 };
 
 class XrApp {

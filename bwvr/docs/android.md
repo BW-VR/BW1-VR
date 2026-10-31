@@ -460,6 +460,17 @@ headset the key Menu shows and hides the menu, and Back shows it.
 `play_menu_hold_ms=0`: no menu of the app over the game (the menu button,
 the key Menu and Back do not show it), each press of the menu button goes
 to the mod at once, and the menu comes back only when the game ends.
+
+**The two sticks** (`play_menu_sticks`, `StepStickChord` of
+`play_rules.h`). The Steam Frame keeps the menu button of the left
+controller for the system: a hold of it centres the view. So with
+`play_menu_sticks=1` (the default) a hold of the clicks of both sticks for
+`play_menu_hold_ms` also shows the menu over the game, on each headset. The
+time starts when the second stick goes down. While the menu shows, the
+next press of both sticks hides it. The clicks of the sticks still go to
+the mod, so a stick click that the mod uses (`gesture_button=2`,
+`radial_menu_button=2`) also acts. The log has "the clicks of both sticks
+show the menu over the game". `play_menu_sticks=0`: only the menu button.
 The process that the app starts is the loader of Wine. It becomes
 `start.exe` of Wine, which runs `runblack.exe` as a process of its own (its
 parent is 1, `emu_game_test.ps1` logs the tree) and gives its exit code

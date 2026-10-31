@@ -51,6 +51,29 @@ uint32_t MemoryType(uint32_t bits, VkMemoryPropertyFlags want) {
   return UINT32_MAX;
 }
 
+// THE MEMORY OF MAKEBUFFER AND MAKEIMAGE (GetMemoryUse). MakeBuffer and
+// MakeImage run on more than one thread.
+SRWLOCK g_use_lock = SRWLOCK_INIT;
+MemoryUse g_use = {};
+
+void CountMemory(bool host, VkDeviceSize bytes, int sign) {
+  AcquireSRWLockExclusive(&g_use_lock);
+  if (host) {
+    g_use.host_count += sign;
+    g_use.host_bytes += sign > 0 ? bytes : 0 - bytes;
+  } else {
+    g_use.device_count += sign;
+    g_use.device_bytes += sign > 0 ? bytes : 0 - bytes;
+  }
+  ReleaseSRWLockExclusive(&g_use_lock);
+}
+
+void CountFailure() {
+  AcquireSRWLockExclusive(&g_use_lock);
+  ++g_use.failures;
+  ReleaseSRWLockExclusive(&g_use_lock);
+}
+
 bool Allocate(const VkMemoryRequirements& req, VkMemoryPropertyFlags want,
               VkDeviceMemory* out) {
   uint32_t type = MemoryType(req.memoryTypeBits, want);
@@ -454,15 +477,24 @@ bool MakeBuffer(VkDeviceSize size, VkBufferUsageFlags usage, bool host,
   const bool cached =
       read && Allocate(req, want | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
                        &out->memory);
-  if ((!cached && !Allocate(req, want, &out->memory)) ||
-      f.vkBindBufferMemory(g_core.device, out->buffer, out->memory, 0) !=
-          VK_SUCCESS) {
+  if (!cached && !Allocate(req, want, &out->memory)) {
+    CountFailure();
+    FreeBuffer(out);
+    return false;
+  }
+  out->memory_bytes = req.size;
+  out->host = host;
+  CountMemory(host, req.size, 1);
+  if (f.vkBindBufferMemory(g_core.device, out->buffer, out->memory, 0) !=
+      VK_SUCCESS) {
     FreeBuffer(out);
     return false;
   }
   out->size = size;
   if (host && f.vkMapMemory(g_core.device, out->memory, 0, size, 0,
                             &out->mapped) != VK_SUCCESS) {
+    CountFailure();
+    out->mapped = nullptr;
     FreeBuffer(out);
     return false;
   }
@@ -476,6 +508,7 @@ void FreeBuffer(Buffer* b) {
   }
   if (b->memory != VK_NULL_HANDLE) {
     f.vkFreeMemory(g_core.device, b->memory, nullptr);
+    CountMemory(b->host, b->memory_bytes, -1);
   }
   memset(b, 0, sizeof(*b));
 }
@@ -500,9 +533,15 @@ bool MakeImage(uint32_t width, uint32_t height, uint32_t levels,
   }
   VkMemoryRequirements req;
   f.vkGetImageMemoryRequirements(g_core.device, out->image, &req);
-  if (!Allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &out->memory) ||
-      f.vkBindImageMemory(g_core.device, out->image, out->memory, 0) !=
-          VK_SUCCESS) {
+  if (!Allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &out->memory)) {
+    CountFailure();
+    FreeImage(out);
+    return false;
+  }
+  out->memory_bytes = req.size;
+  CountMemory(false, req.size, 1);
+  if (f.vkBindImageMemory(g_core.device, out->image, out->memory, 0) !=
+      VK_SUCCESS) {
     FreeImage(out);
     return false;
   }
@@ -534,8 +573,15 @@ void FreeImage(Image* image) {
   }
   if (image->memory != VK_NULL_HANDLE) {
     f.vkFreeMemory(g_core.device, image->memory, nullptr);
+    CountMemory(false, image->memory_bytes, -1);
   }
   memset(image, 0, sizeof(*image));
+}
+
+void GetMemoryUse(MemoryUse* out) {
+  AcquireSRWLockShared(&g_use_lock);
+  *out = g_use;
+  ReleaseSRWLockShared(&g_use_lock);
 }
 
 VkCommandBuffer BeginOnce() {

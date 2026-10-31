@@ -194,6 +194,8 @@ struct Buffer {
   VkDeviceMemory memory;
   VkDeviceSize size;
   void* mapped;
+  VkDeviceSize memory_bytes;  // the size of the memory, for GetMemoryUse
+  bool host;
 };
 bool MakeBuffer(VkDeviceSize size, VkBufferUsageFlags usage, bool host,
                 Buffer* out);
@@ -207,11 +209,25 @@ struct Image {
   VkImageView view;
   VkFormat format;
   uint32_t width, height, levels, layers;
+  VkDeviceSize memory_bytes;  // the size of the memory, for GetMemoryUse
 };
 bool MakeImage(uint32_t width, uint32_t height, uint32_t levels,
                VkFormat format, VkImageUsageFlags usage,
                VkImageAspectFlags aspect, Image* out, uint32_t layers = 1);
 void FreeImage(Image* image);
+
+// THE MEMORY OF MAKEBUFFER AND MAKEIMAGE, for the report. Each buffer and
+// each image has an allocation of its own. Host memory stays mapped while
+// its buffer lives, so it takes address space of the process (2 GB for the
+// game). Device memory takes no address space of the process.
+struct MemoryUse {
+  uint32_t device_count;
+  uint64_t device_bytes;
+  uint32_t host_count;
+  uint64_t host_bytes;
+  uint32_t failures;  // allocations and maps that failed, since the start
+};
+void GetMemoryUse(MemoryUse* out);
 
 // A command buffer for one job: Begin gives it, End submits it and waits.
 VkCommandBuffer BeginOnce();

@@ -47,6 +47,7 @@
 #include "vk_window.h"
 #include "vk_prim_math.h"
 #include "vk_texture_math.h"
+#include "address_space_math.h"
 
 void ModLog(const char* format, ...);
 
@@ -56,6 +57,17 @@ bool g_on = false;
 // vk_lines of bwvr.ini: 1 (the default) a draw of points or lines becomes
 // triangles (vk_prim_math.h). 0: it is not drawn, and the report counts it.
 bool g_lines = true;
+// vk_surface_heap of bwvr.ini: 1 (the default) the pixels of a surface come
+// from the heap of the process, so a small surface takes only its own bytes
+// of the address space. 0: each surface takes a block of VirtualAlloc, and
+// each block takes 64 KB of the address space at the least
+// (address_space_math.h). A texture with mip levels has a surface for each
+// level, so most surfaces of the game are smaller than 64 KB.
+bool g_surface_heap = true;
+// The bytes after the pixels of a surface from the heap. A block of
+// VirtualAlloc ends at the end of a page, so a write a little past the
+// pixels does no harm there. These bytes keep that for the heap.
+const DWORD kHeapSlack = 64;
 
 // THE METHODS THAT THIS FILE DOES NOT MAKE: a count for each name, and one
 // line of the log at the first call.
@@ -127,6 +139,12 @@ volatile LONG g_copy_blts = 0;
 volatile LONG g_fills = 0;
 volatile LONG g_line_draws = 0;
 volatile LONG g_line_prims = 0;
+// The pixels of the surfaces: the surfaces that have them, their KB, the KB
+// of the address space that they take, and the allocations that failed.
+volatile LONG g_pixel_surfaces = 0;
+volatile LONG g_pixel_kb = 0;
+volatile LONG g_pixel_space_kb = 0;
+volatile LONG g_pixel_failures = 0;
 
 // THE FORMATS.
 DDPIXELFORMAT Rgb(DWORD bits, DWORD r, DWORD g, DWORD b, DWORD a) {
@@ -530,13 +548,9 @@ class Surface : public IDirectDrawSurface7 {
   }
   const DDSURFACEDESC2& desc() const { return desc_; }
   void SetNext(Surface* next) { next_ = next; }  // takes the reference
-  // The pixels, made at their first use.
+  // The pixels, made at their first use, with each byte 0.
   uint8_t* Pixels() {
-    if (bits_ == nullptr && bytes_ > 0) {
-      bits_ = static_cast<uint8_t*>(
-          VirtualAlloc(nullptr, bytes_, MEM_COMMIT | MEM_RESERVE,
-                       PAGE_READWRITE));
-    }
+    if (bits_ == nullptr && bytes_ > 0) MakePixels();
     return bits_;
   }
   LONG pitch() const { return pitch_; }
@@ -546,6 +560,8 @@ class Surface : public IDirectDrawSurface7 {
 
  private:
   void Present();
+  void MakePixels();
+  void FreePixels();
 
   LONG refs_ = 1;
   TextureFace face_{this};
@@ -554,6 +570,8 @@ class Surface : public IDirectDrawSurface7 {
   LONG pitch_ = 0;
   DWORD bytes_ = 0;
   uint8_t* bits_ = nullptr;
+  bool bits_heap_ = false;   // bits_ is from the heap, else VirtualAlloc
+  LONG space_kb_ = 0;        // the KB of the address space of bits_
   bool locked_write_ = false;
   Surface* next_ = nullptr;  // the next mip level
   Surface* z_ = nullptr;     // the attached Z buffer
@@ -1508,12 +1526,58 @@ Surface::Surface(Draw* draw, const DDSURFACEDESC2& desc)
 }
 
 Surface::~Surface() {
+  // The memory of this surface can hold a new surface, so the renderer
+  // forgets its texture.
+  VkSceneSurfaceGone(this);
   if (IsPrimary() && draw_ != nullptr) draw_->ForgetPrimary(this);
   if (next_ != nullptr) next_->Release();
   if (z_ != nullptr) z_->Release();
   if (clipper_ != nullptr) clipper_->Release();
-  if (bits_ != nullptr) VirtualFree(bits_, 0, MEM_RELEASE);
+  FreePixels();
   InterlockedDecrement(&g_surfaces);
+}
+
+void Surface::MakePixels() {
+  bits_heap_ = g_surface_heap;
+  uint64_t space = 0;
+  if (bits_heap_) {
+    bits_ = static_cast<uint8_t*>(_aligned_malloc(bytes_ + kHeapSlack, 16));
+    if (bits_ != nullptr) memset(bits_, 0, bytes_ + kHeapSlack);
+    space = bytes_ + kHeapSlack;
+  } else {
+    bits_ = static_cast<uint8_t*>(VirtualAlloc(
+        nullptr, bytes_, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    space = address_space_math::ReservedBytes(bytes_);
+  }
+  if (bits_ == nullptr) {
+    // The game gets DDERR_OUTOFMEMORY. The first 8 go into the log.
+    const LONG n = InterlockedIncrement(&g_pixel_failures);
+    if (n <= 8) {
+      ModLog("vk ddraw     : no memory for the pixels of a surface (%ld of "
+             "8): %lu by %lu, %lu bytes, pixel format flags 0x%lX, caps "
+             "0x%lX. The Lock or the Blt gives DDERR_OUTOFMEMORY",
+             n, desc_.dwWidth, desc_.dwHeight, bytes_,
+             desc_.ddpfPixelFormat.dwFlags, desc_.ddsCaps.dwCaps);
+    }
+    return;
+  }
+  space_kb_ = static_cast<LONG>((space + 1023) / 1024);
+  InterlockedIncrement(&g_pixel_surfaces);
+  InterlockedExchangeAdd(&g_pixel_kb, static_cast<LONG>((bytes_ + 1023) / 1024));
+  InterlockedExchangeAdd(&g_pixel_space_kb, space_kb_);
+}
+
+void Surface::FreePixels() {
+  if (bits_ == nullptr) return;
+  if (bits_heap_) {
+    _aligned_free(bits_);
+  } else {
+    VirtualFree(bits_, 0, MEM_RELEASE);
+  }
+  bits_ = nullptr;
+  InterlockedDecrement(&g_pixel_surfaces);
+  InterlockedExchangeAdd(&g_pixel_kb, -static_cast<LONG>((bytes_ + 1023) / 1024));
+  InterlockedExchangeAdd(&g_pixel_space_kb, -space_kb_);
 }
 
 HRESULT Surface::QueryInterface(REFIID id, LPVOID* out) {
@@ -2063,9 +2127,10 @@ HRESULT Create(ProxyCreateFn, GUID*, void** out, IUnknown*) {
 
 }  // namespace
 
-void VkDdrawInstall(int lines) {
+void VkDdrawInstall(int lines, int surface_heap) {
   g_on = true;
   g_lines = lines != 0;
+  g_surface_heap = surface_heap != 0;
   ProxyCreateHooks hooks = {};
   hooks.create_ex = &CreateEx;
   hooks.create = &Create;
@@ -2085,6 +2150,11 @@ void VkDdrawReport(unsigned long long frames) {
          g_surfaces, g_surfaces_made, InterlockedExchange(&g_presents, 0),
          InterlockedExchange(&g_fills, 0), InterlockedExchange(&g_copy_blts, 0),
          InterlockedExchange(&g_dxt_blts, 0));
+  ModLog("vk ddraw     : vk_surface_heap=%d. %ld surfaces have pixels, %.1f "
+         "MB, in %.1f MB of the address space. %ld allocations of pixels "
+         "failed since the start",
+         g_surface_heap ? 1 : 0, g_pixel_surfaces, g_pixel_kb / 1024.0,
+         g_pixel_space_kb / 1024.0, g_pixel_failures);
   const LONG line_draws = InterlockedExchange(&g_line_draws, 0);
   if (line_draws != 0) {
     ModLog("vk ddraw     : %ld draws of points or lines in the window, as %ld "

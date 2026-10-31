@@ -315,6 +315,10 @@ struct Texture {
   void* surface;
   vk::Image image;
   bool dirty;
+  // vk_texture_forget=1: the surface went away (VkSceneSurfaceGone). The
+  // next walk frees the image and its sets after the GPU is done with them,
+  // and takes the entry out of the table.
+  bool gone;
   uint64_t used_walk;  // g_walk_number of the last walk that drew with it
   struct SetSlot {
     VkSampler sampler;
@@ -326,6 +330,35 @@ const int kMaxTextures = 4096;
 Texture* g_textures = nullptr;
 int g_texture_count = 0;
 SRWLOCK g_texture_lock = SRWLOCK_INIT;  // the dirty marks of the frame thread
+// vk_texture_forget of bwvr.ini: 1 (the default) the table forgets the
+// texture of a surface that the game releases, so a new surface at the same
+// address gets a new texture. 0: the entry stays with its image.
+bool g_texture_forget = true;
+volatile LONG g_gone_pending = 0;  // entries marked gone, not swept yet
+uint64_t g_forgotten = 0;          // for the report
+// THE DRAWS WITH NO TEXTURE OF THEIR OWN: the reasons why a surface gave no
+// image. A draw then has the white texel, or the image of the read before.
+enum WhiteReason {
+  kWhiteLock,     // the Lock of the surface failed
+  kWhiteFormat,   // a format that ReadSurface does not read
+  kWhiteMemory,   // no memory of the CPU for the pixels
+  kWhiteUpload,   // no image or no staging memory of Vulkan
+  kWhiteFull,     // the table of the textures is full
+  kWhiteReasons
+};
+const char* const kWhiteNames[kWhiteReasons] = {
+    "the Lock of the surface failed",
+    "the renderer does not read the format of the surface",
+    "there is no memory of the CPU for the pixels",
+    "Vulkan gave no image or no staging memory",
+    "the table of the textures is full"};
+uint64_t g_white_reads[kWhiteReasons] = {};  // for the report
+uint64_t g_white_kept = 0;  // of them with the image of the read before
+int g_white_said = 0;       // the lines of the log, the first 12
+// The most bytes that one walk put into the ring of the vertices and into
+// the ring of the staging, in the report window.
+VkDeviceSize g_ring_most = 0;
+VkDeviceSize g_stage_most = 0;
 // FOVEATED RESOLUTION: the layers of the outer and the centre image as
 // textures for the eye picture, [image][eye].
 Texture g_mres_texture[2][2] = {};
@@ -931,24 +964,53 @@ const uint8_t* ReadRow(const uint8_t* src, uint32_t bytes) {
   return g_row;
 }
 
-// Reads a surface of the game into RGBA8. False when it cannot.
+// Why ReadSurface gave no pixels, for the log.
+struct ReadFail {
+  WhiteReason reason;
+  HRESULT result;  // of the Lock
+  DWORD flags, fourcc, bits, width, height;
+};
+
+// Reads a surface of the game into RGBA8. False with the reason when it
+// cannot.
 bool ReadSurface(IDirectDrawSurface7* s, uint32_t* width, uint32_t* height,
-                 uint8_t** pixels) {
+                 uint8_t** pixels, ReadFail* fail) {
+  memset(fail, 0, sizeof(*fail));
   DDSURFACEDESC2 desc = {};
   desc.dwSize = sizeof(desc);
-  if (FAILED(s->Lock(nullptr, &desc, DDLOCK_READONLY | DDLOCK_WAIT, nullptr))) {
+  const HRESULT locked =
+      s->Lock(nullptr, &desc, DDLOCK_READONLY | DDLOCK_WAIT, nullptr);
+  if (FAILED(locked)) {
+    fail->reason = kWhiteLock;
+    fail->result = locked;
+    DDSURFACEDESC2 d = {};
+    d.dwSize = sizeof(d);
+    if (SUCCEEDED(s->GetSurfaceDesc(&d))) {
+      fail->flags = d.ddpfPixelFormat.dwFlags;
+      fail->fourcc = d.ddpfPixelFormat.dwFourCC;
+      fail->bits = d.ddpfPixelFormat.dwRGBBitCount;
+      fail->width = d.dwWidth;
+      fail->height = d.dwHeight;
+    }
     return false;
   }
   const DDPIXELFORMAT& pf = desc.ddpfPixelFormat;
   const uint32_t bpp = pf.dwRGBBitCount;
+  fail->flags = pf.dwFlags;
+  fail->fourcc = pf.dwFourCC;
+  fail->bits = bpp;
+  fail->width = desc.dwWidth;
+  fail->height = desc.dwHeight;
   bool ok = (pf.dwFlags & DDPF_RGB) != 0 && (bpp == 16 || bpp == 32 ||
                                              bpp == 24) &&
             desc.dwWidth > 0 && desc.dwHeight > 0;
+  fail->reason = kWhiteFormat;
   if (ok) {
     *width = desc.dwWidth;
     *height = desc.dwHeight;
     *pixels = static_cast<uint8_t*>(malloc(desc.dwWidth * desc.dwHeight * 4));
     ok = *pixels != nullptr;
+    fail->reason = kWhiteMemory;
   }
   if (ok) {
     // The masks of the format, and its table (16 bits) or its channels (24
@@ -1221,7 +1283,9 @@ bool UploadQueued(uint32_t width, uint32_t height, uint8_t* pixels,
 
 Texture* FindTexture(void* surface, bool make) {
   for (int i = 0; i < g_texture_count; ++i) {
-    if (g_textures[i].surface == surface) return &g_textures[i];
+    if (g_textures[i].surface == surface && !g_textures[i].gone) {
+      return &g_textures[i];
+    }
   }
   if (!make || g_texture_count >= kMaxTextures) return nullptr;
   Texture* t = &g_textures[g_texture_count++];
@@ -1241,6 +1305,54 @@ void Retire(vk::Image* image) {
   memset(image, 0, sizeof(*image));
 }
 
+// vk_texture_forget=1, at the start of a walk on the thread of the walks:
+// the image and the sets of each entry that is gone go to the slot of the
+// walk, which frees them after its fence, and the last entry of the table
+// takes the place of the entry. An entry stays for the next walk when the
+// slot has no room for its image or its sets.
+void SweepGone(Slot& s) {
+  if (InterlockedCompareExchange(&g_gone_pending, 0, 0) == 0) return;
+  AcquireSRWLockExclusive(&g_texture_lock);
+  for (int i = g_texture_count - 1; i >= 0; --i) {
+    Texture& t = g_textures[i];
+    if (!t.gone) continue;
+    if (s.garbage_count >= 64 || s.dead_count + t.set_count > 1024) continue;
+    if (t.image.image != VK_NULL_HANDLE) Retire(&t.image);
+    for (int k = 0; k < t.set_count; ++k) {
+      s.dead_sets[s.dead_count++] = t.sets[k].set;
+    }
+    --g_texture_count;
+    if (i != g_texture_count) t = g_textures[g_texture_count];
+    memset(&g_textures[g_texture_count], 0, sizeof(Texture));
+    InterlockedDecrement(&g_gone_pending);
+    ++g_forgotten;
+  }
+  ReleaseSRWLockExclusive(&g_texture_lock);
+}
+
+// A read of a texture that gave no image: the count of its reason, and a
+// line for each of the first 12. kept: the draw has the image of the read
+// before, else the white texel.
+void NoteWhite(const void* surface, const ReadFail& fail, bool kept) {
+  ++g_white_reads[fail.reason];
+  if (kept) ++g_white_kept;
+  if (g_white_said >= 12) return;
+  ++g_white_said;
+  const char c[4] = {static_cast<char>(fail.fourcc & 0xFF),
+                     static_cast<char>((fail.fourcc >> 8) & 0xFF),
+                     static_cast<char>((fail.fourcc >> 16) & 0xFF),
+                     static_cast<char>((fail.fourcc >> 24) & 0xFF)};
+  const bool fourcc = (fail.flags & DDPF_FOURCC) != 0;
+  ModLog("vk scene     : a texture with no new image (%d of 12): %s "
+         "(0x%08lX). The surface %p, %lu by %lu, pixel format flags 0x%lX, "
+         "%lu bits%s%c%c%c%c. The draw has %s",
+         g_white_said, kWhiteNames[fail.reason], fail.result, surface,
+         fail.width, fail.height, fail.flags, fail.bits,
+         fourcc ? ", FourCC " : "", fourcc ? c[0] : ' ',
+         fourcc ? c[1] : ' ', fourcc ? c[2] : ' ', fourcc ? c[3] : ' ',
+         kept ? "the image of the read before" : "the white texel");
+}
+
 // The texture of a surface, read now when it is new or marked.
 Texture* TextureOf(void* surface) {
   if (surface == nullptr) return g_white;
@@ -1249,13 +1361,21 @@ Texture* TextureOf(void* surface) {
   const bool dirty = t != nullptr && t->dirty;
   if (t != nullptr) t->dirty = false;
   ReleaseSRWLockExclusive(&g_texture_lock);
-  if (t == nullptr) return g_white;
+  if (t == nullptr) {
+    ReadFail fail = {};
+    fail.reason = kWhiteFull;
+    NoteWhite(surface, fail, false);
+    return g_white;
+  }
   if (!dirty && t->image.image != VK_NULL_HANDLE) return t;
   uint32_t width = 0, height = 0;
   uint8_t* pixels = nullptr;
+  ReadFail fail;
   if (!ReadSurface(static_cast<IDirectDrawSurface7*>(surface), &width, &height,
-                   &pixels)) {
-    return t->image.image != VK_NULL_HANDLE ? t : g_white;
+                   &pixels, &fail)) {
+    const bool kept = t->image.image != VK_NULL_HANDLE;
+    NoteWhite(surface, fail, kept);
+    return kept ? t : g_white;
   }
   // The image it has, when it has the size and no draw of this walk drew
   // with it.
@@ -1276,7 +1396,11 @@ Texture* TextureOf(void* surface) {
   const bool ok = g_recording && g_walk_upload_queue
                       ? UploadQueued(width, height, pixels, &t->image)
                       : Upload(width, height, pixels, &t->image);
-  if (!ok) return g_white;
+  if (!ok) {
+    fail.reason = kWhiteUpload;
+    NoteWhite(surface, fail, false);
+    return g_white;
+  }
   return t;
 }
 
@@ -2652,6 +2776,7 @@ void BeginOnWorker(const void* data) {
   }
   BlackCheckRead(s);
   f.vkResetFences(device, 1, &s.fence);
+  if (s.stage_used > g_stage_most) g_stage_most = s.stage_used;
   s.stage_used = 0;
   if (s.query_written) {
     // Each query with its availability. A time over 100 ms is not a time
@@ -2693,6 +2818,7 @@ void BeginOnWorker(const void* data) {
     s.dead_count = 0;
   }
   s.upload_open = false;
+  SweepGone(s);
   // The stress test: the next N textures, in turn, are read again at their
   // next use.
   if (seed->reread > 0 && g_texture_count > 0) {
@@ -2704,6 +2830,7 @@ void BeginOnWorker(const void* data) {
     ReleaseSRWLockExclusive(&g_texture_lock);
   }
   g_walk_upload_queue = seed->upload_queue;
+  if (s.used > g_ring_most) g_ring_most = s.used;
   s.used = 0;
   f.vkResetCommandPool(device, s.pool, 0);
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -4184,6 +4311,23 @@ void VkSceneSurfaceWritten(void* surface) {
   ReleaseSRWLockExclusive(&g_texture_lock);
 }
 
+void VkSceneSurfaceGone(void* surface) {
+  if (!g_texture_forget || !VkSceneOn() || g_textures == nullptr ||
+      surface == nullptr) {
+    return;
+  }
+  AcquireSRWLockExclusive(&g_texture_lock);
+  Texture* t = FindTexture(surface, false);
+  if (t != nullptr) {
+    t->gone = true;
+    t->surface = nullptr;
+    InterlockedIncrement(&g_gone_pending);
+  }
+  ReleaseSRWLockExclusive(&g_texture_lock);
+}
+
+void VkSceneSetTextureForget(int on) { g_texture_forget = on != 0; }
+
 void VkSceneReport(uint64_t frames) {
   if (g_mode == 0 || frames == 0) return;
   const double per = static_cast<double>(frames);
@@ -4251,6 +4395,34 @@ void VkSceneReport(uint64_t frames) {
            g_texture_reuse ? 1 : 0, g_reused, g_ring_stages, g_fence_waits,
            g_fence_wait_ticks * 1000.0 / static_cast<double>(hz.QuadPart));
     g_reused = g_ring_stages = g_fence_waits = g_fence_wait_ticks = 0;
+  }
+  {
+    // The textures that a surface gave no image, and the memory of Vulkan.
+    ModLog("vk scene     : vk_texture_forget=%d. %llu textures forgotten after "
+           "the game released their surface. Reads of a texture with no new "
+           "image: %llu with a failed Lock, %llu in a format that the "
+           "renderer does not read, %llu with no memory of the CPU, %llu with "
+           "no memory of Vulkan, %llu with a full table. %llu of them drew "
+           "with the image of the read before",
+           g_texture_forget ? 1 : 0, g_forgotten, g_white_reads[kWhiteLock],
+           g_white_reads[kWhiteFormat], g_white_reads[kWhiteMemory],
+           g_white_reads[kWhiteUpload], g_white_reads[kWhiteFull],
+           g_white_kept);
+    g_forgotten = g_white_kept = 0;
+    for (int i = 0; i < kWhiteReasons; ++i) g_white_reads[i] = 0;
+    vk::MemoryUse use;
+    vk::GetMemoryUse(&use);
+    ModLog("vk scene     : the memory of Vulkan: %u images and buffers in "
+           "device memory, %.1f MB. %u buffers in host memory, %.1f MB, "
+           "mapped in the address space of the process. %u allocations or "
+           "maps failed since the start. The most of one walk: %.1f MB of "
+           "the %llu MB of the ring of the vertices, %.1f MB of the %llu MB "
+           "of the ring of the staging",
+           use.device_count, use.device_bytes / 1048576.0, use.host_count,
+           use.host_bytes / 1048576.0, use.failures,
+           g_ring_most / 1048576.0, kRingBytes >> 20,
+           g_stage_most / 1048576.0, kStageRingBytes >> 20);
+    g_ring_most = g_stage_most = 0;
   }
   if (g_direct) {
     LARGE_INTEGER hz;

@@ -54,6 +54,7 @@ add_library(bwvr_mod SHARED
     cursor_trace.cpp
     exit_test.cpp
     crash_report.cpp
+    address_space.cpp
     game_start.cpp
     comfort_camera.cpp
     script_camera.cpp

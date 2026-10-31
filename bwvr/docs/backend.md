@@ -66,6 +66,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`) |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`) |
 | `src/mod/crash_report.cpp` | The report of a crash in the log, and the dump `bwvr-crash.dmp` (`crash_report`) |
+| `src/mod/address_space.cpp`, `address_space_math.h` | The address space of the process in the log |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
 | `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
@@ -1648,7 +1649,11 @@ fault that no handler takes then writes one block of lines with the tag
 - up to 32 return addresses on the stack of the thread, the nearest first.
   Each one is a word of the stack that is in a module, after a call,
 - the frame, the frame of the Hand, the Hand state, the hand mode, the object
-  in the Hand and the object of the next pick record, each with its class.
+  in the Hand and the object of the next pick record, each with its class,
+- the address space in use, the free part and its largest block ("The
+  address space"). A dump that fails with `0x80070008`
+  (`ERROR_NOT_ENOUGH_MEMORY`) and a small largest block say that the process
+  had no address space left.
 
 Then the filter writes a small minidump, `bwvr-crash.dmp`, beside
 `runblack.exe` (`MiniDumpWriteDump` of `dbghelp.dll`, with the threads, their
@@ -2975,6 +2980,35 @@ textures in each frame: in the cut scene after the rescue of the boy at
 the start of a new game the renderer reads about 3 textures a frame again
 (1350 reads in a window of 450 frames).
 
+**A surface that goes away** (`vk_texture_forget`, 1 is the default). The
+renderer finds the texture of a surface by the address of the surface. With
+`backend=vulkan` the surface tells the renderer when the game releases it
+(`VkSceneSurfaceGone`), and the renderer marks its texture. The next walk
+gives the image and the descriptor sets of the texture to its slot, which
+frees them after its fence, and takes the texture out of the table. So a new
+surface at the same address gets a new texture and is read at its first use.
+With 0 the texture stays in the table with its image until the game writes
+the new surface. The report of each 450 frames counts the textures that the
+renderer forgot.
+
+**A read with no new image.** A read of a texture can give no image: the
+`Lock` fails, the surface has a format that the renderer does not read (a
+FourCC format such as DXT, a palette), there is no memory of the CPU for the
+pixels, Vulkan gives no image or no staging memory, or the table of 4096
+textures is full. The draw then has the image of the read before, or the
+white texel when the texture has no image. The log has a line for each of
+the first 12 such reads, with the reason, the surface, its size and its
+pixel format:
+
+```
+vk scene     : a texture with no new image (1 of 12): <reason> (0x00000000). The surface 0C1F2A40, 256 by 256, pixel format flags 0x41, 16 bits. The draw has the white texel
+```
+
+The report counts these reads for each reason, and it has the memory of
+Vulkan: the images and buffers in device memory, the buffers in host memory
+(mapped in the address space of the process, see "The address space"), and
+the allocations and maps that failed since the start.
+
 **The uploads of a walk** (`vk_upload_queue`, 1 is the default). The copy
 of a texture to the GPU goes into a command buffer of the slot of the walk,
 and the end of the walk submits it before the buffer of the walk, in one
@@ -3109,7 +3143,16 @@ vertex buffer. `LHScreen::GetAvailableVidMem` asks for `IDirectDraw2` and
 calls it with no test of the result.
 
 **The objects.** A surface keeps its pixels in the memory of the CPU, so a
-`Lock` of the game and of the renderer reads and writes that memory. A
+`Lock` of the game and of the renderer reads and writes that memory. The
+pixels come from the heap of the process at the first `Lock` or `Blt`
+(`vk_surface_heap`, 1 is the default), with each byte 0. A texture with mip
+levels has a surface for each level, and most levels are smaller than 64
+KB. With `vk_surface_heap=0` each surface takes a block of `VirtualAlloc`,
+and each block takes 64 KB of the address space at the least ("The address
+space"). The report of each 450 frames has the surfaces with pixels, their
+bytes and the address space that they take. The first 8 allocations of
+pixels that fail give a line each, and the game then gets
+`DDERR_OUTOFMEMORY`. A
 `Blt` copies in that memory with a change of the format, decodes DXT1 to
 DXT5 block by block, and fills with a color. The `Blt` to the primary is
 the present: the picture of the last walk of the left eye goes to the
@@ -3415,7 +3458,61 @@ desktop the file stays until the end of the run.
 driver, and a session with Vulkan that does not start. Only a headset shows
 the first picture of a session with Vulkan that deletes the file.
 
-## Foveated rendering
+### The address space
+
+`runblack.exe` (v1.42) has no `LARGE_ADDRESS_AWARE` flag (its
+characteristics are 0x10F). So the process of the game has 2 GB of address
+space, also on a Windows of 64 bits. The game, the mod, the driver of the
+GPU and the OpenXR runtime share these 2 GB. When no free block is large
+enough, an allocation fails. The mod cannot change the limit, because
+Windows reads the flag from the file of the game at the start of the
+process.
+
+**The line of each report window** (`address_space.cpp`). The report of
+each 450 frames has one line with the address space in use, the part of the
+modules, of the views (mapped files and shared memory) and of the private
+memory, the committed memory, the free part, its count of blocks and its
+largest block. A free block counts from its first multiple of 64 KB, because
+`VirtualAlloc` starts each block there (`address_space_math.h`, with
+checks). The walk of `VirtualQuery` runs on a thread of the pool, so the
+frame thread does not wait for it. The first window with a largest free
+block of less than 128 MB adds a line that says so:
+
+```
+address space: <used> MB of 2048 MB in use (<modules> MB of modules, <views> MB of views, <private> MB of private memory, <committed> MB committed). <free> MB free in <n> blocks, the largest <largest> MB. <regions> regions, the walk took <ms> ms
+address space: the largest free block is less than 128 MB. A large allocation of the game, of the mod or of a driver can fail now
+```
+
+The report of a crash has the address space too ("The report of a crash").
+
+**The parts of the mod.** Two parts of the mod take address space that
+the log counts:
+
+- the pixels of the surfaces of `backend=vulkan` ("The backend of the mod on
+  Vulkan", "The objects"). With `vk_surface_heap=0` each surface takes a
+  block of `VirtualAlloc`, and each block takes 64 KB at the least. A
+  texture of 256 by 256 pixels of 16 bits with its 9 mip levels then takes
+  640 KB for 171 KB of pixels, and a texture of 32 by 32 with its 6 levels
+  takes 384 KB for 3 KB. The game has about 2100 surfaces in play. With
+  `vk_surface_heap=1` (the default) the pixels come from the heap, and each
+  surface takes about its own bytes.
+- the host memory of the Vulkan renderer, which stays mapped while its
+  buffer lives: the ring of the vertices (32 MB) and the ring of the staging
+  (32 MB) of each of the two slots, and the staging buffers of the reads
+  that do not go into the ring. The report has these buffers and the most
+  that one walk put into each ring. Device memory takes no address space of
+  the process.
+
+**Open question: a fault in the driver of NVIDIA.** With `backend=vulkan`
+on an NVIDIA GPU, the game can stop at the choice of the Creature, after
+about 30 minutes of play, with a write to address 0 in `nvoglv32.dll` (the
+Vulkan driver of NVIDIA). The call of the mod is the `vkQueueSubmit` of
+`XrScreen::Impl::EndCopy` (the copy of an eye picture into the swapchain).
+The dump then fails with `0x80070008` (`ERROR_NOT_ENOUGH_MEMORY`), and two
+registers hold addresses just under 2 GB. These facts agree with a process
+that has no address space left. The line of the address space in the log
+of such a fault can prove it or not. No desktop run reached that state.
+
 
 `foveation` (0 is the default, a test key: Shift O, the launcher row "Fewer
 shades away from the middle" in the group "Foveated rendering", with the
@@ -5381,6 +5478,8 @@ keys that the launcher sets.
 | `vulkan_fallback_test` | 0 | A test key of the desktop runs: 1 the mod stops the process before the first walk. See the same section |
 | `vk_window` | 1 | With `backend=vulkan`: 1 the window of the game gets the picture through a swapchain of Vulkan, 0 through the CPU and GDI. A test key: Shift D. See "The window with Vulkan" |
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
+| `vk_texture_forget` | 1 | With `backend=vulkan`: 1 the renderer forgets the texture of a surface that the game releases, so a new surface at the same address gets a new texture. 0 the texture stays with its image until the game writes the new surface. See "The Vulkan renderer", "A surface that goes away" |
+| `vk_surface_heap` | 1 | With `backend=vulkan`: 1 the pixels of a surface come from the heap of the process. 0 each surface takes a block of `VirtualAlloc`, at least 64 KB of the address space. See "The address space" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |
 | `foveation_inner_deg`, `foveation_outer_deg` | 0, 0 | The degrees of the full rate and of 2 by 2 around the centre of the fovea. 0 takes the degrees of the level. See "Foveated rendering" |
 | `foveation_show` | 0 | A test key: 1 a colour over the coarse parts of the eye pictures, blue for 2 by 2 and red for 4 by 4. Shift O goes to it too. See "Foveated rendering" |

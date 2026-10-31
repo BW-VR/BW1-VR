@@ -95,6 +95,22 @@ These items come before the other work.
 
 ### Faults in play
 
+- **B38. Vulkan: white or invisible story people, and a crash in the driver
+  of NVIDIA.** With `backend=vulkan` (an NVIDIA RTX 5070 Ti, a new game),
+  the Lost Brother and the Lost Sister of Land 1 draw flat white and are
+  invisible after their quest (only the eyes show), Sable turns white at the
+  end of the cow stone, and the game stops in `nvoglv32.dll` at the choice
+  of the Creature (`backend.md`, "The address space"). The log now has the
+  address space, the memory of Vulkan, the pixels of the surfaces, and a
+  line with the reason for each texture read that gives no image ("A read
+  with no new image"). `vk_surface_heap=1` takes less address space for the
+  surfaces, and `vk_texture_forget=1` gives a new surface at an old address
+  a new texture. No desktop run has shown these changes yet. Make a run
+  with the test save `pen` with each value of the two keys, one with
+  dxwrapper, and `verify_build.ps1`. Then read the address space in a log
+  of the faults.
+  When the address space is the cause, the only full cure is a game process
+  with `LARGE_ADDRESS_AWARE`, which needs a change of `runblack.exe`.
 - **B37. A save in Program Files: check it in a play.** With no
   administrator rights the profile is in the VirtualStore. Windows then
   refuses two calls of each save: the write of `SaveGame.inf` (error 5, it

@@ -76,6 +76,7 @@
 #include "foveation_math.h"
 #include "vk_scene.h"
 #include "vk_ddraw.h"
+#include "address_space.h"
 #include "vk_window.h"
 #include "render_thread.h"
 #include "scene_sample.h"
@@ -2027,6 +2028,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     VkSceneReport(g_timed_now);
     VkDdrawReport(g_timed_now);
     VkWindowReport();
+    AddressSpaceReport();
     // One time: the DLLs of Direct3D in the process, also in a desktop run
     // with no session.
     static bool s_said_modules = false;

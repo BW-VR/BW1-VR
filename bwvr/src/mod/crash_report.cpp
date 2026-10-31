@@ -10,7 +10,8 @@
 //  - the return addresses on the stack that are in a module, the nearest
 //    first,
 //  - the frame, the Hand state, the hand mode, the object in the Hand and the
-//    object of the next pick record.
+//    object of the next pick record,
+//  - the address space in use, the free part and its largest block.
 // Then it writes a small minidump, bwvr-crash.dmp, beside the game, with
 // MiniDumpWriteDump of dbghelp.dll. Then it calls the filter that was there
 // before it, so the game and Windows do what they did with no report.
@@ -35,6 +36,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "address_space.h"
 #include "scene_sample_math.h"
 #include "thread_id.h"
 
@@ -226,6 +228,16 @@ void Report(EXCEPTION_POINTERS* info) {
   } else {
     ModLog("crash        : frame %llu (hand frame %llu). The game has no Hand "
            "now", ControllersFrameCount(), hand_frame);
+  }
+  // A fault in a driver after an allocation that failed: the address space
+  // tells it (address_space.h).
+  address_space_math::Totals space;
+  uint64_t total = 0;
+  if (ReadAddressSpace(&space, &total)) {
+    ModLog("crash        : the address space: %llu MB of %llu MB in use, %llu "
+           "MB free, the largest free block %llu KB",
+           space.used >> 20, total >> 20, space.free >> 20,
+           space.largest_free >> 10);
   }
 }
 

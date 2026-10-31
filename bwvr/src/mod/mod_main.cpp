@@ -597,6 +597,7 @@ int g_vk_only_test = 0;
 int g_vk_upload_queue = 1;
 int g_vk_present_late = 1;
 int g_vk_texture_reuse = 1;
+int g_vk_texture_forget = 1;
 int g_vk_keep_picture = 1;
 int g_vk_black_check = 1;
 int g_vk_untextured = 1;
@@ -1569,6 +1570,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_present_late", 1, path) != 0 ? 1 : 0;
   g_vk_texture_reuse =
       GetPrivateProfileIntA("bwvr", "vk_texture_reuse", 1, path) != 0 ? 1 : 0;
+  g_vk_texture_forget =
+      GetPrivateProfileIntA("bwvr", "vk_texture_forget", 1, path) != 0 ? 1 : 0;
   g_vk_keep_picture =
       GetPrivateProfileIntA("bwvr", "vk_keep_picture", 1, path) != 0 ? 1 : 0;
   g_vk_black_check =
@@ -1996,6 +1999,7 @@ void StartVrStep() {
     VkSceneSetUploads(g_vk_upload_queue, g_vk_scene_reread_test);
     VkSceneSetPresentLate(g_vk_present_late);
     VkSceneSetTextureReuse(g_vk_texture_reuse);
+    VkSceneSetTextureForget(g_vk_texture_forget);
     VkSceneSetKeepPicture(g_vk_keep_picture);
     VkSceneSetBlackCheck(g_vk_black_check);
     VkSceneSetUntextured(g_vk_untextured);
@@ -3065,8 +3069,10 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
       // objects of another backend, so it does not run then.
       const bool vulkan = ProxyBackendVulkan();
       if (vulkan) {
-        VkDdrawInstall(static_cast<int>(
-            GetPrivateProfileIntA("bwvr", "vk_lines", 1, ini)));
+        VkDdrawInstall(
+            static_cast<int>(GetPrivateProfileIntA("bwvr", "vk_lines", 1, ini)),
+            static_cast<int>(
+                GetPrivateProfileIntA("bwvr", "vk_surface_heap", 1, ini)));
         // Before the first present of the game.
         VkWindowSetOptions(static_cast<int>(
             GetPrivateProfileIntA("bwvr", "vk_window", 1, ini)));

@@ -61,6 +61,13 @@ void VkSceneClear(uint32_t count, const void* rects, uint32_t flags,
 // draw_merge.cpp, on the frame thread: the game writes this surface (a Lock
 // or a Blt to it). Its copy in Vulkan is read again at its next use.
 void VkSceneSurfaceWritten(void* surface);
+// vk_ddraw.cpp: the game released this surface, and its memory can hold a
+// new surface. With vk_texture_forget=1 the table forgets its texture.
+void VkSceneSurfaceGone(void* surface);
+// vk_texture_forget of bwvr.ini: 1 (the default) the table of the textures
+// forgets the texture of a surface that the game releases, so a new surface
+// at the same address gets a new texture. 0: the entry stays with its image.
+void VkSceneSetTextureForget(int on);
 
 void VkSceneReport(uint64_t frames);
 

@@ -153,10 +153,12 @@ inline const Setting kSettings[] = {
      "of the whole view. So a middle above 100% is sharper than the eye "
      "picture: at about 200% it has as many pixels as the panel in the middle "
      "of the lens. The picture of the whole view keeps its own resolution "
-     "too, so the mod draws no eye picture at the full size. When the two "
-     "pictures do not fit side by side, the middle gets fewer pixels. Off: "
-     "the two pictures go into one eye picture. The change counts from the "
-     "next start of the game."},
+     "too. The eye picture keeps the size of the render, and holds the two "
+     "pictures side by side, so the mod does not draw the whole eye picture "
+     "from them. When the two pictures do not fit side by side, the middle "
+     "gets fewer pixels. Off: the two pictures go into one eye picture. On "
+     "the PC this does nothing. The change counts from the next start of the "
+     "game."},
     {kBool, "foveation_show", "Show the parts with fewer details", nullptr, 0,
      "A blue colour over the parts with fewer shades or fewer pixels, so "
      "you can find the settings that you like. Turn it off to play. With "

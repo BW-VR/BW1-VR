@@ -26,8 +26,9 @@ inline void SharpChecks() {
   Check(a.outer[0] == 0 && a.outer[1] == 0 && a.outer[2] == static_cast<int32_t>(l.outer_w) &&
             a.outer[3] == static_cast<int32_t>(l.outer_h),
         "the outer image is at the top left at its own size", a.outer[2], l.outer_w);
-  Check(a.center[0] == a.outer[2] && a.center[1] == 0,
-        "the centre image is to the right of the outer image", a.center[0], a.outer[2]);
+  Check(a.center[0] == a.outer[2] + kAtlasGap && a.center[1] == 0,
+        "the centre image is 2 pixels to the right of the outer image", a.center[0],
+        a.outer[2] + kAtlasGap);
   Check(l.center_w == before.center_w && l.center_h == before.center_h,
         "a centre that fits keeps its size", l.center_w, before.center_w);
   Check(a.center[0] + a.center[2] <= 2200 && a.center[1] + a.center[3] <= 1760,
@@ -77,7 +78,7 @@ inline void SharpChecks() {
         "outer 50 and centre 200 percent in 1380 by 1104: the centre gets smaller",
         s.center_w, big_w);
   Check(sa.center[0] + sa.center[2] <= 1380 && sa.center[1] + sa.center[3] <= 1104 &&
-            (sa.center[0] >= sa.outer[2] || sa.center[1] >= sa.outer[3]),
+            (sa.center[0] >= sa.outer[2] + kAtlasGap || sa.center[1] >= sa.outer[3] + kAtlasGap),
         "the smaller centre is in the picture and not over the outer image",
         sa.center[0] + sa.center[2], 1380);
   Near("the scale of the smaller centre follows its size", s.center_scale_x,
@@ -89,12 +90,13 @@ inline void SharpChecks() {
                         25.0f);
   const Atlas fa = PackAtlas(1380, 1104, &f);
   Check(!fa.on && fa.mres,
-        "outer 100 percent: no room for the centre, the eye picture is made as before",
+        "outer 100 percent: no room for the centre, the eye picture is made as with "
+        "fovea_res_layer=0",
         fa.on ? 1 : 0, 0);
   // A narrow picture with a tall outer image: the centre goes under it.
   Layout t = MakeLayout(1000, 3000, 0.5f, 1.5f, 0.0f, 0.0f, 90.0f, 100.0f, 10.0f);
   const Atlas ta = PackAtlas(1000, 3000, &t);
-  Check(ta.on && ta.center[0] == 0 && ta.center[1] == static_cast<int32_t>(t.outer_h),
+  Check(ta.on && ta.center[0] == 0 && ta.center[1] == static_cast<int32_t>(t.outer_h) + kAtlasGap,
         "a picture with no room to the right: the centre is under the outer image",
         ta.center[1], t.outer_h);
 
@@ -111,6 +113,44 @@ inline void SharpChecks() {
   OuterRect(off, 2200, 1760, columns, mapped);
   Check(mapped[0] == 100 && mapped[2] == 1000, "with no atlas the rect stays", mapped[2],
         1000);
+
+  // The rects do not touch: at least kAtlasGap pixels between them.
+  const Atlas packs[3] = {a, sa, ta};
+  for (const Atlas& p : packs) {
+    const int32_t gap_x = p.center[0] - (p.outer[0] + p.outer[2]);
+    const int32_t gap_y = p.center[1] - (p.outer[1] + p.outer[3]);
+    Check(gap_x >= kAtlasGap || gap_y >= kAtlasGap,
+          "the centre rect and the outer rect have a gap of 2 pixels or more",
+          gap_x > gap_y ? gap_x : gap_y, kAtlasGap);
+  }
+
+  // A swapchain of another size than the eye picture: the rects scale to it
+  // and stay in it.
+  const Atlas same = FitAtlas(a, 2200, 1760);
+  Check(same.on && same.center[0] == a.center[0] && same.center[2] == a.center[2],
+        "a swapchain of the size of the eye picture keeps the rects", same.center[2],
+        a.center[2]);
+  const Atlas halved = FitAtlas(a, 1100, 880);
+  Check(halved.on && halved.width == 1100 && halved.height == 880,
+        "a swapchain of half the size: the atlas has its size", halved.width, 1100);
+  Near("half the size: the centre rect starts at half its x, rounded up", halved.center[0],
+       ceilf(a.center[0] * 0.5f), 0.0);
+  Near("half the size: the centre rect is half as wide, within one pixel", halved.center[2],
+       a.center[2] * 0.5, 1.0);
+  Check(halved.center[0] + halved.center[2] <= 1100 &&
+            halved.center[1] + halved.center[3] <= 880 &&
+            halved.outer[0] + halved.outer[2] <= halved.center[0],
+        "half the size: the rects stay in the swapchain and do not overlap",
+        halved.center[0] + halved.center[2], 1100);
+  const Atlas bigger = FitAtlas(a, 2702, 2162);
+  Check(bigger.on && bigger.center[0] + bigger.center[2] <= 2702 &&
+            bigger.center[1] + bigger.center[3] <= 2162,
+        "a larger swapchain: the rects scale and stay in it", bigger.center[0] + bigger.center[2],
+        2702);
+  const Atlas tiny = FitAtlas(a, 2, 2);
+  Check(!tiny.on, "a swapchain too small for a rect: no centre layer", tiny.on ? 1 : 0, 0);
+  const Atlas unset = FitAtlas(off, 1100, 880);
+  Check(!unset.on, "a picture with no atlas stays with no atlas", unset.on ? 1 : 0, 0);
 
   printf("\nThe sharpness of the middle: the pixels of the panel for a pixel\n");
   namespace es = eye_size;

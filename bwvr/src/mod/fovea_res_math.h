@@ -4,9 +4,9 @@
 // test/controller_math/fovea_res_checks.h.
 //
 // The game gives each vertex in pixels of its render, width by height (the
-// eye picture). PackAtlas and CenterFov put the two images as layers of their
-// own into the eye picture (fovea_res_layer). The outer image has the whole view at outer_pct percent of
-// the pixels on each side. The centre image has a rect of the view around
+// eye picture). PackAtlas and CenterFov put the two images as layers of
+// their own into the eye picture (fovea_res_layer). The outer image has the
+// whole view at outer_pct percent of the pixels on each side. The centre image has a rect of the view around
 // the centre of the fovea at center_pct percent: its half width and half
 // height are inset_deg degrees from the centre. A pass maps the pixels of
 // the game into its image with a scale and an origin, so the same draws go
@@ -118,19 +118,29 @@ struct Atlas {
   // Pixels of each image for a pixel of the game, across.
   float outer_scale;
   float center_scale;
+  // The size of the eye picture of the rects.
+  uint32_t width, height;
 };
 
+// The pixels between the outer rect and the centre rect. They are black with
+// an alpha of 0, so a compositor that samples a rect with a bilinear filter
+// at its edge reads no pixel of the other image.
+constexpr int32_t kAtlasGap = 2;
+
 // The rects of the layout l in an eye picture of width by height: the outer
-// image at the top left, the centre image to its right, or under it when it
-// fits there with more pixels. A centre that fits in neither place at its
-// size gets a smaller size that fits (center_w, center_h and the centre
-// scales of l change). on is false when even a centre of 16 pixels does not
-// fit: the eye picture is then made from the two images as before.
+// image at the top left, the centre image kAtlasGap pixels to its right, or
+// under it when it fits there with more pixels. A centre that fits in neither
+// place at its size gets a smaller size that fits (center_w, center_h and the
+// centre scales of l change). on is false when even a centre of 16 pixels
+// does not fit: the eye picture is then made from the two images as with
+// fovea_res_layer=0.
 inline Atlas PackAtlas(uint32_t width, uint32_t height, Layout* l) {
   Atlas a = {};
   a.mres = true;
   a.outer_scale = l->outer_scale_x;
   a.center_scale = l->center_scale_x;
+  a.width = width;
+  a.height = height;
   if (width == 0 || height == 0 || l->outer_w > width || l->outer_h > height ||
       l->center_w == 0 || l->center_h == 0) {
     return a;
@@ -144,8 +154,9 @@ inline Atlas PackAtlas(uint32_t width, uint32_t height, Layout* l) {
     if (room_h / ch < f) f = room_h / ch;
     return f > 1.0f ? 1.0f : (f < 0.0f ? 0.0f : f);
   };
-  const float right = fit(w - static_cast<float>(l->outer_w), h, cw, ch);
-  const float below = fit(w, h - static_cast<float>(l->outer_h), cw, ch);
+  const float gap = static_cast<float>(kAtlasGap);
+  const float right = fit(w - static_cast<float>(l->outer_w) - gap, h, cw, ch);
+  const float below = fit(w, h - static_cast<float>(l->outer_h) - gap, cw, ch);
   const bool to_right = right >= below;
   const float f = to_right ? right : below;
   if (f < 1.0f) {
@@ -163,8 +174,8 @@ inline Atlas PackAtlas(uint32_t width, uint32_t height, Layout* l) {
   a.outer[1] = 0;
   a.outer[2] = static_cast<int32_t>(l->outer_w);
   a.outer[3] = static_cast<int32_t>(l->outer_h);
-  a.center[0] = to_right ? static_cast<int32_t>(l->outer_w) : 0;
-  a.center[1] = to_right ? 0 : static_cast<int32_t>(l->outer_h);
+  a.center[0] = to_right ? static_cast<int32_t>(l->outer_w) + kAtlasGap : 0;
+  a.center[1] = to_right ? 0 : static_cast<int32_t>(l->outer_h) + kAtlasGap;
   a.center[2] = static_cast<int32_t>(l->center_w);
   a.center[3] = static_cast<int32_t>(l->center_h);
   a.view[0] = l->inset_x0 / w;
@@ -186,6 +197,44 @@ inline void CenterFov(const float fov[4], const float view[4], float out[4]) {
   out[1] = atanf(tl + view[2] * (tr - tl));
   out[2] = atanf(tu - view[1] * (tu - td));
   out[3] = atanf(tu - view[3] * (tu - td));
+}
+
+// The atlas for a swapchain of sw by sh that took the eye picture of a: the
+// same rects when the sizes are the same. Else the eye picture went into the
+// swapchain with a blit to its size, so each rect is scaled to the swapchain,
+// rounded inward (a rect keeps its place within one pixel and reads no pixel
+// of the gap), and kept in the swapchain. on is false when a rect has no
+// pixel then.
+inline Atlas FitAtlas(const Atlas& a, uint32_t sw, uint32_t sh) {
+  if (!a.on || (a.width == sw && a.height == sh)) return a;
+  Atlas f = a;
+  f.width = sw;
+  f.height = sh;
+  if (a.width == 0 || a.height == 0 || sw == 0 || sh == 0) {
+    f.on = false;
+    return f;
+  }
+  const float sx = static_cast<float>(sw) / static_cast<float>(a.width);
+  const float sy = static_cast<float>(sh) / static_cast<float>(a.height);
+  auto scale = [&](const int32_t in[4], int32_t out[4]) {
+    int32_t x0 = static_cast<int32_t>(ceilf(static_cast<float>(in[0]) * sx));
+    int32_t y0 = static_cast<int32_t>(ceilf(static_cast<float>(in[1]) * sy));
+    int32_t x1 = static_cast<int32_t>(floorf(static_cast<float>(in[0] + in[2]) * sx));
+    int32_t y1 = static_cast<int32_t>(floorf(static_cast<float>(in[1] + in[3]) * sy));
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > static_cast<int32_t>(sw)) x1 = static_cast<int32_t>(sw);
+    if (y1 > static_cast<int32_t>(sh)) y1 = static_cast<int32_t>(sh);
+    out[0] = x0;
+    out[1] = y0;
+    out[2] = x1 > x0 ? x1 - x0 : 0;
+    out[3] = y1 > y0 ? y1 - y0 : 0;
+    return out[2] > 0 && out[3] > 0;
+  };
+  const bool outer = scale(a.outer, f.outer);
+  const bool center = scale(a.center, f.center);
+  f.on = outer && center;
+  return f;
 }
 
 // A rect of pixels of the eye picture (x, y, width, height), for example the

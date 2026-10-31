@@ -1377,7 +1377,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (CopyScreen(&eyes_, eye)) {
         shown_view_[eye] = newest_view_;
         view_shown_[eye] = view_newest_;
-        shown_atlas_[eye] = newest_atlas_;
+        // The rects in pixels of the swapchain: a picture of another size
+        // went into it with a blit (fovea_res_math::FitAtlas).
+        shown_atlas_[eye] = fovea_res_math::FitAtlas(newest_atlas_, eyes_.layer[eye].width,
+                                                     eyes_.layer[eye].height);
         if (eye == 0) {
           shown_layers_ = newest_layers_;
           shown_frame_ = newest_frame_;

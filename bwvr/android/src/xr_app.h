@@ -698,8 +698,9 @@ class XrApp {
   scene_stream::ViewBody newest_view_ = {};
   bool view_shown_[2] = {false, false};
   scene_stream::ViewBody shown_view_[2] = {};
-  // The atlas of the newest picture and of the picture in the released image
-  // of each eye (fovea_res_layer=1).
+  // The atlas of the newest picture (in pixels of the picture) and of the
+  // picture in the released image of each eye (in pixels of the swapchain,
+  // fovea_res_math::FitAtlas) (fovea_res_layer=1).
   fovea_res_math::Atlas newest_atlas_ = {};
   fovea_res_math::Atlas shown_atlas_[2] = {};
   uint64_t center_frames_ = 0;  // frames of the session with the centre layer

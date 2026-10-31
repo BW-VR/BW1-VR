@@ -613,6 +613,8 @@ uint64_t g_gaze_frames = 0;
 // (g_done_atlas, VkSceneEyesAtlas).
 bool g_sharp_keys_read = false;
 bool g_mres_layer = false;
+// The value of the key: 2 also makes the atlas on the PC (AtlasAllowed).
+int g_mres_layer_key = 0;
 fovea_res_math::Atlas g_walk_atlas = {};
 fovea_res_math::Atlas g_done_atlas = {};
 fovea_res_math::Atlas g_taken_atlas = {};
@@ -2022,11 +2024,12 @@ void FreeMresImages() {
 
 // The atlas of fovea_res_layer=1 is in each eye picture of the headset app.
 // On the PC the session of the mod shows the eye picture as one image, so the
-// atlas is only in a run with no session that takes the eye pictures (a
-// desktop run): there the window and the pictures of a test show it.
+// atlas is only a test aid there: fovea_res_layer=2 in a run with no session
+// that takes the eye pictures (a desktop run), where the window and the
+// pictures of a test show it.
 bool AtlasAllowed() {
 #ifdef _WIN32
-  return !VkSceneEyesWanted();
+  return g_mres_layer_key == 2 && !VkSceneEyesWanted();
 #else
   return true;
 #endif
@@ -2089,10 +2092,11 @@ bool PrepareMres(const Seed* seed) {
   } else {
     if (g_mres_layer && !g_said_atlas) {
       g_said_atlas = true;
-      ModLog("vk scene     : fovea_res_layer=1, but the session of the mod shows the "
-             "eye picture as one image, so the eye picture is made from the two images "
-             "as with fovea_res_layer=0. Only the headset app and a run with no session "
-             "have the two images as layers");
+      ModLog("vk scene     : fovea_res_layer=%d on the PC, so the eye picture is made "
+             "from the two images as with fovea_res_layer=0. Only the headset app, and "
+             "on the PC fovea_res_layer=2 in a run with no session that takes the eye "
+             "pictures, have the two images side by side",
+             g_mres_layer_key);
     }
     g_walk_atlas.mres = true;
     g_walk_atlas.outer_scale = g_mres.outer_scale_x;
@@ -2402,10 +2406,12 @@ void ReadSharpKeys() {
   if (slash != nullptr && strlen(path) + 9 < MAX_PATH) {
     slash[1] = 0;
     strcat_s(path, "bwvr.ini");
-    g_mres_layer = GetPrivateProfileIntA("bwvr", "fovea_res_layer", 0, path) != 0;
+    g_mres_layer_key =
+        static_cast<int>(GetPrivateProfileIntA("bwvr", "fovea_res_layer", 0, path));
+    g_mres_layer = g_mres_layer_key != 0;
   }
   g_said_atlas = false;
-  ModLog("vk scene     : fovea_res_layer=%d. %s", g_mres_layer ? 1 : 0,
+  ModLog("vk scene     : fovea_res_layer=%d. %s", g_mres_layer_key,
          g_mres_layer
              ? "With fovea_res=1 the eye picture has the outer image and the centre "
                "image side by side, each at its own size, and the headset shows each "
@@ -3624,6 +3630,12 @@ void EndOnWorker(const void*) {
     g_last_layer = g_walk_right ? 1u : 0u;
     g_last_width = Target().width;
     g_last_height = Target().height;
+    // With an atlas (fovea_res_layer) the last picture is the outer image at
+    // the top left: a reader of the whole picture gets the whole view.
+    if (g_walk_mres && g_walk_atlas.on) {
+      g_last_width = static_cast<uint32_t>(g_walk_atlas.outer[2]);
+      g_last_height = static_cast<uint32_t>(g_walk_atlas.outer[3]);
+    }
     g_cpu_newer = false;
   }
   // A walk of the left eye can have the walk of the right eye after it.

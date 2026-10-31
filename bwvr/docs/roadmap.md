@@ -95,34 +95,34 @@ These items come before the other work.
 
 ### Faults in play
 
-- **B38. Vulkan: white or invisible story people, and a crash in the driver
-  of NVIDIA.** With `backend=vulkan` (an NVIDIA RTX 5070 Ti, a new game),
-  the Lost Brother and the Lost Sister of Land 1 draw flat white and are
-  invisible after their quest (only the eyes show), Sable turns white at the
-  end of the cow stone, and the game stops in `nvoglv32.dll` at the choice
-  of the Creature (`backend.md`, "The address space"). The log now has the
-  address space, the memory of Vulkan, the pixels of the surfaces, and a
-  line with the reason for each texture read that gives no image ("A read
-  with no new image"). `vk_surface_heap=1` takes less address space for the
-  surfaces, and `vk_texture_forget=1` gives a new surface at an old address
-  a new texture. No desktop run has shown these changes yet. Make a run
-  with the test save `pen` with each value of the two keys, one with
-  dxwrapper, and `verify_build.ps1`. Then read the address space in a log
-  of the faults.
-  The launcher now sets `LARGE_ADDRESS_AWARE` in `runblack.exe`
-  (`large_address=1`), so the game has 4 GB. A headset play to the choice of
-  the Creature must show that the crash stops.
-- **B37. A save in Program Files: check it in a play.** With no
-  administrator rights the profile is in the VirtualStore. Windows then
-  refuses two calls of each save: the write of `SaveGame.inf` (error 5, it
-  does not virtualize `.inf`) and the rename of `<slot>.sav.tmp` (error 3).
-  `save_virtual_store=1` makes these calls again on the VirtualStore copy
-  (`backend.md`, "A save in the VirtualStore"). A test program with the
-  functions of the mod showed it, but a desktop run cannot: the scripts
-  start the game with administrator rights. Check in a play that a save in
-  the Save Game Room and the save on exit make `<slot>.sav` and
-  `SaveGame.inf`, and that the Save Game Room shows the slot. The log has
-  the lines `save store`.
+- **B38. Vulkan: white or invisible story people, and crashes with no
+  address space left.** With `backend=vulkan` (an NVIDIA RTX 5070 Ti, a new
+  game), the Lost Brother and the Lost Sister of Land 1 draw flat white and
+  are invisible after their quest (only the eyes show), Sable turns white at
+  the end of the cow stone, and the game stops in `nvoglv32.dll` at the
+  choice of the Creature. A second player (SteamVR, a render of 4096 by
+  3966) had a crash in `vrclient.dll`. In both logs the dump failed with no
+  memory (`backend.md`, "The address space"). The launcher now sets
+  `LARGE_ADDRESS_AWARE` in `runblack.exe` (`large_address=1`), so the game
+  has 4 GB. Desktop runs with all memory above 2 GB (`test_high_memory=1`)
+  played as the runs with 2 GB did, with both renderers and through the
+  choice of the Creature. `vk_upload_keep=1` keeps the old picture of a
+  texture when the upload of its new image fails. The log has the address
+  space and a reason line for each texture read that gives no image ("A
+  read with no new image"). Open: a headset play of an hour, to the choice
+  of the Creature and past the Lost Brother quest, must show that the
+  crash and the white people stop. If they do not, read the lines
+  `address space` and `a texture with no new image` of that log. The
+  invisible body after the quest has no known cause yet.
+- **B37. A save in Program Files: check the Save Game Room in a play.**
+  With no administrator rights the profile is in the VirtualStore. Windows
+  then refuses two calls of each save: the write of `SaveGame.inf` (error 2
+  or 5, it does not virtualize `.inf`) and the rename of `<slot>.sav.tmp`
+  (error 3). `save_virtual_store=1` makes these calls again on the
+  VirtualStore copy (`backend.md`, "A save in the VirtualStore"). A desktop
+  run with no administrator rights showed it: the game saved slot 20, and
+  each refused call worked on the VirtualStore copy. Check in a play that
+  the Save Game Room shows the slot and loads it.
 - **B36. The fish do not respond to the Hand in a headset.** At the sea the
   fish get no halo, the grip at the Hand takes none, and the far grab takes
   none. Only the trigger works: a tap on the water scatters them. The take

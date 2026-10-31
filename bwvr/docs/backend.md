@@ -1129,12 +1129,9 @@ save store   : Windows refused MoveFileA(<slot folder>\0.sav.tmp, <slot folder>\
 
 **Known limits.**
 
-- A desktop run cannot show the save in the VirtualStore. The scripts start
-  the game from a shell with administrator rights, so the game is not
-  virtualized and writes its profile in the real game folder. The run then
-  shows only that the four calls pass with the functions of the mod. The
-  test program above shows the calls of Windows and the functions of the
-  mod.
+- A desktop run shows the save in the VirtualStore only when the scripts
+  run with no administrator rights. An elevated game is not virtualized and
+  writes its profile in the real game folder.
 - A slot that a save of the plain game left with only `.tmp` files stays so.
   The mod does not rename such files. The next save in that slot replaces
   them.
@@ -3008,6 +3005,19 @@ The report counts these reads for each reason, and it has the memory of
 Vulkan: the images and buffers in device memory, the buffers in host memory
 (mapped in the address space of the process, see "The address space"), and
 the allocations and maps that failed since the start.
+
+**A new image for a texture that the game wrote** (`vk_upload_keep`, 1 is
+the default). The renderer makes the new image and copies the pixels into
+it first. Only then do the old image and its descriptor sets go to the slot
+of the walk. So when Vulkan gives no image (no memory), the draw keeps the
+old picture of the texture, and the next use tries again. With 0 the old
+image goes first, and a failed upload gives the white texel.
+
+**The room of a slot.** A slot has room for 4096 retired images and for
+32768 retired descriptor sets, as many as the table and the pool can hold.
+So the renderer never frees an image or a set that the GPU can still read.
+If a slot is full all the same, the image is not freed, and the report
+counts it ("images not freed").
 
 **The uploads of a walk** (`vk_upload_queue`, 1 is the default). The copy
 of a texture to the GPU goes into a command buffer of the slot of the walk,
@@ -5511,6 +5521,7 @@ keys that the launcher sets.
 | `vulkan_fallback_test` | 0 | A test key of the desktop runs: 1 the mod stops the process before the first walk. See the same section |
 | `vk_window` | 1 | With `backend=vulkan`: 1 the window of the game gets the picture through a swapchain of Vulkan, 0 through the CPU and GDI. A test key: Shift D. See "The window with Vulkan" |
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
+| `vk_upload_keep` | 1 | With `backend=vulkan`: 1 a texture that the game wrote keeps its old image until the new image has its pixels, so a failed upload does not make it white. 0 the old image goes first. See "The Vulkan renderer", "A new image for a texture that the game wrote" |
 | `vk_texture_forget` | 1 | With `backend=vulkan`: 1 the renderer forgets the texture of a surface that the game releases, so a new surface at the same address gets a new texture. 0 the texture stays with its image until the game writes the new surface. See "The Vulkan renderer", "A surface that goes away" |
 | `vk_surface_heap` | 1 | With `backend=vulkan`: 1 the pixels of a surface come from the heap of the process. 0 each surface takes a block of `VirtualAlloc`, at least 64 KB of the address space. See "The address space" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |

@@ -334,6 +334,10 @@ SRWLOCK g_texture_lock = SRWLOCK_INIT;  // the dirty marks of the frame thread
 // texture of a surface that the game releases, so a new surface at the same
 // address gets a new texture. 0: the entry stays with its image.
 bool g_texture_forget = true;
+// vk_upload_keep of bwvr.ini: 1 (the default) a texture that the game wrote
+// keeps its old image until the new image has its pixels. 0: the old image
+// goes first, and a failed upload gives the white texel.
+bool g_upload_keep = true;
 volatile LONG g_gone_pending = 0;  // entries marked gone, not swept yet
 uint64_t g_forgotten = 0;          // for the report
 // THE DRAWS WITH NO TEXTURE OF THEIR OWN: the reasons why a surface gave no
@@ -370,6 +374,11 @@ Texture g_mres_texture[2][2] = {};
 // submit, so the queue copies each texture before a draw reads it. The
 // staging buffers stay until the fence of the slot says the GPU is done.
 const int kSlotStaging = 64;
+// The images and the descriptor sets that a walk retires wait in the slot for
+// its fence. A slot has room for each texture and each set of the pool, so
+// the renderer never frees an image or a set that the GPU can still read.
+const int kSlotGarbage = kMaxTextures;
+const int kSlotDeadSets = kMaxTextures * 8;
 struct Slot {
   VkCommandPool pool;
   VkCommandBuffer cb;
@@ -383,7 +392,7 @@ struct Slot {
   vk::Buffer ring;
   VkDeviceSize used;
   bool pending;
-  vk::Image garbage[64];
+  vk::Image garbage[kSlotGarbage];
   int garbage_count;
   vk::Buffer staging[kSlotStaging];
   int staging_count;
@@ -393,7 +402,7 @@ struct Slot {
   VkDeviceSize stage_used;
   // The descriptor sets of the textures that the walk read again. They go
   // back to the pool when the fence of the slot says the GPU is done.
-  VkDescriptorSet dead_sets[1024];
+  VkDescriptorSet dead_sets[kSlotDeadSets];
   int dead_count;
   // THE CHECK FOR A BLACK PICTURE (vk_black_check): 16 by 16 points of each
   // layer of the eye picture of the walk, and what the walk drew.
@@ -433,6 +442,7 @@ int g_reread_test = 0;
 int g_reread_next = 0;  // on the D3D7 thread: the next texture to read
 const VkDeviceSize kRingBytes = 32u << 20;
 Slot g_slots[2];
+uint64_t g_garbage_lost = 0;  // images not freed, for the report
 int g_slot = 0;
 bool g_recording = false;
 bool g_picture = false;  // this walk writes its image to a file
@@ -1297,10 +1307,12 @@ Texture* FindTexture(void* surface, bool make) {
 
 void Retire(vk::Image* image) {
   Slot& s = g_slots[g_slot];
-  if (s.garbage_count < 64) {
+  if (s.garbage_count < kSlotGarbage) {
     s.garbage[s.garbage_count++] = *image;
   } else {
-    vk::FreeImage(image);
+    // Not freed: the GPU can still read it. A lost image is better than a
+    // fault of the driver.
+    ++g_garbage_lost;
   }
   memset(image, 0, sizeof(*image));
 }
@@ -1316,7 +1328,10 @@ void SweepGone(Slot& s) {
   for (int i = g_texture_count - 1; i >= 0; --i) {
     Texture& t = g_textures[i];
     if (!t.gone) continue;
-    if (s.garbage_count >= 64 || s.dead_count + t.set_count > 1024) continue;
+    if (s.garbage_count >= kSlotGarbage ||
+        s.dead_count + t.set_count > kSlotDeadSets) {
+      continue;
+    }
     if (t.image.image != VK_NULL_HANDLE) Retire(&t.image);
     for (int k = 0; k < t.set_count; ++k) {
       s.dead_sets[s.dead_count++] = t.sets[k].set;
@@ -1353,6 +1368,19 @@ void NoteWhite(const void* surface, const ReadFail& fail, bool kept) {
          kept ? "the image of the read before" : "the white texel");
 }
 
+// The image of a texture and its sets go to the slot of the walk, which
+// frees them after its fence.
+void RetireImageAndSets(Texture* t) {
+  if (t->image.image != VK_NULL_HANDLE) Retire(&t->image);
+  Slot& s = g_slots[g_slot];
+  for (int i = 0; i < t->set_count; ++i) {
+    if (s.dead_count < kSlotDeadSets) {
+      s.dead_sets[s.dead_count++] = t->sets[i].set;
+    }
+  }
+  t->set_count = 0;
+}
+
 // The texture of a surface, read now when it is new or marked.
 Texture* TextureOf(void* surface) {
   if (surface == nullptr) return g_white;
@@ -1386,13 +1414,28 @@ Texture* TextureOf(void* surface) {
     free(pixels);
     return t;
   }
-  if (t->image.image != VK_NULL_HANDLE) Retire(&t->image);
-  // The sets of the old image go back to the pool after the GPU is done.
-  Slot& s = g_slots[g_slot];
-  for (int i = 0; i < t->set_count; ++i) {
-    if (s.dead_count < 1024) s.dead_sets[s.dead_count++] = t->sets[i].set;
+  // vk_upload_keep=1: the new image first. The old image and its sets stay
+  // until the new image has its pixels, so a failed upload (no memory) keeps
+  // the old picture of the texture and does not give the white texel.
+  if (g_upload_keep && t->image.image != VK_NULL_HANDLE) {
+    vk::Image fresh = {};
+    const bool made = g_recording && g_walk_upload_queue
+                          ? UploadQueued(width, height, pixels, &fresh)
+                          : Upload(width, height, pixels, &fresh);
+    if (!made) {
+      fail.reason = kWhiteUpload;
+      NoteWhite(surface, fail, true);
+      // The next use tries again.
+      AcquireSRWLockExclusive(&g_texture_lock);
+      t->dirty = true;
+      ReleaseSRWLockExclusive(&g_texture_lock);
+      return t;
+    }
+    RetireImageAndSets(t);
+    t->image = fresh;
+    return t;
   }
-  t->set_count = 0;
+  RetireImageAndSets(t);
   const bool ok = g_recording && g_walk_upload_queue
                       ? UploadQueued(width, height, pixels, &t->image)
                       : Upload(width, height, pixels, &t->image);
@@ -1446,7 +1489,7 @@ VkDescriptorSet SetOf(Texture* t, VkSampler sampler) {
     // No room in the texture: the set goes back to the pool after the GPU
     // is done with this walk.
     Slot& s = g_slots[g_slot];
-    if (s.dead_count < 1024) s.dead_sets[s.dead_count++] = set;
+    if (s.dead_count < kSlotDeadSets) s.dead_sets[s.dead_count++] = set;
   }
   return set;
 }
@@ -4327,6 +4370,7 @@ void VkSceneSurfaceGone(void* surface) {
 }
 
 void VkSceneSetTextureForget(int on) { g_texture_forget = on != 0; }
+void VkSceneSetUploadKeep(int on) { g_upload_keep = on != 0; }
 
 void VkSceneReport(uint64_t frames) {
   if (g_mode == 0 || frames == 0) return;
@@ -4359,12 +4403,14 @@ void VkSceneReport(uint64_t frames) {
     ModLog("vk scene     : vk_upload_queue=%d. %llu reads went in the submit "
            "of their walk, %llu waited for the GPU (%.3f ms each). %lld "
            "descriptor sets in use, %llu made since the start, room for %d, "
-           "%llu that the pool did not give",
+           "%llu that the pool did not give. %llu images not freed since the "
+           "start, because a slot had no room for them",
            g_upload_queue ? 1 : 0, g_uploads_queued, waited,
            waited > 0 ? g_upload_wait_ticks * 1000.0 /
                             static_cast<double>(hz.QuadPart) / waited
                       : 0.0,
-           g_sets_live, g_sets_made, kMaxTextures * 8, g_set_failures);
+           g_sets_live, g_sets_made, kMaxTextures * 8, g_set_failures,
+           g_garbage_lost);
     g_uploads_queued = g_upload_wait_ticks = 0;
     g_set_failures = 0;
   }
@@ -4398,13 +4444,15 @@ void VkSceneReport(uint64_t frames) {
   }
   {
     // The textures that a surface gave no image, and the memory of Vulkan.
-    ModLog("vk scene     : vk_texture_forget=%d. %llu textures forgotten after "
+    ModLog("vk scene     : vk_texture_forget=%d, vk_upload_keep=%d. %llu "
+           "textures forgotten after "
            "the game released their surface. Reads of a texture with no new "
            "image: %llu with a failed Lock, %llu in a format that the "
            "renderer does not read, %llu with no memory of the CPU, %llu with "
            "no memory of Vulkan, %llu with a full table. %llu of them drew "
            "with the image of the read before",
-           g_texture_forget ? 1 : 0, g_forgotten, g_white_reads[kWhiteLock],
+           g_texture_forget ? 1 : 0, g_upload_keep ? 1 : 0, g_forgotten,
+           g_white_reads[kWhiteLock],
            g_white_reads[kWhiteFormat], g_white_reads[kWhiteMemory],
            g_white_reads[kWhiteUpload], g_white_reads[kWhiteFull],
            g_white_kept);

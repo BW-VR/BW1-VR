@@ -68,6 +68,10 @@ void VkSceneSurfaceGone(void* surface);
 // forgets the texture of a surface that the game releases, so a new surface
 // at the same address gets a new texture. 0: the entry stays with its image.
 void VkSceneSetTextureForget(int on);
+// vk_upload_keep of bwvr.ini: 1 (the default) a texture that the game wrote
+// keeps its old image until the new image has its pixels, so a failed upload
+// does not make it white. 0: the old image goes first.
+void VkSceneSetUploadKeep(int on);
 
 void VkSceneReport(uint64_t frames);
 

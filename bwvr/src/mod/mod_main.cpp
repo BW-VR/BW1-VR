@@ -599,6 +599,7 @@ int g_vk_upload_queue = 1;
 int g_vk_present_late = 1;
 int g_vk_texture_reuse = 1;
 int g_vk_texture_forget = 1;
+int g_vk_upload_keep = 1;
 int g_vk_keep_picture = 1;
 int g_vk_black_check = 1;
 int g_vk_untextured = 1;
@@ -1573,6 +1574,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_texture_reuse", 1, path) != 0 ? 1 : 0;
   g_vk_texture_forget =
       GetPrivateProfileIntA("bwvr", "vk_texture_forget", 1, path) != 0 ? 1 : 0;
+  g_vk_upload_keep =
+      GetPrivateProfileIntA("bwvr", "vk_upload_keep", 1, path) != 0 ? 1 : 0;
   g_vk_keep_picture =
       GetPrivateProfileIntA("bwvr", "vk_keep_picture", 1, path) != 0 ? 1 : 0;
   g_vk_black_check =
@@ -2001,6 +2004,7 @@ void StartVrStep() {
     VkSceneSetPresentLate(g_vk_present_late);
     VkSceneSetTextureReuse(g_vk_texture_reuse);
     VkSceneSetTextureForget(g_vk_texture_forget);
+    VkSceneSetUploadKeep(g_vk_upload_keep);
     VkSceneSetKeepPicture(g_vk_keep_picture);
     VkSceneSetBlackCheck(g_vk_black_check);
     VkSceneSetUntextured(g_vk_untextured);

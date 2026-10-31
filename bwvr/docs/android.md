@@ -242,11 +242,27 @@ adb install -r bwvr\out\android\bwvr-quest.apk
 The app is in the library of the headset under "Unknown sources". SideQuest
 can install the APK too.
 
-**Steam Frame.** Turn on the developer mode, start Lepton Development, and
-connect `adb` as the Steamworks documentation of Valve says ("Steam Frame").
-Then `adb install -r` as above. The app is in the Android part of the
-headset. Lepton has OpenXR, so the app starts its session there. If the
-session fails, the app shows the menu in a window. Not tried yet.
+**Steam Frame.** Turn on the developer mode (Steam Settings, System), and
+set the user password (Steam Settings, Developer, Set User Password). Then
+the PC gets SSH to `steamos@frame`. Start the Lepton container "dev" over
+SSH, connect `adb` to its port, and install the APK:
+
+```
+ssh steamos@frame "~/.local/share/Steam/steamapps/common/Lepton/lepton start"
+adb connect frame:5555
+adb -s frame:5555 install -r bwvr\out\android\bwvr-quest.apk
+adb -s frame:5555 shell am start -n org.bwvr.quest/android.app.NativeActivity
+```
+
+`lepton ps` gives the port of `adb`. The container has no launcher, so
+`am start` starts the app. Lepton gives Android 11 (arm64-v8a only) and the
+OpenXR runtime of SteamVR (`/vendor/etc/openxr/1/active_runtime.json`, no
+runtime broker): the app gets its session, 1728 by 1728 for each eye at
+90 Hz. The game folder goes in with `push_game.ps1 -Serial frame:5555`.
+Lepton shows each file with the owner 0, so Wine needs
+`wine_owner_check=2` (see "The owner of the folders"). Lepton also has the
+layer `VkLayer_VALVE_fdm_injection` of Valve, which the container "dev"
+does not turn on.
 
 ## The game folder
 
@@ -3479,7 +3495,30 @@ app). The patch adds `dlls/wineaaudio.drv`, an audio driver of `mmdevapi`
 with AAudio of the NDK, and its check in `configure` (the header
 `aaudio/AAudio.h` and `libaaudio`). `build_wine.sh` stops when the configure
 of Wine has no `dlls/wineaaudio.drv`. What the driver does: `audio.md`,
-"In Wine on Android".
+"In Wine on Android". `0004-server-ntdll-any-owner-in-a-container.patch`:
+wineserver and each program of Wine stop when the prefix, its parent or the
+folder of the server does not belong to `getuid` ("... is not owned by
+you"). Lepton, the Android container of the Steam Frame, shows each file
+with the owner 0, and the app gets its Android uid from `getuid`. With
+`WINE_BWVR_ANY_OWNER=1` in the environment the five owner tests accept
+each owner. The tests of the mode (no access for other users) stay.
+
+**The owner of the folders** (`wine_owner_check`, `wine_rules::AnyOwner`).
+Before Wine makes a folder, the app compares the owner of its internal
+folder with its uid, and logs one line:
+
+```
+wine         : wine_owner_check=2. The internal folder belongs to 0, the app is 10014. Wine accepts each owner of its folders (WINE_BWVR_ANY_OWNER=1)
+```
+
+| Value | What Wine does |
+| --- | --- |
+| 2 (the default) | Each owner only when the internal folder has another owner than the app. On a Quest 3 and in the emulator the folder belongs to the app, so Wine tests the owner |
+| 1 | The test of Wine, always |
+| 0 | Each owner, always |
+
+The environment of the app cannot give `WINE_BWVR_ANY_OWNER`: the app
+drops each inherited name that starts with `WINE`.
 Wine for Android installs `bin` and `lib` into a folder of the ABI of
 Android (`arm64-v8a`, `x86_64`) beside `share`, and its loader is
 `lib/wine/<arch>-unix/wine`, in the folder of `ntdll.so`.

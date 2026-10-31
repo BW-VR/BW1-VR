@@ -1,0 +1,93 @@
+server, ntdll: Accept each owner of the folders of Wine on request.
+
+Lepton, the Android container of the Steam Frame, shows each file with
+the owner 0, and the app gets another uid from getuid. The tests of the
+owner of the prefix, of its parent and of the folder of the server then
+stop wineserver and each program ("... is not owned by you"). With
+WINE_BWVR_ANY_OWNER=1 in the environment these tests accept each owner.
+The test of the mode (no access for other users) stays. The app sets the
+variable only when the owner of its own folder is not its uid
+(wine_owner_check=2), or always (wine_owner_check=0).
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1314,6 +1314,16 @@
+ }
+ 
+ 
++/* A container that shows each file with the owner 0 to a process with
++ * another uid (Lepton of the Steam Frame) fails the owner tests of the
++ * folders of Wine. WINE_BWVR_ANY_OWNER=1 lets those tests accept each
++ * owner. The app sets it only when its own folder has another owner. */
++static int bwvr_owner_ok( uid_t owner )
++{
++    const char *any = getenv( "WINE_BWVR_ANY_OWNER" );
++    return owner == getuid() || (any && !strcmp( any, "1" ));
++}
++
+ /***********************************************************************
+  *           setup_config_dir
+  *
+@@ -1332,7 +1342,7 @@
+         {
+             while (p > config_dir + 1 && p[-1] == '/') p--;
+             *p = 0;
+-            if (!stat( config_dir, &st ) && st.st_uid != getuid())
++            if (!stat( config_dir, &st ) && !bwvr_owner_ok( st.st_uid ))
+                 fatal_error( "'%s' is not owned by you, refusing to create a configuration directory there\n",
+                              config_dir );
+             *p = '/';
+@@ -1343,7 +1353,7 @@
+     }
+ 
+     if (stat( ".", &st ) == -1) fatal_perror( "stat %s", config_dir );
+-    if (st.st_uid != getuid()) fatal_error( "'%s' is not owned by you\n", config_dir );
++    if (!bwvr_owner_ok( st.st_uid )) fatal_error( "'%s' is not owned by you\n", config_dir );
+ 
+     server_dir = init_server_dir( st.st_dev, st.st_ino );
+ 
+@@ -1417,7 +1427,7 @@
+ 
+     /* make sure we are at the right place */
+     if (stat( ".", &st ) == -1) fatal_perror( "stat %s", server_dir );
+-    if (st.st_uid != getuid()) fatal_error( "'%s' is not owned by you\n", server_dir );
++    if (!bwvr_owner_ok( st.st_uid )) fatal_error( "'%s' is not owned by you\n", server_dir );
+     if (st.st_mode & 077) fatal_error( "'%s' must not be accessible by other users\n", server_dir );
+ 
+     for (retry = 0; retry < 6; retry++)
+--- a/server/request.c
++++ b/server/request.c
+@@ -576,6 +576,16 @@
+     if (!do_it_once++) unlink( server_socket_name );
+ }
+ 
++/* A container that shows each file with the owner 0 to a process with
++ * another uid (Lepton of the Steam Frame) fails the owner tests of the
++ * folders of Wine. WINE_BWVR_ANY_OWNER=1 lets those tests accept each
++ * owner. The app sets it only when its own folder has another owner. */
++static int bwvr_owner_ok( uid_t owner )
++{
++    const char *any = getenv( "WINE_BWVR_ANY_OWNER" );
++    return owner == getuid() || (any && !strcmp( any, "1" ));
++}
++
+ /* create a directory and check its permissions */
+ static void create_dir( const char *name, struct stat *st )
+ {
+@@ -589,7 +599,7 @@
+             fatal_error( "lstat %s: %s\n", name, strerror( errno ));
+     }
+     if (!S_ISDIR(st->st_mode)) fatal_error( "%s is not a directory\n", name );
+-    if (st->st_uid != getuid()) fatal_error( "%s is not owned by you\n", name );
++    if (!bwvr_owner_ok( st->st_uid )) fatal_error( "%s is not owned by you\n", name );
+     if (st->st_mode & 077) fatal_error( "%s must not be accessible by other users\n", name );
+ }
+ 
+@@ -635,7 +645,7 @@
+         fatal_error( "open %s: %s\n", config_dir, strerror( errno ));
+     if (fstat( config_dir_fd, &st ) == -1)
+         fatal_error( "stat %s: %s\n", config_dir, strerror( errno ));
+-    if (st.st_uid != getuid())
++    if (!bwvr_owner_ok( st.st_uid ))
+         fatal_error( "%s is not owned by you\n", config_dir );
+ 
+     /* create the base directory if needed */

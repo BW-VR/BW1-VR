@@ -46,6 +46,11 @@ class WineRuntime {
     // for the low latency mode first. 0: the mode none
     // (WINEAAUDIO_LOW_LATENCY of the environment).
     bool low_latency = true;
+    // wine_owner_check=2 (the default): Wine accepts each owner of its
+    // folders only when the internal folder of the app has another owner
+    // than the app (wine_rules::AnyOwner). 1: the test of Wine. 0: each
+    // owner.
+    int owner_check = 2;
   };
 
   // The ABI of this build of the app: arm64-v8a or x86_64.

@@ -216,9 +216,12 @@ inline bool NeedsCpuCopy(const std::string& abi, const std::string& marker,
 // and its DLLs from the place of ntdll.so in the tree.
 // WINEAAUDIO_LOW_LATENCY (wine_audio_low_latency): 1 lets the audio driver
 // ask AAudio for the low latency mode first, 0 gives the mode none at once.
+// WINE_BWVR_ANY_OWNER=1 (patch 0004 of wine-patches) only with any_owner
+// (AnyOwner): then the owner tests of the folders of Wine accept each owner.
 inline std::vector<std::string> Environment(const std::vector<std::string>& inherited,
                                             const Paths& p, const std::string& files,
-                                            const std::string& debug, bool low_latency) {
+                                            const std::string& debug, bool low_latency,
+                                            bool any_owner = false) {
   static const char* const kDrop[] = {"WINE",    "LD_LIBRARY_PATH=", "LD_PRELOAD=",
                                       "HOME=",   "TMPDIR=",          "DISPLAY=",
                                       "WAYLAND_DISPLAY="};
@@ -238,7 +241,20 @@ inline std::vector<std::string> Environment(const std::vector<std::string>& inhe
   env.push_back("TMPDIR=" + files + "/tmp");
   if (!Trim(debug).empty()) env.push_back("WINEDEBUG=" + Trim(debug));
   env.push_back(low_latency ? "WINEAAUDIO_LOW_LATENCY=1" : "WINEAAUDIO_LOW_LATENCY=0");
+  if (any_owner) env.push_back("WINE_BWVR_ANY_OWNER=1");
   return env;
+}
+
+// wine_owner_check: 1 Wine tests the owner of its folders (the way of
+// Wine). 0 Wine accepts each owner. 2 (the default) Wine accepts each owner
+// only when the internal folder of the app has an owner that is not the uid
+// of the app: a container that shows each file with the owner 0 (Lepton of
+// the Steam Frame). On a Quest 3 the folder belongs to the app, so 2 gives
+// the test of Wine. True: the environment gets WINE_BWVR_ANY_OWNER=1.
+inline bool AnyOwner(int key, unsigned folder_owner, unsigned uid) {
+  if (key == 0) return true;
+  if (key == 2) return folder_owner != uid;
+  return false;
 }
 
 // The audio driver of the tree (patch 0003 of wine-patches): wineaaudio.drv

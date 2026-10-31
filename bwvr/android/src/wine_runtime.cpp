@@ -123,7 +123,21 @@ void WineRuntime::Start(AAssetManager* assets, const std::string& files,
   paths_ = wine_rules::MakePaths(files, app_folder, abi_);
   std::vector<std::string> inherited;
   for (char** e = environ; e != nullptr && *e != nullptr; ++e) inherited.push_back(*e);
-  env_ = wine_rules::Environment(inherited, paths_, files, options.debug, options.low_latency);
+  // THE OWNER OF THE FOLDERS (wine_owner_check, patch 0004 of wine-patches).
+  // Wine stops when its prefix does not belong to getuid. Lepton of the Steam
+  // Frame shows each file with the owner 0, so the app compares the owner of
+  // its own internal folder with its uid before Wine makes a folder.
+  struct stat folder {};
+  const bool have_folder = stat(files.c_str(), &folder) == 0;
+  const unsigned owner = have_folder ? static_cast<unsigned>(folder.st_uid) : getuid();
+  const bool any_owner = wine_rules::AnyOwner(options.owner_check, owner, getuid());
+  AppLog("wine         : wine_owner_check=%d. The internal folder belongs to %u, the app is %u. "
+         "%s",
+         options.owner_check, owner, static_cast<unsigned>(getuid()),
+         any_owner ? "Wine accepts each owner of its folders (WINE_BWVR_ANY_OWNER=1)"
+                   : "Wine tests the owner of its folders");
+  env_ = wine_rules::Environment(inherited, paths_, files, options.debug, options.low_latency,
+                                 any_owner);
   if (!options.setup) {
     AppLog("wine         : wine_setup=0. The app does not set up Wine");
     return;

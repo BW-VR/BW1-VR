@@ -34,6 +34,16 @@ inline bool Wanted(bool bars_up, bool was_wanted, bool story_owns,
   return story_owns && seconds_since_bars < linger;
 }
 
+// A VIDEO OF THE GAME WITH THE WINDOW OFF (cutscene_video_window). A flat
+// video cannot be around the player, so it plays on the screen of the window
+// also when cut scenes play around the player. The window starts after
+// `needed` frames one after the other with the video, so a video of one
+// frame does not start it. It goes in the first frame with no video.
+inline bool VideoWanted(bool window_on, bool video_window, int video_frames,
+                        int needed) {
+  return !window_on && video_window && video_frames >= needed;
+}
+
 // THE STATE. `open` is 1 for the full view and 0 for the opening that has
 // the size of the window. `flat` is true while the eye pictures go to the
 // screen of the window.

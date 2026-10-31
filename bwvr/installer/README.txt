@@ -125,7 +125,8 @@ These are some of the groups of the launcher.
                   scenes. The default play mode is the God view (see
                   below). A cut scene plays on a screen in front of
                   you. "Around you" plays it all around you, with the
-                  motion of the camera of the game.
+                  motion of the camera of the game. A video of the
+                  game always plays on the screen.
 
   Moving around   Turns in steps, the zoom with the stick, the walk
                   with the left stick, and a blink when you jump or

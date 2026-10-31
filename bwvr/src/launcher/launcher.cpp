@@ -226,7 +226,7 @@ const Setting kSettings[] = {
      "you, and the land around you stays still. Around you: a cut scene "
      "plays all around you, and the camera of the game moves you with all "
      "its motion. Choose it only if a camera that moves is no problem for "
-     "you."},
+     "you. A video of the game always plays on the screen."},
 
     // Not offered: the sizes and the depth of the interface in the eye
     // pictures have settled defaults. With controllers the hints and the

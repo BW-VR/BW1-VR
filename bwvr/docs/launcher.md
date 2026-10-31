@@ -207,7 +207,7 @@ where the parts are.
 | --- | --- | --- |
 | Play mode | God view | Key `play_mode`, a value and not an index. 4 God view: the land is at your waist, so your hands can reach it, with motion controllers or with the mouse (see `god-view.md`). 1 Stereoscopic window: a 3D screen in front of you, and your head does not move the camera. 3 Tabletop (test): the island is a model on a table in front of you (see `tabletop.md`). A window that follows the head is mode 2, which the launcher does not offer. An ini with `play_mode=0` gets the God view. |
 | Intro in stereo | off | The Lionhead logo at the start shows in 3D around you. The view goes along the camera path of the game and does not turn. The menu button skips it. It is a test: no headset session has checked it. Key `intro_vr`. The key `intro_motion` chooses the motion, and the launcher has no row for it. See `intro.md`. |
-| Cut scenes | In a window | Key `cutscene_immersive`, a value. 0 In a window: a cut scene plays on the screen of the cut scene window (`cutscene-window.md`). 1 Around you: no window, and the camera of the game moves the player with all its motion (`script_camera=0`). |
+| Cut scenes | In a window | Key `cutscene_immersive`, a value. 0 In a window: a cut scene plays on the screen of the cut scene window (`cutscene-window.md`). 1 Around you: no window, and the camera of the game moves the player with all its motion (`script_camera=0`). A video of the game still plays on the screen (`cutscene_video_window`). |
 
 ### Moving around
 

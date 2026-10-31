@@ -149,11 +149,14 @@ struct Settings {
   // A test: from this frame on the mod reads the cinema bars as up. 0 is no
   // change.
   uint64_t test_bars;  // cutscene_window_test_bars
+  // With the window off, a video of the game plays on the screen of the
+  // window (cutscene_video_window).
+  bool video_window;
 };
 Settings g_set = {false, true, true, 2.0f, 2.6f,          0.5f, 3.0f,
                   false, 0,    0,    true, kDepthNearest, 0.0f, 0,
                   0,     true, 1.4f, 0,    1,
-                  true,  true, 1.33f, 0};
+                  true,  true, 1.33f, 0,   true};
 
 window_math::State g_state = {false, 1.0f};
 bool g_wanted = false;
@@ -222,6 +225,8 @@ bool g_video_moved = false;  // and it went on the screen plane
 bool g_video_was = false;    // the frame before had a batch of the video
 uint64_t g_video_start = 0;  // the first frame of the video, for the log
 uint64_t g_video_frames = 0;  // frames with the video on the screen plane
+int g_video_run = 0;          // frames one after the other with the video
+uint64_t g_video_window_frames = 0;  // frames of the window for a video only
 
 // THE ADVISORS (cutscene_advisors). The game draws an advisor as a mesh of
 // the scene. HelpDude::Draw 0x005C0700 (thiscall, one char argument, ret 4)
@@ -287,6 +292,9 @@ const int kMaxFrameLogs = 540;
 const float kWallBorder = 40.0f;  // meters
 // The longest frame that the change counts in full, in seconds.
 const float kLongestStep = 0.035f;
+// The frames one after the other with a video of the game before the window
+// starts for it while the window is off (cutscene_video_window).
+const int kVideoFrames = 6;
 
 bool Say() {
   if (g_logs >= kMaxLogs) return false;
@@ -353,6 +361,7 @@ void ReadSettings() {
   g_set.text_place = limit(number("cutscene_subtitle_place", 0), 0, 1);
   g_set.edge = limit(number("cutscene_edge_columns", 1), 0, 16);
   g_set.video = number("cutscene_video", 1) != 0;
+  g_set.video_window = number("cutscene_video_window", 1) != 0;
   g_set.advisors = number("cutscene_advisors", 1) != 0;
   g_set.advisor_distance =
       limit(number("cutscene_advisor_distance_cm", 133), 30,
@@ -396,6 +405,14 @@ void ReadSettings() {
                "picture for both eyes"
              : "A video of the game in the window goes to the eye pictures as "
                "the game draws it, with no rule of the window");
+  if (!g_set.on) {
+    ModLog("cut scene    : cutscene_video_window=%d. %s",
+           g_set.video_window ? 1 : 0,
+           g_set.video_window
+               ? "A cut scene plays around you, but a video of the game plays "
+                 "on the screen of the window"
+               : "A video of the game fills the picture of each eye");
+  }
   if (g_set.advisors) {
     ModLog("cut scene    : cutscene_advisors=1. In the window an advisor is "
            "%.2f m from the eyes (cutscene_advisor_distance_cm), in front of "
@@ -1188,13 +1205,26 @@ uint64_t CutsceneWindowEndFrame(uint64_t frame) {
   } else if (g_since_bars < 1000.0f) {
     g_since_bars += dt;
   }
+  // A video of the game: the latch of the frame.
+  const bool video = g_video_now;
+  const bool moved = g_video_moved;
+  g_video_now = false;
+  g_video_moved = false;
+  if (moved) ++g_video_frames;
+  g_video_run = video ? (g_video_run < 1000000 ? g_video_run + 1 : g_video_run)
+                      : 0;
+  // With the window off, a video of the game still plays on its screen.
+  const bool video_wanted = window_math::VideoWanted(
+      g_set.on, g_set.video_window, g_video_run, kVideoFrames);
   // The window needs the God view and a head on the camera. A flat frame
   // has no head on the camera, and it is still the window.
-  const bool usable =
-      g_set.on && g_set.god && (g_state.flat || HeadCameraOn());
+  const bool usable = (g_set.on || video_wanted) && g_set.god &&
+                      (g_state.flat || HeadCameraOn());
   const bool wanted =
-      usable && window_math::Wanted(bars == 1, g_wanted, story, g_since_bars,
-                                    g_set.linger);
+      usable && (video_wanted ||
+                 window_math::Wanted(bars == 1, g_wanted, story, g_since_bars,
+                                     g_set.linger));
+  if (wanted && video_wanted) ++g_video_window_frames;
 
   if (g_set.god && (bars != g_said_bars || story != g_said_story)) {
     g_said_bars = bars;
@@ -1207,11 +1237,6 @@ uint64_t CutsceneWindowEndFrame(uint64_t frame) {
     }
   }
   // A video of the game: one line when it starts and one when it ends.
-  const bool video = g_video_now;
-  const bool moved = g_video_moved;
-  g_video_now = false;
-  g_video_moved = false;
-  if (moved) ++g_video_frames;
   if (video != g_video_was && g_set.god && Say()) {
     if (video) {
       g_video_start = frame;
@@ -1248,11 +1273,15 @@ uint64_t CutsceneWindowEndFrame(uint64_t frame) {
   }
   if (wanted != g_wanted && Say()) {
     if (wanted) {
-      ModLog("cut scene    : frame %llu: a cut scene starts, so the view "
-             "closes to the window", frame);
+      ModLog("cut scene    : frame %llu: %s", frame,
+             video_wanted ? "a video of the game plays, so the frame goes to "
+                            "the window at once (cutscene_video_window=1)"
+                          : "a cut scene starts, so the view closes to the "
+                            "window");
     } else {
       ModLog("cut scene    : frame %llu: the cut scene is over (%s)", frame,
-             !usable       ? "the window is off"
+             !usable       ? (g_set.on ? "the window is off"
+                                       : "the video is over")
              : story       ? "a story camera stayed too long with no bars"
                            : "the bars are down and the camera is back");
     }
@@ -1260,7 +1289,10 @@ uint64_t CutsceneWindowEndFrame(uint64_t frame) {
   g_wanted = wanted;
 
   const bool was_open = !g_state.flat && g_state.open >= 1.0f;
-  if (window_math::Step(&g_state, wanted, step, g_set.seconds)) {
+  // For a video the frame goes flat at once: the video must not fill the
+  // eye pictures while the view closes.
+  if (window_math::Step(&g_state, wanted, step,
+                        video_wanted ? 0.0f : g_set.seconds)) {
     if (g_state.flat) {
       EnterFlat(frame);
     } else {
@@ -1319,6 +1351,10 @@ void CutsceneWindowReport() {
     ModLog("cut scene    : a video of the game was on the screen plane in %llu "
            "frames this report", g_video_frames);
   }
+  if (g_video_window_frames != 0) {
+    ModLog("cut scene    : cutscene_video_window=1. The window was up for a "
+           "video only in %llu frames this report", g_video_window_frames);
+  }
   if (g_flat_frames != 0 && g_report_plane[1] > 0.0f) {
     ModLog("cut scene    : the screen plane was at %.1f to %.1f units this "
            "report (%.2f to %.2f units for each meter of depth). %llu frames "
@@ -1346,4 +1382,5 @@ void CutsceneWindowReport() {
   g_flat_frames = 0;
   g_change_frames = 0;
   g_video_frames = 0;
+  g_video_window_frames = 0;
 }

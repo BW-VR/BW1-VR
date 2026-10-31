@@ -640,8 +640,9 @@ that moves while the Hand takes it.
 - **P17. A cut scene with no window: check it in a headset.** The launcher
   row "Cut scenes", "Around you" (`cutscene_immersive=1`) plays a cut scene
   around the player, with no window and with the camera of the game and all
-  its motion (`script_camera=0`). The window stays the default. No run has
-  shown it: a desktop run has no head to feel the motion.
+  its motion (`script_camera=0`). A video of the game plays on the screen
+  of the window. The window stays the default. No run has shown the motion:
+  a desktop run has no head to feel it.
 - **P5. Hand tracking.** The player plays with the hands and no
   controllers: the Hand follows the real hand and its fingers, one to one,
   as it follows a controller. First find what the headset gives to the

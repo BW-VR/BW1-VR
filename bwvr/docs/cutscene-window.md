@@ -504,8 +504,18 @@ in the window.
   walk the right eye draws the same tile after the left eye
   (`draw_hooks.cpp`, `kOneWalkRightOnly`), so the mod puts the whole tile back
   after each draw.
-- **Not in the window.** A frame of the full view (the 0.5 s of the enter, or
-  `cutscene_window=0`) gets the video as the game draws it, in each eye.
+- **A video with the window off.** A flat video cannot be around the player.
+  So with the window off (`cutscene_immersive=1`, the launcher row "Cut
+  scenes", "Around you", or `cutscene_window=0`) a video of the game still
+  plays on the screen of the window (`cutscene_video_window=1`). The window
+  starts after 6 frames one after the other with a tile of the video, so a
+  video of one frame does not start it. For a video the frame goes flat at
+  once, with no close of the view, and the window goes in the first frame
+  with no video. The rest of the cut scene plays around the player.
+- **Not in the window.** A frame of the full view (the 0.5 s of the enter of
+  a story, the 6 frames before the window starts for a video, or
+  `cutscene_video_window=0` with the window off) gets the video as the game
+  draws it: in each eye picture, fixed to the head, at the full view.
 
 **The interface and the help text** draw as in play mode 1. The interface is
 on the screen plane (section 6.6).
@@ -613,6 +623,7 @@ All in `[bwvr]`. None is in the launcher.
 | `cutscene_subtitle_width_cm` | 140 | The width of the whole render on that card, 30 to 400. It sets the size of the letters |
 | `cutscene_subtitle_place` | 0 | 0 hangs the card under the scene. 1 hangs it under the whole opening |
 | `cutscene_edge_columns` | 1 | The columns that each eye picture also loses at each side of the opening, 0 to 16 (section 6.2). 0 shows each picture to its edges, with a column of light at the left edge of the opening |
+| `cutscene_video_window` | 1 | With the window off, 1 plays a video of the game on the screen of the window (section 7). 0 lets the video fill each eye picture |
 | `cutscene_video` | 1 | 1 puts a video of the game in the window on the screen plane, the same picture for both eyes (section 7). 0 gives the video no rule of the window: in one walk the two eyes see it at two places on the screen |
 | `cutscene_advisors` | 1 | 1 puts each advisor in front of the screen, `cutscene_advisor_distance_cm` from the eyes, and leaves it out of the measure of the nearest thing (section 7). 0 draws the advisors as the scene draws them, in the measure |
 | `cutscene_advisor_distance_cm` | 133 | The distance of an advisor from the eyes, 30 to `screen_distance_cm` |

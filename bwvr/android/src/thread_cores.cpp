@@ -144,12 +144,12 @@ std::string CpusetOf(int pid) {
   return s.empty() ? std::string("(cannot be read)") : s;
 }
 
-const char* PlaceName(cr::Place p) {
-  switch (p) {
-    case cr::Place::kFast: return "fast";
-    case cr::Place::kOther: return "other";
-    default: return "free";
-  }
+// The place of a thread from its real mask: the fast cores, the other
+// cores, or the list of its cores.
+std::string PlaceText(const cr::Plan& plan, const std::vector<int>& mask) {
+  if (!plan.fast.empty() && mask == plan.fast) return "fast";
+  if (!plan.other.empty() && mask == plan.other) return "other";
+  return "cores " + cr::CpuListText(mask);
 }
 
 // One thread in a line of a second.
@@ -161,7 +161,7 @@ struct Row {
   double percent = 0.0;
   double user = 0.0;
   double system = 0.0;
-  cr::Place place = cr::Place::kFree;
+  std::string place;  // with a binding: PlaceText of its real mask
 };
 
 }  // namespace
@@ -181,7 +181,9 @@ void ThreadCores::GameStarts(const Options& options) {
   game_placed_.clear();
   app_placed_.clear();
   faults_.clear();
+  failed_.clear();
   moved_ = 0;
+  again_ = 0;
   // The play thread of this game starts after Play.
   g_play_tid.store(0);
   // The cores of the device and the cores that the app can use.
@@ -304,9 +306,18 @@ void ThreadCores::Bind(int process, bool game, const std::map<int, ps::Task>& ta
     const bool key = game ? t.id == process : (t.id == session || t.id == play);
     const cr::Place place = cr::PlaceOf(plan_, key);
     if (place == cr::Place::kFree) continue;
-    auto had = placed.find(t.id);
-    if (had != placed.end() && had->second == place) continue;
     const std::vector<int>& cores = cr::CoresOf(plan_, place);
+    auto had = placed.find(t.id);
+    const bool same = had != placed.end() && had->second == place;
+    std::vector<int> before;
+    if (same) {
+      // A thread with a fault gets no second try in this place.
+      if (failed_.count(t.id) != 0) continue;
+      // Each second the real mask: a change of the cpuset of the app can
+      // reset it. Then the thread gets its cores again.
+      before = AffinityOf(t.id);
+      if (before == cores) continue;
+    }
     const int err = SetAffinity(t.id, cores);
     if (err != 0) {
       if (faults_[err]++ == 0) {
@@ -316,11 +327,20 @@ void ThreadCores::Bind(int process, bool game, const std::map<int, ps::Task>& ta
                t.id, t.name.c_str(), game ? "game" : "app", cr::CpuListText(cores).c_str(), err,
                strerror(err));
       }
-      // No second try for this thread in this place.
       placed[t.id] = place;
+      failed_.insert(t.id);
       continue;
     }
+    failed_.erase(t.id);
     placed[t.id] = place;
+    if (same) {
+      ++again_;
+      AppLog("cores        : thread_bind: the thread %d (%s) of the %s had the cores %s. It "
+             "has the cores %s again (sched_getaffinity gives %s)",
+             t.id, t.name.c_str(), game ? "game" : "app", cr::CpuListText(before).c_str(),
+             cr::CpuListText(cores).c_str(), cr::CpuListText(AffinityOf(t.id)).c_str());
+      continue;
+    }
     ++moved_;
     if (key) {
       const char* what = game ? "the main thread of the game"
@@ -383,9 +403,7 @@ void ThreadCores::Second(double seconds) {
         if (is_game && t.id == game_pid_) r.mark = " (the main thread)";
         if (!is_game && t.id == session) r.mark = " (the session thread)";
         if (!is_game && t.id == play) r.mark = " (the play thread)";
-        const std::map<int, cr::Place>& placed = is_game ? game_placed_ : app_placed_;
-        auto p = placed.find(t.id);
-        r.place = p == placed.end() ? cr::Place::kFree : p->second;
+        if (plan_.bind != 0) r.place = PlaceText(plan_, AffinityOf(t.id));
         *sum += r.percent;
         if (r.percent <= 0.0) {
           ++*idle;
@@ -405,7 +423,7 @@ void ThreadCores::Second(double seconds) {
         snprintf(part, sizeof(part), "%s%s %d%s core %d %.0f (%.0f + %.0f)%s%s",
                  s.empty() ? "" : ", ", r.name.c_str(), r.id, r.mark.c_str(), r.core, r.percent,
                  r.user, r.system, plan_.bind != 0 ? " " : "",
-                 plan_.bind != 0 ? PlaceName(r.place) : "");
+                 r.place.c_str());
         s += part;
       }
       return s.empty() ? std::string("none") : s;
@@ -441,12 +459,14 @@ void ThreadCores::Second(double seconds) {
     AppLog("cores        : %.1f s, the app %d threads, %.2f cores in all. The first 8 with CPU "
            "time: %s. %d threads had no CPU time%s",
            seconds, static_cast<int>(app.size()), app_sum / 100.0, text(a, 8).c_str(), app_idle,
-           moved_ > 0 ? (". thread_bind moved " + std::to_string(moved_) +
-                         " threads in this second")
-                            .c_str()
-                      : "");
+           plan_.bind != 0 ? (". thread_bind in this second: " + std::to_string(moved_) +
+                                  " new bindings, " + std::to_string(again_) +
+                                  " threads that got their cores again")
+                                     .c_str()
+                           : "");
   }
   moved_ = 0;
+  again_ = 0;
   game_before_ = game;
   app_before_ = app;
 }

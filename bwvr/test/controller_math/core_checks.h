@@ -63,7 +63,7 @@ inline void PlanChecks() {
   cr::Plan p = cr::MakePlan(0, "", six, all);
   Check(p.bind == 0 && cr::PlaceOf(p, true) == cr::Place::kFree &&
             cr::PlaceOf(p, false) == cr::Place::kFree,
-        "thread_bind=0 (the default): no thread gets a place, as before", 0, 0);
+        "thread_bind=0 (the default): no thread gets a place", 0, 0);
   Check(cr::ParseBind(1) == 1 && cr::ParseBind(2) == 2 && cr::ParseBind(3) == 0 &&
             cr::ParseBind(-1) == 0,
         "thread_bind takes 0, 1 and 2. Each other value is 0", 0, 0);

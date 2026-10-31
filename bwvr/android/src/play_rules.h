@@ -226,26 +226,27 @@ inline Box64Env Box64Vars(int strongmem, const std::string& extra) {
 //                   it translates in files in the folder kFexCacheWine
 //                   (FEX_DISKCACHE=1 and FEX_DISKCACHEPATH, the disk cache
 //                   of FEXCore), and the next start of the game reads it
-//                   from there. fex_env cannot then set these two names.
+//                   from there.
+// fex_env never sets FEX_DISKCACHE or FEX_DISKCACHEPATH: at its start FEX
+// deletes each folder in the path of the cache that does not have the name
+// of its own cache (PruneStaleEntries of DiskCache.cpp). A path of fex_env,
+// for example the game folder, would lose each of its folders (Profiles
+// too). So only fex_disk_cache sets them, with a folder that only FEX uses.
 // The folder of the code cache of FEX, as the game sees it and in the
-// prefix. Only FEX writes into it: at its start FEX deletes each folder in
-// it that is of another build of FEX or of another CPU (PruneStaleEntries
-// of the disk cache).
+// prefix.
 constexpr char kFexCacheWine[] = "C:\\bwvr\\fex-cache\\";
 inline std::string FexCacheFolder(const std::string& prefix) {
   return AppFolder(prefix) + "/fex-cache";
 }
 inline EnvVars FexVars(const std::string& extra, bool disk_cache = false) {
   EnvVars out;
-  std::vector<std::string> names;
-  std::vector<std::string> set_names;
+  const std::vector<std::string> set_names = {"FEX_DISKCACHE", "FEX_DISKCACHEPATH"};
+  std::vector<std::string> names = set_names;
   if (disk_cache) {
     out.vars.push_back("FEX_DISKCACHE=1");
     out.vars.push_back(std::string("FEX_DISKCACHEPATH=") + kFexCacheWine);
-    set_names = {"FEX_DISKCACHE", "FEX_DISKCACHEPATH"};
-    names = set_names;
   }
-  AddVarWords(extra, "FEX_", &names, set_names, "fex_disk_cache", &out);
+  AddVarWords(extra, "FEX_", &names, set_names, "only fex_disk_cache", &out);
   return out;
 }
 

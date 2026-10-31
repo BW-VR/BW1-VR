@@ -198,12 +198,14 @@ inline void FexCacheChecks() {
   printf("\nThe code cache of FEX (fex_disk_cache)\n");
   pr::EnvVars e = pr::FexVars("FEX_X87REDUCEDPRECISION=1", false);
   Check(e.vars.size() == 1 && e.vars[0] == "FEX_X87REDUCEDPRECISION=1" && e.refused.empty(),
-        "fex_disk_cache=0: only fex_env, as before", static_cast<double>(e.vars.size()), 1);
-  e = pr::FexVars("FEX_DISKCACHE=1 FEX_DISKCACHEPATH=C:\\x\\", false);
-  Check(e.vars.size() == 2 && e.vars[0] == "FEX_DISKCACHE=1" &&
-            e.vars[1] == "FEX_DISKCACHEPATH=C:\\x\\" && e.refused.empty(),
-        "fex_disk_cache=0: fex_env can set the two names itself",
-        static_cast<double>(e.vars.size()), 2);
+        "fex_disk_cache=0: only the words of fex_env", static_cast<double>(e.vars.size()), 1);
+  e = pr::FexVars("FEX_DISKCACHE=1 FEX_DISKCACHEPATH=G:\\ FEX_MULTIBLOCK=0", false);
+  Check(e.vars.size() == 1 && e.vars[0] == "FEX_MULTIBLOCK=0" && e.refused.size() == 2 &&
+            e.refused[0] == "FEX_DISKCACHE=1 (only fex_disk_cache sets it)" &&
+            e.refused[1] == "FEX_DISKCACHEPATH=G:\\ (only fex_disk_cache sets it)",
+        "fex_disk_cache=0: fex_env cannot set FEX_DISKCACHE or FEX_DISKCACHEPATH (FEX would "
+        "delete the folders in that path), each with a line",
+        static_cast<double>(e.refused.size()), 2);
   e = pr::FexVars("", true);
   Check(e.vars.size() == 2 && e.vars[0] == "FEX_DISKCACHE=1" &&
             e.vars[1] == "FEX_DISKCACHEPATH=C:\\bwvr\\fex-cache\\" && e.refused.empty(),
@@ -215,10 +217,10 @@ inline void FexCacheChecks() {
                   true);
   Check(e.vars.size() == 4 && e.vars[2] == "FEX_X87REDUCEDPRECISION=1" &&
             e.vars[3] == "FEX_MULTIBLOCK=0" && e.refused.size() == 3 &&
-            e.refused[0] == "FEX_DISKCACHE=0 (fex_disk_cache sets it)" &&
-            e.refused[1] == "FEX_DISKCACHEPATH=D:\\ (fex_disk_cache sets it)" &&
+            e.refused[0] == "FEX_DISKCACHE=0 (only fex_disk_cache sets it)" &&
+            e.refused[1] == "FEX_DISKCACHEPATH=D:\\ (only fex_disk_cache sets it)" &&
             e.refused[2] == "FEX_MULTIBLOCK=1 (the name comes two times)",
-        "fex_disk_cache=1: fex_env cannot set the two names, the other words go as before",
+        "fex_disk_cache=1: fex_env cannot set the two names, the other words go",
         static_cast<double>(e.refused.size()), 3);
   e = pr::CpuVars(Cpu::kBox64, 0, "", "", true);
   Check(e.vars.empty(), "box64: fex_disk_cache gives no variable",

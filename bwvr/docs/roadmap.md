@@ -1154,7 +1154,9 @@ that moves while the Hand takes it.
 - **N33. FEX and the cores of the Quest.** On a Quest 3 with FEX the main
   thread of the game takes 87 to 89 percent of one core, and the threads of
   the game and of the app run on the cores 3 to 5 (the line of the threads
-  of `time_log`). The app gives each second the core and the CPU time of
+  of `time_log`). On the Steam Frame (8 cores) the game made 72 frames a
+  second, and the time log gave the cores 40 to 69 percent busy. The app
+  gives each second the core and the CPU time of
   each thread (`thread_cores=1`), binds the main thread of the game, the
   session thread and the play thread to the fast cores (`thread_bind`), and
   gives FEX a code cache in files (`fex_disk_cache=1`, `android.md`, "The
@@ -1166,7 +1168,10 @@ that moves while the Hand takes it.
   `FEX_TSOENABLED=0`. Open: `SuspendThread` under FEX in Wine stops a thread
   also in the JIT, so a hook that the mod enables while other threads run
   x86 code can hang the game (`android.md`, "FEX as the CPU of the 32 bit
-  code", the part "SuspendThread under FEX in Wine").
+  code", the part "SuspendThread under FEX in Wine"). Open: some runs of
+  `emu_game_test.ps1` do not end (no "Quit game" in game 1), with and
+  without these keys, and with no log of the app (`android.md`, "The cores
+  of the headset").
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

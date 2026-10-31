@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -56,5 +57,7 @@ class ThreadCores {
   std::map<int, core_rules::Place> app_placed_;
   // The faults of sched_setaffinity, by errno, each logged one time.
   std::map<int, int> faults_;
+  std::set<int> failed_;  // the threads with a fault of sched_setaffinity
   int moved_ = 0;  // threads that got a place since the last line
+  int again_ = 0;  // threads that got their cores again since the last line
 };

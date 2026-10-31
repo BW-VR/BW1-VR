@@ -3671,9 +3671,9 @@ call of the stub stops the program with an exception. FEX calls it only in
 it stops that thread first, so that the thread holds no lock of the JIT
 when FEX frees its state. A thread that ends itself does not call it.
 `runblack.exe` and the DLLs of the game folder do not import
-`TerminateThread` (their import tables), and each line "Terminating" of FEX
-in `wine.log` of a Quest 3 is of a thread that ends itself. So the stub does
-not run in a game.
+`TerminateThread` (their import tables), and no log of a Quest 3 shows a
+call: each line "Terminating" of FEX in `wine.log` is of a thread that ends
+itself.
 
 **SuspendThread under FEX in Wine.** On Windows `RtlWow64SuspendThread`
 stops a thread of x86 code at a safe point: the start of a block of
@@ -3706,8 +3706,10 @@ hooks of the mod come and go while the game runs. Not shown: that the hangs
 in the load of the game with `walk_parts=1` on a Quest 3 come from this. A
 stop with the main thread of the game at 0 percent of a core in the line of
 a stop (`time_log`) fits it. The samplers of the mod (`hang_watch`,
-`profile_sample`) also stop the frame thread, but they change no protection
-while it is stopped.
+`profile_sample`) also stop the frame thread. They change no protection
+while it is stopped, but they can also hang, less often: when the sampler
+must translate a block while another thread waits for the unique lock, the
+sampler can wait behind that thread, which waits for the stopped thread.
 
 **The Unix library of FEX** (`libwow64fex.so` of `Source/Windows/UnixLib`)
 is not in the tree. FEX loads it when it is there, and works with no such
@@ -3782,17 +3784,23 @@ gets a new translation. The name of the folder of a cache has a hash of the
 version of the cache and of the features of the CPU. The name of the file
 has a hash of each setting of FEX that changes the translated code (for
 example `FEX_TSOENABLED` and `FEX_X87REDUCEDPRECISION`), so each set of
-`fex_env` has a cache of its own. At its start FEX deletes each folder of
-the cache of another version or of another CPU.
+`fex_env` has a cache of its own. At its start FEX deletes each folder in
+the path of the cache that does not have the name of its own folder
+(`PruneStaleEntries` of `DiskCache.cpp`): the folders of another version or
+of another CPU, and each other folder in that path. So the path must be a
+folder that only FEX uses.
 
 - `fex_disk_cache=0`: no variable. FEX translates each block at each start.
 - `fex_disk_cache=1`: with `wow64_cpu=fex` the game gets `FEX_DISKCACHE=1`
   and `FEX_DISKCACHEPATH=C:\bwvr\fex-cache\`, the folder
   `drive_c/bwvr/fex-cache` of the prefix in the internal folder of the app.
-  The app makes the folder. `fex_env` cannot set these two names then: a
-  word with one of them gives the line "fex_env: FEX_DISKCACHE=0
-  (fex_disk_cache sets it) does not go to the game". With
-  `fex_disk_cache=0`, `fex_env` can set them.
+  The app makes the folder.
+
+`fex_env` never sets `FEX_DISKCACHE` or `FEX_DISKCACHEPATH`, also with
+`fex_disk_cache=0`: a path in `fex_env`, for example the game folder, would
+lose each folder in it (`Profiles` too). A word with one of the two names
+gives the line "fex_env: FEX_DISKCACHEPATH=... (only fex_disk_cache sets
+it) does not go to the game".
 
 The log of the app has one line before the game, "game : fex_disk_cache=1.
 FEX keeps the code that it translates in C:\bwvr\fex-cache\ (<the folder>).
@@ -3973,7 +3981,10 @@ cores ...".
   one core (user + system). Then the count of the threads with no CPU time.
   The line of the app: the first 8 threads with CPU time, with "(the
   session thread)" and "(the play thread)". With a binding each thread also
-  has its place: `fast`, `other` or `free`. With `time_log=1` the threads of
+  has its place, from its real mask (`sched_getaffinity` in that second):
+  `fast` (the fast cores), `other` (the other cores) or `cores <list>`. At
+  the end of the line of the app: the new bindings in the second and the
+  threads that got their cores again. With `time_log=1` the threads of
   the app have their names (`bwvr main`, `bwvr play`).
 
 **The binding** (`thread_bind`). The fast cores are the cores that the app
@@ -3994,11 +4005,15 @@ of the app (`bwvr play`, `frame_loop=1`).
 There is no binding when no core of the app is faster than another and
 `thread_bind_cores` is empty, when no core of `thread_bind_cores` is a core
 of the app, or when the fast cores are each core of the app. The log says
-why. Each second the app binds the new threads. The line "thread_bind: the
+why. Each second the app binds the new threads, and it reads the mask of
+each thread that it bound (`sched_getaffinity`). A thread with another mask
+(for example after a change of the cpuset of the app) gets its cores again,
+with one line "thread_bind: the thread N (name) of the game had the cores
+... It has the cores ... again". The line "thread_bind: the
 main thread of the game (N, runblack.exe) is on the fast cores 4-5 now
 (sched_getaffinity gives 4-5)" names each key thread with its cores after
 the binding. A fault of `sched_setaffinity` gives one line with its errno,
-one time for each errno. At the end of the game each thread of the app
+one time for each errno, and that thread gets no second try in that place. At the end of the game each thread of the app
 gets the cores of the app again. A new process and a new thread get the
 cores of the thread that starts them. So with `thread_bind=1` the processes
 that the app starts after Play (the loader of the game, the game process,
@@ -4010,8 +4025,9 @@ game to the fast cores, the other threads to the other cores. With
 Play. There is no test key: the app has no hotkeys.
 
 **The cost.** Each second about 60 reads of small files of `/proc` and two
-lines of the log on a thread of its own, and one call of `sched_setaffinity`
-for each new thread.
+lines of the log on a thread of its own, one call of `sched_getaffinity` for
+each thread that the app bound and for each thread in a line, and one call
+of `sched_setaffinity` for each new thread.
 
 **What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
 480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
@@ -4026,18 +4042,27 @@ the cores 0-1", then the session thread, the play thread and the main
 thread of the game "on the fast cores 2-3 now (sched_getaffinity gives
 2-3)". The game process could use the cores 0-1 when the app found it (the
 cores of `bwvr game`). No line of a fault of `sched_setaffinity`. Of the
-482 lines of the game in the two games, 480 have the main thread of the
-game on the core 2 or 3 with the place `fast`. The other 2 are the first
-line of each game: the second in which the binding came, with the core
-from before it. Each other thread of the game with CPU time
-(`wine_dsound_mix`, `AudioTrack`) was on the core 0 or 1 with the place
-`other`. At the end of each game "24 threads of the
-app have the cores 0-3 again, 2 of them did not (a thread that ended)" (23
-threads after game 1). The frames a second of the game: 42.6 (game 1) and
-58.2 (game 2, the test save) in the log of the app. With the keys at 0
-(the same test with no key, 204 checks, 0 failed) the log has only the two lines "cores" of each
-Play (the cores of the device and of the app), no line each second and no
-binding, and the game made 43.5 and 60.6 frames a second.
+508 lines of the game in the two games, 506 have the main thread of the
+game on the core 2 or 3 with the place `fast` (from its real mask). The
+other 2 are the first line of each game: the second in which the binding
+came, with the core from before it. Each other thread of the game with CPU
+time (`wine_dsound_mix`, `AudioTrack`) was on the core 0 or 1 with the
+place `other`. The line of the app counts 11, 3 and 1 new bindings in the
+seconds with new threads, and no thread that got its cores again. At the
+end of each game "24 threads of the app have the cores 0-3 again, 2 of them
+did not (a thread that ended)". The frames a second of the game: 43.2
+(game 1) and 58.7 (game 2, the test save) in the log of the app.
+
+Some runs of this test do not end well, with these keys and with no key
+(10 or 11 failed checks of 95 to 97): in game 1 the log has no "Quit game"
+in 900 s, the menu over the game does not come, and the script stops. Then
+the script does not pull the log of the app, so the cause is not known. It
+comes also with the keys at 0, so it is not of the binding.
+
+With the keys at 0 (the same test with no key, 204 checks, 0 failed) the log has only
+the two lines "cores" of each Play (the cores of the device and of the
+app), no line each second and no binding, and the game made 46.7 and 59.2 frames
+a second.
 
 **Only a headset can show** the cores of a Quest 3 and their speeds, the
 cores of the cpuset of the app, if Android lets the app bind the threads of

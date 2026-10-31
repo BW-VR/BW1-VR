@@ -176,13 +176,13 @@ int ControllersButtonLayout();
 // world, the trigger of the pointing hand is the left and the right button of
 // the game, and the trigger of the other hand makes the walk faster.
 bool ControllersFly();
-// The test key of controls (Ctrl, Shift and the apostrophe key, with
-// test_keys=1), and the word "controlskey" of the scripted controller.
+// The test key of controls (Ctrl, Shift and G, with test_keys=1), and the
+// word "controlskey" of the scripted controller.
 void ControllersControlsToggle(const char* by);
 // controls=1 with left_leash=1: X of the hand that does not point is the
 // button of the leash, and a shake of that hand takes the leash off
-// (docs/controllers.md, 5.7). The test key (Ctrl, Shift and the slash key,
-// with test_keys=1) changes left_leash.
+// (docs/controllers.md, 5.7). The test key (Ctrl, Shift and K, with
+// test_keys=1) changes left_leash.
 bool ControllersLeftLeash();
 // The test key of move_stick_climb (Ctrl, Shift and the backslash key, with
 // test_keys=1): the tilt of the controller of the stick moves the player up
@@ -197,8 +197,8 @@ void ControllersLeftLeashToggle(const char* by);
 // test_keys=1): with controls=1 the trigger of the hand that does not point
 // takes as the trigger of the pointing hand does (docs/controllers.md, 5.7).
 void ControllersLeftTakeToggle(const char* by);
-// The test key of left_hold (Ctrl, Shift and the decimal key of the number
-// pad, with test_keys=1) and the word "holdkey" of the scripted controller:
+// The test key of left_hold (Ctrl, Shift and H, with test_keys=1) and the
+// word "holdkey" of the scripted controller:
 // with controls=1 an object that the trigger of the other hand takes stays
 // in that hand (docs/controllers.md, 5.7).
 void ControllersLeftHoldToggle(const char* by);

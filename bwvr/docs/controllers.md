@@ -1037,13 +1037,13 @@ default. Each control has one job, and one button opens the game menu.
 | --- | --- | --- |
 | `controllers` | 1 | Use tracked controllers when the headset has them |
 | `left_hand` | -1 | Which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. The launcher row "Hand" |
-| `controls` | 0 | The control scheme (5.7). 0: the tables of 5.1. 1: the grips only grab the world, the trigger of the pointing hand is the left and the right button of the game, and the trigger of the other hand makes the walk faster. The launcher row "Controls". The test key Ctrl Shift and the apostrophe key goes between the two (`test_keys=1`) |
+| `controls` | 0 | The control scheme (5.7). 0: the tables of 5.1. 1: the grips only grab the world, the trigger of the pointing hand is the left and the right button of the game, and the trigger of the other hand makes the walk faster. The launcher row "Controls". The test key Ctrl Shift G goes between the two (`test_keys=1`) |
 | `move_stick_path` | 1 | With `controls=1`: the flight with the stick keeps its height and stops at the land (`god-view.md`, 5.7). The test key Ctrl Shift and the grave accent key (on a German keyboard the key with the letter O with two dots) goes between 1 and 0 (`test_keys=1`). Not in the launcher |
 | `move_stick_climb` | 1 | With `controls=1`: the tilt of the controller of the stick moves the player up and down in the walk (`god-view.md`, 5.7). The test key Ctrl Shift and the backslash key goes between 1 and 0 (`test_keys=1`). Not in the launcher |
 | `leash_ring_left` | 1 | With `left_leash=1`: 1 the game puts the ring of the leash around the wrist of the other hand. 0 leaves it over the game's Hand (`grab.md`, "The leash at the mod's hand"). Not in the launcher |
-| `left_leash` | 1 | With `controls=1`: 1 X of the other hand is the button of the leash, and a shake of the other hand takes the leash off (5.7). 0 keeps the leash with the pointing hand. The test key Ctrl Shift and the slash key goes between the two (`test_keys=1`). Not in the launcher |
+| `left_leash` | 1 | With `controls=1`: 1 X of the other hand is the button of the leash, and a shake of the other hand takes the leash off (5.7). 0 keeps the leash with the pointing hand. The test key Ctrl Shift K goes between the two (`test_keys=1`). Not in the launcher |
 | `left_glow` | 1 | With `controls=1` and `left_take=1`: 1 the object that the trigger of the other hand can take in its reach glows as the target at the Hand does, and the tip of the index finger of that hand has the glow of a take (`hand-model.md`, "The glow at the Hand's point"). It follows `hand_glow` and its test key. 0 gives the other hand no glow. Not in the launcher |
-| `left_hold` | 1 | With `controls=1` and `left_take=1`: 1 an object that the trigger of the other hand takes stays in that hand while the trigger is down, and the Hand of the game is free for the pointing hand (5.7). 0 keeps the object in the Hand of the game. The test key Ctrl Shift and the decimal key of the number pad goes between the two (`test_keys=1`). Not in the launcher |
+| `left_hold` | 1 | With `controls=1` and `left_take=1`: 1 an object that the trigger of the other hand takes stays in that hand while the trigger is down, and the Hand of the game is free for the pointing hand (5.7). 0 keeps the object in the Hand of the game. The test key Ctrl Shift H goes between the two (`test_keys=1`). Not in the launcher |
 | `left_take` | 1 | With `controls=1`: 1 the trigger of the other hand also takes, and the Hand goes to that controller for the take (5.7). 0 keeps that trigger for the boost and the commands. The test key Ctrl Shift and the less than key goes between the two (`test_keys=1`). Not in the launcher |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed of the walk with the stick at a full pull of the trigger of that hand, in percent of the speed with no trigger, 100 to 2000 (`god-view.md`, 5.7). Not in the launcher |
 | `controller_swap_buttons` | 0 | 1 makes the grip the left button and the trigger the right. With `controls=1` it changes only the dialog boxes, the rooms of the Temple and the pointer |
@@ -1377,20 +1377,19 @@ other hand borrows it, left_take=1)`).
 **The hint cards** name the trigger for the left button and for the right
 button of the game (`controller-hints.md`).
 
-**The test key.** With `test_keys=1`, Ctrl, Shift and the apostrophe key
-change `controls` between 0 and 1 while the game runs. On a German keyboard
-the key is the key with the letter A with two dots. Both controllers give a
+**The test key.** With `test_keys=1`, Ctrl, Shift and G change `controls`
+between 0 and 1 while the game runs. Both controllers give a
 long pulse for 1 and a short pulse for 0, and the log names the scheme. The
 hands let go of the world. A trigger or a grip that is down must open before
 it presses a button of the game, and a stick that is pushed must come back.
 The word `controlskey` of the scripted controller does the same in a desktop
-run. Ctrl, Shift and the slash key change `left_leash` between 1 and 0 (on a
-German keyboard the key with the number sign). Ctrl, Shift and the key
-between the left Shift and Z change `left_take` between 1 and 0 (on a German
-keyboard the key with the less than sign). Ctrl, Shift and the decimal key
-of the number pad change `left_hold` between 1 and 0 (the word `holdkey` of
-the scripted controller does the same). The other controller gives a
-long pulse for 1 and a short pulse for 0.
+run. Ctrl, Shift and K change `left_leash` between 1 and 0. Ctrl, Shift and
+the key between the left Shift and Z change `left_take` between 1 and 0 (on
+a German keyboard the key with the less than sign). Ctrl, Shift and H
+change `left_hold` between 1 and 0 (the word `holdkey` of the scripted
+controller does the same). The other controller gives a long pulse for 1
+and a short pulse for 0. These letters have no other test key and no key
+of the game with Ctrl and Shift (`controls-audit.md`, sections 2 and 3).
 
 **Tests.** The math tests (`grip_checks.h`, `walk_checks.h`) cover the
 choice of the press, the boost and the zoom about the land under the head.

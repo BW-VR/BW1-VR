@@ -1742,7 +1742,7 @@ bool InView() {
 // hands only grab the world, the trigger of the pointing hand is the left and
 // the right button (controller_math::FlyPressButton), and the trigger of the
 // other hand makes the walk with the stick faster. With test_keys=1, Ctrl,
-// Shift and the apostrophe key change it while the game runs.
+// Shift and G change it while the game runs.
 int g_controls = -1;
 // controls=1: the press of the trigger that is down now is the right button.
 bool g_fly_right = false;
@@ -1757,8 +1757,8 @@ int g_boost_pct = -1;
 int g_climb = -1;
 
 // controls=1: the flight keeps its height and stops at the land, with no
-// follow of the land (move_stick_path). With test_keys=1, Ctrl, Shift and 0
-// of the number pad change it.
+// follow of the land (move_stick_path). With test_keys=1, Ctrl, Shift and
+// the grave accent key change it.
 int g_path = -1;
 
 bool PathOn() {
@@ -1801,7 +1801,7 @@ void LogControls(const char* by) {
              : "The trigger is the left button of the game and the grip of "
                "the pointing hand the right button. The grip of the other "
                "hand grabs the world",
-         keys ? ". Ctrl, Shift and the apostrophe key change it" : "");
+         keys ? ". Ctrl, Shift and G change it" : "");
 }
 
 bool FlyScheme() {
@@ -1820,7 +1820,7 @@ bool FlyDirect() { return FlyScheme() && DirectHandNow(); }
 // 5.7). With controls=1 and left_leash=1, X of that hand puts the leash on,
 // gives its next kind, and brings a tied leash back. A shake of that hand
 // takes the leash off. 0 keeps the leash on the pointing hand, as with
-// controls=0. With test_keys=1, Ctrl, Shift and the slash key change it.
+// controls=0. With test_keys=1, Ctrl, Shift and K change it.
 int g_left_leash = -1;
 
 void LogLeftLeash(const char* by) {
@@ -1882,8 +1882,8 @@ bool LeftTakeOn() {
 // other hand ends in the carry of that hand (left_hold.cpp): the object stays
 // in that hand while its trigger is down, and the Hand of the game is free
 // for a take of its own. 0 keeps the take in the Hand of the game, which goes
-// back when the trigger opens. With test_keys=1, Ctrl, Shift and the decimal
-// key of the number pad change it.
+// back when the trigger opens. With test_keys=1, Ctrl, Shift and H change
+// it.
 int g_left_hold = -1;
 
 void LogLeftHold(const char* by) {
@@ -3076,29 +3076,31 @@ void FlyPress() {
   }
 }
 
-// THE TEST KEY OF controls: Ctrl, Shift and the apostrophe key (test_keys=1)
-// change it between 0 and 1 while the game runs. On a German keyboard the
-// key is the one with the letter A with two dots.
+// THE TEST KEY OF controls: Ctrl, Shift and G (test_keys=1) change it
+// between 0 and 1 while the game runs. The keys of the controls use letters
+// that no other test key and no key of the game uses with Ctrl and Shift
+// (controls-audit.md, sections 2 and 3). The apostrophe key and the slash key
+// are the test keys of note_depth and hint_hand_depth, and Ctrl with the
+// decimal key of the number pad is the test key of scroll_draw.
 void PollControlsKey() {
   static int test_keys = -1;
   if (test_keys < 0) test_keys = IniInt("test_keys", 0) != 0 ? 1 : 0;
   if (test_keys == 0) return;
   static bool before = false;
-  const bool down = (GetAsyncKeyState(VK_OEM_7) & 0x8000) != 0 &&
+  const bool down = (GetAsyncKeyState('G') & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
   const bool pressed = down && !before;
   before = down;
-  // Ctrl, Shift and the slash key: left_leash. On a German keyboard the key
-  // is the one with the number sign.
-  static bool slash_before = false;
-  const bool slash = (GetAsyncKeyState(VK_OEM_2) & 0x8000) != 0 &&
+  // Ctrl, Shift and K: left_leash.
+  static bool leash_before = false;
+  const bool leash = (GetAsyncKeyState('K') & 0x8000) != 0 &&
                      (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                      (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-  const bool slash_pressed = slash && !slash_before;
-  slash_before = slash;
-  if (slash_pressed && GameInFront()) {
-    ControllersLeftLeashToggle("Ctrl, Shift and the slash key");
+  const bool leash_pressed = leash && !leash_before;
+  leash_before = leash;
+  if (leash_pressed && GameInFront()) {
+    ControllersLeftLeashToggle("Ctrl, Shift and K");
   }
   // Ctrl, Shift and the backslash key: move_stick_climb. On a German
   // keyboard the key is the one with the caret.
@@ -3133,19 +3135,18 @@ void PollControlsKey() {
   if (less_pressed && GameInFront()) {
     ControllersLeftTakeToggle("Ctrl, Shift and the less than key");
   }
-  // Ctrl, Shift and the decimal key of the number pad: left_hold.
-  static bool decimal_before = false;
-  const bool decimal = (GetAsyncKeyState(VK_DECIMAL) & 0x8000) != 0 &&
-                       (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
-                       (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-  const bool decimal_pressed = decimal && !decimal_before;
-  decimal_before = decimal;
-  if (decimal_pressed && GameInFront()) {
-    ControllersLeftHoldToggle("Ctrl, Shift and the decimal key of the number "
-                              "pad");
+  // Ctrl, Shift and H: left_hold.
+  static bool hold_before = false;
+  const bool hold = (GetAsyncKeyState('H') & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool hold_pressed = hold && !hold_before;
+  hold_before = hold;
+  if (hold_pressed && GameInFront()) {
+    ControllersLeftHoldToggle("Ctrl, Shift and H");
   }
   if (!pressed || !GameInFront()) return;
-  ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
+  ControllersControlsToggle("Ctrl, Shift and G");
 }
 
 // THE TRIGGER OF THE OTHER HAND WITH left_leash=1 (docs/controllers.md,

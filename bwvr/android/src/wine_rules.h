@@ -218,10 +218,13 @@ inline bool NeedsCpuCopy(const std::string& abi, const std::string& marker,
 // ask AAudio for the low latency mode first, 0 gives the mode none at once.
 // WINE_BWVR_ANY_OWNER=1 (patch 0004 of wine-patches) only with any_owner
 // (AnyOwner): then the owner tests of the folders of Wine accept each owner.
+// WINE_BWVR_SIGSYS_ENOSYS=1 (patch 0005) only with sigsys_enosys
+// (SigsysEnosys): then a system call that a seccomp filter traps gives
+// -ENOSYS.
 inline std::vector<std::string> Environment(const std::vector<std::string>& inherited,
                                             const Paths& p, const std::string& files,
                                             const std::string& debug, bool low_latency,
-                                            bool any_owner = false) {
+                                            bool any_owner = false, bool sigsys_enosys = false) {
   static const char* const kDrop[] = {"WINE",    "LD_LIBRARY_PATH=", "LD_PRELOAD=",
                                       "HOME=",   "TMPDIR=",          "DISPLAY=",
                                       "WAYLAND_DISPLAY="};
@@ -242,7 +245,19 @@ inline std::vector<std::string> Environment(const std::vector<std::string>& inhe
   if (!Trim(debug).empty()) env.push_back("WINEDEBUG=" + Trim(debug));
   env.push_back(low_latency ? "WINEAAUDIO_LOW_LATENCY=1" : "WINEAAUDIO_LOW_LATENCY=0");
   if (any_owner) env.push_back("WINE_BWVR_ANY_OWNER=1");
+  if (sigsys_enosys) env.push_back("WINE_BWVR_SIGSYS_ENOSYS=1");
   return env;
+}
+
+// wine_sigsys: 0 a system call that a seccomp filter traps stops the
+// process with SIGSYS (the way of Android). 1 ntdll gives -ENOSYS for it. 2
+// (the default) -ENOSYS only in a container that shows another owner of the
+// internal folder (Lepton of the Steam Frame), the same test as AnyOwner.
+// Lepton traps membarrier, which NtFlushProcessWriteBuffers calls.
+inline bool SigsysEnosys(int key, unsigned folder_owner, unsigned uid) {
+  if (key == 1) return true;
+  if (key == 2) return folder_owner != uid;
+  return false;
 }
 
 // wine_owner_check: 1 Wine tests the owner of its folders (the way of

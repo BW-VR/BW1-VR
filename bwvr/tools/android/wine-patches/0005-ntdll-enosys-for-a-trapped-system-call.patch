@@ -1,0 +1,76 @@
+ntdll: Give -ENOSYS for a system call that a seccomp filter traps, on request.
+
+The seccomp filter of the apps in Lepton, the Android container of the
+Steam Frame, stops a process with SIGSYS at membarrier (arm64 system call
+282). ntdll calls membarrier from __wine_main, so wineboot ended with the
+signal 31 at its start. With WINE_BWVR_SIGSYS_ENOSYS=1 in the
+environment, __wine_main installs a handler of SIGSYS before its first
+system call: the trapped call gives -ENOSYS, and the first trap of each
+number writes one line to stderr. Wine then takes its own way for a
+system call that is not there: with no membarrier,
+NtFlushProcessWriteBuffers is a FIXME. Only aarch64 gets the handler. The
+app sets the variable only with wine_sigsys.
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -2270,6 +2270,53 @@
+ }
+ 
+ 
++#ifdef __aarch64__
++/***********************************************************************
++ *           bwvr_sigsys_handler
++ *
++ * A seccomp filter of an Android container (Lepton of the Steam Frame)
++ * stops a process with SIGSYS at a system call that it does not allow, for
++ * example membarrier, which virtual_init and NtFlushProcessWriteBuffers
++ * call. With WINE_BWVR_SIGSYS_ENOSYS=1 the call gives -ENOSYS instead, so
++ * Wine takes its own way for a system call that is not there. The first
++ * time for each number, one line goes to stderr.
++ */
++static void bwvr_sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
++{
++    static unsigned char said[1024];
++    ucontext_t *context = sigcontext;
++    int nr = siginfo->si_syscall;
++
++    if (nr >= 0 && nr < (int)sizeof(said) && !said[nr])
++    {
++        char line[] = "bwvr: the container does not allow the system call 0000, it gives -ENOSYS\n";
++        char *digit = strstr( line, "0000" ) + 3;
++        int value = nr, i;
++        said[nr] = 1;
++        for (i = 0; i < 4; i++, value /= 10) *digit-- = '0' + value % 10;
++        write( 2, line, sizeof(line) - 1 );
++    }
++    context->uc_mcontext.regs[0] = (ULONG_PTR)-ENOSYS;
++}
++#endif
++
++/* The handler goes in before the first system call of ntdll. */
++static void bwvr_init_sigsys(void)
++{
++#ifdef __aarch64__
++    const char *enosys = getenv( "WINE_BWVR_SIGSYS_ENOSYS" );
++    struct sigaction sig_act;
++
++    if (!enosys || strcmp( enosys, "1" )) return;
++    memset( &sig_act, 0, sizeof(sig_act) );
++    sigemptyset( &sig_act.sa_mask );
++    sig_act.sa_sigaction = bwvr_sigsys_handler;
++    sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
++    sigaction( SIGSYS, &sig_act, NULL );
++#endif
++}
++
++
+ /***********************************************************************
+  *           __wine_main
+  *
+@@ -2280,6 +2327,7 @@
+     main_argc = argc;
+     main_argv = argv;
+ 
++    bwvr_init_sigsys();
+     init_paths();
+     if (!getenv( "WINELOADERNOEXEC" ) || argc <= 1) check_command_line( argc, argv );
+     unsetenv( "WINELOADERNOEXEC" );

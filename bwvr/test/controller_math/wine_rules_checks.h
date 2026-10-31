@@ -225,6 +225,24 @@ inline void EnvironmentChecks() {
         "wine_owner_check=2, the folder shows the owner 0 (Lepton): each owner", 0, 0);
   Check(!wine_rules::AnyOwner(7, 0, 10014) && !wine_rules::AnyOwner(-1, 0, 10014),
         "an unknown value of wine_owner_check: the test of Wine", 0, 0);
+  Check(CountKey(any, "WINE_BWVR_SIGSYS_ENOSYS") == 0 && CountKey(plain, "WINE_BWVR_SIGSYS_ENOSYS") == 0,
+        "no sigsys_enosys: no WINE_BWVR_SIGSYS_ENOSYS, SIGSYS stops the process", 0, 0);
+  const std::vector<std::string> enosys =
+      wine_rules::Environment(app, p, files, "", true, false, true);
+  Check(HasEntry(enosys, "WINE_BWVR_SIGSYS_ENOSYS=1") &&
+            CountKey(enosys, "WINE_BWVR_SIGSYS_ENOSYS") == 1 &&
+            CountKey(enosys, "WINE_BWVR_ANY_OWNER") == 0,
+        "sigsys_enosys: WINE_BWVR_SIGSYS_ENOSYS=1, one time, and no WINE_BWVR_ANY_OWNER", 0, 0);
+  // wine_sigsys: 0 SIGSYS stops the process, 1 always -ENOSYS, 2 -ENOSYS
+  // only when the folder of the app has another owner (Lepton).
+  Check(!wine_rules::SigsysEnosys(0, 0, 10014) && !wine_rules::SigsysEnosys(0, 10014, 10014),
+        "wine_sigsys=0: SIGSYS stops the process, always", 0, 0);
+  Check(wine_rules::SigsysEnosys(1, 10014, 10014) && wine_rules::SigsysEnosys(1, 0, 10014),
+        "wine_sigsys=1: always -ENOSYS", 0, 0);
+  Check(!wine_rules::SigsysEnosys(2, 10014, 10014) && wine_rules::SigsysEnosys(2, 0, 10014),
+        "wine_sigsys=2: -ENOSYS only when the folder shows another owner (Lepton)", 0, 0);
+  Check(!wine_rules::SigsysEnosys(9, 0, 10014),
+        "an unknown value of wine_sigsys: SIGSYS stops the process", 0, 0);
   const std::string reg = wine_rules::UserRegSeed(true);
   Check(reg.compare(0, 24, "WINE REGISTRY Version 2\n") == 0, "user.reg starts with its head",
         0, 0);

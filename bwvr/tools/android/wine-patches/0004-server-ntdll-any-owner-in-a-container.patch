@@ -1,13 +1,13 @@
 server, ntdll: Accept each owner of the folders of Wine on request.
 
 Lepton, the Android container of the Steam Frame, shows each file with
-the owner 0, and the app gets another uid from getuid. The tests of the
-owner of the prefix, of its parent and of the folder of the server then
-stop wineserver and each program ("... is not owned by you"). With
-WINE_BWVR_ANY_OWNER=1 in the environment these tests accept each owner.
-The test of the mode (no access for other users) stays. The app sets the
-variable only when the owner of its own folder is not its uid
-(wine_owner_check=2), or always (wine_owner_check=0).
+the owner 0, and the app gets its Android uid from getuid. The six owner
+tests of the prefix, of its parent, of the folder of the server and of
+its socket then stop wineserver and each program ("... is not owned by
+you"). With WINE_BWVR_ANY_OWNER=1 in the environment these tests accept
+each owner. The tests of the mode (no access for other users) stay. The
+app sets the variable only when the owner of its own folder is not its
+uid (wine_owner_check=2), or always (wine_owner_check=0).
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -1314,6 +1314,16 @@
@@ -54,6 +54,15 @@ variable only when the owner of its own folder is not its uid
      if (st.st_mode & 077) fatal_error( "'%s' must not be accessible by other users\n", server_dir );
  
      for (retry = 0; retry < 6; retry++)
+@@ -1439,7 +1449,7 @@
+         /* make sure the socket is sane (ISFIFO needed for Solaris) */
+         if (!S_ISSOCK(st.st_mode) && !S_ISFIFO(st.st_mode))
+             fatal_error( "'%s/%s' is not a socket\n", server_dir, SOCKETNAME );
+-        if (st.st_uid != getuid())
++        if (!bwvr_owner_ok( st.st_uid ))
+             fatal_error( "'%s/%s' is not owned by you\n", server_dir, SOCKETNAME );
+ 
+         /* try to connect to it */
 --- a/server/request.c
 +++ b/server/request.c
 @@ -576,6 +576,16 @@

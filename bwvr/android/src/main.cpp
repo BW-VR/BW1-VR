@@ -1569,6 +1569,9 @@ void android_main(android_app* android) {
     // wine_owner_check=2: Wine accepts each owner of its folders only in a
     // container that shows another owner (Lepton of the Steam Frame).
     wine.owner_check = app.ini.GetInt("bwvr", "wine_owner_check", 2);
+    // wine_sigsys=2: in that container a system call that its seccomp
+    // filter traps gives -ENOSYS in Wine, and does not stop the process.
+    wine.sigsys = app.ini.GetInt("bwvr", "wine_sigsys", 2);
     // The tree must be in the internal folder: Android runs no program of
     // the shared storage.
     if (android->activity->internalDataPath == nullptr) {

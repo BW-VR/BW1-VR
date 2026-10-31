@@ -51,6 +51,10 @@ class WineRuntime {
     // than the app (wine_rules::AnyOwner). 1: the test of Wine. 0: each
     // owner.
     int owner_check = 2;
+    // wine_sigsys=2 (the default): a system call that a seccomp filter
+    // traps gives -ENOSYS only in that container (wine_rules::SigsysEnosys).
+    // 0: SIGSYS stops the process. 1: always -ENOSYS.
+    int sigsys = 2;
   };
 
   // The ABI of this build of the app: arm64-v8a or x86_64.

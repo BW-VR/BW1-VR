@@ -259,8 +259,10 @@ adb -s frame:5555 shell am start -n org.bwvr.quest/android.app.NativeActivity
 OpenXR runtime of SteamVR (`/vendor/etc/openxr/1/active_runtime.json`, no
 runtime broker): the app gets its session, 1728 by 1728 for each eye at
 90 Hz. The game folder goes in with `push_game.ps1 -Serial frame:5555`.
-Lepton shows each file with the owner 0, so Wine needs
-`wine_owner_check=2` (see "The owner of the folders"). Lepton also has the
+Lepton shows each file with the owner 0 and traps `membarrier`, so Wine
+needs `wine_owner_check=2` and `wine_sigsys=2`, the defaults (see "The owner
+of the folders" and "A system call that the container traps"). Lepton also
+has the
 layer `VkLayer_VALVE_fdm_injection` of Valve, which the container "dev"
 does not turn on.
 
@@ -3519,6 +3521,25 @@ wine         : wine_owner_check=2. The internal folder belongs to 0, the app is 
 
 The environment of the app cannot give `WINE_BWVR_ANY_OWNER`: the app
 drops each inherited name that starts with `WINE`.
+
+**A system call that the container traps** (`wine_sigsys`,
+`wine_rules::SigsysEnosys`, `0005-ntdll-enosys-for-a-trapped-system-call.patch`).
+The seccomp filter of the apps in Lepton stops a process with SIGSYS at
+`membarrier` (arm64 system call 282), and `NtFlushProcessWriteBuffers` of
+Wine calls it, the first time from `__wine_main`. With
+`WINE_BWVR_SIGSYS_ENOSYS=1` ntdll of arm64 installs a handler of SIGSYS at
+the start of `__wine_main`, before its first system call: the trapped call
+gives `-ENOSYS`, and `wine.log` has one line for each number
+("bwvr: the container does not allow the system call 0282, it gives
+-ENOSYS"). With no `membarrier`, `NtFlushProcessWriteBuffers` does no
+barrier (a FIXME of Wine). wineserver does not load ntdll, so a trap there
+still stops it.
+
+| Value | What a trapped system call does |
+| --- | --- |
+| 2 (the default) | `-ENOSYS` only when the internal folder has another owner than the app (the test of `wine_owner_check`). On a Quest 3 and in the emulator: SIGSYS, as Android does |
+| 1 | `-ENOSYS`, always |
+| 0 | SIGSYS stops the process, always |
 Wine for Android installs `bin` and `lib` into a folder of the ABI of
 Android (`arm64-v8a`, `x86_64`) beside `share`, and its loader is
 `lib/wine/<arch>-unix/wine`, in the folder of `ntdll.so`.

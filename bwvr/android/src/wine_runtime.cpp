@@ -136,8 +136,13 @@ void WineRuntime::Start(AAssetManager* assets, const std::string& files,
          options.owner_check, owner, static_cast<unsigned>(getuid()),
          any_owner ? "Wine accepts each owner of its folders (WINE_BWVR_ANY_OWNER=1)"
                    : "Wine tests the owner of its folders");
+  const bool sigsys_enosys = wine_rules::SigsysEnosys(options.sigsys, owner, getuid());
+  AppLog("wine         : wine_sigsys=%d. %s", options.sigsys,
+         sigsys_enosys ? "A system call that a seccomp filter traps gives -ENOSYS in Wine "
+                         "(WINE_BWVR_SIGSYS_ENOSYS=1). wine.log names each one"
+                       : "A system call that a seccomp filter traps stops the process (SIGSYS)");
   env_ = wine_rules::Environment(inherited, paths_, files, options.debug, options.low_latency,
-                                 any_owner);
+                                 any_owner, sigsys_enosys);
   if (!options.setup) {
     AppLog("wine         : wine_setup=0. The app does not set up Wine");
     return;

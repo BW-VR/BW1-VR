@@ -1688,14 +1688,22 @@ picture, the app reads the newest map of the input channel. When the channel
 is behind the newest picture (the frame of the picture came after the read)
 or more than 600 frames ahead of it (a channel of an earlier game), the map
 of the newest picture is the map now. With `motion_comp=2` the map now goes
-on with the walk of its frame to the display time of the frame of the
-session: the speed of the walk times the push of the stick now over the push
-of the frame, for the time from the display time of the input of the frame
-to the display time now, at most `motion_comp_predict_ms`. The push now is
-the push of the stick that the mod gets in this frame of the session, with
-the dead zone and the curve of the mod (`walk_math::Push`). A stick in its
-dead zone gives no prediction, so the prediction stops in the frame of the
-session in which the stick comes back.
+on with the walk of its frame over the slots of the input channel that the
+app wrote after the slot of the map (`motion_comp_math::AheadSeconds`). Each
+frame of the mod walks by the push of the slot that it took, for the time
+from the display time of the slot that it took before, so those slots are
+the walk in the pipe. For each of them the map goes on by the speed of the
+walk of its frame times the push of that slot over the push of the frame,
+for the time from the slot before, at most `motion_comp_predict_ms` after
+the display time of the map. The push is the push of the stick of the walk
+that the mod gets, with the dead zone and the curve of the mod
+(`walk_math::Push`). A slot counts only when the slot after it pushes the
+stick too: the mod can skip a slot, and a later slot with the stick back
+then stops the walk for the time of the skipped slot. So while the mod
+skips no two slots in a row, the prediction never goes past the place where
+the mod stops, and the view does not step back at a stop. When the mod took each slot up to the stop, its map comes
+one slot ahead of the prediction: one step forward of the push of the last
+slot.
 
 **The pose of a view.** The difference of the map now and the map of the
 picture of each eye takes a point of the LOCAL space of the picture to the
@@ -1756,33 +1764,33 @@ bits. A step of the stick of 12.4 cm gives a step of 12.4 cm at the head and
 no turn, and the head goes back by the step in the LOCAL space. A turn of 4
 degrees about the head gives no step at the head and a turn of 4 degrees. A
 snap turn of 30 degrees, a teleport of 3 m and a zoom step of 1.5 times are
-cuts. The prediction: 20 ms at a full push of 150 units a second is 3 units,
-half the push 1.5 units, at most 50 ms, and none with the stick of the walk
-in its dead zone, with `motion_comp=1` or with a display time before the
-map. `emu_game_test.ps1 -StickFrames N`: in game 2, after its pictures, the
-left stick pushes forward for N frames of the script and is then still for
-80 frames, and the test checks the lines of the new pictures.
+cuts. The prediction over slots of 10 ms at a full push of 150 units a
+second: 4 of 5 pushed slots count (6 units), half the push 3 units, at most
+50 ms, the slots before a slot with the stick back, and none with a gap in
+the slots or with `motion_comp=1`. A stop with a full push up to slot 30
+and a mod 3 slots late, which takes each slot, each second or each third
+slot: the view never goes back, never goes past the place where the mod
+stops, and after the pipe it is that place. `emu_game_test.ps1
+-StickFrames N`: in game 2, after its pictures, the left stick pushes forward
+for N frames of the script and is then still for 80 frames. The test checks
+that pictures in the walk have a difference, and that each new picture of
+game 2 before the walk and after its stop (with 10 frames of the pipe, the
+frames from the lines of the mod) has a difference of 0.000.
 
-**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
-480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
--FrameLoop 1 -StickFrames 144 -MenuClick 690,430`, the test runtime at 72
-Hz). The click on "Continue Game" closes the Main Menu of game 2, because a
-dialog box stops the walk. With `motion_comp=2` the mod walks for 2.080 s,
-312.04 cm of the room at 150.0 cm a second, and the view moves on 139 of 139
-frames. In that time the line of each new picture has a difference of 2.1
-to 4.4 cm at the head and no turn, with 14.0 to 15.7 ms of the walk ahead,
-and the line of the motion has 142 frames with a difference (2.671 cm as a
-mean, 8.312 at most) and 123 with the walk ahead (15.4 ms as a mean, 50.0 at
-most), no cut and no frame with no map. Before and after the walk each new
-picture has a difference of 0.000 cm (12293 of 12423 lines), and 30 frames
-after the stop the waist point is 0.000 units from its place at the stop.
-With `motion_comp=0` no line has a difference.
+**What the emulator shows** (the command of "The frame loop" with
+`-StickFrames 144 -MenuClick 690,430`). The click on "Continue Game" closes
+the Main Menu of game 2, because a dialog box stops the walk. With
+`motion_comp` 1 and 2 the pictures of the walk show with a difference of
+some cm at the head and no turn, and each picture before the walk and after
+its stop has no difference. With `motion_comp=0` no picture has a
+difference.
 
 **Not shown yet:** a headset. Only a headset shows the stutter of a walk
 that the player sees with each value of `motion_comp`, the distance of
 `motion_comp_depth_cm` that keeps the land still in a step, how the runtime
-of Meta shows a projection layer with a pose that is not at the head, and
-the feel of the prediction at the stop of a walk.
+of Meta shows a projection layer with a pose that is not at the head, the
+feel of the stop of a walk, and how the Hand looks while the player walks
+(see the known limits).
 
 **Known limits:**
 
@@ -1790,14 +1798,18 @@ the feel of the prediction at the stop of a walk.
   the app asks for no such extension, makes no swapchain of the depth, and
   the ring has no copy of the depth. So a step shows exactly at one distance
   only.
+- The Hand, the leash ring and each other thing that the game draws in the
+  eye pictures move with the world by the difference. While the player
+  walks, the Hand that shows is behind the real hand by the difference of
+  its picture (some cm at a full push). Check it in a headset.
 - The prediction follows only the walk with the stick, and only its move
   over the land. A grab of the world, the smooth zoom, a turn of two hands
   and the zoom of a climb (`controls=1`) show from the newest map of the
   mod, with no prediction.
-- At the stop of a walk the prediction stops at once, and the newest map of
-  the mod can still be behind the place of the stop by the frames in the
-  pipe. Then the view stops a little behind and comes to the place of the
-  stop with the next frames of the mod.
+- When the mod skips two slots or more in a row just before a stop (a frame
+  of the game longer than two frames of the session), the place where the
+  mod stops can be one slot behind the prediction, and the view steps back
+  by the push of one slot.
 
 ## The quad layers
 

@@ -78,6 +78,13 @@ void InputLive::Write(ic::SlotData* slot) {
   clock_gettime(CLOCK_MONOTONIC, &now);
   slot_frame_[slots_ & (kSlotTimes - 1)] = slots_;
   slot_ms_[slots_ & (kSlotTimes - 1)] = now.tv_sec * 1000.0 + now.tv_nsec / 1e6;
+  motion_comp_math::SlotPush& push = slot_push_[slots_ & (kSlotTimes - 1)];
+  push.frame = slots_;
+  push.display_time = slot->display_time;
+  for (int h = 0; h < 2; ++h) {
+    push.stick[h][0] = slot->hands[h].stick[0];
+    push.stick[h][1] = slot->hands[h].stick[1];
+  }
   last_ = *slot;
   no_input_ = false;
   if (test_pulse_ > 0 && slots_ == test_pulse_) {
@@ -165,6 +172,20 @@ double InputLive::SlotMs(uint32_t frame) const {
   if (frame == 0) return 0.0;
   const uint32_t i = frame & (kSlotTimes - 1);
   return slot_frame_[i] == frame ? slot_ms_[i] : 0.0;
+}
+
+int InputLive::SlotsAfter(uint32_t frame, motion_comp_math::SlotPush* out, int max) const {
+  int n = 0;
+  if (slots_ <= frame) return 0;
+  uint32_t first = frame + 1;
+  // The newest max slots, and at most the slots that the ring keeps.
+  const uint32_t most = static_cast<uint32_t>(max) < kSlotTimes ? static_cast<uint32_t>(max) : kSlotTimes;
+  if (slots_ - first + 1 > most) first = slots_ - most + 1;
+  for (uint32_t f = first; f <= slots_ && n < max; ++f) {
+    const motion_comp_math::SlotPush& p = slot_push_[f & (kSlotTimes - 1)];
+    if (p.frame == f) out[n++] = p;
+  }
+  return n;
 }
 
 bool InputLive::PushKey(uint32_t code) {

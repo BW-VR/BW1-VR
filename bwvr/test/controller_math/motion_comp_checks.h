@@ -7,7 +7,10 @@
 #pragma once
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
+
+#include <vector>
 
 #include "../../android/src/frame_loop.h"
 #include "../../src/common/input_channel.h"
@@ -287,35 +290,122 @@ inline void PredictChecks() {
   picture.flags = 0;
   Check(mc::Newest(&channel, &picture) == nullptr, "no map at all: none", 0, 0);
 
-  // The walk of the frame: 150 units a second forward at a full push of the
-  // left stick.
+  // The walk of the frame of the map (slot 600, display time 2000 ms): 150
+  // units a second forward at a full push of the left stick. The slots after
+  // it come each 10 ms.
   ic::World w = WorldOf(m, 600, 2000000000);
+  w.input_frame = 600;
   w.flags |= ic::kWorldWalk;
   w.walk_hand = 0;
   w.walk_share = 1.0f;
   w.walk_dead = 0.3f;
   w.walk_full = 0.95f;
   w.walk_velocity[2] = 150.0f;
-  const float pushed[2][2] = {{0.0f, 1.0f}, {0.0f, 0.0f}};
-  const float half[2][2] = {{0.0f, 0.625f}, {0.0f, 0.0f}};
-  const float back[2][2] = {{0.0f, 0.1f}, {0.8f, 0.0f}};
+  mc::SlotPush slots[16];
+  const auto fill = [&](int count, float push_y, int release_at) {
+    for (int i = 0; i < count; ++i) {
+      slots[i] = mc::SlotPush();
+      slots[i].frame = 601 + i;
+      slots[i].display_time = 2000000000 + static_cast<int64_t>(i + 1) * 10000000;
+      slots[i].stick[0][1] = (release_at >= 0 && i >= release_at) ? 0.0f : push_y;
+      slots[i].stick[1][0] = 0.8f;  // the other stick, pushed: it does not count
+    }
+  };
   float ahead = 0.0f;
-  mc::Map now = mc::Now(w, mc::kPredict, pushed, 2020000000, 50, &ahead);
-  Near("20 ms later at a full push: 20 ms ahead", ahead, 0.020, 1e-6);
-  Near("and the map goes 3 units forward", now.offset[2] - m.offset[2], 3.0, 1e-3);
-  now = mc::Now(w, mc::kPredict, half, 2020000000, 50, &ahead);
-  Near("at half the push: 1.5 units", now.offset[2] - m.offset[2], 1.5, 1e-3);
-  now = mc::Now(w, mc::kPredict, pushed, 2200000000, 50, &ahead);
-  Near("200 ms later: at most motion_comp_predict_ms (50 ms), 7.5 units", now.offset[2] - m.offset[2], 7.5,
-       1e-3);
-  now = mc::Now(w, mc::kPredict, back, 2020000000, 50, &ahead);
+  fill(5, 1.0f, -1);
+  mc::Map now = mc::Now(w, mc::kPredict, slots, 5, 50, &ahead);
+  Near("5 pushed slots: 4 count (the last needs the slot after it), 40 ms ahead", ahead,
+       0.040, 1e-6);
+  Near("and the map goes 6 units forward", now.offset[2] - m.offset[2], 6.0, 1e-3);
+  fill(5, 0.625f, -1);
+  now = mc::Now(w, mc::kPredict, slots, 5, 50, &ahead);
+  Near("at half the push: 3 units", now.offset[2] - m.offset[2], 3.0, 1e-3);
+  fill(12, 1.0f, -1);
+  now = mc::Now(w, mc::kPredict, slots, 12, 50, &ahead);
+  Near("12 pushed slots: at most motion_comp_predict_ms (50 ms), 7.5 units",
+       now.offset[2] - m.offset[2], 7.5, 1e-3);
+  fill(5, 1.0f, 2);
+  now = mc::Now(w, mc::kPredict, slots, 5, 50, &ahead);
+  Near("the stick is back in the third slot: only the first slot counts, 1.5 units",
+       now.offset[2] - m.offset[2], 1.5, 1e-3);
+  fill(5, 1.0f, 0);
+  now = mc::Now(w, mc::kPredict, slots, 5, 50, &ahead);
   Check(memcmp(&now, &m, sizeof(now)) == 0 && ahead == 0.0f,
-        "the stick of the walk is back (the other stick is pushed): no prediction", ahead, 0);
-  now = mc::Now(w, mc::kNewest, pushed, 2020000000, 50, &ahead);
+        "the stick is back in the first slot (the other stick is pushed): no prediction", ahead,
+        0);
+  fill(5, 1.0f, -1);
+  now = mc::Now(w, mc::kNewest, slots, 5, 50, &ahead);
   Check(memcmp(&now, &m, sizeof(now)) == 0, "motion_comp=1: no prediction", ahead, 0);
-  now = mc::Now(w, mc::kPredict, pushed, 1990000000, 50, &ahead);
-  Check(memcmp(&now, &m, sizeof(now)) == 0, "a display time before the map: no prediction",
-        ahead, 0);
+  slots[0].frame = 603;  // a gap after the slot of the map
+  now = mc::Now(w, mc::kPredict, slots, 5, 50, &ahead);
+  Check(memcmp(&now, &m, sizeof(now)) == 0, "a gap in the slots: no prediction", ahead, 0);
+
+  // THE STOP. A session of 10 ms frames writes a slot in each frame, with a
+  // full push up to slot 30 and no push from slot 30 on. The mod takes a
+  // slot 3 frames later, as the mod walks: the push of its slot for the
+  // time since the slot that it took before. The view of each frame is the
+  // newest map of the mod with the prediction over the slots after it. It
+  // never goes back, it never goes past the place where the mod stops, and
+  // after the pipe it is that place.
+  const char* const kPattern[3] = {"the mod takes each slot", "the mod skips each third slot",
+                                   "the mod skips each second slot"};
+  for (int pattern = 0; pattern < 3; ++pattern) {
+    const int kRelease = 30, kLate = 3, kFrames = 60;
+    std::vector<mc::SlotPush> written;
+    double mod_x = 0.0;
+    int64_t mod_time = 0;
+    ic::World latest = WorldOf(m, 0, 0);
+    bool have_latest = false;
+    double least_step = 0.0, most_view = -1.0, last_view = -1.0;
+    for (int n = 1; n <= kFrames; ++n) {
+      mc::SlotPush s;
+      s.frame = static_cast<uint32_t>(n);
+      s.display_time = static_cast<int64_t>(n) * 10000000;
+      s.stick[0][1] = n < kRelease ? 1.0f : 0.0f;
+      written.push_back(s);
+      const int take = n - kLate;
+      const bool skip = (pattern == 1 && take % 3 == 0) || (pattern == 2 && take % 2 == 0);
+      if (take >= 1 && !skip) {
+        const mc::SlotPush& t = written[take - 1];
+        const float share = mc::PushShare(t.stick[0], 0.3f, 0.95f);
+        ic::World next = WorldOf(m, static_cast<uint64_t>(take), t.display_time);
+        next.input_frame = t.frame;
+        next.walk_hand = 0;
+        next.walk_dead = 0.3f;
+        next.walk_full = 0.95f;
+        if (share > 0.0f && mod_time > 0) {
+          mod_x += 150.0 * share * static_cast<double>(t.display_time - mod_time) / 1e9;
+          next.flags |= ic::kWorldWalk;
+          next.walk_share = share;
+          next.walk_velocity[2] = 150.0f * share;
+        }
+        mod_time = t.display_time;
+        next.offset[2] = m.offset[2] + static_cast<float>(mod_x);
+        latest = next;
+        have_latest = true;
+      }
+      if (!have_latest) continue;
+      std::vector<mc::SlotPush> after;
+      for (const mc::SlotPush& x : written) {
+        if (x.frame > latest.input_frame) after.push_back(x);
+      }
+      const mc::Map v = mc::Now(latest, mc::kPredict, after.data(),
+                                static_cast<int>(after.size()), 50, &ahead);
+      const double view = v.offset[2] - m.offset[2];
+      if (last_view >= 0.0 && view - last_view < least_step) least_step = view - last_view;
+      if (view > most_view) most_view = view;
+      last_view = view;
+    }
+    char what[160];
+    snprintf(what, sizeof(what), "a stop, %s: the view never goes back, units", kPattern[pattern]);
+    Near(what, least_step, 0.0, 1e-4);
+    snprintf(what, sizeof(what), "a stop, %s: the view never goes past the stop of the mod",
+             kPattern[pattern]);
+    Check(most_view <= mod_x + 1e-3, what, most_view, mod_x);
+    snprintf(what, sizeof(what), "a stop, %s: after the pipe the view is the place of the mod",
+             kPattern[pattern]);
+    Near(what, last_view, mod_x, 1e-3);
+  }
   Check(mc::Mode(-1) == 0 && mc::Mode(1) == 1 && mc::Mode(7) == 2, "the values of motion_comp",
         mc::Mode(7), 2);
 }

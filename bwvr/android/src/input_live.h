@@ -10,6 +10,7 @@
 #include <string>
 
 #include "../../src/common/input_channel.h"
+#include "../../src/mod/motion_comp_math.h"
 
 class XrApp;
 
@@ -43,10 +44,15 @@ class InputLive {
   // slot is not among the last kSlotTimes slots.
   double SlotMs(uint32_t frame) const;
   static constexpr uint32_t kSlotTimes = 256;  // a power of two
+  // The newest slots after the slot with this frame, in the order of their frames,
+  // with their display times and the sticks that the mod got, at most max
+  // (the prediction of motion_comp=2, motion_comp_math::AheadSeconds).
+  int SlotsAfter(uint32_t frame, motion_comp_math::SlotPush* out, int max) const;
 
  private:
   uint32_t slot_frame_[kSlotTimes] = {};
   double slot_ms_[kSlotTimes] = {};
+  motion_comp_math::SlotPush slot_push_[kSlotTimes];
   input_channel::File* file_ = nullptr;
   int fd_ = -1;
   std::string path_;

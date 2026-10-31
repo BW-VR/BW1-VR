@@ -1863,17 +1863,12 @@ void android_main(android_app* android) {
       step(XrApp::kStepUi);
       // The input of the mod: after xrSyncActions of BeginFrame, with the
       // views of xrLocateViews at the display time of this frame.
-      float sticks[2][2] = {};  // the sticks that the mod gets in this frame
       if (app.input_live.On()) {
         input_channel::SlotData slot;
         app.xr.InputSlot(&slot);
         if (app.game_on) {
           play_rules::MaskInput(&slot, app.menu_over_game);
           if (!app.menu_over_game) play_rules::ApplyMenuBits(&slot, app.menu_step);
-        }
-        for (int h = 0; h < 2; ++h) {
-          sticks[h][0] = slot.hands[h].stick[0];
-          sticks[h][1] = slot.hands[h].stick[1];
         }
         app.input_live.Write(&slot);
         app.input_live.PlayPulses(&app.xr);
@@ -1902,7 +1897,9 @@ void android_main(android_app* android) {
       {
         input_channel::World world;
         const bool has = app.input_live.ReadWorld(&world);
-        app.xr.Motion().FrameNow(has, world, sticks, app.xr.DisplayTime());
+        motion_comp_math::SlotPush slots[64];
+        const int n = app.input_live.SlotsAfter(has ? world.input_frame : 0u, slots, 64);
+        app.xr.Motion().FrameNow(has, world, slots, n);
       }
       UpdateKeyboard(&app);
       bool show_cursor = false;

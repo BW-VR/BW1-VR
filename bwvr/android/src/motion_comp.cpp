@@ -63,7 +63,7 @@ void MotionComp::TakeNewest(int eye) {
 }
 
 void MotionComp::FrameNow(bool has, const input_channel::World& channel,
-                          const float sticks[2][2], int64_t display_time) {
+                          const mc::SlotPush* slots, int count) {
   last_ = Last::kNone;
   now_has_ = false;
   ahead_s_ = 0.0f;
@@ -73,7 +73,7 @@ void MotionComp::FrameNow(bool has, const input_channel::World& channel,
       mc::Newest(has ? &channel : nullptr, newest_has_ ? &newest_ : nullptr);
   if (newest == nullptr) return;
   from_channel_ = newest == &channel;
-  now_ = mc::Now(*newest, keys_.mode, sticks, display_time, keys_.predict_ms, &ahead_s_);
+  now_ = mc::Now(*newest, keys_.mode, slots, count, keys_.predict_ms, &ahead_s_);
   now_frame_ = newest->frame;
   now_has_ = true;
 }

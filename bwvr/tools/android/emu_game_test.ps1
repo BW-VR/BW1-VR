@@ -1740,6 +1740,24 @@ try {
         } elseif ($mode.Success) {
             Expect ($diffs.Count -eq 0) "motion_comp=0: no picture has a difference ($($diffs.Count))"
         }
+        # Before the walk and after its stop, with 10 frames of the pipe, each
+        # new picture of game 2 has no difference: the frames of the walk are
+        # the frames of the lines of the mod.
+        $mod2 = if (Test-Path -LiteralPath (Join-Path $Out 'bwvr-game2.log')) { Get-Content -LiteralPath (Join-Path $Out 'bwvr-game2.log') -Raw } else { '' }
+        $walkFrom = [regex]::Match($mod2, 'god view     : the walk with the stick starts at .*?, frame (\d+)\.')
+        $walkTo = [regex]::Match($mod2, 'god view     : the walk with the stick stopped .*?, frame (\d+)\.')
+        $game2At = $log.LastIndexOf('game         : the first frame of the game')
+        if ($mode.Success -and $mode.Groups[1].Value -ne '0') {
+            Expect ($walkFrom.Success -and $walkTo.Success -and $game2At -ge 0) "game 2 has the start and the stop of the walk in the log of the mod, and its first frame in the log of the app"
+            if ($walkFrom.Success -and $walkTo.Success -and $game2At -ge 0) {
+                $from = [int64]$walkFrom.Groups[1].Value - 10
+                $to = [int64]$walkTo.Groups[1].Value + 10
+                $outside = @([regex]::Matches($log.Substring($game2At), 'the projection layer shows the picture of frame (\d+), with a difference of ([0-9.]+) cm and ([0-9.]+) degrees') |
+                    Where-Object { [int64]$_.Groups[1].Value -lt $from -or [int64]$_.Groups[1].Value -gt $to })
+                $bad = @($outside | Where-Object { [double]$_.Groups[2].Value -ne 0.0 -or [double]$_.Groups[3].Value -ne 0.0 })
+                Expect ($outside.Count -gt 0 -and $bad.Count -eq 0) ("game 2: each new picture before frame $from and after frame $to (the walk and 10 frames of the pipe) has a difference of 0.000 ($($outside.Count) pictures, $($bad.Count) not 0" + $(if ($bad.Count) { ': ' + $bad[0].Value } else { '' }) + ')')
+            }
+        }
     }
     # THE SCREEN QUAD of the frames with no scene (stream_screen=1): the
     # logos, the video before the intro and the dialog box. The quad of the

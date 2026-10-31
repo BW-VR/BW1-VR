@@ -333,28 +333,67 @@ inline void MovePose(const Map& d, float depth_m, const float p[3], const float 
   for (int i = 0; i < 4; ++i) q_out[i] = turned[i];
 }
 
-// THE PREDICTION (motion_comp=2). The newest map of the mod goes on with the
-// walk of its frame to the display time of the frame of the session: the
-// velocity of the walk times the push of the stick now over the push of the
-// frame, for the time from the display time of the input of the frame to the
-// display time now, at most most_ms. A stick in its dead zone now gives no
-// prediction, so the view stops in the frame in which the stick comes back.
-inline float PredictSeconds(int64_t display_now, int64_t display_map, int most_ms) {
-  if (display_now <= 0 || display_map <= 0 || display_now <= display_map) return 0.0f;
-  const double s = static_cast<double>(display_now - display_map) / 1e9;
-  const double most = most_ms > 0 ? most_ms / 1000.0 : 0.0;
-  return static_cast<float>(s < most ? s : most);
-}
-// The push of a stick now, as the walk of the mod takes it (walk_math::Push).
+// THE PREDICTION (motion_comp=2). The mod walks with the slots of the input
+// channel: each frame of the mod moves the view by the push of the slot that
+// it took, for the time from the display time of the slot of its frame
+// before to the display time of its slot (god_display_time=1). The slots
+// that the app wrote after the slot of the newest map are in the pipe: the
+// mod takes the newest of them in its next frames. So the map now goes on
+// with the walk of its frame over those slots: for each slot, the push of
+// that slot over the push of the frame of the map, times the time from the
+// slot before to it, at most most_ms after the display time of the map.
+//
+// A slot counts only when the slot after it pushes the stick of the walk
+// too. The mod can take a slot after it and skip it, and with a released
+// stick in that later slot the mod does not walk over the time of the
+// skipped slot. So while the mod skips no two slots in a row, the prediction
+// never goes past the place where the mod stops, and the view does not step
+// back at a stop. When the mod took the
+// last pushed slot, its map comes one slot ahead of the prediction: one step
+// forward of the push that the player made.
+struct SlotPush {
+  uint32_t frame = 0;        // SlotData::frame
+  int64_t display_time = 0;  // ns
+  float stick[2][2] = {};    // the sticks that the mod got, x right, y forward
+};
+// The push of a stick, as the walk of the mod takes it (walk_math::Push).
 inline float PushShare(const float stick[2], float dead, float full) {
   float push[2];
   return walk_math::Push(stick[0], stick[1], dead, full, push);
 }
-inline void Predict(Map* m, const float velocity[3], float share_now, float share_map,
-                    float seconds) {
-  if (!(share_map > 0.0f) || !(share_now > 0.0f) || !(seconds > 0.0f)) return;
-  const float k = share_now / share_map * seconds;
-  for (int i = 0; i < 3; ++i) m->offset[i] += velocity[i] * k;
+// The seconds of the walk at the push of the frame of the map that the slots
+// after it add (the factor of walk_velocity), and in *span_s the time from
+// the display time of the map to the last slot that counts. slots: in the
+// order of their frames.
+inline float AheadSeconds(const input_channel::World& w, const SlotPush* slots, int count,
+                          int most_ms, float* span_s) {
+  *span_s = 0.0f;
+  if ((w.flags & input_channel::kWorldWalk) == 0 || w.walk_hand < 0 || w.walk_hand > 1 ||
+      !(w.walk_share > 0.0f) || w.display_time <= 0 || most_ms <= 0) {
+    return 0.0f;
+  }
+  const int64_t end = w.display_time + static_cast<int64_t>(most_ms) * 1000000;
+  int64_t before = w.display_time;
+  double sum = 0.0;
+  uint32_t expect = w.input_frame + 1;  // the slots go in sequence, with no gap
+  for (int i = 0; i + 1 < count; ++i) {
+    const SlotPush& s = slots[i];
+    if (s.frame <= w.input_frame) continue;
+    if (s.frame != expect || slots[i + 1].frame != expect + 1) break;
+    ++expect;
+    if (s.display_time <= before) continue;
+    const float share = PushShare(s.stick[w.walk_hand], w.walk_dead, w.walk_full);
+    const float next =
+        PushShare(slots[i + 1].stick[w.walk_hand], w.walk_dead, w.walk_full);
+    if (!(share > 0.0f) || !(next > 0.0f)) break;
+    const int64_t to = s.display_time < end ? s.display_time : end;
+    if (to <= before) break;
+    sum += share / w.walk_share * static_cast<double>(to - before) / 1e9;
+    before = to;
+    *span_s = static_cast<float>(static_cast<double>(before - w.display_time) / 1e9);
+    if (before >= end) break;
+  }
+  return static_cast<float>(sum);
 }
 
 // THE MAPS OF THE INPUT CHANNEL AND OF THE STREAM.
@@ -386,22 +425,18 @@ inline const input_channel::World* Newest(const input_channel::World* channel,
 }
 
 // THE MAP NOW: the newest map, and with motion_comp=2 the prediction of the
-// walk of its frame. sticks: the sticks of the hands now (x right, y
-// forward). display_now: the display time of the frame of the session, ns.
-// *ahead_s: the seconds of the prediction, 0 with none.
-inline Map Now(const input_channel::World& newest, int mode, const float sticks[2][2],
-               int64_t display_now, int most_ms, float* ahead_s) {
+// walk of its frame over the slots after it (AheadSeconds). *ahead_s: the
+// time of the slots of the prediction, 0 with none.
+inline Map Now(const input_channel::World& newest, int mode, const SlotPush* slots, int count,
+               int most_ms, float* ahead_s) {
   Map m = MapOf(newest);
   *ahead_s = 0.0f;
-  if (mode < kPredict || (newest.flags & input_channel::kWorldWalk) == 0 ||
-      newest.walk_hand < 0 || newest.walk_hand > 1) {
-    return m;
-  }
-  const float share = PushShare(sticks[newest.walk_hand], newest.walk_dead, newest.walk_full);
-  const float seconds = PredictSeconds(display_now, newest.display_time, most_ms);
-  if (!(share > 0.0f) || !(seconds > 0.0f)) return m;
-  Predict(&m, newest.walk_velocity, share, newest.walk_share, seconds);
-  *ahead_s = seconds;
+  if (mode < kPredict) return m;
+  float span = 0.0f;
+  const float k = AheadSeconds(newest, slots, count, most_ms, &span);
+  if (!(k > 0.0f)) return m;
+  for (int i = 0; i < 3; ++i) m.offset[i] += newest.walk_velocity[i] * k;
+  *ahead_s = span;
   return m;
 }
 

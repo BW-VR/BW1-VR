@@ -6269,10 +6269,17 @@ unsigned ControllersButtonBits(unsigned* awake) {
 }
 
 // THE STICK OF THE WALK, for the motion of the stick in the headset app
-// (motion_comp_math.h): the hand whose stick walks (PumpWalk), and the dead
-// zone and the full push of walk_math::Push there.
+// (motion_comp_math.h): the hand whose stick walks (FreeIndex, as PumpWalk),
+// and the dead zone and the full push of walk_math::Push there. One line of
+// the log when the hand changes.
 void ControllersWalkStick(int* hand, float* dead, float* full) {
-  *hand = OtherIndex();
+  static int said = -1;
+  *hand = FreeIndex();
+  if (*hand != said) {
+    said = *hand;
+    ModLog("controllers  : the walk with the stick goes to the headset app with the "
+           "stick of the %s hand, frame %llu", said ? "right" : "left", g_frame);
+  }
   *dead = kStickBack;
   *full = kStickFull;
 }

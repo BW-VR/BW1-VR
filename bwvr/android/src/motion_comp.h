@@ -46,10 +46,11 @@ class MotionComp {
   // An eye took the newest picture: the map of its picture.
   void TakeNewest(int eye);
   // ONCE IN EACH FRAME of the session, before the layers: the newest map of
-  // the mod in the input channel (has: the read was whole), the sticks of
-  // the hands now, and the display time of the frame (ns).
-  void FrameNow(bool has, const input_channel::World& channel, const float sticks[2][2],
-                int64_t display_time);
+  // the mod in the input channel (has: the read was whole), and the slots of
+  // the input channel after the slot of that map, in the order of their
+  // frames (InputLive::SlotsAfter), for the prediction.
+  void FrameNow(bool has, const input_channel::World& channel,
+                const motion_comp_math::SlotPush* slots, int count);
   // THE POSE OF A VIEW of the projection layer of this frame: position and
   // orientation (x y z w, LOCAL) of the eye of the picture, changed in place.
   // head: the middle of the eyes of the picture. True when the pose changed.

@@ -35,6 +35,8 @@ add_library(bwvr_mod SHARED
     render_thread.cpp
     fast_transform.cpp
     land_fast.cpp
+    object_timer.cpp
+    land_objects.cpp
     d3d7_count.cpp
     d3d7_thread.cpp
     thread_wait.cpp

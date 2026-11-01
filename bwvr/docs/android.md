@@ -2640,6 +2640,12 @@ it, and no test key):
   not in the frame after its long frame. A write there can make the next
   frame long too, when the frames are near the limit. The lines of the last
   window before the end of the game do not go to the log.
+- `slow_frame_cpu=1` (0 by default, only with `slow_frame_ms` above 0): the
+  lines of the mod have the CPU time of the frame thread, from one call of
+  `GetThreadTimes` at each present. In Wine that call costs about 1 ms of
+  the frame in the emulator, so it is off by default. The lines `game
+  frame` of the app give the same time with no cost on the thread of the
+  game.
   The lines of the mod need `time_log=1` (the default). With `time_log=0`
   the mod logs "slow_frame_ms=N needs time_log=1" and gives no line.
 - `profile_sample_slow=N` (100 to 5000, 0 by default, a test aid, only with
@@ -2659,7 +2665,7 @@ it, and no test key):
 **The lines of the mod** (`time_log.cpp`, on the frame thread):
 
 ```
-long frame   : present P, the newest frame of the stream S, at T s, G ms after the long frame before. It took F ms: the scene walk A, the write of the stream B, the wait of the pace C, the rest D. The calls of the frame loop: the input I, the game turn U, ProcessGraphicsEngine E, FlipScreen L, the network flush N, outside them O. The frame thread had X ms of CPU time. In the frame: K opens of a file of the game (W to write), R reads of the game, M surfaces with pixels into the stream (B KB)
+long frame   : present P, the newest frame of the stream S, at T s, G ms after the long frame before. It took F ms: the scene walk A, the write of the stream B, the wait of the pace C, the rest D. The calls of the frame loop: the input I, the game turn U, ProcessGraphicsEngine E, FlipScreen L, the network flush N, outside them O. The CPU time of the frame thread: X ms. In the frame: K opens of a file of the game (W to write), R reads of the game, M surfaces with pixels into the stream (B KB)
 long frame   : L frames longer than N ms in 10.0 s, K of them with a line. They took F ms, and the frame thread had X ms of CPU time in them (GetThreadTimes: the least step of the clock is S ms)
 ```
 
@@ -2676,8 +2682,10 @@ long frame   : L frames longer than N ms in 10.0 s, K of them with a line. They 
   scene, and the work of the mod in the stereo hook. A present in a call
   splits it: each frame gets its part. "Outside them" is the frame less
   these calls: the rest of the loop and the time between two turns of it.
-- The CPU time of the frame thread is the step of `GetThreadTimes` (kernel
-  and user) from the present before. "No" when the clock gave no time yet.
+- The CPU time of the frame thread (`slow_frame_cpu=1`) is the step of
+  `GetThreadTimes` (kernel and user) from the present before. "Not read
+  (slow_frame_cpu=0)" with the key at 0, and "not known" before the first
+  read.
   The clock has steps: Windows gives about 15.6 ms, and Wine reads
   `/proc/<pid>/task/<tid>/stat` of Linux, which counts in clock ticks (10
   ms at 100 ticks a second). The second line gives the least step that the
@@ -2753,13 +2761,15 @@ the mod, or the translation of new code by FEX. A long frame with much time
 off a core is a wait.
 
 **The cost.** With `slow_frame_ms` above 0 the mod reads the clock two more
-times for each timed call of the frame loop and calls `GetThreadTimes` once
-a frame. In Wine that is a call to the wineserver and a read of `/proc`.
-The app reads the clock and `schedstat` once for each frame of the game on
-the thread of the reader, and the clock once for each take.
+times for each timed call of the frame loop, and with `slow_frame_cpu=1` it
+calls `GetThreadTimes` once a frame. In Wine that call is a call to the
+wineserver and a read of `/proc`. The app reads the clock and `schedstat`
+once for each frame of the game on the thread of the reader, and the clock
+once for each take.
 
 **What the desk runs show** (`desk_run.ps1`, the test save `pen`, 90 s,
-dxwrapper, about 650 to 720 frames a second): with `slow_frame_ms=0` the log
+dxwrapper, about 650 to 720 frames a second, with the read of the CPU time
+that `slow_frame_cpu=1` gives): with `slow_frame_ms=0` the log
 has the same tags of lines as a build before the key, no line `long frame`,
 and each line `time log` has its form. With `slow_frame_ms=10` the log has
 8 to 13 lines of long frames in a run. The load of the save is a row of frames that are

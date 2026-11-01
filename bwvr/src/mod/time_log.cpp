@@ -19,7 +19,9 @@
 //   slow_frame_ms=N  each frame longer than N ms gives one line "long frame"
 //                    with its parts, the calls of the frame loop of the game,
 //                    the CPU time of the frame thread and the counts of the
-//                    frame, at most 5 lines a second. The lines wait in
+//                    frame, at most 5 lines a second (the CPU time only
+//                    with slow_frame_cpu=1, 0 by default: one call of
+//                    GetThreadTimes at each present). The lines wait in
 //                    memory and go to the log after each 10 s line, and one
 //                    more line counts the long frames of the window
 
@@ -56,6 +58,7 @@ bool g_said = false;
 long_frame_math::Gate g_gate;
 long_frame_math::Calls g_calls;
 long_frame_math::CpuClock g_cpu;
+bool g_cpu_on = false;        // slow_frame_cpu=1: GetThreadTimes at each present
 bool g_cpu_ok = true;         // GetThreadTimes works
 uint64_t g_presents = 0;      // the presents since the start
 uint64_t g_stream_frame = 0;  // the newest frame of the live stream
@@ -100,7 +103,9 @@ void SlowFrame(double now) {
   g_calls.Present(now);
   double cpu_ms = -1.0;
   uint64_t cpu = 0;
-  if (g_cpu_ok && ThreadCpu(&cpu)) {
+  if (!g_cpu_on) {
+    // slow_frame_cpu=0: no call of GetThreadTimes.
+  } else if (g_cpu_ok && ThreadCpu(&cpu)) {
     const bool first = !g_cpu.have;
     const uint64_t step = g_cpu.Take(cpu);
     if (!first) cpu_ms = static_cast<double>(step) / 10000.0;
@@ -128,11 +133,13 @@ void SlowFrame(double now) {
     } else {
       sprintf_s(before, "the first long frame");
     }
-    char cpu_text[32];
+    char cpu_text[48];
     if (cpu_ms >= 0.0) {
-      sprintf_s(cpu_text, "%.1f ms", cpu_ms);
+      _snprintf_s(cpu_text, sizeof(cpu_text), _TRUNCATE, "%.1f ms", cpu_ms);
+    } else if (!g_cpu_on) {
+      sprintf_s(cpu_text, "not read (slow_frame_cpu=0)");
     } else {
-      sprintf_s(cpu_text, "no");
+      sprintf_s(cpu_text, "not known");
     }
     const lf::Calls& c = g_calls;
     // _TRUNCATE: a line that does not fit is cut, and no handler of a fault
@@ -142,7 +149,7 @@ void SlowFrame(double now) {
            "%s. It took %.2f ms: the scene walk %.2f, the write of the stream %.2f, the "
            "wait of the pace %.2f, the rest %.2f. The calls of the frame loop: the input "
            "%.2f, the game turn %.2f, ProcessGraphicsEngine %.2f, FlipScreen %.2f, the "
-           "network flush %.2f, outside them %.2f. The frame thread had %s of CPU time. "
+           "network flush %.2f, outside them %.2f. The CPU time of the frame thread: %s. "
            "In the frame: %u opens of a file of the game (%u to write), %u reads of the "
            "game, %llu surfaces with pixels into the stream (%llu KB)",
            g_presents, g_stream_frame, SecondsSinceProcessStart(), before, f.last_frame,
@@ -174,21 +181,25 @@ void TimeLogSetOn(bool on) {
 
 bool TimeLogOn() { return g_on; }
 
-void TimeLogSetSlow(int slow_frame_ms) {
+void TimeLogSetSlow(int slow_frame_ms, bool cpu) {
   const int limit = long_frame_math::Limit(slow_frame_ms);
   g_gate.limit_ms = g_on ? limit : 0;
   g_time_log_slow = g_gate.limit_ms > 0;
+  g_cpu_on = g_time_log_slow && cpu;
   if (limit == 0) return;
   if (!g_on) {
     ModLog("long frame   : slow_frame_ms=%d needs time_log=1. No line of a long frame",
            limit);
     return;
   }
-  ModLog("long frame   : slow_frame_ms=%d. Each frame of the game longer than %d ms "
-         "gives one line with its parts, the calls of the frame loop, the CPU time of "
-         "the frame thread (GetThreadTimes) and the counts of the frame, at most %d "
-         "lines a second",
-         limit, limit, long_frame_math::kLinesPerSecond);
+  ModLog("long frame   : slow_frame_ms=%d, slow_frame_cpu=%d. Each frame of the game "
+         "longer than %d ms gives one line with its parts, the calls of the frame loop, "
+         "%s and the counts of the frame, at most %d lines a second. The lines go to "
+         "the log after the line of their window of 10 s",
+         limit, g_cpu_on ? 1 : 0, limit,
+         g_cpu_on ? "the CPU time of the frame thread (GetThreadTimes at each present)"
+                  : "no CPU time of the frame thread",
+         long_frame_math::kLinesPerSecond);
 }
 
 void TimeLogCall(int call, bool begin) {
@@ -242,7 +253,9 @@ void TimeLogPresent() {
     for (int i = 0; i < g_pending_count; ++i) ModLog("%s", g_pending[i]);
     g_pending_count = 0;
     char step[64];
-    if (!g_cpu_ok) {
+    if (!g_cpu_on) {
+      sprintf_s(step, "not read, slow_frame_cpu=0");
+    } else if (!g_cpu_ok) {
       sprintf_s(step, "GetThreadTimes fails");
     } else if (g_cpu.least_step == 0) {
       sprintf_s(step, "the clock made no step yet");

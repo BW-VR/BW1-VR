@@ -24,8 +24,10 @@ void TimeLogPace(double ms);
 
 // THE LONG FRAMES (slow_frame_ms, long_frame_math.h, docs/android.md, "The
 // long frames"). mod_main.cpp, after TimeLogSetOn: 0 (the default) is off,
-// N gives a line for each frame longer than N ms. It needs time_log=1.
-void TimeLogSetSlow(int slow_frame_ms);
+// N gives a line for each frame longer than N ms. It needs time_log=1. cpu
+// (slow_frame_cpu=1, 0 by default): the line has the CPU time of the frame
+// thread from one call of GetThreadTimes at each present.
+void TimeLogSetSlow(int slow_frame_ms, bool cpu);
 // True with slow_frame_ms above 0 and time_log=1. The callers of the calls
 // below read it first, so with slow_frame_ms=0 they make no call.
 extern bool g_time_log_slow;

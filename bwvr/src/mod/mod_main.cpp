@@ -402,6 +402,7 @@ int g_profile = 0;
 bool g_headless_grab = false;
 bool g_skip_desktop = true;
 bool g_time_log = true;  // time_log
+int g_slow_frame_ms = 0;  // slow_frame_ms
 int g_walk_parts = 0;  // walk_parts
 int g_walk_parts_clock = 1;  // walk_parts_clock
 char g_walk_parts_add[512] = "";  // walk_parts_add
@@ -1657,6 +1658,10 @@ void ReadSettings() {
   // time_log=1: each 10 s one line with the parts of a frame of the game. 0:
   // no line.
   g_time_log = GetPrivateProfileIntA("bwvr", "time_log", 1, path) != 0;
+  // THE LONG FRAMES (long_frame_math.h, docs/android.md, "The long frames").
+  // slow_frame_ms=0 (the default): no line. N: a line for each frame of the
+  // game longer than N ms.
+  g_slow_frame_ms = static_cast<int>(GetPrivateProfileIntA("bwvr", "slow_frame_ms", 0, path));
   // THE PARTS OF THE SCENE WALK (walk_parts.h, docs/backend.md, "The parts of
   // the scene walk"), a test aid. walk_parts=0: no hook and no line. 1: each
   // 10 s the times of the timed functions of the walk. 2: the same with no
@@ -2088,6 +2093,7 @@ void StartVrStep() {
     // The input channel takes the place of the session and of the fake
     // sources, at the same places.
     TimeLogSetOn(g_time_log);
+    TimeLogSetSlow(g_slow_frame_ms);
     WalkPartsSetOptions(g_walk_parts, g_walk_parts_clock, g_walk_parts_add);
     StallWatchStart(g_stall_modules, g_stall_addrs, g_test_stall_ms);
     LogBox64Environment();

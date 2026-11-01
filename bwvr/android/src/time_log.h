@@ -69,6 +69,8 @@ class TimeLog {
   // time_log of bwvr.ini, at the start of the app.
   void Start(bool on);
   bool On() const { return on_; }
+  // The process of the game that the last window found, or 0.
+  int GamePid() const { return game_pid_; }
 
   // Play: a new window starts. The game is in Wine, and the app finds its
   // process (runblack.exe) at the next window.

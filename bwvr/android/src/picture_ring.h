@@ -82,6 +82,7 @@ struct Picture {
   double play_start_ms = 0.0;  // CLOCK_MONOTONIC at the start of the play of its batch
   double arrival_ms = 0.0;     // and at the arrival of the newest frame of the batch
   double ready_ms = 0.0;       // and at the submit of its copies into a slot of the ring
+  double gap_ms = 0.0;         // the newest frame of the batch: its time from the frame before (slow_frame_ms)
 };
 
 class PictureRing {

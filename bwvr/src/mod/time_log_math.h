@@ -66,6 +66,12 @@ struct Frames {
   Stat part[kPartCount];
   Stat rest;
   uint64_t in_walk = 0;  // the presents in a scene walk
+  // The frame that ended at the last present, for the line of a long frame
+  // (long_frame_math.h): its time, the time of each part and the rest. All
+  // 0 before the first frame.
+  double last_frame = 0.0;
+  double last_part[kPartCount] = {0.0, 0.0, 0.0};
+  double last_rest = 0.0;
 
   void Add(Part p, double ms) {
     if (ms > 0.0) open[p] += ms;
@@ -91,8 +97,11 @@ struct Frames {
       for (int i = 0; i < kPartCount; ++i) {
         part[i].Add(open[i]);
         parts += open[i];
+        last_part[i] = open[i];
       }
       rest.Add(ms - parts);
+      last_frame = ms;
+      last_rest = ms > parts ? ms - parts : 0.0;
     }
     for (int i = 0; i < kPartCount; ++i) open[i] = 0.0;
     last_present = now;

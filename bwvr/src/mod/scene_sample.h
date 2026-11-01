@@ -14,3 +14,7 @@ void SceneSampleWalk(bool in);
 // samples since the last one. scene_ms is the time of the scene walks in a
 // frame, for the ms of each module.
 void SceneSampleReport(uint64_t frames, double scene_ms);
+// time_log.cpp, at each present with slow_frame_ms above 0: the frame that
+// ended was long (slow) and took frame_ms. With profile_sample_slow its
+// samples then go to the next report, else they go.
+void SceneSampleFrameEnd(bool slow, double frame_ms);

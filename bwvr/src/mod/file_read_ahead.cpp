@@ -116,6 +116,10 @@ uint32_t g_fills = 0;    // ReadFile calls for a copy
 uint32_t g_reported_reads = 0;
 uint32_t g_reported_copies = 0;
 uint32_t g_reported_fills = 0;
+// For the lines of the long frames (slow_frame_ms, time_log.cpp): each call
+// of LHFile::Open, and of them the opens to write.
+volatile LONG g_open_calls = 0;
+volatile LONG g_open_writes = 0;
 
 Entry* Find(HANDLE file) {
   for (int i = 0; i < kFiles; ++i) {
@@ -136,6 +140,8 @@ HANDLE WINAPI h_CreateFileA(LPCSTR name, DWORD access, DWORD share,
                             DWORD flags, HANDLE model) {
   const HANDLE file =
       RealCreateFileA()(name, access, share, security, creation, flags, model);
+  InterlockedIncrement(&g_open_calls);
+  if ((access & GENERIC_WRITE) != 0) InterlockedIncrement(&g_open_writes);
   if (file == INVALID_HANDLE_VALUE || access != GENERIC_READ ||
       share != FILE_SHARE_READ || (flags & FILE_FLAG_OVERLAPPED) != 0) {
     return file;
@@ -293,6 +299,16 @@ void FileReadAheadToggle(const char* keys) {
 int FileReadAheadValue() {
   if (!g_installed) return kDebugCannot;
   return static_cast<int>(InterlockedCompareExchange(&g_on, 0, 0));
+}
+
+// The counts for the lines of the long frames (time_log.cpp): the calls of
+// LHFile::Open, of them the opens to write, and the reads of the game on the
+// files that LHFile opened to read. All 0 while the calls of LHFile are not
+// in (file_read_ahead=0 with test_keys=0).
+void FileReadAheadCounts(uint32_t* opens, uint32_t* writes, uint32_t* reads) {
+  *opens = static_cast<uint32_t>(InterlockedCompareExchange(&g_open_calls, 0, 0));
+  *writes = static_cast<uint32_t>(InterlockedCompareExchange(&g_open_writes, 0, 0));
+  *reads = g_reads;
 }
 
 // For the report of each 450 frames. A line only when the game read a file

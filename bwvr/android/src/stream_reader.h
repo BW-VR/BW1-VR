@@ -28,7 +28,10 @@ struct QueuedFrame {
   bool start = false;    // a kStart record
   int32_t test_frame = 0;
   double arrival_ms = 0.0;  // CLOCK_MONOTONIC when the reader took it (time_log=1), else 0
+  double gap_ms = 0.0;      // the time from the frame before (slow_frame_ms, long_frames.h), else 0
 };
+
+class GameFrameClock;
 
 class StreamReader {
  public:
@@ -57,6 +60,9 @@ class StreamReader {
   void SetTimeLog(bool on) { time_log_ = on; }
   uint64_t Arrived() const { return arrived_.load(std::memory_order_relaxed); }
   double LastArrivalMs() const { return last_arrival_ms_.load(std::memory_order_relaxed); }
+  // THE LONG FRAMES (slow_frame_ms, long_frames.h), before Start: the thread
+  // gives each frame that it takes to the clock, when the clock is on.
+  void SetFrameClock(GameFrameClock* clock) { frame_clock_ = clock; }
 
   // A TEST AID (stream_live_feed=1): a child process writes the frames of
   // the stream file feed into the ring as the mod does, so the reader takes
@@ -84,6 +90,7 @@ class StreamReader {
   size_t most_bytes_ = 0;
   pid_t feed_ = 0;
   bool time_log_ = false;
+  GameFrameClock* frame_clock_ = nullptr;
   std::atomic<uint64_t> arrived_{0};
   std::atomic<double> last_arrival_ms_{0.0};
 };

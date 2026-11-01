@@ -13,6 +13,7 @@
 #include "../../src/mod/stream_split.h"
 #include "app_log.h"
 #include "game_folder.h"
+#include "long_frames.h"
 
 namespace {
 
@@ -258,6 +259,15 @@ void StreamReader::Run() {
       used += len;
       ++frames;
       bytes += len;
+      // slow_frame_ms: the gap from the frame before, and the time of the main
+      // thread of the game in it (long_frames.h).
+      if (frame_clock_ != nullptr && frame_clock_->On()) {
+        timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        const double ms = now.tv_sec * 1000.0 + now.tv_nsec / 1e6;
+        q.arrival_ms = ms;
+        q.gap_ms = frame_clock_->Arrive(q.frame, ms);
+      }
       if (time_log_) {
         timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);

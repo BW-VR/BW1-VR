@@ -46,6 +46,10 @@ bool g_done = false;
 std::vector<uint8_t> g_record;  // the head of a stream, then the frames
 uint64_t g_draws = 0;
 uint64_t g_surface_bytes = 0;
+// The surfaces whose pixels went into the stream since the start, and their
+// bytes, for the lines of the long frames (VkStreamPixelCounts).
+uint64_t g_pixel_surfaces = 0;
+uint64_t g_pixel_bytes = 0;
 
 // THE FRAME THAT THE CALLS GO TO NOW. g_writer holds the head of a stream and
 // then the records of one frame of the game. At the end of the first walk of
@@ -227,6 +231,8 @@ void Surface(void* surface, bool pixels) {
     const uint32_t bytes = body.width * body.height * 4;
     g_writer.Record(ss::kSurface, &body, sizeof(body), rgba, bytes);
     if (g_unit_record) g_surface_bytes += bytes;
+    ++g_pixel_surfaces;
+    g_pixel_bytes += bytes;
     free(rgba);
     g_with_pixels.insert(id);
     g_surface_cache.Put(id);
@@ -537,6 +543,7 @@ void Deliver() {
     }
     // time_log=1: the time of the write for the line of the times.
     if (timed) TimeLogStream(MsSince(start));
+    TimeLogStreamFrame(g_unit_frame);
   }
   if (chain_start != 0) {
     const uint64_t ticks = render_chain_math::Elapsed(chain_start, __rdtsc());
@@ -759,6 +766,12 @@ void VkStreamStageState(uint32_t stage, uint32_t type, uint32_t value) {
   ChainScope chain(render_chain_math::kStream, render_chain_math::kStageState);
   const uint32_t body[3] = {stage, type, value};
   g_writer.Record(ss::kStageState, body, sizeof(body));
+}
+
+// time_log.cpp: the counts for the lines of the long frames (slow_frame_ms).
+void VkStreamPixelCounts(uint64_t* surfaces, uint64_t* bytes) {
+  *surfaces = g_pixel_surfaces;
+  *bytes = g_pixel_bytes;
 }
 
 void VkStreamTexture(uint32_t stage, void* surface) {

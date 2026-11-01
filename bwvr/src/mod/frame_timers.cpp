@@ -39,6 +39,8 @@
 
 #include "MinHook.h"
 #include "frame_profile.h"
+#include "long_frame_math.h"
+#include "time_log.h"
 
 extern void ModLog(const char* format, ...);
 // tabletop.cpp: the render bracket of the table ends with
@@ -99,13 +101,24 @@ int ProfileTimer(int slot) {
   return slot == kFlipScreen ? kFpFlip : -1;
 }
 
+// The call of the lines of the long frames (time_log.h, TimeLogCall) that a
+// slot goes to. GGame::ProcessGraphicsEngine has its own stub.
+int LongCall(int slot) {
+  if (slot == kActions || slot == kBufferedKeys || slot == kFrameInputs) {
+    return long_frame_math::kInput;
+  }
+  return slot == kFlipScreen ? long_frame_math::kFlip : long_frame_math::kFlush;
+}
+
 // One stub per slot, so each one knows which slot it is timing.
 template <int N>
 void __fastcall MemberStub(void* self, void* unused) {
   LARGE_INTEGER before, after;
+  if (g_time_log_slow) TimeLogCall(LongCall(N), true);
   QueryPerformanceCounter(&before);
   reinterpret_cast<VoidMemberFn>(g_slots[N].original)(self, unused);
   QueryPerformanceCounter(&after);
+  if (g_time_log_slow) TimeLogCall(LongCall(N), false);
   Record(N, after.QuadPart - before.QuadPart);
   if (FrameProfileOn() && ProfileTimer(N) >= 0) {
     FrameProfileAdd(ProfileTimer(N), after.QuadPart - before.QuadPart);
@@ -122,9 +135,11 @@ void __fastcall ActionsStub(void* self, void* unused) {
 void __fastcall GraphicsStub(void* self, void* unused, uint32_t a, uint32_t b) {
   LARGE_INTEGER before, after;
   FrameProfileGraphics(true);
+  if (g_time_log_slow) TimeLogCall(long_frame_math::kGraphics, true);
   QueryPerformanceCounter(&before);
   reinterpret_cast<GraphicsFn>(g_slots[kGraphics].original)(self, unused, a, b);
   QueryPerformanceCounter(&after);
+  if (g_time_log_slow) TimeLogCall(long_frame_math::kGraphics, false);
   FrameProfileGraphics(false);
   Record(kGraphics, after.QuadPart - before.QuadPart);
   // This is the one hook on this function, so the table ends its bracket

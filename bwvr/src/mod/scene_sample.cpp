@@ -23,6 +23,13 @@
 //
 //   profile_sample=0      off (the default)
 //   profile_sample=N      a sample each N microseconds, 100 to 5000
+//
+// THE SAMPLES OF THE LONG FRAMES (profile_sample_slow=1, with slow_frame_ms
+// above 0, docs/android.md, "The long frames"): the thread takes samples in
+// the whole frame, in and outside the scene walks. At each present the
+// samples of the frame that ended stay only when the frame is long
+// (SceneSampleFrameEnd). The report gives the samples of the long frames
+// alone. 0 (the default): the samples of each frame, as above.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -35,6 +42,7 @@
 #include "scene_sample_math.h"
 #include "d3d7_thread.h"
 #include "render_thread.h"
+#include "time_log.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -64,6 +72,18 @@ volatile LONG g_in_walk = 0;
 // in a scene walk (the game turn, the streaming of the land, the loads, the
 // waits for the headset), in place of the scene walks.
 LONG g_outside = 0;
+// profile_sample_slow=1: samples in the whole frame, and only the samples of
+// the long frames go to the report. The samples of a long frame go from the
+// ring into a ring of their own, with their stacks.
+bool g_slow = false;
+const int kSlowRing = 1 << 13;
+uint32_t* g_slow_ring = nullptr;
+uint32_t* g_slow_stacks = nullptr;
+LONG g_slow_written = 0;
+LONG g_slow_reported = 0;
+LONG g_frame_first = 0;   // the first sample of the frame that runs now
+uint64_t g_slow_frames = 0;  // the long frames since the last report
+double g_slow_ms = 0.0;      // their time
 
 // Written by the thread of the samples, read by the report on the frame
 // thread. The report reads only up to the count it read first.
@@ -100,7 +120,7 @@ DWORD WINAPI SampleThread(LPVOID) {
   LARGE_INTEGER next, now;
   QueryPerformanceCounter(&next);
   for (;;) {
-    if (InterlockedCompareExchange(&g_in_walk, 0, 0) == g_outside) {
+    if (!g_slow && InterlockedCompareExchange(&g_in_walk, 0, 0) == g_outside) {
       Sleep(1);
       QueryPerformanceCounter(&next);
       continue;
@@ -119,7 +139,7 @@ DWORD WINAPI SampleThread(LPVOID) {
       }
     }
     if (next.QuadPart < now.QuadPart - 10 * step) next = now;
-    if (InterlockedCompareExchange(&g_in_walk, 0, 0) == g_outside) continue;
+    if (!g_slow && InterlockedCompareExchange(&g_in_walk, 0, 0) == g_outside) continue;
     LARGE_INTEGER a, b;
     QueryPerformanceCounter(&a);
     if (SuspendThread(g_target) == static_cast<DWORD>(-1)) continue;
@@ -251,19 +271,19 @@ int g_own_module = -1;  // the module of the mod
 // For each sample in ntdll.dll of the newest kStackRing samples: the first
 // return address on its stack outside the modules of the system, and the
 // first one that is also outside d3d9.dll and the mod (0 when there is
-// none). Gives the count.
-int FindCallers(LONG first, LONG take) {
+// none). Gives the count. stacks: the ring of the stacks of the samples, with
+// ring samples.
+int FindCallers(LONG first, LONG take, const uint32_t* stacks, int ring) {
   g_own_module = scene_sample::ModuleOf(
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&FindCallers)),
       g_modules, g_module_count);
   int count = 0;
-  const LONG from = take > kStackRing ? take - kStackRing : 0;
+  const LONG from = take > ring ? take - ring : 0;
   for (LONG i = from; i < take; ++i) {
     const int m = scene_sample::ModuleOf(g_scratch[i], g_modules,
                                          g_module_count);
     if (m < 0 || _stricmp(g_names[m], "ntdll.dll") != 0) continue;
-    const uint32_t* stack =
-        g_stacks + ((first + i) & (kStackRing - 1)) * kStackWords;
+    const uint32_t* stack = stacks + ((first + i) & (ring - 1)) * kStackWords;
     uint32_t c1 = 0, c2 = 0;
     for (int w = 0; w < kStackWords && c2 == 0; ++w) {
       const int wm =
@@ -319,6 +339,21 @@ void Start() {
   const int outside = IniKey("profile_sample_outside", 0);
   g_outside = outside > 0 ? 1 : 0;
   if (g_outside != 0 && g_interval_us <= 0) g_interval_us = outside;
+  // profile_sample_slow=N (100 to 5000) takes samples each N microseconds in
+  // the whole frame and keeps the samples of the long frames. It needs
+  // slow_frame_ms above 0 with time_log=1 (time_log.cpp), which says which
+  // frame is long.
+  const int slow = IniKey("profile_sample_slow", 0);
+  if (slow > 0) {
+    if (!g_time_log_slow) {
+      ModLog("scene sample : profile_sample_slow=%d needs slow_frame_ms above 0 and "
+             "time_log=1. No sample of the long frames", slow);
+    } else {
+      g_slow = true;
+      g_outside = 0;
+      if (g_interval_us <= 0) g_interval_us = slow;
+    }
+  }
   if (g_interval_us <= 0) {
     g_interval_us = 0;
     return;
@@ -330,6 +365,11 @@ void Start() {
   g_scratch = new uint32_t[kRing];
   g_stacks = new uint32_t[kStackRing * kStackWords];
   ZeroMemory(g_stacks, kStackRing * kStackWords * sizeof(uint32_t));
+  if (g_slow) {
+    g_slow_ring = new uint32_t[kSlowRing];
+    g_slow_stacks = new uint32_t[kSlowRing * kStackWords];
+    ZeroMemory(g_slow_stacks, kSlowRing * kStackWords * sizeof(uint32_t));
+  }
   // profile_sample_thread=1 takes the samples of the render thread, and 2
   // of the D3D7 thread (d3d7_thread.cpp), in place of the frame thread. That
   // thread starts with the first walk that has it, so SceneSampleWalk opens
@@ -357,8 +397,10 @@ void Start() {
          "module", g_interval_us,
          g_other == 1 ? "render" : g_other == 2 ? "D3D7" : "frame",
          g_interval_us,
-         g_outside != 0 ? "outside the scene walks (profile_sample_outside=1)"
-                        : "in each scene walk");
+         g_slow ? "in the whole frame, and keeps the samples of the long frames "
+                  "(profile_sample_slow)"
+         : g_outside != 0 ? "outside the scene walks (profile_sample_outside=1)"
+                          : "in each scene walk");
 }
 
 }  // namespace
@@ -382,24 +424,59 @@ void SceneSampleWalk(bool in) {
   InterlockedExchange(&g_in_walk, in ? 1 : 0);
 }
 
+void SceneSampleFrameEnd(bool slow, double frame_ms) {
+  if (!g_slow || g_slow_ring == nullptr) return;
+  const LONG written = InterlockedCompareExchange(&g_written, 0, 0);
+  if (slow) {
+    // The ring of the samples holds the newest kRing samples, and the ring of
+    // the stacks the newest kStackRing.
+    LONG first = g_frame_first;
+    if (written - first > kStackRing) first = written - kStackRing;
+    for (LONG i = first; i < written; ++i) {
+      const LONG to = g_slow_written & (kSlowRing - 1);
+      g_slow_ring[to] = g_ring[i & (kRing - 1)];
+      memcpy(g_slow_stacks + to * kStackWords,
+             g_stacks + (i & (kStackRing - 1)) * kStackWords,
+             kStackWords * sizeof(uint32_t));
+      ++g_slow_written;
+    }
+    ++g_slow_frames;
+    g_slow_ms += frame_ms;
+  }
+  g_frame_first = written;
+}
+
 void SceneSampleReport(uint64_t frames, double scene_ms) {
   if (g_interval_us == 0 || g_failed || g_ring == nullptr) return;
-  const LONG written = InterlockedCompareExchange(&g_written, 0, 0);
-  LONG take = written - g_reported;
-  // The ring holds the newest kRing samples. The report is between two
+  // profile_sample_slow: the samples of the long frames since the last
+  // report, in place of the samples of all frames.
+  const uint32_t* ring = g_slow ? g_slow_ring : g_ring;
+  const uint32_t* stacks = g_slow ? g_slow_stacks : g_stacks;
+  const int ring_size = g_slow ? kSlowRing : kRing;
+  const int stack_size = g_slow ? kSlowRing : kStackRing;
+  LONG& reported = g_slow ? g_slow_reported : g_reported;
+  const LONG written = g_slow ? g_slow_written : InterlockedCompareExchange(&g_written, 0, 0);
+  if (g_slow) {
+    frames = g_slow_frames;
+    scene_ms = g_slow_frames > 0 ? g_slow_ms / static_cast<double>(g_slow_frames) : 0.0;
+    g_slow_frames = 0;
+    g_slow_ms = 0.0;
+  }
+  LONG take = written - reported;
+  // The ring holds the newest ring_size samples. The report is between two
   // frames, outside each scene walk, so no sample comes while it reads.
-  const LONG first = take > kRing ? written - kRing : g_reported;
-  if (take > kRing) take = kRing;
-  g_reported = written;
+  const LONG first = take > ring_size ? written - ring_size : reported;
+  if (take > ring_size) take = ring_size;
+  reported = written;
   const LONG lost = InterlockedExchange(&g_lost, 0);
   const LONG64 held = InterlockedExchange64(&g_hold_ticks, 0);
   if (take <= 0 || frames == 0) return;
   for (LONG i = 0; i < take; ++i) {
-    g_scratch[i] = g_ring[(first + i) & (kRing - 1)];
+    g_scratch[i] = ring[(first + i) & (ring_size - 1)];
   }
 
   ReadModules();
-  const int callers = FindCallers(first, take);
+  const int callers = FindCallers(first, take, stacks, stack_size);
   if (g_dump) Dump(take, frames);
   // The samples of each module, and of no module.
   uint32_t per_module[kMaxModules + 1];
@@ -435,11 +512,13 @@ void SceneSampleReport(uint64_t frames, double scene_ms) {
       static_cast<double>(g_frequency.QuadPart) / static_cast<double>(frames);
   ModLog("scene sample : %ld samples %s of %llu frames, %.0f "
          "in a frame. The samples held the frame thread %.3f ms in a frame, "
-         "and %ld stops gave no address. The scene walks were %.2f ms in a "
+         "and %ld stops gave no address. %s %.2f ms in a "
          "frame. By module: %s",
-         take, g_outside != 0 ? "outside the scene walks" : "in the scene walks",
+         take,
+         g_slow ? "in the whole frame"
+         : g_outside != 0 ? "outside the scene walks" : "in the scene walks",
          frames, static_cast<double>(take) / frames, held_ms, lost,
-         scene_ms, line);
+         g_slow ? "These long frames were" : "The scene walks were", scene_ms, line);
 
   // The buckets with the most samples.
   scene_sample::Bucket top[kTopBuckets];

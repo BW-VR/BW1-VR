@@ -30,6 +30,8 @@
 
 #include "MinHook.h"
 #include "frame_profile.h"
+#include "long_frame_math.h"
+#include "time_log.h"
 
 extern void ModLog(const char* format, ...);
 // hand_exact.cpp: the drawn Hand after its draw setup, and the calls of later
@@ -293,9 +295,11 @@ void __cdecl h_PhysicsGameTurnUpdate() {
 
 void __fastcall h_ProcessNetworkPackets(void* self, void* unused) {
   LARGE_INTEGER before, after;
+  if (g_time_log_slow) TimeLogCall(long_frame_math::kTurn, true);
   QueryPerformanceCounter(&before);
   o_ProcessNetworkPackets(self, unused);
   QueryPerformanceCounter(&after);
+  if (g_time_log_slow) TimeLogCall(long_frame_math::kTurn, false);
   const uint64_t spent = after.QuadPart - before.QuadPart;
   if (FrameProfileOn()) FrameProfileAdd(kFpTurn, spent);
   g_turn_ticks += spent;

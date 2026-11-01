@@ -53,6 +53,7 @@ add_library(bwvr_quest SHARED
     src/flat_view.cpp
     src/game_folder.cpp
     src/input_live.cpp
+    src/long_frames.cpp
     src/gpu.cpp
     src/picture_ring.cpp
     src/menu_paint.cpp

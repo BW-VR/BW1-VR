@@ -57,6 +57,7 @@
 #include "stream_reader.h"
 #include "thread_cores.h"
 #include "time_log.h"
+#include "long_frames.h"
 #include "walk_probe.h"
 #include "wine_runtime.h"
 #include "xr_app.h"
@@ -92,6 +93,7 @@ struct LivePlay {
   int space = -1;  // the last frame of the stream: 1 a screen frame, 0 a frame of the scene
   double play_start_ms = 0.0;  // the start of the play of the last batch
   double arrival_ms = 0.0;     // the arrival of the newest frame of the last batch (time_log=1)
+  double gap_ms = 0.0;  // and its time from the frame of the game before (slow_frame_ms)
 };
 
 struct App {
@@ -205,6 +207,14 @@ struct App {
   int display_asked = 0;
   // THE TIME LOG (time_log=1, time_log.h).
   TimeLog time;
+  // THE LONG FRAMES (slow_frame_ms, long_frames.h): the clock of the frames
+  // of the game in the reader, the takes of the session, the time from the
+  // frame of the game before the shown picture, and the display period of
+  // the newest slot of the input channel (0 when not known).
+  GameFrameClock frame_clock;
+  LatchLog latch_log;
+  double shown_gap_ms = 0.0;
+  double period_ms = 0.0;
   // THE CORES OF THE HEADSET (thread_cores, thread_bind, thread_cores.h).
   ThreadCores cores;
 };
@@ -440,6 +450,7 @@ double PlayBatch(App* app, LivePlay* live) {
   const double start = NowMs();
   live->play_start_ms = start;
   live->arrival_ms = live->batch.empty() ? 0.0 : live->batch.back().arrival_ms;
+  live->gap_ms = live->batch.empty() ? 0.0 : live->batch.back().gap_ms;
   const size_t n = live->batch.size();
   for (size_t i = 0; i < n; ++i) {
     QueuedFrame& q = live->batch[i];
@@ -560,6 +571,7 @@ double WriteSlot(App* app, const LivePlay& live) {
   p.pictures = live.pictures;
   p.play_start_ms = live.play_start_ms;
   p.arrival_ms = live.arrival_ms;
+  p.gap_ms = live.gap_ms;
   if (g.last == sq::Last::kScreen && app->xr.ScreenQuadOn()) {
     p.screen_pictures = g.screen_pictures;
     if (g.screen_pictures != s.screen_held) {
@@ -764,6 +776,7 @@ bool TakePicture(App* app) {
   app->shown_arrival_ms = p->arrival_ms;
   app->shown_ready_ms = p->ready_ms;
   app->shown_taken_ms = NowMs();
+  app->shown_gap_ms = p->gap_ms;
   app->shown_input_frame = p->have_view ? p->view.input_frame : 0u;
   GameFrames(app, p->last_frame, p->pictures);
   return true;
@@ -858,6 +871,12 @@ void StartLiveReader(App* app) {
       app->live_whole > 0 ? static_cast<size_t>(queue_mb > 0 ? queue_mb : 0) << 20
                           : static_cast<size_t>(64u << 20);
   app->live_reader.SetTimeLog(app->time.On());
+  // slow_frame_ms (0 by default): the lines of the long frames of the game
+  // (long_frames.h).
+  const int slow_frame_ms = app->ini.GetInt("bwvr", "slow_frame_ms", 0);
+  app->frame_clock.Start(slow_frame_ms);
+  app->latch_log.Start(slow_frame_ms);
+  app->live_reader.SetFrameClock(&app->frame_clock);
   app->live_reader.Start(ring, app->live_whole, queue_bytes);
 }
 
@@ -1048,6 +1067,7 @@ void Play(App* app, bool new_game) {
   app->first_frame = false;
   app->game_on = true;
   app->time.GameStarts(app->play_ms);
+  app->latch_log.GameStarts(app->play_ms);
   // THE CORES (core_rules.h, bwvr.ini only): thread_cores=1 logs the core
   // and the CPU time of each thread each second, thread_bind=1 or 2 binds
   // threads to the cores. 0 (the defaults): no line and no binding.
@@ -1978,6 +1998,7 @@ void android_main(android_app* android) {
         }
         app.input_live.Write(&slot);
         app.input_live.PlayPulses(&app.xr);
+        app.period_ms = slot.display_period > 0 ? static_cast<double>(slot.display_period) / 1e6 : 0.0;
       }
       step(XrApp::kStepSlot);
       // THE PICTURE OF THIS FRAME at the place of the play of the old loop:
@@ -1987,7 +2008,13 @@ void android_main(android_app* android) {
       if (app.play_running) {
         // frame_loop_hold: a new picture only after the hold of the shown one.
         if (eye_copy_math::HoldTakes(app.hold, app.hold_shown, app.hold_any)) {
+          const double take_ms = app.latch_log.On() ? NowMs() : 0.0;
           fresh = TakePicture(&app);
+          // slow_frame_ms: why a take had no new picture (long_frames.h).
+          if (app.latch_log.On() && app.game_on) {
+            app.latch_log.Take(take_ms, fresh, app.shown_arrival_ms, app.shown_ready_ms,
+                               app.shown_gap_ms, app.shown_last, app.period_ms);
+          }
         }
         if (fresh) app.hold_any = true;
         app.hold_shown = eye_copy_math::NextShown(app.hold_shown, fresh);
@@ -2046,6 +2073,12 @@ void android_main(android_app* android) {
           app.time.Tick(now, app.live_reader.Arrived(),
                         app.first_frame ? app.live_reader.LastArrivalMs() : 0.0, app.shown_last);
         }
+      }
+      // THE LONG FRAMES (slow_frame_ms): the process of the game for the
+      // reader (the time log finds it), and the line of each 10 s.
+      if (app.latch_log.On() && app.game_on) {
+        app.frame_clock.SetGamePid(app.time.GamePid());
+        app.latch_log.Tick(NowMs());
       }
     } else {
       // With no session the loop runs each 5 ms for the live stream.

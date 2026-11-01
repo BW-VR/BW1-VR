@@ -191,6 +191,8 @@ Summary:
 | `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
 | `src/mod/time_log.cpp`, `src/mod/time_log_math.h` | The time log of the mod, and the stats and the rules that the app uses too. No Windows code in the header |
 | `test/controller_math/time_log_checks.h` | The math checks of the cap, of the lines of `/proc` and of the parts of a frame |
+| `src/mod/long_frame_math.h`, `android/src/long_frames.cpp` | The long frames of the game (`slow_frame_ms`): the rules of the lines, of the calls of the frame loop, of schedstat and of the late pictures, the clock of the frames of the game in the reader and the log of the takes of the session. No Windows code and no Android code in the header |
+| `test/controller_math/long_frame_checks.h` | The math checks of `long_frame_math.h` |
 | `android/src/walk_probe.cpp`, `android/src/walk_parts.h` | The GPU parts of the walk (`gpu_parts`): the functions of the app in the table of the renderer, the timestamps at the bounds of the passes, and the counts. `walk_parts.h` has the rules of the parts and no Vulkan code |
 | `test/controller_math/gpu_parts_checks.h` | The math checks of `walk_parts.h` |
 
@@ -2615,6 +2617,165 @@ display rate".
   the channel run differs from the frame rate of the fake run, with
   `vk_pace=1` and with `vk_pace=0`: the hint cards follow the clock of the
   PC, so they show at other frames.
+
+## The long frames
+
+The time log gives the mean and the most of the parts of a frame each 10 s
+("The time log of the app", `backend.md`, "The time log of the mod"). A
+frame of the game that takes 25 to 38 ms in a period of 13.89 ms shows an
+old picture again in the headset. The key `slow_frame_ms` gives one line for
+each such frame, in the mod and in the app, so a log says where the time of
+each long frame went. It is a measurement and changes no behavior of the
+game or of the picture.
+
+**The key** (`bwvr.ini`, not a row of `settings_table.h`, so a save keeps
+it, and no test key):
+
+- `slow_frame_ms=0` (the default): no line, no more clock read, no read of
+  `/proc`.
+- `slow_frame_ms=N` (1 to 1000): each frame of the game longer than N ms
+  gives one line, at most 5 lines in a second. 20 fits a display of 72 Hz.
+  The lines of the mod need `time_log=1` (the default). With `time_log=0`
+  the mod logs "slow_frame_ms=N needs time_log=1" and gives no line.
+- `profile_sample_slow=N` (100 to 5000, 0 by default, a test aid, only with
+  `slow_frame_ms` above 0): the sampler of `profile_sample` (`backend.md`,
+  "Where the time of the scene walk goes") takes a sample each N
+  microseconds in the whole frame, and its report of each 450 frames has
+  only the samples of the long frames. It stops the frame thread for each
+  sample. Under FEX that can hang the game ("FEX as the CPU of the 32 bit
+  code", "SuspendThread under FEX in Wine"), and under FEX and Box64 a sample
+  of a thread that runs translated code has the address of its last system
+  call ("The hot code under Box64"). For FEX this comes from its source:
+  `BTCpuGetContext` of `Module.cpp` reads the context of the CPU area
+  (`RtlWow64GetThreadContext`), and FEX writes that context only when the
+  thread leaves its JIT (a system call, an exception). So on a headset the
+  samples name only the waits in system calls.
+
+**The lines of the mod** (`time_log.cpp`, on the frame thread):
+
+```
+long frame   : present P, the newest frame of the stream S, at T s, G ms after the long frame before. It took F ms: the scene walk A, the write of the stream B, the wait of the pace C, the rest D. The calls of the frame loop: the input I, the game turn U, ProcessGraphicsEngine E, FlipScreen L, the network flush N, outside them O. The frame thread had X ms of CPU time. In the frame: K opens of a file of the game (W to write), R reads of the game, M surfaces with pixels into the stream (B KB)
+long frame   : L frames longer than N ms in 10.0 s, K of them with a line. They took F ms, and the frame thread had X ms of CPU time in them (GetThreadTimes: the least step of the clock is S ms)
+```
+
+- A frame goes from one present to the next, as in the 10 s line of the
+  time log. Its parts (the scene walk, the write of the stream, the wait of
+  the pace, the rest) are the parts of that line for this frame alone.
+- The calls of the frame loop are the calls of `GGame::Loop` that the mod
+  times already (`frame_timers.cpp`, `pass_guard.cpp`): the input
+  (`ProcessActionsPerformed`, `ProcessBufferedKeys`, `ProcessFrameInputs`),
+  the game turn (`GGame::ProcessNetworkPackets`, which runs a turn each 100
+  ms of game time), `GGame::ProcessGraphicsEngine`, `GGame::FlipScreen` and
+  the network flush (`0x005525E0`). `ProcessGraphicsEngine` holds the scene
+  walk, the write of the stream and the wait of the pace of a frame of the
+  scene, and the work of the mod in the stereo hook. A present in a call
+  splits it: each frame gets its part. "Outside them" is the frame less
+  these calls: the rest of the loop and the time between two turns of it.
+- The CPU time of the frame thread is the step of `GetThreadTimes` (kernel
+  and user) from the present before. "No" when the clock gave no time yet.
+  The clock has steps: Windows gives about 15.6 ms, and Wine reads
+  `/proc/<pid>/task/<tid>/stat` of Linux, which counts in clock ticks (10
+  ms at 100 ticks a second). The second line gives the least step that the
+  clock made in the run. With steps of 10 ms one frame says only "about 0",
+  "about 10" or "about 20", but the sum of the long frames of 10 s says
+  which share of their time the thread had a core.
+- The counts of the frame: the calls of `LHFile::Open` (all modes, of them
+  the opens to write: a save, the mind of the Creature), the reads of the
+  game from files that LHFile opened to read (`file_read_ahead.cpp`, 0
+  with `file_read_ahead=0` and `test_keys=0`), and the surfaces whose pixels
+  went into the live stream in the frame (a new texture or a texture that
+  the game wrote, `vk_stream.cpp`).
+- `G ms after the long frame before` gives the rhythm: a steady G (for
+  example near 1000 ms) is a work of the game on a timer, a G of one frame
+  is a burst, and long frames that come with opens of files or new surfaces
+  in new places are loads.
+- The 10 s line comes after the line `time log` of the same window. The line
+  `time log` itself stays as with `slow_frame_ms=0`.
+
+**The lines of the app** (`long_frames.cpp`):
+
+```
+game frame   : the frame F of the game came G ms after the frame before. In that time the main thread of the game ran R ms on a core, waited Q ms for a core, and was off a core O ms (K time slices)
+game frame   : 10.0 s, N gaps between frames of the game, ms: the mean A and the most M. In T ms of them with schedstat the main thread of the game ran R ms on a core and waited Q ms for a core. L gaps were longer than X ms (K with a line): G ms, and in T2 ms of them with schedstat the main thread ran R2 ms and waited Q2 ms for a core
+late picture : N frames of the session had no new picture before the frame F of the game: <cause>. It came L ms after the first take that missed it, and its copies ended R ms after that take. Its frame of the game came G ms after the frame before
+late picture : 10.0 s, T takes of the session, M of them with no new picture: a by the GPU, b by the play of the app, c by a long frame of the game (the gap A ms as a mean, B at most), d by a frame of normal length. Those frames of normal length came after the take: e up to 1 ms, f up to 2 ms, g up to 4 ms, h more (C ms as a mean, D at most). The pictures in time ended their copies E ms before the take as a mean, F at the least (P pictures)
+```
+
+- `game frame` comes from the reader of the live stream: at each frame of
+  the game that it takes from the ring (within 0.5 ms of the write of the
+  mod) it reads `/proc/<pid>/task/<pid>/schedstat` of the main thread of
+  the game: the time on a core and the time in the queue for a core, in ns.
+  The gap is the time from the frame before. So "ran" close to the gap says
+  that the thread worked, "waited for a core" says that the thread could
+  run and had no core, and "off a core" says that it slept or waited for an
+  event (a lock, a file, a timer, the wait of the pace). The main thread is
+  the thread with the id of the process. With `vk_device=0` it runs the
+  frame loop of the game. The app finds the process with `time_log=1`, so
+  with `time_log=0` the lines have no time of the main thread. The frame
+  number F is the frame of the stream, the number S of the line `long
+  frame` of the mod.
+- `late picture` comes from the thread of the session with `frame_loop=1`:
+  at each take of a picture (`TakePicture`, before `EndFrame`). A take with
+  no new picture is a miss. The next new picture gives the cause of the
+  misses before it:
+  - by the GPU: its copies went to the GPU before the first take that
+    missed it, and the GPU had not finished them.
+  - by the play of the app: its frame of the game came before that take,
+    and the play of the app ended its copies after it.
+  - by a long frame of the game: its frame came after the take, more than
+    1.5 display periods after the frame of the game before it.
+  - by a frame of normal length: its frame came after the take, and it was
+    not long. The line says by how much it missed the take.
+- The room of a shift of the phase of the pace (`frame_pace_math.h`): with
+  `vk_pace=1` a frame of the game starts at the write of the slot of a
+  frame of the session, so the time from the end of the frame of the game to
+  the next take is fixed by the work of the frame. The pictures in time
+  ended their copies E ms before their take. When most misses are frames of
+  normal length that came up to 1 or 2 ms late, a start of the frame of the
+  game 1 or 2 ms earlier in the period catches them, and costs the same ms
+  of age of the input. When most misses are long frames, a shift of the
+  phase does not help.
+
+**Read the logs together.** For a long frame of the mod, take its number of
+the stream S. The line `game frame` with the frame S of the app gives the
+time of the main thread on a core in the same gap, in ns, and the line `late
+picture` with the frame S says if the session missed it. A long frame with a
+long "rest" or "outside them" and a time on a core near its length is work
+on the frame thread outside the calls of the game that the mod times: Wine,
+the mod, or the translation of new code by FEX. A long frame with much time
+off a core is a wait.
+
+**The cost.** With `slow_frame_ms` above 0 the mod reads the clock two more
+times for each timed call of the frame loop and calls `GetThreadTimes` once
+a frame. In Wine that is a call to the wineserver and a read of `/proc`.
+The app reads the clock and `schedstat` once for each frame of the game on
+the thread of the reader, and the clock once for each take.
+
+**What the desk runs show** (`desk_run.ps1`, the test save `pen`, 90 s,
+dxwrapper, about 650 to 720 frames a second): with `slow_frame_ms=0` the log
+has the same tags of lines as a build before the key, no line `long frame`,
+and each line `time log` has its form. With `slow_frame_ms=10` the log has
+21 lines `long frame`. The load of the save is a row of frames that are
+long outside the calls of the frame loop, for example 382.50 ms with 6
+opens of a file and 339425 reads of the game, and 375.0 ms of CPU time. The
+first frames of the scene after the load have scene walks of 50 to 80 ms.
+In the play a long frame is a scene walk of 10 to 16 ms, also in a run with
+the stick of the scripted controller, and its CPU time is 0.0 ms: the
+least step of `GetThreadTimes` on Windows is 15.625 ms. The frame rate with
+`slow_frame_ms=10` was 0.7 to 5.1 percent lower than with 0 in 6 of the 7
+windows of 10 s, and 3.8 percent higher in one.
+
+**Known limits:**
+
+- The clock of `GetThreadTimes` has steps of 10 ms in Wine and of about
+  15.6 ms on Windows. `schedstat` of the app has ns.
+- The arrival of a frame in the app is up to 0.5 ms after its write (the
+  reader sleeps 0.5 ms when the ring is empty). Two frames in one read of
+  the reader have a gap of about 0.
+- FEX gives no time of its translation in a frame. Its statistics
+  (`FEX_PROFILESTATS`, `SHMStats`) need the Unix library of FEX, which is
+  not in the tree.
+- The mod counts no sound, no change of the camera, and no new object.
 
 ## The display rate
 

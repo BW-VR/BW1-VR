@@ -60,6 +60,7 @@
 #include "frame_profile.h"
 #include "haptics.h"
 #include "hand_exact_math.h"
+#include "hand_fit_math.h"
 #include "miracle.h"
 #include "radial_menu.h"
 #include "script_frame_math.h"
@@ -4306,6 +4307,10 @@ void LogBothButtons() {
 }
 }  // namespace
 
+// Below: the pulse and the frame of a test key of the fit.
+void ControllersGrabPulse(int hands, float amplitude, float seconds);
+uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame);
+
 namespace {
 
 // THE HAND SIDE. The game keeps its left hand option in the profile
@@ -4400,6 +4405,213 @@ void UpdateHandSide() {
   MatchGameHand();
 }
 
+// THE FIT OF THE HAND ON THE CONTROLLER (docs/hand-model.md, "The fit of the
+// hand on the controller"). The keys move and turn the hand against the grip
+// pose of the runtime, so that the hand of the mod covers the real hand on
+// each controller. All zeros is the grip pose of the runtime.
+const int kMaxFitFlips = 8;
+struct HandFitState {
+  bool loaded = false;
+  bool on = true;           // the test key turns it off and on
+  hand_fit_math::HandFit fit = {};
+  // FINGER TRACKING: the curls of the runtime bend the fingers of the hands
+  // (finger_tracking, read by mod_main.cpp for the screen). The test key
+  // turns it off and on.
+  bool fingers = true;
+  bool test_keys = false;
+  bool fit_key_before = false;
+  bool fingers_key_before = false;
+  // fake_controller_fingers: the curls of the fake hands, thumb first.
+  bool fake_fingers = false;
+  float fake_curl[5] = {};
+  // hand_fit_test_flips and finger_tracking_test_flips: the frames at which
+  // the test key of each acts, for a desktop run.
+  uint64_t fit_flips[kMaxFitFlips] = {};
+  int fit_flip_count = 0;
+  uint64_t finger_flips[kMaxFitFlips] = {};
+  int finger_flip_count = 0;
+  // The next frame logs where the grip of the pointing hand is.
+  bool say_grip = true;
+};
+HandFitState g_fit;
+
+// A text key of the game folder's bwvr.ini. Empty when it is not there.
+void IniText(const char* key, char* text, DWORD size) {
+  text[0] = 0;
+  char path[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash =
+      length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return;
+  slash[1] = 0;
+  strcat_s(path, "bwvr.ini");
+  GetPrivateProfileStringA("bwvr", key, "", text, size, path);
+}
+
+// A key of the fit, in its range.
+float FitKey(const char* key, int low, int high) {
+  int value = IniInt(key, 0);
+  if (value < low) value = low;
+  if (value > high) value = high;
+  return static_cast<float>(value);
+}
+
+// Up to kMaxFitFlips frames, with commas between them.
+int FitFlips(const char* key, uint64_t frames[kMaxFitFlips]) {
+  char text[128];
+  IniText(key, text, sizeof(text));
+  int count = 0;
+  for (const char* at = text; *at != 0 && count < kMaxFitFlips;) {
+    char* end = nullptr;
+    const unsigned long frame = strtoul(at, &end, 10);
+    if (end == at) break;
+    frames[count++] = frame;
+    at = *end == ',' ? end + 1 : end;
+  }
+  return count;
+}
+
+void LoadHandFit() {
+  if (g_fit.loaded) return;
+  g_fit.loaded = true;
+  hand_fit_math::HandFit& f = g_fit.fit;
+  f.out_mm = FitKey("hand_fit_out_mm", -80, 80);
+  f.up_mm = FitKey("hand_fit_up_mm", -80, 80);
+  f.forward_mm = FitKey("hand_fit_forward_mm", -80, 80);
+  f.pitch_deg = FitKey("hand_fit_pitch_deg", -90, 90);
+  f.yaw_deg = FitKey("hand_fit_yaw_deg", -90, 90);
+  f.roll_deg = FitKey("hand_fit_roll_deg", -90, 90);
+  g_fit.fingers = IniInt("finger_tracking", 1) != 0;
+  g_fit.test_keys = IniInt("test_keys", 0) != 0;
+  g_fit.fit_flip_count = FitFlips("hand_fit_test_flips", g_fit.fit_flips);
+  g_fit.finger_flip_count =
+      FitFlips("finger_tracking_test_flips", g_fit.finger_flips);
+  char text[128];
+  IniText("fake_controller_fingers", text, sizeof(text));
+  if (text[0] != 0) {
+    float values[5] = {};
+    const int n = sscanf_s(text, "%f %f %f %f %f", &values[0], &values[1],
+                           &values[2], &values[3], &values[4]);
+    if (n == 5) {
+      g_fit.fake_fingers = true;
+      for (int i = 0; i < 5; ++i) {
+        const float c = values[i] * 0.01f;
+        g_fit.fake_curl[i] = c < 0.0f ? 0.0f : (c > 1.0f ? 1.0f : c);
+      }
+    }
+  }
+  if (hand_fit_math::IsZero(f)) {
+    ModLog("controllers  : the hands are on the grip pose of the runtime "
+           "(each hand_fit key is 0)");
+  } else {
+    ModLog("controllers  : the fit of the hands on the controllers: %.0f mm "
+           "out, %.0f mm up, %.0f mm forward, a pitch of %.0f, a yaw of %.0f "
+           "and a roll of %.0f degrees. The left hand is the mirror image",
+           f.out_mm, f.up_mm, f.forward_mm, f.pitch_deg, f.yaw_deg,
+           f.roll_deg);
+  }
+  ModLog("controllers  : finger tracking %s",
+         g_fit.fingers ? "bends the fingers when the runtime tracks them "
+                         "(finger_tracking=1 or 2)"
+                       : "is off, the trigger and the grip bend the fingers "
+                         "(finger_tracking=0)");
+  if (g_fit.fake_fingers) {
+    ModLog("controllers  : the fake hands have finger tracking with the "
+           "curls %.2f %.2f %.2f %.2f %.2f (fake_controller_fingers)",
+           g_fit.fake_curl[0], g_fit.fake_curl[1], g_fit.fake_curl[2],
+           g_fit.fake_curl[3], g_fit.fake_curl[4]);
+  }
+}
+
+// The fit off or on, from the test key or from hand_fit_test_flips.
+void FitToggle(const char* by) {
+  g_fit.on = !g_fit.on;
+  g_fit.say_grip = true;
+  ControllersGrabPulse(1, 0.5f, g_fit.on ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: the hands are %s, frame %llu", by,
+         g_fit.on ? "on the grip pose with the fit of the hand_fit keys"
+                  : "on the grip pose of the runtime, with no fit",
+         g_frame);
+}
+
+// Finger tracking off or on, from the test key or from
+// finger_tracking_test_flips.
+void FingersToggle(const char* by) {
+  g_fit.fingers = !g_fit.fingers;
+  ControllersGrabPulse(1, 0.5f, g_fit.fingers ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: %s, frame %llu", by,
+         g_fit.fingers ? "finger tracking bends the fingers"
+                       : "the trigger and the grip bend the fingers",
+         g_frame);
+}
+
+// The test keys of the fit and of finger tracking, once a frame. Ctrl, Shift
+// and H: the fit off and on. Ctrl, Shift and F: finger tracking off and on.
+// A long pulse for on and a short pulse for off. The frames of
+// hand_fit_test_flips and finger_tracking_test_flips act as the keys do, and
+// a frame counts as a step of the script counts it.
+void PollHandFitKeys() {
+  for (int i = 0; i < g_fit.fit_flip_count; ++i) {
+    if (ControllersTestFrame(g_fit.fit_flips[i], g_frame) ==
+        g_fit.fit_flips[i]) {
+      FitToggle("test key hand_fit_test_flips");
+    }
+  }
+  for (int i = 0; i < g_fit.finger_flip_count; ++i) {
+    if (ControllersTestFrame(g_fit.finger_flips[i], g_frame) ==
+        g_fit.finger_flips[i]) {
+      FingersToggle("test key finger_tracking_test_flips");
+    }
+  }
+  if (!g_fit.test_keys) return;
+  const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                          (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool fit_down = ctrl_shift && (GetAsyncKeyState('H') & 0x8000) != 0;
+  const bool fingers_down =
+      ctrl_shift && (GetAsyncKeyState('F') & 0x8000) != 0;
+  const bool fit_pressed = fit_down && !g_fit.fit_key_before;
+  const bool fingers_pressed = fingers_down && !g_fit.fingers_key_before;
+  g_fit.fit_key_before = fit_down;
+  g_fit.fingers_key_before = fingers_down;
+  if (fit_pressed && GameInFront()) FitToggle("test key (Ctrl, Shift and H)");
+  if (fingers_pressed && GameInFront()) {
+    FingersToggle("test key (Ctrl, Shift and F)");
+  }
+}
+
+// The fit on the grip pose of each hand, and the curls of the fake fingers.
+// Once a frame, directly after the read of the hands, so each reader of
+// g_hands in this frame has the same hand.
+void FitHands() {
+  LoadHandFit();
+  PollHandFitKeys();
+  for (int h = 0; h < 2; ++h) {
+    bwvr::HandInput& hand = g_hands[h];
+    if (g_fake.mode != 0 && g_fit.fake_fingers && hand.active) {
+      hand.fingers_valid = true;
+      for (int f = 0; f < 5; ++f) hand.finger_curl[f] = g_fit.fake_curl[f];
+    }
+    if (!g_fit.fingers) hand.fingers_valid = false;
+    if (!g_fit.on || !hand.grip_valid || hand_fit_math::IsZero(g_fit.fit)) {
+      continue;
+    }
+    hand_fit_math::ApplyHandFit(g_fit.fit, h == 0, hand.grip_position,
+                                hand.grip_orientation);
+  }
+  const bwvr::HandInput& pointing = g_hands[PointingIndex()];
+  if (g_fit.say_grip && pointing.active && pointing.grip_valid) {
+    g_fit.say_grip = false;
+    const float* p = pointing.grip_position;
+    const float* q = pointing.grip_orientation;
+    ModLog("controllers  : the grip of the pointing hand is at %.3f %.3f "
+           "%.3f m with the turn %.3f %.3f %.3f %.3f (x y z w), %s, frame "
+           "%llu", p[0], p[1], p[2], q[0], q[1], q[2], q[3],
+           g_fit.on && !hand_fit_math::IsZero(g_fit.fit) ? "with the fit"
+                                                         : "with no fit",
+           g_frame);
+  }
+}
+
 }  // namespace
 
 // Once for each frame the scene is drawn, after the head pose of the frame is
@@ -4417,6 +4629,7 @@ void ControllersFrame() {
   } else {
     return;
   }
+  FitHands();
   LatchFront();
   LogBothButtons();
   UpdateAim();
@@ -4828,6 +5041,8 @@ bool ControllersOverlayHands(OverlayHands* out) {
                                  o.position, o.rotation);
     o.trigger = hand.trigger;
     o.squeeze = hand.squeeze;
+    o.fingers = hand.fingers_valid;
+    for (int f = 0; f < 5; ++f) o.finger_curl[f] = hand.finger_curl[f];
     o.valid = true;
   }
   return true;

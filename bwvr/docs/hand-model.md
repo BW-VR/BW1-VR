@@ -7,6 +7,9 @@ This doc is about how the hands look and feel. It has these parts:
 - The mod's hands: the game's Hand mesh on both real hands ("The game's hand
   on both real hands"), and a mesh that the player edited ("A hand that the
   player edited").
+- The fit of the hands on the controllers ("The fit of the hand on the
+  controller"), and fingers that follow the real fingers ("Finger
+  tracking").
 - Fingers that react to the world ("Hands that react to the world").
 - The glow at the Hand's point ("The glow at the Hand's point").
 - The renderer that draws the mod's own meshes in the game's frame ("Overlay
@@ -23,6 +26,8 @@ about Half-Life: Alyx that this doc uses.
 | --- | --- |
 | The mod's hands | `hand_model.cpp`, `hand_model_math.h`, `hand_model_file.cpp` |
 | Poses, curls, the overlay | `overlay.cpp`, `overlay_math.h` |
+| The fit on the controller | `hand_fit_math.h`, `controllers.cpp` |
+| Finger tracking | `../vr/finger_curl_math.h`, `../vr/xr_screen.cpp`, `overlay.cpp` |
 | Fingers and the world | `hand_feel.cpp`, `hand_feel_math.h` |
 | The glow at the Hand's point and the halos | `hand_glow.cpp` |
 | The glow on the mesh of a target | `target_glow.cpp`, `target_glow_math.h` |
@@ -30,8 +35,10 @@ about Half-Life: Alyx that this doc uses.
 | The export tool | `bwvr/tools/hand_export/` |
 
 The rule for all of it: the Hand is the real hand, 1:1 in size and place. The
-mod changes only how the fingers bend. It never moves or turns a hand, and it
-makes no motion that the player did not make.
+mod changes only how the fingers bend. It never moves or turns a hand by
+itself, and it makes no motion that the player did not make. The fit on the
+controller is a still offset that the player sets, so that the hand covers
+the real hand.
 
 ## The model of the Hand
 
@@ -587,14 +594,188 @@ of 255. The overlay costs about 0.1 ms a frame on the CPU for both hands.
 **Open: only a headset shows it.**
 
 1. Whether each hand sits right on the controller, with the right size and
-   a wrist that fades. `hand_mesh_yaw_deg`, `hand_mesh_pitch_deg` and
-   `hand_mesh_roll_deg` turn it.
+   a wrist that fades. The keys of the fit ("The fit of the hand on the
+   controller") move and turn it for the player.
 2. Whether the fingers follow the trigger and the grip at each point of the
    way and look right.
 3. Whether a finger goes into a rock, a villager or a tree, or stays far
    from it.
 4. How the point, the flat hand and the fist of the mesh look at the
    teleport aim, at a stroke of the Creature and at a drag of the land.
+
+## The fit of the hand on the controller
+
+Each runtime and each controller puts the grip pose at a different place in
+the hand. So a hand that covers the real hand on one controller can be
+turned or moved on another controller. Six keys move and turn both hands
+against the grip pose, so that the player can make the hand of the mod cover
+the real hand. The code is `src/mod/hand_fit_math.h` (the pure math) and
+`FitHands` in `src/mod/controllers.cpp`.
+
+### What the mod does
+
+Once a frame, directly after the read of the hands (`ControllersFrame`), the
+mod applies the fit to the grip pose of each hand. Each reader of the grip
+pose then has the same hand: the Hand of the game and its point, the hands
+of the overlay, the hold in the palm, the leash ring and the hint cards at
+the wrists. The aim pose does not change, so the ray of the menu and of the
+teleport stays where the runtime has it.
+
+The fit is in the grip frame of OpenXR (+x right, +y up, -z forward along
+the controller):
+
+```
+position    = grip_position + grip_turn * offset
+orientation = grip_turn * Ry(yaw) * Rx(pitch) * Rz(roll)
+offset      = (out, up, -forward) in meters
+```
+
+So the hand moves first, and then it turns about the new point. A turn does
+not move the place that the offset chose. The values are for the right hand.
+The left hand gets the mirror image: `out`, the yaw and the roll change sign.
+So "out" moves each hand to the back of the hand, away from the other hand,
+and a plus yaw or roll turns each hand toward the other hand.
+
+The fit is a still offset that the player sets. It makes no motion, and with
+each key at 0 the hands are on the grip pose of the runtime.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `hand_fit_out_mm` | 0 | Moves each hand to the back of the hand (plus) or to the palm side (minus). -80 to 80. The launcher row "Hand fit: to the side", -60 to 60 mm |
+| `hand_fit_up_mm` | 0 | Moves the hands up or down. The launcher row "Hand fit: up" |
+| `hand_fit_forward_mm` | 0 | Moves the hands forward or back along the controller. The launcher row "Hand fit: forward" |
+| `hand_fit_pitch_deg` | 0 | Turns the front of the hands up (plus) or down. -90 to 90. The launcher row "Hand fit: tilt up", -45 to 45 degrees |
+| `hand_fit_yaw_deg` | 0 | Turns the front of the hands toward the other hand (plus). The launcher row "Hand fit: turn in" |
+| `hand_fit_roll_deg` | 0 | Turns the top of the hands toward the other hand (plus), about the line of the fingers. The launcher row "Hand fit: roll in" |
+| `hand_fit_test_flips` | | Test key. Up to 8 frames, with commas between them. At each one the fit goes off or on, as Ctrl, Shift and H do. A frame counts as a step of the script counts it |
+
+The six rows are in the launcher of the PC, in the group "Controllers". The
+menu of the headset app does not show them, because its page has room for
+10 rows. It keeps their values in the ini.
+
+With `test_keys=1`, **Ctrl, Shift and H** turn the fit off and on while the
+game runs. The pointing controller gives a long pulse for on and a short
+pulse for off.
+
+### The log
+
+The tag `controllers`. At the first frame: the six values, or that each one
+is 0. At that frame and at each change of the test key: the grip point and
+the turn of the pointing hand in the LOCAL space, with or without the fit.
+
+### Tests
+
+The math test (`hand_fit_checks.h`) checks that a fit of zeros changes
+nothing, that the offset goes along the axes of the grip, that the left hand
+is the mirror image, that each turn moves the front or the top of the hand
+the way its key says, that a turn keeps the point of the offset, and that the
+yaw comes after the pitch.
+
+### Limits
+
+**Open: only a headset shows it.** Which values fit the real hand on the
+Touch controllers of the Quest 3 and on the controllers of the Steam Frame.
+
+## Finger tracking
+
+A controller that sees the fingers (the controllers of the Steam Frame and
+of the Valve Index) gives the runtime the place of each finger. With
+`XR_EXT_hand_tracking` the runtime gives the 26 joints of each hand. The mod
+makes one curl for each finger from them, and each finger of the hands bends
+as the real finger bends. A controller that does not see the fingers (the
+Touch controllers) gives no joints, and the trigger and the grip bend the
+fingers as before ("The game's hand on both real hands").
+
+The code is `src/vr/finger_curl_math.h` (the curl from the joints),
+`XrScreen::Impl::LocateFingers` in `src/vr/xr_screen.cpp`, and
+`overlay_math::TrackedCurls` with its call in `src/mod/overlay.cpp`.
+
+### What the mod does
+
+**The extension.** With `finger_tracking` 1 or 2, `XrScreen` asks for
+`XR_EXT_hand_tracking` when the runtime lists it, and for
+`XR_EXT_hand_joints_motion_range` too. It reads
+`XrSystemHandTrackingPropertiesEXT` and makes one hand tracker for each hand
+after the action spaces. A failure only leaves the fingers on the trigger and
+the grip. With `xr_bridge=1` the x64 host makes the instance, so the client
+gives it the value of `finger_tracking` with the command `Instance` (protocol
+2 of the bridge).
+
+**The joints.** In each frame, after the grip pose, `xrLocateHandJointsEXT`
+gives the joints in the LOCAL space at the display time of the eyes. With
+`finger_tracking=1` the motion range is "unobstructed", the pose of the real
+fingers. With 2 it is "conforming to controller": a closed hand closes around
+the controller. When the tracker is not active or a joint has no valid place,
+the hand has no finger tracking in that frame (`HandInput::fingers_valid`).
+
+**The curl.** For each finger the mod adds the bends at its joints past the
+metacarpal: two on the thumb, three on each other finger. A bend is the angle
+between two bones. On a finger, a bend to the back of the hand counts as 0.
+The side of a bend comes from the x axis of the palm joint. The thumb does
+not bend in the plane of the palm, so each of its bends counts. The sum is
+divided by the sum of the bends of the game's tightest pose (the table in
+"What the mod does" above): 135.2 degrees for the thumb, 207.0 for the index
+finger, 226.8 for the middle finger, 272.8 for the ring finger and 253.9 for
+the little finger. The curl is 0 to 1.
+
+**The poses.** The tracked curl takes the place of the trigger and the grip
+in each pose. In the poses relaxed, point, flat and fist the curl of each
+finger is the tracked curl: the real hand chooses to point, to be flat or to
+make a fist. The hold pose keeps its range, `lo + (hi - lo) * curl`, so the
+fingers close on the held object and do not go into it. The weights of the
+poses stay, so a change to and from the hold takes the blend time of 0.1 s.
+Hand feel ("Hands that react to the world") then acts on these curls as on
+the curls of the trigger and the grip.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `finger_tracking` | 1 | 1 the tracked real fingers bend the fingers. 2 the same with the motion range "conforming to controller". 0 the trigger and the grip bend the fingers, and the mod asks for no extension. The launcher row "Finger tracking" |
+| `finger_tracking_test_flips` | | Test key. Up to 8 frames, with commas between them. At each one finger tracking goes off or on, as Ctrl, Shift and F do |
+| `fake_controller_fingers` | | Test key. Five curls in percent, the thumb first. The fake hands have finger tracking with these curls |
+
+With `test_keys=1`, **Ctrl, Shift and F** turn finger tracking off and on
+while the game runs. The pointing controller gives a long pulse for on and a
+short pulse for off. The key needs `finger_tracking` 1 or 2 at the start,
+because the extension is asked for only at the start.
+
+### The log
+
+The tag `openxr`: whether the runtime has the extensions and the system has
+hand tracking, and which motion range. The tag `controllers`: the trackers,
+and each change of a hand to and from finger tracking (40 lines at most).
+The tag `overlay`: each change of a hand between the tracked curls and the
+trigger and the grip, with the curls (20 lines at most).
+
+### Tests
+
+The math test (`hand_fit_checks.h`) makes a hand with the frame of the joints
+of `XR_EXT_hand_tracking`. A straight hand has a curl of 0 on each finger.
+Bends of 30 degrees give 60 / 135.2 on the thumb and 90 divided by the full
+bend on each other finger, on both hands. A finger bent back has a curl of
+0, a fist past the tightest pose has a curl of 1, a turn of the whole hand
+keeps each curl, and a bone with no length gives no curls. In the poses the
+tracked curl is the curl, and in the hold it stays in the hold range.
+
+### Limits
+
+- The spread of the fingers is not read. Only the curl is.
+- The mod does not use the joints for the place of the hand. The grip pose
+  and the fit place it.
+- The menu of the headset app on the Quest has the row, but the Touch
+  controllers give no joints.
+
+**Open: only a headset shows it.**
+
+1. Whether the runtime of the Steam Frame gives `XR_EXT_hand_tracking` from
+   its controllers to the game, directly and through the x64 host.
+2. Whether Virtual Desktop gives joints while the Quest 3 holds its Touch
+   controllers, and how those fingers look.
+3. Whether the full bends of the game's tightest pose make a real fist a
+   fist, and an open real hand open.
 
 ## A hand that the player edited
 

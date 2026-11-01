@@ -23,6 +23,7 @@
 #include <openxr/openxr_platform.h>
 
 #include "../common/version.h"
+#include "finger_curl_math.h"
 
 namespace bwvr {
 namespace {
@@ -545,6 +546,20 @@ struct XrScreen::Impl {
   XrSpace gaze_space = XR_NULL_HANDLE;
   bool gaze_valid = false;
   float gaze_direction[3] = {0.0f, 0.0f, -1.0f};
+  // FINGER TRACKING (XR_EXT_hand_tracking). The trackers stay null when the
+  // runtime or the headset has no hand tracking, and the fingers then follow
+  // the trigger and the grip.
+  bool hands_wanted = false;
+  bool hands_conform = false;    // the motion range "conforming to controller"
+  bool hands_extension = false;  // the instance has XR_EXT_hand_tracking
+  bool range_extension = false;  // and XR_EXT_hand_joints_motion_range
+  bool hands_supported = false;  // and the system has hand tracking
+  XrHandTrackerEXT hand_tracker[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+  PFN_xrCreateHandTrackerEXT create_hand_tracker = nullptr;
+  PFN_xrDestroyHandTrackerEXT destroy_hand_tracker = nullptr;
+  PFN_xrLocateHandJointsEXT locate_hand_joints = nullptr;
+  bool fingers_seen[2] = {false, false};  // for one log line each way
+  int finger_logs = 0;
   bool profiles_logged = false;
   char profile[2][XR_MAX_PATH_LENGTH] = {{0}, {0}};
 
@@ -728,6 +743,9 @@ struct XrScreen::Impl {
   void ClearInput(HandInput* hands);   // not running, or not focused
   void LogProfiles();                  // on INTERACTION_PROFILE_CHANGED
   void DestroyInput();                 // Stop, before the session
+  void CreateHandTrackers();           // CreateInput
+  void DestroyHandTrackers();          // DestroyInput
+  bool LocateFingers(int h, XrTime when, float curls[5]);
   void DestroyActionSet();             // Stop, after the session
   bool SendCard(int index, const CardLayer& card,
                 XrCompositionLayerQuad* quad);
@@ -844,8 +862,91 @@ bool XrScreen::Impl::CreateInput() {
       gaze_supported = false;
     }
   }
+  CreateHandTrackers();
   input_ready = true;
   return true;
+}
+
+// FINGER TRACKING: one tracker for each hand. A failure only leaves the
+// fingers on the trigger and the grip.
+void XrScreen::Impl::CreateHandTrackers() {
+  if (!hands_supported) return;
+  const bool ok =
+      Check(xrGetInstanceProcAddr(
+                instance, "xrCreateHandTrackerEXT",
+                reinterpret_cast<PFN_xrVoidFunction*>(&create_hand_tracker)),
+            "xrGetInstanceProcAddr(xrCreateHandTrackerEXT)") &&
+      Check(xrGetInstanceProcAddr(
+                instance, "xrDestroyHandTrackerEXT",
+                reinterpret_cast<PFN_xrVoidFunction*>(&destroy_hand_tracker)),
+            "xrGetInstanceProcAddr(xrDestroyHandTrackerEXT)") &&
+      Check(xrGetInstanceProcAddr(
+                instance, "xrLocateHandJointsEXT",
+                reinterpret_cast<PFN_xrVoidFunction*>(&locate_hand_joints)),
+            "xrGetInstanceProcAddr(xrLocateHandJointsEXT)");
+  if (!ok || create_hand_tracker == nullptr || destroy_hand_tracker == nullptr ||
+      locate_hand_joints == nullptr) {
+    hands_supported = false;
+    return;
+  }
+  for (int h = 0; h < 2; ++h) {
+    XrHandTrackerCreateInfoEXT info = {XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
+    info.hand = h == 0 ? XR_HAND_LEFT_EXT : XR_HAND_RIGHT_EXT;
+    info.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+    if (!Check(create_hand_tracker(session, &info, &hand_tracker[h]),
+               "xrCreateHandTrackerEXT")) {
+      DestroyHandTrackers();
+      hands_supported = false;
+      return;
+    }
+  }
+  log("  controllers  : finger tracking has a tracker for each hand");
+}
+
+void XrScreen::Impl::DestroyHandTrackers() {
+  for (int h = 0; h < 2; ++h) {
+    if (hand_tracker[h] != XR_NULL_HANDLE && destroy_hand_tracker != nullptr) {
+      destroy_hand_tracker(hand_tracker[h]);
+    }
+    hand_tracker[h] = XR_NULL_HANDLE;
+    fingers_seen[h] = false;
+  }
+}
+
+// The curl of each finger of one hand at the display time. False when the
+// runtime does not track each joint of the hand now (a controller that has
+// no finger tracking, or a hand that is not seen).
+bool XrScreen::Impl::LocateFingers(int h, XrTime when, float curls[5]) {
+  if (hand_tracker[h] == XR_NULL_HANDLE) return false;
+  XrHandJointsLocateInfoEXT info = {XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
+  info.baseSpace = space;
+  info.time = when;
+  XrHandJointsMotionRangeInfoEXT range = {
+      XR_TYPE_HAND_JOINTS_MOTION_RANGE_INFO_EXT};
+  range.handJointsMotionRange =
+      hands_conform ? XR_HAND_JOINTS_MOTION_RANGE_CONFORMING_TO_CONTROLLER_EXT
+                    : XR_HAND_JOINTS_MOTION_RANGE_UNOBSTRUCTED_EXT;
+  if (range_extension) info.next = &range;
+  XrHandJointLocationEXT joints[XR_HAND_JOINT_COUNT_EXT];
+  XrHandJointLocationsEXT located = {XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
+  located.jointCount = XR_HAND_JOINT_COUNT_EXT;
+  located.jointLocations = joints;
+  if (XR_FAILED(locate_hand_joints(hand_tracker[h], &info, &located)) ||
+      !located.isActive) {
+    return false;
+  }
+  const XrSpaceLocationFlags need = XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                                    XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+  float positions[finger_curl_math::kJointCount][3];
+  for (int j = 0; j < finger_curl_math::kJointCount; ++j) {
+    if ((joints[j].locationFlags & need) != need) return false;
+    positions[j][0] = joints[j].pose.position.x;
+    positions[j][1] = joints[j].pose.position.y;
+    positions[j][2] = joints[j].pose.position.z;
+  }
+  const XrQuaternionf& q = joints[finger_curl_math::kPalm].pose.orientation;
+  const float palm[4] = {q.x, q.y, q.z, q.w};
+  return finger_curl_math::FingerCurls(positions, palm, curls);
 }
 
 void XrScreen::Impl::SuggestProfile(const Profile& info) {
@@ -1059,10 +1160,23 @@ void XrScreen::Impl::SyncInput(HandInput* hands, XrTime when) {
       out.grip_orientation[2] = location.pose.orientation.z;
       out.grip_orientation[3] = location.pose.orientation.w;
     }
+    // FINGER TRACKING: the same space and the same time as the grip.
+    out.fingers_valid = LocateFingers(h, when, out.finger_curl);
+    if (out.fingers_valid != fingers_seen[h]) {
+      fingers_seen[h] = out.fingers_valid;
+      if (++finger_logs <= 40) {
+        log("  controllers  : the %s hand %s", h == 0 ? "left" : "right",
+            out.fingers_valid
+                ? "has finger tracking now"
+                : "has no finger tracking now, so the trigger and the grip "
+                  "bend its fingers");
+      }
+    }
   }
 }
 
 void XrScreen::Impl::DestroyInput() {
+  DestroyHandTrackers();
   if (gaze_space != XR_NULL_HANDLE) xrDestroySpace(gaze_space);
   gaze_space = XR_NULL_HANDLE;
   gaze_action = XR_NULL_HANDLE;
@@ -1187,6 +1301,9 @@ bool XrScreen::StartInstance(LogFn log) {
       remote_ = new RemoteScreen(log ? log : NoLog);
       if (!remote_->Launch()) return false;
     }
+    // The host makes the instance, so it asks for finger tracking.
+    remote_->packet->index =
+        impl_->hands_wanted ? (impl_->hands_conform ? 2u : 1u) : 0u;
     remote_->instance_ready = remote_->Call(bridge::Instance) && remote_->packet->result != 0;
     return remote_->instance_ready;
   }
@@ -1219,6 +1336,14 @@ bool XrScreen::StartInstance(LogFn log) {
                      XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME) == 0) {
             s.gaze_extension = s.gaze_wanted;
           }
+          if (strcmp(list[i].extensionName,
+                     XR_EXT_HAND_TRACKING_EXTENSION_NAME) == 0) {
+            s.hands_extension = s.hands_wanted;
+          }
+          if (strcmp(list[i].extensionName,
+                     XR_EXT_HAND_JOINTS_MOTION_RANGE_EXTENSION_NAME) == 0) {
+            s.range_extension = s.hands_wanted;
+          }
           if (strcmp(list[i].extensionName, "XR_MSFT_controller_model") == 0 ||
               strcmp(list[i].extensionName, "XR_FB_render_model") == 0) {
             model = true;
@@ -1230,12 +1355,24 @@ bool XrScreen::StartInstance(LogFn log) {
       }
     }
   }
-  const char* extensions[] = {s.vulkan ? XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME
-                                       : XR_KHR_D3D11_ENABLE_EXTENSION_NAME,
-                              XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME};
+  // The motion range needs hand tracking.
+  if (!s.hands_extension) s.range_extension = false;
+  const char* extensions[4] = {s.vulkan ? XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME
+                                        : XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
+  uint32_t extension_count = 1;
+  if (s.gaze_extension) {
+    extensions[extension_count++] = XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME;
+  }
+  if (s.hands_extension) {
+    extensions[extension_count++] = XR_EXT_HAND_TRACKING_EXTENSION_NAME;
+  }
+  if (s.range_extension) {
+    extensions[extension_count++] =
+        XR_EXT_HAND_JOINTS_MOTION_RANGE_EXTENSION_NAME;
+  }
 
   XrInstanceCreateInfo create = {XR_TYPE_INSTANCE_CREATE_INFO};
-  create.enabledExtensionCount = s.gaze_extension ? 2 : 1;
+  create.enabledExtensionCount = extension_count;
   create.enabledExtensionNames = extensions;
   strcpy_s(create.applicationInfo.applicationName, BWVR_PRODUCT_NAME);
   // A uint32_t, so not XR_MAKE_VERSION, which is 64 bit.
@@ -1324,6 +1461,12 @@ int XrScreen::StartSystem() {
   XrSystemEyeGazeInteractionPropertiesEXT gaze_properties = {
       XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
   if (s.gaze_extension) system_properties.next = &gaze_properties;
+  XrSystemHandTrackingPropertiesEXT hand_properties = {
+      XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT};
+  if (s.hands_extension) {
+    hand_properties.next = system_properties.next;
+    system_properties.next = &hand_properties;
+  }
   s.system_name[0] = 0;
   if (XR_SUCCEEDED(
           xrGetSystemProperties(s.instance, s.system, &system_properties))) {
@@ -1339,6 +1482,26 @@ int XrScreen::StartSystem() {
                 "has no eye tracker, so the fovea is straight ahead"
               : "the runtime has no XR_EXT_eye_gaze_interaction, so the fovea "
                 "is straight ahead");
+  }
+  s.hands_supported =
+      s.hands_extension && hand_properties.supportsHandTracking == XR_TRUE;
+  if (s.hands_wanted) {
+    s.log("  openxr: finger tracking: %s%s",
+          s.hands_supported
+              ? "the runtime has XR_EXT_hand_tracking and the system has "
+                "hand tracking"
+          : s.hands_extension
+              ? "the runtime has XR_EXT_hand_tracking, but the system has no "
+                "hand tracking, so the trigger and the grip bend the fingers"
+              : "the runtime has no XR_EXT_hand_tracking, so the trigger and "
+                "the grip bend the fingers",
+          !s.hands_supported ? ""
+          : s.range_extension
+              ? (s.hands_conform
+                     ? ". The fingers close around the controller"
+                     : ". The fingers have the pose of the real fingers")
+              : ". The runtime has no XR_EXT_hand_joints_motion_range, so "
+                "it chooses the motion range");
   }
 
   // What the headset would like each eye rendered at. This needs no session
@@ -4490,6 +4653,13 @@ void XrScreen::CaptureSwapchainNext(uint64_t name) {
 }
 
 void XrScreen::WantEyeGaze(bool on) { impl_->gaze_wanted = on; }
+
+void XrScreen::WantHandTracking(bool on, bool conform) {
+  impl_->hands_wanted = on;
+  impl_->hands_conform = conform;
+}
+
+bool XrScreen::HandTrackingSupported() const { return impl_->hands_supported; }
 
 bool XrScreen::EyeGazeSupported() const { return impl_->gaze_supported; }
 

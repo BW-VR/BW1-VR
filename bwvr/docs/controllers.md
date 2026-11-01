@@ -388,6 +388,8 @@ struct HandInput {
   bool primary;              // A or X
   bool secondary;            // B or Y
   bool menu;
+  bool fingers_valid;        // finger tracking, see hand-model.md
+  float finger_curl[5];      // thumb first, 0 open to 1 a fist
   uint64_t serial;           // one more on every sync
 };
 
@@ -396,6 +398,12 @@ const char* HandProfile(int index) const; // "" when nothing is bound
 bool InputFocused() const;
 void Haptic(int index, float amplitude, float seconds);
 ```
+
+`fingers_valid` and `finger_curl` come from `XR_EXT_hand_tracking` when the
+runtime tracks the fingers of that hand (`hand-model.md`, "Finger
+tracking"). `ControllersFrame` moves and turns the grip pose by the fit of
+the hand (`hand-model.md`, "The fit of the hand on the controller") before
+any other reader sees it.
 
 `bwvr/src/xrtest/main.cpp` prints both hands once a second. It tests the
 controllers in the headset with no game.

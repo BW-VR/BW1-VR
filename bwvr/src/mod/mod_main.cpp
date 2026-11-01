@@ -590,6 +590,9 @@ int g_foveation_inner_deg = 0;
 int g_foveation_outer_deg = 0;
 int g_foveation_gaze = 1;
 int g_foveation_show = 0;
+// Finger tracking (docs/hand-model.md, "Finger tracking"): 0 off, 1 the
+// pose of the real fingers, 2 the fingers closed around the controller.
+int g_finger_tracking = 1;
 // Foveated resolution (docs/backend.md, "Foveated resolution").
 int g_fovea_res = 0;
 int g_fovea_res_outer_pct = 50;
@@ -1519,6 +1522,9 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "foveation_gaze", 1, path) != 0 ? 1 : 0;
   g_foveation_show =
       GetPrivateProfileIntA("bwvr", "foveation_show", 0, path) != 0 ? 1 : 0;
+  g_finger_tracking = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "finger_tracking", 1, path));
+  if (g_finger_tracking < 0 || g_finger_tracking > 2) g_finger_tracking = 1;
   g_fovea_res =
       GetPrivateProfileIntA("bwvr", "fovea_res", 0, path) != 0 ? 1 : 0;
   g_fovea_res_outer_pct = static_cast<int>(
@@ -2101,6 +2107,7 @@ void PrepareScreen(bwvr::XrScreen* screen) {
   screen->UseVulkan(g_xr_vulkan != 0);
   screen->UseD3D11(!g_vulkan_only);
   screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
+  screen->WantHandTracking(g_finger_tracking != 0, g_finger_tracking == 2);
   screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
   screen->SetHoldMs(g_xr_hold_ms);
 }

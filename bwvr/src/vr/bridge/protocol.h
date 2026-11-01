@@ -3,12 +3,12 @@
 #include <stddef.h>
 
 namespace bwvr::bridge {
-constexpr uint32_t kMagic = 0x42575242, kVersion = 1;
+constexpr uint32_t kMagic = 0x42575242, kVersion = 2;
 constexpr uint32_t kPayload = 32 * 1024 * 1024;
 enum Command : uint32_t { Instance = 1, System, Session, Begin, EyeTexture,
   EyePixels, PanelTexture, Panels, Card, Window, End, Haptic, Stop, Probe };
 // These pointer-free public types have the same MSVC layout in x86 and x64.
-static_assert(sizeof(EyeView) == 48 && sizeof(HandInput) == 96, "Input ABI");
+static_assert(sizeof(EyeView) == 48 && sizeof(HandInput) == 120, "Input ABI");
 static_assert(sizeof(PanelQuad) == 56 && sizeof(WindowLayer) == 132, "Layer ABI");
 #pragma pack(push, 8)
 struct CardInfo {

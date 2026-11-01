@@ -435,8 +435,12 @@ class Menu {
   }
 
  private:
-  // A row is on its page when the renderer Vulkan uses it.
-  static bool Shown(int i) { return !st::OnlyDirect3D9(st::kSettings[i].key); }
+  // A row is on its page when the renderer Vulkan uses it and the launcher
+  // of the PC is not the only place for it.
+  static bool Shown(int i) {
+    return !st::OnlyDirect3D9(st::kSettings[i].key) &&
+           !st::OnlyLauncher(st::kSettings[i].key);
+  }
 
   static bool GroupHasRows(int group) {
     for (int i = group + 1; i < st::kSettingCount; ++i) {

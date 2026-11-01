@@ -553,12 +553,23 @@ that moves while the Hand takes it.
   shown it: a desktop run has no head to feel the motion.
 - **P5. Hand tracking.** The player plays with the hands and no
   controllers: the Hand follows the real hand and its fingers, one to one,
-  as it follows a controller. First find what the headset gives to the
-  game: whether Virtual Desktop (VDXR) gives a 32 bit OpenXR program the
-  extension `XR_EXT_hand_tracking`, and which gestures it gives. Then
-  choose a gesture for each control: the grip, the trigger, the stick, and
-  A, B, X and Y. The rules of the Hand stay: the real hand, one to one, and
-  no motion that the player did not make.
+  as it follows a controller. The mod asks for `XR_EXT_hand_tracking` for
+  finger tracking on the controllers (`hand-model.md`, "Finger tracking"),
+  and the log says whether the runtime and the system have it. A log of a
+  headset run tells whether Virtual Desktop (VDXR) gives it to the game.
+  Then choose a gesture for each control: the grip, the trigger, the stick,
+  and A, B, X and Y. The rules of the Hand stay: the real hand, one to one,
+  and no motion that the player did not make.
+- **P18. The fit of the hand and finger tracking: check them in a headset.**
+  The six `hand_fit` keys move and turn both hands against the grip pose,
+  and `finger_tracking` bends the fingers as the real fingers on a
+  controller that sees them (`hand-model.md`). A desktop run showed the fit
+  and the curls with the fake controller. Only a headset shows which values
+  fit the Touch controllers and the controllers of the Steam Frame, and
+  whether the Steam Frame gives the joints, also through the x64 host. A fit
+  in the headset, with the controllers and no restart, is not built: the
+  player sets the values in the launcher of the PC, and the menu of the
+  headset app does not show them.
 - **P7. A view for videos.** A 16:9 view in the game window with the cards
   and the subtitles in it and a smoothed head, for a capture on the PC.
 - **P8. Pictures in the hints.** A flat picture of each button, then a

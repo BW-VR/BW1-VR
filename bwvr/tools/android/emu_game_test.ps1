@@ -112,7 +112,10 @@
     the render. After the name the runtime points at that pixel of the
     screen quad and pulls the trigger, in place of Enter: a control of the
     box takes the click of the ray. The test checks the press on the quad
-    and that the dialog goes after it.
+    and that the dialog goes after it. The dialog keeps its size in the
+    middle of the render, so with another -ResolutionPct the point moves by
+    the move of the middle (at 200 percent, a render of 4096 by 4096:
+    1838,2166).
 
 .PARAMETER SkipClick
     With -NewProfile: x,y of a row of the start dialog of a new game

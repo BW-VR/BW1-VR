@@ -3283,11 +3283,14 @@ parts that the picture does not need:
   picture.
 - **The second copy of each eye**: the copy of the session from the slot
   into the swapchain.
-- A copy of the panel or of the screen that did not change: there is none.
-  The panel image goes into a slot only after a walk that drew into the
-  panel (`VkScenePanelFor`), and the session copies it only for a new
-  picture. A screen picture goes into a slot only when the slot does not
-  hold it.
+- A copy of the screen that did not change: there is none. A screen
+  picture goes into a slot only when the slot does not hold it. The panel
+  image goes into a slot after each walk that drew into the panel
+  (`VkScenePanelFor`), and the session copies it for each new picture that
+  has one. In the test save each walk draws into the panel, so each picture
+  has two copies of the panel image of the size of the render (one layer,
+  half the bytes of the eye picture). The renderer does not know if its
+  pixels changed. This part stays (see the known limits).
 
 **The keys** (`bwvr.ini` of the game folder, the rules in
 `src/mod/eye_copy_math.h`, checks in
@@ -3382,7 +3385,25 @@ timestamps at the bottom of the pipe goes around each copy
 a walk are in the line of the GPU parts of the walk (`gpu_parts=1`, "The
 GPU parts of the walk").
 
-**What the emulator shows:** RESULTS
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
+-FrameLoop 1`, a render of 1380 by 1104, the test runtime at 72 Hz). The GPU
+of the emulator is the GPU of the PC, so a copy takes 0.02 to 0.03 ms there.
+The MB of the copies are the measure that a headset has too.
+
+| | The new values | The old values |
+| --- | --- | --- |
+| No `fovea_res`, `xr_eye_direct=1`, `frame_loop_hold=2` and 0, 0 | 203 checks, 0 failed. 9299 pictures straight into the swapchains of the slots (1380 by 1104), 0 of the old way, 0 frames with no projection layer. The eyes: one copy of 11.6 MB a picture | the eyes: 11.6 MB into the slot and 2 copies of 5.8 MB into the swapchains, 23.2 MB a picture |
+| `fovea_res=1`, `fovea_res_layer=1`, outer 25 and centre 200 percent, the four keys new and old | 203 checks, 0 failed. The swapchains of the slots have 1069 by 722 (the shown part), the outer rect 345 by 276 at 0 0, the centre rect 720 by 720 at 347 0. The eyes: one copy of 5.9 MB a picture | 204 checks, 0 failed. The eyes: 23.2 MB a picture |
+
+In game 2 (the test save, the same frame of the scene in both runs) the
+pictures of the two projection layers that the runtime read back are the
+same in their rects: 0 of the 518400 pixels of the centre rect and 2 of the
+95220 pixels of the outer rect differ between the new and the old values.
+With `frame_loop_hold=2` and a picture in each frame (68.2 frames of the
+session a second), each picture showed in 2 frames: 341 new pictures in a
+window of 10 s, the age of the shown picture 0.50 frames as a mean and 1 at
+most, and 341 pictures that a newer picture replaced.
 
 **Not shown yet:** the time of the copies in a Quest 3 and in a Steam
 Frame, the even rate in a flight of the camera, the memory of the
@@ -3391,12 +3412,19 @@ answers the calls of the swapchains of the slots on the play thread.
 
 **Known limits:**
 
+- In the emulator `fovea_res=1` with a render of 2760 by 2208
+  (`-ResolutionPct 100`) or 4096 by 4096 (`-ResolutionPct 200`) stops after
+  the first frames of the scene with the old and with the new values of the
+  four keys: the session writes no more slots of the input channel, or the
+  game process ends. The cause is not known.
 - With `vk_atlas_area=1` the pixels of the eye picture outside the shown
   part are undefined. The screen quad of a frame with no scene right after
   a walk with an atlas shows the whole eye picture (`backend.md`, "The
   middle as its own layer"), so it shows those pixels too.
 - The panel image still has two copies (into the slot and into its
-  swapchain) for each walk that drew into the panel.
+  swapchain) of the size of the render for each walk that drew into the
+  panel, in the test save for each picture. The panel quads show only some
+  rects of it.
 - The renderer still draws into its own two targets, and the play thread
   copies from them. A walk straight into a swapchain image would need the
   renderer to take a target for each walk.

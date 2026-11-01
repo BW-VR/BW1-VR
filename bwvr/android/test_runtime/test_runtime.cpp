@@ -1514,6 +1514,11 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
   std::string what;
   std::string quads;  // each quad in full, for the line "quads"
   static std::string s_last_projection;
+  // A second projection layer (the centre layer of fovea_res_layer=1) goes
+  // over the first: the views of the first stay the views of the frame, and
+  // one line has the views of each projection layer.
+  std::string projections;
+  int projection_count = 0;
   for (uint32_t i = 0; i < info->layerCount; ++i) {
     const XrCompositionLayerBaseHeader* l = info->layers[i];
     if (l->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
@@ -1541,8 +1546,10 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
         if (v.subImage.imageArrayIndex != 0) Fault("frame %ld: a view of a projection layer of array index %u", s->frame, v.subImage.imageArrayIndex);
         if (!(v.fov.angleLeft < v.fov.angleRight) || !(v.fov.angleDown < v.fov.angleUp)) Fault("frame %ld: the angles of a view of a projection layer are empty", s->frame);
         s->last_eyes.push_back(v.subImage.swapchain);
-        s->last_view[e] = v;
-        s->have_view = true;
+        if (projection_count == 0) {
+          s->last_view[e] = v;
+          s->have_view = true;
+        }
         char part[256];
         snprintf(part, sizeof(part), " eye %u pose %.4f %.4f %.4f %.4f %.4f %.4f %.4f fov %.4f %.4f %.4f %.4f rect %d %d %dx%d",
                  e, v.pose.position.x, v.pose.position.y, v.pose.position.z, v.pose.orientation.x,
@@ -1552,8 +1559,13 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
                  v.subImage.imageRect.extent.height);
         text += part;
       }
-      if (text != s_last_projection || s->frame % 72 == 0) Report("frame %ld projection%s", s->frame, text.c_str());
-      s_last_projection = text;
+      if (projection_count > 0) {
+        char flags[48];
+        snprintf(flags, sizeof(flags), " projection flags %u", static_cast<unsigned>(p->layerFlags));
+        projections += flags;
+      }
+      projections += text;
+      ++projection_count;
       continue;
     }
     if (l->type != XR_TYPE_COMPOSITION_LAYER_QUAD) {
@@ -1589,6 +1601,12 @@ XrResult XRAPI_CALL EndFrame(XrSession session, const XrFrameEndInfo* info) {
              q->pose.position.y, q->pose.position.z, q->size.width, q->size.height,
              static_cast<int>(q->eyeVisibility));
     what += part;
+  }
+  if (projection_count > 0) {
+    if (projections != s_last_projection || s->frame % 72 == 0) {
+      Report("frame %ld projection%s", s->frame, projections.c_str());
+    }
+    s_last_projection = projections;
   }
   // One line for each change of the layers, not one for each frame.
   static std::string s_last;

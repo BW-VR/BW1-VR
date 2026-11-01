@@ -603,6 +603,25 @@ uint64_t g_mres_draws = 0;  // draws of the walks
 uint64_t g_mres_center_draws = 0;  // of them in the centre image
 uint64_t g_fovea_marks = 0;  // walks with the marks of the test
 uint64_t g_gaze_frames = 0;
+// THE MIDDLE AS ITS OWN LAYER (fovea_res_layer, docs/backend.md, "The middle
+// as its own layer"). With 1 a walk of the eyes with foveated resolution puts
+// the outer image and the centre image side by side into the eye picture,
+// each pixel as it is (fovea_res_math::PackAtlas), and the headset app shows
+// each as a projection layer of its own. The key of bwvr.ini, read at the
+// first walk of each game (ReadSharpKeys). On the D3D7 thread: the atlas of
+// the walk now. The atlas of the last walk of the eyes goes with its picture
+// (g_done_atlas, VkSceneEyesAtlas).
+bool g_sharp_keys_read = false;
+bool g_mres_layer = false;
+// The value of the key: 2 also makes the atlas on the PC (AtlasAllowed).
+int g_mres_layer_key = 0;
+fovea_res_math::Atlas g_walk_atlas = {};
+fovea_res_math::Atlas g_done_atlas = {};
+fovea_res_math::Atlas g_taken_atlas = {};
+bool g_said_atlas = false;
+uint64_t g_atlas_walks = 0;    // for the report
+uint64_t g_atlas_smaller = 0;  // walks with a smaller centre that fits
+uint64_t g_atlas_none = 0;     // walks with no room for the centre
 
 // FEWER STATE CHANGES AND FEWER DRAWS (vk_draw_math.h, docs/backend.md).
 // vk_bind_skip=1: the renderer keeps the state that the command buffer of
@@ -2003,9 +2022,23 @@ void FreeMresImages() {
   }
 }
 
+// The atlas of fovea_res_layer=1 is in each eye picture of the headset app.
+// On the PC the session of the mod shows the eye picture as one image, so the
+// atlas is only a test aid there: fovea_res_layer=2 in a run with no session
+// that takes the eye pictures (a desktop run), where the window and the
+// pictures of a test show it.
+bool AtlasAllowed() {
+#ifdef _WIN32
+  return g_mres_layer_key == 2 && !VkSceneEyesWanted();
+#else
+  return true;
+#endif
+}
+
 bool PrepareMres(const Seed* seed) {
   g_mres_records.clear();
   g_mres_clears.clear();
+  g_walk_atlas = fovea_res_math::Atlas();
   // Only a walk of the eyes: another walk of the game (with the angle of
   // the game, not the one of the headset) keeps the pixels of the render.
   if (!seed->mres || seed->fovea.tan_h <= 0.0f || seed->fovea.tan_v <= 0.0f ||
@@ -2017,6 +2050,58 @@ bool PrepareMres(const Seed* seed) {
       width, height, seed->fovea.tan_h, seed->fovea.tan_v, seed->mres_gaze[0],
       seed->mres_gaze[1], seed->mres_outer, seed->mres_center,
       seed->mres_deg);
+  // THE MIDDLE AS ITS OWN LAYER: the rects of the two images in the eye
+  // picture. A centre that does not fit gets a smaller size before the images
+  // are made.
+  if (g_mres_layer && AtlasAllowed()) {
+    const uint32_t asked_w = g_mres.center_w, asked_h = g_mres.center_h;
+    g_walk_atlas = fovea_res_math::PackAtlas(width, height, &g_mres);
+    if (!g_walk_atlas.on) {
+      ++g_atlas_none;
+    } else {
+      ++g_atlas_walks;
+      if (g_mres.center_w != asked_w) ++g_atlas_smaller;
+    }
+    if (!g_said_atlas) {
+      g_said_atlas = true;
+      const fovea_res_math::Atlas& a = g_walk_atlas;
+      if (a.on) {
+        ModLog("vk scene     : fovea_res_layer=%d: the eye picture of %u by %u has the "
+               "outer image of %d by %d at %d %d and the centre image of %d by %d at "
+               "%d %d%s. The centre is the part %.4f %.4f to %.4f %.4f of the view",
+               g_mres_layer_key, width, height, a.outer[2], a.outer[3], a.outer[0],
+               a.center[2], a.center[3], a.center[0], a.center[1],
+               g_mres.center_w != asked_w
+                   ? " (smaller than the asked size, which does not fit)"
+                   : "",
+               a.view[0], a.view[1], a.view[2], a.view[3]);
+        if (g_mres.center_w != asked_w) {
+          ModLog("vk scene     : fovea_res_layer=%d: the centre has %u by %u pixels in "
+                 "place of %u by %u, scale %.3f. A lower fovea_res_outer_pct or "
+                 "fovea_res_center_deg gives it room",
+                 g_mres_layer_key, g_mres.center_w, g_mres.center_h, asked_w, asked_h,
+                 g_mres.center_scale_x);
+        }
+      } else {
+        ModLog("vk scene     : fovea_res_layer=%d, but the eye picture of %u by %u has "
+               "no room for the centre beside the outer image of %u by %u, so the eye "
+               "picture is made from the two images as with fovea_res_layer=0",
+               g_mres_layer_key, width, height, g_mres.outer_w, g_mres.outer_h);
+      }
+    }
+  } else {
+    if (g_mres_layer && !g_said_atlas) {
+      g_said_atlas = true;
+      ModLog("vk scene     : fovea_res_layer=%d on the PC, so the eye picture is made "
+             "from the two images as with fovea_res_layer=0. Only the headset app, and "
+             "on the PC fovea_res_layer=2 in a run with no session that takes the eye "
+             "pictures, have the two images side by side",
+             g_mres_layer_key);
+    }
+    g_walk_atlas.mres = true;
+    g_walk_atlas.outer_scale = g_mres.outer_scale_x;
+    g_walk_atlas.center_scale = g_mres.center_scale_x;
+  }
   // The images only grow: a smaller layout uses the top left part of them,
   // so a change of the layout does not stop the GPU to make new images.
   uint32_t sizes[2][2] = {{g_mres.outer_w, g_mres.outer_h},
@@ -2308,6 +2393,31 @@ void ReadDrawKeys() {
                      : "the draws keep the order of the game",
          g_draw_merge ? "draws in a row with the same state become one draw"
                       : "each draw of the game is a draw");
+}
+
+// The key fovea_res_layer of bwvr.ini, as ReadDrawKeys reads its keys, at the
+// first walk of each game (VkSceneSetOptions starts a game).
+void ReadSharpKeys() {
+  if (g_sharp_keys_read) return;
+  g_sharp_keys_read = true;
+  char path[MAX_PATH] = "";
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash != nullptr && strlen(path) + 9 < MAX_PATH) {
+    slash[1] = 0;
+    strcat_s(path, "bwvr.ini");
+    g_mres_layer_key =
+        static_cast<int>(GetPrivateProfileIntA("bwvr", "fovea_res_layer", 0, path));
+    g_mres_layer = g_mres_layer_key != 0;
+  }
+  g_said_atlas = false;
+  ModLog("vk scene     : fovea_res_layer=%d. %s", g_mres_layer_key,
+         g_mres_layer
+             ? "With fovea_res=1 the eye picture has the outer image and the centre "
+               "image side by side, each at its own size, and the headset shows each "
+               "as a layer of its own"
+             : "With fovea_res=1 the eye picture is made from the outer image and the "
+               "centre image at the size of the eye picture");
 }
 
 VkDeviceSize RingVertices(Slot& s, const void* data, VkDeviceSize bytes) {
@@ -2700,7 +2810,13 @@ void BlackCheckRead(Slot& s) {
 // the whole picture, and the centre image over its rect, with an edge of 8
 // percent of the rect where its alpha goes from 1 to 0. With the marks of
 // the test the outer image has a blue colour.
+void ComposeAtlas(Slot& s);
+
 void ComposeMres(Slot& s) {
+  if (g_walk_atlas.on) {
+    ComposeAtlas(s);
+    return;
+  }
   const VkCommandBuffer cb = s.cb;
   const uint32_t width = Target().width, height = Target().height;
   BeginRenderingOf(cb, Target(), g_depth, 3u, false, false);
@@ -2796,6 +2912,119 @@ void ComposeMres(Slot& s) {
     if (at == UINT64_MAX) continue;
     push.ops[0] = 2u | 2u << 8;  // the texture alone
     BindPipeline(cb, blended);
+    BindSets(cb, center_set, VK_NULL_HANDLE);
+    PushDraw(cb, push);
+    BindVertices(cb, s, at, at);
+    f.vkCmdDraw(cb, 54, 1, 0, 0);
+  }
+  f.vkCmdEndRendering(cb);
+}
+
+// THE EYE PICTURE AS AN ATLAS (fovea_res_layer=1, g_walk_atlas): for each eye
+// the outer image at its rect and the centre image at its rect, each at its
+// own size, so each pixel of an image is a pixel of the eye picture. The
+// outer image has an alpha of 1. The alpha of the centre goes from 1 inside
+// to 0 at its edge (8 percent of the rect), for the blend of the centre layer
+// over the layer of the whole view: the soft edge of ComposeMres. The rest of
+// the eye picture is black. With the marks of the test the outer image has a
+// blue colour.
+void ComposeAtlas(Slot& s) {
+  const VkCommandBuffer cb = s.cb;
+  const fovea_res_math::Atlas& a = g_walk_atlas;
+  const uint32_t width = Target().width, height = Target().height;
+  BeginRenderingOf(cb, Target(), g_depth, 3u, false, false);
+  const VkViewport viewport = {0.0f, 0.0f, static_cast<float>(width),
+                               static_cast<float>(height), 0.0f, 1.0f};
+  SetViewport(cb, viewport);
+  const VkRect2D scissor = {{0, 0}, {width, height}};
+  SetScissor(cb, scissor);
+  DrawStates(cb, D3DCULL_NONE, 0, 0, D3DCMP_ALWAYS, D3DPT_TRIANGLELIST);
+  // No blend: the alpha of the vertices goes into the eye picture.
+  const VkPipeline opaque = Pipeline(0);
+  const VkSampler sampler = Sampler(2, 2, 1, 3, 3, 1);
+  if (opaque == VK_NULL_HANDLE) {
+    f.vkCmdEndRendering(cb);
+    return;
+  }
+  struct Vertex {
+    float x, y, z, rhw;
+    uint32_t diffuse, specular;
+    float u, v;
+  };
+  // A pixel of the game is at its centre: a rect from x - 0.5 covers its
+  // pixels, and a texel of the same size is read at its centre.
+  const float ox0 = static_cast<float>(a.outer[0]) - 0.5f;
+  const float oy0 = static_cast<float>(a.outer[1]) - 0.5f;
+  const float ox1 = ox0 + static_cast<float>(a.outer[2]);
+  const float oy1 = oy0 + static_cast<float>(a.outer[3]);
+  const float ix0 = static_cast<float>(a.center[0]) - 0.5f;
+  const float iy0 = static_cast<float>(a.center[1]) - 0.5f;
+  const float iw = static_cast<float>(a.center[2]);
+  const float ih = static_cast<float>(a.center[3]);
+  const float edge = 0.08f * (iw < ih ? iw : ih);
+  const float gx[4] = {ix0, ix0 + edge, ix0 + iw - edge, ix0 + iw};
+  const float gy[4] = {iy0, iy0 + edge, iy0 + ih - edge, iy0 + ih};
+  // The used part of each image.
+  const float ou = static_cast<float>(a.outer[2]) /
+                   static_cast<float>(g_mres_color[0].width);
+  const float ov = static_cast<float>(a.outer[3]) /
+                   static_cast<float>(g_mres_color[0].height);
+  const float cu = iw / static_cast<float>(g_mres_color[1].width);
+  const float cv = ih / static_cast<float>(g_mres_color[1].height);
+  for (int eye = 0; eye < 2; ++eye) {
+    DrawPush push = {};
+    push.viewport[2] = 2.0f / static_cast<float>(width);
+    push.viewport[3] = 2.0f / static_cast<float>(height);
+    push.depth[1] = 1.0f;
+    // D3DTOP_SELECTARG1 = 2, D3DTOP_MODULATE = 4. D3DTA_DIFFUSE = 0,
+    // D3DTA_TEXTURE = 2. The alpha is the alpha of the vertex.
+    push.ops[0] = g_walk_show ? (4u | 2u << 8 | 0u << 16) : (2u | 2u << 8);
+    push.ops[1] = 2u | 0u << 8;
+    push.ops[2] = 1u;  // a texture
+    push.ops[3] = 1u | (1u << eye) << 8;  // still, the eye
+    const uint32_t tint = g_walk_show ? 0xFF90B8FFu : 0xFFFFFFFFu;
+    const Vertex outer[6] = {{ox0, oy0, 0, 1, tint, 0, 0, 0},
+                             {ox1, oy0, 0, 1, tint, 0, ou, 0},
+                             {ox1, oy1, 0, 1, tint, 0, ou, ov},
+                             {ox0, oy0, 0, 1, tint, 0, 0, 0},
+                             {ox1, oy1, 0, 1, tint, 0, ou, ov},
+                             {ox0, oy1, 0, 1, tint, 0, 0, ov}};
+    const VkDescriptorSet outer_set = SetOf(&g_mres_texture[0][eye], sampler);
+    const VkDescriptorSet center_set = SetOf(&g_mres_texture[1][eye], sampler);
+    if (outer_set == VK_NULL_HANDLE || center_set == VK_NULL_HANDLE) continue;
+    VkDeviceSize at = RingVertices(s, outer, sizeof(outer));
+    if (at == UINT64_MAX) continue;
+    BindPipeline(cb, opaque);
+    BindSets(cb, outer_set, VK_NULL_HANDLE);
+    PushDraw(cb, push);
+    BindVertices(cb, s, at, at);
+    f.vkCmdDraw(cb, 6, 1, 0, 0);
+    // The centre with its alpha edge.
+    Vertex center[54];
+    int n = 0;
+    for (int j = 0; j < 3; ++j) {
+      for (int i = 0; i < 3; ++i) {
+        const int corner[6][2] = {{i, j},         {i + 1, j},
+                                  {i + 1, j + 1}, {i, j},
+                                  {i + 1, j + 1}, {i, j + 1}};
+        for (int k = 0; k < 6; ++k) {
+          const int ci = corner[k][0], cj = corner[k][1];
+          const bool inside = ci >= 1 && ci <= 2 && cj >= 1 && cj <= 2;
+          Vertex& v = center[n++];
+          v.x = gx[ci];
+          v.y = gy[cj];
+          v.z = 0.0f;
+          v.rhw = 1.0f;
+          v.diffuse = inside ? 0xFFFFFFFFu : 0x00FFFFFFu;
+          v.specular = 0;
+          v.u = (gx[ci] - ix0) / iw * cu;
+          v.v = (gy[cj] - iy0) / ih * cv;
+        }
+      }
+    }
+    at = RingVertices(s, center, sizeof(center));
+    if (at == UINT64_MAX) continue;
+    push.ops[0] = 2u | 2u << 8;  // the texture alone
     BindSets(cb, center_set, VK_NULL_HANDLE);
     PushDraw(cb, push);
     BindVertices(cb, s, at, at);
@@ -3102,6 +3331,7 @@ void BeginOnWorker(const void* data) {
   f.vkBeginCommandBuffer(s.cb, &begin);
   // A new command buffer has no bound state, and no draw waits.
   ReadDrawKeys();
+  ReadSharpKeys();
   g_bound.SetOn(g_bind_skip);
   g_bound.Reset();
   g_queue.clear();
@@ -3391,6 +3621,7 @@ void EndOnWorker(const void*) {
     g_done_image = (uint64_t)Target().image;  // a handle of 64 bits
     g_done_width = Target().width;
     g_done_height = Target().height;
+    g_done_atlas = g_walk_mres ? g_walk_atlas : fovea_res_math::Atlas();
     InterlockedIncrement(&g_done_serial);
   }
   const LONG walk = InterlockedIncrement(&g_walk_serial);
@@ -3440,6 +3671,8 @@ void VkSceneSetOptions(int mode, int test_frame) {
   BWVR_STREAM_OPTION(test_frame = test_frame);
   g_mode = mode == 1 ? 1 : 0;
   g_test_frame = test_frame;
+  // A new game: the next walk reads fovea_res_layer again (ReadSharpKeys).
+  g_sharp_keys_read = false;
   if (g_mode != 0 && g_direct) {
     ModLog("vk scene     : backend=vulkan. The Vulkan renderer draws each walk "
            "of the DirectDraw of the mod into an image of its own, with a "
@@ -3511,8 +3744,11 @@ bool VkSceneEyes(uint64_t* image, uint32_t* width, uint32_t* height) {
   *image = g_done_image;
   *width = g_done_width;
   *height = g_done_height;
+  g_taken_atlas = g_done_atlas;
   return *image != 0;
 }
+
+void VkSceneEyesAtlas(fovea_res_math::Atlas* out) { *out = g_taken_atlas; }
 
 bool VkSceneOn() { return g_mode != 0 && !g_failed; }
 
@@ -4852,6 +5088,13 @@ void VkSceneReport(uint64_t frames) {
            g_mres_center_draws / static_cast<double>(g_mres_walks),
            g_mres_remade);
     g_mres_walks = g_mres_draws = g_mres_center_draws = 0;
+  }
+  if (g_mres_layer && (g_atlas_walks > 0 || g_atlas_none > 0)) {
+    ModLog("vk scene     : fovea_res_layer=1. %llu walks with the two images side "
+           "by side in the eye picture (%llu of them with a smaller centre that "
+           "fits), %llu walks with no room for the centre",
+           g_atlas_walks, g_atlas_smaller, g_atlas_none);
+    g_atlas_walks = g_atlas_smaller = g_atlas_none = 0;
   }
   if (g_fovea_level > 0 || g_fovea_walks > 0) {
     ModLog("vk scene     : foveation=%d. %llu walks with the map of the rates, "

@@ -146,6 +146,19 @@ inline const Setting kSettings[] = {
      "Moves the sharp middle down from straight ahead, for example to the "
      "land and the hands at your waist. Only with no eye tracker: a middle "
      "that follows your gaze stays where you look."},
+    {kBool, "fovea_res_layer", "The middle as its own layer (headset app)",
+     nullptr, 0,
+     "Only in the headset app (Quest). The headset shows the picture of the "
+     "middle as a layer of its own, at its own resolution, over the picture "
+     "of the whole view. So a middle above 100% is sharper than the eye "
+     "picture: at about 200% it has as many pixels as the panel in the middle "
+     "of the lens. The picture of the whole view keeps its own resolution "
+     "too. The eye picture keeps the size of the render, and holds the two "
+     "pictures side by side, so the mod does not draw the whole eye picture "
+     "from them. When the two pictures do not fit side by side, the middle "
+     "gets fewer pixels. Off: the two pictures go into one eye picture. On "
+     "the PC this does nothing. The change counts from the next start of the "
+     "game."},
     {kBool, "foveation_show", "Show the parts with fewer details", nullptr, 0,
      "A blue colour over the parts with fewer shades or fewer pixels, so "
      "you can find the settings that you like. Turn it off to play. With "

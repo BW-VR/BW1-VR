@@ -4466,6 +4466,80 @@ has no edge between the two images, and with `foveation_show=1` the rect of
 the centre with its soft edge shows. Not run: a headset session, an eye
 tracker, the test key.
 
+### The middle as its own layer
+
+With `fovea_res_layer=0` (the default) the eye picture has the size of the
+render, and the centre image goes into it with a linear filter. So a centre
+above 100 percent gets no more pixels into the headset than the eye picture
+has: a centre of 200 percent gives a smoother middle, not a sharper one
+(`android.md`, "The sharpness of the middle").
+
+`fovea_res_layer=1` (the row "The middle as its own layer (headset app)" in
+the group "Foveated rendering") puts the two images side by side into the
+eye picture, each pixel as it is (`fovea_res_math::PackAtlas`, checks in
+`sharp_checks.h`): the outer image at the top left at its own size, and the
+centre image 2 pixels to its right, or 2 pixels under it when it has more
+room there. The gap and the rest of the eye picture are black with an alpha
+of 0, so a compositor that samples a rect with a bilinear filter reads no
+pixel of the other image at its edge. The eye picture keeps the size of the
+render, so the swapchains, the ring of the pictures and the copies do not
+change. The headset app shows the outer
+rect in the projection layer, and the centre rect in a second projection
+layer over it, at the same pose, with the angles of view of the part of
+the view of the centre (`fovea_res_math::CenterFov`). So the compositor
+samples the pixels of the centre image directly. The alpha of the centre
+goes from 1 to 0 at its edge (8 percent of the rect), and the centre layer
+has the blend of its source alpha with colors that are not multiplied by
+the alpha: the soft edge of the eye picture of `fovea_res_layer=0`.
+
+- A centre that does not fit beside or under the outer image at its size
+  gets a smaller size that fits, and a lower scale. The log says so one
+  time. When not even 16 pixels fit (for example with
+  `fovea_res_outer_pct=100`), the walk makes the eye picture as with
+  `fovea_res_layer=0`.
+- The rects go with each picture (`VkSceneEyesAtlas`, the field `atlas` of
+  a picture of the ring), so a picture and its layers always match. The
+  swapchains of the eyes have the size of the first picture. A picture of
+  another size goes into them with a blit, and its rects are scaled to the
+  swapchain, rounded inward and kept in it (`fovea_res_math::FitAtlas`).
+  When a rect then has no pixel, the frame has no centre layer.
+- On the PC the session of the mod shows the eye picture as one image, so
+  there `fovea_res_layer=1` changes nothing, and the log says so. A test
+  aid: `fovea_res_layer=2` puts the two images side by side on the PC in a
+  run with no session that takes the eye pictures (`VkSceneEyesWanted`), so
+  in a desktop run the window and the pictures of a test show the two
+  images side by side. The launcher writes only 0 and 1.
+- The renderer reads the key from `bwvr.ini` at the first walk of each
+  game. There is no test key: the app has no hotkeys, and the stream of the
+  walks has no option for it.
+- **A known limit:** the cut scene window and the stereo screen show the
+  outer image only, with the fewer pixels of the whole view and no centre.
+  The last picture of the renderer (`VkSceneLastPicture`, for the screen
+  quad of a frame with no scene) can be a walk with an atlas, and then the
+  screen quad shows the whole atlas: the outer image and the centre image
+  side by side, for example in a frame with a dialog box right after the
+  frames of the scene. The cut scene window shows the same columns of the
+  outer image (`fovea_res_math::OuterRect`).
+- The report of each 450 frames counts the walks with the two images side
+  by side, those with a smaller centre and those with no room.
+
+**Desktop runs** (Radeon RX 7900 XTX, the test save "pen", render 4080 by
+3264, one walk, `fake_head_fov=1`, `fovea_res_outer_pct=40`,
+`fovea_res_center_pct=200`, `fovea_res_center_deg=22`,
+`fovea_res_center_down_deg=9`, the windows of 450 frames after the first):
+with `fovea_res_layer=2` the eye picture has the outer image of 1632 by
+1306 at 0 0 and the centre image of 1846 by 1846 at 1634 0, and the GPU
+takes 0.456 to 0.685 ms for a walk (the median 0.494). With 1 the log says
+that the PC makes no atlas, and the GPU takes 0.585 to 0.711 ms (the median
+0.592), as with 0: 0.585 to 0.723 ms (the median 0.592). A crop of the
+middle of the left eye at frame 2500 at the same zoom (400 by 400 pixels of
+the centre image, and the same part of the eye picture of
+`fovea_res_layer=0` scaled by 2) has a mean gradient of the luma of 9.62
+with 2 and 6.57 with 0: the text of the Main Menu has sharper edges. An
+emulator test ran at the same time as these runs. Not
+run: a headset (the blend of the centre layer by the compositor of a Quest
+3, and the sharpness through the lens).
+
 ## The session with Vulkan
 
 `xr_vulkan=1` (0 is the default) makes the OpenXR session a session with
@@ -6316,6 +6390,7 @@ keys that the launcher sets.
 | `foveation_gaze` | 1 | 1 the centre of the fovea follows the gaze of an eye tracker when the headset has one (`XR_EXT_eye_gaze_interaction`), 0 it stays straight ahead. See "Foveated rendering" |
 | `fovea_res` | 0 | 1 each eye picture of the Vulkan renderer comes from an outer image and a centre image with their own resolutions. A test key: Shift P. See "Foveated resolution" |
 | `fovea_res_outer_pct`, `fovea_res_center_pct`, `fovea_res_center_deg` | 50, 100, 25 | The resolution of the outer image and of the centre image in percent on each side, and the degrees of the centre on each side. See "Foveated resolution" |
+| `fovea_res_layer` | 0 | 1 the eye picture of a walk with `fovea_res=1` has the outer image and the centre image side by side, each at its own size, and the headset app shows each as a projection layer of its own. 0 the eye picture is made from the two at the size of the render. On the PC 1 changes nothing, and 2 is a test aid that makes the atlas in a run with no session. The renderer reads it at the first walk of each game. No test key. See "The middle as its own layer" |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
 | `walk_parts`, `walk_parts_add` | 0, empty | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. See "The parts of the scene walk" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |

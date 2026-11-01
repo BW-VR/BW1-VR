@@ -5,6 +5,8 @@
 
 #include <stdint.h>
 
+#include "fovea_res_math.h"
+
 // vk_scene of bwvr.ini: 0 (the default) no Vulkan renderer. 1: with
 // d3d7_thread=1 the D3D7 thread gives each call of a walk also to the Vulkan
 // renderer, which draws both eyes into an image of its own, a layer for each
@@ -69,6 +71,11 @@ void VkSceneReport(uint64_t frames);
 // eye, in the layout of a color attachment and in vk::Core::color_format.
 // False when no walk of one walk ended since the last call.
 bool VkSceneEyes(uint64_t* image, uint32_t* width, uint32_t* height);
+// On the same thread after VkSceneEyes gave true: the rects of the outer and
+// the centre image in that picture (fovea_res_layer=1, docs/backend.md, "The
+// middle as its own layer"). Atlas::on is false for a picture that is one
+// image, and Atlas::mres is false for a picture with no foveated resolution.
+void VkSceneEyesAtlas(fovea_res_math::Atlas* out);
 
 // vk_eyes of bwvr.ini, with xr_vulkan=1: 1 (the default) the eye pictures of
 // a frame of one walk come from the Vulkan renderer, 0 from Direct3D 9.

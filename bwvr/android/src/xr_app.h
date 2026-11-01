@@ -23,6 +23,7 @@
 #include <openxr/openxr_platform.h>
 
 #include "../../src/common/input_channel.h"
+#include "../../src/mod/fovea_res_math.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/time_log_math.h"
@@ -283,6 +284,12 @@ class XrApp {
   // The display time of this frame of the session (ns, the clock of the
   // runtime).
   int64_t DisplayTime() const { return frame_.predictedDisplayTime; }
+  // THE MIDDLE AS ITS OWN LAYER (fovea_res_layer=1): the rects of the outer
+  // and the centre image in the newest picture (VkSceneEyesAtlas), after
+  // SetScreenView. With Atlas::on the layer of the whole view shows the
+  // outer rect, and a second projection layer shows the centre rect over it
+  // (fovea_res_math::CenterFov).
+  void SetScreenAtlas(const fovea_res_math::Atlas& atlas) { newest_atlas_ = atlas; }
   // xr_copy_on_change (1 is the default): true, a layer gets a new image of
   // its swapchain only when its picture changed, and the runtime shows the
   // last released image. false, each frame copies each layer. Before Start.
@@ -707,6 +714,18 @@ class XrApp {
   scene_stream::ViewBody newest_view_ = {};
   bool view_shown_[2] = {false, false};
   scene_stream::ViewBody shown_view_[2] = {};
+  // The atlas of the newest picture (in pixels of the picture) and of the
+  // picture in the released image of each eye (in pixels of the swapchain,
+  // fovea_res_math::FitAtlas) (fovea_res_layer=1).
+  fovea_res_math::Atlas newest_atlas_ = {};
+  fovea_res_math::Atlas shown_atlas_[2] = {};
+  uint64_t center_frames_ = 0;  // frames of the session with the centre layer
+  bool said_center_ = false;
+  bool said_sharp_ = false;     // the line of the sharpness of the middle
+  void LogSharpness(const scene_stream::ViewBody& view, const fovea_res_math::Atlas& atlas);
+  void LogViewSizes(const char* when);
+  uint32_t asked_width_ = 0;    // the size that the runtime asks for, for LogViewSizes
+  uint32_t asked_height_ = 0;
   uint64_t projection_frames_ = 0;  // frames of the session with the projection layer
   uint64_t screen_frames_ = 0;      // frames of the session with the stereo screen
   bool said_projection_ = false;

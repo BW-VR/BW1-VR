@@ -241,6 +241,7 @@ void GatherPicture(App* app, uint64_t screen_have, Picture* p) {
   p->eyes_ok = VkSceneEyes(&image, &p->width, &p->height);
   if (!p->eyes_ok) return;
   p->eyes = reinterpret_cast<VkImage>(image);
+  VkSceneEyesAtlas(&p->atlas);
   // The values of the projection layer of the frame of this picture, and
   // the quad layers of that frame (stream_layers=1).
   p->have_view = StreamPictureView(&p->view);
@@ -290,6 +291,7 @@ bool ShowEyes(App* app, const Picture& p) {
   }
   app->xr.SetScreenView(has, p.view);
   app->xr.SetScreenWorld(has && p.have_world, p.world);
+  app->xr.SetScreenAtlas(p.atlas);
   if (layers.panel && p.panel == VK_NULL_HANDLE && !app->said_no_panel) {
     app->said_no_panel = true;
     AppLog("xr           : the mod gives panel quads, but the renderer has no panel "
@@ -575,6 +577,7 @@ double WriteSlot(App* app, const LivePlay& live) {
     p.view = g.view;
     p.have_world = g.have_world;
     p.world = g.world;
+    p.atlas = g.atlas;
     s.layers = *g.layers;
     p.layers = &s.layers;
     // The pictures of the cards change seldom: a copy only after a change.

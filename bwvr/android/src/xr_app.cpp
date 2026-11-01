@@ -1472,11 +1472,15 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   // THE SCREEN QUAD of a frame with no scene (stream_screen=1) takes the
   // place of the pictures of the world.
   const bool flat = frame_.shouldRender && flat_on_ && screen_quad_on_;
-  const bool source = frame_.shouldRender && screen_source_ != VK_NULL_HANDLE && !flat;
-  const bool want_world = source && projection_on_ && view_newest_ && HasEyes();
+  // A picture in the swapchains of a slot (xr_eye_direct=1) has no source
+  // image: it needs no copy.
+  const bool direct = direct_newest_ >= 0 && Made(direct_[direct_newest_].set);
+  const bool source = frame_.shouldRender &&
+                      (screen_source_ != VK_NULL_HANDLE || direct) && !flat;
+  const bool want_world = source && projection_on_ && view_newest_ && (HasEyes() || direct);
   // With stream_projection=0 each picture shows on the stereo screen, a frame
   // of the cut scene window too, and no quad layer of the mod goes out.
-  const bool want_window = source && projection_on_ && layers_on_ &&
+  const bool want_window = source && !direct && projection_on_ && layers_on_ &&
                            ql::AsScreen(newest_layers_) && HasEyes();
   bool world = false;
   bool window = false;
@@ -1484,14 +1488,27 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     PartTo(kPartEyes);
     for (int eye = 0; eye < 2; ++eye) {
       // The values go with the picture of the image that the eye released.
-      if (CopyScreen(&eyes_, eye)) {
+      // A picture of a slot is in its swapchains already: the eye takes it
+      // with no copy.
+      bool fresh = false;
+      if (direct) {
+        fresh = direct_latched_[eye] != direct_revision_;
+        direct_latched_[eye] = direct_revision_;
+      } else {
+        fresh = CopyScreen(&eyes_, eye);
+      }
+      if (fresh) {
+        shown_direct_[eye] = direct ? direct_newest_ : -1;
         shown_view_[eye] = newest_view_;
         view_shown_[eye] = view_newest_;
         motion_.TakeNewest(eye);
         // The rects in pixels of the swapchain: a picture of another size
-        // went into it with a blit (fovea_res_math::FitAtlas).
-        shown_atlas_[eye] = fovea_res_math::FitAtlas(newest_atlas_, eyes_.layer[eye].width,
-                                                     eyes_.layer[eye].height);
+        // went into it with a blit (fovea_res_math::FitAtlas). A slot has the
+        // rects at their place in the picture (eye_copy_math::DirectFits).
+        shown_atlas_[eye] = direct ? newest_atlas_
+                                   : fovea_res_math::FitAtlas(newest_atlas_,
+                                                              eyes_.layer[eye].width,
+                                                              eyes_.layer[eye].height);
         if (eye == 0) {
           shown_layers_ = newest_layers_;
           shown_frame_ = newest_frame_;
@@ -1499,6 +1516,17 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       }
     }
     world = want_world && view_shown_[0] && view_shown_[1];
+    // An eye that shows a slot that is not the slot of the newest picture:
+    // the copy of a newer picture of the old way did not happen yet, and the
+    // play thread can write that slot again. So this frame has no projection
+    // layer.
+    for (int eye = 0; eye < 2; ++eye) {
+      if (world && shown_direct_[eye] >= 0 && shown_direct_[eye] != direct_newest_) {
+        world = false;
+        ++direct_stale_;
+      }
+    }
+    if (world && shown_direct_[0] >= 0) ++direct_frames_;
     window = !world && want_window && eyes_.layer[0].released > 0 &&
              eyes_.layer[1].released > 0 && ql::AsScreen(shown_layers_);
     PartTo(kPartRest);
@@ -1536,10 +1564,11 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       v.pose.position = {p[0], p[1], p[2]};
       v.pose.orientation = {q[0], q[1], q[2], q[3]};
       v.fov = {e.fov[0], e.fov[1], e.fov[2], e.fov[3]};
-      v.subImage.swapchain = eyes_.layer[eye].swapchain;
+      const Layer& shown = EyeLayer(eye);
+      v.subImage.swapchain = shown.swapchain;
       v.subImage.imageRect.offset = {0, 0};
-      v.subImage.imageRect.extent = {static_cast<int32_t>(eyes_.layer[eye].width),
-                                     static_cast<int32_t>(eyes_.layer[eye].height)};
+      v.subImage.imageRect.extent = {static_cast<int32_t>(shown.width),
+                                     static_cast<int32_t>(shown.height)};
       v.subImage.imageArrayIndex = 0;
       // THE MIDDLE AS ITS OWN LAYER: the layer of the whole view shows the
       // outer image, and the centre layer the centre image of the same image
@@ -1658,7 +1687,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     for (int i = 0; i < n && used < kQuads - 2; ++i) {
       const ql::LayerRef& r = order[i];
       ql::QuadSpec s;
-      if (!ql::Spec(f, r, eyes_.layer[0].width, eyes_.layer[0].height, &s)) continue;
+      if (!ql::Spec(f, r, EyeLayer(0).width, EyeLayer(0).height, &s)) continue;
       XrSwapchain swapchain = XR_NULL_HANDLE;
       if (r.kind == ql::kLayerPanel) {
         swapchain = panel_.layer[0].swapchain;
@@ -1782,7 +1811,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       }
     }
   }
-  if (!world && !window && source) {
+  if (!world && !window && source && screen_source_ != VK_NULL_HANDLE) {
     // THE STEREO SCREEN of the renderer, behind the menu: a quad for each
     // eye, 2.6 m wide, 2.6 m in front of the head. Only when the picture
     // went out in no projection layer and in no cut scene window.
@@ -2333,8 +2362,8 @@ void XrApp::LogSharpness(const scene_stream::ViewBody& b, const fovea_res_math::
          "The textures: an anisotropic filter of up to %.0f, the mip level from the pixels of "
          "each image",
          panel, mean, views[0].fov.angleLeft, views[0].fov.angleRight, b.width, b.height,
-         picture, es::PanelPerPixel(panel, picture), steps, eyes_.layer[0].width,
-         eyes_.layer[0].height, max_anisotropy_);
+         picture, es::PanelPerPixel(panel, picture), steps, EyeLayer(0).width,
+         EyeLayer(0).height, max_anisotropy_);
 }
 
 // A set that cannot be made frees each part that it made, and the app does
@@ -2445,6 +2474,113 @@ void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
   source_width_ = image_width;
   source_height_ = image_height;
   eyes_frozen_ = false;
+  direct_newest_ = -1;
+}
+
+void XrApp::SetDirectSource(int slot) {
+  if (slot < 0 || slot >= frame_loop::kSlots) return;
+  direct_newest_ = slot;
+  ++direct_revision_;
+  // As MakeEyes: the size that the runtime asks for at the first picture.
+  if (!direct_sizes_said_) {
+    direct_sizes_said_ = true;
+    LogViewSizes("at the first picture of the projection layer");
+  }
+  // No source image: the stereo screen and the cut scene window copy
+  // nothing from a picture of a slot.
+  screen_source_ = VK_NULL_HANDLE;
+  eyes_frozen_ = true;
+}
+
+const XrApp::Layer& XrApp::EyeLayer(int eye) const {
+  const int slot = shown_direct_[eye];
+  if (slot >= 0 && slot < frame_loop::kSlots && Made(direct_[slot].set)) {
+    return direct_[slot].set.layer[eye];
+  }
+  return eyes_.layer[eye];
+}
+
+// THE PLAY THREAD. The calls of OpenXR that can use the queue hold its lock.
+// The session never shows a slot that the play thread writes (frame_loop.h,
+// Ring), so no layer of a frame has a swapchain of this slot now.
+bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
+                        const fovea_res_math::Atlas& atlas, VkImage targets[2]) {
+  if (!eye_direct_ || slot < 0 || slot >= frame_loop::kSlots || SwapRedBlue()) return false;
+  DirectSet& d = direct_[slot];
+  if (d.failed) return false;
+  if (!Made(d.set)) {
+    uint32_t sw = 0, sh = 0;
+    eye_copy_math::DirectSize(atlas, width, height, &sw, &sh);
+    const char* why = "";
+    LockQueue();
+    const bool made = sw > 0 && sh > 0 && MakeScreenSet(&d.set, sw, sh, &why);
+    UnlockQueue();
+    if (!made) {
+      d.failed = true;
+      AppLog("xr           : slot %d of the ring: no two swapchains of %u by %u for the eye "
+             "pictures (%s). Its pictures take the old way (xr_eye_direct=1)",
+             slot, sw, sh, why);
+      return false;
+    }
+    AppLog("xr           : slot %d of the ring: two swapchains of %u by %u for the eye "
+           "pictures of %u by %u, which the play thread copies straight into them "
+           "(xr_eye_direct=1, %s)",
+           slot, sw, sh, width, height,
+           eye_copy_math::AtlasOf(atlas, width, height)
+               ? "the part of the outer rect and the centre rect"
+               : "the whole picture");
+  }
+  if (!eye_copy_math::DirectFits(d.set.layer[0].width, d.set.layer[0].height, atlas, width,
+                                 height)) {
+    direct_misses_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+  for (int eye = 0; eye < 2; ++eye) {
+    Layer& l = d.set.layer[eye];
+    uint32_t index = 0;
+    XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    LockQueue();
+    const bool acquired =
+        Ok(xrAcquireSwapchainImage(l.swapchain, &acquire, &index), "xrAcquireSwapchainImage");
+    UnlockQueue();
+    if (!acquired || index >= l.images.size()) {
+      DirectEnd(slot);
+      d.failed = true;
+      return false;
+    }
+    d.acquired[eye] = true;
+    // The play thread may wait: the runtime gives the image when the
+    // compositor read it for the last time.
+    XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wait.timeout = XR_INFINITE_DURATION;
+    if (!Ok(xrWaitSwapchainImage(l.swapchain, &wait), "xrWaitSwapchainImage")) {
+      // An image that is not waited cannot go back: the slot has no
+      // swapchains for the eyes any more.
+      DirectEnd(slot);
+      d.failed = true;
+      return false;
+    }
+    d.waited[eye] = true;
+    targets[eye] = l.images[index].image;
+  }
+  direct_writes_.fetch_add(1, std::memory_order_relaxed);
+  return true;
+}
+
+void XrApp::DirectEnd(int slot) {
+  if (slot < 0 || slot >= frame_loop::kSlots) return;
+  DirectSet& d = direct_[slot];
+  XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+  LockQueue();
+  for (int eye = 0; eye < 2; ++eye) {
+    if (d.acquired[eye] && d.waited[eye]) {
+      Ok(xrReleaseSwapchainImage(d.set.layer[eye].swapchain, &release),
+         "xrReleaseSwapchainImage");
+    }
+    if (d.waited[eye] || !d.acquired[eye]) d.acquired[eye] = false;
+    d.waited[eye] = false;
+  }
+  UnlockQueue();
 }
 
 void XrApp::MarkScreenChanged() {
@@ -2456,6 +2592,12 @@ void XrApp::MarkScreenChanged() {
 // One eye of the picture of the renderer into the next image of its
 // swapchain.
 bool XrApp::CopyScreen(Screen* screen, int eye) {
+  // A copy into the swapchains of the eyes takes the part that the layers
+  // show (xr_eye_rects).
+  if (screen == &eyes_) {
+    eye_part_ = eye_copy_math::CopyPart(eye_rects_ && frame_loop_, newest_atlas_, source_width_,
+                                        source_height_);
+  }
   // The stereo screen shows the whole view: with an atlas (fovea_res_layer=1)
   // the outer image at the top left of the picture.
   if (screen == &screen_ && newest_atlas_.on) {
@@ -2604,16 +2746,30 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
   // nothing.
   VkCommandBuffer cmd = FrameCommands();
   if (cmd == VK_NULL_HANDLE) return false;
+  // An eye that shows a slot of xr_eye_direct=1 needs the new picture in this
+  // frame: the play thread can write that slot again.
+  const bool from_slot = screen == &eyes_ && shown_direct_[index] >= 0;
   uint32_t image = 0;
-  if (!NextImage(layer, image_wait_, &image)) return false;
+  if (!NextImage(layer, image_wait_ || from_slot, &image)) return false;
   const VkImage target = layer->images[image].image;
+  // The part of the picture that the copy takes: the shown part of an eye
+  // picture with xr_eye_rects=1, else the whole picture.
+  const eye_copy_math::Rect part =
+      same && screen == &eyes_ ? eye_part_ : eye_copy_math::Whole(layer->width, layer->height);
+  const int kind = screen == &eyes_    ? copy_time::kSwapEyes
+                   : screen == &panel_ ? copy_time::kSwapPanel
+                   : screen == &flat_  ? copy_time::kSwapScreen
+                                       : copy_time::kSwapStereo;
+  const uint32_t stamp = GpuStampIndex(gpu_);
+  gpu_.copy_stamps.Before(cmd, stamp, kind, eye_copy_math::Bytes(part, 1));
   // xr_copy_once=1: the copy of the same size that CopySlot records below,
   // recorded one time.
   if (same && copy_once_) {
     const VkCommandBuffer once =
-        OnceCopy(screen, source, source_layer, source_width, source_height, target);
+        OnceCopy(screen, source, source_layer, source_width, source_height, target, part);
     if (once != VK_NULL_HANDLE) {
       vkCmdExecuteCommands(cmd, 1, &once);
+      gpu_.copy_stamps.After(cmd, stamp);
       ++once_run_;
       to_release_.push_back(layer->swapchain);
       layer->released = layer->revision;
@@ -2646,6 +2802,9 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
   copy.extent = {layer->width, layer->height, 1};
   if (same) {
     copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, source_layer, 1};
+    copy.srcOffset = {part.x, part.y, 0};
+    copy.dstOffset = {part.x, part.y, 0};
+    copy.extent = {static_cast<uint32_t>(part.w), static_cast<uint32_t>(part.h), 1};
     vkCmdCopyImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
   } else {
@@ -2676,6 +2835,7 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+  gpu_.copy_stamps.After(cmd, stamp);
   to_release_.push_back(layer->swapchain);
   layer->released = layer->revision;
   ++copies_;
@@ -2700,6 +2860,11 @@ void XrApp::ReadCopyKeys() {
   ini.Parse(text);
   copy_once_ = ini.GetInt("bwvr", "xr_copy_once", 1) != 0;
   gpu_.pool_reset = ini.GetInt("bwvr", "xr_pool_reset", 1) != 0;
+  eye_rects_ = ini.GetInt("bwvr", "xr_eye_rects", 1) != 0;
+  AppLog("xr           : xr_eye_rects=%d. %s", eye_rects_ ? 1 : 0,
+         eye_rects_ ? "A copy of an eye picture with an atlas (fovea_res_layer=1) takes only "
+                      "the part of the outer rect and the centre rect with their gap"
+                    : "A copy of an eye picture takes the whole picture");
   AppLog("xr           : xr_copy_once=%d, xr_pool_reset=%d. %s, and %s",
          copy_once_ ? 1 : 0, gpu_.pool_reset ? 1 : 0,
          copy_once_ ? "Each copy of the same size from a slot of the ring into a "
@@ -2717,7 +2882,8 @@ void XrApp::ReadCopyKeys() {
 // has no free entry or the command buffer cannot be made: then CopySlot
 // records the copy in the frame.
 VkCommandBuffer XrApp::OnceCopy(Screen* screen, VkImage source, uint32_t source_layer,
-                                uint32_t width, uint32_t height, VkImage target) {
+                                uint32_t width, uint32_t height, VkImage target,
+                                const eye_copy_math::Rect& part) {
   // The ring of the pictures makes the images of a slot again at a new size,
   // also for a slot that the session never took. So the entries go when the
   // source has another size or the ring made or freed an image since their
@@ -2732,7 +2898,8 @@ VkCommandBuffer XrApp::OnceCopy(Screen* screen, VkImage source, uint32_t source_
   }
   for (const Screen::Once& o : screen->once) {
     if (o.source == source && o.layer == source_layer && o.target == target &&
-        o.second == renderer_second_) {
+        o.second == renderer_second_ && o.part.x == part.x && o.part.y == part.y &&
+        o.part.w == part.w && o.part.h == part.h) {
       return o.cmd;
     }
   }
@@ -2776,7 +2943,9 @@ VkCommandBuffer XrApp::OnceCopy(Screen* screen, VkImage source, uint32_t source_
   VkImageCopy copy = {};
   copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, source_layer, 1};
   copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  copy.extent = {width, height, 1};
+  copy.srcOffset = {part.x, part.y, 0};
+  copy.dstOffset = {part.x, part.y, 0};
+  copy.extent = {static_cast<uint32_t>(part.w), static_cast<uint32_t>(part.h), 1};
   vkCmdCopyImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target,
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
   ImageBarrier(cmd, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -2788,7 +2957,7 @@ VkCommandBuffer XrApp::OnceCopy(Screen* screen, VkImage source, uint32_t source_
     ++once_full_;
     return VK_NULL_HANDLE;
   }
-  screen->once.push_back({source, source_layer, target, renderer_second_, cmd});
+  screen->once.push_back({source, source_layer, target, renderer_second_, part, cmd});
   ++once_made_;
   return cmd;
 }
@@ -3109,7 +3278,19 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(once_frees_),
            static_cast<unsigned long long>(once_full_));
   }
+  if (direct_writes_.load() + direct_misses_.load() > 0 || eye_direct_) {
+    AppLog("xr           : xr_eye_direct=%d: %llu pictures went straight into the swapchains "
+           "of the slots, %llu pictures of the projection layer took the old way because "
+           "they did not fit in those swapchains, %llu frames of the session showed a "
+           "picture of a slot, %llu frames had no projection layer because an eye showed "
+           "a slot that the play thread can write",
+           eye_direct_ ? 1 : 0, static_cast<unsigned long long>(direct_writes_.load()),
+           static_cast<unsigned long long>(direct_misses_.load()),
+           static_cast<unsigned long long>(direct_frames_),
+           static_cast<unsigned long long>(direct_stale_));
+  }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
+  for (DirectSet& d : direct_) FreeScreenSet(&d.set);
   FreeLayers();
   FreeScreenSet(&flat_);
   FreeStaging(&gpu_, &flat_pixels_.staging);

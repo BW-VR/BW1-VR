@@ -66,6 +66,7 @@ bool PictureRing::Start(const Gpu& gpu, VkQueue queue, VkSemaphore session_timel
     }
     timestamp_ns_ = gpu.timestamp_ns;
     timestamp_mask_ = gpu.timestamp_mask;
+    stamps_.Start(device_, timestamp_ns_, timestamp_mask_, frame_loop::kSlots);
   }
   started_ = true;
   AppLog("ring         : a ring of %d slots for the pictures of the game, each an image of "
@@ -97,6 +98,7 @@ void PictureRing::Stop() {
   }
   if (query_ != VK_NULL_HANDLE) vkDestroyQueryPool(device_, query_, nullptr);
   query_ = VK_NULL_HANDLE;
+  stamps_.Stop();
   if (pool_ != VK_NULL_HANDLE) vkDestroyCommandPool(device_, pool_, nullptr);
   pool_ = VK_NULL_HANDLE;
   if (started_) {
@@ -197,6 +199,8 @@ int PictureRing::BeginWrite(double* waited) {
       if (ms < 100.0) stats_.busy.Add(ms);
     }
   }
+  // The GPU finished the copies of the slot.
+  stamps_.Take(static_cast<uint32_t>(i));
   vkResetFences(device_, 1, &s.fence);
   s.submitted = false;
   vkResetCommandBuffer(s.cmd, 0);
@@ -208,12 +212,16 @@ int PictureRing::BeginWrite(double* waited) {
     // At the bottom of the pipe: after the walk before it on the queue.
     vkCmdWriteTimestamp(s.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_, 2 * i);
   }
+  stamps_.Begin(s.cmd, static_cast<uint32_t>(i));
   return i;
 }
 
 void PictureRing::Copy(int i, VkImage source, uint32_t first, uint32_t layers,
-                       const Image& to, uint32_t width, uint32_t height) {
+                       const Image& to, uint32_t width, uint32_t height,
+                       const eye_copy_math::Rect* part, int kind) {
   VkCommandBuffer cmd = slots_[i].cmd;
+  const eye_copy_math::Rect r = part != nullptr ? *part : eye_copy_math::Whole(width, height);
+  stamps_.Before(cmd, static_cast<uint32_t>(i), kind, eye_copy_math::Bytes(r, layers));
   VkImageMemoryBarrier b[2] = {{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER},
                                {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}};
   // The image of the renderer: from a color attachment to a source. The
@@ -237,12 +245,16 @@ void PictureRing::Copy(int i, VkImage source, uint32_t first, uint32_t layers,
                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                            VK_PIPELINE_STAGE_TRANSFER_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, b);
+  // The rect of the copy is at the same place in both images. The rest of the
+  // image of the slot is undefined: no layer shows it.
   if (!swap_red_blue_) {
     // The same format: a copy of the bytes.
     VkImageCopy copy = {};
     copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, first, layers};
     copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layers};
-    copy.extent = {width, height, 1};
+    copy.srcOffset = {r.x, r.y, 0};
+    copy.dstOffset = {r.x, r.y, 0};
+    copy.extent = {static_cast<uint32_t>(r.w), static_cast<uint32_t>(r.h), 1};
     vkCmdCopyImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to.image,
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
   } else {
@@ -250,9 +262,11 @@ void PictureRing::Copy(int i, VkImage source, uint32_t first, uint32_t layers,
     // and takes each pixel as it is.
     VkImageBlit blit = {};
     blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, first, layers};
-    blit.srcOffsets[1] = {static_cast<int32_t>(width), static_cast<int32_t>(height), 1};
+    blit.srcOffsets[0] = {r.x, r.y, 0};
+    blit.srcOffsets[1] = {r.x + r.w, r.y + r.h, 1};
     blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layers};
-    blit.dstOffsets[1] = {static_cast<int32_t>(width), static_cast<int32_t>(height), 1};
+    blit.dstOffsets[0] = {r.x, r.y, 0};
+    blit.dstOffsets[1] = {r.x + r.w, r.y + r.h, 1};
     vkCmdBlitImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to.image,
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_NEAREST);
   }
@@ -271,12 +285,82 @@ void PictureRing::Copy(int i, VkImage source, uint32_t first, uint32_t layers,
                        VK_PIPELINE_STAGE_TRANSFER_BIT |
                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                        0, 0, nullptr, 0, nullptr, 2, b);
+  stamps_.After(cmd, static_cast<uint32_t>(i));
+}
+
+// THE EYES STRAIGHT INTO THE SWAPCHAINS: as Copy, with the swapchain image of
+// each eye as the target of one layer, and the targets then in the layout of
+// a color attachment for the release (XrApp::DirectEnd). The format of the
+// swapchains has red first (XrApp::DirectBegin), so a copy keeps the bytes
+// also in an sRGB swapchain.
+void PictureRing::CopyDirect(int i, VkImage source, const eye_copy_math::Rect& part,
+                             const VkImage targets[2]) {
+  VkCommandBuffer cmd = slots_[i].cmd;
+  stamps_.Before(cmd, static_cast<uint32_t>(i), copy_time::kSlotDirect,
+                 eye_copy_math::Bytes(part, 2));
+  VkImageMemoryBarrier b[3] = {{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER},
+                               {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER},
+                               {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}};
+  b[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  b[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  b[0].oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  b[0].srcQueueFamilyIndex = b[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b[0].image = source;
+  b[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 2};
+  // A swapchain image that xrWaitSwapchainImage gave is free, and its old
+  // pixels go.
+  for (int eye = 0; eye < 2; ++eye) {
+    VkImageMemoryBarrier& t = b[1 + eye];
+    t.srcAccessMask = 0;
+    t.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    t.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    t.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    t.srcQueueFamilyIndex = t.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    t.image = targets[eye];
+    t.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  }
+  vkCmdPipelineBarrier(cmd,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 3, b);
+  for (int eye = 0; eye < 2; ++eye) {
+    VkImageCopy copy = {};
+    copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, static_cast<uint32_t>(eye), 1};
+    copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.srcOffset = {part.x, part.y, 0};
+    copy.dstOffset = {part.x, part.y, 0};
+    copy.extent = {static_cast<uint32_t>(part.w), static_cast<uint32_t>(part.h), 1};
+    vkCmdCopyImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, targets[eye],
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  }
+  // The source back to a color attachment for the next walk, and each
+  // swapchain image to the layout of a color attachment, the layout of a
+  // release.
+  b[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  b[0].dstAccessMask =
+      VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  b[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  b[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  for (int eye = 0; eye < 2; ++eye) {
+    VkImageMemoryBarrier& t = b[1 + eye];
+    t.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    t.dstAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    t.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    t.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  }
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0,
+                       nullptr, 3, b);
+  stamps_.After(cmd, static_cast<uint32_t>(i));
 }
 
 // An image of a slot is made at its first use and again at a new size. The
 // GPU may still copy from the old image, so the device must be idle before
 // it goes.
-bool PictureRing::CopyEyes(int i, VkImage source, uint32_t width, uint32_t height) {
+bool PictureRing::CopyEyes(int i, VkImage source, uint32_t width, uint32_t height,
+                           const eye_copy_math::Rect& part) {
   Slot& s = slots_[i];
   if (source == VK_NULL_HANDLE || width == 0 || height == 0) return false;
   if (s.eyes.width != width || s.eyes.height != height || s.eyes.layers != 2) {
@@ -294,8 +378,21 @@ bool PictureRing::CopyEyes(int i, VkImage source, uint32_t width, uint32_t heigh
     AppLog("ring         : slot %d: an image of %u by %u with 2 layers for the eye pictures "
            "(%.1f MB)", i, width, height, width * height * 8.0 / (1024.0 * 1024.0));
   }
-  Copy(i, source, 0, 2, s.eyes, width, height);
+  Copy(i, source, 0, 2, s.eyes, width, height, &part, copy_time::kSlotEyes);
   return true;
+}
+
+// The GPU may still copy from the image (a copy of the session from the slot
+// when it showed before), so the device must be idle before it goes.
+void PictureRing::FreeEyes(int i) {
+  Slot& s = slots_[i];
+  if (s.eyes.image == VK_NULL_HANDLE) return;
+  XrApp::QueueLock();
+  vkDeviceWaitIdle(device_);
+  XrApp::QueueUnlock();
+  FreeImage(&s.eyes);
+  AppLog("ring         : slot %d: its image of the eye pictures goes, because the pictures "
+         "of the slot go into its swapchains (xr_eye_direct=1)", i);
 }
 
 bool PictureRing::CopyPanel(int i, VkImage source, uint32_t width, uint32_t height) {
@@ -315,7 +412,7 @@ bool PictureRing::CopyPanel(int i, VkImage source, uint32_t width, uint32_t heig
     AppLog("ring         : slot %d: an image of %u by %u for the panel image (%.1f MB)", i,
            width, height, width * height * 4.0 / (1024.0 * 1024.0));
   }
-  Copy(i, source, 0, 1, s.panel, width, height);
+  Copy(i, source, 0, 1, s.panel, width, height, nullptr, copy_time::kSlotPanel);
   return true;
 }
 
@@ -338,11 +435,11 @@ bool PictureRing::CopyScreen(int i, VkImage source, uint32_t layer, uint32_t wid
     AppLog("ring         : slot %d: an image of %u by %u for the screen picture (%.1f MB)", i,
            width, height, width * height * 4.0 / (1024.0 * 1024.0));
   }
-  Copy(i, source, layer, 1, s.screen, width, height);
+  Copy(i, source, layer, 1, s.screen, width, height, nullptr, copy_time::kSlotScreen);
   return true;
 }
 
-void PictureRing::EndWrite(int i) {
+void PictureRing::EndWrite(int i, const std::function<void()>& after_submit) {
   Slot& s = slots_[i];
   if (query_ != VK_NULL_HANDLE) {
     vkCmdWriteTimestamp(s.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, query_, 2 * i + 1);
@@ -369,6 +466,7 @@ void PictureRing::EndWrite(int i) {
   XrApp::QueueUnlock();
   s.submitted = ok;
   s.query_written = ok && query_ != VK_NULL_HANDLE;
+  if (after_submit) after_submit();
   std::lock_guard<std::mutex> g(lock_);
   if (ok) {
     ring_.EndWrite(i);

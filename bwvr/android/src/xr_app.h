@@ -10,6 +10,7 @@
 #include <android/native_activity.h>
 #include <stdint.h>
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include <openxr/openxr_platform.h>
 
 #include "../../src/common/input_channel.h"
+#include "../../src/mod/eye_copy_math.h"
 #include "../../src/mod/fovea_res_math.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
@@ -240,7 +242,10 @@ class XrApp {
   void SetMenuShown(bool on) { menu_shown_ = on; }
   // The picture of the renderer goes out of the layers until the next
   // picture (the game ended).
-  void ClearScreenSource() { screen_source_ = VK_NULL_HANDLE; }
+  void ClearScreenSource() {
+    screen_source_ = VK_NULL_HANDLE;
+    direct_newest_ = -1;
+  }
 
   // THE RENDERER OF THE MOD IN THE SESSION (docs/android.md, "The picture
   // of the renderer in the headset"). True when the device of the runtime
@@ -389,6 +394,33 @@ class XrApp {
   void SetImageWait(bool wait) { image_wait_ = wait; }
   // The swapchains have blue first (the slots of the ring take that order).
   bool SwapRedBlue() const;
+  // THE COPIES OF THE EYE PICTURES (eye_copy_math.h, docs/android.md, "The
+  // copies of the eye pictures").
+  // xr_eye_rects (1 by default, read with the keys of the copies at the
+  // first Play with the frame loop): a copy of an eye picture with an atlas
+  // (fovea_res_layer=1) takes only the part that the layers show. 0: the
+  // whole picture.
+  bool EyeRects() const { return eye_rects_; }
+  // xr_eye_direct (0 by default, before the play thread starts): 1, the play
+  // thread copies a picture of the projection layer straight into two
+  // swapchains of its slot of the ring, and the session copies nothing for
+  // the eyes. 0: the copy into the slot and the copy of the session.
+  void SetEyeDirect(bool on) { eye_direct_ = on; }
+  bool EyeDirect() const { return eye_direct_; }
+  // THE PLAY THREAD (xr_eye_direct=1). DirectBegin: the two swapchains of
+  // `slot` (made at the first call for the slot, of the size of
+  // eye_copy_math::DirectSize), and an acquired and waited image of each,
+  // into targets. False when the picture does not go straight into them (no
+  // key, blue first, another size, no swapchain): then it takes the old
+  // way. DirectEnd: after the submit of the copies, the release of the
+  // images, before the slot is ready.
+  bool DirectBegin(int slot, uint32_t width, uint32_t height,
+                   const fovea_res_math::Atlas& atlas, VkImage targets[2]);
+  void DirectEnd(int slot);
+  // THE SESSION: the newest picture is in the two swapchains of `slot`, in
+  // place of SetScreenSource. The values of SetScreenView and SetScreenAtlas
+  // go with it.
+  void SetDirectSource(int slot);
   // THE LOCK OF THE QUEUE that the renderer, the play thread and the session
   // share. The session holds it for each submit and for each call of
   // OpenXR that can use the queue (xrBeginFrame, xrEndFrame,
@@ -501,6 +533,23 @@ class XrApp {
   uint64_t once_frees_ = 0;  // frees of the entries of a set
   uint64_t once_full_ = 0;   // copies with no free entry, recorded in the frame
   bool image_wait_ = false;
+  // THE COPIES OF THE EYE PICTURES. eye_part_: the part of the newest
+  // picture that a copy into the swapchains of the eyes takes. The sets of
+  // the slots of xr_eye_direct=1: each written by the play thread alone, and
+  // read by the session after the slot is ready. The swapchain handles stay
+  // until Stop.
+  bool eye_rects_ = true;
+  eye_copy_math::Rect eye_part_ = {};
+  bool eye_direct_ = false;
+  int direct_newest_ = -1;       // the slot of the newest picture, or -1
+  uint64_t direct_revision_ = 0;  // one more for each new picture in a slot
+  uint64_t direct_latched_[2] = {0, 0};  // the revision that each eye shows
+  int shown_direct_[2] = {-1, -1};  // the slot that each eye shows, or -1 (eyes_)
+  uint64_t direct_frames_ = 0;      // frames of the session with a picture of a slot
+  uint64_t direct_stale_ = 0;       // frames with no projection layer: see EndFrame
+  bool direct_sizes_said_ = false;  // LogViewSizes at the first picture of a slot
+  // The layer of the swapchain that eye `eye` shows.
+  const Layer& EyeLayer(int eye) const;
   bool eyes_frozen_ = false;   // screen_source_ is in a slot that the session left
   bool panel_frozen_ = false;  // panel_source_ too
   bool flat_frozen_ = false;   // flat_source_ too
@@ -528,6 +577,7 @@ class XrApp {
       uint32_t layer;
       VkImage target;
       bool second;  // with the barrier of the second queue
+      eye_copy_math::Rect part;  // the rect of the copy (xr_eye_rects)
       VkCommandBuffer cmd;
     };
     std::vector<Once> once;
@@ -536,6 +586,19 @@ class XrApp {
   };
   // The swapchains of the set are made.
   static bool Made(const Screen& screen) { return screen.layer[0].swapchain != XR_NULL_HANDLE; }
+  // THE TWO SWAPCHAINS OF A SLOT (xr_eye_direct=1). acquired, waited: the
+  // image of each eye between DirectBegin and DirectEnd.
+  struct DirectSet {
+    Screen set;
+    bool failed = false;
+    bool acquired[2] = {false, false};
+    bool waited[2] = {false, false};
+  };
+  DirectSet direct_[frame_loop::kSlots];
+  // The play thread counts its pictures straight into the swapchains, and
+  // the pictures that took the old way with the key on.
+  std::atomic<uint64_t> direct_writes_{0};
+  std::atomic<uint64_t> direct_misses_{0};
   // False with the reason in *why, and then the set has no part. count: the
   // swapchains of the set (2 for the eyes, 1 for the panel). With the frame
   // loop the set has no image between: a copy of the same size needs none,
@@ -547,7 +610,8 @@ class XrApp {
   // CopySlot records it), and the free of the entries of a set.
   void ReadCopyKeys();
   VkCommandBuffer OnceCopy(Screen* screen, VkImage source, uint32_t source_layer,
-                           uint32_t width, uint32_t height, VkImage target);
+                           uint32_t width, uint32_t height, VkImage target,
+                           const eye_copy_math::Rect& part);
   void FreeOnce(Screen* screen);
   // THE FRAME LOOP: a copy from an image of a slot of the ring (the layout
   // of a transfer source, the bytes in the order of the swapchain) into the

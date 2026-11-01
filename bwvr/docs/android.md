@@ -117,6 +117,8 @@ Summary:
 | `android/src/flat_view.cpp` | The menu in the window with no headset |
 | `android/src/gpu.cpp` | The Vulkan device, the staging buffers, the copies, and the ring of the command buffers of the session (`frame_loop=1`) |
 | `android/src/picture_ring.cpp` | The ring of the pictures of the game of the frame loop: the images of the slots, the copies of the play thread, the fences, the newest finished slot for the session |
+| `src/mod/eye_copy_math.h`, `android/src/copy_time.cpp` | The copies of the eye pictures: the part of an atlas that the layers show, the size of the swapchains of a slot (`xr_eye_direct`), the even rate (`frame_loop_hold`), and the timestamps of each copy for the time log. No Android code in the header |
+| `test/controller_math/eye_copy_checks.h` | The math checks of `eye_copy_math.h` |
 | `android/src/frame_loop.h` | The rules of the frame loop: the slots of the ring of the pictures, the drop of a picture, the ring of the command buffers, the serials of the submits, the age of the shown picture, the queue at the GPU, the direct writes and the rect of a copy of the pixels of the CPU. No Android code |
 | `test/controller_math/frame_loop_checks.h` | The math checks of `frame_loop.h` and of the row "The headset gets each frame (no wait for the GPU)" |
 | `android/src/motion_comp.cpp` | The motion of the stick in the projection layer (`motion_comp`), and the parts of the age of a new picture for the time log |
@@ -3029,18 +3031,16 @@ a swapchain image of the projection layer is one `vkCmdCopyImage`, with no
 image between: the slot has the size and the byte order of the swapchain,
 and a copy keeps the bytes also in a swapchain with an sRGB format. The
 panel image and the screen picture go the same way. Only the stereo screen
-(half the size) has a blit into an image between and then a copy. So each
-eye has two copies in all, one on the play thread into the slot and one on
-the session into the swapchain, the same count as the old loop (a blit into
-the image between and a copy). A copy straight from the target of the
-renderer into the swapchain does not fit the ring: the walk after the next
-writes the target again while the session can still show its picture. The
-walk cannot draw into a swapchain image either: the renderer of the mod
-chooses its own two targets (`vk_scene.cpp`, the same code as on the PC). A
-swapchain for each slot would give each eye three swapchains of about three
-images each in place of one swapchain and three images of the slots (at a
-render of 2702 by 2162 about 400 MB in place of about 270 MB), and calls of
-the swapchains on two threads.
+(half the size) has a blit into an image between and then a copy. So with
+`xr_eye_direct=0` (the default) each eye has two copies in all, one on the
+play thread into the slot and one on the session into the swapchain, the
+same count as the old loop (a blit into the image between and a copy). A
+copy straight from the target of the renderer into a swapchain of the
+projection layer does not fit the ring: the walk after the next writes the
+target again while the session can still show its picture. With
+`xr_eye_direct=1` each slot has two swapchains of its own, the play thread
+copies a picture of the projection layer straight into them, and the
+session copies nothing for the eyes ("The copies of the eye pictures").
 
 **The copies of the session with no wait** (`gpu.cpp`, `GpuSetRing`, the
 rules in `frame_loop.h`, `CommandRing`). In a frame the session records
@@ -3259,6 +3259,148 @@ the GPU is busy, and the latency that the player feels.
   queue. A new start of the app with `frame_loop=0` gives the old loop on
   one queue.
 
+## The copies of the eye pictures
+
+**What a copy costs.** Each copy of a picture in the app is a
+`vkCmdCopyImage` of the same size, or with blue first a blit of the same
+size with no filter (`VK_FILTER_NEAREST`). The layout of the target goes
+from undefined to the layout of a transfer, so no step reads its old
+pixels. A copy reads each byte of its rect one time and writes it one time,
+so its GPU time is about its bytes over the bandwidth of the memory of the
+GPU. At a render of 4096 by 3456 an eye picture with its two layers has
+108 MB. A command buffer of 5.55 ms with such a copy writes about 19 GB a
+second and reads as much, so the copies are bound by the memory and not by
+a filter, a format or a layout. Only fewer bytes make a copy shorter. The
+parts that the picture does not need:
+
+- **The rest of an atlas** (`fovea_res_layer=1`, `backend.md`, "The middle
+  as its own layer"). The eye picture keeps the size of the render, and the
+  layers show only the outer rect and the centre rect. The part with both
+  rects and their gap (`eye_copy_math::ShownPart`) is 2880 by 1854 of 4096
+  by 3456 with the outer image at 25 percent and the centre at 200 percent
+  for 22 degrees: 37.7 percent of the bytes (the math checks). The renderer
+  cleared and wrote the whole eye picture, and each copy took the whole
+  picture.
+- **The second copy of each eye**: the copy of the session from the slot
+  into the swapchain.
+- A copy of the panel or of the screen that did not change: there is none.
+  The panel image goes into a slot only after a walk that drew into the
+  panel (`VkScenePanelFor`), and the session copies it only for a new
+  picture. A screen picture goes into a slot only when the slot does not
+  hold it.
+
+**The keys** (`bwvr.ini` of the game folder, the rules in
+`src/mod/eye_copy_math.h`, checks in
+`test/controller_math/eye_copy_checks.h`):
+
+| Key | Default | The new way | The old way |
+| --- | --- | --- | --- |
+| `xr_eye_rects` | 1 | A copy of an eye picture with an atlas, into a slot and into a swapchain, takes only the shown part. The rest of the image of the slot and of the swapchain image is undefined | 0: the whole picture |
+| `vk_atlas_area` | 1 | The renderer of the app clears and writes only the shown part of the eye picture when it puts the two images into it (`ComposeAtlas` of `vk_scene.cpp`, a render area of that part). Its clear gives the gap its black with an alpha of 0 | 0: the whole eye picture. On the PC always 0 |
+| `xr_eye_direct` | 0 | The play thread copies each picture of the projection layer straight into two swapchains of its slot, and the session copies nothing for the eyes | 0: the copy into the slot and the copy of the session |
+| `frame_loop_hold` | 0 | N of 2 to 8: the session takes a new picture only after the shown picture showed in N frames of the session | 0 and 1: the newest finished picture at each frame |
+
+The app reads `xr_eye_rects` with the keys of the copies of the session at
+the first Play with the frame loop ("xr : xr_eye_rects=1. ..."), the
+renderer reads `vk_atlas_area` with `fovea_res_layer` at the first walk of
+each game ("vk scene : vk_atlas_area=1. ..." in `bwvr-quest.log` when
+`fovea_res_layer` is on), and the app reads `xr_eye_direct` and
+`frame_loop_hold` at each Play ("game : xr_eye_direct=1. ...", "game :
+frame_loop_hold=2. ..."). There is no test key: the app has no hotkeys.
+The keys are not rows of `settings_table.h`, so the launcher of the PC
+does not show them.
+
+**The eyes straight into the swapchains** (`xr_eye_direct=1`,
+`XrApp::DirectBegin`, `DirectEnd`, `PictureRing::CopyDirect`).
+
+- Each slot of the ring gets two swapchains (one for each eye) at its first
+  picture of the projection layer, of the size of the shown part of that
+  picture (`eye_copy_math::DirectSize`: the whole picture with no atlas).
+  The play thread makes them (`xrCreateSwapchain` with the lock of the
+  queue), and they stay to the end of the app. The log: "xr : slot 0 of
+  the ring: two swapchains of W by H for the eye pictures of W by H ...".
+- For a picture the play thread acquires and waits for an image of each
+  swapchain of the slot (it may wait, the session never does), records the
+  copy of the shown part of each layer into it after the walk, submits,
+  releases the two images, and only then the slot is ready. The session
+  shows a slot only when its fence is signaled, and the ring never lets the
+  play thread write the shown slot (`frame_loop.h`, `Ring`). So no layer of
+  a frame names a swapchain that has an acquired image, and the runtime
+  reads a swapchain image only after the GPU finished it.
+- The session takes the picture of a new slot with no copy: the views of
+  the projection layer (and of the centre layer) name the swapchains of the
+  slot, with the rects of the atlas at their place in the picture. The
+  poses are the same as with the old way (`motion_comp`).
+- A picture takes the old way when it does not go into the projection
+  layer (the stereo screen, the cut scene window), when it does not fit in
+  the swapchains of its slot (`eye_copy_math::DirectFits`: another size, or
+  no atlas in swapchains of the shown part), and when the swapchains have
+  blue first (a blit would change the bytes of an sRGB swapchain). An eye
+  that shows a slot and gets a picture of the old way waits for its
+  swapchain image in that frame, because the play thread can write that
+  slot again. When the copy still does not happen, the frame has no
+  projection layer, and the log counts it at the end of the app.
+- A slot that has an image of the eye pictures from a picture of the old
+  way frees it at its next picture straight into its swapchains, with one
+  wait for the idle device ("ring : slot 0: its image of the eye pictures
+  goes ...").
+- **The memory.** Three slots with two swapchains of about three images
+  each (the runtime chooses the count): 18 images of one eye, in place of
+  the 3 images of the slots (6 images of one eye) and the 6 images of the
+  two swapchains of the projection layer. At 4096 by 3456 with no atlas
+  that is about 970 MB in place of about 650 MB. With the atlas of 2880 by
+  1854 above it is about 370 MB, and no swapchain of the projection layer
+  of the size of the render is made.
+- At the end of the app: "xr : xr_eye_direct=1: N pictures went straight
+  into the swapchains of the slots, M pictures of the projection layer took
+  the old way because they did not fit in those swapchains, F frames of the
+  session showed a picture of a slot, K frames had no projection layer
+  ...".
+
+**The even rate** (`frame_loop_hold`, `eye_copy_math::HoldTakes`). When the
+GPU makes a picture in about each second frame of the display, the newest
+finished picture shows in 1 or in 2 frames in turn, and a flight of the
+camera of the game judders. With `frame_loop_hold=2` the session takes a
+new picture only after the shown picture showed in 2 frames: 36 pictures a
+second at 72 Hz with a picture in each frame of the GPU, each in 2 frames.
+A picture that is not finished at that frame shows at the first later frame
+where it is finished, and the count starts again. Each frame has the poses
+of its picture with the rules of `motion_comp`, as before. The play thread
+plays at its own rate, so a picture that a newer one replaced before the
+take counts as replaced in the time log.
+
+**The time log** (line 3 of "The time log of the app"): "time : the GPU of
+the copies in ms, the mean and the most: ...", for each kind of copy the
+mean and the most of its GPU time, the count, the MB of a copy, and the GB
+that the GPU wrote in a second of the copy: the eye pictures into a slot,
+the eye pictures straight into the swapchains, the panel image into a
+slot, the screen picture into a slot, an eye picture of a slot into its
+swapchain, an eye picture into the stereo screen, the panel image into its
+swapchain, and the screen picture into the screen quad. A pair of
+timestamps at the bottom of the pipe goes around each copy
+(`copy_time.h`), so the time of a copy has no time of a walk. The parts of
+a walk are in the line of the GPU parts of the walk (`gpu_parts=1`, "The
+GPU parts of the walk").
+
+**What the emulator shows:** RESULTS
+
+**Not shown yet:** the time of the copies in a Quest 3 and in a Steam
+Frame, the even rate in a flight of the camera, the memory of the
+swapchains of the slots in a headset, and how a runtime of a headset
+answers the calls of the swapchains of the slots on the play thread.
+
+**Known limits:**
+
+- With `vk_atlas_area=1` the pixels of the eye picture outside the shown
+  part are undefined. The screen quad of a frame with no scene right after
+  a walk with an atlas shows the whole eye picture (`backend.md`, "The
+  middle as its own layer"), so it shows those pixels too.
+- The panel image still has two copies (into the slot and into its
+  swapchain) for each walk that drew into the panel.
+- The renderer still draws into its own two targets, and the play thread
+  copies from them. A walk straight into a swapchain image would need the
+  renderer to take a target for each walk.
+
 ## The time log of the app
 
 `time_log=1` (the default, `time_log.cpp`, the parse of `/proc` in
@@ -3343,6 +3485,9 @@ the mod").
    buffer of the app is at the bottom of the pipe, so it comes after the
    walk before it on the queue, and the time of the walk is not counted two
    times.
+   **The GPU of the copies** (one more line): the GPU time of each kind of
+   copy of a picture, with its count, its MB and the GB a second that it
+   wrote ("The copies of the eye pictures").
    **The parts of the layers** (one more line): the step "the layers" of
    the line of the steps in its parts, each the mean and the most in ms of
    a frame of the session, with the CPU time of the thread of the session

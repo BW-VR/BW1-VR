@@ -109,6 +109,7 @@ VkCommandBuffer RingBegin(Gpu* gpu) {
     e.query_written = false;
     TakeStamps(gpu, gpu->ring_query, 2 * e.query);
   }
+  gpu->copy_stamps.Take(e.query);
   gpu->ring_current = pick.index;
   if (e.pool != VK_NULL_HANDLE) {
     vkResetCommandPool(gpu->device, e.pool, 0);
@@ -124,6 +125,7 @@ VkCommandBuffer RingBegin(Gpu* gpu) {
     vkCmdWriteTimestamp(e.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->ring_query,
                         2 * e.query);
   }
+  gpu->copy_stamps.Begin(e.cmd, e.query);
   return e.cmd;
 }
 
@@ -143,6 +145,10 @@ void GpuSetRing(Gpu* gpu, bool on) {
         gpu->ring_query = VK_NULL_HANDLE;
       }
     }
+    if (gpu->query != VK_NULL_HANDLE && !gpu->copy_stamps.On()) {
+      gpu->copy_stamps.Start(gpu->device, gpu->timestamp_ns, gpu->timestamp_mask,
+                             static_cast<uint32_t>(gpu->ring_order.Most()));
+    }
     AppLog("gpu          : the ring of command buffers is on (up to %d). A copy of the "
            "session does not wait on the CPU for the GPU",
            gpu->ring_order.Most());
@@ -152,6 +158,7 @@ void GpuSetRing(Gpu* gpu, bool on) {
   for (Gpu::RingEntry& e : gpu->ring_entries) {
     if (e.query_written) TakeStamps(gpu, gpu->ring_query, 2 * e.query);
     e.query_written = false;
+    gpu->copy_stamps.Take(e.query);
   }
   gpu->done_serial = gpu->serial;
   gpu->ring = false;
@@ -261,6 +268,7 @@ void GpuRelease(Gpu* gpu) {
     vkDestroyQueryPool(gpu->device, gpu->ring_query, nullptr);
   }
   gpu->ring_query = VK_NULL_HANDLE;
+  gpu->copy_stamps.Stop();
   gpu->ring = false;
   if (gpu->timeline != VK_NULL_HANDLE) vkDestroySemaphore(gpu->device, gpu->timeline, nullptr);
   gpu->timeline = VK_NULL_HANDLE;

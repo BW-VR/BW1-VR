@@ -15,6 +15,7 @@
 
 #include "../../src/mod/vk_scene.h"
 #include "app_log.h"
+#include "copy_time.h"
 #include "walk_probe.h"
 
 namespace {
@@ -153,6 +154,8 @@ void TimeLog::GameStarts(double now_ms) {
   // The play thread starts after this call, so the renderer is free here.
   VkSceneGpuTime drop;
   VkSceneTakeGpuTime(&drop);
+  copy_time::Window copies;
+  copy_time::TakeWindow(&copies);
   walk_parts::Totals parts;
   WalkProbeTake(&parts);
 }
@@ -493,6 +496,26 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
          pictures_ > 0 ? gpu_ms / pictures_ : 0.0, walk_gpu_.Mean(), walk_gpu_.most,
          static_cast<unsigned long long>(walk_gpu_.count), xr_.busy.Mean(), xr_.busy.most,
          static_cast<unsigned long long>(xr_.busy.count), 100.0 * gpu_ms / (seconds * 1000.0));
+  // THE GPU OF EACH COPY (copy_time.h): the time of each kind of copy, its MB
+  // and the GB that the GPU wrote in a second of the copy.
+  {
+    copy_time::Window w;
+    copy_time::TakeWindow(&w);
+    std::string list;
+    for (int k = 0; k < copy_time::kKinds; ++k) {
+      const tl::Stat& s = w.ms[k];
+      if (s.count == 0) continue;
+      const double mb = static_cast<double>(w.bytes[k]) / (1024.0 * 1024.0);
+      char part[256];
+      snprintf(part, sizeof(part), "%s%s %.2f and %.2f (%llu copies, %.1f MB a copy, %.1f GB "
+               "a second)", list.empty() ? "" : ", ", copy_time::Name(k), s.Mean(), s.most,
+               static_cast<unsigned long long>(s.count), mb / static_cast<double>(s.count),
+               s.sum > 0.0 ? mb / s.sum * 1000.0 / 1024.0 : 0.0);
+      list += part;
+    }
+    AppLog("time         : the GPU of the copies in ms, the mean and the most: %s",
+           list.empty() ? "no copy with a time of the GPU" : list.c_str());
+  }
   // THE PARTS OF THE LAYERS of the thread of the session (the step "the
   // layers" is their sum but the swapchains), the clock and the CPU time of
   // the thread.

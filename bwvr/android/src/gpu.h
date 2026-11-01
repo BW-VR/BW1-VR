@@ -11,6 +11,7 @@
 
 #include <vector>
 
+#include "copy_time.h"
 #include "frame_loop.h"
 #include "../../src/mod/time_log_math.h"
 
@@ -63,6 +64,9 @@ struct Gpu {
   uint64_t serial = 0;     // the serial of the last submit
   uint64_t done_serial = 0;  // the GPU finished each submit up to this serial
   VkQueryPool ring_query = VK_NULL_HANDLE;
+  // The timestamps of each copy in an entry (time_log=1, copy_time.h), by
+  // the index of the queries of the entry.
+  copy_time::Stamps copy_stamps;
   uint32_t ring_queries = 0;  // the entries that have their timestamps
   uint64_t ring_grows = 0;    // new entries because the GPU was not done
   uint64_t ring_waits = 0;    // waits of a full ring
@@ -90,6 +94,12 @@ void GpuSetRing(Gpu* gpu, bool on);
 bool GpuSerialDone(Gpu* gpu, uint64_t serial);
 // The serial that the next GpuSubmit gives.
 inline uint64_t GpuNextSerial(const Gpu& gpu) { return gpu.serial + 1; }
+// THE TIME OF EACH COPY: the index of the open command buffer of the ring in
+// Gpu::copy_stamps, or UINT32_MAX with no open command buffer of the ring.
+inline uint32_t GpuStampIndex(const Gpu& gpu) {
+  return gpu.ring && gpu.ring_current >= 0 ? gpu.ring_entries[gpu.ring_current].query
+                                           : UINT32_MAX;
+}
 
 // A buffer that the CPU writes and the GPU reads.
 struct Staging {

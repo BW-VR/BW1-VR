@@ -135,6 +135,7 @@
 #endif
 #include "vk_fallback.h"
 #include "../common/bw_addresses.h"
+#include "eye_copy_math.h"
 #include "fovea_res_math.h"
 #include "foveation_math.h"
 #include "vk_draw_math.h"
@@ -613,6 +614,12 @@ uint64_t g_gaze_frames = 0;
 // (g_done_atlas, VkSceneEyesAtlas).
 bool g_sharp_keys_read = false;
 bool g_mres_layer = false;
+// vk_atlas_area (1 by default, read with fovea_res_layer, only in the headset
+// app): the draw of the two images into the eye picture clears and writes
+// only the part of the eye picture that the layers show
+// (eye_copy_math::ShownPart). The rest of the eye picture is undefined. 0,
+// and on the PC: the whole eye picture.
+bool g_atlas_area = true;
 // The value of the key: 2 also makes the atlas on the PC (AtlasAllowed).
 int g_mres_layer_key = 0;
 fovea_res_math::Atlas g_walk_atlas = {};
@@ -1692,7 +1699,7 @@ void WritePicture(const vk::Image& image, uint32_t layer, const char* what,
 // the same walk.
 void BeginRenderingOf(VkCommandBuffer cb, const vk::Image& color_image,
                       const vk::Image& depth_image, uint32_t view_mask,
-                      bool load, bool keep_depth) {
+                      bool load, bool keep_depth, const VkRect2D* area = nullptr) {
   VkRenderingAttachmentInfo color = {
       VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
   color.imageView = color_image.view;
@@ -1709,6 +1716,7 @@ void BeginRenderingOf(VkCommandBuffer cb, const vk::Image& color_image,
   depth.clearValue.depthStencil.depth = 1.0f;
   VkRenderingInfo rendering = {VK_STRUCTURE_TYPE_RENDERING_INFO};
   rendering.renderArea = {{0, 0}, {color_image.width, color_image.height}};
+  if (area != nullptr) rendering.renderArea = *area;
   rendering.layerCount = 1;
   rendering.viewMask = view_mask;
   rendering.colorAttachmentCount = 1;
@@ -2409,7 +2417,13 @@ void ReadSharpKeys() {
     g_mres_layer_key =
         static_cast<int>(GetPrivateProfileIntA("bwvr", "fovea_res_layer", 0, path));
     g_mres_layer = g_mres_layer_key != 0;
+    g_atlas_area = GetPrivateProfileIntA("bwvr", "vk_atlas_area", 1, path) != 0;
   }
+#ifdef _WIN32
+  // On the PC the window and the pictures of a test show the whole eye
+  // picture (the test aid fovea_res_layer=2), so each pixel of it is written.
+  g_atlas_area = false;
+#endif
   g_said_atlas = false;
   ModLog("vk scene     : fovea_res_layer=%d. %s", g_mres_layer_key,
          g_mres_layer
@@ -2418,6 +2432,12 @@ void ReadSharpKeys() {
                "as a layer of its own"
              : "With fovea_res=1 the eye picture is made from the outer image and the "
                "centre image at the size of the eye picture");
+  if (g_mres_layer) {
+    ModLog("vk scene     : vk_atlas_area=%d. %s", g_atlas_area ? 1 : 0,
+           g_atlas_area ? "The draw of the two images clears and writes only the part of the "
+                          "eye picture with the outer rect, the centre rect and their gap"
+                        : "The draw of the two images clears and writes the whole eye picture");
+  }
 }
 
 VkDeviceSize RingVertices(Slot& s, const void* data, VkDeviceSize bytes) {
@@ -2932,12 +2952,18 @@ void ComposeAtlas(Slot& s) {
   const VkCommandBuffer cb = s.cb;
   const fovea_res_math::Atlas& a = g_walk_atlas;
   const uint32_t width = Target().width, height = Target().height;
-  BeginRenderingOf(cb, Target(), g_depth, 3u, false, false);
+  // vk_atlas_area=1: only the part that the layers show. Its clear gives the
+  // gap its black with an alpha of 0.
+  VkRect2D area = {{0, 0}, {width, height}};
+  if (g_atlas_area) {
+    const eye_copy_math::Rect part = eye_copy_math::ShownPart(a, width, height);
+    area.extent = {static_cast<uint32_t>(part.w), static_cast<uint32_t>(part.h)};
+  }
+  BeginRenderingOf(cb, Target(), g_depth, 3u, false, false, &area);
   const VkViewport viewport = {0.0f, 0.0f, static_cast<float>(width),
                                static_cast<float>(height), 0.0f, 1.0f};
   SetViewport(cb, viewport);
-  const VkRect2D scissor = {{0, 0}, {width, height}};
-  SetScissor(cb, scissor);
+  SetScissor(cb, area);
   DrawStates(cb, D3DCULL_NONE, 0, 0, D3DCMP_ALWAYS, D3DPT_TRIANGLELIST);
   // No blend: the alpha of the vertices goes into the eye picture.
   const VkPipeline opaque = Pipeline(0);

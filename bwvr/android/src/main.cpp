@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "../../src/common/version.h"
+#include "../../src/mod/eye_copy_math.h"
 #include "app_log.h"
 #include "build_id.h"
 #include "display_rate.h"
@@ -152,6 +153,11 @@ struct App {
   std::mutex play_stats_lock;
   PlayStats play_stats;
   int gpu_depth = 1;  // frame_loop_gpu_depth, read at each Play
+  // THE EVEN RATE (frame_loop_hold, read at each Play): the frames of the
+  // session that showed the shown picture, and if a picture showed.
+  int hold = 0;
+  uint64_t hold_shown = 0;
+  bool hold_any = false;
 
   // THE INPUT CHANNEL (input_live=1, docs/android.md, "The input channel").
   InputLive input_live;
@@ -276,14 +282,19 @@ bool ShowEyes(App* app, const Picture& p) {
   // the eyes too.
   const quad_layer_math::FrameLayers& layers = *p.layers;
   const bool window = app->xr.ProjectionOn() && quad_layer_math::AsScreen(layers);
-  if ((has || window) && !app->xr.HasEyes()) app->xr.MakeEyes(w, h);
+  // A picture in the swapchains of its slot (xr_eye_direct=1) needs no
+  // swapchains of the projection layer.
+  if ((has || window) && !app->xr.HasEyes() && p.direct_slot < 0) app->xr.MakeEyes(w, h);
   if (has && (p.view.width != w || p.view.height != h) && !app->said_view_size) {
     app->said_view_size = true;
     AppLog("xr           : the mod gives the angles of view for pictures of %u by "
            "%u, and the picture of the renderer has %u by %u",
            p.view.width, p.view.height, w, h);
   }
-  if (p.from_ring) {
+  if (p.direct_slot >= 0) {
+    app->xr.SetDirectSource(p.direct_slot);
+    app->screen_image = VK_NULL_HANDLE;
+  } else if (p.from_ring) {
     // Each slot is a new picture.
     app->xr.SetScreenSource(p.eyes, w, h);
     app->screen_image = VK_NULL_HANDLE;
@@ -535,6 +546,7 @@ bool PlayLive(App* app) {
 double WriteSlot(App* app, const LivePlay& live) {
   namespace sq = screen_quad_math;
   double waited = 0.0;
+  bool direct = false;
   const int i = app->ring.BeginWrite(&waited);
   if (i < 0) return waited;
   PictureRing::Slot& s = app->ring.At(i);
@@ -573,8 +585,30 @@ double WriteSlot(App* app, const LivePlay& live) {
     p.screen_width = s.screen_width;
     p.screen_height = s.screen_height;
   } else if (g.eyes_ok) {
-    p.eyes_ok = app->ring.CopyEyes(i, g.eyes, g.width, g.height);
-    p.eyes = s.eyes.image;
+    // THE EYES STRAIGHT INTO THE SWAPCHAINS (xr_eye_direct=1): a picture of
+    // the projection layer goes into the two swapchains of the slot, with no
+    // copy of the session. A picture of the stereo screen or of the cut scene
+    // window takes the old way.
+    const quad_layer_math::FrameLayers& layers = *g.layers;
+    VkImage targets[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    direct = app->xr.EyeDirect() && app->xr.ProjectionOn() && g.have_view &&
+             view_layer_math::ShowsProjection(g.view) && !quad_layer_math::AsScreen(layers) &&
+             app->xr.DirectBegin(i, g.width, g.height, g.atlas, targets);
+    if (direct) {
+      // The slot has no image of its own for the eyes now.
+      app->ring.FreeEyes(i);
+      app->ring.CopyDirect(i, g.eyes, eye_copy_math::CopyPart(true, g.atlas, g.width, g.height),
+                           targets);
+      p.eyes_ok = true;
+      p.direct_slot = i;
+      p.eyes = VK_NULL_HANDLE;
+    } else {
+      // xr_eye_rects=1: only the part of the picture that the layers show.
+      p.eyes_ok = app->ring.CopyEyes(
+          i, g.eyes, g.width, g.height,
+          eye_copy_math::CopyPart(app->xr.EyeRects(), g.atlas, g.width, g.height));
+      p.eyes = s.eyes.image;
+    }
     p.width = g.width;
     p.height = g.height;
     p.have_view = g.have_view;
@@ -598,7 +632,13 @@ double WriteSlot(App* app, const LivePlay& live) {
     }
   }
   p.ready_ms = NowMs();
-  app->ring.EndWrite(i);
+  // The swapchain images of xr_eye_direct=1 go back to the runtime after the
+  // submit and before the slot is ready.
+  if (direct) {
+    app->ring.EndWrite(i, [app, i]() { app->xr.DirectEnd(i); });
+  } else {
+    app->ring.EndWrite(i);
+  }
   return waited;
 }
 
@@ -1065,6 +1105,31 @@ void Play(App* app, bool new_game) {
                ? "The play thread starts a new picture only while fewer pictures than that are "
                  "not finished on the GPU, and then plays the newest frame of the game"
                : "No limit: the play thread plays each batch of frames at once");
+  }
+  // xr_eye_direct (0 by default): 1, the play thread copies each picture of
+  // the projection layer straight into two swapchains of its slot of the
+  // ring, and the session copies nothing for the eyes.
+  const bool eye_direct = loop && app->ini.GetInt("bwvr", "xr_eye_direct", 0) != 0;
+  app->xr.SetEyeDirect(eye_direct);
+  if (loop) {
+    AppLog("game         : xr_eye_direct=%d. %s", eye_direct ? 1 : 0,
+           eye_direct ? "The play thread copies each picture of the projection layer straight "
+                        "into two swapchains of its slot of the ring, and the session copies "
+                        "nothing for the eyes"
+                      : "The play thread copies each picture into its slot of the ring, and "
+                        "the session copies it from there into the swapchains of the eyes");
+  }
+  // frame_loop_hold (0 by default): N of 2 or more, the session takes a new
+  // picture only after the shown picture showed in N frames of the session.
+  app->hold = eye_copy_math::Hold(app->ini.GetInt("bwvr", "frame_loop_hold", 0));
+  app->hold_shown = 0;
+  app->hold_any = false;
+  if (loop) {
+    AppLog("game         : frame_loop_hold=%d. %s", app->hold,
+           app->hold >= 2 ? "Each picture shows in at least that many frames of the session, "
+                            "so the pictures come at an even rate when the GPU is slower than "
+                            "the display"
+                          : "Each frame of the session shows the newest finished picture");
   }
   app->xr.SetFrameLoop(loop);
   if (loop) {
@@ -1920,7 +1985,12 @@ void android_main(android_app* android) {
       // finished, else the play of the batch on this thread.
       bool fresh = false;
       if (app.play_running) {
-        fresh = TakePicture(&app);
+        // frame_loop_hold: a new picture only after the hold of the shown one.
+        if (eye_copy_math::HoldTakes(app.hold, app.hold_shown, app.hold_any)) {
+          fresh = TakePicture(&app);
+        }
+        if (fresh) app.hold_any = true;
+        app.hold_shown = eye_copy_math::NextShown(app.hold_shown, fresh);
         step(XrApp::kStepTake);
       } else if (app.live) {
         fresh = PlayLive(&app);

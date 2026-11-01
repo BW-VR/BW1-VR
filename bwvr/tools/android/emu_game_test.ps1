@@ -297,6 +297,11 @@
     over the land then: with -TestSave give -MenuClick too, so the Main Menu
     of game 2 goes.
 
+.PARAMETER ResolutionPct
+    The value of resolution_pct in bwvr.ini, 50 by default (a render of 1380
+    by 1104 with the eyes of the test runtime). The checks of the size of the
+    render and of the swapchains take this value.
+
 .PARAMETER IniExtra
     More lines for bwvr.ini, for example 'profile_sample_outside=1000'. A
     key that the save of the menu deletes (kRetiredKeys) does not reach the
@@ -342,6 +347,7 @@ param(
     [ValidateSet(-1, 0, 1)][int]$FrameLoop = -1,
     [int]$StickFrames = 0,
     [string[]]$IniExtra = @(),
+    [ValidateRange(10, 400)][int]$ResolutionPct = 50,
     [switch]$Keep
 )
 
@@ -754,7 +760,7 @@ function EyeCap([int]$W, [int]$H, [int]$Key) {
 function MulDivRound([int]$N, [int]$Num, [int]$Den) { return [int][math]::Floor(([int64]$N * $Num + [math]::Floor($Den / 2)) / $Den) }
 function RenderOf([int]$W, [int]$H) {
     $side = [math]::Max($W, $H)
-    $p = MulDivRound $side 50 100
+    $p = MulDivRound $side $ResolutionPct 100
     $p = [int]([math]::Floor($p / 2) * 2)
     $p = [math]::Max(640, [math]::Min(4096, $p))
     $wide = MulDivRound $p 125 100
@@ -1321,7 +1327,7 @@ try {
     Expect ($profiles -match 'No such file') 'the copy has no Profiles folder'
     $ini = Join-Path $Out 'bwvr.ini.pushed'
     # A render of 50 percent of the eye of the test runtime: 1380 by 1104.
-    $iniLines = @('[bwvr]', 'resolution_pct=50', "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio")
+    $iniLines = @('[bwvr]', "resolution_pct=$ResolutionPct", "wine_debug=$WineDebug", 'menu_capture=1', "wine_audio=$WineAudio")
     if ($DisplayHz -gt 0) { $iniLines += "display_hz=$DisplayHz" }
     if ($EyeSizeMax -ge 0) { $iniLines += "eye_size_max=$EyeSizeMax" }
     if ($TimeLog -ge 0) { $iniLines += "time_log=$TimeLog" }

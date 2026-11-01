@@ -15,17 +15,20 @@
 
 #include <stdint.h>
 
+#include <functional>
 #include <mutex>
 #include <vector>
 
 #include <vulkan/vulkan.h>
 
 #include "../../src/common/input_channel.h"
+#include "../../src/mod/eye_copy_math.h"
 #include "../../src/mod/fovea_res_math.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "../../src/mod/time_log_math.h"
+#include "copy_time.h"
 #include "frame_loop.h"
 #include "gpu.h"
 
@@ -68,6 +71,10 @@ struct Picture {
   // The images of a slot: in the layout of a transfer source, with the bytes
   // in the order of the swapchains. Else the images of the renderer.
   bool from_ring = false;
+  // THE EYES STRAIGHT INTO THE SWAPCHAINS (xr_eye_direct=1): the slot whose
+  // two swapchains have the eye pictures (XrApp::DirectBegin), else -1. Then
+  // `eyes` is VK_NULL_HANDLE, and the session copies nothing for the eyes.
+  int direct_slot = -1;
   // THE STREAM: the newest frame of the batch, and the pictures of the play
   // since frames came.
   uint64_t last_frame = 0;
@@ -140,12 +147,25 @@ class PictureRing {
   Slot& At(int i) { return slots_[i]; }
   // The copies from images of the renderer, in the layout of a color
   // attachment, into the images of slot i. They make an image of the slot
-  // at the first use and at a new size.
-  bool CopyEyes(int i, VkImage source, uint32_t width, uint32_t height);
+  // at the first use and at a new size. part: the rect of the eye pictures
+  // that the copy takes (xr_eye_rects, eye_copy_math::CopyPart).
+  bool CopyEyes(int i, VkImage source, uint32_t width, uint32_t height,
+                const eye_copy_math::Rect& part);
+  // THE EYES STRAIGHT INTO THE SWAPCHAINS (xr_eye_direct=1): the rect `part`
+  // of each layer of the source into the swapchain image of its eye
+  // (targets, acquired and waited by XrApp::DirectBegin), at the same place.
+  // The swapchain images go to the layout of a color attachment.
+  void CopyDirect(int i, VkImage source, const eye_copy_math::Rect& part,
+                  const VkImage targets[2]);
+  // The image of the eye pictures of slot i goes, when the slot has one (a
+  // picture of the old way before). It waits for the idle device one time.
+  void FreeEyes(int i);
   bool CopyPanel(int i, VkImage source, uint32_t width, uint32_t height);
   bool CopyScreen(int i, VkImage source, uint32_t layer, uint32_t width, uint32_t height);
-  // The submit of the copies with the fence of the slot. The slot is ready.
-  void EndWrite(int i);
+  // The submit of the copies with the fence of the slot. Then after_submit
+  // (the release of the swapchain images of xr_eye_direct=1), and then the
+  // slot is ready, so no frame of the session shows it before the release.
+  void EndWrite(int i, const std::function<void()>& after_submit = nullptr);
   // THE QUEUE AT THE GPU (frame_loop_gpu_depth): true when fewer than `depth`
   // slots have copies that the GPU did not finish. The fence of a slot comes
   // after the walks of its picture on the queue, so a finished slot has a
@@ -169,9 +189,9 @@ class PictureRing {
   bool MakeImage(Image* image, uint32_t width, uint32_t height, uint32_t layers);
   void FreeImage(Image* image);
   // A copy of `layers` layers from `first` of a source of the renderer into
-  // an image of the slot.
+  // an image of the slot, of the rect `part` (the whole image with no part).
   void Copy(int i, VkImage source, uint32_t first, uint32_t layers, const Image& to,
-            uint32_t width, uint32_t height);
+            uint32_t width, uint32_t height, const eye_copy_math::Rect* part, int kind);
 
   bool started_ = false;
   VkDevice device_ = VK_NULL_HANDLE;
@@ -180,6 +200,7 @@ class PictureRing {
   VkPhysicalDeviceMemoryProperties memory_ = {};
   VkCommandPool pool_ = VK_NULL_HANDLE;
   VkQueryPool query_ = VK_NULL_HANDLE;
+  copy_time::Stamps stamps_;  // the GPU time of each copy (time_log=1)
   double timestamp_ns_ = 0.0;
   uint64_t timestamp_mask_ = 0;
   VkFormat format_ = VK_FORMAT_R8G8B8A8_UNORM;

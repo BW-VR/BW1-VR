@@ -49,6 +49,7 @@ add_library(bwvr_quest SHARED
     src/main.cpp
     src/app_log.cpp
     src/canvas.cpp
+    src/copy_time.cpp
     src/flat_view.cpp
     src/game_folder.cpp
     src/input_live.cpp

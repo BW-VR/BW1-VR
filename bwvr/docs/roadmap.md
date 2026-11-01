@@ -1120,6 +1120,19 @@ that moves while the Hand takes it.
   walk, the counts of the renderer in the line of the GPU parts, and the
   parts "the eye pictures" and "the panel image", with the five keys at 1
   and at 0.
+  **The copies of the eye pictures.** A copy of a picture is bound by the
+  memory of the GPU (about 108 MB of an eye picture at 4096 by 3456). With
+  an atlas the renderer writes and the copies take only the part with the
+  two rects (`vk_atlas_area`, `xr_eye_rects`), with `xr_eye_direct=1` the
+  play thread copies straight into two swapchains of each slot and the
+  session copies nothing for the eyes, and `frame_loop_hold=2` shows each
+  picture in 2 frames of the session (`android.md`, "The copies of the eye
+  pictures"). The time log gives the GPU time of each kind of copy. Next in
+  the headset (Steam Frame and Quest 3): the line of the copies with
+  `xr_eye_direct` 1 and 0, the memory, and the judder of a flight of the
+  camera with `frame_loop_hold` 2 and 0. Then, if the one copy of each eye
+  still costs too much: the walk of the renderer straight into a swapchain
+  image (a target for each walk).
   **The way of a draw to the app.** The device of the mod gives no call
   that changes nothing to the renderer and the stream, a thread of the
   stream puts each frame into the ring, and a table finds the surfaces of

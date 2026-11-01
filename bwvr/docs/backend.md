@@ -4531,11 +4531,16 @@ the group "Foveated rendering") puts the two images side by side into the
 eye picture, each pixel as it is (`fovea_res_math::PackAtlas`, checks in
 `sharp_checks.h`): the outer image at the top left at its own size, and the
 centre image 2 pixels to its right, or 2 pixels under it when it has more
-room there. The gap and the rest of the eye picture are black with an alpha
-of 0, so a compositor that samples a rect with a bilinear filter reads no
-pixel of the other image at its edge. The eye picture keeps the size of the
-render, so the swapchains, the ring of the pictures and the copies do not
-change. The headset app shows the outer
+room there. The gap is black with an alpha of 0, so a compositor that
+samples a rect with a bilinear filter reads no pixel of the other image at
+its edge. The eye picture keeps the size of the render. In the headset app
+(`vk_atlas_area=1`, the default) the renderer clears and writes only the
+part of the eye picture with both rects and their gap
+(`eye_copy_math::ShownPart`), and the rest of the eye picture is
+undefined. With `vk_atlas_area=0`, and on the PC, the whole eye picture is
+cleared, and the rest is black with an alpha of 0 too. The copies of the
+app take only that part (`xr_eye_rects=1`, `android.md`, "The copies of
+the eye pictures"). The headset app shows the outer
 rect in the projection layer, and the centre rect in a second projection
 layer over it, at the same pose, with the angles of view of the part of
 the view of the centre (`fovea_res_math::CenterFov`). So the compositor
@@ -4570,8 +4575,9 @@ the alpha: the soft edge of the eye picture of `fovea_res_layer=0`.
   quad of a frame with no scene) can be a walk with an atlas, and then the
   screen quad shows the whole atlas: the outer image and the centre image
   side by side, for example in a frame with a dialog box right after the
-  frames of the scene. The cut scene window shows the same columns of the
-  outer image (`fovea_res_math::OuterRect`).
+  frames of the scene. With `vk_atlas_area=1` it also shows the undefined
+  pixels outside the part of the two rects. The cut scene window shows the
+  same columns of the outer image (`fovea_res_math::OuterRect`).
 - The report of each 450 frames counts the walks with the two images side
   by side, those with a smaller centre and those with no room.
 
@@ -6448,6 +6454,7 @@ keys that the launcher sets.
 | `fovea_res` | 0 | 1 each eye picture of the Vulkan renderer comes from an outer image and a centre image with their own resolutions. A test key: Shift P. See "Foveated resolution" |
 | `fovea_res_outer_pct`, `fovea_res_center_pct`, `fovea_res_center_deg` | 50, 100, 25 | The resolution of the outer image and of the centre image in percent on each side, and the degrees of the centre on each side. See "Foveated resolution" |
 | `fovea_res_layer` | 0 | 1 the eye picture of a walk with `fovea_res=1` has the outer image and the centre image side by side, each at its own size, and the headset app shows each as a projection layer of its own. 0 the eye picture is made from the two at the size of the render. On the PC 1 changes nothing, and 2 is a test aid that makes the atlas in a run with no session. The renderer reads it at the first walk of each game. No test key. See "The middle as its own layer" |
+| `vk_atlas_area` | 1 | Only in the headset app, with `fovea_res_layer=1`: 1 the draw of the two images into the eye picture clears and writes only the part with both rects and their gap, 0 the whole eye picture. On the PC always the whole eye picture. The renderer reads it with `fovea_res_layer`. No test key. See "The middle as its own layer" and `android.md`, "The copies of the eye pictures" |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
 | `walk_parts`, `walk_parts_add` | 0, empty | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. See "The parts of the scene walk" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |

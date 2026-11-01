@@ -2070,7 +2070,7 @@ bool PrepareMres(const Seed* seed) {
                "outer image of %d by %d at %d %d and the centre image of %d by %d at "
                "%d %d%s. The centre is the part %.4f %.4f to %.4f %.4f of the view",
                g_mres_layer_key, width, height, a.outer[2], a.outer[3], a.outer[0],
-               a.center[2], a.center[3], a.center[0], a.center[1],
+               a.outer[1], a.center[2], a.center[3], a.center[0], a.center[1],
                g_mres.center_w != asked_w
                    ? " (smaller than the asked size, which does not fit)"
                    : "",

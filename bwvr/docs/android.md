@@ -2642,10 +2642,13 @@ it, and no test key):
   window before the end of the game do not go to the log.
 - `slow_frame_cpu=1` (0 by default, only with `slow_frame_ms` above 0): the
   lines of the mod have the CPU time of the frame thread, from one call of
-  `GetThreadTimes` at each present. In Wine that call costs about 1 ms of
-  the frame in the emulator, so it is off by default. The lines `game
-  frame` of the app give the same time with no cost on the thread of the
-  game.
+  `GetThreadTimes` at each present. In Wine that call goes to the
+  wineserver and reads `/proc`, on the frame thread, in the scene walk. The
+  lines `game frame` of the app give the same time in ns with no call on
+  the thread of the game, so the call is off by default. In the emulator
+  the scene walk of the start of a new game was 15.2 to 15.6 ms as a mean
+  with the call, and 14.1 to 16.6 ms in two runs with no key: no cost
+  above the noise between runs.
   The lines of the mod need `time_log=1` (the default). With `time_log=0`
   the mod logs "slow_frame_ms=N needs time_log=1" and gives no line.
 - `profile_sample_slow=N` (100 to 5000, 0 by default, a test aid, only with
@@ -2783,8 +2786,40 @@ least step of `GetThreadTimes` on Windows is 15.625 ms. The frame rate with
 and with 0 it was 583 to 728: the measurement costs less than the noise of
 two runs.
 
+**What the emulator shows** (`emu_game_test.ps1 -NewProfile -ProfileOk
+480,670 -SceneEyes -SkipClick 547,575 -TestSave pen -PlaySeconds 90
+-FrameLoop 1`, Wine of x86_64, the test runtime at 72 Hz):
+
+- With no key: 204 checks, 0 failed, and no new line. With
+  `slow_frame_ms=20`: 204 checks, 0 failed.
+- The frames of the start of a new game are near 20 ms, so nearly each
+  window has 50 lines of long frames (1428 lines in the first game). In the
+  test save `pen` the frames are paced, and the second game has 143 lines,
+  123 of them of frames with no scene walk (the load and the screens
+  before it).
+- `GetThreadTimes` of the mod and `schedstat` of the app give the same time
+  of the frame thread: 20.0 ms each in three frames of the load of `pen`,
+  and 20.50, 19.78 and 20.00 ms in the lines `game frame` of the same
+  frames of the stream. So the main thread of the process is the frame
+  thread of the game in Wine. The least step of `GetThreadTimes` in Wine is
+  10.000 ms.
+- In the video before the intro (25 frames a second) the main thread ran
+  1250 ms of 10 s on a core and waited 438 ms for a core: in the rest of
+  the time it sleeps. In `pen` it ran 1510 to 2505 ms of 10 s: it waits in
+  the pace.
+- In the start of a new game (about 55 frames a second, with no wait of
+  the pace) 120 to 136 of 683 takes of a window of 10 s had no new picture:
+  105 to 120 of them by the play of the app, 2 to 18 by a long frame of the
+  game, 1 to 12 by a frame of normal length (most of them up to 1 ms late),
+  and 3 to 7 by the GPU. The pictures in time ended their copies 6.0 to 6.4
+  ms before the take as a mean.
+
 **Known limits:**
 
+- While the menu of the app shows over the game, and in a load, the app
+  plays no picture for frames that come. A take after such a time can count
+  as "a frame of normal length" that came seconds late (8749.64 ms in one
+  run).
 - The clock of `GetThreadTimes` has steps of 10 ms in Wine and of about
   15.6 ms on Windows. `schedstat` of the app has ns.
 - The arrival of a frame in the app is up to 0.5 ms after its write (the

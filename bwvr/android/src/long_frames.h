@@ -15,11 +15,15 @@
 //                     take, and how early the pictures in time were. One line
 //                     "late picture" for each picture after a miss, at most 5
 //                     lines a second, and each 10 s one line
+//   The lines of the frames wait in memory and go to the log with the line
+//   of their window, so a write of the log does not delay the next frame.
 #pragma once
 
 #include <stdint.h>
 
 #include <atomic>
+#include <string>
+#include <vector>
 
 #include "../../src/mod/long_frame_math.h"
 #include "../../src/mod/time_log_math.h"
@@ -55,6 +59,7 @@ class GameFrameClock {
   time_log_math::Stat gap_;
   double run_ms_ = 0.0, queue_ms_ = 0.0, timed_ms_ = 0.0;  // all frames with schedstat
   double long_ms_ = 0.0, long_run_ms_ = 0.0, long_queue_ms_ = 0.0, long_timed_ms_ = 0.0;
+  std::vector<std::string> kept_;  // the lines of the window, for WindowLine
 };
 
 class LatchLog {
@@ -84,4 +89,5 @@ class LatchLog {
   time_log_math::Stat slack_;   // pictures in time: the take after the end of their copies
   double slack_least_ = -1.0;   // the least of them, or -1
   time_log_math::Stat long_gap_;  // kLong: the gap of the frame of the game
+  std::vector<std::string> kept_;  // the lines of the window, for Tick
 };

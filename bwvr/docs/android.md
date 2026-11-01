@@ -2635,6 +2635,11 @@ it, and no test key):
   `/proc`.
 - `slow_frame_ms=N` (1 to 1000): each frame of the game longer than N ms
   gives one line, at most 5 lines in a second. 20 fits a display of 72 Hz.
+  The lines of the frames wait in memory and go to the log with the line of
+  their window of 10 s (at most 64 in a window), so the write of a line is
+  not in the frame after its long frame. A write there can make the next
+  frame long too, when the frames are near the limit. The lines of the last
+  window before the end of the game do not go to the log.
   The lines of the mod need `time_log=1` (the default). With `time_log=0`
   the mod logs "slow_frame_ms=N needs time_log=1" and gives no line.
 - `profile_sample_slow=N` (100 to 5000, 0 by default, a test aid, only with
@@ -2689,8 +2694,10 @@ long frame   : L frames longer than N ms in 10.0 s, K of them with a line. They 
   example near 1000 ms) is a work of the game on a timer, a G of one frame
   is a burst, and long frames that come with opens of files or new surfaces
   in new places are loads.
-- The 10 s line comes after the line `time log` of the same window. The line
-  `time log` itself stays as with `slow_frame_ms=0`.
+- After the line `time log` of a window come the lines of its long frames
+  and then the line of their count. The line `time log` itself stays as
+  with `slow_frame_ms=0`. In the app the lines of the frames come just
+  before the line of their window.
 
 **The lines of the app** (`long_frames.cpp`):
 
@@ -2755,15 +2762,16 @@ the thread of the reader, and the clock once for each take.
 dxwrapper, about 650 to 720 frames a second): with `slow_frame_ms=0` the log
 has the same tags of lines as a build before the key, no line `long frame`,
 and each line `time log` has its form. With `slow_frame_ms=10` the log has
-21 lines `long frame`. The load of the save is a row of frames that are
+8 to 13 lines of long frames in a run. The load of the save is a row of frames that are
 long outside the calls of the frame loop, for example 382.50 ms with 6
 opens of a file and 339425 reads of the game, and 375.0 ms of CPU time. The
 first frames of the scene after the load have scene walks of 50 to 80 ms.
 In the play a long frame is a scene walk of 10 to 16 ms, also in a run with
 the stick of the scripted controller, and its CPU time is 0.0 ms: the
 least step of `GetThreadTimes` on Windows is 15.625 ms. The frame rate with
-`slow_frame_ms=10` was 0.7 to 5.1 percent lower than with 0 in 6 of the 7
-windows of 10 s, and 3.8 percent higher in one.
+`slow_frame_ms=10` was 559 to 741 frames a second in the windows of 10 s,
+and with 0 it was 583 to 728: the measurement costs less than the noise of
+two runs.
 
 **Known limits:**
 

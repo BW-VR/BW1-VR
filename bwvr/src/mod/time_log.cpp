@@ -19,8 +19,9 @@
 //   slow_frame_ms=N  each frame longer than N ms gives one line "long frame"
 //                    with its parts, the calls of the frame loop of the game,
 //                    the CPU time of the frame thread and the counts of the
-//                    frame, at most 5 lines a second. After each 10 s line
-//                    one more line counts the long frames of its window
+//                    frame, at most 5 lines a second. The lines wait in
+//                    memory and go to the log after each 10 s line, and one
+//                    more line counts the long frames of the window
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -65,6 +66,14 @@ uint64_t g_pixel_surfaces = 0, g_pixel_bytes = 0;
 // thread in them.
 double g_long_ms = 0.0;
 double g_long_cpu_ms = 0.0;
+// The lines of the long frames of the window. They go to the log with the
+// 10 s line, so the write of a line is not in the frame after its long
+// frame. The gate gives at most 5 lines a second, so a window of 10 s has
+// about 50.
+const int kPending = 64;
+char g_pending[kPending][800];
+int g_pending_count = 0;
+uint64_t g_pending_lost = 0;
 
 double NowMs() {
   LARGE_INTEGER now;
@@ -110,10 +119,12 @@ void SlowFrame(double now) {
     g_long_ms += f.last_frame;
     if (cpu_ms >= 0.0) g_long_cpu_ms += cpu_ms;
   }
-  if (say) {
+  if (say && g_pending_count >= kPending) ++g_pending_lost;
+  if (say && g_pending_count < kPending) {
     char before[64];
     if (g_gate.since_last_ms >= 0.0) {
-      sprintf_s(before, "%.0f ms after the long frame before", g_gate.since_last_ms);
+      _snprintf_s(before, sizeof(before), _TRUNCATE, "%.0f ms after the long frame before",
+                  g_gate.since_last_ms);
     } else {
       sprintf_s(before, "the first long frame");
     }
@@ -124,7 +135,10 @@ void SlowFrame(double now) {
       sprintf_s(cpu_text, "no");
     }
     const lf::Calls& c = g_calls;
-    ModLog("long frame   : present %llu, the newest frame of the stream %llu, at %.3f s, "
+    // _TRUNCATE: a line that does not fit is cut, and no handler of a fault
+    // of the C runtime runs.
+    _snprintf_s(g_pending[g_pending_count++], sizeof(g_pending[0]), _TRUNCATE,
+           "long frame   : present %llu, the newest frame of the stream %llu, at %.3f s, "
            "%s. It took %.2f ms: the scene walk %.2f, the write of the stream %.2f, the "
            "wait of the pace %.2f, the rest %.2f. The calls of the frame loop: the input "
            "%.2f, the game turn %.2f, ProcessGraphicsEngine %.2f, FlipScreen %.2f, the "
@@ -225,6 +239,8 @@ void TimeLogPresent() {
          f.part[tl::kStream].Mean(), f.part[tl::kStream].most, f.part[tl::kPace].Mean(),
          f.part[tl::kPace].most, f.rest.Mean(), f.rest.most);
   if (g_time_log_slow) {
+    for (int i = 0; i < g_pending_count; ++i) ModLog("%s", g_pending[i]);
+    g_pending_count = 0;
     char step[64];
     if (!g_cpu_ok) {
       sprintf_s(step, "GetThreadTimes fails");
@@ -237,9 +253,10 @@ void TimeLogPresent() {
     ModLog("long frame   : %llu frames longer than %d ms in %.1f s, %llu of them with a "
            "line. They took %.1f ms, and the frame thread had %.1f ms of CPU time in "
            "them (GetThreadTimes: %s)",
-           g_gate.long_frames, g_gate.limit_ms, seconds, g_gate.lines, g_long_ms,
-           g_long_cpu_ms, step);
+           g_gate.long_frames, g_gate.limit_ms, seconds, g_gate.lines - g_pending_lost,
+           g_long_ms, g_long_cpu_ms, step);
     g_gate.NewWindow();
+    g_pending_lost = 0;
     g_long_ms = g_long_cpu_ms = 0.0;
   }
   if (!g_said) {

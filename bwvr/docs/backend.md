@@ -4578,6 +4578,16 @@ the alpha: the soft edge of the eye picture of `fovea_res_layer=0`.
   frames of the scene. With `vk_atlas_area=1` it also shows the undefined
   pixels outside the part of the two rects. The cut scene window shows the
   same columns of the outer image (`fovea_res_math::OuterRect`).
+- **A known limit of the Steam Frame:** with `fovea_res_layer=1` the centre
+  layer and the projection layer are not in step in the headset. In a
+  strafe with the stick, and when the eyes move, one of the two layers is
+  stable and the other moves, and the picture shakes. With
+  `fovea_res_layer=0` the picture is stable. The two layers have the same
+  image of the swapchain, the same pose, angles of view that fit
+  (`CenterFov`) and no depth, so the cause is probably in the compositor
+  of the runtime. The runtime gives 90 Hz as its display rate, but a
+  display period of 72 Hz. Not known: whether a Quest 3 shows the same
+  fault.
 - The report of each 450 frames counts the walks with the two images side
   by side, those with a smaller centre and those with no room.
 

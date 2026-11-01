@@ -901,9 +901,12 @@ that moves while the Hand takes it.
     image with fewer pixels and a centre image with more. On a Radeon RX
     7900 XTX neither takes time off the GPU, because the time is in the
     draws. The centre follows the gaze of OpenXR or of OSC (Steam Link of
-    the Steam Frame). Not run in a headset, and not run with an eye
-    tracker: check with `foveation_show=1` that the marks follow the gaze
-    (`backend.md`, "Foveated rendering", the open points). (B) one draw
+    the Steam Frame). On the Steam Frame the centre of `fovea_res` follows
+    the gaze of OpenXR. There `fovea_res_layer=1` shakes the picture
+    (`backend.md`, "The middle as its own layer", the known limit): find
+    the cause in the compositor, or keep 0 there. Not run with an eye
+    tracker: `foveation`. Check with `foveation_show=1` that the marks
+    follow the gaze (`backend.md`, "Foveated rendering", the open points). (B) one draw
     for many copies of a mesh (about 870 draws of a frame are 36 meshes);
     (C) a new renderer of the land, after a count of its draws. (D) The
     headset app for Android (`android.md`): an APK for the Quest 3 and for

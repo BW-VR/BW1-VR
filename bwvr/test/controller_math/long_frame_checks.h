@@ -174,7 +174,34 @@ inline void LatchChecks() {
   Check(l.misses == 0 && l.first_miss_ms < 0.0, "a picture ends the misses", l.misses, 0);
 }
 
+inline void KeptChecks() {
+  namespace lf = long_frame_math;
+  printf("\nThe long frames: the order of the kept lines\n");
+  lf::KeptOrder<4> k;
+  Check(k.Pop() == -1, "no line: nothing to write", k.Pop(), -1);
+  const int a = k.Push();
+  const int b = k.Push();
+  Check(a == 0 && b == 1 && k.Pop() == -1, "two lines of an open window: none may go yet",
+        k.count, 2);
+  k.WindowEnds();
+  const int c = k.Push();  // a line of the next window
+  Check(k.Pop() == a, "the window ended: the oldest line goes first", a, 0);
+  Check(k.Pop() == b, "then the second line, one at each call", b, 1);
+  Check(k.Pop() == -1 && k.count == 1, "the line of the next window waits for its end",
+        k.count, 1);
+  k.WindowEnds();
+  Check(k.Pop() == c, "its window ended: it goes", c, 2);
+  for (int i = 0; i < 4; ++i) k.Push();
+  Check(k.Push() == -1 && k.lost == 1, "a full ring: the fifth line is lost and counted",
+        static_cast<double>(k.lost), 1);
+  k.WindowEnds();
+  int went = 0;
+  while (k.Pop() >= 0) ++went;
+  Check(went == 4 && k.count == 0, "the four lines go, the ring goes round", went, 4);
+}
+
 inline void LongFrameChecks() {
+  KeptChecks();
   GateChecks();
   CpuAndCallChecks();
   SchedstatChecks();

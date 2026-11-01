@@ -12,29 +12,6 @@ namespace lf = long_frame_math;
 namespace {
 
 constexpr double kWindowMs = 10000.0;
-// The most lines that wait for the line of a window: 5 a second for 10 s,
-// and some room for a window that comes late.
-constexpr size_t kMostKept = 64;
-
-// A line of one frame waits in `lines` and goes to the log with the line of
-// its window (WriteKept), so the write of the log is not on the thread at
-// the time of the frame. The lines past kMostKept go.
-void KeepLine(std::vector<std::string>* lines, const char* format, ...)
-    __attribute__((format(printf, 2, 3)));
-void KeepLine(std::vector<std::string>* lines, const char* format, ...) {
-  if (lines->size() >= kMostKept) return;
-  char text[640];
-  va_list args;
-  va_start(args, format);
-  vsnprintf(text, sizeof(text), format, args);
-  va_end(args);
-  lines->push_back(text);
-}
-
-void WriteKept(std::vector<std::string>* lines) {
-  for (const std::string& l : *lines) AppLog("%s", l.c_str());
-  lines->clear();
-}
 
 const char* MissName(lf::Miss m) {
   switch (m) {
@@ -52,6 +29,24 @@ const char* MissName(lf::Miss m) {
 
 }  // namespace
 
+// THE KEPT LINES.
+
+void KeptLines::Add(const char* format, ...) {
+  const int slot = order_.Push();
+  if (slot < 0) return;
+  char text[800];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(text, sizeof(text), format, args);
+  va_end(args);
+  slot_[slot] = text;
+}
+
+void KeptLines::WriteOne() {
+  const int slot = order_.Pop();
+  if (slot >= 0) AppLog("%s", slot_[slot].c_str());
+}
+
 // THE GAME FRAME CLOCK (the reader thread).
 
 void GameFrameClock::Start(int slow_frame_ms) {
@@ -61,7 +56,8 @@ void GameFrameClock::Start(int slow_frame_ms) {
   AppLog("game frame   : slow_frame_ms=%d. The reader gives each gap of more than %d ms "
          "between two frames of the game one line, with the time of the main thread of "
          "the game on a core and in the queue for a core (schedstat), at most %d lines a "
-         "second, and one line each 10 s",
+         "second, and one line each 10 s. The lines go to the log after the end of their "
+         "window, one at each frame",
          limit_ms_, limit_ms_, lf::kLinesPerSecond);
 }
 
@@ -95,8 +91,25 @@ bool GameFrameClock::ReadThread(uint64_t* run_ns, uint64_t* wait_ns, uint64_t* s
   return lf::ParseSchedstat(text, run_ns, wait_ns, slices);
 }
 
+void GameFrameClock::NewWindow(double now_ms) {
+  window_ms_ = now_ms;
+  gap_.Reset();
+  run_ms_ = queue_ms_ = timed_ms_ = 0.0;
+  long_ms_ = long_run_ms_ = long_queue_ms_ = long_timed_ms_ = 0.0;
+  gate_.NewWindow();
+}
+
 double GameFrameClock::Arrive(uint64_t frame, double now_ms) {
   if (limit_ms_ == 0) return 0.0;
+  // A new game: no gap from the last frame of the game before, a new window,
+  // and the lines of the old window may go.
+  if (reset_.exchange(false, std::memory_order_relaxed)) {
+    last_ms_ = -1.0;
+    have_ = false;
+    gate_.last_long_ms = -1.0;
+    kept_.WindowEnds();
+    NewWindow(now_ms);
+  }
   if (window_ms_ < 0.0) window_ms_ = now_ms;
   const double gap = last_ms_ >= 0.0 ? now_ms - last_ms_ : 0.0;
   last_ms_ = now_ms;
@@ -133,40 +146,38 @@ double GameFrameClock::Arrive(uint64_t frame, double now_ms) {
       }
       if (say) {
         if (run_ms >= 0.0) {
-          KeepLine(&kept_, "game frame   : the frame %llu of the game came %.2f ms after the frame "
-                 "before. In that time the main thread of the game ran %.2f ms on a core, "
-                 "waited %.2f ms for a core, and was off a core %.2f ms (%llu time slices)",
-                 static_cast<unsigned long long>(frame), gap, run_ms, queue_ms,
-                 lf::OffCpuMs(gap, run_ms, queue_ms), static_cast<unsigned long long>(steps));
+          kept_.Add("game frame   : the frame %llu of the game came %.2f ms after the frame "
+                    "before. In that time the main thread of the game ran %.2f ms on a "
+                    "core, waited %.2f ms for a core, and was off a core %.2f ms (%llu time "
+                    "slices)",
+                    static_cast<unsigned long long>(frame), gap, run_ms, queue_ms,
+                    lf::OffCpuMs(gap, run_ms, queue_ms),
+                    static_cast<unsigned long long>(steps));
         } else {
-          KeepLine(&kept_, "game frame   : the frame %llu of the game came %.2f ms after the frame "
-                 "before. No time of the main thread of the game",
-                 static_cast<unsigned long long>(frame), gap);
+          kept_.Add("game frame   : the frame %llu of the game came %.2f ms after the frame "
+                    "before. No time of the main thread of the game",
+                    static_cast<unsigned long long>(frame), gap);
         }
       }
     }
   }
-  if (now_ms - window_ms_ >= kWindowMs) WindowLine(now_ms);
+  if (now_ms - window_ms_ >= kWindowMs) WindowEnds(now_ms);
   return gap;
 }
 
-void GameFrameClock::WindowLine(double now_ms) {
+void GameFrameClock::WindowEnds(double now_ms) {
   const double seconds = (now_ms - window_ms_) / 1000.0;
-  WriteKept(&kept_);
-  AppLog("game frame   : %.1f s, %llu gaps between frames of the game, ms: the mean %.2f "
-         "and the most %.2f. In %.0f ms of them with schedstat the main thread of the game "
-         "ran %.0f ms on a core and waited %.0f ms for a core. %llu gaps were longer than "
-         "%d ms (%llu with a line): %.0f ms, and in %.0f ms of them with schedstat the main "
-         "thread ran %.0f ms and waited %.0f ms for a core",
-         seconds, static_cast<unsigned long long>(gap_.count), gap_.Mean(), gap_.most,
-         timed_ms_, run_ms_, queue_ms_, static_cast<unsigned long long>(gate_.long_frames),
-         limit_ms_, static_cast<unsigned long long>(gate_.lines), long_ms_, long_timed_ms_,
-         long_run_ms_, long_queue_ms_);
-  window_ms_ = now_ms;
-  gap_.Reset();
-  run_ms_ = queue_ms_ = timed_ms_ = 0.0;
-  long_ms_ = long_run_ms_ = long_queue_ms_ = long_timed_ms_ = 0.0;
-  gate_.NewWindow();
+  kept_.Add("game frame   : %.1f s, %llu gaps between frames of the game, ms: the mean %.2f "
+            "and the most %.2f. In %.0f ms of them with schedstat the main thread of the "
+            "game ran %.0f ms on a core and waited %.0f ms for a core. %llu gaps were longer "
+            "than %d ms (%llu with a line): %.0f ms, and in %.0f ms of them with schedstat "
+            "the main thread ran %.0f ms and waited %.0f ms for a core",
+            seconds, static_cast<unsigned long long>(gap_.count), gap_.Mean(), gap_.most,
+            timed_ms_, run_ms_, queue_ms_, static_cast<unsigned long long>(gate_.long_frames),
+            limit_ms_, static_cast<unsigned long long>(gate_.lines), long_ms_,
+            long_timed_ms_, long_run_ms_, long_queue_ms_);
+  kept_.WindowEnds();
+  NewWindow(now_ms);
 }
 
 // THE LATCH LOG (the thread of the session).
@@ -176,7 +187,8 @@ void LatchLog::Start(int slow_frame_ms) {
   if (limit_ms_ == 0) return;
   AppLog("late picture : slow_frame_ms=%d. Each picture of the game after a frame of the "
          "session with no new picture gives one line with the cause and how late it was, "
-         "at most %d lines a second, and one line each 10 s (frame_loop=1)",
+         "at most %d lines a second, and one line each 10 s (frame_loop=1). The lines go "
+         "to the log after the end of their window, one at each frame of the session",
          limit_ms_, lf::kLinesPerSecond);
 }
 
@@ -212,37 +224,39 @@ void LatchLog::Take(double take_ms, bool fresh, double arrival_ms, double ready_
     long_gap_.Add(gap_ms);
   }
   if (!rate_.May(take_ms)) return;
-  KeepLine(&kept_, "late picture : %d frames of the session had no new picture before the frame %llu "
-         "of the game: %s. It came %.2f ms after the first take that missed it, and its "
-         "copies ended %.2f ms after that take. Its frame of the game came %.2f ms after "
-         "the frame before",
-         r.misses, static_cast<unsigned long long>(frame), MissName(r.kind), r.late_ms,
-         r.ready_ms, gap_ms);
+  kept_.Add("late picture : %d frames of the session had no new picture before the frame "
+            "%llu of the game: %s. It came %.2f ms after the first take that missed it, and "
+            "its copies ended %.2f ms after that take. Its frame of the game came %.2f ms "
+            "after the frame before",
+            r.misses, static_cast<unsigned long long>(frame), MissName(r.kind), r.late_ms,
+            r.ready_ms, gap_ms);
 }
 
 void LatchLog::Tick(double now_ms) {
-  if (limit_ms_ == 0 || window_ms_ < 0.0 || now_ms - window_ms_ < kWindowMs) return;
+  if (limit_ms_ == 0) return;
+  kept_.WriteOne();
+  if (window_ms_ < 0.0 || now_ms - window_ms_ < kWindowMs) return;
   const double seconds = (now_ms - window_ms_) / 1000.0;
-  WriteKept(&kept_);
-  AppLog("late picture : %.1f s, %llu takes of the session, %llu of them with no new "
-         "picture: %llu by the GPU, %llu by the play of the app, %llu by a long frame of "
-         "the game (the gap %.2f ms as a mean, %.2f at most), %llu by a frame of normal "
-         "length. Those frames of normal length came after the take: %llu up to 1 ms, %llu "
-         "up to 2 ms, %llu up to 4 ms, %llu more (%.2f ms as a mean, %.2f at most). The "
-         "pictures in time ended their copies %.2f ms before the take as a mean, %.2f at "
-         "the least (%llu pictures)",
-         seconds, static_cast<unsigned long long>(takes_),
-         static_cast<unsigned long long>(missed_),
-         static_cast<unsigned long long>(by_kind_[lf::kGpu]),
-         static_cast<unsigned long long>(by_kind_[lf::kPlay]),
-         static_cast<unsigned long long>(by_kind_[lf::kLong]), long_gap_.Mean(),
-         long_gap_.most, static_cast<unsigned long long>(by_kind_[lf::kLate]),
-         static_cast<unsigned long long>(late_bins_[0]),
-         static_cast<unsigned long long>(late_bins_[1]),
-         static_cast<unsigned long long>(late_bins_[2]),
-         static_cast<unsigned long long>(late_bins_[3]), late_.Mean(), late_.most,
-         slack_.Mean(), slack_.count > 0 ? slack_least_ : 0.0,
-         static_cast<unsigned long long>(slack_.count));
+  kept_.Add("late picture : %.1f s, %llu takes of the session, %llu of them with no new "
+            "picture: %llu by the GPU, %llu by the play of the app, %llu by a long frame of "
+            "the game (the gap %.2f ms as a mean, %.2f at most), %llu by a frame of normal "
+            "length. Those frames of normal length came after the take: %llu up to 1 ms, "
+            "%llu up to 2 ms, %llu up to 4 ms, %llu more (%.2f ms as a mean, %.2f at most). "
+            "The pictures in time ended their copies %.2f ms before the take as a mean, %.2f "
+            "at the least (%llu pictures)",
+            seconds, static_cast<unsigned long long>(takes_),
+            static_cast<unsigned long long>(missed_),
+            static_cast<unsigned long long>(by_kind_[lf::kGpu]),
+            static_cast<unsigned long long>(by_kind_[lf::kPlay]),
+            static_cast<unsigned long long>(by_kind_[lf::kLong]), long_gap_.Mean(),
+            long_gap_.most, static_cast<unsigned long long>(by_kind_[lf::kLate]),
+            static_cast<unsigned long long>(late_bins_[0]),
+            static_cast<unsigned long long>(late_bins_[1]),
+            static_cast<unsigned long long>(late_bins_[2]),
+            static_cast<unsigned long long>(late_bins_[3]), late_.Mean(), late_.most,
+            slack_.Mean(), slack_.count > 0 ? slack_least_ : 0.0,
+            static_cast<unsigned long long>(slack_.count));
+  kept_.WindowEnds();
   window_ms_ = now_ms;
   takes_ = missed_ = 0;
   for (uint64_t& k : by_kind_) k = 0;

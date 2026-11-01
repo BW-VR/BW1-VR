@@ -22,8 +22,10 @@
 //                    frame, at most 5 lines a second (the CPU time only
 //                    with slow_frame_cpu=1, 0 by default: one call of
 //                    GetThreadTimes at each present). The lines wait in
-//                    memory and go to the log after each 10 s line, and one
-//                    more line counts the long frames of the window
+//                    memory until their window of 10 s ends. Then they go
+//                    to the log one at each present, so no frame has more
+//                    than one write of such a line. One more line counts
+//                    the long frames of the window
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -41,8 +43,9 @@ double SecondsSinceProcessStart();
 // write, and the reads of the game on the files that it opened to read.
 void FileReadAheadCounts(uint32_t* opens, uint32_t* writes, uint32_t* reads);
 // vk_stream.cpp: the surfaces whose pixels went into the live stream, and
-// their bytes.
+// their bytes, and the frame of the stream of this present.
 void VkStreamPixelCounts(uint64_t* surfaces, uint64_t* bytes);
+uint64_t VkStreamPresentFrame();
 
 bool g_time_log_slow = false;
 
@@ -61,7 +64,6 @@ long_frame_math::CpuClock g_cpu;
 bool g_cpu_on = false;        // slow_frame_cpu=1: GetThreadTimes at each present
 bool g_cpu_ok = true;         // GetThreadTimes works
 uint64_t g_presents = 0;      // the presents since the start
-uint64_t g_stream_frame = 0;  // the newest frame of the live stream
 // The counts at the last present.
 uint32_t g_opens = 0, g_writes = 0, g_reads = 0;
 uint64_t g_pixel_surfaces = 0, g_pixel_bytes = 0;
@@ -69,14 +71,18 @@ uint64_t g_pixel_surfaces = 0, g_pixel_bytes = 0;
 // thread in them.
 double g_long_ms = 0.0;
 double g_long_cpu_ms = 0.0;
-// The lines of the long frames of the window. They go to the log with the
-// 10 s line, so the write of a line is not in the frame after its long
-// frame. The gate gives at most 5 lines a second, so a window of 10 s has
-// about 50.
+// The lines of the long frames. They wait until their window ends, and then
+// go to the log one at each present (long_frame_math::KeptOrder). The gate
+// gives at most 5 lines a second, so a window of 10 s has about 50.
 const int kPending = 64;
 char g_pending[kPending][800];
-int g_pending_count = 0;
-uint64_t g_pending_lost = 0;
+long_frame_math::KeptOrder<kPending> g_kept;
+uint64_t g_kept_lost = 0;  // the lost lines at the start of the window
+// The lines of this file that went to the log since the last present: the
+// line of a long frame of the frame after it says them, so a frame that a
+// write made long shows it. And the time of these writes in the window.
+int g_log_writes = 0;
+double g_log_ms = 0.0;
 
 double NowMs() {
   LARGE_INTEGER now;
@@ -124,8 +130,8 @@ void SlowFrame(double now) {
     g_long_ms += f.last_frame;
     if (cpu_ms >= 0.0) g_long_cpu_ms += cpu_ms;
   }
-  if (say && g_pending_count >= kPending) ++g_pending_lost;
-  if (say && g_pending_count < kPending) {
+  const int slot = say ? g_kept.Push() : -1;
+  if (slot >= 0) {
     char before[64];
     if (g_gate.since_last_ms >= 0.0) {
       _snprintf_s(before, sizeof(before), _TRUNCATE, "%.0f ms after the long frame before",
@@ -144,26 +150,39 @@ void SlowFrame(double now) {
     const lf::Calls& c = g_calls;
     // _TRUNCATE: a line that does not fit is cut, and no handler of a fault
     // of the C runtime runs.
-    _snprintf_s(g_pending[g_pending_count++], sizeof(g_pending[0]), _TRUNCATE,
-           "long frame   : present %llu, the newest frame of the stream %llu, at %.3f s, "
+    _snprintf_s(g_pending[slot], sizeof(g_pending[0]), _TRUNCATE,
+           "long frame   : present %llu, the frame of the stream %llu, at %.3f s, "
            "%s. It took %.2f ms: the scene walk %.2f, the write of the stream %.2f, the "
            "wait of the pace %.2f, the rest %.2f. The calls of the frame loop: the input "
            "%.2f, the game turn %.2f, ProcessGraphicsEngine %.2f, FlipScreen %.2f, the "
            "network flush %.2f, outside them %.2f. The CPU time of the frame thread: %s. "
            "In the frame: %u opens of a file of the game (%u to write), %u reads of the "
-           "game, %llu surfaces with pixels into the stream (%llu KB)",
-           g_presents, g_stream_frame, SecondsSinceProcessStart(), before, f.last_frame,
+           "game, %llu surfaces with pixels into the stream (%llu KB), %d lines of the "
+           "time log",
+           g_presents, VkStreamPresentFrame(), SecondsSinceProcessStart(), before,
+           f.last_frame,
            f.last_part[tl::kScene], f.last_part[tl::kStream], f.last_part[tl::kPace],
            f.last_rest, c.last[lf::kInput], c.last[lf::kTurn], c.last[lf::kGraphics],
            c.last[lf::kFlip], c.last[lf::kFlush], c.Outside(f.last_frame), cpu_text,
            opens - g_opens, writes - g_writes, reads - g_reads,
-           surfaces - g_pixel_surfaces, (bytes - g_pixel_bytes) / 1024);
+           surfaces - g_pixel_surfaces, (bytes - g_pixel_bytes) / 1024, g_log_writes);
   }
+  g_log_writes = 0;
   g_opens = opens;
   g_writes = writes;
   g_reads = reads;
   g_pixel_surfaces = surfaces;
   g_pixel_bytes = bytes;
+}
+
+// After the present: the next kept line of an ended window goes to the log.
+void WriteKept() {
+  const int slot = g_kept.Pop();
+  if (slot < 0) return;
+  const double start = NowMs();
+  ModLog("%s", g_pending[slot]);
+  g_log_ms += NowMs() - start;
+  ++g_log_writes;
 }
 
 }  // namespace
@@ -195,7 +214,7 @@ void TimeLogSetSlow(int slow_frame_ms, bool cpu) {
   ModLog("long frame   : slow_frame_ms=%d, slow_frame_cpu=%d. Each frame of the game "
          "longer than %d ms gives one line with its parts, the calls of the frame loop, "
          "%s and the counts of the frame, at most %d lines a second. The lines go to "
-         "the log after the line of their window of 10 s",
+         "the log after the end of their window of 10 s, one at each present",
          limit, g_cpu_on ? 1 : 0, limit,
          g_cpu_on ? "the CPU time of the frame thread (GetThreadTimes at each present)"
                   : "no CPU time of the frame thread",
@@ -211,9 +230,6 @@ void TimeLogCall(int call, bool begin) {
   }
 }
 
-void TimeLogStreamFrame(uint64_t frame) {
-  if (g_time_log_slow) g_stream_frame = frame;
-}
 
 void TimeLogWalk(bool begin) {
   if (!g_on) return;
@@ -237,7 +253,10 @@ void TimeLogPresent() {
   const double now = NowMs();
   g_frames.Present(now);
   if (g_time_log_slow) SlowFrame(now);
-  if (!g_frames.Due(now)) return;
+  if (!g_frames.Due(now)) {
+    if (g_time_log_slow) WriteKept();
+    return;
+  }
   namespace tl = time_log_math;
   const tl::Frames& f = g_frames;
   const double seconds = f.WindowMs(now) / 1000.0;
@@ -250,8 +269,7 @@ void TimeLogPresent() {
          f.part[tl::kStream].Mean(), f.part[tl::kStream].most, f.part[tl::kPace].Mean(),
          f.part[tl::kPace].most, f.rest.Mean(), f.rest.most);
   if (g_time_log_slow) {
-    for (int i = 0; i < g_pending_count; ++i) ModLog("%s", g_pending[i]);
-    g_pending_count = 0;
+    const double start = NowMs();
     char step[64];
     if (!g_cpu_on) {
       sprintf_s(step, "not read, slow_frame_cpu=0");
@@ -263,14 +281,27 @@ void TimeLogPresent() {
       sprintf_s(step, "the least step of the clock is %.3f ms",
                 static_cast<double>(g_cpu.least_step) / 10000.0);
     }
+    char cpu_text[64];
+    if (g_cpu_on && g_cpu_ok) {
+      _snprintf_s(cpu_text, sizeof(cpu_text), _TRUNCATE, "%.1f ms", g_long_cpu_ms);
+    } else {
+      sprintf_s(cpu_text, "not read");
+    }
+    const uint64_t lost = g_kept.lost - g_kept_lost;
     ModLog("long frame   : %llu frames longer than %d ms in %.1f s, %llu of them with a "
-           "line. They took %.1f ms, and the frame thread had %.1f ms of CPU time in "
-           "them (GetThreadTimes: %s)",
-           g_gate.long_frames, g_gate.limit_ms, seconds, g_gate.lines - g_pending_lost,
-           g_long_ms, g_long_cpu_ms, step);
+           "line. They took %.1f ms. The CPU time of the frame thread in them: %s "
+           "(GetThreadTimes: %s). Since the line of the window before, the writes of "
+           "that line and of the lines of the long frames took %.2f ms. The lines of "
+           "this window go to the log now, one at each present",
+           g_gate.long_frames, g_gate.limit_ms, seconds, g_gate.lines - lost, g_long_ms,
+           cpu_text, step, g_log_ms);
     g_gate.NewWindow();
-    g_pending_lost = 0;
+    g_kept.WindowEnds();
+    g_kept_lost = g_kept.lost;
     g_long_ms = g_long_cpu_ms = 0.0;
+    g_log_ms = NowMs() - start;
+    // The two lines of the window are writes of this present.
+    g_log_writes += 2;
   }
   if (!g_said) {
     g_said = true;

@@ -1068,6 +1068,7 @@ void Play(App* app, bool new_game) {
   app->game_on = true;
   app->time.GameStarts(app->play_ms);
   app->latch_log.GameStarts(app->play_ms);
+  app->frame_clock.GameStarts();
   // THE CORES (core_rules.h, bwvr.ini only): thread_cores=1 logs the core
   // and the CPU time of each thread each second, thread_bind=1 or 2 binds
   // threads to the cores. 0 (the defaults): no line and no binding.

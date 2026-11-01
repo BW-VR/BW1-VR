@@ -66,6 +66,41 @@ struct Gate {
   void NewWindow() { long_frames = lines = 0; }
 };
 
+// THE ORDER OF THE KEPT LINES: the slots of a ring of N lines. A line of a
+// frame waits (Push) until its window ends (WindowEnds). Then the lines of
+// that window go to the log one at a time (Pop, one call for each frame), so
+// no frame has more than one write of such a line. A line for a full ring
+// is lost (counted).
+template <int N>
+struct KeptOrder {
+  int head = 0;    // the slot of the oldest line
+  int count = 0;   // the lines in the ring
+  int ready = 0;   // of them, the oldest that may go
+  uint64_t lost = 0;
+  // The slot for a new line, or -1 when the ring is full.
+  int Push() {
+    if (count >= N) {
+      ++lost;
+      return -1;
+    }
+    const int slot = (head + count) % N;
+    ++count;
+    return slot;
+  }
+  // The window ended: each line in the ring may go.
+  void WindowEnds() { ready = count; }
+  // The slot of the next line to write, or -1. The slot stays valid until
+  // the next Push.
+  int Pop() {
+    if (ready <= 0) return -1;
+    const int slot = head;
+    head = (head + 1) % N;
+    --count;
+    --ready;
+    return slot;
+  }
+};
+
 // THE CPU TIME OF A THREAD from a clock of the system in units of 100 ns
 // (GetThreadTimes). Take gives the time since the call before and keeps the
 // least step above 0 that the clock made: the resolution of the clock.

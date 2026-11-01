@@ -317,6 +317,9 @@ void StreamReader::Run() {
       most_bytes_ = queue_most_bytes;
       pthread_cond_broadcast(&arrived_cond_);
       pthread_mutex_unlock(&lock_);
+      // slow_frame_ms: at most one line of the long frames, after the frame
+      // is in the queue.
+      if (frame_clock_ != nullptr && frame_clock_->On()) frame_clock_->AfterPush();
     }
     if (state == State::kRead) pending.erase(pending.begin(), pending.begin() + used);
     if (state == State::kPaused) pending.clear();

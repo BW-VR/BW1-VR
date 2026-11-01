@@ -150,6 +150,9 @@ bool TabletopHidesMist(const void* mist);
 void HandGlowDraw();
 // overlay.cpp: the mod's own meshes, in each eye pass.
 void OverlayDraw();
+// book_bubble.cpp: the game's bubble of a miracle that the hand pulls out of
+// the spell book.
+void BookBubbleDraw();
 
 namespace {
 
@@ -509,7 +512,9 @@ void __cdecl h_MoonTurn(const float* place, float* turn, float* mesh) {
 // The overlay's meshes (overlay.cpp) and the glow at the Hand's point
 // (hand_glow.cpp) come after it: the world is drawn, the depth buffer still
 // holds it, and the interface is not drawn yet. The meshes go first, so the
-// glow shows on the overlay's hand too.
+// glow shows on the overlay's hand too. The game's bubble of the spell book
+// (book_bubble.cpp) comes after the meshes: its glass is clear, so the hand
+// behind it must be there first.
 void __cdecl h_SunGlare() {
   uint32_t* wanted = reinterpret_cast<uint32_t*>(kSunGlareWanted);
   ++g_glare_calls;
@@ -523,6 +528,7 @@ void __cdecl h_SunGlare() {
     o_SunGlare();
   }
   OverlayDraw();
+  BookBubbleDraw();
   HandGlowDraw();
 }
 

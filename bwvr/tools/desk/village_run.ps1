@@ -151,7 +151,8 @@ if ($Kind -eq 'totem') {
     if ($Chants -eq '20000@950') { $Chants = '20000@950 0@1400' }
     if ($Steps -eq '') {
         $Steps = $pre + 'seek@920+1 x@1000+4 shot@1012+1 book@1030+1 shot@1042+1 book@1070+1 shot@1082+1 ' +
-                 'grip@1110+40 pull@1115+60 shot@1130+1 pull@1200+10 grip@1240+60 pull@1245+40 shot@1300+1 ' +
+                 'grip@1110+40 pull@1115+60 shot@1130+1 shot@1145+1 pull@1200+10 grip@1240+60 pull@1245+40 ' +
+                 'shot@1260+1 shot@1272+1 shot@1300+1 ' +
                  'pull@1320+10 b@1350+5 x@1420+4 book@1440+1 shot@1452+1 grip@1470+20 shot@1482+1 ' +
                  'x@1540+4 shot@1560+1'
     }

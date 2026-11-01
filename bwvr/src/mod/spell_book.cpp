@@ -63,6 +63,7 @@
 
 #include "../vr/xr_screen.h"
 #include "audio.h"
+#include "book_bubble.h"
 #include "controller_hints.h"
 #include "controllers.h"
 #include "cutscene_window.h"
@@ -327,6 +328,7 @@ int g_saved = 0;
 bool g_test_keys = false;
 int g_pull_cm = 10;       // 0: the grip takes the miracle at once
 int g_pull_ini = 10;      // the value of bwvr.ini, for the debug page
+bool g_game_bubble = true;  // the game draws the bubble that the hand pulls out
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -358,6 +360,7 @@ void ReadSettings() {
   if (g_pull_cm > 0 && g_pull_cm < 3) g_pull_cm = 3;
   if (g_pull_cm > 30) g_pull_cm = 30;
   g_pull_ini = g_pull_cm > 0 ? g_pull_cm : 10;
+  g_game_bubble = IniKey("spell_book_bubble", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -380,6 +383,11 @@ void ReadSettings() {
     ModLog("spell book   : spell_book_pull_cm=0: the grip takes a miracle from "
            "the book at once");
   }
+  ModLog("spell book   : spell_book_bubble=%d: %s", g_game_bubble ? 1 : 0,
+         g_game_bubble ? "the game draws the bubble that the hand pulls out: "
+                         "its glass ball with the miracle in it"
+                       : "the bubble that the hand pulls out is a flat "
+                         "picture");
   if (!g_game_ok) {
     ModLog("spell book   : the functions of the game do not have the bytes "
            "of v1.42, so the book does not open");
@@ -668,6 +676,11 @@ int g_width_px = 0, g_height_px = 0;
 Look g_drawn;
 bool g_have_drawn = false;
 bool g_staged_new = false;
+// The hole of the game's bubble in the page in this frame, and whether the
+// staged picture has a hole now.
+spell_book_math::Hole g_hole = {};
+uint64_t g_hole_frame = 0;
+bool g_staged_holed = false;
 
 int CellSize(const Layout& l) {
   return static_cast<int>(l.cell_m * kPixelsPerMeter + 0.5f);
@@ -1410,6 +1423,62 @@ void PullStep(const GameNow& g, uint64_t frame, bool* plucked) {
   PullBuzzNow(g_pull.share);
 }
 
+// The bubble of this frame at the point `at` of the room: the game's bubble
+// in the world and its hole in the page, or the flat picture.
+void PlaceBubble(int type, const float at[3], const float head[3],
+                 uint64_t frame) {
+  float world[3], units = 0.0f;
+  if (g_game_bubble && !BookBubbleFailed() &&
+      ControllersLocalToWorld(at, world, &units)) {
+    BookBubbleShow(type, world, units, frame);
+    if (g_have_plane && BubbleHole(g_plane, head, at, kBubbleRadiusM,
+                                   &g_hole)) {
+      g_hole_frame = frame;
+    }
+    return;
+  }
+  StageBubble(at, head);
+}
+
+// The book picture of this frame, with the hole of the game's bubble when it
+// is in front of the page. The hole is clear in its middle and soft at its
+// edge.
+void StagePicture(uint64_t frame) {
+  const bool holed = g_hole_frame == frame && g_hole_frame != 0;
+  if (g_staged_new || holed || g_staged_holed) {
+    g_staged_new = false;
+    for (int y = 0; y < g_height_px; ++y) {
+      memcpy(g_staged + static_cast<size_t>(y) * kTexture * 4,
+             g_base + static_cast<size_t>(y) * kTexture * 4,
+             static_cast<size_t>(g_width_px) * 4);
+    }
+  }
+  g_staged_holed = holed;
+  if (!holed) return;
+  const float cx = 0.5f * g_width_px + g_hole.x * kPixelsPerMeter;
+  const float cy = 0.5f * g_height_px - g_hole.y * kPixelsPerMeter;
+  const float r = g_hole.r * kPixelsPerMeter;
+  const float edge = 3.0f;
+  const int x0 = static_cast<int>(floorf(cx - r - edge));
+  const int x1 = static_cast<int>(ceilf(cx + r + edge));
+  const int y0 = static_cast<int>(floorf(cy - r - edge));
+  const int y1 = static_cast<int>(ceilf(cy + r + edge));
+  for (int y = y0 < 0 ? 0 : y0; y < y1 && y < g_height_px; ++y) {
+    const float py = static_cast<float>(y) + 0.5f;
+    uint8_t* row = g_staged + static_cast<size_t>(y) * kTexture * 4;
+    for (int x = x0 < 0 ? 0 : x0; x < x1 && x < g_width_px; ++x) {
+      const float px = static_cast<float>(x) + 0.5f;
+      const float d = sqrtf((px - cx) * (px - cx) + (py - cy) * (py - cy));
+      const float keep = Clamp01((d - r) / edge + 0.5f);
+      if (keep >= 1.0f) continue;
+      uint8_t* out = row + x * 4;
+      for (int k = 0; k < 4; ++k) {
+        out[k] = static_cast<uint8_t>(out[k] * keep + 0.5f);
+      }
+    }
+  }
+}
+
 // The bubble of this frame: out with the hand, on its way back, or in the
 // hand after the snap.
 void ShowBubble(const GameNow* g, uint64_t frame) {
@@ -1421,7 +1490,7 @@ void ShowBubble(const GameNow* g, uint64_t frame) {
       g_snap_type = -1;
       return;
     }
-    StageBubble(hand, head);
+    PlaceBubble(g_snap_type, hand, head, frame);
     return;
   }
   if (g_pull.state == kPullNone || !g_have_plane) return;
@@ -1455,7 +1524,7 @@ void ShowBubble(const GameNow* g, uint64_t frame) {
                             scale;
     }
   }
-  StageBubble(at, head);
+  PlaceBubble(g_pull.type, at, head, frame);
 }
 
 }  // namespace
@@ -1657,14 +1726,7 @@ void SpellBookFrame() {
       bwvr::XrScreen::CardFailed(bwvr::kCardRing) || RadialMenuShows()) {
     return;
   }
-  if (g_staged_new) {
-    g_staged_new = false;
-    for (int y = 0; y < g_height_px; ++y) {
-      memcpy(g_staged + static_cast<size_t>(y) * kTexture * 4,
-             g_base + static_cast<size_t>(y) * kTexture * 4,
-             static_cast<size_t>(g_width_px) * 4);
-    }
-  }
+  StagePicture(frame);
   bwvr::CardLayer layer = {};
   layer.visible = true;
   layer.pixels = g_staged;
@@ -1815,6 +1877,23 @@ void SpellBookPullChange(const char* by) {
          ControllersFrameCount());
 }
 
+int SpellBookBubbleValue() {
+  ReadSettings();
+  return g_game_ok && !BookBubbleFailed() ? (g_game_bubble ? 1 : 0)
+                                          : kDebugCannot;
+}
+
+void SpellBookBubbleChange(const char* by) {
+  ReadSettings();
+  g_game_bubble = !g_game_bubble;
+  ControllersGrabPulse(1, 0.5f, g_game_bubble ? 0.40f : 0.08f);
+  ModLog("spell book   : %s: spell_book_bubble=%d. %s, frame %llu", by,
+         g_game_bubble ? 1 : 0,
+         g_game_bubble ? "The game draws the bubble that the hand pulls out"
+                       : "The bubble that the hand pulls out is a flat picture",
+         ControllersFrameCount());
+}
+
 int SpellBookAllValue() {
   ReadSettings();
   return g_game_ok ? (g_all ? 1 : 0) : kDebugCannot;
@@ -1842,6 +1921,14 @@ void SpellBookReport() {
          "times, the longest draw took %.2f ms",
          g_opens, g_closes, g_pulls, g_snaps, g_backs, g_plucks, g_requests,
          g_arrived, g_refusals, g_rasters, g_raster_ms);
+  int shown = 0, draws = 0, made = 0;
+  BookBubbleCounts(&shown, &draws, &made);
+  if (shown + draws + made > 0) {
+    ModLog("spell book   : the game's bubble showed in %d frames this window, "
+           "with %d draws (one for each eye pass). The game made %d parts of "
+           "it (the glass ball and the graphic of a miracle)", shown, draws,
+           made);
+  }
   g_pulls = g_snaps = g_backs = 0;
   g_opens = g_closes = g_plucks = g_requests = g_arrived = g_refusals = 0;
   g_rasters = 0;

@@ -214,6 +214,11 @@ struct TeleportInput {
 };
 bool ControllersTeleportInput(TeleportInput* out);
 
+// A point of the LOCAL space of OpenXR, in meters, in the world, with the map
+// of the aim of this frame. units is the world units in a meter of the room.
+bool ControllersLocalToWorld(const float local[3], float world[3],
+                             float* units);
+
 // The ray of the pointing hand while a dialog box is up and the controller
 // owns the pointer. The two ends are in the world. False when none is drawn.
 bool ControllersMenuRay(float from[3], float to[3], float* units);

@@ -315,4 +315,41 @@ inline float BackScale(float t) {
 // The bubble first comes back to its cell at this time after the release.
 inline float BackLandSeconds() { return 1.5707963f / kBackRate; }
 
+// THE GAME'S BUBBLE. The game draws the bubble that the hand pulls out in its
+// own picture of each eye: a glass ball of this radius in the room. The book
+// is a layer over that picture, so the book has a hole where the ball is in
+// front of the page.
+const float kBubbleRadiusM = 0.03f;
+// Half of the space between the eyes. The hole is one picture for both eyes,
+// so it is this much larger for each cm that the ball is off the page.
+const float kHalfEyesM = 0.032f;
+
+// The hole of the ball in the page, in meters from the middle of the page
+// (x to the right, y up) as the head center sees it. False when no part of
+// the ball is in front of the page.
+struct Hole {
+  float x, y, r;
+};
+
+inline bool BubbleHole(const Plane& p, const float head[3], const float at[3],
+                       float radius, Hole* out) {
+  float h[3], b[3];
+  for (int i = 0; i < 3; ++i) {
+    h[i] = head[i] - p.center[i];
+    b[i] = at[i] - p.center[i];
+  }
+  const float dh = h[0] * p.normal[0] + h[1] * p.normal[1] + h[2] * p.normal[2];
+  const float db = b[0] * p.normal[0] + b[1] * p.normal[1] + b[2] * p.normal[2];
+  if (!(dh > 0.01f) || db <= -radius || db >= dh - 0.01f) return false;
+  // The ray from the head through the ball meets the page at k times the
+  // way to the ball.
+  const float k = dh / (dh - db);
+  float on[3];
+  for (int i = 0; i < 3; ++i) on[i] = h[i] + (b[i] - h[i]) * k;
+  out->x = on[0] * p.right[0] + on[1] * p.right[1] + on[2] * p.right[2];
+  out->y = on[0] * p.up[0] + on[1] * p.up[1] + on[2] * p.up[2];
+  out->r = radius * k + kHalfEyesM * fabsf(1.0f - k);
+  return true;
+}
+
 }  // namespace spell_book_math

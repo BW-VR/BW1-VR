@@ -71,7 +71,8 @@ These items come before the other work.
   - In a headset: the place 12 cm from the grip, the size of the cells, and
     whether the book is easy to read and to reach.
   - In a headset: whether a pull of 10 cm and the buzz feel like an elastic
-    band, and whether the bubble quad shows in Virtual Desktop.
+    band, and whether the game's bubble sits on the band with a clean hole
+    in the page (`spell_book_bubble=1`).
   - The gestures were never drawn with a real hand in a headset. No line of
     a card names the draw button (B) while the Hand is empty, and the
     corner pictures of the gestures do not show. So a player of release
@@ -81,8 +82,8 @@ These items come before the other work.
     slots for icons, and the Worship Site copies them (`miracles.md`, "The
     limit of 6 icons"). Every miracle needs icons of the site that do not
     come from the Village Centre (`WorshipSite::AddSpellIconIfNecessary` `0x0077C9E0`).
-  - The miracle bubble of the game: the book draws its own bubble with the
-    gestures. The icons of a Worship Site are meshes of the game.
+  - The items in the book are flat pictures with the gestures. Only the
+    bubble that the hand pulls out is the game's own bubble.
   - Why the corner pictures of the gestures of the game (`DisplayGesture`,
     `fn_0068ABA0`, `fn_0068B740`) do not show in the headset. Prove it with
     an eye picture of a desktop run.

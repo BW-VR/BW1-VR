@@ -88,6 +88,7 @@ add_library(bwvr_mod SHARED
     village.cpp
     radial_menu.cpp
     spell_book.cpp
+    book_bubble.cpp
     debug_menu.cpp
     temple.cpp
     throw_physics.cpp

@@ -594,9 +594,9 @@ starts. The pictures come from the first template of each gesture type in
 the god has a blue bubble, and a Creature miracle an amber one. The name is
 under the bubble. The cells are 6.5 cm for up to 9 items, 5 cm for up to 16
 and 4 cm for more. The book uses the quad layer of the ring (`kCardRing`), so
-it is sharp and never double. The book draws no mesh of the game: the icons
-of a Worship Site are meshes in the world, and the bubble is a picture of
-the mod. A book with no item says "No miracle to ask for now" and the
+it is sharp and never double. The items in the book are pictures of the
+mod. The bubble that the hand pulls out is the bubble of the game (see "The
+pull"). A book with no item says "No miracle to ask for now" and the
 reason: "You have no Worship Site" or "Your Worship Site has no miracle".
 
 **The pick.** The grip point of the pointing hand within 45 percent of a cell
@@ -610,11 +610,12 @@ the pointing hand and the cue "ring move".
 **The pull** (`spell_book_pull_cm=10`). The grip on a picked item that the
 game lets the player ask for does not take the miracle at once:
 
-1. The bubble of the item comes out of the book on an elastic band. It is a
-   small quad of its own (`kCardBubble`), with the gold halo, the fill and
-   the two gestures, and it faces the head. It stays half way from its cell
-   to the grip point of the pointing hand (`PullBubble`). Its cell in the
-   book shows an empty socket. The pick stays on the item.
+1. The bubble of the item comes out of the book on an elastic band. It is
+   the game's own bubble of that miracle (`spell_book_bubble=1`, see "The
+   game's bubble" below): a glass ball 6 cm across in the room, with the
+   icon mesh or the particles of the miracle in it. It stays half way from
+   its cell to the grip point of the pointing hand (`PullBubble`). Its cell
+   in the book shows an empty socket. The pick stays on the item.
 2. Each frame of the pull sends a buzz of 20 ms to both hands: the pointing
    hand at 0.03 to 0.45, and the hand of the book at half of that. The
    buzz goes up with the pull, faster near the end (`PullBuzz`), times
@@ -629,6 +630,40 @@ game lets the player ask for does not take the miracle at once:
    cell in 0.4 s: it goes through the cell one time and comes back
    (`BackScale`). When it first comes to the cell, the hand of the book gets
    the pulse `tick`.
+
+**The game's bubble** (`book_bubble.cpp`). A bubble on the land has two
+parts [V]: a glass ball (the mesh `O_Bibble_up.l3d` with a texture of 4 by
+4 frames) and a `SpellSeedGraphic` in it, with the icon mesh of the miracle
+(`GSpellSeedInfo+0x140`) and its particles (`+0x174`). Storm, Fire,
+Lightning, Water and Teleport have particles only. The gesture help picture
+of the game draws both parts at a free place, at once, with no object in
+the world (`fn_0068B7E0`). The mod does the same:
+
+- One glass ball (`LH3DObject::Create`, `GJUtils::GetSharedMesh`), and one
+  graphic for each seed type (`SpellSeedGraphic::Create` `0x00726F60` with
+  auto update off). They are made at the first pull and kept, as the
+  gesture help keeps its own. The graphic is not on the map and no save
+  writes it. Its particles use the local random of the game.
+- In each eye pass, after the overlay's meshes at `0x0082F4C9`:
+  `DrawUpdateAtPos` and `DrawSpellGraphic` (draw now) for the miracle, then
+  the virtual function `+0x104` of the ball (draw now). The camera of the
+  eye is put in place for the draw and put back after it. The depth test
+  is on, so land in front hides the bubble.
+- The icon turns about the up axis at 2 radians a second, and the texture of
+  the ball steps at 18 frames a second, as on the land.
+- The place is the point of the room in the world, with the map of the aim
+  of this frame (`ControllersLocalToWorld`).
+
+The book is a layer over the picture of the game, so it would hide the
+bubble. When a part of the ball is in front of the page, the book has a
+round hole where the head sees the ball (`BubbleHole`). The hole is larger
+by 3.2 mm for each cm that the ball is off the page, for the two eyes. Its
+edge is soft over 3 pixels. A ball behind the page makes no hole, so the
+book hides it.
+
+With `spell_book_bubble=0`, or when a check of the game's code fails, the
+bubble is a flat picture on a quad of its own (`kCardBubble`): the gold halo,
+the fill and the two gestures, facing the head.
 
 The two hands both make the pull: a move of the hand of the book away from
 the pointing hand also pulls. The card has "Pull farther to take it" and
@@ -724,6 +759,7 @@ place of that corner.
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
 | `spell_book_pull_cm` | 10 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
+| `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
 
 The keys are read from `bwvr.ini`. They are not in the launcher.
@@ -734,8 +770,8 @@ a short pulse for 0.
 
 **The debug page** (`debug_menu=1`, the group Creature): "Spell book" changes
 `spell_book`, "Book pull" changes `spell_book_pull_cm` between 0 and its
-value in `bwvr.ini` (10 when that is 0), and "All miracles" changes
-`debug_all_miracles`. The hand that
+value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
+`spell_book_bubble`, and "All miracles" changes `debug_all_miracles`. The hand that
 does not point gives a long pulse for 1 and a short pulse for 0. These two
 switches have no key of the keyboard.
 
@@ -802,7 +838,12 @@ The tag `spell book` has the book:
 - One line each report window: the opens, the closes, the pulls (the snaps
   and the bubbles that went back), the takes, the
   requests, the Miracles in the Hand, the refusals and the draws of the
-  picture.
+  picture. One more line has the frames with the game's bubble, its draws,
+  and the parts that the game made.
+
+The tag `book bubble` has the game's bubble: the glass ball and each graphic
+that the game makes, the first draw with its place and size, and a check of
+the game's code that fails.
 
 ## Tests
 
@@ -827,7 +868,8 @@ The math test (`spell_book_checks.h`) covers the layout of the book for 0 to
 32 items, the place of the book from the grip pose, the plane that faces the
 head, the pick with its two limits, the open and the close, the grip that
 the book holds, and the pull: the share of the pull, the place of the
-bubble, the buzz, and the spring back.
+bubble, the buzz, the spring back, and the hole of the game's bubble in the
+page.
 
 The spell book has a recipe: `village_run.ps1 -Kind book` (the test save
 `temple`, a Worship Site with Water, Food and Heal, 20000 chants). It opens
@@ -848,6 +890,14 @@ and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
   0.45 on the pointing hand, and half of that on the other hand.
 - The grip that opens at 92 percent of the pull sends no request: the
   bubble goes back, and the book stays open.
+- The game makes the glass ball and the graphic of Food at the first pull,
+  and draws the bubble in each frame of the pull (one draw for each walk of
+  the scene). In the eye pictures with dxwrapper, the glass ball is at the
+  fingers of the right hand during the pull and at the snap, and the
+  fingers in front of it hide a part of it. When the Miracle is in the
+  Hand, the ball is gone and the game's own glow of Food is in the Hand.
+  With Vulkan the log shows the same draws, but the eye pictures of a
+  desktop run are black.
 - The pull of 15 cm: the bubble snaps into the hand at 10.1 cm, in the same
   frame as the take. With `spell_book_pull_cm=0` the grip is the take, and
   the card says "[Grip] Take Food".
@@ -890,7 +940,16 @@ tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 - Whether a pull of 10 cm and the buzz feel like an elastic band, and
   whether the bubble that springs back reads as the miracle that goes back
   into the book.
-- Whether the bubble quad shows in Virtual Desktop as the book does.
+- Whether the game's bubble sits on the elastic band where the book and
+  the hand are, and whether its hole in the page looks right in both eyes.
+  The eye pictures of a desktop run do not have the book, so they do not
+  show the hole.
+- Whether the icon of the miracle shows through the glass of the ball. In
+  the eye pictures the glass is bright and the icon is hard to see.
+- The game's bubble with Vulkan: the eye pictures of a desktop run with
+  Vulkan are black.
+- Whether the flat bubble quad (`spell_book_bubble=0`) shows in Virtual
+  Desktop as the book does.
 - Whether the quad layer of the book shows in Virtual Desktop as the ring
   does. The eye pictures of a desktop run do not have the quad layer. A run
   shows the picture of the book and its place in the log only.

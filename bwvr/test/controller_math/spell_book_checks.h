@@ -270,6 +270,32 @@ inline void SpellBookChecks() {
           "the spring is almost still at its end, so the stop is not seen", 0,
           0);
   }
+  {
+    // The hole of the game's bubble in the page. A page 40 cm in front of
+    // the head, facing it.
+    Plane page;
+    const float center[3] = {0.0f, 0.0f, -0.40f};
+    const float head[3] = {0.0f, 0.0f, 0.0f};
+    PlaneAt(center, head, &page);
+    Hole hole;
+    const float on_page[3] = {0.05f, 0.02f, -0.40f};
+    Check(BubbleHole(page, head, on_page, 0.03f, &hole) &&
+              fabsf(hole.x - 0.05f) < 1e-4f && fabsf(hole.y - 0.02f) < 1e-4f &&
+              fabsf(hole.r - 0.03f) < 1e-4f,
+          "a ball on the page makes a hole of its own size at its place", 0, 0);
+    const float near_head[3] = {0.05f, 0.0f, -0.20f};
+    Check(BubbleHole(page, head, near_head, 0.03f, &hole) &&
+              fabsf(hole.x - 0.10f) < 1e-4f &&
+              fabsf(hole.r - (0.06f + kHalfEyesM)) < 1e-4f,
+          "a ball half way to the head makes a hole two times as far out and "
+          "as large, and larger for the two eyes", 0, 0);
+    const float behind[3] = {0.0f, 0.0f, -0.45f};
+    Check(!BubbleHole(page, head, behind, 0.03f, &hole),
+          "a ball behind the page makes no hole", 0, 0);
+    const float half_in[3] = {0.0f, 0.0f, -0.42f};
+    Check(BubbleHole(page, head, half_in, 0.03f, &hole) && hole.r > 0.02f,
+          "a ball with a part in front of the page makes a hole", 0, 0);
+  }
 }
 
 }  // namespace spell_book_checks

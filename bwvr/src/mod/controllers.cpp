@@ -4502,6 +4502,26 @@ void LatchFrameAim() {
 }
 }  // namespace
 
+// A point of the LOCAL space of OpenXR, in meters, in the world, with the map
+// of the aim of this frame (see THE AIM FOR THE TELEPORT). units is the world
+// units in a meter of the room. False when the aim is not known.
+bool ControllersLocalToWorld(const float local[3], float world[3],
+                             float* units) {
+  const TeleportInput& in = g_frame_aim;
+  if (!g_on || g_frame == 0 || !in.have_aim) return false;
+  const float life = HeadPoseScale();
+  const float none[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  float m[9], t[3];
+  if (!(life > 0.0f) || !HeadPoseToRoom(local, none, m, t)) return false;
+  const float r[3] = {t[0] / life, t[1] / life, t[2] / life};
+  for (int i = 0; i < 3; ++i) {
+    world[i] = in.base[i] + in.map[i * 3 + 0] * r[0] +
+               in.map[i * 3 + 1] * r[1] + in.map[i * 3 + 2] * r[2];
+  }
+  *units = in.units_per_meter;
+  return true;
+}
+
 // THE RAY OF A FAR GRAB (docs/grab.md, "The grab from a distance"): the aim
 // pose of the pointing hand in the world, as the teleport takes it. The origin
 // is the aim point, the direction is a unit vector, and units is the world

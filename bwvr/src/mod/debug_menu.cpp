@@ -262,6 +262,8 @@ int SpellBookValue();
 void SpellBookChange(const char* by);
 int SpellBookPullValue();
 void SpellBookPullChange(const char* by);
+int SpellBookBubbleValue();
+void SpellBookBubbleChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 // The sound (audio_listener.cpp, audio_voices.cpp, audio_range.cpp).
@@ -587,6 +589,9 @@ const Switch kSwitches[] = {
     {kGroupCreature, L"Book pull", L"Pull a miracle out of the book",
      "spell_book_pull_cm", SpellBookPullValue, SpellBookPullChange,
      L"off|on"},
+    {kGroupCreature, L"Book bubble", L"The game's bubble on the pull",
+     "spell_book_bubble", SpellBookBubbleValue, SpellBookBubbleChange,
+     L"flat|game"},
     {kGroupCreature, L"All miracles", L"All miracles, no cost (test)",
      "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on"},
 

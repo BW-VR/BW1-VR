@@ -496,7 +496,6 @@ uint64_t g_pair_walks = 0;  // for the report
 uint64_t g_last_image = 0;
 uint32_t g_last_layer = 0;
 uint32_t g_last_width = 0, g_last_height = 0;
-bool g_last_atlas = false;  // the last walk has an atlas (fovea_res_layer)
 bool g_cpu_newer = false;
 // THE PICTURE OF THE WALK BEFORE (vk_keep_picture, backend=vulkan). In
 // Direct3D 7 the render target keeps its pixels from one scene to the next,
@@ -3631,9 +3630,6 @@ void EndOnWorker(const void*) {
     g_last_layer = g_walk_right ? 1u : 0u;
     g_last_width = Target().width;
     g_last_height = Target().height;
-    // An atlas (fovea_res_layer) is no picture of the whole view for a reader
-    // of one image (VkSceneLastPicture).
-    g_last_atlas = g_walk_mres && g_walk_atlas.on;
     g_cpu_newer = false;
   }
   // A walk of the left eye can have the walk of the right eye after it.
@@ -4900,10 +4896,6 @@ bool VkSceneLastPicture(uint64_t* image, uint32_t* layer, uint32_t* width,
       !SameDeviceAsSession()) {
     return false;
   }
-  // A walk with an atlas (fovea_res_layer=1) has the outer image and the
-  // centre image side by side, not one picture of the view, so a reader of
-  // one image keeps the picture that it had.
-  if (g_last_atlas) return false;
   *image = g_last_image;
   *layer = g_last_layer;
   *width = g_last_width;

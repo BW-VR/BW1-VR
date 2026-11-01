@@ -4513,13 +4513,13 @@ the alpha: the soft edge of the eye picture of `fovea_res_layer=0`.
   game. There is no test key: the app has no hotkeys, and the stream of the
   walks has no option for it.
 - **A known limit:** the cut scene window and the stereo screen show the
-  outer image only, with the fewer pixels of the whole view and no centre,
-  and the screen quad shows no picture of a walk with an atlas. The cut scene window shows the same columns of the outer
-  image (`fovea_res_math::OuterRect`), and the stereo screen the outer
-  image. The last picture of the renderer (`VkSceneLastPicture`, for the
-  screen quad) is not there after a walk with an atlas, so the screen quad
-  keeps the picture that it had. So no reader gets the whole atlas as one
-  picture.
+  outer image only, with the fewer pixels of the whole view and no centre.
+  The last picture of the renderer (`VkSceneLastPicture`, for the screen
+  quad of a frame with no scene) can be a walk with an atlas, and then the
+  screen quad shows the whole atlas: the outer image and the centre image
+  side by side, for example in a frame with a dialog box right after the
+  frames of the scene. The cut scene window shows the same columns of the
+  outer image (`fovea_res_math::OuterRect`).
 - The report of each 450 frames counts the walks with the two images side
   by side, those with a smaller centre and those with no room.
 

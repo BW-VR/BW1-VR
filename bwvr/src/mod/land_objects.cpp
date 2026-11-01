@@ -68,6 +68,7 @@
 
 #include "MinHook.h"
 #include "fast_transform_math.h"
+#include "game_sse_parts.h"
 #include "land_objects.h"
 #include "land_objects_math.h"
 #include "object_timer.h"
@@ -468,11 +469,12 @@ void BeforePart(uint32_t first, uint32_t last) {
 
 void WorkBefore() {
   g_before_on = false;
-  // With the SSE paths of the game (the flag 0x00EA9EB4, a CPU of the family
-  // 15 or game_sse_path=1) the test of the view does not come to the stub,
-  // so a result before the draws has no use.
+  // With the SSE path of the test of a sphere (the flag 0x00EA9EB4 of a CPU
+  // of the family 15 or of game_sse_path=1, or the bit of game_sse_parts)
+  // the test of the view does not come to the stub, so a result before the
+  // draws has no use.
   if (g_mode != 1 || !g_cull_in || g_threads_on <= 0 || g_workers <= 0 || !ConstantsOk() ||
-      Read<int32_t>(0x00EA9EB4) != 0) {
+      GameSseSphereFlag() != 0) {
     return;
   }
   int n = Read<int32_t>(kListCount);

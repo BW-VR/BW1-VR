@@ -786,6 +786,11 @@ void GameSsePartsInstall() {
   if (g_patched && g_check != 0) InstallChecks();
 }
 
+int GameSseSphereFlag() {
+  if (g_patched) return g_flags[kSphere];
+  return Read<int32_t>(GameFlag(kSphere));
+}
+
 void GameSsePartsFrame() {
   if (!g_patched) return;
   const bool in_pass = StereoInPass();

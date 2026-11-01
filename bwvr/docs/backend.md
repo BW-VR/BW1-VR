@@ -3162,8 +3162,9 @@ through 1, 0 and 2.
 `land_objects_threads=N` (0 is the default: one thread, the frame thread)
 starts N worker threads. At the start of `fn_005E5CD0` (a hook of MinHook)
 the workers and the frame thread make the test of the view of each object
-of the list, before the draws, when the game takes its x87 paths (the flag
-`0x00EA9EB4` is 0, as on the Quest). The test of one object reads only that
+of the list, before the draws, when the test of a sphere (`fn_00868C80`)
+takes its x87 path (the flag `0x00EA9EB4` is 0, as on the Quest, or the bit
+64 of `game_sse_parts` is 0). The test of one object reads only that
 object, its 3D part (`+0x40`), its mesh (`+0x7C` of the part, when the entry
 `+0xF8` of its vtable is `fn_007F9E70`) and the camera. A tree scales the
 entries `+0x20` and `+0x28` of the matrix of its part for its draw

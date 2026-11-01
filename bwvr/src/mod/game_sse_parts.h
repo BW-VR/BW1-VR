@@ -19,3 +19,7 @@ void GameSsePartsInstall();
 // h_FinishFrame, after the FinishFrame of the game: the test key, the latch
 // of the flags at the end of a frame, and the lines of the compare.
 void GameSsePartsFrame();
+// The flag that the test of a bounding sphere (fn_00868C80) reads, 1 for its
+// SSE path: the flag of the mod when game_sse_parts patched the readers,
+// else the flag of the game (0x00EA9EB4).
+int GameSseSphereFlag();

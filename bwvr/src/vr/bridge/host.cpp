@@ -78,7 +78,11 @@ int wmain(int argc, wchar_t** argv) {
           for (uint32_t i = 0; i < p->payload_bytes; ++i) p->payload[i] ^= 0x5a;
           p->result = 64;
           break;
-        case Instance: p->result = screen.StartInstance(Log); break;
+        case Instance:
+          // index: finger tracking, 0 off, 1 the real fingers, 2 around the
+          // controller.
+          screen.WantHandTracking(p->index != 0, p->index == 2);
+          p->result = screen.StartInstance(Log); break;
         case System:
           p->result = screen.StartSystem(); screen.LogSystem();
           screen.RecommendedSize(&p->state.recommended_width, &p->state.recommended_height); break;

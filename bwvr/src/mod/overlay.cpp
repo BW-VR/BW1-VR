@@ -94,6 +94,11 @@
 // target of the grip, and the hold pose closes on the body of the object in
 // the Hand. With hand_feel=0 the curls of the pose stay.
 //
+// THE TRACKED FINGERS (docs/hand-model.md, "Finger tracking"). When the
+// runtime tracks the real fingers of a hand (a controller with finger
+// tracking), their curls take the place of the trigger and the grip in each
+// pose, and only the hold pose keeps its range (overlay_math::TrackedCurls).
+//
 // THE FINGERS FROM OUTSIDE. OverlaySetFinger gives one finger of one hand a
 // curl and a spread for the frame, in place of the curl that the poses give.
 // No file of the mod calls it.
@@ -271,6 +276,11 @@ float g_grip[kHands][3];
 float g_index_tip[kHands][3];
 float g_trigger[kHands] = {0.0f, 0.0f};
 float g_squeeze[kHands] = {0.0f, 0.0f};
+// Finger tracking bends the fingers of this hand (docs/hand-model.md,
+// "Finger tracking"). For one log line at each change.
+bool g_tracked_fingers[kHands] = {false, false};
+int g_finger_logs = 0;
+const int kMaxFingerLogs = 20;
 int g_pointing = 1;
 // The hand of the leash. It is the other hand, also while the trigger of
 // that hand borrows the pointer for a take (controllers.cpp, left_take).
@@ -649,8 +659,24 @@ bool BuildFrame() {
     overlay_math::StepWeights(g_pose_weight[h], pose, dt,
                               overlay_math::kPoseBlendSeconds);
     float curls[overlay_math::kFingers];
-    overlay_math::PoseCurls(g_pose_weight[h], hold, hand.trigger,
-                            hand.squeeze, curls);
+    if (hand.fingers && overlay_math::kFingers == 5) {
+      overlay_math::TrackedCurls(g_pose_weight[h], hold, hand.finger_curl,
+                                 curls);
+    } else {
+      overlay_math::PoseCurls(g_pose_weight[h], hold, hand.trigger,
+                              hand.squeeze, curls);
+    }
+    if (hand.fingers != g_tracked_fingers[h]) {
+      g_tracked_fingers[h] = hand.fingers;
+      if (g_finger_logs < kMaxFingerLogs) {
+        ++g_finger_logs;
+        ModLog("overlay      : the %s hand: %s, frame %llu. Curls %.2f %.2f "
+               "%.2f %.2f %.2f", h == 0 ? "left" : "right",
+               hand.fingers ? "the tracked fingers bend the fingers"
+                            : "the trigger and the grip bend the fingers",
+               g_frame, curls[0], curls[1], curls[2], curls[3], curls[4]);
+      }
+    }
     // THE TICKLE: while the pointing hand strokes the Creature, the fingers
     // move a little with the path of the real hand. A hand that is still has
     // still fingers.

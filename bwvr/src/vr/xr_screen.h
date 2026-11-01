@@ -89,6 +89,11 @@ struct HandInput {
   bool primary;              // A or X
   bool secondary;            // B or Y
   bool menu;
+  // FINGER TRACKING (XR_EXT_hand_tracking): the curl of each finger, the
+  // thumb first, 0 an open finger and 1 the tightest pose of the game's Hand.
+  // Valid only when the runtime tracks the joints of this hand in this frame.
+  bool fingers_valid;
+  float finger_curl[5];
   uint64_t serial;           // one more on every sync
 };
 
@@ -301,6 +306,13 @@ class XrScreen {
   void WantEyeGaze(bool on);
   bool EyeGazeSupported() const;
   bool EyeGaze(float direction[3]) const;
+  // FINGER TRACKING (XR_EXT_hand_tracking). WantHandTracking(true) before
+  // Start asks for the extension when the runtime lists it. With conform,
+  // the fingers close around the controller (the motion range "conforming to
+  // controller" of XR_EXT_hand_joints_motion_range), else the runtime gives
+  // the pose of the real fingers. HandInput::finger_curl has the curls.
+  void WantHandTracking(bool on, bool conform);
+  bool HandTrackingSupported() const;
   // The queue of the session. The runtime uses it in xrBeginFrame,
   // xrEndFrame and in the acquire and the release of a swapchain image, so
   // each other submit to it must hold this lock.

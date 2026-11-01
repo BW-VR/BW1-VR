@@ -317,6 +317,37 @@ inline const Setting kSettings[] = {
      "finger. Your hands in the game have this length, so they are the size "
      "of your own hands, and so has the ring of the leash. "
      "Measure your hand and set the value here."},
+    // THE FIT OF THE HAND ON THE CONTROLLER (docs/hand-model.md). The values
+    // are for the right hand, and the left hand gets the mirror image.
+    {kSlider, "hand_fit_out_mm", "Hand fit: to the side", "-60|60|2| mm", 0,
+     "Moves your hands in the game against your controllers, so that they "
+     "cover your real hands. Each controller holds the hand at a different "
+     "place. Plus moves each hand away from the other hand, to the back of "
+     "the hand. The left hand gets the mirror image of each hand fit value."},
+    {kSlider, "hand_fit_up_mm", "Hand fit: up", "-60|60|2| mm", 0,
+     "Moves your hands up (plus) or down (minus) against your controllers."},
+    {kSlider, "hand_fit_forward_mm", "Hand fit: forward", "-60|60|2| mm", 0,
+     "Moves your hands forward (plus) or back (minus) against your "
+     "controllers, along the fingers of a closed hand."},
+    {kSlider, "hand_fit_pitch_deg", "Hand fit: tilt up", "-45|45|1| degrees",
+     0,
+     "Turns the front of your hands up (plus) or down (minus) against your "
+     "controllers."},
+    {kSlider, "hand_fit_yaw_deg", "Hand fit: turn in", "-45|45|1| degrees", 0,
+     "Turns the front of your hands toward the other hand (plus) or away "
+     "from it (minus)."},
+    {kSlider, "hand_fit_roll_deg", "Hand fit: roll in", "-45|45|1| degrees",
+     0,
+     "Turns the top of your hands toward the other hand (plus) or away from "
+     "it (minus), about the line of the fingers."},
+    {kValues, "finger_tracking", "Finger tracking",
+     "Real fingers=1|Around the controller=2|Off=0", 1,
+     "For controllers that see your fingers, for example the controllers of "
+     "the Steam Frame and the Valve Index. Real fingers: each finger in the "
+     "game bends as your finger bends. Around the controller: the same, but "
+     "a closed hand closes around the controller. Off: the trigger bends "
+     "the index finger and the grip bends the other fingers. Controllers "
+     "that do not see your fingers always use the trigger and the grip."},
     {kBool, "hand_glow", "Glow at the Hand's point", nullptr, 0,
      "A small glow at the tip of the index finger shows the point of the "
      "Hand that picks up and clicks. It shows while a press of the grip "
@@ -650,9 +681,11 @@ inline bool OnlyDirect3D9(const char* key) {
 }
 
 // The rows that only the launcher on the PC uses. The menu of the headset app
-// does not show them.
+// does not show them, and keeps their values in the ini. A page of that menu
+// has room for 10 rows, so the six rows of the hand fit are not on it.
 inline bool OnlyLauncher(const char* key) {
-  return key != nullptr && strcmp(key, "update_check") == 0;
+  return key != nullptr && (strcmp(key, "update_check") == 0 ||
+                            strncmp(key, "hand_fit_", 9) == 0);
 }
 
 }  // namespace bwvr_settings

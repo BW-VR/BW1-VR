@@ -3611,6 +3611,7 @@ void CreatureChecks() {
 #include "large_block_checks.h"
 #include "render_chain_checks.h"
 #include "sse_parts_checks.h"
+#include "hand_fit_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4065,6 +4066,7 @@ int main() {
   large_block_checks::LargeBlockChecks();
   render_chain_checks::RenderChainChecks();
   sse_parts_checks::SsePartsChecks();
+  hand_fit_checks::HandFitChecks();
   // Last: it recenters the head of head_pose.cpp.
   motion_comp_checks::MotionCompChecks();
 

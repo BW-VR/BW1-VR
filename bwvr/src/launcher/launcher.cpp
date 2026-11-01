@@ -1580,7 +1580,10 @@ void BuildControls() {
             row - Scaled(4), g_window,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(id++)), nullptr,
             nullptr);
-        SendMessageA(control, TBM_SETRANGE, TRUE, MAKELONG(low, high));
+        // Two messages, not TBM_SETRANGE: its two 16 bit halves cannot hold
+        // a low end below 0.
+        SendMessageA(control, TBM_SETRANGEMIN, FALSE, low);
+        SendMessageA(control, TBM_SETRANGEMAX, TRUE, high);
         SendMessageA(control, TBM_SETPAGESIZE, 0, step);
         SendMessageA(control, TBM_SETLINESIZE, 0, step);
         break;

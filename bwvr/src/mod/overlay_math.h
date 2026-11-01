@@ -421,6 +421,29 @@ inline void PoseCurls(const float weights[kPoseCount], const PoseRange& hold,
   }
 }
 
+// THE TRACKED FINGERS (docs/hand-model.md, "Finger tracking"). When the
+// runtime gives the curl of each real finger, that curl is the curl of the
+// finger in each pose: the real hand chooses to point, to be flat or to make
+// a fist. Only the hold pose keeps its range, so that the fingers close on
+// the held object and do not go into it. The weights of the poses stay, so
+// the change to and from the hold pose takes the blend time.
+inline void TrackedCurls(const float weights[kPoseCount],
+                         const PoseRange& hold,
+                         const float tracked[kFingers], float curls[kFingers]) {
+  float total = 0.0f;
+  for (int p = 0; p < kPoseCount; ++p) total += weights[p];
+  for (int f = 0; f < kFingers; ++f) {
+    const float value = Clamp01(tracked[f]);
+    float sum = 0.0f;
+    for (int p = 0; p < kPoseCount; ++p) {
+      sum += weights[p] *
+             (p == kPoseHold ? hold.lo[f] + (hold.hi[f] - hold.lo[f]) * value
+                             : value);
+    }
+    curls[f] = Clamp01(total > 1e-6f ? sum / total : value);
+  }
+}
+
 // THE BLEND of a change of pose. The weight of the target pose grows by
 // dt / seconds, and the other weights keep their shares of the rest. From one
 // pose to the next the mix is a straight line that takes `seconds`.

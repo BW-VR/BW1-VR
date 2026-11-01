@@ -218,6 +218,10 @@ struct OverlayHand {
   float rotation[9];   // the grip axes in the world: L * M_grip
   float trigger;       // 0 to 1
   float squeeze;       // 0 to 1
+  // Finger tracking: the curl of each finger from the runtime, the thumb
+  // first, 0 open and 1 a fist. Only when `fingers` is true.
+  bool fingers;
+  float finger_curl[5];
 };
 
 struct OverlayHands {

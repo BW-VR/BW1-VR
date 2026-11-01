@@ -48,6 +48,8 @@
 #include "ui_panel.h"
 #include "vr_start.h"
 #include "vr_start_math.h"
+#include "eye_osc.h"
+#include "osc_gaze_math.h"
 #include "xr_input.h"
 #include "xr_layers.h"
 #include "screen_quad_math.h"
@@ -645,7 +647,10 @@ int g_vk_stage1 = 1;
 int g_foveation = 0;
 int g_foveation_inner_deg = 0;
 int g_foveation_outer_deg = 0;
+// The source of the gaze (osc_gaze_math::Source), and the port of OSC.
 int g_foveation_gaze = 1;
+int g_eye_osc_port = 9000;
+int g_eye_osc_any = 0;
 int g_foveation_show = 0;
 // Foveated resolution (docs/backend.md, "Foveated resolution").
 int g_fovea_res = 0;
@@ -654,6 +659,46 @@ int g_fovea_res_center_pct = 100;
 int g_fovea_res_center_deg = 25;
 int g_fovea_res_center_down_deg = 0;
 int g_vk_scene_reread_test = 0;
+
+// THE GAZE OF AN EYE TRACKER is the centre of the fovea of both kinds of
+// foveated rendering. The test keys can turn each kind on while the game
+// runs, so with test_keys=1 both sources are ready, and the key of the
+// source (Ctrl Shift O) can change between them.
+bool GazeWanted() {
+  return g_foveation != 0 || g_fovea_res != 0 || g_test_keys;
+}
+
+bool OpenXrGazeWanted() {
+  return GazeWanted() &&
+         (g_test_keys || osc_gaze_math::UsesOpenXr(osc_gaze_math::SourceOf(
+                             g_foveation_gaze)));
+}
+
+const char* GazeSourceText(int source) {
+  switch (osc_gaze_math::SourceOf(source)) {
+    case osc_gaze_math::kStraight:
+      return "straight ahead, no gaze of an eye tracker";
+    case osc_gaze_math::kOpenXr:
+      return "the gaze of OpenXR (XR_EXT_eye_gaze_interaction) only";
+    case osc_gaze_math::kOsc:
+      return "the gaze of OSC only";
+    default:
+      return "the gaze of OpenXR (XR_EXT_eye_gaze_interaction), else the "
+             "gaze of OSC";
+  }
+}
+
+// The receive of OSC starts with the mod, so that a gaze is there at the
+// first frame of a session.
+void StartGaze() {
+  if (!GazeWanted()) return;
+  ModLog("gaze         : foveation_gaze=%d, the centre of the fovea is %s",
+         g_foveation_gaze, GazeSourceText(g_foveation_gaze));
+  if (g_test_keys ||
+      osc_gaze_math::UsesOsc(osc_gaze_math::SourceOf(g_foveation_gaze))) {
+    EyeOscStart(g_eye_osc_port, g_eye_osc_any != 0);
+  }
+}
 // The OpenXR session with Vulkan, and the eye pictures of the Vulkan
 // renderer in it (docs/backend.md, "The session with Vulkan").
 int g_xr_vulkan = 0;
@@ -1664,8 +1709,12 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "foveation_inner_deg", 0, path));
   g_foveation_outer_deg = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "foveation_outer_deg", 0, path));
-  g_foveation_gaze =
-      GetPrivateProfileIntA("bwvr", "foveation_gaze", 1, path) != 0 ? 1 : 0;
+  g_foveation_gaze = static_cast<int>(osc_gaze_math::SourceOf(static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "foveation_gaze", 1, path))));
+  g_eye_osc_port = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "eye_osc_port", 9000, path));
+  g_eye_osc_any =
+      GetPrivateProfileIntA("bwvr", "eye_osc_any", 0, path) != 0 ? 1 : 0;
   g_foveation_show =
       GetPrivateProfileIntA("bwvr", "foveation_show", 0, path) != 0 ? 1 : 0;
   g_fovea_res =
@@ -2088,6 +2137,7 @@ void StartVrStep() {
     VkSceneSetFoveaRes(g_fovea_res, g_fovea_res_outer_pct,
                        g_fovea_res_center_pct, g_fovea_res_center_deg,
                        g_fovea_res_center_down_deg);
+    StartGaze();
     VkStreamSetOptions(g_vk_stream_record, g_vk_stream_frames, g_vk_stream_live,
                        g_vk_stream_live_drop_us, g_vk_stream_live_drop,
                        g_vk_stream_live_end);
@@ -2153,7 +2203,7 @@ void StartVrStep() {
     options.test_hang_ms = g_vr_start_test_hang_ms;
     options.vulkan = g_xr_vulkan != 0;
     options.d3d11 = !g_vulkan_only;
-    options.eye_gaze = g_foveation != 0 && g_foveation_gaze != 0;
+    options.eye_gaze = OpenXrGazeWanted();
     if (VrStartBegin(options)) {
       g_vr_thread = true;
       return;
@@ -2167,7 +2217,7 @@ void StartVrStep() {
   bwvr::XrScreen* screen = new bwvr::XrScreen();
   screen->UseVulkan(g_xr_vulkan != 0);
   screen->UseD3D11(!g_vulkan_only);
-  screen->WantEyeGaze(g_foveation != 0 && g_foveation_gaze != 0);
+  screen->WantEyeGaze(OpenXrGazeWanted());
   screen->SetVulkanUpload(g_xr_vulkan_upload != 0);
   screen->SetHoldMs(g_xr_hold_ms);
   screen->SetPlacement(g_distance, g_width);
@@ -3026,6 +3076,8 @@ void Shutdown(const char* path) {
     ShutdownPart("the GPU bridge", [] { GpuBridgeShutdown(); });
   }
   ShutdownPart("the frame source", [] { FrameSourceShutdown(); });
+  // When Windows ends the process, the thread of OSC is stopped already.
+  if (!g_process_ends) ShutdownPart("the gaze of OSC", [] { EyeOscStop(); });
   ModLog("shutdown     : all parts are done, %.1f ms", MsSince(start));
 }
 
@@ -3105,6 +3157,20 @@ void EndOfDll(bool process_ends) {
 }
 
 }  // namespace
+
+// The source of the gaze of this frame (stereo.cpp).
+int GazeSourceNow() { return g_foveation_gaze; }
+
+// The test key of the source of the gaze (stereo.cpp, Ctrl Shift O): 1, 2,
+// 3, 0 and 1 again.
+void GazeSourceToggle(const char* keys) {
+  g_foveation_gaze = static_cast<int>(osc_gaze_math::NextSource(
+      osc_gaze_math::SourceOf(g_foveation_gaze)));
+  ControllersGesturePulse(0.5f, g_foveation_gaze != 0 ? 0.30f : 0.08f);
+  ModLog("test key     : %s, foveation_gaze is %d now: the centre of the "
+         "fovea is %s",
+         keys, g_foveation_gaze, GazeSourceText(g_foveation_gaze));
+}
 
 // The test key of xr_vulkan_upload (stereo.cpp, Shift Z). It changes the
 // key for the next session too.

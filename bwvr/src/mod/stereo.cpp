@@ -74,6 +74,8 @@
 #include "thread_wait.h"
 #include "ddraw_census.h"
 #include "foveation_math.h"
+#include "eye_osc.h"
+#include "osc_gaze_math.h"
 #include "vk_scene.h"
 #include "vk_ddraw.h"
 #include "vk_window.h"
@@ -89,6 +91,9 @@
 void D3D9BackendConfirm();
 // mod_main.cpp: the test key of xr_vulkan_upload.
 void XrVulkanUploadToggle(const char* keys);
+// The source of the gaze of foveated rendering (mod_main.cpp).
+int GazeSourceNow();
+void GazeSourceToggle(const char* keys);
 // mod_main.cpp: the test key of xr_hold_ms.
 void XrHoldToggle(const char* keys);
 // mod_main.cpp: backend=vulkan with vulkan_only=1.
@@ -1086,6 +1091,15 @@ void PollHotkeys() {
     UiPanelSubtitleReadAheadToggle("Ctrl, Shift and the semicolon key");
   }
   semicolon_down = semicolon_now;
+  // An A/B of the source of the gaze of foveated rendering (docs/backend.md,
+  // "Foveated rendering"). Shift O with no Ctrl is the key of foveation.
+  static bool gaze_key_down = false;
+  const bool gaze_key_now = (GetAsyncKeyState('O') & 0x8000) != 0;
+  if (g_test_keys && gaze_key_now && !gaze_key_down && ctrl && shift &&
+      GameHasFocus()) {
+    GazeSourceToggle("Ctrl, Shift and O");
+  }
+  gaze_key_down = gaze_key_now;
   // An A/B of one walk (docs/backend.md, "One walk for both eyes"). The
   // menu key (VK_APPS) has no action in the game and no other test key.
   static bool menu_down = false;
@@ -1538,14 +1552,23 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     XrInputRecordView(view, to_headset ? 0 : (channel ? 2 : 1));
   }
   // FOVEATED RENDERING: the gaze of an eye tracker is the centre of the
-  // fovea of this frame. With none the centre is straight ahead.
+  // fovea of this frame. With none the centre is straight ahead. The gaze
+  // of OpenXR comes first: it is for the display time of the frame. The
+  // gaze of OSC is the last that came, and it needs no headset session.
   {
+    const osc_gaze_math::Source source =
+        osc_gaze_math::SourceOf(GazeSourceNow());
     float direction[3] = {0.0f, 0.0f, -1.0f};
     float gx = 0.0f, gy = 0.0f;
-    const bool gaze = ((to_headset && g_screen->EyeGaze(direction)) ||
-                       (channel && XrInputGaze(direction))) &&
+    const bool openxr =
+        osc_gaze_math::UsesOpenXr(source) &&
+        ((to_headset && g_screen->EyeGaze(direction)) ||
+         (channel && XrInputGaze(direction)));
+    const bool gaze = (openxr || (osc_gaze_math::UsesOsc(source) &&
+                                  EyeOscGaze(direction))) &&
                       foveation_math::GazeTangent(direction, &gx, &gy);
     VkSceneSetGaze(gaze, gx, gy);
+    if (g_frames % 450 == 0) EyeOscReport();
   }
   // The walk of one walk of this frame can go without Direct3D 9 (vk_only)
   // when its eye pictures come from the Vulkan renderer: in a session with

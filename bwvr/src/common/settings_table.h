@@ -109,10 +109,10 @@ inline const Setting kSettings[] = {
      "parts around it get one shade for 2 by 2 pixels (4 by 4 at the edge "
      "when the GPU has it). The edges of things stay sharp. This can take "
      "time off a GPU that is slow for each pixel. With an eye tracker (for "
-     "example Quest Pro) the middle follows your gaze. With no eye tracker "
-     "(for example Quest 3) it stays in the middle of the view. It needs "
-     "the Vulkan renderer, or the headset session with Vulkan, and a GPU "
-     "with variable rate shading."},
+     "example Steam Frame or Quest Pro) the middle follows your gaze. With "
+     "no eye tracker (for example Quest 3) it stays in the middle of the "
+     "view. It needs the Vulkan renderer, or the headset session with "
+     "Vulkan, and a GPU with variable rate shading."},
     {kSlider, "foveation_inner_deg", "All shades within", "10|45|1| degrees",
      22,
      "How far the part with all shades goes from the middle to each side. "
@@ -146,6 +146,24 @@ inline const Setting kSettings[] = {
      "Moves the sharp middle down from straight ahead, for example to the "
      "land and the hands at your waist. Only with no eye tracker: a middle "
      "that follows your gaze stays where you look."},
+    {kValues, "foveation_gaze", "The middle follows",
+     "Your gaze=1|Your gaze, OpenXR only=2|Your gaze, OSC only=3|"
+     "Straight ahead=0", 1,
+     "With an eye tracker the middle of both kinds follows your gaze. The "
+     "mod reads the gaze from the headset (OpenXR), and else from OSC "
+     "messages of the eye tracker. Steam Frame: in the SteamVR settings, "
+     "Steam Link, let Steam Link share the eye tracking with other apps. "
+     "For OSC, send it to 127.0.0.1 and the port below. Other eye trackers "
+     "can send OSC with a tool such as VRCFaceTracking."},
+    {kInt, "eye_osc_port", "OSC port of the gaze", nullptr, 9000,
+     "The UDP port on which the mod receives the gaze as OSC (the addresses "
+     "/tracking/eye/... of VRChat). Use the same port in the program that "
+     "sends the gaze. VRChat uses 9000 too: when VRChat runs, give the mod "
+     "and the sender another port. 0 receives nothing."},
+    {kBool, "eye_osc_any", "Gaze from OSC of other devices", nullptr, 0,
+     "Receive the OSC of the gaze from other devices of the network, for "
+     "example from a program that runs on the headset. Off: only from this "
+     "PC (127.0.0.1). Windows can ask if the mod may use the network."},
     {kBool, "foveation_show", "Show the parts with fewer details", nullptr, 0,
      "A blue colour over the parts with fewer shades or fewer pixels, so "
      "you can find the settings that you like. Turn it off to play. With "

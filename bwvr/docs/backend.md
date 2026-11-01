@@ -3346,14 +3346,50 @@ A GPU with no rate of 4 by 4 has 2 by 2 outside too.
 `foveation_inner_deg` and `foveation_outer_deg` replace the degrees of the
 level.
 
-**The centre of the fovea.** With an eye tracker (`XR_EXT_eye_gaze_interaction`,
-for example Quest Pro) the centre is the gaze of the frame: the session reads
-the pose of the gaze in the space of the head at the display time of the
-frame (`XrScreen::EyeGaze`), and the renderer makes a new map when the centre
-goes to another texel of the map. With no eye tracker (for example Quest 3),
-or with `foveation_gaze=0`, the centre is straight ahead: the eye picture is
-the symmetric view of the game, so straight ahead is the middle of the
-picture. The log of the session says which of the two the headset has.
+**The centre of the fovea.** With an eye tracker the centre is the gaze of
+the frame, and the renderer makes a new map when the centre goes to another
+texel of the map. With no eye tracker (for example Quest 3), or with
+`foveation_gaze=0`, the centre is straight ahead: the eye picture is the
+symmetric view of the game, so straight ahead is the middle of the picture.
+Foveated resolution has the same centre. The mod reads the gaze when
+`foveation` or `fovea_res` is on, or with `test_keys=1`.
+
+The gaze has two sources. Each frame takes the first that has a gaze:
+
+1. **OpenXR** (`XR_EXT_eye_gaze_interaction`): the session reads the pose of
+   the gaze in the space of the head at the display time of the frame
+   (`XrScreen::EyeGaze`). Each runtime with an eye tracker that has this
+   extension gives it, for example the Quest Pro and the Steam Frame. The
+   Steam Frame gives it only after the player lets Steam Link share the eye
+   tracking with other apps (the SteamVR settings, Steam Link). The log of
+   the session says if the runtime has the extension and if the headset has
+   an eye tracker.
+2. **OSC** (`eye_osc.cpp`, `osc_gaze_math.h`, checks in
+   `osc_gaze_checks.h`): a thread of the mod receives OSC messages over UDP
+   on `eye_osc_port` (9000), on 127.0.0.1, or on all addresses of the PC
+   with `eye_osc_any=1`. The mod reads the addresses of the eye tracking of
+   VRChat, which Steam Link of the Steam Frame and tools of other eye
+   trackers (for example VRCFaceTracking) send:
+   `/tracking/eye/CenterVec`, `CenterVecFull`, `LeftRightVec` (the mean of
+   the two eyes), `CenterPitchYaw`, `CenterPitchYawDist` and
+   `LeftRightPitchYaw`, also in a bundle. A vector is in the space of the
+   head of Unity (z forward), a pitch and a yaw are degrees of Unity (a
+   positive pitch looks down). A gaze is used for 250 ms after it came.
+   This source needs no headset session, so a desktop run can show it. The
+   log names each new address that comes (at most 16), and each 450 frames
+   the count of the packets, the messages and the gazes while a sender
+   sends.
+
+`foveation_gaze` picks the sources: 1 both (the default), 2 OpenXR only,
+3 OSC only, 0 no gaze. A test key, Ctrl Shift O, goes through 1, 2, 3 and
+0. With `test_keys=1` the session asks for the extension and the thread of
+OSC starts for each value, so that the key can change between them.
+
+On a Steam Frame that streams from the PC, set the target of the OSC of
+Steam Link (the SteamVR settings, Steam Link, OSC) to 127.0.0.1 and the
+port of `eye_osc_port`. VRChat also uses port 9000: when VRChat or another
+receiver of OSC runs, give the mod and the sender another port. The log
+says when the port is not free.
 
 **The map** (`foveation_math.h`, checks in `foveation_checks.h`) has one byte
 for each texel of the attachment (8 by 8 pixels on a Radeon RX 7900 XTX) and
@@ -3400,7 +3436,20 @@ The cause is not known.
 
 In a headset session (`foveation=3`, dxwrapper with the eye
 pictures of the renderer) the map was in each walk, and the parts with 2 by
-2 looked the same as with the full rate. Not run: an eye tracker.
+2 looked the same as with the full rate.
+
+Open, and only a headset can show it:
+
+- The gaze of OpenXR with an eye tracker is not run.
+- The gaze of OSC is run on the desktop with a test sender. The OSC of
+  Steam Link of a Steam Frame is not run: which of the addresses it sends,
+  and if the signs of its pitch and yaw are those of VRChat. With
+  `foveation_show=1` the marks must move where the player looks.
+- The host of `xr_bridge=1` takes the frames of Direct3D 11 only, so a
+  game in Proton on the Steam Frame has no eye pictures of the Vulkan
+  renderer and no foveated rendering.
+- The headset app for Android sends no gaze (`android.md`, "The input
+  channel").
 
 ## Foveated resolution
 
@@ -5133,6 +5182,7 @@ in front. The mod reads the keys and never takes them from the game.
 | Shift U | `test_keys=1` | A walk of one walk with the eyes of the Vulkan renderer goes to the renderer alone, with no draw for Direct3D 9, or Direct3D 9 draws it too, from the next walk. A long pulse and a short pulse (`vk_only`, "The Vulkan renderer"). Ctrl must be up |
 | Shift I | `test_keys=1` | A texture that a walk reads again goes to the GPU in the submit of the walk, with no wait, or at once with a wait for the GPU, from the next walk. A long pulse and a short pulse (`vk_upload_queue`, "The Vulkan renderer"). Ctrl must be up |
 | Shift O | `test_keys=1` | Foveated rendering goes on, then on with the colour over the coarse parts (`foveation_show`), then off, from the next walk. A long pulse when it is on, a short pulse when it is off (`foveation`, "Foveated rendering"). Ctrl must be up |
+| Ctrl Shift O | `test_keys=1` | The source of the centre of the fovea goes through 1 (OpenXR, else OSC), 2 (OpenXR only), 3 (OSC only) and 0 (straight ahead), from the next frame. A short pulse for 0 (`foveation_gaze`, "Foveated rendering") |
 | Shift P | `test_keys=1` | Foveated resolution goes on and off, from the next walk. A long pulse and a short pulse (`fovea_res`, "Foveated resolution"). Ctrl must be up |
 | Shift T | `test_keys=1` | With `backend=vulkan`: a walk with no clear of the whole target starts with the picture of the walk before, or black, from the next walk. A long pulse and a short pulse (`vk_keep_picture`, "The picture of the walk before"). Ctrl must be up |
 | Shift E | `test_keys=1` | With the Vulkan renderer: a draw with a texture on texture stage 1 gets that stage (the light maps of the Temple), or the renderer makes stage 0 alone, from the next walk. A long pulse and a short pulse (`vk_stage1`, "The second stage"). Ctrl must be up |
@@ -5314,7 +5364,9 @@ keys that the launcher sets.
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |
 | `foveation_inner_deg`, `foveation_outer_deg` | 0, 0 | The degrees of the full rate and of 2 by 2 around the centre of the fovea. 0 takes the degrees of the level. See "Foveated rendering" |
 | `foveation_show` | 0 | A test key: 1 a colour over the coarse parts of the eye pictures, blue for 2 by 2 and red for 4 by 4. Shift O goes to it too. See "Foveated rendering" |
-| `foveation_gaze` | 1 | 1 the centre of the fovea follows the gaze of an eye tracker when the headset has one (`XR_EXT_eye_gaze_interaction`), 0 it stays straight ahead. See "Foveated rendering" |
+| `foveation_gaze` | 1 | The source of the centre of the fovea of `foveation` and `fovea_res`. 1 the gaze of OpenXR (`XR_EXT_eye_gaze_interaction`), else the gaze of OSC. 2 the gaze of OpenXR only. 3 the gaze of OSC only. 0 straight ahead. A test key: Ctrl Shift O. See "Foveated rendering" |
+| `eye_osc_port` | 9000 | The UDP port of the gaze of OSC. 0 receives nothing. See "Foveated rendering" |
+| `eye_osc_any` | 0 | 1 the gaze of OSC comes from all addresses of the PC, 0 from 127.0.0.1 only. See "Foveated rendering" |
 | `fovea_res` | 0 | 1 each eye picture of the Vulkan renderer comes from an outer image and a centre image with their own resolutions. A test key: Shift P. See "Foveated resolution" |
 | `fovea_res_outer_pct`, `fovea_res_center_pct`, `fovea_res_center_deg` | 50, 100, 25 | The resolution of the outer image and of the centre image in percent on each side, and the degrees of the centre on each side. See "Foveated resolution" |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |

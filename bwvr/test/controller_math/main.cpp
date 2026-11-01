@@ -3569,6 +3569,7 @@ void CreatureChecks() {
 #include "vk_prim_checks.h"
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
+#include "osc_gaze_checks.h"
 #include "menu_checks.h"
 #include "vk_platform_checks.h"
 #include "stream_checks.h"
@@ -3998,6 +3999,7 @@ int main() {
   vk_prim_checks::VkPrimChecks();
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
+  osc_gaze_checks::OscGazeChecks();
   menu_checks::AllMenuChecks();
   vk_platform_checks::VkPlatformChecks();
   stream_checks::StreamChecks();

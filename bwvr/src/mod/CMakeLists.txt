@@ -3,6 +3,7 @@ add_library(bwvr_mod SHARED
     ../proxy/ddraw_proxy.cpp
     mod_main.cpp
     vr_start.cpp
+    eye_osc.cpp
     frame_source.cpp
     stereo.cpp
     one_walk.cpp
@@ -116,12 +117,14 @@ set_target_properties(bwvr_mod PROPERTIES
     PREFIX ""
 )
 
-target_link_libraries(bwvr_mod PRIVATE minhook bwvr_vr d3d9 d3d11)
+target_link_libraries(bwvr_mod PRIVATE minhook bwvr_vr d3d9 d3d11 ws2_32)
 
 # Windows loads d3d11.dll and dxgi.dll at the first call of the mod, and not
 # at the start of the game. So backend=vulkan with vulkan_only=1 loads no
-# Direct3D of the mod (docs/backend.md, "Only Vulkan").
-target_link_options(bwvr_mod PRIVATE /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll)
+# Direct3D of the mod (docs/backend.md, "Only Vulkan"). ws2_32.dll loads
+# only when the mod receives the gaze of OSC (eye_osc.cpp).
+target_link_options(bwvr_mod PRIVATE /DELAYLOAD:d3d11.dll /DELAYLOAD:dxgi.dll
+    /DELAYLOAD:ws2_32.dll)
 target_link_libraries(bwvr_mod PRIVATE delayimp)
 
 # The C headers of Vulkan (vk_core.cpp). The mod loads vulkan-1.dll at run

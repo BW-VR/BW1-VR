@@ -42,11 +42,17 @@
 //                                          to <name>-p<eye>.bmp
 //   <frame> recenter                       the LOCAL space recenters (an
 //                                          event of a change of the space)
+//   <frame> gaze <x> <y>                   the eye tracker looks to the
+//                                          tangents x (right) and y (up) in
+//                                          the space of the head. Before the
+//                                          first gaze the eye tracker gives
+//                                          no pose
 //   <frame> exit                           the runtime ends the session
 //
 // The head stands still at the origin of the LOCAL space: each eye is 32 mm
 // to its side, with the angles of view below (xrLocateViews). The grip pose
-// of a hand is its aim pose.
+// of a hand is its aim pose. The headset has an eye tracker
+// (XR_EXT_eye_gaze_interaction) when the app asks for the extension.
 //
 // <frame> is a frame of the script. The script counts the frames of the
 // session, but it stops at a hold, so after a hold the frames of the script
@@ -186,6 +192,8 @@ void LoadScript() {
       sscanf(rest, "%15s %f", hand, &s.a);
     } else if (s.what == "stick") {
       sscanf(rest, "%15s %f %f", hand, &s.a, &s.b);
+    } else if (s.what == "gaze") {
+      sscanf(rest, "%f %f", &s.a, &s.b);
     } else if (s.what == "capture" || s.what == "eyes" || s.what == "quads" ||
                s.what == "hold") {
       sscanf(rest, "%63s", name);
@@ -212,6 +220,7 @@ struct Action {
   XrActionType type;
   std::vector<XrPath> subaction;
   std::vector<XrPath> bound;  // the paths of the touch profile
+  bool gaze = false;  // bound to the gaze of the eye tracker
 };
 
 struct Space {
@@ -287,6 +296,10 @@ Session* g_session = nullptr;
 long g_faults = 0;
 // The recenters of the script that the app did not poll yet.
 int g_recenters_due = 0;
+// The gaze of the script: the orientation of the pose of the eye tracker in
+// the space of the head, and true after the first word gaze.
+bool g_gaze_set = false;
+XrQuaternionf g_gaze = {0.0f, 0.0f, 0.0f, 1.0f};
 // The views of the head: the angles left, right, up and down in radians.
 const float kFov[4] = {-0.9425f, 0.8203f, 0.8901f, -0.9599f};
 const float kEyeX = 0.032f;
@@ -610,6 +623,16 @@ void RunScript(Session* s) {
     } else if (st.what == "recenter") {
       ++g_recenters_due;
       Report("frame %ld recenter", s->frame);
+    } else if (st.what == "gaze") {
+      // The turn from -z to the direction (a, b, -1): a yaw about y, then a
+      // pitch about x.
+      const float yaw = -atanf(st.a);
+      const float pitch = atanf(st.b / sqrtf(1.0f + st.a * st.a));
+      const float cy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f);
+      const float cp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
+      g_gaze = {cy * sp, sy * cp, -sy * sp, cy * cp};
+      g_gaze_set = true;
+      Report("frame %ld gaze %.3f %.3f", s->frame, st.a, st.b);
     } else if (st.what == "exit" && !s->exit_asked) {
       s->exit_asked = true;
       Report("frame %ld exit", s->frame);
@@ -646,11 +669,12 @@ XrResult XRAPI_CALL EnumerateInstanceExtensionProperties(
   static const char* kNames[] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
                                  XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
                                  XR_KHR_LOADER_INIT_EXTENSION_NAME,
-                                 XR_KHR_LOADER_INIT_ANDROID_EXTENSION_NAME};
-  *count = 4;
+                                 XR_KHR_LOADER_INIT_ANDROID_EXTENSION_NAME,
+                                 XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME};
+  *count = 5;
   if (capacity == 0) return XR_SUCCESS;
-  if (capacity < 4) return XR_ERROR_SIZE_INSUFFICIENT;
-  for (uint32_t i = 0; i < 4; ++i) {
+  if (capacity < 5) return XR_ERROR_SIZE_INSUFFICIENT;
+  for (uint32_t i = 0; i < 5; ++i) {
     strcpy(out[i].extensionName, kNames[i]);
     out[i].extensionVersion = 1;
   }
@@ -724,6 +748,12 @@ XrResult XRAPI_CALL GetSystemProperties(XrInstance, XrSystemId, XrSystemProperti
   p->graphicsProperties.maxLayerCount = 16;
   p->trackingProperties.orientationTracking = XR_TRUE;
   p->trackingProperties.positionTracking = XR_TRUE;
+  for (XrBaseOutStructure* n = static_cast<XrBaseOutStructure*>(p->next); n != nullptr; n = n->next) {
+    if (n->type == XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT) {
+      reinterpret_cast<XrSystemEyeGazeInteractionPropertiesEXT*>(n)->supportsEyeGazeInteraction = XR_TRUE;
+      Report("call xrGetSystemProperties eye gaze");
+    }
+  }
   return XR_SUCCESS;
 }
 
@@ -922,6 +952,14 @@ XrResult XRAPI_CALL LocateSpace(XrSpace space, XrSpace, XrTime, XrSpaceLocation*
   }
   Session* s = g_session;
   if (s == nullptr) return XR_SUCCESS;
+  if (sp->of != nullptr && sp->of->gaze) {
+    if (!g_gaze_set) return XR_SUCCESS;
+    where->pose.position = {0.0f, 0.0f, 0.0f};
+    where->pose.orientation = g_gaze;
+    where->locationFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
+                           XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+    return XR_SUCCESS;
+  }
   const int hand = HandOf(g_instance, sp->subaction);
   if (hand < 0 || (!BoundTo(sp->of, g_instance, hand, "/input/aim/pose") &&
                    !BoundTo(sp->of, g_instance, hand, "/input/grip/pose"))) {
@@ -1057,6 +1095,17 @@ XrResult XRAPI_CALL SuggestBindings(XrInstance instance, const XrInteractionProf
   Instance* in = reinterpret_cast<Instance*>(instance);
   const std::string profile = NameOf(in, info->interactionProfile);
   Report("call xrSuggestInteractionProfileBindings %s %u", profile.c_str(), info->countSuggestedBindings);
+  if (profile == "/interaction_profiles/ext/eye_gaze_interaction") {
+    for (uint32_t i = 0; i < info->countSuggestedBindings; ++i) {
+      const std::string p = NameOf(in, info->suggestedBindings[i].binding);
+      if (p != "/user/eyes_ext/input/gaze_ext/pose") {
+        Fault("the eye gaze profile has no path %s", p.c_str());
+        return XR_ERROR_PATH_UNSUPPORTED;
+      }
+      reinterpret_cast<Action*>(info->suggestedBindings[i].action)->gaze = true;
+    }
+    return XR_SUCCESS;
+  }
   if (profile != "/interaction_profiles/oculus/touch_controller") return XR_SUCCESS;
   // The inputs of a Touch controller. A path that the profile has not is a
   // fault of the app.

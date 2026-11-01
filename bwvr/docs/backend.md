@@ -3359,7 +3359,9 @@ The gaze has two sources. Each frame takes the first that has a gaze:
 1. **OpenXR** (`XR_EXT_eye_gaze_interaction`): the session reads the pose of
    the gaze in the space of the head at the display time of the frame
    (`XrScreen::EyeGaze`). Each runtime with an eye tracker that has this
-   extension gives it, for example the Quest Pro and the Steam Frame. The
+   extension gives it, for example the Quest Pro and the Steam Frame. In
+   the headset app the app reads it and gives it to the mod through the
+   input channel (`android.md`, "The input channel"). The
    Steam Frame gives it only after the player lets Steam Link share the eye
    tracking with other apps (the SteamVR settings, Steam Link). The log of
    the session says if the runtime has the extension and if the headset has
@@ -3448,8 +3450,9 @@ Open, and only a headset can show it:
 - The host of `xr_bridge=1` takes the frames of Direct3D 11 only, so a
   game in Proton on the Steam Frame has no eye pictures of the Vulkan
   renderer and no foveated rendering.
-- The headset app for Android sends no gaze (`android.md`, "The input
-  channel").
+- The headset app for Android reads the gaze of OpenXR and gives it to the
+  mod through the input channel (`android.md`, "The input channel"). It is
+  run with the test runtime in the emulator, not with an eye tracker.
 
 ## Foveated resolution
 

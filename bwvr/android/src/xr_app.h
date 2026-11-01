@@ -88,6 +88,15 @@ class XrApp {
   void SetInputLive(bool on) { input_live_ = on; }
   void InputSlot(input_channel::SlotData* out);
 
+  // THE GAZE OF AN EYE TRACKER (XR_EXT_eye_gaze_interaction, docs/android.md,
+  // "The input channel"). Call SetEyeGaze(true) before Start: the instance
+  // then asks for the extension when the runtime lists it, and the session
+  // has an action for the gaze when the headset has an eye tracker. On Meta
+  // Horizon OS the app asks for the permission of the eye tracking.
+  // InputSlot gives the gaze in the space of the head (x right, y up, -z
+  // forward) at the display time of the frame, with kGazeValid.
+  void SetEyeGaze(bool on) { gaze_wanted_ = on; }
+
   // THE MENU QUAD. Shown (the default): the menu and the cursor go out over
   // each other layer. Not shown (the game runs and the player plays): no
   // menu quad and no cursor.
@@ -345,6 +354,15 @@ class XrApp {
   void ReadProfiles();
   XrPath hands_[2] = {XR_NULL_PATH, XR_NULL_PATH};
   XrSpace aim_space_[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+  // The gaze (SetEyeGaze).
+  bool gaze_wanted_ = false;
+  bool gaze_extension_ = false;  // the instance has the extension
+  bool gaze_supported_ = false;  // and the headset has an eye tracker
+  XrAction gaze_ = XR_NULL_HANDLE;
+  XrSpace gaze_space_ = XR_NULL_HANDLE;
+  XrSpace view_ = XR_NULL_HANDLE;  // the VIEW space: the space of the head
+  uint64_t gaze_frames_ = 0;  // the slots with a gaze, for the log
+  uint64_t gaze_slots_ = 0;
 
   XrFrameState frame_ = {XR_TYPE_FRAME_STATE};
   Gpu gpu_;

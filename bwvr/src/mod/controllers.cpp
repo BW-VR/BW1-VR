@@ -4546,7 +4546,7 @@ void FingersToggle(const char* by) {
 }
 
 // The test keys of the fit and of finger tracking, once a frame. Ctrl, Shift
-// and H: the fit off and on. Ctrl, Shift and F: finger tracking off and on.
+// and J: the fit off and on. Ctrl, Shift and F: finger tracking off and on.
 // A long pulse for on and a short pulse for off. The frames of
 // hand_fit_test_flips and finger_tracking_test_flips act as the keys do, and
 // a frame counts as a step of the script counts it.
@@ -4566,14 +4566,14 @@ void PollHandFitKeys() {
   if (!g_fit.test_keys) return;
   const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                           (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-  const bool fit_down = ctrl_shift && (GetAsyncKeyState('H') & 0x8000) != 0;
+  const bool fit_down = ctrl_shift && (GetAsyncKeyState('J') & 0x8000) != 0;
   const bool fingers_down =
       ctrl_shift && (GetAsyncKeyState('F') & 0x8000) != 0;
   const bool fit_pressed = fit_down && !g_fit.fit_key_before;
   const bool fingers_pressed = fingers_down && !g_fit.fingers_key_before;
   g_fit.fit_key_before = fit_down;
   g_fit.fingers_key_before = fingers_down;
-  if (fit_pressed && GameInFront()) FitToggle("test key (Ctrl, Shift and H)");
+  if (fit_pressed && GameInFront()) FitToggle("test key (Ctrl, Shift and J)");
   if (fingers_pressed && GameInFront()) {
     FingersToggle("test key (Ctrl, Shift and F)");
   }

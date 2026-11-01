@@ -649,13 +649,13 @@ each key at 0 the hands are on the grip pose of the runtime.
 | `hand_fit_pitch_deg` | 0 | Turns the front of the hands up (plus) or down. -90 to 90. The launcher row "Hand fit: tilt up", -45 to 45 degrees |
 | `hand_fit_yaw_deg` | 0 | Turns the front of the hands toward the other hand (plus). The launcher row "Hand fit: turn in" |
 | `hand_fit_roll_deg` | 0 | Turns the top of the hands toward the other hand (plus), about the line of the fingers. The launcher row "Hand fit: roll in" |
-| `hand_fit_test_flips` | | Test key. Up to 8 frames, with commas between them. At each one the fit goes off or on, as Ctrl, Shift and H do. A frame counts as a step of the script counts it |
+| `hand_fit_test_flips` | | Test key. Up to 8 frames, with commas between them. At each one the fit goes off or on, as Ctrl, Shift and J do. A frame counts as a step of the script counts it |
 
 The six rows are in the launcher of the PC, in the group "Controllers". The
 menu of the headset app does not show them, because its page has room for
 10 rows. It keeps their values in the ini.
 
-With `test_keys=1`, **Ctrl, Shift and H** turn the fit off and on while the
+With `test_keys=1`, **Ctrl, Shift and J** turn the fit off and on while the
 game runs. The pointing controller gives a long pulse for on and a short
 pulse for off.
 

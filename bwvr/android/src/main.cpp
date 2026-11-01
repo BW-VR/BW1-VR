@@ -45,6 +45,7 @@
 #include "menu_painter.h"
 #include "picture_ring.h"
 #include "play_rules.h"
+#include "../../src/mod/osc_gaze_math.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
@@ -1775,6 +1776,24 @@ void android_main(android_app* android) {
                       : "Play saves and does not start the game: the app has no Wine, or "
                         "play_game=0");
   app.xr.SetInputLive(input_live || app.can_play);
+  // THE GAZE OF AN EYE TRACKER for the fovea of the mod (docs/backend.md,
+  // "Foveated rendering"): with foveation or fovea_res on (or test_keys=1,
+  // whose keys can turn them on) and a source of foveation_gaze that reads
+  // OpenXR.
+  {
+    const osc_gaze_math::Source source = osc_gaze_math::SourceOf(
+        app.ini.GetInt("bwvr", "foveation_gaze", 1));
+    const bool fovea = app.ini.GetInt("bwvr", "foveation", 0) != 0 ||
+                       app.ini.GetInt("bwvr", "fovea_res", 0) != 0 ||
+                       app.ini.GetInt("bwvr", "test_keys", 0) != 0;
+    const bool gaze = fovea && (osc_gaze_math::UsesOpenXr(source) ||
+                                app.ini.GetInt("bwvr", "test_keys", 0) != 0);
+    app.xr.SetEyeGaze(gaze);
+    AppLog("gaze         : foveation_gaze=%d. %s", static_cast<int>(source),
+           gaze ? "The app reads the gaze of an eye tracker for the fovea"
+                : "The app reads no gaze: no foveated rendering, or a source "
+                  "with no OpenXR");
+  }
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
                            kCursorPixels);
 

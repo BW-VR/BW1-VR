@@ -442,6 +442,7 @@ try {
     $pageName = $(if ($DisplayRate) { 'rate' } else { 'moving' })
     Set-Content -LiteralPath $script -Encoding ascii -Value @(
         "$(30 + $T) recenter",
+        "$(35 + $T) gaze 0.4 0.2",
         "$(40 + $T) capture start",
         "$(50 + $T) point right $L 800 $groupY",
         "$(60 + $T) capture point",
@@ -490,7 +491,9 @@ try {
     $ini = Join-Path $Out 'bwvr.ini.pushed'
     # The pulse of the test goes into the ring after the script points at
     # the menu, so the hand has a pulse of each kind.
-    $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1', 'input_live=1', "input_live_test_pulse=$(100 + $T)")
+    # foveation=1: the app reads the gaze of the eye tracker of the runtime
+    # (the script word gaze) into the slots of the input channel.
+    $iniLines = @('[bwvr]', 'snap_turn=2', 'menu_capture=1', 'input_live=1', "input_live_test_pulse=$(100 + $T)", 'foveation=1')
     if ($Stream) { $iniLines += 'stream_replay=1' }
     if ($Live) { $iniLines += @('stream_live=1', 'stream_live_feed=1', "stream_live_feed_ms=$FeedMs") }
     if ($NoLayers) { $iniLines += 'stream_layers=0' }
@@ -1005,6 +1008,14 @@ public static class CardBmp {
     Expect ($log -match "input        : input_live_test_pulse: a pulse of 80 ms at 0\.50 for the right hand goes into the ring at slot $(100 + $T)" -and
             $log -match 'input        : a pulse of the mod, 80 ms at 0\.50 for the right hand' -and
             $report -match 'pulse /user/hand/right amplitude 0\.50 duration 80000000') 'a pulse of the ring of the events reaches the runtime, 80 ms at 0.50'
+
+    # THE GAZE OF THE EYE TRACKER (XR_EXT_eye_gaze_interaction, foveation=1).
+    Expect ($report -match 'call xrCreateInstance [^\r\n]*XR_EXT_eye_gaze_interaction') 'the app asks for XR_EXT_eye_gaze_interaction (foveation=1)'
+    Expect ($report -match 'call xrSuggestInteractionProfileBindings /interaction_profiles/ext/eye_gaze_interaction 1') 'the app binds the gaze of the eye tracker'
+    Expect ($log -match 'eye tracking: the headset has an eye tracker') 'the app found the eye tracker of the runtime'
+    Expect ($log -match 'the first gaze of the eye tracker: [-0-9. ]+, tangents 0\.400 0\.200') 'the first gaze of the slots is the gaze of the script (tangents 0.4 and 0.2)'
+    $gazeLine = [regex]::Match($log, '(\d+) of (\d+) slots had the gaze of the eye tracker')
+    Expect ($gazeLine.Success -and [int]$gazeLine.Groups[1].Value -gt 0) "slots of the input channel have the gaze ($($gazeLine.Value))"
 
     Expect ($log -match 'xr           : runtime bwvr test runtime') 'the app logged the runtime'
     Expect ($log -match 'the headset asks for 2064 by 2208') 'the app read the size of the eyes'

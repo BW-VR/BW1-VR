@@ -80,6 +80,45 @@ XrPath Path(XrInstance instance, const char* text) {
   return path;
 }
 
+// THE PERMISSION OF THE EYE TRACKING of Meta Horizon OS. With no permission
+// the runtime gives no gaze. The activity asks the player one time: the
+// answer counts from the next start of the app. Other systems do not know
+// this permission, and the request does nothing there.
+const char kEyePermission[] = "com.oculus.permission.EYE_TRACKING";
+
+void AskEyePermission(ANativeActivity* activity) {
+  JNIEnv* env = nullptr;
+  if (activity->vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
+  jclass type = env->GetObjectClass(activity->clazz);
+  jmethodID check = env->GetMethodID(type, "checkSelfPermission",
+                                     "(Ljava/lang/String;)I");
+  jmethodID request = env->GetMethodID(type, "requestPermissions",
+                                       "([Ljava/lang/String;I)V");
+  if (check == nullptr || request == nullptr) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(type);
+    AppLog("xr           : the activity has no request of a permission");
+    return;
+  }
+  jstring name = env->NewStringUTF(kEyePermission);
+  const jint state = env->CallIntMethod(activity->clazz, check, name);
+  if (state == 0) {  // PackageManager.PERMISSION_GRANTED
+    AppLog("xr           : the app has the permission %s", kEyePermission);
+  } else {
+    jobjectArray names = env->NewObjectArray(
+        1, env->FindClass("java/lang/String"), name);
+    env->CallVoidMethod(activity->clazz, request, names, 1);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(names);
+    AppLog("xr           : the app asks for the permission %s. On Meta "
+           "Horizon OS the gaze comes after the player allows it",
+           kEyePermission);
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  env->DeleteLocalRef(name);
+  env->DeleteLocalRef(type);
+}
+
 }  // namespace
 
 bool XrApp::Start(ANativeActivity* activity, uint32_t menu_width,
@@ -132,6 +171,9 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
     for (int i = 0; i < 6; ++i) {
       if (strcmp(e.extensionName, kFoveation[i]) == 0) foveation[i] = true;
     }
+    if (strcmp(e.extensionName, XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME) == 0) {
+      gaze_extension_ = gaze_wanted_;
+    }
     if (strcmp(e.extensionName, XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME) == 0) {
       vulkan2 = true;
     }
@@ -165,11 +207,14 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   // none (for example Lepton of the Steam Frame) uses its own rate.
   // XR_KHR_convert_timespec_time only when the runtime lists it: the time
   // log takes the display time of a frame on CLOCK_MONOTONIC from it.
-  const char* names[4] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
+  // XR_EXT_eye_gaze_interaction only when the runtime lists it and the fovea
+  // wants the gaze.
+  const char* names[5] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
                           XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};
   uint32_t name_count = 2;
   if (display_rate_ext_) names[name_count++] = XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME;
   if (timespec_ext_) names[name_count++] = XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME;
+  if (gaze_extension_) names[name_count++] = XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME;
   XrInstanceCreateInfoAndroidKHR android_info = {
       XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
   android_info.applicationVM = activity->vm;
@@ -203,6 +248,9 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   system.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
   if (!Ok(xrGetSystem(instance_, &system, &system_), "xrGetSystem")) return false;
   XrSystemProperties sp = {XR_TYPE_SYSTEM_PROPERTIES};
+  XrSystemEyeGazeInteractionPropertiesEXT gaze = {
+      XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
+  if (gaze_extension_) sp.next = &gaze;
   xrGetSystemProperties(instance_, system_, &sp);
   AppLog("xr           : system %s, vendor 0x%X", sp.systemName, sp.vendorId);
   // THE SIZE OF THE RUNTIME (docs/android.md, "The size of the eye
@@ -243,6 +291,19 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
            "the system: %s",
            types > 0 ? list : "none", props);
   }
+  gaze_supported_ =
+      gaze_extension_ && gaze.supportsEyeGazeInteraction == XR_TRUE;
+  if (gaze_wanted_) {
+    AppLog("xr           : eye tracking: %s",
+           gaze_supported_
+               ? "the headset has an eye tracker. The fovea follows the gaze"
+           : gaze_extension_
+               ? "the runtime has XR_EXT_eye_gaze_interaction, but the headset "
+                 "has no eye tracker. The fovea stays straight ahead"
+               : "the runtime has no XR_EXT_eye_gaze_interaction, so the fovea "
+                 "stays straight ahead");
+  }
+  if (gaze_supported_) AskEyePermission(activity);
 
   uint32_t views = 0;
   xrEnumerateViewConfigurationViews(instance_, system_,
@@ -772,6 +833,28 @@ bool XrApp::MakeActions() {
            {secondary_, "/user/hand/left/input/b/click"},
            {secondary_, "/user/hand/right/input/b/click"}});
 
+  // THE GAZE: an action with no hand, on the profile of the eye tracker.
+  if (gaze_supported_) {
+    XrActionCreateInfo a = {XR_TYPE_ACTION_CREATE_INFO};
+    strcpy(a.actionName, "eye_gaze");
+    strcpy(a.localizedActionName, "Eye gaze");
+    a.actionType = XR_ACTION_TYPE_POSE_INPUT;
+    bool ok = Ok(xrCreateAction(action_set_, &a, &gaze_), "eye_gaze");
+    if (ok) {
+      XrActionSuggestedBinding binding = {
+          gaze_, Path(instance_, "/user/eyes_ext/input/gaze_ext/pose")};
+      XrInteractionProfileSuggestedBinding info = {
+          XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+      info.interactionProfile =
+          Path(instance_, "/interaction_profiles/ext/eye_gaze_interaction");
+      info.countSuggestedBindings = 1;
+      info.suggestedBindings = &binding;
+      ok = Ok(xrSuggestInteractionProfileBindings(instance_, &info),
+              "xrSuggestInteractionProfileBindings(eye gaze)");
+    }
+    if (!ok) gaze_supported_ = false;
+  }
+
   XrSessionActionSetsAttachInfo attach = {XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
   attach.countActionSets = 1;
   attach.actionSets = &action_set_;
@@ -793,6 +876,20 @@ bool XrApp::MakeActions() {
     if (!Ok(xrCreateActionSpace(session_, &space, &grip_space_[h]),
             "xrCreateActionSpace(grip)")) {
       return false;
+    }
+  }
+  if (gaze_supported_) {
+    XrActionSpaceCreateInfo space = {XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    space.action = gaze_;
+    space.poseInActionSpace.orientation.w = 1.0f;
+    XrReferenceSpaceCreateInfo view = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    view.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    view.poseInReferenceSpace.orientation.w = 1.0f;
+    if (!Ok(xrCreateActionSpace(session_, &space, &gaze_space_),
+            "xrCreateActionSpace(eye gaze)") ||
+        !Ok(xrCreateReferenceSpace(session_, &view, &view_),
+            "xrCreateReferenceSpace(view)")) {
+      gaze_supported_ = false;
     }
   }
   if (input_live_) {
@@ -2798,6 +2895,42 @@ void XrApp::InputSlot(input_channel::SlotData* out) {
     }
   }
 
+  // THE GAZE in the space of the head at the display time, as
+  // XrScreen::EyeGaze of the PC reads it.
+  if (synced_ && gaze_supported_ && frame_.predictedDisplayTime != 0) {
+    ++gaze_slots_;
+    XrActionStateGetInfo get = {XR_TYPE_ACTION_STATE_GET_INFO};
+    get.action = gaze_;
+    XrActionStatePose state = {XR_TYPE_ACTION_STATE_POSE};
+    XrSpaceLocation where = {XR_TYPE_SPACE_LOCATION};
+    if (XR_SUCCEEDED(xrGetActionStatePose(session_, &get, &state)) &&
+        state.isActive &&
+        XR_SUCCEEDED(xrLocateSpace(gaze_space_, view_,
+                                   frame_.predictedDisplayTime, &where)) &&
+        (where.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+      // The forward axis (-z) turned by the orientation of the gaze.
+      const XrQuaternionf& q = where.pose.orientation;
+      out->gaze[0] = -2.0f * (q.x * q.z + q.w * q.y);
+      out->gaze[1] = -2.0f * (q.y * q.z - q.w * q.x);
+      out->gaze[2] = -(1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+      out->flags |= ic::kGazeValid;
+      if (++gaze_frames_ == 1) {
+        AppLog("xr           : the first gaze of the eye tracker: %.4f %.4f "
+               "%.4f, tangents %.3f %.3f",
+               out->gaze[0], out->gaze[1], out->gaze[2],
+               out->gaze[2] < -1e-3f ? out->gaze[0] / -out->gaze[2] : 0.0f,
+               out->gaze[2] < -1e-3f ? out->gaze[1] / -out->gaze[2] : 0.0f);
+      }
+    }
+    // One line at the first slots, then one each 4500 slots.
+    if (gaze_slots_ == 90 || gaze_slots_ % 4500 == 0) {
+      AppLog("xr           : %llu of %llu slots had the gaze of the eye "
+             "tracker",
+             static_cast<unsigned long long>(gaze_frames_),
+             static_cast<unsigned long long>(gaze_slots_));
+    }
+  }
+
   // THE HANDS, as XrScreen::SyncInput of the PC reads them. With no input
   // focus each hand is not active and each button is up.
   if (!synced_ || !input_live_) return;
@@ -3003,6 +3136,11 @@ void XrApp::Stop() {
     if (s != XR_NULL_HANDLE) xrDestroySpace(s);
     s = XR_NULL_HANDLE;
   }
+  if (gaze_space_ != XR_NULL_HANDLE) xrDestroySpace(gaze_space_);
+  if (view_ != XR_NULL_HANDLE) xrDestroySpace(view_);
+  gaze_space_ = view_ = XR_NULL_HANDLE;
+  gaze_ = XR_NULL_HANDLE;
+  gaze_supported_ = gaze_extension_ = false;
   if (local_ != XR_NULL_HANDLE) xrDestroySpace(local_);
   local_ = XR_NULL_HANDLE;
   if (session_ != XR_NULL_HANDLE) xrDestroySession(session_);

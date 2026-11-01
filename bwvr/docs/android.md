@@ -889,7 +889,11 @@ menu to `bwvr-menu.bmp` in the game folder. A save keeps the key.
    four angles), the display period of 13888888 ns, one recenter, the size
    of the eyes, a last slot with no focus and no active hand, the aim poses
    of the right hand of the script in the slots of the log, the profile of
-   the Touch controller, and the pulse of 80 ms at 0.50 at the runtime. The pictures
+   the Touch controller, and the pulse of 80 ms at 0.50 at the runtime.
+   The runtime also has an eye tracker (the script word `gaze`), and the
+   run has `foveation=1`: the test checks that the app asks for
+   `XR_EXT_eye_gaze_interaction`, binds the gaze, finds the eye tracker,
+   and that the slots have the gaze of the script. The pictures
    are in `bwvr/out/android/emu-xr-test`. This step shows that the app makes
    the calls of OpenXR in the right order with the right structs. It does
    not show the runtime of Meta.
@@ -1411,8 +1415,21 @@ of MSVC in the mod, which Box64 translates with barriers, and the
   face buttons, the menu button, the serial and the profile;
 - the predicted display time and the display period of the runtime, the
   focus, the count of the recenters of the LOCAL space, the size of an eye
-  that the headset asks for, and the gaze of an eye tracker (the app has
-  none yet).
+  that the headset asks for, and the gaze of an eye tracker (below).
+
+**The gaze of an eye tracker** (`XR_EXT_eye_gaze_interaction`). The app
+asks for the extension when the runtime lists it, `foveation` or
+`fovea_res` is on (or `test_keys=1`) and `foveation_gaze` reads OpenXR (1
+or 2, `backend.md`, "Foveated rendering"). When the headset has an eye
+tracker, the session has the action `eye_gaze` on
+`/interaction_profiles/ext/eye_gaze_interaction`, and each slot with the
+focus gets the gaze in the VIEW space (the space of the head) at the
+display time, with `kGazeValid`. The mod makes the centre of the fovea from
+it. The log of the app says if the headset has an eye tracker, names the
+first gaze, and counts the slots with a gaze. On Meta Horizon OS the gaze
+needs the permission `com.oculus.permission.EYE_TRACKING`: the manifest has
+it, and the app asks the player at the start when the headset has an eye
+tracker. The answer counts from the next start of the app.
 
 The values go across as the runtime gave them: no smoothing, no prediction
 of the app, the clock of the runtime.
@@ -1526,8 +1543,9 @@ Box64), and the input of a real headset through the channel.
 
 **Known limits:**
 
-- The app has no eye tracker action, so the gaze of the slot is never
-  valid.
+- Not run in a headset: the gaze of an eye tracker (Quest Pro, Steam
+  Frame). Open: if the runtime of the Steam Frame for an APK has
+  `XR_EXT_eye_gaze_interaction`, and if it needs a permission of its own.
 - The test aid `input_live_test_pulse` writes into the ring of the mod.
   With a mod that sends pulses at the same time, the ring has two writers.
 

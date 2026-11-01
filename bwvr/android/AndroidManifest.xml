@@ -21,6 +21,14 @@
     </intent>
   </queries>
 
+  <!-- The eye tracking of Meta Horizon OS (Quest Pro), for the gaze of
+       foveated rendering. The app asks for it at the start when the runtime
+       has XR_EXT_eye_gaze_interaction. Not required: a headset with no eye
+       tracker installs the app too. -->
+  <uses-permission android:name="com.oculus.permission.EYE_TRACKING" />
+  <uses-feature android:name="oculus.software.eye_tracking"
+      android:required="false" />
+
   <!-- A headset with head tracking and Vulkan. required="false", so the
        Android emulator can install the same APK for a test. -->
   <uses-feature android:name="android.hardware.vr.headtracking"

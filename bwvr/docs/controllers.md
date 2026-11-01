@@ -992,7 +992,7 @@ The pointing hand is the right hand. When the left controller is the Hand
 | --- | --- |
 | Grip | Grabs the land: pull to move it across, and up or down, one to one. Both grips turn and scale the land (`god-view.md`, section 5). `grab_hand=2` also lets the grip of the pointing hand grab the land when the Hand is empty and over nothing it can hold |
 | Y (B when the left hand points) | Hold: opens the ring, and the hand picks an item (section 10) |
-| X (A when the left hand points) | Opens and closes the spell book: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand takes one |
+| X (A when the left hand points) | Opens and closes the spell book: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand holds one, and a pull of 10 cm takes it out |
 | Stick | In the God view: push it to move over the land (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
 | Trigger | No job |
 | Menu button of the left controller | Esc: the game menu (3.6) |

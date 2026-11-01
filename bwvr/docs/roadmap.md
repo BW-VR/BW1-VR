@@ -62,13 +62,21 @@ These items come before the other work.
   turn in each step of the game. The scripted hand gives no turn at the
   release, so only a headset shows the turn that a real throw gives a tree.
 - **P20. The spell book: prove it in a headset.** X opens a spell book over
-  the hand that does not point, and the grip of the pointing hand takes a
-  miracle with the game's own request (`spell_book=1`, `debug_all_miracles`
-  for tests, `miracles.md`, "The spell book"). The recipe
-  `village_run.ps1 -Kind book` shows the open, the halo, the card, the take
-  and a refusal, with Vulkan and with dxwrapper. Open:
+  the hand that does not point, and the pointing hand pulls a miracle out
+  of it with the grip: the game's own request (`spell_book=1`,
+  `spell_book_pull_cm=10`, `debug_all_miracles` for tests, `miracles.md`,
+  "The spell book"). The recipe `village_run.ps1 -Kind book` shows the
+  open, the halo, the card, the pull, the spring back, the take and a
+  refusal. Open:
   - In a headset: the place 12 cm from the grip, the size of the cells, and
     whether the book is easy to read and to reach.
+  - In a headset: whether a pull of 10 cm and the buzz feel like an elastic
+    band, and whether the bubble quad shows in Virtual Desktop.
+  - The gestures were never drawn with a real hand in a headset. No line of
+    a card names the draw button (B) while the Hand is empty, and the
+    corner pictures of the gestures do not show. So a player of release
+    1.2.0, which has no book, does not find how to ask for a miracle with
+    a gesture. The tap of the grip on an icon of a Worship Site works there.
   - `debug_all_miracles=1` gives only 6 miracles: the Village Centre has 6
     slots for icons, and the Worship Site copies them (`miracles.md`, "The
     limit of 6 icons"). Every miracle needs icons of the site that do not

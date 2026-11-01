@@ -132,24 +132,30 @@ if ($Kind -eq 'totem') {
     }
 } elseif ($Kind -eq 'book') {
     # The spell book (bwvr/docs/miracles.md, "The spell book"). X opens the
-    # book over the left hand, the word "book" steps the right hand to the
-    # middle of the first item and then of the second, and the grip takes the
-    # second miracle: the game puts it in the Hand. A tap of B cancels it.
-    # Then the pool of the site has no chants, X opens the book again, the
-    # right hand goes to an item and the grip takes it: the game refuses it,
-    # and the card says why. X closes the book. Each picture of the book is
-    # saved (spell_book_test_save). -Set "debug_all_miracles=1" gives the
-    # book every miracle of the game, and -Set "spell_book=0" gives X no job.
+    # book over the left hand, and the word "book" steps the right hand to the
+    # middle of the first item and then of the second. The grip closes on the
+    # second item, the word "pull" moves the hand 9 cm toward the head, and
+    # the grip opens: the bubble springs back into the book. The hand goes
+    # back. The grip closes again and the hand moves 15 cm: at 10 cm the
+    # bubble snaps into the hand, and the game puts the miracle in the Hand.
+    # A tap of B cancels it. Then the pool of the site has no chants, X opens
+    # the book again, the right hand goes to an item and the grip takes it:
+    # the game refuses it, and the card says why. X closes the book. Each
+    # picture of the book and of the bubble is saved (spell_book_test_save).
+    # -Set "spell_book_pull_cm=0" gives the take at the grip, -Set
+    # "debug_all_miracles=1" gives the book every miracle of the game, and
+    # -Set "spell_book=0" gives X no job.
     if ($Plan -eq '') { $Plan = 'gosite' }
     if ($Census -eq '') { $Census = '890,1300' }
     if ($Seconds -eq 0) { $Seconds = 60 }
-    if ($Chants -eq '20000@950') { $Chants = '20000@950 0@1340' }
+    if ($Chants -eq '20000@950') { $Chants = '20000@950 0@1400' }
     if ($Steps -eq '') {
         $Steps = $pre + 'seek@920+1 x@1000+4 shot@1012+1 book@1030+1 shot@1042+1 book@1070+1 shot@1082+1 ' +
-                 'grip@1110+30 shot@1170+1 b@1250+5 x@1380+4 book@1400+1 shot@1412+1 grip@1440+20 shot@1452+1 ' +
-                 'x@1520+4 shot@1540+1'
+                 'grip@1110+40 pull@1115+60 shot@1130+1 pull@1200+10 grip@1240+60 pull@1245+40 shot@1300+1 ' +
+                 'pull@1320+10 b@1350+5 x@1420+4 book@1440+1 shot@1452+1 grip@1470+20 shot@1482+1 ' +
+                 'x@1540+4 shot@1560+1'
     }
-    $keys = "$keys;spell_book_test_save=12"
+    $keys = "$keys;spell_book_test_save=16"
 } elseif ($Kind -eq 'look') {
     # A villager that a script turns to the camera (bwvr/docs/village.md, "A
     # villager that a script turns to the player"). In the test save "temple"

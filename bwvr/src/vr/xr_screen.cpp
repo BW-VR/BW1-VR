@@ -237,14 +237,15 @@ bool g_have_staged_quad = false;
 // The cards of this frame, set by the mod before EndFrame (xr_screen.h, THE
 // CARDS).
 CardLayer g_staged_card[kCards] = {};
-bool g_have_staged_card[kCards] = {false, false, false, false, false};
-bool g_card_failed[kCards] = {false, false, false, false, false};
+bool g_have_staged_card[kCards] = {false, false, false, false, false, false};
+bool g_card_failed[kCards] = {false, false, false, false, false, false};
 const char* const kCardName[kCards] = {
     "hint card of the pointing hand", "hint card of the other hand",
-    "subtitle card", "ring", "keyboard"};
+    "subtitle card", "ring", "keyboard", "bubble card"};
 // What a card holds, for the line that says where it goes after a failure.
 const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
-                                        "items of the ring", "keys"};
+                                        "items of the ring", "keys",
+                                        "pulled miracles"};
 // The runtime refused a frame with a quad of the interface panel.
 bool g_panel_refused = false;
 
@@ -2819,10 +2820,13 @@ bool XrScreen::BuildFrame() {
     // frame that staged it. The subtitle card is the far one, so it goes
     // first, and the hint cards at the hands draw over it. The ring is open
     // only while the player holds its control, so it draws over all of them.
+    // The spell book uses the quad of the ring, and the bubble that the hand
+    // pulls out of the book draws over the book.
     XrCompositionLayerQuad* card_quads = b.card_quads;
     bool* with_card = b.with_card;
     const int card_order[kCards] = {kCardSubtitles, kCardHintPointing,
-                                    kCardHintOther, kCardRing, kCardKeyboard};
+                                    kCardHintOther,  kCardRing,
+                                    kCardBubble,     kCardKeyboard};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&

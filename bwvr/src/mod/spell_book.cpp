@@ -32,10 +32,21 @@
 // THE PICTURE shares the quad layer of the ring (kCardRing): the book does
 // not open while the ring shows, and the ring closes the book.
 //
+// THE PULL (spell_book_pull_cm). The grip on an item does not take the
+// miracle at once. The bubble of the item comes out of the book on an
+// elastic band, on a quad of its own (kCardBubble), and its cell shows an
+// empty socket. Both hands buzz, more as the hand goes farther. At the pull
+// length the bubble snaps into the hand and the book sends the request. A
+// grip that opens before that puts the miracle back: the bubble springs back
+// to its cell. So the player can let go of a wrong miracle with no cost.
+//
 // THE KEYS of bwvr.ini:
 //
 //   spell_book=1             0: the first face button of the hand that does
 //                            not point has no job
+//   spell_book_pull_cm=10    the pull that takes a miracle out of the book,
+//                            in cm of hand motion, 3 to 30. 0: the grip
+//                            takes the miracle at once
 //   debug_all_miracles=0     1: each Worship Site of the player has every
 //                            miracle of the game, with no limit of prayer
 //                            power. For tests
@@ -314,6 +325,8 @@ bool g_all = false;
 int g_save = 0;
 int g_saved = 0;
 bool g_test_keys = false;
+int g_pull_cm = 10;       // 0: the grip takes the miracle at once
+int g_pull_ini = 10;      // the value of bwvr.ini, for the debug page
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -340,6 +353,11 @@ void ReadSettings() {
   g_all = IniKey("debug_all_miracles", 0) != 0;
   g_save = IniKey("spell_book_test_save", 0);
   g_test_keys = IniKey("test_keys", 0) != 0;
+  g_pull_cm = IniKey("spell_book_pull_cm", 10);
+  if (g_pull_cm < 0) g_pull_cm = 0;
+  if (g_pull_cm > 0 && g_pull_cm < 3) g_pull_cm = 3;
+  if (g_pull_cm > 30) g_pull_cm = 30;
+  g_pull_ini = g_pull_cm > 0 ? g_pull_cm : 10;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -354,6 +372,14 @@ void ReadSettings() {
          g_all ? ": each Worship Site of the player gets every miracle of the "
                  "game and no limit of prayer power (a test)"
                : "");
+  if (g_pull_cm > 0) {
+    ModLog("spell book   : spell_book_pull_cm=%d: the hand pulls a miracle %d "
+           "cm out of the book, and then it snaps into the hand", g_pull_cm,
+           g_pull_cm);
+  } else {
+    ModLog("spell book   : spell_book_pull_cm=0: the grip takes a miracle from "
+           "the book at once");
+  }
   if (!g_game_ok) {
     ModLog("spell book   : the functions of the game do not have the bytes "
            "of v1.42, so the book does not open");
@@ -383,6 +409,7 @@ bool g_left = true;           // the book is at the left hand
 bool g_button_seen_up = false;
 bool g_button_before = false;
 GripClaim g_grip = {};
+volatile LONG g_grip_claimed = 0;  // the book holds the grip now
 volatile LONG g_pluck_asked = 0;  // the pump saw a pluck
 int g_pluck_type = -1;            // the type of that pluck
 int g_request_type = -1;          // the request for the interface step
@@ -394,7 +421,29 @@ const double kNoticeSeconds = 4.0;
 double g_notice_until = 0.0;
 wchar_t g_notice[64] = L"";
 int g_test_item = 0;              // the next item of the word "book"
+
+// The pull of a bubble out of the book.
+enum PullState { kPullNone, kPullOut, kPullBack };
+struct PullNow {
+  int state;
+  int type;          // the seed type of the item
+  float start_gap;   // the gap from the cell to the hand at the grip
+  float share;       // how much of the pull is done, 0 to 1
+  float most;        // the most share of this pull
+  float offset[3];   // at the release: the bubble from its cell, in the axes
+                     // of the book (right, up, toward the head)
+  double back_at;    // the time of the release
+  bool landed;       // the bubble came back to its cell one time
+};
+PullNow g_pull = {kPullNone, -1, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, 0.0,
+                  false};
+// After the snap the bubble stays at the hand until the Miracle is in the
+// Hand, for at most kSnapFrames.
+const uint64_t kSnapFrames = 20;
+int g_snap_type = -1;
+uint64_t g_snap_frame = 0;
 // The counts of a report window.
+uint64_t g_pulls = 0, g_snaps = 0, g_backs = 0;
 uint64_t g_opens = 0, g_closes = 0, g_plucks = 0, g_refusals = 0;
 uint64_t g_requests = 0, g_arrived = 0, g_rasters = 0;
 double g_raster_ms = 0.0;
@@ -599,6 +648,7 @@ struct Look {
   bool can[kMaxItems];
   bool last[kMaxItems];
   int hover;
+  int pulled;        // the item whose bubble is out of the book, or -1
   bool all;
   wchar_t title[48];
   wchar_t note[64];
@@ -741,6 +791,16 @@ void DrawShape(int type, float x, float y, float side) {
           points[0].y + 5);
 }
 
+// The two gestures of the chain of a miracle in its bubble at x, y with the
+// radius r, in pixels.
+void DrawBubbleShapes(int type, float x, float y, float r) {
+  const uint8_t* info = SeedInfo(type);
+  const int first = *reinterpret_cast<const int32_t*>(info + kInfoGestures);
+  const int second = *reinterpret_cast<const int32_t*>(info + kInfoGestures + 4);
+  DrawShape(first, x - 0.42f * r, y, 0.55f * r);
+  DrawShape(second, x + 0.30f * r, y, 0.95f * r);
+}
+
 bool SameLook(const Look& a, const Look& b) {
   return memcmp(&a, &b, sizeof(Look)) == 0;
 }
@@ -784,13 +844,9 @@ void Raster(const Look& look) {
     Bubble(l, i, &bx, &by, &br);
     // The two gestures of the chain in the bubble: the start (the spiral or
     // the inverse spiral) small at the left, and the gesture of the miracle
-    // larger at the right.
-    const uint8_t* info = SeedInfo(look.type[i]);
-    const int first = *reinterpret_cast<const int32_t*>(info + kInfoGestures);
-    const int second =
-        *reinterpret_cast<const int32_t*>(info + kInfoGestures + 4);
-    DrawShape(first, bx - 0.42f * br, by, 0.55f * br);
-    DrawShape(second, bx + 0.30f * br, by, 0.95f * br);
+    // larger at the right. A bubble that the hand pulls out has no gestures
+    // in the book: they go with the bubble.
+    if (i != look.pulled) DrawBubbleShapes(look.type[i], bx, by, br);
     float cx = 0.0f, cy = 0.0f;
     CellPixel(l, i, &cx, &cy);
     RECT name = {static_cast<LONG>(cx - 0.5f * cell + 4),
@@ -848,6 +904,12 @@ void Raster(const Look& look) {
         // The halo: a ring of gold round the bubble of the item under the
         // hand, and a thin ring of light round each other bubble.
         const float ring = Clamp01(halo + 0.5f - d) * Clamp01(d - br + 0.5f);
+        if (i == look.pulled) {
+          // The empty socket of a bubble that the hand pulls out.
+          const float edge = Clamp01(br + 0.5f - d) * Clamp01(d - br + 3.5f);
+          Over(out, kWhite, 0.30f * edge);
+          continue;
+        }
         if (lit) {
           Over(out, kHalo, ring);
         } else {
@@ -902,10 +964,94 @@ void Raster(const Look& look) {
   }
 }
 
+// THE BUBBLE that the hand pulls out of the book: its own small picture, with
+// the gold halo, the fill of its kind and its two gestures, on a clear
+// background. It is drawn one time at the start of each pull.
+const int kBubbleTexture = 256;
+uint8_t g_bubble[kBubbleTexture * kBubbleTexture * 4];
+int g_bubble_px = 0;
+
+bool RasterBubble(int type, const Layout& l) {
+  if (!RasterStart() || type < 0 || type >= kSeedTypes || l.count <= 0) {
+    return false;
+  }
+  const int size = SizeIndex(l);
+  const float cell = static_cast<float>(CellSize(l));
+  const float br = 0.33f * cell;
+  const float halo = br + 0.16f * cell;
+  int side = static_cast<int>(2.0f * halo + 6.0f);
+  side += side & 1;
+  if (side > kBubbleTexture) side = kBubbleTexture;
+  const float c = 0.5f * static_cast<float>(side);
+  for (int y = 0; y < side; ++y) {
+    memset(g_bits + static_cast<size_t>(y) * kTexture, 0,
+           static_cast<size_t>(side) * 4);
+  }
+  SelectObject(g_dc, g_pen[size]);
+  SelectObject(g_dc, GetStockObject(WHITE_BRUSH));
+  DrawBubbleShapes(type, c, c, br);
+  GdiFlush();
+  const Rgb& fill = IsCreatureType(type) ? kCreatureFill : kGod;
+  memset(g_bubble, 0, sizeof(g_bubble));
+  for (int y = 0; y < side; ++y) {
+    const float py = static_cast<float>(y) + 0.5f;
+    uint8_t* row = g_bubble + static_cast<size_t>(y) * kBubbleTexture * 4;
+    const uint32_t* letters = g_bits + static_cast<size_t>(y) * kTexture;
+    for (int x = 0; x < side; ++x) {
+      const float px = static_cast<float>(x) + 0.5f;
+      uint8_t* out = row + x * 4;
+      const float d = sqrtf((px - c) * (px - c) + (py - c) * (py - c));
+      Over(out, kHalo, Clamp01(halo + 0.5f - d) * Clamp01(d - br + 0.5f));
+      Over(out, fill, 0.95f * Clamp01(br + 0.5f - d));
+      const float cover =
+          static_cast<float>((letters[x] >> 8) & 0xFF) * (1.0f / 255.0f);
+      Over(out, kWhite, cover);
+    }
+  }
+  g_bubble_px = side;
+  // The GDI ink of the book is gone, so the next picture of the book draws
+  // all of it again.
+  g_have_drawn = false;
+  if (g_saved < g_save) {
+    ++g_saved;
+    EyeCaptureSaveUi("bubble", ControllersFrameCount(), 1, g_bubble,
+                     kBubbleTexture * 4, static_cast<uint32_t>(side),
+                     static_cast<uint32_t>(side));
+  }
+  return true;
+}
+
+// The bubble card of this frame at the point `at`, facing the head.
+void StageBubble(const float at[3], const float head[3]) {
+  if (g_bubble_px <= 0 || bwvr::XrScreen::CardFailed(bwvr::kCardBubble)) {
+    return;
+  }
+  bwvr::CardLayer layer = {};
+  layer.visible = true;
+  layer.pixels = g_bubble;
+  layer.texture_width = kBubbleTexture;
+  layer.texture_height = kBubbleTexture;
+  layer.rect[0] = 0;
+  layer.rect[1] = 0;
+  layer.rect[2] = g_bubble_px;
+  layer.rect[3] = g_bubble_px;
+  for (int i = 0; i < 3; ++i) layer.position[i] = at[i];
+  controller_math::FacePose(at, head, layer.orientation);
+  layer.width = g_bubble_px / kPixelsPerMeter;
+  layer.height = layer.width;
+  bwvr::XrScreen::StageCard(bwvr::kCardBubble, layer);
+}
+
 void BuildLook(Look* look) {
   memset(look, 0, sizeof(*look));
   look->count = g_count;
   look->hover = g_hover;
+  look->pulled = -1;
+  if (g_pull.state != kPullNone) {
+    for (int i = 0; i < g_count; ++i) {
+      if (g_items[i].type == g_pull.type) look->pulled = i;
+    }
+  }
   look->all = g_all;
   for (int i = 0; i < g_count; ++i) {
     look->type[i] = g_items[i].type;
@@ -1113,6 +1259,205 @@ void Watch(const GameNow& g, uint64_t frame) {
   }
 }
 
+// --- the pull --------------------------------------------------------------------
+
+float Dot3(const float a[3], const float b[3]) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+int ItemOfType(int type) {
+  for (int i = 0; i < g_count; ++i) {
+    if (g_items[i].type == type) return i;
+  }
+  return -1;
+}
+
+// The middle of the bubble of item i in its cell, in the room.
+void CellPoint(int i, float out[3]) {
+  float x = 0.0f, y = 0.0f;
+  ItemCenter(g_layout, i, &x, &y);
+  PointOn(g_plane, x, y, out);
+}
+
+// The buzz of the pull on both hands: the pointing hand at the strength, and
+// the hand of the book at half of it. Each frame of the pull sends one, so
+// the buzz does not stop while the hand pulls.
+void PullBuzzNow(float share) {
+  const float strength = PullBuzz(share);
+  const float pct = static_cast<float>(HapticsPct()) * 0.01f;
+  float amplitude = (0.03f + 0.42f * strength) * pct;
+  if (amplitude > haptics_math::kMostAmplitude) {
+    amplitude = haptics_math::kMostAmplitude;
+  }
+  if (!(amplitude > 0.0f)) return;
+  ControllersGrabPulse(2, amplitude, 0.020f);
+  ControllersGrabPulse(1, 0.5f * amplitude, 0.020f);
+}
+
+void StopPull() {
+  g_pull.state = kPullNone;
+  g_pull.type = -1;
+}
+
+// The grip closes on an item with the pull on. The miracle stays in the book
+// until the hand pulls it out. A dim item is refused at once, as without the
+// pull. False when the pull cannot start: then the grip takes at once.
+bool StartPull(const GameNow& g, uint64_t frame) {
+  const int index = ItemOfType(g_pluck_type);
+  if (index < 0 || !g_have_plane || !g_items[index].can || !g.hand_ready) {
+    return false;
+  }
+  float hand[3], turn[4], head[3];
+  bool left = false;
+  if (!ControllersCardPose(0, hand, turn, head, &left)) return false;
+  if (!RasterBubble(g_items[index].type, g_layout)) return false;
+  float cell[3];
+  CellPoint(index, cell);
+  g_pull.state = kPullOut;
+  g_pull.type = g_items[index].type;
+  g_pull.start_gap = controller_math::Distance(cell, hand);
+  g_pull.share = 0.0f;
+  g_pull.most = 0.0f;
+  g_pull.landed = false;
+  ++g_pulls;
+  HapticsPulseHands(2, haptics_math::kTake);
+  if (LogRoom()) {
+    ModLog("spell book   : the pointing hand grips %s and pulls it out of the "
+           "book: the hand is %.1f cm from its cell, and %d cm more takes it, "
+           "frame %llu", NarrowName(g_pull.type), g_pull.start_gap * 100.0f,
+           g_pull_cm, frame);
+  }
+  return true;
+}
+
+// One frame of a pull that runs: the snap, the release, or more buzz.
+void PullStep(const GameNow& g, uint64_t frame, bool* plucked) {
+  const int index = ItemOfType(g_pull.type);
+  float hand[3], turn[4], head[3];
+  bool left = false;
+  if (index < 0 || !ControllersCardPose(0, hand, turn, head, &left)) {
+    if (LogRoom()) {
+      ModLog("spell book   : the pull of %s stops: %s, frame %llu",
+             NarrowName(g_pull.type),
+             index < 0 ? "the miracle left the book" : "the hand has no pose",
+             frame);
+    }
+    StopPull();
+    return;
+  }
+  float cell[3];
+  CellPoint(index, cell);
+  const float gap = controller_math::Distance(cell, hand);
+  g_pull.share = PullShare(gap, g_pull.start_gap, g_pull_cm * 0.01f);
+  if (g_pull.share > g_pull.most) g_pull.most = g_pull.share;
+  if (InterlockedCompareExchange(&g_grip_claimed, 0, 0) == 0) {
+    // The grip opened before the snap: the bubble springs back.
+    float bubble[3];
+    PullBubble(cell, hand, bubble);
+    float d[3];
+    for (int k = 0; k < 3; ++k) d[k] = bubble[k] - cell[k];
+    g_pull.offset[0] = Dot3(d, g_plane.right);
+    g_pull.offset[1] = Dot3(d, g_plane.up);
+    g_pull.offset[2] = Dot3(d, g_plane.normal);
+    g_pull.state = kPullBack;
+    g_pull.back_at = NowSeconds();
+    ++g_backs;
+    HapticsPulseHands(2, haptics_math::kLetGo);
+    if (LogRoom()) {
+      ModLog("spell book   : the grip opens at %.0f percent of the pull (the "
+             "most was %.0f percent), so %s springs back into the book, frame "
+             "%llu", g_pull.share * 100.0f, g_pull.most * 100.0f,
+             NarrowName(g_pull.type), frame);
+    }
+    return;
+  }
+  if (g_pull.share >= 1.0f) {
+    const int type = g_pull.type;
+    g_pluck_type = type;
+    Pluck(g, frame, plucked);
+    if (*plucked) {
+      ++g_snaps;
+      const float pct = static_cast<float>(HapticsPct()) * 0.01f;
+      float amplitude = 0.65f * pct;
+      if (amplitude > haptics_math::kMostAmplitude) {
+        amplitude = haptics_math::kMostAmplitude;
+      }
+      if (amplitude > 0.0f) {
+        ControllersGrabPulse(2, amplitude, 0.035f);
+        ControllersGrabPulse(1, 0.4f * amplitude, 0.025f);
+      }
+      g_snap_type = type;
+      g_snap_frame = frame;
+      StopPull();
+      if (LogRoom()) {
+        ModLog("spell book   : %s snaps into the hand: the hand is %.1f cm "
+               "from its cell, frame %llu", NarrowName(type), gap * 100.0f,
+               frame);
+      }
+      return;
+    }
+    // The game refuses it now: the bubble goes back to the book.
+    float d[3];
+    for (int k = 0; k < 3; ++k) d[k] = (hand[k] - cell[k]) * kPullFollow;
+    g_pull.offset[0] = Dot3(d, g_plane.right);
+    g_pull.offset[1] = Dot3(d, g_plane.up);
+    g_pull.offset[2] = Dot3(d, g_plane.normal);
+    g_pull.state = kPullBack;
+    g_pull.back_at = NowSeconds();
+    ++g_backs;
+    return;
+  }
+  PullBuzzNow(g_pull.share);
+}
+
+// The bubble of this frame: out with the hand, on its way back, or in the
+// hand after the snap.
+void ShowBubble(const GameNow* g, uint64_t frame) {
+  float hand[3], turn[4], head[3];
+  bool left = false;
+  if (!ControllersCardPose(0, hand, turn, head, &left)) return;
+  if (g_snap_type >= 0) {
+    if ((g != nullptr && g->grain) || frame - g_snap_frame > kSnapFrames) {
+      g_snap_type = -1;
+      return;
+    }
+    StageBubble(hand, head);
+    return;
+  }
+  if (g_pull.state == kPullNone || !g_have_plane) return;
+  const int index = ItemOfType(g_pull.type);
+  if (index < 0) {
+    StopPull();
+    return;
+  }
+  float cell[3];
+  CellPoint(index, cell);
+  float at[3];
+  if (g_pull.state == kPullOut) {
+    PullBubble(cell, hand, at);
+  } else {
+    const float t = static_cast<float>(NowSeconds() - g_pull.back_at);
+    if (t >= kBackSeconds) {
+      StopPull();
+      return;
+    }
+    if (!g_pull.landed && t >= BackLandSeconds()) {
+      // The bubble is back in its cell: a light tick on the hand of the
+      // book.
+      g_pull.landed = true;
+      HapticsPulseHands(1, haptics_math::kTick);
+    }
+    const float scale = BackScale(t);
+    for (int k = 0; k < 3; ++k) {
+      at[k] = cell[k] + (g_plane.right[k] * g_pull.offset[0] +
+                         g_plane.up[k] * g_pull.offset[1] +
+                         g_plane.normal[k] * g_pull.offset[2]) *
+                            scale;
+    }
+  }
+  StageBubble(at, head);
+}
+
 }  // namespace
 
 bool IsCreatureType(int type) {
@@ -1170,8 +1515,12 @@ void SpellBookFrame() {
   in.ring = RadialMenuShows();
   in.menu = have_hand && hand.dialog;
   bool plucked = false;
-  if (InterlockedExchange(&g_pluck_asked, 0) != 0 && g_open && have_game) {
-    Pluck(g, frame, &plucked);
+  if (InterlockedExchange(&g_pluck_asked, 0) != 0 && g_open && have_game &&
+      g_pull.state == kPullNone) {
+    if (g_pull_cm <= 0 || !StartPull(g, frame)) Pluck(g, frame, &plucked);
+  }
+  if (g_pull.state == kPullOut && g_open && have_game) {
+    PullStep(g, frame, &plucked);
   }
   in.plucked = plucked;
   const bool was_open = g_open;
@@ -1209,7 +1558,16 @@ void SpellBookFrame() {
   if (!g_open) {
     g_hover = -1;
     g_hover_type = -1;
+    if (g_pull.state != kPullNone) {
+      if (LogRoom()) {
+        ModLog("spell book   : the book closes while the hand pulls %s, so "
+               "the miracle stays in the book, frame %llu",
+               NarrowName(g_pull.type), frame);
+      }
+      StopPull();
+    }
     if (was_open) g_have_plane = false;
+    ShowBubble(have_game ? &g : nullptr, frame);
     return;
   }
 
@@ -1257,7 +1615,12 @@ void SpellBookFrame() {
   float point[3], point_turn[4], unused_head[3];
   bool unused_left = false;
   int hover = -1;
-  if (ControllersCardPose(0, point, point_turn, unused_head, &unused_left)) {
+  if (g_pull.state != kPullNone) {
+    // While the bubble is out of the book, or on its way back, the pick
+    // stays on its item.
+    hover = ItemOfType(g_pull.type);
+  } else if (ControllersCardPose(0, point, point_turn, unused_head,
+                                 &unused_left)) {
     float in_plane[3];
     InPlane(g_plane, point, in_plane);
     hover = Pick(g_layout, in_plane, current);
@@ -1289,6 +1652,7 @@ void SpellBookFrame() {
   Look look;
   BuildLook(&look);
   if (!g_have_drawn || !SameLook(look, g_drawn)) Raster(look);
+  ShowBubble(have_game ? &g : nullptr, frame);
   if (!g_have_drawn || g_raster_failed ||
       bwvr::XrScreen::CardFailed(bwvr::kCardRing) || RadialMenuShows()) {
     return;
@@ -1321,6 +1685,7 @@ bool SpellBookPumpGrip(bool grip_down) {
   if (!g_on) return false;
   bool pluck = false;
   const bool claim = GripStep(&g_grip, grip_down, g_open, g_hover, &pluck);
+  InterlockedExchange(&g_grip_claimed, claim ? 1 : 0);
   if (pluck) {
     g_pluck_type = g_hover_type;
     InterlockedExchange(&g_pluck_asked, 1);
@@ -1374,10 +1739,16 @@ int SpellBookHint(MiracleLine lines[kMiracleLines]) {
     if (g_empty_why[0] != 0) lines[count++] = {-1, g_empty_why};
     return count;
   }
+  if (g_open && g_pull.state == kPullOut) {
+    lines[count++] = {-1, L"Pull farther to take it"};
+    lines[count++] = {kWordGrab, L"Open to put it back"};
+    return count;
+  }
   if (g_open && g_hover >= 0 && g_hover < g_count) {
     const Item& item = g_items[g_hover];
     if (item.can) {
-      swprintf_s(take, L"Take %s", kSeedName[item.type]);
+      swprintf_s(take, g_pull_cm > 0 ? L"Hold and pull out %s" : L"Take %s",
+                 kSeedName[item.type]);
       lines[count++] = {kWordGrab, take};
     } else {
       swprintf_s(dim, L"%s: %s", kSeedName[item.type], item.why);
@@ -1427,6 +1798,23 @@ void SpellBookChange(const char* by) {
          ControllersFrameCount());
 }
 
+int SpellBookPullValue() {
+  ReadSettings();
+  return g_game_ok ? (g_pull_cm > 0 ? 1 : 0) : kDebugCannot;
+}
+
+void SpellBookPullChange(const char* by) {
+  ReadSettings();
+  g_pull_cm = g_pull_cm > 0 ? 0 : g_pull_ini;
+  if (g_pull.state != kPullNone) StopPull();
+  ControllersGrabPulse(1, 0.5f, g_pull_cm > 0 ? 0.40f : 0.08f);
+  ModLog("spell book   : %s: spell_book_pull_cm=%d. %s, frame %llu", by,
+         g_pull_cm,
+         g_pull_cm > 0 ? "The hand pulls a miracle out of the book"
+                       : "The grip takes a miracle from the book at once",
+         ControllersFrameCount());
+}
+
 int SpellBookAllValue() {
   ReadSettings();
   return g_game_ok ? (g_all ? 1 : 0) : kDebugCannot;
@@ -1446,13 +1834,15 @@ void SpellBookAllChange(const char* by) {
 }
 
 void SpellBookReport() {
-  if (g_opens + g_closes + g_refusals + g_requests == 0) return;
+  if (g_opens + g_closes + g_refusals + g_requests + g_pulls == 0) return;
   ModLog("spell book   : the book opened %llu times and closed %llu times "
-         "this window: %llu miracles taken, %llu requests to the game, %llu "
+         "this window: %llu pulls (%llu snaps, %llu back into the book), "
+         "%llu miracles taken, %llu requests to the game, %llu "
          "Miracles in the Hand, %llu refusals. The picture was drawn %llu "
          "times, the longest draw took %.2f ms",
-         g_opens, g_closes, g_plucks, g_requests, g_arrived, g_refusals,
-         g_rasters, g_raster_ms);
+         g_opens, g_closes, g_pulls, g_snaps, g_backs, g_plucks, g_requests,
+         g_arrived, g_refusals, g_rasters, g_raster_ms);
+  g_pulls = g_snaps = g_backs = 0;
   g_opens = g_closes = g_plucks = g_requests = g_arrived = g_refusals = 0;
   g_rasters = 0;
   g_raster_ms = 0.0;

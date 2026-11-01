@@ -93,12 +93,15 @@ struct PanelQuad {
 //   kCardKeyboard      the keyboard under the menu panel while a text box of
 //                      the game has the focus (docs/ui-layer.md, "The
 //                      keyboard in the headset"). It also shows over a screen.
+//   kCardBubble        the bubble of a miracle that the pointing hand pulls
+//                      out of the spell book (docs/miracles.md, "The pull")
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
 const int kCardRing = 3;
 const int kCardKeyboard = 4;
-const int kCards = 5;
+const int kCardBubble = 5;
+const int kCards = 6;
 
 // The picture of a hint card.
 const uint32_t kHintCardWidth = 768;

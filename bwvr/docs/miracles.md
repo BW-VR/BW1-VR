@@ -29,9 +29,10 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
   with a halo to a Creature miracle.
 - The first face button of the hand that does not point opens the spell
   book. It shows the miracles that the player can ask for now, with the
-  pictures of their gestures. The grip of the pointing hand takes one, with
-  the game's own request. The debug switch "All miracles" gives up to 6
-  miracles with no cost in prayer power, for tests.
+  pictures of their gestures. The grip of the pointing hand holds one, and a
+  pull of 10 cm takes it out of the book, with the game's own request. A
+  grip that opens before that puts the miracle back. The debug switch "All
+  miracles" gives up to 6 miracles with no cost in prayer power, for tests.
 
 ## Gestures in the plain game [V unless marked]
 
@@ -555,8 +556,8 @@ with RTTI derive from `Base`.
 
 The code is in `src/mod/spell_book.cpp`, with the pure math in
 `spell_book_math.h`. The book shows the miracles that the player can ask for
-now, and the pointing hand takes one with the grip. No gesture is necessary.
-The gestures stay as they are.
+now, and the pointing hand pulls one out with the grip. No gesture is
+necessary. The gestures stay as they are.
 
 **The button.** With `button_layout=1` the first face button of the hand that
 does not point (X, or A when the left hand points) opens the book. A second
@@ -603,12 +604,43 @@ of the middle of an item, and 6 cm in front of or behind the book, picks it
 (`Pick`). The item stays until the hand is 65 percent of a cell away, or 9
 cm in front or behind. The item under the hand gets a gold halo and a light
 cell. The title of the book and the card of the pointing hand name it:
-"[Grip] Take Fireball". Each new item gives the pulse `tick` on the pointing
-hand and the cue "ring move".
+"[Grip] Hold and pull out Fireball". Each new item gives the pulse `tick` on
+the pointing hand and the cue "ring move".
 
-**The take.** The grip on the picked item is the take. The book holds that
-press: the game and the grab of the world do not get it, until the grip
-opens (`GripStep`). Before the next interface step of the game, the mod
+**The pull** (`spell_book_pull_cm=10`). The grip on a picked item that the
+game lets the player ask for does not take the miracle at once:
+
+1. The bubble of the item comes out of the book on an elastic band. It is a
+   small quad of its own (`kCardBubble`), with the gold halo, the fill and
+   the two gestures, and it faces the head. It stays half way from its cell
+   to the grip point of the pointing hand (`PullBubble`). Its cell in the
+   book shows an empty socket. The pick stays on the item.
+2. Each frame of the pull sends a buzz of 20 ms to both hands: the pointing
+   hand at 0.03 to 0.45, and the hand of the book at half of that. The
+   buzz goes up with the pull, faster near the end (`PullBuzz`), times
+   `haptics_pct`. The grip at the start gives the pulse `take`.
+3. When the gap from the cell to the hand is 10 cm more than at the grip
+   (`PullShare`), the bubble snaps into the hand: the take below, a pulse of
+   0.65 for 35 ms on the pointing hand and 0.26 on the other hand. The
+   bubble stays at the hand until the Miracle is in the Hand, at most 20
+   frames. Then the Miracle of the game is in the Hand.
+4. A grip that opens before the snap puts the miracle back, with no cost.
+   The pointing hand gets the pulse `let go`. The bubble springs back to its
+   cell in 0.4 s: it goes through the cell one time and comes back
+   (`BackScale`). When it first comes to the cell, the hand of the book gets
+   the pulse `tick`.
+
+The two hands both make the pull: a move of the hand of the book away from
+the pointing hand also pulls. The card has "Pull farther to take it" and
+"[Grip] Open to put it back" while the bubble is out. A close of the book
+stops the pull, and the miracle stays in the book. With
+`spell_book_pull_cm=0` the grip takes the miracle at once.
+
+**The take.** The book holds the press of the grip on an item: the game and
+the grab of the world do not get it, until the grip opens (`GripStep`). So
+the closed grip after a snap does not cast the miracle. The take is the
+snap of the pull, or the grip itself with `spell_book_pull_cm=0`. Before the
+next interface step of the game, the mod
 makes the tests of the end of a chain of gestures again: the Hand is free
 (`IsHandReadyForObject`), and `fn_0064BEC0` says yes. Then it sends the same
 request: packet `0x25` with the seed type (`fn_00550C20` on the `GGame`).
@@ -619,7 +651,9 @@ the Miracle in the Hand, as for the gestures. The take gives the pulse
 `0x25` too, with its seed type, and not with packet `0x26` of the gesture
 "again".
 
-**A refusal.** A grip on a dim item takes nothing. The book stays open, the
+**A refusal.** A grip on a dim item takes nothing, and no bubble comes out.
+When the game refuses a miracle at the snap, the bubble springs back. The
+book stays open, the
 pointing hand gets the pulse `refused`, and the card and the title of the
 book give the reason for 4 s. The game itself shows nothing for a request
 that it refuses.
@@ -689,6 +723,7 @@ place of that corner.
 | `miracle_keep_deg` | the cone and 4 | The target of the last frame stays to this angle |
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
+| `spell_book_pull_cm` | 10 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
 
 The keys are read from `bwvr.ini`. They are not in the launcher.
@@ -698,7 +733,9 @@ changes `miracle_hand`. The pointing controller gives a long pulse for 1 and
 a short pulse for 0.
 
 **The debug page** (`debug_menu=1`, the group Creature): "Spell book" changes
-`spell_book`, and "All miracles" changes `debug_all_miracles`. The hand that
+`spell_book`, "Book pull" changes `spell_book_pull_cm` between 0 and its
+value in `bwvr.ini` (10 when that is 0), and "All miracles" changes
+`debug_all_miracles`. The hand that
 does not point gives a long pulse for 1 and a short pulse for 0. These two
 switches have no key of the keyboard.
 
@@ -752,13 +789,18 @@ The tag `spell book` has the book:
   miracles (a dim one has "(dim)"), and "the book closes", with the cause.
 - "the book does not open", with the cause.
 - "the pointing hand is at Fireball", and "is at no miracle of the book".
+- "the pointing hand grips Water and pulls it out of the book", with the gap
+  from its cell. "the grip opens at N percent of the pull ..., so Water
+  springs back into the book". "Water snaps into the hand", with the gap.
+  "the book closes while the hand pulls Water".
 - "the pointing hand takes Water from the book", or "... and the game
   refuses it", with the reason.
 - "the request of Water goes to the game: packet 0x25 ...", and "the Miracle
   Water is in the Hand, N frames after the request".
 - With `debug_all_miracles=1`: what each town now knows, the icons of its
   Worship Site, and each site that has no limit of prayer power now.
-- One line each report window: the opens, the closes, the takes, the
+- One line each report window: the opens, the closes, the pulls (the snaps
+  and the bubbles that went back), the takes, the
   requests, the Miracles in the Hand, the refusals and the draws of the
   picture.
 
@@ -783,20 +825,32 @@ needs a circle on the land first".
 
 The math test (`spell_book_checks.h`) covers the layout of the book for 0 to
 32 items, the place of the book from the grip pose, the plane that faces the
-head, the pick with its two limits, the open and the close, and the grip
-that the book holds.
+head, the pick with its two limits, the open and the close, the grip that
+the book holds, and the pull: the share of the pull, the place of the
+bubble, the buzz, and the spring back.
 
 The spell book has a recipe: `village_run.ps1 -Kind book` (the test save
 `temple`, a Worship Site with Water, Food and Heal, 20000 chants). It opens
-the book, steps the right hand to two items, takes the second one, cancels
-it, and then asks for a miracle with no chants (a refusal). It saves each
-picture of the book. What the recipe shows, with Vulkan and with dxwrapper:
+the book and steps the right hand to two items. It pulls the second one 9
+cm and opens the grip, then pulls it 15 cm, cancels the miracle, and asks
+for a miracle with no chants (a refusal). It saves each picture of the book
+and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
+(the pull with Vulkan only):
 
 - The card of the left hand has "[X] Spells". X opens the book over the left
   hand, 44 cm from the head: 20 by 10 cm with 3 items, 20 by 16 cm with 6.
   The other hand gets the pulse `tick`.
 - Each step of the right hand to a new item gives a gold halo on it, the
-  pulse `tick` on the pointing hand, and the card "[Grip] Take Food".
+  pulse `tick` on the pointing hand, and the card "[Grip] Hold and pull out
+  Food".
+- The grip on the item gives the bubble picture and the empty socket in the
+  book, and the card "Pull farther to take it". The buzz goes from 0.03 to
+  0.45 on the pointing hand, and half of that on the other hand.
+- The grip that opens at 92 percent of the pull sends no request: the
+  bubble goes back, and the book stays open.
+- The pull of 15 cm: the bubble snaps into the hand at 10.1 cm, in the same
+  frame as the take. With `spell_book_pull_cm=0` the grip is the take, and
+  the card says "[Grip] Take Food".
 - The take sends packet `0x25` with the seed type in the same frame. The
   Miracle is in the Hand 4 to 6 frames later, and the pool of the site goes
   from 20000 to 13000 chants.
@@ -833,6 +887,10 @@ tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 
 - Whether the book is easy to read and to reach over the open palm, and
   whether 12 cm from the grip is the right place.
+- Whether a pull of 10 cm and the buzz feel like an elastic band, and
+  whether the bubble that springs back reads as the miracle that goes back
+  into the book.
+- Whether the bubble quad shows in Virtual Desktop as the book does.
 - Whether the quad layer of the book shows in Virtual Desktop as the ring
   does. The eye pictures of a desktop run do not have the quad layer. A run
   shows the picture of the book and its place in the log only.

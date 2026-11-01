@@ -235,6 +235,41 @@ inline void SpellBookChecks() {
     Check(!GripStep(&held, true, true, 2, &pluck) && !pluck,
           "a grip that was down before the book opened is no pluck", pluck, 0);
   }
+
+  // THE PULL.
+  {
+    Check(PullShare(0.02f, 0.02f, 0.10f) == 0.0f,
+          "the pull starts at 0 at the gap of the grip", 0, 0);
+    Check(PullShare(0.01f, 0.02f, 0.10f) == 0.0f,
+          "a hand nearer to the cell than at the grip pulls nothing", 0, 0);
+    Check(fabsf(PullShare(0.07f, 0.02f, 0.10f) - 0.5f) < 1e-5f,
+          "5 cm of a pull of 10 cm is half the pull", 0, 0);
+    Check(PullShare(0.20f, 0.02f, 0.10f) == 1.0f,
+          "the share stops at 1 past the pull length", 0, 0);
+    Check(PullShare(0.0f, 0.0f, 0.0f) == 1.0f,
+          "a pull length of 0 is a take at once", 0, 0);
+    const float cell[3] = {0.0f, 0.0f, 0.0f};
+    const float hand[3] = {0.10f, -0.04f, 0.02f};
+    float bubble[3];
+    PullBubble(cell, hand, bubble);
+    Check(fabsf(bubble[0] - 0.05f) < 1e-6f && fabsf(bubble[1] + 0.02f) < 1e-6f &&
+              fabsf(bubble[2] - 0.01f) < 1e-6f,
+          "the bubble is half way from its cell to the hand", 0, 0);
+    Check(PullBuzz(0.0f) == 0.0f && PullBuzz(1.0f) == 1.0f &&
+              PullBuzz(0.5f) < 0.5f && PullBuzz(0.5f) > PullBuzz(0.25f),
+          "the buzz goes up with the pull, faster near the end", 0, 0);
+    Check(BackScale(0.0f) == 1.0f,
+          "the bubble starts its way back at the place of the release", 0, 0);
+    Check(BackScale(3.1415926f / kBackRate) < -0.2f,
+          "the bubble goes through its cell one time", 0, 0);
+    Check(fabsf(BackScale(BackLandSeconds())) < 1e-4f,
+          "the bubble is at its cell at the land time", 0, 0);
+    Check(BackScale(kBackSeconds) == 0.0f && BackScale(1.0f) == 0.0f,
+          "the bubble stays at its cell after the spring", 0, 0);
+    Check(fabsf(BackScale(kBackSeconds - 0.001f)) < 0.05f,
+          "the spring is almost still at its end, so the stop is not seen", 0,
+          0);
+  }
 }
 
 }  // namespace spell_book_checks

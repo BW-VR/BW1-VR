@@ -267,4 +267,52 @@ inline bool GripStep(GripClaim* g, bool grip, bool open, int picked,
   return g->claim;
 }
 
+// THE PULL (spell_book_pull_cm above 0). The grip on an item does not take
+// the miracle at once. The bubble of the item comes out of the book on an
+// elastic band: it stays between its cell and the hand, at kPullFollow of the
+// way to the hand. When the gap from the cell to the hand is the pull length
+// more than at the grip, the bubble snaps into the hand and the book sends
+// the request. A grip that opens before that puts the bubble back: it springs
+// to its cell.
+const float kPullFollow = 0.5f;
+// The spring back: the offset of the bubble from its cell, times
+// exp(-kBackDamp t) cos(kBackRate t). It goes through the cell one time and
+// comes back to it.
+const float kBackDamp = 9.0f;
+const float kBackRate = 25.0f;
+const float kBackSeconds = 0.40f;
+
+// How much of the pull is done, 0 to 1. gap is the gap from the cell to the
+// hand now, start_gap the gap at the grip, pull_m the pull length.
+inline float PullShare(float gap, float start_gap, float pull_m) {
+  if (!(pull_m > 0.0f)) return 1.0f;
+  const float share = (gap - start_gap) / pull_m;
+  return share < 0.0f ? 0.0f : (share > 1.0f ? 1.0f : share);
+}
+
+// The place of the bubble while the hand pulls it.
+inline void PullBubble(const float cell[3], const float hand[3],
+                       float out[3]) {
+  for (int i = 0; i < 3; ++i) out[i] = cell[i] + (hand[i] - cell[i]) * kPullFollow;
+}
+
+// The strength of the buzz of the pull, 0 to 1: it goes up faster near the
+// end, so the player feels the snap come.
+inline float PullBuzz(float share) {
+  if (!(share > 0.0f)) return 0.0f;
+  if (share > 1.0f) share = 1.0f;
+  return share * sqrtf(share);
+}
+
+// The share of the offset at the release that the bubble has at t seconds
+// after the release. 0 at kBackSeconds and after.
+inline float BackScale(float t) {
+  if (!(t >= 0.0f)) return 1.0f;
+  if (t >= kBackSeconds) return 0.0f;
+  return expf(-kBackDamp * t) * cosf(kBackRate * t);
+}
+
+// The bubble first comes back to its cell at this time after the release.
+inline float BackLandSeconds() { return 1.5707963f / kBackRate; }
+
 }  // namespace spell_book_math

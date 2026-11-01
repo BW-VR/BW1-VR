@@ -260,6 +260,8 @@ void VillageHoldChange(const char* by);
 // The spell book (spell_book.cpp).
 int SpellBookValue();
 void SpellBookChange(const char* by);
+int SpellBookPullValue();
+void SpellBookPullChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 // The sound (audio_listener.cpp, audio_voices.cpp, audio_range.cpp).
@@ -582,6 +584,9 @@ const Switch kSwitches[] = {
      "hold_target", VillageHoldValue, VillageHoldChange, L"off|on"},
     {kGroupCreature, L"Spell book", L"X opens the spell book", "spell_book",
      SpellBookValue, SpellBookChange, L"off|on"},
+    {kGroupCreature, L"Book pull", L"Pull a miracle out of the book",
+     "spell_book_pull_cm", SpellBookPullValue, SpellBookPullChange,
+     L"off|on"},
     {kGroupCreature, L"All miracles", L"All miracles, no cost (test)",
      "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on"},
 

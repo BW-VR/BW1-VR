@@ -2693,8 +2693,13 @@ word `eyes` (`-p0` to `-p3` with the centre layer).
 -FrameLoop 1` with `fovea_res=1`, `fovea_res_outer_pct=40`,
 `fovea_res_center_pct=200`, `fovea_res_center_deg=22`,
 `fovea_res_center_down_deg=9`, render 1380 by 1104): 204 checks, 0 failed,
-with `fovea_res_layer` 1 and 0. With 1 the eye picture has the outer image
-of 552 by 442 at 0 0 and the centre image of 624 by 624 at 552 0, and each
+with `fovea_res_layer` 1 and 0. **A known limit of the emulator:** some runs
+stop in game 1 at the SkipBox over the first frames of the scene (95 checks,
+10 or 11 failed): the session thread of the app waits in `vkWaitForFences`
+of the GPU of the emulator (a hang report of `androidemu` in logcat). It
+came with `fovea_res_layer` 1 and 0, and the cause is not known. With 1 the
+eye picture has the outer image
+of 552 by 442 at 0 0 and the centre image of 624 by 624 at 554 0, and each
 frame with a picture has two projection layers: the outer rect with the
 angles of the view, and the centre rect with the flags 6 (the blend of the
 source alpha, colors not multiplied) and the angles -0.3858 0.3814 0.2410
@@ -2703,8 +2708,13 @@ centre image, and the same part of the eye picture of 0 scaled by 2) has a
 mean gradient of the luma of 12.07 with 1 and 8.34 with 0 in game 1, and
 3.63 and 2.75 in game 2. The GPU of the emulator takes 0.24 to 0.44 ms for
 a walk in the test save with 1 and 0.24 to 0.41 ms with 0: at this render
-the difference is in the noise. Not shown: the blend of the compositor of a
-Quest 3, the GPU time in a Quest 3, and the sharpness through the lens.
+the difference is in the noise. With `-EyeSize 4096,4291` (render 1350 by
+1080) the eye picture has the outer image of 540 by 432 at 0 0 and the
+centre image of 610 by 610 at 542 0. In the emulator the swapchains of the
+eyes always have the size of the picture, so the scale of the rects to a
+swapchain of another size (`FitAtlas`) has only the math checks. Not
+shown: the blend of the compositor of a Quest 3, the GPU time in a Quest
+3, and the sharpness through the lens.
 
 ## The frame loop
 

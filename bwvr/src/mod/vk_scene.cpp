@@ -2066,27 +2066,27 @@ bool PrepareMres(const Seed* seed) {
       g_said_atlas = true;
       const fovea_res_math::Atlas& a = g_walk_atlas;
       if (a.on) {
-        ModLog("vk scene     : fovea_res_layer=1: the eye picture of %u by %u has the "
+        ModLog("vk scene     : fovea_res_layer=%d: the eye picture of %u by %u has the "
                "outer image of %d by %d at %d %d and the centre image of %d by %d at "
                "%d %d%s. The centre is the part %.4f %.4f to %.4f %.4f of the view",
-               width, height, a.outer[2], a.outer[3], a.outer[0], a.outer[1],
+               g_mres_layer_key, width, height, a.outer[2], a.outer[3], a.outer[0],
                a.center[2], a.center[3], a.center[0], a.center[1],
                g_mres.center_w != asked_w
                    ? " (smaller than the asked size, which does not fit)"
                    : "",
                a.view[0], a.view[1], a.view[2], a.view[3]);
         if (g_mres.center_w != asked_w) {
-          ModLog("vk scene     : fovea_res_layer=1: the centre has %u by %u pixels in "
+          ModLog("vk scene     : fovea_res_layer=%d: the centre has %u by %u pixels in "
                  "place of %u by %u, scale %.3f. A lower fovea_res_outer_pct or "
                  "fovea_res_center_deg gives it room",
-                 g_mres.center_w, g_mres.center_h, asked_w, asked_h,
+                 g_mres_layer_key, g_mres.center_w, g_mres.center_h, asked_w, asked_h,
                  g_mres.center_scale_x);
         }
       } else {
-        ModLog("vk scene     : fovea_res_layer=1, but the eye picture of %u by %u has "
+        ModLog("vk scene     : fovea_res_layer=%d, but the eye picture of %u by %u has "
                "no room for the centre beside the outer image of %u by %u, so the eye "
                "picture is made from the two images as with fovea_res_layer=0",
-               width, height, g_mres.outer_w, g_mres.outer_h);
+               g_mres_layer_key, width, height, g_mres.outer_w, g_mres.outer_h);
       }
     }
   } else {

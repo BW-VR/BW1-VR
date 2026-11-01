@@ -4526,14 +4526,17 @@ the alpha: the soft edge of the eye picture of `fovea_res_layer=0`.
 **Desktop runs** (Radeon RX 7900 XTX, the test save "pen", render 4080 by
 3264, one walk, `fake_head_fov=1`, `fovea_res_outer_pct=40`,
 `fovea_res_center_pct=200`, `fovea_res_center_deg=22`,
-`fovea_res_center_down_deg=9`): with `fovea_res_layer=1` the eye picture has
-the outer image of 1632 by 1306 at 0 0 and the centre image of 1846 by 1846
-at 1632 0, and the GPU takes 0.468 to 0.486 ms for a walk after the first
-window. With `fovea_res_layer=0` it takes 0.542 to 0.581 ms. A crop of the
+`fovea_res_center_down_deg=9`, the windows of 450 frames after the first):
+with `fovea_res_layer=2` the eye picture has the outer image of 1632 by
+1306 at 0 0 and the centre image of 1846 by 1846 at 1634 0, and the GPU
+takes 0.456 to 0.685 ms for a walk (the median 0.494). With 1 the log says
+that the PC makes no atlas, and the GPU takes 0.585 to 0.711 ms (the median
+0.592), as with 0: 0.585 to 0.723 ms (the median 0.592). A crop of the
 middle of the left eye at frame 2500 at the same zoom (400 by 400 pixels of
 the centre image, and the same part of the eye picture of
 `fovea_res_layer=0` scaled by 2) has a mean gradient of the luma of 9.62
-with 1 and 6.57 with 0: the text of the Main Menu has sharper edges. Not
+with 2 and 6.57 with 0: the text of the Main Menu has sharper edges. An
+emulator test ran at the same time as these runs. Not
 run: a headset (the blend of the centre layer by the compositor of a Quest
 3, and the sharpness through the lens).
 

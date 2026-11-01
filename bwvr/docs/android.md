@@ -1429,7 +1429,9 @@ it. The log of the app says if the headset has an eye tracker, names the
 first gaze, and counts the slots with a gaze. On Meta Horizon OS the gaze
 needs the permission `com.oculus.permission.EYE_TRACKING`: the manifest has
 it, and the app asks the player at the start when the headset has an eye
-tracker. The answer counts from the next start of the app.
+tracker. The answer counts from the next start of the app. The menu of the
+app has no row of `foveation_gaze` (a page has room for 10 rows), so
+the app takes its value from `bwvr.ini` (1, the default, reads OpenXR).
 
 The values go across as the runtime gave them: no smoothing, no prediction
 of the app, the clock of the runtime.

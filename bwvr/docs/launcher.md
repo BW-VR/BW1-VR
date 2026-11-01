@@ -201,9 +201,9 @@ where the parts are.
 | Resolution of the middle | 100% | A slider from 50 to 200 in steps of 5. Key `fovea_res_center_pct` |
 | Size of the middle | 25 degrees | A slider from 10 to 45. Key `fovea_res_center_deg` |
 | Middle lower by | 0 degrees | A slider from 0 to 15. Key `fovea_res_center_down_deg`. Only with no eye tracker |
-| The middle follows | Your gaze | Key `foveation_gaze`: your gaze (1, OpenXR, else OSC), your gaze from OpenXR only (2), from OSC only (3), or straight ahead (0). With no eye tracker the middle is straight ahead |
-| OSC port of the gaze | 9000 | Key `eye_osc_port`. The UDP port for the gaze of an eye tracker as OSC, for example from Steam Link of the Steam Frame |
-| Gaze from OSC of other devices | off | Key `eye_osc_any`. On: the OSC of the gaze comes from the whole network, off: only from this PC |
+| The middle follows | Your gaze | Key `foveation_gaze`: your gaze (1, OpenXR, else OSC), your gaze from OpenXR only (2), from OSC only (3), or straight ahead (0). With no eye tracker the middle is straight ahead. Not in the menu of the headset app |
+| OSC port of the gaze | 9000 | Key `eye_osc_port`. The UDP port for the gaze of an eye tracker as OSC, for example from Steam Link of the Steam Frame. Not in the menu of the headset app |
+| Gaze from OSC of other devices | off | Key `eye_osc_any`. On: the OSC of the gaze comes from the whole network, off: only from this PC. Not in the menu of the headset app |
 | Show the parts with fewer details | off | Key `foveation_show`. A blue colour over the parts with fewer shades or fewer pixels |
 
 ### View

@@ -700,10 +700,15 @@ inline bool OnlyDirect3D9(const char* key) {
 
 // The rows that only the launcher on the PC uses. The menu of the headset app
 // does not show them, and keeps their values in the ini. A page of that menu
-// has room for 10 rows, so the six rows of the hand fit are not on it.
+// has room for 10 rows, so the six rows of the hand fit and the three rows of
+// the source of the gaze are not on it. In the headset app the fovea follows
+// the gaze of OpenXR with the value of foveation_gaze in the ini (1 is the
+// default).
 inline bool OnlyLauncher(const char* key) {
   return key != nullptr && (strcmp(key, "update_check") == 0 ||
-                            strncmp(key, "hand_fit_", 9) == 0);
+                            strncmp(key, "hand_fit_", 9) == 0 ||
+                            strcmp(key, "foveation_gaze") == 0 ||
+                            strncmp(key, "eye_osc_", 8) == 0);
 }
 
 }  // namespace bwvr_settings

@@ -1200,8 +1200,16 @@ that moves while the Hand takes it.
   `xrWaitFrame` makes the compositor time out presents. The Frame runs an
   APK at 72 Hz, the rate of SteamVR for each app (`android.md`, "The
   display rate"). Next: runs on the Frame at 90 and 144 Hz (a setting of the
-  device), then pictures between the frames of the game in the app, then
-  the code of the long game turn. The app
+  device), then pictures between the frames of the game in the app. In a
+  desktop run the long game turn is the first use of an animation of the
+  Creature: the game makes its mixed animation with the x87 instructions
+  FSIN, FCOS and FPATAN, which FEX runs as calls. `anim_trig=1` makes those
+  four functions with no x87 instruction (54 percent less time for the
+  animations in a desktop run, `backend.md`, "The long game turn"). Next on
+  the Frame: the length of the long game turn with `anim_trig` 1 and 0
+  (`slow_frame_ms=20`, `anim_watch=1`). The plan for the work of a frame
+  on more cores is in `android.md`, "The work of a frame on more cores".
+  The app
   gives each second the core and the CPU time of
   each thread (`thread_cores=1`), binds the main thread of the game, the
   session thread and the play thread to the fast cores (`thread_bind`), and

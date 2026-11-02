@@ -31,6 +31,7 @@
 #include "MinHook.h"
 #include "frame_profile.h"
 #include "long_frame_math.h"
+#include "scene_sample.h"
 #include "time_log.h"
 
 extern void ModLog(const char* format, ...);
@@ -51,6 +52,12 @@ void LandLightStepBegin();
 void LandLightStepEnd();
 void LandLightStepSkipped();
 void LandLightReport();
+// anim_watch.cpp: the animations that the game makes (anim_watch, a test).
+void AnimWatchInstall();
+void AnimWatchReport();
+// anim_trig.cpp: the angles of the animations with no x87 function.
+void AnimTrigInstall();
+void AnimTrigReport();
 
 namespace {
 
@@ -296,11 +303,17 @@ void __cdecl h_PhysicsGameTurnUpdate() {
 void __fastcall h_ProcessNetworkPackets(void* self, void* unused) {
   LARGE_INTEGER before, after;
   if (g_time_log_slow) TimeLogCall(long_frame_math::kTurn, true);
+  // profile_sample_turn: the samples read the stack up to this local.
+  SceneSampleTurnBegin(&before);
   QueryPerformanceCounter(&before);
   o_ProcessNetworkPackets(self, unused);
   QueryPerformanceCounter(&after);
   if (g_time_log_slow) TimeLogCall(long_frame_math::kTurn, false);
   const uint64_t spent = after.QuadPart - before.QuadPart;
+  SceneSampleTurnEnd(g_frequency.QuadPart != 0
+                         ? static_cast<double>(spent) * 1000.0 /
+                               static_cast<double>(g_frequency.QuadPart)
+                         : 0.0);
   if (FrameProfileOn()) FrameProfileAdd(kFpTurn, spent);
   g_turn_ticks += spent;
   if (spent > g_turn_worst) g_turn_worst = spent;
@@ -389,6 +402,8 @@ void PassGuardInstall() {
   Hook(kTempleUpdateFade, reinterpret_cast<void*>(&h_TempleUpdateFade),
        reinterpret_cast<void**>(&o_TempleUpdateFade), "Temple::UpdateFade");
   LandLightInstall();
+  AnimWatchInstall();
+  AnimTrigInstall();
   QueryPerformanceFrequency(&g_frequency);
   Hook(kProcessNetworkPackets,
        reinterpret_cast<void*>(&h_ProcessNetworkPackets),
@@ -411,6 +426,8 @@ void PassGuardReport() {
            g_fade_second);
   }
   LandLightReport();
+  AnimWatchReport();
+  AnimTrigReport();
   g_fade_second = 0;
   g_world_skipped = 0;
   g_hand_skipped = 0;

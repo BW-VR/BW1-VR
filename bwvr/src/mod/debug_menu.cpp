@@ -167,6 +167,9 @@ int XrHoldValue();
 void XrHoldToggle(const char* by);
 int FileReadAheadValue();
 void FileReadAheadToggle(const char* by);
+// anim_trig.cpp
+int AnimTrigValue();
+void AnimTrigToggle(const char* by);
 // The way of a draw to the headset app (render_chain.cpp).
 int RenderChainStateSkipValue();
 void RenderChainStateSkipToggle(const char* by);
@@ -400,6 +403,8 @@ const Switch kSwitches[] = {
      "thread_wait", ThreadWaitMode, ThreadWaitToggle, L"spin|sleep"},
     {kGroupRender, L"Read ahead", L"Read ahead of the game files",
      "file_read_ahead", FileReadAheadValue, FileReadAheadToggle, L"off|on"},
+    {kGroupRender, L"Anim angles", L"Angles of animations, no x87",
+     "anim_trig", AnimTrigValue, AnimTrigToggle, L"x87|mod"},
     {kGroupRender, L"Follow target", L"Vulkan follows the render target",
      "vk_scene_follow", VkSceneFollowValue, VkSceneFollowToggle, L"off|on"},
     {kGroupRender, L"Upload queue", L"Texture uploads in the submit",

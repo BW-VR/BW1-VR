@@ -77,6 +77,29 @@ inline void SceneSampleChecks() {
         "a call that ends one byte early is not a call", 0, 0);
   const uint8_t data[7] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
   Check(!EndsWithCall(data), "zeros are not a call", 0, 0);
+
+  // The chain of a sample of the game turn.
+  const uint32_t found[6] = {1u, 2u, 3u, 4u, 5u, 6u};
+  uint32_t chain[6] = {0, 0, 0, 0, 0, 0};
+  Near("a short chain keeps each call", KeepChain(found, 3, chain, 4), 3, 0);
+  Check(chain[0] == 1u && chain[2] == 3u, "a short chain is in its order", 0,
+        0);
+  Near("a long chain keeps the count it may have",
+       KeepChain(found, 6, chain, 4), 4, 0);
+  Check(chain[0] == 1u && chain[1] == 2u && chain[2] == 5u && chain[3] == 6u,
+        "a long chain keeps the innermost and the outermost calls", 0, 0);
+  Near("an odd count gives the outermost part one more",
+       KeepChain(found, 6, chain, 3), 3, 0);
+  Check(chain[0] == 1u && chain[1] == 5u && chain[2] == 6u,
+        "with 3 of 6: the innermost call and the two outermost", 0, 0);
+  Near("no call gives no chain", KeepChain(found, 0, chain, 4), 0, 0);
+
+  uint32_t words[6] = {7u, 0u, 3u, 7u, 3u, 9u};
+  Near("the repeats and the zeros go", UniqueWords(words, 6), 3, 0);
+  Check(words[0] == 3u && words[1] == 7u && words[2] == 9u,
+        "the words that stay are sorted", 0, 0);
+  uint32_t zeros[2] = {0u, 0u};
+  Near("only zeros give no word", UniqueWords(zeros, 2), 0, 0);
 }
 
 }  // namespace scene_sample_checks

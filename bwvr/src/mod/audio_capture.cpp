@@ -35,6 +35,7 @@
 
 #include "MinHook.h"
 #include "audio.h"
+#include "audio_watch.h"
 
 void ModLog(const char* format, ...);
 
@@ -48,6 +49,13 @@ typedef HRESULT(STDMETHODCALLTYPE* UnlockFn)(IDirectSoundBuffer*, void*,
 typedef DWORD(WINAPI* GetDirectSoundFn)(void*, IDirectSound**);
 const int kUnlockSlot = 19;   // in the vtable of IDirectSoundBuffer
 const int kLockSlot = 11;
+const int kPositionSlot = 4;
+// IDirectSoundBuffer::GetCurrentPosition. The mod hooks it only for
+// audio_turn_watch, to time the calls of QMixer.
+typedef HRESULT(STDMETHODCALLTYPE* PositionFn)(IDirectSoundBuffer*, DWORD*,
+                                               DWORD*);
+PositionFn o_Position[2] = {nullptr, nullptr};
+void* g_position_code[2] = {nullptr, nullptr};
 UnlockFn o_Unlock[2] = {nullptr, nullptr};
 void* g_unlock_code[2] = {nullptr, nullptr};
 // IDirectSoundBuffer::Lock. Its offset says where QMixer writes, and the
@@ -192,7 +200,11 @@ void OnBlock(char* data, DWORD bytes) {
   if (g_good_format != 0 && (bytes & 3) == 0) {
     int16_t* samples = reinterpret_cast<int16_t*>(data);
     const int frames = static_cast<int>(bytes / 4);
-    if (g_render != nullptr) g_render(samples, frames, g_rate);
+    if (g_render != nullptr) {
+      const int64_t watch = g_audio_watch ? AudioWatchBegin(kAwRender, 0) : 0;
+      g_render(samples, frames, g_rate);
+      if (watch != 0) AudioWatchEnd(kAwRender, watch);
+    }
     if (g_report) {
       for (int i = 0; i < frames; ++i) {
         for (int c = 0; c < 2; ++c) {
@@ -323,7 +335,11 @@ HRESULT STDMETHODCALLTYPE h_Unlock0(IDirectSoundBuffer* self, void* part1,
   if (FromMixer(reinterpret_cast<uintptr_t>(_ReturnAddress()))) {
     DirectSoundBlocks(self, part1, bytes1, part2, bytes2);
   }
-  return o_Unlock[0](self, part1, bytes1, part2, bytes2);
+  const int64_t watch =
+      g_audio_watch ? AudioWatchBegin(kAwUnlock, reinterpret_cast<uintptr_t>(_ReturnAddress())) : 0;
+  const HRESULT hr = o_Unlock[0](self, part1, bytes1, part2, bytes2);
+  if (watch != 0) AudioWatchEnd(kAwUnlock, watch);
+  return hr;
 }
 
 HRESULT STDMETHODCALLTYPE h_Unlock1(IDirectSoundBuffer* self, void* part1,
@@ -331,7 +347,11 @@ HRESULT STDMETHODCALLTYPE h_Unlock1(IDirectSoundBuffer* self, void* part1,
   if (FromMixer(reinterpret_cast<uintptr_t>(_ReturnAddress()))) {
     DirectSoundBlocks(self, part1, bytes1, part2, bytes2);
   }
-  return o_Unlock[1](self, part1, bytes1, part2, bytes2);
+  const int64_t watch =
+      g_audio_watch ? AudioWatchBegin(kAwUnlock, reinterpret_cast<uintptr_t>(_ReturnAddress())) : 0;
+  const HRESULT hr = o_Unlock[1](self, part1, bytes1, part2, bytes2);
+  if (watch != 0) AudioWatchEnd(kAwUnlock, watch);
+  return hr;
 }
 
 void* WINAPI h_InitEx(void* config) {
@@ -366,8 +386,11 @@ void NoteLock(HRESULT hr, DWORD offset, DWORD flags, uintptr_t caller) {
 HRESULT STDMETHODCALLTYPE h_Lock0(IDirectSoundBuffer* self, DWORD offset,
                                   DWORD bytes, void** part1, DWORD* bytes1,
                                   void** part2, DWORD* bytes2, DWORD flags) {
+  const int64_t watch =
+      g_audio_watch ? AudioWatchBegin(kAwLock, reinterpret_cast<uintptr_t>(_ReturnAddress())) : 0;
   const HRESULT hr =
       o_Lock[0](self, offset, bytes, part1, bytes1, part2, bytes2, flags);
+  if (watch != 0) AudioWatchEnd(kAwLock, watch);
   NoteLock(hr, offset, flags, reinterpret_cast<uintptr_t>(_ReturnAddress()));
   return hr;
 }
@@ -375,9 +398,30 @@ HRESULT STDMETHODCALLTYPE h_Lock0(IDirectSoundBuffer* self, DWORD offset,
 HRESULT STDMETHODCALLTYPE h_Lock1(IDirectSoundBuffer* self, DWORD offset,
                                   DWORD bytes, void** part1, DWORD* bytes1,
                                   void** part2, DWORD* bytes2, DWORD flags) {
+  const int64_t watch =
+      g_audio_watch ? AudioWatchBegin(kAwLock, reinterpret_cast<uintptr_t>(_ReturnAddress())) : 0;
   const HRESULT hr =
       o_Lock[1](self, offset, bytes, part1, bytes1, part2, bytes2, flags);
+  if (watch != 0) AudioWatchEnd(kAwLock, watch);
   NoteLock(hr, offset, flags, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+  return hr;
+}
+
+HRESULT STDMETHODCALLTYPE h_Position0(IDirectSoundBuffer* self, DWORD* play,
+                                      DWORD* write) {
+  const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  const int64_t watch = FromMixer(caller) ? AudioWatchBegin(kAwPosition, caller) : 0;
+  const HRESULT hr = o_Position[0](self, play, write);
+  if (watch != 0) AudioWatchEnd(kAwPosition, watch);
+  return hr;
+}
+
+HRESULT STDMETHODCALLTYPE h_Position1(IDirectSoundBuffer* self, DWORD* play,
+                                      DWORD* write) {
+  const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  const int64_t watch = FromMixer(caller) ? AudioWatchBegin(kAwPosition, caller) : 0;
+  const HRESULT hr = o_Position[1](self, play, write);
+  if (watch != 0) AudioWatchEnd(kAwPosition, watch);
   return hr;
 }
 
@@ -406,6 +450,18 @@ void HookUnlock(IDirectSoundBuffer* buffer, const char* what) {
     if (l == MH_OK) l = MH_EnableHook(lock);
     if (l == MH_OK) g_lock_code[slot] = lock;
   }
+  // audio_turn_watch: the same for GetCurrentPosition, to time it.
+  void* position = vtable[kPositionSlot];
+  if (g_audio_watch && s == MH_OK && g_position_code[slot] == nullptr) {
+    MH_STATUS p = MH_CreateHook(
+        position, slot == 0 ? reinterpret_cast<void*>(&h_Position0)
+                            : reinterpret_cast<void*>(&h_Position1),
+        reinterpret_cast<void**>(&o_Position[slot]));
+    if (p == MH_OK) p = MH_EnableHook(position);
+    if (p == MH_OK) g_position_code[slot] = position;
+    ModLog("audio watch  : GetCurrentPosition of a %s DirectSound buffer at %p %s", what,
+           position, p == MH_OK ? "ok" : "FAILED");
+  }
 }
 
 MMRESULT WINAPI h_Write(HWAVEOUT device, LPWAVEHDR header, UINT size) {
@@ -413,7 +469,11 @@ MMRESULT WINAPI h_Write(HWAVEOUT device, LPWAVEHDR header, UINT size) {
       header->dwBufferLength >= 4) {
     OnBlock(header->lpData, header->dwBufferLength);
   }
-  return o_Write(device, header, size);
+  const int64_t watch =
+      g_audio_watch ? AudioWatchBegin(kAwWrite, reinterpret_cast<uintptr_t>(_ReturnAddress())) : 0;
+  const MMRESULT r = o_Write(device, header, size);
+  if (watch != 0) AudioWatchEnd(kAwWrite, watch);
+  return r;
 }
 
 void WINAPI h_DebugString(LPCSTR text) {

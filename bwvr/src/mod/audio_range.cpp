@@ -75,6 +75,7 @@
 
 #include "MinHook.h"
 #include "audio.h"
+#include "audio_watch.h"
 #include "audio_math.h"
 #include "debug_menu.h"
 
@@ -483,7 +484,7 @@ void Change(Sound* s, int state, const Facts& f, const char* format, ...) {
 float __fastcall h_MaxDistance(void* self, void* unused, unsigned sample,
                                void* bank) {
   if (g_force &&
-      reinterpret_cast<uintptr_t>(_ReturnAddress()) == kMaxDistanceReturn) {
+      AudioWatchCaller(reinterpret_cast<uintptr_t>(_ReturnAddress())) == kMaxDistanceReturn) {
     return kPass;
   }
   return o_MaxDistance(self, unused, sample, bank);

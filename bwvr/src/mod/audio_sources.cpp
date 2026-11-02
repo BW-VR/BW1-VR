@@ -53,6 +53,7 @@
 
 #include "MinHook.h"
 #include "audio.h"
+#include "audio_watch.h"
 #include "audio_math.h"
 #include "audio_object.h"
 
@@ -433,7 +434,7 @@ bool Choose(uintptr_t caller, const uint8_t* options, int* kind,
 }
 
 void* __fastcall h_SamplePlay(void* self, void* unused, void* options) {
-  const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  const uintptr_t caller = AudioWatchCaller(reinterpret_cast<uintptr_t>(_ReturnAddress()));
   AudioNoteSystem(self);
   const bool trace = AudioTraceOn();
   if (trace) {

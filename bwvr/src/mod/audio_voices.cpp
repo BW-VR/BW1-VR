@@ -64,6 +64,7 @@
 
 #include "MinHook.h"
 #include "audio.h"
+#include "audio_watch.h"
 #include "audio_math.h"
 #include "audio_spatial.h"
 #include "debug_menu.h"
@@ -267,7 +268,17 @@ bool Readable(const void* p, size_t n) {
 }
 
 struct Lock {
-  Lock() { EnterCriticalSection(&g_lock); }
+  Lock() {
+    // audio_turn_watch=1: a wait for the lock on the frame thread in an
+    // audio turn has a timer.
+    if (g_audio_watch && !TryEnterCriticalSection(&g_lock)) {
+      const int64_t token = AudioWatchBegin(kAwModLock, 0);
+      EnterCriticalSection(&g_lock);
+      AudioWatchEnd(kAwModLock, token);
+    } else if (!g_audio_watch) {
+      EnterCriticalSection(&g_lock);
+    }
+  }
   ~Lock() { LeaveCriticalSection(&g_lock); }
 };
 
@@ -689,7 +700,7 @@ void StopVoice(int channel) {
 // be silent in QMixer because a voice of the mod plays its sample. See the
 // note at the top of this file.
 void WINAPI h_StopSleep(DWORD ms) {
-  const uintptr_t site = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  const uintptr_t site = AudioWatchCaller(reinterpret_cast<uintptr_t>(_ReturnAddress()));
   bool stop = false;
   for (int i = 0; i < kStopSites; ++i) {
     if (site == g_stop_site[i] && site != 0) stop = true;

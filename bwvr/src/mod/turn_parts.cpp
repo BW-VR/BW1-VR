@@ -53,6 +53,7 @@
 #include <string.h>
 
 #include "MinHook.h"
+#include "audio_watch.h"
 #include "thread_id.h"
 #include "time_log.h"
 #include "turn_parts.h"
@@ -128,6 +129,8 @@ constexpr int kDefCount = sizeof(kDefs) / sizeof(kDefs[0]);
 // The index of process_turn in kDefs: a game turn with a call of it is a real
 // turn.
 constexpr int kProcessTurnDef = 0;
+// GAudio::ProcessAudioGameTurn, the audio turn.
+constexpr uint32_t kAudioTurnAddress = 0x00427080;
 
 // The animations of a Morphable (anim_watch.cpp): a table of the object at
 // +0x1D4, one slot for each number (0x2B8) and each kind. An empty slot means
@@ -148,6 +151,7 @@ Timer g_timers[tp::kMaxParts];
 const char* g_names[tp::kMaxParts];
 int g_count = 1;  // timer 0 is the rest
 int g_process_turn_id = 0;
+int g_audio_turn_id = 0;  // the timer of audio_turn, for audio_turn_watch
 uint8_t* g_stubs = nullptr;
 const int kStubBytes = 10;
 
@@ -201,10 +205,12 @@ extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint
   if (g_in_turn && ThisThreadId() == g_thread &&
       tp::Timed(true, true, g_stack.nest[id], g_stack.depth)) {
     const bool take = t.filter != kMadeAnimation || SlotEmpty(self, ret_slot[1], ret_slot[2]);
+    const int64_t now = Now();
     if (take &&
-        g_stack.Push(static_cast<int>(id), Now(), *ret_slot,
+        g_stack.Push(static_cast<int>(id), now, *ret_slot,
                      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ret_slot)))) {
       *ret_slot = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&ExitThunk));
+      if (static_cast<int>(id) == g_audio_turn_id) AudioWatchTurnBegin(now);
     }
   }
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(t.original));
@@ -213,7 +219,11 @@ extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint
 // ExitThunk comes here with the stack place after the return of the function.
 // Integers only.
 extern "C" uint32_t __cdecl TurnPartsExit(uint32_t esp) {
-  const uint32_t ret = g_stack.Return(Now(), esp);
+  const int64_t now = Now();
+  const int top = g_stack.Match(esp);
+  const bool audio_turn = g_audio_turn_id != 0 && top >= 0 && g_stack.open[top].id == g_audio_turn_id;
+  const uint32_t ret = g_stack.Return(now, esp);
+  if (audio_turn) AudioWatchTurnEnd(now);
   if (ret != 0) return ret;
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&NoReturn));
 }
@@ -487,6 +497,10 @@ void TurnPartsInstall() {
     return;
   }
   g_turn_parts = true;
+  for (int i = 1; i < g_count; ++i) {
+    if (g_timers[i].shown == kAudioTurnAddress) g_audio_turn_id = i;
+  }
+  if (g_audio_turn_id != 0) AudioWatchInit();
   ModLog("turn parts   : turn_parts=1. %d timers on the functions of the game turn (%d of %d "
          "parts and %d more by turn_parts_add). Each 10 s one line with the parts of the turns "
          "of %.0f ms or more, and with slow_frame_ms the parts of the turn in each line of a "
@@ -507,6 +521,7 @@ void TurnPartsTurnBegin(int64_t begin) {
 // asks whether one is due) has no call of process_turn and is not a turn.
 void TurnPartsTurnEnd(int64_t end) {
   g_in_turn = false;
+  AudioWatchGameTurnEnd();
   while (g_stack.depth > 1) g_stack.DropTop();
   if (g_stack.depth == 1) g_stack.CloseTop(end);
   g_lost += g_stack.lost;
@@ -529,6 +544,7 @@ int TurnPartsFrameText(char* out, size_t size) {
 
 void TurnPartsFrameEnd() {
   if (g_turn_parts) g_frame.Clear();
+  AudioWatchFrameEnd();
 }
 
 bool TurnPartsWindowLine(double seconds) {

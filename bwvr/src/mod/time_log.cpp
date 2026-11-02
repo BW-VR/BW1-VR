@@ -36,6 +36,7 @@
 #include "scene_sample.h"
 #include "time_log.h"
 #include "time_log_math.h"
+#include "audio_watch.h"
 #include "turn_parts.h"
 
 void ModLog(const char* format, ...);
@@ -77,7 +78,7 @@ double g_long_cpu_ms = 0.0;
 // go to the log one at each present (long_frame_math::KeptOrder). The gate
 // gives at most 5 lines a second, so a window of 10 s has about 50.
 const int kPending = 64;
-char g_pending[kPending][1800];
+char g_pending[kPending][3200];
 long_frame_math::KeptOrder<kPending> g_kept;
 uint64_t g_kept_lost = 0;  // the lost lines at the start of the window
 // The lines of this file that went to the log since the last present: the
@@ -175,6 +176,15 @@ void SlowFrame(double now) {
       if (TurnPartsFrameText(text, sizeof(text)) > 0) {
         _snprintf_s(g_pending[slot] + used, sizeof(g_pending[0]) - used, _TRUNCATE,
                     ". The parts of the game turn (turn_parts=1): %s", text);
+      }
+      // audio_turn_watch=1: the parts of an audio turn of 5 ms or more.
+      if (g_audio_watch) {
+        const size_t used2 = strlen(g_pending[slot]);
+        char audio[1400];
+        if (AudioWatchFrameText(audio, sizeof(audio)) > 0) {
+          _snprintf_s(g_pending[slot] + used2, sizeof(g_pending[0]) - used2, _TRUNCATE,
+                      ". The audio turn (audio_turn_watch=1): %s", audio);
+        }
       }
     }
   }
@@ -316,6 +326,7 @@ void TimeLogPresent() {
     g_log_writes += 2;
   }
   if (g_turn_parts && TurnPartsWindowLine(seconds)) ++g_log_writes;
+  if (g_audio_watch && AudioWatchWindowLine(seconds)) ++g_log_writes;
   if (!g_said) {
     g_said = true;
     ModLog("time log     : the rest is the logic of the game, the frame work of the mod "

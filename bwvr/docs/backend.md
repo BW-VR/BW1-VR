@@ -66,6 +66,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/anim_trig.cpp`, `anim_trig_math.h` | The four functions of the angles and the rotations of the animations with no x87 instruction (`anim_trig`, "The long game turn") |
 | `src/mod/anim_watch.cpp` | A test aid: the animations that `Morphable::GetSetAnim` makes, and their time (`anim_watch`) |
 | `src/mod/turn_parts.cpp`, `turn_parts_math.h` | A test aid: timers on the functions that the game turn calls, and the parts of the turn in the lines of the long frames (`turn_parts`, "The long game turn"). The math checks are in `test/controller_math/turn_parts_checks.h` |
+| `src/mod/audio_watch.cpp`, `audio_watch_math.h` | A test aid: timers on the calls of the audio turn into the audio DLL and QMixer, and on their wait calls (`audio_turn_watch`, `audio.md`, 7.7). It needs `turn_parts=1` |
 | `src/mod/time_log.cpp`, `time_log_math.h` | The time log: each 10 s the parts of a frame of the game (`time_log`). The math checks are in `test/controller_math/time_log_checks.h` |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`). The crash log: the C++ exceptions and each end of the game in its C runtime (`crash_log`) |
 | `src/mod/stall_watch.cpp`, `stall_math.h` | The module list at a stall (`stall_modules`, `stall_addrs`), and the test spin (`test_stall_ms`). The math checks are in `test/controller_math/stall_checks.h` |

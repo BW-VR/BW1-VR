@@ -29,6 +29,7 @@ add_library(bwvr_mod SHARED
     anim_watch.cpp
     anim_trig.cpp
     turn_parts.cpp
+    audio_watch.cpp
     land_light.cpp
     frame_timers.cpp
     tick_direct.cpp

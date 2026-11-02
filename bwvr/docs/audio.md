@@ -589,6 +589,7 @@ functions of the exe.
 | `audio_capture.cpp` | The hook on the stream of QMixer: the mixer takes its block here, the capture writes it, and the latency is set here |
 | `audio_cues.cpp` | The soft sounds for the moves of the player |
 | `audio_trace.cpp` | Log only hooks (section 11) |
+| `audio_watch.cpp`, `audio_watch_math.h` | A test aid: the timers of the audio turn (7.7) |
 | `audio_math.h`, `audio_spatial.h` | The pure math, with checks in `bwvr/test/controller_math/` |
 
 Each hook that patches a function of the exe checks the first bytes of the
@@ -1018,6 +1019,111 @@ skips the wait and a short pulse when each stop has it. Windows gives the key
 do not see the press. The test `audio_stop_wait_test=N` does the same at
 frame `N` of the controllers, for a desktop run.
 
+### 7.7 The watch of the audio turn
+
+A test aid for a wait in `GAudio::ProcessAudioGameTurn` (`0x00427080`), the
+audio turn. On the Steam Frame the audio turn takes 26 to 35 ms in one call
+about 5 times in 10 s, and the stop wait of 7.6 explains only a few of
+them. `audio_turn_watch=1` (0 is the default: no stub and no line) times what
+the audio turn calls. It needs `turn_parts=1` (the timer on the audio turn)
+and `time_log=1` (the lines). `audio_watch.cpp` has the code and
+`audio_watch_math.h` the math, with checks in
+`test/controller_math/audio_watch_checks.h`.
+
+**What has a timer, on the frame thread in an audio turn:**
+
+| Name in the line | The call |
+| --- | --- |
+| `LH:` | An import of `runblack.exe` from `LHaudiodllR.dll` (the audio system, the samples, the listener). It is a slot in the import table of the game |
+| `QM:` | An import of `LHaudiodllR.dll` from `QMixer.dll` (the 30 functions of section 2) |
+| `k32:`, `user:` | The wait calls in the import tables of the two DLLs: `Sleep`, `SleepEx`, `EnterCriticalSection`, `WaitForSingleObject(Ex)`, `WaitForMultipleObjects(Ex)`, `SignalObjectAndWait`, `MsgWaitForMultipleObjects(Ex)`, `SendMessage` |
+| `winmm:`, `acm:`, `log:`, `ole:` | The other imports of the two DLLs from the wave and timer calls, the audio compression manager, the log DLL of the game and OLE |
+| `ds:` | `IDirectSoundBuffer::Lock`, `Unlock` and `GetCurrentPosition` when QMixer calls them (the hooks of `audio_capture.cpp`) |
+| `mod:lock` | The lock of the mixer of the mod (`g_lock` in `audio_voices.cpp`), when the frame thread must wait for it |
+
+A timer is a stub in the import slot. It keeps the registers, takes the
+clock and puts the exit thunk in the place of the return address, as the
+timers of `turn_parts` do (`backend.md`, "The long game turn"). No MinHook
+hook is made, so no thread stops. The slots change at the first audio turn,
+after the other patches of the mod. Only the frame thread in an audio turn
+counts. The time is exclusive: the call less the timers that it calls. The
+audio turn itself is `audio_turn`, so its exclusive time is the code of the
+game and of the mod and each call that has no timer. A hook of the mod that
+reads its own return address (`h_SamplePlay`, `h_MaxDistance`,
+`h_StopSleep`) asks `AudioWatchCaller`, which gives the address that the
+game would see. A stack walk of `audio_trace` shows the thunk instead.
+A data export of `LHaudiodllR.dll` (`LHFileSegment...`) gets no stub.
+
+**The mixer thread.** The hooks of `audio_capture.cpp` time `Lock`,
+`Unlock`, `GetCurrentPosition` (a new hook, only with the key at 1),
+`waveOutWrite` and the render of the mixer of the mod in each block. The
+sums go to the line of the window.
+
+**The lines.**
+
+- Each 10 s one line `audio watch`: the audio turns of the window, and the
+  parts of the audio turns of 5 ms or more. Each part has its name, the call
+  site (`LH+0x12EA2` is an offset in `LHaudiodllR.dll`, `QM+0x2D7A0` one in
+  `QMixer.dll`, `the game 0x004271D7` an address in `runblack.exe`), the
+  timer that called it (`in QM:QSWaveMixSetVolume`), the exclusive ms, the
+  share, the calls and the most in one call. Then the calls of the mixer
+  thread. This is the line of the first window of a desktop run in the test
+  save `pen`. That game had no game turn, so the line shows the form and the
+  mixer thread:
+
+```
+audio watch  : 10.0 s, 0 audio turns (mean 0.00 ms, worst 0.00 ms), 0 of them 5 ms or more (together 0.00 ms). The stubs saw 0 calls on the frame thread outside an audio turn and 0 on another thread. No long audio turn, so no part to show. The mixer thread: IDirectSoundBuffer::Lock 9 calls (mean 0.003 ms, most 0.004 ms), IDirectSoundBuffer::Unlock 9 calls (mean 0.002 ms, most 0.003 ms), IDirectSoundBuffer::GetCurrentPosition 11 calls (mean 0.002 ms, most 0.002 ms), waveOutWrite 0 calls, the render of the mod 9 calls (mean 0.003 ms, most 0.004 ms)
+```
+
+- The line `long frame` of a frame with an audio turn of 5 ms or more ends with
+  `The audio turn (audio_turn_watch=1):`, the audio turn in ms and its eight
+  largest parts in the form above.
+
+**What the code shows (V for the calls, I for the effect).**
+
+- Each `QSWaveMix` call that the DLL makes in the audio turn takes the mutex
+  of the QMixer session first (`SetVolume`, `SetPanRate`, `FlushChannel`,
+  `IsChannelDone`, `SetSourcePosition`, `PlayEx` and the others, but not the
+  calls that open a wave or start a session). `QSWaveMixPump`, which the
+  timer of the DLL calls each 20 ms (section 2, "Threads"), takes it too.
+  The mutex is a Windows mutex (`CreateMutexA`). The lock method
+  is at `QMixer.dll` RVA `0x2D790`: it calls `WaitForSingleObject` with the
+  time `INFINITE`, and the call returns to RVA `0x2D7A0`. The unlock method is
+  at `0x2D7B0`. The session gives the same mutex to the thread object that
+  mixes (the function at RVA `0x9310` passes it on). I: the mixer thread holds
+  the mutex while it mixes and writes a block, so a call of the frame thread
+  waits until the block is done. On a slow or busy CPU a block takes long.
+  Then the watch shows a `k32:WaitForSingleObject` from `QM+0x2D7A0` in the
+  `QM:` call, with a time that is near the time of a block.
+- `LHSampleUpdate3DChannels` (RVA `0x14310`) loops over the 16 sample slots.
+  For each slot that plays it asks `QSWaveMixIsChannelDone`, calls the object
+  function of the game, and then sets the place (`QSWaveMixSetSourcePosition`)
+  or stops the sample. A stop makes four `QSWaveMix` calls and the `Sleep(20)`
+  of 7.6. So one audio turn can take the mutex of the session many times.
+- `LHSamplePlay` (a start) runs the audio compression manager for ADPCM
+  waves (`msacm32.dll`) and logs through `LHLogR.dll`. Both have timers.
+
+**How to read a result.** The part with the most exclusive ms in the long
+audio turns says where the time is.
+
+| The part | The cause | The next step |
+| --- | --- | --- |
+| `k32:WaitForSingleObject` from `QM+0x2D7A0` | The frame thread waits for the mutex of the session. The mixer thread holds it | The `ds:` and `winmm:` times of the mixer thread say how long a block holds it. The fix is a call that the mod moves off the frame thread, or less work of the mixer thread in the lock |
+| `k32:Sleep` from `LH+0x12EA2` (or `0x12CEB`, `0x12DAD`) | A stop that kept its wait (7.6) | `audio_stop_wait=0` skips it for a sound that the mixer of the mod plays |
+| `k32:EnterCriticalSection` from `LH+...` | A lock inside the audio DLL | The thread that holds it |
+| `mod:lock` | The mixer of the mod holds `g_lock` | The render of a block is long, or the mixer thread did not run (`the render of the mod` in the line) |
+| `QM:` with no wait below it | Work or a DirectSound call of Wine inside QMixer, which has no timer | A hook on the DirectSound methods that QMixer calls on the frame thread |
+| `audio_turn` itself | The code of the game, the object function of the game, or a hook of the mod | A `turn_parts_add` timer on the object function |
+| `LH:` with no part below it | The code of the DLL itself, or a call with no timer | The decompiled code of that function (in `local/` only) |
+
+**Limits.** A DirectSound call of QMixer on the frame thread, other than
+`Lock`, `Unlock` and `GetCurrentPosition`, is in the exclusive time of the
+`QM:` call that made it. The calls of the system outside the two DLLs
+(`dsound.dll`, `winmm.dll` of Wine) have no timer of their own, apart from
+the imports listed above. Only a headset (the Steam Frame) shows the wait.
+A desktop run can show only that the lines come and that the sound does not
+change.
+
 ## 8. Cues for the moves of the player
 
 `audio_cues.cpp`. A short, quiet cue plays for a move that the mod makes,
@@ -1083,6 +1189,7 @@ behavior is in the last column.
 | `audio_atmos_mixer` | 1 | The single sounds of the atmosphere (birds, waves) go through the mixer | 0: QMixer plays them, steered by 6.5 |
 | `audio_atmos_toward` | 1 | A single sound of the atmosphere goes toward the land of its kind | 0: a random place on the ring |
 | `audio_stop_wait` | 0 | The mod skips the wait of 20 ms of the audio DLL at the stop of a sound that the mixer of the mod plays (7.6) | 1: each stop holds the frame thread for 20 ms |
+| `audio_turn_watch` | 0 | Test only: times each call of the audio turn into the audio DLL and QMixer, and each wait call of the two DLLs, on the frame thread. It needs `turn_parts=1` and `time_log=1` (7.7) | 0: no timer, no line |
 | `audio_cues` | 1 | Soft sounds for the player's moves | 0 |
 | `audio_cues_pct` | 100 | Their level, 0 to 300 | |
 | `audio_latency_ms` | 0 | The latency that QMixer starts with (section 10) | 0: QMixer's own value, 50 ms |
@@ -1307,6 +1414,12 @@ the game window in front), and the level balance by ear.
 - The stop of a sound that QMixer plays holds the frame thread for 20 ms
   (7.6). A desktop run of 110 s has 2 such stops. Which sounds they are is
   not known.
+- On the Steam Frame the audio turn takes 26 to 35 ms in one call about 5
+  times in 10 s, also with `audio_stop_wait=0`. The time is in the audio turn
+  and in no timer of `turn_parts`. The cause is not known. `audio_turn_watch=1`
+  (7.7) names the call and the call site. QMixer takes one mutex for each call
+  of the audio DLL, and its mixer thread has the same mutex (7.7). So a call
+  of the frame thread can wait for the mixer thread.
 - A sound with no object that the game asks for at a place of its own keeps
   the test of the game, with the game camera 400 units away in the God view.
   Only the loop of a bulk take has the test of the ears (6.4). Sample 52 of

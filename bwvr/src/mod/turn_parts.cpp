@@ -153,6 +153,10 @@ const int kStubBytes = 10;
 
 DWORD g_thread = 0;  // the frame thread
 bool g_in_turn = false;
+uint64_t g_seen_in_turn = 0;       // calls of a stub in a game turn on the frame thread
+uint64_t g_seen_outside = 0;       // calls of a stub on the frame thread outside a game turn
+uint64_t g_seen_other_thread = 0;  // calls of a stub on another thread
+uint64_t g_turn_function_calls = 0;
 LARGE_INTEGER g_hz = {};
 double g_ms_per_tick = 0.0;
 wp::Stack g_stack;
@@ -186,6 +190,14 @@ void __cdecl NoReturn();
 // arguments of the function after it. `self` is ecx at the call.
 extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint32_t self) {
   const Timer& t = g_timers[id];
+  // The counts of the other threads are not exact (no lock). They are a hint.
+  if (ThisThreadId() != g_thread) {
+    ++g_seen_other_thread;
+  } else if (!g_in_turn) {
+    ++g_seen_outside;
+  } else {
+    ++g_seen_in_turn;
+  }
   if (g_in_turn && ThisThreadId() == g_thread &&
       tp::Timed(true, true, g_stack.nest[id], g_stack.depth)) {
     const bool take = t.filter != kMadeAnimation || SlotEmpty(self, ret_slot[1], ret_slot[2]);
@@ -485,6 +497,7 @@ void TurnPartsInstall() {
 // h_ProcessNetworkPackets: the call starts. The stack starts with the turn as
 // timer 0.
 void TurnPartsTurnBegin(int64_t begin) {
+  ++g_turn_function_calls;
   if (g_stack.depth != 0) g_stack = wp::Stack();
   g_stack.Push(0, begin, 0, 0);
   g_in_turn = true;
@@ -521,6 +534,11 @@ void TurnPartsFrameEnd() {
 bool TurnPartsWindowLine(double seconds) {
   if (!g_turn_parts) return false;
   static char line[8192];
+  g_window.turn_function_calls = g_turn_function_calls;
+  g_window.stub_in_turn = g_seen_in_turn;
+  g_window.stub_outside = g_seen_outside;
+  g_window.stub_other_thread = g_seen_other_thread;
+  g_turn_function_calls = g_seen_in_turn = g_seen_outside = g_seen_other_thread = 0;
   tp::WindowLine(line, sizeof(line), g_window, g_count, g_names, seconds);
   ModLog("turn parts   : %s%s", line,
          g_lost > 0 ? ". A call that no return closed was lost (a fault)" : "");

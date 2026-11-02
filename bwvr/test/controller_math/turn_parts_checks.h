@@ -127,7 +127,17 @@ inline void TurnPartsChecks() {
             Has(text, "phase 3.00 ms (30.0 percent, 1 call, most 3.00, inclusive 8.00)") &&
             Has(text, "outside the parts 2.00 ms (20.0 percent, most 2.00)"),
         "the line of a window: the turns, the parts of the long turns, the rest", 1, 1);
+  w.turn_function_calls = 450;
+  w.stub_in_turn = 70;
+  w.stub_outside = 3;
+  w.stub_other_thread = 2;
+  tp::WindowLine(text, sizeof(text), w, 4, names, 10.0);
+  Check(Has(text, "The turn function ran 450 times. The timers saw 70 calls in a game turn on the "
+                  "frame thread, 3 outside a game turn and 2 on another thread."),
+        "the line of a window says what the timers saw", 1, 1);
   w.Reset();
+  Check(w.turn_function_calls == 0 && w.stub_in_turn == 0, "a new window has no count of calls",
+        static_cast<double>(w.stub_in_turn), 0);
   Check(w.turns == 0 && w.long_turns == 0 && w.excl_ms[1] == 0.0, "a new window is empty",
         w.turns, 0);
 }

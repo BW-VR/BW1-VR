@@ -2338,6 +2338,12 @@ more in a turn (`fn_00552F80`, `fn_00555850`, `fn_007AEE98`) have none.
   windows), and `new_animation` up to 4.84 ms in the first 60 s. The first
   window (the load) has `mesh_load` 8.92 ms in 12 calls. The 20 windows have
   no call that no return closed.
+- **A window with no turn.** The line says how often the turn function ran
+  (most calls only ask if a turn is due) and how many calls the stubs saw in a
+  game turn on the frame thread, outside a game turn and on another thread.
+  So a window with 0 turns shows whether the game ran no turn or the timers
+  missed it. In the Android emulator (Wine, no FEX, the test save `pen`, 60 s
+  of the scene) every window had 0 game turns, and the cause is not known.
 
 ```
 turn parts   : 10.0 s, 100 game turns (mean 0.46 ms, worst 6.41 ms), 1 of them 1 ms or more (together 6.41 ms). The parts of these turns, exclusive ms in all of them, the share, the calls, the most in one turn and the inclusive ms: building_site 5.85 ms (91.2 percent, 4 calls, most 5.85, inclusive 5.85), fn_005EC810 0.16 ms (2.6 percent, 1 call, most 0.16, inclusive 0.16), audio_turn 0.12 ms (1.8 percent, 1 call, most 0.12, inclusive 0.12), players_towns 0.07 ms (1.2 percent, 1 call, most 0.07, inclusive 5.92), ..., 47 more parts under 0.01 ms, outside the parts 0.00 ms (0.0 percent, most 0.00)

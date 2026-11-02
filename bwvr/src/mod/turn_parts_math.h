@@ -113,6 +113,14 @@ struct Window {
   double incl_ms[kMaxParts] = {};
   double most_ms[kMaxParts] = {};  // the most exclusive ms in one long turn
   uint64_t calls[kMaxParts] = {};
+  // What the timers saw in the window, for the case of a window with no turn:
+  // the calls of the function of the turn (the game asks if a turn is due,
+  // so most calls run no turn), and the calls of the stubs in a game turn on
+  // the frame thread, outside a game turn, and on another thread.
+  uint64_t turn_function_calls = 0;
+  uint64_t stub_in_turn = 0;
+  uint64_t stub_outside = 0;
+  uint64_t stub_other_thread = 0;
 
   void Reset() { *this = Window(); }
 
@@ -219,6 +227,13 @@ inline int WindowLine(char* out, size_t size, const Window& w, int parts,
          seconds, static_cast<unsigned long long>(w.turns),
          w.turns > 0 ? w.turn_ms / static_cast<double>(w.turns) : 0.0, w.worst_ms,
          static_cast<unsigned long long>(w.long_turns), kLongTurnMs, w.long_ms);
+  Append(out, size, &used,
+         " The turn function ran %llu times. The timers saw %llu calls in a game turn on the "
+         "frame thread, %llu outside a game turn and %llu on another thread.",
+         static_cast<unsigned long long>(w.turn_function_calls),
+         static_cast<unsigned long long>(w.stub_in_turn),
+         static_cast<unsigned long long>(w.stub_outside),
+         static_cast<unsigned long long>(w.stub_other_thread));
   if (w.long_turns == 0) {
     Append(out, size, &used, " No long turn, so no part to show");
     return static_cast<int>(used);

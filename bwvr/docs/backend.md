@@ -2106,10 +2106,12 @@ apart (`android.md`, "The long frames"). A turn of normal length is about
 1.4 ms there, about 3 times the median turn of a desktop run. A desktop run
 has long turns of the same kind (1 to 6 ms). Of the samples of its long
 turns, about 57 percent are below `Morphable::GetSetAnim`, the making of
-the animations of the Creature (below). Other long turns of up to 6 ms come
-with no new animation, and their cause is open. It is expected that FEX
-makes the making of animations more than 3 times longer than a PC, because
-of its x87 instructions. Only a headset can show the parts of a long turn
+the animations of the Creature (below). Other long turns of up to 6.7 ms
+come with no new animation: a new BuildingSite, `Morphable::MorphTexture`
+and `GScript::Process` ("The long turns with no new animation", below). It
+is expected that FEX makes the making of animations more than 3 times
+longer than a PC, because the code of the animations uses x87
+instructions. Only a headset can show the parts of a long turn
 under FEX.
 
 **What the game does in it.** When the Creature uses an animation for the
@@ -2136,7 +2138,7 @@ call at `0x004737B5`), `fn_004FEDA0`, `fn_00484B80`, `Morphable::GetAnim`
 (`0x00619650`), `GetSetAnim`, then `fn_0085EF40` or `fn_00861A00`. In a
 desktop run in the test save `pen` 57 percent of the samples of the turns
 of 1 ms or more have `GetSetAnim` on the stack, and 56 percent are in the
-four functions. The other samples of these turns are open.
+four functions. The other samples are in other parts of the turn (below).
 
 **What a desktop run shows** (the test save `pen`, 150 to 180 s,
 `test_frame_rate=90`, `anim_watch=1`, the x87 path of the game): the median
@@ -2146,8 +2148,8 @@ of kind 0, 11 of kind 1, 102 of the kinds 2 to 5). In the next 60 s each
 worst game turn of each 450 frames is 1.6 to 5.5 ms. After that the scene
 still makes no new animation, and the worst game turn is 0.5 to 0.9 ms in
 most windows of 450 frames. Some windows with no new animation have a
-worst turn of 1.3 to 6.7 ms (one of 5.9 to 6.7 ms in each run): a long turn
-of another cause.
+worst turn of 1.3 to 6.7 ms (one of 5.9 to 6.7 ms in each run). These are
+the long turns with no new animation below.
 Each run of the save makes the same count of animations in each 450 frames.
 A player who moves gives the Creatures new things to do, so on the Frame
 the new animations are expected to come for minutes. Only a headset can
@@ -2217,14 +2219,54 @@ scene sample : 23 samples in the game turns of 1 ms or more: 2 turns of 450, 12 
 scene sample : the return addresses in runblack.exe on the stacks of these samples, in % of the samples that have each one: 0x0054CE5D 100.0%, 0x0054D67E 100.0%, ...
 ```
 
+**The long turns with no new animation** (a desktop run in `pen`, 420 s,
+`anim_trig=1`, `anim_watch=1`, `profile_sample_turn=250`,
+`profile_sample_turn_ms=1`, `profile_sample_dump=1`). The 81 reports of 450
+frames have 37 turns of 1 ms or more: 26 in the 12 reports with new
+animations (the first 65 s), 11 in 10 reports with no new animation. The
+other 59 reports have no turn of 1 ms, and their worst turn is 0.45 to 0.66
+ms. Of the 67 samples of the reports with no new animation,
+`Morphable::MorphTexture` has 29.9 percent, a new BuildingSite 28.4,
+`GScript::Process` 28.4, and the rest 13.4. The class names come from the
+RTTI of `runblack.exe`.
+
+- **A new BuildingSite** gives the turn of 5.9 to 6.7 ms, one in each run,
+  about 100 s after the load (6.32 ms in this run, 19 of its 21 samples).
+  The calls: `ProcessTurn` (the call of `fn_00649A20` at `0x0054E641`, the
+  players and their towns), the town (`fn_00747380`, `fn_00747600`), a
+  virtual function of `Abode` (slot 366 `fn_00405D90`, slot 383
+  `fn_00404440`), `fn_0073B8E0`, the constructor of `BuildingSite`
+  (`fn_0043B7E0`, its vtable at `0x008C6B6C`), `fn_0043CDB0`, then
+  `fn_0043AE10`. `fn_0043AE10` makes the outline of the building on the
+  land: 128 directions, with `FSIN` and `FCOS` and the height of the land
+  for each. Then for each low triangle of the mesh of the building it takes
+  the 128 directions again, each with `FCOS` and `FSIN` of the same angle
+  and a ray test (`fn_0043B630`). The samples are in that loop (`0x0043B2CC`
+  to `0x0043B2EA`) and in `fn_0043B4F0`, `fn_0043B5A0` and `fn_0043B630`.
+  These x87 instructions are in the code of `fn_0043AE10`, not in the four
+  functions of `anim_trig`, so `anim_trig` does not change this turn.
+- **`Morphable::MorphTexture`** (`fn_00619500`, `fn_00870640`: the mix of
+  each texel of the texture of the look) gives a turn of 2.0 to 2.2 ms each
+  60 to 70 s, below `fn_005EC810` (the call at `0x0054E65B`). It is integer
+  code with no x87 instruction.
+- **`GScript::Process`** (the call at `0x0054E693`) gives turns of 1.3 to
+  1.8 ms in the reports after them.
+- **The mesh of the Temple from the disk.** In the reports with new
+  animations 40 of 161 samples (25 percent) are a load of a mesh:
+  `fn_008830E0` makes the path `Data\Citadel\OutsideMeshes\B_TEM...`, and
+  `fn_008067F0` reads the whole file (`GetFileAttributesA`, a read of the C
+  library, then `fn_00806460`). This read does not go through `LHFile`, so
+  `file_read_ahead` does not have it, and the count of the opens of a file
+  in the lines `long frame` does not count it.
+
 **Open.** The animations are still made on the frame thread, one at its
 first use. A thread of its own cannot make them: the code takes memory of
 the allocator of the game and writes the table of the object that the game
-turn reads. The cause of the long turns with no new animation (up to 6.7
-ms in a desktop run) is open. Only a headset can show the length of the
-long game turn under FEX with `anim_trig` 1 and 0, how much of it the
-making of animations is, how many animations a session there makes, and
-the precision of the x87 unit under FEX against the functions of the mod
+turn reads. Only a headset can show the length of the long game turn
+under FEX with `anim_trig` 1 and 0, how much of it the making of
+animations is, how many animations a session there makes, how often a
+session there makes a BuildingSite, how long the turns with no new
+animation take under FEX, and the precision of the x87 unit under FEX against the functions of the mod
 (`anim_trig_check=1`).
 
 ### The refresh rate of the headset

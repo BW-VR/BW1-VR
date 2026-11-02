@@ -2901,13 +2901,18 @@ stick in a saved game):
 - After the load, the game makes 71.2 to 71.6 frames a second, and 4 to 8
   frames in 10 s are longer than 20 ms. Each is 28 to 39 ms long. In nearly
   each one the game turn takes 19 to 33 ms, and the scene walk is 4 to 10
-  ms as in a frame of normal length. The game opens no file in them, and
-  reads from a file in only one of them. They
-  come 0.2 to 5 s apart, with no steady rhythm. In a desktop run about
-  57 percent of the samples of the long game turns are the making of an
-  animation of the Creature at its first use (`backend.md`, "The long game
-  turn", `anim_trig`), and other long turns have a cause that is open. Not
-  shown yet on the Frame.
+  ms as in a frame of normal length. The game opens no file through
+  `LHFile` in them, and reads from such a file in only one of them: the
+  counts of the opens and of the reads are the counts of `LHFile`.
+  `fn_008067F0` loads meshes outside `LHFile` (with `GetFileAttributesA`
+  and a read of the C library), and these counts do not have it. The long
+  frames come 0.2 to 5 s apart, with no steady rhythm. In a desktop run
+  about 57 percent of the samples of the long game turns are the making of
+  an animation of the Creature at its first use (`backend.md`, "The long
+  game turn", `anim_trig`). The other long turns there are a new
+  BuildingSite (up to 6.7 ms), `Morphable::MorphTexture` (2.0 to 2.2 ms
+  each 60 to 70 s), `GScript::Process` (1.3 to 1.8 ms) and a load of a
+  mesh of the Temple through `fn_008067F0`. Not shown yet on the Frame.
 - Each long frame of the mod after the load has a line `game frame` of the
   app at the same frame of the stream, with a gap within 2 ms of the length
   of the long frame. The pairs that do not match are in the load.
@@ -4649,8 +4654,10 @@ in a walk of 6.7 ms on the Frame:
    mesh. No gain.
 4. **The game turn** cannot go to another core: the walk reads the state
    that the turn writes. In a desktop run about 57 percent of the samples
-   of its long turns are the mixed animations of the Creature
-   (`backend.md`, "The long game turn", `anim_trig`), the rest is open.
+   of its long turns are the mixed animations of the Creature, and the
+   others are a new BuildingSite, `Morphable::MorphTexture`,
+   `GScript::Process` and a load of a mesh (`backend.md`, "The long game
+   turn", `anim_trig`).
 
 Not built: the first part needs the parts of the walk of the build now
 under FEX, and `walk_parts=1` is not safe there. Each timer is a hook of

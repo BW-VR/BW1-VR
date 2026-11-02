@@ -2808,6 +2808,10 @@ dxwrapper, about 560 to 750 frames a second, `slow_frame_ms=10`):
   of the frame thread: 20.0 ms in a frame of the mod, and 19.78 to 20.50 ms
   in the lines `game frame` of the same frames. So the main thread of the
   process is the frame thread of the game in Wine.
+- Of the long frames of the mod with a line of the app at S or S+1, the gap
+  of the app matches the length of the long frame (within 2 ms) at S in 86
+  to 88 percent, at S+1 alone in 5 to 7 percent, and at neither in 7
+  percent.
 - In the video before the intro (25 frames a second) the main thread is
   about 12 percent of the time on a core: it sleeps in the rest. In `pen`
   it is 15 to 25 percent of the time on a core: it waits in the pace.

@@ -250,6 +250,7 @@ void AudioCycleMode();
 // audio_voices.cpp: the A/B of audio_stop_wait, and of audio_play_fix.
 void AudioStopWaitToggle();
 void AudioPlayFixCycle();
+void AudioPlayNowCycle();
 // anim_trig.cpp: the A/B of anim_trig, and its test frame.
 void AnimTrigToggle(const char* by);
 void AnimTrigFrame();
@@ -813,6 +814,9 @@ bool D3D9KeyHere(const char* keys) {
 //   Ctrl Shift P  QMixer pumps in each start of a sound, or the mod keeps the
 //               pump out of the call for some sounds (audio_play_fix,
 //               audio_voices.cpp)
+//   Ctrl Shift K  QMixer sorts the channels and pumps in each start of a
+//               sound, or the hooks of the mod skip that work in the call for
+//               some sounds (audio_play_now, audio_voices.cpp)
 //   Ctrl Shift Semicolon  the copy of the subtitle card is read in a
 //               later frame with no wait, or after the eye passes with a wait
 //               for the GPU (subtitle_read_ahead, ui_panel.cpp)
@@ -1139,6 +1143,15 @@ void PollHotkeys() {
     AudioPlayFixCycle();
   }
   pump_key_down = pump_key_now;
+  // An A/B of the work of QMixer in a sound start (audio_play_now). The letter
+  // K with Ctrl and Shift has no other test key.
+  static bool now_key_down = false;
+  const bool now_key_now = (GetAsyncKeyState('K') & 0x8000) != 0;
+  if (g_test_keys && now_key_now && !now_key_down && ctrl && shift &&
+      GameHasFocus()) {
+    AudioPlayNowCycle();
+  }
+  now_key_down = now_key_now;
   // An A/B of the source of the gaze of foveated rendering (docs/backend.md,
   // "Foveated rendering"). Shift O with no Ctrl is the key of foveation.
   static bool gaze_key_down = false;

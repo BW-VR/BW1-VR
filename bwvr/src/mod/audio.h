@@ -124,6 +124,12 @@ int AudioStopWaitValue();
 void AudioPlayFixCycle();
 // The value of audio_play_fix for the debug page, or kDebugCannot.
 int AudioPlayFixValue();
+// The test key of audio_play_now. The frame thread runs the sort and the pump
+// of QMixer in a play, or returns at once for some plays (docs/audio.md,
+// "7.8 The pump of a play"). The mode steps through 0, 1 and 2.
+void AudioPlayNowCycle();
+// The value of audio_play_now for the debug page, or kDebugCannot.
+int AudioPlayNowValue();
 // A flat cue through the mixer: mono, 22050 Hz, pan -1 to 1.
 bool AudioVoicesCue(const int16_t* data, int frames, float gain, float pan);
 // audio_rolloff.cpp, the test key: true gives a room factor that is the same

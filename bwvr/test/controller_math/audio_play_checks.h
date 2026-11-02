@@ -70,6 +70,60 @@ inline void AudioPlayChecks() {
   s.Add(-5, 5000);
   Check(s.calls == 4 && s.sum == 9400, "a negative time counts as 0", static_cast<double>(s.sum), 9400);
   Check(s.MeanUs(0) == 0.0 && s.MostUs(0) == 0.0, "a frequency of 0 gives 0", s.MeanUs(0), 0);
+
+  // audio_play_now. The hooks use the modes of the pump (SkipPump), so a
+  // mode 1 play of a sound that QMixer plays keeps its work in the call.
+  Check(!ap::SkipPump(1, false, true) && ap::SkipPump(2, false, true),
+        "audio_play_now 1 keeps the work for a sound of QMixer, 2 defers a sound of the atmosphere", 0, 0);
+
+  // THE PARTS. Each hooked part has an RVA and 8 bytes. A part with no hook
+  // (the test of the pointer) has RVA 0 and never matches.
+  int hooked = 0;
+  bool unique = true, ordered_names = true;
+  for (int i = 0; i < ap::kParts; ++i) {
+    if (ap::kPartInfo[i].rva != 0) ++hooked;
+    if (ap::kPartInfo[i].name == nullptr || ap::kPartInfo[i].name[0] == 0) ordered_names = false;
+    for (int j = i + 1; j < ap::kParts; ++j) {
+      if (ap::kPartInfo[i].rva != 0 && ap::kPartInfo[i].rva == ap::kPartInfo[j].rva) unique = false;
+    }
+  }
+  Check(hooked == ap::kParts - 1, "all parts but the pointer test have a hook", hooked, ap::kParts - 1);
+  Check(unique && ordered_names, "the RVAs are all different and each part has a name", unique ? 1 : 0, 1);
+  Check(ap::kPartInfo[ap::kPartSort].rva == 0x67E0 && ap::kPartInfo[ap::kPartPump].rva == 0xA310,
+        "the sort is at 0x67E0 and the pump at 0xA310", ap::kPartInfo[ap::kPartPump].rva, 0xA310);
+  uint8_t fn[12];
+  memset(fn, 0x90, sizeof(fn));
+  memcpy(fn, ap::kPartInfo[ap::kPartSort].bytes, 8);
+  Check(ap::PartMatches(ap::kPartSort, fn, sizeof(fn)), "the bytes of the sort are accepted", 1, 1);
+  Check(!ap::PartMatches(ap::kPartPump, fn, sizeof(fn)), "the bytes of the sort are not those of the pump", 0, 0);
+  fn[7] ^= 1;
+  Check(!ap::PartMatches(ap::kPartSort, fn, sizeof(fn)), "a changed last byte is refused", 0, 0);
+  fn[7] ^= 1;
+  Check(!ap::PartMatches(ap::kPartSort, fn, 7), "a short read is refused", 0, 0);
+  Check(!ap::PartMatches(ap::kPartSort, nullptr, 8), "a null pointer is refused", 0, 0);
+  Check(!ap::PartMatches(ap::kPartBadPtr, fn, sizeof(fn)), "a part with no hook never matches", 0, 0);
+  Check(!ap::PartMatches(-1, fn, sizeof(fn)) && !ap::PartMatches(ap::kParts, fn, sizeof(fn)),
+        "a part number out of range is refused", 0, 0);
+
+  // THE TIME OF A PLAY. The runs and the ticks of a part add up in one play.
+  ap::PlayParts play;
+  play.Clear();
+  play.Add(ap::kPartSort, 400);
+  play.Add(ap::kPartSort, 100);
+  play.Add(ap::kPartPump, -7);
+  play.Add(99, 5);
+  Check(play.ticks[ap::kPartSort] == 500 && play.runs[ap::kPartSort] == 2,
+        "two runs of a part add up", static_cast<double>(play.ticks[ap::kPartSort]), 500);
+  Check(play.ticks[ap::kPartPump] == 0 && play.runs[ap::kPartPump] == 1,
+        "a negative time counts as 0 and the run counts", static_cast<double>(play.ticks[ap::kPartPump]), 0);
+  Check(play.runs[ap::kPartCtor] == 0, "a part that did not run has no run", play.runs[ap::kPartCtor], 0);
+  ap::Stat part;
+  part.AddPlay(play.ticks[ap::kPartSort], play.runs[ap::kPartSort], 5000);
+  part.AddPlay(300, 1, 5000);
+  Check(part.calls == 2 && part.runs == 3 && part.sum == 800,
+        "a stat of plays counts the plays, the runs and the time", static_cast<double>(part.runs), 3);
+  play.Clear();
+  Check(play.ticks[ap::kPartSort] == 0 && play.runs[ap::kPartSort] == 0, "Clear empties a play", 0, 0);
 }
 
 }  // namespace audio_play_checks

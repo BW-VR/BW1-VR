@@ -48,18 +48,23 @@
 //
 // THE PUMP IN QSWaveMixPlayEx (docs/audio.md, "7.8 The pump of a play").
 // QSWaveMixPlayEx runs one pump of QMixer on the thread of the caller after it
-// has started the sample. On the Steam Frame the pump takes 26 to 54 ms for a
-// sound of the atmosphere. With audio_play_fix the mod sets the byte of the
-// session that tells QMixer not to pump in the call. The pump of the timer
-// thread of the audio DLL does the same work within 20 ms.
+// has started the sample. On the Steam Frame a play of the atmosphere takes
+// 17 to 30 ms in this call. With audio_play_now the mod hooks the pump and the
+// sort of the channels of QMixer. For a play that the mode defers they return
+// at once on the thread of that play, and the pump of the timer thread of the
+// audio DLL does the work within 20 ms. No byte of the session changes.
+// audio_play_fix does the same with the byte at +5 of the session, which the
+// timer thread reads too. audio_play_parts times the functions of the call.
 //
 // Ini: audio_mixer (default 1, 0 is QMixer's own panning), audio_height,
 // audio_near, audio_far, audio_bed, audio_atmos_mixer (each default 1),
 // audio_height_pct (100, the strength of the height band, 0 to 200),
 // audio_stop_wait (default 0, 1 is the wait of the audio DLL at each stop),
-// audio_play_fix (default 1, 0 is the pump of QMixer in each play, 2 and 3 in
-// audio_play_math.h).
-// Test only: audio_play_fix_test,
+// audio_play_now (default 0, the modes of audio_play_math.h: 0 is the work of
+// QMixer in the call, as in the game), audio_play_fix (default 0, the byte of
+// the session, the same modes), audio_play_parts (default 0, test only: the
+// time of the functions of QMixer in a play).
+// Test only: audio_play_fix_test, audio_play_now_test,
 // audio_test_voice, audio_test_path, audio_test_step_ms, audio_test_solo.
 
 #include <windows.h>
@@ -264,7 +269,7 @@ uint64_t g_stop_test_seen = 0;
 // The pump of QSWaveMixPlayEx. g_play_fix is the mode of audio_play_math.h.
 // g_pump_known is true when the code of the known QMixer.dll was found.
 // The times are in ticks of QueryPerformanceCounter, for the report.
-int g_play_fix = 1;
+int g_play_fix = 0;
 bool g_pump_known = false;
 int64_t g_qpc_hz = 0;
 int g_play_test_frame = 0;      // audio_play_fix_test
@@ -278,6 +283,30 @@ audio_play::Stat g_play_stat[2][2];
 audio_play::Stat g_pump_stat;
 int64_t g_play_changed = 0;     // calls with no pump, since the start
 DWORD g_play_report_at = 0;
+
+// audio_play_now. The play in progress on this thread. A hook of QMixer reads
+// it, so the other threads (the timer thread) always run in full.
+struct PlayCall {
+  bool defer;    // the sort and the pump return at once
+  bool timing;   // audio_play_parts
+  audio_play::PlayParts parts;
+};
+__declspec(thread) PlayCall* t_call = nullptr;
+int g_play_now = 0;             // audio_play_now
+bool g_now_known = false;       // the hooks on the sort and the pump are in
+bool g_parts_on = false;        // audio_play_parts
+int g_play_now_test_frame = 0;  // audio_play_now_test
+uint64_t g_play_now_test_seen = 0;
+volatile LONG g_defer_sort = 0;   // runs of the sort that the hook skipped
+volatile LONG g_defer_pump = 0;   // runs of the pump that the hook skipped
+// The functions of QMixer that the hooks time, by part.
+void* o_part[audio_play::kParts] = {};
+// Per play, [0] a sound of the atmosphere, [1] another sound.
+struct PartsGroup {
+  int64_t plays = 0;
+  audio_play::Stat part[audio_play::kParts];
+};
+PartsGroup g_parts[2];
 
 // For the report.
 volatile LONG g_started[kKinds] = {0, 0, 0, 0};
@@ -555,6 +584,112 @@ void ReleaseChannel(int channel, bool tail) {
   s->releasing = true;
 }
 
+// ---- The hooks on the functions of QMixer in a play -------------------------
+
+// Times one run of a part on the thread of a play with audio_play_parts.
+struct PartTimer {
+  PartTimer(int part) : part_(part), call_(t_call), start_(0) {
+    if (call_ != nullptr && call_->timing) {
+      LARGE_INTEGER t;
+      QueryPerformanceCounter(&t);
+      start_ = t.QuadPart;
+    }
+  }
+  ~PartTimer() {
+    if (start_ != 0) {
+      LARGE_INTEGER t;
+      QueryPerformanceCounter(&t);
+      call_->parts.Add(part_, t.QuadPart - start_);
+    }
+  }
+  int part_;
+  PlayCall* call_;
+  int64_t start_;
+};
+
+// The functions are thiscall in the game. A fastcall function gets the same
+// ecx, and the stack is the same for the arguments after the first.
+typedef void*(__fastcall* Ctor5Fn)(void*, void*, int, int, int, int, int);
+typedef int(__fastcall* ThisPtrFn)(void*, void*, void*);
+typedef int(__fastcall* ThisIntFn)(void*, void*, int);
+typedef void(__fastcall* ThisFn)(void*);
+typedef void(__fastcall* VoiceFn)(void*, void*, int);
+
+void* __fastcall h_PartCtor(void* self, void* edx, int a, int b, int c, int d,
+                            int e) {
+  PartTimer timer(audio_play::kPartCtor);
+  return reinterpret_cast<Ctor5Fn>(o_part[audio_play::kPartCtor])(
+      self, edx, a, b, c, d, e);
+}
+int __fastcall h_PartParams(void* self, void* edx, void* p) {
+  PartTimer timer(audio_play::kPartParams);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartParams])(self, edx,
+                                                                      p);
+}
+int __fastcall h_PartQueue(void* self, void* edx, void* p) {
+  PartTimer timer(audio_play::kPartQueue);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartQueue])(self, edx,
+                                                                     p);
+}
+int __fastcall h_PartOpen(void* self, void* edx, int p) {
+  PartTimer timer(audio_play::kPartOpen);
+  return reinterpret_cast<ThisIntFn>(o_part[audio_play::kPartOpen])(self, edx,
+                                                                    p);
+}
+int __fastcall h_PartAdd(void* self, void* edx, void* p) {
+  PartTimer timer(audio_play::kPartAdd);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartAdd])(self, edx,
+                                                                   p);
+}
+int __fastcall h_PartAppend(void* self, void* edx, void* p) {
+  PartTimer timer(audio_play::kPartAppend);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartAppend])(self, edx,
+                                                                      p);
+}
+void __fastcall h_PartClear(void* self) {
+  PartTimer timer(audio_play::kPartClear);
+  reinterpret_cast<ThisFn>(o_part[audio_play::kPartClear])(self);
+}
+void __fastcall h_PartVoice(void* self, void* edx, int on) {
+  PartTimer timer(audio_play::kPartVoice);
+  reinterpret_cast<VoiceFn>(o_part[audio_play::kPartVoice])(self, edx, on);
+}
+// The sort of the channels and the pump. In a play that the mode defers they
+// return at once. The flag of the session that asks for a sort stays set, so
+// the next run on the timer thread does the work.
+void __fastcall h_PartSort(void* session) {
+  PlayCall* call = t_call;
+  if (call != nullptr && call->defer) {
+    InterlockedIncrement(&g_defer_sort);
+    return;
+  }
+  PartTimer timer(audio_play::kPartSort);
+  reinterpret_cast<ThisFn>(o_part[audio_play::kPartSort])(session);
+}
+void __fastcall h_PartPump(void* session) {
+  PlayCall* call = t_call;
+  if (call != nullptr && call->defer) {
+    InterlockedIncrement(&g_defer_pump);
+    return;
+  }
+  PartTimer timer(audio_play::kPartPump);
+  reinterpret_cast<ThisFn>(o_part[audio_play::kPartPump])(session);
+}
+
+void* const kPartHook[audio_play::kParts] = {
+    nullptr,
+    reinterpret_cast<void*>(&h_PartCtor),
+    reinterpret_cast<void*>(&h_PartParams),
+    reinterpret_cast<void*>(&h_PartQueue),
+    reinterpret_cast<void*>(&h_PartOpen),
+    reinterpret_cast<void*>(&h_PartAdd),
+    reinterpret_cast<void*>(&h_PartClear),
+    reinterpret_cast<void*>(&h_PartAppend),
+    reinterpret_cast<void*>(&h_PartSort),
+    reinterpret_cast<void*>(&h_PartPump),
+    reinterpret_cast<void*>(&h_PartVoice),
+};
+
 DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
                       int loops, void* params) {
   AudioCaptureSession(session);
@@ -664,16 +799,44 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
       *pump_flag = 1;
     }
   }
+  // audio_play_now: the hooks on the sort and the pump read this call on the
+  // thread of the play.
+  PlayCall call;
+  call.defer = g_now_known && g_play_now > 0 &&
+               audio_play::SkipPump(g_play_now, shadow && g_audible, atmosphere);
+  call.timing = g_parts_on;
+  call.parts.Clear();
+  if (call.timing) {
+    // QMixer tests the wave with this call first. Its time is a part.
+    LARGE_INTEGER b0, b1;
+    QueryPerformanceCounter(&b0);
+    IsBadWritePtr(wave, 0x48);
+    QueryPerformanceCounter(&b1);
+    call.parts.Add(audio_play::kPartBadPtr, b1.QuadPart - b0.QuadPart);
+  }
+  if (call.defer || call.timing) t_call = &call;
   LARGE_INTEGER t0, t1;
   QueryPerformanceCounter(&t0);
   const DWORD r = o_PlayEx(session, channel, flags, wave, loops, params);
   QueryPerformanceCounter(&t1);
+  t_call = nullptr;
   if (pump_flag != nullptr) *pump_flag = 0;
   if (g_pump_known) {
+    const bool changed = pump_flag != nullptr || call.defer;
     EnterCriticalSection(&g_play_cs);
-    g_play_stat[atmosphere ? 0 : 1][pump_flag != nullptr ? 1 : 0].Add(
+    g_play_stat[atmosphere ? 0 : 1][changed ? 1 : 0].Add(
         t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
-    if (pump_flag != nullptr) ++g_play_changed;
+    if (changed) ++g_play_changed;
+    if (call.timing) {
+      PartsGroup& group = g_parts[atmosphere ? 0 : 1];
+      ++group.plays;
+      for (int i = 0; i < audio_play::kParts; ++i) {
+        if (call.parts.runs[i] > 0) {
+          group.part[i].AddPlay(call.parts.ticks[i], call.parts.runs[i],
+                                g_qpc_hz / 200);
+        }
+      }
+    }
     LeaveCriticalSection(&g_play_cs);
   }
   if (r != 0 && shadow) {
@@ -1003,6 +1166,34 @@ void TestVoiceFrame() {
   s.test_part = t.part >= 0.0f ? t.part : 0.0f;
 }
 
+// The line of the parts of a play (audio_play_parts): for each part that ran,
+// the plays in which it ran, its runs for each play, and its time in one play
+// (the sum of its runs). The times include the parts below a part.
+void PartsReport(const PartsGroup (&group)[2]) {
+  char text[2400];
+  size_t n = 0;
+  text[0] = 0;
+  const char* const names[2] = {"a sound of the atmosphere", "another sound"};
+  for (int g = 0; g < 2; ++g) {
+    n += snprintf(text + n, sizeof(text) - n, "%s%s: %lld plays", g ? ". " : "",
+                  names[g], static_cast<long long>(group[g].plays));
+    for (int i = 0; i < audio_play::kParts && n < sizeof(text) - 160; ++i) {
+      const audio_play::Stat& s = group[g].part[i];
+      if (s.calls == 0) continue;
+      n += snprintf(text + n, sizeof(text) - n,
+                    ", %s in %lld (%.1f runs, mean %.0f us, most %.0f us, "
+                    "%lld of 5 ms or more)",
+                    audio_play::kPartInfo[i].name,
+                    static_cast<long long>(s.calls),
+                    static_cast<double>(s.runs) / static_cast<double>(s.calls),
+                    s.MeanUs(g_qpc_hz), s.MostUs(g_qpc_hz),
+                    static_cast<long long>(s.long_calls));
+    }
+  }
+  ModLog("audio play   : parts of a play on the frame thread in the last 10 s "
+         "(each time includes the parts below it). %s", text);
+}
+
 // The line of the pump of QSWaveMixPlayEx with the times of the last 10 s.
 // The time of a play is the time of the call of QMixer. A time of 5 ms or more
 // is long.
@@ -1013,6 +1204,7 @@ void PlayReport() {
   if (now - g_play_report_at < 10000) return;
   g_play_report_at = now;
   audio_play::Stat play[2][2], pump;
+  PartsGroup parts[2];
   int64_t changed;
   EnterCriticalSection(&g_play_cs);
   for (int i = 0; i < 2; ++i) {
@@ -1023,6 +1215,10 @@ void PlayReport() {
   }
   pump = g_pump_stat;
   g_pump_stat = audio_play::Stat();
+  for (int i = 0; i < 2; ++i) {
+    parts[i] = g_parts[i];
+    g_parts[i] = PartsGroup();
+  }
   changed = g_play_changed;
   LeaveCriticalSection(&g_play_cs);
   if (play[0][0].calls + play[0][1].calls + play[1][0].calls +
@@ -1033,19 +1229,22 @@ void PlayReport() {
 #define PLAY_TIMES(s) \
   static_cast<long long>((s).calls), (s).MeanUs(hz), (s).MostUs(hz), \
       static_cast<long long>((s).long_calls)
-  ModLog("audio play   : audio_play_fix=%d, %lld plays have run with no pump "
-         "since the start. In the last 10 s, a sound of the atmosphere: %lld "
-         "plays with the pump of QMixer in the call (mean %.0f us, most %.0f "
+  ModLog("audio play   : audio_play_fix=%d, audio_play_now=%d, %lld plays "
+         "have run with no pump since the start (the hooks skipped %ld sorts "
+         "and %ld pumps). In the last 10 s, a sound of the atmosphere: %lld "
+         "plays with the work of QMixer in the call (mean %.0f us, most %.0f "
          "us, %lld of 5 ms or more) and %lld with no pump (mean %.0f us, "
          "most %.0f us, %lld of 5 ms or more). Another sound: %lld plays with "
-         "the pump (mean %.0f us, most %.0f us, %lld of 5 ms or more) and "
+         "the work (mean %.0f us, most %.0f us, %lld of 5 ms or more) and "
          "%lld with no pump (mean %.0f us, most %.0f us, %lld of 5 ms or "
          "more). QSWaveMixPump of the timer thread: %lld calls (mean %.0f us, "
          "most %.0f us, %lld of 5 ms or more)",
-         g_play_fix, static_cast<long long>(changed),
+         g_play_fix, g_play_now, static_cast<long long>(changed),
+         g_defer_sort, g_defer_pump,
          PLAY_TIMES(play[0][0]), PLAY_TIMES(play[0][1]),
          PLAY_TIMES(play[1][0]), PLAY_TIMES(play[1][1]), PLAY_TIMES(pump));
 #undef PLAY_TIMES
+  if (g_parts_on) PartsReport(parts);
 }
 
 void Report() {
@@ -1086,11 +1285,74 @@ void Report() {
   }
 }
 
+// audio_play_now and audio_play_parts. The hooks on the sort and the pump go in
+// when the mode is above 0 or the test key can change it. The hooks that time
+// the other functions go in with audio_play_parts=1. Each function is tested
+// for its first 8 bytes, so another QMixer.dll gets no hook.
+void InstallPlayNow(const uint8_t* base) {
+  g_play_now = audio_play::ClampMode(AudioIni("audio_play_now", 0));
+  g_play_now_test_frame = AudioIni("audio_play_now_test", 0);
+  g_parts_on = AudioIni("audio_play_parts", 0) != 0;
+  const bool deferring = g_play_now > 0 || AudioIni("test_keys", 0) != 0 ||
+                         g_play_now_test_frame > 0;
+  int hooked = 0, failed = 0;
+  bool sort_ok = false, pump_ok = false;
+  for (int i = 0; i < audio_play::kParts; ++i) {
+    const audio_play::PartInfo& info = audio_play::kPartInfo[i];
+    const bool timed = g_parts_on;
+    const bool defer_part =
+        i == audio_play::kPartSort || i == audio_play::kPartPump;
+    if (info.rva == 0 || !(timed || (deferring && defer_part))) continue;
+    const uint8_t* at = base + info.rva;
+    if (!Readable(at, 8) || !audio_play::PartMatches(i, at, 8)) {
+      ModLog("audio play   : the part %s at QMixer RVA 0x%X has other bytes, "
+             "so it gets no hook", info.name, static_cast<unsigned>(info.rva));
+      ++failed;
+      continue;
+    }
+    MH_STATUS s = MH_CreateHook(const_cast<uint8_t*>(at), kPartHook[i],
+                                &o_part[i]);
+    if (s == MH_OK) s = MH_EnableHook(const_cast<uint8_t*>(at));
+    if (s != MH_OK) {
+      ModLog("audio play   : the hook on the part %s FAILED", info.name);
+      o_part[i] = nullptr;
+      ++failed;
+      continue;
+    }
+    ++hooked;
+    if (i == audio_play::kPartSort) sort_ok = true;
+    if (i == audio_play::kPartPump) pump_ok = true;
+  }
+  g_now_known = sort_ok && pump_ok;
+  if (g_play_now > 0 && !g_now_known) {
+    ModLog("audio play   : audio_play_now=%d, but the hooks on the sort and "
+           "the pump of QMixer are not in. QMixer does its work in each play "
+           "as in the game", g_play_now);
+    g_play_now = 0;
+  }
+  ModLog("audio play   : audio_play_now=%d (%s), audio_play_parts=%d. %d "
+         "functions of QMixer have a hook, %d failed. %s", g_play_now,
+         g_play_now == 0 ? "the work of QMixer runs in the call, as in the game"
+         : g_play_now == 1
+             ? "the sort and the pump return at once in the call of a sound "
+               "that the mixer of the mod plays"
+         : g_play_now == 2
+             ? "the sort and the pump return at once in the call of a sound "
+               "of the mixer of the mod and of each sound of the atmosphere"
+             : "the sort and the pump return at once in each call (test "
+               "value)",
+         g_parts_on ? 1 : 0, hooked, failed,
+         g_play_now > 0
+             ? "The pump of the timer thread does the work within 20 ms. The "
+               "session is not changed"
+             : "");
+}
+
 // The mode of audio_play_fix, the check of the code of the known QMixer.dll
 // and the timer on QSWaveMixPump. With another QMixer.dll the pump stays as
 // the game has it.
 void InstallPlayFix(HMODULE q) {
-  g_play_fix = audio_play::ClampMode(AudioIni("audio_play_fix", 1));
+  g_play_fix = audio_play::ClampMode(AudioIni("audio_play_fix", 0));
   g_play_test_frame = AudioIni("audio_play_fix_test", 0);
   const uint8_t* base = reinterpret_cast<const uint8_t*>(q);
   const uint8_t* play =
@@ -1113,9 +1375,11 @@ void InstallPlayFix(HMODULE q) {
   g_qpc_hz = hz.QuadPart;
   Hook(q, "QSWaveMixPump", reinterpret_cast<void*>(&h_Pump),
        reinterpret_cast<void**>(&o_Pump));
+  InstallPlayNow(base);
   ModLog("audio play   : audio_play_fix=%d. QSWaveMixPlayEx of QMixer runs one "
          "pump on the thread of the caller (it sorts the channels, gives a "
-         "voice to the new one and mixes the stream ahead). %s", g_play_fix,
+         "voice to the new one and mixes the stream ahead). The mode sets the "
+         "byte at +5 of the session for the time of the call. %s", g_play_fix,
          g_play_fix == 0
              ? "The mod leaves it so"
          : g_play_fix == 1
@@ -1279,6 +1543,15 @@ void AudioVoicesFrame() {
       if (ControllersTestFrame(at, frame) == at) AudioPlayFixCycle();
     }
   }
+  // The test audio_play_now_test=N: the same for audio_play_now.
+  if (g_play_now_test_frame > 0) {
+    const uint64_t frame = ControllersFrameCount();
+    const uint64_t at = static_cast<uint64_t>(g_play_now_test_frame);
+    if (frame != g_play_now_test_seen) {
+      g_play_now_test_seen = frame;
+      if (ControllersTestFrame(at, frame) == at) AudioPlayNowCycle();
+    }
+  }
   float k = 1.0f;
   const bool room = AudioRoomNow(&k);
   if (!room) k = 1.0f;
@@ -1417,6 +1690,31 @@ void AudioPlayFixCycle() {
 int AudioPlayFixValue() {
   if (!g_on || !g_pump_known) return kDebugCannot;
   return g_play_fix > 2 ? 2 : g_play_fix;
+}
+
+// The test key of audio_play_now (Ctrl, Shift and K, test_keys=1). The mode
+// steps through 0, 1 and 2. A short pulse is 0, a longer one is 1, the
+// longest is 2.
+void AudioPlayNowCycle() {
+  if (!g_on || !g_now_known) {
+    ModLog("audio play   : test key, but the hooks on the sort and the pump "
+           "of QMixer are not in. Start with test_keys=1, or with "
+           "audio_play_now above 0");
+    return;
+  }
+  g_play_now = audio_play::NextMode(g_play_now);
+  ControllersGesturePulse(0.5f, g_play_now == 0 ? 0.08f
+                                : g_play_now == 1 ? 0.30f
+                                                  : 0.55f);
+  ModLog("audio play   : test key, audio_play_now is %d now. The hooks have "
+         "skipped %ld sorts and %ld pumps so far", g_play_now, g_defer_sort,
+         g_defer_pump);
+}
+
+// The value of audio_play_now for the debug page.
+int AudioPlayNowValue() {
+  if (!g_on || !g_now_known) return kDebugCannot;
+  return g_play_now > 2 ? 2 : g_play_now;
 }
 
 // The test key. false gives each shadowed channel back to QMixer, at once,

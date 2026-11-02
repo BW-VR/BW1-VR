@@ -1185,7 +1185,15 @@ that moves while the Hand takes it.
   thread of the game takes 87 to 89 percent of one core, and the threads of
   the game and of the app run on the cores 3 to 5 (the line of the threads
   of `time_log`). On the Steam Frame (8 cores) the game made 72 frames a
-  second, and the time log gave the cores 40 to 69 percent busy. The app
+  second, and the time log gave the cores 40 to 69 percent busy. There 46
+  to 145 of 721 takes of the session in 10 s show an old picture, and the
+  player sees a stutter in a strafe with the stick. Most of these takes
+  come from the phase of the frames of the game to the takes: the copies
+  of the GPU end after the take, or a frame of normal length comes 7 to 9
+  ms after it. A long game turn (19 to 33 ms, 4 to 8 times in 10 s) gives
+  only 2 to 10 of them (`android.md`, "The long frames"). Next: a phase of
+  the pace that has each picture finished a few ms before the take, then
+  the code of the long game turn. The app
   gives each second the core and the CPU time of
   each thread (`thread_cores=1`), binds the main thread of the game, the
   session thread and the play thread to the fast cores (`thread_bind`), and

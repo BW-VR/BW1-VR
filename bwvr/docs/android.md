@@ -2808,10 +2808,6 @@ dxwrapper, about 560 to 750 frames a second, `slow_frame_ms=10`):
   of the frame thread: 20.0 ms in a frame of the mod, and 19.78 to 20.50 ms
   in the lines `game frame` of the same frames. So the main thread of the
   process is the frame thread of the game in Wine.
-- Of the long frames of the mod with a line of the app at S or S+1, the gap
-  of the app matches the length of the long frame (within 2 ms) at S in 86
-  to 88 percent, at S+1 alone in 5 to 7 percent, and at neither in 7
-  percent.
 - In the video before the intro (25 frames a second) the main thread is
   about 12 percent of the time on a core: it sleeps in the rest. In `pen`
   it is 15 to 25 percent of the time on a core: it waits in the pace.
@@ -2822,6 +2818,29 @@ dxwrapper, about 560 to 750 frames a second, `slow_frame_ms=10`):
 - The scene walk of the start of a new game is 14 to 17 ms as a mean, with
   and with no `GetThreadTimes`: no cost of that call above the noise between
   runs.
+
+**What the Steam Frame shows** (the SteamVR runtime at 72 Hz, `wow64_cpu=fex`,
+`frame_loop=1`, `fovea_res_layer=0`, `slow_frame_ms=20`, a strafe with the
+stick in a saved game):
+
+- After the load, the game makes 71.2 to 71.6 frames a second, and 4 to 8
+  frames in 10 s are longer than 20 ms. Each is 28 to 39 ms long. In nearly
+  each one the game turn takes 19 to 33 ms, and the scene walk is 4 to 10
+  ms as in a frame of normal length. The game opens no file in them, and
+  reads from a file in only one of them. They
+  come 0.2 to 5 s apart, with no steady rhythm.
+- Each long frame of the mod after the load has a line `game frame` of the
+  app at the same frame of the stream, with a gap within 2 ms of the length
+  of the long frame. The pairs that do not match are in the load.
+- 46 to 145 of 721 takes in 10 s have no new picture. The GPU had not
+  finished the copies at the take in 31 to 76 of them, a frame of normal
+  length came 7 to 9 ms after the take in 9 to 70, and a long frame of the
+  game caused 2 to 10. A newer picture replaced about 1 picture in 8 before
+  a take. So most takes with an old picture come from the phase of the
+  frames of the game to the takes, not from the long frames.
+- The pictures in time end their copies 5 to 15 ms before the take as a
+  mean, 2.4 ms at the least.
+- `schedstat` of the app gives no time of the main thread of the game.
 
 **Known limits:**
 

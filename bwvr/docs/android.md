@@ -4623,7 +4623,7 @@ walk, from `walk_parts=1`:
 | The land, the sea and the objects on the land (`GLandscape::Draw`) | 0.58 ms (47 percent) | 21.9 ms (85 percent), 17.7 ms of it in `fn_005E5CD0`, with the meshes and the land patches |
 | The sorted draws of `LH3DRender::FinishFrame` | 0.26 ms (21 percent) | 2.6 ms (10 percent) |
 | The calls of the game to the device of the mod, the renderer and the record of the stream | about 0.40 ms (33 percent) | about 5.6 ms with the timers, about 2.6 ms with no timer (about 12 percent) |
-| The sky, the Hand, the interface | below 0.03 ms each | below 0.3 ms each |
+| The sky, the Hand, the interface | below 0.03 ms each | below 0.07 ms each |
 
 The parts that can go to another core, with the gain that each can give
 in a walk of 6.7 ms on the Frame:

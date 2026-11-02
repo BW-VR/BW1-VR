@@ -13,6 +13,11 @@
 // addresses of functions to time, with a comma between them, or empty.
 void WalkPartsSetOptions(int mode, int clock, const char* add);
 bool WalkPartsOn();
+// mod_main.cpp, at the end of the installs of the first frame, after the last hook of
+// the mod, on the frame thread: with walk_parts=1 or 2 and walk_parts_early=1 (the
+// default) it puts all hooks in with one MH_ApplyQueued. It reads its keys from
+// bwvr.ini itself.
+void WalkPartsInstallEarly();
 // stereo.cpp, beside TimeLogWalk: a scene walk starts and ends. The first
 // walks make the hooks.
 void WalkPartsWalk(bool begin);

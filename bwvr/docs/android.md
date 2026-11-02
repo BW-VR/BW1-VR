@@ -4248,9 +4248,11 @@ stop each other thread of the process (`Freeze` of `hook.c`), then call
 disables while other threads run x86 code can hang the game under FEX, when
 one of these threads translates a block at that time. The hooks of the mod
 come in two groups at the start (see "The code that changes, on a Quest
-3"), the timers of `walk_parts=1` come at the third scene walk, and some
-hooks of the mod come and go while the game runs. Not shown: that the hangs
-in the load of the game with `walk_parts=1` on a Quest 3 come from this. A
+3"), the timers of `walk_parts=1` come with them when `walk_parts_early=1`
+(the default) and at the third scene walk when it is 0, and some hooks of
+the mod come and go while the game runs. Not shown: that the hangs in the
+load of the game with `walk_parts=1` and `walk_parts_early=0` on a Quest 3
+come from this. A
 stop with the main thread of the game at 0 percent of a core in the line of
 a stop (`time_log`) fits it. The samplers of the mod (`hang_watch`,
 `profile_sample`) also stop the frame thread. They change no protection
@@ -4659,9 +4661,9 @@ in a walk of 6.7 ms on the Frame:
    `GScript::Process` and a load of a mesh (`backend.md`, "The long game
    turn", `anim_trig`).
 
-Not built: the first part needs the parts of the walk of the build now
-under FEX, and `walk_parts=1` is not safe there. Each timer is a hook of
-MinHook that comes at the third scene walk, in the load. `MH_EnableHook`
+The first part needs the parts of the walk of the build now under FEX.
+With `walk_parts_early=0`, `walk_parts=1` is not safe there. Each timer is
+a hook of MinHook that comes at the third scene walk, in the load. `MH_EnableHook`
 stops each other thread (`Freeze` of `hook.c`) and then changes the
 protection of the code (`VirtualProtect`). Under FEX that change waits for
 the lock of the cache of the translated code. When a stopped thread holds
@@ -4669,13 +4671,14 @@ that lock (a thread of the load that translates new code), the hook waits
 for ever ("FEX as the CPU of the 32 bit code"). In the load many threads
 translate new code, and `walk_parts=1` enables about 70 hooks one at a
 time. 2 of 5 starts hung with `walk_parts=1`, and 0 of 4 with 0. The
-source of FEX and of MinHook fits this cause. No log shows it. A safe
-way: the timers of the functions of the game go in with the first hooks of
-the mod (`PassGuardInstall`, the first frame with a render target), all
-with one stop of the threads (`MH_QueueEnableHook` and one
-`MH_ApplyQueued`, as `anim_trig` does), the timers of the device and of the
-code of the mod are calls in that code (no hook), and the scan of the
-lists of the engine adds no hook after the start.
+source of FEX and of MinHook fits this cause. No log shows it. The safe
+way is `walk_parts_early=1` (the default): the timers of the functions of
+the game and of the code of the mod go in at the end of the installs of the
+first frame (after the last hook of the mod), all with one stop of the
+threads (`MH_QueueEnableHook` and one `MH_ApplyQueued`, as `anim_trig` does).
+The timers of the device have no hook and the scan of the lists of the
+engine adds none after the start, so they are not in this mode. Only a Quest
+3 or the Frame can show that no start hangs with it.
 
 ## Wine in the app
 

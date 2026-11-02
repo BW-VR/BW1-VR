@@ -21,14 +21,30 @@
 // (WalkPartsHookBegin).
 //
 // Only the frame thread in a scene walk counts. A call on another thread, or
-// outside a walk, goes through the stub with no clock read. The hooks come at
-// the third walk, when the device of the game is made. A frame is the walks
-// from one present to the next.
+// outside a walk, goes through the stub with no clock read. A frame is the
+// walks from one present to the next.
+//
+// WHEN THE HOOKS COME. walk_parts_early=1 (the default): all hooks are queued
+// at the end of the installs of the first frame, after the last hook of the mod
+// (WalkPartsInstallEarly), and applied with one MH_ApplyQueued, as anim_trig.cpp and
+// turn_parts.cpp do. MinHook stops each
+// other thread while it applies hooks, and a stop of a thread that a translator
+// of the code translates can hang the process (docs/android.md, "SuspendThread
+// under FEX in Wine"). So no hook comes after the start of the game. This
+// leaves out the timers that need the device of the game (the methods of the
+// device and of the surfaces) and the lists of the engine that the report
+// reads (ScanLists). walk_parts_early=0: the hooks come at the third scene
+// walk, when the device of the game is made, with each timer, and the lists of
+// the engine add more timers with each report. Each hook is then enabled with
+// MH_EnableHook, which stops the other threads one time for each hook.
 //
 //   walk_parts=0      no hook and no line (the default)
 //   walk_parts=1      each timer
 //   walk_parts=2      no timer on each call of the device and of the
 //                     Vulkan renderer of the mod
+//   walk_parts_early  1 (the default): all hooks at the start with one
+//                     MH_ApplyQueued, no timer on the device and on the lists
+//                     of the engine. 0: the hooks at the third scene walk
 //   walk_parts_add    more addresses to time, for example
 //                     walk_parts_add=0x007FF610,0x00879930
 //   walk_parts_clock  1 (the default): the clock of the timers is the time
@@ -192,6 +208,11 @@ int g_mode = 0;
 char g_add[512] = {};
 bool g_installed = false;
 bool g_failed = false;
+bool g_early = false;    // walk_parts_early: the hooks came in WalkPartsInstallEarly
+bool g_queue = false;    // Add queues the enable of each hook (one MH_ApplyQueued follows)
+bool g_started = false;  // the third walk came: the measure of the cost and the window
+int g_applied = 0;       // the timers that the early MH_ApplyQueued turned on
+int g_cost_id = 0;       // the timer of the probe of the measure of the cost (early), or 0
 bool g_in_walk = false;
 bool g_calibrate = false;
 bool g_frame_has_walk = false;
@@ -437,6 +458,12 @@ bool Add(uint32_t address, const char* name, int group, bool quiet = false) {
            MH_StatusToString(st));
     return false;
   }
+  if (g_queue && MH_QueueEnableHook(reinterpret_cast<void*>(at)) != MH_OK) {
+    MH_RemoveHook(reinterpret_cast<void*>(at));
+    ModLog("walk parts   : no timer on %s at 0x%08X (the hook did not queue)", name,
+           static_cast<unsigned>(address));
+    return false;
+  }
   Timer& t = g_timers[g_count];
   t.address = at;
   t.shown = address;
@@ -526,21 +553,30 @@ void AddTable(void* object, const Slot* slots, int count) {
 // less the time of the same calls through the trampoline, with no timer. The
 // least time of 5 rounds of each counts, so a stop of the thread by the
 // system in one round does not count.
+// With walk_parts_early the hook on the probe is queued at the start with the
+// others (QueueCostProbe) and stays on, and this call only measures. Else this
+// call makes and enables the hook, and removes it after the measure.
 double MeasureCost() {
   const int kCalls = 20000;
   const int kRounds = 5;
-  const int id = g_count;
+  const bool queued = g_cost_id != 0;
+  const int id = queued ? g_cost_id : g_count;
   void* original = nullptr;
-  if (MH_CreateHook(reinterpret_cast<void*>(&CostProbe), g_stubs + id * kStubBytes,
-                    &original) != MH_OK) {
-    return 0.0;
+  if (queued) {
+    original = g_timers[id].original;
+  } else {
+    if (MH_CreateHook(reinterpret_cast<void*>(&CostProbe), g_stubs + id * kStubBytes,
+                      &original) != MH_OK) {
+      return 0.0;
+    }
+    g_timers[id].original = original;
+    MakeStub(id);
+    if (MH_EnableHook(reinterpret_cast<void*>(&CostProbe)) != MH_OK) {
+      MH_RemoveHook(reinterpret_cast<void*>(&CostProbe));
+      return 0.0;
+    }
   }
-  g_timers[id].original = original;
-  MakeStub(id);
-  if (MH_EnableHook(reinterpret_cast<void*>(&CostProbe)) != MH_OK) {
-    MH_RemoveHook(reinterpret_cast<void*>(&CostProbe));
-    return 0.0;
-  }
+  if (original == nullptr) return 0.0;
   int (*volatile probe)(int) = &CostProbe;
   int (*volatile bare_probe)(int) = reinterpret_cast<int (*)(int)>(original);
   const int64_t q_start = Qpc();
@@ -561,9 +597,11 @@ double MeasureCost() {
   }
   const int64_t n_end = Now();
   const int64_t q_end = Qpc();
-  MH_DisableHook(reinterpret_cast<void*>(&CostProbe));
-  MH_RemoveHook(reinterpret_cast<void*>(&CostProbe));
-  g_timers[id] = Timer();
+  if (!queued) {
+    MH_DisableHook(reinterpret_cast<void*>(&CostProbe));
+    MH_RemoveHook(reinterpret_cast<void*>(&CostProbe));
+    g_timers[id] = Timer();
+  }
   g_stack.NewFrame();
   // The rate of the clock of the timers over the measure.
   const double span_ms = QpcMs(q_start, q_end);
@@ -574,8 +612,35 @@ double MeasureCost() {
   const double ns = static_cast<double>(timed - bare) * 1000.0 / g_tick_mhz / kCalls;
   return ns > 0.0 ? ns : 0.0;
 }
-void Install() {
+// The probe of the measure of the cost gets its hook with the others.
+void QueueCostProbe() {
+  if (g_count >= wp::kMaxTimers - 1) return;
+  const int id = g_count;
+  void* original = nullptr;
+  if (MH_CreateHook(reinterpret_cast<void*>(&CostProbe), g_stubs + id * kStubBytes, &original) !=
+      MH_OK) {
+    return;
+  }
+  if (MH_QueueEnableHook(reinterpret_cast<void*>(&CostProbe)) != MH_OK) {
+    MH_RemoveHook(reinterpret_cast<void*>(&CostProbe));
+    return;
+  }
+  g_timers[id].original = original;
+  g_timers[id].address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&CostProbe));
+  _snprintf_s(g_timers[id].name, sizeof(g_timers[id].name), _TRUNCATE,
+              "CostProbe, the measure of the cost of a timer");
+  MakeStub(id);
+  g_cost_id = id;
+  ++g_count;
+}
+
+// early: the first call of the install, from WalkPartsInstallEarly. The hooks
+// are queued and the caller applies them with one MH_ApplyQueued. Else the
+// install of the third walk, which enables each hook at once.
+void Install(bool early) {
   g_installed = true;
+  g_early = early;
+  g_queue = early;
   g_stubs = static_cast<uint8_t*>(VirtualAlloc(nullptr, wp::kMaxTimers * kStubBytes,
                                                MEM_COMMIT | MEM_RESERVE,
                                                PAGE_EXECUTE_READWRITE));
@@ -654,8 +719,13 @@ void Install() {
   // The device of the game and its render target.
   void** slot = reinterpret_cast<void**>(bw::render::kDirect3DDevice7);
   IDirect3DDevice7* device = nullptr;
-  if (!IsBadReadPtr(slot, sizeof(void*))) device = static_cast<IDirect3DDevice7*>(*slot);
-  if (device != nullptr) {
+  if (!early && !IsBadReadPtr(slot, sizeof(void*))) {
+    device = static_cast<IDirect3DDevice7*>(*slot);
+  }
+  if (early) {
+    // No timer on the methods of the device: its tables are not read at the
+    // start, and a hook later would stop the other threads.
+  } else if (device != nullptr) {
     AddTable(device, kDeviceSlots, static_cast<int>(sizeof(kDeviceSlots) / sizeof(Slot)));
     IDirectDrawSurface7* target = nullptr;
     if (SUCCEEDED(device->GetRenderTarget(&target)) && target != nullptr) {
@@ -677,6 +747,10 @@ void Install() {
                 static_cast<unsigned>(a));
     Add(a, name, kGame);
   }
+  if (early) {
+    QueueCostProbe();
+    return;
+  }
   const int listed = ScanLists();
   const int enabled = EnableFrom(kFirstStubTimer);
   g_pair_ns = MeasureCost();
@@ -685,6 +759,19 @@ void Install() {
          "(the least of 5 rounds of 20000 calls of a probe with and without a timer). The "
          "clock of the timers runs at %.3f MHz. Each 10 s the lines of the parts of the walk",
          g_mode, g_count - 1, listed, enabled, g_pair_ns, g_tick_mhz);
+}
+
+// The third walk after WalkPartsInstallEarly: the measure of the cost of a
+// timer. The hooks are on already.
+void FinishEarly(int applied) {
+  g_pair_ns = MeasureCost();
+  ModLog("walk parts   : walk_parts=%d, walk_parts_early=1. %d timers in the scene walks of "
+         "the frame thread, %d of them on, all applied at the start with one MH_ApplyQueued. "
+         "No timer on the device of the game and no timer from the lists of the engine. One "
+         "timed call costs %.0f ns (the least of 5 rounds of 20000 calls of a probe with "
+         "and without a timer). The clock of the timers runs at %.3f MHz. Each 10 s the "
+         "lines of the parts of the walk",
+         g_mode, g_count - 1 - (g_cost_id != 0 ? 1 : 0), applied, g_pair_ns, g_tick_mhz);
 }
 
 void Report(int64_t now, int64_t qpc) {
@@ -711,7 +798,7 @@ void Report(int64_t now, int64_t qpc) {
   }
   g_window.Reset();
   const int first = g_count;
-  const int more = ScanLists();
+  const int more = g_early ? 0 : ScanLists();
   if (more > 0) {
     const int on = EnableFrom(first);
     ModLog("walk parts   : %d more timers from the lists of the engine, %d of them on", more, on);
@@ -722,6 +809,59 @@ void Report(int64_t now, int64_t qpc) {
 
 }  // namespace
 
+namespace {
+
+int IniKey(const char* key, int fallback) {
+  char path[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return fallback;
+  slash[1] = 0;
+  strcat_s(path, MAX_PATH, "bwvr.ini");
+  return static_cast<int>(GetPrivateProfileIntA("bwvr", key, fallback, path));
+}
+
+void IniText(const char* key, char* out, DWORD size) {
+  out[0] = 0;
+  char path[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return;
+  slash[1] = 0;
+  strcat_s(path, MAX_PATH, "bwvr.ini");
+  GetPrivateProfileStringA("bwvr", key, "", out, size, path);
+}
+
+}  // namespace
+
+// From mod_main.cpp, after the last hook of the mod, on the frame thread. With walk_parts=1 or 2 and
+// walk_parts_early=1 (the default) all hooks go in here with one
+// MH_ApplyQueued.
+void WalkPartsInstallEarly() {
+  const int mode = IniKey("walk_parts", 0);
+  if ((mode != 1 && mode != 2) || IniKey("walk_parts_early", 1) == 0) return;
+  g_mode = mode;
+  g_clock = IniKey("walk_parts_clock", 1) == 0 ? 0 : 1;
+  IniText("walk_parts_add", g_add, sizeof(g_add));
+  QueryPerformanceFrequency(&g_hz);
+  g_window.ms_per_tick = g_hz.QuadPart > 0 ? 1000.0 / static_cast<double>(g_hz.QuadPart) : 0.0;
+  g_thread = ThisThreadId();
+  Install(true);
+  g_queue = false;
+  if (g_failed) return;
+  // One stop of the other threads for all hooks (anim_trig.cpp, HookAll).
+  if (MH_ApplyQueued() != MH_OK) {
+    for (int i = kFirstStubTimer; i < g_count; ++i) {
+      MH_RemoveHook(reinterpret_cast<void*>(g_timers[i].address));
+    }
+    g_failed = true;
+    g_count = kFirstStubTimer;
+    ModLog("walk parts   : the hooks did not apply. No timer, no line");
+    return;
+  }
+  g_applied = g_count - kFirstStubTimer - (g_cost_id != 0 ? 1 : 0);
+}
+
 void WalkPartsSetOptions(int mode, int clock, const char* add) {
   g_mode = (mode == 1 || mode == 2) ? mode : 0;
   g_clock = clock == 0 ? 0 : 1;
@@ -730,11 +870,14 @@ void WalkPartsSetOptions(int mode, int clock, const char* add) {
   QueryPerformanceFrequency(&g_hz);
   g_window.ms_per_tick = g_hz.QuadPart > 0 ? 1000.0 / static_cast<double>(g_hz.QuadPart) : 0.0;
   if (g_mode != 0) {
-    ModLog("walk parts   : walk_parts=%d, walk_parts_clock=%d (%s), walk_parts_add=%s. The "
-           "hooks come at the third scene walk",
+    ModLog("walk parts   : walk_parts=%d, walk_parts_clock=%d (%s), walk_parts_add=%s. %s",
            g_mode, g_clock,
            g_clock == 1 ? "the time stamp counter of the CPU" : "QueryPerformanceCounter",
-           g_add[0] != 0 ? g_add : "(none)");
+           g_add[0] != 0 ? g_add : "(none)",
+           IniKey("walk_parts_early", 1) != 0
+               ? "The hooks go in at the end of the installs of the first frame with one "
+                 "MH_ApplyQueued"
+               : "The hooks come at the third scene walk");
   }
 }
 
@@ -743,10 +886,15 @@ bool WalkPartsOn() { return g_mode != 0 && g_installed && !g_failed; }
 void WalkPartsWalk(bool begin) {
   if (g_mode == 0) return;
   if (begin) {
-    if (!g_installed) {
+    if (!g_started) {
       if (++g_walks < 3) return;
+      g_started = true;
       g_thread = ThisThreadId();
-      Install();
+      if (g_early) {
+        if (!g_failed) FinishEarly(g_applied);
+      } else {
+        Install(false);
+      }
       if (g_tick_mhz > 0.0) g_window.ms_per_tick = 1.0 / (g_tick_mhz * 1000.0);
       g_window_start = Now();
       g_window_qpc = Qpc();

@@ -1904,8 +1904,23 @@ function returns.
   work of that hook in it.
 - **Only the frame thread in a scene walk counts.** A call on another
   thread, or outside a walk, goes through the stub with no read of the
-  clock. The hooks come at the third walk, when the device of the game is
-  made. A frame is the walks from one present to the next.
+  clock. A frame is the walks from one present to the next.
+- **When the hooks come.** `walk_parts_early=1` (the default): all hooks are
+  queued at the end of the installs of the first frame, after the last hook
+  of the mod, and applied with one `MH_ApplyQueued`, as `anim_trig` does. No
+  hook comes after the start of the game, so no `SuspendThread` runs while
+  the game runs (`android.md`, "SuspendThread under FEX in Wine"). This
+  leaves out the timers on the methods of the device and of the surfaces
+  (the device is not made yet) and the timers from the lists of the engine
+  (the scan of the report would add hooks). The measure of the cost of a
+  timer runs at the third walk with a probe whose hook is queued with the
+  others. A function that the mod hooks later would stop that hook (the
+  call of `MH_CreateHook` of the mod gives `MH_ERROR_ALREADY_CREATED`), which
+  is why the install is after the last hook of the mod. A function that
+  `turn_parts` times already has no second timer, and its line says so.
+  `walk_parts_early=0`: the hooks come at the third walk, when the device of
+  the game is made, with the timers of the device and of the lists of the
+  engine, each enabled with `MH_EnableHook`.
 - **The exclusive time** of a timer is its time less the time of each timer
   that it calls. Timer 0 is the walk itself, so its exclusive time is the
   part of the walk that no timer covers. The sum of all exclusive times is
@@ -6709,7 +6724,7 @@ keys that the launcher sets.
 | `fovea_res_layer` | 0 | 1 the eye picture of a walk with `fovea_res=1` has the outer image and the centre image side by side, each at its own size, and the headset app shows each as a projection layer of its own. 0 the eye picture is made from the two at the size of the render. On the PC 1 changes nothing, and 2 is a test aid that makes the atlas in a run with no session. The renderer reads it at the first walk of each game. No test key. See "The middle as its own layer" |
 | `vk_atlas_area` | 1 | Only in the headset app, with `fovea_res_layer=1`: 1 the draw of the two images into the eye picture clears and writes only the part with both rects and their gap, 0 the whole eye picture. On the PC always the whole eye picture. The renderer reads it with `fovea_res_layer`. No test key. See "The middle as its own layer" and `android.md`, "The copies of the eye pictures" |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
-| `walk_parts`, `walk_parts_add` | 0, empty | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. See "The parts of the scene walk" |
+| `walk_parts`, `walk_parts_add`, `walk_parts_early` | 0, empty, 1 | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. `walk_parts_early=1`: all hooks at the end of the installs of the first frame with one `MH_ApplyQueued`, and no timer on the device and on the lists of the engine. 0: the hooks at the third walk. See "The parts of the scene walk" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
 | `profile_sample_turn`, `profile_sample_turn_ms` | 0, 2 | A test aid: the samples come only in the game turn, each N microseconds (100 to 5000), with the return addresses of the game on the stack, and only the turns of `profile_sample_turn_ms` or more go to the report. See "The long game turn" |

@@ -1191,9 +1191,14 @@ that moves while the Hand takes it.
   come from the phase of the frames of the game to the takes: the copies
   of the GPU end after the take, or a frame of normal length comes 7 to 9
   ms after it. A long game turn (19 to 33 ms, 4 to 8 times in 10 s) gives
-  only 2 to 10 of them (`android.md`, "The long frames"). Next: a phase of
-  the pace that has each picture finished a few ms before the take, then
-  the code of the long game turn. The app
+  only 2 to 10 of them (`android.md`, "The long frames"). The line
+  `take phase` of the app shows why: the frame of the game starts about 1
+  ms after the write of the slot, and its picture needs 13 to 15 ms (a
+  deviation of 2.4 to 3.7 ms) to the end of its GPU work, so it ends at
+  the next take. A later take (`take_late=1`) gains less than 0.2 ms, and a
+  wait at the take (`take_wait_ms`) makes the frames of the session late
+  for the compositor of SteamVR. Next: pictures between the frames of the
+  game in the app, then the code of the long game turn. The app
   gives each second the core and the CPU time of
   each thread (`thread_cores=1`), binds the main thread of the game, the
   session thread and the play thread to the fast cores (`thread_bind`), and

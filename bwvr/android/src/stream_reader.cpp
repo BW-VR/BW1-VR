@@ -148,6 +148,8 @@ void StreamReader::Run() {
   uint64_t takes_at_pause = 0;
   uint64_t pauses = 0;
   while (!stop_) {
+    // The phase of the take: the start of a frame of the game (long_frames.h).
+    if (take_phase_ != nullptr && take_phase_->On()) take_phase_->Poll();
     if (feed_ > 0) {
       int status = 0;
       if (waitpid(feed_, &status, WNOHANG) == feed_) {
@@ -276,6 +278,7 @@ void StreamReader::Run() {
                                std::memory_order_relaxed);
         arrived_.fetch_add(1, std::memory_order_relaxed);
       }
+      if (take_phase_ != nullptr && take_phase_->On()) take_phase_->Arrive(q.frame, q.arrival_ms);
       pthread_mutex_lock(&lock_);
       // THE LIMIT: a queue that the session does not take (a session that
       // does not run) is cleared, and the reader leaves the ring.

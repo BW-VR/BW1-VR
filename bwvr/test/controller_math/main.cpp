@@ -3600,6 +3600,7 @@ void CreatureChecks() {
 #include "panel_pointer_checks.h"
 #include "time_log_checks.h"
 #include "long_frame_checks.h"
+#include "take_phase_checks.h"
 #include "walk_parts_checks.h"
 #include "stall_checks.h"
 #include "wow64_cpu_checks.h"
@@ -4059,6 +4060,7 @@ int main() {
   panel_pointer_checks::PanelPointerChecks();
   time_log_checks::TimeLogChecks();
   long_frame_checks::LongFrameChecks();
+  take_phase_checks::TakePhaseChecks();
   walk_parts_checks::WalkPartsChecks();
   stall_checks::StallChecks();
   wow64_cpu_checks::Wow64CpuChecks();

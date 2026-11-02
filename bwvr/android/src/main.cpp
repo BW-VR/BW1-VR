@@ -215,6 +215,13 @@ struct App {
   LatchLog latch_log;
   double shown_gap_ms = 0.0;
   double period_ms = 0.0;
+  // THE PHASE OF THE TAKE (take_late, take_wait_ms, read at each Play,
+  // take_phase_math.h): the line of the phase (long_frames.h), and the frame
+  // of the newest slot that the app wrote.
+  TakePhase take_phase;
+  bool take_late = false;
+  int take_wait_ms = 0;
+  uint32_t last_slot = 0;
   // THE CORES OF THE HEADSET (thread_cores, thread_bind, thread_cores.h).
   ThreadCores cores;
 };
@@ -692,6 +699,9 @@ void* PlayThread(void* arg) {
         if (waited) waited_gpu = true;
         if (may || app->play_stop.load()) break;
       }
+      // The phase of the take: with a depth of 1 the GPU finished each
+      // picture now, the picture before too.
+      if (depth == 1) app->take_phase.GpuDone(NowMs(), waited_gpu);
       if (waited_gpu) gate_ms = NowMs() - gate_start;
       if (app->play_stop.load()) break;
     }
@@ -704,6 +714,7 @@ void* PlayThread(void* arg) {
     const double ms = PlayBatch(app, live);
     WalkProbeInstall();
     const double waited = WriteSlot(app, *live);
+    app->take_phase.Played(live->last, live->arrival_ms, live->play_start_ms, NowMs());
     if (!timing) continue;
     PlayStats s;
     s.pictures = 1;
@@ -877,6 +888,10 @@ void StartLiveReader(App* app) {
   app->frame_clock.Start(slow_frame_ms);
   app->latch_log.Start(slow_frame_ms);
   app->live_reader.SetFrameClock(&app->frame_clock);
+  // The line of the phase of the take (long_frames.h): with slow_frame_ms
+  // above 0 or time_log=1.
+  app->take_phase.Start(slow_frame_ms > 0 || app->time.On());
+  app->live_reader.SetTakePhase(&app->take_phase);
   app->live_reader.Start(ring, app->live_whole, queue_bytes);
 }
 
@@ -1152,6 +1167,29 @@ void Play(App* app, bool new_game) {
                             "the display"
                           : "Each frame of the session shows the newest finished picture");
   }
+  // THE PHASE OF THE TAKE (bwvr.ini only, take_phase_math.h, docs/android.md,
+  // "The long frames"). take_late (0 by default): 1, the take comes
+  // after the controllers and the paint of the menu, just before the layers
+  // of xrEndFrame. take_wait_ms (0 by default): N, a take with no new picture
+  // waits up to N ms for the picture of a frame of the game that started.
+  app->take_late = take_phase_math::TakeLate(app->ini.GetInt("bwvr", "take_late", 0));
+  app->take_wait_ms = take_phase_math::TakeWaitMs(app->ini.GetInt("bwvr", "take_wait_ms", 0));
+  if (loop) {
+    AppLog("game         : take_late=%d. %s", app->take_late ? 1 : 0,
+           app->take_late ? "The take of a picture comes after the controllers and the paint "
+                            "of the menu, just before the layers of xrEndFrame"
+                          : "The take of a picture comes after the write of the slot of the "
+                            "input channel");
+    AppLog("game         : take_wait_ms=%d. %s", app->take_wait_ms,
+           app->take_wait_ms > 0
+               ? "A take with no new picture waits up to that many ms for the picture of a "
+                 "frame of the game that started, and never past three quarters of the "
+                 "display period from the end of xrWaitFrame less the rest of the frame"
+               : "A take with no new picture shows the picture before at once");
+  }
+  app->take_phase.GameStarts(app->play_ms, &app->input_live, app->take_late,
+                             app->take_wait_ms);
+  app->last_slot = 0;
   app->xr.SetFrameLoop(loop);
   if (loop) {
     StartPlayThread(app);
@@ -1998,56 +2036,98 @@ void android_main(android_app* android) {
           if (!app.menu_over_game) play_rules::ApplyMenuBits(&slot, app.menu_step);
         }
         app.input_live.Write(&slot);
+        app.last_slot = slot.frame;
+        if (app.take_phase.On() && app.game_on) app.take_phase.Wrote(slot.frame, NowMs());
         app.input_live.PlayPulses(&app.xr);
         app.period_ms = slot.display_period > 0 ? static_cast<double>(slot.display_period) / 1e6 : 0.0;
       }
       step(XrApp::kStepSlot);
       // THE PICTURE OF THIS FRAME at the place of the play of the old loop:
       // with frame_loop=1 the newest picture of the ring that the GPU
-      // finished, else the play of the batch on this thread.
+      // finished, else the play of the batch on this thread. With
+      // take_late=1 and frame_loop=1 the take comes after the controllers and
+      // the paint of the menu, just before the layers of xrEndFrame. The age
+      // and the place of the player now come after the take in each order.
       bool fresh = false;
-      if (app.play_running) {
-        // frame_loop_hold: a new picture only after the hold of the shown one.
-        if (eye_copy_math::HoldTakes(app.hold, app.hold_shown, app.hold_any)) {
-          const double take_ms = app.latch_log.On() ? NowMs() : 0.0;
-          fresh = TakePicture(&app);
-          // slow_frame_ms: why a take had no new picture (long_frames.h).
-          if (app.latch_log.On() && app.game_on) {
-            app.latch_log.Take(take_ms, fresh, app.shown_arrival_ms, app.shown_ready_ms,
-                               app.shown_gap_ms, app.shown_last, app.period_ms);
+      double taken_ms = -1.0;  // the clock at the take of the frame loop, -1 with none
+      const auto take = [&]() {
+        if (app.play_running) {
+          // frame_loop_hold: a new picture only after the hold of the shown one.
+          if (eye_copy_math::HoldTakes(app.hold, app.hold_shown, app.hold_any)) {
+            const double take_ms = NowMs();
+            taken_ms = take_ms;
+            fresh = TakePicture(&app);
+            // take_wait_ms: a take with no new picture waits for the picture
+            // of a frame of the game that started (take_phase_math.h).
+            if (!fresh && app.take_wait_ms > 0 && app.game_on && app.first_frame) {
+              input_channel::World world;
+              const bool has = app.input_live.ReadWorld(&world);
+              if (take_phase_math::WaitWorth(false, has, world.input_frame,
+                                             app.shown_input_frame, app.last_slot)) {
+                const double end =
+                    take_phase_math::WaitEnd(take_ms, app.take_wait_ms, app.xr.WaitEndMs(),
+                                             app.period_ms, app.take_phase.RestMs());
+                while (!fresh && NowMs() < end) {
+                  usleep(take_phase_math::kWaitStepUs);
+                  fresh = TakePicture(&app);
+                }
+                taken_ms = NowMs();
+                app.take_phase.Waited(taken_ms - take_ms, fresh);
+              }
+            }
+            // slow_frame_ms: why a take had no new picture (long_frames.h).
+            if (app.latch_log.On() && app.game_on) {
+              app.latch_log.Take(taken_ms, fresh, app.shown_arrival_ms, app.shown_ready_ms,
+                                 app.shown_gap_ms, app.shown_last, app.period_ms);
+            }
           }
+          if (fresh) app.hold_any = true;
+          app.hold_shown = eye_copy_math::NextShown(app.hold_shown, fresh);
+          step(XrApp::kStepTake);
+        } else if (app.live) {
+          fresh = PlayLive(&app);
+          step(XrApp::kStepPlay);
         }
-        if (fresh) app.hold_any = true;
-        app.hold_shown = eye_copy_math::NextShown(app.hold_shown, fresh);
-        step(XrApp::kStepTake);
-      } else if (app.live) {
-        fresh = PlayLive(&app);
-        step(XrApp::kStepPlay);
-      }
-      // THE AGE of the shown picture at the display time of this frame.
-      if (app.game_on && app.first_frame) {
-        app.xr.ShownPicture(app.shown_play_ms, app.shown_arrival_ms, fresh);
-        app.xr.ShownParts(app.input_live.SlotMs(app.shown_input_frame), app.shown_ready_ms,
-                          app.shown_taken_ms);
-      }
-      // THE PLACE OF THE PLAYER NOW for the views of this frame (motion_comp,
-      // docs/android.md, "The motion of the stick"): the newest place that
-      // the mod wrote into the input channel, after the take of the picture.
-      {
-        input_channel::World world;
-        const bool has = app.input_live.ReadWorld(&world);
-        motion_comp_math::SlotPush slots[64];
-        const int n = app.input_live.SlotsAfter(has ? world.input_frame : 0u, slots, 64);
-        app.xr.Motion().FrameNow(has, world, slots, n);
-      }
+        // THE AGE of the shown picture at the display time of this frame.
+        if (app.game_on && app.first_frame) {
+          app.xr.ShownPicture(app.shown_play_ms, app.shown_arrival_ms, fresh);
+          app.xr.ShownParts(app.input_live.SlotMs(app.shown_input_frame), app.shown_ready_ms,
+                            app.shown_taken_ms);
+        }
+        // THE PLACE OF THE PLAYER NOW for the views of this frame (motion_comp,
+        // docs/android.md, "The motion of the stick"): the newest place that
+        // the mod wrote into the input channel, after the take of the picture.
+        {
+          input_channel::World world;
+          const bool has = app.input_live.ReadWorld(&world);
+          motion_comp_math::SlotPush slots[64];
+          const int n = app.input_live.SlotsAfter(has ? world.input_frame : 0u, slots, 64);
+          app.xr.Motion().FrameNow(has, world, slots, n);
+        }
+      };
+      const bool late = app.take_late && app.play_running;
+      if (!late) take();
       UpdateKeyboard(&app);
       bool show_cursor = false;
       float cursor[3] = {0, 0, 0};
       OnControllers(&app, input, &show_cursor, cursor);
       Paint(&app);
       step(XrApp::kStepUi);
+      if (late) {
+        take();
+        step(XrApp::kStepUi);
+      }
       app.xr.EndFrame(quad.center, menu_size, show_cursor, cursor,
                       kCursorMeters);
+      // THE PHASE OF THE TAKE of this frame of the session (long_frames.h).
+      if (app.take_phase.On() && app.game_on) {
+        if (taken_ms >= 0.0 && app.first_frame) {
+          app.take_phase.SessionFrame(app.xr.WaitEndMs(), app.xr.LastWaitMs(), taken_ms, NowMs(),
+                                      app.period_ms, app.xr.DisplayTime(),
+                                      app.xr.DisplayPeriod(), app.xr.DisplayTimeMs());
+        }
+        app.take_phase.Tick(NowMs());
+      }
       // THE TIME LOG of this frame of the session.
       if (app.time.On()) {
         XrApp::FrameTimes times;

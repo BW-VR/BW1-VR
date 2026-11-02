@@ -32,6 +32,7 @@ struct QueuedFrame {
 };
 
 class GameFrameClock;
+class TakePhase;
 
 class StreamReader {
  public:
@@ -63,6 +64,10 @@ class StreamReader {
   // THE LONG FRAMES (slow_frame_ms, long_frames.h), before Start: the thread
   // gives each frame that it takes to the clock, when the clock is on.
   void SetFrameClock(GameFrameClock* clock) { frame_clock_ = clock; }
+  // THE PHASE OF THE TAKE (long_frames.h), before Start: the thread looks at
+  // the world of the mod at each turn of its loop and gives it each frame
+  // that it takes, when the phase is on.
+  void SetTakePhase(TakePhase* phase) { take_phase_ = phase; }
 
   // A TEST AID (stream_live_feed=1): a child process writes the frames of
   // the stream file feed into the ring as the mod does, so the reader takes
@@ -91,6 +96,7 @@ class StreamReader {
   pid_t feed_ = 0;
   bool time_log_ = false;
   GameFrameClock* frame_clock_ = nullptr;
+  TakePhase* take_phase_ = nullptr;
   std::atomic<uint64_t> arrived_{0};
   std::atomic<double> last_arrival_ms_{0.0};
 };

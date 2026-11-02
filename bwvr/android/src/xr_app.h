@@ -180,8 +180,10 @@ class XrApp {
   void SetLayerRect(bool on) { layer_rect_ = on; }
   void SetStagingDirect(bool on) { staging_direct_ = on; }
   void TakeTimes(FrameTimes* out);
-  // The wait in xrWaitFrame of this frame, in ms.
+  // The wait in xrWaitFrame of this frame, in ms, and the clock
+  // (CLOCK_MONOTONIC, ms) at its end, -1 before the first frame.
   double LastWaitMs() const { return last_wait_ms_; }
+  double WaitEndMs() const { return wait_end_ms_; }
   const std::string& RuntimeName() const { return runtime_name_; }
 
   // THE DISPLAY RATE (XR_FB_display_refresh_rate, docs/android.md, "The
@@ -298,6 +300,7 @@ class XrApp {
   // The display time of this frame of the session (ns, the clock of the
   // runtime).
   int64_t DisplayTime() const { return frame_.predictedDisplayTime; }
+  int64_t DisplayPeriod() const { return frame_.predictedDisplayPeriod; }
   // THE MIDDLE AS ITS OWN LAYER (fovea_res_layer=1): the rects of the outer
   // and the centre image in the newest picture (VkSceneEyesAtlas), after
   // SetScreenView. With Atlas::on the layer of the whole view shows the

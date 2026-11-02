@@ -1334,14 +1334,14 @@ void XrApp::PollEvents(bool* quit) {
 bool XrApp::BeginFrame(XrInput* input) {
   XrFrameWaitInfo wait = {XR_TYPE_FRAME_WAIT_INFO};
   frame_ = {XR_TYPE_FRAME_STATE};
-  const double wait_start = time_log_ ? ClockMs() : 0.0;
+  // The end of xrWaitFrame and the wait in it at each frame: the time log and
+  // the room of the take (take_wait_ms, take_phase_math.h).
+  const double wait_start = ClockMs();
   wait_end_ms_ = -1.0;
   if (!Ok(xrWaitFrame(session_, &wait, &frame_), "xrWaitFrame")) return false;
-  if (time_log_) {
-    wait_end_ms_ = ClockMs();
-    last_wait_ms_ = wait_end_ms_ - wait_start;
-    times_.wait.Add(last_wait_ms_);
-  }
+  wait_end_ms_ = ClockMs();
+  last_wait_ms_ = wait_end_ms_ - wait_start;
+  if (time_log_) times_.wait.Add(last_wait_ms_);
   // THE STEPS of this frame (the time log): from here to the end of
   // xrEndFrame. The thread of the session adds up its waits for the lock.
   for (double& ms : step_ms_) ms = 0.0;

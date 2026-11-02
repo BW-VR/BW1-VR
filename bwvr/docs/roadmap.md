@@ -1199,8 +1199,17 @@ that moves while the Hand takes it.
   frame of the session gains less than 0.2 ms, and with SteamVR about 2 ms more work of the session after
   `xrWaitFrame` makes the compositor time out presents. The Frame runs an
   APK at 72 Hz, the rate of SteamVR for each app (`android.md`, "The
-  display rate"). Next: runs on the Frame at 90 and 144 Hz (a setting of the
-  device), then pictures between the frames of the game in the app, then
+  display rate"). At 90 Hz the game keeps the rate (88.6 to 89.2 frames a
+  second), and SteamVR gets 89 pictures a second, but 35 to 102 of 900
+  takes in 10 s have no new picture, and a newer picture replaces many
+  pictures before their take: the player sees micro stutter.
+  `frame_queue=1` shows each picture in its order with a delay of one take
+  more, in a ring of 4 slots, and the line `late picture` gives the new
+  pictures by their delay in takes and the pictures that did not show
+  (`android.md`, "The frame loop", "The queue of the pictures"). Next on
+  the Frame: a strafe with the stick at 90 and 72 Hz with `frame_queue` 1
+  and 0, the counts of `late picture`, and if the micro stutter goes. Then
+  pictures between the frames of the game in the app, then
   the code of the long game turn. The app
   gives each second the core and the CPU time of
   each thread (`thread_cores=1`), binds the main thread of the game, the

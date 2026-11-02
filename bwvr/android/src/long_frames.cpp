@@ -242,6 +242,13 @@ void LatchLog::Take(double take_ms, bool fresh, double arrival_ms, double ready_
             r.ready_ms, gap_ms);
 }
 
+void LatchLog::Cadence(bool fresh, int delay, uint64_t replaced, uint64_t dropped) {
+  if (limit_ms_ == 0) return;
+  if (fresh) ++delay_bins_[frame_loop::DelayBin(delay)];
+  replaced_ += replaced;
+  dropped_ += dropped;
+}
+
 void LatchLog::Tick(double now_ms) {
   if (limit_ms_ == 0) return;
   kept_.WriteOne();
@@ -253,7 +260,10 @@ void LatchLog::Tick(double now_ms) {
             "length. Those frames of normal length came after the take: %llu up to 1 ms, "
             "%llu up to 2 ms, %llu up to 4 ms, %llu more (%.2f ms as a mean, %.2f at most). "
             "The pictures in time ended their copies %.2f ms before the take as a mean, %.2f "
-            "at the least (%llu pictures)",
+            "at the least (%llu pictures). THE CADENCE: the new pictures by the takes after "
+            "the submit of their copies and before the take that showed them: %llu with 0, "
+            "%llu with 1, %llu with 2 or more. Pictures that did not show: %llu that a take freed (a newer picture "
+            "replaced them), %llu that the play thread dropped (no free slot)",
             seconds, static_cast<unsigned long long>(takes_),
             static_cast<unsigned long long>(missed_),
             static_cast<unsigned long long>(by_kind_[lf::kGpu]),
@@ -265,10 +275,17 @@ void LatchLog::Tick(double now_ms) {
             static_cast<unsigned long long>(late_bins_[2]),
             static_cast<unsigned long long>(late_bins_[3]), late_.Mean(), late_.most,
             slack_.Mean(), slack_.count > 0 ? slack_least_ : 0.0,
-            static_cast<unsigned long long>(slack_.count));
+            static_cast<unsigned long long>(slack_.count),
+            static_cast<unsigned long long>(delay_bins_[0]),
+            static_cast<unsigned long long>(delay_bins_[1]),
+            static_cast<unsigned long long>(delay_bins_[2]),
+            static_cast<unsigned long long>(replaced_),
+            static_cast<unsigned long long>(dropped_));
   kept_.WindowEnds();
   window_ms_ = now_ms;
   takes_ = missed_ = 0;
+  for (uint64_t& d : delay_bins_) d = 0;
+  replaced_ = dropped_ = 0;
   for (uint64_t& k : by_kind_) k = 0;
   for (uint64_t& b : late_bins_) b = 0;
   late_.Reset();

@@ -14,7 +14,9 @@
 //                     picture, how late the next picture was relative to the
 //                     take, and how early the pictures in time were. One line
 //                     "late picture" for each picture after a miss, at most 5
-//                     lines a second, and each 10 s one line
+//                     lines a second, and each 10 s one line, with the new
+//                     pictures by their delay in takes and the pictures that
+//                     did not show (frame_queue)
 //   The lines wait in memory until their window of 10 s ends. Then they go
 //   to the log one at each frame (KeptLines), the line of the window last,
 //   so the log never writes many lines on the thread at one time.
@@ -34,6 +36,7 @@
 #include <string>
 
 #include "../../src/mod/long_frame_math.h"
+#include "frame_loop.h"
 #include "../../src/mod/take_phase_math.h"
 #include "../../src/mod/time_log_math.h"
 
@@ -111,6 +114,12 @@ class LatchLog {
   // frame number. period_ms: the display period (0 when not known).
   void Take(double take_ms, bool fresh, double arrival_ms, double ready_ms, double gap_ms,
             uint64_t frame, double period_ms);
+  // At each take, after Take: the cadence of the ring (frame_queue,
+  // frame_loop.h). delay: the takes after the submit of the copies of the
+  // new picture and before this take (fresh only). replaced: the pictures that the take freed before
+  // they showed. dropped: the pictures that the play thread dropped since the
+  // take before.
+  void Cadence(bool fresh, int delay, uint64_t replaced, uint64_t dropped);
   // Each frame of the session: the end of a window of 10 s, and at most one
   // line.
   void Tick(double now_ms);
@@ -129,6 +138,10 @@ class LatchLog {
   time_log_math::Stat slack_;     // pictures in time: the take after the end of their copies
   double slack_least_ = -1.0;     // the least of them, or -1
   time_log_math::Stat long_gap_;  // kLong: the gap of the frame of the game
+  // The new pictures by their delay in takes (frame_loop::DelayBin).
+  uint64_t delay_bins_[frame_loop::kDelayBins] = {0, 0, 0};
+  uint64_t replaced_ = 0;  // pictures that a take freed before they showed
+  uint64_t dropped_ = 0;   // pictures that the play thread dropped
 };
 
 // THE PHASE OF THE TAKE. Three threads give it times (CLOCK_MONOTONIC, ms):

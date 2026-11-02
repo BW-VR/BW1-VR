@@ -123,6 +123,231 @@ inline void RingChecks() {
         0);
 }
 
+// THE QUEUE OF THE PICTURES (frame_queue): which slot a take shows, which
+// slots it frees, the drop rule, and the cadence in a model of the Frame.
+// The model: takes at each whole step. The play thread writes and submits
+// the picture k at k - 0.5 (it plays the next picture after the GPU work of
+// the one before, so a write is short). The GPU ends the picture k at k + e,
+// with e from -0.3 to 0.3 of a step: each picture ends at the edge of its
+// take. gap: steps with no new picture of the game
+// (a long frame). skip: steps with no take (a slow session).
+struct QueueRun {
+  int takes = 0, repeats = 0, out_of_order = 0, most_delay = 0;
+  int repeats_after = 0;  // takes with no new picture after the first one
+  int bins[frame_loop::kDelayBins] = {0, 0, 0};
+  uint64_t replaced = 0, dropped = 0;
+  bool shown_written = false;
+};
+inline QueueRun RunQueue(bool queue, int steps, int gap_at, int gap, int skip_at, int skip) {
+  namespace fl = frame_loop;
+  fl::Ring r(queue);
+  uint64_t picture_of[fl::kSlots] = {0, 0, 0, 0};
+  uint32_t seed = 12345u;
+  double end_of[fl::kSlots] = {0, 0, 0, 0};
+  QueueRun out;
+  bool dropped = false;
+  uint64_t next_picture = 1, last_shown = 0;
+  bool any = false;
+  for (int m = 1; m <= steps; ++m) {
+    const bool game_idle = m >= gap_at && m < gap_at + gap;
+    const int writing = game_idle ? -1 : r.BeginWrite(&dropped);
+    if (writing >= 0) {
+      if (writing == r.Shown()) out.shown_written = true;
+      seed = seed * 1103515245u + 12345u;
+      const double e = (static_cast<double>((seed >> 8) % 1001) / 1000.0 - 0.5) * 0.6;
+      picture_of[writing] = next_picture;
+      end_of[writing] = static_cast<double>(m) + e;
+      ++next_picture;
+      r.EndWrite(writing);
+    }
+    if (m >= skip_at && m < skip_at + skip) continue;
+    bool done[fl::kSlots];
+    for (int i = 0; i < fl::kSlots; ++i) done[i] = end_of[i] <= static_cast<double>(m);
+    const uint64_t replaced = r.Replaced();
+    const int t = r.Take(done);
+    out.replaced += r.Replaced() - replaced;
+    ++out.takes;
+    if (t < 0) {
+      ++out.repeats;
+      if (any) ++out.repeats_after;
+      continue;
+    }
+    if (any && picture_of[t] != last_shown + 1) ++out.out_of_order;
+    any = true;
+    last_shown = picture_of[t];
+    if (r.ShownDelay() > out.most_delay) out.most_delay = r.ShownDelay();
+    ++out.bins[fl::DelayBin(r.ShownDelay())];
+  }
+  out.dropped = r.Dropped();
+  return out;
+}
+
+inline void QueueChecks() {
+  namespace fl = frame_loop;
+  using fl::Slot;
+  printf("\nThe queue of the pictures (frame_queue)\n");
+  Check(!fl::QueueOn(0) && fl::QueueOn(1) && fl::QueueOn(2), "frame_queue: 0 is the old way, each "
+        "other value the queue", 0, 0);
+  Check(fl::SlotsOf(false) == 3 && fl::SlotsOf(true) == 4 && fl::kSlots == 4,
+        "the ring uses 3 slots with frame_queue=0 and 4 with 1", fl::SlotsOf(true), 4);
+  Check(fl::QueuePick(false, 0) == -1 && fl::QueuePick(false, 1) == 0 &&
+            fl::QueuePick(false, 3) == 2,
+        "frame_queue=0: the newest of the finished pictures", fl::QueuePick(false, 3), 2);
+  Check(fl::QueuePick(true, 0) == -1 && fl::QueuePick(true, 1) == 0 && fl::QueuePick(true, 2) == 0,
+        "frame_queue=1: the oldest of one or two finished pictures", fl::QueuePick(true, 2), 0);
+  Check(fl::QueuePick(true, 3) == 1 && fl::QueuePick(true, 4) == 2,
+        "frame_queue=1, more than two: only the newest one waits after the take",
+        fl::QueuePick(true, 4), 2);
+  Check(fl::DelayBin(0) == 0 && fl::DelayBin(1) == 1 && fl::DelayBin(2) == 2 &&
+            fl::DelayBin(7) == 2 && fl::DelayBin(-1) == 0,
+        "the bins of the delay: 0, 1, 2 or more", fl::DelayBin(7), 2);
+
+  // The default ring is the old way: 3 slots.
+  fl::Ring old;
+  Check(!old.Queue() && old.Count() == 3, "a ring with no key: the old way, 3 slots", old.Count(),
+        3);
+
+  // FOUR SLOTS: shown, waiting, at the GPU, in writing.
+  fl::Ring q(true);
+  const bool all[fl::kSlots] = {true, true, true, true};
+  bool dropped = false;
+  int a = q.BeginWrite(&dropped);
+  q.EndWrite(a);
+  const int t_a = q.Take(all);
+  Check(t_a == a && q.ShownDelay() == 0, "the first picture shows at once, delay 0",
+        q.ShownDelay(), 0);
+  int b = q.BeginWrite(&dropped);
+  q.EndWrite(b);
+  int c = q.BeginWrite(&dropped);
+  q.EndWrite(c);
+  int d = q.BeginWrite(&dropped);
+  Check(a == 0 && b == 1 && c == 2 && d == 3 && !dropped && q.Dropped() == 0,
+        "shown, two ready and one in writing: four slots, no drop", d, 3);
+  bool done_bc[fl::kSlots] = {true, true, true, false};
+  const int t_bc = q.Take(done_bc);
+  Check(t_bc == b && q.State(c) == Slot::kReady && q.State(a) == Slot::kFree &&
+            q.Replaced() == 0,
+        "two finished pictures: the older (slot 1) shows, the newer waits, the shown slot before "
+        "is free",
+        static_cast<double>(q.Replaced()), 0);
+  q.EndWrite(d);
+  const int t_c = q.Take(all);
+  Check(t_c == c && q.ShownDelay() == 1 && q.State(d) == Slot::kReady,
+        "the next take shows the waiting picture (slot 2) with a delay of 1 take, slot 3 waits",
+        q.ShownDelay(), 1);
+  const int t_d = q.Take(all);
+  Check(t_d == d && q.ShownDelay() == 1, "and then slot 3, also with a delay of 1",
+        q.ShownDelay(), 1);
+  const int t_none = q.Take(all);
+  Check(t_none == -1 && q.Shown() == d, "no new picture: the shown slot shows again (a miss)",
+        q.Shown(), d);
+
+  // THE DROP RULE OF THE TAKE: three finished pictures wait (the session was
+  // slower than the game). The oldest goes, the middle one shows, the newest
+  // waits.
+  int e = q.BeginWrite(&dropped);
+  q.EndWrite(e);
+  int f = q.BeginWrite(&dropped);
+  q.EndWrite(f);
+  int g = q.BeginWrite(&dropped);
+  q.EndWrite(g);
+  Check(!dropped && q.State(d) == Slot::kShown, "three pictures into the three free slots", 0, 0);
+  const int t_f = q.Take(all);
+  Check(t_f == f && q.State(e) == Slot::kFree && q.State(g) == Slot::kReady &&
+            q.Replaced() == 1,
+        "three finished pictures: the oldest is freed (replaced), the middle one shows, the "
+        "newest waits",
+        static_cast<double>(q.Replaced()), 1);
+  Check(q.Serial(f) > q.Serial(e) && q.Serial(g) > q.Serial(f), "the shown picture is newer than "
+        "the freed one, the waiting one newer than both", 0, 0);
+  // An unfinished picture is no candidate: it waits, also when it is older.
+  int h = q.BeginWrite(&dropped);
+  q.EndWrite(h);
+  bool done_h_only[fl::kSlots] = {false, false, false, false};
+  done_h_only[h] = true;
+  const int t_h = q.Take(done_h_only);
+  Check(t_h == h && q.State(g) == Slot::kFree && q.Replaced() == 2,
+        "only the newer picture is finished: it shows, and the older unfinished one is freed",
+        static_cast<double>(q.Replaced()), 2);
+
+  // THE DROP RULE OF THE PLAY THREAD with four slots: no free slot, the
+  // oldest ready slot, never the shown one.
+  fl::Ring p(true);
+  int s0 = p.BeginWrite(&dropped);
+  p.EndWrite(s0);
+  p.Take(all);
+  for (int k = 0; k < 3; ++k) p.EndWrite(p.BeginWrite(&dropped));
+  const int s4 = p.BeginWrite(&dropped);
+  Check(s4 == 1 && dropped && p.Dropped() == 1 && p.State(0) == Slot::kShown,
+        "no free slot of four: the play thread drops the oldest ready slot (1), never the shown "
+        "one",
+        s4, 1);
+
+  // A NEW VALUE WHILE THE RING RUNS: from 4 slots to 3, slot 3 takes no new
+  // write, and a take frees it.
+  fl::Ring live(true);
+  for (int k = 0; k < 4; ++k) live.EndWrite(live.BeginWrite(&dropped));
+  live.SetQueue(false);
+  const int t_live = live.Take(all);
+  Check(live.Count() == 3 && t_live == 3 && live.State(0) == Slot::kFree &&
+            live.State(1) == Slot::kFree && live.State(2) == Slot::kFree,
+        "frame_queue to 0 with 4 ready slots: the newest (slot 3) shows, the others are free", 0,
+        0);
+  int n0 = live.BeginWrite(&dropped);
+  live.EndWrite(n0);
+  int n1 = live.BeginWrite(&dropped);
+  live.EndWrite(n1);
+  const int t_n = live.Take(all);
+  Check(n0 == 0 && n1 == 1 && t_n == 1 && live.State(3) == Slot::kFree,
+        "the writes go to the slots 0 to 2, and the next take frees slot 3", 0, 0);
+  bool any3 = false;
+  for (int k = 0; k < 20; ++k) {
+    const int i = live.BeginWrite(&dropped);
+    if (i == 3) any3 = true;
+    live.EndWrite(i);
+    if (k % 2 == 0) live.Take(all);
+  }
+  Check(!any3, "20 writes with 3 slots: none into slot 3", 0, 0);
+
+  // THE MODEL OF THE FRAME: each picture ends at the edge of its take.
+  const QueueRun o = RunQueue(false, 900, 0, 0, 0, 0);
+  const QueueRun n = RunQueue(true, 900, 0, 0, 0, 0);
+  printf("    model, 900 takes: frame_queue=0 %d takes with no new picture, %d pictures out of "
+         "order, %llu replaced, %llu dropped. frame_queue=1 %d, %d, %llu, %llu, delay 0/1/2+ "
+         "%d/%d/%d\n",
+         o.repeats_after, o.out_of_order, static_cast<unsigned long long>(o.replaced),
+         static_cast<unsigned long long>(o.dropped), n.repeats_after, n.out_of_order,
+         static_cast<unsigned long long>(n.replaced), static_cast<unsigned long long>(n.dropped),
+         n.bins[0], n.bins[1], n.bins[2]);
+  Check(o.repeats_after > 100 && o.out_of_order > 100,
+        "the model with frame_queue=0: many takes with no new picture and many skipped pictures",
+        o.repeats_after, 100);
+  Check(n.repeats_after <= 1 && n.out_of_order == 0 && n.replaced == 0 && n.dropped == 0,
+        "frame_queue=1: at most one take with no new picture, then each picture in its order",
+        n.repeats_after, 1);
+  Check(n.most_delay == 1 && n.bins[1] > 850 && !n.shown_written && !o.shown_written,
+        "frame_queue=1: a delay of 1 take, never more, and no write into the shown slot",
+        n.bins[1], 850);
+  // A long frame of the game (3 steps with no new picture): the misses of the
+  // gap, and then the order again with a delay of at most 1.
+  const QueueRun lg = RunQueue(true, 900, 400, 3, 0, 0);
+  Check(lg.repeats_after <= 1 + 3 + 1 && lg.out_of_order == 0 && lg.most_delay == 1,
+        "frame_queue=1 with a long frame: the misses of the gap, no picture out of order",
+        lg.repeats_after, 5);
+  // A slow session (2 takes that did not happen): the older pictures go in
+  // the first takes after it, and the delay stays at 1.
+  const QueueRun sl = RunQueue(true, 900, 0, 0, 500, 2);
+  printf("    model, a slow session: %d pictures out of order, %llu replaced, %llu dropped, delay "
+         "0/1/2+ %d/%d/%d\n",
+         sl.out_of_order, static_cast<unsigned long long>(sl.replaced),
+         static_cast<unsigned long long>(sl.dropped), sl.bins[0], sl.bins[1], sl.bins[2]);
+  Check(sl.out_of_order >= 1 && sl.out_of_order <= 2 &&
+            sl.replaced + sl.dropped == 2 && sl.most_delay == 1 && sl.repeats_after <= 1,
+        "frame_queue=1 with a slow session of 2 takes: 2 pictures go (in 1 or 2 jumps), and the "
+        "delay stays at 1",
+        static_cast<double>(sl.replaced + sl.dropped), 2);
+}
+
 inline void CommandRingChecks() {
   namespace fl = frame_loop;
   printf("\nThe ring of the command buffers of the session\n");
@@ -317,6 +542,7 @@ inline void OnceSetChecks() {
 
 inline void FrameLoopChecks() {
   RingChecks();
+  QueueChecks();
   OnceSetChecks();
   CommandRingChecks();
   GpuQueueChecks();

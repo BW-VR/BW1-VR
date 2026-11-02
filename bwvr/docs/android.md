@@ -2726,7 +2726,7 @@ long frame   : L frames longer than N ms in 10.0 s, K of them with a line. They 
 game frame   : the frame F of the game came G ms after the frame before. In that time the main thread of the game ran R ms on a core, waited Q ms for a core, and was off a core O ms (K time slices)
 game frame   : 10.0 s, N gaps between frames of the game, ms: the mean A and the most M. In T ms of them with schedstat the main thread of the game ran R ms on a core and waited Q ms for a core. L gaps were longer than X ms (K with a line): G ms, and in T2 ms of them with schedstat the main thread ran R2 ms and waited Q2 ms for a core
 late picture : N frames of the session had no new picture before the frame F of the game: <cause>. It came L ms after the first take that missed it, and its copies ended R ms after that take. Its frame of the game came G ms after the frame before
-late picture : 10.0 s, T takes of the session, M of them with no new picture: a by the GPU, b by the play of the app, c by a long frame of the game (the gap A ms as a mean, B at most), d by a frame of normal length. Those frames of normal length came after the take: e up to 1 ms, f up to 2 ms, g up to 4 ms, h more (C ms as a mean, D at most). The pictures in time ended their copies E ms before the take as a mean, F at the least (P pictures)
+late picture : 10.0 s, T takes of the session, M of them with no new picture: a by the GPU, b by the play of the app, c by a long frame of the game (the gap A ms as a mean, B at most), d by a frame of normal length. Those frames of normal length came after the take: e up to 1 ms, f up to 2 ms, g up to 4 ms, h more (C ms as a mean, D at most). The pictures in time ended their copies E ms before the take as a mean, F at the least (P pictures). THE CADENCE: the new pictures by the takes after the submit of their copies and before the take that showed them: i with 0, j with 1, k with 2 or more. Pictures that did not show: r that a take freed (a newer picture replaced them), s that the play thread dropped (no free slot)
 ```
 
 - `game frame` comes from the reader of the live stream: at each frame of
@@ -2755,6 +2755,15 @@ late picture : 10.0 s, T takes of the session, M of them with no new picture: a 
   - by a frame of normal length: its frame came after the take, and it was
     not long. The line says by how much it missed the take.
 - The misses before a picture count in the window of that picture.
+- THE CADENCE of the window: each new picture by its delay, the takes after
+  the submit of its copies and before the take that showed it
+  (`frame_loop::DelayBin`). With each picture in time the delay is 0 with
+  `frame_queue=0` and 1 with `frame_queue=1`, so an even cadence has nearly
+  all pictures in one count. The pictures that did not show: the ready
+  pictures that a take freed (a newer picture showed first, or the drop of
+  the queue), and the pictures that the play thread dropped because no slot
+  was free. The misses and their causes count the same way with each value
+  of `frame_queue`.
 - The room of a shift of the phase of the pace (`frame_pace_math.h`): with
   `vk_pace=1` a frame of the game starts at the write of the slot of a
   frame of the session, so the time from the end of the frame of the game to
@@ -3310,7 +3319,8 @@ its `bwvr.ini` or the row.
   shown picture. It does not play and does not wait for the play thread.
 
 **The ring of the pictures** (`PictureRing`, the rules in `frame_loop.h`,
-`Ring`). Three slots. A slot has an image of the eye pictures (a layer for
+`Ring`). Three slots, or four with `frame_queue=1` ("The queue of the
+pictures" below). A slot has an image of the eye pictures (a layer for
 each eye, at the size of the picture), and when a picture needs them an
 image of the panel image and an image of the screen picture. The images
 have the byte order of the swapchains: `R8G8B8A8_UNORM`, or
@@ -3334,10 +3344,11 @@ such a screen), and the frame number of the game.
   the GPU did not finish its copies. The session never waits for it.
 - At each frame the session takes the newest ready slot whose fence is
   signaled (`vkGetFenceStatus`, no wait) and that is newer than the shown
-  slot. The shown slot before is free again, and so is each older ready
-  slot: a newer picture replaced it, and the time log counts it. With no
-  new finished picture the session shows the shown slot again. A picture
-  that the GPU did not finish never holds a frame of the session.
+  slot (with `frame_queue=1` the next one in order, below). The shown slot
+  before is free again, and so is each older ready slot: a newer picture
+  replaced it, and the time log counts it. With no new finished picture the
+  session shows the shown slot again. A picture that the GPU did not finish
+  never holds a frame of the session.
 - The play thread never writes the shown slot, and the session never shows
   an older picture than the shown one (the math checks).
 - When the session leaves a slot (it takes a new slot, or the game ends),
@@ -3345,6 +3356,46 @@ such a screen), and the frame number of the game.
   also with `xr_copy_on_change=0` or with a swapchain image that waits for
   a later frame. A layer keeps its image until the new picture gives it a
   new source.
+
+**The queue of the pictures** (`frame_queue` in `bwvr.ini`, read at each
+Play, 0 by default, the rules in `frame_loop.h`, `QueuePick` and `Ring`).
+When each picture ends its GPU work near the edge of its take, the newest
+finished picture is sometimes the picture before and sometimes the next
+one. Then a picture that misses its take shows one take later, and a newer
+picture replaces the next one before it shows. The player sees micro
+stutter, also when the game keeps the rate of the display.
+
+- `frame_queue=0`: each take shows the newest finished picture, in a ring of
+  3 slots.
+- `frame_queue=1`: a ring of 4 slots: one shown, one finished that waits
+  for its take, one at the GPU and one that the play thread writes. Each
+  take shows the oldest finished picture that is newer than the shown one.
+  When more than one finished picture waits after a take (the session was
+  slower than the game for a time), the older ones go, and the time log and
+  the line "late picture" count them as replaced. So after the first miss
+  each picture shows in its order, one take later than with 0, and has
+  nearly two display periods from the write of the slot of its input to its
+  take. With no new finished picture the take shows the shown picture again
+  (a miss). Only a long frame of the game (or a picture that needs more
+  than about two periods) gives a miss then.
+
+Each picture keeps the poses of its own slot, so the runtime turns it for
+the head as with 0. The take does the same work as with 0: one fence status
+for each ready slot and the choice among at most four slots. The log at
+Play: "game : frame_queue=1. A ring of 4 slots. ...".
+
+The memory of the fourth slot is the memory of one slot: with
+`xr_eye_direct=0` an image of the eye pictures (the width by the height by
+8 bytes), with `xr_eye_direct=1` two swapchains of the eyes (the width by
+the height by 4 bytes for each image that the runtime gives), and when a
+picture needs them an image of the panel and of the screen picture (the
+width by the height by 4 bytes each). At the eye picture of 1080 by 864 of
+the Steam Frame that is 3.6 MB for each image: 7.1 MB for the eye pictures
+or 21.4 MB for two swapchains of 3 images, and 3.6 MB each for the panel
+and the screen picture. At the render of 2702 by 2162 of a Quest 3 it is
+22.3 MB for each image: 44.6 MB for the eye pictures or 133.7 MB for two
+swapchains of 3 images, and 22.3 MB each for the panel and the screen
+picture.
 
 **The queue at the GPU** (`frame_loop_gpu_depth` in `bwvr.ini`, read at
 each Play, 1 by default, the rules in `frame_loop.h`, `PictureRing::WaitGpu`).
@@ -3508,8 +3559,9 @@ idle (a new size of an image) holds it too, and with one lock that wait
 has each queue.
 
 **The log.** At each Play "game : frame_loop=1. A play thread plays each
-picture of the game into a ring of 3 slots ...", at the first Play "ring :
-a ring of 3 slots ...", one line for each image of a slot ("ring : slot 0:
+picture of the game into a slot of the ring of the pictures ...", at the
+first Play "ring : a ring of up to 4 slots ...", one line for each image of
+a slot ("ring : slot 0:
 an image of 1380 by 1104 with 2 layers for the eye pictures (11.6 MB)"),
 "gpu : the ring of command buffers is on (up to 16)" at Play, and at the end
 of the game "gpu : the ring of command buffers is off: N entries, M new
@@ -3523,7 +3575,10 @@ frame for a staging buffer. The time log has the lines of the play thread
 
 - `.\dev.ps1 build`: the checks of `frame_loop_checks.h` (the choice of the
   newest finished picture, the drop rule, the end of a game, 300 frames
-  with no write into the shown slot and no older picture, the ring of the
+  with no write into the shown slot and no older picture, the queue of the
+  pictures with its pick, its frees, its drop rule, a new value while the
+  ring runs, and a model of 900 takes with each picture at the edge of its
+  take, a long frame and a slow session, the ring of the
   command buffers, the serials, the age, the queue at the GPU with a loop
   of 30 steps, the direct writes, the rect of a copy, the row and its
   save).
@@ -3585,9 +3640,10 @@ the GPU is busy, and the latency that the player feels.
 
 **Known limits:**
 
-- The ring needs memory of the GPU: three images of the eye pictures (and
-  of the panel image when the mod gives panel quads) at the size of the
-  render, at 2702 by 2162 about 67 MB for each slot with a panel. The old
+- The ring needs memory of the GPU: three images of the eye pictures (four
+  with `frame_queue=1`, and of the panel image when the mod gives panel
+  quads) at the size of the render, at 2702 by 2162 about 67 MB for each
+  slot with a panel. The old
   loop has one image between for each set of swapchains in place of them.
 - The test runtime of the emulator holds a frame of the session for some
   seconds while it reads back a picture. The session then holds the lock of

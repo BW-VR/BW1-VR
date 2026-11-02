@@ -69,9 +69,9 @@ bool PictureRing::Start(const Gpu& gpu, VkQueue queue, VkSemaphore session_timel
     stamps_.Start(device_, timestamp_ns_, timestamp_mask_, frame_loop::kSlots);
   }
   started_ = true;
-  AppLog("ring         : a ring of %d slots for the pictures of the game, each an image of "
-         "the eye pictures (a layer for each eye) and, when the picture needs them, an image "
-         "of the panel and of the screen, %s",
+  AppLog("ring         : a ring of up to %d slots for the pictures of the game, each an image "
+         "of the eye pictures (a layer for each eye) and, when the picture needs them, an "
+         "image of the panel and of the screen, %s",
          frame_loop::kSlots,
          swap_red_blue ? "B8G8R8A8_UNORM (a blit puts blue first)"
                        : "R8G8B8A8_UNORM (a copy of the bytes of the renderer)");
@@ -493,7 +493,12 @@ bool PictureRing::WaitGpu(int depth, uint64_t timeout_ns, bool* waited) {
   return frame_loop::MayPlay(depth, busy(fences));
 }
 
-const Picture* PictureRing::Take(uint64_t session_serial) {
+void PictureRing::SetQueue(bool on) {
+  std::lock_guard<std::mutex> g(lock_);
+  ring_.SetQueue(on);
+}
+
+const Picture* PictureRing::Take(uint64_t session_serial, TakeFacts* facts) {
   std::lock_guard<std::mutex> g(lock_);
   const int before = ring_.Shown();
   // The fences of the ready slots, with no wait. The play thread resets a
@@ -506,6 +511,12 @@ const Picture* PictureRing::Take(uint64_t session_serial) {
   const uint64_t replaced = ring_.Replaced();
   const int i = ring_.Take(done);
   stats_.replaced += ring_.Replaced() - replaced;
+  if (facts != nullptr) {
+    facts->delay = i >= 0 ? ring_.ShownDelay() : 0;
+    facts->replaced = ring_.Replaced() - replaced;
+    facts->dropped = ring_.Dropped() - dropped_at_take_;
+  }
+  dropped_at_take_ = ring_.Dropped();
   // Each copy from the slot shown before is in a submit up to this serial.
   if (i >= 0 && before >= 0 && before != i) slots_[before].read_serial = session_serial;
   return i >= 0 ? &slots_[i].picture : nullptr;

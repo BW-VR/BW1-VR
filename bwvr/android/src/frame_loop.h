@@ -4,8 +4,9 @@
 //
 //   frame_loop=1  the new loop (the default): a play thread plays each
 //                 picture of the game into a slot of a ring, and the thread
-//                 of the session shows the newest slot that the GPU
-//                 finished. No thread of the session waits on the CPU for
+//                 of the session shows a slot that the GPU finished (the
+//                 newest, or the next in order with frame_queue=1). No
+//                 thread of the session waits on the CPU for
 //                 GPU work of a picture of the game
 //   frame_loop=0  the old loop: the thread of the session plays the frames
 //                 of the game, copies the picture, and waits for the fence
@@ -26,20 +27,64 @@ inline bool On(int key) { return key != 0; }
 //   kReady    the GPU work of the picture is submitted. The fence of the
 //             slot says when it is finished
 //   kShown    the session shows it. The play thread does not touch it
-constexpr int kSlots = 3;
+// kSlots is the size of the arrays of the slots. The ring uses kNewestSlots
+// of them with frame_queue=0 and kSlots with frame_queue=1.
+constexpr int kSlots = 4;
+constexpr int kNewestSlots = 3;
 enum class Slot : uint8_t { kFree, kWriting, kReady, kShown };
+
+// THE QUEUE OF THE PICTURES (frame_queue of bwvr.ini, 0 by default).
+//   frame_queue=0  each take shows the newest finished picture, in a ring of
+//                  3 slots
+//   frame_queue=1  each take shows the oldest finished picture that is newer
+//                  than the shown one, in a ring of 4 slots: one shown, one
+//                  finished that waits for its take, one at the GPU and one
+//                  that the play thread writes. When more than one finished
+//                  picture waits after a take, the older ones go, so the
+//                  delay is at most one take more than with 0
+inline bool QueueOn(int key) { return key != 0; }
+inline int SlotsOf(bool queue) { return queue ? kSlots : kNewestSlots; }
+// The finished pictures that may wait after a take with frame_queue=1.
+constexpr int kQueueWaits = 1;
+// The pick of a take from n finished pictures that are newer than the shown
+// one, in the order of their serials (0 the oldest): the index of the
+// picture that shows, or -1 with none. Each picture before it goes.
+inline int QueuePick(bool queue, int n) {
+  if (n <= 0) return -1;
+  if (!queue) return n - 1;
+  return n > kQueueWaits ? n - 1 - kQueueWaits : 0;
+}
+// THE DELAY OF A SHOWN PICTURE in takes: the takes after the submit of its
+// copies and before the take that showed it. With each picture in time it is
+// 0 with frame_queue=0 and 1 with frame_queue=1. 0, 1, and 2 or more for the
+// counts of the line "late picture".
+constexpr int kDelayBins = 3;
+inline int DelayBin(int takes) { return takes <= 0 ? 0 : takes >= 2 ? 2 : 1; }
 
 class Ring {
  public:
+  // frame_queue: the queue of the pictures (true) or the newest finished
+  // picture (false, the default).
+  explicit Ring(bool queue = false) { SetQueue(queue); }
+  // A new value of frame_queue. The ring can take it at each time: a slot
+  // above the slots of the new value takes no new write, and the session
+  // frees it when a newer picture shows.
+  void SetQueue(bool queue) {
+    queue_ = queue;
+    count_ = SlotsOf(queue);
+  }
+  bool Queue() const { return queue_; }
+  int Count() const { return count_; }
+
   // THE PLAY THREAD: the slot for the next picture. A free slot first (the
   // lowest index), else the oldest ready slot: its picture never shows, and
-  // the ring counts a drop. -1 when no slot is free or ready, which three
-  // slots cannot give: one is shown and the play thread writes one at most.
+  // the ring counts a drop. -1 when no slot is free or ready, which the ring
+  // cannot give: one is shown and the play thread writes one at most.
   int BeginWrite(bool* dropped) {
     *dropped = false;
     int oldest = -1;
     for (int i = 0; i < kSlots; ++i) {
-      if (state_[i] == Slot::kFree) {
+      if (state_[i] == Slot::kFree && i < count_) {
         state_[i] = Slot::kWriting;
         return i;
       }
@@ -59,27 +104,44 @@ class Ring {
     if (i < 0 || i >= kSlots || state_[i] != Slot::kWriting) return;
     state_[i] = Slot::kReady;
     serial_[i] = next_serial_++;
+    waits_[i] = 0;
   }
   // The play thread could not write slot i.
   void CancelWrite(int i) {
     if (i >= 0 && i < kSlots && state_[i] == Slot::kWriting) state_[i] = Slot::kFree;
   }
 
-  // THE SESSION, once in each frame of the session: the newest ready slot
-  // whose GPU work is finished (done[i]) and newer than the shown slot. It
+  // THE SESSION, once in each frame of the session. The candidates are the
+  // ready slots whose GPU work is finished (done[i]) and that are newer than
+  // the shown slot. frame_queue=0: the newest candidate shows. frame_queue=1:
+  // the oldest candidate shows, or with more than kQueueWaits candidates the
+  // oldest of the newest kQueueWaits + 1 (QueuePick). The picked slot
   // becomes the shown slot, and the shown slot before becomes free. Each
   // older ready slot becomes free too: a newer picture replaced it before a
-  // frame of the session. -1: no new picture, and the session shows the
-  // shown slot again. A ready slot that the GPU did not finish never holds a
-  // frame of the session.
+  // frame of the session. Each ready slot that stays after a take counts
+  // one take more of delay, also after a take with no new picture. -1: no
+  // new picture, and the session shows the shown slot again. A ready slot
+  // that the GPU did not finish never holds a frame of the session.
   int Take(const bool done[kSlots]) {
-    int best = -1;
+    int order[kSlots];
+    int n = 0;
     for (int i = 0; i < kSlots; ++i) {
       if (state_[i] != Slot::kReady || !done[i]) continue;
       if (shown_ >= 0 && serial_[i] < serial_[shown_]) continue;
-      if (best < 0 || serial_[i] > serial_[best]) best = i;
+      // In the order of the serials: few slots, so an insertion.
+      int at = n++;
+      while (at > 0 && serial_[order[at - 1]] > serial_[i]) {
+        order[at] = order[at - 1];
+        --at;
+      }
+      order[at] = i;
     }
-    if (best < 0) return -1;
+    const int pick = QueuePick(queue_, n);
+    if (pick < 0) {
+      AddWaits();
+      return -1;
+    }
+    const int best = order[pick];
     for (int i = 0; i < kSlots; ++i) {
       if (i != best && state_[i] == Slot::kReady && serial_[i] < serial_[best]) {
         state_[i] = Slot::kFree;
@@ -89,8 +151,12 @@ class Ring {
     if (shown_ >= 0) state_[shown_] = Slot::kFree;
     state_[best] = Slot::kShown;
     shown_ = best;
+    shown_delay_ = waits_[best];
+    AddWaits();
     return best;
   }
+  // The delay of the shown slot in takes (DelayBin).
+  int ShownDelay() const { return shown_delay_; }
   // The game ended: no slot shows, and each ready slot is free. A slot in
   // writing stays with the play thread.
   void Clear() {
@@ -98,6 +164,7 @@ class Ring {
       if (state_[i] == Slot::kReady || state_[i] == Slot::kShown) state_[i] = Slot::kFree;
     }
     shown_ = -1;
+    shown_delay_ = 0;
   }
 
   Slot State(int i) const { return state_[i]; }
@@ -109,10 +176,20 @@ class Ring {
   uint64_t Replaced() const { return replaced_; }
 
  private:
-  Slot state_[kSlots] = {Slot::kFree, Slot::kFree, Slot::kFree};
-  uint64_t serial_[kSlots] = {0, 0, 0};
+  void AddWaits() {
+    for (int i = 0; i < kSlots; ++i) {
+      if (state_[i] == Slot::kReady) ++waits_[i];
+    }
+  }
+
+  bool queue_ = false;
+  int count_ = kNewestSlots;
+  Slot state_[kSlots] = {Slot::kFree, Slot::kFree, Slot::kFree, Slot::kFree};
+  uint64_t serial_[kSlots] = {0, 0, 0, 0};
+  int waits_[kSlots] = {0, 0, 0, 0};  // the takes since the submit of the ready slot
   uint64_t next_serial_ = 1;
   int shown_ = -1;
+  int shown_delay_ = 0;
   uint64_t dropped_ = 0;
   uint64_t replaced_ = 0;
 };

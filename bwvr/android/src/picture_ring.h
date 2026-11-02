@@ -5,8 +5,9 @@
 // in an image of the slot, with the values of the frame (the poses of the
 // views, the quad layers, the frame number). It submits the copies with the
 // fence of the slot. The thread of the session takes the newest slot whose
-// fence is signaled (vkGetFenceStatus, no wait) and shows it. The rules of
-// the slots are in frame_loop.h (Ring).
+// fence is signaled (vkGetFenceStatus, no wait), or with frame_queue=1 the
+// next finished slot in the order of the pictures, and shows it. The rules
+// of the slots are in frame_loop.h (Ring).
 //
 // The renderer draws each walk into the next of two targets, so a picture
 // stays in its target only until the walk after the next one. The copy into
@@ -176,12 +177,24 @@ class PictureRing {
   // calls it.
   bool WaitGpu(int depth, uint64_t timeout_ns, bool* waited);
 
-  // THE SESSION, once in each frame of the session: the newest picture that
-  // the GPU finished, or null when no new picture is finished. The picture
-  // stays valid until the next Take or Clear.
+  // THE QUEUE OF THE PICTURES (frame_queue, frame_loop.h): at each Play,
+  // before the start of the play thread. The ring then uses 4 slots (on) or
+  // 3 (off, the old way).
+  void SetQueue(bool on);
+
+  // The facts of one take for the line "late picture" (long_frames.h).
+  struct TakeFacts {
+    int delay = 0;          // the takes after the submit of the shown picture (Ring::ShownDelay)
+    uint64_t replaced = 0;  // pictures that this take freed before they showed
+    uint64_t dropped = 0;   // pictures that the play thread dropped since the take before
+  };
+  // THE SESSION, once in each frame of the session: the picture that the
+  // ring picks (frame_loop::Ring::Take), or null when no new picture is
+  // finished. The picture stays valid until the next Take or Clear.
   // session_serial: the serial of the last submit of the session, which
-  // has each copy from the slot shown before.
-  const Picture* Take(uint64_t session_serial);
+  // has each copy from the slot shown before. facts: when not null, the
+  // facts of this take.
+  const Picture* Take(uint64_t session_serial, TakeFacts* facts = nullptr);
   // The game ended: no slot shows.
   void Clear(uint64_t session_serial);
   void TakeStats(Stats* out);
@@ -213,4 +226,5 @@ class PictureRing {
   std::mutex lock_;
   frame_loop::Ring ring_;
   Stats stats_;
+  uint64_t dropped_at_take_ = 0;  // ring_.Dropped() at the take before
 };

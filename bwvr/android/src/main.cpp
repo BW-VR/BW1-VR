@@ -768,11 +768,13 @@ void StopPlayThread(App* app) {
   app->play_running = false;
 }
 
-// THE SESSION: the newest picture of the ring that the GPU finished, at each
-// frame of the session. True when it is a new picture. With none the
-// session shows the picture before again.
-bool TakePicture(App* app) {
-  const Picture* p = app->ring.Take(app->xr.SessionSerial());
+// THE SESSION: the picture of the ring that the take picks (the newest
+// finished one, or the next in order with frame_queue=1), at each frame of
+// the session. True when it is a new picture. With none the session shows
+// the picture before again. facts: the delay and the dropped pictures of the
+// take (slow_frame_ms).
+bool TakePicture(App* app, PictureRing::TakeFacts* facts) {
+  const Picture* p = app->ring.Take(app->xr.SessionSerial(), facts);
   if (p == nullptr) return false;
   // The slot before is free now: no layer copies from it again. The new
   // picture gives the new sources.
@@ -1105,10 +1107,16 @@ void Play(App* app, bool new_game) {
                                app->xr.SessionTimeline(), app->xr.SwapRedBlue())) {
     loop = false;
   }
+  // frame_queue (0 by default): 1, each take shows the next finished picture
+  // in the order of the pictures, with a delay of at most one take more, in
+  // a ring of 4 slots. 0: each take shows the newest finished picture, in a
+  // ring of 3 slots.
+  const bool queue = frame_loop::QueueOn(app->ini.GetInt("bwvr", "frame_queue", 0));
+  if (loop) app->ring.SetQueue(queue);
   AppLog("game         : frame_loop=%d. %s", app->menu.FrameLoop(),
-         loop ? "A play thread plays each picture of the game into a ring of 3 slots, and "
-                "each frame of the session shows the newest slot that the GPU finished, with "
-                "no wait on the CPU for the GPU"
+         loop ? "A play thread plays each picture of the game into a slot of the ring of the "
+                "pictures, and each frame of the session shows a slot that the GPU finished, "
+                "with no wait on the CPU for the GPU"
               : app->menu.FrameLoop() != 0
                     ? "The app has no ring of the pictures, so the thread of the session plays "
                       "the pictures (the old loop)"
@@ -1162,6 +1170,12 @@ void Play(App* app, bool new_game) {
                             "so the pictures come at an even rate when the GPU is slower than "
                             "the display"
                           : "Each frame of the session shows the newest finished picture");
+    AppLog("game         : frame_queue=%d. %s", queue ? 1 : 0,
+           queue ? "A ring of 4 slots. Each take shows the oldest finished picture that is "
+                   "newer than the shown one, so the pictures show in their order with a delay "
+                   "of at most one take more. When more than one finished picture waits after "
+                   "a take, the older ones go"
+                 : "A ring of 3 slots. Each take shows the newest finished picture");
   }
   // THE PHASE OF THE TAKE (docs/android.md, "The long frames"): a new window
   // of its line, with the input channel for the world of the mod.
@@ -2028,11 +2042,13 @@ void android_main(android_app* android) {
           const double take_ms =
               app.latch_log.On() || app.take_phase.On() ? NowMs() : 0.0;
           taken_ms = take_ms;
-          fresh = TakePicture(&app);
+          PictureRing::TakeFacts facts;
+          fresh = TakePicture(&app, &facts);
           // slow_frame_ms: why a take had no new picture (long_frames.h).
           if (app.latch_log.On() && app.game_on) {
             app.latch_log.Take(take_ms, fresh, app.shown_arrival_ms, app.shown_ready_ms,
                                app.shown_gap_ms, app.shown_last, app.period_ms);
+            app.latch_log.Cadence(fresh, facts.delay, facts.replaced, facts.dropped);
           }
         }
         if (fresh) app.hold_any = true;

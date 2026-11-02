@@ -247,8 +247,9 @@ void WorldGrabReport();
 void WorldGrabCycleTest();
 void ControllersCycleOwnerMode();
 void AudioCycleMode();
-// audio_voices.cpp: the A/B of audio_stop_wait.
+// audio_voices.cpp: the A/B of audio_stop_wait, and of audio_play_fix.
 void AudioStopWaitToggle();
+void AudioPlayFixCycle();
 // anim_trig.cpp: the A/B of anim_trig, and its test frame.
 void AnimTrigToggle(const char* by);
 void AnimTrigFrame();
@@ -809,6 +810,9 @@ bool D3D9KeyHere(const char* keys) {
 //               on (audio_stop_wait, audio_voices.cpp). Windows gives the key
 //               VK_CANCEL for Pause with Ctrl down, so the keys of Pause
 //               alone (throw_physics.cpp) do not see it
+//   Ctrl Shift P  QMixer pumps in each start of a sound, or the mod keeps the
+//               pump out of the call for some sounds (audio_play_fix,
+//               audio_voices.cpp)
 //   Ctrl Shift Semicolon  the copy of the subtitle card is read in a
 //               later frame with no wait, or after the eye passes with a wait
 //               for the GPU (subtitle_read_ahead, ui_panel.cpp)
@@ -1125,6 +1129,16 @@ void PollHotkeys() {
     UiPanelSubtitleReadAheadToggle("Ctrl, Shift and the semicolon key");
   }
   semicolon_down = semicolon_now;
+  // An A/B of the pump of QMixer in a sound start (docs/audio.md, "7.8 The
+  // pump of a play"). The letter P with Ctrl and Shift has no other test key.
+  // The render key Shift P needs Ctrl up.
+  static bool pump_key_down = false;
+  const bool pump_key_now = (GetAsyncKeyState('P') & 0x8000) != 0;
+  if (g_test_keys && pump_key_now && !pump_key_down && ctrl && shift &&
+      GameHasFocus()) {
+    AudioPlayFixCycle();
+  }
+  pump_key_down = pump_key_now;
   // An A/B of the source of the gaze of foveated rendering (docs/backend.md,
   // "Foveated rendering"). Shift O with no Ctrl is the key of foveation.
   static bool gaze_key_down = false;

@@ -46,11 +46,20 @@
 // in its own fade, so it sounds the same. A channel that QMixer plays keeps
 // the wait.
 //
+// THE PUMP IN QSWaveMixPlayEx (docs/audio.md, "7.8 The pump of a play").
+// QSWaveMixPlayEx runs one pump of QMixer on the thread of the caller after it
+// has started the sample. On the Steam Frame the pump takes 26 to 54 ms for a
+// sound of the atmosphere. With audio_play_fix the mod sets the byte of the
+// session that tells QMixer not to pump in the call. The pump of the timer
+// thread of the audio DLL does the same work within 20 ms.
+//
 // Ini: audio_mixer (default 1, 0 is QMixer's own panning), audio_height,
 // audio_near, audio_far, audio_bed, audio_atmos_mixer (each default 1),
 // audio_height_pct (100, the strength of the height band, 0 to 200),
-// audio_stop_wait (default 0, 1 is the wait of the audio DLL at each stop).
-// Test only:
+// audio_stop_wait (default 0, 1 is the wait of the audio DLL at each stop),
+// audio_play_fix (default 1, 0 is the pump of QMixer in each play, 2 and 3 in
+// audio_play_math.h).
+// Test only: audio_play_fix_test,
 // audio_test_voice, audio_test_path, audio_test_step_ms, audio_test_solo.
 
 #include <windows.h>
@@ -66,6 +75,7 @@
 #include "audio.h"
 #include "audio_watch.h"
 #include "audio_math.h"
+#include "audio_play_math.h"
 #include "audio_spatial.h"
 #include "debug_menu.h"
 
@@ -250,6 +260,24 @@ LONG g_stop_reported = -1;
 // acts by itself, for a desktop run. 0 is off.
 int g_stop_test_frame = 0;
 uint64_t g_stop_test_seen = 0;
+
+// The pump of QSWaveMixPlayEx. g_play_fix is the mode of audio_play_math.h.
+// g_pump_known is true when the code of the known QMixer.dll was found.
+// The times are in ticks of QueryPerformanceCounter, for the report.
+int g_play_fix = 1;
+bool g_pump_known = false;
+int64_t g_qpc_hz = 0;
+int g_play_test_frame = 0;      // audio_play_fix_test
+uint64_t g_play_test_seen = 0;
+typedef void(WINAPI* PumpFn)();
+PumpFn o_Pump = nullptr;
+CRITICAL_SECTION g_play_cs;
+// [0] a play of the atmosphere, [1] another play. Second index: 0 with the
+// pump of QMixer, 1 with no pump.
+audio_play::Stat g_play_stat[2][2];
+audio_play::Stat g_pump_stat;
+int64_t g_play_changed = 0;     // calls with no pump, since the start
+DWORD g_play_report_at = 0;
 
 // For the report.
 volatile LONG g_started[kKinds] = {0, 0, 0, 0};
@@ -623,7 +651,31 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
       c.muted = false;
     }
   }
+  // No pump of QMixer in this call (audio_play_math.h). The byte is 0 again
+  // when the call returns.
+  volatile uint8_t* pump_flag = nullptr;
+  const bool atmosphere = g_in_play && g_play_kind == kAudioAtmos;
+  if (g_pump_known && g_play_fix > 0 && Readable(session, 8) &&
+      audio_play::SkipPump(g_play_fix, shadow && g_audible, atmosphere)) {
+    const int at = audio_play::SessionFlagOffset(
+        static_cast<const uint8_t*>(session));
+    if (at >= 0) {
+      pump_flag = static_cast<volatile uint8_t*>(session) + at;
+      *pump_flag = 1;
+    }
+  }
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
   const DWORD r = o_PlayEx(session, channel, flags, wave, loops, params);
+  QueryPerformanceCounter(&t1);
+  if (pump_flag != nullptr) *pump_flag = 0;
+  if (g_pump_known) {
+    EnterCriticalSection(&g_play_cs);
+    g_play_stat[atmosphere ? 0 : 1][pump_flag != nullptr ? 1 : 0].Add(
+        t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
+    if (pump_flag != nullptr) ++g_play_changed;
+    LeaveCriticalSection(&g_play_cs);
+  }
   if (r != 0 && shadow) {
     Lock lock;
     Slot* s = SlotOfChannel(channel);
@@ -631,6 +683,18 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
     g_channels[channel].shadowed = false;
   }
   return r;
+}
+
+// QSWaveMixPump runs on the timer thread of the audio DLL each 20 ms. The mod
+// only times it, so that the report shows where the work of the pump goes.
+void WINAPI h_Pump() {
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  o_Pump();
+  QueryPerformanceCounter(&t1);
+  EnterCriticalSection(&g_play_cs);
+  g_pump_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
+  LeaveCriticalSection(&g_play_cs);
 }
 
 DWORD WINAPI h_SetVolume(void* session, int channel, DWORD flags,
@@ -939,6 +1003,51 @@ void TestVoiceFrame() {
   s.test_part = t.part >= 0.0f ? t.part : 0.0f;
 }
 
+// The line of the pump of QSWaveMixPlayEx with the times of the last 10 s.
+// The time of a play is the time of the call of QMixer. A time of 5 ms or more
+// is long.
+void PlayReport() {
+  if (!g_pump_known) return;
+  const DWORD now = GetTickCount();
+  if (g_play_report_at == 0) g_play_report_at = now;
+  if (now - g_play_report_at < 10000) return;
+  g_play_report_at = now;
+  audio_play::Stat play[2][2], pump;
+  int64_t changed;
+  EnterCriticalSection(&g_play_cs);
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 2; ++j) {
+      play[i][j] = g_play_stat[i][j];
+      g_play_stat[i][j] = audio_play::Stat();
+    }
+  }
+  pump = g_pump_stat;
+  g_pump_stat = audio_play::Stat();
+  changed = g_play_changed;
+  LeaveCriticalSection(&g_play_cs);
+  if (play[0][0].calls + play[0][1].calls + play[1][0].calls +
+          play[1][1].calls + pump.calls == 0) {
+    return;
+  }
+  const int64_t hz = g_qpc_hz;
+#define PLAY_TIMES(s) \
+  static_cast<long long>((s).calls), (s).MeanUs(hz), (s).MostUs(hz), \
+      static_cast<long long>((s).long_calls)
+  ModLog("audio play   : audio_play_fix=%d, %lld plays have run with no pump "
+         "since the start. In the last 10 s, a sound of the atmosphere: %lld "
+         "plays with the pump of QMixer in the call (mean %.0f us, most %.0f "
+         "us, %lld of 5 ms or more) and %lld with no pump (mean %.0f us, "
+         "most %.0f us, %lld of 5 ms or more). Another sound: %lld plays with "
+         "the pump (mean %.0f us, most %.0f us, %lld of 5 ms or more) and "
+         "%lld with no pump (mean %.0f us, most %.0f us, %lld of 5 ms or "
+         "more). QSWaveMixPump of the timer thread: %lld calls (mean %.0f us, "
+         "most %.0f us, %lld of 5 ms or more)",
+         g_play_fix, static_cast<long long>(changed),
+         PLAY_TIMES(play[0][0]), PLAY_TIMES(play[0][1]),
+         PLAY_TIMES(play[1][0]), PLAY_TIMES(play[1][1]), PLAY_TIMES(pump));
+#undef PLAY_TIMES
+}
+
 void Report() {
   const DWORD now = GetTickCount();
   if (g_last_report == 0) g_last_report = now;
@@ -977,6 +1086,50 @@ void Report() {
   }
 }
 
+// The mode of audio_play_fix, the check of the code of the known QMixer.dll
+// and the timer on QSWaveMixPump. With another QMixer.dll the pump stays as
+// the game has it.
+void InstallPlayFix(HMODULE q) {
+  g_play_fix = audio_play::ClampMode(AudioIni("audio_play_fix", 1));
+  g_play_test_frame = AudioIni("audio_play_fix_test", 0);
+  const uint8_t* base = reinterpret_cast<const uint8_t*>(q);
+  const uint8_t* play =
+      reinterpret_cast<const uint8_t*>(GetProcAddress(q, "QSWaveMixPlayEx"));
+  const uint8_t* test = base + audio_play::kPumpTestRva;
+  g_pump_known = base != nullptr && play == base + audio_play::kPlayExRva &&
+                 Readable(test, sizeof(audio_play::kPumpTest)) &&
+                 audio_play::PumpTestMatches(test,
+                                             sizeof(audio_play::kPumpTest));
+  if (!g_pump_known) {
+    ModLog("audio play   : audio_play_fix=%d, but QMixer.dll is not the "
+           "known one (QSWaveMixPlayEx or the test of the pump has another "
+           "place or other bytes). QMixer pumps in each QSWaveMixPlayEx as in "
+           "the game", g_play_fix);
+    g_play_fix = 0;
+    return;
+  }
+  LARGE_INTEGER hz;
+  QueryPerformanceFrequency(&hz);
+  g_qpc_hz = hz.QuadPart;
+  Hook(q, "QSWaveMixPump", reinterpret_cast<void*>(&h_Pump),
+       reinterpret_cast<void**>(&o_Pump));
+  ModLog("audio play   : audio_play_fix=%d. QSWaveMixPlayEx of QMixer runs one "
+         "pump on the thread of the caller (it sorts the channels, gives a "
+         "voice to the new one and mixes the stream ahead). %s", g_play_fix,
+         g_play_fix == 0
+             ? "The mod leaves it so"
+         : g_play_fix == 1
+             ? "The mod keeps the pump out of the call for a sound that the "
+               "mixer of the mod plays: QMixer is silent for it. The pump of "
+               "the timer thread does the work within 20 ms"
+         : g_play_fix == 2
+             ? "The mod keeps the pump out of the call for a sound that the "
+               "mixer of the mod plays and for each sound of the atmosphere. "
+               "The pump of the timer thread does the work within 20 ms"
+             : "The mod keeps the pump out of each call (test value). The "
+               "pump of the timer thread does the work within 20 ms");
+}
+
 }  // namespace
 
 bool AudioVoicesInstall(bool on) {
@@ -989,6 +1142,7 @@ bool AudioVoicesInstall(bool on) {
     return activate;
   }
   InitializeCriticalSection(&g_lock);
+  InitializeCriticalSection(&g_play_cs);
   for (int i = 0; i < kChannels; ++i) {
     g_channels[i].volume = static_cast<DWORD>(kFullVolume);
     g_channels[i].volume_flags = kVolumeFlags;
@@ -1026,6 +1180,7 @@ bool AudioVoicesInstall(bool on) {
   g_on = ok;
   if (ok) AudioCaptureSetRender(&Render);
   if (ok) InstallStopWait();
+  if (ok) InstallPlayFix(q);
   ModLog("audio mixer  : %s. Height %s, near field %s, far filter %s, the "
          "bed turns with the world %s",
          ok ? "the mixer of the mod plays the sounds with a place "
@@ -1115,6 +1270,15 @@ void AudioVoicesFrame() {
       if (ControllersTestFrame(at, frame) == at) AudioStopWaitToggle();
     }
   }
+  // The test audio_play_fix_test=N: the test key acts at one frame.
+  if (g_play_test_frame > 0) {
+    const uint64_t frame = ControllersFrameCount();
+    const uint64_t at = static_cast<uint64_t>(g_play_test_frame);
+    if (frame != g_play_test_seen) {
+      g_play_test_seen = frame;
+      if (ControllersTestFrame(at, frame) == at) AudioPlayFixCycle();
+    }
+  }
   float k = 1.0f;
   const bool room = AudioRoomNow(&k);
   if (!room) k = 1.0f;
@@ -1179,6 +1343,7 @@ void AudioVoicesFrame() {
            "%d Hz)", AudioOutRate());
   }
   TestVoiceFrame();
+  PlayReport();
   Report();
 }
 
@@ -1228,6 +1393,30 @@ void AudioStopWaitToggle() {
 int AudioStopWaitValue() {
   if (!g_on || !g_stop_hooked) return kDebugCannot;
   return g_stop_wait;
+}
+
+// The test key of audio_play_fix (Ctrl, Shift and P, test_keys=1). The mode
+// steps through 0, 1 and 2. A short pulse is 0, a longer one is 1, the
+// longest is 2.
+void AudioPlayFixCycle() {
+  if (!g_on || !g_pump_known) {
+    ModLog("audio play   : test key, but the mod has no hook on "
+           "QSWaveMixPlayEx or QMixer.dll is not the known one");
+    return;
+  }
+  g_play_fix = audio_play::NextMode(g_play_fix);
+  ControllersGesturePulse(0.5f, g_play_fix == 0 ? 0.08f
+                                : g_play_fix == 1 ? 0.30f
+                                                  : 0.55f);
+  ModLog("audio play   : test key, audio_play_fix is %d now. %lld plays have "
+         "run with no pump so far", g_play_fix,
+         static_cast<long long>(g_play_changed));
+}
+
+// The value of audio_play_fix for the debug page.
+int AudioPlayFixValue() {
+  if (!g_on || !g_pump_known) return kDebugCannot;
+  return g_play_fix > 2 ? 2 : g_play_fix;
 }
 
 // The test key. false gives each shadowed channel back to QMixer, at once,

@@ -2346,7 +2346,7 @@ more in a turn (`fn_00552F80`, `fn_00555850`, `fn_007AEE98`) have none.
   of the scene) every window had 0 game turns, and the cause is not known.
 
 ```
-turn parts   : 10.0 s, 100 game turns (mean 0.46 ms, worst 6.41 ms), 1 of them 1 ms or more (together 6.41 ms). The parts of these turns, exclusive ms in all of them, the share, the calls, the most in one turn and the inclusive ms: building_site 5.85 ms (91.2 percent, 4 calls, most 5.85, inclusive 5.85), fn_005EC810 0.16 ms (2.6 percent, 1 call, most 0.16, inclusive 0.16), audio_turn 0.12 ms (1.8 percent, 1 call, most 0.12, inclusive 0.12), players_towns 0.07 ms (1.2 percent, 1 call, most 0.07, inclusive 5.92), ..., 47 more parts under 0.01 ms, outside the parts 0.00 ms (0.0 percent, most 0.00)
+turn parts   : 10.0 s, 100 game turns (mean 0.45 ms, worst 1.87 ms), 4 of them 1 ms or more (together 6.27 ms). The turn function ran 901 times. The timers saw 7481 calls in a game turn on the frame thread, 6307 outside a game turn and 0 on another thread. The parts of these turns, exclusive ms in all of them, the share, the calls, the most in one turn and the inclusive ms: new_animation 4.59 ms (73.2 percent, 4 calls, most 1.47, inclusive 4.60), fn_005EC810 0.74 ms (11.7 percent, 4 calls, most 0.22, inclusive 5.33), players_towns 0.19 ms (3.0 percent, 4 calls, most 0.05, inclusive 0.19), ..., 41 more parts under 0.01 ms, outside the parts 0.01 ms (0.1 percent, most 0.00)
 ```
 
 **Open.** The animations are still made on the frame thread, one at its

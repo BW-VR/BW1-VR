@@ -2779,42 +2779,15 @@ is a wait.
 **The phase of the take** (`src/mod/take_phase_math.h`, `TakePhase` of
 `long_frames.cpp`, the loop of the session in `main.cpp`). With
 `frame_loop=1` the session takes the newest finished picture of the ring one
-time in each of its frames. With `vk_pace=1` a frame of the game starts at
-the write of a slot, and its picture must be finished before the take of the
-next frame of the session. Two keys of `bwvr.ini` (not rows of the menu, so
-a save keeps them, read at each Play, and no test key: the app cannot switch
-them while a game runs, so a test does one run with each value):
-
-- `take_late=0` (the default): the take comes just after the write of the
-  slot of the input channel. `take_late=1`: the take comes after the
-  controllers, the keyboard and the paint of the menu, just before the
-  layers of `xrEndFrame`. In each order the age of the shown picture and
-  the place of the player now (`motion_comp`) come after the take, so the
-  motion of the layers uses the picture of the take. The controllers, the
-  keyboard and the menu see the state of the take before.
-- `take_wait_ms=0` (the default): a take with no new picture shows the
-  picture before at once. `take_wait_ms=N` (1 to 20): when a take finds no
-  new picture, and the mod started a frame of the game for a slot after the
-  slot of the shown picture (the world of the input channel), and that slot
-  is one of the two newest slots that the app wrote, the session looks at
-  the ring each 0.2 ms for up to N ms. The wait never goes past 3/4 of the
-  display period after the end of `xrWaitFrame`, less the most time from the
-  take to the end of `xrEndFrame` in this window of 10 s and in the window
-  before (only the frames of the session that were shorter than a display
-  period count, so a stop of the session, for example at the menu, does not
-  count). So the frame of the session keeps 1/4 of the period for the
-  runtime. With the SteamVR runtime this wait makes the frames of the
-  session late (see below), so there the key stays 0.
-
-The line `late picture` stays the measure of both keys: a take of a wait
-that ends with a new picture is a take with a new picture, and the clock of
-the take is the end of the wait.
-
-With `slow_frame_ms` above 0 or `time_log=1` the session gives one line
-each 10 s:
+time in each of its frames, just after the write of the slot of the input
+channel. With `vk_pace=1` a frame of the game starts at the write of a slot,
+and its picture must be finished before the take of the next frame of the
+session. With `slow_frame_ms` above 0 or `time_log=1` the session gives one
+line each 10 s that says where the time between the write and the next take
+goes. It is a measurement and changes no behavior.
 
 ```
-take phase   : 10.0 s, take_late=L, take_wait_ms=N. THE WRITE OF A SLOT TO THE START OF THE FRAME OF THE GAME that took it: ... THE START OF A FRAME OF THE GAME TO THE END OF THE GPU WORK OF ITS PICTURE: ... THE FRAME OF THE SESSION, F frames: ... THE WAITS AT THE TAKE: ...
+take phase   : 10.0 s. THE WRITE OF A SLOT TO THE START OF THE FRAME OF THE GAME that took it: ... THE START OF A FRAME OF THE GAME TO THE END OF THE GPU WORK OF ITS PICTURE: ... THE FRAME OF THE SESSION, F frames: ...
 ```
 
 - The start of a frame of the game: the reader of the live stream reads the
@@ -2833,54 +2806,50 @@ take phase   : 10.0 s, take_late=L, take_wait_ms=N. THE WRITE OF A SLOT TO THE S
   The play thread sees the end of the fence in its wait before the next play
   (`frame_loop_gpu_depth=1`). With another depth the line has no GPU time.
   Each part has the mean, the standard deviation and the most.
-- The frame of the session: the end of `xrWaitFrame` to the take, the take
-  to the end of `xrEndFrame`, the wait in `xrWaitFrame`, the rest of the
-  display period after the end of `xrEndFrame`, the display time after the
-  end of `xrEndFrame` (only with `XR_KHR_convert_timespec_time`), and the
-  frames that the runtime dropped: the display time of a frame moved more
-  than 1.5 display periods.
-- The waits at the take: the count, the waits that ended with a new picture,
-  and their time.
+- The frame of the session: the end of `xrWaitFrame` to the take and the
+  take to the end of `xrEndFrame` (frames with a take), the wait in
+  `xrWaitFrame`, the rest of the display period after the end of
+  `xrEndFrame`, the display time after the end of `xrEndFrame` (only with
+  `XR_KHR_convert_timespec_time`), and the display periods that the runtime
+  skipped: the display time of a frame moved more than 1.5 display periods
+  after a frame of the session that ended in less than a period.
 
-**What the phase of the take shows** (the test save `pen`, the windows of
-10 s with the paced frames of the scene, `slow_frame_ms=20`):
+**What the phase of the take shows** (the test save `pen`,
+`slow_frame_ms=20`, the windows of 10 s from the second window with frames
+of the scene to the last whole window before the menu over the game). The
+column of the Frame comes from the one session with this line so far, which
+had a wait at the take of up to 4 ms in the session (1.6 to 2.4 ms as a
+mean). The app has no wait at the take.
 
-| | Emulator, 72 Hz | Emulator, 90 Hz | Steam Frame, 72 Hz |
+| | Emulator, 72 Hz | Emulator, 90 Hz | Steam Frame, 72 Hz, a session with a wait at the take |
 | --- | --- | --- | --- |
-| The write to the start, ms (mean, deviation, most) | 2.38 to 2.52, 0.95 to 1.32, 5.4 to 12.7 | 2.46 to 2.60, 0.91 to 1.10, 5.4 to 7.0 | 0.99 to 1.13, 0.74 to 1.06, 8.9 to 12.9 |
-| The start to the end of the GPU work, ms (mean, deviation) | 7.00 to 7.09, 0.66 to 0.68 | 6.99 to 7.62, 0.67 to 2.19 | 13.1 to 14.8, 2.4 to 3.7 |
-| Of it the frame and the way to the app, the play, the GPU, ms | 4.3, 2.2, 0.4 | 4.3, 2.2, 0.4 | 7.8 to 8.3, 1.5 to 1.7, 3.7 to 4.7 |
-| The end of `xrWaitFrame` to the take, ms | 0.10 | 0.10 | 1.1 to 1.3 |
-| The take to the end of `xrEndFrame`, ms (mean) | 1.0 | 1.0 | 0.26 to 0.29 |
-| The rest of the period after `xrEndFrame`, ms (mean, least) | 12.7, 11.3 | 10.0, 6.7 | 11.5 to 12.5, 6.8 |
-| Takes with no new picture in 10 s, keys at 0 | 0 of 684 | 13 to 46 of 855 | 46 to 145 of 721 |
+| The write to the start, ms (mean, deviation, most) | 2.38 to 2.52, 0.95 to 1.32, 5.4 to 12.7 | 2.46 to 2.60, 0.91 to 1.09, 5.4 to 7.0 | 0.99 to 1.19, 0.74 to 1.06, 8.9 to 12.9 |
+| The start to the end of the GPU work, ms (mean, deviation) | 7.00 to 8.14, 0.66 to 3.18 | 6.99 to 7.62, 0.67 to 2.19 | 13.1 to 14.8, 2.4 to 5.1 |
+| Of it the frame and the way to the app, the play, the GPU, ms | 4.3 to 5.1, 2.2 to 2.4, 0.4 to 0.5 | 4.3 to 4.7, 2.2 to 2.3, 0.4 | 7.8 to 9.0, 1.5 to 1.7, 3.7 to 4.7 |
+| The end of `xrWaitFrame` to the take, ms (mean) | 0.10 to 0.13 | 0.10 to 0.11 | 1.1 to 1.3 in the windows with no wait |
+| The take to the end of `xrEndFrame`, ms (mean) | 1.0 to 1.1 | 1.0 | 0.26 to 0.31 |
+| The rest of the period after `xrEndFrame`, ms (mean, least) | 12.7 to 12.8, 8.6 | 10.0 to 10.1, 2.5 | 11.5 to 12.3, 6.7 |
+| Takes with no new picture in 10 s | 0 to 28 of 684 | 13 to 46 of 855 | 42 to 123 of 721 |
 
 - On the Frame the frame of the game starts about 1 ms after the write (the
   reader sees a new world each 0.6 ms). So the pace does not start the game
   late there. But a picture needs 13 to 15 ms from that start to the end of
-  its GPU work, with a deviation of 2.4 to 3.7 ms, and the next take comes
+  its GPU work, with a deviation of 2.4 to 5.1 ms, and the next take comes
   about 15 ms after the write. So the end of the pictures falls on the take,
   and the pictures are in time and late by turns. The frame of the game and
   the GPU vary most.
 - In the emulator the start comes 2.4 to 2.6 ms after the write, and a
-  picture needs 7 ms. At 72 Hz and 80 Hz no picture is late in the paced
-  windows. At 90 Hz 13 to 46 of 855 takes in 10 s have no new picture.
-- `take_late=1` gives the take only the time of the controllers and the
-  menu: about 0.05 ms in the emulator and less than 0.2 ms on the Frame. In
-  the emulator at 90 Hz 11 to 30 of 855 takes in 10 s have no new picture,
-  as with `take_late=0`. It does not move `xrEndFrame`.
-- `take_wait_ms=4` in the emulator at 90 Hz: 0 to 3 of 853 takes in 10 s
-  have no new picture, with 11 to 37 waits in 10 s (94 percent of them end
-  with a new picture, 1.3 to 1.8 ms as a mean), and the test runtime drops
-  no frame. On the Frame (the SteamVR runtime) the same key makes the frames
-  of the session late for the compositor of SteamVR: its log has "Timed out"
-  for 528 presents in one session, against 19 and 50 with no wait, and the
-  player sees double pictures and a world that moves partly with the head.
-  The waits there were 1.6 to 2.4 ms as a mean and 4.9 ms at most. The line
-  of the app gives 0 dropped frames and 11.5 ms of rest after `xrEndFrame`
-  in that session: the display time of SteamVR does not show these frames.
-  So `take_wait_ms` must stay 0 with SteamVR. The time from the end of
-  `xrWaitFrame` to `xrEndFrame` is no room for a wait there.
+  picture needs about 7 ms. At 72 Hz one window has 28 takes with no new
+  picture (a window with frames of the game longer than a period), the
+  others have none. At 90 Hz 13 to 46 of 855 takes in 10 s have no new
+  picture.
+- With SteamVR the session has no room for more work between the end of
+  `xrWaitFrame` and `xrEndFrame`. About 2 ms more of it in a frame makes the
+  compositor of SteamVR time out presents ("Timed out" in
+  `vrcompositor.txt`), and the player sees double pictures and a world that
+  moves partly with the head. The line of the app sees no skipped display
+  period then. A later take in the same frame of the session gains only the
+  time of the controllers and of the menu, less than 0.2 ms on the Frame.
 
 **The cost.** With `slow_frame_ms` above 0 the mod reads the clock two more
 times for each timed call of the frame loop, and with `slow_frame_cpu=1` it
@@ -2967,17 +2936,19 @@ stick in a saved game):
   reader sees it at its next turn (0.6 to 1.1 ms apart). The line cannot
   split the lateness of the timer of the pace from the work before the
   write of the world.
-- The line `take phase` counts a dropped frame of the session only when the
+- The line `take phase` counts a skipped display period only when the
   display time of the runtime moves more than 1.5 periods. A present that
   the compositor of SteamVR gets too late ("Timed out" in `vrcompositor.txt`)
   does not show there.
-- Some runs of `emu_game_test.ps1` stop in game 1 while the keyboard of the
-  app types the name of the new profile: the app writes no slot and no line
-  after that, so the menu over the game and "Quit game" fail, and the test
-  aborts before it gets the log of the app ("StartIndex" in `WaitLog`). Two
-  runs at 90 Hz did this, one with `take_late=1` and one with
-  `take_wait_ms=4`, and the same keys passed in the next run (210 checks).
-  The cause is not known.
+- Some runs of `emu_game_test.ps1` stop in game 1 after the dialog of a
+  new profile, when the game loads the land: the log of the app ends about
+  147 s after Play, the mod gets no new slot after that (all frames of the
+  pace at the time limit), the frames of the scene start in the log of the
+  mod, and the app takes about 125 percent of one CPU in the measure (42 to
+  44 percent in a run that passes). Then the menu over the game and "Quit
+  game" fail, and the test aborts before it gets the log of the app and the
+  logcat ("StartIndex" in `WaitLog`). In the runs that pass, the play of
+  one picture in this phase takes up to 9 s. The cause is not known.
 
 ## The display rate
 
@@ -3084,8 +3055,19 @@ does not list the extension.
 
 **Not shown yet:** a rate in a headset: the feel of the head motion, the
 power and the heat of a Quest 3 at each rate, and the frames of the game
-in Wine under Box64 at each rate. A runtime with no extension on a real
-headset (the Steam Frame).
+in Wine under Box64 at each rate.
+
+**Known limits:**
+
+- On the Steam Frame an APK runs at the rate of SteamVR for each app, 72 Hz
+  by default (`/opt/steamvr/drivers/frame_hmd/resources/frame_hmd_additional.vrsettings`
+  has "defaultPerAppRefreshRate": 72.0 and "enablePerAppFPS": true, and the
+  key of an app is `steam.app.<id>`). `xrEnumerateDisplayRefreshRatesFB`
+  gives only the current rate, and `xrRequestDisplayRefreshRateFB` with 90
+  Hz returns `XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB`. So the row
+  "Display rate" cannot change the rate there. The display has the modes 72,
+  80, 90, 96, 108, 120 and 144 Hz. Another rate for the app is a setting of
+  the device.
 
 ## The size of the eye pictures
 
@@ -3323,10 +3305,9 @@ its `bwvr.ini` or the row.
   the thread of the session has the renderer again.
 - **The thread of the session** (`bwvr main`). `xrWaitFrame`,
   `xrBeginFrame`, the slot of the input channel, the newest finished picture
-  of the ring (`TakePicture`, after the menu with `take_late=1`, "The long
-  frames"), the menu, the copies of the frame into the swapchains in one
-  command buffer, and `xrEndFrame` with the poses of the shown picture. It
-  does not play. It waits for a picture only with `take_wait_ms` above 0.
+  of the ring (`TakePicture`), the menu, the copies of the frame into the
+  swapchains in one command buffer, and `xrEndFrame` with the poses of the
+  shown picture. It does not play and does not wait for the play thread.
 
 **The ring of the pictures** (`PictureRing`, the rules in `frame_loop.h`,
 `Ring`). Three slots. A slot has an image of the eye pictures (a layer for

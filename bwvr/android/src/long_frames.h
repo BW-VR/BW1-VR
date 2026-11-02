@@ -23,8 +23,8 @@
 // time_log=1, frame_loop=1): one line "take phase" each 10 s with the time
 // from the write of a slot to the start of the frame of the game that took
 // it, the time from that start to the end of the GPU work of its picture,
-// the times of the frame of the session around the take, and the waits at
-// the take (take_wait_ms, take_phase_math.h).
+// and the times of the frame of the session around the take
+// (take_phase_math.h).
 #pragma once
 
 #include <stdint.h>
@@ -147,9 +147,8 @@ class TakePhase {
   void Start(bool on);
   bool On() const { return on_; }
   // The thread of the session, at each Play: a new game and a new window.
-  // channel: the input channel, which the reader reads the world of. The
-  // keys of the take of this game for the line.
-  void GameStarts(double now_ms, const InputLive* channel, bool take_late, int take_wait_ms);
+  // channel: the input channel, which the reader reads the world of.
+  void GameStarts(double now_ms, const InputLive* channel);
   // The thread of the session: the app wrote the slot with this frame.
   void Wrote(uint32_t slot, double ms);
   // The reader thread, at each turn of its loop.
@@ -163,18 +162,13 @@ class TakePhase {
   // waited: the play thread waited for its fence, so ms is the end. Else
   // the GPU ended before ms.
   void GpuDone(double ms, bool waited);
-  // The thread of the session: a wait at the take of ms, found: it ended
-  // with a new picture.
-  void Waited(double ms, bool found);
-  // The thread of the session, after xrEndFrame of a frame with a take: the
-  // end of xrWaitFrame and the wait in it, the take, the end of xrEndFrame,
-  // the display period, and the display time (ns of the runtime, and ms on
-  // the clock of the app, below 0 when not known).
+  // The thread of the session, after xrEndFrame of each frame: the end of
+  // xrWaitFrame and the wait in it, the take (below 0: no take in this
+  // frame), the end of xrEndFrame, the display period, and the display time
+  // (ns of the runtime, and ms on the clock of the app, below 0 when not
+  // known).
   void SessionFrame(double wait_end_ms, double xr_wait_ms, double take_ms, double end_ms,
                     double period_ms, int64_t display_ns, int64_t period_ns, double display_ms);
-  // The most time from the take to the end of xrEndFrame in this window and
-  // in the window before: the rest of a frame for the rule of the wait.
-  double RestMs() const;
   // The thread of the session, each frame: the end of a window of 10 s, and
   // at most one line.
   void Tick(double now_ms);
@@ -188,8 +182,6 @@ class TakePhase {
   void Flush(double done_ms, bool have_done, bool waited);  // under lock_
 
   bool on_ = false;
-  bool take_late_ = false;
-  int take_wait_ms_ = 0;
   std::atomic<const InputLive*> channel_{nullptr};
   std::atomic<bool> reset_{false};      // the reader starts again (a new game)
   std::atomic<uint64_t> polls_{0};       // the turns of the loop of the reader
@@ -216,15 +208,10 @@ class TakePhase {
   uint64_t polls_at_ = 0;
   take_phase_math::Spread to_take_, to_end_, xr_wait_, room_, lead_;
   take_phase_math::Least room_least_, lead_least_;
-  // THE REST of a frame after the take for the rule of the wait: the take to
-  // the end of xrEndFrame in the frames that were shorter than a display
-  // period (a stop of the session, for example the menu, does not count),
-  // and its most in the window before.
-  take_phase_math::Spread rest_;
-  double rest_before_ = 0.0;
+  // The display time of the frame of the session before, and if that frame
+  // was in time (take_phase_math::SkippedPeriods).
   int64_t display_before_ = 0;
-  uint64_t dropped_ = 0;
+  bool before_in_time_ = false;
+  uint64_t skipped_ = 0;
   uint64_t frames_ = 0;
-  take_phase_math::Spread wait_;
-  uint64_t waits_found_ = 0;
 };

@@ -284,15 +284,12 @@ void TakePhase::Start(bool on) {
   if (!on_) return;
   AppLog("take phase   : one line each 10 s with the time from the write of a slot to the "
          "start of the frame of the game that took it, from that start to the end of the GPU "
-         "work of its picture, the times of the frame of the session around the take, and "
-         "the waits at the take (frame_loop=1). The lines go to the log after the end of "
+         "work of its picture, and the times of the frame of the session around the take "
+         "(frame_loop=1). The lines go to the log after the end of "
          "their window, one at each frame of the session");
 }
 
-void TakePhase::GameStarts(double now_ms, const InputLive* channel, bool take_late,
-                           int take_wait_ms) {
-  take_late_ = take_late;
-  take_wait_ms_ = take_wait_ms;
+void TakePhase::GameStarts(double now_ms, const InputLive* channel) {
   if (!on_) return;
   {
     std::lock_guard<std::mutex> g(lock_);
@@ -322,12 +319,9 @@ void TakePhase::GameStarts(double now_ms, const InputLive* channel, bool take_la
   lead_.Reset();
   room_least_ = tp::Least();
   lead_least_ = tp::Least();
-  rest_.Reset();
-  rest_before_ = 0.0;
   display_before_ = 0;
-  dropped_ = frames_ = 0;
-  wait_.Reset();
-  waits_found_ = 0;
+  before_in_time_ = false;
+  skipped_ = frames_ = 0;
 }
 
 void TakePhase::Wrote(uint32_t slot, double ms) {
@@ -411,37 +405,30 @@ void TakePhase::GpuDone(double ms, bool waited) {
   Flush(ms, true, waited);
 }
 
-void TakePhase::Waited(double ms, bool found) {
-  if (!on_) return;
-  wait_.Add(ms);
-  if (found) ++waits_found_;
-}
-
 void TakePhase::SessionFrame(double wait_end_ms, double xr_wait_ms, double take_ms,
                              double end_ms, double period_ms, int64_t display_ns,
                              int64_t period_ns, double display_ms) {
   if (!on_) return;
   ++frames_;
+  if (take_ms >= 0.0) {
+    if (wait_end_ms >= 0.0) to_take_.Add(take_ms - wait_end_ms);
+    to_end_.Add(end_ms - take_ms);
+  }
+  double room = 0.0;
   if (wait_end_ms >= 0.0) {
-    to_take_.Add(take_ms - wait_end_ms);
-    const double room = tp::RoomAfterEnd(wait_end_ms, end_ms, period_ms);
+    room = tp::RoomAfterEnd(wait_end_ms, end_ms, period_ms);
     room_.Add(room);
     room_least_.Add(room);
   }
-  to_end_.Add(end_ms - take_ms);
-  const double period = period_ms > 0.0 ? period_ms : tp::kIdlePeriodMs;
-  if (end_ms - take_ms < period) rest_.Add(end_ms - take_ms);
   xr_wait_.Add(xr_wait_ms);
   if (display_ms > 0.0) {
     lead_.Add(display_ms - end_ms);
     lead_least_.Add(display_ms - end_ms);
   }
-  dropped_ += static_cast<uint64_t>(tp::DroppedFrames(display_before_, display_ns, period_ns));
+  skipped_ += static_cast<uint64_t>(
+      tp::SkippedPeriods(display_before_, display_ns, period_ns, before_in_time_));
   display_before_ = display_ns;
-}
-
-double TakePhase::RestMs() const {
-  return rest_.most > rest_before_ ? rest_.most : rest_before_;
+  before_in_time_ = wait_end_ms >= 0.0 && room > 0.0;
 }
 
 void TakePhase::Tick(double now_ms) {
@@ -489,7 +476,7 @@ void TakePhase::Tick(double now_ms) {
     snprintf(lead, sizeof(lead), "not known (no display time on the clock of the app)");
   }
   kept_.Add(
-      "take phase   : %.1f s, take_late=%d, take_wait_ms=%d. THE WRITE OF A SLOT TO THE START "
+      "take phase   : %.1f s. THE WRITE OF A SLOT TO THE START "
       "OF THE FRAME OF THE GAME that took it: %llu frames whose frame before came before the "
       "write, %.2f ms as a mean (the deviation %.2f) and %.2f at most (%llu up to 0.5 ms, %llu "
       "up to 1 ms, %llu up to 2 ms, %llu more), %llu frames whose frame before came after the "
@@ -503,10 +490,10 @@ void TakePhase::Tick(double now_ms) {
       "xrWaitFrame to the take %.2f ms as a mean and %.2f at most, the take to the end of "
       "xrEndFrame %.2f and %.2f, the wait in xrWaitFrame %.2f and %.2f. The rest of the "
       "display period after the end of xrEndFrame %.2f ms as a mean and %.2f at the least. "
-      "The display time after the end of xrEndFrame: %s. %llu frames of the session that "
-      "the runtime dropped (the display time moved more than 1.5 periods). THE WAITS AT THE "
-      "TAKE: %llu waits, %llu of them with a new picture, %.2f ms as a mean and %.2f at most",
-      seconds, take_late_ ? 1 : 0, take_wait_ms_, static_cast<unsigned long long>(waited.count),
+      "The display time after the end of xrEndFrame: %s. %llu display periods that the "
+      "runtime skipped after a frame of the session in time (the display time moved more "
+      "than 1.5 periods)",
+      seconds, static_cast<unsigned long long>(waited.count),
       waited.Mean(), waited.Dev(), waited.most, static_cast<unsigned long long>(bins[0]),
       static_cast<unsigned long long>(bins[1]), static_cast<unsigned long long>(bins[2]),
       static_cast<unsigned long long>(bins[3]), static_cast<unsigned long long>(busy.count),
@@ -518,12 +505,9 @@ void TakePhase::Tick(double now_ms) {
       static_cast<unsigned long long>(no_start), static_cast<unsigned long long>(frames_),
       to_take_.Mean(), to_take_.most, to_end_.Mean(), to_end_.most, xr_wait_.Mean(),
       xr_wait_.most, room_.Mean(), room_least_.Or0(), lead,
-      static_cast<unsigned long long>(dropped_), static_cast<unsigned long long>(wait_.count),
-      static_cast<unsigned long long>(waits_found_), wait_.Mean(), wait_.most);
+      static_cast<unsigned long long>(skipped_));
   kept_.WindowEnds();
   window_ms_ = now_ms;
-  rest_before_ = rest_.most;
-  rest_.Reset();
   to_take_.Reset();
   to_end_.Reset();
   xr_wait_.Reset();
@@ -531,7 +515,5 @@ void TakePhase::Tick(double now_ms) {
   lead_.Reset();
   room_least_ = tp::Least();
   lead_least_ = tp::Least();
-  dropped_ = frames_ = 0;
-  wait_.Reset();
-  waits_found_ = 0;
+  skipped_ = frames_ = 0;
 }

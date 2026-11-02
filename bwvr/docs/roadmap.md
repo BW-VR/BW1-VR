@@ -1194,11 +1194,14 @@ that moves while the Hand takes it.
   only 2 to 10 of them (`android.md`, "The long frames"). The line
   `take phase` of the app shows why: the frame of the game starts about 1
   ms after the write of the slot, and its picture needs 13 to 15 ms (a
-  deviation of 2.4 to 3.7 ms) to the end of its GPU work, so it ends at
-  the next take. A later take (`take_late=1`) gains less than 0.2 ms, and a
-  wait at the take (`take_wait_ms`) makes the frames of the session late
-  for the compositor of SteamVR. Next: pictures between the frames of the
-  game in the app, then the code of the long game turn. The app
+  deviation of 2.4 to 5.1 ms, in a session with a wait at the take) to the
+  end of its GPU work, so it ends at the next take. A later take in the
+  frame of the session gains less than 0.2 ms, and with SteamVR about 2 ms more work of the session after
+  `xrWaitFrame` makes the compositor time out presents. The Frame runs an
+  APK at 72 Hz, the rate of SteamVR for each app (`android.md`, "The
+  display rate"). Next: runs on the Frame at 90 and 144 Hz (a setting of the
+  device), then pictures between the frames of the game in the app, then
+  the code of the long game turn. The app
   gives each second the core and the CPU time of
   each thread (`thread_cores=1`), binds the main thread of the game, the
   session thread and the play thread to the fast cores (`thread_bind`), and

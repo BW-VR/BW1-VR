@@ -1335,7 +1335,7 @@ bool XrApp::BeginFrame(XrInput* input) {
   XrFrameWaitInfo wait = {XR_TYPE_FRAME_WAIT_INFO};
   frame_ = {XR_TYPE_FRAME_STATE};
   // The end of xrWaitFrame and the wait in it at each frame: the time log and
-  // the room of the take (take_wait_ms, take_phase_math.h).
+  // the line of the phase of the take (long_frames.h).
   const double wait_start = ClockMs();
   wait_end_ms_ = -1.0;
   if (!Ok(xrWaitFrame(session_, &wait, &frame_), "xrWaitFrame")) return false;

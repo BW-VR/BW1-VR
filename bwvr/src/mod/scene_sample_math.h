@@ -128,4 +128,39 @@ inline bool EndsWithCall(const uint8_t before[7]) {
   return false;
 }
 
+// THE CHAIN OF A SAMPLE OF THE GAME TURN (profile_sample_turn). `found` has
+// the return addresses of the game on the stack of a sample, the innermost
+// first. The chain keeps at most `want` of them: the innermost want / 2 and
+// the outermost want - want / 2. The outermost calls are the calls of the turn
+// itself (its parts), and the innermost are the code that runs. Gives the
+// count in `out`.
+inline int KeepChain(const uint32_t* found, int count, uint32_t* out,
+                     int want) {
+  if (count <= 0 || want <= 0) return 0;
+  if (count <= want) {
+    for (int i = 0; i < count; ++i) out[i] = found[i];
+    return count;
+  }
+  const int inner = want / 2;
+  const int outer = want - inner;
+  for (int i = 0; i < inner; ++i) out[i] = found[i];
+  for (int i = 0; i < outer; ++i) out[inner + i] = found[count - outer + i];
+  return want;
+}
+
+// Sorts the words, and removes the zeros and the repeats. A call that is two
+// times on one stack (a recursion, or an old value) then counts one time for
+// its sample. Gives the new count.
+inline int UniqueWords(uint32_t* words, int count) {
+  if (count <= 0) return 0;
+  qsort(words, static_cast<size_t>(count), sizeof(uint32_t), CompareAddress);
+  int have = 0;
+  for (int i = 0; i < count; ++i) {
+    if (words[i] == 0) continue;
+    if (have > 0 && words[have - 1] == words[i]) continue;
+    words[have++] = words[i];
+  }
+  return have;
+}
+
 }  // namespace scene_sample

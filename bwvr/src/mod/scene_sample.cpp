@@ -30,6 +30,18 @@
 // samples of the frame that ended stay only when the frame is long
 // (SceneSampleFrameEnd). The report gives the samples of the long frames
 // alone. 0 (the default): the samples of each frame, as above.
+//
+// THE SAMPLES OF THE GAME TURN (profile_sample_turn=N, 100 to 5000, a test
+// key, docs/backend.md, "The long game turn"): the thread takes a sample each
+// N microseconds only while the frame thread is in the game turn
+// (GGame::ProcessNetworkPackets, pass_guard.cpp), in place of the scene
+// walks. At the end of each turn its samples stay only when the turn took
+// profile_sample_turn_ms or more (2 by default, 0 keeps each turn). For each
+// sample the thread also reads the stack from the sample up to the hook of
+// the turn (at most kDeepWords), and keeps the return addresses in the code
+// of runblack.exe (the chain, at most kChainWords). The report then also
+// gives the calls of the game on these stacks: the share of the samples that
+// have each call. The outermost calls are the parts of the turn.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -85,6 +97,24 @@ LONG g_frame_first = 0;   // the first sample of the frame that runs now
 uint64_t g_slow_frames = 0;  // the long frames since the last report
 uint64_t g_all_frames = 0;   // all frames since the last report
 double g_slow_ms = 0.0;      // their time
+// profile_sample_turn: the samples come only in the game turn, and the
+// samples of the long turns go to the ring of the long frames, with their
+// chains. g_turn_base is the stack pointer of the hook of the turn: the
+// stack of a sample is read up to there.
+bool g_turn = false;
+double g_turn_min_ms = 2.0;          // profile_sample_turn_ms
+volatile LONG g_turn_base = 0;
+uint64_t g_turn_all = 0;             // the turns since the last report
+double g_turn_most_ms = 0.0;         // the longest turn since the last report
+const int kChainWords = 32;
+const int kDeepWords = 4096;         // 16 KB of the stack
+uint32_t* g_deep = nullptr;          // the stack of one sample, its thread only
+uint32_t* g_chains = nullptr;        // kChainWords for each sample of g_stacks
+uint32_t* g_slow_chains = nullptr;   // kChainWords for each sample of g_slow_ring
+uint32_t* g_chain_scratch = nullptr; // the chains of a report
+const int kTopChainCalls = 28;
+uint32_t g_text_low = 0;             // the code of runblack.exe
+uint32_t g_text_high = 0;
 
 // Written by the thread of the samples, read by the report on the frame
 // thread. The report reads only up to the count it read first.
@@ -111,6 +141,25 @@ int IniKey(const char* key, int fallback) {
   if (strlen(path) + 9 >= MAX_PATH) return fallback;
   strcat_s(path, "bwvr.ini");
   return static_cast<int>(GetPrivateProfileIntA("bwvr", key, fallback, path));
+}
+
+// The return addresses in the code of runblack.exe in the first `words`
+// words of g_deep, the innermost first, as a chain of kChainWords (zeros at
+// the end). The code of the game is always there, so the bytes before a word
+// are read in place.
+void ScanChain(int words, uint32_t* chain) {
+  uint32_t found[512];
+  int count = 0;
+  for (int w = 0; w < words && count < 512; ++w) {
+    const uint32_t word = g_deep[w];
+    if (word < g_text_low + 7 || word >= g_text_high) continue;
+    if (!scene_sample::EndsWithCall(reinterpret_cast<const uint8_t*>(
+            static_cast<uintptr_t>(word - 7)))) {
+      continue;
+    }
+    found[count++] = word;
+  }
+  scene_sample::KeepChain(found, count, chain, kChainWords);
 }
 
 // It runs until the process ends. In a scene walk it spins on its core
@@ -161,11 +210,34 @@ DWORD WINAPI SampleThread(LPVOID) {
                                    &copied)) {
       copied = 0;
     }
+    // profile_sample_turn: the stack up to the hook of the turn, for the
+    // chain. The words go to g_deep, and the scan comes after the resume.
+    SIZE_T deep = 0;
+    if (g_turn && got) {
+      const uint32_t base = static_cast<uint32_t>(
+          InterlockedCompareExchange(&g_turn_base, 0, 0));
+      if (base > context.Esp) {
+        SIZE_T bytes = base - context.Esp;
+        if (bytes > kDeepWords * sizeof(uint32_t)) {
+          bytes = kDeepWords * sizeof(uint32_t);
+        }
+        if (!ReadProcessMemory(GetCurrentProcess(),
+                               reinterpret_cast<LPCVOID>(context.Esp), g_deep,
+                               bytes, &deep)) {
+          deep = 0;
+        }
+      }
+    }
     ResumeThread(g_target);
     QueryPerformanceCounter(&b);
     InterlockedExchangeAdd64(&g_hold_ticks, b.QuadPart - a.QuadPart);
     if (copied < kStackWords * sizeof(uint32_t)) {
       ZeroMemory(stack, kStackWords * sizeof(uint32_t));
+    }
+    if (g_turn) {
+      uint32_t* chain = g_chains + (at & (kStackRing - 1)) * kChainWords;
+      ZeroMemory(chain, kChainWords * sizeof(uint32_t));
+      ScanChain(static_cast<int>(deep / sizeof(uint32_t)), chain);
     }
     if (!got) {
       InterlockedIncrement(&g_lost);
@@ -218,11 +290,12 @@ void ReadModules() {
 // and each of its samples to bwvr-samples.txt beside runblack.exe, for a
 // script that gives the share of each function. A line "M name base size"
 // is a module, "W frames" starts a report, and each other line is the
-// address of a sample, in hex.
+// address of a sample, in hex. With profile_sample_turn the chain of the
+// sample follows its address on its line, the innermost call first.
 bool g_dump = false;
 bool g_dumped = false;  // the file of this run is open for appends
 
-void Dump(LONG take, uint64_t frames) {
+void Dump(LONG take, uint64_t frames, LONG first) {
   char path[MAX_PATH];
   const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
   if (length == 0 || length >= MAX_PATH) return;
@@ -239,7 +312,17 @@ void Dump(LONG take, uint64_t frames) {
     fprintf(f, "M %s %08X %08X\n", g_names[m], g_modules[m].base,
             g_modules[m].size);
   }
-  for (LONG i = 0; i < take; ++i) fprintf(f, "%08X\n", g_scratch[i]);
+  for (LONG i = 0; i < take; ++i) {
+    fprintf(f, "%08X", g_scratch[i]);
+    if (g_turn) {
+      const uint32_t* chain =
+          g_slow_chains + ((first + i) & (kSlowRing - 1)) * kChainWords;
+      for (int w = 0; w < kChainWords && chain[w] != 0; ++w) {
+        fprintf(f, " %08X", chain[w]);
+      }
+    }
+    fprintf(f, "\n");
+  }
   fclose(f);
 }
 
@@ -346,7 +429,33 @@ void Start() {
   // slow_frame_ms above 0 with time_log=1 (time_log.cpp), which says which
   // frame is long.
   const int slow = IniKey("profile_sample_slow", 0);
-  if (slow > 0) {
+  // profile_sample_turn=N (100 to 5000) takes samples each N microseconds in
+  // the game turn alone, and keeps the samples of the turns that took
+  // profile_sample_turn_ms or more. It goes before profile_sample_slow and
+  // profile_sample_outside.
+  const int turn = IniKey("profile_sample_turn", 0);
+  if (turn > 0) {
+    g_turn = true;
+    g_outside = 0;
+    g_interval_us = turn;
+    g_turn_min_ms = IniKey("profile_sample_turn_ms", 2);
+    if (g_turn_min_ms < 0.0) g_turn_min_ms = 0.0;
+    // The code of runblack.exe, from its headers.
+    const uint8_t* image =
+        reinterpret_cast<const uint8_t*>(GetModuleHandleA(nullptr));
+    const IMAGE_DOS_HEADER* dos =
+        reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+    const IMAGE_NT_HEADERS32* nt =
+        reinterpret_cast<const IMAGE_NT_HEADERS32*>(image + dos->e_lfanew);
+    g_text_low = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(image)) +
+                 nt->OptionalHeader.BaseOfCode;
+    g_text_high = g_text_low + nt->OptionalHeader.SizeOfCode;
+    if (slow > 0) {
+      ModLog("scene sample : profile_sample_turn=%d goes before "
+             "profile_sample_slow=%d. No sample of the long frames",
+             turn, slow);
+    }
+  } else if (slow > 0) {
     if (!g_time_log_slow) {
       ModLog("scene sample : profile_sample_slow=%d needs slow_frame_ms above 0 and "
              "time_log=1. No sample of the long frames", slow);
@@ -367,10 +476,18 @@ void Start() {
   g_scratch = new uint32_t[kRing];
   g_stacks = new uint32_t[kStackRing * kStackWords];
   ZeroMemory(g_stacks, kStackRing * kStackWords * sizeof(uint32_t));
-  if (g_slow) {
+  if (g_slow || g_turn) {
     g_slow_ring = new uint32_t[kSlowRing];
     g_slow_stacks = new uint32_t[kSlowRing * kStackWords];
     ZeroMemory(g_slow_stacks, kSlowRing * kStackWords * sizeof(uint32_t));
+  }
+  if (g_turn) {
+    g_deep = new uint32_t[kDeepWords];
+    g_chains = new uint32_t[kStackRing * kChainWords];
+    ZeroMemory(g_chains, kStackRing * kChainWords * sizeof(uint32_t));
+    g_slow_chains = new uint32_t[kSlowRing * kChainWords];
+    ZeroMemory(g_slow_chains, kSlowRing * kChainWords * sizeof(uint32_t));
+    g_chain_scratch = new uint32_t[kSlowRing * kChainWords];
   }
   // profile_sample_thread=1 takes the samples of the render thread, and 2
   // of the D3D7 thread (d3d7_thread.cpp), in place of the frame thread. That
@@ -378,6 +495,8 @@ void Start() {
   // it then.
   g_other = IniKey("profile_sample_thread", 0);
   if (g_other != 1 && g_other != 2) g_other = 0;
+  // The game turn runs on the frame thread.
+  if (g_turn) g_other = 0;
   if (g_other == 0) {
     g_target = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
                               THREAD_QUERY_INFORMATION,
@@ -399,7 +518,9 @@ void Start() {
          "module", g_interval_us,
          g_other == 1 ? "render" : g_other == 2 ? "D3D7" : "frame",
          g_interval_us,
-         g_slow ? "in the whole frame, and keeps the samples of the long frames "
+         g_turn ? "in the game turn alone, and keeps the samples of the turns "
+                  "that take profile_sample_turn_ms or more (profile_sample_turn)"
+         : g_slow ? "in the whole frame, and keeps the samples of the long frames "
                   "(profile_sample_slow)"
          : g_outside != 0 ? "outside the scene walks (profile_sample_outside=1)"
                           : "in each scene walk");
@@ -423,11 +544,49 @@ void SceneSampleWalk(bool in) {
                           FALSE, id);
     if (g_target == nullptr) return;
   }
+  // With profile_sample_turn the flag is the game turn (SceneSampleTurn).
+  if (g_turn) return;
   InterlockedExchange(&g_in_walk, in ? 1 : 0);
 }
 
+bool SceneSampleTurnOn() { return g_turn && !g_failed && g_interval_us > 0; }
+
+void SceneSampleTurnBegin(const void* stack) {
+  if (!SceneSampleTurnOn()) return;
+  g_frame_first = InterlockedCompareExchange(&g_written, 0, 0);
+  InterlockedExchange(&g_turn_base,
+                      static_cast<LONG>(reinterpret_cast<uintptr_t>(stack)));
+  InterlockedExchange(&g_in_walk, 1);
+}
+
+void SceneSampleTurnEnd(double turn_ms) {
+  if (!SceneSampleTurnOn()) return;
+  InterlockedExchange(&g_in_walk, 0);
+  const LONG written = InterlockedCompareExchange(&g_written, 0, 0);
+  ++g_turn_all;
+  if (turn_ms > g_turn_most_ms) g_turn_most_ms = turn_ms;
+  if (turn_ms >= g_turn_min_ms) {
+    LONG first = g_frame_first;
+    if (written - first > kSlowRing) first = written - kSlowRing;
+    for (LONG i = first; i < written; ++i) {
+      const LONG to = g_slow_written & (kSlowRing - 1);
+      g_slow_ring[to] = g_ring[i & (kRing - 1)];
+      memcpy(g_slow_stacks + to * kStackWords,
+             g_stacks + (i & (kStackRing - 1)) * kStackWords,
+             kStackWords * sizeof(uint32_t));
+      memcpy(g_slow_chains + to * kChainWords,
+             g_chains + (i & (kStackRing - 1)) * kChainWords,
+             kChainWords * sizeof(uint32_t));
+      ++g_slow_written;
+    }
+    ++g_slow_frames;
+    g_slow_ms += turn_ms;
+  }
+  g_frame_first = written;
+}
+
 void SceneSampleFrameEnd(bool slow, double frame_ms) {
-  if (!g_slow || g_slow_ring == nullptr) return;
+  if (!g_slow || g_turn || g_slow_ring == nullptr) return;
   const LONG written = InterlockedCompareExchange(&g_written, 0, 0);
   if (slow) {
     // The ring of the long frames holds kSlowRing samples, the fewest of the
@@ -454,17 +613,27 @@ void SceneSampleReport(uint64_t frames, double scene_ms) {
   if (g_interval_us == 0 || g_failed || g_ring == nullptr) return;
   // profile_sample_slow: the samples of the long frames since the last
   // report, in place of the samples of all frames.
-  const uint32_t* ring = g_slow ? g_slow_ring : g_ring;
-  const uint32_t* stacks = g_slow ? g_slow_stacks : g_stacks;
-  const int ring_size = g_slow ? kSlowRing : kRing;
-  const int stack_size = g_slow ? kSlowRing : kStackRing;
-  LONG& reported = g_slow ? g_slow_reported : g_reported;
-  const LONG written = g_slow ? g_slow_written : InterlockedCompareExchange(&g_written, 0, 0);
+  // profile_sample_turn: the samples of the long turns, in the same ring.
+  const bool kept = g_slow || g_turn;
+  const uint32_t* ring = kept ? g_slow_ring : g_ring;
+  const uint32_t* stacks = kept ? g_slow_stacks : g_stacks;
+  const int ring_size = kept ? kSlowRing : kRing;
+  const int stack_size = kept ? kSlowRing : kStackRing;
+  LONG& reported = kept ? g_slow_reported : g_reported;
+  const LONG written = kept ? g_slow_written : InterlockedCompareExchange(&g_written, 0, 0);
   // The samples held the frame thread in each frame, also with
-  // profile_sample_slow, so the hold is of all frames.
+  // profile_sample_slow, so the hold is of all frames. With
+  // profile_sample_turn it is of all turns.
   uint64_t held_frames = frames;
-  if (g_slow) {
-    held_frames = g_all_frames;
+  const uint64_t turns = g_turn_all;
+  const double turn_most = g_turn_most_ms;
+  if (g_turn) {
+    held_frames = g_turn_all;
+    g_turn_all = 0;
+    g_turn_most_ms = 0.0;
+  }
+  if (kept) {
+    if (g_slow) held_frames = g_all_frames;
     g_all_frames = 0;
     frames = g_slow_frames;
     scene_ms = g_slow_frames > 0 ? g_slow_ms / static_cast<double>(g_slow_frames) : 0.0;
@@ -479,6 +648,11 @@ void SceneSampleReport(uint64_t frames, double scene_ms) {
   reported = written;
   const LONG lost = InterlockedExchange(&g_lost, 0);
   const LONG64 held = InterlockedExchange64(&g_hold_ticks, 0);
+  if (g_turn && (take <= 0 || frames == 0)) {
+    ModLog("scene sample : no game turn of %.0f ms or more in %llu turns. The "
+           "longest turn took %.2f ms", g_turn_min_ms, turns, turn_most);
+    return;
+  }
   if (take <= 0 || frames == 0) return;
   for (LONG i = 0; i < take; ++i) {
     g_scratch[i] = ring[(first + i) & (ring_size - 1)];
@@ -486,7 +660,7 @@ void SceneSampleReport(uint64_t frames, double scene_ms) {
 
   ReadModules();
   const int callers = FindCallers(first, take, stacks, stack_size);
-  if (g_dump) Dump(take, frames);
+  if (g_dump) Dump(take, frames, first);
   // The samples of each module, and of no module.
   uint32_t per_module[kMaxModules + 1];
   ZeroMemory(per_module, sizeof(per_module));
@@ -521,15 +695,26 @@ void SceneSampleReport(uint64_t frames, double scene_ms) {
                             static_cast<double>(g_frequency.QuadPart) /
                             static_cast<double>(held_frames)
                       : 0.0;
-  ModLog("scene sample : %ld samples %s of %llu frames, %.0f "
-         "in a frame. The samples held the frame thread %.3f ms in a frame (of %llu frames), "
-         "and %ld stops gave no address. %s %.2f ms in a "
-         "frame. By module: %s",
-         take,
-         g_slow ? "in the whole frame"
-         : g_outside != 0 ? "outside the scene walks" : "in the scene walks",
-         frames, static_cast<double>(take) / frames, held_ms, held_frames, lost,
-         g_slow ? "These long frames were" : "The scene walks were", scene_ms, line);
+  if (g_turn) {
+    ModLog("scene sample : %ld samples in the game turns of %.0f ms or more: "
+           "%llu turns of %llu, %.0f samples in a turn. The samples held the "
+           "frame thread %.3f ms in a turn (of %llu turns), and %ld stops gave "
+           "no address. These turns took %.2f ms on average, the longest turn "
+           "%.2f ms. By module: %s",
+           take, g_turn_min_ms, frames, turns,
+           static_cast<double>(take) / frames, held_ms, held_frames, lost,
+           scene_ms, turn_most, line);
+  } else {
+    ModLog("scene sample : %ld samples %s of %llu frames, %.0f "
+           "in a frame. The samples held the frame thread %.3f ms in a frame (of %llu frames), "
+           "and %ld stops gave no address. %s %.2f ms in a "
+           "frame. By module: %s",
+           take,
+           g_slow ? "in the whole frame"
+           : g_outside != 0 ? "outside the scene walks" : "in the scene walks",
+           frames, static_cast<double>(take) / frames, held_ms, held_frames, lost,
+           g_slow ? "These long frames were" : "The scene walks were", scene_ms, line);
+  }
 
   // The buckets with the most samples.
   scene_sample::Bucket top[kTopBuckets];
@@ -558,5 +743,31 @@ void SceneSampleReport(uint64_t frames, double scene_ms) {
            callers, first_line);
     ModLog("scene sample : the first return address that is also outside "
            "d3d9.dll and the mod: %s", second_line);
+  }
+
+  // profile_sample_turn: the calls of the game on the stacks of the samples.
+  // Each call counts one time in a sample, so its share is the share of the
+  // samples in which the call is on the stack: the time below that call.
+  if (g_turn && g_chain_scratch != nullptr) {
+    int words = 0;
+    for (LONG i = 0; i < take; ++i) {
+      uint32_t* to = g_chain_scratch + words;
+      memcpy(to, g_slow_chains + ((first + i) & (kSlowRing - 1)) * kChainWords,
+             kChainWords * sizeof(uint32_t));
+      words += scene_sample::UniqueWords(to, kChainWords);
+    }
+    scene_sample::Bucket calls[kTopChainCalls];
+    const int have = scene_sample::TopBuckets(g_chain_scratch, words, calls,
+                                              kTopChainCalls, 0);
+    used = 0;
+    for (int k = 0; k < have; ++k) {
+      used += sprintf_s(line + used, sizeof(line) - used,
+                        "%s0x%08X %.1f%%", k == 0 ? "" : ", ", calls[k].first,
+                        calls[k].count * share);
+      if (used >= static_cast<int>(sizeof(line)) - 40) break;
+    }
+    ModLog("scene sample : the return addresses in runblack.exe on the stacks "
+           "of these samples, in %% of the samples that have each one: %s",
+           line);
   }
 }

@@ -3567,6 +3567,7 @@ void CreatureChecks() {
 #include "read_ahead_checks.h"
 #include "target_glow_checks.h"
 #include "scene_sample_checks.h"
+#include "anim_trig_checks.h"
 #include "render_thread_checks.h"
 #include "fast_transform_checks.h"
 #include "land_fast_checks.h"
@@ -4027,6 +4028,7 @@ int main() {
   take_stream_checks::TakeStreamChecks();
   target_glow_checks::TargetGlowChecks();
   scene_sample_checks::SceneSampleChecks();
+  anim_trig_checks::AnimTrigChecks();
   render_thread_checks::RenderThreadChecks();
   fast_transform_checks::FastTransformChecks();
   land_fast_checks::LandFastChecks();

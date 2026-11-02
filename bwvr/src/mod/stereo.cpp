@@ -249,6 +249,9 @@ void ControllersCycleOwnerMode();
 void AudioCycleMode();
 // audio_voices.cpp: the A/B of audio_stop_wait.
 void AudioStopWaitToggle();
+// anim_trig.cpp: the A/B of anim_trig, and its test frame.
+void AnimTrigToggle(const char* by);
+void AnimTrigFrame();
 // frame_time.cpp: the frame time of the game after the two eye passes.
 void FrameTimeHook(bool inside);
 void FrameTimeBeforePasses();
@@ -1170,6 +1173,17 @@ void PollHotkeys() {
     UiDepthToggleHintHandDepth("Ctrl, Shift and T");
   }
   hint_down = hint_now;
+  // An A/B of the angles of the animations with no x87 function
+  // (anim_trig.cpp, docs/backend.md, "The long game turn"). The letter A
+  // with Ctrl and Shift has no other test key. The key Shift A needs Ctrl up.
+  static bool trig_down = false;
+  const bool trig_now =
+      (GetAsyncKeyState('A') & 0x8000) != 0 && ctrl && shift;
+  if (g_test_keys && trig_now && !trig_down && GameHasFocus()) {
+    AnimTrigToggle("Ctrl, Shift and A");
+  }
+  trig_down = trig_now;
+  AnimTrigFrame();
 }
 
 // DECLARE A POSE THE PICTURE COULD HAVE COME FROM.

@@ -26,6 +26,8 @@ add_library(bwvr_mod SHARED
     interop_probe.cpp
     present_watch.cpp
     pass_guard.cpp
+    anim_watch.cpp
+    anim_trig.cpp
     land_light.cpp
     frame_timers.cpp
     tick_direct.cpp

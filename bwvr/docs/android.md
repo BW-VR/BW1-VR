@@ -2912,7 +2912,10 @@ stick in a saved game):
   each one the game turn takes 19 to 33 ms, and the scene walk is 4 to 10
   ms as in a frame of normal length. The game opens no file in them, and
   reads from a file in only one of them. They
-  come 0.2 to 5 s apart, with no steady rhythm.
+  come 0.2 to 5 s apart, with no steady rhythm. In a desktop run the
+  long game turns are the first use of an animation of the Creature: the
+  game makes its mixed animation in the game turn (`backend.md`, "The long
+  game turn", `anim_trig`). Not shown yet on the Frame.
 - Each long frame of the mod after the load has a line `game frame` of the
   app at the same frame of the stream, with a gap within 2 ms of the length
   of the long frame. The pairs that do not match are in the load.
@@ -4662,6 +4665,64 @@ a second.
 cores of the cpuset of the app, if Android lets the app bind the threads of
 the game process, and if the game makes more frames a second with its main
 thread on a fast core.
+
+### The work of a frame on more cores (the plan)
+
+The goal is 120 to 144 Hz: a frame of 7 to 8 ms. On the Steam Frame at 90
+Hz a frame of normal length is 11.2 ms: the scene walk 5.8 to 7.6 ms, the
+rest about 1.2 ms (the game turn is in it), and the wait of the pace 2.2 to
+4.1 ms. All the work of the game is on its main thread. The parts of the
+walk, from `walk_parts=1`:
+
+| Part | Desktop run (`pen`, x87 path, walk 1.22 ms) | Quest 3 under FEX (an older build with no `land_fast`, walk 25.8 ms with 3.6 ms of timers) |
+| --- | --- | --- |
+| The land, the sea and the objects on the land (`GLandscape::Draw`) | 0.58 ms (47 percent) | 21.9 ms (85 percent), 17.7 ms of it in `fn_005E5CD0`, with the meshes and the land patches |
+| The sorted draws of `LH3DRender::FinishFrame` | 0.26 ms (21 percent) | 2.6 ms (10 percent) |
+| The calls of the game to the device of the mod, the renderer and the record of the stream | about 0.40 ms (33 percent) | about 5.6 ms with the timers, about 2.6 ms with no timer (about 12 percent) |
+| The sky, the Hand, the interface | below 0.03 ms each | below 0.3 ms each |
+
+The parts that can go to another core, with the gain that each can give
+in a walk of 6.7 ms on the Frame:
+
+1. **The calls of the device to a thread.** The frame thread puts each
+   draw call and each state call of the walk into a queue, and a thread of
+   the mod makes the record of the stream from it (`vk_stream_worker` makes
+   only the copy into the ring on a thread now). The game reads nothing
+   back from the record. A lock of a surface waits for the queue. Gain:
+   about 12 percent of the walk, about 0.8 ms.
+2. **The land patches in a pipeline.** A thread runs the vertex loop of
+   the next patch (`fn_00874AA0`, `land_fast`) while the frame thread makes
+   the triangles of a patch. The vertices of a patch go to the tables of
+   the engine (`LH3DP3::Table0` and `Table1`), so the thread needs a second
+   pair of tables and the inputs of the patch latched. Gain: the part of
+   the vertex loop in the land, 0.5 to 1 ms (a guess from the old Quest
+   log, `land_fast` made the loop shorter).
+3. **The meshes** (`fn_00856D40`, `fn_0085AB10`, `fn_0084BA90` and the SSE
+   loops of `fast_transform`): about 1500 meshes in a walk (the old Quest
+   log), 1 to 4 microseconds each, and the draw of each mesh comes at
+   once. A hand over to a thread for each mesh costs about as much as the
+   mesh. No gain.
+4. **The game turn** cannot go to another core: the walk reads the state
+   that the turn writes. Its long turns are the mixed animations of the
+   Creature (`backend.md`, "The long game turn", `anim_trig`).
+
+Not built: the first part needs the parts of the walk of the build now
+under FEX, and `walk_parts=1` is not safe there. Each timer is a hook of
+MinHook that comes at the third scene walk, in the load. `MH_EnableHook`
+stops each other thread (`Freeze` of `hook.c`) and then changes the
+protection of the code (`VirtualProtect`). Under FEX that change waits for
+the lock of the cache of the translated code. When a stopped thread holds
+that lock (a thread of the load that translates new code), the hook waits
+for ever ("FEX as the CPU of the 32 bit code"). In the load many threads
+translate new code, and `walk_parts=1` enables about 70 hooks one at a
+time. 2 of 5 starts hung with `walk_parts=1`, and 0 of 4 with 0. The
+source of FEX and of MinHook fits this cause. No log shows it. A safe
+way: the timers of the functions of the game go in with the first hooks of
+the mod (`PassGuardInstall`, the first frame with a render target), all
+with one stop of the threads (`MH_QueueEnableHook` and one
+`MH_ApplyQueued`, as `anim_trig` does), the timers of the device and of the
+code of the mod are calls in that code (no hook), and the scan of the
+lists of the engine adds no hook after the start.
 
 ## Wine in the app
 

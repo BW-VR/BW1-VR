@@ -18,3 +18,9 @@ void SceneSampleReport(uint64_t frames, double scene_ms);
 // ended was long (slow) and took frame_ms. With profile_sample_slow its
 // samples then go to the next report, else they go.
 void SceneSampleFrameEnd(bool slow, double frame_ms);
+// pass_guard.cpp, around each call of GGame::ProcessNetworkPackets (the game
+// turn), with profile_sample_turn above 0: the turn starts, with the stack
+// pointer of the hook (the samples read the stack up to there), and it ends
+// after turn_ms. With the key at 0 each call does nothing.
+void SceneSampleTurnBegin(const void* stack);
+void SceneSampleTurnEnd(double turn_ms);

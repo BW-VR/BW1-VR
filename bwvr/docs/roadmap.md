@@ -1209,10 +1209,16 @@ that moves while the Hand takes it.
   `Morphable::MorphTexture`, `GScript::Process` and a load of a mesh of
   the Temple through `fn_008067F0`. `anim_trig=1` makes the four functions
   of the animations with no x87 instruction (54 percent less time for the
-  animations in a desktop run, `backend.md`, "The long game turn"). Open:
-  how often a session on the Frame makes a BuildingSite, and how long
-  these turns take under FEX. Next on the Frame: the length of the long
-  game turn with `anim_trig` 1 and 0 (`slow_frame_ms=20`, `anim_watch=1`).
+  animations in a desktop run, `backend.md`, "The long game turn"). On the
+  Frame with `anim_trig=1` the animations are not the long turn:
+  `GetSetAnim` made at most 3.62 ms in one call and 0.2 to 29 ms in each 450
+  frames, and the long game turns stay at about 30 ms (75th percentile 30.4
+  ms, 28 to 47 long frames in 10 s). `turn_parts=1` puts a timer on each
+  function that the game turn calls, and the lines `long frame` and
+  `turn parts` give the time of each part. Open: which part takes the 30 ms
+  on the Frame, how often a session there makes a BuildingSite, and how long
+  these turns take under FEX. Next on the Frame: `turn_parts=1`,
+  `slow_frame_ms=20`, `anim_trig=1`, the same scene for some minutes.
   The plan for the work of a frame on more cores is in `android.md`, "The
   work of a frame on more cores". The app gives each second the core and
   the CPU time of each thread (`thread_cores=1`), binds the main thread of

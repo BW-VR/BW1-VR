@@ -28,6 +28,7 @@ add_library(bwvr_mod SHARED
     pass_guard.cpp
     anim_watch.cpp
     anim_trig.cpp
+    turn_parts.cpp
     land_light.cpp
     frame_timers.cpp
     tick_direct.cpp

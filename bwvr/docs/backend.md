@@ -65,6 +65,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`), and in the game turn with the calls on the stack (`profile_sample_turn`) |
 | `src/mod/anim_trig.cpp`, `anim_trig_math.h` | The four functions of the angles and the rotations of the animations with no x87 instruction (`anim_trig`, "The long game turn") |
 | `src/mod/anim_watch.cpp` | A test aid: the animations that `Morphable::GetSetAnim` makes, and their time (`anim_watch`) |
+| `src/mod/turn_parts.cpp`, `turn_parts_math.h` | A test aid: timers on the functions that the game turn calls, and the parts of the turn in the lines of the long frames (`turn_parts`, "The long game turn"). The math checks are in `test/controller_math/turn_parts_checks.h` |
 | `src/mod/time_log.cpp`, `time_log_math.h` | The time log: each 10 s the parts of a frame of the game (`time_log`). The math checks are in `test/controller_math/time_log_checks.h` |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`). The crash log: the C++ exceptions and each end of the game in its C runtime (`crash_log`) |
 | `src/mod/stall_watch.cpp`, `stall_math.h` | The module list at a stall (`stall_modules`, `stall_addrs`), and the test spin (`test_stall_ms`). The math checks are in `test/controller_math/stall_checks.h` |
@@ -2112,7 +2113,7 @@ and `GScript::Process` ("The long turns with no new animation", below). It
 is expected that FEX makes the making of animations more than 3 times
 longer than a PC, because the code of the animations uses x87
 instructions. Only a headset can show the parts of a long turn
-under FEX.
+under FEX (`turn_parts=1`, below).
 
 **What the game does in it.** When the Creature uses an animation for the
 first time, `Morphable::GetSetAnim` (`0x00619690`) makes it, in the game
@@ -2259,12 +2260,80 @@ RTTI of `runblack.exe`.
   `file_read_ahead` does not have it, and the count of the opens of a file
   in the lines `long frame` does not count it.
 
+**The parts of the game turn** (`turn_parts=1`, `turn_parts.cpp`, the math
+in `turn_parts_math.h`). A sampler of the code place does not work under FEX,
+so the mod times the functions that the game turn calls. The turn is the
+call of `GGame::ProcessNetworkPackets` that runs `GGame::ProcessOneGameTurn`
+(`0x0054D620`): `StartTurn`, `ProcessTurn` and `EndTurn`. Each direct callee
+of the three phases has a timer, and so have the phases and
+`ProcessOneGameTurn` itself. The helpers that the phases call 50 times or
+more in a turn (`fn_00552F80`, `fn_00555850`, `fn_007AEE98`) have none.
+
+- **How a timer works.** It is the technique of `walk_parts.cpp`: a hook of
+  MinHook to a stub that keeps the registers, takes the clock and puts the
+  address of `ExitThunk` in the place of the return address. So a stub needs
+  no argument and no calling convention. A function that the mod hooks
+  already (`PhysicsObject::GameTurnUpdate`) gets its timer on the trampoline
+  of that hook. All hooks are queued in `PassGuardInstall` and applied with
+  one `MH_ApplyQueued`, as `anim_trig` does. No hook comes after the start of
+  the game, so no `SuspendThread` runs while the game runs (`android.md`,
+  "SuspendThread under FEX in Wine").
+- **What counts.** Only the frame thread in a game turn. A part counts once,
+  at its outer call (a call of the part inside the part adds nothing). The
+  time of a part is exclusive: its time less the parts that it calls. The
+  turn itself is timer 0, so its exclusive time is `outside_parts`, the turn
+  outside each part. All exclusive times and `outside_parts` add up to the
+  turn. The sums of a turn go into the frame (a latch for each present) and
+  into the window of 10 s.
+- **The parts.** Each has one name in the code, the log and this doc:
+
+| Name | Function |
+| --- | --- |
+| `process_turn`, `start_turn`, `end_turn` | `ProcessTurn` (`0x0054E5C0`), `StartTurn` (`0x0054E4F0`), `EndTurn` (`0x0054E960`): the code of the phase outside its callees. A turn with a call of `process_turn` is a real turn |
+| `one_game_turn` | `GGame::ProcessOneGameTurn` (`0x0054D620`) outside the phases |
+| `players_towns` | `fn_00649A20`, the players and their towns (the call at `0x0054E641`) |
+| `fn_005EC810` | The call at `0x0054E65B`. The Creatures run below it (`Creature::ProcessState`) |
+| `script` | `GScript::Process` (`0x006EB6B0`, the call at `0x0054E693`) |
+| `morph_texture` | `Morphable::MorphTexture` (`fn_00619500`) |
+| `building_site` | The constructor of `BuildingSite` (`fn_0043B7E0`), with `fn_0043AE10` below it |
+| `mesh_load` | `fn_008067F0`, the load of a mesh from a file. The calls are the loads |
+| `new_animation` | `Morphable::GetSetAnim` (`0x00619690`), only the calls that make an animation. The calls are the new animations |
+| `audio_turn` | `GAudio::ProcessAudioGameTurn` (`0x00427080`) |
+| `physics_turn` | `PhysicsObject::GameTurnUpdate` (`0x00644FC0`) |
+| `fn_` and the address | Each other direct callee of the three phases |
+
+- **The lines.** Each 10 s one line `turn parts` gives the game turns of the
+  window (the mean and the worst turn), and for the turns of 1 ms or more
+  the exclusive ms of each part (the part with 0.01 ms or more), its share,
+  its calls, the most in one turn, its inclusive ms, and `outside_parts`.
+  With `slow_frame_ms` each line `long frame` ends with the parts of the
+  game turn of that frame (the exclusive ms and the calls of each part, the
+  inclusive ms when it differs, and `outside_parts`), or says that the frame
+  has no game turn. `turn_parts_add=0x00730760,0x0063E090` puts timers on
+  more functions, with the name `fn_` and the address. With `anim_watch=1`
+  the timer of `new_animation` goes on the trampoline of the hook of
+  `anim_watch`.
+- **A desktop run** (the test save `pen`, 220 s, `turn_parts=1`,
+  `anim_trig=1`, `slow_frame_ms=10`, `test_frame_rate=90`): in
+  every window of 10 s with a turn of 1 ms or more `outside_parts` is 0.0 to
+  0.1 percent of these turns, so the parts add up to the turn. The long turns
+  are in the right parts: `building_site` 5.85 ms of a turn of 6.41 ms (91.2
+  percent, 4 calls) in the window about 100 s after the load, `morph_texture`
+  1.5 ms (3 calls, in 3 windows), `script` 1.4 to 1.6 ms (2 calls, in 2
+  windows), and `new_animation` up to 4.84 ms in the first 60 s. The first
+  window (the load) has `mesh_load` 8.92 ms in 12 calls. The 20 windows have
+  no call that no return closed.
+
+```
+turn parts   : 10.0 s, 100 game turns (mean 0.46 ms, worst 6.41 ms), 1 of them 1 ms or more (together 6.41 ms). The parts of these turns, exclusive ms in all of them, the share, the calls, the most in one turn and the inclusive ms: building_site 5.85 ms (91.2 percent, 4 calls, most 5.85, inclusive 5.85), fn_005EC810 0.16 ms (2.6 percent, 1 call, most 0.16, inclusive 0.16), audio_turn 0.12 ms (1.8 percent, 1 call, most 0.12, inclusive 0.12), players_towns 0.07 ms (1.2 percent, 1 call, most 0.07, inclusive 5.92), ..., 47 more parts under 0.01 ms, outside the parts 0.00 ms (0.0 percent, most 0.00)
+```
+
 **Open.** The animations are still made on the frame thread, one at its
 first use. A thread of its own cannot make them: the code takes memory of
 the allocator of the game and writes the table of the object that the game
-turn reads. Only a headset can show the length of the long game turn
-under FEX with `anim_trig` 1 and 0, how much of it the making of
-animations is, how many animations a session there makes, how often a
+turn reads. Only a headset can show which parts of the long game turn
+take the time under FEX (`turn_parts=1`), the length of the long game turn
+with `anim_trig` 1 and 0, how much of it the making of animations is, how many animations a session there makes, how often a
 session there makes a BuildingSite, how long the turns with no new
 animation take under FEX, and the precision of the x87 unit under FEX against the functions of the mod
 (`anim_trig_check=1`).
@@ -6645,6 +6714,7 @@ keys that the launcher sets.
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
 | `profile_sample_turn`, `profile_sample_turn_ms` | 0, 2 | A test aid: the samples come only in the game turn, each N microseconds (100 to 5000), with the return addresses of the game on the stack, and only the turns of `profile_sample_turn_ms` or more go to the report. See "The long game turn" |
 | `anim_watch` | 0 | A test aid: 1 counts the animations that `Morphable::GetSetAnim` makes and their time, and the calls of `Morphable::MorphAnims`, one line each 450 frames. See "The long game turn" |
+| `turn_parts`, `turn_parts_add` | 0, empty | A test aid: 1 puts a timer on each function that the game turn calls (about 70). Each 10 s one line `turn parts` gives the parts of the turns of 1 ms or more, and with `slow_frame_ms` each line `long frame` gives the parts of its turn. 0: no hook and no line. It needs `time_log=1`. `turn_parts_add` gives more addresses to time. No test key. See "The long game turn" |
 | `anim_trig` | 1 | 1: the four functions of the angles and the rotations of the animations are functions of the mod with no x87 instruction. 0: the x87 code of the game, and no hook. A test key: Ctrl, Shift and A. See "The long game turn" |
 | `anim_trig_check`, `anim_trig_test_frame` | 0, 0 | A test aid: 1 also runs the code of the game for each call of the four functions and counts the floats that differ. `anim_trig_test_frame=N` acts as the test key at frame N of the controllers. See "The long game turn" |
 | `time_log` | 1 | 1: each 10 s one line in `bwvr.log` with the mean and the most of the frame, the scene walk, the write of the live stream, the wait of the pace and the rest. 0: no line. There is no test key. See "The time log of the mod" |

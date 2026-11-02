@@ -30,11 +30,13 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "long_frame_math.h"
 #include "scene_sample.h"
 #include "time_log.h"
 #include "time_log_math.h"
+#include "turn_parts.h"
 
 void ModLog(const char* format, ...);
 // game_start.cpp: the clock of the log.
@@ -75,7 +77,7 @@ double g_long_cpu_ms = 0.0;
 // go to the log one at each present (long_frame_math::KeptOrder). The gate
 // gives at most 5 lines a second, so a window of 10 s has about 50.
 const int kPending = 64;
-char g_pending[kPending][800];
+char g_pending[kPending][1800];
 long_frame_math::KeptOrder<kPending> g_kept;
 uint64_t g_kept_lost = 0;  // the lost lines at the start of the window
 // The lines of this file that went to the log since the last present: the
@@ -166,7 +168,17 @@ void SlowFrame(double now) {
            c.last[lf::kFlip], c.last[lf::kFlush], c.Outside(f.last_frame), cpu_text,
            opens - g_opens, writes - g_writes, reads - g_reads,
            surfaces - g_pixel_surfaces, (bytes - g_pixel_bytes) / 1024, g_log_writes);
+    // turn_parts=1: the parts of the game turn in this frame, in the same line.
+    if (g_turn_parts) {
+      const size_t used = strlen(g_pending[slot]);
+      char text[1024];
+      if (TurnPartsFrameText(text, sizeof(text)) > 0) {
+        _snprintf_s(g_pending[slot] + used, sizeof(g_pending[0]) - used, _TRUNCATE,
+                    ". The parts of the game turn (turn_parts=1): %s", text);
+      }
+    }
   }
+  if (g_turn_parts) TurnPartsFrameEnd();
   g_log_writes = 0;
   g_opens = opens;
   g_writes = writes;
@@ -303,6 +315,7 @@ void TimeLogPresent() {
     // The two lines of the window are writes of this present.
     g_log_writes += 2;
   }
+  if (g_turn_parts && TurnPartsWindowLine(seconds)) ++g_log_writes;
   if (!g_said) {
     g_said = true;
     ModLog("time log     : the rest is the logic of the game, the frame work of the mod "

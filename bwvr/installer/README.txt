@@ -287,12 +287,12 @@ for 20 ms. The mod skips that wait for each sound that it plays, so
 the picture does not stop. Set audio_stop_wait=1 in bwvr.ini to keep
 the wait of the game.
 
-When the game starts a sound, the sound system of the game mixes the
-sound stream on the same thread at once. On a slow processor this can
-hold the picture for 30 ms or more. The mod keeps this work out of the
-start of a sound that it plays itself, and the sound system does it a
-little later on another thread. Set audio_play_fix=0 in bwvr.ini to
-keep the work as the game has it.
+When the game starts a sound, the sound system of the game sorts its
+channels and mixes the sound stream on the same thread at once. On a slow
+processor this can hold the picture for 30 ms or more. Set audio_play_now=1
+in bwvr.ini to keep this work out of the start of a sound that the mod plays
+itself. The sound system then does it a little later on another thread. The
+default, 0, keeps the work as the game has it.
 
 
 THE KEYS

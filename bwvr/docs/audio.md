@@ -585,7 +585,7 @@ functions of the exe.
 | `audio_sources.cpp` | The `LHSamplePlay` hook and the tracker. It steers the advisors and the flat sounds that have a place |
 | `audio_rolloff.cpp` | The hooks on `QSWaveMixSetDistanceMapping`, `SetSourcePosition` and `SetPolarPosition`. The room distances |
 | `audio_range.cpp` | The hooks on the object callback `0x00427200`, `GAudio::PlaySoundEffect`, `GAudio::GetGSFXSampleMaxDistance` and `GAudio::SamplePlayAnimEffect`. The ears decide what plays |
-| `audio_voices.cpp` | The mixer of the mod, and the pump of a play (`audio_play_fix`, 7.8) |
+| `audio_voices.cpp` | The mixer of the mod, and the work of QMixer in a play (`audio_play_now`, `audio_play_fix`, 7.8) |
 | `audio_capture.cpp` | The hook on the stream of QMixer: the mixer takes its block here, the capture writes it, and the latency is set here |
 | `audio_cues.cpp` | The soft sounds for the moves of the player |
 | `audio_trace.cpp` | Log only hooks (section 11) |
@@ -1113,7 +1113,7 @@ audio turns says where the time is.
 | `k32:Sleep` from `LH+0x12EA2` (or `0x12CEB`, `0x12DAD`) | A stop that kept its wait (7.6) | `audio_stop_wait=0` skips it for a sound that the mixer of the mod plays |
 | `k32:EnterCriticalSection` from `LH+...` | A lock inside the audio DLL | The thread that holds it |
 | `mod:lock` | The mixer of the mod holds `g_lock` | The render of a block is long, or the mixer thread did not run (`the render of the mod` in the line) |
-| `QM:` with no wait below it | Work or a DirectSound call of Wine inside QMixer, which has no timer. For `QM:QSWaveMixPlayEx` it is the pump (7.8) | A hook on the DirectSound methods that QMixer calls on the frame thread. For the pump: `audio_play_fix` |
+| `QM:` with no wait below it | Work or a DirectSound call of Wine inside QMixer, which has no timer. For `QM:QSWaveMixPlayEx` it is the sort and the pump, or another part of the call (7.8) | A hook on the DirectSound methods that QMixer calls on the frame thread. For the call of the play: `audio_play_parts=1` and `audio_play_now` |
 | `audio_turn` itself | The code of the game, the object function of the game, or a hook of the mod | A `turn_parts_add` timer on the object function |
 | `LH:` with no part below it | The code of the DLL itself, or a call with no timer | The decompiled code of that function (in `local/` only) |
 
@@ -1149,57 +1149,113 @@ thread (section 2, "Threads"). The pump has three parts (V):
    nearly each long call.
 
 The audio DLL starts a sound of the atmosphere with the flags `0x421` at DLL
-RVA `0x1294F` (the shared start function that `LHSamplePlay` calls).
-On the Steam Frame this call takes 26 to 54 ms about 5 times in 10 s. The
-time is in the code of QMixer and in no wait call (V, the watch of 7.7),
-and the mutex of the session is not the cause (`WaitForSingleObject` from
-`QM+0x2D7A0` is under 0.3 ms). I: the pump takes the time, because it is the
-only part of the call that mixes. A headset run must show it.
+RVA `0x1294F` (the shared start function that `LHSamplePlay` calls). On the
+Steam Frame this call takes 17 to 30 ms as a mean (most 45 ms), 4 to 10 times
+in 10 s. The other plays, with no pump in the call, take 50 to 80 us. The time
+is in the code of QMixer and in no wait call (V, the watch of 7.7), and the
+mutex of the session is not the cause (`WaitForSingleObject` from
+`QM+0x2D7A0` is 68 ms in all).
 
-**What the mod does.** `audio_play_fix` sets the byte at `+5` of the session to
-1 just before the call of `QSWaveMixPlayEx` and back to 0 just after it. The
-call then returns with no pump, and the next pump of the timer thread (within
-20 ms) does the work. The mod does this only when it knows the code: the
-export is at RVA `0x37B0`, and the 14 bytes at RVA `0x60CC` are the known
-ones. Else the log says so, and the pump stays. The byte must be 0, and the
-word at `+0` of the session must be `0x5432`.
+**Where the work of the call is (V for the code, I for the time).** The flags
+`0x421` are `QMIX_CLEARQUEUE` (1), `QMIX_IMMEDIATE` (0x20) and
+`QMIX_PLAY_NOTIFYSTOP` (0x400). The functions of the play path read bit 0
+(the clear of the queue of the channel), bit 1 (a channel by the least recent
+use) and bit 3 (the play waits in a queue). They do not read bit 5. So the
+flag `0x20` does not decide the work, and the mod does not change the flags.
+The call runs these functions on the thread of the caller:
 
-| `audio_play_fix` | The call has no pump for |
+| Part | RVA | What it does |
+| --- | --- | --- |
+| `bad_ptr` | import | `IsBadWritePtr(wave, 0x48)` |
+| `ctor` | `0xBFF0` | the play object (`operator new(0xE8)`) |
+| `params` | `0xC1A0` | the parameters of the play |
+| `queue` | `0x5FF0` | the play goes to the session. At its end it runs the pump when the byte at `+5` is 0 |
+| `open` | `0xC230` | the check of the format of the wave. By the format and the state of the loader it calls the open function of the wave object on the thread of the call, or it gives the wave to the loader thread (I) |
+| `add` | `0x60F0` | the play goes to its channel |
+| `clear` | `0x7580` | flag 1: the play removes the queue of the channel. It then runs the sort when the session asks for it |
+| `append` | `0x7660` | the play goes into the queue of the channel, and the session asks for a sort |
+| `sort` | `0x67E0` | sorts the channels by priority and gives a voice to a new channel (`voice`, RVA `0x72E0`) |
+| `pump` | `0xA310` | the sort, the per channel update and the update of the device |
+
+The sort runs in the call by two ways. The pump runs it, and `clear` runs it
+whatever the byte at `+5` says (V). I: a channel of the atmosphere has a play
+in its queue most of the time, so `clear` finds the session asking for a sort,
+and this is why the byte alone does not remove the 17 to 30 ms. The time can also be in
+`open`, in `voice` or in `ctor`. The parts line (below) says which.
+
+**What the mod does.** `audio_play_now` hooks `sort` and `pump`. The hook looks
+at the call that the frame thread has in progress. In a play that the mode
+defers, the hook returns at once. On any other thread (the timer thread of the
+audio DLL, which runs `QSWaveMixPump` each 20 ms) and in any other play, the
+hook runs the function. The flag of the session that asks for a sort stays set
+(`append` sets it), so the next pump of the timer thread does the sort and the
+pump. The mod changes no byte of the session, so no reader of the timer thread
+sees a changed state. The hooks go in only when the code is the known one: the
+first 8 bytes of each of the two functions must match. Else the log says so,
+and QMixer does its work in the call.
+
+| `audio_play_now` | The call defers the sort and the pump for |
 | --- | --- |
-| 0 | no sound (the game) |
-| 1 | a sound that the mixer of the mod plays (default) |
+| 0 | no sound (the game, default) |
+| 1 | a sound that the mixer of the mod plays |
 | 2 | also each sound of the atmosphere that QMixer plays |
 | 3 | each sound (a test value) |
 
 QMixer has the volume 0 for a channel that the mixer of the mod plays (7.4),
-so mode 1 does not change what the player hears. With 2 and 3 the first
-block of a sound that QMixer plays itself comes up to 20 ms later (I). The
-atmosphere is a bed and birds, and QMixer writes the stream 60 to 70 ms ahead
-anyway (section 10). The test key (below) changes the mode while the game
-runs.
+so mode 1 does not change what the player hears. With 2 and 3 the sound that
+QMixer plays itself starts up to 20 ms later (I: the timer pump gives it its
+voice), and its first block can come one block later. The atmosphere is a bed
+and birds, and QMixer writes the stream 60 to 70 ms ahead anyway (section 10).
+
+`audio_play_fix` does the same for the pump alone, with the byte at `+5` of
+the session. It sets the byte just before the call of `QSWaveMixPlayEx` and
+back to 0 just after it, and it does not hold the mutex of the session. A
+reader of the byte in the timer thread (the functions at RVA `0x4CA0`,
+`0x5260`, `0x5700`, `0x9980` and `0x9D40`) can see the 1 while the frame
+thread waits in the call. So `audio_play_fix` is a test value, and its default
+is 0. It has the same modes as `audio_play_now`.
 
 **The limit.** The work does not go away. The timer thread does it, and it
 holds the mutex of the session while it works. A call of the frame thread in
 that time waits for the mutex. The watch shows that wait as
 `k32:WaitForSingleObject from QM+0x2D7A0`, and the line below shows the time
-of `QSWaveMixPump`. A headset run must show whether the frame thread gets a
-shorter wait.
+of `QSWaveMixPump`. If the work is a long call (a conversion of the wave in
+`open` or `voice`), the long call moves to the timer thread and the frame
+thread waits for it at its next call into QMixer. A headset run must show
+whether the frame thread gets a shorter wait.
 
 **The line.** Each 10 s one line `audio play` has the times of the last 10 s.
 `N` is a count, `T` a time in us, and a time of 5 ms or more is long. The first
 pair is a sound of the atmosphere, the second pair another sound. In each pair
-the first number is the plays that had the pump of QMixer in the call, and the
-second is the plays that had none. The last group is `QSWaveMixPump` on the
-timer thread, which includes its wait for the mutex of the session.
+the first number is the plays that had the work of QMixer in the call, and the
+second is the plays that had none (the deferral of `audio_play_now` or the byte
+of `audio_play_fix`). The last group is `QSWaveMixPump` on the timer thread,
+which includes its wait for the mutex of the session.
 
 ```
-audio play   : audio_play_fix=2, N plays have run with no pump since the start. In the last 10 s, a sound of the atmosphere: N plays with the pump of QMixer in the call (mean T us, most T us, N of 5 ms or more) and N with no pump (mean T us, most T us, N of 5 ms or more). Another sound: N plays with the pump (...) and N with no pump (...). QSWaveMixPump of the timer thread: N calls (mean T us, most T us, N of 5 ms or more)
+audio play   : audio_play_fix=0, audio_play_now=2, N plays have run with no pump since the start (the hooks skipped N sorts and N pumps). In the last 10 s, a sound of the atmosphere: N plays with the work of QMixer in the call (mean T us, most T us, N of 5 ms or more) and N with no pump (mean T us, most T us, N of 5 ms or more). Another sound: N plays with the work (...) and N with no pump (...). QSWaveMixPump of the timer thread: N calls (mean T us, most T us, N of 5 ms or more)
 ```
 
-**Test key.** Ctrl, Shift and P (with `test_keys=1`) step `audio_play_fix`
+**The parts line.** With `audio_play_parts=1` (a test key) the mod puts a
+hook on each function of the table above, and a second line follows the first.
+For each part that ran in the last 10 s it gives the plays in which it ran, the
+runs for each play, and the time of one play, as a mean and a most. The time
+of a part includes the parts below it (`queue` includes `open` and `add`, and
+`add` includes `clear`, `append` and `sort`). A part that the mode defers does
+not appear in a play that it deferred. The time of `bad_ptr` is a call of the
+mod before the original call.
+
+```
+audio play   : parts of a play on the frame thread in the last 10 s (each time includes the parts below it). a sound of the atmosphere: N plays, bad_ptr in N (1.0 runs, mean T us, most T us, N of 5 ms or more), ctor in N (...), ... Another sound: N plays, ...
+```
+
+**Test key.** Ctrl, Shift and K (with `test_keys=1`) step `audio_play_now`
 through 0, 1 and 2. A pulse of 0.08 s is 0, one of 0.30 s is 1, and one of
-0.55 s is 2. The debug page has the line "Play pump" in the group Sound.
-`audio_play_fix_test=N` does the same at frame `N` of the controllers.
+0.55 s is 2. The debug page has the line "Play now" in the group Sound. The
+hooks on the sort and the pump are in when `test_keys=1`, when
+`audio_play_now` is above 0, or when `audio_play_now_test` is set.
+`audio_play_now_test=N` does the same at frame `N` of the controllers. Ctrl,
+Shift and P step `audio_play_fix` in the same way (line "Play pump").
 
 ## 8. Cues for the moves of the player
 
@@ -1266,7 +1322,9 @@ behavior is in the last column.
 | `audio_atmos_mixer` | 1 | The single sounds of the atmosphere (birds, waves) go through the mixer | 0: QMixer plays them, steered by 6.5 |
 | `audio_atmos_toward` | 1 | A single sound of the atmosphere goes toward the land of its kind | 0: a random place on the ring |
 | `audio_stop_wait` | 0 | The mod skips the wait of 20 ms of the audio DLL at the stop of a sound that the mixer of the mod plays (7.6) | 1: each stop holds the frame thread for 20 ms |
-| `audio_play_fix` | 1 | QMixer pumps in each `QSWaveMixPlayEx`, or the mod keeps the pump out of the call: 1 for a sound that the mixer of the mod plays, 2 also for each sound of the atmosphere, 3 for each sound (7.8). Test key: Ctrl, Shift and P | 0: the pump runs in each play, as in the game |
+| `audio_play_now` | 0 | The frame thread skips the sort and the pump of QMixer in `QSWaveMixPlayEx` and the timer thread does the work: 1 for a sound that the mixer of the mod plays, 2 also for each sound of the atmosphere, 3 for each sound (7.8). Test key: Ctrl, Shift and K | 0: the work runs in each play, as in the game |
+| `audio_play_fix` | 0 | The same for the pump alone, through the byte at `+5` of the session. A test value (7.8). Test key: Ctrl, Shift and P | 0: the pump runs in each play, as in the game |
+| `audio_play_parts` | 0 | Test only: times the functions of QMixer that a play runs on the frame thread, and puts a second line in the `audio play` line (7.8) | 0: no hook, no line |
 | `audio_turn_watch` | 0 | Test only: times each call of the audio turn into the audio DLL and QMixer, and each wait call of the two DLLs, on the frame thread. It needs `turn_parts=1` and `time_log=1` (7.7) | 0: no timer, no line |
 | `audio_cues` | 1 | Soft sounds for the player's moves | 0 |
 | `audio_cues_pct` | 100 | Their level, 0 to 300 | |
@@ -1275,7 +1333,7 @@ behavior is in the last column.
 | `audio_capture` | 0 | Test only: write the stream to `bwvr-audio.wav` | |
 | `audio_test_voice`, `audio_test_path`, `audio_test_step_ms`, `audio_test_solo` | 0, empty, 3000, 0 | Test only: the test voice and the test bed (section 11) | |
 | `audio_test_tag`, `audio_test_tag_bank`, `audio_test_bank` | 0, 1, -1 | Test only: a sound tag on the Creature, and a list of the loops of a bank | |
-| `audio_play_fix_test` | 0 | Test only: the frame of the controllers at which `audio_play_fix` steps, as the test key does (7.8) | |
+| `audio_play_fix_test`, `audio_play_now_test` | 0 | Test only: the frame of the controllers at which `audio_play_fix` or `audio_play_now` steps, as the test key does (7.8) | |
 | `audio_stop_wait_test` | 0 | Test only: the frame of the controllers at which `audio_stop_wait` changes, as the test key does (7.6) | |
 
 `audio_test_tag` is a sample number. The mod puts a sound tag with this sample
@@ -1302,7 +1360,7 @@ Hand while the mouse moves.
 Ctrl and Pause (with `test_keys=1`) change `audio_stop_wait` (7.6).
 
 Ctrl, Shift and P (with `test_keys=1`) step `audio_play_fix` through 0, 1 and
-2 (7.8).
+2 (7.8). Ctrl, Shift and K step `audio_play_now` in the same way.
 
 Ctrl and Shift with the equals key of the row of digits (with `test_keys=1`)
 change `audio_take_loop` (6.4). The pointing controller gives a long pulse for 1 and a
@@ -1496,13 +1554,15 @@ the game window in front), and the level balance by ear.
 - The stop of a sound that QMixer plays holds the frame thread for 20 ms
   (7.6). A desktop run of 110 s has 2 such stops. Which sounds they are is
   not known.
-- On the Steam Frame the audio turn takes 26 to 54 ms in one call about 5
-  times in 10 s, also with `audio_stop_wait=0`. The call is `QSWaveMixPlayEx`
-  for a sound of the atmosphere, in the code of QMixer and in no wait (7.7).
-  `audio_play_fix` (7.8) keeps the pump of QMixer out of that call. Not shown:
-  that the pump is all of the time, and that the timer thread does the work
-  with no new wait of the frame thread for the mutex of the session. Only a
-  headset run shows it.
+- On the Steam Frame the audio turn takes 17 to 30 ms (a mean, most 45 ms)
+  in one call 4 to 10 times in 10 s, also with `audio_stop_wait=0`. The call
+  is `QSWaveMixPlayEx` for a sound of the atmosphere, in the code of QMixer
+  and in no wait (7.7). The byte of `audio_play_fix` does not remove it.
+  `audio_play_now` (7.8) defers the sort and the pump, which the code runs in
+  that call. Not shown: that these two are the time of the call, and that the
+  timer thread does the work with no new wait of the frame thread for the
+  mutex of the session. Only a headset run shows it. The line of
+  `audio_play_parts=1` shows where the time is.
 - A sound with no object that the game asks for at a place of its own keeps
   the test of the game, with the game camera 400 units away in the God view.
   Only the loop of a bulk take has the test of the ears (6.4). Sample 52 of

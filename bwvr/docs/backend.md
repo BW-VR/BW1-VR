@@ -2103,8 +2103,14 @@ that stops sounds the same with `audio_stop_wait` 0 and 1.
 
 On the Steam Frame under FEX a game turn of 19 to 33 ms comes 0.2 to 5 s
 apart (`android.md`, "The long frames"). A turn of normal length is about
-1.4 ms there. The cause is the logic of the game, and FEX makes it about 6
-times longer than on a PC.
+1.4 ms there, about 3 times the median turn of a desktop run. A desktop run
+has long turns of the same kind (1 to 6 ms). Of the samples of its long
+turns, about 57 percent are below `Morphable::GetSetAnim`, the making of
+the animations of the Creature (below). Other long turns of up to 6 ms come
+with no new animation, and their cause is open. It is expected that FEX
+makes the making of animations more than 3 times longer than a PC, because
+of its x87 instructions. Only a headset can show the parts of a long turn
+under FEX.
 
 **What the game does in it.** When the Creature uses an animation for the
 first time, `Morphable::GetSetAnim` (`0x00619690`) makes it, in the game
@@ -2116,8 +2122,9 @@ make it, the function can first make the other kinds (a read of the file,
 and `fn_00861A00`). `Morphable::MorphAnims` (`0x00619100`, a virtual
 function) frees each mixed animation of its object (the first 0xE8 slots),
 so each animation is made again at its next use. For each bone and each key
-the mix turns three sets of angles into rotations (`fn_007FAC10`), mixes
-the rotations, and turns the mix back into angles (`fn_007FAB30`, which
+the mix turns three sets of angles into rotations
+(`LHMatrix::SetYXZMatrixOnly` `0x007FAC10`), mixes the rotations, and
+turns the mix back into angles (`LHMatrix::GetYXZ` `0x007FAB30`, which
 calls `fn_007FA990`). Other code of the animations uses `fn_007FACC0`. These
 four functions use the x87 instructions `FSIN`, `FCOS` and `FPATAN`. FEX
 runs each of these instructions as a call of a function.
@@ -2127,8 +2134,9 @@ The calls on the stack of the samples of the long turns of a desktop run
 (the call at `0x0054E660`), `fn_005EC810`, `Creature::ProcessState` (the
 call at `0x004737B5`), `fn_004FEDA0`, `fn_00484B80`, `Morphable::GetAnim`
 (`0x00619650`), `GetSetAnim`, then `fn_0085EF40` or `fn_00861A00`. In a
-desktop run in the test save `pen` 56 percent of the samples of the turns
-of 1 ms or more are in the four functions.
+desktop run in the test save `pen` 57 percent of the samples of the turns
+of 1 ms or more have `GetSetAnim` on the stack, and 56 percent are in the
+four functions. The other samples of these turns are open.
 
 **What a desktop run shows** (the test save `pen`, 150 to 180 s,
 `test_frame_rate=90`, `anim_watch=1`, the x87 path of the game): the median
@@ -2136,10 +2144,14 @@ game turn is 0.40 to 0.52 ms. The first 450 frames make 188 animations (75
 of kind 0, 11 of kind 1, 102 of the kinds 2 to 5). In the next 60 s each
 450 frames make 1 to 12 animations of kind 0, each one up to 5 ms, and the
 worst game turn of each 450 frames is 1.6 to 5.5 ms. After that the scene
-still makes no new animation, and the worst game turn is 0.5 to 0.9 ms.
+still makes no new animation, and the worst game turn is 0.5 to 0.9 ms in
+most windows of 450 frames. Some windows with no new animation have a
+worst turn of 1.3 to 6.7 ms (one of 5.9 to 6.7 ms in each run): a long turn
+of another cause.
 Each run of the save makes the same count of animations in each 450 frames.
 A player who moves gives the Creatures new things to do, so on the Frame
-the new animations come for minutes.
+the new animations are expected to come for minutes. Only a headset can
+show it.
 
 **The fix.** `anim_trig=1` (the default, `anim_trig.cpp`, the math in
 `anim_trig_math.h`) gives each of the four functions a function of the mod
@@ -2154,9 +2166,9 @@ the functions of the mod too.
 - In the desktop run the animations of each 450 frames took 28.7 ms in all
   with `anim_trig=1` and 61.9 ms with `anim_trig=0` (the same DLL, the same
   animations). The worst game turn of each 450 frames from 5 s to 55 s
-  after the load was 1.0 to 3.3 ms with 1 and 1.6 to 5.1 ms with 0. FEX runs the x87
-  instructions slower than the PC, so the gain under FEX is larger. Only a
-  headset can show it.
+  after the load was 1.0 to 3.3 ms with 1 and 1.6 to 5.1 ms with 0. FEX
+  runs the x87 instructions as calls, so the gain under FEX is expected to
+  be larger. Only a headset can show it.
 - `anim_trig_check=1` (a test) also runs the code of the game for each call
   and compares the floats. Each 450 frames the log gives, for each
   function, the calls of the frame thread, the calls with a float that
@@ -2165,14 +2177,16 @@ the functions of the mod too.
   calls differ in a bit, no call differs by more than 1e-6, and the largest
   difference is 2.4e-7 for an angle and 6e-8 for a rotation. The reason is
   the x87 unit of the PC: the game runs it at 24 bits (the line says so),
-  and the functions of the mod at 53 bits. FEX runs the x87 unit at 53 bits
-  (`FEX_X87REDUCEDPRECISION=1`), so there the results are nearer.
+  and the functions of the mod at 53 bits. With
+  `FEX_X87REDUCEDPRECISION=1` FEX is expected to run the x87 unit at 53
+  bits, so the results are expected to be nearer there. Only a session
+  with `anim_trig_check=1` on a headset can show it.
 - The test key (`test_keys=1`): Ctrl, Shift and A. The debug page has the
   switch "Anim angles" (`x87|mod`). `anim_trig_test_frame=N` acts as the
   key at frame N of the controllers.
 
 ```
-anim trig    : anim_trig=1. The angles and the rotations of the animations (fn_007FA990, fn_007FAB30, fn_007FAC10, fn_007FACC0) are the functions of the mod, in doubles with no x87 instruction. The constants of the game: 1.5707963705062866, 3.1415927410125732, -1.5707963705062866 and 0. anim_trig_check=0
+anim trig    : anim_trig=1. The angles and the rotations of the animations (fn_007FA990, LHMatrix::GetYXZ, LHMatrix::SetYXZMatrixOnly, fn_007FACC0) are the functions of the mod, in doubles with no x87 instruction. The constants of the game: 1.5707963705062866, 3.1415927410125732, -1.5707963705062866 and 0. anim_trig_check=0
 ```
 
 **The measures.**
@@ -2206,9 +2220,12 @@ scene sample : the return addresses in runblack.exe on the stacks of these sampl
 **Open.** The animations are still made on the frame thread, one at its
 first use. A thread of its own cannot make them: the code takes memory of
 the allocator of the game and writes the table of the object that the game
-turn reads. Only a headset can show the length of the long game turn under
-FEX with `anim_trig` 1 and 0, and how many animations a session there
-makes.
+turn reads. The cause of the long turns with no new animation (up to 6.7
+ms in a desktop run) is open. Only a headset can show the length of the
+long game turn under FEX with `anim_trig` 1 and 0, how much of it the
+making of animations is, how many animations a session there makes, and
+the precision of the x87 unit under FEX against the functions of the mod
+(`anim_trig_check=1`).
 
 ### The refresh rate of the headset
 

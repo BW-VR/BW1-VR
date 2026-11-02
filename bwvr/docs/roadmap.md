@@ -1201,9 +1201,11 @@ that moves while the Hand takes it.
   APK at 72 Hz, the rate of SteamVR for each app (`android.md`, "The
   display rate"). Next: runs on the Frame at 90 and 144 Hz (a setting of the
   device), then pictures between the frames of the game in the app. In a
-  desktop run the long game turn is the first use of an animation of the
-  Creature: the game makes its mixed animation with the x87 instructions
-  FSIN, FCOS and FPATAN, which FEX runs as calls. `anim_trig=1` makes those
+  desktop run about 57 percent of the samples of the long game turns are
+  the first use of an animation of the Creature: the game makes its mixed
+  animation with the x87 instructions FSIN, FCOS and FPATAN, which FEX runs
+  as calls. Other long turns of up to 6.7 ms in a desktop run have a cause
+  that is open. `anim_trig=1` makes those
   four functions with no x87 instruction (54 percent less time for the
   animations in a desktop run, `backend.md`, "The long game turn"). Next on
   the Frame: the length of the long game turn with `anim_trig` 1 and 0

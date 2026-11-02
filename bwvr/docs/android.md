@@ -2903,10 +2903,11 @@ stick in a saved game):
   each one the game turn takes 19 to 33 ms, and the scene walk is 4 to 10
   ms as in a frame of normal length. The game opens no file in them, and
   reads from a file in only one of them. They
-  come 0.2 to 5 s apart, with no steady rhythm. In a desktop run the
-  long game turns are the first use of an animation of the Creature: the
-  game makes its mixed animation in the game turn (`backend.md`, "The long
-  game turn", `anim_trig`). Not shown yet on the Frame.
+  come 0.2 to 5 s apart, with no steady rhythm. In a desktop run about
+  57 percent of the samples of the long game turns are the making of an
+  animation of the Creature at its first use (`backend.md`, "The long game
+  turn", `anim_trig`), and other long turns have a cause that is open. Not
+  shown yet on the Frame.
 - Each long frame of the mod after the load has a line `game frame` of the
   app at the same frame of the stream, with a gap within 2 ms of the length
   of the long frame. The pairs that do not match are in the load.
@@ -4647,8 +4648,9 @@ in a walk of 6.7 ms on the Frame:
    once. A hand over to a thread for each mesh costs about as much as the
    mesh. No gain.
 4. **The game turn** cannot go to another core: the walk reads the state
-   that the turn writes. Its long turns are the mixed animations of the
-   Creature (`backend.md`, "The long game turn", `anim_trig`).
+   that the turn writes. In a desktop run about 57 percent of the samples
+   of its long turns are the mixed animations of the Creature
+   (`backend.md`, "The long game turn", `anim_trig`), the rest is open.
 
 Not built: the first part needs the parts of the walk of the build now
 under FEX, and `walk_parts=1` is not safe there. Each timer is a hook of

@@ -4,12 +4,13 @@
 // When the Creature uses an animation for the first time after the game
 // mixed its look, Morphable::GetSetAnim makes the mixed animation in the game
 // turn (anim_watch.cpp). For each bone and each key it turns three sets of
-// angles into rotations (fn_007FAC10), mixes them, and turns the mix back
-// into angles (fn_007FAB30 with fn_007FA990). Other code of the animations
-// uses fn_007FACC0. Each of the four functions uses FSIN, FCOS or FPATAN. On
-// a PC one such animation takes 1 to 5 ms. Under FEX each of these
-// instructions is a call of a function, and the game turn with it takes 19
-// to 33 ms: a long frame.
+// angles into rotations (LHMatrix::SetYXZMatrixOnly), mixes them, and turns
+// the mix back into angles (LHMatrix::GetYXZ with fn_007FA990). Other code
+// of the animations uses fn_007FACC0. Each of the four functions uses FSIN,
+// FCOS or FPATAN. On a PC one such animation takes 1 to 5 ms. Under FEX each
+// of these instructions is a call of a function, so an animation is expected
+// to take much longer there. The long game turns of the Frame (19 to 33 ms)
+// can have this cause. Only a headset can show how much of them it is.
 //
 // With anim_trig=1 each of the four functions goes to the function of
 // anim_trig_math.h with the same steps and the same stores to floats, in
@@ -49,8 +50,8 @@ uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame);
 namespace {
 
 const uintptr_t kAngle = 0x007FA990;
-const uintptr_t kMatrixToEuler = 0x007FAB30;
-const uintptr_t kEulerToMatrix3 = 0x007FAC10;
+const uintptr_t kGetYXZ = 0x007FAB30;
+const uintptr_t kSetYXZMatrixOnly = 0x007FAC10;
 const uintptr_t kEulerToMatrix34 = 0x007FACC0;
 const uintptr_t kPlusQuarter = 0x008C7B48;   // double
 const uintptr_t kHalf = 0x008D45D0;          // double
@@ -63,8 +64,8 @@ typedef void(__fastcall* ToEulerFn)(const float* src, void* unused,
 typedef void(__fastcall* ToMatrixFn)(float* m, void* unused, float a, float b,
                                      float c);
 AngleFn o_Angle = nullptr;
-ToEulerFn o_MatrixToEuler = nullptr;
-ToMatrixFn o_EulerToMatrix3 = nullptr;
+ToEulerFn o_GetYXZ = nullptr;
+ToMatrixFn o_SetYXZMatrixOnly = nullptr;
 ToMatrixFn o_EulerToMatrix34 = nullptr;
 
 anim_trig::Constants g_k = {};
@@ -79,16 +80,18 @@ uint64_t g_test_seen = 0;
 // than 1e-6, and the largest difference. The rotations and the angles are
 // near 1, so a difference is absolute: a value near 0 is many units of the
 // last place from a value near 0 of the other sign.
-enum { kFnAngle = 0, kFnToEuler, kFnToMatrix3, kFnToMatrix34, kFns };
-const char* const kFnName[kFns] = {"fn_007FA990", "fn_007FAB30",
-                                   "fn_007FAC10", "fn_007FACC0"};
+enum { kFnAngle = 0, kFnGetYXZ, kFnSetYXZ, kFnToMatrix34, kFns };
+const char* const kFnName[kFns] = {"fn_007FA990", "LHMatrix::GetYXZ",
+                                   "LHMatrix::SetYXZMatrixOnly",
+                                   "fn_007FACC0"};
 uint64_t g_calls[kFns] = {};
 uint64_t g_differ[kFns] = {};
 uint64_t g_large[kFns] = {};
 double g_most[kFns] = {};
 DWORD g_thread = 0;  // the counts are of the frame thread only
-// The thread that runs the code of the game for a compare now. fn_007FAB30
-// calls fn_007FA990, and that call must be the code of the game too.
+// The thread that runs the code of the game for a compare now.
+// LHMatrix::GetYXZ calls fn_007FA990, and that call must be the code of the
+// game too.
 volatile DWORD g_game_in = 0;
 
 void Count(int fn, const float* mod, const float* game, int count) {
@@ -117,38 +120,38 @@ double __cdecl h_Angle(float a, float b) {
   return r;
 }
 
-void __fastcall h_MatrixToEuler(const float* src, void* unused, float* out_a,
+void __fastcall h_GetYXZ(const float* src, void* unused, float* out_a,
                                 float* out_b, float* out_c) {
   if (!g_on) {
-    o_MatrixToEuler(src, unused, out_a, out_b, out_c);
+    o_GetYXZ(src, unused, out_a, out_b, out_c);
     return;
   }
   if (g_check) {
     float game[3];
     g_game_in = GetCurrentThreadId();
-    o_MatrixToEuler(src, unused, &game[0], &game[1], &game[2]);
+    o_GetYXZ(src, unused, &game[0], &game[1], &game[2]);
     g_game_in = 0;
     float mod[3];
-    anim_trig::MatrixToEuler(src, &mod[0], &mod[1], &mod[2], g_k);
-    Count(kFnToEuler, mod, game, 3);
+    anim_trig::GetYXZ(src, &mod[0], &mod[1], &mod[2], g_k);
+    Count(kFnGetYXZ, mod, game, 3);
   }
-  anim_trig::MatrixToEuler(src, out_a, out_b, out_c, g_k);
+  anim_trig::GetYXZ(src, out_a, out_b, out_c, g_k);
 }
 
-void __fastcall h_EulerToMatrix3(float* m, void* unused, float a, float b,
+void __fastcall h_SetYXZMatrixOnly(float* m, void* unused, float a, float b,
                                  float c) {
   if (!g_on) {
-    o_EulerToMatrix3(m, unused, a, b, c);
+    o_SetYXZMatrixOnly(m, unused, a, b, c);
     return;
   }
   if (g_check) {
     float game[9];
-    o_EulerToMatrix3(game, unused, a, b, c);
-    anim_trig::EulerToMatrix3(m, a, b, c);
-    Count(kFnToMatrix3, m, game, 9);
+    o_SetYXZMatrixOnly(game, unused, a, b, c);
+    anim_trig::SetYXZMatrixOnly(m, a, b, c);
+    Count(kFnSetYXZ, m, game, 9);
     return;
   }
-  anim_trig::EulerToMatrix3(m, a, b, c);
+  anim_trig::SetYXZMatrixOnly(m, a, b, c);
 }
 
 void __fastcall h_EulerToMatrix34(float* m, void* unused, float a, float b,
@@ -191,10 +194,10 @@ bool HookAll() {
   const Target targets[4] = {
       {kAngle, reinterpret_cast<void*>(&h_Angle),
        reinterpret_cast<void**>(&o_Angle)},
-      {kMatrixToEuler, reinterpret_cast<void*>(&h_MatrixToEuler),
-       reinterpret_cast<void**>(&o_MatrixToEuler)},
-      {kEulerToMatrix3, reinterpret_cast<void*>(&h_EulerToMatrix3),
-       reinterpret_cast<void**>(&o_EulerToMatrix3)},
+      {kGetYXZ, reinterpret_cast<void*>(&h_GetYXZ),
+       reinterpret_cast<void**>(&o_GetYXZ)},
+      {kSetYXZMatrixOnly, reinterpret_cast<void*>(&h_SetYXZMatrixOnly),
+       reinterpret_cast<void**>(&o_SetYXZMatrixOnly)},
       {kEulerToMatrix34, reinterpret_cast<void*>(&h_EulerToMatrix34),
        reinterpret_cast<void**>(&o_EulerToMatrix34)}};
   int made = 0;
@@ -254,7 +257,8 @@ void AnimTrigInstall() {
   }
   g_in = true;
   ModLog("anim trig    : anim_trig=%d. The angles and the rotations of the "
-         "animations (fn_007FA990, fn_007FAB30, fn_007FAC10, fn_007FACC0) %s. "
+         "animations (fn_007FA990, LHMatrix::GetYXZ, "
+         "LHMatrix::SetYXZMatrixOnly, fn_007FACC0) %s. "
          "The constants of the game: %.17g, %.17g, %.17g and %g. "
          "anim_trig_check=%d%s",
          g_on ? 1 : 0,

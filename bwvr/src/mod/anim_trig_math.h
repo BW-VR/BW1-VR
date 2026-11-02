@@ -5,30 +5,32 @@
 // Four functions of the game turn the angles of a bone into a rotation and
 // back. They use the x87 instructions FSIN, FCOS and FPATAN. A translator of
 // the code (FEX on a headset) runs each of these instructions as a call of a
-// function, so a mixed animation of the Creature (Morphable::GetSetAnim)
-// takes 19 to 33 ms there. The functions here give the same results with
-// double arithmetic and polynomials, with no call:
+// function, so the mixed animations of the Creature (Morphable::GetSetAnim)
+// are expected to take much longer there than on a PC. The functions here
+// give the same results with double arithmetic and polynomials, with no
+// call:
 //
 //   Angle             fn_007FA990 (cdecl, two floats a and b): the angle of
 //                     the point (a, b), by the octant of the point, from the
 //                     arc tangent of the smaller over the larger coordinate
-//   EulerToMatrix3    fn_007FAC10 (thiscall): three angles to a rotation of
-//                     3 by 3 floats
+//   SetYXZMatrixOnly  LHMatrix::SetYXZMatrixOnly 0x007FAC10 (thiscall): three
+//                     angles to a rotation of 3 by 3 floats
 //   EulerToMatrix34   fn_007FACC0 (thiscall): three angles to a transform of
 //                     3 by 4 floats, with the zero of the game
-//   MatrixToEuler     fn_007FAB30 (thiscall): a rotation to three angles
+//   GetYXZ            LHMatrix::GetYXZ 0x007FAB30 (thiscall): a rotation to
+//                     three angles
 //
 // Each value that the game keeps in a float (a store to memory) is a float
 // here too, at the same step. The game keeps the other steps in the x87
 // registers, at the precision control of the x87 unit: 24 bits of mantissa
-// in a desktop run (the check shows it), 53 bits under FEX with its reduced
-// precision. Here they are doubles. So a float result can differ from the
-// result of the game by some units of the last place, and the check of
-// anim_trig.cpp counts these cases.
+// in a desktop run (the check shows it). Under FEX with its reduced
+// precision the x87 unit is expected to have 53 bits. Here they are doubles.
+// So a float result can differ from the result of the game by some units of
+// the last place, and the check of anim_trig.cpp counts these cases.
 //
 // Sin and Cos: a reduction by pi / 2 in three parts (Cody and Waite), then
 // the Taylor series on [-pi / 4, pi / 4] to the power 17 and 18. The first
-// term that is left out is less than 1e-19. A value larger than 1e8 goes to
+// term that is left out is less than 1e-19. A value larger than 1e6 goes to
 // the sine and the cosine of the C library. Atan: the arc tangent of the
 // reciprocal for a value over 1, a step of pi / 4 for a value over
 // tan(pi / 8), one half angle step, then the series to the power 25 on
@@ -62,10 +64,11 @@ struct Constants {
 const double kPi = 3.14159265358979323846;
 const double kHalfPi = 1.57079632679489661923;
 const double kQuarterPi = 0.78539816339744830962;
-// pi / 2 in three parts. The first two have 33 bits, so k times them is exact
-// for each k below 2^20.
+// pi / 2 in three parts: the first 33 bits, the next 33 bits, and the rest
+// (pi / 2 less the two parts). The first two parts have 33 bits, so k times
+// them is exact for each k below 2^20, and |x| <= 1e6 gives such a k.
 const double kHalfPi1 = 1.57079632673412561417e+00;
-const double kHalfPi2 = 6.07710050650619224932e-11;
+const double kHalfPi2 = 6.07710050630396597660e-11;
 const double kHalfPi3 = 2.02226624879595063154e-21;
 const double kTwoOverPi = 6.36619772367581382433e-01;
 const double kTanEighthPi = 0.41421356237309504880;
@@ -100,14 +103,14 @@ ANIM_TRIG_INLINE double CosSmall(double r) {
 }
 
 ANIM_TRIG_INLINE void SinCos(double x, double* s, double* c) {
-  if (!(fabs(x) <= 1e8)) {
+  if (!(fabs(x) <= 1e6)) {
     // A large value, an infinity or NaN.
     *s = sin(x);
     *c = cos(x);
     return;
   }
   // The nearest whole number of quarter turns. cvtsd2si rounds to the
-  // nearest (the rounding of MXCSR), and |x| <= 1e8 fits in 32 bits.
+  // nearest (the rounding of MXCSR), and |x| <= 1e6 fits in 32 bits.
   const int quarters = _mm_cvtsd_si32(_mm_set_sd(x * kTwoOverPi));
   const double k = static_cast<double>(quarters);
   const double r = ((x - k * kHalfPi1) - k * kHalfPi2) - k * kHalfPi3;
@@ -157,7 +160,8 @@ ANIM_TRIG_INLINE double AtanSmall(double t) {
 }
 
 ANIM_TRIG_INLINE double Atan(double t) {
-  if (t != t) return t;
+  // NaN, and a zero with its sign: FPATAN of -0 over 1 is -0.
+  if (t != t || t == 0.0) return t;
   const bool negative = t < 0.0;
   double a = negative ? -t : t;
   double base = 0.0;
@@ -194,8 +198,9 @@ ANIM_TRIG_INLINE double Angle(float a, float b, const Constants& k) {
   return k.minus_quarter - Atan(da / db);
 }
 
-// fn_007FAC10: the angles a, b and c (its three arguments) to m[0..8].
-ANIM_TRIG_INLINE void EulerToMatrix3(float* m, float a, float b, float c) {
+// LHMatrix::SetYXZMatrixOnly 0x007FAC10: the angles a, b and c (its three
+// arguments) to m[0..8].
+ANIM_TRIG_INLINE void SetYXZMatrixOnly(float* m, float a, float b, float c) {
   double sa, ca, sb, cb, sc, cc;
   SinCos(a, &sa, &ca);
   SinCos(b, &sb, &cb);
@@ -252,12 +257,11 @@ ANIM_TRIG_INLINE void EulerToMatrix34(float* m, float a, float b, float c,
   m[11] = static_cast<float>(0.0f - z);
 }
 
-// fn_007FAB30: the rotation src[0..11] (it reads 0, 1, 2, 6, 7 and 8) to the
-// three angles. The game reads the source from a copy, so an output can be
-// in the source.
-ANIM_TRIG_INLINE void MatrixToEuler(const float* src, float* out_a,
-                                    float* out_b, float* out_c,
-                                    const Constants& k) {
+// LHMatrix::GetYXZ 0x007FAB30: the rotation src[0..11] (it reads 0, 1, 2, 6,
+// 7 and 8) to the three angles. The game reads the source from a copy, so an
+// output can be in the source.
+ANIM_TRIG_INLINE void GetYXZ(const float* src, float* out_a, float* out_b,
+                             float* out_c, const Constants& k) {
   const float m0 = src[0], m1 = src[1], m2 = src[2];
   const float m6 = src[6], m7 = src[7], m8 = src[8];
   const double r1 = Angle(m8, -m6, k);

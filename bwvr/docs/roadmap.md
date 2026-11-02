@@ -1206,27 +1206,39 @@ that moves while the Hand takes it.
   `frame_queue=1` shows each picture in its order with a delay of one take
   more, in a ring of 4 slots, and the line `late picture` gives the new
   pictures by their delay in takes and the pictures that did not show
-  (`android.md`, "The frame loop", "The queue of the pictures"). In a
-  desktop run the long game turn is the first use of an animation of the
-  Creature: the game makes its mixed animation with the x87 instructions
-  FSIN, FCOS and FPATAN, which FEX runs as calls. `anim_trig=1` makes those
-  four functions with no x87 instruction (54 percent less time for the
-  animations in a desktop run, `backend.md`, "The long game turn"). Next on
-  the Frame: a strafe with the stick at 90 and 72 Hz with `frame_queue` 1
-  and 0, the counts of `late picture`, the length of the long game turn
-  with `anim_trig` 1 and 0 (`slow_frame_ms=20`, `anim_watch=1`), and if
-  the micro stutter goes. Then runs at 144 Hz, and pictures between the
-  frames of the game in the app. The plan for the work of a frame on more
-  cores is in `android.md`, "The work of a frame on more cores".
-  The app
-  gives each second the core and the CPU time of
-  each thread (`thread_cores=1`), binds the main thread of the game, the
-  session thread and the play thread to the fast cores (`thread_bind`), and
-  gives FEX a code cache in files (`fex_disk_cache=1`, `android.md`, "The
-  cores of the headset" and "FEX as the CPU of the 32 bit code"). Next in
-  the headset: the cores and their speeds, if the binding works there, the
-  frames a second with `thread_bind` 1 and 0, the load and the stutters of
-  the second start with the code cache, and the frames a second with
+  (`android.md`, "The frame loop", "The queue of the pictures"). On the Frame at 90 Hz with
+  `frame_queue=1` the frames of normal length give almost no take with no
+  new picture, and nearly each take with no new picture comes from a long
+  frame of the game. Open: runs at 144 Hz, and pictures between the frames
+  of the game in the app. In a
+  desktop run about 57 percent of the samples of the long game turns are
+  the first use of an animation of the Creature: the game makes its mixed
+  animation with the x87 instructions FSIN, FCOS and FPATAN, which FEX runs
+  as calls. Other long turns of up to 6.7 ms in a desktop run are a new
+  BuildingSite (`fn_0043AE10`, with `FSIN` and `FCOS` in its own code),
+  `Morphable::MorphTexture`, `GScript::Process` and a load of a mesh of
+  the Temple through `fn_008067F0`. `anim_trig=1` makes the four functions
+  of the animations with no x87 instruction (54 percent less time for the
+  animations in a desktop run, `backend.md`, "The long game turn"). On the
+  Frame with `anim_trig=1` the animations are not the long turn:
+  `GetSetAnim` made at most 3.62 ms in one call and 0.2 to 29 ms in each 450
+  frames, and the long game turns stay at about 30 ms (75th percentile 30.4
+  ms, 28 to 47 long frames in 10 s). `turn_parts=1` puts a timer on each
+  function that the game turn calls, and the lines `long frame` and
+  `turn parts` give the time of each part. Open: which part takes the 30 ms
+  on the Frame, how often a session there makes a BuildingSite, and how long
+  these turns take under FEX. Next on the Frame: `turn_parts=1`,
+  `slow_frame_ms=20`, `anim_trig=1`, the same scene for some minutes.
+  The plan for the work of a frame on more cores is in `android.md`, "The
+  work of a frame on more cores". The app gives each second the core and
+  the CPU time of each thread (`thread_cores=1`), binds the main thread of
+  the game, the session thread and the play thread to the fast cores
+  (`thread_bind`), and gives FEX a code cache in files (`fex_disk_cache=1`,
+  `android.md`, "The cores of the headset" and "FEX as the CPU of the 32 bit
+  code"). Next in the headset: the cores and their speeds, if the binding
+  works there, the frames a second with `thread_bind` 1 and 0, the load
+  and the stutters of the second start with the code cache, and the frames
+  a second with
   `FEX_TSOENABLED=1 FEX_EXTENDEDVOLATILEMETADATA=runblack.exe` against
   `FEX_TSOENABLED=0`. Open: `SuspendThread` under FEX in Wine stops a thread
   also in the JIT, so a hook that the mod enables while other threads run

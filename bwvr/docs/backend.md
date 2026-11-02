@@ -65,6 +65,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`), and in the game turn with the calls on the stack (`profile_sample_turn`) |
 | `src/mod/anim_trig.cpp`, `anim_trig_math.h` | The four functions of the angles and the rotations of the animations with no x87 instruction (`anim_trig`, "The long game turn") |
 | `src/mod/anim_watch.cpp` | A test aid: the animations that `Morphable::GetSetAnim` makes, and their time (`anim_watch`) |
+| `src/mod/turn_parts.cpp`, `turn_parts_math.h` | A test aid: timers on the functions that the game turn calls, and the parts of the turn in the lines of the long frames (`turn_parts`, "The long game turn"). The math checks are in `test/controller_math/turn_parts_checks.h` |
 | `src/mod/time_log.cpp`, `time_log_math.h` | The time log: each 10 s the parts of a frame of the game (`time_log`). The math checks are in `test/controller_math/time_log_checks.h` |
 | `src/mod/hang_watch.cpp` | A test aid: the place of the frame thread when it makes no frame for 8 s, and of a fault (`hang_watch`). The crash log: the C++ exceptions and each end of the game in its C runtime (`crash_log`) |
 | `src/mod/stall_watch.cpp`, `stall_math.h` | The module list at a stall (`stall_modules`, `stall_addrs`), and the test spin (`test_stall_ms`). The math checks are in `test/controller_math/stall_checks.h` |
@@ -1903,8 +1904,23 @@ function returns.
   work of that hook in it.
 - **Only the frame thread in a scene walk counts.** A call on another
   thread, or outside a walk, goes through the stub with no read of the
-  clock. The hooks come at the third walk, when the device of the game is
-  made. A frame is the walks from one present to the next.
+  clock. A frame is the walks from one present to the next.
+- **When the hooks come.** `walk_parts_early=1` (the default): all hooks are
+  queued at the end of the installs of the first frame, after the last hook
+  of the mod, and applied with one `MH_ApplyQueued`, as `anim_trig` does. No
+  hook comes after the start of the game, so no `SuspendThread` runs while
+  the game runs (`android.md`, "SuspendThread under FEX in Wine"). This
+  leaves out the timers on the methods of the device and of the surfaces
+  (the device is not made yet) and the timers from the lists of the engine
+  (the scan of the report would add hooks). The measure of the cost of a
+  timer runs at the third walk with a probe whose hook is queued with the
+  others. A function that the mod hooks later would stop that hook (the
+  call of `MH_CreateHook` of the mod gives `MH_ERROR_ALREADY_CREATED`), which
+  is why the install is after the last hook of the mod. A function that
+  `turn_parts` times already has no second timer, and its line says so.
+  `walk_parts_early=0`: the hooks come at the third walk, when the device of
+  the game is made, with the timers of the device and of the lists of the
+  engine, each enabled with `MH_EnableHook`.
 - **The exclusive time** of a timer is its time less the time of each timer
   that it calls. Timer 0 is the walk itself, so its exclusive time is the
   part of the walk that no timer covers. The sum of all exclusive times is
@@ -2103,8 +2119,16 @@ that stops sounds the same with `audio_stop_wait` 0 and 1.
 
 On the Steam Frame under FEX a game turn of 19 to 33 ms comes 0.2 to 5 s
 apart (`android.md`, "The long frames"). A turn of normal length is about
-1.4 ms there. The cause is the logic of the game, and FEX makes it about 6
-times longer than on a PC.
+1.4 ms there, about 3 times the median turn of a desktop run. A desktop run
+has long turns of the same kind (1 to 6 ms). Of the samples of its long
+turns, about 57 percent are below `Morphable::GetSetAnim`, the making of
+the animations of the Creature (below). Other long turns of up to 6.7 ms
+come with no new animation: a new BuildingSite, `Morphable::MorphTexture`
+and `GScript::Process` ("The long turns with no new animation", below). It
+is expected that FEX makes the making of animations more than 3 times
+longer than a PC, because the code of the animations uses x87
+instructions. Only a headset can show the parts of a long turn
+under FEX (`turn_parts=1`, below).
 
 **What the game does in it.** When the Creature uses an animation for the
 first time, `Morphable::GetSetAnim` (`0x00619690`) makes it, in the game
@@ -2116,8 +2140,9 @@ make it, the function can first make the other kinds (a read of the file,
 and `fn_00861A00`). `Morphable::MorphAnims` (`0x00619100`, a virtual
 function) frees each mixed animation of its object (the first 0xE8 slots),
 so each animation is made again at its next use. For each bone and each key
-the mix turns three sets of angles into rotations (`fn_007FAC10`), mixes
-the rotations, and turns the mix back into angles (`fn_007FAB30`, which
+the mix turns three sets of angles into rotations
+(`LHMatrix::SetYXZMatrixOnly` `0x007FAC10`), mixes the rotations, and
+turns the mix back into angles (`LHMatrix::GetYXZ` `0x007FAB30`, which
 calls `fn_007FA990`). Other code of the animations uses `fn_007FACC0`. These
 four functions use the x87 instructions `FSIN`, `FCOS` and `FPATAN`. FEX
 runs each of these instructions as a call of a function.
@@ -2127,8 +2152,9 @@ The calls on the stack of the samples of the long turns of a desktop run
 (the call at `0x0054E660`), `fn_005EC810`, `Creature::ProcessState` (the
 call at `0x004737B5`), `fn_004FEDA0`, `fn_00484B80`, `Morphable::GetAnim`
 (`0x00619650`), `GetSetAnim`, then `fn_0085EF40` or `fn_00861A00`. In a
-desktop run in the test save `pen` 56 percent of the samples of the turns
-of 1 ms or more are in the four functions.
+desktop run in the test save `pen` 57 percent of the samples of the turns
+of 1 ms or more have `GetSetAnim` on the stack, and 56 percent are in the
+four functions. The other samples are in other parts of the turn (below).
 
 **What a desktop run shows** (the test save `pen`, 150 to 180 s,
 `test_frame_rate=90`, `anim_watch=1`, the x87 path of the game): the median
@@ -2136,10 +2162,14 @@ game turn is 0.40 to 0.52 ms. The first 450 frames make 188 animations (75
 of kind 0, 11 of kind 1, 102 of the kinds 2 to 5). In the next 60 s each
 450 frames make 1 to 12 animations of kind 0, each one up to 5 ms, and the
 worst game turn of each 450 frames is 1.6 to 5.5 ms. After that the scene
-still makes no new animation, and the worst game turn is 0.5 to 0.9 ms.
+still makes no new animation, and the worst game turn is 0.5 to 0.9 ms in
+most windows of 450 frames. Some windows with no new animation have a
+worst turn of 1.3 to 6.7 ms (one of 5.9 to 6.7 ms in each run). These are
+the long turns with no new animation below.
 Each run of the save makes the same count of animations in each 450 frames.
 A player who moves gives the Creatures new things to do, so on the Frame
-the new animations come for minutes.
+the new animations are expected to come for minutes. Only a headset can
+show it.
 
 **The fix.** `anim_trig=1` (the default, `anim_trig.cpp`, the math in
 `anim_trig_math.h`) gives each of the four functions a function of the mod
@@ -2154,9 +2184,9 @@ the functions of the mod too.
 - In the desktop run the animations of each 450 frames took 28.7 ms in all
   with `anim_trig=1` and 61.9 ms with `anim_trig=0` (the same DLL, the same
   animations). The worst game turn of each 450 frames from 5 s to 55 s
-  after the load was 1.0 to 3.3 ms with 1 and 1.6 to 5.1 ms with 0. FEX runs the x87
-  instructions slower than the PC, so the gain under FEX is larger. Only a
-  headset can show it.
+  after the load was 1.0 to 3.3 ms with 1 and 1.6 to 5.1 ms with 0. FEX
+  runs the x87 instructions as calls, so the gain under FEX is expected to
+  be larger. Only a headset can show it.
 - `anim_trig_check=1` (a test) also runs the code of the game for each call
   and compares the floats. Each 450 frames the log gives, for each
   function, the calls of the frame thread, the calls with a float that
@@ -2165,14 +2195,16 @@ the functions of the mod too.
   calls differ in a bit, no call differs by more than 1e-6, and the largest
   difference is 2.4e-7 for an angle and 6e-8 for a rotation. The reason is
   the x87 unit of the PC: the game runs it at 24 bits (the line says so),
-  and the functions of the mod at 53 bits. FEX runs the x87 unit at 53 bits
-  (`FEX_X87REDUCEDPRECISION=1`), so there the results are nearer.
+  and the functions of the mod at 53 bits. With
+  `FEX_X87REDUCEDPRECISION=1` FEX is expected to run the x87 unit at 53
+  bits, so the results are expected to be nearer there. Only a session
+  with `anim_trig_check=1` on a headset can show it.
 - The test key (`test_keys=1`): Ctrl, Shift and A. The debug page has the
   switch "Anim angles" (`x87|mod`). `anim_trig_test_frame=N` acts as the
   key at frame N of the controllers.
 
 ```
-anim trig    : anim_trig=1. The angles and the rotations of the animations (fn_007FA990, fn_007FAB30, fn_007FAC10, fn_007FACC0) are the functions of the mod, in doubles with no x87 instruction. The constants of the game: 1.5707963705062866, 3.1415927410125732, -1.5707963705062866 and 0. anim_trig_check=0
+anim trig    : anim_trig=1. The angles and the rotations of the animations (fn_007FA990, LHMatrix::GetYXZ, LHMatrix::SetYXZMatrixOnly, fn_007FACC0) are the functions of the mod, in doubles with no x87 instruction. The constants of the game: 1.5707963705062866, 3.1415927410125732, -1.5707963705062866 and 0. anim_trig_check=0
 ```
 
 **The measures.**
@@ -2203,12 +2235,129 @@ scene sample : 23 samples in the game turns of 1 ms or more: 2 turns of 450, 12 
 scene sample : the return addresses in runblack.exe on the stacks of these samples, in % of the samples that have each one: 0x0054CE5D 100.0%, 0x0054D67E 100.0%, ...
 ```
 
+**The long turns with no new animation** (a desktop run in `pen`, 420 s,
+`anim_trig=1`, `anim_watch=1`, `profile_sample_turn=250`,
+`profile_sample_turn_ms=1`, `profile_sample_dump=1`). The 81 reports of 450
+frames have 37 turns of 1 ms or more: 26 in the 12 reports with new
+animations (the first 65 s), 11 in 10 reports with no new animation. The
+other 59 reports have no turn of 1 ms, and their worst turn is 0.45 to 0.66
+ms. Of the 67 samples of the reports with no new animation,
+`Morphable::MorphTexture` has 29.9 percent, a new BuildingSite 28.4,
+`GScript::Process` 28.4, and the rest 13.4. The class names come from the
+RTTI of `runblack.exe`.
+
+- **A new BuildingSite** gives the turn of 5.9 to 6.7 ms, one in each run,
+  about 100 s after the load (6.32 ms in this run, 19 of its 21 samples).
+  The calls: `ProcessTurn` (the call of `fn_00649A20` at `0x0054E641`, the
+  players and their towns), the town (`fn_00747380`, `fn_00747600`), a
+  virtual function of `Abode` (slot 366 `fn_00405D90`, slot 383
+  `fn_00404440`), `fn_0073B8E0`, the constructor of `BuildingSite`
+  (`fn_0043B7E0`, its vtable at `0x008C6B6C`), `fn_0043CDB0`, then
+  `fn_0043AE10`. `fn_0043AE10` makes the outline of the building on the
+  land: 128 directions, with `FSIN` and `FCOS` and the height of the land
+  for each. Then for each low triangle of the mesh of the building it takes
+  the 128 directions again, each with `FCOS` and `FSIN` of the same angle
+  and a ray test (`fn_0043B630`). The samples are in that loop (`0x0043B2CC`
+  to `0x0043B2EA`) and in `fn_0043B4F0`, `fn_0043B5A0` and `fn_0043B630`.
+  These x87 instructions are in the code of `fn_0043AE10`, not in the four
+  functions of `anim_trig`, so `anim_trig` does not change this turn.
+- **`Morphable::MorphTexture`** (`fn_00619500`, `fn_00870640`: the mix of
+  each texel of the texture of the look) gives a turn of 2.0 to 2.2 ms each
+  60 to 70 s, below `fn_005EC810` (the call at `0x0054E65B`). It is integer
+  code with no x87 instruction.
+- **`GScript::Process`** (the call at `0x0054E693`) gives turns of 1.3 to
+  1.8 ms in the reports after them.
+- **The mesh of the Temple from the disk.** In the reports with new
+  animations 40 of 161 samples (25 percent) are a load of a mesh:
+  `fn_008830E0` makes the path `Data\Citadel\OutsideMeshes\B_TEM...`, and
+  `fn_008067F0` reads the whole file (`GetFileAttributesA`, a read of the C
+  library, then `fn_00806460`). This read does not go through `LHFile`, so
+  `file_read_ahead` does not have it, and the count of the opens of a file
+  in the lines `long frame` does not count it.
+
+**The parts of the game turn** (`turn_parts=1`, `turn_parts.cpp`, the math
+in `turn_parts_math.h`). A sampler of the code place does not work under FEX,
+so the mod times the functions that the game turn calls. The turn is the
+call of `GGame::ProcessNetworkPackets` that runs `GGame::ProcessOneGameTurn`
+(`0x0054D620`): `StartTurn`, `ProcessTurn` and `EndTurn`. Each direct callee
+of the three phases has a timer, and so have the phases and
+`ProcessOneGameTurn` itself. The helpers that the phases call 50 times or
+more in a turn (`fn_00552F80`, `fn_00555850`, `fn_007AEE98`) have none.
+
+- **How a timer works.** It is the technique of `walk_parts.cpp`: a hook of
+  MinHook to a stub that keeps the registers, takes the clock and puts the
+  address of `ExitThunk` in the place of the return address. So a stub needs
+  no argument and no calling convention. A function that the mod hooks
+  already (`PhysicsObject::GameTurnUpdate`) gets its timer on the trampoline
+  of that hook. All hooks are queued in `PassGuardInstall` and applied with
+  one `MH_ApplyQueued`, as `anim_trig` does. No hook comes after the start of
+  the game, so no `SuspendThread` runs while the game runs (`android.md`,
+  "SuspendThread under FEX in Wine").
+- **What counts.** Only the frame thread in a game turn. A part counts once,
+  at its outer call (a call of the part inside the part adds nothing). The
+  time of a part is exclusive: its time less the parts that it calls. The
+  turn itself is timer 0, so its exclusive time is `outside_parts`, the turn
+  outside each part. All exclusive times and `outside_parts` add up to the
+  turn. The sums of a turn go into the frame (a latch for each present) and
+  into the window of 10 s.
+- **The parts.** Each has one name in the code, the log and this doc:
+
+| Name | Function |
+| --- | --- |
+| `process_turn`, `start_turn`, `end_turn` | `ProcessTurn` (`0x0054E5C0`), `StartTurn` (`0x0054E4F0`), `EndTurn` (`0x0054E960`): the code of the phase outside its callees. A turn with a call of `process_turn` is a real turn |
+| `one_game_turn` | `GGame::ProcessOneGameTurn` (`0x0054D620`) outside the phases |
+| `players_towns` | `fn_00649A20`, the players and their towns (the call at `0x0054E641`) |
+| `fn_005EC810` | The call at `0x0054E65B`. The Creatures run below it (`Creature::ProcessState`) |
+| `script` | `GScript::Process` (`0x006EB6B0`, the call at `0x0054E693`) |
+| `morph_texture` | `Morphable::MorphTexture` (`fn_00619500`) |
+| `building_site` | The constructor of `BuildingSite` (`fn_0043B7E0`), with `fn_0043AE10` below it |
+| `mesh_load` | `fn_008067F0`, the load of a mesh from a file. The calls are the loads |
+| `new_animation` | `Morphable::GetSetAnim` (`0x00619690`), only the calls that make an animation. The calls are the new animations |
+| `audio_turn` | `GAudio::ProcessAudioGameTurn` (`0x00427080`) |
+| `physics_turn` | `PhysicsObject::GameTurnUpdate` (`0x00644FC0`) |
+| `fn_` and the address | Each other direct callee of the three phases |
+
+- **The lines.** Each 10 s one line `turn parts` gives the game turns of the
+  window (the mean and the worst turn), and for the turns of 1 ms or more
+  the exclusive ms of each part (the part with 0.01 ms or more), its share,
+  its calls, the most in one turn, its inclusive ms, and `outside_parts`.
+  With `slow_frame_ms` each line `long frame` ends with the parts of the
+  game turn of that frame (the exclusive ms and the calls of each part, the
+  inclusive ms when it differs, and `outside_parts`), or says that the frame
+  has no game turn. `turn_parts_add=0x00730760,0x0063E090` puts timers on
+  more functions, with the name `fn_` and the address. With `anim_watch=1`
+  the timer of `new_animation` goes on the trampoline of the hook of
+  `anim_watch`.
+- **A desktop run** (the test save `pen`, 220 s, `turn_parts=1`,
+  `anim_trig=1`, `slow_frame_ms=10`, `test_frame_rate=90`): in
+  every window of 10 s with a turn of 1 ms or more `outside_parts` is 0.0 to
+  0.1 percent of these turns, so the parts add up to the turn. The long turns
+  are in the right parts: `building_site` 5.85 ms of a turn of 6.41 ms (91.2
+  percent, 4 calls) in the window about 100 s after the load, `morph_texture`
+  1.5 ms (3 calls, in 3 windows), `script` 1.4 to 1.6 ms (2 calls, in 2
+  windows), and `new_animation` up to 4.84 ms in the first 60 s. The first
+  window (the load) has `mesh_load` 8.92 ms in 12 calls. The 20 windows have
+  no call that no return closed.
+- **A window with no turn.** The line says how often the turn function ran
+  (most calls only ask if a turn is due) and how many calls the stubs saw in a
+  game turn on the frame thread, outside a game turn and on another thread.
+  So a window with 0 turns shows whether the game ran no turn or the timers
+  missed it. In the Android emulator (Wine, no FEX, the test save `pen`, 60 s
+  of the scene) every window had 0 game turns, and the cause is not known.
+
+```
+turn parts   : 10.0 s, 100 game turns (mean 0.45 ms, worst 1.87 ms), 4 of them 1 ms or more (together 6.27 ms). The turn function ran 901 times. The timers saw 7481 calls in a game turn on the frame thread, 6307 outside a game turn and 0 on another thread. The parts of these turns, exclusive ms in all of them, the share, the calls, the most in one turn and the inclusive ms: new_animation 4.59 ms (73.2 percent, 4 calls, most 1.47, inclusive 4.60), fn_005EC810 0.74 ms (11.7 percent, 4 calls, most 0.22, inclusive 5.33), players_towns 0.19 ms (3.0 percent, 4 calls, most 0.05, inclusive 0.19), ..., 41 more parts under 0.01 ms, outside the parts 0.01 ms (0.1 percent, most 0.00)
+```
+
 **Open.** The animations are still made on the frame thread, one at its
 first use. A thread of its own cannot make them: the code takes memory of
 the allocator of the game and writes the table of the object that the game
-turn reads. Only a headset can show the length of the long game turn under
-FEX with `anim_trig` 1 and 0, and how many animations a session there
-makes.
+turn reads. Only a headset can show which parts of the long game turn
+take the time under FEX (`turn_parts=1`), the length of the long game turn
+with `anim_trig` 1 and 0, how much of it the making of animations is, how many animations a session there makes, how often a
+session there makes a BuildingSite, how long the turns with no new
+animation take under FEX, and the precision of the x87 unit under FEX against the functions of the mod
+(`anim_trig_check=1`).
 
 ### The refresh rate of the headset
 
@@ -6581,11 +6730,12 @@ keys that the launcher sets.
 | `fovea_res_layer` | 0 | 1 the eye picture of a walk with `fovea_res=1` has the outer image and the centre image side by side, each at its own size, and the headset app shows each as a projection layer of its own. 0 the eye picture is made from the two at the size of the render. On the PC 1 changes nothing, and 2 is a test aid that makes the atlas in a run with no session. The renderer reads it at the first walk of each game. No test key. See "The middle as its own layer" |
 | `vk_atlas_area` | 1 | Only in the headset app, with `fovea_res_layer=1`: 1 the draw of the two images into the eye picture clears and writes only the part with both rects and their gap, 0 the whole eye picture. On the PC always the whole eye picture. The renderer reads it with `fovea_res_layer`. No test key. See "The middle as its own layer" and `android.md`, "The copies of the eye pictures" |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
-| `walk_parts`, `walk_parts_add` | 0, empty | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. See "The parts of the scene walk" |
+| `walk_parts`, `walk_parts_add`, `walk_parts_early` | 0, empty, 1 | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. `walk_parts_early=1`: all hooks at the end of the installs of the first frame with one `MH_ApplyQueued`, and no timer on the device and on the lists of the engine. 0: the hooks at the third walk. See "The parts of the scene walk" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
 | `profile_sample_turn`, `profile_sample_turn_ms` | 0, 2 | A test aid: the samples come only in the game turn, each N microseconds (100 to 5000), with the return addresses of the game on the stack, and only the turns of `profile_sample_turn_ms` or more go to the report. See "The long game turn" |
 | `anim_watch` | 0 | A test aid: 1 counts the animations that `Morphable::GetSetAnim` makes and their time, and the calls of `Morphable::MorphAnims`, one line each 450 frames. See "The long game turn" |
+| `turn_parts`, `turn_parts_add` | 0, empty | A test aid: 1 puts a timer on each function that the game turn calls (about 70). Each 10 s one line `turn parts` gives the parts of the turns of 1 ms or more, and with `slow_frame_ms` each line `long frame` gives the parts of its turn. 0: no hook and no line. It needs `time_log=1`. `turn_parts_add` gives more addresses to time. No test key. See "The long game turn" |
 | `anim_trig` | 1 | 1: the four functions of the angles and the rotations of the animations are functions of the mod with no x87 instruction. 0: the x87 code of the game, and no hook. A test key: Ctrl, Shift and A. See "The long game turn" |
 | `anim_trig_check`, `anim_trig_test_frame` | 0, 0 | A test aid: 1 also runs the code of the game for each call of the four functions and counts the floats that differ. `anim_trig_test_frame=N` acts as the test key at frame N of the controllers. See "The long game turn" |
 | `time_log` | 1 | 1: each 10 s one line in `bwvr.log` with the mean and the most of the frame, the scene walk, the write of the live stream, the wait of the pace and the rest. 0: no line. There is no test key. See "The time log of the mod" |

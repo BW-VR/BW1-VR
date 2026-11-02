@@ -33,6 +33,7 @@
 #include "long_frame_math.h"
 #include "scene_sample.h"
 #include "time_log.h"
+#include "turn_parts.h"
 
 extern void ModLog(const char* format, ...);
 // hand_exact.cpp: the drawn Hand after its draw setup, and the calls of later
@@ -306,8 +307,10 @@ void __fastcall h_ProcessNetworkPackets(void* self, void* unused) {
   // profile_sample_turn: the samples read the stack up to this local.
   SceneSampleTurnBegin(&before);
   QueryPerformanceCounter(&before);
+  if (g_turn_parts) TurnPartsTurnBegin(before.QuadPart);
   o_ProcessNetworkPackets(self, unused);
   QueryPerformanceCounter(&after);
+  if (g_turn_parts) TurnPartsTurnEnd(after.QuadPart);
   if (g_time_log_slow) TimeLogCall(long_frame_math::kTurn, false);
   const uint64_t spent = after.QuadPart - before.QuadPart;
   SceneSampleTurnEnd(g_frequency.QuadPart != 0
@@ -404,6 +407,7 @@ void PassGuardInstall() {
   LandLightInstall();
   AnimWatchInstall();
   AnimTrigInstall();
+  TurnPartsInstall();
   QueryPerformanceFrequency(&g_frequency);
   Hook(kProcessNetworkPackets,
        reinterpret_cast<void*>(&h_ProcessNetworkPackets),

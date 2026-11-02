@@ -3603,6 +3603,7 @@ void CreatureChecks() {
 #include "long_frame_checks.h"
 #include "take_phase_checks.h"
 #include "walk_parts_checks.h"
+#include "turn_parts_checks.h"
 #include "stall_checks.h"
 #include "wow64_cpu_checks.h"
 #include "core_checks.h"
@@ -4064,6 +4065,7 @@ int main() {
   long_frame_checks::LongFrameChecks();
   take_phase_checks::TakePhaseChecks();
   walk_parts_checks::WalkPartsChecks();
+  turn_parts_checks::TurnPartsChecks();
   stall_checks::StallChecks();
   wow64_cpu_checks::Wow64CpuChecks();
   core_checks::CoreChecks();

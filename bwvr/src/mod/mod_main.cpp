@@ -2338,6 +2338,9 @@ void StartVrStep() {
     BubbleCardInstall();
     NoteDepthSetOptions(g_note_depth, g_note_test, g_note_depth_test_frame);
     NoteDepthInstall();
+    // After the last hook of the mod: a timer on a function that the mod
+    // hooks later would stop that hook (MH_ERROR_ALREADY_CREATED).
+    WalkPartsInstallEarly();
   }
 
   // Headless measuring runs the two passes and throws the pictures away, so

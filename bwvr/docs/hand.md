@@ -411,7 +411,7 @@ pointer target. It is not a buffer of old positions.
    before the cut.
 7. It sends packet `0x4D` with 48 bytes: the velocity, a release point
    (`hand+0x48D4` through the physics matrix), a translation and three
-   angles (`fn_007FD140`, `fn_007FAB30`).
+   angles (`fn_007FD140`, `LHMatrix::GetYXZ` `0x007FAB30`).
 8. `GPacket::ProcessPacket` case `0x4D` copies the 48 bytes to
    `GInterfaceStatus+0x44..+0x73`.
 9. The drop action `fn_005DA400` calls `ApplyThisToMapCoord` (+0x728). For a

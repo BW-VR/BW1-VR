@@ -2910,12 +2910,18 @@ stick in a saved game):
 - After the load, the game makes 71.2 to 71.6 frames a second, and 4 to 8
   frames in 10 s are longer than 20 ms. Each is 28 to 39 ms long. In nearly
   each one the game turn takes 19 to 33 ms, and the scene walk is 4 to 10
-  ms as in a frame of normal length. The game opens no file in them, and
-  reads from a file in only one of them. They
-  come 0.2 to 5 s apart, with no steady rhythm. In a desktop run the
-  long game turns are the first use of an animation of the Creature: the
-  game makes its mixed animation in the game turn (`backend.md`, "The long
-  game turn", `anim_trig`). Not shown yet on the Frame.
+  ms as in a frame of normal length. The game opens no file through
+  `LHFile` in them, and reads from such a file in only one of them: the
+  counts of the opens and of the reads are the counts of `LHFile`.
+  `fn_008067F0` loads meshes outside `LHFile` (with `GetFileAttributesA`
+  and a read of the C library), and these counts do not have it. The long
+  frames come 0.2 to 5 s apart, with no steady rhythm. In a desktop run
+  about 57 percent of the samples of the long game turns are the making of
+  an animation of the Creature at its first use (`backend.md`, "The long
+  game turn", `anim_trig`). The other long turns there are a new
+  BuildingSite (up to 6.7 ms), `Morphable::MorphTexture` (2.0 to 2.2 ms
+  each 60 to 70 s), `GScript::Process` (1.3 to 1.8 ms) and a load of a
+  mesh of the Temple through `fn_008067F0`. Not shown yet on the Frame.
 - Each long frame of the mod after the load has a line `game frame` of the
   app at the same frame of the stream, with a gap within 2 ms of the length
   of the long frame. The pairs that do not match are in the load.
@@ -4298,9 +4304,11 @@ stop each other thread of the process (`Freeze` of `hook.c`), then call
 disables while other threads run x86 code can hang the game under FEX, when
 one of these threads translates a block at that time. The hooks of the mod
 come in two groups at the start (see "The code that changes, on a Quest
-3"), the timers of `walk_parts=1` come at the third scene walk, and some
-hooks of the mod come and go while the game runs. Not shown: that the hangs
-in the load of the game with `walk_parts=1` on a Quest 3 come from this. A
+3"), the timers of `walk_parts=1` come with them when `walk_parts_early=1`
+(the default) and at the third scene walk when it is 0, and some hooks of
+the mod come and go while the game runs. Not shown: that the hangs in the
+load of the game with `walk_parts=1` and `walk_parts_early=0` on a Quest 3
+come from this. A
 stop with the main thread of the game at 0 percent of a core in the line of
 a stop (`time_log`) fits it. The samplers of the mod (`hang_watch`,
 `profile_sample`) also stop the frame thread. They change no protection
@@ -4679,7 +4687,7 @@ walk, from `walk_parts=1`:
 | The land, the sea and the objects on the land (`GLandscape::Draw`) | 0.58 ms (47 percent) | 21.9 ms (85 percent), 17.7 ms of it in `fn_005E5CD0`, with the meshes and the land patches |
 | The sorted draws of `LH3DRender::FinishFrame` | 0.26 ms (21 percent) | 2.6 ms (10 percent) |
 | The calls of the game to the device of the mod, the renderer and the record of the stream | about 0.40 ms (33 percent) | about 5.6 ms with the timers, about 2.6 ms with no timer (about 12 percent) |
-| The sky, the Hand, the interface | below 0.03 ms each | below 0.3 ms each |
+| The sky, the Hand, the interface | below 0.03 ms each | below 0.07 ms each |
 
 The parts that can go to another core, with the gain that each can give
 in a walk of 6.7 ms on the Frame:
@@ -4703,12 +4711,15 @@ in a walk of 6.7 ms on the Frame:
    once. A hand over to a thread for each mesh costs about as much as the
    mesh. No gain.
 4. **The game turn** cannot go to another core: the walk reads the state
-   that the turn writes. Its long turns are the mixed animations of the
-   Creature (`backend.md`, "The long game turn", `anim_trig`).
+   that the turn writes. In a desktop run about 57 percent of the samples
+   of its long turns are the mixed animations of the Creature, and the
+   others are a new BuildingSite, `Morphable::MorphTexture`,
+   `GScript::Process` and a load of a mesh (`backend.md`, "The long game
+   turn", `anim_trig`).
 
-Not built: the first part needs the parts of the walk of the build now
-under FEX, and `walk_parts=1` is not safe there. Each timer is a hook of
-MinHook that comes at the third scene walk, in the load. `MH_EnableHook`
+The first part needs the parts of the walk of the build now under FEX.
+With `walk_parts_early=0`, `walk_parts=1` is not safe there. Each timer is
+a hook of MinHook that comes at the third scene walk, in the load. `MH_EnableHook`
 stops each other thread (`Freeze` of `hook.c`) and then changes the
 protection of the code (`VirtualProtect`). Under FEX that change waits for
 the lock of the cache of the translated code. When a stopped thread holds
@@ -4716,13 +4727,14 @@ that lock (a thread of the load that translates new code), the hook waits
 for ever ("FEX as the CPU of the 32 bit code"). In the load many threads
 translate new code, and `walk_parts=1` enables about 70 hooks one at a
 time. 2 of 5 starts hung with `walk_parts=1`, and 0 of 4 with 0. The
-source of FEX and of MinHook fits this cause. No log shows it. A safe
-way: the timers of the functions of the game go in with the first hooks of
-the mod (`PassGuardInstall`, the first frame with a render target), all
-with one stop of the threads (`MH_QueueEnableHook` and one
-`MH_ApplyQueued`, as `anim_trig` does), the timers of the device and of the
-code of the mod are calls in that code (no hook), and the scan of the
-lists of the engine adds no hook after the start.
+source of FEX and of MinHook fits this cause. No log shows it. The safe
+way is `walk_parts_early=1` (the default): the timers of the functions of
+the game and of the code of the mod go in at the end of the installs of the
+first frame (after the last hook of the mod), all with one stop of the
+threads (`MH_QueueEnableHook` and one `MH_ApplyQueued`, as `anim_trig` does).
+The timers of the device have no hook and the scan of the lists of the
+engine adds none after the start, so they are not in this mode. Only a Quest
+3 or the Frame can show that no start hangs with it.
 
 ## Wine in the app
 

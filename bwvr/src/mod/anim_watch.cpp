@@ -38,7 +38,7 @@ const uintptr_t kMorphAnims = 0x00619100;
 const int kSlotsOffset = 0x1D4;
 const int kAnimsPerKind = 0x2B8;
 const int kMixedSlots = 0xE8;
-const int kKinds = 8;
+const int kKinds = 6;  // the kinds 0 to 5 of the switch of GetSetAnim
 const int kCallers = 4;
 
 typedef int(__fastcall* GetSetAnimFn)(void* self, void* unused, int anim,
@@ -85,7 +85,8 @@ int __fastcall h_GetSetAnim(void* self, void* unused, int anim, int kind,
   const int made = o_GetSetAnim(self, unused, anim, kind, value);
   --g_depth;
   QueryPerformanceCounter(&after);
-  const uint64_t spent = static_cast<uint64_t>(after.QuadPart - before.QuadPart);
+  const uint64_t spent =
+      static_cast<uint64_t>(after.QuadPart - before.QuadPart);
   ++g_builds[kind];
   g_build_ticks += spent;
   if (spent > g_build_most) g_build_most = spent;
@@ -149,6 +150,12 @@ void AnimWatchInstall() {
               "Morphable::MorphAnims");
   // One stop of the other threads for both hooks (anim_trig.cpp, HookAll).
   g_on = g_on && MH_ApplyQueued() == MH_OK;
+  if (!g_on) {
+    // No hook stays queued, so a later MH_ApplyQueued does not enable it.
+    // MH_RemoveHook of a target with no hook gives an error and does nothing.
+    MH_RemoveHook(reinterpret_cast<void*>(kGetSetAnim));
+    MH_RemoveHook(reinterpret_cast<void*>(kMorphAnims));
+  }
   ModLog("anim watch   : anim_watch=1 (a test). Each 450 frames the calls of "
          "Morphable::GetSetAnim, the animations that it makes and their time, "
          "and the calls of Morphable::MorphAnims%s",

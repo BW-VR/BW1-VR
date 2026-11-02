@@ -62,7 +62,7 @@ inline double RefAngle(float a, float b, const anim_trig::Constants& k) {
 }
 
 // The rotation of the three angles as the product of three turns, a matrix
-// of rows: m[0..8] of EulerToMatrix3.
+// of rows: m[0..8] of SetYXZMatrixOnly.
 inline void RefMatrix3(double* m, double a, double b, double c) {
   const double sa = sin(a), ca = cos(a), sb = sin(b), cb = cos(b);
   const double sc = sin(c), cc = cos(c);
@@ -99,6 +99,13 @@ inline void AnimTrigChecks() {
   Near("the cosine of 0 is 1", Cos(0.0), 1.0, 0.0);
   Near("the sine of pi / 2 is 1", Sin(kHalfPi), 1.0, 1e-16);
   Near("the cosine of pi is -1", Cos(kPi), -1.0, 1e-16);
+  // Values near the largest of the reduction (about 600000 quarter turns),
+  // against values with 60 digits (a series in decimal arithmetic with pi to
+  // 100 digits). The C library of the 32 bit build is 1.2e-15 off there.
+  Near("the sine of 900000.3 is right within 3e-17", Sin(900000.3),
+       0.02180602182407620019, 3e-17);
+  Near("the cosine of -999999.7 is right within 3e-16", Cos(-999999.7),
+       0.79148333657820919655, 3e-16);
   Near("a large value goes to the C library", Sin(1e9), sin(1e9), 0.0);
   const double nan_value = sqrt(-1.0);
   Check(Sin(nan_value) != Sin(nan_value), "the sine of NaN is NaN", 0, 0);
@@ -116,6 +123,8 @@ inline void AnimTrigChecks() {
   Near("the arc tangent of 1 is pi / 4", Atan(1.0), kQuarterPi, 1e-16);
   Near("the arc tangent of -1e30 is -pi / 2", Atan(-1e30), -kHalfPi, 1e-16);
   Near("the arc tangent of 0 is 0", Atan(0.0), 0.0, 0.0);
+  Check(signbit(Atan(-0.0)) != 0, "the arc tangent of -0 is -0, as FPATAN", 0,
+        0);
 
 #if defined(_MSC_VER) && defined(_M_IX86)
   // The x87 instructions of the game, rounded to a float as the game keeps
@@ -149,6 +158,8 @@ inline void AnimTrigChecks() {
 
   // The angle of a point in each octant, and its compare with atan2.
   Near("the angle of (1, 0) is 0", Angle(1.0f, 0.0f, k), 0.0, 0.0);
+  Check(signbit(Angle(1.0f, -0.0f, k)) != 0,
+        "the angle of (1, -0) is -0, as the code of the game", 0, 0);
   Near("the angle of (0, 1) is pi / 2", Angle(0.0f, 1.0f, k), kHalfPi, 1e-15);
   Near("the angle of (-1, 0) is pi", Angle(-1.0f, 0.0f, k), kPi, 1e-15);
   Near("the angle of (0, -1) is -pi / 2", Angle(0.0f, -1.0f, k), -kHalfPi,
@@ -167,7 +178,7 @@ inline void AnimTrigChecks() {
         "the angle of 3600 points is the angle of the C library within 1e-15",
         worst_angle, 1e-15);
 
-  // EulerToMatrix3 against the product of the three turns, and the way back.
+  // SetYXZMatrixOnly against the product of the three turns, and the way back.
   float m[12];
   float back_a = 0.0f, back_b = 0.0f, back_c = 0.0f;
   double worst_matrix = 0.0, worst_back = 0.0;
@@ -175,14 +186,14 @@ inline void AnimTrigChecks() {
     const float a = static_cast<float>(sin(i * 0.37) * 1.4);
     const float b = static_cast<float>(sin(i * 0.53) * 1.4);
     const float c = static_cast<float>(sin(i * 0.71) * 1.4);
-    EulerToMatrix3(m, a, b, c);
+    SetYXZMatrixOnly(m, a, b, c);
     double r[9];
     RefMatrix3(r, a, b, c);
     for (int j = 0; j < 9; ++j) {
       if (fabs(m[j] - r[j]) > worst_matrix) worst_matrix = fabs(m[j] - r[j]);
     }
     m[9] = m[10] = m[11] = 0.0f;
-    MatrixToEuler(m, &back_a, &back_b, &back_c, k);
+    GetYXZ(m, &back_a, &back_b, &back_c, k);
     // The matrix of the three angles back is the same rotation.
     double r2[9];
     RefMatrix3(r2, back_a, back_b, back_c);

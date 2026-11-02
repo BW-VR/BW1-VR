@@ -3605,6 +3605,7 @@ void CreatureChecks() {
 #include "walk_parts_checks.h"
 #include "turn_parts_checks.h"
 #include "audio_watch_checks.h"
+#include "audio_play_checks.h"
 #include "stall_checks.h"
 #include "wow64_cpu_checks.h"
 #include "core_checks.h"
@@ -4068,6 +4069,7 @@ int main() {
   walk_parts_checks::WalkPartsChecks();
   turn_parts_checks::TurnPartsChecks();
   audio_watch_checks::AudioWatchChecks();
+  audio_play_checks::AudioPlayChecks();
   stall_checks::StallChecks();
   wow64_cpu_checks::Wow64CpuChecks();
   core_checks::CoreChecks();

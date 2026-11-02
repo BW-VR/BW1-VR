@@ -474,7 +474,8 @@ inline const char* const kRetiredKeys[] = {
     // More keys for desktop tests: each key that the mod reads with _test in
     // its name, the turns and the places of the scripted controller, and the
     // keys of a self test, of a probe and of test pictures.
-    "aim_test_keys", "aim_test_touch", "audio_stop_wait_test",
+    "aim_test_keys", "aim_test_touch", "audio_play_fix_test",
+    "audio_stop_wait_test",
     "audio_test_bank", "audio_test_path", "audio_test_solo",
     "audio_test_step_ms", "audio_test_tag", "audio_test_tag_bank",
     "audio_test_voice", "bulk_test_influence", "bulk_test_no_keep",

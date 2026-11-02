@@ -118,6 +118,12 @@ void AudioVoicesAudible(bool audible);
 void AudioStopWaitToggle();
 // The value of audio_stop_wait for the debug page, or kDebugCannot.
 int AudioStopWaitValue();
+// The test key of audio_play_fix. QMixer pumps in each QSWaveMixPlayEx, or the
+// mod keeps the pump out of the call for some sounds (docs/audio.md, "7.8 The
+// pump of a play"). The mode steps through 0, 1 and 2.
+void AudioPlayFixCycle();
+// The value of audio_play_fix for the debug page, or kDebugCannot.
+int AudioPlayFixValue();
 // A flat cue through the mixer: mono, 22050 Hz, pan -1 to 1.
 bool AudioVoicesCue(const int16_t* data, int frames, float gain, float pan);
 // audio_rolloff.cpp, the test key: true gives a room factor that is the same

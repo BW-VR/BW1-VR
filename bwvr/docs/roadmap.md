@@ -767,12 +767,16 @@ that moves while the Hand takes it.
     key while the game runs. A sound that QMixer plays (an advisor, the
     speech of a story) keeps the wait.
   - **The wait of about 30 ms in the audio turn on the Steam Frame.**
-    About 5 times in 10 s one call in `GAudio::ProcessAudioGameTurn` takes
-    26 to 35 ms, also with `audio_stop_wait=0`. The cause is not known.
-    `audio_turn_watch=1` with `turn_parts=1` names the call, its call site and
-    the wait call below it (`audio.md`, 7.7). One Frame run is next. A mutex
-    of the QMixer session that its mixer thread also takes is the first
-    suspect.
+    About 5 times in 10 s `QSWaveMixPlayEx` takes 26 to 54 ms for a sound of
+    the atmosphere, also with `audio_stop_wait=0`. The time is in the code of
+    QMixer, in the pump that the call runs on the thread of the caller
+    (`audio.md`, 7.8). `audio_play_fix=1` (default) keeps the pump out of the
+    call for a sound of the mixer of the mod, and 2 also for each sound of the
+    atmosphere. Next: a Frame run with `audio_play_fix=2` and
+    `audio_turn_watch=1`. Look at the `audio play` line (the time of the call
+    and of `QSWaveMixPump`) and at a new wait of the frame thread for the
+    mutex of the session. Not built: the `QSWaveMix` calls of the audio turn
+    on a thread of the mod.
   - **Slow frames that stay.** The first
     use of a texture or of an effect file makes an eye pass 8 to 15 ms
     longer, when Windows does not have the file in memory. One time a minute

@@ -2382,7 +2382,7 @@ gaps show the cause at once. The file is in the Trace Event Format of Chrome
 | `trace_min_us` | 30 | A bar shorter than N us is not recorded |
 | `trace_wait_us` | 100 | A wait of the frame thread shorter than N us is not recorded |
 | `trace_ring_k` | 128 | The ring of the frame thread has N K events. The other rings have 16 K events |
-| `trace_keyboard` | 1 | 1: Ctrl, Shift and F11 save |
+| `trace_keyboard` | 1 | 1: Ctrl, Shift and G save, while a window of the game is in front |
 | `trace_test_save_s` | 0 | A test aid: one save N s after the start of the recorder |
 | `trace_combo_ms` | 300 | In the app: the time that the combination of the controller is held |
 
@@ -2422,33 +2422,46 @@ decompilation project (`docs/address-map.md`), with the address.
 | Row | What it has |
 | --- | --- |
 | "frames (present to present)" | `frame` (the frame of the stream and its ms), the point `long frame` (above 20 ms) and the counter `game frames a second`. These bars cross the bars of the frame thread, so they have a row of their own |
-| "frame thread" | The six calls of the frame loop of `frame_timers.cpp` (the input, the keys, the network flush, `GGame::ProcessGraphicsEngine`, `ProcessFrameInputs`, `FlipScreen`). `GGame::ProcessNetworkPackets (game turn)` and the timers of `turn_parts` (about 70 callees of the turn, among them `audio_turn`). The callees of `ProcessGraphicsEngine` two levels deep (49 timers, `kGraphicsDefs` in `turn_parts.cpp`: the camera, the interface, `LH3DRender::StartFrame`, `GLandscape::Draw`, the particles, the sky, the Temple, `LH3DAtmos::Render3D`, the help system and others). `scene walk of an eye pass` with `mod work before the walk of the game`, `GGame::Process3dEngine` and `mod work after the walk of the game`. `h_FinishFrame (mod)` with `LH3DRender::FinishFrame`. `wait of the pace (XrInputPace)`, `stream deliver (frame thread)`, `wait for the stream worker`. The waits of the frame thread of 100 us or more: `Sleep`, `WaitForSingleObject`, `EnterCriticalSection` (only a lock that was not free), `ReadFile` and `CreateFileA` |
+| "frame thread" | The six calls of the frame loop of `frame_timers.cpp` (the input, the keys, the network flush, `GGame::ProcessGraphicsEngine`, `ProcessFrameInputs`, `FlipScreen`). `GGame::ProcessNetworkPackets (game turn)` and the timers of `turn_parts` (about 70 callees of the turn, among them `audio_turn`). The callees of `ProcessGraphicsEngine` two levels deep (`kGraphicsDefs` in `turn_parts.cpp`, about 50 timers that count only inside the call of `ProcessGraphicsEngine`: the camera, the interface, `LH3DRender::StartFrame`, `GLandscape::Draw`, the particles, the sky, the Temple, `LH3DAtmos::Render3D`, the help system and others). `LH3DTech::UpdateCamera` (the hook in `head_camera.cpp`, with the work of the mod) and `PhysicsObject::DrawAll` (the call of the game in the hook in `throw_physics.cpp`). `scene walk of an eye pass` with `mod work before the walk of the game`, `GGame::Process3dEngine` and `mod work after the walk of the game`. `h_FinishFrame (mod)` with `LH3DRender::FinishFrame`. `wait of the pace (XrInputPace)`, `stream deliver (frame thread)`, `wait for the stream worker`. The waits of the frame thread of 100 us or more: `Sleep`, `WaitForSingleObject`, `EnterCriticalSection` (only a lock that was not free), `ReadFile` and `CreateFileA` |
 | "stream worker" | `stream put (the frame into the ring)` with the frame, the bytes, the wait for room and the drop |
 | "render thread (Direct3D 9 calls)" | `render thread work`, with `render_thread=1` |
 | "QMixer timer (pump)", "QMixer mixer (render)" | `QSWaveMixPump`, `mod voices render (mixer thread)`, `QMixer play (PlayEx)` and the parts of a play with `audio_play_parts=1` (`open`, `loader` and others), the calls of the audio turn with `audio_turn_watch=1` |
 
 With `trace=1` the timers of `turn_parts` go in at the end of the hooks of the
 mod (`TurnPartsInstallLate`), all with one `MH_ApplyQueued`, also with
-`turn_parts=0`. Then no line `turn parts` is written. A function that the mod
-hooks gets its timer on the code of the game alone. The log names the
-functions where the trampoline is not found (`LH3DTech::UpdateCamera` and
-`PhysicsObject::DrawAll` in the desktop run have no timer). The waits use the
-import table of `runblack.exe`: the mod puts a function of its own into the
-slots of the functions that the game imports from `KERNEL32.dll` (5 slots in
-the desktop run: `Sleep`, `WaitForSingleObject`, `EnterCriticalSection`,
-`ReadFile`, `CreateFileA`). No code changes, and no thread stops. A call from
-the mod or from a DLL does not pass the table of the game, so it has no bar.
+`turn_parts=0`. Then no line `turn parts` is written. A timer of the game turn
+(`kDefs`) counts in the game turn and in the call of `ProcessGraphicsEngine`.
+A timer of the graphics engine (`kGraphicsDefs`) counts only inside that call,
+so the helpers that the game turn calls many times pay no clock read. The line
+`trace` of a save names the calls that got a clock read since the start. A
+function that the mod hooks already gets its timer on the code of the game
+alone, where the log finds the trampoline of the hook. `LH3DTech::UpdateCamera`
+and `PhysicsObject::DrawAll` have no timer of `turn_parts`: their hooks give the
+bars. The waits use the import table of `runblack.exe`: the mod puts a function
+of its own into the slots of the functions that the game imports from
+`KERNEL32.dll` (`Sleep`, `SleepEx`, `WaitForSingleObject`,
+`WaitForSingleObjectEx`, `WaitForMultipleObjects`, `EnterCriticalSection`,
+`ReadFile` and `CreateFileA`, as far as the exe imports them). No code
+changes, and no thread stops. A call from the mod or from a DLL does not pass
+the table of the game, so it has no bar.
 
 **The save.** A save writes the last `trace_seconds` of all rings on a thread
 of the lowest priority. The frame thread only sets a flag. Three things start
 a save: the button combination of the controller (`android.md`, "The
 timeline"), a frame of the scene longer than `trace_auto_ms` (at most one a
-minute, and never in a load), and the key Ctrl, Shift and F11. With
+minute, and never in a load), and the key Ctrl, Shift and G while a window of
+the game is in front (a test key of the table "Keys for v1.0" has the same
+rule). With
 `trace_test_save_s` one save comes by itself, for a desktop run. The mod and
 the app talk through the head of the input channel (`trace_ask`,
 `trace_done`, `trace_game_ask`, `src/common/input_channel.h`). The mod writes
-its part as `bwvr-trace-game.json` beside `runblack.exe` (the events only), and
-the app joins it with its own part into `trace-<time>.json`. Without a channel
+its part beside `runblack.exe` (the events only) as a file for each save:
+`bwvr-trace-game-a<N>.json` for the request N of the app, and
+`bwvr-trace-game-g<N>.json` for the save N of the game. So two saves close
+together do not join the wrong parts. The app reads the part by the name of its
+own job, joins it with its own part into `trace-<time>.json`, and deletes it.
+The mod deletes old parts when it starts. The mod ignores a count of the app
+in the channel that was there before its first look. Without a channel
 the mod writes the whole file `bwvr-trace-<time>.json` beside `runblack.exe`.
 The line `trace` of the log names the file, the events, the bytes and the time
 of the saver thread.
@@ -6554,6 +6567,7 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift F12 | `test_keys=1` | The ears: the head, or the game camera (`audio.md`). Press it with the mouse at rest | Sound, Sound step |
 | Shift F11 | `test_keys=1` | The grab of the world: as set, one to one, or off (`god-view.md`). Press it with the mouse at rest | View, Grab test |
 | Ctrl Shift F11 | `test_keys=1` | The interface panel on and off, when `ui_panel` is not 0 (`ui-layer.md`) | Interface, UI layer |
+| Ctrl Shift G | `trace=1`, `trace_keyboard=1` | Saves the timeline of the last `trace_seconds` ("The timeline of the game and the app"). It needs no test key | None |
 | Numpad 0 | `test_keys=1` | The cut scene window goes off and on (`cutscene-window.md`) | Picture, Scene window |
 | Numpad 1 | `test_keys=1` | The depth limit of the cut scene window goes off and on | Picture, Scene depth |
 | Ctrl Numpad 1 | `test_keys=1` | The game camera stands over the land under the head or over the recenter place (`god-view.md`, section 7) | View, Camera place |

@@ -2988,7 +2988,7 @@ with the frames that both processes know.
 
 | Row | What it has |
 | --- | --- |
-| "session thread" | `xrWaitFrame`, `xrBeginFrame (with the wait for the queue lock)`, `input slot (xrLocateViews, xrLocateSpace)` with the number of the slot, `take of the newest picture (TakePicture)` (new or not, the frame), `take of the eye pictures (CopyScreen, motion)`, `motion of the stick (MotionComp::View)` for each eye, `SubmitFrame (copies to the GPU)`, `xrEndFrame (with the wait for the queue lock)`, `EndFrame of the app (layers, copies, xrEndFrame)`. The point `frame of the session with no new picture` (the frame of the picture that stays). Two points for each new picture: `picture shown (game frame, place of the camera in the world)` with the frame and the place of the player in the world when the game drew it (x, y, z, game units), and `picture shown (head of the picture, LOCAL)` with the head of that picture (x, y, z, meters) and the number of the input slot. A jump back of the picture shows in these numbers |
+| "session thread" | `xrWaitFrame`, `xrBeginFrame (with the wait for the queue lock)`, `input slot (xrLocateViews, xrLocateSpace)` with the number of the slot, `take of the newest picture (TakePicture)` (new or not, the frame), `take of the eye pictures (CopyScreen, motion)`, `motion of the stick (MotionComp::View)` for each eye (the eye, the shift of its pose in cm, and for the left eye the state of the motion: 0 nothing, 1 off, 2 no map, 3 no difference, 4 moved, 5 over the limits), `SubmitFrame (copies to the GPU)`, `xrEndFrame (with the wait for the queue lock)`, `EndFrame of the app (layers, copies, xrEndFrame)`. The point `frame of the session with no new picture` (the frame of the picture that stays). Three points for each frame of the session with a projection layer (new picture or not): `picture shown (game frame, place of the camera in the world)` with the frame and the place of the player in the world when the game drew it (x, y, z, game units), `picture shown (head of the picture, LOCAL)` with the head of that picture (x, y, z, meters) and the number of the input slot, and `motion of the stick (state, shift of the pose)` with the state of the left eye and the shift of the pose of each eye in cm. A jump of the picture with a shift of the pose comes from the motion of the stick, and a jump with no shift comes from the picture of the game. The bar `MotionComp::View` is shorter than 30 us in most frames and is then not recorded, so the point carries the numbers |
 | "reader (live stream)" | `read of the ring (sr::Take)` with the bytes, and the point `game frame arrives (reader)` with the frame, its bytes and the frames that wait |
 | "play thread (renderer)" | `wait for the GPU before a play (WaitGpu)` (only a wait), `play of a batch of frames (renderer)` with the last frame and the number of frames, `copy of the picture into a slot (WriteSlot)` with the wait for a free slot |
 
@@ -3000,9 +3000,9 @@ controller together for 300 ms (`trace_combo_ms`). With the default
 `button_layout=1` and `controls=0` X has no job with the right hand as the Hand,
 and the stick click has no job with the default `gesture_button`, so the chord
 has no other action. With `button_layout=0` a hold of X opens the ring. The app writes the end of the window to the head of the
-input channel, the mod writes its part (`bwvr-trace-game.json`), and a thread
+input channel, the mod writes its part (`bwvr-trace-game-a<N>.json`, one file for each save), and a thread
 of low priority joins both parts into `trace-<time>.json` in the folder of the
-app (`files/`, the folder of `bwvr-quest.log`). Both controllers give a pulse
+app and deletes the part of the game (`files/`, the folder of `bwvr-quest.log`). Both controllers give a pulse
 (0.8, 0.15 s) when the file is written. The line `trace` of `bwvr-quest.log`
 names the file, the events of the app part, the bytes of the game part and the
 time. When the mod does not answer in 8 s, the file has no part of the game

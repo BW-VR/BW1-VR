@@ -192,36 +192,83 @@ inline Span Readable(const Ring& r, uint32_t head) {
 // after kQuiet events in a row that ended before `from`. Gives the count
 // written to `out` (at most max) and `overrun` when the oldest event that
 // the ring keeps is inside the window.
+//
+// The writer keeps writing during the walk. The walk takes the events in
+// chunks, and after each chunk it reads the head again: an event is safe only
+// when it is at most capacity - kMargin events below the head of that moment.
+// The events of a chunk that are older than that are dropped, and the walk
+// ends there. after_chunk(k) is called after each chunk that was read, before
+// the head is read again (the math test moves the head of the ring there).
 constexpr uint32_t kQuiet = 64;
-inline uint32_t CopyWindow(const Ring& r, int64_t from, int64_t to, Event* out, uint32_t max,
-                           bool* overrun) {
+constexpr uint32_t kChunk = 512;
+struct NoHook {
+  void operator()(uint32_t) const {}
+};
+template <typename Hook>
+inline uint32_t CopyWindowHooked(const Ring& r, int64_t from, int64_t to, Event* out, uint32_t max,
+                                 bool* overrun, Hook&& after_chunk) {
   if (overrun != nullptr) *overrun = false;
   if (r.events == nullptr || max == 0) return 0;
   const uint32_t head = LoadAcquire(const_cast<volatile uint32_t*>(&r.head));
   const Span s = Readable(r, head);
-  uint32_t quiet = 0;
+  const uint32_t room = r.capacity > kMargin ? r.capacity - kMargin : 0;
   uint32_t n = 0;
-  uint32_t walked = 0;
-  // Collect from the newest back, then reverse.
-  for (uint32_t k = 0; k < s.count; ++k) {
-    const Event& e = r.events[(head - 1 - k) & r.mask];
-    ++walked;
-    const int64_t end = e.ts + static_cast<int64_t>(e.dur);
-    if (end < from) {
-      if (++quiet >= kQuiet) break;
-      continue;
+  uint32_t quiet = 0;
+  bool quiet_stop = false;
+  // Reads the events k_from to k_to - 1 below the head. Gives the k where it
+  // stopped.
+  auto scan = [&](uint32_t k_from, uint32_t k_to) {
+    uint32_t k = k_from;
+    for (; k < k_to; ++k) {
+      const Event& e = r.events[(head - 1 - k) & r.mask];
+      const int64_t end = e.ts + static_cast<int64_t>(e.dur);
+      if (end < from) {
+        if (++quiet >= kQuiet) {
+          quiet_stop = true;
+          return k + 1;
+        }
+        continue;
+      }
+      quiet = 0;
+      if (e.ts >= to) continue;
+      if (n < max) out[n++] = e;
     }
-    quiet = 0;
-    if (e.ts >= to) continue;
-    if (n < max) out[n++] = e;
+    return k;
+  };
+  uint32_t k = 0;
+  bool cut = false;
+  while (k < s.count && !quiet_stop) {
+    const uint32_t k_to = s.count - k > kChunk ? k + kChunk : s.count;
+    const uint32_t n0 = n;
+    const uint32_t quiet0 = quiet;
+    const uint32_t reached = scan(k, k_to);
+    after_chunk(reached);
+    const uint32_t moved = LoadAcquire(const_cast<volatile uint32_t*>(&r.head)) - head;
+    const uint32_t allowed = room > moved ? room - moved : 0;
+    if (reached > allowed) {
+      // The writer came into this chunk: keep only what it did not reach.
+      n = n0;
+      quiet = quiet0;
+      quiet_stop = false;
+      if (allowed > k) scan(k, allowed);
+      cut = true;
+      break;
+    }
+    k = reached;
   }
-  if (overrun != nullptr) *overrun = s.overrun && walked >= s.count && quiet < kQuiet;
+  if (overrun != nullptr) {
+    *overrun = cut ? quiet < kQuiet : (s.overrun && k >= s.count && !quiet_stop);
+  }
   for (uint32_t i = 0; i < n / 2; ++i) {
     const Event t = out[i];
     out[i] = out[n - 1 - i];
     out[n - 1 - i] = t;
   }
   return n;
+}
+inline uint32_t CopyWindow(const Ring& r, int64_t from, int64_t to, Event* out, uint32_t max,
+                           bool* overrun) {
+  return CopyWindowHooked(r, from, to, out, max, overrun, NoHook());
 }
 
 // ---------------------------------------------------------------------------
@@ -258,8 +305,8 @@ class Recorder {
     ++rejected_;
     return nullptr;
   }
-  // Names the ring of the calling thread, and sets its size. Before the first
-  // event of the thread; later it only renames.
+  // Names the ring of the calling thread, and sets its size. Call it before
+  // the first event of the thread. A later call only renames.
   Ring* Name(uint32_t tid, const char* name, int sort, uint32_t events) {
     Ring* r = FindOrNull(tid);
     if (r == nullptr) return Claim(Hash(tid), tid, name, sort, events);
@@ -288,12 +335,16 @@ class Recorder {
   }
 
   // The rings, for the saver. Gives the count, and the ring i.
-  int Count() const { return count_; }
+  int Count() const { return count_ < kMaxRings ? count_ : kMaxRings; }
   const Ring* At(int i) const { return list_[i]; }
+
+  // For the tests: the count as two claims at the same moment can leave it,
+  // past kMaxRings.
+  void SetCountForTest(int count) { count_ = count; }
 
   // For the tests and for a stop: frees all rings.
   void Reset() {
-    for (int i = 0; i < count_; ++i) {
+    for (int i = 0; i < Count(); ++i) {
       if (list_[i] != nullptr) {
         list_[i]->Free();
         delete list_[i];
@@ -348,8 +399,16 @@ class Recorder {
     // threads with the same hash apart.
     for (int probe = 0; probe < kTable; ++probe, slot = (slot + 1) & (kTable - 1)) {
       if (CompareSwap(&table_[slot].tid, 0, tid)) {
+        // Two threads can pass the test of count_ above together, so the
+        // index that NextIndex gives is the one to test.
+        const uint32_t index = NextIndex(&count_);
+        if (index >= static_cast<uint32_t>(kMaxRings)) {
+          r->Free();
+          delete r;
+          ++rejected_;
+          return nullptr;
+        }
         table_[slot].ring = r;
-        const int index = static_cast<int>(NextIndex(&count_));
         list_[index] = r;
         return r;
       }
@@ -525,6 +584,18 @@ inline size_t FormatHeader(char* out, size_t cap, int64_t base_ns, double second
 }
 inline size_t FormatFooter(char* out, size_t cap) {
   const int w = snprintf(out, cap, "\n]}\n");
+  return w < 0 || static_cast<size_t>(w) >= cap ? 0 : static_cast<size_t>(w);
+}
+
+// THE NAME OF THE PART OF THE GAME. Each save has its own file, so two saves
+// close together do not join the wrong parts. For a request of the app the
+// number is the count of that request ('a'). For a save of the game it is the
+// count of the saves of the game after it ('g'). The game writes the file
+// with the suffix tmp and renames it. The app reads the part by the name of
+// its own job and deletes it after the join.
+inline size_t FormatPartName(char* out, size_t cap, bool from_app, uint32_t number, bool temp) {
+  const int w = snprintf(out, cap, "bwvr-trace-game-%c%u.%s", from_app ? 'a' : 'g',
+                         static_cast<unsigned>(number), temp ? "tmp" : "json");
   return w < 0 || static_cast<size_t>(w) >= cap ? 0 : static_cast<size_t>(w);
 }
 

@@ -286,12 +286,13 @@ void StreamReader::Run() {
         arrived_.fetch_add(1, std::memory_order_relaxed);
       }
       if (take_phase_ != nullptr && take_phase_->On()) take_phase_->Arrive(q.frame, q.arrival_ms);
+      pthread_mutex_lock(&lock_);
       if (g_app_trace) {
+        // The queue is read under the lock: the session takes frames from it.
         static const trace_events::Def kArriveDef = {"game frame arrives (reader)", "reader", {"frame", "bytes", "queue", nullptr}};
         AppTracePoint(&kArriveDef, static_cast<float>(q.frame), static_cast<float>(len),
                       static_cast<float>(queue_.size()));
       }
-      pthread_mutex_lock(&lock_);
       // THE LIMIT: a queue that the session does not take (a session that
       // does not run) is cleared, and the reader leaves the ring.
       if (whole_frames_ > 0 &&

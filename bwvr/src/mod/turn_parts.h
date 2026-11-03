@@ -22,6 +22,9 @@ void TurnPartsInstallLate();
 // callees count in between (turn_parts.cpp, kGraphicsDefs).
 void TurnPartsGraphicsBegin();
 void TurnPartsGraphicsEnd();
+// trace_rec.cpp, in the log of a save: the calls of the timers that got a clock
+// read since the start (trace=1).
+uint32_t TurnPartsTimedCalls();
 // pass_guard.cpp, h_ProcessNetworkPackets: the game turn starts at the tick
 // `begin` of the performance counter, and ends at the tick `end`.
 void TurnPartsTurnBegin(int64_t begin);

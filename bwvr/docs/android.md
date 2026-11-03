@@ -191,7 +191,7 @@ Summary:
 | `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
 | `src/mod/time_log.cpp`, `src/mod/time_log_math.h` | The time log of the mod, and the stats and the rules that the app uses too. No Windows code in the header |
 | `test/controller_math/time_log_checks.h` | The math checks of the cap, of the lines of `/proc` and of the parts of a frame |
-| `android/src/trace_app.cpp`, `trace_app.h`, `src/common/trace_events.h` | The timeline of the app (`trace`, "The timeline"): the bars of the session thread, the reader and the play thread, the button combination, and the join of the file with the part of the game |
+| `android/src/trace_app.cpp`, `trace_app.h`, `src/common/trace_events.h`, `trace_combo.h`, `trace_join.h` | The timeline of the app (`trace`, "The timeline"): the bars of the session thread, the reader and the play thread, the button combinations, and the join of the file with the part of the game, with the shift of its clock |
 | `src/mod/long_frame_math.h`, `android/src/long_frames.cpp` | The long frames of the game (`slow_frame_ms`): the rules of the lines, of the calls of the frame loop, of schedstat and of the late pictures, the clock of the frames of the game in the reader and the log of the takes of the session. No Windows code and no Android code in the header |
 | `test/controller_math/long_frame_checks.h` | The math checks of `long_frame_math.h` |
 | `android/src/walk_probe.cpp`, `android/src/walk_parts.h` | The GPU parts of the walk (`gpu_parts`): the functions of the app in the table of the renderer, the timestamps at the bounds of the passes, and the counts. `walk_parts.h` has the rules of the parts and no Vulkan code |
@@ -2981,8 +2981,9 @@ default) the app makes no ring, no thread and no call of the clock.
 **The clock.** The app reads `CLOCK_BOOTTIME` in ns (`AppTraceNow`). Wine takes
 `QueryPerformanceCounter` from the same clock (the doc of the pace, "The
 clock"), so the mod and the app share it. The take phase (`slow_frame_ms`)
-reads `CLOCK_MONOTONIC` and is not on this clock. The script checks the clock
-with the frames that both processes know.
+reads `CLOCK_MONOTONIC` and is not on this clock. The join checks the clock
+with the frames that both processes know and shifts the game part when the
+two clocks differ (below, "The shift of the clock").
 
 **The bars of the app** (process "app", `trace_app.cpp`, `trace_app.h`):
 
@@ -2995,28 +2996,59 @@ with the frames that both processes know.
 A bar under 30 us (`trace_min_us`) is not recorded. The session thread has a
 ring of 64 K events, the other threads have 16 K events.
 
-**The save.** Hold the X button and the click of the left stick of the left
-controller together for 300 ms (`trace_combo_ms`). With the default
-`button_layout=1` and `controls=0` X has no job with the right hand as the Hand,
-and the stick click has no job with the default `gesture_button`, so the chord
-has no other action. With `button_layout=0` a hold of X opens the ring. The app writes the end of the window to the head of the
-input channel, the mod writes its part (`bwvr-trace-game-a<N>.json`, one file for each save), and a thread
-of low priority joins both parts into `trace-<time>.json` in the folder of the
-app and deletes the part of the game (`files/`, the folder of `bwvr-quest.log`). Both controllers give a pulse
-(0.8, 0.15 s) when the file is written. The line `trace` of `bwvr-quest.log`
-names the file, the events of the app part, the bytes of the game part and the
-time. When the mod does not answer in 8 s, the file has no part of the game
-and the line says so. A save of the mod (a frame longer than `trace_auto_ms`,
-or the key) makes the app join the same way, and the line says "the game saved
-its part".
+**The save.** Two button combinations save. Hold either one for 300 ms
+(`trace_combo_ms`):
+
+1. The X button and the click of the left stick.
+2. The left trigger (squeezed to 0.7 or more) and the click of the right stick
+   (`trace_combo2=1`, the default).
+
+Both have no other action with the defaults. With `button_layout=1` and
+`controls=0` X has no job with the right hand as the Hand, the stick click has
+no job with the default `gesture_button`, and the trigger of the other hand
+has no job. The two clicks of the sticks together are not free: the app shows
+its menu over the game for them (`play_menu_sticks`). The second combination
+needs neither X nor the click of the left stick, so it works when the headset
+keeps one of them. With `button_layout=0` a hold of X opens the ring. When
+the left hand points (a left handed player), the left trigger is the click of
+the game. The log of the app has the line `trace : buttons, slot N:` for each
+change of the left hand (active, the stick click, X, Y, the menu button, the
+trigger) and of the right hand (active, the click of the stick), at most 60
+lines, so the log shows what arrives from the runtime. The first line is the
+state at the first frame. The line `trace : the combination N` says which
+combination fired.
+
+The app writes the end of the window to the head of the input channel, the mod
+writes its part (`bwvr-trace-game-a<N>.json`, one file for each save), and a
+thread of low priority joins both parts into `trace-<time>.json` in the folder
+of the app (`files/`, the folder of `bwvr-quest.log`) and deletes the part of
+the game. Both controllers give a pulse (0.8, 0.15 s) when the file is
+written. The line `trace` of `bwvr-quest.log` names the file, the events of
+the app part, the bytes of the game part and the time. When the mod does not
+answer in 8 s, the file has no part of the game and the line says so. A save of
+the mod (a frame longer than `trace_auto_ms`, or the key) makes the app join
+the same way, and the line says "the game saved its part".
+
+**The shift of the clock** (`trace_shift=1`, the default). The join takes the
+frames that both parts know: the end of `stream put` in the game and the point
+`game frame arrives (reader)` in the app. The arrival is 0 to 1 ms after the
+write, so the shift of the game is the median of the differences less 0.5 ms.
+The join adds the shift to each time of the game part, if at least 3 frames
+are common and the 10th to the 90th percentile of the differences is not wider
+than 100 ms (a wider spread means a wrong match). A line `trace : clock of the
+game:` in `bwvr-quest.log` has the number of frames, the least, 10th, median,
+90th and most difference, the spread and the shift, and says if it was applied.
+The file has the marker `join of the parts (clock shift of the game)` at time 0
+with the same numbers. `trace_shift=0` joins the parts as they were written.
 
 **Take the file.** `adb pull` the file from the folder of the app (the path is
 in `bwvr-quest.log`), then `python bwvr/tools/trace/trace_report.py <file>`,
 or open it in `ui.perfetto.dev`.
 
-**Not shown yet.** Everything on the headset: the cost of the recorder on the
-session thread, the join, the pulse, the clock check, and the combination with
-the real controllers.
+**Not shown yet.** On the headset: the cost of the recorder on the session
+thread, the pulse, which of the buttons of the two combinations the Steam Frame
+gives to the app (the lines `trace : buttons`), and the shift of the clock that
+the join finds.
 
 ## The display rate
 

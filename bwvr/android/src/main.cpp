@@ -720,10 +720,10 @@ void* PlayThread(void* arg) {
     const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
     const double waited = WriteSlot(app, *live);
     if (trace_play != 0) {
-      static const trace_events::Def kPlayDef = {"play of a batch of frames (renderer)", "play", {"last frame", "frames", nullptr, nullptr}};
-      static const trace_events::Def kSlotDef = {"copy of the picture into a slot (WriteSlot)", "play", {"last frame", "wait_ms", nullptr, nullptr}};
-      AppTraceBar(&kPlayDef, trace_play, trace_slot, static_cast<float>(live->last), static_cast<float>(n));
-      AppTraceBar(&kSlotDef, trace_slot, AppTraceNow(), static_cast<float>(live->last), static_cast<float>(waited));
+      static const trace_events::Def kPlayDef = {"play of a batch of frames (renderer)", "play", {"#last frame", "frames", nullptr, nullptr}};
+      static const trace_events::Def kSlotDef = {"copy of the picture into a slot (WriteSlot)", "play", {"#last frame", "wait_ms", nullptr, nullptr}};
+      AppTraceBar(&kPlayDef, trace_play, trace_slot, trace_events::FrameArg(live->last), static_cast<float>(n));
+      AppTraceBar(&kSlotDef, trace_slot, AppTraceNow(), trace_events::FrameArg(live->last), static_cast<float>(waited));
     }
     app->take_phase.Played(live->last, live->arrival_ms, live->play_start_ms, NowMs());
     if (!timing) continue;
@@ -1741,7 +1741,9 @@ void android_main(android_app* android) {
   // trace=1 (0 by default): the timeline of the app (trace_app.h).
   AppTraceStart(app.ini.GetInt("bwvr", "trace", 0) != 0, app.ini.GetInt("bwvr", "trace_seconds", 10),
                 app.ini.GetInt("bwvr", "trace_min_us", 30),
-                app.ini.GetInt("bwvr", "trace_combo_ms", 300), app.folder.c_str(),
+                app.ini.GetInt("bwvr", "trace_combo_ms", 300),
+                app.ini.GetInt("bwvr", "trace_combo2", 1) != 0,
+                app.ini.GetInt("bwvr", "trace_shift", 1) != 0, app.folder.c_str(),
                 app.game.folder.c_str());
   TimeLogNameThread("bwvr main");
   ThreadCores::MarkSession();
@@ -2076,9 +2078,9 @@ void android_main(android_app* android) {
           PictureRing::TakeFacts facts;
           fresh = TakePicture(&app, &facts);
           if (trace_take != 0) {
-            static const trace_events::Def kTakeDef = {"take of the newest picture (TakePicture)", "session", {"new", "frame", nullptr, nullptr}};
+            static const trace_events::Def kTakeDef = {"take of the newest picture (TakePicture)", "session", {"new", "#frame", nullptr, nullptr}};
             AppTraceBar(&kTakeDef, trace_take, AppTraceNow(), fresh ? 1.0f : 0.0f,
-                        static_cast<float>(app.shown_last));
+                        trace_events::FrameArg(app.shown_last));
           }
           // slow_frame_ms: why a take had no new picture (long_frames.h).
           if (app.latch_log.On() && app.game_on) {
@@ -2088,8 +2090,8 @@ void android_main(android_app* android) {
           }
         }
         if (g_app_trace && app.game_on && app.first_frame && !fresh) {
-          static const trace_events::Def kNoPicDef = {"frame of the session with no new picture", "session", {"shown frame", nullptr, nullptr, nullptr}};
-          AppTracePoint(&kNoPicDef, static_cast<float>(app.shown_last));
+          static const trace_events::Def kNoPicDef = {"frame of the session with no new picture", "session", {"#shown frame", nullptr, nullptr, nullptr}};
+          AppTracePoint(&kNoPicDef, trace_events::FrameArg(app.shown_last));
         }
         if (fresh) app.hold_any = true;
         app.hold_shown = eye_copy_math::NextShown(app.hold_shown, fresh);

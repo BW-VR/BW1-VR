@@ -394,8 +394,8 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
   if (g_trace) {
     // The write of the frame into the ring: the app sees the frame when the
     // write index moves, at the end of this bar.
-    static const trace_events::Def kPutDef = {"stream put (the frame into the ring)", "stream", {"frame", "bytes", "wait_ms", "dropped"}};
-    TraceBar(&kPutDef, start.QuadPart, TraceNow(), static_cast<float>(frame),
+    static const trace_events::Def kPutDef = {trace_events::kStreamPutName, "stream", {"#frame", "bytes", "wait_ms", "dropped"}};
+    TraceBarKept(&kPutDef, start.QuadPart, TraceNow(), trace_events::FrameArg(frame),
              static_cast<float>(n), static_cast<float>(waited), dropped ? 1.0f : 0.0f);
   }
   // The stats go in before the write index of the next frame, so a reader
@@ -562,8 +562,8 @@ void Deliver() {
     g_delivered_frame = g_unit_frame;
   }
   if (trace_deliver != 0) {
-    static const trace_events::Def kDeliverDef = {"stream deliver (frame thread)", "stream", {"frame", "bytes", nullptr, nullptr}};
-    TraceBar(&kDeliverDef, trace_deliver, TraceNow(), static_cast<float>(g_unit_frame), static_cast<float>(n));
+    static const trace_events::Def kDeliverDef = {"stream deliver (frame thread)", "stream", {"#frame", "bytes", nullptr, nullptr}};
+    TraceBar(&kDeliverDef, trace_deliver, TraceNow(), trace_events::FrameArg(g_unit_frame), static_cast<float>(n));
   }
   if (chain_start != 0) {
     const uint64_t ticks = render_chain_math::Elapsed(chain_start, __rdtsc());

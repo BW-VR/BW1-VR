@@ -11,9 +11,8 @@
 // frame thread keeps writing), makes the JSON in a buffer of 256 KB and writes
 // the file in blocks. With the input channel of the app the game writes its
 // part as a fragment (bwvr-trace-game-<a or g><count>.json, one file for each
-// save) and tells the app by the head of
-// the channel. Without the app it writes a whole file, bwvr-trace-<time>.json,
-// in the game folder.
+// save) and tells the app by the head of the channel. Without the app it writes
+// a whole file, bwvr-trace-<time>.json, in the game folder.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -48,6 +47,8 @@ int64_t g_freq = 0;
 uint32_t g_frame_tid = 0;
 int g_seconds = 10;
 int g_auto_ms = 40;
+int g_auto_gap_s = 60;
+int g_auto_after_s = 20;
 int g_min_us = 30;
 int g_wait_us = 100;
 int g_ring_k = 128;
@@ -66,9 +67,9 @@ constexpr uint32_t kFrameRow = 0x7F000001u;
 bool g_scene_frame = false;  // a scene walk ran since the last present
 uint32_t g_wait_bars = 0;    // the waits that got a bar
 
-const te::Def kFrameDef = {"frame", "game", {"frame", "ms", nullptr, nullptr}};
+const te::Def kFrameDef = {"frame", "game", {"#frame", "ms", nullptr, nullptr}};
 const te::Def kFpsDef = {"game frames a second", "game", {"fps", nullptr, nullptr, nullptr}};
-const te::Def kLongDef = {"long frame", "game", {"frame", "ms", nullptr, nullptr}};
+const te::Def kLongDef = {"long frame", "game", {"#frame", "ms", nullptr, nullptr}};
 
 int IniKey(const char* key, int fallback) {
   char path[MAX_PATH];
@@ -343,6 +344,8 @@ void TraceInstall() {
   }
   g_seconds = Clamp(IniKey("trace_seconds", 10), 1, 60);
   g_auto_ms = Clamp(IniKey("trace_auto_ms", 40), 0, 100000);
+  g_auto_gap_s = Clamp(IniKey("trace_auto_gap_s", 60), 0, 86400);
+  g_auto_after_s = Clamp(IniKey("trace_auto_after_s", 20), 0, 86400);
   g_min_us = Clamp(IniKey("trace_min_us", 30), 0, 1000000);
   g_wait_us = Clamp(IniKey("trace_wait_us", 100), 0, 1000000);
   g_ring_k = Clamp(IniKey("trace_ring_k", 128), 4, 4096);
@@ -369,9 +372,14 @@ void TraceInstall() {
          "(%d K events for the frame thread, 16 K for the others, %zu bytes an event). A save "
          "writes the last %d s as a file of the Trace Event Format (ui.perfetto.dev). Bars "
          "under %d us are not kept, waits under %d us are not kept. A save comes from the app "
-         "(the button combination), after a frame longer than %d ms (at most one a minute)%s%s",
-         g_ring_k, sizeof(te::Event), g_seconds, g_min_us, g_wait_us, g_auto_ms,
-         g_keyboard ? ", and from the key Ctrl Shift G" : "",
+         "(a button combination, which the app names in its own log)%s, and from a frame of the "
+         "scene longer than %d ms%s (trace_auto_ms=%d, at least %d s after the last automatic "
+         "save with trace_auto_gap_s=%d, and not in the first %d s after the first frame of a "
+         "scene with trace_auto_after_s=%d)%s",
+         g_ring_k, sizeof(te::Event), g_seconds, g_min_us, g_wait_us,
+         g_keyboard ? ", from the key Ctrl Shift G" : "", g_auto_ms,
+         g_auto_ms > 0 ? "" : " (off)", g_auto_ms, g_auto_gap_s, g_auto_gap_s, g_auto_after_s,
+         g_auto_after_s,
          g_test_save_s > 0 ? ", and once by trace_test_save_s" : "");
 }
 
@@ -382,6 +390,11 @@ void TraceNameThread(const char* name, int sort, unsigned events) {
 
 void TraceBar(const te::Def* def, int64_t begin, int64_t end, float a, float b, float c, float d) {
   g_rec.Bar(ThisThreadId(), def, begin, end, a, b, c, d);
+}
+
+void TraceBarKept(const te::Def* def, int64_t begin, int64_t end, float a, float b, float c,
+                  float d) {
+  g_rec.BarKept(ThisThreadId(), def, begin, end, a, b, c, d);
 }
 
 void TracePoint(const te::Def* def, float a, float b, float c, float d) {
@@ -414,18 +427,24 @@ void TraceFramePresent() {
   static int64_t fps_at = 0;
   static uint32_t fps_count = 0;
   static int64_t last_save_ns = 0;
+  static te::SceneWatch scene;
   const int64_t now = TraceNow();
   ++presents;
   if (last != 0) {
     const double ms = static_cast<double>(now - last) * 1000.0 / static_cast<double>(g_freq);
-    const float frame = static_cast<float>(VkStreamPresentFrame());
+    const float frame = te::FrameArg(VkStreamPresentFrame());
     g_rec.Bar(kFrameRow, &kFrameDef, last, now, frame, static_cast<float>(ms));
     if (ms > 20.0) g_rec.Point(kFrameRow, &kLongDef, now, frame, static_cast<float>(ms));
     // A load makes frames of seconds, and a frame with no scene is no frame of
-    // the play: only a frame of the scene under 400 ms starts a save.
+    // the play: only a frame of the scene under 400 ms starts a save. The first
+    // frames of a scene are slow too (the load goes on), so none starts a save
+    // in the first trace_auto_after_s of the scene.
     const int64_t now_ns = te::TicksToNs(now, g_freq);
+    scene.Present(g_scene_frame, now_ns);
     if (g_scene_frame && presents > 200 && ms < 400.0 &&
-        te::AutoShouldSave(ms, g_auto_ms, now_ns, last_save_ns)) {
+        te::AutoShouldSave(ms, g_auto_ms, now_ns, last_save_ns,
+                           static_cast<int64_t>(g_auto_gap_s) * 1000000000LL, scene.start_ns,
+                           static_cast<int64_t>(g_auto_after_s) * 1000000000LL)) {
       last_save_ns = now_ns;
       TraceSave("a long frame");
     }

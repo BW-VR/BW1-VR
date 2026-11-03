@@ -10,16 +10,23 @@
 //                         button combination of the left controller saves
 //   trace_seconds=N       a save writes the last N seconds (10)
 //   trace_min_us=N        a bar shorter than N us is not recorded (30)
-//   trace_combo_ms=N      the left X button and the click of the left stick,
-//                         held together for N ms, ask for a save (300)
+//   trace_combo_ms=N      a button combination held for N ms asks for a save
+//                         (300). The combinations: the left X button with the
+//                         click of the left stick, and the left trigger with
+//                         the click of the right stick (trace_combo.h)
+//   trace_combo2=0|1      1: the second combination saves too (1)
+//   trace_shift=0|1       1: the join shifts the game part by the clock shift
+//                         that it finds from the frames of both parts (1). 0:
+//                         the parts are joined as they were written
 //
-// A SAVE has three sources: the combination (the app asks the game through the
+// A SAVE has three sources: a combination (the app asks the game through the
 // head of the input channel), a long frame or the key of the game (the game
 // counts a save in the head), and nothing else. The app writes its part, waits
 // for the part of the game (bwvr-trace-game-<kind><count>.json in the game
 // folder, one file for each save), joins both into trace-<time>.json in the
 // folder of the app, and deletes the part. A thread of low priority does the
-// work. A short pulse of both controllers says that the file is written.
+// work. A short pulse of both controllers says that the file is written. The
+// log has a line for each change of the buttons that the combinations read.
 #pragma once
 
 #include <stdint.h>
@@ -34,8 +41,8 @@ int64_t AppTraceNow();
 
 // After the log is open, before the threads start. files: the folder for the
 // files of the app. game: the folder of the game. Does nothing with on=false.
-void AppTraceStart(bool on, int seconds, int min_us, int combo_ms, const char* files,
-                   const char* game);
+void AppTraceStart(bool on, int seconds, int min_us, int combo_ms, bool combo2, bool shift_join,
+                   const char* files, const char* game);
 
 // The ring of the calling thread gets a name and an order in the file.
 void AppTraceNameThread(const char* name, int sort, unsigned events = 0);
@@ -48,7 +55,7 @@ void AppTraceCounter(const trace_events::Def* def, float a = 0.0f, float b = 0.0
                      float d = 0.0f);
 
 // The thread of the session, at each frame after the slot is written: the
-// button combination, and the saves of the game. channel: the mapped input
+// button combinations, and the saves of the game. channel: the mapped input
 // channel, or nullptr. Gives true when both controllers must give a pulse.
 bool AppTraceSession(const input_channel::SlotData& slot, input_channel::File* channel);
 

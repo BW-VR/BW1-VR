@@ -1583,12 +1583,12 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     // frame of the game, the place of the player in the world when the game drew
     // it, and the head of that picture (LOCAL, the middle of the eyes).
     if (g_app_trace) {
-      static const trace_events::Def kShownDef = {"picture shown (game frame, place of the camera in the world)", "session", {"frame", "world x", "world y", "world z"}};
+      static const trace_events::Def kShownDef = {"picture shown (game frame, place of the camera in the world)", "session", {"#frame", "world x", "world y", "world z"}};
       static const trace_events::Def kHeadDef = {"picture shown (head of the picture, LOCAL)", "session", {"head x", "head y", "head z", "input frame"}};
       input_channel::World w = {};
       const bool has = motion_.ShownWorld(0, &w);
       const scene_stream::ViewEye* both = shown_view_[0].eyes;
-      AppTracePoint(&kShownDef, static_cast<float>(shown_view_[0].frame),
+      AppTracePoint(&kShownDef, trace_events::FrameArg(shown_view_[0].frame),
                     has ? w.offset[0] : 0.0f, has ? w.offset[1] : 0.0f, has ? w.offset[2] : 0.0f);
       AppTracePoint(&kHeadDef, (both[0].position[0] + both[1].position[0]) * 0.5f,
                     (both[0].position[1] + both[1].position[1]) * 0.5f,
@@ -1596,9 +1596,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                     static_cast<float>(shown_view_[0].input_frame));
       // What the motion of the stick did in this frame: the state of the left
       // eye (MotionComp::LastCode) and the shift of the pose of each eye in cm.
-      static const trace_events::Def kMotionDef = {"motion of the stick (state, shift of the pose)", "session", {"state of the left eye", "shift left cm", "shift right cm", "game frame"}};
+      static const trace_events::Def kMotionDef = {"motion of the stick (state, shift of the pose)", "session", {"state of the left eye", "shift left cm", "shift right cm", "#game frame"}};
       AppTracePoint(&kMotionDef, static_cast<float>(motion_.LastCode()), trace_shift[0],
-                    trace_shift[1], static_cast<float>(shown_view_[0].frame));
+                    trace_shift[1], trace_events::FrameArg(shown_view_[0].frame));
     }
     // One line for each new picture of the layer: the frame of the mod of its
     // values, and the difference of the place of the player.

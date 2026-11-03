@@ -10,8 +10,12 @@
 //                         in a call (the ring of a thread is made at its
 //                         first event)
 //   trace_seconds=N       a save writes the last N seconds (10)
-//   trace_auto_ms=N       a frame of the game longer than N ms starts a save,
-//                         at most one a minute (40, 0 is off)
+//   trace_auto_ms=N       a frame of the scene longer than N ms starts a save
+//                         (40, 0 is off)
+//   trace_auto_gap_s=N    the least time between two automatic saves (60)
+//   trace_auto_after_s=N  no automatic save in the first N s after the first
+//                         frame of a scene, because a load makes slow frames
+//                         (20, 0 is no wait)
 //   trace_min_us=N        a bar shorter than N us is not recorded (30)
 //   trace_wait_us=N       a wait of the frame thread shorter than N us is not
 //                         recorded (100)
@@ -50,6 +54,10 @@ void TraceNameThread(const char* name, int sort, unsigned events = 0);
 // The events. Each call is for the thread that calls.
 void TraceBar(const trace_events::Def* def, int64_t begin, int64_t end, float a = 0.0f,
               float b = 0.0f, float c = 0.0f, float d = 0.0f);
+// A bar that is kept however short it is (the write of a frame of the stream,
+// which the join of the app matches with its arrival).
+void TraceBarKept(const trace_events::Def* def, int64_t begin, int64_t end, float a = 0.0f,
+                  float b = 0.0f, float c = 0.0f, float d = 0.0f);
 void TracePoint(const trace_events::Def* def, float a = 0.0f, float b = 0.0f, float c = 0.0f,
                 float d = 0.0f);
 void TraceCounter(const trace_events::Def* def, float a = 0.0f, float b = 0.0f, float c = 0.0f,

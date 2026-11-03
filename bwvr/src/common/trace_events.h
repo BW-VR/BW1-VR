@@ -90,6 +90,17 @@ inline uint32_t LoadAcquire(volatile uint32_t* p) {
   return __atomic_load_n(p, __ATOMIC_ACQUIRE);
 #endif
 }
+// A fence that keeps the loads before it from moving behind the loads after it.
+// The reader of a ring needs it between the read of the events and the second
+// read of the head: an acquire load alone only keeps later loads behind it, so
+// on ARM the events could be read after the head.
+inline void AcquireFence() {
+#ifdef _MSC_VER
+  _ReadWriteBarrier();
+#else
+  __atomic_thread_fence(__ATOMIC_ACQUIRE);
+#endif
+}
 inline bool CompareSwap(volatile uint32_t* p, uint32_t from, uint32_t to) {
 #ifdef _MSC_VER
   return _InterlockedCompareExchange(reinterpret_cast<volatile long*>(p),
@@ -194,11 +205,14 @@ inline Span Readable(const Ring& r, uint32_t head) {
 // the ring keeps is inside the window.
 //
 // The writer keeps writing during the walk. The walk takes the events in
-// chunks, and after each chunk it reads the head again: an event is safe only
-// when it is at most capacity - kMargin events below the head of that moment.
-// The events of a chunk that are older than that are dropped, and the walk
-// ends there. after_chunk(k) is called after each chunk that was read, before
-// the head is read again (the math test moves the head of the ring there).
+// chunks, and after each chunk it reads the head again (after an acquire
+// fence): an event is safe only when it is at most capacity - kMargin events
+// below the head of that moment. When the writer came into a chunk, the walk
+// reads the chunk again, only down to the safe limit, and checks the head
+// again after that read. It repeats while the limit moves, and it ends there.
+// So no event in the result was below the safe limit at the end of its own
+// read. after_chunk(k) is called after each read of a chunk, before the head
+// is read again (the math test moves the head of the ring there).
 constexpr uint32_t kQuiet = 64;
 constexpr uint32_t kChunk = 512;
 struct NoHook {
@@ -238,23 +252,34 @@ inline uint32_t CopyWindowHooked(const Ring& r, int64_t from, int64_t to, Event*
   uint32_t k = 0;
   bool cut = false;
   while (k < s.count && !quiet_stop) {
-    const uint32_t k_to = s.count - k > kChunk ? k + kChunk : s.count;
+    uint32_t k_to = s.count - k > kChunk ? k + kChunk : s.count;
     const uint32_t n0 = n;
     const uint32_t quiet0 = quiet;
-    const uint32_t reached = scan(k, k_to);
-    after_chunk(reached);
-    const uint32_t moved = LoadAcquire(const_cast<volatile uint32_t*>(&r.head)) - head;
-    const uint32_t allowed = room > moved ? room - moved : 0;
-    if (reached > allowed) {
-      // The writer came into this chunk: keep only what it did not reach.
+    uint32_t reached = k;
+    for (;;) {
       n = n0;
       quiet = quiet0;
       quiet_stop = false;
-      if (allowed > k) scan(k, allowed);
+      reached = scan(k, k_to);
+      after_chunk(reached);
+      AcquireFence();
+      const uint32_t moved = LoadAcquire(const_cast<volatile uint32_t*>(&r.head)) - head;
+      const uint32_t allowed = room > moved ? room - moved : 0;
+      if (reached <= allowed) break;
+      // The writer came into what the read took: read only what it did not
+      // reach, and check the head again after that read.
       cut = true;
-      break;
+      if (allowed <= k) {
+        n = n0;
+        quiet = quiet0;
+        quiet_stop = false;
+        reached = k;
+        break;
+      }
+      k_to = allowed;
     }
     k = reached;
+    if (cut) break;
   }
   if (overrun != nullptr) {
     *overrun = cut ? quiet < kQuiet : (s.overrun && k >= s.count && !quiet_stop);
@@ -324,6 +349,12 @@ class Recorder {
     const int64_t len = end - begin;
     if (len < min_ticks_) return;
     Push(tid, kBar, def, begin, ClipDur(len), a, b, c, d);
+  }
+  // A bar that is kept however short it is (the join matches the write of each
+  // frame, and most writes are shorter than min_ticks).
+  void BarKept(uint32_t tid, const Def* def, int64_t begin, int64_t end, float a = 0, float b = 0,
+               float c = 0, float d = 0) {
+    Push(tid, kBar, def, begin, ClipDur(end - begin), a, b, c, d);
   }
   void Point(uint32_t tid, const Def* def, int64_t at, float a = 0, float b = 0, float c = 0,
              float d = 0) {
@@ -485,6 +516,38 @@ inline size_t EscapeInto(char* out, size_t cap, const char* text) {
   return n;
 }
 
+// THE NUMBER OF A FRAME IN AN ARG. The frames of the stream are the frame of
+// the controllers (small) or kScreenFrameBase + the count of a screen frame
+// (about 1e9). A float keeps 24 bits of an integer, so 1e9 + N would lose its
+// low bits (steps of 64). FrameArg gives a frame of the controllers as it is
+// and a screen frame as -(count + 1), both exact up to 2^24 (then the high
+// bits are dropped). FrameFromArg gives the number of the stream back. A Def
+// names such an arg with a '#' in front of its name ("#frame"): FormatEvent
+// writes the number of the stream as an integer under the name with no '#'.
+// kScreenFrameBase is the same number as screen_quad_math::kScreenFrameBase
+// (a check in trace_checks.h compares them).
+constexpr uint64_t kScreenFrameBase = 1000000000ull;
+// The names of the two events that the join of the app matches by frame.
+constexpr char kStreamPutName[] = "stream put (the frame into the ring)";
+constexpr char kStreamArriveName[] = "game frame arrives (reader)";
+// The marker that the join of the app writes into the file (trace_join.h).
+constexpr char kJoinName[] = "join of the parts (clock shift of the game)";
+constexpr uint64_t kFrameArgMask = (1ull << 24) - 1;
+inline float FrameArg(uint64_t frame) {
+  if (frame >= kScreenFrameBase) {
+    return -static_cast<float>((frame - kScreenFrameBase) & kFrameArgMask) - 1.0f;
+  }
+  return static_cast<float>(frame & kFrameArgMask);
+}
+inline int64_t FrameFromArg(float v) {
+  if (v != v) return 0;
+  if (v < 0.0f) {
+    const int64_t count = static_cast<int64_t>(-v) - 1;
+    return static_cast<int64_t>(kScreenFrameBase) + (count < 0 ? 0 : count);
+  }
+  return static_cast<int64_t>(v);
+}
+
 // A float that JSON can hold: no NaN and no infinity.
 inline double Finite(float v) {
   if (v != v) return 0.0;
@@ -510,11 +573,17 @@ inline size_t FormatEvent(char* out, size_t cap, const Event& e, int pid, uint32
   size_t an = 0;
   args[0] = 0;
   for (int i = 0; i < kArgs; ++i) {
-    if (e.def->args[i] == nullptr) continue;
+    const char* arg_name = e.def->args[i];
+    if (arg_name == nullptr) continue;
+    const bool frame_arg = arg_name[0] == '#';
+    if (frame_arg) ++arg_name;
     char key[40];
-    if (EscapeInto(key, sizeof(key), e.def->args[i]) == 0) continue;
-    const int w = snprintf(args + an, sizeof(args) - an, "%s\"%s\":%.9g", an > 0 ? "," : "", key,
-                           Finite(e.v[i]));
+    if (EscapeInto(key, sizeof(key), arg_name) == 0) continue;
+    const int w = frame_arg
+                      ? snprintf(args + an, sizeof(args) - an, "%s\"%s\":%lld", an > 0 ? "," : "",
+                                 key, static_cast<long long>(FrameFromArg(e.v[i])))
+                      : snprintf(args + an, sizeof(args) - an, "%s\"%s\":%.9g", an > 0 ? "," : "",
+                                 key, Finite(e.v[i]));
     if (w < 0 || static_cast<size_t>(w) >= sizeof(args) - an) break;
     an += static_cast<size_t>(w);
   }
@@ -610,12 +679,44 @@ inline int64_t JoinNs(uint32_t lo, uint32_t hi) {
   return static_cast<int64_t>((static_cast<uint64_t>(hi) << 32) | lo);
 }
 
-// THE AUTOMATIC SAVE (trace_auto_ms): a frame longer than limit_ms saves,
-// when the last save was at least min_gap_ns before. limit_ms 0 is off.
+// THE FIRST FRAME OF A SCENE. A scene frame (a frame with a scene walk) that
+// comes after at least kSceneIdleNs and kSceneIdlePresents presents with no
+// scene frame is the first frame of a scene: the menu, a load and a screen
+// make presents with no walk. One slow scene frame in the play has no such
+// idle time before it, so it does not start a scene.
+constexpr int64_t kSceneIdleNs = 1000000000LL;
+constexpr uint32_t kSceneIdlePresents = 10;
+struct SceneWatch {
+  int64_t start_ns = 0;      // the first frame of the scene that runs, or 0
+  int64_t last_ns = 0;       // the last scene frame
+  uint32_t idle = 0;         // the presents with no scene frame since it
+  // At each present. scene_frame: a scene walk ran since the last present.
+  void Present(bool scene_frame, int64_t now_ns) {
+    if (!scene_frame) {
+      ++idle;
+      return;
+    }
+    if (start_ns == 0 || (idle >= kSceneIdlePresents && now_ns - last_ns >= kSceneIdleNs)) {
+      start_ns = now_ns;
+    }
+    last_ns = now_ns;
+    idle = 0;
+  }
+};
+
+// THE AUTOMATIC SAVE (trace_auto_ms): a frame longer than limit_ms saves. Not
+// before after_ns after the first frame of the scene (start_ns, 0 when there
+// is no scene yet), because the frames of a load are slow. Not when the last
+// automatic save was less than gap_ns before. limit_ms 0 is off. after_ns 0
+// is no wait after the scene start.
 constexpr int64_t kAutoGapNs = 60LL * 1000000000LL;
-inline bool AutoShouldSave(double frame_ms, int limit_ms, int64_t now_ns, int64_t last_save_ns) {
+constexpr int64_t kAutoAfterNs = 20LL * 1000000000LL;
+inline bool AutoShouldSave(double frame_ms, int limit_ms, int64_t now_ns, int64_t last_save_ns,
+                           int64_t gap_ns = kAutoGapNs, int64_t scene_start_ns = 1,
+                           int64_t after_ns = 0) {
   if (limit_ms <= 0 || frame_ms <= static_cast<double>(limit_ms)) return false;
-  return last_save_ns == 0 || now_ns - last_save_ns >= kAutoGapNs;
+  if (scene_start_ns == 0 || now_ns - scene_start_ns < after_ns) return false;
+  return last_save_ns == 0 || now_ns - last_save_ns >= gap_ns;
 }
 
 // THE BUTTON COMBINATION. The combination fires once when all its buttons

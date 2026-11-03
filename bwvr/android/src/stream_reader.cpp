@@ -1,3 +1,4 @@
+#include "trace_app.h"
 #include "stream_reader.h"
 
 #include <errno.h>
@@ -127,6 +128,7 @@ bool StreamReader::WaitAll(std::vector<QueuedFrame>* frames, int timeout_ms) {
 
 void* StreamReader::Main(void* self) {
   TimeLogNameThread("bwvr reader");
+  AppTraceNameThread("reader (live stream)", 3);
   static_cast<StreamReader*>(self)->Run();
   return nullptr;
 }
@@ -225,8 +227,13 @@ void StreamReader::Run() {
       continue;
     }
     bool broken = false;
+    const int64_t trace_take = g_app_trace ? AppTraceNow() : 0;
     const uint32_t n = sr::Take(m.head, m.view + sr::kHeadBytes, chunk.data(),
                                 static_cast<uint32_t>(chunk.size()), &broken);
+    if (trace_take != 0 && n > 0) {
+      static const trace_events::Def kTakeDef = {"read of the ring (sr::Take)", "reader", {"bytes", nullptr, nullptr, nullptr}};
+      AppTraceBar(&kTakeDef, trace_take, AppTraceNow(), static_cast<float>(n));
+    }
     if (broken) {
       AppLog("live         : the indices of the ring are not valid. The app asks again");
       state = State::kAsk;
@@ -279,6 +286,11 @@ void StreamReader::Run() {
         arrived_.fetch_add(1, std::memory_order_relaxed);
       }
       if (take_phase_ != nullptr && take_phase_->On()) take_phase_->Arrive(q.frame, q.arrival_ms);
+      if (g_app_trace) {
+        static const trace_events::Def kArriveDef = {"game frame arrives (reader)", "reader", {"frame", "bytes", "queue", nullptr}};
+        AppTracePoint(&kArriveDef, static_cast<float>(q.frame), static_cast<float>(len),
+                      static_cast<float>(queue_.size()));
+      }
       pthread_mutex_lock(&lock_);
       // THE LIMIT: a queue that the session does not take (a session that
       // does not run) is cleared, and the reader leaves the ring.

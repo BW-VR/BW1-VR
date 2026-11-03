@@ -58,6 +58,7 @@
 #include "thread_cores.h"
 #include "time_log.h"
 #include "long_frames.h"
+#include "trace_app.h"
 #include "walk_probe.h"
 #include "wine_runtime.h"
 #include "xr_app.h"
@@ -673,6 +674,7 @@ double ThreadCpuMs() {
 void* PlayThread(void* arg) {
   App* app = static_cast<App*>(arg);
   TimeLogNameThread("bwvr play");
+  AppTraceNameThread("play thread (renderer)", 2);
   ThreadCores::MarkPlay();
   const bool timing = app->time.On();
   XrApp::TimeQueueWaits(timing);
@@ -688,6 +690,7 @@ void* PlayThread(void* arg) {
     if (depth > 0) {
       // Each wait counts, also one that ends in the first call.
       const double gate_start = NowMs();
+      const int64_t trace_gate = g_app_trace ? AppTraceNow() : 0;
       bool waited_gpu = false;
       for (;;) {
         bool waited = false;
@@ -697,6 +700,10 @@ void* PlayThread(void* arg) {
       }
       // The phase of the take: with a depth of 1 the GPU finished each
       // picture now, the picture before too.
+      if (trace_gate != 0 && waited_gpu) {
+        static const trace_events::Def kGateDef = {"wait for the GPU before a play (WaitGpu)", "wait", {nullptr, nullptr, nullptr, nullptr}};
+        AppTraceBar(&kGateDef, trace_gate, AppTraceNow());
+      }
       if (depth == 1) app->take_phase.GpuDone(NowMs(), waited_gpu);
       if (waited_gpu) gate_ms = NowMs() - gate_start;
       if (app->play_stop.load()) break;
@@ -707,9 +714,17 @@ void* PlayThread(void* arg) {
     }
     const double start = NowMs();
     const size_t n = live->batch.size();
+    const int64_t trace_play = g_app_trace ? AppTraceNow() : 0;
     const double ms = PlayBatch(app, live);
     WalkProbeInstall();
+    const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
     const double waited = WriteSlot(app, *live);
+    if (trace_play != 0) {
+      static const trace_events::Def kPlayDef = {"play of a batch of frames (renderer)", "play", {"last frame", "frames", nullptr, nullptr}};
+      static const trace_events::Def kSlotDef = {"copy of the picture into a slot (WriteSlot)", "play", {"last frame", "wait_ms", nullptr, nullptr}};
+      AppTraceBar(&kPlayDef, trace_play, trace_slot, static_cast<float>(live->last), static_cast<float>(n));
+      AppTraceBar(&kSlotDef, trace_slot, AppTraceNow(), static_cast<float>(live->last), static_cast<float>(waited));
+    }
     app->take_phase.Played(live->last, live->arrival_ms, live->play_start_ms, NowMs());
     if (!timing) continue;
     PlayStats s;
@@ -1709,6 +1724,11 @@ void android_main(android_app* android) {
   // times (time_log.h). 0: no lines. Before the threads of Wine and of the
   // paint start, so they get their names.
   app.time.Start(app.ini.GetInt("bwvr", "time_log", 1) != 0);
+  // trace=1 (0 by default): the timeline of the app (trace_app.h).
+  AppTraceStart(app.ini.GetInt("bwvr", "trace", 0) != 0, app.ini.GetInt("bwvr", "trace_seconds", 10),
+                app.ini.GetInt("bwvr", "trace_min_us", 30),
+                app.ini.GetInt("bwvr", "trace_combo_ms", 300), app.folder.c_str(),
+                app.game.folder.c_str());
   TimeLogNameThread("bwvr main");
   ThreadCores::MarkSession();
   // WINE: the thread unpacks the tree of the APK into the internal folder of
@@ -2006,7 +2026,17 @@ void android_main(android_app* android) {
       // views of xrLocateViews at the display time of this frame.
       if (app.input_live.On()) {
         input_channel::SlotData slot;
+        const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
         app.xr.InputSlot(&slot);
+        if (trace_slot != 0) {
+          static const trace_events::Def kInputDef = {"input slot (xrLocateViews, xrLocateSpace)", "session", {"slot", nullptr, nullptr, nullptr}};
+          AppTraceBar(&kInputDef, trace_slot, AppTraceNow(), static_cast<float>(slot.frame));
+          // The button combination, and the saves of the game.
+          if (AppTraceSession(slot, app.input_live.Channel())) {
+            app.xr.PulseWith(0, 0.8f, 0.15f);
+            app.xr.PulseWith(1, 0.8f, 0.15f);
+          }
+        }
         if (app.game_on) {
           play_rules::MaskInput(&slot, app.menu_over_game);
           if (!app.menu_over_game) play_rules::ApplyMenuBits(&slot, app.menu_step);
@@ -2028,12 +2058,22 @@ void android_main(android_app* android) {
           const double take_ms =
               app.latch_log.On() || app.take_phase.On() ? NowMs() : 0.0;
           taken_ms = take_ms;
+          const int64_t trace_take = g_app_trace ? AppTraceNow() : 0;
           fresh = TakePicture(&app);
+          if (trace_take != 0) {
+            static const trace_events::Def kTakeDef = {"take of the newest picture (TakePicture)", "session", {"new", "frame", nullptr, nullptr}};
+            AppTraceBar(&kTakeDef, trace_take, AppTraceNow(), fresh ? 1.0f : 0.0f,
+                        static_cast<float>(app.shown_last));
+          }
           // slow_frame_ms: why a take had no new picture (long_frames.h).
           if (app.latch_log.On() && app.game_on) {
             app.latch_log.Take(take_ms, fresh, app.shown_arrival_ms, app.shown_ready_ms,
                                app.shown_gap_ms, app.shown_last, app.period_ms);
           }
+        }
+        if (g_app_trace && app.game_on && app.first_frame && !fresh) {
+          static const trace_events::Def kNoPicDef = {"frame of the session with no new picture", "session", {"shown frame", nullptr, nullptr, nullptr}};
+          AppTracePoint(&kNoPicDef, static_cast<float>(app.shown_last));
         }
         if (fresh) app.hold_any = true;
         app.hold_shown = eye_copy_math::NextShown(app.hold_shown, fresh);
@@ -2064,8 +2104,13 @@ void android_main(android_app* android) {
       OnControllers(&app, input, &show_cursor, cursor);
       Paint(&app);
       step(XrApp::kStepUi);
+      const int64_t trace_end = g_app_trace ? AppTraceNow() : 0;
       app.xr.EndFrame(quad.center, menu_size, show_cursor, cursor,
                       kCursorMeters);
+      if (trace_end != 0) {
+        static const trace_events::Def kEndDef = {"EndFrame of the app (layers, copies, xrEndFrame)", "session", {nullptr, nullptr, nullptr, nullptr}};
+        AppTraceBar(&kEndDef, trace_end, AppTraceNow());
+      }
       // THE PHASE OF THE TAKE of this frame of the session (long_frames.h).
       if (app.take_phase.On() && app.game_on) {
         if (app.first_frame) {
@@ -2118,6 +2163,7 @@ void android_main(android_app* android) {
   }
 
   StopPlayThread(&app);
+  AppTraceStop();
   app.cores.GameEnds();
   if (app.live) {
     app.live_reader.Stop();

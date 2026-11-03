@@ -63,6 +63,7 @@ add_library(bwvr_quest SHARED
     src/scene_player.cpp
     src/stream_reader.cpp
     src/thread_cores.cpp
+    src/trace_app.cpp
     src/time_log.cpp
     src/walk_probe.cpp
     src/wine_runtime.cpp

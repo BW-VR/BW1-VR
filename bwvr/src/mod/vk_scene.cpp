@@ -2356,6 +2356,20 @@ void BindVertices(VkCommandBuffer cb, const Slot& s, VkDeviceSize vertex_at,
 }
 
 
+// The geometry of a mesh on the GPU (the pipeline, the sets, the states and
+// the push constants are bound): the vertices of the mesh, the values of the
+// draw as one instance, the offsets, and the indices. These binds go past the
+// state of g_bound.
+void DrawMeshGeometry(VkCommandBuffer cb, const Slot& s, const MresRecord& r) {
+  const VkBuffer buffers[3] = {g_mesh_arena.buffer, s.ring.buffer, s.ring.buffer};
+  const VkDeviceSize offsets[3] = {r.mesh_vertex_at, r.vertex_at, r.offsets_at};
+  f.vkCmdBindVertexBuffers(cb, 0, r.mesh == 2 ? 3 : 2, buffers, offsets);
+  f.vkCmdBindIndexBuffer(cb, g_mesh_arena.buffer, r.mesh_index_at, VK_INDEX_TYPE_UINT16);
+  g_bound.Forget(vk_draw_math::kVertices);
+  g_bound.Forget(vk_draw_math::kIndices);
+  f.vkCmdDrawIndexed(cb, r.index_count, 1, 0, 0, 0);
+}
+
 // One draw into the command buffer of the walk, with the binds that it
 // needs.
 void PlayDraw(const Slot& s, const MresRecord& r) {
@@ -2365,16 +2379,7 @@ void PlayDraw(const Slot& s, const MresRecord& r) {
   DrawStates(cb, r.cull, r.zenable, r.zwrite, r.zfunc, r.type);
   PushDraw(cb, r.push);
   if (r.mesh != 0) {
-    // The vertices of the mesh, the values of the draw as one instance, and
-    // the offsets. These binds go past the state of g_bound.
-    const VkBuffer buffers[3] = {g_mesh_arena.buffer, s.ring.buffer, s.ring.buffer};
-    const VkDeviceSize offsets[3] = {r.mesh_vertex_at, r.vertex_at, r.offsets_at};
-    f.vkCmdBindVertexBuffers(cb, 0, r.mesh == 2 ? 3 : 2, buffers, offsets);
-    f.vkCmdBindIndexBuffer(cb, g_mesh_arena.buffer, r.mesh_index_at,
-                           VK_INDEX_TYPE_UINT16);
-    g_bound.Forget(vk_draw_math::kVertices);
-    g_bound.Forget(vk_draw_math::kIndices);
-    f.vkCmdDrawIndexed(cb, r.index_count, 1, 0, 0, 0);
+    DrawMeshGeometry(cb, s, r);
     ++g_dc_commands;
     return;
   }
@@ -2756,6 +2761,10 @@ void PlayMres(Slot& s) {
       }
       DrawStates(cb, r.cull, r.zenable, r.zwrite, r.zfunc, r.type);
       PushDraw(cb, r.push);
+      if (r.mesh != 0) {
+        DrawMeshGeometry(cb, s, r);
+        continue;
+      }
       BindVertices(cb, s, r.vertex_at, r.uv1_at);
       if (r.index_count > 0) {
         BindIndices(cb, s.ring.buffer, r.index_at, VK_INDEX_TYPE_UINT16);

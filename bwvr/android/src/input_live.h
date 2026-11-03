@@ -35,6 +35,9 @@ class InputLive {
   void WriteNoInput();
   void Stop();
   bool On() const { return file_ != nullptr; }
+  // The mapped file, or nullptr (the timeline reads and writes its fields of
+  // the head: trace_app.h).
+  input_channel::File* Channel() const { return file_; }
   // THE PLACE OF THE PLAYER that the mod wrote last (input_channel::World,
   // docs/android.md, "The motion of the stick"). False when the channel is
   // not open or each read was torn.

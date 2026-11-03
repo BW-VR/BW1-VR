@@ -15,6 +15,7 @@
 #include "app_log.h"
 #include "eye_size.h"
 #include "picture_ring.h"
+#include "trace_app.h"
 
 // The game folder that the app gives to the renderer (scene_host.cpp).
 const char* VkPlatformFolder();
@@ -1338,7 +1339,12 @@ bool XrApp::BeginFrame(XrInput* input) {
   // the line of the phase of the take (long_frames.h).
   const double wait_start = ClockMs();
   wait_end_ms_ = -1.0;
+  const int64_t trace_wait = g_app_trace ? AppTraceNow() : 0;
   if (!Ok(xrWaitFrame(session_, &wait, &frame_), "xrWaitFrame")) return false;
+  if (trace_wait != 0) {
+    static const trace_events::Def kWaitDef = {"xrWaitFrame", "xr", {nullptr, nullptr, nullptr, nullptr}};
+    AppTraceBar(&kWaitDef, trace_wait, AppTraceNow());
+  }
   wait_end_ms_ = ClockMs();
   last_wait_ms_ = wait_end_ms_ - wait_start;
   if (time_log_) times_.wait.Add(last_wait_ms_);
@@ -1351,9 +1357,14 @@ bool XrApp::BeginFrame(XrInput* input) {
   }
   const double begin_start = time_log_ ? ClockMs() : 0.0;
   XrFrameBeginInfo begin = {XR_TYPE_FRAME_BEGIN_INFO};
+  const int64_t trace_begin = g_app_trace ? AppTraceNow() : 0;
   LockQueue();
   const bool begun = Ok(xrBeginFrame(session_, &begin), "xrBeginFrame");
   UnlockQueue();
+  if (trace_begin != 0) {
+    static const trace_events::Def kBeginDef = {"xrBeginFrame (with the wait for the queue lock)", "xr", {nullptr, nullptr, nullptr, nullptr}};
+    AppTraceBar(&kBeginDef, trace_begin, AppTraceNow());
+  }
   const double actions_start = time_log_ ? ClockMs() : 0.0;
   if (time_log_) step_ms_[kStepBegin] = actions_start - begin_start;
   if (!begun) return false;
@@ -1484,6 +1495,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                            ql::AsScreen(newest_layers_) && HasEyes();
   bool world = false;
   bool window = false;
+  const int64_t trace_eyes = g_app_trace ? AppTraceNow() : 0;
   if (want_world || want_window) {
     PartTo(kPartEyes);
     for (int eye = 0; eye < 2; ++eye) {
@@ -1530,6 +1542,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     window = !world && want_window && eyes_.layer[0].released > 0 &&
              eyes_.layer[1].released > 0 && ql::AsScreen(shown_layers_);
     PartTo(kPartRest);
+    if (trace_eyes != 0) {
+      static const trace_events::Def kEyesDef = {"take of the eye pictures (CopyScreen, motion)", "session", {"world", nullptr, nullptr, nullptr}};
+      AppTraceBar(&kEyesDef, trace_eyes, AppTraceNow(), world ? 1.0f : 0.0f);
+    }
   }
   if (world) {
     // THE POSES OF THE VIEWS: the poses of the picture of each eye, with the
@@ -1543,7 +1559,28 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                              (both[0].position[2] + both[1].position[2]) * 0.5f};
       memcpy(pose_position[eye], e.position, sizeof(pose_position[eye]));
       memcpy(pose_orientation[eye], e.orientation, sizeof(pose_orientation[eye]));
+      const int64_t trace_view = g_app_trace ? AppTraceNow() : 0;
       motion_.View(eye, head, pose_position[eye], pose_orientation[eye]);
+      if (trace_view != 0) {
+        static const trace_events::Def kViewDef = {"motion of the stick (MotionComp::View)", "session", {"eye", nullptr, nullptr, nullptr}};
+        AppTraceBar(&kViewDef, trace_view, AppTraceNow(), static_cast<float>(eye));
+      }
+    }
+    // The picture that this frame shows, for a jump back in the timeline: the
+    // frame of the game, the place of the player in the world when the game drew
+    // it, and the head of that picture (LOCAL, the middle of the eyes).
+    if (g_app_trace) {
+      static const trace_events::Def kShownDef = {"picture shown (game frame, place of the camera in the world)", "session", {"frame", "world x", "world y", "world z"}};
+      static const trace_events::Def kHeadDef = {"picture shown (head of the picture, LOCAL)", "session", {"head x", "head y", "head z", "input frame"}};
+      input_channel::World w = {};
+      const bool has = motion_.ShownWorld(0, &w);
+      const scene_stream::ViewEye* both = shown_view_[0].eyes;
+      AppTracePoint(&kShownDef, static_cast<float>(shown_view_[0].frame),
+                    has ? w.offset[0] : 0.0f, has ? w.offset[1] : 0.0f, has ? w.offset[2] : 0.0f);
+      AppTracePoint(&kHeadDef, (both[0].position[0] + both[1].position[0]) * 0.5f,
+                    (both[0].position[1] + both[1].position[1]) * 0.5f,
+                    (both[0].position[2] + both[1].position[2]) * 0.5f,
+                    static_cast<float>(shown_view_[0].input_frame));
     }
     // One line for each new picture of the layer: the frame of the mod of its
     // values, and the difference of the place of the player.
@@ -1982,7 +2019,12 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   end.layers = layers;
   // THE FRAME LOOP: the copies of this frame go to the GPU in one submit,
   // and their swapchain images go back to the runtime, before xrEndFrame.
+  const int64_t trace_submit = g_app_trace ? AppTraceNow() : 0;
   SubmitFrame();
+  if (trace_submit != 0) {
+    static const trace_events::Def kSubmitDef = {"SubmitFrame (copies to the GPU)", "session", {nullptr, nullptr, nullptr, nullptr}};
+    AppTraceBar(&kSubmitDef, trace_submit, AppTraceNow());
+  }
   PartTo(kPartSwapchain);
   const double end_start = time_log_ ? ClockMs() : 0.0;
   if (parts_on_) {
@@ -1992,9 +2034,14 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       times_.part_cpu[k].Add(part_cpu_ms_[k]);
     }
   }
+  const int64_t trace_xr_end = g_app_trace ? AppTraceNow() : 0;
   LockQueue();
   Ok(xrEndFrame(session_, &end), "xrEndFrame");
   UnlockQueue();
+  if (trace_xr_end != 0) {
+    static const trace_events::Def kXrEndDef = {"xrEndFrame (with the wait for the queue lock)", "xr", {nullptr, nullptr, nullptr, nullptr}};
+    AppTraceBar(&kXrEndDef, trace_xr_end, AppTraceNow());
+  }
   // THE PARTS OF THE AGE of a new picture of this frame, and the lines of
   // the motion of the stick and of the parts each 10 s.
   if (time_log_) {

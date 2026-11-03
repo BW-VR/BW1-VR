@@ -28,6 +28,8 @@ add_library(bwvr_mod SHARED
     pass_guard.cpp
     anim_watch.cpp
     anim_trig.cpp
+    trace_rec.cpp
+    trace_waits.cpp
     turn_parts.cpp
     audio_watch.cpp
     land_light.cpp

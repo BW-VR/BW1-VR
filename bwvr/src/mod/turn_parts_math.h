@@ -27,7 +27,7 @@
 namespace turn_parts_math {
 
 // The timers, the rest (id 0) included.
-constexpr int kMaxParts = 96;
+constexpr int kMaxParts = 192;
 // A turn of this many ms or more is a long turn.
 constexpr double kLongTurnMs = 1.0;
 // A line lists a part only when its exclusive or its inclusive time is this

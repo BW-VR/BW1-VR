@@ -1266,7 +1266,15 @@ that moves while the Hand takes it.
   code", the part "SuspendThread under FEX in Wine"). Open: some runs of
   `emu_game_test.ps1` do not end (no "Quit game" in game 1), with and
   without these keys, and with no log of the app (`android.md`, "The cores
-  of the headset").
+  of the headset"). The timeline (`trace=1`, `backend.md`, "The timeline of
+  the game and the app") shows the bars of all threads of the game and of
+  the app on one clock, and the picture shown with the place of the camera
+  of its frame. Next on the Frame: `trace=1` in `bwvr.ini`, play, press the
+  combination of the left controller (X and the click of the left stick) right
+  after a stutter or a jump of the picture, take `trace-<time>.json` of the
+  app folder and read it with `tools/trace/trace_report.py` or in
+  `ui.perfetto.dev`. Not shown: the cost of the recorder on the Frame, the
+  join of the two parts, and the clock of Wine against `CLOCK_BOOTTIME`.
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

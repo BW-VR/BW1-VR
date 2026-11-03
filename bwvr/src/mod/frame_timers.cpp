@@ -41,6 +41,8 @@
 #include "frame_profile.h"
 #include "long_frame_math.h"
 #include "time_log.h"
+#include "trace_rec.h"
+#include "turn_parts.h"
 
 extern void ModLog(const char* format, ...);
 // tabletop.cpp: the render bracket of the table ends with
@@ -79,6 +81,9 @@ Slot g_slots[kSlotCount] = {
 };
 
 LARGE_INTEGER g_frequency = {0};
+// The bars of the timeline (trace_rec.h), one def for each slot. The name of a
+// def is the name of the slot.
+trace_events::Def g_trace_defs[kSlotCount] = {};
 bool g_installed = false;
 bool g_graphics_hooked = false;
 
@@ -119,6 +124,7 @@ void __fastcall MemberStub(void* self, void* unused) {
   reinterpret_cast<VoidMemberFn>(g_slots[N].original)(self, unused);
   QueryPerformanceCounter(&after);
   if (g_time_log_slow) TimeLogCall(LongCall(N), false);
+  if (g_trace) TraceBar(&g_trace_defs[N], before.QuadPart, after.QuadPart);
   Record(N, after.QuadPart - before.QuadPart);
   if (FrameProfileOn() && ProfileTimer(N) >= 0) {
     FrameProfileAdd(ProfileTimer(N), after.QuadPart - before.QuadPart);
@@ -137,8 +143,13 @@ void __fastcall GraphicsStub(void* self, void* unused, uint32_t a, uint32_t b) {
   FrameProfileGraphics(true);
   if (g_time_log_slow) TimeLogCall(long_frame_math::kGraphics, true);
   QueryPerformanceCounter(&before);
+  // The timers of the parts of the graphics engine (turn_parts.cpp) count
+  // from here to the return.
+  if (g_trace && g_turn_parts) TurnPartsGraphicsBegin();
   reinterpret_cast<GraphicsFn>(g_slots[kGraphics].original)(self, unused, a, b);
+  if (g_trace && g_turn_parts) TurnPartsGraphicsEnd();
   QueryPerformanceCounter(&after);
+  if (g_trace) TraceBar(&g_trace_defs[kGraphics], before.QuadPart, after.QuadPart);
   if (g_time_log_slow) TimeLogCall(long_frame_math::kGraphics, false);
   FrameProfileGraphics(false);
   Record(kGraphics, after.QuadPart - before.QuadPart);
@@ -164,6 +175,10 @@ bool Hook(int slot, void* replacement) {
 void FrameTimersInstall() {
   if (g_installed) return;
   QueryPerformanceFrequency(&g_frequency);
+  for (int i = 0; i < kSlotCount; ++i) {
+    g_trace_defs[i].name = g_slots[i].name;
+    g_trace_defs[i].cat = "game";
+  }
   int ok = 0;
   ok += Hook(kActions, reinterpret_cast<void*>(&ActionsStub)) ? 1 : 0;
   ok += Hook(kBufferedKeys,

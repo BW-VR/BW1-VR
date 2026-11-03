@@ -20,6 +20,7 @@
 #include "stream_ring.h"
 #include "stream_split.h"
 #include "time_log.h"
+#include "trace_rec.h"
 #include "ui_panel.h"
 #include "vk_prim_math.h"
 #include "vk_scene.h"
@@ -390,6 +391,13 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
   }
   const double took = MsSince(start);
   const double waited = wait_for_room;
+  if (g_trace) {
+    // The write of the frame into the ring: the app sees the frame when the
+    // write index moves, at the end of this bar.
+    static const trace_events::Def kPutDef = {"stream put (the frame into the ring)", "stream", {"frame", "bytes", "wait_ms", "dropped"}};
+    TraceBar(&kPutDef, start.QuadPart, TraceNow(), static_cast<float>(frame),
+             static_cast<float>(n), static_cast<float>(waited), dropped ? 1.0f : 0.0f);
+  }
   // The stats go in before the write index of the next frame, so a reader
   // that has the next frame sees them.
   sr::FrameStat* stat = &h->stats[frame % sr::kStats];
@@ -446,6 +454,7 @@ void LivePut(uint64_t frame, const uint8_t* bytes, uint32_t n, bool keep) {
 }
 
 DWORD WINAPI WorkerMain(void*) {
+  TraceNameThread("stream worker", 10);
   for (;;) {
     AcquireSRWLockExclusive(&g_worker.lock);
     while (g_worker.busy == 0) {
@@ -489,11 +498,16 @@ uint64_t WaitWorker() {
   if (InterlockedCompareExchange(&g_worker.busy, 0, 0) != 0) {
     ++g_chain_stream.waits;
     const uint64_t start = g_chain_time ? __rdtsc() : 0;
+    const int64_t trace_begin = g_trace ? TraceNow() : 0;
     AcquireSRWLockExclusive(&g_worker.lock);
     while (g_worker.busy != 0) {
       SleepConditionVariableSRW(&g_worker.changed, &g_worker.lock, INFINITE, 0);
     }
     ReleaseSRWLockExclusive(&g_worker.lock);
+    if (trace_begin != 0) {
+      static const trace_events::Def kWaitDef = {"wait for the stream worker", "wait", {nullptr, nullptr, nullptr, nullptr}};
+      TraceWait(&kWaitDef, trace_begin, TraceNow());
+    }
     if (start != 0) waited = render_chain_math::Elapsed(start, __rdtsc());
     g_chain_stream.wait_ticks += waited;
   }
@@ -527,6 +541,7 @@ void Deliver() {
   // The time of the frame thread for the ring: the wait for the frame
   // before, and the copy or the give.
   const uint64_t chain_start = g_chain_time ? __rdtsc() : 0;
+  const int64_t trace_deliver = g_trace ? TraceNow() : 0;
   LARGE_INTEGER start = {};
   const bool timed = TimeLogOn();
   if (timed) QueryPerformanceCounter(&start);
@@ -545,6 +560,10 @@ void Deliver() {
     // time_log=1: the time of the write for the line of the times.
     if (timed) TimeLogStream(MsSince(start));
     g_delivered_frame = g_unit_frame;
+  }
+  if (trace_deliver != 0) {
+    static const trace_events::Def kDeliverDef = {"stream deliver (frame thread)", "stream", {"frame", "bytes", nullptr, nullptr}};
+    TraceBar(&kDeliverDef, trace_deliver, TraceNow(), static_cast<float>(g_unit_frame), static_cast<float>(n));
   }
   if (chain_start != 0) {
     const uint64_t ticks = render_chain_math::Elapsed(chain_start, __rdtsc());

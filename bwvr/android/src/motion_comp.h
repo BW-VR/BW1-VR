@@ -41,6 +41,14 @@ class MotionComp {
   void SetMode(int mode);
   int Mode() const { return keys_.mode; }
 
+  // The place of the player in the world of the picture that the eye shows, or
+  // false (the timeline, trace_app.h).
+  bool ShownWorld(int eye, input_channel::World* out) const {
+    if (eye < 0 || eye > 1 || !shown_has_[eye]) return false;
+    *out = shown_[eye];
+    return true;
+  }
+
   // The map of the newest picture (with XrApp::SetScreenView).
   void SetNewest(bool has, const input_channel::World& world);
   // An eye took the newest picture: the map of its picture.

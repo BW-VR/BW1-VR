@@ -2512,7 +2512,10 @@ the whole call (ms, draws, states, textures and other calls a frame) and the
 device in the bars. The lines `turn parts   : graphics timers: ...` after it
 give for the 48 timers with the most own time: the name and the address, the
 timed calls a frame, the own ms a frame (the device in it), and the bars a
-frame that were under `trace_min_us`.
+frame that were under `trace_min_us`. The own ms are the time less every timer
+in the bar. The device in it is the part that no kept bar covers, so the device
+calls of a bar under `trace_min_us` in it count, and the device can be more
+than the own ms of a bar.
 
 **`PhysicsObject::DrawAll`.** The hook is in when `throw_law=2` and the bytes of
 the physics code are those of the game (`throw_physics.cpp`, the log line

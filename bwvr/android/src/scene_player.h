@@ -22,6 +22,8 @@ struct PlayResult {
   uint64_t frames = 0;
   uint64_t walks = 0;
   uint64_t draws = 0;
+  uint64_t mesh_draws = 0;  // kMeshDraw: a mesh of the game on the GPU (gpu_mesh)
+  uint64_t mesh_data = 0;   // kMeshData
   uint64_t surfaces = 0;
   uint64_t views = 0;    // kView: the projection layer of a frame
   uint64_t layers = 0;   // kCard, kPanel, kWindow: the quad layers of a frame

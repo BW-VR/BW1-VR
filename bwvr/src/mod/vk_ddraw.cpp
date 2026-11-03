@@ -750,6 +750,13 @@ class Device : public IDirect3DDevice7 {
     VkSceneRenderState(type, value);
     return D3D_OK;
   }
+  // The state that decides if a mesh takes the GPU path (gpu_mesh_math.h).
+  void MeshState(gpu_mesh_math::DeviceState* out) const {
+    out->alpha_blend = rs_[D3DRENDERSTATE_ALPHABLENDENABLE];
+    out->z_enable = rs_[D3DRENDERSTATE_ZENABLE];
+    out->z_write = rs_[D3DRENDERSTATE_ZWRITEENABLE];
+    out->stage1 = ts_[1][D3DTSS_COLOROP] > 1 && textures_[1] != nullptr;
+  }
   STDMETHOD(GetRenderState)(D3DRENDERSTATETYPE type, LPDWORD out) override {
     if (out == nullptr || static_cast<uint32_t>(type) >= kStates) {
       return DDERR_INVALIDPARAMS;
@@ -2176,6 +2183,12 @@ void VkDdrawInstall(int lines) {
 }
 
 bool VkDdrawOn() { return g_on; }
+
+bool VkDdrawMeshState(void* device, gpu_mesh_math::DeviceState* out) {
+  if (!g_on || device == nullptr) return false;
+  static_cast<const Device*>(static_cast<IDirect3DDevice7*>(device))->MeshState(out);
+  return true;
+}
 
 void VkDdrawReport(unsigned long long frames) {
   if (!g_on || frames == 0) return;

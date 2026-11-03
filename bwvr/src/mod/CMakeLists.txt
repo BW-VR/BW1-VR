@@ -45,6 +45,7 @@ add_library(bwvr_mod SHARED
     object_timer.cpp
     land_objects.cpp
     part_draw.cpp
+    gpu_mesh.cpp
     game_sse_parts.cpp
     d3d7_count.cpp
     d3d7_thread.cpp

@@ -64,6 +64,11 @@ namespace window_math {
 struct AdvisorShift;
 }
 void CutsceneWindowInstall();
+// True while the batches of an advisor get their place in front of the
+// screen (CutsceneWindowAdvisorBatch). A mesh on the GPU takes the CPU path
+// then (gpu_mesh.cpp).
+bool CutsceneWindowAdvisorNow();
+
 bool CutsceneWindowAdvisorBatch(int eye, const void* verts, uint32_t count,
                                 const uint16_t* idx, uint32_t n,
                                 window_math::AdvisorShift* shift);

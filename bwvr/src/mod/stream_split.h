@@ -9,7 +9,7 @@
 // - THE STATE stays: kStart (the options), kFrame and kFrameEnd, kGaze,
 //   kOnlyFrame, kTarget and kPanelBind (the target of the draws of the
 //   renderer, which a walk does not set again), kSurface and kWritten (the
-//   pixels of the surfaces) and kCardPicture (the picture of a card). A later
+//   pixels of the surfaces), kMeshData (the data of a mesh of the game) and kCardPicture (the picture of a card). A later
 //   frame needs them. kView (the projection layer of the frame) and kCard,
 //   kPanel and kWindow (its quad layers) stay too, but the app takes them only
 //   with a picture of their frame (view_layer_math.h, PictureView, and
@@ -42,7 +42,7 @@ namespace ss = scene_stream;
 inline bool WalkKind(uint32_t kind) {
   return kind == ss::kWalkBegin || kind == ss::kWalkEnd || kind == ss::kDraw ||
          kind == ss::kClear || kind == ss::kRenderState || kind == ss::kStageState ||
-         kind == ss::kTexture || kind == ss::kViewport;
+         kind == ss::kTexture || kind == ss::kViewport || kind == ss::kMeshDraw;
 }
 
 // The records of state of a frame (records with no head of a stream, as in

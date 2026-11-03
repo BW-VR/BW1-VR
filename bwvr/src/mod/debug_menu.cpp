@@ -143,6 +143,8 @@ int FastTransformValue();
 void FastTransformToggle(const char* by);
 int PartDrawValue();
 void PartDrawToggle(const char* by);
+int GpuMeshValue();
+void GpuMeshToggle(const char* by);
 int D3D7ThreadValue();
 void D3D7ThreadToggle(const char* by);
 int D3D7ThreadMergeValue();
@@ -411,6 +413,8 @@ const Switch kSwitches[] = {
      FastTransformValue, FastTransformToggle, L"x87|SSE"},
     {kGroupRender, L"Part draw", L"Mesh edge, triangles and offsets",
      "part_draw", PartDrawValue, PartDrawToggle, L"x87|SSE"},
+    {kGroupRender, L"GPU mesh", L"Meshes of the 3D parts on the GPU",
+     "gpu_mesh", GpuMeshValue, GpuMeshToggle, L"CPU|GPU"},
     {kGroupRender, L"Thread wait", L"Threads spin, then sleep",
      "thread_wait", ThreadWaitMode, ThreadWaitToggle, L"spin|sleep"},
     {kGroupRender, L"Read ahead", L"Read ahead of the game files",

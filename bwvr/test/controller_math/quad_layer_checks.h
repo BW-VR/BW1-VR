@@ -130,9 +130,9 @@ inline void QuadLayerChecks() {
         "the records kPanel and kWindow have one layout for the mod and the app",
         static_cast<double>(sizeof(ss::PanelBody) + sizeof(ss::WindowBody)), 312);
   Check(ss::kCard == 19 && ss::kCardPicture == 20 && ss::kPanel == 21 &&
-            ss::kWindow == 22 && ss::kLastKind == ss::kScreen && ss::kScreen == 23,
-        "the kinds of the quad layers are 19 to 22, and kScreen (23) is the last kind",
-        static_cast<double>(ss::kLastKind), 23);
+            ss::kWindow == 22 && ss::kScreen == 23 && ss::kLastKind == ss::kMeshDraw,
+        "the kinds of the quad layers are 19 to 22, kScreen is 23, and kMeshDraw (25) is the last kind",
+        static_cast<double>(ss::kLastKind), 25);
   {
     // The reader of the ring takes the new kinds, and no kind after them.
     ss::Writer w;

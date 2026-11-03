@@ -1054,6 +1054,8 @@ void CutsceneWindowInstall() {
        "the draw of a sorted object (the mesh of an advisor)");
 }
 
+bool CutsceneWindowAdvisorNow() { return g_advisor_now >= 0 && g_state.flat && g_crop > 0; }
+
 bool CutsceneWindowAdvisorBatch(int eye, const void* verts, uint32_t count,
                                 const uint16_t* idx, uint32_t n,
                                 window_math::AdvisorShift* shift) {

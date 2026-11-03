@@ -659,6 +659,8 @@ void TargetGlowPassDone() {
   g_written_count = 0;
 }
 
+bool TargetGlowActive() { return g_written_count > 0; }
+
 void TargetGlowBatch(void* verts, uint32_t count, const uint16_t* idx,
                      uint32_t indices, bool clipped, uint32_t caller) {
   if (g_written_count == 0 || verts == nullptr || count == 0 ||

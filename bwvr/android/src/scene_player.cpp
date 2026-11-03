@@ -258,6 +258,39 @@ class Player {
         ++result_->draws;
         break;
       }
+      case ss::kMeshData: {
+        // The data of a mesh of the game (gpu_mesh). It is a record of state:
+        // a frame that loses its walks keeps it.
+        ss::MeshDataBody d;
+        if (!ss::Body(body, bytes, &d)) break;
+        const uint64_t vertex_bytes = static_cast<uint64_t>(d.vertex_count) * 32;
+        const uint64_t index_bytes = static_cast<uint64_t>(d.triangle_count) * 6;
+        if (bytes < sizeof(d) + vertex_bytes + index_bytes) break;
+        const uint8_t* vertices = body + sizeof(d);
+        // The vertices and the indices follow the body with no gap. A copy
+        // puts each on its own alignment.
+        indices_.resize(static_cast<size_t>(d.triangle_count) * 3);
+        memcpy(indices_.data(), vertices + vertex_bytes, index_bytes);
+        mesh_vertices_.resize(vertex_bytes);
+        memcpy(mesh_vertices_.data(), vertices, vertex_bytes);
+        VkSceneMeshData(d.mesh, d.hash, mesh_vertices_.data(), d.vertex_count, indices_.data(),
+                        d.triangle_count);
+        ++result_->mesh_data;
+        break;
+      }
+      case ss::kMeshDraw: {
+        ss::MeshDrawBody d;
+        if (!ss::Body(body, bytes, &d)) break;
+        const uint64_t offset_bytes = static_cast<uint64_t>(d.offset_floats) * 4;
+        if (bytes < sizeof(d) + offset_bytes) break;
+        State(d.state);
+        offsets_.resize(d.offset_floats);
+        if (d.offset_floats > 0) memcpy(offsets_.data(), body + sizeof(d), offset_bytes);
+        VkSceneDrawMesh(d.mesh, d.consts, d.offset_floats > 0 ? offsets_.data() : nullptr,
+                        d.offset_floats);
+        ++result_->mesh_draws;
+        break;
+      }
       case ss::kTarget: {
         ss::TargetBody t;
         if (!ss::Body(body, bytes, &t)) break;
@@ -344,6 +377,8 @@ class Player {
   quad_layer_math::AppPictures pictures_;
   screen_quad_math::ScreenPicture screen_;
   std::vector<uint16_t> indices_;
+  std::vector<uint8_t> mesh_vertices_;
+  std::vector<float> offsets_;
   std::vector<D3DRECT> rects_;
 };
 

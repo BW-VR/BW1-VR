@@ -120,6 +120,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <unordered_map>
 #include <vector>
 
 #include "d3d7_thread.h"
@@ -143,6 +144,8 @@
 #include "vk_texture_math.h"
 #include "vk_scene_frag.h"
 #include "vk_scene_vert.h"
+#include "vk_mesh_vert.h"
+#include "gpu_mesh_math.h"
 
 void ModLog(const char* format, ...);
 // controllers.cpp
@@ -286,6 +289,10 @@ vk::Buffer g_half_buffer = {};
 bool g_half_locked = false;
 // Pipelines of the panel: no multiview, and the alpha blend of the panel.
 const uint32_t kPanelKey = 1u << 24;
+// Pipelines of the meshes on the GPU (vk_mesh.vert): no blend, and with the
+// offsets of the vertices as vertex buffer 2.
+const uint32_t kMeshKey = 1u << 25;
+const uint32_t kMeshOffsetKey = 1u << 26;
 
 // THE WALK WITHOUT DIRECT3D 9 (vk_only). On the frame thread: the key now,
 // the test key of the desktop, the frame of stereo.cpp, and a walk of
@@ -313,6 +320,8 @@ vk::Image& Target() { return g_colors[g_target]; }
 // THE PIPELINES: one for each blend (off, or a pair of factors).
 VkShaderModule g_vert = VK_NULL_HANDLE;
 VkShaderModule g_frag = VK_NULL_HANDLE;
+VkShaderModule g_mesh_vert = VK_NULL_HANDLE;
+VkShaderModule g_mesh_vert_offsets = VK_NULL_HANDLE;
 VkDescriptorSetLayout g_set_layout = VK_NULL_HANDLE;
 VkPipelineLayout g_layout = VK_NULL_HANDLE;
 VkDescriptorPool g_pool = VK_NULL_HANDLE;
@@ -430,6 +439,33 @@ bool g_said_set_failure = false;
 int g_reread_test = 0;
 int g_reread_next = 0;  // on the D3D7 thread: the next texture to read
 const VkDeviceSize kRingBytes = 32u << 20;
+
+// THE MESHES ON THE GPU (vk_mesh.vert). The data of a mesh (its vertices of
+// 32 bytes and its indices) live in the arena, a buffer of the CPU that the
+// GPU reads, by the id that the stream gave. A range that a new version of a
+// mesh replaces goes back after the walks that can read it are done.
+struct MeshEntry {
+  VkDeviceSize at;     // the vertices in the arena, then the indices
+  VkDeviceSize bytes;  // the range
+  uint64_t hash;
+  uint32_t vertex_count, triangles;
+};
+struct MeshRange {
+  VkDeviceSize at, bytes;
+  uint64_t walk;  // the walk that freed it
+};
+const VkDeviceSize kMeshArenaBytes = 64u << 20;
+vk::Buffer g_mesh_arena = {};
+VkDeviceSize g_mesh_top = 0;
+std::unordered_map<uint64_t, MeshEntry> g_meshes;
+std::vector<MeshRange> g_mesh_free;     // ranges that can be used now
+std::vector<MeshRange> g_mesh_retired;  // ranges that a walk can still read
+uint64_t g_mesh_draws = 0, g_mesh_data_records = 0, g_mesh_data_bytes = 0;
+uint64_t g_mesh_no_data = 0, g_mesh_no_room = 0, g_mesh_bad_offsets = 0;
+bool g_mesh_compare = false;
+bool g_said_mesh_room = false;
+void MeshCompare(const vk::Image& image, uint64_t frame);
+
 Slot g_slots[2];
 int g_slot = 0;
 bool g_recording = false;
@@ -588,6 +624,12 @@ struct MresRecord {
   // the move of the right eye. The pass of the centre image leaves out a
   // draw whose rect is not in the rect of the centre.
   float bounds[4];
+  // A mesh on the GPU (vk_mesh.vert): 1, or 2 with offsets. vertex_at is the
+  // place of its values in the ring, then mesh_vertex_at and mesh_index_at
+  // are places in the mesh arena, and offsets_at in the ring. index_count
+  // is the count of the indices.
+  uint32_t mesh;
+  VkDeviceSize mesh_vertex_at, mesh_index_at, offsets_at;
 };
 struct MresClear {
   uint32_t flags, color;
@@ -717,7 +759,9 @@ VkPipeline Pipeline(uint32_t key) {
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
   stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-  stages[0].module = g_vert;
+  const bool mesh = (key & kMeshKey) != 0;
+  const bool mesh_offsets = (key & kMeshOffsetKey) != 0;
+  stages[0].module = mesh ? (mesh_offsets ? g_mesh_vert_offsets : g_mesh_vert) : g_vert;
   stages[0].pName = "main";
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = g_frag;
@@ -737,6 +781,29 @@ VkPipeline Pipeline(uint32_t key) {
   input.pVertexBindingDescriptions = bindings;
   input.vertexAttributeDescriptionCount = 5;
   input.pVertexAttributeDescriptions = attributes;
+  // A mesh on the GPU: buffer 0 has the vertices of the mesh in its space,
+  // buffer 1 the values of the draw (one instance), buffer 2 the offsets.
+  const VkVertexInputBindingDescription mesh_bindings[3] = {
+      {0, 32, VK_VERTEX_INPUT_RATE_VERTEX},
+      {1, sizeof(gpu_mesh_math::Consts), VK_VERTEX_INPUT_RATE_INSTANCE},
+      {2, 12, VK_VERTEX_INPUT_RATE_VERTEX}};
+  const VkVertexInputAttributeDescription mesh_attributes[10] = {
+      {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
+      {1, 0, VK_FORMAT_R32G32_SFLOAT, 12},
+      {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 20},
+      {3, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 0},
+      {4, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 16},
+      {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 32},
+      {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 48},
+      {7, 1, VK_FORMAT_R32G32B32A32_UINT, 64},
+      {8, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 80},
+      {9, 2, VK_FORMAT_R32G32B32_SFLOAT, 0}};
+  if (mesh) {
+    input.vertexBindingDescriptionCount = mesh_offsets ? 3 : 2;
+    input.pVertexBindingDescriptions = mesh_bindings;
+    input.vertexAttributeDescriptionCount = mesh_offsets ? 10 : 9;
+    input.pVertexAttributeDescriptions = mesh_attributes;
+  }
   VkPipelineInputAssemblyStateCreateInfo assembly = {
       VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
   assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -761,7 +828,7 @@ VkPipeline Pipeline(uint32_t key) {
   VkPipelineColorBlendAttachmentState blend = {};
   blend.colorWriteMask = 0xF;
   const bool panel = (key & kPanelKey) != 0;
-  if ((key & ~kPanelKey) != 0) {
+  if ((key & ~(kPanelKey | kMeshKey | kMeshOffsetKey)) != 0) {
     blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = Factor((key >> 8) & 255);
     blend.dstColorBlendFactor = Factor(key & 255);
@@ -1523,7 +1590,10 @@ bool Ready() {
   const VkDevice device = vk::Get().device;
   g_vert = Module(kVkSceneVert, sizeof(kVkSceneVert));
   g_frag = Module(kVkSceneFrag, sizeof(kVkSceneFrag));
-  if (g_vert == VK_NULL_HANDLE || g_frag == VK_NULL_HANDLE) {
+  g_mesh_vert = Module(kVkMeshVert, sizeof(kVkMeshVert));
+  g_mesh_vert_offsets = Module(kVkMeshVertOffsets, sizeof(kVkMeshVertOffsets));
+  if (g_vert == VK_NULL_HANDLE || g_frag == VK_NULL_HANDLE ||
+      g_mesh_vert == VK_NULL_HANDLE || g_mesh_vert_offsets == VK_NULL_HANDLE) {
     return Fail("the shaders");
   }
   VkDescriptorSetLayoutBinding binding = {
@@ -1614,6 +1684,14 @@ bool Ready() {
                         true, &s.ring)) {
       return Fail("a vertex buffer");
     }
+  }
+  if (!vk::MakeBuffer(kMeshArenaBytes,
+                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                      true, &g_mesh_arena)) {
+    g_mesh_arena = {};
+    ModLog("vk scene     : the arena of the meshes on the GPU (%u MB) failed, so "
+           "gpu_mesh draws nothing",
+           static_cast<unsigned>(kMeshArenaBytes >> 20));
   }
   g_ready = true;
   ModLog("vk scene     : the Vulkan renderer is ready (the shadow test)");
@@ -2275,6 +2353,7 @@ void BindVertices(VkCommandBuffer cb, const Slot& s, VkDeviceSize vertex_at,
   f.vkCmdBindVertexBuffers(cb, 0, 2, buffers, offsets);
 }
 
+
 // One draw into the command buffer of the walk, with the binds that it
 // needs.
 void PlayDraw(const Slot& s, const MresRecord& r) {
@@ -2283,6 +2362,20 @@ void PlayDraw(const Slot& s, const MresRecord& r) {
   BindSets(cb, r.set, r.set1);
   DrawStates(cb, r.cull, r.zenable, r.zwrite, r.zfunc, r.type);
   PushDraw(cb, r.push);
+  if (r.mesh != 0) {
+    // The vertices of the mesh, the values of the draw as one instance, and
+    // the offsets. These binds go past the state of g_bound.
+    const VkBuffer buffers[3] = {g_mesh_arena.buffer, s.ring.buffer, s.ring.buffer};
+    const VkDeviceSize offsets[3] = {r.mesh_vertex_at, r.vertex_at, r.offsets_at};
+    f.vkCmdBindVertexBuffers(cb, 0, r.mesh == 2 ? 3 : 2, buffers, offsets);
+    f.vkCmdBindIndexBuffer(cb, g_mesh_arena.buffer, r.mesh_index_at,
+                           VK_INDEX_TYPE_UINT16);
+    g_bound.Forget(vk_draw_math::kVertices);
+    g_bound.Forget(vk_draw_math::kIndices);
+    f.vkCmdDrawIndexed(cb, r.index_count, 1, 0, 0, 0);
+    ++g_dc_commands;
+    return;
+  }
   BindVertices(cb, s, r.vertex_at, r.uv1_at);
   if (r.index_count > 0) {
     BindIndices(cb, s.ring.buffer, r.index_at,
@@ -2304,7 +2397,8 @@ vk_draw_math::Draw FactsOf(const MresRecord& r) {
   d.zenable = r.zenable;
   d.zwrite = r.zwrite;
   d.zfunc = r.zfunc;
-  d.type = r.type;
+  // A mesh on the GPU is no triangle list of the ring: no join.
+  d.type = r.mesh != 0 ? 99u : r.type;
   d.push = &r.push;
   d.push_bytes = sizeof(r.push);
   d.vertex_at = r.vertex_at;
@@ -3680,6 +3774,7 @@ void EndOnWorker(const void*) {
     if (g_panel_drawn) {
       WritePicture(g_panels[g_target], 0, "panel", g_picture_frame);
     }
+    if (g_mesh_compare && !g_walk_mres) MeshCompare(Target(), g_picture_frame);
     // FOVEATED RESOLUTION: the two images of the left eye too.
     if (g_walk_mres) {
       WritePicture(g_mres_color[0], 0, "outer", g_picture_frame,
@@ -4190,7 +4285,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
         if (v[2] < 1.0f) all_far = false;
       }
       still = all_rhw_one || all_far ? 1u : 0u;
-      push.depth[2] = OneWalkShiftPerRhw();
+      push.depth[2] = g_mesh_compare ? 0.0f : OneWalkShiftPerRhw();
     }
   }
   push.ops[0] = (ts[D3DTSS_COLOROP] & 255) | (ts[D3DTSS_COLORARG1] & 255) << 8 |
@@ -4304,6 +4399,368 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
     return;
   }
   PlayDraw(s, r);
+}
+
+// ---------------------------------------------------------------------------
+// THE MESHES ON THE GPU (gpu_mesh_math.h, vk_mesh.vert).
+
+namespace {
+
+// A range of the arena for `bytes`, from the ranges that are free now or from
+// the top. False when the arena is full.
+bool MeshAlloc(VkDeviceSize bytes, VkDeviceSize* at, VkDeviceSize* got) {
+  bytes = (bytes + 15) & ~15ull;
+  for (size_t i = 0; i < g_mesh_free.size(); ++i) {
+    MeshRange& r = g_mesh_free[i];
+    if (r.bytes < bytes) continue;
+    *at = r.at;
+    *got = r.bytes;
+    g_mesh_free.erase(g_mesh_free.begin() + static_cast<ptrdiff_t>(i));
+    return true;
+  }
+  if (g_mesh_top + bytes > kMeshArenaBytes) return false;
+  *at = g_mesh_top;
+  *got = bytes;
+  g_mesh_top += bytes;
+  return true;
+}
+
+// The ranges that a walk freed go back to the free ranges when the walks
+// that can read them are done. A walk waits for the fence of its slot at its
+// start, so the walks before the walk one before are done.
+void MeshReclaim() {
+  size_t keep = 0;
+  for (size_t i = 0; i < g_mesh_retired.size(); ++i) {
+    if (g_mesh_retired[i].walk + 3 <= g_walk_number) {
+      g_mesh_free.push_back(g_mesh_retired[i]);
+    } else {
+      g_mesh_retired[keep++] = g_mesh_retired[i];
+    }
+  }
+  g_mesh_retired.resize(keep);
+}
+
+// One layer of an eye image as RGBA bytes.
+bool ReadLayerPixels(const vk::Image& image, uint32_t layer, std::vector<uint8_t>* out) {
+  const uint32_t w = image.width, h = image.height;
+  vk::Buffer read;
+  if (!vk::MakeBuffer(static_cast<VkDeviceSize>(w) * h * 4,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, &read)) {
+    return false;
+  }
+  VkCommandBuffer cb = vk::BeginOnce();
+  const VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  vk::Barrier(cb, image.image, VK_IMAGE_ASPECT_COLOR_BIT, layout,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, image.layers);
+  VkBufferImageCopy copy = {};
+  copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1};
+  copy.imageExtent = {w, h, 1};
+  f.vkCmdCopyImageToBuffer(cb, image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           read.buffer, 1, &copy);
+  vk::Barrier(cb, image.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, layout, 1, image.layers);
+  if (!vk::EndOnce(cb)) {
+    vk::FreeBuffer(&read);
+    return false;
+  }
+  out->assign(static_cast<const uint8_t*>(read.mapped),
+              static_cast<const uint8_t*>(read.mapped) + static_cast<size_t>(w) * h * 4);
+  vk::FreeBuffer(&read);
+  return true;
+}
+
+// gpu_mesh=2: the left layer has the meshes with the CPU path, the right layer
+// the same meshes on the GPU, and all other draws are in both. The log has the
+// pixels that differ, and a file has the difference.
+void MeshCompare(const vk::Image& image, uint64_t frame) {
+  std::vector<uint8_t> a, b;
+  if (!ReadLayerPixels(image, 0, &a) || !ReadLayerPixels(image, 1, &b)) return;
+  const uint32_t w = image.width, h = image.height;
+  const size_t pixels = static_cast<size_t>(w) * h;
+  uint64_t over_24 = 0, over_0 = 0, sum = 0, over_80 = 0;
+  uint32_t most = 0;
+  uint32_t box[4] = {w, h, 0, 0};
+  std::vector<uint8_t> diff(pixels * 3);
+  for (size_t i = 0; i < pixels; ++i) {
+    uint32_t d = 0;
+    for (int c = 0; c < 3; ++c) {
+      const int x = a[i * 4 + c], y = b[i * 4 + c];
+      const uint32_t e = static_cast<uint32_t>(x > y ? x - y : y - x);
+      if (e > d) d = e;
+    }
+    const uint8_t shown = static_cast<uint8_t>(d > 63 ? 255 : d * 4);
+    diff[i * 3] = diff[i * 3 + 1] = diff[i * 3 + 2] = shown;
+    if (d == 0) continue;
+    ++over_0;
+    sum += d;
+    if (d > most) most = d;
+    if (d > 24) {
+      ++over_24;
+      const uint32_t x = static_cast<uint32_t>(i % w), y = static_cast<uint32_t>(i / w);
+      if (x < box[0]) box[0] = x;
+      if (y < box[1]) box[1] = y;
+      if (x > box[2]) box[2] = x;
+      if (y > box[3]) box[3] = y;
+    }
+    if (d > 80) ++over_80;
+  }
+  const double all = static_cast<double>(pixels);
+  ModLog("vk scene     : mesh compare, frame %llu, %u by %u: the left layer (the CPU "
+         "path) and the right layer (the GPU path) differ in %llu pixels (%.4f percent), "
+         "in %llu pixels (%.4f percent) by more than 24 levels, in %llu (%.4f percent) "
+         "by more than 80. The most is %u levels, the mean of the pixels that differ "
+         "is %.2f levels. The box of the pixels over 24: x %u to %u, y %u to %u",
+         frame, w, h, over_0, 100.0 * static_cast<double>(over_0) / all, over_24,
+         100.0 * static_cast<double>(over_24) / all, over_80,
+         100.0 * static_cast<double>(over_80) / all, most,
+         over_0 > 0 ? static_cast<double>(sum) / static_cast<double>(over_0) : 0.0, box[0],
+         box[2], box[1], box[3]);
+#ifdef _WIN32
+  char path[MAX_PATH];
+  GetModuleFileNameA(GetModuleHandleA(nullptr), path, MAX_PATH);
+  char* slash = strrchr(path, '\\');
+  if (slash != nullptr) slash[1] = 0;
+  char name[64];
+  sprintf_s(name, "bwvr-vk-meshdiff-%05llu.bmp", frame);
+  strcat_s(path, name);
+  FILE* out = nullptr;
+  if (fopen_s(&out, path, "wb") == 0 && out != nullptr) {
+    const uint32_t row = (w * 3 + 3) & ~3u;
+    const uint32_t data = row * h;
+    uint8_t header[54] = {'B', 'M'};
+    const uint32_t file = 54 + data;
+    memcpy(header + 2, &file, 4);
+    const uint32_t offset = 54, info = 40, planes_bits = 1 | (24 << 16);
+    memcpy(header + 10, &offset, 4);
+    memcpy(header + 14, &info, 4);
+    memcpy(header + 18, &w, 4);
+    memcpy(header + 22, &h, 4);
+    memcpy(header + 26, &planes_bits, 4);
+    memcpy(header + 34, &data, 4);
+    fwrite(header, 1, 54, out);
+    std::vector<uint8_t> line(row, 0);
+    for (uint32_t y = 0; y < h; ++y) {
+      memcpy(line.data(), diff.data() + static_cast<size_t>(h - 1 - y) * w * 3, w * 3);
+      fwrite(line.data(), 1, row, out);
+    }
+    fclose(out);
+    ModLog("vk scene     : the difference (four times the largest channel) is in %s", path);
+  }
+#endif
+}
+
+}  // namespace
+
+void VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
+                     uint32_t vertex_count, const uint16_t* indices,
+                     uint32_t triangles) {
+  BWVR_STREAM(VkStreamMeshData(mesh, hash, vertices, vertex_count, indices, triangles));
+  if (!g_device || g_failed || g_mesh_arena.buffer == VK_NULL_HANDLE ||
+      vertices == nullptr || indices == nullptr || vertex_count == 0 || triangles == 0) {
+    return;
+  }
+  MeshReclaim();
+  auto it = g_meshes.find(mesh);
+  if (it != g_meshes.end() && it->second.hash == hash &&
+      it->second.vertex_count == vertex_count && it->second.triangles == triangles) {
+    return;
+  }
+  const VkDeviceSize vertex_bytes = static_cast<VkDeviceSize>(vertex_count) * 32;
+  const VkDeviceSize index_bytes = (static_cast<VkDeviceSize>(triangles) * 6 + 3) & ~3ull;
+  VkDeviceSize at = 0, got = 0;
+  if (it != g_meshes.end()) {
+    g_mesh_retired.push_back({it->second.at, it->second.bytes, g_walk_number});
+    g_meshes.erase(it);
+  }
+  if (!MeshAlloc(vertex_bytes + index_bytes, &at, &got)) {
+    ++g_mesh_no_room;
+    if (!g_said_mesh_room) {
+      g_said_mesh_room = true;
+      ModLog("vk scene     : the arena of the meshes on the GPU is full (%u MB), so "
+             "a mesh has no data and the draw of it is left out",
+             static_cast<unsigned>(kMeshArenaBytes >> 20));
+    }
+    return;
+  }
+  uint8_t* base = static_cast<uint8_t*>(g_mesh_arena.mapped);
+  memcpy(base + at, vertices, static_cast<size_t>(vertex_bytes));
+  memcpy(base + at + vertex_bytes, indices, static_cast<size_t>(triangles) * 6);
+  MeshEntry e = {at, got, hash, vertex_count, triangles};
+  g_meshes[mesh] = e;
+  ++g_mesh_data_records;
+  g_mesh_data_bytes += vertex_bytes + index_bytes;
+}
+
+void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
+                     const float* offsets, uint32_t offset_floats) {
+  BWVR_STREAM(VkStreamDrawMesh(mesh, consts, offsets, offset_floats));
+  if (g_bare_walk || !g_recording) return;
+  // A mesh is a draw of the world: not for the panel.
+  if (ForPanel() || OffTarget()) {
+    ++g_skipped;
+    ++g_skip_target;
+    return;
+  }
+  const auto found = g_meshes.find(mesh);
+  if (g_mesh_arena.buffer == VK_NULL_HANDLE || found == g_meshes.end()) {
+    ++g_mesh_no_data;
+    ++g_skipped;
+    return;
+  }
+  const MeshEntry& m = found->second;
+  const bool with_offsets = offsets != nullptr && offset_floats != 0;
+  if (with_offsets && offset_floats != m.vertex_count * 3) {
+    ++g_mesh_bad_offsets;
+    ++g_skipped;
+    return;
+  }
+  Slot& s = g_slots[g_slot];
+  const VkDeviceSize data_bytes = sizeof(gpu_mesh_math::Consts);
+  const VkDeviceSize offset_bytes =
+      with_offsets ? static_cast<VkDeviceSize>(m.vertex_count) * 12 : 0;
+  if (s.used + data_bytes + offset_bytes + 64 > kRingBytes) {
+    ++g_skipped;
+    ++g_skip_ring;
+    return;
+  }
+  VkPipeline pipeline = Pipeline(kMeshKey | (with_offsets ? kMeshOffsetKey : 0u));
+  if (pipeline == VK_NULL_HANDLE) {
+    ++g_skipped;
+    ++g_skip_state;
+    return;
+  }
+  const uint32_t* rs = g_rs;
+  Texture* texture = TextureOf(g_texture);
+  texture->used_walk = g_walk_number;
+  const uint32_t* ts = g_ts[0];
+  VkSampler sampler =
+      Sampler(ts[D3DTSS_MAGFILTER], ts[D3DTSS_MINFILTER], ts[D3DTSS_MIPFILTER],
+              ts[D3DTSS_ADDRESSU] != 0 ? ts[D3DTSS_ADDRESSU] : 1,
+              ts[D3DTSS_ADDRESSV] != 0 ? ts[D3DTSS_ADDRESSV] : 1,
+              ts[D3DTSS_MAXANISOTROPY]);
+  VkDescriptorSet set = SetOf(texture, sampler);
+  if (set == VK_NULL_HANDLE) {
+    ++g_skipped;
+    ++g_skip_state;
+    return;
+  }
+  uint8_t* ring = static_cast<uint8_t*>(s.ring.mapped);
+  const VkDeviceSize data_at = s.used;
+  memcpy(ring + data_at, &consts, sizeof(consts));
+  s.used += data_bytes;
+  const VkDeviceSize offsets_at = s.used;
+  if (with_offsets) {
+    memcpy(ring + offsets_at, offsets, static_cast<size_t>(offset_bytes));
+    s.used += offset_bytes;
+  }
+  s.used = (s.used + 31) & ~31ull;
+
+  DrawPush push = {};
+  push.viewport[0] = static_cast<float>(g_viewport.dwX);
+  push.viewport[1] = static_cast<float>(g_viewport.dwY);
+  push.viewport[2] = 2.0f / static_cast<float>(g_viewport.dwWidth);
+  push.viewport[3] = 2.0f / static_cast<float>(g_viewport.dwHeight);
+  const float range = g_viewport.dvMaxZ - g_viewport.dvMinZ;
+  push.depth[0] = g_viewport.dvMinZ;
+  push.depth[1] = range > 0.0f ? 1.0f / range : 1.0f;
+  // The eyes of the draw and the move of the right eye: a mesh moves.
+  uint32_t eyes = g_walk_right ? 2u : 1u;
+  uint32_t still = 1u;
+  if (OneWalkActive()) {
+    const int mode = OneWalkModeNow();
+    eyes = mode == kOneWalkLeftOnly ? 1u : mode == kOneWalkRightOnly ? 2u : 3u;
+    if (mode == kOneWalkBoth) {
+      still = 0u;
+      push.depth[2] = g_mesh_compare ? 0.0f : OneWalkShiftPerRhw();
+    }
+  }
+  push.ops[0] = (ts[D3DTSS_COLOROP] & 255) | (ts[D3DTSS_COLORARG1] & 255) << 8 |
+                (ts[D3DTSS_COLORARG2] & 255) << 16;
+  push.ops[1] = (ts[D3DTSS_ALPHAOP] & 255) | (ts[D3DTSS_ALPHAARG1] & 255) << 8 |
+                (ts[D3DTSS_ALPHAARG2] & 255) << 16;
+  if (texture == g_white && g_untextured) {
+    const auto uses_texture = [](uint32_t op) {
+      return ((op >> 8) & D3DTA_SELECTMASK) == D3DTA_TEXTURE ||
+             ((op >> 16) & D3DTA_SELECTMASK) == D3DTA_TEXTURE;
+    };
+    const uint32_t kDiffuse = D3DTOP_SELECTARG1 | D3DTA_DIFFUSE << 8;
+    if (uses_texture(push.ops[0])) push.ops[0] = kDiffuse;
+    if (uses_texture(push.ops[1])) push.ops[1] = kDiffuse;
+  }
+  uint32_t flags = texture != g_white ? 1u : 0u;
+  if (rs[D3DRENDERSTATE_ALPHATESTENABLE] != 0) {
+    flags |= 2u | (rs[D3DRENDERSTATE_ALPHAFUNC] & 15) << 4;
+  }
+  if (rs[D3DRENDERSTATE_SPECULARENABLE] != 0) flags |= 0x100u;
+  if (rs[D3DRENDERSTATE_FOGENABLE] != 0 && rs[D3DRENDERSTATE_FOGTABLEMODE] == 0) {
+    flags |= 0x200u;
+  }
+  push.ops[2] = flags;
+  push.ops[3] = still | eyes << 8;
+  push.alpha[0] = static_cast<float>(rs[D3DRENDERSTATE_ALPHAREF] & 255) / 255.0f;
+  const uint32_t fog = rs[D3DRENDERSTATE_FOGCOLOR];
+  push.fog_color[0] = static_cast<float>((fog >> 16) & 255) / 255.0f;
+  push.fog_color[1] = static_cast<float>((fog >> 8) & 255) / 255.0f;
+  push.fog_color[2] = static_cast<float>(fog & 255) / 255.0f;
+  push.fog_color[3] = 1.0f;
+
+  MresRecord r = {};
+  r.clear = -1;
+  r.pipeline = pipeline;
+  r.set = set;
+  r.cull = rs[D3DRENDERSTATE_CULLMODE];
+  r.zenable = rs[D3DRENDERSTATE_ZENABLE];
+  r.zwrite = rs[D3DRENDERSTATE_ZWRITEENABLE];
+  r.zfunc = rs[D3DRENDERSTATE_ZFUNC];
+  r.type = 4;  // D3DPT_TRIANGLELIST
+  r.push = push;
+  r.vertex_at = data_at;
+  r.vertex_count = m.vertex_count;
+  r.index_count = m.triangles * 3;
+  r.mesh = with_offsets ? 2u : 1u;
+  r.mesh_vertex_at = m.at;
+  r.mesh_index_at = m.at + static_cast<VkDeviceSize>(m.vertex_count) * 32;
+  r.offsets_at = offsets_at;
+  ++g_mesh_draws;
+  if (g_walk_mres) {
+    if (g_walk_follow) {
+      r.viewport[0] = static_cast<float>(g_viewport.dwX);
+      r.viewport[1] = static_cast<float>(g_viewport.dwY);
+      r.viewport[2] = static_cast<float>(g_viewport.dwWidth);
+      r.viewport[3] = static_cast<float>(g_viewport.dwHeight);
+    } else {
+      r.viewport[2] = static_cast<float>(Target().width);
+      r.viewport[3] = static_cast<float>(Target().height);
+    }
+    // The rect of the vertices is not known: the whole viewport.
+    r.bounds[0] = r.bounds[1] = -1e9f;
+    r.bounds[2] = r.bounds[3] = 1e9f;
+    g_mres_records.push_back(r);
+    ++g_draws;
+    return;
+  }
+  UsePanel(false);
+  KeepPicture();
+  ++g_dc_draws;
+  ++g_draws;
+  if (g_walk_queue) {
+    g_queue.push_back(r);
+    return;
+  }
+  PlayDraw(s, r);
+}
+
+void VkSceneSetMesh(int compare) { g_mesh_compare = compare != 0; }
+
+void VkSceneTakeMeshCounts(VkSceneMeshCounts* out) {
+  out->draws = g_mesh_draws;
+  out->data_records = g_mesh_data_records;
+  out->data_bytes = g_mesh_data_bytes;
+  out->no_data = g_mesh_no_data;
+  out->no_room = g_mesh_no_room;
+  out->meshes = static_cast<uint32_t>(g_meshes.size());
+  out->arena_bytes = g_mesh_top;
+  g_mesh_draws = g_mesh_data_records = g_mesh_data_bytes = g_mesh_no_data = g_mesh_no_room = 0;
 }
 
 void VkSceneSetPanel(int on) {

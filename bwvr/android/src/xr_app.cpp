@@ -914,10 +914,18 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
   info.faceCount = 1;
   info.arraySize = 1;
   info.mipCount = 1;
-  if (!Ok(xrCreateSwapchain(session_, &info, &layer->swapchain),
-          "xrCreateSwapchain")) {
+  const XrResult created = xrCreateSwapchain(session_, &info, &layer->swapchain);
+  if (!Ok(created, "xrCreateSwapchain")) {
+    AppLog("xr           : the swapchain of %u by %u was not made%s. The app holds %d "
+           "swapchains now", width, height,
+           created == XR_ERROR_LIMIT_REACHED
+               ? " (XR_ERROR_LIMIT_REACHED: the runtime has no more swapchains or memory for "
+                 "them)"
+               : "",
+           Swapchains());
     return false;
   }
+  swapchains_.fetch_add(1, std::memory_order_relaxed);
   uint32_t count = 0;
   xrEnumerateSwapchainImages(layer->swapchain, 0, &count, nullptr);
   layer->images.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR});
@@ -1785,7 +1793,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         if (wall_.swapchain == XR_NULL_HANDLE && !wall_failed_) {
           if (!MakeLayer(&wall_, ql::kWallPixels, ql::kWallPixels)) {
             wall_failed_ = true;
-            if (wall_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(wall_.swapchain);
+            if (wall_.swapchain != XR_NULL_HANDLE) DestroySwapchain(wall_.swapchain);
             FreeStaging(&gpu_, &wall_.staging);
             wall_ = Layer();
             AppLog("xr           : no swapchain for the walls of the cut scene window, so "
@@ -2197,13 +2205,13 @@ void XrApp::SetScreenQuadPixels(const scene_stream::ScreenBody& body,
     vkDeviceWaitIdle(gpu_.device);
     UnlockQueue();
     FreeStaging(&gpu_, &flat_pixels_.staging);
-    xrDestroySwapchain(flat_pixels_.swapchain);
+    DestroySwapchain(flat_pixels_.swapchain);
     flat_pixels_ = Layer();
   }
   if (flat_pixels_.swapchain == XR_NULL_HANDLE) {
     if (flat_pixels_failed_) return;
     if (!MakeLayer(&flat_pixels_, width, height)) {
-      if (flat_pixels_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(flat_pixels_.swapchain);
+      if (flat_pixels_.swapchain != XR_NULL_HANDLE) DestroySwapchain(flat_pixels_.swapchain);
       FreeStaging(&gpu_, &flat_pixels_.staging);
       flat_pixels_ = Layer();
       flat_pixels_failed_ = true;
@@ -2242,13 +2250,13 @@ bool XrApp::TakeCard(int index, const scene_stream::CardBody& body,
     vkDeviceWaitIdle(gpu_.device);
     UnlockQueue();
     FreeStaging(&gpu_, &k.layer.staging);
-    xrDestroySwapchain(k.layer.swapchain);
+    DestroySwapchain(k.layer.swapchain);
     k.layer = Layer();
     k.picture = 0;
   }
   if (k.layer.swapchain == XR_NULL_HANDLE) {
     if (!MakeLayer(&k.layer, body.texture_width, body.texture_height)) {
-      if (k.layer.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(k.layer.swapchain);
+      if (k.layer.swapchain != XR_NULL_HANDLE) DestroySwapchain(k.layer.swapchain);
       FreeStaging(&gpu_, &k.layer.staging);
       k.layer = Layer();
       k.failed = true;
@@ -2298,12 +2306,12 @@ bool XrApp::TakeCard(int index, const scene_stream::CardBody& body,
 void XrApp::FreeLayers() {
   for (Card& k : cards_) {
     FreeStaging(&gpu_, &k.layer.staging);
-    if (k.layer.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(k.layer.swapchain);
+    if (k.layer.swapchain != XR_NULL_HANDLE) DestroySwapchain(k.layer.swapchain);
     k.layer = Layer();
   }
   FreeScreenSet(&panel_);
   FreeStaging(&gpu_, &wall_.staging);
-  if (wall_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(wall_.swapchain);
+  if (wall_.swapchain != XR_NULL_HANDLE) DestroySwapchain(wall_.swapchain);
   wall_ = Layer();
 }
 
@@ -2507,11 +2515,90 @@ bool XrApp::MakeBetween(Screen* screen, const char** why) {
   return true;
 }
 
+void XrApp::DestroySwapchain(XrSwapchain swapchain) {
+  if (swapchain == XR_NULL_HANDLE) return;
+  xrDestroySwapchain(swapchain);
+  swapchains_.fetch_sub(1, std::memory_order_relaxed);
+}
+
+void XrApp::DropSet(Screen* screen) {
+  FreeScreenSet(screen);
+  *screen = Screen();
+}
+
+// A NEW PLAY (xr_resize_free): no game runs, so the play thread does not
+// run, and the session shows no picture of a slot. A set that the render of
+// this Play does not give its size goes (swapchain_free_math::FreeAtPlay), and
+// the next picture makes it at the new size. The failed flags clear, so a
+// set that the runtime refused is tried again.
+void XrApp::NewPlay(uint32_t width, uint32_t height) {
+  namespace sf = swapchain_free_math;
+  AppLog("xr           : a new Play with a render of %u by %u. The app holds %d swapchains "
+         "(xr_resize_free=%d)", width, height, Swapchains(), resize_free_ ? 1 : 0);
+  if (!resize_free_ || gpu_.device == VK_NULL_HANDLE) return;
+  LockQueue();
+  vkDeviceWaitIdle(gpu_.device);
+  struct Item {
+    const char* name;
+    Screen* set;
+    sf::Kind kind;
+    uint32_t made_width, made_height;
+  };
+  std::vector<Item> items = {
+      {"the projection layer", &eyes_, sf::kEyes, eyes_.layer[0].width, eyes_.layer[0].height},
+      {"the stereo screen", &screen_, sf::kScreen, screen_.layer[0].width,
+       screen_.layer[0].height},
+      {"the panel image", &panel_, sf::kPanel, panel_.layer[0].width, panel_.layer[0].height},
+      {"the screen quad", &flat_, sf::kFlat, flat_.layer[0].width, flat_.layer[0].height}};
+  char said[512] = "";
+  int freed = 0;
+  size_t used = 0;
+  auto note = [&](const char* name, uint32_t w, uint32_t h) {
+    ++freed;
+    used += snprintf(said + used, sizeof(said) - used, "%s%s (%u by %u)", used ? ", " : "", name,
+                     w, h);
+    if (used >= sizeof(said)) used = sizeof(said) - 1;
+  };
+  for (const Item& it : items) {
+    if (sf::FreeAtPlay(resize_free_, Made(*it.set), it.made_width, it.made_height, it.kind, width,
+                       height)) {
+      note(it.name, it.made_width, it.made_height);
+      DropSet(it.set);
+    }
+  }
+  for (int i = 0; i < frame_loop::kSlots; ++i) {
+    DirectSet& d = direct_[i];
+    if (sf::FreeAtPlay(resize_free_, Made(d.set), d.made_width, d.made_height, sf::kDirect, width,
+                       height)) {
+      char name[40];
+      snprintf(name, sizeof(name), "the slot %d", i);
+      note(name, d.set.layer[0].width, d.set.layer[0].height);
+      DropSet(&d.set);
+    }
+    d.replaced = 0;
+    if (sf::ClearFailedAtPlay(resize_free_)) d.failed = false;
+  }
+  if (sf::ClearFailedAtPlay(resize_free_)) {
+    eyes_.failed = screen_.failed = panel_.failed = flat_.failed = false;
+    flat_pixels_failed_ = false;
+    for (Card& k : cards_) k.failed = false;
+  }
+  UnlockQueue();
+  // No eye shows a slot of the Play before, and no layer of the first frames
+  // names a set that went.
+  if (!Made(panel_)) panel_shown_ = false;
+  if (!Made(flat_)) flat_on_ = false;
+  shown_direct_[0] = shown_direct_[1] = -1;
+  direct_newest_ = -1;
+  AppLog("xr           : the new Play freed %d sets of another size%s%s. The app holds %d "
+         "swapchains now", freed, freed ? ": " : "", said, Swapchains());
+}
+
 void XrApp::FreeScreenSet(Screen* screen) {
   FreeOnce(screen);
   for (Layer& l : screen->layer) {
     FreeStaging(&gpu_, &l.staging);
-    if (l.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(l.swapchain);
+    if (l.swapchain != XR_NULL_HANDLE) DestroySwapchain(l.swapchain);
     l.swapchain = XR_NULL_HANDLE;
     l.pending = -1;
   }
@@ -2573,6 +2660,30 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
   if (!eye_direct_ || slot < 0 || slot >= frame_loop::kSlots || SwapRedBlue()) return false;
   DirectSet& d = direct_[slot];
   if (d.failed) return false;
+  // A picture that would go straight into the swapchains of the slot does not
+  // fit in them (a new render size in this process, or a larger atlas): the
+  // slot frees them and makes two at the size of the picture, so the picture
+  // does not need the swapchains of the old way at the new size.
+  // The slot is not the shown slot, so no layer of a frame names its
+  // swapchains. The runtime keeps a swapchain until the compositor is done
+  // with it. The GPU finished the copies of the slot before it was free.
+  if (Made(d.set)) {
+    const bool fits = eye_copy_math::DirectFits(d.set.layer[0].width, d.set.layer[0].height,
+                                                atlas, width, height);
+    if (swapchain_free_math::ReplaceDirect(resize_free_, fits, d.replaced)) {
+      const uint32_t old_width = d.set.layer[0].width, old_height = d.set.layer[0].height;
+      LockQueue();
+      vkDeviceWaitIdle(gpu_.device);
+      DropSet(&d.set);
+      UnlockQueue();
+      ++d.replaced;
+      AppLog("xr           : slot %d of the ring: its two swapchains of %u by %u do not fit "
+             "the eye pictures of %u by %u (replacement %d of at most %d). They are freed, "
+             "and the slot makes two for the new size (xr_resize_free=1). The app holds %d "
+             "swapchains now", slot, old_width, old_height, width, height, d.replaced,
+             swapchain_free_math::kMostReplaces, Swapchains());
+    }
+  }
   if (!Made(d.set)) {
     uint32_t sw = 0, sh = 0;
     eye_copy_math::DirectSize(atlas, width, height, &sw, &sh);
@@ -2587,13 +2698,16 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
              slot, sw, sh, why);
       return false;
     }
+    d.made_width = width;
+    d.made_height = height;
     AppLog("xr           : slot %d of the ring: two swapchains of %u by %u for the eye "
            "pictures of %u by %u, which the play thread copies straight into them "
-           "(xr_eye_direct=1, %s)",
+           "(xr_eye_direct=1, %s). The app holds %d swapchains now",
            slot, sw, sh, width, height,
            eye_copy_math::AtlasOf(atlas, width, height)
                ? "the part of the outer rect and the centre rect"
-               : "the whole picture");
+               : "the whole picture",
+           Swapchains());
   }
   if (!eye_copy_math::DirectFits(d.set.layer[0].width, d.set.layer[0].height, atlas, width,
                                  height)) {
@@ -3359,20 +3473,20 @@ void XrApp::Stop() {
   FreeLayers();
   FreeScreenSet(&flat_);
   FreeStaging(&gpu_, &flat_pixels_.staging);
-  if (flat_pixels_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(flat_pixels_.swapchain);
+  if (flat_pixels_.swapchain != XR_NULL_HANDLE) DestroySwapchain(flat_pixels_.swapchain);
   flat_pixels_ = Layer();
   flat_source_ = VK_NULL_HANDLE;
   flat_on_ = false;
   FreeStaging(&gpu_, &menu_.staging);
   FreeStaging(&gpu_, &cursor_.staging);
   FreeStaging(&gpu_, &keyboard_.staging);
-  if (keyboard_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(keyboard_.swapchain);
+  if (keyboard_.swapchain != XR_NULL_HANDLE) DestroySwapchain(keyboard_.swapchain);
   keyboard_.swapchain = XR_NULL_HANDLE;
   FreeScreenSet(&screen_);
   FreeScreenSet(&eyes_);
   screen_source_ = VK_NULL_HANDLE;
-  if (menu_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(menu_.swapchain);
-  if (cursor_.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(cursor_.swapchain);
+  if (menu_.swapchain != XR_NULL_HANDLE) DestroySwapchain(menu_.swapchain);
+  if (cursor_.swapchain != XR_NULL_HANDLE) DestroySwapchain(cursor_.swapchain);
   menu_.swapchain = cursor_.swapchain = XR_NULL_HANDLE;
   for (XrSpace& s : aim_space_) {
     if (s != XR_NULL_HANDLE) xrDestroySpace(s);

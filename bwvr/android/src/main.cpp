@@ -1195,6 +1195,19 @@ void Play(App* app, bool new_game) {
   // THE PHASE OF THE TAKE (docs/android.md, "The long frames"): a new window
   // of its line, with the input channel for the world of the mod.
   app->take_phase.GameStarts(app->play_ms, &app->input_live);
+  // xr_resize_free (1 by default): a new Play frees the swapchains that have
+  // another size than the render of this game and makes them again at the new
+  // size, and a slot of xr_eye_direct=1 does the same for a picture that does
+  // not fit. 0: the sets stay as they are.
+  const bool resize_free = app->ini.GetInt("bwvr", "xr_resize_free", 1) != 0;
+  app->xr.SetResizeFree(resize_free);
+  AppLog("game         : xr_resize_free=%d. %s", resize_free ? 1 : 0,
+         resize_free ? "A set of swapchains of another size than the render goes at this "
+                       "Play and is made again at the new size, and a slot of the ring "
+                       "whose swapchains do not fit a picture makes new ones"
+                     : "The swapchains stay as they are, and a picture that does not fit "
+                       "takes the old way");
+  app->xr.NewPlay(game.width, game.height);
   app->xr.SetFrameLoop(loop);
   if (loop) {
     StartPlayThread(app);

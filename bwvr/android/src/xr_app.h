@@ -28,6 +28,7 @@
 #include "../../src/mod/fovea_res_math.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
+#include "../../src/mod/swapchain_free_math.h"
 #include "../../src/mod/time_log_math.h"
 #include "../../src/mod/vk_core.h"
 #include "frame_loop.h"
@@ -424,6 +425,19 @@ class XrApp {
   // place of SetScreenSource. The values of SetScreenView and SetScreenAtlas
   // go with it.
   void SetDirectSource(int slot);
+  // A NEW RENDER SIZE IN THE SAME PROCESS (xr_resize_free, 1 by default,
+  // docs/android.md, "A new render size in the same process"). SetResizeFree:
+  // at each Play, before the play thread starts. 1: NewPlay frees the sets
+  // that have another size than the render of the game, and clears the failed
+  // flags, so the next picture makes them at the new size. A slot of
+  // xr_eye_direct=1 whose swapchains do not fit a picture frees them and
+  // makes two at the size of the picture (DirectBegin). 0: the sets stay as
+  // they are. NewPlay is a call of the session thread while no game runs, and
+  // it logs the count of the swapchains that the app holds.
+  void SetResizeFree(bool on) { resize_free_ = on; }
+  void NewPlay(uint32_t width, uint32_t height);
+  // The swapchains that the app holds now, any thread.
+  int Swapchains() const { return swapchains_.load(std::memory_order_relaxed); }
   // THE LOCK OF THE QUEUE that the renderer, the play thread and the session
   // share. The session holds it for each submit and for each call of
   // OpenXR that can use the queue (xrBeginFrame, xrEndFrame,
@@ -591,17 +605,32 @@ class XrApp {
   static bool Made(const Screen& screen) { return screen.layer[0].swapchain != XR_NULL_HANDLE; }
   // THE TWO SWAPCHAINS OF A SLOT (xr_eye_direct=1). acquired, waited: the
   // image of each eye between DirectBegin and DirectEnd.
+  // made_width, made_height: the size of the pictures that the set was made
+  // for (NewPlay). replaced: the replacements of the set since the Play
+  // started (swapchain_free_math::kMostReplaces).
   struct DirectSet {
     Screen set;
     bool failed = false;
     bool acquired[2] = {false, false};
     bool waited[2] = {false, false};
+    uint32_t made_width = 0;
+    uint32_t made_height = 0;
+    int replaced = 0;
   };
   DirectSet direct_[frame_loop::kSlots];
   // The play thread counts its pictures straight into the swapchains, and
   // the pictures that took the old way with the key on.
   std::atomic<uint64_t> direct_writes_{0};
   std::atomic<uint64_t> direct_misses_{0};
+  // xr_resize_free, and the swapchains that the runtime made and the app did
+  // not destroy yet (MakeLayer, DestroySwapchain).
+  bool resize_free_ = true;
+  std::atomic<int> swapchains_{0};
+  void DestroySwapchain(XrSwapchain swapchain);
+  // The set goes with all its parts, and it is a new set (no failed flag, no
+  // released image). The caller holds the lock of the queue and has waited
+  // for the idle device.
+  void DropSet(Screen* screen);
   // False with the reason in *why, and then the set has no part. count: the
   // swapchains of the set (2 for the eyes, 1 for the panel). With the frame
   // loop the set has no image between: a copy of the same size needs none,

@@ -119,6 +119,7 @@ Summary:
 | `android/src/picture_ring.cpp` | The ring of the pictures of the game of the frame loop: the images of the slots, the copies of the play thread, the fences, the newest finished slot for the session |
 | `src/mod/eye_copy_math.h`, `android/src/copy_time.cpp` | The copies of the eye pictures: the part of an atlas that the layers show, the size of the swapchains of a slot (`xr_eye_direct`), the even rate (`frame_loop_hold`), and the timestamps of each copy for the time log. No Android code in the header |
 | `test/controller_math/eye_copy_checks.h` | The math checks of `eye_copy_math.h` |
+| `src/mod/swapchain_free_math.h` | Which sets of swapchains a new Play frees, and when a slot of `xr_eye_direct` replaces its swapchains (`xr_resize_free`). No Android code in the header || `test/controller_math/swapchain_free_checks.h` | The math checks of `swapchain_free_math.h` |
 | `android/src/frame_loop.h` | The rules of the frame loop: the slots of the ring of the pictures, the drop of a picture, the ring of the command buffers, the serials of the submits, the age of the shown picture, the queue at the GPU, the direct writes and the rect of a copy of the pixels of the CPU. No Android code |
 | `test/controller_math/frame_loop_checks.h` | The math checks of `frame_loop.h` and of the row "The headset gets each frame (no wait for the GPU)" |
 | `android/src/motion_comp.cpp` | The motion of the stick in the projection layer (`motion_comp`), and the parts of the age of a new picture for the time log |
@@ -3210,6 +3211,54 @@ them, and a cap of a swapchain would only make a picture of the render
 smaller. A render larger than the panel comes only from a `resolution_pct`
 above 100.
 
+**A new render size in the same process** (`xr_resize_free`,
+`src/mod/swapchain_free_math.h`, `XrApp::NewPlay`, `XrApp::DirectBegin`).
+The player can set another `resolution_pct` in the menu and play again
+without a new start of the app. The swapchains have the size of the render
+of the Play before. The runtime can refuse a second set of swapchains at the
+new size (`xrCreateSwapchain` gives `XR_ERROR_LIMIT_REACHED`, -10), so the
+app frees the sets of the old size.
+
+- At each Play, before the play thread starts, `NewPlay` waits for the idle
+  device and frees each set whose size is not the size that this render
+  wants: the projection layer and the panel image (the render), the stereo
+  screen (half of it), the screen quad (the render), and the two swapchains
+  of each slot of `xr_eye_direct=1` (the size of the pictures that the slot
+  was made for). It clears the failed flags of these sets and of the cards,
+  and the eyes do not show a slot of the Play before. The next picture makes
+  each set at the new size, as at a fresh start of the app.
+- A slot of `xr_eye_direct=1` whose swapchains do not fit a picture that
+  would go straight into them (`eye_copy_math::DirectFits` is false) frees
+  them in `DirectBegin` and makes two at the size of the picture. It waits
+  for the idle device with the lock of the queue, as `FreeEyes`. The slot is
+  not the shown slot, so no layer of a frame names its swapchains. The
+  runtime keeps a swapchain until the compositor is done with it. A slot
+  replaces its swapchains at most `kMostReplaces` (8) times in a Play, then
+  its pictures take the old way.
+- The app counts the swapchains that it made and did not destroy. The log
+  has the count at each new Play ("xr : a new Play with a render of W by H.
+  The app holds N swapchains"), after the free ("the new Play freed K sets
+  of another size: ... The app holds N swapchains now"), at the swapchains
+  of each slot, and at each swapchain that the runtime does not make ("the
+  swapchain of W by H was not made (XR_ERROR_LIMIT_REACHED ...). The app
+  holds N swapchains now").
+- With `xr_resize_free=0` the sets stay as they are and the failed flags
+  stay: a render of another size in the same process takes the old way for
+  each picture, and the projection layer can fail at the new size.
+
+**The menu button after a new render size.** A saved game that the game loads
+at its start (the test save) opens
+the Main Menu of the game, a dialog box. The
+dialog box is drawn into the panel image, and only the panel quads show it
+(`stream_layers`). The panel quads go out only in a frame with the
+projection layer. A set that stays at the old size gives no projection layer
+at the new size, so the player sees the stereo screen and no dialog box. The
+menu button sends Esc to the game, and a dialog box that is up ignores Esc.
+The game logs "the menu button sends Esc, a dialog box is up". So the
+missing menu is a result of the missing projection layer. With the
+projection layer the player points at the dialog box and clicks it away,
+and then the menu button sends Esc to the game and opens the menu.
+
 **The log.** One line with the value of the runtime and the value after the
 cap:
 
@@ -3793,6 +3842,7 @@ parts that the picture does not need:
 | `xr_eye_rects` | 1 | A copy of an eye picture with an atlas, into a slot and into a swapchain, takes only the shown part. The rest of the image of the slot and of the swapchain image is undefined | 0: the whole picture |
 | `vk_atlas_area` | 1 | The renderer of the app clears and writes only the shown part of the eye picture when it puts the two images into it (`ComposeAtlas` of `vk_scene.cpp`, a render area of that part). Its clear gives the gap its black with an alpha of 0 | 0: the whole eye picture. On the PC always 0 |
 | `xr_eye_direct` | 0 | The play thread copies each picture of the projection layer straight into two swapchains of its slot, and the session copies nothing for the eyes | 0: the copy into the slot and the copy of the session |
+| `xr_resize_free` | 1 | A new Play frees the sets of swapchains that have another size than the render and makes them again, clears the failed flags, and a slot of `xr_eye_direct=1` replaces swapchains that do not fit a picture (see "A new render size in the same process" in "The size of the eye pictures") | 0: the sets stay as they are |
 | `frame_loop_hold` | 0 | N of 2 to 8: the session takes a new picture only after the shown picture showed in N frames of the session | 0 and 1: the newest finished picture at each frame |
 
 The app reads `xr_eye_rects` with the keys of the copies of the session at
@@ -3801,7 +3851,8 @@ renderer reads `vk_atlas_area` with `fovea_res_layer` at the first walk of
 each game ("vk scene : vk_atlas_area=1. ..." in `bwvr-quest.log` when
 `fovea_res_layer` is on), and the app reads `xr_eye_direct` and
 `frame_loop_hold` at each Play ("game : xr_eye_direct=1. ...", "game :
-frame_loop_hold=2. ..."). There is no test key: the app has no hotkeys.
+frame_loop_hold=2. ..."), and `xr_resize_free` at each Play too ("game :
+xr_resize_free=1. ..."). There is no test key: the app has no hotkeys.
 The keys are not rows of `settings_table.h`, so the launcher of the PC
 does not show them.
 
@@ -3812,8 +3863,9 @@ does not show them.
   picture of the projection layer, of the size of the shown part of that
   picture (`eye_copy_math::DirectSize`: the whole picture with no atlas).
   The play thread makes them (`xrCreateSwapchain` with the lock of the
-  queue), and they stay to the end of the app. The log: "xr : slot 0 of
-  the ring: two swapchains of W by H for the eye pictures of W by H ...".
+  queue), and they stay until a new Play with another size of the render, or
+  a picture that does not fit (`xr_resize_free`, below). The log: "xr : slot
+  0 of the ring: two swapchains of W by H for the eye pictures of W by H ...".
 - For a picture the play thread acquires and waits for an image of each
   swapchain of the slot (it may wait, the session never does), records the
   copy of the shown part of each layer into it after the walk, submits,
@@ -3828,9 +3880,11 @@ does not show them.
   poses are the same as with the old way (`motion_comp`).
 - A picture takes the old way when it does not go into the projection
   layer (the stereo screen, the cut scene window), when it does not fit in
-  the swapchains of its slot (`eye_copy_math::DirectFits`: another size, or
-  no atlas in swapchains of the shown part), and when the swapchains have
-  blue first (a blit would change the bytes of an sRGB swapchain). An eye
+  the swapchains of its slot and the slot does not replace them
+  (`xr_resize_free=0`, or the most replacements; `eye_copy_math::DirectFits`:
+  another size, or no atlas in swapchains of the shown part), and when the
+  swapchains have blue first (a blit would change the bytes of an sRGB
+  swapchain). An eye
   that shows a slot and gets a picture of the old way waits for its
   swapchain image in that frame, because the play thread can write that
   slot again. When the copy still does not happen, the frame has no

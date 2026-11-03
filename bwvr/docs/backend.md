@@ -3763,6 +3763,29 @@ offsets loop, and 400 meshes for the triangles.
 - Not known: the cost of a hook of MinHook with a stub under FEX for each
   mesh. The stubs save and restore the registers with `pushad`.
 
+### The meshes on the GPU
+
+`gpu_mesh=1` takes the five mesh functions off the CPU: the renderer makes the
+vertices of an opaque mesh on the GPU, and the frame thread records one draw
+for each mesh (`software-tnl.md`, "The meshes on the GPU"). The functions
+`fn_0080DB30` and `fn_0080AD90` stay as they are. Their calls of the mesh
+functions then cost the hook of the mod (the checks, the material and the
+record) and not the two loops. Read the time with `object_timer=1` and the sites
+above with `gpu_mesh=0` and with `gpu_mesh=1` (the sites of the calls in the
+mesh functions run only on the CPU path), and the line "gpu mesh     : gpu_mesh=1,
+in 10 s" has the time of the hook:
+
+```
+gpu_mesh=1
+walk_parts=0
+object_timer=1
+object_timer_sites=0x00815F62,0x0080E700,0x0080E6DA,0x0080D93F,0x0080D95E,0x0080E51F,0x0080E53E,0x0087FB79,0x008573E2,0x0085B237,0x0084C39B,0x00859D7F
+```
+
+- Only a headset shows the time of the meshes on the Frame. `walk_parts=1`
+  hooks the start of three of these functions, so `gpu_mesh=1` needs
+  `walk_parts=0`.
+
 ### The work before the draws on more threads
 
 `land_objects_threads=N` (0 is the default: one thread, the frame thread)
@@ -4247,6 +4270,26 @@ both renderers. A run in the start dialog with the scripted controller
 (`hand_run.ps1 -Kind fixed -NewGame`, frame 420) has the hand of the mod in
 view: 0.18 percent of the pixels of the left eye and 0.20 percent of the
 right eye differ, and 0.3 percent in a box around the hand, on its edges.
+
+### The meshes on the GPU in the renderer
+
+A mesh of the stream (`kMeshData`) is a range of the arena of the renderer, a
+buffer of 64 MB that the CPU writes and the GPU reads, with the vertices of 32
+bytes and then the indices. A draw (`kMeshDraw`, `VkSceneDrawMesh`) takes the
+state of the device as a draw of the game does (the texture, the sampler, the
+render states), copies its values (96 bytes, `gpu_mesh_math::Consts`) and the
+offsets into the ring, and is a record like the others: it waits in the queue
+for the sort, and it is a record of foveated resolution. The pipeline has a
+vertex shader of its own (`vk_mesh.vert`, a pipeline with no blend and one
+with the offsets as vertex buffer 2), the fragment shader is the one of the
+other draws. Buffer 0 is the arena, buffer 1 the values of the draw as one
+instance (so there is no descriptor set for them). `PlayDraw` and `PlayMres`
+draw the geometry of a mesh with one function. A mesh may move in the sort as
+any opaque draw may, and it is never in a draw of the merge (it has the type
+99 in `vk_draw_math::Draw`). With foveated resolution a mesh goes into the
+outer image and the centre image, because its rect on the screen is not
+known. The renderer has no mesh for an id that the stream did not give: the
+draw is left out and counted. The counts are in the line "gpu mesh     :".
 
 ### Fewer state changes and fewer draws
 
@@ -7037,6 +7080,9 @@ keys that the launcher sets.
 | `land_objects` | 1 | 1: the vertex loop of the reflection meshes and the test of the view of the 3D parts run with SSE, with the bits of the game. 0: the code of the game. 2: a test aid, the compare. A test key: Ctrl Shift F8. See "The objects on the land" |
 | `land_objects_threads` | 0 | 0: one thread. N: N worker threads make the test of the view of the objects before their draws. A test key: Ctrl Shift F9. See "The objects on the land" |
 | `part_draw` | 0 | 1: the loop over the triangles of a mesh and the vertex loops of `fn_00859530` run with SSE, with the bits of the game. 0: the code of the game. 2: a test aid, the compare. A test key: Ctrl Shift F4. See "The parts with SSE" |
+| `gpu_mesh` | 0 | 1: the opaque meshes of the 3D parts with one matrix are transformed, lit, clipped and culled by the renderer on the GPU, and the frame thread records one draw for each mesh. 0: the CPU path of the game. 2: a test aid on the PC with `one_walk=1`, the CPU path draws each such mesh in the left eye layer and the GPU path in the right eye layer, and the log has the difference. It needs `backend=vulkan`. A test key: Ctrl Shift F10. See `software-tnl.md`, "The meshes on the GPU" |
+| `gpu_mesh_kinds` | 31 | Bit k leaves the function k on the GPU path: `fn_00856D40` 0, `fn_0085AB10` 1, `fn_0084BA90` 2, `fn_0085BA30` 3, `fn_00859530` 4. A function with its bit at 0 keeps the CPU path |
+| `gpu_mesh_compare_every` | 0 | A test aid with `gpu_mesh=2`. N: each Nth frame the log has the difference of the two layers of the next frame, for the functions on the GPU path and then for each function alone |
 | `object_timer`, `object_timer_sites` | 0, empty | A test aid. 1: in the play, each 10 s the time of the draw of the objects and of each class and method of the objects. `object_timer_sites` gives more calls to time. A test key: Ctrl Shift F7. See "The timer of the objects" |
 | `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
 | `game_sse_parts` | 0 | 0: each part reads the flag of the game. A sum of bits: the parts with their bit take the SSE path of the game, the others the x87 path. -1: each part. A test key: Ctrl, Shift and S. See "The SSE paths of the game, one at a time" |

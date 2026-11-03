@@ -987,7 +987,7 @@ The pointing hand is the right hand. When the left controller is the Hand
 | B (Y on the left hand) | Hold and draw: a gesture (`miracles.md`). A short press with a miracle in the Hand takes the miracle out. B while A is down cancels the teleport |
 | Stick left and right | One snap turn (5.4). In the Temple it turns the player in the room (11.4) |
 | Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`). In other views, a wheel click |
-| Stick click | The gesture button with `gesture_button=2` |
+| Stick click | The gesture button with `gesture_button=2`. With `trace=1` in the headset app, the click of the right stick held with the left trigger for 300 ms saves the timeline (`android.md`, "The timeline") |
 | Dialog box up | The hand points a ray. The trigger is the left button and the grip the right button (3.6) |
 | In a room of the Temple | The hand points a ray. The trigger and the grip both click (11.3) |
 
@@ -997,9 +997,9 @@ The pointing hand is the right hand. When the left controller is the Hand
 | --- | --- |
 | Grip | Grabs the land: pull to move it across, and up or down, one to one. Both grips turn and scale the land (`god-view.md`, section 5). `grab_hand=2` also lets the grip of the pointing hand grab the land when the Hand is empty and over nothing it can hold |
 | Y (B when the left hand points) | Hold: opens the ring, and the hand picks an item (section 10) |
-| X (A when the left hand points) | No job. With `trace=1` in the headset app, X held together with the click of the left stick for 300 ms saves the timeline (`android.md`, "The timeline"). The chord has no other action with `button_layout=1` |
+| X (A when the left hand points) | No job. With `trace=1` in the headset app, X held together with the click of the left stick for 300 ms saves the timeline (`android.md`, "The timeline"). The chord has no other action with `button_layout=1`. Both clicks of the sticks are not free: the app shows its menu for them (`play_menu_sticks`) |
 | Stick | In the God view: push it to move over the land (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
-| Trigger | No job |
+| Trigger | No job. With `trace=1` in the headset app, the trigger held with the click of the right stick for 300 ms saves the timeline |
 | Menu button of the left controller | Esc: the game menu (3.6) |
 
 **The layout of the other hand** (`button_layout`, `ButtonLayout` in

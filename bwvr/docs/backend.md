@@ -65,7 +65,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/scene_sample.cpp`, `scene_sample_math.h` | A test aid: samples of the code of the frame thread in the scene walks, by module (`profile_sample`), and in the game turn with the calls on the stack (`profile_sample_turn`) |
 | `src/mod/anim_trig.cpp`, `anim_trig_math.h` | The four functions of the angles and the rotations of the animations with no x87 instruction (`anim_trig`, "The long game turn") |
 | `src/mod/anim_watch.cpp` | A test aid: the animations that `Morphable::GetSetAnim` makes, and their time (`anim_watch`) |
-| `src/common/trace_events.h`, `src/mod/trace_rec.cpp`, `trace_rec.h`, `trace_waits.cpp` | The timeline: the recorder (bars, points and counters in a ring for each thread), the save of the last seconds as a file for `ui.perfetto.dev`, and the waits of the frame thread (`trace`, "The timeline of the game and the app"). The checks are in `test/controller_math/trace_checks.h`. The script is `tools/trace/trace_report.py` |
+| `src/common/trace_events.h`, `trace_join.h`, `trace_combo.h`, `src/mod/trace_rec.cpp`, `trace_rec.h`, `trace_waits.cpp` | The timeline: the recorder (bars, points and counters in a ring for each thread), the save of the last seconds as a file for `ui.perfetto.dev`, the join math and the button combinations (they run in the app), and the waits of the frame thread (`trace`, "The timeline of the game and the app"). The checks are in `test/controller_math/trace_checks.h`. The script is `tools/trace/trace_report.py` |
 | `src/mod/turn_parts.cpp`, `turn_parts_math.h` | A test aid: timers on the functions that the game turn calls, and the parts of the turn in the lines of the long frames (`turn_parts`, "The long game turn"). The math checks are in `test/controller_math/turn_parts_checks.h` |
 | `src/mod/audio_play_math.h` | The pure math of the work of QMixer in a sound start (`audio_play_now`, `audio_play_fix`, `audio_open_loader`, `audio_play_parts`, `audio.md`, 7.8). The checks are in `test/controller_math/audio_play_checks.h` |
 | `src/mod/audio_watch.cpp`, `audio_watch_math.h` | A test aid: timers on the calls of the audio turn into the audio DLL and QMixer, and on their wait calls (`audio_turn_watch`, `audio.md`, 7.7). It needs `turn_parts=1` |
@@ -2378,18 +2378,27 @@ gaps show the cause at once. The file is in the Trace Event Format of Chrome
 | --- | --- | --- |
 | `trace` | 0 | 0: no recorder, no hook, no cost. 1: each thread records into a ring |
 | `trace_seconds` | 10 | A save writes the last N seconds (1 to 60) |
-| `trace_auto_ms` | 40 | A frame of the scene longer than N ms starts a save, at most one a minute. 0: off |
-| `trace_min_us` | 30 | A bar shorter than N us is not recorded |
+| `trace_auto_ms` | 40 | A frame of the scene longer than N ms starts a save. 0: off |
+| `trace_auto_gap_s` | 60 | The least time between two automatic saves, in s |
+| `trace_auto_after_s` | 20 | No automatic save in the first N s after the first frame of a scene. A load makes slow frames. 0: no wait |
+| `trace_min_us` | 30 | A bar shorter than N us is not recorded (except `stream put`, which the join of the app needs for each frame) |
 | `trace_wait_us` | 100 | A wait of the frame thread shorter than N us is not recorded |
 | `trace_ring_k` | 128 | The ring of the frame thread has N K events. The other rings have 16 K events |
 | `trace_keyboard` | 1 | 1: Ctrl, Shift and G save, while a window of the game is in front |
 | `trace_test_save_s` | 0 | A test aid: one save N s after the start of the recorder |
-| `trace_combo_ms` | 300 | In the app: the time that the combination of the controller is held |
+| `trace_combo_ms` | 300 | In the app: the time that a button combination is held |
+| `trace_combo2` | 1 | In the app: 1: the left trigger with the click of the right stick saves too. 0: only X with the click of the left stick |
+| `trace_shift` | 1 | In the app: 1: the join shifts the game part by the clock shift that it finds from the frames of both parts. 0: no shift |
 
 **The recorder** (`src/common/trace_events.h`, the same code in the mod and in
 the app, checks in `test/controller_math/trace_checks.h`). An event has a
 pointer to a static `Def` (name, category, up to four names of numbers), the
-start and the length in ticks, and four floats. It has 40 bytes. A bar is
+start and the length in ticks, and four floats. It has 40 bytes. A float keeps
+24 bits of an integer, so the number of a frame goes through `FrameArg`: a
+frame of the controllers as it is, a screen frame (1e9 plus a count) as the
+negative of its count plus 1. The name of such an arg has a `#` in front in
+its `Def`, and the file has the exact number of the stream under the name
+with no `#` (`"frame":1000000320`). A bar is
 `"ph":"X"`, a point `"ph":"i"` and a counter `"ph":"C"`. The names of the
 processes and the threads are `"ph":"M"`. Each thread has a ring of its own,
 found by the id of the thread. A push is one store of the event and one
@@ -2409,12 +2418,14 @@ frames", "The clock"), and the app reads `CLOCK_BOOTTIME` in ns. The take
 phase of `android.md` ("The long frames") uses `CLOCK_MONOTONIC`, which does not
 count the time that a headset slept, so it is not the clock of the game. Each
 save has one start (the end of the window less `trace_seconds`), and both
-parts count their microseconds from it. The script
-`tools/trace/trace_report.py` checks the clock: the arrival of a frame in the
-reader of the app must be 0 to 1 ms after the end of `stream put` of the same
-frame in the game. It says so when the two clocks differ, and `--write-fixed`
-writes a file with the shift. That the clock of Wine is `CLOCK_BOOTTIME` comes
-from the doc of the pace. No run on the headset shows it yet.
+parts count their microseconds from it. The arrival of a frame in the reader of
+the app must be 0 to 1 ms after the end of `stream put` of the same frame in
+the game. The join in the app (`android.md`, "The shift of the clock") takes
+the median of that difference less 0.5 ms as the shift of the game, adds it to
+the game part and logs it. The script `tools/trace/trace_report.py` makes the
+same check on a file, and `--write-fixed` writes a file with the shift. That
+the clock of Wine is `CLOCK_BOOTTIME` comes from the doc of the pace. No run on
+the headset shows it yet.
 
 **The bars of the game.** The names are those of the symbol file of the
 decompilation project (`docs/address-map.md`), with the address.
@@ -2423,14 +2434,15 @@ decompilation project (`docs/address-map.md`), with the address.
 | --- | --- |
 | "frames (present to present)" | `frame` (the frame of the stream and its ms), the point `long frame` (above 20 ms) and the counter `game frames a second`. These bars cross the bars of the frame thread, so they have a row of their own |
 | "frame thread" | The six calls of the frame loop of `frame_timers.cpp` (the input, the keys, the network flush, `GGame::ProcessGraphicsEngine`, `ProcessFrameInputs`, `FlipScreen`). `GGame::ProcessNetworkPackets (game turn)` and the timers of `turn_parts` (about 70 callees of the turn, among them `audio_turn`). The callees of `ProcessGraphicsEngine` two levels deep (`kGraphicsDefs` in `turn_parts.cpp`, about 50 timers that count only inside the call of `ProcessGraphicsEngine`: the camera, the interface, `LH3DRender::StartFrame`, `GLandscape::Draw`, the particles, the sky, the Temple, `LH3DAtmos::Render3D`, the help system and others). `LH3DTech::UpdateCamera` (the hook in `head_camera.cpp`, with the work of the mod) and `PhysicsObject::DrawAll` (the call of the game in the hook in `throw_physics.cpp`). `scene walk of an eye pass` with `mod work before the walk of the game`, `GGame::Process3dEngine` and `mod work after the walk of the game`. `h_FinishFrame (mod)` with `LH3DRender::FinishFrame`. `wait of the pace (XrInputPace)`, `stream deliver (frame thread)`, `wait for the stream worker`. The waits of the frame thread of 100 us or more: `Sleep`, `WaitForSingleObject`, `EnterCriticalSection` (only a lock that was not free), `ReadFile` and `CreateFileA` |
-| "stream worker" | `stream put (the frame into the ring)` with the frame, the bytes, the wait for room and the drop |
+| "stream worker" | `stream put (the frame into the ring)` with the frame, the bytes, the wait for room and the drop. Each write has a bar, however short, because the join of the app matches it with the arrival of the frame |
 | "render thread (Direct3D 9 calls)" | `render thread work`, with `render_thread=1` |
 | "QMixer timer (pump)", "QMixer mixer (render)" | `QSWaveMixPump`, `mod voices render (mixer thread)`, `QMixer play (PlayEx)` and the parts of a play with `audio_play_parts=1` (`open`, `loader` and others), the calls of the audio turn with `audio_turn_watch=1` |
 
 With `trace=1` the timers of `turn_parts` go in at the end of the hooks of the
 mod (`TurnPartsInstallLate`), all with one `MH_ApplyQueued`, also with
 `turn_parts=0`. Then no line `turn parts` is written. A timer of the game turn
-(`kDefs`) counts in the game turn and in the call of `ProcessGraphicsEngine`.
+(`kDefs`, among them `physics_turn`, which is `PhysicsObject::GameTurnUpdate`)
+counts in the game turn and in the call of `ProcessGraphicsEngine`.
 A timer of the graphics engine (`kGraphicsDefs`) counts only inside that call,
 so the helpers that the game turn calls many times pay no clock read. The line
 `trace` of a save names the calls that got a clock read since the start. A
@@ -2447,11 +2459,14 @@ the table of the game, so it has no bar.
 
 **The save.** A save writes the last `trace_seconds` of all rings on a thread
 of the lowest priority. The frame thread only sets a flag. Three things start
-a save: the button combination of the controller (`android.md`, "The
-timeline"), a frame of the scene longer than `trace_auto_ms` (at most one a
-minute, and never in a load), and the key Ctrl, Shift and G while a window of
-the game is in front (a test key of the table "Keys for v1.0" has the same
-rule). With
+a save: a button combination of the controllers (`android.md`, "The
+timeline"), a frame of the scene longer than `trace_auto_ms` (at least
+`trace_auto_gap_s` after the last automatic save, and not in the first
+`trace_auto_after_s` after the first frame of a scene), and the key Ctrl, Shift
+and G while a window of the game is in front (a test key of the table "Keys for
+v1.0" has the same rule). The first frame of a scene is a frame with a scene
+walk after at least 1 s and 10 presents with no scene walk (the menu, a load
+and a screen make presents with no walk). With
 `trace_test_save_s` one save comes by itself, for a desktop run. The mod and
 the app talk through the head of the input channel (`trace_ask`,
 `trace_done`, `trace_game_ask`, `src/common/input_channel.h`). The mod writes
@@ -2466,9 +2481,9 @@ the mod writes the whole file `bwvr-trace-<time>.json` beside `runblack.exe`.
 The line `trace` of the log names the file, the events, the bytes and the time
 of the saver thread.
 
-**The size.** A save of 10 s in a desktop run (the test save `pen`, no pace,
-about 900 frames a second) had 73 600 events and 9.4 MB, so an event is 128
-bytes in the text. The save took 170 ms on the saver thread. The frame thread
+**The size.** A save of 10 s on the desktop (no pace, about 900 frames a
+second) has 73 600 events and 9.4 MB, so an event is 128 bytes in the text.
+The save takes 170 ms on the saver thread. The frame thread
 of the headset makes fewer frames and more bars in each one. The ring of 128 K
 events holds 10 s when the thread makes less than 13 K events a second.
 
@@ -6863,7 +6878,7 @@ keys that the launcher sets.
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
 | `profile_sample_turn`, `profile_sample_turn_ms` | 0, 2 | A test aid: the samples come only in the game turn, each N microseconds (100 to 5000), with the return addresses of the game on the stack, and only the turns of `profile_sample_turn_ms` or more go to the report. See "The long game turn" |
 | `anim_watch` | 0 | A test aid: 1 counts the animations that `Morphable::GetSetAnim` makes and their time, and the calls of `Morphable::MorphAnims`, one line each 450 frames. See "The long game turn" |
-| `trace`, `trace_seconds`, `trace_auto_ms`, `trace_min_us`, `trace_wait_us`, `trace_ring_k`, `trace_keyboard`, `trace_test_save_s`, `trace_combo_ms` | 0, 10, 40, 30, 100, 128, 1, 0, 300 | 1: the timeline of the threads of the game and of the app in one file. The keys are in the table of "The timeline of the game and the app". 0: no recorder, no hook, no cost. No test key |
+| `trace`, `trace_seconds`, `trace_auto_ms`, `trace_auto_gap_s`, `trace_auto_after_s`, `trace_min_us`, `trace_wait_us`, `trace_ring_k`, `trace_keyboard`, `trace_test_save_s`, `trace_combo_ms`, `trace_combo2`, `trace_shift` | 0, 10, 40, 60, 20, 30, 100, 128, 1, 0, 300, 1, 1 | 1: the timeline of the threads of the game and of the app in one file. The keys are in the table of "The timeline of the game and the app". 0: no recorder, no hook, no cost. No test key |
 | `turn_parts`, `turn_parts_add` | 0, empty | A test aid: 1 puts a timer on each function that the game turn calls (about 70). Each 10 s one line `turn parts` gives the parts of the turns of 1 ms or more, and with `slow_frame_ms` each line `long frame` gives the parts of its turn. 0: no hook and no line. It needs `time_log=1`. `turn_parts_add` gives more addresses to time. No test key. See "The long game turn" |
 | `anim_trig` | 1 | 1: the four functions of the angles and the rotations of the animations are functions of the mod with no x87 instruction. 0: the x87 code of the game, and no hook. A test key: Ctrl, Shift and A. See "The long game turn" |
 | `anim_trig_check`, `anim_trig_test_frame` | 0, 0 | A test aid: 1 also runs the code of the game for each call of the four functions and counts the floats that differ. `anim_trig_test_frame=N` acts as the test key at frame N of the controllers. See "The long game turn" |

@@ -1,10 +1,15 @@
 // THE TIMELINE OF THE HEADSET APP (trace_app.h, src/common/trace_events.h).
 //
 // The join: the worker thread writes the part of the app into the file
-// trace-<time>.json, then the part of the game (bwvr-trace-game-<kind><count>.json,
-// which the mod wrote for this save), then the end of the file. Both parts have their events in
-// microseconds from the same start (the end of the window less trace_seconds),
-// on the clock CLOCK_BOOTTIME. Perfetto shows two processes, "game" and "app".
+// trace-<time>.json, then the part of the game (the file that the mod wrote for
+// this save, bwvr-trace-game-<kind><count>.json), then the end of the file.
+// Both parts have their events in microseconds from the same start (the end of
+// the window less trace_seconds). Perfetto shows two processes, "game" and
+// "app". The clock of the game can have another start than the clock of the
+// app, so the join finds the shift from the frames that both processes know
+// (the end of the write in the game, the arrival in the reader of the app,
+// trace_join.h), adds it to each time of the game part and logs it
+// (trace_shift=1).
 
 #include "trace_app.h"
 
@@ -21,10 +26,15 @@
 
 #include <atomic>
 #include <string>
+#include <vector>
 
 #include "app_log.h"
+#include "../../src/common/trace_combo.h"
+#include "../../src/common/trace_join.h"
 
 namespace te = trace_events;
+namespace tc = trace_combo;
+namespace tj = trace_join;
 namespace ic = input_channel;
 
 bool g_app_trace = false;
@@ -36,7 +46,14 @@ std::string g_files;
 std::string g_game;
 int g_seconds = 10;
 int g_combo_ms = 300;
+bool g_combo2 = true;
+bool g_shift_join = true;
 te::ComboLatch g_latch;
+// The change of the buttons that the combinations read goes to the log, at most
+// kButtonLines times.
+constexpr int kButtonLines = 60;
+int g_button_lines = 0;
+uint32_t g_button_bits = 0xFFFFFFFFu;
 bool g_game_ask_init = false;
 uint32_t g_game_ask_seen = 0;
 std::atomic<bool> g_pulse{false};
@@ -114,7 +131,7 @@ void StampText(char* out, size_t size) {
 
 // The part of the app: the name of the process, then each thread.
 void WritePart(Out* out, int64_t from_ns, int64_t to_ns, uint32_t* events, uint32_t* threads,
-               uint32_t* overrun_rings) {
+               uint32_t* overrun_rings, std::vector<tj::Sample>* arrivals) {
   char* p = out->Room(512);
   out->Added(te::FormatProcessName(p, 512, 2, "app", false));
   for (int i = 0; i < g_rec.Count(); ++i) {
@@ -138,6 +155,13 @@ void WritePart(Out* out, int64_t from_ns, int64_t to_ns, uint32_t* events, uint3
       const size_t n = te::FormatEvent(p, 1024, copy[k], 2, r->tid, 1000000000LL, from_ns, true);
       out->Added(n);
       if (n > 0) ++*events;
+      if (copy[k].kind == te::kPoint && copy[k].def != nullptr && copy[k].def->name != nullptr &&
+          strcmp(copy[k].def->name, te::kStreamArriveName) == 0) {
+        tj::Sample s;
+        s.frame = te::FrameFromArg(copy[k].v[0]);
+        s.us = te::UsFrom(copy[k].ts, 1000000000LL, from_ns);
+        arrivals->push_back(s);
+      }
     }
     free(copy);
   }
@@ -162,7 +186,8 @@ void DoJob(const Job& job) {
                              job.from_app ? "Black and White VR Mod, saved by the controllers"
                                           : "Black and White VR Mod, saved by the game"));
   uint32_t events = 0, threads = 0, overrun = 0;
-  WritePart(&out, from_ns, job.end_ns, &events, &threads, &overrun);
+  std::vector<tj::Sample> arrivals;
+  WritePart(&out, from_ns, job.end_ns, &events, &threads, &overrun, &arrivals);
 
   // The part of the game. For a save of the app the mod answers in the head of
   // the channel. For a save of the game it wrote its part before it counted.
@@ -185,6 +210,7 @@ void DoJob(const Job& job) {
     game_note = " (no input channel, so the file has no part of the game)";
   }
   size_t game_bytes = 0;
+  std::string join_note;
   if (game_ok) {
     // The part of this job by name: another save close to this one has its own
     // file. The app deletes the file after the join.
@@ -194,15 +220,59 @@ void DoJob(const Job& job) {
     const std::string game_path = g_game + "/" + part_name;
     FILE* gf = fopen(game_path.c_str(), "rb");
     if (gf != nullptr) {
-      out.Text(",\n", 2);
+      std::string text;
       char chunk[64 * 1024];
       size_t n;
-      while ((n = fread(chunk, 1, sizeof(chunk), gf)) > 0) {
-        out.Text(chunk, n);
-        game_bytes += n;
-      }
+      while ((n = fread(chunk, 1, sizeof(chunk), gf)) > 0) text.append(chunk, n);
       fclose(gf);
       remove(game_path.c_str());
+      game_bytes = text.size();
+      // The shift of the clock of the game from the frames that both know.
+      std::vector<tj::Sample> puts;
+      tj::ScanPuts(text.c_str(), text.size(), &puts);
+      const tj::Shift shift = tj::EstimateShift(puts, arrivals);
+      const bool applied = g_shift_join && shift.apply;
+      char note[640];
+      if (shift.pairs == 0) {
+        snprintf(note, sizeof(note),
+                 "clock of the game: no frame is in both parts (%zu writes, %zu arrivals), "
+                 "no shift",
+                 puts.size(), arrivals.size());
+      } else {
+        snprintf(note, sizeof(note),
+                 "clock of the game: %d frames in both parts, arrival less end of the write "
+                 "least %.2f, 10th %.2f, median %.2f, 90th %.2f, most %.2f ms (spread %.2f ms). "
+                 "Shift of the game %+.3f ms (median less %.1f ms), %s",
+                 shift.pairs, shift.least_us / 1000.0, shift.p10_us / 1000.0,
+                 shift.median_us / 1000.0, shift.p90_us / 1000.0, shift.most_us / 1000.0,
+                 shift.spread_us / 1000.0, shift.shift_us / 1000.0, tj::kArrivalUs / 1000.0,
+                 applied ? "applied"
+                         : (!g_shift_join ? "not applied (trace_shift=0)"
+                                          : (shift.pairs < tj::kMinPairs
+                                                 ? "not applied (too few frames)"
+                                                 : "not applied (the spread is too wide)")));
+      }
+      join_note = note;
+      out.Text(",\n", 2);
+      if (applied) {
+        std::string shifted;
+        tj::ShiftPart(text.c_str(), text.size(), shift.shift_us, &shifted);
+        out.Text(shifted.data(), shifted.size());
+      } else {
+        out.Text(text.data(), text.size());
+      }
+      // A marker at the start of the file, with the numbers of the join.
+      char marker[512];
+      const int mw = snprintf(
+          marker, sizeof(marker),
+          ",\n{\"name\":\"%s\",\"cat\":\"join\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0.000,"
+          "\"pid\":2,\"tid\":0,\"args\":{\"pairs\":%d,\"shift_ms\":%.3f,\"applied\":%d,"
+          "\"median_ms\":%.3f,\"spread_ms\":%.3f}}",
+          te::kJoinName, shift.pairs, applied ? shift.shift_us / 1000.0 : 0.0, applied ? 1 : 0,
+          shift.median_us / 1000.0, shift.spread_us / 1000.0);
+      if (mw > 0 && static_cast<size_t>(mw) < sizeof(marker)) {
+        out.Text(marker, static_cast<size_t>(mw));
+      }
     } else {
       game_note = " (the game part is not there)";
     }
@@ -217,6 +287,7 @@ void DoJob(const Job& job) {
          path.c_str(), job.from_app ? "the controllers" : "the game", g_seconds, events, threads,
          overrun, game_bytes, game_note, out.total,
          static_cast<double>(AppTraceNow() - t0) / 1e6);
+  if (!join_note.empty()) AppLog("trace        : %s", join_note.c_str());
   g_pulse.store(true);
 }
 
@@ -252,11 +323,13 @@ int64_t AppTraceNow() {
   return static_cast<int64_t>(t.tv_sec) * 1000000000LL + t.tv_nsec;
 }
 
-void AppTraceStart(bool on, int seconds, int min_us, int combo_ms, const char* files,
-                   const char* game) {
+void AppTraceStart(bool on, int seconds, int min_us, int combo_ms, bool combo2, bool shift_join,
+                   const char* files, const char* game) {
   if (!on) return;
   g_seconds = seconds < 1 ? 1 : (seconds > 60 ? 60 : seconds);
   g_combo_ms = combo_ms < 50 ? 50 : combo_ms;
+  g_combo2 = combo2;
+  g_shift_join = shift_join;
   g_files = files != nullptr ? files : "";
   g_game = game != nullptr ? game : "";
   g_rec.Init(1000000000LL, static_cast<int64_t>(min_us) * 1000LL, 16384);
@@ -264,10 +337,17 @@ void AppTraceStart(bool on, int seconds, int min_us, int combo_ms, const char* f
   AppTraceNameThread("session thread", 0, 65536);
   g_thread_on = pthread_create(&g_thread, nullptr, &Worker, nullptr) == 0;
   AppLog("trace        : trace=1. Each thread records bars, points and counters into a ring "
-         "(%zu bytes an event) on the clock CLOCK_BOOTTIME. Hold the X button and the stick "
-         "click of the left controller together for %d ms to save the last %d s into %s as "
-         "trace-<time>.json (the part of the game joins it). Bars under %d us are not kept",
-         sizeof(te::Event), g_combo_ms, g_seconds, g_files.c_str(), min_us);
+         "(%zu bytes an event) on the clock CLOCK_BOOTTIME. Bars under %d us are not kept. "
+         "The last %d s are saved into %s as trace-<time>.json (the part of the game joins "
+         "it). These save: (1) the X button and the click of the left stick held together "
+         "for %d ms%s. The log writes each change of the buttons of the left hand and of "
+         "the click of the right stick (at most %d lines). The join %s the clock of the game "
+         "from the frames of both parts (trace_shift=%d)",
+         sizeof(te::Event), min_us, g_seconds, g_files.c_str(), g_combo_ms,
+         g_combo2 ? " (2) the left trigger and the click of the right stick held together "
+                    "for the same time (trace_combo2=1)"
+                  : ". The second combination is off (trace_combo2=0)",
+         kButtonLines, g_shift_join ? "shifts" : "does not shift", g_shift_join ? 1 : 0);
 }
 
 void AppTraceNameThread(const char* name, int sort, unsigned events) {
@@ -292,10 +372,25 @@ bool AppTraceSession(const ic::SlotData& slot, ic::File* channel) {
   if (!g_app_trace) return false;
   g_channel.store(channel);
   const int64_t now = AppTraceNow();
-  const uint32_t need = ic::kPrimary | ic::kStickClick;
-  const bool held = (slot.hands[0].flags & ic::kActive) != 0 &&
-                    (slot.hands[0].flags & need) == need;
-  if (g_latch.Step(held, now, static_cast<int64_t>(g_combo_ms) * 1000000LL)) {
+  const uint32_t bits = tc::Bits(slot);
+  if (bits != g_button_bits) {
+    // What arrives from the runtime: a line for each change.
+    g_button_bits = bits;
+    if (g_button_lines < kButtonLines) {
+      ++g_button_lines;
+      const ic::Hand& left = slot.hands[0];
+      AppLog("trace        : buttons, slot %u: left hand %s, stick click %d, X %d, Y %d, menu "
+             "%d, trigger %.2f. Right hand %s, stick click %d%s",
+             slot.frame, (bits & tc::kLeftActive) != 0 ? "active" : "not active",
+             (bits & tc::kLeftStick) != 0, (bits & tc::kLeftX) != 0, (bits & tc::kLeftY) != 0,
+             (bits & tc::kLeftMenu) != 0, left.trigger,
+             (bits & tc::kRightActive) != 0 ? "active" : "not active",
+             (bits & tc::kRightStick) != 0,
+             g_button_lines == kButtonLines ? ". No more lines of this kind" : "");
+    }
+  }
+  const int which = tc::Held(bits, g_combo2);
+  if (g_latch.Step(which != 0, now, static_cast<int64_t>(g_combo_ms) * 1000000LL)) {
     Job job;
     job.from_app = true;
     job.end_ns = now;
@@ -307,7 +402,10 @@ bool AppTraceSession(const ic::SlotData& slot, ic::File* channel) {
       job.ask = channel->head.trace_ask + 1;
       ic::StoreRelease(&channel->head.trace_ask, job.ask);
     }
-    AppLog("trace        : the combination of the left controller. Save of the last %d s", g_seconds);
+    AppLog("trace        : the combination %d (%s). Save of the last %d s", which,
+           which == 2 ? "the left trigger and the click of the right stick"
+                      : "the X button and the click of the left stick",
+           g_seconds);
     Enqueue(job);
   }
   if (channel != nullptr) {

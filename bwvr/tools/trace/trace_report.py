@@ -10,9 +10,13 @@ The file has the process "game" (pid 1) and, from the headset, the process
 
   1. The clock check: the frames that both processes know (the write of the
      frame into the ring in the game, the arrival in the reader of the app).
-     The arrival is 0 to 1 ms after the end of the write. When the two clocks
-     differ, the script says so and gives the shift (--write-fixed writes a
-     file with the shift applied to the game).
+     The arrival is 0 to 1 ms after the end of the write. The app shifts the
+     game part by the median of the differences less 0.5 ms when it joins the
+     parts (trace_shift=1), and the file has the marker "join of the parts".
+     The script checks the file again. When the two clocks still differ (a file
+     with trace_shift=0), the script says so and gives the same shift
+     (--write-fixed writes a file with the shift applied to the game). A file
+     whose frame numbers repeat (the frame numbers were floats) has no check.
   2. The --max-game longest frames of the game among those longer than
      --game-ms: the --top longest bars inside each, with their thread, their
      start in the frame and their own time (the time without the bars inside
@@ -38,6 +42,10 @@ import collections
 import json
 import statistics
 import sys
+
+# The arrival of a frame in the app is 0 to 1 ms after the end of its write.
+ARRIVAL_US = 500.0
+JOIN_MARKER = "join of the parts"
 
 GAME, APP = 1, 2
 PID_NAME = {GAME: "game", APP: "app"}
@@ -127,41 +135,78 @@ def longest_inside(bars, lo, hi, top, skip_names):
     return inside[:top]
 
 
+def arg_text(v):
+    # An integer (a frame number) is written whole, a float with 6 digits.
+    return str(v) if isinstance(v, int) else "%g" % v
+
+
 def print_bars(threads, rows, lo, hi):
     for b in rows:
         extra = ""
         if b.args:
-            extra = "  " + " ".join("%s=%g" % (k, v) for k, v in b.args.items())
+            extra = "  " + " ".join("%s=%s" % (k, arg_text(v)) for k, v in b.args.items())
         idle = "  [a wait]" if b.cat in ("wait", "xr") else ""
         print("      %7.2f ms  own %7.2f ms  at %+8.2f  %-34s %s%s%s" % (
             clip(b, lo, hi) / 1000.0, b.self_us / 1000.0, (b.ts - lo) / 1000.0,
             thread_label(threads, b.pid, b.tid), b.name, extra, idle))
 
 
+def percentile(sorted_values, q):
+    if not sorted_values:
+        return 0.0
+    pos = q * (len(sorted_values) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
+
+
 def clock_check(bars, points):
-    puts = {}
+    """Gives (the shift to add to the game in us, the clocks match)."""
+    puts = collections.defaultdict(list)
+    n_puts = 0
     for b in bars:
         if b.pid == GAME and b.name.startswith("stream put") and "frame" in b.args:
-            puts[int(b.args["frame"])] = b.end
+            puts[int(b.args["frame"])].append(b.end)
+            n_puts += 1
     arrivals = {}
-    for p in points:
-        if p.pid == APP and p.name.startswith("game frame arrives") and "frame" in p.args:
-            arrivals.setdefault(int(p.args["frame"]), p.ts)
+    n_arrivals = 0
+    for p in sorted([p for p in points if p.pid == APP and p.name.startswith("game frame arrives")
+                     and "frame" in p.args], key=lambda p: p.ts):
+        arrivals.setdefault(int(p.args["frame"]), p.ts)
+        n_arrivals += 1
+    marker = [p for p in points if p.name.startswith(JOIN_MARKER)]
+    if marker:
+        m = marker[0].args
+        if m.get("applied"):
+            print("join: the app shifted the game part by %+.3f ms (%d frames in both parts, "
+                  "median %.3f ms, spread %.3f ms)" % (
+                      m.get("shift_ms", 0.0), m.get("pairs", 0), m.get("median_ms", 0.0),
+                      m.get("spread_ms", 0.0)))
+        else:
+            print("join: the app did not shift the game part (%d frames in both parts, median %.3f ms, "
+                  "spread %.3f ms)" % (m.get("pairs", 0), m.get("median_ms", 0.0), m.get("spread_ms", 0.0)))
+    if n_puts >= 4 and len(puts) < 0.5 * n_puts:
+        print("clock check: skipped. The frame numbers repeat (%d writes, %d different numbers): the "
+              "file is from a build with float frame numbers" % (n_puts, len(puts)))
+        return 0.0, True
     common = sorted(set(puts) & set(arrivals))
     if not common:
         print("clock check: no frame is in both processes (the file has the game alone, or the "
               "app did not record the arrivals)")
-        return 0.0, False
-    d = [(arrivals[f] - puts[f]) / 1000.0 for f in common]
-    least, med = min(d), statistics.median(d)
-    ok = -1.0 <= least and med <= 5.0
+        return 0.0, True
+    # The last write of a frame and its first arrival.
+    d = sorted((arrivals[f] - max(puts[f])) for f in common)
+    least, med, most = d[0], percentile(d, 0.5), d[-1]
+    p10, p90 = percentile(d, 0.1), percentile(d, 0.9)
+    ok = -1000.0 <= least and med <= 5000.0
     print("clock check: %d frames in both processes. Arrival less end of the write: least %.2f ms, "
-          "median %.2f ms, most %.2f ms (the arrival is 0 to 1 ms after the write)" % (
-              len(d), least, med, max(d)))
+          "10th %.2f, median %.2f, 90th %.2f, most %.2f ms (the arrival is 0 to 1 ms after the write)" % (
+              len(d), least / 1000.0, p10 / 1000.0, med / 1000.0, p90 / 1000.0, most / 1000.0))
+    shift = med - ARRIVAL_US
     if not ok:
         print("  THE CLOCKS DO NOT MATCH. Shift the game by %+0.2f ms (--write-fixed) before you "
-              "compare the two processes" % least)
-    return least * 1000.0, ok
+              "compare the two processes" % (shift / 1000.0))
+    return shift, ok
 
 
 def game_frames(bars, points, threads, args, all_bars):
@@ -322,7 +367,7 @@ def main():
         print("  %s: %d threads: %s" % (PID_NAME.get(pid, pid), len(rows), ", ".join(rows)))
 
     shift_us, ok = clock_check(bars, points)
-    if not ok and shift_us != 0.0:
+    if not ok:
         if args.write_fixed:
             write_fixed(data, shift_us, args.write_fixed)
         for b in bars + points:

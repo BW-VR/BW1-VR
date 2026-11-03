@@ -1944,12 +1944,12 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     WalkPartsWalk(false);
     TimeLogWalk(false);
     if (g_trace) {
-      static const trace_events::Def kWalkDef = {"scene walk of an eye pass", "game", {"eye", "frame", nullptr, nullptr}};
+      static const trace_events::Def kWalkDef = {"scene walk of an eye pass", "game", {"eye", "#frame", nullptr, nullptr}};
       static const trace_events::Def kBeforeDef = {"mod work before the walk of the game", "mod", {"eye", nullptr, nullptr, nullptr}};
       static const trace_events::Def kEngineDef = {"GGame::Process3dEngine 0x0054DA80", "game", {"eye", nullptr, nullptr, nullptr}};
       static const trace_events::Def kAfterDef = {"mod work after the walk of the game", "mod", {"eye", nullptr, nullptr, nullptr}};
       TraceSceneFrame();
-      TraceBar(&kWalkDef, t2.QuadPart, t3.QuadPart, static_cast<float>(eye), static_cast<float>(VkStreamPresentFrame()));
+      TraceBar(&kWalkDef, t2.QuadPart, t3.QuadPart, static_cast<float>(eye), trace_events::FrameArg(VkStreamPresentFrame()));
       TraceBar(&kBeforeDef, t2.QuadPart, trace_engine, static_cast<float>(eye));
       TraceBar(&kEngineDef, trace_engine, trace_engine_end, static_cast<float>(eye));
       TraceBar(&kAfterDef, trace_engine_end, t3.QuadPart, static_cast<float>(eye));

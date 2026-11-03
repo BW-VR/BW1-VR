@@ -97,8 +97,11 @@ struct Def {
 // Process3dEngine has its own bars (stereo.cpp), and LH3DRender::FinishFrame
 // has its own bar in h_FinishFrame (mod_main.cpp). LH3DTech::UpdateCamera
 // (head_camera.cpp) and PhysicsObject::DrawAll (throw_physics.cpp) are under a
-// hook of the mod that the stubs cannot time, so their hooks give the bars. The parts that the game turn
-// also calls (PhysicsObject::GameTurnUpdate, fn_007DEE00) have a timer in kDefs.
+// hook of the mod that the stubs cannot time, so their hooks give the bars.
+// A part that the game turn also calls has one timer, in kDefs (physics_turn is
+// PhysicsObject::GameTurnUpdate at 0x00644FC0, and fn_007DEE00). That timer
+// counts in the call of ProcessGraphicsEngine too, so kGraphicsDefs does not
+// list it again.
 const Def kGraphicsDefs[] = {
     // The callees of ProcessGraphicsEngine.
     {0x007E4810, "LHMouse::UpdateDeltaPos", kAll}, {0x00441F80, "GCamera::Update", kAll},
@@ -137,7 +140,6 @@ const Def kGraphicsDefs[] = {
     {0x007635D0, "Town::DisplayHowImpressed", kAll},
     {0x0064C1A0, "GPlayer::DrawComputerPlayers", kAll},
     {0x00445E10, "GCameraEditor::Draw3DPart", kAll},
-    {0x00644FC0, "PhysicsObject::GameTurnUpdate", kAll},
 };
 constexpr int kGraphicsDefCount = sizeof(kGraphicsDefs) / sizeof(kGraphicsDefs[0]);
 

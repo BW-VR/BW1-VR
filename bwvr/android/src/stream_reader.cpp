@@ -289,8 +289,8 @@ void StreamReader::Run() {
       pthread_mutex_lock(&lock_);
       if (g_app_trace) {
         // The queue is read under the lock: the session takes frames from it.
-        static const trace_events::Def kArriveDef = {"game frame arrives (reader)", "reader", {"frame", "bytes", "queue", nullptr}};
-        AppTracePoint(&kArriveDef, static_cast<float>(q.frame), static_cast<float>(len),
+        static const trace_events::Def kArriveDef = {trace_events::kStreamArriveName, "reader", {"#frame", "bytes", "queue", nullptr}};
+        AppTracePoint(&kArriveDef, trace_events::FrameArg(q.frame), static_cast<float>(len),
                       static_cast<float>(queue_.size()));
       }
       // THE LIMIT: a queue that the session does not take (a session that

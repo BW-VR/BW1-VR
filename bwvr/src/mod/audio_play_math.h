@@ -316,9 +316,10 @@ inline int AcmFormatSize(uint16_t tag, uint16_t cb_size) {
 }
 
 // Whether the cache may answer a call of acmFormatSuggest. A driver handle
-// makes the answer depend on that driver, so the call goes to the ACM.
+// makes the answer depend on that driver, so the call goes to the ACM. A PCM
+// source (16 bytes) is not kept: its key is too short to tell formats apart.
 inline bool AcmSuggestCacheable(bool no_driver, int src_size, uint32_t cb_dst, uint32_t suggest) {
-  return no_driver && src_size >= 16 && src_size <= kAcmFormatMax && cb_dst >= 16 && cb_dst <= kAcmFormatMax &&
+  return no_driver && src_size >= 18 && src_size <= kAcmFormatMax && cb_dst >= 16 && cb_dst <= kAcmFormatMax &&
          (suggest & ~kAcmSuggestKnown) == 0;
 }
 
@@ -403,7 +404,6 @@ struct AcmDriver {
 
 struct AcmDrivers {
   AcmDriver entry[kAcmDrivers];
-  int next;
   void Clear() {
     memset(this, 0, sizeof(*this));
   }
@@ -425,23 +425,44 @@ inline int AcmDriverFind(const AcmDrivers& list, const uint8_t* src, int src_siz
   return -1;
 }
 
-// Keeps the handle for a pair. Returns the index, or -1 when the pair is
-// already in the list, the handle is 0 or the sizes do not fit. A full list
-// replaces the oldest entry.
+// Puts a pair in the first free slot. Returns the index, or -1 when the pair
+// is already in the list, the list is full or the sizes do not fit. The list
+// never replaces an entry, so a handle that the list holds stays valid.
+inline int AcmDriverAdd(AcmDrivers* list, const uint8_t* src, int src_size, const uint8_t* dst, int dst_size,
+                        uintptr_t handle, bool bad) {
+  if (src == nullptr || dst == nullptr || src_size < 16 || src_size > kAcmFormatMax || dst_size < 16 ||
+      dst_size > kAcmFormatMax || AcmDriverFind(*list, src, src_size, dst, dst_size) >= 0) {
+    return -1;
+  }
+  for (int at = 0; at < kAcmDrivers; ++at) {
+    AcmDriver& d = list->entry[at];
+    if (d.used) continue;
+    d.used = true;
+    d.bad = bad;
+    d.src_size = static_cast<uint16_t>(src_size);
+    d.dst_size = static_cast<uint16_t>(dst_size);
+    d.handle = handle;
+    memcpy(d.src, src, static_cast<size_t>(src_size));
+    memcpy(d.dst, dst, static_cast<size_t>(dst_size));
+    return at;
+  }
+  return -1;
+}
+
+// Keeps the handle for a pair. Returns the index, or -1 when the handle is 0,
+// the pair is already in the list, the list is full or the sizes do not fit.
+// With -1 the caller still owns the handle and closes it.
 inline int AcmDriverStore(AcmDrivers* list, const uint8_t* src, int src_size, const uint8_t* dst, int dst_size,
                           uintptr_t handle) {
-  if (handle == 0 || AcmDriverFind(*list, src, src_size, dst, dst_size) >= 0) return -1;
-  const int at = list->next;
-  list->next = (list->next + 1) % kAcmDrivers;
-  AcmDriver& d = list->entry[at];
-  d.used = true;
-  d.bad = false;
-  d.src_size = static_cast<uint16_t>(src_size);
-  d.dst_size = static_cast<uint16_t>(dst_size);
-  d.handle = handle;
-  memcpy(d.src, src, static_cast<size_t>(src_size));
-  memcpy(d.dst, dst, static_cast<size_t>(dst_size));
-  return at;
+  if (handle == 0) return -1;
+  return AcmDriverAdd(list, src, src_size, dst, dst_size, handle, false);
+}
+
+// Keeps a pair that has no driver: the lookup of its driver failed. The next
+// open of the pair goes to the ACM with no lookup. Returns the index, or -1
+// as AcmDriverStore does.
+inline int AcmDriverStoreBad(AcmDrivers* list, const uint8_t* src, int src_size, const uint8_t* dst, int dst_size) {
+  return AcmDriverAdd(list, src, src_size, dst, dst_size, 0, true);
 }
 
 // A short name for a format tag, for the log.

@@ -75,10 +75,10 @@
 // QMixer in the call, as in the game), audio_play_fix (default 0, the byte of
 // the session, the same modes), audio_play_parts (default 0, test only: the
 // time of the functions of QMixer in a play),
-// audio_open_loader (default 0, the open as QMixer has it; 1 sends the open of
+// audio_open_loader (default 0, the open as QMixer has it. 1 sends the open of
 // a sound of the atmosphere to the loader thread, 2 each open),
 // audio_acm_cache (default 0, each call of acmFormatSuggest goes to the audio
-// compression manager; 1 keeps its answer, 2 also keeps the driver of
+// compression manager. 1 keeps its answer, 2 also keeps the driver of
 // acmStreamOpen), audio_acm_compare (default 5, the first hits that the mod
 // checks with a real call).
 // Test only: audio_play_fix_test, audio_play_now_test, audio_open_loader_test,
@@ -384,6 +384,8 @@ int64_t g_acm_driver_found = 0;     // drivers that an open found and the mod ke
 int64_t g_acm_driver_failed = 0;    // opens with a kept driver that failed
 int g_acm_miss_logged = 0;
 const int kAcmMissLogMax = 8;
+int g_acm_driver_logged = 0;        // lines of the lookup of a driver
+const int kAcmDriverLogMax = 16;
 
 // For the report.
 volatile LONG g_started[kKinds] = {0, 0, 0, 0};
@@ -1184,7 +1186,11 @@ UINT AcmSuggestCached(AcmSuggestFn real, void* had, void* src, void* dst,
     number = ++g_acm_compared;
     if (!same) {
       ++g_acm_different;
-      if (hit < audio_play::kAcmEntries) g_acm_cache.entry[hit].used = false;
+      // Drop the entry that holds the key now. Another thread may have
+      // replaced the entry at `hit` while the lock was open.
+      const int now = audio_play::AcmFind(g_acm_cache, s, src_size, in,
+                                          cb_dst, suggest);
+      if (now >= 0) g_acm_cache.entry[now].used = false;
     }
     LeaveCriticalSection(&g_acm_cs);
     char text[160];
@@ -1301,23 +1307,38 @@ UINT AcmOpenKept(AcmOpenFn real, void* phas, void* src, void* dst) {
   void* driver = nullptr;
   const UINT e_id = id_fn(*static_cast<void**>(phas), &driver_id, 0);
   const UINT e_open = e_id == 0 ? open_fn(&driver, driver_id, 0) : e_id;
+  const bool lookup_ok = e_open == 0 && driver != nullptr;
   int stored = -1;
   int64_t number = 0;
-  if (e_open == 0 && driver != nullptr) {
-    EnterCriticalSection(&g_acm_cs);
+  int line;
+  EnterCriticalSection(&g_acm_cs);
+  if (lookup_ok) {
     stored = audio_play::AcmDriverStore(&g_acm_drivers, s, src_size, d,
                                         dst_size,
                                         reinterpret_cast<uintptr_t>(driver));
     if (stored >= 0) number = ++g_acm_driver_found;
-    LeaveCriticalSection(&g_acm_cs);
-    if (stored < 0) close_fn(driver, 0);
+  } else {
+    // No driver: the next open of this pair goes to the ACM with no lookup.
+    stored = audio_play::AcmDriverStoreBad(&g_acm_drivers, s, src_size, d,
+                                           dst_size);
+    ++g_acm_driver_failed;
   }
-  char from[160];
-  AcmSayFormat(s, src_size, from, sizeof(from));
-  ModLog("audio acm    : driver for the source %s: acmDriverID result %u, "
-         "acmDriverOpen result %u, %s (%lld kept)", from, e_id, e_open,
-         stored >= 0 ? "kept for the next open" : "not kept",
-         static_cast<long long>(number));
+  line = g_acm_driver_logged < kAcmDriverLogMax ? ++g_acm_driver_logged : 0;
+  LeaveCriticalSection(&g_acm_cs);
+  // The list did not take the handle (it is full or holds the pair): the mod
+  // closes the handle and never uses it.
+  if (lookup_ok && stored < 0) close_fn(driver, 0);
+  if (line > 0) {
+    char from[160];
+    AcmSayFormat(s, src_size, from, sizeof(from));
+    ModLog("audio acm    : driver for the source %s: acmDriverID result %u, "
+           "acmDriverOpen result %u, %s (%lld kept)", from, e_id, e_open,
+           lookup_ok ? (stored >= 0 ? "kept for the next open"
+                                    : "not kept, the list is full")
+                     : (stored >= 0 ? "no driver, the pair goes to the ACM"
+                                    : "no driver, not stored"),
+           static_cast<long long>(number));
+  }
   return r;
 }
 

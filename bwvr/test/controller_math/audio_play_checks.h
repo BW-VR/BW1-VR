@@ -189,6 +189,8 @@ inline void AudioPlayChecks() {
   Check(!ap::AcmSuggestCacheable(true, 15, 18, 0x10000) && !ap::AcmSuggestCacheable(true, 50, 15, 0x10000) &&
             !ap::AcmSuggestCacheable(true, 129, 18, 0x10000) && !ap::AcmSuggestCacheable(true, 50, 129, 0x10000),
         "a format that is too small or too large is not cached", 0, 0);
+  Check(!ap::AcmSuggestCacheable(true, 16, 18, 0x10000) && ap::AcmSuggestCacheable(true, 18, 18, 0x10000),
+        "a PCM source of 16 bytes is not cached", 0, 0);
   Check(ap::AcmSuggestCacheable(true, 50, 18, 0x000F0000) && !ap::AcmSuggestCacheable(true, 50, 18, 0x10001) &&
             !ap::AcmSuggestCacheable(true, 50, 18, 0x00100000),
         "a flag that the cache does not know is not cached", 0, 0);
@@ -258,6 +260,47 @@ inline void AudioPlayChecks() {
   src2[40] = 0;
   Check(ap::AcmDriverFind(drivers, src2, 50, pcm, 18) == 0 && ap::AcmDriverStore(&drivers, src, 50, pcm, 18, 0x99) == -1,
         "a pair has one driver", 0, 0);
+
+  // A pair with no driver is kept as bad: the next open finds it.
+  ap::AcmDrivers bad_list;
+  bad_list.Clear();
+  const int b0 = ap::AcmDriverStoreBad(&bad_list, src, 50, pcm, 18);
+  Check(b0 == 0 && bad_list.entry[0].bad && bad_list.entry[0].handle == 0 &&
+            ap::AcmDriverFind(bad_list, src, 50, pcm, 18) == 0,
+        "a pair with no driver is stored as bad and found", b0, 0);
+  Check(ap::AcmDriverStoreBad(&bad_list, src, 50, pcm, 18) == -1 && ap::AcmDriverStore(&bad_list, src, 50, pcm, 18, 0x77) == -1 &&
+            bad_list.entry[0].bad && bad_list.entry[0].handle == 0,
+        "a bad pair is stored once and a handle does not replace it", 0, 0);
+  Check(ap::AcmDriverStoreBad(&bad_list, src, 129, pcm, 18) == -1 && ap::AcmDriverStoreBad(&bad_list, src, 50, pcm, 15) == -1,
+        "a pair with sizes that do not fit is not stored as bad", -1, -1);
+
+  // A full list does not store, and it keeps each entry as it is.
+  ap::AcmDrivers full;
+  full.Clear();
+  uint8_t other_src[50];
+  memcpy(other_src, src, sizeof(other_src));
+  int filled = 0;
+  for (int i = 0; i < ap::kAcmDrivers; ++i) {
+    other_src[4] = static_cast<uint8_t>(0x30 + i);
+    // The last entry is a bad pair, so a full list holds both kinds.
+    const int at = (i == ap::kAcmDrivers - 1) ? ap::AcmDriverStoreBad(&full, other_src, 50, pcm, 18)
+                                               : ap::AcmDriverStore(&full, other_src, 50, pcm, 18, 0x100 + i);
+    if (at == i) ++filled;
+  }
+  Check(filled == ap::kAcmDrivers, "the list takes kAcmDrivers pairs", filled, ap::kAcmDrivers);
+  other_src[4] = 0x99;
+  Check(ap::AcmDriverStore(&full, other_src, 50, pcm, 18, 0x555) == -1 &&
+            ap::AcmDriverStoreBad(&full, other_src, 50, pcm, 18) == -1 &&
+            ap::AcmDriverFind(full, other_src, 50, pcm, 18) == -1,
+        "a full list does not store a new pair, the caller closes its handle", -1, -1);
+  bool kept = true;
+  for (int i = 0; i < ap::kAcmDrivers; ++i) {
+    other_src[4] = static_cast<uint8_t>(0x30 + i);
+    const bool is_bad = i == ap::kAcmDrivers - 1;
+    kept = kept && ap::AcmDriverFind(full, other_src, 50, pcm, 18) == i && full.entry[i].bad == is_bad &&
+           full.entry[i].handle == (is_bad ? 0u : static_cast<uintptr_t>(0x100 + i));
+  }
+  Check(kept, "a full list keeps each handle that it holds (no entry is replaced)", kept ? 1 : 0, 1);
 }
 
 }  // namespace audio_play_checks

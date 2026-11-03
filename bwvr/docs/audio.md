@@ -1380,8 +1380,8 @@ value is the bytes that the ACM wrote and the result. The cache has 16 entries
 in a fixed array and replaces the oldest. Its lock is not held while the ACM
 runs, because the frame thread and the loader thread of QMixer both call the
 wrapper. A call goes to the ACM and is not kept when it has a driver handle, a
-flag other than the four flags of a field, a format over 128 bytes, or when
-the ACM answers with something other than 0. A hit writes the bytes of the
+flag other than the four flags of a field, a PCM source (its key is 16 bytes),
+a format over 128 bytes, or when the ACM answers with something other than 0. A hit writes the bytes of the
 first answer and returns 0. The math is in `audio_play_math.h` (`AcmFind`,
 `AcmStore`, `AcmSuggestCacheable`) with checks.
 
@@ -1389,7 +1389,7 @@ first answer and returns 0. The math is in `audio_play_math.h` (`AcmFind`,
 that the wrapper checks. For such a hit it runs the real call on a copy of the
 target, compares the result and the bytes, writes the line `audio acm    :
 compare N: ...`, and gives the caller the answer of the ACM. A difference
-drops the entry. A checked hit takes as long as a call to the ACM (more than
+drops the entry that holds the key after the real call. A checked hit takes as long as a call to the ACM (more than
 20 ms on the Steam Frame), so only the first few are checked. 0 turns the check
 off.
 
@@ -1397,15 +1397,21 @@ off.
 that opens the stream (I: the Wine source is not in the repo). The wrapper asks
 the first stream of a pair of formats for its driver (`acmDriverID`), opens a
 handle of that driver (`acmDriverOpen`) and keeps it (8 pairs). The next open
-of the same pair gets that handle in place of NULL. An open with the kept
+of the same pair gets that handle in place of NULL. The list never replaces an
+entry. With a full list the wrapper closes the new handle at once and keeps
+nothing. A pair whose `acmDriverID` or `acmDriverOpen` fails, or that gives a
+null handle, is kept as a pair with no driver: its next open goes to the ACM
+with no lookup, and the failure counts in `failed`. An open with the kept
 handle that fails goes to the ACM as QMixer asked, and the pair is not tried
 again (the log says it). The mod keeps no stream handle between two plays and
-never closes the driver handle. Not shown: that the 2 ms of the open are the
-search of a driver. The Frame decides it with the times in the line below.
+never closes a handle that the list holds. Not shown: that the 2 ms of the
+open are the search of a driver. The Frame decides it with the times in the
+line below.
 
 *The lines.* The `audio open` lines end with the hits and the misses of
 `acmFormatSuggest` so far. A miss, the first checks, and a driver that mode 2
-keeps have each a line `audio acm    :` (the first 8 misses). Each 10 s, with
+keeps have each a line `audio acm    :` (the first 8 misses, the first 16
+lookups of a driver). Each 10 s, with
 the `audio play` line, one line gives the counts since the start:
 
 ```

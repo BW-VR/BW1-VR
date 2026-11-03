@@ -1276,12 +1276,13 @@ that moves while the Hand takes it.
   session shows which part of the time of `GLandscape::Draw` is the
   work of the game and which part is the calls of the device. Next on the
   Frame: `trace=1` in `bwvr.ini`, play, press a combination of the
-  controllers right after a stutter or a jump of the picture (X with the click of the left stick, or the left trigger with the
-  click of the right stick), take `trace-<time>.json` of the app folder and
-  read it with `tools/trace/trace_report.py` or in `ui.perfetto.dev`. Not
-  shown: which buttons the Steam Frame gives to the app (the lines `trace :
-  buttons` of `bwvr-quest.log`), the cost of the recorder on the Frame, and the clock shift that the join
-  finds.
+  controllers right after a stutter or a jump of the picture (X with the
+  click of the left stick, or the left trigger with the click of the right
+  stick), take `trace-<time>.json` of the app folder and read it with
+  `tools/trace/trace_report.py` or in `ui.perfetto.dev`. Not shown: which
+  buttons the Steam Frame gives to the app (the lines `trace : buttons` of
+  `bwvr-quest.log`), the cost of the recorder on the Frame, and the clock
+  shift that the join finds.
 - **N19. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the

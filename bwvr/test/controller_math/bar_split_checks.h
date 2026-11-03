@@ -79,6 +79,38 @@ inline void BarSplitChecks() {
           static_cast<double>(deep.Ticks() + outer.Ticks()));
   }
 
+  // The part of every timer, kept or not (the table in the log): a device call
+  // is in one timer only, so the parts add up to the whole sum.
+  {
+    Stack s;
+    Acc run;
+    s.Push(0, run);
+    s.Push(1, run);  // short bar, not kept
+    run.ticks[rc::kDraw] += 40;
+    run.calls[rc::kDraw] += 1;
+    s.Push(2, run);  // kept bar in it
+    run.ticks[rc::kDraw] += 100;
+    run.calls[rc::kDraw] += 2;
+    Acc all_deep, all_short, all_outer;
+    s.Pop(2, run, true, &all_deep);
+    run.ticks[rc::kDraw] += 5;
+    run.calls[rc::kDraw] += 1;
+    s.Pop(1, run, false, &all_short);
+    run.ticks[rc::kTexture] += 7;
+    run.calls[rc::kTexture] += 1;
+    const Acc outer = s.Pop(0, run, true, &all_outer);
+    Check(all_deep.Ticks() == 100 && all_short.Ticks() == 45 && all_outer.Ticks() == 7,
+          "the part of every timer: 100, 45 and 7 ticks", 152, static_cast<double>(
+              all_deep.Ticks() + all_short.Ticks() + all_outer.Ticks()));
+    Check(all_deep.Ticks() + all_short.Ticks() + all_outer.Ticks() == run.Ticks(),
+          "the parts of every timer add up to the whole sum, a short bar is not counted twice",
+          static_cast<double>(run.Ticks()),
+          static_cast<double>(all_deep.Ticks() + all_short.Ticks() + all_outer.Ticks()));
+    Check(outer.Ticks() == 52,
+          "the kept part of the outer bar has the short bar and its own 7 ticks", 52,
+          static_cast<double>(outer.Ticks()));
+  }
+
   // A depth outside the stack gives nothing and does not write.
   {
     Stack s;

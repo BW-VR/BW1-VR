@@ -37,6 +37,15 @@ The script prints:
      many long frames it led, and its mean own time, game part and device part
      in those frames. --list-long N prints the N longest long frames one by
      one, with the five largest own parts of each.
+  5. --tree NAME: the inclusive time under the bars whose name starts with NAME,
+     as a mean of a game frame: all of it, the game part, the device part, and
+     the own time of each bar name below it.
+
+Every sum is a mean over the game frames (the "frame" bars), also the sums of
+the counters. The line "clamped" says how many bars the script had to correct.
+The counter "timed calls (a frame)" is the number of timer calls that got a
+clock read in the graphics call: each costs the time that the log gives as "the
+cost of one timed call".
 
 Only the standard library. The script does not change a file.
 """
@@ -50,7 +59,12 @@ import sys
 
 # The bars that are waits or frames, not work of the game.
 SKIP_PREFIX = ("wait of the pace",)
-SKIP_NAMES = ("frame",)
+SKIP_NAMES = ("frame", "census log (mod)")
+
+# The bars that the clamps changed: an own time below 0 (a child that is longer
+# than the bar around it, from the rounding of the clock) and a device part above
+# the own time.
+CLAMP = {"own_n": 0, "own_us": 0.0, "device_n": 0, "device_us": 0.0}
 
 
 def load(path):
@@ -110,7 +124,12 @@ def own_times(bars):
         out.append(rec)
     for r in out:
         if r.own < 0:
+            CLAMP["own_n"] += 1
+            CLAMP["own_us"] -= r.own
             r.own = 0.0
+        if r.device > r.own:
+            CLAMP["device_n"] += 1
+            CLAMP["device_us"] += r.device - r.own
     return out
 
 
@@ -139,6 +158,8 @@ def main():
     ap.add_argument("--culprits", type=int, default=12, help="bar names to print for the long frames (12)")
     ap.add_argument("--list-long", type=int, default=0, metavar="N",
                     help="print the N longest long frames one by one (0)")
+    ap.add_argument("--tree", metavar="NAME", help="the inclusive game and device time under the bars "
+                    "whose name starts with NAME")
     args = ap.parse_args()
 
     files = files_of(args.paths)
@@ -157,6 +178,10 @@ def main():
     long_frames = []
     counter_sum = collections.defaultdict(lambda: collections.Counter())
     counter_n = collections.Counter()
+    tree_inc = tree_dev = 0.0
+    tree_calls = 0
+    tree_own = collections.Counter()
+    tree_dev_by = collections.Counter()
     n_files = 0
     for path in files:
         got = load(path)
@@ -173,6 +198,20 @@ def main():
             draws[r.name] += r.draws
             states[r.name] += r.states
             textures[r.name] += r.textures
+        if args.tree:
+            starts = [r.start for r in rows]
+            for i, root in enumerate(rows):
+                if not root.name.startswith(args.tree):
+                    continue
+                tree_calls += 1
+                k = i
+                while k < len(rows) and rows[k].start < root.end:
+                    r = rows[k]
+                    tree_inc += r.own
+                    tree_dev += r.device_own
+                    tree_own[r.name] += r.own
+                    tree_dev_by[r.name] += r.device_own
+                    k += 1
         for c in counters:
             counter_n[c["name"]] += 1
             for k, v in (c.get("args") or {}).items():
@@ -218,14 +257,16 @@ def main():
         sum(device.values()) / 1000.0 / nframes))
 
     if counter_n:
-        print("\nThe counters of the device of a frame (mean of %d frames of the graphics engine):" %
-              max(counter_n.values()))
+        print("\nThe counters of a frame (mean over the %d game frames, %d to %d counter events):" %
+              (nframes, min(counter_n.values()), max(counter_n.values())))
         for name in sorted(counter_n):
-            n = counter_n[name]
-            print("  %-26s %s" % (name, ", ".join("%s %.1f" % (k, v / n)
+            # A counter "(a frame)" has one event for each game frame. Another counter
+            # (the frames a second) is a mean over its own events.
+            den = nframes if name.endswith("(a frame)") else counter_n[name]
+            print("  %-26s %s" % (name, ", ".join("%s %.1f" % (k, v / den)
                                                     for k, v in sorted(counter_sum[name].items()))))
 
-    calls_n = counter_n.get("device us (a frame)", 0)
+    calls_n = nframes if counter_n.get("device us (a frame)", 0) else 0
     if calls_n:
         device_us = sum(counter_sum["device us (a frame)"].values()) + \
             counter_sum["device other (a frame)"].get("us", 0.0)
@@ -236,13 +277,34 @@ def main():
                   device_us / 1000.0 / calls_n, in_bars / 1000.0 / calls_n,
                   (device_us - in_bars) / 1000.0 / calls_n))
 
+    if CLAMP["own_n"] or CLAMP["device_n"]:
+        print("\nclamped: %d bars had an own time below 0 (%.3f ms in all, set to 0), %d bars had a "
+              "device part above their own time (%.3f ms in all, cut to the own time)" % (
+                  CLAMP["own_n"], CLAMP["own_us"] / 1000.0, CLAMP["device_n"],
+                  CLAMP["device_us"] / 1000.0))
+    else:
+        print("\nclamped: no bar")
+
+    if args.tree:
+        if tree_calls == 0:
+            print("\n--tree %s: no bar with this name" % args.tree)
+        else:
+            print("\n--tree %s: %d bars, %.2f ms a game frame inclusive: game %.2f ms, device %.2f ms" % (
+                args.tree, tree_calls, tree_inc / 1000.0 / nframes,
+                (tree_inc - tree_dev) / 1000.0 / nframes, tree_dev / 1000.0 / nframes))
+            print("  %8s %8s %8s  %s" % ("own ms", "game ms", "dev ms", "bar below it"))
+            for name, v in tree_own.most_common(args.top):
+                print("  %8.2f %8.2f %8.2f  %s" % (
+                    v / 1000.0 / nframes, (v - tree_dev_by[name]) / 1000.0 / nframes,
+                    tree_dev_by[name] / 1000.0 / nframes, name))
+
     print("\nThe largest own part in each frame over %.0f ms (%d frames):" % (args.long_ms, len(long_frames)))
     for name, k in culprit_n.most_common(args.culprits):
         print("  %4d frames  own %6.2f ms (game %6.2f, device %6.2f) as a mean  %s" % (
             k, culprit_own[name] / 1000.0 / k, (culprit_own[name] - culprit_dev[name]) / 1000.0 / k,
             culprit_dev[name] / 1000.0 / k, name))
-    if args.list_long > 0:
-        print("\nThe %d longest of them:" % args.list_long)
+    if args.list_long > 0 and long_frames:
+        print("\nThe %d longest of them:" % min(args.list_long, len(long_frames)))
         for ms, path, inside in sorted(long_frames, key=lambda t: -t[0])[:args.list_long]:
             print("  %.1f ms  %s" % (ms, os.path.basename(path)))
             for r in inside[:5]:

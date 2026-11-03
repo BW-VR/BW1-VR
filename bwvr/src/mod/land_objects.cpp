@@ -73,6 +73,7 @@
 #include "land_objects_math.h"
 #include "object_timer.h"
 #include "thread_id.h"
+#include "trace_rec.h"
 
 void ModLog(const char* format, ...);
 
@@ -503,7 +504,14 @@ void WorkBefore() {
 }
 
 void __cdecl h_DrawObjects() {
-  WorkBefore();
+  {
+    // The work of the mod before the draws of the game: a bar of its own, so it
+    // is not in the own time of the bar of fn_005E5CD0.
+    static const trace_events::Def kWorkBeforeDef = {
+        "land objects: work before the draws (mod)", "mod", {nullptr, nullptr, nullptr, nullptr}};
+    TraceScope trace_scope(&kWorkBeforeDef);
+    WorkBefore();
+  }
   o_DrawObjects();
   g_before_on = false;
 }

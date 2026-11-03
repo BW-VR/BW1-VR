@@ -2387,8 +2387,8 @@ gaps show the cause at once. The file is in the Trace Event Format of Chrome
 | `trace_ring_k` | 128 | The ring of the frame thread has N K events. The other rings have 16 K events |
 | `trace_keyboard` | 1 | 1: Ctrl, Shift and G save, while a window of the game is in front |
 | `trace_test_save_s` | 0 | A test aid: one save N s after the start of the recorder |
-| `trace_draw_parts` | 1 | 1: the callees of `GLandscape::Draw` and their callees have bars (about 77 timers, `kDrawDefs` in `turn_parts.cpp`). A timer that is called more than 200 times in a frame is a helper, and the timeline leaves it out from then on. 0: only the timers of `kGraphicsDefs` |
-| `trace_device` | 1 | 1: each bar of the group of the graphics engine has the time and the calls of the device of the mod in it (`device_us`, `draws`, `state_calls`, `textures`), and each frame of the graphics engine has three counters of the device. It needs `backend=vulkan` (the device of the mod, `vk_ddraw.cpp`). 0: the bars have no such numbers |
+| `trace_draw_parts` | 1 | 1: the callees of `GLandscape::Draw` and their callees have bars (about 77 timers, `kDrawDefs` in `turn_parts.cpp`). A timer of `kDrawDefs` that is called more than 200 times in a frame is a helper, and the timeline leaves it out from then on (the timers of `kGraphicsDefs` have no such cap). 0: only the timers of `kGraphicsDefs` |
+| `trace_device` | 1 | 1: each bar of the group of the graphics engine has the time and the calls of the device of the mod in it (`device_us`, `draws`, `state_calls`, `textures`), and each frame of the graphics engine has three counters of the device. It also writes the table of the timers to the log and the counter `timed calls (a frame)`, as `trace_draw_parts=1` does. It needs `backend=vulkan` (the device of the mod, `vk_ddraw.cpp`). 0: the bars have no such numbers |
 | `trace_draw_all_kept` | 1 | 1: the bar of `PhysicsObject::DrawAll` is kept however short it is. 0: it follows `trace_min_us` |
 | `trace_combo_ms` | 300 | In the app: the time that a button combination is held |
 | `trace_combo2` | 1 | In the app: 1: the left trigger with the click of the right stick saves too. 0: only X with the click of the left stick |
@@ -2469,11 +2469,18 @@ to the interface, the conversion of a float, the random number, the altitude,
 the allocator, the small math functions) has no timer. The virtual calls of
 `GLandscape::Draw` (26 sites) have no timer: their time stays in the own time
 of the bar. All timers go in with the one `MH_ApplyQueued`. A timer of this
-group that is called more than 200 times in one frame (`bar_split_math.h`,
-`kCallsCap`) is a helper: it is not timed from then on, and the log names it
-("was called more than 200 times in a frame"). A bar under `trace_min_us` is
-not in the file. The table in the log (below) has the bars that the file does
-not have.
+group (`kDrawDefs` only, not the timers of `kGraphicsDefs`) that is called more
+than 200 times in one frame (`bar_split_math.h`, `kCallsCap`) is a helper: it
+gets no clock read from then on, and the log names it ("was called more than
+200 times in a frame"). The calls of such a timer go on counting in the table of
+the log, which marks it "(left out)". A bar under `trace_min_us` is not in the
+file. The table in the log (below) has the bars that the file does not have.
+
+The "game" part of a bar includes the code of the mod that runs in the hooks and
+the stubs under it, for example the hook of `land_objects` on `fn_005E5CD0`. The
+work of that hook before the draws of the game has a bar of its own, "land
+objects: work before the draws (mod)". The write of the table to the log has one
+too, "census log (mod)", which `trace_self.py` leaves out of its lists.
 
 **The device in a bar** (`trace_device=1`, `bar_split_math.h`, checks in
 `test/controller_math/bar_split_checks.h`). The device of the mod
@@ -2495,27 +2502,36 @@ return the bar has four numbers:
 A bar in a bar takes its part out of the outer bar. A bar that the file does
 not have (under `trace_min_us`) leaves its part in the bar that called it. So
 the own time of a bar (its length less the bars in it) is `device_us` plus the
-game, which is the rest. The clock of the CPU is turned to us with its rate:
-a spin of 3 ms at the start, then the rate over the whole run against the
-performance counter. After each call of `ProcessGraphicsEngine` three counters
-have the device of the whole call: `device calls (a frame)` (draws, render
+game, which is the rest. The clock of the CPU is converted to microseconds
+with its rate: a spin of 3 ms at the start, then the rate over the whole run
+against the performance counter. After each call of `ProcessGraphicsEngine` four counters
+have the device of the whole call and the timers: `device calls (a frame)` (draws, render
 states, stage states, textures), `device us (a frame)` (the same kinds, in us)
-and `device other (a frame)` (the other calls, BeginScene, EndScene, Clear and
-the state blocks, and their us). The device here is the device of the mod
+`device other (a frame)` (the other calls, BeginScene, EndScene, Clear and the
+state blocks, and their us) and `timed calls (a frame)` (the timer calls that got
+a clock read). The device here is the device of the mod
 only: the surface calls of DirectDraw (a lock, a blit) are not in it. With a
 backend that is not Vulkan there is no device of the mod, and the numbers are
 0.
 
-Each 900 frames of the graphics engine the log has the table of the timers:
+With `trace_draw_parts=1` or `trace_device=1`, each 900 frames of the graphics
+engine the log has the table of the timers:
 the line `turn parts   : graphics timers, N frames: ...` gives the device of
-the whole call (ms, draws, states, textures and other calls a frame) and the
-device in the bars. The lines `turn parts   : graphics timers: ...` after it
+the whole call (ms, draws, states, textures and other calls a frame), the device
+in the timers and the timed calls a frame. The lines `turn parts   : graphics timers: ...` after it
 give for the 48 timers with the most own time: the name and the address, the
-timed calls a frame, the own ms a frame (the device in it), and the bars a
-frame that were under `trace_min_us`. The own ms are the time less every timer
-in the bar. The device in it is the part that no kept bar covers, so the device
-calls of a bar under `trace_min_us` in it count, and the device can be more
-than the own ms of a bar.
+calls a frame (the calls of the stub, also of a timer that is left out), the own
+ms a frame (the device in it), and the bars a frame that were under
+`trace_min_us`. The own ms are the time less every timer in the bar. The device
+in it is the part that no other timer covers, so a device call is in one timer
+only and the parts add up to the device in the timers.
+
+At the start the log has the cost of one timed call ("the cost of one timed
+call ... ns"): a probe function with a timer of its own, called 20000 times in 5
+rounds with the timer and without it. The cost is for the frame thread of that
+start, and it includes the two clock reads, the stack, the split of the device
+and the check of the cap. Multiply it by the timed calls a frame to know what the
+timers add to a frame.
 
 **`PhysicsObject::DrawAll`.** The hook is in when `throw_law=2` and the bytes of
 the physics code are those of the game (`throw_physics.cpp`, the log line
@@ -2565,9 +2581,11 @@ back against the direction of the pictures before, and a check of the file
 `trace-*.json` files) sums the own time of each bar name on the frame thread as
 a mean of a game frame, split into the game part and the device part
 (`device_us`), with the bars, draws, state calls and textures a frame, the
-means of the three counters of the device, and the largest own part of each
-frame longer than `--long-ms` (20). `--list-long N` prints the N longest
-frames with their five largest own parts. A bar that the file does not have
+means of the counters of a frame, how many bars it had to clamp, and the largest
+own part of each frame longer than `--long-ms` (20). `--list-long N` prints the N
+longest frames with their five largest own parts. `--tree NAME` gives the
+inclusive game and device time under the bars of that name, for example
+`--tree GLandscape::Draw`. A bar that the file does not have
 (under `trace_min_us`) is in the own time of the bar that called it.
 
 **Not shown yet.** The cost of the recorder on the headset (the clock read under

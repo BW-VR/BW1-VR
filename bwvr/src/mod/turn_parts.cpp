@@ -53,9 +53,25 @@
 // group counts only between TurnPartsGraphicsBegin and TurnPartsGraphicsEnd
 // (the call of ProcessGraphicsEngine on the frame thread), and only with
 // trace=1.
+//
+// THE CALLEES OF GLandscape::Draw (trace_draw_parts=1, kDrawDefs): its callees
+// and their callees, in the same group. A timer that is called more than
+// bar_split_math::kCallsCap (200) times in a frame is a helper: the timeline
+// leaves it out from then on, and the log names it.
+//
+// THE DEVICE IN A BAR (trace_device=1, bar_split_math.h). The device of the mod
+// adds each call of Direct3D 7 to the running sum g_chain_acc (render_chain.h).
+// A timer of the group keeps the sum at its call. At its return the bar gets
+// four numbers: the time in the calls of the device inside the bar that no bar
+// in it covers (device_us), and the draws, the state calls (render states and
+// stage states) and the textures of those calls. So the own time of a bar
+// splits into the device and the game (the rest). After each frame of the
+// graphics engine three counters have the calls and the time of the device in
+// the whole call. Each 900 frames the log has the table of the timers.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <intrin.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +79,8 @@
 
 #include "MinHook.h"
 #include "audio_watch.h"
+#include "bar_split_math.h"
+#include "render_chain.h"
 #include "thread_id.h"
 #include "time_log.h"
 #include "trace_rec.h"
@@ -78,6 +96,7 @@ namespace {
 
 namespace tp = turn_parts_math;
 namespace wp = walk_parts_math;
+namespace rc = render_chain_math;
 
 // What a part counts besides its place.
 enum Filter {
@@ -142,6 +161,49 @@ const Def kGraphicsDefs[] = {
     {0x00445E10, "GCameraEditor::Draw3DPart", kAll},
 };
 constexpr int kGraphicsDefCount = sizeof(kGraphicsDefs) / sizeof(kGraphicsDefs[0]);
+
+// The callees of GLandscape::Draw (0x005E42E0) and their callees, found in the
+// disassembly of the exe: each direct callee of 96 bytes or more, and from
+// those each direct callee of 96 bytes or more. A helper that the game calls
+// at many places (the access to the interface, the conversion of a float, the
+// random number, the altitude, the allocator, the small math functions) has no
+// timer. A function with a timer already (kDefs, kGraphicsDefs) has no second
+// one. The names are those of the symbol file.
+const Def kDrawDefs[] = {
+    {0x004059F0, "Windmill::PreDraw", kAll}, {0x00442C20, nullptr, kAll},
+    {0x004670D0, "CitadelHeart::DrawNow", kAll}, {0x005DF1B0, nullptr, kAll},
+    {0x005DFCE0, nullptr, kAll}, {0x007FAE60, nullptr, kAll}, {0x00839980, nullptr, kAll},
+    {0x005DFF20, "PetitNavire::PreDraw", kAll}, {0x005E1020, "PetitNavire::PetitNavire", kAll},
+    {0x005E13C0, nullptr, kAll}, {0x00801C90, nullptr, kAll}, {0x0083AC70, nullptr, kAll},
+    {0x005E1DE0, nullptr, kAll}, {0x0086A2C0, nullptr, kAll}, {0x0086A330, nullptr, kAll},
+    {0x005E2D10, "LandFeature::DrawWorm", kAll}, {0x007FEB30, nullptr, kAll},
+    {0x0080B4D0, "LH3DObject::Create", kAll}, {0x005E3F70, nullptr, kAll},
+    {0x0081C090, "LH3DTech::Draw3DWorldTriangle", kAll}, {0x005E5100, nullptr, kAll},
+    {0x00840530, "LH3DSprite::Draw", kAll}, {0x005E5830, nullptr, kAll},
+    {0x005E25C0, nullptr, kAll}, {0x0081E1F0, nullptr, kAll}, {0x008229B0, nullptr, kAll},
+    {0x00823460, nullptr, kAll}, {0x00823690, nullptr, kAll},
+    {0x0086A1B0, "LH3DSky::Time2SkyType", kAll}, {0x005E5CD0, nullptr, kAll},
+    {0x00429E30, "GAudio::PlaySoundEffect", kAll}, {0x00439B90, nullptr, kAll},
+    {0x0043A9E0, nullptr, kAll}, {0x005D8A10, "GInterface::StartImmersion", kAll},
+    {0x005DF640, nullptr, kAll}, {0x005E03F0, "PetitNavire::PostDraw", kAll},
+    {0x005E3770, "DesignedWaterFall", kAll}, {0x005E66A0, nullptr, kAll},
+    {0x00823570, nullptr, kAll}, {0x00824140, nullptr, kAll}, {0x00825350, nullptr, kAll},
+    {0x008254A0, nullptr, kAll}, {0x00826470, nullptr, kAll}, {0x008274A0, nullptr, kAll},
+    {0x00827820, nullptr, kAll}, {0x0083F310, "LH3DZSorter::NewZObject", kAll},
+    {0x005FFBB0, nullptr, kAll}, {0x00646FE0, nullptr, kAll}, {0x005167D0, nullptr, kAll},
+    {0x007FB5C0, nullptr, kAll}, {0x007FCE80, nullptr, kAll}, {0x0074A7C0, "Tree::PreDraw", kAll},
+    {0x00774E30, nullptr, kAll}, {0x007FF4F0, nullptr, kAll},
+    {0x007FF2D0, "LH3DIsland::PreDraw", kAll}, {0x00874AA0, nullptr, kAll},
+    {0x00877D20, nullptr, kAll}, {0x007FF610, nullptr, kAll}, {0x00878350, nullptr, kAll},
+    {0x00802550, nullptr, kAll}, {0x00802680, nullptr, kAll}, {0x0081F820, nullptr, kAll},
+    {0x00822560, nullptr, kAll}, {0x00824B90, nullptr, kAll}, {0x00824DA0, nullptr, kAll},
+    {0x00829BC0, nullptr, kAll}, {0x00806D00, "LH3DMesh::Release", kAll},
+    {0x00825E70, nullptr, kAll}, {0x008296D0, nullptr, kAll}, {0x00874850, nullptr, kAll},
+    {0x00806F60, nullptr, kAll}, {0x00874600, nullptr, kAll}, {0x008801D0, nullptr, kAll},
+    {0x00879930, nullptr, kAll}, {0x0082A500, "DrawAndClip", kAll}, {0x00879500, nullptr, kAll},
+    {0x0087A090, nullptr, kAll},
+};
+constexpr int kDrawDefCount = sizeof(kDrawDefs) / sizeof(kDrawDefs[0]);
 
 // The parts: GGame::ProcessOneGameTurn (0x0054D620), the three phases of the
 // turn, and the functions that the phases call. Every direct callee of the
@@ -213,6 +275,38 @@ struct Timer {
 trace_events::Def g_trace_defs[tp::kMaxParts];
 char g_trace_names[tp::kMaxParts][72];
 
+// The split of the bars into the game and the device (trace_device=1).
+bool g_split_on = false;
+bar_split_math::Stack g_split;
+bar_split_math::ClockRate g_rate;
+bar_split_math::Acc g_frame_acc0;  // the running sum at the start of the graphics call
+// The numbers of the bar of a timer of the group, and the counters of a frame.
+const char* const kSplitArgs[4] = {"device_us", "draws", "state_calls", "textures"};
+const trace_events::Def kDeviceCallsDef = {
+    "device calls (a frame)", "game", {"draws", "render states", "stage states", "textures"}};
+const trace_events::Def kDeviceUsDef = {
+    "device us (a frame)", "game", {"draws", "render states", "stage states", "textures"}};
+const trace_events::Def kDeviceOtherDef = {
+    "device other (a frame)", "game", {"calls", "us", nullptr, nullptr}};
+// The calls of each timer of the group in this frame, and the timers that the
+// timeline leaves out (more than kCallsCap calls in a frame).
+uint32_t g_frame_calls[tp::kMaxParts];
+bool g_left_out[tp::kMaxParts];
+bool g_left_new = false;
+bool g_left_logged[tp::kMaxParts];
+
+// The sums of a window of graphics frames, for the table in the log.
+constexpr uint64_t kCensusFrames = 900;
+struct Census {
+  uint64_t frames = 0;
+  uint64_t calls[tp::kMaxParts] = {};
+  int64_t own_qpc[tp::kMaxParts] = {};       // own time, ticks of the performance counter
+  uint64_t device_tsc[tp::kMaxParts] = {};   // device time in it, ticks of the CPU clock
+  uint64_t short_bars[tp::kMaxParts] = {};   // bars under trace_min_us (not in the file)
+  bar_split_math::Acc device;                // the device in the whole graphics call
+};
+Census g_census;
+
 Timer g_timers[tp::kMaxParts];
 const char* g_names[tp::kMaxParts];
 int g_count = 1;  // timer 0 is the rest
@@ -274,7 +368,17 @@ extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint
   }
   // A timer of the graphics engine counts only in its call: the helpers that
   // the game turn calls many times must not pay for two clock reads a call.
-  const bool counts = t.graphics_only ? g_in_graphics : (g_in_turn || g_in_graphics);
+  bool counts = t.graphics_only ? g_in_graphics : (g_in_turn || g_in_graphics);
+  // A helper (more than kCallsCap calls in a frame) is left out from then on.
+  if (counts && frame_thread && t.graphics_only) {
+    if (g_left_out[id]) {
+      counts = false;
+    } else if (bar_split_math::LeaveOut(++g_frame_calls[id])) {
+      g_left_out[id] = true;
+      g_left_new = true;
+      counts = false;
+    }
+  }
   if (counts && frame_thread && tp::Timed(true, true, g_stack.nest[id], g_stack.depth)) {
     const bool take = t.filter != kMadeAnimation || SlotEmpty(self, ret_slot[1], ret_slot[2]);
     const int64_t now = Now();
@@ -282,6 +386,7 @@ extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint
         g_stack.Push(static_cast<int>(id), now, *ret_slot,
                      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ret_slot)))) {
       *ret_slot = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&ExitThunk));
+      if (g_split_on) g_split.Push(g_stack.depth - 1, g_chain_acc);
       if (static_cast<int>(id) == g_audio_turn_id) AudioWatchTurnBegin(now);
       if (g_trace) ++g_timed_calls;
     }
@@ -298,8 +403,24 @@ extern "C" uint32_t __cdecl TurnPartsExit(uint32_t esp) {
   // The bar of the part in the timeline, from its call to its return.
   const int trace_id = top >= 0 ? g_stack.open[top].id : 0;
   const int64_t trace_begin = top >= 0 ? g_stack.open[top].start : 0;
+  // The device calls in the bar that no kept bar in it has.
+  const bool keeps = g_trace && trace_id > 0 && TraceKeeps(trace_begin, now);
+  bar_split_math::Acc own;
+  if (g_split_on && top >= 0) own = g_split.Pop(top, g_chain_acc, keeps);
   const uint32_t ret = g_stack.Return(now, esp);
-  if (g_trace && ret != 0 && trace_id > 0) TraceBar(&g_trace_defs[trace_id], trace_begin, now);
+  if (g_trace && ret != 0 && trace_id > 0) {
+    if (g_split_on && g_timers[trace_id].graphics_only) {
+      TraceBar(&g_trace_defs[trace_id], trace_begin, now,
+               static_cast<float>(g_rate.Us(own.Ticks())), static_cast<float>(own.calls[rc::kDraw]),
+               static_cast<float>(own.StateCalls()), static_cast<float>(own.calls[rc::kTexture]));
+    } else {
+      TraceBar(&g_trace_defs[trace_id], trace_begin, now);
+    }
+    if (g_in_graphics) {
+      g_census.device_tsc[trace_id] += own.Ticks();
+      if (!keeps) ++g_census.short_bars[trace_id];
+    }
+  }
   if (audio_turn) AudioWatchTurnEnd(now);
   if (ret != 0) return ret;
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&NoReturn));
@@ -362,6 +483,22 @@ void MakeStub(int id) {
   const int32_t rel = static_cast<int32_t>(reinterpret_cast<intptr_t>(&EnterThunk) -
                                            reinterpret_cast<intptr_t>(at + 10));
   memcpy(at + 6, &rel, 4);
+}
+
+// The us of a tick of the clock of the CPU, from a spin of 3 ms against the
+// performance counter. The rate of the whole run replaces it (ClockRate).
+double SeedRate() {
+  LARGE_INTEGER a, b;
+  QueryPerformanceCounter(&a);
+  const uint64_t t0 = __rdtsc();
+  do {
+    QueryPerformanceCounter(&b);
+  } while ((b.QuadPart - a.QuadPart) * 1000 < g_hz.QuadPart * 3);
+  const uint64_t t1 = __rdtsc();
+  if (t1 <= t0) return 0.0;
+  const double us = static_cast<double>(b.QuadPart - a.QuadPart) * 1e6 /
+                    static_cast<double>(g_hz.QuadPart);
+  return us / static_cast<double>(t1 - t0);
 }
 
 bool Known(uint32_t address) {
@@ -561,6 +698,23 @@ static void InstallNow() {
       }
     }
   }
+  // The callees of GLandscape::Draw, for the timeline only.
+  int draw_in = 0;
+  const bool draw_parts = g_trace && IniKey("trace_draw_parts", 1) != 0;
+  if (draw_parts) {
+    for (int i = 0; i < kDrawDefCount; ++i) {
+      char auto_name[32];
+      _snprintf_s(auto_name, sizeof(auto_name), _TRUNCATE, "fn_%08X",
+                  static_cast<unsigned>(kDrawDefs[i].address));
+      if (Add(kDrawDefs[i].address, kDrawDefs[i].name != nullptr ? kDrawDefs[i].name : auto_name,
+              kDrawDefs[i].filter)) {
+        g_timers[g_count - 1].graphics_only = true;
+        ++in;
+        ++graphics_in;
+        ++draw_in;
+      }
+    }
+  }
   char list[1536];
   IniText("turn_parts_add", list, sizeof(list));
   int more = 0;
@@ -587,6 +741,12 @@ static void InstallNow() {
     return;
   }
   g_turn_parts = true;
+  // The device in the bars of the group (trace_device=1).
+  g_split_on = g_trace && IniKey("trace_device", 1) != 0;
+  if (g_split_on) {
+    g_rate.Seed(SeedRate());
+    g_chain_acc_on = true;
+  }
   for (int i = 1; i < g_count; ++i) {
     if (g_timers[i].shown == kAudioTurnAddress) g_audio_turn_id = i;
     // The bar of the timeline: the name of the part and its address.
@@ -594,11 +754,27 @@ static void InstallNow() {
                 g_timers[i].name, static_cast<unsigned>(g_timers[i].shown));
     g_trace_defs[i].name = g_trace_names[i];
     g_trace_defs[i].cat = "game";
+    if (g_split_on && g_timers[i].graphics_only) {
+      for (int k = 0; k < 4; ++k) g_trace_defs[i].args[k] = kSplitArgs[k];
+    }
   }
   if (g_trace) {
     ModLog("turn parts   : trace=1. %d timers give bars to the timeline, %d of them on the "
            "callees of ProcessGraphicsEngine (two levels deep)",
            in, graphics_in);
+    ModLog("turn parts   : trace_draw_parts=%d. %s", draw_parts ? 1 : 0,
+           draw_parts ? "The callees of GLandscape::Draw and their callees have bars too. A timer "
+                        "that is called more than 200 times in a frame is left out from then on"
+                      : "No bar on the callees of GLandscape::Draw");
+    if (g_split_on) {
+      ModLog("turn parts   : trace_device=1. Each bar of the group has the time and the calls of "
+             "the device of the mod in it that no bar in it covers (device_us, draws, "
+             "state_calls, textures), and each frame has three counters of the device. The "
+             "clock of the CPU has %.6f us a tick at the start",
+             g_rate.us_per_tick);
+    } else {
+      ModLog("turn parts   : trace_device=0. The bars have no numbers of the device");
+    }
   }
   if (!g_turn_lines) return;
   if (g_audio_turn_id != 0) AudioWatchInit();
@@ -655,14 +831,110 @@ void TurnPartsTurnEnd(int64_t end) {
 void TurnPartsGraphicsBegin() {
   if (g_stack.depth != 0) g_stack = wp::Stack();
   g_in_graphics = true;
+  memset(g_frame_calls, 0, sizeof(g_frame_calls));
+  if (g_split_on) {
+    g_rate.Read(__rdtsc(), Now(), g_hz.QuadPart, 1e6);
+    g_frame_acc0 = g_chain_acc;
+  }
 }
+
+namespace {
+
+// The table of the timers of a window of graphics frames, in the log: the
+// calls a frame, the own time a frame with the device in it, and the bars under
+// trace_min_us a frame. The timers with the most own time come first.
+void CensusLog() {
+  const double f = static_cast<double>(g_census.frames);
+  const double tick_ms = g_ms_per_tick;
+  const double device_ms = g_rate.Us(g_census.device.Ticks()) / 1000.0 / f;
+  uint64_t device_total = 0;
+  for (int i = 1; i < g_count; ++i) device_total += g_census.device_tsc[i];
+  int order[tp::kMaxParts];
+  int n = 0;
+  for (int i = 1; i < g_count; ++i) {
+    if (g_census.calls[i] > 0) order[n++] = i;
+  }
+  for (int a = 1; a < n; ++a) {
+    const int v = order[a];
+    int b = a;
+    while (b > 0 && g_census.own_qpc[order[b - 1]] < g_census.own_qpc[v]) {
+      order[b] = order[b - 1];
+      --b;
+    }
+    order[b] = v;
+  }
+  ModLog("turn parts   : graphics timers, %llu frames: %d timers had calls. The device of the mod "
+         "in the graphics call: %.3f ms a frame, %.1f draws, %.1f render states, %.1f stage "
+         "states, %.1f textures, %.1f other calls. The device in the bars below: %.3f ms a "
+         "frame. Per timer: calls a frame, own ms a frame (the device in it), bars under "
+         "trace_min_us a frame",
+         static_cast<unsigned long long>(g_census.frames), n, device_ms,
+         g_census.device.calls[rc::kDraw] / f, g_census.device.calls[rc::kRenderState] / f,
+         g_census.device.calls[rc::kStageState] / f, g_census.device.calls[rc::kTexture] / f,
+         g_census.device.calls[rc::kOther] / f, g_rate.Us(device_total) / 1000.0 / f);
+  char line[1400];
+  line[0] = 0;
+  int in_line = 0;
+  for (int k = 0; k < n && k < 48; ++k) {
+    const int i = order[k];
+    const size_t used = strlen(line);
+    _snprintf_s(line + used, sizeof(line) - used, _TRUNCATE, "%s%s 0x%08X: %.1f, %.3f (%.3f), %.1f",
+                in_line > 0 ? "; " : "", g_timers[i].name,
+                static_cast<unsigned>(g_timers[i].shown), g_census.calls[i] / f,
+                g_census.own_qpc[i] * tick_ms / f,
+                g_rate.Us(g_census.device_tsc[i]) / 1000.0 / f, g_census.short_bars[i] / f);
+    if (++in_line == 4 || k + 1 == n || k + 1 == 48) {
+      ModLog("turn parts   : graphics timers: %s", line);
+      line[0] = 0;
+      in_line = 0;
+    }
+  }
+  g_census = Census();
+}
+
+}  // namespace
 
 void TurnPartsGraphicsEnd() {
   g_in_graphics = false;
+  if (g_trace) {
+    ++g_census.frames;
+    for (int i = 1; i < g_count; ++i) {
+      g_census.calls[i] += g_stack.calls[i];
+      g_census.own_qpc[i] += g_stack.excl[i];
+    }
+  }
+  if (g_split_on) {
+    // The device in the whole graphics call: three counters of the frame.
+    const bar_split_math::Acc d = g_chain_acc.Minus(g_frame_acc0);
+    g_census.device.Add(d);
+    TraceCounter(&kDeviceCallsDef, static_cast<float>(d.calls[rc::kDraw]),
+                 static_cast<float>(d.calls[rc::kRenderState]),
+                 static_cast<float>(d.calls[rc::kStageState]),
+                 static_cast<float>(d.calls[rc::kTexture]));
+    TraceCounter(&kDeviceUsDef, static_cast<float>(g_rate.Us(d.ticks[rc::kDraw])),
+                 static_cast<float>(g_rate.Us(d.ticks[rc::kRenderState])),
+                 static_cast<float>(g_rate.Us(d.ticks[rc::kStageState])),
+                 static_cast<float>(g_rate.Us(d.ticks[rc::kTexture])));
+    TraceCounter(&kDeviceOtherDef, static_cast<float>(d.calls[rc::kOther]),
+                 static_cast<float>(g_rate.Us(d.ticks[rc::kOther])));
+  }
   // A call that no return closed (a long jump) goes away.
   while (g_stack.depth > 0) g_stack.DropTop();
   g_lost += g_stack.lost;
   g_stack = wp::Stack();
+  if (g_left_new) {
+    g_left_new = false;
+    for (int i = 1; i < g_count; ++i) {
+      if (g_left_out[i] && g_timers[i].graphics_only && !g_left_logged[i]) {
+        g_left_logged[i] = true;
+        ModLog("turn parts   : %s 0x%08X was called more than %u times in a frame, so it is a "
+               "helper. The timeline leaves it out from now on",
+               g_timers[i].name, static_cast<unsigned>(g_timers[i].shown),
+               bar_split_math::kCallsCap);
+      }
+    }
+  }
+  if (g_trace && g_census.frames >= kCensusFrames) CensusLog();
 }
 
 uint32_t TurnPartsTimedCalls() { return static_cast<uint32_t>(g_timed_calls); }

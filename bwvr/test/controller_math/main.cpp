@@ -3619,6 +3619,7 @@ void CreatureChecks() {
 #include "address_space_checks.h"
 #include "large_block_checks.h"
 #include "render_chain_checks.h"
+#include "bar_split_checks.h"
 #include "sse_parts_checks.h"
 #include "hand_fit_checks.h"
 
@@ -4083,6 +4084,7 @@ int main() {
   address_space_checks::AddressSpaceChecks();
   large_block_checks::LargeBlockChecks();
   render_chain_checks::RenderChainChecks();
+  bar_split_checks::BarSplitChecks();
   sse_parts_checks::SsePartsChecks();
   hand_fit_checks::HandFitChecks();
   // Last: it recenters the head of head_pose.cpp.

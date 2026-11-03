@@ -4186,6 +4186,11 @@ the work before it on the GPU, but a pass ends there anyway.
 line. The log at the start: "gpu parts : gpu_parts=1. ..." at the first
 install, or "gpu parts : gpu_parts=0, time_log=1. ..." with no parts.
 
+With `gpu_mesh=1` in the game a second line follows each line of the parts
+(`VkSceneTakeMeshCounts`): the draws of meshes in the window, the records of
+mesh data with their bytes, the meshes in the arena, and the draws with no data
+(the data of the mesh did not come, so the draw is left out).
+
 **Not shown yet:** the parts in a Quest 3, and the cost of the timestamps on
 its GPU (compare the walk of the line of the GPU with `gpu_parts` 1 and 0).
 

@@ -4573,8 +4573,12 @@ void VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
                      uint32_t vertex_count, const uint16_t* indices,
                      uint32_t triangles) {
   BWVR_STREAM(VkStreamMeshData(mesh, hash, vertices, vertex_count, indices, triangles));
-  if (!g_device || g_failed || g_mesh_arena.buffer == VK_NULL_HANDLE ||
-      vertices == nullptr || indices == nullptr || vertex_count == 0 || triangles == 0) {
+  if (!g_device || g_failed) return;
+  // The data of a mesh can come in a frame that the app plays with no walk
+  // (a record of state), before the first walk made the renderer ready.
+  if (g_mesh_arena.buffer == VK_NULL_HANDLE && !g_ready && !Ready()) return;
+  if (g_mesh_arena.buffer == VK_NULL_HANDLE || vertices == nullptr || indices == nullptr ||
+      vertex_count == 0 || triangles == 0) {
     return;
   }
   MeshReclaim();

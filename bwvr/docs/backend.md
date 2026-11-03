@@ -3654,6 +3654,115 @@ Each 10 s the `land objects` lines give the counts and the largest
 differences. With `test_keys=1`, Ctrl Shift F8 steps `land_objects`
 through 1, 0 and 2.
 
+### The parts with SSE
+
+A 3D part draws its meshes in the entry `+0x108` of its vtable. `fn_00815A70`
+(the entry `+0x100`) calls it for a part that is in the view. Two methods do
+the work:
+
+- `fn_0080DB30` draws a part with a mesh list in `+0x7C`. It sets the camera
+  matrix of the part (`fn_007FAFF0`) and the globals of the draw (the color
+  and the specular color, the fog, the detail), asks a few small virtual
+  methods of the part (`+0x4C`, `+0x5C`, `+0xA4`, `+0xE4`, `+0x8`, `+0xC`),
+  and then calls one function for each mesh group of the list:
+  `fn_0080D910` (`fn_00856D40`, or `fn_0084BA90` for a lit mesh with clip
+  flags) or `fn_0080E4F0` (`fn_0085BA30`, or `fn_0085AB10` for a lit mesh).
+  It has no loop over vertices. Its own code is about 100 instructions of
+  moves and calls, so the own time of its timer is the time of the mesh
+  functions that no timer covers.
+- `fn_0080E550` draws a part with an offset for each vertex (a person or an
+  animal: the offsets are at `+0x80` of the part, and `0x00F05180` points at
+  them). It calls `fn_0080AD90`, which calls `fn_0087FB60` for each group
+  of its list, which calls `fn_00859530` for each mesh. `fn_0080AD90` has no
+  loop over vertices either.
+
+Each mesh function runs the same four steps: the loop over the vertices (to
+`LH3DP3::Table1`, "The vertex loops with SSE"), the loop over the triangles
+(it tests the back face of a triangle, and it clips a triangle with a clip
+flag with `fn_0081A760`), the material (`g_set_render_mode_data`,
+`SetD3DTillingOn` and `SetD3DTillingOff`, the cull mode), and
+`LH3DRender::DrawTriangle`. A mesh has about 30 vertices. After
+`fast_transform` two pieces of this still run on the x87 unit, for each
+triangle or each vertex of each mesh of each part:
+
+| The piece | Where | Work |
+| --- | --- | --- |
+| The triangles | `fn_00856D40`, `fn_0085AB10`, `fn_0084BA90`, `fn_00859530`, after the vertex loop | 13 x87 operations for each triangle that has no clip flag: it stays when `(y2 - y0)(x1 - x0) - (y1 - y0)(x2 - x0)` is above 0. The triangle goes to `g_TriangleList` |
+| The offsets | `fn_00859530` | About 90 x87 operations and a call of `__ftol` for each vertex: the offset, the matrix, the clip flags, the projection and the light of the normal. It is the loop of `fn_0084BA90` with one matrix, with an offset for each vertex and its own order of additions |
+
+Under FEX each x87 operation costs several host instructions. On the Steam
+Frame (FEX, island 2) the own time of `fn_0080DB30` is 3 us for a call (796
+calls and 2.4 ms in a frame), and the own time of `fn_0080AD90` is 24 us for
+a call (47 calls and 1.13 ms in a frame). No timer covers a mesh function in
+these times.
+
+`LH3DRender::DrawTriangle` has two x87 loops over the vertices too. The
+first shifts and clamps the screen x and y. It runs only while `0x00FA9398`
+is 1, which the game sets at `0x0068B88D` and clears at `0x0068BF1F`. It did
+not run once in a desktop run of 3 minutes. The second shifts u and v with
+6 x87 operations for each vertex, and runs for a part with a shift of the
+texture. The mod leaves both loops.
+
+`part_draw=1` (0 is the default, `part_draw.cpp`, the math in
+`part_draw_math.h`) makes the two pieces with SSE, with the bits of the game:
+
+- **The triangles.** A jump at the store of `g_NoBackfaceCull` in each of
+  the four functions (`0x0085715F`, `0x0085B078`, `0x0084C10B`,
+  `0x00859AE7`) goes to a stub. The stub builds the whole list in
+  `g_TriangleList` (`BuildTriangles`) and goes on at the test of the size
+  (`0x00857340`, `0x0085B195`, `0x0084C25E`, `0x00859C43`). A triangle with
+  clip flags that the game must clip goes to `fn_0081A760`, the function of
+  the game, at its place in the list. The stub stores `g_NoBackfaceCull` and
+  `g_TriangleListSize` as the loop of the game does. A mesh whose list
+  would not fit in `g_TriangleList` runs the loop of the game.
+- **The offsets.** A jump at the start of each of the two vertex loops of
+  `fn_00859530` (`0x00859582` with three offsets for each vertex,
+  `0x00859831` with one offset for y) goes to a stub. The stub runs the SSE
+  loop (`TransformOffsets`), moves `0x00F05180` past the offsets of the mesh
+  as the game does, and goes on at `0x00859AC4`. The orders of the additions
+  of these two loops are not the orders of the other vertex loops. The light
+  of the normal rounds toward 0, as the `cvttsd2si` of `__ftol` does, and
+  the loop needs `LH3DP3::HasSSE2` (`0x00E83A20`) to be 1.
+
+The SSE code runs only while the x87 unit has the precision of 24 bits and
+rounds to the nearest. The triangles only subtract, multiply and compare
+screen values, so they leave MXCSR as it is when it rounds to the nearest.
+The offsets loop divides and projects, so it sets MXCSR as `fast_transform`
+does while it runs. Else the code of the game runs, and the report counts
+it. With `part_draw=0` the mod sets no hook (except with `test_keys=1`,
+which sets them for the test key).
+
+`part_draw=2` (a test aid) runs the code of the game and compares. Before
+each piece the stub makes the SSE result in a copy of its own, and a hook
+after the piece compares the copy with what the game made: the list and its
+size after the triangles, the vertices and the clip flags after the
+offsets. A mesh with a triangle that the game must clip is counted and not
+compared. With `test_keys=1`, Ctrl Shift F4 steps
+`part_draw` through 1, 0 and 2, and the debug page Render has the row "Part
+draw" (x87 and SSE). Each 10 s the `part draw` lines give the counts of
+meshes, triangles and vertices with SSE and with the code of the game. With
+`part_draw=2` they give the compare: the vertices that differ and the
+largest difference of each field.
+
+The checks in `bwvr/test/controller_math/part_draw_checks.h` run the x87 code
+of the game for one vertex or one triangle, instruction by instruction, and
+compare the bits of the SSE functions with it: 8 times 4099 vertices for each
+offsets loop, and 400 meshes for the triangles.
+
+- Only a headset shows the time of the parts under FEX. The lines of
+  `object_timer=1` with these sites have the part draws of each class
+  (`0x00815F62`), the mesh functions with their calls of the device inside
+  (`fn_0084BA90`, `fn_00856D40`, `fn_0085AB10`, `fn_0085BA30`,
+  `fn_00859530`), `fn_0080AD90` and `LH3DRender::DrawTriangle` (the call of
+  the device and the hook of the mod). Read them with `part_draw=0` and with
+  `part_draw=1`:
+
+  ```
+  object_timer_sites=0x00815F62,0x0080E700,0x0080E6DA,0x0080D93F,0x0080D95E,0x0080E51F,0x0080E53E,0x0087FB79,0x008573E2,0x0085B237,0x0084C39B,0x00859D7F
+  ```
+- Not known: the cost of a hook of MinHook with a stub under FEX for each
+  mesh. The stubs save and restore the registers with `pushad`.
+
 ### The work before the draws on more threads
 
 `land_objects_threads=N` (0 is the default: one thread, the frame thread)
@@ -6927,6 +7036,7 @@ keys that the launcher sets.
 | `land_fast` | 1 | 1: the vertex loop of the land on the x87 path runs with SSE, with the bits of the game. 0: on the x87 unit, with no hook. 2: a test aid, the compare. See "The vertex loop of the land with SSE" |
 | `land_objects` | 1 | 1: the vertex loop of the reflection meshes and the test of the view of the 3D parts run with SSE, with the bits of the game. 0: the code of the game. 2: a test aid, the compare. A test key: Ctrl Shift F8. See "The objects on the land" |
 | `land_objects_threads` | 0 | 0: one thread. N: N worker threads make the test of the view of the objects before their draws. A test key: Ctrl Shift F9. See "The objects on the land" |
+| `part_draw` | 0 | 1: the loop over the triangles of a mesh and the vertex loops of `fn_00859530` run with SSE, with the bits of the game. 0: the code of the game. 2: a test aid, the compare. A test key: Ctrl Shift F4. See "The parts with SSE" |
 | `object_timer`, `object_timer_sites` | 0, empty | A test aid. 1: in the play, each 10 s the time of the draw of the objects and of each class and method of the objects. `object_timer_sites` gives more calls to time. A test key: Ctrl Shift F7. See "The timer of the objects" |
 | `game_sse_path` | -1 | A test key. -1: the game chooses its SSE paths by the CPU. 0: the x87 paths. 1: the SSE paths of the game. See "The vertex loop of the land with SSE" |
 | `game_sse_parts` | 0 | 0: each part reads the flag of the game. A sum of bits: the parts with their bit take the SSE path of the game, the others the x87 path. -1: each part. A test key: Ctrl, Shift and S. See "The SSE paths of the game, one at a time" |

@@ -24,6 +24,9 @@
 //   trace_keyboard=1      Ctrl Shift G saves, while a window of the game is in front
 //                         (the desk run)
 //   trace_test_save_s=N   a test aid: one save N s after the start of the recorder
+//   trace_draw_all_kept=1 the bar of PhysicsObject::DrawAll is kept however short
+//                         it is (throw_physics.cpp). 0: it follows trace_min_us
+//                         as each other bar does
 //
 // A save comes from the app (a button combination of the controllers, written
 // to the input channel), from the game (a long frame, the test aid), or from
@@ -40,6 +43,9 @@
 // True with trace=1. The callers read it first.
 extern bool g_trace;
 
+// True with trace=1 and trace_draw_all_kept=1.
+extern bool g_trace_draw_all_kept;
+
 // The clock of the events: QueryPerformanceCounter ticks.
 int64_t TraceNow();
 
@@ -54,6 +60,8 @@ void TraceNameThread(const char* name, int sort, unsigned events = 0);
 // The events. Each call is for the thread that calls.
 void TraceBar(const trace_events::Def* def, int64_t begin, int64_t end, float a = 0.0f,
               float b = 0.0f, float c = 0.0f, float d = 0.0f);
+// True when TraceBar keeps a bar from `begin` to `end` (trace_min_us).
+bool TraceKeeps(int64_t begin, int64_t end);
 // A bar that is kept however short it is (the write of a frame of the stream,
 // which the join of the app matches with its arrival).
 void TraceBarKept(const trace_events::Def* def, int64_t begin, int64_t end, float a = 0.0f,

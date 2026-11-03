@@ -40,6 +40,8 @@ bool g_chain_surface_cache = true;
 rc::Window g_chain = {};
 ChainStream g_chain_stream = {};
 int g_chain_device_depth = 0;
+bar_split_math::Acc g_chain_acc = {};
+bool g_chain_acc_on = false;
 
 namespace {
 

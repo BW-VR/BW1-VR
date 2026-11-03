@@ -2202,11 +2202,20 @@ void __cdecl h_DrawAll() {
   DrawFlights();
   CatchFrame();
   // The bar of the timeline for the call of the game: the hook is on the
-  // function, so the timers of turn_parts cannot time it.
+  // function, so the timers of turn_parts cannot time it. The call is short
+  // when no physics object is in the air, so with trace_draw_all_kept=1 the
+  // bar is kept however short it is (trace_rec.h): the file then has each call.
   static const trace_events::Def kTraceDef = {"PhysicsObject::DrawAll 0x00646DE0", "game",
                                               {nullptr, nullptr, nullptr, nullptr}};
-  TraceScope trace_scope(&kTraceDef);
+  const int64_t trace_begin = g_trace ? TraceNow() : 0;
   o_DrawAll();
+  if (trace_begin != 0) {
+    if (g_trace_draw_all_kept) {
+      TraceBarKept(&kTraceDef, trace_begin, TraceNow());
+    } else {
+      TraceBar(&kTraceDef, trace_begin, TraceNow());
+    }
+  }
 }
 
 // After CHand::PrepareForDrawing, in each eye pass. In the Holding state the

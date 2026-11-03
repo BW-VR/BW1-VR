@@ -12,6 +12,7 @@
 #include <intrin.h>
 #include <stdint.h>
 
+#include "bar_split_math.h"
 #include "render_chain_math.h"
 
 // The keys of bwvr.ini, read at the install of the backend. The test keys
@@ -40,6 +41,13 @@ struct ChainStream {
 };
 extern ChainStream g_chain_stream;
 
+// The running sum of the calls of the device and their ticks, for the split of
+// the bars of the timeline into the game and the device (bar_split_math.h,
+// trace_device=1). It never goes back and the frame thread alone writes it.
+// The ticks count only while g_chain_acc_on is true.
+extern bar_split_math::Acc g_chain_acc;
+extern bool g_chain_acc_on;
+
 // The time of a step, from its start to the end of the scope. The time of a
 // scope of the device counts only when no scope of the device is open (a
 // state block calls the methods of the device). Each call counts.
@@ -62,15 +70,18 @@ class ChainScope {
 class ChainDeviceScope {
  public:
   explicit ChainDeviceScope(int call)
-      : call_(call), start_(g_chain_time && g_chain_device_depth == 0 ? __rdtsc() : 0) {
+      : call_(call),
+        start_((g_chain_time || g_chain_acc_on) && g_chain_device_depth == 0 ? __rdtsc() : 0) {
     ++g_chain_device_depth;
     ++g_chain.calls[call];
+    if (g_chain_acc_on) ++g_chain_acc.calls[call];
   }
   ~ChainDeviceScope() {
     --g_chain_device_depth;
     if (start_ != 0) {
-      g_chain.ticks[render_chain_math::kDevice][call_] +=
-          render_chain_math::Elapsed(start_, __rdtsc());
+      const uint64_t elapsed = render_chain_math::Elapsed(start_, __rdtsc());
+      if (g_chain_time) g_chain.ticks[render_chain_math::kDevice][call_] += elapsed;
+      if (g_chain_acc_on) g_chain_acc.ticks[call_] += elapsed;
     }
   }
 

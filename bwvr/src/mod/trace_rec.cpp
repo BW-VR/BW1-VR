@@ -39,6 +39,7 @@ namespace te = trace_events;
 namespace ic = input_channel;
 
 bool g_trace = false;
+bool g_trace_draw_all_kept = false;
 
 namespace {
 
@@ -50,6 +51,7 @@ int g_auto_ms = 40;
 int g_auto_gap_s = 60;
 int g_auto_after_s = 20;
 int g_min_us = 30;
+int64_t g_min_ticks = 0;  // g_min_us in ticks of the clock
 int g_wait_us = 100;
 int g_ring_k = 128;
 bool g_keyboard = true;
@@ -361,7 +363,9 @@ void TraceInstall() {
   slash[1] = 0;
   lstrcpynA(g_dir, path, MAX_PATH);
   RemoveOldParts();
-  g_rec.Init(g_freq, static_cast<int64_t>(g_min_us) * g_freq / 1000000, 16384);
+  g_min_ticks = static_cast<int64_t>(g_min_us) * g_freq / 1000000;
+  g_rec.Init(g_freq, g_min_ticks, 16384);
+  g_trace_draw_all_kept = IniKey("trace_draw_all_kept", 1) != 0;
   g_frame_tid = ThisThreadId();
   g_rec.Name(g_frame_tid, "frame thread", 1, static_cast<uint32_t>(g_ring_k) * 1024u);
   g_rec.Name(kFrameRow, "frames (present to present)", 0, 32768);
@@ -391,6 +395,8 @@ void TraceNameThread(const char* name, int sort, unsigned events) {
 void TraceBar(const te::Def* def, int64_t begin, int64_t end, float a, float b, float c, float d) {
   g_rec.Bar(ThisThreadId(), def, begin, end, a, b, c, d);
 }
+
+bool TraceKeeps(int64_t begin, int64_t end) { return end - begin >= g_min_ticks; }
 
 void TraceBarKept(const te::Def* def, int64_t begin, int64_t end, float a, float b, float c,
                   float d) {

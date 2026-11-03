@@ -1269,9 +1269,14 @@ that moves while the Hand takes it.
   of the headset"). The timeline (`trace=1`, `backend.md`, "The timeline of
   the game and the app") shows the bars of all threads of the game and of
   the app on one clock, and the picture shown with the place of the camera
-  of its frame. Next on the Frame: `trace=1` in `bwvr.ini`, play, press a
-  combination of the controllers right after a stutter or a jump of the
-  picture (X with the click of the left stick, or the left trigger with the
+  of its frame. The bars of `GLandscape::Draw` and of its callees
+  (`trace_draw_parts=1`) have the time and the calls of the device of the
+  mod in them (`trace_device=1`), and `tools/trace/trace_self.py` splits the
+  own time of each bar into the game and the device, so the next Frame
+  session shows which part of the time of `GLandscape::Draw` is the
+  work of the game and which part is the calls of the device. Next on the
+  Frame: `trace=1` in `bwvr.ini`, play, press a combination of the
+  controllers right after a stutter or a jump of the picture (X with the click of the left stick, or the left trigger with the
   click of the right stick), take `trace-<time>.json` of the app folder and
   read it with `tools/trace/trace_report.py` or in `ui.perfetto.dev`. Not
   shown: which buttons the Steam Frame gives to the app (the lines `trace :

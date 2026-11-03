@@ -21,7 +21,7 @@
 
 namespace walk_parts_math {
 
-constexpr int kMaxTimers = 192;
+constexpr int kMaxTimers = 256;
 constexpr int kMaxDepth = 64;
 // The most bytes of arguments that a function takes off the stack at its
 // return (ret N). The exit of a timer finds its entry by the place of the

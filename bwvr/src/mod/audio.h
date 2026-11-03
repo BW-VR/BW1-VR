@@ -130,6 +130,12 @@ int AudioPlayFixValue();
 void AudioPlayNowCycle();
 // The value of audio_play_now for the debug page, or kDebugCannot.
 int AudioPlayNowValue();
+// The test key of audio_open_loader. QMixer opens the wave of a play on the
+// thread of the caller, or the loader thread of QMixer does it for some plays
+// (docs/audio.md, "7.8 The pump of a play"). The mode steps through 0, 1 and 2.
+void AudioOpenLoaderCycle();
+// The value of audio_open_loader for the debug page, or kDebugCannot.
+int AudioOpenLoaderValue();
 // A flat cue through the mixer: mono, 22050 Hz, pan -1 to 1.
 bool AudioVoicesCue(const int16_t* data, int frames, float gain, float pan);
 // audio_rolloff.cpp, the test key: true gives a room factor that is the same

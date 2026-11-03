@@ -251,6 +251,7 @@ void AudioCycleMode();
 void AudioStopWaitToggle();
 void AudioPlayFixCycle();
 void AudioPlayNowCycle();
+void AudioOpenLoaderCycle();
 // anim_trig.cpp: the A/B of anim_trig, and its test frame.
 void AnimTrigToggle(const char* by);
 void AnimTrigFrame();
@@ -1152,6 +1153,15 @@ void PollHotkeys() {
     AudioPlayNowCycle();
   }
   now_key_down = now_key_now;
+  // An A/B of the open of a wave in a sound start (audio_open_loader). F6 with
+  // Ctrl and Shift has no other test key.
+  static bool open_key_down = false;
+  const bool open_key_now = (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
+  if (g_test_keys && open_key_now && !open_key_down && ctrl && shift &&
+      GameHasFocus()) {
+    AudioOpenLoaderCycle();
+  }
+  open_key_down = open_key_now;
   // An A/B of the source of the gaze of foveated rendering (docs/backend.md,
   // "Foveated rendering"). Shift O with no Ctrl is the key of foveation.
   static bool gaze_key_down = false;

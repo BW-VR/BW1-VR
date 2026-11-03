@@ -1,4 +1,4 @@
-// THE SPLIT OF A BAR INTO THE GAME AND THE DEVICE (trace_device, bar_split.cpp,
+// THE SPLIT OF A BAR INTO THE GAME AND THE DEVICE (trace_device, turn_parts.cpp,
 // docs/backend.md, "The timeline of the game and the app"). The pure rules, with
 // no Windows code, so the math test checks them.
 //
@@ -23,8 +23,8 @@ namespace bar_split_math {
 
 namespace rc = render_chain_math;
 
-// A timer that is called more than this many times in a frame is a helper, and
-// the timeline leaves it out from then on.
+// A timer of the callees of GLandscape::Draw that is called more than this many
+// times in a frame is a helper, and the timeline leaves it out from then on.
 constexpr uint32_t kCallsCap = 200;
 
 // The calls of the device and their ticks, for each kind (render_chain_math
@@ -65,27 +65,40 @@ struct Acc {
 };
 
 // The open bars: for each depth of the stack of the timers, the sum at the
-// call and the part that the bars in it took.
+// call and the part that the bars in it took. taken counts the kept bars
+// (the numbers of a bar), taken_all counts every timer (the table in the log,
+// where a device call must be in the part of one timer only).
 struct Stack {
   Acc at_call[walk_parts_math::kMaxDepth];
   Acc taken[walk_parts_math::kMaxDepth];
+  Acc taken_all[walk_parts_math::kMaxDepth];
 
   // The bar at `depth` starts. `now` is the running sum.
   void Push(int depth, const Acc& now) {
     if (depth < 0 || depth >= walk_parts_math::kMaxDepth) return;
     at_call[depth] = now;
     taken[depth] = Acc();
+    taken_all[depth] = Acc();
   }
 
   // The bar at `depth` ends. `recorded`: the timeline keeps the bar. Gives the
   // exclusive part: the device calls in the bar that no kept bar in it has.
   // The bar below takes the whole bar when it is kept, else only what the kept
   // bars in it took, so a short bar leaves its part in the bar that called it.
-  Acc Pop(int depth, const Acc& now, bool recorded) {
-    if (depth < 0 || depth >= walk_parts_math::kMaxDepth) return Acc();
+  // all_exclusive, when given, gets the part that no timer in the bar has,
+  // kept or not.
+  Acc Pop(int depth, const Acc& now, bool recorded, Acc* all_exclusive = nullptr) {
+    if (depth < 0 || depth >= walk_parts_math::kMaxDepth) {
+      if (all_exclusive != nullptr) *all_exclusive = Acc();
+      return Acc();
+    }
     const Acc inclusive = now.Minus(at_call[depth]);
     const Acc exclusive = inclusive.Minus(taken[depth]);
-    if (depth > 0) taken[depth - 1].Add(recorded ? inclusive : taken[depth]);
+    if (all_exclusive != nullptr) *all_exclusive = inclusive.Minus(taken_all[depth]);
+    if (depth > 0) {
+      taken[depth - 1].Add(recorded ? inclusive : taken[depth]);
+      taken_all[depth - 1].Add(inclusive);
+    }
     return exclusive;
   }
 };

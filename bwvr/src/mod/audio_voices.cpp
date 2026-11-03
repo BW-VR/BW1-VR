@@ -75,9 +75,14 @@
 // QMixer in the call, as in the game), audio_play_fix (default 0, the byte of
 // the session, the same modes), audio_play_parts (default 0, test only: the
 // time of the functions of QMixer in a play),
-// audio_open_loader (default 0, the open as QMixer has it; 1 sends the open of
-// a sound of the atmosphere to the loader thread, 2 each open).
+// audio_open_loader (default 0, the open as QMixer has it. 1 sends the open of
+// a sound of the atmosphere to the loader thread, 2 each open),
+// audio_acm_cache (default 0, each call of acmFormatSuggest goes to the audio
+// compression manager. 1 keeps its answer, 2 also keeps the driver of
+// acmStreamOpen), audio_acm_compare (default 5, the first hits that the mod
+// checks with a real call).
 // Test only: audio_play_fix_test, audio_play_now_test, audio_open_loader_test,
+// audio_acm_cache_test, audio_acm_selftest,
 // audio_test_voice, audio_test_path, audio_test_step_ms, audio_test_solo.
 
 #include <windows.h>
@@ -354,6 +359,33 @@ const int kNamesMax = 64;
 char g_names[kNamesMax][48] = {};   // names that QMixer got from the system
 int g_name_count = 0;
 audio_play::Stat g_lock_stat;       // the lock wait of QSWaveMixPump
+
+// audio_acm_cache (audio_play_math.h). The wrappers for the functions of the
+// audio compression manager that QMixer gets by GetProcAddress. The cache, the
+// drivers and the counters are under g_acm_cs.
+int g_acm_mode = 0;                 // audio_acm_cache
+bool g_acm_installed = false;       // the wrapper of GetProcAddress is in
+int g_acm_test_frame = 0;           // audio_acm_cache_test
+uint64_t g_acm_test_seen = 0;
+bool g_acm_selftest = false;        // audio_acm_selftest
+volatile LONG g_acm_compare_left = 0;  // audio_acm_compare: hits still to check
+CRITICAL_SECTION g_acm_cs;
+audio_play::AcmCache g_acm_cache;
+audio_play::AcmDrivers g_acm_drivers;
+audio_play::Stat g_acm_hit_stat;    // hits with no compare
+audio_play::Stat g_acm_miss_stat;   // the calls that went to the ACM and were kept
+audio_play::Stat g_acm_plain_stat;  // acmStreamOpen with no kept driver
+audio_play::Stat g_acm_kept_stat;   // acmStreamOpen with a kept driver
+int64_t g_acm_hits = 0;             // all hits, also the compared ones
+int64_t g_acm_pass = 0;             // calls that the cache does not answer
+int64_t g_acm_compared = 0;
+int64_t g_acm_different = 0;
+int64_t g_acm_driver_found = 0;     // drivers that an open found and the mod kept
+int64_t g_acm_driver_failed = 0;    // opens with a kept driver that failed
+int g_acm_miss_logged = 0;
+const int kAcmMissLogMax = 8;
+int g_acm_driver_logged = 0;        // lines of the lookup of a driver
+const int kAcmDriverLogMax = 16;
 
 // For the report.
 volatile LONG g_started[kKinds] = {0, 0, 0, 0};
@@ -797,9 +829,10 @@ void __fastcall h_PartLock(void* session) {
 
 // The test at RVA 0x265D0 says if the open of a wave runs at once (0) or goes
 // to the loader thread of the session (1). audio_open_loader answers 1 for a
-// play of the mode: the loader thread then opens the wave, as it does for each
-// wave of a format that is not PCM or float. Only the thread of that play
-// has a call, so the loader thread and the timer thread see no change.
+// play of the mode: the loader thread then opens the wave, as it does for a
+// wave of another format until the compression manager has loaded. Only the
+// thread of that play has a call, so the loader thread and the timer thread
+// see no change.
 unsigned __fastcall h_PartFormat(void* source) {
   PlayCall* call = t_call;
   unsigned r;
@@ -900,11 +933,14 @@ int PartOfRva(uint32_t rva) {
 // target with no timer is a function to time in the next run.
 void NoteVtable(const char* kind, uint32_t vtable_rva, const uint8_t* vtable) {
   if (vtable_rva == 0 || !Readable(vtable, 28)) return;
-  for (int i = 0; i < g_vtable_count; ++i) {
-    if (g_vtable_seen[i] == vtable_rva) return;
+  EnterCriticalSection(&g_play_cs);
+  bool fresh = g_vtable_count < kVtableMax;
+  for (int i = 0; fresh && i < g_vtable_count; ++i) {
+    if (g_vtable_seen[i] == vtable_rva) fresh = false;
   }
-  if (g_vtable_count >= kVtableMax) return;
-  g_vtable_seen[g_vtable_count++] = vtable_rva;
+  if (fresh) g_vtable_seen[g_vtable_count++] = vtable_rva;
+  LeaveCriticalSection(&g_play_cs);
+  if (!fresh) return;
   char text[640];
   size_t n = 0;
   text[0] = 0;
@@ -935,8 +971,16 @@ void LogOpen(const PlayCall* call, const OpenInfo& in, int64_t ticks,
   const bool unknown = in.loader_thread && call->fmt_result < 0;
   const bool loader = in.loader_thread && (call->fmt_result != 0 || call->forced);
   if (!unknown) InterlockedIncrement(&g_open_path[group][loader ? 1 : 0]);
-  if (g_open_logged[group] >= kOpenLogMax) return;
-  ++g_open_logged[group];
+  int logged;
+  EnterCriticalSection(&g_play_cs);
+  logged = g_open_logged[group] < kOpenLogMax ? ++g_open_logged[group] : 0;
+  LeaveCriticalSection(&g_play_cs);
+  if (logged == 0) return;
+  int64_t acm_hits, acm_misses;
+  EnterCriticalSection(&g_acm_cs);
+  acm_hits = g_acm_hits;
+  acm_misses = g_acm_miss_stat.calls;
+  LeaveCriticalSection(&g_acm_cs);
   const bool model_at_once =
       audio_play::OpensAtOnce(in.loader_thread, in.have_format, in.tag,
                               in.acm_ready);
@@ -948,8 +992,10 @@ void LogOpen(const PlayCall* call, const OpenInfo& in, int64_t ticks,
          "%u bits, %u bytes of data. Wave object: tag 0x%X, %u ch, %u Hz, %u "
          "bits, %u bytes, %s the wave of the play. Source vtable RVA 0x%X. "
          "Loader thread: %s. Compression manager loaded: %s. Path: %s%s "
-         "(the model says %s). The open took %.0f us, result %d",
-         group == 0 ? "atmosphere" : "other sound", g_open_logged[group],
+         "(the model says %s). The open took %.0f us, result %d. "
+         "audio_acm_cache=%d: %lld hits and %lld misses of acmFormatSuggest so "
+         "far",
+         group == 0 ? "atmosphere" : "other sound", logged,
          in.tag, audio_play::TagName(in.tag), in.channels, in.rate, in.bits,
          in.bytes, in.wave_tag, in.wave_channels, in.wave_rate, in.wave_bits,
          in.wave_bytes, in.same_wave ? "the same object as" : "not",
@@ -957,7 +1003,8 @@ void LogOpen(const PlayCall* call, const OpenInfo& in, int64_t ticks,
          in.acm_ready ? "yes" : "no",
          unknown ? "unknown" : loader ? "loader thread" : "at once",
          call->forced ? " (forced by audio_open_loader)" : "",
-         model_at_once ? "at once" : "loader thread", us, result);
+         model_at_once ? "at once" : "loader thread", us, result, g_acm_mode,
+         acm_hits, acm_misses);
 }
 
 // The open of the wave of a play (RVA 0xC230).
@@ -1039,17 +1086,386 @@ SYS_FN(LONG, w_MmioSeek, audio_play::kSysMmioSeek, (HMMIO a, LONG b, int c),
 SYS_FN(MMRESULT, w_MmioDescend, audio_play::kSysMmioDescend,
        (HMMIO a, LPMMCKINFO b, const MMCKINFO* c, UINT d), (a, b, c, d))
 // The functions of msacm32.dll, with the prototypes of the documentation.
-SYS_FN(UINT, w_AcmSuggest, audio_play::kSysAcmSuggest,
-       (void* a, void* b, void* c, DWORD d, DWORD e), (a, b, c, d, e))
-SYS_FN(UINT, w_AcmOpen, audio_play::kSysAcmOpen,
-       (void* a, void* b, void* c, void* d, void* e, DWORD_PTR f, DWORD_PTR g,
-        DWORD h),
-       (a, b, c, d, e, f, g, h))
+// acmFormatSuggest and acmStreamOpen have their own wrappers below.
 SYS_FN(UINT, w_AcmSize, audio_play::kSysAcmSize,
        (void* a, DWORD b, LPDWORD c, DWORD d), (a, b, c, d))
 SYS_FN(UINT, w_AcmPrepare, audio_play::kSysAcmPrepare,
        (void* a, void* b, DWORD c), (a, b, c))
 #undef SYS_FN
+
+// ---- The cache of acmFormatSuggest (audio_acm_cache) ------------------------
+
+typedef UINT(WINAPI* AcmSuggestFn)(void*, void*, void*, DWORD, DWORD);
+typedef UINT(WINAPI* AcmOpenFn)(void*, void*, void*, void*, void*, DWORD_PTR,
+                                DWORD_PTR, DWORD);
+typedef UINT(WINAPI* AcmDriverIdFn)(void*, void**, DWORD);
+typedef UINT(WINAPI* AcmDriverOpenFn)(void**, void*, DWORD);
+typedef UINT(WINAPI* AcmDriverCloseFn)(void*, DWORD);
+typedef UINT(WINAPI* AcmCloseFn)(void*, DWORD);
+
+// The size of the format at `p` in bytes, or 0 when it cannot be read.
+int AcmFormatBytes(const void* p) {
+  if (!Readable(p, 16)) return 0;
+  const uint8_t* f = static_cast<const uint8_t*>(p);
+  const uint16_t tag = *reinterpret_cast<const uint16_t*>(f);
+  if (tag == audio_play::kTagPcm) return 16;
+  if (!Readable(p, 18)) return 0;
+  const int size = audio_play::AcmFormatSize(
+      tag, *reinterpret_cast<const uint16_t*>(f + 16));
+  return size <= audio_play::kAcmFormatMax && Readable(p, size) ? size : 0;
+}
+
+// Words for the log: the fields of a format.
+void AcmSayFormat(const uint8_t* f, int size, char* out, size_t n) {
+  const uint16_t tag = *reinterpret_cast<const uint16_t*>(f);
+  snprintf(out, n, "tag 0x%X (%s), %u ch, %lu Hz, %u bits, %d bytes", tag,
+           audio_play::TagName(tag),
+           *reinterpret_cast<const uint16_t*>(f + 2),
+           static_cast<unsigned long>(*reinterpret_cast<const uint32_t*>(f + 4)),
+           *reinterpret_cast<const uint16_t*>(f + 14), size);
+}
+
+double AcmUs(int64_t ticks) {
+  return g_qpc_hz > 0 ? 1e6 * static_cast<double>(ticks) /
+                            static_cast<double>(g_qpc_hz)
+                      : 0.0;
+}
+
+// The call of acmFormatSuggest with the cache. The ACM is not called while the
+// lock is held, so the loader thread and the frame thread never wait for a
+// call of 20 ms or more.
+UINT AcmSuggestCached(AcmSuggestFn real, void* had, void* src, void* dst,
+                      DWORD cb_dst, DWORD suggest) {
+  uint8_t* s = static_cast<uint8_t*>(src);
+  uint8_t* d = static_cast<uint8_t*>(dst);
+  const int src_size = AcmFormatBytes(s);
+  if (src_size == 0 || d == nullptr || cb_dst > audio_play::kAcmFormatMax ||
+      !audio_play::AcmSuggestCacheable(had == nullptr, src_size, cb_dst,
+                                       suggest) ||
+      !Readable(d, cb_dst)) {
+    EnterCriticalSection(&g_acm_cs);
+    ++g_acm_pass;
+    LeaveCriticalSection(&g_acm_cs);
+    return real(had, src, dst, cb_dst, suggest);
+  }
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  uint8_t in[audio_play::kAcmFormatMax];
+  uint8_t out[audio_play::kAcmFormatMax];
+  memcpy(in, d, cb_dst);
+  int hit;
+  EnterCriticalSection(&g_acm_cs);
+  hit = audio_play::AcmFind(g_acm_cache, s, src_size, in, cb_dst, suggest);
+  if (hit >= 0) {
+    memcpy(out, g_acm_cache.entry[hit].dst_out, cb_dst);
+    ++g_acm_cache.entry[hit].hits;
+    ++g_acm_hits;
+  }
+  LeaveCriticalSection(&g_acm_cs);
+  if (hit >= 0) {
+    const LONG left = g_acm_compare_left;
+    if (left <= 0 || InterlockedDecrement(&g_acm_compare_left) < 0) {
+      memcpy(d, out, cb_dst);
+      QueryPerformanceCounter(&t1);
+      EnterCriticalSection(&g_acm_cs);
+      g_acm_hit_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
+      LeaveCriticalSection(&g_acm_cs);
+      return 0;
+    }
+    // A hit that the mod checks: the real call runs on a copy of the target,
+    // and the caller gets the answer of the ACM.
+    uint8_t copy[audio_play::kAcmFormatMax];
+    memcpy(copy, in, cb_dst);
+    LARGE_INTEGER c0, c1;
+    QueryPerformanceCounter(&c0);
+    const UINT r = real(had, src, copy, cb_dst, suggest);
+    QueryPerformanceCounter(&c1);
+    const bool same = r == 0 && memcmp(copy, out, cb_dst) == 0;
+    int64_t number;
+    EnterCriticalSection(&g_acm_cs);
+    number = ++g_acm_compared;
+    if (!same) {
+      ++g_acm_different;
+      // Drop the entry that holds the key now. Another thread may have
+      // replaced the entry at `hit` while the lock was open.
+      const int now = audio_play::AcmFind(g_acm_cache, s, src_size, in,
+                                          cb_dst, suggest);
+      if (now >= 0) g_acm_cache.entry[now].used = false;
+    }
+    LeaveCriticalSection(&g_acm_cs);
+    char text[160];
+    AcmSayFormat(copy, static_cast<int>(cb_dst), text, sizeof(text));
+    ModLog("audio acm    : compare %lld: the cache answered result 0, the ACM "
+           "answered result %u in %.0f us. The target bytes are %s%s. Target "
+           "of the ACM: %s", static_cast<long long>(number), r,
+           AcmUs(c1.QuadPart - c0.QuadPart), same ? "the same" : "DIFFERENT",
+           same ? "" : " (the entry is dropped)", text);
+    memcpy(d, copy, cb_dst);
+    return r;
+  }
+  const UINT r = real(had, src, dst, cb_dst, suggest);
+  QueryPerformanceCounter(&t1);
+  if (r != 0) {
+    EnterCriticalSection(&g_acm_cs);
+    ++g_acm_pass;
+    LeaveCriticalSection(&g_acm_cs);
+    return r;
+  }
+  int stored;
+  int number;
+  EnterCriticalSection(&g_acm_cs);
+  stored = audio_play::AcmStore(&g_acm_cache, s, src_size, in, cb_dst, suggest,
+                                d, r);
+  g_acm_miss_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
+  number = g_acm_miss_logged < kAcmMissLogMax ? ++g_acm_miss_logged : 0;
+  LeaveCriticalSection(&g_acm_cs);
+  if (number > 0) {
+    char from[160], to[160];
+    AcmSayFormat(s, src_size, from, sizeof(from));
+    AcmSayFormat(d, static_cast<int>(cb_dst), to, sizeof(to));
+    ModLog("audio acm    : miss %d: acmFormatSuggest for the source %s, "
+           "fdwSuggest 0x%lX, cbwfxDst %lu took %.0f us, result 0, entry %d. "
+           "Target %s", number, from, static_cast<unsigned long>(suggest),
+           static_cast<unsigned long>(cb_dst),
+           AcmUs(t1.QuadPart - t0.QuadPart), stored, to);
+  }
+  return r;
+}
+
+UINT WINAPI w_AcmSuggest(void* had, void* src, void* dst, DWORD cb_dst,
+                         DWORD suggest) {
+  PartTimer timer(audio_play::kSysAcmSuggest);
+  const AcmSuggestFn real =
+      reinterpret_cast<AcmSuggestFn>(o_part[audio_play::kSysAcmSuggest]);
+  if (g_acm_mode == 0) return real(had, src, dst, cb_dst, suggest);
+  return AcmSuggestCached(real, had, src, dst, cb_dst, suggest);
+}
+
+// acmStreamOpen with a kept driver (audio_acm_cache=2). With no driver handle
+// the ACM looks for a driver that opens the stream. The mod asks the stream
+// for its driver the first time, opens a handle of that driver, and gives the
+// handle to the next open of the same pair of formats. An open with the kept
+// handle that fails goes to the ACM as QMixer asked for it, and the pair is
+// not tried again. The mod never keeps a stream handle.
+UINT AcmOpenKept(AcmOpenFn real, void* phas, void* src, void* dst) {
+  const int src_size = AcmFormatBytes(src);
+  const int dst_size = AcmFormatBytes(dst);
+  if (src_size == 0 || dst_size == 0) {
+    return real(phas, nullptr, src, dst, nullptr, 0, 0, 0);
+  }
+  const uint8_t* s = static_cast<const uint8_t*>(src);
+  const uint8_t* d = static_cast<const uint8_t*>(dst);
+  uintptr_t handle = 0;
+  bool known = false;
+  EnterCriticalSection(&g_acm_cs);
+  const int at = audio_play::AcmDriverFind(g_acm_drivers, s, src_size, d,
+                                           dst_size);
+  if (at >= 0) {
+    known = true;
+    if (!g_acm_drivers.entry[at].bad) handle = g_acm_drivers.entry[at].handle;
+  }
+  LeaveCriticalSection(&g_acm_cs);
+  LARGE_INTEGER t0, t1;
+  if (handle != 0) {
+    QueryPerformanceCounter(&t0);
+    const UINT r = real(phas, reinterpret_cast<void*>(handle), src, dst,
+                        nullptr, 0, 0, 0);
+    QueryPerformanceCounter(&t1);
+    if (r == 0) {
+      EnterCriticalSection(&g_acm_cs);
+      g_acm_kept_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
+      LeaveCriticalSection(&g_acm_cs);
+      return 0;
+    }
+    EnterCriticalSection(&g_acm_cs);
+    ++g_acm_driver_failed;
+    const int again = audio_play::AcmDriverFind(g_acm_drivers, s, src_size, d,
+                                                dst_size);
+    if (again >= 0) g_acm_drivers.entry[again].bad = true;
+    LeaveCriticalSection(&g_acm_cs);
+    ModLog("audio acm    : acmStreamOpen with the kept driver 0x%lX failed "
+           "with result %u. The pair of formats goes to the ACM from now on",
+           static_cast<unsigned long>(handle), r);
+  }
+  QueryPerformanceCounter(&t0);
+  const UINT r = real(phas, nullptr, src, dst, nullptr, 0, 0, 0);
+  QueryPerformanceCounter(&t1);
+  EnterCriticalSection(&g_acm_cs);
+  g_acm_plain_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
+  LeaveCriticalSection(&g_acm_cs);
+  if (r != 0 || known) return r;
+  // The first open of this pair: ask the stream for its driver.
+  HMODULE acm = GetModuleHandleA("msacm32.dll");
+  const AcmDriverIdFn id_fn = reinterpret_cast<AcmDriverIdFn>(
+      acm != nullptr ? GetProcAddress(acm, "acmDriverID") : nullptr);
+  const AcmDriverOpenFn open_fn = reinterpret_cast<AcmDriverOpenFn>(
+      acm != nullptr ? GetProcAddress(acm, "acmDriverOpen") : nullptr);
+  const AcmDriverCloseFn close_fn = reinterpret_cast<AcmDriverCloseFn>(
+      acm != nullptr ? GetProcAddress(acm, "acmDriverClose") : nullptr);
+  if (id_fn == nullptr || open_fn == nullptr || close_fn == nullptr) return r;
+  void* driver_id = nullptr;
+  void* driver = nullptr;
+  const UINT e_id = id_fn(*static_cast<void**>(phas), &driver_id, 0);
+  const UINT e_open = e_id == 0 ? open_fn(&driver, driver_id, 0) : e_id;
+  const bool lookup_ok = e_open == 0 && driver != nullptr;
+  int stored = -1;
+  int64_t number = 0;
+  int line;
+  EnterCriticalSection(&g_acm_cs);
+  if (lookup_ok) {
+    stored = audio_play::AcmDriverStore(&g_acm_drivers, s, src_size, d,
+                                        dst_size,
+                                        reinterpret_cast<uintptr_t>(driver));
+    if (stored >= 0) number = ++g_acm_driver_found;
+  } else {
+    // No driver: the next open of this pair goes to the ACM with no lookup.
+    stored = audio_play::AcmDriverStoreBad(&g_acm_drivers, s, src_size, d,
+                                           dst_size);
+    ++g_acm_driver_failed;
+  }
+  line = g_acm_driver_logged < kAcmDriverLogMax ? ++g_acm_driver_logged : 0;
+  LeaveCriticalSection(&g_acm_cs);
+  // The list did not take the handle (it is full or holds the pair): the mod
+  // closes the handle and never uses it.
+  if (lookup_ok && stored < 0) close_fn(driver, 0);
+  if (line > 0) {
+    char from[160];
+    AcmSayFormat(s, src_size, from, sizeof(from));
+    ModLog("audio acm    : driver for the source %s: acmDriverID result %u, "
+           "acmDriverOpen result %u, %s (%lld kept)", from, e_id, e_open,
+           lookup_ok ? (stored >= 0 ? "kept for the next open"
+                                    : "not kept, the list is full")
+                     : (stored >= 0 ? "no driver, the pair goes to the ACM"
+                                    : "no driver, not stored"),
+           static_cast<long long>(number));
+  }
+  return r;
+}
+
+UINT WINAPI w_AcmOpen(void* phas, void* had, void* src, void* dst,
+                      void* filter, DWORD_PTR callback, DWORD_PTR instance,
+                      DWORD flags) {
+  PartTimer timer(audio_play::kSysAcmOpen);
+  const AcmOpenFn real =
+      reinterpret_cast<AcmOpenFn>(o_part[audio_play::kSysAcmOpen]);
+  if (g_acm_mode < 2 || had != nullptr || phas == nullptr || src == nullptr ||
+      dst == nullptr || filter != nullptr || callback != 0 || instance != 0 ||
+      flags != 0) {
+    return real(phas, had, src, dst, filter, callback, instance, flags);
+  }
+  return AcmOpenKept(real, phas, src, dst);
+}
+
+// A test (audio_acm_selftest=1): on the first frame the mod calls its two
+// wrappers with an MS ADPCM format, as the decoder of QMixer does, and logs the
+// answers. The desktop game has no ADPCM wave, so this is the only way to see
+// a hit and a kept driver there.
+void AcmSelfTest() {
+  HMODULE acm = LoadLibraryA("msacm32.dll");
+  const AcmSuggestFn suggest = reinterpret_cast<AcmSuggestFn>(
+      acm != nullptr ? GetProcAddress(acm, "acmFormatSuggest") : nullptr);
+  const AcmOpenFn open_fn = reinterpret_cast<AcmOpenFn>(
+      acm != nullptr ? GetProcAddress(acm, "acmStreamOpen") : nullptr);
+  const AcmCloseFn close_fn = reinterpret_cast<AcmCloseFn>(
+      acm != nullptr ? GetProcAddress(acm, "acmStreamClose") : nullptr);
+  if (suggest == nullptr || open_fn == nullptr || close_fn == nullptr) {
+    ModLog("audio acm    : selftest: msacm32.dll has no acmFormatSuggest, "
+           "acmStreamOpen or acmStreamClose");
+    return;
+  }
+  if (o_part[audio_play::kSysAcmSuggest] == nullptr) {
+    o_part[audio_play::kSysAcmSuggest] = reinterpret_cast<void*>(suggest);
+  }
+  if (o_part[audio_play::kSysAcmOpen] == nullptr) {
+    o_part[audio_play::kSysAcmOpen] = reinterpret_cast<void*>(open_fn);
+  }
+  // MS ADPCM, 22050 Hz, 4 bits, a block of 1024 bytes, the 7 standard pairs
+  // of coefficients. A block of this size holds 1012 samples in stereo and
+  // 2036 in mono.
+  static const int16_t kCoef[14] = {256, 0,   512, -256, 0,   0,  192,
+                                    64,  240, 0,   460,  -208, 392, -232};
+  ModLog("audio acm    : selftest: audio_acm_cache=%d", g_acm_mode);
+  for (int channels = 2; channels >= 1; --channels) {
+    uint8_t fmt[50];
+    memset(fmt, 0, sizeof(fmt));
+    *reinterpret_cast<uint16_t*>(fmt + 0) = 2;
+    *reinterpret_cast<uint16_t*>(fmt + 2) = static_cast<uint16_t>(channels);
+    *reinterpret_cast<uint32_t*>(fmt + 4) = 22050;
+    const uint16_t samples = channels == 2 ? 1012 : 2036;
+    *reinterpret_cast<uint32_t*>(fmt + 8) = 1024u * 22050u / samples;
+    *reinterpret_cast<uint16_t*>(fmt + 12) = 1024;
+    *reinterpret_cast<uint16_t*>(fmt + 14) = 4;
+    *reinterpret_cast<uint16_t*>(fmt + 16) = 32;
+    *reinterpret_cast<uint16_t*>(fmt + 18) = samples;
+    *reinterpret_cast<uint16_t*>(fmt + 20) = 7;
+    memcpy(fmt + 22, kCoef, sizeof(kCoef));
+    uint8_t dst[18];
+    for (int round = 1; round <= 3; ++round) {
+      memset(dst, 0, sizeof(dst));
+      dst[0] = 1;
+      LARGE_INTEGER t0, t1;
+      QueryPerformanceCounter(&t0);
+      const UINT r = w_AcmSuggest(nullptr, fmt, dst, 18, 0x10000);
+      QueryPerformanceCounter(&t1);
+      char text[160];
+      AcmSayFormat(dst, 18, text, sizeof(text));
+      ModLog("audio acm    : selftest: %d ch, acmFormatSuggest call %d: result "
+             "%u in %.0f us. Target %s", channels, round, r,
+             AcmUs(t1.QuadPart - t0.QuadPart), text);
+    }
+    for (int round = 1; round <= 3; ++round) {
+      void* stream = nullptr;
+      LARGE_INTEGER t0, t1;
+      QueryPerformanceCounter(&t0);
+      const UINT r = w_AcmOpen(&stream, nullptr, fmt, dst, nullptr, 0, 0, 0);
+      QueryPerformanceCounter(&t1);
+      ModLog("audio acm    : selftest: %d ch, acmStreamOpen call %d: result %u "
+             "in %.0f us", channels, round, r,
+             AcmUs(t1.QuadPart - t0.QuadPart));
+      if (r == 0) close_fn(stream, 0);
+    }
+  }
+}
+
+// The report of the cache: the counts since the start. A line is written when
+// a count has changed.
+void AcmReport() {
+  if (!g_acm_installed) return;
+  audio_play::Stat hit, miss, plain, kept;
+  int64_t hits, pass, compared, different, found, failed;
+  EnterCriticalSection(&g_acm_cs);
+  hit = g_acm_hit_stat;
+  miss = g_acm_miss_stat;
+  plain = g_acm_plain_stat;
+  kept = g_acm_kept_stat;
+  hits = g_acm_hits;
+  pass = g_acm_pass;
+  compared = g_acm_compared;
+  different = g_acm_different;
+  found = g_acm_driver_found;
+  failed = g_acm_driver_failed;
+  LeaveCriticalSection(&g_acm_cs);
+  static int64_t last = -1;
+  const int64_t total = hits + miss.calls + pass + plain.calls + kept.calls;
+  if (total == last) return;
+  last = total;
+  const int64_t hz = g_qpc_hz;
+  ModLog("audio play   : audio_acm_cache=%d. Since the start, acmFormatSuggest: "
+         "%lld hits (%lld of them with no compare took a mean of %.0f us, most "
+         "%.0f us), %lld calls to the ACM that were kept (mean %.0f us, most "
+         "%.0f us), %lld calls that the cache does not answer. Compared with "
+         "the ACM: %lld, different: %lld. acmStreamOpen: %lld with a kept "
+         "driver (mean %.0f us, most %.0f us), %lld with no kept driver (mean "
+         "%.0f us, most %.0f us), %lld drivers kept, %lld failed",
+         g_acm_mode, static_cast<long long>(hits),
+         static_cast<long long>(hit.calls), hit.MeanUs(hz), hit.MostUs(hz),
+         static_cast<long long>(miss.calls), miss.MeanUs(hz), miss.MostUs(hz),
+         static_cast<long long>(pass), static_cast<long long>(compared),
+         static_cast<long long>(different), static_cast<long long>(kept.calls),
+         kept.MeanUs(hz), kept.MostUs(hz), static_cast<long long>(plain.calls),
+         plain.MeanUs(hz), plain.MostUs(hz), static_cast<long long>(found),
+         static_cast<long long>(failed));
+}
 
 // The names that QMixer gets from the system, once each: the first
 // kNamesMax. A name comes from GetProcAddress or LoadLibraryA.
@@ -1084,7 +1500,7 @@ FARPROC WINAPI w_GetProc(HMODULE module, LPCSTR name) {
         o_part[audio_play::kSysGetProc])(module, name);
   }
   if (r == nullptr || reinterpret_cast<uintptr_t>(name) <= 0xFFFF) return r;
-  NoteName("GetProcAddress", name);
+  if (g_parts_on) NoteName("GetProcAddress", name);
   struct Acm {
     const char* name;
     int part;
@@ -1116,7 +1532,7 @@ HMODULE WINAPI w_LoadLib(LPCSTR name) {
     r = reinterpret_cast<HMODULE(WINAPI*)(LPCSTR)>(
         o_part[audio_play::kSysLoadLib])(name);
   }
-  if (name != nullptr) NoteName("LoadLibraryA", name);
+  if (name != nullptr && g_parts_on) NoteName("LoadLibraryA", name);
   return r;
 }
 
@@ -1169,8 +1585,10 @@ const SysImport kSysImport[] = {
 
 // Puts the wrappers in the import table of QMixer.dll. One aligned store of 4
 // bytes for each entry, so a call in progress sees the old or the new pointer.
-// Returns the number of entries changed.
-int PatchImports(HMODULE module) {
+// With `all` false only GetProcAddress gets a wrapper: that is the entry that
+// gives QMixer the wrappers of the ACM functions. Returns the number of
+// entries changed.
+int PatchImports(HMODULE module, bool all) {
   const uint8_t* base = reinterpret_cast<const uint8_t*>(module);
   if (!Readable(base, sizeof(IMAGE_DOS_HEADER))) return 0;
   const IMAGE_DOS_HEADER* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
@@ -1199,6 +1617,7 @@ int PatchImports(HMODULE module) {
       const char* fn = reinterpret_cast<const char*>(base + names[i] + 2);
       for (const SysImport& imp : kSysImport) {
         if (_stricmp(dll, imp.dll) != 0 || strcmp(fn, imp.name) != 0) continue;
+        if (!all && imp.part != audio_play::kSysGetProc) continue;
         if (o_part[imp.part] != nullptr) continue;
         DWORD old = 0;
         if (!VirtualProtect(&slots[i], sizeof(slots[i]), PAGE_READWRITE, &old)) {
@@ -1820,6 +2239,7 @@ void PlayReport() {
            g_parts_on ? "" : ". Start with audio_play_parts=1 to count the "
                              "paths");
   }
+  AcmReport();
   if (g_parts_on) {
     PartsReport(parts);
     ModLog("audio play   : opens in the last 10 s (audio_play_parts). A sound "
@@ -1892,6 +2312,10 @@ void InstallPlayNow(const uint8_t* base) {
   g_open_mode = audio_play::ClampOpenMode(AudioIni("audio_open_loader", 0));
   g_open_test_frame = AudioIni("audio_open_loader_test", 0);
   g_parts_on = AudioIni("audio_play_parts", 0) != 0;
+  g_acm_mode = audio_play::ClampAcmMode(AudioIni("audio_acm_cache", 0));
+  g_acm_test_frame = AudioIni("audio_acm_cache_test", 0);
+  g_acm_compare_left = AudioIni("audio_acm_compare", 5);
+  g_acm_selftest = AudioIni("audio_acm_selftest", 0) != 0;
   const bool test_keys = AudioIni("test_keys", 0) != 0;
   const bool deferring = g_play_now > 0 || test_keys || g_play_now_test_frame > 0;
   const bool opening =
@@ -1947,7 +2371,18 @@ void InstallPlayNow(const uint8_t* base) {
                 g_part_hooked[audio_play::kPartPump];
   g_open_known = g_part_hooked[audio_play::kPartFormat];
   int imports = 0;
-  if (g_parts_on) imports = PatchImports(AudioMixerDll());
+  const bool acm_wanted =
+      g_acm_mode > 0 || test_keys || g_acm_test_frame > 0 || g_acm_selftest;
+  if (g_parts_on || acm_wanted) {
+    imports = PatchImports(AudioMixerDll(), g_parts_on);
+    g_acm_installed = o_part[audio_play::kSysGetProc] != nullptr;
+  }
+  if (g_acm_mode > 0 && !g_acm_installed) {
+    ModLog("audio play   : audio_acm_cache=%d, but the wrapper of "
+           "GetProcAddress is not in. QMixer calls the ACM as in the game",
+           g_acm_mode);
+    g_acm_mode = 0;
+  }
   if (g_play_now > 0 && !g_now_known) {
     ModLog("audio play   : audio_play_now=%d, but the hooks on the sort and "
            "the pump of QMixer are not in. QMixer does its work in each play "
@@ -1985,6 +2420,12 @@ void InstallPlayNow(const uint8_t* base) {
                "loader thread of QMixer"
              : "the open of each wave goes to the loader thread of QMixer (test "
                "value)");
+  ModLog("audio play   : audio_acm_cache=%d (%s), audio_acm_compare=%ld. The "
+         "wrapper for the ACM functions of QMixer is %s", g_acm_mode,
+         g_acm_mode == 0 ? "each call of the ACM runs as QMixer has it"
+         : g_acm_mode == 1 ? "the answer of acmFormatSuggest is kept"
+                           : "also the driver of acmStreamOpen is kept",
+         g_acm_compare_left, g_acm_installed ? "in" : "not in");
 }
 
 // The mode of audio_play_fix, the check of the code of the known QMixer.dll
@@ -2046,6 +2487,7 @@ bool AudioVoicesInstall(bool on) {
   }
   InitializeCriticalSection(&g_lock);
   InitializeCriticalSection(&g_play_cs);
+  InitializeCriticalSection(&g_acm_cs);
   for (int i = 0; i < kChannels; ++i) {
     g_channels[i].volume = static_cast<DWORD>(kFullVolume);
     g_channels[i].volume_flags = kVolumeFlags;
@@ -2199,6 +2641,19 @@ void AudioVoicesFrame() {
       g_open_test_seen = frame;
       if (ControllersTestFrame(at, frame) == at) AudioOpenLoaderCycle();
     }
+  }
+  // The test audio_acm_cache_test=N: the same for audio_acm_cache.
+  if (g_acm_test_frame > 0) {
+    const uint64_t frame = ControllersFrameCount();
+    const uint64_t at = static_cast<uint64_t>(g_acm_test_frame);
+    if (frame != g_acm_test_seen) {
+      g_acm_test_seen = frame;
+      if (ControllersTestFrame(at, frame) == at) AudioAcmCacheCycle();
+    }
+  }
+  if (g_acm_selftest && g_pump_known) {
+    g_acm_selftest = false;
+    AcmSelfTest();
   }
   float k = 1.0f;
   const bool room = AudioRoomNow(&k);
@@ -2365,7 +2820,7 @@ int AudioPlayNowValue() {
   return g_play_now > 2 ? 2 : g_play_now;
 }
 
-// The test key of audio_open_loader (Ctrl, Shift and F6, test_keys=1). The
+// The test key of audio_open_loader (Ctrl, Shift and I, test_keys=1). The
 // mode steps through 0, 1 and 2. A short pulse is 0, a longer one is 1, the
 // longest is 2.
 void AudioOpenLoaderCycle() {
@@ -2387,6 +2842,29 @@ void AudioOpenLoaderCycle() {
 int AudioOpenLoaderValue() {
   if (!g_on || !g_open_known) return kDebugCannot;
   return g_open_mode;
+}
+
+// The test key of audio_acm_cache (Ctrl, Shift and U, test_keys=1). The mode
+// steps through 0, 1 and 2. A short pulse is 0, a longer one is 1, the longest
+// is 2.
+void AudioAcmCacheCycle() {
+  if (!g_on || !g_acm_installed) {
+    ModLog("audio play   : test key, but the wrapper for the ACM functions of "
+           "QMixer is not in. Start with test_keys=1, or with "
+           "audio_acm_cache above 0");
+    return;
+  }
+  g_acm_mode = audio_play::NextAcmMode(g_acm_mode);
+  ControllersGesturePulse(0.5f, g_acm_mode == 0 ? 0.08f
+                                : g_acm_mode == 1 ? 0.30f
+                                                  : 0.55f);
+  ModLog("audio play   : test key, audio_acm_cache is %d now", g_acm_mode);
+}
+
+// The value of audio_acm_cache for the debug page.
+int AudioAcmCacheValue() {
+  if (!g_on || !g_acm_installed) return kDebugCannot;
+  return g_acm_mode;
 }
 
 // The test key. false gives each shadowed channel back to QMixer, at once,

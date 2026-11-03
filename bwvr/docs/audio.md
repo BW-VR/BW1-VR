@@ -585,7 +585,7 @@ functions of the exe.
 | `audio_sources.cpp` | The `LHSamplePlay` hook and the tracker. It steers the advisors and the flat sounds that have a place |
 | `audio_rolloff.cpp` | The hooks on `QSWaveMixSetDistanceMapping`, `SetSourcePosition` and `SetPolarPosition`. The room distances |
 | `audio_range.cpp` | The hooks on the object callback `0x00427200`, `GAudio::PlaySoundEffect`, `GAudio::GetGSFXSampleMaxDistance` and `GAudio::SamplePlayAnimEffect`. The ears decide what plays |
-| `audio_voices.cpp` | The mixer of the mod, and the work of QMixer in a play (`audio_play_now`, `audio_play_fix`, `audio_open_loader`, 7.8) |
+| `audio_voices.cpp` | The mixer of the mod, and the work of QMixer in a play (`audio_play_now`, `audio_play_fix`, `audio_open_loader`, `audio_acm_cache`, 7.8) |
 | `audio_capture.cpp` | The hook on the stream of QMixer: the mixer takes its block here, the capture writes it, and the latency is set here |
 | `audio_cues.cpp` | The soft sounds for the moves of the player |
 | `audio_trace.cpp` | Log only hooks (section 11) |
@@ -1208,8 +1208,9 @@ section, with a reference to the source and to the play) and sets its event
 when the list was empty. The loader thread then does the same two virtual
 calls and sets the flag at `play+0xDC`. Until that flag is set the play has no
 reader (`play+0xE4` is 0) and the channel mixes silence for it. The code that
-reads the flag treats a play with no flag as "not loaded yet", because the
-game uses this way for each wave of a tag that is not PCM.
+reads the flag treats a play with no flag as "not loaded yet". The Frame log
+shows the table above for MS ADPCM: the first ADPCM open goes to the loader
+thread, and each later ADPCM open runs at once on the thread of the call.
 
 **What the mod does.** `audio_play_now` hooks `sort` and `pump`. The hook looks
 at the call that the frame thread has in progress. In a play that the mode
@@ -1298,7 +1299,7 @@ first 20 opens of a sound of the atmosphere and of another sound have each a
 line:
 
 ```
-audio open   : atmosphere 1: source format tag 0x1 (PCM), 1 ch, 22050 Hz, 16 bits, N bytes of data. Wave object: tag 0x1, ... bytes, the same object as the wave of the play. Source vtable RVA 0x37290. Loader thread: yes. Compression manager loaded: no. Path: at once (the model says at once). The open took T us, result 0
+audio open   : atmosphere 1: source format tag 0x1 (PCM), 1 ch, 22050 Hz, 16 bits, N bytes of data. Wave object: tag 0x1, ... bytes, the same object as the wave of the play. Source vtable RVA 0x37290. Loader thread: yes. Compression manager loaded: no. Path: at once (the model says at once). The open took T us, result 0. audio_acm_cache=0: N hits and N misses of acmFormatSuggest so far
 ```
 
 `Path` is what the open did (`at once`, `loader thread`, or `unknown`). The
@@ -1320,10 +1321,20 @@ are 1 or 2 channels and 28 KB to 122 KB. The other sounds are 1 channel and
 reader, vtable `0x373C0`). The compression manager was never loaded, so the
 open of each wave is at once, and the model of the table above and the log
 agree for the 20 opens of each group. On the PC the open takes 1 to 2 us for
-the atmosphere and for the other sounds. So the waves of the atmosphere are
-not ADPCM, and no format work (a decode, a copy of the wave) is in their open.
-The 15 to 23 ms of the Steam Frame are in a call that the PC does not make
-slow: the Frame run with `audio_play_parts=1` names it.
+the atmosphere and for the other sounds. The test save has no ADPCM wave, so a
+desktop run shows no ACM call of the game.
+
+**What the open is on the Steam Frame (V, the Frame log).** The waves of the
+atmosphere on island 2 are of two kinds: PCM (the open takes 10 to 24 us) and
+MS ADPCM (tag 2, 1 or 2 channels, 22050 Hz, 4 bits, 37 KB to 120 KB). The open
+of an ADPCM wave takes 23 to 26 ms on the frame thread, in each play, also for
+a wave that played before. The path is `open`, `loader`, `src_map` and
+`dec_init` (about 25 ms). In `dec_init`, `acm:FormatSuggest` takes 22.5 to
+23.8 ms and `acm:StreamOpen` 2.0 to 2.6 ms. `acm:StreamSize`,
+`acm:StreamPrepare`, `HeapAlloc` and the locks take 1 to 14 us. The time is
+nearly the same for a wave of 37 KB and of 120 KB, so it is not the decode.
+I: it is the search of Wine for a driver in `acmFormatSuggest`, which is slow
+under FEX.
 
 **The loader thread for the open (`audio_open_loader`).** The mod hooks the
 format test. For a play of the mode it answers "loader thread" when the code
@@ -1342,12 +1353,96 @@ itself, and the wait for a core) and by the 20 ms of the timer pump that gives
 it a voice. If the loader thread cannot run in time, a very short sound
 can end before it starts.
 
-**Test key.** Ctrl, Shift and F6 (with `test_keys=1`) step
+**The cache of the ACM calls (`audio_acm_cache`).** The decoder of QMixer
+(`dec_init`, RVA `0x257B0`) gets `acmFormatSuggest`, `acmStreamOpen`,
+`acmStreamSize` and `acmStreamPrepareHeader` from `msacm32.dll` by
+`GetProcAddress`, one time. With `audio_acm_cache` above 0, with `test_keys=1`,
+with a test frame or with `audio_acm_selftest=1`, the mod puts a wrapper in the
+import entry of `GetProcAddress` of `QMixer.dll`. The wrapper gives QMixer a
+function of the mod for each of the four names (`audio_play_parts=1` times
+them as before). The functions read the mode at each call, so the test key
+switches at once. The modes: 0 each call goes to the ACM (default), 1 the
+answer of `acmFormatSuggest` is kept, 2 also the driver of `acmStreamOpen` is
+kept.
+
+The calls of QMixer (V, the disassembly of `dec_init`) are
+`acmFormatSuggest(NULL, source format, target, 18, 0x10000)` and then
+`acmStreamOpen(&stream, NULL, source format, target, NULL, 0, 0, 0)`. The
+target is 18 bytes: the tag 1 (PCM) and zero in the rest. The flag `0x10000` is
+`ACM_FORMATSUGGESTF_WFORMATTAG`. So the answer depends on the source format
+only, and one source format gets the same answer in each play.
+
+*Mode 1.* The key of an entry is the bytes of the source format (16 bytes for
+PCM, else 18 and the `cbSize` bytes), all bytes of the target as the caller has
+it, `cbwfxDst` and `fdwSuggest`. The key has the whole target and not only the
+fields that the flags select, because the ACM may leave a byte as it is. The
+value is the bytes that the ACM wrote and the result. The cache has 16 entries
+in a fixed array and replaces the oldest. Its lock is not held while the ACM
+runs, because the frame thread and the loader thread of QMixer both call the
+wrapper. A call goes to the ACM and is not kept when it has a driver handle, a
+flag other than the four flags of a field, a PCM source (its key is 16 bytes),
+a format over 128 bytes, or when the ACM answers with something other than 0. A hit writes the bytes of the
+first answer and returns 0. The math is in `audio_play_math.h` (`AcmFind`,
+`AcmStore`, `AcmSuggestCacheable`) with checks.
+
+*The compare.* `audio_acm_compare` (default 5) is the number of the first hits
+that the wrapper checks. For such a hit it runs the real call on a copy of the
+target, compares the result and the bytes, writes the line `audio acm    :
+compare N: ...`, and gives the caller the answer of the ACM. A difference
+drops the entry that holds the key after the real call. A checked hit takes as long as a call to the ACM (more than
+20 ms on the Steam Frame), so only the first few are checked. 0 turns the check
+off.
+
+*Mode 2.* `acmStreamOpen` with no driver handle makes the ACM look for a driver
+that opens the stream (I: the Wine source is not in the repo). The wrapper asks
+the first stream of a pair of formats for its driver (`acmDriverID`), opens a
+handle of that driver (`acmDriverOpen`) and keeps it (8 pairs). The next open
+of the same pair gets that handle in place of NULL. The list never replaces an
+entry. With a full list the wrapper closes the new handle at once and keeps
+nothing. A pair whose `acmDriverID` or `acmDriverOpen` fails, or that gives a
+null handle, is kept as a pair with no driver: its next open goes to the ACM
+with no lookup, and the failure counts in `failed`. An open with the kept
+handle that fails goes to the ACM as QMixer asked, and the pair is not tried
+again (the log says it). The mod keeps no stream handle between two plays and
+never closes a handle that the list holds. Not shown: that the 2 ms of the
+open are the search of a driver. The Frame decides it with the times in the
+line below.
+
+*The lines.* The `audio open` lines end with the hits and the misses of
+`acmFormatSuggest` so far. A miss, the first checks, and a driver that mode 2
+keeps have each a line `audio acm    :` (the first 8 misses, the first 16
+lookups of a driver). Each 10 s, with
+the `audio play` line, one line gives the counts since the start:
+
+```
+audio play   : audio_acm_cache=1. Since the start, acmFormatSuggest: N hits (N of them with no compare took a mean of T us, most T us), N calls to the ACM that were kept (mean T us, most T us), N calls that the cache does not answer. Compared with the ACM: N, different: N. acmStreamOpen: N with a kept driver (mean T us, most T us), N with no kept driver (mean T us, most T us), N drivers kept, N failed
+```
+
+*The selftest.* The test game on the PC plays no ADPCM wave, so it makes no ACM
+call. With `audio_acm_selftest=1` (test only) the mod calls the two wrappers
+once on the first frame with an MS ADPCM format of 22050 Hz and 1024 bytes a
+block, in stereo and in mono: three calls of `acmFormatSuggest` and three of
+`acmStreamOpen` for each, on the real `msacm32.dll`. The log shows the miss,
+the checked hits and the kept driver.
+
+**Test key.** Ctrl, Shift and I (with `test_keys=1`) step
 `audio_open_loader` through 0, 1 and 2 (a pulse of 0.08 s is 0, 0.30 s is 1,
 0.55 s is 2). The debug page has the line "Open loader" in the group Sound.
 `audio_open_loader_test=N` steps the mode at frame `N` of the controllers. The
 hook on the format test is in when `audio_open_loader` is above 0, when
 `test_keys=1`, when the test frame is set, or with `audio_play_parts=1`.
+`audio_open_loader` is a test value. The reference counts of the source and of
+the play are plain reads and writes with no `LOCK`, and the loader thread
+releases them while the frame thread can add a reference. A default above 0
+needs the release on the loader thread and each add on the frame thread under
+one lock, or another way to take the open off the frame thread.
+
+**Test key.** Ctrl, Shift and U (with `test_keys=1`) step `audio_acm_cache`
+through 0, 1 and 2 (a pulse of 0.08 s is 0, 0.30 s is 1, 0.55 s is 2). The
+debug page has the line "ACM cache" in the group Sound. `audio_acm_cache_test=N`
+steps the mode at frame `N` of the controllers. The wrapper of
+`GetProcAddress` is in when `audio_acm_cache` is above 0, when `test_keys=1`,
+when the test frame is set, or with `audio_acm_selftest=1`.
 
 **Test key.** Ctrl, Shift and K (with `test_keys=1`) step `audio_play_now`
 through 0, 1 and 2. A pulse of 0.08 s is 0, one of 0.30 s is 1, and one of
@@ -1423,7 +1518,9 @@ behavior is in the last column.
 | `audio_atmos_toward` | 1 | A single sound of the atmosphere goes toward the land of its kind | 0: a random place on the ring |
 | `audio_stop_wait` | 0 | The mod skips the wait of 20 ms of the audio DLL at the stop of a sound that the mixer of the mod plays (7.6) | 1: each stop holds the frame thread for 20 ms |
 | `audio_play_now` | 0 | The frame thread skips the sort and the pump of QMixer in `QSWaveMixPlayEx` and the timer thread does the work: 1 for a sound that the mixer of the mod plays, 2 also for each sound of the atmosphere, 3 for each sound (7.8). Test key: Ctrl, Shift and K | 0: the work runs in each play, as in the game |
-| `audio_open_loader` | 0 | The open of the wave of a play goes to the loader thread of QMixer instead of the thread of the caller: 1 for a sound of the atmosphere, 2 for each sound (7.8). Test key: Ctrl, Shift and F6 | 0: the open runs as QMixer has it |
+| `audio_open_loader` | 0 | The open of the wave of a play goes to the loader thread of QMixer instead of the thread of the caller: 1 for a sound of the atmosphere, 2 for each sound. A test value (7.8). Test key: Ctrl, Shift and I | 0: the open runs as QMixer has it |
+| `audio_acm_cache` | 0 | The mod keeps the answer of `acmFormatSuggest` that the decoder of QMixer asks for in the open of an ADPCM wave: 1 keeps it, 2 also keeps the driver of `acmStreamOpen` (7.8). Test key: Ctrl, Shift and U | 0: each call goes to the audio compression manager |
+| `audio_acm_compare` | 5 | The number of the first hits of the cache that the mod checks with a real call and logs (7.8). A checked hit takes as long as the real call. 0 turns the check off | |
 | `audio_play_fix` | 0 | The same for the pump alone, through the byte at `+5` of the session. A test value (7.8). Test key: Ctrl, Shift and P | 0: the pump runs in each play, as in the game |
 | `audio_play_parts` | 0 | Test only: times the functions of QMixer that a play runs on the frame thread, and puts a second line in the `audio play` line (7.8) | 0: no hook, no line |
 | `audio_turn_watch` | 0 | Test only: times each call of the audio turn into the audio DLL and QMixer, and each wait call of the two DLLs, on the frame thread. It needs `turn_parts=1` and `time_log=1` (7.7) | 0: no timer, no line |
@@ -1434,7 +1531,8 @@ behavior is in the last column.
 | `audio_capture` | 0 | Test only: write the stream to `bwvr-audio.wav` | |
 | `audio_test_voice`, `audio_test_path`, `audio_test_step_ms`, `audio_test_solo` | 0, empty, 3000, 0 | Test only: the test voice and the test bed (section 11) | |
 | `audio_test_tag`, `audio_test_tag_bank`, `audio_test_bank` | 0, 1, -1 | Test only: a sound tag on the Creature, and a list of the loops of a bank | |
-| `audio_play_fix_test`, `audio_play_now_test`, `audio_open_loader_test` | 0 | Test only: the frame of the controllers at which `audio_play_fix`, `audio_play_now` or `audio_open_loader` steps, as the test key does (7.8) | |
+| `audio_play_fix_test`, `audio_play_now_test`, `audio_open_loader_test`, `audio_acm_cache_test` | 0 | Test only: the frame of the controllers at which `audio_play_fix`, `audio_play_now`, `audio_open_loader` or `audio_acm_cache` steps, as the test key does (7.8) | |
+| `audio_acm_selftest` | 0 | Test only: on the first frame the mod calls its wrappers of the ACM with an MS ADPCM format and logs the answers (7.8) | |
 | `audio_stop_wait_test` | 0 | Test only: the frame of the controllers at which `audio_stop_wait` changes, as the test key does (7.6) | |
 
 `audio_test_tag` is a sample number. The mod puts a sound tag with this sample
@@ -1461,8 +1559,8 @@ Hand while the mouse moves.
 Ctrl and Pause (with `test_keys=1`) change `audio_stop_wait` (7.6).
 
 Ctrl, Shift and P (with `test_keys=1`) step `audio_play_fix` through 0, 1 and
-2 (7.8). Ctrl, Shift and K step `audio_play_now` in the same way, and Ctrl,
-Shift and F6 step `audio_open_loader`.
+2 (7.8). Ctrl, Shift and K step `audio_play_now` in the same way, Ctrl, Shift
+and I step `audio_open_loader`, and Ctrl, Shift and U step `audio_acm_cache`.
 
 Ctrl and Shift with the equals key of the row of digits (with `test_keys=1`)
 change `audio_take_loop` (6.4). The pointing controller gives a long pulse for 1 and a
@@ -1661,12 +1759,13 @@ the game window in front), and the level balance by ear.
   is `QSWaveMixPlayEx` for a sound of the atmosphere, in the code of QMixer
   and in no wait (7.7). The byte of `audio_play_fix` does not remove it.
   `audio_play_now` (7.8) defers the sort and the pump, which the code runs in
-  that call, and it did not shorten the call: nearly all of the time is in
-  `open`. The waves of the atmosphere are PCM and open in 1 to 2 us on the PC.
-  `audio_open_loader=1` (7.8) sends that open to the loader thread. Not shown:
-  which function below `open` has the time on the Frame, and that the loader
-  thread removes it with no new wait of the frame thread. Only a headset run
-  shows it. The line of `audio_play_parts=1` shows where the time is.
+  that call, and it does not shorten the call: nearly all of the time is in
+  `open`. The open of an MS ADPCM wave takes 23 to 26 ms, of which
+  `acmFormatSuggest` is 22.5 to 23.8 ms and `acmStreamOpen` 2.0 to 2.6 ms.
+  `audio_acm_cache` (7.8) keeps the answer of the first and, with 2, the driver
+  of the second. Not shown: the time of an open with the cache on the Frame,
+  and that a kept driver opens a stream in Wine. Only a headset run shows it.
+  `audio_open_loader=1` is a test value (7.8).
 - A sound with no object that the game asks for at a place of its own keeps
   the test of the game, with the game camera 400 units away in the God view.
   Only the loop of a bulk take has the test of the ears (6.4). Sample 52 of

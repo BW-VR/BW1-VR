@@ -229,6 +229,8 @@ struct DeviceState {
   uint32_t z_enable;
   uint32_t z_write;
   bool stage1;        // a color operation and a texture on stage 1
+  uint32_t z_func;    // for the log of the compare
+  uint32_t cull;
 };
 inline bool OpaqueState(const DeviceState& s) {
   return s.alpha_blend == 0 && s.z_enable != 0 && s.z_write != 0 && !s.stage1;

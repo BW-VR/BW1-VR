@@ -14,7 +14,13 @@
 // frame (vk_scene_test_frame) gives the difference of the two layers in the
 // log. It needs backend=vulkan. With test_keys=1, Ctrl Shift F10 steps
 // gpu_mesh through 1, 0 and 2.
-void GpuMeshSetOptions(int mode, bool test_keys);
+// gpu_mesh_compare_every=N (a test aid, only with gpu_mesh=2): each Nth frame the
+// log has the difference of the two layers, for the functions on the GPU path
+// and then for each function alone.
+// gpu_mesh_kinds=N: bit k of N leaves function k of the list (fn_00856D40 0,
+// fn_0085AB10 1, fn_0084BA90 2, fn_0085BA30 3, fn_00859530 4) on the GPU path.
+// 31 is the default.
+void GpuMeshSetOptions(int mode, bool test_keys, int compare_every, int kinds);
 void GpuMeshInstall();
 // h_FinishFrame, after the present: the test key and the report.
 void GpuMeshFrame();

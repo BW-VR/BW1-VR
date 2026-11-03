@@ -66,7 +66,7 @@ void ModLog(const char* format, ...);
 void ControllersGesturePulse(float amplitude, float seconds);
 // draw_hooks.cpp
 void DrawHooksMeshBatch(float rhw);
-bool DrawHooksTriangleSpecial();
+bool DrawHooksTriangleSpecial(uint32_t specular);
 
 namespace {
 
@@ -125,6 +125,12 @@ void Write(uintptr_t address, T v) {
 }
 
 int g_mode = 0;  // gpu_mesh
+int g_compare_every = 0;  // gpu_mesh_compare_every: frames between two samples of the compare
+uint32_t g_kinds = 31;    // gpu_mesh_kinds: bit k of the functions on the GPU path
+uint32_t g_base_kinds = 31;
+uint64_t g_frames = 0;
+int g_sample = 0;
+int g_twin_lines[kKinds + 1] = {};
 bool g_test_keys = false;
 bool g_in = false;
 bool g_key_down = false;
@@ -139,6 +145,7 @@ struct Counts {
   uint32_t why_special = 0; // h_DrawTriangle would change the batch
   uint32_t why_state = 0;   // blend, no depth write, stage 1
   uint32_t why_table = 0;   // the table of meshes is full
+  uint32_t why_kind = 0;    // gpu_mesh_kinds leaves the function out
   uint32_t data_sent = 0;
   uint64_t data_bytes = 0;
   uint64_t gpu_ticks = 0;   // the time of the hook for the GPU path
@@ -233,6 +240,7 @@ struct Prepared {
   uint32_t offset_step;   // floats of the game for each vertex: 1 or 3
   uint32_t vertex_count, triangles;
   float first_field;      // for DrawHooksMeshBatch
+  uint32_t zfunc, cull, zwrite;  // the device now, for the log of the compare
 };
 
 // The checks, the material, the state of the device and the data of the mesh.
@@ -261,7 +269,15 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
       return false;
     }
   }
-  if (DrawHooksTriangleSpecial()) {
+  // The values of the draw that the loop of the game reads: they are read
+  // before the material, as the loop reads them before it.
+  const uint32_t specular = Read<uint32_t>(kSpecular);
+  const uint32_t color = Read<uint32_t>(kColor);
+  if ((g_kinds & (1u << kind)) == 0) {
+    ++g_counts.why_kind;
+    return false;
+  }
+  if (DrawHooksTriangleSpecial(specular)) {
     ++g_counts.why_special;
     return false;
   }
@@ -294,6 +310,9 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
     ++g_counts.why_state;
     return false;
   }
+  out->zfunc = state.z_func;
+  out->cull = state.cull;
+  out->zwrite = state.z_write;
 
   // The values of the draw.
   gm::Consts& c = out->c;
@@ -302,8 +321,7 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
   c.near_plane = Read<float>(kNearPlane);
   c.half_x = Read<float>(kHalfX);
   c.half_y = Read<float>(kHalfY);
-  c.specular = Read<uint32_t>(kSpecular);
-  const uint32_t color = Read<uint32_t>(kColor);
+  c.specular = specular;
   const bool lit = kind == kLit || kind == kLitClip || kind == kOffsets;
   c.color = (kind == kLit || kind == kLitClip) ? MeshColor(mesh, color) : color;
   if (lit) {
@@ -408,6 +426,16 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
   if (g_mode == 2) {
     // The compare: the function of the game draws the mesh into the left eye
     // layer, and the GPU path draws it into the right eye layer.
+    if (g_twin_lines[kind] < 6) {
+      ++g_twin_lines[kind];
+      ModLog("gpu mesh     : compare, %s, mesh 0x%08X: type %u, flags 0x%02X, %u vertices, %u "
+             "triangles, color 0x%08X, specular 0x%08X, ambient %d, flags 0x%X, camera "
+             "position %.3f %.3f %.3f, first vertex rhw field %.5f, zfunc/cull/zwrite %u/%u/%u",
+             kKindName[kind], static_cast<unsigned>(reinterpret_cast<uintptr_t>(mesh)),
+             Read<uint32_t>(reinterpret_cast<uintptr_t>(mesh)), mesh[5], p.vertex_count,
+             p.triangles, p.c.color, p.c.specular, p.c.ambient, p.c.flags, p.c.row[0][3],
+             p.c.row[1][3], p.c.row[2][3], p.first_field, p.zfunc, p.cull, p.zwrite);
+    }
     OneWalkSetMode(kOneWalkLeftOnly);
     g_back[kind](mesh, edx);
     OneWalkSetMode(kOneWalkRightOnly);
@@ -481,7 +509,7 @@ void Report() {
            "triangles, %u offsets), %u on the CPU path. The GPU path by function: %s %u, %s "
            "%u, %s %u, %s %u, %s %u. The CPU path by reason: checks before the material %u, "
            "a draw that h_DrawTriangle changes %u, blend or no depth write or stage 1 %u, "
-           "table full %u, and in the function of the game %u, %u, %u, %u, %u (by function). "
+           "table full %u, left out by gpu_mesh_kinds %u, and in the function of the game %u, %u, %u, %u, %u (by function). "
            "Records of mesh data %u (%llu bytes), the renderer has %u meshes in %llu bytes "
            "and drew %llu, %llu with no data. Time on the frame thread in 10 s: the GPU path "
            "%.2f ms, the function of the game %.2f ms",
@@ -489,6 +517,7 @@ void Report() {
            kKindName[0], g_counts.gpu[0], kKindName[1], g_counts.gpu[1], kKindName[2],
            g_counts.gpu[2], kKindName[3], g_counts.gpu[3], kKindName[4], g_counts.gpu[4],
            g_counts.why_pre, g_counts.why_special, g_counts.why_state, g_counts.why_table,
+           g_counts.why_kind,
            g_counts.cpu[0], g_counts.cpu[1], g_counts.cpu[2], g_counts.cpu[3], g_counts.cpu[4],
            g_counts.data_sent, static_cast<unsigned long long>(g_counts.data_bytes),
            renderer.meshes, static_cast<unsigned long long>(renderer.arena_bytes),
@@ -502,11 +531,13 @@ void Report() {
 
 }  // namespace
 
-void GpuMeshSetOptions(int mode, bool test_keys) {
+void GpuMeshSetOptions(int mode, bool test_keys, int compare_every, int kinds) {
+  g_compare_every = compare_every;
+  g_kinds = g_base_kinds = static_cast<uint32_t>(kinds) & 31u;
   g_mode = mode < 0 || mode > 2 ? 0 : mode;
   g_test_keys = test_keys;
   VkSceneSetMesh(g_mode == 2 ? 1 : 0);
-  ModLog("gpu mesh     : gpu_mesh=%d. %s", g_mode, ModeText(g_mode));
+  ModLog("gpu mesh     : gpu_mesh=%d, gpu_mesh_kinds=%d. %s", g_mode, kinds, ModeText(g_mode));
 }
 
 void GpuMeshInstall() {
@@ -553,9 +584,31 @@ void GpuMeshToggle(const char* keys) {
   ModLog("test key     : %s, gpu_mesh is %d from the next mesh", keys, g_mode);
 }
 
+// The compare samples (gpu_mesh_compare_every=N): each Nth frame the next frame
+// gives its difference to the log, and the functions on the GPU path go
+// through 6 sets in turn: all of them (gpu_mesh_kinds), then each function
+// alone. So one run gives the difference for each function.
+void Sample() {
+  if (g_mode != 2 || g_compare_every <= 0) {
+    g_kinds = g_base_kinds;
+    return;
+  }
+  ++g_frames;
+  if (g_frames % static_cast<uint64_t>(g_compare_every) != 0) {
+    // The frame after a sample goes back to the base set.
+    g_kinds = g_base_kinds;
+    return;
+  }
+  const int step = g_sample++ % (kKinds + 1);
+  g_kinds = step == 0 ? g_base_kinds : ((1u << (step - 1)) & g_base_kinds);
+  if (g_kinds == 0) return;
+  VkSceneCompareNext(g_kinds);
+}
+
 void GpuMeshFrame() {
   if (!g_in) return;
   Report();
+  Sample();
   if (!g_test_keys) return;
   const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                           (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;

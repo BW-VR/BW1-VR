@@ -756,6 +756,8 @@ class Device : public IDirect3DDevice7 {
     out->z_enable = rs_[D3DRENDERSTATE_ZENABLE];
     out->z_write = rs_[D3DRENDERSTATE_ZWRITEENABLE];
     out->stage1 = ts_[1][D3DTSS_COLOROP] > 1 && textures_[1] != nullptr;
+    out->z_func = rs_[D3DRENDERSTATE_ZFUNC];
+    out->cull = rs_[D3DRENDERSTATE_CULLMODE];
   }
   STDMETHOD(GetRenderState)(D3DRENDERSTATETYPE type, LPDWORD out) override {
     if (out == nullptr || static_cast<uint32_t>(type) >= kStates) {

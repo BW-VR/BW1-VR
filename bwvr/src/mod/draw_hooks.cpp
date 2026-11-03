@@ -136,7 +136,7 @@ bool HandGlowEyePoint(int eye, float* x, float* y, float* meters);
 // vertices of a target of the Hand get their glow. caller is for the log.
 void TargetGlowBatch(void* verts, uint32_t count, const uint16_t* idx,
                      uint32_t indices, bool clipped, uint32_t caller);
-bool TargetGlowActive();
+bool TargetGlowWantsBatch(uint32_t specular);
 // cutscene_window.cpp: the batches of an advisor get a place in front of the
 // screen now.
 bool CutsceneWindowAdvisorNow();
@@ -2759,9 +2759,10 @@ void DrawHooksMeshBatch(float rhw) {
 
 // True when h_DrawTriangle does more than the two readings for a batch now:
 // the box of a speech bubble, the advisor of a cut scene and the glow of a
-// target change the vertices or the draw. A mesh then takes the CPU path.
-bool DrawHooksTriangleSpecial() {
-  return BubbleCardInBubble() || CutsceneWindowAdvisorNow() || TargetGlowActive();
+// target change the vertices or the draw. `specular` is the specular color of
+// the mesh. A mesh then takes the CPU path.
+bool DrawHooksTriangleSpecial(uint32_t specular) {
+  return BubbleCardInBubble() || CutsceneWindowAdvisorNow() || TargetGlowWantsBatch(specular);
 }
 
 namespace {

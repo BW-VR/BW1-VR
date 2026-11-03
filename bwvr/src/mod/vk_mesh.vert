@@ -91,9 +91,11 @@ void main() {
     const uint ambient = colors.z;
     uint level = ambient;
     if (i >= 0) level = ((255u - ambient) * uint(i) >> 8) + ambient;
-    const uint r = (((color >> 16) & 255u) * level) >> 8;
-    const uint g = (((color >> 8) & 255u) * level) >> 8;
-    const uint b = ((color & 255u) * level) >> 8;
+    // Each channel keeps its low 8 bits, as the integer math of the game does
+    // when the level is above 255.
+    const uint r = ((((color >> 16) & 255u) * level) >> 8) & 255u;
+    const uint g = ((((color >> 8) & 255u) * level) >> 8) & 255u;
+    const uint b = (((color & 255u) * level) >> 8) & 255u;
     color = (color & 0xFF000000u) | (r << 16) | (g << 8) | b;
   }
   out_diffuse = Unpack(color);

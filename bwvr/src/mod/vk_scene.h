@@ -328,6 +328,9 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
 // kOneWalkRightOnly), and the images of a test frame (vk_scene_test_frame)
 // give the difference of the two layers in the log.
 void VkSceneSetMesh(int compare);
+// In the compare: the next walk with both eyes gives its difference to the log
+// (with no file), with this label (the mask of the functions on the GPU path).
+void VkSceneCompareNext(uint32_t label);
 // The counts since the last call: the draws of meshes, the meshes in the
 // arena, their bytes, the data records, the draws with no data, and the
 // compare of the last test frame.

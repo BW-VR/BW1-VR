@@ -464,7 +464,9 @@ uint64_t g_mesh_draws = 0, g_mesh_data_records = 0, g_mesh_data_bytes = 0;
 uint64_t g_mesh_no_data = 0, g_mesh_no_room = 0, g_mesh_bad_offsets = 0;
 bool g_mesh_compare = false;
 bool g_said_mesh_room = false;
-void MeshCompare(const vk::Image& image, uint64_t frame);
+void MeshCompare(const vk::Image& image, uint64_t frame, bool bmp, uint32_t label);
+bool g_mesh_compare_request = false;
+uint32_t g_mesh_compare_label = 0;
 
 Slot g_slots[2];
 int g_slot = 0;
@@ -3737,6 +3739,12 @@ void EndOnWorker(const void*) {
   }
   g_target_drawn[g_target] = true;
   g_walk_keep = false;
+  // The mod asked for the compare of this walk (VkSceneCompareNext).
+  if (g_mesh_compare && g_mesh_compare_request && !g_picture && g_walk_both) {
+    g_mesh_compare_request = false;
+    f.vkWaitForFences(vk::Get().device, 1, &s.fence, VK_TRUE, UINT64_MAX);
+    MeshCompare(Target(), g_walk_number, false, g_mesh_compare_label);
+  }
   if (g_walk_both || g_walk_right) {
     g_done_image = (uint64_t)Target().image;  // a handle of 64 bits
     g_done_width = Target().width;
@@ -3774,7 +3782,7 @@ void EndOnWorker(const void*) {
     if (g_panel_drawn) {
       WritePicture(g_panels[g_target], 0, "panel", g_picture_frame);
     }
-    if (g_mesh_compare && !g_walk_mres) MeshCompare(Target(), g_picture_frame);
+    if (g_mesh_compare) MeshCompare(Target(), g_picture_frame, true, 0xFFu);
     // FOVEATED RESOLUTION: the two images of the left eye too.
     if (g_walk_mres) {
       WritePicture(g_mres_color[0], 0, "outer", g_picture_frame,
@@ -4472,7 +4480,7 @@ bool ReadLayerPixels(const vk::Image& image, uint32_t layer, std::vector<uint8_t
 // gpu_mesh=2: the left layer has the meshes with the CPU path, the right layer
 // the same meshes on the GPU, and all other draws are in both. The log has the
 // pixels that differ, and a file has the difference.
-void MeshCompare(const vk::Image& image, uint64_t frame) {
+void MeshCompare(const vk::Image& image, uint64_t frame, bool bmp, uint32_t label) {
   std::vector<uint8_t> a, b;
   if (!ReadLayerPixels(image, 0, &a) || !ReadLayerPixels(image, 1, &b)) return;
   const uint32_t w = image.width, h = image.height;
@@ -4505,17 +4513,18 @@ void MeshCompare(const vk::Image& image, uint64_t frame) {
     if (d > 80) ++over_80;
   }
   const double all = static_cast<double>(pixels);
-  ModLog("vk scene     : mesh compare, frame %llu, %u by %u: the left layer (the CPU "
+  ModLog("vk scene     : mesh compare %u, frame %llu, %u by %u: the left layer (the CPU "
          "path) and the right layer (the GPU path) differ in %llu pixels (%.4f percent), "
          "in %llu pixels (%.4f percent) by more than 24 levels, in %llu (%.4f percent) "
          "by more than 80. The most is %u levels, the mean of the pixels that differ "
          "is %.2f levels. The box of the pixels over 24: x %u to %u, y %u to %u",
-         frame, w, h, over_0, 100.0 * static_cast<double>(over_0) / all, over_24,
+         label, frame, w, h, over_0, 100.0 * static_cast<double>(over_0) / all, over_24,
          100.0 * static_cast<double>(over_24) / all, over_80,
          100.0 * static_cast<double>(over_80) / all, most,
          over_0 > 0 ? static_cast<double>(sum) / static_cast<double>(over_0) : 0.0, box[0],
          box[2], box[1], box[3]);
 #ifdef _WIN32
+  if (!bmp) return;
   char path[MAX_PATH];
   GetModuleFileNameA(GetModuleHandleA(nullptr), path, MAX_PATH);
   char* slash = strrchr(path, '\\');
@@ -4751,6 +4760,11 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
 }
 
 void VkSceneSetMesh(int compare) { g_mesh_compare = compare != 0; }
+
+void VkSceneCompareNext(uint32_t label) {
+  g_mesh_compare_request = true;
+  g_mesh_compare_label = label;
+}
 
 void VkSceneTakeMeshCounts(VkSceneMeshCounts* out) {
   out->draws = g_mesh_draws;

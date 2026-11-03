@@ -25,10 +25,10 @@ void TargetGlowFrame();
 // stereo.cpp: after the scene walk of each eye pass.
 void TargetGlowPassDone();
 
-// True when a target has its glow in this pass: DrawTriangle changes the
-// vertices of its batches (TargetGlowBatch). A mesh on the GPU takes the CPU
-// path then (gpu_mesh.cpp).
-bool TargetGlowActive();
+// True when TargetGlowBatch would change the vertices of a mesh with this
+// specular color: the mesh is a target of this pass, in its call or with its
+// mark. A mesh on the GPU takes the CPU path then (gpu_mesh.cpp).
+bool TargetGlowWantsBatch(uint32_t specular);
 
 // draw_hooks.cpp: a batch of the world goes to the draw. verts has the
 // vertex format 0x1C4, and idx has the indices of a triangle list. clipped:

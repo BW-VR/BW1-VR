@@ -252,6 +252,7 @@ void AudioStopWaitToggle();
 void AudioPlayFixCycle();
 void AudioPlayNowCycle();
 void AudioOpenLoaderCycle();
+void AudioAcmCacheCycle();
 // anim_trig.cpp: the A/B of anim_trig, and its test frame.
 void AnimTrigToggle(const char* by);
 void AnimTrigFrame();
@@ -1153,15 +1154,26 @@ void PollHotkeys() {
     AudioPlayNowCycle();
   }
   now_key_down = now_key_now;
-  // An A/B of the open of a wave in a sound start (audio_open_loader). F6 with
-  // Ctrl and Shift has no other test key.
+  // An A/B of the open of a wave in a sound start (audio_open_loader). The
+  // letter I with Ctrl and Shift has no other test key and no game action
+  // (docs/controls-audit.md, sections 2 and 3).
   static bool open_key_down = false;
-  const bool open_key_now = (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
+  const bool open_key_now = (GetAsyncKeyState('I') & 0x8000) != 0;
   if (g_test_keys && open_key_now && !open_key_down && ctrl && shift &&
       GameHasFocus()) {
     AudioOpenLoaderCycle();
   }
   open_key_down = open_key_now;
+  // An A/B of the audio compression manager in a sound start
+  // (audio_acm_cache). The letter U with Ctrl and Shift has no other test key
+  // and no game action.
+  static bool acm_key_down = false;
+  const bool acm_key_now = (GetAsyncKeyState('U') & 0x8000) != 0;
+  if (g_test_keys && acm_key_now && !acm_key_down && ctrl && shift &&
+      GameHasFocus()) {
+    AudioAcmCacheCycle();
+  }
+  acm_key_down = acm_key_now;
   // An A/B of the source of the gaze of foveated rendering (docs/backend.md,
   // "Foveated rendering"). Shift O with no Ctrl is the key of foveation.
   static bool gaze_key_down = false;

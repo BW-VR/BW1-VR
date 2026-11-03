@@ -273,6 +273,8 @@ int AudioPlayFixValue();
 int AudioPlayNowValue();
 void AudioOpenLoaderCycle();
 int AudioOpenLoaderValue();
+void AudioAcmCacheCycle();
+int AudioAcmCacheValue();
 int AudioTakeLoopValue();
 void AudioTakeLoopChange(const char* by);
 // The Temple (temple.cpp).
@@ -609,6 +611,9 @@ const Switch kSwitches[] = {
     {kGroupSound, L"Open loader", L"QMixer open of a wave in a sound start",
      "audio_open_loader", AudioOpenLoaderValue,
      [](const char*) { AudioOpenLoaderCycle(); }, L"in play|atmosphere|each"},
+    {kGroupSound, L"ACM cache", L"QMixer ACM calls in a sound start",
+     "audio_acm_cache", AudioAcmCacheValue,
+     [](const char*) { AudioAcmCacheCycle(); }, L"each call|suggest|driver"},
     {kGroupSound, L"Take loop", L"Ears start the loop of a take",
      "audio_take_loop", AudioTakeLoopValue, AudioTakeLoopChange, L"off|on"},
 

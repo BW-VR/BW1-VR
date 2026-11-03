@@ -279,6 +279,171 @@ inline bool ForceLoader(int mode, bool atmosphere) {
   return mode == 1 ? atmosphere : mode >= 2;
 }
 
+// ---- The cache of acmFormatSuggest (audio_acm_cache) -----------------------
+//
+// QMixer sets up the decoder of each wave that is not PCM with the calls
+// acmFormatSuggest, acmStreamOpen, acmStreamSize and acmStreamPrepareHeader
+// of msacm32.dll (RVA 0x257B0). It asks acmFormatSuggest with no driver
+// handle, with a PCM target that has only its format tag set. Wine then looks
+// for a driver in the list of drivers, which takes more than 20 ms on the
+// Steam Frame, and the answer is the same each time. The mod gives QMixer a
+// wrapper in place of the function from GetProcAddress. The wrapper keeps the
+// answer of a call and gives it back to a call with the same input.
+//
+// The input of a call is the source format, the target format as the caller
+// has it, the size of the target and the flags. The wrapper keeps all bytes of
+// the target, not only the fields that the flags select, because the driver
+// may leave a byte as it is. Only a call that the ACM answered with 0 is kept.
+//
+// audio_acm_cache, the modes. 0: each call goes to the ACM. 1: the answer of
+// acmFormatSuggest is kept. 2: also the driver that the first acmStreamOpen
+// found is kept and given to the next acmStreamOpen of the same formats.
+const int kAcmModes = 3;
+inline int ClampAcmMode(int mode) { return mode < 0 ? 0 : (mode >= kAcmModes ? kAcmModes - 1 : mode); }
+inline int NextAcmMode(int mode) { return (mode >= 0 && mode < kAcmModes - 1) ? mode + 1 : 0; }
+
+// The flags of acmFormatSuggest that select a field of the target.
+const uint32_t kAcmSuggestKnown = 0x000F0000;  // WFORMATTAG, NCHANNELS, NSAMPLESPERSEC, WBITSPERSAMPLE
+
+const int kAcmFormatMax = 128;  // the most bytes of a format that the cache keeps
+const int kAcmEntries = 16;
+const int kAcmDrivers = 8;
+
+// The size of a format in bytes: the 16 bytes of a PCM format, else the
+// WAVEFORMATEX of 18 bytes and its cbSize extra bytes.
+inline int AcmFormatSize(uint16_t tag, uint16_t cb_size) {
+  return tag == kTagPcm ? 16 : 18 + static_cast<int>(cb_size);
+}
+
+// Whether the cache may answer a call of acmFormatSuggest. A driver handle
+// makes the answer depend on that driver, so the call goes to the ACM.
+inline bool AcmSuggestCacheable(bool no_driver, int src_size, uint32_t cb_dst, uint32_t suggest) {
+  return no_driver && src_size >= 16 && src_size <= kAcmFormatMax && cb_dst >= 16 && cb_dst <= kAcmFormatMax &&
+         (suggest & ~kAcmSuggestKnown) == 0;
+}
+
+struct AcmEntry {
+  bool used;
+  uint16_t src_size;
+  uint16_t cb_dst;
+  uint32_t suggest;
+  uint32_t result;
+  int32_t hits;
+  uint8_t src[kAcmFormatMax];
+  uint8_t dst_in[kAcmFormatMax];
+  uint8_t dst_out[kAcmFormatMax];
+};
+
+struct AcmCache {
+  AcmEntry entry[kAcmEntries];
+  int next;  // the slot that the next new entry takes
+  void Clear() {
+    memset(this, 0, sizeof(*this));
+  }
+};
+
+inline bool AcmEntryMatches(const AcmEntry& e, const uint8_t* src, int src_size, const uint8_t* dst_in,
+                            uint32_t cb_dst, uint32_t suggest) {
+  return e.used && e.src_size == src_size && e.cb_dst == cb_dst && e.suggest == suggest &&
+         memcmp(e.src, src, static_cast<size_t>(src_size)) == 0 &&
+         memcmp(e.dst_in, dst_in, static_cast<size_t>(cb_dst)) == 0;
+}
+
+// The index of the entry for this input, or -1.
+inline int AcmFind(const AcmCache& cache, const uint8_t* src, int src_size, const uint8_t* dst_in, uint32_t cb_dst,
+                   uint32_t suggest) {
+  if (src == nullptr || dst_in == nullptr || src_size < 0 || src_size > kAcmFormatMax || cb_dst > kAcmFormatMax) {
+    return -1;
+  }
+  for (int i = 0; i < kAcmEntries; ++i) {
+    if (AcmEntryMatches(cache.entry[i], src, src_size, dst_in, cb_dst, suggest)) return i;
+  }
+  return -1;
+}
+
+// Keeps an answer. An entry with the same input is replaced. Else the entry
+// at `next` is replaced (the oldest). Returns the index, or -1 when the
+// result is not 0 or the sizes do not fit.
+inline int AcmStore(AcmCache* cache, const uint8_t* src, int src_size, const uint8_t* dst_in, uint32_t cb_dst,
+                    uint32_t suggest, const uint8_t* dst_out, uint32_t result) {
+  if (result != 0 || src == nullptr || dst_in == nullptr || dst_out == nullptr || src_size < 0 ||
+      src_size > kAcmFormatMax || cb_dst > kAcmFormatMax) {
+    return -1;
+  }
+  int at = AcmFind(*cache, src, src_size, dst_in, cb_dst, suggest);
+  if (at < 0) {
+    at = cache->next;
+    cache->next = (cache->next + 1) % kAcmEntries;
+  }
+  AcmEntry& e = cache->entry[at];
+  e.used = true;
+  e.src_size = static_cast<uint16_t>(src_size);
+  e.cb_dst = static_cast<uint16_t>(cb_dst);
+  e.suggest = suggest;
+  e.result = result;
+  e.hits = 0;
+  memcpy(e.src, src, static_cast<size_t>(src_size));
+  memcpy(e.dst_in, dst_in, static_cast<size_t>(cb_dst));
+  memcpy(e.dst_out, dst_out, static_cast<size_t>(cb_dst));
+  return at;
+}
+
+// The drivers for acmStreamOpen (mode 2): the driver handle that the first
+// open of a pair of formats found. A pair is the source format and the target
+// format of the open.
+struct AcmDriver {
+  bool used;
+  bool bad;  // an open with this handle failed: the pair goes to the ACM
+  uint16_t src_size;
+  uint16_t dst_size;
+  uintptr_t handle;
+  uint8_t src[kAcmFormatMax];
+  uint8_t dst[kAcmFormatMax];
+};
+
+struct AcmDrivers {
+  AcmDriver entry[kAcmDrivers];
+  int next;
+  void Clear() {
+    memset(this, 0, sizeof(*this));
+  }
+};
+
+inline int AcmDriverFind(const AcmDrivers& list, const uint8_t* src, int src_size, const uint8_t* dst, int dst_size) {
+  if (src == nullptr || dst == nullptr || src_size < 16 || src_size > kAcmFormatMax || dst_size < 16 ||
+      dst_size > kAcmFormatMax) {
+    return -1;
+  }
+  for (int i = 0; i < kAcmDrivers; ++i) {
+    const AcmDriver& d = list.entry[i];
+    if (d.used && d.src_size == src_size && d.dst_size == dst_size &&
+        memcmp(d.src, src, static_cast<size_t>(src_size)) == 0 &&
+        memcmp(d.dst, dst, static_cast<size_t>(dst_size)) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+// Keeps the handle for a pair. Returns the index, or -1 when the pair is
+// already in the list, the handle is 0 or the sizes do not fit. A full list
+// replaces the oldest entry.
+inline int AcmDriverStore(AcmDrivers* list, const uint8_t* src, int src_size, const uint8_t* dst, int dst_size,
+                          uintptr_t handle) {
+  if (handle == 0 || AcmDriverFind(*list, src, src_size, dst, dst_size) >= 0) return -1;
+  const int at = list->next;
+  list->next = (list->next + 1) % kAcmDrivers;
+  AcmDriver& d = list->entry[at];
+  d.used = true;
+  d.bad = false;
+  d.src_size = static_cast<uint16_t>(src_size);
+  d.dst_size = static_cast<uint16_t>(dst_size);
+  d.handle = handle;
+  memcpy(d.src, src, static_cast<size_t>(src_size));
+  memcpy(d.dst, dst, static_cast<size_t>(dst_size));
+  return at;
+}
+
 // A short name for a format tag, for the log.
 inline const char* TagName(uint32_t tag) {
   switch (tag) {

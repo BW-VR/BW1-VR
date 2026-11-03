@@ -173,6 +173,91 @@ inline void AudioPlayChecks() {
   Check(strcmp(ap::TagName(0x11), "IMA ADPCM") == 0 && strcmp(ap::TagName(1), "PCM") == 0 &&
             strcmp(ap::TagName(0x7777), "other") == 0,
         "the names of the format tags", 1, 1);
+
+  // THE CACHE OF acmFormatSuggest (audio_acm_cache). The input is the source
+  // format, the target format, its size and the flags. The answer is kept only
+  // for the result 0.
+  Check(ap::ClampAcmMode(-1) == 0 && ap::ClampAcmMode(1) == 1 && ap::ClampAcmMode(5) == 2,
+        "an ACM mode is clamped to 0 to 2", ap::ClampAcmMode(5), 2);
+  Check(ap::NextAcmMode(0) == 1 && ap::NextAcmMode(1) == 2 && ap::NextAcmMode(2) == 0 && ap::NextAcmMode(8) == 0,
+        "the test key steps 0, 1, 2 and back", ap::NextAcmMode(2), 0);
+  Check(ap::AcmFormatSize(1, 0) == 16 && ap::AcmFormatSize(1, 22) == 16 && ap::AcmFormatSize(2, 32) == 50 &&
+            ap::AcmFormatSize(0x11, 2) == 20,
+        "the size of a format: 16 for PCM, else 18 and the extra bytes", ap::AcmFormatSize(2, 32), 50);
+  Check(ap::AcmSuggestCacheable(true, 50, 18, 0x10000) && !ap::AcmSuggestCacheable(false, 50, 18, 0x10000),
+        "a call with a driver handle is not cached", 0, 0);
+  Check(!ap::AcmSuggestCacheable(true, 15, 18, 0x10000) && !ap::AcmSuggestCacheable(true, 50, 15, 0x10000) &&
+            !ap::AcmSuggestCacheable(true, 129, 18, 0x10000) && !ap::AcmSuggestCacheable(true, 50, 129, 0x10000),
+        "a format that is too small or too large is not cached", 0, 0);
+  Check(ap::AcmSuggestCacheable(true, 50, 18, 0x000F0000) && !ap::AcmSuggestCacheable(true, 50, 18, 0x10001) &&
+            !ap::AcmSuggestCacheable(true, 50, 18, 0x00100000),
+        "a flag that the cache does not know is not cached", 0, 0);
+
+  // The source is a MS ADPCM format of 50 bytes (the cbSize is 32). The target
+  // is 18 bytes with the tag 1 and zero in the rest.
+  uint8_t src[50], src2[50], dst_in[18], dst_out[18], got[18];
+  memset(src, 0, sizeof(src));
+  src[0] = 2; src[2] = 2; src[4] = 0x22; src[5] = 0x56; src[16] = 32;
+  memcpy(src2, src, sizeof(src));
+  memset(dst_in, 0, sizeof(dst_in));
+  dst_in[0] = 1;
+  memset(dst_out, 0, sizeof(dst_out));
+  dst_out[0] = 1; dst_out[2] = 2; dst_out[4] = 0x22; dst_out[5] = 0x56; dst_out[8] = 0x88; dst_out[9] = 0x58;
+  dst_out[12] = 4; dst_out[14] = 16;
+  ap::AcmCache cache;
+  cache.Clear();
+  Check(ap::AcmFind(cache, src, 50, dst_in, 18, 0x10000) == -1, "an empty cache has no entry", 0, 0);
+  Check(ap::AcmStore(&cache, src, 50, dst_in, 18, 0x10000, dst_out, 0x20) == -1 &&
+            ap::AcmFind(cache, src, 50, dst_in, 18, 0x10000) == -1,
+        "an answer that is not 0 is not kept", 0, 0);
+  const int first = ap::AcmStore(&cache, src, 50, dst_in, 18, 0x10000, dst_out, 0);
+  Check(first == 0 && ap::AcmFind(cache, src2, 50, dst_in, 18, 0x10000) == 0,
+        "an answer is found for the same bytes", first, 0);
+  memcpy(got, cache.entry[0].dst_out, sizeof(got));
+  Check(memcmp(got, dst_out, sizeof(got)) == 0 && cache.entry[0].result == 0,
+        "the entry gives back the bytes that the ACM wrote", 1, 1);
+  src2[4] = 0x44;
+  Check(ap::AcmFind(cache, src2, 50, dst_in, 18, 0x10000) == -1, "another rate is another entry", -1, -1);
+  src2[4] = 0x22; src2[2] = 1;
+  Check(ap::AcmFind(cache, src2, 50, dst_in, 18, 0x10000) == -1, "another channel count is another entry", -1, -1);
+  src2[2] = 2; src2[40] = 7;
+  Check(ap::AcmFind(cache, src2, 50, dst_in, 18, 0x10000) == -1,
+        "a byte of the extra data of the source is part of the key", -1, -1);
+  uint8_t dst_in2[18];
+  memcpy(dst_in2, dst_in, sizeof(dst_in));
+  dst_in2[17] = 9;
+  Check(ap::AcmFind(cache, src, 50, dst_in2, 18, 0x10000) == -1,
+        "a byte of the target that the caller sets is part of the key", -1, -1);
+  Check(ap::AcmFind(cache, src, 50, dst_in, 18, 0x20000) == -1 && ap::AcmFind(cache, src, 50, dst_in, 20, 0x10000) == -1,
+        "the flags and the size of the target are part of the key", -1, -1);
+  Check(ap::AcmStore(&cache, src, 50, dst_in, 18, 0x10000, dst_out, 0) == 0 && cache.next == 1,
+        "the same input replaces its entry", cache.next, 1);
+  // Sixteen other inputs fill the cache. The 17th replaces the oldest slot.
+  uint8_t other[50];
+  memcpy(other, src, sizeof(other));
+  for (int i = 0; i < ap::kAcmEntries; ++i) {
+    other[4] = static_cast<uint8_t>(0x30 + i);
+    ap::AcmStore(&cache, other, 50, dst_in, 18, 0x10000, dst_out, 0);
+  }
+  other[4] = 0x30;
+  Check(ap::AcmFind(cache, src, 50, dst_in, 18, 0x10000) == -1 && ap::AcmFind(cache, other, 50, dst_in, 18, 0x10000) >= 0,
+        "a full cache replaces the oldest entry", ap::AcmFind(cache, src, 50, dst_in, 18, 0x10000), -1);
+
+  // THE DRIVERS FOR acmStreamOpen (mode 2).
+  ap::AcmDrivers drivers;
+  drivers.Clear();
+  uint8_t pcm[18];
+  memset(pcm, 0, sizeof(pcm));
+  pcm[0] = 1; pcm[2] = 2; pcm[4] = 0x22; pcm[5] = 0x56; pcm[14] = 16;
+  Check(ap::AcmDriverFind(drivers, src, 50, pcm, 18) == -1, "an empty list has no driver", -1, -1);
+  Check(ap::AcmDriverStore(&drivers, src, 50, pcm, 18, 0) == -1, "a handle 0 is not kept", -1, -1);
+  const int d0 = ap::AcmDriverStore(&drivers, src, 50, pcm, 18, 0x1234);
+  src2[40] = 7;
+  Check(d0 == 0 && ap::AcmDriverFind(drivers, src2, 50, pcm, 18) == -1 && drivers.entry[0].handle == 0x1234,
+        "a driver is found for its pair of formats only", d0, 0);
+  src2[40] = 0;
+  Check(ap::AcmDriverFind(drivers, src2, 50, pcm, 18) == 0 && ap::AcmDriverStore(&drivers, src, 50, pcm, 18, 0x99) == -1,
+        "a pair has one driver", 0, 0);
 }
 
 }  // namespace audio_play_checks

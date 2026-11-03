@@ -771,17 +771,21 @@ that moves while the Hand takes it.
     the atmosphere, also with `audio_stop_wait=0`. The time is in the code of
     QMixer, in no wait (`audio.md`, 7.8). The byte of `audio_play_fix` does
     not remove it, and `audio_play_now=2` (the sort and the pump return at
-    once in that call) did not either: nearly all of the time is in `open`
-    (RVA `0xC230`, `audio.md`, 7.8). The waves of the atmosphere are PCM, and
-    on the PC their open takes 1 to 2 us, so the Frame cost is not shown there.
-    `audio_play_parts=1` now times each function and system call below the
-    open, and `audio_open_loader=1` (default 0) sends the open of a sound of
-    the atmosphere to the loader thread of QMixer. Next: two Frame runs, one
-    with `audio_play_now=2`, `audio_play_parts=1`, `audio_open_loader=0`,
-    `turn_parts=1`, `audio_turn_watch=1` and `time_log=1` (the `audio play`
-    parts line names the function), one with `audio_open_loader=1`. Then set
-    the default. Not built: the `QSWaveMix` calls of the audio turn on a
-    thread of the mod.
+    once in that call) does not either: nearly all of the time is in `open`
+    (RVA `0xC230`, `audio.md`, 7.8). The waves of the atmosphere on island 2
+    include MS ADPCM waves. The open of one takes 23 to 26 ms on the frame
+    thread: `acmFormatSuggest` is 22.5 to 23.8 ms and `acmStreamOpen` 2.0 to
+    2.6 ms. `audio_acm_cache=1` (default 0) keeps the answer of
+    `acmFormatSuggest`, and `audio_acm_cache=2` also keeps the driver of
+    `acmStreamOpen`. Next: a Frame session with `audio_acm_cache=1`,
+    `audio_acm_compare=5`, `audio_play_parts=1` and `time_log=1` (the hits, the
+    compares and the time of an open are in the log), then one with
+    `audio_acm_cache=2`. Then set the default. `audio_open_loader` stays a
+    test value: the reference counts of QMixer have no `LOCK`, so a default
+    above 0 needs the release on the loader thread and each add on the frame
+    thread under one lock, or another way to take the open off the frame
+    thread. Not built: the `QSWaveMix` calls of the audio turn on a thread of
+    the mod.
   - **Slow frames that stay.** The first
     use of a texture or of an effect file makes an eye pass 8 to 15 ms
     longer, when Windows does not have the file in memory. One time a minute

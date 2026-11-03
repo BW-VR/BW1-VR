@@ -136,6 +136,13 @@ int AudioPlayNowValue();
 void AudioOpenLoaderCycle();
 // The value of audio_open_loader for the debug page, or kDebugCannot.
 int AudioOpenLoaderValue();
+// The test key of audio_acm_cache. QMixer asks the audio compression manager
+// for each decoder it sets up, or the mod keeps the answer of
+// acmFormatSuggest, and with 2 also the driver of acmStreamOpen
+// (docs/audio.md, "7.8 The pump of a play"). The mode steps through 0, 1 and 2.
+void AudioAcmCacheCycle();
+// The value of audio_acm_cache for the debug page, or kDebugCannot.
+int AudioAcmCacheValue();
 // A flat cue through the mixer: mono, 22050 Hz, pan -1 to 1.
 bool AudioVoicesCue(const int16_t* data, int frames, float gain, float pan);
 // audio_rolloff.cpp, the test key: true gives a room factor that is the same

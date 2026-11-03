@@ -33,6 +33,7 @@
 #include "game_sse_parts.h"
 #include "land_fast.h"
 #include "land_objects.h"
+#include "part_draw.h"
 #include "object_timer.h"
 #include "thread_wait.h"
 #include "time_log.h"
@@ -647,6 +648,7 @@ int g_game_sse_path = -1;
 int g_object_timer = 0;
 int g_land_objects = 1;
 int g_land_objects_threads = 0;
+int g_part_draw = 0;
 char g_object_timer_sites[512] = "";
 int g_game_sse_parts = 0;  // game_sse_parts, game_sse_parts.h
 int g_game_sse_check = 0;  // game_sse_check
@@ -1757,6 +1759,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "land_objects", 1, path));
   g_land_objects_threads = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "land_objects_threads", 0, path));
+  // The edge, the triangles and the offsets of the meshes of the 3D parts
+  // with SSE (part_draw.h).
+  g_part_draw = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "part_draw", 0, path));
   // The timer of the objects on the land (object_timer.h), a test aid.
   g_object_timer = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "object_timer", 0, path));
@@ -2262,6 +2268,8 @@ void StartVrStep() {
     LandFastInstall();
     LandObjectsSetOptions(g_land_objects, g_land_objects_threads, g_test_keys);
     LandObjectsInstall();
+    PartDrawSetOptions(g_part_draw, g_test_keys);
+    PartDrawInstall();
     ObjectTimerSetOptions(g_object_timer, g_object_timer_sites, g_test_keys);
     D3D7CountSetOptions(g_d3d7_count);
     if (!g_vulkan_only) {
@@ -2721,6 +2729,7 @@ void __cdecl h_FinishFrame() {
   WalkPartsPresent();
   ObjectTimerFrame();
   LandObjectsFrame();
+  PartDrawFrame();
   GameSsePartsFrame();
   UiBarsEnd(bars);
   ++g_frame;

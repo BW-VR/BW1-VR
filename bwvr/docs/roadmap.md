@@ -1283,7 +1283,11 @@ that moves while the Hand takes it.
   makes the test of the view of each object before the draws on N worker
   threads. Next in the headset: the `object timer` lines (`object_timer=1`)
   with `land_objects=1` and 0, and with `land_objects_threads=2` and 0.
-  Then a fast version of the part that the lines of the Quest show first.
+  `part_draw=1` makes the loop over the triangles of each mesh and the
+  vertex loops of `fn_00859530` (a person or an animal) with SSE (`backend.md`, "The parts with SSE"). Next on the Frame: the lines
+  with `object_timer=1` and the sites of that section, with `part_draw=1` and
+  0. Not shown: the time of the draw of the objects with `part_draw=1` under
+  FEX (the goal is less than half of its time with the same picture).
 - **N22. Haptics from the world: check it in a headset.** With
   `world_haptics=1` the hand feels the purr of a stroke, the beat of a
   living thing in the Hand, the land under a grip, the thump of a landing

@@ -141,6 +141,8 @@ int RenderThreadLateEndValue();
 void RenderThreadLateEndToggle(const char* by);
 int FastTransformValue();
 void FastTransformToggle(const char* by);
+int PartDrawValue();
+void PartDrawToggle(const char* by);
 int D3D7ThreadValue();
 void D3D7ThreadToggle(const char* by);
 int D3D7ThreadMergeValue();
@@ -405,6 +407,8 @@ const Switch kSwitches[] = {
      "frame_time_real", FrameTimeValue, FrameTimeToggle, L"kept|real"},
     {kGroupRender, L"SSE loops", L"Vertex loops with SSE", "fast_transform",
      FastTransformValue, FastTransformToggle, L"x87|SSE"},
+    {kGroupRender, L"Part draw", L"Mesh edge, triangles and offsets",
+     "part_draw", PartDrawValue, PartDrawToggle, L"x87|SSE"},
     {kGroupRender, L"Thread wait", L"Threads spin, then sleep",
      "thread_wait", ThreadWaitMode, ThreadWaitToggle, L"spin|sleep"},
     {kGroupRender, L"Read ahead", L"Read ahead of the game files",

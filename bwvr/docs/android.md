@@ -191,6 +191,7 @@ Summary:
 | `android/src/time_log.cpp`, `android/src/proc_stat.h` | The time log of the app (`time_log`): the times of a frame, of the GPU, of each thread and of each core, each 10 s. `proc_stat.h` reads the lines of `/proc` and has no Android code |
 | `src/mod/time_log.cpp`, `src/mod/time_log_math.h` | The time log of the mod, and the stats and the rules that the app uses too. No Windows code in the header |
 | `test/controller_math/time_log_checks.h` | The math checks of the cap, of the lines of `/proc` and of the parts of a frame |
+| `android/src/trace_app.cpp`, `trace_app.h`, `src/common/trace_events.h` | The timeline of the app (`trace`, "The timeline"): the bars of the session thread, the reader and the play thread, the button combination, and the join of the file with the part of the game |
 | `src/mod/long_frame_math.h`, `android/src/long_frames.cpp` | The long frames of the game (`slow_frame_ms`): the rules of the lines, of the calls of the frame loop, of schedstat and of the late pictures, the clock of the frames of the game in the reader and the log of the takes of the session. No Windows code and no Android code in the header |
 | `test/controller_math/long_frame_checks.h` | The math checks of `long_frame_math.h` |
 | `android/src/walk_probe.cpp`, `android/src/walk_parts.h` | The GPU parts of the walk (`gpu_parts`): the functions of the app in the table of the renderer, the timestamps at the bounds of the passes, and the counts. `walk_parts.h` has the rules of the parts and no Vulkan code |
@@ -2958,6 +2959,55 @@ stick in a saved game):
   game" fail, and the test aborts before it gets the log of the app and the
   logcat ("StartIndex" in `WaitLog`). In the runs that pass, the play of
   one picture in this phase takes up to 9 s. The cause is not known.
+
+## The timeline
+
+With `trace=1` in `bwvr.ini` the app records the bars of its threads on the
+same clock as the game, and one file shows the game and the app together
+(`backend.md`, "The timeline of the game and the app", has the format, the
+keys and the bars of the game). The app reads the keys when it starts: set
+`trace=1` in `bwvr.ini`, then start the app again. With `trace=0` (the
+default) the app makes no ring, no thread and no call of the clock.
+
+**The clock.** The app reads `CLOCK_BOOTTIME` in ns (`AppTraceNow`). Wine takes
+`QueryPerformanceCounter` from the same clock (the doc of the pace, "The
+clock"), so the mod and the app share it. The take phase (`slow_frame_ms`)
+reads `CLOCK_MONOTONIC` and is not on this clock. The script checks the clock
+with the frames that both processes know.
+
+**The bars of the app** (process "app", `trace_app.cpp`, `trace_app.h`):
+
+| Row | What it has |
+| --- | --- |
+| "session thread" | `xrWaitFrame`, `xrBeginFrame (with the wait for the queue lock)`, `input slot (xrLocateViews, xrLocateSpace)` with the number of the slot, `take of the newest picture (TakePicture)` (new or not, the frame), `take of the eye pictures (CopyScreen, motion)`, `motion of the stick (MotionComp::View)` for each eye, `SubmitFrame (copies to the GPU)`, `xrEndFrame (with the wait for the queue lock)`, `EndFrame of the app (layers, copies, xrEndFrame)`. The point `frame of the session with no new picture` (the frame of the picture that stays). Two points for each new picture: `picture shown (game frame, place of the camera in the world)` with the frame and the place of the player in the world when the game drew it (x, y, z, game units), and `picture shown (head of the picture, LOCAL)` with the head of that picture (x, y, z, meters) and the number of the input slot. A jump back of the picture shows in these numbers |
+| "reader (live stream)" | `read of the ring (sr::Take)` with the bytes, and the point `game frame arrives (reader)` with the frame, its bytes and the frames that wait |
+| "play thread (renderer)" | `wait for the GPU before a play (WaitGpu)` (only a wait), `play of a batch of frames (renderer)` with the last frame and the number of frames, `copy of the picture into a slot (WriteSlot)` with the wait for a free slot |
+
+A bar under 30 us (`trace_min_us`) is not recorded. The session thread has a
+ring of 64 K events, the other threads have 16 K events.
+
+**The save.** Hold the X button and the click of the left stick of the left
+controller together for 300 ms (`trace_combo_ms`). With the default
+`button_layout=1` and `controls=0` X has no job with the right hand as the Hand,
+and the stick click has no job with the default `gesture_button`, so the chord
+has no other action. With `button_layout=0` a hold of X opens the ring. The app writes the end of the window to the head of the
+input channel, the mod writes its part (`bwvr-trace-game.json`), and a thread
+of low priority joins both parts into `trace-<time>.json` in the folder of the
+app (`files/`, the folder of `bwvr-quest.log`). Both controllers give a pulse
+(0.8, 0.15 s) when the file is written. The line `trace` of `bwvr-quest.log`
+names the file, the events of the app part, the bytes of the game part and the
+time. When the mod does not answer in 8 s, the file has no part of the game
+and the line says so. A save of the mod (a frame longer than `trace_auto_ms`,
+or the key) makes the app join the same way, and the line says "the game saved
+its part".
+
+**Take the file.** `adb pull` the file from the folder of the app (the path is
+in `bwvr-quest.log`), then `python bwvr/tools/trace/trace_report.py <file>`,
+or open it in `ui.perfetto.dev`.
+
+**Not shown yet.** Everything on the headset: the cost of the recorder on the
+session thread, the join, the pulse, the clock check, and the combination with
+the real controllers.
 
 ## The display rate
 

@@ -794,6 +794,9 @@ bool TakePicture(App* app, PictureRing::TakeFacts* facts) {
   // The slot before is free now: no layer copies from it again. The new
   // picture gives the new sources.
   app->xr.FreezeSlotSources();
+  // A picture that takes an early return of ShowPicture (a screen, no eyes)
+  // names no slot, and the slot of the picture before is free.
+  app->xr.ClearDirectSource();
   ShowPicture(app, *p);
   app->shown_last = p->last_frame;
   app->shown_play_ms = p->play_start_ms;
@@ -1207,7 +1210,13 @@ void Play(App* app, bool new_game) {
                        "whose swapchains do not fit a picture makes new ones"
                      : "The swapchains stay as they are, and a picture that does not fit "
                        "takes the old way");
-  app->xr.NewPlay(game.width, game.height);
+  // NewPlay frees sets that a play thread would write: it runs only while
+  // no play thread runs.
+  if (!app->play_running) {
+    app->xr.NewPlay(game.width, game.height);
+  } else {
+    AppLog("game         : a play thread runs, so the swapchains of the Play before stay");
+  }
   app->xr.SetFrameLoop(loop);
   if (loop) {
     StartPlayThread(app);

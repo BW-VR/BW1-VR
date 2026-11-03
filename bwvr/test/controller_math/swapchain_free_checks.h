@@ -67,6 +67,13 @@ inline void SwapchainFreeChecks() {
   // And a picture that is smaller than the set, with no atlas, needs a new set too.
   Check(sf::ReplaceDirect(true, eye_copy_math::DirectFits(2808, 2246, none, 1080, 864), 0),
         "a smaller picture with no atlas does not fit a larger set, so the slot replaces it", 1, 1);
+
+  // THE SLOT THAT A LAYER NAMES: only the slot of the newest picture.
+  Check(sf::NamedSlot(2, 2, 4) == 2, "an eye that shows the newest slot names its swapchains", sf::NamedSlot(2, 2, 4), 2);
+  Check(sf::NamedSlot(1, 2, 4) == -1, "an eye that shows an older slot names nothing of a slot", sf::NamedSlot(1, 2, 4), -1);
+  Check(sf::NamedSlot(1, -1, 4) == -1, "after a take of a picture with no slot nothing is named", sf::NamedSlot(1, -1, 4), -1);
+  Check(sf::NamedSlot(-1, -1, 4) == -1, "no slot shown, nothing named", sf::NamedSlot(-1, -1, 4), -1);
+  Check(sf::NamedSlot(4, 4, 4) == -1, "a slot number out of range names nothing", sf::NamedSlot(4, 4, 4), -1);
 }
 
 }  // namespace swapchain_free_checks

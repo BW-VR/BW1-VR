@@ -119,7 +119,8 @@ Summary:
 | `android/src/picture_ring.cpp` | The ring of the pictures of the game of the frame loop: the images of the slots, the copies of the play thread, the fences, the newest finished slot for the session |
 | `src/mod/eye_copy_math.h`, `android/src/copy_time.cpp` | The copies of the eye pictures: the part of an atlas that the layers show, the size of the swapchains of a slot (`xr_eye_direct`), the even rate (`frame_loop_hold`), and the timestamps of each copy for the time log. No Android code in the header |
 | `test/controller_math/eye_copy_checks.h` | The math checks of `eye_copy_math.h` |
-| `src/mod/swapchain_free_math.h` | Which sets of swapchains a new Play frees, and when a slot of `xr_eye_direct` replaces its swapchains (`xr_resize_free`). No Android code in the header || `test/controller_math/swapchain_free_checks.h` | The math checks of `swapchain_free_math.h` |
+| `src/mod/swapchain_free_math.h` | Which sets of swapchains a new Play frees, and when a slot of `xr_eye_direct` replaces its swapchains (`xr_resize_free`). No Android code in the header |
+| `test/controller_math/swapchain_free_checks.h` | The math checks of `swapchain_free_math.h` |
 | `android/src/frame_loop.h` | The rules of the frame loop: the slots of the ring of the pictures, the drop of a picture, the ring of the command buffers, the serials of the submits, the age of the shown picture, the queue at the GPU, the direct writes and the rect of a copy of the pixels of the CPU. No Android code |
 | `test/controller_math/frame_loop_checks.h` | The math checks of `frame_loop.h` and of the row "The headset gets each frame (no wait for the GPU)" |
 | `android/src/motion_comp.cpp` | The motion of the stick in the projection layer (`motion_comp`), and the parts of the age of a new picture for the time log |
@@ -3224,17 +3225,22 @@ app frees the sets of the old size.
   wants: the projection layer and the panel image (the render), the stereo
   screen (half of it), the screen quad (the render), and the two swapchains
   of each slot of `xr_eye_direct=1` (the size of the pictures that the slot
-  was made for). It clears the failed flags of these sets and of the cards,
-  and the eyes do not show a slot of the Play before. The next picture makes
-  each set at the new size, as at a fresh start of the app.
+  was made for). A slot whose set failed (a failed wait for an image) loses
+  its set too, so it has no image that was acquired and never waited. It
+  clears the failed flags of these sets and of the cards, and the eyes do not
+  show a slot of the Play before. The next picture makes each set at the new
+  size, as at a fresh start of the app.
 - A slot of `xr_eye_direct=1` whose swapchains do not fit a picture that
   would go straight into them (`eye_copy_math::DirectFits` is false) frees
   them in `DirectBegin` and makes two at the size of the picture. It waits
-  for the idle device with the lock of the queue, as `FreeEyes`. The slot is
-  not the shown slot, so no layer of a frame names its swapchains. The
-  runtime keeps a swapchain until the compositor is done with it. A slot
-  replaces its swapchains at most `kMostReplaces` (8) times in a Play, then
-  its pictures take the old way.
+  for the idle device with the lock of the queue, as `FreeEyes`. The session
+  names the swapchains of a slot only while that slot is the slot of its
+  newest picture (`direct_newest_`), which is a shown slot. Each take of a
+  picture clears that name first (`ClearDirectSource`), and `NamedSlot` lets
+  an eye layer read a slot set only for that slot. The ring never gives a
+  shown slot to the play thread. The runtime keeps a swapchain until the
+  compositor is done with it. A slot replaces its swapchains at most
+  `kMostReplaces` (8) times in a Play, then its pictures take the old way.
 - The app counts the swapchains that it made and did not destroy. The log
   has the count at each new Play ("xr : a new Play with a render of W by H.
   The app holds N swapchains"), after the free ("the new Play freed K sets
@@ -3246,10 +3252,9 @@ app frees the sets of the old size.
   stay: a render of another size in the same process takes the old way for
   each picture, and the projection layer can fail at the new size.
 
-**The menu button after a new render size.** A saved game that the game loads
-at its start (the test save) opens
-the Main Menu of the game, a dialog box. The
-dialog box is drawn into the panel image, and only the panel quads show it
+**The menu button after a new render size.** A saved game that the game
+loads at its start opens the Main Menu of the game, a dialog box. The dialog
+box is drawn into the panel image, and only the panel quads show it
 (`stream_layers`). The panel quads go out only in a frame with the
 projection layer. A set that stays at the old size gives no projection layer
 at the new size, so the player sees the stereo screen and no dialog box. The
@@ -3880,12 +3885,12 @@ does not show them.
   poses are the same as with the old way (`motion_comp`).
 - A picture takes the old way when it does not go into the projection
   layer (the stereo screen, the cut scene window), when it does not fit in
-  the swapchains of its slot and the slot does not replace them
-  (`xr_resize_free=0`, or the most replacements; `eye_copy_math::DirectFits`:
-  another size, or no atlas in swapchains of the shown part), and when the
+  the swapchains of its slot and the slot does not replace them (with
+  `xr_resize_free=0`, or after the most replacements), and when the
   swapchains have blue first (a blit would change the bytes of an sRGB
-  swapchain). An eye
-  that shows a slot and gets a picture of the old way waits for its
+  swapchain). `eye_copy_math::DirectFits` is false for another size, or for
+  no atlas in swapchains of the shown part. An eye that shows a slot and
+  gets a picture of the old way waits for its
   swapchain image in that frame, because the play thread can write that
   slot again. When the copy still does not happen, the frame has no
   projection layer, and the log counts it at the end of the app.

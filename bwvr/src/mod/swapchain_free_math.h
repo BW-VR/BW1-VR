@@ -66,4 +66,13 @@ inline bool ReplaceDirect(bool key, bool fits, int replaced) {
   return key && !fits && replaced >= 0 && replaced < kMostReplaces;
 }
 
+// The slot that an eye layer may read now. The session names the swapchains
+// of a slot only while that slot is the slot of the newest picture, because
+// that slot is shown, and the play thread never writes (or replaces the
+// swapchains of) a shown slot. An eye that shows another slot reads the set
+// of the old way (-1).
+inline int NamedSlot(int shown, int newest, int slots) {
+  return shown >= 0 && shown < slots && shown == newest ? shown : -1;
+}
+
 }  // namespace swapchain_free_math

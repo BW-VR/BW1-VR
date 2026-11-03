@@ -916,6 +916,7 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
   info.mipCount = 1;
   const XrResult created = xrCreateSwapchain(session_, &info, &layer->swapchain);
   if (!Ok(created, "xrCreateSwapchain")) {
+    layer->swapchain = XR_NULL_HANDLE;
     AppLog("xr           : the swapchain of %u by %u was not made%s. The app holds %d "
            "swapchains now", width, height,
            created == XR_ERROR_LIMIT_REACHED
@@ -2526,9 +2527,10 @@ void XrApp::DropSet(Screen* screen) {
   *screen = Screen();
 }
 
-// A NEW PLAY (xr_resize_free): no game runs, so the play thread does not
-// run, and the session shows no picture of a slot. A set that the render of
-// this Play does not give its size goes (swapchain_free_math::FreeAtPlay), and
+// A NEW PLAY (xr_resize_free): the play thread of the game before ended, and
+// the play thread of the new game did not start, so no thread writes a slot,
+// and the session shows no picture of a slot. A set that the render of this
+// Play does not give its size goes (swapchain_free_math::FreeAtPlay), and
 // the next picture makes it at the new size. The failed flags clear, so a
 // set that the runtime refused is tried again.
 void XrApp::NewPlay(uint32_t width, uint32_t height) {
@@ -2568,12 +2570,19 @@ void XrApp::NewPlay(uint32_t width, uint32_t height) {
   }
   for (int i = 0; i < frame_loop::kSlots; ++i) {
     DirectSet& d = direct_[i];
-    if (sf::FreeAtPlay(resize_free_, Made(d.set), d.made_width, d.made_height, sf::kDirect, width,
-                       height)) {
-      char name[40];
-      snprintf(name, sizeof(name), "the slot %d", i);
+    // A failed set that still exists comes from a failed wait for a swapchain
+    // image: an image is acquired and never waited. It goes with its
+    // swapchains, so the next picture does not acquire a second image.
+    const bool broken = resize_free_ && d.failed && Made(d.set);
+    if (broken || sf::FreeAtPlay(resize_free_, Made(d.set), d.made_width, d.made_height,
+                                 sf::kDirect, width, height)) {
+      char name[48];
+      snprintf(name, sizeof(name), broken ? "the slot %d after a fault" : "the slot %d", i);
       note(name, d.set.layer[0].width, d.set.layer[0].height);
       DropSet(&d.set);
+    }
+    if (resize_free_) {
+      d.acquired[0] = d.acquired[1] = d.waited[0] = d.waited[1] = false;
     }
     d.replaced = 0;
     if (sf::ClearFailedAtPlay(resize_free_)) d.failed = false;
@@ -2645,8 +2654,9 @@ void XrApp::SetDirectSource(int slot) {
 }
 
 const XrApp::Layer& XrApp::EyeLayer(int eye) const {
-  const int slot = shown_direct_[eye];
-  if (slot >= 0 && slot < frame_loop::kSlots && Made(direct_[slot].set)) {
+  const int slot = swapchain_free_math::NamedSlot(shown_direct_[eye], direct_newest_,
+                                                  frame_loop::kSlots);
+  if (slot >= 0 && Made(direct_[slot].set)) {
     return direct_[slot].set.layer[eye];
   }
   return eyes_.layer[eye];
@@ -2664,9 +2674,12 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
   // fit in them (a new render size in this process, or a larger atlas): the
   // slot frees them and makes two at the size of the picture, so the picture
   // does not need the swapchains of the old way at the new size.
-  // The slot is not the shown slot, so no layer of a frame names its
-  // swapchains. The runtime keeps a swapchain until the compositor is done
-  // with it. The GPU finished the copies of the slot before it was free.
+  // The session names the swapchains of a slot only while that slot is the
+  // slot of its newest picture (direct_newest_, NamedSlot), which is a shown
+  // slot, and the ring never gives a shown slot to the play thread. A frame
+  // that the session submitted before can still name the swapchains. The
+  // runtime keeps a swapchain until the compositor is done with it. The GPU
+  // finished the copies of the slot before it was free.
   if (Made(d.set)) {
     const bool fits = eye_copy_math::DirectFits(d.set.layer[0].width, d.set.layer[0].height,
                                                 atlas, width, height);

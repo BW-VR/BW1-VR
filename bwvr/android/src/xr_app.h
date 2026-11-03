@@ -249,6 +249,11 @@ class XrApp {
     screen_source_ = VK_NULL_HANDLE;
     direct_newest_ = -1;
   }
+  // The session took a new picture of the ring: the slot of the picture
+  // before is free, and the play thread can write it or replace its
+  // swapchains. No layer names a slot until SetDirectSource names the slot
+  // of this picture, so direct_newest_ is -1 or the shown slot.
+  void ClearDirectSource() { direct_newest_ = -1; }
 
   // THE RENDERER OF THE MOD IN THE SESSION (docs/android.md, "The picture
   // of the renderer in the headset"). True when the device of the runtime
@@ -283,7 +288,8 @@ class XrApp {
   bool ProjectionOn() const { return projection_on_; }
   // The two swapchains of the projection layer, width by height (the size of
   // the picture of the renderer). After one fault it gives false with no new
-  // try, and the pictures show on the stereo screen.
+  // try until the next Play (NewPlay clears the flag with xr_resize_free=1),
+  // and the pictures show on the stereo screen.
   bool MakeEyes(uint32_t width, uint32_t height);
   bool HasEyes() const { return Made(eyes_); }
   // The values of the projection layer of the newest picture (after
@@ -432,7 +438,7 @@ class XrApp {
   // flags, so the next picture makes them at the new size. A slot of
   // xr_eye_direct=1 whose swapchains do not fit a picture frees them and
   // makes two at the size of the picture (DirectBegin). 0: the sets stay as
-  // they are. NewPlay is a call of the session thread while no game runs, and
+  // they are. NewPlay is a call of the session thread while the play thread does not run, and
   // it logs the count of the swapchains that the app holds.
   void SetResizeFree(bool on) { resize_free_ = on; }
   void NewPlay(uint32_t width, uint32_t height);
@@ -553,8 +559,9 @@ class XrApp {
   // THE COPIES OF THE EYE PICTURES. eye_part_: the part of the newest
   // picture that a copy into the swapchains of the eyes takes. The sets of
   // the slots of xr_eye_direct=1: each written by the play thread alone, and
-  // read by the session after the slot is ready. The swapchain handles stay
-  // until Stop.
+  // read by the session after the slot is ready. The swapchain handles of a
+  // set stay until a new Play frees the set (NewPlay), the slot replaces it
+  // (DirectBegin), or Stop.
   bool eye_rects_ = true;
   eye_copy_math::Rect eye_part_ = {};
   bool eye_direct_ = false;

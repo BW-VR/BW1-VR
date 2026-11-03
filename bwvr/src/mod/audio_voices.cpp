@@ -639,8 +639,6 @@ void ReleaseChannel(int channel, bool tail) {
 
 // ---- The hooks on the functions of QMixer in a play -------------------------
 
-// Times one run of a part on the thread of a play with audio_play_parts. The
-// system calls count only inside the open (RVA 0xC230).
 // The def of a part in the timeline (trace_rec.h).
 const trace_events::Def* PartDef(int part) {
   static trace_events::Def defs[audio_play::kParts];
@@ -651,6 +649,8 @@ const trace_events::Def* PartDef(int part) {
   return &defs[part];
 }
 
+// Times one run of a part on the thread of a play with audio_play_parts. The
+// system calls count only inside the open (RVA 0xC230).
 struct PartTimer {
   PartTimer(int part) : part_(part), call_(t_call), start_(0) {
     if (call_ != nullptr && call_->timing &&

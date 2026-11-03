@@ -67,6 +67,7 @@
 #include "MinHook.h"
 #include "../common/bw_addresses.h"
 #include "temple_math.h"
+#include "trace_rec.h"
 
 extern void ModLog(const char* format, ...);
 // stereo.cpp: an eye pass runs, and which eye. The camera of the eye pass
@@ -746,6 +747,12 @@ void PlaceCamera(const float* position, const float* focus, bool intro,
 }
 
 void __fastcall h_UpdateCamera(const float* position, const float* focus) {
+  // The bar of the timeline: the hook is on the function, so the timers of
+  // turn_parts cannot time it. The bar holds the mod work and the game call.
+  static const trace_events::Def kTraceDef = {
+      "LH3DTech::UpdateCamera 0x00819920 (with the hook of the mod)", "game",
+      {nullptr, nullptr, nullptr, nullptr}};
+  TraceScope trace_scope(&kTraceDef);
   const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
   float still_position[3], still_focus[3];
   if (IntroCameraPose(caller, position, focus, still_position, still_focus)) {

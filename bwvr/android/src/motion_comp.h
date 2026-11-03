@@ -49,6 +49,11 @@ class MotionComp {
     return true;
   }
 
+  // What View did for the left eye in this frame, as a number for the timeline:
+  // 0 nothing yet, 1 motion_comp=0, 2 no map, 3 no difference, 4 moved, 5 the
+  // difference is over the limits (the pose stays).
+  int LastCode() const { return static_cast<int>(last_); }
+
   // The map of the newest picture (with XrApp::SetScreenView).
   void SetNewest(bool has, const input_channel::World& world);
   // An eye took the newest picture: the map of its picture.

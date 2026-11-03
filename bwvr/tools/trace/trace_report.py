@@ -13,16 +13,21 @@ The file has the process "game" (pid 1) and, from the headset, the process
      The arrival is 0 to 1 ms after the end of the write. When the two clocks
      differ, the script says so and gives the shift (--write-fixed writes a
      file with the shift applied to the game).
-  2. Each frame of the game longer than --game-ms: the --top longest bars
-     inside it, with their thread, their start in the frame and their own time
-     (the time without the bars inside them).
+  2. The --max-game longest frames of the game among those longer than
+     --game-ms: the --top longest bars inside each, with their thread, their
+     start in the frame and their own time (the time without the bars inside
+     them).
   3. Each frame of the session of the app with no new picture (the point "frame
      of the session with no new picture"): the same list, for the frame of the
      session around the point (from the end of one xrWaitFrame to the end of the
      next one).
   4. Each picture in which the place of the camera goes back against the
      direction of the pictures before (the points "picture shown"), and each
-     picture of a frame of the game that is older than the one before.
+     picture of a frame of the game that is older than the one before. With
+     each step back it prints what the motion of the stick did in that frame of
+     the session (the point "motion of the stick (state, shift of the pose)"):
+     a shift of the pose means that the motion made the jump, no shift means
+     that the picture of the game jumped.
   5. A check of the file: bars that cross each other on one thread.
 
 Only the standard library. The script does not change the file.
@@ -169,7 +174,12 @@ def game_frames(bars, points, threads, args, all_bars):
         if frames else "none"))
     long_frames = [b for b in frames if b.dur > args.game_ms * 1000.0]
     print("game: %d frames longer than %.1f ms" % (len(long_frames), args.game_ms))
-    for f in long_frames:
+    # The longest ones, printed in the order of time.
+    shown = sorted(sorted(long_frames, key=lambda b: b.dur, reverse=True)[:args.max_game],
+                   key=lambda b: b.ts)
+    if len(long_frames) > len(shown):
+        print("game: the %d longest of them follow (--max-game)" % len(shown))
+    for f in shown:
         lo, hi = f.ts, f.end
         print("  frame %s  %.2f ms  at %.3f s" % (
             int(f.args.get("frame", -1)), f.dur / 1000.0, lo / 1e6))
@@ -209,7 +219,26 @@ def session_frames(bars, points, threads, args, all_bars):
         print("  ... %d more (--max-session)" % (shown - args.max_session))
 
 
+MOTION = "motion of the stick (state, shift of the pose)"
+MOTION_STATE = {0: "nothing yet", 1: "motion_comp=0", 2: "no map", 3: "no difference",
+                4: "moved", 5: "over the limits (the pose stays)"}
+
+
+def motion_text(motion, ts):
+    """What the motion of the stick did in the frame of the session at ts."""
+    if not motion:
+        return ""
+    near = min(motion, key=lambda m: abs(m.ts - ts))
+    if abs(near.ts - ts) > 2000.0:
+        return ""
+    state = int(near.args.get("state of the left eye", 0))
+    return ". Motion of the stick in that frame: %s, shift of the pose %.2f cm (left) %.2f cm (right)" % (
+        MOTION_STATE.get(state, state), near.args.get("shift left cm", 0.0),
+        near.args.get("shift right cm", 0.0))
+
+
 def camera_back(points, args):
+    motion = sorted([p for p in points if p.pid == APP and p.name == MOTION], key=lambda p: p.ts)
     pics = sorted([p for p in points if p.pid == APP and p.name.startswith("picture shown (game frame")],
                   key=lambda p: p.ts)
     print("\napp: %d pictures shown with a place of the camera" % len(pics))
@@ -250,10 +279,11 @@ def camera_back(points, args):
         cos = sum(mean[c] * step[c] for c in range(3)) / (mm * sm)
         if cos < args.back_cos:
             back += 1
-            skip_until = i + k
+            skip_until = i + k + 1
             print("  CAMERA BACK at %.3f s: frame %d, step %.3f (%+.3f %+.3f %+.3f) against the mean "
-                  "step %.3f of the %d pictures before, cos %.2f" % (
-                      seq[i][0] / 1e6, seq[i][1], sm, step[0], step[1], step[2], mm, k, cos))
+                  "step %.3f of the %d pictures before, cos %.2f%s" % (
+                      seq[i][0] / 1e6, seq[i][1], sm, step[0], step[1], step[2], mm, k, cos,
+                      motion_text(motion, seq[i][0])))
     print("  %d pictures with an older frame, %d pictures with a step back against the steps before "
           "(--history %d, --back-cos %.2f, --min-step %.3f)" % (older, back, k, args.back_cos, args.min_step))
 
@@ -272,6 +302,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file")
     ap.add_argument("--game-ms", type=float, default=13.0, help="frames of the game longer than this (13)")
+    ap.add_argument("--max-game", type=int, default=30, help="frames of the game to print, the longest (30)")
     ap.add_argument("--top", type=int, default=10, help="bars to print for each frame (10)")
     ap.add_argument("--max-session", type=int, default=30, help="frames of the session to print (30)")
     ap.add_argument("--history", type=int, default=3, help="pictures that give the direction (3)")

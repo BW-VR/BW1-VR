@@ -1551,6 +1551,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     // THE POSES OF THE VIEWS: the poses of the picture of each eye, with the
     // difference of the place of the player since its frame (motion_comp).
     float pose_position[2][3], pose_orientation[2][4];
+    float trace_shift[2] = {0.0f, 0.0f};
     for (int eye = 0; eye < 2; ++eye) {
       const scene_stream::ViewEye& e = shown_view_[eye].eyes[eye];
       const scene_stream::ViewEye* both = shown_view_[eye].eyes;
@@ -1560,10 +1561,22 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       memcpy(pose_position[eye], e.position, sizeof(pose_position[eye]));
       memcpy(pose_orientation[eye], e.orientation, sizeof(pose_orientation[eye]));
       const int64_t trace_view = g_app_trace ? AppTraceNow() : 0;
+      const float trace_before[3] = {pose_position[eye][0], pose_position[eye][1],
+                                     pose_position[eye][2]};
       motion_.View(eye, head, pose_position[eye], pose_orientation[eye]);
       if (trace_view != 0) {
-        static const trace_events::Def kViewDef = {"motion of the stick (MotionComp::View)", "session", {"eye", nullptr, nullptr, nullptr}};
-        AppTraceBar(&kViewDef, trace_view, AppTraceNow(), static_cast<float>(eye));
+        // The shift that the motion of the stick made to the pose of this eye
+        // (cm). A jump of the picture with a shift comes from the motion, a
+        // jump with no shift comes from the game.
+        const float dx = pose_position[eye][0] - trace_before[0];
+        const float dy = pose_position[eye][1] - trace_before[1];
+        const float dz = pose_position[eye][2] - trace_before[2];
+        trace_shift[eye] = sqrtf(dx * dx + dy * dy + dz * dz) * 100.0f;
+        // A call is shorter than trace_min_us in most frames, so the point
+        // below carries the same numbers for each frame.
+        static const trace_events::Def kViewDef = {"motion of the stick (MotionComp::View)", "session", {"eye", "pose shift cm", "state of the left eye", nullptr}};
+        AppTraceBar(&kViewDef, trace_view, AppTraceNow(), static_cast<float>(eye), trace_shift[eye],
+                    eye == 0 ? static_cast<float>(motion_.LastCode()) : -1.0f);
       }
     }
     // The picture that this frame shows, for a jump back in the timeline: the
@@ -1581,6 +1594,11 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                     (both[0].position[1] + both[1].position[1]) * 0.5f,
                     (both[0].position[2] + both[1].position[2]) * 0.5f,
                     static_cast<float>(shown_view_[0].input_frame));
+      // What the motion of the stick did in this frame: the state of the left
+      // eye (MotionComp::LastCode) and the shift of the pose of each eye in cm.
+      static const trace_events::Def kMotionDef = {"motion of the stick (state, shift of the pose)", "session", {"state of the left eye", "shift left cm", "shift right cm", "game frame"}};
+      AppTracePoint(&kMotionDef, static_cast<float>(motion_.LastCode()), trace_shift[0],
+                    trace_shift[1], static_cast<float>(shown_view_[0].frame));
     }
     // One line for each new picture of the layer: the frame of the mod of its
     // values, and the difference of the place of the player.

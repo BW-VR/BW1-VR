@@ -17,14 +17,15 @@
 //                         recorded (100)
 //   trace_ring_k=N        the ring of the frame thread has N K events (128).
 //                         The other threads have 16 K events
-//   trace_keyboard=1      Ctrl Shift F11 saves (the desk run)
-//   trace_test_save_s=N   a test aid: one save N s after the first frame
+//   trace_keyboard=1      Ctrl Shift G saves, while a window of the game is in front
+//                         (the desk run)
+//   trace_test_save_s=N   a test aid: one save N s after the start of the recorder
 //
 // A save comes from the app (a button combination of the controllers, written
-// to the input channel), from the game (a long frame, the key, the test aid),
-// or from the key of the keyboard. The game writes its part next to the log
-// and the app joins the two parts. Without the app the game writes the whole
-// file.
+// to the input channel), from the game (a long frame, the test aid), or from
+// the key of the keyboard. The game writes its part beside the exe, one file
+// for each save, and the app joins the two parts. Without the app the game
+// writes the whole file.
 
 #pragma once
 

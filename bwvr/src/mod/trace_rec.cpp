@@ -10,7 +10,8 @@
 // thread only sets a flag. The saver copies the last seconds of each ring (the
 // frame thread keeps writing), makes the JSON in a buffer of 256 KB and writes
 // the file in blocks. With the input channel of the app the game writes its
-// part as a fragment (bwvr-trace-game.json) and tells the app by the head of
+// part as a fragment (bwvr-trace-game-<a or g><count>.json, one file for each
+// save) and tells the app by the head of
 // the channel. Without the app it writes a whole file, bwvr-trace-<time>.json,
 // in the game folder.
 
@@ -24,6 +25,7 @@
 #include "../common/input_channel.h"
 #include "thread_id.h"
 #include "trace_rec.h"
+#include "turn_parts.h"
 #include "xr_input.h"
 
 void ModLog(const char* format, ...);
@@ -76,6 +78,16 @@ int IniKey(const char* key, int fallback) {
   slash[1] = 0;
   strcat_s(path, MAX_PATH, "bwvr.ini");
   return static_cast<int>(GetPrivateProfileIntA("bwvr", key, fallback, path));
+}
+
+// A key pressed in another program is not for the game: GetAsyncKeyState reads
+// the keyboard of the whole system.
+bool GameInFront() {
+  const HWND window = GetForegroundWindow();
+  if (window == nullptr) return false;
+  DWORD process = 0;
+  GetWindowThreadProcessId(window, &process);
+  return process == GetCurrentProcessId();
 }
 
 int Clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -156,6 +168,21 @@ bool WritePart(Out* out, int64_t from, int64_t to, int64_t base_ns, Saved* saved
   return out->file != nullptr;
 }
 
+// Parts that an earlier run wrote and no app joined.
+void RemoveOldParts() {
+  char pattern[MAX_PATH];
+  _snprintf_s(pattern, sizeof(pattern), _TRUNCATE, "%sbwvr-trace-game-*", g_dir);
+  WIN32_FIND_DATAA found;
+  const HANDLE find = FindFirstFileA(pattern, &found);
+  if (find == INVALID_HANDLE_VALUE) return;
+  do {
+    char file[MAX_PATH];
+    _snprintf_s(file, sizeof(file), _TRUNCATE, "%s%s", g_dir, found.cFileName);
+    DeleteFileA(file);
+  } while (FindNextFileA(find, &found));
+  FindClose(find);
+}
+
 void TimeText(char* out, size_t size) {
   SYSTEMTIME t;
   GetLocalTime(&t);
@@ -173,9 +200,16 @@ void DoSave(int64_t end_ticks, const char* why, uint32_t ask) {
   char path[MAX_PATH], tmp[MAX_PATH], stamp[32];
   TimeText(stamp, sizeof(stamp));
   const bool part = channel != nullptr;
+  // The number of the part: the count of the request of the app, or the count
+  // of the saves of the game after this one.
+  const uint32_t number =
+      ask != 0 ? ask : (channel != nullptr ? ic::LoadAcquire(&channel->head.trace_game_ask) + 1 : 0);
   if (part) {
-    _snprintf_s(path, sizeof(path), _TRUNCATE, "%sbwvr-trace-game.json", g_dir);
-    _snprintf_s(tmp, sizeof(tmp), _TRUNCATE, "%sbwvr-trace-game.tmp", g_dir);
+    char name[64];
+    te::FormatPartName(name, sizeof(name), ask != 0, number, false);
+    _snprintf_s(path, sizeof(path), _TRUNCATE, "%s%s", g_dir, name);
+    te::FormatPartName(name, sizeof(name), ask != 0, number, true);
+    _snprintf_s(tmp, sizeof(tmp), _TRUNCATE, "%s%s", g_dir, name);
   } else {
     _snprintf_s(path, sizeof(path), _TRUNCATE, "%sbwvr-trace-%s.json", g_dir, stamp);
     _snprintf_s(tmp, sizeof(tmp), _TRUNCATE, "%s", path);
@@ -214,7 +248,7 @@ void DoSave(int64_t end_ticks, const char* why, uint32_t ask) {
       te::SplitNs(te::TicksToNs(end_ticks, g_freq), &lo, &hi);
       ic::StoreRelease(&channel->head.trace_game_lo, lo);
       ic::StoreRelease(&channel->head.trace_game_hi, hi);
-      ic::StoreRelease(&channel->head.trace_game_ask, channel->head.trace_game_ask + 1);
+      ic::StoreRelease(&channel->head.trace_game_ask, number);
     }
   }
   const double spent =
@@ -222,12 +256,13 @@ void DoSave(int64_t end_ticks, const char* why, uint32_t ask) {
 
   ModLog("trace        : saved (%s) the last %d s: %u events of %u threads, %zu bytes, %s%s, "
          "in %.1f ms on the saver thread. %u rings had run over%s. Since the start the "
-         "frame thread made %u calls through the import slots (Sleep, wait, lock, file) and "
-         "%u waits got a bar",
+         "frame thread made %u calls through the import slots (Sleep, wait, lock, file), "
+         "%u waits got a bar, and the timers of the game turn and of the graphics engine "
+         "read the clock for %u calls%s",
          why, g_seconds, saved.events, saved.threads, saved.bytes, part ? "the game part " : "",
-         part ? "bwvr-trace-game.json (the app joins it)" : path, spent, saved.overrun_rings,
+         path, spent, saved.overrun_rings,
          g_rec.rejected() != 0 ? ". Some threads had no ring (too many)" : "",
-         TraceWaitsCalls(), g_wait_bars);
+         TraceWaitsCalls(), g_wait_bars, TurnPartsTimedCalls(), part ? " (the app joins the part)" : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +270,7 @@ void DoSave(int64_t end_ticks, const char* why, uint32_t ask) {
 DWORD WINAPI SaverMain(LPVOID) {
   SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
   uint32_t ask_seen = 0;
+  bool ask_known = false;
   bool key_down = false;
   bool test_done = false;
   const int64_t started = TraceNow();
@@ -244,11 +280,16 @@ DWORD WINAPI SaverMain(LPVOID) {
     char why[48] = {};
     uint32_t answer = 0;
     // The request of the app: the count in the head, and the end of the window.
+    // A count in the head at the first sight is from an earlier session of the
+    // app and is no request.
     ic::File* channel = XrInputChannel();
     if (channel != nullptr) {
       if (channel->head.trace_on == 0) ic::StoreRelease(&channel->head.trace_on, 1);
       const uint32_t ask = ic::LoadAcquire(&channel->head.trace_ask);
-      if (ask != ask_seen) {
+      if (!ask_known) {
+        ask_known = true;
+        ask_seen = ask;
+      } else if (ask != ask_seen) {
         ask_seen = ask;
         const int64_t ns = te::JoinNs(ic::LoadAcquire(&channel->head.trace_ask_lo),
                                       ic::LoadAcquire(&channel->head.trace_ask_hi));
@@ -264,12 +305,12 @@ DWORD WINAPI SaverMain(LPVOID) {
       lstrcpynA(why, g_request_why, sizeof(why));
     }
     if (end == 0 && g_keyboard) {
-      const bool down = (GetAsyncKeyState(VK_F11) & 0x8000) != 0 &&
+      const bool down = GameInFront() && (GetAsyncKeyState('G') & 0x8000) != 0 &&
                         (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                         (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
       if (down && !key_down) {
         end = TraceNow();
-        _snprintf_s(why, sizeof(why), _TRUNCATE, "the key Ctrl Shift F11");
+        _snprintf_s(why, sizeof(why), _TRUNCATE, "the key Ctrl Shift G");
       }
       key_down = down;
     }
@@ -316,6 +357,7 @@ void TraceInstall() {
   }
   slash[1] = 0;
   lstrcpynA(g_dir, path, MAX_PATH);
+  RemoveOldParts();
   g_rec.Init(g_freq, static_cast<int64_t>(g_min_us) * g_freq / 1000000, 16384);
   g_frame_tid = ThisThreadId();
   g_rec.Name(g_frame_tid, "frame thread", 1, static_cast<uint32_t>(g_ring_k) * 1024u);
@@ -329,7 +371,7 @@ void TraceInstall() {
          "under %d us are not kept, waits under %d us are not kept. A save comes from the app "
          "(the button combination), after a frame longer than %d ms (at most one a minute)%s%s",
          g_ring_k, sizeof(te::Event), g_seconds, g_min_us, g_wait_us, g_auto_ms,
-         g_keyboard ? ", and from the key Ctrl Shift F11" : "",
+         g_keyboard ? ", and from the key Ctrl Shift G" : "",
          g_test_save_s > 0 ? ", and once by trace_test_save_s" : "");
 }
 

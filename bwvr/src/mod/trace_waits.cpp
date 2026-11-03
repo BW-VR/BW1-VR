@@ -1,7 +1,9 @@
 // THE WAITS OF THE FRAME THREAD IN THE TIMELINE (trace, trace_rec.h). The game
-// calls Sleep, WaitForSingleObject, EnterCriticalSection, ReadFile and
-// CreateFileA through the import table of runblack.exe. With trace=1 the mod
-// puts a function of its own in each of these import slots. The function times
+// calls Sleep, SleepEx, WaitForSingleObject, WaitForSingleObjectEx,
+// WaitForMultipleObjects, EnterCriticalSection, ReadFile and CreateFileA
+// through the import table of runblack.exe (a slot that the exe does not use
+// is not changed). With trace=1 the mod puts a function of its own in each of
+// these import slots. The function times
 // the call and gives a bar when the calling thread is the frame thread and the
 // call took trace_wait_us or more. It then calls the function that the slot
 // had before (the system, or a hook of another patch).

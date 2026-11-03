@@ -1,8 +1,8 @@
 // THE TIMELINE OF THE HEADSET APP (trace_app.h, src/common/trace_events.h).
 //
 // The join: the worker thread writes the part of the app into the file
-// trace-<time>.json, then the part of the game (bwvr-trace-game.json, which
-// the mod wrote), then the end of the file. Both parts have their events in
+// trace-<time>.json, then the part of the game (bwvr-trace-game-<kind><count>.json,
+// which the mod wrote for this save), then the end of the file. Both parts have their events in
 // microseconds from the same start (the end of the window less trace_seconds),
 // on the clock CLOCK_BOOTTIME. Perfetto shows two processes, "game" and "app".
 
@@ -44,7 +44,8 @@ std::atomic<ic::File*> g_channel{nullptr};
 
 struct Job {
   bool from_app = false;  // the combination: the game must answer with trace_done == ask
-  uint32_t ask = 0;
+  uint32_t ask = 0;       // the count of the request (from_app)
+  uint32_t game_count = 0;  // the count of the saves of the game (not from_app)
   int64_t end_ns = 0;
 };
 constexpr int kJobs = 8;
@@ -164,13 +165,15 @@ void DoJob(const Job& job) {
   WritePart(&out, from_ns, job.end_ns, &events, &threads, &overrun);
 
   // The part of the game. For a save of the app the mod answers in the head of
-  // the channel; for a save of the game it wrote its part before it counted.
+  // the channel. For a save of the game it wrote its part before it counted.
   bool game_ok = true;
   const char* game_note = "";
   if (job.from_app && channel != nullptr) {
     game_ok = false;
     for (int waited = 0; waited < 8000; waited += 20) {
-      if (ic::LoadAcquire(&channel->head.trace_done) == job.ask) {
+      // The game answers the newest request, so a done count above ours means
+      // that it skipped our request and has no part for it.
+      if (static_cast<int32_t>(ic::LoadAcquire(&channel->head.trace_done) - job.ask) >= 0) {
         game_ok = true;
         break;
       }
@@ -183,7 +186,12 @@ void DoJob(const Job& job) {
   }
   size_t game_bytes = 0;
   if (game_ok) {
-    const std::string game_path = g_game + "/bwvr-trace-game.json";
+    // The part of this job by name: another save close to this one has its own
+    // file. The app deletes the file after the join.
+    char part_name[64];
+    te::FormatPartName(part_name, sizeof(part_name), job.from_app,
+                       job.from_app ? job.ask : job.game_count, false);
+    const std::string game_path = g_game + "/" + part_name;
     FILE* gf = fopen(game_path.c_str(), "rb");
     if (gf != nullptr) {
       out.Text(",\n", 2);
@@ -194,6 +202,7 @@ void DoJob(const Job& job) {
         game_bytes += n;
       }
       fclose(gf);
+      remove(game_path.c_str());
     } else {
       game_note = " (the game part is not there)";
     }
@@ -311,6 +320,7 @@ bool AppTraceSession(const ic::SlotData& slot, ic::File* channel) {
       g_game_ask_seen = g;
       Job job;
       job.from_app = false;
+      job.game_count = g;
       job.end_ns = te::JoinNs(ic::LoadAcquire(&channel->head.trace_game_lo),
                               ic::LoadAcquire(&channel->head.trace_game_hi));
       if (job.end_ns <= 0 || job.end_ns > now) job.end_ns = now;

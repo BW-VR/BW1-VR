@@ -103,6 +103,7 @@
 #include "haptics.h"
 #include "throw_math.h"
 #include "throw_physics.h"
+#include "trace_rec.h"
 
 extern void ModLog(const char* format, ...);
 // controllers.cpp: the count of the frames.
@@ -2200,6 +2201,11 @@ void __cdecl h_DrawAll() {
   PollSlowKeys();
   DrawFlights();
   CatchFrame();
+  // The bar of the timeline for the call of the game: the hook is on the
+  // function, so the timers of turn_parts cannot time it.
+  static const trace_events::Def kTraceDef = {"PhysicsObject::DrawAll 0x00646DE0", "game",
+                                              {nullptr, nullptr, nullptr, nullptr}};
+  TraceScope trace_scope(&kTraceDef);
   o_DrawAll();
 }
 

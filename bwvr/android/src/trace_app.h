@@ -16,10 +16,10 @@
 // A SAVE has three sources: the combination (the app asks the game through the
 // head of the input channel), a long frame or the key of the game (the game
 // counts a save in the head), and nothing else. The app writes its part, waits
-// for the part of the game (bwvr-trace-game.json in the game folder), and
-// joins both into trace-<time>.json in the folder of the app. A thread of low
-// priority does the work. A short pulse of both controllers says that the
-// file is written.
+// for the part of the game (bwvr-trace-game-<kind><count>.json in the game
+// folder, one file for each save), joins both into trace-<time>.json in the
+// folder of the app, and deletes the part. A thread of low priority does the
+// work. A short pulse of both controllers says that the file is written.
 #pragma once
 
 #include <stdint.h>

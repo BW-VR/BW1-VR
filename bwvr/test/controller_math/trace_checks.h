@@ -9,8 +9,10 @@
 
 #include <stdlib.h>
 
+#include <atomic>
 #include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../../src/common/trace_events.h"
@@ -168,7 +170,7 @@ inline void RingChecks() {
   Check(rec.Count() == 1, "one ring after the first thread", rec.Count(), 1);
   const te::Ring* r = rec.At(0);
   Check(r->head == 11 && std::string(r->name) == "frame",
-        "10 bars and a point, the short bar is not kept; the ring has its name", r->head, 11);
+        "10 bars and a point (the short bar is not kept), and the ring has its name", r->head, 11);
 
   std::vector<te::Event> out(1024);
   bool overrun = false;
@@ -240,6 +242,191 @@ inline void RingChecks() {
   big.Reset();
   sec.Reset();
   rec.Reset();
+}
+
+// The name of the file of the part of the game: one file for each save.
+inline void PartNameChecks() {
+  printf("\nThe timeline: the name of the part of the game\n");
+  char a[64], b[64], c[64], d[64];
+  const size_t na = te::FormatPartName(a, sizeof(a), true, 5, false);
+  const size_t nb = te::FormatPartName(b, sizeof(b), false, 5, false);
+  const size_t nc = te::FormatPartName(c, sizeof(c), true, 6, false);
+  const size_t nd = te::FormatPartName(d, sizeof(d), true, 5, true);
+  Check(na > 0 && std::string(a) == "bwvr-trace-game-a5.json",
+        "the part for the request 5 of the app is bwvr-trace-game-a5.json", static_cast<double>(na), 1);
+  Check(nb > 0 && std::string(b) == "bwvr-trace-game-g5.json" && std::string(a) != std::string(b),
+        "the part for the save 5 of the game has another name than the request 5 of the app", 0, 0);
+  Check(nc > 0 && std::string(c) != std::string(a),
+        "two saves close together (request 5 and request 6) have two names", 0, 0);
+  Check(nd > 0 && std::string(d) == "bwvr-trace-game-a5.tmp",
+        "the file that is being written has the suffix tmp", 0, 0);
+  char tiny[10];
+  Check(te::FormatPartName(tiny, sizeof(tiny), true, 5, false) == 0,
+        "a buffer that is too small gives 0", 0, 0);
+  // The count of a request counts up one by one, so the names never repeat.
+  bool repeat = false;
+  std::string last;
+  for (uint32_t ask = 1; ask <= 200; ++ask) {
+    char name[64];
+    te::FormatPartName(name, sizeof(name), true, ask, false);
+    if (name == last) repeat = true;
+    last = name;
+  }
+  Check(!repeat, "the names of 200 requests in a row differ", 0, 0);
+}
+
+// CopyWindow while the writer keeps writing: the oldest events of a full ring
+// are overwritten during the copy and must not be in the result.
+inline void MovedHeadChecks() {
+  printf("\nThe timeline: a copy of the window while the head moves\n");
+  static const te::Def d = {"x", "t", {"i", nullptr, nullptr, nullptr}};
+  te::Recorder rec;
+  rec.Init(1000000, 0, 1024);
+  rec.Name(5, "x", 0, 1024);
+  // 2000 events into a ring of 1024. The value of an event is its index.
+  for (int i = 0; i < 2000; ++i) rec.Bar(5, &d, i * 10, i * 10 + 5, static_cast<float>(i));
+  const te::Ring* r = rec.At(0);
+  std::vector<te::Event> out(4096);
+  bool overrun = false;
+
+  // A head that does not move: the whole readable span.
+  uint32_t n = te::CopyWindow(*r, 0, 100000000, out.data(), 4096, &overrun);
+  Check(n == 1024 - te::kMargin && overrun, "a quiet writer: the ring less the margin, overrun", n,
+        1024 - te::kMargin);
+
+  // The writer pushes 300 events after the first chunk was read.
+  struct Writer {
+    te::Recorder* rec;
+    int pushed = 0;
+    int count = 0;
+    void operator()(uint32_t) {
+      if (pushed != 0) return;
+      static const te::Def def = {"x", "t", {"i", nullptr, nullptr, nullptr}};
+      for (int i = 0; i < count; ++i) {
+        rec->Bar(5, &def, (2000 + i) * 10, (2000 + i) * 10 + 5, static_cast<float>(2000 + i));
+      }
+      pushed = count;
+    }
+  };
+  Writer writer;
+  writer.rec = &rec;
+  writer.count = 300;
+  n = te::CopyWindowHooked(*r, 0, 100000000, out.data(), 4096, &overrun, writer);
+  const uint32_t head_after = r->head;
+  // Every event that the copy keeps must be at most capacity - kMargin events
+  // below the head of the end of the copy, so the writer did not reach it.
+  const float oldest_safe = static_cast<float>(head_after - (1024 - te::kMargin));
+  bool all_safe = n > 0;
+  bool in_order = true;
+  for (uint32_t k = 0; k < n; ++k) {
+    if (out[k].v[0] < oldest_safe) all_safe = false;
+    if (k > 0 && out[k].v[0] != out[k - 1].v[0] + 1.0f) in_order = false;
+  }
+  Check(head_after == 2300, "the writer pushed 300 events during the copy", head_after, 2300);
+  Check(all_safe, "no event below the margin of the new head is in the copy", n, 0);
+  Check(in_order && out[n - 1].v[0] == 1999.0f,
+        "the events are whole and in order up to the newest one that the copy saw", out[n - 1].v[0],
+        1999);
+  // The copy dropped exactly the 300 events that the writer came over.
+  Check(n == 1024 - te::kMargin - 300 && overrun,
+        "the copy lost the 300 oldest events and says overrun", n, 1024 - te::kMargin - 300);
+
+  // A writer that comes over the whole ring: nothing safe is left.
+  te::Recorder fast;
+  fast.Init(1000000, 0, 1024);
+  fast.Name(6, "y", 0, 1024);
+  for (int i = 0; i < 2000; ++i) fast.Bar(6, &d, i * 10, i * 10 + 5, static_cast<float>(i));
+  struct Flood {
+    te::Recorder* rec;
+    bool done = false;
+    void operator()(uint32_t) {
+      if (done) return;
+      done = true;
+      static const te::Def def = {"x", "t", {"i", nullptr, nullptr, nullptr}};
+      for (int i = 0; i < 5000; ++i) {
+        rec->Bar(6, &def, (2000 + i) * 10, (2000 + i) * 10 + 5, static_cast<float>(2000 + i));
+      }
+    }
+  };
+  Flood flood;
+  flood.rec = &fast;
+  n = te::CopyWindowHooked(*fast.At(0), 0, 100000000, out.data(), 4096, &overrun, flood);
+  Check(n == 0 && overrun, "a writer that ran over the whole ring gives an empty copy and overrun",
+        n, 0);
+
+  // A ring that is not full: the writer cannot reach what the copy read.
+  te::Recorder part;
+  part.Init(1000000, 0, 1024);
+  part.Name(7, "z", 0, 1024);
+  for (int i = 0; i < 500; ++i) part.Bar(7, &d, i * 10, i * 10 + 5, static_cast<float>(i));
+  struct Few {
+    te::Recorder* rec;
+    bool done = false;
+    void operator()(uint32_t) {
+      if (done) return;
+      done = true;
+      static const te::Def def = {"x", "t", {"i", nullptr, nullptr, nullptr}};
+      for (int i = 0; i < 100; ++i) rec->Bar(7, &def, 9000 + i, 9001 + i, 1.0f);
+    }
+  };
+  Few few;
+  few.rec = &part;
+  n = te::CopyWindowHooked(*part.At(0), 0, 5000, out.data(), 4096, &overrun, few);
+  Check(n == 500 && !overrun, "a ring that is not full keeps all its events", n, 500);
+  rec.Reset();
+  fast.Reset();
+  part.Reset();
+}
+
+// Claim: the ring count never passes kMaxRings, also when threads claim at
+// the same moment.
+inline void ClaimBoundChecks() {
+  printf("\nThe timeline: the bound of the table of rings\n");
+  static const te::Def d = {"x", "t", {nullptr, nullptr, nullptr, nullptr}};
+  te::Recorder rec;
+  rec.Init(1000000, 0, 1024);
+  // The count as a race can leave it: more than kMaxRings.
+  rec.SetCountForTest(te::kMaxRings + 5);
+  Check(rec.Count() == te::kMaxRings, "a count past kMaxRings reads as kMaxRings", rec.Count(),
+        te::kMaxRings);
+  rec.Reset();
+  rec.Init(1000000, 0, 1024);
+  // The last free index goes to the first thread. The next thread has no ring.
+  rec.SetCountForTest(te::kMaxRings - 1);
+  rec.Point(1001, &d, 1);
+  rec.Point(1002, &d, 1);
+  Check(rec.Count() == te::kMaxRings && rec.At(te::kMaxRings - 1) != nullptr &&
+            rec.At(te::kMaxRings - 1)->tid == 1001,
+        "the last free index goes to the first thread", rec.Count(), te::kMaxRings);
+  Check(rec.rejected() >= 1, "the next thread is rejected", rec.rejected(), 1);
+  rec.Reset();
+
+  // 48 threads claim at the same moment, 20 rounds.
+  int worst = 0;
+  bool all_whole = true;
+  for (int round = 0; round < 20; ++round) {
+    te::Recorder r;
+    r.Init(1000000, 0, 1024);
+    std::atomic<bool> go{false};
+    std::vector<std::thread> threads;
+    for (uint32_t t = 0; t < 48; ++t) {
+      threads.emplace_back([&r, &go, t] {
+        while (!go.load()) {
+        }
+        r.Point(5000 + t * 977, &d, static_cast<int64_t>(t));
+      });
+    }
+    go.store(true);
+    for (std::thread& th : threads) th.join();
+    if (r.Count() > worst) worst = r.Count();
+    for (int i = 0; i < r.Count(); ++i) {
+      if (r.At(i) == nullptr || r.At(i)->events == nullptr) all_whole = false;
+    }
+    r.Reset();
+  }
+  Check(worst <= te::kMaxRings, "48 threads at once: the count stays within kMaxRings", worst,
+        te::kMaxRings);
+  Check(all_whole, "48 threads at once: each ring below the count is there", 0, 0);
 }
 
 inline void TriggerChecks() {
@@ -321,6 +508,7 @@ inline void SampleFile() {
   static const te::Def wait_def = {"xrWaitFrame", "xr", {nullptr, nullptr, nullptr, nullptr}};
   static const te::Def arrive_def = {"game frame arrives (reader)", "reader", {"frame", "bytes", "queue", nullptr}};
   static const te::Def nopic_def = {"frame of the session with no new picture", "session", {"shown frame", nullptr, nullptr, nullptr}};
+  static const te::Def motion_def = {"motion of the stick (state, shift of the pose)", "session", {"state of the left eye", "shift left cm", "shift right cm", "game frame"}};
   static const te::Def shown_def = {"picture shown (game frame, place of the camera in the world)", "session", {"frame", "world x", "world y", "world z"}};
   const int64_t boot_ns = 364000000000000LL;
   const int64_t gf = 10000000, af = 1000000000;
@@ -364,6 +552,9 @@ inline void SampleFile() {
       shown_game = game_frame;
       x += game_frame == 90 ? -0.9f : 0.3f;
       app.Point(200, &shown_def, b + 3000000, static_cast<float>(game_frame), x, 0.0f, 100.0f);
+      // The motion of the stick does nothing in the sample: the jump comes from
+      // the picture of the game.
+      app.Point(200, &motion_def, b + 3000100, 3.0f, 0.0f, 0.0f, static_cast<float>(game_frame));
     } else if (i > 5) {
       app.Point(200, &nopic_def, b + 3000000, static_cast<float>(shown_game));
     }
@@ -418,6 +609,9 @@ inline void TraceChecks() {
   FormatChecks();
   ClockChecks();
   RingChecks();
+  PartNameChecks();
+  MovedHeadChecks();
+  ClaimBoundChecks();
   TriggerChecks();
   CostChecks();
   SampleFile();

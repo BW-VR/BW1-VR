@@ -95,7 +95,9 @@ struct Def {
 // for the timeline. The names are those of the symbol file of the decompilation
 // project that the mod uses for its names (docs/address-map.md). GGame::
 // Process3dEngine has its own bars (stereo.cpp), and LH3DRender::FinishFrame
-// has its own bar in h_FinishFrame (mod_main.cpp). The parts that the game turn
+// has its own bar in h_FinishFrame (mod_main.cpp). LH3DTech::UpdateCamera
+// (head_camera.cpp) and PhysicsObject::DrawAll (throw_physics.cpp) are under a
+// hook of the mod that the stubs cannot time, so their hooks give the bars. The parts that the game turn
 // also calls (PhysicsObject::GameTurnUpdate, fn_007DEE00) have a timer in kDefs.
 const Def kGraphicsDefs[] = {
     // The callees of ProcessGraphicsEngine.
@@ -104,7 +106,7 @@ const Def kGraphicsDefs[] = {
     {0x005CEAB0, "GInterface::PostDrawProcess", kAll},
     {0x005C5EB0, "HelpSystem::PostDrawProcess", kAll},
     // Their callees.
-    {0x00442720, "Zoomer::Update", kAll}, {0x00819920, "LH3DTech::UpdateCamera", kAll},
+    {0x00442720, "Zoomer::Update", kAll},
     {0x00803090, "LH3DIsland::GetAltitude", kAll},
     {0x00442EF0, "GCamera::UpdateGameThingWithPosData", kAll},
     {0x005D0610, "GInterface::UpdateHandRenderCollide", kAll},
@@ -120,7 +122,7 @@ const Def kGraphicsDefs[] = {
     {0x006CA6E0, "PSysLightMaps::AddDrawing", kAll},
     {0x00871F00, "LH3DLandscape::TextureUpdateThread", kAll},
     {0x005E42E0, "GLandscape::Draw", kAll}, {0x0048DD70, "LH3DCreature::DrawFightSparkles", kAll},
-    {0x005D9310, "GInterface::DrawAllLeashes", kAll}, {0x00646DE0, "PhysicsObject::DrawAll", kAll},
+    {0x005D9310, "GInterface::DrawAllLeashes", kAll},
     {0x0046E490, "CHand::UpdateHeldObject", kAll}, {0x0046D100, "CHand::AddDrawing", kAll},
     {0x00518640, "GInterface::Draw", kAll}, {0x00845D00, "UpdateLiquidParticles", kAll},
     {0x00845C50, "DrawLiquidParticles", kAll}, {0x005533B0, "GGame::Draw", kAll},
@@ -202,6 +204,7 @@ struct Timer {
   uint32_t at = 0;          // the code that has the hook: shown, or its trampoline
   void* original = nullptr; // the trampoline that the stub jumps to
   int filter = kAll;
+  bool graphics_only = false;  // a callee of ProcessGraphicsEngine: counts only there
   char name[48] = {};
 };
 // The bar of a part in the timeline: the name and the address.
@@ -220,6 +223,7 @@ DWORD g_thread = 0;  // the frame thread
 bool g_in_turn = false;
 bool g_in_graphics = false;  // in the call of GGame::ProcessGraphicsEngine (trace=1)
 bool g_turn_lines = false;   // turn_parts=1: the lines of the log
+volatile LONG g_timed_calls = 0;  // the calls that got a clock read, for the log of a save
 uint64_t g_seen_in_turn = 0;       // calls of a stub in a game turn on the frame thread
 uint64_t g_seen_outside = 0;       // calls of a stub on the frame thread outside a game turn
 uint64_t g_seen_other_thread = 0;  // calls of a stub on another thread
@@ -257,16 +261,19 @@ void __cdecl NoReturn();
 // arguments of the function after it. `self` is ecx at the call.
 extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint32_t self) {
   const Timer& t = g_timers[id];
+  const bool frame_thread = ThisThreadId() == g_thread;
   // The counts of the other threads are not exact (no lock). They are a hint.
-  if (ThisThreadId() != g_thread) {
+  if (!frame_thread) {
     ++g_seen_other_thread;
   } else if (!g_in_turn) {
     ++g_seen_outside;
   } else {
     ++g_seen_in_turn;
   }
-  if ((g_in_turn || g_in_graphics) && ThisThreadId() == g_thread &&
-      tp::Timed(true, true, g_stack.nest[id], g_stack.depth)) {
+  // A timer of the graphics engine counts only in its call: the helpers that
+  // the game turn calls many times must not pay for two clock reads a call.
+  const bool counts = t.graphics_only ? g_in_graphics : (g_in_turn || g_in_graphics);
+  if (counts && frame_thread && tp::Timed(true, true, g_stack.nest[id], g_stack.depth)) {
     const bool take = t.filter != kMadeAnimation || SlotEmpty(self, ret_slot[1], ret_slot[2]);
     const int64_t now = Now();
     if (take &&
@@ -274,6 +281,7 @@ extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint
                      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ret_slot)))) {
       *ret_slot = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&ExitThunk));
       if (static_cast<int>(id) == g_audio_turn_id) AudioWatchTurnBegin(now);
+      if (g_trace) ++g_timed_calls;
     }
   }
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(t.original));
@@ -545,6 +553,7 @@ static void InstallNow() {
   if (g_trace) {
     for (int i = 0; i < kGraphicsDefCount; ++i) {
       if (Add(kGraphicsDefs[i].address, kGraphicsDefs[i].name, kGraphicsDefs[i].filter)) {
+        g_timers[g_count - 1].graphics_only = true;
         ++in;
         ++graphics_in;
       }
@@ -653,6 +662,8 @@ void TurnPartsGraphicsEnd() {
   g_lost += g_stack.lost;
   g_stack = wp::Stack();
 }
+
+uint32_t TurnPartsTimedCalls() { return static_cast<uint32_t>(g_timed_calls); }
 
 int TurnPartsFrameText(char* out, size_t size) {
   if (!g_turn_parts || !g_turn_lines) {

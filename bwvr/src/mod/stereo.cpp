@@ -110,9 +110,9 @@ void LogDirect3DModules(const char* when);
 // walk.
 void StallTestWalk();
 
-extern // vk_stream.cpp: the frame of the stream of this present.
+extern void ModLog(const char* format, ...);
+// vk_stream.cpp: the frame of the stream of this present.
 uint64_t VkStreamPresentFrame();
-void ModLog(const char* format, ...);
 
 const void* FrameSourceGrab(int* pitch);
 const void* FrameSourceBegin(int* pitch);

@@ -79,7 +79,10 @@ inline void AudioPlayChecks() {
   // THE PARTS. Each hooked part has an RVA and 8 bytes. A part with no hook
   // (the test of the pointer) has RVA 0 and never matches.
   int hooked = 0;
-  bool unique = true, ordered_names = true;
+  bool unique = true, ordered_names = true, sys_no_rva = true;
+  for (int i = ap::kSysFirst; i < ap::kParts; ++i) {
+    if (ap::kPartInfo[i].rva != 0) sys_no_rva = false;
+  }
   for (int i = 0; i < ap::kParts; ++i) {
     if (ap::kPartInfo[i].rva != 0) ++hooked;
     if (ap::kPartInfo[i].name == nullptr || ap::kPartInfo[i].name[0] == 0) ordered_names = false;
@@ -87,7 +90,11 @@ inline void AudioPlayChecks() {
       if (ap::kPartInfo[i].rva != 0 && ap::kPartInfo[i].rva == ap::kPartInfo[j].rva) unique = false;
     }
   }
-  Check(hooked == ap::kParts - 1, "all parts but the pointer test have a hook", hooked, ap::kParts - 1);
+  Check(hooked == ap::kPartCodeEnd - 1, "all code parts but the pointer test have a hook", hooked, ap::kPartCodeEnd - 1);
+  Check(sys_no_rva && ap::kSysFirst == ap::kPartCodeEnd, "the system parts follow the code parts and have no RVA", sys_no_rva ? 1 : 0, 1);
+  Check(ap::IsSysPart(ap::kSysEnter) && ap::IsSysPart(ap::kSysAcmPrepare) && !ap::IsSysPart(ap::kPartLock) &&
+            !ap::IsSysPart(ap::kParts) && !ap::IsSysPart(-1),
+        "IsSysPart marks the system parts only", ap::IsSysPart(ap::kPartLock) ? 1 : 0, 0);
   Check(unique && ordered_names, "the RVAs are all different and each part has a name", unique ? 1 : 0, 1);
   Check(ap::kPartInfo[ap::kPartSort].rva == 0x67E0 && ap::kPartInfo[ap::kPartPump].rva == 0xA310,
         "the sort is at 0x67E0 and the pump at 0xA310", ap::kPartInfo[ap::kPartPump].rva, 0xA310);
@@ -124,6 +131,48 @@ inline void AudioPlayChecks() {
         "a stat of plays counts the plays, the runs and the time", static_cast<double>(part.runs), 3);
   play.Clear();
   Check(play.ticks[ap::kPartSort] == 0 && play.runs[ap::kPartSort] == 0, "Clear empties a play", 0, 0);
+  play.Add(ap::kSysAcmOpen, 50);
+  Check(play.runs[ap::kSysAcmOpen] == 1 && play.ticks[ap::kSysAcmOpen] == 50,
+        "a system part is a part of a play too", static_cast<double>(play.ticks[ap::kSysAcmOpen]), 50);
+
+  // THE PARTS BELOW THE OPEN. The RVAs are those of the known QMixer.dll.
+  Check(ap::kPartInfo[ap::kPartOpen].rva == 0xC230 && ap::kPartInfo[ap::kPartLoader].rva == 0x2B670 &&
+            ap::kPartInfo[ap::kPartFormat].rva == 0x265D0 && ap::kPartInfo[ap::kPartLock].rva == 0xA2D0,
+        "the open, the loader, the format test and the lock have the RVAs of the decompile", ap::kPartInfo[ap::kPartFormat].rva, 0x265D0);
+  uint8_t fmt[12];
+  memset(fmt, 0x90, sizeof(fmt));
+  memcpy(fmt, ap::kPartInfo[ap::kPartFormat].bytes, 8);
+  Check(ap::PartMatches(ap::kPartFormat, fmt, sizeof(fmt)) && !ap::PartMatches(ap::kPartLoader, fmt, sizeof(fmt)),
+        "the bytes of the format test match it only", 1, 1);
+
+  // THE FORMAT TEST (RVA 0x265D0). PCM and float open at once. The three ADPCM
+  // style tags go to the loader until the compression manager has loaded. Each
+  // other tag, and a source with no format, go to the loader.
+  Check(!ap::FormatWantsLoader(true, ap::kTagPcm, false) && !ap::FormatWantsLoader(true, ap::kTagFloat, true),
+        "PCM and float open at once", 0, 0);
+  Check(ap::FormatWantsLoader(true, ap::kTagImaAdpcm, false) && !ap::FormatWantsLoader(true, ap::kTagImaAdpcm, true),
+        "IMA ADPCM goes to the loader until the compression manager is loaded", 1, 1);
+  Check(ap::FormatWantsLoader(true, ap::kTagMsAdpcm, false) && !ap::FormatWantsLoader(true, ap::kTagMsAdpcm, true) &&
+            ap::FormatWantsLoader(true, ap::kTagAlaw, false) && !ap::FormatWantsLoader(true, ap::kTagAlaw, true),
+        "MS ADPCM and A-law follow the same rule", 1, 1);
+  Check(ap::FormatWantsLoader(true, 0x55, true) && ap::FormatWantsLoader(true, 0x161, false),
+        "MP3 and WMA always go to the loader", 1, 1);
+  Check(ap::FormatWantsLoader(false, 0, true), "a source with no format goes to the loader", 1, 1);
+  Check(ap::OpensAtOnce(false, true, 0x55, false), "a session with no loader thread opens at once", 1, 1);
+  Check(!ap::OpensAtOnce(true, true, 0x55, false) && ap::OpensAtOnce(true, true, ap::kTagPcm, false),
+        "with a loader thread the format decides", 1, 1);
+
+  // audio_open_loader. 0 changes nothing. 1 sends the atmosphere. 2 sends each.
+  Check(!ap::ForceLoader(0, true) && !ap::ForceLoader(0, false), "mode 0 forces no open", 0, 0);
+  Check(ap::ForceLoader(1, true) && !ap::ForceLoader(1, false), "mode 1 forces the open of the atmosphere only", 1, 1);
+  Check(ap::ForceLoader(2, false) && ap::ForceLoader(2, true), "mode 2 forces each open", 1, 1);
+  Check(ap::ClampOpenMode(-3) == 0 && ap::ClampOpenMode(1) == 1 && ap::ClampOpenMode(7) == 2,
+        "an open mode is clamped to 0 to 2", ap::ClampOpenMode(7), 2);
+  Check(ap::NextOpenMode(0) == 1 && ap::NextOpenMode(1) == 2 && ap::NextOpenMode(2) == 0 && ap::NextOpenMode(9) == 0,
+        "the test key steps 0, 1, 2 and back", ap::NextOpenMode(2), 0);
+  Check(strcmp(ap::TagName(0x11), "IMA ADPCM") == 0 && strcmp(ap::TagName(1), "PCM") == 0 &&
+            strcmp(ap::TagName(0x7777), "other") == 0,
+        "the names of the format tags", 1, 1);
 }
 
 }  // namespace audio_play_checks

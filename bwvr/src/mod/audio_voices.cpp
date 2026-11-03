@@ -56,6 +56,17 @@
 // audio_play_fix does the same with the byte at +5 of the session, which the
 // timer thread reads too. audio_play_parts times the functions of the call.
 //
+// THE OPEN IN QSWaveMixPlayEx. In the same call QMixer opens the wave of the
+// play (RVA 0xC230). A wave of the format PCM or float opens at once, on the
+// thread of the caller. The formats MS ADPCM, A-law and IMA ADPCM open at once
+// too, as soon as the audio compression manager has loaded once. Each other
+// format goes to the loader thread of the session. audio_play_parts times
+// each function below the open, the system calls of QMixer in it, and the
+// lock wait of the timer pump, and logs the format of the first opens.
+// audio_open_loader sends the open of a sound of the atmosphere to the loader
+// thread. The sound then starts when the loader has opened the wave, and the
+// frame thread does not wait for the open.
+//
 // Ini: audio_mixer (default 1, 0 is QMixer's own panning), audio_height,
 // audio_near, audio_far, audio_bed, audio_atmos_mixer (each default 1),
 // audio_height_pct (100, the strength of the height band, 0 to 200),
@@ -63,8 +74,10 @@
 // audio_play_now (default 0, the modes of audio_play_math.h: 0 is the work of
 // QMixer in the call, as in the game), audio_play_fix (default 0, the byte of
 // the session, the same modes), audio_play_parts (default 0, test only: the
-// time of the functions of QMixer in a play).
-// Test only: audio_play_fix_test, audio_play_now_test,
+// time of the functions of QMixer in a play),
+// audio_open_loader (default 0, the open as QMixer has it; 1 sends the open of
+// a sound of the atmosphere to the loader thread, 2 each open).
+// Test only: audio_play_fix_test, audio_play_now_test, audio_open_loader_test,
 // audio_test_voice, audio_test_path, audio_test_step_ms, audio_test_solo.
 
 #include <windows.h>
@@ -287,11 +300,25 @@ DWORD g_play_report_at = 0;
 // audio_play_now. The play in progress on this thread. A hook of QMixer reads
 // it, so the other threads (the timer thread) always run in full.
 struct PlayCall {
-  bool defer;    // the sort and the pump return at once
-  bool timing;   // audio_play_parts
+  bool defer;         // the sort and the pump return at once
+  bool timing;        // audio_play_parts
+  bool atmosphere;    // a sound of the atmosphere
+  bool force_loader;  // audio_open_loader: the open goes to the loader thread
+  bool in_open;       // inside the open of the wave
+  bool forced;        // the format test was changed in this call
+  int fmt_result;     // the answer of the format test, -1 for none
+  const void* wave;   // the wave of QSWaveMixPlayEx
   audio_play::PlayParts parts;
 };
 __declspec(thread) PlayCall* t_call = nullptr;
+// True on the timer thread inside QSWaveMixPump.
+__declspec(thread) bool t_in_pump = false;
+// Sets the call of this thread, and puts the one before back at the end.
+struct CallGuard {
+  explicit CallGuard(PlayCall* call) : previous_(t_call) { t_call = call; }
+  ~CallGuard() { t_call = previous_; }
+  PlayCall* previous_;
+};
 int g_play_now = 0;             // audio_play_now
 bool g_now_known = false;       // the hooks on the sort and the pump are in
 bool g_parts_on = false;        // audio_play_parts
@@ -307,6 +334,26 @@ struct PartsGroup {
   audio_play::Stat part[audio_play::kParts];
 };
 PartsGroup g_parts[2];
+bool g_part_hooked[audio_play::kParts] = {};  // the hook of a part is in
+const uint8_t* g_qm_base = nullptr;           // the base of QMixer.dll
+uint32_t g_qm_size = 0;                       // its size in memory
+
+// audio_open_loader and the log of the opens.
+int g_open_mode = 0;                // audio_open_loader
+bool g_open_known = false;          // the hook on the format test is in
+int g_open_test_frame = 0;          // audio_open_loader_test
+uint64_t g_open_test_seen = 0;
+volatile LONG g_open_forced = 0;    // opens that the mode sent to the loader
+volatile LONG g_open_path[2][2] = {};  // [atmosphere, other][at once, loader]
+int g_open_logged[2] = {0, 0};      // lines of opens so far
+const int kOpenLogMax = 20;
+const int kVtableMax = 24;
+uint32_t g_vtable_seen[kVtableMax] = {};
+int g_vtable_count = 0;
+const int kNamesMax = 64;
+char g_names[kNamesMax][48] = {};   // names that QMixer got from the system
+int g_name_count = 0;
+audio_play::Stat g_lock_stat;       // the lock wait of QSWaveMixPump
 
 // For the report.
 volatile LONG g_started[kKinds] = {0, 0, 0, 0};
@@ -586,10 +633,12 @@ void ReleaseChannel(int channel, bool tail) {
 
 // ---- The hooks on the functions of QMixer in a play -------------------------
 
-// Times one run of a part on the thread of a play with audio_play_parts.
+// Times one run of a part on the thread of a play with audio_play_parts. The
+// system calls count only inside the open (RVA 0xC230).
 struct PartTimer {
   PartTimer(int part) : part_(part), call_(t_call), start_(0) {
-    if (call_ != nullptr && call_->timing) {
+    if (call_ != nullptr && call_->timing &&
+        (!audio_play::IsSysPart(part) || call_->in_open)) {
       LARGE_INTEGER t;
       QueryPerformanceCounter(&t);
       start_ = t.QuadPart;
@@ -610,10 +659,15 @@ struct PartTimer {
 // The functions are thiscall in the game. A fastcall function gets the same
 // ecx, and the stack is the same for the arguments after the first.
 typedef void*(__fastcall* Ctor5Fn)(void*, void*, int, int, int, int, int);
+typedef void*(__fastcall* Ctor3Fn)(void*, void*, int, int, int);
 typedef int(__fastcall* ThisPtrFn)(void*, void*, void*);
 typedef int(__fastcall* ThisIntFn)(void*, void*, int);
 typedef void(__fastcall* ThisFn)(void*);
 typedef void(__fastcall* VoiceFn)(void*, void*, int);
+typedef bool(__fastcall* FlagsFn)(void*, void*, unsigned);
+typedef void(__fastcall* LoaderFn)(void*, void*, int, int, int, int, int);
+typedef unsigned(__fastcall* FormatFn)(void*);
+typedef int(__fastcall* InitFn)(void*);
 
 void* __fastcall h_PartCtor(void* self, void* edx, int a, int b, int c, int d,
                             int e) {
@@ -630,11 +684,6 @@ int __fastcall h_PartQueue(void* self, void* edx, void* p) {
   PartTimer timer(audio_play::kPartQueue);
   return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartQueue])(self, edx,
                                                                      p);
-}
-int __fastcall h_PartOpen(void* self, void* edx, int p) {
-  PartTimer timer(audio_play::kPartOpen);
-  return reinterpret_cast<ThisIntFn>(o_part[audio_play::kPartOpen])(self, edx,
-                                                                    p);
 }
 int __fastcall h_PartAdd(void* self, void* edx, void* p) {
   PartTimer timer(audio_play::kPartAdd);
@@ -676,7 +725,498 @@ void __fastcall h_PartPump(void* session) {
   reinterpret_cast<ThisFn>(o_part[audio_play::kPartPump])(session);
 }
 
-void* const kPartHook[audio_play::kParts] = {
+// The parts below the open.
+bool __fastcall h_PartFlags(void* self, void* edx, unsigned flags) {
+  PartTimer timer(audio_play::kPartFlags);
+  return reinterpret_cast<FlagsFn>(o_part[audio_play::kPartFlags])(self, edx,
+                                                                   flags);
+}
+void __fastcall h_PartLoader(void* self, void* edx, int a, int b, int c, int d,
+                             int e) {
+  PartTimer timer(audio_play::kPartLoader);
+  reinterpret_cast<LoaderFn>(o_part[audio_play::kPartLoader])(self, edx, a, b,
+                                                              c, d, e);
+}
+// The Open of a source (the call at +0x10 of its vtable). Which one runs
+// depends on the class of the source.
+int __fastcall h_PartSrcMap(void* self, void* edx, void* out) {
+  PartTimer timer(audio_play::kPartSrcMap);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartSrcMap])(self, edx,
+                                                                      out);
+}
+int __fastcall h_PartSrcBase(void* self, void* edx, void* out) {
+  PartTimer timer(audio_play::kPartSrcBase);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartSrcBase])(
+      self, edx, out);
+}
+int __fastcall h_PartSrcMem(void* self, void* edx, void* out) {
+  PartTimer timer(audio_play::kPartSrcMem);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartSrcMem])(self, edx,
+                                                                      out);
+}
+int __fastcall h_PartSrcFile(void* self, void* edx, void* out) {
+  PartTimer timer(audio_play::kPartSrcFile);
+  return reinterpret_cast<ThisPtrFn>(o_part[audio_play::kPartSrcFile])(
+      self, edx, out);
+}
+void* __fastcall h_PartPcmCtor(void* self, void* edx, int a, int b, int c) {
+  PartTimer timer(audio_play::kPartPcmCtor);
+  return reinterpret_cast<Ctor3Fn>(o_part[audio_play::kPartPcmCtor])(self, edx,
+                                                                     a, b, c);
+}
+void* __fastcall h_PartDecCtor(void* self, void* edx, int a, int b, int c) {
+  PartTimer timer(audio_play::kPartDecCtor);
+  return reinterpret_cast<Ctor3Fn>(o_part[audio_play::kPartDecCtor])(self, edx,
+                                                                     a, b, c);
+}
+int __fastcall h_PartDecInit(void* self) {
+  PartTimer timer(audio_play::kPartDecInit);
+  return reinterpret_cast<InitFn>(o_part[audio_play::kPartDecInit])(self);
+}
+int __fastcall h_PartSeekPcm(void* self, void* edx, int position) {
+  PartTimer timer(audio_play::kPartSeekPcm);
+  return reinterpret_cast<ThisIntFn>(o_part[audio_play::kPartSeekPcm])(
+      self, edx, position);
+}
+// The lock of the session. QSWaveMixPump takes it on the timer thread, and the
+// time of that wait goes to g_lock_stat. A play takes it too.
+void __fastcall h_PartLock(void* session) {
+  if (!t_in_pump) {
+    PartTimer timer(audio_play::kPartLock);
+    reinterpret_cast<ThisFn>(o_part[audio_play::kPartLock])(session);
+    return;
+  }
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  reinterpret_cast<ThisFn>(o_part[audio_play::kPartLock])(session);
+  QueryPerformanceCounter(&t1);
+  EnterCriticalSection(&g_play_cs);
+  g_lock_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
+  LeaveCriticalSection(&g_play_cs);
+}
+
+// The test at RVA 0x265D0 says if the open of a wave runs at once (0) or goes
+// to the loader thread of the session (1). audio_open_loader answers 1 for a
+// play of the mode: the loader thread then opens the wave, as it does for each
+// wave of a format that is not PCM or float. Only the thread of that play
+// has a call, so the loader thread and the timer thread see no change.
+unsigned __fastcall h_PartFormat(void* source) {
+  PlayCall* call = t_call;
+  unsigned r;
+  {
+    PartTimer timer(audio_play::kPartFormat);
+    r = reinterpret_cast<FormatFn>(o_part[audio_play::kPartFormat])(source) &
+        0xFF;
+  }
+  if (call != nullptr) {
+    call->fmt_result = static_cast<int>(r);
+    if (r == 0 && call->force_loader) {
+      call->forced = true;
+      InterlockedIncrement(&g_open_forced);
+      r = 1;
+    }
+  }
+  return r;
+}
+
+// ---- The log of the opens (audio_play_parts) --------------------------------
+
+// What the open of one play reads, before it runs.
+struct OpenInfo {
+  uint32_t vtable;       // the RVA of the vtable of the source, 0 for none
+  bool have_format;      // the source has a format
+  uint32_t tag, channels, rate, bits, bytes;
+  bool have_wave;        // the wave object of the play has a format
+  uint32_t wave_tag, wave_channels, wave_rate, wave_bits, wave_bytes;
+  bool same_wave;        // the wave object is the wave of QSWaveMixPlayEx
+  bool loader_thread;    // the session has a loader thread
+  bool acm_ready;        // the audio compression manager has loaded
+};
+
+bool ReadU32(const uint8_t* p, uint32_t* v) {
+  if (!Readable(p, 4)) return false;
+  *v = *reinterpret_cast<const uint32_t*>(p);
+  return true;
+}
+
+// The offsets are from the decompile of the known QMixer.dll: the play object
+// has the session at +0x34 and the wave object at +0x40. The wave object has
+// the source at +0x44. A source has the data at +8, the size at +0xC and a
+// pointer to a copy of the WAVEFORMATEX at +0x1C.
+void ReadOpenInfo(const uint8_t* play, const void* wave_of_call, OpenInfo* o) {
+  memset(o, 0, sizeof(*o));
+  uint32_t v = 0;
+  o->acm_ready = Readable(g_qm_base + audio_play::kAcmReadyRva, 1) &&
+                 g_qm_base[audio_play::kAcmReadyRva] != 0;
+  if (ReadU32(play + 0x34, &v) && v != 0) {
+    uint32_t loader = 0, thread = 0;
+    const uint8_t* session = reinterpret_cast<const uint8_t*>(v);
+    if (ReadU32(session + audio_play::kLoaderOffset, &loader) && loader != 0 &&
+        ReadU32(reinterpret_cast<const uint8_t*>(loader) +
+                    audio_play::kLoaderThreadOffset, &thread)) {
+      o->loader_thread = thread != 0;
+    }
+  }
+  if (!ReadU32(play + 0x40, &v) || v == 0) return;
+  const uint8_t* wave = reinterpret_cast<const uint8_t*>(v);
+  o->same_wave = wave == wave_of_call;
+  if (Readable(wave, kWaveSize)) {
+    const PCMWAVEFORMAT* f =
+        reinterpret_cast<const PCMWAVEFORMAT*>(wave + kWaveFormat);
+    o->have_wave = true;
+    o->wave_tag = f->wf.wFormatTag;
+    o->wave_channels = f->wf.nChannels;
+    o->wave_rate = f->wf.nSamplesPerSec;
+    o->wave_bits = f->wBitsPerSample;
+    o->wave_bytes = *reinterpret_cast<const DWORD*>(wave + kWaveBytes);
+  }
+  if (!ReadU32(wave + 0x44, &v) || v == 0) return;
+  const uint8_t* source = reinterpret_cast<const uint8_t*>(v);
+  uint32_t vt = 0, fmt = 0;
+  if (ReadU32(source, &vt)) o->vtable = vt - reinterpret_cast<uint32_t>(g_qm_base);
+  ReadU32(source + 0xC, &o->bytes);
+  if (ReadU32(source + 0x1C, &fmt) && fmt != 0 &&
+      Readable(reinterpret_cast<const void*>(fmt), 16)) {
+    const uint8_t* f = reinterpret_cast<const uint8_t*>(fmt);
+    o->have_format = true;
+    o->tag = *reinterpret_cast<const uint16_t*>(f);
+    o->channels = *reinterpret_cast<const uint16_t*>(f + 2);
+    o->rate = *reinterpret_cast<const uint32_t*>(f + 4);
+    o->bits = *reinterpret_cast<const uint16_t*>(f + 14);
+  }
+}
+
+// The part that has the function at this RVA, or -1.
+int PartOfRva(uint32_t rva) {
+  if (rva == 0) return -1;
+  for (int i = 0; i < audio_play::kPartCodeEnd; ++i) {
+    if (audio_play::kPartInfo[i].rva == rva) return i;
+  }
+  return -1;
+}
+
+// Logs the first slots of a vtable that the open has not shown yet: the RVA of
+// the vtable and the target of each slot, and if the target has a timer. A new
+// target with no timer is a function to time in the next run.
+void NoteVtable(const char* kind, uint32_t vtable_rva, const uint8_t* vtable) {
+  if (vtable_rva == 0 || !Readable(vtable, 28)) return;
+  for (int i = 0; i < g_vtable_count; ++i) {
+    if (g_vtable_seen[i] == vtable_rva) return;
+  }
+  if (g_vtable_count >= kVtableMax) return;
+  g_vtable_seen[g_vtable_count++] = vtable_rva;
+  char text[640];
+  size_t n = 0;
+  text[0] = 0;
+  const uint32_t* slots = reinterpret_cast<const uint32_t*>(vtable);
+  for (int slot = 3; slot <= 6; ++slot) {
+    const uint32_t rva = slots[slot] - reinterpret_cast<uint32_t>(g_qm_base);
+    const bool inside = rva < g_qm_size;
+    const int part = inside ? PartOfRva(rva) : -1;
+    n += snprintf(text + n, sizeof(text) - n, "%s slot +0x%X is 0x%X (%s)",
+                  slot > 3 ? "," : "", slot * 4,
+                  inside ? rva : slots[slot],
+                  !inside ? "outside QMixer"
+                  : part >= 0 && g_part_hooked[part]
+                      ? audio_play::kPartInfo[part].name
+                  : part >= 0 ? "has a hook that did not go in"
+                              : "NO TIMER, a new target");
+    if (n >= sizeof(text) - 100) break;
+  }
+  ModLog("audio open   : %s vtable at QMixer RVA 0x%X:%s", kind, vtable_rva,
+         text);
+}
+
+// One line for each of the first kOpenLogMax opens of the atmosphere and of the
+// other sounds.
+void LogOpen(const PlayCall* call, const OpenInfo& in, int64_t ticks,
+             int result) {
+  const int group = call->atmosphere ? 0 : 1;
+  const bool unknown = in.loader_thread && call->fmt_result < 0;
+  const bool loader = in.loader_thread && (call->fmt_result != 0 || call->forced);
+  if (!unknown) InterlockedIncrement(&g_open_path[group][loader ? 1 : 0]);
+  if (g_open_logged[group] >= kOpenLogMax) return;
+  ++g_open_logged[group];
+  const bool model_at_once =
+      audio_play::OpensAtOnce(in.loader_thread, in.have_format, in.tag,
+                              in.acm_ready);
+  const double us = g_qpc_hz > 0
+                        ? 1e6 * static_cast<double>(ticks) /
+                              static_cast<double>(g_qpc_hz)
+                        : 0.0;
+  ModLog("audio open   : %s %d: source format tag 0x%X (%s), %u ch, %u Hz, "
+         "%u bits, %u bytes of data. Wave object: tag 0x%X, %u ch, %u Hz, %u "
+         "bits, %u bytes, %s the wave of the play. Source vtable RVA 0x%X. "
+         "Loader thread: %s. Compression manager loaded: %s. Path: %s%s "
+         "(the model says %s). The open took %.0f us, result %d",
+         group == 0 ? "atmosphere" : "other sound", g_open_logged[group],
+         in.tag, audio_play::TagName(in.tag), in.channels, in.rate, in.bits,
+         in.bytes, in.wave_tag, in.wave_channels, in.wave_rate, in.wave_bits,
+         in.wave_bytes, in.same_wave ? "the same object as" : "not",
+         in.vtable, in.loader_thread ? "yes" : "no",
+         in.acm_ready ? "yes" : "no",
+         unknown ? "unknown" : loader ? "loader thread" : "at once",
+         call->forced ? " (forced by audio_open_loader)" : "",
+         model_at_once ? "at once" : "loader thread", us, result);
+}
+
+// The open of the wave of a play (RVA 0xC230).
+int __fastcall h_PartOpen(void* self, void* edx, int flags) {
+  PlayCall* call = t_call;
+  if (call == nullptr || !call->timing) {
+    return reinterpret_cast<ThisIntFn>(o_part[audio_play::kPartOpen])(self, edx,
+                                                                      flags);
+  }
+  const uint8_t* play = static_cast<const uint8_t*>(self);
+  OpenInfo info;
+  ReadOpenInfo(play, call->wave, &info);
+  if (info.vtable != 0) {
+    NoteVtable("source", info.vtable, g_qm_base + info.vtable);
+  }
+  call->in_open = true;
+  call->fmt_result = -1;
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  const int r = reinterpret_cast<ThisIntFn>(o_part[audio_play::kPartOpen])(
+      self, edx, flags);
+  QueryPerformanceCounter(&t1);
+  call->in_open = false;
+  call->parts.Add(audio_play::kPartOpen, t1.QuadPart - t0.QuadPart);
+  // The reader that the open made: a play that opened at once has it now.
+  uint32_t reader = 0, reader_vt = 0;
+  if (ReadU32(play + 0xE4, &reader) && reader != 0 &&
+      ReadU32(reinterpret_cast<const uint8_t*>(reader), &reader_vt)) {
+    NoteVtable("reader", reader_vt - reinterpret_cast<uint32_t>(g_qm_base),
+               reinterpret_cast<const uint8_t*>(reader_vt));
+  }
+  LogOpen(call, info, t1.QuadPart - t0.QuadPart, r);
+  return r;
+}
+
+// ---- The system calls of QMixer inside the open ------------------------------
+
+// QMixer calls the system through its import table. With audio_play_parts the
+// mod puts a timer in each entry of the list below. A call counts only on the
+// thread of a play, inside its open. The functions of the audio compression
+// manager come by GetProcAddress, and the mod gives QMixer a timer for them.
+#define SYS_FN(ret, name, part, params, args)                                 \
+  ret WINAPI name params {                                                    \
+    PartTimer timer(part);                                                    \
+    return reinterpret_cast<ret(WINAPI*) params>(o_part[part]) args;          \
+  }
+SYS_FN(void, w_EnterCS, audio_play::kSysEnter, (LPCRITICAL_SECTION cs), (cs))
+SYS_FN(void, w_LeaveCS, audio_play::kSysLeave, (LPCRITICAL_SECTION cs), (cs))
+SYS_FN(BOOL, w_SetEvent, audio_play::kSysSetEvent, (HANDLE h), (h))
+SYS_FN(DWORD, w_Wait, audio_play::kSysWait, (HANDLE h, DWORD ms), (h, ms))
+SYS_FN(void, w_Sleep, audio_play::kSysSleep, (DWORD ms), (ms))
+SYS_FN(HANDLE, w_CreateFile, audio_play::kSysCreateFile,
+       (LPCSTR a, DWORD b, DWORD c, LPSECURITY_ATTRIBUTES d, DWORD e, DWORD f,
+        HANDLE g),
+       (a, b, c, d, e, f, g))
+SYS_FN(BOOL, w_ReadFile, audio_play::kSysReadFile,
+       (HANDLE a, LPVOID b, DWORD c, LPDWORD d, LPOVERLAPPED e),
+       (a, b, c, d, e))
+SYS_FN(DWORD, w_SetFilePtr, audio_play::kSysSetFilePtr,
+       (HANDLE a, LONG b, PLONG c, DWORD d), (a, b, c, d))
+SYS_FN(HANDLE, w_Mapping, audio_play::kSysMapping,
+       (HANDLE a, LPSECURITY_ATTRIBUTES b, DWORD c, DWORD d, DWORD e, LPCSTR f),
+       (a, b, c, d, e, f))
+SYS_FN(LPVOID, w_MapView, audio_play::kSysMapView,
+       (HANDLE a, DWORD b, DWORD c, DWORD d, SIZE_T e), (a, b, c, d, e))
+SYS_FN(LPVOID, w_HeapAlloc, audio_play::kSysHeapAlloc,
+       (HANDLE a, DWORD b, SIZE_T c), (a, b, c))
+SYS_FN(LPVOID, w_VirtAlloc, audio_play::kSysVirtAlloc,
+       (LPVOID a, SIZE_T b, DWORD c, DWORD d), (a, b, c, d))
+SYS_FN(HRESULT, w_CoCreate, audio_play::kSysCoCreate,
+       (const void* a, void* b, DWORD c, const void* d, void** e),
+       (a, b, c, d, e))
+SYS_FN(HMMIO, w_MmioOpen, audio_play::kSysMmioOpen,
+       (LPSTR a, LPMMIOINFO b, DWORD c), (a, b, c))
+SYS_FN(LONG, w_MmioRead, audio_play::kSysMmioRead, (HMMIO a, HPSTR b, LONG c),
+       (a, b, c))
+SYS_FN(LONG, w_MmioSeek, audio_play::kSysMmioSeek, (HMMIO a, LONG b, int c),
+       (a, b, c))
+SYS_FN(MMRESULT, w_MmioDescend, audio_play::kSysMmioDescend,
+       (HMMIO a, LPMMCKINFO b, const MMCKINFO* c, UINT d), (a, b, c, d))
+// The functions of msacm32.dll, with the prototypes of the documentation.
+SYS_FN(UINT, w_AcmSuggest, audio_play::kSysAcmSuggest,
+       (void* a, void* b, void* c, DWORD d, DWORD e), (a, b, c, d, e))
+SYS_FN(UINT, w_AcmOpen, audio_play::kSysAcmOpen,
+       (void* a, void* b, void* c, void* d, void* e, DWORD_PTR f, DWORD_PTR g,
+        DWORD h),
+       (a, b, c, d, e, f, g, h))
+SYS_FN(UINT, w_AcmSize, audio_play::kSysAcmSize,
+       (void* a, DWORD b, LPDWORD c, DWORD d), (a, b, c, d))
+SYS_FN(UINT, w_AcmPrepare, audio_play::kSysAcmPrepare,
+       (void* a, void* b, DWORD c), (a, b, c))
+#undef SYS_FN
+
+// The names that QMixer gets from the system, once each: the first
+// kNamesMax. A name comes from GetProcAddress or LoadLibraryA.
+void NoteName(const char* what, const char* name) {
+  bool fresh = false;
+  EnterCriticalSection(&g_play_cs);
+  for (int i = 0; i < g_name_count; ++i) {
+    if (strcmp(g_names[i], name) == 0) {
+      LeaveCriticalSection(&g_play_cs);
+      return;
+    }
+  }
+  if (g_name_count < kNamesMax) {
+    strncpy_s(g_names[g_name_count], sizeof(g_names[0]), name, _TRUNCATE);
+    ++g_name_count;
+    fresh = true;
+  }
+  LeaveCriticalSection(&g_play_cs);
+  if (!fresh) return;
+  const PlayCall* call = t_call;
+  ModLog("audio open   : QMixer calls %s for %s (%s)", what, name,
+         call != nullptr && call->in_open ? "on the frame thread, in the open"
+                                          : "on another thread, or outside "
+                                            "the open");
+}
+
+FARPROC WINAPI w_GetProc(HMODULE module, LPCSTR name) {
+  FARPROC r;
+  {
+    PartTimer timer(audio_play::kSysGetProc);
+    r = reinterpret_cast<FARPROC(WINAPI*)(HMODULE, LPCSTR)>(
+        o_part[audio_play::kSysGetProc])(module, name);
+  }
+  if (r == nullptr || reinterpret_cast<uintptr_t>(name) <= 0xFFFF) return r;
+  NoteName("GetProcAddress", name);
+  struct Acm {
+    const char* name;
+    int part;
+    void* wrapper;
+  };
+  static const Acm kAcm[] = {
+      {"acmFormatSuggest", audio_play::kSysAcmSuggest,
+       reinterpret_cast<void*>(&w_AcmSuggest)},
+      {"acmStreamOpen", audio_play::kSysAcmOpen,
+       reinterpret_cast<void*>(&w_AcmOpen)},
+      {"acmStreamSize", audio_play::kSysAcmSize,
+       reinterpret_cast<void*>(&w_AcmSize)},
+      {"acmStreamPrepareHeader", audio_play::kSysAcmPrepare,
+       reinterpret_cast<void*>(&w_AcmPrepare)},
+  };
+  for (const Acm& a : kAcm) {
+    if (strcmp(name, a.name) == 0) {
+      o_part[a.part] = reinterpret_cast<void*>(r);
+      return reinterpret_cast<FARPROC>(a.wrapper);
+    }
+  }
+  return r;
+}
+
+HMODULE WINAPI w_LoadLib(LPCSTR name) {
+  HMODULE r;
+  {
+    PartTimer timer(audio_play::kSysLoadLib);
+    r = reinterpret_cast<HMODULE(WINAPI*)(LPCSTR)>(
+        o_part[audio_play::kSysLoadLib])(name);
+  }
+  if (name != nullptr) NoteName("LoadLibraryA", name);
+  return r;
+}
+
+struct SysImport {
+  const char* dll;
+  const char* name;
+  int part;
+  void* wrapper;
+};
+const SysImport kSysImport[] = {
+    {"kernel32.dll", "EnterCriticalSection", audio_play::kSysEnter,
+     reinterpret_cast<void*>(&w_EnterCS)},
+    {"kernel32.dll", "LeaveCriticalSection", audio_play::kSysLeave,
+     reinterpret_cast<void*>(&w_LeaveCS)},
+    {"kernel32.dll", "SetEvent", audio_play::kSysSetEvent,
+     reinterpret_cast<void*>(&w_SetEvent)},
+    {"kernel32.dll", "WaitForSingleObject", audio_play::kSysWait,
+     reinterpret_cast<void*>(&w_Wait)},
+    {"kernel32.dll", "Sleep", audio_play::kSysSleep,
+     reinterpret_cast<void*>(&w_Sleep)},
+    {"kernel32.dll", "GetProcAddress", audio_play::kSysGetProc,
+     reinterpret_cast<void*>(&w_GetProc)},
+    {"kernel32.dll", "LoadLibraryA", audio_play::kSysLoadLib,
+     reinterpret_cast<void*>(&w_LoadLib)},
+    {"kernel32.dll", "CreateFileA", audio_play::kSysCreateFile,
+     reinterpret_cast<void*>(&w_CreateFile)},
+    {"kernel32.dll", "ReadFile", audio_play::kSysReadFile,
+     reinterpret_cast<void*>(&w_ReadFile)},
+    {"kernel32.dll", "SetFilePointer", audio_play::kSysSetFilePtr,
+     reinterpret_cast<void*>(&w_SetFilePtr)},
+    {"kernel32.dll", "CreateFileMappingA", audio_play::kSysMapping,
+     reinterpret_cast<void*>(&w_Mapping)},
+    {"kernel32.dll", "MapViewOfFile", audio_play::kSysMapView,
+     reinterpret_cast<void*>(&w_MapView)},
+    {"kernel32.dll", "HeapAlloc", audio_play::kSysHeapAlloc,
+     reinterpret_cast<void*>(&w_HeapAlloc)},
+    {"kernel32.dll", "VirtualAlloc", audio_play::kSysVirtAlloc,
+     reinterpret_cast<void*>(&w_VirtAlloc)},
+    {"ole32.dll", "CoCreateInstance", audio_play::kSysCoCreate,
+     reinterpret_cast<void*>(&w_CoCreate)},
+    {"winmm.dll", "mmioOpenA", audio_play::kSysMmioOpen,
+     reinterpret_cast<void*>(&w_MmioOpen)},
+    {"winmm.dll", "mmioRead", audio_play::kSysMmioRead,
+     reinterpret_cast<void*>(&w_MmioRead)},
+    {"winmm.dll", "mmioSeek", audio_play::kSysMmioSeek,
+     reinterpret_cast<void*>(&w_MmioSeek)},
+    {"winmm.dll", "mmioDescend", audio_play::kSysMmioDescend,
+     reinterpret_cast<void*>(&w_MmioDescend)},
+};
+
+// Puts the wrappers in the import table of QMixer.dll. One aligned store of 4
+// bytes for each entry, so a call in progress sees the old or the new pointer.
+// Returns the number of entries changed.
+int PatchImports(HMODULE module) {
+  const uint8_t* base = reinterpret_cast<const uint8_t*>(module);
+  if (!Readable(base, sizeof(IMAGE_DOS_HEADER))) return 0;
+  const IMAGE_DOS_HEADER* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+  if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+  const IMAGE_NT_HEADERS* nt =
+      reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+  if (!Readable(nt, sizeof(IMAGE_NT_HEADERS)) ||
+      nt->Signature != IMAGE_NT_SIGNATURE) {
+    return 0;
+  }
+  const IMAGE_DATA_DIRECTORY& dir =
+      nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+  if (dir.VirtualAddress == 0) return 0;
+  const IMAGE_IMPORT_DESCRIPTOR* d =
+      reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress);
+  int patched = 0;
+  for (; Readable(d, sizeof(*d)) && d->Name != 0; ++d) {
+    const char* dll = reinterpret_cast<const char*>(base + d->Name);
+    const uintptr_t* names = reinterpret_cast<const uintptr_t*>(
+        base + (d->OriginalFirstThunk != 0 ? d->OriginalFirstThunk
+                                           : d->FirstThunk));
+    uintptr_t* slots = reinterpret_cast<uintptr_t*>(
+        const_cast<uint8_t*>(base) + d->FirstThunk);
+    for (int i = 0; names[i] != 0; ++i) {
+      if ((names[i] & 0x80000000u) != 0) continue;
+      const char* fn = reinterpret_cast<const char*>(base + names[i] + 2);
+      for (const SysImport& imp : kSysImport) {
+        if (_stricmp(dll, imp.dll) != 0 || strcmp(fn, imp.name) != 0) continue;
+        if (o_part[imp.part] != nullptr) continue;
+        DWORD old = 0;
+        if (!VirtualProtect(&slots[i], sizeof(slots[i]), PAGE_READWRITE, &old)) {
+          continue;
+        }
+        o_part[imp.part] = reinterpret_cast<void*>(slots[i]);
+        slots[i] = reinterpret_cast<uintptr_t>(imp.wrapper);
+        VirtualProtect(&slots[i], sizeof(slots[i]), old, &old);
+        ++patched;
+      }
+    }
+  }
+  return patched;
+}
+
+// The hook function of each part that has a code hook, in the order of the
+// enum. A part with no hook has nullptr.
+void* const kPartHook[] = {
     nullptr,
     reinterpret_cast<void*>(&h_PartCtor),
     reinterpret_cast<void*>(&h_PartParams),
@@ -688,7 +1228,22 @@ void* const kPartHook[audio_play::kParts] = {
     reinterpret_cast<void*>(&h_PartSort),
     reinterpret_cast<void*>(&h_PartPump),
     reinterpret_cast<void*>(&h_PartVoice),
+    reinterpret_cast<void*>(&h_PartFlags),
+    reinterpret_cast<void*>(&h_PartLoader),
+    reinterpret_cast<void*>(&h_PartFormat),
+    reinterpret_cast<void*>(&h_PartSrcMap),
+    reinterpret_cast<void*>(&h_PartSrcBase),
+    reinterpret_cast<void*>(&h_PartSrcMem),
+    reinterpret_cast<void*>(&h_PartSrcFile),
+    reinterpret_cast<void*>(&h_PartPcmCtor),
+    reinterpret_cast<void*>(&h_PartDecCtor),
+    reinterpret_cast<void*>(&h_PartDecInit),
+    reinterpret_cast<void*>(&h_PartSeekPcm),
+    reinterpret_cast<void*>(&h_PartLock),
 };
+static_assert(sizeof(kPartHook) / sizeof(kPartHook[0]) ==
+                  audio_play::kPartCodeEnd,
+              "one hook for each part of the code");
 
 DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
                       int loops, void* params) {
@@ -805,6 +1360,13 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
   call.defer = g_now_known && g_play_now > 0 &&
                audio_play::SkipPump(g_play_now, shadow && g_audible, atmosphere);
   call.timing = g_parts_on;
+  call.atmosphere = atmosphere;
+  call.force_loader =
+      g_open_known && audio_play::ForceLoader(g_open_mode, atmosphere);
+  call.in_open = false;
+  call.forced = false;
+  call.fmt_result = -1;
+  call.wave = wave;
   call.parts.Clear();
   if (call.timing) {
     // QMixer tests the wave with this call first. Its time is a part.
@@ -814,12 +1376,16 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
     QueryPerformanceCounter(&b1);
     call.parts.Add(audio_play::kPartBadPtr, b1.QuadPart - b0.QuadPart);
   }
-  if (call.defer || call.timing) t_call = &call;
+  const bool track = call.defer || call.timing || call.force_loader;
   LARGE_INTEGER t0, t1;
-  QueryPerformanceCounter(&t0);
-  const DWORD r = o_PlayEx(session, channel, flags, wave, loops, params);
-  QueryPerformanceCounter(&t1);
-  t_call = nullptr;
+  DWORD r;
+  {
+    // A play that no hook needs to see runs with no call on this thread.
+    CallGuard guard(track ? &call : nullptr);
+    QueryPerformanceCounter(&t0);
+    r = o_PlayEx(session, channel, flags, wave, loops, params);
+    QueryPerformanceCounter(&t1);
+  }
   if (pump_flag != nullptr) *pump_flag = 0;
   if (g_pump_known) {
     const bool changed = pump_flag != nullptr || call.defer;
@@ -852,9 +1418,11 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
 // only times it, so that the report shows where the work of the pump goes.
 void WINAPI h_Pump() {
   LARGE_INTEGER t0, t1;
+  t_in_pump = true;
   QueryPerformanceCounter(&t0);
   o_Pump();
   QueryPerformanceCounter(&t1);
+  t_in_pump = false;
   EnterCriticalSection(&g_play_cs);
   g_pump_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
   LeaveCriticalSection(&g_play_cs);
@@ -1170,14 +1738,14 @@ void TestVoiceFrame() {
 // the plays in which it ran, its runs for each play, and its time in one play
 // (the sum of its runs). The times include the parts below a part.
 void PartsReport(const PartsGroup (&group)[2]) {
-  char text[2400];
+  char text[9000];
   size_t n = 0;
   text[0] = 0;
   const char* const names[2] = {"a sound of the atmosphere", "another sound"};
   for (int g = 0; g < 2; ++g) {
     n += snprintf(text + n, sizeof(text) - n, "%s%s: %lld plays", g ? ". " : "",
                   names[g], static_cast<long long>(group[g].plays));
-    for (int i = 0; i < audio_play::kParts && n < sizeof(text) - 160; ++i) {
+    for (int i = 0; i < audio_play::kParts && n < sizeof(text) - 200; ++i) {
       const audio_play::Stat& s = group[g].part[i];
       if (s.calls == 0) continue;
       n += snprintf(text + n, sizeof(text) - n,
@@ -1203,7 +1771,7 @@ void PlayReport() {
   if (g_play_report_at == 0) g_play_report_at = now;
   if (now - g_play_report_at < 10000) return;
   g_play_report_at = now;
-  audio_play::Stat play[2][2], pump;
+  audio_play::Stat play[2][2], pump, lock;
   PartsGroup parts[2];
   int64_t changed;
   EnterCriticalSection(&g_play_cs);
@@ -1215,6 +1783,8 @@ void PlayReport() {
   }
   pump = g_pump_stat;
   g_pump_stat = audio_play::Stat();
+  lock = g_lock_stat;
+  g_lock_stat = audio_play::Stat();
   for (int i = 0; i < 2; ++i) {
     parts[i] = g_parts[i];
     g_parts[i] = PartsGroup();
@@ -1244,7 +1814,26 @@ void PlayReport() {
          PLAY_TIMES(play[0][0]), PLAY_TIMES(play[0][1]),
          PLAY_TIMES(play[1][0]), PLAY_TIMES(play[1][1]), PLAY_TIMES(pump));
 #undef PLAY_TIMES
-  if (g_parts_on) PartsReport(parts);
+  if (g_open_known) {
+    ModLog("audio play   : audio_open_loader=%d. %ld opens went to the loader "
+           "thread because of it since the start%s", g_open_mode, g_open_forced,
+           g_parts_on ? "" : ". Start with audio_play_parts=1 to count the "
+                             "paths");
+  }
+  if (g_parts_on) {
+    PartsReport(parts);
+    ModLog("audio play   : opens in the last 10 s (audio_play_parts). A sound "
+           "of the atmosphere: %ld at once, %ld on the loader thread. Another "
+           "sound: %ld at once, %ld on the loader thread. The lock of the "
+           "session in QSWaveMixPump on the timer thread: %lld calls (mean "
+           "%.0f us, most %.0f us, %lld of 5 ms or more)",
+           InterlockedExchange(&g_open_path[0][0], 0),
+           InterlockedExchange(&g_open_path[0][1], 0),
+           InterlockedExchange(&g_open_path[1][0], 0),
+           InterlockedExchange(&g_open_path[1][1], 0),
+           static_cast<long long>(lock.calls), lock.MeanUs(hz),
+           lock.MostUs(hz), static_cast<long long>(lock.long_calls));
+  }
 }
 
 void Report() {
@@ -1285,24 +1874,37 @@ void Report() {
   }
 }
 
-// audio_play_now and audio_play_parts. The hooks on the sort and the pump go in
-// when the mode is above 0 or the test key can change it. The hooks that time
-// the other functions go in with audio_play_parts=1. Each function is tested
-// for its first 8 bytes, so another QMixer.dll gets no hook.
+// audio_play_now, audio_open_loader and audio_play_parts. The hooks on the sort
+// and the pump go in when the mode is above 0 or the test key can change it.
+// The hook on the format test goes in for audio_open_loader. The hooks that
+// time the other functions go in with audio_play_parts=1. Each function is
+// tested for its first 8 bytes, so another QMixer.dll gets no hook. Each hook
+// is queued and one MH_ApplyQueued writes them all, with one stop of the other
+// threads. The system calls get a timer by the import table, with no hook.
 void InstallPlayNow(const uint8_t* base) {
+  g_qm_base = base;
+  const IMAGE_DOS_HEADER* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+  const IMAGE_NT_HEADERS* nt =
+      reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+  g_qm_size = nt->OptionalHeader.SizeOfImage;
   g_play_now = audio_play::ClampMode(AudioIni("audio_play_now", 0));
   g_play_now_test_frame = AudioIni("audio_play_now_test", 0);
+  g_open_mode = audio_play::ClampOpenMode(AudioIni("audio_open_loader", 0));
+  g_open_test_frame = AudioIni("audio_open_loader_test", 0);
   g_parts_on = AudioIni("audio_play_parts", 0) != 0;
-  const bool deferring = g_play_now > 0 || AudioIni("test_keys", 0) != 0 ||
-                         g_play_now_test_frame > 0;
+  const bool test_keys = AudioIni("test_keys", 0) != 0;
+  const bool deferring = g_play_now > 0 || test_keys || g_play_now_test_frame > 0;
+  const bool opening =
+      g_open_mode > 0 || test_keys || g_open_test_frame > 0 || g_parts_on;
+  const uint8_t* queued[audio_play::kPartCodeEnd] = {};
   int hooked = 0, failed = 0;
-  bool sort_ok = false, pump_ok = false;
-  for (int i = 0; i < audio_play::kParts; ++i) {
+  for (int i = 0; i < audio_play::kPartCodeEnd; ++i) {
     const audio_play::PartInfo& info = audio_play::kPartInfo[i];
-    const bool timed = g_parts_on;
     const bool defer_part =
         i == audio_play::kPartSort || i == audio_play::kPartPump;
-    if (info.rva == 0 || !(timed || (deferring && defer_part))) continue;
+    const bool wanted = g_parts_on || (deferring && defer_part) ||
+                        (opening && i == audio_play::kPartFormat);
+    if (info.rva == 0 || !wanted) continue;
     const uint8_t* at = base + info.rva;
     if (!Readable(at, 8) || !audio_play::PartMatches(i, at, 8)) {
       ModLog("audio play   : the part %s at QMixer RVA 0x%X has other bytes, "
@@ -1310,28 +1912,57 @@ void InstallPlayNow(const uint8_t* base) {
       ++failed;
       continue;
     }
-    MH_STATUS s = MH_CreateHook(const_cast<uint8_t*>(at), kPartHook[i],
-                                &o_part[i]);
-    if (s == MH_OK) s = MH_EnableHook(const_cast<uint8_t*>(at));
-    if (s != MH_OK) {
+    uint8_t* target = const_cast<uint8_t*>(at);
+    if (MH_CreateHook(target, kPartHook[i], &o_part[i]) != MH_OK) {
       ModLog("audio play   : the hook on the part %s FAILED", info.name);
       o_part[i] = nullptr;
       ++failed;
       continue;
     }
+    if (MH_QueueEnableHook(target) != MH_OK) {
+      MH_RemoveHook(target);
+      o_part[i] = nullptr;
+      ModLog("audio play   : the hook on the part %s FAILED", info.name);
+      ++failed;
+      continue;
+    }
+    queued[i] = at;
     ++hooked;
-    if (i == audio_play::kPartSort) sort_ok = true;
-    if (i == audio_play::kPartPump) pump_ok = true;
   }
-  g_now_known = sort_ok && pump_ok;
+  if (hooked > 0 && MH_ApplyQueued() != MH_OK) {
+    ModLog("audio play   : MH_ApplyQueued FAILED, so no hook on QMixer is in");
+    for (int i = 0; i < audio_play::kPartCodeEnd; ++i) {
+      if (queued[i] == nullptr) continue;
+      MH_RemoveHook(const_cast<uint8_t*>(queued[i]));
+      o_part[i] = nullptr;
+      queued[i] = nullptr;
+    }
+    failed += hooked;
+    hooked = 0;
+  }
+  for (int i = 0; i < audio_play::kPartCodeEnd; ++i) {
+    g_part_hooked[i] = queued[i] != nullptr;
+  }
+  g_now_known = g_part_hooked[audio_play::kPartSort] &&
+                g_part_hooked[audio_play::kPartPump];
+  g_open_known = g_part_hooked[audio_play::kPartFormat];
+  int imports = 0;
+  if (g_parts_on) imports = PatchImports(AudioMixerDll());
   if (g_play_now > 0 && !g_now_known) {
     ModLog("audio play   : audio_play_now=%d, but the hooks on the sort and "
            "the pump of QMixer are not in. QMixer does its work in each play "
            "as in the game", g_play_now);
     g_play_now = 0;
   }
+  if (g_open_mode > 0 && !g_open_known) {
+    ModLog("audio play   : audio_open_loader=%d, but the hook on the format "
+           "test of QMixer is not in. QMixer opens each wave as in the game",
+           g_open_mode);
+    g_open_mode = 0;
+  }
   ModLog("audio play   : audio_play_now=%d (%s), audio_play_parts=%d. %d "
-         "functions of QMixer have a hook, %d failed. %s", g_play_now,
+         "functions of QMixer have a hook, %d failed, %d entries of the import "
+         "table have a timer. %s", g_play_now,
          g_play_now == 0 ? "the work of QMixer runs in the call, as in the game"
          : g_play_now == 1
              ? "the sort and the pump return at once in the call of a sound "
@@ -1341,11 +1972,19 @@ void InstallPlayNow(const uint8_t* base) {
                "of the mixer of the mod and of each sound of the atmosphere"
              : "the sort and the pump return at once in each call (test "
                "value)",
-         g_parts_on ? 1 : 0, hooked, failed,
+         g_parts_on ? 1 : 0, hooked, failed, imports,
          g_play_now > 0
              ? "The pump of the timer thread does the work within 20 ms. The "
                "session is not changed"
              : "");
+  ModLog("audio play   : audio_open_loader=%d (%s)", g_open_mode,
+         g_open_mode == 0
+             ? "the open of a wave runs as QMixer has it"
+         : g_open_mode == 1
+             ? "the open of the wave of a sound of the atmosphere goes to the "
+               "loader thread of QMixer"
+             : "the open of each wave goes to the loader thread of QMixer (test "
+               "value)");
 }
 
 // The mode of audio_play_fix, the check of the code of the known QMixer.dll
@@ -1552,6 +2191,15 @@ void AudioVoicesFrame() {
       if (ControllersTestFrame(at, frame) == at) AudioPlayNowCycle();
     }
   }
+  // The test audio_open_loader_test=N: the same for audio_open_loader.
+  if (g_open_test_frame > 0) {
+    const uint64_t frame = ControllersFrameCount();
+    const uint64_t at = static_cast<uint64_t>(g_open_test_frame);
+    if (frame != g_open_test_seen) {
+      g_open_test_seen = frame;
+      if (ControllersTestFrame(at, frame) == at) AudioOpenLoaderCycle();
+    }
+  }
   float k = 1.0f;
   const bool room = AudioRoomNow(&k);
   if (!room) k = 1.0f;
@@ -1715,6 +2363,30 @@ void AudioPlayNowCycle() {
 int AudioPlayNowValue() {
   if (!g_on || !g_now_known) return kDebugCannot;
   return g_play_now > 2 ? 2 : g_play_now;
+}
+
+// The test key of audio_open_loader (Ctrl, Shift and F6, test_keys=1). The
+// mode steps through 0, 1 and 2. A short pulse is 0, a longer one is 1, the
+// longest is 2.
+void AudioOpenLoaderCycle() {
+  if (!g_on || !g_open_known) {
+    ModLog("audio play   : test key, but the hook on the format test of "
+           "QMixer is not in. Start with test_keys=1, or with "
+           "audio_open_loader above 0");
+    return;
+  }
+  g_open_mode = audio_play::NextOpenMode(g_open_mode);
+  ControllersGesturePulse(0.5f, g_open_mode == 0 ? 0.08f
+                                : g_open_mode == 1 ? 0.30f
+                                                   : 0.55f);
+  ModLog("audio play   : test key, audio_open_loader is %d now. %ld opens "
+         "went to the loader thread so far", g_open_mode, g_open_forced);
+}
+
+// The value of audio_open_loader for the debug page.
+int AudioOpenLoaderValue() {
+  if (!g_on || !g_open_known) return kDebugCannot;
+  return g_open_mode;
 }
 
 // The test key. false gives each shadowed channel back to QMixer, at once,

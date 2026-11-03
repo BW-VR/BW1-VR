@@ -585,12 +585,12 @@ functions of the exe.
 | `audio_sources.cpp` | The `LHSamplePlay` hook and the tracker. It steers the advisors and the flat sounds that have a place |
 | `audio_rolloff.cpp` | The hooks on `QSWaveMixSetDistanceMapping`, `SetSourcePosition` and `SetPolarPosition`. The room distances |
 | `audio_range.cpp` | The hooks on the object callback `0x00427200`, `GAudio::PlaySoundEffect`, `GAudio::GetGSFXSampleMaxDistance` and `GAudio::SamplePlayAnimEffect`. The ears decide what plays |
-| `audio_voices.cpp` | The mixer of the mod, and the work of QMixer in a play (`audio_play_now`, `audio_play_fix`, 7.8) |
+| `audio_voices.cpp` | The mixer of the mod, and the work of QMixer in a play (`audio_play_now`, `audio_play_fix`, `audio_open_loader`, 7.8) |
 | `audio_capture.cpp` | The hook on the stream of QMixer: the mixer takes its block here, the capture writes it, and the latency is set here |
 | `audio_cues.cpp` | The soft sounds for the moves of the player |
 | `audio_trace.cpp` | Log only hooks (section 11) |
 | `audio_watch.cpp`, `audio_watch_math.h` | A test aid: the timers of the audio turn (7.7) |
-| `audio_play_math.h` | The pure math of the pump of a play (7.8) |
+| `audio_play_math.h` | The pure math of the pump and of the open of a play (7.8) |
 | `audio_math.h`, `audio_spatial.h` | The pure math, with checks in `bwvr/test/controller_math/` |
 
 Each hook that patches a function of the exe checks the first bytes of the
@@ -1170,7 +1170,7 @@ The call runs these functions on the thread of the caller:
 | `ctor` | `0xBFF0` | the play object (`operator new(0xE8)`) |
 | `params` | `0xC1A0` | the parameters of the play |
 | `queue` | `0x5FF0` | the play goes to the session. At its end it runs the pump when the byte at `+5` is 0 |
-| `open` | `0xC230` | the check of the format of the wave. By the format and the state of the loader it calls the open function of the wave object on the thread of the call, or it gives the wave to the loader thread (I) |
+| `open` | `0xC230` | the test of the flags of the wave (`flags`, `0xD020`), then `loader` (`0x2B670`). See "The open of the wave" below (V) |
 | `add` | `0x60F0` | the play goes to its channel |
 | `clear` | `0x7580` | flag 1: the play removes the queue of the channel. It then runs the sort when the session asks for it |
 | `append` | `0x7660` | the play goes into the queue of the channel, and the session asks for a sort |
@@ -1182,6 +1182,34 @@ whatever the byte at `+5` says (V). I: a channel of the atmosphere has a play
 in its queue most of the time, so `clear` finds the session asking for a sort,
 and this is why the byte alone does not remove the 17 to 30 ms. The time can also be in
 `open`, in `voice` or in `ctor`. The parts line (below) says which.
+
+**The open of the wave (V for the code).** `loader` (RVA `0x2B670`) is the
+open function of the "Wave Loader" object of the session (`session+0x158`: a
+critical section, two events and a thread with the ini priority "Wave Loader
+Priority", default -1). It asks `format` (RVA `0x265D0`). The format tag of
+the source (a pointer at `source+0x1C`) decides:
+
+| Format tag | The open |
+| --- | --- |
+| 1 (PCM), 3 (float) | at once, on the thread of the call |
+| 2 (MS ADPCM), 6 (A-law), 0x11 (IMA ADPCM) | on the loader thread until the audio compression manager has loaded (the byte at RVA `0x47828` is 0), and at once on the thread of the call after that |
+| each other tag, and a source with no format | on the loader thread |
+
+A session with no loader thread opens each wave at once. The open at once
+calls the virtual function at `+0x10` of the source (`source.Open`) and then
+the function at `+0x18` of the reader that it made (the start position). For
+PCM and float this makes a "PCM_Source" reader and takes no system call. For
+the other tags `src_map` (RVA `0x26510`) makes a decoder object that
+`dec_init` (RVA `0x257B0`) sets up: it loads `msacm32.dll` the first time,
+gets `acmFormatSuggest`, `acmStreamOpen`, `acmStreamSize` and
+`acmStreamPrepareHeader` by `GetProcAddress`, and runs them. The open on the
+loader thread puts a request in the list of the loader (under its critical
+section, with a reference to the source and to the play) and sets its event
+when the list was empty. The loader thread then does the same two virtual
+calls and sets the flag at `play+0xDC`. Until that flag is set the play has no
+reader (`play+0xE4` is 0) and the channel mixes silence for it. The code that
+reads the flag treats a play with no flag as "not loaded yet", because the
+game uses this way for each wave of a tag that is not PCM.
 
 **What the mod does.** `audio_play_now` hooks `sort` and `pump`. The hook looks
 at the call that the frame thread has in progress. In a play that the mode
@@ -1248,6 +1276,78 @@ mod before the original call.
 ```
 audio play   : parts of a play on the frame thread in the last 10 s (each time includes the parts below it). a sound of the atmosphere: N plays, bad_ptr in N (1.0 runs, mean T us, most T us, N of 5 ms or more), ctor in N (...), ... Another sound: N plays, ...
 ```
+
+**The timers below the open.** `audio_play_parts=1` also puts a timer on
+`flags`, `loader`, `format`, the four `Open` functions that the vtables of the
+sources use (`src_map` `0x26510`, `src_base` `0x2C0F0`, `src_mem` `0x246E0`,
+`src_file` `0x25E40`), the PCM reader constructor (`pcm_ctor`, `0x29290`), the
+decoder constructor and set up (`dec_ctor` `0x256E0`, `dec_init` `0x257B0`),
+the PCM reader start position (`seek_pcm`, `0x29350`) and the lock of the
+session (`lock`, `0xA2D0`). It writes the system calls of QMixer in the open
+into the same line with the prefix `k32:`, `ole:`, `winmm:` and `acm:`: the
+mod puts a timer in the import table of `QMixer.dll` (an aligned store of
+4 bytes for each entry, no hook) for `EnterCriticalSection`,
+`LeaveCriticalSection`, `SetEvent`, `WaitForSingleObject`, `Sleep`,
+`GetProcAddress`, `LoadLibraryA`, `CreateFileA`, `ReadFile`, `SetFilePointer`,
+`CreateFileMappingA`, `MapViewOfFile`, `HeapAlloc`, `VirtualAlloc`,
+`CoCreateInstance`, `mmioOpenA`, `mmioRead`, `mmioSeek` and `mmioDescend`, and
+for the four `acm` functions, which it gives to QMixer in place of the ones
+from `GetProcAddress`. A system call counts only on the thread of a play,
+inside its open. Each hook of QMixer goes in with one `MH_ApplyQueued`. The
+first 20 opens of a sound of the atmosphere and of another sound have each a
+line:
+
+```
+audio open   : atmosphere 1: source format tag 0x1 (PCM), 1 ch, 22050 Hz, 16 bits, N bytes of data. Wave object: tag 0x1, ... bytes, the same object as the wave of the play. Source vtable RVA 0x37290. Loader thread: yes. Compression manager loaded: no. Path: at once (the model says at once). The open took T us, result 0
+```
+
+`Path` is what the open did (`at once`, `loader thread`, or `unknown`). The
+model is the table above (`audio_play_math.h`, `OpensAtOnce`). The log also
+has one line for each new vtable of a source and of a reader, with the RVA of
+the vtable and the target of the slots `+0xC` to `+0x18`. A target with no
+timer is marked "NO TIMER, a new target": time it in the next run. A line
+`QMixer calls GetProcAddress for NAME` (and `LoadLibraryA`) names each
+function that QMixer gets from the system, once, with the thread. The line
+after the parts line has the opens of the last 10 s by path and the wait of
+`QSWaveMixPump` for the lock of the session on the timer thread (a call that
+is not 0 waits for the frame thread when it holds the lock).
+
+**What the open is on the PC (V, a desktop run).** Each wave that the game
+plays in the test save is PCM, 16 bits, 22050 Hz. The waves of the atmosphere
+are 1 or 2 channels and 28 KB to 122 KB. The other sounds are 1 channel and
+8 KB to 44 KB (one stereo wave of 2.7 MB). All have the source vtable at RVA
+`0x37290` (`src_map` is its Open, `seek_pcm` the start position of its PCM
+reader, vtable `0x373C0`). The compression manager was never loaded, so the
+open of each wave is at once, and the model of the table above and the log
+agree for the 20 opens of each group. On the PC the open takes 1 to 2 us for
+the atmosphere and for the other sounds. So the waves of the atmosphere are
+not ADPCM, and no format work (a decode, a copy of the wave) is in their open.
+The 15 to 23 ms of the Steam Frame are in a call that the PC does not make
+slow: the Frame run with `audio_play_parts=1` names it.
+
+**The loader thread for the open (`audio_open_loader`).** The mod hooks the
+format test. For a play of the mode it answers "loader thread" when the code
+answers "at once". The code of QMixer then queues the open in the way that it
+uses for each other tag, and the frame thread returns after a list insert and
+an event (the timers of `k32:EnterCS` and `k32:SetEvent` show it). Only the
+thread of that play has the changed answer. The loader thread and the timer
+thread see no change, and no byte of the session changes. The modes:
+0 the open runs as QMixer has it (default), 1 the open of a sound of the
+atmosphere goes to the loader thread, 2 each open does (a test value). The
+sound starts when the loader has done the open, and the channel mixes silence
+until then. The sounds of the atmosphere that the mixer of the mod plays (7.4)
+do not change, because QMixer is silent for them. A sound of the atmosphere
+that QMixer plays starts later by the time of the loader thread (the open
+itself, and the wait for a core) and by the 20 ms of the timer pump that gives
+it a voice. If the loader thread cannot run in time, a very short sound
+can end before it starts.
+
+**Test key.** Ctrl, Shift and F6 (with `test_keys=1`) step
+`audio_open_loader` through 0, 1 and 2 (a pulse of 0.08 s is 0, 0.30 s is 1,
+0.55 s is 2). The debug page has the line "Open loader" in the group Sound.
+`audio_open_loader_test=N` steps the mode at frame `N` of the controllers. The
+hook on the format test is in when `audio_open_loader` is above 0, when
+`test_keys=1`, when the test frame is set, or with `audio_play_parts=1`.
 
 **Test key.** Ctrl, Shift and K (with `test_keys=1`) step `audio_play_now`
 through 0, 1 and 2. A pulse of 0.08 s is 0, one of 0.30 s is 1, and one of
@@ -1323,6 +1423,7 @@ behavior is in the last column.
 | `audio_atmos_toward` | 1 | A single sound of the atmosphere goes toward the land of its kind | 0: a random place on the ring |
 | `audio_stop_wait` | 0 | The mod skips the wait of 20 ms of the audio DLL at the stop of a sound that the mixer of the mod plays (7.6) | 1: each stop holds the frame thread for 20 ms |
 | `audio_play_now` | 0 | The frame thread skips the sort and the pump of QMixer in `QSWaveMixPlayEx` and the timer thread does the work: 1 for a sound that the mixer of the mod plays, 2 also for each sound of the atmosphere, 3 for each sound (7.8). Test key: Ctrl, Shift and K | 0: the work runs in each play, as in the game |
+| `audio_open_loader` | 0 | The open of the wave of a play goes to the loader thread of QMixer instead of the thread of the caller: 1 for a sound of the atmosphere, 2 for each sound (7.8). Test key: Ctrl, Shift and F6 | 0: the open runs as QMixer has it |
 | `audio_play_fix` | 0 | The same for the pump alone, through the byte at `+5` of the session. A test value (7.8). Test key: Ctrl, Shift and P | 0: the pump runs in each play, as in the game |
 | `audio_play_parts` | 0 | Test only: times the functions of QMixer that a play runs on the frame thread, and puts a second line in the `audio play` line (7.8) | 0: no hook, no line |
 | `audio_turn_watch` | 0 | Test only: times each call of the audio turn into the audio DLL and QMixer, and each wait call of the two DLLs, on the frame thread. It needs `turn_parts=1` and `time_log=1` (7.7) | 0: no timer, no line |
@@ -1333,7 +1434,7 @@ behavior is in the last column.
 | `audio_capture` | 0 | Test only: write the stream to `bwvr-audio.wav` | |
 | `audio_test_voice`, `audio_test_path`, `audio_test_step_ms`, `audio_test_solo` | 0, empty, 3000, 0 | Test only: the test voice and the test bed (section 11) | |
 | `audio_test_tag`, `audio_test_tag_bank`, `audio_test_bank` | 0, 1, -1 | Test only: a sound tag on the Creature, and a list of the loops of a bank | |
-| `audio_play_fix_test`, `audio_play_now_test` | 0 | Test only: the frame of the controllers at which `audio_play_fix` or `audio_play_now` steps, as the test key does (7.8) | |
+| `audio_play_fix_test`, `audio_play_now_test`, `audio_open_loader_test` | 0 | Test only: the frame of the controllers at which `audio_play_fix`, `audio_play_now` or `audio_open_loader` steps, as the test key does (7.8) | |
 | `audio_stop_wait_test` | 0 | Test only: the frame of the controllers at which `audio_stop_wait` changes, as the test key does (7.6) | |
 
 `audio_test_tag` is a sample number. The mod puts a sound tag with this sample
@@ -1360,7 +1461,8 @@ Hand while the mouse moves.
 Ctrl and Pause (with `test_keys=1`) change `audio_stop_wait` (7.6).
 
 Ctrl, Shift and P (with `test_keys=1`) step `audio_play_fix` through 0, 1 and
-2 (7.8). Ctrl, Shift and K step `audio_play_now` in the same way.
+2 (7.8). Ctrl, Shift and K step `audio_play_now` in the same way, and Ctrl,
+Shift and F6 step `audio_open_loader`.
 
 Ctrl and Shift with the equals key of the row of digits (with `test_keys=1`)
 change `audio_take_loop` (6.4). The pointing controller gives a long pulse for 1 and a
@@ -1559,10 +1661,12 @@ the game window in front), and the level balance by ear.
   is `QSWaveMixPlayEx` for a sound of the atmosphere, in the code of QMixer
   and in no wait (7.7). The byte of `audio_play_fix` does not remove it.
   `audio_play_now` (7.8) defers the sort and the pump, which the code runs in
-  that call. Not shown: that these two are the time of the call, and that the
-  timer thread does the work with no new wait of the frame thread for the
-  mutex of the session. Only a headset run shows it. The line of
-  `audio_play_parts=1` shows where the time is.
+  that call, and it did not shorten the call: nearly all of the time is in
+  `open`. The waves of the atmosphere are PCM and open in 1 to 2 us on the PC.
+  `audio_open_loader=1` (7.8) sends that open to the loader thread. Not shown:
+  which function below `open` has the time on the Frame, and that the loader
+  thread removes it with no new wait of the frame thread. Only a headset run
+  shows it. The line of `audio_play_parts=1` shows where the time is.
 - A sound with no object that the game asks for at a place of its own keeps
   the test of the game, with the game camera 400 units away in the God view.
   Only the loop of a bulk take has the test of the ears (6.4). Sample 52 of

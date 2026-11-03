@@ -271,6 +271,8 @@ void AudioPlayFixCycle();
 void AudioPlayNowCycle();
 int AudioPlayFixValue();
 int AudioPlayNowValue();
+void AudioOpenLoaderCycle();
+int AudioOpenLoaderValue();
 int AudioTakeLoopValue();
 void AudioTakeLoopChange(const char* by);
 // The Temple (temple.cpp).
@@ -604,6 +606,9 @@ const Switch kSwitches[] = {
     {kGroupSound, L"Play now", L"QMixer work in a sound start",
      "audio_play_now", AudioPlayNowValue,
      [](const char*) { AudioPlayNowCycle(); }, L"in play|mod sounds|atmosphere"},
+    {kGroupSound, L"Open loader", L"QMixer open of a wave in a sound start",
+     "audio_open_loader", AudioOpenLoaderValue,
+     [](const char*) { AudioOpenLoaderCycle(); }, L"in play|atmosphere|each"},
     {kGroupSound, L"Take loop", L"Ears start the loop of a take",
      "audio_take_loop", AudioTakeLoopValue, AudioTakeLoopChange, L"off|on"},
 

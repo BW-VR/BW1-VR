@@ -36,6 +36,8 @@
 #include "object_timer.h"
 #include "thread_wait.h"
 #include "time_log.h"
+#include "trace_rec.h"
+#include "turn_parts.h"
 #include "walk_parts.h"
 #include "ddraw_census.h"
 #include "vk_core.h"
@@ -2023,6 +2025,8 @@ void StartVrStep() {
     TextureFilterInstall(g_anisotropy);
     GdiWatchInstall();
     PassGuardSetOptions(g_skip_hand_pass2, g_skip_physics_pass2);
+    // The timeline first: the hooks of the parts of the frame read g_trace.
+    TraceInstall();
     PassGuardInstall();
     FrameTimersInstall();
     TickDirectInstall(g_tick_direct);
@@ -2341,6 +2345,8 @@ void StartVrStep() {
     // After the last hook of the mod: a timer on a function that the mod
     // hooks later would stop that hook (MH_ERROR_ALREADY_CREATED).
     WalkPartsInstallEarly();
+    // The timers of the timeline (trace=1), after every other hook.
+    TurnPartsInstallLate();
   }
 
   // Headless measuring runs the two passes and throws the pictures away, so
@@ -2686,6 +2692,9 @@ void __cdecl h_FinishFrame() {
     o_FinishFrame();
     return;
   }
+  // The timeline: the whole hook, and the call of the game inside it.
+  static const trace_events::Def kHookDef = {"h_FinishFrame (mod)", "mod", {"frame", nullptr, nullptr, nullptr}};
+  TraceScope trace_hook(&kHookDef, static_cast<float>(g_frame));
   // The time of this hook in a scene walk (walk_parts, a test aid). The hook
   // reads its return address, so a timer cannot use a stub here.
   WalkPartsScope walk_parts_scope(kWalkHookFinishFrame);
@@ -2702,9 +2711,13 @@ void __cdecl h_FinishFrame() {
   // The pointer on the screen quad (controllers.cpp): the Setup callback in
   // FinishFrame reads the pointer of the game.
   if (!in_pass && !IntroInPass()) ControllersScreenApply();
+  static const trace_events::Def kGameFinishDef = {"LH3DRender::FinishFrame 0x0082F460", "game", {"frame", nullptr, nullptr, nullptr}};
+  const int64_t trace_finish = g_trace ? TraceNow() : 0;
   o_FinishFrame();
+  if (trace_finish != 0) TraceBar(&kGameFinishDef, trace_finish, TraceNow(), static_cast<float>(g_frame));
   // The present of the game was in this FinishFrame (time_log.h).
   TimeLogPresent();
+  TraceFramePresent();
   WalkPartsPresent();
   ObjectTimerFrame();
   LandObjectsFrame();

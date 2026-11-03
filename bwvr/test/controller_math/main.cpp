@@ -3602,6 +3602,7 @@ void CreatureChecks() {
 #include "time_log_checks.h"
 #include "long_frame_checks.h"
 #include "take_phase_checks.h"
+#include "trace_checks.h"
 #include "walk_parts_checks.h"
 #include "turn_parts_checks.h"
 #include "audio_watch_checks.h"
@@ -4066,6 +4067,7 @@ int main() {
   time_log_checks::TimeLogChecks();
   long_frame_checks::LongFrameChecks();
   take_phase_checks::TakePhaseChecks();
+  trace_checks::TraceChecks();
   walk_parts_checks::WalkPartsChecks();
   turn_parts_checks::TurnPartsChecks();
   audio_watch_checks::AudioWatchChecks();

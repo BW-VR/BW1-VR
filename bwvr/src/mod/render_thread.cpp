@@ -50,6 +50,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "trace_rec.h"
 #include "MinHook.h"
 #include "one_walk_math.h"
 #include "d3d7_thread.h"
@@ -1119,6 +1120,7 @@ bool SpinForWrite(uint32_t read, int64_t budget) {
 // spins for a short time (thread_wait.cpp), because a wake from a sleep is a
 // call of the kernel on the writer. Then it sleeps.
 DWORD WINAPI Worker(LPVOID) {
+  TraceNameThread("render thread (Direct3D 9 calls)", 11);
   for (;;) {
     uint32_t read = LoadIndex(&g_read);
     uint32_t write = LoadIndex(&g_write);
@@ -1153,6 +1155,7 @@ DWORD WINAPI Worker(LPVOID) {
     // of what was written, and the count of the writer is read again only
     // then: each read of a count of the other core moves its cache line.
     const uint64_t start = Ticks();
+    const int64_t trace_begin = g_trace ? TraceNow() : 0;
     // The buffers take the draws of [read, write) before they play. A new
     // part of the queue is prepared only when the part before it has
     // played, because the marks of the records point into g_prepared.
@@ -1178,6 +1181,10 @@ DWORD WINAPI Worker(LPVOID) {
     }
     InterlockedExchangeAdd64(&g_busy_ticks,
                              static_cast<LONG64>(Ticks() - start));
+    if (trace_begin != 0) {
+      static const trace_events::Def kWorkDef = {"render thread work", "render", {nullptr, nullptr, nullptr, nullptr}};
+      TraceBar(&kWorkDef, trace_begin, TraceNow());
+    }
   }
 }
 

@@ -48,6 +48,7 @@
 #include "audio.h"
 #include "audio_watch.h"
 #include "audio_watch_math.h"
+#include "trace_rec.h"
 #include "thread_id.h"
 #include "time_log.h"
 
@@ -99,6 +100,18 @@ struct Range {
   const char* name = "";
 };
 Range g_range[4];  // the game, LHaudiodllR.dll, QMixer.dll, the mod
+
+// The bar of a watched call in the timeline (trace_rec.h). The name of a timer
+// lives as long as the process.
+void TraceCall(int id, int64_t begin, int64_t end) {
+  static trace_events::Def defs[aw::kMaxTimers];
+  if (id < 0 || id >= aw::kMaxTimers || g_names[id] == nullptr) return;
+  if (defs[id].name == nullptr) {
+    defs[id].cat = "audio";
+    defs[id].name = g_names[id];
+  }
+  TraceBar(&defs[id], begin, end);
+}
 
 int64_t Now() {
   LARGE_INTEGER t;
@@ -160,9 +173,13 @@ extern "C" uint32_t __cdecl AudioWatchEnter(uint32_t id, uint32_t* ret_slot) {
 // function. Integers only.
 extern "C" uint32_t __cdecl AudioWatchExit(uint32_t esp) {
   aw::Closed closed;
-  const uint32_t ret = g_stack.Return(Now(), esp, &closed);
+  const int top = g_stack.Match(esp);
+  const int64_t begin = top >= 0 ? g_stack.open[top].start : 0;
+  const int64_t now = Now();
+  const uint32_t ret = g_stack.Return(now, esp, &closed);
   if (ret != 0) {
     g_turn.AddCall(closed, g_ms_per_tick);
+    if (g_trace) TraceCall(closed.id, begin, now);
     return ret;
   }
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&NoReturn));
@@ -500,9 +517,13 @@ void AudioWatchEnd(int kind, int64_t token) {
   if (token == 0 || kind < 0 || kind >= kAwKinds) return;
   if (ThisThreadId() == g_thread) {
     if (!g_active || g_stack.depth < 2 || g_stack.open[g_stack.depth - 1].id != kind + 1) return;
-    g_turn.AddCall(g_stack.CloseTop(Now()), g_ms_per_tick);
+    const int64_t begin = g_stack.open[g_stack.depth - 1].start;
+    const int64_t now = Now();
+    g_turn.AddCall(g_stack.CloseTop(now), g_ms_per_tick);
+    if (g_trace) TraceCall(kind + 1, begin, now);
     return;
   }
+  if (g_trace) TraceCall(kind + 1, token, Now());
   if (kind >= 5) return;
   const double us100 = static_cast<double>(Now() - token) * 1.0e7 / static_cast<double>(g_hz.QuadPart);
   const LONG v = us100 < 0.0 ? 0 : (us100 > 2.0e9 ? 2000000000 : static_cast<LONG>(us100));

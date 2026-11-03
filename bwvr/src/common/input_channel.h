@@ -212,7 +212,17 @@ struct Head {
   uint32_t key_write;      // the app: the keys written
   uint32_t key_read;       // the mod: the keys read
   uint32_t keys_dropped;   // the app: the keys that a full ring dropped
-  uint32_t reserved[47];
+  // THE SAVE OF THE TIMELINE (trace, docs/android.md, "The timeline"). The
+  // times are ns of CLOCK_BOOTTIME, the end of the window of the save.
+  uint32_t trace_ask;       // the app: the count of its save requests
+  uint32_t trace_ask_lo;    // the app: the end of the window of the last request
+  uint32_t trace_ask_hi;
+  uint32_t trace_done;      // the mod: the request whose part of the game is written
+  uint32_t trace_game_ask;  // the mod: the count of its own saves (a long frame, the key)
+  uint32_t trace_game_lo;   // the mod: the end of the window of the last one
+  uint32_t trace_game_hi;
+  uint32_t trace_on;        // the mod: 1 while it records (trace=1)
+  uint32_t reserved[39];
 };
 static_assert(sizeof(Head) == kHeadBytes, "Head");
 static_assert(offsetof(Head, want) == 32 && offsetof(Head, event_read) == 48,

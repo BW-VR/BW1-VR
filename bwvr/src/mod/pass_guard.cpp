@@ -33,6 +33,7 @@
 #include "long_frame_math.h"
 #include "scene_sample.h"
 #include "time_log.h"
+#include "trace_rec.h"
 #include "turn_parts.h"
 
 extern void ModLog(const char* format, ...);
@@ -312,6 +313,11 @@ void __fastcall h_ProcessNetworkPackets(void* self, void* unused) {
   QueryPerformanceCounter(&after);
   if (g_turn_parts) TurnPartsTurnEnd(after.QuadPart);
   if (g_time_log_slow) TimeLogCall(long_frame_math::kTurn, false);
+  if (g_trace) {
+    static const trace_events::Def kTurnDef = {
+        "GGame::ProcessNetworkPackets (game turn)", "game", {nullptr, nullptr, nullptr, nullptr}};
+    TraceBar(&kTurnDef, before.QuadPart, after.QuadPart);
+  }
   const uint64_t spent = after.QuadPart - before.QuadPart;
   SceneSampleTurnEnd(g_frequency.QuadPart != 0
                          ? static_cast<double>(spent) * 1000.0 /

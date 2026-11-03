@@ -95,6 +95,7 @@
 #include "audio_math.h"
 #include "audio_play_math.h"
 #include "audio_spatial.h"
+#include "trace_rec.h"
 #include "debug_menu.h"
 
 void ModLog(const char* format, ...);
@@ -568,6 +569,11 @@ void Render(int16_t* stereo, int frames, int rate) {
   LARGE_INTEGER end, frequency;
   QueryPerformanceCounter(&end);
   QueryPerformanceFrequency(&frequency);
+  if (g_trace) {
+    static const trace_events::Def kRenderDef = {"mod voices render (mixer thread)", "audio", {nullptr, nullptr, nullptr, nullptr}};
+    TraceNameThread("QMixer mixer (render)", 13);
+    TraceBar(&kRenderDef, start.QuadPart, end.QuadPart);
+  }
   const double us = 1e6 * static_cast<double>(end.QuadPart - start.QuadPart) /
                     static_cast<double>(frequency.QuadPart);
   g_render_us += us;
@@ -635,6 +641,16 @@ void ReleaseChannel(int channel, bool tail) {
 
 // Times one run of a part on the thread of a play with audio_play_parts. The
 // system calls count only inside the open (RVA 0xC230).
+// The def of a part in the timeline (trace_rec.h).
+const trace_events::Def* PartDef(int part) {
+  static trace_events::Def defs[audio_play::kParts];
+  if (defs[part].name == nullptr) {
+    defs[part].cat = "audio";
+    defs[part].name = audio_play::kPartInfo[part].name;
+  }
+  return &defs[part];
+}
+
 struct PartTimer {
   PartTimer(int part) : part_(part), call_(t_call), start_(0) {
     if (call_ != nullptr && call_->timing &&
@@ -649,6 +665,7 @@ struct PartTimer {
       LARGE_INTEGER t;
       QueryPerformanceCounter(&t);
       call_->parts.Add(part_, t.QuadPart - start_);
+      if (g_trace) TraceBar(PartDef(part_), start_, t.QuadPart);
     }
   }
   int part_;
@@ -982,6 +999,7 @@ int __fastcall h_PartOpen(void* self, void* edx, int flags) {
   QueryPerformanceCounter(&t1);
   call->in_open = false;
   call->parts.Add(audio_play::kPartOpen, t1.QuadPart - t0.QuadPart);
+  if (g_trace) TraceBar(PartDef(audio_play::kPartOpen), t0.QuadPart, t1.QuadPart);
   // The reader that the open made: a play that opened at once has it now.
   uint32_t reader = 0, reader_vt = 0;
   if (ReadU32(play + 0xE4, &reader) && reader != 0 &&
@@ -1386,6 +1404,10 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
     r = o_PlayEx(session, channel, flags, wave, loops, params);
     QueryPerformanceCounter(&t1);
   }
+  if (g_trace) {
+    static const trace_events::Def kPlayDef = {"QMixer play (PlayEx)", "audio", {"atmosphere", nullptr, nullptr, nullptr}};
+    TraceBar(&kPlayDef, t0.QuadPart, t1.QuadPart, atmosphere ? 1.0f : 0.0f);
+  }
   if (pump_flag != nullptr) *pump_flag = 0;
   if (g_pump_known) {
     const bool changed = pump_flag != nullptr || call.defer;
@@ -1419,10 +1441,15 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
 void WINAPI h_Pump() {
   LARGE_INTEGER t0, t1;
   t_in_pump = true;
+  TraceNameThread("QMixer timer (pump)", 12);
   QueryPerformanceCounter(&t0);
   o_Pump();
   QueryPerformanceCounter(&t1);
   t_in_pump = false;
+  if (g_trace) {
+    static const trace_events::Def kPumpDef = {"QSWaveMixPump", "audio", {nullptr, nullptr, nullptr, nullptr}};
+    TraceBar(&kPumpDef, t0.QuadPart, t1.QuadPart);
+  }
   EnterCriticalSection(&g_play_cs);
   g_pump_stat.Add(t1.QuadPart - t0.QuadPart, g_qpc_hz / 200);
   LeaveCriticalSection(&g_play_cs);

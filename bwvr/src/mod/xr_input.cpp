@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "trace_rec.h"
 #include "../common/input_channel.h"
 #include "frame_pace_math.h"
 #include "thread_wait.h"
@@ -337,6 +338,7 @@ bool XrInputPace() {
   if (!g_pace_due) return false;
   g_pace_due = false;
   if (g_chan == nullptr || g_options.pace == 0 || VkSceneDevice()) return false;
+  const int64_t trace_begin = g_trace ? TraceNow() : 0;
   const int64_t start = PaceNow();
   PaceLook(start);
   const int64_t deadline = fp::Deadline(g_pace, start);
@@ -352,6 +354,10 @@ bool XrInputPace() {
   fp::End(&g_pace, now);
   const double ms = (now - start) / 1e6;
   TimeLogPace(ms);
+  if (trace_begin != 0) {
+    static const trace_events::Def kPaceDef = {"wait of the pace (XrInputPace)", "wait", {"ms", nullptr, nullptr, nullptr}};
+    TraceBar(&kPaceDef, trace_begin, TraceNow(), static_cast<float>(ms));
+  }
   ++g_pace_waits;
   g_pace_ms += ms;
   if (ms > g_pace_ms_most) g_pace_ms_most = ms;
@@ -517,6 +523,8 @@ void XrInputHaptic(int index, float amplitude, float seconds) {
   }
   LeaveCriticalSection(&g_push_lock);
 }
+
+input_channel::File* XrInputChannel() { return g_chan; }
 
 uint32_t XrInputSlotFrame() { return g_have_slot ? g_slot_frame : 0u; }
 

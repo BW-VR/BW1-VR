@@ -44,6 +44,15 @@
 //                   part is its address (fn_00730760)
 //
 // It needs time_log=1, which writes the lines.
+//
+// THE TIMELINE (trace=1, trace_rec.h). The same stubs also give a bar to the
+// timeline for each part that returns, so with trace=1 the hooks go in even
+// with turn_parts=0 (no line is written then). A second group of stubs times
+// the callees of GGame::ProcessGraphicsEngine, two levels deep (kGraphicsDefs):
+// the scene walk, the draws of the land, the interface and the particles. The
+// group counts only between TurnPartsGraphicsBegin and TurnPartsGraphicsEnd
+// (the call of ProcessGraphicsEngine on the frame thread), and only with
+// trace=1.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -56,6 +65,7 @@
 #include "audio_watch.h"
 #include "thread_id.h"
 #include "time_log.h"
+#include "trace_rec.h"
 #include "turn_parts.h"
 #include "turn_parts_math.h"
 #include "walk_parts_math.h"
@@ -80,6 +90,54 @@ struct Def {
   const char* name;
   int filter;
 };
+
+// The callees of GGame::ProcessGraphicsEngine (0x0054D850) and of its callees,
+// for the timeline. The names are those of the symbol file of the decompilation
+// project that the mod uses for its names (docs/address-map.md). GGame::
+// Process3dEngine has its own bars (stereo.cpp), and LH3DRender::FinishFrame
+// has its own bar in h_FinishFrame (mod_main.cpp). The parts that the game turn
+// also calls (PhysicsObject::GameTurnUpdate, fn_007DEE00) have a timer in kDefs.
+const Def kGraphicsDefs[] = {
+    // The callees of ProcessGraphicsEngine.
+    {0x007E4810, "LHMouse::UpdateDeltaPos", kAll}, {0x00441F80, "GCamera::Update", kAll},
+    {0x005CE9E0, "GInterface::PreDrawProcess", kAll},
+    {0x005CEAB0, "GInterface::PostDrawProcess", kAll},
+    {0x005C5EB0, "HelpSystem::PostDrawProcess", kAll},
+    // Their callees.
+    {0x00442720, "Zoomer::Update", kAll}, {0x00819920, "LH3DTech::UpdateCamera", kAll},
+    {0x00803090, "LH3DIsland::GetAltitude", kAll},
+    {0x00442EF0, "GCamera::UpdateGameThingWithPosData", kAll},
+    {0x005D0610, "GInterface::UpdateHandRenderCollide", kAll},
+    {0x00756170, "Villager::ShowDiscipleIcon", kAll}, {0x005D5980, "fn_005D5980", kAll},
+    {0x005D9130, "GInterface::UpdateAllLeashes", kAll},
+    {0x005D5A70, "GInterface::UpdateInterfaceCollide", kAll},
+    {0x005D8320, "GInterface::UpdateCollideImmersion", kAll},
+    // The callees of Process3dEngine.
+    {0x0082F0E0, "LH3DRender::StartFrame", kAll}, {0x008357A0, "LH3DAtmos::Update3D", kAll},
+    {0x00825190, "TemporaryShadow::UpdateAll", kAll},
+    {0x005E2160, "GLandAlignement::DrawSky", kAll}, {0x00794370, "Temple::Draw", kAll},
+    {0x00793EE0, "Temple::Update", kAll}, {0x005E3F60, "GLandscape::PreDraw", kAll},
+    {0x006CA6E0, "PSysLightMaps::AddDrawing", kAll},
+    {0x00871F00, "LH3DLandscape::TextureUpdateThread", kAll},
+    {0x005E42E0, "GLandscape::Draw", kAll}, {0x0048DD70, "LH3DCreature::DrawFightSparkles", kAll},
+    {0x005D9310, "GInterface::DrawAllLeashes", kAll}, {0x00646DE0, "PhysicsObject::DrawAll", kAll},
+    {0x0046E490, "CHand::UpdateHeldObject", kAll}, {0x0046D100, "CHand::AddDrawing", kAll},
+    {0x00518640, "GInterface::Draw", kAll}, {0x00845D00, "UpdateLiquidParticles", kAll},
+    {0x00845C50, "DrawLiquidParticles", kAll}, {0x005533B0, "GGame::Draw", kAll},
+    {0x00520E70, "EditorIconBase::DrawMouseOver", kAll},
+    {0x0068F5E0, "PSysGlobal::DrawLoop", kAll}, {0x007203F0, "Spell::DrawSpells", kAll},
+    {0x0063E0D0, "GParticleContainer::DrawParticleContainers", kAll},
+    {0x0064C140, "GPlayer::DrawPlayers", kAll}, {0x007447F0, "TownCentre::DrawAll", kAll},
+    {0x00836250, "LH3DAtmos::Render3D", kAll}, {0x008366A0, "LH3DAtmos::Render2D", kAll},
+    {0x006EB9D0, "GScript::ProcessFade", kAll}, {0x00794280, "Temple::UpdateFade", kAll},
+    {0x005C59A0, "HelpSystem::Draw3D", kAll}, {0x005E57B0, "ClearLight", kAll},
+    {0x00826C90, "InfluenceCircle::Draw", kAll}, {0x007627E0, "VillagerNameBlock::DeleteAll", kAll},
+    {0x007635D0, "Town::DisplayHowImpressed", kAll},
+    {0x0064C1A0, "GPlayer::DrawComputerPlayers", kAll},
+    {0x00445E10, "GCameraEditor::Draw3DPart", kAll},
+    {0x00644FC0, "PhysicsObject::GameTurnUpdate", kAll},
+};
+constexpr int kGraphicsDefCount = sizeof(kGraphicsDefs) / sizeof(kGraphicsDefs[0]);
 
 // The parts: GGame::ProcessOneGameTurn (0x0054D620), the three phases of the
 // turn, and the functions that the phases call. Every direct callee of the
@@ -146,6 +204,9 @@ struct Timer {
   int filter = kAll;
   char name[48] = {};
 };
+// The bar of a part in the timeline: the name and the address.
+trace_events::Def g_trace_defs[tp::kMaxParts];
+char g_trace_names[tp::kMaxParts][72];
 
 Timer g_timers[tp::kMaxParts];
 const char* g_names[tp::kMaxParts];
@@ -157,6 +218,8 @@ const int kStubBytes = 10;
 
 DWORD g_thread = 0;  // the frame thread
 bool g_in_turn = false;
+bool g_in_graphics = false;  // in the call of GGame::ProcessGraphicsEngine (trace=1)
+bool g_turn_lines = false;   // turn_parts=1: the lines of the log
 uint64_t g_seen_in_turn = 0;       // calls of a stub in a game turn on the frame thread
 uint64_t g_seen_outside = 0;       // calls of a stub on the frame thread outside a game turn
 uint64_t g_seen_other_thread = 0;  // calls of a stub on another thread
@@ -202,7 +265,7 @@ extern "C" uint32_t __cdecl TurnPartsEnter(uint32_t id, uint32_t* ret_slot, uint
   } else {
     ++g_seen_in_turn;
   }
-  if (g_in_turn && ThisThreadId() == g_thread &&
+  if ((g_in_turn || g_in_graphics) && ThisThreadId() == g_thread &&
       tp::Timed(true, true, g_stack.nest[id], g_stack.depth)) {
     const bool take = t.filter != kMadeAnimation || SlotEmpty(self, ret_slot[1], ret_slot[2]);
     const int64_t now = Now();
@@ -222,7 +285,11 @@ extern "C" uint32_t __cdecl TurnPartsExit(uint32_t esp) {
   const int64_t now = Now();
   const int top = g_stack.Match(esp);
   const bool audio_turn = g_audio_turn_id != 0 && top >= 0 && g_stack.open[top].id == g_audio_turn_id;
+  // The bar of the part in the timeline, from its call to its return.
+  const int trace_id = top >= 0 ? g_stack.open[top].id : 0;
+  const int64_t trace_begin = top >= 0 ? g_stack.open[top].start : 0;
   const uint32_t ret = g_stack.Return(now, esp);
+  if (g_trace && ret != 0 && trace_id > 0) TraceBar(&g_trace_defs[trace_id], trace_begin, now);
   if (audio_turn) AudioWatchTurnEnd(now);
   if (ret != 0) return ret;
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&NoReturn));
@@ -439,13 +506,15 @@ void IniText(const char* key, char* out, DWORD size) {
 
 }  // namespace
 
-// From PassGuardInstall, on the frame thread.
-void TurnPartsInstall() {
-  if (IniKey("turn_parts", 0) == 0) return;
-  if (IniKey("time_log", 1) == 0) {
-    ModLog("turn parts   : turn_parts=1 needs time_log=1, which writes the lines. No hook");
-    return;
+static void InstallNow() {
+  // turn_parts=1 writes the lines of the log. trace=1 needs the same stubs for
+  // the bars of the timeline, with no line.
+  g_turn_lines = IniKey("turn_parts", 0) != 0;
+  if (g_turn_lines && IniKey("time_log", 1) == 0) {
+    ModLog("turn parts   : turn_parts=1 needs time_log=1, which writes the lines. No line");
+    g_turn_lines = false;
   }
+  if (!g_turn_lines && !g_trace) return;
   QueryPerformanceFrequency(&g_hz);
   g_thread = ThisThreadId();
   g_stubs = static_cast<uint8_t*>(VirtualAlloc(nullptr, tp::kMaxParts * kStubBytes,
@@ -461,6 +530,7 @@ void TurnPartsInstall() {
   g_timers[0].shown = 0x0054CC30;  // GGame::ProcessNetworkPackets, the turn itself
   int in = 0;
   int defs_in = 0;
+  int graphics_in = 0;
   for (int i = 0; i < kDefCount; ++i) {
     char auto_name[32];
     _snprintf_s(auto_name, sizeof(auto_name), _TRUNCATE, "fn_%08X",
@@ -470,6 +540,15 @@ void TurnPartsInstall() {
     if (i == kProcessTurnDef) g_process_turn_id = ok ? g_count - 1 : 0;
     in += ok ? 1 : 0;
     defs_in += ok ? 1 : 0;
+  }
+  // The parts of the graphics engine, for the timeline only.
+  if (g_trace) {
+    for (int i = 0; i < kGraphicsDefCount; ++i) {
+      if (Add(kGraphicsDefs[i].address, kGraphicsDefs[i].name, kGraphicsDefs[i].filter)) {
+        ++in;
+        ++graphics_in;
+      }
+    }
   }
   char list[1536];
   IniText("turn_parts_add", list, sizeof(list));
@@ -499,13 +578,38 @@ void TurnPartsInstall() {
   g_turn_parts = true;
   for (int i = 1; i < g_count; ++i) {
     if (g_timers[i].shown == kAudioTurnAddress) g_audio_turn_id = i;
+    // The bar of the timeline: the name of the part and its address.
+    _snprintf_s(g_trace_names[i], sizeof(g_trace_names[i]), _TRUNCATE, "%s 0x%08X",
+                g_timers[i].name, static_cast<unsigned>(g_timers[i].shown));
+    g_trace_defs[i].name = g_trace_names[i];
+    g_trace_defs[i].cat = "game";
   }
+  if (g_trace) {
+    ModLog("turn parts   : trace=1. %d timers give bars to the timeline, %d of them on the "
+           "callees of ProcessGraphicsEngine (two levels deep)",
+           in, graphics_in);
+  }
+  if (!g_turn_lines) return;
   if (g_audio_turn_id != 0) AudioWatchInit();
   ModLog("turn parts   : turn_parts=1. %d timers on the functions of the game turn (%d of %d "
          "parts and %d more by turn_parts_add). Each 10 s one line with the parts of the turns "
          "of %.0f ms or more, and with slow_frame_ms the parts of the turn in each line of a "
          "long frame. The time of a part is exclusive: less the parts that it calls",
          in, defs_in, kDefCount, more, tp::kLongTurnMs);
+}
+
+// From PassGuardInstall, on the frame thread. With trace=1 the install comes
+// at the end of the hooks of the mod instead (TurnPartsInstallLate).
+void TurnPartsInstall() {
+  if (!g_trace) InstallNow();
+}
+
+// From mod_main.cpp, after the last hook of the mod, on the frame thread. A
+// timer on a function that the mod hooks later would stop that hook
+// (MH_ERROR_ALREADY_CREATED), and the many timers of the timeline all go in with
+// one MH_ApplyQueued.
+void TurnPartsInstallLate() {
+  if (g_trace) InstallNow();
 }
 
 // h_ProcessNetworkPackets: the call starts. The stack starts with the turn as
@@ -529,13 +633,29 @@ void TurnPartsTurnEnd(int64_t end) {
     static tp::Turn turn;
     turn.FromStack(g_stack, g_count, g_ms_per_tick);
     g_window.AddTurn(turn, g_count);
-    if (g_time_log_slow) g_frame.AddTurn(turn, g_count);
+    if (g_time_log_slow && g_turn_lines) g_frame.AddTurn(turn, g_count);
   }
   g_stack = wp::Stack();
 }
 
+// frame_timers.cpp, GraphicsStub: the call of GGame::ProcessGraphicsEngine
+// starts and ends on the frame thread. The timers of kGraphicsDefs count
+// between the two.
+void TurnPartsGraphicsBegin() {
+  if (g_stack.depth != 0) g_stack = wp::Stack();
+  g_in_graphics = true;
+}
+
+void TurnPartsGraphicsEnd() {
+  g_in_graphics = false;
+  // A call that no return closed (a long jump) goes away.
+  while (g_stack.depth > 0) g_stack.DropTop();
+  g_lost += g_stack.lost;
+  g_stack = wp::Stack();
+}
+
 int TurnPartsFrameText(char* out, size_t size) {
-  if (!g_turn_parts) {
+  if (!g_turn_parts || !g_turn_lines) {
     if (size > 0) out[0] = 0;
     return 0;
   }
@@ -548,7 +668,7 @@ void TurnPartsFrameEnd() {
 }
 
 bool TurnPartsWindowLine(double seconds) {
-  if (!g_turn_parts) return false;
+  if (!g_turn_parts || !g_turn_lines) return false;
   static char line[8192];
   g_window.turn_function_calls = g_turn_function_calls;
   g_window.stub_in_turn = g_seen_in_turn;

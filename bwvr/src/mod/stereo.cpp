@@ -91,6 +91,7 @@
 #include "vk_stream.h"
 #include "xr_input.h"
 #include "xr_layers.h"
+#include "trace_rec.h"
 
 // d3d9_backend.cpp: the start with DXVK did not fail.
 void D3D9BackendConfirm();
@@ -109,7 +110,9 @@ void LogDirect3DModules(const char* when);
 // walk.
 void StallTestWalk();
 
-extern void ModLog(const char* format, ...);
+extern // vk_stream.cpp: the frame of the stream of this present.
+uint64_t VkStreamPresentFrame();
+void ModLog(const char* format, ...);
 
 const void* FrameSourceGrab(int* pitch);
 const void* FrameSourceBegin(int* pitch);
@@ -1916,7 +1919,9 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     }
     D3D7CountWalk(true);
     DdrawCensusWalk(true);
+    const int64_t trace_engine = g_trace ? TraceNow() : 0;
     o_Process3dEngine(self, unused);
+    const int64_t trace_engine_end = g_trace ? TraceNow() : 0;
     DdrawCensusWalk(false);
     // The targets get the color of the game back (target_glow.cpp).
     TargetGlowPassDone();
@@ -1938,6 +1943,17 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     QueryPerformanceCounter(&t3);
     WalkPartsWalk(false);
     TimeLogWalk(false);
+    if (g_trace) {
+      static const trace_events::Def kWalkDef = {"scene walk of an eye pass", "game", {"eye", "frame", nullptr, nullptr}};
+      static const trace_events::Def kBeforeDef = {"mod work before the walk of the game", "mod", {"eye", nullptr, nullptr, nullptr}};
+      static const trace_events::Def kEngineDef = {"GGame::Process3dEngine 0x0054DA80", "game", {"eye", nullptr, nullptr, nullptr}};
+      static const trace_events::Def kAfterDef = {"mod work after the walk of the game", "mod", {"eye", nullptr, nullptr, nullptr}};
+      TraceSceneFrame();
+      TraceBar(&kWalkDef, t2.QuadPart, t3.QuadPart, static_cast<float>(eye), static_cast<float>(VkStreamPresentFrame()));
+      TraceBar(&kBeforeDef, t2.QuadPart, trace_engine, static_cast<float>(eye));
+      TraceBar(&kEngineDef, trace_engine, trace_engine_end, static_cast<float>(eye));
+      TraceBar(&kAfterDef, trace_engine_end, t3.QuadPart, static_cast<float>(eye));
+    }
     // The test spin of test_stall_ms (stall_watch.cpp).
     StallTestWalk();
     // This eye pass is over. Nothing after it may put its camera back.

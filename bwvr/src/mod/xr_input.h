@@ -92,6 +92,11 @@ void XrInputWriteWorld(const input_channel::World& world);
 // of the mod are dropped.
 uint32_t XrInputTakeKeys(uint32_t* codes, uint32_t max);
 
+// The mapped file of the channel, or nullptr when the mod has no channel. The
+// timeline (trace_rec.cpp) reads and writes the fields of its save request in
+// the head from the saver thread.
+input_channel::File* XrInputChannel();
+
 // THE RECORD (xr_input_record). True while frames go into the record.
 bool XrInputRecording();
 // One frame of the controllers. source: 0 the session, 1 the fake

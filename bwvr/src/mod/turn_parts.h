@@ -14,6 +14,14 @@ extern bool g_turn_parts;
 // pass_guard.cpp, in PassGuardInstall on the frame thread: turn_parts=1 puts
 // the hooks in, with one MH_ApplyQueued.
 void TurnPartsInstall();
+// mod_main.cpp, after the last hook of the mod: with trace=1 the timers go in
+// here and not in TurnPartsInstall.
+void TurnPartsInstallLate();
+// frame_timers.cpp, GraphicsStub, with trace=1: the call of GGame::
+// ProcessGraphicsEngine on the frame thread starts and ends. The timers on its
+// callees count in between (turn_parts.cpp, kGraphicsDefs).
+void TurnPartsGraphicsBegin();
+void TurnPartsGraphicsEnd();
 // pass_guard.cpp, h_ProcessNetworkPackets: the game turn starts at the tick
 // `begin` of the performance counter, and ends at the tick `end`.
 void TurnPartsTurnBegin(int64_t begin);

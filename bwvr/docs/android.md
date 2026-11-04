@@ -4080,7 +4080,10 @@ outer image, no centre image, no pass that makes the eye picture and no copy.
 - **The device.** With the key at the start the device of the session gets
   `VK_EXT_fragment_density_map` when the GPU has it with the map and with images that
   have no subsamples. The log says so ("xr : xr_density_pass at the start: 1. The
-  device gets the extension ..."). The instance of OpenXR gets the extensions of the
+  device gets the extension ..."). The device gets the feature for images with no
+  subsamples too, and no shading rate attachment (a rendering has one of the two
+  maps). A device that the driver refuses with the density map is made again without
+  it, and the pass is off. The instance of OpenXR gets the extensions of the
   foveation that the runtime lists (`XR_FB_foveation`, `XR_FB_foveation_configuration`,
   `XR_FB_foveation_vulkan`, `XR_META_foveation_eye_tracked`,
   `XR_FB_swapchain_update_state`) for the probe only. A runtime that refuses them
@@ -4133,9 +4136,9 @@ outer image, no centre image, no pass that makes the eye picture and no copy.
 - **The lines to read after a run of the Frame.** "xr : xr_density_pass at the start", "game
   : xr_density_pass=1" (or the reason that it is off), the lines "probe :", "xr : slot N of the
   ring: one swapchain of two layers", "vk scene : the one pass (xr_density_pass=1): ..." (the size
-  of the map, the bytes, the share of the fragments of the first map), then each 10 s "time :
+  of the map, the bytes, the share of the fragments that the first map asks for), then each 10 s "time :
   the one pass ... in this window" (the walks of the pass against the walks that went the old way,
-  the cuts, the lost depths), "time : the GPU parts of the walk" (the pass as "the one pass with a
+  the cuts, the lost depths, the waits for a swapchain image), "time : the GPU parts of the walk" (the pass as "the one pass with a
   density map": its draws and its ms, to compare with the 2.45 and 2.11 ms of the two passes
   and the 1.6 ms of the compose), "time : the GPU in ms: a picture" (the goal is well below 5 to
   8 ms in the view of the middle of the island) and "time : the GPU of the copies" (no copy for a
@@ -4146,7 +4149,10 @@ outer image, no centre image, no pass that makes the eye picture and no copy.
   have no subsamples, so the blocks have sharp edges), the ring, the follow of the gaze at the
   step of a texel (32 pixels), whether the compositor shows the swapchain image of two layers
   as it shows two images of one layer, and the picture of a frame with a dialog box (the panel
-  quads and the cut scene window). The look of the pictures in an emulator or a desktop run
+  quads and the cut scene window), and whether the mutable format and the transfer
+  source usage of the swapchain turn off the compression of the image (UBWC) on the
+  Steam Frame. The extension `XR_KHR_vulkan_swapchain_format_list` could tell the
+  driver which formats the views use, and the app does not use it. The look of the pictures in an emulator or a desktop run
   cannot show them, because the GPU of the PC has no density map.
 
 **The even rate** (`frame_loop_hold`, `eye_copy_math::HoldTakes`). When the

@@ -599,15 +599,21 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
     // image since the line before.
     VkSceneDensityCounts pass;
     VkSceneTakeDensityCounts(&pass);
+    uint64_t waits = 0;
+    double waits_sum = 0.0, waits_most = 0.0;
+    XrApp::TakeSwapchainWaits(&waits, &waits_sum, &waits_most);
     if (pass.walks + pass.refused_size + pass.refused_atlas + pass.refused_texel +
-            pass.refused_map > 0) {
+            pass.refused_map + pass.refused_seed + waits > 0) {
       AppLog("time         : the one pass (xr_density_pass=1) in this window: %llu walks drew one "
-             "time into a swapchain image (%llu draws, %llu maps made, the last map shades %.1f "
-             "percent of the fragments). A part of a walk started again %llu times after a draw "
+             "time into a swapchain image (%llu draws, %llu maps made, the share of the fragments "
+             "that the last map asks for is %.1f percent, which is not the share that the GPU "
+             "shades). A part of a walk started again %llu times after a draw "
              "for the panel or a clear of one eye, and %llu of these parts lost their depth. "
              "Walks that went the old way: %llu "
              "for the size of the image, %llu for an atlas, %llu for the texel of the GPU, "
-             "%llu for no map or no pipeline",
+             "%llu for no map or no pipeline, %llu for a walk that is no walk of both eyes with "
+             "fovea_res. The play thread waited %llu times for a swapchain image of the pass "
+             "(xrWaitSwapchainImage), %.2f ms in all, %.2f ms at most",
              static_cast<unsigned long long>(pass.walks),
              static_cast<unsigned long long>(pass.draws),
              static_cast<unsigned long long>(pass.maps), pass.share * 100.0,
@@ -616,7 +622,9 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
              static_cast<unsigned long long>(pass.refused_size),
              static_cast<unsigned long long>(pass.refused_atlas),
              static_cast<unsigned long long>(pass.refused_texel),
-             static_cast<unsigned long long>(pass.refused_map));
+             static_cast<unsigned long long>(pass.refused_map),
+             static_cast<unsigned long long>(pass.refused_seed),
+             static_cast<unsigned long long>(waits), waits_sum, waits_most);
     }
     // The meshes on the GPU (gpu_mesh=1 in the game): what the renderer drew
     // since the line before.

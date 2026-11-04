@@ -1343,10 +1343,8 @@ void Play(App* app, bool new_game) {
     else if (!res) why = "fovea_res is 0 (its keys set the map)";
     else if (atlas) why = "fovea_res_layer is not 0 (the centre as its own layer has an atlas)";
     else if (!app->xr.DensityMap()) {
-      why = app->ini.GetInt("bwvr", "xr_density_pass", 0) != 0 && !app->xr.DensityMap()
-                ? "the device has no VK_EXT_fragment_density_map (the GPU lacks it, or the key "
-                  "was 0 at the start of the app)"
-                : nullptr;
+      why = "the device has no VK_EXT_fragment_density_map (the GPU lacks it, or the key was 0 "
+            "at the start of the app)";
     }
     app->density_pass = key && why == nullptr;
     app->xr.SetDensityPass(app->density_pass);

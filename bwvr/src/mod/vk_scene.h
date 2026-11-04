@@ -220,17 +220,15 @@ bool VkSceneDensityPicture(uint64_t image);
 // A swapchain image that goes: the view of the pass goes (the device must be
 // idle).
 void VkSceneDensityForget(uint64_t image);
-// True when the renderer can run the pass: the device of the session has the
-// density map.
-bool VkSceneDensityUsable();
 // The counts of the pass since the last call (the time log of the app): the
 // walks of the pass, the maps made, the walks cut by a draw for the panel or by
 // a clear of one eye, the walks that lost the depth of a part, the draws, the
 // walks that went the old way (the size of the image, an atlas, the texel of
-// the GPU, no map) and the share of the fragments of the last map (0 to 1).
+// the GPU, no map, a walk that is no walk of both eyes with fovea_res) and the
+// share of the fragments that the last map asks for (0 to 1).
 struct VkSceneDensityCounts {
   uint64_t walks, maps, cuts, depth_lost, draws;
-  uint64_t refused_size, refused_atlas, refused_texel, refused_map;
+  uint64_t refused_size, refused_atlas, refused_texel, refused_map, refused_seed;
   float share;
 };
 void VkSceneTakeDensityCounts(VkSceneDensityCounts* out);

@@ -513,8 +513,9 @@ class XrApp {
   // of two layers): then the pictures of the slot take the old way. DirectEnd
   // releases the image. The probe of the runtime runs at the first call.
   bool DensityBegin(int slot, uint32_t width, uint32_t height, VkImage* target);
-  // The slot has a swapchain of the one pass (a picture of it needs no copy).
-  bool DensitySlot(int slot) const;
+  // The waits of DensityBegin for a swapchain image (xrWaitSwapchainImage) since
+  // the last call: the count, the sum and the most in ms.
+  static void TakeSwapchainWaits(uint64_t* count, double* sum_ms, double* most_ms);
   // The count of the pictures of the one pass that went into the projection layer
   // with no copy (direct), and of the ones that took a copy from the swapchain
   // image. The log at the end of the app has both.
@@ -923,7 +924,7 @@ class XrApp {
   // The extensions of the foveation of the runtime that the instance has on (the
   // order of kFoveation in MakeInstance), and the headset has the eye tracked
   // foveation.
-  bool foveation_on_[6] = {};
+  bool foveation_on_[5] = {};
   bool runtime_fov_tracked_ = false;
   std::atomic<uint64_t> density_direct_{0}, density_copied_{0};
   void DensityProbe(uint32_t width, uint32_t height);

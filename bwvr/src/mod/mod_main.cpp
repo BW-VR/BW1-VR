@@ -1773,7 +1773,7 @@ void ReadSettings() {
   g_gpu_mesh.kinds = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_kinds", 31, path));
   g_gpu_mesh.blend = static_cast<int>(
-      GetPrivateProfileIntA("bwvr", "gpu_mesh_blend", 1, path));
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_blend", 0, path));
   g_gpu_mesh.stage1 = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_stage1", 1, path));
   g_gpu_mesh.uvshift = static_cast<int>(
@@ -1788,6 +1788,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "gpu_mesh_timer", 0, path));
   g_gpu_mesh.vertices = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_vertices", 0, path));
+  g_gpu_mesh.trace = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_trace", 0, path));
   g_gpu_mesh.latch = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_latch", 1, path));
   g_gpu_mesh.material_skip = static_cast<int>(

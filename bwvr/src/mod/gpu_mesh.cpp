@@ -69,12 +69,14 @@
 #include "debug_menu.h"
 #include "gpu_mesh.h"
 #include "gpu_mesh_math.h"
+#include "latch_math.h"
 #include "one_walk.h"
 #include "vk_ddraw.h"
 #include "vk_scene.h"
 #include "vk_stream.h"
 
 void ModLog(const char* format, ...);
+int StereoPassEye();
 void ControllersGesturePulse(float amplitude, float seconds);
 // draw_hooks.cpp
 void DrawHooksMeshBatch(float rhw);
@@ -192,12 +194,7 @@ Caller g_callers[8] = {};
 // such a layer comes right after a mesh of the five functions, the meshes of that
 // 3D part take the CPU path for the next frames, so the layer and the mesh under
 // it have the same path.
-struct LatchedPart {
-  uintptr_t part;
-  uint32_t until;  // the frame
-};
-LatchedPart g_latched[64] = {};
-uint32_t g_latched_next = 0;
+latch_math::PartTable g_latched;
 bool g_latch_key = true;     // gpu_mesh_latch
 bool g_latch_on = true;      // the key now (Ctrl Shift 3)
 bool g_latch_active = false; // some part is latched now
@@ -214,6 +211,19 @@ uint32_t g_latch_said = 0;
 bool g_material_skip = false;  // gpu_mesh_material_skip
 uintptr_t g_mat_mesh = 0;
 uint32_t g_mat_serial = 0;
+// THE TRACE (gpu_mesh_trace=1, a test aid that reaches the Frame). For the callers
+// of the five functions (the return address of the call): the meshes on the GPU
+// path, those with blend, those drawn outside an eye pass, and those drawn when
+// the device had no stage 0 texture. And the frames that took long (the menu
+// pauses the game for about 200 ms).
+bool g_trace = false;
+struct TraceCaller {
+  uint32_t address, gpu, blend, outside;
+};
+TraceCaller g_trace_callers[16] = {};
+uint64_t g_trace_frame_qpc = 0;
+uint32_t g_trace_long = 0, g_trace_longest_ms = 0, g_trace_meshes_in_frame = 0;
+uint32_t g_trace_meshes_before_long = 0;
 uint32_t g_epoch = 0;       // VkStreamMeshEpoch, read one time in a frame (GpuMeshFrame)
 uint32_t g_changes_said_sample = 0, g_changes_said_full = 0;  // lines of the log for a change
 
@@ -264,6 +274,12 @@ struct Counts {
   uint32_t latch_refresh = 0;   // layers that kept a part latched
   uint32_t r_latch = 0;         // meshes on the CPU path because their part is latched
   uint32_t latch_by[6] = {};    // new latches by the function of the layer
+  uint32_t latch_full = 0;      // new latches that took the place of a live latch
+  uint32_t trace_outside = 0;   // gpu_mesh_trace: meshes on the GPU path outside an eye pass
+  uint32_t trace_long = 0;      // frames of more than 120 ms between two frames of the hook
+  uint32_t trace_longest_ms = 0;
+  uint32_t trace_meshes_before_long = 0;
+  uint32_t latch_live = 0;      // latched parts now
   // The material (RunMaterial), with gpu_mesh_timer=1: runs, runs that changed a
   // state of the device, runs of the same mesh with no change since the last run,
   // runs skipped (gpu_mesh_material_skip), and the time of the parts.
@@ -425,6 +441,7 @@ struct Prepared {
   uint32_t group_count;
   float first_field;      // for DrawHooksMeshBatch
   uint32_t zfunc, cull, zwrite;  // the device now, for the log of the compare
+  uint32_t blend;                // the blend state of the device
 };
 
 // The clock of the parts of the hook (gpu_mesh_timer=1).
@@ -654,12 +671,9 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
     return false;
   }
   if (g_latch_active && g_latch_on) {
-    const uintptr_t part = Read<uintptr_t>(kPart);
-    for (const LatchedPart& l : g_latched) {
-      if (l.part == part && part != 0 && g_frame < l.until) {
-        ++g_counts.r_latch;
-        return false;
-      }
+    if (g_latched.Has(Read<uintptr_t>(kPart), g_frame)) {
+      ++g_counts.r_latch;
+      return false;
     }
   }
   // The inputs of the loops of the game. The function reads them before its
@@ -795,6 +809,7 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
   out->zfunc = state.z_func;
   out->cull = state.cull;
   out->zwrite = state.z_write;
+  out->blend = state.alpha_blend;
   clock->Lap(2);
   if (shifted) {
     c.uv_shift_u = Read<float>(kUvShiftU);
@@ -950,7 +965,26 @@ void NoteMesh(const uint8_t* mesh, Kind kind, bool gpu) {
   g_last_valid = true;
 }
 
-void Hook(Kind kind, void* mesh_in, void* edx) {
+void TraceMesh(uint32_t caller, const Prepared& p) {
+  const int eye = StereoPassEye();
+  ++g_trace_meshes_in_frame;
+  if (eye < 0) ++g_counts.trace_outside;
+  TraceCaller* slot = nullptr;
+  for (TraceCaller& c : g_trace_callers) {
+    if (c.address == caller) {
+      slot = &c;
+      break;
+    }
+    if (slot == nullptr && c.address == 0) slot = &c;
+  }
+  if (slot == nullptr) return;
+  slot->address = caller;
+  ++slot->gpu;
+  if (p.blend != 0) ++slot->blend;
+  if (eye < 0) ++slot->outside;
+}
+
+void Hook(Kind kind, void* mesh_in, void* edx, uint32_t ret) {
   uint8_t* mesh = static_cast<uint8_t*>(mesh_in);
   if (!g_active) {
     if (g_mode != 0 && !g_said_backend && !VkDdrawOn()) {
@@ -1005,15 +1039,26 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
     Submit(kind, mesh, p, true);
   }
   clock.Lap(5);
+  if (g_trace) TraceMesh(ret, p);
   NoteMesh(mesh, kind, true);
   g_counts.gpu_ticks += __rdtsc() - start - back_ticks;
 }
 
-void __fastcall Hook0(void* mesh, void* edx) { Hook(kClip, mesh, edx); }
-void __fastcall Hook1(void* mesh, void* edx) { Hook(kLit, mesh, edx); }
-void __fastcall Hook2(void* mesh, void* edx) { Hook(kLitClip, mesh, edx); }
-void __fastcall Hook3(void* mesh, void* edx) { Hook(kFlat, mesh, edx); }
-void __fastcall Hook4(void* mesh, void* edx) { Hook(kOffsets, mesh, edx); }
+void __fastcall Hook0(void* mesh, void* edx) {
+  Hook(kClip, mesh, edx, reinterpret_cast<uint32_t>(_ReturnAddress()));
+}
+void __fastcall Hook1(void* mesh, void* edx) {
+  Hook(kLit, mesh, edx, reinterpret_cast<uint32_t>(_ReturnAddress()));
+}
+void __fastcall Hook2(void* mesh, void* edx) {
+  Hook(kLitClip, mesh, edx, reinterpret_cast<uint32_t>(_ReturnAddress()));
+}
+void __fastcall Hook3(void* mesh, void* edx) {
+  Hook(kFlat, mesh, edx, reinterpret_cast<uint32_t>(_ReturnAddress()));
+}
+void __fastcall Hook4(void* mesh, void* edx) {
+  Hook(kOffsets, mesh, edx, reinterpret_cast<uint32_t>(_ReturnAddress()));
+}
 
 // fn_0081C090 (docs/software-tnl.md, "The batches of vertices"): a draw of a
 // batch of vertices that the caller gives: positions (3 floats), a color for
@@ -1264,13 +1309,27 @@ void Report() {
            static_cast<unsigned long long>(renderer.groups_off), renderer.wait_count,
            static_cast<unsigned long long>(renderer.wait_bytes), renderer.free_ranges,
            static_cast<unsigned long long>(renderer.group_peak), renderer.pipelines);
+    if (g_trace) {
+      ModLog("gpu mesh     : trace (gpu_mesh_trace=1) in 10 s: %u meshes on the GPU path outside an eye "
+             "pass, %u frames of more than 120 ms between two frames of the hook (the longest %u ms, "
+             "with %u meshes on the GPU path in the frame before it)",
+             c.trace_outside, c.trace_long, c.trace_longest_ms, c.trace_meshes_before_long);
+      for (const TraceCaller& k : g_trace_callers) {
+        if (k.address == 0) continue;
+        ModLog("gpu mesh     : trace: the five functions called from 0x%08X: %u meshes on the GPU "
+               "path, %u with blend, %u outside an eye pass",
+               k.address, k.gpu, k.blend, k.outside);
+      }
+    }
     if (g_latch_on || c.latch_new + c.r_latch > 0) {
       ModLog("gpu mesh     : latch (gpu_mesh_latch=%d) in 10 s: %u 3D parts latched for the first "
              "time (by fn_00851870 %u, fn_00859D90 %u, fn_0084E200 %u, fn_0085A6F0 %u, "
-             "fn_00850FC0 %u, fn_0085C7F0 %u), %u layers kept a part latched, %u meshes took the "
-             "CPU path because their part is latched",
+             "fn_00850FC0 %u, fn_0085C7F0 %u), %u layers kept a part latched, %u new latches took "
+             "the place of a live one (the table has 4096 places), %u parts latched now, %u meshes "
+             "took the CPU path because their part is latched",
              g_latch_on ? 1 : 0, c.latch_new, c.latch_by[0], c.latch_by[1], c.latch_by[2],
-             c.latch_by[3], c.latch_by[4], c.latch_by[5], c.latch_refresh, c.r_latch);
+             c.latch_by[3], c.latch_by[4], c.latch_by[5], c.latch_refresh, c.latch_full,
+             c.latch_live, c.r_latch);
     }
     if (g_timer && c.mat_runs > 0 && per_ms > 0.0) {
       ModLog("gpu mesh     : the material in 10 s: %u runs, %u changed a state of the device, %u "
@@ -1320,6 +1379,7 @@ void Report() {
   }
   g_counts = Counts();
   memset(g_callers, 0, sizeof(g_callers));
+  memset(g_trace_callers, 0, sizeof(g_trace_callers));
 }
 
 bool InstallVertexHook() {
@@ -1387,6 +1447,7 @@ void GpuMeshSetOptions(const GpuMeshOptions& o) {
   g_check_frames = o.check_frames < 0 ? 0u : static_cast<uint32_t>(o.check_frames);
   g_timer = o.timer != 0;
   g_vertices_key = o.vertices != 0;
+  g_trace = o.trace != 0;
   g_latch_key = g_latch_on = o.latch != 0;
   g_material_skip = o.material_skip != 0;
   VkSceneSetMesh(g_mode == 2 ? 1 : 0);
@@ -1452,16 +1513,12 @@ void GpuMeshCpuBatch(uint32_t caller, int via) {
   if (!g_latch_on || via != 0 || g_last_mesh_info.part == 0) return;
   const int function = gm::LayerFunctionOf(caller);
   if (function < 0) return;
-  for (LatchedPart& l : g_latched) {
-    if (l.part == g_last_mesh_info.part && g_frame < l.until) {
-      l.until = g_frame + g_latch_frames;
-      ++g_counts.latch_refresh;
-      return;
-    }
+  const int set = g_latched.Set(g_last_mesh_info.part, g_frame, g_frame + g_latch_frames);
+  if (set == 0) {
+    ++g_counts.latch_refresh;
+    return;
   }
-  LatchedPart& slot = g_latched[g_latched_next++ % 64];
-  slot.part = g_last_mesh_info.part;
-  slot.until = g_frame + g_latch_frames;
+  if (set == 2) ++g_counts.latch_full;
   g_latch_active = true;
   ++g_counts.latch_new;
   ++g_counts.latch_by[function];
@@ -1595,13 +1652,28 @@ void GpuMeshFrame() {
   if (!g_in) return;
   ++g_frame;
   g_epoch = VkStreamMeshEpoch();
-  if (g_latch_active) {
-    bool any = false;
-    for (LatchedPart& l : g_latched) {
-      if (l.part != 0 && g_frame >= l.until) l.part = 0;
-      if (l.part != 0) any = true;
+  if (g_trace) {
+    LARGE_INTEGER q, f;
+    QueryPerformanceCounter(&q);
+    QueryPerformanceFrequency(&f);
+    const uint64_t now = static_cast<uint64_t>(q.QuadPart);
+    if (g_trace_frame_qpc != 0) {
+      const uint32_t ms = static_cast<uint32_t>((now - g_trace_frame_qpc) * 1000 /
+                                                static_cast<uint64_t>(f.QuadPart));
+      if (ms > 120) {
+        ++g_counts.trace_long;
+        if (ms > g_counts.trace_longest_ms) {
+          g_counts.trace_longest_ms = ms;
+          g_counts.trace_meshes_before_long = g_trace_meshes_in_frame;
+        }
+      }
     }
-    g_latch_active = any;
+    g_trace_frame_qpc = now;
+    g_trace_meshes_in_frame = 0;
+  }
+  if (g_latch_active) {
+    g_counts.latch_live = g_latched.Prune(g_frame);
+    g_latch_active = g_counts.latch_live != 0;
   }
   g_active = g_mode != 0 && VkDdrawOn() && VkSceneDirect();
   Report();

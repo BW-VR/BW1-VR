@@ -253,7 +253,7 @@ that kind of mesh on the CPU path), and a switch for a live test:
 
 | Part | Key | What it takes |
 | --- | --- | --- |
-| Blend | `gpu_mesh_blend` | a mesh with blend, with no depth write or with no depth test (the glass, the shadows, the effects, the leaves of a tree) |
+| Blend | `gpu_mesh_blend` (0 by default) | a mesh with blend, with no depth write or with no depth test (the glass, the shadows, the effects, the leaves of a tree). Off by default: on the Frame the meshes with blend on the GPU path made the roofs of the houses with snow flicker, and the pictures old at the game menu when the head turns. Open: the cause |
 | Stage 1 | `gpu_mesh_stage1` | a mesh with a texture on stage 1. The vertex shader gives stage 1 the texture coordinates of stage 0, as the vertex format of the game (FVF `0x1C4`) does |
 | Shift of the texture | `gpu_mesh_uvshift` | a mesh that `DrawTriangle` shifts (`0x00ECA628`, the values at `0x00ECA62C` and `0x00ECA630`: water and fire). The shift is part of the record and the shader adds it to u and v |
 | Groups | `gpu_mesh_group` | a mesh with a matrix for each group of vertices (below) |
@@ -409,6 +409,17 @@ come through `DrawTriangle` from `fn_0081C090` (60000), `fn_007A8DB0` (26000) an
 first group goes to the GPU path, and the layers after a mesh on the GPU path
 are 82000 in 10 s, 70000 of them from `fn_007A8DB0`.
 
+**Layers on two paths.** The Frame runs with `gpu_mesh_blend=0` showed no flicker of
+the roofs and no snow: the roof (opaque) is on the GPU path, and the snow, a layer
+with the same vertices drawn by a mesh class function on the CPU path, loses the
+depth test of LESSEQUAL against the roof, because the depth of the GPU is not the
+same bit for bit as the depth of the x87 code. With all meshes on the GPU path
+the layers that come through the five functions have the same bits, but the
+layers from the mesh class functions are still on the CPU path, and they flicker
+where the two depths are within a rounding. All on the CPU path (`gpu_mesh=0`)
+works. This is the working theory, not proven. The latch below puts the meshes
+under such a layer on the CPU path.
+
 **The latch** (`gpu_mesh_latch`, 1 by default, Ctrl Shift 3 with `test_keys=1`).
 A mesh class of the engine has a draw function of its own on the CPU path, and
 such a function can draw a layer (blend or no depth write, a depth test of
@@ -438,8 +449,11 @@ function of a mesh class (`fn_00851870`, `fn_00859D90`, `fn_0084E200`,
 `fn_0085A6F0`, `fn_00850FC0`, `fn_0085C7F0`) comes right after a mesh of the five
 functions (on the GPU path or on the CPU path), the meshes of the 3D part of that
 mesh (`0x00EA1AE8`) take the CPU path for the next 90 frames, and each new layer
-of the part keeps the latch. The layer and the meshes under it then have the same
-path, as with the glow of a target. A sprite is no layer over a mesh for the
+of the part keeps the latch. The table of the latched parts has 4096 places (`latch_math.h`): the
+first version had 64, and in a snow land more parts than that have a layer at
+the same time, so a latch was lost before the next layer could keep it (tens of
+thousands of new latches in 10 s, and the flicker stayed). The layer and the
+meshes under it then have the same path, as with the glow of a target. A sprite is no layer over a mesh for the
 latch, because a snow land has sprites between nearly all meshes. The log has
 the first 12 latches (the part, the function of the layer, its state, the mesh)
 and each 10 s the new latches by function, the layers that kept a latch, and the

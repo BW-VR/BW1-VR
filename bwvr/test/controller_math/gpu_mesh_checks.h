@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "../../src/mod/gpu_mesh_math.h"
+#include "../../src/mod/latch_math.h"
 #include "../../src/mod/mesh_store_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/stream_split.h"
@@ -633,6 +634,29 @@ inline void GpuMeshChecks() {
                     gm::LayerFunctionOf(0x0081CCB7) == -1 && gm::LayerFunctionOf(0x78E0C2A0) == -1 &&
                     gm::LayerFunctionOf(0x00851870) == 0 && gm::LayerFunctionOf(0x00851870 + 0x13D0) == -1;
     Check(ok, "the return address of a layer names the function of its mesh class, and a sprite does not", ok, 1);
+  }
+
+  // THE TABLE OF THE LATCHED PARTS. 500 parts stay latched (the first version
+  // had 64 places and lost a latch before the next layer could keep it), a layer
+  // keeps a latch, a latch ends, and a full probe window gives the earliest end up.
+  {
+    static latch_math::PartTable table;
+    bool ok = true;
+    for (uint32_t i = 1; i <= 500; ++i) {
+      ok = ok && table.Set(0x46000000u + i * 0x1230u, 100, 190) != 2;
+    }
+    int live = 0;
+    for (uint32_t i = 1; i <= 500; ++i) {
+      live += table.Has(0x46000000u + i * 0x1230u, 150) ? 1 : 0;
+    }
+    // A layer in the frame 150 keeps parts 1 to 500 until 240.
+    for (uint32_t i = 1; i <= 500; ++i) ok = ok && table.Set(0x46000000u + i * 0x1230u, 150, 240) == 0;
+    ok = ok && table.Has(0x46000000u + 7 * 0x1230u, 239) && !table.Has(0x46000000u + 7 * 0x1230u, 240) &&
+         !table.Has(0, 100) && !table.Has(0x12345670u, 100);
+    ok = ok && table.Prune(300) == 0 && !table.Has(0x46000000u + 7 * 0x1230u, 300);
+    // A part again after the end is a new latch (1).
+    ok = ok && table.Set(0x46000000u + 7 * 0x1230u, 300, 390) == 1;
+    Check(ok && live == 500, "500 latched parts stay latched, a layer keeps a latch, and a latch ends", live, 500);
   }
 
   // THE STORE OF THE MESH DATA (mesh_store_math.h). The guard of a draw with

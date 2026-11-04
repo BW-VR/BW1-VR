@@ -870,6 +870,20 @@ void VkStreamDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
   if (g_unit_record) ++g_draws;
 }
 
+void VkStreamDrawVertices(const gpu_mesh_math::Consts& consts, const void* vertices,
+                          uint32_t vertex_count, const uint16_t* indices, uint32_t triangles) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kDraw);
+  ss::MeshDrawBody body = {};
+  body.state = State();
+  body.mesh = ss::kInlineMesh;
+  body.consts = consts;
+  body.offset_floats = vertex_count * 8;
+  body.group_count = triangles;
+  g_writer.Record(ss::kMeshDraw, &body, sizeof(body), vertices, vertex_count * 32, indices,
+                  triangles * 6);
+  if (g_unit_record) ++g_draws;
+}
+
 uint32_t VkStreamMeshEpoch() { return g_mesh_epoch; }
 
 void VkStreamTarget(void* surface) {

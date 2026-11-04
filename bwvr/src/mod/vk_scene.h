@@ -375,6 +375,13 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
 // and with the GPU path into the right eye layer (kOneWalkLeftOnly and
 // kOneWalkRightOnly), and the images of a test frame (vk_scene_test_frame)
 // give the difference of the two layers in the log.
+// The draw of a batch of vertices that comes with the draw (fn_0081C090,
+// gpu_mesh_vertices): `vertices` are 32 bytes each (x, y, z, u, v, the color of
+// the vertex in the first word of the normal), `indices` 3 for each triangle.
+// The vertex shader of the meshes transforms them with the matrix in `consts`.
+// They go into the stream as a kMeshDraw with the mesh id kInlineMesh.
+void VkSceneDrawVertices(const gpu_mesh_math::Consts& consts, const void* vertices,
+                         uint32_t vertex_count, const uint16_t* indices, uint32_t triangles);
 void VkSceneSetMesh(int compare);
 // In the compare: the next walk with both eyes gives its difference to the log
 // (with no file), with this label (the mask of the functions on the GPU path).
@@ -384,6 +391,17 @@ void VkSceneCompareNext(uint32_t label);
 // compare of the last test frame.
 struct VkSceneMeshCounts {
   uint64_t draws, data_records, data_bytes, no_data, no_room;
+  // Draws with groups that the guard stopped (the draw has fewer matrices than
+  // the data have groups), draws with groups left out because the buffers of
+  // the groups could not be made, the data that wait for a range (the count
+  // and the bytes), the free ranges of the arena, the largest use of the
+  // buffer of the groups in a walk (bytes), and the pipelines of the renderer.
+  uint64_t bad_groups, groups_off;
+  uint32_t wait_count;
+  uint64_t wait_bytes;
+  uint32_t free_ranges;
+  uint64_t group_peak;
+  uint32_t pipelines;
   uint32_t meshes;
   uint64_t arena_bytes;
 };

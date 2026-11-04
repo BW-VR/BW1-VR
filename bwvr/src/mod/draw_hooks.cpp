@@ -84,6 +84,7 @@
 #include <windows.h>
 #include <d3d.h>
 #include <stdint.h>
+#include "gpu_mesh.h"
 #include <intrin.h>
 #include <math.h>
 #include <stdio.h>
@@ -2627,6 +2628,7 @@ void __cdecl h_DrawAndClip(D3DPRIMITIVETYPE type, uint32_t fvf, void* verts,
   // The time of this hook (walk_parts). It reads its return address, so a
   // timer cannot use a stub here.
   WalkPartsScope walk_parts_scope(kWalkHookDrawAndClip);
+  GpuMeshCpuBatch(reinterpret_cast<uint32_t>(_ReturnAddress()), 1);
   const uint32_t outer = g_caller;
   g_caller = reinterpret_cast<uint32_t>(_ReturnAddress());
   // A mesh that the engine clips comes this way. The mesh of a target of the
@@ -2670,6 +2672,7 @@ void __fastcall h_DrawTriangle(void* verts, uint32_t count, uint16_t* idx,
   // The time of this hook (walk_parts). It reads its return address, so a
   // timer cannot use a stub here.
   WalkPartsScope walk_parts_scope(kWalkHookDrawTriangle);
+  GpuMeshCpuBatch(reinterpret_cast<uint32_t>(_ReturnAddress()), 0);
   // World geometry never goes to the interface panel.
   PanelRelease();
   // The mesh of a target of the Hand gets its glow (target_glow.cpp).

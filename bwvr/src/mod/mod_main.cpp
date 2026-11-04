@@ -1802,9 +1802,11 @@ void ReadSettings() {
   g_gpu_mesh.depth = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_depth", 1, path));
   g_gpu_mesh.check_frames = static_cast<int>(
-      GetPrivateProfileIntA("bwvr", "gpu_mesh_check_frames", 120, path));
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_check_frames", 30, path));
   g_gpu_mesh.timer = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_timer", 0, path));
+  g_gpu_mesh.vertices = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_vertices", 0, path));
   // The timer of the objects on the land (object_timer.h), a test aid.
   g_object_timer = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "object_timer", 0, path));

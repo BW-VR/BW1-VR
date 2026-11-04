@@ -257,11 +257,14 @@ that kind of mesh on the CPU path), and a switch for a live test:
 | Stage 1 | `gpu_mesh_stage1` | a mesh with a texture on stage 1. The vertex shader gives stage 1 the texture coordinates of stage 0, as the vertex format of the game (FVF `0x1C4`) does |
 | Shift of the texture | `gpu_mesh_uvshift` | a mesh that `DrawTriangle` shifts (`0x00ECA628`, the values at `0x00ECA62C` and `0x00ECA630`: water and fire). The shift is part of the record and the shader adds it to u and v |
 | Groups | `gpu_mesh_group` | a mesh with a matrix for each group of vertices (below) |
-| Depth of the game | `gpu_mesh_depth` | not a kind of mesh: the vertex shader makes the depth and the w as the game does (`rhw = near * (1 / cz)` and `z = 1 - rhw`, each rounded to a float, then `z * w`), with `precise` values and `invariant gl_Position`. The linear form (`z = w - 1`) has a larger rounding error in z after the divide of the GPU. Two layers on one surface (the snow on a roof is a draw with blend and a depth test of LESSEQUAL over the roof) keep the depth order of the CPU path only when the depth has the rounding of the game. Only a headset shows if a layer flickers |
+| Position of the game | `gpu_mesh_depth` | not a kind of mesh: 1 the vertex shader makes the pixel, the depth and the w as the loops of the game do: the camera point with the sums in the order of the loop (no fused operation), `inv = 1 / cz`, `rhw = near * inv`, `z = 1 - rhw`, `x = (inv cx + 1) half_x`, `y = half_y - (product of inv, cy and half_y in the order of the function)`, each rounded to a float, then the map of the renderer (`vk_scene.vert`) with `w = 1 / rhw`. All with `precise` values and `invariant gl_Position`. A batch on the CPU path and a mesh on the GPU path then get the same pixel and the same depth where the geometry is the same, up to the arithmetic of the GPU. 0 the other vertex shader (the `LEGACY` variants of `vk_mesh.vert`): the linear form `z = w - 1`, with neither `invariant` nor `precise`. See "The layers" |
 
 With `test_keys=1`, Ctrl Shift 6 turns all five parts off and on (the debug
-page has the row "GPU mesh parts"), and Ctrl Shift 7 turns `gpu_mesh` between 1
-and 0 (the row "GPU mesh"). With `gpu_mesh=0` in `bwvr.ini` and `test_keys=1`
+page has the row "GPU mesh parts"), Ctrl Shift 5 turns the position of the game
+alone off and on (the other parts stay), Ctrl Shift 4 turns the batches of
+vertices (below) off and on, and Ctrl Shift 7 turns `gpu_mesh` between 1 and 0
+(the row "GPU mesh"). The default control map of the game has
+no action on the digits 5, 6 and 7 (`controls-audit.md`, section 2). With `gpu_mesh=0` in `bwvr.ini` and `test_keys=1`
 the hooks go in at the first press of Ctrl Shift 7.
 
 **Which mesh takes the CPU path.** A draw with the clamp of the screen
@@ -298,16 +301,28 @@ rounding.
 
 **The data.** A mesh goes into the stream one time (`kMeshData`: the id is
 its address, then the vertices of 32 bytes, the indices of 16 bits and the
-ordinals of the groups, as the game has them). The mesh is an asset of the game:
-its words do not change while it lives, and a new mesh at the same address has
-other pointers or other words. Each draw tests the pointers, the counts and a
+ordinals of the groups, as the game has them). The words of a mesh
+can change at the same address: a new mesh made in the place of an old one, and
+other changes that the log shows. A draw tests the pointers, the counts and a
 sample over the first, the middle and the last vertex and the first and the
-last triangle (`MeshSample`, 8 steps of the sum). A full sum over all words
-(`MeshHash`, 6 SSE operations for 16 bytes, with the groups) comes for each mesh
-every `gpu_mesh_check_frames` frames (120 by default, spread over the meshes by
-their address). When a full sum finds a change, the data go again, the log
-counts it, and that mesh has a full sum at each draw from then on.
-`gpu_mesh_check_frames=0` is a full sum at each draw. The data also go again
+last triangle (`MeshSample`, 8 steps of the sum), once in a frame for each mesh.
+A full sum over all words (`MeshHash`, 6 SSE operations for 16 bytes, with the
+groups) comes for each mesh every `gpu_mesh_check_frames` frames (30 by default,
+spread over the meshes by their address). A change that the sample sees goes
+to the renderer at the draw. A change that only the full sum sees (a change of a
+few words in the middle) goes after up to that many frames. When a full sum
+finds a change, that mesh has a full sum at each draw from then on.
+`gpu_mesh_check_frames=0` is a full sum at each draw. The log counts the changes
+that the sample found apart from the changes that only the full sum found (with
+the longest time since the last full sum), and for the first 12 changes of each kind it says
+the mesh, its type and counts, how it was found and the first changed vertex or
+block of indices (the hook keeps the sums of the blocks of 32 bytes of each
+mesh for this). In the desk run of the Temple save (45 changes in
+the first window, none later) the sample found 42, and the full sum found 3, all
+of one animated mesh of 60 vertices where a few vertices move: the full sum found
+the first change 148 frames late, and the mesh then had a full sum at each draw.
+So the default is 30 frames (a change that only the full sum sees is up to half a
+second late). The data also go again
 when the frame has the whole state (a reader that comes late,
 `VkStreamMeshEpoch`) and when the table of the hook has no entry. A record of
 data is not a record of a walk (`stream_split.h`), so a frame that loses its
@@ -316,12 +331,18 @@ with mesh data is neither dropped by the writer nor skipped by the reader.
 
 The renderer keeps the data in an arena of 64 MB (`VkSceneMeshData`), made at
 the first data of a mesh. A range that a new version replaces goes back after
-the walks that can read it are done. When the arena is full, the meshes that no
-walk drew for 600 walks give their range back, and the data that found no
-room wait in a list of up to 16 MB until a range is free. The game does not
-know of the eviction, so a mesh that comes back after it has no data until the
-data come again. A renderer in the game process that cannot take the data
-(not ready) says so, and the hook gives them again after 30 frames. A failed
+the walks that can read it are done. The renderer takes no range back from a
+mesh that is in use: the game sends the data one time, the renderer cannot ask
+for them again, and a mesh with no data would stay out of the picture. When the
+arena is full the log says so, and the data wait (one entry for each mesh, up
+to 16 MB, `mesh_store_math.h`) for a range that a new version of a mesh frees.
+A direct store of a mesh removes its entry, so a try never puts an older
+version over a newer one, and the try runs once in a walk. A new version of a
+mesh that has no room keeps the old version in use. A renderer in the game
+process that cannot take the data (not ready) says so, and the hook gives them
+again after 30 frames. A draw with groups needs at least as many matrices as
+the data have groups (a smaller draw is left out and counted), because the
+shader reads the matrix of the group of each vertex. A failed
 shader module or arena stops the meshes only. `kMeshDraw` names the mesh and
 has the values of the draw. Both are records of the stream of version 4. The
 writer sends no mesh record with `gpu_mesh=0`. A draw of the CPU path has 32
@@ -361,6 +382,58 @@ the color at `+0x0C` of the mesh when the word at `+8` is 0 (`fn_007ACF70`).
 variants: plain, `OFFSETS` and `GROUPS`) with the glslc of the NDK. Its first
 line has the hash of the source, and a check of the math tests fails when the
 header is not the header of the source.
+
+**The layers.** A layer is a draw with blend or with no depth write and a depth
+test of EQUAL or LESSEQUAL over a mesh (the snow over a roof). Two draws on one
+surface give the same depth only when their vertices and their math are the
+same. What was checked: both layers take the GPU path in the Frame logs (the
+CPU path has only the clamp of the screen, which is the icons of the spells, and
+the glow of a target), so the same data go through the same shader.
+`DrawTriangle` and `DrawAndClip` change x and y (the clamp) and u and v, and never
+z, and no function of the game sets the state ZBIAS to another value than 0
+(one call in the code, with the value 0). The line each 10 s counts: the layers
+on the GPU path, the layers right after a layer, the CPU batches that are
+layers right after a mesh on the GPU path (with the first 8 return addresses of
+the callers in `DrawTriangle` and `DrawAndClip`), and the log has the first 16
+pairs of layers with the mesh, the type, the function, the vertices, the
+matrix and the groups of both. The causes that are left: one layer is a batch
+that does not come through the five functions, one layer has groups and the
+other has not (the shader reads the matrices from another place), the rounding
+of the depth of the GPU (the part `gpu_mesh_depth` and its key Ctrl Shift 5),
+and the vertices of the two layers. At a house with snow, compare
+`gpu_mesh_depth` 1 and 0 (Ctrl Shift 5), `gpu_mesh_group=0`, and
+`gpu_mesh=0` (Ctrl Shift 7). In the desk run of the Temple save about
+90000 CPU batches in 10 s are layers right after a mesh on the GPU path. They
+come through `DrawTriangle` from `fn_0081C090` (60000), `fn_007A8DB0` (26000) and
+`fn_0085C7F0` (7000), not from the five functions. With `gpu_mesh_vertices=1` the
+first group goes to the GPU path, and the layers after a mesh on the GPU path
+are 82000 in 10 s, 70000 of them from `fn_007A8DB0`.
+
+**The batches of vertices** (`gpu_mesh_vertices`, 0 by default, Ctrl Shift 4 with
+`test_keys=1`). `fn_0081C090` draws a batch of vertices that the caller gives
+in each call: positions (3 floats), a color for each vertex (a dword), texture
+coordinates (2 floats), the triangles as 6 words each (an index every other
+word), a material mesh (or none) and a flag for the camera matrix (with 0 it
+copies the camera matrix to `0x00EA9E10` and points `0x00EA9EA0` at the copy).
+It has 18 callers (text in the world, icons, effects) and no light. It
+transforms with the sums in the order `((z + y) + x) + t` for x and
+`((y + z) + x) + t` for y and z, tests the clip flags and the back face,
+runs the material and calls `DrawTriangle`. The vertices change in each call,
+so the data go with each draw (a `kMeshDraw` with the id `kInlineMesh`: the
+vertices of 32 bytes with the color in the first word of the normal, and the
+indices as 16 bit, three for each triangle). The vertex shader makes the
+position of the game with the order of the sums of this function (flag 64) and
+takes the color of the vertex (flag 128). The hook takes the batch when it has
+no clamp of the screen (`0x00FA9398`), no glow, advisor or bubble, all indices
+inside the batch and a state that the parts allow. Else the function runs. The
+hook does what the function does before its loops: the copy of the camera
+matrix. The log counts the batches on each path and the time.
+`fn_007A8DB0` (a sprite, 4 vertices that it makes with its own trigonometry and
+`rcpss`, from `fn_007ACD20`) and `fn_0085C7F0` (a mesh with offsets that the
+water plane cuts: the flag `0x800`, `fn_0081D4F0` for the cut, and
+`fn_0085C0E0` after the draw reads the vertex table) stay on the CPU path. The
+first has nothing on the CPU that the GPU could save and its depth is the depth
+of the game, the second needs the vertex table and a clip plane.
 
 **The checks** (`test/controller_math/gpu_mesh_checks.h`) compare the C++ math
 of `gpu_mesh_math.h` with the loops of the game (`fast_transform_math.h`, the
@@ -417,6 +490,10 @@ read for each part.
 - Open: the hook of the mesh functions and `walk_parts=1` hook the same
   start of three functions, and the second one fails. Use `walk_parts=0` with
   `gpu_mesh=1`.
+- Open: the snow roofs. On the Frame, the roofs of the houses with snow
+  flicker with `gpu_mesh=1`, and the flicker stops when the glow of a target
+  sends the meshes of the target to the CPU path. The cause is not known.
+  "The layers" lists what was checked.
 - Open: the order of the products in the light of a mesh with groups. The
   shader uses one order, the game uses three. The compare gives the pixels that
   differ.

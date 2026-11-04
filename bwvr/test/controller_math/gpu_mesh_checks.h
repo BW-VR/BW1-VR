@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "../../src/mod/gpu_mesh_math.h"
+#include "../../src/mod/mesh_store_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/stream_split.h"
 #include "../../src/mod/vk_draw_math.h"
@@ -56,7 +57,7 @@ inline void GpuMeshChecks() {
   // MinZ above 0 (the viewport of a pass of foveated resolution has such
   // values), and for a viewport with the render of a headset (4080 by 3264).
   struct Worst {
-    int projected = 0, flag_mismatch = 0, edge_mismatch = 0, z_exact = 0;
+    int projected = 0, flag_mismatch = 0, edge_mismatch = 0, z_exact = 0, x_exact = 0, y_exact = 0;
     double xy = 0.0, z = 0.0, rhw = 0.0;
   };
   const auto position = [&](const gm::View& view, bool whole, uint32_t seed, int meshes,
@@ -119,6 +120,8 @@ inline void GpuMeshChecks() {
         const double dz = fabs(static_cast<double>(s.z) - o[2]);
         if (dz > w.z) w.z = dz;
         if (dz == 0.0) ++w.z_exact;
+        if (dx == 0.0) ++w.x_exact;
+        if (dy == 0.0) ++w.y_exact;
         const double drhw = fabs(static_cast<double>(s.rhw) - o[3]) / o[3];
         if (drhw > w.rhw) w.rhw = drhw;
       }
@@ -146,10 +149,14 @@ inline void GpuMeshChecks() {
     // layers of the CPU path and the GPU path keep one order. The linear form
     // is exact for fewer points.
     const Worst linear = whole;
-    const Worst game = position(view, true, 4242u, 300, gm::kDepthGame);
+    const Worst game = position(view, true, 4242u, 300, gm::kDepthGame | gm::kYOrderC);
     const double exact_game = static_cast<double>(game.z_exact) / game.projected;
     const double exact_linear = static_cast<double>(linear.z_exact) / linear.projected;
-    Check(game.flag_mismatch == 0 && game.z < 1.2e-7 && exact_game > 0.9 && exact_game > exact_linear,
+    printf("  (x and y exact: %.1f and %.1f percent with the position of the game, %.1f and %.1f percent linear)\n",
+           100.0 * game.x_exact / game.projected, 100.0 * game.y_exact / game.projected,
+           100.0 * linear.x_exact / linear.projected, 100.0 * linear.y_exact / linear.projected);
+    Check(game.flag_mismatch == 0 && game.z < 1.2e-7 && exact_game > 0.9 && exact_game > exact_linear &&
+              game.x_exact >= linear.x_exact && game.y_exact >= linear.y_exact,
           "the depth of the game is the depth of the loop of the game for nine of ten points, more than the linear form",
           exact_game, 1.0);
     printf("  (depth of the game: %.1f percent of the points exact, worst %.7f. The linear form: %.1f percent, worst %.7f)\n",
@@ -614,6 +621,70 @@ inline void GpuMeshChecks() {
          bytes == sizeof(data) + sizeof(vertex_bytes) + sizeof(indices) + sizeof(ordinals);
     Check(ok, "a draw with groups and the data of a mesh with groups go through the writer and the reader",
           ok, 1);
+  }
+
+  // THE STORE OF THE MESH DATA (mesh_store_math.h). The guard of a draw with
+  // groups, the list of data that wait, and the gate of a walk.
+  {
+    namespace ms = mesh_store_math;
+    const bool guard = ms::GroupDrawOk(3, 3, 128) && ms::GroupDrawOk(3, 5, 128) &&
+                       !ms::GroupDrawOk(3, 2, 128) && !ms::GroupDrawOk(0, 2, 128) &&
+                       !ms::GroupDrawOk(3, 200, 128) && !ms::GroupDrawOk(3, 0, 128);
+    Check(guard, "a draw with groups needs at least as many matrices as the data have groups, and at most 128",
+          guard, 1);
+
+    struct Item {
+      uint64_t id;
+      size_t size;
+      int version;
+    };
+    ms::WaitList<Item> list(1000);
+    bool ok = list.Put({1, 100, 1}) && list.Put({2, 200, 1}) && list.Bytes() == 300;
+    // A newer version of a mesh replaces the entry of the mesh.
+    ok = ok && list.Put({1, 150, 2}) && list.Count() == 2 && list.Bytes() == 350;
+    int version_of_1 = 0;
+    for (const Item& item : list.Items()) {
+      if (item.id == 1) version_of_1 = item.version;
+    }
+    ok = ok && version_of_1 == 2;
+    // A direct store of mesh 2 removes its entry: a flush has nothing of it.
+    ok = ok && list.Remove(2) && !list.Has(2) && !list.Remove(2) && list.Bytes() == 150;
+    // A flush takes the entries that found a range.
+    list.Put({3, 300, 1});
+    list.Put({4, 400, 1});
+    list.RemoveIf([](Item& item) { return item.id == 3 || item.id == 1; });
+    ok = ok && list.Count() == 1 && list.Has(4) && list.Bytes() == 400;
+    // No room: the item is dropped, and the older version of its mesh goes too,
+    // so the list never keeps an older version for a newer one.
+    ok = ok && !list.Put({4, 2000, 2}) && !list.Has(4) && list.Empty() && list.Bytes() == 0;
+    Check(ok, "the list of data that wait has one entry for each mesh, and a direct store removes it", ok, 1);
+
+    ms::WalkGate gate;
+    const bool once = gate.Once(0) && !gate.Once(0) && gate.Once(7) && !gate.Once(7) && gate.Once(8);
+    Check(once, "the gate lets an action run once in each walk (a full arena flushes once in a walk)", once, 1);
+  }
+
+  // WHERE A CHANGE IS. The sums of the blocks of 32 bytes find the first changed
+  // vertex or the block of the indices.
+  {
+    static uint8_t vertices[37 * 32];
+    static uint16_t indices[50 * 3];
+    for (auto& b : vertices) b = static_cast<uint8_t>(r.Next() >> 13);
+    for (auto& i : indices) i = static_cast<uint16_t>(r.Next() % 37);
+    const uint32_t count = gm::BlockCount(37, 50);
+    static uint32_t before[64], after[64];
+    gm::BlockSums(vertices, 37, indices, 50, before);
+    bool ok = count == 37 + (50 * 6 + 31) / 32 && count <= 64;
+    gm::BlockSums(vertices, 37, indices, 50, after);
+    ok = ok && gm::FirstChangedBlock(before, after, count) == -1;
+    vertices[21 * 32 + 17] ^= 0x04;
+    gm::BlockSums(vertices, 37, indices, 50, after);
+    ok = ok && gm::FirstChangedBlock(before, after, count) == 21;
+    vertices[21 * 32 + 17] ^= 0x04;
+    reinterpret_cast<uint8_t*>(indices)[299] ^= 0x01;  // the last byte of the last triangle
+    gm::BlockSums(vertices, 37, indices, 50, after);
+    ok = ok && gm::FirstChangedBlock(before, after, count) == static_cast<int>(37 + 299 / 32);
+    Check(ok, "the sums of the blocks find the first changed vertex or index block", ok, 1);
   }
 
   // THE RECORDS. A mesh goes into the stream and out of it with its offsets.

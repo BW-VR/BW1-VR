@@ -68,6 +68,16 @@ const uint32_t kGroup = 4u;
 // keep the depth order that the CPU path gives them. Without it the shader
 // takes the linear form (w - 1), which has a larger rounding error in z.
 const uint32_t kDepthGame = 8u;
+// With kDepthGame: the order of the product of y in the loop of the function
+// (the shader and ClipPosition): none is (1 / cz * cy) * half_y (fn_0085AB10,
+// fn_0085BA30, fn_00859530, fn_0081C090), kYOrderB is (half_y * (1 / cz)) * cy
+// (fn_0084BA90) and kYOrderC is (half_y * cy) * (1 / cz) (fn_00856D40).
+const uint32_t kYOrderB = 16u;
+const uint32_t kYOrderC = 32u;
+// The order of the sums of the camera point of fn_0081C090 (the shader).
+const uint32_t kVertexOrder = 64u;
+// The color of each vertex is in the first word of its normal (fn_0081C090).
+const uint32_t kVertexColor = 128u;
 
 // From the 12 floats of the matrix of the game (rows of 3, the translation
 // last) to the rows of the shader.
@@ -172,21 +182,36 @@ inline Camera CameraSpace(const Consts& c, const float p[3], const float* offset
 // eye of a draw that one walk moves by per_rhw * rhw.
 inline void ClipPosition(const Consts& c, const View& v, const Camera& cam,
                          bool right_eye, bool moves, float out[4]) {
-  const bool game = (c.flags & kDepthGame) != 0 && cam.z > 1e-4f;
+  const bool game = (c.flags & kDepthGame) != 0 && cam.z >= c.near_plane && cam.z > 1e-4f;
   float w = cam.z / c.near_plane;
   float game_z = 0.0f;
+  float game_x = 0.0f, game_y = 0.0f, game_rhw = 0.0f;
   if (game) {
-    const float rhw = c.near_plane * (1.0f / cam.z);
+    const float inv = 1.0f / cam.z;
+    const float rhw = c.near_plane * inv;
     w = 1.0f / rhw;
     game_z = 1.0f - rhw;
+    game_rhw = rhw;
+    game_x = (inv * cam.x + 1.0f) * c.half_x;
+    const float product = (c.flags & kYOrderB) != 0   ? (c.half_y * inv) * cam.y
+                          : (c.flags & kYOrderC) != 0 ? (c.half_y * cam.y) * inv
+                                                      : (inv * cam.y) * c.half_y;
+    game_y = c.half_y - product;
   }
   const float kx = c.half_x * v.inv_w;
   const float ky = c.half_y * v.inv_h;
   const float ax = (c.half_x + 0.5f - v.x) * v.inv_w - 1.0f;
   const float ay = (c.half_y + 0.5f - v.y) * v.inv_h - 1.0f;
   float xc = w * ax + cam.x / c.near_plane * kx;
-  const float yc = w * ay - cam.y / c.near_plane * ky;
+  float yc = w * ay - cam.y / c.near_plane * ky;
   if (right_eye && moves) xc += v.per_rhw * v.inv_w;
+  if (game) {
+    // The position of the game, then the map of the renderer (vk_scene.vert).
+    float sx = game_x;
+    if (right_eye && moves) sx += v.per_rhw * game_rhw;
+    xc = ((sx + 0.5f - v.x) * v.inv_w - 1.0f) * w;
+    yc = ((game_y + 0.5f - v.y) * v.inv_h - 1.0f) * w;
+  }
   out[0] = xc;
   out[1] = yc;
   out[2] = game ? ((game_z - v.min_z) * v.inv_z) * w : v.inv_z * (w * (1.0f - v.min_z) - 1.0f);
@@ -338,6 +363,42 @@ inline uint32_t MeshSample(const void* vertices, uint32_t vertex_count, const vo
   memcpy(tail + 6, ix + static_cast<size_t>(triangles - 1) * 6, 6);
   SumBlock(&m, tail);
   return m.s[0] ^ (m.s[1] * 31u) ^ (m.s[2] * 0x9E3779B1u) ^ m.s[3] ^ (m.a[0] + m.a[3] * 7u);
+}
+
+// WHERE A CHANGE IS. The data of a mesh (the vertices, then the indices) in
+// blocks of 32 bytes (one vertex, or 5 and a third triangles), each with a sum.
+// A mesh that changed at its place has the first block with another sum.
+inline uint32_t BlockCount(uint32_t vertex_count, uint32_t triangles) {
+  return vertex_count + (triangles * 6 + 31) / 32;
+}
+inline uint32_t BlockSum(const uint8_t* p, size_t n) {
+  uint8_t block[32] = {};
+  memcpy(block, p, n);
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < 8; ++i) {
+    uint32_t w;
+    memcpy(&w, block + 4 * i, 4);
+    h = (h ^ w) * 16777619u;
+    h ^= h >> 15;
+  }
+  return h;
+}
+inline void BlockSums(const void* vertices, uint32_t vertex_count, const void* indices,
+                      uint32_t triangles, uint32_t* out) {
+  const uint8_t* v = static_cast<const uint8_t*>(vertices);
+  for (uint32_t i = 0; i < vertex_count; ++i) out[i] = BlockSum(v + 32 * i, 32);
+  const uint8_t* x = static_cast<const uint8_t*>(indices);
+  const size_t bytes = static_cast<size_t>(triangles) * 6;
+  for (size_t at = 0, k = 0; at < bytes; at += 32, ++k) {
+    out[vertex_count + k] = BlockSum(x + at, bytes - at < 32 ? bytes - at : 32);
+  }
+}
+// The first block with another sum, or -1.
+inline int FirstChangedBlock(const uint32_t* a, const uint32_t* b, uint32_t count) {
+  for (uint32_t i = 0; i < count; ++i) {
+    if (a[i] != b[i]) return static_cast<int>(i);
+  }
+  return -1;
 }
 
 // WHICH MESH TAKES THE GPU PATH. The state of the device after the material of

@@ -301,6 +301,21 @@ class Player {
       case ss::kMeshDraw: {
         ss::MeshDrawBody d;
         if (!ss::Body(body, bytes, &d)) break;
+        if (d.mesh == ss::kInlineMesh) {
+          // The vertices come with the draw.
+          const uint64_t vertex_bytes = static_cast<uint64_t>(d.offset_floats) * 4;
+          const uint64_t index_bytes = static_cast<uint64_t>(d.group_count) * 6;
+          if (d.offset_floats % 8 != 0 || bytes < sizeof(d) + vertex_bytes + index_bytes) break;
+          State(d.state);
+          mesh_vertices_.resize(vertex_bytes);
+          memcpy(mesh_vertices_.data(), body + sizeof(d), vertex_bytes);
+          indices_.resize(static_cast<size_t>(d.group_count) * 3);
+          memcpy(indices_.data(), body + sizeof(d) + vertex_bytes, index_bytes);
+          VkSceneDrawVertices(d.consts, mesh_vertices_.data(), d.offset_floats / 8, indices_.data(),
+                              d.group_count);
+          ++result_->mesh_draws;
+          break;
+        }
         const uint64_t offset_bytes = static_cast<uint64_t>(d.offset_floats) * 4;
         const uint64_t group_floats =
             static_cast<uint64_t>(d.group_count) *

@@ -730,6 +730,7 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
     const uint64_t back_start = __rdtsc();
     g_back[kind](mesh, edx);
     back_ticks = __rdtsc() - back_start;
+    clock.Start();  // the run of the function of the game is not part of the record
     OneWalkSetMode(kOneWalkRightOnly);
     Submit(kind, mesh, p, false);
     OneWalkSetMode(kOneWalkBoth);

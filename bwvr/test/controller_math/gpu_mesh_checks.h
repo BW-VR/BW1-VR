@@ -122,20 +122,20 @@ inline void GpuMeshChecks() {
     }
     return w;
   };
-  const Worst base = position(view, true, 4242u, 300);
-  Check(base.flag_mismatch == 0 && base.projected > 2000,
+  const Worst whole = position(view, true, 4242u, 300);
+  Check(whole.flag_mismatch == 0 && whole.projected > 2000,
         "the clip test of the GPU is the clip flags of the game (no point away from an edge differs)",
-        base.flag_mismatch, 0);
-  Check(base.xy < 0.0005,
+        whole.flag_mismatch, 0);
+  Check(whole.xy < 0.0005,
         "the pixel of the GPU position is the pixel of the game to 0.0005 of a pixel",
-        base.xy, 0.0);
-  Check(base.z < 2e-7,
+        whole.xy, 0.0);
+  Check(whole.z < 2e-7,
         "the depth of the GPU position is the depth of the game (1 - near / z) to 2e-7",
-        base.z, 0.0);
-  Check(base.rhw < 8e-7, "the rhw of the GPU position is the rhw of the game to 8e-7 relative",
-        base.rhw, 0.0);
+        whole.z, 0.0);
+  Check(whole.rhw < 8e-7, "the rhw of the GPU position is the rhw of the game to 8e-7 relative",
+        whole.rhw, 0.0);
   printf("  (%d points projected, %d edge points, the worst pixel %.5f, depth %.7f, rhw %.2e)\n",
-         base.projected, base.edge_mismatch, base.xy, base.z, base.rhw);
+         whole.projected, whole.edge_mismatch, whole.xy, whole.z, whole.rhw);
   {
     // A viewport with an offset, a smaller size and a MinZ: the pixel of the
     // game and its rhw stay, and the depth is the depth of the game after the
@@ -425,8 +425,8 @@ inline void GpuMeshChecks() {
     dir = dir.substr(0, dir.find_last_of("/\\")) + "/../../src/mod/";
     const auto read = [](const std::string& path) {
       std::string text;
-      FILE* f = fopen(path.c_str(), "rb");
-      if (f == nullptr) return text;
+      FILE* f = nullptr;
+      if (fopen_s(&f, path.c_str(), "rb") != 0 || f == nullptr) return text;
       char chunk[4096];
       size_t n;
       while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) text.append(chunk, n);
@@ -544,8 +544,8 @@ inline void GpuMeshChecks() {
     w.Record(ss::kMeshDraw, &draw, sizeof(draw), nullptr, 0, group_floats, sizeof(group_floats));
     ss::Reader reader = ss::Reader::Records(w.Bytes().data() + 8, w.Bytes().size() - 8);
     ss::Kind kind;
-    const uint8_t* body;
-    uint32_t bytes;
+    const uint8_t* body = nullptr;
+    uint32_t bytes = 0;
     bool ok = reader.Next(&kind, &body, &bytes) && kind == ss::kMeshDraw &&
               bytes == sizeof(draw) + sizeof(group_floats);
     ss::MeshDrawBody back;

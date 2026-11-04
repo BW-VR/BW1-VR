@@ -359,7 +359,7 @@ bool g_density_depth_valid = true;   // the depth of the part before is stored
 float g_density_ring_deg = 8.0f;     // vk_density_ring_deg
 VkImage g_density_done = VK_NULL_HANDLE;  // the image of the last walk of the pass
 uint64_t g_density_walks = 0, g_density_maps = 0, g_density_cuts = 0;
-uint64_t g_density_depth_lost = 0, g_density_refused[4] = {};
+uint64_t g_density_depth_lost = 0, g_density_refused[5] = {};
 uint64_t g_density_draws_start = 0, g_density_draws = 0;
 float g_density_share = 0.0f;        // the share of the fragments of the last map
 bool g_said_density = false;
@@ -1934,7 +1934,10 @@ void BeginRenderingOf(VkCommandBuffer cb, const vk::Image& color_image,
       ++g_density_depth_lost;
       g_density_sticky = 60;
     }
-    if (g_density_segment > 0) ++g_density_cuts;
+    if (g_density_segment > 0) {
+      ++g_density_cuts;
+      g_density_sticky = 60;
+    }
     keep_depth = g_density_segment > 0 || !g_density_depth_lazy || g_density_sticky > 0;
     g_density_depth_valid = keep_depth;
     ++g_density_segment;
@@ -3702,6 +3705,49 @@ bool PrepareFovea(Slot& s, const Seed* seed) {
   return true;
 }
 
+// The inputs of the map for a walk.
+density_map_math::Params DensityParamsOf(const Seed* seed) {
+  density_map_math::Params p;
+  p.width = g_density_target.width;
+  p.height = g_density_target.height;
+  p.tan_h = seed->fovea.tan_h;
+  p.tan_v = seed->fovea.tan_v;
+  p.gaze_x = seed->mres_gaze[0];
+  p.gaze_y = seed->mres_gaze[1];
+  p.center_deg = seed->mres_deg;
+  p.ring_deg = g_density_ring_deg;
+  p.outer_pct = seed->mres_outer;
+  return p;
+}
+
+// The map into the image of the map, in the command buffer cb, with the buffer
+// of slot `slot`. The image ends in the layout of the map.
+void DensityFill(VkCommandBuffer cb, int slot, const density_map_math::Params& p,
+                 const density_map_math::Key& key) {
+  const vk::Core& core = vk::Get();
+  const VkDeviceSize layer = static_cast<VkDeviceSize>(g_density_map_w) * g_density_map_h * 2;
+  uint8_t* map = static_cast<uint8_t*>(g_density_stage[slot].mapped);
+  density_map_math::Build(map, g_density_map_w, g_density_map_h, core.density_texel_w,
+                          core.density_texel_h, p);
+  memcpy(map + layer, map, static_cast<size_t>(layer));
+  vk::Barrier(cb, g_density_map.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
+  VkBufferImageCopy copy = {};
+  copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
+  copy.imageExtent = {g_density_map_w, g_density_map_h, 1};
+  f.vkCmdCopyBufferToImage(cb, g_density_stage[slot].buffer, g_density_map.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  vk::Barrier(cb, g_density_map.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT, 1, 2);
+  g_density_key = key;
+  g_density_key_valid = true;
+  ++g_density_maps;
+  g_density_share = density_map_math::FragmentShare(
+      map, g_density_map_w, g_density_map_h, core.density_texel_w, core.density_texel_h,
+      p.width, p.height);
+}
+
 // THE ONE PASS. The walk draws into the swapchain image of the app when the
 // app gave one (VkSceneDensityTarget), the walk is a walk of both eyes with
 // foveated resolution (its keys give the map), the eye picture has no atlas,
@@ -3712,6 +3758,7 @@ bool DensityEligible(const Seed* seed) {
   if (!g_density_set) return false;
   if (!seed->mres || !seed->both || seed->intro_eye >= 0 || seed->fovea.tan_h <= 0.0f ||
       seed->fovea.tan_v <= 0.0f) {
+    ++g_density_refused[4];
     return false;
   }
   ReadSharpKeys();
@@ -3771,49 +3818,35 @@ bool DensityEligible(const Seed* seed) {
     }
     g_density_map_w = map_w;
     g_density_map_h = map_h;
+    // The driver reads the map on the CPU when a rendering begins, so the first
+    // map is written now and the GPU is waited for. A later change goes into the
+    // command buffer of a walk and acts one walk late.
+    const density_map_math::Params p = DensityParamsOf(seed);
+    const VkCommandBuffer once = vk::BeginOnce();
+    if (once == VK_NULL_HANDLE) {
+      ++g_density_refused[3];
+      return false;
+    }
+    DensityFill(once, 0, p, density_map_math::KeyOf(p, tw, th));
+    if (!vk::EndOnce(once)) {
+      g_density_key_valid = false;
+      ++g_density_refused[3];
+      return false;
+    }
   }
   return true;
 }
 
-// The map of the walk, into the image of the map in the command buffer of the
-// walk, when the rects moved to other texels or a level changed.
+// A change of the map (the gaze moved a rect to other texels, or a level changed)
+// goes into the command buffer of the walk. The driver reads the map when a
+// rendering begins on the CPU, so the change acts one walk late.
 void DensityRecord(Slot& s, const Seed* seed) {
   const vk::Core& core = vk::Get();
-  density_map_math::Params p;
-  p.width = g_density_target.width;
-  p.height = g_density_target.height;
-  p.tan_h = seed->fovea.tan_h;
-  p.tan_v = seed->fovea.tan_v;
-  p.gaze_x = seed->mres_gaze[0];
-  p.gaze_y = seed->mres_gaze[1];
-  p.center_deg = seed->mres_deg;
-  p.ring_deg = g_density_ring_deg;
-  p.outer_pct = seed->mres_outer;
+  const density_map_math::Params p = DensityParamsOf(seed);
   const density_map_math::Key key =
       density_map_math::KeyOf(p, core.density_texel_w, core.density_texel_h);
   if (!g_density_key_valid || key != g_density_key) {
-    const int slot = static_cast<int>(&s - g_slots);
-    const VkDeviceSize layer = static_cast<VkDeviceSize>(g_density_map_w) * g_density_map_h * 2;
-    uint8_t* map = static_cast<uint8_t*>(g_density_stage[slot].mapped);
-    density_map_math::Build(map, g_density_map_w, g_density_map_h, core.density_texel_w,
-                            core.density_texel_h, p);
-    memcpy(map + layer, map, static_cast<size_t>(layer));
-    vk::Barrier(s.cb, g_density_map.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
-    VkBufferImageCopy copy = {};
-    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
-    copy.imageExtent = {g_density_map_w, g_density_map_h, 1};
-    f.vkCmdCopyBufferToImage(s.cb, g_density_stage[slot].buffer, g_density_map.image,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-    vk::Barrier(s.cb, g_density_map.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT, 1, 2);
-    g_density_key = key;
-    g_density_key_valid = true;
-    ++g_density_maps;
-    g_density_share = density_map_math::FragmentShare(
-        map, g_density_map_w, g_density_map_h, core.density_texel_w, core.density_texel_h,
-        p.width, p.height);
+    DensityFill(s.cb, static_cast<int>(&s - g_slots), p, key);
   }
   ++g_density_walks;
   if (!g_said_density) {
@@ -3824,8 +3857,8 @@ void DensityRecord(Slot& s, const Seed* seed) {
            "by %u pixels (the texel of the GPU is %u by %u to %u by %u). The full density "
            "(255) is %.0f degrees on each side of the centre (fovea_res_center_deg), the ring "
            "(%u) is %.0f degrees wider (vk_density_ring_deg), the rest has the byte %u "
-           "(fovea_res_outer_pct=%.0f). The first map shades %.1f percent of the fragments of "
-           "the picture. The depth of the first part is %s (vk_density_depth=%d)",
+           "(fovea_res_outer_pct=%.0f). The first map asks for %.1f percent of the fragments of "
+           "the picture (the share that the GPU shades is not known). The depth of the first part is %s (vk_density_depth=%d)",
            p.width, p.height, g_density_map_w, g_density_map_h, core.density_texel_w,
            core.density_texel_h, core.density_texel_w, core.density_texel_h,
            core.density_texel_max_w, core.density_texel_max_h, p.center_deg, l.ring,
@@ -6502,10 +6535,6 @@ void VkSceneDensityForget(uint64_t image) {
   }
 }
 
-bool VkSceneDensityUsable() {
-  return g_direct && VkSceneOn() && vk::Started() && vk::Get().external && vk::Get().density_map;
-}
-
 void VkSceneTakeDensityCounts(VkSceneDensityCounts* out) {
   out->walks = g_density_walks;
   out->maps = g_density_maps;
@@ -6516,9 +6545,10 @@ void VkSceneTakeDensityCounts(VkSceneDensityCounts* out) {
   out->refused_atlas = g_density_refused[1];
   out->refused_texel = g_density_refused[2];
   out->refused_map = g_density_refused[3];
+  out->refused_seed = g_density_refused[4];
   out->share = g_density_share;
   g_density_walks = g_density_maps = g_density_cuts = g_density_depth_lost = g_density_draws = 0;
-  g_density_refused[0] = g_density_refused[1] = g_density_refused[2] = g_density_refused[3] = 0;
+  for (uint64_t& r : g_density_refused) r = 0;
 }
 
 void VkSceneComposeStop() { vk_compose::Stop(); }

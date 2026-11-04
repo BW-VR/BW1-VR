@@ -64,6 +64,10 @@ double ThreadCpuMs() {
 std::recursive_mutex g_queue_lock;
 thread_local bool t_time_lock = false;
 thread_local double t_lock_wait_ms = 0.0;
+// The waits of the play thread for a swapchain image of the one pass.
+std::mutex g_density_wait_lock;
+uint64_t g_density_wait_count = 0;
+double g_density_wait_sum = 0.0, g_density_wait_most = 0.0;
 void LockQueue() {
   if (!t_time_lock) {
     g_queue_lock.lock();
@@ -618,38 +622,66 @@ bool XrApp::MakeVulkan() {
   VkPhysicalDeviceFragmentDensityMapFeaturesEXT want_density = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
   want_density.fragmentDensityMap = VK_TRUE;
-  // The chain after want11: the shading rate, then the density map.
-  void** tail = &want11.pNext;
-  if (shading_rate_) {
-    *tail = &want_rate;
-    tail = &want_rate.pNext;
-  }
-  if (density_map_) *tail = &want_density;
+  want_density.fragmentDensityMapNonSubsampledImages = VK_TRUE;
   VkPhysicalDeviceFeatures2 want = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
   want.pNext = &want13;
   want.features.samplerAnisotropy = max_anisotropy_ > 0.0f ? VK_TRUE : VK_FALSE;
+  // A device with the density map has no shading rate attachment: a rendering
+  // may have only one of the two maps, and the device may not enable both
+  // (VUID-VkDeviceCreateInfo-fragmentDensityMap-04683 and 04483). The device
+  // without the density map gets the shading rate again.
+  const bool rate_found = shading_rate_;
   const char* device_extensions[2];
-  uint32_t device_extension_count = 0;
-  if (shading_rate_) device_extensions[device_extension_count++] = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME;
-  if (density_map_) device_extensions[device_extension_count++] = VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME;
-  VkDeviceCreateInfo di = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-  if (renderer13_) {
-    di.pNext = &want;
-    di.enabledExtensionCount = device_extension_count;
-    di.ppEnabledExtensionNames = device_extension_count > 0 ? device_extensions : nullptr;
-  }
-  di.queueCreateInfoCount = 1;
-  di.pQueueCreateInfos = &queue;
   XrVulkanDeviceCreateInfoKHR xd = {XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
-  xd.systemId = system_;
-  xd.pfnGetInstanceProcAddr = &vkGetInstanceProcAddr;
-  xd.vulkanPhysicalDevice = gpu_.physical;
-  xd.vulkanCreateInfo = &di;
-  if (!Ok(create_device(instance_, &xd, &gpu_.device, &vr),
-          "xrCreateVulkanDeviceKHR") ||
-      vr != VK_SUCCESS) {
-    AppLog("xr           : the Vulkan device gave %d", static_cast<int>(vr));
-    return false;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    if (attempt == 1) {
+      if (!density_map_) break;
+      AppLog("xr           : the device with the density map gave %d, so the app tries again "
+             "without it (the one pass is off)", static_cast<int>(vr));
+      density_map_ = false;
+      gpu_.device = VK_NULL_HANDLE;
+    }
+    shading_rate_ = rate_found && !density_map_;
+    void** tail = &want11.pNext;
+    *tail = nullptr;
+    if (shading_rate_) {
+      *tail = &want_rate;
+      tail = &want_rate.pNext;
+    }
+    want_rate.pNext = nullptr;
+    want_density.pNext = nullptr;
+    if (density_map_) *tail = &want_density;
+    uint32_t device_extension_count = 0;
+    if (shading_rate_) {
+      device_extensions[device_extension_count++] = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME;
+    }
+    if (density_map_) {
+      device_extensions[device_extension_count++] = VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME;
+    }
+    VkDeviceCreateInfo di = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    if (renderer13_) {
+      di.pNext = &want;
+      di.enabledExtensionCount = device_extension_count;
+      di.ppEnabledExtensionNames = device_extension_count > 0 ? device_extensions : nullptr;
+    }
+    di.queueCreateInfoCount = 1;
+    di.pQueueCreateInfos = &queue;
+    xd.systemId = system_;
+    xd.pfnGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    xd.vulkanPhysicalDevice = gpu_.physical;
+    xd.vulkanCreateInfo = &di;
+    vr = VK_SUCCESS;
+    const XrResult made = create_device(instance_, &xd, &gpu_.device, &vr);
+    if (XR_SUCCEEDED(made) && vr == VK_SUCCESS) break;
+    if (!density_map_ || attempt == 1) {
+      Ok(made, "xrCreateVulkanDeviceKHR");
+      AppLog("xr           : the Vulkan device gave %d", static_cast<int>(vr));
+      return false;
+    }
+  }
+  if (density_map_) {
+    AppLog("xr           : the device has VK_EXT_fragment_density_map with the map and the images "
+           "with no subsamples, and no shading rate attachment (a rendering has one of the two)");
   }
   if (!GpuFinish(&gpu_)) return false;
   if (time_log_) GpuTimingStart(&gpu_);
@@ -2959,7 +2991,16 @@ bool XrApp::DensityBegin(int slot, uint32_t width, uint32_t height, VkImage* tar
   d.acquired[0] = true;
   XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
-  if (!Ok(xrWaitSwapchainImage(l.swapchain, &wait), "xrWaitSwapchainImage")) {
+  const double wait_start = ClockMs();
+  const bool waited = Ok(xrWaitSwapchainImage(l.swapchain, &wait), "xrWaitSwapchainImage");
+  {
+    const double ms = ClockMs() - wait_start;
+    std::lock_guard<std::mutex> lock(g_density_wait_lock);
+    ++g_density_wait_count;
+    g_density_wait_sum += ms;
+    if (ms > g_density_wait_most) g_density_wait_most = ms;
+  }
+  if (!waited) {
     DirectEnd(slot);
     d.failed = true;
     return false;
@@ -2969,9 +3010,13 @@ bool XrApp::DensityBegin(int slot, uint32_t width, uint32_t height, VkImage* tar
   return true;
 }
 
-bool XrApp::DensitySlot(int slot) const {
-  return slot >= 0 && slot < frame_loop::kSlots && direct_[slot].stereo &&
-         Made(direct_[slot].set);
+void XrApp::TakeSwapchainWaits(uint64_t* count, double* sum_ms, double* most_ms) {
+  std::lock_guard<std::mutex> lock(g_density_wait_lock);
+  *count = g_density_wait_count;
+  *sum_ms = g_density_wait_sum;
+  *most_ms = g_density_wait_most;
+  g_density_wait_count = 0;
+  g_density_wait_sum = g_density_wait_most = 0.0;
 }
 
 void XrApp::CountDensity(bool direct) {

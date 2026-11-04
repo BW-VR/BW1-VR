@@ -37,9 +37,11 @@ inline void DensityMapChecks() {
   // The levels.
   const Levels l = LevelsOf(p);
   Check(l.full == 255, "the full density is 255", l.full, 255);
-  Check(l.outer == 64, "25 percent is the byte 64 (4 by 4 pixels for a fragment)", l.outer, 64);
-  Check(l.ring == 128 || l.ring == 127,
-        "the ring of an outer density of 25 percent is 50 percent (2 by 2)", l.ring, 128);
+  Check(l.outer == 63, "25 percent is the byte 63, a little below a quarter (4 by 4)", l.outer, 63);
+  Check(l.ring == 127, "the ring of an outer density of 25 percent is the byte 127 (2 by 2)",
+        l.ring, 127);
+  Check(ByteOf(50.0f) == 127 && ByteOf(100.0f) == 255 && ByteOf(12.5f) < 32,
+        "50 percent is 127, 100 percent is 255, 12.5 percent is below an eighth", ByteOf(50.0f), 127);
   Near("the ring is the geometric mean of 100 and 25", RingPct(25.0f), 50.0, 1e-4);
   Check(RingPct(100.0f) == 100.0f, "an outer density of 100 percent has a ring of 100", 1, 1);
   Check(LevelsOf([&] { Params q = p; q.ring_deg = 0.0f; return q; }()).ring == l.outer,
@@ -64,8 +66,9 @@ inline void DensityMapChecks() {
   Build(map.data(), mw, mh, tw, th, p);
   auto at = [&](uint32_t tx, uint32_t ty) { return map[(static_cast<size_t>(ty) * mw + tx) * 2]; };
   Check(at(44, 35) == 255, "the middle of the map has the full density", at(44, 35), 255);
-  Check(at(0, 0) == 64 && at(87, 70) == 64 && at(0, 70) == 64 && at(87, 0) == 64,
-        "each corner has the outer density", at(0, 0), 64);
+  Check(at(0, 0) == l.outer && at(87, 70) == l.outer && at(0, 70) == l.outer &&
+            at(87, 0) == l.outer,
+        "each corner has the outer density", at(0, 0), l.outer);
   Check(map[(35 * mw + 44) * 2] == map[(35 * mw + 44) * 2 + 1],
         "the density across and down are equal", 1, 1);
   // A row through the middle goes full, ring, outer on each side.

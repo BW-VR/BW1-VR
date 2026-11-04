@@ -13,8 +13,13 @@
 //
 // A block that touches a rect takes the density of that rect, so no part of
 // the middle gets less than its density. The values are the density along
-// each axis: 255 is 1 by 1 pixel for each fragment, 128 is 2 by 2, 64 is 4 by
-// 4. The driver rounds a value to a size of fragment that it has.
+// each axis: 255 is 1 by 1 pixel for each fragment. A value a little below a
+// half (127) and a quarter (63) gives 2 by 2 and 4 by 4, because a driver that
+// asks for at least the density of the map takes the next size up from a value
+// that is a little above. The driver rounds a value to a size of fragment
+// that it has. A GPU with tiles (Turnip) gives one fragment size to each bin,
+// so the shape of the sizes on the picture can differ from the map: what the
+// map asks for is open until a headset shows what the GPU shades.
 #pragma once
 
 #include <math.h>
@@ -42,10 +47,11 @@ struct Levels {
   uint8_t full, ring, outer;
 };
 
+// The byte rounds down, so 25 percent is 63 and 50 percent is 127.
 inline uint8_t ByteOf(float pct) {
   if (pct < 1.0f) pct = 1.0f;
-  if (pct > 100.0f) pct = 100.0f;
-  return static_cast<uint8_t>(pct * 2.55f + 0.5f);
+  if (pct >= 100.0f) return 255;
+  return static_cast<uint8_t>(pct * 2.55f);
 }
 
 // The ring is the geometric mean of the full density and the outer density,
@@ -179,9 +185,11 @@ inline Key KeyOf(const Params& p, uint32_t texel_w, uint32_t texel_h) {
   return k;
 }
 
-// The share of the fragments of the picture against a map with the full
-// density everywhere (0 to 1): a block with the density d along each axis has
-// d * d of its fragments. For the log.
+// The share of the fragments that a map asks for, against a map with the full
+// density everywhere (0 to 1): a block with the density d along each axis asks
+// for d * d of its fragments. For the log. A GPU with tiles gives one fragment
+// size to each bin, so the shape of the sizes can differ from the map, and the
+// share that it shades is not this value.
 inline float FragmentShare(const uint8_t* map, uint32_t map_w, uint32_t map_h, uint32_t texel_w,
                            uint32_t texel_h, uint32_t width, uint32_t height) {
   double sum = 0.0;

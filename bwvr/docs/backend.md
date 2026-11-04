@@ -5483,19 +5483,26 @@ has one of three densities:
 | Where | Byte | Pixels for a fragment |
 | --- | --- | --- |
 | The rect of `fovea_res` around the centre of the fovea (`fovea_res_center_deg` on each side) | 255 | 1 by 1 |
-| A ring around that rect (`vk_density_ring_deg`, 8 degrees by default, 0 for none) | the geometric mean of 100 and `fovea_res_outer_pct`, 50 percent for 25 | 2 by 2 for an outer density of 25 percent |
-| The rest of the picture | `fovea_res_outer_pct` | 4 by 4 for 25 percent |
+| A ring around that rect (`vk_density_ring_deg`, 8 degrees by default, 0 for none) | the geometric mean of 100 and `fovea_res_outer_pct`, rounded down: 127 for 25 | 2 by 2 for an outer density of 25 percent |
+| The rest of the picture | `fovea_res_outer_pct` rounded down: 63 for 25 | 4 by 4 for 25 percent |
+
+A byte a little below a half or a quarter is on purpose. A driver that asks for at
+least the density of the map gives 2 by 1 for the byte 128 and 4 by 2 for the byte 64.
 
 A block that touches a rect gets the density of that rect, so no part of the
 middle has less than its density. The rect is the one that `fovea_res` puts in
 the picture (`fovea_res_math::MakeLayout`), kept in the picture. The centre is
 the gaze of the eye tracker, or straight ahead (`fovea_res_center_down_deg`
-degrees below it with no eye tracker). The renderer makes the map again in the
-command buffer of the walk when a rect goes to other texels or a level changes
-(`density_map_math::Key`), so the sharp middle follows the gaze, at the steps of
-a texel. The map is in one image for all walks, and each of the two slots of
-the renderer has a buffer for the upload. The driver rounds a density to a size
-of fragment that it has.
+degrees below it with no eye tracker). The first map is written when the image of
+the map is made, with a wait for the GPU, because the driver reads the map on the
+CPU when a rendering begins. The renderer makes the map again in the command buffer
+of a walk when a rect goes to other texels or a level changes
+(`density_map_math::Key`), so the sharp middle follows the gaze at the steps of a
+texel, and a change acts one walk late. The map is in one image for all walks, and
+each of the two slots of the renderer has a buffer for the upload. The driver rounds
+a density to a size of fragment that it has. A GPU with tiles gives one fragment size
+to each bin, so the shape of the sizes on the picture can differ from the map. What
+the GPU shades is open, and the log has only the share that the map asks for.
 
 **The images have no subsamples.** The swapchain image is a normal image, so a
 fragment of a block with fewer fragments gives its color to every pixel of the
@@ -5527,16 +5534,17 @@ no compare of the meshes. A picture of a test (F12) is written from the image.
 that starts again after a draw for the panel or a clear of one eye loads the
 depth of the part before. With `vk_density_depth=1` (the default) the first part
 of a walk stores its depth only when a walk before was cut (for 60 walks after
-the cut), else the depth of a tiled GPU never goes to memory. A walk that is cut
+each cut), else the depth of a tiled GPU never goes to memory. A walk that is cut
 in the middle with no stored depth starts its next part with a cleared depth and
 adds one to the count of the lost depths. `vk_density_depth=0` stores the depth
 of the first part always, as the normal play path does.
 
 **The log.** The app log has, in the window of the time log, one line "the one
 pass (xr_density_pass=1) in this window": the walks of the pass, their draws,
-the maps made, the share of the fragments of the last map, the parts that started
-again after a cut, the lost depths, and the walks that went the old way with the
-reason (the size of the image, an atlas, the texel of the GPU, no map). The line
+the maps made, the share of the fragments that the last map asks for, the parts that started
+again after a cut, the lost depths, the walks that went the old way with the
+reason (the size of the image, an atlas, the texel of the GPU, no map, no walk of both
+eyes with `fovea_res`), and the waits of the play thread for a swapchain image. The line
 of the GPU parts of the walk (`gpu_parts=1`) shows the pass as "a pass of both
 eyes, W by H, cleared, the one pass with a density map" with its time and its
 draws. The line "the GPU of the copies" has no copy for such a picture.

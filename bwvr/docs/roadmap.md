@@ -448,7 +448,7 @@ is built, and no test has proven it.
   Temple:
   - that the clouds, the miracle icons and the beams of light of a charge
     stay with the world at any time,
-  - that Ctrl, Shift and R (or the debug page "Picture", "Eye camera") shows
+  - that Ctrl, Shift and E (or the debug page "Picture", "Eye camera") shows
     the old behavior with 0.
 
   With `roll_trace=1` the log names the address that gives the camera and the

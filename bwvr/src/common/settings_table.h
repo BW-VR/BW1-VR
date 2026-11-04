@@ -499,7 +499,7 @@ inline const char* const kRetiredKeys[] = {
     "help_test", "hint_counts_test_file", "land_light_test",
     "near_test_flips", "sky_test_frame", "sky_test_trace",
     "sky_test_hour", "spawn_test_flag", "sprite_test_frame",
-    "sprite_test_trace", "roll_test_frame", "roll_trace",
+    "sprite_test_trace", "roll_test_inject",
     "spawn_test_temple",
     "spawn_test_toggle", "spawn_test_x", "spawn_test_z",
     "spirit_point_world_test", "spirit_world_size_test",

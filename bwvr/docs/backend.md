@@ -6462,7 +6462,7 @@ for, with the head, the roll and the offset of the eye (`StereoReapplyEye` makes
 same call again). A part of the game can then give the engine a camera of its own in
 the middle of the scene walk, with `LH3DTech::UpdateCamera` (`0x00819920`), draw with
 it, and give the stored camera back. The restore (`0x0068B7D0`, called at
-`0x0068BF2F` by the effect `fn_0068B480`) builds the matrices of the camera again from
+`0x0068BF2F`, in the code of `fn_0068B480`) builds the matrices of the camera again from
 the stored camera. That build has no eye offset and no roll. Each draw after it, in
 the same eye pass, uses a camera that is not the camera of the eye. The world has the
 roll of the head, so such a draw does not roll with the world, and it seems fixed to
@@ -6505,26 +6505,37 @@ or icon can come before the restore at one time and after it at another.
    call of the room of the Temple is not in the stack, because `head_camera.cpp` puts
    the eye camera back after it.
 2. Before each item of the sorted list, and after the last one, when the camera
-   matrix is not the matrix that the eye loop wrote. This covers an effect that
-   gives the engine a camera and does not give it back. The hook on `fn_0082F280`
-   walks the list as the game does, item for item (the node has the object at `+4`,
-   the function at `+8`, a number at `+0xC` that goes to `0x00EE9D30`, and the next
-   node at `+0x14`).
+   matrix is not the matrix that the eye loop wrote. It acts only in the scene
+   walk of an eye pass, so the intro and the menus keep their own camera. This
+   covers an effect that gives the engine a camera and does not give it back. The
+   hook on `fn_0082F280` walks the list as the game does, item for item (the node has
+   the object at `+4`, the function at `+8`, a number at `+0xC` that goes to
+   `0x00EE9D30`, and the next node at `+0x14`).
 
 `eye_after_camera=0` keeps the camera that the game leaves, and the walk of the list
-is then the walk of the game. The sun glare (`sun_glare`) puts the eye camera back
-too, so its mode 0 is the same as before. `eye_stale.cpp` compares the scaled camera
+is then the walk of the game. The sun glare (`sun_glare`) mode 0 puts the eye camera
+back with each value of `eye_after_camera`. In mode 1 the glare has the eye camera
+with `eye_after_camera=1` (the guard after the last item) and the camera that the game
+leaves with 0. `eye_stale.cpp` compares the scaled camera
 matrix (`0x00EA9E40`) with the matrix that the last eye move wrote
 (`EyeCameraStale`, `eye_camera.cpp`). The check is one compare of 48 bytes for each
 item of the list.
 
-**Keys.** With `test_keys=1`, Ctrl, Shift and R change `eye_after_camera` between 1
-and 0, with a long pulse for 1 and a short pulse for 0. The debug page "Picture", item
-"Eye camera", does the same in the headset. The test key `roll_test_frame=N` changes
-the key at frame N of the scripted controller.
+**Keys.** With `test_keys=1`, Ctrl, Shift and E change `eye_after_camera` between 1
+and 0, with a long pulse for 1 and a short pulse for 0. The game reads R (the last
+miracle again) and the other letters of its control map, and E is not one of them. The
+debug page "Picture", item "Eye camera", does the same in the headset. A change comes
+at the start of the next frame, so both eyes of a frame use one value. The test key
+`roll_test_frame=N` changes the key at frame N of the scripted controller.
+`roll_test_inject` is a test key for the desktop, where the effect of the game does
+not give the engine a camera of its own: 1 makes each flush of the sorted list start
+with such a camera and the stored camera back, 2 with such a camera and no restore. The
+trace then shows the items of the list that see the wrong camera with
+`eye_after_camera=0` and none with 1.
 
 **The trace.** `roll_trace=1` adds lines to each report window. The key is for the
-desktop and for a session on the Frame, and the launcher removes it on each save.
+desktop and for a session on the Frame. The launcher keeps `roll_trace` and
+`roll_test_frame` in `bwvr.ini`.
 
 - `eye restore`: the camera calls in the walk, the calls that gave a camera back, and
   how many times the eye camera went back after a call, before an item and after the
@@ -6543,6 +6554,14 @@ desktop and for a session on the Frame, and the launcher removes it on each save
   degrees of straight up or down. There the turn of a sprite to world up fades to 0
   (`kFadeShare`), so a sprite rolls with the head a little. The clouds have no such
   zone, because they face the table camera.
+
+**Open.** A session on the Frame has one call that opens a camera of its own and one
+restore in each frame. A desktop run in the test save "temple" has none: the walk has
+one camera call in each frame, although the item `fn_0068B480` (the only code that
+calls `0x0068B7D0`) runs in each frame. The name of the effect, its caller address and
+the state that starts it are not known: a session with `roll_trace=1` names the
+address. `roll_test_inject` does what the effect does, so the fix can be checked on the
+desktop.
 
 **Not a roll.** In the first frame after a load the mod has no table camera yet. A
 cloud then faces the stored camera, which has no head in it, so the line "N of M cloud
@@ -7033,7 +7052,7 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift F | `test_keys=1` | The tracked real fingers bend the fingers of the hands, or the trigger and the grip do. It needs `finger_tracking` 1 or 2 at the start. A long pulse and a short pulse (`hand-model.md`, "Finger tracking") | None |
 | Ctrl Shift Period | `test_keys=1` | On the hint card, the lines of the walk with the stick and of A show only while they can move the player, or the card has no line for the walk and the line of A shows in each case. A long pulse and a short pulse (`prompt_moves`, `controller-hints.md`, 9.4) | Interface, Prompt moves |
 | Ctrl Shift H | `test_keys=1` | In the God view the Creature turns to and looks at the head of the player, or at the game's own camera. A long pulse and a short pulse (`creature_player_head`, `creature.md`, 5.4). Shift H with Ctrl up is a key of the render | None |
-| Ctrl Shift R | `test_keys=1` | After a camera of its own in an eye pass, the draws of the pass use the camera of the eye, or the camera that the game leaves. A long pulse and a short pulse (`eye_after_camera`, "The eye camera after a camera of its own"). Shift R with Ctrl up is a key of the render | Picture, Eye camera |
+| Ctrl Shift E | `test_keys=1` | After a camera of its own in an eye pass, the draws of the pass use the camera of the eye, or the camera that the game leaves. A long pulse and a short pulse (`eye_after_camera`, "The eye camera after a camera of its own"). Shift E with Ctrl up is a key of the render | Picture, Eye camera |
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw | Render, Frame send |
 | Ctrl Shift 7 | `test_keys=1` | With `backend=vulkan`: `gpu_mesh` is 1 or 0 (the meshes of the 3D parts on the GPU or on the CPU). With `gpu_mesh=0` in `bwvr.ini` the hooks go in at the first press. A long pulse for 1 and a short pulse for 0 (`gpu_mesh`, `software-tnl.md`, "The meshes on the GPU") | Render, GPU mesh |
 | Ctrl Shift 6 | `test_keys=1` | With `gpu_mesh=1`: the parts of the GPU path (blend, stage 1, the shift of the texture, the groups and the depth of the game) are on as the keys say, or all off (the meshes with blend, stage 1, a shift of the texture or groups take the CPU path). A long pulse for on and a short pulse for off | Render, GPU mesh parts |
@@ -7160,7 +7179,7 @@ keys that the launcher sets.
 | `sprite_world_up` | 1 | 1: smoke, fire and the other sprites keep world up, so they do not roll with the head. 0: they roll with the head. See "Sprites with world up" |
 | `sprite_test_frame`, `sprite_test_trace` | 0, 0 | Test keys of the desktop runs. See "Sprites with world up" |
 | `eye_after_camera` | 1 | 1: after a camera of its own in an eye pass, the draws of the pass use the camera of the eye again, so the clouds, the beams of light and the sprites roll with the world. 0: they use the camera that the game leaves, which has no roll and no eye offset. See "The eye camera after a camera of its own" |
-| `roll_test_frame`, `roll_trace` | 0, 0 | Test keys of the desktop runs and of a session with a log. See the same section |
+| `roll_test_frame`, `roll_trace`, `roll_test_inject` | 0, 0, 0 | Test keys of the desktop runs and of a session with a log. `roll_trace` and `roll_test_frame` stay in `bwvr.ini` on a save of the launcher. See the same section |
 | `freeze_time` | 1 | See "Time, bars and the second eye pass" |
 | `frame_time_real` | 1 | 1: after the two eye passes the game has the real time of the frame as its frame time. 0: it has the number from before the passes. See "The delta time after the passes" |
 | `frame_time_test_frame`, `frame_time_test_readers`, `frame_time_test_readers_frames` | 0, 0, 600 | Test keys of the desktop runs. See "The delta time after the passes" |

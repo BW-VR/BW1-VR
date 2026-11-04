@@ -28,6 +28,7 @@ enum WalkPartsHook {
   kWalkHookDrawTriangle,     // h_DrawTriangle, draw_hooks.cpp
   kWalkHookDrawAndClip,      // h_DrawAndClip, draw_hooks.cpp
   kWalkHookDrawAndClip2D,    // h_DrawAndClip2D, draw_hooks.cpp
+  kWalkHookSortedFlush,      // h_SortedFlush, eye_stale.cpp
   kWalkHookCount
 };
 // The call of the hook starts. Gives the place of its timer on the stack of

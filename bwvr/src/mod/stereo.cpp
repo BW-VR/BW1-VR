@@ -195,7 +195,7 @@ void UiDepthReportHelp();
 void SkyDetailReport();
 void SpriteUpReport();
 void EyeStaleReport();
-void EyeStalePassBegin();
+void EyeStalePassBegin(int eye);
 // spirit_anchor.cpp
 void SpiritAnchorReport();
 void SpiritAnchorWorldSizeToggle();
@@ -1876,7 +1876,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
       }
     }
     UiDepthSetEye(eye, g_ui_shift_used);
-    EyeStalePassBegin();
+    EyeStalePassBegin(eye);
     BubbleCardPass(eye);
     NoteDepthPass(eye);
     PassGuardSetEye(eye);

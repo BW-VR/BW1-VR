@@ -76,8 +76,8 @@ bool StereoInPass();
 int StereoPassEye();
 // eye_stale.cpp: the camera calls of the scene walk in an eye pass, and the
 // eye camera after a camera of its own.
-bool EyeStaleCallBegin(uintptr_t caller, const float* position,
-                       const float* focus);
+bool EyeStaleCallBegin(uintptr_t caller, bool room_camera,
+                       const float* position, const float* focus);
 void EyeStaleCallEnd(bool restore);
 void StereoRoomCamera();
 // head_pose.cpp: the world units in a meter of the room.
@@ -769,7 +769,8 @@ void __fastcall h_UpdateCamera(const float* position, const float* focus) {
   // a camera with no eye offset and no roll (eye_stale.cpp).
   const bool in_pass_call = g_in_scene && StereoInPass();
   const bool restore =
-      in_pass_call && EyeStaleCallBegin(caller, position, focus);
+      in_pass_call &&
+      EyeStaleCallBegin(caller, caller == kRoomPreDrawReturn, position, focus);
   PlaceCamera(position, focus, false, caller);
   if (in_pass_call) EyeStaleCallEnd(restore);
 }
@@ -784,6 +785,10 @@ void HeadCameraWorldIsUp() { g_world_is_up = true; }
 // one eye or two. Every camera the engine builds between these two is a sub
 // camera, and none of them owns the frame's state.
 void HeadCameraBeginScene() { g_in_scene = true; }
+
+// True from the start to the end of the scene walk of a frame. The sorted list
+// of draws is drawn inside it (eye_stale.cpp).
+bool HeadCameraInScene() { return g_in_scene; }
 
 // The intro has no scene walk to end, so it ends its own frame here. One frame
 // gives one head to both of its eye passes. See RecordThisCall.

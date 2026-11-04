@@ -62,6 +62,14 @@ struct CameraStack {
   }
 };
 
+// True when the eye camera goes back after a call: the call gave a camera
+// back, and no call is open any more. The restore of an inner effect gives
+// the camera of the outer effect back. The outer effect still draws with it,
+// so the eye camera waits for the restore of the outer effect.
+inline bool EyeBackAfter(const CameraStack& stack, bool restore) {
+  return restore && stack.depth == 0;
+}
+
 // Why a draw sees a camera that is not the camera of the eye.
 enum Reason {
   kEyeCamera = 0,    // the matrix is the matrix the eye loop wrote

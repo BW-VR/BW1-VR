@@ -105,11 +105,19 @@ These items come before the other work.
   choice of the Creature. `vk_upload_keep=1` keeps the old picture of a
   texture when the upload of its new image fails. The log has the address
   space and a reason line for each texture read that gives no image ("A
-  read with no new image"). Open: a headset play of an hour, to the choice
+  read with no new image"). Testers still get up to two crashes a day,
+  with the God view and with the flat view. Open: a headset play of an hour, to the choice
   of the Creature and past the Lost Brother quest, must show that the
   crash and the white people stop. If they do not, read the lines
   `address space` and `a texture with no new image` of that log. The
   invisible body after the quest has no known cause yet.
+- **B39. The camera turns around the Forest miracle.** Testers find that the
+  camera turns in a circle at the Forest miracle, and that this must stop. It
+  occurs with the cut scene around the player and with the window. This is
+  motion that the player did not make. Not known: which script or cut scene
+  of the game turns the camera, and when it starts. Find it in a desktop
+  run first. Then hold the camera still or let the head control it, with a
+  key whose old value keeps the turn.
 - **B37. A save in Program Files: check the Save Game Room in a play.**
   With no administrator rights the profile is in the VirtualStore. Windows
   then refuses two calls of each save: the write of `SaveGame.inf` (error 2
@@ -352,7 +360,10 @@ These items come before the other work.
   the right eye has it at the eye difference of the Hand's point
   (`one_walk_marks=1`, `backend.md`, "The cards and the marks of the mod").
   A desktop run shows the glow of the right eye at its place in each pose of
-  a hand that turns. The glow is off by default (`hand_glow=0`). Still open:
+  a hand that turns. The glow is off by default (`hand_glow=0`). Testers
+  find that the glow helps the aim when the view is zoomed out and a tree
+  is too small to see. Still open:
+  - Decide whether the glow is on by default.
   - Check in a headset that the glow stays at one place on the hand when the
     hand turns. Ctrl, Shift and the right square bracket key (`test_keys=1`)
     give the right eye the glow by the rhw of its disc for a comparison.
@@ -702,6 +713,33 @@ that moves while the Hand takes it.
 - **P12. Ideas from Half-Life: Alyx** that are not built are in
   `research-hla.md`, for the far grab, the teleport, the hands, the hints,
   the sound and comfort.
+- **P21. A take at the Hand stops when the hand moves away.** With the grip
+  closed at a pile of the store, the take stops when the hand moves out of
+  the area of the pile. A take at a distance (the ray) keeps on while the
+  player moves (`grab.md`, "A bulk source at a distance"). Wanted: the take
+  at the Hand acts as the take at a distance. First find which test of the
+  game or of the mod ends the take (`grab.md`, "The bulk take").
+- **P22. A quicker jump to a bookmark.** Page 2 of the ring sets a bookmark
+  (`mark_set`), goes to the next one (`mark_go`) and goes back
+  (`mark_back`), see `controllers.md`. Testers do not find a way to go to a
+  bookmark. Wanted: a choice of each bookmark by its number in the ring,
+  and the previous bookmark (`controls-audit.md`, item 1).
+- **P23. The aim down from a chair: keep watch.** A seated player aims down
+  less well than a standing player, because furniture can be in the way of
+  the hand. Not planned. One idea: a launcher option that lets the grab
+  with two hands tilt the world. A tilted world makes the physics and other
+  parts more difficult, so wait for more reports first.
+
+### Faults of the plain game
+
+These faults are in the game with the unofficial patch v1.42, not in the
+mod. A fix is a change of behavior, with a key whose old value keeps the
+game as it is.
+
+- **G1. Silver Scrolls of Land 3.** Testers report that a guru (a yogi)
+  sees the player from behind, and that trees go away in the puzzle of the
+  trees. Not known: the quest of each fault, and the script or the code that
+  has it. Make each fault occur in a desktop run first.
 
 ### Built, and not proven or not finished
 
@@ -957,7 +995,9 @@ that moves while the Hand takes it.
   and Heal from its icon at the Worship Site.
 - **N6. Miracles.** Not run: teleport, the Creature miracles other than
   Strong and Freeze, and each reason of a refusal but "needs a Creature"
-  and "needs a circle on the land".
+  and "needs a circle on the land". Testers find the circle of a shield
+  hard to draw to the correct size. Check it when the miracles get their
+  tests.
 - **N8. The scripts and the engine camera.** The scripts get the place of
   the player. Not changed: the 114 markers at "camera position",
   `GetFacingCameraPosition`, and the other readers of the engine camera.

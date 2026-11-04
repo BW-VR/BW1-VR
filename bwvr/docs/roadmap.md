@@ -719,11 +719,21 @@ that moves while the Hand takes it.
   player moves (`grab.md`, "A bulk source at a distance"). Wanted: the take
   at the Hand acts as the take at a distance. First find which test of the
   game or of the mod ends the take (`grab.md`, "The bulk take").
-- **P22. A quicker jump to a bookmark.** Page 2 of the ring sets a bookmark
+- **P22. A panel of places to go.** Page 2 of the ring sets a bookmark
   (`mark_set`), goes to the next one (`mark_go`) and goes back
   (`mark_back`), see `controllers.md`. Testers do not find a way to go to a
-  bookmark. Wanted: a choice of each bookmark by its number in the ring,
-  and the previous bookmark (`controls-audit.md`, item 1).
+  bookmark. Plan: one item of the ring opens a panel of buttons, and the
+  pointing hand presses them with the ray and the trigger, as on the
+  keyboard in the headset (`ui-layer.md`, section 21). The panel has:
+  - the places of the game: the Temple, the Creature, the next town and
+    the middle of the land,
+  - the 7 bookmarks of the game, each with Go, Set here, Follow and Remove
+    (`controls-audit.md`, item 1). A bookmark that is not set is dim,
+  - Back (Backspace), and a button that closes the panel.
+
+  A press of Go closes the panel. Set and Remove keep it open. The panel is
+  fixed in the room, as the menu panel is. The bookmark items of page 2 of
+  the ring give their slots to other items. A key keeps the old items.
 - **P23. The aim down from a chair: keep watch.** A seated player aims down
   less well than a standing player, because furniture can be in the way of
   the hand. Not planned. One idea: a launcher option that lets the grab

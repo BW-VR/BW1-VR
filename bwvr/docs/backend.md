@@ -5339,6 +5339,7 @@ windows of 10 s of one session that had both passes:
 | `vk_pass_store=1` | The depth of the two small passes is not stored | The 4.9 MB of the depth, about 0.1 to 0.2 ms |
 | `vk_mres_draws=1`, `vk_mres_sort=1` | The draws of the two small passes get the merge of the walks with one image, and with the second key the sort (1.6 us for each draw that goes) | In a desktop run 27 percent of the commands with both. The same share of 2158 draws is 0.9 ms. The merge alone is less |
 | `xr_panel_rect=1` | The copies of the panel image take the rect of the quads | The panel copies are 0.3 ms of a picture (118 copies of 24.1 MB in 10 s). The saving is their share of the image that the quads do not show |
+| `xr_density_pass=1` | The walk draws one time into the swapchain image with a density map ("The one pass with a density map"). No outer image, no centre image, no compose, no copy | The second play of the list of draws (about 2.3 us for each draw), the pass that makes the eye picture and the copy |
 
 The mean of the sum: 9.9 ms, minus 3.6, 0.8, 0.15, 0.9 and 0.2, is about 4.3 ms
 if each saving comes in full. The goal is less than 7 ms in the view of the
@@ -5444,6 +5445,116 @@ the draw needs no bind. (2) Draw copies of one mesh in one command
 (`instanceCount`): the values of a draw are already a vertex buffer of the rate
 instance, so records of the same mesh, state and sets that lie one after the
 other in the ring need only a count.
+
+## The one pass with a density map
+
+`xr_density_pass=1` (a key of the headset app, `android.md`, "The one pass with
+a density map") draws the eye pictures of a walk one time, straight into a
+swapchain image of the app, with a fragment density map
+(`VK_EXT_fragment_density_map`). The walk makes no outer image, no centre
+image, no pass that makes the eye picture, and no copy. The pass of the two
+images (`fovea_res=1`) plays the list of draws two times, and the second play
+costs about 2.3 us for each draw ("The compose of the eye picture"). The one
+pass plays it one time, with the normal play path of a walk with one image:
+the draws wait for the sort and the merge of `vk_draw_sort` and
+`vk_draw_merge`, and the pipelines, the sets and the push constants are those
+of any walk.
+
+**When a walk takes the pass** (`DensityEligible` of `vk_scene.cpp`). The app
+gives the swapchain image before it plays a batch of frames
+(`VkSceneDensityTarget`). A walk takes it when all of these are true, else it
+goes the old way into the images of the renderer:
+
+- the walk draws both eyes (one walk) and `fovea_res=1` (its keys give the
+  map),
+- `fovea_res_layer` is 0 (the atlas of `fovea_res_layer=1` has two images in
+  one picture, which the pass does not make),
+- the viewport of the walk is the whole image of the app, 0 0 and its width
+  by its height,
+- the device has the extension with the map and with images that have no
+  subsamples, and the largest texel of the GPU covers the picture with the
+  map that the finest texel gives.
+
+**The map** (`density_map_math.h`, checks in `density_map_checks.h`). One texel
+of the map covers a block of pixels (the finest texel of the GPU, 32 by 32 on a
+Turnip Adreno 750). The map is R8G8_UNORM with a layer for each eye. A block
+has one of three densities:
+
+| Where | Byte | Pixels for a fragment |
+| --- | --- | --- |
+| The rect of `fovea_res` around the centre of the fovea (`fovea_res_center_deg` on each side) | 255 | 1 by 1 |
+| A ring around that rect (`vk_density_ring_deg`, 8 degrees by default, 0 for none) | the geometric mean of 100 and `fovea_res_outer_pct`, 50 percent for 25 | 2 by 2 for an outer density of 25 percent |
+| The rest of the picture | `fovea_res_outer_pct` | 4 by 4 for 25 percent |
+
+A block that touches a rect gets the density of that rect, so no part of the
+middle has less than its density. The rect is the one that `fovea_res` puts in
+the picture (`fovea_res_math::MakeLayout`), kept in the picture. The centre is
+the gaze of the eye tracker, or straight ahead (`fovea_res_center_down_deg`
+degrees below it with no eye tracker). The renderer makes the map again in the
+command buffer of the walk when a rect goes to other texels or a level changes
+(`density_map_math::Key`), so the sharp middle follows the gaze, at the steps of
+a texel. The map is in one image for all walks, and each of the two slots of
+the renderer has a buffer for the upload. The driver rounds a density to a size
+of fragment that it has.
+
+**The images have no subsamples.** The swapchain image is a normal image, so a
+fragment of a block with fewer fragments gives its color to every pixel of the
+block. The part outside the middle is then made of blocks of 2 by 2 and 4 by 4
+pixels with sharp edges, not a smooth picture as the outer image with a linear
+filter is. The size of the blocks is the choice of `fovea_res_outer_pct`.
+
+**The pass.** The rendering of the eyes has a view with both layers of the
+image of the app in the format UNORM, a depth image of the renderer and the
+map as `VkRenderingFragmentDensityMapAttachmentInfoEXT`. The pipelines of a
+walk of the pass are their own (`kDensityKey`), made with
+`VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT` and
+without a shading rate: a pipeline with the bit needs a rendering with a map,
+and a rendering with a map needs it. A draw for the panel has its own
+rendering, and its pipelines have no map. The meshes on the GPU draw with the
+pipelines of the pass too. The texture level of a draw follows the larger
+fragments, so the outside gets a coarser mip level, as the outer image does.
+
+**The image is the swapchain image, not the target of the renderer.** From the
+start of a walk of the pass `Target()` is the image of the app. The walk keeps no
+picture of the walk before (`vk_keep_picture`), because that picture is in another
+swapchain image. `VkSceneEyes` gives the image, and `VkSceneDensityPicture` says
+that the picture is in it. The renderer leaves the image in the layout of a color
+attachment, and the app releases it. The pass makes no pictures for the screen
+quad (`VkSceneLastPicture` gives none after it), no check for a black picture, and
+no compare of the meshes. A picture of a test (F12) is written from the image.
+
+**The depth.** The depth image is the one of the renderer. A part of a walk
+that starts again after a draw for the panel or a clear of one eye loads the
+depth of the part before. With `vk_density_depth=1` (the default) the first part
+of a walk stores its depth only when a walk before was cut (for 60 walks after
+the cut), else the depth of a tiled GPU never goes to memory. A walk that is cut
+in the middle with no stored depth starts its next part with a cleared depth and
+adds one to the count of the lost depths. `vk_density_depth=0` stores the depth
+of the first part always, as the normal play path does.
+
+**The log.** The app log has, in the window of the time log, one line "the one
+pass (xr_density_pass=1) in this window": the walks of the pass, their draws,
+the maps made, the share of the fragments of the last map, the parts that started
+again after a cut, the lost depths, and the walks that went the old way with the
+reason (the size of the image, an atlas, the texel of the GPU, no map). The line
+of the GPU parts of the walk (`gpu_parts=1`) shows the pass as "a pass of both
+eyes, W by H, cleared, the one pass with a density map" with its time and its
+draws. The line "the GPU of the copies" has no copy for such a picture.
+
+**Known limits and open points** (only a headset can show them):
+
+- Whether the driver of the Steam Frame draws the pass with the density map, and
+  at which rounding of the density, with the time of the GPU: not run.
+- The texture of the blocks outside the middle is sharp-edged. Whether the look is
+  good enough at the density of 25 percent, and at which ring.
+- The gaze moves the map at the steps of a texel (32 pixels), in the command buffer
+  of a walk. The offset of `VK_QCOM_fragment_density_map_offset` needs the end of a
+  render pass of the old kind, not the dynamic rendering of the renderer, so it is
+  not used.
+- A frame with a dialog box that follows the scene walks has no picture of the last
+  walk for the screen quad, because the image went back to the runtime.
+- A depth of the first part that is not stored can lose a depth test after the first
+  cut of a run of walks (one walk).
 
 ## The session with Vulkan
 

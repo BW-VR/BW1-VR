@@ -158,6 +158,13 @@ struct App {
   PlayStats play_stats;
   int gpu_depth = 1;  // frame_loop_gpu_depth, read at each Play
   bool compose_direct = false;  // xr_compose_direct, read at each Play and from the debug page
+  // THE ONE PASS (xr_density_pass, read at each Play): the walks of both eyes draw
+  // into a swapchain image of the slot of the picture. The size of the render of
+  // this game, and a fault (the renderer took no view of an image) that sends the
+  // rest of the game to the old way.
+  bool density_pass = false;
+  bool density_off = false;
+  uint32_t render_w = 0, render_h = 0;
   std::atomic<bool> play_ok{false};  // the play thread runs (the late compose may be on)
   // THE EVEN RATE (frame_loop_hold, read at each Play): the frames of the
   // session that showed the shown picture, and if a picture showed.
@@ -561,11 +568,17 @@ bool PlayLive(App* app) {
 // the session needs. A screen picture goes into the slot only when the slot
 // does not hold it yet. The result is the ms that the play thread waited for
 // the fence of the slot.
-double WriteSlot(App* app, const LivePlay& live) {
+//
+// THE ONE PASS (xr_density_pass=1): the play thread took the slot before the
+// play (early, with the ms that it waited), and the walks of the batch drew
+// into a swapchain image of the slot (density). The picture of the batch
+// is in that image when the renderer says so (VkSceneDensityPicture).
+double WriteSlot(App* app, const LivePlay& live, int early = -1, bool density = false,
+                 double early_waited = 0.0) {
   namespace sq = screen_quad_math;
-  double waited = 0.0;
+  double waited = early_waited;
   bool direct = false;
-  const int i = app->ring.BeginWrite(&waited);
+  const int i = early >= 0 ? early : app->ring.BeginWrite(&waited);
   if (i < 0) return waited;
   PictureRing::Slot& s = app->ring.At(i);
   Picture g;
@@ -614,36 +627,61 @@ double WriteSlot(App* app, const LivePlay& live) {
     // window takes the old way.
     const quad_layer_math::FrameLayers& layers = *g.layers;
     VkImage targets[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    direct = app->xr.EyeDirect() && app->xr.ProjectionOn() && g.have_view &&
-             view_layer_math::ShowsProjection(g.view) && !quad_layer_math::AsScreen(layers) &&
-             app->xr.DirectBegin(i, g.width, g.height, g.atlas, targets);
-    // THE LATE COMPOSE (xr_compose_direct=1): the walk left the eye picture to
-    // the app. It has no atlas, so the part is the whole picture.
-    const bool late = VkSceneComposePending(reinterpret_cast<uint64_t>(g.eyes));
-    if (direct) {
-      // The slot has no image of its own for the eyes now.
-      app->ring.FreeEyes(i);
-      const eye_copy_math::Rect part =
-          eye_copy_math::CopyPart(true, g.atlas, g.width, g.height);
-      if (!(late && app->xr.ComposeFormatOk() &&
-            app->ring.ComposeDirect(i, targets, app->xr.SwapFormat(), part))) {
-        // The old way, or the pass cannot go into this format: the pass into
-        // the image of the renderer, and the copy from it.
-        if (late) app->ring.ComposeEyes(i, part);
-        app->ring.CopyDirect(i, g.eyes, part, targets);
+    const bool shows_projection = app->xr.ProjectionOn() && g.have_view &&
+                                  view_layer_math::ShowsProjection(g.view) &&
+                                  !quad_layer_math::AsScreen(layers);
+    // THE ONE PASS: the picture is in the swapchain image of the slot already.
+    // It shows in the projection layer with no copy, else it is copied from
+    // that image (the stereo screen, the cut scene window).
+    const bool in_swapchain =
+        density && VkSceneDensityPicture(reinterpret_cast<uint64_t>(g.eyes));
+    if (in_swapchain) {
+      app->xr.CountDensity(shows_projection);
+      if (shows_projection) {
+        app->ring.FreeEyes(i);
+        app->ring.DensityMark(i, g.eyes);
+        direct = true;
+        p.eyes_ok = true;
+        p.direct_slot = i;
+        p.eyes = VK_NULL_HANDLE;
+      } else {
+        p.eyes_ok = app->ring.CopyEyes(i, g.eyes, g.width, g.height,
+                                       eye_copy_math::Whole(g.width, g.height));
+        p.eyes = s.eyes.image;
       }
-      p.eyes_ok = true;
-      p.direct_slot = i;
-      p.eyes = VK_NULL_HANDLE;
     } else {
-      if (late) {
-        app->ring.ComposeEyes(i, eye_copy_math::Whole(g.width, g.height));
+      // A slot with an image of the one pass in hand never makes swapchains of
+      // its own here.
+      direct = !density && app->xr.EyeDirect() && shows_projection &&
+               app->xr.DirectBegin(i, g.width, g.height, g.atlas, targets);
+      // THE LATE COMPOSE (xr_compose_direct=1): the walk left the eye picture to
+      // the app. It has no atlas, so the part is the whole picture.
+      const bool late = VkSceneComposePending(reinterpret_cast<uint64_t>(g.eyes));
+      if (direct) {
+        // The slot has no image of its own for the eyes now.
+        app->ring.FreeEyes(i);
+        const eye_copy_math::Rect part =
+            eye_copy_math::CopyPart(true, g.atlas, g.width, g.height);
+        if (!(late && app->xr.ComposeFormatOk() &&
+              app->ring.ComposeDirect(i, targets, app->xr.SwapFormat(), part))) {
+          // The old way, or the pass cannot go into this format: the pass into
+          // the image of the renderer, and the copy from it.
+          if (late) app->ring.ComposeEyes(i, part);
+          app->ring.CopyDirect(i, g.eyes, part, targets);
+        }
+        p.eyes_ok = true;
+        p.direct_slot = i;
+        p.eyes = VK_NULL_HANDLE;
+      } else {
+        if (late) {
+          app->ring.ComposeEyes(i, eye_copy_math::Whole(g.width, g.height));
+        }
+        // xr_eye_rects=1: only the part of the picture that the layers show.
+        p.eyes_ok = app->ring.CopyEyes(
+            i, g.eyes, g.width, g.height,
+            eye_copy_math::CopyPart(app->xr.EyeRects(), g.atlas, g.width, g.height));
+        p.eyes = s.eyes.image;
       }
-      // xr_eye_rects=1: only the part of the picture that the layers show.
-      p.eyes_ok = app->ring.CopyEyes(
-          i, g.eyes, g.width, g.height,
-          eye_copy_math::CopyPart(app->xr.EyeRects(), g.atlas, g.width, g.height));
-      p.eyes = s.eyes.image;
     }
     p.width = g.width;
     p.height = g.height;
@@ -674,8 +712,9 @@ double WriteSlot(App* app, const LivePlay& live) {
   }
   p.ready_ms = NowMs();
   // The swapchain images of xr_eye_direct=1 go back to the runtime after the
-  // submit and before the slot is ready.
-  if (direct) {
+  // submit and before the slot is ready. The image of the one pass goes back
+  // also when the picture took a copy from it, or was no eye picture.
+  if (direct || density) {
     app->ring.EndWrite(i, [app, i]() { app->xr.DirectEnd(i); });
   } else {
     app->ring.EndWrite(i);
@@ -740,10 +779,34 @@ void* PlayThread(void* arg) {
     const double start = NowMs();
     const size_t n = live->batch.size();
     const int64_t trace_play = g_app_trace ? AppTraceNow() : 0;
+    // THE ONE PASS (xr_density_pass=1): the slot of the picture and its
+    // swapchain image first, so the walks of the batch draw into the image. A
+    // slot that has no image for the pass keeps its place, and the batch goes
+    // the old way.
+    int early = -1;
+    bool density = false;
+    double early_waited = 0.0;
+    if (app->xr.DensityPass() && !app->density_off) {
+      early = app->ring.BeginWrite(&early_waited);
+      VkImage image = VK_NULL_HANDLE;
+      if (early >= 0 && app->xr.DensityBegin(early, app->render_w, app->render_h, &image)) {
+        density = VkSceneDensityTarget(reinterpret_cast<uint64_t>(image), app->render_w,
+                                       app->render_h);
+        if (!density) {
+          // The image goes back unused, and this game has no more tries.
+          app->xr.DirectEnd(early);
+          app->density_off = true;
+          AppLog("game         : xr_density_pass=1, but the renderer took no view of the "
+                 "swapchain image (see the line of vk scene before). The rest of this game "
+                 "goes the old way");
+        }
+      }
+    }
     const double ms = PlayBatch(app, live);
+    if (density) VkSceneDensityTargetEnd();
     WalkProbeInstall();
     const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
-    const double waited = WriteSlot(app, *live);
+    const double waited = WriteSlot(app, *live, early, density, early_waited);
     if (trace_play != 0) {
       static const trace_events::Def kPlayDef = {"play of a batch of frames (renderer)", "play", {"#last frame", "frames", nullptr, nullptr}};
       static const trace_events::Def kSlotDef = {"copy of the picture into a slot (WriteSlot)", "play", {"#last frame", "wait_ms", nullptr, nullptr}};
@@ -1256,6 +1319,44 @@ void Play(App* app, bool new_game) {
                                "thread copies it"
                              : "Needs xr_eye_direct=1. The renderer makes the eye picture of "
                                "each walk"));
+  }
+  // xr_density_pass (0 by default, needs xr_eye_direct=1, fovea_res=1 with
+  // fovea_res_layer=0, and a device with the density map): 1, the walks of both
+  // eyes draw one time into a swapchain image of the slot, with a fragment density
+  // map from the keys of fovea_res. No outer image, no centre image, no compose
+  // and no copy.
+  app->render_w = game.width;
+  app->render_h = game.height;
+  app->density_off = false;
+  {
+    const bool key = app->ini.GetInt("bwvr", "xr_density_pass", 0) != 0;
+    const bool res = app->ini.GetInt("bwvr", "fovea_res", 0) != 0;
+    const bool atlas = app->ini.GetInt("bwvr", "fovea_res_layer", 0) != 0;
+    const char* why = nullptr;
+    if (!key) why = nullptr;
+    else if (!loop) why = "the frame loop is off";
+    else if (!eye_direct) why = "xr_eye_direct is 0";
+    else if (!res) why = "fovea_res is 0 (its keys set the map)";
+    else if (atlas) why = "fovea_res_layer is not 0 (the centre as its own layer has an atlas)";
+    else if (!app->xr.DensityMap()) {
+      why = app->ini.GetInt("bwvr", "xr_density_pass", 0) != 0 && !app->xr.DensityMap()
+                ? "the device has no VK_EXT_fragment_density_map (the GPU lacks it, or the key "
+                  "was 0 at the start of the app)"
+                : nullptr;
+    }
+    app->density_pass = key && why == nullptr;
+    app->xr.SetDensityPass(app->density_pass);
+    if (key || loop) {
+      AppLog("game         : xr_density_pass=%d. %s", key ? 1 : 0,
+             app->density_pass
+                 ? "A walk of both eyes draws one time into a swapchain image of two layers of the "
+                   "slot, with a fragment density map from fovea_res_center_deg, "
+                   "fovea_res_outer_pct and vk_density_ring_deg (no outer image, no centre image, "
+                   "no compose, no copy)"
+                 : (key ? "The one pass is off for this game: see the reason below"
+                        : "The walks draw into the images of the renderer"));
+      if (key && why != nullptr) AppLog("game         : the one pass is off: %s", why);
+    }
   }
   // xr_panel_rect (0 by default): 1, the copies of the panel image (into the
   // slot and into its swapchain) take only the part that the panel quads show.
@@ -1967,6 +2068,10 @@ void android_main(android_app* android) {
   // frame_loop_queues=2 (the default): with the frame loop the renderer has
   // a queue of its own when the device has one. 1: one queue for all.
   app.xr.SetQueues(app.ini.GetInt("bwvr", "frame_loop_queues", 2));
+  // xr_density_pass=1 (0 by default): the device gets the extension of the
+  // density map, and the runtime gets the probe of the one pass. The key is read
+  // again at each Play, but the device is made one time, at the start.
+  app.xr.SetDensityWanted(app.ini.GetInt("bwvr", "xr_density_pass", 0) != 0);
   // eye_size_max=1 (the default): the size of the eyes that the app takes
   // from the runtime has a cap, the panel of a Quest 3 (2064 by 2208) with the
   // aspect of the runtime (eye_size.h). 0: the size of the runtime.

@@ -151,6 +151,13 @@ struct Core {
   uint32_t rate_texel_w;
   uint32_t rate_texel_h;
   bool rate_quarter;
+  // THE ONE PASS (xr_density_pass, density_map_math.h): the device has
+  // VK_EXT_fragment_density_map on, with the map and with images that have no
+  // subsamples. The texel of the map in pixels: the finest the GPU has, and
+  // the coarsest.
+  bool density_map;
+  uint32_t density_texel_w, density_texel_h;
+  uint32_t density_texel_max_w, density_texel_max_h;
   // THE WINDOW (vk_window.cpp): the instance has VK_KHR_surface and
   // VK_KHR_win32_surface, and the device has VK_KHR_swapchain.
   bool window_present;
@@ -166,6 +173,11 @@ struct External {
   float max_anisotropy;
   VkFormat color_format;
   bool shading_rate;  // VK_KHR_fragment_shading_rate is on the device
+  // VK_EXT_fragment_density_map is on the device with the map and the images
+  // with no subsamples, and the sizes of its texel (as Core::density_*).
+  bool density_map;
+  uint32_t density_texel_w, density_texel_h;
+  uint32_t density_texel_max_w, density_texel_max_h;
   bool window_present;  // as Core::window_present
   void (*lock)();  // the lock of the queue of the session
   void (*unlock)();

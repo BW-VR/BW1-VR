@@ -38,9 +38,10 @@ struct PassKey {
   uint32_t height = 0;
   bool clear = false;  // the color starts cleared, else it is loaded
   bool rate = false;   // the pass has the map of the shading rates
+  bool density = false;  // the pass has a fragment density map (the one pass)
   bool Same(const PassKey& o) const {
     return views == o.views && width == o.width && height == o.height && clear == o.clear &&
-           rate == o.rate;
+           rate == o.rate && density == o.density;
   }
 };
 

@@ -198,6 +198,40 @@ bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t im
 void VkSceneComposeForget(uint64_t image);
 // The views, pipelines and buffers of the compose go (the device must be idle).
 void VkSceneComposeStop();
+// THE ONE PASS (xr_density_pass=1 of the headset app, docs/backend.md, "The one
+// pass with a density map"). Before it plays a batch of frames, the app gives
+// the swapchain image of the picture: an image with a layer for each eye, of
+// width by height, in a format with red first (UNORM or sRGB) that the app made
+// with the usage of a color attachment and a mutable format. A walk of both
+// eyes with fovea_res=1 then draws its list of draws one time into that image,
+// with a fragment density map (fovea_res_center_deg, fovea_res_outer_pct and
+// vk_density_ring_deg give the map, the gaze moves it), and the walk makes no
+// outer image, no centre image, no compose and no copy. False when the renderer
+// cannot (no density map on the device, no view of the image): the walks go the
+// old way. The image stays in the layout of a color attachment.
+bool VkSceneDensityTarget(uint64_t image, uint32_t width, uint32_t height);
+// After the batch: no walk draws into the image any more.
+void VkSceneDensityTargetEnd();
+// True when the last eye picture (VkSceneEyes) is that image, drawn by the one
+// pass.
+bool VkSceneDensityPicture(uint64_t image);
+// A swapchain image that goes: the view of the pass goes (the device must be
+// idle).
+void VkSceneDensityForget(uint64_t image);
+// True when the renderer can run the pass: the device of the session has the
+// density map.
+bool VkSceneDensityUsable();
+// The counts of the pass since the last call (the time log of the app): the
+// walks of the pass, the maps made, the walks cut by a draw for the panel or by
+// a clear of one eye, the walks that lost the depth of a part, the draws, the
+// walks that went the old way (the size of the image, an atlas, the texel of
+// the GPU, no map) and the share of the fragments of the last map (0 to 1).
+struct VkSceneDensityCounts {
+  uint64_t walks, maps, cuts, depth_lost, draws;
+  uint64_t refused_size, refused_atlas, refused_texel, refused_map;
+  float share;
+};
+void VkSceneTakeDensityCounts(VkSceneDensityCounts* out);
 // THE KEYS OF THE DEBUG PAGE (app_keys.h): vk_mres_draws, vk_mres_sort,
 // vk_compose_light and vk_pass_store from the next walk. After a call the
 // renderer does not read these four keys from bwvr.ini again.

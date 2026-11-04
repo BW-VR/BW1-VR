@@ -223,6 +223,11 @@ bool StartExternal() {
   g_lock = e.lock;
   g_unlock = e.unlock;
   g_core.shading_rate = e.shading_rate;
+  g_core.density_map = e.density_map && e.density_texel_w > 0 && e.density_texel_h > 0;
+  g_core.density_texel_w = e.density_texel_w;
+  g_core.density_texel_h = e.density_texel_h;
+  g_core.density_texel_max_w = e.density_texel_max_w;
+  g_core.density_texel_max_h = e.density_texel_max_h;
   g_core.window_present = e.window_present;
   ReadShadingRate();
   if (!MakeOnce()) return false;

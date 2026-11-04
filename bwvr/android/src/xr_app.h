@@ -495,6 +495,30 @@ class XrApp {
   // wait on the GPU behind a walk. 1: one queue for all.
   void SetQueues(int count) { queues_wanted_ = count; }
   bool TwoQueues() const { return queue2_ != VK_NULL_HANDLE; }
+  // THE ONE PASS (xr_density_pass, docs/android.md, "The one pass with a density
+  // map"). SetDensityWanted, before Start: the device gets the extension
+  // VK_EXT_fragment_density_map when the GPU has it with the map and the images
+  // with no subsamples. DensityMap: the device has it. SetDensityPass, at each
+  // Play before the play thread starts: 1, the play thread gives the renderer a
+  // swapchain image of its slot (DensityBegin) and the walks of both eyes draw
+  // into it with a density map.
+  void SetDensityWanted(bool on) { density_wanted_ = on; }
+  bool DensityMap() const { return density_map_; }
+  void SetDensityPass(bool on) { density_pass_ = on; }
+  bool DensityPass() const { return density_pass_ && density_map_; }
+  // THE PLAY THREAD (xr_density_pass=1). DensityBegin: the swapchain of `slot`
+  // with a layer for each eye (made at the first call for the slot, of width by
+  // height), and an acquired and waited image of it, into *target. False when
+  // the slot cannot have it (no key, no density map, blue first, no swapchain
+  // of two layers): then the pictures of the slot take the old way. DirectEnd
+  // releases the image. The probe of the runtime runs at the first call.
+  bool DensityBegin(int slot, uint32_t width, uint32_t height, VkImage* target);
+  // The slot has a swapchain of the one pass (a picture of it needs no copy).
+  bool DensitySlot(int slot) const;
+  // The count of the pictures of the one pass that went into the projection layer
+  // with no copy (direct), and of the ones that took a copy from the swapchain
+  // image. The log at the end of the app has both.
+  void CountDensity(bool direct);
   // Before RendererDevice: the renderer takes the second queue (with the
   // frame loop, when the device has it). It keeps it to the end of the
   // process.
@@ -545,6 +569,11 @@ class XrApp {
     // An image that the app acquired and the runtime did not give free yet
     // (frame_loop_image_wait=0), or -1.
     int pending = -1;
+    // THE ONE PASS: a swapchain with two layers. Layer 0 of the set owns it
+    // (array_index 0), and layer 1 names the same swapchain (array_index 1,
+    // shared: it is never destroyed or released as a swapchain of its own).
+    uint32_t array_index = 0;
+    bool shared = false;
   };
   // The next image of the swapchain of a layer, free for a copy, into
   // *index. block: wait for it. With no block a busy image stays acquired
@@ -559,7 +588,7 @@ class XrApp {
   bool MakeSession();
   bool MakeActions();
   bool MakeLayer(Layer* layer, uint32_t width, uint32_t height,
-                 bool staging = true);
+                 bool staging = true, bool stereo = false);
   void CopyLayer(Layer* layer);
   // The pixels of a layer: straight into its staging buffer when it is free
   // (xr_staging_direct=1), else into its copy in memory. Null when the layer
@@ -652,6 +681,10 @@ class XrApp {
   struct DirectSet {
     Screen set;
     bool failed = false;
+    // THE ONE PASS: the set is one swapchain of two layers, and the slot could
+    // not make or use one (the pictures of the slot take the old way).
+    bool stereo = false;
+    bool density_failed = false;
     bool acquired[2] = {false, false};
     bool waited[2] = {false, false};
     uint32_t made_width = 0;
@@ -696,6 +729,9 @@ class XrApp {
   bool MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
                      const char** why, int count = 2);
   bool MakeBetween(Screen* screen, const char** why);
+  // A set of the one pass: one swapchain with a layer for each eye, in two
+  // Layers of the set (see Layer::shared).
+  bool MakeStereoSet(Screen* screen, uint32_t width, uint32_t height, const char** why);
   // xr_copy_once: the keys, the secondary command buffer of a copy (null:
   // CopySlot records it), and the free of the entries of a set.
   void ReadCopyKeys();
@@ -876,6 +912,21 @@ class XrApp {
   bool renderer13_ = false;
   bool renderer_used_ = false;
   bool shading_rate_ = false;
+  // THE ONE PASS: the key at the start (the device), the key of this Play, the
+  // device has the extension, the texel of the map in pixels (the finest, then
+  // the coarsest), and the probe of the runtime.
+  bool density_wanted_ = false;
+  bool density_pass_ = false;
+  bool density_map_ = false;
+  uint32_t density_texel_[4] = {0, 0, 0, 0};
+  bool density_probed_ = false;
+  // The extensions of the foveation of the runtime that the instance has on (the
+  // order of kFoveation in MakeInstance), and the headset has the eye tracked
+  // foveation.
+  bool foveation_on_[6] = {};
+  bool runtime_fov_tracked_ = false;
+  std::atomic<uint64_t> density_direct_{0}, density_copied_{0};
+  void DensityProbe(uint32_t width, uint32_t height);
   float max_anisotropy_ = 0.0f;
   Screen screen_;  // the stereo screen
   Screen eyes_;    // the projection layer

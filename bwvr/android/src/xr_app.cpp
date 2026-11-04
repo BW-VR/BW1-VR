@@ -211,12 +211,25 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   // log takes the display time of a frame on CLOCK_MONOTONIC from it.
   // XR_EXT_eye_gaze_interaction only when the runtime lists it and the fovea
   // wants the gaze.
-  const char* names[5] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
-                          XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};
+  const char* names[10] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
+                           XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};
   uint32_t name_count = 2;
   if (display_rate_ext_) names[name_count++] = XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME;
   if (timespec_ext_) names[name_count++] = XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME;
   if (gaze_extension_) names[name_count++] = XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME;
+  // THE ONE PASS (xr_density_pass=1): the probe of the runtime uses the
+  // extensions of its foveation. They are on only with the key, so a start with
+  // the key off is the start of before. A runtime that refuses them gets a
+  // second try without.
+  const uint32_t plain_count = name_count;
+  if (density_wanted_) {
+    for (int i = 0; i < 5; ++i) {
+      if (foveation[i]) {
+        names[name_count++] = kFoveation[i];
+        foveation_on_[i] = true;
+      }
+    }
+  }
   XrInstanceCreateInfoAndroidKHR android_info = {
       XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
   android_info.applicationVM = activity->vm;
@@ -229,7 +242,16 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   info.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 34);
   info.enabledExtensionCount = name_count;
   info.enabledExtensionNames = names;
-  if (!Ok(xrCreateInstance(&info, &instance_), "xrCreateInstance")) return false;
+  XrResult made = xrCreateInstance(&info, &instance_);
+  if (XR_FAILED(made) && name_count > plain_count) {
+    AppLog("xr           : xrCreateInstance with the extensions of the foveation gave %d, so "
+           "the app tries again without them. The probe of the one pass has no runtime "
+           "foveation", static_cast<int>(made));
+    for (bool& on : foveation_on_) on = false;
+    info.enabledExtensionCount = plain_count;
+    made = xrCreateInstance(&info, &instance_);
+  }
+  if (!Ok(made, "xrCreateInstance")) return false;
   if (timespec_ext_) {
     to_timespec_ = Proc<PFN_xrConvertTimeToTimespecTimeKHR>(instance_,
                                                             "xrConvertTimeToTimespecTimeKHR");
@@ -253,7 +275,14 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   XrSystemEyeGazeInteractionPropertiesEXT gaze = {
       XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
   if (gaze_extension_) sp.next = &gaze;
+  XrSystemFoveationEyeTrackedPropertiesMETA fov_tracked = {
+      XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META};
+  if (foveation_on_[3]) {
+    fov_tracked.next = sp.next;
+    sp.next = &fov_tracked;
+  }
   xrGetSystemProperties(instance_, system_, &sp);
+  runtime_fov_tracked_ = foveation_on_[3] && fov_tracked.supportsFoveationEyeTracked != 0;
   AppLog("xr           : system %s, vendor 0x%X", sp.systemName, sp.vendorId);
   // THE SIZE OF THE RUNTIME (docs/android.md, "The size of the eye
   // pictures"): the values that can explain the size that it asks for.
@@ -491,18 +520,20 @@ bool XrApp::MakeVulkan() {
          max_anisotropy_,
          shading_rate_ ? "yes" : "no");
   // THE FOVEATION OF THE GPU (docs/android.md, "The sharpness of the
-  // middle"): a fragment density map, for a log line. The renderer uses none.
+  // middle"): a fragment density map. The one pass of xr_density_pass=1 uses
+  // it, and the log names it.
+  bool density = false;
+  VkPhysicalDeviceFragmentDensityMapPropertiesEXT map_size = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT};
+  VkPhysicalDeviceFragmentDensityMapFeaturesEXT map = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
   {
-    bool density = false, density2 = false, offset = false;
+    bool density2 = false, offset = false;
     for (const VkExtensionProperties& e : extensions) {
       if (strcmp(e.extensionName, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME) == 0) density = true;
       if (strcmp(e.extensionName, VK_EXT_FRAGMENT_DENSITY_MAP_2_EXTENSION_NAME) == 0) density2 = true;
       if (strcmp(e.extensionName, "VK_QCOM_fragment_density_map_offset") == 0) offset = true;
     }
-    VkPhysicalDeviceFragmentDensityMapFeaturesEXT map = {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
-    VkPhysicalDeviceFragmentDensityMapPropertiesEXT map_size = {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT};
     if (density && properties.apiVersion >= VK_API_VERSION_1_1) {
       VkPhysicalDeviceFeatures2 query = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
       query.pNext = &map;
@@ -524,6 +555,22 @@ bool XrApp::MakeVulkan() {
            map_size.maxFragmentDensityTexelSize.height, density2 ? "yes" : "no",
            offset ? "yes" : "no");
   }
+
+  // THE ONE PASS (xr_density_pass=1): the device gets the extension of the
+  // density map only when the key is on at the start of the app, so a device
+  // with the key off is the device of before. The map and the images with no
+  // subsamples are what the pass needs.
+  density_map_ = density_wanted_ && renderer13_ && density && map.fragmentDensityMap &&
+                 map.fragmentDensityMapNonSubsampledImages &&
+                 map_size.minFragmentDensityTexelSize.width > 0 &&
+                 map_size.minFragmentDensityTexelSize.height > 0;
+  density_texel_[0] = map_size.minFragmentDensityTexelSize.width;
+  density_texel_[1] = map_size.minFragmentDensityTexelSize.height;
+  density_texel_[2] = map_size.maxFragmentDensityTexelSize.width;
+  density_texel_[3] = map_size.maxFragmentDensityTexelSize.height;
+  AppLog("xr           : xr_density_pass at the start: %s. The device %s the extension "
+         "VK_EXT_fragment_density_map",
+         density_wanted_ ? "1" : "0", density_map_ ? "gets" : "does not get");
 
   // THE TWO QUEUES (frame_loop_queues=2): the session on the first with the
   // higher priority, the renderer on the second. The timeline semaphore of
@@ -568,18 +615,28 @@ bool XrApp::MakeVulkan() {
   VkPhysicalDeviceFragmentShadingRateFeaturesKHR want_rate = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
   want_rate.attachmentFragmentShadingRate = VK_TRUE;
-  if (shading_rate_) want11.pNext = &want_rate;
+  VkPhysicalDeviceFragmentDensityMapFeaturesEXT want_density = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
+  want_density.fragmentDensityMap = VK_TRUE;
+  // The chain after want11: the shading rate, then the density map.
+  void** tail = &want11.pNext;
+  if (shading_rate_) {
+    *tail = &want_rate;
+    tail = &want_rate.pNext;
+  }
+  if (density_map_) *tail = &want_density;
   VkPhysicalDeviceFeatures2 want = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
   want.pNext = &want13;
   want.features.samplerAnisotropy = max_anisotropy_ > 0.0f ? VK_TRUE : VK_FALSE;
-  const char* rate_name = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME;
+  const char* device_extensions[2];
+  uint32_t device_extension_count = 0;
+  if (shading_rate_) device_extensions[device_extension_count++] = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME;
+  if (density_map_) device_extensions[device_extension_count++] = VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME;
   VkDeviceCreateInfo di = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
   if (renderer13_) {
     di.pNext = &want;
-    if (shading_rate_) {
-      di.enabledExtensionCount = 1;
-      di.ppEnabledExtensionNames = &rate_name;
-    }
+    di.enabledExtensionCount = device_extension_count;
+    di.ppEnabledExtensionNames = device_extension_count > 0 ? device_extensions : nullptr;
   }
   di.queueCreateInfoCount = 1;
   di.pQueueCreateInfos = &queue;
@@ -903,17 +960,24 @@ bool XrApp::MakeActions() {
 }
 
 bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
-                      bool staging) {
+                      bool staging, bool stereo) {
   XrSwapchainCreateInfo info = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
   info.usageFlags = XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT |
                     XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
                     XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+  // THE ONE PASS: two layers, one for each eye. The renderer draws the bytes of
+  // the game through a view of the UNORM format also into an sRGB image (the
+  // mutable format), and a picture that cannot go straight into the
+  // swapchain is copied from it (the source of a transfer).
+  if (stereo) {
+    info.usageFlags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
+  }
   info.format = format_;
   info.sampleCount = 1;
   info.width = width;
   info.height = height;
   info.faceCount = 1;
-  info.arraySize = 1;
+  info.arraySize = stereo ? 2 : 1;
   info.mipCount = 1;
   const XrResult created = xrCreateSwapchain(session_, &info, &layer->swapchain);
   if (!Ok(created, "xrCreateSwapchain")) {
@@ -936,6 +1000,8 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
       reinterpret_cast<XrSwapchainImageBaseHeader*>(layer->images.data()));
   layer->width = width;
   layer->height = height;
+  layer->array_index = 0;
+  layer->shared = false;
   layer->swap_red_blue =
       format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_B8G8R8A8_UNORM;
   if (!staging) return true;
@@ -1638,7 +1704,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       v.subImage.imageRect.offset = {0, 0};
       v.subImage.imageRect.extent = {static_cast<int32_t>(shown.width),
                                      static_cast<int32_t>(shown.height)};
-      v.subImage.imageArrayIndex = 0;
+      v.subImage.imageArrayIndex = shown.array_index;
       // THE MIDDLE AS ITS OWN LAYER: the layer of the whole view shows the
       // outer image, and the centre layer the centre image of the same image
       // of the swapchain, at the same pose, over the part of the view of its
@@ -2351,6 +2417,11 @@ void XrApp::RendererDevice(vk::External* out) {
   // of UNORM, as on the PC. The copy into the quads keeps the bytes.
   out->color_format = VK_FORMAT_R8G8B8A8_UNORM;
   out->shading_rate = shading_rate_;
+  out->density_map = density_map_;
+  out->density_texel_w = density_texel_[0];
+  out->density_texel_h = density_texel_[1];
+  out->density_texel_max_w = density_texel_[2];
+  out->density_texel_max_h = density_texel_[3];
   out->window_present = false;
   out->lock = &LockQueue;
   out->unlock = &UnlockQueue;
@@ -2482,6 +2553,27 @@ bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
   return true;
 }
 
+// A set of the one pass: one swapchain with a layer for each eye. Layer 0 of
+// the set owns it, and layer 1 names it again for the right eye.
+bool XrApp::MakeStereoSet(Screen* screen, uint32_t width, uint32_t height, const char** why) {
+  if (!MakeLayer(&screen->layer[0], width, height, false, true)) {
+    FreeScreenSet(screen);
+    screen->failed = true;
+    *why = "the runtime gave no swapchain of two layers (xrCreateSwapchain)";
+    return false;
+  }
+  Layer& left = screen->layer[0];
+  Layer& right = screen->layer[1];
+  right = Layer();
+  right.swapchain = left.swapchain;
+  right.width = width;
+  right.height = height;
+  right.swap_red_blue = left.swap_red_blue;
+  right.array_index = 1;
+  right.shared = true;
+  return true;
+}
+
 bool XrApp::MakeBetween(Screen* screen, const char** why) {
   const uint32_t width = screen->layer[0].width;
   const uint32_t height = screen->layer[0].height;
@@ -2601,12 +2693,13 @@ void XrApp::NewPlay(uint32_t width, uint32_t height) {
       snprintf(name, sizeof(name), broken ? "the slot %d after a fault" : "the slot %d", i);
       note(name, d.set.layer[0].width, d.set.layer[0].height);
       DropSet(&d.set);
+      d.stereo = false;
     }
     if (resize_free_) {
       d.acquired[0] = d.acquired[1] = d.waited[0] = d.waited[1] = false;
     }
     d.replaced = 0;
-    if (sf::ClearFailedAtPlay(resize_free_)) d.failed = false;
+    if (sf::ClearFailedAtPlay(resize_free_)) d.failed = d.density_failed = false;
   }
   if (sf::ClearFailedAtPlay(resize_free_)) {
     eyes_.failed = screen_.failed = panel_.failed = flat_.failed = false;
@@ -2632,8 +2725,12 @@ void XrApp::FreeScreenSet(Screen* screen) {
     for (const XrSwapchainImageVulkan2KHR& image : l.images) {
       VkSceneComposeForget(reinterpret_cast<uint64_t>(image.image));
     }
+    // The images of the one pass have a view in the renderer too.
+    for (const XrSwapchainImageVulkan2KHR& image : l.images) {
+      VkSceneDensityForget(reinterpret_cast<uint64_t>(image.image));
+    }
     FreeStaging(&gpu_, &l.staging);
-    if (l.swapchain != XR_NULL_HANDLE) DestroySwapchain(l.swapchain);
+    if (l.swapchain != XR_NULL_HANDLE && !l.shared) DestroySwapchain(l.swapchain);
     l.swapchain = XR_NULL_HANDLE;
     l.pending = -1;
   }
@@ -2707,14 +2804,16 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
   // runtime keeps a swapchain until the compositor is done with it. The GPU
   // finished the copies of the slot before it was free.
   if (Made(d.set)) {
-    const bool fits = eye_copy_math::DirectFits(d.set.layer[0].width, d.set.layer[0].height,
-                                                atlas, width, height);
+    const bool fits = !d.stereo && eye_copy_math::DirectFits(d.set.layer[0].width,
+                                                             d.set.layer[0].height, atlas, width,
+                                                             height);
     if (swapchain_free_math::ReplaceDirect(resize_free_, fits, d.replaced)) {
       const uint32_t old_width = d.set.layer[0].width, old_height = d.set.layer[0].height;
       LockQueue();
       vkDeviceWaitIdle(gpu_.device);
       DropSet(&d.set);
       UnlockQueue();
+      d.stereo = false;
       ++d.replaced;
       AppLog("xr           : slot %d of the ring: its two swapchains of %u by %u do not fit "
              "the eye pictures of %u by %u (replacement %d of at most %d). They are freed, "
@@ -2748,8 +2847,8 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
                : "the whole picture",
            Swapchains());
   }
-  if (!eye_copy_math::DirectFits(d.set.layer[0].width, d.set.layer[0].height, atlas, width,
-                                 height)) {
+  if (d.stereo || !eye_copy_math::DirectFits(d.set.layer[0].width, d.set.layer[0].height, atlas,
+                                             width, height)) {
     direct_misses_.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
@@ -2784,6 +2883,250 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
   }
   direct_writes_.fetch_add(1, std::memory_order_relaxed);
   return true;
+}
+
+// THE ONE PASS. The play thread asks for the swapchain image of its slot before
+// it plays a batch. The set of the slot is one swapchain of two layers (the
+// views of the eyes name its layers). A slot that has two swapchains of one
+// layer, or a swapchain of another size, drops them and makes one for the
+// pass. The runtime gives the image when the compositor read it for the last
+// time, so the play thread may wait. DirectEnd releases it.
+bool XrApp::DensityBegin(int slot, uint32_t width, uint32_t height, VkImage* target) {
+  if (!DensityPass() || !eye_direct_ || slot < 0 || slot >= frame_loop::kSlots ||
+      !ComposeFormatOk() || width == 0 || height == 0) {
+    return false;
+  }
+  DirectSet& d = direct_[slot];
+  if (d.failed || d.density_failed) return false;
+  if (!density_probed_) {
+    density_probed_ = true;
+    DensityProbe(width, height);
+  }
+  if (Made(d.set) &&
+      (!d.stereo || d.set.layer[0].width != width || d.set.layer[0].height != height)) {
+    if (!swapchain_free_math::ReplaceDirect(resize_free_, false, d.replaced)) {
+      d.density_failed = true;
+      AppLog("xr           : slot %d of the ring: its swapchains do not fit the one pass and "
+             "the slot has no more replacements (xr_resize_free=%d). Its pictures take the "
+             "old way", slot, resize_free_ ? 1 : 0);
+      return false;
+    }
+    const uint32_t old_width = d.set.layer[0].width, old_height = d.set.layer[0].height;
+    LockQueue();
+    vkDeviceWaitIdle(gpu_.device);
+    DropSet(&d.set);
+    UnlockQueue();
+    d.stereo = false;
+    ++d.replaced;
+    AppLog("xr           : slot %d of the ring: its swapchains of %u by %u are freed for the "
+           "one pass (replacement %d of at most %d). The app holds %d swapchains now", slot,
+           old_width, old_height, d.replaced, swapchain_free_math::kMostReplaces, Swapchains());
+  }
+  if (!Made(d.set)) {
+    const char* why = "";
+    LockQueue();
+    const bool made = MakeStereoSet(&d.set, width, height, &why);
+    UnlockQueue();
+    if (!made) {
+      d.density_failed = true;
+      AppLog("xr           : slot %d of the ring: no swapchain of two layers and %u by %u for "
+             "the one pass (%s). Its pictures take the old way (xr_density_pass=1)", slot,
+             width, height, why);
+      return false;
+    }
+    d.stereo = true;
+    d.made_width = width;
+    d.made_height = height;
+    AppLog("xr           : slot %d of the ring: one swapchain of two layers and %u by %u for "
+           "the one pass (xr_density_pass=1), %zu images, format %lld. The renderer draws "
+           "into it, and the layers of the eyes name its layers 0 and 1. The app holds %d "
+           "swapchains now", slot, width, height, d.set.layer[0].images.size(),
+           static_cast<long long>(format_), Swapchains());
+  }
+  if (age_log_) AgeWrite(slot);
+  Layer& l = d.set.layer[0];
+  uint32_t index = 0;
+  XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+  LockQueue();
+  const bool acquired =
+      Ok(xrAcquireSwapchainImage(l.swapchain, &acquire, &index), "xrAcquireSwapchainImage");
+  UnlockQueue();
+  if (!acquired || index >= l.images.size()) {
+    DirectEnd(slot);
+    d.failed = true;
+    return false;
+  }
+  d.acquired[0] = true;
+  XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+  wait.timeout = XR_INFINITE_DURATION;
+  if (!Ok(xrWaitSwapchainImage(l.swapchain, &wait), "xrWaitSwapchainImage")) {
+    DirectEnd(slot);
+    d.failed = true;
+    return false;
+  }
+  d.waited[0] = true;
+  *target = l.images[index].image;
+  return true;
+}
+
+bool XrApp::DensitySlot(int slot) const {
+  return slot >= 0 && slot < frame_loop::kSlots && direct_[slot].stereo &&
+         Made(direct_[slot].set);
+}
+
+void XrApp::CountDensity(bool direct) {
+  (direct ? density_direct_ : density_copied_).fetch_add(1, std::memory_order_relaxed);
+}
+
+// THE PROBE OF THE RUNTIME (stage 1 of the one pass), once at the first picture
+// with xr_density_pass=1. It makes swapchains of two layers like the pass, and
+// logs what the runtime and the driver give, so the log of the first run says
+// which map is the best on this runtime: the map of the runtime on its own
+// swapchains (XR_FB_foveation_vulkan) or the map of the mod in an image of its
+// own. The pass uses the map of the mod in any case, because the profiles of
+// the runtime have levels and no degrees (fovea_res_center_deg and
+// fovea_res_outer_pct set the map of the mod). Each swapchain of the probe goes
+// again before the call returns.
+void XrApp::DensityProbe(uint32_t width, uint32_t height) {
+  AppLog("probe        : the one pass, stage 1: swapchains of two layers and %u by %u, format "
+         "%lld, on %s (Vulkan device with VK_EXT_fragment_density_map: %s, texel of the map "
+         "%u by %u to %u by %u pixels)", width, height, static_cast<long long>(format_),
+         runtime_name_.c_str(), density_map_ ? "yes" : "no", density_texel_[0],
+         density_texel_[1], density_texel_[2], density_texel_[3]);
+  AppLog("probe        : the extensions on: XR_FB_foveation %s, XR_FB_foveation_configuration "
+         "%s, XR_FB_foveation_vulkan %s, XR_META_foveation_eye_tracked %s (the headset %s the "
+         "eye tracked foveation), XR_FB_swapchain_update_state %s",
+         foveation_on_[0] ? "on" : "off", foveation_on_[1] ? "on" : "off",
+         foveation_on_[2] ? "on" : "off", foveation_on_[3] ? "on" : "off",
+         runtime_fov_tracked_ ? "has" : "has no", foveation_on_[4] ? "on" : "off");
+  // 1. A swapchain of two layers with the usage of the pass: the images, and a
+  // view of the UNORM format of the renderer on the first image.
+  {
+    Layer probe;
+    LockQueue();
+    const bool made = MakeLayer(&probe, width, height, false, true);
+    UnlockQueue();
+    if (!made) {
+      AppLog("probe        : the runtime gave no swapchain of two layers and %u by %u with the "
+             "usage of the pass (color attachment, sampled, transfer source and destination, "
+             "mutable format). The one pass cannot run on this runtime", width, height);
+    } else {
+      VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+      view.image = probe.images.empty() ? VK_NULL_HANDLE : probe.images[0].image;
+      view.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+      view.format = VK_FORMAT_R8G8B8A8_UNORM;
+      view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 2};
+      VkImageView v = VK_NULL_HANDLE;
+      const VkResult r = view.image != VK_NULL_HANDLE
+                             ? vkCreateImageView(gpu_.device, &view, nullptr, &v)
+                             : VK_ERROR_INITIALIZATION_FAILED;
+      AppLog("probe        : a swapchain of two layers, %zu images. A view of the format "
+             "R8G8B8A8_UNORM with 2 layers on the first image (the swapchain format is %lld): "
+             "VkResult %d%s", probe.images.size(), static_cast<long long>(format_),
+             static_cast<int>(r),
+             r == VK_SUCCESS ? ". The pass can write the bytes of the game raw"
+                             : ". The pass cannot write the bytes of the game raw");
+      if (v != VK_NULL_HANDLE) vkDestroyImageView(gpu_.device, v, nullptr);
+      LockQueue();
+      vkDeviceWaitIdle(gpu_.device);
+      DestroySwapchain(probe.swapchain);
+      UnlockQueue();
+    }
+  }
+  // 2. The map of the runtime: a swapchain with the density map of the runtime.
+  if (!foveation_on_[0] || !foveation_on_[2]) {
+    AppLog("probe        : the runtime has not both XR_FB_foveation and XR_FB_foveation_vulkan "
+           "on, so it gives no map of its own. The pass uses the map of the mod");
+    return;
+  }
+  XrSwapchainCreateInfoFoveationFB fi = {XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+  fi.flags = XR_SWAPCHAIN_CREATE_FOVEATION_FRAGMENT_DENSITY_MAP_BIT_FB;
+  XrSwapchainCreateInfo info = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
+  info.next = &fi;
+  info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
+                    XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+  info.format = format_;
+  info.sampleCount = 1;
+  info.width = width;
+  info.height = height;
+  info.faceCount = 1;
+  info.arraySize = 2;
+  info.mipCount = 1;
+  XrSwapchain chain = XR_NULL_HANDLE;
+  LockQueue();
+  const XrResult created = xrCreateSwapchain(session_, &info, &chain);
+  UnlockQueue();
+  if (XR_FAILED(created) || chain == XR_NULL_HANDLE) {
+    AppLog("probe        : xrCreateSwapchain with XrSwapchainCreateInfoFoveationFB (the map of "
+           "the runtime) gave %d, so the runtime gives no map of its own. The pass uses the "
+           "map of the mod", static_cast<int>(created));
+    return;
+  }
+  swapchains_.fetch_add(1, std::memory_order_relaxed);
+  uint32_t count = 0;
+  xrEnumerateSwapchainImages(chain, 0, &count, nullptr);
+  std::vector<XrSwapchainImageVulkan2KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR});
+  std::vector<XrSwapchainImageFoveationVulkanFB> maps(
+      count, {XR_TYPE_SWAPCHAIN_IMAGE_FOVEATION_VULKAN_FB});
+  for (uint32_t i = 0; i < count; ++i) images[i].next = &maps[i];
+  const XrResult listed = xrEnumerateSwapchainImages(
+      chain, count, &count, reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
+  AppLog("probe        : a swapchain of two layers with the map of the runtime: %u images "
+         "(xrEnumerateSwapchainImages gave %d). The map of the first image: image %s, %u by "
+         "%u texels (the struct gives no count of layers, the swapchain has 2). The map of the "
+         "last image: image %s, %u by %u", count, static_cast<int>(listed),
+         count > 0 && maps[0].image != VK_NULL_HANDLE ? "yes" : "no", count > 0 ? maps[0].width : 0,
+         count > 0 ? maps[0].height : 0,
+         count > 0 && maps[count - 1].image != VK_NULL_HANDLE ? "yes" : "no",
+         count > 0 ? maps[count - 1].width : 0, count > 0 ? maps[count - 1].height : 0);
+  auto create_profile = Proc<PFN_xrCreateFoveationProfileFB>(instance_, "xrCreateFoveationProfileFB");
+  auto destroy_profile = Proc<PFN_xrDestroyFoveationProfileFB>(instance_, "xrDestroyFoveationProfileFB");
+  auto update = Proc<PFN_xrUpdateSwapchainFB>(instance_, "xrUpdateSwapchainFB");
+  if (create_profile == nullptr || destroy_profile == nullptr || update == nullptr ||
+      !foveation_on_[1] || !foveation_on_[4]) {
+    AppLog("probe        : the calls of the profile are missing (xrCreateFoveationProfileFB %s, "
+           "xrUpdateSwapchainFB %s, XR_FB_foveation_configuration %s, "
+           "XR_FB_swapchain_update_state %s), so the probe makes no profile",
+           create_profile != nullptr ? "yes" : "no", update != nullptr ? "yes" : "no",
+           foveation_on_[1] ? "on" : "off", foveation_on_[4] ? "on" : "off");
+  } else {
+    for (int tracked = 0; tracked < 2; ++tracked) {
+      if (tracked == 1 && !runtime_fov_tracked_) break;
+      XrFoveationEyeTrackedProfileCreateInfoMETA eye_info = {
+          XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+      XrFoveationLevelProfileCreateInfoFB level = {XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+      level.level = XR_FOVEATION_LEVEL_HIGH_FB;
+      level.verticalOffset = 0.0f;
+      level.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
+      if (tracked == 1) level.next = &eye_info;
+      XrFoveationProfileCreateInfoFB profile_info = {XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+      profile_info.next = &level;
+      XrFoveationProfileFB profile = XR_NULL_HANDLE;
+      LockQueue();
+      const XrResult p = create_profile(session_, &profile_info, &profile);
+      UnlockQueue();
+      XrResult u = XR_ERROR_RUNTIME_FAILURE;
+      if (XR_SUCCEEDED(p) && profile != XR_NULL_HANDLE) {
+        XrSwapchainStateFoveationFB state = {XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+        state.profile = profile;
+        LockQueue();
+        u = update(chain, reinterpret_cast<const XrSwapchainStateBaseHeaderFB*>(&state));
+        UnlockQueue();
+      }
+      AppLog("probe        : the profile of the runtime, level high, %s: xrCreateFoveationProfileFB "
+             "gave %d, xrUpdateSwapchainFB gave %d", tracked == 1 ? "eye tracked" : "fixed",
+             static_cast<int>(p), static_cast<int>(u));
+      if (profile != XR_NULL_HANDLE) destroy_profile(profile);
+    }
+  }
+  LockQueue();
+  vkDeviceWaitIdle(gpu_.device);
+  DestroySwapchain(chain);
+  UnlockQueue();
+  AppLog("probe        : the best map on this runtime: the pass uses the map of the mod "
+         "(fovea_res_center_deg, fovea_res_outer_pct, vk_density_ring_deg and the gaze set "
+         "it, the images of the swapchain have no subsamples). The map of the runtime has "
+         "levels low, medium and high and no degrees, so it cannot take the old keys");
 }
 
 void XrApp::DirectEnd(int slot) {
@@ -3629,6 +3972,13 @@ void XrApp::Stop() {
            static_cast<unsigned long long>(direct_misses_.load()),
            static_cast<unsigned long long>(direct_frames_),
            static_cast<unsigned long long>(direct_stale_));
+  }
+  if (density_direct_.load() + density_copied_.load() > 0) {
+    AppLog("xr           : xr_density_pass=1: %llu pictures of the one pass went into the "
+           "projection layer with no copy, %llu took a copy from the swapchain image (the "
+           "stereo screen or the cut scene window)",
+           static_cast<unsigned long long>(density_direct_.load()),
+           static_cast<unsigned long long>(density_copied_.load()));
   }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   for (DirectSet& d : direct_) FreeScreenSet(&d.set);

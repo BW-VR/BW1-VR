@@ -160,6 +160,7 @@ bool g_key_down = false;
 bool g_parts_key_down = false;
 bool g_depth_key_down = false;
 bool g_vertices_key_down = false;
+bool g_latch_key_down = false;
 bool g_said_backend = false;
 // Latched for each frame (GpuMeshFrame): the mode, and a renderer that draws
 // the meshes.
@@ -184,6 +185,35 @@ struct Caller {
   uint32_t via;
 };
 Caller g_callers[8] = {};
+// THE LATCH (gpu_mesh_latch, docs/software-tnl.md, "The layers"). The functions
+// that draw a mesh class of their own (fn_00851870, fn_00859D90, fn_0084E200,
+// fn_0085A6F0, fn_00850FC0, fn_0085C7F0) draw layers (blend or no depth write,
+// depth test EQUAL or LESSEQUAL) over the meshes of a 3D part on the CPU path. When
+// such a layer comes right after a mesh of the five functions, the meshes of that
+// 3D part take the CPU path for the next frames, so the layer and the mesh under
+// it have the same path.
+struct LatchedPart {
+  uintptr_t part;
+  uint32_t until;  // the frame
+};
+LatchedPart g_latched[64] = {};
+uint32_t g_latched_next = 0;
+bool g_latch_key = true;     // gpu_mesh_latch
+bool g_latch_on = true;      // the key now (Ctrl Shift 3)
+bool g_latch_active = false; // some part is latched now
+uint32_t g_latch_frames = 90;
+bool g_in_cpu_mesh = false;  // the function of the game for a mesh runs now
+bool g_last_valid = false;   // the draw before was a mesh of the five functions
+struct LastMesh {
+  uintptr_t part, mesh;
+  uint32_t type, vertices, kind;
+  bool gpu;
+};
+LastMesh g_last_mesh_info = {};
+uint32_t g_latch_said = 0;
+bool g_material_skip = false;  // gpu_mesh_material_skip
+uintptr_t g_mat_mesh = 0;
+uint32_t g_mat_serial = 0;
 uint32_t g_epoch = 0;       // VkStreamMeshEpoch, read one time in a frame (GpuMeshFrame)
 uint32_t g_changes_said_sample = 0, g_changes_said_full = 0;  // lines of the log for a change
 
@@ -228,6 +258,17 @@ struct Counts {
   // path: a layer on the CPU path over a mesh on the GPU path.
   uint32_t cpu_layer[2] = {};
   uint32_t cpu_after_gpu = 0;  // all CPU batches right after a mesh on the GPU path
+  // The latch (gpu_mesh_latch): a layer from a mesh class function right after a
+  // mesh of the five functions sends the meshes of that 3D part to the CPU path.
+  uint32_t latch_new = 0;       // parts latched for the first time
+  uint32_t latch_refresh = 0;   // layers that kept a part latched
+  uint32_t r_latch = 0;         // meshes on the CPU path because their part is latched
+  uint32_t latch_by[6] = {};    // new latches by the function of the layer
+  // The material (RunMaterial), with gpu_mesh_timer=1: runs, runs that changed a
+  // state of the device, runs of the same mesh with no change since the last run,
+  // runs skipped (gpu_mesh_material_skip), and the time of the parts.
+  uint32_t mat_runs = 0, mat_changed = 0, mat_repeat = 0, mat_skipped = 0;
+  uint64_t mat_ticks[3] = {};   // the function of the type, the tiling, the cull mode
   uint32_t groups = 0;        // the groups of those meshes
   uint32_t lights = 0;        // lights of groups checked against the functions of the game
   uint32_t light_diff = 0;    // of them with other bits
@@ -305,20 +346,37 @@ uint32_t MeshColor(const uint8_t* mesh, uint32_t color) {
 }
 
 // What the function does after the loops for a mesh that is drawn: the
-// material, the tiling and the cull mode.
+// material, the tiling and the cull mode. Each call of the game here is a
+// state that its own cache drops when it has the value, so a run that finds
+// the device as it left it changes nothing. With gpu_mesh_material_skip=1 the
+// run is left out for the mesh of the run before when the device had no change
+// since (VkDdrawStateSerial) and the mesh has no dynamic texture (the word at
+// +0x138). With gpu_mesh_timer=1 the log counts the runs, the runs that changed
+// the device, and the time of the parts.
 void RunMaterial(uint8_t* mesh) {
   if (Read<uint32_t>(kDoUpdateMaterial) == 0) return;
   Write<void*>(kCurrentMaterial, mesh);
+  const uintptr_t m = reinterpret_cast<uintptr_t>(mesh);
+  const bool measure = g_timer || g_material_skip;
+  const uint32_t serial = measure ? VkDdrawStateSerial() : 0;
+  if (g_material_skip && m == g_mat_mesh && serial == g_mat_serial &&
+      Read<uint32_t>(m + 0x138) == 0) {
+    ++g_counts.mat_skipped;
+    return;
+  }
+  uint64_t t0 = g_timer ? __rdtsc() : 0;
   const uintptr_t table = Read<uintptr_t>(kMaterialTable);
-  const uint32_t type = Read<uint32_t>(reinterpret_cast<uintptr_t>(mesh));
+  const uint32_t type = Read<uint32_t>(m);
   const MaterialFunction material =
       Read<MaterialFunction>(table + static_cast<uintptr_t>(type) * 8);
   material(mesh, 0);
+  uint64_t t1 = g_timer ? __rdtsc() : 0;
   if (Read<uint32_t>(kNeedTilling) == 0 && (mesh[5] & 4) == 0) {
     reinterpret_cast<TilingFunction>(kTilingOff)(0);
   } else {
     reinterpret_cast<TilingFunction>(kTilingOn)(0);
   }
+  uint64_t t2 = g_timer ? __rdtsc() : 0;
   const uint32_t cull = ((~static_cast<uint32_t>(mesh[5]) & 1u) << 1) | 1u;
   if (Read<uint32_t>(kCullCache) != cull) {
     void* device = Read<void*>(kDevice);
@@ -327,6 +385,23 @@ void RunMaterial(uint8_t* mesh) {
         Read<SetRenderStateFunction>(vtable + 0x50)(device, 0x16, cull);
     Write<uint32_t>(kCullCache, 0xFFFFFFFFu);
     if (result == 0) Write<uint32_t>(kCullCache, cull);
+  }
+  if (measure) {
+    const uint32_t after = VkDdrawStateSerial();
+    ++g_counts.mat_runs;
+    if (after != serial) {
+      ++g_counts.mat_changed;
+    } else if (m == g_mat_mesh && serial == g_mat_serial) {
+      ++g_counts.mat_repeat;
+    }
+    g_mat_mesh = m;
+    g_mat_serial = after;
+    if (g_timer) {
+      const uint64_t t3 = __rdtsc();
+      g_counts.mat_ticks[0] += t1 - t0;
+      g_counts.mat_ticks[1] += t2 - t1;
+      g_counts.mat_ticks[2] += t3 - t2;
+    }
   }
 }
 
@@ -577,6 +652,15 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
   if ((g_kinds & (1u << kind)) == 0) {
     ++g_counts.r_kind;
     return false;
+  }
+  if (g_latch_active && g_latch_on) {
+    const uintptr_t part = Read<uintptr_t>(kPart);
+    for (const LatchedPart& l : g_latched) {
+      if (l.part == part && part != 0 && g_frame < l.until) {
+        ++g_counts.r_latch;
+        return false;
+      }
+    }
   }
   // The inputs of the loops of the game. The function reads them before its
   // material, so the hook does too.
@@ -854,6 +938,18 @@ void Submit(Kind kind, uint8_t* mesh, const Prepared& p, bool effects) {
   }
 }
 
+// The mesh of the five functions that was drawn last: its 3D part, for the latch.
+void NoteMesh(const uint8_t* mesh, Kind kind, bool gpu) {
+  const uintptr_t m = reinterpret_cast<uintptr_t>(mesh);
+  g_last_mesh_info.part = Read<uintptr_t>(kPart);
+  g_last_mesh_info.mesh = m;
+  g_last_mesh_info.type = Read<uint32_t>(m);
+  g_last_mesh_info.vertices = Read<uint32_t>(m + 0x10);
+  g_last_mesh_info.kind = kind;
+  g_last_mesh_info.gpu = gpu;
+  g_last_valid = true;
+}
+
 void Hook(Kind kind, void* mesh_in, void* edx) {
   uint8_t* mesh = static_cast<uint8_t*>(mesh_in);
   if (!g_active) {
@@ -871,7 +967,10 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
   clock.Start();
   if (!Prepare(kind, mesh, &p, &clock)) {
     const uint64_t cpu_start = __rdtsc();
+    g_in_cpu_mesh = true;
     g_back[kind](mesh, edx);
+    g_in_cpu_mesh = false;
+    NoteMesh(mesh, kind, false);
     ++g_counts.cpu[kind];
     if (g_timer) ++g_counts.t_cpu[Read<uint32_t>(reinterpret_cast<uintptr_t>(mesh)) & 31u];
     g_counts.cpu_ticks += __rdtsc() - cpu_start;
@@ -894,7 +993,9 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
     }
     OneWalkSetMode(kOneWalkLeftOnly);
     const uint64_t back_start = __rdtsc();
+    g_in_cpu_mesh = true;
     g_back[kind](mesh, edx);
+    g_in_cpu_mesh = false;
     back_ticks = __rdtsc() - back_start;
     clock.Start();  // the run of the function of the game is not part of the record
     OneWalkSetMode(kOneWalkRightOnly);
@@ -904,6 +1005,7 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
     Submit(kind, mesh, p, true);
   }
   clock.Lap(5);
+  NoteMesh(mesh, kind, true);
   g_counts.gpu_ticks += __rdtsc() - start - back_ticks;
 }
 
@@ -1162,6 +1264,24 @@ void Report() {
            static_cast<unsigned long long>(renderer.groups_off), renderer.wait_count,
            static_cast<unsigned long long>(renderer.wait_bytes), renderer.free_ranges,
            static_cast<unsigned long long>(renderer.group_peak), renderer.pipelines);
+    if (g_latch_on || c.latch_new + c.r_latch > 0) {
+      ModLog("gpu mesh     : latch (gpu_mesh_latch=%d) in 10 s: %u 3D parts latched for the first "
+             "time (by fn_00851870 %u, fn_00859D90 %u, fn_0084E200 %u, fn_0085A6F0 %u, "
+             "fn_00850FC0 %u, fn_0085C7F0 %u), %u layers kept a part latched, %u meshes took the "
+             "CPU path because their part is latched",
+             g_latch_on ? 1 : 0, c.latch_new, c.latch_by[0], c.latch_by[1], c.latch_by[2],
+             c.latch_by[3], c.latch_by[4], c.latch_by[5], c.latch_refresh, c.r_latch);
+    }
+    if (g_timer && c.mat_runs > 0 && per_ms > 0.0) {
+      ModLog("gpu mesh     : the material in 10 s: %u runs, %u changed a state of the device, %u "
+             "ran for the mesh of the run before with no change of the device since, %u skipped "
+             "(gpu_mesh_material_skip=%d). Time of a run in us: the function of the type %.3f, the "
+             "tiling %.3f, the cull mode %.3f",
+             c.mat_runs, c.mat_changed, c.mat_repeat, c.mat_skipped, g_material_skip ? 1 : 0,
+             c.mat_ticks[0] / per_ms * 1000.0 / c.mat_runs,
+             c.mat_ticks[1] / per_ms * 1000.0 / c.mat_runs,
+             c.mat_ticks[2] / per_ms * 1000.0 / c.mat_runs);
+    }
     if (c.cpu_layer[0] + c.cpu_layer[1] > 0) {
       for (const Caller& k : g_callers) {
         if (k.count == 0) continue;
@@ -1267,12 +1387,15 @@ void GpuMeshSetOptions(const GpuMeshOptions& o) {
   g_check_frames = o.check_frames < 0 ? 0u : static_cast<uint32_t>(o.check_frames);
   g_timer = o.timer != 0;
   g_vertices_key = o.vertices != 0;
+  g_latch_key = g_latch_on = o.latch != 0;
+  g_material_skip = o.material_skip != 0;
   VkSceneSetMesh(g_mode == 2 ? 1 : 0);
   if (g_mode == 0 && !g_test_keys) return;
   ModLog("gpu mesh     : gpu_mesh=%d, gpu_mesh_kinds=%d, parts 0x%X (blend %d, stage1 %d, uvshift "
-         "%d, group %d, depth %d), gpu_mesh_check_frames=%d, gpu_mesh_timer=%d, gpu_mesh_vertices=%d. %s",
+         "%d, group %d, depth %d), gpu_mesh_check_frames=%d, gpu_mesh_timer=%d, gpu_mesh_vertices=%d, gpu_mesh_latch=%d, "
+         "gpu_mesh_material_skip=%d. %s",
          g_mode, o.kinds, g_parts, o.blend, o.stage1, o.uvshift, o.group, o.depth, o.check_frames,
-         o.timer, o.vertices, ModeText(g_mode));
+         o.timer, o.vertices, o.latch, o.material_skip, ModeText(g_mode));
 }
 
 void GpuMeshInstall() {
@@ -1288,9 +1411,15 @@ void GpuMeshInstall() {
 // GPU path. Such a pair has the depth of two paths. The log counts them and
 // keeps the first 8 return addresses.
 void GpuMeshCpuBatch(uint32_t caller, int via) {
-  if (!g_after_gpu) return;
+  // The draw of the function of the game for a mesh of the five functions is not
+  // a batch of another caller.
+  if (g_in_cpu_mesh) return;
+  const bool after_mesh = g_last_valid;
+  const bool after_gpu = g_after_gpu;
+  g_last_valid = false;
   g_after_gpu = false;
-  ++g_counts.cpu_after_gpu;
+  if (!after_mesh) return;
+  if (after_gpu) ++g_counts.cpu_after_gpu;
   gm::DeviceState state = {};
   if (!VkDdrawMeshState(Read<void*>(kDevice), &state)) return;
   const uint32_t reasons = gm::StateReasons(state);
@@ -1298,20 +1427,54 @@ void GpuMeshCpuBatch(uint32_t caller, int via) {
       (state.z_func != 3 && state.z_func != 4)) {
     return;
   }
-  ++g_counts.cpu_layer[via & 1];
-  for (Caller& c : g_callers) {
-    if (c.count != 0 && c.address == caller && c.via == static_cast<uint32_t>(via)) {
-      ++c.count;
+  if (after_gpu) {
+    ++g_counts.cpu_layer[via & 1];
+    bool found = false;
+    for (Caller& c : g_callers) {
+      if (c.count != 0 && c.address == caller && c.via == static_cast<uint32_t>(via)) {
+        ++c.count;
+        found = true;
+        break;
+      }
+    }
+    for (Caller& c : g_callers) {
+      if (found) break;
+      if (c.count == 0) {
+        c.address = caller;
+        c.via = static_cast<uint32_t>(via);
+        c.count = 1;
+        break;
+      }
+    }
+  }
+  // The latch: a layer from a function of a mesh class right after a mesh of the
+  // five functions (GPU or CPU path).
+  if (!g_latch_on || via != 0 || g_last_mesh_info.part == 0) return;
+  const int function = gm::LayerFunctionOf(caller);
+  if (function < 0) return;
+  for (LatchedPart& l : g_latched) {
+    if (l.part == g_last_mesh_info.part && g_frame < l.until) {
+      l.until = g_frame + g_latch_frames;
+      ++g_counts.latch_refresh;
       return;
     }
   }
-  for (Caller& c : g_callers) {
-    if (c.count == 0) {
-      c.address = caller;
-      c.via = static_cast<uint32_t>(via);
-      c.count = 1;
-      return;
-    }
+  LatchedPart& slot = g_latched[g_latched_next++ % 64];
+  slot.part = g_last_mesh_info.part;
+  slot.until = g_frame + g_latch_frames;
+  g_latch_active = true;
+  ++g_counts.latch_new;
+  ++g_counts.latch_by[function];
+  if (g_latch_said < 12) {
+    ++g_latch_said;
+    ModLog("gpu mesh     : latch %u: the 3D part 0x%08X goes to the CPU path for %u frames, because a "
+           "layer from %s (0x%08X, blend %u, z write %u, zfunc %u) follows its mesh 0x%08X (type %u, "
+           "%u vertices, %s, on the %s path)",
+           g_latch_said, static_cast<unsigned>(g_last_mesh_info.part), g_latch_frames,
+           gm::kLayerFunctions[function].name, caller, state.alpha_blend, state.z_write, state.z_func,
+           static_cast<unsigned>(g_last_mesh_info.mesh), g_last_mesh_info.type,
+           g_last_mesh_info.vertices, kKindName[g_last_mesh_info.kind],
+           g_last_mesh_info.gpu ? "GPU" : "CPU");
   }
 }
 
@@ -1374,8 +1537,8 @@ static bool GameWindowInFront() {
 }
 
 void GpuMeshFrame() {
-  // Ctrl Shift 7, 6, 5 and 4 (the digits of the top row): no other test key uses
-  // them.
+  // Ctrl Shift 7, 6, 5, 4 and 3 (the digits of the top row): no other test key
+  // uses them.
   if (g_test_keys) {
     const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                             (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -1420,10 +1583,26 @@ void GpuMeshFrame() {
       }
     }
     g_vertices_key_down = vertices_down;
+    // Ctrl Shift 3: the latch (gpu_mesh_latch) on or off.
+    const bool latch_down = ctrl_shift && (GetAsyncKeyState('3') & 0x8000) != 0;
+    if (latch_down && !g_latch_key_down && g_in && GameWindowInFront()) {
+      g_latch_on = !g_latch_on;
+      ControllersGesturePulse(0.5f, g_latch_on ? 0.30f : 0.08f);
+      ModLog("test key     : Ctrl Shift 3, gpu_mesh_latch is %d from the next mesh", g_latch_on ? 1 : 0);
+    }
+    g_latch_key_down = latch_down;
   }
   if (!g_in) return;
   ++g_frame;
   g_epoch = VkStreamMeshEpoch();
+  if (g_latch_active) {
+    bool any = false;
+    for (LatchedPart& l : g_latched) {
+      if (l.part != 0 && g_frame >= l.until) l.part = 0;
+      if (l.part != 0) any = true;
+    }
+    g_latch_active = any;
+  }
   g_active = g_mode != 0 && VkDdrawOn() && VkSceneDirect();
   Report();
   Sample();

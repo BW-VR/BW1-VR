@@ -623,6 +623,18 @@ inline void GpuMeshChecks() {
           ok, 1);
   }
 
+  // THE LATCH. The return address names the function of a mesh class that draws a
+  // layer; the sprite, the land and the text are not.
+  {
+    const bool ok = gm::LayerFunctionOf(0x00852BA7) == 0 && gm::LayerFunctionOf(0x0085A6D9) == 1 &&
+                    gm::LayerFunctionOf(0x0084E8F6) == 2 && gm::LayerFunctionOf(0x0085AA7A) == 3 &&
+                    gm::LayerFunctionOf(0x008517F7) == 4 && gm::LayerFunctionOf(0x0085CED5) == 5 &&
+                    gm::LayerFunctionOf(0x00840C5C) == -1 && gm::LayerFunctionOf(0x00875627) == -1 &&
+                    gm::LayerFunctionOf(0x0081CCB7) == -1 && gm::LayerFunctionOf(0x78E0C2A0) == -1 &&
+                    gm::LayerFunctionOf(0x00851870) == 0 && gm::LayerFunctionOf(0x00851870 + 0x13D0) == -1;
+    Check(ok, "the return address of a layer names the function of its mesh class, and a sprite does not", ok, 1);
+  }
+
   // THE STORE OF THE MESH DATA (mesh_store_math.h). The guard of a draw with
   // groups, the list of data that wait, and the gate of a walk.
   {

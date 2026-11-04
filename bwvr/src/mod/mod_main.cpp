@@ -1788,6 +1788,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "gpu_mesh_timer", 0, path));
   g_gpu_mesh.vertices = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_vertices", 0, path));
+  g_gpu_mesh.latch = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_latch", 1, path));
+  g_gpu_mesh.material_skip = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_material_skip", 0, path));
   // The timer of the objects on the land (object_timer.h), a test aid.
   g_object_timer = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "object_timer", 0, path));

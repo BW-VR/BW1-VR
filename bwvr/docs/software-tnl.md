@@ -409,6 +409,56 @@ come through `DrawTriangle` from `fn_0081C090` (60000), `fn_007A8DB0` (26000) an
 first group goes to the GPU path, and the layers after a mesh on the GPU path
 are 82000 in 10 s, 70000 of them from `fn_007A8DB0`.
 
+**The latch** (`gpu_mesh_latch`, 1 by default, Ctrl Shift 3 with `test_keys=1`).
+A mesh class of the engine has a draw function of its own on the CPU path, and
+such a function can draw a layer (blend or no depth write, a depth test of
+EQUAL or LESSEQUAL) over the meshes of a 3D part. The callers that the Frame log
+names (the return address of `DrawTriangle`) are, with their functions:
+
+| Return address | Function | What it is |
+| --- | --- | --- |
+| `0x00840C5C` | `fn_00840530`, `LH3DSprite::Draw` | a sprite (a billboard, 31 callers). Not a mesh |
+| `0x00852BA7` | `fn_00851870` | a mesh class draw, from the draws of the part at `0x0080F061`, `0x0080FC91`, `0x00814A74`, `0x00814B6B`. It makes the texture coordinates from the light and the normal (the fraction of a product, a sheen) |
+| `0x0085CED5` | `fn_0085C7F0` | `fn_00859530` with a water plane, from `fn_00816AD0` |
+| `0x0085A6D9` | `fn_00859D90` | a mesh class draw (sheen), from `fn_0080AF80` |
+| `0x00875627` | `fn_00874AA0` | the land: a patch, from `fn_007FF4F0` and `LH3DIsland::Draw` |
+| `0x0081CCB7` | `fn_0081C780` | a draw of an array of vertices like `fn_0081C090`, from `fn_007F7ED0`, `fn_0083E8C0`, the icons of the spells `fn_0067C150` and `fn_0067B3F0` |
+| `0x0084E8F6` | `fn_0084E200` | a mesh class draw, from `fn_0080B050` |
+| `0x008573E7` | `fn_00856D40` | the CPU path of the mesh function itself (clamp) |
+| `0x008517F7` | `fn_00850FC0` | a mesh class draw, from `fn_00810E20` and `fn_00811010` |
+| `0x0085AA7A` | `fn_0085A6F0` | a mesh class draw, from `fn_0080AE40` |
+| `0x00841159` | `fn_00840CC0`, `LH3DSprite::DrawSpecial1` | a sprite |
+| `0x0081C5B6` | `fn_0081C090` | the batches of vertices (below) |
+| `0x78E0C2A0` | outside the exe | not named |
+
+The snow of a roof is a layer over a house mesh. The land of Lethys shows
+`fn_00851870` and `fn_00859D90` in the log, which the Temple save does not show, so
+they are the candidates. The latch does not need the name: when a layer from a
+function of a mesh class (`fn_00851870`, `fn_00859D90`, `fn_0084E200`,
+`fn_0085A6F0`, `fn_00850FC0`, `fn_0085C7F0`) comes right after a mesh of the five
+functions (on the GPU path or on the CPU path), the meshes of the 3D part of that
+mesh (`0x00EA1AE8`) take the CPU path for the next 90 frames, and each new layer
+of the part keeps the latch. The layer and the meshes under it then have the same
+path, as with the glow of a target. A sprite is no layer over a mesh for the
+latch, because a snow land has sprites between nearly all meshes. The log has
+the first 12 latches (the part, the function of the layer, its state, the mesh)
+and each 10 s the new latches by function, the layers that kept a latch, and the
+meshes that took the CPU path because of a latch.
+
+**The material.** `RunMaterial` calls the function of the type of the mesh (a
+table at `0x00ECA618`), the tiling (`fn_0082FF10` or `fn_0082FF50`) and the
+cull mode. Each of them asks the device only when its own cache of the game has
+another value, so a run that finds the device as it left it changes nothing.
+On the Frame the material takes 2.0 us of 3.2 us for a mesh, against 0.08 us on the
+PC. The calls go through indirect calls and the device of the mod (the
+reference count of a surface at a change of the texture, the stream record of a
+state). `gpu_mesh_timer=1` counts the runs, the runs that changed a state of the
+device (a counter in the device), the runs of the mesh of the run before with
+no change, and the time of the function of the type, of the tiling and of the
+cull mode. `gpu_mesh_material_skip=1` leaves a run out for the mesh of the run
+before when the device had no change since and the mesh has no dynamic texture
+(the word at `+0x138`).
+
 **The batches of vertices** (`gpu_mesh_vertices`, 0 by default, Ctrl Shift 4 with
 `test_keys=1`). `fn_0081C090` draws a batch of vertices that the caller gives
 in each call: positions (3 floats), a color for each vertex (a dword), texture

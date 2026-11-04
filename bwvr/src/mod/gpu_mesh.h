@@ -38,6 +38,13 @@
 // vertices go with the draw (a kMeshDraw with the id kInlineMesh) and the vertex
 // shader of the meshes transforms them. With test_keys=1, Ctrl Shift 4 turns it
 // on and off.
+// gpu_mesh_latch (1 is the default): a layer (blend or no depth write, depth test
+// EQUAL or LESSEQUAL) from a function that draws a mesh class on the CPU path,
+// right after a mesh of the five functions, sends the meshes of that 3D part to
+// the CPU path for the next 90 frames, so the layer and the mesh under it have the
+// same path. 0: no latch. With test_keys=1, Ctrl Shift 3 turns it on and off.
+// gpu_mesh_material_skip (0 is the default): 1 leaves the run of the material out
+// for the mesh of the run before when the device had no change since.
 struct GpuMeshOptions {
   int mode = 0;
   bool test_keys = false;
@@ -47,6 +54,8 @@ struct GpuMeshOptions {
   int check_frames = 30;
   int timer = 0;
   int vertices = 0;
+  int latch = 1;
+  int material_skip = 0;
 };
 void GpuMeshSetOptions(const GpuMeshOptions& options);
 void GpuMeshInstall();

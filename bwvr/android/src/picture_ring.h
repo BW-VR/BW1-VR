@@ -69,6 +69,9 @@ struct Picture {
   const quad_layer_math::FrameLayers* layers = nullptr;
   const quad_layer_math::AppPictures* cards = nullptr;
   VkImage panel = VK_NULL_HANDLE;  // the panel image of the picture, or none
+  // The part of the panel image that its copy into the slot took (PanelPart). The
+  // session copies the same part. Empty: the whole image.
+  eye_copy_math::Rect panel_part = {};
   // The images of a slot: in the layout of a transfer source, with the bytes
   // in the order of the swapchains. Else the images of the renderer.
   bool from_ring = false;

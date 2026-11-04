@@ -336,9 +336,13 @@ class XrApp {
   // of panel_width by panel_height in the layout of a color attachment), or
   // VK_NULL_HANDLE. A card gets new pixels only when its picture, its rect or
   // the size of its texture changed.
+  // panel_part: the part of the panel image that the picture has (an empty rect:
+  // the whole image). A quad whose rect is not in the part of the last copy does
+  // not show.
   void SetScreenLayers(const quad_layer_math::FrameLayers& layers,
                        const quad_layer_math::AppPictures& pictures, VkImage panel,
-                       uint32_t panel_width, uint32_t panel_height);
+                       uint32_t panel_width, uint32_t panel_height,
+                       const eye_copy_math::Rect& panel_part);
 
   // THE SCREEN QUAD (stream_screen, docs/android.md, "The screens with no
   // scene"). On (1, the default): a frame with no scene of the mod (the
@@ -404,10 +408,10 @@ class XrApp {
   void SetImageWait(bool wait) { image_wait_ = wait; }
   // The swapchains have blue first (the slots of the ring take that order).
   bool SwapRedBlue() const;
-  // xr_panel_rect (0 by default, at each Play before the play thread starts):
-  // 1, the copies of the panel image take only the part that the panel quads
-  // show (PanelPart of picture_ring.h), and a quad whose rect is not in the
-  // part of the last copy does not show.
+  // xr_panel_rect (0 by default, at each Play before the play thread starts, and
+  // the debug page): 1, the copy of the panel image into a slot takes only the
+  // part that the panel quads show (PanelPart of picture_ring.h). Only the play
+  // thread reads it.
   void SetPanelRect(bool on) { panel_rect_ = on; }
   bool PanelRect() const { return panel_rect_; }
   // THE LATE COMPOSE (xr_compose_direct=1, docs/android.md, "The compose into
@@ -579,7 +583,8 @@ class XrApp {
   eye_copy_math::Rect eye_part_ = {};
   bool eye_direct_ = false;
   bool panel_rect_ = false;
-  eye_copy_math::Rect panel_part_ = {};  // the part of the panel image of the last copy
+  eye_copy_math::Rect panel_part_ = {};       // the part of the panel image of the last copy
+  eye_copy_math::Rect panel_part_copy_ = {};  // the part of the copy that CopySlot makes now
   int direct_newest_ = -1;       // the slot of the newest picture, or -1
   uint64_t direct_revision_ = 0;  // one more for each new picture in a slot
   uint64_t direct_latched_[2] = {0, 0};  // the revision that each eye shows

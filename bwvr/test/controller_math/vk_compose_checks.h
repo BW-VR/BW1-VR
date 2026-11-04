@@ -6,7 +6,9 @@
 
 #include <string>
 
+#include "../../src/mod/app_keys.h"
 #include "../../src/mod/vk_compose_math.h"
+#include "../../src/mod/vk_draw_math.h"
 
 namespace vk_compose_checks {
 
@@ -223,6 +225,41 @@ inline void VkComposeChecks() {
   for (int t = 0; t < m::kVertices; t += 3) area += TriangleArea(g + t);
   Near("a centre rect at the corner: the triangles fill the picture", area, 2808.0 * 2246.0,
        1e-4 * 2808.0 * 2246.0);
+
+  // The keys of the debug page: one bit for each key and the bit "sent".
+  {
+    const int values[app_keys::kKeys] = {1, 0, 1, 1, 0, 1};
+    const uint32_t bits = app_keys::Pack(values);
+    Check(bits == (app_keys::kSent | app_keys::kMresDraws | app_keys::kComposeLight |
+                   app_keys::kPassStore | app_keys::kPanelRect) &&
+              (bits & app_keys::kMresSort) == 0 && (bits & app_keys::kComposeDirect) == 0,
+          "the keys of the debug page are one bit each, in the order of the enum, and the bit sent",
+          bits, 0);
+    const int none[app_keys::kKeys] = {0, 0, 0, 0, 0, 0};
+    Check(app_keys::Pack(none) == app_keys::kSent,
+          "a frame with all keys off still has the bit sent (0 means an older stream)", 0, 0);
+  }
+
+  // The indices of the draws of the passes. A record of the eyes points into its
+  // store. A flush of the queue (a panel draw between two draws of the eyes)
+  // clears the store of the queue and not the store of the records.
+  {
+    std::vector<uint16_t> queue_store, record_store;
+    const uint32_t first_at = static_cast<uint32_t>(record_store.size());
+    record_store.insert(record_store.end(), 6, 1);  // a draw of the eyes
+    queue_store.insert(queue_store.end(), 3, 2);    // a draw of the panel
+    queue_store.clear();                            // its flush
+    const uint32_t second_at = static_cast<uint32_t>(record_store.size());
+    record_store.insert(record_store.end(), 6, 3);  // the next draw of the eyes
+    Check(vk_draw_math::IndexesThere(record_store.size(), first_at, 6) &&
+              vk_draw_math::IndexesThere(record_store.size(), second_at, 6),
+          "after a flush the indices of the records are still there",
+          static_cast<double>(record_store.size()), 12);
+    Check(!vk_draw_math::IndexesThere(queue_store.size(), first_at, 6) &&
+              !vk_draw_math::IndexesThere(5, 3, 6) && vk_draw_math::IndexesThere(9, 3, 6) &&
+              vk_draw_math::IndexesThere(0, 0, 0),
+          "a store that was cleared, or that is too short, does not have the indices", 0, 0);
+  }
 
   // The transfer function: the shader decodes the byte, an sRGB target
   // encodes it again, and the byte is the same.

@@ -39,6 +39,14 @@ void Set(const Input& input, uint64_t eye_image, bool uncomposed);
 bool Pending(uint64_t eye_image);
 // The eye image of the last walk that left its picture to the compose.
 uint64_t Pending();
+// The walk writes this eye image now (or the images of the compose are made
+// again): nothing is pending for it any more.
+void Drop(uint64_t eye_image);
+void DropAll();
+// True when the module works: the device has the functions, the shaders, the
+// layouts and the pipeline of the format of the renderer. Makes them at the
+// first call. The thread that records calls it.
+bool Usable();
 // The walk composed into the eye image itself (Record with the layers of
 // that image): the picture is not pending any more.
 void MarkComposed(uint64_t eye_image);

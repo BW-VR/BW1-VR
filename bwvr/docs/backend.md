@@ -5329,7 +5329,7 @@ windows of 10 s of one session that had both passes:
 | `xr_compose_direct=1` | The eye picture goes from the two images into the swapchain image in one pass. No copy of 48.1 MB, no 50.5 MB image of the renderer in the path | The copy: 3.6 ms. The pass moves into the command buffer of the slot, with no depth and no load (the saving of `vk_compose_light`) |
 | `vk_compose_light=1` | The pass that makes the eye picture loads nothing and stores no depth. A GPU with tiles then writes the color once, and the depth never | Up to the half of the 1.6 ms of the pass, when the pass is bound by the clears. It applies when `xr_compose_direct` is 0 |
 | `vk_pass_store=1` | The depth of the two small passes is not stored | The 4.9 MB of the depth, about 0.1 to 0.2 ms |
-| `vk_mres_draws=1` | The draws of the two small passes get the sort and the merge of the walks with one image (1.6 us for each draw that goes) | In the desktop run below 27 percent of the commands. The same share of 2158 draws is 0.9 ms |
+| `vk_mres_draws=1`, `vk_mres_sort=1` | The draws of the two small passes get the merge of the walks with one image, and with the second key the sort (1.6 us for each draw that goes) | In a desktop run 27 percent of the commands with both. The same share of 2158 draws is 0.9 ms. The merge alone is less |
 | `xr_panel_rect=1` | The copies of the panel image take the rect of the quads | The panel copies are 0.3 ms of a picture (118 copies of 24.1 MB in 10 s). The saving is their share of the image that the quads do not show |
 
 The mean of the sum: 9.9 ms, minus 3.6, 0.8, 0.15, 0.9 and 0.2, is about 4.3 ms
@@ -5376,46 +5376,52 @@ pass for each image:
   table `vk::f`, which the app wraps for the GPU parts of the walk, does not see
   its commands. A walk that left its eye picture to the app has no pass of the eye
   picture in its line of the GPU parts, and `BlackCheckWrite` skips it.
-- The renderer composes itself, as before, in a walk with the atlas of
+- The renderer composes itself in a walk with the atlas of
   `fovea_res_layer=1`, in a walk with a test picture, in a walk with the compare
   of the meshes, and when the app did not call `VkSceneComposeLate(true)`.
 
 **The pass of the eye picture without load** (`vk_compose_light=1`).
-`ComposeMres` drew into a color attachment that it cleared, and it had a depth
-attachment that it cleared and that none of its draws used. With the key its
-pass does `LOAD_OP_DONT_CARE` for the color (the first draw covers all the
-pixels, with no blend) and for the depth, and it stores no depth. The atlas
-(`ComposeAtlas`) keeps the clear of the color, because its gap must be black
-with the alpha 0.
+`ComposeMres` has a color attachment and a depth attachment that none of its
+draws uses. With the key its pass does `LOAD_OP_DONT_CARE` for the color (the
+first draw covers all the pixels, with no blend) and for the depth, and it
+stores no depth. With `vk_compose_light=0` it clears both. When the pipelines of
+the pass are missing, the pass clears the color too. The atlas (`ComposeAtlas`)
+keeps the clear of the color, because its gap must be black with the alpha 0.
 
-**The depth of the two small passes** (`vk_pass_store=1`). A pass of the outer
-image or of the centre image stored its depth at its end. Nothing reads it after
-the pass, unless a clear of one eye ends the pass and starts it again
-(`PlayClear`, which loads the depth). `PlayMres` finds such a clear before it
-starts the passes and stores the depth only then.
+**The depth of the two small passes** (`vk_pass_store=1`). Nothing reads the
+depth of a pass of the outer image or of the centre image after the pass, unless
+a clear of one eye ends the pass and starts it again (`PlayClear`, which loads
+the depth). `PlayMres` finds such a clear before it starts the passes and stores
+the depth only then. `vk_pass_store=0` always stores it.
 
-**The sort and the merge in the two small passes** (`vk_mres_draws=1`). A walk
-with one image sorts and merges its draws (`FlushDraws`, "Fewer state changes and
-fewer draws"). A walk with the two images keeps the draws of the eyes as records
-until its end and plays them in the order of the game, so the sort and the merge
-did not apply to it. `PreparePass` now makes the list of a pass from the records:
-the draws whose viewport is out of the image and, for the centre image, those
-whose rect is out of the centre go out (as before). Then each row of draws
-between two clears gets `vk_draw_math::SortDraws` and the merge of
-`vk_draw_math::CanJoin`. A merge also needs the same viewport. The indices of the
-draws that join come from a copy in `g_queue_indices`, because the CPU does not
-read the ring. A mesh on the GPU keeps its record and joins no draw. The counts
+**The merge and the sort in the two small passes** (`vk_mres_draws=1`,
+`vk_mres_sort=1`). A walk with one image sorts and merges its draws
+(`FlushDraws`, "Fewer state changes and fewer draws"). A walk with the two
+images keeps the draws of the eyes as records until its end. Without
+`vk_mres_draws` a pass plays them in the order of the game, one command for each
+draw. With it `PreparePass` makes the list of a pass from the records: the draws
+whose viewport is out of the image and, for the centre image, those whose rect is
+out of the centre go out. Then each row of draws between two clears gets the
+merge of `vk_draw_math::CanJoin` (draws in a row with the same state, push
+constants and viewport become one draw with 32 bit indices), and with
+`vk_mres_sort=1` first `vk_draw_math::SortDraws` (the opaque draws with a depth
+write go by pipeline and descriptor sets). The merge alone keeps the order of the
+game, so its picture is the one of the unmerged draws. The sort can swap two
+opaque draws at the same depth in a pixel, for example coplanar layers, so it is
+a key of its own. The indices of the draws that join come from a copy in
+`g_mres_indices`, which only the start of a walk clears (a flush of the queue for
+the panel clears `g_queue_indices`, and the records of the eyes wait until the
+end of the walk). `vk_draw_math::IndexesThere` checks the copy for each draw
+that joins. A mesh on the GPU keeps its record and joins no draw. The counts
 of the renderer (`VkSceneDrawCounts`) have the draws of the game that the passes
 play and the commands that play them, so the line of the GPU parts of the app
-shows the saving. `vk_mres_sort=0` keeps the merge and leaves the sort out. A
-desktop run of the test save "pen" (a walk with 594 draws in the two passes)
-played 433 commands, with 58 draws that the sort moved and 220 draws in draws of
-the merge. The pictures of frame 3000 in three runs (the same setting twice
-without the key, and once with it) differ from run to run in about 0.11 to 0.13
-percent of the pixels of an eye picture and in 0.15 to 0.19 percent of the
-outer image, whether the key is on or off. The centre image is the same in all
-runs, to the byte. So the key adds no difference that is larger than the
-difference between two runs.
+shows the saving. A desktop run of the test save "pen" (a walk with 594 draws in
+the two passes) with the merge and the sort played 433 commands, with 58 draws
+that the sort moved and 220 draws in draws of the merge. The pictures of frame
+3000 of two runs without the key differ in 0.125 percent of the pixels of an eye
+picture and in 0.19 percent of the outer image (the game moves between runs). A
+run with the merge and the sort differs from a run without the key in 0.112 and
+0.15 percent. The centre image is the same in all runs, to the byte.
 
 **What the draws of the meshes need** (for the next stage, brief 50 owns the
 code). The two small passes play about 700 mesh draws in a walk of the island
@@ -7403,8 +7409,8 @@ keys that the launcher sets.
 | `vk_atlas_area` | 1 | Only in the headset app, with `fovea_res_layer=1`: 1 the draw of the two images into the eye picture clears and writes only the part with both rects and their gap, 0 the whole eye picture. On the PC always the whole eye picture. The renderer reads it with `fovea_res_layer`. No test key. See "The middle as its own layer" and `android.md`, "The copies of the eye pictures" |
 | `vk_compose_light` | 1 | The pass that makes the eye picture from the outer image and the centre image loads no color that its first draw covers, and no depth. 0: it clears the color and the depth. See "The compose of the eye picture" |
 | `vk_pass_store` | 1 | The pass of the outer image and the pass of the centre image store their depth only when a clear of one eye restarts the pass. 0: they always store it |
-| `vk_mres_draws` | 1 | The draws of the pass of the outer image and of the centre image get the sort and the merge of `vk_draw_sort` and `vk_draw_merge`. 0: one command for each draw, in the order of the game |
-| `vk_mres_sort` | 1 | With `vk_mres_draws=1`: the sort is part of it. 0: the merge alone, which keeps the order of the game |
+| `vk_mres_draws` | 1 | The draws of the pass of the outer image and of the centre image get the merge of `vk_draw_merge`. 0: one command for each draw, in the order of the game. The six keys of this group have a row on the debug page (group Render, the values go to the app with each frame of the stream) |
+| `vk_mres_sort` | 0 | With `vk_mres_draws=1`: 1 the sort of `vk_draw_sort` runs before the merge. 0: the merge alone, which keeps the order of the game |
 | `vk_compose_test` | 0 | A test aid of the desktop runs: the late compose of the 3rd and the 40th walk with the two images goes into images of the formats sRGB and UNORM, and the log compares each with the eye picture of the walk |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
 | `walk_parts`, `walk_parts_add`, `walk_parts_early` | 0, empty, 1 | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. `walk_parts_early=1`: all hooks at the end of the installs of the first frame with one `MH_ApplyQueued`, and no timer on the device and on the lists of the engine. 0: the hooks at the third walk. See "The parts of the scene walk" |

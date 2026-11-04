@@ -39,6 +39,13 @@ struct PlayResult {
 // stream are one set.
 void PlayStreamRecords(const uint8_t* bytes, size_t size, PlayResult* result);
 
+// THE KEYS OF THE DEBUG PAGE (src/mod/app_keys.h): the bits of FrameBody::app_keys.
+// The player gives the four keys of the renderer to VkSceneSetAppKeys and the
+// bits to the hook, each time they change (and again after SetAppKeysHook).
+// It calls on the thread that plays.
+using AppKeysHook = void (*)(uint32_t bits);
+void SetAppKeysHook(AppKeysHook hook);
+
 // THE PROJECTION LAYER OF THE LAST PICTURE of the renderer: the kView of the
 // frame of that picture (src/mod/view_layer_math.h, PictureView). False when
 // the frame of that picture has none.

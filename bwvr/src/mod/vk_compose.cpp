@@ -395,6 +395,21 @@ uint64_t Pending() {
   return g_have && g_uncomposed ? g_eye_image : 0;
 }
 
+void Drop(uint64_t eye_image) {
+  std::lock_guard<std::mutex> lock(g_lock);
+  if (g_eye_image == eye_image) g_have = false;
+}
+
+void DropAll() {
+  std::lock_guard<std::mutex> lock(g_lock);
+  g_have = false;
+}
+
+bool Usable() {
+  std::lock_guard<std::mutex> lock(g_lock);
+  return Init() && PipelineFor(vk::Get().color_format) != VK_NULL_HANDLE;
+}
+
 void MarkComposed(uint64_t eye_image) {
   std::lock_guard<std::mutex> lock(g_lock);
   if (g_eye_image == eye_image) g_uncomposed = false;

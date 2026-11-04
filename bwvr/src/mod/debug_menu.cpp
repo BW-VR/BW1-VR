@@ -29,6 +29,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "app_keys.h"
 #include "debug_menu.h"
 #include "debug_menu_math.h"
 
@@ -424,6 +425,26 @@ const Switch kSwitches[] = {
      "gpu_mesh", GpuMeshValue, GpuMeshToggle, L"CPU|GPU"},
     {kGroupRender, L"GPU mesh parts", L"Blend, stage 1, texture shift on the GPU",
      "gpu_mesh_blend", GpuMeshPartsValue, GpuMeshPartsToggle, L"off|on"},
+    // The keys of the renderer in the headset app and of the app itself. The
+    // values go to the app with each frame of the stream (app_keys.h).
+    {kGroupRender, L"Merge draws", L"Merge draws in the two small passes",
+     "vk_mres_draws", [] { return AppKeyValue(app_keys::kKeyMresDraws); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyMresDraws, by); }, L"off|on"},
+    {kGroupRender, L"Sort draws", L"Sort the draws of the two small passes",
+     "vk_mres_sort", [] { return AppKeyValue(app_keys::kKeyMresSort); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyMresSort, by); }, L"off|on"},
+    {kGroupRender, L"Light compose", L"Eye picture pass loads nothing",
+     "vk_compose_light", [] { return AppKeyValue(app_keys::kKeyComposeLight); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyComposeLight, by); }, L"off|on"},
+    {kGroupRender, L"Pass depth", L"Small passes store depth only if needed",
+     "vk_pass_store", [] { return AppKeyValue(app_keys::kKeyPassStore); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyPassStore, by); }, L"always|if needed"},
+    {kGroupRender, L"Compose direct", L"Eye pictures drawn into swapchains",
+     "xr_compose_direct", [] { return AppKeyValue(app_keys::kKeyComposeDirect); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyComposeDirect, by); }, L"copy|direct"},
+    {kGroupRender, L"Panel rect", L"Panel copies take the quad rects",
+     "xr_panel_rect", [] { return AppKeyValue(app_keys::kKeyPanelRect); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyPanelRect, by); }, L"whole|rects"},
     {kGroupRender, L"Thread wait", L"Threads spin, then sleep",
      "thread_wait", ThreadWaitMode, ThreadWaitToggle, L"spin|sleep"},
     {kGroupRender, L"Read ahead", L"Read ahead of the game files",

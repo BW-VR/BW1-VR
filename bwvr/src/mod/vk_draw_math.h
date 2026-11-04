@@ -143,6 +143,14 @@ inline uint32_t SortDraws(const Draw* d, uint32_t n, bool sort,
   return moved;
 }
 
+// True when a copy of `count` indices at `at` is in a store of `have`
+// indices. A draw of the merge reads its indices from the copy that its record
+// points at (vk_scene.cpp, g_mres_indices), and a store that was cleared after
+// the record does not have them.
+inline bool IndexesThere(size_t have, size_t at, uint32_t count) {
+  return at <= have && static_cast<size_t>(count) <= have - at;
+}
+
 // THE MERGE. The triangles of a draw: a list draws full triangles only, as
 // Direct3D draws them.
 inline uint32_t ListIndices(const Draw& d) {

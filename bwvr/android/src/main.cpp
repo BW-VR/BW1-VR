@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "../../src/common/version.h"
+#include "../../src/mod/app_keys.h"
 #include "../../src/mod/eye_copy_math.h"
 #include "app_log.h"
 #include "build_id.h"
@@ -156,7 +157,8 @@ struct App {
   std::mutex play_stats_lock;
   PlayStats play_stats;
   int gpu_depth = 1;  // frame_loop_gpu_depth, read at each Play
-  bool compose_direct = false;  // xr_compose_direct, read at each Play
+  bool compose_direct = false;  // xr_compose_direct, read at each Play and from the debug page
+  std::atomic<bool> play_ok{false};  // the play thread runs (the late compose may be on)
   // THE EVEN RATE (frame_loop_hold, read at each Play): the frames of the
   // session that showed the shown picture, and if a picture showed.
   int hold = 0;
@@ -327,7 +329,7 @@ bool ShowEyes(App* app, const Picture& p) {
     AppLog("xr           : the mod gives panel quads, but the renderer has no panel "
            "image of %u by %u for the picture. The panel quads do not show", w, h);
   }
-  app->xr.SetScreenLayers(layers, *p.cards, p.panel, w, h);
+  app->xr.SetScreenLayers(layers, *p.cards, p.panel, w, h, p.panel_part);
   return true;
 }
 
@@ -661,10 +663,13 @@ double WriteSlot(App* app, const LivePlay& live) {
     }
     if (!same) s.cards = *g.cards;
     p.cards = &s.cards;
-    if (g.panel != VK_NULL_HANDLE &&
-        app->ring.CopyPanel(i, g.panel, g.width, g.height,
-                            PanelPart(app->xr.PanelRect(), *g.layers, g.width, g.height))) {
-      p.panel = s.panel.image;
+    if (g.panel != VK_NULL_HANDLE) {
+      const eye_copy_math::Rect panel_part =
+          PanelPart(app->xr.PanelRect(), *g.layers, g.width, g.height);
+      if (app->ring.CopyPanel(i, g.panel, g.width, g.height, panel_part)) {
+        p.panel = s.panel.image;
+        p.panel_part = panel_part;
+      }
     }
   }
   p.ready_ms = NowMs();
@@ -784,24 +789,46 @@ void* PlayThread(void* arg) {
   return nullptr;
 }
 
+// THE KEYS OF THE DEBUG PAGE (src/mod/app_keys.h): the player calls this on the
+// play thread when the bits of a frame change. xr_compose_direct needs
+// xr_eye_direct=1. The late compose goes on only while the play thread runs.
+App* g_hook_app = nullptr;
+void AppKeysApply(uint32_t bits) {
+  App* app = g_hook_app;
+  if (app == nullptr) return;
+  app->compose_direct = app->xr.EyeDirect() && (bits & app_keys::kComposeDirect) != 0;
+  app->xr.SetPanelRect((bits & app_keys::kPanelRect) != 0);
+  if (app->play_ok.load()) VkSceneComposeLate(app->compose_direct);
+  AppLog("game         : the debug page: xr_compose_direct=%d, xr_panel_rect=%d",
+         app->compose_direct ? 1 : 0, (bits & app_keys::kPanelRect) != 0 ? 1 : 0);
+}
+
 void StartPlayThread(App* app) {
   if (app->play_running) return;
   app->play_stop.store(false);
-  // The play thread records the compose of the walks that leave their eye
-  // picture to it (xr_compose_direct).
-  VkSceneComposeLate(app->compose_direct);
+  // The keys of the debug page come with the frames of the stream.
+  g_hook_app = app;
+  SetAppKeysHook(&AppKeysApply);
   {
     std::lock_guard<std::mutex> lock(app->play_stats_lock);
     app->play_stats = PlayStats();
   }
   app->play_running = pthread_create(&app->play_thread, nullptr, &PlayThread, app) == 0;
-  if (!app->play_running) AppLog("game         : the play thread did not start");
+  if (!app->play_running) {
+    AppLog("game         : the play thread did not start");
+  } else {
+    // The play thread records the compose of the walks that leave their eye
+    // picture to it (xr_compose_direct), so the mode goes on only now.
+    app->play_ok.store(true);
+    VkSceneComposeLate(app->compose_direct);
+  }
 }
 
 // The thread of the session owns the renderer again after the join.
 void StopPlayThread(App* app) {
   if (!app->play_running) return;
   app->play_stop.store(true);
+  app->play_ok.store(false);
   pthread_join(app->play_thread, nullptr);
   app->play_running = false;
   // Nobody records the compose of a walk any more.
@@ -1208,7 +1235,6 @@ void Play(App* app, bool new_game) {
   // each eye straight into the swapchain image of its slot, in one pass, with
   // no eye image of the renderer and no copy of it.
   app->compose_direct = eye_direct && app->ini.GetInt("bwvr", "xr_compose_direct", 0) != 0;
-  VkSceneComposeLate(app->compose_direct);
   if (loop) {
     AppLog("game         : xr_compose_direct=%d. %s", app->compose_direct ? 1 : 0,
            app->compose_direct

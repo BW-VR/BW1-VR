@@ -3949,7 +3949,26 @@ swapchains reads and writes it again. With the key the two steps are one.
   of the last walk (a frame with a dialog box right after the frames of the
   scene) gets it too, because the screen quad copies that image.
 - The views of a swapchain image for the pass go with the swapchain
-  (`FreeScreenSet` calls `VkSceneComposeForget`).
+  (`FreeScreenSet` calls `VkSceneComposeForget`), and the module goes at the end
+  of the app (`XrApp::Stop` calls `VkSceneComposeStop`).
+- The module is usable when its shaders, layouts and the pipeline of the format
+  of the renderer exist (`vk_compose::Usable`). When it is not, the walk makes
+  its eye picture itself. A walk that writes a target (or that makes the images
+  of the two passes again) drops the compose that waited for that target, and a
+  walk that keeps the picture of the walk before (`KeepPicture`) does not copy a
+  picture that nobody composed.
+- The late compose goes on only while the play thread runs (`StartPlayThread`
+  turns it on after the thread started, `StopPlayThread` turns it off).
+- **The debug page.** The group Render of the debug page of the mod has a row for
+  `xr_compose_direct` and `xr_panel_rect`, and for the four keys of the renderer
+  (`vk_mres_draws`, `vk_mres_sort`, `vk_compose_light`, `vk_pass_store`). The mod
+  keeps their values (from `bwvr.ini`, then from the rows) and puts six bits into
+  the record of every frame of the stream (`FrameBody::app_keys`,
+  `src/mod/app_keys.h`). The player gives the bits to the renderer and to the app
+  (`SetAppKeysHook`) before the walks of the frame, so a row acts from the next
+  picture, also in the headset. `xr_compose_direct` also needs `xr_eye_direct=1`.
+  The rows have no hotkey: every key with a letter, a digit or the numpad is
+  taken by the game or by another test key (`controls-audit.md`, section 3).
 - The time log has the pass as a copy of its own: "the eye pictures made from
   the two images straight into the swapchains (xr_compose_direct=1)" with the
   GPU time and the MB that it writes (the pass writes the whole picture of
@@ -4029,7 +4048,10 @@ answers the calls of the swapchains of the slots on the play thread.
   swapchain) of the size of the render for each walk that drew into the
   panel, in the test save for each picture. The panel quads show only some
   rects of it, and `xr_panel_rect=1` copies only the smallest rect that holds
-  them.
+  them. The play thread gives the part of the copy to the session with the
+  picture (`Picture::panel_part`), and the session takes the part for the image
+  of the panel after its copy worked. A quad whose rect is not in the part of the
+  last copy does not show.
 - Without `xr_compose_direct=1`, and for a walk without the two images
   (no `fovea_res`, or the atlas of `fovea_res_layer=1`), the renderer draws
   into its own two targets, and the play thread copies from them.

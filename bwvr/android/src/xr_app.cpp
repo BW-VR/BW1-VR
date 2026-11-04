@@ -1733,6 +1733,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (Made(panel_)) {
         if (CopyImage(&panel_, 0, panel_source_, 0, panel_width_, panel_height_)) {
           panel_shown_ = true;
+          // The image has this part now. A copy that failed leaves the part
+          // of the image before.
+          panel_part_ = panel_part_copy_;
         }
         panel_ok = panel_shown_;
       }
@@ -1755,9 +1758,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (!ql::Spec(f, r, EyeLayer(0).width, EyeLayer(0).height, &s)) continue;
       XrSwapchain swapchain = XR_NULL_HANDLE;
       if (r.kind == ql::kLayerPanel) {
-        // xr_panel_rect=1: the image has only the part of the last copy.
+        // The image has only the part of the last copy (xr_panel_rect=1).
         const int32_t have[4] = {panel_part_.x, panel_part_.y, panel_part_.w, panel_part_.h};
-        if (panel_rect_ && !ql::RectInside(s.rect, have)) continue;
+        if (!ql::RectInside(s.rect, have)) continue;
         swapchain = panel_.layer[0].swapchain;
         ++panels;
         // The menu panel quad of a dialog box that takes text: the keyboard
@@ -2147,7 +2150,8 @@ void XrApp::SetKeyboard(bool shown, const float position[3], const float orienta
 
 void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
                             const quad_layer_math::AppPictures& pictures, VkImage panel,
-                            uint32_t panel_width, uint32_t panel_height) {
+                            uint32_t panel_width, uint32_t panel_height,
+                            const eye_copy_math::Rect& panel_part) {
   newest_layers_ = layers;
   for (int c = 0; c < bwvr::kCards; ++c) {
     if (layers.card[c]) TakeCard(c, layers.cards[c], pictures);
@@ -2159,7 +2163,9 @@ void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
   // A new picture has a new panel image.
   if (panel_source_ != VK_NULL_HANDLE) {
     ++panel_.layer[0].revision;
-    panel_part_ = PanelPart(panel_rect_, layers, panel_width, panel_height);
+    panel_part_copy_ = panel_part.w > 0 && panel_part.h > 0
+                           ? panel_part
+                           : eye_copy_math::Whole(panel_width, panel_height);
   }
 }
 
@@ -2960,7 +2966,7 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
   // picture with xr_eye_rects=1, else the whole picture.
   const eye_copy_math::Rect part =
       same && screen == &eyes_    ? eye_part_
-      : same && screen == &panel_ ? panel_part_
+      : same && screen == &panel_ ? panel_part_copy_
                                   : eye_copy_math::Whole(layer->width, layer->height);
   const int kind = screen == &eyes_    ? copy_time::kSwapEyes
                    : screen == &panel_ ? copy_time::kSwapPanel
@@ -3497,6 +3503,8 @@ void XrApp::Stop() {
   }
   if (gpu_.device != VK_NULL_HANDLE) vkDeviceWaitIdle(gpu_.device);
   for (DirectSet& d : direct_) FreeScreenSet(&d.set);
+  // The views and pipelines of the compose go while the device is idle.
+  VkSceneComposeStop();
   FreeLayers();
   FreeScreenSet(&flat_);
   FreeStaging(&gpu_, &flat_pixels_.staging);

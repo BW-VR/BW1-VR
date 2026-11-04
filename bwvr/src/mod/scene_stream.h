@@ -100,7 +100,10 @@ struct FrameBody {
   uint64_t frame;
   uint64_t name;
   uint32_t capture;
-  uint32_t reserved;
+  // The keys of the renderer and of the app that the debug page of the mod
+  // changes (app_keys.h): the bit kSent and one bit for each key. 0: the frame
+  // has none (a stream of an older mod), and the app keeps its values.
+  uint32_t app_keys;
 };
 
 struct GazeBody {

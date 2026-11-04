@@ -257,8 +257,9 @@ that kind of mesh on the CPU path), and a switch for a live test:
 | Stage 1 | `gpu_mesh_stage1` | a mesh with a texture on stage 1. The vertex shader gives stage 1 the texture coordinates of stage 0, as the vertex format of the game (FVF `0x1C4`) does |
 | Shift of the texture | `gpu_mesh_uvshift` | a mesh that `DrawTriangle` shifts (`0x00ECA628`, the values at `0x00ECA62C` and `0x00ECA630`: water and fire). The shift is part of the record and the shader adds it to u and v |
 | Groups | `gpu_mesh_group` | a mesh with a matrix for each group of vertices (below) |
+| Depth of the game | `gpu_mesh_depth` | not a kind of mesh: the vertex shader makes the depth and the w as the game does (`rhw = near * (1 / cz)` and `z = 1 - rhw`, each rounded to a float, then `z * w`), with `precise` values and `invariant gl_Position`. The linear form (`z = w - 1`) has a larger rounding error in z after the divide of the GPU. Two layers on one surface (the snow on a roof is a draw with blend and a depth test of LESSEQUAL over the roof) keep the depth order of the CPU path only when the depth has the rounding of the game. Only a headset shows if a layer flickers |
 
-With `test_keys=1`, Ctrl Shift 6 turns all four parts off and on (the debug
+With `test_keys=1`, Ctrl Shift 6 turns all five parts off and on (the debug
 page has the row "GPU mesh parts"), and Ctrl Shift 7 turns `gpu_mesh` between 1
 and 0 (the row "GPU mesh"). With `gpu_mesh=0` in `bwvr.ini` and `test_keys=1`
 the hooks go in at the first press of Ctrl Shift 7.
@@ -399,7 +400,8 @@ s": the meshes on each path with the share of the GPU path, the vertices,
 triangles and offsets on the GPU path, the GPU path by function, what the
 meshes on the GPU path have (blend, no depth write, no depth test, stage 1,
 shift of the texture), the CPU path by reason and by function, the meshes with
-groups, the records of mesh data with their bytes, the full sums, the meshes
+groups, the layers (a draw with blend or no depth write and a depth test of EQUAL
+or LESSEQUAL, and how many of them draw the mesh of the draw before), the records of mesh data with their bytes, the full sums, the meshes
 whose words changed, what the renderer has, and the time on the frame thread:
 the GPU path (the checks, the material, the sum and the record, and in a
 process with a renderer also the draw of the renderer), the function of the

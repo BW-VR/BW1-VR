@@ -164,6 +164,7 @@ bool g_said_backend = false;
 bool g_active = false;
 uint32_t g_frame = 0;  // the frame number of the checks of the data
 uint64_t g_report_at = 0;
+uintptr_t g_last_mesh = 0;  // the mesh of the last draw on the GPU path
 
 // For the report.
 struct Counts {
@@ -190,6 +191,8 @@ struct Counts {
   uint32_t data_full = 0;     // full sums
   uint32_t data_retry = 0;    // data that the renderer dropped, given again
   uint32_t f_group = 0;       // meshes on the GPU path with groups
+  uint32_t f_layer = 0;       // blend or no depth write with a depth test of EQUAL or LESSEQUAL
+  uint32_t f_layer_same = 0;  // of them the mesh that the draw before drew too
   uint32_t groups = 0;        // the groups of those meshes
   uint32_t lights = 0;        // lights of groups checked against the functions of the game
   uint32_t light_diff = 0;    // of them with other bits
@@ -544,6 +547,7 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
   gm::Consts& c = out->c;
   c = gm::Consts();
   if (!grouped) gm::SetMatrix(&c, matrix);
+  if ((g_parts & gm::kPartDepth) != 0) c.flags |= gm::kDepthGame;
   c.near_plane = near_plane;
   c.half_x = half_x;
   c.half_y = half_y;
@@ -590,6 +594,15 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
     if (shifted) ++g_counts.t_uv[type];
     if (grouped) ++g_counts.t_group[type];
   }
+  // A layer over a surface: a draw with blend or with no depth write that passes
+  // at the depth of what is there (D3DCMP_EQUAL 3, D3DCMP_LESSEQUAL 4). The snow
+  // on a roof is one. Two layers on the GPU path need the same depth math.
+  if ((reasons & (gm::kStateBlend | gm::kStateNoZWrite)) != 0 &&
+      (state.z_func == 3 || state.z_func == 4)) {
+    ++g_counts.f_layer;
+    if (m == g_last_mesh) ++g_counts.f_layer_same;
+  }
+  g_last_mesh = m;
   if (reasons != 0 || shifted) {
     if ((reasons & gm::kStateBlend) != 0) ++g_counts.f_blend;
     if ((reasons & gm::kStateNoZWrite) != 0) ++g_counts.f_nozwrite;
@@ -813,7 +826,9 @@ void Report() {
            "gpu_mesh_kinds %u, table full %u, blend %u, no depth write %u, no depth test %u, "
            "stage 1 %u, state of the last frames %u. The CPU path by function: %u, %u, %u, %u, "
            "%u. Meshes with groups on the GPU path %u (%u groups; %u lights of groups checked against "
-           "the functions of the game, %u with other bits). Records of mesh data %u (%llu bytes), "
+           "the functions of the game, %u with other bits). Layers (blend or no depth write, depth "
+           "test EQUAL or LESSEQUAL) on the GPU path %u, %u of them over the mesh of the draw "
+           "before. Records of mesh data %u (%llu bytes), "
            "full sums %u, meshes whose words changed %u, data given again %u. The renderer has %u meshes in %llu bytes and drew %llu, %llu "
            "with no data, %llu with no room. Time on the frame thread in 10 s: the GPU path %.2f "
            "ms (%.3f us a mesh), the function of the game %.2f ms (%.3f us a mesh), the checks "
@@ -824,7 +839,7 @@ void Report() {
            c.f_stage1, c.f_uv, c.r_data, c.r_clamp, c.r_uv, c.r_group, c.r_offsets, c.r_special,
            c.r_kind, c.r_table, c.r_blend, c.r_nozwrite, c.r_noztest, c.r_stage1, c.r_cached,
            c.cpu[0], c.cpu[1], c.cpu[2], c.cpu[3], c.cpu[4], c.f_group, c.groups, c.lights,
-           c.light_diff, c.data_sent,
+           c.light_diff, c.f_layer, c.f_layer_same, c.data_sent,
            static_cast<unsigned long long>(c.data_bytes), c.data_full, c.data_changed,
            c.data_retry, renderer.meshes, static_cast<unsigned long long>(renderer.arena_bytes),
            static_cast<unsigned long long>(renderer.draws),
@@ -903,16 +918,17 @@ void GpuMeshSetOptions(const GpuMeshOptions& o) {
   g_mode = o.mode < 0 || o.mode > 2 ? 0 : o.mode;
   g_test_keys = o.test_keys;
   g_parts_keys = (o.blend != 0 ? gm::kPartBlend : 0u) | (o.stage1 != 0 ? gm::kPartStage1 : 0u) |
-                 (o.uvshift != 0 ? gm::kPartUvShift : 0u) | (o.group != 0 ? gm::kPartGroup : 0u);
+                 (o.uvshift != 0 ? gm::kPartUvShift : 0u) | (o.group != 0 ? gm::kPartGroup : 0u) |
+                 (o.depth != 0 ? gm::kPartDepth : 0u);
   g_parts = g_parts_keys;
   g_check_frames = o.check_frames < 0 ? 0u : static_cast<uint32_t>(o.check_frames);
   g_timer = o.timer != 0;
   VkSceneSetMesh(g_mode == 2 ? 1 : 0);
   if (g_mode == 0 && !g_test_keys) return;
   ModLog("gpu mesh     : gpu_mesh=%d, gpu_mesh_kinds=%d, parts 0x%X (blend %d, stage1 %d, uvshift "
-         "%d, group %d), gpu_mesh_check_frames=%d, gpu_mesh_timer=%d. %s",
-         g_mode, o.kinds, g_parts, o.blend, o.stage1, o.uvshift, o.group, o.check_frames, o.timer,
-         ModeText(g_mode));
+         "%d, group %d, depth %d), gpu_mesh_check_frames=%d, gpu_mesh_timer=%d. %s",
+         g_mode, o.kinds, g_parts, o.blend, o.stage1, o.uvshift, o.group, o.depth, o.check_frames,
+         o.timer, ModeText(g_mode));
 }
 
 void GpuMeshInstall() {

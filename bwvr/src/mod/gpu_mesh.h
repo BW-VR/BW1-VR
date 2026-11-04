@@ -23,7 +23,7 @@
 // 31 is the default.
 // gpu_mesh_blend, gpu_mesh_stage1, gpu_mesh_uvshift and gpu_mesh_group (1 is the
 // default): 0 leaves that kind of mesh on the CPU path. With test_keys=1, Ctrl
-// Shift 6 turns all four off and on.
+// Shift 6 turns the four and the depth off and on.
 // gpu_mesh_depth (1 is the default): 1 the vertex shader makes the depth and
 // the w as the game does, so two layers on one surface (the snow on a roof)
 // keep the depth order of the CPU path. 0 the linear form. It is one of the

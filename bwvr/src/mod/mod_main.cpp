@@ -696,6 +696,7 @@ int g_vk_only = 1;
 int g_vk_only_test = 0;
 int g_vk_upload_queue = 1;
 int g_vk_present_late = 1;
+int g_vk_equal_depth = 1;
 int g_vk_texture_reuse = 1;
 int g_vk_keep_picture = 1;
 int g_vk_black_check = 1;
@@ -1859,6 +1860,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_upload_queue", 1, path) != 0 ? 1 : 0;
   g_vk_present_late =
       GetPrivateProfileIntA("bwvr", "vk_present_late", 1, path) != 0 ? 1 : 0;
+  g_vk_equal_depth =
+      GetPrivateProfileIntA("bwvr", "vk_equal_depth", 1, path) != 0 ? 1 : 0;
   g_vk_texture_reuse =
       GetPrivateProfileIntA("bwvr", "vk_texture_reuse", 1, path) != 0 ? 1 : 0;
   g_vk_keep_picture =
@@ -2356,6 +2359,7 @@ void StartVrStep() {
     VkSceneSetOnly(g_vk_only, g_vk_only_test);
     VkSceneSetUploads(g_vk_upload_queue, g_vk_scene_reread_test);
     VkSceneSetPresentLate(g_vk_present_late);
+    VkSceneSetEqualDepth(g_vk_equal_depth);
     VkSceneSetTextureReuse(g_vk_texture_reuse);
     VkSceneSetKeepPicture(g_vk_keep_picture);
     VkSceneSetBlackCheck(g_vk_black_check);

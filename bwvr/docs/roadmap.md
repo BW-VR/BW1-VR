@@ -1324,9 +1324,15 @@ that moves while the Hand takes it.
   "The meshes on the GPU"). `gpu_mesh=1` takes the transform, the light, the
   clip and the cull of the meshes of `fn_00856D40`, `fn_0085AB10`,
   `fn_0084BA90`, `fn_0085BA30` and `fn_00859530` to the GPU of the app. This
-  includes the meshes with blend, with a texture on stage 1, with a shift of
-  the texture and with a matrix for each group of vertices (each part has a key
-  with the old way as the value 0). Next on the Frame: the lines "gpu mesh" with
+  includes the meshes with a texture on stage 1, with a shift of the texture and
+  with a matrix for each group of vertices, and with `gpu_mesh_blend=1` the
+  meshes with blend (each part has a key with the old way as the value 0).
+  Open: with `gpu_mesh=1` the snow on the roofs of Lethys is missing
+  (`gpu_mesh_blend=0`) or flickers (`gpu_mesh_blend=1`), and with blend the
+  pictures are old at the game menu when the head turns. The causes are not
+  found. Next on the Frame: `vk_equal_depth` 1 and 0 (Ctrl Shift 2) at a roof
+  with snow, `gpu_mesh_latch` 1 and 0 (Ctrl Shift 3), and `gpu_mesh_trace=1`
+  with `gpu_mesh_blend=1` at the game menu. Then the lines "gpu mesh" with
   `gpu_mesh=1` and `gpu_mesh_timer=1` (the share of the meshes on the GPU path
   and the time of the hook for a mesh, with the goals of more than 95 percent
   and less than 1 us), and `object_timer=1` with `gpu_mesh=0` and 1 (the time of

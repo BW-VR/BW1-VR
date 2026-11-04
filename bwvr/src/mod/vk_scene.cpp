@@ -149,6 +149,7 @@
 #include "vk_scene_vert.h"
 #include "vk_mesh_vert.h"
 #include "gpu_mesh_math.h"
+#include "equal_depth_math.h"
 
 void ModLog(const char* format, ...);
 // controllers.cpp
@@ -160,6 +161,10 @@ int StereoPassEye();
 // intro_vr.cpp: the eye pass of the intro in stereo with intro_eye_trails,
 // or -1.
 int IntroPassEye();
+#ifndef _WIN32
+// scene_host.cpp: vk_equal_depth of the game, with the record of the draw.
+bool EqualDepthNow();
+#endif
 
 namespace {
 
@@ -760,6 +765,25 @@ bool g_draw_keys_read = false;
 bool g_bind_skip = true;
 bool g_draw_sort = true;
 bool g_draw_merge = true;
+// vk_equal_depth: a draw with ZFUNC EQUAL gets LESS_OR_EQUAL and a depth bias
+// (equal_depth_math.h). The game process has the key. The app reads it from the
+// record of each draw (EqualDepthNow).
+bool g_equal_depth = true;
+// The draws with ZFUNC EQUAL since the last report, with the bias and without.
+uint64_t g_equal_biased = 0;
+uint64_t g_equal_plain = 0;
+#ifdef _WIN32
+bool EqualDepthNow() { return g_equal_depth; }
+#endif
+// The ZFUNC of a record: D3DCMP_EQUAL becomes kZFuncEqualBias for a draw that the
+// bias is for, and the draw keeps the value through the sort and the merge.
+uint32_t RecordZFunc(uint32_t zenable, uint32_t zfunc) {
+  const uint32_t out = equal_depth_math::RecordZFunc(EqualDepthNow(), zenable, zfunc);
+  if (zenable != 0 && zfunc == equal_depth_math::kZFuncEqual) {
+    ++(out == equal_depth_math::kZFuncEqualBias ? g_equal_biased : g_equal_plain);
+  }
+  return out;
+}
 // For the walk now.
 bool g_walk_sort = false;
 bool g_walk_merge = false;
@@ -935,7 +959,8 @@ VkPipeline Pipeline(uint32_t key) {
       VK_DYNAMIC_STATE_VIEWPORT,          VK_DYNAMIC_STATE_SCISSOR,
       VK_DYNAMIC_STATE_CULL_MODE,         VK_DYNAMIC_STATE_FRONT_FACE,
       VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
-      VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,  VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY};
+      VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,  VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+      VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_DEPTH_BIAS};
   VkPipelineDynamicStateCreateInfo dynamic_state = {
       VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
   dynamic_state.dynamicStateCount = sizeof(dynamic) / sizeof(dynamic[0]);
@@ -2370,8 +2395,18 @@ void DrawStates(VkCommandBuffer cb, uint32_t cull, uint32_t zenable,
       VK_COMPARE_OP_LESS_OR_EQUAL, VK_COMPARE_OP_GREATER,
       VK_COMPARE_OP_NOT_EQUAL,     VK_COMPARE_OP_GREATER_OR_EQUAL,
       VK_COMPARE_OP_ALWAYS};
-  const VkCompareOp compare = kCompare[zfunc <= 8 ? zfunc : 0];
+  // kZFuncEqualBias (vk_equal_depth): LESS_OR_EQUAL with the depth bias toward the
+  // camera. Every other draw has the bias off. The bias is in the dynamic state,
+  // so this holds for each pass that draws with these states.
+  const bool biased = zfunc == equal_depth_math::kZFuncEqualBias;
+  const VkCompareOp compare = biased ? VK_COMPARE_OP_LESS_OR_EQUAL
+                                     : kCompare[zfunc <= 8 ? zfunc : 0];
   if (Need(dm::kDepthCompare, compare)) f.vkCmdSetDepthCompareOp(cb, compare);
+  const uint32_t bias = biased ? 1u : 0u;
+  if (Need(dm::kDepthBias, bias)) {
+    f.vkCmdSetDepthBiasEnable(cb, bias != 0 ? VK_TRUE : VK_FALSE);
+    f.vkCmdSetDepthBias(cb, biased ? -equal_depth_math::kEqualBiasUnits : 0.0f, 0.0f, 0.0f);
+  }
   // D3DPT_: 4 list, 5 strip, 6 fan.
   const VkPrimitiveTopology topology =
       type == 5   ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
@@ -4741,7 +4776,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
   r.cull = rs[D3DRENDERSTATE_CULLMODE];
   r.zenable = rs[D3DRENDERSTATE_ZENABLE];
   r.zwrite = rs[D3DRENDERSTATE_ZWRITEENABLE];
-  r.zfunc = rs[D3DRENDERSTATE_ZFUNC];
+  r.zfunc = RecordZFunc(r.zenable, rs[D3DRENDERSTATE_ZFUNC]);
   r.type = type;
   r.push = push;
   r.vertex_at = vertex_at;
@@ -5456,7 +5491,7 @@ void DrawMeshImpl(uint64_t mesh, const gpu_mesh_math::Consts& consts_in, const f
   r.cull = rs[D3DRENDERSTATE_CULLMODE];
   r.zenable = rs[D3DRENDERSTATE_ZENABLE];
   r.zwrite = rs[D3DRENDERSTATE_ZWRITEENABLE];
-  r.zfunc = rs[D3DRENDERSTATE_ZFUNC];
+  r.zfunc = RecordZFunc(r.zenable, rs[D3DRENDERSTATE_ZFUNC]);
   r.type = 4;  // D3DPT_TRIANGLELIST
   r.push = push;
   r.vertex_at = data_at;
@@ -5882,6 +5917,33 @@ void VkSceneSetTextureReuse(int on) {
                "buffer");
 }
 
+void VkSceneSetEqualDepth(int on) {
+  g_equal_depth = on != 0;
+  ModLog("vk scene     : vk_equal_depth=%d. A draw with the depth test EQUAL %s",
+         g_equal_depth ? 1 : 0,
+         g_equal_depth ? "tests LESS_OR_EQUAL with a depth bias toward the camera of "
+                         "4 steps of the depth image"
+                       : "tests EQUAL as the game says");
+}
+
+bool VkSceneEqualDepthWanted() { return g_equal_depth; }
+
+int VkSceneEqualDepthValue() { return g_equal_depth ? 1 : 0; }
+
+void VkSceneEqualDepthToggle(const char* keys) {
+  g_equal_depth = !g_equal_depth;
+  ControllersGesturePulse(0.5f, g_equal_depth ? 0.30f : 0.08f);
+  ModLog("test key     : %s, vk_equal_depth is %d from the next draw", keys,
+         g_equal_depth ? 1 : 0);
+}
+
+void VkSceneEqualDepthCounts(uint64_t* biased, uint64_t* plain) {
+  *biased = g_equal_biased;
+  *plain = g_equal_plain;
+  g_equal_biased = 0;
+  g_equal_plain = 0;
+}
+
 void VkSceneSetPresentLate(int on) {
   BWVR_STREAM_OPTION(present_late = on);
   g_present_late = on != 0;
@@ -6280,6 +6342,18 @@ void VkSceneReport(uint64_t frames) {
            (now.skipped - s_last.skipped) / walks,
            static_cast<unsigned long long>(now.no_room - s_last.no_room));
     s_last = now;
+  }
+  {
+    uint64_t biased = 0, plain = 0;
+    VkSceneEqualDepthCounts(&biased, &plain);
+    if (biased + plain > 0) {
+      ModLog("vk scene     : vk_equal_depth=%d. In 10 s %llu draws with the depth test EQUAL: %llu "
+             "as LESS_OR_EQUAL with a depth bias of %.0f steps toward the camera, %llu as EQUAL",
+             g_equal_depth ? 1 : 0, static_cast<unsigned long long>(biased + plain),
+             static_cast<unsigned long long>(biased),
+             static_cast<double>(equal_depth_math::kEqualBiasUnits),
+             static_cast<unsigned long long>(plain));
+    }
   }
 #ifdef _WIN32
   // vk_device=0: the proof that no part of the process loaded Vulkan.

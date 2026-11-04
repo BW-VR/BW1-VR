@@ -608,6 +608,15 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
              static_cast<unsigned long long>(mesh.no_data),
              static_cast<unsigned long long>(mesh.no_room));
     }
+    // The draws with the depth test EQUAL in this window (vk_equal_depth).
+    uint64_t equal_biased = 0, equal_plain = 0;
+    VkSceneEqualDepthCounts(&equal_biased, &equal_plain);
+    if (equal_biased + equal_plain > 0) {
+      AppLog("time         : the draws with the depth test EQUAL in this window: %llu as "
+             "LESS_OR_EQUAL with the depth bias (vk_equal_depth=1), %llu as EQUAL",
+             static_cast<unsigned long long>(equal_biased),
+             static_cast<unsigned long long>(equal_plain));
+    }
   }
   // THE THREADS AND THE CORES.
   Sample now;

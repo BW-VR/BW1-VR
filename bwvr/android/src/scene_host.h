@@ -17,6 +17,8 @@ struct SceneHostState {
   int one_walk_mode = 0;
   // ui_panel.h, GpuBridgeIsPanel: the surface of the panel target.
   const void* panel_target = nullptr;
+  // vk_equal_depth of the game (vk_scene.h).
+  bool equal_depth = true;
   // The angles of the camera of the game (bw::tech::InfoTransform).
   float inv_half_tan_fov_x = 0.0f;
   int res_x = 0;

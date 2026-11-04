@@ -163,6 +163,7 @@ bool g_parts_key_down = false;
 bool g_depth_key_down = false;
 bool g_vertices_key_down = false;
 bool g_latch_key_down = false;
+bool g_equal_key_down = false;
 bool g_said_backend = false;
 // Latched for each frame (GpuMeshFrame): the mode, and a renderer that draws
 // the meshes.
@@ -187,6 +188,8 @@ struct Caller {
   uint32_t via;
 };
 Caller g_callers[8] = {};
+// The callers of the batches of the game with the depth test EQUAL.
+Caller g_equal_callers[16] = {};
 // THE LATCH (gpu_mesh_latch, docs/software-tnl.md, "The layers"). The functions
 // that draw a mesh class of their own (fn_00851870, fn_00859D90, fn_0084E200,
 // fn_0085A6F0, fn_00850FC0, fn_0085C7F0) draw layers (blend or no depth write,
@@ -280,6 +283,11 @@ struct Counts {
   uint32_t trace_longest_ms = 0;
   uint32_t trace_meshes_before_long = 0;
   uint32_t latch_live = 0;      // latched parts now
+  // The draws with the depth test EQUAL (vk_equal_depth): meshes on the GPU path,
+  // and the batches of the game on the CPU path (DrawTriangle, DrawAndClip).
+  uint32_t equal_gpu = 0;
+  uint32_t equal_gpu_kind[5] = {};
+  uint32_t equal_cpu[2] = {};
   // The material (RunMaterial), with gpu_mesh_timer=1: runs, runs that changed a
   // state of the device, runs of the same mesh with no change since the last run,
   // runs skipped (gpu_mesh_material_skip), and the time of the parts.
@@ -1039,6 +1047,10 @@ void Hook(Kind kind, void* mesh_in, void* edx, uint32_t ret) {
     Submit(kind, mesh, p, true);
   }
   clock.Lap(5);
+  if (p.zfunc == 3) {
+    ++g_counts.equal_gpu;
+    ++g_counts.equal_gpu_kind[kind];
+  }
   if (g_trace) TraceMesh(ret, p);
   NoteMesh(mesh, kind, true);
   g_counts.gpu_ticks += __rdtsc() - start - back_ticks;
@@ -1341,6 +1353,19 @@ void Report() {
              c.mat_ticks[1] / per_ms * 1000.0 / c.mat_runs,
              c.mat_ticks[2] / per_ms * 1000.0 / c.mat_runs);
     }
+    if (c.equal_gpu + c.equal_cpu[0] + c.equal_cpu[1] > 0) {
+      ModLog("gpu mesh     : draws with the depth test EQUAL in 10 s (the renderer draws them as "
+             "LESS_OR_EQUAL with a small depth bias with vk_equal_depth=1): %u meshes on the GPU "
+             "path (fn_00856D40 %u, fn_0085AB10 %u, fn_0084BA90 %u, fn_0085BA30 %u, fn_00859530 "
+             "%u), %u batches of the game on the CPU path by DrawTriangle and %u by DrawAndClip",
+             c.equal_gpu, c.equal_gpu_kind[0], c.equal_gpu_kind[1], c.equal_gpu_kind[2],
+             c.equal_gpu_kind[3], c.equal_gpu_kind[4], c.equal_cpu[0], c.equal_cpu[1]);
+      for (const Caller& k : g_equal_callers) {
+        if (k.count == 0) continue;
+        ModLog("gpu mesh     : a batch of the game with the depth test EQUAL (%s) from 0x%08X, "
+               "%u times in 10 s", k.via == 0 ? "DrawTriangle" : "DrawAndClip", k.address, k.count);
+      }
+    }
     if (c.cpu_layer[0] + c.cpu_layer[1] > 0) {
       for (const Caller& k : g_callers) {
         if (k.count == 0) continue;
@@ -1379,6 +1404,7 @@ void Report() {
   }
   g_counts = Counts();
   memset(g_callers, 0, sizeof(g_callers));
+  memset(g_equal_callers, 0, sizeof(g_equal_callers));
   memset(g_trace_callers, 0, sizeof(g_trace_callers));
 }
 
@@ -1472,6 +1498,26 @@ void GpuMeshInstall() {
 // GPU path. Such a pair has the depth of two paths. The log counts them and
 // keeps the first 8 return addresses.
 void GpuMeshCpuBatch(uint32_t caller, int via) {
+  // The batches of the game with the depth test EQUAL, by caller.
+  if (g_in) {
+    gm::DeviceState equal = {};
+    if (VkDdrawMeshState(Read<void*>(kDevice), &equal) && equal.z_enable != 0 && equal.z_func == 3) {
+      ++g_counts.equal_cpu[via & 1];
+      Caller* slot = nullptr;
+      for (Caller& c : g_equal_callers) {
+        if (c.count != 0 && c.address == caller && c.via == static_cast<uint32_t>(via)) {
+          slot = &c;
+          break;
+        }
+        if (slot == nullptr && c.count == 0) slot = &c;
+      }
+      if (slot != nullptr) {
+        slot->address = caller;
+        slot->via = static_cast<uint32_t>(via);
+        ++slot->count;
+      }
+    }
+  }
   // The draw of the function of the game for a mesh of the five functions is not
   // a batch of another caller.
   if (g_in_cpu_mesh) return;
@@ -1648,6 +1694,13 @@ void GpuMeshFrame() {
       ModLog("test key     : Ctrl Shift 3, gpu_mesh_latch is %d from the next mesh", g_latch_on ? 1 : 0);
     }
     g_latch_key_down = latch_down;
+    // Ctrl Shift 2: the depth test EQUAL with a small bias (vk_equal_depth) on or
+    // off. It acts on the draws that follow, on the PC and in the app.
+    const bool equal_down = ctrl_shift && (GetAsyncKeyState('2') & 0x8000) != 0;
+    if (equal_down && !g_equal_key_down && GameWindowInFront()) {
+      VkSceneEqualDepthToggle("Ctrl Shift 2");
+    }
+    g_equal_key_down = equal_down;
   }
   if (!g_in) return;
   ++g_frame;

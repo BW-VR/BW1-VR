@@ -48,6 +48,7 @@ int StereoPassEye() { return g_state.pass_eye; }
 int IntroPassEye() { return g_state.intro_eye; }
 
 bool OneWalkActive() { return g_state.one_walk; }
+bool EqualDepthNow() { return g_state.equal_depth; }
 float OneWalkShiftPerRhw() { return g_state.shift_per_rhw; }
 void* OneWalkBoundTarget() { return g_state.bound_target; }
 int OneWalkModeNow() { return g_state.one_walk_mode; }

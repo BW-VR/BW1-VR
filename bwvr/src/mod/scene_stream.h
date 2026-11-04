@@ -72,7 +72,7 @@ struct StreamState {
   float shift_per_rhw;    // OneWalkShiftPerRhw
   uint64_t bound_target;  // OneWalkBoundTarget
   int32_t one_walk_mode;  // OneWalkModeNow
-  uint32_t reserved;
+  uint32_t equal_depth;   // VkSceneEqualDepthWanted (vk_equal_depth)
   uint64_t panel_target;  // the surface for which GpuBridgeIsPanel is true
 };
 

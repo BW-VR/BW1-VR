@@ -115,6 +115,7 @@ class Player {
     h.shift_per_rhw = s.shift_per_rhw;
     h.bound_target = Surface(s.bound_target);
     h.one_walk_mode = s.one_walk_mode;
+    h.equal_depth = s.equal_depth != 0;
     h.panel_target = Surface(s.panel_target);
     SceneHostSetState(h);
   }

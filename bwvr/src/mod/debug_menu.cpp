@@ -169,6 +169,8 @@ int VkSceneFoveationValue();
 void VkSceneFoveationToggle(const char* by);
 int VkSceneFoveaResValue();
 void VkSceneFoveaResToggle(const char* by);
+int VkSceneEqualDepthValue();
+void VkSceneEqualDepthToggle(const char* by);
 int VkWindowValue();
 void VkWindowToggle(const char* by);
 int XrVulkanUploadValue();
@@ -448,6 +450,9 @@ const Switch kSwitches[] = {
     {kGroupRender, L"Slot order", L"The app writes the slot shown longest ago",
      "ring_slot_order", [] { return AppKeyValue(app_keys::kKeyRingOrder); },
      [](const char* by) { AppKeyChange(app_keys::kKeyRingOrder, by); }, L"lowest|oldest"},
+    {kGroupRender, L"Equal depth", L"Depth test EQUAL with a small bias",
+     "vk_equal_depth", VkSceneEqualDepthValue, VkSceneEqualDepthToggle,
+     L"EQUAL|bias"},
     {kGroupRender, L"Thread wait", L"Threads spin, then sleep",
      "thread_wait", ThreadWaitMode, ThreadWaitToggle, L"spin|sleep"},
     {kGroupRender, L"Read ahead", L"Read ahead of the game files",

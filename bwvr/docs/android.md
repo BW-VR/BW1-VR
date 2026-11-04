@@ -1160,7 +1160,8 @@ the device, the render states, the textures, the draws with their vertices
 and indices, the targets, the viewports, the clears, and each surface of the
 game with its pixels as RGBA8 before its first use and after the game writes
 it. With each walk, draw and target the stream has the values of the other
-parts of the mod that the renderer reads (`StreamState`).
+parts of the mod that the renderer reads (`StreamState`: the eye pass, the one
+walk and `vk_equal_depth`).
 
 **The record on the PC** (`vk_stream.cpp`, a test aid). `vk_stream_record=N`
 in `bwvr.ini`: from the frame with the count N of the controllers (as

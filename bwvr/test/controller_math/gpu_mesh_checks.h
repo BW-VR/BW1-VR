@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "../../src/mod/gpu_mesh_math.h"
+#include "../../src/mod/equal_depth_math.h"
 #include "../../src/mod/latch_math.h"
 #include "../../src/mod/mesh_store_math.h"
 #include "../../src/mod/scene_stream.h"
@@ -634,6 +635,135 @@ inline void GpuMeshChecks() {
                     gm::LayerFunctionOf(0x0081CCB7) == -1 && gm::LayerFunctionOf(0x78E0C2A0) == -1 &&
                     gm::LayerFunctionOf(0x00851870) == 0 && gm::LayerFunctionOf(0x00851870 + 0x13D0) == -1;
     Check(ok, "the return address of a layer names the function of its mesh class, and a sprite does not", ok, 1);
+  }
+
+  // THE DEPTH TEST EQUAL (equal_depth_math.h). A layer with ZFUNC EQUAL over a mesh
+  // on the GPU path: the depth that the hardware tests is the clip depth over w.
+  // The mesh gets it from the shader (ClipPosition with the depth of the game), and
+  // the batch of the CPU path from the depth and the rhw of the loop of the game
+  // through vk_scene.vert. The difference of the two, in steps of the depth image,
+  // is the error that the bias has to cover.
+  {
+    namespace ed = equal_depth_math;
+    const auto steps = [&](uint32_t seed, int meshes, uint32_t mode_flags, float near_plane,
+                           int hist[6], double* worst_out, double* tiny_abs_out) {
+      Random rr = {seed};
+      const float old_near = c.near_plane;
+      c.near_plane = near_plane;
+      const int kVertices = 64;
+      static uint8_t in[kVertices * 32];
+      static uint8_t out[kVertices * 32];
+      static uint32_t flags[kVertices];
+      int counted = 0;
+      double worst = 0.0, tiny_abs = 0.0;
+      for (int k = 0; k < 6; ++k) hist[k] = 0;
+      for (int mesh = 0; mesh < meshes; ++mesh) {
+        for (int i = 0; i < 12; ++i) c.m[i] = rr.Range(-1.5f, 1.5f);
+        for (int i = 9; i < 12; ++i) c.m[i] = rr.Range(-3.0f, 3.0f);
+        for (int i : {0, 1, 2, 3, 4, 5}) c.m[i] *= 1.3f;
+        // The far rows: the mesh is 5 to 60 times as far as the near test.
+        const float scale = rr.Range(1.0f, 60.0f);
+        for (int v = 0; v < kVertices; ++v) {
+          float f[8];
+          for (int k = 0; k < 8; ++k) f[k] = rr.Range(-4.0f, 4.0f);
+          memcpy(in + v * 32, f, 32);
+        }
+        c.m[11] += scale;
+        fast_transform_math::TransformClip(c, in, kVertices, out, flags);
+        gm::Consts g = {};
+        gm::SetMatrix(&g, c.m);
+        g.near_plane = c.near_plane;
+        g.half_x = c.half_x;
+        g.half_y = c.half_y;
+        g.flags = mode_flags;
+        for (int v = 0; v < kVertices; ++v) {
+          if (flags[v] != 0) continue;
+          const float* p = reinterpret_cast<const float*>(in + v * 32);
+          const gm::Camera cam = gm::CameraSpace(g, p, nullptr);
+          float clip[4];
+          gm::ClipPosition(g, view, cam, false, false, clip);
+          if (!gm::InsideClip(clip)) continue;
+          const float* o = reinterpret_cast<const float*>(out + v * 32);
+          // vk_scene.vert: w = 1 / rhw, z = (z - min_z) * inv_z, clip z = z * w.
+          const float w = 1.0f / o[3];
+          const float cpu = (((o[2] - view.min_z) * view.inv_z) * w) / w;
+          const float gpu = clip[2] / clip[3];
+          const double step = ed::DepthStep(fmaxf(fabsf(cpu), fabsf(gpu)));
+          const double d = fabs(static_cast<double>(gpu) - cpu) / step;
+          // Nearer than twice the near distance the depth is below 0.5. The steps of the
+          // depth image are smaller there than the rounding of 1 - rhw (about 1e-7), so
+          // the error is counted in absolute value for those points.
+          if (cpu < 0.5f || gpu < 0.5f) {
+            tiny_abs = fmax(tiny_abs, fabs(static_cast<double>(gpu) - cpu));
+            continue;
+          }
+          ++counted;
+          if (d > worst) worst = d;
+          ++hist[d < 0.5 ? 0 : d < 1.5 ? 1 : d < 2.5 ? 2 : d < 3.5 ? 3 : d < 4.5 ? 4 : 5];
+        }
+      }
+      c.near_plane = old_near;
+      *worst_out = worst;
+      *tiny_abs_out = tiny_abs;
+      return counted;
+    };
+    int hist[6];
+    double worst = 0.0, tiny = 0.0;
+    const int near_count = steps(7777u, 400, gm::kDepthGame | gm::kYOrderC, 0.15f, hist, &worst, &tiny);
+    printf("  (depth the test sees, GPU against CPU path, near 0.15: %d points; 0 steps %d, 1 step %d, 2 steps %d, "
+           "3 steps %d, 4 steps %d, more %d; worst %.2f steps)\n",
+           near_count, hist[0], hist[1], hist[2], hist[3], hist[4], hist[5], worst);
+    Check(near_count > 3000 && worst <= ed::kEqualBiasUnits * 0.5,
+          "the depth that the test sees differs between the GPU path and the CPU path by at most half of the bias",
+          worst, ed::kEqualBiasUnits * 0.5);
+    int hist1[6];
+    double worst1 = 0.0, tiny1 = 0.0;
+    const int near1_count = steps(8888u, 400, gm::kDepthGame | gm::kYOrderB, 1.0f, hist1, &worst1, &tiny1);
+    printf("  (near 1.0: %d points; 0 steps %d, 1 step %d, 2 steps %d, 3 steps %d, 4 steps %d, more %d; worst %.2f steps)\n",
+           near1_count, hist1[0], hist1[1], hist1[2], hist1[3], hist1[4], hist1[5], worst1);
+    Check(near1_count > 3000 && worst1 <= ed::kEqualBiasUnits * 0.5,
+          "the same for the near plane of 1.0 and the other order of y",
+          worst1, ed::kEqualBiasUnits * 0.5);
+    printf("  (points with a depth below 0.5, nearer than twice the near distance: the worst error %.2e and %.2e, "
+           "where 4 steps of the depth image at 0.5 are %.2e)\n",
+           tiny, tiny1, 4.0 * ed::DepthStep(0.75f));
+    Check(tiny <= 4.0 * ed::DepthStep(0.75f) && tiny1 <= 4.0 * ed::DepthStep(0.75f),
+          "below the depth of 0.5 the error of the GPU depth is at most 4 steps of the depth image at 0.5",
+          tiny, 4.0 * ed::DepthStep(0.75f));
+
+    // The test with the bias. A layer passes at the same depth, and up to the bias
+    // behind it, and does not pass behind that. A surface in front of the layer by
+    // more than the bias hides it, as with EQUAL.
+    bool test = true;
+    for (float z : {0.001f, 0.1f, 0.5f, 0.9f, 0.99f, 0.9999f}) {
+      const float step = ed::DepthStep(z);
+      test = test && ed::PassesEqual(z, z) && ed::PassesEqual(z + 3.0f * step, z) &&
+             ed::PassesEqual(z + 4.0f * step, z) && !ed::PassesEqual(z + 6.0f * step, z) &&
+             ed::PassesEqual(z, z - 3.0f * step) && !ed::PassesEqual(z, z - 6.0f * step) &&
+             !ed::PassesEqual(z, z - 1000.0f * step);
+    }
+    Check(test, "a layer with the bias passes at its depth and 4 steps behind, and a surface 6 steps in front hides it",
+          test, 1);
+
+    // How far in front of the layer a surface must be to hide it, at some
+    // distances (the roofs of a village are 20 to 300 units away, the far land
+    // 1000 to 2000).
+    const float near_plane = 0.15f;
+    const double at100 = ed::HidingDistance(near_plane, 100.0f);
+    const double at300 = ed::HidingDistance(near_plane, 300.0f);
+    const double at1000 = ed::HidingDistance(near_plane, 1000.0f);
+    const double at2000 = ed::HidingDistance(near_plane, 2000.0f);
+    printf("  (a surface hides the layer when it is in front by: %.4f at 100, %.4f at 300, %.3f at 1000, %.3f at 2000 units; near 0.15)\n",
+           at100, at300, at1000, at2000);
+    Check(at100 < 0.02 && at300 < 0.15 && at1000 < 2.0 && at2000 < 8.0 && at100 > 0.0,
+          "the surface that hides a layer with the bias is within 2 cm at 100 units and within 2 units at 1000 units",
+          at100, 0.02);
+
+    // The record: only a test EQUAL that is on, with the key, gets the value.
+    const bool record = ed::RecordZFunc(true, 1, 3) == ed::kZFuncEqualBias &&
+                        ed::RecordZFunc(false, 1, 3) == 3 && ed::RecordZFunc(true, 0, 3) == 3 &&
+                        ed::RecordZFunc(true, 1, 4) == 4 && ed::RecordZFunc(true, 1, 2) == 2;
+    Check(record, "the record gives the value of the bias for a test EQUAL that is on, with the key", record, 1);
   }
 
   // THE TABLE OF THE LATCHED PARTS. 500 parts stay latched (the first version

@@ -205,6 +205,7 @@ ss::StreamState State() {
   s.shift_per_rhw = OneWalkShiftPerRhw();
   s.bound_target = Id(OneWalkBoundTarget());
   s.one_walk_mode = OneWalkModeNow();
+  s.equal_depth = VkSceneEqualDepthWanted() ? 1u : 0u;
   return s;
 }
 

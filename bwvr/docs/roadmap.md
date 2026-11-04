@@ -1354,6 +1354,19 @@ that moves while the Hand takes it.
   commands of the mesh draws (`backend.md` says what they need), and a depth of
   16 bits for the two small passes (fewer bins on a GPU with tiles, but
   another precision for the Z test).
+- **N36. Old pictures in the headset when the menu of the game opens**
+  (`android.md`, "The age of a picture in the layer"). On the Steam Frame the
+  headset shows pictures of the land from some time before, in a flicker with
+  the new ones, when the menu of the game opens and in play when the game is
+  slower than the display. The ring and the layer never name a frame below the
+  frame before (the math test, and the lines "the projection layer shows the
+  picture of frame N" of the app). The cause is not known. Next on the Frame:
+  a session with `take_age_log=1` (the lines "take age" name a picture that is
+  older than its frame number, a pair of two frames, the writes of the play
+  thread soon after a frame named the swapchains, and the walks that started
+  with the picture of the walk before), then the same view with
+  `ring_slot_order=1` and 0 (the debug page, row "Slot order"), with
+  `frame_queue=0` and 1, and with `xr_eye_direct=0` and 1.
 - **N22. Haptics from the world: check it in a headset.** With
   `world_haptics=1` the hand feels the purr of a stroke, the beat of a
   living thing in the Hand, the land under a grip, the thump of a landing

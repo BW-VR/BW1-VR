@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,7 @@
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/swapchain_free_math.h"
+#include "../../src/mod/take_age_math.h"
 #include "../../src/mod/time_log_math.h"
 #include "../../src/mod/vk_core.h"
 #include "frame_loop.h"
@@ -254,6 +256,18 @@ class XrApp {
   // swapchains. No layer names a slot until SetDirectSource names the slot
   // of this picture, so direct_newest_ is -1 or the shown slot.
   void ClearDirectSource() { direct_newest_ = -1; }
+
+  // THE AGE LOG (take_age_log=1, take_age_math.h, docs/android.md, "The age of
+  // a picture in the layer"). SetAgeLog: at each Play, before the play thread
+  // starts. AgeTake: the session took a picture of the ring (facts), from the
+  // slot `slot` (-1: none). It counts the reasons of the picture and writes a
+  // line for one that is older than the picture before. AgeTick: each frame of
+  // the session, the line of the window each 10 s. With the key off they do
+  // nothing.
+  void SetAgeLog(bool on);
+  bool AgeLog() const { return age_log_; }
+  void AgeTake(const take_age::TakeFacts& facts, int slot);
+  void AgeTick(double now_ms);
 
   // THE RENDERER OF THE MOD IN THE SESSION (docs/android.md, "The picture
   // of the renderer in the headset"). True when the device of the runtime
@@ -645,6 +659,23 @@ class XrApp {
     int replaced = 0;
   };
   DirectSet direct_[frame_loop::kSlots];
+  // THE AGE LOG. The session and the play thread both write it, under the lock.
+  bool age_log_ = false;
+  std::mutex age_lock_;
+  take_age::Shown age_shown_;
+  take_age::Layer age_layer_;
+  take_age::Writes age_writes_;
+  take_age::Window age_window_;
+  uint64_t age_frames_ = 0;        // frames of the session since the Play
+  double age_window_ms_ = 0.0;     // the start of the window
+  int age_take_lines_ = 0;   // the lines written for a take, and for a layer
+  int age_layer_lines_ = 0;
+  uint64_t age_kept_ = 0, age_whole_ = 0;  // VkSceneCounts at the start of the window
+  // A frame of the session with a projection layer of the slot `slot` (-1: the
+  // old way) and the frames of its two eyes.
+  void AgeLayer(int slot, uint64_t left, uint64_t right);
+  // The play thread starts a write into the swapchains of `slot`.
+  void AgeWrite(int slot);
   // The play thread counts its pictures straight into the swapchains, and
   // the pictures that took the old way with the key on.
   std::atomic<uint64_t> direct_writes_{0};

@@ -228,14 +228,14 @@ inline void VkComposeChecks() {
 
   // The keys of the debug page: one bit for each key and the bit "sent".
   {
-    const int values[app_keys::kKeys] = {1, 0, 1, 1, 0, 1};
+    const int values[app_keys::kKeys] = {1, 0, 1, 1, 0, 1, 1};
     const uint32_t bits = app_keys::Pack(values);
     Check(bits == (app_keys::kSent | app_keys::kMresDraws | app_keys::kComposeLight |
-                   app_keys::kPassStore | app_keys::kPanelRect) &&
+                   app_keys::kPassStore | app_keys::kPanelRect | app_keys::kRingOrder) &&
               (bits & app_keys::kMresSort) == 0 && (bits & app_keys::kComposeDirect) == 0,
           "the keys of the debug page are one bit each, in the order of the enum, and the bit sent",
           bits, 0);
-    const int none[app_keys::kKeys] = {0, 0, 0, 0, 0, 0};
+    const int none[app_keys::kKeys] = {0, 0, 0, 0, 0, 0, 0};
     Check(app_keys::Pack(none) == app_keys::kSent,
           "a frame with all keys off still has the bit sent (0 means an older stream)", 0, 0);
   }

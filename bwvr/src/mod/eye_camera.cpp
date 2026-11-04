@@ -147,6 +147,12 @@ struct Saved {
 Saved g_saved = {};
 bool g_captured = false;
 
+// The scaled matrix that the last EyeCameraSetEye or EyeCameraSetPose wrote.
+// A draw that sees a different matrix has a camera that is not the camera of
+// the eye (camera_stale_math.h).
+float g_applied[kMatrixFloats];
+bool g_have_applied = false;
+
 // Every fix is a switch, so a report of "this still looks wrong" can be
 // narrowed to one change without a rebuild, and so the draw probe can measure
 // each one on its own.
@@ -307,6 +313,7 @@ bool EyeCameraCapture() {
     memcpy(g_saved.inverse, Inverse(), kMatrixBytes);
   }
 
+  g_have_applied = false;
   g_saved.have_seed = false;
   if (g_fix_random) {
     uint32_t* seed = RandomSeed();
@@ -337,6 +344,8 @@ void EyeCameraSetEye(float d) {
   float* scaled = Scaled();
   memcpy(scaled, g_saved.scaled, kMatrixBytes);
   scaled[kTranslationX] -= scale * d;
+  memcpy(g_applied, scaled, kMatrixBytes);
+  g_have_applied = true;
 
   if (g_saved.have_unscaled) {
     float* unscaled = Unscaled();
@@ -459,6 +468,8 @@ void EyeCameraSetPose(const float h[9], const float d[3], bool log) {
     }
   }
   memcpy(Scaled(), scaled_out, kMatrixBytes);
+  memcpy(g_applied, scaled_out, kMatrixBytes);
+  g_have_applied = true;
   if (g_saved.have_copy) memcpy(ScaledCopy(), scaled_out, kMatrixBytes);
   if (g_saved.have_inverse) {
     SetInverseFn set_inverse =
@@ -485,7 +496,18 @@ void EyeCameraRestore() {
   // The seed is deliberately NOT restored. The world should move on from one
   // draw of the particles, not from two.
   g_captured = false;
+  g_have_applied = false;
 }
+
+// True when an eye move wrote the matrix of the camera and the engine now has
+// a different one.
+bool EyeCameraStale() {
+  if (!g_have_applied || !g_checked.scaled) return false;
+  return memcmp(Scaled(), g_applied, kMatrixBytes) != 0;
+}
+
+// True when an eye move wrote the matrix of the camera in this pass.
+bool EyeCameraApplied() { return g_have_applied; }
 
 void EyeCameraSetFixes(bool unscaled, bool copy, bool inverse, bool random) {
   g_fix_unscaled = unscaled;

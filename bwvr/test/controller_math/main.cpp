@@ -3546,6 +3546,7 @@ void CreatureChecks() {
 #include "teleport_checks.h"
 #include "sky_checks.h"
 #include "sprite_checks.h"
+#include "camera_stale_checks.h"
 #include "feel_checks.h"
 #include "pinch_checks.h"
 #include "feel_shape_checks.h"
@@ -4010,6 +4011,7 @@ int main() {
   teleport_checks::TeleportChecks();
   sky_checks::SkyChecks();
   sprite_checks::SpriteChecks();
+  camera_stale_checks::CameraStaleChecks();
   forest_checks::ForestChecks();
   forest_checks::ForestGripChecks();
   feel_checks::FeelChecks();

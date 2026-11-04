@@ -146,6 +146,9 @@ void StereoReapplyEye();
 // tabletop.cpp: true for a cloud past the edge of the table. Always false
 // when the table does not own the frame.
 bool TabletopHidesMist(const void* mist);
+// eye_stale.cpp: the trace of the draws that see a camera that is not the
+// camera of the eye. Kind 0 is a cloud.
+void EyeStaleDraw(int kind);
 // hand_glow.cpp: the glow at the Hand's point, in each eye pass.
 void HandGlowDraw();
 // overlay.cpp: the mod's own meshes, in each eye pass.
@@ -407,6 +410,7 @@ void TraceDome(const void* mist, const float place[3], const float basis[9],
 void __fastcall h_MistDraw(void* self, void* unused) {
   if (TabletopHidesMist(self)) return;
   TestFrameCheck();
+  EyeStaleDraw(0);
   if (g_head_free && self != nullptr) {
     const uint8_t* mist = static_cast<const uint8_t*>(self);
     const float* position =

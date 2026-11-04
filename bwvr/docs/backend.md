@@ -6414,7 +6414,9 @@ puts the stored camera back with `UpdateCamera` (`fn_0068B7D0`, called at
 `0x0068BF2F`). That restore rebuilds the matrices without the per eye offset and
 roll. `sun_glare` picks: 0 (default) calls `StereoReapplyEye` first and draws the
 glare, 1 draws it as the game does, 2 does not draw it. The `fn_0085AB10` batch (one
-a frame, 90 pixels wide, clamped to the screen edges) reads as the glare.
+a frame, 90 pixels wide, clamped to the screen edges) reads as the glare. The other
+items of the sorted list get the eye camera back too (see "The eye camera after a
+camera of its own").
 
 Ruled out as the cause: the full screen quad that `LH3DRender::FinishFrame` draws at
 `0x0082F617` (diffuse 0, a transparent fade) and `CloudInSky` (its per frame update at
@@ -6422,6 +6424,100 @@ Ruled out as the cause: the full screen quad that `LH3DRender::FinishFrame` draw
 
 Open: the sun bobs a little as the head moves in the headset. The sun glare is the
 best candidate, and it is not proven.
+
+### The eye camera after a camera of its own
+
+The eye loop gives the engine the camera of one eye: the camera that the game asked
+for, with the head, the roll and the offset of the eye (`StereoReapplyEye` makes the
+same call again). A part of the game can then give the engine a camera of its own in
+the middle of the scene walk, with `LH3DTech::UpdateCamera` (`0x00819920`), draw with
+it, and give the stored camera back. The restore (`0x0068B7D0`, called at
+`0x0068BF2F` by the effect `fn_0068B480`) builds the matrices of the camera again from
+the stored camera. That build has no eye offset and no roll. Each draw after it, in
+the same eye pass, uses a camera that is not the camera of the eye. The world has the
+roll of the head, so such a draw does not roll with the world, and it seems fixed to
+the head. The other callers of `UpdateCamera` in the game are `GCamera::Update` (the
+main camera), `InnerCamera::PreDraw` (the room of the Temple, `head_camera.cpp`),
+`Plasma::Render` (`0x0053CC29`), `RunAlexFX` (`0x005F8A84`, `0x005F934B`),
+`fn_005DAEE0` (`0x005DB120`), `fn_00640054` (`0x00640124`), `fn_0086DAC0`
+(`0x0086DDBF`, `0x0086E053`), a sprite at `0x0072DFC5` and the menus. The trace names
+the callers that a session has.
+
+**The sorted list.** `LH3DRender::FinishFrame` draws the sorted list of the engine
+(`LH3DZSorter`, up to 2048 items, `fn_0082F280`) after the scene walk. It holds the
+draws that the game must make from far to near:
+
+- the clouds and the ground mist, and each other object that the game puts into the
+  list (`LH3DObject::AddForDrawing`): the callback `0x007FA980` calls the virtual
+  function `+0x108` of the object,
+- the beams of light: the callback `0x004246E0` (`GLightSheet`) is put into the list by
+  `GLightSheet::Draw` (`0x00424650`), by `SpellIcon::TChargingData::Draw`
+  (`0x007267A0`, the charge of a miracle icon) and by
+  `WorshipTotem::TChargingData::Draw` (`0x00780ECB`, the totem),
+- the billboards (`LH3DSprite::AddDrawing` `0x00840C70`, the callback `0x00840530`),
+- the effects of the particle systems.
+
+The land, the houses and the trees are drawn in the scene walk, before the list, so
+the restore does not reach them. The miracle icon of a Worship Site is a mesh
+(`SpellIcon::Draw` `0x00519650`, through `Game3DObject::AddForDrawing`) with the
+graphic of its seed (`SpellSeedGraphic::DrawSpellGraphic` `0x00519AD0`). An item of
+the list that comes after the restore is drawn from the wrong camera. The order is by
+a distance (for a beam, the distance from the stored camera), so the same cloud, beam
+or icon can come before the restore at one time and after it at another.
+
+**What the mod does.** `eye_after_camera` (default 1) puts the eye camera back with
+`StereoReapplyEye` at two places (`eye_stale.cpp`, `camera_stale_math.h`):
+
+1. After a call that gives a camera back. A call in the scene walk of an eye pass
+   gives a camera back when its camera is the stored camera from before an open
+   call. The engine stores the camera of the effect too, so a stack of the stored
+   cameras before the calls finds the restore (`camera_stale_math::CameraStack`). The
+   call of the room of the Temple is not in the stack, because `head_camera.cpp` puts
+   the eye camera back after it.
+2. Before each item of the sorted list, and after the last one, when the camera
+   matrix is not the matrix that the eye loop wrote. This covers an effect that
+   gives the engine a camera and does not give it back. The hook on `fn_0082F280`
+   walks the list as the game does, item for item (the node has the object at `+4`,
+   the function at `+8`, a number at `+0xC` that goes to `0x00EE9D30`, and the next
+   node at `+0x14`).
+
+`eye_after_camera=0` keeps the camera that the game leaves, and the walk of the list
+is then the walk of the game. The sun glare (`sun_glare`) puts the eye camera back
+too, so its mode 0 is the same as before. `eye_stale.cpp` compares the scaled camera
+matrix (`0x00EA9E40`) with the matrix that the last eye move wrote
+(`EyeCameraStale`, `eye_camera.cpp`). The check is one compare of 48 bytes for each
+item of the list.
+
+**Keys.** With `test_keys=1`, Ctrl, Shift and R change `eye_after_camera` between 1
+and 0, with a long pulse for 1 and a short pulse for 0. The debug page "Picture", item
+"Eye camera", does the same in the headset. The test key `roll_test_frame=N` changes
+the key at frame N of the scripted controller.
+
+**The trace.** `roll_trace=1` adds lines to each report window. The key is for the
+desktop and for a session on the Frame, and the launcher removes it on each save.
+
+- `eye restore`: the camera calls in the walk, the calls that gave a camera back, and
+  how many times the eye camera went back after a call, before an item and after the
+  last item.
+- `roll trace`: the camera calls by the address that called, and for each number the
+  calls that gave a camera back.
+- `roll trace`: the items of the sorted list, the items that saw a camera that is not
+  the camera of the eye (the first frame, the number of frames, and the reason: inside
+  a camera of its own, after the stored camera came back, or a change with no camera
+  call), and the same by draw function, with the name where it is known. The items
+  are counted at their start, after the fix of the call. With `eye_after_camera=1` a
+  call that gave a camera back leaves no stale item.
+- `roll trace`: the clouds and the sprites at their draw, wherever the game draws
+  them, in the same form.
+- `sprite trace`: the billboards that are drawn while the head looks within about 10
+  degrees of straight up or down. There the turn of a sprite to world up fades to 0
+  (`kFadeShare`), so a sprite rolls with the head a little. The clouds have no such
+  zone, because they face the table camera.
+
+**Not a roll.** In the first frame after a load the mod has no table camera yet. A
+cloud then faces the stored camera, which has no head in it, so the line "N of M cloud
+and mist draws faced the table camera" can have N less than M by the draws of one
+frame.
 
 ### Models keep their detail further out
 
@@ -6907,6 +7003,7 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift F | `test_keys=1` | The tracked real fingers bend the fingers of the hands, or the trigger and the grip do. It needs `finger_tracking` 1 or 2 at the start. A long pulse and a short pulse (`hand-model.md`, "Finger tracking") | None |
 | Ctrl Shift Period | `test_keys=1` | On the hint card, the lines of the walk with the stick and of A show only while they can move the player, or the card has no line for the walk and the line of A shows in each case. A long pulse and a short pulse (`prompt_moves`, `controller-hints.md`, 9.4) | Interface, Prompt moves |
 | Ctrl Shift H | `test_keys=1` | In the God view the Creature turns to and looks at the head of the player, or at the game's own camera. A long pulse and a short pulse (`creature_player_head`, `creature.md`, 5.4). Shift H with Ctrl up is a key of the render | None |
+| Ctrl Shift R | `test_keys=1` | After a camera of its own in an eye pass, the draws of the pass use the camera of the eye, or the camera that the game leaves. A long pulse and a short pulse (`eye_after_camera`, "The eye camera after a camera of its own"). Shift R with Ctrl up is a key of the render | Picture, Eye camera |
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw | Render, Frame send |
 | Ctrl Shift 8 | `test_keys=1` | With `backend=vulkan`: a render state, a stage state or a texture with the value of the device of the mod does not go to the renderer and the stream, or each call goes, from the next call. A long pulse and a short pulse (`vk_state_skip`, "The way of a draw to the headset app"). The game has no key with 8, 9 or 0 | Render, State skip |
 | Ctrl Shift 9 | `test_keys=1` | A frame of the live stream goes into the ring on a thread of the stream, or on the frame thread, from the next frame of the stream. A long pulse and a short pulse (`vk_stream_worker`, "The way of a draw to the headset app") | Render, Stream thread |
@@ -7030,6 +7127,8 @@ keys that the launcher sets.
 | `sky_test_frame`, `sky_test_trace`, `sky_test_hour` | 0, 0, -1 | Test keys of the desktop runs. See "The moon" |
 | `sprite_world_up` | 1 | 1: smoke, fire and the other sprites keep world up, so they do not roll with the head. 0: they roll with the head. See "Sprites with world up" |
 | `sprite_test_frame`, `sprite_test_trace` | 0, 0 | Test keys of the desktop runs. See "Sprites with world up" |
+| `eye_after_camera` | 1 | 1: after a camera of its own in an eye pass, the draws of the pass use the camera of the eye again, so the clouds, the beams of light and the sprites roll with the world. 0: they use the camera that the game leaves, which has no roll and no eye offset. See "The eye camera after a camera of its own" |
+| `roll_test_frame`, `roll_trace` | 0, 0 | Test keys of the desktop runs and of a session with a log. See the same section |
 | `freeze_time` | 1 | See "Time, bars and the second eye pass" |
 | `frame_time_real` | 1 | 1: after the two eye passes the game has the real time of the frame as its frame time. 0: it has the number from before the passes. See "The delta time after the passes" |
 | `frame_time_test_frame`, `frame_time_test_readers`, `frame_time_test_readers_frames` | 0, 0, 600 | Test keys of the desktop runs. See "The delta time after the passes" |

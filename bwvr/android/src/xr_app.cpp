@@ -2725,6 +2725,8 @@ void XrApp::NewPlay(uint32_t width, uint32_t height) {
       snprintf(name, sizeof(name), broken ? "the slot %d after a fault" : "the slot %d", i);
       note(name, d.set.layer[0].width, d.set.layer[0].height);
       DropSet(&d.set);
+      d.acquired[0] = d.acquired[1] = false;
+      d.waited[0] = d.waited[1] = false;
       d.stereo = false;
     }
     if (resize_free_) {
@@ -2844,6 +2846,8 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
       LockQueue();
       vkDeviceWaitIdle(gpu_.device);
       DropSet(&d.set);
+      d.acquired[0] = d.acquired[1] = false;
+      d.waited[0] = d.waited[1] = false;
       UnlockQueue();
       d.stereo = false;
       ++d.replaced;
@@ -2887,6 +2891,12 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
   if (age_log_) AgeWrite(slot);
   for (int eye = 0; eye < 2; ++eye) {
     Layer& l = d.set.layer[eye];
+    // A picture that no frame took did not go back to the runtime
+    // (xr_release_take=1), so the new picture goes into its image.
+    if (d.acquired[eye] && d.waited[eye] && d.index[eye] < l.images.size()) {
+      targets[eye] = l.images[d.index[eye]].image;
+      continue;
+    }
     uint32_t index = 0;
     XrSwapchainImageAcquireInfo acquire = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
     LockQueue();
@@ -2899,6 +2909,7 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
       return false;
     }
     d.acquired[eye] = true;
+    d.index[eye] = index;
     // The play thread may wait: the runtime gives the image when the
     // compositor read it for the last time.
     XrSwapchainImageWaitInfo wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
@@ -2947,6 +2958,8 @@ bool XrApp::DensityBegin(int slot, uint32_t width, uint32_t height, VkImage* tar
     LockQueue();
     vkDeviceWaitIdle(gpu_.device);
     DropSet(&d.set);
+    d.acquired[0] = d.acquired[1] = false;
+    d.waited[0] = d.waited[1] = false;
     UnlockQueue();
     d.stereo = false;
     ++d.replaced;
@@ -3741,6 +3754,25 @@ void XrApp::ReadProfiles() {
     AppLog("xr           : the %s hand has the profile \"%s\"",
            h == 0 ? "left" : "right", profile_[h].c_str());
   }
+}
+
+bool XrApp::LocateHead(int64_t display_time, float head[3]) {
+  if (display_time == 0) return false;
+  XrViewLocateInfo locate = {XR_TYPE_VIEW_LOCATE_INFO};
+  locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+  locate.displayTime = display_time;
+  locate.space = local_;
+  XrViewState state = {XR_TYPE_VIEW_STATE};
+  XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+  uint32_t found = 0;
+  if (XR_FAILED(xrLocateViews(session_, &locate, &state, 2, &found, views)) || found != 2 ||
+      (state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0) {
+    return false;
+  }
+  head[0] = (views[0].pose.position.x + views[1].pose.position.x) * 0.5f;
+  head[1] = (views[0].pose.position.y + views[1].pose.position.y) * 0.5f;
+  head[2] = (views[0].pose.position.z + views[1].pose.position.z) * 0.5f;
+  return true;
 }
 
 void XrApp::InputSlot(input_channel::SlotData* out) {

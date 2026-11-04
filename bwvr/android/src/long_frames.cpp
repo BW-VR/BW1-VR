@@ -363,7 +363,7 @@ void TakePhase::Poll() {
   const double now = ClockMs();
   std::lock_guard<std::mutex> g(lock_);
   starts_.Put(w.frame, now);
-  const double write = writes_.Get(w.input_frame);
+  const double write = writes_.Get(w.frame_slot);
   if (write <= 0.0 || now < write) {
     ++start_no_write_;
     return;

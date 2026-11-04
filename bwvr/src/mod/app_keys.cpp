@@ -18,10 +18,11 @@ using namespace app_keys;
 // vk_scene.cpp and in the app).
 const char* const kName[kKeys] = {"vk_mres_draws",  "vk_mres_sort",      "vk_compose_light",
                                   "vk_pass_store",  "xr_compose_direct", "xr_panel_rect",
-                                  "ring_slot_order"};
-const int kDefault[kKeys] = {1, 0, 1, 1, 0, 0, 1};
+                                  "ring_slot_order", "late_camera",  "xr_release_take",
+                                  "late_take"};
+const int kDefault[kKeys] = {1, 0, 1, 1, 0, 0, 1, 1, 1, 0};
 
-int g_value[kKeys] = {1, 0, 1, 1, 0, 0, 1};
+int g_value[kKeys] = {1, 0, 1, 1, 0, 0, 1, 1, 1, 0};
 bool g_read = false;
 
 void Read() {

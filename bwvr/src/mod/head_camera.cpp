@@ -70,6 +70,8 @@
 #include "trace_rec.h"
 
 extern void ModLog(const char* format, ...);
+uint32_t XrInputSlotFrame();
+bool StereoDisplayTime(int64_t* time, int64_t* period);
 // stereo.cpp: an eye pass runs, and which eye. The camera of the eye pass
 // again, after the game built a camera of a room of the Temple in it.
 bool StereoInPass();
@@ -228,6 +230,8 @@ int g_logged = 0;
 // The serial is the second half of the rule. Without it, a frame with no sub
 // cameras at all would let a second outside call overwrite the first.
 bool g_in_scene = false;
+uint32_t g_map_slot = 0;
+int64_t g_map_display = 0;
 uint64_t g_frame = 0;
 uint64_t g_recorded_frame = 0xFFFFFFFFFFFFFFFFull;
 
@@ -613,6 +617,12 @@ void PlaceCamera(const float* position, const float* focus, bool intro,
     // with the origin of the lean of this call.
     memcpy(g_map_camera, position, sizeof(g_map_camera));
     g_map_units = lean_gain * HeadPoseScale();
+    // The slot of the input that this camera call has: the walk of this call
+    // ends at its display time, and the head of this call comes from it. The
+    // frame takes its own slot after this call (XrInputLatch of the frame).
+    g_map_slot = XrInputSlotFrame();
+    int64_t map_period = 0;
+    if (!StereoDisplayTime(&g_map_display, &map_period)) g_map_display = 0;
     g_map_frame = HeadPoseOrigin(g_map_origin, g_map_rotation)
                       ? g_frame
                       : 0xFFFFFFFFFFFFFFFFull;
@@ -863,6 +873,13 @@ bool HeadCameraFrameRecorded() { return g_recorded_frame == g_frame; }
 // The camera of the main call is camera + basis * lean * gain. False before
 // the main call of this frame, in a flat frame of the cut scene window, and
 // when the head had no recenter pose at the main call.
+// The slot of the input and its display time at the main camera call of this
+// frame, for the place of the player of the frame.
+void HeadCameraMapSlot(uint32_t* slot, int64_t* display_time) {
+  *slot = g_map_slot;
+  *display_time = g_map_display;
+}
+
 bool HeadCameraWorldMap(float camera[3], float basis[9], float* units, float origin[3],
                         float rotation[4]) {
   if (g_map_frame != g_frame || CutsceneWindowFlat()) return false;

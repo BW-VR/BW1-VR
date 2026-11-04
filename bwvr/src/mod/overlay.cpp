@@ -1329,7 +1329,15 @@ bool OverlayFingerJoints(int hand, int finger, float curl, float spread,
 // sky_detail.cpp, after the sun glare and before the glow, once in each
 // FinishFrame. Draws only inside an eye pass, and at most once in each eye
 // pass of a frame.
+void VkSceneRoomDraws(bool on);  // vk_scene.h
+
 void OverlayDraw() {
+  // THE LATE CAMERA: the hands go with the player, and not with the walk in the
+  // world (vk_scene.h).
+  struct RoomScope {
+    RoomScope() { VkSceneRoomDraws(true); }
+    ~RoomScope() { VkSceneRoomDraws(false); }
+  } room_scope;
   if (g_count == 0 && !g_mesh_hands) return;
   const int eye = g_eye;
   if (eye < 0 || eye > 1 || g_asked_frame[eye] == g_frame) return;

@@ -537,6 +537,19 @@ bool PictureRing::WaitGpu(int depth, uint64_t timeout_ns, bool* waited) {
   return frame_loop::MayPlay(depth, busy(fences));
 }
 
+late_camera_math::TickPicture PictureRing::PictureOfTick(uint64_t serial) {
+  using late_camera_math::TickPicture;
+  std::lock_guard<std::mutex> g(lock_);
+  TickPicture out = TickPicture::kNone;
+  // The play thread resets a fence only for a slot in writing, which is not ready.
+  for (int i = 0; i < frame_loop::kSlots; ++i) {
+    if (ring_.State(i) != frame_loop::Slot::kReady || slots_[i].picture.late_tick < serial) continue;
+    if (vkGetFenceStatus(device_, slots_[i].fence) == VK_SUCCESS) return TickPicture::kDone;
+    out = TickPicture::kOnGpu;
+  }
+  return out;
+}
+
 void PictureRing::SetQueue(bool on) {
   std::lock_guard<std::mutex> g(lock_);
   ring_.SetQueue(on);

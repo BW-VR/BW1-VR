@@ -25,6 +25,7 @@
 #include "../../src/common/input_channel.h"
 #include "../../src/mod/eye_copy_math.h"
 #include "../../src/mod/fovea_res_math.h"
+#include "../../src/mod/late_camera_math.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/screen_quad_math.h"
@@ -87,6 +88,10 @@ struct Picture {
   double arrival_ms = 0.0;     // and at the arrival of the newest frame of the batch
   double ready_ms = 0.0;       // and at the submit of its copies into a slot of the ring
   double gap_ms = 0.0;         // the newest frame of the batch: its time from the frame before (slow_frame_ms)
+  // THE LATE CAMERA: a picture of the list again, and the move of its world (pose_log).
+  bool late_again = false;
+  float late_move[3] = {0.0f, 0.0f, 0.0f};
+  uint64_t late_tick = 0;  // the tick of the session that this picture is for, 0 with none
 };
 
 // THE PART OF THE PANEL IMAGE THAT A COPY TAKES (xr_panel_rect): with `on`, the
@@ -210,6 +215,9 @@ class PictureRing {
   // `depth` unfinished slots or more (it waited). The play thread alone
   // calls it.
   bool WaitGpu(int depth, uint64_t timeout_ns, bool* waited);
+  // THE LATE TAKE (late_take_ms): what the ready slots have for the tick `serial`
+  // of the late camera. The thread of the session asks, with no wait.
+  late_camera_math::TickPicture PictureOfTick(uint64_t serial);
 
   // THE QUEUE OF THE PICTURES (frame_queue, frame_loop.h): at each Play,
   // before the start of the play thread. The ring then uses 4 slots (on) or

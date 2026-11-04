@@ -3889,6 +3889,154 @@ the GPU is busy, and the latency that the player feels.
   queue. A new start of the app with `frame_loop=0` gives the old loop on
   one queue.
 
+## The late camera
+
+The game makes the draws of a frame on its own thread, and a frame takes 11 to
+14 ms on the Steam Frame, with some frames of 20 to 120 ms. A picture of a frame
+of the game shows the world at the place of the player for the display time of
+the input of that frame, and the frame then waits 0 to 7 display periods for its
+place in the headset. So at a fast walk or flight the world goes too far in one
+refresh, and stays for the next. The eye of the player follows the land at an
+even speed, so it sees the land go forward and back.
+
+With `late_camera=1` (the default, `src/mod/late_camera_math.h`, `PlayThread`
+of `main.cpp`, `VkSceneLateFinish` and `VkSceneLateReplay` of `vk_scene.cpp`)
+each frame of the session makes a new picture from the newest list of draws of
+the game, from the place of the head and of the player at the next display time.
+The game only gives new lists. A frame of the game that comes late stops the
+things that move in the world, and not the view.
+
+**The tick.** After the take of its picture, each frame of the session gives the
+play thread the head at its display time plus one period (`XrApp::LocateHead`),
+the newest slot, the newest place of the player of the mod and the sticks of the
+slots after it. The play thread then takes the frames of the game that came
+since the last tick. A walk of a new frame does not go to the GPU at its end
+(`VkSceneLateOpen`). It gets the move of its picture first
+(`VkSceneLateFinish`). With no new walk the list of the last walk draws again
+(`VkSceneLateReplay`) in the same slot of the renderer: the list of records, the
+vertices in the ring and the textures stay until the next walk. Only the indices
+of the joined draws go into the ring again. The compose goes into the swapchains
+of a slot of the ring as for each picture (`xr_compose_direct=1`), and the next
+frame of the session takes it.
+
+**The move.** The turn of the head stays with the runtime: the layer keeps the
+orientation of the picture, so the sky and each flat batch stay right. The move
+is the head of the new picture less the head of the picture of the frame, and the
+move of the head in the world (`motion_comp_math::Difference` of the map of the
+frame and the map now). The vertex shaders (`vk_scene.vert`, `vk_mesh.vert`) give
+each vertex its new place from its pixel and its rhw:
+
+```
+k      = separation * pixels_of_a_tangent / |per_rhw|
+d      = k / rhw                                 (meters in front of the eye)
+point  = (tangent_x * d, tangent_y * d, -d) + move
+```
+
+Then each pixel has the parallax that the new place gives, with no hole and no
+guess: it is a new draw of the geometry. A flat batch and a batch at infinity
+(`ops.w` bit 0) do not move. The hands (`OverlayDraw`, `VkSceneRoomDraws`,
+`ops.w` bit 1) are things of the room: they take only the move of the head, so a
+walk does not move them against the player. The last 32 bytes of the push
+constants have the two moves, one time for each command buffer, so the range is
+128 bytes, the least that Vulkan gives. A move of less than
+`late_camera_still_um` is no move: the picture then has the bits of the game. In
+a list again with no such change of the place, no new picture goes out.
+
+**The time of the place.** The main camera call of a frame comes before the frame
+takes its slot of the input. So its walk ends at the display time of the slot of
+the frame before, and the map of the frame has that slot
+(`input_channel::World::input_frame`, `HeadCameraMapSlot`). The slot that the frame
+then takes is `World::frame_slot`. A picture has the player at the display time of
+the slot before the newest slot (`late_camera_math::AheadSeconds`), also when the
+newest frame of the game is older or younger than that. So each picture moves by
+one slot of the stick, whichever frame of the game came. The walk goes on past
+the newest map of the mod at the speed of its frame times the push of each slot
+over the push of its frame, at most `late_camera_predict_ms`. A stick that comes
+back stops it in the slot before, so the view does not go back at a stop.
+
+**The release of an image** (`xr_release_take`, 1 by default, the row "Release" of
+the debug page). The play thread writes a picture ahead of the frame that shows
+it, into the swapchains of its slot. With 1 the images stay acquired after the
+submit, and the session releases them at the take of the picture, just before
+`xrEndFrame`. So the newest released image of a swapchain is always the picture of
+the frame that names it, as in a session with one swapchain. A picture that no
+frame took keeps its images, and the next picture of the slot goes into them.
+With 0 the images go back after the submit, and a runtime that reads the newest
+image of a swapchain late can show a newer picture with the pose of an older one.
+Only a headset shows if the Steam Frame does this.
+
+**The late take** (`late_take`, 0 by default, the row "Late take" of the debug page,
+and `late_take_ms`, 4 by default). A picture is for the frame after its tick. A
+picture that is not finished at the take of that frame would show one frame later,
+and in a flight the land then stands for one frame and makes two steps after it: a
+double picture, one display period apart. `xrEndFrame` can come some ms after the
+take, so the take waits up to `late_take_ms` for the picture of the tick before. The
+tick of the frame goes out before that wait, so the next picture does not start
+later. With `late_take=0` the take does not wait, and the tick goes out after the
+take. Known limit: after a picture over the limit the take can stay at the limit
+for up to 2 s, and each picture is then one frame older. The cause is open, so the
+default is 0.
+
+**A known fault of `xr_eye_direct=1` on the Steam Frame.** The picture shows short
+flickering double pictures at a fixed time distance, in a flight with a still head
+and at a turn of the head with no flight. With `xr_eye_direct=0` the fault does not
+show. The cause is open. That key changes more than the number of swapchains: it
+also turns off the late compose and the late camera, and each picture then takes
+two copies, so the GPU needs 8 to 9 ms for a picture in place of about 4 ms. Only a
+headset shows this fault.
+
+**A cut.** A difference of the maps over the limits is a cut (a teleport, a snap
+turn, a zoom step): the world stays as the game drew it until the frame of the
+game with the new place comes.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `late_camera` | 1 | 0: a new picture only for a new frame of the game. The debug page has the row "Late camera" for a live A/B. It needs `xr_compose_direct=1` and `xr_density_pass=0`. With 1 each take shows the newest picture (`frame_queue` has no effect), and `motion_comp` is 0 |
+| `late_camera_predict_ms` | 250 | The longest walk past the newest map of the mod |
+| `late_camera_most_cm` | 200 | The limit of the step at the head of a difference of the maps |
+| `late_camera_most_deg` | 2 | The limit of the turn of a difference of the maps |
+| `late_camera_still_um` | 100 | A smaller move is no move |
+| `late_take` | 0 | 1: the take of a frame of the session waits up to `late_take_ms` for its picture. The debug page has the row "Late take" for a live A/B |
+| `late_take_ms` | 4 | The longest wait of the take, 0 to 8 |
+| `pose_log` | 0 | A test aid: 1 writes one record for each frame of the session into `bwvr-pose.bin` of the folder of the app, and `tools/android/pose_report.py` names the frames that do not fit the frames around them |
+
+The keys are in `bwvr.ini` of the game folder, read at each Play.
+
+**The log.** At Play: "game : late_camera=1. ...". Each 10 s: "late camera : ..."
+with the pictures from a new frame of the game, the pictures of the list again,
+the ticks with no change of the place, the cuts, the size of the move, and the
+steps of a walk from a tick to the next: their count, the count of those more
+than a third from the speed of the walk, and the longest in slots of the stick.
+"late take : ..." each 10 s has the frames that waited for their picture, the time
+of the waits, and the frames that came to the limit.
+The log of the mod has "pose check : ..." each 900 frames: the angle between the
+view of the layer and the camera matrix of the engine for that frame. The
+line "time" of the frames of the session counts the pictures: "made N pictures a
+second" goes to the display rate.
+
+**The tests.** `.\dev.ps1 build`: the checks of `late_camera_checks.h`: the move
+for a step of the head, a turned eye, the clip position of a moved vertex with a
+move in depth and with no move, a point behind the eye, the walk in the map, a
+snap turn as a cut, and an even walk with a mod 0 to 5 slots late.
+
+**Not shown yet:** a headset. Only a headset shows the GPU time of a picture at
+the display rate, the look of a flight and of a walk, and the frames in which the
+GPU is too late for its take.
+
+**Known limits:**
+
+- A thing in the Hand and the ring of the leash are in the list of draws as things
+  of the world, so they move with the world by the walk since their frame. In a
+  flight they go back by the speed of the flight times the age of their frame, and
+  the next frame of the game puts them right. A head that moves does not do this.
+- The things that move in the world keep the rate of the game.
+- The rect of the centre image follows the gaze of the frame of the game.
+- A draw of the game that has a vertex past the edge of the view keeps its clamp
+  of the screen. Only the edge of the view can show that.
+- A turn and a change of the scale in a difference of the maps (the turn with two
+  hands, a smooth zoom) go only with the frames of the game. The head keeps its
+  place in them.
+
 ## The copies of the eye pictures
 
 **What a copy costs.** Each copy of a picture in the app is a
@@ -4044,7 +4192,7 @@ swapchains reads and writes it again. With the key the two steps are one.
   `xr_compose_direct`, `xr_panel_rect` and `ring_slot_order`, and for the four keys
   of the renderer (`vk_mres_draws`, `vk_mres_sort`, `vk_compose_light`,
   `vk_pass_store`). The mod
-  keeps their values (from `bwvr.ini`, then from the rows) and puts seven bits into
+  keeps their values (from `bwvr.ini`, then from the rows) and puts ten bits into
   the record of every frame of the stream (`FrameBody::app_keys`,
   `src/mod/app_keys.h`). The player gives the bits to the renderer and to the app
   (`SetAppKeysHook`) before the walks of the frame, so a row acts from the next

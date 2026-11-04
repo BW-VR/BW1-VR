@@ -181,6 +181,23 @@ bool VkSceneLastPicture(uint64_t* image, uint32_t* layer, uint32_t* width,
 // VkSceneEyes gives has no pixels until the app calls VkSceneComposeRecord for
 // it. A walk of another kind composes itself.
 void VkSceneComposeLate(bool on);
+// THE LATE CAMERA (late_camera_math.h, docs/android.md, "The late camera"). The
+// headset app only. With VkSceneLateDefer(true) a walk that the app composes keeps
+// its command buffer open at its end. VkSceneLateFinish gives that walk the move
+// of its picture (late_camera_math::Push, the two arrays), then its passes go to
+// the GPU. VkSceneLateReplay draws the list of the last such walk again with a
+// new move, and VkSceneEyes then gives the picture. All on the thread of the walks.
+void VkSceneLateDefer(bool on);
+// The draws after VkSceneRoomDraws(true) are things of the room, as the hands: they
+// take the move of the head and not the walk of the player in the world.
+void VkSceneRoomDraws(bool on);
+bool VkSceneRoomDrawsNow();
+bool VkSceneLateOpen();
+bool VkSceneLateFinish(const float move[4], const float room[4]);
+bool VkSceneLateCanReplay();
+bool VkSceneLateReplay(const float move[4], const float room[4]);
+// The panel image of the last walk that drew into it, for a picture of the list again.
+bool VkScenePanelAgain(uint32_t width, uint32_t height, uint64_t* image);
 // True when the eye image (the image that VkSceneEyes or
 // VkSceneLastPicture gave) is a picture that nobody composed.
 bool VkSceneComposePending(uint64_t eye_image);

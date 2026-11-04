@@ -16,9 +16,7 @@
 // (ops.w bit 0). A batch of the interface for one eye only goes to the
 // other eye outside the clip space (ops.w bits 8 and 9: the eyes).
 //
-// Compile with:
-//   glslang -V --target-env vulkan1.3 --vn kVkSceneVert -o vk_scene_vert.h
-//       vk_scene.vert
+// bwvr/tools/mesh_shaders.ps1 makes vk_scene_vert.h from this file.
 
 layout(location = 0) in vec4 position;  // x, y, z, rhw
 layout(location = 1) in vec4 diffuse;   // B8G8R8A8: the format gives RGBA
@@ -36,6 +34,12 @@ layout(push_constant) uniform Draw {
   vec4 alpha;     // the reference of the alpha test, the fog color
   vec4 fog_color;
   uvec4 ops1;     // stage 1, see vk_scene.frag
+  // THE LATE CAMERA (late_camera_math.h): the move of a point of the world in
+  // the space of the eye in meters, and in w the separation of the eyes times
+  // late_room.w (0: no late camera). The move of a thing of the room (ops.w bit 1),
+  // and in w the pixels of a tangent.
+  vec4 late_move;
+  vec4 late_room;
 } draw;
 
 layout(location = 0) out vec4 out_diffuse;
@@ -62,6 +66,23 @@ void main() {
   const float y = (position.y + 0.5 - draw.viewport.y) * draw.viewport.w - 1.0;
   const float z = (position.z - draw.depth.x) * draw.depth.y;
   gl_Position = vec4(x * w, y * w, z * w, w);
+  // A flat batch and a batch at infinity do not move with the place of the eye.
+  if (draw.late_move.w > 0.0 && (draw.ops.w & 1u) == 0u && draw.depth.z != 0.0 &&
+      position.w > 0.0) {
+    const float a = draw.late_room.w;
+    const float k = draw.late_move.w / abs(draw.depth.z);
+    const float d = k / position.w;
+    const float tan_x = -1.0 / (draw.viewport.z * a);
+    const float tan_y = 1.0 / (draw.viewport.w * a);
+    const vec3 move = (draw.ops.w & 2u) != 0u ? draw.late_room.xyz : draw.late_move.xyz;
+    const vec3 p = vec3(((sx + 0.5) / a + tan_x) * d, (tan_y - (position.y + 0.5) / a) * d, -d) +
+                   move;
+    const float dn = -p.z;
+    const float wn = dn / k;
+    gl_Position = vec4(((p.x - tan_x * dn) * a / k - draw.viewport.x * wn) * draw.viewport.z - wn,
+                       ((tan_y * dn - p.y) * a / k - draw.viewport.y * wn) * draw.viewport.w - wn,
+                       ((position.z + position.w - draw.depth.x) * wn - 1.0) * draw.depth.y, wn);
+  }
   out_diffuse = diffuse;
   out_specular = specular;
   out_uv = uv;

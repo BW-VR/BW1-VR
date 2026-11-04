@@ -51,6 +51,8 @@ class InputLive {
   // with their display times and the sticks that the mod got, at most max
   // (the prediction of motion_comp=2, motion_comp_math::AheadSeconds).
   int SlotsAfter(uint32_t frame, motion_comp_math::SlotPush* out, int max) const;
+  // The frame of the newest slot (SlotData::frame), 0 with none.
+  uint32_t NewestSlot() const { return slots_; }
 
  private:
   uint32_t slot_frame_[kSlotTimes] = {};

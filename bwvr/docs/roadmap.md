@@ -748,6 +748,30 @@ that moves while the Hand takes it.
 
 ### Built, and not proven or not finished
 
+- **N0. The late camera of the headset app: check it on the Steam Frame.** Each
+  frame of the session draws the newest list of draws of the game again from the
+  place of the head and of the player at the next display time (`late_camera=1`,
+  `android.md`, "The late camera"). The math checks have the place of a vertex.
+  It runs on the Steam Frame and gives 90 pictures a second, but it needs
+  `xr_eye_direct=1`, and with that key the picture has flickering double pictures
+  (`android.md`, "A known fault of `xr_eye_direct=1`"). `xr_eye_direct=0` has no
+  flicker, no late camera and twice the GPU time of a picture. Next: one pair of
+  swapchains, with the compose at the take of the picture. Check on the Steam
+  Frame, with the row "Late camera" of the debug page for a comparison:
+  - a flight to the side and a flight over the middle of Land 2, right after the
+    start of a game: no double picture and no jump of the land,
+  - the Hand in a flight (a thing in the Hand goes back by the speed times the age
+    of its frame),
+  - the GPU time of a picture at 90 Hz and at the highest rate of the headset:
+    144 Hz needs a picture in 6.9 ms. The runtime of the Steam Frame takes the rate of the app from
+    `preferredRefreshRate` of `steam.app.2729671027` in
+    `~/.config/openvr/config/steamvr.vrsettings`, not from the quick menu,
+  - the snow on the roofs and each other layer with a depth test EQUAL in a move.
+
+  Next: a list that the play thread does not sort again for each picture, and then
+  the time of the frame thread in
+  the first 30 s of a game (the turns of the game are 40 to 108 ms there with no
+  read of a file: the first run of the code under FEX).
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:

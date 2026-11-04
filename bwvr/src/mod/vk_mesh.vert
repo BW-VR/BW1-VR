@@ -50,6 +50,8 @@ layout(push_constant) uniform Draw {
   vec4 alpha;
   vec4 fog_color;
   uvec4 ops1;
+  vec4 late_move;  // the late camera, see vk_scene.vert
+  vec4 late_room;
 } draw;
 
 #ifndef LEGACY
@@ -178,6 +180,27 @@ void main() {
                                 : draw.depth.y * (w * (1.0 - draw.depth.x) - 1.0);
 #endif
   gl_Position = vec4(xc, yc, zc, w);
+  // THE LATE CAMERA (late_camera_math.h): the same place as vk_scene.vert gives a
+  // vertex with these pixels, linear in the camera point, so a vertex behind the
+  // near plane still clips right.
+  if (draw.late_move.w > 0.0 && (draw.ops.w & 1u) == 0u && draw.depth.z != 0.0) {
+    const float a = draw.late_room.w;
+    const float k = draw.late_move.w / abs(draw.depth.z);
+    const float per = k / near_plane;
+    const float d = cz * per;
+    const float tan_x = -1.0 / (draw.viewport.z * a);
+    const float tan_y = 1.0 / (draw.viewport.w * a);
+    float px = cx * per * scene.y / a + ((scene.y + 0.5) / a + tan_x) * d;
+    if (gl_ViewIndex == 1) px += draw.depth.z * k / a;
+    const float py = cy * per * scene.z / a + (tan_y - (scene.z + 0.5) / a) * d;
+    const vec3 move = (draw.ops.w & 2u) != 0u ? draw.late_room.xyz : draw.late_move.xyz;
+    const vec3 p2 = vec3(px, py, -d) + move;
+    const float dn = -p2.z;
+    const float wn = dn / k;
+    gl_Position = vec4(((p2.x - tan_x * dn) * a / k - draw.viewport.x * wn) * draw.viewport.z - wn,
+                       ((tan_y * dn - p2.y) * a / k - draw.viewport.y * wn) * draw.viewport.w - wn,
+                       ((1.0 - draw.depth.x) * wn - 1.0) * draw.depth.y, wn);
+  }
 
   uint color = colors.x;
   // Flag 128: the color of each vertex is in the first word of the normal

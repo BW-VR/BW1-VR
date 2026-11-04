@@ -172,9 +172,10 @@ constexpr uint32_t kWorldWalk = 1u << 1;   // the walk with the stick moved the 
 // has the same values after its ViewBody (scene_stream.h).
 struct World {
   uint32_t flags;          // kWorldValid, kWorldWalk
-  uint32_t input_frame;    // SlotData::frame of the input of the frame
+  uint32_t input_frame;    // SlotData::frame of the slot of the camera of the frame: the map is
+                           // the place of the player at the display time of this slot
   uint64_t frame;          // the frame of the controllers
-  int64_t display_time;    // ns, the display time of the input of the frame
+  int64_t display_time;    // ns, the display time of that slot
   float linear[9];         // row major
   float offset[3];
   float walk_velocity[3];  // game units a second: the move of offset by the walk of the frame
@@ -182,7 +183,7 @@ struct World {
   float walk_share;        // the push of that stick in the frame, 0 to 1 (walk_math::Push)
   float walk_dead;         // the dead zone and the full push of that stick
   float walk_full;
-  uint32_t reserved;
+  uint32_t frame_slot;     // SlotData::frame of the slot that the frame took after its camera
 };
 static_assert(offsetof(World, frame) == 8 && offsetof(World, linear) == 24, "World");
 static_assert(offsetof(World, walk_hand) == 84 && sizeof(World) == 104, "World size");

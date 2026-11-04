@@ -2,7 +2,7 @@
 // docs/backend.md, "The compose of the eye picture"). The renderer runs in the
 // headset app, and the game runs in Wine, so a key of the renderer or of the
 // app cannot change in the game process. The mod keeps the value of each key
-// (from bwvr.ini at the first use, then from the debug page) and puts seven bits
+// (from bwvr.ini at the first use, then from the debug page) and puts ten bits
 // into the record of every frame of the stream (scene_stream.h,
 // FrameBody::app_keys). The app plays the bits before the walks of the frame,
 // so a change shows from the next picture.
@@ -21,10 +21,13 @@ constexpr uint32_t kPassStore = 1u << 3;
 constexpr uint32_t kComposeDirect = 1u << 4;
 constexpr uint32_t kPanelRect = 1u << 5;
 constexpr uint32_t kRingOrder = 1u << 6;
+constexpr uint32_t kLateCamera = 1u << 7;
+constexpr uint32_t kReleaseTake = 1u << 8;
+constexpr uint32_t kLateTake = 1u << 9;
 
 // The keys of the debug page, in the order of kName in app_keys.cpp.
 enum Key { kKeyMresDraws, kKeyMresSort, kKeyComposeLight, kKeyPassStore, kKeyComposeDirect,
-           kKeyPanelRect, kKeyRingOrder, kKeys };
+           kKeyPanelRect, kKeyRingOrder, kKeyLateCamera, kKeyReleaseTake, kKeyLateTake, kKeys };
 
 inline uint32_t BitOf(int key) { return 1u << key; }
 

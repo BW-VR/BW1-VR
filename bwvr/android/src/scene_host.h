@@ -19,6 +19,8 @@ struct SceneHostState {
   const void* panel_target = nullptr;
   // vk_equal_depth of the game (vk_scene.h).
   bool equal_depth = true;
+  // The draw is a thing of the room (VkSceneRoomDraws of the game).
+  bool room_draws = false;
   // The angles of the camera of the game (bw::tech::InfoTransform).
   float inv_half_tan_fov_x = 0.0f;
   int res_x = 0;

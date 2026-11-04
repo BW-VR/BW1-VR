@@ -3620,6 +3620,7 @@ void CreatureChecks() {
 #include "density_map_checks.h"
 #include "take_age_checks.h"
 #include "motion_comp_checks.h"
+#include "late_camera_checks.h"
 #include "gpu_parts_checks.h"
 #include "update_checks.h"
 #include "refresh_rate_checks.h"
@@ -4101,6 +4102,7 @@ int main() {
   bar_split_checks::BarSplitChecks();
   sse_parts_checks::SsePartsChecks();
   hand_fit_checks::HandFitChecks();
+  late_camera_checks::LateCameraChecks();
   // Last: it recenters the head of head_pose.cpp.
   motion_comp_checks::MotionCompChecks();
 

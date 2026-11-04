@@ -231,6 +231,10 @@ class XrApp {
   // smoothing and no prediction of the app.
   void SetInputLive(bool on) { input_live_ = on; }
   void InputSlot(input_channel::SlotData* out);
+  // THE LATE CAMERA (docs/android.md, "The late camera"): the middle of the eyes
+  // at a display time, in the LOCAL space. False when the runtime has no valid
+  // place for that time.
+  bool LocateHead(int64_t display_time, float head[3]);
 
   // THE GAZE OF AN EYE TRACKER (XR_EXT_eye_gaze_interaction, docs/android.md,
   // "The input channel"). Call SetEyeGaze(true) before Start: the instance
@@ -455,6 +459,8 @@ class XrApp {
   // key, blue first, another size, no swapchain): then it takes the old
   // way. DirectEnd: after the submit of the copies, the release of the
   // images, before the slot is ready.
+  // A slot with images that no frame took (xr_release_take=1) keeps them for the
+  // new picture, so DirectBegin acquires nothing then.
   bool DirectBegin(int slot, uint32_t width, uint32_t height,
                    const fovea_res_math::Atlas& atlas, VkImage targets[2]);
   void DirectEnd(int slot);
@@ -688,6 +694,7 @@ class XrApp {
     bool density_failed = false;
     bool acquired[2] = {false, false};
     bool waited[2] = {false, false};
+    uint32_t index[2] = {0, 0};  // the image of each eye while it is acquired
     uint32_t made_width = 0;
     uint32_t made_height = 0;
     int replaced = 0;

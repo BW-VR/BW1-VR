@@ -60,3 +60,12 @@ $sb = New-Object Text.StringBuilder
 [void]$sb.Append("const uint32_t kVkMeshVertLegacyGroups[] = $legacyGroups`n;`n")
 [IO.File]::WriteAllText($header, $sb.ToString().Replace("`n", "`r`n"), (New-Object Text.UTF8Encoding($false)))
 "vk_mesh_vert.h made from vk_mesh.vert (fnv64 $sha)"
+
+# vk_scene_vert.h from vk_scene.vert, one array.
+$sceneSource = Join-Path $mod 'vk_scene.vert'
+$sceneHeader = Join-Path $mod 'vk_scene_vert.h'
+$out = & $glslc -mfmt=c --target-env=vulkan1.3 -fshader-stage=vertex $sceneSource -o - 2>&1
+if ($LASTEXITCODE -ne 0) { throw "glslc failed: $out" }
+$scene = "// glslc (shaderc ndk-r27c): vk_scene.vert`n#pragma once`nconst uint32_t kVkSceneVert[] = $($out -join "`n")`n;`n"
+[IO.File]::WriteAllText($sceneHeader, $scene.Replace("`n", "`r`n"), (New-Object Text.UTF8Encoding($false)))
+"vk_scene_vert.h made from vk_scene.vert"

@@ -151,6 +151,7 @@
 #include "vk_mesh_vert.h"
 #include "gpu_mesh_math.h"
 #include "equal_depth_math.h"
+#include "late_camera_math.h"
 
 void ModLog(const char* format, ...);
 // controllers.cpp
@@ -165,6 +166,8 @@ int IntroPassEye();
 #ifndef _WIN32
 // scene_host.cpp: vk_equal_depth of the game, with the record of the draw.
 bool EqualDepthNow();
+// scene_host.cpp: VkSceneRoomDraws of the game, with the record of the draw.
+bool RoomDrawsHere();
 #endif
 
 namespace {
@@ -448,6 +451,9 @@ struct Slot {
   bool query_written;
   vk::Buffer ring;
   VkDeviceSize used;
+  // THE LATE CAMERA: the end of the data of the walk in the ring. A draw of the
+  // list again writes its joined indices from here.
+  VkDeviceSize used_walk;
   // The matrices and the lights of the meshes with groups (GroupsReady), the
   // storage buffer of set 2.
   vk::Buffer groups;
@@ -691,6 +697,14 @@ struct DrawPush {
   float fog_color[4];
   uint32_t ops1[4];  // stage 1, see vk_scene.frag
 };
+// THE LATE CAMERA (late_camera_math.h): the last bytes of the push constants,
+// one time for each command buffer.
+late_camera_math::Push g_late_push = {};
+float g_late_margin = 0.0f;  // the pixels that a draw can move in the picture
+bool g_late_defer = false;   // VkSceneLateDefer: a walk waits for its move
+bool g_late_open = false;    // a walk waits for its move, and its command buffer is open
+bool g_late_replay_ok = false;  // the list of draws of the last walk can draw again
+const uint32_t kPushBytes = sizeof(DrawPush) + sizeof(late_camera_math::Push);
 // A draw or a clear of the walk, in pixels of the game.
 struct MresRecord {
   int clear;  // -1 a draw, else the index of the clear
@@ -813,8 +827,10 @@ bool g_equal_depth = true;
 // The draws with ZFUNC EQUAL since the last report, with the bias and without.
 uint64_t g_equal_biased = 0;
 uint64_t g_equal_plain = 0;
+bool g_room_draws = false;  // VkSceneRoomDraws
 #ifdef _WIN32
 bool EqualDepthNow() { return g_equal_depth; }
+bool RoomDrawsHere() { return g_room_draws; }
 #endif
 // The ZFUNC of a record: D3DCMP_EQUAL becomes kZFuncEqualBias for a draw that the
 // bias is for, and the draw keeps the value through the sort and the merge.
@@ -1775,8 +1791,7 @@ bool Ready() {
     return Fail("the descriptor set layout");
   }
   VkPushConstantRange push = {
-      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-      sizeof(DrawPush)};
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, kPushBytes};
   // Set 0 has the texture of stage 0, and set 1 the texture of stage 1.
   const VkDescriptorSetLayout set_layouts[2] = {g_set_layout, g_set_layout};
   VkPipelineLayoutCreateInfo layout_info = {
@@ -2515,6 +2530,13 @@ void PushDraw(VkCommandBuffer cb, const DrawPush& push) {
   }
 }
 
+// THE LATE CAMERA: the move of this command buffer. PushDraw does not touch these
+// bytes, so one push holds for each draw of the buffer.
+void PushLate(VkCommandBuffer cb) {
+  f.vkCmdPushConstants(cb, g_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       sizeof(DrawPush), sizeof(g_late_push), &g_late_push);
+}
+
 void BindIndices(VkCommandBuffer cb, VkBuffer buffer, VkDeviceSize at,
                  VkIndexType type) {
   struct {
@@ -2951,10 +2973,10 @@ void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint
       ++out_of_view[pass];
       continue;
     }
-    if (pass == 1 && (r.bounds[2] < g_mres.inset_x0 - 1.0f ||
-                      r.bounds[0] > g_mres.inset_x0 + g_mres.inset_w + 1.0f ||
-                      r.bounds[3] < g_mres.inset_y0 - 1.0f ||
-                      r.bounds[1] > g_mres.inset_y0 + g_mres.inset_h + 1.0f)) {
+    if (pass == 1 && (r.bounds[2] < g_mres.inset_x0 - 1.0f - g_late_margin ||
+                      r.bounds[0] > g_mres.inset_x0 + g_mres.inset_w + 1.0f + g_late_margin ||
+                      r.bounds[3] < g_mres.inset_y0 - 1.0f - g_late_margin ||
+                      r.bounds[1] > g_mres.inset_y0 + g_mres.inset_h + 1.0f + g_late_margin)) {
       ++left_out[pass];
       continue;
     }
@@ -3122,6 +3144,7 @@ bool ComposeLate() {
 // the eye picture from the two.
 void PlayMres(Slot& s) {
   const VkCommandBuffer cb = s.cb;
+  PushLate(cb);
   // A TEST AID: what each pass did with the records (MresWalkLine).
   uint32_t drawn[2] = {0, 0}, out_of_view[2] = {0, 0}, left_out[2] = {0, 0};
   // vk_pass_store=1: a pass stores its depth only when a clear of the records
@@ -3192,10 +3215,10 @@ void PlayMres(Slot& s) {
         ++out_of_view[pass];
         continue;
       }
-      if (pass == 1 && (r.bounds[2] < g_mres.inset_x0 - 1.0f ||
-                        r.bounds[0] > g_mres.inset_x0 + g_mres.inset_w + 1.0f ||
-                        r.bounds[3] < g_mres.inset_y0 - 1.0f ||
-                        r.bounds[1] > g_mres.inset_y0 + g_mres.inset_h + 1.0f)) {
+      if (pass == 1 && (r.bounds[2] < g_mres.inset_x0 - 1.0f - g_late_margin ||
+                        r.bounds[0] > g_mres.inset_x0 + g_mres.inset_w + 1.0f + g_late_margin ||
+                        r.bounds[3] < g_mres.inset_y0 - 1.0f - g_late_margin ||
+                        r.bounds[1] > g_mres.inset_y0 + g_mres.inset_h + 1.0f + g_late_margin)) {
         ++left_out[pass];
         continue;
       }
@@ -3985,8 +4008,79 @@ void EndWithNoDevice() {
 }
 
 // THE WALK, on the D3D7 thread.
+void FinishWalk();
+
+// The times of the GPU of the walk before on this slot, after its fence.
+void ReadSlotTime(Slot& s) {
+  if (!s.query_written) return;
+  // Each query with its availability. A time over 100 ms is not a time
+  // of a walk, and the report counts it apart.
+  uint64_t stamps[4] = {0, 0, 0, 0};
+  if (f.vkGetQueryPoolResults(
+          vk::Get().device, s.query, 0, 2, sizeof(stamps), stamps,
+          2 * sizeof(uint64_t),
+          VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ==
+          VK_SUCCESS &&
+      stamps[1] != 0 && stamps[3] != 0) {
+    // The valid bits of the queue: a difference of two stamps in them.
+    const uint32_t bits = vk::Get().timestamp_bits;
+    const uint64_t mask = bits >= 64 || bits == 0 ? ~0ull : (1ull << bits) - 1;
+    const uint64_t ticks = (stamps[2] - stamps[0]) & mask;
+    if (static_cast<double>(ticks) * vk::Get().timestamp_ns < 1e8) {
+      g_gpu_ticks += ticks;
+      ++g_gpu_walks;
+      if (g_take_on) {
+        const double ms = static_cast<double>(ticks) * vk::Get().timestamp_ns * 1e-6;
+        ++g_take.walks;
+        g_take.ms += ms;
+        if (ms > g_take.most_ms) g_take.most_ms = ms;
+      }
+    } else {
+      if (g_gpu_odd_said < 4) {
+        ++g_gpu_odd_said;
+        ModLog("vk scene     : a time of the GPU that is not used: the "
+               "stamps 0x%llX and 0x%llX, %u valid bits, %.3f ns a tick",
+               stamps[0], stamps[2], bits, vk::Get().timestamp_ns);
+      }
+      ++g_gpu_odd;
+    }
+  }
+  s.query_written = false;
+}
+
+// The wait for the GPU before a new use of a slot.
+void WaitSlot(Slot& s) {
+  const VkDevice device = vk::Get().device;
+  if (f.vkGetFenceStatus(device, s.fence) == VK_SUCCESS) return;
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  f.vkWaitForFences(device, 1, &s.fence, VK_TRUE, UINT64_MAX);
+  QueryPerformanceCounter(&t1);
+  ++g_fence_waits;
+  g_fence_wait_ticks += static_cast<uint64_t>(t1.QuadPart - t0.QuadPart);
+  if (g_take_on) {
+    LARGE_INTEGER hz;
+    QueryPerformanceFrequency(&hz);
+    const double ms = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 /
+                      static_cast<double>(hz.QuadPart);
+    ++g_take.fence_waits;
+    g_take.fence_wait_ms += ms;
+    if (ms > g_take.fence_wait_most_ms) g_take.fence_wait_most_ms = ms;
+  }
+}
+
 void BeginOnWorker(const void* data) {
   const Seed* seed = static_cast<const Seed*>(data);
+  // A second walk in one batch: the walk before goes out as the game drew it.
+  if (g_late_open) {
+    g_late_open = false;
+    g_late_push = late_camera_math::NoPush();
+    g_late_margin = 0.0f;
+    FinishWalk();
+  }
+  g_late_replay_ok = false;
+  g_late_push = late_camera_math::NoPush();
+  g_late_margin = 0.0f;
   g_walk_only = false;
   g_walk_mres = false;
   g_walk_density = false;
@@ -4039,64 +4133,14 @@ void BeginOnWorker(const void* data) {
   }
   Slot& s = g_slots[g_slot];
   const VkDevice device = vk::Get().device;
-  if (f.vkGetFenceStatus(device, s.fence) != VK_SUCCESS) {
-    LARGE_INTEGER t0, t1;
-    QueryPerformanceCounter(&t0);
-    f.vkWaitForFences(device, 1, &s.fence, VK_TRUE, UINT64_MAX);
-    QueryPerformanceCounter(&t1);
-    ++g_fence_waits;
-    g_fence_wait_ticks += static_cast<uint64_t>(t1.QuadPart - t0.QuadPart);
-    if (g_take_on) {
-      LARGE_INTEGER hz;
-      QueryPerformanceFrequency(&hz);
-      const double ms = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 /
-                        static_cast<double>(hz.QuadPart);
-      ++g_take.fence_waits;
-      g_take.fence_wait_ms += ms;
-      if (ms > g_take.fence_wait_most_ms) g_take.fence_wait_most_ms = ms;
-    }
-  }
+  WaitSlot(s);
   BlackCheckRead(s);
   // The walk writes this target now: a compose that waited for its picture
   // has nothing to compose.
   vk_compose::Drop((uint64_t)Target().image);
   f.vkResetFences(device, 1, &s.fence);
   s.stage_used = 0;
-  if (s.query_written) {
-    // Each query with its availability. A time over 100 ms is not a time
-    // of a walk, and the report counts it apart.
-    uint64_t stamps[4] = {0, 0, 0, 0};
-    if (f.vkGetQueryPoolResults(
-            device, s.query, 0, 2, sizeof(stamps), stamps,
-            2 * sizeof(uint64_t),
-            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ==
-            VK_SUCCESS &&
-        stamps[1] != 0 && stamps[3] != 0) {
-      // The valid bits of the queue: a difference of two stamps in them.
-      const uint32_t bits = vk::Get().timestamp_bits;
-      const uint64_t mask = bits >= 64 || bits == 0 ? ~0ull : (1ull << bits) - 1;
-      const uint64_t ticks = (stamps[2] - stamps[0]) & mask;
-      if (static_cast<double>(ticks) * vk::Get().timestamp_ns < 1e8) {
-        g_gpu_ticks += ticks;
-        ++g_gpu_walks;
-        if (g_take_on) {
-          const double ms = static_cast<double>(ticks) * vk::Get().timestamp_ns * 1e-6;
-          ++g_take.walks;
-          g_take.ms += ms;
-          if (ms > g_take.most_ms) g_take.most_ms = ms;
-        }
-      } else {
-        if (g_gpu_odd_said < 4) {
-          ++g_gpu_odd_said;
-          ModLog("vk scene     : a time of the GPU that is not used: the "
-                 "stamps 0x%llX and 0x%llX, %u valid bits, %.3f ns a tick",
-                 stamps[0], stamps[2], bits, vk::Get().timestamp_ns);
-        }
-        ++g_gpu_odd;
-      }
-    }
-    s.query_written = false;
-  }
+  ReadSlotTime(s);
   for (int i = 0; i < s.garbage_count; ++i) vk::FreeImage(&s.garbage[i]);
   s.garbage_count = 0;
   for (int i = 0; i < s.staging_count; ++i) vk::FreeBuffer(&s.staging[i]);
@@ -4125,6 +4169,7 @@ void BeginOnWorker(const void* data) {
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   f.vkBeginCommandBuffer(s.cb, &begin);
+  PushLate(s.cb);
   // A new command buffer has no bound state, and no draw waits.
   ReadDrawKeys();
   ReadSharpKeys();
@@ -4383,7 +4428,20 @@ void EndOnWorker(const void*) {
     g_dc_shown.skipped = skipped;
     ReleaseSRWLockExclusive(&g_dc_lock);
   }
+  // THE LATE CAMERA: a walk that the app composes waits for the place of its
+  // picture (VkSceneLateFinish), with its command buffer open.
+  if (g_late_defer && g_walk_mres && g_walk_both && g_compose_late && !g_walk_atlas.on &&
+      !g_picture && !(g_mesh_compare && g_mesh_compare_request) && !g_walk_density) {
+    g_late_open = true;
+    return;
+  }
+  FinishWalk();
+}
+
+// The end of a walk: its passes, its submit and the values of its picture.
+void FinishWalk() {
   Slot& s = g_slots[g_slot];
+  s.used_walk = s.used;
   if (g_walk_mres) {
     if (g_rendering_panel) f.vkCmdEndRendering(s.cb);
     g_rendering_panel = false;
@@ -5029,7 +5087,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
     flags |= 0x200u;
   }
   push.ops[2] = flags;
-  push.ops[3] = still | eyes << 8;
+  push.ops[3] = still | (RoomDrawsHere() ? 2u : 0u) | eyes << 8;
   if (set1 != VK_NULL_HANDLE) {
     const uint32_t* ts1 = g_ts[1];
     push.ops1[0] = (ts1[D3DTSS_COLOROP] & 255) |
@@ -5186,7 +5244,7 @@ bool GroupsReady() {
     return fail("the set layout");
   }
   const VkPushConstantRange push = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                    sizeof(DrawPush)};
+                                    kPushBytes};
   const VkDescriptorSetLayout layouts[3] = {g_set_layout, g_set_layout, g_group_set_layout};
   VkPipelineLayoutCreateInfo layout_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
   layout_info.setLayoutCount = 3;
@@ -5743,7 +5801,7 @@ void DrawMeshImpl(uint64_t mesh, const gpu_mesh_math::Consts& consts_in, const f
     flags |= 0x200u;
   }
   push.ops[2] = flags;
-  push.ops[3] = still | eyes << 8;
+  push.ops[3] = still | (RoomDrawsHere() ? 2u : 0u) | eyes << 8;
   if (set1 != VK_NULL_HANDLE) {
     const uint32_t* ts1 = g_ts[1];
     push.ops1[0] = (ts1[D3DTSS_COLOROP] & 255) |
@@ -5923,6 +5981,19 @@ bool VkScenePanelFor(uint32_t width, uint32_t height, uint64_t* image) {
   g_panel_taken = walk;
   *image = (uint64_t)panel->image;  // a handle of 64 bits
   ++g_panel_layers;
+  return true;
+}
+
+// THE LATE CAMERA: a picture of the list again shows the panel of the last walk
+// that drew into it, in its own copy.
+bool VkScenePanelAgain(uint32_t width, uint32_t height, uint64_t* image) {
+  if (!SameDeviceAsSession() || !g_device || !VkScenePanelOn()) return false;
+  if (InterlockedCompareExchange(&g_panel_walk, 0, 0) == 0) return false;
+  const vk::Image& panel = g_panels[g_panel_index];
+  if (panel.image == VK_NULL_HANDLE || panel.width != width || panel.height != height) {
+    return false;
+  }
+  *image = (uint64_t)panel.image;  // a handle of 64 bits
   return true;
 }
 
@@ -6510,6 +6581,88 @@ void VkSceneComposeLate(bool on) {
          on ? "A walk with the outer image and the centre image leaves its eye picture to "
               "the app when the module of the compose works"
             : "Each walk makes its eye picture");
+}
+
+// THE LATE CAMERA (late_camera_math.h, docs/android.md, "The late camera").
+namespace {
+
+// A thing at this distance moves the most in the test of a draw against the rect
+// of the centre image: the near plane of the God view is about here.
+constexpr float kLateNearest = 0.15f;
+
+void SetLate(const float move[4], const float room[4]) {
+  memcpy(g_late_push.move, move, sizeof(g_late_push.move));
+  memcpy(g_late_push.room, room, sizeof(g_late_push.room));
+  const float limit = static_cast<float>(Target().width) * 0.25f;
+  const float margin = late_camera_math::MarginPixels(g_late_push, kLateNearest);
+  g_late_margin = margin < limit ? margin : limit;
+}
+
+}  // namespace
+
+void VkSceneRoomDraws(bool on) { g_room_draws = on; }
+bool VkSceneRoomDrawsNow() { return g_room_draws; }
+
+void VkSceneLateDefer(bool on) { g_late_defer = on; }
+
+bool VkSceneLateOpen() { return g_late_open; }
+
+bool VkSceneLateFinish(const float move[4], const float room[4]) {
+  if (!g_late_open) return false;
+  g_late_open = false;
+  SetLate(move, room);
+  FinishWalk();
+  g_late_replay_ok = g_walk_late && !g_failed;
+  return !g_failed;
+}
+
+bool VkSceneLateCanReplay() {
+  return g_late_replay_ok && !g_late_open && !g_recording && !g_failed && g_compose_late;
+}
+
+bool VkSceneLateReplay(const float move[4], const float room[4]) {
+  if (!VkSceneLateCanReplay()) return false;
+  Slot& s = g_slots[g_slot];
+  const VkDevice device = vk::Get().device;
+  WaitSlot(s);
+  f.vkResetFences(device, 1, &s.fence);
+  ReadSlotTime(s);
+  // The list stays. Only the indices of the joined draws go in again.
+  s.used = s.used_walk;
+  s.upload_open = false;
+  f.vkResetCommandPool(device, s.pool, 0);
+  VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  f.vkBeginCommandBuffer(s.cb, &begin);
+  g_bound.SetOn(g_bind_skip);
+  g_bound.Reset();
+  if (s.query != VK_NULL_HANDLE) {
+    f.vkCmdResetQueryPool(s.cb, s.query, 0, 2);
+    f.vkCmdWriteTimestamp2(s.cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.query, 0);
+  }
+  SetLate(move, room);
+  g_walk_late = false;
+  PlayMres(s);
+  if (s.query != VK_NULL_HANDLE) {
+    f.vkCmdWriteTimestamp2(s.cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.query, 1);
+    s.query_written = true;
+  }
+  f.vkEndCommandBuffer(s.cb);
+  VkCommandBufferSubmitInfo cb_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+  cb_info.commandBuffer = s.cb;
+  VkSubmitInfo2 submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.commandBufferInfoCount = 1;
+  submit.pCommandBufferInfos = &cb_info;
+  vk::LockQueue();
+  const VkResult submitted = f.vkQueueSubmit2(vk::Get().queue, 1, &submit, s.fence);
+  vk::UnlockQueue();
+  if (submitted != VK_SUCCESS) {
+    Fail("a submit");
+    return false;
+  }
+  // A new picture of the list for the next VkSceneEyes.
+  InterlockedIncrement(&g_done_serial);
+  return true;
 }
 
 bool VkSceneComposePending(uint64_t eye_image) { return vk_compose::Pending(eye_image); }

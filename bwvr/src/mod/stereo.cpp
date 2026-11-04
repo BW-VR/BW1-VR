@@ -1656,6 +1656,36 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
                        &world);
     if (channel && VkStreamOn()) VkStreamView(view, &world);
     if (channel) XrInputWriteWorld(world);
+    // A TEST AID: the turn that the layer declares against the camera that the
+    // engine has for this frame, for a picture at a wrong place in the runtime.
+    {
+      static uint64_t s_count = 0, s_over = 0;
+      static double s_sum = 0.0, s_most = 0.0;
+      static int s_lines = 0;
+      const float error = MotionWorldViewError(world, view.eyes[0].orientation, base);
+      if (error >= 0.0f) {
+        ++s_count;
+        s_sum += error;
+        if (error > s_most) s_most = error;
+        if (error > 0.2f) {
+          ++s_over;
+          if (s_lines < 40) {
+            ++s_lines;
+            ModLog("pose check   : frame %llu: the layer and the camera of the engine are %.2f "
+                   "degrees apart, the slot of the camera %u, the slot of the frame %u",
+                   static_cast<unsigned long long>(layer.frame), error, world.input_frame,
+                   world.frame_slot);
+          }
+        }
+        if (s_count == 900) {
+          ModLog("pose check   : 900 frames: the layer and the camera of the engine are %.3f "
+                 "degrees apart as a mean and %.3f at most, %llu frames over 0.2 degrees",
+                 s_sum / s_count, s_most, static_cast<unsigned long long>(s_over));
+          s_count = s_over = 0;
+          s_sum = s_most = 0.0;
+        }
+      }
+    }
     XrInputRecordView(view, to_headset ? 0 : (channel ? 2 : 1));
   }
   // FOVEATED RENDERING: the gaze of an eye tracker is the centre of the

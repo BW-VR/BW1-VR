@@ -27,6 +27,8 @@
 #include <pthread.h>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -34,6 +36,7 @@
 #include "../../src/common/version.h"
 #include "../../src/mod/app_keys.h"
 #include "../../src/mod/eye_copy_math.h"
+#include "../../src/mod/late_camera_math.h"
 #include "app_log.h"
 #include "build_id.h"
 #include "display_rate.h"
@@ -47,6 +50,7 @@
 #include "menu_painter.h"
 #include "picture_ring.h"
 #include "play_rules.h"
+#include "pose_log.h"
 #include "../../src/mod/osc_gaze_math.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "../../src/mod/stream_ring.h"
@@ -78,6 +82,20 @@ constexpr uint32_t kCursorPixels = 64;
 // THE PLAY OF THE LIVE STREAM (PlayBatch): the batch, the counts and the
 // state of the play. The thread that plays the renderer has it: the thread
 // of the session in the old loop, the play thread with frame_loop=1.
+// THE LATE CAMERA (docs/android.md, "The late camera"): what each frame of the
+// session gives the play thread.
+struct LateTick {
+  uint64_t serial = 0;       // one more for each tick, 0 with none
+  uint32_t slot = 0;         // the newest slot of the input channel
+  int64_t period = 0;        // the display period, ns
+  bool head_ok = false;
+  float head[3] = {0.0f, 0.0f, 0.0f};  // the middle of the eyes at the next display time
+  bool has_world = false;
+  input_channel::World world = {};     // the newest place of the player of the mod
+  int count = 0;
+  motion_comp_math::SlotPush slots[64];  // the slots after the slot of that place
+};
+
 struct LivePlay {
   PlayResult result;
   std::vector<QueuedFrame> batch;
@@ -158,6 +176,7 @@ struct App {
   PlayStats play_stats;
   int gpu_depth = 1;  // frame_loop_gpu_depth, read at each Play
   bool compose_direct = false;  // xr_compose_direct, read at each Play and from the debug page
+  std::atomic<bool> release_take{true};  // xr_release_take, read at each Play and from the debug page
   // THE ONE PASS (xr_density_pass, read at each Play): the walks of both eyes draw
   // into a swapchain image of the slot of the picture. The size of the render of
   // this game, and a fault (the renderer took no view of an image) that sends the
@@ -166,6 +185,50 @@ struct App {
   bool density_off = false;
   uint32_t render_w = 0, render_h = 0;
   std::atomic<bool> play_ok{false};  // the play thread runs (the late compose may be on)
+  // THE LATE CAMERA (late_camera, read at each Play, docs/android.md, "The late
+  // camera"). Each frame of the session gives the play thread a tick, and the play
+  // thread draws the newest list of draws for the next display time. late_on: this
+  // game can do it. late_live: the debug page has it on.
+  bool late_on = false;
+  std::atomic<bool> late_live{true};
+  // THE LATE TAKE (late_take, late_take_ms): the longest wait of a frame of the
+  // session for the picture of the tick before, the row of the debug page, and the
+  // newest tick that the play thread ended its work for.
+  int late_take_ms = 4;
+  std::atomic<bool> late_take_live{false};
+  std::atomic<uint64_t> late_handled{0};
+  uint64_t late_serial = 0;  // the tick of the picture that the play thread writes now
+  // The counts of the line of the log, on the thread of the session.
+  uint64_t take_all = 0, take_waits = 0, take_over = 0;
+  double take_sum = 0.0, take_most = 0.0, take_log_at = 0.0;
+  double take_wait_now = 0.0;  // the wait of this frame
+  late_camera_math::Keys late_keys;
+  std::mutex late_lock;
+  std::condition_variable late_cond;
+  LateTick late_tick;
+  // The picture that the play thread writes now, for WriteSlot.
+  bool late_again = false;   // a picture of the list again: its panel too
+  bool late_moved = false;   // the eyes of the view go to the place of the new picture
+  float late_head_move[3] = {0.0f, 0.0f, 0.0f};
+  float late_move[3] = {0.0f, 0.0f, 0.0f};
+  bool late_has_map = false;
+  motion_comp_math::Map late_map = {};
+  // The evenness of a walk, for the log: the map of the last tick, and the counts
+  // of the steps.
+  bool late_step_have = false;
+  float late_step_at[3] = {0.0f, 0.0f, 0.0f};
+  uint32_t late_step_slot = 0;
+  uint64_t late_steps = 0, late_uneven = 0;
+  double late_step_most = 0.0;
+  // A TEST AID (pose_log, pose_log.h): one record for each frame of the session,
+  // with the values of the shown picture.
+  PoseLog pose_log;
+  bool shown_again = false;
+  uint64_t shown_tick = 0;
+  double shown_work_ms = 0.0;
+  float shown_move[3] = {0.0f, 0.0f, 0.0f};
+  scene_stream::ViewBody shown_body = {};
+  float shown_place[3] = {0.0f, 0.0f, 0.0f};
   // THE EVEN RATE (frame_loop_hold, read at each Play): the frames of the
   // session that showed the shown picture, and if a picture showed.
   int hold = 0;
@@ -285,6 +348,9 @@ void GatherPicture(App* app, uint64_t screen_have, Picture* p) {
   // The panel quads show the panel image of the renderer of this frame.
   uint64_t panel = 0;
   if (p->layers->panel && VkScenePanelFor(p->width, p->height, &panel)) {
+    p->panel = reinterpret_cast<VkImage>(panel);
+  } else if (p->layers->panel && app->late_again &&
+             VkScenePanelAgain(p->width, p->height, &panel)) {
     p->panel = reinterpret_cast<VkImage>(panel);
   }
 }
@@ -689,6 +755,20 @@ double WriteSlot(App* app, const LivePlay& live, int early = -1, bool density = 
     p.view = g.view;
     p.have_world = g.have_world;
     p.world = g.world;
+    p.late_again = app->late_again;
+    p.late_tick = app->late_serial;
+    memcpy(p.late_move, app->late_move, sizeof(p.late_move));
+    // THE LATE CAMERA: the layer has the eyes where the new picture has them, and
+    // the place of the player of the new picture.
+    if (app->late_moved) {
+      for (int e = 0; e < 2; ++e) {
+        for (int k = 0; k < 3; ++k) p.view.eyes[e].position[k] += app->late_head_move[k];
+      }
+      if (app->late_has_map) {
+        memcpy(p.world.linear, app->late_map.linear, sizeof(p.world.linear));
+        memcpy(p.world.offset, app->late_map.offset, sizeof(p.world.offset));
+      }
+    }
     p.atlas = g.atlas;
     s.layers = *g.layers;
     p.layers = &s.layers;
@@ -711,10 +791,15 @@ double WriteSlot(App* app, const LivePlay& live, int early = -1, bool density = 
     }
   }
   p.ready_ms = NowMs();
-  // The swapchain images of xr_eye_direct=1 go back to the runtime after the
-  // submit and before the slot is ready. The image of the one pass goes back
-  // also when the picture took a copy from it, or was no eye picture.
-  if (direct || density) {
+  // THE RELEASE OF THE IMAGES OF A SLOT (xr_release_take). 1: the swapchain images
+  // of xr_eye_direct=1 go back to the runtime at the take of the picture
+  // (TakePicture), just before the frame that names them, as in a session with
+  // one swapchain. So the newest released image of a swapchain is the picture of
+  // the frame that names it, also for a runtime that reads the swapchain later.
+  // 0: they go back after the submit and before the slot is ready. The image of the
+  // one pass goes back there also when the picture took a copy from it, or was
+  // no eye picture.
+  if (density || (direct && !app->release_take.load())) {
     app->ring.EndWrite(i, [app, i]() { app->xr.DirectEnd(i); });
   } else {
     app->ring.EndWrite(i);
@@ -726,6 +811,84 @@ double ThreadCpuMs() {
   timespec t;
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
   return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
+// THE LATE CAMERA (late_camera_math.h, docs/android.md, "The late camera").
+//
+// The newest tick after `seen`, up to timeout_ms. False with no new tick.
+bool WaitLateTick(App* app, LateTick* out, uint64_t* seen, int timeout_ms) {
+  std::unique_lock<std::mutex> lock(app->late_lock);
+  if (app->late_tick.serial == *seen) {
+    app->late_cond.wait_for(lock, std::chrono::milliseconds(timeout_ms));
+  }
+  if (app->late_tick.serial == *seen) return false;
+  *seen = app->late_tick.serial;
+  *out = app->late_tick;
+  return true;
+}
+
+// The move of the picture of the newest list for the display time of the tick.
+// False when the picture has no place: it shows as the game drew it.
+bool LateMoveOf(App* app, const LateTick& tick, late_camera_math::Result* out) {
+  namespace lc = late_camera_math;
+  namespace mc = motion_comp_math;
+  app->late_moved = false;
+  app->late_has_map = false;
+  *out = lc::Result();
+  scene_stream::ViewBody view;
+  if (tick.serial == 0 || !tick.head_ok || !StreamPictureView(&view) ||
+      !view_layer_math::ShowsProjection(view)) {
+    return false;
+  }
+  input_channel::World world = {};
+  const bool have_world = StreamPictureWorld(&world) && mc::Valid(world);
+  const input_channel::World* newest =
+      mc::Newest(tick.has_world ? &tick.world : nullptr, have_world ? &world : nullptr);
+  lc::Input in = {};
+  for (int e = 0; e < 2; ++e) {
+    for (int k = 0; k < 3; ++k) in.eye_position[e][k] = view.eyes[e].position[k];
+  }
+  memcpy(in.eye_orientation, view.eyes[0].orientation, sizeof(in.eye_orientation));
+  memcpy(in.fov, view.eyes[0].fov, sizeof(in.fov));
+  in.width = view.width;
+  in.height = view.height;
+  memcpy(in.head_now, tick.head, sizeof(in.head_now));
+  in.have_maps = have_world && newest != nullptr;
+  if (in.have_maps) {
+    const float period_s = static_cast<float>(static_cast<double>(tick.period) / 1e9);
+    const float ahead = lc::AheadSeconds(*newest, tick.slots, tick.count, tick.slot, period_s,
+                                         app->late_keys.predict_ms);
+    in.drawn = mc::MapOf(world);
+    in.now = lc::MapNow(*newest, ahead);
+    app->late_map = in.now;
+    app->late_has_map = true;
+    // THE EVENNESS OF THE WALK, one count for each new slot of the walk.
+    const bool walks = (newest->flags & input_channel::kWorldWalk) != 0;
+    if (walks && app->late_step_have && tick.slot > app->late_step_slot &&
+        tick.slot - app->late_step_slot <= 4) {
+      float step = 0.0f, speed = 0.0f;
+      for (int k = 0; k < 3; ++k) {
+        const float d = in.now.offset[k] - app->late_step_at[k];
+        step += d * d;
+        speed += newest->walk_velocity[k] * newest->walk_velocity[k];
+      }
+      step = sqrtf(step);
+      speed = sqrtf(speed);
+      const float seconds = period_s * static_cast<float>(tick.slot - app->late_step_slot);
+      ++app->late_steps;
+      if (lc::StepUneven(step, speed, seconds)) ++app->late_uneven;
+      const double slots = speed > 0.0f ? step / (speed * period_s) : 0.0;
+      if (slots > app->late_step_most) app->late_step_most = slots;
+    }
+    app->late_step_have = walks;
+    app->late_step_slot = tick.slot;
+    memcpy(app->late_step_at, in.now.offset, sizeof(app->late_step_at));
+  }
+  *out = lc::Compute(in, app->late_keys);
+  app->late_moved = out->push.move[3] > 0.0f;
+  if (app->late_moved) memcpy(app->late_head_move, out->head_move, sizeof(app->late_head_move));
+  memcpy(app->late_move, out->push.move, sizeof(app->late_move));
+  return true;
 }
 
 // The play thread takes each batch of the reader as it comes, plays it into
@@ -746,6 +909,16 @@ void* PlayThread(void* arg) {
   double before_total = 0.0, before_gpu = 0.0, before_queue = 0.0;
   double cpu_at = ThreadCpuMs();
   const int depth = app->gpu_depth;
+  // THE LATE CAMERA: the newest tick, the move of the last picture of the list,
+  // and the counts of its line in the log.
+  LateTick late_tick;
+  uint64_t late_seen = 0;
+  float late_last[3] = {0.0f, 0.0f, 0.0f};
+  float late_last_room[3] = {0.0f, 0.0f, 0.0f};
+  bool late_last_on = false;
+  uint64_t late_new = 0, late_replays = 0, late_same = 0, late_cuts = 0, late_plain = 0;
+  double late_move_sum = 0.0, late_move_most = 0.0, late_world_sum = 0.0, late_world_most = 0.0;
+  double late_log_at = NowMs();
   while (!app->play_stop.load()) {
     // THE QUEUE AT THE GPU (frame_loop_gpu_depth): no new play while the GPU
     // has `depth` pictures that are not finished. The reader keeps the frames
@@ -772,7 +945,20 @@ void* PlayThread(void* arg) {
       if (waited_gpu) gate_ms = NowMs() - gate_start;
       if (app->play_stop.load()) break;
     }
-    if (!app->live_reader.WaitAll(&live->batch, 50)) {
+    // THE LATE CAMERA: a picture for each frame of the session, with the frames
+    // of the game that came since the last one. With no tick for 50 ms (a session
+    // that does not run) the frames of the game still go on.
+    const bool late = app->late_on && app->late_live.load();
+    VkSceneLateDefer(late);
+    bool got_tick = false;
+    if (late) {
+      got_tick = WaitLateTick(app, &late_tick, &late_seen, 50);
+      if (app->play_stop.load()) break;
+      if (!app->live_reader.TakeAll(&live->batch) && !got_tick) {
+        QuietCheck(app, live);
+        continue;
+      }
+    } else if (!app->live_reader.WaitAll(&live->batch, 50)) {
       QuietCheck(app, live);
       continue;
     }
@@ -806,18 +992,104 @@ void* PlayThread(void* arg) {
         }
       }
     }
-    const double ms = PlayBatch(app, live);
+    const double ms = n > 0 ? PlayBatch(app, live) : 0.0;
     if (density) VkSceneDensityTargetEnd();
     WalkProbeInstall();
+    // THE LATE CAMERA: the walk of this batch gets the move of its picture, or
+    // with no walk the last list draws again when the place changed.
+    bool write = n > 0;
+    app->late_again = false;
+    app->late_moved = false;
+    app->late_serial = late ? late_seen : 0;
+    if (late) {
+      namespace lc = late_camera_math;
+      const bool open = VkSceneLateOpen();
+      const bool world_last =
+          StreamScreen().LastPicture() == screen_quad_math::Last::kWorld;
+      const bool can_again = world_last && VkSceneLateCanReplay();
+      bool replayed = false;
+      if (open || (got_tick && can_again)) {
+        lc::Result moved;
+        const bool placed = LateMoveOf(app, late_tick, &moved);
+        const lc::Push& push = moved.push;
+        // A new picture of the same list only when its place changed. A session
+        // frame with no new picture shows the picture before.
+        bool same = !open && late_last_on == (push.move[3] > 0.0f);
+        for (int k = 0; k < 3 && same; ++k) {
+          if (fabsf(push.move[k] - late_last[k]) >= app->late_keys.still ||
+              fabsf(push.room[k] - late_last_room[k]) >= app->late_keys.still) {
+            same = false;
+          }
+        }
+        if (open) {
+          VkSceneLateFinish(push.move, push.room);
+          write = true;
+          ++late_new;
+        } else if (same) {
+          ++late_same;
+        } else if (VkSceneLateReplay(push.move, push.room)) {
+          app->late_again = true;
+          live->play_start_ms = start;
+          replayed = true;
+          ++late_replays;
+        }
+        if (open || replayed) {
+          for (int k = 0; k < 3; ++k) {
+            late_last[k] = push.move[k];
+            late_last_room[k] = push.room[k];
+          }
+          late_last_on = push.move[3] > 0.0f;
+          if (moved.cut) ++late_cuts;
+          if (!placed) ++late_plain;
+          late_move_sum += moved.move_cm;
+          late_world_sum += moved.world_cm;
+          if (moved.move_cm > late_move_most) late_move_most = moved.move_cm;
+          if (moved.world_cm > late_world_most) late_world_most = moved.world_cm;
+        }
+      }
+      // A batch with no walk has no eye picture. The slot of a picture stays for
+      // a picture of the list: a slot with no eyes would take the projection
+      // layer from the frame of the session.
+      if (!open && can_again) write = replayed;
+      const double log_now = NowMs();
+      if (log_now - late_log_at >= 10000.0) {
+        const uint64_t pictures = late_new + late_replays;
+        AppLog("late camera  : %.1f s: %llu pictures from a new frame of the game, %llu of the "
+               "list again, %llu ticks with no change of the place. %llu cuts of the view, %llu "
+               "pictures with no place. The move of a picture: %.2f cm as a mean and %.2f at "
+               "most, of it the walk and the map %.2f and %.2f. The steps of the walk from a tick "
+               "to the next: %llu, %llu of them more than a third from the speed of the walk, "
+               "the longest %.2f slots of the stick",
+               (log_now - late_log_at) / 1000.0, static_cast<unsigned long long>(late_new),
+               static_cast<unsigned long long>(late_replays),
+               static_cast<unsigned long long>(late_same),
+               static_cast<unsigned long long>(late_cuts),
+               static_cast<unsigned long long>(late_plain),
+               pictures > 0 ? late_move_sum / static_cast<double>(pictures) : 0.0, late_move_most,
+               pictures > 0 ? late_world_sum / static_cast<double>(pictures) : 0.0,
+               late_world_most, static_cast<unsigned long long>(app->late_steps),
+               static_cast<unsigned long long>(app->late_uneven), app->late_step_most);
+        app->late_steps = app->late_uneven = 0;
+        app->late_step_most = 0.0;
+        late_log_at = log_now;
+        late_new = late_replays = late_same = late_cuts = late_plain = 0;
+        late_move_sum = late_move_most = late_world_sum = late_world_most = 0.0;
+      }
+    }
+    if (!write) {
+      if (late) app->late_handled.store(late_seen, std::memory_order_release);
+      continue;
+    }
     const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
     const double waited = WriteSlot(app, *live, early, density, early_waited);
+    if (late) app->late_handled.store(late_seen, std::memory_order_release);
     if (trace_play != 0) {
       static const trace_events::Def kPlayDef = {"play of a batch of frames (renderer)", "play", {"#last frame", "frames", nullptr, nullptr}};
       static const trace_events::Def kSlotDef = {"copy of the picture into a slot (WriteSlot)", "play", {"#last frame", "wait_ms", nullptr, nullptr}};
       AppTraceBar(&kPlayDef, trace_play, trace_slot, trace_events::FrameArg(live->last), static_cast<float>(n));
       AppTraceBar(&kSlotDef, trace_slot, AppTraceNow(), trace_events::FrameArg(live->last), static_cast<float>(waited));
     }
-    app->take_phase.Played(live->last, live->arrival_ms, live->play_start_ms, NowMs());
+    if (n > 0) app->take_phase.Played(live->last, live->arrival_ms, live->play_start_ms, NowMs());
     if (!timing) continue;
     PlayStats s;
     s.pictures = 1;
@@ -852,6 +1124,7 @@ void* PlayThread(void* arg) {
     std::lock_guard<std::mutex> lock(app->play_stats_lock);
     app->play_stats.Merge(s);
   }
+  VkSceneLateDefer(false);
   XrApp::TimeQueueWaits(false);
   return nullptr;
 }
@@ -866,10 +1139,15 @@ void AppKeysApply(uint32_t bits) {
   app->compose_direct = app->xr.EyeDirect() && (bits & app_keys::kComposeDirect) != 0;
   app->xr.SetPanelRect((bits & app_keys::kPanelRect) != 0);
   app->ring.SetLeastRecent((bits & app_keys::kRingOrder) != 0);
+  app->late_live.store((bits & app_keys::kLateCamera) != 0);
+  app->release_take.store((bits & app_keys::kReleaseTake) != 0);
+  app->late_take_live.store((bits & app_keys::kLateTake) != 0);
   if (app->play_ok.load()) VkSceneComposeLate(app->compose_direct);
-  AppLog("game         : the debug page: xr_compose_direct=%d, xr_panel_rect=%d, ring_slot_order=%d",
+  AppLog("game         : the debug page: xr_compose_direct=%d, xr_panel_rect=%d, ring_slot_order=%d, "
+         "late_camera=%d, xr_release_take=%d, late_take=%d",
          app->compose_direct ? 1 : 0, (bits & app_keys::kPanelRect) != 0 ? 1 : 0,
-         (bits & app_keys::kRingOrder) != 0 ? 1 : 0);
+         (bits & app_keys::kRingOrder) != 0 ? 1 : 0, (bits & app_keys::kLateCamera) != 0 ? 1 : 0,
+         (bits & app_keys::kReleaseTake) != 0 ? 1 : 0, (bits & app_keys::kLateTake) != 0 ? 1 : 0);
 }
 
 void StartPlayThread(App* app) {
@@ -904,6 +1182,49 @@ void StopPlayThread(App* app) {
   VkSceneComposeLate(false);
 }
 
+// THE LATE TAKE (late_take_ms, docs/android.md, "The late camera"): the thread of
+// the session looks for the picture of the tick before, up to most_ms. The tick of
+// this frame went out already, so the next picture does not start later. With the
+// line of the log each 10 s.
+void WaitTickPicture(App* app, uint64_t serial, int most_ms) {
+  namespace lc = late_camera_math;
+  const double start = NowMs();
+  double waited = 0.0;
+  bool over = false;
+  for (;;) {
+    const lc::TickPicture picture = app->ring.PictureOfTick(serial);
+    waited = NowMs() - start;
+    if (lc::TakeWaitEnds(picture, app->late_handled.load(std::memory_order_acquire), serial, waited,
+                         most_ms)) {
+      over = picture != lc::TickPicture::kDone && waited >= static_cast<double>(most_ms);
+      break;
+    }
+    usleep(100);
+  }
+  app->take_wait_now = waited;
+  ++app->take_all;
+  if (waited >= 0.2) {
+    ++app->take_waits;
+    app->take_sum += waited;
+    if (waited > app->take_most) app->take_most = waited;
+  }
+  if (over) ++app->take_over;
+  const double now = start + waited;
+  if (app->take_log_at <= 0.0) app->take_log_at = now;
+  if (now - app->take_log_at >= 10000.0) {
+    AppLog("late take    : %.1f s: %llu frames of the session, %llu of them waited for the picture "
+           "of the tick before, %.2f ms as a mean and %.2f at most. %llu came to the limit of %d ms "
+           "and show the picture before",
+           (now - app->take_log_at) / 1000.0, static_cast<unsigned long long>(app->take_all),
+           static_cast<unsigned long long>(app->take_waits),
+           app->take_waits > 0 ? app->take_sum / static_cast<double>(app->take_waits) : 0.0,
+           app->take_most, static_cast<unsigned long long>(app->take_over), most_ms);
+    app->take_all = app->take_waits = app->take_over = 0;
+    app->take_sum = app->take_most = 0.0;
+    app->take_log_at = now;
+  }
+}
+
 // THE SESSION: the picture of the ring that the take picks (the newest
 // finished one, or the next in order with frame_queue=1), at each frame of
 // the session. True when it is a new picture. With none the session shows
@@ -912,6 +1233,9 @@ void StopPlayThread(App* app) {
 bool TakePicture(App* app, PictureRing::TakeFacts* facts) {
   const Picture* p = app->ring.Take(app->xr.SessionSerial(), facts);
   if (p == nullptr) return false;
+  // xr_release_take=1: the images of the picture go back to the runtime now. With 0
+  // they went back already, and this does nothing.
+  if (p->direct_slot >= 0) app->xr.DirectEnd(p->direct_slot);
   // The slot before is free now: no layer copies from it again. The new
   // picture gives the new sources.
   app->xr.FreezeSlotSources();
@@ -935,6 +1259,14 @@ bool TakePicture(App* app, PictureRing::TakeFacts* facts) {
   app->shown_taken_ms = NowMs();
   app->shown_gap_ms = p->gap_ms;
   app->shown_input_frame = p->have_view ? p->view.input_frame : 0u;
+  if (app->pose_log.On()) {
+    app->shown_again = p->late_again;
+    app->shown_tick = p->late_tick;
+    app->shown_work_ms = p->ready_ms - p->play_start_ms;
+    memcpy(app->shown_move, p->late_move, sizeof(app->shown_move));
+    app->shown_body = p->view;
+    memcpy(app->shown_place, p->world.offset, sizeof(app->shown_place));
+  }
   GameFrames(app, p->last_frame, p->pictures);
   return true;
 }
@@ -1359,6 +1691,74 @@ void Play(App* app, bool new_game) {
                         : "The walks draw into the images of the renderer"));
       if (key && why != nullptr) AppLog("game         : the one pass is off: %s", why);
     }
+  }
+  // THE LATE CAMERA (late_camera, 1 by default, needs xr_compose_direct=1 and no
+  // one pass): each frame of the session draws the newest list of draws of the
+  // game again, from the place of the head and of the player at the next display
+  // time. 0: a new picture only for a new frame of the game. It shows the newest
+  // picture, so frame_queue has no effect then.
+  {
+    const bool key = late_camera_math::On(app->ini.GetInt("bwvr", "late_camera", 1));
+    app->late_on = key && loop && app->compose_direct && !app->density_pass;
+    app->late_live.store(true);
+    app->late_keys = late_camera_math::Keys();
+    app->late_keys.most_step = app->ini.GetInt("bwvr", "late_camera_most_cm", 200) * 0.01f;
+    app->late_keys.most_turn = static_cast<float>(app->ini.GetInt("bwvr", "late_camera_most_deg", 2));
+    app->late_keys.predict_ms = app->ini.GetInt("bwvr", "late_camera_predict_ms", 250);
+    app->late_keys.still = app->ini.GetInt("bwvr", "late_camera_still_um", 100) * 1e-6f;
+    if (app->late_on && queue) app->ring.SetQueue(false);
+    // late_take (0 by default, the row "Late take" of the debug page), and its limit.
+    {
+      const int most = app->ini.GetInt("bwvr", "late_take_ms", 4);
+      app->late_take_ms = most < 0 ? 0 : (most > 8 ? 8 : most);
+      app->late_take_live.store(app->ini.GetInt("bwvr", "late_take", 0) != 0);
+      app->late_handled.store(0);
+      app->take_all = app->take_waits = app->take_over = 0;
+      app->take_sum = app->take_most = app->take_log_at = 0.0;
+      if (app->late_on) {
+        AppLog("game         : late_take=%d, late_take_ms=%d. %s", app->late_take_live.load() ? 1 : 0,
+               app->late_take_ms,
+               app->late_take_live.load() && app->late_take_ms > 0
+                   ? "The tick of a frame of the session goes out before its take, and the take "
+                     "waits up to that time for the picture of the tick before"
+                   : "The take of a frame of the session does not wait, and the tick of the frame "
+                     "goes out after the take");
+      }
+    }
+    // The new pictures have the place of the player at their display time, so the
+    // poses of the layer take no difference on top.
+    if (app->late_on) app->xr.Motion().SetMode(motion_comp_math::kOff);
+    // pose_log (bwvr.ini only, 0 by default): one record for each frame of the
+    // session, for tools/android/pose_report.py. Memory for 15 minutes at 90 Hz.
+    if (app->ini.GetInt("bwvr", "pose_log", 0) != 0 && !app->pose_log.On()) {
+      const std::string pose_path = app->folder + "/bwvr-pose.bin";
+      app->pose_log.Start(pose_path, 81000);
+      AppLog("game         : pose_log=1. One record of %u bytes for each frame of the session "
+             "goes into %s", static_cast<unsigned>(sizeof(PoseRecord)), pose_path.c_str());
+    }
+    {
+      std::lock_guard<std::mutex> lock(app->late_lock);
+      app->late_tick.serial = 0;
+    }
+    if (loop) {
+      AppLog("game         : late_camera=%d. %s", key ? 1 : 0,
+             app->late_on
+                 ? "Each frame of the session draws the newest list of draws of the game again "
+                   "for the next display time, so the camera does not wait for the game"
+             : key ? "It needs xr_compose_direct=1 and no one pass, so each frame of the game "
+                     "makes one picture"
+                   : "Each frame of the game makes one picture");
+    }
+  }
+  // xr_release_take (1 by default): see WriteSlot.
+  app->release_take.store(app->ini.GetInt("bwvr", "xr_release_take", 1) != 0);
+  if (loop) {
+    AppLog("game         : xr_release_take=%d. %s", app->release_take.load() ? 1 : 0,
+           app->release_take.load()
+               ? "The images of a picture in the swapchains of its slot go back to the runtime at "
+                 "the take of the picture, just before the frame that names them"
+               : "The images of a picture in the swapchains of its slot go back to the runtime "
+                 "after the submit of the picture");
   }
   // xr_panel_rect (0 by default): 1, the copies of the panel image (into the
   // slot and into its swapchain) take only the part that the panel quads show.
@@ -2284,8 +2684,8 @@ void android_main(android_app* android) {
       step(XrApp::kStepUi);
       // The input of the mod: after xrSyncActions of BeginFrame, with the
       // views of xrLocateViews at the display time of this frame.
+      input_channel::SlotData slot = {};
       if (app.input_live.On()) {
-        input_channel::SlotData slot;
         const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
         app.xr.InputSlot(&slot);
         if (trace_slot != 0) {
@@ -2307,6 +2707,50 @@ void android_main(android_app* android) {
         app.period_ms = slot.display_period > 0 ? static_cast<double>(slot.display_period) / 1e6 : 0.0;
       }
       step(XrApp::kStepSlot);
+      // THE PLACE OF THE PLAYER NOW and THE TICK OF THE PLAY THREAD of this frame.
+      // With the late take they come before the take, so a take that waits does not
+      // make the next picture late. Else they come after the take.
+      input_channel::World now_world;
+      bool now_has = false;
+      motion_comp_math::SlotPush now_slots[64];
+      int now_count = 0;
+      const auto read_place = [&]() {
+        now_has = app.input_live.ReadWorld(&now_world);
+        now_count = app.input_live.SlotsAfter(now_has ? now_world.input_frame : 0u, now_slots, 64);
+      };
+      float late_head[3] = {0.0f, 0.0f, 0.0f};
+      bool late_head_ok = false;
+      const auto locate_head = [&]() {
+        late_head_ok = app.xr.LocateHead(app.xr.DisplayTime() + app.xr.DisplayPeriod(), late_head);
+      };
+      const auto send_tick = [&]() {
+        {
+          std::lock_guard<std::mutex> lock(app.late_lock);
+          LateTick& t = app.late_tick;
+          ++t.serial;
+          t.slot = app.input_live.NewestSlot();
+          t.period = app.xr.DisplayPeriod();
+          t.head_ok = late_head_ok;
+          if (late_head_ok) memcpy(t.head, late_head, sizeof(t.head));
+          t.has_world = now_has;
+          if (now_has) t.world = now_world;
+          t.count = now_count;
+          memcpy(t.slots, now_slots, static_cast<size_t>(now_count) * sizeof(now_slots[0]));
+        }
+        app.late_cond.notify_one();
+      };
+      const bool late_frame = app.late_on && app.play_running && app.input_live.On();
+      const int take_most = late_frame && app.late_live.load() && app.late_take_live.load()
+                                ? app.late_take_ms
+                                : 0;
+      // The thread of the session alone changes the serial.
+      const uint64_t tick_before = app.late_tick.serial;
+      if (take_most > 0) {
+        read_place();
+        locate_head();
+        send_tick();
+      }
+      app.take_wait_now = 0.0;
       // THE PICTURE OF THIS FRAME at the place of the play of the old loop:
       // with frame_loop=1 the newest picture of the ring that the GPU
       // finished, else the play of the batch on this thread.
@@ -2315,6 +2759,7 @@ void android_main(android_app* android) {
       if (app.play_running) {
         // frame_loop_hold: a new picture only after the hold of the shown one.
         if (eye_copy_math::HoldTakes(app.hold, app.hold_shown, app.hold_any)) {
+          if (take_most > 0) WaitTickPicture(&app, tick_before, take_most);
           const double take_ms =
               app.latch_log.On() || app.take_phase.On() ? NowMs() : 0.0;
           taken_ms = take_ms;
@@ -2354,11 +2799,39 @@ void android_main(android_app* android) {
       // docs/android.md, "The motion of the stick"): the newest place that
       // the mod wrote into the input channel, after the take of the picture.
       {
-        input_channel::World world;
-        const bool has = app.input_live.ReadWorld(&world);
-        motion_comp_math::SlotPush slots[64];
-        const int n = app.input_live.SlotsAfter(has ? world.input_frame : 0u, slots, 64);
-        app.xr.Motion().FrameNow(has, world, slots, n);
+        if (take_most <= 0) read_place();
+        app.xr.Motion().FrameNow(now_has, now_world, now_slots, now_count);
+        // THE LATE CAMERA: the tick of the play thread, with the head at the next
+        // display time.
+        if (late_frame) {
+          if (take_most <= 0) locate_head();
+          // A TEST AID (pose_log.h).
+          if (app.pose_log.On() && app.game_on) {
+            PoseRecord r = {};
+            r.t_ms = NowMs();
+            r.display_time = app.xr.DisplayTime();
+            r.slot = slot.frame;
+            r.fresh = fresh ? 1u : 0u;
+            for (int e = 0; e < 2; ++e) memcpy(r.eye[e], slot.eyes[e].position, sizeof(r.eye[e]));
+            memcpy(r.orientation, slot.eyes[0].orientation, sizeof(r.orientation));
+            memcpy(r.fov, slot.eyes[0].fov, sizeof(r.fov));
+            memcpy(r.next_head, late_head, sizeof(r.next_head));
+            r.pic_frame = app.shown_last;
+            r.pic_input = app.shown_body.input_frame;
+            r.pic_again = app.shown_again ? 1u : 0u;
+            memcpy(r.pic_eye, app.shown_body.eyes[0].position, sizeof(r.pic_eye));
+            memcpy(r.pic_orientation, app.shown_body.eyes[0].orientation, sizeof(r.pic_orientation));
+            memcpy(r.pic_place, app.shown_place, sizeof(r.pic_place));
+            memcpy(r.pic_move, app.shown_move, sizeof(r.pic_move));
+            r.wait_ms = static_cast<float>(app.xr.LastWaitMs());
+            r.tick = static_cast<uint32_t>(tick_before + 1);
+            r.pic_tick = static_cast<uint32_t>(app.shown_tick);
+            r.take_wait_ms = static_cast<float>(app.take_wait_now);
+            r.pic_work_ms = static_cast<float>(app.shown_work_ms);
+            app.pose_log.Add(r);
+          }
+          if (take_most <= 0) send_tick();
+        }
       }
       UpdateKeyboard(&app);
       bool show_cursor = false;

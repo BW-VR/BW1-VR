@@ -209,6 +209,10 @@ class PictureRing {
   // before the start of the play thread. The ring then uses 4 slots (on) or
   // 3 (off, the old way).
   void SetQueue(bool on);
+  // THE ORDER OF THE FREE SLOTS (ring_slot_order, frame_loop.h): at each Play,
+  // before the start of the play thread. true, the free slot that showed the
+  // longest ago. false, the lowest free index.
+  void SetLeastRecent(bool on);
 
   // The facts of one take for the line "late picture" (long_frames.h).
   struct TakeFacts {

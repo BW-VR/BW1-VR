@@ -525,6 +525,11 @@ void PictureRing::SetQueue(bool on) {
   ring_.SetQueue(on);
 }
 
+void PictureRing::SetLeastRecent(bool on) {
+  std::lock_guard<std::mutex> g(lock_);
+  ring_.SetLeastRecent(on);
+}
+
 const Picture* PictureRing::Take(uint64_t session_serial, TakeFacts* facts) {
   std::lock_guard<std::mutex> g(lock_);
   const int before = ring_.Shown();

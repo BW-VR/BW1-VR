@@ -3568,6 +3568,78 @@ session never waits for it. `frame_loop_gpu_depth=0`: no limit, the play
 thread plays each batch at once, and the GPU can have each slot of the ring
 in its queue. The log at Play: "game : frame_loop_gpu_depth=1. ...".
 
+**The age of a picture in the layer** (`take_age_log` and `ring_slot_order`
+in `bwvr.ini`, read at each Play, the rules in `take_age_math.h` and
+`frame_loop.h`, the log in `XrApp::AgeTake`, `AgeLayer` and `AgeTick`, checks
+in `take_age_checks.h`). The headset must never show a picture of the land
+that is older than the picture it showed before. The ring and the layer keep
+these rules:
+
+- A take gives a picture only when its slot has a higher serial than the
+  shown slot. The serials follow the order of the pictures, so a take never
+  gives an older picture, and the play thread never writes the shown slot.
+  The math test checks both in a model of 20000 random steps.
+- A layer names the swapchains of a slot only while that slot holds the
+  newest picture (`NamedSlot`). A picture with no eye pictures names no slot,
+  and the frame has no projection layer then.
+- The view of a picture goes with the walk that ends its frame. A frame with
+  no walks gives its view to no picture.
+
+So the line "xr : the projection layer shows the picture of frame N" must
+have a higher N than the line before it. What can still make a shown picture
+old is one of these:
+
+- **The picture is older than its frame number.** The newest frame of its
+  batch had no walk, so its eye pictures and its view are of an earlier
+  frame.
+- **A walk starts with the picture of the walk before** (`vk_keep_picture=1`).
+  A walk of foveated resolution does not. After a frame that lost its walks,
+  such a walk starts with an older picture.
+- **The play thread writes the swapchains of a slot soon after a frame named
+  them.** A runtime that reads a swapchain late would show the image of an
+  older write, or an image that the GPU did not finish.
+- **A frame of the session with no new picture** shows the picture before
+  again. The runtime reprojects it to the head.
+
+`ring_slot_order` (1 by default, a key of the debug page "Slot order"): 1, the
+play thread writes the free slot that showed the longest ago, and 0, the free
+slot with the lowest index. In a game at the rate of the display with 4
+slots, 1 writes the swapchains of a slot 3 takes after it showed and 0
+writes them 1 take after (the math test). The log at Play: "game :
+ring_slot_order=1. ...", and "game : the debug page: ... ring_slot_order=1"
+when the debug page changes it.
+
+`take_age_log` (0 by default): 1, the app writes these lines to
+`bwvr-quest.log`, each with the prefix "take age     :".
+
+- For each take of a picture that is older than the picture before, a line (at
+  most 40) with the slot, the frame and the view of the picture, the frame and
+  the view of the picture before, and the reasons: a frame below the picture
+  before, a view of a frame below the view before, a view of a frame below its
+  own frame number, no eye pictures.
+- For each frame of the session with a projection layer whose two eyes show two
+  frames, or whose frame is below the layer before, a line (at most 40).
+- Each 10 s, one line with the count of each reason, the most frames that a
+  view lags behind its frame number, the frames of the session with a
+  projection layer, the writes of the play thread into the swapchains of a slot
+  that a frame named before (at the frame that named it, 1, 2 and 3 or more
+  frames later, how many started before the display time of that frame, and
+  the least time after it), and the walks of the renderer that started with the
+  picture of the walk before.
+
+A new land can restart the frame numbers of the scene, and then one line names
+a frame below the picture before. A screen with no scene and a world picture
+have frame numbers of their own, so a take that changes the kind compares no
+frame number.
+
+**Not known:** which of the four things gives the old pictures that the player
+sees on the Steam Frame when the menu of the game opens, and in play when the
+game is slower than the display. A session with `take_age_log=1` names it: a
+count of "a view of a frame below its own frame number" or of "walks started
+with the picture of the walk before" above 0 points at the first two, writes
+that start before the display time of the frame that named the slot point at
+the third, and all counts at 0 leave the fourth. Only a headset can show it.
+
 **The poses.** A picture goes out with the `kView` of its own frame: the
 poses that the game drew it with. The runtime reprojects it to the pose of
 the head at the display time, which is the normal work of the runtime. With
@@ -3861,6 +3933,8 @@ parts that the picture does not need:
 | `xr_panel_rect` | 0 | The copy of the panel image into a slot and the copy into its swapchain take only the smallest rect that holds the rects of the panel quads. A quad whose rect is not in the part of the last copy does not show | 0: the whole panel image |
 | `xr_resize_free` | 1 | A new Play frees the sets of swapchains that have another size than the render and makes them again, clears the failed flags, and a slot of `xr_eye_direct=1` replaces swapchains that do not fit a picture (see "A new render size in the same process" in "The size of the eye pictures") | 0: the sets stay as they are |
 | `frame_loop_hold` | 0 | N of 2 to 8: the session takes a new picture only after the shown picture showed in N frames of the session | 0 and 1: the newest finished picture at each frame |
+| `ring_slot_order` | 1 | The play thread writes the free slot of the ring that showed the longest ago, so the swapchains that a frame named last are written again as late as the ring allows. The debug page has the row "Slot order" | 0: the free slot with the lowest index |
+| `take_age_log` | 0 | The log names each take of a picture that is older than the picture before, with the reason, and gives each 10 s the counts ("The age of a picture in the layer") | 0: no age lines |
 
 The app reads `xr_eye_rects` with the keys of the copies of the session at
 the first Play with the frame loop ("xr : xr_eye_rects=1. ..."), the
@@ -3868,8 +3942,10 @@ renderer reads `vk_atlas_area` with `fovea_res_layer` at the first walk of
 each game ("vk scene : vk_atlas_area=1. ..." in `bwvr-quest.log` when
 `fovea_res_layer` is on), and the app reads `xr_eye_direct` and
 `frame_loop_hold` at each Play ("game : xr_eye_direct=1. ...", "game :
-frame_loop_hold=2. ..."), and `xr_resize_free` at each Play too ("game :
-xr_resize_free=1. ..."). There is no test key: the app has no hotkeys.
+frame_loop_hold=2. ..."), and `xr_resize_free`, `ring_slot_order` and
+`take_age_log` at each Play too ("game : xr_resize_free=1. ..."). The app has
+no hotkeys. The debug page (`debug_menu=1`) changes `xr_compose_direct`,
+`xr_panel_rect` and `ring_slot_order` while the game runs.
 The keys are not rows of `settings_table.h`, so the launcher of the PC
 does not show them.
 
@@ -3960,9 +4036,10 @@ swapchains reads and writes it again. With the key the two steps are one.
 - The late compose goes on only while the play thread runs (`StartPlayThread`
   turns it on after the thread started, `StopPlayThread` turns it off).
 - **The debug page.** The group Render of the debug page of the mod has a row for
-  `xr_compose_direct` and `xr_panel_rect`, and for the four keys of the renderer
-  (`vk_mres_draws`, `vk_mres_sort`, `vk_compose_light`, `vk_pass_store`). The mod
-  keeps their values (from `bwvr.ini`, then from the rows) and puts six bits into
+  `xr_compose_direct`, `xr_panel_rect` and `ring_slot_order`, and for the four keys
+  of the renderer (`vk_mres_draws`, `vk_mres_sort`, `vk_compose_light`,
+  `vk_pass_store`). The mod
+  keeps their values (from `bwvr.ini`, then from the rows) and puts seven bits into
   the record of every frame of the stream (`FrameBody::app_keys`,
   `src/mod/app_keys.h`). The player gives the bits to the renderer and to the app
   (`SetAppKeysHook`) before the walks of the frame, so a row acts from the next

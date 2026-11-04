@@ -3617,6 +3617,7 @@ void CreatureChecks() {
 #include "frame_loop_checks.h"
 #include "eye_copy_checks.h"
 #include "swapchain_free_checks.h"
+#include "take_age_checks.h"
 #include "motion_comp_checks.h"
 #include "gpu_parts_checks.h"
 #include "update_checks.h"
@@ -4088,6 +4089,7 @@ int main() {
   frame_loop_checks::FrameLoopChecks();
   eye_copy_checks::EyeCopyChecks();
   swapchain_free_checks::SwapchainFreeChecks();
+  take_age_checks::TakeAgeChecks();
   gpu_parts_checks::GpuPartsChecks();
   update_checks::UpdateChecks();
   refresh_rate_checks::RefreshRateChecks();

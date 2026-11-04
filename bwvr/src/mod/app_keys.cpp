@@ -17,10 +17,11 @@ using namespace app_keys;
 // The ini key and the default of each key (the same as the readers in
 // vk_scene.cpp and in the app).
 const char* const kName[kKeys] = {"vk_mres_draws",  "vk_mres_sort",      "vk_compose_light",
-                                  "vk_pass_store",  "xr_compose_direct", "xr_panel_rect"};
-const int kDefault[kKeys] = {1, 0, 1, 1, 0, 0};
+                                  "vk_pass_store",  "xr_compose_direct", "xr_panel_rect",
+                                  "ring_slot_order"};
+const int kDefault[kKeys] = {1, 0, 1, 1, 0, 0, 1};
 
-int g_value[kKeys] = {1, 0, 1, 1, 0, 0};
+int g_value[kKeys] = {1, 0, 1, 1, 0, 0, 1};
 bool g_read = false;
 
 void Read() {

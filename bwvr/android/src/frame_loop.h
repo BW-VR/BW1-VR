@@ -75,22 +75,36 @@ class Ring {
   }
   bool Queue() const { return queue_; }
   int Count() const { return count_; }
+  // THE ORDER OF THE FREE SLOTS (ring_slot_order of bwvr.ini): true, the play
+  // thread writes the free slot that showed the longest ago (a slot that never
+  // showed counts as the longest ago). So the swapchains that a frame of the
+  // session named last are written again as late as the ring allows. false
+  // (the default of this class), the lowest free index, which is the slot that
+  // the take freed just now when it is the lowest.
+  void SetLeastRecent(bool on) { least_recent_ = on; }
+  bool LeastRecent() const { return least_recent_; }
 
   // THE PLAY THREAD: the slot for the next picture. A free slot first (the
-  // lowest index), else the oldest ready slot: its picture never shows, and
-  // the ring counts a drop. -1 when no slot is free or ready, which the ring
-  // cannot give: one is shown and the play thread writes one at most.
+  // one that showed the longest ago, or the lowest index), else the oldest
+  // ready slot: its picture never shows, and the ring counts a drop. -1 when
+  // no slot is free or ready, which the ring cannot give: one is shown and
+  // the play thread writes one at most.
   int BeginWrite(bool* dropped) {
     *dropped = false;
     int oldest = -1;
+    int free_pick = -1;
     for (int i = 0; i < kSlots; ++i) {
-      if (state_[i] == Slot::kFree && i < count_) {
-        state_[i] = Slot::kWriting;
-        return i;
+      if (state_[i] == Slot::kFree && i < count_ &&
+          (free_pick < 0 || (least_recent_ && shown_at_[i] < shown_at_[free_pick]))) {
+        free_pick = i;
       }
       if (state_[i] == Slot::kReady && (oldest < 0 || serial_[i] < serial_[oldest])) {
         oldest = i;
       }
+    }
+    if (free_pick >= 0) {
+      state_[free_pick] = Slot::kWriting;
+      return free_pick;
     }
     if (oldest < 0) return -1;
     state_[oldest] = Slot::kWriting;
@@ -151,6 +165,7 @@ class Ring {
     if (shown_ >= 0) state_[shown_] = Slot::kFree;
     state_[best] = Slot::kShown;
     shown_ = best;
+    shown_at_[best] = ++takes_;
     shown_delay_ = waits_[best];
     AddWaits();
     return best;
@@ -188,6 +203,9 @@ class Ring {
   uint64_t serial_[kSlots] = {0, 0, 0, 0};
   int waits_[kSlots] = {0, 0, 0, 0};  // the takes since the submit of the ready slot
   uint64_t next_serial_ = 1;
+  bool least_recent_ = false;
+  uint64_t shown_at_[kSlots] = {0, 0, 0, 0};  // the take that showed the slot last, 0: never
+  uint64_t takes_ = 0;                        // the takes that picked a slot
   int shown_ = -1;
   int shown_delay_ = 0;
   uint64_t dropped_ = 0;

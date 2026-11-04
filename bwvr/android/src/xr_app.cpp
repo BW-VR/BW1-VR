@@ -1456,6 +1456,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
                      float cursor_size) {
   namespace ql = quad_layer_math;
   const double end_frame_start = time_log_ ? ClockMs() : 0.0;
+  if (age_log_) {
+    std::lock_guard<std::mutex> lock(age_lock_);
+    ++age_frames_;
+  }
   // The steps of the swapchains so far belong to this call too.
   const double before_steps = step_ms_[kStepAcquire] + step_ms_[kStepImageWait] +
                               step_ms_[kStepSubmit] + step_ms_[kStepRelease];
@@ -1660,6 +1664,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     projection.views = views;
     layers[count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
     ++projection_frames_;
+    if (age_log_) {
+      AgeLayer(shown_direct_[0] >= 0 && shown_direct_[0] == shown_direct_[1] ? shown_direct_[0] : -1,
+               shown_view_[0].frame, shown_view_[1].frame);
+    }
     // The centre layer only when both eyes have it. Its alpha goes to 0 at its
     // edge, and its colors have no alpha in them.
     if (shown_atlas_[0].on && shown_atlas_[1].on) {
@@ -2745,6 +2753,7 @@ bool XrApp::DirectBegin(int slot, uint32_t width, uint32_t height,
     direct_misses_.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
+  if (age_log_) AgeWrite(slot);
   for (int eye = 0; eye < 2; ++eye) {
     Layer& l = d.set.layer[eye];
     uint32_t index = 0;
@@ -2791,6 +2800,126 @@ void XrApp::DirectEnd(int slot) {
     d.waited[eye] = false;
   }
   UnlockQueue();
+}
+
+// THE AGE LOG (take_age_log=1, take_age_math.h). It says which picture is
+// older than the picture before and why. It says how soon the play thread
+// writes the swapchains of a slot that a frame named. It says how many walks
+// of the renderer started with the picture of the walk before.
+void XrApp::SetAgeLog(bool on) {
+  std::lock_guard<std::mutex> lock(age_lock_);
+  age_log_ = on;
+  age_shown_ = take_age::Shown();
+  age_layer_.Reset();
+  age_writes_.Reset();
+  age_writes_.Take();
+  age_window_ = take_age::Window();
+  age_frames_ = 0;
+  age_window_ms_ = 0.0;
+  age_take_lines_ = 0;
+  age_layer_lines_ = 0;
+  uint64_t walks = 0, draws = 0, clears = 0;
+  VkSceneCounts(&walks, &draws, &clears, &age_kept_, &age_whole_);
+}
+
+void XrApp::AgeTake(const take_age::TakeFacts& facts, int slot) {
+  if (!age_log_) return;
+  namespace ta = take_age;
+  std::lock_guard<std::mutex> lock(age_lock_);
+  const ta::Shown before = age_shown_;
+  const uint32_t reasons = ta::Classify(before, facts);
+  ta::Count(&age_window_, reasons, ta::Lag(facts));
+  age_shown_ = ta::After(before, facts);
+  // A screen and a world picture have their own frame numbers.
+  if (facts.eyes && before.any && before.screen != facts.screen) age_layer_.Reset();
+  if (!ta::NamesLine(reasons) || age_take_lines_ >= ta::kMostLines) return;
+  ++age_take_lines_;
+  char why[400] = "";
+  size_t used = 0;
+  for (int bit = 0; bit < ta::kReasons; ++bit) {
+    if ((reasons & (1u << bit)) == 0) continue;
+    used += snprintf(why + used, sizeof(why) - used, "%s%s", used ? ", " : "", ta::ReasonName(bit));
+    if (used >= sizeof(why)) used = sizeof(why) - 1;
+  }
+  AppLog("take age     : the take of slot %d shows frame %llu (the view of frame %llu%s). The "
+         "picture before: frame %llu (the view of frame %llu). Why it is old: %s",
+         slot, static_cast<unsigned long long>(facts.frame),
+         static_cast<unsigned long long>(facts.view_frame), facts.have_view ? "" : ", none",
+         static_cast<unsigned long long>(before.frame),
+         static_cast<unsigned long long>(before.view_frame), why);
+}
+
+void XrApp::AgeLayer(int slot, uint64_t left, uint64_t right) {
+  namespace ta = take_age;
+  std::lock_guard<std::mutex> lock(age_lock_);
+  ++age_window_.layers;
+  const uint32_t reasons = age_layer_.Check(left, right);
+  if ((reasons & ta::kPairDiffers) != 0) ++age_window_.pair_differs;
+  if ((reasons & ta::kLayerOlder) != 0) ++age_window_.layer_older;
+  if (reasons != 0 && age_layer_lines_ < ta::kMostLines) {
+    ++age_layer_lines_;
+    AppLog("take age     : the projection layer of frame %llu of the session names the frame "
+           "%llu for the left eye and the frame %llu for the right eye%s%s. The layer before "
+           "named frame %llu",
+           static_cast<unsigned long long>(age_frames_), static_cast<unsigned long long>(left),
+           static_cast<unsigned long long>(right),
+           (reasons & ta::kPairDiffers) != 0 ? ". The two eyes show two frames" : "",
+           (reasons & ta::kLayerOlder) != 0 ? ". A frame below the layer before" : "",
+           static_cast<unsigned long long>(age_layer_.Last()));
+  }
+  if (slot >= 0) age_writes_.Named(slot, age_frames_, DisplayTimeMs());
+}
+
+void XrApp::AgeWrite(int slot) {
+  std::lock_guard<std::mutex> lock(age_lock_);
+  age_writes_.Write(slot, age_frames_, ClockMs());
+}
+
+void XrApp::AgeTick(double now_ms) {
+  if (!age_log_) return;
+  namespace ta = take_age;
+  std::lock_guard<std::mutex> lock(age_lock_);
+  if (age_window_ms_ <= 0.0) {
+    age_window_ms_ = now_ms;
+    return;
+  }
+  if (now_ms - age_window_ms_ < 10000.0) return;
+  const double seconds = (now_ms - age_window_ms_) / 1000.0;
+  age_window_ms_ = now_ms;
+  const ta::Window w = age_window_;
+  age_window_ = ta::Window();
+  const ta::WriteStats s = age_writes_.Take();
+  uint64_t walks = 0, draws = 0, clears = 0, kept = 0, whole = 0;
+  VkSceneCounts(&walks, &draws, &clears, &kept, &whole);
+  const uint64_t kept_now = kept - age_kept_, whole_now = whole - age_whole_;
+  age_kept_ = kept;
+  age_whole_ = whole;
+  if (w.takes == 0 && w.layers == 0 && s.writes == 0) return;
+  AppLog("take age     : %.1f s, %llu takes with a new picture. A frame below the picture "
+         "before: %llu. A view of a frame below the view before: %llu. The same frame again: "
+         "%llu. A view of a frame below its own frame number: %llu (the most %llu frames). No "
+         "eye pictures: %llu. %llu frames of the session with a projection layer: %llu with "
+         "two frames in the pair, %llu with a frame below the layer before. The play thread "
+         "started %llu writes into the swapchains of a slot that a frame named before: at the "
+         "frame that named it %llu, one frame later %llu, two frames later %llu, three or more "
+         "%llu. %llu of them started before the display time of the frame that named the slot "
+         "(the least %.1f ms after it). The renderer: %llu walks started with the picture of "
+         "the walk before, and %llu cleared the whole target first",
+         seconds, static_cast<unsigned long long>(w.takes),
+         static_cast<unsigned long long>(w.reasons[0]),
+         static_cast<unsigned long long>(w.reasons[1]),
+         static_cast<unsigned long long>(w.reasons[2]),
+         static_cast<unsigned long long>(w.reasons[3]),
+         static_cast<unsigned long long>(w.most_lag),
+         static_cast<unsigned long long>(w.reasons[4]),
+         static_cast<unsigned long long>(w.layers),
+         static_cast<unsigned long long>(w.pair_differs),
+         static_cast<unsigned long long>(w.layer_older),
+         static_cast<unsigned long long>(s.writes), static_cast<unsigned long long>(s.gap[0]),
+         static_cast<unsigned long long>(s.gap[1]), static_cast<unsigned long long>(s.gap[2]),
+         static_cast<unsigned long long>(s.gap[3]),
+         static_cast<unsigned long long>(s.before_display), s.have_least ? s.least_ms : 0.0,
+         static_cast<unsigned long long>(kept_now), static_cast<unsigned long long>(whole_now));
 }
 
 void XrApp::MarkScreenChanged() {

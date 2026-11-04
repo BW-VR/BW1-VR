@@ -798,9 +798,11 @@ void AppKeysApply(uint32_t bits) {
   if (app == nullptr) return;
   app->compose_direct = app->xr.EyeDirect() && (bits & app_keys::kComposeDirect) != 0;
   app->xr.SetPanelRect((bits & app_keys::kPanelRect) != 0);
+  app->ring.SetLeastRecent((bits & app_keys::kRingOrder) != 0);
   if (app->play_ok.load()) VkSceneComposeLate(app->compose_direct);
-  AppLog("game         : the debug page: xr_compose_direct=%d, xr_panel_rect=%d",
-         app->compose_direct ? 1 : 0, (bits & app_keys::kPanelRect) != 0 ? 1 : 0);
+  AppLog("game         : the debug page: xr_compose_direct=%d, xr_panel_rect=%d, ring_slot_order=%d",
+         app->compose_direct ? 1 : 0, (bits & app_keys::kPanelRect) != 0 ? 1 : 0,
+         (bits & app_keys::kRingOrder) != 0 ? 1 : 0);
 }
 
 void StartPlayThread(App* app) {
@@ -850,6 +852,15 @@ bool TakePicture(App* app, PictureRing::TakeFacts* facts) {
   // names no slot, and the slot of the picture before is free.
   app->xr.ClearDirectSource();
   ShowPicture(app, *p);
+  if (app->xr.AgeLog()) {
+    take_age::TakeFacts t;
+    t.screen = p->last == screen_quad_math::Last::kScreen && app->xr.ScreenQuadOn();
+    t.eyes = t.screen ? p->screen_ok : p->eyes_ok;
+    t.frame = p->last_frame;
+    t.have_view = p->have_view;
+    t.view_frame = p->view.frame;
+    app->xr.AgeTake(t, p->direct_slot);
+  }
   app->shown_last = p->last_frame;
   app->shown_play_ms = p->play_start_ms;
   app->shown_arrival_ms = p->arrival_ms;
@@ -1289,6 +1300,31 @@ void Play(App* app, bool new_game) {
                        "whose swapchains do not fit a picture makes new ones"
                      : "The swapchains stay as they are, and a picture that does not fit "
                        "takes the old way");
+  // ring_slot_order (1 by default, a key of the debug page too): 1, the play
+  // thread writes the free slot that showed the longest ago, so the swapchains
+  // that a frame of the session named last are written again as late as the
+  // ring allows. 0: the lowest free index, which is often the slot that the
+  // take freed just now.
+  const bool slot_order = app->ini.GetInt("bwvr", "ring_slot_order", 1) != 0;
+  if (loop) {
+    app->ring.SetLeastRecent(slot_order);
+    AppLog("game         : ring_slot_order=%d. %s", slot_order ? 1 : 0,
+           slot_order ? "The play thread writes the free slot that showed the longest ago"
+                      : "The play thread writes the free slot with the lowest index");
+  }
+  // take_age_log (0 by default): 1, the log says which picture is older than
+  // the picture before and why, how soon the play thread writes the
+  // swapchains of a slot that a frame named, and how many walks started with
+  // the picture of the walk before (docs/android.md, "The age of a picture in
+  // the layer").
+  const bool age_log = loop && app->ini.GetInt("bwvr", "take_age_log", 0) != 0;
+  app->xr.SetAgeLog(age_log);
+  if (loop) {
+    AppLog("game         : take_age_log=%d. %s", age_log ? 1 : 0,
+           age_log ? "Each take of a picture that is older than the picture before gets a line "
+                     "with the reason, and each 10 s a line counts the reasons"
+                   : "No age lines");
+  }
   // NewPlay frees sets that a play thread would write: it runs only while
   // no play thread runs.
   if (!app->play_running) {
@@ -2230,6 +2266,8 @@ void android_main(android_app* android) {
         static const trace_events::Def kEndDef = {"EndFrame of the app (layers, copies, xrEndFrame)", "session", {nullptr, nullptr, nullptr, nullptr}};
         AppTraceBar(&kEndDef, trace_end, AppTraceNow());
       }
+      // THE AGE LOG: the line of the window each 10 s (take_age_log=1).
+      if (app.game_on) app.xr.AgeTick(NowMs());
       // THE PHASE OF THE TAKE of this frame of the session (long_frames.h).
       if (app.take_phase.On() && app.game_on) {
         if (app.first_frame) {

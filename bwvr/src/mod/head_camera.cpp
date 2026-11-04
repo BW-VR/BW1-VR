@@ -785,6 +785,10 @@ void HeadCameraWorldIsUp() { g_world_is_up = true; }
 // camera, and none of them owns the frame's state.
 void HeadCameraBeginScene() { g_in_scene = true; }
 
+// True from the start to the end of the scene walk of a frame. The sorted list
+// of draws is drawn inside it (eye_stale.cpp).
+bool HeadCameraInScene() { return g_in_scene; }
+
 // The intro has no scene walk to end, so it ends its own frame here. One frame
 // gives one head to both of its eye passes. See RecordThisCall.
 void HeadCameraIntroFrame() {

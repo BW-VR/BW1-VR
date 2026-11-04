@@ -6475,11 +6475,12 @@ or icon can come before the restore at one time and after it at another.
    call of the room of the Temple is not in the stack, because `head_camera.cpp` puts
    the eye camera back after it.
 2. Before each item of the sorted list, and after the last one, when the camera
-   matrix is not the matrix that the eye loop wrote. This covers an effect that
-   gives the engine a camera and does not give it back. The hook on `fn_0082F280`
-   walks the list as the game does, item for item (the node has the object at `+4`,
-   the function at `+8`, a number at `+0xC` that goes to `0x00EE9D30`, and the next
-   node at `+0x14`).
+   matrix is not the matrix that the eye loop wrote. It acts only in the scene
+   walk of an eye pass, so the intro and the menus keep their own camera. This
+   covers an effect that gives the engine a camera and does not give it back. The
+   hook on `fn_0082F280` walks the list as the game does, item for item (the node has
+   the object at `+4`, the function at `+8`, a number at `+0xC` that goes to
+   `0x00EE9D30`, and the next node at `+0x14`).
 
 `eye_after_camera=0` keeps the camera that the game leaves, and the walk of the list
 is then the walk of the game. The sun glare (`sun_glare`) puts the eye camera back

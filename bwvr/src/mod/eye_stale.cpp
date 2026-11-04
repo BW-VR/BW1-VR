@@ -68,6 +68,8 @@ uint64_t ControllersFrameCount();
 // controllers.cpp: a pulse of the controllers, for the key: long for 1 and
 // short for 0.
 void ControllersGesturePulse(float amplitude, float seconds);
+// head_camera.cpp
+bool HeadCameraInScene();
 // stereo.cpp
 bool StereoInPass();
 bool StereoEyeCameraStale();
@@ -230,8 +232,10 @@ void __cdecl h_SortedFlush() {
   reinterpret_cast<void(__cdecl*)()>(kFlushStub)();
   const uint64_t frame = g_trace ? ControllersFrameCount() : 0;
   uint32_t* node = *reinterpret_cast<uint32_t**>(kListHead);
+  // The intro and the menus draw with a camera of their own and no scene
+  // walk. Only the scene walk of an eye pass has an eye camera to keep.
+  const bool pass = StereoInPass() && HeadCameraInScene();
   while (node != nullptr) {
-    const bool pass = StereoInPass();
     const bool stale = pass && StereoEyeCameraStale();
     if (g_trace && pass) {
       const camera_stale_math::Reason reason = ReasonNow(stale);
@@ -247,7 +251,7 @@ void __cdecl h_SortedFlush() {
                                       nullptr);
     node = reinterpret_cast<uint32_t*>(node[5]);
   }
-  if (g_on && StereoInPass() && PutEyeBack()) ++g_reapplied_end;
+  if (g_on && pass && PutEyeBack()) ++g_reapplied_end;
 }
 
 bool Hook(uintptr_t address, void* replacement, void** original,
@@ -343,7 +347,10 @@ void EyeStaleCallEnd(bool restore) {
 
 // A draw outside the sorted list, for the trace. kind: 0 a cloud, 1 a sprite.
 void EyeStaleDraw(int kind) {
-  if (!g_trace || kind < 0 || kind >= kOutsideKinds || !StereoInPass()) return;
+  if (!g_trace || kind < 0 || kind >= kOutsideKinds || !StereoInPass() ||
+      !HeadCameraInScene()) {
+    return;
+  }
   const bool stale = StereoEyeCameraStale();
   g_outside[kind].Add(ControllersFrameCount(), stale);
   ++g_outside_reason[kind][ReasonNow(stale)];

@@ -1780,6 +1780,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "gpu_mesh_uvshift", 1, path));
   g_gpu_mesh.group = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_group", 1, path));
+  g_gpu_mesh.depth = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_depth", 1, path));
   g_gpu_mesh.check_frames = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_check_frames", 120, path));
   g_gpu_mesh.timer = static_cast<int>(

@@ -51,6 +51,8 @@ layout(push_constant) uniform Draw {
   uvec4 ops1;
 } draw;
 
+invariant gl_Position;
+
 layout(location = 0) out vec4 out_diffuse;
 layout(location = 1) out vec4 out_specular;
 layout(location = 2) out vec2 out_uv;
@@ -87,7 +89,13 @@ void main() {
   const float cz = dot(row2, q);
 #endif
   const float near_plane = scene.x;
-  const float w = cz / near_plane;
+  // Flag 8: the depth and the w of the game (rhw = near * (1 / cz), z = 1 - rhw,
+  // each rounded, then z * w), so two layers on one surface keep the order of
+  // the CPU path. The linear form (w - 1) has a larger error in z.
+  const bool game_depth = (colors.w & 8u) != 0u && cz > 1e-4;
+  precise float rhw = near_plane * (1.0 / cz);
+  precise float game_z = 1.0 - rhw;
+  precise float w = game_depth ? 1.0 / rhw : cz / near_plane;
   const float kx = scene.y * draw.viewport.z;
   const float ky = scene.z * draw.viewport.w;
   const float ax = (scene.y + 0.5 - draw.viewport.x) * draw.viewport.z - 1.0;
@@ -97,7 +105,8 @@ void main() {
   if (gl_ViewIndex == 1 && (draw.ops.w & 1u) == 0u) {
     xc += draw.depth.z * draw.viewport.z;
   }
-  const float zc = draw.depth.y * (w * (1.0 - draw.depth.x) - 1.0);
+  precise float zc = game_depth ? ((game_z - draw.depth.x) * draw.depth.y) * w
+                                : draw.depth.y * (w * (1.0 - draw.depth.x) - 1.0);
   gl_Position = vec4(xc, yc, zc, w);
 
   uint color = colors.x;

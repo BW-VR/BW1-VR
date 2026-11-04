@@ -62,6 +62,12 @@ const uint32_t kTruncate = 2u;  // the light level rounds toward 0 (fn_00859530)
 // the float indices that the renderer puts in row[0][0] and row[0][1] of the
 // record (the matrix of the record is not used then).
 const uint32_t kGroup = 4u;
+// The vertex shader makes the depth and the w as the game does (ClipPosition):
+// rhw = near * (1 / cz) and z = 1 - rhw, each rounded to a float, then z * w.
+// Two layers on the same surface (the snow on a roof, a lit copy over a mesh)
+// keep the depth order that the CPU path gives them. Without it the shader
+// takes the linear form (w - 1), which has a larger rounding error in z.
+const uint32_t kDepthGame = 8u;
 
 // From the 12 floats of the matrix of the game (rows of 3, the translation
 // last) to the rows of the shader.
@@ -166,7 +172,14 @@ inline Camera CameraSpace(const Consts& c, const float p[3], const float* offset
 // eye of a draw that one walk moves by per_rhw * rhw.
 inline void ClipPosition(const Consts& c, const View& v, const Camera& cam,
                          bool right_eye, bool moves, float out[4]) {
-  const float w = cam.z / c.near_plane;
+  const bool game = (c.flags & kDepthGame) != 0 && cam.z > 1e-4f;
+  float w = cam.z / c.near_plane;
+  float game_z = 0.0f;
+  if (game) {
+    const float rhw = c.near_plane * (1.0f / cam.z);
+    w = 1.0f / rhw;
+    game_z = 1.0f - rhw;
+  }
   const float kx = c.half_x * v.inv_w;
   const float ky = c.half_y * v.inv_h;
   const float ax = (c.half_x + 0.5f - v.x) * v.inv_w - 1.0f;
@@ -176,7 +189,7 @@ inline void ClipPosition(const Consts& c, const View& v, const Camera& cam,
   if (right_eye && moves) xc += v.per_rhw * v.inv_w;
   out[0] = xc;
   out[1] = yc;
-  out[2] = v.inv_z * (w * (1.0f - v.min_z) - 1.0f);
+  out[2] = game ? ((game_z - v.min_z) * v.inv_z) * w : v.inv_z * (w * (1.0f - v.min_z) - 1.0f);
   out[3] = w;
 }
 
@@ -339,7 +352,8 @@ const uint32_t kPartBlend = 1u;    // blend, no depth write, no depth test
 const uint32_t kPartStage1 = 2u;   // a texture on stage 1
 const uint32_t kPartUvShift = 4u;  // the shift of u and v (water, fire)
 const uint32_t kPartGroup = 8u;    // a matrix for each group of vertices
-const uint32_t kPartsAll = 15u;
+const uint32_t kPartDepth = 16u;   // the depth and the w of the game (kDepthGame)
+const uint32_t kPartsAll = 31u;
 
 struct DeviceState {
   uint32_t alpha_blend;

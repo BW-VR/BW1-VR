@@ -24,6 +24,10 @@
 // gpu_mesh_blend, gpu_mesh_stage1, gpu_mesh_uvshift and gpu_mesh_group (1 is the
 // default): 0 leaves that kind of mesh on the CPU path. With test_keys=1, Ctrl
 // Shift 6 turns all four off and on.
+// gpu_mesh_depth (1 is the default): 1 the vertex shader makes the depth and
+// the w as the game does, so two layers on one surface (the snow on a roof)
+// keep the depth order of the CPU path. 0 the linear form. It is one of the
+// parts that Ctrl Shift 6 turns off and on.
 // gpu_mesh_check_frames=N (120 by default): a mesh has a full sum over its
 // words each N frames, and a cheap sample at each draw. 0: the full sum at
 // each draw. gpu_mesh_timer=1: the log line has the time of each part of the
@@ -33,7 +37,7 @@ struct GpuMeshOptions {
   bool test_keys = false;
   int compare_every = 0;
   int kinds = 31;
-  int blend = 1, stage1 = 1, uvshift = 1, group = 1;
+  int blend = 1, stage1 = 1, uvshift = 1, group = 1, depth = 1;
   int check_frames = 120;
   int timer = 0;
 };

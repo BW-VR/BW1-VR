@@ -56,10 +56,11 @@ inline void GpuMeshChecks() {
   // MinZ above 0 (the viewport of a pass of foveated resolution has such
   // values), and for a viewport with the render of a headset (4080 by 3264).
   struct Worst {
-    int projected = 0, flag_mismatch = 0, edge_mismatch = 0;
+    int projected = 0, flag_mismatch = 0, edge_mismatch = 0, z_exact = 0;
     double xy = 0.0, z = 0.0, rhw = 0.0;
   };
-  const auto position = [&](const gm::View& view, bool whole, uint32_t seed, int meshes) {
+  const auto position = [&](const gm::View& view, bool whole, uint32_t seed, int meshes,
+                            uint32_t mode_flags = 0) {
     Random rr = {seed};
     Worst w;
     const int kVertices = 64;
@@ -83,6 +84,7 @@ inline void GpuMeshChecks() {
       g.near_plane = c.near_plane;
       g.half_x = c.half_x;
       g.half_y = c.half_y;
+      g.flags = mode_flags;
       for (int v = 0; v < kVertices; ++v) {
         const float* p = reinterpret_cast<const float*>(in + v * 32);
         const gm::Camera cam = gm::CameraSpace(g, p, nullptr);
@@ -116,6 +118,7 @@ inline void GpuMeshChecks() {
         }
         const double dz = fabs(static_cast<double>(s.z) - o[2]);
         if (dz > w.z) w.z = dz;
+        if (dz == 0.0) ++w.z_exact;
         const double drhw = fabs(static_cast<double>(s.rhw) - o[3]) / o[3];
         if (drhw > w.rhw) w.rhw = drhw;
       }
@@ -136,6 +139,54 @@ inline void GpuMeshChecks() {
         whole.rhw, 0.0);
   printf("  (%d points projected, %d edge points, the worst pixel %.5f, depth %.7f, rhw %.2e)\n",
          whole.projected, whole.edge_mismatch, whole.xy, whole.z, whole.rhw);
+  {
+    // THE DEPTH OF THE GAME (kDepthGame). The shader makes rhw = near * (1 / cz)
+    // and z = 1 - rhw as the game does, so the depth after the divide of the GPU
+    // is the depth of the loop of the game for nearly each point, and the
+    // layers of the CPU path and the GPU path keep one order. The linear form
+    // is exact for fewer points.
+    const Worst linear = whole;
+    const Worst game = position(view, true, 4242u, 300, gm::kDepthGame);
+    const double exact_game = static_cast<double>(game.z_exact) / game.projected;
+    const double exact_linear = static_cast<double>(linear.z_exact) / linear.projected;
+    Check(game.flag_mismatch == 0 && game.z < 1.2e-7 && exact_game > 0.9 && exact_game > exact_linear,
+          "the depth of the game is the depth of the loop of the game for nine of ten points, more than the linear form",
+          exact_game, 1.0);
+    printf("  (depth of the game: %.1f percent of the points exact, worst %.7f. The linear form: %.1f percent, worst %.7f)\n",
+           100.0 * exact_game, game.z, 100.0 * exact_linear, linear.z);
+  }
+  {
+    // Far points (the roofs of a village are 20 to 300 units away): the depth of
+    // the game against the depth that each form gives after the divide.
+    gm::Consts g = {};
+    g.near_plane = 0.15f;
+    g.half_x = 640.0f;
+    g.half_y = 360.0f;
+    gm::Consts gg = g;
+    gg.flags = gm::kDepthGame;
+    int exact_linear = 0, exact_game = 0, total = 0;
+    double worst_linear = 0.0, worst_game = 0.0;
+    for (int k = 0; k < 20000; ++k) {
+      const float cz = r.Range(20.0f, 300.0f);
+      const float truth = 1.0f - g.near_plane * (1.0f / cz);
+      const gm::Camera cam = {r.Range(-cz, cz), r.Range(-cz, cz), cz};
+      float a[4], b[4];
+      gm::ClipPosition(g, view, cam, false, false, a);
+      gm::ClipPosition(gg, view, cam, false, false, b);
+      const double dl = fabs(static_cast<double>(gm::ScreenOf(a, view).z) - truth);
+      const double dg = fabs(static_cast<double>(gm::ScreenOf(b, view).z) - truth);
+      exact_linear += dl == 0.0;
+      exact_game += dg == 0.0;
+      worst_linear = fmax(worst_linear, dl);
+      worst_game = fmax(worst_game, dg);
+      ++total;
+    }
+    Check(exact_game > exact_linear && worst_game <= worst_linear,
+          "far points: the depth of the game is nearer to the depth of the loop than the linear form",
+          exact_game, exact_linear);
+    printf("  (far points: exact %.1f percent and worst %.2e with the depth of the game, %.1f percent and %.2e linear)\n",
+           100.0 * exact_game / total, worst_game, 100.0 * exact_linear / total, worst_linear);
+  }
   {
     // A viewport with an offset, a smaller size and a MinZ: the pixel of the
     // game and its rhw stay, and the depth is the depth of the game after the

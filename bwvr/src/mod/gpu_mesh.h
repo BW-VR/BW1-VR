@@ -21,8 +21,12 @@
 // gpu_mesh_kinds=N: bit k of N leaves function k of the list (fn_00856D40 0,
 // fn_0085AB10 1, fn_0084BA90 2, fn_0085BA30 3, fn_00859530 4) on the GPU path.
 // 31 is the default.
-// gpu_mesh_blend, gpu_mesh_stage1, gpu_mesh_uvshift and gpu_mesh_group (1 is the
-// default): 0 leaves that kind of mesh on the CPU path. With test_keys=1, Ctrl
+// gpu_mesh_blend (0 is the default), gpu_mesh_stage1, gpu_mesh_uvshift and
+// gpu_mesh_group (1 is the default): 0 leaves that kind of mesh on the CPU path.
+// The meshes with blend are off by default: on the Frame they made the roofs of the
+// houses with snow flicker and the pictures old at the menu. gpu_mesh_trace=1 (a
+// test aid) adds the callers of the five functions, the meshes outside an eye pass
+// and the frames of more than 120 ms to the log each 10 s. With test_keys=1, Ctrl
 // Shift 6 turns the four and the depth off and on.
 // gpu_mesh_depth (1 is the default): 1 the vertex shader makes the depth and
 // the w as the game does, so two layers on one surface (the snow on a roof)
@@ -50,12 +54,13 @@ struct GpuMeshOptions {
   bool test_keys = false;
   int compare_every = 0;
   int kinds = 31;
-  int blend = 1, stage1 = 1, uvshift = 1, group = 1, depth = 1;
+  int blend = 0, stage1 = 1, uvshift = 1, group = 1, depth = 1;
   int check_frames = 30;
   int timer = 0;
   int vertices = 0;
   int latch = 1;
   int material_skip = 0;
+  int trace = 0;
 };
 void GpuMeshSetOptions(const GpuMeshOptions& options);
 void GpuMeshInstall();

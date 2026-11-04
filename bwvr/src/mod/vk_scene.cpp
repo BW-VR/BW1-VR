@@ -678,6 +678,12 @@ struct MresClear {
 };
 std::vector<MresRecord> g_mres_records;
 std::vector<MresClear> g_mres_clears;
+// The 16 bit indices of the draws of the records, a copy because the CPU does
+// not read the ring (PreparePass). It has its own place: a flush of the queue
+// (FlushDraws, with the draws of the panel between two draws of the eyes)
+// clears g_queue_indices, and the records of the eyes wait until the end of
+// the walk. Only the start of a walk clears it.
+std::vector<uint16_t> g_mres_indices;
 uint64_t g_mres_walks = 0;  // for the report
 uint64_t g_mres_remade = 0;  // the images made again, since the start
 // THE COMPOSE OF THE EYE PICTURE (ComposeMres, vk_compose.h).
@@ -700,8 +706,11 @@ bool g_walk_late = false;     // the walk now left its eye picture to the app
 bool g_mres_play_on = true;
 // vk_mres_sort=1: that includes the sort. 0: the merge alone, which keeps the
 // order of the game (the picture is then the one of the unmerged draws).
-bool g_mres_sort = true;
+bool g_mres_sort = false;
+// The four keys of the debug page came (VkSceneSetAppKeys): ReadSharpKeys keeps them.
+bool g_app_keys_set = false;
 uint64_t g_late_walks = 0;    // for the report
+uint64_t g_mres_index_faults = 0;  // draws that did not join: the copy of their indices was not there
 uint64_t g_mres_draws = 0;  // draws of the walks
 uint64_t g_mres_center_draws = 0;  // of them in the centre image
 uint64_t g_fovea_marks = 0;  // walks with the marks of the test
@@ -1972,6 +1981,8 @@ void KeepPicture() {
   const vk::Image& from = g_colors[before];
   const vk::Image& to = Target();
   if (from.width != to.width || from.height != to.height) return;
+  // A picture that the app has not composed has no pixels to keep.
+  if (vk_compose::Pending((uint64_t)from.image)) return;
   FlushDraws();
   const VkCommandBuffer cb = g_slots[g_slot].cb;
   f.vkCmdEndRendering(cb);
@@ -2148,6 +2159,8 @@ void Deliver(D3D7ThreadFn fn, const void* data, unsigned bytes) {
 // FOVEATED RESOLUTION: the layout of the walk, and the two images in its
 // sizes. False when the walk has no foveated resolution.
 void FreeMresImages() {
+  // The views of the pending compose go with the images.
+  vk_compose::DropAll();
   const VkDevice device = vk::Get().device;
   for (int i = 0; i < 2; ++i) {
     for (int e = 0; e < 2; ++e) {
@@ -2582,11 +2595,13 @@ void ReadSharpKeys() {
         static_cast<int>(GetPrivateProfileIntA("bwvr", "fovea_res_layer", 0, path));
     g_mres_layer = g_mres_layer_key != 0;
     g_atlas_area = GetPrivateProfileIntA("bwvr", "vk_atlas_area", 1, path) != 0;
-    g_compose_light = GetPrivateProfileIntA("bwvr", "vk_compose_light", 1, path) != 0;
-    g_pass_store = GetPrivateProfileIntA("bwvr", "vk_pass_store", 1, path) != 0;
     g_compose_test = GetPrivateProfileIntA("bwvr", "vk_compose_test", 0, path) != 0;
-    g_mres_play_on = GetPrivateProfileIntA("bwvr", "vk_mres_draws", 1, path) != 0;
-    g_mres_sort = GetPrivateProfileIntA("bwvr", "vk_mres_sort", 1, path) != 0;
+    if (!g_app_keys_set) {
+      g_compose_light = GetPrivateProfileIntA("bwvr", "vk_compose_light", 1, path) != 0;
+      g_pass_store = GetPrivateProfileIntA("bwvr", "vk_pass_store", 1, path) != 0;
+      g_mres_play_on = GetPrivateProfileIntA("bwvr", "vk_mres_draws", 1, path) != 0;
+      g_mres_sort = GetPrivateProfileIntA("bwvr", "vk_mres_sort", 0, path) != 0;
+    }
   }
 #ifdef _WIN32
   // On the PC the window and the pictures of a test show the whole eye
@@ -2841,13 +2856,19 @@ void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint
       const dm::Draw& first = g_mres_facts[g_mres_order[i]];
       uint32_t last = i + 1;
       uint32_t indices = dm::ListIndices(first);
-      if (g_walk_merge && first_record.mesh == 0 && first_record.wide == 0) {
+      if (g_walk_merge && first_record.mesh == 0 && first_record.wide == 0 &&
+          dm::IndexesThere(g_mres_indices.size(), first_record.queue_index, first.index_count)) {
         while (last < n) {
           const MresRecord& next_record = row[g_mres_order[last]];
           if (next_record.mesh != 0 || next_record.wide != 0 ||
               memcmp(first_record.viewport, next_record.viewport,
                      sizeof(first_record.viewport)) != 0 ||
               !dm::CanJoin(first, g_mres_facts[g_mres_order[last]])) {
+            break;
+          }
+          if (!dm::IndexesThere(g_mres_indices.size(), next_record.queue_index,
+                                g_mres_facts[g_mres_order[last]].index_count)) {
+            ++g_mres_index_faults;
             break;
           }
           indices += dm::ListIndices(g_mres_facts[g_mres_order[last]]);
@@ -2866,7 +2887,7 @@ void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint
             // The ring is memory that the CPU writes and does not read: the
             // indices come from their copy (VkSceneDraw).
             const uint16_t* from =
-                d.index_count > 0 ? g_queue_indices.data() + member.queue_index : nullptr;
+                d.index_count > 0 ? g_mres_indices.data() + member.queue_index : nullptr;
             dm::JoinIndices(first, d, from, out);
             out += dm::ListIndices(d);
             if (member.bounds[0] < merged.bounds[0]) merged.bounds[0] = member.bounds[0];
@@ -2935,6 +2956,21 @@ bool ComposeLate() {
   if (!g_compose_late || g_walk_atlas.on || !g_walk_both || g_picture ||
       (g_mesh_compare && g_mesh_compare_request)) {
     return false;
+  }
+  // The module must work (shaders, layouts, the pipeline of the format of the
+  // renderer). Else the walk makes its eye picture, as without the key.
+  static bool s_said = false;
+  if (!vk_compose::Usable()) {
+    if (!s_said) {
+      s_said = true;
+      ModLog("vk scene     : the late compose cannot work on this device, so each walk makes "
+             "its eye picture");
+    }
+    return false;
+  }
+  if (!s_said) {
+    s_said = true;
+    ModLog("vk scene     : the first walk that leaves its eye picture to the app");
   }
   vk_compose::Set(ComposeInput(), (uint64_t)Target().image, true);
   ++g_late_walks;
@@ -3258,7 +3294,11 @@ void ComposeMres(Slot& s) {
   }
   const VkCommandBuffer cb = s.cb;
   const uint32_t width = Target().width, height = Target().height;
-  BeginComposeRendering(cb, nullptr, true);
+  BeginComposeRendering(
+      cb, nullptr,
+      Pipeline(0) != VK_NULL_HANDLE &&
+          Pipeline((1u << 16) | (D3DBLEND_SRCALPHA << 8) | D3DBLEND_INVSRCALPHA) !=
+              VK_NULL_HANDLE);
   const VkViewport viewport = {0.0f, 0.0f, static_cast<float>(width),
                                static_cast<float>(height), 0.0f, 1.0f};
   SetViewport(cb, viewport);
@@ -3710,6 +3750,9 @@ void BeginOnWorker(const void* data) {
     }
   }
   BlackCheckRead(s);
+  // The walk writes this target now: a compose that waited for its picture
+  // has nothing to compose.
+  vk_compose::Drop((uint64_t)Target().image);
   f.vkResetFences(device, 1, &s.fence);
   s.stage_used = 0;
   if (s.query_written) {
@@ -3782,6 +3825,7 @@ void BeginOnWorker(const void* data) {
   g_bound.Reset();
   g_queue.clear();
   g_queue_indices.clear();
+  g_mres_indices.clear();
   g_walk_sort = g_draw_sort;
   g_walk_merge = g_draw_merge;
   g_walk_queue = g_walk_sort || g_walk_merge;
@@ -4723,8 +4767,8 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
     memcpy(r.bounds, b, sizeof(b));
     // PreparePass joins draws with indices from this copy.
     if (g_mres_play_on && g_walk_merge && index_count > 0) {
-      r.queue_index = static_cast<uint32_t>(g_queue_indices.size());
-      g_queue_indices.insert(g_queue_indices.end(), indices, indices + index_count);
+      r.queue_index = static_cast<uint32_t>(g_mres_indices.size());
+      g_mres_indices.insert(g_mres_indices.end(), indices, indices + index_count);
     }
     g_mres_records.push_back(r);
     ++g_draws;
@@ -6050,10 +6094,10 @@ bool VkSceneLastPicture(uint64_t* image, uint32_t* layer, uint32_t* width,
 void VkSceneComposeLate(bool on) {
   if (g_compose_late == on) return;
   g_compose_late = on;
-  ModLog("vk scene     : the late compose is %s: %s", on ? "on" : "off",
-         on ? "a walk with the outer image and the centre image leaves its eye picture to "
-              "the app"
-            : "each walk makes its eye picture");
+  ModLog("vk scene     : the app asks for the late compose: %s. %s", on ? "on" : "off",
+         on ? "A walk with the outer image and the centre image leaves its eye picture to "
+              "the app when the module of the compose works"
+            : "Each walk makes its eye picture");
 }
 
 bool VkSceneComposePending(uint64_t eye_image) { return vk_compose::Pending(eye_image); }
@@ -6077,6 +6121,25 @@ bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t im
 }
 
 void VkSceneComposeForget(uint64_t image) { vk_compose::Forget((VkImage)image); }
+
+void VkSceneComposeStop() { vk_compose::Stop(); }
+
+void VkSceneSetAppKeys(int mres_draws, int mres_sort, int compose_light, int pass_store) {
+  const bool draws = mres_draws != 0, sort = mres_sort != 0, light = compose_light != 0,
+             store = pass_store != 0;
+  if (g_app_keys_set && draws == g_mres_play_on && sort == g_mres_sort &&
+      light == g_compose_light && store == g_pass_store) {
+    return;
+  }
+  g_app_keys_set = true;
+  g_mres_play_on = draws;
+  g_mres_sort = sort;
+  g_compose_light = light;
+  g_pass_store = store;
+  ModLog("vk scene     : the keys of the debug page: vk_mres_draws=%d, vk_mres_sort=%d, "
+         "vk_compose_light=%d, vk_pass_store=%d, from the next walk", draws ? 1 : 0,
+         sort ? 1 : 0, light ? 1 : 0, store ? 1 : 0);
+}
 
 void VkSceneSetGpuTake(bool on) { g_take_on = on; }
 
@@ -6262,6 +6325,9 @@ void VkSceneReport(uint64_t frames) {
            g_mres_draws / static_cast<double>(g_mres_walks),
            g_mres_center_draws / static_cast<double>(g_mres_walks),
            g_mres_remade);
+    ModLog("vk scene     : the passes of the two images: %llu draws did not join because the "
+           "copy of their indices was not there, %llu walks left their eye picture to the app",
+           g_mres_index_faults, g_late_walks);
     g_mres_walks = g_mres_draws = g_mres_center_draws = 0;
   }
   if (g_mres_layer && (g_atlas_walks > 0 || g_atlas_none > 0)) {

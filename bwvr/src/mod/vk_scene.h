@@ -196,6 +196,12 @@ bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t im
                           uint32_t format);
 // The images of the compose of a swapchain image that goes.
 void VkSceneComposeForget(uint64_t image);
+// The views, pipelines and buffers of the compose go (the device must be idle).
+void VkSceneComposeStop();
+// THE KEYS OF THE DEBUG PAGE (app_keys.h): vk_mres_draws, vk_mres_sort,
+// vk_compose_light and vk_pass_store from the next walk. After a call the
+// renderer does not read these four keys from bwvr.ini again.
+void VkSceneSetAppKeys(int mres_draws, int mres_sort, int compose_light, int pass_store);
 bool VkSceneDirect();
 // THE VULKAN DEVICE OF THE MOD (vk_device of bwvr.ini, docs/backend.md, "No
 // Vulkan device of the mod"). on: 1 (the default) the renderer draws on a

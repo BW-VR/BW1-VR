@@ -1339,10 +1339,13 @@ that moves while the Hand takes it.
   picture needs 9.9 ms of GPU as a mean (11.7 ms in the worst window): the pass
   of the outer image 2.5 ms, the pass of the centre image 2.1 ms, the pass that
   makes the eye picture 1.6 ms and the copy into the swapchains 3.6 ms. The two
-  small passes cost 1.2 and 2.3 us for each draw, not by their pixels. Five keys
+  small passes cost 1.2 and 2.3 us for each draw, not by their pixels. Six keys
   take parts away (`xr_compose_direct`, `vk_compose_light`, `vk_pass_store`,
-  `vk_mres_draws`, `xr_panel_rect`, each with the old way as the value 0). Next
-  on the Frame: a session with the five keys at 1 and at 0 in the same view, the
+  `vk_mres_draws`, `vk_mres_sort`, `xr_panel_rect`, each with the old way as the
+  value 0, and each with a row on the debug page, group Render, that acts from the
+  next picture in the headset). Next on the Frame: a session with the keys at 1
+  and at 0 in the same view (the sort `vk_mres_sort` can change the order of
+  coplanar layers, for example the snow on a roof, so check it first), the
   lines "the GPU in ms", "the GPU of the copies" and "the GPU parts of the walk"
   (the goal is less than 7 ms for a picture as a mean), the picture itself (the
   look of the soft edge of the centre, the panel quads with `xr_panel_rect=1`,

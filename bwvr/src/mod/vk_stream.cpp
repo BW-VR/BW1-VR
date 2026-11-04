@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "../common/bw_addresses.h"
+#include "app_keys.h"
 #include "one_walk.h"
 #include "quad_layer_math.h"
 #include "render_chain.h"
@@ -632,7 +633,7 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
   // a number above each frame of the scene (screen_quad_math.h), and a frame
   // of the scene after it ends it.
   if (g_unit_open && !g_unit_screen && frame < g_unit_frame) {
-    ss::FrameBody body = {frame, name, capture ? 1u : 0u, 0};
+    ss::FrameBody body = {frame, name, capture ? 1u : 0u, AppKeysBits()};
     g_writer.Record(ss::kFrame, &body, sizeof(body));
     return;
   }
@@ -713,7 +714,7 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
   if (g_record_on) g_last = frame;
   g_unit_open = true;
   g_unit_frame = frame;
-  ss::FrameBody body = {frame, name, capture ? 1u : 0u, 0};
+  ss::FrameBody body = {frame, name, capture ? 1u : 0u, AppKeysBits()};
   g_writer.Record(ss::kFrame, &body, sizeof(body));
 }
 

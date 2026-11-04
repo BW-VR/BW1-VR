@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 
+#include "../../src/mod/app_keys.h"
 #include "../../src/mod/quad_layer_math.h"
 #include "../../src/mod/scene_stream.h"
 #include "../../src/mod/stream_split.h"
@@ -21,6 +22,18 @@
 namespace {
 
 namespace ss = scene_stream;
+
+AppKeysHook g_app_keys_hook = nullptr;
+uint32_t g_app_keys_last = 0;
+
+// The keys of a frame (app_keys.h): only a change does anything.
+void ApplyAppKeys(uint32_t bits) {
+  if ((bits & app_keys::kSent) == 0 || bits == g_app_keys_last) return;
+  g_app_keys_last = bits;
+  VkSceneSetAppKeys((bits & app_keys::kMresDraws) != 0, (bits & app_keys::kMresSort) != 0,
+                    (bits & app_keys::kComposeLight) != 0, (bits & app_keys::kPassStore) != 0);
+  if (g_app_keys_hook != nullptr) g_app_keys_hook(bits);
+}
 
 // A surface of the game from the stream: its caps and its last pixels.
 struct StreamSurface : IDirectDrawSurface7 {
@@ -152,6 +165,7 @@ class Player {
         ss::FrameBody f;
         if (!ss::Body(body, bytes, &f)) break;
         VkSceneFrame(f.frame, f.name, f.capture != 0);
+        ApplyAppKeys(f.app_keys);
         view_.OnFrame();
         layers_.OnFrame();
         screen_.OnFrame();
@@ -503,4 +517,10 @@ PlayResult PlayStreamFile(const std::string& path, const std::string& folder) {
            static_cast<unsigned long long>(result.card_pictures));
   }
   return result;
+}
+
+void SetAppKeysHook(AppKeysHook hook) {
+  g_app_keys_hook = hook;
+  // The next frame with keys gives them to the new hook.
+  g_app_keys_last = 0;
 }

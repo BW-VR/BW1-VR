@@ -790,15 +790,19 @@ void* PlayThread(void* arg) {
       early = app->ring.BeginWrite(&early_waited);
       VkImage image = VK_NULL_HANDLE;
       if (early >= 0 && app->xr.DensityBegin(early, app->render_w, app->render_h, &image)) {
-        density = VkSceneDensityTarget(reinterpret_cast<uint64_t>(image), app->render_w,
-                                       app->render_h);
+        const int taken = VkSceneDensityTarget(reinterpret_cast<uint64_t>(image),
+                                               app->render_w, app->render_h);
+        density = taken > 0;
         if (!density) {
-          // The image goes back unused, and this game has no more tries.
+          // The image goes back unused. Result 0: the renderer is not ready yet,
+          // so the next batch asks again. Else this game has no more tries.
           app->xr.DirectEnd(early);
-          app->density_off = true;
-          AppLog("game         : xr_density_pass=1, but the renderer took no view of the "
-                 "swapchain image (see the line of vk scene before). The rest of this game "
-                 "goes the old way");
+          if (taken < 0) {
+            app->density_off = true;
+            AppLog("game         : xr_density_pass=1, but the renderer cannot draw into the "
+                   "swapchain image (see the line of vk scene before). The rest of this game "
+                   "goes the old way");
+          }
         }
       }
     }

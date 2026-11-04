@@ -6463,14 +6463,15 @@ static VkImageView DensityViewOf(VkImage image) {
   return made;
 }
 
-bool VkSceneDensityTarget(uint64_t image, uint32_t width, uint32_t height) {
+int VkSceneDensityTarget(uint64_t image, uint32_t width, uint32_t height) {
   g_density_set = false;
-  if (!g_direct || !VkSceneOn() || !vk::Started() || !vk::Get().external ||
-      !vk::Get().density_map || image == 0 || width == 0 || height == 0) {
-    return false;
-  }
+  // The options of the game and the device come with the first frames: until
+  // then the app tries again with the next batch.
+  if (!g_direct || !VkSceneOn() || image == 0 || width == 0 || height == 0) return 0;
+  if (!Ready()) return g_failed ? -1 : 0;
+  if (!vk::Get().external || !vk::Get().density_map) return -1;
   const VkImageView view = DensityViewOf((VkImage)image);
-  if (view == VK_NULL_HANDLE) return false;
+  if (view == VK_NULL_HANDLE) return -1;
   g_density_target = vk::Image();
   g_density_target.image = (VkImage)image;
   g_density_target.view = view;
@@ -6480,7 +6481,7 @@ bool VkSceneDensityTarget(uint64_t image, uint32_t width, uint32_t height) {
   g_density_target.levels = 1;
   g_density_target.layers = 2;
   g_density_set = true;
-  return true;
+  return 1;
 }
 
 void VkSceneDensityTargetEnd() { g_density_set = false; }

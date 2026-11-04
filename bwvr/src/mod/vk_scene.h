@@ -206,10 +206,12 @@ void VkSceneComposeStop();
 // eyes with fovea_res=1 then draws its list of draws one time into that image,
 // with a fragment density map (fovea_res_center_deg, fovea_res_outer_pct and
 // vk_density_ring_deg give the map, the gaze moves it), and the walk makes no
-// outer image, no centre image, no compose and no copy. False when the renderer
-// cannot (no density map on the device, no view of the image): the walks go the
-// old way. The image stays in the layout of a color attachment.
-bool VkSceneDensityTarget(uint64_t image, uint32_t width, uint32_t height);
+// outer image, no centre image, no compose and no copy. The image stays in the
+// layout of a color attachment. The result: 1 the renderer took the image. 0 not
+// now (the renderer or the options of the game are not ready), so the walks of
+// this batch go the old way and the app asks again with the next batch. -1 never
+// (no density map on the device, no view of the image): the walks go the old way.
+int VkSceneDensityTarget(uint64_t image, uint32_t width, uint32_t height);
 // After the batch: no walk draws into the image any more.
 void VkSceneDensityTargetEnd();
 // True when the last eye picture (VkSceneEyes) is that image, drawn by the one

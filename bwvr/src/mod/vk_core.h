@@ -105,6 +105,8 @@ namespace vk {
   X(vkCmdSetDepthTestEnable)          \
   X(vkCmdSetDepthWriteEnable)         \
   X(vkCmdSetDepthCompareOp)           \
+  X(vkCmdSetDepthBiasEnable)          \
+  X(vkCmdSetDepthBias)                \
   X(vkCmdDrawIndexed)                 \
   X(vkCmdDraw)                        \
   X(vkCmdClearAttachments)            \

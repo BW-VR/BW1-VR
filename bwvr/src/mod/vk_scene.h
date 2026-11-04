@@ -305,6 +305,18 @@ void VkSceneSetTextureReuse(int on);
 // the picture of the present before, with no wait for the GPU. 0: it waits
 // for the picture of this present.
 void VkSceneSetPresentLate(int on);
+// vk_equal_depth of bwvr.ini (docs/backend.md, "The depth test EQUAL"): 1 (the
+// default) draws a draw with ZFUNC EQUAL as LESS_OR_EQUAL with a depth bias of
+// a few steps toward the camera (equal_depth_math.h), so a layer passes over the
+// mesh under it when the depths differ by the rounding. 0: the test EQUAL of
+// the game. The game process has the key and sends it with each draw.
+void VkSceneSetEqualDepth(int on);
+bool VkSceneEqualDepthWanted();
+// The row of the debug menu and the test key (Ctrl Shift 2).
+int VkSceneEqualDepthValue();
+void VkSceneEqualDepthToggle(const char* keys);
+// The draws with ZFUNC EQUAL since the last call: with the bias, and without.
+void VkSceneEqualDepthCounts(uint64_t* biased, uint64_t* plain);
 
 
 // THE MESHES ON THE GPU (gpu_mesh of bwvr.ini, gpu_mesh_math.h, docs/software-tnl.md,

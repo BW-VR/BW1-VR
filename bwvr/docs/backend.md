@@ -4389,6 +4389,44 @@ the walk (`android.md`, "The GPU parts of the walk").
 **Not shown yet:** the GPU time of a walk with the keys at 1 and at 0 in a
 Quest 3. Only the Quest shows the GPU time that counts.
 
+**The depth test EQUAL** (`vk_equal_depth`, 1 is the default, a row of the
+debug menu and the test key Ctrl Shift 2). A layer of the game (the snow on a
+roof, a lit copy over a mesh) draws the vertices of the mesh under it with
+ZFUNC EQUAL, so it passes where its depth is the depth that the mesh wrote.
+That holds when both draws come from the x87 code of the game. When the mesh is
+on the GPU path (`gpu_mesh=1`) its depth comes from the vertex shader, and the
+layer on the CPU path has the depth of the x87 code. With `vk_equal_depth=1`
+the renderer draws a draw with ZFUNC EQUAL, the test on, as LESS_OR_EQUAL with a
+depth bias toward the camera of 4 steps of the depth image
+(`equal_depth_math.h`: `constantFactor` of -4, no slope factor). The depth image
+is D32_SFLOAT, so a step is `2^(exponent of the depth - 23)` and the bias
+scales with the depth. `DrawStates` sets it, so every pass that draws with these
+states has it: the walk, the passes of the foveated images and the one pass.
+The bias is a dynamic state (`vkCmdSetDepthBiasEnable`, `vkCmdSetDepthBias`,
+Vulkan 1.3), and every other draw has it off. The record of a draw gives the
+value 9 for ZFUNC (no value of Direct3D) when the key is on at the record,
+so the sort and the merge of the draws keep these draws apart, and the key
+works for each draw at once, also in the headset app (the game sends it in
+`StreamState`).
+
+The size of the error that the bias covers: the checks in float math (the
+loops of the game against the shader, 48000 points) give a depth that is
+the same bit for bit for 99.5 to 99.9 percent of the points and 1 or 2 steps for the
+others, at the distance of 2 times the near distance and more. Nearer than that
+the error is at most 1.8e-7 in the depth (the rounding of `1 - rhw`), which is
+less than the bias of 4 steps at the depth 0.5. A surface in front of the layer
+hides it when it is nearer by more than the bias: 0.016 units at the
+distance 100, 0.14 at 300, 1.6 at 1000 and 6.4 at 2000 (near plane 0.15, the
+step of the depth image there is the limit of the depth buffer itself).
+**Limits.** LESS_OR_EQUAL also passes where the layer is in front of the depth
+image, not only where it is equal. A layer over a mesh that did not write a
+pixel (a texel with the alpha test) can show on the surface behind it. The
+10 s line of the mod (`gpu mesh`) counts the draws with ZFUNC EQUAL for the
+meshes on the GPU path by function, and for the batches of the game on the CPU
+path by `DrawTriangle` and `DrawAndClip`, with the first 16 return addresses of the
+callers. The line `vk scene` (and `time` in the app) counts the draws that got the bias
+and the draws that did not.
+
 ## The backend of the mod on Vulkan
 
 `backend=vulkan` (`vk_ddraw.cpp`) makes DirectDraw 7 and Direct3D 7 in the
@@ -6947,6 +6985,7 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift H | `test_keys=1` | In the God view the Creature turns to and looks at the head of the player, or at the game's own camera. A long pulse and a short pulse (`creature_player_head`, `creature.md`, 5.4). Shift H with Ctrl up is a key of the render | None |
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw | Render, Frame send |
 | Ctrl Shift 7 | `test_keys=1` | With `backend=vulkan`: `gpu_mesh` is 1 or 0 (the meshes of the 3D parts on the GPU or on the CPU). With `gpu_mesh=0` in `bwvr.ini` the hooks go in at the first press. A long pulse for 1 and a short pulse for 0 (`gpu_mesh`, `software-tnl.md`, "The meshes on the GPU") | Render, GPU mesh |
+| Ctrl Shift 2 | `test_keys=1` | With `backend=vulkan`: the depth test EQUAL with the bias (`vk_equal_depth`) is on or off, for the draws that follow, also in the headset app. A long pulse for on and a short pulse for off | None |
 | Ctrl Shift 3 | `test_keys=1` | With `gpu_mesh=1`: the latch (`gpu_mesh_latch`) is on or off. A long pulse for on and a short pulse for off | None |
 | Ctrl Shift 4 | `test_keys=1` | With `gpu_mesh=1`: the batches of vertices of `fn_0081C090` (`gpu_mesh_vertices`) are on the GPU path or on the CPU path. The hook goes in at the first press. A long pulse for on and a short pulse for off | None |
 | Ctrl Shift 5 | `test_keys=1` | With `gpu_mesh=1`: the depth of the game alone (`gpu_mesh_depth`) is on or off, and the other parts stay. A long pulse for on and a short pulse for off | None |
@@ -7129,7 +7168,8 @@ keys that the launcher sets.
 | `gpu_mesh_vertices` | 0 | With `gpu_mesh=1`: 1 the batches of vertices that `fn_0081C090` draws (text in the world, icons, effects: the caller gives the positions, the colors and the texture coordinates in each call) take the GPU path: the vertices go with each draw. 0 the CPU path. A test key: Ctrl Shift 4. See `software-tnl.md`, "The meshes on the GPU" |
 | `gpu_mesh_depth` | 1 | With `gpu_mesh=1`: 1 the vertex shader makes the depth and the w as the game does, so a layer over a mesh (the snow on a roof) keeps the depth order of the CPU path. 0 the other vertex shader, with the linear depth and no `invariant`. Test keys: Ctrl Shift 5 (this part alone) and Ctrl Shift 6 (with the four keys below) |
 | `gpu_mesh_trace` | 0 | A test aid. 1: each 10 s the log has, for each caller of the five mesh functions (the return address), the meshes on the GPU path, those with blend and those outside an eye pass, and the count of frames of more than 120 ms between two frames of the hook (the menu pauses the game for about 200 ms) |
-| `gpu_mesh_blend` | 0 | With `gpu_mesh=1`: 1 puts the meshes with blend, no depth write or no depth test on the GPU path. 0 leaves them on the CPU path. Off by default: on the Frame they made the roofs with snow flicker |
+| `vk_equal_depth` | 1 | With `backend=vulkan`: 1 draws a draw with the depth test EQUAL as LESS_OR_EQUAL with a depth bias of 4 steps toward the camera, so a layer on the CPU path passes over a mesh on the GPU path. 0 tests EQUAL as the game says. A test key: Ctrl Shift 2. See "The depth test EQUAL" |
+| `gpu_mesh_blend` | 0 | With `gpu_mesh=1`: 1 puts the meshes with blend, no depth write or no depth test on the GPU path. 0 leaves them on the CPU path. Known limit with 1: on the Frame the roofs with snow flicker, and the cause is not found |
 | `gpu_mesh_stage1`, `gpu_mesh_uvshift`, `gpu_mesh_group` | 1 | With `gpu_mesh=1`: 1 puts the meshes with a texture on stage 1 (stage1), with a shift of the texture (uvshift) and with a matrix for each group of vertices (group) on the GPU path. 0 leaves that kind on the CPU path. A test key: Ctrl Shift 6 turns all the parts (with blend and the depth of the game) off and on |
 | `gpu_mesh_check_frames` | 30 | With `gpu_mesh=1`: the frames between two full sums over the words of a mesh. A draw tests the pointers, the counts and a sample of a few words. 0: a full sum at each draw |
 | `gpu_mesh_timer` | 0 | A test aid. 1: a second line each 10 s has the time of each part of the hook (a clock read for each part) |

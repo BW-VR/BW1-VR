@@ -253,7 +253,7 @@ that kind of mesh on the CPU path), and a switch for a live test:
 
 | Part | Key | What it takes |
 | --- | --- | --- |
-| Blend | `gpu_mesh_blend` (0 by default) | a mesh with blend, with no depth write or with no depth test (the glass, the shadows, the effects, the leaves of a tree). Off by default: on the Frame the meshes with blend on the GPU path made the roofs of the houses with snow flicker, and the pictures old at the game menu when the head turns. Open: the cause |
+| Blend | `gpu_mesh_blend` (0 by default) | a mesh with blend, with no depth write or with no depth test (the glass, the shadows, the effects, the leaves of a tree). Off by default. Known limit with 1: on the Frame the roofs of the houses with snow flicker, and the pictures are old at the game menu when the head turns. Open: the cause |
 | Stage 1 | `gpu_mesh_stage1` | a mesh with a texture on stage 1. The vertex shader gives stage 1 the texture coordinates of stage 0, as the vertex format of the game (FVF `0x1C4`) does |
 | Shift of the texture | `gpu_mesh_uvshift` | a mesh that `DrawTriangle` shifts (`0x00ECA628`, the values at `0x00ECA62C` and `0x00ECA630`: water and fire). The shift is part of the record and the shader adds it to u and v |
 | Groups | `gpu_mesh_group` | a mesh with a matrix for each group of vertices (below) |
@@ -409,16 +409,20 @@ come through `DrawTriangle` from `fn_0081C090` (60000), `fn_007A8DB0` (26000) an
 first group goes to the GPU path, and the layers after a mesh on the GPU path
 are 82000 in 10 s, 70000 of them from `fn_007A8DB0`.
 
-**Layers on two paths.** The Frame runs with `gpu_mesh_blend=0` showed no flicker of
-the roofs and no snow: the roof (opaque) is on the GPU path, and the snow, a layer
-with the same vertices drawn by a mesh class function on the CPU path, loses the
-depth test of LESSEQUAL against the roof, because the depth of the GPU is not the
-same bit for bit as the depth of the x87 code. With all meshes on the GPU path
-the layers that come through the five functions have the same bits, but the
-layers from the mesh class functions are still on the CPU path, and they flicker
-where the two depths are within a rounding. All on the CPU path (`gpu_mesh=0`)
-works. This is the working theory, not proven. The latch below puts the meshes
-under such a layer on the CPU path.
+**Layers on two paths.** The layers that the log names (`fn_00851870`,
+`fn_00859D90`, `fn_0084E200`) have blend, a depth write and the depth test EQUAL
+(zfunc 3), so a layer passes only where its depth is the depth of the mesh under
+it. On the CPU path both come from the x87 code of the game, with the same bits.
+A mesh on the GPU path has the depth of the vertex shader, and a layer on the CPU
+path over it can differ by a step or two of the depth image. The renderer draws
+a draw with the test EQUAL as LESS_OR_EQUAL with a small depth bias
+(`vk_equal_depth`, `backend.md`, "The depth test EQUAL"), so such a layer passes.
+The checks in float math give a depth that is the same bit for bit for 99.5 to
+99.9 percent of the vertices of the two paths, so the bias is a safety margin, and
+no run in the game has shown yet that it brings the snow back. With all on the CPU
+path (`gpu_mesh=0`) the snow is right. Open: the cause of the missing snow with
+`gpu_mesh_blend=0` and of the flicker with `gpu_mesh_blend=1`. The latch below puts
+the meshes under such a layer on the CPU path.
 
 **The latch** (`gpu_mesh_latch`, 1 by default, Ctrl Shift 3 with `test_keys=1`).
 A mesh class of the engine has a draw function of its own on the CPU path, and

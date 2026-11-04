@@ -27,6 +27,7 @@ enum StateSlot {
   kDepthTest,
   kDepthWrite,
   kDepthCompare,
+  kDepthBias,
   kTopology,
   kViewport,
   kScissor,

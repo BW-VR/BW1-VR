@@ -28,7 +28,7 @@
 // the w as the game does, so two layers on one surface (the snow on a roof)
 // keep the depth order of the CPU path. 0 the linear form. It is one of the
 // parts that Ctrl Shift 6 turns off and on.
-// gpu_mesh_check_frames=N (120 by default): a mesh has a full sum over its
+// gpu_mesh_check_frames=N (30 by default): a mesh has a full sum over its
 // words each N frames, and a cheap sample at each draw. 0: the full sum at
 // each draw. gpu_mesh_timer=1: the log line has the time of each part of the
 // hook (it costs a clock read for each part).
@@ -38,13 +38,16 @@ struct GpuMeshOptions {
   int compare_every = 0;
   int kinds = 31;
   int blend = 1, stage1 = 1, uvshift = 1, group = 1, depth = 1;
-  int check_frames = 120;
+  int check_frames = 30;
   int timer = 0;
 };
 void GpuMeshSetOptions(const GpuMeshOptions& options);
 void GpuMeshInstall();
 // h_FinishFrame, after the present: the test key and the report.
 void GpuMeshFrame();
+// h_DrawTriangle (via 0) and h_DrawAndClip (via 1), at their start: the count of
+// the layers on the CPU path right after a mesh on the GPU path.
+void GpuMeshCpuBatch(uint32_t caller, int via);
 // The debug page: the value (0 CPU, 1 GPU) or kDebugCannot, and the switch.
 // With gpu_mesh=0 and test_keys=1 the hooks are put in at the first switch.
 int GpuMeshValue();

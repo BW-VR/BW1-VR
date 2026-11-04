@@ -15,7 +15,8 @@
 // is the constant per_rhw * (2 / Width) in clip space (the move of the pixel
 // times w is per_rhw * rhw * w = per_rhw, as rhw = 1 / w).
 //
-// Three variants (tools/mesh_shaders.ps1 makes vk_mesh_vert.h from them):
+// Six variants (LEGACY is the form of gpu_mesh_depth=0). tools/mesh_shaders.ps1 makes
+// vk_mesh_vert.h from them:
 //   glslc -mfmt=c --target-env=vulkan1.3 -fshader-stage=vertex vk_mesh.vert
 //   OFFSETS: the offset of each vertex (a person or an animal, fn_00859530)
 //   GROUPS:  a matrix for each group of vertices (and a light for each group
@@ -51,7 +52,9 @@ layout(push_constant) uniform Draw {
   uvec4 ops1;
 } draw;
 
+#ifndef LEGACY
 invariant gl_Position;
+#endif
 
 layout(location = 0) out vec4 out_diffuse;
 layout(location = 1) out vec4 out_specular;
@@ -82,20 +85,37 @@ void main() {
   const uint at = uint(row0.x) + group * 12u;
   const float cx = dot(vec4(groups.g[at], groups.g[at + 1u], groups.g[at + 2u], groups.g[at + 3u]), q);
   const float cy = dot(vec4(groups.g[at + 4u], groups.g[at + 5u], groups.g[at + 6u], groups.g[at + 7u]), q);
+#ifdef LEGACY
   const float cz = dot(vec4(groups.g[at + 8u], groups.g[at + 9u], groups.g[at + 10u], groups.g[at + 11u]), q);
+#else
+  // The order of the sums of the loops of the game for z: ((x + y) + z) + t, with
+  // no fused operation, so that the depth has the rounding of the game.
+  precise float cz = ((groups.g[at + 8u] * p.x + groups.g[at + 9u] * p.y) +
+                      groups.g[at + 10u] * p.z) + groups.g[at + 11u];
+#endif
 #else
   const float cx = dot(row0, q);
   const float cy = dot(row1, q);
+#ifdef LEGACY
   const float cz = dot(row2, q);
+#else
+  precise float cz = ((row2.x * p.x + row2.y * p.y) + row2.z * p.z) + row2.w;
+#endif
 #endif
   const float near_plane = scene.x;
   // Flag 8: the depth and the w of the game (rhw = near * (1 / cz), z = 1 - rhw,
   // each rounded, then z * w), so two layers on one surface keep the order of
   // the CPU path. The linear form (w - 1) has a larger error in z.
+#ifdef LEGACY
+  // LEGACY (the variant for gpu_mesh_depth=0): the linear form, with no
+  // invariant and no precise.
+  const float w = cz / near_plane;
+#else
   const bool game_depth = (colors.w & 8u) != 0u && cz > 1e-4;
   precise float rhw = near_plane * (1.0 / cz);
   precise float game_z = 1.0 - rhw;
   precise float w = game_depth ? 1.0 / rhw : cz / near_plane;
+#endif
   const float kx = scene.y * draw.viewport.z;
   const float ky = scene.z * draw.viewport.w;
   const float ax = (scene.y + 0.5 - draw.viewport.x) * draw.viewport.z - 1.0;
@@ -105,8 +125,12 @@ void main() {
   if (gl_ViewIndex == 1 && (draw.ops.w & 1u) == 0u) {
     xc += draw.depth.z * draw.viewport.z;
   }
+#ifdef LEGACY
+  const float zc = draw.depth.y * (w * (1.0 - draw.depth.x) - 1.0);
+#else
   precise float zc = game_depth ? ((game_z - draw.depth.x) * draw.depth.y) * w
                                 : draw.depth.y * (w * (1.0 - draw.depth.x) - 1.0);
+#endif
   gl_Position = vec4(xc, yc, zc, w);
 
   uint color = colors.x;

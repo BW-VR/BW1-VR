@@ -405,22 +405,18 @@ class Writer {
               const void* c = nullptr, uint32_t c_bytes = 0) {
     const uint32_t size = body_bytes + a_bytes + b_bytes + c_bytes;
     const uint32_t head[2] = {static_cast<uint32_t>(kind), size};
-    // One growth of the buffer for the whole record, with the padding to 4
-    // bytes, then the copies. A record of a draw of a mesh is hundreds of
-    // bytes, and a byte by byte insert was most of its cost.
-    const size_t at = bytes_.size();
+    // Range inserts: a copy of the bytes of each block, with no fill of new
+    // bytes first and no push of a byte at a time (the buffer grows by the
+    // factor of the vector). The padding to 4 bytes is the only fill.
     const size_t padded = (static_cast<size_t>(size) + sizeof(head) + 3) & ~static_cast<size_t>(3);
-    bytes_.resize(at + padded);
-    uint8_t* p = bytes_.data() + at;
-    memcpy(p, head, sizeof(head));
-    p += sizeof(head);
-    if (body_bytes > 0 && body != nullptr) memcpy(p, body, body_bytes);
-    p += body_bytes;
-    if (a_bytes > 0 && a != nullptr) memcpy(p, a, a_bytes);
-    p += a_bytes;
-    if (b_bytes > 0 && b != nullptr) memcpy(p, b, b_bytes);
-    p += b_bytes;
-    if (c_bytes > 0 && c != nullptr) memcpy(p, c, c_bytes);
+    const uint8_t* h = reinterpret_cast<const uint8_t*>(head);
+    bytes_.insert(bytes_.end(), h, h + sizeof(head));
+    Put(body, body_bytes);
+    Put(a, a_bytes);
+    Put(b, b_bytes);
+    Put(c, c_bytes);
+    const size_t pad = padded - (static_cast<size_t>(size) + sizeof(head));
+    if (pad > 0) bytes_.insert(bytes_.end(), pad, 0);
   }
 
  private:

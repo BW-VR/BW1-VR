@@ -43,15 +43,14 @@
 // path, with the same states, and the triangles of a mesh go in the order of
 // its indices in both paths.
 //
-// WHICH MESH TAKES THE CPU PATH. A mesh with a matrix for each group of
-// vertices (the flag in the first word of the mesh group, as long as the
-// groups are not on the GPU), a draw with the clamp of the screen
-// (0x00FA9398), a mesh that h_DrawTriangle changes (the glow of a target, an
-// advisor of a cut scene, the box of a speech bubble), a mesh with more than
-// 20000 vertices or 40000 triangles, and a mesh of a function that
+// WHICH MESH TAKES THE CPU PATH. A draw with the clamp of the screen
+// (0x00FA9398, the icons of the spells), a mesh that h_DrawTriangle changes (the
+// glow of a target, an advisor of a cut scene, the box of a speech bubble), a
+// mesh with more than 20000 vertices or 40000 triangles, a mesh with groups
+// whose counts are not its vertex count, and a mesh of a function that
 // gpu_mesh_kinds leaves out. The keys gpu_mesh_blend, gpu_mesh_stage1,
-// gpu_mesh_uvshift and gpu_mesh_group put the other kinds on the CPU path
-// again. The log counts each reason apart.
+// gpu_mesh_uvshift and gpu_mesh_group put that kind of mesh on the CPU path.
+// The log counts each reason apart.
 //
 // THE COMPARE (gpu_mesh=2). Each mesh that could take the GPU path is drawn
 // two times: the function of the game draws it in the left eye layer, and the
@@ -63,6 +62,7 @@
 #include <windows.h>
 #include <intrin.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "MinHook.h"
@@ -149,7 +149,7 @@ uint32_t g_kinds = 31;    // gpu_mesh_kinds: bit k of the functions on the GPU p
 uint32_t g_base_kinds = 31;
 uint32_t g_parts_keys = gm::kPartsAll;  // gpu_mesh_blend and the other keys
 uint32_t g_parts = gm::kPartsAll;       // the parts now (the test key turns them off)
-uint32_t g_check_frames = 120;          // gpu_mesh_check_frames
+uint32_t g_check_frames = 30;           // gpu_mesh_check_frames
 bool g_timer = false;                   // gpu_mesh_timer
 uint64_t g_frames = 0;
 int g_sample = 0;
@@ -158,6 +158,7 @@ bool g_test_keys = false;
 bool g_in = false;
 bool g_key_down = false;
 bool g_parts_key_down = false;
+bool g_depth_key_down = false;
 bool g_said_backend = false;
 // Latched for each frame (GpuMeshFrame): the mode, and a renderer that draws
 // the meshes.
@@ -165,6 +166,25 @@ bool g_active = false;
 uint32_t g_frame = 0;  // the frame number of the checks of the data
 uint64_t g_report_at = 0;
 uintptr_t g_last_mesh = 0;  // the mesh of the last draw on the GPU path
+// The last draw on the GPU path, for the log of the pairs of layers.
+struct LastDraw {
+  uintptr_t mesh;
+  uint32_t type, kind, vertices, zfunc, zwrite, blend, grouped;
+  const void* data;
+  float rows[12];
+};
+LastDraw g_last = {};
+bool g_last_layer = false;   // the last draw on the GPU path was a layer
+bool g_after_gpu = false;    // the draw before was a mesh on the GPU path
+uint32_t g_pairs_said = 0;
+struct Caller {
+  uint32_t address;
+  uint32_t count;
+  uint32_t via;
+};
+Caller g_callers[8] = {};
+uint32_t g_epoch = 0;       // VkStreamMeshEpoch, read one time in a frame (GpuMeshFrame)
+uint32_t g_changes_said_sample = 0, g_changes_said_full = 0;  // lines of the log for a change
 
 // For the report.
 struct Counts {
@@ -188,11 +208,21 @@ struct Counts {
   uint32_t f_blend = 0, f_nozwrite = 0, f_noztest = 0, f_stage1 = 0, f_uv = 0;
   uint32_t data_sent = 0;
   uint32_t data_changed = 0;  // a mesh whose words changed at the same address
+  uint32_t changed_sample = 0;  // of them found by the sample at a draw
+  uint32_t changed_full = 0;    // of them found only by the full sum
+  uint32_t full_age_max = 0;    // frames between the last full sum and one that found a change
+  uint32_t changes_said = 0;    // lines of the log for a change
   uint32_t data_full = 0;     // full sums
   uint32_t data_retry = 0;    // data that the renderer dropped, given again
   uint32_t f_group = 0;       // meshes on the GPU path with groups
   uint32_t f_layer = 0;       // blend or no depth write with a depth test of EQUAL or LESSEQUAL
   uint32_t f_layer_same = 0;  // of them the mesh that the draw before drew too
+  uint32_t f_layer_pairs = 0; // a layer right after a layer on the GPU path
+  // CPU batches (DrawTriangle, DrawAndClip) with blend or no depth write and a
+  // depth test of EQUAL or LESSEQUAL right after a draw of a mesh on the GPU
+  // path: a layer on the CPU path over a mesh on the GPU path.
+  uint32_t cpu_layer[2] = {};
+  uint32_t cpu_after_gpu = 0;  // all CPU batches right after a mesh on the GPU path
   uint32_t groups = 0;        // the groups of those meshes
   uint32_t lights = 0;        // lights of groups checked against the functions of the game
   uint32_t light_diff = 0;    // of them with other bits
@@ -222,6 +252,10 @@ struct Known {
   uint32_t vertex_count, triangles;
   uint32_t epoch;
   uint32_t group_count;  // the groups that the renderer has for the mesh (0: none)
+  uint32_t checked;    // the frame of the last test of the data
+  uint32_t full_at;    // the frame of the last full sum
+  uint32_t* blocks;    // the sums of the 32 byte blocks of the data, to find a change
+  uint32_t block_count;
   uint32_t next_full;  // the frame of the next full sum
   uint32_t cpu_until;  // the frame until which the mesh goes to the CPU path (the state test failed)
   uint32_t retry_at;   // the frame of the next try to give the renderer its data, or 0
@@ -334,10 +368,66 @@ struct PartClock {
 // full sum comes at a slow rate (gpu_mesh_check_frames), and at each draw for a
 // mesh whose words changed once. The offsets of a person or an animal are not
 // part of the data: each draw sends them.
+// Keeps the sums of the blocks of the data of a mesh, to say where a change is.
+void KeepBlocks(Known* known, const uint8_t* vertices, uint32_t n, const uint16_t* indices,
+                uint32_t triangles) {
+  const uint32_t count = gm::BlockCount(n, triangles);
+  if (known->block_count != count) {
+    free(known->blocks);
+    known->blocks = static_cast<uint32_t*>(malloc(sizeof(uint32_t) * count));
+    known->block_count = known->blocks != nullptr ? count : 0;
+  }
+  if (known->blocks != nullptr) gm::BlockSums(vertices, n, indices, triangles, known->blocks);
+}
+
+// A mesh whose words changed at the same address: the first lines of the log
+// say how the change was found, the mesh and the first changed block.
+void SayChange(Known* known, uintptr_t m, const uint8_t* vertices, uint32_t n,
+               const uint16_t* indices, uint32_t triangles, bool by_sample) {
+  if (by_sample) {
+    ++g_counts.changed_sample;
+  } else {
+    ++g_counts.changed_full;
+    const uint32_t age = g_frame - known->full_at;
+    if (age > g_counts.full_age_max) g_counts.full_age_max = age;
+  }
+  // The first 12 changes that the sample found, and the first 12 that only the
+  // full sum found, since the start.
+  uint32_t& said = by_sample ? g_changes_said_sample : g_changes_said_full;
+  if (said >= 12) return;
+  ++said;
+  ++g_counts.changes_said;
+  int block = -1;
+  if (known->blocks != nullptr && known->block_count == gm::BlockCount(n, triangles)) {
+    static uint32_t now[(gm::kMostVertices * 32 + gm::kMostTriangles * 6) / 32 + 2];
+    gm::BlockSums(vertices, n, indices, triangles, now);
+    block = gm::FirstChangedBlock(known->blocks, now, known->block_count);
+  }
+  const uint32_t type = Read<uint32_t>(m);
+  if (block < 0) {
+    ModLog("gpu mesh     : a mesh changed in place, found by the %s: mesh 0x%08X, type %u, %u "
+           "vertices, %u triangles, the first changed place is not known",
+           by_sample ? "sample" : "full sum", static_cast<unsigned>(m), type, n, triangles);
+  } else if (static_cast<uint32_t>(block) < n) {
+    const float* v = reinterpret_cast<const float*>(vertices + static_cast<size_t>(block) * 32);
+    ModLog("gpu mesh     : a mesh changed in place, found by the %s: mesh 0x%08X, type %u, %u "
+           "vertices, %u triangles, the first changed place is vertex %d (now %.3f %.3f %.3f, uv "
+           "%.3f %.3f, normal %.3f %.3f %.3f), frames since the last full sum %u",
+           by_sample ? "sample" : "full sum", static_cast<unsigned>(m), type, n, triangles, block,
+           v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], g_frame - known->full_at);
+  } else {
+    ModLog("gpu mesh     : a mesh changed in place, found by the %s: mesh 0x%08X, type %u, %u "
+           "vertices, %u triangles, the first changed place is in the indices, about triangle %u, "
+           "frames since the last full sum %u",
+           by_sample ? "sample" : "full sum", static_cast<unsigned>(m), type, n, triangles,
+           (static_cast<uint32_t>(block) - n) * 32 / 6, g_frame - known->full_at);
+  }
+}
+
 void GiveData(Known* known, uintptr_t m, const uint8_t* vertices, uint32_t n,
               const uint16_t* indices, uint32_t triangles, const gm::MeshGroup* groups,
               uint32_t group_count, bool want_groups) {
-  const uint32_t epoch = VkStreamMeshEpoch();
+  const uint32_t epoch = g_epoch;
   const bool same_place = known->mesh == m && known->vertices == vertices &&
                           known->indices == indices && known->vertex_count == n &&
                           known->triangles == triangles;
@@ -358,20 +448,29 @@ void GiveData(Known* known, uintptr_t m, const uint8_t* vertices, uint32_t n,
                             ? 0u
                             : g_frame + 30u;
     }
+    // A mesh is tested once in a frame: the draws of an instance in the same
+    // frame see the same words.
+    if (known->checked == g_frame) return;
+    known->checked = g_frame;
     const bool full = g_check_frames == 0 || (known->flags & kKnownChanged) != 0 ||
                       static_cast<int32_t>(g_frame - known->next_full) >= 0;
     const uint32_t sample = gm::MeshSample(vertices, n, indices, triangles);
     if (sample == known->sample && !full) return;
     ++g_counts.data_full;
     hash = gm::MeshHash(vertices, n, indices, triangles, groups, group_count);
-    known->next_full = g_frame + g_check_frames + static_cast<uint32_t>((m >> 4) % 64);
+    const bool by_sample = sample != known->sample;
+    known->next_full =
+        g_frame + g_check_frames + static_cast<uint32_t>((m >> 4) % (g_check_frames / 2 + 1));
     if (hash == known->hash) {
       known->sample = sample;
+      known->full_at = g_frame;
       return;
     }
     have_hash = true;
     known->flags |= kKnownChanged;
     ++g_counts.data_changed;
+    SayChange(known, m, vertices, n, indices, triangles, by_sample);
+    known->full_at = g_frame;
   }
   if (!have_hash) hash = gm::MeshHash(vertices, n, indices, triangles, groups, group_count);
   // The ordinals of the groups go with the data when the mesh has valid
@@ -397,7 +496,11 @@ void GiveData(Known* known, uintptr_t m, const uint8_t* vertices, uint32_t n,
   known->vertices = vertices;
   known->indices = indices;
   known->group_count = sent_groups;
-  known->next_full = g_frame + g_check_frames + static_cast<uint32_t>((m >> 4) % 64);
+  known->checked = g_frame;
+  known->full_at = g_frame;
+  KeepBlocks(known, vertices, n, indices, triangles);
+  known->next_full =
+        g_frame + g_check_frames + static_cast<uint32_t>((m >> 4) % (g_check_frames / 2 + 1));
   // A renderer in this process that dropped the data (no room, not ready)
   // gets them again from the data of this draw, in a few frames.
   known->retry_at = taken ? 0u : g_frame + 30u;
@@ -512,38 +615,10 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
     ++g_counts.r_cached;
     return false;
   }
-  clock->Lap(0);
-
-  // The material, and the state of the device that it left.
-  Write<void*>(kCurrentMesh, mesh);
-  RunMaterial(mesh);
-  clock->Lap(1);
-  gm::DeviceState state = {};
-  if (!VkDdrawMeshState(Read<void*>(kDevice), &state)) {
-    ++g_counts.r_data;
-    return false;
-  }
-  const uint32_t reasons = gm::StateReasons(state);
-  if (!gm::StateAllowed(reasons, g_parts)) {
-    // The first reason that is not on the GPU path.
-    if ((reasons & gm::kStateBlend) != 0 && (g_parts & gm::kPartBlend) == 0) {
-      ++g_counts.r_blend;
-    } else if ((reasons & gm::kStateNoZWrite) != 0 && (g_parts & gm::kPartBlend) == 0) {
-      ++g_counts.r_nozwrite;
-    } else if ((reasons & gm::kStateNoZTest) != 0 && (g_parts & gm::kPartBlend) == 0) {
-      ++g_counts.r_noztest;
-    } else {
-      ++g_counts.r_stage1;
-    }
-    known->cpu_until = g_frame + 30u;
-    return false;
-  }
-  out->zfunc = state.z_func;
-  out->cull = state.cull;
-  out->zwrite = state.z_write;
-  clock->Lap(2);
-
-  // The values of the draw.
+  // The values of the draw that the loops of the game read before the material
+  // (the color, the matrix, the light, the ambient value, the position of the
+  // light and the matrices of the groups): the hook reads them here too, in
+  // case the material changes one of them.
   gm::Consts& c = out->c;
   c = gm::Consts();
   if (!grouped) gm::SetMatrix(&c, matrix);
@@ -552,10 +627,6 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
   c.half_x = half_x;
   c.half_y = half_y;
   c.specular = specular;
-  if (shifted) {
-    c.uv_shift_u = Read<float>(kUvShiftU);
-    c.uv_shift_v = Read<float>(kUvShiftV);
-  }
   const bool lit = kind == kLit || kind == kLitClip || kind == kOffsets;
   c.color = (kind == kLit || kind == kLitClip) ? MeshColor(mesh, color) : color;
   if (lit) {
@@ -564,69 +635,10 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
     memcpy(c.light, reinterpret_cast<const void*>(kLightDirection), 12);
     c.ambient = Read<int32_t>(kAmbient);
   }
-  out->offsets = nullptr;
-  out->offset_floats = 0;
-  out->source = offsets;
-  out->offset_step = offset_kind == 2 ? 3u : 1u;
-  if (kind == kOffsets) {
-    if (offset_kind == 1) {
-      for (uint32_t i = 0; i < n; ++i) {
-        g_expanded[3 * i] = 0.0f;
-        g_expanded[3 * i + 1] = offsets[i];
-        g_expanded[3 * i + 2] = 0.0f;
-      }
-      out->offsets = g_expanded;
-    } else {
-      out->offsets = offsets;
-    }
-    out->offset_floats = 3 * n;
-  }
-  out->vertex_count = n;
-  out->triangles = static_cast<uint32_t>(triangles);
   out->groups = nullptr;
   out->group_count = 0;
-  if (g_timer) {
-    const uint32_t type = Read<uint32_t>(m) & 31u;
-    ++g_counts.t_gpu[type];
-    if ((reasons & gm::kStateBlend) != 0) ++g_counts.t_blend[type];
-    if ((reasons & (gm::kStateNoZWrite | gm::kStateNoZTest)) != 0) ++g_counts.t_nowrite[type];
-    if ((reasons & gm::kStateStage1) != 0) ++g_counts.t_stage1[type];
-    if (shifted) ++g_counts.t_uv[type];
-    if (grouped) ++g_counts.t_group[type];
-  }
-  // A layer over a surface: a draw with blend or with no depth write that passes
-  // at the depth of what is there (D3DCMP_EQUAL 3, D3DCMP_LESSEQUAL 4). The snow
-  // on a roof is one. Two layers on the GPU path need the same depth math.
-  if ((reasons & (gm::kStateBlend | gm::kStateNoZWrite)) != 0 &&
-      (state.z_func == 3 || state.z_func == 4)) {
-    ++g_counts.f_layer;
-    if (m == g_last_mesh) ++g_counts.f_layer_same;
-  }
-  g_last_mesh = m;
-  if (reasons != 0 || shifted) {
-    if ((reasons & gm::kStateBlend) != 0) ++g_counts.f_blend;
-    if ((reasons & gm::kStateNoZWrite) != 0) ++g_counts.f_nozwrite;
-    if ((reasons & gm::kStateNoZTest) != 0) ++g_counts.f_noztest;
-    if ((reasons & gm::kStateStage1) != 0) ++g_counts.f_stage1;
-    if (shifted) ++g_counts.f_uv;
-  }
-
-  clock->Lap(3);
-
-  // The data of the mesh, one time.
-  GiveData(known, m, vertices, n, indices, out->triangles, groups, group_count, grouped);
-  clock->Lap(4);
-
-  // The matrices (and the lights) of the groups of this draw.
   gm::Consts first_group = c;
   if (grouped) {
-    if (known->group_count != group_count) {
-      // The counts of the groups are not the count of the vertices: the loop of
-      // the game leaves vertices as they were.
-      ++g_counts.r_group;
-      known->cpu_until = g_frame + 30u;
-      return false;
-    }
     const float* list = Read<const float*>(kGroupMatrices);
     const uint8_t* table = Read<const uint8_t*>(kRootTable);
     float light_position[3];
@@ -658,13 +670,144 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
         }
       }
     }
+    first_group = c;
+    memcpy(first_group.row, g_group_floats, 48);
+  }
+  clock->Lap(0);
+
+  // The material, and the state of the device that it left.
+  Write<void*>(kCurrentMesh, mesh);
+  RunMaterial(mesh);
+  clock->Lap(1);
+  gm::DeviceState state = {};
+  if (!VkDdrawMeshState(Read<void*>(kDevice), &state)) {
+    ++g_counts.r_data;
+    return false;
+  }
+  const uint32_t reasons = gm::StateReasons(state);
+  if (!gm::StateAllowed(reasons, g_parts)) {
+    // The first reason that is not on the GPU path.
+    if ((reasons & gm::kStateBlend) != 0 && (g_parts & gm::kPartBlend) == 0) {
+      ++g_counts.r_blend;
+    } else if ((reasons & gm::kStateNoZWrite) != 0 && (g_parts & gm::kPartBlend) == 0) {
+      ++g_counts.r_nozwrite;
+    } else if ((reasons & gm::kStateNoZTest) != 0 && (g_parts & gm::kPartBlend) == 0) {
+      ++g_counts.r_noztest;
+    } else {
+      ++g_counts.r_stage1;
+    }
+    known->cpu_until = g_frame + 30u;
+    return false;
+  }
+  out->zfunc = state.z_func;
+  out->cull = state.cull;
+  out->zwrite = state.z_write;
+  clock->Lap(2);
+  if (shifted) {
+    c.uv_shift_u = Read<float>(kUvShiftU);
+    c.uv_shift_v = Read<float>(kUvShiftV);
+  }
+  out->offsets = nullptr;
+  out->offset_floats = 0;
+  out->source = offsets;
+  out->offset_step = offset_kind == 2 ? 3u : 1u;
+  if (kind == kOffsets) {
+    if (offset_kind == 1) {
+      for (uint32_t i = 0; i < n; ++i) {
+        g_expanded[3 * i] = 0.0f;
+        g_expanded[3 * i + 1] = offsets[i];
+        g_expanded[3 * i + 2] = 0.0f;
+      }
+      out->offsets = g_expanded;
+    } else {
+      out->offsets = offsets;
+    }
+    out->offset_floats = 3 * n;
+  }
+  out->vertex_count = n;
+  out->triangles = static_cast<uint32_t>(triangles);
+  if (g_timer) {
+    const uint32_t type = Read<uint32_t>(m) & 31u;
+    ++g_counts.t_gpu[type];
+    if ((reasons & gm::kStateBlend) != 0) ++g_counts.t_blend[type];
+    if ((reasons & (gm::kStateNoZWrite | gm::kStateNoZTest)) != 0) ++g_counts.t_nowrite[type];
+    if ((reasons & gm::kStateStage1) != 0) ++g_counts.t_stage1[type];
+    if (shifted) ++g_counts.t_uv[type];
+    if (grouped) ++g_counts.t_group[type];
+  }
+  // A layer over a surface: a draw with blend or with no depth write that passes
+  // at the depth of what is there (D3DCMP_EQUAL 3, D3DCMP_LESSEQUAL 4). The snow
+  // on a roof is one. Two layers on the GPU path need the same depth math.
+  const bool is_layer = (reasons & (gm::kStateBlend | gm::kStateNoZWrite)) != 0 &&
+                        (state.z_func == 3 || state.z_func == 4);
+  LastDraw now = {};
+  now.mesh = m;
+  now.type = Read<uint32_t>(m);
+  now.kind = kind;
+  now.vertices = n;
+  now.zfunc = state.z_func;
+  now.zwrite = state.z_write;
+  now.blend = state.alpha_blend;
+  now.grouped = grouped ? 1u : 0u;
+  now.data = vertices;
+  memcpy(now.rows, grouped ? g_group_floats : &c.row[0][0], sizeof(now.rows));
+  if (is_layer) {
+    ++g_counts.f_layer;
+    if (m == g_last_mesh) ++g_counts.f_layer_same;
+    if (g_last_layer) {
+      ++g_counts.f_layer_pairs;
+      if (g_pairs_said < 16) {
+        ++g_pairs_said;
+        ModLog("gpu mesh     : layer pair %u: mesh 0x%08X (type %u, function %s, %u vertices, vertices "
+               "at 0x%08X, blend %u, z write %u, zfunc %u, groups %u) then mesh 0x%08X (type %u, "
+               "function %s, %u vertices, vertices at 0x%08X, blend %u, z write %u, zfunc %u, "
+               "groups %u). The same mesh %d, the same vertices %d, the same matrix %d, the same "
+               "function %d",
+               g_pairs_said, static_cast<unsigned>(g_last.mesh), g_last.type,
+               kKindName[g_last.kind], g_last.vertices, static_cast<unsigned>(
+                   reinterpret_cast<uintptr_t>(g_last.data)),
+               g_last.blend, g_last.zwrite, g_last.zfunc, g_last.grouped,
+               static_cast<unsigned>(now.mesh), now.type, kKindName[now.kind], now.vertices,
+               static_cast<unsigned>(reinterpret_cast<uintptr_t>(now.data)), now.blend, now.zwrite,
+               now.zfunc, now.grouped, g_last.mesh == now.mesh ? 1 : 0,
+               g_last.data == now.data ? 1 : 0,
+               memcmp(g_last.rows, now.rows, sizeof(now.rows)) == 0 ? 1 : 0,
+               g_last.kind == now.kind ? 1 : 0);
+      }
+    }
+  }
+  g_last = now;
+  g_last_layer = is_layer;
+  g_last_mesh = m;
+  if (reasons != 0 || shifted) {
+    if ((reasons & gm::kStateBlend) != 0) ++g_counts.f_blend;
+    if ((reasons & gm::kStateNoZWrite) != 0) ++g_counts.f_nozwrite;
+    if ((reasons & gm::kStateNoZTest) != 0) ++g_counts.f_noztest;
+    if ((reasons & gm::kStateStage1) != 0) ++g_counts.f_stage1;
+    if (shifted) ++g_counts.f_uv;
+  }
+
+  clock->Lap(3);
+
+  // The data of the mesh, one time.
+  GiveData(known, m, vertices, n, indices, out->triangles, groups, group_count, grouped);
+  clock->Lap(4);
+
+  if (grouped) {
+    if (known->group_count != group_count) {
+      // The counts of the groups are not the count of the vertices: the loop of
+      // the game leaves vertices as they were.
+      ++g_counts.r_group;
+      known->cpu_until = g_frame + 30u;
+      return false;
+    }
     out->groups = g_group_floats;
     out->group_count = group_count;
     c.flags |= gm::kGroup;
     ++g_counts.f_group;
     g_counts.groups += group_count;
-    first_group = c;
     memcpy(first_group.row, g_group_floats, 48);
+    first_group.flags = c.flags;
   }
 
   // The first vertex of the batch, for the measure of the nearest geometry
@@ -686,6 +829,7 @@ void Submit(Kind kind, uint8_t* mesh, const Prepared& p, bool effects) {
   const uintptr_t m = reinterpret_cast<uintptr_t>(mesh);
   if (effects) DrawHooksMeshBatch(p.first_field);
   VkSceneDrawMesh(m, p.c, p.offsets, p.offset_floats, p.groups, p.group_count);
+  g_after_gpu = true;
   ++g_counts.gpu[kind];
   g_counts.vertices += p.vertex_count;
   g_counts.triangles += p.triangles;
@@ -768,8 +912,7 @@ bool Expect(const Site& s) {
 const char* ModeText(int mode) {
   static const char* const kText[3] = {
       "The meshes take the CPU path of the game",
-      "The meshes with one matrix take the GPU path: the renderer transforms, lights, "
-      "clips and culls them",
+      "The meshes take the GPU path: the renderer transforms, lights, clips and culls them",
       "A test aid: each such mesh is drawn with the CPU path in the left eye layer and with "
       "the GPU path in the right eye layer"};
   return kText[mode < 0 || mode > 2 ? 0 : mode];
@@ -829,7 +972,11 @@ void Report() {
            "the functions of the game, %u with other bits). Layers (blend or no depth write, depth "
            "test EQUAL or LESSEQUAL) on the GPU path %u, %u of them over the mesh of the draw "
            "before. Records of mesh data %u (%llu bytes), "
-           "full sums %u, meshes whose words changed %u, data given again %u. The renderer has %u meshes in %llu bytes and drew %llu, %llu "
+           "full sums %u, meshes whose words changed %u (found by the sample %u, found only by the "
+           "full sum %u, the longest time since the last full sum %u frames), data given again %u. "
+           "CPU batches (DrawTriangle %u, DrawAndClip %u) with blend or no depth write and a depth "
+           "test of EQUAL or LESSEQUAL right after a mesh on the GPU path (of %u CPU batches "
+           "after a mesh on the GPU path), pairs of layers on the GPU path %u. The renderer has %u meshes in %llu bytes and drew %llu, %llu "
            "with no data, %llu with no room. Time on the frame thread in 10 s: the GPU path %.2f "
            "ms (%.3f us a mesh), the function of the game %.2f ms (%.3f us a mesh), the checks "
            "of the meshes that went to the CPU path %.2f ms",
@@ -841,12 +988,30 @@ void Report() {
            c.cpu[0], c.cpu[1], c.cpu[2], c.cpu[3], c.cpu[4], c.f_group, c.groups, c.lights,
            c.light_diff, c.f_layer, c.f_layer_same, c.data_sent,
            static_cast<unsigned long long>(c.data_bytes), c.data_full, c.data_changed,
-           c.data_retry, renderer.meshes, static_cast<unsigned long long>(renderer.arena_bytes),
+           c.changed_sample, c.changed_full, c.full_age_max, c.data_retry, c.cpu_layer[0],
+           c.cpu_layer[1], c.cpu_after_gpu, c.f_layer_pairs, renderer.meshes, static_cast<unsigned long long>(renderer.arena_bytes),
            static_cast<unsigned long long>(renderer.draws),
            static_cast<unsigned long long>(renderer.no_data),
            static_cast<unsigned long long>(renderer.no_room), gpu_ms,
            gpu > 0 ? gpu_ms * 1000.0 / gpu : 0.0, cpu_ms, cpu > 0 ? cpu_ms * 1000.0 / cpu : 0.0,
            check_ms);
+    ModLog("gpu mesh     : the renderer in 10 s: %llu draws with groups stopped because the draw has "
+           "fewer matrices than the data have groups, %llu draws with groups left out because the "
+           "buffers of the groups failed, %u meshes wait for a range (%llu bytes), %u free ranges "
+           "in the arena, the buffer of the groups used %llu bytes of 8388608 in the largest walk, "
+           "%u pipelines of 64",
+           static_cast<unsigned long long>(renderer.bad_groups),
+           static_cast<unsigned long long>(renderer.groups_off), renderer.wait_count,
+           static_cast<unsigned long long>(renderer.wait_bytes), renderer.free_ranges,
+           static_cast<unsigned long long>(renderer.group_peak), renderer.pipelines);
+    if (c.cpu_layer[0] + c.cpu_layer[1] > 0) {
+      for (const Caller& k : g_callers) {
+        if (k.count == 0) continue;
+        ModLog("gpu mesh     : a layer on the CPU path (%s) right after a mesh on the GPU path, from "
+               "0x%08X, %u times in 10 s", k.via == 0 ? "DrawTriangle" : "DrawAndClip", k.address,
+               k.count);
+      }
+    }
     if (g_timer && gpu > 0 && per_ms > 0.0) {
       // The parts of the hook for a mesh on the GPU path, in us for a mesh.
       // "record" has the stream write and the draw of the renderer.
@@ -876,6 +1041,7 @@ void Report() {
     }
   }
   g_counts = Counts();
+  memset(g_callers, 0, sizeof(g_callers));
 }
 
 bool InstallHooks() {
@@ -938,6 +1104,39 @@ void GpuMeshInstall() {
   if (!InstallHooks()) g_mode = 0;
 }
 
+// h_DrawTriangle (via 0) and h_DrawAndClip (via 1), at their start. A batch with
+// blend or with no depth write, and a depth test of EQUAL or LESSEQUAL, right
+// after a mesh on the GPU path is a layer on the CPU path over a mesh on the
+// GPU path. Such a pair has the depth of two paths. The log counts them and
+// keeps the first 8 return addresses.
+void GpuMeshCpuBatch(uint32_t caller, int via) {
+  if (!g_after_gpu) return;
+  g_after_gpu = false;
+  ++g_counts.cpu_after_gpu;
+  gm::DeviceState state = {};
+  if (!VkDdrawMeshState(Read<void*>(kDevice), &state)) return;
+  const uint32_t reasons = gm::StateReasons(state);
+  if ((reasons & (gm::kStateBlend | gm::kStateNoZWrite)) == 0 ||
+      (state.z_func != 3 && state.z_func != 4)) {
+    return;
+  }
+  ++g_counts.cpu_layer[via & 1];
+  for (Caller& c : g_callers) {
+    if (c.count != 0 && c.address == caller && c.via == static_cast<uint32_t>(via)) {
+      ++c.count;
+      return;
+    }
+  }
+  for (Caller& c : g_callers) {
+    if (c.count == 0) {
+      c.address = caller;
+      c.via = static_cast<uint32_t>(via);
+      c.count = 1;
+      return;
+    }
+  }
+}
+
 int GpuMeshValue() {
   if (g_mode == 0 && !g_in && !g_test_keys) return kDebugCannot;
   return g_mode == 1 ? 1 : 0;
@@ -997,8 +1196,8 @@ static bool GameWindowInFront() {
 }
 
 void GpuMeshFrame() {
-  // Ctrl Shift 7 and Ctrl Shift 6 (the digits of the top row): no other test
-  // key uses them.
+  // Ctrl Shift 7, 6 and 5 (the digits of the top row): no other test key uses
+  // them.
   if (g_test_keys) {
     const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
                             (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -1018,9 +1217,21 @@ void GpuMeshFrame() {
       GpuMeshPartsToggle("Ctrl Shift 6");
     }
     g_parts_key_down = parts_down;
+    // Ctrl Shift 5: the depth of the game alone (gpu_mesh_depth), with the other
+    // parts as they are. Off, the renderer uses the vertex shader with the
+    // linear depth and no invariant (the LEGACY variants).
+    const bool depth_down = ctrl_shift && (GetAsyncKeyState('5') & 0x8000) != 0;
+    if (depth_down && !g_depth_key_down && g_in && GameWindowInFront()) {
+      g_parts ^= gm::kPartDepth;
+      ControllersGesturePulse(0.5f, (g_parts & gm::kPartDepth) != 0 ? 0.30f : 0.08f);
+      ModLog("test key     : Ctrl Shift 5, gpu_mesh_depth is %d from the next mesh (the parts are "
+             "0x%X)", (g_parts & gm::kPartDepth) != 0 ? 1 : 0, g_parts);
+    }
+    g_depth_key_down = depth_down;
   }
   if (!g_in) return;
   ++g_frame;
+  g_epoch = VkStreamMeshEpoch();
   g_active = g_mode != 0 && VkDdrawOn() && VkSceneDirect();
   Report();
   Sample();

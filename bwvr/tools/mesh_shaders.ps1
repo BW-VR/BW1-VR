@@ -6,7 +6,8 @@
 .DESCRIPTION
     The header has one SPIR-V array for each variant of the shader:
     kVkMeshVert (no define), kVkMeshVertOffsets (-DOFFSETS) and
-    kVkMeshVertGroups (-DGROUPS). The first
+    kVkMeshVertGroups (-DGROUPS), and the same three with -DLEGACY (the linear depth of
+    gpu_mesh_depth=0). The first
     line of the header names the FNV-1a hash of the source (64 bit, over the
     text with LF line ends), and a check of the math tests reads it, so a
     change of the source with no new header fails the build.
@@ -45,11 +46,17 @@ function Compile([string[]]$Defines) {
 $plain = Compile @()
 $offsets = Compile @('-DOFFSETS')
 $groups = Compile @('-DGROUPS')
+$legacy = Compile @('-DLEGACY')
+$legacyOffsets = Compile @('-DLEGACY', '-DOFFSETS')
+$legacyGroups = Compile @('-DLEGACY', '-DGROUPS')
 $sb = New-Object Text.StringBuilder
 [void]$sb.Append("// glslc (shaderc ndk-r27c): vk_mesh.vert and vk_mesh.vert with -DOFFSETS and -DGROUPS. source-fnv64 $sha`n")
 [void]$sb.Append("#pragma once`n")
 [void]$sb.Append("const uint32_t kVkMeshVert[] = $plain`n;`n")
 [void]$sb.Append("const uint32_t kVkMeshVertOffsets[] = $offsets`n;`n")
 [void]$sb.Append("const uint32_t kVkMeshVertGroups[] = $groups`n;`n")
+[void]$sb.Append("const uint32_t kVkMeshVertLegacy[] = $legacy`n;`n")
+[void]$sb.Append("const uint32_t kVkMeshVertLegacyOffsets[] = $legacyOffsets`n;`n")
+[void]$sb.Append("const uint32_t kVkMeshVertLegacyGroups[] = $legacyGroups`n;`n")
 [IO.File]::WriteAllText($header, $sb.ToString().Replace("`n", "`r`n"), (New-Object Text.UTF8Encoding($false)))
 "vk_mesh_vert.h made from vk_mesh.vert (fnv64 $sha)"

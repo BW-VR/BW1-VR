@@ -340,6 +340,42 @@ inline uint32_t MeshSample(const void* vertices, uint32_t vertex_count, const vo
   return m.s[0] ^ (m.s[1] * 31u) ^ (m.s[2] * 0x9E3779B1u) ^ m.s[3] ^ (m.a[0] + m.a[3] * 7u);
 }
 
+// WHERE A CHANGE IS. The data of a mesh (the vertices, then the indices) in
+// blocks of 32 bytes (one vertex, or 5 and a third triangles), each with a sum.
+// A mesh that changed at its place has the first block with another sum.
+inline uint32_t BlockCount(uint32_t vertex_count, uint32_t triangles) {
+  return vertex_count + (triangles * 6 + 31) / 32;
+}
+inline uint32_t BlockSum(const uint8_t* p, size_t n) {
+  uint8_t block[32] = {};
+  memcpy(block, p, n);
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < 8; ++i) {
+    uint32_t w;
+    memcpy(&w, block + 4 * i, 4);
+    h = (h ^ w) * 16777619u;
+    h ^= h >> 15;
+  }
+  return h;
+}
+inline void BlockSums(const void* vertices, uint32_t vertex_count, const void* indices,
+                      uint32_t triangles, uint32_t* out) {
+  const uint8_t* v = static_cast<const uint8_t*>(vertices);
+  for (uint32_t i = 0; i < vertex_count; ++i) out[i] = BlockSum(v + 32 * i, 32);
+  const uint8_t* x = static_cast<const uint8_t*>(indices);
+  const size_t bytes = static_cast<size_t>(triangles) * 6;
+  for (size_t at = 0, k = 0; at < bytes; at += 32, ++k) {
+    out[vertex_count + k] = BlockSum(x + at, bytes - at < 32 ? bytes - at : 32);
+  }
+}
+// The first block with another sum, or -1.
+inline int FirstChangedBlock(const uint32_t* a, const uint32_t* b, uint32_t count) {
+  for (uint32_t i = 0; i < count; ++i) {
+    if (a[i] != b[i]) return static_cast<int>(i);
+  }
+  return -1;
+}
+
 // WHICH MESH TAKES THE GPU PATH. The state of the device after the material of
 // the mesh. The five functions draw a mesh at once, in the order of the calls
 // (the z sorter of the engine holds whole objects and calls the function of

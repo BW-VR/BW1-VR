@@ -125,6 +125,7 @@
 #include <vector>
 
 #include "d3d7_thread.h"
+#include "mesh_store_math.h"
 #include "debug_menu.h"
 #include "ui_panel.h"
 #include "one_walk.h"
@@ -298,6 +299,9 @@ const uint32_t kMeshOffsetKey = 1u << 26;
 // a vertex is vertex buffer 2, and set 2 is the buffer with the matrices and
 // the lights of the draw (GroupsReady).
 const uint32_t kMeshGroupKey = 1u << 27;
+// The vertex shader of gpu_mesh_depth=0: the linear depth, with no invariant
+// and no precise (the LEGACY variants of vk_mesh.vert).
+const uint32_t kMeshLegacyKey = 1u << 28;
 
 // THE WALK WITHOUT DIRECT3D 9 (vk_only). On the frame thread: the key now,
 // the test key of the desktop, the frame of stereo.cpp, and a walk of
@@ -328,6 +332,7 @@ VkShaderModule g_frag = VK_NULL_HANDLE;
 VkShaderModule g_mesh_vert = VK_NULL_HANDLE;
 VkShaderModule g_mesh_vert_offsets = VK_NULL_HANDLE;
 VkShaderModule g_mesh_vert_groups = VK_NULL_HANDLE;
+VkShaderModule g_mesh_legacy[3] = {};  // plain, offsets, groups
 // The layout of the pipelines of the groups: sets 0 and 1 of g_layout and set 2
 // with the storage buffer of the groups. It is made at the first group mesh.
 VkDescriptorSetLayout g_group_set_layout = VK_NULL_HANDLE;
@@ -465,7 +470,6 @@ struct MeshEntry {
   VkDeviceSize bytes;  // the range
   uint64_t hash;
   uint32_t vertex_count, triangles;
-  uint64_t last_walk;  // the walk of the last draw (or of the data), for the eviction
   VkDeviceSize group_at;  // the ordinal of the group of each vertex (16 bit), or 0
   uint32_t group_count;
 };
@@ -485,6 +489,9 @@ std::vector<MeshRange> g_mesh_retired;  // ranges that a walk can still read
 // and clears them (VkSceneTakeMeshCounts) on another thread.
 std::atomic<uint64_t> g_mesh_draws{0}, g_mesh_data_records{0}, g_mesh_data_bytes{0};
 std::atomic<uint64_t> g_mesh_no_data{0}, g_mesh_no_room{0}, g_mesh_bad_offsets{0};
+std::atomic<uint64_t> g_mesh_bad_groups{0}, g_mesh_groups_off{0};
+std::atomic<uint32_t> g_mesh_wait_count{0}, g_mesh_free_count{0};
+std::atomic<uint64_t> g_mesh_wait_bytes{0}, g_mesh_group_peak{0};
 std::atomic<uint32_t> g_mesh_count{0};        // the meshes in the arena now
 std::atomic<uint64_t> g_mesh_top_shown{0};    // g_mesh_top for the log
 bool g_mesh_compare = false;
@@ -494,7 +501,6 @@ bool g_said_mesh_room = false;
 // stops the meshes only.
 bool g_mesh_ready = false;
 bool g_mesh_failed = false;
-uint64_t g_mesh_evicted = 0;
 void MeshCompare(const vk::Image& image, uint64_t frame, bool bmp, uint32_t label);
 bool g_mesh_compare_request = false;
 uint32_t g_mesh_compare_label = 0;
@@ -799,9 +805,11 @@ VkPipeline Pipeline(uint32_t key) {
   const bool mesh = (key & kMeshKey) != 0;
   const bool mesh_offsets = (key & kMeshOffsetKey) != 0;
   const bool mesh_groups = (key & kMeshGroupKey) != 0;
-  stages[0].module = mesh ? (mesh_groups    ? g_mesh_vert_groups
-                             : mesh_offsets ? g_mesh_vert_offsets
-                                            : g_mesh_vert)
+  const bool mesh_legacy = (key & kMeshLegacyKey) != 0;
+  stages[0].module = mesh ? (mesh_legacy ? g_mesh_legacy[mesh_groups ? 2 : mesh_offsets ? 1 : 0]
+                                         : mesh_groups    ? g_mesh_vert_groups
+                                           : mesh_offsets ? g_mesh_vert_offsets
+                                                          : g_mesh_vert)
                           : g_vert;
   if (stages[0].module == VK_NULL_HANDLE) return VK_NULL_HANDLE;
   stages[0].pName = "main";
@@ -873,7 +881,8 @@ VkPipeline Pipeline(uint32_t key) {
   VkPipelineColorBlendAttachmentState blend = {};
   blend.colorWriteMask = 0xF;
   const bool panel = (key & kPanelKey) != 0;
-  if ((key & ~(kPanelKey | kMeshKey | kMeshOffsetKey | kMeshGroupKey)) != 0) {
+  if ((key & ~(kPanelKey | kMeshKey | kMeshOffsetKey | kMeshGroupKey |
+                  kMeshLegacyKey)) != 0) {
     blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = Factor((key >> 8) & 255);
     blend.dstColorBlendFactor = Factor(key & 255);
@@ -4471,7 +4480,10 @@ bool MeshReady() {
   if (!g_ready && !Ready()) return false;
   g_mesh_vert = Module(kVkMeshVert, sizeof(kVkMeshVert));
   g_mesh_vert_offsets = Module(kVkMeshVertOffsets, sizeof(kVkMeshVertOffsets));
-  if (g_mesh_vert == VK_NULL_HANDLE || g_mesh_vert_offsets == VK_NULL_HANDLE) {
+  g_mesh_legacy[0] = Module(kVkMeshVertLegacy, sizeof(kVkMeshVertLegacy));
+  g_mesh_legacy[1] = Module(kVkMeshVertLegacyOffsets, sizeof(kVkMeshVertLegacyOffsets));
+  if (g_mesh_vert == VK_NULL_HANDLE || g_mesh_vert_offsets == VK_NULL_HANDLE ||
+      g_mesh_legacy[0] == VK_NULL_HANDLE || g_mesh_legacy[1] == VK_NULL_HANDLE) {
     g_mesh_failed = true;
     ModLog("vk scene     : the shaders of the meshes on the GPU failed, so gpu_mesh draws "
            "nothing and the rest of the renderer goes on");
@@ -4509,7 +4521,10 @@ bool GroupsReady() {
     return false;
   };
   g_mesh_vert_groups = Module(kVkMeshVertGroups, sizeof(kVkMeshVertGroups));
-  if (g_mesh_vert_groups == VK_NULL_HANDLE) return fail("the shader");
+  g_mesh_legacy[2] = Module(kVkMeshVertLegacyGroups, sizeof(kVkMeshVertLegacyGroups));
+  if (g_mesh_vert_groups == VK_NULL_HANDLE || g_mesh_legacy[2] == VK_NULL_HANDLE) {
+    return fail("the shader");
+  }
   VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                                           VK_SHADER_STAGE_VERTEX_BIT, nullptr};
   VkDescriptorSetLayoutCreateInfo set_info = {
@@ -4581,28 +4596,13 @@ bool MeshAllocFrom(VkDeviceSize bytes, VkDeviceSize* at, VkDeviceSize* got) {
   return true;
 }
 
-// The same, and when the arena is full, the meshes that no walk drew for
-// kMeshIdleWalks give their ranges back. A walk that is not done can still
-// read a range, so the range waits in the retired ranges first (MeshReclaim).
-// The game does not know of the eviction: a mesh that comes back has no data
-// until the data come again (a new epoch of the stream, or a change of the
-// mesh).
-const uint64_t kMeshIdleWalks = 600;
+// The arena has no eviction. The game sends the data of a mesh one time (and
+// again only when the data change or a new epoch of the stream comes), and the
+// renderer cannot ask for them, so a range that the renderer took back would
+// leave a mesh with no data for good. A full arena is in the log, and the data
+// that found no room wait for a range that a new version of a mesh frees.
 bool MeshAlloc(VkDeviceSize bytes, VkDeviceSize* at, VkDeviceSize* got) {
-  if (MeshAllocFrom(bytes, at, got)) return true;
-  size_t evicted = 0;
-  for (auto it = g_meshes.begin(); it != g_meshes.end();) {
-    if (it->second.last_walk + kMeshIdleWalks < g_walk_number) {
-      g_mesh_retired.push_back({it->second.at, it->second.bytes, g_walk_number});
-      it = g_meshes.erase(it);
-      ++evicted;
-    } else {
-      ++it;
-    }
-  }
-  g_mesh_evicted += evicted;
-  g_mesh_count = static_cast<uint32_t>(g_meshes.size());
-  return false;
+  return MeshAllocFrom(bytes, at, got);
 }
 
 // The ranges that a walk freed go back to the free ranges when the walks
@@ -4734,15 +4734,18 @@ void MeshCompare(const vk::Image& image, uint64_t frame, bool bmp, uint32_t labe
 
 namespace {
 
-// Mesh data that found no room: they wait here (a copy) until the ranges that
-// the eviction freed are free, and the next data or draw stores them.
+// Mesh data that found no room: they wait here (a copy) for a range that a new
+// version of a mesh frees. One entry for each mesh, and a direct store removes
+// the entry of its mesh (mesh_store_math.h), so a try never puts an older
+// version over a newer one.
 struct PendingMesh {
-  uint64_t mesh, hash;
+  uint64_t id, hash;
+  size_t size;
   std::vector<uint8_t> bytes;  // the vertices, the indices, then the groups
   uint32_t vertex_count, triangles, group_count;
 };
-std::vector<PendingMesh> g_mesh_pending;
-const size_t kMeshPendingBytes = 16u << 20;
+mesh_store_math::WaitList<PendingMesh> g_mesh_wait(16u << 20);
+mesh_store_math::WalkGate g_flush_gate;
 
 // The bytes of a mesh in the arena: the vertices, the indices (padded to 4),
 // then the ordinals of the groups (padded to 4).
@@ -4753,31 +4756,39 @@ VkDeviceSize MeshBytes(uint32_t vertex_count, uint32_t triangles, uint32_t group
   return bytes;
 }
 
-// Puts the data of a mesh into the arena. 1 stored (or no change), 0 no
-// room.
-int MeshStore(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t vertex_count,
-              const void* indices, uint32_t triangles, const void* group_of_vertex,
-              uint32_t group_count) {
+void MeshShowCounts() {
+  g_mesh_count = static_cast<uint32_t>(g_meshes.size());
+  g_mesh_top_shown = g_mesh_top;
+  g_mesh_wait_count = static_cast<uint32_t>(g_mesh_wait.Count());
+  g_mesh_wait_bytes = g_mesh_wait.Bytes();
+  g_mesh_free_count = static_cast<uint32_t>(g_mesh_free.size());
+}
+
+// Puts the data of a mesh into the arena. 1 stored (or no change), 0 no room.
+// The old version of the mesh stays (and draws) until the new one has a range.
+// This function does not touch the wait list.
+int MeshStoreOnly(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t vertex_count,
+                  const void* indices, uint32_t triangles, const void* group_of_vertex,
+                  uint32_t group_count) {
   if (group_of_vertex == nullptr) group_count = 0;
   auto it = g_meshes.find(mesh);
   if (it != g_meshes.end() && it->second.hash == hash &&
       it->second.vertex_count == vertex_count && it->second.triangles == triangles &&
       it->second.group_count == group_count) {
-    it->second.last_walk = g_walk_number;
     return 1;
   }
   const VkDeviceSize vertex_bytes = static_cast<VkDeviceSize>(vertex_count) * 32;
   const VkDeviceSize index_bytes = (static_cast<VkDeviceSize>(triangles) * 6 + 3) & ~3ull;
   VkDeviceSize at = 0, got = 0;
+  if (!MeshAlloc(MeshBytes(vertex_count, triangles, group_count), &at, &got)) return 0;
   if (it != g_meshes.end()) {
     g_mesh_retired.push_back({it->second.at, it->second.bytes, g_walk_number});
     g_meshes.erase(it);
   }
-  if (!MeshAlloc(MeshBytes(vertex_count, triangles, group_count), &at, &got)) return 0;
   uint8_t* base = static_cast<uint8_t*>(g_mesh_arena.mapped);
   memcpy(base + at, vertices, static_cast<size_t>(vertex_bytes));
   memcpy(base + at + vertex_bytes, indices, static_cast<size_t>(triangles) * 6);
-  MeshEntry e = {at, got, hash, vertex_count, triangles, g_walk_number, 0, group_count};
+  MeshEntry e = {at, got, hash, vertex_count, triangles, 0, group_count};
   if (group_count != 0) {
     e.group_at = at + vertex_bytes + index_bytes;
     memcpy(base + e.group_at, group_of_vertex, static_cast<size_t>(vertex_count) * 2);
@@ -4785,31 +4796,25 @@ int MeshStore(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t verte
   g_meshes[mesh] = e;
   ++g_mesh_data_records;
   g_mesh_data_bytes += vertex_bytes + index_bytes;
-  g_mesh_count = static_cast<uint32_t>(g_meshes.size());
-  g_mesh_top_shown = g_mesh_top;
   return 1;
 }
 
+// Once in a walk the data that wait try for a range.
 void MeshFlushPending() {
-  if (g_mesh_pending.empty()) return;
+  if (g_mesh_wait.Empty() || !g_flush_gate.Once(g_walk_number)) return;
   MeshReclaim();
-  size_t keep = 0;
-  for (size_t i = 0; i < g_mesh_pending.size(); ++i) {
-    PendingMesh& p = g_mesh_pending[i];
+  g_mesh_wait.RemoveIf([](PendingMesh& p) {
     const uint8_t* v = p.bytes.data();
     const uint8_t* ix = v + static_cast<size_t>(p.vertex_count) * 32;
     const uint8_t* gr = ix + static_cast<size_t>(p.triangles) * 6;
-    if (MeshStore(p.mesh, p.hash, v, p.vertex_count, ix, p.triangles,
-                  p.group_count != 0 ? gr : nullptr, p.group_count) == 0) {
-      if (keep != i) g_mesh_pending[keep] = std::move(p);
-      ++keep;
-    }
-  }
-  g_mesh_pending.resize(keep);
+    return MeshStoreOnly(p.id, p.hash, v, p.vertex_count, ix, p.triangles,
+                         p.group_count != 0 ? gr : nullptr, p.group_count) != 0;
+  });
+  MeshShowCounts();
 }
 
 // The data of a mesh for the renderer of this process. True when it has them
-// or keeps them for a later store; false when it cannot (not ready, no device).
+// or keeps them for a later store, false when it cannot (not ready yet).
 bool MeshGive(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t vertex_count,
               const uint16_t* indices, uint32_t triangles, const uint16_t* group_of_vertex,
               uint32_t group_count) {
@@ -4822,36 +4827,29 @@ bool MeshGive(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t verte
   }
   MeshReclaim();
   MeshFlushPending();
-  if (MeshStore(mesh, hash, vertices, vertex_count, indices, triangles, group_of_vertex,
-                group_count) != 0) {
+  if (MeshStoreOnly(mesh, hash, vertices, vertex_count, indices, triangles, group_of_vertex,
+                    group_count) != 0) {
+    g_mesh_wait.Remove(mesh);
+    MeshShowCounts();
     return true;
   }
   ++g_mesh_no_room;
   if (!g_said_mesh_room) {
     g_said_mesh_room = true;
-    ModLog("vk scene     : the arena of the meshes on the GPU is full (%u MB). Meshes that no "
-           "walk drew for %u walks give their range back, and the data wait for it",
-           static_cast<unsigned>(kMeshArenaBytes >> 20), static_cast<unsigned>(kMeshIdleWalks));
-  }
-  size_t waiting = 0;
-  for (const PendingMesh& p : g_mesh_pending) waiting += p.bytes.size();
-  const size_t bytes = static_cast<size_t>(vertex_count) * 32 + static_cast<size_t>(triangles) * 6 +
-                       (group_of_vertex != nullptr ? static_cast<size_t>(vertex_count) * 2 : 0);
-  if (waiting + bytes > kMeshPendingBytes) return true;  // dropped: the log has no_room
-  // A newer version of a mesh in the list replaces it.
-  for (size_t i = 0; i < g_mesh_pending.size(); ++i) {
-    if (g_mesh_pending[i].mesh == mesh) {
-      g_mesh_pending.erase(g_mesh_pending.begin() + static_cast<ptrdiff_t>(i));
-      break;
-    }
+    ModLog("vk scene     : the arena of the meshes on the GPU is full (%u MB, %zu ranges free). "
+           "The renderer takes no range back. The data wait (up to 16 MB) for a range that a "
+           "new version of a mesh frees, and a mesh with no data is left out of the draws",
+           static_cast<unsigned>(kMeshArenaBytes >> 20), g_mesh_free.size());
   }
   PendingMesh p;
-  p.mesh = mesh;
+  p.id = mesh;
   p.hash = hash;
   p.vertex_count = vertex_count;
   p.triangles = triangles;
   p.group_count = group_of_vertex != nullptr ? group_count : 0;
-  p.bytes.resize(bytes);
+  p.size = static_cast<size_t>(vertex_count) * 32 + static_cast<size_t>(triangles) * 6 +
+           (group_of_vertex != nullptr ? static_cast<size_t>(vertex_count) * 2 : 0);
+  p.bytes.resize(p.size);
   memcpy(p.bytes.data(), vertices, static_cast<size_t>(vertex_count) * 32);
   memcpy(p.bytes.data() + static_cast<size_t>(vertex_count) * 32, indices,
          static_cast<size_t>(triangles) * 6);
@@ -4860,7 +4858,8 @@ bool MeshGive(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t verte
                static_cast<size_t>(triangles) * 6,
            group_of_vertex, static_cast<size_t>(vertex_count) * 2);
   }
-  g_mesh_pending.push_back(std::move(p));
+  g_mesh_wait.Put(std::move(p));  // false: no room in the list, the data are dropped
+  MeshShowCounts();
   return true;
 }
 
@@ -4895,7 +4894,7 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
     return;
   }
   auto found = g_meshes.find(mesh);
-  if (found == g_meshes.end() && !g_mesh_pending.empty()) {
+  if (found == g_meshes.end() && !g_mesh_wait.Empty()) {
     MeshFlushPending();
     found = g_meshes.find(mesh);
   }
@@ -4905,7 +4904,6 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
     return;
   }
   MeshEntry& m = found->second;
-  m.last_walk = g_walk_number;
   const bool with_offsets = offsets != nullptr && offset_floats != 0;
   if (with_offsets && offset_floats != m.vertex_count * 3) {
     ++g_mesh_bad_offsets;
@@ -4916,11 +4914,19 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
   // the slot, and the record names their places.
   gpu_mesh_math::Consts consts = consts_in;
   const bool with_groups = groups != nullptr && group_count != 0;
-  if (with_groups && (m.group_count == 0 || group_count > gpu_mesh_math::kMostGroups ||
-                      !GroupsReady())) {
-    ++g_mesh_bad_offsets;
-    ++g_skipped;
-    return;
+  if (with_groups) {
+    // The shader reads the matrix of the ordinal of each vertex, so the draw
+    // needs at least as many matrices as the data have groups.
+    if (!mesh_store_math::GroupDrawOk(m.group_count, group_count, gpu_mesh_math::kMostGroups)) {
+      ++g_mesh_bad_groups;
+      ++g_skipped;
+      return;
+    }
+    if (!GroupsReady()) {
+      ++g_mesh_groups_off;
+      ++g_skipped;
+      return;
+    }
   }
   Slot& s = g_slots[g_slot];
   const VkDeviceSize data_bytes = sizeof(gpu_mesh_math::Consts);
@@ -4941,7 +4947,10 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
                 (rs[D3DRENDERSTATE_DESTBLEND] & 255)
           : 0u;
   VkPipeline pipeline = Pipeline(blend | kMeshKey | (with_offsets ? kMeshOffsetKey : 0u) |
-                                 (with_groups ? kMeshGroupKey : 0u));
+                                 (with_groups ? kMeshGroupKey : 0u) |
+                                 ((consts_in.flags & gpu_mesh_math::kDepthGame) == 0
+                                      ? kMeshLegacyKey
+                                      : 0u));
   if (pipeline == VK_NULL_HANDLE) {
     ++g_skipped;
     ++g_skip_state;
@@ -4999,6 +5008,9 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
     }
     float* out = reinterpret_cast<float*>(static_cast<uint8_t*>(s.groups.mapped) + s.groups_used);
     memcpy(out, groups, static_cast<size_t>(matrix_floats + light_floats) * 4);
+    if (s.groups_used + (matrix_floats + light_floats) * 4 > g_mesh_group_peak) {
+      g_mesh_group_peak = s.groups_used + (matrix_floats + light_floats) * 4;
+    }
     // The float indices of the matrices and of the lights (exact up to 2^24).
     consts.row[0][0] = static_cast<float>(s.groups_used / 4);
     consts.row[0][1] = static_cast<float>(s.groups_used / 4 + matrix_floats);
@@ -5123,6 +5135,13 @@ void VkSceneCompareNext(uint32_t label) {
 }
 
 void VkSceneTakeMeshCounts(VkSceneMeshCounts* out) {
+  out->bad_groups = g_mesh_bad_groups.exchange(0);
+  out->groups_off = g_mesh_groups_off.exchange(0);
+  out->wait_count = g_mesh_wait_count.load();
+  out->wait_bytes = g_mesh_wait_bytes.load();
+  out->free_ranges = g_mesh_free_count.load();
+  out->group_peak = g_mesh_group_peak.exchange(0);
+  out->pipelines = static_cast<uint32_t>(g_pipeline_count);
   out->draws = g_mesh_draws.exchange(0);
   out->data_records = g_mesh_data_records.exchange(0);
   out->data_bytes = g_mesh_data_bytes.exchange(0);

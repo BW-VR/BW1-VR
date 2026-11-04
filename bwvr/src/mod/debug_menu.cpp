@@ -417,7 +417,7 @@ const Switch kSwitches[] = {
      "part_draw", PartDrawValue, PartDrawToggle, L"x87|SSE"},
     {kGroupRender, L"GPU mesh", L"Meshes of the 3D parts on the GPU",
      "gpu_mesh", GpuMeshValue, GpuMeshToggle, L"CPU|GPU"},
-    {kGroupRender, L"GPU mesh parts", L"Blend, stage 1, texture shift on the GPU",
+    {kGroupRender, L"GPU mesh parts", L"Blend, stage 1, shift, groups, depth",
      "gpu_mesh_blend", GpuMeshPartsValue, GpuMeshPartsToggle, L"off|on"},
     {kGroupRender, L"Thread wait", L"Threads spin, then sleep",
      "thread_wait", ThreadWaitMode, ThreadWaitToggle, L"spin|sleep"},

@@ -355,6 +355,17 @@ void VkSceneCompareNext(uint32_t label);
 // compare of the last test frame.
 struct VkSceneMeshCounts {
   uint64_t draws, data_records, data_bytes, no_data, no_room;
+  // Draws with groups that the guard stopped (the draw has fewer matrices than
+  // the data have groups), draws with groups left out because the buffers of
+  // the groups could not be made, the data that wait for a range (the count
+  // and the bytes), the free ranges of the arena, the largest use of the
+  // buffer of the groups in a walk (bytes), and the pipelines of the renderer.
+  uint64_t bad_groups, groups_off;
+  uint32_t wait_count;
+  uint64_t wait_bytes;
+  uint32_t free_ranges;
+  uint64_t group_peak;
+  uint32_t pipelines;
   uint32_t meshes;
   uint64_t arena_bytes;
 };

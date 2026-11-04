@@ -159,6 +159,7 @@ bool g_in = false;
 bool g_key_down = false;
 bool g_parts_key_down = false;
 bool g_depth_key_down = false;
+bool g_vertices_key_down = false;
 bool g_said_backend = false;
 // Latched for each frame (GpuMeshFrame): the mode, and a renderer that draws
 // the meshes.
@@ -204,6 +205,10 @@ struct Counts {
   uint32_t r_noztest = 0;   // no depth test (gpu_mesh_blend=0)
   uint32_t r_stage1 = 0;    // a texture on stage 1 (gpu_mesh_stage1=0)
   uint32_t r_cached = 0;    // the state test failed in the last frames of this mesh
+  // fn_0081C090 (gpu_mesh_vertices): batches of vertices that come with the call.
+  uint32_t v_gpu = 0, v_cpu = 0, v_vertices = 0, v_triangles = 0;
+  uint32_t v_clamp = 0, v_special = 0, v_data = 0, v_index = 0, v_state = 0;
+  uint64_t v_ticks = 0;
   // What the meshes on the GPU path have.
   uint32_t f_blend = 0, f_nozwrite = 0, f_noztest = 0, f_stage1 = 0, f_uv = 0;
   uint32_t data_sent = 0;
@@ -622,7 +627,11 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
   gm::Consts& c = out->c;
   c = gm::Consts();
   if (!grouped) gm::SetMatrix(&c, matrix);
-  if ((g_parts & gm::kPartDepth) != 0) c.flags |= gm::kDepthGame;
+  if ((g_parts & gm::kPartDepth) != 0) {
+    // The position of the game, with the order of the product of y of this function.
+    c.flags |= gm::kDepthGame | (kind == kLitClip ? gm::kYOrderB : 0u) |
+               (kind == kClip ? gm::kYOrderC : 0u);
+  }
   c.near_plane = near_plane;
   c.half_x = half_x;
   c.half_y = half_y;
@@ -904,6 +913,145 @@ void __fastcall Hook2(void* mesh, void* edx) { Hook(kLitClip, mesh, edx); }
 void __fastcall Hook3(void* mesh, void* edx) { Hook(kFlat, mesh, edx); }
 void __fastcall Hook4(void* mesh, void* edx) { Hook(kOffsets, mesh, edx); }
 
+// fn_0081C090 (docs/software-tnl.md, "The batches of vertices"): a draw of a
+// batch of vertices that the caller gives: positions (3 floats), a color for
+// each vertex (a dword), texture coordinates (2 floats), the triangles as 6 words
+// each (an index every other word), a material mesh (or none) and a flag for the
+// camera matrix. It has 18 callers (text, icons, effects). It transforms the
+// positions with the matrix at 0x00EA9EA0, clips, tests the back face, runs the
+// material and calls DrawTriangle. The vertices are new in each call, so they go
+// with each draw.
+const uintptr_t kVertexSite = 0x0081C090;
+const uint8_t kVertexBytes[5] = {0x51, 0x8B, 0x44, 0x24, 0x1C};
+const uintptr_t kMatrixCopy = 0x00EA9E10;   // the copy of the camera matrix (12 floats)
+const uintptr_t kCameraMatrix = 0x00EA9E40;
+typedef void(__fastcall* VertexFunction)(uint32_t count, float* positions, uint32_t* colors,
+                                         float* uvs, int triangles, uint16_t* indices,
+                                         uint8_t* material, uint32_t use_matrix);
+VertexFunction g_back_vertices = nullptr;
+bool g_vertices_key = false;  // gpu_mesh_vertices
+bool g_vertices_on = false;   // the key now (Ctrl Shift 4)
+bool g_vertex_hook_in = false;
+float g_vertex_pack[gm::kMostVertices * 8];
+uint16_t g_index_pack[gm::kMostTriangles * 3];
+
+void __fastcall HookVertices(uint32_t count_in, float* positions, uint32_t* colors, float* uvs,
+                             int triangles, uint16_t* indices, uint8_t* material,
+                             uint32_t use_matrix) {
+  const uint32_t count = count_in & 0xFFFFu;
+  if (!g_active || !g_vertices_on) {
+    g_back_vertices(count_in, positions, colors, uvs, triangles, indices, material, use_matrix);
+    return;
+  }
+  const uint64_t start = __rdtsc();
+  auto cpu = [&](uint32_t* reason) {
+    if (reason != nullptr) ++*reason;
+    ++g_counts.v_cpu;
+    g_back_vertices(count_in, positions, colors, uvs, triangles, indices, material, use_matrix);
+  };
+  if (count == 0 || count > gm::kMostVertices || triangles <= 0 ||
+      triangles > static_cast<int>(gm::kMostTriangles) || positions == nullptr ||
+      colors == nullptr || uvs == nullptr || indices == nullptr) {
+    cpu(&g_counts.v_data);
+    return;
+  }
+  if (Read<uint32_t>(kClampOn) != 0) {
+    cpu(&g_counts.v_clamp);
+    return;
+  }
+  if (DrawHooksTriangleSpecial(0)) {
+    cpu(&g_counts.v_special);
+    return;
+  }
+  // The indices of the triangles: an index every other word, all inside the batch.
+  const uint32_t tris = static_cast<uint32_t>(triangles);
+  for (uint32_t t = 0; t < tris; ++t) {
+    const uint16_t a = indices[6 * t], b = indices[6 * t + 2], c = indices[6 * t + 4];
+    if (a >= count || b >= count || c >= count) {
+      cpu(&g_counts.v_index);
+      return;
+    }
+    g_index_pack[3 * t] = a;
+    g_index_pack[3 * t + 1] = b;
+    g_index_pack[3 * t + 2] = c;
+  }
+  // The camera matrix: with the flag 0 the function takes a copy of the matrix
+  // of the camera, and the pointer goes to the copy.
+  if (use_matrix == 0) {
+    memcpy(reinterpret_cast<void*>(kMatrixCopy), reinterpret_cast<const void*>(kCameraMatrix), 48);
+    Write<uintptr_t>(kMatrix, kMatrixCopy);
+  }
+  const float* matrix = Read<const float*>(kMatrix);
+  if (matrix == nullptr) {
+    cpu(&g_counts.v_data);
+    return;
+  }
+  gm::Consts c = {};
+  gm::SetMatrix(&c, matrix);
+  c.near_plane = Read<float>(kNearPlane);
+  c.half_x = Read<float>(kHalfX);
+  c.half_y = Read<float>(kHalfY);
+  c.specular = 0;  // the function gives 0 as the specular color
+  c.flags = gm::kVertexOrder | gm::kVertexColor |
+            ((g_parts & gm::kPartDepth) != 0 ? gm::kDepthGame : 0u);
+  // The shift of the texture: for the material mesh of the draw.
+  const uintptr_t shift_mesh = material != nullptr && Read<uint32_t>(kDoUpdateMaterial) != 0
+                                   ? reinterpret_cast<uintptr_t>(material)
+                                   : Read<uintptr_t>(kCurrentMaterial);
+  const bool shifted = Read<uint32_t>(kUvShift) != 0 && shift_mesh != 0 &&
+                       (Read<uint8_t>(shift_mesh + 5) & 0x10) == 0;
+  if (shifted && (g_parts & gm::kPartUvShift) == 0) {
+    cpu(&g_counts.v_state);
+    return;
+  }
+  if (material != nullptr) {
+    Write<void*>(kCurrentMesh, material);
+    RunMaterial(material);
+  }
+  gm::DeviceState state = {};
+  if (!VkDdrawMeshState(Read<void*>(kDevice), &state) ||
+      !gm::StateAllowed(gm::StateReasons(state), g_parts)) {
+    cpu(&g_counts.v_state);
+    return;
+  }
+  if (shifted) {
+    c.uv_shift_u = Read<float>(kUvShiftU);
+    c.uv_shift_v = Read<float>(kUvShiftV);
+  }
+  for (uint32_t i = 0; i < count; ++i) {
+    float* v = g_vertex_pack + 8 * i;
+    memcpy(v, positions + 3 * i, 12);
+    memcpy(v + 3, uvs + 2 * i, 8);
+    memcpy(v + 5, colors + i, 4);
+    v[6] = 0.0f;
+    v[7] = 0.0f;
+  }
+  // The first vertex, for the measure of the nearest geometry.
+  const gm::Camera cam = gm::CameraSpace(c, positions, nullptr);
+  const bool clipped = !(cam.z >= c.near_plane && cam.x <= cam.z && cam.x >= -cam.z &&
+                         cam.y <= cam.z && cam.y >= -cam.z);
+  const float first_field =
+      clipped ? cam.z : (cam.z != 0.0f ? c.near_plane * (1.0f / cam.z) : 0.0f);
+  const uint64_t back_ticks_start = __rdtsc();
+  uint64_t back_ticks = 0;
+  if (g_mode == 2) {
+    OneWalkSetMode(kOneWalkLeftOnly);
+    g_back_vertices(count_in, positions, colors, uvs, triangles, indices, material, 1);
+    back_ticks = __rdtsc() - back_ticks_start;
+    OneWalkSetMode(kOneWalkRightOnly);
+    VkSceneDrawVertices(c, g_vertex_pack, count, g_index_pack, tris);
+    OneWalkSetMode(kOneWalkBoth);
+  } else {
+    DrawHooksMeshBatch(first_field);
+    VkSceneDrawVertices(c, g_vertex_pack, count, g_index_pack, tris);
+  }
+  g_after_gpu = true;
+  ++g_counts.v_gpu;
+  g_counts.v_vertices += count;
+  g_counts.v_triangles += tris;
+  g_counts.v_ticks += __rdtsc() - start - back_ticks;
+}
+
 bool Expect(const Site& s) {
   const void* at = reinterpret_cast<const void*>(s.address);
   return !IsBadReadPtr(at, sizeof(s.bytes)) && memcmp(at, s.bytes, sizeof(s.bytes)) == 0;
@@ -995,6 +1143,16 @@ void Report() {
            static_cast<unsigned long long>(renderer.no_room), gpu_ms,
            gpu > 0 ? gpu_ms * 1000.0 / gpu : 0.0, cpu_ms, cpu > 0 ? cpu_ms * 1000.0 / cpu : 0.0,
            check_ms);
+    if (g_vertices_on || c.v_gpu + c.v_cpu > 0) {
+      ModLog("gpu mesh     : batches of vertices (fn_0081C090, gpu_mesh_vertices=%d) in 10 s: %u on the "
+             "GPU path (%u vertices, %u triangles), %u on the CPU path (clamp of the screen %u, "
+             "h_DrawTriangle changes the draw %u, no data %u, an index out of the batch %u, state "
+             "%u), %.3f us a batch on the GPU path",
+             g_vertices_on ? 1 : 0, c.v_gpu, c.v_vertices, c.v_triangles, c.v_cpu, c.v_clamp,
+             c.v_special, c.v_data, c.v_index, c.v_state,
+             c.v_gpu > 0 && per_ms > 0.0 ? static_cast<double>(c.v_ticks) / per_ms * 1000.0 / c.v_gpu
+                                         : 0.0);
+    }
     ModLog("gpu mesh     : the renderer in 10 s: %llu draws with groups stopped because the draw has "
            "fewer matrices than the data have groups, %llu draws with groups left out because the "
            "buffers of the groups failed, %u meshes wait for a range (%llu bytes), %u free ranges "
@@ -1044,6 +1202,24 @@ void Report() {
   memset(g_callers, 0, sizeof(g_callers));
 }
 
+bool InstallVertexHook() {
+  if (g_vertex_hook_in) return true;
+  if (IsBadReadPtr(reinterpret_cast<const void*>(kVertexSite), 5) ||
+      memcmp(reinterpret_cast<const void*>(kVertexSite), kVertexBytes, 5) != 0) {
+    ModLog("gpu mesh     : the code at the start of fn_0081C090 is not the code of the game that "
+           "the mod fits, so its batches take the CPU path");
+    return false;
+  }
+  void* target = reinterpret_cast<void*>(kVertexSite);
+  void* back = nullptr;
+  g_vertex_hook_in = MH_CreateHook(target, reinterpret_cast<void*>(&HookVertices), &back) == MH_OK &&
+                     MH_EnableHook(target) == MH_OK;
+  g_back_vertices = reinterpret_cast<VertexFunction>(back);
+  ModLog("hooks        : the batches of vertices fn_0081C090 at 0x%08X %s",
+         static_cast<unsigned>(kVertexSite), g_vertex_hook_in ? "ok" : "FAILED");
+  return g_vertex_hook_in;
+}
+
 bool InstallHooks() {
   if (g_in) return true;
   for (int k = 0; k < kKinds; ++k) {
@@ -1073,6 +1249,7 @@ bool InstallHooks() {
          static_cast<unsigned>(kSites[0].address), static_cast<unsigned>(kSites[1].address),
          static_cast<unsigned>(kSites[2].address), static_cast<unsigned>(kSites[3].address),
          static_cast<unsigned>(kSites[4].address), g_in ? "ok" : "FAILED");
+  if (g_in && g_vertices_key) g_vertices_on = InstallVertexHook();
   return g_in;
 }
 
@@ -1089,12 +1266,13 @@ void GpuMeshSetOptions(const GpuMeshOptions& o) {
   g_parts = g_parts_keys;
   g_check_frames = o.check_frames < 0 ? 0u : static_cast<uint32_t>(o.check_frames);
   g_timer = o.timer != 0;
+  g_vertices_key = o.vertices != 0;
   VkSceneSetMesh(g_mode == 2 ? 1 : 0);
   if (g_mode == 0 && !g_test_keys) return;
   ModLog("gpu mesh     : gpu_mesh=%d, gpu_mesh_kinds=%d, parts 0x%X (blend %d, stage1 %d, uvshift "
-         "%d, group %d, depth %d), gpu_mesh_check_frames=%d, gpu_mesh_timer=%d. %s",
+         "%d, group %d, depth %d), gpu_mesh_check_frames=%d, gpu_mesh_timer=%d, gpu_mesh_vertices=%d. %s",
          g_mode, o.kinds, g_parts, o.blend, o.stage1, o.uvshift, o.group, o.depth, o.check_frames,
-         o.timer, ModeText(g_mode));
+         o.timer, o.vertices, ModeText(g_mode));
 }
 
 void GpuMeshInstall() {
@@ -1196,7 +1374,7 @@ static bool GameWindowInFront() {
 }
 
 void GpuMeshFrame() {
-  // Ctrl Shift 7, 6 and 5 (the digits of the top row): no other test key uses
+  // Ctrl Shift 7, 6, 5 and 4 (the digits of the top row): no other test key uses
   // them.
   if (g_test_keys) {
     const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
@@ -1228,6 +1406,20 @@ void GpuMeshFrame() {
              "0x%X)", (g_parts & gm::kPartDepth) != 0 ? 1 : 0, g_parts);
     }
     g_depth_key_down = depth_down;
+    // Ctrl Shift 4: the batches of vertices of fn_0081C090 on the GPU path or on
+    // the CPU path (gpu_mesh_vertices). The hook goes in at the first press.
+    const bool vertices_down = ctrl_shift && (GetAsyncKeyState('4') & 0x8000) != 0;
+    if (vertices_down && !g_vertices_key_down && g_in && GameWindowInFront()) {
+      if (!g_vertices_on && !InstallVertexHook()) {
+        // no hook: the batches stay on the CPU path
+      } else {
+        g_vertices_on = !g_vertices_on;
+        ControllersGesturePulse(0.5f, g_vertices_on ? 0.30f : 0.08f);
+        ModLog("test key     : Ctrl Shift 4, gpu_mesh_vertices is %d from the next batch",
+               g_vertices_on ? 1 : 0);
+      }
+    }
+    g_vertices_key_down = vertices_down;
   }
   if (!g_in) return;
   ++g_frame;

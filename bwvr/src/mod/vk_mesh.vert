@@ -66,6 +66,27 @@ vec4 Unpack(uint c) {
               float(c & 255u), float(c >> 24)) / 255.0;
 }
 
+#ifndef LEGACY
+// The camera coordinate with the sum order of the loops of the game and no fused
+// operation. order 0: ((x + y) + z) + t, which the five functions use. order 1
+// and 2 are the orders of fn_0081C090: ((z + y) + x) + t for x, ((y + z) + x) + t
+// for y and z.
+float Chain(vec4 r, vec3 p, uint order) {
+  precise float a = r.x * p.x;
+  precise float b = r.y * p.y;
+  precise float c = r.z * p.z;
+  precise float s;
+  if (order == 1u) {
+    s = ((c + b) + a) + r.w;
+  } else if (order == 2u) {
+    s = ((b + c) + a) + r.w;
+  } else {
+    s = ((a + b) + c) + r.w;
+  }
+  return s;
+}
+#endif
+
 void main() {
   const uint eyes = (draw.ops.w >> 8) & 3u;
   if (((eyes >> gl_ViewIndex) & 1u) == 0u) {
@@ -83,39 +104,22 @@ void main() {
   const vec4 q = vec4(p, 1.0);
 #ifdef GROUPS
   const uint at = uint(row0.x) + group * 12u;
-  const float cx = dot(vec4(groups.g[at], groups.g[at + 1u], groups.g[at + 2u], groups.g[at + 3u]), q);
-  const float cy = dot(vec4(groups.g[at + 4u], groups.g[at + 5u], groups.g[at + 6u], groups.g[at + 7u]), q);
-#ifdef LEGACY
-  const float cz = dot(vec4(groups.g[at + 8u], groups.g[at + 9u], groups.g[at + 10u], groups.g[at + 11u]), q);
+  const vec4 r0 = vec4(groups.g[at], groups.g[at + 1u], groups.g[at + 2u], groups.g[at + 3u]);
+  const vec4 r1 = vec4(groups.g[at + 4u], groups.g[at + 5u], groups.g[at + 6u], groups.g[at + 7u]);
+  const vec4 r2 = vec4(groups.g[at + 8u], groups.g[at + 9u], groups.g[at + 10u], groups.g[at + 11u]);
 #else
-  // The order of the sums of the loops of the game for z: ((x + y) + z) + t, with
-  // no fused operation, so that the depth has the rounding of the game.
-  precise float cz = ((groups.g[at + 8u] * p.x + groups.g[at + 9u] * p.y) +
-                      groups.g[at + 10u] * p.z) + groups.g[at + 11u];
-#endif
-#else
-  const float cx = dot(row0, q);
-  const float cy = dot(row1, q);
-#ifdef LEGACY
-  const float cz = dot(row2, q);
-#else
-  precise float cz = ((row2.x * p.x + row2.y * p.y) + row2.z * p.z) + row2.w;
-#endif
+  const vec4 r0 = row0;
+  const vec4 r1 = row1;
+  const vec4 r2 = row2;
 #endif
   const float near_plane = scene.x;
-  // Flag 8: the depth and the w of the game (rhw = near * (1 / cz), z = 1 - rhw,
-  // each rounded, then z * w), so two layers on one surface keep the order of
-  // the CPU path. The linear form (w - 1) has a larger error in z.
 #ifdef LEGACY
   // LEGACY (the variant for gpu_mesh_depth=0): the linear form, with no
   // invariant and no precise.
+  const float cx = dot(r0, q);
+  const float cy = dot(r1, q);
+  const float cz = dot(r2, q);
   const float w = cz / near_plane;
-#else
-  const bool game_depth = (colors.w & 8u) != 0u && cz > 1e-4;
-  precise float rhw = near_plane * (1.0 / cz);
-  precise float game_z = 1.0 - rhw;
-  precise float w = game_depth ? 1.0 / rhw : cz / near_plane;
-#endif
   const float kx = scene.y * draw.viewport.z;
   const float ky = scene.z * draw.viewport.w;
   const float ax = (scene.y + 0.5 - draw.viewport.x) * draw.viewport.z - 1.0;
@@ -125,15 +129,60 @@ void main() {
   if (gl_ViewIndex == 1 && (draw.ops.w & 1u) == 0u) {
     xc += draw.depth.z * draw.viewport.z;
   }
-#ifdef LEGACY
   const float zc = draw.depth.y * (w * (1.0 - draw.depth.x) - 1.0);
 #else
+  // Flag 8: the position of the game. The loops of the game make the camera point
+  // with the sums in a fixed order, then rhw = near * (1 / cz), z = 1 - rhw,
+  // x = (1 / cz * cx + 1) half_x and y = half_y - 1 / cz * cy * half_y (the order
+  // of the product of y depends on the function, flags 16 and 32), each rounded
+  // to a float. The vertex shader of the renderer (vk_scene.vert) then makes the
+  // clip position of the pixel from them. This shader does the same with
+  // precise values, so a mesh on the GPU path and a batch on the CPU path have
+  // the same pixels and the same depth where the geometry is the same. Flag 64:
+  // the order of the sums of fn_0081C090. Without flag 8 the clip position is
+  // linear in the camera point (w - 1 for z), which has a larger rounding error.
+  const uint vertex_order = (colors.w & 64u) != 0u ? 1u : 0u;
+  precise float cx = Chain(r0, p, vertex_order);
+  precise float cy = Chain(r1, p, vertex_order * 2u);
+  precise float cz = Chain(r2, p, vertex_order * 2u);
+  const bool game_depth = (colors.w & 8u) != 0u && cz >= near_plane && cz > 1e-4;
+  precise float inv = 1.0 / cz;
+  precise float rhw = near_plane * inv;
+  precise float game_z = 1.0 - rhw;
+  precise float w = game_depth ? 1.0 / rhw : cz / near_plane;
+  float xc;
+  float yc;
+  if (game_depth) {
+    precise float xg = (inv * cx + 1.0) * scene.y;
+    const uint y_order = (colors.w >> 4) & 3u;
+    precise float y_product = y_order == 1u   ? (scene.z * inv) * cy
+                              : y_order == 2u ? (scene.z * cy) * inv
+                                              : (inv * cy) * scene.z;
+    precise float yg = scene.z - y_product;
+    float sx = xg;
+    if (gl_ViewIndex == 1 && (draw.ops.w & 1u) == 0u) sx += draw.depth.z * rhw;
+    xc = ((sx + 0.5 - draw.viewport.x) * draw.viewport.z - 1.0) * w;
+    yc = ((yg + 0.5 - draw.viewport.y) * draw.viewport.w - 1.0) * w;
+  } else {
+    const float kx = scene.y * draw.viewport.z;
+    const float ky = scene.z * draw.viewport.w;
+    const float ax = (scene.y + 0.5 - draw.viewport.x) * draw.viewport.z - 1.0;
+    const float ay = (scene.z + 0.5 - draw.viewport.y) * draw.viewport.w - 1.0;
+    xc = w * ax + cx / near_plane * kx;
+    yc = w * ay - cy / near_plane * ky;
+    if (gl_ViewIndex == 1 && (draw.ops.w & 1u) == 0u) {
+      xc += draw.depth.z * draw.viewport.z;
+    }
+  }
   precise float zc = game_depth ? ((game_z - draw.depth.x) * draw.depth.y) * w
                                 : draw.depth.y * (w * (1.0 - draw.depth.x) - 1.0);
 #endif
   gl_Position = vec4(xc, yc, zc, w);
 
   uint color = colors.x;
+  // Flag 128: the color of each vertex is in the first word of the normal
+  // (fn_0081C090 has a color for each vertex and no light).
+  if ((colors.w & 128u) != 0u) color = floatBitsToUint(in_normal.x);
   if ((colors.w & 1u) != 0u) {
 #ifdef GROUPS
     const uint lb = uint(row0.y) + group * 4u;

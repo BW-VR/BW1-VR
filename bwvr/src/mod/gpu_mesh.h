@@ -32,6 +32,12 @@
 // words each N frames, and a cheap sample at each draw. 0: the full sum at
 // each draw. gpu_mesh_timer=1: the log line has the time of each part of the
 // hook (it costs a clock read for each part).
+// gpu_mesh_vertices (0 is the default): 1 the batches of vertices that fn_0081C090
+// draws (text, icons, effects: positions, a color and texture coordinates for
+// each vertex, given by the caller in each call) take the GPU path too: the
+// vertices go with the draw (a kMeshDraw with the id kInlineMesh) and the vertex
+// shader of the meshes transforms them. With test_keys=1, Ctrl Shift 4 turns it
+// on and off.
 struct GpuMeshOptions {
   int mode = 0;
   bool test_keys = false;
@@ -40,6 +46,7 @@ struct GpuMeshOptions {
   int blend = 1, stage1 = 1, uvshift = 1, group = 1, depth = 1;
   int check_frames = 30;
   int timer = 0;
+  int vertices = 0;
 };
 void GpuMeshSetOptions(const GpuMeshOptions& options);
 void GpuMeshInstall();

@@ -257,12 +257,13 @@ that kind of mesh on the CPU path), and a switch for a live test:
 | Stage 1 | `gpu_mesh_stage1` | a mesh with a texture on stage 1. The vertex shader gives stage 1 the texture coordinates of stage 0, as the vertex format of the game (FVF `0x1C4`) does |
 | Shift of the texture | `gpu_mesh_uvshift` | a mesh that `DrawTriangle` shifts (`0x00ECA628`, the values at `0x00ECA62C` and `0x00ECA630`: water and fire). The shift is part of the record and the shader adds it to u and v |
 | Groups | `gpu_mesh_group` | a mesh with a matrix for each group of vertices (below) |
-| Depth of the game | `gpu_mesh_depth` | not a kind of mesh: 1 the vertex shader makes the depth and the w as the game does (`rhw = near * (1 / cz)` and `z = 1 - rhw`, each rounded to a float, then `z * w`), with `precise` values and `invariant gl_Position`. 0 the other vertex shader (the `LEGACY` variants of `vk_mesh.vert`): the linear form `z = w - 1`, with neither `invariant` nor `precise`. See "The layers" |
+| Position of the game | `gpu_mesh_depth` | not a kind of mesh: 1 the vertex shader makes the pixel, the depth and the w as the loops of the game do: the camera point with the sums in the order of the loop (no fused operation), `inv = 1 / cz`, `rhw = near * inv`, `z = 1 - rhw`, `x = (inv cx + 1) half_x`, `y = half_y - (product of inv, cy and half_y in the order of the function)`, each rounded to a float, then the map of the renderer (`vk_scene.vert`) with `w = 1 / rhw`. All with `precise` values and `invariant gl_Position`. A batch on the CPU path and a mesh on the GPU path then get the same pixel and the same depth where the geometry is the same, up to the arithmetic of the GPU. 0 the other vertex shader (the `LEGACY` variants of `vk_mesh.vert`): the linear form `z = w - 1`, with neither `invariant` nor `precise`. See "The layers" |
 
 With `test_keys=1`, Ctrl Shift 6 turns all five parts off and on (the debug
-page has the row "GPU mesh parts"), Ctrl Shift 5 turns the depth of the game
-alone off and on (the other parts stay), and Ctrl Shift 7 turns `gpu_mesh`
-between 1 and 0 (the row "GPU mesh"). The default control map of the game has
+page has the row "GPU mesh parts"), Ctrl Shift 5 turns the position of the game
+alone off and on (the other parts stay), Ctrl Shift 4 turns the batches of
+vertices (below) off and on, and Ctrl Shift 7 turns `gpu_mesh` between 1 and 0
+(the row "GPU mesh"). The default control map of the game has
 no action on the digits 5, 6 and 7 (`controls-audit.md`, section 2). With `gpu_mesh=0` in `bwvr.ini` and `test_keys=1`
 the hooks go in at the first press of Ctrl Shift 7.
 
@@ -401,7 +402,38 @@ other has not (the shader reads the matrices from another place), the rounding
 of the depth of the GPU (the part `gpu_mesh_depth` and its key Ctrl Shift 5),
 and the vertices of the two layers. At a house with snow, compare
 `gpu_mesh_depth` 1 and 0 (Ctrl Shift 5), `gpu_mesh_group=0`, and
-`gpu_mesh=0` (Ctrl Shift 7).
+`gpu_mesh=0` (Ctrl Shift 7). In the desk run of the Temple save about
+90000 CPU batches in 10 s are layers right after a mesh on the GPU path. They
+come through `DrawTriangle` from `fn_0081C090` (60000), `fn_007A8DB0` (26000) and
+`fn_0085C7F0` (7000), not from the five functions. With `gpu_mesh_vertices=1` the
+first group goes to the GPU path, and the layers after a mesh on the GPU path
+are 82000 in 10 s, 70000 of them from `fn_007A8DB0`.
+
+**The batches of vertices** (`gpu_mesh_vertices`, 0 by default, Ctrl Shift 4 with
+`test_keys=1`). `fn_0081C090` draws a batch of vertices that the caller gives
+in each call: positions (3 floats), a color for each vertex (a dword), texture
+coordinates (2 floats), the triangles as 6 words each (an index every other
+word), a material mesh (or none) and a flag for the camera matrix (with 0 it
+copies the camera matrix to `0x00EA9E10` and points `0x00EA9EA0` at the copy).
+It has 18 callers (text in the world, icons, effects) and no light. It
+transforms with the sums in the order `((z + y) + x) + t` for x and
+`((y + z) + x) + t` for y and z, tests the clip flags and the back face,
+runs the material and calls `DrawTriangle`. The vertices change in each call,
+so the data go with each draw (a `kMeshDraw` with the id `kInlineMesh`: the
+vertices of 32 bytes with the color in the first word of the normal, and the
+indices as 16 bit, three for each triangle). The vertex shader makes the
+position of the game with the order of the sums of this function (flag 64) and
+takes the color of the vertex (flag 128). The hook takes the batch when it has
+no clamp of the screen (`0x00FA9398`), no glow, advisor or bubble, all indices
+inside the batch and a state that the parts allow. Else the function runs. The
+hook does what the function does before its loops: the copy of the camera
+matrix. The log counts the batches on each path and the time.
+`fn_007A8DB0` (a sprite, 4 vertices that it makes with its own trigonometry and
+`rcpss`, from `fn_007ACD20`) and `fn_0085C7F0` (a mesh with offsets that the
+water plane cuts: the flag `0x800`, `fn_0081D4F0` for the cut, and
+`fn_0085C0E0` after the draw reads the vertex table) stay on the CPU path. The
+first has nothing on the CPU that the GPU could save and its depth is the depth
+of the game, the second needs the vertex table and a clip plane.
 
 **The checks** (`test/controller_math/gpu_mesh_checks.h`) compare the C++ math
 of `gpu_mesh_math.h` with the loops of the game (`fast_transform_math.h`, the

@@ -318,6 +318,12 @@ struct MeshDataBody {
   uint32_t reserved;
 };
 
+// A kMeshDraw with the id kInlineMesh has its vertices in the record (a batch
+// of vertices that comes with the draw, fn_0081C090): offset_floats is 8 for
+// each vertex, group_count is the count of triangles, and the vertices (32 bytes
+// each) and the indices (6 bytes for each triangle) follow the body.
+constexpr uint64_t kInlineMesh = ~0ull;
+
 // The offsets of kMeshDraw: 0 none, else 3 floats for each vertex follow the
 // body (a person or an animal, fn_00859530). Then, for a mesh with groups
 // (gpu_mesh_math::kGroup), 12 floats for each group (its matrix in the rows of

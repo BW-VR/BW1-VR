@@ -57,7 +57,7 @@ inline void GpuMeshChecks() {
   // MinZ above 0 (the viewport of a pass of foveated resolution has such
   // values), and for a viewport with the render of a headset (4080 by 3264).
   struct Worst {
-    int projected = 0, flag_mismatch = 0, edge_mismatch = 0, z_exact = 0;
+    int projected = 0, flag_mismatch = 0, edge_mismatch = 0, z_exact = 0, x_exact = 0, y_exact = 0;
     double xy = 0.0, z = 0.0, rhw = 0.0;
   };
   const auto position = [&](const gm::View& view, bool whole, uint32_t seed, int meshes,
@@ -120,6 +120,8 @@ inline void GpuMeshChecks() {
         const double dz = fabs(static_cast<double>(s.z) - o[2]);
         if (dz > w.z) w.z = dz;
         if (dz == 0.0) ++w.z_exact;
+        if (dx == 0.0) ++w.x_exact;
+        if (dy == 0.0) ++w.y_exact;
         const double drhw = fabs(static_cast<double>(s.rhw) - o[3]) / o[3];
         if (drhw > w.rhw) w.rhw = drhw;
       }
@@ -147,10 +149,14 @@ inline void GpuMeshChecks() {
     // layers of the CPU path and the GPU path keep one order. The linear form
     // is exact for fewer points.
     const Worst linear = whole;
-    const Worst game = position(view, true, 4242u, 300, gm::kDepthGame);
+    const Worst game = position(view, true, 4242u, 300, gm::kDepthGame | gm::kYOrderC);
     const double exact_game = static_cast<double>(game.z_exact) / game.projected;
     const double exact_linear = static_cast<double>(linear.z_exact) / linear.projected;
-    Check(game.flag_mismatch == 0 && game.z < 1.2e-7 && exact_game > 0.9 && exact_game > exact_linear,
+    printf("  (x and y exact: %.1f and %.1f percent with the position of the game, %.1f and %.1f percent linear)\n",
+           100.0 * game.x_exact / game.projected, 100.0 * game.y_exact / game.projected,
+           100.0 * linear.x_exact / linear.projected, 100.0 * linear.y_exact / linear.projected);
+    Check(game.flag_mismatch == 0 && game.z < 1.2e-7 && exact_game > 0.9 && exact_game > exact_linear &&
+              game.x_exact >= linear.x_exact && game.y_exact >= linear.y_exact,
           "the depth of the game is the depth of the loop of the game for nine of ten points, more than the linear form",
           exact_game, 1.0);
     printf("  (depth of the game: %.1f percent of the points exact, worst %.7f. The linear form: %.1f percent, worst %.7f)\n",

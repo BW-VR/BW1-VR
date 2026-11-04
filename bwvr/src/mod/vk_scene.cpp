@@ -2402,16 +2402,17 @@ void BindVertices(VkCommandBuffer cb, const Slot& s, VkDeviceSize vertex_at,
 // draw as one instance, the offsets, and the indices. These binds go past the
 // state of g_bound.
 void DrawMeshGeometry(VkCommandBuffer cb, const Slot& s, const MresRecord& r) {
-  const VkBuffer buffers[3] = {g_mesh_arena.buffer, s.ring.buffer,
+  const VkBuffer vertex_buffer = r.mesh == 4 ? s.ring.buffer : g_mesh_arena.buffer;
+  const VkBuffer buffers[3] = {vertex_buffer, s.ring.buffer,
                                r.mesh == 3 ? g_mesh_arena.buffer : s.ring.buffer};
   const VkDeviceSize offsets[3] = {r.mesh_vertex_at, r.vertex_at,
                                    r.mesh == 3 ? r.mesh_group_at : r.offsets_at};
-  f.vkCmdBindVertexBuffers(cb, 0, r.mesh >= 2 ? 3 : 2, buffers, offsets);
+  f.vkCmdBindVertexBuffers(cb, 0, r.mesh == 2 || r.mesh == 3 ? 3 : 2, buffers, offsets);
   if (r.mesh == 3) {
     f.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_group_layout, 2, 1,
                               &r.groups_set, 0, nullptr);
   }
-  f.vkCmdBindIndexBuffer(cb, g_mesh_arena.buffer, r.mesh_index_at, VK_INDEX_TYPE_UINT16);
+  f.vkCmdBindIndexBuffer(cb, vertex_buffer, r.mesh_index_at, VK_INDEX_TYPE_UINT16);
   g_bound.Forget(vk_draw_math::kVertices);
   g_bound.Forget(vk_draw_math::kIndices);
   f.vkCmdDrawIndexed(cb, r.index_count, 1, 0, 0, 0);
@@ -4882,10 +4883,21 @@ bool VkSceneMeshRetry(uint64_t mesh, uint64_t hash, const void* vertices,
                   group_count);
 }
 
-void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
-                     const float* offsets, uint32_t offset_floats, const float* groups,
-                     uint32_t group_count) {
-  BWVR_STREAM(VkStreamDrawMesh(mesh, consts_in, offsets, offset_floats, groups, group_count));
+namespace {
+
+// The vertices of a draw that come with the draw (fn_0081C090): 32 bytes each
+// (x, y, z, u, v, the color in the first word of the normal) and the indices of
+// the triangles. They go into the ring of the slot, not into the arena.
+struct InlineVertices {
+  const uint8_t* vertices;
+  uint32_t vertex_count;
+  const uint16_t* indices;
+  uint32_t triangles;
+};
+
+void DrawMeshImpl(uint64_t mesh, const gpu_mesh_math::Consts& consts_in, const float* offsets,
+                  uint32_t offset_floats, const float* groups, uint32_t group_count,
+                  const InlineVertices* inl) {
   if (g_bare_walk || !g_recording) return;
   // A mesh is a draw of the world: not for the panel.
   if (ForPanel() || OffTarget()) {
@@ -4893,17 +4905,25 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
     ++g_skip_target;
     return;
   }
-  auto found = g_meshes.find(mesh);
-  if (found == g_meshes.end() && !g_mesh_wait.Empty()) {
-    MeshFlushPending();
-    found = g_meshes.find(mesh);
+  MeshEntry inline_entry = {};
+  MeshEntry* entry = &inline_entry;
+  if (inl != nullptr) {
+    inline_entry.vertex_count = inl->vertex_count;
+    inline_entry.triangles = inl->triangles;
+  } else {
+    auto found = g_meshes.find(mesh);
+    if (found == g_meshes.end() && !g_mesh_wait.Empty()) {
+      MeshFlushPending();
+      found = g_meshes.find(mesh);
+    }
+    if (g_mesh_arena.buffer == VK_NULL_HANDLE || found == g_meshes.end()) {
+      ++g_mesh_no_data;
+      ++g_skipped;
+      return;
+    }
+    entry = &found->second;
   }
-  if (g_mesh_arena.buffer == VK_NULL_HANDLE || found == g_meshes.end()) {
-    ++g_mesh_no_data;
-    ++g_skipped;
-    return;
-  }
-  MeshEntry& m = found->second;
+  MeshEntry& m = *entry;
   const bool with_offsets = offsets != nullptr && offset_floats != 0;
   if (with_offsets && offset_floats != m.vertex_count * 3) {
     ++g_mesh_bad_offsets;
@@ -4932,7 +4952,11 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
   const VkDeviceSize data_bytes = sizeof(gpu_mesh_math::Consts);
   const VkDeviceSize offset_bytes =
       with_offsets ? static_cast<VkDeviceSize>(m.vertex_count) * 12 : 0;
-  if (s.used + data_bytes + offset_bytes + 64 > kRingBytes) {
+  const VkDeviceSize inline_bytes =
+      inl != nullptr ? static_cast<VkDeviceSize>(inl->vertex_count) * 32 +
+                           ((static_cast<VkDeviceSize>(inl->triangles) * 6 + 3) & ~3ull) + 64
+                     : 0;
+  if (s.used + data_bytes + offset_bytes + inline_bytes + 64 > kRingBytes) {
     ++g_skipped;
     ++g_skip_ring;
     return;
@@ -4997,6 +5021,16 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
     s.used += offset_bytes;
   }
   s.used = (s.used + 31) & ~31ull;
+  VkDeviceSize inline_vertex_at = 0, inline_index_at = 0;
+  if (inl != nullptr) {
+    inline_vertex_at = s.used;
+    memcpy(ring + inline_vertex_at, inl->vertices, static_cast<size_t>(inl->vertex_count) * 32);
+    s.used += static_cast<VkDeviceSize>(inl->vertex_count) * 32;
+    inline_index_at = s.used;
+    memcpy(ring + inline_index_at, inl->indices, static_cast<size_t>(inl->triangles) * 6);
+    s.used += (static_cast<VkDeviceSize>(inl->triangles) * 6 + 3) & ~3ull;
+    s.used = (s.used + 31) & ~31ull;
+  }
   if (with_groups) {
     const bool lit = (consts.flags & gpu_mesh_math::kLit) != 0;
     const VkDeviceSize matrix_floats = static_cast<VkDeviceSize>(group_count) * 12;
@@ -5092,11 +5126,12 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
   r.vertex_at = data_at;
   r.vertex_count = m.vertex_count;
   r.index_count = m.triangles * 3;
-  r.mesh = with_groups ? 3u : with_offsets ? 2u : 1u;
+  r.mesh = inl != nullptr ? 4u : with_groups ? 3u : with_offsets ? 2u : 1u;
   r.mesh_group_at = m.group_at;
   r.groups_set = s.groups_set;
-  r.mesh_vertex_at = m.at;
-  r.mesh_index_at = m.at + static_cast<VkDeviceSize>(m.vertex_count) * 32;
+  r.mesh_vertex_at = inl != nullptr ? inline_vertex_at : m.at;
+  r.mesh_index_at = inl != nullptr ? inline_index_at
+                                   : m.at + static_cast<VkDeviceSize>(m.vertex_count) * 32;
   r.offsets_at = offsets_at;
   ++g_mesh_draws;
   if (g_walk_mres) {
@@ -5125,6 +5160,24 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
     return;
   }
   PlayDraw(s, r);
+}
+
+}  // namespace
+
+void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
+                     const float* offsets, uint32_t offset_floats, const float* groups,
+                     uint32_t group_count) {
+  BWVR_STREAM(VkStreamDrawMesh(mesh, consts_in, offsets, offset_floats, groups, group_count));
+  DrawMeshImpl(mesh, consts_in, offsets, offset_floats, groups, group_count, nullptr);
+}
+
+void VkSceneDrawVertices(const gpu_mesh_math::Consts& consts, const void* vertices,
+                         uint32_t vertex_count, const uint16_t* indices, uint32_t triangles) {
+  BWVR_STREAM(VkStreamDrawVertices(consts, vertices, vertex_count, indices, triangles));
+  if (vertices == nullptr || indices == nullptr || vertex_count == 0 || triangles == 0) return;
+  const InlineVertices inl = {static_cast<const uint8_t*>(vertices), vertex_count, indices,
+                              triangles};
+  DrawMeshImpl(0, consts, nullptr, 0, nullptr, 0, &inl);
 }
 
 void VkSceneSetMesh(int compare) { g_mesh_compare = compare != 0; }

@@ -75,6 +75,8 @@ void VkStreamMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
 void VkStreamDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
                       const float* offsets, uint32_t offset_floats, const float* groups,
                       uint32_t group_count);
+void VkStreamDrawVertices(const gpu_mesh_math::Consts& consts, const void* vertices,
+                          uint32_t vertex_count, const uint16_t* indices, uint32_t triangles);
 uint32_t VkStreamMeshEpoch();
 void VkStreamViewport(const void* viewport7);
 void VkStreamClear(uint32_t count, const void* rects, uint32_t flags,

@@ -1,0 +1,240 @@
+// The late compose of the eye picture (vk_compose_math.h). main.cpp includes
+// this file after Check and Near, just before main.
+#pragma once
+
+#include <stdio.h>
+
+#include <string>
+
+#include "../../src/mod/vk_compose_math.h"
+
+namespace vk_compose_checks {
+
+namespace m = vk_compose_math;
+
+// The 54 vertices of the old compose (ComposeMres of vk_scene.cpp) for the
+// centre: a grid of 4 by 4 points. Gives the alpha and the uv of the corner.
+struct OldVertex {
+  float x, y, alpha, u, v;
+};
+
+inline int OldCentre(const m::Layout& l, OldVertex out[54]) {
+  const float ix0 = l.inset_x0, iy0 = l.inset_y0;
+  const float iw = l.inset_w, ih = l.inset_h;
+  const float edge = 0.08f * (iw < ih ? iw : ih);
+  const float gx[4] = {ix0, ix0 + edge, ix0 + iw - edge, ix0 + iw};
+  const float gy[4] = {iy0, iy0 + edge, iy0 + ih - edge, iy0 + ih};
+  const float cu = static_cast<float>(l.center_w) / static_cast<float>(l.center_image_w);
+  const float cv = static_cast<float>(l.center_h) / static_cast<float>(l.center_image_h);
+  int n = 0;
+  for (int j = 0; j < 3; ++j) {
+    for (int i = 0; i < 3; ++i) {
+      const int corner[6][2] = {{i, j},         {i + 1, j},
+                                {i + 1, j + 1}, {i, j},
+                                {i + 1, j + 1}, {i, j + 1}};
+      for (int k = 0; k < 6; ++k) {
+        const int ci = corner[k][0], cj = corner[k][1];
+        const bool inside = ci >= 1 && ci <= 2 && cj >= 1 && cj <= 2;
+        OldVertex& v = out[n++];
+        v.x = gx[ci];
+        v.y = gy[cj];
+        v.alpha = inside ? 1.0f : 0.0f;
+        v.u = (gx[ci] - ix0) / iw * cu;
+        v.v = (gy[cj] - iy0) / ih * cv;
+      }
+    }
+  }
+  return n;
+}
+
+// The interpolated value at (px, py) of the triangle list, or false when no
+// triangle has the point. The value: a, u, v of the vertices (a template for
+// the two vertex types).
+template <typename V, typename Get>
+inline bool Interpolate(const V* v, int count, float px, float py, Get get, float out[3]) {
+  for (int t = 0; t + 2 < count; t += 3) {
+    const float x0 = v[t].x, y0 = v[t].y, x1 = v[t + 1].x, y1 = v[t + 1].y;
+    const float x2 = v[t + 2].x, y2 = v[t + 2].y;
+    const float det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+    if (fabsf(det) < 1e-9f) continue;
+    const float l0 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / det;
+    const float l1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / det;
+    const float l2 = 1.0f - l0 - l1;
+    const float e = -1e-5f;
+    if (l0 < e || l1 < e || l2 < e) continue;
+    float a[3], b[3], c[3];
+    get(v[t], a);
+    get(v[t + 1], b);
+    get(v[t + 2], c);
+    for (int k = 0; k < 3; ++k) out[k] = l0 * a[k] + l1 * b[k] + l2 * c[k];
+    return true;
+  }
+  return false;
+}
+
+inline float TriangleArea(const m::Vertex* v) {
+  return 0.5f * fabsf((v[1].x - v[0].x) * (v[2].y - v[0].y) -
+                      (v[2].x - v[0].x) * (v[1].y - v[0].y));
+}
+
+inline void CheckLayout(const char* label, const m::Layout& l) {
+  printf("  layout %s\n", label);
+  m::Vertex grid[m::kVertices];
+  const int n = m::BuildGrid(l, grid);
+  Check(n == 150 && m::kVertices == 150, "the grid has 150 vertices", n, 150);
+  // The cells fill the eye picture once.
+  double area = 0.0;
+  for (int t = 0; t < n; t += 3) area += TriangleArea(grid + t);
+  Near("the triangles fill the eye picture", area,
+       static_cast<double>(l.width) * l.height, 1e-4 * l.width * l.height);
+
+  OldVertex old[54];
+  OldCentre(l, old);
+  // The alpha and the centre uv at points of the centre rect are the ones of
+  // the old grid. The points include the soft edge.
+  int compared = 0;
+  float worst_alpha = 0.0f, worst_uv = 0.0f;
+  for (int j = 0; j <= 24; ++j) {
+    for (int i = 0; i <= 24; ++i) {
+      const float px = l.inset_x0 + (static_cast<float>(i) + 0.37f) / 25.0f * l.inset_w;
+      const float py = l.inset_y0 + (static_cast<float>(j) + 0.21f) / 25.0f * l.inset_h;
+      float a_new[3], a_old[3];
+      const bool in_new = Interpolate(
+          grid, n, px, py,
+          [](const m::Vertex& v, float o[3]) {
+            o[0] = v.alpha;
+            o[1] = v.u_center;
+            o[2] = v.v_center;
+          },
+          a_new);
+      const bool in_old = Interpolate(
+          old, 54, px, py,
+          [](const OldVertex& v, float o[3]) {
+            o[0] = v.alpha;
+            o[1] = v.u;
+            o[2] = v.v;
+          },
+          a_old);
+      if (!in_new || !in_old) continue;
+      ++compared;
+      worst_alpha = fmaxf(worst_alpha, fabsf(a_new[0] - a_old[0]));
+      worst_uv = fmaxf(worst_uv, fmaxf(fabsf(a_new[1] - a_old[1]), fabsf(a_new[2] - a_old[2])));
+    }
+  }
+  Check(compared > 500, "points of the centre rect are in both grids", compared, 625);
+  Near("the alpha of the soft edge is the one of the old grid", worst_alpha, 0.0, 1e-4);
+  Near("the centre uv is the one of the old grid", worst_uv, 0.0, 1e-4);
+
+  // Outside the centre rect the alpha is 0, so the outer image alone shows.
+  int outside = 0;
+  float worst_out = 0.0f;
+  for (int j = 0; j < 20; ++j) {
+    for (int i = 0; i < 20; ++i) {
+      const float px = (static_cast<float>(i) + 0.5f) / 20.0f * l.width;
+      const float py = (static_cast<float>(j) + 0.5f) / 20.0f * l.height;
+      if (px >= l.inset_x0 && px <= l.inset_x0 + l.inset_w && py >= l.inset_y0 &&
+          py <= l.inset_y0 + l.inset_h) {
+        continue;
+      }
+      float o[3];
+      if (!Interpolate(
+              grid, n, px, py,
+              [](const m::Vertex& v, float r[3]) {
+                r[0] = v.alpha;
+                r[1] = v.u_outer;
+                r[2] = v.v_outer;
+              },
+              o)) {
+        continue;
+      }
+      ++outside;
+      worst_out = fmaxf(worst_out, o[0]);
+    }
+  }
+  Check(outside > 50, "points outside the centre rect are in the grid", outside, 100);
+  Near("outside the centre rect the alpha is 0", worst_out, 0.0, 1e-6);
+
+  // The outer uv covers the used part of the outer image over the picture.
+  const float ou = static_cast<float>(l.outer_w) / l.outer_image_w;
+  const float ov = static_cast<float>(l.outer_h) / l.outer_image_h;
+  float o_end[3];
+  Interpolate(
+      grid, n, l.width - 0.01f, l.height - 0.01f,
+      [](const m::Vertex& v, float r[3]) {
+        r[0] = v.alpha;
+        r[1] = v.u_outer;
+        r[2] = v.v_outer;
+      },
+      o_end);
+  Near("the outer uv u at the right edge is the used share of the image", o_end[1], ou, 1e-3);
+  Near("the outer uv v at the bottom edge is the used share of the image", o_end[2], ov, 1e-3);
+}
+
+// The hash of a shader source (FNV-1a, 64 bit, over the text with LF line
+// ends), as tools/compose_shaders.ps1 writes it into the header.
+inline bool ShaderHeaderMatches(const std::string& source_name, const std::string& header_name) {
+  std::string dir = __FILE__;
+  dir = dir.substr(0, dir.find_last_of("/\\")) + "/../../src/mod/";
+  const auto read = [](const std::string& path) {
+    std::string text;
+    FILE* f = nullptr;
+    if (fopen_s(&f, path.c_str(), "rb") != 0 || f == nullptr) return text;
+    char chunk[4096];
+    size_t n;
+    while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) text.append(chunk, n);
+    fclose(f);
+    return text;
+  };
+  const std::string source = read(dir + source_name);
+  const std::string header = read(dir + header_name);
+  uint64_t fnv = 0xcbf29ce484222325ull;
+  for (char ch : source) {
+    if (ch == '\r') continue;
+    fnv ^= static_cast<uint8_t>(ch);
+    fnv *= 0x100000001b3ull;
+  }
+  char want[48];
+  snprintf(want, sizeof(want), "source-fnv64 %016llx", static_cast<unsigned long long>(fnv));
+  return !source.empty() && header.find(want) != std::string::npos;
+}
+
+inline void VkComposeChecks() {
+  printf("\nThe compose of the eye picture: the grid and the transfer function\n");
+  {
+    const bool vert = ShaderHeaderMatches("vk_compose.vert", "vk_compose_vert.h");
+    const bool frag = ShaderHeaderMatches("vk_compose.frag", "vk_compose_frag.h");
+    Check(vert && frag,
+          "vk_compose_vert.h and vk_compose_frag.h are made from the sources (run "
+          "bwvr/tools/compose_shaders.ps1)",
+          (vert ? 1 : 0) + (frag ? 1 : 0), 2);
+  }
+  // The Steam Frame: a render of 2808 by 2246, the outer image at 25 percent
+  // (702 by 562), the centre at 100 percent for 20 degrees (456 by 456).
+  m::Layout frame = {2808, 2246, 702, 562, 702, 562, 456, 456, 456, 456, 1000.0f, 700.0f, 456.0f, 456.0f};
+  CheckLayout("of the Steam Frame", frame);
+  // The images are larger than the used part (they only grow).
+  m::Layout grown = {2808, 2246, 702, 562, 800, 640, 456, 456, 512, 512, 100.5f, 33.25f, 456.0f, 456.0f};
+  CheckLayout("with images larger than their used part", grown);
+  // The centre rect at the corner of the picture: cells of no width.
+  m::Layout corner = {2808, 2246, 702, 562, 702, 562, 456, 456, 456, 456, 0.0f, 0.0f, 456.0f, 456.0f};
+  m::Vertex g[m::kVertices];
+  m::BuildGrid(corner, g);
+  double area = 0.0;
+  for (int t = 0; t < m::kVertices; t += 3) area += TriangleArea(g + t);
+  Near("a centre rect at the corner: the triangles fill the picture", area, 2808.0 * 2246.0,
+       1e-4 * 2808.0 * 2246.0);
+
+  // The transfer function: the shader decodes the byte, an sRGB target
+  // encodes it again, and the byte is the same.
+  int bad = 0;
+  for (int b = 0; b < 256; ++b) {
+    const float c = static_cast<float>(b) / 255.0f;
+    const float back = m::LinearToSrgb(m::SrgbToLinear(c)) * 255.0f;
+    if (static_cast<int>(back + 0.5f) != b) ++bad;
+  }
+  Check(bad == 0, "decode then encode gives each byte of 0 to 255 again", bad, 0);
+  Near("decode of 0 is 0", m::SrgbToLinear(0.0f), 0.0, 1e-9);
+  Near("decode of 1 is 1", m::SrgbToLinear(1.0f), 1.0, 1e-6);
+}
+
+}  // namespace vk_compose_checks

@@ -451,6 +451,34 @@ inline void QuadLayerChecks() {
               !ql::PanelQuadRect(off, 2000, 1600, r) && !ql::PanelQuadRect(out, 2000, 1600, r),
           "a panel quad is cut to the panel image, and a quad that is not visible or outside does not show",
           r[3], 100);
+    // The part of the panel image that the quads need (xr_panel_rect=1).
+    ss::PanelBody panel = {};
+    panel.width = 2000;
+    panel.height = 1600;
+    panel.quads[0] = q;
+    panel.quads[0].rect[0] = 100;
+    panel.quads[0].rect[1] = 200;
+    panel.quads[0].rect[2] = 300;
+    panel.quads[0].rect[3] = 400;
+    panel.quads[1] = q;
+    panel.quads[1].visible = 0;  // off, but it keeps its rect
+    panel.quads[1].rect[0] = 900;
+    panel.quads[1].rect[1] = 100;
+    panel.quads[1].rect[2] = 200;
+    panel.quads[1].rect[3] = 50;
+    int32_t u[4] = {0, 0, 0, 0};
+    const bool have = ql::PanelUnion(panel, u);
+    Check(have && u[0] == 100 && u[1] == 100 && u[2] == 1000 && u[3] == 500,
+          "the part of the panel image holds the rects of all quads, also a quad that is off",
+          u[2], 1000);
+    int32_t inside[4] = {150, 250, 100, 100}, outside[4] = {90, 250, 100, 100};
+    Check(ql::RectInside(inside, u) && !ql::RectInside(outside, u),
+          "a rect lies in the part or it does not", ql::RectInside(inside, u) ? 1 : 0, 1);
+    ss::PanelBody empty = {};
+    empty.width = 2000;
+    empty.height = 1600;
+    Check(!ql::PanelUnion(empty, u),
+          "a panel with no rect gives no part, so the whole image is the part", 0, 0);
     ss::WindowBody w = {};
     w.mask = 1;
     w.alpha = 0.5f;

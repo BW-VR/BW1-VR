@@ -3857,6 +3857,8 @@ parts that the picture does not need:
 | `xr_eye_rects` | 1 | A copy of an eye picture with an atlas, into a slot and into a swapchain, takes only the shown part. The rest of the image of the slot and of the swapchain image is undefined | 0: the whole picture |
 | `vk_atlas_area` | 1 | The renderer of the app clears and writes only the shown part of the eye picture when it puts the two images into it (`ComposeAtlas` of `vk_scene.cpp`, a render area of that part). Its clear gives the gap its black with an alpha of 0 | 0: the whole eye picture. On the PC always 0 |
 | `xr_eye_direct` | 0 | The play thread copies each picture of the projection layer straight into two swapchains of its slot, and the session copies nothing for the eyes | 0: the copy into the slot and the copy of the session |
+| `xr_compose_direct` | 0 | Needs `xr_eye_direct=1`. A walk with `fovea_res=1` and `fovea_res_layer=0` leaves its eye picture to the app, and the play thread draws the eye picture of each eye from the outer image and the centre image straight into the swapchain image of its slot, in one pass ("The compose into the swapchains"). The renderer makes no eye picture, and no copy of 48 MB follows | 0: the renderer makes the eye picture in its own image, and the play thread copies it |
+| `xr_panel_rect` | 0 | The copy of the panel image into a slot and the copy into its swapchain take only the smallest rect that holds the rects of the panel quads. A quad whose rect is not in the part of the last copy does not show | 0: the whole panel image |
 | `xr_resize_free` | 1 | A new Play frees the sets of swapchains that have another size than the render and makes them again, clears the failed flags, and a slot of `xr_eye_direct=1` replaces swapchains that do not fit a picture (see "A new render size in the same process" in "The size of the eye pictures") | 0: the sets stay as they are |
 | `frame_loop_hold` | 0 | N of 2 to 8: the session takes a new picture only after the shown picture showed in N frames of the session | 0 and 1: the newest finished picture at each frame |
 
@@ -3921,6 +3923,44 @@ does not show them.
   session showed a picture of a slot, K frames had no projection layer
   ...".
 
+**The compose into the swapchains** (`xr_compose_direct=1`, `vk_compose.cpp`,
+`backend.md`, "The compose of the eye picture"). With `fovea_res=1` and
+`fovea_res_layer=0` the eye picture of the renderer is the outer image and the
+centre image mixed in a pass of 2808 by 2246 pixels, and the copy into the
+swapchains reads and writes it again. With the key the two steps are one.
+
+- At the start of a Play (and at the start of the play thread) the app calls
+  `VkSceneComposeLate(true)`. A walk of both eyes with the two images then
+  leaves out its last pass. `VkSceneEyes` still gives the eye image of the
+  walk, but it has no pixels until `VkSceneComposeRecord` records the pass.
+  A walk of another kind (no `fovea_res`, the atlas of `fovea_res_layer=1`, a
+  test picture) makes its eye picture itself. The play thread stops the
+  mode at the end of a Play.
+- `WriteSlot` asks `VkSceneComposePending` for the eye image. With
+  `xr_eye_direct` it records the pass into the command buffer of the slot,
+  once for each eye, with the swapchain image of that eye as the target
+  (`PictureRing::ComposeDirect`), and no copy. The pass has no depth and no
+  load. It writes the bytes of the game also into an image of the format sRGB
+  (the shader decodes the byte, the target encodes it again).
+- A picture that takes the old way (it does not fit in the swapchains of its
+  slot, or the swapchains have another format than red first with 8 bits) gets
+  the same pass into the eye image of the renderer
+  (`PictureRing::ComposeEyes`), and then the copy as before. A screen picture
+  of the last walk (a frame with a dialog box right after the frames of the
+  scene) gets it too, because the screen quad copies that image.
+- The views of a swapchain image for the pass go with the swapchain
+  (`FreeScreenSet` calls `VkSceneComposeForget`).
+- The time log has the pass as a copy of its own: "the eye pictures made from
+  the two images straight into the swapchains (xr_compose_direct=1)" with the
+  GPU time and the MB that it writes (the pass writes the whole picture of
+  both eyes, 50.5 MB at 2808 by 2246). A picture of the old way has "into the
+  image of the renderer". The line of the GPU parts of the walk has no pass of
+  2808 by 2246 any more.
+- Not shown yet: the time of the pass on the Steam Frame, and whether the
+  compositor shows the image of the pass as it shows the image of a copy (the
+  bytes of a desktop run differ from the old compose by 1 of 255 in 8.4 percent
+  of the pixels of an sRGB target, `backend.md`).
+
 **The even rate** (`frame_loop_hold`, `eye_copy_math::HoldTakes`). When the
 GPU makes a picture in about each second frame of the display, the newest
 finished picture shows in 1 or in 2 frames in turn, and a flight of the
@@ -3937,7 +3977,10 @@ take counts as replaced in the time log.
 the copies in ms, the mean and the most: ...", for each kind of copy the
 mean and the most of its GPU time, the count, the MB of a copy, and the GB
 that the GPU wrote in a second of the copy: the eye pictures into a slot,
-the eye pictures straight into the swapchains, the panel image into a
+the eye pictures straight into the swapchains, the eye pictures made from
+the two images straight into the swapchains or into the image of the renderer
+(`xr_compose_direct=1`, the pass counts as a copy because it writes the same
+bytes), the panel image into a
 slot, the screen picture into a slot, an eye picture of a slot into its
 swapchain, an eye picture into the stereo screen, the panel image into its
 swapchain, and the screen picture into the screen quad. A pair of
@@ -3985,10 +4028,11 @@ answers the calls of the swapchains of the slots on the play thread.
 - The panel image still has two copies (into the slot and into its
   swapchain) of the size of the render for each walk that drew into the
   panel, in the test save for each picture. The panel quads show only some
-  rects of it.
-- The renderer still draws into its own two targets, and the play thread
-  copies from them. A walk straight into a swapchain image would need the
-  renderer to take a target for each walk.
+  rects of it, and `xr_panel_rect=1` copies only the smallest rect that holds
+  them.
+- Without `xr_compose_direct=1`, and for a walk without the two images
+  (no `fovea_res`, or the atlas of `fovea_res_layer=1`), the renderer draws
+  into its own two targets, and the play thread copies from them.
 
 ## The time log of the app
 

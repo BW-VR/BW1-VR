@@ -86,6 +86,21 @@ struct Picture {
   double gap_ms = 0.0;         // the newest frame of the batch: its time from the frame before (slow_frame_ms)
 };
 
+// THE PART OF THE PANEL IMAGE THAT A COPY TAKES (xr_panel_rect): with `on`, the
+// smallest rect that holds the rect of each panel quad of the frame
+// (quad_layer_math::PanelUnion), else the whole image. The play thread (the
+// copy into the slot) and the session (the copy into the swapchain) both
+// call it with the layers of the same picture, so they agree.
+inline eye_copy_math::Rect PanelPart(bool on, const quad_layer_math::FrameLayers& layers,
+                                     uint32_t width, uint32_t height) {
+  int32_t r[4];
+  if (on && layers.panel && layers.panel_body.width == width &&
+      layers.panel_body.height == height && quad_layer_math::PanelUnion(layers.panel_body, r)) {
+    return {r[0], r[1], r[2], r[3]};
+  }
+  return eye_copy_math::Whole(width, height);
+}
+
 class PictureRing {
  public:
   // An image of a slot, in the byte order of the swapchains.
@@ -159,10 +174,20 @@ class PictureRing {
   // The swapchain images go to the layout of a color attachment.
   void CopyDirect(int i, VkImage source, const eye_copy_math::Rect& part,
                   const VkImage targets[2]);
+  // THE LATE COMPOSE (xr_compose_direct=1, VkSceneComposeRecord): the pass of
+  // the compose into the swapchain image of each eye (targets, as for
+  // CopyDirect), of the format `format`. part: the rect that it writes, for the
+  // time log. False when the renderer cannot record it, then nothing is written.
+  bool ComposeDirect(int i, const VkImage targets[2], uint32_t format,
+                     const eye_copy_math::Rect& part);
+  // The compose into the image of the renderer, the layers of the eye picture
+  // that a copy takes after it (CopyEyes, CopyDirect, CopyScreen).
+  bool ComposeEyes(int i, const eye_copy_math::Rect& part);
   // The image of the eye pictures of slot i goes, when the slot has one (a
   // picture of the old way before). It waits for the idle device one time.
   void FreeEyes(int i);
-  bool CopyPanel(int i, VkImage source, uint32_t width, uint32_t height);
+  bool CopyPanel(int i, VkImage source, uint32_t width, uint32_t height,
+                 const eye_copy_math::Rect& part);
   bool CopyScreen(int i, VkImage source, uint32_t layer, uint32_t width, uint32_t height);
   // The submit of the copies with the fence of the slot. Then after_submit
   // (the release of the swapchain images of xr_eye_direct=1), and then the

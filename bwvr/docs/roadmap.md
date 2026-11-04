@@ -1171,9 +1171,9 @@ that moves while the Hand takes it.
   pictures"). The time log gives the GPU time of each kind of copy. Next in
   the headset (Steam Frame and Quest 3): the line of the copies with
   `xr_eye_direct` 1 and 0, the memory, and the judder of a flight of the
-  camera with `frame_loop_hold` 2 and 0. Then, if the one copy of each eye
-  still costs too much: the walk of the renderer straight into a swapchain
-  image (a target for each walk).
+  camera with `frame_loop_hold` 2 and 0. With `fovea_res=1` the pass that
+  makes the eye picture can go straight into the swapchain images
+  (`xr_compose_direct`, "The compose into the swapchains" in `android.md`).
   **The way of a draw to the app.** The device of the mod gives no call
   that changes nothing to the renderer and the stream, a thread of the
   stream puts each frame into the ring, and a table finds the surfaces of
@@ -1334,6 +1334,23 @@ that moves while the Hand takes it.
   trees, the water, the glass, the people and the Creature. Next in the code:
   the own code of the objects (`fn_00815A70`, the test of the view and the
   choice of the detail) and the class draws that call `fn_0080DB30`.
+- **N35. The GPU time of a picture on the Steam Frame** (`backend.md`, "The
+  compose of the eye picture"). In the view of the middle of the island a
+  picture needs 9.9 ms of GPU as a mean (11.7 ms in the worst window): the pass
+  of the outer image 2.5 ms, the pass of the centre image 2.1 ms, the pass that
+  makes the eye picture 1.6 ms and the copy into the swapchains 3.6 ms. The two
+  small passes cost 1.2 and 2.3 us for each draw, not by their pixels. Five keys
+  take parts away (`xr_compose_direct`, `vk_compose_light`, `vk_pass_store`,
+  `vk_mres_draws`, `xr_panel_rect`, each with the old way as the value 0). Next
+  on the Frame: a session with the five keys at 1 and at 0 in the same view, the
+  lines "the GPU in ms", "the GPU of the copies" and "the GPU parts of the walk"
+  (the goal is less than 7 ms for a picture as a mean), the picture itself (the
+  look of the soft edge of the centre, the panel quads with `xr_panel_rect=1`,
+  a dialog box over the scene with `xr_compose_direct=1`), and whether the
+  compositor shows the swapchain image of the pass as it shows the copy. Open: the
+  commands of the mesh draws (`backend.md` says what they need), and a depth of
+  16 bits for the two small passes (fewer bins on a GPU with tiles, but
+  another precision for the Z test).
 - **N22. Haptics from the world: check it in a headset.** With
   `world_haptics=1` the hand feels the purr of a stroke, the beat of a
   living thing in the Hand, the land under a grip, the thump of a landing

@@ -5287,6 +5287,150 @@ emulator test ran at the same time as these runs. Not
 run: a headset (the blend of the centre layer by the compositor of a Quest
 3, and the sharpness through the lens).
 
+### The compose of the eye picture
+
+**Where the GPU time of a picture goes on the Steam Frame** (Turnip Adreno 750,
+the island of the game, `fovea_res=1` with the outer image at 25 percent and
+the centre at 100 percent for 20 degrees, a render of 2808 by 2246 for each
+eye, `xr_eye_direct=1`, 90 Hz). The time log of the app has the GPU time of
+each pass (`gpu_parts=1`) and of each copy. The table is the mean over the 22
+windows of 10 s of one session that had both passes:
+
+| Part | ms a picture, mean (least to most of the windows) | Draws a walk |
+| --- | --- | --- |
+| The pass of the outer image, 702 by 562, both eyes | 2.45 (1.58 to 3.87) | 1313 |
+| The pass of the centre image, 456 by 456, both eyes | 2.11 (1.18 to 3.47) | 841 |
+| The pass that makes the eye picture, 2808 by 2246, both eyes | 1.61 (1.46 to 1.76) | 4 |
+| The copy of the eye picture into the swapchains, 48.1 MB | 3.59 (3.41 to 3.87) | none |
+| The rest (the copies of the panel image, the uploads, the barriers) | 0.15 | none |
+| A picture | 9.91 (7.98 to 12.77) | 2158 |
+
+- **The two small passes cost by their draws, not by their pixels.** Over the
+  22 windows the time of the outer pass is 0.82 ms plus 1.2 us for each draw (R2
+  0.94), and the centre pass 0.20 ms plus 2.3 us for each draw (R2 0.99). Both
+  passes together: 1.07 ms plus 1.6 us for each draw (R2 0.98). The pass of the
+  centre image has half the pixels of the other pass and the same cost for a
+  draw. A GPU with tiles draws a pass in bins. It runs the vertices of every
+  draw once to sort the draws into the bins, and then it plays every draw again
+  for each bin that the draw touches, with the state of the draw. A small image
+  has few bins, so the cost is the commands of the draws. The time did not follow
+  the count of pipeline binds so well (R2 0.76) as the count of draws and of
+  descriptor set binds (R2 0.96), but these counts go together.
+- **The pass of the eye picture and the copy cost by their bytes.** The pass
+  writes 50.5 MB of color, and with `vk_compose_light=0` it clears the same
+  bytes of color and of depth before. The copy reads 48.1 MB and writes 48.1 MB,
+  at 12.8 GB a second. Together they are 52 percent of the GPU time of a picture,
+  and they draw nothing that the passes before did not draw.
+- **What the keys take away.** The numbers below are what the reason gives. The
+  Steam Frame has to show them.
+
+| Key | What it changes | Expected saving |
+| --- | --- | --- |
+| `xr_compose_direct=1` | The eye picture goes from the two images into the swapchain image in one pass. No copy of 48.1 MB, no 50.5 MB image of the renderer in the path | The copy: 3.6 ms. The pass moves into the command buffer of the slot, with no depth and no load (the saving of `vk_compose_light`) |
+| `vk_compose_light=1` | The pass that makes the eye picture loads nothing and stores no depth. A GPU with tiles then writes the color once, and the depth never | Up to the half of the 1.6 ms of the pass, when the pass is bound by the clears. It applies when `xr_compose_direct` is 0 |
+| `vk_pass_store=1` | The depth of the two small passes is not stored | The 4.9 MB of the depth, about 0.1 to 0.2 ms |
+| `vk_mres_draws=1` | The draws of the two small passes get the sort and the merge of the walks with one image (1.6 us for each draw that goes) | In the desktop run below 27 percent of the commands. The same share of 2158 draws is 0.9 ms |
+| `xr_panel_rect=1` | The copies of the panel image take the rect of the quads | The panel copies are 0.3 ms of a picture (118 copies of 24.1 MB in 10 s). The saving is their share of the image that the quads do not show |
+
+The mean of the sum: 9.9 ms, minus 3.6, 0.8, 0.15, 0.9 and 0.2, is about 4.3 ms
+if each saving comes in full. The goal is less than 7 ms in the view of the
+middle of the island, where a picture needs 11.7 ms.
+
+**The late compose** (`vk_compose.cpp`, `vk_compose.h`, `vk_compose_math.h`).
+With `fovea_res=1` and `fovea_res_layer=0` the walk ends with the pass that
+makes the eye picture of both eyes in one image of two layers
+(`ComposeMres`). `VkSceneComposeLate(true)` (the headset app calls it) leaves
+that pass out. The walk then keeps the input of the pass (`vk_compose::Input`:
+the views of the two images, their sizes, the rect of the centre) and the
+renderer gives the eye image as before (`VkSceneEyes`), without pixels. The app
+calls `VkSceneComposeRecord` with its own command buffer and the two images that
+it wants, for example the swapchain images of the eyes. The module records one
+pass for each image:
+
+- A grid of 5 by 5 cells (150 vertices, `vk_compose_math::BuildGrid`) in one draw.
+  The breaks of the grid are the edges of the centre rect and of its soft edge,
+  so the cells inside are the centre rect with its soft edge and the 16 cells
+  round it are the outer image alone. The vertices have the alpha of the soft
+  edge and the texture coordinates of both images, with the diagonals of the old
+  grid. The checks of the math tests compare the alpha and the coordinates with
+  the grid of `ComposeMres` at 625 points.
+- The fragment shader (`vk_compose.frag`) mixes the two images by the alpha, in
+  the bytes of the game, as the blend of the old pass did. The mix and the old
+  blend differ only by the rounding of the 8 bit values in between. The alpha of
+  the picture is the one that the blend gave.
+- A target of an sRGB format encodes what the shader writes. The shader decodes
+  the bytes of the game first (`flags.x = 1`), so the target stores them again. The
+  checks of the math tests show that decode then encode gives each byte of 0 to
+  255 again.
+- No depth, no load, the image to the layout of a color attachment at the end.
+  The shaders are made with `tools/compose_shaders.ps1` from the sources, and a
+  check of the math tests reads the hash of each source in its header.
+- A desktop run (`vk_compose_test=1`, the test save "pen", a render of 4080 by 3264,
+  Radeon RX 7900 XTX, 13.3 million pixels for each eye) compares the late compose
+  with the eye picture of the walk: into a target of the format UNORM the largest
+  difference is 1 of 255 in 0.4 percent of the pixels (the mean 0.0011), and into
+  a target of the format sRGB it is 1 of 255 in 8.4 percent of the pixels (the
+  mean 0.0224). No pixel differs by 2 or more. The GPU of a headset may round the
+  encode of an sRGB target in another way.
+- The module uses the functions of the device through `vkGetDeviceProcAddr`. The
+  table `vk::f`, which the app wraps for the GPU parts of the walk, does not see
+  its commands. A walk that left its eye picture to the app has no pass of the eye
+  picture in its line of the GPU parts, and `BlackCheckWrite` skips it.
+- The renderer composes itself, as before, in a walk with the atlas of
+  `fovea_res_layer=1`, in a walk with a test picture, in a walk with the compare
+  of the meshes, and when the app did not call `VkSceneComposeLate(true)`.
+
+**The pass of the eye picture without load** (`vk_compose_light=1`).
+`ComposeMres` drew into a color attachment that it cleared, and it had a depth
+attachment that it cleared and that none of its draws used. With the key its
+pass does `LOAD_OP_DONT_CARE` for the color (the first draw covers all the
+pixels, with no blend) and for the depth, and it stores no depth. The atlas
+(`ComposeAtlas`) keeps the clear of the color, because its gap must be black
+with the alpha 0.
+
+**The depth of the two small passes** (`vk_pass_store=1`). A pass of the outer
+image or of the centre image stored its depth at its end. Nothing reads it after
+the pass, unless a clear of one eye ends the pass and starts it again
+(`PlayClear`, which loads the depth). `PlayMres` finds such a clear before it
+starts the passes and stores the depth only then.
+
+**The sort and the merge in the two small passes** (`vk_mres_draws=1`). A walk
+with one image sorts and merges its draws (`FlushDraws`, "Fewer state changes and
+fewer draws"). A walk with the two images keeps the draws of the eyes as records
+until its end and plays them in the order of the game, so the sort and the merge
+did not apply to it. `PreparePass` now makes the list of a pass from the records:
+the draws whose viewport is out of the image and, for the centre image, those
+whose rect is out of the centre go out (as before). Then each row of draws
+between two clears gets `vk_draw_math::SortDraws` and the merge of
+`vk_draw_math::CanJoin`. A merge also needs the same viewport. The indices of the
+draws that join come from a copy in `g_queue_indices`, because the CPU does not
+read the ring. A mesh on the GPU keeps its record and joins no draw. The counts
+of the renderer (`VkSceneDrawCounts`) have the draws of the game that the passes
+play and the commands that play them, so the line of the GPU parts of the app
+shows the saving. `vk_mres_sort=0` keeps the merge and leaves the sort out. A
+desktop run of the test save "pen" (a walk with 594 draws in the two passes)
+played 433 commands, with 58 draws that the sort moved and 220 draws in draws of
+the merge. The pictures of frame 3000 in three runs (the same setting twice
+without the key, and once with it) differ from run to run in about 0.11 to 0.13
+percent of the pixels of an eye picture and in 0.15 to 0.19 percent of the
+outer image, whether the key is on or off. The centre image is the same in all
+runs, to the byte. So the key adds no difference that is larger than the
+difference between two runs.
+
+**What the draws of the meshes need** (for the next stage, brief 50 owns the
+code). The two small passes play about 700 mesh draws in a walk of the island
+(`gpu_mesh=1`), each as its own command. A mesh draw binds two or three vertex
+buffers and an index buffer at the offsets of its mesh in the arena
+(`DrawMeshGeometry`), and forgets the bound vertex and index state, so the next
+draw binds them again. The sort of `vk_mres_draws` moves an opaque mesh draw
+to its pipeline and sets, but it cannot join two of them. Two changes would take
+the commands away: (1) bind the vertex buffer and the index buffer of the arena
+one time in a pass and draw each mesh with `firstIndex` and `vertexOffset`, so
+the draw needs no bind. (2) Draw copies of one mesh in one command
+(`instanceCount`): the values of a draw are already a vertex buffer of the rate
+instance, so records of the same mesh, state and sets that lie one after the
+other in the ring need only a count.
+
 ## The session with Vulkan
 
 `xr_vulkan=1` (0 is the default) makes the OpenXR session a session with
@@ -7277,6 +7421,11 @@ keys that the launcher sets.
 | `fovea_res_outer_pct`, `fovea_res_center_pct`, `fovea_res_center_deg` | 50, 100, 25 | The resolution of the outer image and of the centre image in percent on each side, and the degrees of the centre on each side. See "Foveated resolution" |
 | `fovea_res_layer` | 0 | 1 the eye picture of a walk with `fovea_res=1` has the outer image and the centre image side by side, each at its own size, and the headset app shows each as a projection layer of its own. 0 the eye picture is made from the two at the size of the render. On the PC 1 changes nothing, and 2 is a test aid that makes the atlas in a run with no session. The renderer reads it at the first walk of each game. No test key. See "The middle as its own layer" |
 | `vk_atlas_area` | 1 | Only in the headset app, with `fovea_res_layer=1`: 1 the draw of the two images into the eye picture clears and writes only the part with both rects and their gap, 0 the whole eye picture. On the PC always the whole eye picture. The renderer reads it with `fovea_res_layer`. No test key. See "The middle as its own layer" and `android.md`, "The copies of the eye pictures" |
+| `vk_compose_light` | 1 | The pass that makes the eye picture from the outer image and the centre image loads no color that its first draw covers, and no depth. 0: it clears the color and the depth. See "The compose of the eye picture" |
+| `vk_pass_store` | 1 | The pass of the outer image and the pass of the centre image store their depth only when a clear of one eye restarts the pass. 0: they always store it |
+| `vk_mres_draws` | 1 | The draws of the pass of the outer image and of the centre image get the sort and the merge of `vk_draw_sort` and `vk_draw_merge`. 0: one command for each draw, in the order of the game |
+| `vk_mres_sort` | 1 | With `vk_mres_draws=1`: the sort is part of it. 0: the merge alone, which keeps the order of the game |
+| `vk_compose_test` | 0 | A test aid of the desktop runs: the late compose of the 3rd and the 40th walk with the two images goes into images of the formats sRGB and UNORM, and the log compares each with the eye picture of the walk |
 | `profile_sample` | 0 | A test key. See "Where the time of the scene walk goes" |
 | `walk_parts`, `walk_parts_add`, `walk_parts_early` | 0, empty, 1 | A test aid. 1: each 10 s the calls, the inclusive and the exclusive ms in a frame of each timed function of the scene walk. 2: the same with no timer on each call of the device and of the Vulkan renderer. 0: no hook and no line. `walk_parts_add` gives more addresses to time. `walk_parts_early=1`: all hooks at the end of the installs of the first frame with one `MH_ApplyQueued`, and no timer on the device and on the lists of the engine. 0: the hooks at the third walk. See "The parts of the scene walk" |
 | `profile_sample_thread` | 0 | A test key: 1 takes the samples of `profile_sample` from the render thread, 2 from the D3D7 thread. See "Where the time of the scene walk goes" |

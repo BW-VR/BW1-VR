@@ -156,6 +156,7 @@ struct App {
   std::mutex play_stats_lock;
   PlayStats play_stats;
   int gpu_depth = 1;  // frame_loop_gpu_depth, read at each Play
+  bool compose_direct = false;  // xr_compose_direct, read at each Play
   // THE EVEN RATE (frame_loop_hold, read at each Play): the frames of the
   // session that showed the shown picture, and if a picture showed.
   int hold = 0;
@@ -588,6 +589,10 @@ double WriteSlot(App* app, const LivePlay& live) {
       if (g.screen_ok && g.screen_cpu) {
         s.screen_rgba = *g.screen_rgba;
       } else if (g.screen_ok) {
+        // The last walk can have left its eye picture to the app.
+        if (VkSceneComposePending(reinterpret_cast<uint64_t>(g.screen_image))) {
+          app->ring.ComposeEyes(i, eye_copy_math::Whole(g.screen_width, g.screen_height));
+        }
         s.screen_ok = app->ring.CopyScreen(i, g.screen_image, g.screen_layer, g.screen_width,
                                            g.screen_height);
       }
@@ -610,15 +615,28 @@ double WriteSlot(App* app, const LivePlay& live) {
     direct = app->xr.EyeDirect() && app->xr.ProjectionOn() && g.have_view &&
              view_layer_math::ShowsProjection(g.view) && !quad_layer_math::AsScreen(layers) &&
              app->xr.DirectBegin(i, g.width, g.height, g.atlas, targets);
+    // THE LATE COMPOSE (xr_compose_direct=1): the walk left the eye picture to
+    // the app. It has no atlas, so the part is the whole picture.
+    const bool late = VkSceneComposePending(reinterpret_cast<uint64_t>(g.eyes));
     if (direct) {
       // The slot has no image of its own for the eyes now.
       app->ring.FreeEyes(i);
-      app->ring.CopyDirect(i, g.eyes, eye_copy_math::CopyPart(true, g.atlas, g.width, g.height),
-                           targets);
+      const eye_copy_math::Rect part =
+          eye_copy_math::CopyPart(true, g.atlas, g.width, g.height);
+      if (!(late && app->xr.ComposeFormatOk() &&
+            app->ring.ComposeDirect(i, targets, app->xr.SwapFormat(), part))) {
+        // The old way, or the pass cannot go into this format: the pass into
+        // the image of the renderer, and the copy from it.
+        if (late) app->ring.ComposeEyes(i, part);
+        app->ring.CopyDirect(i, g.eyes, part, targets);
+      }
       p.eyes_ok = true;
       p.direct_slot = i;
       p.eyes = VK_NULL_HANDLE;
     } else {
+      if (late) {
+        app->ring.ComposeEyes(i, eye_copy_math::Whole(g.width, g.height));
+      }
       // xr_eye_rects=1: only the part of the picture that the layers show.
       p.eyes_ok = app->ring.CopyEyes(
           i, g.eyes, g.width, g.height,
@@ -643,7 +661,9 @@ double WriteSlot(App* app, const LivePlay& live) {
     }
     if (!same) s.cards = *g.cards;
     p.cards = &s.cards;
-    if (g.panel != VK_NULL_HANDLE && app->ring.CopyPanel(i, g.panel, g.width, g.height)) {
+    if (g.panel != VK_NULL_HANDLE &&
+        app->ring.CopyPanel(i, g.panel, g.width, g.height,
+                            PanelPart(app->xr.PanelRect(), *g.layers, g.width, g.height))) {
       p.panel = s.panel.image;
     }
   }
@@ -767,6 +787,9 @@ void* PlayThread(void* arg) {
 void StartPlayThread(App* app) {
   if (app->play_running) return;
   app->play_stop.store(false);
+  // The play thread records the compose of the walks that leave their eye
+  // picture to it (xr_compose_direct).
+  VkSceneComposeLate(app->compose_direct);
   {
     std::lock_guard<std::mutex> lock(app->play_stats_lock);
     app->play_stats = PlayStats();
@@ -781,6 +804,8 @@ void StopPlayThread(App* app) {
   app->play_stop.store(true);
   pthread_join(app->play_thread, nullptr);
   app->play_running = false;
+  // Nobody records the compose of a walk any more.
+  VkSceneComposeLate(false);
 }
 
 // THE SESSION: the picture of the ring that the take picks (the newest
@@ -1176,6 +1201,34 @@ void Play(App* app, bool new_game) {
                         "nothing for the eyes"
                       : "The play thread copies each picture into its slot of the ring, and "
                         "the session copies it from there into the swapchains of the eyes");
+  }
+  // xr_compose_direct (0 by default, needs xr_eye_direct=1): 1, a walk with the
+  // outer image and the centre image (fovea_res=1, fovea_res_layer=0) leaves
+  // its eye picture to the app, and the play thread draws the eye picture of
+  // each eye straight into the swapchain image of its slot, in one pass, with
+  // no eye image of the renderer and no copy of it.
+  app->compose_direct = eye_direct && app->ini.GetInt("bwvr", "xr_compose_direct", 0) != 0;
+  VkSceneComposeLate(app->compose_direct);
+  if (loop) {
+    AppLog("game         : xr_compose_direct=%d. %s", app->compose_direct ? 1 : 0,
+           app->compose_direct
+               ? "A walk with the outer image and the centre image leaves its eye picture to "
+                 "the app, and the play thread draws it into the swapchain image of each eye "
+                 "of its slot in one pass (no copy of the eye picture)"
+               : (eye_direct ? "The renderer makes the eye picture of each walk, and the play "
+                               "thread copies it"
+                             : "Needs xr_eye_direct=1. The renderer makes the eye picture of "
+                               "each walk"));
+  }
+  // xr_panel_rect (0 by default): 1, the copies of the panel image (into the
+  // slot and into its swapchain) take only the part that the panel quads show.
+  const bool panel_rect = app->ini.GetInt("bwvr", "xr_panel_rect", 0) != 0;
+  app->xr.SetPanelRect(panel_rect);
+  if (loop) {
+    AppLog("game         : xr_panel_rect=%d. %s", panel_rect ? 1 : 0,
+           panel_rect ? "The copies of the panel image take only the smallest rect that holds "
+                        "the rects of the panel quads"
+                      : "The copies of the panel image take the whole image");
   }
   // frame_loop_hold (0 by default): N of 2 or more, the session takes a new
   // picture only after the shown picture showed in N frames of the session.

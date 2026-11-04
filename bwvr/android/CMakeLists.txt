@@ -39,6 +39,7 @@ target_include_directories(native_app_glue PUBLIC
 # The headers of Vulkan are the ones of the repo, the headers of the PC
 # build.
 add_library(bwvr_renderer STATIC
+    ../src/mod/vk_compose.cpp
     ../src/mod/vk_core.cpp
     ../src/mod/vk_scene.cpp
 )

@@ -34,6 +34,7 @@
 #include "land_fast.h"
 #include "land_objects.h"
 #include "part_draw.h"
+#include "gpu_mesh.h"
 #include "object_timer.h"
 #include "thread_wait.h"
 #include "time_log.h"
@@ -649,6 +650,9 @@ int g_object_timer = 0;
 int g_land_objects = 1;
 int g_land_objects_threads = 0;
 int g_part_draw = 0;
+int g_gpu_mesh = 0;
+int g_gpu_mesh_compare_every = 0;
+int g_gpu_mesh_kinds = 31;
 char g_object_timer_sites[512] = "";
 int g_game_sse_parts = 0;  // game_sse_parts, game_sse_parts.h
 int g_game_sse_check = 0;  // game_sse_check
@@ -1763,6 +1767,13 @@ void ReadSettings() {
   // with SSE (part_draw.h).
   g_part_draw = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "part_draw", 0, path));
+  // The meshes of the 3D parts on the GPU (gpu_mesh.h).
+  g_gpu_mesh = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh", 0, path));
+  g_gpu_mesh_compare_every = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_compare_every", 0, path));
+  g_gpu_mesh_kinds = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_kinds", 31, path));
   // The timer of the objects on the land (object_timer.h), a test aid.
   g_object_timer = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "object_timer", 0, path));
@@ -2270,6 +2281,8 @@ void StartVrStep() {
     LandObjectsInstall();
     PartDrawSetOptions(g_part_draw, g_test_keys);
     PartDrawInstall();
+    GpuMeshSetOptions(g_gpu_mesh, g_test_keys, g_gpu_mesh_compare_every, g_gpu_mesh_kinds);
+    GpuMeshInstall();
     ObjectTimerSetOptions(g_object_timer, g_object_timer_sites, g_test_keys);
     D3D7CountSetOptions(g_d3d7_count);
     if (!g_vulkan_only) {
@@ -2730,6 +2743,7 @@ void __cdecl h_FinishFrame() {
   ObjectTimerFrame();
   LandObjectsFrame();
   PartDrawFrame();
+  GpuMeshFrame();
   GameSsePartsFrame();
   UiBarsEnd(bars);
   ++g_frame;

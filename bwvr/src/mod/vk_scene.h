@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "fovea_res_math.h"
+#include "gpu_mesh_math.h"
 
 // vk_scene of bwvr.ini: 0 (the default) no Vulkan renderer. 1: with
 // d3d7_thread=1 the D3D7 thread gives each call of a walk also to the Vulkan
@@ -304,6 +305,41 @@ void VkSceneSetTextureReuse(int on);
 // the picture of the present before, with no wait for the GPU. 0: it waits
 // for the picture of this present.
 void VkSceneSetPresentLate(int on);
+
+
+// THE MESHES ON THE GPU (gpu_mesh of bwvr.ini, gpu_mesh_math.h, docs/software-tnl.md,
+// "The meshes on the GPU"). VkSceneMeshData gives the renderer a mesh of the
+// game: `vertices` of 32 bytes (x, y, z, u, v, nx, ny, nz) and `triangles`
+// indices of 3 words, kept by the id `mesh`. A hash that the renderer has
+// already is no change. VkSceneDrawMesh draws the mesh of an id with the
+// state of the device (the texture, the render states and the cull mode,
+// as a call of VkSceneDraw) in the left eye of the walk, and in the right eye
+// as one walk moves it. `offsets` (3 floats for each vertex, or null) are
+// added to the vertices in the space of the mesh. Only with backend=vulkan
+// (VkSceneDirect). The calls go into the stream (kMeshData, kMeshDraw).
+void VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
+                     uint32_t vertex_count, const uint16_t* indices,
+                     uint32_t triangles);
+void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
+                     const float* offsets, uint32_t offset_floats);
+// gpu_mesh=2 (a test aid on the PC): the renderer draws no move of the right
+// eye, so the mod can draw a mesh with the CPU path into the left eye layer
+// and with the GPU path into the right eye layer (kOneWalkLeftOnly and
+// kOneWalkRightOnly), and the images of a test frame (vk_scene_test_frame)
+// give the difference of the two layers in the log.
+void VkSceneSetMesh(int compare);
+// In the compare: the next walk with both eyes gives its difference to the log
+// (with no file), with this label (the mask of the functions on the GPU path).
+void VkSceneCompareNext(uint32_t label);
+// The counts since the last call: the draws of meshes, the meshes in the
+// arena, their bytes, the data records, the draws with no data, and the
+// compare of the last test frame.
+struct VkSceneMeshCounts {
+  uint64_t draws, data_records, data_bytes, no_data, no_room;
+  uint32_t meshes;
+  uint64_t arena_bytes;
+};
+void VkSceneTakeMeshCounts(VkSceneMeshCounts* out);
 
 // The values of the test keys for the debug page (vk_eyes, vk_scene_follow,
 // vk_panel, vk_only, vk_upload_queue, the step of the foveation key,

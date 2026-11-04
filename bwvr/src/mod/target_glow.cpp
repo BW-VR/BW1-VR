@@ -659,6 +659,20 @@ void TargetGlowPassDone() {
   g_written_count = 0;
 }
 
+bool TargetGlowWantsBatch(uint32_t specular) {
+  if (g_written_count == 0) return false;
+  // In the call of a target, each batch is a batch of that target.
+  if (g_call >= 0 && g_call < g_written_count) return true;
+  // After the call, the color of the first vertex names the target
+  // (TargetGlowBatch).
+  if ((specular & 0x00FFFFFFu) == 0) return false;
+  for (int i = 0; i < g_written_count; ++i) {
+    const uint32_t mark = g_written[i].mark;
+    if (SameRgb(specular, mark) || (StrongMark(mark) && HasMark(specular, mark))) return true;
+  }
+  return false;
+}
+
 void TargetGlowBatch(void* verts, uint32_t count, const uint16_t* idx,
                      uint32_t indices, bool clipped, uint32_t caller) {
   if (g_written_count == 0 || verts == nullptr || count == 0 ||

@@ -78,21 +78,24 @@ inline void ScreenQuadChecks() {
             offsetof(ss::ScreenBody, orientation) == 44 && offsetof(ss::ScreenBody, size) == 60,
         "the record kScreen has one layout for the mod and the app",
         static_cast<double>(sizeof(ss::ScreenBody)), 72);
-  Check(ss::kScreen == 23 && ss::kLastKind == ss::kScreen && ss::kScreenCpu == 1,
-        "kScreen is kind 23, the last kind", static_cast<double>(ss::kScreen), 23);
+  Check(ss::kScreen == 23 && ss::kMeshData == 24 && ss::kLastKind == ss::kMeshDraw &&
+            ss::kScreenCpu == 1,
+        "kScreen is kind 23, and the kinds after it are the meshes on the GPU",
+        static_cast<double>(ss::kScreen), 23);
   {
     // A stream of version 2 (no kScreen, the streams of the runs before)
-    // plays, a stream of version 3 plays, and a later version does not.
-    const uint32_t v2[2] = {ss::kMagic, 2}, v3[2] = {ss::kMagic, 3}, v4[2] = {ss::kMagic, 4};
+    // plays, a stream of version 3 and of version 4 (the meshes on the GPU)
+    // plays, and a later version does not.
+    const uint32_t v2[2] = {ss::kMagic, 2}, v3[2] = {ss::kMagic, 3}, v4[2] = {ss::kMagic, 5};
     ss::Reader r2(reinterpret_cast<const uint8_t*>(v2), sizeof(v2));
     ss::Reader r3(reinterpret_cast<const uint8_t*>(v3), sizeof(v3));
     ss::Reader r4(reinterpret_cast<const uint8_t*>(v4), sizeof(v4));
     ss::Writer w;
     uint32_t head[2];
     memcpy(head, w.Bytes().data(), sizeof(head));
-    Check(r2.Ok() && r3.Ok() && !r4.Ok() && head[1] == 3 && ss::kVersion == 3,
-          "the reader plays a stream of version 2 and 3, and the writer writes 3",
-          static_cast<double>(head[1]), 3);
+    Check(r2.Ok() && r3.Ok() && !r4.Ok() && head[1] == 4 && ss::kVersion == 4,
+          "the reader plays a stream of version 2, 3 and 4, and the writer writes 4",
+          static_cast<double>(head[1]), 4);
   }
 
   // THE NUMBERS OF THE SCREEN FRAMES. Above each frame of the scene, in 32

@@ -178,6 +178,9 @@ Screens g_screens;
 
 uint64_t Id(const void* p) { return reinterpret_cast<uintptr_t>(p); }
 
+// The frames with the whole state since the start (VkStreamMeshEpoch).
+uint32_t g_mesh_epoch = 1;
+
 double MsSince(const LARGE_INTEGER& t) {
   LARGE_INTEGER now;
   QueryPerformanceCounter(&now);
@@ -699,6 +702,7 @@ void VkStreamFrame(uint64_t frame, uint64_t name, bool capture) {
     g_known.clear();
     g_with_pixels.clear();
     g_surface_cache.Clear();
+    ++g_mesh_epoch;
     g_sent_pictures.Reset();
     g_writer.Record(ss::kStart, &g_options, sizeof(g_options));
     g_unit_keep = true;
@@ -830,6 +834,34 @@ void VkStreamDraw(uint32_t type, uint32_t fvf, const void* vertices,
                   indices, body.index_count * 2);
   if (g_unit_record) ++g_draws;
 }
+
+void VkStreamMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
+                      uint32_t vertex_count, const uint16_t* indices,
+                      uint32_t triangles) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kOther);
+  ss::MeshDataBody body = {};
+  body.mesh = mesh;
+  body.hash = hash;
+  body.vertex_count = vertex_count;
+  body.triangle_count = triangles;
+  g_writer.Record(ss::kMeshData, &body, sizeof(body), vertices, vertex_count * 32,
+                  indices, triangles * 6);
+  g_unit_keep = true;
+}
+
+void VkStreamDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
+                      const float* offsets, uint32_t offset_floats) {
+  ChainScope chain(render_chain_math::kStream, render_chain_math::kDraw);
+  ss::MeshDrawBody body = {};
+  body.state = State();
+  body.mesh = mesh;
+  body.consts = consts;
+  body.offset_floats = offsets != nullptr ? offset_floats : 0;
+  g_writer.Record(ss::kMeshDraw, &body, sizeof(body), offsets, body.offset_floats * 4);
+  if (g_unit_record) ++g_draws;
+}
+
+uint32_t VkStreamMeshEpoch() { return g_mesh_epoch; }
 
 void VkStreamTarget(void* surface) {
   ChainScope chain(render_chain_math::kStream, render_chain_math::kOther);

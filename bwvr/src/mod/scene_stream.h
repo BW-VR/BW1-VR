@@ -22,12 +22,15 @@
 
 #include <vector>
 
+#include "gpu_mesh_math.h"
+
 namespace scene_stream {
 
 constexpr uint32_t kMagic = 0x53535742u;  // "BWSS"
-// Version 3 has the record kScreen. The reader plays a stream of version 2
-// too: it has no kScreen.
-constexpr uint32_t kVersion = 3;
+// Version 3 has the record kScreen. Version 4 has the records kMeshData and
+// kMeshDraw. The reader plays a stream of version 2 or 3 too: it has none of
+// them.
+constexpr uint32_t kVersion = 4;
 constexpr uint32_t kOldestVersion = 2;
 
 enum Kind : uint32_t {
@@ -54,9 +57,11 @@ enum Kind : uint32_t {
   kPanel = 21,        // PanelBody: the panel quads of the frame (XrScreen::SetPanelQuads)
   kWindow = 22,       // WindowBody: the cut scene window of the frame (XrScreen::StageWindow)
   kScreen = 23,       // ScreenBody: the screen of a frame with no scene (screen_quad_math.h)
+  kMeshData = 24,     // MeshDataBody, the vertices (32 bytes each), the indices (16 bit): a mesh of the game
+  kMeshDraw = 25,     // MeshDrawBody, the offsets: a draw of a mesh (gpu_mesh_math.h)
 };
 // The last kind. A record of a higher kind is not of the stream.
-constexpr uint32_t kLastKind = kScreen;
+constexpr uint32_t kLastKind = kMeshDraw;
 
 // The values of the other parts of the mod that the renderer reads, at the
 // time of a record (scene_host.h in the app).
@@ -296,6 +301,31 @@ struct ScreenBody {
   uint32_t reserved;
 };
 
+
+// THE MESHES ON THE GPU (kMeshData, kMeshDraw, docs/software-tnl.md, "The
+// meshes on the GPU"). A mesh of the game goes into the stream one time, with
+// the id of its address and a hash of its data (gpu_mesh_math.h, MeshHash).
+// The renderer keeps it by the id. The writer sends it again when the hash
+// changes, and with the whole state of a frame. A record of data is not a
+// record of a walk (stream_split.h), so a frame that loses its walks keeps it.
+// kMeshDraw names the mesh and has the values of the draw.
+struct MeshDataBody {
+  uint64_t mesh;            // the address of the mesh in the game process
+  uint64_t hash;
+  uint32_t vertex_count;    // vertices of 32 bytes follow
+  uint32_t triangle_count;  // then 3 indices of 16 bits for each triangle
+};
+
+// The offsets of kMeshDraw: 0 none, else 3 floats for each vertex follow the
+// body (a person or an animal, fn_00859530).
+struct MeshDrawBody {
+  StreamState state;
+  uint64_t mesh;
+  gpu_mesh_math::Consts consts;
+  uint32_t offset_floats;   // 0 or 3 * vertex_count
+  uint32_t reserved;
+};
+
 // The mod is 32 bit and the app is 64 bit: each body has one size on both.
 static_assert(sizeof(StreamState) == 40, "StreamState");
 static_assert(sizeof(StartBody) == 100, "StartBody");
@@ -339,6 +369,8 @@ static_assert(sizeof(WindowBody) == 136 && offsetof(WindowBody, crop) == 8 &&
                   offsetof(WindowBody, wall_size) == 100 &&
                   offsetof(WindowBody, alpha) == 132,
               "WindowBody");
+static_assert(sizeof(MeshDataBody) == 24, "MeshDataBody");
+static_assert(sizeof(MeshDrawBody) == 40 + 8 + 96 + 8, "MeshDrawBody");
 static_assert(sizeof(ScreenBody) == 72 && offsetof(ScreenBody, count) == 8 &&
                   offsetof(ScreenBody, surface) == 16 && offsetof(ScreenBody, width) == 24 &&
                   offsetof(ScreenBody, position) == 32 &&

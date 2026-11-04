@@ -593,6 +593,21 @@ void TimeLog::Lines(double now_ms, uint64_t arrived, uint64_t last_frame) {
            (now.skipped - was.skipped) / rw,
            static_cast<unsigned long long>(now.no_room - was.no_room));
     was = now;
+    // The meshes on the GPU (gpu_mesh=1 in the game): what the renderer drew
+    // since the line before.
+    VkSceneMeshCounts mesh;
+    VkSceneTakeMeshCounts(&mesh);
+    if (mesh.draws + mesh.data_records + mesh.no_data > 0) {
+      AppLog("time         : the meshes on the GPU in this window: %llu draws, %llu records of "
+             "data (%llu bytes), %u meshes in the arena (%llu bytes), %llu draws with no data "
+             "(the data did not come), %llu records with no room in the arena",
+             static_cast<unsigned long long>(mesh.draws),
+             static_cast<unsigned long long>(mesh.data_records),
+             static_cast<unsigned long long>(mesh.data_bytes), mesh.meshes,
+             static_cast<unsigned long long>(mesh.arena_bytes),
+             static_cast<unsigned long long>(mesh.no_data),
+             static_cast<unsigned long long>(mesh.no_room));
+    }
   }
   // THE THREADS AND THE CORES.
   Sample now;

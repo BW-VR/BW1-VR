@@ -1209,6 +1209,17 @@ the uploads of the textures. The read back of the pictures takes about two
 minutes in the emulator, because the GPU of the emulator gives an image of
 40 MB to the CPU slowly.
 
+**The meshes on the GPU** (`kMeshData` and `kMeshDraw`, the stream of
+version 4, `gpu_mesh=1`, `software-tnl.md`, "The meshes on the GPU"). A mesh of
+the game goes into the stream one time with its vertices and indices
+(`kMeshData`, a record of state: a frame that loses its walks keeps it), and each
+draw is a `kMeshDraw` with the values of the draw. The player gives them to
+`VkSceneMeshData` and `VkSceneDrawMesh` of the renderer in the app, which
+draws the mesh on the GPU of the headset. The writer sends the data of every
+mesh again with the whole state of a frame (a reader that comes late), so the
+renderer of the app has each mesh that a draw names. A stream of version 2 or 3
+has none of these records.
+
 ## The live stream
 
 The live stream gives each frame of the walks of the game to the app while
@@ -4233,6 +4244,11 @@ the work before it on the GPU, but a pass ends there anyway.
 `gpu_parts=0`: the table of the renderer stays as it is, and there is no
 line. The log at the start: "gpu parts : gpu_parts=1. ..." at the first
 install, or "gpu parts : gpu_parts=0, time_log=1. ..." with no parts.
+
+With `gpu_mesh=1` in the game a second line follows each line of the parts
+(`VkSceneTakeMeshCounts`): the draws of meshes in the window, the records of
+mesh data with their bytes, the meshes in the arena, and the draws with no data
+(the data of the mesh did not come, so the draw is left out).
 
 **Not shown yet:** the parts in a Quest 3, and the cost of the timestamps on
 its GPU (compare the walk of the line of the GPU with `gpu_parts` 1 and 0).

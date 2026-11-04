@@ -9,6 +9,10 @@ Facts in this file are for `runblack.exe` v1.42, SHA1
 every point on the CPU against a matrix at **`0x00EA9E40`**, and `LH3DRender`
 only hands the finished screen space vertices to Direct3D.
 
+The meshes of the 3D parts can take this work off the CPU: with `gpu_mesh=1`
+the renderer of the app transforms, lights, clips and culls them on the GPU
+("The meshes on the GPU").
+
 The Direct3D VIEW transform that the engine also sets is a copy that nothing
 in the scene reads. Changes to `LH3DRender::g_d3d_world2view` or to
 `D3DTRANSFORMSTATE_VIEW` do not reach the screen.
@@ -180,6 +184,152 @@ needs.
 A 180 degree roll of the matrix at `0x00EA9E40` from a hook on
 `LH3DTech::UpdateCamera` turns the whole picture upside down. This is the
 test for any claim that a change reaches the picture.
+
+## The meshes on the GPU
+
+`gpu_mesh=1` (0 is the default, `gpu_mesh.cpp`, the math in
+`gpu_mesh_math.h`, the shader `vk_mesh.vert`) takes the transform, the light,
+the clip and the cull of the meshes of the 3D parts off the CPU of the game.
+The renderer of the app does them on the GPU (native ARM, no FEX). It needs
+`backend=vulkan`. With another backend the meshes take the CPU path, and the
+log says so.
+
+**Which functions.** A 3D part draws each mesh through one of five functions
+(`backend.md`, "The parts with SSE"). Each one runs the loop over the
+vertices, the loop over the triangles, the material, and
+`LH3DRender::DrawTriangle`:
+
+| Function | Light | Clip flags | Offsets |
+| --- | --- | --- | --- |
+| `fn_00856D40` | no | yes | no |
+| `fn_0085AB10` | yes (the normal of each vertex, and the mesh color) | no | no |
+| `fn_0084BA90` | yes (as `fn_0085AB10`) | yes | no |
+| `fn_0085BA30` | no | no | no |
+| `fn_00859530` | yes (the level rounds toward 0) | yes | one value for y, or three values, for each vertex |
+
+**What the hook does.** A hook at the start of each function (MinHook). A
+mesh that can take the GPU path does what the function does after the loops:
+
+1. The material, with the same calls as the function (the function of the
+   type of the mesh, the tiling, the cull mode).
+2. A look at the state of the device (`VkDdrawMeshState`): no blend, the
+   depth test and the depth write on, and no texture on stage 1. The
+   renderer draws such a mesh with stage 0 alone, and a mesh with blend sorts
+   by depth in the engine. Else the function of the game runs from its start
+   (it runs the material again, which changes nothing).
+3. The data of the mesh go to the renderer one time (below).
+4. One record of the stream for the draw: the matrix at `0x00EA9EA0`, the
+   projection (`0x00E839E0`, `0x00E839F0`, `0x00E839F4`), the color, the
+   specular color, the light at `0x00F03140` and the ambient value at
+   `0x00C39264`, and the offsets of `fn_00859530`.
+
+The hook reads the color, the specular color and the other values before
+the material, as the loops of the game do. It does the rest of the work of
+the function: the counter of the meshes at `0x00F05184`, and the pointer of
+the offsets at `0x00F05180` (the game moves it past the offsets of each
+mesh), and the two readings of `h_DrawTriangle` that a batch needs (the
+interface panel goes back to the eye pictures, and the first vertex is in the
+measure of the nearest geometry, `DrawHooksMeshBatch`).
+
+**Which mesh takes the CPU path.** A mesh in a group (a matrix for each
+group of vertices: the flag in the first word of the mesh group at
+`0x00FA93BC`), with a shift of the texture (`0x00ECA628`: water and fire),
+with a texture on stage 1, with blend or with no depth write (the glass, the
+shadows and the effects), a mesh that `h_DrawTriangle` changes (the glow of a
+target of the Hand, the advisor of a cut scene, the box of a speech bubble),
+and a mesh with more than 20000 vertices or 40000 triangles. The log counts
+each reason. `gpu_mesh_kinds=N` leaves a function on the CPU path: bit k of N
+is the function k of the table (31 is the default).
+
+**The data.** A mesh goes into the stream one time (`kMeshData`: the id is
+its address, then the vertices of 32 bytes and the indices of 16 bits as the
+game has them). A sum over the words (`MeshHash`, 6 SSE operations for 16
+bytes) is checked at each draw, and the data go again when it changes, when
+the frame has the whole state (a reader that comes late, `VkStreamMeshEpoch`),
+and when the table of the hook has no entry. A record of data is not a record
+of a walk (`stream_split.h`), so a frame that loses its walks keeps it. The
+renderer keeps the data in an arena of 64 MB (`VkSceneMeshData`), and a range
+that a new version replaces goes back after the walks that can read it are
+done. `kMeshDraw` names the mesh and has the values of the draw. Both are
+records of the stream of version 4. A draw of the CPU path has 32 bytes for
+each vertex, a draw of the GPU path 152 bytes, and the offsets of
+`fn_00859530` (12 bytes for each vertex).
+
+**The shader.** `vk_mesh.vert` makes the camera point `c = M p` (with the
+offset added to `p` first), the clip position of the pixel of the game, and
+the lit color. The clip position is linear in `c`, so a point behind the
+camera needs no division:
+
+```
+w   = cz / near
+x   = w ax + cx / near kx        kx = half_x (2 / Width), ax = (half_x + 0.5 - X) (2 / Width) - 1
+y   = w ay - cy / near ky        (the same for y, which goes down)
+z   = 1 / (MaxZ - MinZ) (w (1 - MinZ) - 1)
+```
+
+`w = cz / near` is `1 / rhw` of the vertices of the game, so the GPU
+interpolates the texture as it does for the vertices of the engine
+(`vk_scene.vert`). The near plane of the GPU (`z = 0`) is the near plane of the
+engine (`cz = near`), and the GPU clips the sides of the view. The cull is
+the cull mode of the device (`D3DRENDERSTATE_CULLMODE`, 3 for a mesh with
+the test of the back face, 1 for a mesh with the flag in the byte at `+5`),
+and the screen turn of the CPU test is the turn that the renderer culls. The
+right eye of one walk moves a point by `per_rhw * rhw` pixels. In clip space
+that is the constant `per_rhw * 2 / Width`, so the shader needs no per eye
+matrix: the matrix in a record is the camera of the pass (the left eye in one
+walk, the eye of the pass in a walk for each eye). The light is the integer
+math of `LitColor` (`fast_transform_math.h`): the level is the dot product
+times 255, rounded to the nearest whole number (toward 0 for
+`fn_00859530`), then `(255 - ambient) level >> 8 + ambient`, and each channel
+`(channel level) >> 8`. The color of a lit mesh is the color of the part times
+the color at `+0x0C` of the mesh when the word at `+8` is 0 (`fn_007ACF70`).
+
+**The checks** (`test/controller_math/gpu_mesh_checks.h`) compare the C++ math
+of `gpu_mesh_math.h` with the loops of the game (`fast_transform_math.h`, the
+bits of the x87 code). For 300 random matrices with 64 points each (3295 points in the view): the pixel is the pixel of the
+game to 0.0003, the depth to 1e-7 and the rhw to 4e-7 relative. The clip test
+of the GPU is the clip flags of the game, except for a point less than 2 pixels
+from an edge (the GPU map has the half pixel of Direct3D 9). The lit color is
+`LitColor` bit for bit for 20000 random normals with each rounding. The checks also cover the sum, the
+state test, the records and the loss of `kMeshDraw` in a frame with no walks.
+The GLSL is not run by a check: the compare below runs it.
+
+**The compare** (`gpu_mesh=2`, a test aid on the PC with `one_walk=1`). Each
+mesh that can take the GPU path is drawn two times: the function of the game
+draws it in the left eye layer (`kOneWalkLeftOnly`), and the GPU path draws
+it in the right eye layer (`kOneWalkRightOnly`). The renderer does not move the
+right eye of the other draws in this mode, so the layers of a walk are two
+renderings of one picture, and the log has their difference:
+`vk_scene_test_frame=N` gives it for that frame (and the file
+`bwvr-vk-meshdiff-N.bmp`), and `gpu_mesh_compare_every=N` gives it for each
+Nth frame, for the functions on the GPU path and then for each function alone.
+The line is "vk scene     : mesh compare MASK, ...": the pixels that differ at
+all, by more than 24 levels and by more than 80, the most, and the box. The
+hand, the halos and the interface of the mod are drawn for each eye, so they
+differ in the two layers. The log has the first 6 meshes of each function
+with their values.
+
+**Each 10 s** the log has the line "gpu mesh     : gpu_mesh=1, in 10 s": the meshes on
+each path, the vertices, triangles and offsets on the GPU path, the CPU path by
+function and by reason, the records of mesh data with their bytes, what the
+renderer has, and the time on the frame thread for the GPU path (the checks,
+the material and the record) and for the function of the game. With `test_keys=1`,
+Ctrl Shift F10 steps `gpu_mesh` through 1, 0 and 2, and the debug page Render
+has the row "GPU mesh".
+
+- Not shown: the time of the draws of the meshes on the Frame
+  (`object_timer=1`, the sites in `backend.md`, "The parts with SSE", with
+  `gpu_mesh=0` and `gpu_mesh=1`), and the time of the GPU of the headset for
+  these draws. Only a headset shows both.
+- Open: the hook of the mesh functions and `walk_parts=1` hook the same
+  start of three functions, and the second one fails. Use `walk_parts=0` with
+  `gpu_mesh=1`.
+- Open: the meshes in a group (a person, an animal, a building with parts that
+  move) and the meshes with blend stay on the CPU path. A group needs a matrix
+  for each group of vertices, and for `fn_0085AB10` and `fn_0084BA90` also the
+  light of each group (`fn_007FB290`).
+- Next: the own code of the objects (`fn_00815A70`, the test of the view and the
+  choice of the detail) and the class draws on the GPU.
 
 ## Open questions
 

@@ -3571,6 +3571,7 @@ void CreatureChecks() {
 #include "render_thread_checks.h"
 #include "fast_transform_checks.h"
 #include "part_draw_checks.h"
+#include "gpu_mesh_checks.h"
 #include "land_fast_checks.h"
 #include "object_timer_checks.h"
 #include "land_objects_checks.h"
@@ -4039,6 +4040,7 @@ int main() {
   render_thread_checks::RenderThreadChecks();
   fast_transform_checks::FastTransformChecks();
   part_draw_checks::PartDrawChecks();
+  gpu_mesh_checks::GpuMeshChecks();
   land_fast_checks::LandFastChecks();
   object_timer_checks::ObjectTimerChecks();
   land_objects_checks::LandObjectsChecks();

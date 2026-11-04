@@ -1302,6 +1302,16 @@ that moves while the Hand takes it.
   with `object_timer=1` and the sites of that section, with `part_draw=1` and
   0. Not shown: the time of the draw of the objects with `part_draw=1` under
   FEX (the goal is less than half of its time with the same picture).
+- **N34. The meshes of the 3D parts on the GPU** (`gpu_mesh`, `software-tnl.md`,
+  "The meshes on the GPU"). `gpu_mesh=1` takes the transform, the light, the
+  clip and the cull of the opaque meshes with one matrix of `fn_00856D40`,
+  `fn_0085AB10`, `fn_0084BA90`, `fn_0085BA30` and `fn_00859530` to the GPU of
+  the app. Next: a desk run with `gpu_mesh=2` and `gpu_mesh_compare_every=300`
+  with `fovea_res=1` and with 0 (the pixel difference of the layers, for each
+  function), then the Frame with `gpu_mesh=1`, `walk_parts=0` and
+  `object_timer=1` (the time of the draws of the meshes against `gpu_mesh=0`;
+  the goal is less than a quarter). Then the meshes in a group and with blend,
+  and the own code of the objects (`fn_00815A70`) and the class draws.
 - **N22. Haptics from the world: check it in a headset.** With
   `world_haptics=1` the hand feels the purr of a stroke, the beat of a
   living thing in the Hand, the land under a grip, the thump of a landing

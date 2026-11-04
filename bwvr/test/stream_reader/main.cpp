@@ -1085,7 +1085,8 @@ const char* KindName(uint32_t kind) {
       "kWalkBegin", "kWalkEnd",    "kRenderState", "kStageState", "kTexture",
       "kDraw",      "kTarget",     "kViewport",  "kClear",       "kPanelBind",
       "kSurface",   "kWritten",    "kFrameEnd",  "kView",        "kCard",
-      "kCardPicture", "kPanel",    "kWindow",     "kScreen"};
+      "kCardPicture", "kPanel",    "kWindow",     "kScreen",      "kMeshData",
+      "kMeshDraw"};
   return kind <= ss::kLastKind ? kNames[kind] : "?";
 }
 

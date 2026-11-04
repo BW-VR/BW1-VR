@@ -136,6 +136,10 @@ bool HandGlowEyePoint(int eye, float* x, float* y, float* meters);
 // vertices of a target of the Hand get their glow. caller is for the log.
 void TargetGlowBatch(void* verts, uint32_t count, const uint16_t* idx,
                      uint32_t indices, bool clipped, uint32_t caller);
+bool TargetGlowWantsBatch(uint32_t specular);
+// cutscene_window.cpp: the batches of an advisor get a place in front of the
+// screen now.
+bool CutsceneWindowAdvisorNow();
 
 // intro_vr.cpp: the flat text and the boxes of the Lionhead logo in stereo.
 // IntroFlatOn is true when a flat batch from `caller` comes in an eye pass
@@ -2730,6 +2734,38 @@ void __fastcall h_DrawTriangle(void* verts, uint32_t count, uint16_t* idx,
   if (box) BubbleCardBoxOut(verts, count);
   g_caller = outer;
 }
+
+}  // namespace
+
+// gpu_mesh.cpp: a mesh on the GPU is a batch of the world, as h_DrawTriangle
+// sees one. It does the two readings of that hook that the batch needs: the
+// panel target of the interface goes back to the eye pictures, and the first
+// vertex of the batch is in the measure of the nearest geometry. `rhw` is the
+// field of the first vertex that DrawTriangle would get (the rhw, or the
+// camera z of a vertex that the game clips).
+void DrawHooksMeshBatch(float rhw) {
+  PanelRelease();
+  const float near_plane = *reinterpret_cast<const float*>(bw::tech::kNearPlane);
+  if (near_plane > 0.0f) {
+    const float scaled = rhw * (kHistogramNear / near_plane);
+    if (scaled > 0.0f && scaled <= 1.0f) {
+      int bucket = static_cast<int>(scaled * kRhwBuckets);
+      if (bucket >= kRhwBuckets) bucket = kRhwBuckets - 1;
+      ++g_rhw_histogram[bucket];
+      ++g_rhw_samples;
+    }
+  }
+}
+
+// True when h_DrawTriangle does more than the two readings for a batch now:
+// the box of a speech bubble, the advisor of a cut scene and the glow of a
+// target change the vertices or the draw. `specular` is the specular color of
+// the mesh. A mesh then takes the CPU path.
+bool DrawHooksTriangleSpecial(uint32_t specular) {
+  return BubbleCardInBubble() || CutsceneWindowAdvisorNow() || TargetGlowWantsBatch(specular);
+}
+
+namespace {
 
 bool Hook(uintptr_t address, void* replacement, void** original,
           const char* name) {

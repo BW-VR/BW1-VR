@@ -404,6 +404,19 @@ class XrApp {
   void SetImageWait(bool wait) { image_wait_ = wait; }
   // The swapchains have blue first (the slots of the ring take that order).
   bool SwapRedBlue() const;
+  // xr_panel_rect (0 by default, at each Play before the play thread starts):
+  // 1, the copies of the panel image take only the part that the panel quads
+  // show (PanelPart of picture_ring.h), and a quad whose rect is not in the
+  // part of the last copy does not show.
+  void SetPanelRect(bool on) { panel_rect_ = on; }
+  bool PanelRect() const { return panel_rect_; }
+  // THE LATE COMPOSE (xr_compose_direct=1, docs/android.md, "The compose into
+  // the swapchains"): the format of the swapchains is red first with 8 bits,
+  // UNORM or sRGB, so the compose pass writes the bytes of the game into them.
+  uint32_t SwapFormat() const { return static_cast<uint32_t>(format_); }
+  bool ComposeFormatOk() const {
+    return format_ == VK_FORMAT_R8G8B8A8_SRGB || format_ == VK_FORMAT_R8G8B8A8_UNORM;
+  }
   // THE COPIES OF THE EYE PICTURES (eye_copy_math.h, docs/android.md, "The
   // copies of the eye pictures").
   // xr_eye_rects (1 by default, read with the keys of the copies at the
@@ -565,6 +578,8 @@ class XrApp {
   bool eye_rects_ = true;
   eye_copy_math::Rect eye_part_ = {};
   bool eye_direct_ = false;
+  bool panel_rect_ = false;
+  eye_copy_math::Rect panel_part_ = {};  // the part of the panel image of the last copy
   int direct_newest_ = -1;       // the slot of the newest picture, or -1
   uint64_t direct_revision_ = 0;  // one more for each new picture in a slot
   uint64_t direct_latched_[2] = {0, 0};  // the revision that each eye shows

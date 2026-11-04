@@ -15,6 +15,12 @@ const char* Name(int kind) {
   switch (kind) {
     case kSlotEyes: return "the eye pictures into a slot of the ring";
     case kSlotDirect: return "the eye pictures straight into the swapchains (xr_eye_direct=1)";
+    case kSlotCompose:
+      return "the eye pictures made from the two images straight into the swapchains "
+             "(xr_compose_direct=1)";
+    case kSlotComposeEyes:
+      return "the eye pictures made from the two images into the image of the renderer "
+             "(xr_compose_direct=1, a picture that took the old way)";
     case kSlotPanel: return "the panel image into a slot";
     case kSlotScreen: return "the screen picture into a slot";
     case kSwapEyes: return "an eye picture of a slot into its swapchain";

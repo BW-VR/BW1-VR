@@ -20,6 +20,8 @@ namespace copy_time {
 enum Kind {
   kSlotEyes,    // the play thread: the eye pictures into a slot of the ring
   kSlotDirect,  // the play thread: the eye pictures straight into the swapchains
+  kSlotCompose,  // the play thread: the eye pictures made from the two images straight in the swapchains
+  kSlotComposeEyes,  // the play thread: the eye pictures made from the two images into the image of the renderer
   kSlotPanel,   // the play thread: the panel image into a slot
   kSlotScreen,  // the play thread: the screen picture into a slot
   kSwapEyes,    // the session: an eye picture into its swapchain

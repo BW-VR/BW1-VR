@@ -129,6 +129,7 @@
 #include "ui_panel.h"
 #include "one_walk.h"
 #include "one_walk_math.h"
+#include "vk_compose.h"
 #include "vk_core.h"
 #include "vk_scene.h"
 #include "vk_stream.h"
@@ -679,6 +680,28 @@ std::vector<MresRecord> g_mres_records;
 std::vector<MresClear> g_mres_clears;
 uint64_t g_mres_walks = 0;  // for the report
 uint64_t g_mres_remade = 0;  // the images made again, since the start
+// THE COMPOSE OF THE EYE PICTURE (ComposeMres, vk_compose.h).
+// vk_compose_light=1: the pass of the compose loads no color that its first draw
+// covers and no depth that it does not use.
+bool g_compose_light = true;
+// vk_pass_store=1: the pass of the outer image and of the centre image stores
+// its depth only when a clear of the walk restarts the pass.
+bool g_pass_store = true;
+// The app asks (VkSceneComposeLate): a walk with the two images leaves its eye
+// picture to the app, which records the compose into the swapchain images.
+bool g_compose_late = false;
+// vk_compose_test=1 (desktop runs): the late compose of two walks goes into
+// images of two formats, and the log compares them with the eye picture.
+bool g_compose_test = false;
+int g_compose_test_walks = 0;
+bool g_walk_late = false;     // the walk now left its eye picture to the app
+// vk_mres_draws=1: the draws of a pass of the two images get the sort and the
+// merge of the walks with one image (vk_draw_sort and vk_draw_merge, vk_draw_math.h).
+bool g_mres_play_on = true;
+// vk_mres_sort=1: that includes the sort. 0: the merge alone, which keeps the
+// order of the game (the picture is then the one of the unmerged draws).
+bool g_mres_sort = true;
+uint64_t g_late_walks = 0;    // for the report
 uint64_t g_mres_draws = 0;  // draws of the walks
 uint64_t g_mres_center_draws = 0;  // of them in the centre image
 uint64_t g_fovea_marks = 0;  // walks with the marks of the test
@@ -1575,6 +1598,8 @@ bool MakeTarget(uint32_t width, uint32_t height) {
   vk::LockQueue();
   f.vkDeviceWaitIdle(vk::Get().device);
   vk::UnlockQueue();
+  vk_compose::Forget(g_colors[0].image);
+  vk_compose::Forget(g_colors[1].image);
   vk::FreeImage(&g_colors[0]);
   vk::FreeImage(&g_colors[1]);
   vk::FreeImage(&g_depth);
@@ -2557,6 +2582,11 @@ void ReadSharpKeys() {
         static_cast<int>(GetPrivateProfileIntA("bwvr", "fovea_res_layer", 0, path));
     g_mres_layer = g_mres_layer_key != 0;
     g_atlas_area = GetPrivateProfileIntA("bwvr", "vk_atlas_area", 1, path) != 0;
+    g_compose_light = GetPrivateProfileIntA("bwvr", "vk_compose_light", 1, path) != 0;
+    g_pass_store = GetPrivateProfileIntA("bwvr", "vk_pass_store", 1, path) != 0;
+    g_compose_test = GetPrivateProfileIntA("bwvr", "vk_compose_test", 0, path) != 0;
+    g_mres_play_on = GetPrivateProfileIntA("bwvr", "vk_mres_draws", 1, path) != 0;
+    g_mres_sort = GetPrivateProfileIntA("bwvr", "vk_mres_sort", 1, path) != 0;
   }
 #ifdef _WIN32
   // On the PC the window and the pictures of a test show the whole eye
@@ -2564,6 +2594,23 @@ void ReadSharpKeys() {
   g_atlas_area = false;
 #endif
   g_said_atlas = false;
+  ModLog("vk scene     : vk_compose_light=%d, vk_pass_store=%d, vk_compose_test=%d. %s, %s%s",
+         g_compose_light ? 1 : 0, g_pass_store ? 1 : 0, g_compose_test ? 1 : 0,
+         g_compose_light ? "The compose of the eye picture loads no color and no depth"
+                         : "The compose of the eye picture clears the whole color and the depth",
+         g_pass_store ? "the passes of the two images store their depth only when a clear "
+                        "restarts them"
+                      : "the passes of the two images always store their depth",
+         g_compose_test ? ". The late compose is compared with the compose of the walk" : "");
+  ModLog("vk scene     : vk_mres_draws=%d, vk_mres_sort=%d. %s", g_mres_play_on ? 1 : 0,
+         g_mres_sort ? 1 : 0,
+         g_mres_play_on ? (g_mres_sort ? "The draws of the pass of the outer image and of the pass "
+                                         "of the centre image get the sort and the merge of "
+                                         "vk_draw_sort and vk_draw_merge"
+                                       : "The draws of the two passes get the merge of "
+                                         "vk_draw_merge, in the order of the game")
+                        : "The draws of the two passes play in the order of the game, one command "
+                          "for each draw");
   ModLog("vk scene     : fovea_res_layer=%d. %s", g_mres_layer_key,
          g_mres_layer
              ? "With fovea_res=1 the eye picture has the outer image and the centre "
@@ -2714,12 +2761,199 @@ void MresWalkLine(const Slot& s, const uint32_t drawn[2],
   }
 }
 
+// THE DRAWS OF A PASS (vk_mres_draws=1). The records of the walk give the draws
+// of the pass in g_mres_play: the draws whose viewport is out of the image,
+// and for the centre image those whose rect is out of the centre, go (the
+// cull). Then each row of draws between two clears gets the sort and the merge
+// of the walks with one image (FlushDraws): the opaque draws with a depth write
+// go by pipeline and descriptor sets, and draws in a row with the same state,
+// the same viewport and the same push constants become one draw with 32 bit
+// indices. A mesh on the GPU keeps its record and joins no draw.
+// Without the key the pass plays the records as they are.
+std::vector<MresRecord> g_mres_play;
+std::vector<MresRecord> g_mres_merged;
+std::vector<vk_draw_math::Draw> g_mres_facts;
+std::vector<uint32_t> g_mres_order;
+
+void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint32_t used_w,
+                 uint32_t used_h, uint32_t out_of_view[2], uint32_t left_out[2]) {
+  namespace dm = vk_draw_math;
+  g_mres_play.clear();
+  float last_vp[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+  bool in_view = false;
+  for (const MresRecord& r : g_mres_records) {
+    if (r.clear >= 0) {
+      g_mres_play.push_back(r);
+      continue;
+    }
+    if (memcmp(r.viewport, last_vp, sizeof(last_vp)) != 0) {
+      memcpy(last_vp, r.viewport, sizeof(last_vp));
+      VkRect2D scissor = {{0, 0}, {0, 0}};
+      in_view = PassScissor(r.viewport, ox, oy, sx, sy, used_w, used_h, &scissor);
+    }
+    if (!in_view) {
+      ++out_of_view[pass];
+      continue;
+    }
+    if (pass == 1 && (r.bounds[2] < g_mres.inset_x0 - 1.0f ||
+                      r.bounds[0] > g_mres.inset_x0 + g_mres.inset_w + 1.0f ||
+                      r.bounds[3] < g_mres.inset_y0 - 1.0f ||
+                      r.bounds[1] > g_mres.inset_y0 + g_mres.inset_h + 1.0f)) {
+      ++left_out[pass];
+      continue;
+    }
+    g_mres_play.push_back(r);
+  }
+  uint64_t draws = 0;
+  for (const MresRecord& r : g_mres_play) {
+    if (r.clear < 0) ++draws;
+  }
+  // The counts of VkSceneDrawCounts: the draws of the game that the pass
+  // plays, and the commands that play them.
+  g_dc_draws += draws;
+  if (!g_mres_play_on || !((g_walk_sort && g_mres_sort) || g_walk_merge)) {
+    g_dc_commands += draws;
+    return;
+  }
+  // Each row of draws between two clears.
+  g_mres_merged.clear();
+  g_mres_merged.reserve(g_mres_play.size());
+  uint8_t* ring = static_cast<uint8_t*>(s.ring.mapped);
+  size_t at = 0;
+  while (at < g_mres_play.size()) {
+    if (g_mres_play[at].clear >= 0) {
+      g_mres_merged.push_back(g_mres_play[at]);
+      ++at;
+      continue;
+    }
+    size_t end = at;
+    while (end < g_mres_play.size() && g_mres_play[end].clear < 0) ++end;
+    const uint32_t n = static_cast<uint32_t>(end - at);
+    const MresRecord* row = g_mres_play.data() + at;
+    g_mres_facts.resize(n);
+    g_mres_order.resize(n);
+    for (uint32_t i = 0; i < n; ++i) g_mres_facts[i] = FactsOf(row[i]);
+    g_dc_moved += dm::SortDraws(g_mres_facts.data(), n, g_walk_sort && g_mres_sort,
+                                g_mres_order.data());
+    uint32_t i = 0;
+    while (i < n) {
+      const MresRecord& first_record = row[g_mres_order[i]];
+      const dm::Draw& first = g_mres_facts[g_mres_order[i]];
+      uint32_t last = i + 1;
+      uint32_t indices = dm::ListIndices(first);
+      if (g_walk_merge && first_record.mesh == 0 && first_record.wide == 0) {
+        while (last < n) {
+          const MresRecord& next_record = row[g_mres_order[last]];
+          if (next_record.mesh != 0 || next_record.wide != 0 ||
+              memcmp(first_record.viewport, next_record.viewport,
+                     sizeof(first_record.viewport)) != 0 ||
+              !dm::CanJoin(first, g_mres_facts[g_mres_order[last]])) {
+            break;
+          }
+          indices += dm::ListIndices(g_mres_facts[g_mres_order[last]]);
+          ++last;
+        }
+      }
+      if (last - i >= 2) {
+        const VkDeviceSize place = (s.used + 3) & ~3ull;
+        const VkDeviceSize bytes = static_cast<VkDeviceSize>(indices) * 4;
+        if (place + bytes <= kRingBytes) {
+          uint32_t* out = reinterpret_cast<uint32_t*>(ring + place);
+          MresRecord merged = first_record;
+          for (uint32_t k = i; k < last; ++k) {
+            const MresRecord& member = row[g_mres_order[k]];
+            const dm::Draw& d = g_mres_facts[g_mres_order[k]];
+            // The ring is memory that the CPU writes and does not read: the
+            // indices come from their copy (VkSceneDraw).
+            const uint16_t* from =
+                d.index_count > 0 ? g_queue_indices.data() + member.queue_index : nullptr;
+            dm::JoinIndices(first, d, from, out);
+            out += dm::ListIndices(d);
+            if (member.bounds[0] < merged.bounds[0]) merged.bounds[0] = member.bounds[0];
+            if (member.bounds[1] < merged.bounds[1]) merged.bounds[1] = member.bounds[1];
+            if (member.bounds[2] > merged.bounds[2]) merged.bounds[2] = member.bounds[2];
+            if (member.bounds[3] > merged.bounds[3]) merged.bounds[3] = member.bounds[3];
+          }
+          s.used = (place + bytes + 31) & ~31ull;
+          merged.uv1_at = merged.vertex_at;
+          merged.index_at = place;
+          merged.index_count = indices;
+          merged.wide = 1;
+          g_mres_merged.push_back(merged);
+          g_dc_joined += last - i;
+          i = last;
+          continue;
+        }
+        g_dc_no_room += last - i;
+      }
+      g_mres_merged.push_back(first_record);
+      ++i;
+    }
+    at = end;
+  }
+  g_mres_play.swap(g_mres_merged);
+  uint64_t commands = 0;
+  for (const MresRecord& r : g_mres_play) {
+    if (r.clear < 0) ++commands;
+  }
+  g_dc_commands += commands;
+}
+
+// What the late compose needs from the walk now (vk_compose.h).
+vk_compose::Input ComposeInput() {
+  vk_compose::Input in = {};
+  vk_compose_math::Layout& l = in.layout;
+  l.width = Target().width;
+  l.height = Target().height;
+  l.outer_w = g_mres.outer_w;
+  l.outer_h = g_mres.outer_h;
+  l.outer_image_w = g_mres_color[0].width;
+  l.outer_image_h = g_mres_color[0].height;
+  l.center_w = g_mres.center_w;
+  l.center_h = g_mres.center_h;
+  l.center_image_w = g_mres_color[1].width;
+  l.center_image_h = g_mres_color[1].height;
+  l.inset_x0 = g_mres.inset_x0;
+  l.inset_y0 = g_mres.inset_y0;
+  l.inset_w = g_mres.inset_w;
+  l.inset_h = g_mres.inset_h;
+  for (int e = 0; e < 2; ++e) {
+    in.outer[e] = g_mres_view[0][e];
+    in.center[e] = g_mres_view[1][e];
+  }
+  // The views are made again with the images.
+  in.generation = g_mres_remade + 1;
+  in.tint = g_walk_show;
+  return in;
+}
+
+// The walk leaves its eye picture to the app (VkSceneComposeLate) when it has
+// both eyes, the two images side by side are not in the picture (the atlas of
+// fovea_res_layer=1 keeps its compose), and nobody reads the picture in this
+// walk: a test picture, the compare of the meshes.
+bool ComposeLate() {
+  if (!g_compose_late || g_walk_atlas.on || !g_walk_both || g_picture ||
+      (g_mesh_compare && g_mesh_compare_request)) {
+    return false;
+  }
+  vk_compose::Set(ComposeInput(), (uint64_t)Target().image, true);
+  ++g_late_walks;
+  return true;
+}
+
 // The records of the walk into the outer image and the centre image, then
 // the eye picture from the two.
 void PlayMres(Slot& s) {
   const VkCommandBuffer cb = s.cb;
   // A TEST AID: what each pass did with the records (MresWalkLine).
   uint32_t drawn[2] = {0, 0}, out_of_view[2] = {0, 0}, left_out[2] = {0, 0};
+  // vk_pass_store=1: a pass stores its depth only when a clear of the records
+  // of one eye ends it and starts it again (PlayClear), as the pass then
+  // loads the depth. Else nobody reads the depth after the pass.
+  bool restarts = !g_pass_store;
+  for (const MresRecord& r : g_mres_records) {
+    if (r.clear >= 0 && g_mres_clears[r.clear].eyes != 3u) restarts = true;
+  }
   for (int pass = 0; pass < 2; ++pass) {
     vk::Image& color = g_mres_color[pass];
     vk::Image& depth = g_mres_depth[pass];
@@ -2749,16 +2983,17 @@ void PlayMres(Slot& s) {
     if (g_walk_right) {
       BeginRenderingOf(cb, color, depth, 2u, false, true);
       f.vkCmdEndRendering(cb);
-      BeginRenderingOf(cb, color, depth, 3u, true, true);
+      BeginRenderingOf(cb, color, depth, 3u, true, restarts);
     } else {
-      BeginRenderingOf(cb, color, depth, 3u, false, true);
+      BeginRenderingOf(cb, color, depth, 3u, false, restarts);
     }
     float last_vp[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
     bool in_view = false;
     VkPipeline last_pipeline = VK_NULL_HANDLE;
     VkDescriptorSet last_set = VK_NULL_HANDLE;
     VkDescriptorSet last_set1 = VK_NULL_HANDLE;
-    for (const MresRecord& r : g_mres_records) {
+    PreparePass(s, pass, ox, oy, sx, sy, used_w, used_h, out_of_view, left_out);
+    for (const MresRecord& r : g_mres_play) {
       if (r.clear >= 0) {
         PlayClear(cb, g_mres_clears[r.clear], color, depth, ox, oy, sx, sy,
                   used_w, used_h);
@@ -2806,7 +3041,8 @@ void PlayMres(Slot& s) {
       }
       BindVertices(cb, s, r.vertex_at, r.uv1_at);
       if (r.index_count > 0) {
-        BindIndices(cb, s.ring.buffer, r.index_at, VK_INDEX_TYPE_UINT16);
+        BindIndices(cb, s.ring.buffer, r.index_at,
+                    r.wide != 0 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
         f.vkCmdDrawIndexed(cb, r.index_count, 1, 0, 0, 0);
       } else {
         f.vkCmdDraw(cb, r.vertex_count, 1, 0, 0);
@@ -2866,7 +3102,13 @@ void PlayMres(Slot& s) {
                         r.push.ops[1], diffuse);
     }
   }
-  ComposeMres(s);
+  // THE LATE COMPOSE: the app records the eye picture into its swapchain
+  // images. Else the walk makes it now.
+  g_walk_late = ComposeLate();
+  if (!g_walk_late) {
+    ComposeMres(s);
+    if (g_compose_test) vk_compose::Set(ComposeInput(), (uint64_t)Target().image, false);
+  }
 }
 
 // THE CHECK FOR A BLACK PICTURE (vk_black_check=1, backend=vulkan). At the
@@ -2970,6 +3212,39 @@ void BlackCheckRead(Slot& s) {
   g_black_before = any;
 }
 
+// The rendering of the compose of the eye picture (ComposeMres and
+// ComposeAtlas): both eyes, and a depth attachment that no draw of the
+// compose uses. area: the part that the compose writes (the whole target
+// when null). covers: the first draw covers the area, so the color needs no
+// clear. vk_compose_light=1 loads nothing and stores no depth: a GPU with
+// tiles then writes the color once and no depth. vk_compose_light=0 clears
+// the color and the depth, and stores the color.
+void BeginComposeRendering(VkCommandBuffer cb, const VkRect2D* area, bool covers) {
+  if (!g_compose_light) {
+    BeginRenderingOf(cb, Target(), g_depth, 3u, false, false, area);
+    return;
+  }
+  VkRenderingAttachmentInfo color = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+  color.imageView = Target().view;
+  color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  color.loadOp = covers ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR;
+  color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  VkRenderingAttachmentInfo depth = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+  depth.imageView = g_depth.view;
+  depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+  depth.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  VkRenderingInfo rendering = {VK_STRUCTURE_TYPE_RENDERING_INFO};
+  rendering.renderArea = {{0, 0}, {Target().width, Target().height}};
+  if (area != nullptr) rendering.renderArea = *area;
+  rendering.layerCount = 1;
+  rendering.viewMask = 3u;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachments = &color;
+  rendering.pDepthAttachment = &depth;
+  f.vkCmdBeginRendering(cb, &rendering);
+}
+
 // THE EYE PICTURE from the two images: for each eye the outer image over
 // the whole picture, and the centre image over its rect, with an edge of 8
 // percent of the rect where its alpha goes from 1 to 0. With the marks of
@@ -2983,7 +3258,7 @@ void ComposeMres(Slot& s) {
   }
   const VkCommandBuffer cb = s.cb;
   const uint32_t width = Target().width, height = Target().height;
-  BeginRenderingOf(cb, Target(), g_depth, 3u, false, false);
+  BeginComposeRendering(cb, nullptr, true);
   const VkViewport viewport = {0.0f, 0.0f, static_cast<float>(width),
                                static_cast<float>(height), 0.0f, 1.0f};
   SetViewport(cb, viewport);
@@ -3103,7 +3378,7 @@ void ComposeAtlas(Slot& s) {
     const eye_copy_math::Rect part = eye_copy_math::ShownPart(a, width, height);
     area.extent = {static_cast<uint32_t>(part.w), static_cast<uint32_t>(part.h)};
   }
-  BeginRenderingOf(cb, Target(), g_depth, 3u, false, false, &area);
+  BeginComposeRendering(cb, &area, false);
   const VkViewport viewport = {0.0f, 0.0f, static_cast<float>(width),
                                static_cast<float>(height), 0.0f, 1.0f};
   SetViewport(cb, viewport);
@@ -3731,6 +4006,7 @@ void EndOnWorker(const void*) {
     return;
   }
   if (!g_recording) return;
+  g_walk_late = false;
   FlushDraws();
   if (g_walk_show && g_walk_fovea) DrawFoveaMarks();
   // A walk with no draw and no clear for the eyes keeps the picture too.
@@ -3757,7 +4033,8 @@ void EndOnWorker(const void*) {
   } else {
     f.vkCmdEndRendering(s.cb);
   }
-  BlackCheckWrite(s);
+  // A picture that the app composes later has no pixels to check.
+  if (!g_walk_late) BlackCheckWrite(s);
   if (s.query != VK_NULL_HANDLE) {
     f.vkCmdWriteTimestamp2(s.cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                            s.query, 1);
@@ -3793,6 +4070,16 @@ void EndOnWorker(const void*) {
     g_mesh_compare_request = false;
     f.vkWaitForFences(vk::Get().device, 1, &s.fence, VK_TRUE, UINT64_MAX);
     MeshCompare(Target(), g_walk_number, false, g_mesh_compare_label);
+  }
+  // A TEST AID (vk_compose_test=1): the late compose of two walks, compared
+  // with the eye picture that the walk made.
+  if (g_compose_test && g_walk_mres && !g_walk_late && !g_picture && g_walk_both &&
+      !g_walk_atlas.on) {
+    ++g_compose_test_walks;
+    if (g_compose_test_walks == 3 || g_compose_test_walks == 40) {
+      f.vkWaitForFences(vk::Get().device, 1, &s.fence, VK_TRUE, UINT64_MAX);
+      vk_compose::CompareWithTarget(Target().image, Target().width, Target().height);
+    }
   }
   if (g_walk_both || g_walk_right) {
     g_done_image = (uint64_t)Target().image;  // a handle of 64 bits
@@ -4434,6 +4721,11 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
       if (y > b[3]) b[3] = y;
     }
     memcpy(r.bounds, b, sizeof(b));
+    // PreparePass joins draws with indices from this copy.
+    if (g_mres_play_on && g_walk_merge && index_count > 0) {
+      r.queue_index = static_cast<uint32_t>(g_queue_indices.size());
+      g_queue_indices.insert(g_queue_indices.end(), indices, indices + index_count);
+    }
     g_mres_records.push_back(r);
     ++g_draws;
     return;
@@ -5754,6 +6046,37 @@ bool VkSceneLastPicture(uint64_t* image, uint32_t* layer, uint32_t* width,
   *height = g_last_height;
   return true;
 }
+
+void VkSceneComposeLate(bool on) {
+  if (g_compose_late == on) return;
+  g_compose_late = on;
+  ModLog("vk scene     : the late compose is %s: %s", on ? "on" : "off",
+         on ? "a walk with the outer image and the centre image leaves its eye picture to "
+              "the app"
+            : "each walk makes its eye picture");
+}
+
+bool VkSceneComposePending(uint64_t eye_image) { return vk_compose::Pending(eye_image); }
+
+bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t images[2],
+                          uint32_t format) {
+  const VkCommandBuffer cb = reinterpret_cast<VkCommandBuffer>(command_buffer);
+  if (images == nullptr) {
+    // Into the eye image of the walk, in the format of the renderer.
+    const uint64_t eye = vk_compose::Pending();
+    if (eye == 0) return false;
+    const vk_compose::Target targets[2] = {{(VkImage)eye, 0, vk::Get().color_format},
+                                           {(VkImage)eye, 1, vk::Get().color_format}};
+    if (!vk_compose::Record(cb, slot, targets)) return false;
+    vk_compose::MarkComposed(eye);
+    return true;
+  }
+  const vk_compose::Target targets[2] = {{(VkImage)images[0], 0, static_cast<VkFormat>(format)},
+                                         {(VkImage)images[1], 0, static_cast<VkFormat>(format)}};
+  return vk_compose::Record(cb, slot, targets);
+}
+
+void VkSceneComposeForget(uint64_t image) { vk_compose::Forget((VkImage)image); }
 
 void VkSceneSetGpuTake(bool on) { g_take_on = on; }
 

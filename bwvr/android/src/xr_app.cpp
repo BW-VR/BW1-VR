@@ -12,6 +12,7 @@
 #include "../../src/common/ini_text.h"
 #include "../../src/mod/controller_math.h"
 #include "../../src/mod/screen_quad_math.h"
+#include "../../src/mod/vk_scene.h"
 #include "app_log.h"
 #include "eye_size.h"
 #include "picture_ring.h"
@@ -1754,6 +1755,9 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (!ql::Spec(f, r, EyeLayer(0).width, EyeLayer(0).height, &s)) continue;
       XrSwapchain swapchain = XR_NULL_HANDLE;
       if (r.kind == ql::kLayerPanel) {
+        // xr_panel_rect=1: the image has only the part of the last copy.
+        const int32_t have[4] = {panel_part_.x, panel_part_.y, panel_part_.w, panel_part_.h};
+        if (panel_rect_ && !ql::RectInside(s.rect, have)) continue;
         swapchain = panel_.layer[0].swapchain;
         ++panels;
         // The menu panel quad of a dialog box that takes text: the keyboard
@@ -2153,7 +2157,10 @@ void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
   panel_width_ = panel_width;
   panel_height_ = panel_height;
   // A new picture has a new panel image.
-  if (panel_source_ != VK_NULL_HANDLE) ++panel_.layer[0].revision;
+  if (panel_source_ != VK_NULL_HANDLE) {
+    ++panel_.layer[0].revision;
+    panel_part_ = PanelPart(panel_rect_, layers, panel_width, panel_height);
+  }
 }
 
 void XrApp::SetScreenQuadImage(const scene_stream::ScreenBody& body, VkImage image,
@@ -2606,6 +2613,11 @@ void XrApp::NewPlay(uint32_t width, uint32_t height) {
 void XrApp::FreeScreenSet(Screen* screen) {
   FreeOnce(screen);
   for (Layer& l : screen->layer) {
+    // The views of the compose (VkSceneComposeRecord) of these images go with
+    // them: the runtime may give a new image the same handle.
+    for (const XrSwapchainImageVulkan2KHR& image : l.images) {
+      VkSceneComposeForget(reinterpret_cast<uint64_t>(image.image));
+    }
     FreeStaging(&gpu_, &l.staging);
     if (l.swapchain != XR_NULL_HANDLE) DestroySwapchain(l.swapchain);
     l.swapchain = XR_NULL_HANDLE;
@@ -2947,7 +2959,9 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
   // The part of the picture that the copy takes: the shown part of an eye
   // picture with xr_eye_rects=1, else the whole picture.
   const eye_copy_math::Rect part =
-      same && screen == &eyes_ ? eye_part_ : eye_copy_math::Whole(layer->width, layer->height);
+      same && screen == &eyes_    ? eye_part_
+      : same && screen == &panel_ ? panel_part_
+                                  : eye_copy_math::Whole(layer->width, layer->height);
   const int kind = screen == &eyes_    ? copy_time::kSwapEyes
                    : screen == &panel_ ? copy_time::kSwapPanel
                    : screen == &flat_  ? copy_time::kSwapScreen

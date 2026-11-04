@@ -55,6 +55,7 @@ add_library(bwvr_mod SHARED
     ddraw_census.cpp
     vk_ddraw.cpp
     vk_core.cpp
+    vk_compose.cpp
     vk_scene.cpp
     vk_stream.cpp
     render_chain.cpp

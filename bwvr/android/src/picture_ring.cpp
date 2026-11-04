@@ -4,6 +4,7 @@
 
 #include <atomic>
 
+#include "../../src/mod/vk_scene.h"
 #include "app_log.h"
 #include "xr_app.h"
 
@@ -356,6 +357,31 @@ void PictureRing::CopyDirect(int i, VkImage source, const eye_copy_math::Rect& p
   stamps_.After(cmd, static_cast<uint32_t>(i));
 }
 
+// THE LATE COMPOSE: the eye pictures from the outer image and the centre image
+// of the walk, straight into the swapchain image of each eye.
+bool PictureRing::ComposeDirect(int i, const VkImage targets[2], uint32_t format,
+                                const eye_copy_math::Rect& part) {
+  VkCommandBuffer cmd = slots_[i].cmd;
+  stamps_.Before(cmd, static_cast<uint32_t>(i), copy_time::kSlotCompose,
+                 eye_copy_math::Bytes(part, 2));
+  const uint64_t images[2] = {reinterpret_cast<uint64_t>(targets[0]),
+                              reinterpret_cast<uint64_t>(targets[1])};
+  const bool ok = VkSceneComposeRecord(cmd, static_cast<uint32_t>(i), images, format);
+  stamps_.After(cmd, static_cast<uint32_t>(i));
+  return ok;
+}
+
+// The same pass into the image of the renderer (a picture that takes the old
+// way, or a screen picture of the last walk).
+bool PictureRing::ComposeEyes(int i, const eye_copy_math::Rect& part) {
+  VkCommandBuffer cmd = slots_[i].cmd;
+  stamps_.Before(cmd, static_cast<uint32_t>(i), copy_time::kSlotComposeEyes,
+                 eye_copy_math::Bytes(part, 2));
+  const bool ok = VkSceneComposeRecord(cmd, static_cast<uint32_t>(i), nullptr, 0);
+  stamps_.After(cmd, static_cast<uint32_t>(i));
+  return ok;
+}
+
 // An image of a slot is made at its first use and again at a new size. The
 // GPU may still copy from the old image, so the device must be idle before
 // it goes.
@@ -395,7 +421,8 @@ void PictureRing::FreeEyes(int i) {
          "of the slot go into its swapchains (xr_eye_direct=1)", i);
 }
 
-bool PictureRing::CopyPanel(int i, VkImage source, uint32_t width, uint32_t height) {
+bool PictureRing::CopyPanel(int i, VkImage source, uint32_t width, uint32_t height,
+                            const eye_copy_math::Rect& part) {
   Slot& s = slots_[i];
   if (source == VK_NULL_HANDLE || width == 0 || height == 0) return false;
   if (s.panel.width != width || s.panel.height != height) {
@@ -412,7 +439,7 @@ bool PictureRing::CopyPanel(int i, VkImage source, uint32_t width, uint32_t heig
     AppLog("ring         : slot %d: an image of %u by %u for the panel image (%.1f MB)", i,
            width, height, width * height * 4.0 / (1024.0 * 1024.0));
   }
-  Copy(i, source, 0, 1, s.panel, width, height, nullptr, copy_time::kSlotPanel);
+  Copy(i, source, 0, 1, s.panel, width, height, &part, copy_time::kSlotPanel);
   return true;
 }
 

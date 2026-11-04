@@ -166,6 +166,43 @@ inline bool PanelQuadRect(const ss::PanelQuadBody& q, uint32_t width, uint32_t h
   return true;
 }
 
+// THE PART OF THE PANEL IMAGE THAT THE QUADS NEED (xr_panel_rect=1): the
+// smallest rect that holds the rect of each panel quad, shown or not, cut to
+// the panel image. A quad that is off keeps its rect, so a quad that comes on
+// later with no new panel image still lies in the part. False when no quad
+// has a rect in the image: then the whole image is the part.
+inline bool PanelUnion(const ss::PanelBody& p, int32_t out[4]) {
+  int32_t x0 = 0x7fffffff, y0 = 0x7fffffff, x1 = 0, y1 = 0;
+  bool any = false;
+  for (int i = 0; i < 3; ++i) {
+    const ss::PanelQuadBody& q = p.quads[i];
+    const int32_t x = q.rect[0] < 0 ? 0 : q.rect[0];
+    const int32_t y = q.rect[1] < 0 ? 0 : q.rect[1];
+    int32_t w = q.rect[2], h = q.rect[3];
+    if (x + w > static_cast<int32_t>(p.width)) w = static_cast<int32_t>(p.width) - x;
+    if (y + h > static_cast<int32_t>(p.height)) h = static_cast<int32_t>(p.height) - y;
+    if (w <= 0 || h <= 0) continue;
+    any = true;
+    if (x < x0) x0 = x;
+    if (y < y0) y0 = y;
+    if (x + w > x1) x1 = x + w;
+    if (y + h > y1) y1 = y + h;
+  }
+  if (!any) return false;
+  out[0] = x0;
+  out[1] = y0;
+  out[2] = x1 - x0;
+  out[3] = y1 - y0;
+  return true;
+}
+
+// True when the rect `inner` (x, y, w, h) lies in the rect `outer`.
+inline bool RectInside(const int32_t inner[4], const int32_t outer[4]) {
+  return inner[0] >= outer[0] && inner[1] >= outer[1] &&
+         inner[0] + inner[2] <= outer[0] + outer[2] &&
+         inner[1] + inner[3] <= outer[1] + outer[3];
+}
+
 // THE KEYBOARD OF THE APP IN A FRAME OF THE SCENE (docs/android.md, "The
 // dialog boxes by the controllers"). A dialog box of the game is on the menu
 // panel quad (quads[0]). While it takes text, the mod sets kPanelQuadText on

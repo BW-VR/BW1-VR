@@ -3582,6 +3582,7 @@ void CreatureChecks() {
 #include "vk_draw_checks.h"
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
+#include "vk_compose_checks.h"
 #include "sharp_checks.h"
 #include "osc_gaze_checks.h"
 #include "menu_checks.h"
@@ -4052,6 +4053,7 @@ int main() {
   vk_draw_checks::VkDrawChecks();
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
+  vk_compose_checks::VkComposeChecks();
   sharp_checks::SharpChecks();
   osc_gaze_checks::OscGazeChecks();
   menu_checks::AllMenuChecks();

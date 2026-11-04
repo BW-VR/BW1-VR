@@ -173,6 +173,29 @@ void VkSceneSetDirect(bool on);
 // render target after it: then the pixels of the CPU are the picture.
 bool VkSceneLastPicture(uint64_t* image, uint32_t* layer, uint32_t* width,
                         uint32_t* height);
+// THE LATE COMPOSE (vk_compose.h, docs/backend.md, "The compose of the eye
+// picture"). The headset app calls VkSceneComposeLate(true) before the first
+// walk of a game that it plays with the ring of the pictures. Then a walk
+// with fovea_res=1 and the outer image and the centre image in the eye picture
+// (fovea_res_layer=0) leaves the eye picture to the app: the image that
+// VkSceneEyes gives has no pixels until the app calls VkSceneComposeRecord for
+// it. A walk of another kind composes itself.
+void VkSceneComposeLate(bool on);
+// True when the eye image (the image that VkSceneEyes or
+// VkSceneLastPicture gave) is a picture that nobody composed.
+bool VkSceneComposePending(uint64_t eye_image);
+// Records the compose of the last walk into the command buffer of the app (a
+// VkCommandBuffer in the recording state, on the device of the renderer). images
+// null: into the eye image of the walk, which is then composed (the app copies
+// it as it copies a picture of the walk). images not null: the two images
+// (VkImage), one for each eye, of the format `format` (a VkFormat): whole
+// image, no load, left in the layout of a color attachment. slot: 0 to 7, a
+// place for the vertices that the caller keeps free until the GPU finished the
+// command buffer. False when nothing is pending or the module cannot work.
+bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t images[2],
+                          uint32_t format);
+// The images of the compose of a swapchain image that goes.
+void VkSceneComposeForget(uint64_t image);
 bool VkSceneDirect();
 // THE VULKAN DEVICE OF THE MOD (vk_device of bwvr.ini, docs/backend.md, "No
 // Vulkan device of the mod"). on: 1 (the default) the renderer draws on a

@@ -113,6 +113,9 @@ volatile LONG g_target_writes = 0;
 // and the stream: the stream sends the pixels of a written surface at its
 // next use as a texture.
 volatile LONG g_surface_writes = 0;
+// A count of the changes of the state of the device (VkDdrawStateSerial). The
+// frame thread writes it and reads it.
+uint32_t g_state_serial = 0;
 
 void SurfaceWritten(void* surface) {
   InterlockedIncrement(&g_surface_writes);
@@ -746,6 +749,7 @@ class Device : public IDirect3DDevice7 {
       }
     }
     rs_[type] = value;
+    ++g_state_serial;
     ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kRenderState);
     VkSceneRenderState(type, value);
     return D3D_OK;
@@ -849,6 +853,7 @@ class Device : public IDirect3DDevice7 {
     if (textures_[stage] != nullptr) textures_[stage]->Release();
     textures_[stage] = s;
     texture_writes_[stage] = writes;
+    ++g_state_serial;
     ChainScope renderer(render_chain_math::kRenderer, render_chain_math::kTexture);
     VkSceneTexture(stage, s);
     return D3D_OK;
@@ -884,6 +889,7 @@ class Device : public IDirect3DDevice7 {
       }
     }
     ts_[stage][type] = value;
+    ++g_state_serial;
     // In Direct3D 7 D3DTSS_ADDRESS sets the mode of u and of v.
     if (type == D3DTSS_ADDRESS) {
       ts_[stage][D3DTSS_ADDRESSU] = value;
@@ -2185,6 +2191,8 @@ void VkDdrawInstall(int lines) {
 }
 
 bool VkDdrawOn() { return g_on; }
+
+uint32_t VkDdrawStateSerial() { return g_state_serial; }
 
 bool VkDdrawMeshState(void* device, gpu_mesh_math::DeviceState* out) {
   if (!g_on || device == nullptr) return false;

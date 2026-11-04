@@ -365,6 +365,31 @@ inline uint32_t MeshSample(const void* vertices, uint32_t vertex_count, const vo
   return m.s[0] ^ (m.s[1] * 31u) ^ (m.s[2] * 0x9E3779B1u) ^ m.s[3] ^ (m.a[0] + m.a[3] * 7u);
 }
 
+// THE FUNCTIONS THAT DRAW A LAYER over a mesh (the latch, gpu_mesh_latch). A mesh
+// class of the engine has its own draw function on the CPU path. The return
+// address of DrawTriangle names the function that called it.
+struct LayerFunction {
+  uint32_t address, size;
+  const char* name;
+};
+const int kLayerFunctionCount = 6;
+const LayerFunction kLayerFunctions[kLayerFunctionCount] = {
+    {0x00851870, 0x13D0, "fn_00851870"}, {0x00859D90, 0x960, "fn_00859D90"},
+    {0x0084E200, 0x790, "fn_0084E200"},  {0x0085A6F0, 0x420, "fn_0085A6F0"},
+    {0x00850FC0, 0x840, "fn_00850FC0"},  {0x0085C7F0, 0x780, "fn_0085C7F0"}};
+// The index of the function that holds the return address, or -1 (the sprite
+// LH3DSprite::Draw at 0x00840530, the land, the text and the icons are not layers
+// over a mesh).
+inline int LayerFunctionOf(uint32_t return_address) {
+  for (int i = 0; i < kLayerFunctionCount; ++i) {
+    if (return_address >= kLayerFunctions[i].address &&
+        return_address < kLayerFunctions[i].address + kLayerFunctions[i].size) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 // WHERE A CHANGE IS. The data of a mesh (the vertices, then the indices) in
 // blocks of 32 bytes (one vertex, or 5 and a third triangles), each with a sum.
 // A mesh that changed at its place has the first block with another sum.

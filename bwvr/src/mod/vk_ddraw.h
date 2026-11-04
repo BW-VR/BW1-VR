@@ -20,6 +20,10 @@ bool VkDdrawOn();
 // decide if a mesh takes the GPU path. `device` is the Direct3D 7 device of the
 // game (0x00ECA638). False when the backend is not on.
 bool VkDdrawMeshState(void* device, gpu_mesh_math::DeviceState* out);
+// A count of the changes of a render state, a stage state or a texture of the
+// device (a call that the device did not drop). The hook of the meshes asks if
+// the material of a mesh changed the device (gpu_mesh_timer, gpu_mesh_material_skip).
+uint32_t VkDdrawStateSerial();
 
 // For the report of each 450 frames: the calls of each method that the
 // backend does not make, and the counts of the objects.

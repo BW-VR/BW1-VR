@@ -265,16 +265,22 @@ class Player {
         if (!ss::Body(body, bytes, &d)) break;
         const uint64_t vertex_bytes = static_cast<uint64_t>(d.vertex_count) * 32;
         const uint64_t index_bytes = static_cast<uint64_t>(d.triangle_count) * 6;
-        if (bytes < sizeof(d) + vertex_bytes + index_bytes) break;
+        const uint64_t group_bytes = d.group_count != 0 ? static_cast<uint64_t>(d.vertex_count) * 2 : 0;
+        if (bytes < sizeof(d) + vertex_bytes + index_bytes + group_bytes) break;
         const uint8_t* vertices = body + sizeof(d);
-        // The vertices and the indices follow the body with no gap. A copy
-        // puts each on its own alignment.
+        // The vertices, the indices and the groups follow the body with no gap.
+        // A copy puts each on its own alignment.
         indices_.resize(static_cast<size_t>(d.triangle_count) * 3);
         memcpy(indices_.data(), vertices + vertex_bytes, index_bytes);
         mesh_vertices_.resize(vertex_bytes);
         memcpy(mesh_vertices_.data(), vertices, vertex_bytes);
+        mesh_groups_.resize(static_cast<size_t>(group_bytes / 2));
+        if (group_bytes != 0) {
+          memcpy(mesh_groups_.data(), vertices + vertex_bytes + index_bytes, group_bytes);
+        }
         VkSceneMeshData(d.mesh, d.hash, mesh_vertices_.data(), d.vertex_count, indices_.data(),
-                        d.triangle_count);
+                        d.triangle_count, group_bytes != 0 ? mesh_groups_.data() : nullptr,
+                        d.group_count);
         ++result_->mesh_data;
         break;
       }
@@ -282,12 +288,20 @@ class Player {
         ss::MeshDrawBody d;
         if (!ss::Body(body, bytes, &d)) break;
         const uint64_t offset_bytes = static_cast<uint64_t>(d.offset_floats) * 4;
-        if (bytes < sizeof(d) + offset_bytes) break;
+        const uint64_t group_floats =
+            static_cast<uint64_t>(d.group_count) *
+            ((d.consts.flags & gpu_mesh_math::kLit) != 0 ? 16u : 12u);
+        if (bytes < sizeof(d) + offset_bytes + group_floats * 4) break;
         State(d.state);
         offsets_.resize(d.offset_floats);
         if (d.offset_floats > 0) memcpy(offsets_.data(), body + sizeof(d), offset_bytes);
+        mesh_group_floats_.resize(static_cast<size_t>(group_floats));
+        if (group_floats != 0) {
+          memcpy(mesh_group_floats_.data(), body + sizeof(d) + offset_bytes, group_floats * 4);
+        }
         VkSceneDrawMesh(d.mesh, d.consts, d.offset_floats > 0 ? offsets_.data() : nullptr,
-                        d.offset_floats);
+                        d.offset_floats, group_floats != 0 ? mesh_group_floats_.data() : nullptr,
+                        d.group_count);
         ++result_->mesh_draws;
         break;
       }
@@ -378,6 +392,8 @@ class Player {
   screen_quad_math::ScreenPicture screen_;
   std::vector<uint16_t> indices_;
   std::vector<uint8_t> mesh_vertices_;
+  std::vector<uint16_t> mesh_groups_;
+  std::vector<float> mesh_group_floats_;
   std::vector<float> offsets_;
   std::vector<D3DRECT> rects_;
 };

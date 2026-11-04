@@ -120,6 +120,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <atomic>
 #include <unordered_map>
 #include <vector>
 
@@ -293,6 +294,10 @@ const uint32_t kPanelKey = 1u << 24;
 // offsets of the vertices as vertex buffer 2.
 const uint32_t kMeshKey = 1u << 25;
 const uint32_t kMeshOffsetKey = 1u << 26;
+// A mesh with a matrix for each group of vertices: the ordinal of the group of
+// a vertex is vertex buffer 2, and set 2 is the buffer with the matrices and
+// the lights of the draw (GroupsReady).
+const uint32_t kMeshGroupKey = 1u << 27;
 
 // THE WALK WITHOUT DIRECT3D 9 (vk_only). On the frame thread: the key now,
 // the test key of the desktop, the frame of stereo.cpp, and a walk of
@@ -322,6 +327,12 @@ VkShaderModule g_vert = VK_NULL_HANDLE;
 VkShaderModule g_frag = VK_NULL_HANDLE;
 VkShaderModule g_mesh_vert = VK_NULL_HANDLE;
 VkShaderModule g_mesh_vert_offsets = VK_NULL_HANDLE;
+VkShaderModule g_mesh_vert_groups = VK_NULL_HANDLE;
+// The layout of the pipelines of the groups: sets 0 and 1 of g_layout and set 2
+// with the storage buffer of the groups. It is made at the first group mesh.
+VkDescriptorSetLayout g_group_set_layout = VK_NULL_HANDLE;
+VkPipelineLayout g_group_layout = VK_NULL_HANDLE;
+VkDescriptorPool g_group_pool = VK_NULL_HANDLE;
 VkDescriptorSetLayout g_set_layout = VK_NULL_HANDLE;
 VkPipelineLayout g_layout = VK_NULL_HANDLE;
 VkDescriptorPool g_pool = VK_NULL_HANDLE;
@@ -329,7 +340,7 @@ struct PipelineSlot {
   uint32_t key;  // 0 for no blend, else 1 << 16 | src << 8 | dst
   VkPipeline pipeline;
 };
-const int kMaxPipelines = 32;
+const int kMaxPipelines = 64;
 PipelineSlot g_pipelines[kMaxPipelines];
 int g_pipeline_count = 0;
 
@@ -385,6 +396,11 @@ struct Slot {
   bool query_written;
   vk::Buffer ring;
   VkDeviceSize used;
+  // The matrices and the lights of the meshes with groups (GroupsReady), the
+  // storage buffer of set 2.
+  vk::Buffer groups;
+  VkDeviceSize groups_used;
+  VkDescriptorSet groups_set;
   bool pending;
   vk::Image garbage[64];
   int garbage_count;
@@ -449,21 +465,36 @@ struct MeshEntry {
   VkDeviceSize bytes;  // the range
   uint64_t hash;
   uint32_t vertex_count, triangles;
+  uint64_t last_walk;  // the walk of the last draw (or of the data), for the eviction
+  VkDeviceSize group_at;  // the ordinal of the group of each vertex (16 bit), or 0
+  uint32_t group_count;
 };
 struct MeshRange {
   VkDeviceSize at, bytes;
   uint64_t walk;  // the walk that freed it
 };
 const VkDeviceSize kMeshArenaBytes = 64u << 20;
+// The matrices and the lights of the draws with groups, for one walk (a slot).
+const VkDeviceSize kGroupBytes = 8u << 20;
 vk::Buffer g_mesh_arena = {};
 VkDeviceSize g_mesh_top = 0;
 std::unordered_map<uint64_t, MeshEntry> g_meshes;
 std::vector<MeshRange> g_mesh_free;     // ranges that can be used now
 std::vector<MeshRange> g_mesh_retired;  // ranges that a walk can still read
-uint64_t g_mesh_draws = 0, g_mesh_data_records = 0, g_mesh_data_bytes = 0;
-uint64_t g_mesh_no_data = 0, g_mesh_no_room = 0, g_mesh_bad_offsets = 0;
+// The counts of the meshes: the walk writes them, and the log of the app reads
+// and clears them (VkSceneTakeMeshCounts) on another thread.
+std::atomic<uint64_t> g_mesh_draws{0}, g_mesh_data_records{0}, g_mesh_data_bytes{0};
+std::atomic<uint64_t> g_mesh_no_data{0}, g_mesh_no_room{0}, g_mesh_bad_offsets{0};
+std::atomic<uint32_t> g_mesh_count{0};        // the meshes in the arena now
+std::atomic<uint64_t> g_mesh_top_shown{0};    // g_mesh_top for the log
 bool g_mesh_compare = false;
 bool g_said_mesh_room = false;
+// The shaders and the arena of the meshes are made at the first data of a
+// mesh (MeshReady), so a game with gpu_mesh=0 never makes them, and a failure
+// stops the meshes only.
+bool g_mesh_ready = false;
+bool g_mesh_failed = false;
+uint64_t g_mesh_evicted = 0;
 void MeshCompare(const vk::Image& image, uint64_t frame, bool bmp, uint32_t label);
 bool g_mesh_compare_request = false;
 uint32_t g_mesh_compare_label = 0;
@@ -632,6 +663,10 @@ struct MresRecord {
   // is the count of the indices.
   uint32_t mesh;
   VkDeviceSize mesh_vertex_at, mesh_index_at, offsets_at;
+  // A mesh with groups (mesh 3): the ordinals in the arena, and the set 2 of
+  // its slot.
+  VkDeviceSize mesh_group_at;
+  VkDescriptorSet groups_set;
 };
 struct MresClear {
   uint32_t flags, color;
@@ -763,7 +798,12 @@ VkPipeline Pipeline(uint32_t key) {
   stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
   const bool mesh = (key & kMeshKey) != 0;
   const bool mesh_offsets = (key & kMeshOffsetKey) != 0;
-  stages[0].module = mesh ? (mesh_offsets ? g_mesh_vert_offsets : g_mesh_vert) : g_vert;
+  const bool mesh_groups = (key & kMeshGroupKey) != 0;
+  stages[0].module = mesh ? (mesh_groups    ? g_mesh_vert_groups
+                             : mesh_offsets ? g_mesh_vert_offsets
+                                            : g_mesh_vert)
+                          : g_vert;
+  if (stages[0].module == VK_NULL_HANDLE) return VK_NULL_HANDLE;
   stages[0].pName = "main";
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = g_frag;
@@ -788,8 +828,8 @@ VkPipeline Pipeline(uint32_t key) {
   const VkVertexInputBindingDescription mesh_bindings[3] = {
       {0, 32, VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(gpu_mesh_math::Consts), VK_VERTEX_INPUT_RATE_INSTANCE},
-      {2, 12, VK_VERTEX_INPUT_RATE_VERTEX}};
-  const VkVertexInputAttributeDescription mesh_attributes[10] = {
+      {2, mesh_groups ? 2u : 12u, VK_VERTEX_INPUT_RATE_VERTEX}};
+  VkVertexInputAttributeDescription mesh_attributes[10] = {
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
       {1, 0, VK_FORMAT_R32G32_SFLOAT, 12},
       {2, 0, VK_FORMAT_R32G32B32_SFLOAT, 20},
@@ -801,9 +841,12 @@ VkPipeline Pipeline(uint32_t key) {
       {8, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 80},
       {9, 2, VK_FORMAT_R32G32B32_SFLOAT, 0}};
   if (mesh) {
-    input.vertexBindingDescriptionCount = mesh_offsets ? 3 : 2;
+    // Binding 2 is the offsets of each vertex, or the ordinal of the group of
+    // each vertex (16 bit).
+    if (mesh_groups) mesh_attributes[9] = {9, 2, VK_FORMAT_R16_UINT, 0};
+    input.vertexBindingDescriptionCount = mesh_offsets || mesh_groups ? 3 : 2;
     input.pVertexBindingDescriptions = mesh_bindings;
-    input.vertexAttributeDescriptionCount = mesh_offsets ? 10 : 9;
+    input.vertexAttributeDescriptionCount = mesh_offsets || mesh_groups ? 10 : 9;
     input.pVertexAttributeDescriptions = mesh_attributes;
   }
   VkPipelineInputAssemblyStateCreateInfo assembly = {
@@ -830,7 +873,7 @@ VkPipeline Pipeline(uint32_t key) {
   VkPipelineColorBlendAttachmentState blend = {};
   blend.colorWriteMask = 0xF;
   const bool panel = (key & kPanelKey) != 0;
-  if ((key & ~(kPanelKey | kMeshKey | kMeshOffsetKey)) != 0) {
+  if ((key & ~(kPanelKey | kMeshKey | kMeshOffsetKey | kMeshGroupKey)) != 0) {
     blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = Factor((key >> 8) & 255);
     blend.dstColorBlendFactor = Factor(key & 255);
@@ -877,7 +920,7 @@ VkPipeline Pipeline(uint32_t key) {
   info.pDepthStencilState = &depth;
   info.pColorBlendState = &blend_state;
   info.pDynamicState = &dynamic_state;
-  info.layout = g_layout;
+  info.layout = mesh_groups ? g_group_layout : g_layout;
   // FOVEATED RENDERING: the rate of the attachment replaces the rate of the
   // pipeline. With no attachment in a rendering the rate is 1 by 1.
   VkPipelineFragmentShadingRateStateCreateInfoKHR rate_state = {
@@ -1592,10 +1635,7 @@ bool Ready() {
   const VkDevice device = vk::Get().device;
   g_vert = Module(kVkSceneVert, sizeof(kVkSceneVert));
   g_frag = Module(kVkSceneFrag, sizeof(kVkSceneFrag));
-  g_mesh_vert = Module(kVkMeshVert, sizeof(kVkMeshVert));
-  g_mesh_vert_offsets = Module(kVkMeshVertOffsets, sizeof(kVkMeshVertOffsets));
-  if (g_vert == VK_NULL_HANDLE || g_frag == VK_NULL_HANDLE ||
-      g_mesh_vert == VK_NULL_HANDLE || g_mesh_vert_offsets == VK_NULL_HANDLE) {
+  if (g_vert == VK_NULL_HANDLE || g_frag == VK_NULL_HANDLE) {
     return Fail("the shaders");
   }
   VkDescriptorSetLayoutBinding binding = {
@@ -1686,14 +1726,6 @@ bool Ready() {
                         true, &s.ring)) {
       return Fail("a vertex buffer");
     }
-  }
-  if (!vk::MakeBuffer(kMeshArenaBytes,
-                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                      true, &g_mesh_arena)) {
-    g_mesh_arena = {};
-    ModLog("vk scene     : the arena of the meshes on the GPU (%u MB) failed, so "
-           "gpu_mesh draws nothing",
-           static_cast<unsigned>(kMeshArenaBytes >> 20));
   }
   g_ready = true;
   ModLog("vk scene     : the Vulkan renderer is ready (the shadow test)");
@@ -2361,9 +2393,15 @@ void BindVertices(VkCommandBuffer cb, const Slot& s, VkDeviceSize vertex_at,
 // draw as one instance, the offsets, and the indices. These binds go past the
 // state of g_bound.
 void DrawMeshGeometry(VkCommandBuffer cb, const Slot& s, const MresRecord& r) {
-  const VkBuffer buffers[3] = {g_mesh_arena.buffer, s.ring.buffer, s.ring.buffer};
-  const VkDeviceSize offsets[3] = {r.mesh_vertex_at, r.vertex_at, r.offsets_at};
-  f.vkCmdBindVertexBuffers(cb, 0, r.mesh == 2 ? 3 : 2, buffers, offsets);
+  const VkBuffer buffers[3] = {g_mesh_arena.buffer, s.ring.buffer,
+                               r.mesh == 3 ? g_mesh_arena.buffer : s.ring.buffer};
+  const VkDeviceSize offsets[3] = {r.mesh_vertex_at, r.vertex_at,
+                                   r.mesh == 3 ? r.mesh_group_at : r.offsets_at};
+  f.vkCmdBindVertexBuffers(cb, 0, r.mesh >= 2 ? 3 : 2, buffers, offsets);
+  if (r.mesh == 3) {
+    f.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_group_layout, 2, 1,
+                              &r.groups_set, 0, nullptr);
+  }
   f.vkCmdBindIndexBuffer(cb, g_mesh_arena.buffer, r.mesh_index_at, VK_INDEX_TYPE_UINT16);
   g_bound.Forget(vk_draw_math::kVertices);
   g_bound.Forget(vk_draw_math::kIndices);
@@ -2650,7 +2688,8 @@ void MresWalkLine(const Slot& s, const uint32_t drawn[2],
   int listed = 0;
   for (size_t i = 0; i < g_mres_records.size() && listed < 12; ++i) {
     const MresRecord& r = g_mres_records[i];
-    if (r.clear >= 0 || r.vertex_count > 8) continue;
+    // A mesh on the GPU has the values of its draw at vertex_at, no vertex.
+    if (r.clear >= 0 || r.mesh != 0 || r.vertex_count > 8) continue;
     const float x0 = r.bounds[0] > 0.0f ? r.bounds[0] : 0.0f;
     const float y0 = r.bounds[1] > 0.0f ? r.bounds[1] : 0.0f;
     const float x1 = r.bounds[2] < width ? r.bounds[2] : width;
@@ -3456,6 +3495,7 @@ void BeginOnWorker(const void* data) {
   }
   g_walk_upload_queue = seed->upload_queue;
   s.used = 0;
+  s.groups_used = 0;
   f.vkResetCommandPool(device, s.pool, 0);
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -4423,9 +4463,108 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
 
 namespace {
 
+// The shaders and the arena of the meshes. False when the renderer is not
+// ready, or when a part failed: then the meshes have no data.
+bool MeshReady() {
+  if (g_mesh_ready) return true;
+  if (g_mesh_failed || !g_device || g_failed) return false;
+  if (!g_ready && !Ready()) return false;
+  g_mesh_vert = Module(kVkMeshVert, sizeof(kVkMeshVert));
+  g_mesh_vert_offsets = Module(kVkMeshVertOffsets, sizeof(kVkMeshVertOffsets));
+  if (g_mesh_vert == VK_NULL_HANDLE || g_mesh_vert_offsets == VK_NULL_HANDLE) {
+    g_mesh_failed = true;
+    ModLog("vk scene     : the shaders of the meshes on the GPU failed, so gpu_mesh draws "
+           "nothing and the rest of the renderer goes on");
+    return false;
+  }
+  if (!vk::MakeBuffer(kMeshArenaBytes,
+                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                      true, &g_mesh_arena)) {
+    g_mesh_arena = {};
+    g_mesh_failed = true;
+    ModLog("vk scene     : the arena of the meshes on the GPU (%u MB) failed, so "
+           "gpu_mesh draws nothing and the rest of the renderer goes on",
+           static_cast<unsigned>(kMeshArenaBytes >> 20));
+    return false;
+  }
+  g_mesh_ready = true;
+  return true;
+}
+
+// The pipeline layout, the shader and the buffers of the meshes with groups,
+// made at the first such mesh. False when a part failed: a mesh with groups has
+// no draw then (the log says so one time).
+bool GroupsReady() {
+  static bool tried = false, ok = false;
+  if (tried) return ok;
+  tried = true;
+  if (!MeshReady()) {
+    tried = false;
+    return false;
+  }
+  const VkDevice device = vk::Get().device;
+  const auto fail = [](const char* what) {
+    ModLog("vk scene     : %s for the meshes with groups failed, so a mesh with groups has no "
+           "draw on the GPU and the rest of the renderer goes on", what);
+    return false;
+  };
+  g_mesh_vert_groups = Module(kVkMeshVertGroups, sizeof(kVkMeshVertGroups));
+  if (g_mesh_vert_groups == VK_NULL_HANDLE) return fail("the shader");
+  VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                                          VK_SHADER_STAGE_VERTEX_BIT, nullptr};
+  VkDescriptorSetLayoutCreateInfo set_info = {
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  set_info.bindingCount = 1;
+  set_info.pBindings = &binding;
+  if (f.vkCreateDescriptorSetLayout(device, &set_info, nullptr, &g_group_set_layout) !=
+      VK_SUCCESS) {
+    return fail("the set layout");
+  }
+  const VkPushConstantRange push = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                    sizeof(DrawPush)};
+  const VkDescriptorSetLayout layouts[3] = {g_set_layout, g_set_layout, g_group_set_layout};
+  VkPipelineLayoutCreateInfo layout_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  layout_info.setLayoutCount = 3;
+  layout_info.pSetLayouts = layouts;
+  layout_info.pushConstantRangeCount = 1;
+  layout_info.pPushConstantRanges = &push;
+  if (f.vkCreatePipelineLayout(device, &layout_info, nullptr, &g_group_layout) != VK_SUCCESS) {
+    return fail("the pipeline layout");
+  }
+  const VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2};
+  VkDescriptorPoolCreateInfo pool_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  pool_info.maxSets = 2;
+  pool_info.poolSizeCount = 1;
+  pool_info.pPoolSizes = &size;
+  if (f.vkCreateDescriptorPool(device, &pool_info, nullptr, &g_group_pool) != VK_SUCCESS) {
+    return fail("the descriptor pool");
+  }
+  for (Slot& s : g_slots) {
+    if (!vk::MakeBuffer(kGroupBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, &s.groups)) {
+      return fail("the buffer");
+    }
+    VkDescriptorSetAllocateInfo alloc = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    alloc.descriptorPool = g_group_pool;
+    alloc.descriptorSetCount = 1;
+    alloc.pSetLayouts = &g_group_set_layout;
+    if (f.vkAllocateDescriptorSets(device, &alloc, &s.groups_set) != VK_SUCCESS) {
+      return fail("the descriptor set");
+    }
+    const VkDescriptorBufferInfo buffer = {s.groups.buffer, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = s.groups_set;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.pBufferInfo = &buffer;
+    f.vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+  }
+  ok = true;
+  return true;
+}
+
 // A range of the arena for `bytes`, from the ranges that are free now or from
 // the top. False when the arena is full.
-bool MeshAlloc(VkDeviceSize bytes, VkDeviceSize* at, VkDeviceSize* got) {
+bool MeshAllocFrom(VkDeviceSize bytes, VkDeviceSize* at, VkDeviceSize* got) {
   bytes = (bytes + 15) & ~15ull;
   for (size_t i = 0; i < g_mesh_free.size(); ++i) {
     MeshRange& r = g_mesh_free[i];
@@ -4440,6 +4579,30 @@ bool MeshAlloc(VkDeviceSize bytes, VkDeviceSize* at, VkDeviceSize* got) {
   *got = bytes;
   g_mesh_top += bytes;
   return true;
+}
+
+// The same, and when the arena is full, the meshes that no walk drew for
+// kMeshIdleWalks give their ranges back. A walk that is not done can still
+// read a range, so the range waits in the retired ranges first (MeshReclaim).
+// The game does not know of the eviction: a mesh that comes back has no data
+// until the data come again (a new epoch of the stream, or a change of the
+// mesh).
+const uint64_t kMeshIdleWalks = 600;
+bool MeshAlloc(VkDeviceSize bytes, VkDeviceSize* at, VkDeviceSize* got) {
+  if (MeshAllocFrom(bytes, at, got)) return true;
+  size_t evicted = 0;
+  for (auto it = g_meshes.begin(); it != g_meshes.end();) {
+    if (it->second.last_walk + kMeshIdleWalks < g_walk_number) {
+      g_mesh_retired.push_back({it->second.at, it->second.bytes, g_walk_number});
+      it = g_meshes.erase(it);
+      ++evicted;
+    } else {
+      ++it;
+    }
+  }
+  g_mesh_evicted += evicted;
+  g_mesh_count = static_cast<uint32_t>(g_meshes.size());
+  return false;
 }
 
 // The ranges that a walk freed go back to the free ranges when the walks
@@ -4569,23 +4732,39 @@ void MeshCompare(const vk::Image& image, uint64_t frame, bool bmp, uint32_t labe
 
 }  // namespace
 
-void VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
-                     uint32_t vertex_count, const uint16_t* indices,
-                     uint32_t triangles) {
-  BWVR_STREAM(VkStreamMeshData(mesh, hash, vertices, vertex_count, indices, triangles));
-  if (!g_device || g_failed) return;
-  // The data of a mesh can come in a frame that the app plays with no walk
-  // (a record of state), before the first walk made the renderer ready.
-  if (g_mesh_arena.buffer == VK_NULL_HANDLE && !g_ready && !Ready()) return;
-  if (g_mesh_arena.buffer == VK_NULL_HANDLE || vertices == nullptr || indices == nullptr ||
-      vertex_count == 0 || triangles == 0) {
-    return;
-  }
-  MeshReclaim();
+namespace {
+
+// Mesh data that found no room: they wait here (a copy) until the ranges that
+// the eviction freed are free, and the next data or draw stores them.
+struct PendingMesh {
+  uint64_t mesh, hash;
+  std::vector<uint8_t> bytes;  // the vertices, the indices, then the groups
+  uint32_t vertex_count, triangles, group_count;
+};
+std::vector<PendingMesh> g_mesh_pending;
+const size_t kMeshPendingBytes = 16u << 20;
+
+// The bytes of a mesh in the arena: the vertices, the indices (padded to 4),
+// then the ordinals of the groups (padded to 4).
+VkDeviceSize MeshBytes(uint32_t vertex_count, uint32_t triangles, uint32_t group_count) {
+  VkDeviceSize bytes = static_cast<VkDeviceSize>(vertex_count) * 32;
+  bytes += (static_cast<VkDeviceSize>(triangles) * 6 + 3) & ~3ull;
+  if (group_count != 0) bytes += (static_cast<VkDeviceSize>(vertex_count) * 2 + 3) & ~3ull;
+  return bytes;
+}
+
+// Puts the data of a mesh into the arena. 1 stored (or no change), 0 no
+// room.
+int MeshStore(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t vertex_count,
+              const void* indices, uint32_t triangles, const void* group_of_vertex,
+              uint32_t group_count) {
+  if (group_of_vertex == nullptr) group_count = 0;
   auto it = g_meshes.find(mesh);
   if (it != g_meshes.end() && it->second.hash == hash &&
-      it->second.vertex_count == vertex_count && it->second.triangles == triangles) {
-    return;
+      it->second.vertex_count == vertex_count && it->second.triangles == triangles &&
+      it->second.group_count == group_count) {
+    it->second.last_walk = g_walk_number;
+    return 1;
   }
   const VkDeviceSize vertex_bytes = static_cast<VkDeviceSize>(vertex_count) * 32;
   const VkDeviceSize index_bytes = (static_cast<VkDeviceSize>(triangles) * 6 + 3) & ~3ull;
@@ -4594,28 +4773,120 @@ void VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
     g_mesh_retired.push_back({it->second.at, it->second.bytes, g_walk_number});
     g_meshes.erase(it);
   }
-  if (!MeshAlloc(vertex_bytes + index_bytes, &at, &got)) {
-    ++g_mesh_no_room;
-    if (!g_said_mesh_room) {
-      g_said_mesh_room = true;
-      ModLog("vk scene     : the arena of the meshes on the GPU is full (%u MB), so "
-             "a mesh has no data and the draw of it is left out",
-             static_cast<unsigned>(kMeshArenaBytes >> 20));
-    }
-    return;
-  }
+  if (!MeshAlloc(MeshBytes(vertex_count, triangles, group_count), &at, &got)) return 0;
   uint8_t* base = static_cast<uint8_t*>(g_mesh_arena.mapped);
   memcpy(base + at, vertices, static_cast<size_t>(vertex_bytes));
   memcpy(base + at + vertex_bytes, indices, static_cast<size_t>(triangles) * 6);
-  MeshEntry e = {at, got, hash, vertex_count, triangles};
+  MeshEntry e = {at, got, hash, vertex_count, triangles, g_walk_number, 0, group_count};
+  if (group_count != 0) {
+    e.group_at = at + vertex_bytes + index_bytes;
+    memcpy(base + e.group_at, group_of_vertex, static_cast<size_t>(vertex_count) * 2);
+  }
   g_meshes[mesh] = e;
   ++g_mesh_data_records;
   g_mesh_data_bytes += vertex_bytes + index_bytes;
+  g_mesh_count = static_cast<uint32_t>(g_meshes.size());
+  g_mesh_top_shown = g_mesh_top;
+  return 1;
 }
 
-void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
-                     const float* offsets, uint32_t offset_floats) {
-  BWVR_STREAM(VkStreamDrawMesh(mesh, consts, offsets, offset_floats));
+void MeshFlushPending() {
+  if (g_mesh_pending.empty()) return;
+  MeshReclaim();
+  size_t keep = 0;
+  for (size_t i = 0; i < g_mesh_pending.size(); ++i) {
+    PendingMesh& p = g_mesh_pending[i];
+    const uint8_t* v = p.bytes.data();
+    const uint8_t* ix = v + static_cast<size_t>(p.vertex_count) * 32;
+    const uint8_t* gr = ix + static_cast<size_t>(p.triangles) * 6;
+    if (MeshStore(p.mesh, p.hash, v, p.vertex_count, ix, p.triangles,
+                  p.group_count != 0 ? gr : nullptr, p.group_count) == 0) {
+      if (keep != i) g_mesh_pending[keep] = std::move(p);
+      ++keep;
+    }
+  }
+  g_mesh_pending.resize(keep);
+}
+
+// The data of a mesh for the renderer of this process. True when it has them
+// or keeps them for a later store; false when it cannot (not ready, no device).
+bool MeshGive(uint64_t mesh, uint64_t hash, const void* vertices, uint32_t vertex_count,
+              const uint16_t* indices, uint32_t triangles, const uint16_t* group_of_vertex,
+              uint32_t group_count) {
+  if (!g_device || g_failed) return true;
+  // The data of a mesh can come in a frame that the app plays with no walk
+  // (a record of state), before the first walk made the renderer ready.
+  if (!MeshReady()) return g_mesh_failed;
+  if (vertices == nullptr || indices == nullptr || vertex_count == 0 || triangles == 0) {
+    return true;
+  }
+  MeshReclaim();
+  MeshFlushPending();
+  if (MeshStore(mesh, hash, vertices, vertex_count, indices, triangles, group_of_vertex,
+                group_count) != 0) {
+    return true;
+  }
+  ++g_mesh_no_room;
+  if (!g_said_mesh_room) {
+    g_said_mesh_room = true;
+    ModLog("vk scene     : the arena of the meshes on the GPU is full (%u MB). Meshes that no "
+           "walk drew for %u walks give their range back, and the data wait for it",
+           static_cast<unsigned>(kMeshArenaBytes >> 20), static_cast<unsigned>(kMeshIdleWalks));
+  }
+  size_t waiting = 0;
+  for (const PendingMesh& p : g_mesh_pending) waiting += p.bytes.size();
+  const size_t bytes = static_cast<size_t>(vertex_count) * 32 + static_cast<size_t>(triangles) * 6 +
+                       (group_of_vertex != nullptr ? static_cast<size_t>(vertex_count) * 2 : 0);
+  if (waiting + bytes > kMeshPendingBytes) return true;  // dropped: the log has no_room
+  // A newer version of a mesh in the list replaces it.
+  for (size_t i = 0; i < g_mesh_pending.size(); ++i) {
+    if (g_mesh_pending[i].mesh == mesh) {
+      g_mesh_pending.erase(g_mesh_pending.begin() + static_cast<ptrdiff_t>(i));
+      break;
+    }
+  }
+  PendingMesh p;
+  p.mesh = mesh;
+  p.hash = hash;
+  p.vertex_count = vertex_count;
+  p.triangles = triangles;
+  p.group_count = group_of_vertex != nullptr ? group_count : 0;
+  p.bytes.resize(bytes);
+  memcpy(p.bytes.data(), vertices, static_cast<size_t>(vertex_count) * 32);
+  memcpy(p.bytes.data() + static_cast<size_t>(vertex_count) * 32, indices,
+         static_cast<size_t>(triangles) * 6);
+  if (group_of_vertex != nullptr) {
+    memcpy(p.bytes.data() + static_cast<size_t>(vertex_count) * 32 +
+               static_cast<size_t>(triangles) * 6,
+           group_of_vertex, static_cast<size_t>(vertex_count) * 2);
+  }
+  g_mesh_pending.push_back(std::move(p));
+  return true;
+}
+
+}  // namespace
+
+bool VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
+                     uint32_t vertex_count, const uint16_t* indices,
+                     uint32_t triangles, const uint16_t* group_of_vertex,
+                     uint32_t group_count) {
+  BWVR_STREAM(VkStreamMeshData(mesh, hash, vertices, vertex_count, indices, triangles,
+                               group_of_vertex, group_count));
+  return MeshGive(mesh, hash, vertices, vertex_count, indices, triangles, group_of_vertex,
+                  group_count);
+}
+
+bool VkSceneMeshRetry(uint64_t mesh, uint64_t hash, const void* vertices,
+                      uint32_t vertex_count, const uint16_t* indices, uint32_t triangles,
+                      const uint16_t* group_of_vertex, uint32_t group_count) {
+  return MeshGive(mesh, hash, vertices, vertex_count, indices, triangles, group_of_vertex,
+                  group_count);
+}
+
+void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts_in,
+                     const float* offsets, uint32_t offset_floats, const float* groups,
+                     uint32_t group_count) {
+  BWVR_STREAM(VkStreamDrawMesh(mesh, consts_in, offsets, offset_floats, groups, group_count));
   if (g_bare_walk || !g_recording) return;
   // A mesh is a draw of the world: not for the panel.
   if (ForPanel() || OffTarget()) {
@@ -4623,15 +4894,30 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
     ++g_skip_target;
     return;
   }
-  const auto found = g_meshes.find(mesh);
+  auto found = g_meshes.find(mesh);
+  if (found == g_meshes.end() && !g_mesh_pending.empty()) {
+    MeshFlushPending();
+    found = g_meshes.find(mesh);
+  }
   if (g_mesh_arena.buffer == VK_NULL_HANDLE || found == g_meshes.end()) {
     ++g_mesh_no_data;
     ++g_skipped;
     return;
   }
-  const MeshEntry& m = found->second;
+  MeshEntry& m = found->second;
+  m.last_walk = g_walk_number;
   const bool with_offsets = offsets != nullptr && offset_floats != 0;
   if (with_offsets && offset_floats != m.vertex_count * 3) {
+    ++g_mesh_bad_offsets;
+    ++g_skipped;
+    return;
+  }
+  // A mesh with groups: the matrices (and the lights) go into the buffer of
+  // the slot, and the record names their places.
+  gpu_mesh_math::Consts consts = consts_in;
+  const bool with_groups = groups != nullptr && group_count != 0;
+  if (with_groups && (m.group_count == 0 || group_count > gpu_mesh_math::kMostGroups ||
+                      !GroupsReady())) {
     ++g_mesh_bad_offsets;
     ++g_skipped;
     return;
@@ -4645,13 +4931,22 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
     ++g_skip_ring;
     return;
   }
-  VkPipeline pipeline = Pipeline(kMeshKey | (with_offsets ? kMeshOffsetKey : 0u));
+  // The states of the draw, as VkSceneDrawIndexed reads them: the blend, the
+  // textures of both stages. A mesh with blend or with no depth write comes
+  // at its place in the order of the calls, like the draw of the CPU path.
+  const uint32_t* rs = g_rs;
+  const uint32_t blend =
+      rs[D3DRENDERSTATE_ALPHABLENDENABLE] != 0
+          ? (1u << 16) | (rs[D3DRENDERSTATE_SRCBLEND] & 255) << 8 |
+                (rs[D3DRENDERSTATE_DESTBLEND] & 255)
+          : 0u;
+  VkPipeline pipeline = Pipeline(blend | kMeshKey | (with_offsets ? kMeshOffsetKey : 0u) |
+                                 (with_groups ? kMeshGroupKey : 0u));
   if (pipeline == VK_NULL_HANDLE) {
     ++g_skipped;
     ++g_skip_state;
     return;
   }
-  const uint32_t* rs = g_rs;
   Texture* texture = TextureOf(g_texture);
   texture->used_walk = g_walk_number;
   const uint32_t* ts = g_ts[0];
@@ -4666,6 +4961,23 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
     ++g_skip_state;
     return;
   }
+  // The second stage (the vertex shader gives stage 1 the texture
+  // coordinates of stage 0, as the format of the game does).
+  const bool stage1 = g_ts[1][D3DTSS_COLOROP] > 1 && g_texture1 != nullptr;
+  if (stage1) ++g_stage1;
+  const bool with1 = stage1 && g_walk_stage1;
+  VkDescriptorSet set1 = VK_NULL_HANDLE;
+  Texture* texture1 = with1 ? TextureOf(g_texture1) : g_white;
+  if (texture1 != g_white) {
+    texture1->used_walk = g_walk_number;
+    const uint32_t* ts1 = g_ts[1];
+    const VkSampler sampler1 = Sampler(
+        ts1[D3DTSS_MAGFILTER], ts1[D3DTSS_MINFILTER], ts1[D3DTSS_MIPFILTER],
+        ts1[D3DTSS_ADDRESSU] != 0 ? ts1[D3DTSS_ADDRESSU] : 1,
+        ts1[D3DTSS_ADDRESSV] != 0 ? ts1[D3DTSS_ADDRESSV] : 1,
+        ts1[D3DTSS_MAXANISOTROPY]);
+    set1 = SetOf(texture1, sampler1);
+  }
   uint8_t* ring = static_cast<uint8_t*>(s.ring.mapped);
   const VkDeviceSize data_at = s.used;
   memcpy(ring + data_at, &consts, sizeof(consts));
@@ -4676,6 +4988,24 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
     s.used += offset_bytes;
   }
   s.used = (s.used + 31) & ~31ull;
+  if (with_groups) {
+    const bool lit = (consts.flags & gpu_mesh_math::kLit) != 0;
+    const VkDeviceSize matrix_floats = static_cast<VkDeviceSize>(group_count) * 12;
+    const VkDeviceSize light_floats = lit ? static_cast<VkDeviceSize>(group_count) * 4 : 0;
+    if (s.groups_used + (matrix_floats + light_floats) * 4 > kGroupBytes) {
+      ++g_skipped;
+      ++g_skip_ring;
+      return;
+    }
+    float* out = reinterpret_cast<float*>(static_cast<uint8_t*>(s.groups.mapped) + s.groups_used);
+    memcpy(out, groups, static_cast<size_t>(matrix_floats + light_floats) * 4);
+    // The float indices of the matrices and of the lights (exact up to 2^24).
+    consts.row[0][0] = static_cast<float>(s.groups_used / 4);
+    consts.row[0][1] = static_cast<float>(s.groups_used / 4 + matrix_floats);
+    s.groups_used += (matrix_floats + light_floats) * 4;
+    // The consts were copied into the ring before: write the places.
+    memcpy(ring + data_at, &consts, sizeof(consts));
+  }
 
   DrawPush push = {};
   push.viewport[0] = static_cast<float>(g_viewport.dwX);
@@ -4719,6 +5049,15 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
   }
   push.ops[2] = flags;
   push.ops[3] = still | eyes << 8;
+  if (set1 != VK_NULL_HANDLE) {
+    const uint32_t* ts1 = g_ts[1];
+    push.ops1[0] = (ts1[D3DTSS_COLOROP] & 255) |
+                   (ts1[D3DTSS_COLORARG1] & 255) << 8 |
+                   (ts1[D3DTSS_COLORARG2] & 255) << 16;
+    push.ops1[1] = (ts1[D3DTSS_ALPHAOP] & 255) |
+                   (ts1[D3DTSS_ALPHAARG1] & 255) << 8 |
+                   (ts1[D3DTSS_ALPHAARG2] & 255) << 16;
+  }
   push.alpha[0] = static_cast<float>(rs[D3DRENDERSTATE_ALPHAREF] & 255) / 255.0f;
   const uint32_t fog = rs[D3DRENDERSTATE_FOGCOLOR];
   push.fog_color[0] = static_cast<float>((fog >> 16) & 255) / 255.0f;
@@ -4729,7 +5068,9 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
   MresRecord r = {};
   r.clear = -1;
   r.pipeline = pipeline;
+  r.blend = blend;
   r.set = set;
+  r.set1 = set1;
   r.cull = rs[D3DRENDERSTATE_CULLMODE];
   r.zenable = rs[D3DRENDERSTATE_ZENABLE];
   r.zwrite = rs[D3DRENDERSTATE_ZWRITEENABLE];
@@ -4739,7 +5080,9 @@ void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
   r.vertex_at = data_at;
   r.vertex_count = m.vertex_count;
   r.index_count = m.triangles * 3;
-  r.mesh = with_offsets ? 2u : 1u;
+  r.mesh = with_groups ? 3u : with_offsets ? 2u : 1u;
+  r.mesh_group_at = m.group_at;
+  r.groups_set = s.groups_set;
   r.mesh_vertex_at = m.at;
   r.mesh_index_at = m.at + static_cast<VkDeviceSize>(m.vertex_count) * 32;
   r.offsets_at = offsets_at;
@@ -4780,14 +5123,13 @@ void VkSceneCompareNext(uint32_t label) {
 }
 
 void VkSceneTakeMeshCounts(VkSceneMeshCounts* out) {
-  out->draws = g_mesh_draws;
-  out->data_records = g_mesh_data_records;
-  out->data_bytes = g_mesh_data_bytes;
-  out->no_data = g_mesh_no_data;
-  out->no_room = g_mesh_no_room;
-  out->meshes = static_cast<uint32_t>(g_meshes.size());
-  out->arena_bytes = g_mesh_top;
-  g_mesh_draws = g_mesh_data_records = g_mesh_data_bytes = g_mesh_no_data = g_mesh_no_room = 0;
+  out->draws = g_mesh_draws.exchange(0);
+  out->data_records = g_mesh_data_records.exchange(0);
+  out->data_bytes = g_mesh_data_bytes.exchange(0);
+  out->no_data = g_mesh_no_data.exchange(0);
+  out->no_room = g_mesh_no_room.exchange(0);
+  out->meshes = g_mesh_count.load();
+  out->arena_bytes = g_mesh_top_shown.load();
 }
 
 void VkSceneSetPanel(int on) {

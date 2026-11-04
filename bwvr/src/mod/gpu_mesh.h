@@ -12,18 +12,40 @@
 // with one_walk=1): the CPU path draws each such mesh into the left eye layer,
 // and the GPU path draws the same mesh into the right eye layer, and a test
 // frame (vk_scene_test_frame) gives the difference of the two layers in the
-// log. It needs backend=vulkan. With test_keys=1, Ctrl Shift F10 steps
-// gpu_mesh through 1, 0 and 2.
+// log. It needs backend=vulkan. With test_keys=1, Ctrl Shift 7 steps gpu_mesh
+// between 1 and 0 (the debug page has the same switch). With gpu_mesh=2 in
+// bwvr.ini the key leaves mode 2 for 0.
 // gpu_mesh_compare_every=N (a test aid, only with gpu_mesh=2): each Nth frame the
 // log has the difference of the two layers, for the functions on the GPU path
 // and then for each function alone.
 // gpu_mesh_kinds=N: bit k of N leaves function k of the list (fn_00856D40 0,
 // fn_0085AB10 1, fn_0084BA90 2, fn_0085BA30 3, fn_00859530 4) on the GPU path.
 // 31 is the default.
-void GpuMeshSetOptions(int mode, bool test_keys, int compare_every, int kinds);
+// gpu_mesh_blend, gpu_mesh_stage1, gpu_mesh_uvshift and gpu_mesh_group (1 is the
+// default): 0 leaves that kind of mesh on the CPU path. With test_keys=1, Ctrl
+// Shift 6 turns all four off and on.
+// gpu_mesh_check_frames=N (120 by default): a mesh has a full sum over its
+// words each N frames, and a cheap sample at each draw. 0: the full sum at
+// each draw. gpu_mesh_timer=1: the log line has the time of each part of the
+// hook (it costs a clock read for each part).
+struct GpuMeshOptions {
+  int mode = 0;
+  bool test_keys = false;
+  int compare_every = 0;
+  int kinds = 31;
+  int blend = 1, stage1 = 1, uvshift = 1, group = 1;
+  int check_frames = 120;
+  int timer = 0;
+};
+void GpuMeshSetOptions(const GpuMeshOptions& options);
 void GpuMeshInstall();
 // h_FinishFrame, after the present: the test key and the report.
 void GpuMeshFrame();
 // The debug page: the value (0 CPU, 1 GPU) or kDebugCannot, and the switch.
+// With gpu_mesh=0 and test_keys=1 the hooks are put in at the first switch.
 int GpuMeshValue();
 void GpuMeshToggle(const char* keys);
+// The second switch: the new parts of the path (blend, stage 1, the shift of
+// the texture and the groups) on as the keys say, or all off.
+int GpuMeshPartsValue();
+void GpuMeshPartsToggle(const char* keys);

@@ -3766,22 +3766,32 @@ offsets loop, and 400 meshes for the triangles.
 ### The meshes on the GPU
 
 `gpu_mesh=1` takes the five mesh functions off the CPU: the renderer makes the
-vertices of an opaque mesh on the GPU, and the frame thread records one draw
-for each mesh (`software-tnl.md`, "The meshes on the GPU"). The functions
-`fn_0080DB30` and `fn_0080AD90` stay as they are. Their calls of the mesh
-functions then cost the hook of the mod (the checks, the material and the
+vertices of a mesh on the GPU, and the frame thread records one draw for each
+mesh (`software-tnl.md`, "The meshes on the GPU"). The meshes with blend, with
+a texture on stage 1, with a shift of the texture and with groups are on the GPU
+path too, each part with a key (`gpu_mesh_blend`, `gpu_mesh_stage1`,
+`gpu_mesh_uvshift`, `gpu_mesh_group`). The functions `fn_0080DB30` and
+`fn_0080AD90` stay as they are. Their calls of the mesh functions then cost the
+hook of the mod (the checks, the material, the cheap test of the data and the
 record) and not the two loops. Read the time with `object_timer=1` and the sites
 above with `gpu_mesh=0` and with `gpu_mesh=1` (the sites of the calls in the
 mesh functions run only on the CPU path), and the line "gpu mesh     : gpu_mesh=1,
-in 10 s" has the time of the hook:
+parts 0xF, in 10 s" has the share of the meshes on each path and the time of
+the hook for a mesh:
 
 ```
 gpu_mesh=1
 walk_parts=0
 object_timer=1
+time_log=1
+test_keys=1
 object_timer_sites=0x00815F62,0x0080E700,0x0080E6DA,0x0080D93F,0x0080D95E,0x0080E51F,0x0080E53E,0x0087FB79,0x008573E2,0x0085B237,0x0084C39B,0x00859D7F
 ```
 
+- With `test_keys=1`, Ctrl Shift 7 turns `gpu_mesh` between 1 and 0, and Ctrl
+  Shift 6 turns the four parts off and on, so one session shows the three
+  states: the CPU path, the GPU path for the opaque meshes with one matrix
+  (the four parts off) and the whole path.
 - Only a headset shows the time of the meshes on the Frame. `walk_parts=1`
   hooks the start of three of these functions, so `gpu_mesh=1` needs
   `walk_parts=0`.
@@ -4275,21 +4285,41 @@ right eye differ, and 0.3 percent in a box around the hand, on its edges.
 
 A mesh of the stream (`kMeshData`) is a range of the arena of the renderer, a
 buffer of 64 MB that the CPU writes and the GPU reads, with the vertices of 32
-bytes and then the indices. A draw (`kMeshDraw`, `VkSceneDrawMesh`) takes the
-state of the device as a draw of the game does (the texture, the sampler, the
-render states), copies its values (96 bytes, `gpu_mesh_math::Consts`) and the
-offsets into the ring, and is a record like the others: it waits in the queue
-for the sort, and it is a record of foveated resolution. The pipeline has a
-vertex shader of its own (`vk_mesh.vert`, a pipeline with no blend and one
-with the offsets as vertex buffer 2), the fragment shader is the one of the
-other draws. Buffer 0 is the arena, buffer 1 the values of the draw as one
-instance (so there is no descriptor set for them). `PlayDraw` and `PlayMres`
-draw the geometry of a mesh with one function. A mesh may move in the sort as
-any opaque draw may, and it is never in a draw of the merge (it has the type
-99 in `vk_draw_math::Draw`). With foveated resolution a mesh goes into the
-outer image and the centre image, because its rect on the screen is not
-known. The renderer has no mesh for an id that the stream did not give: the
-draw is left out and counted. The counts are in the line "gpu mesh     :".
+bytes, then the indices, then (for a mesh with groups) the ordinal of the group
+of each vertex. The arena and the shader modules of the meshes are made at the
+first data of a mesh, so a game with `gpu_mesh=0` makes neither, and a failure
+stops the meshes only. A draw (`kMeshDraw`, `VkSceneDrawMesh`) takes the state
+of the device as a draw of the game does (both textures and samplers, the
+render states and the blend), copies its values (96 bytes,
+`gpu_mesh_math::Consts`) and the offsets into the ring, and is a record like
+the others: it waits in the queue for the sort, and it is a record of foveated
+resolution. The pipeline has a vertex shader of its own (`vk_mesh.vert`): the
+pipelines have the blend of the draw as a key, and three variants of the
+vertex input: the plain mesh, the offsets as vertex buffer 2, and the groups
+(vertex buffer 2 is the ordinals, and set 2 is a storage buffer with the
+matrices and lights of the draw). The fragment shader is the one of the other
+draws. Buffer 0 is the arena, buffer 1 the values of the draw as one instance
+(so there is no descriptor set for them).
+
+The pipeline layout of the groups is the layout of the other draws and a set
+2, so the sets 0 and 1 stay bound when a draw changes the layout. The set,
+its layout, its pool and one buffer of 8 MB for each slot are made at the first
+mesh with groups. The matrices and the lights of a draw go into the buffer of
+the slot, which starts empty with each walk, and the record has their float
+indices in the matrix of the record (the matrix of a mesh with groups is
+not used). `PlayDraw` and `PlayMres` draw the geometry of a mesh with one
+function. A mesh with blend, with no depth write or with no depth test stays
+where it is in the queue, as any draw like that. A mesh with blend and
+depth write on cannot move either, and an opaque mesh may move in the sort as
+any opaque draw may. A mesh is never in a draw of the merge (it has the type 99
+in `vk_draw_math::Draw`). With foveated resolution a mesh goes into the outer
+image and the centre image, because its rect on the screen is not known. The
+renderer has no mesh for an id that the stream did not give: the draw is left
+out and counted. When the arena is full, the meshes that no walk drew for 600
+walks give their range back, and the data that found no room wait in a list
+of up to 16 MB. The counts are in the line "gpu mesh     :", and the app has them in
+the time log. The counters are atomic, because the log of the app reads and
+clears them on another thread.
 
 ### Fewer state changes and fewer draws
 
@@ -6908,6 +6938,8 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift Period | `test_keys=1` | On the hint card, the lines of the walk with the stick and of A show only while they can move the player, or the card has no line for the walk and the line of A shows in each case. A long pulse and a short pulse (`prompt_moves`, `controller-hints.md`, 9.4) | Interface, Prompt moves |
 | Ctrl Shift H | `test_keys=1` | In the God view the Creature turns to and looks at the head of the player, or at the game's own camera. A long pulse and a short pulse (`creature_player_head`, `creature.md`, 5.4). Shift H with Ctrl up is a key of the render | None |
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw | Render, Frame send |
+| Ctrl Shift 7 | `test_keys=1` | With `backend=vulkan`: `gpu_mesh` is 1 or 0 (the meshes of the 3D parts on the GPU or on the CPU). With `gpu_mesh=0` in `bwvr.ini` the hooks go in at the first press. A long pulse for 1 and a short pulse for 0 (`gpu_mesh`, `software-tnl.md`, "The meshes on the GPU") | Render, GPU mesh |
+| Ctrl Shift 6 | `test_keys=1` | With `gpu_mesh=1`: the parts of the GPU path (blend, stage 1, the shift of the texture and the groups) are on as the keys say, or all off (the meshes with blend, stage 1, a shift of the texture or groups take the CPU path). A long pulse for on and a short pulse for off | Render, GPU mesh parts |
 | Ctrl Shift 8 | `test_keys=1` | With `backend=vulkan`: a render state, a stage state or a texture with the value of the device of the mod does not go to the renderer and the stream, or each call goes, from the next call. A long pulse and a short pulse (`vk_state_skip`, "The way of a draw to the headset app"). The game has no key with 8, 9 or 0 | Render, State skip |
 | Ctrl Shift 9 | `test_keys=1` | A frame of the live stream goes into the ring on a thread of the stream, or on the frame thread, from the next frame of the stream. A long pulse and a short pulse (`vk_stream_worker`, "The way of a draw to the headset app") | Render, Stream thread |
 | Ctrl Shift 0 | `test_keys=1` | The stream finds a surface that it has with its pixels in a table, or in its two sets, from the next find. A long pulse and a short pulse (`vk_stream_surface_cache`, "The way of a draw to the headset app") | Render, Surface table |
@@ -7080,7 +7112,10 @@ keys that the launcher sets.
 | `land_objects` | 1 | 1: the vertex loop of the reflection meshes and the test of the view of the 3D parts run with SSE, with the bits of the game. 0: the code of the game. 2: a test aid, the compare. A test key: Ctrl Shift F8. See "The objects on the land" |
 | `land_objects_threads` | 0 | 0: one thread. N: N worker threads make the test of the view of the objects before their draws. A test key: Ctrl Shift F9. See "The objects on the land" |
 | `part_draw` | 0 | 1: the loop over the triangles of a mesh and the vertex loops of `fn_00859530` run with SSE, with the bits of the game. 0: the code of the game. 2: a test aid, the compare. A test key: Ctrl Shift F4. See "The parts with SSE" |
-| `gpu_mesh` | 0 | 1: the opaque meshes of the 3D parts with one matrix are transformed, lit, clipped and culled by the renderer on the GPU, and the frame thread records one draw for each mesh. 0: the CPU path of the game. 2: a test aid on the PC with `one_walk=1`, the CPU path draws each such mesh in the left eye layer and the GPU path in the right eye layer, and the log has the difference. It needs `backend=vulkan`. A test key: Ctrl Shift F10. See `software-tnl.md`, "The meshes on the GPU" |
+| `gpu_mesh` | 0 | 1: the meshes of the 3D parts are transformed, lit, clipped and culled by the renderer on the GPU, and the frame thread records one draw for each mesh. 0: the CPU path of the game. 2: a test aid on the PC with `one_walk=1`, the CPU path draws each such mesh in the left eye layer and the GPU path in the right eye layer, and the log has the difference. It needs `backend=vulkan`. A test key: Ctrl Shift 7 (1 and 0). See `software-tnl.md`, "The meshes on the GPU" |
+| `gpu_mesh_blend`, `gpu_mesh_stage1`, `gpu_mesh_uvshift`, `gpu_mesh_group` | 1 | With `gpu_mesh=1`: 1 puts the meshes with blend, no depth write or no depth test (blend), with a texture on stage 1 (stage1), with a shift of the texture (uvshift) and with a matrix for each group of vertices (group) on the GPU path. 0 leaves that kind on the CPU path. A test key: Ctrl Shift 6 turns all four off and on |
+| `gpu_mesh_check_frames` | 120 | With `gpu_mesh=1`: the frames between two full sums over the words of a mesh. A draw tests the pointers, the counts and a sample of a few words. 0: a full sum at each draw |
+| `gpu_mesh_timer` | 0 | A test aid. 1: a second line each 10 s has the time of each part of the hook (a clock read for each part) |
 | `gpu_mesh_kinds` | 31 | Bit k leaves the function k on the GPU path: `fn_00856D40` 0, `fn_0085AB10` 1, `fn_0084BA90` 2, `fn_0085BA30` 3, `fn_00859530` 4. A function with its bit at 0 keeps the CPU path |
 | `gpu_mesh_compare_every` | 0 | A test aid with `gpu_mesh=2`. N: each Nth frame the log has the difference of the two layers of the next frame, for the functions on the GPU path and then for each function alone |
 | `object_timer`, `object_timer_sites` | 0, empty | A test aid. 1: in the play, each 10 s the time of the draw of the objects and of each class and method of the objects. `object_timer_sites` gives more calls to time. A test key: Ctrl Shift F7. See "The timer of the objects" |

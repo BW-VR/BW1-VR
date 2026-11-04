@@ -152,9 +152,10 @@ inline void StreamRingChecks() {
           "the walks leave 4 MB of the ring free, so the state of a dropped frame goes in at once",
           sr::RoomForWalks(5000, 4000), 1000);
     Check(sr::KeepKind(ss::kStart) && sr::KeepKind(ss::kSurface) &&
-              sr::KeepKind(ss::kWritten) && !sr::KeepKind(ss::kDraw) &&
+              sr::KeepKind(ss::kWritten) && sr::KeepKind(ss::kMeshData) &&
+              !sr::KeepKind(ss::kDraw) && !sr::KeepKind(ss::kMeshDraw) &&
               !sr::KeepKind(ss::kTexture),
-          "kStart, kSurface and kWritten keep a frame", 0, 0);
+          "kStart, kSurface, kWritten and kMeshData keep a frame, kMeshDraw does not", 0, 0);
   }
 
   // THE FRAMES OF THE READER.

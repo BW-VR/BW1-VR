@@ -28,11 +28,11 @@
 // from there. A reader that leaves adds one to bye, and the writer stops
 // until the next ask.
 //
-// A FULL RING (a slow reader). A frame with no kStart, kSurface, kWritten or
-// kCardPicture record waits up to Policy::drop_us (vk_stream_live_drop_us, 0
-// by default) for room for the whole frame. Then the writer drops it: the
-// reader keeps each texture and each picture of a card, because such a frame
-// changes none. A frame with one of
+// A FULL RING (a slow reader). A frame with no kStart, kSurface, kWritten,
+// kCardPicture or kMeshData record waits up to Policy::drop_us
+// (vk_stream_live_drop_us, 0 by default) for room for the whole frame. Then
+// the writer drops it: the reader keeps each texture, each picture of a card
+// and each mesh, because such a frame changes none. A frame with one of
 // these records is never dropped: it goes into the ring in parts as the
 // reader makes room. When the reader takes no byte for Policy::gone_us, the
 // writer gives up on it (lost) and stops until the next ask.
@@ -243,7 +243,7 @@ enum class Step { kWrite, kWait, kDrop, kLost };
 
 // left: the bytes of the frame that are not in the ring yet. started: a part
 // of the frame is in the ring. keep: the frame has a kStart, a kSurface, a
-// kWritten or a kCardPicture record. waited_us: the wait for this frame so
+// kWritten, a kCardPicture or a kMeshData record. waited_us: the wait for this frame so
 // far. stalled_us: the time since the reader last took a byte, or since the
 // ring was empty.
 inline Step Choose(uint32_t capacity, uint32_t room, uint32_t left,
@@ -261,11 +261,12 @@ inline Step Choose(uint32_t capacity, uint32_t room, uint32_t left,
 }
 
 // True for the records that change the state of a surface, of the picture
-// of a card or of the options. The writer never drops a frame with one of
-// them.
+// of a card, of the options or of the mesh data of the GPU path. The writer
+// never drops a frame with one of them, and the reader plays it.
 inline bool KeepKind(uint32_t kind) {
   return kind == scene_stream::kStart || kind == scene_stream::kSurface ||
-         kind == scene_stream::kWritten || kind == scene_stream::kCardPicture;
+         kind == scene_stream::kWritten || kind == scene_stream::kCardPicture ||
+         kind == scene_stream::kMeshData;
 }
 
 // THE FRAMES OF THE READER. The length of the first whole frame at the start
@@ -307,7 +308,7 @@ inline size_t UnitBytes(const uint8_t* bytes, size_t n, size_t limit,
 // in the ring at one time (a batch).
 struct UnitInfo {
   uint64_t frame = 0;      // the frame of its first kFrame
-  bool keep = false;       // a kStart, a kSurface, a kWritten or a kCardPicture record
+  bool keep = false;       // a kStart, kSurface, kWritten, kCardPicture or kMeshData record
   bool capture = false;    // a kFrame with a picture of a test (F12)
   bool start = false;      // a kStart record
   int32_t test_frame = 0;  // vk_scene_test_frame of its kStart

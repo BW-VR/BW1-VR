@@ -192,7 +192,8 @@ test for any claim that a change reaches the picture.
 the clip and the cull of the meshes of the 3D parts off the CPU of the game.
 The renderer of the app does them on the GPU (native ARM, no FEX). It needs
 `backend=vulkan`. With another backend the meshes take the CPU path, and the
-log says so.
+log says so. With `gpu_mesh=0` the game runs as it did before: no hook, no
+shader module and no arena of the meshes.
 
 **Which functions.** A 3D part draws each mesh through one of five functions
 (`backend.md`, "The parts with SSE"). Each one runs the loop over the
@@ -207,58 +208,130 @@ vertices, the loop over the triangles, the material, and
 | `fn_0085BA30` | no | no | no |
 | `fn_00859530` | yes (the level rounds toward 0) | yes | one value for y, or three values, for each vertex |
 
+No caller reads the value that the functions return. The 40 call sites
+overwrite `eax` at once, or read `al` after a new load, so the hook is a
+function with no value.
+
 **What the hook does.** A hook at the start of each function (MinHook). A
 mesh that can take the GPU path does what the function does after the loops:
 
-1. The material, with the same calls as the function (the function of the
-   type of the mesh, the tiling, the cull mode).
-2. A look at the state of the device (`VkDdrawMeshState`): no blend, the
-   depth test and the depth write on, and no texture on stage 1. The
-   renderer draws such a mesh with stage 0 alone, and a mesh with blend sorts
-   by depth in the engine. Else the function of the game runs from its start
-   (it runs the material again, which changes nothing).
+1. The checks of the mesh, and the reads of the inputs that the function
+   reads before its material: the matrix at `0x00EA9EA0`, the projection
+   (`0x00E839E0`, `0x00E839F0`, `0x00E839F4`), the color, the specular color,
+   the light at `0x00F03140` and the ambient value at `0x00C39264`.
+2. The material, with the same calls as the function (the function of the
+   type of the mesh, the tiling, the cull mode). It runs one time for each
+   mesh. The state of the device after it (`VkDdrawMeshState`) says which
+   parts the mesh needs (below).
 3. The data of the mesh go to the renderer one time (below).
-4. One record of the stream for the draw: the matrix at `0x00EA9EA0`, the
-   projection (`0x00E839E0`, `0x00E839F0`, `0x00E839F4`), the color, the
-   specular color, the light at `0x00F03140` and the ambient value at
-   `0x00C39264`, and the offsets of `fn_00859530`.
+4. One record of the stream for the draw: the values of step 1, the shift of
+   the texture, the offsets of `fn_00859530`, and the matrices and lights of
+   the groups.
 
-The hook reads the color, the specular color and the other values before
-the material, as the loops of the game do. It does the rest of the work of
-the function: the counter of the meshes at `0x00F05184`, and the pointer of
-the offsets at `0x00F05180` (the game moves it past the offsets of each
-mesh), and the two readings of `h_DrawTriangle` that a batch needs (the
-interface panel goes back to the eye pictures, and the first vertex is in the
-measure of the nearest geometry, `DrawHooksMeshBatch`).
+The hook does the rest of the work of the function: the counter of the meshes
+at `0x00F05184`, and the pointer of the offsets at `0x00F05180` (the game
+moves it past the offsets of each mesh), and the two readings of
+`h_DrawTriangle` that a batch needs (the interface panel goes back to the eye
+pictures, and the first vertex is in the measure of the nearest geometry,
+`DrawHooksMeshBatch`).
 
-**Which mesh takes the CPU path.** A mesh in a group (a matrix for each
-group of vertices: the flag in the first word of the mesh group at
-`0x00FA93BC`), with a shift of the texture (`0x00ECA628`: water and fire),
-with a texture on stage 1, with blend or with no depth write (the glass, the
-shadows and the effects), a mesh that `h_DrawTriangle` changes (the glow of a
-target of the Hand, the advisor of a cut scene, the box of a speech bubble),
-and a mesh with more than 20000 vertices or 40000 triangles. The log counts
-each reason. `gpu_mesh_kinds=N` leaves a function on the CPU path: bit k of N
-is the function k of the table (31 is the default).
+**The order of the draws.** The five functions draw a mesh at once through
+`DrawTriangle`, in the order of their calls. The z sorter of the engine
+(`LH3DZSorter::NewZObject`) holds whole objects with a callback, and the
+callback calls the function of the mesh later, in the order of the depth. The
+functions have no sort of their own, and the triangles of a mesh go to the
+device in the order of its indices. So a mesh with blend or with no depth
+write needs nothing but its states: the record of the GPU path comes at the
+place of the draw of the CPU path, the renderer reads the same states, and the
+queue of the renderer moves only draws that may move (`vk_draw_math.h`:
+no blend, a depth write, a depth test). A mesh draw is never in a draw of the
+merge.
+
+**The parts.** The state of the device after the material gives the reasons
+that a mesh needs a part of the path. Each part has a key (the value 0 leaves
+that kind of mesh on the CPU path), and a switch for a live test:
+
+| Part | Key | What it takes |
+| --- | --- | --- |
+| Blend | `gpu_mesh_blend` | a mesh with blend, with no depth write or with no depth test (the glass, the shadows, the effects, the leaves of a tree) |
+| Stage 1 | `gpu_mesh_stage1` | a mesh with a texture on stage 1. The vertex shader gives stage 1 the texture coordinates of stage 0, as the vertex format of the game (FVF `0x1C4`) does |
+| Shift of the texture | `gpu_mesh_uvshift` | a mesh that `DrawTriangle` shifts (`0x00ECA628`, the values at `0x00ECA62C` and `0x00ECA630`: water and fire). The shift is part of the record and the shader adds it to u and v |
+| Groups | `gpu_mesh_group` | a mesh with a matrix for each group of vertices (below) |
+
+With `test_keys=1`, Ctrl Shift 6 turns all four parts off and on (the debug
+page has the row "GPU mesh parts"), and Ctrl Shift 7 turns `gpu_mesh` between 1
+and 0 (the row "GPU mesh"). With `gpu_mesh=0` in `bwvr.ini` and `test_keys=1`
+the hooks go in at the first press of Ctrl Shift 7.
+
+**Which mesh takes the CPU path.** A draw with the clamp of the screen
+(`0x00FA9398`), a mesh that `h_DrawTriangle` changes (the glow of a target of
+the Hand, the advisor of a cut scene, the box of a speech bubble), a mesh with
+more than 20000 vertices or 40000 triangles, a mesh with groups whose counts
+are not its vertex count, a mesh of a function that `gpu_mesh_kinds=N` leaves
+out (bit k of N is the function k of the table, 31 is the default), and a mesh
+of a part that a key turned off. A mesh that a key turned off keeps the CPU
+path for 30 frames after its first test, so the material does not run twice
+for it in each frame. The log counts each reason apart.
+
+**The groups.** A person or an animal has a matrix for each group of vertices
+(the flag in the first word of the mesh group at `0x00FA93BC`). The mesh has
+the count of its groups at `+0x20` and a list at `+0x24`, and each entry is a
+count of vertices and the index of a matrix in the list of the part at
+`0x00E9FE48` (12 floats each). The vertices of the groups follow each other.
+The data of the mesh have the ordinal of the group of each vertex (16 bit).
+Each draw has the matrices of the groups in the order of the list (in the rows
+of the shader) and, for a lit mesh, the light of each group. The renderer keeps
+them in a buffer of its own for each slot (a storage buffer, set 2 of the
+pipeline layout of the groups, which is made at the first such mesh). The light
+of a group is made on the CPU as the game makes it (`fn_0084BA90`,
+`fn_0085AB10`): the inverse of the matrix of the group (`LHMatrix::SetInverse`),
+the position of the light at `0x00EA9E80` in the space of the group, and the
+length 1 from the fast root of `fn_00841170` (a table at the pointer
+`0x00EEA394`). The port has the float operations in the order of the game. In
+the compare (`gpu_mesh=2`) the hook also calls the two functions of the game
+for a light and counts the lights with other bits (the log line). The shader
+makes the dot product of the normal and the light in one order for all lit
+functions. The game has other orders in `fn_0084BA90`, `fn_0085AB10` and
+`fn_00859530`, so the level can differ by 1 for a normal on the edge of a
+rounding.
 
 **The data.** A mesh goes into the stream one time (`kMeshData`: the id is
-its address, then the vertices of 32 bytes and the indices of 16 bits as the
-game has them). A sum over the words (`MeshHash`, 6 SSE operations for 16
-bytes) is checked at each draw, and the data go again when it changes, when
-the frame has the whole state (a reader that comes late, `VkStreamMeshEpoch`),
-and when the table of the hook has no entry. A record of data is not a record
-of a walk (`stream_split.h`), so a frame that loses its walks keeps it. The
-renderer keeps the data in an arena of 64 MB (`VkSceneMeshData`), and a range
-that a new version replaces goes back after the walks that can read it are
-done. `kMeshDraw` names the mesh and has the values of the draw. Both are
-records of the stream of version 4. A draw of the CPU path has 32 bytes for
-each vertex, a draw of the GPU path 152 bytes, and the offsets of
-`fn_00859530` (12 bytes for each vertex).
+its address, then the vertices of 32 bytes, the indices of 16 bits and the
+ordinals of the groups, as the game has them). The mesh is an asset of the game:
+its words do not change while it lives, and a new mesh at the same address has
+other pointers or other words. Each draw tests the pointers, the counts and a
+sample over the first, the middle and the last vertex and the first and the
+last triangle (`MeshSample`, 8 steps of the sum). A full sum over all words
+(`MeshHash`, 6 SSE operations for 16 bytes, with the groups) comes for each mesh
+every `gpu_mesh_check_frames` frames (120 by default, spread over the meshes by
+their address). When a full sum finds a change, the data go again, the log
+counts it, and that mesh has a full sum at each draw from then on.
+`gpu_mesh_check_frames=0` is a full sum at each draw. The data also go again
+when the frame has the whole state (a reader that comes late,
+`VkStreamMeshEpoch`) and when the table of the hook has no entry. A record of
+data is not a record of a walk (`stream_split.h`), so a frame that loses its
+walks keeps it, and `KeepKind` of `stream_ring.h` includes it, so a frame
+with mesh data is neither dropped by the writer nor skipped by the reader.
+
+The renderer keeps the data in an arena of 64 MB (`VkSceneMeshData`), made at
+the first data of a mesh. A range that a new version replaces goes back after
+the walks that can read it are done. When the arena is full, the meshes that no
+walk drew for 600 walks give their range back, and the data that found no
+room wait in a list of up to 16 MB until a range is free. The game does not
+know of the eviction, so a mesh that comes back after it has no data until the
+data come again. A renderer in the game process that cannot take the data
+(not ready) says so, and the hook gives them again after 30 frames. A failed
+shader module or arena stops the meshes only. `kMeshDraw` names the mesh and
+has the values of the draw. Both are records of the stream of version 4. The
+writer sends no mesh record with `gpu_mesh=0`. A draw of the CPU path has 32
+bytes for each vertex, a draw of the GPU path 152 bytes (the record, with the
+state of the stream), the offsets of `fn_00859530` (12 bytes for each vertex)
+and the groups.
 
 **The shader.** `vk_mesh.vert` makes the camera point `c = M p` (with the
-offset added to `p` first), the clip position of the pixel of the game, and
-the lit color. The clip position is linear in `c`, so a point behind the
-camera needs no division:
+offset added to `p` first, and `M` the matrix of the group for a vertex in a
+group), the clip position of the pixel of the game, and the lit color. The
+clip position is linear in `c`, so a point behind the camera needs no division:
 
 ```
 w   = cz / near
@@ -283,16 +356,28 @@ times 255, rounded to the nearest whole number (toward 0 for
 `fn_00859530`), then `(255 - ambient) level >> 8 + ambient`, and each channel
 `(channel level) >> 8`. The color of a lit mesh is the color of the part times
 the color at `+0x0C` of the mesh when the word at `+8` is 0 (`fn_007ACF70`).
+`tools/mesh_shaders.ps1` makes `vk_mesh_vert.h` (the SPIR-V of the three
+variants: plain, `OFFSETS` and `GROUPS`) with the glslc of the NDK. Its first
+line has the hash of the source, and a check of the math tests fails when the
+header is not the header of the source.
 
 **The checks** (`test/controller_math/gpu_mesh_checks.h`) compare the C++ math
 of `gpu_mesh_math.h` with the loops of the game (`fast_transform_math.h`, the
-bits of the x87 code). For 300 random matrices with 64 points each (3295 points in the view): the pixel is the pixel of the
-game to 0.0003, the depth to 1e-7 and the rhw to 4e-7 relative. The clip test
-of the GPU is the clip flags of the game, except for a point less than 2 pixels
-from an edge (the GPU map has the half pixel of Direct3D 9). The lit color is
-`LitColor` bit for bit for 20000 random normals with each rounding. The checks also cover the sum, the
-state test, the records and the loss of `kMeshDraw` in a frame with no walks.
-The GLSL is not run by a check: the compare below runs it.
+bits of the x87 code). For 300 random matrices with 64 points each (3295
+points in the view): the pixel is the pixel of the game to 0.0003, the depth to
+1e-7 and the rhw to 4e-7 relative. The same holds for a viewport with an offset,
+a smaller size and a MinZ above 0, and for a render of 4080 by 3264. The clip
+test of the GPU is the clip flags of the game, except for a point less than 2
+pixels from an edge (the GPU map has the half pixel of Direct3D 9). The lit
+color is `LitColor` bit for bit for 20000 random normals with each rounding.
+The checks also cover the sum and the sample (the sample sees the first, middle
+and last vertex and the first and last triangle, the full sum sees any other
+change), the reasons of a state and the parts that take them, the order of the
+sort around a mesh with blend, the shift of the texture, the light of a group
+(the inverse of the part and the fast root), the groups of a mesh, the records,
+the single growth of a record in the writer, the loss of `kMeshDraw` in a frame
+with no walks, and the hash of the shader source. The GLSL is not run by a check:
+the compare below runs it.
 
 **The compare** (`gpu_mesh=2`, a test aid on the PC with `one_walk=1`). Each
 mesh that can take the GPU path is drawn two times: the function of the game
@@ -309,13 +394,19 @@ hand, the halos and the interface of the mod are drawn for each eye, so they
 differ in the two layers. The log has the first 6 meshes of each function
 with their values.
 
-**Each 10 s** the log has the line "gpu mesh     : gpu_mesh=1, in 10 s": the meshes on
-each path, the vertices, triangles and offsets on the GPU path, the CPU path by
-function and by reason, the records of mesh data with their bytes, what the
-renderer has, and the time on the frame thread for the GPU path (the checks,
-the material and the record) and for the function of the game. With `test_keys=1`,
-Ctrl Shift F10 steps `gpu_mesh` through 1, 0 and 2, and the debug page Render
-has the row "GPU mesh".
+**Each 10 s** the log has the line "gpu mesh     : gpu_mesh=1, parts 0xF, in 10
+s": the meshes on each path with the share of the GPU path, the vertices,
+triangles and offsets on the GPU path, the GPU path by function, what the
+meshes on the GPU path have (blend, no depth write, no depth test, stage 1,
+shift of the texture), the CPU path by reason and by function, the meshes with
+groups, the records of mesh data with their bytes, the full sums, the meshes
+whose words changed, what the renderer has, and the time on the frame thread:
+the GPU path (the checks, the material, the sum and the record, and in a
+process with a renderer also the draw of the renderer), the function of the
+game, and the checks of the meshes that went to the CPU path. With
+`gpu_mesh_timer=1` a second line has the time of each part of the hook for a
+mesh (checks, material, state, consts, data, record), at the cost of a clock
+read for each part.
 
 - Not shown: the time of the draws of the meshes on the Frame
   (`object_timer=1`, the sites in `backend.md`, "The parts with SSE", with
@@ -324,12 +415,9 @@ has the row "GPU mesh".
 - Open: the hook of the mesh functions and `walk_parts=1` hook the same
   start of three functions, and the second one fails. Use `walk_parts=0` with
   `gpu_mesh=1`.
-- Open: the meshes in a group (a person, an animal, a building with parts that
-  move) and the meshes with blend stay on the CPU path. A group needs a matrix
-  for each group of vertices, and for `fn_0085AB10` and `fn_0084BA90` also the
-  light of each group (`fn_007FB290`).
-- Next: the own code of the objects (`fn_00815A70`, the test of the view and the
-  choice of the detail) and the class draws on the GPU.
+- Open: the order of the products in the light of a mesh with groups. The
+  shader uses one order, the game uses three. The compare gives the pixels that
+  differ.
 
 ## Open questions
 

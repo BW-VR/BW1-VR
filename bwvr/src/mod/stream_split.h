@@ -9,11 +9,12 @@
 // - THE STATE stays: kStart (the options), kFrame and kFrameEnd, kGaze,
 //   kOnlyFrame, kTarget and kPanelBind (the target of the draws of the
 //   renderer, which a walk does not set again), kSurface and kWritten (the
-//   pixels of the surfaces), kMeshData (the data of a mesh of the game) and kCardPicture (the picture of a card). A later
-//   frame needs them. kView (the projection layer of the frame) and kCard,
-//   kPanel and kWindow (its quad layers) stay too, but the app takes them only
-//   with a picture of their frame (view_layer_math.h, PictureView, and
-//   quad_layer_math.h, PictureLayers).
+//   pixels of the surfaces), kMeshData (the data of a mesh of the game) and
+//   kCardPicture (the picture of a card). A later frame needs them. kView
+//   (the projection layer of the frame) and kCard, kPanel and kWindow (its
+//   quad layers) stay too, but the app takes them only with a picture of
+//   their frame (view_layer_math.h, PictureView, and quad_layer_math.h,
+//   PictureLayers).
 // - THE WALKS go: kWalkBegin to kWalkEnd with the draws, the clears, the
 //   render states, the stage states, the textures and the viewports. Each
 //   walk starts from the state of the device in its kWalkBegin

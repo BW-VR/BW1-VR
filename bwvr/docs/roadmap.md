@@ -438,6 +438,24 @@ is built, and no test has proven it.
   The cause is not known. The crash log (`crash_log=1`, `backend.md`, "The
   crash log") now writes the C++ exception and the caller of `abort`. The
   next log of this end gives the place.
+- **B39. The clouds, the beams of light and the miracle icons and the roll of
+  the head: check it in a headset.** A camera of its own in the scene walk
+  leaves the engine with a camera that has no roll and no eye offset, and the
+  draws of the sorted list after it do not roll with the world
+  (`eye_after_camera=1` puts the eye camera back, `backend.md`, "The eye
+  camera after a camera of its own"). Check on the Frame with the head
+  rolled to the side, in the God view, over the village centre and the
+  Temple:
+  - that the clouds, the miracle icons and the beams of light of a charge
+    stay with the world at any time,
+  - that Ctrl, Shift and R (or the debug page "Picture", "Eye camera") shows
+    the old behavior with 0.
+
+  With `roll_trace=1` the log names the address that gives the camera and the
+  draw functions of the items that saw it. Not known: the name of the effect
+  that gives the camera on each frame, and whether the billboards that turn
+  by less than the roll within 10 degrees of a look straight down (line
+  `sprite trace`) show in the headset.
 
 B1b, B2, B4 and B11 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.

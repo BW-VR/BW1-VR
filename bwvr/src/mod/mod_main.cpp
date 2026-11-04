@@ -235,6 +235,8 @@ void SkySetHeadFree(bool clouds, bool moon, int test_frame, bool trace,
                     int test_hour);
 void SpriteUpSet(bool on, int test_frame, bool trace);
 void SpriteUpInstall();
+void EyeStaleSet(bool on, bool trace, int test_frame, bool test_keys);
+void EyeStaleInstall();
 void PointerMapSetDragSmoothing(int ms);
 void PointerMapSetFakeMouse(const char* script, int step_px,
                             const int x_pct[2], const int y_pct[2]);
@@ -500,6 +502,12 @@ int g_sky_test_hour = -1;
 bool g_sprite_world_up = true;
 int g_sprite_test_frame = 0;
 bool g_sprite_test_trace = false;
+// After a camera of its own in an eye pass, the draws of the pass use the
+// camera of the eye again, so the clouds, the beams and the miracle icons
+// roll with the world. The test keys change it at a frame and trace it.
+bool g_eye_after_camera = true;
+int g_roll_test_frame = 0;
+bool g_roll_trace = false;
 // The black bars of the story scenes. Off by default in a headset.
 bool g_cinema_bars = false;
 // The advisors stay where the player looked when they came.
@@ -1281,6 +1289,13 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "sprite_test_frame", 0, path));
   g_sprite_test_trace =
       GetPrivateProfileIntA("bwvr", "sprite_test_trace", 0, path) != 0;
+  // Not in the launcher. See docs/backend.md, "The eye camera after a camera
+  // of its own". With test_keys=1, Ctrl, Shift and R change it.
+  g_eye_after_camera =
+      GetPrivateProfileIntA("bwvr", "eye_after_camera", 1, path) != 0;
+  g_roll_test_frame = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "roll_test_frame", 0, path));
+  g_roll_trace = GetPrivateProfileIntA("bwvr", "roll_trace", 0, path) != 0;
   g_cinema_bars = GetPrivateProfileIntA("bwvr", "cinema_bars", 0, path) != 0;
   g_spirit_anchor =
       GetPrivateProfileIntA("bwvr", "spirit_anchor", 1, path) != 0;
@@ -2085,6 +2100,9 @@ void StartVrStep() {
     SkyDetailInstall();
     SpriteUpSet(g_sprite_world_up, g_sprite_test_frame, g_sprite_test_trace);
     SpriteUpInstall();
+    EyeStaleSet(g_eye_after_camera, g_roll_trace, g_roll_test_frame,
+                g_test_keys);
+    EyeStaleInstall();
     SpiritAnchorSetEnabled(g_spirit_anchor);
     SpiritAnchorSetWorldSize(g_spirit_world_size, TestSwitchesOn(),
                              g_spirit_world_size_test,

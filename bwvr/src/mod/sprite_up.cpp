@@ -41,11 +41,15 @@
 #include <string.h>
 
 #include "MinHook.h"
+#include "camera_stale_math.h"
 #include "sprite_math.h"
 
 extern void ModLog(const char* format, ...);
 // controllers.cpp: the frame number that the scripted controller counts.
 uint64_t ControllersFrameCount();
+// eye_stale.cpp: the trace of the draws that see a camera that is not the
+// camera of the eye. Kind 1 is a sprite.
+void EyeStaleDraw(int kind);
 
 namespace {
 
@@ -97,6 +101,10 @@ uint64_t g_speed_unrolled = 0;
 
 // THE TRACE.
 uint64_t g_trace_sprites = 0;
+// The billboards drawn while world up is within the fade of the turn (the
+// head looks within about 10 degrees of straight up or down), and so turned
+// by less than the roll.
+uint64_t g_trace_fade = 0;
 float g_trace_off_most = 0.0f;  // degrees, drawn up from world up
 double g_trace_off_sum = 0.0;
 float g_trace_roll_most = 0.0f;  // degrees, the roll of the camera
@@ -187,6 +195,7 @@ void __fastcall h_SpriteDraw(void* self, void* unused) {
     return;
   }
   ++g_billboards;
+  EyeStaleDraw(1);
   float* angle = reinterpret_cast<float*>(sprite + kSpriteAngle);
   const float old = *angle;
   const float turn = g_on ? TurnNow() : 0.0f;
@@ -198,6 +207,9 @@ void __fastcall h_SpriteDraw(void* self, void* unused) {
     const float* p = reinterpret_cast<const float*>(sprite);
     const float z = p[0] * m[2] + p[1] * m[5] + p[2] * m[8] + m[11];
     built = z > *reinterpret_cast<const float*>(kNearZ);
+    if (camera_stale_math::PlaneShare(m) < sprite_math::kFadeShare) {
+      ++g_trace_fade;
+    }
   }
   if (turn != 0.0f) {
     *angle = old + turn;
@@ -306,12 +318,18 @@ void SpriteUpReport() {
     ModLog("sprite trace : at a turn from a speed the roll of the camera was "
            "at most %.2f degrees", g_trace_speed_roll_most);
   }
+  if (g_trace && g_billboards > 0) {
+    ModLog("sprite trace : %llu of %llu billboards were drawn with the head "
+           "within the fade of the turn, so they turn by less than the roll",
+           g_trace_fade, g_billboards);
+  }
   g_billboards = 0;
   g_turned = 0;
   g_turn_most = 0.0f;
   g_speed_calls = 0;
   g_speed_unrolled = 0;
   g_trace_sprites = 0;
+  g_trace_fade = 0;
   g_trace_off_most = 0.0f;
   g_trace_off_sum = 0.0;
   g_trace_roll_most = 0.0f;

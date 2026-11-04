@@ -194,6 +194,8 @@ void ScriptCameraReport();
 void UiDepthReportHelp();
 void SkyDetailReport();
 void SpriteUpReport();
+void EyeStaleReport();
+void EyeStalePassBegin();
 // spirit_anchor.cpp
 void SpiritAnchorReport();
 void SpiritAnchorWorldSizeToggle();
@@ -319,6 +321,7 @@ void DrawProbeProfileTake(double* d3d_ms, uint64_t* calls, uint64_t* vertices,
 bool EyeCameraCapture();
 void EyeCameraSetEye(float d);
 void EyeCameraRestore();
+bool EyeCameraStale();
 
 // eye_luma.cpp: the mean brightness of each eye picture, a test.
 bool EyeLumaOn();
@@ -1873,6 +1876,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
       }
     }
     UiDepthSetEye(eye, g_ui_shift_used);
+    EyeStalePassBegin();
     BubbleCardPass(eye);
     NoteDepthPass(eye);
     PassGuardSetEye(eye);
@@ -2395,6 +2399,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     UiPanelReport();
     SkyDetailReport();
     SpriteUpReport();
+    EyeStaleReport();
     SpiritAnchorReport();
     ControllersReport();
     XrInputReport();
@@ -2466,6 +2471,13 @@ void StereoReapplyEye() {
     EyeCameraSetEye(g_eye_slide);
   }
   if (seed != nullptr) *seed = saved_seed;
+}
+
+// True in an eye pass that placed its eye, when the engine has a camera
+// matrix other than the one that the eye loop wrote. A camera call inside the
+// walk does it (camera_stale_math.h).
+bool StereoEyeCameraStale() {
+  return g_in_pass && g_eye_placement != kEyeNotPlaced && EyeCameraStale();
 }
 
 // The eye of the pass that runs: 0 or 1, and -1 outside a pass.

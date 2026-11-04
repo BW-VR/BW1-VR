@@ -74,6 +74,11 @@ extern void ModLog(const char* format, ...);
 // again, after the game built a camera of a room of the Temple in it.
 bool StereoInPass();
 int StereoPassEye();
+// eye_stale.cpp: the camera calls of the scene walk in an eye pass, and the
+// eye camera after a camera of its own.
+bool EyeStaleCallBegin(uintptr_t caller, const float* position,
+                       const float* focus);
+void EyeStaleCallEnd(bool restore);
 void StereoRoomCamera();
 // head_pose.cpp: the world units in a meter of the room.
 float HeadPoseScale();
@@ -760,7 +765,13 @@ void __fastcall h_UpdateCamera(const float* position, const float* focus) {
     IntroCameraBuilt();
     return;
   }
+  // A call in the scene walk of an eye pass that gives a camera back leaves
+  // a camera with no eye offset and no roll (eye_stale.cpp).
+  const bool in_pass_call = g_in_scene && StereoInPass();
+  const bool restore =
+      in_pass_call && EyeStaleCallBegin(caller, position, focus);
   PlaceCamera(position, focus, false, caller);
+  if (in_pass_call) EyeStaleCallEnd(restore);
 }
 
 }  // namespace

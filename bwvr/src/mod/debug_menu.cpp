@@ -63,6 +63,9 @@ int TabletopGodZoomAboutValue();
 void TabletopGodZoomAboutCycle();
 int TabletopGodMoveStickValue();
 void TabletopGodMoveStickCycle();
+// The eye camera after a camera of its own (eye_stale.cpp).
+int EyeStaleValue();
+void EyeStaleToggle(const char* by);
 int WorldGrabTestValue();
 void WorldGrabCycleTest();
 // The teleport (teleport.cpp).
@@ -385,6 +388,8 @@ const Switch kSwitches[] = {
      "spirit_world_size", SpiritAnchorWorldSizeValue,
      [](const char*) { SpiritAnchorWorldSizeToggle(); },
      L"game|near size"},
+    {kGroupPicture, L"Eye camera", L"Eye camera after own camera",
+     "eye_after_camera", EyeStaleValue, EyeStaleToggle, L"game|eye back"},
     {kGroupPicture, L"Vulkan eyes", L"Eye pictures from Vulkan", "vk_eyes",
      VkSceneEyesValue, VkSceneEyesToggle, L"D3D9|Vulkan"},
     {kGroupPicture, L"Keep picture", L"Walk starts from last picture",

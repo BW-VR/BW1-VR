@@ -1208,15 +1208,14 @@ minutes in the emulator, because the GPU of the emulator gives an image of
 40 MB to the CPU slowly.
 
 **The meshes on the GPU** (`kMeshData` and `kMeshDraw`, the stream of
-version 4, `gpu_mesh=1`, `software-tnl.md`, "The meshes on the GPU"). A mesh of
-the game goes into the stream one time with its vertices and indices
-(`kMeshData`, a record of state: a frame that loses its walks keeps it), and each
-draw is a `kMeshDraw` with the values of the draw. The player gives them to
-`VkSceneMeshData` and `VkSceneDrawMesh` of the renderer in the app, which
-draws the mesh on the GPU of the headset. The writer sends the data of every
-mesh again with the whole state of a frame (a reader that comes late), so the
-renderer of the app has each mesh that a draw names. A stream of version 2 or 3
-has none of these records.
+version 4, `software-tnl.md`, "The meshes on the GPU"). The player gives the
+records to `VkSceneMeshData` and `VkSceneDrawMesh` of the renderer in the app,
+which draws the meshes on the GPU of the headset. `kMeshData` is a record of
+state, and `KeepKind` of `stream_ring.h` keeps its frame, so the app never
+skips a frame with mesh data. The writer sends the data of every mesh again
+with the whole state of a frame (a reader that comes late). The time log of the
+app has the draws, the records of data, the meshes in the arena and the draws
+with no data. A stream of version 2 or 3 has none of these records.
 
 ## The live stream
 

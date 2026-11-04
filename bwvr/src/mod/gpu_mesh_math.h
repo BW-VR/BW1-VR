@@ -30,6 +30,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "tree_body_math.h"
+
 #if defined(_M_IX86) || defined(_M_X64) || defined(__SSE2__)
 #include <emmintrin.h>
 #define BWVR_MESH_SSE2 1
@@ -41,18 +43,25 @@ namespace gpu_mesh_math {
 // row[0] = (m0, m3, m6, m9) and so on: cx = row[0] . (x, y, z, 1).
 struct Consts {
   float row[3][4];
-  float near_plane, half_x, half_y, reserved;
+  float near_plane, half_x, half_y;
+  float uv_shift_u;   // DrawTriangle adds the shift to u (water, fire), else 0
   uint32_t color;     // the diffuse color of the mesh (D3DCOLOR)
   uint32_t specular;  // the specular color of the mesh (the fog)
   int32_t ambient;    // 0 to 255
   uint32_t flags;     // kLit, kTruncate
-  float light[4];     // the direction of the light in the space of the mesh
+  float light[3];     // the direction of the light in the space of the mesh
+  float uv_shift_v;
 };
 static_assert(sizeof(Consts) == 96, "Consts");
 
 // The bits of Consts::flags.
 const uint32_t kLit = 1u;       // the color is lit by the normal
 const uint32_t kTruncate = 2u;  // the light level rounds toward 0 (fn_00859530)
+// The mesh has a matrix for each group of vertices (and, with kLit, a light for
+// each group). The matrices and the lights are in the ring of the renderer, at
+// the float indices that the renderer puts in row[0][0] and row[0][1] of the
+// record (the matrix of the record is not used then).
+const uint32_t kGroup = 4u;
 
 // From the 12 floats of the matrix of the game (rows of 3, the translation
 // last) to the rows of the shader.
@@ -60,6 +69,69 @@ inline void SetMatrix(Consts* c, const float* m) {
   c->row[0][0] = m[0]; c->row[0][1] = m[3]; c->row[0][2] = m[6]; c->row[0][3] = m[9];
   c->row[1][0] = m[1]; c->row[1][1] = m[4]; c->row[1][2] = m[7]; c->row[1][3] = m[10];
   c->row[2][0] = m[2]; c->row[2][1] = m[5]; c->row[2][2] = m[8]; c->row[2][3] = m[11];
+}
+
+// THE GROUPS. A person or an animal has a matrix for each group of vertices
+// (the mesh group flag at 0x00FA93BC): the mesh has a list of groups, each with
+// a count of vertices and the index of a matrix in the list of the part
+// (0x00E9FE48, 12 floats each), and the vertices of the groups follow each
+// other. The GPU gets the ordinal of the group for each vertex (with the
+// data of the mesh), and for each draw the matrices of the groups in the order
+// of the list, in the rows of the shader (SetMatrix).
+const uint32_t kMostGroups = 128;
+
+// A group of a mesh as the game keeps it: 4 bytes.
+struct MeshGroup {
+  uint16_t count;
+  uint16_t matrix;
+};
+static_assert(sizeof(MeshGroup) == 4, "MeshGroup");
+
+// The ordinal of the group of each vertex into `out` (vertex_count values).
+// False when the counts of the groups are not the vertex count: the loop of
+// the game then leaves vertices as they were.
+inline bool GroupOrdinals(const MeshGroup* groups, uint32_t group_count, uint32_t vertex_count,
+                          uint16_t* out) {
+  if (group_count == 0 || group_count > kMostGroups) return false;
+  uint32_t at = 0;
+  for (uint32_t g = 0; g < group_count; ++g) {
+    if (groups[g].count > vertex_count - at) return false;
+    for (uint32_t i = 0; i < groups[g].count; ++i) out[at++] = static_cast<uint16_t>(g);
+  }
+  return at == vertex_count;
+}
+
+// The light of a group, as fn_0084BA90 and fn_0085AB10 make it: the position of
+// the light (0x00EA9E80, camera space) goes into the space of the group with
+// the inverse of the matrix of the group (LHMatrix::SetInverse, 0x007FB290),
+// and the vector gets the length 1 with the fast inverse root
+// (fn_00841170, a step of Newton from a table of 128 bytes at the pointer
+// 0x00EEA394). The game has 24 bit float math here, so the float operations in
+// the same order give the same bits.
+inline float FastInverseSqrt(float x, const uint8_t* table) {
+  uint32_t u;
+  memcpy(&u, &x, 4);
+  const uint32_t e = (u >> 23) & 0xFFu;
+  const uint32_t bits = ((0x5F000000u - (e << 22)) & 0xFF800000u) |
+                        (static_cast<uint32_t>(table[(u >> 17) & 0x7Fu]) << 15);
+  float y;
+  memcpy(&y, &bits, 4);
+  return (3.0f - x * y * y) * y * 0.5f;
+}
+inline void GroupLight(const float matrix[12], const float light_position[3],
+                       const uint8_t* table, float out[3]) {
+  float inverse[12];
+  tree_body_math::Invert(matrix, inverse);
+  const float lx = inverse[0] * light_position[0] + inverse[3] * light_position[1] +
+                   inverse[6] * light_position[2] + inverse[9];
+  const float ly = inverse[1] * light_position[0] + inverse[4] * light_position[1] +
+                   inverse[7] * light_position[2] + inverse[10];
+  const float lz = inverse[2] * light_position[0] + inverse[5] * light_position[1] +
+                   inverse[8] * light_position[2] + inverse[11];
+  const float k = FastInverseSqrt(lx * lx + lz * lz + ly * ly, table);
+  out[0] = lx * k;
+  out[1] = ly * k;
+  out[2] = lz * k;
 }
 
 // The viewport of a draw, as the push constants of the renderer have it.
@@ -133,6 +205,14 @@ inline bool InsideClip(const float clip[4]) {
          clip[1] <= w && clip[2] >= 0.0f && clip[2] <= w;
 }
 
+// The texture coordinates of a vertex: DrawTriangle adds the shift of the part
+// to u and v (water, fire), and stage 1 reads the same set as stage 0 for the
+// vertex format of the game.
+inline void TextureCoord(const Consts& c, const float uv[2], float out[2]) {
+  out[0] = uv[0] + c.uv_shift_u;
+  out[1] = uv[1] + c.uv_shift_v;
+}
+
 // The light level of a normal: the dot product of the normal and the light
 // times 255, rounded to the nearest whole number (kTruncate: toward 0).
 inline int32_t LightLevel(const Consts& c, const float n[3]) {
@@ -197,13 +277,16 @@ inline void SumBlocks(MeshSum* m, const uint8_t* p, size_t blocks) {
 }
 #endif
 inline uint64_t MeshHash(const void* vertices, uint32_t vertex_count,
-                         const void* indices, uint32_t triangles) {
+                         const void* indices, uint32_t triangles,
+                         const void* groups = nullptr, uint32_t group_count = 0) {
   MeshSum m = {{0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu}, {0, 0, 0, 0}};
-  const uint8_t* parts[2] = {static_cast<const uint8_t*>(vertices),
-                             static_cast<const uint8_t*>(indices)};
-  const size_t sizes[2] = {static_cast<size_t>(vertex_count) * 32,
-                           static_cast<size_t>(triangles) * 6};
-  for (int k = 0; k < 2; ++k) {
+  const uint8_t* parts[3] = {static_cast<const uint8_t*>(vertices),
+                             static_cast<const uint8_t*>(indices),
+                             static_cast<const uint8_t*>(groups)};
+  const size_t sizes[3] = {static_cast<size_t>(vertex_count) * 32,
+                           static_cast<size_t>(triangles) * 6,
+                           static_cast<size_t>(groups != nullptr ? group_count : 0) * 4};
+  for (int k = 0; k < 3; ++k) {
     const uint8_t* p = parts[k];
     size_t n = sizes[k];
     SumBlocks(&m, p, n / 16);
@@ -216,14 +299,48 @@ inline uint64_t MeshHash(const void* vertices, uint32_t vertex_count,
     }
   }
   const uint32_t lo = m.s[0] ^ (m.s[1] * 31u) ^ (m.s[2] * 0x9E3779B1u) ^ m.s[3];
-  const uint32_t hi = m.a[0] + m.a[1] * 3u + m.a[2] * 5u + m.a[3] * 7u + vertex_count * 0x01000193u + triangles;
+  const uint32_t hi = m.a[0] + m.a[1] * 3u + m.a[2] * 5u + m.a[3] * 7u + vertex_count * 0x01000193u +
+                      triangles + group_count * 0x9E3779B1u;
   return static_cast<uint64_t>(hi) << 32 | lo;
 }
 
+// THE CHEAP TEST OF A DRAW. A mesh of the game is an asset: its vertices and
+// its indices stay in place for as long as the mesh lives, and a new mesh at
+// the same address has other words. Each draw reads the pointers and the
+// counts, and this sample over the first, the middle and the last vertex and
+// the first and the last triangle (a few steps of the sum). A change of the
+// whole mesh (a new mesh, an animation of all vertices) changes the sample.
+// A change of a few words in the middle is found by the full sum, which a mesh
+// gets at a slow rate, and each draw once the full sum found a change.
+inline uint32_t MeshSample(const void* vertices, uint32_t vertex_count, const void* indices,
+                           uint32_t triangles) {
+  MeshSum m = {{0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu}, {0, 0, 0, 0}};
+  const uint8_t* v = static_cast<const uint8_t*>(vertices);
+  const uint8_t* at[3] = {v, v + static_cast<size_t>(vertex_count / 2) * 32,
+                          v + static_cast<size_t>(vertex_count - 1) * 32};
+  for (int k = 0; k < 3; ++k) SumBlocks(&m, at[k], 2);
+  const uint8_t* ix = static_cast<const uint8_t*>(indices);
+  uint8_t tail[16] = {};
+  memcpy(tail, ix, 6);
+  memcpy(tail + 6, ix + static_cast<size_t>(triangles - 1) * 6, 6);
+  SumBlock(&m, tail);
+  return m.s[0] ^ (m.s[1] * 31u) ^ (m.s[2] * 0x9E3779B1u) ^ m.s[3] ^ (m.a[0] + m.a[3] * 7u);
+}
+
 // WHICH MESH TAKES THE GPU PATH. The state of the device after the material of
-// the mesh: no blend (a mesh with blend sorts by depth), the depth test and
-// the depth write on, and no texture on stage 1 (the renderer draws a mesh
-// with stage 0 alone).
+// the mesh. The five functions draw a mesh at once, in the order of the calls
+// (the z sorter of the engine holds whole objects and calls the function of
+// a mesh later, in the order of the depth), and the renderer draws the record
+// of a mesh in the same order with the same states. So a mesh with blend, with
+// no depth write, with no depth test or with a texture on stage 1 needs no
+// other treatment than its states. The parts of the path are bits, so a key
+// leaves a part on the CPU path.
+const uint32_t kPartBlend = 1u;    // blend, no depth write, no depth test
+const uint32_t kPartStage1 = 2u;   // a texture on stage 1
+const uint32_t kPartUvShift = 4u;  // the shift of u and v (water, fire)
+const uint32_t kPartGroup = 8u;    // a matrix for each group of vertices
+const uint32_t kPartsAll = 15u;
+
 struct DeviceState {
   uint32_t alpha_blend;
   uint32_t z_enable;
@@ -232,9 +349,26 @@ struct DeviceState {
   uint32_t z_func;    // for the log of the compare
   uint32_t cull;
 };
-inline bool OpaqueState(const DeviceState& s) {
-  return s.alpha_blend == 0 && s.z_enable != 0 && s.z_write != 0 && !s.stage1;
+
+// What a mesh has that needs a part: bit k of the result is the reason k.
+// The bits are the reasons for the count of the log.
+const uint32_t kStateBlend = 1u;
+const uint32_t kStateNoZWrite = 2u;
+const uint32_t kStateNoZTest = 4u;
+const uint32_t kStateStage1 = 8u;
+inline uint32_t StateReasons(const DeviceState& s) {
+  return (s.alpha_blend != 0 ? kStateBlend : 0u) | (s.z_write == 0 ? kStateNoZWrite : 0u) |
+         (s.z_enable == 0 ? kStateNoZTest : 0u) | (s.stage1 ? kStateStage1 : 0u);
 }
+inline bool StateAllowed(uint32_t reasons, uint32_t parts) {
+  if ((reasons & (kStateBlend | kStateNoZWrite | kStateNoZTest)) != 0 &&
+      (parts & kPartBlend) == 0) {
+    return false;
+  }
+  if ((reasons & kStateStage1) != 0 && (parts & kPartStage1) == 0) return false;
+  return true;
+}
+inline bool OpaqueState(const DeviceState& s) { return StateReasons(s) == 0; }
 
 // The limits of a mesh for the GPU path: the indices are 16 bit, so a mesh has
 // at most 65535 vertices, and the stream sends a mesh of up to this size.

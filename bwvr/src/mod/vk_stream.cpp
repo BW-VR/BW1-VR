@@ -837,27 +837,35 @@ void VkStreamDraw(uint32_t type, uint32_t fvf, const void* vertices,
 
 void VkStreamMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
                       uint32_t vertex_count, const uint16_t* indices,
-                      uint32_t triangles) {
+                      uint32_t triangles, const uint16_t* group_of_vertex,
+                      uint32_t group_count) {
   ChainScope chain(render_chain_math::kStream, render_chain_math::kOther);
   ss::MeshDataBody body = {};
   body.mesh = mesh;
   body.hash = hash;
   body.vertex_count = vertex_count;
   body.triangle_count = triangles;
+  body.group_count = group_of_vertex != nullptr ? group_count : 0;
   g_writer.Record(ss::kMeshData, &body, sizeof(body), vertices, vertex_count * 32,
-                  indices, triangles * 6);
+                  indices, triangles * 6, group_of_vertex,
+                  body.group_count != 0 ? vertex_count * 2 : 0);
   g_unit_keep = true;
 }
 
 void VkStreamDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
-                      const float* offsets, uint32_t offset_floats) {
+                      const float* offsets, uint32_t offset_floats, const float* groups,
+                      uint32_t group_count) {
   ChainScope chain(render_chain_math::kStream, render_chain_math::kDraw);
   ss::MeshDrawBody body = {};
   body.state = State();
   body.mesh = mesh;
   body.consts = consts;
   body.offset_floats = offsets != nullptr ? offset_floats : 0;
-  g_writer.Record(ss::kMeshDraw, &body, sizeof(body), offsets, body.offset_floats * 4);
+  body.group_count = groups != nullptr ? group_count : 0;
+  const uint32_t group_floats =
+      body.group_count * ((consts.flags & gpu_mesh_math::kLit) != 0 ? 16u : 12u);
+  g_writer.Record(ss::kMeshDraw, &body, sizeof(body), offsets, body.offset_floats * 4, groups,
+                  group_floats * 4);
   if (g_unit_record) ++g_draws;
 }
 

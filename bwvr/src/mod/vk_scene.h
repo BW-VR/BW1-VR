@@ -317,11 +317,30 @@ void VkSceneSetPresentLate(int on);
 // as one walk moves it. `offsets` (3 floats for each vertex, or null) are
 // added to the vertices in the space of the mesh. Only with backend=vulkan
 // (VkSceneDirect). The calls go into the stream (kMeshData, kMeshDraw).
-void VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
+// It returns false when the renderer of this process dropped the data (not
+// ready yet): the mod gives them again with VkSceneMeshRetry, which does not
+// write the stream. With no renderer in this process (the game under Wine
+// that writes the stream only) it returns true. The shaders and the arena of
+// the meshes (64 MB) are made at the first data, not at the start. When the
+// arena is full, the meshes that no walk drew for 600 walks give their range
+// back and the data wait for it (up to 16 MB).
+bool VkSceneMeshData(uint64_t mesh, uint64_t hash, const void* vertices,
                      uint32_t vertex_count, const uint16_t* indices,
-                     uint32_t triangles);
+                     uint32_t triangles, const uint16_t* group_of_vertex = nullptr,
+                     uint32_t group_count = 0);
+bool VkSceneMeshRetry(uint64_t mesh, uint64_t hash, const void* vertices,
+                      uint32_t vertex_count, const uint16_t* indices,
+                      uint32_t triangles, const uint16_t* group_of_vertex = nullptr,
+                      uint32_t group_count = 0);
+// `group_of_vertex` (a 16 bit ordinal for each vertex) and `group_count`: a
+// mesh with a matrix for each group of vertices. A draw of such a mesh
+// (gpu_mesh_math::kGroup in its flags) gives `groups`: 12 floats for each
+// group (the matrix in the rows of the shader), and with kLit 4 floats for
+// each group after them (the light in the space of the group). The renderer
+// keeps them in a buffer of its own.
 void VkSceneDrawMesh(uint64_t mesh, const gpu_mesh_math::Consts& consts,
-                     const float* offsets, uint32_t offset_floats);
+                     const float* offsets, uint32_t offset_floats,
+                     const float* groups = nullptr, uint32_t group_count = 0);
 // gpu_mesh=2 (a test aid on the PC): the renderer draws no move of the right
 // eye, so the mod can draw a mesh with the CPU path into the left eye layer
 // and with the GPU path into the right eye layer (kOneWalkLeftOnly and

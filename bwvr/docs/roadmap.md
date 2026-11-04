@@ -1304,14 +1304,18 @@ that moves while the Hand takes it.
   FEX (the goal is less than half of its time with the same picture).
 - **N34. The meshes of the 3D parts on the GPU** (`gpu_mesh`, `software-tnl.md`,
   "The meshes on the GPU"). `gpu_mesh=1` takes the transform, the light, the
-  clip and the cull of the opaque meshes with one matrix of `fn_00856D40`,
-  `fn_0085AB10`, `fn_0084BA90`, `fn_0085BA30` and `fn_00859530` to the GPU of
-  the app. Next: a desk run with `gpu_mesh=2` and `gpu_mesh_compare_every=300`
-  with `fovea_res=1` and with 0 (the pixel difference of the layers, for each
-  function), then the Frame with `gpu_mesh=1`, `walk_parts=0` and
-  `object_timer=1` (the time of the draws of the meshes against `gpu_mesh=0`;
-  the goal is less than a quarter). Then the meshes in a group and with blend,
-  and the own code of the objects (`fn_00815A70`) and the class draws.
+  clip and the cull of the meshes of `fn_00856D40`, `fn_0085AB10`,
+  `fn_0084BA90`, `fn_0085BA30` and `fn_00859530` to the GPU of the app. This
+  includes the meshes with blend, with a texture on stage 1, with a shift of
+  the texture and with a matrix for each group of vertices (each part has a key
+  with the old way as the value 0). Next on the Frame: the lines "gpu mesh" with
+  `gpu_mesh=1` and `gpu_mesh_timer=1` (the share of the meshes on the GPU path
+  and the time of the hook for a mesh, with the goals of more than 95 percent
+  and less than 1 us), and `object_timer=1` with `gpu_mesh=0` and 1 (the time of
+  the draws of the meshes, with the goal of less than a quarter), and a look at the
+  trees, the water, the glass, the people and the Creature. Next in the code:
+  the own code of the objects (`fn_00815A70`, the test of the view and the
+  choice of the detail) and the class draws that call `fn_0080DB30`.
 - **N22. Haptics from the world: check it in a headset.** With
   `world_haptics=1` the hand feels the purr of a stroke, the beat of a
   living thing in the Hand, the land under a grip, the thump of a landing

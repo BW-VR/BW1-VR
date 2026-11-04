@@ -20,26 +20,38 @@
 // MinHook). When the mesh can take the GPU path, the hook does what the
 // function does after the loops, and not the loops:
 //
-//   1. the material (the same calls as the function: the function of the
+//   1. the checks of the mesh and the reads of the inputs (the color, the
+//      matrix, the light), as the function does before its loops,
+//   2. the material (the same calls as the function: the function of the
 //      material type, the tiling, the cull mode),
-//   2. a look at the state of the device: no blend, a depth write, the depth
-//      test and no texture on stage 1. A mesh with blend sorts by depth, so
-//      it keeps the CPU path, and the function of the game runs from its
-//      start (it runs the material a second time, which changes nothing),
-//   3. the data of the mesh go to the renderer one time (a sum over the
-//      words checks that the game did not change them),
+//   3. the data of the mesh go to the renderer one time (a cheap test at each
+//      draw, a full sum over the words at a slow rate),
 //   4. one record for the draw: the matrix of the part and the camera, the
-//      projection, the colors and the light.
+//      projection, the colors, the light and the shift of the texture. The
+//      renderer reads the blend, the depth states and the textures of both
+//      stages from the device, as for each other draw.
 //
 // Else the function of the game runs as it is, and the loops of
 // fast_transform.cpp and part_draw.cpp are still in it.
 //
-// WHICH MESH TAKES THE CPU PATH. A mesh in a group (a matrix for each group
-// of vertices, the flag of the mesh group), a mesh with a texture shift
-// (water, fire: DrawTriangle adds a shift to u and v), a mesh with a
-// texture on stage 1, a mesh with blend or with no depth write, and a draw
-// that h_DrawTriangle changes (the glow of a target, an advisor of a cut
-// scene, the box of a speech bubble).
+// THE ORDER. The five functions draw a mesh at once through
+// LH3DRender::DrawTriangle, in the order of their calls. The z sorter of the
+// engine (LH3DZSorter::NewZObject) holds whole objects with a callback, and
+// the callback calls the function of the mesh later, in the order of the
+// depth. So a mesh with blend or with no depth write needs no sort of its own:
+// the record of the GPU path comes at the same place as the draw of the CPU
+// path, with the same states, and the triangles of a mesh go in the order of
+// its indices in both paths.
+//
+// WHICH MESH TAKES THE CPU PATH. A mesh with a matrix for each group of
+// vertices (the flag in the first word of the mesh group, as long as the
+// groups are not on the GPU), a draw with the clamp of the screen
+// (0x00FA9398), a mesh that h_DrawTriangle changes (the glow of a target, an
+// advisor of a cut scene, the box of a speech bubble), a mesh with more than
+// 20000 vertices or 40000 triangles, and a mesh of a function that
+// gpu_mesh_kinds leaves out. The keys gpu_mesh_blend, gpu_mesh_stage1,
+// gpu_mesh_uvshift and gpu_mesh_group put the other kinds on the CPU path
+// again. The log counts each reason apart.
 //
 // THE COMPARE (gpu_mesh=2). Each mesh that could take the GPU path is drawn
 // two times: the function of the game draws it in the left eye layer, and the
@@ -96,6 +108,8 @@ const uintptr_t kNeedTilling = 0x00ECA614;
 const uintptr_t kCullCache = 0x00ECA248;
 const uintptr_t kDoUpdateMaterial = 0x00C38714;
 const uintptr_t kUvShift = 0x00ECA628;         // the part shifts u and v
+const uintptr_t kUvShiftU = 0x00ECA62C;
+const uintptr_t kUvShiftV = 0x00ECA630;
 const uintptr_t kClampOn = 0x00FA9398;         // DrawTriangle clamps the screen
 const uintptr_t kMeshCounter = 0x00F05184;
 const uintptr_t kCurrentMesh = 0x00F0517C;
@@ -103,6 +117,11 @@ const uintptr_t kGroup = 0x00FA93BC;           // the mesh group: flags first
 const uintptr_t kPart = 0x00EA1AE8;            // the 3D part being drawn
 const uintptr_t kOffsetPointer = 0x00F05180;
 const uintptr_t kMatrix = 0x00EA9EA0;          // pointer to the 12 floats
+const uintptr_t kGroupMatrices = 0x00E9FE48;   // pointer to the matrices of the groups
+const uintptr_t kLightPosition = 0x00EA9E80;   // 3 floats: the light in camera space
+const uintptr_t kRootTable = 0x00EEA394;       // pointer to the table of fn_00841170
+const uintptr_t kSetInverse = 0x007FB290;      // LHMatrix::SetInverse, fastcall (out, in)
+const uintptr_t kInverseRoot = 0x00841170;     // cdecl float (float)
 const uintptr_t kNearPlane = 0x00E839E0;
 const uintptr_t kHalfX = 0x00E839F0;
 const uintptr_t kHalfY = 0x00E839F4;
@@ -128,32 +147,65 @@ int g_mode = 0;  // gpu_mesh
 int g_compare_every = 0;  // gpu_mesh_compare_every: frames between two samples of the compare
 uint32_t g_kinds = 31;    // gpu_mesh_kinds: bit k of the functions on the GPU path
 uint32_t g_base_kinds = 31;
+uint32_t g_parts_keys = gm::kPartsAll;  // gpu_mesh_blend and the other keys
+uint32_t g_parts = gm::kPartsAll;       // the parts now (the test key turns them off)
+uint32_t g_check_frames = 120;          // gpu_mesh_check_frames
+bool g_timer = false;                   // gpu_mesh_timer
 uint64_t g_frames = 0;
 int g_sample = 0;
 int g_twin_lines[kKinds + 1] = {};
 bool g_test_keys = false;
 bool g_in = false;
 bool g_key_down = false;
+bool g_parts_key_down = false;
 bool g_said_backend = false;
+// Latched for each frame (GpuMeshFrame): the mode, and a renderer that draws
+// the meshes.
+bool g_active = false;
+uint32_t g_frame = 0;  // the frame number of the checks of the data
 uint64_t g_report_at = 0;
 
 // For the report.
 struct Counts {
   uint32_t gpu[kKinds] = {};
   uint32_t cpu[kKinds] = {};
-  uint32_t why_pre = 0;     // the checks before the material
-  uint32_t why_special = 0; // h_DrawTriangle would change the batch
-  uint32_t why_state = 0;   // blend, no depth write, stage 1
-  uint32_t why_table = 0;   // the table of meshes is full
-  uint32_t why_kind = 0;    // gpu_mesh_kinds leaves the function out
+  // The reasons for the CPU path. A mesh has the first that applies.
+  uint32_t r_data = 0;      // no vertices, no indices, or too many
+  uint32_t r_clamp = 0;     // DrawTriangle clamps the screen
+  uint32_t r_uv = 0;        // the shift of the texture (gpu_mesh_uvshift=0)
+  uint32_t r_group = 0;     // a matrix for each group of vertices
+  uint32_t r_offsets = 0;   // fn_00859530 without its offsets
+  uint32_t r_special = 0;   // h_DrawTriangle would change the batch
+  uint32_t r_kind = 0;      // gpu_mesh_kinds leaves the function out
+  uint32_t r_table = 0;     // the table of meshes is full
+  uint32_t r_blend = 0;     // blend (gpu_mesh_blend=0)
+  uint32_t r_nozwrite = 0;  // no depth write (gpu_mesh_blend=0)
+  uint32_t r_noztest = 0;   // no depth test (gpu_mesh_blend=0)
+  uint32_t r_stage1 = 0;    // a texture on stage 1 (gpu_mesh_stage1=0)
+  uint32_t r_cached = 0;    // the state test failed in the last frames of this mesh
+  // What the meshes on the GPU path have.
+  uint32_t f_blend = 0, f_nozwrite = 0, f_noztest = 0, f_stage1 = 0, f_uv = 0;
   uint32_t data_sent = 0;
+  uint32_t data_changed = 0;  // a mesh whose words changed at the same address
+  uint32_t data_full = 0;     // full sums
+  uint32_t data_retry = 0;    // data that the renderer dropped, given again
+  uint32_t f_group = 0;       // meshes on the GPU path with groups
+  uint32_t groups = 0;        // the groups of those meshes
+  uint32_t lights = 0;        // lights of groups checked against the functions of the game
+  uint32_t light_diff = 0;    // of them with other bits
   uint64_t data_bytes = 0;
-  uint64_t gpu_ticks = 0;   // the time of the hook for the GPU path
-  uint64_t cpu_ticks = 0;   // the time of the function of the game
+  uint64_t gpu_ticks = 0;     // the hook for the meshes on the GPU path
+  uint64_t cpu_ticks = 0;     // the function of the game
+  uint64_t check_ticks = 0;   // the checks (and the material) of a mesh that went to the CPU
+  uint64_t part_ticks[6] = {};
+  // gpu_mesh_timer=1: the meshes by material type (the word at +0 of the mesh).
+  uint32_t t_gpu[32] = {}, t_cpu[32] = {}, t_blend[32] = {}, t_nowrite[32] = {};
+  uint32_t t_stage1[32] = {}, t_uv[32] = {}, t_group[32] = {};
   uint32_t vertices = 0, triangles = 0, offsets = 0;
 };
 Counts g_counts;
 uint64_t g_window_tsc = 0, g_window_qpc = 0;
+const char* const kPartName[6] = {"checks", "material", "state", "consts", "data", "record"};
 
 // THE TABLE OF THE MESHES: what the renderer has, by the address of the
 // mesh. A mesh that the game made again at the same address has other words
@@ -163,9 +215,17 @@ struct Known {
   const void* vertices;
   const void* indices;
   uint64_t hash;
+  uint32_t sample;
   uint32_t vertex_count, triangles;
   uint32_t epoch;
+  uint32_t group_count;  // the groups that the renderer has for the mesh (0: none)
+  uint32_t next_full;  // the frame of the next full sum
+  uint32_t cpu_until;  // the frame until which the mesh goes to the CPU path (the state test failed)
+  uint32_t retry_at;   // the frame of the next try to give the renderer its data, or 0
+  uint32_t flags;
 };
+const uint32_t kKnownChanged = 1u;  // the words changed in place: a full sum at each draw
+const uint32_t kKnownBadGroups = 2u;  // the groups of the mesh do not add up to its vertices
 const uint32_t kTableSize = 1u << 15;
 Known* g_table = nullptr;
 
@@ -202,7 +262,7 @@ uint32_t MeshColor(const uint8_t* mesh, uint32_t color) {
          (channel(2, (color >> 16) & 0xFF) & 0xFF) << 16 | channel(3, color >> 24) << 24;
 }
 
-// What the function does after the loops, for a mesh that is drawn: the
+// What the function does after the loops for a mesh that is drawn: the
 // material, the tiling and the cull mode.
 void RunMaterial(uint8_t* mesh) {
   if (Read<uint32_t>(kDoUpdateMaterial) == 0) return;
@@ -230,6 +290,11 @@ void RunMaterial(uint8_t* mesh) {
 
 // The offsets of fn_00859530 as 3 floats for each vertex.
 float g_expanded[3 * gm::kMostVertices];
+// The groups of a draw: 12 floats for each group (the matrix in the rows of
+// the shader), then with a light 4 floats for each group. And the ordinal of
+// the group of each vertex for the data of a mesh.
+float g_group_floats[gm::kMostGroups * 16];
+uint16_t g_ordinals[gm::kMostVertices];
 
 // The values of one draw that Prepare made.
 struct Prepared {
@@ -239,46 +304,183 @@ struct Prepared {
   const float* source;    // the offsets of the game, for the pointer after the draw
   uint32_t offset_step;   // floats of the game for each vertex: 1 or 3
   uint32_t vertex_count, triangles;
+  const float* groups;    // the matrices and lights of the groups, or null
+  uint32_t group_count;
   float first_field;      // for DrawHooksMeshBatch
   uint32_t zfunc, cull, zwrite;  // the device now, for the log of the compare
 };
 
+// The clock of the parts of the hook (gpu_mesh_timer=1).
+struct PartClock {
+  uint64_t last = 0;
+  void Start() {
+    if (g_timer) last = __rdtsc();
+  }
+  void Lap(int part) {
+    if (!g_timer) return;
+    const uint64_t now = __rdtsc();
+    g_counts.part_ticks[part] += now - last;
+    last = now;
+  }
+};
+
+// The data of the mesh for the renderer, one time. The full sum over the words
+// is the proof that the data are the data that the renderer has. A mesh of the
+// game is an asset (its vertices and indices do not change in place), so a
+// draw tests the pointers, the counts and a sample of a few words, and the
+// full sum comes at a slow rate (gpu_mesh_check_frames), and at each draw for a
+// mesh whose words changed once. The offsets of a person or an animal are not
+// part of the data: each draw sends them.
+void GiveData(Known* known, uintptr_t m, const uint8_t* vertices, uint32_t n,
+              const uint16_t* indices, uint32_t triangles, const gm::MeshGroup* groups,
+              uint32_t group_count, bool want_groups) {
+  const uint32_t epoch = VkStreamMeshEpoch();
+  const bool same_place = known->mesh == m && known->vertices == vertices &&
+                          known->indices == indices && known->vertex_count == n &&
+                          known->triangles == triangles;
+  // A mesh drawn without its groups before, and now with them, gets its data
+  // again with the groups.
+  const bool groups_missing =
+      want_groups && known->group_count == 0 && (known->flags & kKnownBadGroups) == 0;
+  uint64_t hash = 0;
+  bool have_hash = false;
+  if (same_place && known->epoch == epoch && !groups_missing) {
+    if (known->retry_at != 0 && g_frame >= known->retry_at) {
+      ++g_counts.data_retry;
+      const bool have_groups = known->group_count != 0 && groups != nullptr &&
+                               gm::GroupOrdinals(groups, group_count, n, g_ordinals);
+      known->retry_at = VkSceneMeshRetry(m, known->hash, vertices, n, indices, triangles,
+                                         have_groups ? g_ordinals : nullptr,
+                                         have_groups ? group_count : 0)
+                            ? 0u
+                            : g_frame + 30u;
+    }
+    const bool full = g_check_frames == 0 || (known->flags & kKnownChanged) != 0 ||
+                      static_cast<int32_t>(g_frame - known->next_full) >= 0;
+    const uint32_t sample = gm::MeshSample(vertices, n, indices, triangles);
+    if (sample == known->sample && !full) return;
+    ++g_counts.data_full;
+    hash = gm::MeshHash(vertices, n, indices, triangles, groups, group_count);
+    known->next_full = g_frame + g_check_frames + static_cast<uint32_t>((m >> 4) % 64);
+    if (hash == known->hash) {
+      known->sample = sample;
+      return;
+    }
+    have_hash = true;
+    known->flags |= kKnownChanged;
+    ++g_counts.data_changed;
+  }
+  if (!have_hash) hash = gm::MeshHash(vertices, n, indices, triangles, groups, group_count);
+  // The ordinals of the groups go with the data when the mesh has valid
+  // groups. A retry of the renderer has them from g_ordinals only while the
+  // mesh is the last one that was given, so it keeps a copy: see below.
+  uint32_t sent_groups = 0;
+  known->flags &= ~kKnownBadGroups;
+  if (groups != nullptr) {
+    if (gm::GroupOrdinals(groups, group_count, n, g_ordinals)) {
+      sent_groups = group_count;
+    } else {
+      known->flags |= kKnownBadGroups;
+    }
+  }
+  const bool taken = VkSceneMeshData(m, hash, vertices, n, indices, triangles,
+                                     sent_groups != 0 ? g_ordinals : nullptr, sent_groups);
+  known->mesh = m;
+  known->hash = hash;
+  known->sample = gm::MeshSample(vertices, n, indices, triangles);
+  known->epoch = epoch;
+  known->vertex_count = n;
+  known->triangles = triangles;
+  known->vertices = vertices;
+  known->indices = indices;
+  known->group_count = sent_groups;
+  known->next_full = g_frame + g_check_frames + static_cast<uint32_t>((m >> 4) % 64);
+  // A renderer in this process that dropped the data (no room, not ready)
+  // gets them again from the data of this draw, in a few frames.
+  known->retry_at = taken ? 0u : g_frame + 30u;
+  ++g_counts.data_sent;
+  g_counts.data_bytes += static_cast<uint64_t>(n) * 32 + static_cast<uint64_t>(triangles) * 6 +
+                         (sent_groups != 0 ? static_cast<uint64_t>(n) * 2 : 0);
+}
+
 // The checks, the material, the state of the device and the data of the mesh.
 // True when the mesh takes the GPU path. False: nothing is drawn, and the
 // function of the game must run.
-bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
+bool Prepare(Kind kind, uint8_t* mesh, Prepared* out, PartClock* clock) {
   const uintptr_t m = reinterpret_cast<uintptr_t>(mesh);
   // The checks that need no material.
   const int32_t vertex_count = Read<int32_t>(m + 0x10);
   const int32_t triangles = Read<int32_t>(m + 0x18);
   const uint8_t* vertices = Read<const uint8_t*>(m + 0x14);
   const uint16_t* indices = Read<const uint16_t*>(m + 0x1C);
-  const float* matrix = Read<const float*>(kMatrix);
   if (vertex_count <= 0 || vertex_count > static_cast<int32_t>(gm::kMostVertices) ||
       triangles <= 0 || triangles > static_cast<int32_t>(gm::kMostTriangles) ||
-      vertices == nullptr || indices == nullptr || matrix == nullptr ||
-      Read<uint32_t>(kClampOn) != 0 ||
-      (Read<uint32_t>(kUvShift) != 0 && (mesh[5] & 0x10) == 0)) {
-    ++g_counts.why_pre;
+      vertices == nullptr || indices == nullptr) {
+    ++g_counts.r_data;
     return false;
   }
+  if (Read<uint32_t>(kClampOn) != 0) {
+    ++g_counts.r_clamp;
+    return false;
+  }
+  // The shift of the texture: DrawTriangle adds it for the material mesh, which
+  // is this mesh once the material ran.
+  const uintptr_t shift_mesh =
+      Read<uint32_t>(kDoUpdateMaterial) != 0 ? m : Read<uintptr_t>(kCurrentMaterial);
+  const bool shifted = Read<uint32_t>(kUvShift) != 0 && shift_mesh != 0 &&
+                       (Read<uint8_t>(shift_mesh + 5) & 0x10) == 0;
+  if (shifted && (g_parts & gm::kPartUvShift) == 0) {
+    ++g_counts.r_uv;
+    return false;
+  }
+  // A mesh with a matrix for each group of vertices: the flag of the mesh group.
+  // The list of groups of the mesh (a count at +0x20, a pointer at +0x24) goes
+  // with the data of the mesh when it is valid.
+  bool grouped = false;
+  const gm::MeshGroup* groups = nullptr;
+  uint32_t group_count = 0;
   if (kind != kOffsets) {
     const uintptr_t group = Read<uintptr_t>(kGroup);
-    if (group == 0 || (Read<uint32_t>(group) & 1u) != 0) {
-      ++g_counts.why_pre;
+    if (group == 0) {
+      ++g_counts.r_group;
+      return false;
+    }
+    grouped = (Read<uint32_t>(group) & 1u) != 0;
+  }
+  {
+    const int32_t count = Read<int32_t>(m + 0x20);
+    const gm::MeshGroup* list = Read<const gm::MeshGroup*>(m + 0x24);
+    if (count > 0 && count <= static_cast<int32_t>(gm::kMostGroups) && list != nullptr) {
+      groups = list;
+      group_count = static_cast<uint32_t>(count);
+    }
+  }
+  if (grouped) {
+    const float* list = Read<const float*>(kGroupMatrices);
+    if ((g_parts & gm::kPartGroup) == 0 || groups == nullptr || list == nullptr ||
+        Read<uintptr_t>(kRootTable) == 0) {
+      ++g_counts.r_group;
       return false;
     }
   }
-  // The values of the draw that the loop of the game reads: they are read
-  // before the material, as the loop reads them before it.
-  const uint32_t specular = Read<uint32_t>(kSpecular);
-  const uint32_t color = Read<uint32_t>(kColor);
   if ((g_kinds & (1u << kind)) == 0) {
-    ++g_counts.why_kind;
+    ++g_counts.r_kind;
     return false;
   }
+  // The inputs of the loops of the game. The function reads them before its
+  // material, so the hook does too.
+  const float* matrix = Read<const float*>(kMatrix);
+  if (matrix == nullptr && !grouped) {
+    ++g_counts.r_data;
+    return false;
+  }
+  const uint32_t specular = Read<uint32_t>(kSpecular);
+  const uint32_t color = Read<uint32_t>(kColor);
+  const float near_plane = Read<float>(kNearPlane);
+  const float half_x = Read<float>(kHalfX);
+  const float half_y = Read<float>(kHalfY);
   if (DrawHooksTriangleSpecial(specular)) {
-    ++g_counts.why_special;
+    ++g_counts.r_special;
     return false;
   }
   const uint32_t n = static_cast<uint32_t>(vertex_count);
@@ -288,7 +490,7 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
     const uintptr_t part = Read<uintptr_t>(kPart);
     offsets = Read<float*>(kOffsetPointer);
     if (part == 0 || offsets == nullptr) {
-      ++g_counts.why_pre;
+      ++g_counts.r_offsets;
       return false;
     }
     const uintptr_t vtable = Read<uintptr_t>(part);
@@ -298,30 +500,58 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
   }
   Known* known = FindKnown(m);
   if (known == nullptr) {
-    ++g_counts.why_table;
+    ++g_counts.r_table;
     return false;
   }
+  // A mesh whose state the parts of the path did not take: the function of
+  // the game, with no second run of the material, for a few frames.
+  if (known->cpu_until != 0 && g_frame < known->cpu_until) {
+    ++g_counts.r_cached;
+    return false;
+  }
+  clock->Lap(0);
 
   // The material, and the state of the device that it left.
   Write<void*>(kCurrentMesh, mesh);
   RunMaterial(mesh);
+  clock->Lap(1);
   gm::DeviceState state = {};
-  if (!VkDdrawMeshState(Read<void*>(kDevice), &state) || !gm::OpaqueState(state)) {
-    ++g_counts.why_state;
+  if (!VkDdrawMeshState(Read<void*>(kDevice), &state)) {
+    ++g_counts.r_data;
+    return false;
+  }
+  const uint32_t reasons = gm::StateReasons(state);
+  if (!gm::StateAllowed(reasons, g_parts)) {
+    // The first reason that is not on the GPU path.
+    if ((reasons & gm::kStateBlend) != 0 && (g_parts & gm::kPartBlend) == 0) {
+      ++g_counts.r_blend;
+    } else if ((reasons & gm::kStateNoZWrite) != 0 && (g_parts & gm::kPartBlend) == 0) {
+      ++g_counts.r_nozwrite;
+    } else if ((reasons & gm::kStateNoZTest) != 0 && (g_parts & gm::kPartBlend) == 0) {
+      ++g_counts.r_noztest;
+    } else {
+      ++g_counts.r_stage1;
+    }
+    known->cpu_until = g_frame + 30u;
     return false;
   }
   out->zfunc = state.z_func;
   out->cull = state.cull;
   out->zwrite = state.z_write;
+  clock->Lap(2);
 
   // The values of the draw.
   gm::Consts& c = out->c;
   c = gm::Consts();
-  gm::SetMatrix(&c, matrix);
-  c.near_plane = Read<float>(kNearPlane);
-  c.half_x = Read<float>(kHalfX);
-  c.half_y = Read<float>(kHalfY);
+  if (!grouped) gm::SetMatrix(&c, matrix);
+  c.near_plane = near_plane;
+  c.half_x = half_x;
+  c.half_y = half_y;
   c.specular = specular;
+  if (shifted) {
+    c.uv_shift_u = Read<float>(kUvShiftU);
+    c.uv_shift_v = Read<float>(kUvShiftV);
+  }
   const bool lit = kind == kLit || kind == kLitClip || kind == kOffsets;
   c.color = (kind == kLit || kind == kLitClip) ? MeshColor(mesh, color) : color;
   if (lit) {
@@ -349,30 +579,86 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
   }
   out->vertex_count = n;
   out->triangles = static_cast<uint32_t>(triangles);
+  out->groups = nullptr;
+  out->group_count = 0;
+  if (g_timer) {
+    const uint32_t type = Read<uint32_t>(m) & 31u;
+    ++g_counts.t_gpu[type];
+    if ((reasons & gm::kStateBlend) != 0) ++g_counts.t_blend[type];
+    if ((reasons & (gm::kStateNoZWrite | gm::kStateNoZTest)) != 0) ++g_counts.t_nowrite[type];
+    if ((reasons & gm::kStateStage1) != 0) ++g_counts.t_stage1[type];
+    if (shifted) ++g_counts.t_uv[type];
+    if (grouped) ++g_counts.t_group[type];
+  }
+  if (reasons != 0 || shifted) {
+    if ((reasons & gm::kStateBlend) != 0) ++g_counts.f_blend;
+    if ((reasons & gm::kStateNoZWrite) != 0) ++g_counts.f_nozwrite;
+    if ((reasons & gm::kStateNoZTest) != 0) ++g_counts.f_noztest;
+    if ((reasons & gm::kStateStage1) != 0) ++g_counts.f_stage1;
+    if (shifted) ++g_counts.f_uv;
+  }
+
+  clock->Lap(3);
 
   // The data of the mesh, one time.
-  const uint64_t hash = gm::MeshHash(vertices, n, indices, out->triangles);
-  const uint32_t epoch = VkStreamMeshEpoch();
-  if (known->mesh != m || known->hash != hash || known->epoch != epoch ||
-      known->vertex_count != n || known->triangles != out->triangles ||
-      known->vertices != vertices || known->indices != indices) {
-    VkSceneMeshData(m, hash, vertices, n, indices, out->triangles);
-    known->mesh = m;
-    known->hash = hash;
-    known->epoch = epoch;
-    known->vertex_count = n;
-    known->triangles = out->triangles;
-    known->vertices = vertices;
-    known->indices = indices;
-    ++g_counts.data_sent;
-    g_counts.data_bytes += static_cast<uint64_t>(n) * 32 + static_cast<uint64_t>(triangles) * 6;
+  GiveData(known, m, vertices, n, indices, out->triangles, groups, group_count, grouped);
+  clock->Lap(4);
+
+  // The matrices (and the lights) of the groups of this draw.
+  gm::Consts first_group = c;
+  if (grouped) {
+    if (known->group_count != group_count) {
+      // The counts of the groups are not the count of the vertices: the loop of
+      // the game leaves vertices as they were.
+      ++g_counts.r_group;
+      known->cpu_until = g_frame + 30u;
+      return false;
+    }
+    const float* list = Read<const float*>(kGroupMatrices);
+    const uint8_t* table = Read<const uint8_t*>(kRootTable);
+    float light_position[3];
+    memcpy(light_position, reinterpret_cast<const void*>(kLightPosition), 12);
+    float* lights = g_group_floats + group_count * 12;
+    for (uint32_t g = 0; g < group_count; ++g) {
+      const float* source = list + static_cast<size_t>(groups[g].matrix) * 12;
+      gm::Consts one = {};
+      gm::SetMatrix(&one, source);
+      memcpy(g_group_floats + g * 12, one.row, 48);
+      if (lit) {
+        gm::GroupLight(source, light_position, table, lights + g * 4);
+        lights[g * 4 + 3] = 0.0f;
+        if (g_mode == 2 && g_counts.lights < 4000) {
+          // The compare checks the light of a group against the functions of the game.
+          float inverse[12];
+          reinterpret_cast<void(__fastcall*)(float*, const float*)>(kSetInverse)(inverse, source);
+          const float lx = inverse[0] * light_position[0] + inverse[3] * light_position[1] +
+                           inverse[6] * light_position[2] + inverse[9];
+          const float ly = inverse[1] * light_position[0] + inverse[4] * light_position[1] +
+                           inverse[7] * light_position[2] + inverse[10];
+          const float lz = inverse[2] * light_position[0] + inverse[5] * light_position[1] +
+                           inverse[8] * light_position[2] + inverse[11];
+          const float k = reinterpret_cast<float(__cdecl*)(float)>(kInverseRoot)(
+              lx * lx + lz * lz + ly * ly);
+          const float want[3] = {lx * k, ly * k, lz * k};
+          ++g_counts.lights;
+          if (memcmp(want, lights + g * 4, 12) != 0) ++g_counts.light_diff;
+        }
+      }
+    }
+    out->groups = g_group_floats;
+    out->group_count = group_count;
+    c.flags |= gm::kGroup;
+    ++g_counts.f_group;
+    g_counts.groups += group_count;
+    first_group = c;
+    memcpy(first_group.row, g_group_floats, 48);
   }
 
   // The first vertex of the batch, for the measure of the nearest geometry
   // (DrawHooksMeshBatch): the rhw of the vertex, or its camera z when the game
   // clips it.
   const gm::Camera cam =
-      gm::CameraSpace(c, reinterpret_cast<const float*>(vertices), out->offsets);
+      gm::CameraSpace(first_group, reinterpret_cast<const float*>(vertices), out->offsets);
   const bool clipped = kind != kLit && kind != kFlat &&
                        !(cam.z >= c.near_plane && cam.x <= cam.z && cam.x >= -cam.z &&
                          cam.y <= cam.z && cam.y >= -cam.z);
@@ -386,7 +672,7 @@ bool Prepare(Kind kind, uint8_t* mesh, Prepared* out) {
 void Submit(Kind kind, uint8_t* mesh, const Prepared& p, bool effects) {
   const uintptr_t m = reinterpret_cast<uintptr_t>(mesh);
   if (effects) DrawHooksMeshBatch(p.first_field);
-  VkSceneDrawMesh(m, p.c, p.offsets, p.offset_floats);
+  VkSceneDrawMesh(m, p.c, p.offsets, p.offset_floats, p.groups, p.group_count);
   ++g_counts.gpu[kind];
   g_counts.vertices += p.vertex_count;
   g_counts.triangles += p.triangles;
@@ -404,8 +690,8 @@ void Submit(Kind kind, uint8_t* mesh, const Prepared& p, bool effects) {
 
 void Hook(Kind kind, void* mesh_in, void* edx) {
   uint8_t* mesh = static_cast<uint8_t*>(mesh_in);
-  if (g_mode == 0 || !VkDdrawOn() || !VkSceneDirect()) {
-    if (g_mode != 0 && !g_said_backend) {
+  if (!g_active) {
+    if (g_mode != 0 && !g_said_backend && !VkDdrawOn()) {
       g_said_backend = true;
       ModLog("gpu mesh     : gpu_mesh=%d needs backend=vulkan, so the meshes take the CPU "
              "path", g_mode);
@@ -415,14 +701,18 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
   }
   const uint64_t start = __rdtsc();
   Prepared p;
-  if (!Prepare(kind, mesh, &p)) {
+  PartClock clock;
+  clock.Start();
+  if (!Prepare(kind, mesh, &p, &clock)) {
     const uint64_t cpu_start = __rdtsc();
     g_back[kind](mesh, edx);
     ++g_counts.cpu[kind];
+    if (g_timer) ++g_counts.t_cpu[Read<uint32_t>(reinterpret_cast<uintptr_t>(mesh)) & 31u];
     g_counts.cpu_ticks += __rdtsc() - cpu_start;
-    g_counts.gpu_ticks += cpu_start - start;  // the checks and the material of this mesh
+    g_counts.check_ticks += cpu_start - start;  // the checks (and the material) of this mesh
     return;
   }
+  uint64_t back_ticks = 0;
   if (g_mode == 2) {
     // The compare: the function of the game draws the mesh into the left eye
     // layer, and the GPU path draws it into the right eye layer.
@@ -437,14 +727,17 @@ void Hook(Kind kind, void* mesh_in, void* edx) {
              p.c.row[1][3], p.c.row[2][3], p.first_field, p.zfunc, p.cull, p.zwrite);
     }
     OneWalkSetMode(kOneWalkLeftOnly);
+    const uint64_t back_start = __rdtsc();
     g_back[kind](mesh, edx);
+    back_ticks = __rdtsc() - back_start;
     OneWalkSetMode(kOneWalkRightOnly);
     Submit(kind, mesh, p, false);
     OneWalkSetMode(kOneWalkBoth);
   } else {
     Submit(kind, mesh, p, true);
   }
-  g_counts.gpu_ticks += __rdtsc() - start;
+  clock.Lap(5);
+  g_counts.gpu_ticks += __rdtsc() - start - back_ticks;
 }
 
 void __fastcall Hook0(void* mesh, void* edx) { Hook(kClip, mesh, edx); }
@@ -461,7 +754,7 @@ bool Expect(const Site& s) {
 const char* ModeText(int mode) {
   static const char* const kText[3] = {
       "The meshes take the CPU path of the game",
-      "The opaque meshes with one matrix take the GPU path: the renderer transforms, lights, "
+      "The meshes with one matrix take the GPU path: the renderer transforms, lights, "
       "clips and culls them",
       "A test aid: each such mesh is drawn with the CPU path in the left eye layer and with "
       "the GPU path in the right eye layer"};
@@ -504,49 +797,78 @@ void Report() {
     gpu += g_counts.gpu[k];
     cpu += g_counts.cpu[k];
   }
+  const Counts& c = g_counts;
   if (g_mode != 0 || gpu + cpu > 0) {
-    ModLog("gpu mesh     : gpu_mesh=%d, in 10 s: %u meshes on the GPU path (%u vertices, %u "
-           "triangles, %u offsets), %u on the CPU path. The GPU path by function: %s %u, %s "
-           "%u, %s %u, %s %u, %s %u. The CPU path by reason: checks before the material %u, "
-           "a draw that h_DrawTriangle changes %u, blend or no depth write or stage 1 %u, "
-           "table full %u, left out by gpu_mesh_kinds %u, and in the function of the game %u, %u, %u, %u, %u (by function). "
-           "Records of mesh data %u (%llu bytes), the renderer has %u meshes in %llu bytes "
-           "and drew %llu, %llu with no data. Time on the frame thread in 10 s: the GPU path "
-           "%.2f ms, the function of the game %.2f ms",
-           g_mode, gpu, g_counts.vertices, g_counts.triangles, g_counts.offsets, cpu,
-           kKindName[0], g_counts.gpu[0], kKindName[1], g_counts.gpu[1], kKindName[2],
-           g_counts.gpu[2], kKindName[3], g_counts.gpu[3], kKindName[4], g_counts.gpu[4],
-           g_counts.why_pre, g_counts.why_special, g_counts.why_state, g_counts.why_table,
-           g_counts.why_kind,
-           g_counts.cpu[0], g_counts.cpu[1], g_counts.cpu[2], g_counts.cpu[3], g_counts.cpu[4],
-           g_counts.data_sent, static_cast<unsigned long long>(g_counts.data_bytes),
-           renderer.meshes, static_cast<unsigned long long>(renderer.arena_bytes),
+    const double total = static_cast<double>(gpu) + static_cast<double>(cpu);
+    const double gpu_ms = per_ms > 0.0 ? static_cast<double>(c.gpu_ticks) / per_ms : 0.0;
+    const double cpu_ms = per_ms > 0.0 ? static_cast<double>(c.cpu_ticks) / per_ms : 0.0;
+    const double check_ms = per_ms > 0.0 ? static_cast<double>(c.check_ticks) / per_ms : 0.0;
+    ModLog("gpu mesh     : gpu_mesh=%d, parts 0x%X, in 10 s: %u meshes on the GPU path (%.1f "
+           "percent; %u vertices, %u triangles, %u offsets), %u on the CPU path. The GPU path by "
+           "function: %s %u, %s %u, %s %u, %s %u, %s %u. The GPU path has: blend %u, no depth "
+           "write %u, no depth test %u, stage 1 %u, shift of the texture %u. The CPU path by "
+           "reason: no data or too large %u, clamp of the screen %u, shift of the texture %u, "
+           "group %u, no offsets %u, h_DrawTriangle changes the draw %u, function left out by "
+           "gpu_mesh_kinds %u, table full %u, blend %u, no depth write %u, no depth test %u, "
+           "stage 1 %u, state of the last frames %u. The CPU path by function: %u, %u, %u, %u, "
+           "%u. Meshes with groups on the GPU path %u (%u groups; %u lights of groups checked against "
+           "the functions of the game, %u with other bits). Records of mesh data %u (%llu bytes), "
+           "full sums %u, meshes whose words changed %u, data given again %u. The renderer has %u meshes in %llu bytes and drew %llu, %llu "
+           "with no data, %llu with no room. Time on the frame thread in 10 s: the GPU path %.2f "
+           "ms (%.3f us a mesh), the function of the game %.2f ms (%.3f us a mesh), the checks "
+           "of the meshes that went to the CPU path %.2f ms",
+           g_mode, g_parts, gpu, total > 0.0 ? 100.0 * gpu / total : 0.0, c.vertices, c.triangles,
+           c.offsets, cpu, kKindName[0], c.gpu[0], kKindName[1], c.gpu[1], kKindName[2], c.gpu[2],
+           kKindName[3], c.gpu[3], kKindName[4], c.gpu[4], c.f_blend, c.f_nozwrite, c.f_noztest,
+           c.f_stage1, c.f_uv, c.r_data, c.r_clamp, c.r_uv, c.r_group, c.r_offsets, c.r_special,
+           c.r_kind, c.r_table, c.r_blend, c.r_nozwrite, c.r_noztest, c.r_stage1, c.r_cached,
+           c.cpu[0], c.cpu[1], c.cpu[2], c.cpu[3], c.cpu[4], c.f_group, c.groups, c.lights,
+           c.light_diff, c.data_sent,
+           static_cast<unsigned long long>(c.data_bytes), c.data_full, c.data_changed,
+           c.data_retry, renderer.meshes, static_cast<unsigned long long>(renderer.arena_bytes),
            static_cast<unsigned long long>(renderer.draws),
            static_cast<unsigned long long>(renderer.no_data),
-           per_ms > 0.0 ? static_cast<double>(g_counts.gpu_ticks) / per_ms : 0.0,
-           per_ms > 0.0 ? static_cast<double>(g_counts.cpu_ticks) / per_ms : 0.0);
+           static_cast<unsigned long long>(renderer.no_room), gpu_ms,
+           gpu > 0 ? gpu_ms * 1000.0 / gpu : 0.0, cpu_ms, cpu > 0 ? cpu_ms * 1000.0 / cpu : 0.0,
+           check_ms);
+    if (g_timer && gpu > 0 && per_ms > 0.0) {
+      // The parts of the hook for a mesh on the GPU path, in us for a mesh.
+      // "record" has the stream write and the draw of the renderer.
+      ModLog("gpu mesh     : gpu_mesh_timer=1, in 10 s for a mesh on the GPU path in us: %s %.3f, "
+             "%s %.3f, %s %.3f, %s %.3f, %s %.3f, %s %.3f. The checks of a mesh that went to the "
+             "CPU path are in the first part too",
+             kPartName[0], c.part_ticks[0] / per_ms * 1000.0 / gpu, kPartName[1],
+             c.part_ticks[1] / per_ms * 1000.0 / gpu, kPartName[2],
+             c.part_ticks[2] / per_ms * 1000.0 / gpu, kPartName[3],
+             c.part_ticks[3] / per_ms * 1000.0 / gpu, kPartName[4],
+             c.part_ticks[4] / per_ms * 1000.0 / gpu, kPartName[5],
+             c.part_ticks[5] / per_ms * 1000.0 / gpu);
+      // The meshes by material type: on the GPU path (all, with blend, with no
+      // depth write or test, with stage 1, with a shift of the texture, with
+      // groups) and on the CPU path.
+      char types[1024];
+      int at = 0;
+      for (int t = 0; t < 32 && at < 900; ++t) {
+        if (c.t_gpu[t] + c.t_cpu[t] == 0) continue;
+        at += _snprintf_s(types + at, sizeof(types) - at, _TRUNCATE,
+                          "%s%d: %u (%u, %u, %u, %u, %u) and %u", at > 0 ? ", " : "", t, c.t_gpu[t],
+                          c.t_blend[t], c.t_nowrite[t], c.t_stage1[t], c.t_uv[t], c.t_group[t],
+                          c.t_cpu[t]);
+      }
+      ModLog("gpu mesh     : by material type (type: GPU path (blend, no depth write or test, "
+             "stage 1, shift of the texture, group) and CPU path): %s", types);
+    }
   }
   g_counts = Counts();
 }
 
-}  // namespace
-
-void GpuMeshSetOptions(int mode, bool test_keys, int compare_every, int kinds) {
-  g_compare_every = compare_every;
-  g_kinds = g_base_kinds = static_cast<uint32_t>(kinds) & 31u;
-  g_mode = mode < 0 || mode > 2 ? 0 : mode;
-  g_test_keys = test_keys;
-  VkSceneSetMesh(g_mode == 2 ? 1 : 0);
-  ModLog("gpu mesh     : gpu_mesh=%d, gpu_mesh_kinds=%d. %s", g_mode, kinds, ModeText(g_mode));
-}
-
-void GpuMeshInstall() {
-  if (g_in || (g_mode == 0 && !g_test_keys)) return;
+bool InstallHooks() {
+  if (g_in) return true;
   for (int k = 0; k < kKinds; ++k) {
     if (!Expect(kSites[k])) {
       ModLog("gpu mesh     : the code at the start of %s is not the code of the game that the "
              "mod fits, so the meshes take the CPU path", kKindName[k]);
-      return;
+      return false;
     }
   }
   void* const hooks[kKinds] = {reinterpret_cast<void*>(&Hook0), reinterpret_cast<void*>(&Hook1),
@@ -569,25 +891,66 @@ void GpuMeshInstall() {
          static_cast<unsigned>(kSites[0].address), static_cast<unsigned>(kSites[1].address),
          static_cast<unsigned>(kSites[2].address), static_cast<unsigned>(kSites[3].address),
          static_cast<unsigned>(kSites[4].address), g_in ? "ok" : "FAILED");
-  if (!g_in) g_mode = 0;
+  return g_in;
+}
+
+}  // namespace
+
+void GpuMeshSetOptions(const GpuMeshOptions& o) {
+  g_compare_every = o.compare_every;
+  g_kinds = g_base_kinds = static_cast<uint32_t>(o.kinds) & 31u;
+  g_mode = o.mode < 0 || o.mode > 2 ? 0 : o.mode;
+  g_test_keys = o.test_keys;
+  g_parts_keys = (o.blend != 0 ? gm::kPartBlend : 0u) | (o.stage1 != 0 ? gm::kPartStage1 : 0u) |
+                 (o.uvshift != 0 ? gm::kPartUvShift : 0u) | (o.group != 0 ? gm::kPartGroup : 0u);
+  g_parts = g_parts_keys;
+  g_check_frames = o.check_frames < 0 ? 0u : static_cast<uint32_t>(o.check_frames);
+  g_timer = o.timer != 0;
+  VkSceneSetMesh(g_mode == 2 ? 1 : 0);
+  if (g_mode == 0 && !g_test_keys) return;
+  ModLog("gpu mesh     : gpu_mesh=%d, gpu_mesh_kinds=%d, parts 0x%X (blend %d, stage1 %d, uvshift "
+         "%d, group %d), gpu_mesh_check_frames=%d, gpu_mesh_timer=%d. %s",
+         g_mode, o.kinds, g_parts, o.blend, o.stage1, o.uvshift, o.group, o.check_frames, o.timer,
+         ModeText(g_mode));
+}
+
+void GpuMeshInstall() {
+  // With gpu_mesh=0 the game runs as it did before the hooks: the test key
+  // puts them in at its first press.
+  if (g_in || g_mode == 0) return;
+  if (!InstallHooks()) g_mode = 0;
 }
 
 int GpuMeshValue() {
-  if (!g_in) return kDebugCannot;
+  if (g_mode == 0 && !g_in && !g_test_keys) return kDebugCannot;
   return g_mode == 1 ? 1 : 0;
 }
 
 void GpuMeshToggle(const char* keys) {
+  if (g_mode == 0 && !g_in && !InstallHooks()) return;
   g_mode = g_mode == 1 ? 0 : 1;
   VkSceneSetMesh(0);
+  g_active = g_mode != 0 && VkDdrawOn() && VkSceneDirect();
   ControllersGesturePulse(0.5f, g_mode == 1 ? 0.30f : 0.08f);
   ModLog("test key     : %s, gpu_mesh is %d from the next mesh", keys, g_mode);
+}
+
+int GpuMeshPartsValue() {
+  if (!g_in) return kDebugCannot;
+  return g_parts == g_parts_keys ? 1 : 0;
+}
+
+void GpuMeshPartsToggle(const char* keys) {
+  g_parts = g_parts == g_parts_keys ? 0u : g_parts_keys;
+  ControllersGesturePulse(0.5f, g_parts == g_parts_keys ? 0.30f : 0.08f);
+  ModLog("test key     : %s, the parts of the GPU path are 0x%X from the next mesh", keys, g_parts);
 }
 
 // The compare samples (gpu_mesh_compare_every=N): each Nth frame the next frame
 // gives its difference to the log, and the functions on the GPU path go
 // through 6 sets in turn: all of them (gpu_mesh_kinds), then each function
 // alone. So one run gives the difference for each function.
+namespace {
 void Sample() {
   if (g_mode != 2 || g_compare_every <= 0) {
     g_kinds = g_base_kinds;
@@ -604,21 +967,44 @@ void Sample() {
   if (g_kinds == 0) return;
   VkSceneCompareNext(g_kinds);
 }
+}  // namespace
+
+// True while a window of the game process is in front: the test keys act only
+// then.
+static bool GameWindowInFront() {
+  const HWND window = GetForegroundWindow();
+  if (window == nullptr) return false;
+  DWORD process = 0;
+  GetWindowThreadProcessId(window, &process);
+  return process == GetCurrentProcessId();
+}
 
 void GpuMeshFrame() {
+  // Ctrl Shift 7 and Ctrl Shift 6 (the digits of the top row): no other test
+  // key uses them.
+  if (g_test_keys) {
+    const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                            (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    const bool down = ctrl_shift && (GetAsyncKeyState('7') & 0x8000) != 0;
+    if (down && !g_key_down && GameWindowInFront()) {
+      if (g_mode == 2) {
+        g_mode = 0;
+        VkSceneSetMesh(0);
+        ModLog("test key     : Ctrl Shift 7, gpu_mesh is 0 from the next mesh");
+      } else {
+        GpuMeshToggle("Ctrl Shift 7");
+      }
+    }
+    g_key_down = down;
+    const bool parts_down = ctrl_shift && (GetAsyncKeyState('6') & 0x8000) != 0;
+    if (parts_down && !g_parts_key_down && g_in && GameWindowInFront()) {
+      GpuMeshPartsToggle("Ctrl Shift 6");
+    }
+    g_parts_key_down = parts_down;
+  }
   if (!g_in) return;
+  ++g_frame;
+  g_active = g_mode != 0 && VkDdrawOn() && VkSceneDirect();
   Report();
   Sample();
-  if (!g_test_keys) return;
-  const bool ctrl_shift = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
-                          (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-  const bool down = ctrl_shift && (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
-  if (down && !g_key_down) {
-    // 1, 0, 2, 1 ...: the compare needs one_walk=1, which the renderer
-    // checks for the draw.
-    g_mode = g_mode == 1 ? 0 : (g_mode == 0 ? 2 : 1);
-    VkSceneSetMesh(g_mode == 2 ? 1 : 0);
-    ModLog("gpu mesh     : Ctrl Shift F10: gpu_mesh=%d. %s", g_mode, ModeText(g_mode));
-  }
-  g_key_down = down;
 }

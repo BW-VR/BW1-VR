@@ -15,9 +15,15 @@
 // is the constant per_rhw * (2 / Width) in clip space (the move of the pixel
 // times w is per_rhw * rhw * w = per_rhw, as rhw = 1 / w).
 //
-// Compile with (OFFSETS: the second shader, with the offset of each vertex):
+// Three variants (tools/mesh_shaders.ps1 makes vk_mesh_vert.h from them):
 //   glslc -mfmt=c --target-env=vulkan1.3 -fshader-stage=vertex vk_mesh.vert
-//   glslc -mfmt=c --target-env=vulkan1.3 -fshader-stage=vertex -DOFFSETS vk_mesh.vert
+//   OFFSETS: the offset of each vertex (a person or an animal, fn_00859530)
+//   GROUPS:  a matrix for each group of vertices (and a light for each group
+//            when the mesh is lit). The ordinal of the group of a vertex is
+//            vertex buffer 2, and the matrices and the lights are the storage
+//            buffer of set 2. The record has their float indices in row0.x
+//            (the matrices, 12 floats for each group, the rows as SetMatrix
+//            makes them) and row0.y (the lights, 4 floats for each group).
 
 layout(location = 0) in vec3 in_pos;
 layout(location = 1) in vec2 in_uv;
@@ -25,11 +31,15 @@ layout(location = 2) in vec3 in_normal;
 layout(location = 3) in vec4 row0;
 layout(location = 4) in vec4 row1;
 layout(location = 5) in vec4 row2;
-layout(location = 6) in vec4 scene;    // near, half_x, half_y, unused
+layout(location = 6) in vec4 scene;    // near, half_x, half_y, the shift of u
 layout(location = 7) in uvec4 colors;  // color, specular, ambient, flags
-layout(location = 8) in vec4 light;    // direction xyz in the space of the mesh
+layout(location = 8) in vec4 light;    // direction xyz in the space of the mesh, the shift of v
 #ifdef OFFSETS
 layout(location = 9) in vec3 offset;
+#endif
+#ifdef GROUPS
+layout(location = 9) in uint group;
+layout(std430, set = 2, binding = 0) readonly buffer Groups { float g[]; } groups;
 #endif
 
 layout(push_constant) uniform Draw {
@@ -66,9 +76,16 @@ void main() {
   p += offset;
 #endif
   const vec4 q = vec4(p, 1.0);
+#ifdef GROUPS
+  const uint at = uint(row0.x) + group * 12u;
+  const float cx = dot(vec4(groups.g[at], groups.g[at + 1u], groups.g[at + 2u], groups.g[at + 3u]), q);
+  const float cy = dot(vec4(groups.g[at + 4u], groups.g[at + 5u], groups.g[at + 6u], groups.g[at + 7u]), q);
+  const float cz = dot(vec4(groups.g[at + 8u], groups.g[at + 9u], groups.g[at + 10u], groups.g[at + 11u]), q);
+#else
   const float cx = dot(row0, q);
   const float cy = dot(row1, q);
   const float cz = dot(row2, q);
+#endif
   const float near_plane = scene.x;
   const float w = cz / near_plane;
   const float kx = scene.y * draw.viewport.z;
@@ -85,8 +102,14 @@ void main() {
 
   uint color = colors.x;
   if ((colors.w & 1u) != 0u) {
-    const float d = (light.z * in_normal.z + light.x * in_normal.x +
-                     light.y * in_normal.y) * 255.0;
+#ifdef GROUPS
+    const uint lb = uint(row0.y) + group * 4u;
+    const vec3 l = vec3(groups.g[lb], groups.g[lb + 1u], groups.g[lb + 2u]);
+#else
+    const vec3 l = light.xyz;
+#endif
+    const float d = (l.z * in_normal.z + l.x * in_normal.x +
+                     l.y * in_normal.y) * 255.0;
     const int i = (colors.w & 2u) != 0u ? int(d) : int(roundEven(d));
     const uint ambient = colors.z;
     uint level = ambient;
@@ -100,6 +123,8 @@ void main() {
   }
   out_diffuse = Unpack(color);
   out_specular = Unpack(colors.y);
-  out_uv = in_uv;
-  out_uv1 = vec2(0.0);
+  // DrawTriangle adds the shift to u and v. Stage 1 reads the same set of
+  // texture coordinates as stage 0 for the vertex format of the game.
+  out_uv = in_uv + vec2(scene.w, light.w);
+  out_uv1 = out_uv;
 }

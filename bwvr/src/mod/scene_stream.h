@@ -314,16 +314,20 @@ struct MeshDataBody {
   uint64_t hash;
   uint32_t vertex_count;    // vertices of 32 bytes follow
   uint32_t triangle_count;  // then 3 indices of 16 bits for each triangle
+  uint32_t group_count;     // 0, or the groups of the mesh: then 16 bits for each vertex follow, its group
+  uint32_t reserved;
 };
 
 // The offsets of kMeshDraw: 0 none, else 3 floats for each vertex follow the
-// body (a person or an animal, fn_00859530).
+// body (a person or an animal, fn_00859530). Then, for a mesh with groups
+// (gpu_mesh_math::kGroup), 12 floats for each group (its matrix in the rows of
+// the shader), and with kLit 4 floats for each group (its light).
 struct MeshDrawBody {
   StreamState state;
   uint64_t mesh;
   gpu_mesh_math::Consts consts;
   uint32_t offset_floats;   // 0 or 3 * vertex_count
-  uint32_t reserved;
+  uint32_t group_count;     // 0 or the groups of the draw
 };
 
 // The mod is 32 bit and the app is 64 bit: each body has one size on both.
@@ -369,7 +373,7 @@ static_assert(sizeof(WindowBody) == 136 && offsetof(WindowBody, crop) == 8 &&
                   offsetof(WindowBody, wall_size) == 100 &&
                   offsetof(WindowBody, alpha) == 132,
               "WindowBody");
-static_assert(sizeof(MeshDataBody) == 24, "MeshDataBody");
+static_assert(sizeof(MeshDataBody) == 32, "MeshDataBody");
 static_assert(sizeof(MeshDrawBody) == 40 + 8 + 96 + 8, "MeshDrawBody");
 static_assert(sizeof(ScreenBody) == 72 && offsetof(ScreenBody, count) == 8 &&
                   offsetof(ScreenBody, surface) == 16 && offsetof(ScreenBody, width) == 24 &&
@@ -394,17 +398,29 @@ class Writer {
     bytes_.insert(bytes_.end(), records, records + n);
   }
 
-  // A record of one body and up to two blocks after it.
+  // A record of one body and up to three blocks after it.
   void Record(Kind kind, const void* body, uint32_t body_bytes,
               const void* a = nullptr, uint32_t a_bytes = 0,
-              const void* b = nullptr, uint32_t b_bytes = 0) {
-    const uint32_t size = body_bytes + a_bytes + b_bytes;
+              const void* b = nullptr, uint32_t b_bytes = 0,
+              const void* c = nullptr, uint32_t c_bytes = 0) {
+    const uint32_t size = body_bytes + a_bytes + b_bytes + c_bytes;
     const uint32_t head[2] = {static_cast<uint32_t>(kind), size};
-    Put(head, sizeof(head));
-    Put(body, body_bytes);
-    Put(a, a_bytes);
-    Put(b, b_bytes);
-    while ((bytes_.size() & 3) != 0) bytes_.push_back(0);
+    // One growth of the buffer for the whole record, with the padding to 4
+    // bytes, then the copies. A record of a draw of a mesh is hundreds of
+    // bytes, and a byte by byte insert was most of its cost.
+    const size_t at = bytes_.size();
+    const size_t padded = (static_cast<size_t>(size) + sizeof(head) + 3) & ~static_cast<size_t>(3);
+    bytes_.resize(at + padded);
+    uint8_t* p = bytes_.data() + at;
+    memcpy(p, head, sizeof(head));
+    p += sizeof(head);
+    if (body_bytes > 0 && body != nullptr) memcpy(p, body, body_bytes);
+    p += body_bytes;
+    if (a_bytes > 0 && a != nullptr) memcpy(p, a, a_bytes);
+    p += a_bytes;
+    if (b_bytes > 0 && b != nullptr) memcpy(p, b, b_bytes);
+    p += b_bytes;
+    if (c_bytes > 0 && c != nullptr) memcpy(p, c, c_bytes);
   }
 
  private:

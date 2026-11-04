@@ -650,9 +650,7 @@ int g_object_timer = 0;
 int g_land_objects = 1;
 int g_land_objects_threads = 0;
 int g_part_draw = 0;
-int g_gpu_mesh = 0;
-int g_gpu_mesh_compare_every = 0;
-int g_gpu_mesh_kinds = 31;
+GpuMeshOptions g_gpu_mesh;  // gpu_mesh and its keys (gpu_mesh.h)
 char g_object_timer_sites[512] = "";
 int g_game_sse_parts = 0;  // game_sse_parts, game_sse_parts.h
 int g_game_sse_check = 0;  // game_sse_check
@@ -1768,12 +1766,24 @@ void ReadSettings() {
   g_part_draw = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "part_draw", 0, path));
   // The meshes of the 3D parts on the GPU (gpu_mesh.h).
-  g_gpu_mesh = static_cast<int>(
+  g_gpu_mesh.mode = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh", 0, path));
-  g_gpu_mesh_compare_every = static_cast<int>(
+  g_gpu_mesh.compare_every = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_compare_every", 0, path));
-  g_gpu_mesh_kinds = static_cast<int>(
+  g_gpu_mesh.kinds = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "gpu_mesh_kinds", 31, path));
+  g_gpu_mesh.blend = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_blend", 1, path));
+  g_gpu_mesh.stage1 = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_stage1", 1, path));
+  g_gpu_mesh.uvshift = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_uvshift", 1, path));
+  g_gpu_mesh.group = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_group", 1, path));
+  g_gpu_mesh.check_frames = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_check_frames", 120, path));
+  g_gpu_mesh.timer = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "gpu_mesh_timer", 0, path));
   // The timer of the objects on the land (object_timer.h), a test aid.
   g_object_timer = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "object_timer", 0, path));
@@ -2281,7 +2291,8 @@ void StartVrStep() {
     LandObjectsInstall();
     PartDrawSetOptions(g_part_draw, g_test_keys);
     PartDrawInstall();
-    GpuMeshSetOptions(g_gpu_mesh, g_test_keys, g_gpu_mesh_compare_every, g_gpu_mesh_kinds);
+    g_gpu_mesh.test_keys = g_test_keys;
+    GpuMeshSetOptions(g_gpu_mesh);
     GpuMeshInstall();
     ObjectTimerSetOptions(g_object_timer, g_object_timer_sites, g_test_keys);
     D3D7CountSetOptions(g_d3d7_count);

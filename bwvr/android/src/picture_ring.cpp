@@ -357,6 +357,23 @@ void PictureRing::CopyDirect(int i, VkImage source, const eye_copy_math::Rect& p
   stamps_.After(cmd, static_cast<uint32_t>(i));
 }
 
+// THE ONE PASS: no copy. The barrier orders this command buffer after the writes
+// of the walks to the swapchain image, on the queue, and keeps the layout.
+void PictureRing::DensityMark(int i, VkImage image) {
+  VkCommandBuffer cmd = slots_[i].cmd;
+  VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  b.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b.image = image;
+  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 2};
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                       &b);
+}
+
 // THE LATE COMPOSE: the eye pictures from the outer image and the centre image
 // of the walk, straight into the swapchain image of each eye.
 bool PictureRing::ComposeDirect(int i, const VkImage targets[2], uint32_t format,

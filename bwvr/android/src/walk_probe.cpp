@@ -165,6 +165,11 @@ VKAPI_ATTR void VKAPI_CALL BeginRendering(VkCommandBuffer cb, const VkRenderingI
               VK_NULL_HANDLE) {
         key.rate = true;
       }
+      if (n->sType == VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_INFO_EXT &&
+          reinterpret_cast<const VkRenderingFragmentDensityMapAttachmentInfoEXT*>(n)->imageView !=
+              VK_NULL_HANDLE) {
+        key.density = true;
+      }
     }
     uint32_t mark = 0;
     if (e->rec.PassBegin(key, &mark)) Stamp(cb, e, mark);

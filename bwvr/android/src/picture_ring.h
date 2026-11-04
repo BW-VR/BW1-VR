@@ -183,6 +183,12 @@ class PictureRing {
   // time log. False when the renderer cannot record it, then nothing is written.
   bool ComposeDirect(int i, const VkImage targets[2], uint32_t format,
                      const eye_copy_math::Rect& part);
+  // THE ONE PASS (xr_density_pass=1): the walks drew the eye picture into the
+  // swapchain image `image` of the slot (two layers). The command buffer of the
+  // slot waits for those writes, so the fence of the slot is signaled only
+  // when the picture is finished, and the image stays in the layout of a color
+  // attachment for the release (XrApp::DirectEnd). No copy.
+  void DensityMark(int i, VkImage image);
   // The compose into the image of the renderer, the layers of the eye picture
   // that a copy takes after it (CopyEyes, CopyDirect, CopyScreen).
   bool ComposeEyes(int i, const eye_copy_math::Rect& part);

@@ -1360,6 +1360,23 @@ that moves while the Hand takes it.
   commands of the mesh draws (`backend.md` says what they need), and a depth of
   16 bits for the two small passes (fewer bins on a GPU with tiles, but
   another precision for the Z test).
+- **N37. The one pass with a density map on the Steam Frame** (`backend.md`, "The one
+  pass with a density map", `android.md`, "The one pass with a density map"). With
+  `xr_density_pass=1` the walk of both eyes draws its list of draws one time, straight
+  into a swapchain image of two layers of its slot, with a fragment density map from the
+  keys of `fovea_res`. It leaves out the second play of the list of draws (2.3 us for each
+  draw), the pass that makes the eye picture and the copy. Next on the Frame: a session with
+  the keys of the doc (`xr_density_pass=1`, `xr_eye_direct=1`, `fovea_res=1`,
+  `fovea_res_layer=0`, `fovea_res_outer_pct=25`, `fovea_res_center_deg=20`) and the same
+  view with `xr_density_pass=0`: the lines "probe :" (what the runtime gives), the line "the
+  one pass" of the time log, the GPU parts of the walk, "the GPU in ms: a picture" (the goal
+  is well below 5 to 8 ms in the view of the middle of the island), the look of the blocks
+  outside the middle, the ring (`vk_density_ring_deg` 0 and 8), the follow of the gaze, and
+  `vk_density_depth` 0 and 1. Open: the debug page has no row that shows the path (the page
+  is in the game, and the path is in the app), the map of the runtime on its own swapchains
+  (the probe logs what it gives), the offset of the gaze with
+  `VK_QCOM_fragment_density_map_offset` (it needs a render pass of the old kind), and a depth
+  that is not stored for the whole walk.
 - **N36. Old pictures in the headset when the menu of the game opens**
   (`android.md`, "The age of a picture in the layer"). On the Steam Frame the
   headset shows pictures of the land from some time before, in a flicker with

@@ -3377,11 +3377,12 @@ its features and the size of its texels, `VK_EXT_fragment_density_map2`,
 pass that draws into an image of a swapchain. The renderer draws into
 images of its own, and the app copies them into the swapchains, so it
 cannot act on the eye pictures. `VK_EXT_fragment_density_map` acts on a
-render pass of the renderer, but the GPU of the PC (Radeon RX 7900 XTX) and
-the emulator have none, so no run can show it. The emulator has no shading
-rate attachment either (`foveation`). The Quest 3 has a shading rate
-attachment. The outer image of `fovea_res` already has fewer pixels at the
-edge.
+render pass of the renderer: the one pass uses it ("The copies of the eye
+pictures", "The one pass with a density map"). The GPU of the PC (Radeon RX 7900
+XTX) and the emulator have none, so no desktop run or emulator run can show it.
+The emulator has no shading rate attachment either (`foveation`). The Quest 3
+has a shading rate attachment. The outer image of `fovea_res` already has fewer
+pixels at the edge.
 
 **The textures.** The renderer of the app has an anisotropic filter of up
 to 16 (the log of the Quest: "filtering : anisotropic 16x, min=1 mag=1"),
@@ -3931,6 +3932,9 @@ parts that the picture does not need:
 | `vk_atlas_area` | 1 | The renderer of the app clears and writes only the shown part of the eye picture when it puts the two images into it (`ComposeAtlas` of `vk_scene.cpp`, a render area of that part). Its clear gives the gap its black with an alpha of 0 | 0: the whole eye picture. On the PC always 0 |
 | `xr_eye_direct` | 0 | The play thread copies each picture of the projection layer straight into two swapchains of its slot, and the session copies nothing for the eyes | 0: the copy into the slot and the copy of the session |
 | `xr_compose_direct` | 0 | Needs `xr_eye_direct=1`. A walk with `fovea_res=1` and `fovea_res_layer=0` leaves its eye picture to the app, and the play thread draws the eye picture of each eye from the outer image and the centre image straight into the swapchain image of its slot, in one pass ("The compose into the swapchains"). The renderer makes no eye picture, and no copy of 48 MB follows | 0: the renderer makes the eye picture in its own image, and the play thread copies it |
+| `xr_density_pass` | 0 | A walk of both eyes with `fovea_res=1` draws one time into a swapchain image of its slot, with a fragment density map ("The one pass with a density map"). Needs `xr_eye_direct=1`, `fovea_res_layer=0` and the key at the start of the app | 0: the two images and the pass that makes the eye picture |
+| `vk_density_depth` | 1 | The depth of the first part of a pass is stored only after a walk was cut (a draw for the panel or a clear of one eye) | 0: always stored |
+| `vk_density_ring_deg` | 8 | The ring of the half density around the rect of `fovea_res`, in degrees (0 to 40) | 0: no ring |
 | `xr_panel_rect` | 0 | The copy of the panel image into a slot and the copy into its swapchain take only the smallest rect that holds the rects of the panel quads. A quad whose rect is not in the part of the last copy does not show | 0: the whole panel image |
 | `xr_resize_free` | 1 | A new Play frees the sets of swapchains that have another size than the render and makes them again, clears the failed flags, and a slot of `xr_eye_direct=1` replaces swapchains that do not fit a picture (see "A new render size in the same process" in "The size of the eye pictures") | 0: the sets stay as they are |
 | `frame_loop_hold` | 0 | N of 2 to 8: the session takes a new picture only after the shown picture showed in N frames of the session | 0 and 1: the newest finished picture at each frame |
@@ -4057,6 +4061,93 @@ swapchains reads and writes it again. With the key the two steps are one.
   compositor shows the image of the pass as it shows the image of a copy (the
   bytes of a desktop run differ from the old compose by 1 of 255 in 8.4 percent
   of the pixels of an sRGB target, `backend.md`).
+
+**The one pass with a density map** (`xr_density_pass=1`, `backend.md`, "The
+one pass with a density map"). The walk draws its list of draws one time, with
+both eyes, straight into a swapchain image of the slot of the picture, with a
+fragment density map. The map comes from the keys of `fovea_res`: the full
+density in the rect around the gaze (`fovea_res_center_deg`), a ring of half
+density (`vk_density_ring_deg`), and `fovea_res_outer_pct` outside. There is no
+outer image, no centre image, no pass that makes the eye picture and no copy.
+
+- **Keys for the Steam Frame.** `xr_eye_direct=1`, `fovea_res=1`,
+  `fovea_res_layer=0`, `fovea_res_outer_pct=25`, `fovea_res_center_pct=100`,
+  `fovea_res_center_deg=20`, `xr_density_pass=1`. The key must be 1 when the app
+  starts, because the device of the session gets the extension then. Without
+  `xr_compose_direct` (the pass has no use for it). `vk_density_depth=1` and
+  `vk_density_ring_deg=8` are the defaults. A session with `xr_density_pass=0` and
+  the same other keys is the comparison.
+- **The device.** With the key at the start the device of the session gets
+  `VK_EXT_fragment_density_map` when the GPU has it with the map and with images that
+  have no subsamples. The log says so ("xr : xr_density_pass at the start: 1. The
+  device gets the extension ..."). The instance of OpenXR gets the extensions of the
+  foveation that the runtime lists (`XR_FB_foveation`, `XR_FB_foveation_configuration`,
+  `XR_FB_foveation_vulkan`, `XR_META_foveation_eye_tracked`,
+  `XR_FB_swapchain_update_state`) for the probe only. A runtime that refuses them
+  gets a second `xrCreateInstance` without them.
+- **The set of a slot.** A slot of the ring has one swapchain with two layers (the
+  usage: color attachment, sampled, transfer source and destination, and a mutable
+  format) in place of two swapchains of one layer. The layer of the left eye names
+  its layer 0 and the layer of the right eye its layer 1 (`imageArrayIndex`). The
+  renderer makes a view of the format UNORM with two layers on the image, so it writes
+  the bytes of the game raw also into an sRGB swapchain. A slot that has the old set
+  drops it for the new set (at most `kMostReplaces` times in a Play), and a slot that
+  cannot make the new set keeps the old way.
+- **The play thread.** Before it plays a batch, the play thread takes the slot
+  (`PictureRing::BeginWrite`), then acquires and waits for the swapchain image of the
+  slot (`XrApp::DensityBegin`, the wait is on the play thread) and gives the renderer
+  the image (`VkSceneDensityTarget`). The walks of the batch with both eyes draw into
+  it. After the batch the thread writes the slot as before, but with no copy: a barrier
+  in the command buffer of the slot orders it after the walks (`PictureRing::DensityMark`),
+  and the image goes back to the runtime after the submit of the slot
+  (`XrApp::DirectEnd`). The session never shows a slot that the play thread writes, as
+  before. A batch whose last picture is not a picture of the pass (a screen picture, or
+  no eye picture) releases the image unused.
+- **A picture that cannot show in the projection layer** (the stereo screen, the cut
+  scene window) takes a copy from the swapchain image of the slot into the image of the
+  ring, before the image goes back. The count of these pictures and of those with no
+  copy is in the line at the end of the app ("xr : xr_density_pass=1: N pictures of the
+  one pass went into the projection layer with no copy ...").
+- **A new render size** (`xr_resize_free`): a slot whose set has another size drops it at
+  a new Play and makes one at the new size, as for `xr_eye_direct`. A walk whose viewport
+  is not the size of the image goes the old way, and the time log counts it.
+- **The probe of the runtime** (stage 1, once at the first picture, lines "probe :").
+  It makes a swapchain of two layers with the usage of the pass and logs the number of
+  images and the result of a view of the format R8G8B8A8_UNORM on the first image. Then,
+  when the runtime has `XR_FB_foveation` and `XR_FB_foveation_vulkan` on, it makes a
+  swapchain with the map of the runtime (`XrSwapchainCreateInfoFoveationFB` with the
+  density map flag), logs the map of its first and last image (the image, the width and
+  the height of `XrSwapchainImageFoveationVulkanFB`), makes a profile of the level high
+  (fixed, and eye tracked when the headset has it), applies it
+  (`xrUpdateSwapchainFB`), logs each result, and frees all of it. The pass uses the map of
+  the mod in any case: the profiles of the runtime have levels and no degrees, so the keys
+  `fovea_res_center_deg` and `fovea_res_outer_pct` cannot set them, and the map of the mod
+  has the ring and the centre that follows the gaze at the step of a texel. The probe says
+  what the runtime gives, so a later change can use the map of the runtime when it is
+  better.
+- **The gaze.** The sharp centre is the gaze of the eye tracker when the app has it, else
+  straight ahead and `fovea_res_center_down_deg` degrees down. The map is made again in the
+  command buffer of the walk when a rect goes to another texel. The offset of
+  `VK_QCOM_fragment_density_map_offset` is not used (it needs the end of a render pass of
+  the old kind, and the renderer has dynamic rendering).
+- **The lines to read after a run of the Frame.** "xr : xr_density_pass at the start", "game
+  : xr_density_pass=1" (or the reason that it is off), the lines "probe :", "xr : slot N of the
+  ring: one swapchain of two layers", "vk scene : the one pass (xr_density_pass=1): ..." (the size
+  of the map, the bytes, the share of the fragments of the first map), then each 10 s "time :
+  the one pass ... in this window" (the walks of the pass against the walks that went the old way,
+  the cuts, the lost depths), "time : the GPU parts of the walk" (the pass as "the one pass with a
+  density map": its draws and its ms, to compare with the 2.45 and 2.11 ms of the two passes
+  and the 1.6 ms of the compose), "time : the GPU in ms: a picture" (the goal is well below 5 to
+  8 ms in the view of the middle of the island) and "time : the GPU of the copies" (no copy for a
+  picture of the pass).
+- **Not shown yet, only a headset can show it:** the time of the pass on the Steam Frame, if
+  the driver draws it as a pass with the map (the rounding of the density to a size of
+  fragment), the look of the blocks of 2 by 2 and 4 by 4 pixels outside the middle (the images
+  have no subsamples, so the blocks have sharp edges), the ring, the follow of the gaze at the
+  step of a texel (32 pixels), whether the compositor shows the swapchain image of two layers
+  as it shows two images of one layer, and the picture of a frame with a dialog box (the panel
+  quads and the cut scene window). The look of the pictures in an emulator or a desktop run
+  cannot show them, because the GPU of the PC has no density map.
 
 **The even rate** (`frame_loop_hold`, `eye_copy_math::HoldTakes`). When the
 GPU makes a picture in about each second frame of the display, the newest

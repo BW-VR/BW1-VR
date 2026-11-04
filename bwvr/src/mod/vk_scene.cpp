@@ -142,6 +142,7 @@
 #include "eye_copy_math.h"
 #include "fovea_res_math.h"
 #include "foveation_math.h"
+#include "density_map_math.h"
 #include "vk_draw_math.h"
 #include "vk_scene_math.h"
 #include "vk_texture_math.h"
@@ -308,6 +309,8 @@ const uint32_t kMeshGroupKey = 1u << 27;
 // The vertex shader of gpu_mesh_depth=0: the linear depth, with no invariant
 // and no precise (the LEGACY variants of vk_mesh.vert).
 const uint32_t kMeshLegacyKey = 1u << 28;
+// A pipeline for the pass with a fragment density map (THE ONE PASS).
+const uint32_t kDensityKey = 1u << 29;
 
 // THE WALK WITHOUT DIRECT3D 9 (vk_only). On the frame thread: the key now,
 // the test key of the desktop, the frame of stereo.cpp, and a walk of
@@ -329,8 +332,46 @@ uint32_t g_done_width = 0;
 uint32_t g_done_height = 0;
 bool g_said_pending = false;
 
+// THE ONE PASS (xr_density_pass=1, docs/backend.md, "The one pass with a
+// density map"). The headset app gives the swapchain image of the picture
+// (VkSceneDensityTarget): two layers, one for each eye, in a format with red
+// first that the renderer takes as UNORM. A walk of both eyes with
+// fovea_res=1 then draws its list of draws one time into that image, with a
+// fragment density map, and Target() is that image. The map has a layer for
+// each eye.
+const int kDensityViews = 32;
+struct DensityView {
+  VkImage image;
+  VkImageView view;
+};
+DensityView g_density_views[kDensityViews] = {};
+int g_density_view_count = 0;
+vk::Image g_density_target = {};     // the image of the app, not owned
+bool g_density_set = false;          // the app gave a target for the walks
+bool g_walk_density = false;         // the walk now draws into it
+vk::Image g_density_map = {};        // R8G8_UNORM, a layer for each eye
+vk::Buffer g_density_stage[2] = {};  // the map for the upload, for each slot
+uint32_t g_density_map_w = 0, g_density_map_h = 0;
+density_map_math::Key g_density_key = {};
+bool g_density_key_valid = false;
+// The depth of the pass. vk_density_depth=1 (the default) stores it at the end
+// of the first part of a walk only after a walk was cut (a draw for the panel
+// or a clear of one eye in the middle of a walk). 0 always stores it.
+bool g_density_depth_lazy = true;
+int g_density_sticky = 0;            // the walks that still store the depth
+int g_density_segment = 0;           // the parts of the pass of this walk
+bool g_density_depth_valid = true;   // the depth of the part before is stored
+float g_density_ring_deg = 8.0f;     // vk_density_ring_deg
+VkImage g_density_done = VK_NULL_HANDLE;  // the image of the last walk of the pass
+uint64_t g_density_walks = 0, g_density_maps = 0, g_density_cuts = 0;
+uint64_t g_density_depth_lost = 0, g_density_refused[4] = {};
+uint64_t g_density_draws_start = 0, g_density_draws = 0;
+float g_density_share = 0.0f;        // the share of the fragments of the last map
+bool g_said_density = false;
+bool g_density_pipeline_failed = false;  // a pipeline with the density map was not made
+
 // The target of the walk now.
-vk::Image& Target() { return g_colors[g_target]; }
+vk::Image& Target() { return g_walk_density ? g_density_target : g_colors[g_target]; }
 
 // THE PIPELINES: one for each blend (off, or a pair of factors).
 VkShaderModule g_vert = VK_NULL_HANDLE;
@@ -351,7 +392,7 @@ struct PipelineSlot {
   uint32_t key;  // 0 for no blend, else 1 << 16 | src << 8 | dst
   VkPipeline pipeline;
 };
-const int kMaxPipelines = 64;
+const int kMaxPipelines = 128;
 PipelineSlot g_pipelines[kMaxPipelines];
 int g_pipeline_count = 0;
 
@@ -849,11 +890,16 @@ VkBlendFactor Factor(uint32_t blend) {
   }
 }
 
+// The key of the pass with a density map for a draw: the eyes of a walk of the
+// one pass. The panel has its own rendering with no map.
+uint32_t DensityKey(bool panel) { return g_walk_density && !panel ? kDensityKey : 0u; }
+
 VkPipeline Pipeline(uint32_t key) {
   for (int i = 0; i < g_pipeline_count; ++i) {
     if (g_pipelines[i].key == key) return g_pipelines[i].pipeline;
   }
   if (g_pipeline_count >= kMaxPipelines) return VK_NULL_HANDLE;
+  if ((key & kDensityKey) != 0 && g_density_pipeline_failed) return VK_NULL_HANDLE;
   VkPipelineShaderStageCreateInfo stages[2] = {
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
@@ -937,8 +983,9 @@ VkPipeline Pipeline(uint32_t key) {
   VkPipelineColorBlendAttachmentState blend = {};
   blend.colorWriteMask = 0xF;
   const bool panel = (key & kPanelKey) != 0;
+  const bool density = (key & kDensityKey) != 0;
   if ((key & ~(kPanelKey | kMeshKey | kMeshOffsetKey | kMeshGroupKey |
-                  kMeshLegacyKey)) != 0) {
+                  kMeshLegacyKey | kDensityKey)) != 0) {
     blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = Factor((key >> 8) & 255);
     blend.dstColorBlendFactor = Factor(key & 255);
@@ -994,7 +1041,11 @@ VkPipeline Pipeline(uint32_t key) {
   rate_state.fragmentSize = {1, 1};
   rate_state.combinerOps[0] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
   rate_state.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
-  if (vk::Get().shading_rate && !panel) {
+  if (density) {
+    // THE ONE PASS: the rendering has a fragment density map attachment, and
+    // a pipeline for it says so. It has no shading rate attachment.
+    info.flags |= VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT;
+  } else if (vk::Get().shading_rate && !panel) {
     rendering.pNext = &rate_state;
     info.flags |=
         VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
@@ -1002,6 +1053,12 @@ VkPipeline Pipeline(uint32_t key) {
   VkPipeline pipeline = VK_NULL_HANDLE;
   if (f.vkCreateGraphicsPipelines(vk::Get().device, VK_NULL_HANDLE, 1, &info,
                                   nullptr, &pipeline) != VK_SUCCESS) {
+    if (density && !g_density_pipeline_failed) {
+      g_density_pipeline_failed = true;
+      ModLog("vk scene     : the driver made no pipeline with the density map (key 0x%X). The "
+             "next walks go the old way, and the draws of this one with that state are not "
+             "drawn", key);
+    }
     return VK_NULL_HANDLE;
   }
   g_pipelines[g_pipeline_count].key = key;
@@ -1891,6 +1948,22 @@ void BeginRenderingOf(VkCommandBuffer cb, const vk::Image& color_image,
   depth.imageView = depth_image.view;
   depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
   depth.loadOp = load ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+  // THE ONE PASS: the eyes of a density walk. A part of the walk that starts
+  // after a cut loads the depth only when the part before stored it. The first
+  // part stores its depth only when a walk before was cut (vk_density_depth=1).
+  const bool eyes_density = g_walk_density && view_mask != 0 &&
+                            color_image.image == g_density_target.image;
+  if (eyes_density) {
+    if (load && !g_density_depth_valid) {
+      depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+      ++g_density_depth_lost;
+      g_density_sticky = 60;
+    }
+    if (g_density_segment > 0) ++g_density_cuts;
+    keep_depth = g_density_segment > 0 || !g_density_depth_lazy || g_density_sticky > 0;
+    g_density_depth_valid = keep_depth;
+    ++g_density_segment;
+  }
   depth.storeOp = keep_depth ? VK_ATTACHMENT_STORE_OP_STORE
                              : VK_ATTACHMENT_STORE_OP_DONT_CARE;
   depth.clearValue.depthStencil.depth = 1.0f;
@@ -1912,6 +1985,14 @@ void BeginRenderingOf(VkCommandBuffer cb, const vk::Image& color_image,
     rate.shadingRateAttachmentTexelSize = {vk::Get().rate_texel_w,
                                            vk::Get().rate_texel_h};
     rendering.pNext = &rate;
+  }
+  // THE ONE PASS: the map of the densities, a layer for each eye.
+  VkRenderingFragmentDensityMapAttachmentInfoEXT density_map = {
+      VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_INFO_EXT};
+  if (eyes_density && g_density_map.view != VK_NULL_HANDLE) {
+    density_map.imageView = g_density_map.view;
+    density_map.imageLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+    rendering.pNext = &density_map;
   }
   f.vkCmdBeginRendering(cb, &rendering);
 }
@@ -2641,6 +2722,11 @@ void ReadSharpKeys() {
     g_mres_layer = g_mres_layer_key != 0;
     g_atlas_area = GetPrivateProfileIntA("bwvr", "vk_atlas_area", 1, path) != 0;
     g_compose_test = GetPrivateProfileIntA("bwvr", "vk_compose_test", 0, path) != 0;
+    g_density_depth_lazy = GetPrivateProfileIntA("bwvr", "vk_density_depth", 1, path) != 0;
+    {
+      const int ring = static_cast<int>(GetPrivateProfileIntA("bwvr", "vk_density_ring_deg", 8, path));
+      g_density_ring_deg = static_cast<float>(ring < 0 ? 0 : (ring > 40 ? 40 : ring));
+    }
     if (!g_app_keys_set) {
       g_compose_light = GetPrivateProfileIntA("bwvr", "vk_compose_light", 1, path) != 0;
       g_pass_store = GetPrivateProfileIntA("bwvr", "vk_pass_store", 1, path) != 0;
@@ -2671,6 +2757,13 @@ void ReadSharpKeys() {
                                          "vk_draw_merge, in the order of the game")
                         : "The draws of the two passes play in the order of the game, one command "
                           "for each draw");
+  ModLog("vk scene     : vk_density_depth=%d, vk_density_ring_deg=%.0f (keys of the one pass, "
+         "xr_density_pass=1 of the app). %s",
+         g_density_depth_lazy ? 1 : 0, g_density_ring_deg,
+         g_density_depth_lazy
+             ? "The depth of the first part of a walk is stored only after a walk was cut by a "
+               "draw for the panel or a clear of one eye"
+             : "The depth of the pass is always stored");
   ModLog("vk scene     : fovea_res_layer=%d. %s", g_mres_layer_key,
          g_mres_layer
              ? "With fovea_res=1 the eye picture has the outer image and the centre "
@@ -3644,6 +3737,139 @@ bool PrepareFovea(Slot& s, const Seed* seed) {
   return true;
 }
 
+// THE ONE PASS. The walk draws into the swapchain image of the app when the
+// app gave one (VkSceneDensityTarget), the walk is a walk of both eyes with
+// foveated resolution (its keys give the map), the eye picture has no atlas,
+// and the viewport has the size of the image. Else the walk goes the old way
+// into the images of the renderer. The map and its buffers are made here, so a
+// failure sends the walk to the old way before any command.
+bool DensityEligible(const Seed* seed) {
+  if (!g_density_set) return false;
+  if (!seed->mres || !seed->both || seed->intro_eye >= 0 || seed->fovea.tan_h <= 0.0f ||
+      seed->fovea.tan_v <= 0.0f) {
+    return false;
+  }
+  ReadSharpKeys();
+  const vk::Core& core = vk::Get();
+  if (!core.density_map) return false;
+  if (g_mres_layer && AtlasAllowed()) {
+    ++g_density_refused[1];
+    return false;
+  }
+  if (g_viewport.dwX != 0 || g_viewport.dwY != 0 ||
+      g_viewport.dwWidth != g_density_target.width ||
+      g_viewport.dwHeight != g_density_target.height) {
+    ++g_density_refused[0];
+    return false;
+  }
+  const uint32_t tw = core.density_texel_w, th = core.density_texel_h;
+  const uint32_t map_w = density_map_math::TexelCount(g_density_target.width, tw);
+  const uint32_t map_h = density_map_math::TexelCount(g_density_target.height, th);
+  // The map has at least as many texels as the picture has over the largest
+  // texel of the GPU (the finest texel always gives that).
+  if (map_w == 0 || map_h == 0 ||
+      map_w < density_map_math::TexelCount(g_density_target.width, core.density_texel_max_w) ||
+      map_h < density_map_math::TexelCount(g_density_target.height, core.density_texel_max_h)) {
+    ++g_density_refused[2];
+    return false;
+  }
+  if (g_density_pipeline_failed) {
+    ++g_density_refused[3];
+    return false;
+  }
+  if (g_density_map.image == VK_NULL_HANDLE || g_density_map_w != map_w ||
+      g_density_map_h != map_h) {
+    if (g_density_map.image != VK_NULL_HANDLE) {
+      vk::LockQueue();
+      f.vkDeviceWaitIdle(core.device);
+      vk::UnlockQueue();
+    }
+    vk::FreeImage(&g_density_map);
+    for (int i = 0; i < 2; ++i) vk::FreeBuffer(&g_density_stage[i]);
+    g_density_key_valid = false;
+    bool ok = vk::MakeImage(map_w, map_h, 1, VK_FORMAT_R8G8_UNORM,
+                            VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT |
+                                VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                            VK_IMAGE_ASPECT_COLOR_BIT, &g_density_map, 2);
+    for (int i = 0; ok && i < 2; ++i) {
+      ok = vk::MakeBuffer(static_cast<VkDeviceSize>(map_w) * map_h * 4,
+                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, &g_density_stage[i]);
+    }
+    if (!ok) {
+      vk::FreeImage(&g_density_map);
+      for (int i = 0; i < 2; ++i) vk::FreeBuffer(&g_density_stage[i]);
+      g_density_map_w = g_density_map_h = 0;
+      ++g_density_refused[3];
+      ModLog("vk scene     : the one pass: no map of %u by %u texels, so the walks go the "
+             "old way", map_w, map_h);
+      return false;
+    }
+    g_density_map_w = map_w;
+    g_density_map_h = map_h;
+  }
+  return true;
+}
+
+// The map of the walk, into the image of the map in the command buffer of the
+// walk, when the rects moved to other texels or a level changed.
+void DensityRecord(Slot& s, const Seed* seed) {
+  const vk::Core& core = vk::Get();
+  density_map_math::Params p;
+  p.width = g_density_target.width;
+  p.height = g_density_target.height;
+  p.tan_h = seed->fovea.tan_h;
+  p.tan_v = seed->fovea.tan_v;
+  p.gaze_x = seed->mres_gaze[0];
+  p.gaze_y = seed->mres_gaze[1];
+  p.center_deg = seed->mres_deg;
+  p.ring_deg = g_density_ring_deg;
+  p.outer_pct = seed->mres_outer;
+  const density_map_math::Key key =
+      density_map_math::KeyOf(p, core.density_texel_w, core.density_texel_h);
+  if (!g_density_key_valid || key != g_density_key) {
+    const int slot = static_cast<int>(&s - g_slots);
+    const VkDeviceSize layer = static_cast<VkDeviceSize>(g_density_map_w) * g_density_map_h * 2;
+    uint8_t* map = static_cast<uint8_t*>(g_density_stage[slot].mapped);
+    density_map_math::Build(map, g_density_map_w, g_density_map_h, core.density_texel_w,
+                            core.density_texel_h, p);
+    memcpy(map + layer, map, static_cast<size_t>(layer));
+    vk::Barrier(s.cb, g_density_map.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
+    VkBufferImageCopy copy = {};
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
+    copy.imageExtent = {g_density_map_w, g_density_map_h, 1};
+    f.vkCmdCopyBufferToImage(s.cb, g_density_stage[slot].buffer, g_density_map.image,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    vk::Barrier(s.cb, g_density_map.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT, 1, 2);
+    g_density_key = key;
+    g_density_key_valid = true;
+    ++g_density_maps;
+    g_density_share = density_map_math::FragmentShare(
+        map, g_density_map_w, g_density_map_h, core.density_texel_w, core.density_texel_h,
+        p.width, p.height);
+  }
+  ++g_density_walks;
+  if (!g_said_density) {
+    g_said_density = true;
+    const density_map_math::Levels l = density_map_math::LevelsOf(p);
+    ModLog("vk scene     : the one pass (xr_density_pass=1): a walk of both eyes draws one time "
+           "into the swapchain image of %u by %u, with a density map of %u by %u texels of %u "
+           "by %u pixels (the texel of the GPU is %u by %u to %u by %u). The full density "
+           "(255) is %.0f degrees on each side of the centre (fovea_res_center_deg), the ring "
+           "(%u) is %.0f degrees wider (vk_density_ring_deg), the rest has the byte %u "
+           "(fovea_res_outer_pct=%.0f). The first map shades %.1f percent of the fragments of "
+           "the picture. The depth of the first part is %s (vk_density_depth=%d)",
+           p.width, p.height, g_density_map_w, g_density_map_h, core.density_texel_w,
+           core.density_texel_h, core.density_texel_w, core.density_texel_h,
+           core.density_texel_max_w, core.density_texel_max_h, p.center_deg, l.ring,
+           p.ring_deg, l.outer, p.outer_pct, g_density_share * 100.0f,
+           g_density_depth_lazy ? "stored only after a cut walk" : "always stored",
+           g_density_depth_lazy ? 1 : 0);
+  }
+}
+
 // THE WALKS WITH NO DEVICE (vk_device=0). The start of a walk, after the
 // seed: the states that ForPanel and OffTarget read, and the size of the
 // target. As MakeTarget, a target of a new size has no panel of a walk
@@ -3730,6 +3956,7 @@ void BeginOnWorker(const void* data) {
   const Seed* seed = static_cast<const Seed*>(data);
   g_walk_only = false;
   g_walk_mres = false;
+  g_walk_density = false;
   if (!Ready()) return;
   memcpy(g_rs, seed->rs, sizeof(g_rs));
   memcpy(g_ts, seed->ts, sizeof(g_ts));
@@ -3757,6 +3984,8 @@ void BeginOnWorker(const void* data) {
     Fail("the target");
     return;
   }
+  // THE ONE PASS: from here Target() is the swapchain image of the app.
+  g_walk_density = DensityEligible(seed);
   g_slot ^= 1;
   g_walk_both = seed->both;
   g_walk_right = !seed->both && seed->eye == 1 &&
@@ -3896,8 +4125,15 @@ void BeginOnWorker(const void* data) {
   vk::Barrier(s.cb, g_depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
               VK_IMAGE_LAYOUT_UNDEFINED,
               VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, 1, 2);
-  g_walk_mres = PrepareMres(seed);
-  g_walk_fovea = !g_walk_mres && PrepareFovea(s, seed);
+  g_density_segment = 0;
+  g_density_depth_valid = true;
+  if (g_density_sticky > 0) --g_density_sticky;
+  g_walk_mres = !g_walk_density && PrepareMres(seed);
+  g_walk_fovea = !g_walk_mres && !g_walk_density && PrepareFovea(s, seed);
+  if (g_walk_density) {
+    DensityRecord(s, seed);
+    g_density_draws_start = g_draws;
+  }
   g_walk_show = (g_walk_fovea || g_walk_mres) && seed->fovea_show;
   g_walk_gaze[0] = seed->gaze[0];
   g_walk_gaze[1] = seed->gaze[1];
@@ -3906,7 +4142,7 @@ void BeginOnWorker(const void* data) {
   // In direct mode the walks are on the frame thread, so the key is read
   // here.
   g_walk_keep = g_keep_picture && g_direct && g_walk_follow && !g_walk_right &&
-                !g_walk_mres && seed->intro_eye < 0;
+                !g_walk_mres && !g_walk_density && seed->intro_eye < 0;
   g_eye_target = seed->target;
   g_draw_target = seed->target;
   g_walk_panel = seed->panel;
@@ -4122,8 +4358,9 @@ void EndOnWorker(const void*) {
   } else {
     f.vkCmdEndRendering(s.cb);
   }
-  // A picture that the app composes later has no pixels to check.
-  if (!g_walk_late) BlackCheckWrite(s);
+  // A picture that the app composes later has no pixels to check, and the
+  // swapchain image of the one pass is not read by the renderer.
+  if (!g_walk_late && !g_walk_density) BlackCheckWrite(s);
   if (s.query != VK_NULL_HANDLE) {
     f.vkCmdWriteTimestamp2(s.cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                            s.query, 1);
@@ -4152,10 +4389,14 @@ void EndOnWorker(const void*) {
     Fail("a submit");
     return;
   }
-  g_target_drawn[g_target] = true;
+  // The picture of a walk of the one pass is in the swapchain image, so the
+  // target of the renderer has none for a walk that keeps the picture before.
+  g_target_drawn[g_target] = !g_walk_density;
   g_walk_keep = false;
+  if (g_walk_density) g_density_draws += g_draws - g_density_draws_start;
   // The mod asked for the compare of this walk (VkSceneCompareNext).
-  if (g_mesh_compare && g_mesh_compare_request && !g_picture && g_walk_both) {
+  if (g_mesh_compare && g_mesh_compare_request && !g_picture && g_walk_both &&
+      !g_walk_density) {
     g_mesh_compare_request = false;
     f.vkWaitForFences(vk::Get().device, 1, &s.fence, VK_TRUE, UINT64_MAX);
     MeshCompare(Target(), g_walk_number, false, g_mesh_compare_label);
@@ -4175,11 +4416,14 @@ void EndOnWorker(const void*) {
     g_done_width = Target().width;
     g_done_height = Target().height;
     g_done_atlas = g_walk_mres ? g_walk_atlas : fovea_res_math::Atlas();
+    g_density_done = g_walk_density ? g_density_target.image : VK_NULL_HANDLE;
     InterlockedIncrement(&g_done_serial);
   }
   const LONG walk = InterlockedIncrement(&g_walk_serial);
   if (g_direct) {
-    g_last_image = (uint64_t)Target().image;  // a handle of 64 bits
+    // The swapchain image of the one pass goes back to the runtime, so the
+    // screen quad of a frame with no scene has no picture of it to copy.
+    g_last_image = g_walk_density ? 0 : (uint64_t)Target().image;  // a handle of 64 bits
     g_last_layer = g_walk_right ? 1u : 0u;
     g_last_width = Target().width;
     g_last_height = Target().height;
@@ -4216,6 +4460,7 @@ void EndOnWorker(const void*) {
                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
   }
+  g_walk_density = false;
 }
 
 }  // namespace
@@ -4633,7 +4878,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
           ? (1u << 16) | (rs[D3DRENDERSTATE_SRCBLEND] & 255) << 8 |
                 (rs[D3DRENDERSTATE_DESTBLEND] & 255)
           : 0u;
-  VkPipeline pipeline = Pipeline(blend | (panel ? kPanelKey : 0u));
+  VkPipeline pipeline = Pipeline(blend | (panel ? kPanelKey : 0u) | DensityKey(panel));
   if (pipeline == VK_NULL_HANDLE) {
     ++g_skipped;
     ++g_skip_state;
@@ -5342,7 +5587,7 @@ void DrawMeshImpl(uint64_t mesh, const gpu_mesh_math::Consts& consts_in, const f
                 (rs[D3DRENDERSTATE_DESTBLEND] & 255)
           : 0u;
   VkPipeline pipeline = Pipeline(blend | kMeshKey | (with_offsets ? kMeshOffsetKey : 0u) |
-                                 (with_groups ? kMeshGroupKey : 0u) |
+                                 (with_groups ? kMeshGroupKey : 0u) | DensityKey(false) |
                                  ((consts_in.flags & gpu_mesh_math::kDepthGame) == 0
                                       ? kMeshLegacyKey
                                       : 0u));
@@ -6255,6 +6500,88 @@ bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t im
 }
 
 void VkSceneComposeForget(uint64_t image) { vk_compose::Forget((VkImage)image); }
+
+// THE ONE PASS. The view of an image of the app for the pass: the UNORM format
+// of the renderer, both layers.
+static VkImageView DensityViewOf(VkImage image) {
+  for (int i = 0; i < g_density_view_count; ++i) {
+    if (g_density_views[i].image == image) return g_density_views[i].view;
+  }
+  if (g_density_view_count >= kDensityViews) return VK_NULL_HANDLE;
+  VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  view.image = image;
+  view.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  view.format = vk::Get().color_format;
+  view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 2};
+  VkImageView made = VK_NULL_HANDLE;
+  const VkResult r = f.vkCreateImageView(vk::Get().device, &view, nullptr, &made);
+  if (r != VK_SUCCESS) {
+    ModLog("vk scene     : the one pass: a view of the format %d of the swapchain image gave "
+           "%d, so the walks go the old way", static_cast<int>(view.format),
+           static_cast<int>(r));
+    return VK_NULL_HANDLE;
+  }
+  g_density_views[g_density_view_count++] = {image, made};
+  return made;
+}
+
+int VkSceneDensityTarget(uint64_t image, uint32_t width, uint32_t height) {
+  g_density_set = false;
+  // The options of the game and the device come with the first frames: until
+  // then the app tries again with the next batch.
+  if (!g_direct || !VkSceneOn() || image == 0 || width == 0 || height == 0) return 0;
+  if (!Ready()) return g_failed ? -1 : 0;
+  if (!vk::Get().external || !vk::Get().density_map) return -1;
+  const VkImageView view = DensityViewOf((VkImage)image);
+  if (view == VK_NULL_HANDLE) return -1;
+  g_density_target = vk::Image();
+  g_density_target.image = (VkImage)image;
+  g_density_target.view = view;
+  g_density_target.format = vk::Get().color_format;
+  g_density_target.width = width;
+  g_density_target.height = height;
+  g_density_target.levels = 1;
+  g_density_target.layers = 2;
+  g_density_set = true;
+  return 1;
+}
+
+void VkSceneDensityTargetEnd() { g_density_set = false; }
+
+bool VkSceneDensityPicture(uint64_t image) {
+  return image != 0 && g_density_done != VK_NULL_HANDLE && (VkImage)image == g_density_done;
+}
+
+void VkSceneDensityForget(uint64_t image) {
+  for (int i = 0; i < g_density_view_count; ++i) {
+    if (g_density_views[i].image != (VkImage)image) continue;
+    if (g_density_done == (VkImage)image) g_density_done = VK_NULL_HANDLE;
+    if (g_density_set && g_density_target.image == (VkImage)image) g_density_set = false;
+    f.vkDestroyImageView(vk::Get().device, g_density_views[i].view, nullptr);
+    g_density_views[i] = g_density_views[--g_density_view_count];
+    g_density_views[g_density_view_count] = DensityView();
+    return;
+  }
+}
+
+bool VkSceneDensityUsable() {
+  return g_direct && VkSceneOn() && vk::Started() && vk::Get().external && vk::Get().density_map;
+}
+
+void VkSceneTakeDensityCounts(VkSceneDensityCounts* out) {
+  out->walks = g_density_walks;
+  out->maps = g_density_maps;
+  out->cuts = g_density_cuts;
+  out->depth_lost = g_density_depth_lost;
+  out->draws = g_density_draws;
+  out->refused_size = g_density_refused[0];
+  out->refused_atlas = g_density_refused[1];
+  out->refused_texel = g_density_refused[2];
+  out->refused_map = g_density_refused[3];
+  out->share = g_density_share;
+  g_density_walks = g_density_maps = g_density_cuts = g_density_depth_lost = g_density_draws = 0;
+  g_density_refused[0] = g_density_refused[1] = g_density_refused[2] = g_density_refused[3] = 0;
+}
 
 void VkSceneComposeStop() { vk_compose::Stop(); }
 

@@ -235,7 +235,8 @@ void SkySetHeadFree(bool clouds, bool moon, int test_frame, bool trace,
                     int test_hour);
 void SpriteUpSet(bool on, int test_frame, bool trace);
 void SpriteUpInstall();
-void EyeStaleSet(bool on, bool trace, int test_frame, bool test_keys);
+void EyeStaleSet(bool on, bool trace, int test_frame, bool test_keys,
+                 int test_inject);
 void EyeStaleInstall();
 void PointerMapSetDragSmoothing(int ms);
 void PointerMapSetFakeMouse(const char* script, int step_px,
@@ -508,6 +509,7 @@ bool g_sprite_test_trace = false;
 bool g_eye_after_camera = true;
 int g_roll_test_frame = 0;
 bool g_roll_trace = false;
+int g_roll_test_inject = 0;
 // The black bars of the story scenes. Off by default in a headset.
 bool g_cinema_bars = false;
 // The advisors stay where the player looked when they came.
@@ -1298,6 +1300,8 @@ void ReadSettings() {
   g_roll_test_frame = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "roll_test_frame", 0, path));
   g_roll_trace = GetPrivateProfileIntA("bwvr", "roll_trace", 0, path) != 0;
+  g_roll_test_inject = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "roll_test_inject", 0, path));
   g_cinema_bars = GetPrivateProfileIntA("bwvr", "cinema_bars", 0, path) != 0;
   g_spirit_anchor =
       GetPrivateProfileIntA("bwvr", "spirit_anchor", 1, path) != 0;
@@ -2091,7 +2095,7 @@ void StartVrStep() {
     SpriteUpSet(g_sprite_world_up, g_sprite_test_frame, g_sprite_test_trace);
     SpriteUpInstall();
     EyeStaleSet(g_eye_after_camera, g_roll_trace, g_roll_test_frame,
-                g_test_keys);
+                g_test_keys, g_roll_test_inject);
     EyeStaleInstall();
     SpiritAnchorSetEnabled(g_spirit_anchor);
     SpiritAnchorSetWorldSize(g_spirit_world_size, TestSwitchesOn(),

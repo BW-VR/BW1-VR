@@ -653,12 +653,14 @@ void Install(bool early) {
   _snprintf_s(g_timers[0].name, sizeof(g_timers[0].name), _TRUNCATE,
               "the scene walk, outside each timer");
   {
-    const uint32_t shown[kWalkHookCount] = {0x0082F460, 0x0082F810, 0x0082A500, 0x0082A5B0};
+    const uint32_t shown[kWalkHookCount] = {0x0082F460, 0x0082F810, 0x0082A500, 0x0082A5B0,
+                                            0x0082F280};
     const char* const names[kWalkHookCount] = {
         "h_FinishFrame, the hook of the mod on LH3DRender::FinishFrame",
         "h_DrawTriangle, the hook of the mod on LH3DRender::DrawTriangle",
         "h_DrawAndClip, the hook of the mod on DrawAndClip",
-        "h_DrawAndClip2D, the hook of the mod on DrawAndClip2D"};
+        "h_DrawAndClip2D, the hook of the mod on DrawAndClip2D",
+        "h_SortedFlush, the hook of the mod on fn_0082F280 (its own loop)"};
     for (int h = 0; h < kWalkHookCount; ++h) {
       Timer& t = g_timers[kFirstHookTimer + h];
       t.shown = shown[h];

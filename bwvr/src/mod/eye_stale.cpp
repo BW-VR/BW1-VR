@@ -16,7 +16,8 @@
 // LH3DRender::FinishFrame through fn_0082F280) holds the draws that need an
 // order from far to near: the clouds and the ground mist (an LH3DMist, drawn
 // through the virtual function +0x108 of its object), the beams of light
-// (GLightSheet::Draw 0x004246E0), billboards (LH3DSprite::Draw 0x00840530)
+// (the callback 0x004246E0, which GLightSheet::Draw 0x00424650 puts in the
+// list), billboards (LH3DSprite::Draw 0x00840530)
 // and the effects of the particle systems. An item of the list that comes
 // after a restore is drawn from a camera with no roll and no eye offset. The
 // world has the roll of the head, so the item does not roll with the world.
@@ -43,15 +44,23 @@
 // THE TRACE (roll_trace=1) counts, for each report window, the camera calls
 // of the walk by the address that called, the items of the sorted list by
 // the address of their draw function, and how many of them saw a camera that
-// was not the camera of the eye, with the reason and the first frame. The
-// clouds and the sprites that the game draws outside the list are counted by
-// their own hooks (sky_detail.cpp, sprite_up.cpp).
+// was not the camera of the eye, with the reason and the first frame. An item
+// is counted at its start, after the fix of the call that gave a camera back.
+// So with eye_after_camera=1 the count of such items is what the fix left,
+// and with eye_after_camera=0 it is what the game leaves. The clouds and the
+// sprites that the game draws outside the list are counted by their own hooks
+// (sky_detail.cpp, sprite_up.cpp).
 //
 // THE LOOP. fn_0082F280 sets the flag of the flush (0x00ECA610), calls the
 // empty function 0x008398B0, and walks the list from 0x00EE9D38. A node has
 // the object at +4, the draw function at +8 (a thiscall with no arguments),
 // a number at +0xC that the loop copies to 0x00EE9D30 before the call, the
 // distance at +0x10 and the next node at +0x14. The hook does the same walk.
+// The function writes nothing after the loop (the code from 0x0082F280 to
+// 0x0082F2B0 is the whole function), so the hook has no write after it either.
+// The hook shows its time to walk_parts with a timer of its own
+// (kWalkHookSortedFlush), because with its own loop it does not call the
+// trampoline that walk_parts would time.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -61,6 +70,7 @@
 
 #include "MinHook.h"
 #include "camera_stale_math.h"
+#include "walk_parts.h"
 
 extern void ModLog(const char* format, ...);
 // controllers.cpp: the frame number that the scripted controller counts.
@@ -90,9 +100,6 @@ const uintptr_t kListCurrent = 0x00EE9D30;
 // The stored camera: the position at 0x00EA1DB8 and the focus at 0x00EA1DC4,
 // 6 floats in a row.
 const uintptr_t kStoredCamera = 0x00EA1DB8;
-// The return address of the call of InnerCamera::PreDraw (head_camera.cpp).
-// The camera of a room of the Temple is not a camera of its own.
-const uintptr_t kRoomPreDrawReturn = 0x007969D2;
 
 // Draw functions of the sorted list that have a name.
 struct KnownDraw {
@@ -117,9 +124,15 @@ bool g_on = true;
 // changes, for one run with each value. 0 is no change.
 uint64_t g_test_frame = 0;
 bool g_test_done = false;
+// A change of the key waits for the start of the next frame, so both eyes of
+// a frame use one value. g_on and the pending change give the value that the
+// player sees.
+bool g_flip_pending = false;
+char g_flip_by[48] = "";
 // roll_trace
 bool g_trace = false;
 bool g_test_keys = false;
+int g_test_inject = 0;
 
 // THE CAMERA CALLS OF THE WALK. The stored cameras from before the open
 // calls.
@@ -137,6 +150,7 @@ struct CallerTally {
 const int kCallers = 12;
 CallerTally g_callers[kCallers];
 int g_caller_count = 0;
+CallerTally g_callers_other;  // the callers that the table has no room for
 
 uint64_t g_scene_calls = 0;
 uint64_t g_restores = 0;
@@ -168,7 +182,7 @@ CallerTally* CallerSlot(uintptr_t caller) {
   for (int i = 0; i < g_caller_count; ++i) {
     if (g_callers[i].caller == caller) return &g_callers[i];
   }
-  if (g_caller_count == kCallers) return &g_callers[kCallers - 1];
+  if (g_caller_count == kCallers) return &g_callers_other;
   CallerTally* slot = &g_callers[g_caller_count++];
   slot->caller = caller;
   slot->calls = 0;
@@ -180,13 +194,14 @@ camera_stale_math::Reason ReasonNow(bool stale) {
   return camera_stale_math::Classify(!stale, g_calls_since, g_last_restore);
 }
 
-// Ctrl, Shift and R change eye_after_camera between 1 and 0 (test_keys=1). The
-// key is read once in each flush of the sorted list, and only while a window
-// of the game is in front.
+// Ctrl, Shift and E change eye_after_camera between 1 and 0 (test_keys=1).
+// The game reads R (the last miracle again), M, P, T and the other letters of
+// its control map, and E is not one of them. The key is read once in each
+// flush of the sorted list, and only while a window of the game is in front.
 void PollKey() {
   static bool was = false;
   if (!g_test_keys) return;
-  const bool down = (GetAsyncKeyState('R') & 0x8000) != 0 &&
+  const bool down = (GetAsyncKeyState('E') & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
   const bool pressed = down && !was;
@@ -196,7 +211,38 @@ void PollKey() {
   const HWND window = GetForegroundWindow();
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
-  EyeStaleToggle("Ctrl, Shift and R");
+  EyeStaleToggle("Ctrl, Shift and E");
+}
+
+// roll_test_inject (a test key for the desktop, where the effect of the game
+// does not run): at the start of each flush of the sorted list in an eye pass
+// the mod does what the effect does. 1: it gives the engine a camera of its
+// own and gives the stored camera back. 2: it gives the engine a camera of
+// its own and does not give it back. The items of the list are then drawn
+// from the camera that the game leaves, or from the camera of the eye, by the
+// key eye_after_camera.
+typedef void(__fastcall* UpdateCameraFn)(const float* position,
+                                         const float* focus);
+const uintptr_t kUpdateCamera = 0x00819920;
+
+void InjectCamera() {
+  const float* stored = reinterpret_cast<const float*>(kStoredCamera);
+  float saved[6];
+  memcpy(saved, stored, sizeof(saved));
+  const float position[3] = {0.0f, 4.0f, 0.0f};
+  const float focus[3] = {0.0f, 0.0f, 20.0f};
+  UpdateCameraFn update = reinterpret_cast<UpdateCameraFn>(kUpdateCamera);
+  update(position, focus);
+  if (g_test_inject == 1) update(saved, saved + 3);
+}
+
+// The change of the key, at the start of a frame.
+void ApplyFlip() {
+  if (!g_flip_pending) return;
+  g_flip_pending = false;
+  g_on = !g_on;
+  ModLog("eye restore  : eye_after_camera=%d now (%s), frame %llu",
+         g_on ? 1 : 0, g_flip_by, ControllersFrameCount());
 }
 
 void TestFrameCheck() {
@@ -204,9 +250,9 @@ void TestFrameCheck() {
   const uint64_t frame = ControllersFrameCount();
   if (frame < g_test_frame) return;
   g_test_done = true;
-  g_on = !g_on;
-  ModLog("eye restore  : roll_test_frame at frame %llu: eye_after_camera=%d "
-         "now", frame, g_on ? 1 : 0);
+  g_flip_pending = !g_flip_pending;
+  _snprintf_s(g_flip_by, sizeof(g_flip_by), _TRUNCATE, "roll_test_frame %llu",
+              g_test_frame);
 }
 
 // The eye camera back, when the engine has another one. True when it did.
@@ -227,6 +273,7 @@ void __cdecl h_SortedFlush() {
     o_Flush();
     return;
   }
+  WalkPartsScope walk_parts_scope(kWalkHookSortedFlush);
   ++g_flushes;
   *reinterpret_cast<uint32_t*>(kFlushFlag) = 1;
   reinterpret_cast<void(__cdecl*)()>(kFlushStub)();
@@ -235,6 +282,7 @@ void __cdecl h_SortedFlush() {
   // The intro and the menus draw with a camera of their own and no scene
   // walk. Only the scene walk of an eye pass has an eye camera to keep.
   const bool pass = StereoInPass() && HeadCameraInScene();
+  if (pass && g_test_inject != 0) InjectCamera();
   while (node != nullptr) {
     const bool stale = pass && StereoEyeCameraStale();
     if (g_trace && pass) {
@@ -267,7 +315,9 @@ bool Hook(uintptr_t address, void* replacement, void** original,
 }  // namespace
 
 // eye_after_camera, roll_trace, roll_test_frame and test_keys.
-void EyeStaleSet(bool on, bool trace, int test_frame, bool test_keys) {
+void EyeStaleSet(bool on, bool trace, int test_frame, bool test_keys,
+                 int test_inject) {
+  g_test_inject = test_inject;
   g_on = on;
   g_trace = trace;
   g_test_keys = test_keys;
@@ -282,6 +332,11 @@ void EyeStaleSet(bool on, bool trace, int test_frame, bool test_keys) {
            test_frame);
   }
   if (trace) ModLog("eye restore  : roll_trace=1");
+  if (test_inject != 0) {
+    ModLog("eye restore  : roll_test_inject=%d. Each flush of the sorted list "
+           "starts with a camera of its own%s", test_inject,
+           test_inject == 1 ? " and the stored camera back" : "");
+  }
 }
 
 void EyeStaleInstall() {
@@ -291,18 +346,22 @@ void EyeStaleInstall() {
        reinterpret_cast<void**>(&o_Flush), "the sorted list of draws");
 }
 
-int EyeStaleValue() { return g_on ? 1 : 0; }
+// The value that the player sees: the change that waits for the next frame
+// counts.
+int EyeStaleValue() { return (g_on != g_flip_pending) ? 1 : 0; }
 
 void EyeStaleToggle(const char* by) {
-  g_on = !g_on;
-  ControllersGesturePulse(0.5f, g_on ? 0.24f : 0.08f);
-  ModLog("eye restore  : eye_after_camera=%d now (%s), frame %llu",
-         g_on ? 1 : 0, by != nullptr ? by : "", ControllersFrameCount());
+  g_flip_pending = !g_flip_pending;
+  _snprintf_s(g_flip_by, sizeof(g_flip_by), _TRUNCATE, "%s",
+              by != nullptr ? by : "");
+  ControllersGesturePulse(0.5f, EyeStaleValue() != 0 ? 0.24f : 0.08f);
 }
 
 // A new eye pass. The stored camera of the pass is the camera that the game
-// asked for, and no call is open.
-void EyeStalePassBegin() {
+// asked for, and no call is open. A change of the key comes with the first
+// pass of a frame.
+void EyeStalePassBegin(int eye) {
+  if (eye == 0) ApplyFlip();
   g_stack.Clear();
   g_calls_since = 0;
   g_last_restore = false;
@@ -310,9 +369,11 @@ void EyeStalePassBegin() {
 
 // Before a camera call of the scene walk in an eye pass. True when the call
 // gives a camera back: its camera is the stored camera from before an open
-// call. `caller` is the return address of the call.
-bool EyeStaleCallBegin(uintptr_t caller, const float* position,
-                       const float* focus) {
+// call. `caller` is the return address of the call. `room_camera` is the call
+// of InnerCamera::PreDraw: the camera of a room of the Temple is not a camera
+// of its own.
+bool EyeStaleCallBegin(uintptr_t caller, bool room_camera,
+                       const float* position, const float* focus) {
   if (position == nullptr || focus == nullptr) return false;
   if (IsBadReadPtr(position, sizeof(float) * 3) ||
       IsBadReadPtr(focus, sizeof(float) * 3)) {
@@ -323,7 +384,7 @@ bool EyeStaleCallBegin(uintptr_t caller, const float* position,
   memcpy(args, position, sizeof(float) * 3);
   memcpy(args + 3, focus, sizeof(float) * 3);
   bool restore = false;
-  if (caller != kRoomPreDrawReturn) {
+  if (!room_camera) {
     restore = g_stack.Call(
         args, reinterpret_cast<const float*>(kStoredCamera));
   }
@@ -340,8 +401,11 @@ bool EyeStaleCallBegin(uintptr_t caller, const float* position,
 }
 
 // After the call. A restore leaves a camera with no eye offset and no roll.
+// The eye camera goes back only when no call is open any more: the restore
+// of an inner effect gives the camera of the outer effect back, and the
+// outer effect still draws with it (camera_stale_math::EyeBackAfter).
 void EyeStaleCallEnd(bool restore) {
-  if (!restore || !g_on) return;
+  if (!g_on || !camera_stale_math::EyeBackAfter(g_stack, restore)) return;
   if (PutEyeBack()) ++g_reapplied_restore;
 }
 
@@ -371,12 +435,20 @@ void EyeStaleReport() {
     char callers[320] = "";
     int at = 0;
     for (int i = 0; i < g_caller_count && at < 280; ++i) {
-      at += _snprintf_s(callers + at, sizeof(callers) - at, _TRUNCATE,
-                        "%s0x%08X x%llu (%llu gave a camera back)",
-                        i == 0 ? "" : ", ", g_callers[i].caller,
-                        g_callers[i].calls, g_callers[i].restores);
+      const int n = _snprintf_s(callers + at, sizeof(callers) - at, _TRUNCATE,
+                                "%s0x%08X x%llu (%llu gave a camera back)",
+                                i == 0 ? "" : ", ",
+                                static_cast<unsigned>(g_callers[i].caller),
+                                g_callers[i].calls, g_callers[i].restores);
+      if (n < 0) break;
+      at += n;
     }
-    if (g_caller_count > 0) {
+    if (g_callers_other.calls > 0 && at < 280) {
+      _snprintf_s(callers + at, sizeof(callers) - at, _TRUNCATE,
+                  ", other callers x%llu (%llu gave a camera back)",
+                  g_callers_other.calls, g_callers_other.restores);
+    }
+    if (g_caller_count > 0 || g_callers_other.calls > 0) {
       ModLog("roll trace   : camera calls in the walk by the address that "
              "called: %s", callers);
     }
@@ -443,6 +515,7 @@ void EyeStaleReport() {
   g_flushes = 0;
   g_items = 0;
   g_caller_count = 0;
+  memset(&g_callers_other, 0, sizeof(g_callers_other));
   g_census.Clear();
   g_items_all.Clear();
   memset(g_reason_items, 0, sizeof(g_reason_items));

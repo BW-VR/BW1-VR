@@ -66,8 +66,14 @@ inline void CameraStaleChecks() {
   Check(stack.depth == 2, "two calls are open", stack.depth, 2);
   Check(stack.Call(b, c), "the camera of the outer effect is a restore", 0, 0);
   Check(stack.depth == 1, "the inner call is closed", stack.depth, 1);
+  Check(!EyeBackAfter(stack, true), "the inner restore leaves the eye camera "
+        "alone, because the outer effect is open", 0, 0);
   Check(stack.Call(a, b), "the outer restore gives A back", 0, 0);
   Check(stack.depth == 0, "no call is open at the end", stack.depth, 0);
+  Check(EyeBackAfter(stack, true), "the outer restore puts the eye camera "
+        "back", 0, 0);
+  Check(!EyeBackAfter(stack, false), "a call that gives no camera back does "
+        "not put the eye camera back", 0, 0);
 
   // A restore of the outer camera closes the inner call too.
   stack.Clear();

@@ -12,6 +12,7 @@
 
 #include "../../src/mod/stream_ring.h"
 #include "../../src/mod/stream_split.h"
+#include "thread_cores.h"
 #include "app_log.h"
 #include "game_folder.h"
 #include "long_frames.h"
@@ -135,6 +136,7 @@ bool StreamReader::WaitAll(std::vector<QueuedFrame>* frames, int timeout_ms) {
 
 void* StreamReader::Main(void* self) {
   TimeLogNameThread("bwvr reader");
+  ThreadCores::MarkReader();
   AppTraceNameThread("reader (live stream)", 3);
   static_cast<StreamReader*>(self)->Run();
   return nullptr;

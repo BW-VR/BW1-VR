@@ -34,6 +34,10 @@ class ThreadCores {
   // app. The binding puts it on the fast cores.
   static void MarkSession();
   static void MarkPlay();
+  static void MarkReader();
+  // THE FAST CORES (late_fast_cores): the session thread, the play thread and the reader of the
+  // app on the fast cores, or on each core of the app again. It can change while a game runs.
+  static void KeepOnFastCores(bool on);
 
  private:
   static void* Main(void* self);

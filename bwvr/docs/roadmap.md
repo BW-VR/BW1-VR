@@ -773,10 +773,11 @@ that moves while the Hand takes it.
     picture as a stutter. Its log has no line that says that the compositor took the value.
 
   - The small hiccups in a flight with the stick. The player clicks a stick at each hiccup in the
-    blind compare `frame_tests/hitch_clicks.json`, and a repeated picture comes before each click.
-    About 0.5 pictures a second still come late, mostly a picture with a long play at about 1800
-    draws. The compare now measures `late_prebuild`. Before it goes into the values of the Steam
-    Frame, a run must show it.
+    blind compare `frame_tests/hitch_clicks.json`, and most clicks come 300 to 600 ms after a repeated
+    picture. About 0.5 pictures a second still come late, mostly with a play of about 4 ms, also
+    for a list that draws again. The threads of the app can run on a core with a quarter of the
+    speed, and the log does not show the core of a picture. The compare now measures
+    `late_fast_cores`. Before it goes into the values of the Steam Frame, a run must show it.
   - A turn and a zoom of two hands still go in the steps of the frames of the game: the shader
     would need a turn and a scale of each point.
 

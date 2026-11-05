@@ -24,6 +24,7 @@ namespace ps = proc_stat;
 // The session thread and the play thread of the app (MarkSession, MarkPlay).
 std::atomic<int> g_session_tid{0};
 std::atomic<int> g_play_tid{0};
+std::atomic<int> g_reader_tid{0};
 
 int Gettid() { return static_cast<int>(syscall(__NR_gettid)); }
 
@@ -168,6 +169,26 @@ struct Row {
 
 void ThreadCores::MarkSession() { g_session_tid.store(Gettid()); }
 void ThreadCores::MarkPlay() { g_play_tid.store(Gettid()); }
+void ThreadCores::MarkReader() { g_reader_tid.store(Gettid()); }
+
+void ThreadCores::KeepOnFastCores(bool on) {
+  // The main thread of the process keeps each core that the app can use.
+  const std::vector<int> allowed = AffinityOf(static_cast<int>(getpid()));
+  const cr::Plan plan = cr::MakePlan(2, "", ReadCores(), allowed);
+  if (plan.bind == 0) {
+    AppLog("cores        : late_fast_cores=%d binds no thread: %s", on ? 1 : 0, plan.why.c_str());
+    return;
+  }
+  const std::vector<int>& cores = on ? plan.fast : allowed;
+  const int tids[3] = {g_session_tid.load(), g_play_tid.load(), g_reader_tid.load()};
+  int failed = 0;
+  for (int tid : tids) {
+    if (tid != 0 && SetAffinity(tid, cores) != 0) ++failed;
+  }
+  AppLog("cores        : late_fast_cores=%d. The session thread %d, the play thread %d and the "
+         "reader %d are on the cores %s, %d of them failed", on ? 1 : 0, tids[0], tids[1], tids[2],
+         cr::CpuListText(cores).c_str(), failed);
+}
 
 void ThreadCores::GameStarts(const Options& options) {
   GameEnds();

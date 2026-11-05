@@ -212,6 +212,7 @@ struct App {
   std::atomic<bool> late_prepare_live{false};  // the row "Prepare early"
   std::atomic<bool> late_gap_live{false};      // the row "Prepare gap"
   std::atomic<bool> late_prebuild_live{false};  // the row "Prebuild"
+  bool late_fast_now = false;                   // the row "Fast cores"
   late_camera_math::GrabFilter late_grab_filter;
   float late_grab_ms = 35.0f;                  // grab_smoothing_ms
   std::atomic<uint64_t> late_handled{0};
@@ -1347,6 +1348,15 @@ void AppKeysApply(uint32_t bits) {
   app->late_prepare_live.store((bits & app_keys::kLatePrepare) != 0);
   app->late_gap_live.store((bits & app_keys::kLateGap) != 0);
   app->late_prebuild_live.store((bits & app_keys::kLatePrebuild) != 0);
+  // THE FAST CORES (late_fast_cores=1): on a slow core a picture takes about 4 times as long, and
+  // the system can choose such a core for each wake of a thread.
+  {
+    const bool fast = (bits & app_keys::kLateFastCores) != 0;
+    if (fast != app->late_fast_now) {
+      app->late_fast_now = fast;
+      ThreadCores::KeepOnFastCores(fast);
+    }
+  }
   app->panel_keep.store((bits & app_keys::kPanelKeep) != 0);
   VkSceneSetBindless((bits & app_keys::kBindless) != 0);
   VkSceneSetFastShaders((bits & app_keys::kFastShaders) != 0);

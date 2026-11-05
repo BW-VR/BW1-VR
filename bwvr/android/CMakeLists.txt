@@ -60,6 +60,7 @@ add_library(bwvr_quest SHARED
     src/menu_paint.cpp
     src/menu_painter.cpp
     src/motion_comp.cpp
+    src/remote_control.cpp
     src/scene_host.cpp
     src/scene_player.cpp
     src/stream_reader.cpp

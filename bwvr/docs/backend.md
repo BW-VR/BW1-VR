@@ -6908,9 +6908,9 @@ mesh by the depth of an object along the view axis, against four multiples of a 
 figure: 23.3 (full detail), 66.7 (middle), 86.7 (lowest) and 173.3 (lowest, fading
 out). Past the last, a stand-in sprite is drawn, or nothing. The four live at
 `0x00C37E8C` to `0x00C37E98` in writable data, with two readers each and no writer.
-`detail_distance` multiplies them once, after the mod checks that they hold the
+`detail_distance` multiplies them, after the mod checks that they hold the
 expected values. The key is 0 for the game's own, 1 for 2x, 2 for 3x and 3 (default)
-for 5x. The registry value `MaxObjectDistance` does nothing: at `0x008238C4` its
+for 5x. The debug page has the row "Detail" for a live A/B. The registry value `MaxObjectDistance` does nothing: at `0x008238C4` its
 value is read into a stack slot that the next read overwrites.
 
 From one fixed view with both eye passes at 70 degrees: the game's values give 3.6 to

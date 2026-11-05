@@ -6,6 +6,8 @@
 
 // controllers.cpp, once a frame, after the hands of the frame are known.
 void RadialMenuFrame();
+// A TEST AID (remote_control.cpp): the game thread sets the switches of the file.
+void RemoteControlFrame();
 
 // controllers.cpp, once for each pass of the message pump of the game. The
 // keys of a choice go into the key buffer of the game here.

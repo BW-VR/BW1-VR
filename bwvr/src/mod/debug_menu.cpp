@@ -39,6 +39,8 @@ uint64_t ControllersFrameCount();
 // --- the switches, from the files of their areas ----------------------------------
 
 // The ring (radial_menu.cpp).
+int DetailDistanceValue();
+void DetailDistanceToggle(const char* by);
 int RadialMenuWayValue();
 void RadialMenuWayChange(const char* by);
 // The controllers (controllers.cpp).
@@ -473,6 +475,8 @@ const Switch kSwitches[] = {
      [](const char* by) { AppKeyChange(app_keys::kKeyFastShaders, by); }, L"off|on"},
     {kGroupRender, L"Walk cap", L"The longest game frame that the walk counts",
      "move_stick_cap_ms", TabletopWalkCapValue, TabletopWalkCapToggle, L"50 ms|250 ms"},
+    {kGroupRender, L"Detail", L"How far out models keep their full detail",
+     "detail_distance", DetailDistanceValue, DetailDistanceToggle, L"1x|2x|3x|5x"},
     {kGroupRender, L"Equal depth", L"Depth test EQUAL with a small bias",
      "vk_equal_depth", VkSceneEqualDepthValue, VkSceneEqualDepthToggle,
      L"EQUAL|bias"},
@@ -822,6 +826,26 @@ bool DebugSwitchChoose(int i) {
            ControllersFrameCount());
   }
   return true;
+}
+
+bool DebugSwitchSetKey(const char* key, int value) {
+  for (int i = 0; i < kCount; ++i) {
+    const Switch& s = kSwitches[i];
+    if (strcmp(s.key, key) != 0) continue;
+    const int before = s.value();
+    if (before == kDebugCannot) {
+      ModLog("remote       : %s cannot change now, frame %llu", key, ControllersFrameCount());
+      return false;
+    }
+    // A switch with more values goes in a circle.
+    for (int step = 0; step < 16 && s.value() != value; ++step) s.change("the remote control");
+    const int after = s.value();
+    ModLog("remote       : %s is %d now, it was %d, the file asks for %d, frame %llu", key, after,
+           before, value, ControllersFrameCount());
+    return after == value;
+  }
+  ModLog("remote       : no switch has the key %s", key);
+  return false;
 }
 
 void DebugMenuLogStart() {

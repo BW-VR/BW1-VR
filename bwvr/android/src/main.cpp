@@ -52,6 +52,7 @@
 #include "picture_ring.h"
 #include "play_rules.h"
 #include "pose_log.h"
+#include "remote_control.h"
 #include "steamvr_settings.h"
 #include "../../src/mod/osc_gaze_math.h"
 #include "../../src/mod/screen_quad_math.h"
@@ -233,6 +234,9 @@ struct App {
   // with the values of the shown picture.
   PoseLog pose_log;
   RecordLog<PictureRecord> picture_log;
+  // A TEST AID (remote_control): the file of the test run, and the text for the player.
+  RemoteControl remote;
+  std::string remote_prompt;
   bool shown_again = false;
   uint64_t shown_tick = 0;
   double shown_work_ms = 0.0;
@@ -1131,6 +1135,14 @@ void* PlayThread(void* arg) {
     const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
     const double waited = WriteSlot(app, *live, early, density, early_waited);
     if (late) app->late_handled.store(late_seen, std::memory_order_release);
+    // A TEST AID: the test run sets the test state of the renderer.
+    {
+      const int want = app->remote.GpuState();
+      if (want >= 0 && want != test_state && want < VkSceneGpuTestStates()) {
+        test_state = want;
+        AppLog("remote       : the test state of the renderer is %s", VkSceneGpuTest(test_state));
+      }
+    }
     if (late && app->picture_log.On()) {
       picture_record = PictureRecord();
       picture_record.tick_ms = late_tick.sent_ms;
@@ -1139,6 +1151,7 @@ void* PlayThread(void* arg) {
       picture_record.tick = static_cast<uint32_t>(late_seen);
       picture_record.flags = (n > 0 ? 1u : 0u) | (app->late_again ? 2u : 0u);
       picture_record.gate_ms = gate_ms > 0.0 ? static_cast<float>(gate_ms) : 0.0f;
+      VkSceneLastDraws(&picture_record.outer_draws, &picture_record.center_draws);
       picture_pending = true;
     }
     if (trace_play != 0) {
@@ -1486,7 +1499,11 @@ std::string ClockNow() {
 void ShowNotice(App* app) {
   const bool notice = app->play_notice && app->game_on && !app->first_frame &&
                       !app->menu_over_game;
-  if (notice) {
+  // A TEST AID: the text of the test run takes the same place.
+  const bool remote = !app->remote_prompt.empty() && app->game_on && !app->menu_over_game;
+  if (remote) {
+    app->menu.SetNotice(app->remote_prompt);
+  } else if (notice) {
     const int ms = app->play_menu_hold_ms;
     char text[320];
     if (ms > 0) {
@@ -1504,7 +1521,7 @@ void ShowNotice(App* app) {
   } else {
     app->menu.SetNotice("");
   }
-  app->xr.SetMenuShown(app->menu_over_game || notice || !app->game_on);
+  app->xr.SetMenuShown(app->menu_over_game || notice || remote || !app->game_on);
 }
 
 // The menu over the game, or the game with no menu.
@@ -1878,6 +1895,16 @@ void Play(App* app, bool new_game) {
   // gpu_test (0 by default, bwvr.ini only): a test aid. The renderer goes through its test
   // states, 4 s each, and the log has the GPU time of each state.
   app->gpu_test = app->ini.GetInt("bwvr", "gpu_test", 0) != 0;
+  // remote_control (0 by default, bwvr.ini only): a test aid. The test run on the headset
+  // changes the switches of the debug page while the game runs ("The test run").
+  {
+    const bool remote = app->ini.GetInt("bwvr", "remote_control", 0) != 0;
+    VkSceneListMeasure(remote);
+    if (remote) {
+      app->remote_prompt.clear();
+      app->remote.Start(app->game.folder + "/bwvr-control.txt", app->folder + "/bwvr-steps.csv");
+    }
+  }
   // xr_release_take (1 by default): see WriteSlot.
   app->release_take.store(app->ini.GetInt("bwvr", "xr_release_take", 1) != 0);
   if (loop) {
@@ -2022,10 +2049,13 @@ void MenuButton(App* app, const XrInput& in) {
 // code in the status line.
 void GameTick(App* app) {
   if (!app->game_on) return;
+  if (app->remote.TakePrompt(&app->remote_prompt)) ShowNotice(app);
   int code = 0;
   std::string why;
   if (app->wine.State(&code, &why) != WineRuntime::GameState::kEnded) return;
   app->game_on = false;
+  app->remote.Stop();
+  app->remote_prompt.clear();
   // THE FRAME LOOP ends with the game: the thread of the session owns the
   // renderer again, and no slot of the ring shows.
   if (app->play_running) {

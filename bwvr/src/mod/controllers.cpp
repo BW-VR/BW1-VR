@@ -5045,6 +5045,7 @@ void ControllersFrame() {
   LatchEsc();
   LatchLeashButton();
   RadialMenuFrame();
+  RemoteControlFrame();
 }
 
 namespace {

@@ -257,6 +257,7 @@ void SpiritAnchorSetEnabled(bool on);
 void SpiritAnchorSetWorldSize(bool on, bool test_keys, int test_frame,
                               bool test_point);
 void DetailDistanceSet(float factor);
+void RemoteControlInstall();
 void ComfortCameraRelease();
 void PointerMapInstall();
 void HeadCameraSetHandAnchored(bool on);
@@ -2133,6 +2134,7 @@ void StartVrStep() {
                   g_audio_test_tag_bank);
     AudioInstall(g_audio_head, g_audio_advisors, g_audio_trace);
     DetailDistanceSet(g_detail_distance);
+    RemoteControlInstall();
     SnapshotGuardInstall();
     PresentWatchSetEnabled(true);
     PresentWatchInstall();

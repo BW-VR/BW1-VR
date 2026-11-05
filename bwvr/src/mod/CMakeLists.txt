@@ -111,6 +111,7 @@ add_library(bwvr_mod SHARED
     miracle.cpp
     village.cpp
     radial_menu.cpp
+    remote_control.cpp
     debug_menu.cpp
     temple.cpp
     throw_physics.cpp

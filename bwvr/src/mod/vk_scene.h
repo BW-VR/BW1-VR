@@ -238,6 +238,10 @@ void VkSceneSetFastShaders(bool on);
 int VkSceneGpuTestStates();
 const char* VkSceneGpuTest(int state);
 void VkSceneGpuTestCounts(uint64_t* outer, uint64_t* center, uint64_t* walks, int* kinds);
+// A TEST AID: the draws of the last walk in the outer image and in the centre image.
+void VkSceneLastDraws(uint32_t* outer, uint32_t* center);
+// A TEST AID: with true, each 720 walks the log has what a list of draws is made of.
+void VkSceneListMeasure(bool on);
 // THE SAME PANEL (xr_panel_keep): the hash of the draws of the last walk that drew into
 // the panel. Two walks with one hash have the same pixels in the panel.
 uint64_t VkScenePanelHash();

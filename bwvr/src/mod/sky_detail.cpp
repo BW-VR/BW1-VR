@@ -128,6 +128,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "debug_menu.h"
 #include "MinHook.h"
 #include "sky_math.h"
 
@@ -690,6 +691,21 @@ void DetailDistanceSet(float factor) {
 }
 
 float DetailDistanceFactor() { return g_lod_factor; }
+
+// The values of the key detail_distance: 0 the game's own, 1 two times, 2 three times,
+// 3 five times.
+int DetailDistanceValue() {
+  if (!g_lod_have_saved) return kDebugCannot;
+  return g_lod_factor < 1.5f ? 0 : g_lod_factor < 2.5f ? 1 : g_lod_factor < 4.0f ? 2 : 3;
+}
+
+void DetailDistanceToggle(const char* by) {
+  if (!g_lod_have_saved) return;
+  static const float kFactors[] = {1.0f, 2.0f, 3.0f, 5.0f};
+  const int next = (DetailDistanceValue() + 1) % 4;
+  DetailDistanceSet(kFactors[next]);
+  ModLog("test key     : %s, detail_distance is %d", by, next);
+}
 
 void SkyDetailRelease() {
   if (g_lod_have_saved) DetailDistanceSet(1.0f);

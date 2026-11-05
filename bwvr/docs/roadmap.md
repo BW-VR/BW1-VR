@@ -772,6 +772,42 @@ that moves while the Hand takes it.
   the time of the frame thread in
   the first 30 s of a game (the turns of the game are 40 to 108 ms there with no
   read of a file: the first run of the code under FEX).
+- **N0a. 144 Hz with the whole island in view.** At 144 Hz a picture has 6.9 ms. With
+  about 3000 draws the GPU needs about 3.7 ms for a walk, 1.5 ms for the compose and 1 ms
+  for the compositor of SteamVR, and the play thread needs about 3 ms of the CPU. A walk
+  with no pixels still takes about 3 ms, and each extra draw adds about 1 us, so the draws
+  are the largest cost. Each step gets a key with the old behavior as a value and a row of
+  the debug page. `tools/android/frame_test.py` measures each step (`android.md`, "The test
+  run"). The order:
+  1. **The detail distance.** The row "Detail" changes `detail_distance` while the game
+     runs. Measure 5x, 3x, 2x and 1x, let the player judge the models in the distance, and
+     then choose the default of the headset app.
+  2. **Many draws in one call.** A run of draws with one state becomes one
+     `vkCmdDrawIndexedIndirect`. The values of a draw go into a buffer, and the draw finds
+     them by its first instance. This replaces the push constant, the bind of the vertices
+     and the bind of the indices of each draw, so it lowers the cost of the GPU and of the
+     CPU. The list again keeps its indirect buffer and its values, so a picture of the same
+     list has nearly no work on the CPU. The vertices need one stride and one base in the
+     ring. The line "a list of the ..." of the log has the runs for a view: few runs for
+     many draws give the largest gain. A list with a clear of one eye keeps the old way.
+  3. **Prepare and draw at the same time** (`frame_loop_gpu_depth=2`). The play thread
+     starts a picture while the GPU draws the picture before. This needs a fourth set of
+     images, a command buffer for each picture of a list, and a place of its own for the
+     joined indices. Do this only when a test run after step 2 still shows that the play
+     thread waits for the GPU.
+  4. **No tiny draws.** The line "a list of the ..." counts the draws of the game by their
+     size in pixels. A draw far below one pixel can go before it goes to the app, so this
+     also relieves the game. Check the fade of a far object and the thin lines.
+  5. **A merge across textures.** With the places of the textures in the values of a draw,
+     the merge can join draws with different textures. This comes after step 2 and uses
+     its buffer.
+  6. **A cheaper compose.** The compose costs 1.5 ms at 200 percent. Compare a lower shading
+     rate outside the centre in the compose pass with the outer image and the centre image
+     as two layers of the runtime (`fovea_res_layer`), which have no soft edge.
+  7. **Pictures between the walks, by depth.** For a view that is still too heavy, a
+     picture between two walks comes from the last picture and its depth. This is the
+     largest work, and the edges of near objects can show faults. Do this only when the
+     steps before do not reach 144 Hz.
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:

@@ -4044,6 +4044,7 @@ game with the new place comes.
 | `xr_panel_keep` | 0 | 1: a panel with the same draws as the panel in the swapchain takes no copy. The debug page has the row "Panel keep" for a live A/B |
 | `vk_fast_shaders` | 0 | 1, with `vk_bindless=1` and the dynamic blend: the operations of a draw are constants of its pipeline (`backend.md`, "The textures in one set"). The debug page has the row "Fast shaders" |
 | `gpu_test` | 0 | A test aid: 1 goes through the states of the test of the GPU, 4 s each, each game. The picture has no pixels of the world in one state. The log has "gpu test : ..." for each state |
+| `remote_control` | 0 | A test aid: 1, the switches of the debug page follow `bwvr-control.txt` of the game folder (see "The test run" below). It counts at the next Play |
 | `pose_log` | 0 | A test aid: 1 writes one record for each frame of the session into `bwvr-pose.bin` of the folder of the app, and `tools/android/pose_report.py` names the frames that do not fit the frames around them |
 
 The keys are in `bwvr.ini` of the game folder, read at each Play.
@@ -4056,13 +4057,49 @@ than a third from the speed of the walk, and the longest in slots of the stick.
 "late take : ..." each 10 s has the frames that waited for their picture, the time
 of the waits, and the frames that came to the limit. With `pose_log=1` the file
 `bwvr-pictures.bin` has one record for each picture of the late camera: the send of
-its tick, the start of its play, its submit, and the end of its GPU work.
+its tick, the start of its play, its submit, the end of its GPU work, and its draws.
 The log of the mod has "pose check : ..." each 900 frames: the angle between the
 view of the layer and the camera matrix of the engine for that frame. The
 line "time" of the frames of the session counts the pictures: "made N pictures a
 second" goes to the display rate.
 
-**The tests.** `.\dev.ps1 build`: the checks of `late_camera_checks.h`: the move
+**The test run** (`remote_control=1` and `pose_log=1` in `bwvr.ini`). The player only
+starts the game, and a script changes the switches while the game runs:
+
+```bash
+python tools/android/frame_test.py run tools/android/frame_tests/detail.json <folder>
+```
+
+- On the PC the script copies itself and the test to the Steam Frame, starts it there, waits
+  for its end, gets the logs into the folder and prints the table. `fetch` and `report` do
+  the last two parts alone. A short loss of the network does not stop the test.
+- On the Steam Frame the script waits for the line "the frames of the scene start" in the log of
+  the app. Then it writes `bwvr-control.txt` into the game folder for each step of the test, and
+  it goes through the steps in turns until `most_s` ends or the game ends. At the end
+  it sets `end_keys`.
+- The file has lines `key=value`, and the first line is `serial=N`. A reader acts only on a new
+  serial (`remote_math.h`). The mod (`remote_control.cpp`) reads the file 5 times a second,
+  and the game thread sets each switch of the debug page with that ini key in the steps of its
+  change function. The value of a key is the value of its row, so `detail_distance=2` means
+  the third word of the row. The log has "remote : ..." for each change.
+- The app (`android/src/remote_control.cpp`) reads the same file for `step` (the time and the
+  name go into `bwvr-steps.csv`), `prompt` (a text for the player in the quad of the menu, and
+  empty hides it) and `gpu_state` (the test state of the renderer from the test of the GPU).
+- A test is a JSON file in `tools/android/frame_tests/`: `cycle` with `step`, `keys` and
+  `prompt`, then `step_s`, `skip_s` (the first part of a step that does not count),
+  `step_prompt_s`, `most_s`, `start_prompt`, `end_prompt` and `end_keys`. `skip_s` must be longer
+  than `step_prompt_s`, so the text in the headset is not in the numbers.
+
+The table has one row for each step: the frames of the session, the new pictures, the frames
+of the game, the time of the play and of the GPU for a walk, and the time from the tick to the
+end of the GPU. The player can look at another place during a test, so the table has the steps
+also for windows with about the same number of draws. With `remote_control=1` the log also has
+one line for each image each 720 walks: "a list of the outer image: ...", with the draws, the
+runs of one state, the different states, the indices and the draws of the game by their size in
+pixels. SteamVR gives only the sum of the whole run for its reprojected frames.
+
+**The tests.** `.\dev.ps1 build`: the checks of `remote_checks.h` for the file of the test
+run, and the checks of `late_camera_checks.h`: the move
 for a step of the head, a turned eye, the clip position of a moved vertex with a
 move in depth and with no move, a point behind the eye, the walk in the map, a
 snap turn as a cut, and an even walk with a mod 0 to 5 slots late.

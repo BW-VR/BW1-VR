@@ -51,6 +51,9 @@ void DebugSwitchValueText(int i, int value, wchar_t* out, int size);
 // The player chose switch i on the page: its change function runs, and the
 // log has the switch and its new value. False when it cannot change now.
 bool DebugSwitchChoose(int i);
+// A TEST AID (remote_control.cpp): the switch with this ini key takes this value, in
+// the steps of its change function. False when it cannot.
+bool DebugSwitchSetKey(const char* key, int value);
 
 // One log line at the start with debug_menu=1.
 void DebugMenuLogStart();

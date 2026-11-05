@@ -1,0 +1,18 @@
+{
+  "name": "detail",
+  "start_prompt": "The test runs. Make the world small, so that you see the whole island. Stay there. Only look.",
+  "start_prompt_s": 8,
+  "step_s": 8,
+  "skip_s": 1.5,
+  "step_prompt_s": 1.2,
+  "most_s": 240,
+  "cycle": [
+    {"step": "detail 5x", "keys": {"detail_distance": 3}, "prompt": "Detail 5x"},
+    {"step": "detail 3x", "keys": {"detail_distance": 2}, "prompt": "Detail 3x"},
+    {"step": "detail 2x", "keys": {"detail_distance": 1}, "prompt": "Detail 2x"},
+    {"step": "detail 1x", "keys": {"detail_distance": 0}, "prompt": "Detail 1x"}
+  ],
+  "end_keys": {"detail_distance": 3},
+  "end_prompt": "The test is done. You can quit the game.",
+  "end_prompt_s": 8
+}

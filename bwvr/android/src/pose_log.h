@@ -49,6 +49,8 @@ struct PictureRecord {
   uint32_t flags;    // 1: frames of the game in the batch, 2: the list again
   float gate_ms;     // the wait for the GPU before this picture
   float gpu_ms;      // the GPU time of the walks that ended before this picture
+  uint32_t outer_draws;   // the draws of the walk in the outer image
+  uint32_t center_draws;  // the draws of the walk in the centre image
 };
 
 template <typename T>

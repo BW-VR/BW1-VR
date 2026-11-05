@@ -772,11 +772,12 @@ that moves while the Hand takes it.
   - The async reprojection. `steamvr.disableAsync=1` of SteamVR is for a test that shows a missed
     picture as a stutter. Its log has no line that says that the compositor took the value.
 
-  - The motion between the frames of the game. `frame_tests/motion_compare.json` measures
-    `late_prepare` and `late_grab`, and the player judges the grab of the land and a flight with
-    the stick. A run must show both before they go into the values of the Steam Frame. A turn and
-    a zoom of two hands still go in the steps of the frames of the game: the shader would need a
-    turn and a scale of each point.
+  - The small hiccups in a flight with the stick. The player feels them with no dropped frame.
+    `frame_tests/hitch_clicks.json` is a blind compare of `late_prepare_gap`: the player clicks a
+    stick at each hiccup, and the records around a click show the cause. Late pictures are the
+    known cause (`late_prepare_gap` is for them), and no run has shown that they are the only one.
+  - A turn and a zoom of two hands still go in the steps of the frames of the game: the shader
+    would need a turn and a scale of each point.
 
   Do each of these only when a test run shows the need:
   1. **Many draws in one call.** A run of draws with one state becomes one

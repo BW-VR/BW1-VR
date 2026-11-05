@@ -48,6 +48,8 @@ class StreamReader {
   void Stop();
   // Each frame that waits, the oldest first, or false when none waits.
   bool TakeAll(std::vector<QueuedFrame>* frames);
+  // True when frames wait for TakeAll.
+  bool HasFrames();
   // THE PLAY THREAD (frame_loop=1): as TakeAll, but when no frame waits it
   // waits up to timeout_ms for the next frame of the ring.
   bool WaitAll(std::vector<QueuedFrame>* frames, int timeout_ms);

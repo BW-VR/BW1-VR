@@ -4046,6 +4046,7 @@ game with the new place comes.
 | `gpu_test` | 0 | A test aid: 1 goes through the states of the test of the GPU, 4 s each, each game. The picture has no pixels of the world in one state. The log has "gpu test : ..." for each state |
 | `vk_tiny_draws` | 0 | 1: a draw of the world that is smaller than `vk_tiny_pixels` in both directions in the image of a pass does not go to the GPU. A draw that is that small also in the centre image leaves earlier: the mod does not send it to the app. The debug page has the row "Tiny draws" for a live A/B |
 | `late_prepare` | 0 | 1: a frame of the game goes into the renderer when it comes, also while the GPU draws the picture before, and not after the next tick. So a new list does not make its picture late. The debug page has the row "Prepare early" |
+| `late_prepare_gap` | 0 | 1, with `late_prepare=1`: a frame of the game starts only when it fits before the next tick, by the time of the frames before it, and the tick draws the list before again. A frame waits for 2 ticks at most. The debug page has the row "Prepare gap" |
 | `late_grab` | 0 | 1: while a grip holds the land, the app moves the newest map at each frame of the session by the way of the grips, eased by `grab_smoothing_ms` (`late_camera_math.h`, "The late grab"). The land then does not go in the steps of the frames of the game. A turn and a zoom of two hands keep these steps, because the shader takes only a move. The debug page has the row "Late grab" |
 | `vk_compose_fast` | 0 | 1: the compose draws the cells outside the centre with a pipeline that reads one image, at the rate of `vk_compose_rate`. With `xr_eye_mutable=1` it writes through a view of the UNORM format, so the shader decodes nothing and the target encodes nothing, and a new panel goes to its swapchain with a draw and not with a copy. The debug page has the row "Compose fast" |
 | `vk_compose_rate` | 1 | The shading rate of the cells outside the centre with `vk_compose_fast=1`: 1, 2 or 4 pixels on each side for one shade |
@@ -4066,7 +4067,7 @@ the Vulkan instance of the session: `fovea_res=1` with `fovea_res_outer_pct=25`,
 `xr_compose_direct=1`, `xr_compose_take=1`, `xr_eye_mutable=1`, `vk_compose_fast=1`,
 `vk_compose_rate=2`, `tu_debug=sysmem`, `vk_bindless=1`, `vk_fast_shaders=1`, `vk_list_keep=1`,
 `vk_cheap_draws=1`, `vk_tiny_draws=1`, `vk_tiny_pixels=30`, `detail_by_scale=1`,
-`xr_panel_keep=1` and `move_stick_cap_ms=250`. A value that the file has stays, also a 0, so a
+`xr_panel_keep=1`, `move_stick_cap_ms=250`, `late_grab=1` and `late_prepare=1`. A value that the file has stays, also a 0, so a
 save of the menu before this start can keep a default of the table. `frame_defaults=0` adds
 nothing. The log has "menu : frame_defaults=1. ...". `vk_mres_sort` stays 0: the sort takes about
 5 percent off a walk, and it adds work on the CPU. `vk_compose_rate=4` takes only 0.05 ms more off
@@ -4117,6 +4118,10 @@ python tools/android/frame_test.py run tools/android/frame_tests/detail.json <fo
   player clicks a stick, for at most `stage_most_s`. With `mark=1` in the file the mod writes
   the scale of the table and the factor of the detail into `bwvr-marks.csv` at the click, and
   the table of the run has them. `detail_marks.json` finds the scales of `detail_by_scale`.
+- With `"track_marks": true` and `mark=1` in the keys of a step, the script writes the time of each
+  click of a stick into `marks_time.csv`, on the clock of the records of the app. The table then
+  counts the clicks of each step. With no text in the headset the player does not know the step,
+  and the records around a click show what happened at that moment.
 - A test is a JSON file in `tools/android/frame_tests/`: `cycle` with `step`, `keys` and
   `prompt`, then `step_s`, `skip_s` (the first part of a step that does not count),
   `step_prompt_s`, `most_s`, `start_prompt`, `end_prompt` and `end_keys`. `skip_s` must be longer

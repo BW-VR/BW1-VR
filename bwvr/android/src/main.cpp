@@ -210,6 +210,7 @@ struct App {
   std::atomic<bool> late_take_live{false};
   std::atomic<bool> late_grab_live{false};     // the row "Late grab"
   std::atomic<bool> late_prepare_live{false};  // the row "Prepare early"
+  std::atomic<bool> late_gap_live{false};      // the row "Prepare gap"
   late_camera_math::GrabFilter late_grab_filter;
   float late_grab_ms = 35.0f;                  // grab_smoothing_ms
   std::atomic<uint64_t> late_handled{0};
@@ -972,6 +973,10 @@ void* PlayThread(void* arg) {
   // next tick, and the ms of their play.
   size_t prepared_n = 0;
   double prepared_ms = 0.0;
+  // THE GAP BETWEEN TWO TICKS (late_prepare_gap): the ms that a frame of the game takes, and the
+  // ticks that frames of the game waited for a gap.
+  double prepare_cost = 3.0;
+  int prepare_waited = 0;
   // A TEST AID (remote_control): the limit of the tiny draws and the rate of the compose
   // that the file asks for.
   int tiny_seen = -1;
@@ -991,10 +996,31 @@ void* PlayThread(void* arg) {
     // tick has only the commands of the list before it, and a new list does not make its
     // picture late. One frame waits for each tick: a newer frame stays with the reader.
     const bool prepare = late && app->late_prepare_live.load() && !app->xr.DensityPass();
-    const auto prepare_now = [&]() {
-      if (!prepare || prepared_n > 0 || !app->live_reader.TakeAll(&live->batch)) return;
+    // THE GAP (late_prepare_gap=1): a frame of the game that would still run at the next tick
+    // makes that picture late, so it starts only when it fits before the next tick. The tick then
+    // draws the list before again, which is right for its place. A frame waits for 2 ticks at
+    // most, and with no list to draw again it does not wait.
+    const bool gap = prepare && app->late_gap_live.load();
+    const auto prepare_now = [&](bool at_tick) {
+      if (!prepare || prepared_n > 0) return;
+      if (gap && prepare_waited < 2 && VkSceneLateCanReplay() &&
+          StreamScreen().LastPicture() == screen_quad_math::Last::kWorld) {
+        const double period_ms = static_cast<double>(late_tick.period) / 1e6;
+        const double left = late_tick.sent_ms + period_ms - NowMs();
+        const bool ticks_run = left > -period_ms;
+        if (ticks_run && (at_tick || left < prepare_cost + 0.5)) {
+          if (at_tick && app->live_reader.HasFrames()) ++prepare_waited;
+          return;
+        }
+      }
+      if (!app->live_reader.TakeAll(&live->batch)) return;
+      prepare_waited = 0;
       prepared_n = live->batch.size();
       prepared_ms = PlayBatch(app, live);
+      // A rare long frame does not close the gaps: 5 ms still fits after the submit of a picture.
+      const double decayed = prepare_cost * 0.98;
+      const double cost = prepared_ms > decayed ? prepared_ms : decayed;
+      prepare_cost = cost < 5.0 ? cost : 5.0;
     };
     double gate_ms = -1.0;
     if (depth > 0) {
@@ -1007,7 +1033,7 @@ void* PlayThread(void* arg) {
         const bool may = app->ring.WaitGpu(depth, prepare ? 1000000ull : 5000000ull, &waited);
         if (waited) waited_gpu = true;
         if (may || app->play_stop.load()) break;
-        prepare_now();
+        prepare_now(false);
       }
       // The phase of the take: with a depth of 1 the GPU finished each
       // picture now, the picture before too.
@@ -1034,11 +1060,11 @@ void* PlayThread(void* arg) {
       for (;;) {
         got_tick = WaitLateTick(app, &late_tick, &late_seen, 1);
         if (got_tick || app->play_stop.load()) break;
-        prepare_now();
+        prepare_now(false);
         if (NowMs() - wait_at >= 50.0) break;
       }
       if (app->play_stop.load()) break;
-      prepare_now();
+      prepare_now(got_tick);
       if (prepared_n == 0 && !got_tick) {
         QuietCheck(app, live);
         continue;
@@ -1311,6 +1337,7 @@ void AppKeysApply(uint32_t bits) {
   app->late_take_live.store((bits & app_keys::kLateTake) != 0);
   app->late_grab_live.store((bits & app_keys::kLateGrab) != 0);
   app->late_prepare_live.store((bits & app_keys::kLatePrepare) != 0);
+  app->late_gap_live.store((bits & app_keys::kLateGap) != 0);
   app->panel_keep.store((bits & app_keys::kPanelKeep) != 0);
   VkSceneSetBindless((bits & app_keys::kBindless) != 0);
   VkSceneSetFastShaders((bits & app_keys::kFastShaders) != 0);
@@ -1922,6 +1949,7 @@ void Play(App* app, bool new_game) {
       app->late_take_live.store(app->ini.GetInt("bwvr", "late_take", 0) != 0);
       app->late_grab_live.store(app->ini.GetInt("bwvr", "late_grab", 0) != 0);
       app->late_prepare_live.store(app->ini.GetInt("bwvr", "late_prepare", 0) != 0);
+      app->late_gap_live.store(app->ini.GetInt("bwvr", "late_prepare_gap", 0) != 0);
       app->late_grab_ms = static_cast<float>(app->ini.GetInt("bwvr", "grab_smoothing_ms", 35));
       app->late_handled.store(0);
       app->take_all = app->take_waits = app->take_over = 0;

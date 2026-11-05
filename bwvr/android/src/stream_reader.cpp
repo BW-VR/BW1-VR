@@ -97,6 +97,13 @@ size_t StreamReader::MostBytes() {
   return most;
 }
 
+bool StreamReader::HasFrames() {
+  pthread_mutex_lock(&lock_);
+  const bool any = !queue_.empty();
+  pthread_mutex_unlock(&lock_);
+  return any;
+}
+
 bool StreamReader::TakeAll(std::vector<QueuedFrame>* frames) {
   frames->clear();
   pthread_mutex_lock(&lock_);

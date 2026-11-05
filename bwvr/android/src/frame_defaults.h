@@ -38,9 +38,11 @@ constexpr Value kValues[] = {
     {"vk_tiny_draws", "1"},
     {"vk_tiny_pixels", "30"},
     {"detail_by_scale", "1"},
-    // The panel, and the walk of a long frame of the game.
+    // The panel, and the motion between the frames of the game.
     {"xr_panel_keep", "1"},
     {"move_stick_cap_ms", "250"},
+    {"late_grab", "1"},
+    {"late_prepare", "1"},
 };
 
 inline bool IsFrameRuntime(const std::string& runtime) {

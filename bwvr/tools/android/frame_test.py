@@ -17,6 +17,8 @@ bwvr.ini of the headset needs remote_control=1 and pose_log=1.
 
 A test goes through "cycle" in turns, or with "mode": "marks" through "stages": each stage
 waits until the player clicks a stick, and the table has the scale of the world at the click.
+With "track_marks": true the script writes the time of each click, and the table counts the clicks
+of each step. The player does not need to know the step, so this is a blind compare.
 """
 import json
 import os
@@ -24,6 +26,7 @@ import statistics
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 HOST = 'steamos@frame'
@@ -164,6 +167,24 @@ def run_marks(test, control, result, say, marks_path):
             say('no mark in this stage')
 
 
+def track_marks(marks_path, times_path, stop):
+    """The time of each click: CLOCK_MONOTONIC in ms, the clock of the records of the app."""
+    seen = 0
+    while not stop.is_set():
+        try:
+            with open(marks_path) as f:
+                count = sum(1 for _ in f)
+        except OSError:
+            count = 0
+        if count > seen:
+            now = time.monotonic() * 1000.0
+            with open(times_path, 'a') as f:
+                for _ in range(count - seen):
+                    f.write(f'{now:.1f}\n')
+            seen = count
+        time.sleep(0.02)
+
+
 def conduct(test_path):
     with open(test_path) as f:
         test = json.load(f)
@@ -181,6 +202,12 @@ def conduct(test_path):
         os.remove(marks_path)
     marks = test.get('mode') == 'marks'
     result = {'name': test.get('name', ''), 'steps': 0, 'game_ended': False, 'game_came': False}
+    times_path = os.path.join(home, 'marks_time.csv')
+    if os.path.exists(times_path):
+        os.remove(times_path)
+    stop_track = threading.Event()
+    if test.get('track_marks'):
+        threading.Thread(target=track_marks, args=(marks_path, times_path, stop_track), daemon=True).start()
     if wait_for_scene(os.path.join(APP_FILES, 'bwvr-quest.log'), test.get('wait_most_s', WAIT_MOST_S), say):
         result['game_came'] = True
         first = test['stages'][0] if marks else test['cycle'][0]
@@ -201,6 +228,7 @@ def conduct(test_path):
             time.sleep(float(test.get('end_prompt_s', 0.0)))
             control.send('end', None, '')
             time.sleep(1.0)
+    stop_track.set()
     control.remove()
     with open(done_path + '.tmp', 'w') as f:
         json.dump(result, f)
@@ -236,7 +264,7 @@ def fetch(folder):
         scp_from(f'{APP_FILES}/{name}', folder)
     for name in ('bwvr.log', 'bwvr.ini', 'bwvr-marks.csv'):
         scp_from(f'{APP_FILES}/game/{name}', os.path.join(folder, 'game'))
-    for name in ('test.json', 'conduct.log', 'done'):
+    for name in ('test.json', 'conduct.log', 'done', 'marks_time.csv'):
         scp_from(f'{TEST_DIR}/{name}', folder)
     scp_from(f'{PERF_LOGS}/vrcompositor.txt', folder)
     newest = ssh(f'ls -t {PERF_LOGS}/perfrecording-steam.app.2729671027-*.csv | head -1',
@@ -450,6 +478,7 @@ def report(folder):
             if group:
                 row(name, group)
     print_marks(folder)
+    print_clicks(folder)
     print_perf(folder)
     print_lists(folder)
     print_remote_faults(folder)
@@ -466,6 +495,27 @@ def print_marks(folder):
             parts = line.strip().split(',')
             if len(parts) == 3:
                 print(f'  the factor {float(parts[2]):.2f} disturbs at {float(parts[1]):.0f} units a meter')
+
+
+def print_clicks(folder):
+    path = os.path.join(folder, 'marks_time.csv')
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        times = [float(line) for line in f if line.strip()]
+    steps = read_steps(folder)
+    counts = {}
+    seconds = {}
+    for i, (at, name) in enumerate(steps):
+        if name in ('start', 'end') or i + 1 >= len(steps):
+            continue
+        seconds[name] = seconds.get(name, 0.0) + (steps[i + 1][0] - at) / 1000.0
+        counts[name] = counts.get(name, 0) + sum(1 for t in times if at <= t < steps[i + 1][0])
+    print()
+    print(f'The clicks of the player: {len(times)}')
+    for name in counts:
+        print(f'  {name:26s} {counts[name]:4d} clicks in {seconds[name]:5.0f} s, '
+              f'{60.0 * counts[name] / max(seconds[name], 0.001):5.1f} a minute')
 
 
 def print_perf(folder):

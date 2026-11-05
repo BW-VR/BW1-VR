@@ -855,6 +855,24 @@ keeps the mod as it is.
   skips the wait only for the sounds of the mod's mixer. The other sounds
   still make the game thread wait, and this can stop the game for 40 to
   170 ms.
+- **F25. A new look for the hint cards.** The cards look too clean and
+  modern for the game. Now `HintCardEndFrame` draws each card with GDI: a
+  dark card with round corners, white Segoe UI letters, and a badge for
+  the button (`controller-hints.md`, section 9.2). Wanted: a look that fits
+  the fantasy, old and playful world of the game, for example old paper or
+  a small scroll with a gold edge, dark ink in a letter with serifs, and a
+  button badge as a seal or a carved stone. Then use the same look for the
+  other cards of the mod: the ring, the spell book, the keyboard and the
+  cards of the debug page. Rules:
+  - No art and no font of the game in the repo or the installer. Draw the
+    art in code, or make our own pictures. A font must have a license that
+    lets the mod ship it (for example the SIL Open Font License). The mod
+    can read a font of the game from the player's game folder at run time.
+  - The words must stay easy to read at the length of an arm: a capital
+    letter is 0.8 degrees now. Check the contrast against the land and the
+    sky in a headset.
+  - A key keeps the look of now (`hint_card_style=0`).
+  Make two or three looks as eye pictures first, and let the owner choose.
 
 ### Faults of the plain game
 

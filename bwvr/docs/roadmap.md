@@ -771,8 +771,8 @@ keeps the mod as it is.
 
 **Miracles and gestures**
 
-- **F1. A trail at the fingertip.** While B is held, a ribbon follows the
-  tip of the index finger, so the player sees the gesture. Now the game
+- **F1. A trail at the fingertip.** While B is held, a gold ribbon follows
+  the tip of the index finger, so the player sees the gesture. Now the game
   shows no trail, and the point of the draw is the grip point. Build the
   ribbon in the overlay from the points of `gesture_air.cpp`, and a key for
   the point of the draw (the tip or the grip).
@@ -816,8 +816,9 @@ keeps the mod as it is.
   (turn, teleport, vignette, main hand, move speed, recenter) that saves to
   `bwvr.ini`. The same panel shows one time at the start of a new game.
 - **F12. "Saving..." while the game saves.** The save box of the game draws
-  in a frame with no scene, so the headset shows a still view. Show a card
-  at the place of the menu panel.
+  in a frame with no scene, so the headset shows a still view. Show
+  "Saving..." on the hint card. Find first whether the card layer still
+  goes to the headset while the game thread saves.
 - **F13. A snapshot for a bug report:** an item of the ring saves the eye
   pictures and a copy of the log in `bwvr\captures`.
 - **F14. A ray that glows.** The ray, the tether of the far grab and the
@@ -837,12 +838,14 @@ keeps the mod as it is.
   and only for the villager in the Hand or under it. The draw of the icon is
   not traced (`Abode::DiscipleInHandNear` `0x00407420`,
   `GGuidance::MakeDiscipleSFX` `0x0071BF10`).
-- **F19. The Creature with no press.** An open hand that stays in the body
-  strokes it, and a thing held to the Creature for a short time goes to it
-  with no opening of the grip (`creature.md`, section 8).
-- **F20. The choice of the Creature at the start** with the Hand (R2).
-- **F21. The spirits nearer the middle of the view**
-  (`HelpDude::ScreenToWorld` `0x005BD2A0`, `spirit_anchor.cpp`).
+- **F19. The Creature with no press.** The Creature panel of the game
+  shows when the Hand is over the Creature (`ui-layer.md`, section 13), and
+  it goes at once when the Hand leaves. Wanted: the open hand near the
+  Creature shows the panel with no press, and the panel stays for a few
+  seconds after the hand goes, so it does not go on and off. An open hand
+  that stays in the body strokes the Creature with no grip, and a thing
+  held to the Creature for a short time goes to it with no opening of the
+  grip (`creature.md`, section 8).
 - **F22. Words that the card never shows**, for example the game's "Throw"
   and "Drop" (`HintCardGameHint`).
 - **F23. The sea with depth:** the coast at its real depth and water that

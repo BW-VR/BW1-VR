@@ -849,13 +849,15 @@ keeps the mod as it is.
 - **F25. The scroll look for the other cards.** The hint cards are
   parchment scrolls with wax seals (`hint_card_style=1`,
   `controller-hints.md`, section 9.11). The art is in `card_scroll.h`. Open:
+  - The spell book is a page of the same parchment (`miracles.md`, "The
+    spell book"). Its longest draw is 8.7 to 10.2 ms, against 3 to 6 ms for
+    the dark panel, and the page itself is only about 1.3 ms. Find the rest
+    and make it smaller.
   - The same look for the other cards that GDI draws: the ring
-    (`radial_menu.cpp`), the spell book (`spell_book.cpp`) and the keyboard
-    (`vr_keyboard.cpp`). Keep their layout. The cells of the book fill its
-    full width, so the rolls need a margin at each side and a larger quad,
-    with the same center. The ring has badges on a circle: a seal for each
-    badge fits it. The keyboard is opaque and fills its rect. The debug page
-    draws no picture of its own: it uses the ring.
+    (`radial_menu.cpp`) and the keyboard (`vr_keyboard.cpp`). Keep their
+    layout. The ring has badges on a circle: a seal for each badge fits it.
+    The keyboard is opaque and fills its rect. The debug page draws no
+    picture of its own: it uses the ring.
   - Only a headset can show the contrast of the scroll against the sky and
     the land, and whether the grain or the ink shimmers when the headset
     shows the card smaller than its picture.

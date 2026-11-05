@@ -443,6 +443,62 @@ void Paper(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
   }
 }
 
+void Page(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
+  const int w = picture.width;
+  const int h = picture.height;
+  for (int y = 0; y < h; ++y) {
+    memset(picture.bgra + static_cast<size_t>(y) * picture.pitch * 4, 0,
+           static_cast<size_t>(w) * 4);
+  }
+  const int kMaxSide = 2048;
+  if (w > kMaxSide || h > kMaxSide || w <= 0 || h <= 0) return;
+  const int ox = seed * 71, oy = seed * 53;
+  // The torn edges: the top and the bottom for each column, the left and
+  // the right for each row.
+  static float edge_top[kMaxSide], edge_bottom[kMaxSide];
+  static float edge_left[kMaxSide], edge_right[kMaxSide];
+  for (int x = 0; x < w; ++x) {
+    edge_top[x] = y0 + 5.2f * (Tile(g_mid, x + ox, 7 + oy) - 0.5f) +
+                  1.4f * (Tile(g_fine, x + ox, 29 + oy) - 0.5f);
+    edge_bottom[x] = y1 + 5.2f * (Tile(g_mid, x + ox, 101 + oy) - 0.5f) +
+                     1.4f * (Tile(g_fine, x + ox, 131 + oy) - 0.5f);
+  }
+  for (int y = 0; y < h; ++y) {
+    edge_left[y] = x0 + 5.2f * (Tile(g_mid, 61 + ox, y + oy) - 0.5f) +
+                   1.4f * (Tile(g_fine, 83 + ox, y + oy) - 0.5f);
+    edge_right[y] = x1 + 5.2f * (Tile(g_mid, 157 + ox, y + oy) - 0.5f) +
+                    1.4f * (Tile(g_fine, 179 + ox, y + oy) - 0.5f);
+  }
+  for (int y = 0; y < h; ++y) {
+    const float py = y + 0.5f;
+    uint8_t* out = picture.bgra + static_cast<size_t>(y) * picture.pitch * 4;
+    for (int x = 0; x < w; ++x, out += 4) {
+      const float px = x + 0.5f;
+      float d = edge_top[x] - py;
+      if (py - edge_bottom[x] > d) d = py - edge_bottom[x];
+      if (edge_left[y] - px > d) d = edge_left[y] - px;
+      if (px - edge_right[y] > d) d = px - edge_right[y];
+      const float cover = Clamp01(0.5f - d);
+      if (cover <= 0.0f) continue;
+      const int tx = x + ox, ty = y + oy;
+      const float k = (0.84f + 0.28f * Tile(g_blotch, tx, ty)) *
+                      (1.0f + Tile(g_grain, tx, ty));
+      const int step = BurnStep(-d);
+      const float burn =
+          g_burn_near[step] + g_burn_far[step] * Tile(g_mid, tx, ty);
+      const Rgb color = Mix(Scale(kPaper, k), kBurnt, Clamp01(burn));
+      if (cover >= 1.0f) {
+        out[0] = static_cast<uint8_t>(color.b > 255.0f ? 255.0f : color.b);
+        out[1] = static_cast<uint8_t>(color.g > 255.0f ? 255.0f : color.g);
+        out[2] = static_cast<uint8_t>(color.r > 255.0f ? 255.0f : color.r);
+        out[3] = 255;
+      } else {
+        Over(out, color, cover);
+      }
+    }
+  }
+}
+
 void Seal(const Picture& picture, int x0, int y0, int x1, int y1, int tone,
           int seed) {
   // The distance to the uneven edge of the wax, for each pixel of the box and

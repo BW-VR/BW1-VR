@@ -77,6 +77,11 @@ double StartMs();
 // down. seed moves the grain, so two cards do not look the same.
 void Paper(const Picture& picture, int x0, int y0, int x1, int y1, int seed);
 
+// Clears the picture, then draws a page of the same paper from x0 to x1 and
+// from y0 to y1, with a torn and burnt edge at each of its four sides, and
+// with no roll and no shadow. For a card whose layout fills its picture.
+void Page(const Picture& picture, int x0, int y0, int x1, int y1, int seed);
+
 // A wax seal with round ends in the box, with its own small shadow.
 void Seal(const Picture& picture, int x0, int y0, int x1, int y1, int tone,
           int seed);

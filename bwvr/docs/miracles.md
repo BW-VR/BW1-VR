@@ -639,6 +639,16 @@ mod. The bubble that the hand pulls out is the bubble of the game (see "The
 pull"). A book with no item says "No miracle to ask for now" and the
 reason: "You have no Worship Site" or "Your Worship Site has no miracle".
 
+With `hint_card_style=1` (the default, the launcher row "Card look") the
+book is a page of the parchment of the hint cards (`controller-hints.md`,
+9.11): opaque, with a torn and burnt edge 4 px inside the picture, so each
+cell keeps its place. The words are in dark brown Alegreya at the capital
+letter height of Segoe UI, a dim item is light brown, and the reason of a
+refusal is red brown. The bubbles keep their blue and amber fill with white
+gestures. The cell under the hand is tan with a deep gold halo, and the
+other bubbles have a brown ring. With `hint_card_style=0` the book is the
+dark panel with an alpha of 0.86 and white Segoe UI letters.
+
 **The pick.** The grip point of the pointing hand within 45 percent of a cell
 of the middle of an item, and 6 cm in front of or behind the book, picks it
 (`Pick`). The item stays until the hand is 65 percent of a cell away, or 9
@@ -801,9 +811,11 @@ place of that corner.
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
 | `spell_book_pull_cm` | 10 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
 | `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |
+| `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
 
-The keys are read from `bwvr.ini`. They are not in the launcher.
+The keys are read from `bwvr.ini`. Only `hint_card_style` is in the launcher
+("Card look").
 
 **The A/B key**, with `test_keys=1`: Ctrl with the 8 key of the number pad
 changes `miracle_hand`. The pointing controller gives a long pulse for 1 and
@@ -956,8 +968,13 @@ and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
   worship". A grip gives the pulse `refused`, and the card gives the reason.
   The game itself shows nothing.
 - The last miracle is the first item when the book opens again.
-- One picture of the book takes 3 to 6 ms to draw. The book draws it only
-  when it changes (2 or 3 times for each open).
+- One picture of the book takes 3 to 6 ms to draw with
+  `hint_card_style=0`. The book draws it only when it changes (2 or 3 times
+  for each open). With `hint_card_style=1` the pictures are the page of
+  parchment, and the longest draw of a window is 8.7 to 10.2 ms. The page
+  itself takes about 1.3 ms at 800 by 400 px. The cause of the rest is not
+  measured yet: the first draw of each letter of Alegreya at a new size is a
+  candidate.
 - With `spell_book=0`, X makes the log line of no job, and no book opens.
 - With `debug_all_miracles=1` the book has 6 miracles, and a take with 0
   chants puts the Miracle in the Hand (see "The limit of 6 icons").

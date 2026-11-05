@@ -52,6 +52,9 @@
 //                            power. For tests
 //   spell_book_test_save=0   a test key: the mod saves the first N pictures
 //                            of the book as bwvr-book-NNNNN.bmp
+//   hint_card_style=1        1: the book is a page of parchment with dark
+//                            ink, as the hint cards (card_scroll.h). 0: the
+//                            dark panel with white letters
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -64,6 +67,7 @@
 #include "../vr/xr_screen.h"
 #include "audio.h"
 #include "book_bubble.h"
+#include "card_scroll.h"
 #include "controller_hints.h"
 #include "controllers.h"
 #include "cutscene_window.h"
@@ -328,6 +332,7 @@ int g_saved = 0;
 bool g_test_keys = false;
 int g_pull_cm = 10;       // 0: the grip takes the miracle at once
 int g_pull_ini = 10;      // the value of bwvr.ini, for the debug page
+bool g_style = true;      // hint_card_style: the book is a page of parchment
 bool g_game_bubble = true;  // the game draws the bubble that the hand pulls out
 bool g_game_ok = false;   // the functions of the game have their bytes
 
@@ -361,6 +366,7 @@ void ReadSettings() {
   if (g_pull_cm > 30) g_pull_cm = 30;
   g_pull_ini = g_pull_cm > 0 ? g_pull_cm : 10;
   g_game_bubble = IniKey("spell_book_bubble", 1) != 0;
+  g_style = IniKey("hint_card_style", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -383,6 +389,9 @@ void ReadSettings() {
     ModLog("spell book   : spell_book_pull_cm=0: the grip takes a miracle from "
            "the book at once");
   }
+  ModLog("spell book   : hint_card_style=%d: %s", g_style ? 1 : 0,
+         g_style ? "the book is a page of parchment with dark ink"
+                 : "the book is a dark panel with white letters");
   ModLog("spell book   : spell_book_bubble=%d: %s", g_game_bubble ? 1 : 0,
          g_game_bubble ? "the game draws the bubble that the hand pulls out: "
                          "its glass ball with the miracle in it"
@@ -648,6 +657,14 @@ const Rgb kHalo = {255.0f, 206.0f, 84.0f};      // the gold of a target
 const Rgb kWhite = {255.0f, 255.0f, 255.0f};
 const Rgb kDimInk = {160.0f, 164.0f, 172.0f};
 const Rgb kNoteInk = {255.0f, 196.0f, 60.0f};
+// The page of parchment (hint_card_style=1): dark brown ink, a red brown
+// note, a tan cell under the hand, deep gold for its halo, and brown rings.
+const Rgb kPageInk = {52.0f, 30.0f, 14.0f};
+const Rgb kPageDimInk = {140.0f, 112.0f, 84.0f};
+const Rgb kPageNoteInk = {150.0f, 40.0f, 20.0f};
+const Rgb kPageCellLit = {196.0f, 160.0f, 96.0f};
+const Rgb kPageHalo = {176.0f, 110.0f, 20.0f};
+const Rgb kPageRing = {90.0f, 55.0f, 25.0f};
 
 // What the picture shows. It is drawn again only when this changes.
 struct Look {
@@ -670,6 +687,7 @@ HFONT g_note_font = nullptr;
 HFONT g_name_font[3] = {nullptr, nullptr, nullptr};
 HPEN g_pen[3] = {nullptr, nullptr, nullptr};
 bool g_raster_failed = false;
+bool g_page = false;  // the book is a page of parchment (hint_card_style=1)
 uint8_t g_base[kTexture * kTexture * 4];
 uint8_t g_staged[kTexture * kTexture * 4];
 int g_width_px = 0, g_height_px = 0;
@@ -707,7 +725,11 @@ bool RasterStart() {
   if (g_dc != nullptr) {
     g_dib = CreateDIBSection(g_dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
   }
+  // The page uses the font of the hint cards, with the capital letter of
+  // Segoe UI at the same size (0.7 of the em).
+  g_page = g_style && g_dc != nullptr && card_scroll::Start(g_dc);
   const auto font = [](int em, int weight) {
+    if (g_page) return card_scroll::WordsFont(g_dc, em * 7 / 10);
     return CreateFontW(-em, 0, 0, 0, weight, FALSE, FALSE, FALSE,
                        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
                        ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS,
@@ -874,20 +896,33 @@ void Raster(const Look& look) {
   GdiFlush();
 
   // The shapes, then the ink over them.
-  for (int y = 0; y < h; ++y) {
-    memset(g_base + static_cast<size_t>(y) * kTexture * 4, 0,
-           static_cast<size_t>(w) * 4);
-  }
-  for (int y = 0; y < h; ++y) {
-    const float py = static_cast<float>(y) + 0.5f;
-    uint8_t* row = g_base + static_cast<size_t>(y) * kTexture * 4;
-    for (int x = 0; x < w; ++x) {
-      const float px = static_cast<float>(x) + 0.5f;
-      Over(row + x * 4, kPanel,
-           0.86f * RoundCover(px, py, 0.0f, 0.0f, static_cast<float>(w),
-                              static_cast<float>(h), 28.0f));
+  if (g_page) {
+    // The page fills the picture, with its torn edge 4 px inside, so the
+    // cells keep their place.
+    const card_scroll::Picture page = {g_base, kTexture, w, h};
+    card_scroll::Page(page, 4, 4, w - 4, h - 4, 5);
+  } else {
+    for (int y = 0; y < h; ++y) {
+      memset(g_base + static_cast<size_t>(y) * kTexture * 4, 0,
+             static_cast<size_t>(w) * 4);
+    }
+    for (int y = 0; y < h; ++y) {
+      const float py = static_cast<float>(y) + 0.5f;
+      uint8_t* row = g_base + static_cast<size_t>(y) * kTexture * 4;
+      for (int x = 0; x < w; ++x) {
+        const float px = static_cast<float>(x) + 0.5f;
+        Over(row + x * 4, kPanel,
+             0.86f * RoundCover(px, py, 0.0f, 0.0f, static_cast<float>(w),
+                                static_cast<float>(h), 28.0f));
+      }
     }
   }
+  const Rgb& cell_lit = g_page ? kPageCellLit : kCellLit;
+  const float cell_lit_alpha = g_page ? 0.55f : 0.9f;
+  const Rgb& halo_color = g_page ? kPageHalo : kHalo;
+  const Rgb& ring_color = g_page ? kPageRing : kWhite;
+  const float ring_alpha = g_page ? 0.4f : 0.25f;
+  const float socket_alpha = g_page ? 0.45f : 0.30f;
   for (int i = 0; i < look.count; ++i) {
     float bx = 0.0f, by = 0.0f, br = 0.0f;
     Bubble(l, i, &bx, &by, &br);
@@ -909,9 +944,9 @@ void Raster(const Look& look) {
         const float px = static_cast<float>(x) + 0.5f;
         uint8_t* out = row + x * 4;
         if (lit) {
-          Over(out, kCellLit,
-               0.9f * RoundCover(px, py, x0 + 3.0f, y0 + 3.0f, x1 - 3.0f,
-                                 y1 - 3.0f, 0.12f * cell));
+          Over(out, cell_lit,
+               cell_lit_alpha * RoundCover(px, py, x0 + 3.0f, y0 + 3.0f,
+                                           x1 - 3.0f, y1 - 3.0f, 0.12f * cell));
         }
         const float d = sqrtf((px - bx) * (px - bx) + (py - by) * (py - by));
         // The halo: a ring of gold round the bubble of the item under the
@@ -920,13 +955,13 @@ void Raster(const Look& look) {
         if (i == look.pulled) {
           // The empty socket of a bubble that the hand pulls out.
           const float edge = Clamp01(br + 0.5f - d) * Clamp01(d - br + 3.5f);
-          Over(out, kWhite, 0.30f * edge);
+          Over(out, ring_color, socket_alpha * edge);
           continue;
         }
         if (lit) {
-          Over(out, kHalo, ring);
+          Over(out, halo_color, ring);
         } else {
-          Over(out, kWhite, 0.25f * ring);
+          Over(out, ring_color, ring_alpha * ring);
         }
         Over(out, fill, (look.can[i] ? 0.95f : 0.6f) * Clamp01(br + 0.5f - d));
       }
@@ -939,11 +974,12 @@ void Raster(const Look& look) {
       const float cover =
           static_cast<float>((letters[x] >> 8) & 0xFF) * (1.0f / 255.0f);
       if (cover <= 0.0f) continue;
-      const Rgb* ink = &kWhite;
+      const Rgb* ink = g_page ? &kPageInk : &kWhite;
+      const Rgb* note_ink = g_page ? &kPageNoteInk : &kNoteInk;
       if (look.count == 0) {
-        if (y >= h / 2) ink = &kNoteInk;
+        if (y >= h / 2) ink = note_ink;
       } else if (y < title_px) {
-        if (note_in_band) ink = &kNoteInk;
+        if (note_in_band) ink = note_ink;
       } else {
         // The letters of a cell: dim for an item that the game refuses now.
         const float mx = (x - 0.5f * w) / kPixelsPerMeter;
@@ -959,7 +995,16 @@ void Raster(const Look& look) {
             cell_of = i;
           }
         }
-        if (cell_of >= 0 && !look.can[cell_of]) ink = &kDimInk;
+        if (cell_of >= 0 && !look.can[cell_of]) {
+          ink = g_page ? &kPageDimInk : &kDimInk;
+        }
+        // The gestures in a bubble stay white on its fill.
+        if (g_page && cell_of >= 0) {
+          float bx = 0.0f, by = 0.0f, br = 0.0f;
+          Bubble(l, cell_of, &bx, &by, &br);
+          const float dx = x + 0.5f - bx, dy = y + 0.5f - by;
+          if (dx * dx + dy * dy < br * br) ink = &kWhite;
+        }
       }
       Over(row + x * 4, *ink, cover);
     }

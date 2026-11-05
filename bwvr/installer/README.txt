@@ -591,9 +591,9 @@ the hints in the view. Set controller_hints=0 to keep the mouse hints.
 
 A card is a small parchment scroll with dark letters. The button word
 is on a wax seal: green for the trigger, amber for the grip and red
-for the other buttons. In the launcher, "Card look" is "Scroll" (the
-default) or "Plain" (key hint_card_style, 0 is a dark card with white
-letters).
+for the other buttons. The spell book is a page of the same parchment.
+In the launcher, "Card look" is "Scroll" (the default) or "Plain" (key
+hint_card_style, 0 gives dark cards with white letters).
 
 Some lines of the game wait for a click. The text stays, and the card
 says "Trigger Continue" as its first line. Press the trigger. Until

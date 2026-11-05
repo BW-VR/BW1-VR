@@ -236,6 +236,7 @@ move the camera in steps.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| Card look | Scroll | Key `hint_card_style`, a value. 1 Scroll: each hint card is a parchment scroll with dark letters, and the button word is on a wax seal. 0 Plain: a dark card with white letters (`controller-hints.md`, 9.11). |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |
 | Grab the world | Grip of the other hand | Key `grab_hand`, a value. 1 Hold the grip of your other hand and move that hand to pull the world. Hold both grips to turn the world and to zoom. 2 Either grip: the grip of the pointing hand also grabs the world when the Hand is empty and not over an object. 0 Off. |
 | Hand | Follow the game | Key `left_hand`, a value. -1 Follow the game: the left hand option of the game (`HAND_ORIENTATION` of the profile) chooses the controller of the Hand. 0 Right: the right controller is the Hand. 1 Left: the left controller is the Hand, and the two controllers swap each job (`controllers.md`, section 5.6). |

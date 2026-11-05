@@ -157,6 +157,13 @@ Source: "{#Payload}\dxwrapper\dxwrapper.dll"; DestDir: "{app}\dxwrapper"; Flags:
 Source: "{#Payload}\dxwrapper\dxwrapper.ini"; DestDir: "{app}\dxwrapper"; Flags: ignoreversion; Permissions: users-modify
 Source: "{#Payload}\dxwrapper\ddraw.ini"; DestDir: "{app}\dxwrapper"; Flags: ignoreversion
 
+; The fonts of the cards (SIL Open Font License, the text is in OFL.txt).
+; The mod loads them for its own process only, so Windows does not install
+; them.
+Source: "{#Payload}\bwvr-fonts\Alegreya[wght].ttf"; DestDir: "{app}\bwvr-fonts"; Flags: ignoreversion
+Source: "{#Payload}\bwvr-fonts\AlegreyaSC-Bold.ttf"; DestDir: "{app}\bwvr-fonts"; Flags: ignoreversion
+Source: "{#Payload}\bwvr-fonts\OFL.txt"; DestDir: "{app}\bwvr-fonts"; Flags: ignoreversion
+
 ; The game folder already holds a readme.txt, from 2001. Windows does not
 ; care about the case of a file name, so ours has to be called something
 ; else. The names match the launcher, so the mod's files sit together.
@@ -871,4 +878,5 @@ begin
 
   { The folder is the game's, so it stays. Only our own subfolder goes. }
   RemoveDir(ExpandConstant('{app}\dxwrapper'));
+  RemoveDir(ExpandConstant('{app}\bwvr-fonts'));
 end;

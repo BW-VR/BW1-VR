@@ -141,7 +141,7 @@ These are some of the groups of the launcher.
                   turn.
 
   Controllers     The glow at the Hand, the grab of the world, and the
-                  lines of the hint cards.
+                  lines and the look of the hint cards.
 
   Launcher        "Use 4 GB of memory": the launcher gives the game
                   4 GB of memory space before each start (see HOW TO
@@ -588,6 +588,12 @@ hide it. A hint that is not true with the controllers does not show.
 For example, in the God view the trigger does not move the land, so the
 card does not say "Trigger Move". Set hint_card=0 in bwvr.ini to draw
 the hints in the view. Set controller_hints=0 to keep the mouse hints.
+
+A card is a small parchment scroll with dark letters. The button word
+is on a wax seal: green for the trigger, amber for the grip and red
+for the other buttons. In the launcher, "Card look" is "Scroll" (the
+default) or "Plain" (key hint_card_style, 0 is a dark card with white
+letters).
 
 Some lines of the game wait for a click. The text stays, and the card
 says "Trigger Continue" as its first line. Press the trigger. Until
@@ -1313,5 +1319,9 @@ This is an unofficial mod, made by a fan. Electronic Arts and
 Lionhead Studios did not make it, do not endorse it, and have no
 connection with it. Black & White is a trademark of its owner. The
 mod contains no game files. You must have your own copy of the game.
+
+The cards use the fonts Alegreya and Alegreya SC by The Alegreya
+Project Authors, under the SIL Open Font License 1.1. The license is
+in the notices file and in the bwvr-fonts folder.
 
 Copyright (C) 2026 Buck.

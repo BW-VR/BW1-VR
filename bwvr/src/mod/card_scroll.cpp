@@ -1,0 +1,592 @@
+// The scroll look of the cards. See card_scroll.h.
+
+#include "card_scroll.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
+
+extern void ModLog(const char* format, ...);
+
+namespace card_scroll {
+namespace {
+
+// --- the noise tile ----------------------------------------------------------
+
+// Value noise that repeats each kTile pixels, so a lookup is one read with no
+// edge. Each channel is in 0 to 1. The smallest cell is 4 pixels.
+const int kTile = 256;
+const int kTileMask = kTile - 1;
+float g_blotch[kTile * kTile];  // cells of 64 to 8 px: the light and dark areas
+float g_grain[kTile * kTile];   // fibers of 16 by 4 px and dots of 4 px, about 0
+float g_mid[kTile * kTile];     // cells of 16 and 8 px
+float g_fine[kTile * kTile];    // cells of 4 px
+
+float Hash(int x, int y, int seed) {
+  uint32_t h = static_cast<uint32_t>(x) * 374761393u +
+               static_cast<uint32_t>(y) * 668265263u +
+               static_cast<uint32_t>(seed) * 1442695041u;
+  h = (h ^ (h >> 13)) * 1274126177u;
+  h ^= h >> 16;
+  return static_cast<float>(h & 0xFFFFFF) / 16777215.0f;
+}
+
+// Value noise at a cell size of cell_x by cell_y pixels, which repeats each
+// kTile pixels.
+float Value(int x, int y, int cell_x, int cell_y, int seed) {
+  const int period_x = kTile / cell_x;
+  const int period_y = kTile / cell_y;
+  const int xi = x / cell_x;
+  const int yi = y / cell_y;
+  float fx = static_cast<float>(x % cell_x) / cell_x;
+  float fy = static_cast<float>(y % cell_y) / cell_y;
+  fx = fx * fx * (3.0f - 2.0f * fx);
+  fy = fy * fy * (3.0f - 2.0f * fy);
+  const int x0 = xi % period_x, x1 = (xi + 1) % period_x;
+  const int y0 = yi % period_y, y1 = (yi + 1) % period_y;
+  const float a = Hash(x0, y0, seed), b = Hash(x1, y0, seed);
+  const float c = Hash(x0, y1, seed), d = Hash(x1, y1, seed);
+  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+}
+
+void MakeTile() {
+  for (int y = 0; y < kTile; ++y) {
+    for (int x = 0; x < kTile; ++x) {
+      const int i = y * kTile + x;
+      g_blotch[i] = (Value(x, y, 64, 64, 11) + 0.5f * Value(x, y, 32, 32, 12) +
+                     0.25f * Value(x, y, 16, 16, 13) +
+                     0.125f * Value(x, y, 8, 8, 14)) /
+                    1.875f;
+      g_grain[i] = (Value(x, y, 16, 4, 21) - 0.5f) * 0.07f +
+                   (Value(x, y, 4, 4, 22) - 0.5f) * 0.05f;
+      g_mid[i] = (2.0f * Value(x, y, 16, 16, 31) + Value(x, y, 8, 8, 32)) /
+                 3.0f;
+      g_fine[i] = Value(x, y, 4, 4, 41);
+    }
+  }
+}
+
+inline float Tile(const float* tile, int x, int y) {
+  return tile[(y & kTileMask) * kTile + (x & kTileMask)];
+}
+
+// --- small helpers -----------------------------------------------------------
+
+struct Rgb {
+  float r, g, b;
+};
+
+inline float Clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+
+inline float Smooth(float a, float b, float x) {
+  const float t = Clamp01((x - a) / (b - a));
+  return t * t * (3.0f - 2.0f * t);
+}
+
+inline float Gauss(float x, float s) { return expf(-(x * x) / (2.0f * s * s)); }
+
+// The signed distance to a rect with round corners: below 0 is inside.
+inline float RoundRect(float px, float py, float x0, float y0, float x1,
+                       float y1, float radius) {
+  const float qx = fabsf(px - 0.5f * (x0 + x1)) - (0.5f * (x1 - x0) - radius);
+  const float qy = fabsf(py - 0.5f * (y0 + y1)) - (0.5f * (y1 - y0) - radius);
+  const float ox = qx > 0.0f ? qx : 0.0f;
+  const float oy = qy > 0.0f ? qy : 0.0f;
+  const float most = qx > qy ? qx : qy;
+  return sqrtf(ox * ox + oy * oy) + (most < 0.0f ? most : 0.0f) - radius;
+}
+
+// One color over a pixel, at the alpha a. The pixel has its color multiplied
+// by its alpha.
+inline void Over(uint8_t* out, const Rgb& c, float a) {
+  if (a <= 0.0f) return;
+  if (a > 1.0f) a = 1.0f;
+  const float k = 1.0f - a;
+  const float r = c.r < 0.0f ? 0.0f : (c.r > 255.0f ? 255.0f : c.r);
+  const float g = c.g < 0.0f ? 0.0f : (c.g > 255.0f ? 255.0f : c.g);
+  const float b = c.b < 0.0f ? 0.0f : (c.b > 255.0f ? 255.0f : c.b);
+  out[0] = static_cast<uint8_t>(b * a + out[0] * k + 0.5f);
+  out[1] = static_cast<uint8_t>(g * a + out[1] * k + 0.5f);
+  out[2] = static_cast<uint8_t>(r * a + out[2] * k + 0.5f);
+  out[3] = static_cast<uint8_t>(255.0f * a + out[3] * k + 0.5f);
+}
+
+inline Rgb Mix(const Rgb& a, const Rgb& b, float t) {
+  return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t};
+}
+
+inline Rgb Scale(const Rgb& a, float k) { return {a.r * k, a.g * k, a.b * k}; }
+
+const Rgb kPaper = {240.0f, 218.0f, 170.0f};
+const Rgb kBurnt = {112.0f, 62.0f, 26.0f};
+const Rgb kRoll = {222.0f, 190.0f, 134.0f};
+const Rgb kRollHollow = {80.0f, 46.0f, 18.0f};
+const Rgb kInk = {52.0f, 30.0f, 14.0f};
+const Rgb kInkBleed = {96.0f, 58.0f, 28.0f};
+const Rgb kBlack = {0.0f, 0.0f, 0.0f};
+const Rgb kSheen = {255.0f, 250.0f, 235.0f};
+const Rgb kWax[kWaxTones] = {
+    {160.0f, 30.0f, 26.0f},   // no tone: red
+    {36.0f, 124.0f, 60.0f},   // the trigger: green
+    {204.0f, 128.0f, 22.0f},  // the grip: amber
+    {160.0f, 30.0f, 26.0f},   // any other button: red
+};
+const Rgb kWaxInk[kWaxTones] = {
+    {255.0f, 236.0f, 205.0f},
+    {255.0f, 244.0f, 214.0f},
+    {70.0f, 36.0f, 6.0f},
+    {255.0f, 236.0f, 205.0f},
+};
+
+// The burnt edge as a function of the depth into the paper, in steps of
+// 0.25 px, so a pixel needs no exp.
+const int kBurnSteps = 256;
+float g_burn_near[kBurnSteps];  // the dark rim of the paper
+float g_burn_far[kBurnSteps];   // the wide brown cloud, times the noise
+float g_burn_roll[kBurnSteps];  // the dark rim of a roll
+
+void MakeBurn() {
+  for (int i = 0; i < kBurnSteps; ++i) {
+    const float depth = i * 0.25f;
+    g_burn_near[i] = expf(-depth / 7.0f) * 0.75f;
+    g_burn_far[i] = expf(-depth / 22.0f) * 0.18f;
+    g_burn_roll[i] = expf(-depth / 3.0f) * 0.8f;
+  }
+}
+
+inline int BurnStep(float depth) {
+  if (depth <= 0.0f) return 0;
+  const int i = static_cast<int>(depth * 4.0f);
+  return i < kBurnSteps ? i : kBurnSteps - 1;
+}
+
+// --- the fonts ---------------------------------------------------------------
+
+bool g_started = false;
+bool g_ok = false;
+double g_start_ms = 0.0;
+wchar_t g_words_face[LF_FACESIZE] = L"";
+wchar_t g_seal_face[LF_FACESIZE] = L"";
+char g_note[256] = "";
+
+// The font files, in the folder bwvr-fonts beside runblack.exe.
+const char* const kFontFiles[] = {"Alegreya[wght].ttf", "AlegreyaSC-Bold.ttf"};
+const int kFontCount = 2;
+
+bool FontFolderFile(const char* dir, const char* name, char* out,
+                    size_t size) {
+  if (dir != nullptr && dir[0] != 0) {
+    const size_t length = strlen(dir);
+    const bool slash = dir[length - 1] == '\\' || dir[length - 1] == '/';
+    return _snprintf_s(out, size, _TRUNCATE, "%s%s%s", dir, slash ? "" : "\\",
+                       name) > 0;
+  }
+  char path[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) return false;
+  char* slash = strrchr(path, '\\');
+  if (slash == nullptr) return false;
+  slash[1] = 0;
+  return _snprintf_s(out, size, _TRUNCATE, "%sbwvr-fonts\\%s", path, name) > 0;
+}
+
+// True when GDI gives the face itself, not a font in its place.
+bool HaveFace(HDC dc, const wchar_t* face) {
+  HFONT font = CreateFontW(-40, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                           DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                           ANTIALIASED_QUALITY, DEFAULT_PITCH, face);
+  if (font == nullptr) return false;
+  HGDIOBJ old = SelectObject(dc, font);
+  wchar_t got[LF_FACESIZE] = L"";
+  GetTextFaceW(dc, LF_FACESIZE, got);
+  SelectObject(dc, old);
+  DeleteObject(font);
+  return _wcsicmp(got, face) == 0;
+}
+
+void Narrow(const wchar_t* in, char* out, size_t size) {
+  size_t i = 0;
+  for (; in[i] != 0 && i + 1 < size; ++i) {
+    out[i] = in[i] < 128 ? static_cast<char>(in[i]) : '?';
+  }
+  out[i] = 0;
+}
+
+// A bold font of the face with a capital letter of cap pixels. The height of
+// the capital H comes from its outline at a large size, so each face has the
+// same letter height.
+HFONT FontForCap(HDC dc, const wchar_t* face, int cap) {
+  const int probe_em = 200;
+  HFONT probe = CreateFontW(-probe_em, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                            DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            ANTIALIASED_QUALITY, DEFAULT_PITCH, face);
+  int cap_units = 0;
+  if (probe != nullptr) {
+    HGDIOBJ old = SelectObject(dc, probe);
+    const MAT2 identity = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
+    GLYPHMETRICS metrics;
+    if (GetGlyphOutlineW(dc, L'H', GGO_METRICS, &metrics, 0, nullptr,
+                         &identity) != GDI_ERROR) {
+      cap_units = static_cast<int>(metrics.gmBlackBoxY);
+    }
+    SelectObject(dc, old);
+    DeleteObject(probe);
+  }
+  const int em = cap_units > 0 ? (probe_em * cap + cap_units / 2) / cap_units
+                               : cap * 10 / 7;
+  return CreateFontW(-em, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                     DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                     ANTIALIASED_QUALITY, DEFAULT_PITCH, face);
+}
+
+void LoadFonts(HDC dc, const char* dir) {
+  int missing = 0;
+  char first_missing[MAX_PATH] = "";
+  for (int i = 0; i < kFontCount; ++i) {
+    char path[MAX_PATH];
+    if (!FontFolderFile(dir, kFontFiles[i], path, sizeof(path))) continue;
+    wchar_t wide[MAX_PATH];
+    if (MultiByteToWideChar(CP_ACP, 0, path, -1, wide, MAX_PATH) == 0) continue;
+    if (AddFontResourceExW(wide, FR_PRIVATE, nullptr) == 0) {
+      if (missing++ == 0) strcpy_s(first_missing, path);
+    }
+  }
+  const wchar_t* const words_faces[] = {L"Alegreya", L"Georgia", L"Segoe UI"};
+  for (const wchar_t* face : words_faces) {
+    if (HaveFace(dc, face)) {
+      wcscpy_s(g_words_face, face);
+      break;
+    }
+  }
+  if (HaveFace(dc, L"Alegreya SC")) {
+    wcscpy_s(g_seal_face, L"Alegreya SC");
+  } else {
+    wcscpy_s(g_seal_face, g_words_face);
+  }
+  char words[LF_FACESIZE], seal[LF_FACESIZE];
+  Narrow(g_words_face, words, sizeof(words));
+  Narrow(g_seal_face, seal, sizeof(seal));
+  if (missing > 0) {
+    _snprintf_s(g_note, _TRUNCATE,
+                "the words use %s and the seals use %s. %d font file(s) did "
+                "not load, the first is %s",
+                words[0] != 0 ? words : "no font", seal[0] != 0 ? seal : "no font",
+                missing, first_missing);
+  } else {
+    _snprintf_s(g_note, _TRUNCATE,
+                "the words use %s and the seals use %s, from the folder %s",
+                words, seal,
+                dir != nullptr && dir[0] != 0 ? dir : "bwvr-fonts");
+  }
+}
+
+}  // namespace
+
+bool Start(HDC dc) {
+  if (g_started) return g_ok;
+  g_started = true;
+  LARGE_INTEGER t0, t1, f;
+  QueryPerformanceFrequency(&f);
+  QueryPerformanceCounter(&t0);
+  MakeTile();
+  MakeBurn();
+  char font_dir[MAX_PATH] = "";
+  char ini[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, ini, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(ini, '\\') : nullptr;
+  if (slash != nullptr && strlen(ini) + 9 < MAX_PATH) {
+    strcpy_s(slash + 1, MAX_PATH - (slash + 1 - ini), "bwvr.ini");
+    GetPrivateProfileStringA("bwvr", "hint_card_fonts_test_dir", "", font_dir,
+                             sizeof(font_dir), ini);
+  }
+  LoadFonts(dc, font_dir);
+  QueryPerformanceCounter(&t1);
+  g_start_ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+  g_ok = g_words_face[0] != 0;
+  ModLog("card scroll  : %s. The noise tile and the fonts took %.1f ms",
+         g_ok ? g_note : "GDI gave no font for the words", g_start_ms);
+  return g_ok;
+}
+
+HFONT WordsFont(HDC dc, int cap) { return FontForCap(dc, g_words_face, cap); }
+
+HFONT SealFont(HDC dc, int cap) { return FontForCap(dc, g_seal_face, cap); }
+
+const char* FontNote() { return g_note; }
+
+double StartMs() { return g_start_ms; }
+
+void Paper(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
+  const int w = picture.width;
+  const int h = picture.height;
+  for (int y = 0; y < h; ++y) {
+    memset(picture.bgra + static_cast<size_t>(y) * picture.pitch * 4, 0,
+           static_cast<size_t>(w) * 4);
+  }
+  const int kMaxWidth = 2048;
+  if (w > kMaxWidth || w <= 0 || h <= 0) return;
+  const int ox = seed * 71, oy = seed * 53;
+  const float rw = static_cast<float>(kRollWidth);
+  const float l0 = static_cast<float>(x0), l1 = l0 + rw;
+  const float r1 = static_cast<float>(x1), r0 = r1 - rw;
+  const float body_l = l0 + 0.5f * rw, body_r = r1 - 0.5f * rw;
+  const float top = static_cast<float>(y0), bottom = static_cast<float>(y1);
+  const float roll_top = top - kRollOver, roll_bottom = bottom + kRollOver;
+  const float roll_radius = 0.5f * rw;
+
+  // For each column: the torn top and bottom edges, the shade of the paper
+  // near a roll, and the shade of the cylinder of a roll.
+  static float edge_top[kMaxWidth], edge_bottom[kMaxWidth];
+  static float side[kMaxWidth], roll_shade[kMaxWidth];
+  for (int x = 0; x < w; ++x) {
+    const float px = x + 0.5f;
+    edge_top[x] = top + 5.2f * (Tile(g_mid, x + ox, 7 + oy) - 0.5f) +
+                  1.4f * (Tile(g_fine, x + ox, 29 + oy) - 0.5f);
+    edge_bottom[x] = bottom + 5.2f * (Tile(g_mid, x + ox, 101 + oy) - 0.5f) +
+                     1.4f * (Tile(g_fine, x + ox, 131 + oy) - 0.5f);
+    float e = px - l1 < r0 - px ? px - l1 : r0 - px;
+    if (e < 0.0f) e = 0.0f;
+    side[x] = 1.0f - 0.38f * expf(-e / 6.0f);
+    const bool left = px < 0.5f * (l0 + r1);
+    const float t = Clamp01(left ? (px - l0) / rw : (px - r0) / rw);
+    const float cylinder = 0.5f + 0.5f * sinf(3.14159265f * t);
+    const float wrap = left ? t - 0.78f : t - 0.22f;
+    roll_shade[x] = (0.42f + 0.62f * cylinder + 0.22f * Gauss(t - 0.33f, 0.09f)) *
+                    (1.0f - 0.35f * Gauss(wrap, 0.035f));
+  }
+
+  // The drop shadow: the outline of the shape, moved, with a soft edge of
+  // 5 px each way. It shows only where the paper does not cover.
+  const float shadow_dx = 3.0f, shadow_dy = 5.0f, shadow_soft = 5.0f;
+  const float shadow_alpha = 0.5f;
+
+  for (int y = 0; y < h; ++y) {
+    const float py = y + 0.5f;
+    uint8_t* out = picture.bgra + static_cast<size_t>(y) * picture.pitch * 4;
+    for (int x = 0; x < w; ++x, out += 4) {
+      const float px = x + 0.5f;
+      float cover_body = 0.0f;
+      float body_d = 1.0f;
+      if (px > body_l - 1.0f && px < body_r + 1.0f &&
+          py > edge_top[x] - 1.0f && py < edge_bottom[x] + 1.0f) {
+        const float dv = edge_top[x] - py > py - edge_bottom[x]
+                             ? edge_top[x] - py
+                             : py - edge_bottom[x];
+        const float dh = body_l - px > px - body_r ? body_l - px : px - body_r;
+        body_d = dv > dh ? dv : dh;
+        cover_body = Clamp01(0.5f - body_d);
+      }
+      float roll_d = 1e6f;
+      const bool in_left = px < l1 + 1.0f;
+      const bool in_right = px > r0 - 1.0f;
+      if ((in_left || in_right) && py > roll_top - 1.0f &&
+          py < roll_bottom + 1.0f) {
+        roll_d = in_left ? RoundRect(px, py, l0, roll_top, l1, roll_bottom,
+                                     roll_radius)
+                         : RoundRect(px, py, r0, roll_top, r1, roll_bottom,
+                                     roll_radius);
+      }
+      const float cover_roll = Clamp01(0.5f - roll_d);
+      if (cover_body < 1.0f && cover_roll < 1.0f) {
+        const float sx = px - shadow_dx, sy = py - shadow_dy;
+        float d = RoundRect(sx, sy, body_l, top, body_r, bottom, 2.0f);
+        const float dl = RoundRect(sx, sy, l0, roll_top, l1, roll_bottom,
+                                   roll_radius);
+        const float dr = RoundRect(sx, sy, r0, roll_top, r1, roll_bottom,
+                                   roll_radius);
+        if (dl < d) d = dl;
+        if (dr < d) d = dr;
+        if (d < shadow_soft) {
+          Over(out, kBlack,
+               shadow_alpha * Smooth(-shadow_soft, shadow_soft, -d));
+        }
+      }
+      if (cover_body > 0.0f) {
+        const int tx = x + ox, ty = y + oy;
+        const float k = (0.84f + 0.28f * Tile(g_blotch, tx, ty)) *
+                        (1.0f + Tile(g_grain, tx, ty));
+        Rgb color = Scale(kPaper, k);
+        const float depth = -body_d;
+        const int step = BurnStep(depth);
+        const float burn =
+            g_burn_near[step] + g_burn_far[step] * Tile(g_mid, tx, ty);
+        color = Mix(color, kBurnt, Clamp01(burn));
+        color = Scale(color, side[x]);
+        if (cover_body >= 1.0f) {
+          // Most pixels: opaque paper, so no blend.
+          out[0] = static_cast<uint8_t>(color.b > 255.0f ? 255.0f : color.b);
+          out[1] = static_cast<uint8_t>(color.g > 255.0f ? 255.0f : color.g);
+          out[2] = static_cast<uint8_t>(color.r > 255.0f ? 255.0f : color.r);
+          out[3] = 255;
+        } else {
+          Over(out, color, cover_body);
+        }
+      }
+      if (cover_roll > 0.0f) {
+        const float grain =
+            (Tile(g_fine, x + ox, (y + oy) / 4) - 0.5f) * 0.12f;
+        Rgb color = Scale(kRoll, roll_shade[x] * (1.0f + grain));
+        color = Mix(color, kBurnt, Clamp01(g_burn_roll[BurnStep(-roll_d)]));
+        // The hollow ends of the roll.
+        const float cx = in_left ? 0.5f * (l0 + l1) : 0.5f * (r0 + r1);
+        const float ex = (px - cx) / (rw * 0.30f);
+        const float ends[2] = {roll_top + 6.0f, roll_bottom - 6.0f};
+        for (float ey : ends) {
+          const float ez = (py - ey) / 3.2f;
+          const float r = sqrtf(ex * ex + ez * ez);
+          if (r < 1.4f) color = Mix(color, kRollHollow, Clamp01(1.4f - r) * 0.9f);
+        }
+        Over(out, color, cover_roll);
+      }
+    }
+  }
+}
+
+void Seal(const Picture& picture, int x0, int y0, int x1, int y1, int tone,
+          int seed) {
+  // The distance to the uneven edge of the wax, for each pixel of the box and
+  // a border, so the shade and the shadow read their neighbors from it.
+  const int kBorder = 9;
+  const int kMaxW = 800, kMaxH = 120;
+  const int gx0 = x0 - kBorder, gy0 = y0 - kBorder;
+  const int gw = (x1 - x0) + 2 * kBorder, gh = (y1 - y0) + 2 * kBorder;
+  if (gw <= 0 || gh <= 0 || gw > kMaxW || gh > kMaxH) return;
+  static float grid[kMaxW * kMaxH];
+  const float fx0 = static_cast<float>(x0), fy0 = static_cast<float>(y0);
+  const float fx1 = static_cast<float>(x1), fy1 = static_cast<float>(y1);
+  const float radius = 0.5f * (fy1 - fy0);
+  const int ox = seed * 37 + 91, oy = seed * 29 + 17;
+  for (int j = 0; j < gh; ++j) {
+    for (int i = 0; i < gw; ++i) {
+      const int x = gx0 + i, y = gy0 + j;
+      grid[j * gw + i] =
+          RoundRect(x + 0.5f, y + 0.5f, fx0, fy0, fx1, fy1, radius) +
+          6.8f * (Tile(g_mid, x + ox, y + oy) - 0.5f) +
+          2.4f * (Tile(g_fine, x + ox, y + oy) - 0.5f);
+    }
+  }
+  const auto at = [&](int i, int j) {
+    if (i < 0) i = 0;
+    if (j < 0) j = 0;
+    if (i >= gw) i = gw - 1;
+    if (j >= gh) j = gh - 1;
+    return grid[j * gw + i];
+  };
+  const Rgb& wax = kWax[tone & 3];
+  const float light_x = -0.6f, light_y = -0.8f;
+  for (int j = 1; j < gh - 1; ++j) {
+    const int y = gy0 + j;
+    if (y < 0 || y >= picture.height) continue;
+    for (int i = 1; i < gw - 1; ++i) {
+      const int x = gx0 + i;
+      if (x < 0 || x >= picture.width) continue;
+      uint8_t* out =
+          picture.bgra + (static_cast<size_t>(y) * picture.pitch + x) * 4;
+      // The small shadow of the seal: its outline 2 px right and 3 px down.
+      const float ds = at(i - 2, j - 3);
+      if (ds < 2.5f) Over(out, kBlack, 0.55f * Smooth(-2.5f, 2.5f, -ds));
+      const float d = grid[j * gw + i];
+      const float cover = Clamp01(0.5f - d);
+      if (cover <= 0.0f) continue;
+      float nx = at(i + 1, j) - at(i - 1, j);
+      float ny = at(i, j + 1) - at(i, j - 1);
+      const float length = sqrtf(nx * nx + ny * ny) + 1e-4f;
+      nx /= length;
+      ny /= length;
+      const float t = -d;
+      const float lit = nx * light_x + ny * light_y;
+      float shade = 0.92f + 0.5f * lit * (1.0f - Smooth(0.0f, 7.0f, t)) -
+                    0.25f * (1.0f - Smooth(0.0f, 2.5f, t));
+      if (fabsf(t - 8.5f) < 4.5f) shade -= 0.45f * Gauss(t - 8.5f, 1.1f) * lit;
+      shade += 0.06f * (Tile(g_fine, x + ox + 50, y + oy) - 0.5f);
+      Rgb color = Scale(wax, shade);
+      const float hx = (x + 0.5f - (fx0 + radius * 0.9f)) / (radius * 0.7f);
+      const float hy = (y + 0.5f - (fy0 + radius * 0.55f)) / (radius * 0.28f);
+      const float sheen = Clamp01(1.0f - sqrtf(hx * hx + hy * hy));
+      color = Mix(color, kSheen, sheen * 0.32f);
+      Over(out, color, cover);
+    }
+  }
+}
+
+void Ink(const Picture& picture, const uint32_t* letters, int x0, int y0,
+         int x1, int y1, int seed) {
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 > picture.width) x1 = picture.width;
+  if (y1 > picture.height) y1 = picture.height;
+  const int pitch = picture.pitch;
+  const int kMaxRows = 1024, kMaxColumns = 2048;
+  if (x1 - x0 > kMaxColumns - 2 || y1 > kMaxRows || x1 <= x0 || y1 <= y0) {
+    return;
+  }
+  // A row with no letter, and with no letter above or below it, has no ink.
+  static bool has[kMaxRows + 1];
+  for (int y = y0 > 0 ? y0 - 1 : 0; y <= y1 && y < picture.height; ++y) {
+    const uint32_t* row = letters + y * pitch;
+    bool any = false;
+    for (int x = x0; x < x1 && !any; ++x) any = (row[x] & 0xFF00) != 0;
+    has[y] = any;
+  }
+  const auto row_has = [&](int y) {
+    return y >= 0 && y < picture.height && y <= y1 && has[y];
+  };
+  // The ink bleeds 1 px into the paper: the mean of the 3 by 3 pixels, from
+  // the sum of each column of 3 pixels.
+  static int column[kMaxColumns];
+  const int ox = seed * 43, oy = seed * 61;
+  for (int y = y0; y < y1; ++y) {
+    if (!row_has(y - 1) && !row_has(y) && !row_has(y + 1)) continue;
+    const int left = x0 > 0 ? x0 - 1 : x0;
+    const int right = x1 < picture.width ? x1 + 1 : x1;
+    for (int x = left; x < right; ++x) {
+      int sum = 0;
+      for (int j = y - 1; j <= y + 1; ++j) {
+        if (row_has(j)) sum += (letters[j * pitch + x] >> 8) & 0xFF;
+      }
+      column[x - left] = sum;
+    }
+    for (int x = x0; x < x1; ++x) {
+      const int c = x - left;
+      const int sum = column[c] + (c > 0 ? column[c - 1] : 0) +
+                      (x + 1 < right ? column[c + 1] : 0);
+      if (sum == 0) continue;
+      uint8_t* out = picture.bgra + (static_cast<size_t>(y) * pitch + x) * 4;
+      const float bleed = sum * (1.0f / (9.0f * 255.0f));
+      const float letter =
+          ((letters[y * pitch + x] >> 8) & 0xFF) * (1.0f / 255.0f);
+      const float strength = 0.9f + 0.1f * Tile(g_mid, x + ox, y + oy);
+      Over(out, kInkBleed, bleed * 0.22f);
+      Over(out, kInk, letter * strength);
+    }
+  }
+}
+
+void SealInk(const Picture& picture, const uint32_t* letters, int x0, int y0,
+             int x1, int y1, int tone) {
+  if (x0 < 1) x0 = 1;
+  if (y0 < 1) y0 = 1;
+  if (x1 > picture.width) x1 = picture.width;
+  if (y1 > picture.height) y1 = picture.height;
+  const int pitch = picture.pitch;
+  // The amber wax has dark letters with a light edge under them. The other
+  // waxes have light letters with a dark edge.
+  const bool dark_letters = (tone & 3) == 2;
+  const Rgb edge = dark_letters ? Rgb{255.0f, 230.0f, 160.0f}
+                                : Rgb{30.0f, 10.0f, 5.0f};
+  for (int y = y0; y < y1; ++y) {
+    for (int x = x0; x < x1; ++x) {
+      const float letter =
+          ((letters[y * pitch + x] >> 8) & 0xFF) * (1.0f / 255.0f);
+      const float under =
+          ((letters[(y - 1) * pitch + x - 1] >> 8) & 0xFF) * (1.0f / 255.0f);
+      if (letter <= 0.0f && under <= 0.0f) continue;
+      uint8_t* out = picture.bgra + (static_cast<size_t>(y) * pitch + x) * 4;
+      Over(out, edge, under * 0.55f);
+      Over(out, kWaxInk[tone & 3], letter);
+    }
+  }
+}
+
+}  // namespace card_scroll

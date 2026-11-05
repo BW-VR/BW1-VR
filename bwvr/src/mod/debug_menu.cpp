@@ -93,6 +93,8 @@ int HintCardWordsValue();
 void HintCardWordsChange(const char* by);
 int HintCardMovesValue();
 void HintCardMovesToggle(const char* by);
+int HintCardStyleValue();
+void HintCardStyleToggle(const char* by);
 int TextClickValue();
 void TextClickChange(const char* by);
 int SpiritAnchorWorldSizeValue();
@@ -474,6 +476,9 @@ const Switch kSwitches[] = {
      "hint_words", HintCardWordsValue, HintCardWordsChange, L""},
     {kGroupInterface, L"Prompt moves", L"Lines show only when they move",
      "prompt_moves", HintCardMovesValue, HintCardMovesToggle, L"off|on"},
+    {kGroupInterface, L"Card look", L"Hint cards as scrolls",
+     "hint_card_style", HintCardStyleValue, HintCardStyleToggle,
+     L"plain|scroll"},
     {kGroupInterface, L"Tree card", L"Card of a tree in the Hand",
      "tree_plant_hint", HandDirectTreeHintValue, HandDirectTreeHintToggle,
      L"off|on"},

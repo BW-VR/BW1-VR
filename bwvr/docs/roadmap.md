@@ -846,24 +846,21 @@ keeps the mod as it is.
   skips the wait only for the sounds of the mod's mixer. The other sounds
   still make the game thread wait, and this can stop the game for 40 to
   170 ms.
-- **F25. A new look for the hint cards.** The cards look too clean and
-  modern for the game. Now `HintCardEndFrame` draws each card with GDI: a
-  dark card with round corners, white Segoe UI letters, and a badge for
-  the button (`controller-hints.md`, section 9.2). Wanted: a look that fits
-  the fantasy, old and playful world of the game, for example old paper or
-  a small scroll with a gold edge, dark ink in a letter with serifs, and a
-  button badge as a seal or a carved stone. Then use the same look for the
-  other cards of the mod: the ring, the spell book, the keyboard and the
-  cards of the debug page. Rules:
-  - No art and no font of the game in the repo or the installer. Draw the
-    art in code, or make our own pictures. A font must have a license that
-    lets the mod ship it (for example the SIL Open Font License). The mod
-    can read a font of the game from the player's game folder at run time.
-  - The words must stay easy to read at the length of an arm: a capital
-    letter is 0.8 degrees now. Check the contrast against the land and the
-    sky in a headset.
-  - A key keeps the look of now (`hint_card_style=0`).
-  Make two or three looks as eye pictures first, and let the owner choose.
+- **F25. The scroll look for the other cards.** The hint cards are
+  parchment scrolls with wax seals (`hint_card_style=1`,
+  `controller-hints.md`, section 9.11). The art is in `card_scroll.h`. Open:
+  - The same look for the other cards that GDI draws: the ring
+    (`radial_menu.cpp`), the spell book (`spell_book.cpp`) and the keyboard
+    (`vr_keyboard.cpp`). Keep their layout. The cells of the book fill its
+    full width, so the rolls need a margin at each side and a larger quad,
+    with the same center. The ring has badges on a circle: a seal for each
+    badge fits it. The keyboard is opaque and fills its rect. The debug page
+    draws no picture of its own: it uses the ring.
+  - Only a headset can show the contrast of the scroll against the sky and
+    the land, and whether the grain or the ink shimmers when the headset
+    shows the card smaller than its picture.
+  - The scroll is 1.1 cm wider and 0.8 cm higher than the plain card. In a
+    headset, check that it does not hide the other hand more often.
 
 ### Faults of the plain game
 

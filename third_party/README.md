@@ -13,13 +13,15 @@ The full license texts that go out with the mod are in
 | `backends/dx7.games/` | dxwrapper: `dxwrapper.dll` and its `ddraw.dll` stub. It turns the DirectX 7 of the game into Direct3D 9 | release 1.8.8600.25 | see `bwvr/installer/Notices.txt`, section 4 | https://github.com/elishacloud/dxwrapper |
 | `Vulkan-Headers/include/` | The C headers of Vulkan (`vulkan/*.h`, `vk_video/*.h`), no C++ headers | tag `vulkan-sdk-1.4.357.0` | Apache-2.0 or MIT (`LICENSE.md`, `LICENSES/`) | https://github.com/KhronosGroup/Vulkan-Headers |
 | `cgltf/` | cgltf, the glTF reader for a hand model file (`cgltf.h`) | v1.14 | MIT (`LICENSE`) | https://github.com/jkuhlmann/cgltf |
+| `fonts/alegreya/`, `fonts/alegreyasc/` | Alegreya (`Alegreya[wght].ttf`, a variable font) and Alegreya SC Bold (`AlegreyaSC-Bold.ttf`), the fonts of the scroll cards. The installer puts them in `bwvr-fonts` of the game folder | google/fonts commit `24ddc1f` | SIL OFL 1.1 (`OFL.txt` in each folder) | https://github.com/google/fonts (`ofl/alegreya`, `ofl/alegreyasc`) |
 
 ## The binaries are pinned
 
 `bwvr/tools/package.ps1` holds the SHA-256 of `openxr_loader.dll`,
-`dxwrapper.dll` and the `ddraw.dll` stub, and it stops when a file is not
-the recorded one. So a binary here changes only together with its hash in
-that script, in one commit that says where the new file is from.
+`dxwrapper.dll`, the `ddraw.dll` stub and the two font files, and it stops
+when a file is not the recorded one. So a binary here changes only together
+with its hash in that script, in one commit that says where the new file is
+from.
 
 ## How the OpenXR loader was built
 

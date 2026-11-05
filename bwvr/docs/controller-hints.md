@@ -667,10 +667,12 @@ is 1, no hint of the game draws in an eye picture:
    mouse picture) and the caption. Then it returns. The game draws nothing, and
    its callers run their fades as before.
 3. After both eye passes (`UiDepthSetEye(-1)`), `HintCardEndFrame` draws the
-   words of each card into a picture of 768 by 320 pixels with GDI (Segoe UI):
-   a dark card, white letters, and the button word on a badge. The trigger
-   badge is green and the grip badge is gold, as the glow at the Hand's point.
-   Other buttons have a light badge.
+   words of each card into a picture of 768 by 320 pixels with GDI. With
+   `hint_card_style=1` the card is a parchment scroll with dark brown letters,
+   and the button word is on a wax seal (9.11). With `hint_card_style=0` it is
+   a dark card with white Segoe UI letters, and the button word is on a badge.
+   In both looks the trigger is green and the grip is gold or amber, as the
+   glow at the Hand's point. Other buttons have a red seal or a light badge.
 4. `XrScreen::StageCard` gives the picture and its pose to
    `XrScreen::EndFrame`. That makes a small swapchain at the first layer of a
    card, writes the part that shows, and adds one quad layer for the card in
@@ -718,7 +720,9 @@ no game transform, so it is at the real wrist at each scale of the world.
   letter is about 8 mm high and a card with one line is 2.2 cm high. That
   letter is 0.8 degrees at 55 cm, the length of an arm. Most cards are 7 to
   14 cm wide. A wider card stops at 19 cm. `hint_card_size_pct` scales all of
-  it. The card has an alpha of 0.86 and round corners.
+  it. The scroll is opaque, and its rolls and its drop shadow add 1.1 cm to
+  the width and 0.8 cm to the height. The plain card has an alpha of 0.86 and
+  round corners.
 
 A card on the forearm side of the wrist in the room (away from the fingers and
 up) would be between the eyes and the hand when the fingers point along the
@@ -942,6 +946,9 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `prompt_moves` | 1 | 1 the prompt of the land has the line of the walk with the stick while a push moves the player, and the line of A shows only while a press of A can move the player. 0 no line for the walk, and the line of A shows in each case (9.4) |
 | `hint_learn` | 1 | 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). The launcher row "Hints": "Until learned" is 1, "Always" is 0 |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
+| `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0 |
+| `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
+| `hint_card_fonts_test_dir` | empty | Test key. The folder of the font files of the scroll. Empty is `bwvr-fonts` beside `runblack.exe`. A desktop run sets the staged folder `bwvr\out\stage\bwvr-fonts` of its worktree |
 
 `hint_card.cpp` reads the keys itself, at the first frame. With `test_keys=1`
 and `ui_panel=0`, Ctrl Shift F11 switches between the card and the hints in the
@@ -953,12 +960,24 @@ three pulses for 3, two for 2 and one for 1. It gives one long pulse for 0.
 Ctrl and Shift with the period key switch `prompt_moves` between 1 (a long
 pulse) and 0 (a short pulse). The word `promptkey` of the scripted controller
 does the same in a desktop run. `hint_learn` has no test key: the launcher
-row "Hints" sets it.
+row "Hints" sets it. `hint_card_style` has no key of the keyboard. With
+`debug_menu=1` the switch "Card look" (group Interface) of the debug page
+changes it, and each card draws its picture again in the next frame.
 
 ### 9.6 The log
 
 - `hint card : hint_card=1, ... prompts=1, ...` once, with the settings, and
-  one line each for `prompt_timing`, `hint_words` and `prompt_moves`.
+  one line each for `prompt_timing`, `hint_words`, `prompt_moves` and
+  `hint_card_style`.
+- `card scroll : the words use Alegreya and the seals use Alegreya SC, from
+  the folder bwvr-fonts. The noise tile and the fonts took 8.5 ms`: once, at
+  the first picture of a scroll. When a font file does not load, the line
+  names the font in its place (Georgia, then Segoe UI) and the first file
+  that did not load.
+- `hint card : frame N, a new picture of the card of the pointing hand in
+  the scroll look, 501 by 119 px, took 1.80 ms`: one line for each new
+  picture (24 lines at most). The report window has a line with the count of
+  the new pictures, their mean time and the longest time.
 - `hint card : frame N, the card of the right hand: [Grip] Take. 6.0 by 2.2 cm,
   241 by 86 px, at x y z m, 7.4 cm to the right of the wrist in the view and
   55 cm from the head. The prompt is for an object to take`: each time the words
@@ -1262,6 +1281,67 @@ show three fetches there.
 Not shown by a run: the collect, the grab of the land, the walk, the ring,
 the commands of the Creature, and a line that comes back after 10 minutes of
 play. The math test has the rules for them.
+
+### 9.11 The look of the card
+
+Code: `src/mod/card_scroll.cpp` and `.h` (the art), `RasterScroll` in
+`src/mod/hint_card.cpp` (the layout). The fonts are in
+`third_party/fonts`.
+
+With `hint_card_style=1` (the default) each card is a small parchment scroll,
+to match the old world look of the game. The parts, from the back:
+
+1. A soft drop shadow 3 px to the right and 5 px down. It comes from the
+   outline of the shape with a distance test, so it needs no blur.
+2. The paper: a warm color with light and dark areas and a grain of fibers,
+   a torn top and bottom edge, and a burnt brown rim along the edge.
+3. A rolled end at each side: a cylinder with a shade, a line where the paper
+   wraps, and a hollow at each end.
+4. A wax seal for each button word, with an uneven edge, a raised rim, a
+   shine and its own small shadow. The trigger is green, the grip is amber,
+   and other buttons are red. The word is in capitals: light letters on green
+   and red, dark letters on amber.
+5. The words in dark brown ink. The ink bleeds 1 px into the paper.
+
+The grid of the plain card stays: 40 px a cm, a row of 66 px, a seal of
+50 px, and a pad of 18 px. The capital letter of the words is 31 px, as the
+capital letter of Segoe UI at 44 px, and that of a seal word is 23 px. The
+mod measures the capital H of each font, so a font in place of Alegreya has
+the same letter height. The rolls and the shadow add a margin around the
+paper (`card_scroll.h`). The paper is opaque.
+
+**The fonts.** The words use Alegreya Bold and the seals use Alegreya SC Bold,
+both under the SIL Open Font License 1.1. Alegreya is a variable font: GDI
+gives its Bold instance for the weight 700. The installer and `dev.ps1 install`
+put the files in `bwvr-fonts` of the game folder, with `OFL.txt`. The mod
+loads them with `AddFontResourceEx` and `FR_PRIVATE`, so they are for the game
+process only. When a file does not load, the words use Georgia, then Segoe
+UI, and the log says so. No font of the game is used.
+
+**The grain and the cost.** The headset shows a card smaller than its picture
+(about 26 pixels of the view for each cm at 55 cm), so a detail of 1 px would
+shimmer. The smallest cell of the noise is 4 px. `card_scroll::Start` makes
+one noise tile of 256 by 256 pixels and the tables of the burnt edge, one
+time. A new picture reads the tile and makes no blur. The picture is drawn
+again only when the words of the card change.
+
+**Tests.** A desktop run saves each new picture of a card with
+`hint_card_save_test=1`, and loads the fonts from the staged folder of its
+worktree (`package.ps1 -StageOnly`, then `hint_card_fonts_test_dir`). The
+run is the six takes at the store of Land 1 (9.10), with the keys
+`hint_learn=0;prompts=2;hint_card_save_test=1;hint_card_fonts_test_dir=<folder>`
+added to `-Set`. With `hint_card_style=1` the pictures show the scroll, the
+seals and the ink, and the log line `card scroll` names Alegreya and
+Alegreya SC. With `hint_card_style=0` the pictures are the plain cards. In
+these runs a new picture of the scroll takes 0.55 to 1.1 ms, and a plain one
+0.3 to 0.9 ms. The first picture of the scroll takes about 14 ms: it makes
+the noise tile and loads the fonts (about 8.5 ms), and GDI draws each letter
+of the new fonts for the first time. A line that is too long for 19 cm ends
+in "..." in both looks.
+
+**Needs the headset.** The contrast of the scroll against the sky and the
+land, whether the grain or the ink shimmers, and whether the larger scroll
+hides the other hand more often.
 
 ## 10. A text that waits for a click
 

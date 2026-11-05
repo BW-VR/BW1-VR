@@ -345,6 +345,11 @@ const Setting kSettings[] = {
      "back after 10 minutes of play without that action. In a lesson of the "
      "tutorial, each line shows. Always: each line always shows. To show all "
      "lines again, delete bwvr-hint-counts.ini in the game folder."},
+    {kValues, "hint_card_style", "Card look", "Scroll=1|Plain=0", 1,
+     "The look of the cards beside your wrists. Scroll: a small parchment "
+     "scroll with dark letters, and the button word on a wax seal (green for "
+     "the trigger, amber for the grip). Plain: a dark card with white "
+     "letters."},
 
     {kGroup, nullptr, "Launcher", nullptr, 0, nullptr},
     {kBool, "large_address", "Use 4 GB of memory", nullptr, 1,

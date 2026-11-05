@@ -174,7 +174,9 @@ Thank you for playing. If you like the mod, you can support the work here:
 
 The code and the documents of the mod have the MIT license, see
 [`LICENSE`](LICENSE). The code of other projects in `third_party/` keeps its
-own license, see [`third_party/README.md`](third_party/README.md).
+own license, see [`third_party/README.md`](third_party/README.md). The cards
+use the fonts Alegreya and Alegreya SC by The Alegreya Project Authors, under
+the SIL Open Font License 1.1.
 
 This is an unofficial mod, made by a fan. Electronic Arts and Lionhead
 Studios did not make it, do not endorse it, and have no connection with it.

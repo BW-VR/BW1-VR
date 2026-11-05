@@ -92,6 +92,13 @@
 //                        shows always, and the mod writes no counts
 //   hint_counts_test_file  a desktop test puts the file of the counts at
 //                        this full path, in the folder of its run
+//   hint_card_style=1    1 the card is a parchment scroll with dark ink and a
+//                        wax seal for each button word (card_scroll.h). 0 the
+//                        plain dark card with white Segoe UI letters
+//   hint_card_save_test=0  1 saves each new picture of a card as
+//                        bwvr-hintcard-draw-NNN-NNNNN.bmp (40 at most)
+//   hint_card_fonts_test_dir  a desktop test loads the fonts of the scroll
+//                        from this folder, not from bwvr-fonts
 //
 // With no headset (the desktop test) the route runs too. A capture frame
 // saves each card as bwvr-hintcard-right-NNNNN.bmp or
@@ -105,6 +112,7 @@
 #include <string.h>
 
 #include "../vr/xr_screen.h"
+#include "card_scroll.h"
 #include "controller_hints.h"
 #include "controllers.h"
 #include "creature_command.h"
@@ -172,6 +180,8 @@ int g_words = 3;             // hint_words, and its test key
 int g_moves = 1;             // prompt_moves, and its test key
 int g_learn = 1;             // hint_learn
 bool g_palm_check = true;    // hint_palm_check (GameHintTrue, palm_off)
+int g_style = 1;             // hint_card_style
+bool g_save_test = false;    // hint_card_save_test
 // A hint of the game that a prompt owned does not show for this long after
 // the prompt went (hint_words=3, hint_card_math.h, OwnedStale).
 const double kOwnedSeconds = 0.25;
@@ -295,6 +305,15 @@ void ReadSettings() {
          g_palm_check ? "a grip hint of the game over the land does not show "
                         "while a press there acts on no object"
                       : "a grip hint of the game over the land shows");
+  g_style = IniKey("hint_card_style", 1) != 0 ? 1 : 0;
+  g_save_test = IniKey("hint_card_save_test", 0) != 0;
+  ModLog("hint card    : hint_card_style=%d, %s%s", g_style,
+         g_style != 0 ? "the card is a parchment scroll with dark ink and a wax "
+                        "seal for each button word"
+                      : "the card is dark with white letters",
+         g_save_test ? ". hint_card_save_test=1 saves each new picture of a "
+                       "card"
+                     : "");
   if (g_size_pct < 50) g_size_pct = 50;
   if (g_size_pct > 200) g_size_pct = 200;
   ModLog("hint card    : hint_card=%d, %s. prompts=%d, %s. The size is %d "
@@ -945,6 +964,15 @@ const int kBadgeEm = 34;
 const float kCardRadius = 24.0f;
 const float kBadgeRadius = 16.0f;
 const float kCardAlpha = 0.86f;
+// The scroll (hint_card_style=1) keeps the grid above: the row, the height of
+// a seal (kBadgeHeight) and the pad. Its capital letter has the height of the
+// capital letter of Segoe UI at kTextEm, and the seal word that of kBadgeEm.
+// The rolls and the shadow add the margins of card_scroll.h. The paper is
+// opaque.
+const int kScrollTextCap = 31;
+const int kScrollSealCap = 23;
+const int kScrollSealMin = kBadgeHeight + 12;  // the narrowest seal
+const int kScrollSealPad = 22;  // from the end of a seal to its word
 // A soft fade: the card comes in 0.25 s and goes in 0.35 s, in place.
 const float kFadeInSeconds = 0.25f;
 const float kFadeOutSeconds = 0.35f;
@@ -955,6 +983,21 @@ uint32_t* g_bits = nullptr;  // the GDI picture: white letters on black
 HFONT g_text_font = nullptr;
 HFONT g_badge_font = nullptr;
 bool g_raster_failed = false;
+HFONT g_scroll_text_font = nullptr;
+HFONT g_scroll_seal_font = nullptr;
+int g_scroll_text_ascent = 0;
+int g_scroll_seal_ascent = 0;
+int g_scroll_text_height = 0;
+int g_scroll_seal_height = 0;
+bool g_scroll_failed = false;
+// The cost of a redraw of a card picture, for the log and the report.
+int g_draw_logs = 0;
+const int kMaxDrawLogs = 24;
+uint64_t g_draws = 0;
+double g_draw_ms = 0.0;
+double g_draw_most_ms = 0.0;
+int g_saved_draws = 0;
+const int kMaxSavedDraws = 40;
 
 // One card. base is the picture, color multiplied by alpha, BGRA, at full
 // strength. staged is the picture as it goes to the headset, with the fade.
@@ -1063,9 +1106,9 @@ const Rgb kBadgeColor[4] = {
     {232.0f, 236.0f, 242.0f},  // any other button
 };
 
-// Draws the content into the base picture of the card. The used part starts
-// at 0, 0 and is rect_w by rect_h.
-bool Raster(const Content& content, CardState* card) {
+// Draws the content into the base picture of the card in the plain look
+// (hint_card_style=0). The used part starts at 0, 0 and is rect_w by rect_h.
+bool RasterPlain(const Content& content, CardState* card) {
   if (!RasterStart()) return false;
   const int width = static_cast<int>(kHintCardWidth);
   const int height = static_cast<int>(kHintCardHeight);
@@ -1171,6 +1214,169 @@ bool Raster(const Content& content, CardState* card) {
   card->rect_h = card_h;
   card->drawn = content;
   card->staged_fade = -1.0f;
+  return true;
+}
+
+// The fonts of the scroll, one time. False keeps the plain look.
+bool ScrollStart() {
+  if (g_scroll_text_font != nullptr) return true;
+  if (g_scroll_failed) return false;
+  if (!card_scroll::Start(g_dc)) {
+    g_scroll_failed = true;
+    return false;
+  }
+  g_scroll_text_font = card_scroll::WordsFont(g_dc, kScrollTextCap);
+  g_scroll_seal_font = card_scroll::SealFont(g_dc, kScrollSealCap);
+  if (g_scroll_text_font == nullptr || g_scroll_seal_font == nullptr) {
+    g_scroll_failed = true;
+    ModLog("hint card    : GDI gave no font for the scroll, so the cards have "
+           "the plain look");
+    return false;
+  }
+  TEXTMETRICW metrics;
+  SelectObject(g_dc, g_scroll_text_font);
+  GetTextMetricsW(g_dc, &metrics);
+  g_scroll_text_ascent = metrics.tmAscent;
+  g_scroll_text_height = metrics.tmHeight;
+  SelectObject(g_dc, g_scroll_seal_font);
+  GetTextMetricsW(g_dc, &metrics);
+  g_scroll_seal_ascent = metrics.tmAscent;
+  g_scroll_seal_height = metrics.tmHeight;
+  return true;
+}
+
+// Draws the content into the base picture of the card as a scroll
+// (hint_card_style=1, card_scroll.h). The used part starts at 0, 0 and is
+// rect_w by rect_h. The grid of the rows is that of the plain look, inside
+// the margins of the rolls and the shadow.
+bool RasterScroll(const Content& content, CardState* card, int seed) {
+  const int width = static_cast<int>(kHintCardWidth);
+  const int height = static_cast<int>(kHintCardHeight);
+  int seal_x0[kMaxLines], seal_x1[kMaxLines], text_x0[kMaxLines];
+  wchar_t seal_word[kMaxLines][24];
+  int most = 0;
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    int x = card_scroll::kWordsLeft;
+    seal_x0[i] = seal_x1[i] = x;
+    seal_word[i][0] = 0;
+    if (line.button[0] != 0) {
+      wcsncpy_s(seal_word[i], line.button, _TRUNCATE);
+      CharUpperW(seal_word[i]);
+      int w = TextWidth(g_scroll_seal_font, seal_word[i]) + 2 * kScrollSealPad;
+      if (w < kScrollSealMin) w = kScrollSealMin;
+      seal_x1[i] = x + w;
+      x = seal_x1[i] + kBadgeGap;
+    }
+    text_x0[i] = x;
+    int end = x + TextWidth(g_scroll_text_font, line.text);
+    if (line.text[0] == 0 && line.button[0] != 0) end = seal_x1[i];
+    if (end > most) most = end;
+  }
+  int card_w = most + card_scroll::kWordsRight;
+  if (card_w > width) card_w = width;
+  const int body_h = 2 * kPad + content.count * kRow - (kRow - kBadgeHeight);
+  int card_h = card_scroll::kPaperTop + body_h + card_scroll::kPaperBottom;
+  if (card_h > height) card_h = height;
+  const int text_right = card_w - card_scroll::kWordsRight;
+
+  // The paper, the rolls and the seals.
+  const card_scroll::Picture picture = {card->base, width, card_w, card_h};
+  card_scroll::Paper(picture, card_scroll::kEdgeLeft, card_scroll::kPaperTop,
+                     card_w - card_scroll::kEdgeRight,
+                     card_scroll::kPaperTop + body_h, seed);
+  for (int i = 0; i < content.count; ++i) {
+    if (seal_word[i][0] == 0) continue;
+    const int top = card_scroll::kPaperTop + kPad + i * kRow;
+    card_scroll::Seal(picture, seal_x0[i], top, seal_x1[i],
+                      top + kBadgeHeight, content.line[i].tone & 3,
+                      seed + 50 + i * 7);
+  }
+
+  // The words, white on black, with the capital letter in the middle of the
+  // row. Then the ink.
+  for (int y = 0; y < card_h; ++y) {
+    memset(g_bits + y * width, 0, static_cast<size_t>(card_w) * 4);
+  }
+  SelectObject(g_dc, g_scroll_text_font);
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    if (line.text[0] == 0 || text_right <= text_x0[i]) continue;
+    const int top = card_scroll::kPaperTop + kPad + i * kRow;
+    const int baseline = top + (kBadgeHeight + kScrollTextCap) / 2;
+    RECT r = {text_x0[i], baseline - g_scroll_text_ascent, text_right,
+              baseline - g_scroll_text_ascent + g_scroll_text_height};
+    DrawTextW(g_dc, line.text, -1, &r,
+              DT_SINGLELINE | DT_NOPREFIX | DT_LEFT | DT_TOP |
+                  DT_END_ELLIPSIS | DT_NOCLIP);
+  }
+  GdiFlush();
+  card_scroll::Ink(picture, g_bits, 0, 0, card_w, card_h, seed);
+
+  // The seal words, each in the box of its seal.
+  SelectObject(g_dc, g_scroll_seal_font);
+  for (int i = 0; i < content.count; ++i) {
+    if (seal_word[i][0] == 0) continue;
+    const int top = card_scroll::kPaperTop + kPad + i * kRow;
+    for (int y = top; y < top + kBadgeHeight && y < card_h; ++y) {
+      memset(g_bits + y * width + seal_x0[i], 0,
+             static_cast<size_t>(seal_x1[i] - seal_x0[i]) * 4);
+    }
+    const int baseline = top + (kBadgeHeight + kScrollSealCap) / 2;
+    RECT r = {seal_x0[i], baseline - g_scroll_seal_ascent, seal_x1[i],
+              baseline - g_scroll_seal_ascent + g_scroll_seal_height};
+    DrawTextW(g_dc, seal_word[i], -1, &r,
+              DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP | DT_NOCLIP);
+  }
+  GdiFlush();
+  for (int i = 0; i < content.count; ++i) {
+    if (seal_word[i][0] == 0) continue;
+    const int top = card_scroll::kPaperTop + kPad + i * kRow;
+    card_scroll::SealInk(picture, g_bits, seal_x0[i], top, seal_x1[i],
+                         top + kBadgeHeight, content.line[i].tone & 3);
+  }
+
+  card->rect_w = card_w;
+  card->rect_h = card_h;
+  card->drawn = content;
+  card->staged_fade = -1.0f;
+  return true;
+}
+
+// Draws the content into the base picture of the card, in the look of
+// hint_card_style. It measures the time of each redraw, and with
+// hint_card_save_test=1 it saves the new picture.
+bool Raster(const Content& content, CardState* card) {
+  if (!RasterStart()) return false;
+  LARGE_INTEGER t0, t1, frequency;
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&t0);
+  const int hand = static_cast<int>(card - g_cards);
+  const bool scroll = g_style != 0 && ScrollStart();
+  const bool ok = scroll ? RasterScroll(content, card, hand * 17 + 3)
+                         : RasterPlain(content, card);
+  QueryPerformanceCounter(&t1);
+  if (!ok) return false;
+  const double ms =
+      (t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+  ++g_draws;
+  g_draw_ms += ms;
+  if (ms > g_draw_most_ms) g_draw_most_ms = ms;
+  if (g_draw_logs < kMaxDrawLogs) {
+    ++g_draw_logs;
+    ModLog("hint card    : frame %llu, a new picture of the card of the %s "
+           "hand in the %s look, %d by %d px, took %.2f ms", g_frame,
+           hand == kPointing ? "pointing" : "other",
+           scroll ? "scroll" : "plain", card->rect_w, card->rect_h, ms);
+  }
+  if (g_save_test && g_saved_draws < kMaxSavedDraws) {
+    char name[48];
+    _snprintf_s(name, _TRUNCATE, "hintcard-draw-%03d", g_saved_draws++);
+    EyeCaptureSaveUi(name, g_frame, 1, card->base,
+                     static_cast<int>(kHintCardWidth) * 4,
+                     static_cast<uint32_t>(card->rect_w),
+                     static_cast<uint32_t>(card->rect_h));
+  }
   return true;
 }
 
@@ -2339,6 +2545,24 @@ int HintCardMovesValue() {
   return g_moves;
 }
 
+// The switch "Card look" of the debug page: hint_card_style between the
+// scroll (1) and the plain card (0). Each card draws its picture again in
+// the next frame.
+void HintCardStyleToggle(const char* by) {
+  ReadSettings();
+  if (!CardsCanShow()) return;
+  g_style = g_style != 0 ? 0 : 1;
+  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  ControllersGesturePulse(0.5f, g_style != 0 ? 0.30f : 0.08f);
+  ModLog("test key     : %s: hint_card_style is %d now (%s)", by, g_style,
+         g_style != 0 ? "the cards are scrolls" : "the cards are plain");
+}
+
+int HintCardStyleValue() {
+  if (!CardsCanShow()) return kDebugCannot;
+  return g_style;
+}
+
 void HintCardToggle() {
   ReadSettings();
   if (!g_on) {
@@ -2408,6 +2632,14 @@ void HintCardReport() {
          "%llu times (the pointing hand first)",
          a.frames_no_hand, b.frames_no_hand, a.frames_hidden, b.frames_hidden,
          a.side_changes, b.side_changes);
+  if (g_draws > 0) {
+    ModLog("hint card    : %llu new pictures of the cards in the %s look, %.2f "
+           "ms each on average and %.2f ms at the most",
+           g_draws, g_style != 0 && !g_scroll_failed ? "scroll" : "plain",
+           g_draw_ms / static_cast<double>(g_draws), g_draw_most_ms);
+    g_draws = 0;
+    g_draw_ms = g_draw_most_ms = 0.0;
+  }
   if (g_click_shown != 0 || g_click_hidden != 0) {
     ModLog("hint card    : the prompt of a text that waits for a click showed "
            "on %llu frames and did not show on %llu (text_click=%d)",

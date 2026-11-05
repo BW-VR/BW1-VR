@@ -68,6 +68,7 @@ add_library(bwvr_mod SHARED
     controllers.cpp
     controller_hints.cpp
     hint_card.cpp
+    card_scroll.cpp
     text_click.cpp
     hand_direct.cpp
     hand_glow.cpp

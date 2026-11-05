@@ -43,6 +43,7 @@ constexpr Value kValues[] = {
     {"move_stick_cap_ms", "250"},
     {"late_grab", "1"},
     {"late_prepare", "1"},
+    {"late_prepare_gap", "1"},
 };
 
 inline bool IsFrameRuntime(const std::string& runtime) {

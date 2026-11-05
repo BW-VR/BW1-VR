@@ -8,10 +8,10 @@
   "most_s": 240,
   "track_marks": true,
   "cycle": [
-    {"step": "no gap", "keys": {"mark": 1, "late_prepare": 1, "late_grab": 1, "late_prepare_gap": 0}},
-    {"step": "gap", "keys": {"mark": 1, "late_prepare": 1, "late_grab": 1, "late_prepare_gap": 1}}
+    {"step": "lists at the tick", "keys": {"mark": 1, "late_prepare_gap": 1, "late_prebuild": 0}},
+    {"step": "lists before", "keys": {"mark": 1, "late_prepare_gap": 1, "late_prebuild": 1}}
   ],
-  "end_keys": {"mark": 0, "late_prepare": 1, "late_grab": 1, "late_prepare_gap": 0},
+  "end_keys": {"mark": 0},
   "end_prompt": "The test is done. You can quit the game.",
   "end_prompt_s": 8
 }

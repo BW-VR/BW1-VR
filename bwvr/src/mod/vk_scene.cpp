@@ -449,6 +449,8 @@ bool g_list_keep = false;
 bool g_cheap_draws = false;  // VkSceneSetCheapDraws
 bool g_lists_valid = false;
 bool g_lists_reuse = false;
+bool g_lists_prebuilt = false;   // VkSceneLatePrebuild: the lists wait for the end of the walk
+float g_late_last_margin = 0.0f;  // the margin of the last picture
 float g_lists_margin = 0.0f;
 uint32_t g_lists_out_of_view[2] = {0, 0};
 uint32_t g_lists_left_out[2] = {0, 0};
@@ -3526,7 +3528,7 @@ void PlayMres(Slot& s) {
       // after this one can keep it. The loop below still leaves out what this move needs not.
       const float margin = g_late_margin;
       if (g_list_keep) {
-        const float wide = margin * 1.5f;
+        const float wide = margin * 3.0f;
         g_late_margin = wide > 64.0f ? wide : 64.0f;
         g_lists_margin = g_late_margin;
       }
@@ -4850,9 +4852,19 @@ void EndOnWorker(const void*) {
 // The end of a walk: its passes, its submit and the values of its picture.
 void FinishWalk() {
   Slot& s = g_slots[g_slot];
-  s.used_walk = s.used;
-  g_lists_valid = false;
-  g_lists_reuse = false;
+  if (g_lists_prebuilt) {
+    // The lists of VkSceneLatePrebuild, while they hold for the move of this picture.
+    g_lists_prebuilt = false;
+    g_lists_reuse = g_list_keep && g_gpu_test == kTestNormal && g_late_margin <= g_lists_margin;
+    if (!g_lists_reuse) {
+      g_lists_valid = false;
+      s.used = s.used_walk;
+    }
+  } else {
+    s.used_walk = s.used;
+    g_lists_valid = false;
+    g_lists_reuse = false;
+  }
   if (g_walk_mres) {
     if (g_rendering_panel) f.vkCmdEndRendering(s.cb);
     g_rendering_panel = false;
@@ -7066,6 +7078,7 @@ void SetLate(const float move[4], const float room[4]) {
   const float limit = static_cast<float>(Target().width) * 0.25f;
   const float margin = late_camera_math::MarginPixels(g_late_push, kLateNearest);
   g_late_margin = margin < limit ? margin : limit;
+  g_late_last_margin = g_late_margin;
 }
 
 }  // namespace
@@ -7153,6 +7166,39 @@ void VkSceneSetBindless(bool on) {
 }
 
 void VkSceneSetTinyDraws(bool on) { g_tiny_on = on; }
+
+void VkSceneLatePrebuild() {
+  if (!g_late_open || !g_walk_mres || !g_list_keep || g_failed || g_gpu_test != kTestNormal) return;
+  Slot& s = g_slots[g_slot];
+  s.used_walk = s.used;
+  const float margin = g_late_margin;
+  // The move of the coming picture is not known yet: the margin of the picture before.
+  const float wide = g_late_last_margin * 3.0f;
+  g_late_margin = wide > 64.0f ? wide : 64.0f;
+  g_lists_margin = g_late_margin;
+  for (int pass = 0; pass < 2; ++pass) {
+    const float ox = pass == 1 ? g_mres.inset_x0 : 0.0f;
+    const float oy = pass == 1 ? g_mres.inset_y0 : 0.0f;
+    const float sx = pass == 1 ? g_mres.center_scale_x : g_mres.outer_scale_x;
+    const float sy = pass == 1 ? g_mres.center_scale_y : g_mres.outer_scale_y;
+    const uint32_t used_w = pass == 1 ? g_mres.center_w : g_mres.outer_w;
+    const uint32_t used_h = pass == 1 ? g_mres.center_h : g_mres.outer_h;
+    uint32_t out_of_view[2] = {0, 0}, left_out[2] = {0, 0};
+    const uint64_t draws_before = g_dc_draws, commands_before = g_dc_commands;
+    PreparePass(s, pass, ox, oy, sx, sy, used_w, used_h, out_of_view, left_out);
+    g_mres_lists[pass].swap(g_mres_play);
+    g_lists_out_of_view[pass] = out_of_view[pass];
+    g_lists_left_out[pass] = left_out[pass];
+    // The picture of this walk counts them (PlayMres).
+    g_lists_draws[pass] = g_dc_draws - draws_before;
+    g_lists_commands[pass] = g_dc_commands - commands_before;
+    g_dc_draws = draws_before;
+    g_dc_commands = commands_before;
+  }
+  g_late_margin = margin;
+  g_lists_valid = true;
+  g_lists_prebuilt = true;
+}
 
 void VkSceneSetListKeep(bool on) {
   g_list_keep = on;

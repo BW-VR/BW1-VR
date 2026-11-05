@@ -240,6 +240,9 @@ void VkSceneSetTinyPixels(float pixels);
 // THE LIST AGAIN (vk_list_keep): a picture of the same list keeps the lists of its passes
 // and their joined indices.
 void VkSceneSetListKeep(bool on);
+// THE LISTS BEFORE THE TICK (late_prebuild): with an open walk and vk_list_keep, the lists of the
+// passes and their joined indices are ready before the move of the picture is known.
+void VkSceneLatePrebuild();
 // THE COMPOSE IN PARTS (vk_compose_fast, vk_compose_rate, vk_compose.h).
 void VkSceneComposeFast(bool on);
 void VkSceneComposeRate(int rate);

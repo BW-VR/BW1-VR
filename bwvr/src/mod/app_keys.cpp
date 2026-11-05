@@ -21,10 +21,10 @@ const char* const kName[kKeys] = {"vk_mres_draws",  "vk_mres_sort",      "vk_com
                                   "ring_slot_order", "late_camera",  "xr_release_take",
                                   "late_take", "vk_bindless", "xr_panel_keep",
                                   "vk_fast_shaders", "vk_tiny_draws", "vk_compose_fast", "vk_list_keep", "vk_cheap_draws", "late_grab", "late_prepare",
-                                  "late_prepare_gap"};
-const int kDefault[kKeys] = {1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                                  "late_prepare_gap", "late_prebuild"};
+const int kDefault[kKeys] = {1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-int g_value[kKeys] = {1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int g_value[kKeys] = {1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool g_read = false;
 
 void Read() {

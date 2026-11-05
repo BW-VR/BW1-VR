@@ -5414,7 +5414,7 @@ and a flat batch and a batch at infinity stay.
 
 **The list again** (`vk_list_keep`, 0 by default, the row "List keep" of the debug page). A
 picture of the same list keeps the lists of the two passes and the joined indices in the ring,
-so it only records its commands. The list of the centre holds for a move of 1.5 times the move
+so it only records its commands. The list of the centre holds for a move of 3 times the move
 of its first picture, and at least 64 pixels. A larger move makes the lists again.
 
 **The cheap draws** (`vk_cheap_draws`, 0 by default, the row "Cheap draws" of the debug page).

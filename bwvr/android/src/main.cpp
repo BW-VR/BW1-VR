@@ -211,6 +211,7 @@ struct App {
   std::atomic<bool> late_grab_live{false};     // the row "Late grab"
   std::atomic<bool> late_prepare_live{false};  // the row "Prepare early"
   std::atomic<bool> late_gap_live{false};      // the row "Prepare gap"
+  std::atomic<bool> late_prebuild_live{false};  // the row "Prebuild"
   late_camera_math::GrabFilter late_grab_filter;
   float late_grab_ms = 35.0f;                  // grab_smoothing_ms
   std::atomic<uint64_t> late_handled{0};
@@ -1017,6 +1018,13 @@ void* PlayThread(void* arg) {
       prepare_waited = 0;
       prepared_n = live->batch.size();
       prepared_ms = PlayBatch(app, live);
+      // THE LISTS BEFORE THE TICK (late_prebuild=1): the sort and the merge of a new list take
+      // 1 to 3 ms, and they need no tick either.
+      if (app->late_prebuild_live.load()) {
+        const double build_at = NowMs();
+        VkSceneLatePrebuild();
+        prepared_ms += NowMs() - build_at;
+      }
       // A rare long frame does not close the gaps: 5 ms still fits after the submit of a picture.
       const double decayed = prepare_cost * 0.98;
       const double cost = prepared_ms > decayed ? prepared_ms : decayed;
@@ -1338,6 +1346,7 @@ void AppKeysApply(uint32_t bits) {
   app->late_grab_live.store((bits & app_keys::kLateGrab) != 0);
   app->late_prepare_live.store((bits & app_keys::kLatePrepare) != 0);
   app->late_gap_live.store((bits & app_keys::kLateGap) != 0);
+  app->late_prebuild_live.store((bits & app_keys::kLatePrebuild) != 0);
   app->panel_keep.store((bits & app_keys::kPanelKeep) != 0);
   VkSceneSetBindless((bits & app_keys::kBindless) != 0);
   VkSceneSetFastShaders((bits & app_keys::kFastShaders) != 0);
@@ -1950,6 +1959,7 @@ void Play(App* app, bool new_game) {
       app->late_grab_live.store(app->ini.GetInt("bwvr", "late_grab", 0) != 0);
       app->late_prepare_live.store(app->ini.GetInt("bwvr", "late_prepare", 0) != 0);
       app->late_gap_live.store(app->ini.GetInt("bwvr", "late_prepare_gap", 0) != 0);
+      app->late_prebuild_live.store(app->ini.GetInt("bwvr", "late_prebuild", 0) != 0);
       app->late_grab_ms = static_cast<float>(app->ini.GetInt("bwvr", "grab_smoothing_ms", 35));
       app->late_handled.store(0);
       app->take_all = app->take_waits = app->take_over = 0;

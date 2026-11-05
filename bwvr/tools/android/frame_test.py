@@ -486,7 +486,8 @@ def report(folder):
 
 def print_marks(folder):
     path = os.path.join(folder, 'game', 'bwvr-marks.csv')
-    if not os.path.exists(path):
+    # A test with the times of the clicks has its own lines (print_clicks).
+    if not os.path.exists(path) or os.path.exists(os.path.join(folder, 'marks_time.csv')):
         return
     print()
     print('The clicks of the player')

@@ -14,6 +14,9 @@ On the headset (the run starts this):
   python3 frame_test.py conduct <test.json>
 
 bwvr.ini of the headset needs remote_control=1 and pose_log=1.
+
+A test goes through "cycle" in turns, or with "mode": "marks" through "stages": each stage
+waits until the player clicks a stick, and the table has the scale of the world at the click.
 """
 import json
 import os
@@ -99,6 +102,67 @@ class Control:
             pass
 
 
+def run_cycle(test, control, result, say):
+    """The steps in turns, each for step_s, until most_s ends."""
+    step_s = float(test.get('step_s', 8.0))
+    step_prompt_s = float(test.get('step_prompt_s', 0.0))
+    cycle = test['cycle']
+    limit = time.monotonic() + float(test.get('most_s', 240.0))
+    index = 0
+    while time.monotonic() < limit:
+        if not game_runs():
+            result['game_ended'] = True
+            say('the game ended')
+            return
+        step = cycle[index % len(cycle)]
+        index += 1
+        prompt = step.get('prompt')
+        control.send(step['step'], step.get('keys', {}), prompt)
+        result['steps'] += 1
+        say(step['step'])
+        if prompt and step_prompt_s > 0.0:
+            time.sleep(step_prompt_s)
+            control.send(step['step'], None, '')
+            time.sleep(max(step_s - step_prompt_s, 0.0))
+        else:
+            time.sleep(step_s)
+
+
+def run_marks(test, control, result, say, marks_path):
+    """Each stage ends with a click of a stick, or after stage_most_s."""
+    def marks_now():
+        try:
+            with open(marks_path) as f:
+                return sum(1 for _ in f)
+        except OSError:
+            return 0
+    prompt_s = float(test.get('stage_prompt_s', 7.0))
+    most_s = float(test.get('stage_most_s', 180.0))
+    for stage in test['stages']:
+        keys = dict(stage.get('keys', {}))
+        keys['mark'] = 1
+        count = marks_now()
+        control.send(stage['step'], keys, stage.get('prompt', ''))
+        result['steps'] += 1
+        say(stage['step'])
+        start = time.monotonic()
+        hidden = False
+        while time.monotonic() < start + most_s:
+            if not game_runs():
+                result['game_ended'] = True
+                say('the game ended')
+                return
+            if not hidden and time.monotonic() >= start + prompt_s:
+                control.send(stage['step'], None, '')
+                hidden = True
+            if marks_now() > count:
+                say('a mark')
+                break
+            time.sleep(0.25)
+        else:
+            say('no mark in this stage')
+
+
 def conduct(test_path):
     with open(test_path) as f:
         test = json.load(f)
@@ -111,38 +175,27 @@ def conduct(test_path):
         log.write(f'{time.monotonic():.3f} {text}\n')
     control = Control(os.path.join(APP_FILES, 'game', 'bwvr-control.txt'))
     control.remove()
+    marks_path = os.path.join(APP_FILES, 'game', 'bwvr-marks.csv')
+    if os.path.exists(marks_path):
+        os.remove(marks_path)
+    marks = test.get('mode') == 'marks'
     result = {'name': test.get('name', ''), 'steps': 0, 'game_ended': False, 'game_came': False}
     if wait_for_scene(os.path.join(APP_FILES, 'bwvr-quest.log'), test.get('wait_most_s', 3600), say):
         result['game_came'] = True
-        step_s = float(test.get('step_s', 8.0))
-        step_prompt_s = float(test.get('step_prompt_s', 0.0))
-        cycle = test['cycle']
-        start_keys = cycle[0].get('keys', {})
-        control.send('start', start_keys, test.get('start_prompt', ''))
+        first = test['stages'][0] if marks else test['cycle'][0]
+        control.send('start', first.get('keys', {}), test.get('start_prompt', ''))
         say('the start')
         time.sleep(float(test.get('start_prompt_s', 0.0)))
         control.send('start', None, '')
-        limit = time.monotonic() + float(test.get('most_s', 240.0))
-        index = 0
-        while time.monotonic() < limit:
-            if not game_runs():
-                result['game_ended'] = True
-                say('the game ended')
-                break
-            step = cycle[index % len(cycle)]
-            index += 1
-            prompt = step.get('prompt')
-            control.send(step['step'], step.get('keys', {}), prompt)
-            result['steps'] += 1
-            say(step['step'])
-            if prompt and step_prompt_s > 0.0:
-                time.sleep(step_prompt_s)
-                control.send(step['step'], None, '')
-                time.sleep(max(step_s - step_prompt_s, 0.0))
-            else:
-                time.sleep(step_s)
+        if marks:
+            run_marks(test, control, result, say, marks_path)
+        else:
+            run_cycle(test, control, result, say)
         if game_runs():
-            control.send('end', test.get('end_keys', {}), test.get('end_prompt', ''))
+            end_keys = dict(test.get('end_keys', {}))
+            if marks:
+                end_keys['mark'] = 0
+            control.send('end', end_keys, test.get('end_prompt', ''))
             say('the end')
             time.sleep(float(test.get('end_prompt_s', 0.0)))
             control.send('end', None, '')
@@ -180,7 +233,7 @@ def fetch(folder):
     os.makedirs(os.path.join(folder, 'game'), exist_ok=True)
     for name in ('bwvr-pose.bin', 'bwvr-pictures.bin', 'bwvr-steps.csv', 'bwvr-quest.log'):
         scp_from(f'{APP_FILES}/{name}', folder)
-    for name in ('bwvr.log', 'bwvr.ini'):
+    for name in ('bwvr.log', 'bwvr.ini', 'bwvr-marks.csv'):
         scp_from(f'{APP_FILES}/game/{name}', os.path.join(folder, 'game'))
     for name in ('test.json', 'conduct.log', 'done'):
         scp_from(f'{TEST_DIR}/{name}', folder)
@@ -368,9 +421,23 @@ def report(folder):
             group = [x for x in band if x.name == name]
             if group:
                 row(name, group)
+    print_marks(folder)
     print_perf(folder)
     print_lists(folder)
     print_remote_faults(folder)
+
+
+def print_marks(folder):
+    path = os.path.join(folder, 'game', 'bwvr-marks.csv')
+    if not os.path.exists(path):
+        return
+    print()
+    print('The clicks of the player')
+    with open(path, errors='replace') as f:
+        for line in f:
+            parts = line.strip().split(',')
+            if len(parts) == 3:
+                print(f'  the factor {float(parts[2]):.2f} disturbs at {float(parts[1]):.0f} units a meter')
 
 
 def print_perf(folder):
@@ -418,7 +485,7 @@ def print_lists(folder):
 
 
 def print_remote_faults(folder):
-    path = os.path.join(folder, 'bwvr-quest.log')
+    path = os.path.join(folder, 'game', 'bwvr.log')
     if not os.path.exists(path):
         return
     changes = 0

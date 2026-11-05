@@ -41,6 +41,8 @@ uint64_t ControllersFrameCount();
 // The ring (radial_menu.cpp).
 int DetailDistanceValue();
 void DetailDistanceToggle(const char* by);
+int DetailScaleValue();
+void DetailScaleToggle(const char* by);
 int RadialMenuWayValue();
 void RadialMenuWayChange(const char* by);
 // The controllers (controllers.cpp).
@@ -477,6 +479,8 @@ const Switch kSwitches[] = {
      "move_stick_cap_ms", TabletopWalkCapValue, TabletopWalkCapToggle, L"50 ms|250 ms"},
     {kGroupRender, L"Detail", L"How far out models keep their full detail",
      "detail_distance", DetailDistanceValue, DetailDistanceToggle, L"1x|2x|3x|5x"},
+    {kGroupRender, L"Detail scale", L"The detail distance follows the size of the world",
+     "detail_by_scale", DetailScaleValue, DetailScaleToggle, L"off|on"},
     {kGroupRender, L"Equal depth", L"Depth test EQUAL with a small bias",
      "vk_equal_depth", VkSceneEqualDepthValue, VkSceneEqualDepthToggle,
      L"EQUAL|bias"},

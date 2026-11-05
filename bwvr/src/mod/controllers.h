@@ -289,3 +289,6 @@ struct RingHand {
   float head[3];      // the head center
 };
 bool ControllersRingHand(RingHand* out);
+
+// A TEST AID (remote_control.cpp): a stick of either hand is clicked now.
+bool ControllersAnyStickClick();

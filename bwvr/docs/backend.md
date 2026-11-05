@@ -6910,7 +6910,13 @@ out). Past the last, a stand-in sprite is drawn, or nothing. The four live at
 `0x00C37E8C` to `0x00C37E98` in writable data, with two readers each and no writer.
 `detail_distance` multiplies them, after the mod checks that they hold the
 expected values. The key is 0 for the game's own, 1 for 2x, 2 for 3x and 3 (default)
-for 5x. The debug page has the row "Detail" for a live A/B. The registry value `MaxObjectDistance` does nothing: at `0x008238C4` its
+for 5x. The debug page has the row "Detail" for a live A/B. With `detail_by_scale=1`
+(0 by default, the row "Detail scale") the factor follows the scale of the table
+(`detail_scale_math.h`): 1x when the world is small, up to the factor of `detail_distance`
+when it is large. `detail_scale_1x`, `detail_scale_2x` and `detail_scale_3x` are the scales in
+world units for one meter where these factors start to disturb. The factor changes on a scale
+of ratios between them, so no zoom makes all models change at one scale. With no table the
+factor of `detail_distance` counts. The registry value `MaxObjectDistance` does nothing: at `0x008238C4` its
 value is read into a stack slot that the next read overwrites.
 
 From one fixed view with both eye passes at 70 degrees: the game's values give 3.6 to

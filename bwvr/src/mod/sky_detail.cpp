@@ -129,6 +129,9 @@
 #include <string.h>
 
 #include "debug_menu.h"
+#include "detail_scale_math.h"
+
+float TabletopViewScale();
 #include "MinHook.h"
 #include "sky_math.h"
 
@@ -236,6 +239,12 @@ int g_glare_mode = kGlareEyeCamera;
 float g_lod_saved[kLodCount];
 bool g_lod_have_saved = false;
 float g_lod_factor = 1.0f;
+// THE DETAIL BY THE SCALE (detail_by_scale): the factor of the key detail_distance is the
+// highest factor of the curve.
+float g_detail_most = 5.0f;
+bool g_detail_by_scale = false;
+detail_scale_math::Curve g_detail_curve;
+int g_detail_log_frames = 0;
 
 // For the report. Each eye pass draws every dome, so both passes count.
 uint64_t g_dome_draws = 0;
@@ -679,6 +688,7 @@ void DetailDistanceSet(float factor) {
   if (factor < 1.0f) factor = 1.0f;
   if (factor > 8.0f) factor = 8.0f;
   DWORD old = 0;
+  // The values are in writable data, and the call keeps the rights that they have.
   if (!VirtualProtect(distances, sizeof(float) * kLodCount,
                       PAGE_READWRITE, &old)) {
     return;
@@ -696,17 +706,72 @@ float DetailDistanceFactor() { return g_lod_factor; }
 // 3 five times.
 int DetailDistanceValue() {
   if (!g_lod_have_saved) return kDebugCannot;
-  return g_lod_factor < 1.5f ? 0 : g_lod_factor < 2.5f ? 1 : g_lod_factor < 4.0f ? 2 : 3;
+  return g_detail_most < 1.5f ? 0 : g_detail_most < 2.5f ? 1 : g_detail_most < 4.0f ? 2 : 3;
 }
 
 void DetailDistanceToggle(const char* by) {
   if (!g_lod_have_saved) return;
   static const float kFactors[] = {1.0f, 2.0f, 3.0f, 5.0f};
   const int next = (DetailDistanceValue() + 1) % 4;
-  DetailDistanceSet(kFactors[next]);
+  g_detail_most = kFactors[next];
+  if (!g_detail_by_scale) DetailDistanceSet(g_detail_most);
   ModLog("test key     : %s, detail_distance is %d", by, next);
 }
 
+void DetailScaleInstall(float most) {
+  g_detail_most = most;
+  char path[MAX_PATH] = "";
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return;
+  slash[1] = 0;
+  strcat_s(path, "bwvr.ini");
+  detail_scale_math::Curve& c = g_detail_curve;
+  c.units_1x = static_cast<float>(
+      GetPrivateProfileIntA("bwvr", "detail_scale_1x", static_cast<int>(c.units_1x), path));
+  c.units_2x = static_cast<float>(
+      GetPrivateProfileIntA("bwvr", "detail_scale_2x", static_cast<int>(c.units_2x), path));
+  c.units_3x = static_cast<float>(
+      GetPrivateProfileIntA("bwvr", "detail_scale_3x", static_cast<int>(c.units_3x), path));
+  g_detail_by_scale = GetPrivateProfileIntA("bwvr", "detail_by_scale", 0, path) != 0;
+  ModLog("detail       : detail_by_scale=%d, 1x down to %.0f units a meter, 2x at %.0f, 3x at "
+         "%.0f%s", g_detail_by_scale ? 1 : 0, c.units_1x, c.units_2x, c.units_3x,
+         detail_scale_math::Valid(c) ? "" : ". These values are not in order, so the factor stays");
+}
+
+// The game thread, each frame. A small change of the factor goes with no log.
+void DetailScaleFrame() {
+  if (!g_detail_by_scale || !g_lod_have_saved) return;
+  const float factor =
+      detail_scale_math::FactorOf(TabletopViewScale(), g_detail_curve, g_detail_most);
+  const float change = factor - g_lod_factor;
+  if (fabsf(change) < 0.02f * g_lod_factor) return;
+  float* distances = reinterpret_cast<float*>(kLodDistances);
+  DWORD old = 0;
+  if (!VirtualProtect(distances, sizeof(float) * kLodCount, PAGE_READWRITE, &old)) return;
+  for (int i = 0; i < kLodCount; ++i) distances[i] = g_lod_saved[i] * factor;
+  VirtualProtect(distances, sizeof(float) * kLodCount, old, &old);
+  g_lod_factor = factor;
+  if (--g_detail_log_frames <= 0) {
+    g_detail_log_frames = 200;
+    ModLog("detail       : the factor is %.2f at %.0f units a meter", factor, TabletopViewScale());
+  }
+}
+
+int DetailScaleValue() {
+  if (!g_lod_have_saved) return kDebugCannot;
+  return g_detail_by_scale ? 1 : 0;
+}
+
+void DetailScaleToggle(const char* by) {
+  if (!g_lod_have_saved) return;
+  g_detail_by_scale = !g_detail_by_scale;
+  // With the key at 0 the fixed factor counts again.
+  if (!g_detail_by_scale) DetailDistanceSet(g_detail_most);
+  ModLog("test key     : %s, detail_by_scale is %d", by, g_detail_by_scale ? 1 : 0);
+}
+
 void SkyDetailRelease() {
+  g_detail_by_scale = false;
   if (g_lod_have_saved) DetailDistanceSet(1.0f);
 }

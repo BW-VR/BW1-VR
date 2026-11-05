@@ -3379,8 +3379,9 @@ bool ComposeLate() {
 // the eye picture from the two.
 // A TEST AID (VkSceneListMeasure): a run is a row of draws that one call could draw,
 // because no state changes between them. The sizes are those of the draws of the game,
-// before the merge, in pixels of the image of the pass.
-void ListMeasure(int pass, float sx, float sy) {
+// before the merge, in pixels of the image of the pass. A rect has the move of the right
+// eye in its width, so only its height says how small a draw is.
+void ListMeasure(int pass, float sy) {
   if (pass == 0) g_list_now = g_list_measure && (++g_list_walks % 720) == 1;
   if (!g_list_now) return;
   namespace dm = vk_draw_math;
@@ -3406,23 +3407,21 @@ void ListMeasure(int pass, float sx, float sy) {
     for (uint32_t i = 0; i < different && !known; ++i) known = seen[i] == hash;
     if (!known && different < 256) seen[different++] = hash;
   }
-  // The longer side below 1, 2, 4, 8, 16, 32 pixels, and more.
+  // The height below 1, 2, 4, 8, 16, 32 pixels, and more.
   uint32_t sizes[7] = {0, 0, 0, 0, 0, 0, 0};
   for (const MresRecord& r : g_mres_records) {
     if (r.clear >= 0) continue;
-    const float w = (r.bounds[2] - r.bounds[0]) * sx;
-    const float h = (r.bounds[3] - r.bounds[1]) * sy;
-    const float side = w > h ? w : h;
+    const float height = (r.bounds[3] - r.bounds[1]) * sy;
     int bin = 0;
     float limit = 1.0f;
-    while (bin < 6 && side >= limit) {
+    while (bin < 6 && height >= limit) {
       ++bin;
       limit *= 2.0f;
     }
     ++sizes[bin];
   }
   ModLog("vk scene     : a list of the %s image: %u draws, %u runs of one state, %u different "
-         "states, %llu indices. The draws of the game by their longer side: below 1 pixel %u, "
+         "states, %llu indices. The draws of the game by their height: below 1 pixel %u, "
          "2: %u, 4: %u, 8: %u, 16: %u, 32: %u, more: %u",
          pass == 1 ? "centre" : "outer", draws, runs, different,
          static_cast<unsigned long long>(indices), sizes[0], sizes[1], sizes[2], sizes[3],
@@ -3491,7 +3490,7 @@ void PlayMres(Slot& s) {
     bool blend_known = false;
     uint32_t blend_now = 0;
     PreparePass(s, pass, ox, oy, sx, sy, used_w, used_h, out_of_view, left_out);
-    ListMeasure(pass, sx, sy);
+    ListMeasure(pass, sy);
     for (const MresRecord& r : g_mres_play) {
       if (r.clear >= 0) {
         PlayClear(cb, g_mres_clears[r.clear], color, depth, ox, oy, sx, sy,

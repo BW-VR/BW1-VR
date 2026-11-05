@@ -5046,6 +5046,12 @@ void ControllersFrame() {
   LatchLeashButton();
   RadialMenuFrame();
   RemoteControlFrame();
+  DetailScaleFrame();
+}
+
+bool ControllersAnyStickClick() {
+  return (g_hands[0].active && g_hands[0].stick_click) ||
+         (g_hands[1].active && g_hands[1].stick_click);
 }
 
 namespace {

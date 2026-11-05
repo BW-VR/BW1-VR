@@ -8,6 +8,8 @@
 void RadialMenuFrame();
 // A TEST AID (remote_control.cpp): the game thread sets the switches of the file.
 void RemoteControlFrame();
+// THE DETAIL BY THE SCALE (sky_detail.cpp): the factor of this frame.
+void DetailScaleFrame();
 
 // controllers.cpp, once for each pass of the message pump of the game. The
 // keys of a choice go into the key buffer of the game here.

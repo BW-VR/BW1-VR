@@ -779,9 +779,12 @@ that moves while the Hand takes it.
   are the largest cost. Each step gets a key with the old behavior as a value and a row of
   the debug page. `tools/android/frame_test.py` measures each step (`android.md`, "The test
   run"). The order:
-  1. **The detail distance.** The row "Detail" changes `detail_distance` while the game
-     runs. Measure 5x, 3x, 2x and 1x, let the player judge the models in the distance, and
-     then choose the default of the headset app.
+  1. **The detail distance by the size of the world** (`detail_by_scale`). With the whole
+     island in view, 1x has 2775 draws where 5x has 4235, a walk takes 2.45 ms on the GPU
+     where 5x takes 4.76 ms, and the game has 56 frames a second where 5x has 42. In a small
+     world even 1x does not disturb the player. Find the three scales with
+     `frame_tests/detail_marks.json`, set them as defaults of the headset app, and prove the
+     result with an A/B of the row "Detail scale".
   2. **Many draws in one call.** A run of draws with one state becomes one
      `vkCmdDrawIndexedIndirect`. The values of a draw go into a buffer, and the draw finds
      them by its first instance. This replaces the push constant, the bind of the vertices

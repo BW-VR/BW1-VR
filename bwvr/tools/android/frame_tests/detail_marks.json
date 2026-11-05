@@ -1,0 +1,20 @@
+{
+  "name": "detail marks",
+  "mode": "marks",
+  "start_prompt": "The test runs. Make the world small, so that you see the whole island.",
+  "start_prompt_s": 8,
+  "stage_prompt_s": 7,
+  "stage_most_s": 180,
+  "skip_s": 8,
+  "stages": [
+    {"step": "detail 1x", "keys": {"detail_by_scale": 0, "detail_distance": 0},
+     "prompt": "Detail 1x. Make the world larger, slowly. Click a stick when the missing models disturb you."},
+    {"step": "detail 2x", "keys": {"detail_by_scale": 0, "detail_distance": 1},
+     "prompt": "Detail 2x. Go on: make the world larger, slowly. Click a stick when it disturbs you."},
+    {"step": "detail 3x", "keys": {"detail_by_scale": 0, "detail_distance": 2},
+     "prompt": "Detail 3x. Go on: make the world larger, slowly. Click a stick when it disturbs you."}
+  ],
+  "end_keys": {"detail_by_scale": 0, "detail_distance": 3},
+  "end_prompt": "The test is done. You can quit the game.",
+  "end_prompt_s": 8
+}

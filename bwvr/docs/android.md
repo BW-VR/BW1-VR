@@ -4085,6 +4085,10 @@ python tools/android/frame_test.py run tools/android/frame_tests/detail.json <fo
 - The app (`android/src/remote_control.cpp`) reads the same file for `step` (the time and the
   name go into `bwvr-steps.csv`), `prompt` (a text for the player in the quad of the menu, and
   empty hides it) and `gpu_state` (the test state of the renderer from the test of the GPU).
+- A test with `"mode": "marks"` has `stages` in place of `cycle`: each stage waits until the
+  player clicks a stick, for at most `stage_most_s`. With `mark=1` in the file the mod writes
+  the scale of the table and the factor of the detail into `bwvr-marks.csv` at the click, and
+  the table of the run has them. `detail_marks.json` finds the scales of `detail_by_scale`.
 - A test is a JSON file in `tools/android/frame_tests/`: `cycle` with `step`, `keys` and
   `prompt`, then `step_s`, `skip_s` (the first part of a step that does not count),
   `step_prompt_s`, `most_s`, `start_prompt`, `end_prompt` and `end_keys`. `skip_s` must be longer
@@ -4096,7 +4100,13 @@ end of the GPU. The player can look at another place during a test, so the table
 also for windows with about the same number of draws. With `remote_control=1` the log also has
 one line for each image each 720 walks: "a list of the outer image: ...", with the draws, the
 runs of one state, the different states, the indices and the draws of the game by their size in
-pixels. SteamVR gives only the sum of the whole run for its reprojected frames.
+pixels. A rect has the move of the right eye in its width, so the size is the height. SteamVR
+gives only the sum of the whole run for its reprojected frames.
+
+On the Steam Frame `steamvr.disableAsync` of SteamVR turns off the async reprojection for all
+apps (`vrcmd --set-settings-bool steamvr.disableAsync 1`, and 0 turns it on), so a missed picture
+shows as a stutter and not as a rotated old picture. Motion smoothing is off there already.
+Whether the compositor takes the value with no new start is not proven.
 
 **The tests.** `.\dev.ps1 build`: the checks of `remote_checks.h` for the file of the test
 run, and the checks of `late_camera_checks.h`: the move

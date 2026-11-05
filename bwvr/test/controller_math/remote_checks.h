@@ -2,14 +2,63 @@
 // Check and Near, just before main.
 #pragma once
 
+#include <math.h>
 #include <string.h>
 
+#include "../../src/mod/detail_scale_math.h"
 #include "../../src/mod/remote_math.h"
 
 namespace remote_checks {
 
+inline void DetailScaleChecks() {
+  namespace m = detail_scale_math;
+  m::Curve c;
+  c.units_1x = 800.0f;
+  c.units_2x = 200.0f;
+  c.units_3x = 100.0f;
+  Check(fabsf(m::FactorOf(2000.0f, c, 5.0f) - 1.0f) < 0.001f, "a small world has the game's own distances",
+        m::FactorOf(2000.0f, c, 5.0f), 1.0f);
+  Check(fabsf(m::FactorOf(800.0f, c, 5.0f) - 1.0f) < 0.001f, "the mark of 1x still has 1x",
+        m::FactorOf(800.0f, c, 5.0f), 1.0f);
+  Check(fabsf(m::FactorOf(400.0f, c, 5.0f) - 1.5f) < 0.001f,
+        "the middle on a scale of ratios: 800 to 200 has 400 in the middle",
+        m::FactorOf(400.0f, c, 5.0f), 1.5f);
+  Check(fabsf(m::FactorOf(200.0f, c, 5.0f) - 2.0f) < 0.001f, "the mark of 2x has 2x",
+        m::FactorOf(200.0f, c, 5.0f), 2.0f);
+  Check(fabsf(m::FactorOf(100.0f, c, 5.0f) - 3.0f) < 0.001f, "the mark of 3x has 3x",
+        m::FactorOf(100.0f, c, 5.0f), 3.0f);
+  Check(fabsf(m::FactorOf(100.0f / 1.5f, c, 5.0f) - 5.0f) < 0.001f, "5x comes soon after the mark of 3x",
+        m::FactorOf(100.0f / 1.5f, c, 5.0f), 5.0f);
+  Check(fabsf(m::FactorOf(40.0f, c, 5.0f) - 5.0f) < 0.001f, "a large world has 5x",
+        m::FactorOf(40.0f, c, 5.0f), 5.0f);
+  Check(fabsf(m::FactorOf(40.0f, c, 2.0f) - 2.0f) < 0.001f, "the key detail_distance is the highest factor",
+        m::FactorOf(40.0f, c, 2.0f), 2.0f);
+  Check(fabsf(m::FactorOf(0.0f, c, 5.0f) - 5.0f) < 0.001f, "with no table the factor of the key counts",
+        m::FactorOf(0.0f, c, 5.0f), 5.0f);
+  // No jump: a zoom in small steps changes the factor by little, and only upward.
+  float before = m::FactorOf(2000.0f, c, 5.0f);
+  float most_step = 0.0f;
+  bool upward = true;
+  for (float units = 2000.0f; units > 40.0f; units *= 0.99f) {
+    const float now = m::FactorOf(units, c, 5.0f);
+    if (now < before - 0.0001f) upward = false;
+    if (now - before > most_step) most_step = now - before;
+    before = now;
+  }
+  Check(upward, "a larger world never has a lower factor", upward ? 1 : 0, 1);
+  Check(most_step < 0.1f, "one percent of zoom changes the factor by little", most_step, 0.1f);
+  m::Curve wrong;
+  wrong.units_1x = 100.0f;
+  wrong.units_2x = 200.0f;
+  wrong.units_3x = 50.0f;
+  Check(!m::Valid(wrong), "values out of order are no curve", 0, 0);
+  Check(fabsf(m::FactorOf(150.0f, wrong, 5.0f) - 5.0f) < 0.001f, "with no curve the factor of the key counts",
+        m::FactorOf(150.0f, wrong, 5.0f), 5.0f);
+}
+
 inline void RemoteChecks() {
   namespace m = remote_math;
+  DetailScaleChecks();
   {
     const char* text = "serial=12\r\nstep=detail 3x\ndetail_distance=2\n\nno equal\n=x\nprompt=\n";
     const int size = static_cast<int>(strlen(text));

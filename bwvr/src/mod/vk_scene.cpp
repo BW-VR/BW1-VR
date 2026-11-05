@@ -3208,6 +3208,7 @@ void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint
                  uint32_t used_h, uint32_t out_of_view[2], uint32_t left_out[2]) {
   namespace dm = vk_draw_math;
   g_mres_play.clear();
+  g_mres_play.reserve(g_mres_records.size());
   g_tiny_out[pass] = 0;
   const float tiny_limit = g_tiny_on ? g_tiny_pixels : 0.0f;
   float last_vp[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
@@ -5278,6 +5279,8 @@ void VkSceneTexture(uint32_t stage, void* surface) {
 static bool TinyEverywhere(uint32_t fvf, const void* vertices, uint32_t vertex_count) {
   if (!g_tiny_on || fvf != 0x1C4 || vertices == nullptr || ForPanel()) return false;
   if (!OneWalkActive() || OneWalkModeNow() != kOneWalkBoth) return false;
+  const float sx = g_walk_mres && g_mres.center_scale_x > 0.0f ? g_mres.center_scale_x : 1.0f;
+  const float sy = g_walk_mres && g_mres.center_scale_y > 0.0f ? g_mres.center_scale_y : 1.0f;
   const float* v = static_cast<const float*>(vertices);
   float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
   bool all_rhw_one = true, all_far = true;
@@ -5286,14 +5289,13 @@ static bool TinyEverywhere(uint32_t fvf, const void* vertices, uint32_t vertex_c
     if (v[0] > x1) x1 = v[0];
     if (v[1] < y0) y0 = v[1];
     if (v[1] > y1) y1 = v[1];
+    // Most draws are large, and they leave after a few vertices.
+    if (!vk_draw_math::IsTiny((x1 - x0) * sx, (y1 - y0) * sy, g_tiny_pixels)) return false;
     if (v[3] != 1.0f) all_rhw_one = false;
     if (v[2] < 1.0f) all_far = false;
   }
   // A flat batch (the interface) and a batch at infinity stay.
-  if (all_rhw_one || all_far) return false;
-  const float sx = g_walk_mres && g_mres.center_scale_x > 0.0f ? g_mres.center_scale_x : 1.0f;
-  const float sy = g_walk_mres && g_mres.center_scale_y > 0.0f ? g_mres.center_scale_y : 1.0f;
-  return vk_draw_math::IsTiny((x1 - x0) * sx, (y1 - y0) * sy, g_tiny_pixels);
+  return !all_rhw_one && !all_far;
 }
 
 void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
@@ -5337,9 +5339,13 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
             (g_rs[D3DRENDERSTATE_SRCBLEND] & 255) << 8 |
             (g_rs[D3DRENDERSTATE_DESTBLEND] & 255) << 16 |
             (t1[D3DTSS_ALPHAOP] & 255) << 24};
-    int k = 0;
-    for (; k < g_state_kind_count; ++k) {
-      if (memcmp(g_state_kinds[k].key, key, sizeof(key)) == 0) break;
+    // Most draws have the kind of the draw before.
+    static int s_state_kind_last = 0;
+    int k = s_state_kind_last;
+    if (k >= g_state_kind_count || memcmp(g_state_kinds[k].key, key, sizeof(key)) != 0) {
+      for (k = 0; k < g_state_kind_count; ++k) {
+        if (memcmp(g_state_kinds[k].key, key, sizeof(key)) == 0) break;
+      }
     }
     if (k == g_state_kind_count && k < kMaxStateKinds) {
       memcpy(g_state_kinds[k].key, key, sizeof(key));
@@ -5365,7 +5371,10 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
                                     "out (vk_stage1=0)")
                  : "");
     }
-    if (k < g_state_kind_count) ++g_state_kinds[k].draws;
+    if (k < g_state_kind_count) {
+      ++g_state_kinds[k].draws;
+      s_state_kind_last = k;
+    }
   }
   if (vertices == nullptr || vertex_count == 0) return;
   VertexLayout layout = {32, 16, 20, 24, 24};
@@ -5488,6 +5497,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
       for (uint32_t i = 0; i < vertex_count; ++i, v += 8) {
         if (v[3] != 1.0f) all_rhw_one = false;
         if (v[2] < 1.0f) all_far = false;
+        if (!all_rhw_one && !all_far) break;
       }
       still = all_rhw_one || all_far ? 1u : 0u;
       push.depth[2] = g_mesh_compare ? 0.0f : OneWalkShiftPerRhw();

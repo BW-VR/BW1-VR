@@ -2,9 +2,9 @@
   "name": "detail",
   "start_prompt": "The test runs. Make the world small, so that you see the whole island. Stay there. Only look.",
   "start_prompt_s": 8,
-  "step_s": 8,
-  "skip_s": 1.5,
-  "step_prompt_s": 1.2,
+  "step_s": 12,
+  "skip_s": 4.5,
+  "step_prompt_s": 4,
   "most_s": 240,
   "cycle": [
     {"step": "detail 5x", "keys": {"detail_distance": 3}, "prompt": "Detail 5x"},

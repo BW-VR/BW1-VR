@@ -1,0 +1,17 @@
+{
+  "name": "tiny compare",
+  "start_prompt": "The test runs. Go through all sizes of the world, slowly: small, middle, large. Stay some time at each size. Look at far objects and thin lines.",
+  "start_prompt_s": 8,
+  "step_s": 12,
+  "skip_s": 4.5,
+  "step_prompt_s": 4,
+  "most_s": 300,
+  "cycle": [
+    {"step": "tiny 2 px", "keys": {"detail_by_scale": 1, "detail_distance": 3, "vk_tiny_draws": 1, "tiny_pixels": 20}, "prompt": "Tiny 2 px"},
+    {"step": "tiny 3 px", "keys": {"detail_by_scale": 1, "detail_distance": 3, "vk_tiny_draws": 1, "tiny_pixels": 30}, "prompt": "Tiny 3 px"},
+    {"step": "tiny 4 px", "keys": {"detail_by_scale": 1, "detail_distance": 3, "vk_tiny_draws": 1, "tiny_pixels": 40}, "prompt": "Tiny 4 px"}
+  ],
+  "end_keys": {"detail_by_scale": 0, "detail_distance": 3, "vk_tiny_draws": 0},
+  "end_prompt": "The test is done. You can quit the game.",
+  "end_prompt_s": 8
+}

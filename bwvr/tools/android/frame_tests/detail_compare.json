@@ -2,9 +2,9 @@
   "name": "detail compare",
   "start_prompt": "The test runs. Go through all sizes of the world, slowly: small, middle, large. Stay some time at each size.",
   "start_prompt_s": 8,
-  "step_s": 8,
-  "skip_s": 1.5,
-  "step_prompt_s": 1.2,
+  "step_s": 12,
+  "skip_s": 4.5,
+  "step_prompt_s": 4,
   "most_s": 300,
   "cycle": [
     {"step": "old", "keys": {"detail_by_scale": 0, "detail_distance": 3, "vk_tiny_draws": 0}, "prompt": "Old"},

@@ -2210,7 +2210,8 @@ void ApplyGodWalk(double frame_seconds) {
              FollowText(), ControllersFrameCount());
     }
   }
-  const float seconds = zoom_math::FrameSeconds(frame_seconds, kHoldFrameCap);
+  const float seconds =
+      zoom_math::FrameSeconds(frame_seconds, static_cast<float>(g_settings.move_stick_cap_ms) * 0.001f);
   ++g_walk.frames;
   g_walk.seconds += seconds;
   if (seconds > 0.0f) {
@@ -2689,6 +2690,8 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   if (g_settings.move_stick_speed_cm > 500) {
     g_settings.move_stick_speed_cm = 500;
   }
+  if (g_settings.move_stick_cap_ms < 10) g_settings.move_stick_cap_ms = 10;
+  if (g_settings.move_stick_cap_ms > 250) g_settings.move_stick_cap_ms = 250;
   g_settings.move_stick_follow_land =
       g_settings.move_stick_follow_land != 0 ? 1 : 0;
   if (g_settings.move_stick_trace < 0) g_settings.move_stick_trace = 0;
@@ -3714,6 +3717,14 @@ bool TabletopMoveAllowed() { return (CameraFeatures() & kFeatureDrag) != 0; }
 // of the stick in the headset app (motion_comp_math.h): the move of the
 // waist point in game units a second, and the push of the stick, 0 to 1.
 // False when the walk did not move the view in this frame.
+// The row "Walk cap" of the debug page: the longest frame that the walk counts.
+int TabletopWalkCapValue() { return g_settings.move_stick_cap_ms > 50 ? 1 : 0; }
+
+void TabletopWalkCapToggle(const char* by) {
+  g_settings.move_stick_cap_ms = g_settings.move_stick_cap_ms > 50 ? 50 : 250;
+  ModLog("test key     : %s, move_stick_cap_ms is %d", by, g_settings.move_stick_cap_ms);
+}
+
 bool TabletopGodWalkRate(float velocity[3], float* share) {
   if (!(g_walk_rate_share > 0.0f) || !g_live) return false;
   for (int i = 0; i < 3; ++i) velocity[i] = g_walk_rate[i];

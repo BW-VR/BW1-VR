@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "../../src/mod/late_camera_math.h"
+#include "../../src/mod/zoom_math.h"
 
 namespace late_camera_checks {
 
@@ -238,7 +239,24 @@ inline void TakeChecks() {
         ends(TickPicture::kNone, 5, 6, 4.5), 1.0);
 }
 
+// A LONG FRAME OF THE GAME. While it runs, the picture goes ahead by the speed times
+// the time, up to the limit of the prediction. Then the new map comes, with the walk of
+// that frame up to move_stick_cap_ms. The two must end at one place.
+inline void LongFrameChecks() {
+  const float speed = 150.0f;
+  const float predict_s = 0.25f;
+  const auto jump = [&](float frame_s, float cap_s) {
+    const float ahead = frame_s < predict_s ? frame_s : predict_s;
+    return speed * zoom_math::FrameSeconds(frame_s, cap_s) - speed * ahead;
+  };
+  Near("late camera: a frame of 120 ms, a walk cap of 50 ms goes back", jump(0.12f, 0.05f), -10.5f, 1e-3f);
+  Near("late camera: a frame of 120 ms, a walk cap of 250 ms has no jump", jump(0.12f, 0.25f), 0.0f, 1e-3f);
+  Near("late camera: a frame of 40 ms has no jump with each cap", jump(0.04f, 0.05f), 0.0f, 1e-3f);
+  Near("late camera: a frame of 1 s, the cap and the prediction stop at one place", jump(1.0f, 0.25f), 0.0f, 1e-3f);
+}
+
 inline void LateCameraChecks() {
+  LongFrameChecks();
   ViewChecks();
   MapChecks();
   AheadChecks();

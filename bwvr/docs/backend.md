@@ -5383,6 +5383,24 @@ The mean of the sum: 9.9 ms, minus 3.6, 0.8, 0.15, 0.9 and 0.2, is about 4.3 ms
 if each saving comes in full. The goal is less than 7 ms in the view of the
 middle of the island, where a picture needs 11.7 ms.
 
+**The textures in one set** (`vk_bindless`, 0 by default, the row "Bindless" of the debug
+page). In a walk the GPU time goes with the number of draws, about 1.3 us for a draw, and
+nearly each draw binds a set for its texture and many bind a pipeline for their blend.
+With this key one set has each pair of a texture and a sampler at a place of its own
+(`NewTextureSlot`, `VK_EXT_descriptor_indexing` of Vulkan 1.2, with an update after the
+bind). The push constants name the places of stage 0 and stage 1 (`ops1.z` and `ops1.w`),
+the fragment shader has `SLOTS`, and the blend is a dynamic state where the device has
+`VK_EXT_extended_dynamic_state3`. So a pass binds one pipeline and one set. A draw of a mesh
+on the GPU keeps the old way. On the Steam Frame the walk has 2 pipelines and 2 binds of sets
+in place of about 650 and 1700, and the GPU time of the walk does not change: the binds are
+not what costs the time.
+
+**The fast shaders** (`vk_fast_shaders`, 0 by default, the row "Fast shaders" of the debug
+page). The fragment shader does each operation of Direct3D 7 that the game uses, with values
+of the push constants. With this key the pipeline of a draw has those values as
+specialization constants, so the compiler takes away each branch that the draw does not use.
+The game has about 14 kinds of draws. Only a headset shows the gain.
+
 **The late compose** (`vk_compose.cpp`, `vk_compose.h`, `vk_compose_math.h`).
 With `fovea_res=1` and `fovea_res_layer=0` the walk ends with the pass that
 makes the eye picture of both eyes in one image of two layers

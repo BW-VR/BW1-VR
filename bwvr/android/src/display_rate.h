@@ -6,17 +6,20 @@
 // (xrEnumerateDisplayRefreshRatesFB), and the app can ask for one of them
 // (xrRequestDisplayRefreshRateFB). The menu offers each rate of kOffered that
 // the runtime lists. display_hz=0 (the default) asks for no rate, and the
-// headset uses its own rate (72 Hz on a Quest 3).
+// headset uses its own rate (72 Hz on a Quest 3). SteamVR has another way
+// (steamvr_settings.h), and the menu then offers kSteamVr.
 #pragma once
 
 #include <math.h>
+#include <stdint.h>
 
+#include <string>
 #include <vector>
 
 namespace display_rate {
 
 // The rates that the menu can offer, in Hz.
-constexpr int kOffered[] = {72, 80, 90, 120};
+constexpr int kOffered[] = {72, 80, 90, 120, 144};
 constexpr int kOfferedCount = static_cast<int>(sizeof(kOffered) / sizeof(kOffered[0]));
 // A rate of the runtime is a float, for example 72.0 or 89.9: it counts as
 // a rate of kOffered within this many Hz.
@@ -69,6 +72,29 @@ inline int Step(int now, int direction, const std::vector<int>& offered) {
   }
   index = ((index + direction) % count + count) % count;
   return index == 0 ? 0 : offered[index - 1];
+}
+
+// THE RATES OF THE STEAM FRAME. The runtime lists only one rate, so the row of the menu
+// has this list when the settings of SteamVR answer (steamvr_settings.h).
+inline std::vector<int> SteamVrOffered() { return {72, 90, 120, 144}; }
+
+// The rate of a display period in whole Hz, 0 with no period.
+inline int HzOfPeriod(int64_t period_ns) {
+  if (period_ns <= 0) return 0;
+  return static_cast<int>(1e9 / static_cast<double>(period_ns) + 0.5);
+}
+
+// True when the display period is the rate `hz`, within 1 Hz.
+inline bool Reached(int hz, int64_t period_ns) {
+  if (hz <= 0 || period_ns <= 0) return false;
+  return fabs(1e9 / static_cast<double>(period_ns) - static_cast<double>(hz)) <= 1.0;
+}
+
+// The text of the row: the value, and the rate of the headset now when that is another one.
+inline std::string RowText(int hz, int now) {
+  const std::string value = hz > 0 ? std::to_string(hz) + " Hz" : "Headset default";
+  if (now <= 0 || now == hz) return value;
+  return value + " (now " + std::to_string(now) + " Hz)";
 }
 
 }  // namespace display_rate

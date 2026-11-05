@@ -36,6 +36,21 @@ inline void DisplayRateChecks() {
   Check(dr::RuntimeRate(80, {72.0f, 90.0f}) == 0.0f,
         "a rate that the runtime does not list asks for no rate", 0, 0);
 
+  // THE STEAM FRAME: the runtime lists only 144 Hz, and the settings of SteamVR set the rate.
+  Check(Same(dr::Offered({144.0f}), {144}), "a runtime with 144 Hz: the row offers it", 0, 0);
+  Check(Same(dr::SteamVrOffered(), {72, 90, 120, 144}), "the row with the settings of SteamVR", 0, 0);
+  Check(dr::Step(120, 1, dr::SteamVrOffered()) == 144 && dr::Step(144, 1, dr::SteamVrOffered()) == 0,
+        "the steps reach 144 Hz and then Headset default", 0, 0);
+  Check(dr::HzOfPeriod(11111111) == 90, "a period of 11.11 ms is 90 Hz", dr::HzOfPeriod(11111111), 90);
+  Check(dr::HzOfPeriod(6944444) == 144, "a period of 6.94 ms is 144 Hz", dr::HzOfPeriod(6944444), 144);
+  Check(dr::HzOfPeriod(0) == 0, "no period is no rate", 0, 0);
+  Check(dr::Reached(144, 6944444) && !dr::Reached(144, 11111111) && !dr::Reached(0, 11111111),
+        "the rate of the row against the display period", 0, 0);
+  Check(dr::RowText(144, 144) == "144 Hz", "the row at the rate of the headset", 0, 0);
+  Check(dr::RowText(144, 90) == "144 Hz (now 90 Hz)", "the row with another rate of the headset", 0, 0);
+  Check(dr::RowText(0, 90) == "Headset default (now 90 Hz)", "the row with no rate shows the rate now", 0, 0);
+  Check(dr::RowText(0, 0) == "Headset default", "the row before the first frame", 0, 0);
+
   // THE FALL BACK OF THE INI VALUE.
   const std::vector<int> four = {72, 80, 90, 120};
   Check(dr::Checked(0, four) == 0, "display_hz=0 stays 0", 0, 0);

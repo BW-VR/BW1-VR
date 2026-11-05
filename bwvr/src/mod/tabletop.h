@@ -57,6 +57,10 @@ struct TabletopSettings {
   // head, and 2 along the direction in which that controller points.
   int move_stick = 1;            // move_stick: 0 off, 1 head, 2 controller
   int move_stick_speed_cm = 150; // move_stick_speed_cm: a full push, a second
+  // move_stick_cap_ms: a frame of the game counts at most this long for the walk, 10
+  // to 250. The late camera of the headset app needs the same limit as its prediction
+  // (late_camera_predict_ms), so a long frame does not jump back.
+  int move_stick_cap_ms = 50;
   // god_display_time: 1 the time of a frame for the walk and the smooth zoom
   // is the time between the display times of two frames of the headset, 0
   // the time of the CPU between two main camera calls.

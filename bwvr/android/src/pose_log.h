@@ -38,20 +38,34 @@ struct PoseRecord {
   float pic_work_ms;       // the shown picture: the start of its play to its submit
 };
 
-class PoseLog {
+// A TEST AID with pose_log=1: one record for each picture of the late camera, into
+// bwvr-pictures.bin. So a picture that did not show has its times too.
+struct PictureRecord {
+  double tick_ms;    // CLOCK_MONOTONIC: the session sent the tick
+  double start_ms;   // the play thread took the tick
+  double submit_ms;  // the play thread submitted the picture
+  double done_ms;    // the play thread saw the end of the GPU work
+  uint32_t tick;     // the tick of the picture
+  uint32_t flags;    // 1: frames of the game in the batch, 2: the list again
+  float gate_ms;     // the wait for the GPU before this picture
+  float gpu_ms;      // the GPU time of the walks that ended before this picture
+};
+
+template <typename T>
+class RecordLog {
  public:
   bool On() const { return on_; }
 
-  void Start(const std::string& path, size_t most) {
+  void Start(const std::string& path, size_t most, uint32_t magic = 0x474F4C50u) {
     if (on_) return;
     file_ = fopen(path.c_str(), "wb");
     if (file_ == nullptr) return;
-    const uint32_t head[2] = {0x474F4C50u, static_cast<uint32_t>(sizeof(PoseRecord))};
+    const uint32_t head[2] = {magic, static_cast<uint32_t>(sizeof(T))};
     fwrite(head, sizeof(head), 1, file_);
     records_.resize(most);
     count_.store(0);
     stop_.store(false);
-    on_ = pthread_create(&thread_, nullptr, &PoseLog::Main, this) == 0;
+    on_ = pthread_create(&thread_, nullptr, &RecordLog::Main, this) == 0;
     if (!on_) {
       fclose(file_);
       file_ = nullptr;
@@ -67,8 +81,8 @@ class PoseLog {
     file_ = nullptr;
   }
 
-  // The thread of the session. The records past the end of the memory go.
-  void Add(const PoseRecord& r) {
+  // One thread adds. The records past the end of the memory go.
+  void Add(const T& r) {
     const size_t n = count_.load(std::memory_order_relaxed);
     if (n >= records_.size()) return;
     records_[n] = r;
@@ -77,13 +91,13 @@ class PoseLog {
 
  private:
   static void* Main(void* self) {
-    PoseLog* log = static_cast<PoseLog*>(self);
+    RecordLog* log = static_cast<RecordLog*>(self);
     size_t written = 0;
     while (!log->stop_.load()) {
       for (int i = 0; i < 10 && !log->stop_.load(); ++i) usleep(100000);
       const size_t n = log->count_.load(std::memory_order_acquire);
       if (n > written) {
-        fwrite(log->records_.data() + written, sizeof(PoseRecord), n - written, log->file_);
+        fwrite(log->records_.data() + written, sizeof(T), n - written, log->file_);
         fflush(log->file_);
         written = n;
       }
@@ -96,5 +110,7 @@ class PoseLog {
   pthread_t thread_ = {};
   std::atomic<bool> stop_{false};
   std::atomic<size_t> count_{0};
-  std::vector<PoseRecord> records_;
+  std::vector<T> records_;
 };
+
+using PoseLog = RecordLog<PoseRecord>;

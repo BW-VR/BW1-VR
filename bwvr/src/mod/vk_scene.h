@@ -211,8 +211,36 @@ bool VkSceneComposePending(uint64_t eye_image);
 // command buffer. False when nothing is pending or the module cannot work.
 bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t images[2],
                           uint32_t format);
+// THE COMPOSE AT THE TAKE (xr_compose_take, docs/android.md, "The compose at the
+// take"). The headset app only. VkSceneComposeSets, before the first walk of a game:
+// the sets of the outer image and the centre image, 1 or 3. The play thread calls
+// VkSceneComposeTicket for the eye image of a walk that left its picture to the app
+// (0 with none, else nothing is pending then). The thread of the session then calls
+// VkSceneComposeRecordTicket with its command buffer and the swapchain image of each
+// eye, as VkSceneComposeRecord. It holds VkSceneComposeTakeLock until its submit.
+void VkSceneComposeSets(int sets);
+uint64_t VkSceneComposeTicket(uint64_t eye_image);
+bool VkSceneComposeRecordTicket(void* command_buffer, uint64_t ticket, uint32_t slot,
+                                const uint64_t images[2], uint32_t format);
+void VkSceneComposeTakeLock();
+void VkSceneComposeTakeUnlock();
 // The images of the compose of a swapchain image that goes.
 void VkSceneComposeForget(uint64_t image);
+// THE TEXTURES IN ONE SET (vk_bindless, docs/backend.md, "The textures in one set").
+// VkSceneSetDeviceFeatures: before the start of the renderer, what the device was made
+// with. VkSceneSetBindless: the row "Bindless" of the debug page, from the next walk.
+void VkSceneSetDeviceFeatures(bool slots, bool dynamic_blend);
+void VkSceneSetBindless(bool on);
+// THE FAST SHADERS (vk_fast_shaders): the row "Fast shaders" of the debug page.
+void VkSceneSetFastShaders(bool on);
+// A TEST AID (gpu_test, docs/android.md, "The test of the GPU"). VkSceneGpuTest: the
+// state of the test from the next walk, and its name for the log.
+int VkSceneGpuTestStates();
+const char* VkSceneGpuTest(int state);
+void VkSceneGpuTestCounts(uint64_t* outer, uint64_t* center, uint64_t* walks, int* kinds);
+// THE SAME PANEL (xr_panel_keep): the hash of the draws of the last walk that drew into
+// the panel. Two walks with one hash have the same pixels in the panel.
+uint64_t VkScenePanelHash();
 // The views, pipelines and buffers of the compose go (the device must be idle).
 void VkSceneComposeStop();
 // THE ONE PASS (xr_density_pass=1 of the headset app, docs/backend.md, "The one

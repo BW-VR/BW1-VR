@@ -70,6 +70,10 @@ struct Picture {
   const quad_layer_math::FrameLayers* layers = nullptr;
   const quad_layer_math::AppPictures* cards = nullptr;
   VkImage panel = VK_NULL_HANDLE;  // the panel image of the picture, or none
+  // THE SAME PANEL (xr_panel_keep): the hash of the pixels of its panel, and true when
+  // the swapchain of the panel has those pixels, so the picture has no panel image.
+  uint64_t panel_hash = 0;
+  bool panel_same = false;
   // The part of the panel image that its copy into the slot took (PanelPart). The
   // session copies the same part. Empty: the whole image.
   eye_copy_math::Rect panel_part = {};
@@ -92,6 +96,9 @@ struct Picture {
   bool late_again = false;
   float late_move[3] = {0.0f, 0.0f, 0.0f};
   uint64_t late_tick = 0;  // the tick of the session that this picture is for, 0 with none
+  // THE COMPOSE AT THE TAKE (xr_compose_take=1): the picture waits in the renderer, and
+  // the session composes it into the swapchains of the eyes. 0: another way.
+  uint64_t compose_ticket = 0;
 };
 
 // THE PART OF THE PANEL IMAGE THAT A COPY TAKES (xr_panel_rect): with `on`, the

@@ -254,12 +254,16 @@ class XrApp {
   void ClearScreenSource() {
     screen_source_ = VK_NULL_HANDLE;
     direct_newest_ = -1;
+    compose_newest_ = 0;
   }
   // The session took a new picture of the ring: the slot of the picture
   // before is free, and the play thread can write it or replace its
   // swapchains. No layer names a slot until SetDirectSource names the slot
   // of this picture, so direct_newest_ is -1 or the shown slot.
-  void ClearDirectSource() { direct_newest_ = -1; }
+  void ClearDirectSource() {
+    direct_newest_ = -1;
+    compose_newest_ = 0;
+  }
 
   // THE AGE LOG (take_age_log=1, take_age_math.h, docs/android.md, "The age of
   // a picture in the layer"). SetAgeLog: at each Play, before the play thread
@@ -357,10 +361,15 @@ class XrApp {
   // panel_part: the part of the panel image that the picture has (an empty rect:
   // the whole image). A quad whose rect is not in the part of the last copy does
   // not show.
+  // THE SAME PANEL (xr_panel_keep): the hash of the pixels in the swapchain of the panel,
+  // for the play thread. panel_same in SetScreenLayers: the picture has no panel image,
+  // because it has those pixels.
+  uint64_t PanelCopiedHash() const { return panel_copied_hash_.load(std::memory_order_acquire); }
   void SetScreenLayers(const quad_layer_math::FrameLayers& layers,
                        const quad_layer_math::AppPictures& pictures, VkImage panel,
                        uint32_t panel_width, uint32_t panel_height,
-                       const eye_copy_math::Rect& panel_part);
+                       const eye_copy_math::Rect& panel_part,
+                       uint64_t panel_hash = 0, bool panel_same = false);
 
   // THE SCREEN QUAD (stream_screen, docs/android.md, "The screens with no
   // scene"). On (1, the default): a frame with no scene of the mod (the
@@ -468,6 +477,10 @@ class XrApp {
   // place of SetScreenSource. The values of SetScreenView and SetScreenAtlas
   // go with it.
   void SetDirectSource(int slot);
+  // THE COMPOSE AT THE TAKE (xr_compose_take=1, docs/android.md, "The compose at the
+  // take"): the newest picture waits in the renderer (VkSceneComposeTicket), in place
+  // of SetScreenSource. EndFrame composes it into the swapchains of the eyes.
+  void SetComposeSource(uint64_t ticket, uint32_t width, uint32_t height);
   // A NEW RENDER SIZE IN THE SAME PROCESS (xr_resize_free, 1 by default,
   // docs/android.md, "A new render size in the same process"). SetResizeFree:
   // at each Play, before the play thread starts. 1: NewPlay frees the sets
@@ -636,6 +649,17 @@ class XrApp {
   eye_copy_math::Rect panel_part_ = {};       // the part of the panel image of the last copy
   eye_copy_math::Rect panel_part_copy_ = {};  // the part of the copy that CopySlot makes now
   int direct_newest_ = -1;       // the slot of the newest picture, or -1
+  // THE COMPOSE AT THE TAKE: the ticket of the newest picture (0 with none), the ticket
+  // that is in the swapchains, the image of each eye that the session holds until both
+  // are free, the place of the vertices of the compose, and the lock until the submit.
+  bool ComposeTake();
+  uint64_t compose_newest_ = 0;
+  uint64_t compose_done_ = 0;
+  bool compose_held_[2] = {false, false};
+  uint32_t compose_index_[2] = {0, 0};
+  uint32_t compose_slot_ = 0;
+  bool compose_locked_ = false;
+  bool compose_said_size_ = false;
   uint64_t direct_revision_ = 0;  // one more for each new picture in a slot
   uint64_t direct_latched_[2] = {0, 0};  // the revision that each eye shows
   int shown_direct_[2] = {-1, -1};  // the slot that each eye shows, or -1 (eyes_)
@@ -783,6 +807,11 @@ class XrApp {
   Card cards_[bwvr::kCards];
   Screen panel_;  // one swapchain of the size of the panel image
   VkImage panel_source_ = VK_NULL_HANDLE;
+  // THE SAME PANEL (xr_panel_keep): the hash of the pixels in the swapchain of the panel
+  // and of the newest panel image, and a picture with those pixels (no copy).
+  std::atomic<uint64_t> panel_copied_hash_{0};
+  uint64_t panel_hash_new_ = 0;
+  bool panel_keep_ = false;
   uint32_t panel_width_ = 0;
   uint32_t panel_height_ = 0;
   bool panel_shown_ = false;  // the released image has the panel of shown_layers_

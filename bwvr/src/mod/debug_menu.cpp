@@ -182,6 +182,9 @@ void FileReadAheadToggle(const char* by);
 // anim_trig.cpp
 int AnimTrigValue();
 void AnimTrigToggle(const char* by);
+// tabletop.cpp
+int TabletopWalkCapValue();
+void TabletopWalkCapToggle(const char* by);
 // The way of a draw to the headset app (render_chain.cpp).
 int RenderChainStateSkipValue();
 void RenderChainStateSkipToggle(const char* by);
@@ -459,6 +462,17 @@ const Switch kSwitches[] = {
     {kGroupRender, L"Late take", L"A headset frame waits a little for its picture",
      "late_take", [] { return AppKeyValue(app_keys::kKeyLateTake); },
      [](const char* by) { AppKeyChange(app_keys::kKeyLateTake, by); }, L"off|on"},
+    {kGroupRender, L"Bindless", L"All textures in one set, one pipeline for a pass",
+     "vk_bindless", [] { return AppKeyValue(app_keys::kKeyBindless); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyBindless, by); }, L"off|on"},
+    {kGroupRender, L"Panel keep", L"The panel goes to the runtime only when it changes",
+     "xr_panel_keep", [] { return AppKeyValue(app_keys::kKeyPanelKeep); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyPanelKeep, by); }, L"each picture|on change"},
+    {kGroupRender, L"Fast shaders", L"A fragment shader for each kind of draw",
+     "vk_fast_shaders", [] { return AppKeyValue(app_keys::kKeyFastShaders); },
+     [](const char* by) { AppKeyChange(app_keys::kKeyFastShaders, by); }, L"off|on"},
+    {kGroupRender, L"Walk cap", L"The longest game frame that the walk counts",
+     "move_stick_cap_ms", TabletopWalkCapValue, TabletopWalkCapToggle, L"50 ms|250 ms"},
     {kGroupRender, L"Equal depth", L"Depth test EQUAL with a small bias",
      "vk_equal_depth", VkSceneEqualDepthValue, VkSceneEqualDepthToggle,
      L"EQUAL|bias"},

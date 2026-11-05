@@ -93,7 +93,7 @@ VkSampler g_sampler = VK_NULL_HANDLE;
 VkDescriptorSetLayout g_set_layout = VK_NULL_HANDLE;
 VkPipelineLayout g_layout = VK_NULL_HANDLE;
 VkDescriptorPool g_pool = VK_NULL_HANDLE;
-VkDescriptorSet g_sets[2] = {};
+VkDescriptorSet g_sets[m::kMostSets][2] = {};
 uint64_t g_sets_generation = 0;
 vk::Buffer g_vertices = {};
 std::vector<View> g_views;
@@ -105,6 +105,16 @@ uint64_t g_eye_image = 0;
 bool g_have = false;
 bool g_uncomposed = false;
 Counts g_counts;
+
+// THE COMPOSE AT THE TAKE: the inputs that wait for the thread of the session.
+struct Ticket {
+  Input input;
+  uint64_t serial;
+};
+Ticket g_tickets[kSlots] = {};
+uint64_t g_ticket_serial = 0;
+uint64_t g_ticket_first = 1;  // an older ticket names images that went
+std::mutex g_take_lock;
 
 template <typename T>
 bool Load(T* out, const char* name) {
@@ -166,8 +176,9 @@ void DestroyAll() {
   g_set_layout = VK_NULL_HANDLE;
   g_sampler = VK_NULL_HANDLE;
   g_vert = g_frag = VK_NULL_HANDLE;
-  g_sets[0] = g_sets[1] = VK_NULL_HANDLE;
+  memset(g_sets, 0, sizeof(g_sets));
   g_sets_generation = 0;
+  g_ticket_first = g_ticket_serial + 1;
   g_ready = false;
   g_have = false;
   g_device = VK_NULL_HANDLE;
@@ -220,9 +231,9 @@ bool Init() {
   layout.pushConstantRangeCount = 1;
   layout.pPushConstantRanges = &range;
   ok = ok && g_dev.CreatePipelineLayout(g_device, &layout, nullptr, &g_layout) == VK_SUCCESS;
-  VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4};
+  VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * m::kMostSets};
   VkDescriptorPoolCreateInfo pool = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-  pool.maxSets = 2;
+  pool.maxSets = 2 * m::kMostSets;
   pool.poolSizeCount = 1;
   pool.pPoolSizes = &size;
   ok = ok && g_dev.CreatePool(g_device, &pool, nullptr, &g_pool) == VK_SUCCESS;
@@ -338,28 +349,33 @@ VkImageView ViewFor(const Target& t) {
   return view;
 }
 
-// The two sets of the input (one for each eye): the outer image and the
-// centre image. They are made again when the views change.
-bool EnsureSets() {
-  if (g_sets[0] != VK_NULL_HANDLE && g_sets_generation == g_input.generation) return true;
-  g_dev.ResetPool(g_device, g_pool, 0);
+// The two descriptor sets of the input (one for each eye): the outer image and the
+// centre image of its set. They are made again when the views change.
+bool EnsureSets(const Input& input) {
+  VkDescriptorSet* sets = g_sets[input.set];
+  if (sets[0] != VK_NULL_HANDLE && g_sets_generation == input.generation) return true;
+  if (g_sets_generation != input.generation) {
+    g_dev.ResetPool(g_device, g_pool, 0);
+    memset(g_sets, 0, sizeof(g_sets));
+    g_sets_generation = input.generation;
+  }
   VkDescriptorSetLayout layouts[2] = {g_set_layout, g_set_layout};
   VkDescriptorSetAllocateInfo alloc = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
   alloc.descriptorPool = g_pool;
   alloc.descriptorSetCount = 2;
   alloc.pSetLayouts = layouts;
-  if (g_dev.AllocateSets(g_device, &alloc, g_sets) != VK_SUCCESS) {
-    g_sets[0] = g_sets[1] = VK_NULL_HANDLE;
+  if (g_dev.AllocateSets(g_device, &alloc, sets) != VK_SUCCESS) {
+    sets[0] = sets[1] = VK_NULL_HANDLE;
     return false;
   }
   for (int eye = 0; eye < 2; ++eye) {
     VkDescriptorImageInfo images[2] = {
-        {g_sampler, g_input.outer[eye], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-        {g_sampler, g_input.center[eye], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+        {g_sampler, input.outer[eye], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {g_sampler, input.center[eye], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
     VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                       {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
     for (uint32_t i = 0; i < 2; ++i) {
-      writes[i].dstSet = g_sets[eye];
+      writes[i].dstSet = sets[eye];
       writes[i].dstBinding = i;
       writes[i].descriptorCount = 1;
       writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -367,13 +383,14 @@ bool EnsureSets() {
     }
     g_dev.UpdateSets(g_device, 2, writes, 0, nullptr);
   }
-  g_sets_generation = g_input.generation;
   return true;
 }
 
 bool IsSrgb(VkFormat format) {
   return format == VK_FORMAT_R8G8B8A8_SRGB || format == VK_FORMAT_B8G8R8A8_SRGB;
 }
+
+bool RecordInput(VkCommandBuffer cb, uint32_t slot, const Input& input, const Target targets[2]);
 
 }  // namespace
 
@@ -403,6 +420,7 @@ void Drop(uint64_t eye_image) {
 void DropAll() {
   std::lock_guard<std::mutex> lock(g_lock);
   g_have = false;
+  g_ticket_first = g_ticket_serial + 1;
 }
 
 bool Usable() {
@@ -421,8 +439,39 @@ bool Record(VkCommandBuffer cb, uint32_t slot, const Target targets[2]) {
     ++g_counts.no_pending;
     return false;
   }
-  if (!Init() || !EnsureSets()) return false;
-  const m::Layout& l = g_input.layout;
+  return RecordInput(cb, slot, g_input, targets);
+}
+
+uint64_t TakeTicket(uint64_t eye_image) {
+  std::lock_guard<std::mutex> lock(g_lock);
+  if (!g_have || !g_uncomposed || g_eye_image != eye_image) return 0;
+  ++g_ticket_serial;
+  Ticket& t = g_tickets[g_ticket_serial % kSlots];
+  t.input = g_input;
+  t.serial = g_ticket_serial;
+  g_uncomposed = false;
+  return g_ticket_serial;
+}
+
+bool RecordTicket(VkCommandBuffer cb, uint64_t ticket, uint32_t slot, const Target targets[2]) {
+  std::lock_guard<std::mutex> lock(g_lock);
+  const Ticket& t = g_tickets[ticket % kSlots];
+  if (ticket < g_ticket_first || t.serial != ticket) {
+    ++g_counts.no_pending;
+    return false;
+  }
+  return RecordInput(cb, slot, t.input, targets);
+}
+
+void TakeLock() { g_take_lock.lock(); }
+void TakeUnlock() { g_take_lock.unlock(); }
+
+namespace {
+
+// With g_lock.
+bool RecordInput(VkCommandBuffer cb, uint32_t slot, const Input& input, const Target targets[2]) {
+  if (!Init() || !EnsureSets(input)) return false;
+  const m::Layout& l = input.layout;
   m::Vertex grid[m::kVertices];
   m::BuildGrid(l, grid);
   slot %= kSlots;
@@ -468,14 +517,14 @@ bool Record(VkCommandBuffer cb, uint32_t slot, const Target targets[2]) {
     g_dev.CmdViewport(cb, 0, 1, &viewport);
     g_dev.CmdScissor(cb, 0, 1, &scissor);
     g_dev.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    g_dev.CmdBindSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &g_sets[eye], 0,
-                      nullptr);
+    g_dev.CmdBindSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &g_sets[input.set][eye],
+                      0, nullptr);
     PushConstants push = {};
     push.scale[0] = 2.0f / static_cast<float>(l.width);
     push.scale[1] = 2.0f / static_cast<float>(l.height);
     // The marks of the test: the outer image has a blue colour.
-    push.tint[0] = g_input.tint ? 0x90 / 255.0f : 1.0f;
-    push.tint[1] = g_input.tint ? 0xB8 / 255.0f : 1.0f;
+    push.tint[0] = input.tint ? 0x90 / 255.0f : 1.0f;
+    push.tint[1] = input.tint ? 0xB8 / 255.0f : 1.0f;
     push.tint[2] = 1.0f;
     push.tint[3] = 1.0f;
     push.flags[0] = IsSrgb(t.format) ? 1u : 0u;
@@ -488,6 +537,8 @@ bool Record(VkCommandBuffer cb, uint32_t slot, const Target targets[2]) {
   ++g_counts.records;
   return true;
 }
+
+}  // namespace
 
 void Forget(VkImage image) {
   std::lock_guard<std::mutex> lock(g_lock);

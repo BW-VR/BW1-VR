@@ -192,4 +192,25 @@ inline void JoinIndices(const Draw& first, const Draw& d,
   }
 }
 
+// A hash of bytes, for THE SAME PANEL (xr_panel_keep). Fast on words of 8 bytes: it runs
+// on the vertices of a draw.
+inline uint64_t HashBytes(uint64_t h, const void* data, size_t bytes) {
+  const uint64_t kPrime = 0x100000001b3ULL;
+  const uint8_t* p = static_cast<const uint8_t*>(data);
+  while (bytes >= 8) {
+    uint64_t word;
+    memcpy(&word, p, 8);
+    h = (h ^ word) * kPrime;
+    h ^= h >> 29;
+    p += 8;
+    bytes -= 8;
+  }
+  while (bytes > 0) {
+    h = (h ^ *p) * kPrime;
+    ++p;
+    --bytes;
+  }
+  return h;
+}
+
 }  // namespace vk_draw_math

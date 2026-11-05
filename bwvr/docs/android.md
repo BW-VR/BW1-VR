@@ -3073,9 +3073,21 @@ the rules in `display_rate.h`, the row in `menu_model.h`).
 **The extension.** The instance has `XR_FB_display_refresh_rate` only when
 the runtime lists it. After the session is made, the app reads the rates
 of the runtime (`xrEnumerateDisplayRefreshRatesFB`) and the rate that it
-uses (`xrGetDisplayRefreshRateFB`). A runtime with no such extension (for
-example Lepton of the Steam Frame, not tried) gives no rates: the menu has
-no row, the app asks for no rate, and the headset sets the rate.
+uses (`xrGetDisplayRefreshRateFB`). A runtime with no such extension gives no
+rates: the menu has no row, the app asks for no rate, and the headset sets the
+rate.
+
+**The Steam Frame.** Its runtime lists only 144 Hz in that extension, and the rate of
+an app comes from `preferredRefreshRate` in the section of the app in the settings of
+SteamVR (`steam.app.<id>`). SteamVR keeps those settings in its memory: an edit of the
+file `steamvr.vrsettings` goes when SteamVR saves the file again. The app writes the
+value with `IVRSettings_003` of `vrclient.so`, the client of SteamVR that the OpenXR
+runtime has in the process of the app (`steamvr_settings.cpp`). With these settings the
+row offers 72, 90, 120 and 144 Hz. "Headset default" leaves the value of SteamVR as it
+is. The key of the app comes from `SteamAppId` of the environment, or from
+`steamvr_app_key` of `bwvr.ini`. Only a headset shows if SteamVR gives these rates to a
+running session. The row shows the rate of the headset in brackets, from the display
+period of the frames of the session, when it is not the rate of the row.
 
 **The row.** A list row, in the look of the other list rows: "Headset
 default" and each of 72, 80, 90 and 120 Hz that the runtime lists (a rate
@@ -3104,7 +3116,13 @@ Hz. It uses 72.00 Hz now", the rates of the row, the value of `display_hz`
 or its fall back, each request with its result and the rate that the
 runtime uses after it, each event `XrEventDataDisplayRefreshRateChangedFB`
 ("the display rate changed from 80.00 to 90.00 Hz"), and in the lines
-`input` each change of the display period that the input channel writes.
+`input` each change of the display period that the input channel writes. On the
+Steam Frame: "steamvr : the settings of SteamVR answer ...", each write of the value,
+and "the headset runs at N Hz, S s after the request", or the same line after 5 s with
+the rate that it still has. SteamVR records each run in
+`~/.local/share/Steam/logs/perfrecording-<key of the app>-<date>.csv` when its setting
+`perfcheck.recordStats` is on: for each second the frames, the longest CPU and GPU time,
+the reprojected frames, the clock of the GPU, the power and the refresh rate.
 
 **The pace at each rate.** The mod paces the game by the display period
 of the slot of the input channel ("The pace of the frames"), and the app
@@ -3979,11 +3997,32 @@ default is 0.
 
 **A known fault of `xr_eye_direct=1` on the Steam Frame.** The picture shows short
 flickering double pictures at a fixed time distance, in a flight with a still head
-and at a turn of the head with no flight. With `xr_eye_direct=0` the fault does not
-show. The cause is open. That key changes more than the number of swapchains: it
-also turns off the late compose and the late camera, and each picture then takes
-two copies, so the GPU needs 8 to 9 ms for a picture in place of about 4 ms. Only a
-headset shows this fault.
+and at a turn of the head with no flight. With one pair of swapchains the fault does
+not show, also with the late camera ("The compose at the take"). The way inside the
+runtime that makes the fault is not known. Only a headset shows this fault.
+
+**The compose at the take** (`xr_compose_take`, 0 by default, with `xr_eye_direct=0`
+and `xr_compose_direct=1`). It gives the late camera and the late compose with one
+pair of swapchains, as a session with no slots of swapchains has them. A walk draws
+into the next of three sets of the outer image and the centre image
+(`vk_compose_math::NextSet`). The ring holds no eye picture. At the take the session
+acquires the swapchain image of each eye, records the compose of that picture into
+the command buffer of its frame, submits it and releases the images, and then calls
+`xrEndFrame`. The two eyes get a new picture together or not at all. With three sets
+the set of the picture that the session reads has no writes: the play thread starts
+a walk only when the GPU finished the walk before (`frame_loop_gpu_depth=1`), so at
+most two walks come after that picture before the take picks a newer one. The row
+"Compose direct" of the debug page gives a live A/B with the copies. With the copies
+each picture takes 8 to 9 ms of the GPU. With this way it takes 3 to 6 ms, of it 0.65 ms
+for the compose. A session on the Steam Frame shows no flicker with this way, and about
+90 pictures a second at 90 Hz.
+
+**A long frame of the game** (`move_stick_cap_ms`, the row "Walk cap" of the debug
+page). While a frame of the game runs, the picture goes ahead along the walk, up to
+`late_camera_predict_ms`. The walk of the game counts that frame only up to
+`move_stick_cap_ms`. With 50 a frame of 120 ms makes the world go back when the frame
+comes, by the speed times 70 ms. With 250, the same as the prediction, the two end
+at one place.
 
 **A cut.** A difference of the maps over the limits is a cut (a teleport, a snap
 turn, a zoom step): the world stays as the game drew it until the frame of the
@@ -3997,7 +4036,14 @@ game with the new place comes.
 | `late_camera_most_deg` | 2 | The limit of the turn of a difference of the maps |
 | `late_camera_still_um` | 100 | A smaller move is no move |
 | `late_take` | 0 | 1: the take of a frame of the session waits up to `late_take_ms` for its picture. The debug page has the row "Late take" for a live A/B |
+| `xr_compose_take` | 0 | 1, with `xr_eye_direct=0` and `xr_compose_direct=1`: the session composes each picture into one pair of swapchains at its take, and the late camera works |
 | `late_take_ms` | 4 | The longest wait of the take, 0 to 8 |
+| `move_stick_cap_ms` | 50 | The longest frame of the game that the walk counts, 10 to 250. The late camera needs 250. The debug page has the row "Walk cap" for a live A/B |
+| `tu_debug` | empty | A test aid: TU_DEBUG of the Vulkan driver Turnip, for example `sysmem`. It counts at the next start of the app |
+| `vk_bindless` | 0 | 1: all textures in one set, and one pipeline for the draws of a pass (`backend.md`, "The textures in one set"). The debug page has the row "Bindless" for a live A/B |
+| `xr_panel_keep` | 0 | 1: a panel with the same draws as the panel in the swapchain takes no copy. The debug page has the row "Panel keep" for a live A/B |
+| `vk_fast_shaders` | 0 | 1, with `vk_bindless=1` and the dynamic blend: the operations of a draw are constants of its pipeline (`backend.md`, "The textures in one set"). The debug page has the row "Fast shaders" |
+| `gpu_test` | 0 | A test aid: 1 goes through the states of the test of the GPU, 4 s each, each game. The picture has no pixels of the world in one state. The log has "gpu test : ..." for each state |
 | `pose_log` | 0 | A test aid: 1 writes one record for each frame of the session into `bwvr-pose.bin` of the folder of the app, and `tools/android/pose_report.py` names the frames that do not fit the frames around them |
 
 The keys are in `bwvr.ini` of the game folder, read at each Play.
@@ -4008,7 +4054,9 @@ the ticks with no change of the place, the cuts, the size of the move, and the
 steps of a walk from a tick to the next: their count, the count of those more
 than a third from the speed of the walk, and the longest in slots of the stick.
 "late take : ..." each 10 s has the frames that waited for their picture, the time
-of the waits, and the frames that came to the limit.
+of the waits, and the frames that came to the limit. With `pose_log=1` the file
+`bwvr-pictures.bin` has one record for each picture of the late camera: the send of
+its tick, the start of its play, its submit, and the end of its GPU work.
 The log of the mod has "pose check : ..." each 900 frames: the angle between the
 view of the layer and the camera matrix of the engine for that frame. The
 line "time" of the frames of the session counts the pictures: "made N pictures a
@@ -4192,7 +4240,7 @@ swapchains reads and writes it again. With the key the two steps are one.
   `xr_compose_direct`, `xr_panel_rect` and `ring_slot_order`, and for the four keys
   of the renderer (`vk_mres_draws`, `vk_mres_sort`, `vk_compose_light`,
   `vk_pass_store`). The mod
-  keeps their values (from `bwvr.ini`, then from the rows) and puts ten bits into
+  keeps their values (from `bwvr.ini`, then from the rows) and puts 13 bits into
   the record of every frame of the stream (`FrameBody::app_keys`,
   `src/mod/app_keys.h`). The player gives the bits to the renderer and to the app
   (`SetAppKeysHook`) before the walks of the frame, so a row acts from the next

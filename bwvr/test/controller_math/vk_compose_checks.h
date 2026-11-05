@@ -226,6 +226,44 @@ inline void VkComposeChecks() {
   Near("a centre rect at the corner: the triangles fill the picture", area, 2808.0 * 2246.0,
        1e-4 * 2808.0 * 2246.0);
 
+  // THE SAME PANEL: the hash of the draws of a panel.
+  {
+    const uint32_t a[5] = {1, 2, 3, 4, 5};
+    const uint32_t b[5] = {1, 2, 3, 4, 6};
+    const uint64_t seed = 0x9E3779B97F4A7C15ULL;
+    const uint64_t ha = vk_draw_math::HashBytes(seed, a, sizeof(a));
+    Check(ha == vk_draw_math::HashBytes(seed, a, sizeof(a)), "one set of bytes has one hash", 0, 0);
+    Check(ha != vk_draw_math::HashBytes(seed, b, sizeof(b)), "the last bytes change the hash", 0, 0);
+    Check(ha != seed, "bytes change the seed", 0, 0);
+    Check(vk_draw_math::HashBytes(seed, a, 0) == seed, "no bytes keep the seed", 0, 0);
+  }
+
+  // THE COMPOSE AT THE TAKE. The session reads the set of a finished picture. The play
+  // thread can have finished the walk after it and have the next walk on the GPU, so
+  // two walks write after the picture that the session reads.
+  {
+    Check(m::NextSet(0, 1, true) == 0 && m::NextSet(2, 1, true) == 0, "one set stays set 0",
+          m::NextSet(2, 1, true), 0);
+    Check(m::NextSet(0, 3, true) == 1 && m::NextSet(2, 3, true) == 0, "three sets go in turn",
+          m::NextSet(2, 3, true), 0);
+    Check(m::NextSet(1, 3, false) == 1, "a walk of one eye stays in its set",
+          m::NextSet(1, 3, false), 1);
+    int bad = 0;
+    int set_of[16] = {};
+    int set = 0;
+    for (int walk = 1; walk < 16; ++walk) {
+      set = m::NextSet(set, m::kMostSets, true);
+      set_of[walk] = set;
+    }
+    for (int read = 1; read + 2 < 16; ++read) {
+      if (set_of[read] == set_of[read + 1] || set_of[read] == set_of[read + 2]) ++bad;
+    }
+    Check(bad == 0, "the set of a picture that the session reads has no write of the next two walks",
+          bad, 0);
+    // A set more does not fit the sets of the descriptors of the module.
+    Check(m::kMostSets == 3, "three sets", m::kMostSets, 3);
+  }
+
   // The keys of the debug page: one bit for each key and the bit "sent".
   {
     const int values[app_keys::kKeys] = {1, 0, 1, 1, 0, 1, 1};

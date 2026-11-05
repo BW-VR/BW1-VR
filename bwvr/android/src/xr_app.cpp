@@ -587,6 +587,33 @@ bool XrApp::MakeVulkan() {
     query.pNext = &have12;
     vkGetPhysicalDeviceFeatures2(gpu_.physical, &query);
   }
+  // THE TEXTURES IN ONE SET (vk_bindless, docs/backend.md, "The textures in one set"): the
+  // device gets what the key needs when it can do it, so the row of the debug page can
+  // turn the way on and off. The dynamic blend comes with its extension.
+  bool device_slots = renderer13_ && have.features.shaderSampledImageArrayDynamicIndexing &&
+                      have12.runtimeDescriptorArray && have12.descriptorBindingPartiallyBound &&
+                      have12.descriptorBindingSampledImageUpdateAfterBind &&
+                      have12.descriptorBindingUpdateUnusedWhilePending;
+  bool dynamic_blend = false;
+  VkPhysicalDeviceExtendedDynamicState3FeaturesEXT want_blend = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT};
+  if (device_slots) {
+    bool extension = false;
+    for (const VkExtensionProperties& e : extensions) {
+      if (strcmp(e.extensionName, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) == 0) extension = true;
+    }
+    if (extension) {
+      VkPhysicalDeviceExtendedDynamicState3FeaturesEXT have_blend = {
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT};
+      VkPhysicalDeviceFeatures2 query = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+      query.pNext = &have_blend;
+      vkGetPhysicalDeviceFeatures2(gpu_.physical, &query);
+      dynamic_blend = have_blend.extendedDynamicState3ColorBlendEnable &&
+                      have_blend.extendedDynamicState3ColorBlendEquation;
+    }
+    want_blend.extendedDynamicState3ColorBlendEnable = VK_TRUE;
+    want_blend.extendedDynamicState3ColorBlendEquation = VK_TRUE;
+  }
   const bool two = renderer13_ && queues_wanted_ >= 2 && family_queues >= 2 &&
                    have12.timelineSemaphore;
   AppLog("xr           : frame_loop_queues=%d. The family of the queue has %u queues%s. %s",
@@ -609,13 +636,17 @@ bool XrApp::MakeVulkan() {
   want11.multiview = VK_TRUE;
   VkPhysicalDeviceVulkan12Features want12 = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-  want12.timelineSemaphore = VK_TRUE;
-  if (two) {
-    want13.pNext = &want12;
-    want12.pNext = &want11;
-  } else {
-    want13.pNext = &want11;
-  }
+  want12.timelineSemaphore = two ? VK_TRUE : VK_FALSE;
+  const auto want_slots = [&](bool on) {
+    const VkBool32 value = on ? VK_TRUE : VK_FALSE;
+    want12.runtimeDescriptorArray = value;
+    want12.descriptorBindingPartiallyBound = value;
+    want12.descriptorBindingSampledImageUpdateAfterBind = value;
+    want12.descriptorBindingUpdateUnusedWhilePending = value;
+  };
+  want_slots(device_slots);
+  want13.pNext = &want12;
+  want12.pNext = &want11;
   VkPhysicalDeviceFragmentShadingRateFeaturesKHR want_rate = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
   want_rate.attachmentFragmentShadingRate = VK_TRUE;
@@ -626,19 +657,28 @@ bool XrApp::MakeVulkan() {
   VkPhysicalDeviceFeatures2 want = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
   want.pNext = &want13;
   want.features.samplerAnisotropy = max_anisotropy_ > 0.0f ? VK_TRUE : VK_FALSE;
+  want.features.shaderSampledImageArrayDynamicIndexing = device_slots ? VK_TRUE : VK_FALSE;
   // A device with the density map has no shading rate attachment: a rendering
   // may have only one of the two maps, and the device may not enable both
   // (VUID-VkDeviceCreateInfo-fragmentDensityMap-04683 and 04483). The device
   // without the density map gets the shading rate again.
   const bool rate_found = shading_rate_;
-  const char* device_extensions[2];
+  const char* device_extensions[3];
   XrVulkanDeviceCreateInfoKHR xd = {XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
-  for (int attempt = 0; attempt < 2; ++attempt) {
-    if (attempt == 1) {
-      if (!density_map_) break;
-      AppLog("xr           : the device with the density map gave %d, so the app tries again "
-             "without it (the one pass is off)", static_cast<int>(vr));
-      density_map_ = false;
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    if (attempt > 0) {
+      if (density_map_) {
+        AppLog("xr           : the device with the density map gave %d, so the app tries again "
+               "without it (the one pass is off)", static_cast<int>(vr));
+        density_map_ = false;
+      } else {
+        AppLog("xr           : the device gave %d, so the app tries again without the textures "
+               "in one set (vk_bindless has no effect)", static_cast<int>(vr));
+        device_slots = false;
+        dynamic_blend = false;
+        want_slots(false);
+        want.features.shaderSampledImageArrayDynamicIndexing = VK_FALSE;
+      }
       gpu_.device = VK_NULL_HANDLE;
     }
     shading_rate_ = rate_found && !density_map_;
@@ -650,13 +690,21 @@ bool XrApp::MakeVulkan() {
     }
     want_rate.pNext = nullptr;
     want_density.pNext = nullptr;
-    if (density_map_) *tail = &want_density;
+    want_blend.pNext = nullptr;
+    if (density_map_) {
+      *tail = &want_density;
+      tail = &want_density.pNext;
+    }
+    if (dynamic_blend) *tail = &want_blend;
     uint32_t device_extension_count = 0;
     if (shading_rate_) {
       device_extensions[device_extension_count++] = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME;
     }
     if (density_map_) {
       device_extensions[device_extension_count++] = VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME;
+    }
+    if (dynamic_blend) {
+      device_extensions[device_extension_count++] = VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME;
     }
     VkDeviceCreateInfo di = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     if (renderer13_) {
@@ -673,12 +721,15 @@ bool XrApp::MakeVulkan() {
     vr = VK_SUCCESS;
     const XrResult made = create_device(instance_, &xd, &gpu_.device, &vr);
     if (XR_SUCCEEDED(made) && vr == VK_SUCCESS) break;
-    if (!density_map_ || attempt == 1) {
+    if ((!density_map_ && !device_slots && !dynamic_blend) || attempt == 2) {
       Ok(made, "xrCreateVulkanDeviceKHR");
       AppLog("xr           : the Vulkan device gave %d", static_cast<int>(vr));
       return false;
     }
   }
+  VkSceneSetDeviceFeatures(device_slots, dynamic_blend);
+  AppLog("xr           : the device: the textures in one set %s, the dynamic blend %s",
+         device_slots ? "yes" : "no", dynamic_blend ? "yes" : "no");
   if (density_map_) {
     AppLog("xr           : the device has VK_EXT_fragment_density_map with the map and the images "
            "with no subsamples, and no shading rate attachment (a rendering has one of the two)");
@@ -1245,6 +1296,10 @@ void XrApp::SubmitFrame() {
   XrSwapchainImageReleaseInfo release = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
   for (XrSwapchain s : to_release_) xrReleaseSwapchainImage(s, &release);
   UnlockQueue();
+  if (compose_locked_) {
+    compose_locked_ = false;
+    VkSceneComposeTakeUnlock();
+  }
   if (time_log_) {
     const double now = ClockMs();
     step_ms_[kStepSubmit] += release_start - submit_start;
@@ -1252,6 +1307,56 @@ void XrApp::SubmitFrame() {
   }
   to_release_.clear();
   frame_cmd_ = VK_NULL_HANDLE;
+}
+
+// THE COMPOSE AT THE TAKE. The newest picture into the swapchain image of each eye,
+// in the command buffer of this frame. True when the two images have a new picture.
+// With an image that is not free the session holds the other one and tries again in
+// the next frame, and the layers show the picture before.
+bool XrApp::ComposeTake() {
+  if (compose_newest_ == compose_done_ || !HasEyes()) return false;
+  if (eyes_.layer[0].width != source_width_ || eyes_.layer[0].height != source_height_) {
+    if (!compose_said_size_) {
+      compose_said_size_ = true;
+      AppLog("xr           : xr_compose_take=1, but the swapchains of %u by %u do not fit the "
+             "picture of %u by %u, so these pictures do not show", eyes_.layer[0].width,
+             eyes_.layer[0].height, source_width_, source_height_);
+    }
+    return false;
+  }
+  for (int eye = 0; eye < 2; ++eye) {
+    if (compose_held_[eye]) continue;
+    uint32_t image = 0;
+    if (!NextImage(&eyes_.layer[eye], image_wait_, &image)) return false;
+    compose_index_[eye] = image;
+    compose_held_[eye] = true;
+  }
+  VkCommandBuffer cmd = FrameCommands();
+  if (cmd == VK_NULL_HANDLE) return false;
+  const uint64_t images[2] = {
+      reinterpret_cast<uint64_t>(eyes_.layer[0].images[compose_index_[0]].image),
+      reinterpret_cast<uint64_t>(eyes_.layer[1].images[compose_index_[1]].image)};
+  const uint32_t stamp = GpuStampIndex(gpu_);
+  gpu_.copy_stamps.Before(cmd, stamp, copy_time::kSwapCompose,
+                          eye_copy_math::Bytes(eye_copy_math::Whole(source_width_, source_height_), 2));
+  if (!compose_locked_) VkSceneComposeTakeLock();
+  compose_locked_ = true;
+  const bool ok = VkSceneComposeRecordTicket(cmd, compose_newest_, compose_slot_++ % 8, images,
+                                             static_cast<uint32_t>(format_));
+  gpu_.copy_stamps.After(cmd, stamp);
+  compose_done_ = compose_newest_;
+  // With no record the images stay held for the next picture. The lock goes in the
+  // submit of the frame, which comes for the stamps of the command buffer too.
+  if (!ok) return false;
+  for (int eye = 0; eye < 2; ++eye) {
+    Layer& layer = eyes_.layer[eye];
+    to_release_.push_back(layer.swapchain);
+    layer.released = layer.revision;
+    compose_held_[eye] = false;
+    ++copies_;
+    ++eyes_.copies[eye];
+  }
+  return true;
 }
 
 bool XrApp::NextImage(Layer* layer, bool block, uint32_t* index) {
@@ -1598,18 +1703,21 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
   // A picture in the swapchains of a slot (xr_eye_direct=1) has no source
   // image: it needs no copy.
   const bool direct = direct_newest_ >= 0 && Made(direct_[direct_newest_].set);
+  const bool compose = compose_newest_ != 0;
   const bool source = frame_.shouldRender &&
-                      (screen_source_ != VK_NULL_HANDLE || direct) && !flat;
+                      (screen_source_ != VK_NULL_HANDLE || direct || compose) && !flat;
   const bool want_world = source && projection_on_ && view_newest_ && (HasEyes() || direct);
   // With stream_projection=0 each picture shows on the stereo screen, a frame
   // of the cut scene window too, and no quad layer of the mod goes out.
-  const bool want_window = source && !direct && projection_on_ && layers_on_ &&
+  const bool want_window = source && !direct && !compose && projection_on_ && layers_on_ &&
                            ql::AsScreen(newest_layers_) && HasEyes();
   bool world = false;
   bool window = false;
   const int64_t trace_eyes = g_app_trace ? AppTraceNow() : 0;
   if (want_world || want_window) {
     PartTo(kPartEyes);
+    // Both eyes or none, so the two eyes always have the same picture.
+    const bool composed = compose && ComposeTake();
     for (int eye = 0; eye < 2; ++eye) {
       // The values go with the picture of the image that the eye released.
       // A picture of a slot is in its swapchains already: the eye takes it
@@ -1618,6 +1726,8 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
       if (direct) {
         fresh = direct_latched_[eye] != direct_revision_;
         direct_latched_[eye] = direct_revision_;
+      } else if (compose) {
+        fresh = composed;
       } else {
         fresh = CopyScreen(&eyes_, eye);
       }
@@ -1813,7 +1923,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     // panel image goes into its swapchain for a new picture.
     const ql::FrameLayers& f = shown_layers_;
     bool panel_ok = false;
-    if (world && f.panel && panel_source_ != VK_NULL_HANDLE &&
+    if (world && f.panel && (panel_source_ != VK_NULL_HANDLE || panel_keep_) &&
         panel_width_ == f.panel_body.width && panel_height_ == f.panel_body.height) {
       PartTo(kPartPanel);
       if (Made(panel_) &&
@@ -1824,6 +1934,7 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         UnlockQueue();
         FreeScreenSet(&panel_);
         panel_shown_ = false;
+        panel_copied_hash_.store(0, std::memory_order_release);
       }
       if (!Made(panel_) && !panel_.failed) {
         const char* why = "";
@@ -1837,8 +1948,10 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
         }
       }
       if (Made(panel_)) {
-        if (CopyImage(&panel_, 0, panel_source_, 0, panel_width_, panel_height_)) {
+        if (panel_source_ != VK_NULL_HANDLE &&
+            CopyImage(&panel_, 0, panel_source_, 0, panel_width_, panel_height_)) {
           panel_shown_ = true;
+          panel_copied_hash_.store(panel_hash_new_, std::memory_order_release);
           // The image has this part now. A copy that failed leaves the part
           // of the image before.
           panel_part_ = panel_part_copy_;
@@ -2257,11 +2370,19 @@ void XrApp::SetKeyboard(bool shown, const float position[3], const float orienta
 void XrApp::SetScreenLayers(const quad_layer_math::FrameLayers& layers,
                             const quad_layer_math::AppPictures& pictures, VkImage panel,
                             uint32_t panel_width, uint32_t panel_height,
-                            const eye_copy_math::Rect& panel_part) {
+                            const eye_copy_math::Rect& panel_part, uint64_t panel_hash,
+                            bool panel_same) {
   newest_layers_ = layers;
   for (int c = 0; c < bwvr::kCards; ++c) {
     if (layers.card[c]) TakeCard(c, layers.cards[c], pictures);
   }
+  panel_keep_ = layers.panel && panel_same && panel_hash != 0 && panel_shown_ &&
+                panel_copied_hash_.load(std::memory_order_acquire) == panel_hash;
+  if (panel_keep_) {
+    panel_source_ = VK_NULL_HANDLE;
+    return;
+  }
+  panel_hash_new_ = panel_hash;
   panel_source_ = layers.panel ? panel : VK_NULL_HANDLE;
   panel_frozen_ = false;
   panel_width_ = panel_width;
@@ -2670,6 +2791,11 @@ void XrApp::DestroySwapchain(XrSwapchain swapchain) {
 void XrApp::DropSet(Screen* screen) {
   FreeScreenSet(screen);
   *screen = Screen();
+  if (screen == &eyes_) {
+    compose_held_[0] = compose_held_[1] = false;
+    compose_newest_ = compose_done_ = 0;
+  }
+  if (screen == &panel_) panel_copied_hash_.store(0, std::memory_order_release);
 }
 
 // A NEW PLAY (xr_resize_free): the play thread of the game before ended, and
@@ -2793,11 +2919,22 @@ void XrApp::SetScreenSource(VkImage image, uint32_t image_width,
   source_height_ = image_height;
   eyes_frozen_ = false;
   direct_newest_ = -1;
+  compose_newest_ = 0;
+}
+
+void XrApp::SetComposeSource(uint64_t ticket, uint32_t width, uint32_t height) {
+  for (Layer& l : eyes_.layer) ++l.revision;
+  screen_source_ = VK_NULL_HANDLE;
+  source_width_ = width;
+  source_height_ = height;
+  direct_newest_ = -1;
+  compose_newest_ = ticket;
 }
 
 void XrApp::SetDirectSource(int slot) {
   if (slot < 0 || slot >= frame_loop::kSlots) return;
   direct_newest_ = slot;
+  compose_newest_ = 0;
   ++direct_revision_;
   // As MakeEyes: the size that the runtime asks for at the first picture.
   if (!direct_sizes_said_) {
@@ -4076,6 +4213,8 @@ void XrApp::Stop() {
   FreeScreenSet(&screen_);
   FreeScreenSet(&eyes_);
   screen_source_ = VK_NULL_HANDLE;
+  compose_held_[0] = compose_held_[1] = false;
+  compose_newest_ = compose_done_ = 0;
   if (menu_.swapchain != XR_NULL_HANDLE) DestroySwapchain(menu_.swapchain);
   if (cursor_.swapchain != XR_NULL_HANDLE) DestroySwapchain(cursor_.swapchain);
   menu_.swapchain = cursor_.swapchain = XR_NULL_HANDLE;

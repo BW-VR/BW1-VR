@@ -63,6 +63,7 @@ add_library(bwvr_quest SHARED
     src/scene_host.cpp
     src/scene_player.cpp
     src/stream_reader.cpp
+    src/steamvr_settings.cpp
     src/thread_cores.cpp
     src/trace_app.cpp
     src/time_log.cpp
@@ -81,4 +82,4 @@ target_link_options(bwvr_quest PRIVATE
     "-u" "ANativeActivity_onCreate"
     "-Wl,-z,max-page-size=16384")
 target_link_libraries(bwvr_quest PRIVATE
-    bwvr_renderer native_app_glue openxr_loader vulkan android jnigraphics log)
+    dl bwvr_renderer native_app_glue openxr_loader vulkan android jnigraphics log)

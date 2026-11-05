@@ -1,5 +1,8 @@
 #version 450
 #extension GL_EXT_multiview : require
+#ifdef SLOTS
+#extension GL_EXT_nonuniform_qualifier : require
+#endif
 // The fragment shader of the Vulkan renderer of the scene (vk_scene.cpp,
 // docs/backend.md, "The Vulkan renderer"). It makes texture stage 0 of
 // Direct3D 7 for the operations and inputs that the game uses, texture
@@ -25,8 +28,36 @@ layout(location = 1) in vec4 in_specular;
 layout(location = 2) in vec2 in_uv;
 layout(location = 3) in vec2 in_uv1;
 
+// With SLOTS (vk_bindless) one set has all the textures, and ops1.z and ops1.w of a draw
+// name the textures of stage 0 and stage 1.
+#ifdef SLOTS
+layout(set = 0, binding = 0) uniform sampler2D textures[];
+#define TEX0 textures[draw.ops1.z]
+#define TEX1 textures[draw.ops1.w]
+// The fast shaders (vk_fast_shaders): with kSpec the operations of the draw are constants
+// of the pipeline, so the compiler takes away each branch that the draw does not use.
+layout(constant_id = 0) const uint kSpec = 0u;
+layout(constant_id = 1) const uint kOpsX = 0u;
+layout(constant_id = 2) const uint kOpsY = 0u;
+layout(constant_id = 3) const uint kOpsZ = 0u;
+layout(constant_id = 4) const uint kOps1X = 0u;
+layout(constant_id = 5) const uint kOps1Y = 0u;
+#define OPS_X (kSpec != 0u ? kOpsX : draw.ops.x)
+#define OPS_Y (kSpec != 0u ? kOpsY : draw.ops.y)
+#define OPS_Z (kSpec != 0u ? kOpsZ : draw.ops.z)
+#define OPS1_X (kSpec != 0u ? kOps1X : draw.ops1.x)
+#define OPS1_Y (kSpec != 0u ? kOps1Y : draw.ops1.y)
+#else
 layout(set = 0, binding = 0) uniform sampler2D tex;
 layout(set = 1, binding = 0) uniform sampler2D tex1;
+#define TEX0 tex
+#define TEX1 tex1
+#define OPS_X draw.ops.x
+#define OPS_Y draw.ops.y
+#define OPS_Z draw.ops.z
+#define OPS1_X draw.ops1.x
+#define OPS1_Y draw.ops1.y
+#endif
 
 layout(push_constant) uniform Draw {
   vec4 viewport;
@@ -86,32 +117,32 @@ bool Passes(uint func, float value, float reference) {
 }
 
 void main() {
-  const uint flags = draw.ops.z;
-  const vec4 texel = (flags & 1u) != 0u ? texture(tex, in_uv) : vec4(1.0);
-  const uint color_op = draw.ops.x & 255u;
-  const uint alpha_op = draw.ops.y & 255u;
+  const uint flags = OPS_Z;
+  const vec4 texel = (flags & 1u) != 0u ? texture(TEX0, in_uv) : vec4(1.0);
+  const uint color_op = OPS_X & 255u;
+  const uint alpha_op = OPS_Y & 255u;
   vec4 color = in_diffuse;
   if (color_op > 1u) {
-    color.rgb = Op(color_op, Arg((draw.ops.x >> 8) & 255u, texel, in_diffuse),
-                   Arg((draw.ops.x >> 16) & 255u, texel, in_diffuse)).rgb;
+    color.rgb = Op(color_op, Arg((OPS_X >> 8) & 255u, texel, in_diffuse),
+                   Arg((OPS_X >> 16) & 255u, texel, in_diffuse)).rgb;
   }
   if (alpha_op > 1u) {
-    color.a = Op(alpha_op, Arg((draw.ops.y >> 8) & 255u, texel, in_diffuse),
-                 Arg((draw.ops.y >> 16) & 255u, texel, in_diffuse)).a;
+    color.a = Op(alpha_op, Arg((OPS_Y >> 8) & 255u, texel, in_diffuse),
+                 Arg((OPS_Y >> 16) & 255u, texel, in_diffuse)).a;
   }
   // Stage 1 takes the result of stage 0 as its current color, for example
   // the light map of a room of the Temple (D3DTOP_MODULATE2X or D3DTOP_ADD
   // of the texture and the current color). An alpha operation of 1 keeps the alpha of stage 0.
-  const uint color_op1 = draw.ops1.x & 255u;
+  const uint color_op1 = OPS1_X & 255u;
   if (color_op1 > 1u) {
-    const vec4 texel1 = texture(tex1, in_uv1);
+    const vec4 texel1 = texture(TEX1, in_uv1);
     const vec4 current = color;
-    color.rgb = Op(color_op1, Arg((draw.ops1.x >> 8) & 255u, texel1, current),
-                   Arg((draw.ops1.x >> 16) & 255u, texel1, current)).rgb;
-    const uint alpha_op1 = draw.ops1.y & 255u;
+    color.rgb = Op(color_op1, Arg((OPS1_X >> 8) & 255u, texel1, current),
+                   Arg((OPS1_X >> 16) & 255u, texel1, current)).rgb;
+    const uint alpha_op1 = OPS1_Y & 255u;
     if (alpha_op1 > 1u) {
-      color.a = Op(alpha_op1, Arg((draw.ops1.y >> 8) & 255u, texel1, current),
-                   Arg((draw.ops1.y >> 16) & 255u, texel1, current)).a;
+      color.a = Op(alpha_op1, Arg((OPS1_Y >> 8) & 255u, texel1, current),
+                   Arg((OPS1_Y >> 16) & 255u, texel1, current)).a;
     }
   }
   if ((flags & 2u) != 0u &&

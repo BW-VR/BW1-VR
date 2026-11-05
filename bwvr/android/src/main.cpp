@@ -37,6 +37,7 @@
 #include "../../src/mod/app_keys.h"
 #include "../../src/mod/eye_copy_math.h"
 #include "../../src/mod/late_camera_math.h"
+#include "../../src/mod/vk_compose_math.h"
 #include "app_log.h"
 #include "build_id.h"
 #include "display_rate.h"
@@ -51,6 +52,7 @@
 #include "picture_ring.h"
 #include "play_rules.h"
 #include "pose_log.h"
+#include "steamvr_settings.h"
 #include "../../src/mod/osc_gaze_math.h"
 #include "../../src/mod/screen_quad_math.h"
 #include "../../src/mod/stream_ring.h"
@@ -86,6 +88,7 @@ constexpr uint32_t kCursorPixels = 64;
 // session gives the play thread.
 struct LateTick {
   uint64_t serial = 0;       // one more for each tick, 0 with none
+  double sent_ms = 0.0;      // the clock when the session sent it
   uint32_t slot = 0;         // the newest slot of the input channel
   int64_t period = 0;        // the display period, ns
   bool head_ok = false;
@@ -176,7 +179,13 @@ struct App {
   PlayStats play_stats;
   int gpu_depth = 1;  // frame_loop_gpu_depth, read at each Play
   bool compose_direct = false;  // xr_compose_direct, read at each Play and from the debug page
+  // xr_compose_take. key: this game can do it, from each Play. compose_take: it is on now
+  // (the same row of the debug page as xr_compose_direct).
+  bool compose_take_key = false;
+  bool compose_take = false;
   std::atomic<bool> release_take{true};  // xr_release_take, read at each Play and from the debug page
+  std::atomic<bool> panel_keep{false};   // xr_panel_keep, from the debug page
+  bool gpu_test = false;  // gpu_test, read at each Play
   // THE ONE PASS (xr_density_pass, read at each Play): the walks of both eyes draw
   // into a swapchain image of the slot of the picture. The size of the render of
   // this game, and a fault (the renderer took no view of an image) that sends the
@@ -223,6 +232,7 @@ struct App {
   // A TEST AID (pose_log, pose_log.h): one record for each frame of the session,
   // with the values of the shown picture.
   PoseLog pose_log;
+  RecordLog<PictureRecord> picture_log;
   bool shown_again = false;
   uint64_t shown_tick = 0;
   double shown_work_ms = 0.0;
@@ -279,6 +289,9 @@ struct App {
   // THE DISPLAY RATE (display_hz): the value of the row at the last request
   // to the runtime. 0: no request yet, or a request for no rate.
   int display_asked = 0;
+  // The session waits for the rate of the last request, for the line of the log.
+  bool display_waits = false;
+  double display_asked_ms = 0.0;
   // THE TIME LOG (time_log=1, time_log.h).
   TimeLog time;
   // THE LONG FRAMES (slow_frame_ms, long_frames.h): the clock of the frames
@@ -381,7 +394,10 @@ bool ShowEyes(App* app, const Picture& p) {
            "%u, and the picture of the renderer has %u by %u",
            p.view.width, p.view.height, w, h);
   }
-  if (p.direct_slot >= 0) {
+  if (p.compose_ticket != 0) {
+    app->xr.SetComposeSource(p.compose_ticket, w, h);
+    app->screen_image = VK_NULL_HANDLE;
+  } else if (p.direct_slot >= 0) {
     app->xr.SetDirectSource(p.direct_slot);
     app->screen_image = VK_NULL_HANDLE;
   } else if (p.from_ring) {
@@ -402,7 +418,7 @@ bool ShowEyes(App* app, const Picture& p) {
     AppLog("xr           : the mod gives panel quads, but the renderer has no panel "
            "image of %u by %u for the picture. The panel quads do not show", w, h);
   }
-  app->xr.SetScreenLayers(layers, *p.cards, p.panel, w, h, p.panel_part);
+  app->xr.SetScreenLayers(layers, *p.cards, p.panel, w, h, p.panel_part, p.panel_hash, p.panel_same);
   return true;
 }
 
@@ -723,7 +739,18 @@ double WriteSlot(App* app, const LivePlay& live, int early = -1, bool density = 
       // THE LATE COMPOSE (xr_compose_direct=1): the walk left the eye picture to
       // the app. It has no atlas, so the part is the whole picture.
       const bool late = VkSceneComposePending(reinterpret_cast<uint64_t>(g.eyes));
-      if (direct) {
+      // THE COMPOSE AT THE TAKE (xr_compose_take=1): no eye picture and no copy now.
+      // The session composes the picture when it takes it.
+      const uint64_t ticket =
+          !direct && late && shows_projection && app->compose_take && app->xr.ComposeFormatOk()
+              ? VkSceneComposeTicket(reinterpret_cast<uint64_t>(g.eyes))
+              : 0;
+      if (ticket != 0) {
+        app->ring.FreeEyes(i);
+        p.compose_ticket = ticket;
+        p.eyes_ok = true;
+        p.eyes = VK_NULL_HANDLE;
+      } else if (direct) {
         // The slot has no image of its own for the eyes now.
         app->ring.FreeEyes(i);
         const eye_copy_math::Rect part =
@@ -784,7 +811,16 @@ double WriteSlot(App* app, const LivePlay& live, int early = -1, bool density = 
     if (g.panel != VK_NULL_HANDLE) {
       const eye_copy_math::Rect panel_part =
           PanelPart(app->xr.PanelRect(), *g.layers, g.width, g.height);
-      if (app->ring.CopyPanel(i, g.panel, g.width, g.height, panel_part)) {
+      // THE SAME PANEL (xr_panel_keep): a panel with the pixels in the swapchain takes no
+      // copy, and its layer shows those pixels. The rect of the copy counts as a part of
+      // the pixels.
+      p.panel_hash = VkScenePanelHash() ^ (static_cast<uint64_t>(panel_part.x) << 48) ^
+                     (static_cast<uint64_t>(panel_part.y) << 32) ^
+                     (static_cast<uint64_t>(panel_part.w) << 16) ^
+                     static_cast<uint64_t>(panel_part.h);
+      p.panel_same = app->panel_keep.load() && p.panel_hash != 0 &&
+                     p.panel_hash == app->xr.PanelCopiedHash();
+      if (!p.panel_same && app->ring.CopyPanel(i, g.panel, g.width, g.height, panel_part)) {
         p.panel = s.panel.image;
         p.panel_part = panel_part;
       }
@@ -919,6 +955,12 @@ void* PlayThread(void* arg) {
   uint64_t late_new = 0, late_replays = 0, late_same = 0, late_cuts = 0, late_plain = 0;
   double late_move_sum = 0.0, late_move_most = 0.0, late_world_sum = 0.0, late_world_most = 0.0;
   double late_log_at = NowMs();
+  PictureRecord picture_record = {};
+  bool picture_pending = false;
+  // A TEST AID (gpu_test): the state, its start, and the GPU time of its walks.
+  int test_state = 0;
+  double test_at = 0.0, test_sum = 0.0, test_most = 0.0;
+  uint64_t test_count = 0;
   while (!app->play_stop.load()) {
     // THE QUEUE AT THE GPU (frame_loop_gpu_depth): no new play while the GPU
     // has `depth` pictures that are not finished. The reader keeps the frames
@@ -944,6 +986,12 @@ void* PlayThread(void* arg) {
       if (depth == 1) app->take_phase.GpuDone(NowMs(), waited_gpu);
       if (waited_gpu) gate_ms = NowMs() - gate_start;
       if (app->play_stop.load()) break;
+      // A TEST AID (pose_log.h): the picture before is finished now.
+      if (picture_pending) {
+        picture_record.done_ms = NowMs();
+        app->picture_log.Add(picture_record);
+        picture_pending = false;
+      }
     }
     // THE LATE CAMERA: a picture for each frame of the session, with the frames
     // of the game that came since the last one. With no tick for 50 ms (a session
@@ -1083,6 +1131,16 @@ void* PlayThread(void* arg) {
     const int64_t trace_slot = g_app_trace ? AppTraceNow() : 0;
     const double waited = WriteSlot(app, *live, early, density, early_waited);
     if (late) app->late_handled.store(late_seen, std::memory_order_release);
+    if (late && app->picture_log.On()) {
+      picture_record = PictureRecord();
+      picture_record.tick_ms = late_tick.sent_ms;
+      picture_record.start_ms = start;
+      picture_record.submit_ms = NowMs();
+      picture_record.tick = static_cast<uint32_t>(late_seen);
+      picture_record.flags = (n > 0 ? 1u : 0u) | (app->late_again ? 2u : 0u);
+      picture_record.gate_ms = gate_ms > 0.0 ? static_cast<float>(gate_ms) : 0.0f;
+      picture_pending = true;
+    }
     if (trace_play != 0) {
       static const trace_events::Def kPlayDef = {"play of a batch of frames (renderer)", "play", {"#last frame", "frames", nullptr, nullptr}};
       static const trace_events::Def kSlotDef = {"copy of the picture into a slot (WriteSlot)", "play", {"#last frame", "wait_ms", nullptr, nullptr}};
@@ -1104,6 +1162,41 @@ void* PlayThread(void* arg) {
     }
     VkSceneGpuTime g;
     VkSceneTakeGpuTime(&g);
+    picture_record.gpu_ms = static_cast<float>(g.ms);
+    if (app->gpu_test) {
+      const double test_now = NowMs();
+      if (test_at <= 0.0) {
+        test_at = test_now;
+        VkSceneGpuTest(test_state);
+      }
+      // The walks of the state before end in the first part of a state.
+      if (test_now - test_at >= 500.0) {
+        test_sum += g.ms;
+        test_count += g.walks;
+        if (g.most_ms > test_most) test_most = g.most_ms;
+      } else {
+        uint64_t outer, center, walks;
+        int kinds;
+        VkSceneGpuTestCounts(&outer, &center, &walks, &kinds);
+      }
+      if (test_now - test_at >= 4000.0) {
+        uint64_t outer, center, walks;
+        int kinds;
+        VkSceneGpuTestCounts(&outer, &center, &walks, &kinds);
+        const double per = walks > 0 ? static_cast<double>(walks) : 1.0;
+        AppLog("gpu test     : %s: a walk %.2f ms as a mean and %.2f at most (%llu walks), "
+               "%.0f + %.0f draws a walk, %d kinds of draws",
+               VkSceneGpuTest(test_state),
+               test_count > 0 ? test_sum / static_cast<double>(test_count) : 0.0, test_most,
+               static_cast<unsigned long long>(test_count), static_cast<double>(outer) / per,
+               static_cast<double>(center) / per, kinds);
+        test_state = (test_state + 1) % VkSceneGpuTestStates();
+        VkSceneGpuTest(test_state);
+        test_at = test_now;
+        test_sum = test_most = 0.0;
+        test_count = 0;
+      }
+    }
     s.walk_gpu.count = g.walks;
     s.walk_gpu.sum = g.ms;
     s.walk_gpu.most = g.most_ms;
@@ -1137,15 +1230,20 @@ void AppKeysApply(uint32_t bits) {
   App* app = g_hook_app;
   if (app == nullptr) return;
   app->compose_direct = app->xr.EyeDirect() && (bits & app_keys::kComposeDirect) != 0;
+  app->compose_take = app->compose_take_key && (bits & app_keys::kComposeDirect) != 0;
   app->xr.SetPanelRect((bits & app_keys::kPanelRect) != 0);
   app->ring.SetLeastRecent((bits & app_keys::kRingOrder) != 0);
   app->late_live.store((bits & app_keys::kLateCamera) != 0);
   app->release_take.store((bits & app_keys::kReleaseTake) != 0);
   app->late_take_live.store((bits & app_keys::kLateTake) != 0);
-  if (app->play_ok.load()) VkSceneComposeLate(app->compose_direct);
-  AppLog("game         : the debug page: xr_compose_direct=%d, xr_panel_rect=%d, ring_slot_order=%d, "
+  app->panel_keep.store((bits & app_keys::kPanelKeep) != 0);
+  VkSceneSetBindless((bits & app_keys::kBindless) != 0);
+  VkSceneSetFastShaders((bits & app_keys::kFastShaders) != 0);
+  if (app->play_ok.load()) VkSceneComposeLate(app->compose_direct || app->compose_take);
+  AppLog("game         : the debug page: xr_compose_direct=%d (at the take %d), xr_panel_rect=%d, ring_slot_order=%d, "
          "late_camera=%d, xr_release_take=%d, late_take=%d",
-         app->compose_direct ? 1 : 0, (bits & app_keys::kPanelRect) != 0 ? 1 : 0,
+         app->compose_direct ? 1 : 0, app->compose_take ? 1 : 0,
+         (bits & app_keys::kPanelRect) != 0 ? 1 : 0,
          (bits & app_keys::kRingOrder) != 0 ? 1 : 0, (bits & app_keys::kLateCamera) != 0 ? 1 : 0,
          (bits & app_keys::kReleaseTake) != 0 ? 1 : 0, (bits & app_keys::kLateTake) != 0 ? 1 : 0);
 }
@@ -1156,6 +1254,7 @@ void StartPlayThread(App* app) {
   // The keys of the debug page come with the frames of the stream.
   g_hook_app = app;
   SetAppKeysHook(&AppKeysApply);
+  VkSceneComposeSets(app->compose_take_key ? vk_compose_math::kMostSets : 1);
   {
     std::lock_guard<std::mutex> lock(app->play_stats_lock);
     app->play_stats = PlayStats();
@@ -1167,7 +1266,7 @@ void StartPlayThread(App* app) {
     // The play thread records the compose of the walks that leave their eye
     // picture to it (xr_compose_direct), so the mode goes on only now.
     app->play_ok.store(true);
-    VkSceneComposeLate(app->compose_direct);
+    VkSceneComposeLate(app->compose_direct || app->compose_take);
   }
 }
 
@@ -1656,6 +1755,30 @@ void Play(App* app, bool new_game) {
                              : "Needs xr_eye_direct=1. The renderer makes the eye picture of "
                                "each walk"));
   }
+  // xr_compose_take (0 by default, needs xr_eye_direct=0, xr_compose_direct=1 for the
+  // row of the debug page, frame_loop_gpu_depth=1 and one queue): a walk with the outer
+  // image and the centre image leaves its eye picture to the app, and the session
+  // composes it into the one pair of swapchains at the take of the picture.
+  {
+    const bool key = app->ini.GetInt("bwvr", "xr_compose_take", 0) != 0;
+    const char* why = nullptr;
+    if (!key) why = nullptr;
+    else if (!loop) why = "the frame loop is off";
+    else if (eye_direct) why = "xr_eye_direct is 1";
+    else if (app->ini.GetInt("bwvr", "xr_compose_direct", 0) == 0) why = "xr_compose_direct is 0";
+    else if (app->gpu_depth != 1) why = "frame_loop_gpu_depth is not 1";
+    else if (app->xr.RendererOnSecondQueue()) why = "the renderer has a second queue";
+    app->compose_take_key = key && why == nullptr;
+    app->compose_take = app->compose_take_key;
+    if (key || loop) {
+      AppLog("game         : xr_compose_take=%d. %s", key ? 1 : 0,
+             app->compose_take
+                 ? "A walk with the outer image and the centre image leaves its eye picture to "
+                   "the app, and the session composes it into one pair of swapchains at the take"
+                 : "The session does not compose the pictures");
+      if (key && why != nullptr) AppLog("game         : xr_compose_take is off: %s", why);
+    }
+  }
   // xr_density_pass (0 by default, needs xr_eye_direct=1, fovea_res=1 with
   // fovea_res_layer=0, and a device with the density map): 1, the walks of both
   // eyes draw one time into a swapchain image of the slot, with a fragment density
@@ -1692,14 +1815,15 @@ void Play(App* app, bool new_game) {
       if (key && why != nullptr) AppLog("game         : the one pass is off: %s", why);
     }
   }
-  // THE LATE CAMERA (late_camera, 1 by default, needs xr_compose_direct=1 and no
-  // one pass): each frame of the session draws the newest list of draws of the
+  // THE LATE CAMERA (late_camera, 1 by default, needs xr_compose_direct=1 with
+  // xr_eye_direct=1, or xr_compose_take=1, and no one pass): each frame of the session
+  // draws the newest list of draws of the
   // game again, from the place of the head and of the player at the next display
   // time. 0: a new picture only for a new frame of the game. It shows the newest
   // picture, so frame_queue has no effect then.
   {
     const bool key = late_camera_math::On(app->ini.GetInt("bwvr", "late_camera", 1));
-    app->late_on = key && loop && app->compose_direct && !app->density_pass;
+    app->late_on = key && loop && (app->compose_direct || app->compose_take) && !app->density_pass;
     app->late_live.store(true);
     app->late_keys = late_camera_math::Keys();
     app->late_keys.most_step = app->ini.GetInt("bwvr", "late_camera_most_cm", 200) * 0.01f;
@@ -1733,6 +1857,7 @@ void Play(App* app, bool new_game) {
     if (app->ini.GetInt("bwvr", "pose_log", 0) != 0 && !app->pose_log.On()) {
       const std::string pose_path = app->folder + "/bwvr-pose.bin";
       app->pose_log.Start(pose_path, 81000);
+      app->picture_log.Start(app->folder + "/bwvr-pictures.bin", 81000, 0x53434950u);
       AppLog("game         : pose_log=1. One record of %u bytes for each frame of the session "
              "goes into %s", static_cast<unsigned>(sizeof(PoseRecord)), pose_path.c_str());
     }
@@ -1745,11 +1870,14 @@ void Play(App* app, bool new_game) {
              app->late_on
                  ? "Each frame of the session draws the newest list of draws of the game again "
                    "for the next display time, so the camera does not wait for the game"
-             : key ? "It needs xr_compose_direct=1 and no one pass, so each frame of the game "
-                     "makes one picture"
+             : key ? "It needs xr_compose_direct=1 or xr_compose_take=1 and no one pass, so "
+                     "each frame of the game makes one picture"
                    : "Each frame of the game makes one picture");
     }
   }
+  // gpu_test (0 by default, bwvr.ini only): a test aid. The renderer goes through its test
+  // states, 4 s each, and the log has the GPU time of each state.
+  app->gpu_test = app->ini.GetInt("bwvr", "gpu_test", 0) != 0;
   // xr_release_take (1 by default): see WriteSlot.
   app->release_take.store(app->ini.GetInt("bwvr", "xr_release_take", 1) != 0);
   if (loop) {
@@ -2285,21 +2413,54 @@ void OnControllers(App* app, const XrInput& in, bool* show_cursor,
 // session runs (its start) and at each change of the row, with no new start.
 // display_hz=0 (the default): no request, and the headset sets the rate. A
 // change back to 0 after a request asks for no rate ("no preference" of
-// XR_FB_display_refresh_rate).
+// XR_FB_display_refresh_rate). SteamVR takes the rate from its settings
+// (steamvr_settings.h). There 0 leaves the value of SteamVR as it is. The display
+// period of the frames of the session says if the headset took the rate.
 void ApplyDisplayRate(App* app) {
   const int hz = app->menu.DisplayHz();
-  if (hz == app->display_asked) return;
-  app->display_asked = hz;
-  app->xr.RequestDisplayRate(display_rate::RuntimeRate(hz, app->xr.DisplayRates()));
+  const int64_t period = app->xr.DisplayPeriod();
+  app->menu.SetDisplayNow(display_rate::HzOfPeriod(period));
+  if (hz != app->display_asked) {
+    app->display_asked = hz;
+    app->display_waits = hz > 0;
+    app->display_asked_ms = NowMs();
+    if (steamvr_settings::On()) {
+      if (hz > 0) {
+        const bool took = steamvr_settings::WriteRate(static_cast<float>(hz));
+        AppLog("steamvr      : the app sets preferredRefreshRate of %s to %d Hz (%s). SteamVR "
+               "reads %.2f Hz, and the headset runs at %d Hz now",
+               steamvr_settings::AppKey().c_str(), hz, took ? "taken" : "refused",
+               steamvr_settings::ReadRate(), display_rate::HzOfPeriod(period));
+      }
+    } else {
+      app->xr.RequestDisplayRate(display_rate::RuntimeRate(hz, app->xr.DisplayRates()));
+    }
+  }
+  if (!app->display_waits) return;
+  const double waited = NowMs() - app->display_asked_ms;
+  if (display_rate::Reached(hz, period)) {
+    app->display_waits = false;
+    AppLog("xr           : the headset runs at %d Hz, %.1f s after the request", hz,
+           waited / 1000.0);
+  } else if (waited > 5000.0) {
+    app->display_waits = false;
+    AppLog("xr           : 5 s after the request of %d Hz the headset still runs at %d Hz. It "
+           "can take the rate only at a new start of the app",
+           hz, display_rate::HzOfPeriod(period));
+  }
 }
 
 // The rates of the runtime into the menu, after the start of the session.
 void TakeDisplayRates(App* app) {
-  const std::vector<int> offered = display_rate::Offered(app->xr.DisplayRates());
+  // steamvr_app_key (bwvr.ini only, empty by default): the section of the app in the
+  // settings of SteamVR, in place of SteamAppId of the environment.
+  const bool steamvr = steamvr_settings::Start(app->ini.Get("bwvr", "steamvr_app_key", ""));
+  const std::vector<int> offered =
+      steamvr ? display_rate::SteamVrOffered() : display_rate::Offered(app->xr.DisplayRates());
   app->menu.SetDisplayRates(offered);
   if (offered.empty()) {
-    AppLog("menu         : display_hz=%d. The runtime gives none of the rates 72, 80, 90 "
-           "and 120 Hz, so the menu has no row Display rate and the app asks for no rate",
+    AppLog("menu         : display_hz=%d. The runtime gives none of the rates 72, 80, 90, "
+           "120 and 144 Hz, so the menu has no row Display rate and the app asks for no rate",
            app->menu.DisplayWanted());
     return;
   }
@@ -2474,6 +2635,17 @@ void android_main(android_app* android) {
   // density map, and the runtime gets the probe of the one pass. The key is read
   // again at each Play, but the device is made one time, at the start.
   app.xr.SetDensityWanted(app.ini.GetInt("bwvr", "xr_density_pass", 0) != 0);
+  // tu_debug (bwvr.ini only, empty by default): TU_DEBUG of the Vulkan driver Turnip, for a
+  // test of its ways to draw, for example sysmem. The driver reads it when the session
+  // makes its Vulkan instance, so a change counts at the next start of the app.
+  {
+    const std::string tu_debug = app.ini.Get("bwvr", "tu_debug", "");
+    if (!tu_debug.empty()) {
+      setenv("TU_DEBUG", tu_debug.c_str(), 1);
+      AppLog("gpu          : tu_debug=%s. The Vulkan driver gets TU_DEBUG with this value",
+             tu_debug.c_str());
+    }
+  }
   // eye_size_max=1 (the default): the size of the eyes that the app takes
   // from the runtime has a cap, the panel of a Quest 3 (2064 by 2208) with the
   // aspect of the runtime (eye_size.h). 0: the size of the runtime.
@@ -2728,6 +2900,7 @@ void android_main(android_app* android) {
           std::lock_guard<std::mutex> lock(app.late_lock);
           LateTick& t = app.late_tick;
           ++t.serial;
+          t.sent_ms = NowMs();
           t.slot = app.input_live.NewestSlot();
           t.period = app.xr.DisplayPeriod();
           t.head_ok = late_head_ok;

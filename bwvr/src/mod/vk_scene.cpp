@@ -147,6 +147,7 @@
 #include "vk_scene_math.h"
 #include "vk_texture_math.h"
 #include "vk_scene_frag.h"
+#include "vk_scene_frag_slots.h"
 #include "vk_scene_vert.h"
 #include "vk_mesh_vert.h"
 #include "gpu_mesh_math.h"
@@ -314,6 +315,10 @@ const uint32_t kMeshGroupKey = 1u << 27;
 const uint32_t kMeshLegacyKey = 1u << 28;
 // A pipeline for the pass with a fragment density map (THE ONE PASS).
 const uint32_t kDensityKey = 1u << 29;
+// THE TEXTURES IN ONE SET (vk_bindless): the pipeline has the one set of all textures
+// and the fragment shader with SLOTS. With kDynBlendKey its blend is a dynamic state.
+const uint32_t kSlotsKey = 1u << 30;
+const uint32_t kDynBlendKey = 1u << 31;
 
 // THE WALK WITHOUT DIRECT3D 9 (vk_only). On the frame thread: the key now,
 // the test key of the desktop, the frame of stereo.cpp, and a walk of
@@ -389,6 +394,54 @@ VkDescriptorSetLayout g_group_set_layout = VK_NULL_HANDLE;
 VkPipelineLayout g_group_layout = VK_NULL_HANDLE;
 VkDescriptorPool g_group_pool = VK_NULL_HANDLE;
 VkDescriptorSetLayout g_set_layout = VK_NULL_HANDLE;
+// THE TEXTURES IN ONE SET (vk_bindless, docs/backend.md, "The textures in one set"). A
+// bind of a set before each draw costs the GPU more than the draw. So one set has each
+// pair of a texture and a sampler at a place of its own, the push constants name the
+// places, and the blend is a dynamic state, so a pass binds one pipeline and one set.
+const uint32_t kNoSlot = 0xFFFFFFFFu;
+const uint32_t kSlotCount = 8192;
+bool g_slots_device = false;     // the device can do it (VkSceneSetDeviceFeatures)
+bool g_dyn_blend_device = false;
+bool g_slots_key = false;        // vk_bindless, the row "Bindless" of the debug page
+VkShaderModule g_frag_slots = VK_NULL_HANDLE;
+VkDescriptorSetLayout g_slots_set_layout = VK_NULL_HANDLE;
+VkPipelineLayout g_slots_layout = VK_NULL_HANDLE;
+VkDescriptorPool g_slots_pool = VK_NULL_HANDLE;
+VkDescriptorSet g_slots_set = VK_NULL_HANDLE;
+uint32_t g_slot_next = 0;
+std::vector<uint32_t> g_slot_free;
+PFN_vkCmdSetColorBlendEnableEXT g_set_blend_enable = nullptr;
+PFN_vkCmdSetColorBlendEquationEXT g_set_blend_equation = nullptr;
+// THE FAST SHADERS (vk_fast_shaders): the operations of a draw as constants of its
+// pipeline. kDynBlendKey has no blend in the low bits of the key, so they name the kinds.
+bool g_fast_key = false;
+struct SpecKind {
+  uint32_t values[5];  // ops.x, ops.y, ops.z, ops1.x, ops1.y
+};
+const int kMostSpecKinds = 64;
+SpecKind g_spec_kinds[kMostSpecKinds];
+int g_spec_kind_count = 0;
+int g_spec_kind_last = 0;
+// A TEST AID (gpu_test of bwvr.ini, docs/android.md, "The test of the GPU"): the state of
+// this test, and the draws and walks since the last line of the log.
+enum GpuTestState {
+  kTestNormal,
+  kTestAniso4,
+  kTestAniso1,
+  kTestNoMerge,
+  kTestFast,
+  kTestFastAniso4,
+  kTestNoLateMath,
+  kTestNoPixels,
+  kTestStates
+};
+int g_gpu_test = kTestNormal;
+uint64_t g_test_draws[2] = {0, 0};
+uint64_t g_test_walks = 0;
+// THE SAME PANEL (xr_panel_keep): the hash of the draws of the panel of this walk and of
+// the last walk that drew into the panel.
+uint64_t g_panel_hash_now = 0;
+uint64_t g_panel_hash = 0;
 VkPipelineLayout g_layout = VK_NULL_HANDLE;
 VkDescriptorPool g_pool = VK_NULL_HANDLE;
 struct PipelineSlot {
@@ -418,9 +471,11 @@ struct Texture {
   vk::Image image;
   bool dirty;
   uint64_t used_walk;  // g_walk_number of the last walk that drew with it
+  uint64_t uploads;    // one more for each read of its pixels
   struct SetSlot {
     VkSampler sampler;
     VkDescriptorSet set;
+    uint32_t slot;  // its place in the one set, kNoSlot with none
   } sets[8];
   int set_count;
 };
@@ -429,8 +484,8 @@ Texture* g_textures = nullptr;
 int g_texture_count = 0;
 SRWLOCK g_texture_lock = SRWLOCK_INIT;  // the dirty marks of the frame thread
 // FOVEATED RESOLUTION: the layers of the outer and the centre image as
-// textures for the eye picture, [image][eye].
-Texture g_mres_texture[2][2] = {};
+// textures for the eye picture, [set][image][eye].
+Texture g_mres_texture[vk_compose_math::kMostSets][2][2] = {};
 
 // THE FRAME. Two slots, so the CPU fills one while the GPU draws the other.
 // THE UPLOADS OF A WALK (vk_upload_queue=1). A texture that the walk reads
@@ -472,6 +527,8 @@ struct Slot {
   // back to the pool when the fence of the slot says the GPU is done.
   VkDescriptorSet dead_sets[1024];
   int dead_count;
+  uint32_t dead_slots[1024];  // places of the one set, free after the GPU is done
+  int dead_slot_count;
   // THE CHECK FOR A BLACK PICTURE (vk_black_check): 16 by 16 points of each
   // layer of the eye picture of the walk, and what the walk drew.
   vk::Buffer probe;
@@ -684,9 +741,15 @@ float g_mres_outer = 50.0f, g_mres_center = 100.0f, g_mres_deg = 25.0f;
 float g_mres_down_deg = 0.0f;
 bool g_walk_mres = false;
 fovea_res_math::Layout g_mres = {};
-vk::Image g_mres_color[2] = {};  // 0 the outer image, 1 the centre image
+// [set][image], image 0 the outer image, 1 the centre image. The walks draw into
+// the sets in turn (vk_compose_math::NextSet). The depth has no sets: only the
+// walk reads it.
+vk::Image g_mres_color[vk_compose_math::kMostSets][2] = {};
 vk::Image g_mres_depth[2] = {};
-VkImageView g_mres_view[2][2] = {};  // the view of each layer, [image][eye]
+VkImageView g_mres_view[vk_compose_math::kMostSets][2][2] = {};  // [set][image][eye]
+int g_mres_set = 0;         // the set of this walk
+int g_mres_set_count = 1;   // VkSceneComposeSets
+int g_mres_sets_made = 0;
 bool g_said_mres_size = false;
 // The values of the push constants of a draw.
 struct DrawPush {
@@ -716,6 +779,7 @@ struct MresRecord {
   VkDeviceSize vertex_at, uv1_at, index_at;
   uint32_t vertex_count, index_count;
   uint32_t wide;  // 1: 32 bit indices (a draw of the merge), 0: 16 bit
+  uint32_t spec_kind;  // the fast shaders: the kind of its operations, 0 with none
   // A draw in g_queue with indices: their copy in g_queue_indices, at this
   // place. The ring is memory that the CPU writes and does not read.
   uint32_t queue_index;
@@ -932,8 +996,19 @@ VkPipeline Pipeline(uint32_t key) {
   if (stages[0].module == VK_NULL_HANDLE) return VK_NULL_HANDLE;
   stages[0].pName = "main";
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-  stages[1].module = g_frag;
+  stages[1].module = (key & kSlotsKey) != 0 ? g_frag_slots : g_frag;
   stages[1].pName = "main";
+  // THE FAST SHADERS: the values of the kind of the key, else kSpec is 0.
+  uint32_t spec_values[6] = {0, 0, 0, 0, 0, 0};
+  const uint32_t spec_kind = (key & kDynBlendKey) != 0 ? key & 0xFFFFu : 0u;
+  if (spec_kind > 0 && static_cast<int>(spec_kind) <= g_spec_kind_count) {
+    spec_values[0] = 1;
+    memcpy(&spec_values[1], g_spec_kinds[spec_kind - 1].values, 5 * sizeof(uint32_t));
+  }
+  VkSpecializationMapEntry spec_map[6];
+  for (uint32_t i = 0; i < 6; ++i) spec_map[i] = {i, i * 4u, 4u};
+  const VkSpecializationInfo spec_info = {6, spec_map, sizeof(spec_values), spec_values};
+  if ((key & kSlotsKey) != 0) stages[1].pSpecializationInfo = &spec_info;
   // Buffer 1 has the texture coordinates of stage 1 (THE SECOND STAGE).
   const VkVertexInputBindingDescription bindings[2] = {
       {0, 32, VK_VERTEX_INPUT_RATE_VERTEX}, {1, 8, VK_VERTEX_INPUT_RATE_VERTEX}};
@@ -1000,8 +1075,9 @@ VkPipeline Pipeline(uint32_t key) {
   blend.colorWriteMask = 0xF;
   const bool panel = (key & kPanelKey) != 0;
   const bool density = (key & kDensityKey) != 0;
-  if ((key & ~(kPanelKey | kMeshKey | kMeshOffsetKey | kMeshGroupKey |
-                  kMeshLegacyKey | kDensityKey)) != 0) {
+  if ((key & kDynBlendKey) == 0 &&
+      (key & ~(kPanelKey | kMeshKey | kMeshOffsetKey | kMeshGroupKey |
+                  kMeshLegacyKey | kDensityKey | kSlotsKey)) != 0) {
     blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = Factor((key >> 8) & 255);
     blend.dstColorBlendFactor = Factor(key & 255);
@@ -1023,10 +1099,13 @@ VkPipeline Pipeline(uint32_t key) {
       VK_DYNAMIC_STATE_CULL_MODE,         VK_DYNAMIC_STATE_FRONT_FACE,
       VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
       VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,  VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
-      VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_DEPTH_BIAS};
+      VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_DEPTH_BIAS,
+      VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT, VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT};
   VkPipelineDynamicStateCreateInfo dynamic_state = {
       VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic_state.dynamicStateCount = sizeof(dynamic) / sizeof(dynamic[0]);
+  // The last two only for a pipeline with kDynBlendKey.
+  dynamic_state.dynamicStateCount =
+      sizeof(dynamic) / sizeof(dynamic[0]) - ((key & kDynBlendKey) != 0 ? 0u : 2u);
   dynamic_state.pDynamicStates = dynamic;
   VkPipelineRenderingCreateInfo rendering = {
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -1049,7 +1128,7 @@ VkPipeline Pipeline(uint32_t key) {
   info.pDepthStencilState = &depth;
   info.pColorBlendState = &blend_state;
   info.pDynamicState = &dynamic_state;
-  info.layout = mesh_groups ? g_group_layout : g_layout;
+  info.layout = mesh_groups ? g_group_layout : (key & kSlotsKey) != 0 ? g_slots_layout : g_layout;
   // FOVEATED RENDERING: the rate of the attachment replaces the rate of the
   // pipeline. With no attachment in a rendering the rate is 1 by 1.
   VkPipelineFragmentShadingRateStateCreateInfoKHR rate_state = {
@@ -1088,6 +1167,8 @@ VkPipeline Pipeline(uint32_t key) {
 // filter needs the feature of the device (vk::Core, max_anisotropy).
 VkSampler Sampler(uint32_t mag, uint32_t min, uint32_t mip, uint32_t u,
                   uint32_t v, uint32_t anisotropy) {
+  if ((g_gpu_test == kTestAniso4 || g_gpu_test == kTestFastAniso4) && anisotropy > 4) anisotropy = 4;
+  if (g_gpu_test == kTestAniso1) anisotropy = 1;
   const uint32_t key = (mag & 7) | (min & 7) << 3 | (mip & 7) << 6 |
                        (u & 7) << 9 | (v & 7) << 12 | (anisotropy & 31) << 15;
   for (int i = 0; i < g_sampler_count; ++i) {
@@ -1636,6 +1717,7 @@ Texture* TextureOf(void* surface) {
                    &pixels)) {
     return t->image.image != VK_NULL_HANDLE ? t : g_white;
   }
+  ++t->uploads;
   // The image it has, when it has the size and no draw of this walk drew
   // with it.
   if (g_texture_reuse && g_recording && g_walk_upload_queue &&
@@ -1650,6 +1732,9 @@ Texture* TextureOf(void* surface) {
   Slot& s = g_slots[g_slot];
   for (int i = 0; i < t->set_count; ++i) {
     if (s.dead_count < 1024) s.dead_sets[s.dead_count++] = t->sets[i].set;
+    if (t->sets[i].slot != kNoSlot && s.dead_slot_count < 1024) {
+      s.dead_slots[s.dead_slot_count++] = t->sets[i].slot;
+    }
   }
   t->set_count = 0;
   const bool ok = g_recording && g_walk_upload_queue
@@ -1657,6 +1742,114 @@ Texture* TextureOf(void* surface) {
                       : Upload(width, height, pixels, &t->image);
   if (!ok) return g_white;
   return t;
+}
+
+// THE TEXTURES IN ONE SET: the set, its layout, and the functions of the dynamic blend.
+// With a fault the walks bind a set for each texture, as with vk_bindless=0.
+void MakeTextureSlots(const VkPushConstantRange& push) {
+  const VkDevice device = vk::Get().device;
+  g_frag_slots = Module(kVkSceneFragSlots, sizeof(kVkSceneFragSlots));
+  const VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                                kSlotCount, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+  const VkDescriptorBindingFlags flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                                         VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+                                         VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
+  VkDescriptorSetLayoutBindingFlagsCreateInfo flag_info = {
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+  flag_info.bindingCount = 1;
+  flag_info.pBindingFlags = &flags;
+  VkDescriptorSetLayoutCreateInfo set_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  set_info.pNext = &flag_info;
+  set_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+  set_info.bindingCount = 1;
+  set_info.pBindings = &binding;
+  VkPipelineLayoutCreateInfo layout_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  layout_info.setLayoutCount = 1;
+  layout_info.pSetLayouts = &g_slots_set_layout;
+  layout_info.pushConstantRangeCount = 1;
+  layout_info.pPushConstantRanges = &push;
+  const VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kSlotCount};
+  VkDescriptorPoolCreateInfo pool_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+  pool_info.maxSets = 1;
+  pool_info.poolSizeCount = 1;
+  pool_info.pPoolSizes = &size;
+  bool ok = g_frag_slots != VK_NULL_HANDLE &&
+            f.vkCreateDescriptorSetLayout(device, &set_info, nullptr, &g_slots_set_layout) == VK_SUCCESS &&
+            f.vkCreatePipelineLayout(device, &layout_info, nullptr, &g_slots_layout) == VK_SUCCESS &&
+            f.vkCreateDescriptorPool(device, &pool_info, nullptr, &g_slots_pool) == VK_SUCCESS;
+  if (ok) {
+    VkDescriptorSetAllocateInfo info = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    info.descriptorPool = g_slots_pool;
+    info.descriptorSetCount = 1;
+    info.pSetLayouts = &g_slots_set_layout;
+    ok = f.vkAllocateDescriptorSets(device, &info, &g_slots_set) == VK_SUCCESS;
+  }
+  if (!ok) {
+    g_slots_set = VK_NULL_HANDLE;
+    ModLog("vk scene     : the set of all textures was not made, so vk_bindless has no effect");
+    return;
+  }
+  if (g_dyn_blend_device) {
+    g_set_blend_enable = reinterpret_cast<PFN_vkCmdSetColorBlendEnableEXT>(
+        f.vkGetDeviceProcAddr(device, "vkCmdSetColorBlendEnableEXT"));
+    g_set_blend_equation = reinterpret_cast<PFN_vkCmdSetColorBlendEquationEXT>(
+        f.vkGetDeviceProcAddr(device, "vkCmdSetColorBlendEquationEXT"));
+  }
+  ModLog("vk scene     : one set has room for %u textures (vk_bindless), and the blend is %s",
+         kSlotCount, g_set_blend_enable != nullptr && g_set_blend_equation != nullptr
+                         ? "a dynamic state"
+                         : "a part of each pipeline");
+}
+
+// The place of a new pair of a texture and a sampler in the one set.
+uint32_t NewTextureSlot(VkImageView view, VkSampler sampler) {
+  if (g_slots_set == VK_NULL_HANDLE) return kNoSlot;
+  uint32_t slot;
+  if (!g_slot_free.empty()) {
+    slot = g_slot_free.back();
+    g_slot_free.pop_back();
+  } else if (g_slot_next < kSlotCount) {
+    slot = g_slot_next++;
+  } else {
+    return kNoSlot;
+  }
+  const VkDescriptorImageInfo image = {sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  write.dstSet = g_slots_set;
+  write.dstArrayElement = slot;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  write.pImageInfo = &image;
+  f.vkUpdateDescriptorSets(vk::Get().device, 1, &write, 0, nullptr);
+  return slot;
+}
+
+// The kind of the operations of a draw, for the fast shaders. 0 with no room.
+int SpecKindOf(const uint32_t ops[4], const uint32_t ops1[4]) {
+  const uint32_t values[5] = {ops[0], ops[1], ops[2], ops1[0], ops1[1]};
+  const size_t bytes = sizeof(values);
+  if (g_spec_kind_last > 0 && memcmp(g_spec_kinds[g_spec_kind_last - 1].values, values, bytes) == 0) {
+    return g_spec_kind_last;
+  }
+  for (int i = 0; i < g_spec_kind_count; ++i) {
+    if (memcmp(g_spec_kinds[i].values, values, bytes) == 0) {
+      g_spec_kind_last = i + 1;
+      return g_spec_kind_last;
+    }
+  }
+  if (g_spec_kind_count >= kMostSpecKinds) return 0;
+  memcpy(g_spec_kinds[g_spec_kind_count].values, values, bytes);
+  g_spec_kind_last = ++g_spec_kind_count;
+  return g_spec_kind_last;
+}
+
+// The place of a set of a texture, kNoSlot with none.
+uint32_t SlotOfSet(const Texture* t, VkDescriptorSet set) {
+  for (int i = 0; i < t->set_count; ++i) {
+    if (t->sets[i].set == set) return t->sets[i].slot;
+  }
+  return kNoSlot;
 }
 
 VkDescriptorSet SetOf(Texture* t, VkSampler sampler) {
@@ -1696,6 +1889,7 @@ VkDescriptorSet SetOf(Texture* t, VkSampler sampler) {
   if (t->set_count < 8) {
     t->sets[t->set_count].sampler = sampler;
     t->sets[t->set_count].set = set;
+    t->sets[t->set_count].slot = NewTextureSlot(t->image.view, sampler);
     ++t->set_count;
   } else {
     // No room in the texture: the set goes back to the pool after the GPU
@@ -1828,6 +2022,7 @@ bool Ready() {
   uint8_t* white = static_cast<uint8_t*>(malloc(4));
   white[0] = white[1] = white[2] = white[3] = 255;
   if (!Upload(1, 1, white, &g_white->image)) return Fail("the white texture");
+  if (g_slots_device) MakeTextureSlots(push);
   for (int i = 0; i < 2; ++i) {
     Slot& s = g_slots[i];
     memset(&s, 0, sizeof(s));
@@ -2295,22 +2490,27 @@ void FreeMresImages() {
   // The views of the pending compose go with the images.
   vk_compose::DropAll();
   const VkDevice device = vk::Get().device;
-  for (int i = 0; i < 2; ++i) {
-    for (int e = 0; e < 2; ++e) {
-      Texture& t = g_mres_texture[i][e];
-      for (int k = 0; k < t.set_count; ++k) {
-        f.vkFreeDescriptorSets(device, g_pool, 1, &t.sets[k].set);
-        --g_sets_live;
+  for (int n = 0; n < vk_compose_math::kMostSets; ++n) {
+    for (int i = 0; i < 2; ++i) {
+      for (int e = 0; e < 2; ++e) {
+        Texture& t = g_mres_texture[n][i][e];
+        for (int k = 0; k < t.set_count; ++k) {
+          f.vkFreeDescriptorSets(device, g_pool, 1, &t.sets[k].set);
+          --g_sets_live;
+          if (t.sets[k].slot != kNoSlot) g_slot_free.push_back(t.sets[k].slot);
+        }
+        memset(&t, 0, sizeof(t));
+        if (g_mres_view[n][i][e] != VK_NULL_HANDLE) {
+          f.vkDestroyImageView(device, g_mres_view[n][i][e], nullptr);
+          g_mres_view[n][i][e] = VK_NULL_HANDLE;
+        }
       }
-      memset(&t, 0, sizeof(t));
-      if (g_mres_view[i][e] != VK_NULL_HANDLE) {
-        f.vkDestroyImageView(device, g_mres_view[i][e], nullptr);
-        g_mres_view[i][e] = VK_NULL_HANDLE;
-      }
+      vk::FreeImage(&g_mres_color[n][i]);
     }
-    vk::FreeImage(&g_mres_color[i]);
-    vk::FreeImage(&g_mres_depth[i]);
   }
+  for (int i = 0; i < 2; ++i) vk::FreeImage(&g_mres_depth[i]);
+  g_mres_sets_made = 0;
+  g_mres_set = 0;
 }
 
 // The atlas of fovea_res_layer=1 is in each eye picture of the headset app.
@@ -2397,46 +2597,61 @@ bool PrepareMres(const Seed* seed) {
   // so a change of the layout does not stop the GPU to make new images.
   uint32_t sizes[2][2] = {{g_mres.outer_w, g_mres.outer_h},
                           {g_mres.center_w, g_mres.center_h}};
-  if (g_mres_color[0].width < sizes[0][0] ||
-      g_mres_color[0].height < sizes[0][1] ||
-      g_mres_color[1].width < sizes[1][0] ||
-      g_mres_color[1].height < sizes[1][1]) {
+  if (g_mres_color[0][0].width < sizes[0][0] ||
+      g_mres_color[0][0].height < sizes[0][1] ||
+      g_mres_color[0][1].width < sizes[1][0] ||
+      g_mres_color[0][1].height < sizes[1][1] ||
+      g_mres_sets_made != g_mres_set_count) {
     for (int i = 0; i < 2; ++i) {
-      if (g_mres_color[i].width > sizes[i][0]) sizes[i][0] = g_mres_color[i].width;
-      if (g_mres_color[i].height > sizes[i][1]) sizes[i][1] = g_mres_color[i].height;
+      if (g_mres_color[0][i].width > sizes[i][0]) sizes[i][0] = g_mres_color[0][i].width;
+      if (g_mres_color[0][i].height > sizes[i][1]) sizes[i][1] = g_mres_color[0][i].height;
     }
     ++g_mres_remade;
-    if (g_mres_color[0].image != VK_NULL_HANDLE) {
+    // The thread of the session does not compose from the images that go.
+    vk_compose::TakeLock();
+    if (g_mres_color[0][0].image != VK_NULL_HANDLE) {
       vk::LockQueue();
       f.vkDeviceWaitIdle(vk::Get().device);
       vk::UnlockQueue();
     }
     FreeMresImages();
+    vk_compose::TakeUnlock();
     for (int i = 0; i < 2; ++i) {
-      if (!vk::MakeImage(sizes[i][0], sizes[i][1], 1, vk::Get().color_format,
-                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                             VK_IMAGE_USAGE_SAMPLED_BIT,
-                         VK_IMAGE_ASPECT_COLOR_BIT, &g_mres_color[i], 2) ||
-          !vk::MakeImage(sizes[i][0], sizes[i][1], 1, kDepthFormat,
+      if (!vk::MakeImage(sizes[i][0], sizes[i][1], 1, kDepthFormat,
                          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                          VK_IMAGE_ASPECT_DEPTH_BIT, &g_mres_depth[i], 2)) {
         FreeMresImages();
         return false;
       }
-      for (int e = 0; e < 2; ++e) {
-        VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        view.image = g_mres_color[i].image;
-        view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view.format = vk::Get().color_format;
-        view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1,
-                                 static_cast<uint32_t>(e), 1};
-        if (f.vkCreateImageView(vk::Get().device, &view, nullptr,
-                                &g_mres_view[i][e]) != VK_SUCCESS) {
+      for (int n = 0; n < g_mres_set_count; ++n) {
+        if (!vk::MakeImage(sizes[i][0], sizes[i][1], 1, vk::Get().color_format,
+                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                               VK_IMAGE_USAGE_SAMPLED_BIT,
+                           VK_IMAGE_ASPECT_COLOR_BIT, &g_mres_color[n][i], 2)) {
           FreeMresImages();
           return false;
         }
-        g_mres_texture[i][e].image.view = g_mres_view[i][e];
+        for (int e = 0; e < 2; ++e) {
+          VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+          view.image = g_mres_color[n][i].image;
+          view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+          view.format = vk::Get().color_format;
+          view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1,
+                                   static_cast<uint32_t>(e), 1};
+          if (f.vkCreateImageView(vk::Get().device, &view, nullptr,
+                                  &g_mres_view[n][i][e]) != VK_SUCCESS) {
+            FreeMresImages();
+            return false;
+          }
+          g_mres_texture[n][i][e].image.view = g_mres_view[n][i][e];
+        }
       }
+    }
+    g_mres_sets_made = g_mres_set_count;
+    if (g_mres_set_count > 1) {
+      ModLog("vk scene     : %d sets of the outer image and the centre image, so the thread "
+             "of the session can compose a finished picture while the next walks draw",
+             g_mres_set_count);
     }
     if (!g_said_mres_size) {
       g_said_mres_size = true;
@@ -2558,6 +2773,20 @@ void BindSets(VkCommandBuffer cb, VkDescriptorSet set, VkDescriptorSet set1) {
   if (!Need(vk_draw_math::kSets, sets)) return;
   f.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0,
                             2, sets, 0, nullptr);
+}
+
+// The blend of a draw as a dynamic state: key as for Pipeline.
+void SetDynamicBlend(VkCommandBuffer cb, uint32_t key) {
+  const VkBool32 enable = key != 0 ? VK_TRUE : VK_FALSE;
+  g_set_blend_enable(cb, 0, 1, &enable);
+  VkColorBlendEquationEXT e = {};
+  e.srcColorBlendFactor = key != 0 ? Factor((key >> 8) & 255) : VK_BLEND_FACTOR_ONE;
+  e.dstColorBlendFactor = key != 0 ? Factor(key & 255) : VK_BLEND_FACTOR_ZERO;
+  e.colorBlendOp = VK_BLEND_OP_ADD;
+  e.srcAlphaBlendFactor = e.srcColorBlendFactor;
+  e.dstAlphaBlendFactor = e.dstColorBlendFactor;
+  e.alphaBlendOp = VK_BLEND_OP_ADD;
+  g_set_blend_equation(cb, 0, 1, &e);
 }
 
 // Vertex buffer 0 and vertex buffer 1 (the texture coordinates of stage 1)
@@ -2989,7 +3218,8 @@ void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint
   // The counts of VkSceneDrawCounts: the draws of the game that the pass
   // plays, and the commands that play them.
   g_dc_draws += draws;
-  if (!g_mres_play_on || !((g_walk_sort && g_mres_sort) || g_walk_merge)) {
+  if (!g_mres_play_on || g_gpu_test == kTestNoMerge ||
+      !((g_walk_sort && g_mres_sort) || g_walk_merge)) {
     g_dc_commands += draws;
     return;
   }
@@ -3091,22 +3321,23 @@ vk_compose::Input ComposeInput() {
   l.height = Target().height;
   l.outer_w = g_mres.outer_w;
   l.outer_h = g_mres.outer_h;
-  l.outer_image_w = g_mres_color[0].width;
-  l.outer_image_h = g_mres_color[0].height;
+  l.outer_image_w = g_mres_color[g_mres_set][0].width;
+  l.outer_image_h = g_mres_color[g_mres_set][0].height;
   l.center_w = g_mres.center_w;
   l.center_h = g_mres.center_h;
-  l.center_image_w = g_mres_color[1].width;
-  l.center_image_h = g_mres_color[1].height;
+  l.center_image_w = g_mres_color[g_mres_set][1].width;
+  l.center_image_h = g_mres_color[g_mres_set][1].height;
   l.inset_x0 = g_mres.inset_x0;
   l.inset_y0 = g_mres.inset_y0;
   l.inset_w = g_mres.inset_w;
   l.inset_h = g_mres.inset_h;
   for (int e = 0; e < 2; ++e) {
-    in.outer[e] = g_mres_view[0][e];
-    in.center[e] = g_mres_view[1][e];
+    in.outer[e] = g_mres_view[g_mres_set][0][e];
+    in.center[e] = g_mres_view[g_mres_set][1][e];
   }
   // The views are made again with the images.
   in.generation = g_mres_remade + 1;
+  in.set = g_mres_set;
   in.tint = g_walk_show;
   return in;
 }
@@ -3143,8 +3374,10 @@ bool ComposeLate() {
 // The records of the walk into the outer image and the centre image, then
 // the eye picture from the two.
 void PlayMres(Slot& s) {
+  ++g_test_walks;
   const VkCommandBuffer cb = s.cb;
   PushLate(cb);
+  g_mres_set = vk_compose_math::NextSet(g_mres_set, g_mres_sets_made, g_walk_both);
   // A TEST AID: what each pass did with the records (MresWalkLine).
   uint32_t drawn[2] = {0, 0}, out_of_view[2] = {0, 0}, left_out[2] = {0, 0};
   // vk_pass_store=1: a pass stores its depth only when a clear of the records
@@ -3155,7 +3388,7 @@ void PlayMres(Slot& s) {
     if (r.clear >= 0 && g_mres_clears[r.clear].eyes != 3u) restarts = true;
   }
   for (int pass = 0; pass < 2; ++pass) {
-    vk::Image& color = g_mres_color[pass];
+    vk::Image& color = g_mres_color[g_mres_set][pass];
     vk::Image& depth = g_mres_depth[pass];
     const float ox = pass == 1 ? g_mres.inset_x0 : 0.0f;
     const float oy = pass == 1 ? g_mres.inset_y0 : 0.0f;
@@ -3192,6 +3425,15 @@ void PlayMres(Slot& s) {
     VkPipeline last_pipeline = VK_NULL_HANDLE;
     VkDescriptorSet last_set = VK_NULL_HANDLE;
     VkDescriptorSet last_set1 = VK_NULL_HANDLE;
+    // THE TEXTURES IN ONE SET.
+    const bool use_slots = g_slots_key && g_slots_set != VK_NULL_HANDLE;
+    const bool dyn_blend = g_set_blend_enable != nullptr && g_set_blend_equation != nullptr;
+    const bool fast = dyn_blend && (g_fast_key || g_gpu_test == kTestFast || g_gpu_test == kTestFastAniso4);
+    bool slots_bound = false;
+    uint32_t slots_key = 0;
+    VkPipeline slots_pipeline = VK_NULL_HANDLE;
+    bool blend_known = false;
+    uint32_t blend_now = 0;
     PreparePass(s, pass, ox, oy, sx, sy, used_w, used_h, out_of_view, left_out);
     for (const MresRecord& r : g_mres_play) {
       if (r.clear >= 0) {
@@ -3209,6 +3451,9 @@ void PlayMres(Slot& s) {
         VkRect2D scissor = {{0, 0}, {0, 0}};
         in_view = PassScissor(r.viewport, ox, oy, sx, sy, used_w, used_h,
                               &scissor);
+        // A TEST AID: with no pixels the time of the walk is the time of its draws and
+        // of its vertices.
+        if (g_gpu_test == kTestNoPixels) scissor.extent = {1, 1};
         if (in_view) SetScissor(cb, scissor);
       }
       if (!in_view) {
@@ -3224,14 +3469,49 @@ void PlayMres(Slot& s) {
       }
       ++drawn[pass];
       ++(pass == 1 ? g_mres_center_draws : g_mres_draws);
-      if (r.pipeline != last_pipeline) {
-        BindPipeline(cb, r.pipeline);
-        last_pipeline = r.pipeline;
+      ++g_test_draws[pass];
+      bool slots = use_slots && r.mesh == 0 && r.push.ops1[2] != kNoSlot && r.push.ops1[3] != kNoSlot;
+      if (slots) {
+        const uint32_t key = dyn_blend ? kSlotsKey | kDynBlendKey | (fast ? r.spec_kind : 0u)
+                                       : kSlotsKey | r.blend;
+        if (key != slots_key) {
+          slots_key = key;
+          slots_pipeline = Pipeline(key);
+        }
+        slots = slots_pipeline != VK_NULL_HANDLE;
       }
-      if (r.set != last_set || r.set1 != last_set1) {
-        BindSets(cb, r.set, r.set1);
-        last_set = r.set;
-        last_set1 = r.set1;
+      if (slots) {
+        if (!slots_bound) {
+          f.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_slots_layout, 0, 1,
+                                    &g_slots_set, 0, nullptr);
+          slots_bound = true;
+          // The binds that the next draw of the old way knows are not bound now.
+          g_bound.Reset();
+          last_pipeline = VK_NULL_HANDLE;
+          last_set = last_set1 = VK_NULL_HANDLE;
+        }
+        if (slots_pipeline != last_pipeline) {
+          BindPipeline(cb, slots_pipeline);
+          last_pipeline = slots_pipeline;
+        }
+        if (dyn_blend && (!blend_known || blend_now != r.blend)) {
+          SetDynamicBlend(cb, r.blend);
+          blend_known = true;
+          blend_now = r.blend;
+        }
+      } else {
+        if (r.pipeline != last_pipeline) {
+          BindPipeline(cb, r.pipeline);
+          last_pipeline = r.pipeline;
+        }
+        // A pipeline with a blend of its own makes the dynamic blend unknown.
+        blend_known = false;
+        if (r.set != last_set || r.set1 != last_set1) {
+          BindSets(cb, r.set, r.set1);
+          last_set = r.set;
+          last_set1 = r.set1;
+          slots_bound = false;
+        }
       }
       DrawStates(cb, r.cull, r.zenable, r.zwrite, r.zfunc, r.type);
       PushDraw(cb, r.push);
@@ -3249,6 +3529,7 @@ void PlayMres(Slot& s) {
       }
     }
     f.vkCmdEndRendering(cb);
+    if (slots_bound) g_bound.Reset();
     vk::Barrier(cb, color.image, VK_IMAGE_ASPECT_COLOR_BIT,
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 2);
@@ -3505,21 +3786,21 @@ void ComposeMres(Slot& s) {
     const uint32_t tint = g_walk_show ? 0xFF90B8FFu : 0xFFFFFFFFu;
     // The used part of each image.
     const float ou = static_cast<float>(g_mres.outer_w) /
-                     static_cast<float>(g_mres_color[0].width);
+                     static_cast<float>(g_mres_color[g_mres_set][0].width);
     const float ov = static_cast<float>(g_mres.outer_h) /
-                     static_cast<float>(g_mres_color[0].height);
+                     static_cast<float>(g_mres_color[g_mres_set][0].height);
     const float cu = static_cast<float>(g_mres.center_w) /
-                     static_cast<float>(g_mres_color[1].width);
+                     static_cast<float>(g_mres_color[g_mres_set][1].width);
     const float cv = static_cast<float>(g_mres.center_h) /
-                     static_cast<float>(g_mres_color[1].height);
+                     static_cast<float>(g_mres_color[g_mres_set][1].height);
     const Vertex outer[6] = {{x0, y0, 0, 1, tint, 0, 0, 0},
                              {x1, y0, 0, 1, tint, 0, ou, 0},
                              {x1, y1, 0, 1, tint, 0, ou, ov},
                              {x0, y0, 0, 1, tint, 0, 0, 0},
                              {x1, y1, 0, 1, tint, 0, ou, ov},
                              {x0, y1, 0, 1, tint, 0, 0, ov}};
-    const VkDescriptorSet outer_set = SetOf(&g_mres_texture[0][eye], sampler);
-    const VkDescriptorSet center_set = SetOf(&g_mres_texture[1][eye], sampler);
+    const VkDescriptorSet outer_set = SetOf(&g_mres_texture[g_mres_set][0][eye], sampler);
+    const VkDescriptorSet center_set = SetOf(&g_mres_texture[g_mres_set][1][eye], sampler);
     if (outer_set == VK_NULL_HANDLE || center_set == VK_NULL_HANDLE) continue;
     VkDeviceSize at = RingVertices(s, outer, sizeof(outer));
     if (at == UINT64_MAX) continue;
@@ -3615,11 +3896,11 @@ void ComposeAtlas(Slot& s) {
   const float gy[4] = {iy0, iy0 + edge, iy0 + ih - edge, iy0 + ih};
   // The used part of each image.
   const float ou = static_cast<float>(a.outer[2]) /
-                   static_cast<float>(g_mres_color[0].width);
+                   static_cast<float>(g_mres_color[g_mres_set][0].width);
   const float ov = static_cast<float>(a.outer[3]) /
-                   static_cast<float>(g_mres_color[0].height);
-  const float cu = iw / static_cast<float>(g_mres_color[1].width);
-  const float cv = ih / static_cast<float>(g_mres_color[1].height);
+                   static_cast<float>(g_mres_color[g_mres_set][0].height);
+  const float cu = iw / static_cast<float>(g_mres_color[g_mres_set][1].width);
+  const float cv = ih / static_cast<float>(g_mres_color[g_mres_set][1].height);
   for (int eye = 0; eye < 2; ++eye) {
     DrawPush push = {};
     push.viewport[2] = 2.0f / static_cast<float>(width);
@@ -3638,8 +3919,8 @@ void ComposeAtlas(Slot& s) {
                              {ox0, oy0, 0, 1, tint, 0, 0, 0},
                              {ox1, oy1, 0, 1, tint, 0, ou, ov},
                              {ox0, oy1, 0, 1, tint, 0, 0, ov}};
-    const VkDescriptorSet outer_set = SetOf(&g_mres_texture[0][eye], sampler);
-    const VkDescriptorSet center_set = SetOf(&g_mres_texture[1][eye], sampler);
+    const VkDescriptorSet outer_set = SetOf(&g_mres_texture[g_mres_set][0][eye], sampler);
+    const VkDescriptorSet center_set = SetOf(&g_mres_texture[g_mres_set][1][eye], sampler);
     if (outer_set == VK_NULL_HANDLE || center_set == VK_NULL_HANDLE) continue;
     VkDeviceSize at = RingVertices(s, outer, sizeof(outer));
     if (at == UINT64_MAX) continue;
@@ -4151,6 +4432,8 @@ void BeginOnWorker(const void* data) {
     g_sets_live -= s.dead_count;
     s.dead_count = 0;
   }
+  for (int i = 0; i < s.dead_slot_count; ++i) g_slot_free.push_back(s.dead_slots[i]);
+  s.dead_slot_count = 0;
   s.upload_open = false;
   // The stress test: the next N textures, in turn, are read again at their
   // next use.
@@ -4228,6 +4511,7 @@ void BeginOnWorker(const void* data) {
   g_draw_panel = false;
   g_panel_drawn = false;
   g_rendering_panel = false;
+  g_panel_hash_now = 0x9E3779B97F4A7C15ULL;
   if (g_walk_mres) {
     // The draws of the eyes are records until the end of the walk.
     if (g_walk_right) ++g_pair_walks;
@@ -4531,6 +4815,7 @@ void FinishWalk() {
     g_present_ready = true;
   }
   if (g_panel_drawn) {
+    g_panel_hash = g_panel_hash_now;
     g_panel_index = g_target;
     InterlockedExchange(&g_panel_walk, walk);
     ++g_panel_walks;
@@ -4545,9 +4830,9 @@ void FinishWalk() {
     if (g_mesh_compare) MeshCompare(Target(), g_picture_frame, true, 0xFFu);
     // FOVEATED RESOLUTION: the two images of the left eye too.
     if (g_walk_mres) {
-      WritePicture(g_mres_color[0], 0, "outer", g_picture_frame,
+      WritePicture(g_mres_color[g_mres_set][0], 0, "outer", g_picture_frame,
                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-      WritePicture(g_mres_color[1], 0, "centre", g_picture_frame,
+      WritePicture(g_mres_color[g_mres_set][1], 0, "centre", g_picture_frame,
                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
   }
@@ -5103,6 +5388,21 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
   push.fog_color[1] = static_cast<float>((fog >> 8) & 255) / 255.0f;
   push.fog_color[2] = static_cast<float>(fog & 255) / 255.0f;
   push.fog_color[3] = 1.0f;
+  // THE TEXTURES IN ONE SET: the places of the two textures.
+  push.ops1[2] = SlotOfSet(texture, set);
+  push.ops1[3] = set1 != VK_NULL_HANDLE ? SlotOfSet(texture1, set1) : push.ops1[2];
+  // THE SAME PANEL: what this draw adds to the panel.
+  if (panel) {
+    const uint64_t textures[6] = {(uint64_t)set, texture->uploads,
+                                  (uint64_t)set1, texture1->uploads,
+                                  blend, type};
+    g_panel_hash_now = vk_draw_math::HashBytes(g_panel_hash_now, &push, sizeof(push));
+    g_panel_hash_now = vk_draw_math::HashBytes(g_panel_hash_now, textures, sizeof(textures));
+    g_panel_hash_now = vk_draw_math::HashBytes(g_panel_hash_now, vertices, vertex_count * 32u);
+    if (indices != nullptr && index_count > 0) {
+      g_panel_hash_now = vk_draw_math::HashBytes(g_panel_hash_now, indices, index_count * 2u);
+    }
+  }
   MresRecord r = {};
   r.clear = -1;
   r.pipeline = pipeline;
@@ -5115,6 +5415,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
   r.zfunc = RecordZFunc(r.zenable, rs[D3DRENDERSTATE_ZFUNC]);
   r.type = type;
   r.push = push;
+  r.spec_kind = static_cast<uint32_t>(SpecKindOf(push.ops, push.ops1));
   r.vertex_at = vertex_at;
   r.uv1_at = uv1_at;
   r.index_at = index_at;
@@ -6593,6 +6894,8 @@ constexpr float kLateNearest = 0.15f;
 void SetLate(const float move[4], const float room[4]) {
   memcpy(g_late_push.move, move, sizeof(g_late_push.move));
   memcpy(g_late_push.room, room, sizeof(g_late_push.room));
+  // A TEST AID: the vertex shader without the math of the late camera.
+  if (g_gpu_test == kTestNoLateMath) g_late_push = late_camera_math::NoPush();
   const float limit = static_cast<float>(Target().width) * 0.25f;
   const float margin = late_camera_math::MarginPixels(g_late_push, kLateNearest);
   g_late_margin = margin < limit ? margin : limit;
@@ -6666,6 +6969,65 @@ bool VkSceneLateReplay(const float move[4], const float room[4]) {
 }
 
 bool VkSceneComposePending(uint64_t eye_image) { return vk_compose::Pending(eye_image); }
+
+void VkSceneSetDeviceFeatures(bool slots, bool dynamic_blend) {
+  g_slots_device = slots;
+  g_dyn_blend_device = dynamic_blend;
+}
+
+void VkSceneSetBindless(bool on) {
+  if (g_slots_key == on) return;
+  g_slots_key = on;
+  ModLog("vk scene     : vk_bindless=%d from the next walk. %s", on ? 1 : 0,
+         g_slots_device ? "" : "The device cannot do it, so it has no effect");
+}
+
+void VkSceneSetFastShaders(bool on) {
+  if (g_fast_key == on) return;
+  g_fast_key = on;
+  ModLog("vk scene     : vk_fast_shaders=%d from the next walk. It needs vk_bindless=1 and the "
+         "dynamic blend", on ? 1 : 0);
+}
+
+int VkSceneGpuTestStates() { return kTestStates; }
+
+const char* VkSceneGpuTest(int state) {
+  g_gpu_test = state % kTestStates;
+  static const char* const kNames[kTestStates] = {
+      "as the keys say",          "anisotropy at most 4",
+      "no anisotropy",            "no merge of the draws",
+      "fast shaders",             "fast shaders, anisotropy at most 4",
+      "no math of the late camera", "no pixels (a scissor of one pixel)"};
+  return kNames[g_gpu_test];
+}
+
+void VkSceneGpuTestCounts(uint64_t* outer, uint64_t* center, uint64_t* walks, int* kinds) {
+  *outer = g_test_draws[0];
+  *center = g_test_draws[1];
+  *walks = g_test_walks;
+  *kinds = g_spec_kind_count;
+  g_test_draws[0] = g_test_draws[1] = 0;
+  g_test_walks = 0;
+}
+
+uint64_t VkScenePanelHash() { return g_panel_hash; }
+
+void VkSceneComposeSets(int sets) {
+  g_mres_set_count = sets < 1 ? 1 : (sets > vk_compose_math::kMostSets ? vk_compose_math::kMostSets : sets);
+}
+
+uint64_t VkSceneComposeTicket(uint64_t eye_image) { return vk_compose::TakeTicket(eye_image); }
+
+bool VkSceneComposeRecordTicket(void* command_buffer, uint64_t ticket, uint32_t slot,
+                                const uint64_t images[2], uint32_t format) {
+  const vk_compose::Target targets[2] = {{(VkImage)images[0], 0, static_cast<VkFormat>(format)},
+                                         {(VkImage)images[1], 0, static_cast<VkFormat>(format)}};
+  return vk_compose::RecordTicket(reinterpret_cast<VkCommandBuffer>(command_buffer), ticket, slot,
+                                  targets);
+}
+
+void VkSceneComposeTakeLock() { vk_compose::TakeLock(); }
+void VkSceneComposeTakeUnlock() { vk_compose::TakeUnlock(); }
 
 bool VkSceneComposeRecord(void* command_buffer, uint32_t slot, const uint64_t images[2],
                           uint32_t format) {

@@ -25,6 +25,7 @@ enum Kind {
   kSlotPanel,   // the play thread: the panel image into a slot
   kSlotScreen,  // the play thread: the screen picture into a slot
   kSwapEyes,    // the session: an eye picture into its swapchain
+  kSwapCompose,  // the session: the eye pictures made from the two images at the take
   kSwapStereo,  // the session: an eye picture into the stereo screen
   kSwapPanel,   // the session: the panel image into its swapchain
   kSwapScreen,  // the session: the screen picture into the screen quad

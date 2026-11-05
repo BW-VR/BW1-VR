@@ -69,3 +69,14 @@ if ($LASTEXITCODE -ne 0) { throw "glslc failed: $out" }
 $scene = "// glslc (shaderc ndk-r27c): vk_scene.vert`n#pragma once`nconst uint32_t kVkSceneVert[] = $($out -join "`n")`n;`n"
 [IO.File]::WriteAllText($sceneHeader, $scene.Replace("`n", "`r`n"), (New-Object Text.UTF8Encoding($false)))
 "vk_scene_vert.h made from vk_scene.vert"
+
+# vk_scene_frag.h and vk_scene_frag_slots.h from vk_scene.frag.
+$fragSource = Join-Path $mod 'vk_scene.frag'
+foreach ($variant in @(@('vk_scene_frag.h', 'kVkSceneFrag', @()), @('vk_scene_frag_slots.h', 'kVkSceneFragSlots', @('-DSLOTS')))) {
+    $defines = $variant[2]
+    $out = & $glslc -mfmt=c --target-env=vulkan1.3 -fshader-stage=fragment @defines $fragSource -o - 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "glslc failed: $out" }
+    $text = "// glslc (shaderc ndk-r27c): vk_scene.frag $($defines -join ' ')`n#pragma once`nconst uint32_t $($variant[1])[] = $($out -join "`n")`n;`n"
+    [IO.File]::WriteAllText((Join-Path $mod $variant[0]), $text.Replace("`n", "`r`n"), (New-Object Text.UTF8Encoding($false)))
+    "$($variant[0]) made from vk_scene.frag"
+}

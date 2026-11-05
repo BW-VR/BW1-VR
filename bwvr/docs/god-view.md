@@ -785,6 +785,7 @@ event.
 | --- | --- | --- |
 | `move_stick` | 1 | 0: the stick does not move the player. 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Move with the other stick" |
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
+| `move_stick_cap_ms` | 50 | The longest frame of the game that the walk counts, 10 to 250. The row "Walk cap" of the debug page gives 50 or 250 (`android.md`, "A long frame of the game") |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed at a full pull of the trigger of the hand of the stick, in percent of the speed with no trigger, 100 to 2000 |
 | `move_stick_path` | 1 | With `controls=1`: 1 the flight keeps its height and stops at the land, with no follow of the land. 0 the walk follows the land as `move_stick_follow_land` says |
 | `move_stick_climb` | 1 | With `controls=1`: 1 the tilt of the controller of the stick moves the player up and down, and past the top limit the world gets smaller. 0 the walk keeps the height |

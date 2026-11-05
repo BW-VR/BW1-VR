@@ -195,6 +195,12 @@ class Menu {
   const std::vector<int>& DisplayRates() const { return display_rates_; }
   // The rate of the row: 0 (the headset sets the rate) or a rate in Hz.
   int DisplayHz() const { return display_hz_; }
+  // The rate of the headset now in whole Hz, for the text of the row.
+  void SetDisplayNow(int hz) {
+    if (hz == display_now_) return;
+    display_now_ = hz;
+    ++revision_;
+  }
   // display_hz of bwvr.ini at the load.
   int DisplayWanted() const { return display_wanted_; }
 
@@ -336,7 +342,7 @@ class Menu {
   // x 2064)". Empty for a command.
   std::string ValueText(const Item& item) const {
     if (item.kind == ItemKind::kDisplayRate) {
-      return display_hz_ > 0 ? std::to_string(display_hz_) + " Hz" : "Headset default";
+      return display_rate::RowText(display_hz_, display_now_);
     }
     if (item.kind == ItemKind::kStrongMem) return StrongMemText(strongmem_);
     if (item.kind == ItemKind::kFrameLoop) return frame_loop_ != 0 ? "On" : "Off";
@@ -424,7 +430,8 @@ class Menu {
         return "How many pictures a second the headset shows. A higher rate gives "
                "smoother head motion. It costs more power and heat. The game itself "
                "can make fewer frames than the rate. Headset default: the app asks "
-               "for no rate. The change counts at once.";
+               "for no rate. The change counts at once. The rate in brackets is the rate "
+               "of the headset now, when it is another rate.";
       case ItemKind::kFrameLoop:
         return "On: a thread of its own plays each picture of the game, and the headset "
                "gets a frame at each refresh of its display, also when the game or the GPU "
@@ -699,6 +706,7 @@ class Menu {
   std::vector<int> display_rates_;
   int display_wanted_ = 0;
   int display_hz_ = 0;
+  int display_now_ = 0;
   int strongmem_ = 0;
   int frame_loop_ = 1;
   wine_rules::Cpu wow64_cpu_ = wine_rules::Cpu::kBox64;

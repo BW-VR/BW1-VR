@@ -752,12 +752,12 @@ that moves while the Hand takes it.
   frame of the session draws the newest list of draws of the game again from the
   place of the head and of the player at the next display time (`late_camera=1`,
   `android.md`, "The late camera"). The math checks have the place of a vertex.
-  It runs on the Steam Frame and gives 90 pictures a second, but it needs
-  `xr_eye_direct=1`, and with that key the picture has flickering double pictures
-  (`android.md`, "A known fault of `xr_eye_direct=1`"). `xr_eye_direct=0` has no
-  flicker, no late camera and twice the GPU time of a picture. Next: one pair of
-  swapchains, with the compose at the take of the picture. Check on the Steam
-  Frame, with the row "Late camera" of the debug page for a comparison:
+  It runs on the Steam Frame with `xr_eye_direct=0` and `xr_compose_take=1`
+  (`android.md`, "The compose at the take"): about 90 pictures a second and no
+  flicker. These keys are 0 by default, and `move_stick_cap_ms` is 50 by default: set
+  the defaults of the headset app. From the tick to the end of the GPU work a picture
+  takes 11.7 ms as a mean and 20 ms for one picture in ten, and 90 Hz has 11.1 ms. Check
+  on the Steam Frame, with the row "Late camera" of the debug page for a comparison:
   - a flight to the side and a flight over the middle of Land 2, right after the
     start of a game: no double picture and no jump of the land,
   - the Hand in a flight (a thing in the Hand goes back by the speed times the age

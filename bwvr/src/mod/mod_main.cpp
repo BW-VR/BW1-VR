@@ -1063,6 +1063,7 @@ void ReadSettings() {
     // with the stick").
     t.move_stick = number("move_stick", 1);
     t.move_stick_speed_cm = number("move_stick_speed_cm", 150);
+    t.move_stick_cap_ms = number("move_stick_cap_ms", 50);
     // The time of a frame for the walk and the smooth zoom: the time between
     // the display times of two frames of the headset (1), or the time of
     // the CPU between two main camera calls (0). docs/god-view.md, "The time

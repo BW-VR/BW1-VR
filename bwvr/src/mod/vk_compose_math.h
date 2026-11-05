@@ -116,4 +116,19 @@ inline uint64_t BytesWritten(const Layout& l) {
   return static_cast<uint64_t>(l.width) * l.height * 4u;
 }
 
+// THE COMPOSE AT THE TAKE (xr_compose_take, docs/android.md, "The compose at the
+// take"). The thread of the session composes the newest finished picture, and the
+// play thread then can have one walk on the GPU and the next walk in its hands.
+// So the walks draw into the sets of the outer image and the centre image in turn.
+// The set of the picture that the session reads is free of writes only with three
+// sets: the two walks after it have the two other sets.
+constexpr int kMostSets = 3;
+
+// The set of a walk. One set: 0. A walk of one eye goes on in the set of the walk
+// before, because its layer 0 stays.
+inline int NextSet(int set, int count, bool both_eyes) {
+  if (count <= 1) return 0;
+  return both_eyes ? (set + 1) % count : set;
+}
+
 }  // namespace vk_compose_math

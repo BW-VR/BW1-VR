@@ -27,6 +27,7 @@ struct Input {
   VkImageView outer[2];   // a 2D view of each eye layer of the outer image
   VkImageView center[2];  // and of the centre image
   uint64_t generation;    // changes with the views
+  int set;                // the set of the two images that the views name
   bool tint;              // the marks of the test (foveation_show): the outer image is blue
 };
 
@@ -67,6 +68,16 @@ struct Target {
 // finished the command buffer. False when nothing is pending or the module
 // cannot work (then it records nothing).
 bool Record(VkCommandBuffer cb, uint32_t slot, const Target targets[2]);
+
+// THE COMPOSE AT THE TAKE (xr_compose_take). TakeTicket keeps the input of the last
+// walk, which left the picture `eye_image` to the compose: nothing is pending then,
+// and the result names that input (0 with none). RecordTicket records it on another
+// thread. It is false for a ticket whose images went. The thread that records holds
+// TakeLock until its submit, and a thread that frees the two images holds it too.
+uint64_t TakeTicket(uint64_t eye_image);
+bool RecordTicket(VkCommandBuffer cb, uint64_t ticket, uint32_t slot, const Target targets[2]);
+void TakeLock();
+void TakeUnlock();
 
 // A swapchain image goes (or an image of the renderer is made again): the
 // views of the module for it go.

@@ -24,6 +24,7 @@ const char* Name(int kind) {
     case kSlotPanel: return "the panel image into a slot";
     case kSlotScreen: return "the screen picture into a slot";
     case kSwapEyes: return "an eye picture of a slot into its swapchain";
+    case kSwapCompose: return "the eye pictures made from the two images at the take (xr_compose_take=1)";
     case kSwapStereo: return "an eye picture into the stereo screen";
     case kSwapPanel: return "the panel image into its swapchain";
     case kSwapScreen: return "the screen picture into the screen quad";

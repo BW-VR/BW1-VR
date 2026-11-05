@@ -12,6 +12,7 @@
 #include "../../src/common/ini_text.h"
 #include "../../src/mod/controller_math.h"
 #include "../../src/mod/screen_quad_math.h"
+#include "../../src/mod/vk_compose_math.h"
 #include "../../src/mod/vk_scene.h"
 #include "app_log.h"
 #include "eye_size.h"
@@ -650,6 +651,7 @@ bool XrApp::MakeVulkan() {
   VkPhysicalDeviceFragmentShadingRateFeaturesKHR want_rate = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
   want_rate.attachmentFragmentShadingRate = VK_TRUE;
+  want_rate.pipelineFragmentShadingRate = rate.pipelineFragmentShadingRate;
   VkPhysicalDeviceFragmentDensityMapFeaturesEXT want_density = {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
   want_density.fragmentDensityMap = VK_TRUE;
@@ -728,6 +730,7 @@ bool XrApp::MakeVulkan() {
     }
   }
   VkSceneSetDeviceFeatures(device_slots, dynamic_blend);
+  VkSceneComposeDeviceRate(shading_rate_ && rate.pipelineFragmentShadingRate == VK_TRUE);
   AppLog("xr           : the device: the textures in one set %s, the dynamic blend %s",
          device_slots ? "yes" : "no", dynamic_blend ? "yes" : "no");
   if (density_map_) {
@@ -1055,6 +1058,8 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
   if (stereo) {
     info.usageFlags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
   }
+  if (make_mutable_) info.usageFlags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+  layer->mutable_format = stereo || make_mutable_;
   info.format = format_;
   info.sampleCount = 1;
   info.width = width;
@@ -1062,7 +1067,15 @@ bool XrApp::MakeLayer(Layer* layer, uint32_t width, uint32_t height,
   info.faceCount = 1;
   info.arraySize = stereo ? 2 : 1;
   info.mipCount = 1;
-  const XrResult created = xrCreateSwapchain(session_, &info, &layer->swapchain);
+  XrResult created = xrCreateSwapchain(session_, &info, &layer->swapchain);
+  // A runtime with no mutable swapchain still gets the swapchain of the old kind.
+  if (XR_FAILED(created) && make_mutable_ && !stereo) {
+    AppLog("xr           : a swapchain with the mutable format gave %d, so the app makes one "
+           "without it (xr_eye_mutable has no effect here)", static_cast<int>(created));
+    info.usageFlags &= ~static_cast<XrSwapchainUsageFlags>(XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT);
+    layer->mutable_format = false;
+    created = xrCreateSwapchain(session_, &info, &layer->swapchain);
+  }
   if (!Ok(created, "xrCreateSwapchain")) {
     layer->swapchain = XR_NULL_HANDLE;
     AppLog("xr           : the swapchain of %u by %u was not made%s. The app holds %d "
@@ -1341,8 +1354,15 @@ bool XrApp::ComposeTake() {
                           eye_copy_math::Bytes(eye_copy_math::Whole(source_width_, source_height_), 2));
   if (!compose_locked_) VkSceneComposeTakeLock();
   compose_locked_ = true;
+  // With the mutable format the compose writes the bytes of the game as they are: the target
+  // encodes nothing, and the shader decodes nothing.
+  const bool bytes = compose_bytes_.load(std::memory_order_relaxed) &&
+                     eyes_.layer[0].mutable_format && eyes_.layer[1].mutable_format;
+  const uint32_t view_format =
+      bytes ? vk_compose_math::BytesFormat(static_cast<uint32_t>(format_))
+            : static_cast<uint32_t>(format_);
   const bool ok = VkSceneComposeRecordTicket(cmd, compose_newest_, compose_slot_++ % 8, images,
-                                             static_cast<uint32_t>(format_));
+                                             view_format);
   gpu_.copy_stamps.After(cmd, stamp);
   compose_done_ = compose_newest_;
   // With no record the images stay held for the next picture. The lock goes in the
@@ -2696,7 +2716,10 @@ bool XrApp::MakeScreenSet(Screen* screen, uint32_t width, uint32_t height,
     return false;
   };
   for (int i = 0; i < count && i < 2; ++i) {
-    if (!MakeLayer(&screen->layer[i], width, height, false)) {
+    make_mutable_ = eye_mutable_;
+    const bool made = MakeLayer(&screen->layer[i], width, height, false);
+    make_mutable_ = false;
+    if (!made) {
       return fail("the runtime gave no swapchain (xrCreateSwapchain)");
     }
   }
@@ -3641,6 +3664,25 @@ bool XrApp::CopySlot(Screen* screen, int index, VkImage source, uint32_t source_
                                        : copy_time::kSwapStereo;
   const uint32_t stamp = GpuStampIndex(gpu_);
   gpu_.copy_stamps.Before(cmd, stamp, kind, eye_copy_math::Bytes(part, 1));
+  // THE PANEL BY A DRAW (vk_compose_fast=1): a draw writes about five times the bytes of a copy
+  // in a second. It needs a view of the UNORM format, because a copy keeps the bytes too.
+  if (screen == &panel_ && same && !renderer_second_ && layer->mutable_format &&
+      compose_bytes_.load(std::memory_order_relaxed)) {
+    if (!compose_locked_) VkSceneComposeTakeLock();
+    compose_locked_ = true;
+    const uint32_t view_format = vk_compose_math::BytesFormat(static_cast<uint32_t>(format_));
+    // The ring keeps its images in the UNORM format of the byte order of the swapchain.
+    if (VkSceneComposeRecordCopy(cmd, reinterpret_cast<uint64_t>(source), view_format,
+                                 compose_slot_ % 8, reinterpret_cast<uint64_t>(target), view_format,
+                                 part.x, part.y, part.w, part.h, layer->width, layer->height)) {
+      gpu_.copy_stamps.After(cmd, stamp);
+      to_release_.push_back(layer->swapchain);
+      layer->released = layer->revision;
+      ++copies_;
+      ++screen->copies[index];
+      return true;
+    }
+  }
   // xr_copy_once=1: the copy of the same size that CopySlot records below,
   // recorded one time.
   if (same && copy_once_) {

@@ -84,6 +84,34 @@ inline void CheckLayout(const char* label, const m::Layout& l) {
   m::Vertex grid[m::kVertices];
   const int n = m::BuildGrid(l, grid);
   Check(n == 150 && m::kVertices == 150, "the grid has 150 vertices", n, 150);
+  {
+    m::Vertex parts[m::kVertices];
+    const int made = m::BuildGridParts(l, parts);
+    Check(made == m::kVertices, "the grid in parts has all vertices", made, m::kVertices);
+    int outer_alpha = 0;
+    for (int i = 0; i < m::kOuterVertices; ++i) {
+      if (parts[i].alpha != 0.0f) ++outer_alpha;
+    }
+    Check(outer_alpha == 0, "the outer part has only the outer image", outer_alpha, 0);
+    int inner_one = 0;
+    for (int i = m::kOuterVertices; i < m::kVertices; ++i) {
+      if (parts[i].alpha == 1.0f) ++inner_one;
+    }
+    Check(inner_one > 0, "the inner part has the centre", inner_one, 1);
+    // The same cells: the sum of the places is the same in both orders.
+    double whole = 0.0, split = 0.0, alpha_whole = 0.0, alpha_split = 0.0;
+    for (int i = 0; i < m::kVertices; ++i) {
+      whole += grid[i].x * 3.0 + grid[i].y;
+      split += parts[i].x * 3.0 + parts[i].y;
+      alpha_whole += grid[i].alpha;
+      alpha_split += parts[i].alpha;
+    }
+    Check(whole == split && alpha_whole == alpha_split, "the parts have the cells of the grid", split,
+          whole);
+    Check(m::BytesFormat(43) == 37 && m::BytesFormat(50) == 44,
+          "an sRGB format has its UNORM format for the bytes", m::BytesFormat(43), 37);
+    Check(m::BytesFormat(37) == 37, "a UNORM format stays", m::BytesFormat(37), 37);
+  }
   // The cells fill the eye picture once.
   double area = 0.0;
   for (int t = 0; t < n; t += 3) area += TriangleArea(grid + t);

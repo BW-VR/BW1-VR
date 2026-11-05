@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <atomic>
 #include <cstddef>
 #include <mutex>
 #include <vector>
@@ -59,6 +60,7 @@ struct Dev {
   PFN_vkCmdSetViewport CmdViewport;
   PFN_vkCmdSetScissor CmdScissor;
   PFN_vkCmdDraw CmdDraw;
+  PFN_vkCmdSetFragmentShadingRateKHR CmdSetRate;
 };
 
 constexpr uint32_t kSlots = 8;
@@ -79,8 +81,19 @@ struct View {
 
 struct Pipe {
   VkFormat format;
+  int mode;  // kOuterOnly of vk_compose.frag
   VkPipeline pipeline;
 };
+
+// THE PANEL BY A DRAW: the view and the set of a source image.
+struct CopySource {
+  VkImage image;
+  VkImageView view;
+  VkDescriptorSet set;
+};
+constexpr uint32_t kCopySets = 32;
+// The vertices of the copy in a slot, after the 150 vertices of the grid.
+constexpr VkDeviceSize kCopyVerticesAt = 6144;
 
 std::mutex g_lock;
 Dev g_dev = {};
@@ -98,6 +111,12 @@ uint64_t g_sets_generation = 0;
 vk::Buffer g_vertices = {};
 std::vector<View> g_views;
 std::vector<Pipe> g_pipes;
+std::vector<CopySource> g_copy_sources;
+VkDescriptorPool g_copy_pool = VK_NULL_HANDLE;
+// THE COMPOSE IN PARTS: the play thread sets them, and the thread of the session reads them.
+std::atomic<bool> g_fast{false};
+std::atomic<int> g_rate{1};
+bool g_rate_device = false;
 
 // The pending input.
 Input g_input = {};
@@ -152,6 +171,8 @@ bool LoadDevice() {
   BWVR_LOAD(CmdViewport, "vkCmdSetViewport");
   BWVR_LOAD(CmdScissor, "vkCmdSetScissor");
   BWVR_LOAD(CmdDraw, "vkCmdDraw");
+  // Only a device with the rate of a pipeline has it, and the compose works with no rate.
+  Load(&g_dev.CmdSetRate, "vkCmdSetFragmentShadingRateKHR");
 #undef BWVR_LOAD
   return ok;
 }
@@ -162,6 +183,10 @@ void DestroyAll() {
     if (v.view != VK_NULL_HANDLE) g_dev.DestroyImageView(g_device, v.view, nullptr);
   }
   g_views.clear();
+  for (CopySource& c : g_copy_sources) g_dev.DestroyImageView(g_device, c.view, nullptr);
+  g_copy_sources.clear();
+  if (g_copy_pool != VK_NULL_HANDLE) g_dev.DestroyPool(g_device, g_copy_pool, nullptr);
+  g_copy_pool = VK_NULL_HANDLE;
   for (Pipe& p : g_pipes) g_dev.DestroyPipeline(g_device, p.pipeline, nullptr);
   g_pipes.clear();
   if (g_pool != VK_NULL_HANDLE) g_dev.DestroyPool(g_device, g_pool, nullptr);
@@ -252,10 +277,17 @@ bool Init() {
   return true;
 }
 
-VkPipeline PipelineFor(VkFormat format) {
+VkPipeline PipelineFor(VkFormat format, int mode) {
   for (const Pipe& p : g_pipes) {
-    if (p.format == format) return p.pipeline;
+    if (p.format == format && p.mode == mode) return p.pipeline;
   }
+  const VkSpecializationMapEntry spec_entry = {0, 0, sizeof(int32_t)};
+  const int32_t spec_value = mode;
+  VkSpecializationInfo spec = {};
+  spec.mapEntryCount = 1;
+  spec.pMapEntries = &spec_entry;
+  spec.dataSize = sizeof(spec_value);
+  spec.pData = &spec_value;
   VkPipelineShaderStageCreateInfo stages[2] = {
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
@@ -265,6 +297,7 @@ VkPipeline PipelineFor(VkFormat format) {
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = g_frag;
   stages[1].pName = "main";
+  stages[1].pSpecializationInfo = &spec;
   const VkVertexInputBindingDescription binding = {0, sizeof(m::Vertex),
                                                    VK_VERTEX_INPUT_RATE_VERTEX};
   const VkVertexInputAttributeDescription attributes[4] = {
@@ -300,10 +333,11 @@ VkPipeline PipelineFor(VkFormat format) {
       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
   blend_state.attachmentCount = 1;
   blend_state.pAttachments = &blend;
-  const VkDynamicState dynamic[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  const VkDynamicState dynamic[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
+                                    VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR};
   VkPipelineDynamicStateCreateInfo dynamic_state = {
       VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dynamic_state.dynamicStateCount = 2;
+  dynamic_state.dynamicStateCount = g_rate_device && g_dev.CmdSetRate != nullptr ? 3 : 2;
   dynamic_state.pDynamicStates = dynamic;
   // One layer, no eye, no depth.
   VkPipelineRenderingCreateInfo rendering = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -327,8 +361,9 @@ VkPipeline PipelineFor(VkFormat format) {
       VK_SUCCESS) {
     return VK_NULL_HANDLE;
   }
-  g_pipes.push_back({format, pipeline});
-  ModLog("vk compose   : a pipeline of the compose for the format %d", static_cast<int>(format));
+  g_pipes.push_back({format, mode, pipeline});
+  ModLog("vk compose   : a pipeline of the compose for the format %d%s", static_cast<int>(format),
+         mode == 1 ? ", for the cells outside the centre" : mode == 2 ? ", for a copy" : "");
   return pipeline;
 }
 
@@ -394,6 +429,156 @@ bool RecordInput(VkCommandBuffer cb, uint32_t slot, const Input& input, const Ta
 
 }  // namespace
 
+void SetFast(bool on) { g_fast.store(on, std::memory_order_relaxed); }
+
+void SetRate(int rate) {
+  g_rate.store(rate == 2 || rate == 4 ? rate : 1, std::memory_order_relaxed);
+}
+
+void SetDeviceRate(bool on) { g_rate_device = on; }
+
+namespace {
+
+// The set of a source image: the image is in both bindings, and the shader reads binding 0.
+VkDescriptorSet CopySetFor(VkImage source, VkFormat format) {
+  for (const CopySource& c : g_copy_sources) {
+    if (c.image == source) return c.set;
+  }
+  if (g_copy_pool == VK_NULL_HANDLE) {
+    const VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * kCopySets};
+    VkDescriptorPoolCreateInfo pool = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pool.maxSets = kCopySets;
+    pool.poolSizeCount = 1;
+    pool.pPoolSizes = &size;
+    if (g_dev.CreatePool(g_device, &pool, nullptr, &g_copy_pool) != VK_SUCCESS) {
+      g_copy_pool = VK_NULL_HANDLE;
+      return VK_NULL_HANDLE;
+    }
+  }
+  VkImageViewCreateInfo info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  info.image = source;
+  info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  info.format = format;
+  info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  VkImageView view = VK_NULL_HANDLE;
+  if (g_dev.CreateImageView(g_device, &info, nullptr, &view) != VK_SUCCESS) return VK_NULL_HANDLE;
+  VkDescriptorSetAllocateInfo alloc = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  alloc.descriptorPool = g_copy_pool;
+  alloc.descriptorSetCount = 1;
+  alloc.pSetLayouts = &g_set_layout;
+  VkDescriptorSet set = VK_NULL_HANDLE;
+  if (g_dev.AllocateSets(g_device, &alloc, &set) != VK_SUCCESS) {
+    // The pool has no more room: the caller keeps the copy of the transfer.
+    g_dev.DestroyImageView(g_device, view, nullptr);
+    return VK_NULL_HANDLE;
+  }
+  const VkDescriptorImageInfo image = {g_sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                    {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+  for (uint32_t i = 0; i < 2; ++i) {
+    writes[i].dstSet = set;
+    writes[i].dstBinding = i;
+    writes[i].descriptorCount = 1;
+    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[i].pImageInfo = &image;
+  }
+  g_dev.UpdateSets(g_device, 2, writes, 0, nullptr);
+  g_copy_sources.push_back({source, view, set});
+  return set;
+}
+
+void SourceBarrier(VkCommandBuffer cb, VkImage image, bool to_shader) {
+  VkImageMemoryBarrier2 b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+  b.srcStageMask = to_shader ? VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+                             : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  b.srcAccessMask = to_shader ? VK_ACCESS_2_MEMORY_WRITE_BIT : 0;
+  b.dstStageMask = to_shader ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+                             : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  b.dstAccessMask = to_shader ? VK_ACCESS_2_SHADER_READ_BIT : VK_ACCESS_2_TRANSFER_READ_BIT;
+  b.oldLayout = to_shader ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                          : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  b.newLayout = to_shader ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                          : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b.image = image;
+  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  VkDependencyInfo dependency = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+  dependency.imageMemoryBarrierCount = 1;
+  dependency.pImageMemoryBarriers = &b;
+  g_dev.CmdBarrier(cb, &dependency);
+}
+
+}  // namespace
+
+bool RecordCopy(VkCommandBuffer cb, VkImage source, VkFormat source_format, uint32_t slot,
+                const Target& target, int32_t x, int32_t y, int32_t w, int32_t h, uint32_t width,
+                uint32_t height) {
+  std::lock_guard<std::mutex> lock(g_lock);
+  if (!Init() || w <= 0 || h <= 0 || width == 0 || height == 0) return false;
+  const VkDescriptorSet set = CopySetFor(source, source_format);
+  const VkPipeline pipeline = PipelineFor(target.format, 2);
+  const VkImageView view = ViewFor(target);
+  if (set == VK_NULL_HANDLE || pipeline == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return false;
+  // One quad over the whole image, and the scissor has the part.
+  const float fw = static_cast<float>(width), fh = static_cast<float>(height);
+  const m::Vertex quad[6] = {{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+                             {fw, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f},
+                             {fw, fh, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f},
+                             {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+                             {fw, fh, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f},
+                             {0.0f, fh, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f}};
+  const VkDeviceSize at = kSlotBytes * (slot % kSlots) + kCopyVerticesAt;
+  memcpy(static_cast<uint8_t*>(g_vertices.mapped) + at, quad, sizeof(quad));
+  SourceBarrier(cb, source, true);
+  VkImageMemoryBarrier2 barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+  barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+  barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image = target.image;
+  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, target.layer, 1};
+  VkDependencyInfo dependency = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+  dependency.imageMemoryBarrierCount = 1;
+  dependency.pImageMemoryBarriers = &barrier;
+  g_dev.CmdBarrier(cb, &dependency);
+  VkRenderingAttachmentInfo color = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+  color.imageView = view;
+  color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  color.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  VkRenderingInfo rendering = {VK_STRUCTURE_TYPE_RENDERING_INFO};
+  const VkRect2D part = {{x, y}, {static_cast<uint32_t>(w), static_cast<uint32_t>(h)}};
+  rendering.renderArea = part;
+  rendering.layerCount = 1;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachments = &color;
+  g_dev.CmdBegin(cb, &rendering);
+  const VkViewport viewport = {0.0f, 0.0f, fw, fh, 0.0f, 1.0f};
+  g_dev.CmdViewport(cb, 0, 1, &viewport);
+  g_dev.CmdScissor(cb, 0, 1, &part);
+  g_dev.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+  g_dev.CmdBindSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &set, 0, nullptr);
+  PushConstants push = {};
+  push.scale[0] = 2.0f / fw;
+  push.scale[1] = 2.0f / fh;
+  push.tint[0] = push.tint[1] = push.tint[2] = push.tint[3] = 1.0f;
+  g_dev.CmdPush(cb, g_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                sizeof(push), &push);
+  g_dev.CmdBindVertices(cb, 0, 1, &g_vertices.buffer, &at);
+  if (g_rate_device && g_dev.CmdSetRate != nullptr) {
+    const VkFragmentShadingRateCombinerOpKHR keep[2] = {VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR,
+                                                        VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR};
+    const VkExtent2D one = {1, 1};
+    g_dev.CmdSetRate(cb, &one, keep);
+  }
+  g_dev.CmdDraw(cb, 6, 1, 0, 0);
+  g_dev.CmdEnd(cb);
+  SourceBarrier(cb, source, false);
+  return true;
+}
+
 void Set(const Input& input, uint64_t eye_image, bool uncomposed) {
   std::lock_guard<std::mutex> lock(g_lock);
   g_input = input;
@@ -425,7 +610,7 @@ void DropAll() {
 
 bool Usable() {
   std::lock_guard<std::mutex> lock(g_lock);
-  return Init() && PipelineFor(vk::Get().color_format) != VK_NULL_HANDLE;
+  return Init() && PipelineFor(vk::Get().color_format, 0) != VK_NULL_HANDLE;
 }
 
 void MarkComposed(uint64_t eye_image) {
@@ -472,16 +657,26 @@ namespace {
 bool RecordInput(VkCommandBuffer cb, uint32_t slot, const Input& input, const Target targets[2]) {
   if (!Init() || !EnsureSets(input)) return false;
   const m::Layout& l = input.layout;
+  const bool fast = g_fast.load(std::memory_order_relaxed);
+  const bool can_rate = g_rate_device && g_dev.CmdSetRate != nullptr;
   m::Vertex grid[m::kVertices];
-  m::BuildGrid(l, grid);
+  if (fast) {
+    m::BuildGridParts(l, grid);
+  } else {
+    m::BuildGrid(l, grid);
+  }
   slot %= kSlots;
   const VkDeviceSize at = kSlotBytes * slot;
   memcpy(static_cast<uint8_t*>(g_vertices.mapped) + at, grid, sizeof(grid));
   for (int eye = 0; eye < 2; ++eye) {
     const Target& t = targets[eye];
-    const VkPipeline pipeline = PipelineFor(t.format);
+    const VkPipeline pipeline = PipelineFor(t.format, 0);
+    const VkPipeline outer_pipeline = fast ? PipelineFor(t.format, 1) : VK_NULL_HANDLE;
     const VkImageView view = ViewFor(t);
-    if (pipeline == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return false;
+    if (pipeline == VK_NULL_HANDLE || view == VK_NULL_HANDLE ||
+        (fast && outer_pipeline == VK_NULL_HANDLE)) {
+      return false;
+    }
     // The old pixels go: the pass loads nothing. The wait is for every
     // earlier command of the queue, because a copy of an earlier picture can
     // still read the image.
@@ -516,7 +711,7 @@ bool RecordInput(VkCommandBuffer cb, uint32_t slot, const Input& input, const Ta
     const VkRect2D scissor = {{0, 0}, {l.width, l.height}};
     g_dev.CmdViewport(cb, 0, 1, &viewport);
     g_dev.CmdScissor(cb, 0, 1, &scissor);
-    g_dev.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    g_dev.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, fast ? outer_pipeline : pipeline);
     g_dev.CmdBindSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &g_sets[input.set][eye],
                       0, nullptr);
     PushConstants push = {};
@@ -531,7 +726,23 @@ bool RecordInput(VkCommandBuffer cb, uint32_t slot, const Input& input, const Ta
     g_dev.CmdPush(cb, g_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                   sizeof(push), &push);
     g_dev.CmdBindVertices(cb, 0, 1, &g_vertices.buffer, &at);
-    g_dev.CmdDraw(cb, m::kVertices, 1, 0, 0);
+    const VkFragmentShadingRateCombinerOpKHR keep[2] = {VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR,
+                                                        VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR};
+    const VkExtent2D one = {1, 1};
+    if (fast) {
+      // The outer image has a quarter of the pixels on each side, so a coarse shade of
+      // its cells loses little. The rect of the centre has one shade for each pixel.
+      const uint32_t rate = static_cast<uint32_t>(g_rate.load(std::memory_order_relaxed));
+      const VkExtent2D coarse = {rate, rate};
+      if (can_rate) g_dev.CmdSetRate(cb, &coarse, keep);
+      g_dev.CmdDraw(cb, m::kOuterVertices, 1, 0, 0);
+      g_dev.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+      if (can_rate) g_dev.CmdSetRate(cb, &one, keep);
+      g_dev.CmdDraw(cb, m::kVertices - m::kOuterVertices, 1, m::kOuterVertices, 0);
+    } else {
+      if (can_rate) g_dev.CmdSetRate(cb, &one, keep);
+      g_dev.CmdDraw(cb, m::kVertices, 1, 0, 0);
+    }
     g_dev.CmdEnd(cb);
   }
   ++g_counts.records;
@@ -545,6 +756,14 @@ void Forget(VkImage image) {
   // The eye image of a pending compose goes: nothing is pending.
   if (g_eye_image == (uint64_t)image) g_have = false;
   if (g_device == VK_NULL_HANDLE) return;
+  for (size_t i = 0; i < g_copy_sources.size();) {
+    if (g_copy_sources[i].image == image) {
+      g_dev.DestroyImageView(g_device, g_copy_sources[i].view, nullptr);
+      g_copy_sources.erase(g_copy_sources.begin() + static_cast<std::ptrdiff_t>(i));
+    } else {
+      ++i;
+    }
+  }
   for (size_t i = 0; i < g_views.size();) {
     if (g_views[i].image == image) {
       g_dev.DestroyImageView(g_device, g_views[i].view, nullptr);

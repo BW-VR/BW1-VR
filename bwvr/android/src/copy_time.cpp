@@ -1,5 +1,6 @@
 #include "copy_time.h"
 
+#include <atomic>
 #include <mutex>
 
 namespace copy_time {
@@ -32,12 +33,17 @@ const char* Name(int kind) {
   }
 }
 
+std::atomic<float> g_last_compose_ms{0.0f};
+
 void Add(int kind, double ms, uint64_t bytes) {
   if (kind < 0 || kind >= kKinds) return;
+  if (kind == kSwapCompose) g_last_compose_ms.store(static_cast<float>(ms), std::memory_order_relaxed);
   std::lock_guard<std::mutex> g(g_lock);
   g_window.ms[kind].Add(ms);
   g_window.bytes[kind] += bytes;
 }
+
+float LastComposeMs() { return g_last_compose_ms.load(std::memory_order_relaxed); }
 
 void TakeWindow(Window* out) {
   std::lock_guard<std::mutex> g(g_lock);

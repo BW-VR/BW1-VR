@@ -27,6 +27,7 @@ void RemoteControl::Start(const std::string& control_path, const std::string& st
   step_.clear();
   gpu_state_.store(-1);
   tiny_pixels_.store(-1);
+  compose_rate_.store(-1);
   {
     std::lock_guard<std::mutex> lock(lock_);
     prompt_.clear();
@@ -99,6 +100,9 @@ void RemoteControl::ReadFile() {
     } else if (rm::KeyIs(line, "tiny_pixels")) {
       int tenths = -1;
       if (rm::IntOf(line, &tenths)) tiny_pixels_.store(tenths, std::memory_order_relaxed);
+    } else if (rm::KeyIs(line, "compose_rate")) {
+      int rate = -1;
+      if (rm::IntOf(line, &rate)) compose_rate_.store(rate, std::memory_order_relaxed);
     }
   }
 }

@@ -122,7 +122,9 @@ bool PictureRing::MakeImage(Image* image, uint32_t width, uint32_t height, uint3
   info.arrayLayers = layers;
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
-  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  // THE PANEL BY A DRAW samples the image of a slot.
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_SAMPLED_BIT;
   if (vkCreateImage(device_, &info, nullptr, &image->image) != VK_SUCCESS) {
     image->image = VK_NULL_HANDLE;
     return false;
@@ -447,6 +449,7 @@ bool PictureRing::CopyPanel(int i, VkImage source, uint32_t width, uint32_t heig
       XrApp::QueueLock();
       vkDeviceWaitIdle(device_);
       XrApp::QueueUnlock();
+      VkSceneComposeForget(reinterpret_cast<uint64_t>(s.panel.image));
       FreeImage(&s.panel);
     }
     if (!MakeImage(&s.panel, width, height, 1)) {

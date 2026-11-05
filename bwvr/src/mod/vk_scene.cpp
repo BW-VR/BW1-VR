@@ -443,6 +443,17 @@ bool g_list_measure = false;        // VkSceneListMeasure
 bool g_tiny_on = false;             // VkSceneSetTinyDraws
 float g_tiny_pixels = 1.0f;         // VkSceneSetTinyPixels
 uint32_t g_tiny_out[2] = {0, 0};    // the tiny draws of the last walk, for each pass
+// THE LIST AGAIN (vk_list_keep): the lists of the passes of the last walk, what they left
+// out, and the move in pixels that they hold for.
+bool g_list_keep = false;
+bool g_cheap_draws = false;  // VkSceneSetCheapDraws
+bool g_lists_valid = false;
+bool g_lists_reuse = false;
+float g_lists_margin = 0.0f;
+uint32_t g_lists_out_of_view[2] = {0, 0};
+uint32_t g_lists_left_out[2] = {0, 0};
+uint64_t g_lists_draws[2] = {0, 0};
+uint64_t g_lists_commands[2] = {0, 0};
 bool g_list_now = false;
 uint64_t g_list_walks = 0;
 // THE SAME PANEL (xr_panel_keep): the hash of the draws of the panel of this walk and of
@@ -3189,6 +3200,7 @@ void MresWalkLine(const Slot& s, const uint32_t drawn[2],
 // Without the key the pass plays the records as they are.
 std::vector<MresRecord> g_mres_play;
 std::vector<MresRecord> g_mres_merged;
+std::vector<MresRecord> g_mres_lists[2];  // the list of each pass (PlayMres)
 std::vector<vk_draw_math::Draw> g_mres_facts;
 std::vector<uint32_t> g_mres_order;
 
@@ -3402,7 +3414,7 @@ void ListMeasure(int pass, float sx, float sy) {
   uint64_t indices = 0, seen[256];
   uint64_t last = 0;
   bool in_run = false;
-  for (const MresRecord& r : g_mres_play) {
+  for (const MresRecord& r : g_mres_lists[pass]) {
     if (r.clear >= 0) {
       in_run = false;
       continue;
@@ -3503,9 +3515,31 @@ void PlayMres(Slot& s) {
     VkPipeline slots_pipeline = VK_NULL_HANDLE;
     bool blend_known = false;
     uint32_t blend_now = 0;
-    PreparePass(s, pass, ox, oy, sx, sy, used_w, used_h, out_of_view, left_out);
+    if (g_lists_reuse) {
+      out_of_view[pass] = g_lists_out_of_view[pass];
+      left_out[pass] = g_lists_left_out[pass];
+      g_dc_draws += g_lists_draws[pass];
+      g_dc_commands += g_lists_commands[pass];
+    } else {
+      // With vk_list_keep the list of the centre holds for a wider move, so the pictures
+      // after this one can keep it. The loop below still leaves out what this move needs not.
+      const float margin = g_late_margin;
+      if (g_list_keep) {
+        const float wide = margin * 1.5f;
+        g_late_margin = wide > 64.0f ? wide : 64.0f;
+        g_lists_margin = g_late_margin;
+      }
+      const uint64_t draws_before = g_dc_draws, commands_before = g_dc_commands;
+      PreparePass(s, pass, ox, oy, sx, sy, used_w, used_h, out_of_view, left_out);
+      g_late_margin = margin;
+      g_mres_lists[pass].swap(g_mres_play);
+      g_lists_out_of_view[pass] = out_of_view[pass];
+      g_lists_left_out[pass] = left_out[pass];
+      g_lists_draws[pass] = g_dc_draws - draws_before;
+      g_lists_commands[pass] = g_dc_commands - commands_before;
+    }
     ListMeasure(pass, sx, sy);
-    for (const MresRecord& r : g_mres_play) {
+    for (const MresRecord& r : g_mres_lists[pass]) {
       if (r.clear >= 0) {
         PlayClear(cb, g_mres_clears[r.clear], color, depth, ox, oy, sx, sy,
                   used_w, used_h);
@@ -3589,6 +3623,22 @@ void PlayMres(Slot& s) {
         DrawMeshGeometry(cb, s, r);
         continue;
       }
+      // THE CHEAP DRAWS: no bind for a draw. A draw names the place of its vertices and of its
+      // indices in the ring, so the state of the device does not change. A draw with texture
+      // coordinates of stage 1 moves buffer 1, so that the vertex at `base` reads its own.
+      if (g_cheap_draws && r.vertex_at % 32 == 0) {
+        const uint32_t base = static_cast<uint32_t>(r.vertex_at / 32);
+        BindVertices(cb, s, 0, r.uv1_at != r.vertex_at ? r.uv1_at - r.vertex_at / 4 : 0);
+        if (r.index_count > 0) {
+          const bool wide = r.wide != 0;
+          BindIndices(cb, s.ring.buffer, 0, wide ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
+          f.vkCmdDrawIndexed(cb, r.index_count, 1, static_cast<uint32_t>(r.index_at / (wide ? 4 : 2)),
+                             static_cast<int32_t>(base), 0);
+        } else {
+          f.vkCmdDraw(cb, r.vertex_count, 1, base, 0);
+        }
+        continue;
+      }
       BindVertices(cb, s, r.vertex_at, r.uv1_at);
       if (r.index_count > 0) {
         BindIndices(cb, s.ring.buffer, r.index_at,
@@ -3605,6 +3655,8 @@ void PlayMres(Slot& s) {
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 2);
   }
   MresWalkLine(s, drawn, out_of_view, left_out);
+  g_lists_valid = g_list_keep;
+  g_lists_reuse = false;
   g_last_drawn[0] = drawn[0];
   g_last_drawn[1] = drawn[1];
   // For the check for a black picture: what the walk drew, and the quads
@@ -4798,6 +4850,8 @@ void EndOnWorker(const void*) {
 void FinishWalk() {
   Slot& s = g_slots[g_slot];
   s.used_walk = s.used;
+  g_lists_valid = false;
+  g_lists_reuse = false;
   if (g_walk_mres) {
     if (g_rendering_panel) f.vkCmdEndRendering(s.cb);
     g_rendering_panel = false;
@@ -5218,9 +5272,34 @@ void VkSceneTexture(uint32_t stage, void* surface) {
   if (stage == 1) g_texture1 = surface;
 }
 
+// THE TINY DRAWS: a draw that is tiny also in the centre image leaves before all work. In the
+// mod it does not go to the app, and in the app it takes no place in the ring and no record.
+// The centre image has the most pixels, so such a draw is tiny in the outer image too.
+static bool TinyEverywhere(uint32_t fvf, const void* vertices, uint32_t vertex_count) {
+  if (!g_tiny_on || fvf != 0x1C4 || vertices == nullptr || ForPanel()) return false;
+  if (!OneWalkActive() || OneWalkModeNow() != kOneWalkBoth) return false;
+  const float* v = static_cast<const float*>(vertices);
+  float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+  bool all_rhw_one = true, all_far = true;
+  for (uint32_t i = 0; i < vertex_count; ++i, v += 8) {
+    if (v[0] < x0) x0 = v[0];
+    if (v[0] > x1) x1 = v[0];
+    if (v[1] < y0) y0 = v[1];
+    if (v[1] > y1) y1 = v[1];
+    if (v[3] != 1.0f) all_rhw_one = false;
+    if (v[2] < 1.0f) all_far = false;
+  }
+  // A flat batch (the interface) and a batch at infinity stay.
+  if (all_rhw_one || all_far) return false;
+  const float sx = g_walk_mres && g_mres.center_scale_x > 0.0f ? g_mres.center_scale_x : 1.0f;
+  const float sy = g_walk_mres && g_mres.center_scale_y > 0.0f ? g_mres.center_scale_y : 1.0f;
+  return vk_draw_math::IsTiny((x1 - x0) * sx, (y1 - y0) * sy, g_tiny_pixels);
+}
+
 void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
                  uint32_t vertex_count, const uint16_t* indices,
                  uint32_t index_count) {
+  if (TinyEverywhere(fvf, vertices, vertex_count)) return;
   BWVR_STREAM(VkStreamDraw(type, fvf, vertices, vertex_count, indices,
                            index_count));
   if (g_bare_walk) {
@@ -7008,8 +7087,6 @@ bool VkSceneLateReplay(const float move[4], const float room[4]) {
   WaitSlot(s);
   f.vkResetFences(device, 1, &s.fence);
   ReadSlotTime(s);
-  // The list stays. Only the indices of the joined draws go in again.
-  s.used = s.used_walk;
   s.upload_open = false;
   f.vkResetCommandPool(device, s.pool, 0);
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -7022,6 +7099,11 @@ bool VkSceneLateReplay(const float move[4], const float room[4]) {
     f.vkCmdWriteTimestamp2(s.cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.query, 0);
   }
   SetLate(move, room);
+  // The list stays. With vk_list_keep the lists of its passes and their joined indices stay too,
+  // while they hold for this move. Else the indices of the joined draws go in again.
+  g_lists_reuse = g_list_keep && g_lists_valid && g_late_margin <= g_lists_margin &&
+                  g_gpu_test == kTestNormal;
+  if (!g_lists_reuse) s.used = s.used_walk;
   g_walk_late = false;
   PlayMres(s);
   if (s.query != VK_NULL_HANDLE) {
@@ -7061,6 +7143,28 @@ void VkSceneSetBindless(bool on) {
 }
 
 void VkSceneSetTinyDraws(bool on) { g_tiny_on = on; }
+
+void VkSceneSetListKeep(bool on) {
+  g_list_keep = on;
+  if (!on) g_lists_valid = false;
+}
+
+void VkSceneComposeFast(bool on) { vk_compose::SetFast(on); }
+
+void VkSceneComposeRate(int rate) { vk_compose::SetRate(rate); }
+
+bool VkSceneComposeRecordCopy(void* command_buffer, uint64_t source, uint32_t source_format,
+                              uint32_t slot, uint64_t target, uint32_t target_format, int32_t x,
+                              int32_t y, int32_t w, int32_t h, uint32_t width, uint32_t height) {
+  const vk_compose::Target t = {(VkImage)target, 0, static_cast<VkFormat>(target_format)};
+  return vk_compose::RecordCopy(reinterpret_cast<VkCommandBuffer>(command_buffer), (VkImage)source,
+                                static_cast<VkFormat>(source_format), slot, t, x, y, w, h, width,
+                                height);
+}
+
+void VkSceneSetCheapDraws(bool on) { g_cheap_draws = on; }
+
+void VkSceneComposeDeviceRate(bool on) { vk_compose::SetDeviceRate(on); }
 
 void VkSceneSetTinyPixels(float pixels) { g_tiny_pixels = pixels; }
 

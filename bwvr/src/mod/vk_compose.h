@@ -61,6 +61,22 @@ struct Target {
   VkFormat format;
 };
 
+// THE COMPOSE IN PARTS (vk_compose_fast=1): the cells outside the centre draw with a
+// pipeline that reads one image, at the shading rate of SetRate (1, 2 or 4, 1 by default).
+// SetDeviceRate: the device was made with the rate of a pipeline.
+void SetFast(bool on);
+void SetRate(int rate);
+void SetDeviceRate(bool on);
+
+// THE PANEL BY A DRAW: the pixels of `part` of the image `source` (a transfer source, in the
+// format `source_format`) into the image of the target, with their alpha. A draw writes about
+// five times the bytes of a copy in a second on the GPU of the Steam Frame. The source is a
+// transfer source again at the end, and the target is a color attachment. The caller holds
+// TakeLock until its submit. False with nothing recorded.
+bool RecordCopy(VkCommandBuffer cb, VkImage source, VkFormat source_format, uint32_t slot,
+                const Target& target, int32_t x, int32_t y, int32_t w, int32_t h, uint32_t width,
+                uint32_t height);
+
 // Records the compose of the pending input into the command buffer: one pass
 // for each eye, into targets[0] and targets[1], whole image, no load, in the
 // layout of a color attachment at the end. `slot` (0 to 7) is the place of

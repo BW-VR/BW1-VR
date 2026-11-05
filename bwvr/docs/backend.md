@@ -5335,6 +5335,15 @@ run: a headset (the blend of the centre layer by the compositor of a Quest
 
 ### The compose of the eye picture
 
+**The compose in parts** (`vk_compose_fast`, 0 by default, the row "Compose fast" of the debug
+page). The 16 cells around the centre draw first, with a pipeline that reads only the outer image
+and at the shading rate of `vk_compose_rate`. The 9 cells of the centre draw after them at one
+shade for each pixel, and the middle of the centre reads only the centre image. With
+`xr_eye_mutable=1` the compose writes through a view of the UNORM format: the shader decodes
+nothing and the target encodes nothing, and the bytes stay the bytes of the game. A new panel
+then goes to its swapchain with a draw of the same module and with its alpha (`RecordCopy`),
+because a draw writes about five times the bytes of a copy in a second on the Steam Frame.
+
 **Where the GPU time of a picture goes on the Steam Frame** (Turnip Adreno 750,
 the island of the game, `fovea_res=1` with the outer image at 25 percent and
 the centre at 100 percent for 20 degrees, a render of 2808 by 2246 for each
@@ -5394,6 +5403,24 @@ the fragment shader has `SLOTS`, and the blend is a dynamic state where the devi
 on the GPU keeps the old way. On the Steam Frame the walk has 2 pipelines and 2 binds of sets
 in place of about 650 and 1700, and the GPU time of the walk does not change: the binds are
 not what costs the time.
+
+**The tiny draws** (`vk_tiny_draws`, 0 by default, the row "Tiny draws" of the debug page).
+A draw of the world that is smaller than `vk_tiny_pixels` tenths of a pixel in both directions
+in the image of a pass does not go to the GPU for that pass. The size comes from the rect of the
+left eye, because the rect of the record has the move of the right eye in its width. A draw that
+is tiny also in the centre image leaves in `VkSceneDraw`: in the mod it does not go to the app,
+so the game writes less, and in the app it takes no place in the ring. A long thin draw stays,
+and a flat batch and a batch at infinity stay.
+
+**The list again** (`vk_list_keep`, 0 by default, the row "List keep" of the debug page). A
+picture of the same list keeps the lists of the two passes and the joined indices in the ring,
+so it only records its commands. The list of the centre holds for a move of 1.5 times the move
+of its first picture, and at least 64 pixels. A larger move makes the lists again.
+
+**The cheap draws** (`vk_cheap_draws`, 0 by default, the row "Cheap draws" of the debug page).
+The vertices and the indices stay bound at the start of the ring for a pass, and a draw names
+their place by its first index and its vertex offset. A draw with texture coordinates of stage 1
+moves buffer 1, so that the vertex at the offset reads its own coordinates.
 
 **The fast shaders** (`vk_fast_shaders`, 0 by default, the row "Fast shaders" of the debug
 page). The fragment shader does each operation of Direct3D 7 that the game uses, with values

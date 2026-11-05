@@ -24,6 +24,8 @@ class RemoteControl {
   int GpuState() const { return gpu_state_.load(std::memory_order_relaxed); }
   // The play thread: the limit of the tiny draws in tenths of a pixel, or -1.
   int TinyPixels() const { return tiny_pixels_.load(std::memory_order_relaxed); }
+  // The play thread: the shading rate of the compose in parts (1, 2 or 4), or -1.
+  int ComposeRate() const { return compose_rate_.load(std::memory_order_relaxed); }
 
  private:
   static void* Main(void* self);
@@ -41,4 +43,5 @@ class RemoteControl {
   bool prompt_new_ = false;
   std::atomic<int> gpu_state_{-1};
   std::atomic<int> tiny_pixels_{-1};
+  std::atomic<int> compose_rate_{-1};
 };

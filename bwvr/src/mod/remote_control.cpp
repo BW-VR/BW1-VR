@@ -18,6 +18,7 @@
 void ModLog(const char* format, ...);
 float TabletopViewScale();
 float DetailDistanceFactor();
+void VkSceneSetTinyPixels(float pixels);
 
 namespace {
 
@@ -122,9 +123,13 @@ void RemoteControlFrame() {
   int at = 0;
   rm::Line line;
   while (rm::NextLine(text, size, &at, &line)) {
-    if (rm::IsAppKey(line)) continue;
     char key[64];
     int value = 0;
+    // The app and the mod both leave out tiny draws, with one limit.
+    if (rm::KeyIs(line, "tiny_pixels") && rm::IntOf(line, &value)) {
+      VkSceneSetTinyPixels(static_cast<float>(value) * 0.1f);
+    }
+    if (rm::IsAppKey(line)) continue;
     if (rm::KeyIs(line, "mark")) {
       if (rm::IntOf(line, &value)) g_mark_on = value != 0;
       continue;

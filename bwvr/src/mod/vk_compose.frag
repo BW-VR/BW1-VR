@@ -13,6 +13,11 @@
 //
 // Compile with bwvr/tools/compose_shaders.ps1.
 
+// THE COMPOSE IN PARTS (vk_compose_fast=1): a cell outside the rect of the centre has only
+// the outer image, so its pipeline has kOuterOnly=1 and reads one image. THE PANEL BY A
+// DRAW: kOuterOnly=2 writes the pixels of the outer image with their alpha.
+layout(constant_id = 0) const int kOuterOnly = 0;
+
 layout(set = 0, binding = 0) uniform sampler2D outer_image;
 layout(set = 0, binding = 1) uniform sampler2D center_image;
 
@@ -35,10 +40,20 @@ vec3 SrgbToLinear(vec3 c) {
 }
 
 void main() {
-  vec3 rgb = textureLod(outer_image, in_uv_outer, 0.0).rgb * pc.tint.rgb;
-  float a = in_alpha;
-  if (a > 0.0) {
-    rgb = mix(rgb, textureLod(center_image, in_uv_center, 0.0).rgb, a);
+  if (kOuterOnly == 2) {
+    out_color = textureLod(outer_image, in_uv_outer, 0.0);
+    return;
+  }
+  float a = kOuterOnly != 0 ? 0.0 : in_alpha;
+  vec3 rgb;
+  if (a >= 1.0) {
+    // The middle of the centre: the outer image has no share here.
+    rgb = textureLod(center_image, in_uv_center, 0.0).rgb;
+  } else {
+    rgb = textureLod(outer_image, in_uv_outer, 0.0).rgb * pc.tint.rgb;
+    if (a > 0.0) {
+      rgb = mix(rgb, textureLod(center_image, in_uv_center, 0.0).rgb, a);
+    }
   }
   if (pc.flags.x != 0u) rgb = SrgbToLinear(rgb);
   out_color = vec4(rgb, (1.0 - a) + a * a);

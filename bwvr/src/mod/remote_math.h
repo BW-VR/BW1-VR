@@ -77,7 +77,7 @@ inline int SerialOf(const char* text, int size) {
 // The keys that the app reads. The mod does not look for a switch with these names.
 inline bool IsAppKey(const Line& line) {
   return KeyIs(line, "serial") || KeyIs(line, "step") || KeyIs(line, "prompt") ||
-         KeyIs(line, "gpu_state") || KeyIs(line, "tiny_pixels");
+         KeyIs(line, "gpu_state") || KeyIs(line, "tiny_pixels") || KeyIs(line, "compose_rate");
 }
 
 }  // namespace remote_math

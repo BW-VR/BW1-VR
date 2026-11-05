@@ -41,6 +41,8 @@ struct Vertex {
 constexpr int kColumns = 5;
 constexpr int kRows = 5;
 constexpr int kVertices = kColumns * kRows * 6;
+// THE COMPOSE IN PARTS: the 16 cells around the rect of the centre, with the alpha 0.
+constexpr int kOuterVertices = 16 * 6;
 
 // The soft edge of the centre: 8 percent of its smaller side.
 inline float EdgeOf(const Layout& l) {
@@ -64,41 +66,73 @@ inline void Breaks(const Layout& l, float x[6], float y[6]) {
   y[5] = static_cast<float>(l.height);
 }
 
-// The 150 vertices (25 cells of 2 triangles). Gives kVertices. The corners
-// of a cell are in the order of the draw of the old compose, so the soft
-// edge has the same diagonals.
-inline int BuildGrid(const Layout& l, Vertex out[kVertices]) {
-  float bx[6], by[6];
-  Breaks(l, bx, by);
+// The 6 vertices of the cell in column i and row j. The corners of a cell are in the
+// order of the draw of the old compose, so the soft edge has the same diagonals.
+inline void PutCell(const Layout& l, const float bx[6], const float by[6], int i, int j,
+                    Vertex* out) {
   const float ou = static_cast<float>(l.outer_w) / static_cast<float>(l.outer_image_w);
   const float ov = static_cast<float>(l.outer_h) / static_cast<float>(l.outer_image_h);
   const float cu = static_cast<float>(l.center_w) / static_cast<float>(l.center_image_w);
   const float cv = static_cast<float>(l.center_h) / static_cast<float>(l.center_image_h);
   const float w = static_cast<float>(l.width), h = static_cast<float>(l.height);
+  const int corner[6][2] = {{i, j},         {i + 1, j},
+                            {i + 1, j + 1}, {i, j},
+                            {i + 1, j + 1}, {i, j + 1}};
+  for (int k = 0; k < 6; ++k) {
+    const int ci = corner[k][0], cj = corner[k][1];
+    Vertex& v = out[k];
+    v.x = bx[ci];
+    v.y = by[cj];
+    // The break 2 and 3 are the inside of the soft edge, 1 and 4 the
+    // edge of the rect: the alpha is 1 at the breaks 2 and 3 of both
+    // directions. A vertex outside the rect has the alpha 0.
+    v.alpha = (ci == 2 || ci == 3) && (cj == 2 || cj == 3) ? 1.0f : 0.0f;
+    v.pad = 0.0f;
+    v.u_outer = bx[ci] / w * ou;
+    v.v_outer = by[cj] / h * ov;
+    v.u_center = (bx[ci] - l.inset_x0) / l.inset_w * cu;
+    v.v_center = (by[cj] - l.inset_y0) / l.inset_h * cv;
+  }
+}
+
+// The 150 vertices (25 cells of 2 triangles), row by row. Gives kVertices.
+inline int BuildGrid(const Layout& l, Vertex out[kVertices]) {
+  float bx[6], by[6];
+  Breaks(l, bx, by);
   int n = 0;
   for (int j = 0; j < kRows; ++j) {
     for (int i = 0; i < kColumns; ++i) {
-      const int corner[6][2] = {{i, j},         {i + 1, j},
-                                {i + 1, j + 1}, {i, j},
-                                {i + 1, j + 1}, {i, j + 1}};
-      for (int k = 0; k < 6; ++k) {
-        const int ci = corner[k][0], cj = corner[k][1];
-        Vertex& v = out[n++];
-        v.x = bx[ci];
-        v.y = by[cj];
-        // The break 2 and 3 are the inside of the soft edge, 1 and 4 the
-        // edge of the rect: the alpha is 1 at the breaks 2 and 3 of both
-        // directions. A vertex outside the rect has the alpha 0.
-        v.alpha = (ci == 2 || ci == 3) && (cj == 2 || cj == 3) ? 1.0f : 0.0f;
-        v.pad = 0.0f;
-        v.u_outer = bx[ci] / w * ou;
-        v.v_outer = by[cj] / h * ov;
-        v.u_center = (bx[ci] - l.inset_x0) / l.inset_w * cu;
-        v.v_center = (by[cj] - l.inset_y0) / l.inset_h * cv;
+      PutCell(l, bx, by, i, j, out + n);
+      n += 6;
+    }
+  }
+  return n;
+}
+
+// The same cells with the 16 outer cells first, so kOuterVertices vertices have the
+// alpha 0 and a draw of their own. Gives kVertices.
+inline int BuildGridParts(const Layout& l, Vertex out[kVertices]) {
+  float bx[6], by[6];
+  Breaks(l, bx, by);
+  int n = 0;
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int j = 0; j < kRows; ++j) {
+      for (int i = 0; i < kColumns; ++i) {
+        const bool outer = i == 0 || i == kColumns - 1 || j == 0 || j == kRows - 1;
+        if (outer != (pass == 0)) continue;
+        PutCell(l, bx, by, i, j, out + n);
+        n += 6;
       }
     }
   }
   return n;
+}
+
+// The format of a view that writes the bytes of the game as they are: the UNORM format of
+// an sRGB format. With it a target encodes nothing, and the shader decodes nothing.
+// 37: R8G8B8A8_UNORM, 43: R8G8B8A8_SRGB, 44: B8G8R8A8_UNORM, 50: B8G8R8A8_SRGB.
+inline uint32_t BytesFormat(uint32_t format) {
+  return format == 43u ? 37u : format == 50u ? 44u : format;
 }
 
 // The sRGB transfer function of the shader, in floats. A target of an sRGB

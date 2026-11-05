@@ -1,0 +1,22 @@
+{
+  "name": "fast compare",
+  "start_prompt": "The test runs. Go through all sizes of the world, slowly. Stay some time at each size. Look at the edge of your view and at subtitles.",
+  "start_prompt_s": 8,
+  "step_s": 12,
+  "skip_s": 4.5,
+  "step_prompt_s": 4,
+  "most_s": 480,
+  "cycle": [
+    {"step": "base", "keys": {"vk_compose_fast": 0, "vk_list_keep": 0, "vk_cheap_draws": 0, "vk_mres_sort": 0}, "prompt": "Base"},
+    {"step": "compose", "keys": {"vk_compose_fast": 1, "compose_rate": 1, "vk_list_keep": 0, "vk_cheap_draws": 0, "vk_mres_sort": 0}, "prompt": "Compose fast"},
+    {"step": "compose 2x2", "keys": {"vk_compose_fast": 1, "compose_rate": 2, "vk_list_keep": 0, "vk_cheap_draws": 0, "vk_mres_sort": 0}, "prompt": "Compose 2x2"},
+    {"step": "compose 4x4", "keys": {"vk_compose_fast": 1, "compose_rate": 4, "vk_list_keep": 0, "vk_cheap_draws": 0, "vk_mres_sort": 0}, "prompt": "Compose 4x4"},
+    {"step": "list keep", "keys": {"vk_compose_fast": 0, "vk_list_keep": 1, "vk_cheap_draws": 0, "vk_mres_sort": 0}, "prompt": "List keep"},
+    {"step": "cheap draws", "keys": {"vk_compose_fast": 0, "vk_list_keep": 0, "vk_cheap_draws": 1, "vk_mres_sort": 0}, "prompt": "Cheap draws"},
+    {"step": "sort", "keys": {"vk_compose_fast": 0, "vk_list_keep": 0, "vk_cheap_draws": 0, "vk_mres_sort": 1}, "prompt": "Sort"},
+    {"step": "all", "keys": {"vk_compose_fast": 1, "compose_rate": 2, "vk_list_keep": 1, "vk_cheap_draws": 1, "vk_mres_sort": 1}, "prompt": "All on"}
+  ],
+  "end_keys": {"vk_compose_fast": 0, "vk_list_keep": 0, "vk_cheap_draws": 0, "vk_mres_sort": 0},
+  "end_prompt": "The test is done. You can quit the game.",
+  "end_prompt_s": 8
+}

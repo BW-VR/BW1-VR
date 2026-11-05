@@ -440,6 +440,10 @@ class XrApp {
   // part that the panel quads show (PanelPart of picture_ring.h). Only the play
   // thread reads it.
   void SetPanelRect(bool on) { panel_rect_ = on; }
+  // xr_eye_mutable: at a new set of swapchains of the eyes. SetComposeBytes: the row
+  // "Compose fast". With both the compose writes through a view of the UNORM format.
+  void SetEyeMutable(bool on) { eye_mutable_ = on; }
+  void SetComposeBytes(bool on) { compose_bytes_.store(on, std::memory_order_relaxed); }
   bool PanelRect() const { return panel_rect_; }
   // THE LATE COMPOSE (xr_compose_direct=1, docs/android.md, "The compose into
   // the swapchains"): the format of the swapchains is red first with 8 bits,
@@ -569,6 +573,7 @@ class XrApp {
     std::vector<XrSwapchainImageVulkan2KHR> images;
     uint32_t width = 0;
     uint32_t height = 0;
+    bool mutable_format = false;  // its images allow a view of another format
     Staging staging;
     bool swap_red_blue = false;
     // The revision of the content, and the revision of the last image that
@@ -660,6 +665,9 @@ class XrApp {
   uint32_t compose_slot_ = 0;
   bool compose_locked_ = false;
   bool compose_said_size_ = false;
+  bool eye_mutable_ = false;
+  bool make_mutable_ = false;  // MakeLayer: this swapchain is one of the eyes
+  std::atomic<bool> compose_bytes_{false};
   uint64_t direct_revision_ = 0;  // one more for each new picture in a slot
   uint64_t direct_latched_[2] = {0, 0};  // the revision that each eye shows
   int shown_direct_[2] = {-1, -1};  // the slot that each eye shows, or -1 (eyes_)

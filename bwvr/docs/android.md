@@ -4044,7 +4044,12 @@ game with the new place comes.
 | `xr_panel_keep` | 0 | 1: a panel with the same draws as the panel in the swapchain takes no copy. The debug page has the row "Panel keep" for a live A/B |
 | `vk_fast_shaders` | 0 | 1, with `vk_bindless=1` and the dynamic blend: the operations of a draw are constants of its pipeline (`backend.md`, "The textures in one set"). The debug page has the row "Fast shaders" |
 | `gpu_test` | 0 | A test aid: 1 goes through the states of the test of the GPU, 4 s each, each game. The picture has no pixels of the world in one state. The log has "gpu test : ..." for each state |
-| `vk_tiny_draws` | 0 | 1: a draw of the world that is smaller than `vk_tiny_pixels` in both directions in the image of a pass does not go to the GPU. The debug page has the row "Tiny draws" for a live A/B |
+| `vk_tiny_draws` | 0 | 1: a draw of the world that is smaller than `vk_tiny_pixels` in both directions in the image of a pass does not go to the GPU. A draw that is that small also in the centre image leaves earlier: the mod does not send it to the app. The debug page has the row "Tiny draws" for a live A/B |
+| `vk_compose_fast` | 0 | 1: the compose draws the cells outside the centre with a pipeline that reads one image, at the rate of `vk_compose_rate`. With `xr_eye_mutable=1` it writes through a view of the UNORM format, so the shader decodes nothing and the target encodes nothing, and a new panel goes to its swapchain with a draw and not with a copy. The debug page has the row "Compose fast" |
+| `vk_compose_rate` | 1 | The shading rate of the cells outside the centre with `vk_compose_fast=1`: 1, 2 or 4 pixels on each side for one shade |
+| `xr_eye_mutable` | 0 | 1: the swapchains of the eyes and of the panel have the mutable format. It counts for a new set of swapchains |
+| `vk_list_keep` | 0 | 1: a picture of the same list keeps the lists of its passes and their joined indices, while they hold for its move. The debug page has the row "List keep" |
+| `vk_cheap_draws` | 0 | 1: the vertices and the indices stay bound in a pass, and a draw names its place in the ring. The debug page has the row "Cheap draws" |
 | `vk_tiny_pixels` | 10 | The limit of the tiny draws in tenths of a pixel |
 | `remote_control` | 0 | A test aid: 1, the switches of the debug page follow `bwvr-control.txt` of the game folder (see "The test run" below). It counts at the next Play |
 | `pose_log` | 0 | A test aid: 1 writes one record for each frame of the session into `bwvr-pose.bin` of the folder of the app, and `tools/android/pose_report.py` names the frames that do not fit the frames around them |
@@ -4059,8 +4064,8 @@ than a third from the speed of the walk, and the longest in slots of the stick.
 "late take : ..." each 10 s has the frames that waited for their picture, the time
 of the waits, and the frames that came to the limit. With `pose_log=1` the file
 `bwvr-pictures.bin` has one record for each picture of the late camera: the send of
-its tick, the start of its play, its submit, the end of its GPU work, its draws, and the
-scale of the world.
+its tick, the start of its play, its submit, the end of its GPU work, its draws, the
+scale of the world, and the GPU time of the last compose.
 The log of the mod has "pose check : ..." each 900 frames: the angle between the
 view of the layer and the camera matrix of the engine for that frame. The
 line "time" of the frames of the session counts the pictures: "made N pictures a
@@ -4089,8 +4094,9 @@ python tools/android/frame_test.py run tools/android/frame_tests/detail.json <fo
   the third word of the row. The log has "remote : ..." for each change.
 - The app (`android/src/remote_control.cpp`) reads the same file for `step` (the time and the
   name go into `bwvr-steps.csv`), `prompt` (a text for the player in the quad of the menu, and
-  empty hides it), `gpu_state` (the test state of the renderer from the test of the GPU) and
-  `tiny_pixels` (the limit of the tiny draws in tenths of a pixel).
+  empty hides it), `gpu_state` (the test state of the renderer from the test of the GPU),
+  `tiny_pixels` (the limit of the tiny draws in tenths of a pixel, also for the mod) and
+  `compose_rate` (the shading rate of `vk_compose_fast`).
 - A test with `"mode": "marks"` has `stages` in place of `cycle`: each stage waits until the
   player clicks a stick, for at most `stage_most_s`. With `mark=1` in the file the mod writes
   the scale of the table and the factor of the detail into `bwvr-marks.csv` at the click, and

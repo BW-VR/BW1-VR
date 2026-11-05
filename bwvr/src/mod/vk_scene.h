@@ -237,6 +237,19 @@ void VkSceneSetFastShaders(bool on);
 // this size in the image of a pass does not go to the GPU.
 void VkSceneSetTinyDraws(bool on);
 void VkSceneSetTinyPixels(float pixels);
+// THE LIST AGAIN (vk_list_keep): a picture of the same list keeps the lists of its passes
+// and their joined indices.
+void VkSceneSetListKeep(bool on);
+// THE COMPOSE IN PARTS (vk_compose_fast, vk_compose_rate, vk_compose.h).
+void VkSceneComposeFast(bool on);
+void VkSceneComposeRate(int rate);
+void VkSceneComposeDeviceRate(bool on);
+// THE PANEL BY A DRAW (vk_compose.h, RecordCopy): the caller holds VkSceneComposeTakeLock.
+bool VkSceneComposeRecordCopy(void* command_buffer, uint64_t source, uint32_t source_format,
+                              uint32_t slot, uint64_t target, uint32_t target_format, int32_t x,
+                              int32_t y, int32_t w, int32_t h, uint32_t width, uint32_t height);
+// THE CHEAP DRAWS (vk_cheap_draws): the buffers stay bound in a pass, and a draw names its place.
+void VkSceneSetCheapDraws(bool on);
 // A TEST AID (gpu_test, docs/android.md, "The test of the GPU"). VkSceneGpuTest: the
 // state of the test from the next walk, and its name for the log.
 int VkSceneGpuTestStates();

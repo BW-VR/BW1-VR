@@ -43,6 +43,8 @@ struct Window {
 void Add(int kind, double ms, uint64_t bytes);
 // The copies since the last call, any thread.
 void TakeWindow(Window* out);
+// The GPU time of the last compose at the take in ms, for the records of the pictures.
+float LastComposeMs();
 
 // The timestamps of the copies of a set of command buffers, each with an
 // index of its own (a slot of the ring, an entry of the ring of command

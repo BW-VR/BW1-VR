@@ -961,8 +961,10 @@ void* PlayThread(void* arg) {
   double late_log_at = NowMs();
   PictureRecord picture_record = {};
   bool picture_pending = false;
-  // A TEST AID (remote_control): the limit of the tiny draws that the file asks for.
+  // A TEST AID (remote_control): the limit of the tiny draws and the rate of the compose
+  // that the file asks for.
   int tiny_seen = -1;
+  int rate_seen = -1;
   // A TEST AID (gpu_test): the state, its start, and the GPU time of its walks.
   int test_state = 0;
   double test_at = 0.0, test_sum = 0.0, test_most = 0.0;
@@ -1150,6 +1152,12 @@ void* PlayThread(void* arg) {
         VkSceneSetTinyPixels(static_cast<float>(tiny) * 0.1f);
         AppLog("remote       : the limit of the tiny draws is %.1f pixels", tiny * 0.1);
       }
+      const int rate = app->remote.ComposeRate();
+      if (rate >= 0 && rate != rate_seen) {
+        rate_seen = rate;
+        VkSceneComposeRate(rate);
+        AppLog("remote       : the shading rate of the compose in parts is %d", rate);
+      }
     }
     if (late && app->picture_log.On()) {
       picture_record = PictureRecord();
@@ -1160,6 +1168,7 @@ void* PlayThread(void* arg) {
       picture_record.flags = (n > 0 ? 1u : 0u) | (app->late_again ? 2u : 0u);
       picture_record.gate_ms = gate_ms > 0.0 ? static_cast<float>(gate_ms) : 0.0f;
       VkSceneLastDraws(&picture_record.outer_draws, &picture_record.center_draws);
+      picture_record.compose_ms = copy_time::LastComposeMs();
       if (app->late_has_map) {
         const float* l = app->late_map.linear;
         picture_record.world_scale = sqrtf(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
@@ -1265,6 +1274,10 @@ void AppKeysApply(uint32_t bits) {
   VkSceneSetBindless((bits & app_keys::kBindless) != 0);
   VkSceneSetFastShaders((bits & app_keys::kFastShaders) != 0);
   VkSceneSetTinyDraws((bits & app_keys::kTinyDraws) != 0);
+  VkSceneSetListKeep((bits & app_keys::kListKeep) != 0);
+  VkSceneSetCheapDraws((bits & app_keys::kCheapDraws) != 0);
+  VkSceneComposeFast((bits & app_keys::kComposeFast) != 0);
+  app->xr.SetComposeBytes((bits & app_keys::kComposeFast) != 0);
   if (app->play_ok.load()) VkSceneComposeLate(app->compose_direct || app->compose_take);
   AppLog("game         : the debug page: xr_compose_direct=%d (at the take %d), xr_panel_rect=%d, ring_slot_order=%d, "
          "late_camera=%d, xr_release_take=%d, late_take=%d",
@@ -1911,6 +1924,11 @@ void Play(App* app, bool new_game) {
   // vk_tiny_pixels (10 by default, bwvr.ini only): the limit of the tiny draws in tenths of
   // a pixel. The row "Tiny draws" of the debug page turns them on.
   VkSceneSetTinyPixels(static_cast<float>(app->ini.GetInt("bwvr", "vk_tiny_pixels", 10)) * 0.1f);
+  // vk_compose_rate (1 by default, bwvr.ini only): the shading rate of the cells outside the
+  // centre with vk_compose_fast=1. xr_eye_mutable (0 by default, bwvr.ini only): the swapchains
+  // of the eyes allow a view of the UNORM format, so the compose writes the bytes as they are.
+  VkSceneComposeRate(app->ini.GetInt("bwvr", "vk_compose_rate", 1));
+  app->xr.SetEyeMutable(app->ini.GetInt("bwvr", "xr_eye_mutable", 0) != 0);
   // remote_control (0 by default, bwvr.ini only): a test aid. The test run on the headset
   // changes the switches of the debug page while the game runs ("The test run").
   {

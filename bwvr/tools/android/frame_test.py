@@ -302,7 +302,7 @@ def run(test_path, folder):
 
 # --- the table ------------------------------------------------------------------------
 
-PICTURE = struct.Struct('<ddddIIffIIfI')
+PICTURE = struct.Struct('<ddddIIffIIff')
 POSE = struct.Struct('<dqII6f4f4f3f4xQII3f4f3f3ffIIff')
 POSE_FIELDS = {'t': 0, 'fresh': 3, 'frame': 21, 'tick': 38, 'pic_tick': 39}
 PICTURE_MAGIC = 0x53434950
@@ -397,17 +397,18 @@ def row(label, group):
     play = [p[2] - p[1] for p in pictures]
     gpu = [p[7] for p in pictures if p[7] > 0.0]
     draws = [p[8] + p[9] for p in pictures]
+    compose = [p[11] for p in pictures if p[11] > 0.0]
     print(f'{label:26s} {len(group):4d} {seconds:6.0f} {statistics.mean(draws) if draws else 0:7.0f} '
           f'{frames / max(seconds, 0.001):7.1f} {fresh / max(seconds, 0.001):7.1f} '
           f'{game / max(seconds, 0.001):6.1f} {percent(play, 0.5):6.2f} {percent(gpu, 0.5):6.2f} '
-          f'{percent(done, 0.5):6.2f} {percent(done, 0.9):6.2f}')
+          f'{percent(compose, 0.5):6.2f} {percent(done, 0.5):6.2f} {percent(done, 0.9):6.2f}')
 
 
 HEAD = (f'{"":26s} {"runs":>4s} {"s":>6s} {"draws":>7s} {"frames":>7s} {"new":>7s} '
-        f'{"game":>6s} {"play":>6s} {"GPU":>6s} {"done50":>6s} {"done90":>6s}')
+        f'{"game":>6s} {"play":>6s} {"GPU":>6s} {"comp":>6s} {"done50":>6s} {"done90":>6s}')
 UNITS = ('frames: frames of the session a second, new: new pictures a second, game: frames of '
-         'the game a second,\nplay and GPU: ms for a walk (50th percentile), done: ms from the '
-         'tick to the end of the GPU (50th and 90th percentile)')
+         'the game a second,\nplay and GPU: ms for a walk (50th percentile), comp: GPU ms of the '
+         'compose, done: ms from the tick to the end of the GPU (50th and 90th percentile)')
 
 
 def report(folder):

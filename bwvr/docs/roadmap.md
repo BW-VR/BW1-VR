@@ -779,24 +779,29 @@ that moves while the Hand takes it.
   are the largest cost. Each step gets a key with the old behavior as a value and a row of
   the debug page. `tools/android/frame_test.py` measures each step (`android.md`, "The test
   run"). The order:
+  A test run on the Steam Frame proved the curve with `vk_tiny_pixels` from 2 to 4: the player
+  saw no fault, and 3 pixels gave nearly all of the gain. Set `detail_by_scale=1`,
+  `vk_tiny_draws=1` and `vk_tiny_pixels=30` as defaults of the headset app.
+  `frame_tests/fast_compare.json` measures the next keys against that state: `vk_compose_fast`
+  with each `vk_compose_rate`, `vk_list_keep`, `vk_cheap_draws` and `vk_mres_sort`. These need
+  `xr_eye_mutable=1` for all of their gain, and no run has shown them yet. Keep each key that
+  a run proves, and remove the others.
   1. **The detail distance by the size of the world** (`detail_by_scale`). With the whole
      island in view, 1x has 2775 draws where 5x has 4235, a walk takes 2.45 ms on the GPU
      where 5x takes 4.76 ms, and the game has 56 frames a second where 5x has 42. In a small
      world even 1x does not disturb the player. Both launchers offer the curve. Prove it with
      `frame_tests/detail_compare.json`, and then make `detail_by_scale=1` the default.
-  2. **Many draws in one call.** A run of draws with one state becomes one
-     `vkCmdDrawIndexedIndirect`. The values of a draw go into a buffer, and the draw finds
-     them by its first instance. This replaces the push constant, the bind of the vertices
-     and the bind of the indices of each draw, so it lowers the cost of the GPU and of the
-     CPU. The list again keeps its indirect buffer and its values, so a picture of the same
-     list has nearly no work on the CPU. The vertices need one stride and one base in the
-     ring. The line "a list of the ..." of the log has the runs for a view: few runs for
-     many draws give the largest gain. A list with a clear of one eye keeps the old way.
+  2. **Many draws in one call.** Do this only when a run with `vk_cheap_draws=1` and
+     `vk_mres_sort=1` still shows a high cost for each draw. A run of draws with one state
+     becomes one `vkCmdDrawIndexedIndirect`, and the values of a draw go into a buffer. Each
+     vertex then reads that buffer, and the texture places become flat values of each pixel,
+     so the gain is not sure. With about 1000 draws for each picture, more than half of the
+     draws start a new run in the order of the game.
   3. **Prepare and draw at the same time** (`frame_loop_gpu_depth=2`). The play thread
      starts a picture while the GPU draws the picture before. This needs a fourth set of
      images, a command buffer for each picture of a list, and a place of its own for the
-     joined indices. Do this only when a test run after step 2 still shows that the play
-     thread waits for the GPU.
+     joined indices. Do this only when a test run still shows that the play thread waits for
+     the GPU.
   4. **No tiny draws** (`vk_tiny_draws`). A draw that is smaller than one pixel of the image of
      a pass does not go to the GPU. Prove it with `frame_tests/detail_compare.json`, and let the
      player judge far objects and thin lines. A next step leaves these draws out in the mod
@@ -804,9 +809,9 @@ that moves while the Hand takes it.
   5. **A merge across textures.** With the places of the textures in the values of a draw,
      the merge can join draws with different textures. This comes after step 2 and uses
      its buffer.
-  6. **A cheaper compose.** The compose costs 1.5 ms at 200 percent. Compare a lower shading
-     rate outside the centre in the compose pass with the outer image and the centre image
-     as two layers of the runtime (`fovea_res_layer`), which have no soft edge.
+  6. **A cheaper compose** (`vk_compose_fast`). The compose costs 1.5 ms at 200 percent. If a
+     run shows that it is still too much, compare it with the outer image and the centre
+     image as two layers of the runtime (`fovea_res_layer`), which have no soft edge.
   7. **Pictures between the walks, by depth.** For a view that is still too heavy, a
      picture between two walks comes from the last picture and its depth. This is the
      largest work, and the edges of near objects can show faults. Do this only when the

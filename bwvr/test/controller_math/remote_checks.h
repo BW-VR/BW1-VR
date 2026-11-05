@@ -5,8 +5,10 @@
 #include <math.h>
 #include <string.h>
 
+#include "../../src/common/settings_table.h"
 #include "../../src/mod/detail_scale_math.h"
 #include "../../src/mod/remote_math.h"
+#include "../../src/mod/vk_draw_math.h"
 
 namespace remote_checks {
 
@@ -56,9 +58,43 @@ inline void DetailScaleChecks() {
         m::FactorOf(150.0f, wrong, 5.0f), 5.0f);
 }
 
+// The launchers and the mod have one default for each point of the curve.
+inline void DetailTableChecks() {
+  namespace st = bwvr_settings;
+  const detail_scale_math::Curve c;
+  Check(detail_scale_math::Valid(c), "the default curve is in order", 1, 1);
+  int found = 0;
+  for (int i = 0; i < st::kSettingCount; ++i) {
+    const st::Setting& s = st::kSettings[i];
+    if (s.key == nullptr) continue;
+    float want = -1.0f;
+    if (strcmp(s.key, "detail_scale_1x") == 0) want = c.units_1x;
+    if (strcmp(s.key, "detail_scale_2x") == 0) want = c.units_2x;
+    if (strcmp(s.key, "detail_scale_3x") == 0) want = c.units_3x;
+    if (strcmp(s.key, "detail_by_scale") == 0) ++found;
+    if (want < 0.0f) continue;
+    ++found;
+    Check(st::kSlider == s.kind, "a point of the curve is a slider", s.kind, st::kSlider);
+    Check(static_cast<float>(s.fallback) == want, "the table and the mod have one default", s.fallback,
+          want);
+  }
+  Check(found == 4, "the table has the switch and the three points of the curve", found, 4);
+}
+
+inline void TinyChecks() {
+  namespace d = vk_draw_math;
+  Check(d::IsTiny(0.5f, 0.5f, 1.0f), "a draw below the limit in both directions is tiny", 1, 1);
+  Check(!d::IsTiny(30.0f, 0.5f, 1.0f), "a long thin draw is not tiny", 0, 0);
+  Check(!d::IsTiny(0.5f, 30.0f, 1.0f), "a tall thin draw is not tiny", 0, 0);
+  Check(!d::IsTiny(1.0f, 1.0f, 1.0f), "the limit itself is not tiny", 0, 0);
+  Check(!d::IsTiny(0.0f, 0.0f, 0.0f), "with no limit no draw is tiny", 0, 0);
+}
+
 inline void RemoteChecks() {
   namespace m = remote_math;
   DetailScaleChecks();
+  DetailTableChecks();
+  TinyChecks();
   {
     const char* text = "serial=12\r\nstep=detail 3x\ndetail_distance=2\n\nno equal\n=x\nprompt=\n";
     const int size = static_cast<int>(strlen(text));

@@ -194,6 +194,12 @@ inline void JoinIndices(const Draw& first, const Draw& d,
 
 // A hash of bytes, for THE SAME PANEL (xr_panel_keep). Fast on words of 8 bytes: it runs
 // on the vertices of a draw.
+// THE TINY DRAWS (vk_tiny_draws): a draw that is smaller than the limit in both
+// directions. A long thin draw stays, because a row of them can be a whole piece of land.
+inline bool IsTiny(float width, float height, float limit) {
+  return limit > 0.0f && width < limit && height < limit;
+}
+
 inline uint64_t HashBytes(uint64_t h, const void* data, size_t bytes) {
   const uint64_t kPrime = 0x100000001b3ULL;
   const uint8_t* p = static_cast<const uint8_t*>(data);

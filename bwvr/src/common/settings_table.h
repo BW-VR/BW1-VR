@@ -77,7 +77,22 @@ inline const Setting kSettings[] = {
     {kChoice, "detail_distance", "Model detail distance", "Game|2x|3x|5x", 3,
      "How far out trees, villagers and buildings keep their full models "
      "before they change to simpler ones or disappear. Further costs more "
-     "frame time in busy places."},
+     "frame time in busy places. With \"Detail by world size\" on, this is "
+     "the highest detail."},
+    {kBool, "detail_by_scale", "Detail by world size", nullptr, 0,
+     "The detail follows the size of the world. In a small world you see the "
+     "whole land, missing models do not disturb, and the game runs much "
+     "faster. The three values below give the curve. The change is smooth."},
+    {kSlider, "detail_scale_1x", "Game detail from", "2|400|1| units/m", 135,
+     "The size of the world is in game units for one meter of your room, so "
+     "a high number is a small world. From this size to smaller worlds, "
+     "models have the detail of the game."},
+    {kSlider, "detail_scale_2x", "2x detail at", "2|400|1| units/m", 60,
+     "The detail comes to 2x at this size of the world. This value must be "
+     "lower than the value above."},
+    {kSlider, "detail_scale_3x", "3x detail at", "2|400|1| units/m", 10,
+     "The detail comes to 3x at this size of the world. This value must be "
+     "lower than the value above. Soon below it the detail is 5x."},
 
     {kGroup, nullptr, "Performance", nullptr, 0, nullptr},
     {kRenderer, "backend", "Renderer", "Vulkan|Direct3D 9", 0,

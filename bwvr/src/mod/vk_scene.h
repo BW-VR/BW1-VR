@@ -233,6 +233,10 @@ void VkSceneSetDeviceFeatures(bool slots, bool dynamic_blend);
 void VkSceneSetBindless(bool on);
 // THE FAST SHADERS (vk_fast_shaders): the row "Fast shaders" of the debug page.
 void VkSceneSetFastShaders(bool on);
+// THE TINY DRAWS (vk_tiny_draws, vk_tiny_pixels): a draw of the world that is smaller than
+// this size in the image of a pass does not go to the GPU.
+void VkSceneSetTinyDraws(bool on);
+void VkSceneSetTinyPixels(float pixels);
 // A TEST AID (gpu_test, docs/android.md, "The test of the GPU"). VkSceneGpuTest: the
 // state of the test from the next walk, and its name for the log.
 int VkSceneGpuTestStates();

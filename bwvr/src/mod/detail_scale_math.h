@@ -8,13 +8,13 @@
 
 namespace detail_scale_math {
 
-// World units for one meter of the room, so a large value is a small world. Each value
-// is the scale where a factor starts to disturb when the world grows: 1x at units_1x,
-// 2x at units_2x, 3x at units_3x.
+// World units for one meter of the room, so a large value is a small world. A value is
+// the scale where the curve has a factor when the world grows: 1x down to units_1x, 2x at
+// units_2x, 3x at units_3x. The launchers offer these values (settings_table.h).
 struct Curve {
-  float units_1x = 600.0f;
-  float units_2x = 250.0f;
-  float units_3x = 120.0f;
+  float units_1x = 135.0f;
+  float units_2x = 60.0f;
+  float units_3x = 10.0f;
 };
 
 inline bool Valid(const Curve& c) {

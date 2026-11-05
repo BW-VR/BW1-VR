@@ -302,7 +302,7 @@ def run(test_path, folder):
 
 # --- the table ------------------------------------------------------------------------
 
-PICTURE = struct.Struct('<ddddIIffII')
+PICTURE = struct.Struct('<ddddIIffIIfI')
 POSE = struct.Struct('<dqII6f4f4f3f4xQII3f4f3f3ffIIff')
 POSE_FIELDS = {'t': 0, 'fresh': 3, 'frame': 21, 'tick': 38, 'pic_tick': 39}
 PICTURE_MAGIC = 0x53434950
@@ -349,8 +349,8 @@ class Window:
     def seconds(self):
         return (self.end - self.start) / 1000.0
 
-    def draws(self):
-        return statistics.mean(p[8] + p[9] for p in self.pictures) if self.pictures else 0.0
+    def scale(self):
+        return statistics.median(p[10] for p in self.pictures) if self.pictures else 0.0
 
 
 def windows_of(folder, skip_ms):
@@ -429,15 +429,15 @@ def report(folder):
     print(HEAD)
     for name in names:
         row(name, [x for x in windows if x.name == name])
-    # The player can look at another place, so a compare needs windows with about the
-    # same number of draws.
-    bands = [(0, 1000), (1000, 2000), (2000, 3000), (3000, 4000), (4000, 1 << 30)]
+    # The player changes the size of the world during a test, so a compare needs
+    # windows with about the same size.
+    bands = [(0, 20), (20, 60), (60, 135), (135, 300), (300, 1 << 30)]
     for low, high in bands:
-        band = [x for x in windows if low <= x.draws() < high]
+        band = [x for x in windows if low <= x.scale() < high]
         if not band:
             continue
         print()
-        print(f'Windows with {low} to {high if high < 1 << 30 else "more"} draws')
+        print(f'A world of {low} to {high if high < 1 << 30 else "more"} units a meter')
         print(HEAD)
         for name in names:
             group = [x for x in band if x.name == name]

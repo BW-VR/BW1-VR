@@ -2,7 +2,7 @@
 // 0 by default, docs/android.md, "The test run"). A thread reads bwvr-control.txt
 // of the folder of the game. The mod reads the same file for the switches. The app
 // takes the name of the step for bwvr-steps.csv, the text for the player in the
-// headset, and the test state of the renderer.
+// headset, the test state of the renderer, and the limit of the tiny draws.
 #pragma once
 
 #include <pthread.h>
@@ -22,6 +22,8 @@ class RemoteControl {
   bool TakePrompt(std::string* text);
   // The play thread: the test state of the renderer that the file asks for, or -1.
   int GpuState() const { return gpu_state_.load(std::memory_order_relaxed); }
+  // The play thread: the limit of the tiny draws in tenths of a pixel, or -1.
+  int TinyPixels() const { return tiny_pixels_.load(std::memory_order_relaxed); }
 
  private:
   static void* Main(void* self);
@@ -38,4 +40,5 @@ class RemoteControl {
   std::string prompt_;
   bool prompt_new_ = false;
   std::atomic<int> gpu_state_{-1};
+  std::atomic<int> tiny_pixels_{-1};
 };

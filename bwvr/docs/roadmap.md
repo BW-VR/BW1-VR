@@ -782,9 +782,8 @@ that moves while the Hand takes it.
   1. **The detail distance by the size of the world** (`detail_by_scale`). With the whole
      island in view, 1x has 2775 draws where 5x has 4235, a walk takes 2.45 ms on the GPU
      where 5x takes 4.76 ms, and the game has 56 frames a second where 5x has 42. In a small
-     world even 1x does not disturb the player. Find the three scales with
-     `frame_tests/detail_marks.json`, set them as defaults of the headset app, and prove the
-     result with an A/B of the row "Detail scale".
+     world even 1x does not disturb the player. Both launchers offer the curve. Prove it with
+     `frame_tests/detail_compare.json`, and then make `detail_by_scale=1` the default.
   2. **Many draws in one call.** A run of draws with one state becomes one
      `vkCmdDrawIndexedIndirect`. The values of a draw go into a buffer, and the draw finds
      them by its first instance. This replaces the push constant, the bind of the vertices
@@ -798,9 +797,10 @@ that moves while the Hand takes it.
      images, a command buffer for each picture of a list, and a place of its own for the
      joined indices. Do this only when a test run after step 2 still shows that the play
      thread waits for the GPU.
-  4. **No tiny draws.** The line "a list of the ..." counts the draws of the game by their
-     size in pixels. A draw far below one pixel can go before it goes to the app, so this
-     also relieves the game. Check the fade of a far object and the thin lines.
+  4. **No tiny draws** (`vk_tiny_draws`). A draw that is smaller than one pixel of the image of
+     a pass does not go to the GPU. Prove it with `frame_tests/detail_compare.json`, and let the
+     player judge far objects and thin lines. A next step leaves these draws out in the mod
+     before they go to the app, and this also relieves the game.
   5. **A merge across textures.** With the places of the textures in the values of a draw,
      the merge can join draws with different textures. This comes after step 2 and uses
      its buffer.

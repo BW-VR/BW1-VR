@@ -51,6 +51,8 @@ struct PictureRecord {
   float gpu_ms;      // the GPU time of the walks that ended before this picture
   uint32_t outer_draws;   // the draws of the walk in the outer image
   uint32_t center_draws;  // the draws of the walk in the centre image
+  float world_scale;      // world units for one meter of the room, 0 with no map
+  uint32_t reserved;
 };
 
 template <typename T>

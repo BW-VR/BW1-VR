@@ -4044,6 +4044,8 @@ game with the new place comes.
 | `xr_panel_keep` | 0 | 1: a panel with the same draws as the panel in the swapchain takes no copy. The debug page has the row "Panel keep" for a live A/B |
 | `vk_fast_shaders` | 0 | 1, with `vk_bindless=1` and the dynamic blend: the operations of a draw are constants of its pipeline (`backend.md`, "The textures in one set"). The debug page has the row "Fast shaders" |
 | `gpu_test` | 0 | A test aid: 1 goes through the states of the test of the GPU, 4 s each, each game. The picture has no pixels of the world in one state. The log has "gpu test : ..." for each state |
+| `vk_tiny_draws` | 0 | 1: a draw of the world that is smaller than `vk_tiny_pixels` in both directions in the image of a pass does not go to the GPU. The debug page has the row "Tiny draws" for a live A/B |
+| `vk_tiny_pixels` | 10 | The limit of the tiny draws in tenths of a pixel |
 | `remote_control` | 0 | A test aid: 1, the switches of the debug page follow `bwvr-control.txt` of the game folder (see "The test run" below). It counts at the next Play |
 | `pose_log` | 0 | A test aid: 1 writes one record for each frame of the session into `bwvr-pose.bin` of the folder of the app, and `tools/android/pose_report.py` names the frames that do not fit the frames around them |
 
@@ -4057,7 +4059,8 @@ than a third from the speed of the walk, and the longest in slots of the stick.
 "late take : ..." each 10 s has the frames that waited for their picture, the time
 of the waits, and the frames that came to the limit. With `pose_log=1` the file
 `bwvr-pictures.bin` has one record for each picture of the late camera: the send of
-its tick, the start of its play, its submit, the end of its GPU work, and its draws.
+its tick, the start of its play, its submit, the end of its GPU work, its draws, and the
+scale of the world.
 The log of the mod has "pose check : ..." each 900 frames: the angle between the
 view of the layer and the camera matrix of the engine for that frame. The
 line "time" of the frames of the session counts the pictures: "made N pictures a
@@ -4086,7 +4089,8 @@ python tools/android/frame_test.py run tools/android/frame_tests/detail.json <fo
   the third word of the row. The log has "remote : ..." for each change.
 - The app (`android/src/remote_control.cpp`) reads the same file for `step` (the time and the
   name go into `bwvr-steps.csv`), `prompt` (a text for the player in the quad of the menu, and
-  empty hides it) and `gpu_state` (the test state of the renderer from the test of the GPU).
+  empty hides it), `gpu_state` (the test state of the renderer from the test of the GPU) and
+  `tiny_pixels` (the limit of the tiny draws in tenths of a pixel).
 - A test with `"mode": "marks"` has `stages` in place of `cycle`: each stage waits until the
   player clicks a stick, for at most `stage_most_s`. With `mark=1` in the file the mod writes
   the scale of the table and the factor of the detail into `bwvr-marks.csv` at the click, and
@@ -4098,12 +4102,12 @@ python tools/android/frame_test.py run tools/android/frame_tests/detail.json <fo
 
 The table has one row for each step: the frames of the session, the new pictures, the frames
 of the game, the time of the play and of the GPU for a walk, and the time from the tick to the
-end of the GPU. The player can look at another place during a test, so the table has the steps
-also for windows with about the same number of draws. With `remote_control=1` the log also has
+end of the GPU. The player can change the size of the world during a test, so the table has the
+steps also for windows with about the same size. With `remote_control=1` the log also has
 one line for each image each 720 walks: "a list of the outer image: ...", with the draws, the
-runs of one state, the different states, the indices and the draws of the game by their size in
-pixels. A rect has the move of the right eye in its width, so the size is the height. SteamVR
-gives only the sum of the whole run for its reprojected frames.
+runs of one state, the different states, the indices, the tiny draws that are left out, and the
+draws of the game by their longer side in pixels. SteamVR gives only the sum of the whole run
+for its reprojected frames.
 
 On the Steam Frame `steamvr.disableAsync` of SteamVR turns off the async reprojection for all
 apps (`vrcmd --set-settings-bool steamvr.disableAsync 1`, and 0 turns it on), so a missed picture
@@ -4289,7 +4293,7 @@ swapchains reads and writes it again. With the key the two steps are one.
   `xr_compose_direct`, `xr_panel_rect` and `ring_slot_order`, and for the four keys
   of the renderer (`vk_mres_draws`, `vk_mres_sort`, `vk_compose_light`,
   `vk_pass_store`). The mod
-  keeps their values (from `bwvr.ini`, then from the rows) and puts 13 bits into
+  keeps their values (from `bwvr.ini`, then from the rows) and puts 14 bits into
   the record of every frame of the stream (`FrameBody::app_keys`,
   `src/mod/app_keys.h`). The player gives the bits to the renderer and to the app
   (`SetAppKeysHook`) before the walks of the frame, so a row acts from the next

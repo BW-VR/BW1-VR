@@ -26,6 +26,7 @@ void RemoteControl::Start(const std::string& control_path, const std::string& st
   serial_ = -1;
   step_.clear();
   gpu_state_.store(-1);
+  tiny_pixels_.store(-1);
   {
     std::lock_guard<std::mutex> lock(lock_);
     prompt_.clear();
@@ -95,6 +96,9 @@ void RemoteControl::ReadFile() {
     } else if (rm::KeyIs(line, "gpu_state")) {
       int state = -1;
       if (rm::IntOf(line, &state)) gpu_state_.store(state, std::memory_order_relaxed);
+    } else if (rm::KeyIs(line, "tiny_pixels")) {
+      int tenths = -1;
+      if (rm::IntOf(line, &tenths)) tiny_pixels_.store(tenths, std::memory_order_relaxed);
     }
   }
 }

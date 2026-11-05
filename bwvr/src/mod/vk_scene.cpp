@@ -440,6 +440,9 @@ uint64_t g_test_draws[2] = {0, 0};
 uint64_t g_test_walks = 0;
 uint32_t g_last_drawn[2] = {0, 0};  // VkSceneLastDraws
 bool g_list_measure = false;        // VkSceneListMeasure
+bool g_tiny_on = false;             // VkSceneSetTinyDraws
+float g_tiny_pixels = 1.0f;         // VkSceneSetTinyPixels
+uint32_t g_tiny_out[2] = {0, 0};    // the tiny draws of the last walk, for each pass
 bool g_list_now = false;
 uint64_t g_list_walks = 0;
 // THE SAME PANEL (xr_panel_keep): the hash of the draws of the panel of this walk and of
@@ -792,6 +795,9 @@ struct MresRecord {
   // the move of the right eye. The pass of the centre image leaves out a
   // draw whose rect is not in the rect of the centre.
   float bounds[4];
+  // The width and the height of the rect of the left eye, in pixels of the game. The
+  // rect above has the move of the right eye in its width, and the size of a draw does not.
+  float size[2];
   // A mesh on the GPU (vk_mesh.vert): 1, or 2 with offsets. vertex_at is the
   // place of its values in the ring, then mesh_vertex_at and mesh_index_at
   // are places in the mesh arena, and offsets_at in the ring. index_count
@@ -3190,6 +3196,8 @@ void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint
                  uint32_t used_h, uint32_t out_of_view[2], uint32_t left_out[2]) {
   namespace dm = vk_draw_math;
   g_mres_play.clear();
+  g_tiny_out[pass] = 0;
+  const float tiny_limit = g_tiny_on ? g_tiny_pixels : 0.0f;
   float last_vp[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
   bool in_view = false;
   for (const MresRecord& r : g_mres_records) {
@@ -3211,6 +3219,12 @@ void PreparePass(Slot& s, int pass, float ox, float oy, float sx, float sy, uint
                       r.bounds[3] < g_mres.inset_y0 - 1.0f - g_late_margin ||
                       r.bounds[1] > g_mres.inset_y0 + g_mres.inset_h + 1.0f + g_late_margin)) {
       ++left_out[pass];
+      continue;
+    }
+    // A flat batch (the interface) always stays. A mesh on the GPU has no rect.
+    if (r.mesh == 0 && (r.push.ops[3] & 1u) == 0u &&
+        dm::IsTiny(r.size[0] * sx, r.size[1] * sy, tiny_limit)) {
+      ++g_tiny_out[pass];
       continue;
     }
     g_mres_play.push_back(r);
@@ -3379,9 +3393,8 @@ bool ComposeLate() {
 // the eye picture from the two.
 // A TEST AID (VkSceneListMeasure): a run is a row of draws that one call could draw,
 // because no state changes between them. The sizes are those of the draws of the game,
-// before the merge, in pixels of the image of the pass. A rect has the move of the right
-// eye in its width, so only its height says how small a draw is.
-void ListMeasure(int pass, float sy) {
+// before the merge, in pixels of the image of the pass.
+void ListMeasure(int pass, float sx, float sy) {
   if (pass == 0) g_list_now = g_list_measure && (++g_list_walks % 720) == 1;
   if (!g_list_now) return;
   namespace dm = vk_draw_math;
@@ -3407,25 +3420,26 @@ void ListMeasure(int pass, float sy) {
     for (uint32_t i = 0; i < different && !known; ++i) known = seen[i] == hash;
     if (!known && different < 256) seen[different++] = hash;
   }
-  // The height below 1, 2, 4, 8, 16, 32 pixels, and more.
+  // The longer side below 1, 2, 4, 8, 16, 32 pixels, and more.
   uint32_t sizes[7] = {0, 0, 0, 0, 0, 0, 0};
   for (const MresRecord& r : g_mres_records) {
     if (r.clear >= 0) continue;
-    const float height = (r.bounds[3] - r.bounds[1]) * sy;
+    const float w = r.size[0] * sx, h = r.size[1] * sy;
+    const float side = w > h ? w : h;
     int bin = 0;
     float limit = 1.0f;
-    while (bin < 6 && height >= limit) {
+    while (bin < 6 && side >= limit) {
       ++bin;
       limit *= 2.0f;
     }
     ++sizes[bin];
   }
   ModLog("vk scene     : a list of the %s image: %u draws, %u runs of one state, %u different "
-         "states, %llu indices. The draws of the game by their height: below 1 pixel %u, "
-         "2: %u, 4: %u, 8: %u, 16: %u, 32: %u, more: %u",
+         "states, %llu indices, %u tiny draws left out. The draws of the game by their longer "
+         "side: below 1 pixel %u, 2: %u, 4: %u, 8: %u, 16: %u, 32: %u, more: %u",
          pass == 1 ? "centre" : "outer", draws, runs, different,
-         static_cast<unsigned long long>(indices), sizes[0], sizes[1], sizes[2], sizes[3],
-         sizes[4], sizes[5], sizes[6]);
+         static_cast<unsigned long long>(indices), g_tiny_out[pass], sizes[0], sizes[1], sizes[2],
+         sizes[3], sizes[4], sizes[5], sizes[6]);
 }
 
 void PlayMres(Slot& s) {
@@ -3490,7 +3504,7 @@ void PlayMres(Slot& s) {
     bool blend_known = false;
     uint32_t blend_now = 0;
     PreparePass(s, pass, ox, oy, sx, sy, used_w, used_h, out_of_view, left_out);
-    ListMeasure(pass, sy);
+    ListMeasure(pass, sx, sy);
     for (const MresRecord& r : g_mres_play) {
       if (r.clear >= 0) {
         PlayClear(cb, g_mres_clears[r.clear], color, depth, ox, oy, sx, sy,
@@ -5494,9 +5508,12 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
     // The rect of the vertices, and of the right eye with its move.
     const float* v = static_cast<const float*>(vertices);
     float b[4] = {1e30f, 1e30f, -1e30f, -1e30f};
+    float x_low = 1e30f, x_high = -1e30f;
     const float shift = still == 0u ? push.depth[2] : 0.0f;
     for (uint32_t i = 0; i < vertex_count; ++i, v += 8) {
       const float x = v[0], y = v[1];
+      if (x < x_low) x_low = x;
+      if (x > x_high) x_high = x;
       const float xr = x + shift * v[3];
       const float lo = x < xr ? x : xr, hi = x < xr ? xr : x;
       if (lo < b[0]) b[0] = lo;
@@ -5505,6 +5522,8 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
       if (y > b[3]) b[3] = y;
     }
     memcpy(r.bounds, b, sizeof(b));
+    r.size[0] = x_high - x_low;
+    r.size[1] = b[3] - b[1];
     // PreparePass joins draws with indices from this copy.
     if (g_mres_play_on && g_walk_merge && index_count > 0) {
       r.queue_index = static_cast<uint32_t>(g_mres_indices.size());
@@ -6213,6 +6232,7 @@ void DrawMeshImpl(uint64_t mesh, const gpu_mesh_math::Consts& consts_in, const f
     // The rect of the vertices is not known: the whole viewport.
     r.bounds[0] = r.bounds[1] = -1e9f;
     r.bounds[2] = r.bounds[3] = 1e9f;
+    r.size[0] = r.size[1] = 2e9f;
     g_mres_records.push_back(r);
     ++g_draws;
     return;
@@ -7039,6 +7059,10 @@ void VkSceneSetBindless(bool on) {
   ModLog("vk scene     : vk_bindless=%d from the next walk. %s", on ? 1 : 0,
          g_slots_device ? "" : "The device cannot do it, so it has no effect");
 }
+
+void VkSceneSetTinyDraws(bool on) { g_tiny_on = on; }
+
+void VkSceneSetTinyPixels(float pixels) { g_tiny_pixels = pixels; }
 
 void VkSceneSetFastShaders(bool on) {
   if (g_fast_key == on) return;

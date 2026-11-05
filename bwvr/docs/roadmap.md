@@ -782,12 +782,6 @@ keeps the mod as it is.
   the palm of the hand that does not point, while that palm is up, as
   `book_bubble.cpp` draws the bubble of the game. Then the spiral shows what
   the player can draw next. First prove the cause with an eye picture.
-- **F3. A circle that casts when it closes.** Spiritual Shield, Physical
-  Shield and Storm cast when the game matches the circle, with the grip
-  still closed. Now the cast comes when the grip opens. The game sees the
-  match in `h_MatchType` (`gesture_air.cpp`). The game's own release then
-  comes from a button that looks open to the game until the real grip
-  opens, as `miracle_seed_use` does.
 - **F4. Lightning from the fingertip.** Find where the bolt of Lightning
   starts (`UR_Lightning` `0x0067E900`), and start it at the tip of the
   index finger.

@@ -113,7 +113,7 @@ gesture types that fit the moment, and it tests each of them with
 
 | Moment | Types | On a match |
 | --- | --- | --- |
-| A Miracle in the Hand is ready to power up (`GInterface+0x39` bit 1) | its own gesture (`SpellSeedInfo+0x10C`) | `fn_0057A5E0` places the power up, then `fn_005CE420(1)` |
+| A Miracle in the Hand with its own gesture, and bit 1 of `GInterface+0x39` | its own gesture (`SpellSeedInfo+0x10C`), the circle | `fn_0057A5E0` places the circle, then `fn_005CE420(1)`. See "The circle of a cast" |
 | A Miracle in the Hand (`fn_005CEF50`) | the scribble (5), and up to three types at `GInterface+0x16C` | the scribble drops the Miracle. The others power it up (`fn_005D0000`) |
 | A chain of a miracle has started (`GInterface+0x364`, `fn_005CF1C0`) | the next gesture of each candidate miracle, and the scribble | `fn_005CFAE0`, see below |
 | The Creature's leash is on (`fn_005CEFB0`) | the leash gestures | `GInterface::DoLeashSelectionSystem` |
@@ -325,12 +325,35 @@ on a villager: Heal is cast at a place.
   pointer while the button is held. The release (`FUN_005D48D0`) calls
   `FUN_005D3340`, which sends the throw velocity `CHand+0x48C8` in packet
   `0x4D`. A fireball and a flock fly with that velocity. A storm and the two
-  shields need their own gesture, the circle: `ProcessPowerUpSystem` matches
-  it while the button is held (`0x005CF4E0`, `GInterface+0x17C`), and the
-  circle gives the place and the size (`fn_0057A5E0`).
+  shields need their own gesture, the circle. See "The circle of a cast".
 - **2, the press**: the cast is at once, on the object or at the land point.
   A Creature miracle stays in the Hand while its spell runs (`+0x114`), and
   `ProcessInHand` deletes the seed when the spell ends.
+
+### The circle of a cast
+
+Storm and the two shields have their own gesture (`GSpellSeedInfo+0x10C`,
+the circle). `ProcessPowerUpSystem` tests it at `0x005CF4E0` when all of
+these are true:
+
+- Bit 1 of `GInterface+0x39` is set. The press of the right button sets it [I].
+- The Hand holds a miracle (`fn_005D3880`), and the miracle has its own
+  gesture (`fn_00729AC0`).
+- The game holds no circle now (`GInterface+0x17C` is 0).
+
+A match (`fn_005CF220`) of that type closes the circle. `fn_0057A5E0` gives
+the place and the size of the circle from the path: for a template of kind
+2 (`+0x64A`), the place is the middle of the box of the land points of the
+path, and the size is the width of that box across the view of the camera,
+times 1.05. The game keeps the circle at `GInterface+0x180` to `+0x190`,
+sets `+0x17C` to 1, and clears the ring (`fn_005CE420(1)`). The circle
+stays for 5 s (`+0x194`), and then `+0x17C` goes back to 0.
+
+The release of action 8 (`FUN_005D48D0`) calls `FUN_005D3340`. With
+`+0x17C` set, the cast takes the circle as its gesture (`+0x1A4`) and the
+middle of the circle as its land point, and it clears `+0x17C`. With no
+circle, the gesture test (`fn_00729AF0`) fails and the game refuses the
+cast. A refused cast keeps the circle until its 5 s end.
 
 ### Power ups
 
@@ -453,7 +476,7 @@ Hand (see `grab.md`, "The grip holds").
 | Heal, Forest, Teleport, Explosion | Close the grip with the Hand over the place | `FUN_005D3340`: the cast at the land under the Hand |
 | Food, Wood, Water, Lightning | Keep the grip closed over the place | Action 10: a cast each game turn. The opening ends the pour |
 | Fireball, the flocks | Close the grip, swing the hand, open the grip | Action 8: the release sends the speed of the Hand |
-| Storm, the two shields | Close the grip, draw a circle with the hand, open the grip | The game matches the circle, and the release casts at its place |
+| Storm, the two shields | Close the grip and draw a circle with the hand | The game matches the circle, and the cast comes at once, at its place. The grip that opens then does nothing more |
 
 **The throw** uses the game's own speed of the Hand: the Grain state filters
 the motion of the Hand, which is the motion of the real hand. The mod does
@@ -463,6 +486,16 @@ not change it.
 closed with a miracle that needs a circle, and the interface action is 8 or
 9. The path of the hand goes to the ring as it does for the draw button
 (`MiracleDrawsCircle`, `ControllersGestureInput`, "Feeding a 3D path").
+
+**The circle casts when it closes** (`miracle_circle_cast=1`). When
+`GInterface+0x17C` goes from 0 to 1 while the grip holds action 8, the grip
+looks open to the game until the real grip opens (`MiracleFrame`, the same
+mask as the use of a seed). The game's own release then casts at the circle
+in the next step, with the grip still closed. The opening of the real grip
+then sends no second release, so it gives no second cast, no throw and no
+drop. Only a new match counts: a circle that a refused cast left at
+`+0x17C` does not cast at the next press, and the release casts it as the
+game does. With `miracle_circle_cast=0` the cast comes when the grip opens.
 
 ### The way out
 
@@ -516,7 +549,7 @@ go, and one line of its text stays (the name of the miracle).
 | A miracle for a place | "[Grip] Cast here" |
 | A miracle to pour | "[Grip] Hold to pour", and "[Grip] Open to stop" while it pours |
 | A miracle to throw | "[Grip] Hold, swing, open to throw", and "[Grip] Open to throw" while the grip is closed |
-| A miracle that needs a circle | "[Grip] Hold and draw a circle", and "[Grip] Draw a circle, then open" |
+| A miracle that needs a circle | "[Grip] Hold and draw a circle", and "[Grip] Draw a circle to cast" while the grip is closed ("[Grip] Draw a circle, then open" with `miracle_circle_cast=0`) |
 | The spell of a Creature miracle runs | "The miracle acts now" |
 | Each state of a miracle | "[B] Tap to cancel, or shake" |
 
@@ -753,6 +786,7 @@ place of that corner.
 | `miracle_cancel_button` | 1 | 0: the second face button does not cancel |
 | `miracle_cancel_ms` | 400 | The longest press of that button that is a cancel. 50 to 2000 |
 | `miracle_seed_use` | 1 | 0: the trigger does not make a carried seed active. Then only a short press of the grip does |
+| `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
 | `miracle_touch_cm` | 3 | A body this near to the Hand's point is the target at the Hand, in cm of the room |
 | `miracle_cone_deg` | 6 | The cone of the aim for a new target at a distance |
 | `miracle_keep_deg` | the cone and 4 | The target of the last frame stays to this angle |
@@ -864,6 +898,13 @@ Site (Water and Food) with a power up and the power that goes back at a
 cancel. A Physical Shield with no circle gives the refusal "this miracle
 needs a circle on the land first".
 
+`miracle_run.ps1 -Kind shield` shows the circle that casts when it closes.
+The game matches the circle of Spiritual Shield and of Storm at frames 445
+and 1025, and casts each one 2 frames later, while the grip stays closed for
+80 more frames. The opening of the grip then gives no second cast. With
+`miracle_circle_cast=0` the cast comes at the opening of the grip, 82
+frames after the match, at the same land point.
+
 The math test (`spell_book_checks.h`) covers the layout of the book for 0 to
 32 items, the place of the book from the grip pose, the plane that faces the
 head, the pick with its two limits, the open and the close, the grip that
@@ -960,6 +1001,8 @@ tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
   means. The desktop runs had only a step of the hand.
 - Whether a circle of the real hand over the land fits the circle of the
   game.
+- Whether a cast at the close of the circle, with the grip still closed,
+  feels right.
 - Whether 3 cm and 6 degrees find the Creature with no effort.
 - Whether the miracle looks right in the real hand.
 

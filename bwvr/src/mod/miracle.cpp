@@ -88,6 +88,7 @@ const uintptr_t kMyInterface = 0x00555850;
 const int kFaceFlags = 0x39;         // 2 a right press, 0x40 a right release
 const int kFaceAction = 0x44;        // the interface action, 0 to 23
 const int kFaceInfluence = 0x48;     // the influence at the land point +0x3F0
+const int kFaceCircle = 0x17C;       // a byte: the game holds a matched circle
 const int kFaceGesture = 0x1A4;      // a byte: the gesture of the next cast
 const int kFaceStatus = 0x39C;       // the local GInterfaceStatus
 const int kFaceHand = 0x3A0;         // the CHand
@@ -233,6 +234,7 @@ struct Settings {
   bool button = true;        // miracle_cancel_button
   int tap_ms = 400;          // miracle_cancel_ms: the longest press that cancels
   bool seed_use = true;      // miracle_seed_use: the trigger uses a seed
+  bool circle_cast = true;   // miracle_circle_cast: a closed circle casts
   float cone_deg = 6.0f;     // miracle_cone_deg: a new target in the aim
   float keep_deg = 10.0f;    // miracle_keep_deg: the target stays to here
   float touch_cm = 3.0f;     // miracle_touch_cm
@@ -391,6 +393,7 @@ uint64_t g_casts = 0;
 uint64_t g_refusals = 0;
 uint64_t g_cancels = 0;
 uint64_t g_uses = 0;
+uint64_t g_circle_casts = 0;
 uint64_t g_record_puts = 0;
 uint64_t g_record_clears = 0;
 uint64_t g_target_frames = 0;
@@ -695,6 +698,7 @@ void Init() {
   if (g_settings.tap_ms < 50) g_settings.tap_ms = 50;
   if (g_settings.tap_ms > 2000) g_settings.tap_ms = 2000;
   g_settings.seed_use = IniInt("miracle_seed_use", 1) != 0;
+  g_settings.circle_cast = IniInt("miracle_circle_cast", 1) != 0;
   g_settings.cone_deg = IniFloat("miracle_cone_deg", 6.0f);
   if (!(g_settings.cone_deg >= 0.5f)) g_settings.cone_deg = 0.5f;
   if (g_settings.cone_deg > 30.0f) g_settings.cone_deg = 30.0f;
@@ -763,6 +767,12 @@ void Init() {
          g_settings.button ? 1 : 0, g_settings.tap_ms,
          g_settings.seed_use ? 1 : 0, g_settings.touch_cm,
          g_settings.cone_deg, g_settings.max_m, g_settings.keep_deg);
+  ModLog("miracle      : miracle_circle_cast=%d: %s",
+         g_settings.circle_cast ? 1 : 0,
+         g_settings.circle_cast
+             ? "a miracle that needs a circle casts when the game matches the "
+               "circle, with the grip still closed"
+             : "a miracle that needs a circle casts when the grip opens");
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 8 changes miracle_hand between 1 "
            "and 0 (test_keys=1)");
@@ -1096,6 +1106,33 @@ void MiracleFrame() {
     if (real) {
       for (int i = 0; i < 3; ++i) last_point[i] = point[i];
     }
+  }
+  // THE CIRCLE CASTS WHEN IT CLOSES (miracle_circle_cast=1). A match of the
+  // circle sets GInterface+0x17C (ProcessPowerUpSystem, 0x005CF4E0), and the
+  // release of action 8 casts at that circle (FUN_005D48D0, FUN_005D3340).
+  // So when the circle comes while the grip holds action 8, the grip looks
+  // open to the game until the real grip opens. The game's own release then
+  // casts at once, and the opening of the real grip does nothing more. Only a
+  // new match counts: a circle that a refused cast left stays at +0x17C for
+  // 5 s, and the release casts it as the game does.
+  {
+    static bool circle_was = false;
+    const bool circle = have && f.seed != nullptr &&
+                        f.info.cast == miracle_math::kCastThrow &&
+                        f.info.gesture != 0 && f.face[kFaceCircle] != 0;
+    if (circle && !circle_was && g_settings.circle_cast && f.action == 8 &&
+        GripDown() && !g_mask_grip) {
+      g_mask_grip = true;
+      ++g_circle_casts;
+      if (Log()) {
+        ModLog("miracle      : the game matched the circle of %s while the "
+               "grip holds interface action 8, so the grip looks open to the "
+               "game until the real grip opens, and the game's release casts "
+               "now (miracle_circle_cast=1), frame %llu",
+               SeedName(f.info.type), g_frame);
+      }
+    }
+    circle_was = circle;
   }
   CancelFrame(f, have);
   // The end of a pour: the interface action is no pour action now (10 pours
@@ -1545,8 +1582,9 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
       add(kWordGrab, L"Hold and draw a circle");
       break;
     case miracle_math::kPromptHeld:
-      add(kWordGrab, g_now.info.gesture != 0 ? L"Draw a circle, then open"
-                                             : L"Open to throw");
+      add(kWordGrab, g_now.info.gesture == 0 ? L"Open to throw"
+                     : g_settings.circle_cast ? L"Draw a circle to cast"
+                                              : L"Draw a circle, then open");
       break;
     case miracle_math::kPromptRuns:
       add(-1, L"The miracle acts now");
@@ -1595,23 +1633,26 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
 void MiracleReport() {
   if (!g_ready) return;
   if (g_frames_miracle == 0 && g_frames_seed == 0 && g_casts == 0 &&
-      g_refusals == 0 && g_cancels == 0 && g_uses == 0) {
+      g_refusals == 0 && g_cancels == 0 && g_uses == 0 &&
+      g_circle_casts == 0) {
     return;
   }
   ModLog("miracle      : a miracle was in the Hand on %llu frames and a "
          "one-off seed on %llu. %llu casts sent, %llu casts refused, %llu "
          "cancels, %llu seeds used with the trigger. A target on %llu "
          "frames: the mod put it in the pick record %llu times and took "
-         "another object out %llu times, this window (miracle_hand=%d)",
+         "another object out %llu times. %llu circles cast when they closed, "
+         "this window (miracle_hand=%d)",
          g_frames_miracle, g_frames_seed, g_casts, g_refusals, g_cancels,
          g_uses, g_target_frames, g_record_puts, g_record_clears,
-         g_settings.on ? 1 : 0);
+         g_circle_casts, g_settings.on ? 1 : 0);
   g_frames_miracle = 0;
   g_frames_seed = 0;
   g_casts = 0;
   g_refusals = 0;
   g_cancels = 0;
   g_uses = 0;
+  g_circle_casts = 0;
   g_target_frames = 0;
   g_record_puts = 0;
   g_record_clears = 0;

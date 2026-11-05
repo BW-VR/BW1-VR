@@ -383,7 +383,8 @@ def windows_of(folder, skip_ms):
             windows[w].frames += 1
             windows[w].fresh += 1 if r[POSE_FIELDS['fresh']] else 0
             windows[w].game_frames.add(r[POSE_FIELDS['frame']])
-    return [x for x in windows if x.frames > 0]
+    # A window with few frames is the end of the game, not a result of its step.
+    return [x for x in windows if x.frames / max(x.seconds(), 0.001) >= 30.0]
 
 
 def row(label, group):

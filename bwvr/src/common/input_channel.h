@@ -164,6 +164,8 @@ static_assert(sizeof(KeyEvent) == 8, "KeyEvent");
 
 // The bits of World::flags.
 constexpr uint32_t kWorldValid = 1u << 0;  // the map is the map of the main camera call of the frame
+constexpr uint32_t kWorldGrab = 1u << 2;   // a grip holds the land (grab_hands, grab_hand)
+constexpr uint32_t kGrabVertical = 1u << 2;  // grab_hands: the land also moves up and down
 constexpr uint32_t kWorldWalk = 1u << 1;   // the walk with the stick moved the view in the frame
 
 // THE PLACE OF THE PLAYER in the world of one frame of the mod
@@ -184,16 +186,21 @@ struct World {
   float walk_dead;         // the dead zone and the full push of that stick
   float walk_full;
   uint32_t frame_slot;     // SlotData::frame of the slot that the frame took after its camera
+  // THE LATE GRAB (late_camera_math.h). Bit 0 the left hand holds the land, bit 1 the right hand,
+  // and kGrabVertical. grab_hand: the eased grip points that gave this map, in the LOCAL space.
+  uint32_t grab_hands;
+  float grab_hand[2][3];
+  uint32_t grab_pad;
 };
 static_assert(offsetof(World, frame) == 8 && offsetof(World, linear) == 24, "World");
-static_assert(offsetof(World, walk_hand) == 84 && sizeof(World) == 104, "World size");
+static_assert(offsetof(World, walk_hand) == 84 && sizeof(World) == 136, "World size");
 
 struct WorldSlot {
   uint32_t seq;  // odd while the mod writes
   uint32_t pad;
   World data;
 };
-static_assert(sizeof(WorldSlot) == 112, "WorldSlot");
+static_assert(sizeof(WorldSlot) == 144, "WorldSlot");
 
 struct Head {
   uint32_t magic;          // kMagic when the head is whole

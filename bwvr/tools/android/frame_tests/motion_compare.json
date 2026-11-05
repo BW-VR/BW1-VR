@@ -1,0 +1,18 @@
+{
+  "name": "motion compare",
+  "start_prompt": "The test runs. Move the world with the grip, and fly with the stick, in turns. Keep moving.",
+  "start_prompt_s": 8,
+  "step_s": 12,
+  "skip_s": 4.5,
+  "step_prompt_s": 4,
+  "most_s": 300,
+  "cycle": [
+    {"step": "base", "keys": {"late_prepare": 0, "late_grab": 0}, "prompt": "Base"},
+    {"step": "prepare", "keys": {"late_prepare": 1, "late_grab": 0}, "prompt": "Prepare early"},
+    {"step": "grab", "keys": {"late_prepare": 0, "late_grab": 1}, "prompt": "Late grab"},
+    {"step": "both", "keys": {"late_prepare": 1, "late_grab": 1}, "prompt": "Both"}
+  ],
+  "end_keys": {"late_prepare": 1, "late_grab": 1},
+  "end_prompt": "The test is done. You can quit the game.",
+  "end_prompt_s": 8
+}

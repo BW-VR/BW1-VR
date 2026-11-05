@@ -109,6 +109,7 @@ bool HeadPoseCurrent(float matrix_out[9], float translation_out[3]);
 bool HeadPoseOrigin(float position_out[3], float rotation_out[4]);
 // tabletop.cpp: the table takes the main call of a frame. It gives the camera
 // to put the head on, and the gain for the lean. See docs/tabletop.md, "The table camera".
+void WorldGrabLatchHands();
 bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
                     float position_out[3], float focus_out[3],
                     float* lean_gain);
@@ -621,6 +622,7 @@ void PlaceCamera(const float* position, const float* focus, bool intro,
     // ends at its display time, and the head of this call comes from it. The
     // frame takes its own slot after this call (XrInputLatch of the frame).
     g_map_slot = XrInputSlotFrame();
+    WorldGrabLatchHands();
     int64_t map_period = 0;
     if (!StereoDisplayTime(&g_map_display, &map_period)) g_map_display = 0;
     g_map_frame = HeadPoseOrigin(g_map_origin, g_map_rotation)

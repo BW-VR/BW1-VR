@@ -5049,6 +5049,9 @@ void ControllersFrame() {
   DetailScaleFrame();
 }
 
+// The hand of a slot of the grab: 0 the other hand and 1 the pointing hand. Gives 0 left, 1 right.
+int ControllersGrabHandIndex(int slot) { return slot == 0 ? OtherIndex() : PointingIndex(); }
+
 bool ControllersAnyStickClick() {
   return (g_hands[0].active && g_hands[0].stick_click) ||
          (g_hands[1].active && g_hands[1].stick_click);

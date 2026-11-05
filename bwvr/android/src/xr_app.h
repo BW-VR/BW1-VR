@@ -236,6 +236,8 @@ class XrApp {
   // at a display time, in the LOCAL space. False when the runtime has no valid
   // place for that time.
   bool LocateHead(int64_t display_time, float head[3]);
+  // The grip of each hand at a display time, in the LOCAL space (the late grab).
+  void LocateGrips(int64_t display_time, float grips[2][3], bool ok[2]);
 
   // THE GAZE OF AN EYE TRACKER (XR_EXT_eye_gaze_interaction, docs/android.md,
   // "The input channel"). Call SetEyeGaze(true) before Start: the instance

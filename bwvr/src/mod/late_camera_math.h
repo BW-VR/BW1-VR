@@ -85,6 +85,64 @@ inline mc::Map MapNow(const input_channel::World& newest, float ahead_s) {
   return m;
 }
 
+// THE LATE GRAB (late_grab). The mod moves the land with the eased grips once for each frame
+// of the game, so with no more the land goes in steps while the session has more frames. One
+// hand holds a point of the land under it, so the map at the place of the hand is the same point
+// of the world for each place of the hand. The app eases the grips of its own frames in the same
+// way, and moves the newest map by the way from the grips of that map to its own. The result
+// does not depend on the time of the frames of the game. A turn and a zoom of two hands keep the
+// steps, because the shader takes only a move.
+struct GrabFilter {
+  bool on = false;
+  uint32_t hands = 0;  // World::grab_hands
+  float hand[2][3] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+};
+
+// One frame of the session. world: the newest map, or null when the key is off. raw: the grips
+// at the display time of the new picture, in the LOCAL space. A hand that joins starts at the
+// grip of the map. share: 1 - exp(-period / grab_smoothing_ms).
+inline void GrabStep(const input_channel::World* world, const float raw[2][3], const bool ok[2],
+                     float share, GrabFilter* f) {
+  if (world == nullptr || (world->flags & input_channel::kWorldGrab) == 0) {
+    *f = GrabFilter();
+    return;
+  }
+  for (int h = 0; h < 2; ++h) {
+    const uint32_t bit = 1u << h;
+    if ((world->grab_hands & bit) == 0) continue;
+    if (!f->on || (f->hands & bit) == 0) {
+      for (int i = 0; i < 3; ++i) f->hand[h][i] = world->grab_hand[h][i];
+    }
+    if (ok[h]) {
+      for (int i = 0; i < 3; ++i) f->hand[h][i] += (raw[h][i] - f->hand[h][i]) * share;
+    }
+  }
+  f->on = true;
+  f->hands = world->grab_hands;
+}
+
+// The map of a grab now: the land under the hand stays under the hand. Two hands hold the middle
+// between them, and only across when the land does not go up and down.
+inline void GrabMove(const input_channel::World& world, const GrabFilter& f, mc::Map* map) {
+  const uint32_t both = 3u;
+  if (!f.on || (world.flags & input_channel::kWorldGrab) == 0 ||
+      (world.grab_hands & both) == 0 || (world.grab_hands & both) != (f.hands & both)) {
+    return;
+  }
+  float way[3] = {0.0f, 0.0f, 0.0f};
+  int count = 0;
+  for (int h = 0; h < 2; ++h) {
+    if ((world.grab_hands & (1u << h)) == 0) continue;
+    for (int i = 0; i < 3; ++i) way[i] += f.hand[h][i] - world.grab_hand[h][i];
+    ++count;
+  }
+  for (float& v : way) v /= static_cast<float>(count);
+  if ((world.grab_hands & input_channel::kGrabVertical) == 0) way[1] = 0.0f;
+  float at[3];
+  mc::Rotate(map->linear, way, at);
+  for (int i = 0; i < 3; ++i) map->offset[i] -= at[i];
+}
+
 // THE EVENNESS OF A WALK, for the log: the step of the map now from the tick
 // before, against the step that the speed of the walk gives. True when the step
 // is more than a third away from it. A step of 0 at a speed counts: the view stood

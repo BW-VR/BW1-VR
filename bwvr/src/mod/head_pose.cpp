@@ -390,6 +390,16 @@ bool HeadPoseUpdate(const float position[3], const float orientation[4]) {
   return true;
 }
 
+// A point of the room in meters, in the LOCAL space of the runtime: RoomTranslation back.
+bool HeadPoseRoomMetersToLocal(const float room[3], float local[3]) {
+  if (!g_have_origin) return false;
+  const float turned[3] = {room[0], room[1], -room[2]};
+  float back[3];
+  Rotate(g_origin_rotation, turned, back);
+  for (int i = 0; i < 3; ++i) local[i] = g_origin_position[i] + back[i];
+  return true;
+}
+
 // A pose in the room, with the same origin and scale as the head, and no
 // origin capture. Only the head captures the origin, so a controller can never
 // become straight ahead. False until the head has captured one. The

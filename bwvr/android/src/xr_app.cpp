@@ -3936,6 +3936,22 @@ void XrApp::ReadProfiles() {
   }
 }
 
+void XrApp::LocateGrips(int64_t display_time, float grips[2][3], bool ok[2]) {
+  for (int h = 0; h < 2; ++h) {
+    ok[h] = false;
+    if (grip_space_[h] == XR_NULL_HANDLE || display_time == 0) continue;
+    XrSpaceLocation where = {XR_TYPE_SPACE_LOCATION};
+    if (XR_FAILED(xrLocateSpace(grip_space_[h], local_, display_time, &where)) ||
+        (where.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0) {
+      continue;
+    }
+    grips[h][0] = where.pose.position.x;
+    grips[h][1] = where.pose.position.y;
+    grips[h][2] = where.pose.position.z;
+    ok[h] = true;
+  }
+}
+
 bool XrApp::LocateHead(int64_t display_time, float head[3]) {
   if (display_time == 0) return false;
   XrViewLocateInfo locate = {XR_TYPE_VIEW_LOCATE_INFO};

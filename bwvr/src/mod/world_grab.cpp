@@ -126,6 +126,14 @@ float g_anchor_distance = 0.0f;  // the camera to the grabbed point
 
 // The grip points: smoothed, and raw from the last sample.
 float g_smooth[2][3];
+// THE LATE GRAB: the eased grips of the last solve of the table in room meters, and the same
+// values at the main camera call of the frame, which has the table of that solve.
+float g_solved_room[2][3];
+int g_solved_mask = 0;
+bool g_solved_vertical = false;
+float g_latched_room[2][3];
+int g_latched_mask = 0;
+bool g_latched_vertical = false;
 float g_raw[2][3];
 bool g_have_raw[2] = {false, false};
 uint64_t g_sample = ~0ull;
@@ -453,6 +461,7 @@ bool Anchor(const GrabCamera& camera, const GrabInput& in, int mask,
 // The grab has ended. The camera stays where the grab left it, and the rest of
 // the smoothing is dropped.
 void Release(const char* why) {
+  g_solved_mask = 0;
   if (g_holding && g_on_table && g_have_table_written &&
       g_table_at_press.scale > 0.0f) {
     // In the God view one hand also moves the land up and down (center y).
@@ -775,6 +784,14 @@ void TableSolve(const GrabInput& in, int mask, const char* why) {
   float room[3], low = 0.0f, high = 0.0f;
   uint64_t serial = 0;
   TabletopPose(&pose, room, &low, &high, &serial);
+  {
+    const float units = in.scale > 0.0f ? in.scale : 7.5f;
+    for (int slot = 0; slot < 2; ++slot) {
+      for (int i = 0; i < 3; ++i) g_solved_room[slot][i] = g_smooth[slot][i] / units;
+    }
+    g_solved_mask = mask;
+    g_solved_vertical = vertical;
+  }
 
   if (g_new_sample) {
     ++g_held;
@@ -899,6 +916,20 @@ void WorldGrabCheckCamera(const float position[3], const float focus[3]) {
 // comfort_camera.cpp, after the game's update of CameraModeNew3: the camera
 // the grab wants, from the hands of the last frame. False when no grab holds,
 // and then nothing is written.
+void WorldGrabLatchHands() {
+  memcpy(g_latched_room, g_solved_room, sizeof(g_latched_room));
+  g_latched_mask = g_solved_mask;
+  g_latched_vertical = g_solved_vertical;
+}
+
+bool WorldGrabHandsOfMap(int* mask, bool* vertical, float room[2][3]) {
+  if (g_latched_mask == 0) return false;
+  *mask = g_latched_mask;
+  *vertical = g_latched_vertical;
+  memcpy(room, g_latched_room, sizeof(g_latched_room));
+  return true;
+}
+
 bool WorldGrabSolve(const GrabCamera& camera, GrabCamera* out) {
   DropStale();
   g_solve_frame = ControllersFrameCount();

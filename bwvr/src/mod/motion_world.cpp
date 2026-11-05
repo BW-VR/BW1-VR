@@ -11,6 +11,9 @@ bool HeadCameraWorldMap(float camera[3], float basis[9], float* units, float ori
 bool TabletopGodWalkRate(float velocity[3], float* share);
 void ControllersWalkStick(int* hand, float* dead, float* full);
 void HeadCameraMapSlot(uint32_t* slot, int64_t* display_time);
+bool WorldGrabHandsOfMap(int* mask, bool* vertical, float room[2][3]);
+bool HeadPoseRoomMetersToLocal(const float room[3], float local[3]);
+int ControllersGrabHandIndex(int slot);
 
 float MotionWorldViewError(const input_channel::World& world, const float q[4],
                            const float matrix[12]) {
@@ -58,6 +61,25 @@ bool MotionWorldOfFrame(uint64_t frame, uint32_t input_frame, int64_t display_ti
     int hand = -1;
     ControllersWalkStick(&hand, &out->walk_dead, &out->walk_full);
     out->walk_hand = hand;
+  }
+  // THE LATE GRAB: the grips that gave this map, so the app can follow the hand between the
+  // frames of the game.
+  int grab_mask = 0;
+  bool grab_vertical = false;
+  float grab_room[2][3];
+  if (WorldGrabHandsOfMap(&grab_mask, &grab_vertical, grab_room)) {
+    for (int slot = 0; slot < 2; ++slot) {
+      if (((grab_mask >> slot) & 1) == 0) continue;
+      const int hand = ControllersGrabHandIndex(slot);
+      if (hand < 0 || hand > 1) continue;
+      if (HeadPoseRoomMetersToLocal(grab_room[slot], out->grab_hand[hand])) {
+        out->grab_hands |= 1u << hand;
+      }
+    }
+    if (out->grab_hands != 0) {
+      out->flags |= input_channel::kWorldGrab;
+      if (grab_vertical) out->grab_hands |= input_channel::kGrabVertical;
+    }
   }
   return true;
 }

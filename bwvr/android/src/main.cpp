@@ -99,6 +99,7 @@ struct LateTick {
   input_channel::World world = {};     // the newest place of the player of the mod
   int count = 0;
   motion_comp_math::SlotPush slots[64];  // the slots after the slot of that place
+  late_camera_math::GrabFilter grab;     // the grips of the late grab at the next display time
 };
 
 struct LivePlay {
@@ -207,6 +208,10 @@ struct App {
   // newest tick that the play thread ended its work for.
   int late_take_ms = 4;
   std::atomic<bool> late_take_live{false};
+  std::atomic<bool> late_grab_live{false};     // the row "Late grab"
+  std::atomic<bool> late_prepare_live{false};  // the row "Prepare early"
+  late_camera_math::GrabFilter late_grab_filter;
+  float late_grab_ms = 35.0f;                  // grab_smoothing_ms
   std::atomic<uint64_t> late_handled{0};
   uint64_t late_serial = 0;  // the tick of the picture that the play thread writes now
   // The counts of the line of the log, on the thread of the session.
@@ -901,6 +906,7 @@ bool LateMoveOf(App* app, const LateTick& tick, late_camera_math::Result* out) {
                                          app->late_keys.predict_ms);
     in.drawn = mc::MapOf(world);
     in.now = lc::MapNow(*newest, ahead);
+    lc::GrabMove(*newest, tick.grab, &in.now);
     app->late_map = in.now;
     app->late_has_map = true;
     // THE EVENNESS OF THE WALK, one count for each new slot of the walk.
@@ -962,6 +968,10 @@ void* PlayThread(void* arg) {
   double late_log_at = NowMs();
   PictureRecord picture_record = {};
   bool picture_pending = false;
+  // THE PREPARE AHEAD (late_prepare): the frames of the game that the walk has ready for the
+  // next tick, and the ms of their play.
+  size_t prepared_n = 0;
+  double prepared_ms = 0.0;
   // A TEST AID (remote_control): the limit of the tiny draws and the rate of the compose
   // that the file asks for.
   int tiny_seen = -1;
@@ -974,6 +984,18 @@ void* PlayThread(void* arg) {
     // THE QUEUE AT THE GPU (frame_loop_gpu_depth): no new play while the GPU
     // has `depth` pictures that are not finished. The reader keeps the frames
     // of the game meanwhile, so the next batch has the newest one.
+    const bool late = app->late_on && app->late_live.load();
+    VkSceneLateDefer(late);
+    // THE PREPARE AHEAD (late_prepare=1): a frame of the game goes into the renderer when it
+    // comes, also while the GPU draws the picture before, and not after the next tick. So the
+    // tick has only the commands of the list before it, and a new list does not make its
+    // picture late. One frame waits for each tick: a newer frame stays with the reader.
+    const bool prepare = late && app->late_prepare_live.load() && !app->xr.DensityPass();
+    const auto prepare_now = [&]() {
+      if (!prepare || prepared_n > 0 || !app->live_reader.TakeAll(&live->batch)) return;
+      prepared_n = live->batch.size();
+      prepared_ms = PlayBatch(app, live);
+    };
     double gate_ms = -1.0;
     if (depth > 0) {
       // Each wait counts, also one that ends in the first call.
@@ -982,9 +1004,10 @@ void* PlayThread(void* arg) {
       bool waited_gpu = false;
       for (;;) {
         bool waited = false;
-        const bool may = app->ring.WaitGpu(depth, 5000000ull, &waited);
+        const bool may = app->ring.WaitGpu(depth, prepare ? 1000000ull : 5000000ull, &waited);
         if (waited) waited_gpu = true;
         if (may || app->play_stop.load()) break;
+        prepare_now();
       }
       // The phase of the take: with a depth of 1 the GPU finished each
       // picture now, the picture before too.
@@ -1005,10 +1028,22 @@ void* PlayThread(void* arg) {
     // THE LATE CAMERA: a picture for each frame of the session, with the frames
     // of the game that came since the last one. With no tick for 50 ms (a session
     // that does not run) the frames of the game still go on.
-    const bool late = app->late_on && app->late_live.load();
-    VkSceneLateDefer(late);
     bool got_tick = false;
-    if (late) {
+    if (prepare) {
+      const double wait_at = NowMs();
+      for (;;) {
+        got_tick = WaitLateTick(app, &late_tick, &late_seen, 1);
+        if (got_tick || app->play_stop.load()) break;
+        prepare_now();
+        if (NowMs() - wait_at >= 50.0) break;
+      }
+      if (app->play_stop.load()) break;
+      prepare_now();
+      if (prepared_n == 0 && !got_tick) {
+        QuietCheck(app, live);
+        continue;
+      }
+    } else if (late) {
       got_tick = WaitLateTick(app, &late_tick, &late_seen, 50);
       if (app->play_stop.load()) break;
       if (!app->live_reader.TakeAll(&live->batch) && !got_tick) {
@@ -1020,7 +1055,7 @@ void* PlayThread(void* arg) {
       continue;
     }
     const double start = NowMs();
-    const size_t n = live->batch.size();
+    const size_t n = prepare ? prepared_n : live->batch.size();
     const int64_t trace_play = g_app_trace ? AppTraceNow() : 0;
     // THE ONE PASS (xr_density_pass=1): the slot of the picture and its
     // swapchain image first, so the walks of the batch draw into the image. A
@@ -1049,7 +1084,10 @@ void* PlayThread(void* arg) {
         }
       }
     }
-    const double ms = n > 0 ? PlayBatch(app, live) : 0.0;
+    const double ms = prepare ? prepared_ms : n > 0 ? PlayBatch(app, live) : 0.0;
+    if (prepare && n > 0) live->play_start_ms = start;
+    prepared_n = 0;
+    prepared_ms = 0.0;
     if (density) VkSceneDensityTargetEnd();
     WalkProbeInstall();
     // THE LATE CAMERA: the walk of this batch gets the move of its picture, or
@@ -1271,6 +1309,8 @@ void AppKeysApply(uint32_t bits) {
   app->late_live.store((bits & app_keys::kLateCamera) != 0);
   app->release_take.store((bits & app_keys::kReleaseTake) != 0);
   app->late_take_live.store((bits & app_keys::kLateTake) != 0);
+  app->late_grab_live.store((bits & app_keys::kLateGrab) != 0);
+  app->late_prepare_live.store((bits & app_keys::kLatePrepare) != 0);
   app->panel_keep.store((bits & app_keys::kPanelKeep) != 0);
   VkSceneSetBindless((bits & app_keys::kBindless) != 0);
   VkSceneSetFastShaders((bits & app_keys::kFastShaders) != 0);
@@ -1880,6 +1920,9 @@ void Play(App* app, bool new_game) {
       const int most = app->ini.GetInt("bwvr", "late_take_ms", 4);
       app->late_take_ms = most < 0 ? 0 : (most > 8 ? 8 : most);
       app->late_take_live.store(app->ini.GetInt("bwvr", "late_take", 0) != 0);
+      app->late_grab_live.store(app->ini.GetInt("bwvr", "late_grab", 0) != 0);
+      app->late_prepare_live.store(app->ini.GetInt("bwvr", "late_prepare", 0) != 0);
+      app->late_grab_ms = static_cast<float>(app->ini.GetInt("bwvr", "grab_smoothing_ms", 35));
       app->late_handled.store(0);
       app->take_all = app->take_waits = app->take_over = 0;
       app->take_sum = app->take_most = app->take_log_at = 0.0;
@@ -2980,7 +3023,18 @@ void android_main(android_app* android) {
       float late_head[3] = {0.0f, 0.0f, 0.0f};
       bool late_head_ok = false;
       const auto locate_head = [&]() {
-        late_head_ok = app.xr.LocateHead(app.xr.DisplayTime() + app.xr.DisplayPeriod(), late_head);
+        const int64_t next_time = app.xr.DisplayTime() + app.xr.DisplayPeriod();
+        late_head_ok = app.xr.LocateHead(next_time, late_head);
+        // THE LATE GRAB: the grips at the same time, eased as the mod eases them.
+        const bool grab = now_has && app.late_grab_live.load() &&
+                          (now_world.flags & input_channel::kWorldGrab) != 0;
+        float grips[2][3] = {};
+        bool grips_ok[2] = {false, false};
+        if (grab) app.xr.LocateGrips(next_time, grips, grips_ok);
+        const float period_ms = static_cast<float>(static_cast<double>(app.xr.DisplayPeriod()) / 1e6);
+        const float share = app.late_grab_ms > 0.0f ? 1.0f - expf(-period_ms / app.late_grab_ms) : 1.0f;
+        late_camera_math::GrabStep(grab ? &now_world : nullptr, grips, grips_ok, share,
+                                   &app.late_grab_filter);
       };
       const auto send_tick = [&]() {
         {
@@ -2996,6 +3050,7 @@ void android_main(android_app* android) {
           if (now_has) t.world = now_world;
           t.count = now_count;
           memcpy(t.slots, now_slots, static_cast<size_t>(now_count) * sizeof(now_slots[0]));
+          t.grab = app.late_grab_filter;
         }
         app.late_cond.notify_one();
       };

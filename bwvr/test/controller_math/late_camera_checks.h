@@ -255,7 +255,98 @@ inline void LongFrameChecks() {
   Near("late camera: a frame of 1 s, the cap and the prediction stop at one place", jump(1.0f, 0.25f), 0.0f, 1e-3f);
 }
 
+inline void GrabChecks() {
+  namespace lc = late_camera_math;
+  namespace mc = motion_comp_math;
+  input_channel::World w = {};
+  w.flags = input_channel::kWorldValid | input_channel::kWorldGrab;
+  w.grab_hands = 1u | input_channel::kGrabVertical;
+  // 100 units a meter, with a quarter turn about up, as a map has a turn.
+  const float linear[9] = {0.0f, 0.0f, 100.0f, 0.0f, 100.0f, 0.0f, -100.0f, 0.0f, 0.0f};
+  memcpy(w.linear, linear, sizeof(linear));
+  w.offset[0] = 500.0f;
+  w.offset[1] = 20.0f;
+  w.offset[2] = 700.0f;
+  w.grab_hand[0][0] = 0.1f;
+  w.grab_hand[0][1] = 1.0f;
+  w.grab_hand[0][2] = 0.2f;
+  const float raw[2][3] = {{0.3f, 1.2f, 0.1f}, {0.0f, 0.0f, 0.0f}};
+  const bool ok[2] = {true, false};
+  lc::GrabFilter f;
+  lc::GrabStep(&w, raw, ok, 1.0f, &f);
+  Check(f.on && f.hand[0][0] == raw[0][0], "a share of 1 takes the grip of the frame", f.hand[0][0],
+        raw[0][0]);
+  mc::Map map = mc::MapOf(w);
+  const mc::Map first = map;
+  lc::GrabMove(w, f, &map);
+  // The point of the world under the hand stays when the hand moves.
+  float before[3], after[3];
+  mc::Point(first, w.grab_hand[0], before);
+  mc::Point(map, f.hand[0], after);
+  for (int i = 0; i < 3; ++i) {
+    Near("late grab: the land under the hand stays under the hand", after[i], before[i], 0.01);
+  }
+  // A new map of the game with the same point of the land gives the same map now.
+  input_channel::World next = w;
+  next.grab_hand[0][0] = 0.2f;
+  float way[3] = {0.1f, 0.0f, 0.0f}, at[3];
+  mc::Rotate(first.linear, way, at);
+  for (int i = 0; i < 3; ++i) next.offset[i] -= at[i];
+  mc::Map from_next = mc::MapOf(next);
+  lc::GrabMove(next, f, &from_next);
+  for (int i = 0; i < 3; ++i) {
+    Near("late grab: a new frame of the game does not move the map now", from_next.offset[i],
+         map.offset[i], 0.01);
+  }
+  // Across only: the way up does not count.
+  input_channel::World flat = w;
+  flat.grab_hands = 1u;
+  mc::Map across = mc::MapOf(flat);
+  lc::GrabMove(flat, f, &across);
+  mc::Point(first, w.grab_hand[0], before);
+  const float high[3] = {w.grab_hand[0][0], f.hand[0][1], w.grab_hand[0][2]};
+  mc::Point(first, high, after);
+  Near("late grab: with no vertical the height of the map stays", across.offset[1], flat.offset[1],
+       0.001);
+  // The ease: half of the way for a share of 0.5, from the grip of the map.
+  lc::GrabFilter half;
+  lc::GrabStep(&w, raw, ok, 0.5f, &half);
+  Near("late grab: the ease starts at the grip of the map", half.hand[0][0], 0.2, 0.001);
+  // Two hands: the middle.
+  input_channel::World two = w;
+  two.grab_hands = 3u;
+  two.grab_hand[1][0] = 0.5f;
+  two.grab_hand[1][1] = 1.0f;
+  two.grab_hand[1][2] = 0.2f;
+  const float raw2[2][3] = {{0.2f, 1.0f, 0.2f}, {0.6f, 1.0f, 0.2f}};
+  const bool ok2[2] = {true, true};
+  lc::GrabFilter f2;
+  lc::GrabStep(&two, raw2, ok2, 1.0f, &f2);
+  mc::Map map2 = mc::MapOf(two);
+  lc::GrabMove(two, f2, &map2);
+  float way2[3] = {0.1f, 0.0f, 0.0f}, at2[3];
+  mc::Rotate(two.linear, way2, at2);
+  Near("late grab: two hands move the map by the way of their middle", map2.offset[0],
+       two.offset[0] - at2[0], 0.001);
+  // A hand that is not in the map yet, no flag, and a hand with no place.
+  lc::GrabMove(two, f, &map2);
+  Near("late grab: a filter of other hands moves nothing", map2.offset[0], two.offset[0] - at2[0],
+       0.001);
+  input_channel::World none = w;
+  none.flags = input_channel::kWorldValid;
+  lc::GrabStep(&none, raw, ok, 1.0f, &f);
+  Check(!f.on && f.hands == 0, "the end of the grab ends the filter", f.on ? 1 : 0, 0);
+  mc::Map still = mc::MapOf(none);
+  lc::GrabMove(none, f, &still);
+  Near("late grab: with no grab the map stays", still.offset[0], none.offset[0], 0.001);
+  const bool lost[2] = {false, false};
+  lc::GrabFilter held;
+  lc::GrabStep(&w, raw, lost, 1.0f, &held);
+  Near("late grab: a hand with no place stays at the grip of the map", held.hand[0][0], 0.1, 0.001);
+}
+
 inline void LateCameraChecks() {
+  GrabChecks();
   LongFrameChecks();
   ViewChecks();
   MapChecks();

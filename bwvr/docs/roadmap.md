@@ -772,6 +772,12 @@ that moves while the Hand takes it.
   - The async reprojection. `steamvr.disableAsync=1` of SteamVR is for a test that shows a missed
     picture as a stutter. Its log has no line that says that the compositor took the value.
 
+  - The motion between the frames of the game. `frame_tests/motion_compare.json` measures
+    `late_prepare` and `late_grab`, and the player judges the grab of the land and a flight with
+    the stick. A run must show both before they go into the values of the Steam Frame. A turn and
+    a zoom of two hands still go in the steps of the frames of the game: the shader would need a
+    turn and a scale of each point.
+
   Do each of these only when a test run shows the need:
   1. **Many draws in one call.** A run of draws with one state becomes one
      `vkCmdDrawIndexedIndirect`, and the values of a draw go into a buffer. Each vertex then reads

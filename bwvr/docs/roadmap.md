@@ -846,6 +846,8 @@ keeps the mod as it is.
     spell book"). Its longest draw is 8.7 to 10.2 ms, against 3 to 6 ms for
     the dark panel, and the page itself is only about 1.3 ms. Find the rest
     and make it smaller.
+  - In the spell book, the ring of the chosen item goes past its cell, and
+    the cell cuts its top and its bottom flat.
   - The same look for the other cards that GDI draws: the ring
     (`radial_menu.cpp`) and the keyboard (`vr_keyboard.cpp`). Keep their
     layout. The ring has badges on a circle: a seal for each badge fits it.

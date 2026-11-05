@@ -179,8 +179,14 @@ traced.
 
 The mod draws a gesture with the real hand through the game's own ring.
 
-- While the draw button is held, the grip point goes on a plane that faces
-  the head at the start of the stroke, with the head's right and up axes.
+- While the draw button is held, the point of the draw goes on a plane that
+  faces the head at the start of the stroke, with the head's right and up
+  axes. The point of the draw is the tip of the index finger (`gesture_point=1`,
+  the default) or the grip point (0). The tip is the tip of the hand model's
+  index finger at its rest curl, at the real hand's length, turned with the
+  grip pose. The trigger does not move it, so a press does not bend a
+  gesture. A turn of the wrist moves the tip in the plane, as a finger
+  moves when it draws in the air.
 - The plane becomes pixels at `gesture_size_cm` (30) for a third of the
   render height, around the controller's pixel at the start.
 - A pre hook on `ProcessPowerUpSystem` adds a sample when the pixel has
@@ -784,6 +790,33 @@ miracles that the towns know stay. A save of the game made while the switch
 is on keeps the miracles of the towns, the icons and the flags of the sites.
 The switch itself writes nothing to a saved game.
 
+### The trail at the fingertip (`gesture_trail=1`)
+
+While the draw button is held and the hand may draw, a ribbon follows the
+point of the draw, so the player sees the gesture that he draws. The game
+shows no trail of its own in the headset. The code is `overlay.cpp`
+(`BuildGestureTrail`) with the pure math in `gesture_trail_math.h` and
+`glow_math.h`. The ribbon is a glow ribbon (`hand-model.md`, "The glow
+ribbons"): gold in the middle and amber at the rim, 1.8 cm across at the
+newest end, with a light that adds to the picture.
+
+- The trail draws while `GestureInput.held` is true, the same input that
+  feeds the ring of the game. So it also draws for the circle of a shield,
+  while the grip is closed with a miracle that needs a circle.
+- The newest end is the point of the draw of this frame, so the ribbon
+  always reaches the finger. A point goes in each 5 mm of the room. The
+  trail keeps 96 points at the most.
+- A point stays 1.5 s. Its light and its width fall to nothing over that
+  time (width to 35 percent), so the old end of the trail goes out. A hand
+  that holds still loses the trail in 1.5 s.
+- When the draw ends, all the light falls to nothing over 0.3 s, and the
+  trail is empty. A new draw starts a new trail.
+- The points are in the room (game units), not in the world. In each frame
+  they go into the world with the map of that frame, so a move of the game
+  camera does not bend the trail. The hand and the trail move together.
+- It draws with `overlay=0` too, and with the hand model, the low poly
+  hand, and `hand_exact`.
+
 ### Where the gesture pictures of the game go
 
 The game shows the gestures that the player can draw now in the lower right
@@ -813,9 +846,11 @@ place of that corner.
 | `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |
 | `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
+| `gesture_point` | 1 | 1: the tip of the index finger draws a gesture. 0: the grip point draws it. Not in the launcher |
+| `gesture_trail` | 1 | 1: a ribbon follows the point of the draw (see "The trail at the fingertip"). 0: no trail. The launcher row "Trail for gestures" |
 
-The keys are read from `bwvr.ini`. Only `hint_card_style` is in the launcher
-("Card look").
+The keys are read from `bwvr.ini`. Only `hint_card_style` ("Card look")
+and `gesture_trail` are in the launcher.
 
 **The A/B key**, with `test_keys=1`: Ctrl with the 8 key of the number pad
 changes `miracle_hand`. The pointing controller gives a long pulse for 1 and
@@ -824,9 +859,11 @@ a short pulse for 0.
 **The debug page** (`debug_menu=1`, the group Creature): "Spell book" changes
 `spell_book`, "Book pull" changes `spell_book_pull_cm` between 0 and its
 value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
-`spell_book_bubble`, and "All miracles" changes `debug_all_miracles`. The hand that
-does not point gives a long pulse for 1 and a short pulse for 0. These two
-switches have no key of the keyboard.
+`spell_book_bubble`, "All miracles" changes `debug_all_miracles`, "Gesture
+point" changes `gesture_point` (grip or fingertip), and "Gesture trail"
+changes `gesture_trail`. The hand that does not point gives a long pulse for
+1 and a short pulse for 0. These switches have no key of the keyboard. Choose
+"Gesture point" between two draws.
 
 Test keys for the desktop runs only (the launcher removes them):
 
@@ -979,6 +1016,36 @@ and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
 - With `debug_all_miracles=1` the book has 6 miracles, and a take with 0
   chants puts the Miracle in the Hand (see "The limit of 6 icons").
 
+The math test (`glow_checks.h`) covers the trail and the glow ribbons: the
+light by age, the points that go in and out, the keep time, the release, a
+new draw, a full buffer, the same count of points at 72, 90 and 120 Hz, the
+ribbon of a line and of a curve, and the place of the eye from the camera
+matrix.
+
+The trail has a recipe: `village_run.ps1 -Kind miracle -Icon 3` with
+`-Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60"` and the steps of the
+recipe with `shot@1240+1 shot@1300+1 shot@1360+1` added to the first draw (the
+word `trace` and B, 300 frames). What it shows:
+
+- The log has "the trail of a gesture starts" and "ends" for each draw, and
+  "the draw starts ... The point of the draw is the tip of the index finger,
+  8.8 cm of the room from the grip".
+- The eye pictures of both eyes show a gold ribbon that follows the path of
+  the draw and reaches the fingertip of the right hand. Its old end is thin
+  and faint. In the picture 60 frames later the hand has moved on and only
+  the last part of the path shows.
+- The game matched the spiral (template 64) 116 frames after the start of
+  the first draw and 116 frames after the start of the third one, and the W
+  shape 58 frames after the start of the fourth draw. With
+  `gesture_point=0` it matched the same gestures at the same frames, with
+  the same 44 samples, 5 corners and path of 3692 pixels. The scripted hand
+  never turns, so the tip is at a fixed offset from the grip, and the two
+  draws feed the game the same path. The run proves the way of the tip
+  through the plane and the ring. It does not show what a turn of the wrist
+  does to a gesture.
+- The ribbons cost 0.02 to 0.03 ms a frame on the CPU for the two eyes, with
+  80 to 140 triangles in each eye.
+
 A miracle that pours stays in the Hand after the pour, until its chants are
 used or the player takes it out. So a recipe with more than one seed must
 tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
@@ -988,6 +1055,10 @@ tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 
 - The spell book: the close when the ring or the game menu opens, an empty
   book, a Creature miracle in the book, and the switches of the debug page.
+- A draw with a hand that turns: the scripted hand keeps its turn, so no run
+  shows whether the tip or the grip gives a gesture that the game matches
+  more often. The trail with the low poly hand, with `overlay=0` and on the
+  table.
 
 - Teleport (the cast of Heal), and the Creature miracles other than Strong
   and Freeze.
@@ -1000,6 +1071,11 @@ tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 
 **Needs the headset:**
 
+- Whether the tip of the index finger is the right point to draw with, when
+  the wrist turns, and whether `gesture_size_cm` (30) still fits it. The
+  grip point is the key value 0.
+- Whether the trail reads well: its gold, its width of 1.8 cm, the 1.5 s that
+  it stays, and whether it hides the Hand's point on a bright land or sky.
 - Whether the book is easy to read and to reach over the open palm, and
   whether 12 cm from the grip is the right place.
 - Whether a pull of 10 cm and the buzz feel like an elastic band, and

@@ -2264,7 +2264,9 @@ moment of its rest comes to the hand each time.
   (`target_glow=1`, `hand-model.md`, "The glow on the mesh of a target").
 - **The tether** (`overlay.cpp`, `BuildFar`). After the lock, a gold tube of 3 mm
   goes from the Hand's point to the object. It also shows while the game takes
-  from a far bulk source.
+  from a far bulk source. With `ray_glow=1` (the default) it has a glow of
+  1 cm of the room from the middle to the edge, with a light that runs along
+  the tether from the Hand (`hand-model.md`, "The glow ribbons").
 - **The tick:** 0.15 for 10 ms at a new target, 0.3 for 30 ms at the lock, and
   0.2 up to 0.6 every 60 ms during the glide. The game's effect 4 starts at the
   pick up.

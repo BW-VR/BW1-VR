@@ -148,6 +148,7 @@ void HandDirectInstallCreatureCamera(int mode);
 void HandGlowSetEnabled(bool on);
 // overlay.cpp: the mod's own meshes, a test hand at each controller.
 void OverlaySetEnabled(bool on);
+void OverlaySetGlow(bool rays, bool trail);
 void PresentWatchSetEnabled(bool on);
 void PresentWatchInstall();
 void PresentWatchSkipDesktop(bool on);
@@ -502,6 +503,10 @@ bool g_hand_glow = false;
 TargetGlowSettings g_target_glow;
 // The mod draws its own test hand at each controller (overlay.cpp).
 bool g_overlay = false;
+// The glow of the rays (ray_glow) and the trail of a gesture (gesture_trail),
+// both drawn by overlay.cpp.
+bool g_ray_glow = true;
+bool g_gesture_trail = true;
 // The teleport with a visible arc (teleport.cpp). See docs/god-view.md.
 TeleportSettings g_teleport;
 // The grab from a distance (far_grab.cpp), and the square root law of the
@@ -1491,6 +1496,11 @@ void ReadSettings() {
     // Drawing a gesture in the air. See docs/miracles.md.
     g_gesture.button = number("gesture_button", 1);
     g_gesture.size_cm = number("gesture_size_cm", 30);
+    g_gesture.point = number("gesture_point", 1);
+    // The glow of the rays and the trail of a gesture. See docs/hand-model.md,
+    // "The glow ribbons".
+    g_ray_glow = number("ray_glow", 1) != 0;
+    g_gesture_trail = number("gesture_trail", 1) != 0;
   }
   // How many game units a metre is worth. The default keeps the neck and
   // the eyes agreeing: the mod renders with eye_separation world units for
@@ -1892,6 +1902,7 @@ void StartVrStep() {
       WorldGrabSetOptions(g_grab);
       PointerMapSetGrabProbe(g_grab.probe);
       ControllersSetGesture(g_gesture);
+      OverlaySetGlow(g_ray_glow, g_gesture_trail);
       if (g_gesture.button != 0) GestureAirInstall();
       if (g_overlay) OverlaySetEnabled(true);
     }

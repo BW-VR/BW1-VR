@@ -268,6 +268,13 @@ int SpellBookBubbleValue();
 void SpellBookBubbleChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
+// The draw of a gesture (controllers.cpp, overlay.cpp).
+int ControllersGesturePointValue();
+void ControllersGesturePointChange(const char* by);
+int OverlayTrailValue();
+void OverlayTrailChange(const char* by);
+int OverlayRayGlowValue();
+void OverlayRayGlowChange(const char* by);
 // The sound (audio_listener.cpp, audio_voices.cpp, audio_range.cpp).
 int AudioModeValue();
 void AudioCycleMode();
@@ -390,6 +397,8 @@ const Switch kSwitches[] = {
     {kGroupPicture, L"No texture", L"Stage 0 with no texture",
      "vk_untextured", VkSceneUntexturedValue, VkSceneUntexturedToggle,
      L"white|diffuse"},
+    {kGroupPicture, L"Ray glow", L"Glow along the rays and the arc",
+     "ray_glow", OverlayRayGlowValue, OverlayRayGlowChange, L"off|on"},
 
     // Render
     {kGroupRender, L"One walk", L"One walk for both eyes", "one_walk",
@@ -599,6 +608,11 @@ const Switch kSwitches[] = {
      L"flat|game"},
     {kGroupCreature, L"All miracles", L"All miracles, no cost (test)",
      "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on"},
+    {kGroupCreature, L"Gesture point", L"Point that draws a gesture",
+     "gesture_point", ControllersGesturePointValue,
+     ControllersGesturePointChange, L"grip|fingertip"},
+    {kGroupCreature, L"Gesture trail", L"Trail at the fingertip",
+     "gesture_trail", OverlayTrailValue, OverlayTrailChange, L"off|on"},
 
     // Sound
     {kGroupSound, L"Sound step", L"Sound of the mod, step by step", "",

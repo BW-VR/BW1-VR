@@ -1768,9 +1768,10 @@ glows.
 
 The overlay renderer draws the mod's own meshes inside the game's frame, at
 the right depth in both eyes: the hands, the arc and the ring of the
-teleport, the ray and the tether. Later users can be the controller models
-of the hints and the rim of the table. The code is in `src/mod/overlay.cpp`
-and `src/mod/overlay_math.h`.
+teleport, the ray and the tether, and the glow ribbons. Later users can be
+the controller models of the hints and the rim of the table. The code is in
+`src/mod/overlay.cpp` and `src/mod/overlay_math.h`. The glow ribbons have
+`glow_math.h`, `ray_glow_math.h` and `gesture_trail_math.h`.
 
 **The low poly hand** (`overlay_math.h`, `BuildHand`). A palm, four fingers
 of three segments and a thumb of three segments, 330 triangles. Each segment
@@ -1832,6 +1833,10 @@ default) the mesh of the game stands for the low poly hand
    stage 1 is off. The texture stays bound. The hand writes depth, so its
    fingers hide its palm, and land in front hides the hand. (The mesh of the
    game uses the alpha blend, see above.)
+7. After the meshes, a second `DrawPrimitive` draws the glow ribbons (see
+   "The glow ribbons"). It changes the same states, and `ALPHABLENDENABLE`
+   on, `SRCBLEND` one, `DESTBLEND` one and `ZWRITEENABLE` off. The draw
+   reads each of these states before it changes it, and puts the value back.
 
 The overlay draws only while the controller owns the pointer, and each hand
 only while its pose is tracked. The skin takes the color of the player's
@@ -1840,7 +1845,40 @@ arc and ring (`teleport.cpp`) are a second source with their own switch: they
 draw while the player aims, with `overlay=0` too. They are a tube of 6 sides,
 6 mm of the room across, and a ring on the land. Cyan means a valid target
 and red means a target that is not valid. They are opaque, with the depth test
-and the depth write on.
+and the depth write on. With `ray_glow=1` each of them also has a glow ribbon.
+
+**The glow ribbons** (`glow_math.h`, `ray_glow_math.h`,
+`gesture_trail_math.h`). A ribbon is a flat strip along a line of points.
+It turns to the eye, so it has the same width from every side. It has 5
+corners across. The light is none at the two edges, the rim light half way
+from the middle to each edge, and the core light on the middle line. The
+light between two corners is a straight line, so the strip is a soft glow
+with no edge. The draw adds this light to the picture, tests the depth and
+writes no depth. So land in front of a ribbon hides it, and a ribbon hides
+nothing. The ribbons draw after the meshes: a hand in front of a ribbon
+hides it, and a ribbon in front of a hand adds its light to the hand. A
+ribbon is built again in each eye pass, because it turns to the eye of that
+pass (`glow_math::BuildRibbon`, with the place of the eye from the world to
+camera matrix). The cut at the near plane, the projection and the vertex
+format are those of the meshes. Two sources use it:
+
+- **The glow of a ray** (`ray_glow=1`, the default). The menu ray, the
+  tether of the far grab, the arc of the teleport and the arc of a Creature
+  command each get a ribbon along their tube. The tube stays as it is. The
+  ribbon is 1.2 cm (menu ray), 1 cm (tether) or 2.5 cm (arc) of the room from
+  the middle to the edge, and has the color of the tube. Its light is a
+  bright band that runs along the line from the hand outward: one band each
+  0.30 m, at 0.9 m/s. Between two bands the light is 40 percent of the
+  band. The light is none at the hand and full from 6 cm. The line is cut
+  in samples, 6 for each band and 64 at most, so a line longer than 10 m has
+  wider bands. Only the look of the line moves. The ray, the arc and the
+  world stay where they are, and the clock is read once a frame, so both
+  eyes show the same light. With `ray_glow=0` the lines are plain tubes.
+- **The trail of a gesture** (`gesture_trail=1`, see `miracles.md`, "The
+  trail at the fingertip").
+
+The cost is in the log: after each report window with a glow, one line gives
+the frames, the triangles in each eye and the CPU time of the two draws.
 
 **Keys.** `overlay` (the code default is 1): 1 draws the hands of the
 overlay. With 0 the overlay draws nothing for the hands and changes no state.
@@ -1848,6 +1886,11 @@ With `hand_exact=1` and `overlay=0` the overlay draws only the hand that the
 game's Hand does not cover (hand.md, "The exact Hand"). With
 `hand_hide_game=1` (the default) the overlay draws both hands with `overlay=0`
 too (hand.md, "8. The two real hands and which one is the Hand"). There is no launcher row.
+
+`ray_glow` (1): the glow ribbons of the rays (see "The glow ribbons"). 0 gives
+plain tubes. The launcher row "Glow on the rays", and the switch "Ray glow" of
+the debug page (the group Picture). `gesture_trail` (1) is the trail of a
+gesture (`miracles.md`).
 
 **The log.** The tag is `overlay`. One line at the first draw, and one at
 each change of the owner of the pointer. Then, on the first draw, on a
@@ -1860,6 +1903,11 @@ a draw in both eyes, one line gives the triangles a frame and the time on the
 CPU, with the build and the draws apart. Each report window counts the draws,
 the triangles, the triangles that crossed the near plane and the triangles
 off the screen.
+
+The glow has its own lines: the values of `ray_glow` and `gesture_trail` at the
+start, the first glow of a ray, and each start and end of a trail (30 at the
+most). After each report window with a glow, one line gives the frames, the
+triangles in each eye and the CPU time of the two glow draws.
 
 **Tests.** The math test (`OverlayChecks`):
 
@@ -1880,11 +1928,34 @@ off the screen.
 - Two eyes put a corner `fx * e / d * hx` pixels apart, level, at the same
   depth.
 
+The checks of the glow (`glow_checks.h`): the ribbon of a straight line and of
+a curve (the width, the light of each corner, the plane square to the way to
+the eye, a line that points at the eye, a side that does not flip), the room
+of the build, the place of the eye from the camera matrix, the trail (the
+light, the points, the keep time, the release, a new draw, a full buffer, the
+same count at 72, 90 and 120 Hz) and the glow of a ray (the period, the
+samples, the bands that move outward, the fade at the hand, the point along
+a polyline).
+
+Desktop runs with dxwrapper, `test_frame_rate=60` and `ray_glow=1` against
+`ray_glow=0` (`aim_run.ps1` with the recipe `ring1`, and `village_run.ps1
+-Kind fartotem`): the eye pictures show a soft glow round the cyan arc of the
+teleport, and a gold glow round the tether of the far grab, brightest near
+the object. With `ray_glow=0` the same pictures show a plain tube. In these
+pictures the arc leaves the hand and goes down, and its glow is a pale band
+beside the tube. The ribbons cost 0.02 to 0.03 ms a frame on the CPU
+for the two eyes. The Main Menu of a desktop run shows no menu ray, with
+`ray_glow=0` too, so no picture shows the glow of the menu ray. The log
+shows that the ray and its ribbon were built.
+
 An offline check sent the fake controller's pose for both hands through the
 real `head_pose.cpp` and the overlay math. Both hands showed in both eyes,
 and the left hand was the mirror image of the right.
 
-**Open: only a headset shows it.** Whether the hand sits on the real hand:
+**Open: only a headset shows it.** Whether the glow of a ray reads as energy
+in motion (the speed of 0.9 m/s, a band each 0.30 m, 40 percent of light
+between two bands) and does not distract on a bright land. The glow of the
+menu ray in the Temple. Whether the hand sits on the real hand:
 each runtime and controller puts the grip pose at its own place on the
 handle. The size and the color. The near plane: in play mode 0 it is 3.5
 units, 47 cm of the room, so a hand nearer to the eye than that is cut away.

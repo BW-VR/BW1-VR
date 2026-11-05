@@ -333,6 +333,15 @@ const Setting kSettings[] = {
      "A small glow at the tip of the index finger shows the point of the "
      "Hand that picks up and clicks. It shows while a press of the grip "
      "acts on something."},
+    {kBool, "gesture_trail", "Trail for gestures", nullptr, 1,
+     "While you hold the draw button (B, or Y with a left Hand) and draw a "
+     "gesture, a gold ribbon follows the tip of your index finger. It shows "
+     "what you draw. It fades after 1.5 seconds and goes out when you let "
+     "the button go. Off: the game shows no trail."},
+    {kBool, "ray_glow", "Glow on the rays", nullptr, 1,
+     "The ray of the menu, the line to a far object and the arc of the "
+     "teleport get a soft glow, and a light that runs along them from your "
+     "hand. Off: they are plain lines."},
     {kValues, "grab_hand", "Grab the world",
      "Grip of the other hand=1|Either grip=2|Off=0", 1,
      "Hold the grip of your other hand. Move that hand to pull the world. "

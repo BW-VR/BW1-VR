@@ -1283,7 +1283,9 @@ the pointing hand (`controllers.md`, 3.6).
 `0x00407ED0`, which reads `0x00C4CD20`), the direct hand steps aside. The
 pointing hand points like a mouse: its aim ray picks the render pixel (the
 pointer mode of `controller_hand=0`), and the trigger clicks. A thin ray (2 mm,
-warm white) leaves the aim pose and shows where it points. It ends on the
+warm white) leaves the aim pose and shows where it points. With `ray_glow=1`
+(the default) it has a glow of 1.2 cm of the room from the middle to the edge,
+with a light that runs along the ray from the hand. It ends on the
 cursor in both eyes (see "The depth of the menu" in `controllers.md`). When the
 box closes, the direct hand comes back on the same frame.
 
@@ -1811,7 +1813,10 @@ over it. The inner radius is 0.75 of the outer radius, so the band has a
 width of a quarter of the radius at each size. A valid ring has a disc in the
 middle. A red ring has a cross. The meshes are opaque, with the depth test and
 the depth write on, as the hands. The tube of the arc and the lift of the ring
-are in meters of the room, so they look the same at every scale.
+are in meters of the room, so they look the same at every scale. With
+`ray_glow=1` (the default) the arc also has a glow ribbon of 2.5 cm of the room
+from the middle to the edge, with a light that runs along the arc from the
+hand (`hand-model.md`, "The glow ribbons"). The ring has no glow.
 
 **The size of the ring.** By default (`teleport_ring_mode=1`) the ring has one
 size in the world: an outer radius of 11 units (`teleport_ring_units`). The

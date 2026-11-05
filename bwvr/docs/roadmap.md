@@ -771,11 +771,6 @@ keeps the mod as it is.
 
 **Miracles and gestures**
 
-- **F1. A trail at the fingertip.** While B is held, a gold ribbon follows
-  the tip of the index finger, so the player sees the gesture. Now the game
-  shows no trail, and the point of the draw is the grip point. Build the
-  ribbon in the overlay from the points of `gesture_air.cpp`, and a key for
-  the point of the draw (the tip or the grip).
 - **F2. The gestures of the game over the hand.** The game's corner
   pictures of the gestures (`DisplayGesture`, `fn_0068ABA0`, drawn by
   `fn_0068B740`) do not show in the headset. Draw them in each eye pass over
@@ -812,8 +807,6 @@ keeps the mod as it is.
   goes to the headset while the game thread saves.
 - **F13. A snapshot for a bug report:** an item of the ring saves the eye
   pictures and a copy of the log in `bwvr\captures`.
-- **F14. A ray that glows.** The ray, the tether of the far grab and the
-  arc of the teleport get a glow that moves along them.
 - **F15. The cut scene window:** a ray and the hands in the window, so the
   trigger points at what it clicks.
 - **F16. No turn and no zoom while a menu is up.** The walk, the teleport

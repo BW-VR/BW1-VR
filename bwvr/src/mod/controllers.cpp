@@ -82,6 +82,9 @@ bool HeadPoseCurrent(float matrix_out[9], float translation_out[3]);
 bool HeadPoseToRoom(const float position[3], const float orientation[4],
                     float rotation_out[9], float translation_out[3]);
 bool HeadPoseHeadInRoom(float translation_out[3]);
+// overlay.cpp: the tip of the index finger in the hand frame of the right hand,
+// in hand lengths, at the rest curl.
+void OverlayIndexTipLocal(float out[3]);
 // head_camera.cpp
 bool HeadCameraStageBasis(float basis_out[9]);
 bool HeadCameraGameCamera(float position[3], float focus[3]);
@@ -734,6 +737,9 @@ struct Pointing {
   bool grip_frozen;      // not tracked, so the last tracked point is used
   float grip[3];         // the grip point, one to one
   float grip_room[3];    // the same in the room, for the motion test
+  float draw_room[3];    // the point of the draw of a gesture in the room: the
+                         // tip of the index finger, or the grip point
+  bool draw_tip;
   float anchor[3];       // the reach anchor in the world
   float reach[3];        // the grip point moved out by the reach curve
   float reach_room[3];   // the same in the room, for the velocity
@@ -771,6 +777,9 @@ float g_aim_q[2][4] = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
 // aim point of the runtime, moved by the preset.
 float g_aim_p[2][3] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
 Pointing g_point;
+// The settings of the draw of a gesture (gesture_button, gesture_size_cm and
+// gesture_point). Compute reads the point of the draw.
+GestureSettings g_gesture;
 uint64_t g_frame = 0;
 uint64_t g_frames_in_window = 0;
 bool g_said_no_head = false;
@@ -1301,6 +1310,22 @@ void Compute() {
       controller_math::ReachAnchor(
           scale, g_direct.reach_anchor_down_cm * 0.01f, anchor_room);
       for (int i = 0; i < 3; ++i) p.grip_room[i] = t_grip[i];
+      // THE POINT OF THE DRAW of a gesture (gesture_air.cpp): the tip of the
+      // index finger at its rest curl, as the exact Hand has it, or the grip
+      // point. The trigger does not move the tip. The tip is in the room, at
+      // the real hand's length at the life size scale.
+      for (int i = 0; i < 3; ++i) p.draw_room[i] = t_grip[i];
+      if (g_gesture.point != 0) {
+        float local[3];
+        OverlayIndexTipLocal(local);
+        const float length =
+            g_direct.hand_cm * 0.01f * g_direct.scale_pct * 0.01f * scale;
+        const float zero[3] = {0.0f, 0.0f, 0.0f};
+        float off[3];
+        overlay_math::PlacePoint(zero, m_grip, length, index == 0, local, off);
+        for (int i = 0; i < 3; ++i) p.draw_room[i] += off[i];
+        p.draw_tip = true;
+      }
       if (p.table) {
         // No reach curve on the table: the whole land is within arm's
         // reach, and the Hand is where the hand is.
@@ -2253,7 +2278,6 @@ void GrabSamples() {
 // for the owner rule. A draw that stops while the button stays down needs a
 // new press, as the game's buttons do. The button is no mouse button, so it
 // takes nothing from pick up, the land drag or the grab.
-GestureSettings g_gesture;
 bool g_gesture_down = false;    // the button on this frame
 bool g_gesture_before = false;  // and on the last frame
 bool g_gesture_need_up = false;
@@ -4097,6 +4121,8 @@ bool ControllersGestureInput(GestureInput* out) {
     out->why = "the grip is closed with a miracle that needs a circle";
   }
   for (int i = 0; i < 3; ++i) out->grip_room[i] = g_point.grip_room[i];
+  for (int i = 0; i < 3; ++i) out->draw_room[i] = g_point.draw_room[i];
+  out->draw_tip = g_point.draw_tip;
   for (int i = 0; i < 9; ++i) out->head[i] = g_point.head[i];
   out->scale = HeadPoseScale();
   float x = 0.0f, y = 0.0f;
@@ -4376,6 +4402,12 @@ bool ControllersOverlayHands(OverlayHands* out) {
   out->units_per_meter = HeadPoseScale() * gain;
   out->pointing = PointingIndex();
   out->frame = g_frame;
+  for (int i = 0; i < 3; ++i) {
+    out->map_eye[i] = eye[i];
+    out->map_head[i] = t_head_w[i];
+  }
+  for (int i = 0; i < 9; ++i) out->map_basis[i] = room[i];
+  out->map_gain = gain;
   for (int index = 0; index < 2; ++index) {
     const bwvr::HandInput& hand = g_hands[index];
     OverlayHand& o = out->hand[index];
@@ -4669,12 +4701,30 @@ void ControllersSetGesture(const GestureSettings& gesture) {
   if (g_gesture.button < 0 || g_gesture.button > 2) g_gesture.button = 1;
   if (g_gesture.size_cm < 5) g_gesture.size_cm = 5;
   if (g_gesture.size_cm > 200) g_gesture.size_cm = 200;
+  g_gesture.point = g_gesture.point != 0 ? 1 : 0;
   static const char* const kButton[3] = {
       "off", "the second face button (B, or Y on the left hand)",
       "the stick click"};
   ModLog("gesture      : the draw button is %s. %d cm of hand motion is a "
-         "third of the view height to the game.", kButton[g_gesture.button],
-         g_gesture.size_cm);
+         "third of the view height to the game. The point of the draw is the "
+         "%s (gesture_point=%d).", kButton[g_gesture.button],
+         g_gesture.size_cm,
+         g_gesture.point != 0 ? "tip of the index finger" : "grip point",
+         g_gesture.point);
+}
+
+// The switch "Gesture point" of the debug page: the tip of the index finger
+// or the grip point draws the gesture. Choose it between two draws.
+void ControllersGrabPulse(int hands, float amplitude, float seconds);
+int ControllersGesturePointValue() { return g_gesture.point; }
+
+void ControllersGesturePointChange(const char* by) {
+  g_gesture.point = g_gesture.point != 0 ? 0 : 1;
+  ControllersGrabPulse(1, 0.5f, g_gesture.point != 0 ? 0.40f : 0.08f);
+  ModLog("gesture      : %s: gesture_point=%d. The point of the draw is the "
+         "%s, frame %llu", by, g_gesture.point,
+         g_gesture.point != 0 ? "tip of the index finger" : "grip point",
+         static_cast<unsigned long long>(g_frame));
 }
 
 // The player keys of the grab. world_grab.cpp gets the same.

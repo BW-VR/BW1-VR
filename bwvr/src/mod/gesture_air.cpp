@@ -15,9 +15,11 @@
 // controllers.cpp already turns into a pulse. The game then draws the
 // gesture on the land from the samples' land points.
 //
-// WHAT THE MOD DOES. While the draw button is held, the grip point goes on a
-// plane that the head faced when the draw started (controller_math.h,
-// GesturePlane). The plane becomes pixels around the controller's pixel of
+// WHAT THE MOD DOES. While the draw button is held, the point of the draw
+// goes on a plane that the head faced when the draw started (controller_math.h,
+// GesturePlane). The point of the draw is the tip of the index finger, or the
+// grip point with gesture_point=0 (controllers.cpp, Compute). The overlay
+// draws a trail at the same point (overlay.cpp, BuildGestureTrail). The plane becomes pixels around the controller's pixel of
 // that moment, at gesture_size_cm for a third of the render height. A new
 // sample goes in when the pixel has moved a fortieth of the render height,
 // about what a mouse gives in 28 ms, and a sharp corner between two samples
@@ -393,7 +395,7 @@ bool Add(uint8_t* face, uint8_t* ring, float px, float py) {
 // last one, and a corner between the two goes in first.
 void Feed(uint8_t* face, uint8_t* ring, const GestureInput& in) {
   float x, y;
-  controller_math::GesturePixel(g_plane, in.grip_room, g_start_x, g_start_y,
+  controller_math::GesturePixel(g_plane, in.draw_room, g_start_x, g_start_y,
                                 g_pixels_per_unit, &x, &y);
   // A grip far off the plane's scale is no gesture. It must not wrap the
   // game's integer pixel.
@@ -439,7 +441,7 @@ void Feed(uint8_t* face, uint8_t* ring, const GestureInput& in) {
 }
 
 void Begin(uint8_t* face, uint8_t* ring, const GestureInput& in) {
-  controller_math::GesturePlaneFromHead(in.head, in.grip_room, &g_plane);
+  controller_math::GesturePlaneFromHead(in.head, in.draw_room, &g_plane);
   g_scale = in.scale > 0.0f ? in.scale : 7.5f;
   g_pixels_per_unit = controller_math::GesturePixelsPerUnit(
       in.render_height, ControllersGestureSizeCm() * 0.01f, g_scale);
@@ -467,10 +469,16 @@ void Begin(uint8_t* face, uint8_t* ring, const GestureInput& in) {
     ModLog("gesture      : the draw starts at frame %llu, at pixel %.0f %.0f "
            "of %.0f x %.0f. The plane faces the head: right %.2f %.2f %.2f, "
            "up %.2f %.2f %.2f. %.1f pixels per cm of hand, a sample every "
-           "%.0f pixels. The camera is %s.", in.frame, g_start_x, g_start_y,
+           "%.0f pixels. The point of the draw is the %s, %.1f cm of the room "
+           "from the grip. The camera is %s.", in.frame, g_start_x, g_start_y,
            in.render_width, in.render_height, g_plane.right[0],
            g_plane.right[1], g_plane.right[2], g_plane.up[0], g_plane.up[1],
            g_plane.up[2], g_pixels_per_unit * g_scale * 0.01f, g_spacing,
+           in.draw_tip ? "tip of the index finger" : "grip point",
+           g_scale > 0.0f
+               ? controller_math::Distance(in.draw_room, in.grip_room) /
+                     g_scale * 100.0f
+               : 0.0f,
            CameraMoving() ? "moving, so the game clears the ring" : "still");
   }
   Feed(face, ring, in);

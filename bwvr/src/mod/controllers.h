@@ -43,6 +43,8 @@ struct GestureSettings {
   // gesture_size_cm: this much hand motion is a third of the view height to
   // the game, the size of a gesture drawn with the mouse.
   int size_cm = 30;
+  // gesture_point: 1 the tip of the index finger draws, 0 the grip point.
+  int point = 1;
 };
 
 // What the draw needs from the last controllers frame.
@@ -51,6 +53,9 @@ struct GestureInput {
   bool button_down;       // the draw button is down
   const char* why;        // why held is false
   float grip_room[3];     // the pointing grip in the room, game units
+  float draw_room[3];     // the point of the draw in the room: the tip of the
+                          // index finger, or the grip point
+  bool draw_tip;          // draw_room is the tip (gesture_point=1)
   float head[9];          // the head matrix in the room, of the same sample
   float scale;            // game units per meter
   bool have_pixel;        // the controller's pointer pixel is on the render
@@ -189,6 +194,16 @@ struct OverlayHands {
   int pointing;            // the hand that holds the pointer
   float units_per_meter;   // world units in a meter of the room, at the scale now
   unsigned long long frame;  // the controllers frame
+  // The map of a point of the room (game units at the life size scale) into
+  // the world, as the hands use it:
+  //
+  //   world = map_eye + map_basis * (map_gain * point - map_head)
+  //
+  // The gain is 1 off the table. controller_math::RoomToWorld does it.
+  float map_eye[3];
+  float map_basis[9];
+  float map_head[3];       // the head in the room, with the gain applied
+  float map_gain;
 };
 bool ControllersOverlayHands(OverlayHands* out);
 

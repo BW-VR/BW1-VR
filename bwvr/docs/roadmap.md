@@ -739,6 +739,23 @@ that moves while the Hand takes it.
   the hand. Not planned. One idea: a launcher option that lets the grab
   with two hands tilt the world. A tilted world makes the physics and other
   parts more difficult, so wait for more reports first.
+- **P24. The Hand stops at the land.** Wanted: the drawn hands do not go
+  through the land. Now a hand that the player pushes into the land goes
+  into it, and the land hides it (`hand-model.md`, "What the mod does").
+  Only the tip of the pointing finger stays 0.5 cm over the land. Plan: when
+  the real hand goes under the land, the drawn hand stays on the land at
+  the point where it went in, and slides with the real hand along the land.
+  It comes back to the real hand when the real hand comes up. A pulse tells
+  the player that the hand touches the land. The game's height of the land
+  (`LH3DIsland::GetAltitude` `0x00803090`) gives the stop for each joint
+  of the hand mesh. Before the build, decide:
+  - This changes the rule "the Hand is the real hand, 1:1" (`CLAUDE.md`,
+    `hand-model.md`). The new rule: 1:1 above the land, and on the land
+    when the real hand is under it.
+  - Which point the game reads (the Hand's point, a take, a far grab and
+    the grab of the land) while the drawn hand stays on the land.
+  - Whether a faint copy of the real hand shows under the land.
+  - Buildings and rocks: the land only, or each solid object too.
 
 ### Faults of the plain game
 

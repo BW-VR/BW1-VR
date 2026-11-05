@@ -782,9 +782,6 @@ keeps the mod as it is.
   the palm of the hand that does not point, while that palm is up, as
   `book_bubble.cpp` draws the bubble of the game. Then the spiral shows what
   the player can draw next. First prove the cause with an eye picture.
-- **F4. Lightning from the fingertip.** Find where the bolt of Lightning
-  starts (`UR_Lightning` `0x0067E900`), and start it at the tip of the
-  index finger.
 - **F5. The influence at the hand.** Outside the influence of the player,
   the hands fade (`HandModelSetOpacity`), and the stream of the influence
   starts at the hand, not on the land under it
@@ -1134,8 +1131,14 @@ game as it is.
 - **N6. Miracles.** Not run: teleport, the Creature miracles other than
   Strong and Freeze, and each reason of a refusal but "needs a Creature"
   and "needs a circle on the land". Testers find the circle of a shield
-  hard to draw to the correct size. Check it when the miracles get their
-  tests.
+  hard to draw to the correct size. The cause: the game reads the path of
+  the hand on a plane that faces the head, at `gesture_size_cm` for a third
+  of the height of the render (`gesture_air.cpp`). So the size of the
+  circle on the land does not follow the size of the hand's circle over
+  the land. A possible fix: while the player draws the circle of such a
+  miracle, give the game the pixel of the Hand's own point, so the points
+  on the land are under the real hand. The match uses angles and a loose
+  class of the aspect, so it should still match. Not built.
 - **N8. The scripts and the engine camera.** The scripts get the place of
   the player. Not changed: the 114 markers at "camera position",
   `GetFacingCameraPosition`, and the other readers of the engine camera.

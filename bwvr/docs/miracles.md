@@ -497,6 +497,13 @@ drop. Only a new match counts: a circle that a refused cast left at
 `+0x17C` does not cast at the next press, and the release casts it as the
 game does. With `miracle_circle_cast=0` the cast comes when the grip opens.
 
+**The bolt of Lightning starts at the fingertip.** A fork of lightning in
+the Hand starts at the gesture place of its particle manager
+(`UR_Lightning::ActualModify` `0x006914C0`, the manager `+0x30`). That place
+is the Hand's point, and the Hand's point is the tip of the index finger at
+the rest curl (`hand-model.md`). So the bolt comes from the end of the index
+finger, and only a curl of that finger moves the tip away from the bolt.
+
 ### The way out
 
 Two inputs take a miracle out of the Hand:

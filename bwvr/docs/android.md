@@ -4072,7 +4072,9 @@ python tools/android/frame_test.py run tools/android/frame_tests/detail.json <fo
 
 - On the PC the script copies itself and the test to the Steam Frame, starts it there, waits
   for its end, gets the logs into the folder and prints the table. `fetch` and `report` do
-  the last two parts alone. A short loss of the network does not stop the test.
+  the last two parts alone. A short loss of the network does not stop the test, and after a
+  new start of the headset the PC starts the script there again. With no game in
+  `wait_most_s` (12 hours by default) no test runs, and the tool gets no logs.
 - On the Steam Frame the script waits for the line "the frames of the scene start" in the log of
   the app. Then it writes `bwvr-control.txt` into the game folder for each step of the test, and
   it goes through the steps in turns until `most_s` ends or the game ends. At the end

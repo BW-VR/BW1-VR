@@ -33,6 +33,7 @@ APP_FILES = ('/home/steamos/.local/share/Steam/steamapps/compatdata/2729671027/e
 PERF_LOGS = '.local/share/Steam/logs'
 TEST_DIR = 'bwvr-test'
 SCENE_LINE = b'the frames of the scene start'
+WAIT_MOST_S = 43200.0  # how long the script waits for a game, if the test does not say
 
 
 # --- on the headset --------------------------------------------------------------------
@@ -180,7 +181,7 @@ def conduct(test_path):
         os.remove(marks_path)
     marks = test.get('mode') == 'marks'
     result = {'name': test.get('name', ''), 'steps': 0, 'game_ended': False, 'game_came': False}
-    if wait_for_scene(os.path.join(APP_FILES, 'bwvr-quest.log'), test.get('wait_most_s', 3600), say):
+    if wait_for_scene(os.path.join(APP_FILES, 'bwvr-quest.log'), test.get('wait_most_s', WAIT_MOST_S), say):
         result['game_came'] = True
         first = test['stages'][0] if marks else test['cycle'][0]
         control.send('start', first.get('keys', {}), test.get('start_prompt', ''))
@@ -248,30 +249,51 @@ def fetch(folder):
             os.rename(os.path.join(folder, os.path.basename(newest)), target)
 
 
-def run(test_path, folder, most_wait_s=5400.0):
+def start_conduct():
+    ssh(f'cd {TEST_DIR} && nohup python3 frame_test.py conduct test.json '
+        f'> conduct.out 2>&1 < /dev/null & echo started')
+
+
+def run(test_path, folder):
     here = os.path.dirname(os.path.abspath(__file__))
     test_dir = os.path.dirname(os.path.abspath(test_path))
+    with open(test_path) as f:
+        test = json.load(f)
     os.makedirs(folder, exist_ok=True)
     ssh(f'mkdir -p {TEST_DIR}; rm -f {TEST_DIR}/done; '
         f'pkill -f "[f]rame_test.py conduct"; true')
     scp_to(here, 'frame_test.py', f'{TEST_DIR}/frame_test.py')
     scp_to(test_dir, os.path.basename(test_path), f'{TEST_DIR}/test.json')
-    ssh(f'cd {TEST_DIR} && nohup python3 frame_test.py conduct test.json '
-        f'> conduct.out 2>&1 < /dev/null & echo started')
+    start_conduct()
     print('The script on the headset waits for the game. Start the game now.', flush=True)
-    limit = time.monotonic() + most_wait_s
+    # One hour more than the wait for the game, for the test itself.
+    limit = time.monotonic() + float(test.get('wait_most_s', WAIT_MOST_S)) + 3600.0
+    result = None
     while time.monotonic() < limit:
         time.sleep(10.0)
-        # A short loss of the network does not end the run.
+        # A short loss of the network does not end the run, and a new start of the
+        # headset ends the script there, so it starts again.
         answer = subprocess.run(
             ['ssh', '-i', KEY, '-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes', HOST,
-             f'test -f {TEST_DIR}/done && cat {TEST_DIR}/done'],
+             f'if test -f {TEST_DIR}/done; then cat {TEST_DIR}/done; '
+             f'elif pgrep -f "[f]rame_test.py conduct" > /dev/null; then echo waits; '
+             f'else echo gone; fi'],
             stdout=subprocess.PIPE, text=True)
-        if answer.returncode == 0 and answer.stdout.strip():
-            print('The test run ended:', answer.stdout.strip(), flush=True)
+        word = answer.stdout.strip() if answer.returncode == 0 else ''
+        if word == 'gone':
+            print('The script on the headset is gone. It starts again.', flush=True)
+            start_conduct()
+        elif word and word != 'waits':
+            print('The test run ended:', word, flush=True)
+            result = json.loads(word)
             break
-    else:
-        print('The time for the test run ended.', flush=True)
+    if result is None:
+        print('The time for the test run ended, and the script on the headset did not end.', flush=True)
+        return
+    if not result.get('game_came'):
+        print('No game came, so no test ran. The logs on the headset are from a run before, and '
+              'this tool does not get them.', flush=True)
+        return
     # The file of the pictures goes to disk one time each second.
     time.sleep(3.0)
     fetch(folder)

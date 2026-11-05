@@ -265,6 +265,7 @@ void SaveStoreInstall(bool on);
 // near_plane.cpp: the near plane of the game camera.
 void NearPlaneSetOptions(int cm_24, int cm_16);
 void NearPlaneInstall();
+void GesturePanelInstall();
 // proxy/ddraw_proxy.cpp
 void ProxyForceSystemDDraw();
 void ProxyCreateStarts(unsigned char ex[2], unsigned char old[2]);
@@ -1934,6 +1935,9 @@ void StartVrStep() {
     if (g_head_tracking && g_immersive) {
       NearPlaneSetOptions(g_near_plane_cm, g_near_plane_cm_16);
       NearPlaneInstall();
+      // The game's gesture pictures over the palm (gesture_panel=1) need
+      // the real hand in the world.
+      if (g_controllers) GesturePanelInstall();
     }
     // The thumbnail reads past the end of a square window, so it goes.
     SnapshotGuardSetSkip(g_skip_snapshot);

@@ -11,6 +11,12 @@ void BookBubbleShow(int seed, const float world[3], float units_per_meter,
                     uint64_t frame);
 // sky_detail.cpp: once in each eye pass, after the overlay's meshes.
 void BookBubbleDraw();
+// gesture_panel.cpp, inside its draw of an eye pass, with the camera of the
+// eye in place: one part of a bubble at the world point. seed -1 is the empty
+// glass ball, and a seed type is the graphic of that miracle. radius_units is
+// the radius of the ball in world units, and alpha is 0 to 255.
+void BookBubbleDrawPart(int seed, const float world[3], float radius_units,
+                        int alpha);
 // True after a check of the game's code failed: then the book uses its own
 // picture of the bubble.
 bool BookBubbleFailed();

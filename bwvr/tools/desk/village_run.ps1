@@ -36,6 +36,11 @@
 #                choice with the gestures (the spiral and the W shape), and a
 #                shake. -Icon gives the seed type of a different icon (3 is
 #                Food, which pours as Water does).
+# -Kind palm:    the gesture pictures of the game and the palm that turns up
+#                (bwvr/docs/miracles.md, "The gesture row over the palm" and
+#                "The book on the palm"): the steps of -Kind miracle with
+#                gesture_panel=0 and eye pictures of the corner, then
+#                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, job, tree, throw, probe, workshop, site,
 # build, scaffold, fartake, fartotem, choice, look, book) have a comment at
 # their steps below.
@@ -325,6 +330,33 @@ if ($Kind -eq 'totem') {
         $Steps += "shot@$at+1"
     }
     $keys = "$keys;far_test_aim_class=1;far_test_aim_toward=1;far_test_aim_pair=1;far_test_aim_blends=$blends"
+} elseif ($Kind -eq 'palm') {
+    # The steps of -Kind miracle with an eye picture at each state of the
+    # game's gesture pictures, first with gesture_panel=0: the pictures of an
+    # empty Hand, of a Miracle in the Hand, of the power up, of the chain
+    # after the spiral, and of the W. The game draws them at the corner of
+    # its screen. At step frame 2690 the test key gesture_panel_test_frame
+    # turns the row on. Then the word "lrot" turns the left palm up: the
+    # palm opens the book (frame 2700) and closes it (2800). With the grip
+    # of the left hand on the land the palm opens no book until 0.4 s after
+    # the grip ends (2900 to 3140). With B held the palm up shows the row of
+    # an empty Hand and opens no book. When B ends, the palm opens the book
+    # (3200 to 3480). Give it -Set "backend=dxwrapper\ddraw.dll" for eye
+    # pictures.
+    if ($Plan -eq '') { $Plan = 'gosite,icon' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 110 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 shot@960+1 seek@1000+1 grip@1040+3 point@1100+1 shot@1120+1 ' +
+                 'trace@1150+320 b@1156+300 shot@1300+1 point@1505+1 grip@1520+60 b@1650+5 shot@1720+1 ' +
+                 'trace@1750+320 b@1756+300 shot@1950+1 shot@2075+1 trace@2100+320 b@2106+300 shot@2200+1 ' +
+                 'shot@2380+1 pull@2500+1 pull@2506+1 pull@2512+1 pull@2518+1 pull@2524+1 pull@2530+1 ' +
+                 'shot@2650+1 lrot@2700+1 shot@2760+1 lrot@2800+1 lrot@2900+1 lgrip@2900+120 shot@2990+1 ' +
+                 'shot@3080+1 lrot@3140+1 shot@3160+1 b@3200+150 lrot@3210+1 shot@3300+1 shot@3420+1 lrot@3480+1'
+    }
+    $keys = "$keys;fake_controller_gestures=$Gestures;village_test_icon=$Icon;gesture_panel=0;" +
+            'gesture_panel_test_frame=2690;spell_book_palm=1;' +
+            'fake_controller_left_rots=0,0,-90 0,0,0 0,0,-90 0,0,0 0,0,-90 0,0,0'
 } else {
     if ($Plan -eq '') { $Plan = 'gosite,icon' }
     if ($Census -eq '') { $Census = '890,1010,1500,1600,1700,2460,2600' }
@@ -370,6 +402,9 @@ if ($Kind -eq 'fartake') {
                '^hand bulk    : (the game|the bulk take ends|the amount in the Hand is \d+ after (10|20|30|50|100) game|test key|the take|the test key)|' +
                '^hand pick    : (seek plan|the Hand holds)|^hand press   : the grip pressed|^grip         : (?!\d)|^hand throw   : (release|the object left)|' +
                '^audio play   : .* in game (44|98),|^audio chan   : .* in game (44|98) |^audio take   :|^take stream  :'
+}
+if ($Kind -eq 'palm') {
+    $pattern = '^gesture panel:|^spell book   : (the book|the palm)|^controllers  : the fake left hand'
 }
 if ($Kind -eq 'book') {
     $pattern = '^spell book   :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +

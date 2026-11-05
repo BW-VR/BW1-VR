@@ -839,6 +839,7 @@ The scripts in `bwvr/tools/desk/` use these keys and words.
 | `fake_controller_points` | empty | Hand positions for the word `point`: `right,up,forward` in cm, separated by spaces (16 at most) |
 | `fake_controller_left_points` | empty | The same for the word `lpoint` and the left hand. Not mirrored: -20 is 20 cm to the left of the head |
 | `fake_controller_rots` | empty | Turns for the word `rot`: `yaw,pitch,roll` in degrees, separated by spaces. A test key, read from `bwvr.ini` |
+| `fake_controller_left_rots` | empty | The same for the word `lrot` and the left hand. Not mirrored: `0,0,-90` turns the left palm up, `0,0,90` turns it down. A test key |
 | `fake_controller_turns` | empty | Turns for the word `aimturn`: `yaw,pitch,0` in degrees, yaw to the left and pitch up. A third number that is not 0 makes the two angles the aim itself and not a turn. A test key |
 | `fake_controller_gestures` | empty | Template numbers of `Data\Gestures.jty` for the word `trace`, separated by spaces |
 | `fake_controller_gesture_cm` | 30 | The side of the square for `trace`, in front of the head, 5 to 200 |
@@ -922,6 +923,7 @@ The words that act on the first frame of the word only:
 | `teleportkey` | The test key of `teleport_switch` acts (`god-view.md`, section 14.6) |
 | `promptkey` | The test key of `prompt_moves` acts (`controller-hints.md`, 9.5) |
 | `book` | Steps the right hand to the middle of the next item of the open spell book (`miracles.md`, "The spell book") |
+| `lrot` | Turns the left hand to the next of `fake_controller_left_rots`. After the last one the list starts again. The palm that turns up (`miracles.md`, "The gesture row over the palm" and "The book on the palm") |
 
 The placement of the hand is in cm from the head center. Each pose word sets
 the position of the right hand until the next one.

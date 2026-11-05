@@ -74,19 +74,20 @@ These items come before the other work.
     band, and whether the game's bubble sits on the band with a clean hole
     in the page (`spell_book_bubble=1`).
   - The gestures were never drawn with a real hand in a headset. No line of
-    a card names the draw button (B) while the Hand is empty, and the
-    corner pictures of the gestures do not show. So a player of release
-    1.2.0, which has no book, does not find how to ask for a miracle with
-    a gesture. The tap of the grip on an icon of a Worship Site works there.
+    a card names the draw button (B) while the Hand is empty. So a player
+    of release 1.2.0, which has no book and no row of gestures, does not
+    find how to ask for a miracle with a gesture. The tap of the grip on an
+    icon of a Worship Site works there.
+  - In a headset: whether the row of the game's gesture pictures over the
+    palm (`gesture_panel=1`, 30 cm, 12 cm over the palm) is easy to read,
+    and whether the palm that turns up opens the book (`spell_book_palm=1`,
+    40 degrees, 0.4 s) with no open by accident.
   - `debug_all_miracles=1` gives only 6 miracles: the Village Centre has 6
     slots for icons, and the Worship Site copies them (`miracles.md`, "The
     limit of 6 icons"). Every miracle needs icons of the site that do not
     come from the Village Centre (`WorshipSite::AddSpellIconIfNecessary` `0x0077C9E0`).
   - The items in the book are flat pictures with the gestures. Only the
     bubble that the hand pulls out is the game's own bubble.
-  - Why the corner pictures of the gestures of the game (`DisplayGesture`,
-    `fn_0068ABA0`, `fn_0068B740`) do not show in the headset. Prove it with
-    an eye picture of a desktop run.
   - The leash gestures and the scribble are not in the book.
 
 ### Faults in play
@@ -771,12 +772,6 @@ keeps the mod as it is.
 
 **Miracles and gestures**
 
-- **F2. The gestures of the game over the hand.** The game's corner
-  pictures of the gestures (`DisplayGesture`, `fn_0068ABA0`, drawn by
-  `fn_0068B740`) do not show in the headset. Draw them in each eye pass over
-  the palm of the hand that does not point, while that palm is up, as
-  `book_bubble.cpp` draws the bubble of the game. Then the spiral shows what
-  the player can draw next. First prove the cause with an eye picture.
 - **F5. The influence at the hand.** Outside the influence of the player,
   the hands fade (`HandModelSetOpacity`), and the stream of the influence
   starts at the hand, not on the land under it
@@ -787,8 +782,6 @@ keeps the mod as it is.
   swing. If it flies short in a headset, a key scales that speed. For other
   objects, a key `throw_speed_pct` (100: the real speed) can make a throw
   stronger.
-- **F7. The spell book on a palm that turns up**, as a second way to open
-  it, with the palm normal of `BookCenter`.
 
 **Comfort and moving**
 

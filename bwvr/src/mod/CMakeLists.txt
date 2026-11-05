@@ -90,6 +90,7 @@ add_library(bwvr_mod SHARED
     radial_menu.cpp
     spell_book.cpp
     book_bubble.cpp
+    gesture_panel.cpp
     debug_menu.cpp
     temple.cpp
     throw_physics.cpp

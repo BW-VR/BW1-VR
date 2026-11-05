@@ -137,6 +137,7 @@ bool g_failed = false;
 void* g_ball = nullptr;
 float g_ball_middle[3] = {0.0f, kBallMiddle, 0.0f};
 float g_ball_frame = 0.0f;
+uint64_t g_ball_step_frame = 0;
 void* g_graphic[kSeedTypes] = {};
 
 // What shows in this frame. The game thread writes it in SpellBookFrame, and
@@ -264,6 +265,46 @@ void* Graphic(int seed) {
   return graphic;
 }
 
+// The texture of the ball steps once in each frame, by the time of the game.
+void StepBall() {
+  const uint64_t now = ControllersFrameCount();
+  if (now == g_ball_step_frame) return;
+  g_ball_step_frame = now;
+  const uint32_t step =
+      *reinterpret_cast<const uint32_t*>(bw::tech::kGameTimeInc);
+  g_ball_frame = fmodf(g_ball_frame + step * kBallFramesPerMs, kBallFrames);
+}
+
+// The graphic of a miracle with its middle at the world point, at the scale
+// of a ball of scale s. The camera of the eye must be in place.
+void DrawGraphic(void* graphic, const float world[3], float s, int alpha) {
+  // Only the place of the matrix counts.
+  float middle[12] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+  for (int i = 0; i < 3; ++i) middle[9 + i] = world[i];
+  reinterpret_cast<DrawUpdateAtPosFn>(kDrawUpdateAtPos)(graphic, middle,
+                                                        kGraphicShare * s);
+  reinterpret_cast<DrawSpellGraphicFn>(kDrawSpellGraphic)(graphic, nullptr, 1,
+                                                          0, alpha);
+}
+
+// The glass ball with its middle at the world point: no turn, the scale s.
+void DrawBall(const float world[3], float s, int alpha) {
+  StepBall();
+  const int f = static_cast<int>(g_ball_frame);
+  float ball[12] = {s, 0.0f, 0.0f, 0.0f, s, 0.0f, 0.0f, 0.0f, s};
+  for (int i = 0; i < 3; ++i) ball[9 + i] = world[i] - g_ball_middle[i] * s;
+  uint8_t* object = static_cast<uint8_t*>(g_ball);
+  memcpy(object + kObjectMatrix, ball, sizeof(ball));
+  memcpy(object + kObjectScale, &s, sizeof(s));
+  const uint32_t color =
+      (static_cast<uint32_t>(alpha & 0xFF) << 24) | 0x00FFFFFFu;
+  memcpy(object + kObjectColor, &color, sizeof(color));
+  void** table = VTable(g_ball);
+  reinterpret_cast<SetFrameFn>(table[0xE8 / 4])(g_ball, (f % 4) * 0.25f,
+                                                (f / 4) * 0.25f);
+  reinterpret_cast<DrawNowFn>(table[0x104 / 4])(g_ball);
+}
+
 }  // namespace
 
 void BookBubbleShow(int seed, const float world[3], float units_per_meter,
@@ -293,16 +334,6 @@ void BookBubbleDraw() {
   if (graphic == nullptr) return;
 
   const float s = spell_book_math::kBubbleRadiusM * g_units / kBallUnits;
-  // The ball: no turn, the scale s, its middle at the point.
-  float ball[12] = {s, 0.0f, 0.0f, 0.0f, s, 0.0f, 0.0f, 0.0f, s};
-  for (int i = 0; i < 3; ++i) ball[9 + i] = g_world[i] - g_ball_middle[i] * s;
-  // The graphic: only the place of its matrix counts.
-  float middle[12] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
-  for (int i = 0; i < 3; ++i) middle[9 + i] = g_world[i];
-  const uint32_t step =
-      *reinterpret_cast<const uint32_t*>(bw::tech::kGameTimeInc);
-  g_ball_frame = fmodf(g_ball_frame + step * kBallFramesPerMs, kBallFrames);
-  const int f = static_cast<int>(g_ball_frame);
 
   const size_t bytes = sizeof(float) * 12;
   float scaled[12], unscaled[12], copy[12], inverse[12];
@@ -319,19 +350,8 @@ void BookBubbleDraw() {
   StereoReapplyEye();
 
   // The miracle first, then the glass over it.
-  reinterpret_cast<DrawUpdateAtPosFn>(kDrawUpdateAtPos)(graphic, middle,
-                                                        kGraphicShare * s);
-  reinterpret_cast<DrawSpellGraphicFn>(kDrawSpellGraphic)(graphic, nullptr, 1,
-                                                          0, 0xFF);
-  uint8_t* object = static_cast<uint8_t*>(g_ball);
-  memcpy(object + kObjectMatrix, ball, sizeof(ball));
-  memcpy(object + kObjectScale, &s, sizeof(s));
-  const uint32_t color = 0xFFFFFFFFu;
-  memcpy(object + kObjectColor, &color, sizeof(color));
-  void** table = VTable(g_ball);
-  reinterpret_cast<SetFrameFn>(table[0xE8 / 4])(g_ball, (f % 4) * 0.25f,
-                                                (f / 4) * 0.25f);
-  reinterpret_cast<DrawNowFn>(table[0x104 / 4])(g_ball);
+  DrawGraphic(graphic, g_world, s, 0xFF);
+  DrawBall(g_world, s, 0xFF);
 
   memcpy(reinterpret_cast<void*>(bw::tech::kWorldToCamera), scaled, bytes);
   memcpy(reinterpret_cast<void*>(bw::tech::kWorldToCameraUnscaled), unscaled,
@@ -347,6 +367,18 @@ void BookBubbleDraw() {
            "%llu", g_seed, g_world[0], g_world[1], g_world[2],
            2.0f * spell_book_math::kBubbleRadiusM * 100.0f, s, now);
   }
+}
+
+void BookBubbleDrawPart(int seed, const float world[3], float radius_units,
+                        int alpha) {
+  if (g_failed || !(radius_units > 0.0f) || !Check()) return;
+  const float s = radius_units / kBallUnits;
+  if (seed < 0) {
+    if (MakeBall()) DrawBall(world, s, alpha);
+    return;
+  }
+  void* graphic = Graphic(seed);
+  if (graphic != nullptr) DrawGraphic(graphic, world, s, alpha);
 }
 
 bool BookBubbleFailed() { return g_failed; }

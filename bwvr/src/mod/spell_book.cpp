@@ -2,10 +2,9 @@
 //
 // WHY. In the plain game the player asks for a miracle at a Worship Site
 // with a chain of two gestures, or with a tap on its icon. In the headset
-// the gestures are hard to learn, and the pictures of the gestures that the
-// game shows in a corner of the screen are not seen. The book shows the
-// miracles that the player can ask for now over the hand that does not
-// point, and the pointing hand takes one with the grip.
+// the gestures are hard to learn. The book shows the miracles that the
+// player can ask for now over the hand that does not point, and the pointing
+// hand takes one with the grip.
 //
 // THE GAME'S WAY. The list is the game's own. Each Worship Site of the player
 // (GPlayer+0xA48, the Citadel, and its 6 sites at +0x34) has a miracle icon
@@ -44,6 +43,9 @@
 //
 //   spell_book=1             0: the first face button of the hand that does
 //                            not point has no job
+//   spell_book_palm=1        the book also opens when the palm of that hand
+//                            turns up and stays up for 0.4 s, and closes
+//                            when that palm turns down. 0: only the button
 //   spell_book_pull_cm=10    the pull that takes a miracle out of the book,
 //                            in cm of hand motion, 3 to 30. 0: the grip
 //                            takes the miracle at once
@@ -72,6 +74,8 @@
 #include "controllers.h"
 #include "cutscene_window.h"
 #include "debug_menu.h"
+#include "gesture_panel.h"
+#include "gesture_panel_math.h"
 #include "haptics.h"
 #include "radial_menu.h"
 #include "spell_book.h"
@@ -334,6 +338,7 @@ int g_pull_cm = 10;       // 0: the grip takes the miracle at once
 int g_pull_ini = 10;      // the value of bwvr.ini, for the debug page
 bool g_style = true;      // hint_card_style: the book is a page of parchment
 bool g_game_bubble = true;  // the game draws the bubble that the hand pulls out
+bool g_palm = true;       // spell_book_palm: the palm that turns up opens it
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -367,6 +372,7 @@ void ReadSettings() {
   g_pull_ini = g_pull_cm > 0 ? g_pull_cm : 10;
   g_game_bubble = IniKey("spell_book_bubble", 1) != 0;
   g_style = IniKey("hint_card_style", 1) != 0;
+  g_palm = IniKey("spell_book_palm", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -397,6 +403,11 @@ void ReadSettings() {
                          "its glass ball with the miracle in it"
                        : "the bubble that the hand pulls out is a flat "
                          "picture");
+  ModLog("spell book   : spell_book_palm=%d: %s", g_palm ? 1 : 0,
+         g_palm ? "the book also opens when the palm of the hand that does "
+                  "not point turns up and stays up for 0.4 s, and it closes "
+                  "when that palm turns down"
+                : "only the button opens the book");
   if (!g_game_ok) {
     ModLog("spell book   : the functions of the game do not have the bytes "
            "of v1.42, so the book does not open");
@@ -425,6 +436,10 @@ Layout g_layout = LayoutFor(0);
 bool g_left = true;           // the book is at the left hand
 bool g_button_seen_up = false;
 bool g_button_before = false;
+// The book on the palm (spell_book_palm=1).
+gesture_panel_math::PalmBook g_palm_book = {false, false, 0.0};
+bool g_open_by_palm = false;      // the palm opened the book that is open
+uint64_t g_palm_opens = 0, g_palm_closes = 0;
 GripClaim g_grip = {};
 volatile LONG g_grip_claimed = 0;  // the book holds the grip now
 volatile LONG g_pluck_asked = 0;  // the pump saw a pluck
@@ -1250,6 +1265,7 @@ const char* const kCloseWords[] = {
     "", "", "", "the button", "the ring opened", "a dialog box or the game "
     "menu is up", "the pointing hand took a miracle", "the book cannot stay "
     "now"};
+const char kClosePalmWords[] = "the palm turned down";
 
 void SetNotice(const wchar_t* text) {
   wcsncpy_s(g_notice, text, _TRUNCATE);
@@ -1587,6 +1603,11 @@ bool SpellBookButtonOn() {
 
 bool SpellBookOpen() { return g_open; }
 
+bool SpellBookPalmOn() {
+  ReadSettings();
+  return g_on && g_game_ok && g_palm;
+}
+
 bool SpellBookCanOpen() {
   ReadSettings();
   if (!g_on || g_open || RadialMenuShows()) return false;
@@ -1628,6 +1649,30 @@ void SpellBookFrame() {
                 !CutsceneWindowFlat();
   in.ring = RadialMenuShows();
   in.menu = have_hand && hand.dialog;
+  // The palm that turns up (spell_book_palm=1). It opens the book only when
+  // a press could open it, when the hand holds nothing (no grip on the land,
+  // no grip, no ring), and when the row of the gestures does not want the
+  // palm (GesturePanelWantsPalm). It closes only a book that it opened.
+  bool palm_open = false, palm_close = false;
+  if (g_palm) {
+    float palm_grip[3], palm_turn[4], palm_head[3];
+    bool palm_left = true;
+    const bool palm_pose =
+        have_hand && hand.active &&
+        ControllersCardPose(1, palm_grip, palm_turn, palm_head, &palm_left);
+    const float cos_up =
+        palm_pose ? gesture_panel_math::PalmUp(palm_turn, palm_left) : -1.0f;
+    const bool free = in.can_open && !in.ring && !in.menu &&
+                      !hand.grab_held && !hand.button &&
+                      hand.squeeze < 0.5f && hand.trigger < 0.5f &&
+                      !GesturePanelWantsPalm();
+    const int step = gesture_panel_math::PalmBookStep(
+        &g_palm_book, cos_up, free, g_open, g_open_by_palm,
+        g_pull.state == kPullOut, NowSeconds());
+    palm_open = step == gesture_panel_math::kPalmOpen && !press;
+    palm_close = step == gesture_panel_math::kPalmClose && !press;
+  }
+  if (palm_open) in.press = true;
   bool plucked = false;
   if (InterlockedExchange(&g_pluck_asked, 0) != 0 && g_open && have_game &&
       g_pull.state == kPullNone) {
@@ -1638,8 +1683,16 @@ void SpellBookFrame() {
   }
   in.plucked = plucked;
   const bool was_open = g_open;
-  const int event = OpenStep(&g_open, in);
+  int event = OpenStep(&g_open, in);
+  bool closed_by_palm = false;
+  if (event == kNothing && palm_close && g_open) {
+    g_open = false;
+    closed_by_palm = true;
+    event = kClosedButton;
+  }
   if (event == kOpened) {
+    g_open_by_palm = palm_open;
+    if (palm_open) ++g_palm_opens;
     ++g_opens;
     g_left = hand.left;
     g_hover = -1;
@@ -1663,10 +1716,12 @@ void SpellBookFrame() {
     }
   } else if (event != kNothing) {
     ++g_closes;
+    if (closed_by_palm) ++g_palm_closes;
+    g_open_by_palm = false;
     if (event == kClosedButton) HapticsPulseHands(1, haptics_math::kTick);
     if (LogRoom()) {
       ModLog("spell book   : the book closes: %s, frame %llu",
-             kCloseWords[event], frame);
+             closed_by_palm ? kClosePalmWords : kCloseWords[event], frame);
     }
   }
   if (!g_open) {
@@ -1713,9 +1768,11 @@ void SpellBookFrame() {
       }
       empty[n] = 0;
     }
-    ModLog("spell book   : the book opens over the %s hand, at %.3f %.3f %.3f "
-           "m, %.0f cm from the head, %.0f by %.0f cm. %d miracles: %s%s, "
-           "frame %llu", left ? "left" : "right", center[0], center[1],
+    ModLog("spell book   : the book opens over the %s hand%s, at %.3f %.3f "
+           "%.3f m, %.0f cm from the head, %.0f by %.0f cm. %d miracles: "
+           "%s%s, frame %llu", left ? "left" : "right",
+           g_open_by_palm ? ", because its palm turned up" : "", center[0],
+           center[1],
            center[2], controller_math::Distance(center, head) * 100.0f,
            g_layout.width_m * 100.0f, g_layout.height_m * 100.0f, g_count,
            g_count > 0 ? words : "none. ", empty, frame);
@@ -1962,10 +2019,12 @@ void SpellBookReport() {
   ModLog("spell book   : the book opened %llu times and closed %llu times "
          "this window: %llu pulls (%llu snaps, %llu back into the book), "
          "%llu miracles taken, %llu requests to the game, %llu "
-         "Miracles in the Hand, %llu refusals. The picture was drawn %llu "
+         "Miracles in the Hand, %llu refusals. The palm opened it %llu "
+         "times and closed it %llu times. The picture was drawn %llu "
          "times, the longest draw took %.2f ms",
          g_opens, g_closes, g_pulls, g_snaps, g_backs, g_plucks, g_requests,
-         g_arrived, g_refusals, g_rasters, g_raster_ms);
+         g_arrived, g_refusals, g_palm_opens, g_palm_closes, g_rasters,
+         g_raster_ms);
   int shown = 0, draws = 0, made = 0;
   BookBubbleCounts(&shown, &draws, &made);
   if (shown + draws + made > 0) {
@@ -1976,6 +2035,7 @@ void SpellBookReport() {
   }
   g_pulls = g_snaps = g_backs = 0;
   g_opens = g_closes = g_plucks = g_requests = g_arrived = g_refusals = 0;
+  g_palm_opens = g_palm_closes = 0;
   g_rasters = 0;
   g_raster_ms = 0.0;
 }

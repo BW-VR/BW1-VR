@@ -257,6 +257,7 @@ struct RingHand {
   bool stick_click;
   bool stick_live;    // false for a Vive pad that is not clicked
   float trigger;      // 0 to 1
+  float squeeze;      // the grip, 0 to 1
   float stick[2];     // x right, y forward
   float position[3];  // the grip point
   float head[3];      // the head center

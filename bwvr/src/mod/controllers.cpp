@@ -66,6 +66,7 @@
 #include "note_depth.h"
 #include "radial_menu.h"
 #include "spell_book.h"
+#include "gesture_panel.h"
 #include "script_frame_math.h"
 #include "temple.h"
 #include "temple_math.h"
@@ -297,6 +298,10 @@ enum FakeInput {
   // The spell book: the right hand steps to the middle of the next item of
   // the open book (spell_book.cpp).
   kBook,
+  // The left hand turns to the next yaw, pitch and roll of
+  // fake_controller_left_rots: the palm that turns up (spell_book_palm,
+  // gesture_panel).
+  kLRot,
   kInputCount
 };
 
@@ -311,7 +316,7 @@ const char* const kInputName[kInputCount] = {
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
-    "book"};
+    "book",       "lrot"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -330,6 +335,12 @@ int g_rots[kMaxPoints][3];
 int g_rot_count = 0;
 int g_rot_index = -1;
 int g_rots_used = 0;
+// The same for the left hand and the word "lrot", from the test key
+// fake_controller_left_rots. Not mirrored.
+int g_lrots[kMaxPoints][3];
+int g_lrot_count = 0;
+int g_lrot_index = -1;
+int g_lrots_used = 0;
 // The word "aimfar" turns the right hand to a yaw and a pitch that point the
 // aim ray at an object. The word "pull" steps the right hand 15 cm toward the
 // head center (the origin of the cm of the points) over a few frames, and the
@@ -645,7 +656,12 @@ void FakeHand(int index, bwvr::HandInput* out) {
                                                 : g_fake.pitch);
   const float roll = g_fake.roll * turn;
   float q[4];
-  if (role == 1 && g_aim_set) {
+  if (role == 0 && g_lrot_index >= 0 && g_lrot_index < g_lrot_count) {
+    controller_math::FakeOrientation(
+        static_cast<float>(g_lrots[g_lrot_index][0]),
+        static_cast<float>(g_lrots[g_lrot_index][1]),
+        static_cast<float>(g_lrots[g_lrot_index][2]), q);
+  } else if (role == 1 && g_aim_set) {
     controller_math::FakeOrientation(g_aim_yaw, g_aim_pitch, roll, q);
   } else if (role == 1 && g_rot_index >= 0 && g_rot_index < g_rot_count) {
     controller_math::FakeOrientation(
@@ -1096,6 +1112,12 @@ void UpdateScript() {
       ModLog("controllers  : the fake hand turns to yaw %d, pitch %d, roll %d "
              "at frame %llu", g_rots[g_rot_index][0], g_rots[g_rot_index][1],
              g_rots[g_rot_index][2], g_frame);
+    }
+    if (step.input == kLRot && t == step.start && g_lrot_count > 0) {
+      g_lrot_index = g_lrots_used++ % g_lrot_count;
+      ModLog("controllers  : the fake left hand turns to yaw %d, pitch %d, "
+             "roll %d at frame %llu", g_lrots[g_lrot_index][0],
+             g_lrots[g_lrot_index][1], g_lrots[g_lrot_index][2], g_frame);
     }
     if (step.input == kShot && t == step.start) {
       EyeCaptureArmNow(g_frame + 3);
@@ -3718,6 +3740,9 @@ void ControllersSetFake(const FakeControllerSettings& fake) {
   g_rot_count = 0;
   g_rot_index = -1;
   g_rots_used = 0;
+  g_lrot_count = 0;
+  g_lrot_index = -1;
+  g_lrots_used = 0;
   if (fake.mode != 0) {
     char path[MAX_PATH];
     const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -3730,6 +3755,10 @@ void ControllersSetFake(const FakeControllerSettings& fake) {
       GetPrivateProfileStringA("bwvr", "fake_controller_rots", "", rots,
                                sizeof(rots), path);
       ParsePoints(rots, g_rots, &g_rot_count);
+      char lrots[512];
+      GetPrivateProfileStringA("bwvr", "fake_controller_left_rots", "", lrots,
+                               sizeof(lrots), path);
+      ParsePoints(lrots, g_lrots, &g_lrot_count);
       char turns[512];
       GetPrivateProfileStringA("bwvr", "fake_controller_turns", "", turns,
                                sizeof(turns), path);
@@ -4051,6 +4080,7 @@ void ControllersFrame() {
   LatchEsc();
   RadialMenuFrame();
   SpellBookFrame();
+  GesturePanelFrame();
 }
 
 namespace {
@@ -4235,6 +4265,7 @@ bool ControllersRingHand(RingHand* out) {
   out->stick_click = hand.stick_click;
   out->stick_live = StickLive(hand);
   out->trigger = hand.trigger;
+  out->squeeze = hand.squeeze;
   out->stick[0] = hand.stick[0];
   out->stick[1] = hand.stick[1];
   return true;
@@ -4947,6 +4978,7 @@ void ControllersReport() {
   }
   RadialMenuReport();
   SpellBookReport();
+  GesturePanelReport();
   TempleReport();
   TextClickReport();
   if (g_god_zooms != 0 || g_god_holds != 0) {

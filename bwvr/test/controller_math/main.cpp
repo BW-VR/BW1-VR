@@ -3544,6 +3544,7 @@ void CreatureChecks() {
 #include "debug_menu_checks.h"
 #include "teleport_checks.h"
 #include "spell_book_checks.h"
+#include "gesture_panel_checks.h"
 #include "sky_checks.h"
 #include "sprite_checks.h"
 #include "feel_checks.h"
@@ -3969,6 +3970,7 @@ int main() {
   debug_menu_checks::DebugMenuChecks();
   teleport_checks::TeleportChecks();
   spell_book_checks::SpellBookChecks();
+  gesture_panel_checks::GesturePanelChecks();
   sky_checks::SkyChecks();
   sprite_checks::SpriteChecks();
   forest_checks::ForestChecks();

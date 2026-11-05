@@ -27,6 +27,11 @@ void SpellBookInterfaceStep(void* face);
 // True while the book is open.
 bool SpellBookOpen();
 
+// True when the palm of the hand that does not point can open the book
+// (spell_book_palm=1). gesture_panel.cpp then gives that palm to the book,
+// except while the row of the gestures wants it.
+bool SpellBookPalmOn();
+
 // For the hint words: spell_book is on, and the first face button of the
 // hand that does not point opens the book (button_layout=1, a controller
 // with face buttons that does not send Esc with that button).

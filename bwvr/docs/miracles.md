@@ -33,6 +33,11 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
   pull of 10 cm takes it out of the book, with the game's own request. A
   grip that opens before that puts the miracle back. The debug switch "All
   miracles" gives up to 6 miracles with no cost in prayer power, for tests.
+  The palm of that hand that turns up and stays up for 0.4 s also opens the
+  book.
+- While that palm is up, the gesture pictures of the game show in a row over
+  it: what the player can draw now. While B is down, or while a chain or a
+  power up goes on, the palm shows the row and not the book.
 
 ## Gestures in the plain game [V unless marked]
 
@@ -754,6 +759,36 @@ hand that does not point has "[X] Spells" (or "[A] Spells" when the left
 hand points), while a press can open the book. While the book is open, that
 card does not show.
 
+### The book on the palm (`spell_book_palm=1`)
+
+The book also opens when the palm of the hand that does not point turns up
+and stays up for 0.4 s. It is the second way beside the button. The normal
+of the palm is the axis of `BookCenter` (+x of the grip of the left hand,
+-x of the right hand). The code is in `spell_book.cpp`, and the math
+(`PalmBookStep`) in `gesture_panel_math.h`.
+
+- The palm is up when its normal is 40 degrees or less from the up of the
+  room. It stays up until the normal is more than 60 degrees from up.
+- The palm opens the book only when a press of the button could open it, and
+  only while the hand is free: no grip on the land or on the world
+  (`GrabHeld`), the grip and the trigger of that hand are open, the ring
+  button is up, and the ring does not show. A palm that is not free starts
+  the 0.4 s again. So the release of a grip on the land with the palm up
+  opens the book only 0.4 s later, while the palm stays up.
+- The palm opens the book only one time. The palm must turn away from up
+  (past 60 degrees) before it can open the book again. This is also true
+  after the button or a take closed the book.
+- A book that the palm opened closes when the palm is more than 70 degrees
+  from up. A pull of a bubble out of the book holds it open until the pull
+  ends. The button also closes it. The palm does not close a book that the
+  button opened.
+- The palm is also the place of the row of the gestures (see "The gesture
+  row over the palm"). While the draw button is down, or while the game
+  shows a gesture that goes on from a gesture that the player drew, the
+  palm gives the row and does not open the book.
+
+With `spell_book_palm=0` only the button opens the book.
+
 ### The debug switch "All miracles" (`debug_all_miracles=1`)
 
 A switch for tests, default 0. With 1, once a second:
@@ -817,15 +852,118 @@ newest end, with a light that adds to the picture.
 - It draws with `overlay=0` too, and with the hand model, the low poly
   hand, and `hand_exact`.
 
+### The gesture pictures of the game [V]
+
+In each run of `ProcessPowerUpSystem` the game gives its "looking for" list
+to `fn_0068ABA0`. When the list changes, that function makes one
+`DisplayGesture` for each gesture type that the player can draw now. The
+list of the pictures is at `0x00D4EAC8`, with the count at `0x00D4EAD0`.
+`PSysGlobal::DrawLoop` (`fn_0068AA60`) puts each picture on the sorted list
+of the frame with the draw `fn_0068B480`. A picture has three parts:
+
+- The bubble (`fn_0068B7E0`): an empty glass ball for a chain start, the
+  mesh of a leash, or the `SpellSeedGraphic` of the miracle. The bubble has
+  a camera of its own (`fn_0068B740`, put back by `fn_0068B7D0`) and a move
+  of the middle of the projection to the place of the picture.
+- The card: a sprite with the picture of the gesture
+  (`data\textures\S_Gesture*.raw`, `fn_0057D5D0`).
+- A dot that runs along the path of the gesture.
+
+The card and the dot get their place from `fn_0068B420`: a pixel of the
+square of the picture, 10 units in front of the camera
+(`LH3DTech::Get3DPointFromScreen`). The squares are at the lower right of
+the game screen. Each one is 3.5 percent of the width of the screen, 0.5
+percent apart, in a row from the right (`fn_0068AED0`). The card and the dot
+draw with no depth test. The pictures fade out while the help system shows
+a text (`HelpSystem+0x14`, `+0xB8`).
+
+The list of an empty Hand at rest has the chain starts and "again"
+(`GSpellSystemInfo+0x10` to `+0x18`): the game shows these whenever a
+Worship Site of the player has a miracle. After a chain start the list has
+the next gesture of each miracle and the scribble. With a Miracle in the
+Hand it has the scribble and the gestures of the power ups.
+
 ### Where the gesture pictures of the game go
 
-The game shows the gestures that the player can draw now in the lower right
-corner of the screen (`fn_0068ABA0`, a `DisplayGesture` for each type, at
-pixels of the game screen, drawn by the particle system with its own camera,
-`fn_0068B740`). The headset does not show them. The cause is not proven. A
-likely cause is that the corner is at the edge of the lens, and that the
-particle camera gets the camera of each eye. The book shows the gestures in
-place of that corner.
+With `gesture_panel=0` the headset does not show the pictures, for three
+reasons. A desktop run with dxwrapper shows each one (`village_run.ps1
+-Kind palm`, the render of 3600 by 2880, the God view at 44.4 units for each
+meter):
+
+- The game draws the pictures: up to 1300 draws in a report window, with the
+  fade at 1. They are at the lower right corner of the render of each eye,
+  in the last 3 percent of its width and height (the middle of the first
+  card at the pixel 3483 2817). The lens of the headset shows little or
+  nothing of the corners of the render.
+- The game puts each card 10 units deep on the ray of its pixel: 19.9 units
+  from the eye, 45 cm of the room. With one walk the right eye sees that
+  point 370 pixels (10 percent of the width) to the left of the place in
+  the left eye. So the two eyes do not see one picture at one place. When
+  one copy is in the part that the lens shows, it is a ghost in one eye.
+- The bubbles have a camera of their own and a move of the middle of the
+  projection. In the eye pictures they are cut at the bottom edge of the
+  left eye, and a stray icon shows at the right edge of the right eye.
+
+While the help system shows a text, the fade is 0, and the game draws no
+picture.
+
+### The gesture row over the palm (`gesture_panel=1`)
+
+The code is in `src/mod/gesture_panel.cpp`, with the pure math in
+`gesture_panel_math.h`. The row shows the gesture pictures of the game over
+the palm of the hand that does not point, while that palm is up. The
+pictures are the game's own, with the game's list, its order, its fade and
+its animation of the dot.
+
+**The place.** The middle of the row is where the middle of the spell book
+is (`BookCenter`): 12 cm from the grip along the normal of the palm, and 2
+cm up. The row faces the head with no roll, as the book does. The mod keeps
+the layout of the game: it puts the row of squares of the game screen, with
+the bubbles over them, on that plane. Three pictures or more are
+`gesture_panel_cm` wide (30 cm). Fewer pictures keep the size of a row of
+three, so one picture is about 9 cm.
+
+**The draw.** The draw of the sorted list draws no picture. In each eye
+pass, after the game's bubble of the spell book, the mod calls the draw of
+the game (`fn_0068B480`) for each picture, with three changes:
+
+- `fn_0068B420` gives a point of the plane over the palm, in place of the
+  point 10 units in front of the camera.
+- `fn_0068B7E0` draws the bubble at its point of the plane with the glass
+  ball and the graphics of `book_bubble.cpp` (`BookBubbleDrawPart`), and not
+  with a camera of its own. The bubble is 0.9 of the side of its card
+  across. The meshes of a leash do not show.
+- The sizes of the card and of the dot (`0x00C02674` and `0x00D4EAFC`) are
+  scaled for the plane while the draw runs, and then put back.
+
+The camera of the eye is put in place for the draw and put back after it.
+
+**When.** The row shows while each of these is true:
+
+- The palm is up: its normal is 40 degrees or less from the up of the
+  room. It stays up until the normal is more than 60 degrees from up. A
+  palm that is not up shows no row, so no picture stays at a place of the
+  view.
+- The game shows a gesture picture.
+- The spell book is closed. One palm cannot hold the book and the row, so
+  the row does not show while the book is open.
+- The controllers can act, no dialog box is up, no ring shows, and the cut
+  scene window is not up.
+
+**The palm and the book.** With `spell_book_palm=1` the palm that turns up
+also opens the book (see "The book on the palm"). The rule:
+
+- While the draw button (B) is down, the palm shows the row.
+- While the game shows a picture that goes on from a gesture that the
+  player drew (a chain after a spiral, the gestures of a power up, the
+  scribble with a Miracle in the Hand), the palm shows the row. The draw
+  button is up between the pieces of a chain, and the row stays.
+- At other times (an empty Hand at rest) the palm opens the book.
+
+With `spell_book_palm=0` the palm always shows the row.
+
+With `gesture_panel=0` the game draws its pictures as before, and the
+headset does not show them.
 
 ## Keys
 
@@ -843,6 +981,9 @@ place of that corner.
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
 | `spell_book_pull_cm` | 10 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
+| `spell_book_palm` | 1 | 0: the palm that turns up does not open the book. Only the button opens it |
+| `gesture_panel` | 1 | 0: no row over the palm. The game draws its gesture pictures at the corner of its screen, and the headset does not show them |
+| `gesture_panel_cm` | 30 | The width of the row of the gesture pictures over the palm, in cm, for 3 pictures or more, 10 to 80 |
 | `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |
 | `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
@@ -876,6 +1017,11 @@ Test keys for the desktop runs only (the launcher removes them):
   `bwvr-book-NNNNN.bmp`.
 - The word `book` of the scripted controller steps the pointing hand to the
   middle of the next item of the open book.
+- `fake_controller_left_rots` and the word `lrot` turn the left hand, so a
+  run can turn its palm up and down (`controllers.md`, 4.2).
+- `gesture_panel_test_frame`: at this frame of the scripted controller
+  `gesture_panel` changes, so one run shows the corner of the game and the
+  row over the palm.
 
 ## The log
 
@@ -930,6 +1076,21 @@ The tag `spell book` has the book:
   requests, the Miracles in the Hand, the refusals and the draws of the
   picture. One more line has the frames with the game's bubble, its draws,
   and the parts that the game made.
+
+The tag `gesture panel` has the gesture pictures:
+
+- The keys at the start, and the change of the test key
+  `gesture_panel_test_frame`.
+- Each new list of the game: each picture with its gesture type, display
+  order, seed type, leash and square, whether a picture goes on from a drawn
+  gesture, and the fade.
+- With `gesture_panel=0`, for each new list: the world point of the first
+  card, its distance from the camera in units and in cm of the room, and
+  its pixel in the camera of now.
+- "the row of N gesture pictures shows over the left palm", "the row does
+  not show", with the cause, and the first draw of the row with its size.
+- One line each report window: the draws of the row, the corner draws that
+  the mod skipped, the corner draws of the game, and the fade.
 
 The tag `book bubble` has the game's bubble: the glass ball and each graphic
 that the game makes, the first draw with its place and size, and a check of
@@ -1051,6 +1212,33 @@ used or the player takes it out. So a recipe with more than one seed must
 tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 `-Steps` the steps).
 
+The math test (`gesture_panel_checks.h`) covers the palm that turns up for
+each hand and the turns of the word `lrot`, the band of 40 and 60 degrees,
+the book on the palm (the hold of 0.4 s, the grip on the land, the close by
+the palm, the pull that holds the book, and the book of the button), and the
+map of the row of the game onto the plane.
+
+The gesture pictures and the palm have a recipe: `village_run.ps1 -Kind
+palm` (the test save `temple`, with `backend=dxwrapper\ddraw.dll` for eye
+pictures). What it shows:
+
+- With `gesture_panel=0` the eye pictures have the pictures of the game at
+  the lower right corner of each eye, 370 pixels apart (see "Where the
+  gesture pictures of the game go").
+- The list of an empty Hand at rest has the spiral, "again" and a leash
+  gesture (the leash of the Creature is on in the save). After the spiral
+  it has the next gestures of Water, Food and Heal. With Water in the Hand
+  it has the power up and the scribble.
+- With `gesture_panel=1` and the palm up, the row is over the left hand in
+  both eyes: three cards 8.7 cm apart with the bubbles of the miracles over
+  them, the empty glass ball over the spiral. The palm to the side hides the
+  row. The corner draws stop.
+- The palm up at rest opens the book 0.4 s later ("because its palm turned
+  up"), and the palm to the side closes it. With the grip of the left hand
+  on the land, the book opens only 0.4 s after the grip ends. With B held,
+  the palm up shows the row and opens no book. When B ends, the palm opens
+  the book.
+
 **Not run on the desktop:**
 
 - The spell book: the close when the ring or the game menu opens, an empty
@@ -1076,6 +1264,12 @@ tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
   grip point is the key value 0.
 - Whether the trail reads well: its gold, its width of 1.8 cm, the 1.5 s that
   it stays, and whether it hides the Hand's point on a bright land or sky.
+- Whether the row over the palm is easy to read, and whether 30 cm and the
+  place 12 cm over the palm are right. Whether the bubbles and the dot of
+  the game read well at that size.
+- Whether a real palm turns up past 40 degrees with no effort, and whether
+  0.4 s opens the book with no open by accident.
+
 - Whether the book is easy to read and to reach over the open palm, and
   whether 12 cm from the grip is the right place.
 - Whether a pull of 10 cm and the buzz feel like an elastic band, and

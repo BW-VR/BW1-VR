@@ -717,8 +717,15 @@ that moves while the Hand takes it.
   closed at a pile of the store, the take stops when the hand moves out of
   the area of the pile. A take at a distance (the ray) keeps on while the
   player moves (`grab.md`, "A bulk source at a distance"). Wanted: the take
-  at the Hand acts as the take at a distance. First find which test of the
-  game or of the mod ends the take (`grab.md`, "The bulk take").
+  at the Hand acts as the take at a distance. The game has no test of the
+  distance: it ends a take only when the source is gone or empty, the Pot
+  is full, or the Hand is outside the influence
+  (`GInterfaceStatus::Process` `0x005DC4E0`). So the mod most likely lets
+  the game's button go up. Places to look: `ReleaseController` and the
+  test of the view for a held button in `controllers.cpp`, the paths of
+  `need_up`, and `far_claim` in `StepGrip`. A headset log of the fault
+  shows which: "grip : the grip opens during a bulk take" means the
+  button went up.
 - **P22. A panel of places to go.** Page 2 of the ring sets a bookmark
   (`mark_set`), goes to the next one (`mark_go`) and goes back
   (`mark_back`), see `controllers.md`. Testers do not find a way to go to a
@@ -756,6 +763,95 @@ that moves while the Hand takes it.
     the grab of the land) while the drawn hand stays on the land.
   - Whether a faint copy of the real hand shows under the land.
   - Buildings and rocks: the land only, or each solid object too.
+
+### New features: miracles, comfort and help
+
+The order is the order of the work. Each one gets a key whose old value
+keeps the mod as it is.
+
+**Miracles and gestures**
+
+- **F1. A trail at the fingertip.** While B is held, a ribbon follows the
+  tip of the index finger, so the player sees the gesture. Now the game
+  shows no trail, and the point of the draw is the grip point. Build the
+  ribbon in the overlay from the points of `gesture_air.cpp`, and a key for
+  the point of the draw (the tip or the grip).
+- **F2. The gestures of the game over the hand.** The game's corner
+  pictures of the gestures (`DisplayGesture`, `fn_0068ABA0`, drawn by
+  `fn_0068B740`) do not show in the headset. Draw them in each eye pass over
+  the palm of the hand that does not point, while that palm is up, as
+  `book_bubble.cpp` draws the bubble of the game. Then the spiral shows what
+  the player can draw next. First prove the cause with an eye picture.
+- **F3. A circle that casts when it closes.** Spiritual Shield, Physical
+  Shield and Storm cast when the game matches the circle, with the grip
+  still closed. Now the cast comes when the grip opens. The game sees the
+  match in `h_MatchType` (`gesture_air.cpp`). The game's own release then
+  comes from a button that looks open to the game until the real grip
+  opens, as `miracle_seed_use` does.
+- **F4. Lightning from the fingertip.** Find where the bolt of Lightning
+  starts (`UR_Lightning` `0x0067E900`), and start it at the tip of the
+  index finger.
+- **F5. The influence at the hand.** Outside the influence of the player,
+  the hands fade (`HandModelSetOpacity`), and the stream of the influence
+  starts at the hand, not on the land under it
+  (`GVirtualInfluence::Draw` `0x0076D000`, the call of
+  `PSysGlobal::AddManaPathSprite` at `0x0076D1C2`).
+- **F6. The fireball and the speed of a throw.** A fireball leaves at the
+  game's filtered speed of the Hand (`CHand+0x48C8`), and no run had a real
+  swing. If it flies short in a headset, a key scales that speed. For other
+  objects, a key `throw_speed_pct` (100: the real speed) can make a throw
+  stronger.
+- **F7. The spell book on a palm that turns up**, as a second way to open
+  it, with the palm normal of `BookCenter`.
+
+**Comfort and moving**
+
+- **F8. A comfort vignette** (off, gentle, strong): the edges of the view go
+  dark during a walk with the stick, a smooth zoom and a grab of the world.
+- **F9. A smooth turn** with the stick, and its speed (P4).
+- **F10. A recenter from the controllers:** a hold of the stick click of the
+  other hand for 1 s, and an item of the ring. Now only F11 and the
+  headset's own recenter do it.
+- **F11. Settings in the headset.** A panel of the most used settings
+  (turn, teleport, vignette, main hand, move speed, recenter) that saves to
+  `bwvr.ini`. The same panel shows one time at the start of a new game.
+- **F12. "Saving..." while the game saves.** The save box of the game draws
+  in a frame with no scene, so the headset shows a still view. Show a card
+  at the place of the menu panel.
+- **F13. A snapshot for a bug report:** an item of the ring saves the eye
+  pictures and a copy of the log in `bwvr\captures`.
+- **F14. A ray that glows.** The ray, the tether of the far grab and the
+  arc of the teleport get a glow that moves along them.
+- **F15. The cut scene window:** a ray and the hands in the window, so the
+  trigger points at what it clicks.
+- **F16. No turn and no zoom while a menu is up.** The walk, the teleport
+  and the grab of the world stop with a dialog box. `PumpStick` has no such
+  test for the snap turn and the zoom step.
+
+**The village, the Creature and the help**
+
+- **F17. A turn of the wrist turns the building of a scaffold**
+  (`Scaffold::ProcessInHand` `0x006E8570`). The field of the angle is not
+  found yet.
+- **F18. The job icon of a villager in the Hand:** large, just over his head,
+  and only for the villager in the Hand or under it. The draw of the icon is
+  not traced (`Abode::DiscipleInHandNear` `0x00407420`,
+  `GGuidance::MakeDiscipleSFX` `0x0071BF10`).
+- **F19. The Creature with no press.** An open hand that stays in the body
+  strokes it, and a thing held to the Creature for a short time goes to it
+  with no opening of the grip (`creature.md`, section 8).
+- **F20. The choice of the Creature at the start** with the Hand (R2).
+- **F21. The spirits nearer the middle of the view**
+  (`HelpDude::ScreenToWorld` `0x005BD2A0`, `spirit_anchor.cpp`).
+- **F22. Words that the card never shows**, for example the game's "Throw"
+  and "Drop" (`HintCardGameHint`).
+- **F23. The sea with depth:** the coast at its real depth and water that
+  the player can see through. The plain sea quad `0x0087A090` has no depth
+  test.
+- **F24. No wait of 20 ms at the stop of a sound.** `audio_stop_wait=0`
+  skips the wait only for the sounds of the mod's mixer. The other sounds
+  still make the game thread wait, and this can stop the game for 40 to
+  170 ms.
 
 ### Faults of the plain game
 

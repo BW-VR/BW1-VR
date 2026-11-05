@@ -169,7 +169,7 @@ does not delete them, so a value that a person writes in `bwvr.ini` is kept.
 | Resolution scale | 100% | A slider from 50 to 200 in steps of 5. Key `resolution_pct`. See "The resolution comes from the headset". |
 | Anisotropic filtering | 16x | A list: off, 2x, 4x, 8x, 16x. Key `anisotropy` (1, 2, 4, 8, 16). With the renderer Direct3D 9 the launcher also writes the level to `AnisotropicFiltering` in `dxwrapper\dxwrapper.ini`, because dxwrapper applies its own level to the Direct3D 9 device. A fixed 16 there would make "off" do nothing. dxwrapper reads 0 as "leave it to the game". The renderer Vulkan takes the level that the game sets on its textures, so it needs no other file. |
 | Enable texture mipmaps | on | Uses smaller copies of each texture in the distance. Key `force_mips`. |
-| Detail by world size | off | The detail follows the size of the world. Key `detail_by_scale`. The three values below give the curve (`backend.md`, "Models keep their detail further out") |
+| Detail by world size | off, on for the Steam Frame (`android.md`, "The values of the Steam Frame") | The detail follows the size of the world. Key `detail_by_scale`. The three values below give the curve (`backend.md`, "Models keep their detail further out") |
 | Game detail from | 135 units/m | From this size to smaller worlds, models have the detail of the game. Key `detail_scale_1x` |
 | 2x detail at | 60 units/m | The detail comes to 2x at this size. Key `detail_scale_2x` |
 | 3x detail at | 10 units/m | The detail comes to 3x at this size. Key `detail_scale_3x` |

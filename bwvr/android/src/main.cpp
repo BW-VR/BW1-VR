@@ -51,6 +51,7 @@
 #include "menu_painter.h"
 #include "picture_ring.h"
 #include "play_rules.h"
+#include "frame_defaults.h"
 #include "pose_log.h"
 #include "remote_control.h"
 #include "steamvr_settings.h"
@@ -2546,6 +2547,27 @@ void TakeDisplayRates(App* app) {
   }
 }
 
+// THE VALUES OF THE STEAM FRAME (frame_defaults.h, frame_defaults=1 by default): before the
+// Vulkan instance of the session, so that the driver gets tu_debug at this start too.
+void RuntimeKnown(App* app, const std::string& runtime) {
+  if (!frame_defaults::IsFrameRuntime(runtime)) return;
+  if (app->ini.GetInt("bwvr", "frame_defaults", 1) == 0) {
+    AppLog("menu         : frame_defaults=0. The app adds no values of the Steam Frame");
+    return;
+  }
+  const int added = frame_defaults::Seed(&app->ini);
+  if (added == 0) return;
+  if (!WriteTextFile(app->game.ini_path, app->ini.Text())) {
+    AppLog("menu         : the values of the Steam Frame cannot go into %s, so they count only "
+           "for this start of the app", app->game.ini_path.c_str());
+  }
+  app->menu.Load(app->ini);
+  const std::string tu_debug = app->ini.Get("bwvr", "tu_debug", "");
+  if (!tu_debug.empty()) setenv("TU_DEBUG", tu_debug.c_str(), 1);
+  AppLog("menu         : frame_defaults=1. The runtime is %s, and %d values of the Steam Frame "
+         "went into bwvr.ini", runtime.c_str(), added);
+}
+
 void Load(App* app) {
   app->game = FindGameFolder(app->folder);
   app->ini.Parse(ReadTextFile(app->game.ini_path));
@@ -2810,6 +2832,7 @@ void android_main(android_app* android) {
                 : "The app reads no gaze: no foveated rendering, or a source "
                   "with no OpenXR");
   }
+  app.xr.SetRuntimeKnown([&app](const std::string& runtime) { RuntimeKnown(&app, runtime); });
   app.xr_on = app.xr.Start(android->activity, ml::kWidth, ml::kHeight,
                            kCursorPixels);
 

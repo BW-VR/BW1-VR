@@ -748,74 +748,46 @@ that moves while the Hand takes it.
 
 ### Built, and not proven or not finished
 
-- **N0. The late camera of the headset app: check it on the Steam Frame.** Each
-  frame of the session draws the newest list of draws of the game again from the
-  place of the head and of the player at the next display time (`late_camera=1`,
-  `android.md`, "The late camera"). The math checks have the place of a vertex.
-  It runs on the Steam Frame with `xr_eye_direct=0` and `xr_compose_take=1`
-  (`android.md`, "The compose at the take"): about 90 pictures a second and no
-  flicker. These keys are 0 by default, and `move_stick_cap_ms` is 50 by default: set
-  the defaults of the headset app. From the tick to the end of the GPU work a picture
-  takes 11.7 ms as a mean and 20 ms for one picture in ten, and 90 Hz has 11.1 ms. Check
-  on the Steam Frame, with the row "Late camera" of the debug page for a comparison:
-  - a flight to the side and a flight over the middle of Land 2, right after the
-    start of a game: no double picture and no jump of the land,
-  - the Hand in a flight (a thing in the Hand goes back by the speed times the age
-    of its frame),
-  - the GPU time of a picture at 90 Hz and at the highest rate of the headset:
-    144 Hz needs a picture in 6.9 ms. The runtime of the Steam Frame takes the rate of the app from
-    `preferredRefreshRate` of `steam.app.2729671027` in
-    `~/.config/openvr/config/steamvr.vrsettings`, not from the quick menu,
+- **N0. The late camera of the headset app: open checks on the Steam Frame.** Each frame of the
+  session draws the newest list of draws of the game again from the place of the head and of the
+  player at the next display time (`late_camera=1`, `android.md`, "The late camera"). The math
+  checks have the place of a vertex. Check on the Steam Frame, with the row "Late camera" of the
+  debug page for a comparison:
+  - a flight to the side and a flight over the middle of Land 2, right after the start of a game:
+    no double picture and no jump of the land,
+  - the Hand in a flight (a thing in the Hand goes back by the speed times the age of its frame),
   - the snow on the roofs and each other layer with a depth test EQUAL in a move.
 
-  Next: a list that the play thread does not sort again for each picture, and then
-  the time of the frame thread in
-  the first 30 s of a game (the turns of the game are 40 to 108 ms there with no
-  read of a file: the first run of the code under FEX).
-- **N0a. 144 Hz with the whole island in view.** At 144 Hz a picture has 6.9 ms. With
-  about 3000 draws the GPU needs about 3.7 ms for a walk, 1.5 ms for the compose and 1 ms
-  for the compositor of SteamVR, and the play thread needs about 3 ms of the CPU. A walk
-  with no pixels still takes about 3 ms, and each extra draw adds about 1 us, so the draws
-  are the largest cost. Each step gets a key with the old behavior as a value and a row of
-  the debug page. `tools/android/frame_test.py` measures each step (`android.md`, "The test
-  run"). The order:
-  A test run on the Steam Frame proved the curve with `vk_tiny_pixels` from 2 to 4: the player
-  saw no fault, and 3 pixels gave nearly all of the gain. Set `detail_by_scale=1`,
-  `vk_tiny_draws=1` and `vk_tiny_pixels=30` as defaults of the headset app.
-  `frame_tests/fast_compare.json` measures the next keys against that state: `vk_compose_fast`
-  with each `vk_compose_rate`, `vk_list_keep`, `vk_cheap_draws` and `vk_mres_sort`. These need
-  `xr_eye_mutable=1` for all of their gain, and no run has shown them yet. Keep each key that
-  a run proves, and remove the others.
-  1. **The detail distance by the size of the world** (`detail_by_scale`). With the whole
-     island in view, 1x has 2775 draws where 5x has 4235, a walk takes 2.45 ms on the GPU
-     where 5x takes 4.76 ms, and the game has 56 frames a second where 5x has 42. In a small
-     world even 1x does not disturb the player. Both launchers offer the curve. Prove it with
-     `frame_tests/detail_compare.json`, and then make `detail_by_scale=1` the default.
-  2. **Many draws in one call.** Do this only when a run with `vk_cheap_draws=1` and
-     `vk_mres_sort=1` still shows a high cost for each draw. A run of draws with one state
-     becomes one `vkCmdDrawIndexedIndirect`, and the values of a draw go into a buffer. Each
-     vertex then reads that buffer, and the texture places become flat values of each pixel,
-     so the gain is not sure. With about 1000 draws for each picture, more than half of the
-     draws start a new run in the order of the game.
-  3. **Prepare and draw at the same time** (`frame_loop_gpu_depth=2`). The play thread
-     starts a picture while the GPU draws the picture before. This needs a fourth set of
-     images, a command buffer for each picture of a list, and a place of its own for the
-     joined indices. Do this only when a test run still shows that the play thread waits for
-     the GPU.
-  4. **No tiny draws** (`vk_tiny_draws`). A draw that is smaller than one pixel of the image of
-     a pass does not go to the GPU. Prove it with `frame_tests/detail_compare.json`, and let the
-     player judge far objects and thin lines. A next step leaves these draws out in the mod
-     before they go to the app, and this also relieves the game.
-  5. **A merge across textures.** With the places of the textures in the values of a draw,
-     the merge can join draws with different textures. This comes after step 2 and uses
-     its buffer.
-  6. **A cheaper compose** (`vk_compose_fast`). The compose costs 1.5 ms at 200 percent. If a
-     run shows that it is still too much, compare it with the outer image and the centre
-     image as two layers of the runtime (`fovea_res_layer`), which have no soft edge.
-  7. **Pictures between the walks, by depth.** For a view that is still too heavy, a
-     picture between two walks comes from the last picture and its depth. This is the
-     largest work, and the edges of near objects can show faults. Do this only when the
-     steps before do not reach 144 Hz.
+  Next: the time of the frame thread in the first 30 s of a game (the turns of the game are 40 to
+  108 ms there with no read of a file: the first run of the code under FEX).
+- **N0a. 144 Hz on the Steam Frame: what is open.** At 144 Hz a picture has 6.9 ms. With the values
+  of the Steam Frame (`android.md`, "The values of the Steam Frame") at 200 percent, 99 percent of
+  the pictures end on the GPU within 6.65 ms of their tick, and about 1 picture a second comes
+  late. For 550 to 1300 draws a walk takes 1.1 to 2 ms on the GPU and the compose 1.12 ms, and the
+  compositor of SteamVR takes about 1 ms. `tools/android/frame_test.py` measures each next step
+  (`android.md`, "The test run"). Open:
+  - A new install on a Steam Frame: no run has shown that a file with no keys gets all it needs.
+    `steamvr_app_key` is not in the list, because its value depends on the install.
+  - A Quest 3: no run has shown these keys there.
+  - The async reprojection. `steamvr.disableAsync=1` of SteamVR is for a test that shows a missed
+    picture as a stutter. Its log has no line that says that the compositor took the value.
+
+  Do each of these only when a test run shows the need:
+  1. **Many draws in one call.** A run of draws with one state becomes one
+     `vkCmdDrawIndexedIndirect`, and the values of a draw go into a buffer. Each vertex then reads
+     that buffer, and the texture places become flat values of each pixel, so the gain is not sure.
+     With `vk_cheap_draws=1` the GPU time of a draw stays the same, so a bind of the vertices and
+     of the indices is not the cost, and more than half of the draws start a new run.
+  2. **Prepare and draw at the same time** (`frame_loop_gpu_depth=2`). The play thread starts a
+     picture while the GPU draws the picture before. This needs a fourth set of images, a command
+     buffer for each picture of a list, and a place of its own for the joined indices.
+  3. **A merge across textures.** With the places of the textures in the values of a draw, the
+     merge can join draws with different textures. This needs the buffer of step 1.
+  4. **The outer image and the centre image as two layers of the runtime** (`fovea_res_layer`), in
+     place of the compose. These layers have no soft edge.
+  5. **Pictures between the walks, by depth.** For a view that is still too heavy, a picture
+     between two walks comes from the last picture and its depth. This is the largest work, and
+     the edges of near objects can show faults.
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:

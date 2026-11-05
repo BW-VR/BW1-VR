@@ -272,6 +272,7 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
          XR_VERSION_MAJOR(properties.runtimeVersion),
          XR_VERSION_MINOR(properties.runtimeVersion),
          XR_VERSION_PATCH(properties.runtimeVersion));
+  if (runtime_known_) runtime_known_(runtime_name_);
 
   XrSystemGetInfo system = {XR_TYPE_SYSTEM_GET_INFO};
   system.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;

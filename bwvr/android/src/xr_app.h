@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -526,6 +527,11 @@ class XrApp {
   // swapchain image of its slot (DensityBegin) and the walks of both eyes draw
   // into it with a density map.
   void SetDensityWanted(bool on) { density_wanted_ = on; }
+  // Before Start: Start calls it when it knows the name of the runtime, before it makes the
+  // Vulkan instance of the session.
+  void SetRuntimeKnown(std::function<void(const std::string&)> call) {
+    runtime_known_ = std::move(call);
+  }
   bool DensityMap() const { return density_map_; }
   void SetDensityPass(bool on) { density_pass_ = on; }
   bool DensityPass() const { return density_pass_ && density_map_; }
@@ -882,6 +888,7 @@ class XrApp {
   uint32_t eye_height_ = 0;
   int eye_size_max_ = 1;
   std::string runtime_name_;
+  std::function<void(const std::string&)> runtime_known_;
   // THE TIME LOG.
   bool time_log_ = false;
   FrameTimes times_;

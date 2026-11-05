@@ -4056,6 +4056,20 @@ game with the new place comes.
 
 The keys are in `bwvr.ini` of the game folder, read at each Play.
 
+**The values of the Steam Frame** (`frame_defaults`, 1 by default, `frame_defaults.h`). The Steam
+Frame and a Quest 3 have one APK, and these values have run only on the Steam Frame. So with the
+runtime SteamVR the app adds each value of the list that `bwvr.ini` does not have, before it makes
+the Vulkan instance of the session: `fovea_res=1` with `fovea_res_outer_pct=25`,
+`fovea_res_center_pct=100`, `fovea_res_center_deg=20` and `fovea_res_center_down_deg=10`,
+`xr_compose_direct=1`, `xr_compose_take=1`, `xr_eye_mutable=1`, `vk_compose_fast=1`,
+`vk_compose_rate=2`, `tu_debug=sysmem`, `vk_bindless=1`, `vk_fast_shaders=1`, `vk_list_keep=1`,
+`vk_cheap_draws=1`, `vk_tiny_draws=1`, `vk_tiny_pixels=30`, `detail_by_scale=1`,
+`xr_panel_keep=1` and `move_stick_cap_ms=250`. A value that the file has stays, also a 0, so a
+save of the menu before this start can keep a default of the table. `frame_defaults=0` adds
+nothing. The log has "menu : frame_defaults=1. ...". `vk_mres_sort` stays 0: the sort takes about
+5 percent off a walk, and it adds work on the CPU. `vk_compose_rate=4` takes only 0.05 ms more off
+the compose than 2, and each shade is larger.
+
 **The log.** At Play: "game : late_camera=1. ...". Each 10 s: "late camera : ..."
 with the pictures from a new frame of the game, the pictures of the list again,
 the ticks with no change of the place, the cuts, the size of the move, and the
@@ -4106,9 +4120,10 @@ python tools/android/frame_test.py run tools/android/frame_tests/detail.json <fo
   `step_prompt_s`, `most_s`, `start_prompt`, `end_prompt` and `end_keys`. `skip_s` must be longer
   than `step_prompt_s`, so the text in the headset is not in the numbers.
 
-The table has one row for each step: the frames of the session, the new pictures, the frames
-of the game, the time of the play and of the GPU for a walk, and the time from the tick to the
-end of the GPU. The player can change the size of the world during a test, so the table has the
+The table has one row for each step: the frames of the session, the pictures, the pictures that
+came late, the frames of the game, the time of the play and of the GPU for a walk, the GPU time of
+the compose, and the time from the tick to the end of the GPU. A still view needs no new picture,
+so only the late pictures say that a picture was missing. The player can change the size of the world during a test, so the table has the
 steps also for windows with about the same size. With `remote_control=1` the log also has
 one line for each image each 720 walks: "a list of the outer image: ...", with the draws, the
 runs of one state, the different states, the indices, the tiny draws that are left out, and the

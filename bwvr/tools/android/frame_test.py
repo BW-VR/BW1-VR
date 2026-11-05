@@ -304,7 +304,7 @@ def run(test_path, folder):
 
 PICTURE = struct.Struct('<ddddIIffIIff')
 POSE = struct.Struct('<dqII6f4f4f3f4xQII3f4f3f3ffIIff')
-POSE_FIELDS = {'t': 0, 'fresh': 3, 'frame': 21, 'tick': 38, 'pic_tick': 39}
+POSE_FIELDS = {'t': 0, 'frame': 21, 'pic_tick': 39}
 PICTURE_MAGIC = 0x53434950
 
 
@@ -343,7 +343,7 @@ class Window:
         self.end = end
         self.pictures = []
         self.frames = 0
-        self.fresh = 0
+        self.shown = set()
         self.game_frames = set()
 
     def seconds(self):
@@ -381,7 +381,7 @@ def windows_of(folder, skip_ms):
             break
         if t >= windows[w].start:
             windows[w].frames += 1
-            windows[w].fresh += 1 if r[POSE_FIELDS['fresh']] else 0
+            windows[w].shown.add(r[POSE_FIELDS['pic_tick']])
             windows[w].game_frames.add(r[POSE_FIELDS['frame']])
     # A window with few frames is the end of the game, not a result of its step.
     return [x for x in windows if x.frames / max(x.seconds(), 0.001) >= 30.0]
@@ -391,7 +391,7 @@ def row(label, group):
     seconds = sum(x.seconds() for x in group)
     pictures = [p for x in group for p in x.pictures]
     frames = sum(x.frames for x in group)
-    fresh = sum(x.fresh for x in group)
+    late = sum(1 for x in group for p in x.pictures if p[4] not in x.shown)
     game = sum(len(x.game_frames) for x in group)
     done = [p[3] - p[0] for p in pictures if p[3] > 0.0]
     play = [p[2] - p[1] for p in pictures]
@@ -399,16 +399,20 @@ def row(label, group):
     draws = [p[8] + p[9] for p in pictures]
     compose = [p[11] for p in pictures if p[11] > 0.0]
     print(f'{label:26s} {len(group):4d} {seconds:6.0f} {statistics.mean(draws) if draws else 0:7.0f} '
-          f'{frames / max(seconds, 0.001):7.1f} {fresh / max(seconds, 0.001):7.1f} '
+          f'{frames / max(seconds, 0.001):7.1f} {len(pictures) / max(seconds, 0.001):6.1f} '
+          f'{late / max(seconds, 0.001):5.1f} '
           f'{game / max(seconds, 0.001):6.1f} {percent(play, 0.5):6.2f} {percent(gpu, 0.5):6.2f} '
-          f'{percent(compose, 0.5):6.2f} {percent(done, 0.5):6.2f} {percent(done, 0.9):6.2f}')
+          f'{percent(compose, 0.5):6.2f} {percent(done, 0.5):6.2f} {percent(done, 0.9):6.2f} '
+          f'{percent(done, 0.99):6.2f}')
 
 
-HEAD = (f'{"":26s} {"runs":>4s} {"s":>6s} {"draws":>7s} {"frames":>7s} {"new":>7s} '
-        f'{"game":>6s} {"play":>6s} {"GPU":>6s} {"comp":>6s} {"done50":>6s} {"done90":>6s}')
-UNITS = ('frames: frames of the session a second, new: new pictures a second, game: frames of '
-         'the game a second,\nplay and GPU: ms for a walk (50th percentile), comp: GPU ms of the '
-         'compose, done: ms from the tick to the end of the GPU (50th and 90th percentile)')
+HEAD = (f'{"":26s} {"runs":>4s} {"s":>6s} {"draws":>7s} {"frames":>7s} {"made":>6s} {"late":>5s} '
+        f'{"game":>6s} {"play":>6s} {"GPU":>6s} {"comp":>6s} {"done50":>6s} {"done90":>6s} '
+        f'{"done99":>6s}')
+UNITS = ('frames: frames of the session a second. made: pictures a second, and a still view needs '
+         'no new picture. late: made pictures a second that did not show.\ngame: frames of the '
+         'game a second. play and GPU: ms for a walk (50th percentile). comp: GPU ms of the compose.'
+         '\ndone: ms from the tick to the end of the GPU (50th, 90th and 99th percentile)')
 
 
 def report(folder):

@@ -5,6 +5,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "../../android/src/frame_defaults.h"
 #include "../../src/common/settings_table.h"
 #include "../../src/mod/detail_scale_math.h"
 #include "../../src/mod/remote_math.h"
@@ -81,6 +82,23 @@ inline void DetailTableChecks() {
   Check(found == 4, "the table has the switch and the three points of the curve", found, 4);
 }
 
+inline void FrameDefaultsChecks() {
+  namespace fd = frame_defaults;
+  Check(fd::IsFrameRuntime("SteamVR/OpenXR"), "SteamVR is the runtime of the Steam Frame", 1, 1);
+  Check(!fd::IsFrameRuntime("Oculus"), "another runtime keeps the defaults of the keys", 0, 0);
+  const int count = static_cast<int>(sizeof(fd::kValues) / sizeof(fd::kValues[0]));
+  bwvr_ini::IniText empty("");
+  Check(fd::Seed(&empty) == count, "an empty file gets each value", count, count);
+  Check(empty.GetInt("bwvr", "vk_compose_rate", 0) == 2, "the file has the value of the compose",
+        empty.GetInt("bwvr", "vk_compose_rate", 0), 2);
+  Check(empty.Get("bwvr", "tu_debug", "") == "sysmem", "the file has a value that is a word", 0, 0);
+  Check(fd::Seed(&empty) == 0, "a second time adds nothing", 0, 0);
+  bwvr_ini::IniText own("[bwvr]\r\nvk_tiny_draws=0\r\nresolution_pct=150\r\n");
+  Check(fd::Seed(&own) == count - 1, "a value of the file is not added", count - 1, count - 1);
+  Check(own.GetInt("bwvr", "vk_tiny_draws", 1) == 0, "a 0 of the player stays", 0, 0);
+  Check(own.GetInt("bwvr", "resolution_pct", 0) == 150, "another key of the player stays", 150, 150);
+}
+
 inline void TinyChecks() {
   namespace d = vk_draw_math;
   Check(d::IsTiny(0.5f, 0.5f, 1.0f), "a draw below the limit in both directions is tiny", 1, 1);
@@ -94,6 +112,7 @@ inline void RemoteChecks() {
   namespace m = remote_math;
   DetailScaleChecks();
   DetailTableChecks();
+  FrameDefaultsChecks();
   TinyChecks();
   {
     const char* text = "serial=12\r\nstep=detail 3x\ndetail_distance=2\n\nno equal\n=x\nprompt=\n";

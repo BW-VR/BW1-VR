@@ -474,10 +474,6 @@ keeps the mod as it is.
   - The art of each controller must be our own drawing, or a model with a
     license that lets us ship it (for example a model that the runtime
     gives through an OpenXR extension at run time).
-- **F12. "Saving..." while the game saves.** The save box of the game draws
-  in a frame with no scene, so the headset shows a still view. Show
-  "Saving..." on the hint card. Find first whether the card layer still
-  goes to the headset while the game thread saves.
 - **F15. The hands in the cut scene window.** While a cut scene plays in
   the window, the mod draws no hands and no ray (`cutscene-window.md`,
   section 7), and the trigger clicks at the place of the mouse pointer,

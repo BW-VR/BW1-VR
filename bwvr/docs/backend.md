@@ -524,6 +524,14 @@ frame (the frame is "taken"). `BuildFrame` then waits for a new frame of the
 runtime and sends the new pictures in it. A slow frame of the game that is
 shorter does not wait for a second frame of the runtime.
 
+`XrScreen::HoldCard` puts a card into the layers of the last frame before a
+long stop of the frame thread: the card of a save ("Saving...",
+`controller-hints.md`, 9.12). It waits for the second thread to have no
+frame, takes `hold_lock`, writes the picture into the swapchain of the card
+and puts the quad in place of that card of the last frame, or after the other
+layers. Each frame of the hold then shows the card. With `xr_hold_ms=0`
+there is no hold, and the card cannot show.
+
 The frame thread holds `hold_lock` while it reads the events, begins a frame
 and makes its layers. The second thread only tries to take the lock, so it
 never waits for the frame thread, and the frame thread waits at most for

@@ -406,6 +406,12 @@ class XrScreen {
   // go back to the eye pictures.
   static void StageCard(int card, const CardLayer& layer);
   static bool CardFailed(int card);
+  // THE CARD OF A LONG WAIT. A frame thread that will give no frame for a
+  // time (a save of the game) puts a card into the layers that the hold
+  // sends again (SetHoldMs), in place of that card of the last frame. So the
+  // headset shows the card until the game gives a frame again. False with no
+  // hold, with no world in the last frame, and when the card cannot go out.
+  bool HoldCard(int card, const CardLayer& layer);
   // True after the runtime refused a frame with a quad of the interface
   // panel. Then the menus must go back to the eye pictures.
   static bool PanelFailed();

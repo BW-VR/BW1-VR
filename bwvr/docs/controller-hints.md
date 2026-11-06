@@ -946,6 +946,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_learn` | 1 | 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). The launcher row "Hints": "Until learned" is 1, "Always" is 0 |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
 | `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`), of the ring (`controllers.md`, 10.4) and of the keyboard in the headset (`ui-layer.md`, section 21) |
+| `hint_card_saving` | 1 | 1 while the game saves, the card of the pointing hand says "Saving..." (9.12). 0 the cards say nothing in a save |
 | `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
 | `hint_card_fonts_test_dir` | empty | Test key. The folder of the font files of the scroll. Empty is `bwvr-fonts` beside `runblack.exe`. A desktop run sets the staged folder `bwvr\out\stage\bwvr-fonts` of its worktree |
 
@@ -1334,6 +1335,40 @@ in "..." in both looks.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
+
+### 9.12 The card of a save
+
+The game writes a save on the game thread. `GameOSFile::SaveAllGame`
+(`0x00558160`) draws the save box in one frame with no scene
+(`GameSavingBox`, `0x00557FC0`), writes the files, and only then returns. The
+mod sends no frame of that box: the frame comes less than 150 ms after the
+last stereo frame, so it is no screen with no scene (`ui-layer.md`, 1.4). The
+game gives no frame until the save is over, so no card can change in that
+time. The headset shows the layers of the last frame, which the hold sends
+again (`backend.md`, "The hold of the last frame").
+
+So a hook on `SaveAllGame` makes the card before the save starts
+(`HintCardSavingLayer`). The card of the pointing hand has one line,
+"Saving...", at the place of the card of the last frame.
+`XrScreen::HoldCard` puts it into the layers of the hold. The card shows
+until the game gives a frame again, and then it fades out in 0.35 s, as each
+card does. The card needs the route of the last frame: a controller points,
+and the cards showed.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `hint_card_saving` | 1 | 1 the card "Saving..." in a save. 0 the cards say nothing in a save |
+
+The log: `hint card : frame N, the game saves: the card of the right hand
+says "Saving..."` at the start, and `save card : the game saved in N ms` at
+the end, with the reason when the card did not go to the hold. With
+`hint_card_save_test=1` the picture of the card is in the folder of the run.
+
+A new game of the desktop saves near frame 830, so
+`creature_recipe.ps1 -Kind open -NewGame` shows the card. A desktop run has
+no headset session, so it shows the picture and the log, not the hold. Only
+a headset can show that the card stays in the view for the whole save, and
+with `xr_hold_ms=0` there is no hold and no card.
 
 ## 10. A text that waits for a click
 

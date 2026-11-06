@@ -2101,6 +2101,35 @@ bool XrScreen::CardFailed(int card) {
   return card < 0 || card >= kCards || g_card_failed[card];
 }
 
+// The layers of the last frame are in Impl::built, and the hold sends them
+// again while the game gives no frame. The card goes into its own swapchain
+// here, on the frame thread, with the second thread at rest and hold_lock
+// held, so no frame of the hold reads the layers while they change.
+bool XrScreen::HoldCard(int card, const CardLayer& layer) {
+  if (remote_ || card < 0 || card >= kCards || !running_) return false;
+  Impl& s = *impl_;
+  if (s.hold_ms <= 0 || !s.session_running || !layer.visible) return false;
+  Join();
+  Impl::HoldGuard hold(s);
+  Impl::Built& b = s.built;
+  const uint32_t most = static_cast<uint32_t>(sizeof(b.layers) /
+                                              sizeof(b.layers[0]));
+  if (!b.world || b.layer_count == 0 ||
+      (!b.with_card[card] && b.layer_count >= most)) {
+    return false;
+  }
+  XrCompositionLayerQuad quad;
+  if (!s.SendCard(card, layer, &quad)) return false;
+  b.card_quads[card] = quad;
+  if (!b.with_card[card]) {
+    b.layers[b.layer_count++] =
+        reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+            &b.card_quads[card]);
+    b.with_card[card] = true;
+  }
+  return true;
+}
+
 bool XrScreen::PanelFailed() { return g_panel_refused; }
 
 void XrScreen::Impl::DestroyCard(int index) {

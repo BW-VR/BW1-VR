@@ -182,6 +182,7 @@ int g_learn = 1;             // hint_learn
 bool g_palm_check = true;    // hint_palm_check (GameHintTrue, palm_off)
 int g_style = 1;             // hint_card_style
 bool g_save_test = false;    // hint_card_save_test
+bool g_saving = true;        // hint_card_saving
 // A hint of the game that a prompt owned does not show for this long after
 // the prompt went (hint_words=3, hint_card_math.h, OwnedStale).
 const double kOwnedSeconds = 0.25;
@@ -307,6 +308,11 @@ void ReadSettings() {
                       : "a grip hint of the game over the land shows");
   g_style = IniKey("hint_card_style", 1) != 0 ? 1 : 0;
   g_save_test = IniKey("hint_card_save_test", 0) != 0;
+  g_saving = IniKey("hint_card_saving", 1) != 0;
+  ModLog("hint card    : hint_card_saving=%d, %s", g_saving ? 1 : 0,
+         g_saving ? "while the game saves, the card of the pointing hand says "
+                    "\"Saving...\""
+                  : "the cards say nothing while the game saves");
   ModLog("hint card    : hint_card_style=%d, %s%s", g_style,
          g_style != 0 ? "the card is a parchment scroll with dark ink and a wax "
                         "seal for each button word"
@@ -2378,6 +2384,72 @@ void HintCardEndFrame() {
                        static_cast<uint32_t>(c.rect_h));
     }
   }
+}
+
+// THE SAVE OF THE GAME (hint_card_saving, docs/controller-hints.md, "The
+// card of a save"). The game writes a save on its own thread and gives no
+// frame until the save is over, so no card can change in that time.
+// mod_main.cpp asks for this card at the start of the save, and
+// XrScreen::HoldCard puts it into the layers of the last frame, which the
+// hold sends again until the game gives a frame. The card of the pointing
+// hand has one line, "Saving...", at the place of the card of the last
+// frame. False when the cards did not show in the last frame.
+bool HintCardSavingLayer(bwvr::CardLayer* out) {
+  ReadSettings();
+  CardsStart();
+  if (!g_saving || !g_on || g_toggled_off || g_raster_failed) return false;
+  if (!g_route || g_route_frame != g_frame) return false;
+  CardState& c = g_cards[kPointing];
+  Content content = {};
+  SetLine(&content.line[0], nullptr, L"Saving...", kToneNone, 0);
+  content.count = 1;
+  if (!SameContent(content, c.drawn) && !Raster(content, &c)) return false;
+  Plan p = {};
+  float head[3] = {0.0f, 0.0f, 0.0f};
+  p.have_hand = ControllersCardPose(kPointing, p.grip_position,
+                                    p.grip_orientation, head, &p.left);
+  if (!p.have_hand || c.rect_w <= 0 || c.rect_h <= 0) return false;
+  const float hand_length = ControllersHandCm() * 0.01f *
+                            (ControllersHandScalePct() * 0.01f);
+  const float hand_m = hand_length > 0.05f ? hand_length : 0.19f;
+  const float size = g_size_pct * 0.01f;
+  hint_card_math::HandFromGrip(p.grip_position, p.grip_orientation, p.left,
+                               hand_m, &p.hand);
+  hint_card_math::HandOutline(p.grip_position, p.grip_orientation, p.left,
+                              hand_m, p.outline);
+  hint_card_math::CardSize(c.rect_w, c.rect_h, kPixelsPerMeter / size,
+                           kMostWidth * size, &p.width, &p.height);
+  if (!c.visible || p.left != c.side_left_hand) c.side = 0;
+  c.side_left_hand = p.left;
+  if (!hint_card_math::CardPose(p.hand, p.outline,
+                                hint_card_math::kOutlinePoints, head, p.width,
+                                kGap, kSideExcess, c.last_right, c.side,
+                                p.left ? -1 : 1, &p.card)) {
+    return false;
+  }
+  for (int i = 0; i < 3; ++i) c.last_right[i] = p.card.right[i];
+  c.side = p.card.side;
+  c.fade = 1.0f;
+  Stage(&c);
+  c.visible = true;
+  bwvr::CardLayer layer = {};
+  layer.visible = true;
+  layer.pixels = c.staged;
+  layer.texture_width = kHintCardWidth;
+  layer.texture_height = kHintCardHeight;
+  layer.rect[2] = c.rect_w;
+  layer.rect[3] = c.rect_h;
+  for (int i = 0; i < 3; ++i) layer.position[i] = p.card.center[i];
+  for (int i = 0; i < 4; ++i) layer.orientation[i] = p.card.orientation[i];
+  layer.width = p.width;
+  layer.height = p.height;
+  *out = layer;
+  ModLog("hint card    : frame %llu, the game saves: the card of the %s hand "
+         "says \"Saving...\", %.1f by %.1f cm at %.3f %.3f %.3f m, until the "
+         "game gives a frame again (hint_card_saving=1)", g_frame,
+         p.left ? "left" : "right", p.width * 100.0f, p.height * 100.0f,
+         p.card.center[0], p.card.center[1], p.card.center[2]);
+  return true;
 }
 
 // The switches of the debug page (debug_menu.h) can change only while the

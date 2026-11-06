@@ -28,6 +28,7 @@
 #include "controllers.h"
 #include "debug_menu.h"
 #include "frame_profile.h"
+#include "hint_card.h"
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
 #include "fast_transform.h"
@@ -2813,6 +2814,59 @@ void EarlyHooks() {
 
 void ExitPathInstall();
 
+// THE CARD OF A SAVE (hint_card_saving, docs/controller-hints.md, "The card
+// of a save"). GameOSFile::SaveAllGame (0x00558160, cdecl, the path, an int)
+// writes each save. It draws the save box of the game in one frame with no
+// scene (GameSavingBox 0x00557FC0), writes the files on the game thread, and
+// gives no frame until it returns. So the headset shows the layers of the
+// last frame for all that time, from the hold (xr_hold_ms). Before the save
+// starts, the card of the pointing hand says "Saving...", and HoldCard puts
+// it into those layers.
+typedef int(__cdecl* SaveAllGameFn)(char* path);
+const uintptr_t kSaveAllGame = 0x00558160;
+SaveAllGameFn o_SaveAllGame = nullptr;
+int g_save_logs = 0;
+const int kMaxSaveLogs = 20;
+
+int __cdecl h_SaveAllGame(char* path) {
+  LARGE_INTEGER t0, t1, hz;
+  QueryPerformanceFrequency(&hz);
+  QueryPerformanceCounter(&t0);
+  bwvr::CardLayer layer = {};
+  const bool card = HintCardSavingLayer(&layer);
+  const bool session = g_screen != nullptr && g_screen->running();
+  const bool held =
+      card && session && g_screen->HoldCard(bwvr::kCardHintPointing, layer);
+  const int result = o_SaveAllGame(path);
+  QueryPerformanceCounter(&t1);
+  if (g_save_logs < kMaxSaveLogs) {
+    ++g_save_logs;
+    ModLog("save card    : the game saved in %.0f ms (result %d), frame %llu. "
+           "%s", (t1.QuadPart - t0.QuadPart) * 1000.0 /
+                     static_cast<double>(hz.QuadPart),
+           result, g_frame,
+           held ? "The card \"Saving...\" was in the layers that the hold "
+                  "sent again in that time"
+                : !card ? "No card: the cards did not show in the last frame, "
+                          "or hint_card_saving=0"
+                        : !session ? "The card has no headset session to go to"
+                                   : "The hold did not take the card (no "
+                                     "hold, or no world in the last frame)");
+  }
+  return result;
+}
+
+void SaveCardInstall() {
+  void* target = reinterpret_cast<void*>(kSaveAllGame);
+  MH_STATUS status =
+      MH_CreateHook(target, reinterpret_cast<void*>(&h_SaveAllGame),
+                    reinterpret_cast<void**>(&o_SaveAllGame));
+  if (status == MH_OK) status = MH_EnableHook(target);
+  ModLog("hooks        : GameOSFile::SaveAllGame at 0x%08X %s (the card of "
+         "a save)", static_cast<unsigned>(kSaveAllGame),
+         status == MH_OK ? "ok" : "FAILED");
+}
+
 void Startup() {
   ModLog("%s", ProxyBackendNote());
   ModLog("");
@@ -2849,6 +2903,7 @@ void Startup() {
   if (status != MH_OK) g_vr_enabled = false;
   ExitPathInstall();
   Depth24Install();
+  SaveCardInstall();
 }
 
 // THE END OF THE MOD.

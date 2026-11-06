@@ -7,6 +7,10 @@
 
 #include <stdint.h>
 
+namespace bwvr {
+struct CardLayer;
+}
+
 // Once a stereo frame, before the eye passes (ui_panel.cpp passes it on).
 // to_headset: the frame goes to a headset. projection: as a projection layer.
 // capture: this frame saves the eye pictures, so it saves the card too.
@@ -29,6 +33,12 @@ void HintCardLatchContext(int eye);
 
 // After both eye passes: the card of this frame goes to the headset.
 void HintCardEndFrame();
+
+// The save of the game starts (mod_main.cpp): the card of the pointing hand
+// says "Saving...", at the place of its card in the last frame. The caller
+// gives the layer to XrScreen::HoldCard. False when the cards did not show in
+// the last frame, or with hint_card_saving=0.
+bool HintCardSavingLayer(bwvr::CardLayer* out);
 
 // The test key (Ctrl Shift F11 with ui_panel=0): the card, or the hints in
 // the eye pictures.

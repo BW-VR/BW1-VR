@@ -1120,7 +1120,8 @@ God view and on the table.
   has the count of its domes (`MapShield`, `+0xF0`). A storm line says if
   its particle system (`+0xEC`) is there: `SpellStormAndTornado::Process`
   deletes it when the spell has no caster. A line comes every 2 s for 12 s,
-  and one line when the spell is gone, with its time.
+  then every 10 s to 30 lines, and one line when the spell is gone, with its
+  time.
 - **A Creature after a Creature miracle.** For 25 s after a cast on a
   Creature, a line comes at each change and every 3 s. It gives the size of
   the Creature for the game (`fn_004F5E60`), the base size
@@ -1139,20 +1140,37 @@ What the game does to the Creature [V]:
 
 - Shrink (entry 1) and Enlarge (entry 2) move the base size of the Creature
   (`[Creature+0x160]+0x6C`) to the size of the spell and back
-  (`0x004F5520` to `0x004F5672`). The walk reads that size
-  (`LH3DCreature::GetNavRadius` `0x00480A60`). The size of the drawn body
-  (`+0x90`) does not change: only `Creature::SetHeight` (vtable `0x144`,
-  from the scripts) writes it. So the body keeps its size in the plain game
-  too. A desktop run shows the base size at 0.200 with Shrink and 2.400 with
-  Enlarge, and the drawn body at 0.220 in each one.
+  (`0x004F5520` to `0x004F5672`). On each game turn `Creature::ProcessState`
+  calls `fn_004EFCE0`, which gives a size to the body
+  (`LH3DCreature::SetSize`, vtable 8, which writes `+0x90`). Away from the
+  Temple that size is the base size. Near the pen of the Temple it is
+  smaller: at 16 m of the game or less from the point of the Creature at
+  the pen (`Creature+0x1200`), in a cone in front of the pen (the Citadel
+  `GPlayer+0xA48`, its pen at `+0x30`), the size goes from the base size at
+  16 m to 0.22 at 14 m and nearer. So at the door of the Temple the body
+  keeps the size 0.22 with each spell, also in the plain game. A desktop
+  run in the test save `temple` shows the base size at 0.200 with Shrink
+  and 2.400 with Enlarge, and the drawn body at 0.220. The watch line gives
+  the metres from the point at the pen, and the size that the body gets in
+  front of the pen. The walk also reads the base size
+  (`LH3DCreature::GetNavRadius` `0x00480A60`).
 - Invisibility (entry 7, `0x004F58B0` and `0x004F5960`) sets the flag at
   `Creature+0x106C` and starts the fizz (`Creature::SetFizz` `0x0047AB90`)
   to 0.75. `Creature::ProcessState` (`0x004737F9`) gives the fizz and the
   fizz material (`GlobalTextures::GetFizzMaterial`) to the draw of the body
-  while the switch `0x00D00DE4` is set.
+  while the switch `0x00D00DE4` is set. A desktop run shows the fizz at
+  0.75 in the draw, and only sparkles and a shadow in the eye pictures.
 
-Open: the invisible Creature is opaque in the eye pictures of a desktop run.
-The line above says if the game gave the fizz to the draw.
+**The cloud of a Storm.** The particle system of the cast
+(`SF_StormCast`) ends at 6 s: its pieces die at the age of 6 s
+(`RemoveRuleOldAgeOnly`, `DieAge`). The storm spell stands on, and it
+drifts. Its cloud is an `LH3DMist`, as the clouds of the sky. The mod
+limits the pole of each cloud to `cloud_pole_pct` percent of its distance
+(`backend.md`, "Clouds"), so a storm cloud near the head is flat.
+
+Open: in the full view the cloud of a Storm is a flat grey band with
+straight edges. A desktop run with `cloud_pole_pct=0` says if the limit of
+the pole makes it.
 
 ## Keys
 

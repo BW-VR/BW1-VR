@@ -24,10 +24,15 @@
 //   fn_004F5E60 (thiscall on that table): entry 2 +0xC while it is active,
 //   else entry 1 +0xC while it is active, else the base size
 //   [Creature+0x160]+0x6C. The body (the LH3DCreature at [Creature+0x160]+
-//   0x58) has the size that the draw uses at +0x90. Only Creature::SetHeight
-//   (vtable 0x144, from the scripts) writes it. The start, step and end of
-//   Shrink and Enlarge (0x004F5520 to 0x004F5672) move only the base size,
-//   which the walk reads (LH3DCreature::GetNavRadius 0x00480A60).
+//   0x58) has the size that the draw uses at +0x90. The start, step and end
+//   of Shrink and Enlarge (0x004F5520 to 0x004F5672) move the base size. On
+//   each game turn Creature::ProcessState calls fn_004EFCE0, which gives the
+//   base size to the body (LH3DCreature::SetSize, vtable 8, which writes
+//   +0x90). Near the pen of the Temple the body gets a smaller size: at 16 m
+//   of the game or less from its point at the pen (Creature+0x1200), in a
+//   cone in front of the pen (GPlayer+0xA48, the Citadel, +0x30, with its
+//   slot 0x890 not 0), the size goes from the base size at 16 m to 0.22 at
+//   14 m and nearer.
 // - Invisibility (the entry 7, 0x004F58B0 and 0x004F5960) sets Creature+
 //   0x106C to 1 and starts the fizz (Creature::SetFizz 0x0047AB90): its
 //   target at +0x12B4 goes to 0.75, and +0x12B0 follows it. Creature::
@@ -87,6 +92,18 @@ struct MapCoords {
   float over;
 };
 typedef float(__fastcall* AltitudeFn)(const MapCoords* at, void* unused);
+// The pen of the Temple and the size of the body near it (fn_004EFCE0).
+const int kCreaturePenPoint = 0x1200;  // MapCoords
+const int kPlayerCitadel = 0xA48;
+const int kCitadelPen = 0x30;
+const int kPenIsOpen = 0x890;          // a vtable slot, thiscall, no arguments
+const int kGetPlayer = 0x1C;           // a vtable slot of Object
+// GUtils::GetDistanceInMetres, cdecl (const MapCoords*, const MapCoords*).
+const uintptr_t kMetres = 0x0074CD70;
+typedef float(__cdecl* MetresFn)(const void* a, const void* b);
+typedef void*(__fastcall* ObjectFn)(void* self, void* unused);
+typedef int(__fastcall* ObjectIntFn)(void* self, void* unused);
+
 const int kReceiveEntries = 16;
 const int kReceiveEntry = 0x18;
 const int kReceiveBytes = 4 + kReceiveEntries * kReceiveEntry;
@@ -98,7 +115,7 @@ typedef float(__fastcall* SizeFn)(void* spells, void* unused);
 const uintptr_t kRdataStart = 0x008A9000;
 const uintptr_t kRdataEnd = 0x009C6000;
 
-const int kMaxLogs = 160;
+const int kMaxLogs = 320;
 int g_logs = 0;
 
 bool Log() {
@@ -134,6 +151,28 @@ float Cm(float units_of_world) {
   return units > 0.0f ? units_of_world / units * 100.0f : 0.0f;
 }
 
+// The metres of the game from the Creature to its point at the pen, or -1
+// with no pen that counts.
+float PenMetres(void* creature) {
+  void* player = reinterpret_cast<ObjectFn>(
+      (*static_cast<void***>(creature))[kGetPlayer / 4])(creature, nullptr);
+  if (player == nullptr || IsBadReadPtr(player, kPlayerCitadel + 4)) {
+    return -1.0f;
+  }
+  uint8_t* citadel = Read<uint8_t*>(player, kPlayerCitadel);
+  if (citadel == nullptr || IsBadReadPtr(citadel, kCitadelPen + 4)) {
+    return -1.0f;
+  }
+  void* pen = Read<void*>(citadel, kCitadelPen);
+  if (!LiveObject(pen, 4)) return -1.0f;
+  if (reinterpret_cast<ObjectIntFn>(
+          (*static_cast<void***>(pen))[kPenIsOpen / 4])(pen, nullptr) == 0) {
+    return -1.0f;
+  }
+  const uint8_t* c = static_cast<const uint8_t*>(creature);
+  return reinterpret_cast<MetresFn>(kMetres)(c + 0x14, c + kCreaturePenPoint);
+}
+
 // --- the spells of a circle ---------------------------------------------
 
 // The last cast at a circle, for the distance of a new spell from it.
@@ -153,8 +192,10 @@ Watched g_watched[kMaxWatched];
 int g_watched_count = 0;
 uint64_t g_spells_seen = 0;
 
-const int kLines = 7;            // status lines of one spell
-const double kLineSeconds = 2.0;  // between two status lines
+const int kLines = 7;              // status lines every 2 s at the start
+const double kLineSeconds = 2.0;
+const int kMostLines = 30;         // then a line every 10 s, to this count
+const double kLateSeconds = 10.0;
 
 void SpellLine(const Watched& w, const char* what, uint64_t frame) {
   const void* s = w.spell;
@@ -240,7 +281,8 @@ void SpellsFrame(uint64_t frame) {
       }
       continue;
     }
-    if (w->lines < kLines && t - w->said >= kLineSeconds) {
+    const double every = w->lines < kLines ? kLineSeconds : kLateSeconds;
+    if (w->lines < kMostLines && t - w->said >= every) {
       w->said = t;
       ++w->lines;
       if (Log()) SpellLine(*w, "stands", frame);
@@ -320,6 +362,20 @@ void CreatureFrame(uint64_t frame, int hand_state) {
       material = Read<void*>(draw, kDrawFizzMaterial);
     }
   }
+  const float pen = PenMetres(g_creature);
+  char pen_text[160];
+  if (pen < 0.0f) {
+    snprintf(pen_text, sizeof(pen_text), "No pen of the Temple counts");
+  } else {
+    const float base = Read<float>(link, kLinkBaseSize);
+    const float d = pen < 14.0f ? 14.0f : pen > 16.0f ? 16.0f : pen;
+    const float near_pen =
+        pen >= 16.0f ? base : (d - 14.0f) * (base - 0.22f) / 2.0f + 0.22f;
+    snprintf(pen_text, sizeof(pen_text),
+             "It is %.1f m of the game from its point at the pen of the "
+             "Temple, so in front of the pen the body gets the size %.3f",
+             pen, near_pen);
+  }
   const void* fizz_on = reinterpret_cast<const void*>(kFizzOn);
   const int fizz_global =
       IsBadReadPtr(fizz_on, 4) ? -1 : Read<int32_t>(fizz_on, 0);
@@ -341,14 +397,15 @@ void CreatureFrame(uint64_t frame, int hand_state) {
          "drawn body %.3f. The base of the body is %.1f cm of the room over "
          "the land, and the Hand is in state %d. Invisible %d, the fizz %.2f "
          "to %.2f, the fizz of the draw %.2f with the material %p (the "
-         "switch 0x00D00DE4 is %d). %s%s, frame %llu", g_creature,
+         "switch 0x00D00DE4 is %d). %s. %s%s, frame %llu", g_creature,
          t - g_creature_since, g_creature_cast, size,
          have_size ? "" : " (fn_004F5E60 has other bytes, so no size)",
          Read<float>(link, kLinkBaseSize), drawn, Cm(over), hand_state,
          Read<int32_t>(g_creature, kCreatureInvisible),
          Read<float>(g_creature, kCreatureFizz),
          Read<float>(g_creature, kCreatureFizz + 4), draw_fizz, material,
-         fizz_global, mask == 0 ? "No spell is on it" : "The spells on it: ",
+         fizz_global, pen_text,
+         mask == 0 ? "No spell is on it" : "The spells on it: ",
          list, frame);
 }
 

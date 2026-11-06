@@ -277,6 +277,33 @@ inline void MiracleChecks() {
           fired_frame, 44);
     Check(first.strokes == 4, "with 4 strokes", first.strokes, 4);
   }
+
+  // The circle of a path: a circle of radius 10 on the land around 100 50 200,
+  // a circle of the same size upright in front of the head, and no path.
+  {
+    float flat[16][3], upright[16][3];
+    for (int i = 0; i < 16; ++i) {
+      const float a = 6.2831853f * static_cast<float>(i) / 16.0f;
+      flat[i][0] = 100.0f + 10.0f * cosf(a);
+      flat[i][1] = 50.0f;
+      flat[i][2] = 200.0f + 10.0f * sinf(a);
+      upright[i][0] = 100.0f + 10.0f * cosf(a);
+      upright[i][1] = 50.0f + 10.0f * sinf(a);
+      upright[i][2] = 200.0f;
+    }
+    float middle[3], widest = 0.0f;
+    CircleOfPath(flat, 16, middle, &widest);
+    Near("the middle of a circle on the land: x", middle[0], 100.0f, 0.01);
+    Near("the middle of a circle on the land: z", middle[2], 200.0f, 0.01);
+    Near("its widest span is the diameter", widest, 20.0f, 0.01);
+    CircleOfPath(upright, 16, middle, &widest);
+    Near("the middle of an upright circle: x", middle[0], 100.0f, 0.01);
+    Near("the middle of an upright circle: z", middle[2], 200.0f, 0.01);
+    Near("its widest span across the land is the diameter", widest, 20.0f,
+         0.01);
+    const bool none = CircleOfPath(flat, 0, middle, &widest);
+    Check(!none && widest == 0.0f, "no path gives no circle", none ? 1 : 0, 0);
+  }
 }
 
 }  // namespace miracle_checks

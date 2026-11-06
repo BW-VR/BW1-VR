@@ -66,10 +66,11 @@ const int kMiracleLines = 3;
 int MiracleHint(MiracleLine lines[kMiracleLines]);
 
 // miracle_watch.cpp: the log of what a cast makes in the world. miracle.cpp
-// calls the frame step once a frame, the circle at a cast at the circle of a
-// Storm or a shield (its land point), and the Creature at a cast on a
-// Creature. The report runs once a report window.
-void MiracleWatchFrame(uint64_t frame);
+// calls the frame step once a frame with the state of the Hand, the circle
+// at a cast at the circle of a Storm or a shield (the middle of the circle),
+// and the Creature at a cast on a Creature. The report runs once a report
+// window.
+void MiracleWatchFrame(uint64_t frame, int hand_state);
 void MiracleWatchCircle(const char* name, float x, float z);
 void MiracleWatchCreature(void* creature, const char* name);
 void MiracleWatchReport();

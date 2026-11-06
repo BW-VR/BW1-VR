@@ -24,7 +24,16 @@
 //   fn_004F5E60 (thiscall on that table): entry 2 +0xC while it is active,
 //   else entry 1 +0xC while it is active, else the base size
 //   [Creature+0x160]+0x6C. The body (the LH3DCreature at [Creature+0x160]+
-//   0x58) has the size that the draw uses at +0x90.
+//   0x58) has the size that the draw uses at +0x90. Only Creature::SetHeight
+//   (vtable 0x144, from the scripts) writes it. The start, step and end of
+//   Shrink and Enlarge (0x004F5520 to 0x004F5672) move only the base size,
+//   which the walk reads (LH3DCreature::GetNavRadius 0x00480A60).
+// - Invisibility (the entry 7, 0x004F58B0 and 0x004F5960) sets Creature+
+//   0x106C to 1 and starts the fizz (Creature::SetFizz 0x0047AB90): its
+//   target at +0x12B4 goes to 0.75, and +0x12B0 follows it. Creature::
+//   ProcessState (0x004737F9) gives +0x12B0 and the fizz material to the
+//   draw of the body ([LH3DCreature+0x482C]+0xA0 and +0x9C) while the global
+//   0x00D00DE4 is set.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -64,6 +73,20 @@ const int kCreatureLink = 0x160;
 const int kLinkBody = 0x58;
 const int kLinkBaseSize = 0x6C;
 const int kBodySize = 0x90;
+const int kBodyPlace = 0x78;          // the base of the body, in the world
+const int kBodyDraw = 0x482C;         // the draw data of the body
+const int kDrawFizz = 0xA0;
+const int kDrawFizzMaterial = 0x9C;
+const int kCreatureInvisible = 0x106C;
+const int kCreatureFizz = 0x12B0;     // now, then the target at +0x12B4
+const uintptr_t kFizzOn = 0x00D00DE4;
+// LH3DIsland::GetAltitude, thiscall on a MapCoords, the height in st0.
+const uintptr_t kAltitude = 0x00803090;
+struct MapCoords {
+  int32_t x, z;
+  float over;
+};
+typedef float(__fastcall* AltitudeFn)(const MapCoords* at, void* unused);
 const int kReceiveEntries = 16;
 const int kReceiveEntry = 0x18;
 const int kReceiveBytes = 4 + kReceiveEntries * kReceiveEntry;
@@ -236,14 +259,14 @@ float g_creature_size = 0.0f;
 const double kCreatureSeconds = 25.0;
 const double kCreatureEvery = 3.0;
 
-void CreatureFrame(uint64_t frame) {
+void CreatureFrame(uint64_t frame, int hand_state) {
   if (g_creature == nullptr) return;
   const double t = NowSeconds();
   if (t - g_creature_since > kCreatureSeconds) {
     g_creature = nullptr;
     return;
   }
-  if (!LiveObject(g_creature, kCreatureSpells + 4)) {
+  if (!LiveObject(g_creature, kCreatureFizz + 8)) {
     if (Log()) {
       ModLog("miracle watch: the Creature %p is gone, frame %llu", g_creature,
              frame);
@@ -278,9 +301,28 @@ void CreatureFrame(uint64_t frame) {
   g_creature_said = t;
   if (!Log()) return;
   const uint8_t* body = Read<uint8_t*>(link, kLinkBody);
-  const float drawn = body != nullptr && !IsBadReadPtr(body, kBodySize + 4)
-                          ? Read<float>(body, kBodySize)
-                          : 0.0f;
+  const bool have_body = body != nullptr && !IsBadReadPtr(body, kBodyDraw + 4);
+  const float drawn = have_body ? Read<float>(body, kBodySize) : 0.0f;
+  // How high the base of the body is over the land, and the fizz of the
+  // draw.
+  float over = 0.0f, draw_fizz = -1.0f;
+  void* material = nullptr;
+  if (have_body) {
+    const float* at = reinterpret_cast<const float*>(body + kBodyPlace);
+    const MapCoords coords = {static_cast<int32_t>(at[0] * kMapScale),
+                              static_cast<int32_t>(at[2] * kMapScale), 0.0f};
+    if (coords.x > 0 && coords.z > 0) {
+      over = at[1] - reinterpret_cast<AltitudeFn>(kAltitude)(&coords, nullptr);
+    }
+    const uint8_t* draw = Read<uint8_t*>(body, kBodyDraw);
+    if (draw != nullptr && !IsBadReadPtr(draw, kDrawFizz + 4)) {
+      draw_fizz = Read<float>(draw, kDrawFizz);
+      material = Read<void*>(draw, kDrawFizzMaterial);
+    }
+  }
+  const void* fizz_on = reinterpret_cast<const void*>(kFizzOn);
+  const int fizz_global =
+      IsBadReadPtr(fizz_on, 4) ? -1 : Read<int32_t>(fizz_on, 0);
   char list[400];
   int used = 0;
   list[0] = 0;
@@ -296,11 +338,18 @@ void CreatureFrame(uint64_t frame) {
   }
   ModLog("miracle watch: the Creature %p, %.1f s after the cast of %s: its "
          "size for the game is %.3f%s, the base size %.3f, the size of the "
-         "drawn body %.3f. %s%s, frame %llu", g_creature,
+         "drawn body %.3f. The base of the body is %.1f cm of the room over "
+         "the land, and the Hand is in state %d. Invisible %d, the fizz %.2f "
+         "to %.2f, the fizz of the draw %.2f with the material %p (the "
+         "switch 0x00D00DE4 is %d). %s%s, frame %llu", g_creature,
          t - g_creature_since, g_creature_cast, size,
          have_size ? "" : " (fn_004F5E60 has other bytes, so no size)",
-         Read<float>(link, kLinkBaseSize), drawn,
-         mask == 0 ? "No spell is on it" : "The spells on it: ", list, frame);
+         Read<float>(link, kLinkBaseSize), drawn, Cm(over), hand_state,
+         Read<int32_t>(g_creature, kCreatureInvisible),
+         Read<float>(g_creature, kCreatureFizz),
+         Read<float>(g_creature, kCreatureFizz + 4), draw_fizz, material,
+         fizz_global, mask == 0 ? "No spell is on it" : "The spells on it: ",
+         list, frame);
 }
 
 uint64_t g_frames = 0;
@@ -323,10 +372,10 @@ void MiracleWatchCreature(void* creature, const char* name) {
   g_creature_size = -1.0f;
 }
 
-void MiracleWatchFrame(uint64_t frame) {
+void MiracleWatchFrame(uint64_t frame, int hand_state) {
   ++g_frames;
   SpellsFrame(frame);
-  CreatureFrame(frame);
+  CreatureFrame(frame, hand_state);
 }
 
 void MiracleWatchReport() {

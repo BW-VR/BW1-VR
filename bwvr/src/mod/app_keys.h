@@ -2,7 +2,7 @@
 // docs/backend.md, "The compose of the eye picture"). The renderer runs in the
 // headset app, and the game runs in Wine, so a key of the renderer or of the
 // app cannot change in the game process. The mod keeps the value of each key
-// (from bwvr.ini at the first use, then from the debug page) and puts 22 bits
+// (from bwvr.ini at the first use, then from the debug page) and puts 23 bits
 // into the record of every frame of the stream (scene_stream.h,
 // FrameBody::app_keys). The app plays the bits before the walks of the frame,
 // so a change shows from the next picture.
@@ -36,11 +36,12 @@ constexpr uint32_t kLatePrepare = 1u << 18;
 constexpr uint32_t kLateGap = 1u << 19;
 constexpr uint32_t kLatePrebuild = 1u << 20;
 constexpr uint32_t kLateFastCores = 1u << 21;
+constexpr uint32_t kLateFastGame = 1u << 22;
 
 // The keys of the debug page, in the order of kName in app_keys.cpp.
 enum Key { kKeyMresDraws, kKeyMresSort, kKeyComposeLight, kKeyPassStore, kKeyComposeDirect,
            kKeyPanelRect, kKeyRingOrder, kKeyLateCamera, kKeyReleaseTake, kKeyLateTake, kKeyBindless, kKeyPanelKeep,
-           kKeyFastShaders, kKeyTinyDraws, kKeyComposeFast, kKeyListKeep, kKeyCheapDraws, kKeyLateGrab, kKeyLatePrepare, kKeyLateGap, kKeyLatePrebuild, kKeyLateFastCores, kKeys };
+           kKeyFastShaders, kKeyTinyDraws, kKeyComposeFast, kKeyListKeep, kKeyCheapDraws, kKeyLateGrab, kKeyLatePrepare, kKeyLateGap, kKeyLatePrebuild, kKeyLateFastCores, kKeyLateFastGame, kKeys };
 
 inline uint32_t BitOf(int key) { return 1u << key; }
 

@@ -213,6 +213,7 @@ struct App {
   std::atomic<bool> late_gap_live{false};      // the row "Prepare gap"
   std::atomic<bool> late_prebuild_live{false};  // the row "Prebuild"
   bool late_fast_now = false;                   // the row "Fast cores"
+  bool late_fast_game_now = false;              // the row "Game fast"
   late_camera_math::GrabFilter late_grab_filter;
   float late_grab_ms = 35.0f;                  // grab_smoothing_ms
   std::atomic<uint64_t> late_handled{0};
@@ -1355,6 +1356,11 @@ void AppKeysApply(uint32_t bits) {
     if (fast != app->late_fast_now) {
       app->late_fast_now = fast;
       ThreadCores::KeepOnFastCores(fast);
+    }
+    const bool game = (bits & app_keys::kLateFastGame) != 0;
+    if (game != app->late_fast_game_now) {
+      app->late_fast_game_now = game;
+      ThreadCores::KeepGameOnFastCores(game);
     }
   }
   app->panel_keep.store((bits & app_keys::kPanelKeep) != 0);

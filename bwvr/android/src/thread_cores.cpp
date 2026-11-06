@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
 #include <string.h>
@@ -273,21 +274,15 @@ void ThreadCores::Run() {
   }
 }
 
-void ThreadCores::FindGame() {
-  if (game_pid_ > 0) {
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/%d", game_pid_);
-    struct stat st;
-    if (stat(path, &st) == 0) return;
-    AppLog("cores        : the game process %d is gone", game_pid_);
-    game_pid_ = 0;
-    game_before_.clear();
-    game_placed_.clear();
-  }
+namespace {
+
+// The process of the game: a process of the user of the app with the name of an .exe. 0 with none.
+int FindGamePid(std::string* name) {
   const int self = static_cast<int>(getpid());
   const uid_t uid = getuid();
   DIR* dir = opendir("/proc");
-  if (dir == nullptr) return;
+  if (dir == nullptr) return 0;
+  int found = 0;
   while (dirent* e = readdir(dir)) {
     if (!IsNumber(e->d_name)) continue;
     const int pid = atoi(e->d_name);
@@ -307,14 +302,68 @@ void ThreadCores::FindGame() {
       game = EndsWithExe(std::string(cmd.c_str()));
     }
     if (!game) continue;
-    game_pid_ = pid;
-    AppLog("cores        : the game is the process %d (%s). It can use the cores %s "
-           "(sched_getaffinity, Cpus_allowed_list %s), its cpuset is %s",
-           pid, t.name.c_str(), cr::CpuListText(AffinityOf(pid)).c_str(),
-           AllowedList(pid).c_str(), CpusetOf(pid).c_str());
+    found = pid;
+    *name = t.name;
     break;
   }
   closedir(dir);
+  return found;
+}
+
+void* GameCoresMain(void* arg) {
+  const bool on = arg != nullptr;
+  const std::vector<int> allowed = AffinityOf(static_cast<int>(getpid()));
+  const cr::Plan plan = cr::MakePlan(2, "", ReadCores(), allowed);
+  if (plan.bind == 0) {
+    AppLog("cores        : late_fast_game=%d binds no thread: %s", on ? 1 : 0, plan.why.c_str());
+    return nullptr;
+  }
+  std::string name;
+  const int pid = FindGamePid(&name);
+  if (pid == 0) {
+    AppLog("cores        : late_fast_game=%d finds no process of the game", on ? 1 : 0);
+    return nullptr;
+  }
+  const std::vector<int>& cores = on ? plan.fast : allowed;
+  const int err = SetAffinity(pid, cores);
+  AppLog("cores        : late_fast_game=%d. The main thread %d (%s) of the game asks for the cores "
+         "%s, and sched_getaffinity gives %s, errno %d", on ? 1 : 0, pid, name.c_str(),
+         cr::CpuListText(cores).c_str(), cr::CpuListText(AffinityOf(pid)).c_str(), err);
+  return nullptr;
+}
+
+}  // namespace
+
+void ThreadCores::KeepGameOnFastCores(bool on) {
+  pthread_t thread;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  if (pthread_create(&thread, &attr, &GameCoresMain, on ? &thread : nullptr) != 0) {
+    AppLog("cores        : late_fast_game=%d: no thread for the change", on ? 1 : 0);
+  }
+  pthread_attr_destroy(&attr);
+}
+
+void ThreadCores::FindGame() {
+  if (game_pid_ > 0) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d", game_pid_);
+    struct stat st;
+    if (stat(path, &st) == 0) return;
+    AppLog("cores        : the game process %d is gone", game_pid_);
+    game_pid_ = 0;
+    game_before_.clear();
+    game_placed_.clear();
+  }
+  std::string name;
+  const int pid = FindGamePid(&name);
+  if (pid == 0) return;
+  game_pid_ = pid;
+  AppLog("cores        : the game is the process %d (%s). It can use the cores %s "
+         "(sched_getaffinity, Cpus_allowed_list %s), its cpuset is %s",
+         pid, name.c_str(), cr::CpuListText(AffinityOf(pid)).c_str(),
+         AllowedList(pid).c_str(), CpusetOf(pid).c_str());
 }
 
 void ThreadCores::Bind(int process, bool game, const std::map<int, ps::Task>& tasks) {

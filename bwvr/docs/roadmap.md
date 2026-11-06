@@ -772,9 +772,9 @@ that moves while the Hand takes it.
   - The async reprojection. `steamvr.disableAsync=1` of SteamVR is for a test that shows a missed
     picture as a stutter. Its log has no line that says that the compositor took the value.
 
-  - The main thread of the game on the fast cores. `thread_bind=2` binds it, and no run has
-    measured it on the Steam Frame. The game has about 55 frames a second in a flight, and a
-    thing that moves in the world goes in the steps of these frames.
+  - The main thread of the game on the fast cores (`late_fast_game`). The blind compare
+    `frame_tests/hitch_clicks.json` measures it. The game has about 55 frames a second in a flight,
+    and a thing that moves in the world goes in the steps of these frames.
   - A turn and a zoom of two hands still go in the steps of the frames of the game: the shader
     would need a turn and a scale of each point.
 

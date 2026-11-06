@@ -4049,6 +4049,7 @@ game with the new place comes.
 | `late_prepare_gap` | 0 | 1, with `late_prepare=1`: a frame of the game starts only when it fits before the next tick, by the time of the frames before it, and the tick draws the list before again. A frame waits for 2 ticks at most. The debug page has the row "Prepare gap" |
 | `late_prebuild` | 0 | 1, with `late_prepare=1` and `vk_list_keep=1`: the lists of the passes of a new frame of the game are ready before its tick, so the tick has only their commands. The debug page has the row "Prebuild" |
 | `late_fast_cores` | 0 | 1: the session thread, the play thread and the reader stay on the fast cores (`thread_cores.h`). The Steam Frame has 2 cores with a quarter of the speed of the fastest core, and a play there takes about 4 ms and makes its picture late. It can change while a game runs, for these three threads and not for the game. The debug page has the row "Fast cores" |
+| `late_fast_game` | 0 | 1: the main thread of the game stays on the fast cores (`thread_cores.h`). It can change while a game runs. The debug page has the row "Game fast". `thread_bind=2` is the same for a whole game, and it also has a thread of its own that reads /proc each second |
 | `late_grab` | 0 | 1: while a grip holds the land, the app moves the newest map at each frame of the session by the way of the grips, eased by `grab_smoothing_ms` (`late_camera_math.h`, "The late grab"). The land then does not go in the steps of the frames of the game. A turn and a zoom of two hands keep these steps, because the shader takes only a move. The debug page has the row "Late grab" |
 | `vk_compose_fast` | 0 | 1: the compose draws the cells outside the centre with a pipeline that reads one image, at the rate of `vk_compose_rate`. With `xr_eye_mutable=1` it writes through a view of the UNORM format, so the shader decodes nothing and the target encodes nothing, and a new panel goes to its swapchain with a draw and not with a copy. The debug page has the row "Compose fast" |
 | `vk_compose_rate` | 1 | The shading rate of the cells outside the centre with `vk_compose_fast=1`: 1, 2 or 4 pixels on each side for one shade |
@@ -4323,7 +4324,7 @@ swapchains reads and writes it again. With the key the two steps are one.
   `xr_compose_direct`, `xr_panel_rect` and `ring_slot_order`, and for the four keys
   of the renderer (`vk_mres_draws`, `vk_mres_sort`, `vk_compose_light`,
   `vk_pass_store`). The mod
-  keeps their values (from `bwvr.ini`, then from the rows) and puts 14 bits into
+  keeps their values (from `bwvr.ini`, then from the rows) and puts 23 bits into
   the record of every frame of the stream (`FrameBody::app_keys`,
   `src/mod/app_keys.h`). The player gives the bits to the renderer and to the app
   (`SetAppKeysHook`) before the walks of the frame, so a row acts from the next

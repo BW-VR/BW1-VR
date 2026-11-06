@@ -574,8 +574,9 @@ The spirits are not at eye level. In a desktop run of the God view, with the
 head 30 cm right and 40 cm forward of the recenter place, the good spirit at
 its usual place was 83 cm below the head and 1.27 m from it, which is about
 40 degrees below eye level [M]. The room camera does not look down, so the
-screen point of the game is that far below the middle of the view [I]. No
-headset session has checked where the spirits are for a real head.
+screen point of the game is that far below the middle of the view [I].
+
+The checks in a headset are in `headset-checks.md`, "Cut scenes and stories".
 
 A grab of the table moves `P0` with the land, so the spirits stay where they
 are in the room. On the table the jumps and turns of the game camera are not

@@ -1259,48 +1259,7 @@ pictures). What it shows:
   that is not its default, other than `miracle_hand`.
 - A left handed player, `controller_swap_buttons=1`, and a multiplayer game.
 
-**Needs the headset:**
-
-- Whether the tip of the index finger is the right point to draw with, when
-  the wrist turns, and whether `gesture_size_cm` (30) still fits it. The
-  grip point is the key value 0.
-- Whether the trail reads well: its gold, its width of 1.8 cm, the 1.5 s that
-  it stays, and whether it hides the Hand's point on a bright land or sky.
-- Whether the row over the palm is easy to read, and whether 30 cm and the
-  place 12 cm over the palm are right. Whether the bubbles and the dot of
-  the game read well at that size.
-- Whether a real palm turns up past 40 degrees with no effort, and whether
-  0.4 s opens the book with no open by accident.
-
-- Whether the book is easy to read and to reach over the open palm, and
-  whether 12 cm from the grip is the right place.
-- Whether a pull of 10 cm and the buzz feel like an elastic band, and
-  whether the bubble that springs back reads as the miracle that goes back
-  into the book.
-- Whether the game's bubble sits on the elastic band where the book and
-  the hand are, and whether its hole in the page looks right in both eyes.
-  The eye pictures of a desktop run do not have the book, so they do not
-  show the hole.
-- Whether the icon of the miracle shows through the glass of the ball. In
-  the eye pictures the glass is bright and the icon is hard to see.
-- The game's bubble with Vulkan: the eye pictures of a desktop run with
-  Vulkan are black.
-- Whether the flat bubble quad (`spell_book_bubble=0`) shows in Virtual
-  Desktop as the book does.
-- Whether the quad layer of the book shows in Virtual Desktop as the ring
-  does. The eye pictures of a desktop run do not have the quad layer. A run
-  shows the picture of the book and its place in the log only.
-- Whether a real shake of 0.6 m/s takes the miracle out and a normal move
-  does not.
-- Whether 400 ms is the right limit of the tap of B.
-- Whether the speed of a real swing throws a fireball as far as the player
-  means. The desktop runs had only a step of the hand.
-- Whether a circle of the real hand over the land fits the circle of the
-  game.
-- Whether a cast at the close of the circle, with the grip still closed,
-  feels right.
-- Whether 3 cm and 6 degrees find the Creature with no effort.
-- Whether the miracle looks right in the real hand.
+The checks in a headset are in `headset-checks.md`, "Miracles and gestures".
 
 ## Limits
 

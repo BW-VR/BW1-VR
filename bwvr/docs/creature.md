@@ -1577,8 +1577,9 @@ pictures of the desktop runs its head is about 20 pixels high. In the
 pictures at frame 1473 with the key at 1 and at 0 the head looks almost the
 same, although the angles of the game differ by 46 degrees of yaw and 34
 degrees of pitch. How much the look animations turn the head on the screen
-was not measured. Only a headset can show the eye contact, with a larger
-Creature near the player.
+was not measured.
+
+The checks in a headset are in `headset-checks.md`, "The Creature".
 
 
 ## 6. A fight of Creatures
@@ -1717,14 +1718,15 @@ The numbers in these lines are an example: no run had a fight.
 
 - No desktop run reaches a fight. A test save starts at the Creature pens or
   at the door of the Temple, and the scripted controller cannot start a
-  fight. The math checks have the ray and the place of a mark. Only a
-  headset session shows the attack, the block and the marks.
+  fight. The math checks have the ray and the place of a mark.
 - Whether one size of the mark in front of the body is enough at each place
   of the body: a part of the body that is nearer to the eye than the place of
   the mark can still cut it.
 - Why a press of the trigger with the grip did act in a headset session
   without the ray of the Hand was not traced. Both buttons go to the same
   ray of the game.
+
+The checks in a headset are in `headset-checks.md`, "The Creature".
 
 ## 7. Tests
 
@@ -1937,49 +1939,7 @@ now"), and the Creature state ends.
 
 ### 7.3 What the desktop cannot show
 
-- Whether a real hand gives an object to the Creature at the first opening of
-  the grip, with the leash on and with no leash. Whether 20 cm of the room
-  (`creature_gift_cm`) is a good reach: the gift must go on while the hand
-  rests, and a move of the hand away must keep the object. How it reads when
-  the object goes from the real hand to the hand of the Creature at the take
-  frame.
-- A stroke or a slap at the right feel at `creature_slap_mps` 1.0 and 5 cm of
-  reach, and a backhand and a forehand, with the arm and with the wrist.
-- That the camera stays still at a press on the Creature.
-- That the size of the capsule fits the Creature's body.
-- That the Creature tutorial goes on with no camera mode (it likely waits on
-  the packets `0x27` and `0x59`, not on the camera [G]). Fallback:
-  `creature_camera=1`.
-- That the hand opens flat or as a finger at the right zoom, that 0.75 is a
-  good change point, that the fingers of the tickle read as a stroke, that the
-  glow at the palm reads well, and that a slow stroke with the flat hand is
-  never a slap.
-- That the halo of the Creature does not show when the player does not want
-  it, and that a short grip from a distance puts the leash on without the
-  Creature turning to the hand.
-- Whether a tap sends the Creature to the place that the player pointed at,
-  whether a trigger that closes by accident sends it too often, and whether
-  the Creature does what the player expects on each kind of object.
-- Whether 0.6 m/s and 4 strokes fit a real shake, and whether a normal move
-  of the hand never takes the leash off.
-- Whether 3 degrees and 10 m are the right numbers for a real hand, whether
-  the wait of 100 ms is right, and whether the halo on almost each object in
-  the cone is too much while the leash is on.
-- Whether 500 ms is the right time for a real finger, and whether it feels
-  right that the first tap sends the Creature before the second press ties
-  the leash.
-- That each press on the land has its land point in the headset: the log line
-  of the press must say "The arc of the press meets", not "has no land point:
-  the arc meets no land".
-- Whether 350 ms is the right hold time for a real grip: a short grip must
-  not start a stay, and a hold must not feel late.
-- Where the Creature turns to in a stay in the God view. The game turns it
-  to the place of the game camera.
-- Whether the head of the Creature follows the real hand well when the hand
-  is far from it.
-- Whether the animation of what the Creature thinks of, and the line of the
-  Creature help, read well with no stroke after them.
-- Whether the halo and the pulse are enough to show that the stay is on.
+The checks in a headset are in `headset-checks.md`, "The Creature".
 
 ## 8. Not built, open
 

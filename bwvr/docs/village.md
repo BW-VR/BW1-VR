@@ -258,11 +258,7 @@ puts the fake hand at a pixel pair of the two eye pictures. At a scale of
 29.6 units a meter, one pixel of disparity is about 17 cm at 3.4 m of the
 room, so the picture limits that test and not the body.
 
-**Only the headset can show:**
-
-- If 10 cm is a good reach for a real hand at each scale.
-- If the glow and the halo show at each scroll that a player could not start
-  before.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 **Not proven, and suspects:**
 
@@ -856,21 +852,8 @@ value after 100 frames (0.44) and 44 frames (0.22).
 - A scaffold of three or more.
 - A left handed player, and a multiplayer game.
 
-**Needs the headset:**
-
-- Whether a person of a quest that turns his body to the head reads as a
-  look at the player. The game has no pitch for a villager, so he does not
-  look up.
-
-- Whether the pole feels held: the mod's hand stays where the grip closed on
-  the pole, and the pole moves with it.
-- Whether the totem from a distance is easy to set: the pole follows the
-  height of the hand, and the hand is not at the pole.
-- Whether 18 cm for the whole travel is easy to set to a wanted count.
-- Whether a real draw of the spiral and of the second gesture fits the
-  templates of the game.
-- Whether a tap of the grip on an icon is easy to hit: the icons of one site
-  are 4 to 8 cm of the room apart.
+The checks in a headset are in `headset-checks.md`, "The village" and
+"Miracles and gestures".
 
 **Limits.** The pole follows the height of the hand only: the hand can move
 away sideways while the grip is closed. The mod does not change the game's
@@ -973,12 +956,12 @@ your old Creature", `temple_run.ps1 -NoEnter`) have shown a tap at each post
 (the chosen post changes and the packet kind follows) and at the door (the
 player is in the hall 3 frames later).
 
-**Not tested, and what needs the headset:**
+**Not tested:**
 
-1. A real hand at the posts: they are small at the scale of the start, and
-   the nearest one wins. Whether a player hits the one that he wants.
-2. A tap on the chosen post (the game sets -1 and sends nothing).
-3. The door before the story turns it on: the card says "Tap to go into the
+1. A tap on the chosen post (the game sets -1 and sends nothing).
+2. The door before the story turns it on: the card says "Tap to go into the
    Temple" then too. The log has the state of the door.
-4. The grab from a distance on a post or on the door.
-5. The lines of the card of the mod: no run had the hints of the game off.
+3. The grab from a distance on a post or on the door.
+4. The lines of the card of the mod: no run had the hints of the game off.
+
+The checks in a headset are in `headset-checks.md`, "The Temple".

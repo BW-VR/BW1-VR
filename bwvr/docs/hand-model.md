@@ -609,17 +609,7 @@ of 255. The overlay costs about 0.1 ms a frame on the CPU for both hands.
   outer bend (its last bone) and the turn of the game's open hold pose. It
   has no other turn and no bend back.
 
-**Open: only a headset shows it.**
-
-1. Whether each hand sits right on the controller, with the right size and
-   a wrist that fades. `hand_mesh_yaw_deg`, `hand_mesh_pitch_deg` and
-   `hand_mesh_roll_deg` turn it.
-2. Whether the fingers follow the trigger and the grip at each point of the
-   way and look right.
-3. Whether a finger goes into a rock, a villager or a tree, or stays far
-   from it.
-4. How the point, the flat hand and the fist of the mesh look at the
-   teleport aim, at a stroke of the Creature and at a drag of the land.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## A hand that the player edited
 
@@ -741,9 +731,10 @@ On the desktop, the test key `hand_model_file_path` reads a file from outside
 the game folder. A mesh with 922 vertices costs 0.22 ms a frame on the CPU
 for both hands, against 0.1 ms for the mesh of the game.
 
-**Open.** A hand that the player edited with his own Blender, a file from
-another 3D editor, and how the joints of a mesh with more bones look in the
-headset.
+**Open.** A hand that the player edited with his own Blender, and a file
+from another 3D editor.
+
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## Hands that react to the world
 
@@ -1404,45 +1395,7 @@ between 0 and 1 at a small target (a villager walks away), and what the
 pulses feel like. The camera of the God view looks down on the hand, so a
 picture shows a contact from above.
 
-**Open: only a headset shows it.**
-
-1. Put a hand down on the land with the fingers first, slowly. The fingers
-   must bend as they meet the land, the longer ones first, with no jump. A
-   finger must not shake when the hand is still.
-2. Lay a flat hand on the land, palm down, on a slope and across a ridge.
-   The fingers must open and lie on it.
-3. Press the trigger and the grip with the hand on the land. The player's
-   own fingers must still show.
-4. Is the pulse at the first touch too weak, too strong or too often
-   (`hand_feel_pulse=0` turns it off, and `haptics_pct` scales it)?
-5. Bring the tip of the index finger to a rock, a villager and a tree. Does
-   the form look right, and does it come too late or too early
-   (`hand_feel_approach=0` turns it off)?
-6. Take a rock, a villager and a tree. Does a finger go into the object or
-   stay far from it, and does the thumb that stays out for a villager and a
-   tree look right (`hand_feel_hold=0`)?
-7. Take a tree with the palm to the side, as a pole. The trunk must lie in
-   the hand (`hand_hold_trunk=0`).
-8. Put a hand at the wall of a house, at a trunk, at a villager and at the
-   Creature, and let a villager walk into the hand. Does a finger bend in
-   the air beside the thing, or go into it (`hand_feel_bodies=0` turns it
-   off)? Does the tip bend at its outer joints (`hand_feel_joints=0`)? Do
-   the walls of the Workshop and of the Village Store, and a house at the
-   hand that does not point, bend a finger (`hand_feel_offer=0`)?
-9. Lay a flat hand on the land and on a wall. Does the spread of the fingers
-   look right? Take a villager and a boulder. Does the thumb go round it
-   (`hand_feel_shape=0`)?
-10. Put a hand into the sea. Do the fingers go into the water, and is the
-    pulse at the water line right (`hand_feel_sea=0`)? Does the part of the
-    hand in the water look under the surface (`hand_feel_water_look=0`), and
-    is the ring on the water the right size (`hand_feel_ripple=0`)?
-11. With `hand_feel_idle=1`: is the slow wave of the fingers wanted? It is
-    motion that the player did not make.
-12. Take a small rock or mushroom, and zoom out and in with the object in the
-    Hand (`hand_pinch=0` and Ctrl, Shift and End give the fist). Is the
-    pinch a pinch, and not a claw? The tips meet near the base of the palm
-    with the index finger curled 0.55 to 0.75. Does the object glide at the
-    change, and is the limit of 0.16 to 0.20 hand lengths right?
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## The glow at the Hand's point
 
@@ -1592,14 +1545,10 @@ eye (`one_walk_checks.h`). A halo of a far target, 446 units deep, is at the
 same pixels with `one_walk_marks` 1 and 0. The run with a halo of the target
 at the Hand has the Hand in front of most of the halo.
 
-**Open: only a headset shows it.** The sizes and the colors. Whether the glow
-is easy to see on bright land, on the sea and on the Hand. Whether the depth
-pull of half a Hand is right: the disc must not vanish into the finger tip,
-and a hill in front must still hide it. Whether a one frame change of the look
-(9, `0x12`, 3 when the Hand leaves an object) shows as a flicker. Which
-objects give the touch look: scrolls, signposts and buildings. On the
-desktop, a press at the edge of the view can start off the render while one
-eye shows gold.
+**Open.** On the desktop, a press at the edge of the view can start off the
+render while one eye shows gold.
+
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## The glow on the mesh of a target
 
@@ -1758,11 +1707,9 @@ of two runs.
 
 **Open.** No run has shown a mesh of the sorted list as a target, a mesh
 that comes through the clip of the engine, or a target by day: the test
-saves are at dusk. Only a headset shows these: whether 45 percent is right by
-day and by night, on a villager and on a house. Whether the pulse and the
-wave are calm enough at the size of the God view. Whether the Creature and a
-building in work, which keep the halo, look wrong beside a target that
-glows.
+saves are at dusk.
+
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## Overlay renderer
 
@@ -1952,15 +1899,12 @@ An offline check sent the fake controller's pose for both hands through the
 real `head_pose.cpp` and the overlay math. Both hands showed in both eyes,
 and the left hand was the mirror image of the right.
 
-**Open: only a headset shows it.** Whether the glow of a ray reads as energy
-in motion (the speed of 0.9 m/s, a band each 0.30 m, 40 percent of light
-between two bands) and does not distract on a bright land. The glow of the
-menu ray in the Temple. Whether the hand sits on the real hand:
-each runtime and controller puts the grip pose at its own place on the
-handle. The size and the color. The near plane: in play mode 0 it is 3.5
-units, 47 cm of the room, so a hand nearer to the eye than that is cut away.
-The God view brings it in to 5 cm. The frame cost at the headset's render
-size.
+**Limit.** The near plane: in play mode 0 it is 3.5 units, 47 cm of the room,
+so a hand nearer to the eye than that is cut away. The God view brings it in
+to 5 cm.
+
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs"
+and "Performance".
 
 ## Haptics
 
@@ -2052,8 +1996,7 @@ The desktop shows only that a pulse goes out at the right frame: `target`,
 `command` and `leash off`. The call sites of `teleport`, `refused`,
 `gesture`, `power` and `world` have no desktop proof.
 
-**Open: only a headset shows it.** How each pulse feels. Set `haptics_pct=50`
-or `200` and say which kinds are too faint or too strong.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## Haptics from the world
 
@@ -2157,7 +2100,4 @@ throw`). With `world_haptics=0` the same runs give the lines with no pulse.
 No run has shown `purr`: in the runs of the Creature state the game counted
 no stroke.
 
-**Open: only a headset shows it.** How each pattern feels: whether the purr
-reads as a purr, the beat as a heartbeat, and the texture of the land as
-land, whether the thump of a landing far from the hand feels right, and
-whether the 80 ms keep a target and a lock clear.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".

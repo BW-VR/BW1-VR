@@ -259,8 +259,8 @@ section 6, and `grab.md`.
 
 ### 2.4 Guide and open plans
 
-- **Which preset is correct** for the menu, and which for the grab from a
-  distance, needs a headset test. Numpad 5 goes through the presets.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+
 - **Freeze the menu pointer after a press.** Keep the pointer pixel for a
   short time (HLA: 0.5 s) after the trigger goes down. The mod has no such
   rule. Do it only if clicks miss. Cost: small, in the code that makes the

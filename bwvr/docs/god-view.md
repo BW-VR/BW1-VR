@@ -1615,10 +1615,7 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
 - **Not built for the grab:** a vignette while the camera moves, a cut for the
   advisor anchor (`SpiritAnchorCameraCut`) on a fast grab, and a hint text
   "Grab the world" (see `controller-hints.md`).
-- **The smooth zoom** (section 2) is not the default. A headset test must
-  show how it feels: whether a scale that changes in each frame is
-  comfortable with no blink, whether 500 ms for a step is a good top rate,
-  and whether the dead zone of 30 percent fits a real stick. No run has shown
+- **The smooth zoom** (section 2) is not the default. No run has shown
   a push with the zoom switch off, a small push, or the key Ctrl, Shift and
   Insert with a real key.
 - **The point of the zoom** (section 2). A headset session compared the
@@ -1628,15 +1625,7 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   the Hand's point with no controller, a hill at the new place of the head,
   the mouse wheel with the look, or the key with a real key. These have the
   math test only.
-- **The walk with the stick** (section 5.7). A headset test must show
-  whether the walk is comfortable with the head as the direction and with
-  the controller as the direction (Shift and the Menu key change the rule),
-  whether 150 cm of the room for each second is a good top speed near the
-  land and far out, and whether the dead zone of 30 percent fits a real
-  stick. It must also show whether the follow of the land is calm on the
-  hills and keeps the land near enough to the hands on a steep slope, and
-  whether the walk is even (the count of the late frames in the line of the
-  end of a walk, "An even walk" in section 5.7). No run has shown a small
+- **The walk with the stick** (section 5.7). No run has shown a small
   push, the edge of the map, a push with the switch for the drag off, a
   controller that points straight up or down, or the test key with a real
   key. These have the math test or no test.
@@ -1649,16 +1638,11 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   the Temple, the missionaries, the lessons of Land 2 (levels 8 and 12) and
   the lessons of the Gods' Playground after the step of the turn. With
   `script_view=1` the Island Keeper did not start his first walk in the
-  desktop runs (section 7). A headset session must show that a player comes
-  through each of them.
-- **Needs the headset:** the ground height of 60 cm, the zoom step of 1.5
-  times, the start scale of 100, the Hand at the life size scale near the
-  eyes with the near plane of 5 cm, the look of the land and the clouds at
-  each scale, the frame rate at 90 Hz, the sound, the spirits, whether a
-  story that stands aside feels right, the mouse pan with a real mouse (the
-  land must stay under the Hand, and must not move after the release), the
-  tracking noise times the gain of the grab on the game camera, the squeeze
-  levels of real Touch and Index controllers, and the frame age of the hands.
+  desktop runs (section 7).
+
+The checks in a headset are in `headset-checks.md`, "The God view and
+moving", "The Hand and grabs", "Cut scenes and stories", "Sound" and
+"Performance".
 
 ## 14. The teleport
 
@@ -1984,18 +1968,15 @@ each scale.
 
 - Not run on the desktop: the red arc on the sea, the aim at the sky, the
   cancel with B and the mouse double click (the steps 4 to 7 of 14.9).
-- The look of the arc and the ring in the headset: the width of 6 mm, the
-  colors, the limits of 4 and 40 cm of the ring, and whether the arc is easy to aim at 4000 units a
-  meter.
-- Whether the aim pose (the point of the controller) feels right as the start
-  of the arc, or whether the arc must start at the index finger.
 - The immersive move and the table ray have no desktop run. Ctrl F11 gives
   the immersive view.
 - `teleport_switch`: no run has the key Ctrl, Shift and comma with a real
   key, a switch that goes off while the player aims, or the teleport on the
   walk around the mountain, where the game has the drag on and the jump off
-  too. Only a headset session can show whether a player finds the way to the
-  village with the teleport and the stick, with no snap turn there.
+  too.
+
+The checks in a headset are in `headset-checks.md`, "The God view and
+moving".
 
 ## 15. The place at a camera of the game
 
@@ -2238,10 +2219,9 @@ the fake controller with `fake_controller_front=1`, and a render of 2560 by
 - **A grab that moves the land, and the mouse pan,** have no run with the
   watch. Each one writes the game camera, which is a move of the player by
   the rule of 15.3.
-- **Only the headset can show** whether 50 cm ahead is the right distance,
-  whether the height of the look point is right on a slope, whether the cut
-  1 s after "Keep your old Creature" is good, and whether a quest puts
-  the player at the right place.
+
+The checks in a headset are in `headset-checks.md`, "The God view and
+moving".
 
 ## 16. The player that a script sees
 
@@ -2540,10 +2520,9 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   Playground, which waits for the hold of both buttons. The pointer at a
   side of the screen also shows the rotate arrow of the game: no run has
   that in the God view.
-- **Only the headset can show** if the quests of a real session go on:
-  the Island Keeper of the Gods' Playground, the mother of `FollowUs`. It can
-  also show if the nearest hand is the right point for a real player, and if
-  a script that deletes a thing behind the head is good in VR.
+
+The checks in a headset are in `headset-checks.md`, "The God view and
+moving".
 
 ## 17. The camera zone
 
@@ -2735,9 +2714,6 @@ pulse.
   drew 73 frames in 48 s and 163 frames in 90 s while a person used the PC,
   so the recipe did not come to its steps. The zone does not touch the
   renderer, and no run has shown it with Direct3D 9.
-- Only the headset can show whether the margin of 100 units gives a
-  comfortable view at the Creature select, whether the sound and the pulse
-  of a bump each 500 ms feel right, and how the force field looks.
 - The other zones of Land 1 have the same rule. The verify runs show the zone
   `Land1Zone5.exc` in the test save `temple`, with no push. No run and no
   session has shown a push at another zone.
@@ -2746,3 +2722,6 @@ pulse.
 - The two other callers of `LH3DCameraChecker::Create`
   (`AddSoundToAtom::ModifyAtomCore` and `fn_006E63C0`) still shake the
   view in the God view.
+
+The checks in a headset are in `headset-checks.md`, "The God view and
+moving".

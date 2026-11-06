@@ -1171,11 +1171,8 @@ Desktop runs use the fake controller with `fake_head=1`. These checks apply:
    script presses and releases the trigger, the game sees one press and one
    release.
 
-In the headset, `xrtest` shows both hands, the profile and every button. In
-the game, the Hand follows the controller, and Ctrl+F12 switches the owner
-live. Open the menu of Virtual Desktop while the trigger is held: the button
-must release. Close the menu with the trigger still down: no press may arrive
-until the trigger goes up and down again.
+The checks in a headset are in `headset-checks.md`, "Stability and the start
+of a session".
 
 ### 5.6 The left hand
 
@@ -1227,9 +1224,7 @@ of the right hand points. The base pose of each hand is on the side of its
 controller. So each recipe runs with the left hand as it runs with the right
 hand.
 
-Only a headset shows: the left hand with a real controller, the hand model
-and the game's Hand on the left controller, and the menu button of the left
-controller as the button of the pointing hand.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## 6. Risks and known limits
 
@@ -1272,10 +1267,8 @@ controller as the button of the pointing hand.
 
 ## 7. Open questions
 
-1. What each button does in each state of the Hand, and whether the trigger
-   for the left button and the grip for the right button feel right. The
-   glove table in `input-devices.md` is a guide. Only a test in the headset can
-   decide.
+1. What each button does in each state of the Hand. The glove table in
+   `input-devices.md` is a guide.
 2. Whether Virtual Desktop reports hand tracking as an interaction profile,
    and which one. The mod binds no hand tracking profile now. A hand tracking
    profile would need a pinch for the trigger and the grip and has no stick,
@@ -1283,6 +1276,8 @@ controller as the button of the pointing hand.
 3. The `LH3DMapCoords` layout, for the exact land march (3.2).
 4. Whether a laser line or a dot at `T` helps in the pointer mode, or whether
    the Hand alone is enough. The mod draws any such mark, not the game.
+
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## 8. The aim ray
 
@@ -1446,17 +1441,7 @@ grab and the Creature commands. Not run: Numpad 5 through the three presets,
 and a far fetch and a teleport with a preset (`aim_queue.ps1` has the run,
 with `aim_test_touch=700`).
 
-Only a headset shows:
-
-1. The grip to aim line of each hand, which says what Virtual Desktop gives
-   for the Quest 3 controllers.
-2. Which preset matches the ray of the Quest menu. Open the game menu and the
-   Quest menu, compare the two rays, and go through the presets with Numpad 5.
-   If the rays still differ, Numpad 8, 2, 4 and 6 change the trim.
-3. That the same values fit the left hand as the pointing hand
-   (`left_hand=1`).
-4. That the halo, the arc and the green halo show where the hand points, at a
-   far object, at the land with A, and with the leash on at an object.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## 9. The game window behind
 
@@ -1633,10 +1618,8 @@ Not proven on the desktop: `XrScreen::InputFocused` itself in a session (the
 fake controller stands for it), a real `WM_ACTIVATEAPP` from Windows, and a
 take of an object in the `deactivate` state.
 
-Needs the headset: start the game, click a different window on the desktop,
-and put the headset on. The hands, the grip, the trigger, the sticks, Y and the
-menu button must act. Open the menu of the headset: nothing may act in the game until it
-closes. The log then names the program that was in front.
+The checks in a headset are in `headset-checks.md`, "Stability and the start
+of a session".
 
 ## 10. The ring
 
@@ -1979,20 +1962,8 @@ action key. Also not run: `room_options` (the same call with a different
 room), the two test keys with a real key, an Index controller, a controller
 with no face buttons, and a real controller.
 
-Needs the headset:
-
-1. That Virtual Desktop shows the quad layer of the ring, and that it is sharp.
-2. Whether Y is easy to hold while the hand moves to an item
-   (`button_layout=1`). Ctrl and the Menu key change to the layout with X and
-   the stick, and Ctrl and Numpad 1 then leave only one of its two ways on.
-3. Whether 5 cm is the right reach, and whether 32 cm is the right size
-   (`radial_menu_reach_cm`, `radial_menu_size_pct`).
-4. Whether the card in the middle is in the way of the hand.
-5. The order of the items.
-6. In the Temple: the view of each room, and the Hand at a door (section 11).
-7. The scroll look: whether the gold seal of the choice stands out at a
-   glance, whether the faded seals read against the land, and whether the
-   thin ring helps.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the
+ring" and "The Temple".
 
 ### 10.8 The debug page
 
@@ -2076,10 +2047,8 @@ next press of Y opens the ring on the page Render again, and "Foveation"
 goes on. `radial_test_save` saves each picture of the ring. With
 `debug_menu=0` page 2 has `help` in slot 5, and no page has `debug`.
 
-Needs the headset:
-
-1. Whether the badges of two lines are easy to read at 32 cm.
-2. Whether 0.45 s on each link is too slow for a walk through three pages.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the
+ring".
 
 ## 11. The Temple
 
@@ -2773,33 +2742,4 @@ always starts in a new game.
   state 4, and in a run it did not turn while the box was up [R]. A box that
   comes up with the camera in the state 1 is not known.
 
-Needs the headset:
-
-1. The ray in a room: that the line ends on the thing in both eyes.
-2. The size of a room, and the height of the floor. The camera of the hall is
-   about 1.3 m above the floor, so the floor is at that distance below the
-   head of the recenter pose.
-3. Whether a room that does not turn to the pointer is right, and the turn
-   with the stick: its angle, and that the room stays level.
-4. The trigger and the grip as the click (Ctrl and Numpad 6 gives the other
-   ways).
-5. The guide of a first visit in the cut scene window.
-6. The cross at the end of the ray: its size on a far wall.
-7. The entry of the Temple and the end of the way through a door: that the
-   room comes out of black at the rest pose, with no turn and no move after
-   it (Ctrl and the star key of the number pad gives the flight of the plain
-   game).
-8. The view of a room (`temple_view`): that the room stays still and level
-   when the head turns, tilts and leans, and that it has depth. That the left
-   eye is not dark when the player comes into the Temple, changes the room or
-   leaves the Temple (`temple_fade_eyes`). That a look down at the pool of
-   the hall does not move the player (`temple_camera_screen`). Shift and the
-   slash key of the number pad, and Ctrl, Shift and the plus key, give the other
-   ways for a comparison. The check line of the view (11.7) is in the log of
-   the session.
-9. Whether the guide of the hall still has black frames, with the camera at
-   its rest pose.
-10. The pace of the way through a door (5 s) and of the look at a picture
-   (1.4 s), in a game from a saved game. Ctrl, Shift and the star key of the
-   number pad give the frame time from before the two eye passes for a
-   comparison (`backend.md`, "The delta time after the passes").
+The checks in a headset are in `headset-checks.md`, "The Temple".

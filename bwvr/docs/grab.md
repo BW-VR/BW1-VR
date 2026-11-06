@@ -260,11 +260,7 @@ click of the game, and `-Fps 90` a run at 90 frames a second. The recipe
 reach its state (`bwvr/tools/desk/README.md`, "Known limits of the
 recipes").
 
-**Needs the headset.** Whether 3 to 4 frames from the opening to the release
-feel at once. Whether the window of 80 ms before the opening gives the throw
-the player meant. Whether a still hand sets the object down where it is.
-Whether a catch with a real hand takes the object each time: a real grip
-closes over some frames, and a real hand moves with the object.
+The checks in a headset are in `headset-checks.md`, "Throws and catches".
 
 ### A catch at once
 
@@ -423,11 +419,7 @@ to the sum of the turn (`0x00645FEE` adds the force of a step with a contact
 after the call of `fn_007FE260`, and the hook takes that force off before).
 
 
-**Needs the headset.** Whether the object is in the hand at the press with a
-real hand, which closes over some frames and moves with the object. Whether
-the way of 0.12 s to the place in the Hand looks right when the object was
-15 to 23 cm from the finger tip at the press. Whether the throw after a
-catch is the throw that the player meant.
+The checks in a headset are in `headset-checks.md`, "Throws and catches".
 
 ## One point for each interaction
 
@@ -963,15 +955,8 @@ game, the red halo, the Creature as a choice, a scroll that wins over a tree tha
 the leash past its install. A place at 66 to 100 units a meter, the scale of
 the headset, is not run.
 
-**Needs the headset.** Whether 4 cm is the right reach: an object must be easy
-to take, and an object at the palm must not be taken. Whether a scroll starts
-with the glow on it. Whether the body of a scroll is where the scroll shows
-(the line of the tag `hand pick` gives the gap). Whether 10 and 15 cm keep the
-far grab out of the way near an object and do not turn it off too often in a
-village. Whether 1 cm is the right touch distance. Whether the halo is easy to
-see and not too strong, and whether the Hand with no glow is still easy to
-aim. Whether the rope of the leash now comes out of the hand. Whether the paler
-gold of the activate look is easy to tell from the gold of the take look.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs" and
+"The Creature".
 
 ## The bulk take
 
@@ -1316,10 +1301,7 @@ a fish is in it. The game did not give its grip hint over the land near a
 farm in the desktop runs, also with `hint_palm_check=0`. Only the math checks
 (`hint_checks.h`) show the rule of `hint_palm_check`.
 
-**Needs the headset.** Whether the body of a school (8 to 10 units around
-the middle of the fish, 18 to 23 cm of the room at 44 units a meter) is easy
-to find with the hand, and whether the halo that moves with the fish is calm
-enough.
+The checks in a headset are in `headset-checks.md`, "The village".
 
 ### The log, tests and keys of the take
 
@@ -1367,10 +1349,7 @@ the hand pulled away from the store. A desktop run has the loop of a take of
 wood ([audio.md](audio.md), section 11). Desktop runs have the take of fish
 (see "The fish in the sea").
 
-**Needs the headset.** Whether the count reads at the hand. Whether the loop
-of the take sounds, and how loud it is beside the other sounds. Whether the
-stream of pieces reads well. Whether the Hand stays at the controller during a
-take. A short squeeze on a pile must stop when the grip opens.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## The grab from a distance
 
@@ -2041,8 +2020,7 @@ In the test save `pen` these recipes take a small rock beside the tree and
 not the tree, so they need `-NewGame` (`tools/desk/README.md`, "Known limits
 of the recipes").
 
-**Open.** Whether the pile at the roots is what the player means by the "pit"
-needs the headset.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ### The far touch
 
@@ -2248,8 +2226,9 @@ held 15 steps back, and the game put the rock in the Hand in that turn. With
 the Hand kept the rock until the grip opened.
 
 **Open.** Not run: a villager that comes to rest in a take, and
-the mouse. Only a headset shows whether a tree that the player takes at the
-moment of its rest comes to the hand each time.
+the mouse.
+
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ### Show
 
@@ -2602,14 +2581,7 @@ land outside the influence, a multiplayer game, a fetch of a villager, a
 Creature or a building, the haptics on a real controller, and the look of the
 halo against open land (the pen is a slope).
 
-**Needs the headset.** Whether 2 m is the right range. Whether the body, the size term and the bias of 3 degrees pick the villager that the hand points at in a crowd, in the quest to save the children. Whether the Creature, a miracle and a signpost are easy to choose with the real aim, and whether a signpost in the last rank is still easy to choose with the aim on it. Whether the cone of 8
-degrees feels right with the real aim pose. Whether the pull at 0.8 m/s or 12 cm
-is easy to do and does not fire by accident. Whether the glide time reads well.
-Whether a take at a distance reads well: the halo, the tether and the count at
-the Hand. Whether the curve of the stream of that take reads well in depth, how
-it looks with a hand that moves, and whether a life of 1 s and 8 pieces a
-second read well on a way of 2 m. Whether the halo alone shows the target well against the land. Whether
-a ball on the sea gets the halo, the lock and the fetch.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## Many trees from a forest
 
@@ -2776,10 +2748,7 @@ that one. A `BigForest` gives the wood of one tree at each step with no tree tha
 leaves the picture, until the game deletes the forest. The take changes the tree
 in the Hand into wood.
 
-**Needs the headset.** Whether 600 ms and 400 ms feel right, and whether 10 cm is
-the right reach at the scales of the headset. Whether one whole tree is still easy
-to take from a forest. Whether the take at a distance starts when the player does
-not want it, after a fetch of one tree.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## An object in the Hand that goes onto a thing
 
@@ -2984,11 +2953,8 @@ code with a different class), the altar and a sacrifice, a teleport, a thing out
 the influence (the red halo and its line), a villager at a field, at a building site
 and at the Workshop, and a scaffold that the Workshop makes.
 
-**Needs the headset.** Whether 6 cm is the right reach for a store and a scaffold.
-Whether the halo of a large thing (the Village Store has a body of 15 units, 35 cm of
-the room) reads as "the wood goes here". Whether a player gives an object to the
-Creature with no effort: the Creature becomes the target in its body, and it stays
-the target to 6 cm.
+The checks in a headset are in `headset-checks.md`, "The village" and "The
+Creature".
 
 **Limits.** The draw offers a thing only when the point of its mesh is near the Hand.
 A very large building with its point far from the Hand's point can be no target, and

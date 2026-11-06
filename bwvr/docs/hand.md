@@ -655,8 +655,7 @@ math test checks the clearance for the three scales.
 The tag `hand` logs, 20 frames after the target stops, the point's height
 over the land and how far the controller is under it, in cm of the room.
 
-Needs the headset: whether the glow and the game's Hand reach the land and a
-villager in the God view, and whether the Hand's mesh in the land looks wrong.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## 6. The pose builder and the drawn Hand
 
@@ -997,10 +996,7 @@ palm in 0.12 s and turns with the hand.
 Not reached on the desktop: the PlayAnim state. Not shown on the desktop: the
 poses with a real controller.
 
-Needs the headset: whether the Hand sits on the real hand with each runtime's
-grip pose, the rest turn, whether the Hand in the land drag, the Tug and the
-Grain state looks right at the controller, and for which object the place or
-the opening of the hand in the palm looks wrong.
+The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 
 ## 8. The two real hands and which one is the Hand
 

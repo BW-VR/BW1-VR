@@ -398,15 +398,11 @@ stayed at the place of a guess: the math checks cover that rule.
 - A Miracle and the objects that a thrown object pushes keep the game's time.
 - While another object touches a thrown object, the thrown object moves at
   the speed of the game's own time (`sqrt(s) / k` times slower than in the
-  flight). Only a headset shows whether that looks right.
+  flight).
 - A flying tree is tested in desktop runs only (a throw of 3.0 m/s, and a
   fall from the Hand, see "The landing of a tree"), and not in the headset.
-- Only a headset shows: whether a throw feels like a real throw at 7.5, 67
-  and 400 units per meter, whether the top speed of 120 ms gives the throw
-  that the player meant, whether a quick put down throws by accident (the 1
-  m/s rule), whether a villager lives through a soft throw and dies from a
-  hard one, whether a rock still breaks a house, and the cost of the steps at
-  1000 units per meter and more (the log gives it for each flight).
+
+The checks in a headset are in `headset-checks.md`, "Throws and catches".
 
 ## The landing of a thrown object
 
@@ -726,18 +722,11 @@ catch up of the picture (`kCatchUp`).
   of a villager, of a rock in the sea and of a rock at 7.5 to 225 units per
   meter ("Desktop runs" in "The throw physics", and "The rest after a
   landing"). The log does not say whether a thrown villager lives.
-- The rest after a landing: only a headset shows whether a rock that stops
-  its turn this fast looks right, and whether a rock on a steep slope goes
-  down at a pace that looks right. On such a slope the object moves in the
+- The rest after a landing: on a steep slope the object moves in the
   game's own time until the land is flatter (8 s on the slope at the pen,
   which is 41 units high).
-  Ctrl and Shift with Pause give the landing with no rule for a comparison.
-- Only a headset shows: whether the landing looks natural at the rate of the
-  land, or too slow (on the slope of the pen the rock moves slowly for about
-  2.5 s before it stops: try `throw_land=2` with the Pause key, or a higher
-  rate with Ctrl and Numpad Divide), whether the change of the rate shows at
-  the first contact, and whether a thrown villager lives through a soft throw
-  and dies from a hard one.
+
+The checks in a headset are in `headset-checks.md`, "Throws and catches".
 
 ## The landing of a tree
 
@@ -776,8 +765,8 @@ game's landing. Rocks and other objects are not changed.
   runs, with the settle on or off. The aim keeps the tree, and the gaps in the
   target were the near rule while the tree falls past the Hand. The tumble is
   gone with the settle, so it can not move the candidate.
-- Only a headset shows whether a tree that stops this fast looks right, and
-  whether a rolling tree on a slope still rolls.
+
+The checks in a headset are in `headset-checks.md`, "Throws and catches".
 
 ## The turn of a thrown object
 
@@ -937,9 +926,8 @@ after the cut.
 - How large the turn of the release is with the direct hand is not known:
   the hold of the game makes it from the swing of the object, and the mod
   draws the object in the Hand by itself.
-- Only a headset shows whether a thrown tree now looks natural in its flight
-  and its landing, and whether a throw that turned at the game's pace looks
-  too still.
+
+The checks in a headset are in `headset-checks.md`, "Throws and catches".
 
 ## The height of a release
 
@@ -1033,7 +1021,8 @@ throw at each height.
   cm. A tree that falls is in "The landing of a tree".
 - Not tested in a desktop run: a pot, a villager and an animal that fall
   from the Hand, and an opening over a store at a height.
-- Only a headset shows whether 15 cm feels right.
+
+The checks in a headset are in `headset-checks.md`, "Throws and catches".
 
 ## The release at once
 
@@ -1177,6 +1166,5 @@ closes it again, and the trace of 12 values.
   `release_at_once=0`. The run needs the start dialog of `god-view.md`,
   section 12, a far target that is no tree (`far_test_influence=1`,
   `far_grab_max_m=4.0`) and a pull, a grip open and a release.
-- Only a headset shows: whether a throw leaves the hand when the hand opens,
-  and whether the fast opening lets go of an object that the player wants to
-  keep (the lines of the tag `grip` show the grip values before each opening).
+
+The checks in a headset are in `headset-checks.md`, "Throws and catches".

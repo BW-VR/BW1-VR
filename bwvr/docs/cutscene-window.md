@@ -720,7 +720,8 @@ of the advisors. Then the log has these lines:
   frames. The line has the pixels of the index tip of the pointing hand and
   of the end of the ray in each eye picture. The tag `controllers`: the place
   of the end of the ray on the screen and its pixel in each eye picture and
-  in the game camera, when the ray comes onto the opening or goes off it.
+  in the game camera, when the ray comes onto the opening or goes off it, and
+  when its pixel moves 8 px or more (one line each 30 frames at most).
   Each press of a button in the window has a line with the pointer of the
   game.
 - The frame that the bars go down, the frame that the cut scene is over, the

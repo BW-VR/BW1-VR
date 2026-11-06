@@ -499,14 +499,14 @@ game as it is.
 
 ### Built, and not proven or not finished
 
-- **B39, F5 and F15 wait for their desktop runs** (`scene_run.ps1`, kinds
-  `forest`, `edge` and `window`). The camera of the player stays at the
-  Forest miracle (`miracle_camera_still`, `miracles.md`, "The camera path of
-  a miracle"). The hands fade outside the influence, the stream ends at the
-  Hand and a wall shows the edge (`influence_fade`, `influence_stream_hand`,
-  `influence_wall`, `miracles.md`, "The influence at the hand"). The hands
-  and a ray show in the cut scene window, and the trigger clicks at the
-  pixel of the ray (`cutscene_hands`, `cutscene-window.md`, section 7).
+- **F5. The stream of the influence at the hand.** The hook that ends the
+  stream of the game at the Hand's point is built, but no desktop run had a
+  stream of the game, so `influence_stream_hand` is 0. The update of the
+  game keeps the land point of the interface, which in the God view can be
+  away from the land under the Hand (`miracles.md`, "The influence at the
+  hand"). The report of `scene_run.ps1 -Kind edge` has the state of the
+  stream. Open: which state stops it, and then a run that shows the stream
+  at the Hand.
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:

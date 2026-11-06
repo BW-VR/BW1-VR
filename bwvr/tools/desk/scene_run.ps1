@@ -35,8 +35,11 @@
 #   of 25 cm of the room around the Hand's point at its first step. The hand
 #   steps forward in steps of 10 cm to 50 cm past that point, with an eye
 #   picture at each step, and back. The log has the lines "influence":
-#   the hand goes out of the influence and comes back, the wall shows and
-#   goes, and the stream of the game ends at the Hand's point.
+#   the hand goes out of the influence and comes back, and the wall shows
+#   and goes. The report has the state of the stream of the game. With
+#   influence_stream_hand=1 a stream of the game ends at the Hand's point.
+#   influence_wall_test_light_pct=300 makes the wall three times as bright
+#   for the eye pictures.
 #
 # Give -Set "backend=dxwrapper\ddraw.dll" for eye pictures (the eye pictures
 # of a run with the Vulkan renderer are black). With the Vulkan renderer give

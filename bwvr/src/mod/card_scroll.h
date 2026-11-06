@@ -11,12 +11,13 @@
 // THE GRAIN. The headset shows a card smaller than its picture, so a detail
 // of 1 pixel would shimmer. The smallest cell of the noise is 4 pixels.
 //
-// THE FIRST DRAW OF A FONT. GDI makes each letter of a font at a size the
-// first time that it draws it, and keeps it for the process. For the words
-// of a card that is 7 to 30 ms. With font_warm=1 a thread of the mod draws
-// each letter of each font of the cards one time at the start of the game
-// (WarmStart), so the first card, the book, the ring, the keyboard and the
-// panels show with no such cost on the frame thread.
+// THE FIRST DRAW OF A FONT. The first DrawTextW of a font at a size costs 6
+// to 11 ms: GDI makes each letter, and the text layout of Windows makes its
+// data for the font. Both are kept for the process. With font_warm=1 a
+// thread of the mod draws each letter of each font of the cards one time
+// with DrawTextW at the start of the game (WarmStart), so the first card,
+// the book, the ring, the keyboard and the panels show with no such cost on
+// the frame thread.
 //
 // THE COST. A redraw makes no blur. The drop shadow comes from the outline of
 // the shape (a distance test). Start bakes the color of the paper into the

@@ -2231,10 +2231,20 @@ room can use them:
   look.
 - `panel_kit_math`: `PlaceAt`, `HitRects`, `RectBox`, and the trigger with
   its band (`Press`, `PressStep`, `PressOpen`).
+- The widgets of a panel of settings (the debug window, section 23):
+  `Toggle` (a slot with a knob of wax), `ArrowKey` (a key with a triangle of
+  ink), `ScrollBar`, `InkWordsIn` (words at the left, in the middle or at
+  the right of a box), `InkLines` (words that wrap), and `Note` with `Over`
+  (a small card with rolled ends, laid over the card). They draw into a
+  picture of the caller, so a part can be drawn one time and copied to each
+  place. The look `kOn` is a button that is on now, for example a tab.
+- `panel_kit_math`, the list that scrolls: `MaxOffset`, `ClampOffset`,
+  `Thumb`, `OffsetOfThumb` (the drag of the thumb), and `StickScroll` (the
+  speed of a scroll by the stick).
 
 The caller keeps the trigger from the game while its panel is open
-(`PlacesPanelHoldsTrigger` in the pump of `controllers.cpp`), and it decides
-what closes its panel.
+(`PlacesPanelHoldsTrigger` and `DebugWindowHoldsTrigger` in the pump of
+`controllers.cpp`), and it decides what closes its panel.
 
 ### 22.7 Tests and limits
 
@@ -2278,3 +2288,121 @@ panel from page 2 of the ring five times: Y, the left hand to More, then to
 Only a headset shows the panel, its place and its size, whether the ray
 finds a button with ease, whether a hand that points stays below the
 panel, and what Follow does with a bookmark on an object in the God view.
+
+## 23. The debug window
+
+The item `debug` of the ring opens a window with the switches of the debug
+page (`controllers.md`, 10.8), with `debug_menu=1` and `debug_window=1`.
+It is built on the parts of section 22.6. The code is in `debug_window.cpp`
+and `debug_window_math.h`, and the notes of the switches are in `kTips` of
+`debug_menu.cpp`.
+
+### 23.1 What the window has
+
+The picture is 1024 by 1024 pixels:
+
+| Part | Where | What it is |
+| --- | --- | --- |
+| The title | The top | "Debug switches" |
+| The tabs | A column at the left, 196 by 62 px each | One for each group. The tab of the group that shows is bright gold (`kOn`) |
+| The list | 692 by 760 px, 10 rows of 76 px | The switches of the group, one row for each: the label at the left and the control at the right. An ink rule is at the foot of each row, and above and below the list |
+| The scroll bar | At the right of the list | Only for a group with more than 10 rows. The thumb is the share of the list in the view, at least 56 px |
+| The bottom row | Under the list | The words of the last press at the left, and Close at the right |
+| The note | Over the list | After a rest of 0.35 s on a row: the name of the switch, its note in one to three sentences, and its ini key. It goes below the row, or above the row when it does not fit below. It does not catch the ray |
+
+The control of a row:
+
+- **A toggle** for a switch with two values: the word of the value, and a
+  slot (a key of ink) with a knob of wax. The knob is green at the right for
+  the value 1, and red at the left for 0. A press anywhere on the row changes
+  it.
+- **Two arrows** for a switch with more values or a number: a key with a
+  triangle at each side of the word of the value. The left arrow makes the
+  step back of the switch when the table has one, and else the step of the
+  right arrow (`controllers.md`, 10.8).
+- **A dim row** for a switch that cannot change now: the row goes 65 percent
+  of the way back to the paper, and the word is "not now".
+
+### 23.2 The place, the ray and the stick
+
+The place, the ray and the trigger are those of the panel of places (22.2,
+22.3): 1 m in front of the head, 12 degrees below eye level, 56 cm across,
+fixed in the room. A row is 4.2 cm high and an arrow 3.3 cm across.
+
+- The part under the ray is gold, with a light pulse at each new part. For a
+  toggle the part is the whole row.
+- A pull of the trigger presses the part under the ray. A press of a tab,
+  Close, the thumb or the track gives the stronger pulse of the kit. A step
+  of a switch gives the pulse of its test key only, and the control flashes.
+- The thumb: a pull on it takes it, the ray drags it while the trigger is
+  down, and the point of the thumb that the ray took stays under the ray.
+  A pull on the track goes one view less one row up or down.
+- The stick of the pointing hand: while the ray is on the window, a push
+  forward or back past 25 percent scrolls the list, up to 1400 px a second
+  at a full push (`StickScroll`). Forward goes up the list. The pump of
+  `controllers.cpp` then sends no zoom and no wheel (`DebugWindowTakesStick`),
+  and a push that the window took must come back before it zooms.
+- B of the pointing hand and the menu button close the window. B then draws
+  no gesture, and the menu button sends no Esc. Close, the ring, the spell
+  book, a dialog box and a cut scene close it too.
+
+### 23.3 The look and the bake
+
+The look follows `hint_card_style`, as the panel of places does. With 1 it
+is a page of parchment, with the words in Alegreya (a capital of 24 px for a
+label) and the values in Alegreya SC. With 0 it is dark, in Segoe UI, and
+the mod draws all of it each time that it changes.
+
+**The bake.** The page with the title and the rules is drawn one time. Each
+tab and Close in each look is drawn the first time that it shows, and the
+mod keeps a copy (`panel_kit::Tiles`). Each row of the group shows the paper
+of the first row of the list, so a copy of a row can go to each place of the
+list. A row is drawn into a picture of its own when its value or the look of
+its control changes, and a new picture copies the rows that show. So a
+scroll copies rows, and a change under the ray draws one or two rows. The
+note is drawn one time for each switch and laid over the rows again after a
+change. The scroll bar and the bottom row are drawn when they change.
+
+Costs in a desktop run: the first picture 31 ms (the first draw of each
+letter by GDI), a change under the ray 0.4 to 0.9 ms, and 1.8 to 1.9 ms
+while a note shows (the note is laid over the rows again), a frame of a
+scroll by the stick 0.6 to 1.8 ms, a new group 5 ms, the first draw of a
+note 4 to 6 ms. The report of each window gives
+the average, the most, and the most for a change under the ray only.
+
+The window uses the quad layer of the ring (`kCardRing`), 1024 by 1024
+pixels. The ring, the panel of places and the window never show at one
+time. Memory: the page and the card (4 MB each), a picture of 692 by 76 px
+for each row of the group (210 KB each, 24 rows in the group Render), and
+the note.
+
+### 23.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `debug_window` | 1 | With `debug_menu=1`: 1 the item `debug` opens the window. 0 it goes to the debug pages of the ring |
+| `hint_card_style` | 1 | 1: the parchment. 0: the dark window |
+| `debug_window_test_save` | 0 | Test key. N saves the first N pictures of the window with a new group, a new value, a note or a scroll of 3 rows as `bwvr-debugwin-FFFFF.bmp` over a checkerboard |
+| `debug_test_parts` | | Test key. The parts for the word `aimdebug` of the scripted controller: `tab3`, `row5`, `left5`, `right5` (from 0), `thumb`, `trackend` and `close` |
+
+The log has the tag `debug window`:
+
+```
+debug window : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group View with 14 switches, frame 371
+debug window : the note of "Zoom point" shows (row 4), frame 543
+debug window : the trigger presses the tab Render: 24 switches, frame 731
+debug window : the trigger takes the thumb of the scroll bar at offset 933, frame 841
+debug window : the trigger lets go of the thumb at offset 0 of 1064, frame 901
+debug window : frame 641, a new picture of the parchment window took 0.92 ms: 2 parts drawn and 9 parts copied (a change under the ray)
+debug window : 67 new pictures, 1.34 ms each on average and 5.69 ms at the most. 10 were a change under the ray only, 1.92 ms at the most
+```
+
+### 23.5 Tests and limits
+
+The math checks are in `test/controller_math/debug_window_checks.h`
+(`controllers.md`, 10.8). A desktop run opens the window from page 2 of the
+ring and presses a toggle, both arrows of a switch of three values, the
+arrows of "Throw speed", a tab, the stick, the thumb, the track and Close,
+and closes the window with B and with the menu button.
+
+The check in a headset is in `headset-checks.md`, check 22.

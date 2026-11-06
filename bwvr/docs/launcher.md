@@ -258,7 +258,7 @@ See `controllers.md` for the full controls.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Test keys | off | Key `test_keys`. Turns on the keys for tests. Each key changes one rule of the mod while the game runs, for a comparison. `backend.md` ("Keys for v1.0") and the player readme list them. F12 saves a picture of each eye in the game folder. A player does not need this. |
-| Debug menu | off | Key `debug_menu`. The ring of the left hand gets the item Debug, with pages of the switches of the test keys. A choice changes a switch at once, so a comparison needs no keyboard (`controllers.md`, 10.8). It does not need "Test keys". A player does not need this. |
+| Debug menu | off | Key `debug_menu`. The ring of the left hand gets the item Debug. It opens the debug window with the switches of the test keys, and the ray and the trigger of the right hand change a switch at once, so a comparison needs no keyboard (`controllers.md`, 10.8). It does not need "Test keys". A player does not need this. |
 
 F11 makes the direction of your head straight ahead. This key is always on.
 

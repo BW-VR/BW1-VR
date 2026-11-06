@@ -21,6 +21,9 @@
 //   debug_menu=0     1 puts the item "debug" on the ring. It does not need
 //                    test_keys=1. The keys of the keyboard still need
 //                    test_keys=1
+//   debug_window=1   1: the item "debug" opens the debug window
+//                    (debug_window.cpp). 0: it goes to the debug pages of
+//                    the ring
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -326,6 +329,14 @@ struct Switch {
   int (*value)();
   void (*change)(const char* by);
   const wchar_t* words;   // the words of the values from 0, with "|"
+  // The debug window (debug_window.cpp). `back` is the step to the value
+  // before, for the left arrow, or null: then the left arrow makes the
+  // step of `change` too. A line with `in_window` false is on the ring
+  // only, because a line with a `back` holds its step. `window_label` is
+  // the label of that row, or null for `label`.
+  void (*back)(const char* by) = nullptr;
+  bool in_window = true;
+  const wchar_t* window_label = nullptr;
 };
 
 // THE TABLE. One line for each test key that is a switch. A new test key is
@@ -580,13 +591,17 @@ const Switch kSwitches[] = {
     {kGroupThrow, L"Land rest", L"Rest after a landing", "throw_land_rest",
      ThrowRestValue, ThrowRestChange, L"off|on|spin|steep|still"},
     {kGroupThrow, L"Throw slower", L"Time factor of a throw x10",
-     "throw_slow_x10", ThrowSlowValue, ThrowSlowerChange, L""},
+     "throw_slow_x10", ThrowSlowValue, ThrowSlowerChange, L"", nullptr,
+     false},
     {kGroupThrow, L"Throw faster", L"Time factor of a throw x10",
-     "throw_slow_x10", ThrowSlowValue, ThrowFasterChange, L""},
+     "throw_slow_x10", ThrowSlowValue, ThrowFasterChange, L"",
+     ThrowSlowerChange, true, L"Throw speed"},
     {kGroupThrow, L"Land slower", L"Rate of the land x10",
-     "throw_land_rate_x10", ThrowLandRateValue, ThrowLandSlowerChange, L""},
+     "throw_land_rate_x10", ThrowLandRateValue, ThrowLandSlowerChange, L"",
+     nullptr, false},
     {kGroupThrow, L"Land faster", L"Rate of the land x10",
-     "throw_land_rate_x10", ThrowLandRateValue, ThrowLandFasterChange, L""},
+     "throw_land_rate_x10", ThrowLandRateValue, ThrowLandFasterChange, L"",
+     ThrowLandSlowerChange, true, L"Land speed"},
 
     // Creature
     {kGroupCreature, L"Command rule", L"Rule of the Creature command",
@@ -654,7 +669,394 @@ const Switch kSwitches[] = {
      L"left eye|both eyes"},
 };
 
+
+// THE NOTES of the debug window: what each switch is and what it does, from
+// the key tables of the docs. One line for each line of kSwitches, in the
+// same order, so a new switch gets its note here.
+const wchar_t* const kTips[] = {
+    // Table
+    L"Turns the table, or the God view, on and off. When it comes back, it "
+    L"faces the game camera again.",
+    // Follow camera
+    L"On: the player goes where the game puts its camera. Off: the view moves "
+    L"only at a start, a load and the end of a story.",
+    // Camera place
+    L"Recenter: the game camera is over the recenter place. Head: it is over "
+    L"the land point under the head.",
+    // Smooth zoom
+    L"Steps: one zoom step for each push of the stick. Smooth: the scale "
+    L"changes while the stick is held.",
+    // Zoom point
+    L"The point that stays in place in the room during a zoom: the land under "
+    L"the head, the land that the head looks at, or the point of the Hand.",
+    // Stick walk
+    L"The stick of the hand that does not point. Head: forward is where the "
+    L"head looks. Controller: where the controller points. Off: no walk.",
+    // Vignette
+    L"The edges of the view go dark while a control moves the view: a walk, "
+    L"a zoom, a turn, a teleport or a grab of the world. Off, gentle or "
+    L"strong.",
+    // Menu turn
+    L"Stops: while a dialog box of the game is up, the stick does not turn "
+    L"or zoom. Turns: the stick turns and zooms as at other times.",
+    // Recenter hold
+    L"A hold of the stick click for 1 s, with the stick at rest, recenters "
+    L"the view. Other hand: the click of the hand that does not point. Hand: "
+    L"the click of the pointing hand. Off: no hold recenters.",
+    // Grab test
+    L"A test step for the grab of the world: as the ini sets it, one to one, "
+    L"or off. A grab that holds ends, and the next press uses the step.",
+    // Ring size
+    L"Room: the teleport ring has one size in the room. World: it has one "
+    L"size in the world.",
+    // Jump switch
+    L"The game switch that a press of A for the teleport keeps to. Jump: the "
+    L"double click jump. Drag: the drag of the land, as the stick walk.",
+    // Camera zone
+    L"Game: the game pushes its camera back into a script zone, with its "
+    L"sound and its shake. View: the God view stays in the zone, with no "
+    L"shake.",
+    // Button layout
+    L"The buttons of the hand that does not point. Ring on X: Y opens the "
+    L"game menu, X and the stick open the ring. Ring on Y: Y opens the ring.",
+    // Ring ways
+    L"What opens the ring: both ways, the button only (the hand picks), or "
+    L"the stick only (the trigger chooses). Only when the stick can drive the "
+    L"ring.",
+    // Pointer owner
+    L"Automatic: the mod picks the owner of the pointer. Controller: only the "
+    L"controllers move the pointer. Mouse: only the mouse moves it.",
+    // Script player
+    L"Camera: a script that measures a distance from the camera uses the game "
+    L"camera. Player: it uses the place of the player.",
+    // Scene window
+    L"On: a cut scene of the God view plays on a screen in the room. Off: it "
+    L"plays in the full view, with held shots.",
+    // Scene depth
+    L"Off: both eye pictures of the cut scene are at one depth. Nearest: the "
+    L"nearest thing stays on or behind the screen. Fixed: the game near "
+    L"plane.",
+    // Eye clean
+    L"Own: each eye pass starts from its own frame before. Shared: the two "
+    L"eye passes share the render target.",
+    // Walk marks
+    L"In one walk. On: bubbles, name cards, the Hand glow and the halos draw "
+    L"for each eye alone. Off: the right eye gets them as other batches.",
+    // Land light
+    L"A light on the land that comes one time a frame, such as the light of a "
+    L"lightning. It shows in both eyes, or in the left eye only.",
+    // Advisor size
+    L"An advisor at a place of the world. Near size: the size that it has for "
+    L"the eye at its usual place. Game: the size of the game.",
+    // Vulkan eyes
+    L"In a Vulkan session, the eye pictures come from the Vulkan renderer or "
+    L"from Direct3D 9. The change starts at the next frame.",
+    // Keep picture
+    L"Vulkan only. Keep: a walk with no clear of the whole target starts with "
+    L"the picture of the walk before. Black: each walk starts black.",
+    // Stage 1
+    L"On: the Vulkan renderer uses texture stage 1, for example the light "
+    L"maps of the Temple. Off: it uses stage 0 alone.",
+    // No texture
+    L"A Vulkan stage 0 with no texture. Diffuse: it uses the diffuse color, "
+    L"as Direct3D does. White: it reads a white texel.",
+    // Ray glow
+    L"On: the menu ray, the far grab tether and the teleport arc glow, with a "
+    L"light that runs from the hand. Off: plain tubes.",
+    // One walk
+    L"Walks the scene of the game one time for both eyes. Off walks it one "
+    L"time for each eye, which costs more time.",
+    // Foveation
+    L"On: fewer shades away from the center of the Vulkan eye pictures. "
+    L"Marks: also a color over the coarse parts. For a test.",
+    // Fovea images
+    L"On: each Vulkan eye picture comes from an outer image and a center "
+    L"image, each with its own resolution.",
+    // Frame send
+    L"When the mod waits for the GPU. Each eye: after each eye pass. One "
+    L"wait: one time a frame. 2nd thread: one wait a frame on a second "
+    L"thread.",
+    // Frame hold
+    L"When the game gives no frame for this many ms, a thread sends the last "
+    L"frame again. 0 is off. A step goes to 0 and back.",
+    // Real time
+    L"Real: after the eye passes, the game gets the real time of the frame. "
+    L"Kept: it gets the time from before the passes.",
+    // SSE loops
+    L"The two vertex loops of the engine run with SSE or on the x87 unit. The "
+    L"change starts at the next mesh.",
+    // Thread wait
+    L"Sleep: a thread of the mod that waits spins for a short time, then "
+    L"sleeps. Spin: the threads spin for the whole walk.",
+    // Read ahead
+    L"On: a small read from a game file comes from a copy of the next 256 KB. "
+    L"Off: each read goes to Windows, as in the plain game.",
+    // Follow target
+    L"On: the Vulkan renderer follows the render target, the viewport and the "
+    L"clears. Off: each draw goes into the eye pictures, with no clear.",
+    // Upload queue
+    L"Queue: a texture that a walk reads again goes to the GPU in the submit, "
+    L"with no wait. Wait: each copy goes at once and waits for the GPU.",
+    // Vulkan window
+    L"With the Vulkan backend, the game window gets its picture through a "
+    L"Vulkan swapchain, or through the CPU and GDI.",
+    // Vulkan only
+    L"On: a walk with the Vulkan eyes goes to the Vulkan renderer alone. Off: "
+    L"Direct3D 9 draws each walk too.",
+    // Vulkan upload
+    L"In a Vulkan session, the CPU pixels (cards, CPU eye pictures, cut scene "
+    L"walls) go into the swapchains by a Vulkan copy, or through Direct3D 11.",
+    // Render thread
+    L"On: the calls of each walk go to the render thread. Kept: the mod keeps "
+    L"them until each stop, for a test only. Off: each call goes as it comes.",
+    // No lock
+    L"On: the mod answers some texture calls with no lock of the device. Off: "
+    L"each call goes to Direct3D 9. Needs the render thread on in the ini.",
+    // Call filter
+    L"On: a call that sets a value that the device has already does not go to "
+    L"Direct3D 9. Needs the render thread on in the ini.",
+    // Own buffers
+    L"On: the render thread draws from buffers of its own. Off: each draw "
+    L"goes to Direct3D 9 as it is. Needs the render thread on in the ini.",
+    // Merge eyes
+    L"On: a batch of one walk is one draw for both eyes. Off: one draw for "
+    L"each eye. Needs the render thread on in the ini.",
+    // GPU flush
+    L"The driver gives the calls of a walk to the GPU each N draws. 0: when "
+    L"the driver wants. A step goes to 0 and back.",
+    // Right eye copy
+    L"The thread that makes the right eye copy of a batch in one walk. "
+    L"Render: the render thread. Frame: the frame thread.",
+    // D3D7 thread
+    L"On: the Direct3D 7 calls of a walk go to their own thread. Off: to "
+    L"dxwrapper on the frame thread. Needs the render thread on in the ini.",
+    // D3D7 merge
+    L"On: the D3D7 thread merges a row of draws with one state. Off: the "
+    L"frame thread merges them.",
+    // Late end
+    L"No wait: the end of a walk does not wait for the render thread. Wait: "
+    L"it waits.",
+    // UI layer
+    L"In picture: the interface is in the eye pictures. Own layer: it is on "
+    L"its own layers. Test: both, and it saves captures. Desktop only.",
+    // Subtitle angle
+    L"How far below the center of the view the subtitles are, in degrees. A "
+    L"step goes 25, 30, 35, 40, 45, then 25 again.",
+    // Subtitle copy
+    L"No wait: the mod reads the copy of the subtitle card in a later frame. "
+    L"Wait: it reads it in the same frame and waits for the GPU.",
+    // Bubble card
+    L"On: a speech bubble of the game is one flat card at the depth of its "
+    L"sign. Off: the game draws it in each eye pass.",
+    // Note depth
+    L"On: a note of the game over a thing, for example a lesson percent over "
+    L"the Creature, has the depth of its place. Off: the interface depth.",
+    // Hint depth
+    L"On: a tooltip or a hint of the game at the Hand has the depth of the "
+    L"Hand in both eyes. Off: the same pixel in both eyes.",
+    // Vulkan panel
+    L"On: the Vulkan renderer draws the panel for the subtitle card and the "
+    L"panel layer. Off: they use the panel of Direct3D 9.",
+    // Prompt timing
+    L"On: the prompt of a target shows at once, stays while the target is "
+    L"there, and shows each time. Off: all prompts use the dwell, hold and "
+    L"count.",
+    // Hint words
+    L"0: the hint of the game replaces the prompt. 1: the prompt of a target "
+    L"owns its button. 2 and 3: the prompt of a take, then a fetch, keeps the "
+    L"grip.",
+    // Prompt moves
+    L"On: the walk line shows while a push moves the player, and the A line "
+    L"only when A can move the player. Off: no walk line.",
+    // Card look
+    L"Scroll: the cards, the ring, the spell book and the keyboard are "
+    L"parchment scrolls with wax seals. Plain: dark cards with white letters.",
+    // Tree card
+    L"On: the card says what an open grip does with a tree in the Hand. Off: "
+    L"the card shows the text of the game, Plant, each time.",
+    // Text click
+    L"On: while a text of the game waits for a click, the card shows its "
+    L"prompt and the trigger clicks it. Off: the usual rule of a hint.",
+    // Catch moving
+    L"Extra reach for an object that moves. Pick: on the pick reach only. "
+    L"Rest: on all of the reach at rest. Open: as Rest, the guard ends at an "
+    L"open grip.",
+    // Wide pick
+    L"Reach in cm for an object that the Hand can hold, when nothing nearer "
+    L"is a target. 0 is off. A step goes to 0 and back.",
+    // Near rule
+    L"The pick at the Hand. One target: the rule of the mod. Nearest: the "
+    L"nearest body in reach. Old: a reach of 60 percent of the Hand, no near "
+    L"rules.",
+    // Far choice
+    L"The choice in the far grab cone. Point: one point. Bias: living things "
+    L"score better. Ranks: living things first. Balls: a ball for each "
+    L"object.",
+    // Far stay
+    L"On: a living thing with the halo keeps it against things that are not "
+    L"living, while the aim stays near its cone. Off: a margin of 2 degrees "
+    L"only.",
+    // Take carry
+    L"On: when the source of a far take goes away while the grip is closed, "
+    L"the grip carries the bundle. Off: the bundle drops at once.",
+    // Roots pile
+    L"Roots: the roots pile of a far tree goes where the tree stood. Glide: "
+    L"it stays where the game puts it, on the way of the glide.",
+    // Take stream
+    L"Curve: the pieces of a far take go on a curve from the top of the "
+    L"source to the Hand. Line: the line of the game, from the land under the "
+    L"Hand.",
+    // Forest take
+    L"On: a closed grip collects the trees of a forest in one bundle. Off: "
+    L"one tree for each grip, as in the plain game.",
+    // Target glow
+    L"What marks a target of the Hand. Mesh: a glow on its mesh, or a halo "
+    L"when the mesh cannot glow. Halo: a halo. Both: the glow and a halo.",
+    // Idle glow
+    L"On: the glow shows also with no target, and while the Hand holds an "
+    L"object. Off: the glow shows only on a target.",
+    // Scroll draw
+    L"On: each scroll that the game draws is a target, with the ball of its "
+    L"draw. Off: only what the pick of the game offers.",
+    // Press guard
+    L"On: in the first 300 ms of a press, before the Hand holds the object, a "
+    L"closed grip opens only below 35 percent. Off: it can open at any time.",
+    // Press hold
+    L"On: the game button stays down until the game has the object in its "
+    L"Hand. Off: it goes up 167 ms after the object comes into the Hand.",
+    // Take guard
+    L"On: while the Hand takes an object, the mod holds back the end of its "
+    L"physics, so a tree stays a tree. Off: the tree can die, and the Hand is "
+    L"empty.",
+    // Catch at once
+    L"On: a grip on an object that moves puts it in the Hand at once. Off: "
+    L"the game picks it up 225 ms later, and it moves on until then.",
+    // Pinch
+    L"Pinch: the Hand holds a small object between the thumb and the index "
+    L"finger. Fist: the Hand holds it in the fist.",
+    // Finger feel
+    L"On: the fingers react to the world. Off: the fingers have the curls of "
+    L"the pose only.",
+    // Game Hand
+    L"Hidden: the mod hides the mesh of the game Hand while a controller "
+    L"places it, and draws both hands. Shown: the game draws its Hand too.",
+    // Hand model
+    L"The hands that the mod draws. Low poly: simple hands. Game: the hand "
+    L"mesh of the game. File: the hand mesh from a file.",
+    // Hand look
+    L"The look of the game hand mesh: the alignment of the player, evil, "
+    L"neutral or good. The low poly hands do not change.",
+    // Fast release
+    L"On: a game turn runs on the frame after a release of the Hand, or after "
+    L"the grip opens in a take. Off: the mod waits up to 100 ms for the game "
+    L"turn.",
+    // Throw law
+    L"Real: a throw has the real flight. Root: the square root law with the "
+    L"game physics. Gain: a fixed gain with the game physics.",
+    // Throw picture
+    L"Where the mod draws a thrown object between game steps. Real: a substep "
+    L"with a touch is 5 ms, and the picture waits at a guess. Flight: flight "
+    L"time.",
+    // Fall rule
+    L"On: a still hand lets an object fall when the Hand point is high over "
+    L"the land. Off: the hand sets the object down at each height.",
+    // Landing
+    L"Game: the landing of the game. Land: the land rate, with a low bounce "
+    L"and the brake. Flight: the low bounce and the brake at the flight rate.",
+    // Tree settle
+    L"On: a falling tree that touches the land at a low speed turns down "
+    L"fast. Off: the turn of the game. Needs a landing of the mod.",
+    // Throw turn
+    L"Pace: a thrown object turns as fast as the game turns it. Game: the "
+    L"momentum of the game, so the picture turns faster in a slow flight.",
+    // Land rest
+    L"How a landed object comes to rest. On: three rules (spin, steep land, "
+    L"still). Spin, Steep, Still: that rule only. Off: the rules of the game.",
+    // Throw slower
+    L"Makes the time factor of a throw larger, so the next throw flies "
+    L"slower.",
+    // Throw faster
+    L"The time factor of a throw, times 10, from 10 to 100. The next throw "
+    L"has the real arc, this many times slower. Left: slower. Right: faster.",
+    // Land slower
+    L"Makes the rate of the land smaller, so a thrown object moves slower "
+    L"after it lands.",
+    // Land faster
+    L"How fast a thrown object moves after its first contact, times 10, from "
+    L"10 to 100. 10 is the time of the game. Left: slower. Right: faster.",
+    // Command rule
+    L"4: a press on the land stays a walk. 3 and 2: a press goes to a live "
+    L"target. 1: the press fixes its kind. A step goes down to 1, then to 4.",
+    // Hold stay
+    L"On: a long grip on the far Creature makes it stay. Off: the leash click "
+    L"goes out when the grip closes, and no grip makes it stay.",
+    // Stroke hand
+    L"By size: the size of the Creature chooses the hand of a stroke. Flat: "
+    L"the flat hand always. Finger: the index finger always. Fist: the fist.",
+    // Stroke limits
+    L"The size limits of the finger and the flat hand in a stroke. Ini: the "
+    L"limits of the ini. Fixed: the fixed limits of the test key.",
+    // Palm point
+    L"Palm: with the flat hand of a stroke, the point of the Hand is the "
+    L"palm. Finger: it is the tip of the index finger.",
+    // Slap speed
+    L"The speed of the hand that a slap needs. Ini: the value of the ini. A "
+    L"hard slap needs 1.8 times this speed.",
+    // Miracle hand
+    L"On: a miracle is in the real hand, with a target, a cancel and lines. "
+    L"Off: the game places the Hand with the miracle.",
+    // Totem hand
+    L"On: the totem follows the real hand. Off: the game moves the totem with "
+    L"the screen rows of the pixel of the Hand point.",
+    // Hold target
+    L"On: with an object in the Hand, the target is the thing at the Hand, "
+    L"with a halo. Off: the object behind the pixel of the Hand point.",
+    // Spell book
+    L"On: the first face button of the hand that does not point opens the "
+    L"spell book. Off: that button has no job.",
+    // Book pull
+    L"On: the hand pulls a miracle out of the book. Off: the grip takes the "
+    L"miracle at once.",
+    // Book bubble
+    L"Game: the bubble that the hand pulls out is the bubble of the game. "
+    L"Flat: a flat picture with the two gestures.",
+    // All miracles
+    L"For a test only. Each town knows each miracle, the spell book shows up "
+    L"to 6, and the miracles cost no prayer power.",
+    // Gesture point
+    L"Fingertip: the tip of the index finger draws a gesture. Grip: the grip "
+    L"point draws it.",
+    // Gesture trail
+    L"On: a ribbon follows the point of the draw while the draw button is "
+    L"held. Off: no trail.",
+    // Sound step
+    L"A test. Each step removes more of the mod sound: as set, same distance "
+    L"at each zoom, QMixer pans, the game picks the sounds, the game ears.",
+    // Stop wait
+    L"Skip: the mod skips the 20 ms wait of the audio DLL at a sound stop. "
+    L"Wait: each stop holds the frame thread for 20 ms.",
+    // Take loop
+    L"On: the ears start the loop sound of a bulk take. Off: the game camera "
+    L"starts it, and in the God view the take has no sound.",
+    // Temple pointer
+    L"Ray click: a ray, and the trigger and the grip are both Action. Ray "
+    L"plain: a ray with the plain buttons. Hand: the real hand, with no line.",
+    // Room flight
+    L"On: the camera flies into a room of the Temple, as in the plain game. "
+    L"Off: the camera is at its rest pose at once.",
+    // Room view
+    L"Head view: each eye draws the room from the head. Screen: the same, but "
+    L"the head does not turn the room camera. Game cam: the camera of the "
+    L"game.",
+    // Temple fade
+    L"Both eyes: the fade of the Temple shows in both eyes. Left eye: it "
+    L"shows in the left eye only.",
+};
+
 const int kCount = static_cast<int>(sizeof(kSwitches) / sizeof(kSwitches[0]));
+static_assert(sizeof(kTips) / sizeof(kTips[0]) == sizeof(kSwitches) /
+                                                     sizeof(kSwitches[0]),
+              "each switch needs one note in kTips");
 static_assert(kCount <= radial_math::kMaxSwitches,
               "the ring has no item code for so many switches");
 
@@ -673,6 +1075,7 @@ bool IniPath(char path[MAX_PATH]) {
 // the other keys of the mod are read, so it reads the file itself.
 int g_test_keys = -1;
 int g_debug_menu = -1;
+int g_debug_window = 1;
 
 void ReadKeys() {
   if (g_debug_menu >= 0) return;
@@ -684,6 +1087,8 @@ void ReadKeys() {
   }
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, path) != 0;
   g_debug_menu = GetPrivateProfileIntA("bwvr", "debug_menu", 0, path) != 0;
+  g_debug_window =
+      GetPrivateProfileIntA("bwvr", "debug_window", 1, path) != 0 ? 1 : 0;
 }
 
 void Narrow(const wchar_t* in, char* out, size_t size) {
@@ -748,7 +1153,11 @@ void DebugSwitchValueText(int i, int value, wchar_t* out, int size) {
   swprintf_s(out, size, L"%d", value);
 }
 
-bool DebugSwitchChoose(int i) {
+namespace {
+
+// A step of switch i: its change function, or `back` for the left arrow of
+// the window. The log has the switch and its new value.
+bool Step(int i, bool back) {
   if (i < 0 || i >= kCount) return false;
   const Switch& s = kSwitches[i];
   const int before = s.value();
@@ -759,23 +1168,65 @@ bool DebugSwitchChoose(int i) {
            "frame %llu", label, ControllersFrameCount());
     return false;
   }
-  s.change(kDebugBy);
+  const bool other = back && s.back != nullptr;
+  (other ? s.back : s.change)(kDebugBy);
   const int after = s.value();
   wchar_t word[32];
   char text[32];
   DebugSwitchValueText(i, after, word, 32);
   Narrow(word, text, sizeof(text));
+  const char* way = other ? " (a step back)" : "";
   if (s.key[0] != 0) {
-    ModLog("debug page   : the player chose \"%s\": %s is %d now (%s), it was "
-           "%d, frame %llu", label, s.key, after, text, before,
+    ModLog("debug page   : the player chose \"%s\"%s: %s is %d now (%s), it "
+           "was %d, frame %llu", label, way, s.key, after, text, before,
            ControllersFrameCount());
   } else {
-    ModLog("debug page   : the player chose \"%s\": the value is %d now (%s), "
-           "it was %d, frame %llu", label, after, text, before,
+    ModLog("debug page   : the player chose \"%s\"%s: the value is %d now "
+           "(%s), it was %d, frame %llu", label, way, after, text, before,
            ControllersFrameCount());
   }
   return true;
 }
+
+}  // namespace
+
+bool DebugSwitchChoose(int i) { return Step(i, false); }
+
+bool DebugWindowOn() {
+  ReadKeys();
+  return g_debug_menu != 0 && g_debug_window != 0;
+}
+
+bool DebugSwitchInWindow(int i) {
+  return i >= 0 && i < kCount && kSwitches[i].in_window;
+}
+
+const wchar_t* DebugSwitchWindowLabel(int i) {
+  if (i < 0 || i >= kCount) return L"";
+  return kSwitches[i].window_label != nullptr ? kSwitches[i].window_label
+                                              : kSwitches[i].label;
+}
+
+const wchar_t* DebugSwitchTip(int i) {
+  return i >= 0 && i < kCount ? kTips[i] : L"";
+}
+
+int DebugSwitchValueCount(int i) {
+  if (i < 0 || i >= kCount) return 0;
+  const wchar_t* w = kSwitches[i].words;
+  if (w == nullptr || w[0] == 0) return 0;
+  int n = 1;
+  for (; *w != 0; ++w) {
+    if (*w == L'|') ++n;
+  }
+  return n;
+}
+
+bool DebugSwitchHasBack(int i) {
+  return i >= 0 && i < kCount && kSwitches[i].back != nullptr;
+}
+
+bool DebugSwitchStep(int i, bool back) { return Step(i, back); }
 
 void DebugMenuLogStart() {
   if (!DebugMenuOn()) return;
@@ -786,4 +1237,18 @@ void DebugMenuLogStart() {
   ModLog("debug page   : debug_menu=1. The ring has the item \"debug\" with "
          "%d switches in %d groups, %d of them can change now. test_keys=%d",
          kCount, static_cast<int>(kGroups), can, g_test_keys);
+  int backs = 0;
+  for (int i = 0; i < kCount; ++i) {
+    if (kSwitches[i].back != nullptr) ++backs;
+  }
+  ModLog("debug page   : debug_window=%d. %s", g_debug_window,
+         g_debug_window != 0
+             ? "The item \"debug\" opens the debug window, and the ray and "
+               "the trigger of the pointing hand change its switches"
+             : "The item \"debug\" goes to the debug pages of the ring");
+  if (g_debug_window != 0) {
+    ModLog("debug page   : in the window, %d switches step back with the left "
+           "arrow, and the left arrow of each other switch of more than two "
+           "values makes the step of its test key", backs);
+  }
 }

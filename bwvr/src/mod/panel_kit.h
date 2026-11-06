@@ -11,6 +11,9 @@
 //            drawn one time and a card that each frame shows
 //   Tiles    a copy of the box of each part in each look, so a new picture
 //            copies the parts that changed and draws a part one time only
+//   Widgets  a toggle, a key with an arrow, a scroll bar, words that wrap in
+//            lines, and a note of paper over the card, for a panel of
+//            settings (debug_window.cpp)
 //
 // The math (the place, the hit test, the trigger) is in panel_kit_math.h.
 
@@ -20,6 +23,7 @@
 #include <windows.h>
 #include <stdint.h>
 
+#include "card_scroll.h"
 #include "panel_kit_math.h"
 
 namespace panel_kit {
@@ -64,6 +68,8 @@ int Step(Room* room, HitFn hit, void* context, float* trigger);
 
 // A press that acts: the stronger pulse, and the part flashes for 120 ms.
 void Pressed(Room* room, int part);
+// The flash with no pulse, for a press whose act gives a pulse of its own.
+void Flash(Room* room, int part);
 
 // The part that flashes now, or -1.
 int Flashing(Room* room);
@@ -134,8 +140,9 @@ void ClearCard(Canvas* canvas);
 
 // --- the parts -------------------------------------------------------------------
 
-// The looks of a button.
-enum Look { kPlain = 0, kHover = 1, kFlash = 2, kDim = 3, kLooks = 4 };
+// The looks of a button. kOn is a button that is on now, for example the
+// tab of the page that shows: bright gold, as a press.
+enum Look { kPlain = 0, kHover = 1, kFlash = 2, kDim = 3, kOn = 4, kLooks = 5 };
 
 // A BUTTON of the parchment: a key of ink (card_scroll::Key) with its word.
 // Under the ray it is gold, after a press bright gold, and a dim button is
@@ -159,6 +166,69 @@ bool MakeTiles(Tiles* tiles, int parts, int looks);
 typedef void (*DrawFn)(Canvas* canvas, int part, int look, void* context);
 bool ShowPart(Canvas* canvas, Tiles* tiles, int part, int look,
               const int box[4], DrawFn draw, void* context);
+
+// --- the widgets -----------------------------------------------------------------
+//
+// These draw into a picture `to` of the caller whose pitch is the width of
+// the canvas, and whose height is not more than the height of the canvas.
+// The letters go into the GDI picture at the same x and y. So a part can be
+// drawn at the top of a picture of its own, and then copied to its place.
+
+// A picture of the canvas: the card, or the page.
+card_scroll::Picture CardPicture(Canvas* canvas);
+card_scroll::Picture PagePicture(Canvas* canvas);
+
+// Words of dark ink in the box (x0, y0, x1, y1) of `to`, with the capital
+// in the middle of the box.
+enum Align { kCenter = 0, kLeftAlign = 1, kRightAlign = 2 };
+void InkWordsIn(Canvas* canvas, const card_scroll::Picture& to,
+                const Font& font, const wchar_t* words, const int box[4],
+                int seed, int align);
+
+// Words that wrap into lines in the box, from its top, at the left. The
+// answer is the height of the lines in pixels. With `draw` false nothing
+// changes, and the answer is the height that the words need.
+int InkLines(Canvas* canvas, const card_scroll::Picture& to, const Font& font,
+             const wchar_t* words, const int box[4], int seed, bool draw);
+
+// A KEY WITH AN ARROW: a key of ink (card_scroll::Key) in a look of Look,
+// with a triangle of ink that points to the left or to the right. rect is
+// x, y, w, h, and the key changes kRim pixels round it.
+void ArrowKey(Canvas* canvas, const card_scroll::Picture& to, const int rect[4],
+              int look, bool left, int seed);
+
+// A TOGGLE: a slot (a key of ink) with a knob of wax in it. The knob is at
+// the right and green when `on`, and at the left and pale red when not.
+// rect is x, y, w, h.
+void Toggle(Canvas* canvas, const card_scroll::Picture& to, const int rect[4],
+            int look, bool on, int seed);
+
+// A SCROLL BAR: the track (x0, y0, x1, y1) is a key of ink pressed into the
+// paper, and the thumb (x0, y0, x1, y1) is a key in it, in a look of Look.
+// It changes the track and kRim pixels round it.
+void ScrollBar(Canvas* canvas, const card_scroll::Picture& to,
+               const int track[4], const int thumb[4], int look, int seed);
+
+// The box (x0, y0, x1, y1) of `to` goes 65 percent of the way back to the
+// same box of `under`, as Fade does.
+void FadeBox(const card_scroll::Picture& to, const card_scroll::Picture& under,
+             const int box[4]);
+
+// A NOTE: a small card of paper with rolled ends (card_scroll::Paper) and
+// the words of `lines` in it, drawn into `note`, a picture of the caller as
+// for the widgets, of the size of the note. The answer is false when the
+// note does not fit in the canvas. Each line of `lines` is one paragraph:
+// lines[0] in `title`, the others in `font`. Over puts it on the card, so a
+// note that does not change is drawn one time.
+bool Note(Canvas* canvas, const card_scroll::Picture& note,
+          const wchar_t* const* lines, int count, const Font& title,
+          const Font& font, int seed);
+// A picture with alpha (the color multiplied by the alpha) over the card at
+// x, y. The parts of the card under it change.
+void Over(Canvas* canvas, const card_scroll::Picture& picture, int x, int y);
+// The height of the note for `lines` at the width of `note`.
+int NoteHeight(Canvas* canvas, int width, const wchar_t* const* lines,
+               int count, const Font& title, const Font& font);
 
 // THE DARK LOOK (hint_card_style=0), drawn all of it in the GDI picture.
 void PlainFill(Canvas* canvas, const int box[4], COLORREF color);

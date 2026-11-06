@@ -90,6 +90,7 @@ add_library(bwvr_mod SHARED
     radial_menu.cpp
     panel_kit.cpp
     places_panel.cpp
+    debug_window.cpp
     snapshot.cpp
     spell_book.cpp
     book_bubble.cpp

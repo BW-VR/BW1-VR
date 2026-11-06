@@ -70,4 +70,67 @@ inline int PressStep(Press* p, float trigger, int part_under_ray) {
 // The panel opens: a trigger that is down now is not a press.
 inline void PressOpen(Press* p) { p->down = p->was = true; }
 
+// THE LIST THAT SCROLLS. A list of `content` pixels shows in a view of
+// `view` pixels, from `offset` pixels down the list. The scroll bar beside
+// it has a track of `track` pixels, and the thumb shows which part of the
+// list is in the view.
+
+// The largest offset: 0 when the list fits in the view.
+inline int MaxOffset(int content, int view) {
+  return content > view ? content - view : 0;
+}
+
+inline int ClampOffset(int offset, int content, int view) {
+  const int most = MaxOffset(content, view);
+  return offset < 0 ? 0 : (offset > most ? most : offset);
+}
+
+// The thumb: its top from the top of the track, and its length. The length
+// is the share of the list in the view, and at least `least` pixels. With
+// a list that fits, the thumb fills the track.
+inline void Thumb(int content, int view, int offset, int track, int least,
+                  int* top, int* length) {
+  const int most = MaxOffset(content, view);
+  if (most <= 0 || track <= 0) {
+    *top = 0;
+    *length = track;
+    return;
+  }
+  int n = static_cast<int>(static_cast<long long>(track) * view / content);
+  if (n < least) n = least;
+  if (n > track) n = track;
+  *length = n;
+  const int clamped = ClampOffset(offset, content, view);
+  *top = static_cast<int>(static_cast<long long>(track - n) * clamped / most);
+}
+
+// The offset for a thumb whose top is `top` pixels down the track: the
+// other way of Thumb. The ray drags the thumb with this.
+inline int OffsetOfThumb(int content, int view, int track, int least,
+                         int top) {
+  const int most = MaxOffset(content, view);
+  if (most <= 0) return 0;
+  int n = static_cast<int>(static_cast<long long>(track) * view / content);
+  if (n < least) n = least;
+  if (n > track) n = track;
+  const int room = track - n;
+  if (room <= 0) return 0;
+  const int t = top < 0 ? 0 : (top > room ? room : top);
+  return static_cast<int>((static_cast<long long>(t) * most + room / 2) /
+                          room);
+}
+
+// THE STICK scrolls the list while it is pushed forward or back: no move
+// below `rest` (0 to 1), then a speed that grows from 0 to `full` pixels a
+// second at a full push. Forward (a positive push) goes up the list, so
+// the answer is negative then. dt is the time of the frame in seconds.
+inline float StickScroll(float push, float rest, float full, float dt) {
+  const float a = push < 0.0f ? -push : push;
+  if (!(a > rest) || rest >= 1.0f || !(dt > 0.0f)) return 0.0f;
+  float share = (a - rest) / (1.0f - rest);
+  if (share > 1.0f) share = 1.0f;
+  const float pixels = share * share * full * dt;
+  return push > 0.0f ? -pixels : pixels;
+}
+
 }  // namespace panel_kit_math

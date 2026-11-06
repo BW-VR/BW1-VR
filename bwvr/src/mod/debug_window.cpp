@@ -1,0 +1,1156 @@
+// The debug window. See debug_window.h, docs/controllers.md, "The debug
+// window", and docs/ui-layer.md, "The debug window".
+//
+// WHY. The debug page holds the switches of the test keys (debug_menu.cpp)
+// for a live A/B in the headset. On the ring it is a walk through pages of
+// seals, a group and then 6 switches at a time, and a seal has no room to
+// say what its switch does. The window shows a whole group as a list, with
+// a control for each switch and a note that says what it does.
+//
+// WHAT. The item "debug" of the ring opens the window at the place of the
+// panel of places (places_panel.cpp): 1 m in front of the head, 12 degrees
+// below eye level, fixed in the room. At its left is a tab for each group,
+// and at its right the switches of the group, one row for each:
+//
+//   a toggle      a switch with two values. A press anywhere on the row
+//                 changes it
+//   two arrows    a switch with more values. The right arrow makes the step
+//                 of its test key. The left arrow makes the step back of the
+//                 switch when the table gives one (throw speed, land speed),
+//                 and else the same step as the right arrow: the change
+//                 function of a test key steps one way only
+//   no control    a switch that cannot change now (kDebugCannot): the row
+//                 is dim
+//
+// A group with more than 10 rows has a scroll bar. The ray drags its thumb,
+// a press on its track goes one view up or down, and the stick of the
+// pointing hand forward and back scrolls the list while the ray is on the
+// window (it does not zoom then). When the ray rests on a row for 0.35 s, a
+// note of paper shows what the switch is and what it does, and its ini key.
+// Close, B of the pointing hand and the menu button close the window. The
+// ring, the spell book, a dialog box and a cut scene close it too.
+//
+// A STEP of a switch is the step of its test key (DebugSwitchStep): the
+// same change, the same pulse and the same log line. So the window gives no
+// pulse of its own for a step, only the flash of the control.
+//
+// THE BAKE. The page with the title is drawn one time, with an ink rule
+// above and below the list. Each tab and Close in each look is drawn the
+// first time that it shows, and a copy is kept (panel_kit::Tiles). Each row
+// of the group is drawn into a picture of its own when its look or its
+// value changes. Each row has the same paper (the paper of the first row of
+// the list), so a copy of a row can go to each place of the list, and a
+// scroll is a copy of the rows that show. The scroll bar, the note and the
+// words of the bottom row are drawn when they change.
+//
+// THE PICTURE uses the quad layer of the ring (kCardRing): the ring and the
+// window never show at one time.
+//
+//   debug_window=1             0: the item "debug" goes to the debug pages
+//                              of the ring (debug_menu.cpp)
+//   hint_card_style=1          1: the parchment. 0: the dark window
+//   debug_window_test_save=0   N: saves the first N pictures of the window
+//                              with a new group, a new value, a note or a
+//                              scroll as bwvr-debugwin-<frame>.bmp (a test
+//                              key)
+//   debug_test_parts           a test key: the parts for the word "aimdebug"
+//                              of the scripted controller, for example
+//                              "tab2 right0 row3 thumb trackend close"
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
+
+#include <new>
+
+#include "card_scroll.h"
+#include "controllers.h"
+#include "cutscene_window.h"
+#include "debug_menu.h"
+#include "debug_window.h"
+#include "debug_window_math.h"
+#include "haptics.h"
+#include "panel_kit.h"
+#include "radial_menu.h"
+#include "spell_book.h"
+
+extern void ModLog(const char* format, ...);
+
+uint64_t ControllersFrameCount();
+// eye_capture.cpp
+void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
+                      const void* pixels, int pitch, uint32_t width,
+                      uint32_t height);
+
+namespace {
+
+using namespace debugwin_math;
+namespace kit = panel_kit;
+
+// --- the settings ----------------------------------------------------------------
+
+bool g_read = false;
+int g_style_ini = 1;
+int g_save = 0;
+int g_saved = 0;
+const int kMostTests = 48;
+int g_tests[kMostTests];
+int g_test_count = 0;
+int g_tests_used = 0;
+
+// The stick: no scroll below this push, and the speed at a full push.
+const float kStickRest = 0.25f;
+const float kStickFull = 1400.0f;  // pixels a second, 18 rows
+
+bool IniPath(char path[MAX_PATH]) {
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) return false;
+  char* slash = strrchr(path, '\\');
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return false;
+  slash[1] = 0;
+  strcat_s(path, MAX_PATH, "bwvr.ini");
+  return true;
+}
+
+void ReadSettings() {
+  if (g_read) return;
+  g_read = true;
+  char path[MAX_PATH];
+  char text[512] = "";
+  if (IniPath(path)) {
+    g_style_ini =
+        GetPrivateProfileIntA("bwvr", "hint_card_style", 1, path) != 0 ? 1 : 0;
+    g_save = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "debug_window_test_save", 0, path));
+    GetPrivateProfileStringA("bwvr", "debug_test_parts", "", text,
+                             sizeof(text), path);
+  }
+  g_test_count = ParseParts(text, g_tests, kMostTests);
+  if (g_save > 0) {
+    ModLog("debug window : debug_window_test_save=%d saves pictures of the "
+           "window (a test)", g_save);
+  }
+  if (g_test_count > 0) {
+    ModLog("debug window : debug_test_parts has %d parts for the word "
+           "aimdebug (a test)", g_test_count);
+  }
+}
+
+double NowMs() {
+  static LARGE_INTEGER frequency = {};
+  if (frequency.QuadPart == 0) QueryPerformanceFrequency(&frequency);
+  LARGE_INTEGER count;
+  QueryPerformanceCounter(&count);
+  return static_cast<double>(count.QuadPart) * 1000.0 /
+         static_cast<double>(frequency.QuadPart);
+}
+
+void Narrow(const wchar_t* in, char* out, size_t size) {
+  size_t n = 0;
+  for (; n + 1 < size && in != nullptr && in[n] != 0; ++n) {
+    out[n] = (in[n] >= 32 && in[n] < 127) ? static_cast<char>(in[n]) : '?';
+  }
+  out[n] = 0;
+}
+
+// --- the state -------------------------------------------------------------------
+
+kit::Room g_room = {};
+// The trigger stays with the window after a press that closed it, until it
+// goes up. The pump reads these, so they are LONGs.
+volatile LONG g_holds = 0;
+volatile LONG g_stick = 0;
+bool g_hold_after = false;
+
+// The group that shows, and its rows: the switch of each row, and its kind
+// and value, latched once a frame.
+int g_group = 0;
+int g_rows = 0;
+int g_switch[kMostRows];
+unsigned char g_kind[kMostRows];
+int g_value[kMostRows];
+
+// The scroll: whole pixels for the picture, and the stick adds parts of a
+// pixel.
+int g_offset = 0;
+float g_offset_f = 0.0f;
+bool g_drag = false;
+int g_grab = 0;
+bool g_stick_moving = false;
+int g_stick_from = 0;
+double g_last_ms = 0.0;
+
+// The note: the row under the ray, since when, and the row whose note shows.
+int g_rest_row = -1;
+double g_rest_since = 0.0;
+int g_note_row = -1;
+
+// The words of the bottom row after a press, until then.
+wchar_t g_status[96] = L"";
+ULONGLONG g_status_until = 0;
+const ULONGLONG kStatusMs = 2500;
+
+uint64_t g_opens = 0, g_presses = 0, g_steps = 0, g_refused = 0;
+uint64_t g_draws = 0, g_hover_draws = 0;
+double g_draw_ms = 0.0, g_draw_most_ms = 0.0, g_hover_most_ms = 0.0;
+int g_logs = 0;
+const int kMaxLogs = 300;
+
+bool LogRoom() {
+  if (g_logs >= kMaxLogs) return false;
+  ++g_logs;
+  return true;
+}
+
+void SetHolds() {
+  InterlockedExchange(&g_holds, (g_room.open || g_hold_after) ? 1 : 0);
+}
+
+int Groups() {
+  const int n = DebugGroupCount();
+  return n < kMostTabs ? n : kMostTabs;
+}
+
+void Latch() {
+  for (int r = 0; r < g_rows; ++r) {
+    const int i = g_switch[r];
+    g_value[r] = DebugSwitchValue(i);
+    g_kind[r] = static_cast<unsigned char>(KindOfRow(
+        DebugSwitchValueCount(i), g_value[r] == kDebugCannot));
+  }
+}
+
+void FillGroup(int group) {
+  g_group = group;
+  g_rows = 0;
+  const int count = DebugSwitchCount();
+  for (int i = 0; i < count && g_rows < kMostRows; ++i) {
+    if (DebugSwitchGroup(i) == group && DebugSwitchInWindow(i)) {
+      g_switch[g_rows++] = i;
+    }
+  }
+  g_offset = 0;
+  g_offset_f = 0.0f;
+  g_drag = false;
+  g_stick_moving = false;
+  g_rest_row = -1;
+  g_note_row = -1;
+  Latch();
+}
+
+int HitPart(float u, float v, void*) {
+  return PartAt(u, v, Groups(), g_rows, g_kind, g_offset);
+}
+
+const char* PartName(int part, char* out, size_t size) {
+  char label[40];
+  if (part < 0) {
+    sprintf_s(out, size, "no part");
+  } else if (part < kMostTabs) {
+    Narrow(DebugGroupName(part), label, sizeof(label));
+    sprintf_s(out, size, "the tab %s", label);
+  } else if (part == kPartClose) {
+    sprintf_s(out, size, "Close");
+  } else if (part == kPartThumb) {
+    sprintf_s(out, size, "the thumb of the scroll bar");
+  } else if (part == kPartTrack) {
+    sprintf_s(out, size, "the track of the scroll bar");
+  } else {
+    const int r = RowOf(part);
+    if (r < 0 || r >= g_rows) {
+      sprintf_s(out, size, "no row");
+      return out;
+    }
+    Narrow(DebugSwitchWindowLabel(g_switch[r]), label, sizeof(label));
+    const int on = OnOf(part);
+    sprintf_s(out, size, "%s%s (row %d)",
+              on == kOnLeft    ? "the left arrow of "
+              : on == kOnRight ? "the right arrow of "
+                               : "",
+              label, r);
+  }
+  return out;
+}
+
+void Close(const char* why, bool hold) {
+  if (!g_room.open) return;
+  kit::Close(&g_room);
+  g_hold_after = hold;
+  g_drag = false;
+  g_note_row = -1;
+  SetHolds();
+  InterlockedExchange(&g_stick, 0);
+  ModLog("debug window : the window closes: %s, frame %llu", why,
+         ControllersFrameCount());
+}
+
+// --- the picture -----------------------------------------------------------------
+
+struct RowLook {
+  int value;
+  uint8_t kind;
+  uint8_t row;    // a panel_kit::Look: all of a toggle row
+  uint8_t left;   // the left arrow
+  uint8_t right;  // the right arrow
+};
+
+bool SameRow(const RowLook& a, const RowLook& b) {
+  return a.value == b.value && a.kind == b.kind && a.row == b.row &&
+         a.left == b.left && a.right == b.right;
+}
+
+struct Look {
+  int style;
+  int group;
+  int rows;
+  int offset;
+  int note_row;
+  int bar;  // the look of the thumb, or -1 with no scroll bar
+  uint8_t tab[kMostTabs];
+  uint8_t close;
+  wchar_t status[96];
+  RowLook row[kMostRows];
+};
+Look g_drawn;
+bool g_have_drawn = false;
+Look g_saved_look;
+bool g_have_saved = false;
+
+kit::Canvas g_canvas = {};
+kit::Tiles g_tab_tiles = {};  // the tabs, then Close
+const int kTabParts = kMostTabs + 1;
+uint8_t* g_band = nullptr;     // the paper of a row, with no words
+uint8_t* g_scratch = nullptr;  // a row while it is drawn
+uint8_t* g_note = nullptr;     // the note while it is drawn
+uint8_t* g_tile[kMostRows];    // each row of the group, as it shows now
+RowLook g_tile_look[kMostRows];
+bool g_tile_ok[kMostRows];
+int g_tile_group = -1;
+const size_t kTileBytes = static_cast<size_t>(kWellWidth) * kRowPitch * 4;
+kit::Font g_title_font = {}, g_tab_font = {}, g_label_font = {},
+          g_value_font = {}, g_status_font = {}, g_note_title = {},
+          g_note_font = {};
+bool g_fonts_failed = false;
+HFONT g_plain_font = nullptr, g_plain_small = nullptr;
+
+card_scroll::Picture RowPicture(uint8_t* bgra) {
+  const card_scroll::Picture p = {bgra, kWidth, kWellWidth, kRowPitch};
+  return p;
+}
+
+// A rule of ink: the pixels of the box get darker.
+void Rule(uint8_t* bgra, int pitch, int x0, int x1, int y0, int y1, int keep) {
+  for (int y = y0; y < y1; ++y) {
+    uint8_t* p = bgra + (static_cast<size_t>(y) * pitch + x0) * 4;
+    for (int x = x0; x < x1; ++x, p += 4) {
+      for (int k = 0; k < 3; ++k) p[k] = static_cast<uint8_t>(p[k] * keep / 256);
+    }
+  }
+}
+
+// The page: the fonts, the title, and a rule above and below the list. The
+// kit has loaded the fonts of the cards (card_scroll::Start) before this.
+void DrawPage(kit::Canvas* c, void*) {
+  g_title_font = kit::WordsFont(c, 36);
+  g_tab_font = kit::WordsFont(c, 22);
+  g_label_font = kit::WordsFont(c, 24);
+  g_value_font = kit::SealFont(c, 21);
+  g_status_font = kit::WordsFont(c, 21);
+  g_note_title = kit::WordsFont(c, 22);
+  g_note_font = kit::WordsFont(c, 19);
+  const int title[4] = {kLeft, kTitleTop, kRight, kTitleBottom};
+  kit::InkWords(c, g_title_font, L"Debug switches", title, 5, true);
+  Rule(c->page, c->width, kWellLeft, kWellRight, kWellTop - 4, kWellTop - 1,
+       150);
+  Rule(c->page, c->width, kWellLeft, kWellRight, kWellBottom + 1,
+       kWellBottom + 4, 150);
+}
+
+bool ParchmentStart() {
+  if (g_fonts_failed) return false;
+  if (!kit::StartParchment(&g_canvas, &DrawPage, nullptr)) return false;
+  if (g_band == nullptr) {
+    const size_t bytes = static_cast<size_t>(kWidth) * kRowPitch * 4;
+    g_band = new (std::nothrow) uint8_t[bytes];
+    g_scratch = new (std::nothrow) uint8_t[bytes];
+    g_note = new (std::nothrow)
+        uint8_t[static_cast<size_t>(kWidth) * kNoteMost * 4];
+    if (g_band != nullptr) {
+      memset(g_band, 0, bytes);
+      // The paper of the first row of the list.
+      for (int y = 0; y < kRowPitch; ++y) {
+        memcpy(g_band + static_cast<size_t>(y) * kWidth * 4,
+               g_canvas.page +
+                   (static_cast<size_t>(kWellTop + y) * kWidth + kWellLeft) *
+                       4,
+               static_cast<size_t>(kWellWidth) * 4);
+      }
+    }
+  }
+  if (g_title_font.font == nullptr || g_tab_font.font == nullptr ||
+      g_label_font.font == nullptr || g_value_font.font == nullptr ||
+      g_status_font.font == nullptr || g_note_title.font == nullptr ||
+      g_note_font.font == nullptr || g_band == nullptr ||
+      g_scratch == nullptr || g_note == nullptr ||
+      !kit::MakeTiles(&g_tab_tiles, kTabParts, kit::kLooks)) {
+    g_fonts_failed = true;
+    ModLog("debug window : no font or no memory for the parchment, so the "
+           "window is dark");
+    return false;
+  }
+  return true;
+}
+
+void TabRectOf(int part, int r[4]) {
+  if (part == kMostTabs) {
+    CloseRect(r);
+  } else {
+    TabRect(part, r);
+  }
+}
+
+void DrawTab(kit::Canvas* c, int part, int look, void*) {
+  int r[4];
+  TabRectOf(part, r);
+  kit::Button(c, r, look, part == kMostTabs ? L"Close" : DebugGroupName(part),
+              part == kMostTabs ? g_label_font : g_tab_font, part * 7 + 3);
+}
+
+// Row r of the group in its look: into the picture of its row.
+void DrawRow(int r, const RowLook& look) {
+  const card_scroll::Picture to = RowPicture(g_scratch);
+  for (int y = 0; y < kRowPitch; ++y) {
+    memcpy(g_scratch + static_cast<size_t>(y) * kWidth * 4,
+           g_band + static_cast<size_t>(y) * kWidth * 4,
+           static_cast<size_t>(kWellWidth) * 4);
+  }
+  const int i = g_switch[r];
+  const int seed = i * 5 + 1;
+  int box[4];
+  LabelBox(box);
+  kit::InkWordsIn(&g_canvas, to, g_label_font, DebugSwitchWindowLabel(i), box,
+                  seed, kit::kLeftAlign);
+  wchar_t word[32];
+  if (look.kind == kRowDim) {
+    ValueBox(kRowArrows, box);
+    kit::InkWordsIn(&g_canvas, to, g_value_font, L"not now", box, seed + 1,
+                    kit::kCenter);
+    const int all[4] = {0, 0, kWellWidth, kRowPitch - 3};
+    const card_scroll::Picture under = RowPicture(g_band);
+    kit::FadeBox(to, under, all);
+  } else if (look.kind == kRowToggle) {
+    DebugSwitchValueText(i, look.value, word, 32);
+    ValueBox(kRowToggle, box);
+    kit::InkWordsIn(&g_canvas, to, g_value_font, word, box, seed + 1,
+                    kit::kRightAlign);
+    int pill[4];
+    PillRect(pill);
+    kit::Toggle(&g_canvas, to, pill, look.row, look.value != 0, seed + 2);
+  } else {
+    DebugSwitchValueText(i, look.value, word, 32);
+    ValueBox(kRowArrows, box);
+    kit::InkWordsIn(&g_canvas, to, g_value_font, word, box, seed + 1,
+                    kit::kCenter);
+    int a[4];
+    LeftArrowRect(a);
+    kit::ArrowKey(&g_canvas, to, a, look.left, true, seed + 2);
+    RightArrowRect(a);
+    kit::ArrowKey(&g_canvas, to, a, look.right, false, seed + 3);
+  }
+  // A rule at the foot of the row: the join of two rows is under it.
+  Rule(g_scratch, kWidth, 10, kWellWidth - 10, kRowPitch - 3, kRowPitch - 1,
+       200);
+  if (g_tile[r] == nullptr) g_tile[r] = new (std::nothrow) uint8_t[kTileBytes];
+  if (g_tile[r] == nullptr) return;
+  const size_t row = static_cast<size_t>(kWellWidth) * 4;
+  for (int y = 0; y < kRowPitch; ++y) {
+    memcpy(g_tile[r] + y * row, g_scratch + static_cast<size_t>(y) * kWidth * 4,
+           row);
+  }
+  g_tile_look[r] = look;
+  g_tile_ok[r] = true;
+}
+
+// The note of row r over the card. The note of the last switch is kept, so
+// a change of the row under it lays the same note again.
+int g_note_switch = -1;
+bool g_note_style = false;
+void DrawNote(int r, int offset) {
+  const int i = g_switch[r];
+  wchar_t key[64];
+  const char* k = DebugSwitchKey(i);
+  if (k[0] != 0) {
+    swprintf_s(key, L"Key: %hs", k);
+  } else {
+    wcscpy_s(key, L"No ini key: a state of a test only");
+  }
+  const wchar_t* lines[3] = {DebugSwitchName(i), DebugSwitchTip(i), key};
+  int height = kit::NoteHeight(&g_canvas, kNoteWidth, lines, 3, g_note_title,
+                               g_note_font);
+  if (height > kNoteMost) height = kNoteMost;
+  int box[4];
+  NotePlace(RowTop(r, offset), height, box);
+  const card_scroll::Picture note = {g_note, kWidth, kNoteWidth, height};
+  if (g_note_switch != i || g_note_style != g_canvas.parchment_ready) {
+    kit::Note(&g_canvas, note, lines, 3, g_note_title, g_note_font, i + 11);
+    g_note_switch = i;
+    g_note_style = g_canvas.parchment_ready;
+  }
+  kit::Over(&g_canvas, note, box[0], box[1]);
+}
+
+void BarBox(int out[4]) {
+  out[0] = kBarLeft - kit::kRim;
+  out[1] = kWellTop - kit::kRim;
+  out[2] = kBarRight + kit::kRim;
+  out[3] = kWellBottom + kit::kRim;
+}
+
+// The parchment look: the parts that changed. The log says when only the
+// looks of the parts under the ray changed: that is the cost of a hover.
+void Compose(const Look& look, uint64_t frame) {
+  const double start = NowMs();
+  kit::Canvas* c = &g_canvas;
+  const bool first = !g_have_drawn || g_drawn.style != 1;
+  if (first) kit::ClearCard(c);
+  if (g_tile_group != look.group) {
+    for (int r = 0; r < kMostRows; ++r) g_tile_ok[r] = false;
+    g_tile_group = look.group;
+  }
+  int drawn = 0, copied = 0;
+  for (int part = 0; part < kTabParts; ++part) {
+    if (part < kMostTabs && part >= Groups()) continue;
+    const int now = part == kMostTabs ? look.close : look.tab[part];
+    const int was = part == kMostTabs ? g_drawn.close : g_drawn.tab[part];
+    if (!first && now == was) continue;
+    int r[4], box[4];
+    TabRectOf(part, r);
+    panel_kit_math::RectBox(r, kit::kRim, kWidth, kHeight, box);
+    if (kit::ShowPart(c, &g_tab_tiles, part, now, box, &DrawTab, nullptr)) {
+      ++copied;
+    } else {
+      ++drawn;
+    }
+  }
+  if (first || wcscmp(look.status, g_drawn.status) != 0) {
+    int n[4];
+    NoteBox(n);
+    kit::PageToCard(c, n);
+    const card_scroll::Picture card = kit::CardPicture(c);
+    kit::InkWordsIn(c, card, g_status_font, look.status, n, 13,
+                    kit::kLeftAlign);
+    ++drawn;
+  }
+  if (first || look.bar != g_drawn.bar ||
+      (look.bar >= 0 && look.offset != g_drawn.offset)) {
+    int b[4];
+    BarBox(b);
+    kit::PageToCard(c, b);
+    int track[4], thumb[4];
+    if (look.bar >= 0 && BarBoxes(look.rows, look.offset, track, thumb)) {
+      kit::ScrollBar(c, kit::CardPicture(c), track, thumb, look.bar, 21);
+    }
+    ++drawn;
+  }
+  bool well = first || look.group != g_drawn.group ||
+              look.offset != g_drawn.offset ||
+              look.note_row != g_drawn.note_row;
+  for (int r = 0; r < look.rows && !well; ++r) {
+    const int top = RowTop(r, look.offset);
+    if (top + kRowPitch <= kWellTop || top >= kWellBottom) continue;
+    if (!SameRow(look.row[r], g_drawn.row[r])) well = true;
+  }
+  if (well) {
+    const size_t line = static_cast<size_t>(kWellWidth) * 4;
+    for (int y = kWellTop; y < kWellBottom; ++y) {
+      const int along = y - kWellTop + look.offset;
+      const int r = along / kRowPitch;
+      if (r >= look.rows) {
+        memcpy(c->card + (static_cast<size_t>(y) * kWidth + kWellLeft) * 4,
+               c->page + (static_cast<size_t>(y) * kWidth + kWellLeft) * 4,
+               line);
+        continue;
+      }
+      const int ly = along - r * kRowPitch;
+      if (ly == 0 || y == kWellTop) {
+        if (!g_tile_ok[r] || !SameRow(g_tile_look[r], look.row[r])) {
+          DrawRow(r, look.row[r]);
+          ++drawn;
+        } else {
+          ++copied;
+        }
+      }
+      if (g_tile[r] == nullptr) continue;
+      memcpy(c->card + (static_cast<size_t>(y) * kWidth + kWellLeft) * 4,
+             g_tile[r] + ly * line, line);
+    }
+    if (look.note_row >= 0 && look.note_row < look.rows) {
+      DrawNote(look.note_row, look.offset);
+      ++drawn;
+    }
+  }
+  const double ms = NowMs() - start;
+  const bool hover_only =
+      !first && look.group == g_drawn.group &&
+      look.offset == g_drawn.offset && look.note_row == g_drawn.note_row &&
+      wcscmp(look.status, g_drawn.status) == 0;
+  ++g_draws;
+  g_draw_ms += ms;
+  if (ms > g_draw_most_ms) g_draw_most_ms = ms;
+  if (hover_only) {
+    ++g_hover_draws;
+    if (ms > g_hover_most_ms) g_hover_most_ms = ms;
+  }
+  if (LogRoom() && g_draws <= 60) {
+    ModLog("debug window : frame %llu, a new picture of the parchment window "
+           "took %.2f ms: %d parts drawn and %d parts copied%s", frame, ms,
+           drawn, copied, hover_only ? " (a change under the ray)" : "");
+  }
+}
+
+// THE DARK LOOK (hint_card_style=0): all of it each time that it changes.
+void PlainWords(HFONT font, COLORREF color, const wchar_t* words,
+                const int box[4], UINT side) {
+  kit::Canvas* c = &g_canvas;
+  SelectObject(c->dc, font);
+  SetTextColor(c->dc, color);
+  RECT rect = {box[0], box[1], box[2], box[3]};
+  DrawTextW(c->dc, words, -1, &rect,
+            side | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+}
+
+void RasterPlain(const Look& look) {
+  kit::Canvas* c = &g_canvas;
+  if (g_plain_font == nullptr) {
+    const auto font = [](int em, int weight) {
+      return CreateFontW(-em, 0, 0, 0, weight, FALSE, FALSE, FALSE,
+                         DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS,
+                         L"Segoe UI");
+    };
+    g_plain_font = font(36, FW_SEMIBOLD);
+    g_plain_small = font(26, FW_NORMAL);
+  }
+  const int all[4] = {0, 0, kWidth, kHeight};
+  kit::PlainFill(c, all, RGB(22, 24, 28));
+  const int title[4] = {0, kTitleTop, kWidth, kTitleBottom};
+  kit::PlainText(c, g_plain_font, RGB(235, 235, 235), L"Debug switches",
+                 title);
+  for (int g = 0; g < Groups(); ++g) {
+    int r[4];
+    TabRect(g, r);
+    kit::PlainButton(c, r, look.tab[g], DebugGroupName(g), g_plain_small);
+  }
+  int r[4];
+  CloseRect(r);
+  kit::PlainButton(c, r, look.close, L"Close", g_plain_small);
+  int n[4];
+  NoteBox(n);
+  PlainWords(g_plain_small, RGB(230, 190, 110), look.status, n, DT_LEFT);
+  // The rows, in the list only.
+  HRGN clip = CreateRectRgn(kWellLeft, kWellTop, kWellRight, kWellBottom);
+  SelectClipRgn(c->dc, clip);
+  const int well[4] = {kWellLeft, kWellTop, kWellRight, kWellBottom};
+  kit::PlainFill(c, well, RGB(30, 33, 38));
+  for (int row = 0; row < look.rows; ++row) {
+    const int top = RowTop(row, look.offset);
+    if (top + kRowPitch <= kWellTop || top >= kWellBottom) continue;
+    const RowLook& l = look.row[row];
+    const int i = g_switch[row];
+    const bool dim = l.kind == kRowDim;
+    int b[4];
+    LabelBox(b);
+    const int label[4] = {kWellLeft + b[0], top + b[1], kWellLeft + b[2],
+                          top + b[3]};
+    PlainWords(g_plain_small, dim ? RGB(110, 110, 110) : RGB(235, 235, 235),
+               DebugSwitchWindowLabel(i), label, DT_LEFT);
+    wchar_t word[32];
+    DebugSwitchValueText(i, l.value, word, 32);
+    ValueBox(dim ? kRowArrows : l.kind, b);
+    const int value[4] = {kWellLeft + b[0], top + b[1], kWellLeft + b[2],
+                          top + b[3]};
+    if (dim) {
+      PlainWords(g_plain_small, RGB(110, 110, 110), L"not now", value,
+                 DT_CENTER);
+    } else if (l.kind == kRowToggle) {
+      PlainWords(g_plain_small, RGB(230, 190, 110), word, value, DT_RIGHT);
+      int p[4];
+      PillRect(p);
+      const int pill[4] = {kWellLeft + p[0], top + p[1],
+                           kWellLeft + p[0] + p[2], top + p[1] + p[3]};
+      kit::PlainFill(c, pill, l.row == kit::kHover   ? RGB(205, 172, 96)
+                              : l.row == kit::kFlash ? RGB(250, 225, 150)
+                                                     : RGB(62, 66, 76));
+      const int half = p[2] / 2;
+      const int knob[4] = {l.value != 0 ? pill[0] + half + 4 : pill[0] + 4,
+                           pill[1] + 4,
+                           l.value != 0 ? pill[2] - 4 : pill[0] + half - 4,
+                           pill[3] - 4};
+      kit::PlainFill(c, knob,
+                     l.value != 0 ? RGB(70, 170, 90) : RGB(150, 60, 56));
+    } else {
+      PlainWords(g_plain_small, RGB(230, 190, 110), word, value, DT_CENTER);
+      int a[4];
+      LeftArrowRect(a);
+      const int left[4] = {kWellLeft + a[0], top + a[1], a[2], a[3]};
+      kit::PlainButton(c, left, l.left, L"<", g_plain_small);
+      RightArrowRect(a);
+      const int right[4] = {kWellLeft + a[0], top + a[1], a[2], a[3]};
+      kit::PlainButton(c, right, l.right, L">", g_plain_small);
+    }
+    const int line[4] = {kWellLeft + 10, top + kRowPitch - 2,
+                         kWellRight - 10, top + kRowPitch - 1};
+    kit::PlainFill(c, line, RGB(52, 56, 64));
+  }
+  SelectClipRgn(c->dc, nullptr);
+  DeleteObject(clip);
+  int track[4], thumb[4];
+  if (look.bar >= 0 && BarBoxes(look.rows, look.offset, track, thumb)) {
+    kit::PlainFill(c, track, RGB(40, 42, 48));
+    const int t[4] = {thumb[0] + 4, thumb[1] + 4, thumb[2] - 4, thumb[3] - 4};
+    kit::PlainFill(c, t, look.bar == kit::kHover   ? RGB(205, 172, 96)
+                         : look.bar == kit::kFlash ? RGB(250, 225, 150)
+                                                   : RGB(90, 96, 108));
+  }
+  if (look.note_row >= 0 && look.note_row < look.rows) {
+    const int i = g_switch[look.note_row];
+    wchar_t text[512];
+    const char* k = DebugSwitchKey(i);
+    swprintf_s(text, L"%s\n%s\nKey: %hs", DebugSwitchName(i),
+               DebugSwitchTip(i), k[0] != 0 ? k : "none, a test only");
+    SelectObject(c->dc, g_plain_small);
+    RECT measure = {0, 0, kNoteWidth - 32, 1};
+    const int h = DrawTextW(c->dc, text, -1, &measure,
+                            DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT) + 28;
+    int box[4];
+    NotePlace(RowTop(look.note_row, look.offset), h, box);
+    kit::PlainFill(c, box, RGB(70, 62, 44));
+    const int inner[4] = {box[0] + 2, box[1] + 2, box[2] - 2, box[3] - 2};
+    kit::PlainFill(c, inner, RGB(36, 34, 30));
+    SetTextColor(c->dc, RGB(240, 230, 200));
+    RECT rect = {box[0] + 16, box[1] + 14, box[2] - 16, box[3] - 8};
+    DrawTextW(c->dc, text, -1, &rect, DT_WORDBREAK | DT_NOPREFIX | DT_LEFT);
+  }
+  kit::PlainDone(c);
+}
+
+void BuildLook(Look* look) {
+  memset(look, 0, sizeof(*look));
+  look->style = kit::CardStyle(g_style_ini);
+  look->group = g_group;
+  look->rows = g_rows;
+  look->offset = g_offset;
+  look->note_row = g_note_row;
+  const int flash = kit::Flashing(&g_room);
+  const int hover = g_room.hover;
+  for (int g = 0; g < kMostTabs; ++g) {
+    look->tab[g] = static_cast<uint8_t>(
+        g == g_group ? (hover == g ? kit::kHover : kit::kOn)
+                     : (g == flash ? kit::kFlash
+                                   : (g == hover ? kit::kHover : kit::kPlain)));
+  }
+  look->close = static_cast<uint8_t>(
+      kPartClose == flash ? kit::kFlash
+                          : (kPartClose == hover ? kit::kHover : kit::kPlain));
+  int track[4], thumb[4];
+  look->bar = -1;
+  if (BarBoxes(g_rows, g_offset, track, thumb)) {
+    look->bar = g_drag ? kit::kFlash
+                       : (hover == kPartThumb ? kit::kHover : kit::kPlain);
+  }
+  const int hover_row = RowOf(hover);
+  const int flash_row = RowOf(flash);
+  for (int r = 0; r < g_rows; ++r) {
+    RowLook& l = look->row[r];
+    l.value = g_value[r];
+    l.kind = g_kind[r];
+    const auto part_look = [&](int on) -> uint8_t {
+      if (flash_row == r && OnOf(flash) == on) return kit::kFlash;
+      if (hover_row == r && OnOf(hover) == on) return kit::kHover;
+      return kit::kPlain;
+    };
+    if (l.kind == kRowToggle) {
+      l.row = static_cast<uint8_t>(
+          flash_row == r ? kit::kFlash
+                         : (hover_row == r ? kit::kHover : kit::kPlain));
+    } else if (l.kind == kRowArrows) {
+      l.left = part_look(kOnLeft);
+      l.right = part_look(kOnRight);
+    }
+  }
+  if (g_status[0] != 0 && GetTickCount64() < g_status_until) {
+    wcsncpy_s(look->status, g_status, _TRUNCATE);
+  } else if (hover_row >= 0 && hover_row < g_rows &&
+             g_kind[hover_row] == kRowDim) {
+    swprintf_s(look->status, L"%s cannot change now",
+               DebugSwitchWindowLabel(g_switch[hover_row]));
+  } else {
+    wcscpy_s(look->status, L"Point at a switch to read what it does");
+  }
+}
+
+bool SameLook(const Look& a, const Look& b) {
+  if (a.style != b.style || a.group != b.group || a.rows != b.rows ||
+      a.offset != b.offset || a.note_row != b.note_row || a.bar != b.bar ||
+      a.close != b.close || memcmp(a.tab, b.tab, sizeof(a.tab)) != 0 ||
+      wcscmp(a.status, b.status) != 0) {
+    return false;
+  }
+  for (int r = 0; r < a.rows; ++r) {
+    if (!SameRow(a.row[r], b.row[r])) return false;
+  }
+  return true;
+}
+
+// A picture for debug_window_test_save: the first one, and one with a new
+// group, a new value, a note, or a scroll of 3 rows or more.
+bool WorthSaving(const Look& look) {
+  if (!g_have_saved) return true;
+  const Look& s = g_saved_look;
+  if (look.group != s.group || look.style != s.style) return true;
+  if (look.note_row >= 0 && look.note_row != s.note_row) return true;
+  const int moved = look.offset - s.offset;
+  if (moved >= 3 * kRowPitch || -moved >= 3 * kRowPitch) return true;
+  for (int r = 0; r < look.rows; ++r) {
+    if (look.row[r].value != s.row[r].value) return true;
+  }
+  return false;
+}
+
+// --- a press ---------------------------------------------------------------------
+
+void SetStatus(const wchar_t* words) {
+  wcsncpy_s(g_status, words, _TRUNCATE);
+  g_status_until = GetTickCount64() + kStatusMs;
+}
+
+void Act(int part, uint64_t frame) {
+  char name[64];
+  PartName(part, name, sizeof(name));
+  ++g_presses;
+  if (part < kMostTabs) {
+    kit::Pressed(&g_room, part);
+    if (part != g_group) {
+      FillGroup(part);
+      char group[32];
+      Narrow(DebugGroupName(part), group, sizeof(group));
+      ModLog("debug window : the trigger presses the tab %s: %d switches, "
+             "frame %llu", group, g_rows, frame);
+    }
+    return;
+  }
+  if (part == kPartClose) {
+    kit::Pressed(&g_room, part);
+    ModLog("debug window : the trigger presses Close, frame %llu", frame);
+    Close("the player pressed Close", true);
+    return;
+  }
+  if (part == kPartThumb) {
+    int track[4], thumb[4];
+    if (!BarBoxes(g_rows, g_offset, track, thumb)) return;
+    kit::Pressed(&g_room, part);
+    g_drag = true;
+    g_grab = static_cast<int>(g_room.v * kHeight) - thumb[1];
+    ModLog("debug window : the trigger takes the thumb of the scroll bar at "
+           "offset %d, frame %llu", g_offset, frame);
+    return;
+  }
+  if (part == kPartTrack) {
+    kit::Pressed(&g_room, part);
+    const int from = g_offset;
+    g_offset = PageOffset(g_rows, g_offset, g_room.v * kHeight);
+    g_offset_f = static_cast<float>(g_offset);
+    ModLog("debug window : the trigger presses the track of the scroll bar: "
+           "the list goes from offset %d to %d of %d, frame %llu", from,
+           g_offset, panel_kit_math::MaxOffset(ContentOf(g_rows), kView),
+           frame);
+    return;
+  }
+  const int r = RowOf(part);
+  const int on = OnOf(part);
+  if (r < 0 || r >= g_rows) return;
+  const int i = g_switch[r];
+  const wchar_t* label = DebugSwitchWindowLabel(i);
+  wchar_t words[96];
+  if (g_kind[r] == kRowDim) {
+    ++g_refused;
+    HapticsPulse(haptics_math::kRefused);
+    swprintf_s(words, L"%s cannot change now", label);
+    SetStatus(words);
+    ModLog("debug window : the trigger presses %s, which cannot change now, "
+           "frame %llu", name, frame);
+    return;
+  }
+  // The label and the value of a row with arrows do nothing.
+  if (g_kind[r] == kRowArrows && on == kOnRow) return;
+  const bool back = g_kind[r] == kRowArrows && on == kOnLeft;
+  ModLog("debug window : the trigger presses %s, frame %llu", name, frame);
+  if (!DebugSwitchStep(i, back)) {
+    ++g_refused;
+    HapticsPulse(haptics_math::kRefused);
+    swprintf_s(words, L"%s cannot change now", label);
+    SetStatus(words);
+    return;
+  }
+  ++g_steps;
+  kit::Flash(&g_room, g_kind[r] == kRowToggle ? RowPartOf(r, kOnRow) : part);
+  g_value[r] = DebugSwitchValue(i);
+  g_kind[r] = static_cast<unsigned char>(
+      KindOfRow(DebugSwitchValueCount(i), g_value[r] == kDebugCannot));
+  wchar_t word[32];
+  DebugSwitchValueText(i, g_value[r], word, 32);
+  swprintf_s(words, L"%s: %s", label, word);
+  SetStatus(words);
+}
+
+// The stick of the pointing hand while the ray is on the window.
+void StickStep(double dt, uint64_t frame) {
+  float push = 0.0f;
+  float d = 0.0f;
+  if (g_room.on_panel && !g_drag && ControllersPointingStick(&push)) {
+    d = panel_kit_math::StickScroll(push, kStickRest, kStickFull,
+                                    static_cast<float>(dt));
+  }
+  const int most = panel_kit_math::MaxOffset(ContentOf(g_rows), kView);
+  if (d != 0.0f && most > 0) {
+    if (!g_stick_moving) {
+      g_stick_moving = true;
+      g_stick_from = g_offset;
+    }
+    g_offset_f += d;
+    if (g_offset_f < 0.0f) g_offset_f = 0.0f;
+    if (g_offset_f > static_cast<float>(most)) {
+      g_offset_f = static_cast<float>(most);
+    }
+    g_offset = static_cast<int>(g_offset_f + 0.5f);
+  } else if (g_stick_moving) {
+    g_stick_moving = false;
+    if (LogRoom()) {
+      ModLog("debug window : the stick scrolls the list from offset %d to %d "
+             "of %d, frame %llu", g_stick_from, g_offset, most, frame);
+    }
+  }
+}
+
+}  // namespace
+
+bool DebugWindowOpen() { return g_room.open; }
+
+bool DebugWindowHoldsTrigger() {
+  return InterlockedCompareExchange(&g_holds, 0, 0) != 0;
+}
+
+bool DebugWindowRay(float* meters) {
+  *meters = g_room.open ? g_room.meters : 0.0f;
+  return g_room.open;
+}
+
+bool DebugWindowTakesStick() {
+  return InterlockedCompareExchange(&g_stick, 0, 0) != 0;
+}
+
+bool DebugWindowCloseBy(const char* why) {
+  if (!g_room.open) return false;
+  Close(why, false);
+  return true;
+}
+
+bool DebugWindowOpenFromRing() {
+  ReadSettings();
+  if (!DebugWindowOn() ||
+      !kit::Open(&g_room, kDistance, kPitch, kMeters, kMeters)) {
+    return false;
+  }
+  g_hold_after = false;
+  g_status[0] = 0;
+  if (g_group < 0 || g_group >= Groups()) g_group = 0;
+  // The window opens on the group of the last time, at the same row.
+  const int offset = g_offset;
+  FillGroup(g_group);
+  g_offset = panel_kit_math::ClampOffset(offset, ContentOf(g_rows), kView);
+  g_offset_f = static_cast<float>(g_offset);
+  g_last_ms = NowMs();
+  SetHolds();
+  ++g_opens;
+  const menu_room_math::Panel& p = g_room.panel;
+  char group[32];
+  Narrow(DebugGroupName(g_group), group, sizeof(group));
+  ModLog("debug window : the window opens, %.2f by %.2f m, its middle at %.2f "
+         "%.2f %.2f m, the group %s with %d switches, frame %llu", p.width,
+         p.height, p.position[0], p.position[1], p.position[2], group, g_rows,
+         ControllersFrameCount());
+  return true;
+}
+
+bool DebugWindowTestTarget(float out[3]) {
+  ReadSettings();
+  if (!g_room.open || g_test_count == 0) return false;
+  const int part = g_tests[g_tests_used++ % g_test_count];
+  char name[64];
+  PartName(part, name, sizeof(name));
+  float u = 0.0f, v = 0.0f;
+  if (!PartMiddle(part, Groups(), g_rows, g_kind, g_offset, &u, &v)) {
+    ModLog("debug window : the word aimdebug: %s is not in the view now",
+           name);
+    return false;
+  }
+  kit::PointOf(g_room, u, v, out);
+  ModLog("debug window : the word aimdebug aims at %s, at %.3f %.3f %.3f m",
+         name, out[0], out[1], out[2]);
+  return true;
+}
+
+void DebugWindowFrame() {
+  ReadSettings();
+  const uint64_t frame = ControllersFrameCount();
+
+  // After a press that closed the window the trigger stays with it until
+  // it goes up.
+  if (!g_room.open) {
+    InterlockedExchange(&g_stick, 0);
+    if (g_hold_after) {
+      float p[3], q[4], trigger = 0.0f;
+      if (!ControllersPointingAim(p, q, &trigger) || trigger < 0.4f) {
+        g_hold_after = false;
+        SetHolds();
+      }
+    }
+    return;
+  }
+
+  // What closes the window.
+  RingHand hand;
+  const bool have_hand = ControllersRingHand(&hand);
+  if (RadialMenuOpen()) {
+    Close("the ring opens", false);
+  } else if (SpellBookOpen()) {
+    Close("the spell book opens", false);
+  } else if (have_hand && !hand.usable) {
+    Close("the controllers cannot act now", false);
+  } else if (have_hand && hand.dialog) {
+    Close("a dialog box is up", false);
+  } else if (CutsceneWindowFlat()) {
+    Close("a cut scene plays", false);
+  }
+  if (!g_room.open) return;
+
+  if (kit::FollowRecenter(&g_room)) {
+    ModLog("debug window : the window goes in front of the head after a "
+           "recenter, its middle at %.2f %.2f %.2f m, frame %llu",
+           g_room.panel.position[0], g_room.panel.position[1],
+           g_room.panel.position[2], frame);
+  }
+
+  Latch();
+  const int before = g_room.hover;
+  float trigger = 0.0f;
+  const int pressed = kit::Step(&g_room, &HitPart, nullptr, &trigger);
+  if (g_drag) {
+    if (!g_room.press.down) {
+      g_drag = false;
+      ModLog("debug window : the trigger lets go of the thumb at offset %d of "
+             "%d, frame %llu", g_offset,
+             panel_kit_math::MaxOffset(ContentOf(g_rows), kView), frame);
+    } else if (g_room.on_panel) {
+      g_offset = DragOffset(g_rows, g_room.v * kHeight, g_grab);
+      g_offset_f = static_cast<float>(g_offset);
+    }
+  }
+  if (g_room.hover != before && LogRoom()) {
+    char name[64];
+    ModLog("debug window : the ray is on %s, frame %llu",
+           PartName(g_room.hover, name, sizeof(name)), frame);
+  }
+  if (pressed >= 0) Act(pressed, frame);
+  if (!g_room.open) return;
+
+  const double now = NowMs();
+  double dt = (now - g_last_ms) / 1000.0;
+  if (dt < 0.0 || dt > 0.1) dt = 0.1;
+  g_last_ms = now;
+  InterlockedExchange(&g_stick, g_room.on_panel ? 1 : 0);
+  StickStep(dt, frame);
+
+  // The note of the row under the ray, after a rest on it.
+  const int rest = g_drag ? -1 : RowOf(g_room.hover);
+  if (rest != g_rest_row) {
+    g_rest_row = rest;
+    g_rest_since = now;
+  }
+  const int note =
+      rest >= 0 && rest < g_rows && now - g_rest_since >= kNoteRestMs ? rest
+                                                                      : -1;
+  if (note != g_note_row) {
+    g_note_row = note;
+    if (note >= 0 && LogRoom()) {
+      char label[40];
+      Narrow(DebugSwitchWindowLabel(g_switch[note]), label, sizeof(label));
+      ModLog("debug window : the note of \"%s\" shows (row %d), frame %llu",
+             label, note, frame);
+    }
+  }
+
+  // The picture of this frame.
+  if (!kit::Start(&g_canvas, kWidth, kHeight, "debug window ")) return;
+  Look look;
+  BuildLook(&look);
+  const uint8_t* pixels = reinterpret_cast<const uint8_t*>(g_canvas.bits);
+  bool fresh = false;
+  if (look.style != 0 && ParchmentStart()) {
+    look.style = 1;
+    if (!g_have_drawn || !SameLook(look, g_drawn)) {
+      Compose(look, frame);
+      fresh = true;
+    }
+    pixels = g_canvas.card;
+  } else {
+    look.style = 0;
+    if (!g_have_drawn || !SameLook(look, g_drawn)) {
+      const double start = NowMs();
+      RasterPlain(look);
+      const double ms = NowMs() - start;
+      ++g_draws;
+      g_draw_ms += ms;
+      if (ms > g_draw_most_ms) g_draw_most_ms = ms;
+      fresh = true;
+    }
+  }
+  g_drawn = look;
+  g_have_drawn = true;
+  if (fresh && g_saved < g_save && WorthSaving(look)) {
+    ++g_saved;
+    g_saved_look = look;
+    g_have_saved = true;
+    char name[64], group[32];
+    Narrow(DebugGroupName(look.group), group, sizeof(group));
+    ModLog("debug window : frame %llu, the saved picture has the group %s at "
+           "offset %d, the ray on %s, and %s", frame, group, look.offset,
+           PartName(g_room.hover, name, sizeof(name)),
+           look.note_row >= 0 ? "a note" : "no note");
+    EyeCaptureSaveUi("debugwin", frame, 1, pixels, kWidth * 4, kWidth,
+                     kHeight);
+  }
+  if (!kit::StageLayer(g_room, pixels, kWidth, kHeight)) {
+    Close("the runtime refused the layer of the ring", false);
+  }
+}
+
+void DebugWindowReport() {
+  if (g_opens + g_presses + g_draws == 0) return;
+  ModLog("debug window : the window opened %llu times this window: %llu "
+         "presses, %llu steps of a switch, %llu that did not act", g_opens,
+         g_presses, g_steps, g_refused);
+  if (g_draws > 0) {
+    ModLog("debug window : %llu new pictures, %.2f ms each on average and "
+           "%.2f ms at the most. %llu were a change under the ray only, "
+           "%.2f ms at the most", g_draws,
+           g_draw_ms / static_cast<double>(g_draws), g_draw_most_ms,
+           g_hover_draws, g_hover_most_ms);
+  }
+  g_opens = g_presses = g_steps = g_refused = g_draws = g_hover_draws = 0;
+  g_draw_ms = g_draw_most_ms = g_hover_most_ms = 0.0;
+}

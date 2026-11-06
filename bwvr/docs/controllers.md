@@ -914,6 +914,8 @@ The words that act on the first frame of the word only:
 | `aimcmd` | Turns the aim to the middle of the body of the nearest object that a Creature command can act on. `command_test_class` names the class. See `creature.md` |
 | `aimturn` | Turns the aim by the next step of `fake_controller_turns`. A turn is a step and not a motion. See `creature.md` |
 | `aimtemple` | Turns the aim to the next target of `temple_test_targets` (11.6) |
+| `aimplaces` | Turns the aim to the middle of the next button of `places_test_buttons` on the panel of places (`ui-layer.md`, 22.5) |
+| `aimdebug` | Turns the aim to the middle of the next part of `debug_test_parts` on the debug window (10.5) |
 | `lean`, `look` | `lean` holds the lean of `fake_head_*_cm` for the frames of the word. `look` turns the invented head 30 degrees left and 20 degrees down for the frames. With no `lean` word in the script, a lean that is set holds for the whole run |
 | `shot` | Saves a picture of both eyes 3 frames later. It moves nothing |
 | `bench` | The frames of the word are one scene of the frame cost measure (`profile=1`, `backend.md`, "The frame cost measure"). It moves nothing. The scene starts with the frame after the first frame of the word |
@@ -984,7 +986,7 @@ The pointing hand is the right hand. When the left controller is the Hand
 | A | Hold to aim the teleport arc, let go to go there (`god-view.md`). `teleport=0` gives a jump to the object or the land under the Hand |
 | B (Y on the left hand) | Hold and draw: a gesture (`miracles.md`). A short press with a miracle in the Hand takes the miracle out. B while A is down cancels the teleport |
 | Stick left and right | One snap turn (5.4). In the Temple it turns the player in the room (11.4). No turn while a dialog box is up (`menu_stops_turn`, `god-view.md`, section 5.8) |
-| Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`), and no zoom while a dialog box is up (`menu_stops_turn`). In other views, a wheel click |
+| Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`), and no zoom while a dialog box is up (`menu_stops_turn`). In other views, a wheel click. While the ray is on the debug window, it scrolls the list of the window (10.8) |
 | Stick click | The gesture button with `gesture_button=2` |
 | Dialog box up | The hand points a ray. The trigger is the left button and the grip the right button (3.6) |
 | In a room of the Temple | The hand points a ray. The trigger and the grip both click (11.3) |
@@ -1722,7 +1724,7 @@ key buffer of the game.
 | `leave` | Leave the Temple, or back to the hall | Esc |
 | `recenter` | Recenter the view | No key: the view recenters as F11 does, and both hands get a pulse (`ControllersRecenter`). It acts also where the game takes no key. Slot 2 of page 2 has it with `places_panel=1` |
 | `more` | More | The other page |
-| `debug` | The debug page | The first page of the debug page (10.8). An empty slot with `debug_menu=0` |
+| `debug` | The debug page | Opens the debug window, or with `debug_window=0` goes to the first page of the debug page (10.8). An empty slot with `debug_menu=0` |
 | `back` | Back | The page before, on a page of the debug page |
 | `none` | An empty slot | |
 
@@ -1863,6 +1865,9 @@ first time.
 | `radial_test_save` | 0 | A test key: the mod saves the first N pictures of the ring as `bwvr-ring-NNNNN.bmp` |
 | `snapshot_test_dir` | | A test key: the snapshots go into this folder, and not into `bwvr\captures` of the game folder |
 | `debug_menu` | 0 | 1 puts the item `debug` on the ring (10.8). The launcher row "Debug menu" in the group "Testing" |
+| `debug_window` | 1 | With `debug_menu=1`: 1 the item `debug` opens the debug window (10.8). 0 it goes to the debug pages of the ring |
+| `debug_window_test_save` | 0 | A test key: the mod saves the first N pictures of the debug window with a new group, a new value, a note or a scroll as `bwvr-debugwin-NNNNN.bmp` |
+| `debug_test_parts` | | A test key: the parts of the debug window for the word `aimdebug`, in order: `tab3`, `row5`, `left5`, `right5` (from 0), `thumb`, `trackend` (the end of the track that is farther from the thumb) and `close` |
 
 **The test keys.** With `test_keys=1`, Ctrl and the Menu key change
 `button_layout` (5.1). While the stick can drive the ring (`button_layout=0`),
@@ -1988,22 +1993,53 @@ desktop run can prove are in `roadmap.md`, R12.
 The test keys (`test_keys=1`, `backend.md`, "Keys for v1.0") change one
 rule each while the game runs, for a live A/B. A player in the headset has
 no keyboard. With `debug_menu=1` (the launcher row "Debug menu") the ring
-has the item `debug`, and its pages hold the same switches. The page does
-not need `test_keys=1`, and the keys of the keyboard still need it.
+has the item `debug`, and it gives the same switches to the hand. The page
+does not need `test_keys=1`, and the keys of the keyboard still need it.
 
-The code is `debug_menu.cpp` (the table of the switches), `debug_menu_math.h`
-(the pages and their links) and the ring (`radial_menu.cpp`).
+With `debug_window=1` (the default) the item opens the debug window: a
+window of parchment in the room with the switches of a group as a list,
+which the ray and the trigger of the pointing hand change
+(`ui-layer.md`, "The debug window"). With `debug_window=0` the item goes to
+the debug pages of the ring (below).
+
+The code is `debug_menu.cpp` (the table of the switches and their notes),
+`debug_window.cpp` with `debug_window_math.h` (the window), and
+`debug_menu_math.h` with the ring (`radial_menu.cpp`) for the pages.
 
 **The place of the item.** A page of the ini that has the word `debug`
 holds it. Else the last page of the ring gets it: its first empty slot, or
 on a full page slot 5 (from 0 at the top and clockwise: the slot left of the
 bottom, `DebugSlot`). Page 2 is full, with `places_panel=1` and with
 `places_panel=0`, so `debug` takes the place of `help` there. The ring of the Temple has it in its empty slot 7. The log names the
-item that gives its slot.
+item that gives its slot. With `debug_window=1` the item is no link: the
+release of the button on it chooses it, as on `places`.
 
-**The pages.** A link item goes to its page after 0.45 s with the hand on
-it, or at once with the trigger, as `More` does. A release on a link chooses
-nothing.
+**The debug window.**
+
+| Part | What it does |
+| --- | --- |
+| The tabs at the left | One for each group: View, Picture, Render, Interface, Hand, Throw, Creature, Sound, Temple. A press shows the switches of the group. The tab of the group that shows is bright gold |
+| A row with a toggle | A switch with two values. The word of the value, and a slot with a knob of wax: green at the right for the value 1, red at the left for 0. A press anywhere on the row changes it |
+| A row with two arrows | A switch with more values, or with a number. The right arrow makes the step of the test key. The left arrow makes a step back for "Throw speed" and "Land speed". For each other switch the left arrow makes the same step as the right arrow, because the change function of a test key steps one way only, and many of them go between the value of the ini and one other value |
+| A dim row | A switch that cannot change now (its part is off, its hook is not in, or it is for the other renderer). It says "not now", and a press gives the pulse `refused` |
+| The scroll bar | When the group has more than 10 rows. The ray drags the thumb, and a press on the track goes one view up or down. While the ray is on the window, the stick of the pointing hand forward and back scrolls the list, and it does not zoom then (5.1) |
+| The note | When the ray rests on a row for 0.35 s, a small note of paper shows the name of the switch, what it does, and its ini key |
+| The bottom row | The value after a press, for 2.5 s, or why a dim row cannot change. Close is at the right |
+
+Close, B of the pointing hand and the menu button close the window. Then B
+draws no gesture, and the menu button sends no Esc. The ring, the spell
+book, a dialog box and a cut scene also close it. While the window is open
+the trigger belongs to it, as for the panel of places (`ui-layer.md`,
+22.3). The next time, the window opens on the same group at the same row.
+
+"Throw slower" and "Throw faster" are two switches of the ring with one ini
+key, and so are "Land slower" and "Land faster". The window has one row for
+each pair, "Throw speed" and "Land speed", with the slower step on the left
+arrow. The table marks the slower line as a line of the ring only.
+
+**The debug pages of the ring** (`debug_window=0`). A link item goes to its
+page after 0.45 s with the hand on it, or at once with the trigger, as
+`More` does. A release on a link chooses nothing.
 
 | Page | Items |
 | --- | --- |
@@ -2013,28 +2049,28 @@ nothing.
 Each page has `back` in the bottom slot: from a group to the page of the
 groups, and from the groups to the page with `debug`. A list of 7 items or
 fewer has one page. A longer list has 6 items on each page, and `more` in
-slot 3 goes to its next page, and from its last page to its first.
+slot 3 goes to its next page, and from its last page to its first. A switch
+that cannot change now is not on a page. The ring makes its debug pages
+again on each frame that it is closed. For 30 s after a choice of a switch
+the ring opens on the same page again, so a second choice for an A/B needs
+no walk through the pages.
 
-**A choice of a switch** calls the change function of its test key: the same
-step of the value, the same pulse and the same log line, at once. The ring
-gives no pulse of its own for a switch, so the pulse of the test key is
-clear. The log has one more line with the new value. For 30 s after the
-choice the ring opens on the same page again, so a second choice for an A/B
-needs no walk through the pages.
-
-**A switch that cannot change now is not on the page**: its part is off,
-its hook is not in, or it is for the other renderer (the switches of
-Direct3D 9 with `vulkan_only=1`). The ring makes its debug pages again on
-each frame that it is closed.
+**A choice of a switch**, in the window and on the ring, calls the change
+function of its test key: the same step of the value, the same pulse and
+the same log line, at once. The window and the ring give no pulse of their
+own for a switch, so the pulse of the test key is clear. The log has one
+more line with the new value.
 
 **The table.** `kSwitches` in `debug_menu.cpp` has one line for each switch:
 the group, the word on the badge, the name on the card, the ini key, the
-value function, the change function and the words of the values. The file of
-the area has the two functions, and its test key calls the same change
-function. So a new test key is one more line. A switch that needs a start
-of the game (for example `backend`) is not in the table. The keys of the
-intro, the trims of the aim ray, F11 and F12 are not switches. The hotkey
-table of `backend.md` names the item of each key.
+value function, the change function and the words of the values. A line can
+also have a step back for the left arrow of the window. `kTips` beside it
+has the note of each switch, in the same order. The file of the area has the
+two functions, and its test key calls the same change function. So a new
+test key is one more line in each table. A switch that needs a start of the
+game (for example `backend`) is not in the table. The keys of the intro, the
+trims of the aim ray, F11 and F12 are not switches. The hotkey table of
+`backend.md` names the item of each key.
 
 A part that a switch needs, and that the mod puts in only for a test, is in
 with `test_keys=1` or `debug_menu=1` (`TestSwitchesOn`): the hook of the
@@ -2044,21 +2080,46 @@ spirits, and the second thread of the bridge.
 The log:
 
 ```
-debug page   : debug_menu=1. The ring has the item "debug" with 107 switches in 9 groups, 92 of them can change now. test_keys=0
-ring         : debug_menu=1: the item "debug" takes slot 5 (0 is the top) of page 2, in place of "help"
+debug page   : debug_menu=1. The ring has the item "debug" with 117 switches in 9 groups, 102 of them can change now. test_keys=1
+debug page   : debug_window=1. The item "debug" opens the debug window, and the ray and the trigger of the pointing hand change its switches
+ring         : the player chose "debug": the debug window opens, frame 371
+debug window : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group View with 14 switches, frame 371
+debug window : the trigger presses the right arrow of Zoom point (row 4), frame 531
+debug page   : the player chose "Zoom point": god_zoom_about is 2 now (Hand), it was 0, frame 531
+debug page   : the player chose "Throw faster" (a step back): throw_slow_x10 is 23 now (23), it was 20, frame 651
+debug window : the stick scrolls the list from offset 0 to 933 of 1064, frame 811
+debug window : the window closes: the player pressed B, frame 1271
+```
+
+With `debug_window=0`:
+
+```
 ring         : The debug page of the groups (page 3): View, Picture, Render, more, back, Interface, Hand, Throw, frame 248
 ring         : The debug page Render (page 9): one_walk, foveation, fovea_res, more, back, frame_send, frame_time_real, fast_transform, frame 299
-one walk     : off. The scene is walked one time for each eye (one_walk=0)
 debug page   : the player chose "One walk": one_walk is 0 now (off), it was 1, frame 371
 ```
 
 **Tests.** The math test (`debug_menu_checks.h`) covers the lists and their
 slots, the slot of `debug`, the pages with their links (`debug`, the groups,
 `back`, `more`), a switch that cannot change, pages that do not fit, the
-words of a value, and the ring with the links: the hand through `More`,
-`debug` and a group to a switch, and the stick with the trigger on `back`.
+words of a value, and the ring with the links. `debug_window_checks.h`
+covers the window: the list that scrolls and its thumb, the stick, the kinds
+of a row, the layout, the part under the ray at each offset, the drag and
+the track, the place of the note, and the test key.
 
-Desktop runs [R] (the test save `temple`, `debug_menu=1` and `test_keys=0`,
+Desktop runs [R] (the test save `temple`, `debug_menu=1`, Vulkan with
+`test_frame_rate=60`): Y and the left hand through `More` to `debug` open
+the window. The word `aimdebug` aims the ray at the parts of
+`debug_test_parts`, and the trigger presses them. In one run the note of a
+row shows after 0.35 s, a toggle changes `god_spawn`, both arrows of "Zoom
+point" step it, the left arrow of "Throw speed" steps it back and the right
+arrow steps it again, the stick scrolls the group Render, the ray drags the
+thumb to the top, a press on the track goes one view down, and Close, B and
+the menu button each close the window. `debug_window_test_save` saves the
+pictures. With `debug_window=0` the item goes to the page of the groups of
+the ring.
+
+With `debug_window=0`: (the test save `temple`, `debug_menu=1` and `test_keys=0`,
 with Vulkan): Y and four steps of the left hand go through `More`, `debug`
 and the group Render to "One walk", and the release turns one walk off. The
 next press of Y opens the ring on the page Render again, and "Foveation"

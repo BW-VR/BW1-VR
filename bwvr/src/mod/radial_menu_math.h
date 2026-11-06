@@ -80,6 +80,7 @@ enum Item {
   kItemBack,
   kItemPlaces,
   kItemSnapshot,
+  kItemDebugWindow,
   kItems
 };
 
@@ -114,6 +115,7 @@ enum How {
   kHowPanel,    // opens the panel of places (places_panel.cpp)
   kHowSnapshot, // saves the eye pictures and the log (snapshot.cpp)
   kHowRecenter, // the recenter of the view (ControllersRecenter), no key
+  kHowWindow,   // opens the debug window (debug_window.cpp)
 };
 
 // The modifier word of the key buffer of the game.
@@ -176,6 +178,8 @@ const ItemInfo kItemInfo[kItems] = {
     {"places", L"Places", L"Places and bookmarks", kHowPanel, 0, 0, 0},
     {"snapshot", L"Snapshot", L"A snapshot for a report", kHowSnapshot, 0,
      0, 0},
+    // The item "debug" with debug_window=1 (radial_menu.cpp, PlaceDebug).
+    {"debug_window", L"Debug", L"The debug window", kHowWindow, 0, 0, 0},
 };
 
 // The rings as made. The order is how often a player needs an item, from the

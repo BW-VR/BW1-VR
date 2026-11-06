@@ -52,5 +52,24 @@ void DebugSwitchValueText(int i, int value, wchar_t* out, int size);
 // log has the switch and its new value. False when it cannot change now.
 bool DebugSwitchChoose(int i);
 
+// --- for the debug window (debug_window.cpp) ---------------------------------------
+
+// True with debug_menu=1 and debug_window=1: the item "debug" opens the
+// window, and the ring has no debug pages.
+bool DebugWindowOn();
+// False for a line of the table that is on the ring only.
+bool DebugSwitchInWindow(int i);
+// The label of the row of switch i.
+const wchar_t* DebugSwitchWindowLabel(int i);
+// The note of switch i: what it is and what it does (kTips).
+const wchar_t* DebugSwitchTip(int i);
+// The count of the words of the values of switch i, 0 for a number.
+int DebugSwitchValueCount(int i);
+// True when switch i has a step back for the left arrow.
+bool DebugSwitchHasBack(int i);
+// A step of switch i, as DebugSwitchChoose. With `back` and a step back,
+// that step. False when it cannot change now.
+bool DebugSwitchStep(int i, bool back);
+
 // One log line at the start with debug_menu=1.
 void DebugMenuLogStart();

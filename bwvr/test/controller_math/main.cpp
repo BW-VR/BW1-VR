@@ -3588,6 +3588,7 @@ void CreatureChecks() {
 #include "comfort_checks.h"
 #include "glow_checks.h"
 #include "places_checks.h"
+#include "debug_window_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4021,6 +4022,7 @@ int main() {
   menu_room_checks::KeyboardChecks();
   glow_checks::GlowChecks();
   places_checks::PlacesChecks();
+  debug_window_checks::DebugWindowChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

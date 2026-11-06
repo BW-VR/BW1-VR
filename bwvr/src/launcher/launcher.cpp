@@ -390,10 +390,11 @@ const Setting kSettings[] = {
      "F12 saves a picture of each eye in the game folder. A player does "
      "not need this."},
     {kBool, "debug_menu", "Debug menu", nullptr, 0,
-     "Adds the item Debug to the ring of your left hand. It opens pages "
-     "with the switches of the test keys, and a choice changes a switch at "
-     "once. So you can compare in the headset with no keyboard. It does "
-     "not need the test keys. A player does not need this."},
+     "Adds the item Debug to the ring of your left hand. It opens a window "
+     "with the switches of the test keys. The ray and the trigger of your "
+     "right hand change a switch at once, so you can compare in the headset "
+     "with no keyboard. It does not need the test keys. A player does not "
+     "need this."},
 };
 
 const int kSettingCount = sizeof(kSettings) / sizeof(kSettings[0]);
@@ -1505,6 +1506,7 @@ const char* const kRetiredKeys[] = {
     "fake_mouse_y_pct", "fake_mouse_x2_pct", "fake_mouse_y2_pct",
     "radial_test_save", "spell_book_test_save", "gesture_panel_test_frame",
     "places_panel_test_save", "places_test_buttons", "snapshot_test_dir",
+    "debug_window_test_save", "debug_test_parts",
     "village_test_chants", "village_test_census",
     "village_test_icon", "village_test_site", "seek_step_cm",
     "village_test_miracles", "village_test_scaffolds",

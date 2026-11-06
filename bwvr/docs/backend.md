@@ -5313,8 +5313,10 @@ Hotkeys read `GetAsyncKeyState` and work only while a window of the game process
 in front. The mod reads the keys and never takes them from the game.
 
 The column "Debug page" names the group and the item of the same switch on
-the debug page of the ring (`debug_menu=1`, `controllers.md`, 10.8). The item
-calls the same change function as the key. "None" is a key with no item.
+the debug page (`debug_menu=1`, `controllers.md`, 10.8): a tab and a row of
+the debug window, or a page and an item of the ring with `debug_window=0`.
+The item calls the same change function as the key. "None" is a key with no
+item.
 
 | Key | For | Effect | Debug page |
 | --- | --- | --- | --- |
@@ -5405,8 +5407,8 @@ calls the same change function as the key. "None" is a key with no item.
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up | View, Stick walk |
 
 The launcher shows `test_keys` as "Test keys", in a group named "Testing". It is off
-by default. The row "Debug menu" (`debug_menu`) under it puts the same switches on
-the ring.
+by default. The row "Debug menu" (`debug_menu`) under it puts the same switches in
+the debug window, which the ring opens.
 
 Why these keys. The game binds F1 to F9: F6 to F9 go to the Challenge Room, the Save
 Game Room, the Options Room and the Library (`ControlMap::LoadDefaults`,

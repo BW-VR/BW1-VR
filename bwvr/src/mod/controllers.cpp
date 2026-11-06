@@ -65,6 +65,7 @@
 #include "menu_room_math.h"
 #include "miracle.h"
 #include "note_depth.h"
+#include "debug_window.h"
 #include "places_panel.h"
 #include "radial_menu.h"
 #include "spell_book.h"
@@ -311,6 +312,9 @@ enum FakeInput {
   kAimPlaces,
   // The stick click of the left hand: the recenter hold (recenter_hold=1).
   kLStickClick,
+  // The debug window: the aim of the right hand turns to the middle of the
+  // next part of debug_test_parts (debug_window.cpp).
+  kAimDebug,
   kInputCount
 };
 
@@ -325,7 +329,8 @@ const char* const kInputName[kInputCount] = {
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
-    "book",       "lrot",       "aimplaces",  "lstick_click"};
+    "book",       "lrot",       "aimplaces",  "lstick_click",
+    "aimdebug"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -1027,6 +1032,30 @@ void AimPlaces() {
          g_aim_yaw, g_aim_pitch, g_frame);
 }
 
+// The word "aimdebug": the same as "aimplaces", for the next part of
+// debug_test_parts on the open debug window.
+void AimDebug() {
+  float local[3];
+  if (!DebugWindowTestTarget(local)) {
+    ModLog("controllers  : the word aimdebug: the debug window is not open, "
+           "or debug_test_parts has no part in the view, frame %llu",
+           g_frame);
+    return;
+  }
+  const float* from = g_aim_p[g_left_handed ? 0 : 1];
+  const float d[3] = {local[0] - from[0], local[1] - from[1],
+                      -(local[2] - from[2])};
+  if (!controller_math::FakeAimAngles(d, &g_aim_yaw, &g_aim_pitch)) return;
+  float turn_yaw = 0.0f, turn_pitch = 0.0f;
+  AimTurnOfPointingHand(&turn_yaw, &turn_pitch);
+  g_aim_yaw -= turn_yaw;
+  g_aim_pitch -= turn_pitch;
+  g_aim_set = true;
+  ModLog("controllers  : the fake hand aims its ray at a part of the debug "
+         "window: the pose has yaw %.2f, pitch %.2f degrees, at frame %llu",
+         g_aim_yaw, g_aim_pitch, g_frame);
+}
+
 void UpdateScript() {
   if (g_script_play < 0) {
     g_script_play = IniInt("fake_controller_play_frame", 0);
@@ -1122,6 +1151,7 @@ void UpdateScript() {
     }
     if (step.input == kAimTemple && t == step.start) AimTemple();
     if (step.input == kAimPlaces && t == step.start) AimPlaces();
+    if (step.input == kAimDebug && t == step.start) AimDebug();
     if (step.input == kPull && t == step.start) {
       // 15 cm toward the head center, or back to where the hand was.
       float here[3];
@@ -1216,7 +1246,7 @@ void UpdateScript() {
         i == kTouchCreature || i == kRot || i == kAimFar || i == kPull ||
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
-        i == kMoveKey || i == kBook || i == kAimPlaces) {
+        i == kMoveKey || i == kBook || i == kAimPlaces || i == kAimDebug) {
       continue;
     }
     if (i == kPose2) {
@@ -2338,6 +2368,7 @@ void GrabSamples() {
 // takes nothing from pick up, the land drag or the grab.
 bool g_gesture_down = false;    // the button on this frame
 bool g_gesture_before = false;  // and on the last frame
+bool g_window_b_before = false;  // B, for the debug window
 bool g_gesture_need_up = false;
 bool g_gesture_held = false;    // the draw may run on this frame
 const char* g_gesture_why = "the button is up";
@@ -2356,6 +2387,13 @@ void LatchGesture(bool back) {
   g_gesture_before = down;
   g_gesture_down = down;
   if (!down) g_gesture_need_up = false;
+  // THE DEBUG WINDOW (debug_window.cpp). A press of B closes it, and the
+  // draw button must go up before it draws.
+  const bool b = hand.active && hand.secondary;
+  if (b && !g_window_b_before && DebugWindowCloseBy("the player pressed B")) {
+    g_gesture_need_up = down;
+  }
+  g_window_b_before = b;
   // While A holds a teleport, B cancels it and starts no gesture.
   if (down && !g_gesture_held && hand.primary && TeleportOwnsA()) {
     g_gesture_need_up = true;
@@ -2546,7 +2584,10 @@ void LatchEsc() {
     face = free_hand.primary;
   }
   const bool down = (left.active && left.menu) || (free_hand.active && face);
-  if (down && !g_esc_before && g_esc_prev_active && active) {
+  // A press closes the debug window (debug_window.cpp), and then it sends no
+  // Esc.
+  if (down && !g_esc_before && g_esc_prev_active && active &&
+      !DebugWindowCloseBy("the player pressed the menu button")) {
     g_esc_event = true;
   }
   g_esc_before = down;
@@ -3066,9 +3107,11 @@ void PumpButtons(ULONGLONG now) {
   // the trigger is no command and makes no seed active: it goes to the game.
   const bool click_waits = TextClickFlag();
   const bool click_on = TextClickOn();
-  // THE PANEL OF PLACES (places_panel.cpp). While it is open, the trigger
-  // presses its buttons and does not reach the game.
-  const bool panel_claim = PlacesPanelHoldsTrigger();
+  // THE PANEL OF PLACES (places_panel.cpp) and THE DEBUG WINDOW
+  // (debug_window.cpp). While one is open, the trigger presses its parts
+  // and does not reach the game.
+  const bool panel_claim =
+      PlacesPanelHoldsTrigger() || DebugWindowHoldsTrigger();
   bool command_claim = panel_claim;
   {
     const bool ok = usable && DirectHandNow() && g_pointer_owned &&
@@ -3316,6 +3359,15 @@ void PumpStick(ULONGLONG now) {
     g_turn_armed = false;
     ++g_turns_asked;
     ComfortCameraRequestTurn(hand.stick[0] > 0.0f ? 1 : -1);
+  }
+  // THE DEBUG WINDOW (debug_window.cpp). While the ray is on the window, the
+  // stick forward and back scrolls its list, so it does not zoom and sends
+  // no wheel. A push that the window took must come back below kStickBack
+  // before it zooms.
+  if (DebugWindowTakesStick()) {
+    if (live && ay > kStickBack) g_god_zoom_armed = false;
+    g_wheel_tick = 0;
+    return;
   }
   // THE DIRECTION OF THE ZOOM (god_zoom_forward_in). With 0 the stick forward
   // zooms out, so the world gets smaller, and the stick back zooms in. With
@@ -4268,6 +4320,7 @@ void ControllersFrame() {
   LatchEsc();
   RadialMenuFrame();
   PlacesPanelFrame();
+  DebugWindowFrame();
   SpellBookFrame();
   GesturePanelFrame();
 }
@@ -4469,6 +4522,15 @@ bool ControllersPointingAim(float position[3], float orientation[4],
   for (int i = 0; i < 3; ++i) position[i] = g_aim_p[index][i];
   for (int i = 0; i < 4; ++i) orientation[i] = g_aim_q[index][i];
   *trigger = hand.trigger;
+  return true;
+}
+
+bool ControllersPointingStick(float* forward) {
+  *forward = 0.0f;
+  if (!g_on || !g_installed || g_frame == 0) return false;
+  const bwvr::HandInput& hand = g_hands[PointingIndex()];
+  if (!hand.active || !StickLive(hand)) return false;
+  *forward = hand.stick[1];
   return true;
 }
 
@@ -4850,10 +4912,11 @@ bool ControllersFarAllowed(const char** why) {
 // and a point kMenuRayMeters of the room along the aim. units is the world
 // units in a meter of the room. False when there is no ray to draw.
 bool ControllersMenuRay(float from[3], float to[3], float* units) {
-  // The panel of places has the ray too: to the panel, or 2 m long when the
-  // ray is off the panel.
+  // The panel of places and the debug window have the ray too: to the
+  // panel, or 2 m long when the ray is off the panel.
   float panel_meters = 0.0f;
-  const bool panel = PlacesPanelRay(&panel_meters);
+  bool panel = PlacesPanelRay(&panel_meters);
+  if (!panel) panel = DebugWindowRay(&panel_meters);
   if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn() || panel)) {
     return false;
   }
@@ -5237,6 +5300,7 @@ void ControllersReport() {
   }
   RadialMenuReport();
   PlacesPanelReport();
+  DebugWindowReport();
   SpellBookReport();
   GesturePanelReport();
   TempleReport();

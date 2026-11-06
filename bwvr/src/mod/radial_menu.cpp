@@ -73,7 +73,9 @@
 // "debug", and its pages hold the switches of the test keys
 // (debug_menu_math.h). A badge of a switch has its word and its value now.
 // After a choice of a switch, the ring opens on that page again for 30 s, so
-// a second choice for an A/B needs no walk through the pages.
+// a second choice for an A/B needs no walk through the pages. With
+// debug_window=1 (the default) the item "debug" opens the debug window
+// (debug_window.cpp) in place of the pages.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -90,6 +92,7 @@
 #include "cutscene_window.h"
 #include "debug_menu.h"
 #include "debug_menu_math.h"
+#include "debug_window.h"
 #include "haptics.h"
 #include "hint_card_math.h"
 #include "places_panel.h"
@@ -150,6 +153,7 @@ struct Ring {
 Ring g_ring;
 Ring g_temple_ring;
 bool g_debug = false;
+bool g_debug_window = false;  // debug_window, with debug_menu=1
 bool g_debug_failed = false;
 // The controller of the ring has face buttons. One with none (a Vive wand, a
 // Windows Mixed Reality controller) keeps the ring on its stick.
@@ -245,7 +249,7 @@ void PageTitle(const Ring& ring, bool temple, int page, char* out,
 // THE ITEM "debug" in the pages of the ini of a ring. With debug_menu=0 the
 // word is an empty slot. With debug_menu=1 and no page with the word, the
 // last page gets it (DebugSlot).
-void PlaceDebug(Ring* ring, const char* which) {
+void PlaceDebugItem(Ring* ring, const char* which) {
   ring->home = -1;
   ring->home_slot = -1;
   debug_math::Pages& p = ring->pages;
@@ -272,6 +276,24 @@ void PlaceDebug(Ring* ring, const char* which) {
            "the top) of %s %d, in place of \"%s\"", slot, which, page + 1,
            kItemInfo[before].id);
   }
+}
+
+// With debug_window=1 the item opens the debug window (debug_window.cpp).
+// So it is no link, and the ring has no debug pages. The word
+// "debug_window" in a page of the ini is the word "debug".
+void PlaceDebug(Ring* ring, const char* which) {
+  debug_math::Pages& p = ring->pages;
+  for (int page = 0; page < p.count; ++page) {
+    for (int s = 0; s < kSlots; ++s) {
+      if (p.items[page][s] != kItemDebugWindow) continue;
+      p.items[page][s] = g_debug ? kItemDebug : kItemNone;
+    }
+  }
+  PlaceDebugItem(ring, which);
+  if (!g_debug_window || ring->home < 0) return;
+  p.items[ring->home][ring->home_slot] = kItemDebugWindow;
+  ring->home = -1;
+  ring->home_slot = -1;
 }
 
 // THE DEBUG PAGES of a ring, after the pages of the ini. A switch that
@@ -371,6 +393,7 @@ void ReadSettings() {
   for (int i = 0; i < kSlots; ++i) g_temple_items[1][i] = kItemNone;
   g_pages = PageHasItems(g_items[1]) ? 2 : 1;
   g_debug = DebugMenuOn();
+  g_debug_window = DebugWindowOn();
   for (int page = 0; page < g_pages; ++page) {
     memcpy(g_ring.pages.items[page], g_items[page], sizeof(g_items[page]));
   }
@@ -820,7 +843,8 @@ ItemNow StateOf(int item, const Facts& f) {
     now.can = false;
     return now;
   }
-  if (item == kItemMore || item == kItemDebug || item == kItemBack) {
+  if (item == kItemMore || item == kItemDebug || item == kItemBack ||
+      item == kItemDebugWindow) {
     return now;
   }
   // The snapshot needs no game: it saves what the headset shows.
@@ -1025,6 +1049,18 @@ bool Choose(int item, const Facts& f, const ItemNow& now) {
       }
       ++g_choices;
       ModLog("ring         : the player chose \"places\": the panel of places "
+             "opens, frame %llu", frame);
+      return true;
+    case kHowWindow:
+      if (!DebugWindowOpenFromRing()) {
+        ++g_refusals;
+        ModLog("ring         : the player chose \"debug\", and the debug "
+               "window does not open: the head has no pose yet, frame %llu",
+               frame);
+        return false;
+      }
+      ++g_choices;
+      ModLog("ring         : the player chose \"debug\": the debug window "
              "opens, frame %llu", frame);
       return true;
     case kHowSnapshot:
@@ -2157,7 +2193,8 @@ void RadialMenuWayChange(const char* by) {
 bool RadialMenuOpen() { return g_state_ready && g_state.open != kClosed; }
 
 bool RadialMenuShows() {
-  return RadialMenuOpen() || g_fade > 0.0f || PlacesPanelOpen();
+  return RadialMenuOpen() || g_fade > 0.0f || PlacesPanelOpen() ||
+         DebugWindowOpen();
 }
 
 bool RadialMenuItemCan(int item, const wchar_t** note) {

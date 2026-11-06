@@ -274,3 +274,8 @@ bool ControllersRingHand(RingHand* out);
 // places (places_panel.cpp). False when the hand has no aim pose.
 bool ControllersPointingAim(float position[3], float orientation[4],
                             float* trigger);
+
+// The stick of the pointing hand forward (positive) and back (negative), -1
+// to 1, for the scroll of the debug window (debug_window.cpp). False when
+// the hand is not active, or its pad is not clicked (a Vive wand).
+bool ControllersPointingStick(float* forward);

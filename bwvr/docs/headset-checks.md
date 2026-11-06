@@ -130,7 +130,10 @@ want.
     menu is open. Wrong: a panel that turns with the head or is at a bad
     place, a panel that hides the pointing hand, keys, buttons or a ring that
     are blurred or hard to read or hard to hit with the ray, a ray that does
-    not meet the arrow of the game, or a thumb that lets go of Y.
+    not meet the arrow of the game, or a thumb that lets go of Y. With
+    `debug_menu=1`, also open the debug window, read a note, and scroll a
+    long group with the stick. Wrong: rows or notes hard to read, arrows hard
+    to hit, or a scroll that is too fast or too slow.
 23. **The cards and the subtitles.** Read the hint cards at the wrist and the
     subtitle card while the hands work. Wrong: low contrast or a shimmer, a
     card that covers a hand or often changes side, a prompt that is late or

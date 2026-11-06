@@ -494,12 +494,14 @@ scene walks take 9 ms or more, the frame thread alone is over the 11.1 ms of
 a frame at 90 Hz.
 
 Not known: why `xrEndFrame` is slower on the second thread, and the age of a
-frame with the values 0 and 1. Not run: the value 1 in a headset (its code
-also runs when the device is for one thread, or when the second thread does
-not start), and the value 2 with a headset or a runtime other than a Quest 3
-through Virtual Desktop. A desktop run sends no frame to a runtime. With
+frame with the values 0 and 1. The code of the value 1 also runs when the
+device is for one thread, or when the second thread does not start. Not run:
+the value 2 with a headset or a runtime other than a Quest 3 through Virtual
+Desktop. A desktop run sends no frame to a runtime. With
 `test_keys=1`, Ctrl, Shift and the slash key of the number pad step the value
 while the game runs.
+
+The checks in a headset are in `headset-checks.md`, "Performance".
 
 ### The hold of the last frame
 
@@ -544,8 +546,9 @@ part of such a frame.
 Known limit: when the game copies a new eye picture into its swapchain image
 before it makes its layers (a flat frame or the intro in stereo with
 `backend=vulkan`), a frame of the hold in that time shows the new picture
-with the pose of the old one. Only a headset can show the hold: a desktop
-run has no runtime.
+with the pose of the old one.
+
+The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
 
 ### The self test
 
@@ -732,7 +735,7 @@ monitor:
 .\bwvr\tools\desk\spawn_run.ps1 -Name vsh -Dll <build>\src\mod\Release\ddraw.dll -Save temple -Seconds 150 -Set "vr=1;stereo_headless=0;vr_start=1;vr_start_test_hang_try=2;vr_start_test_hang_ms=60000"
 ```
 
-A desktop run cannot show a session that starts: only a headset can.
+The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
 
 ## The x64 host for Steam Frame
 
@@ -844,7 +847,7 @@ them. The game also writes `MemoryLeaks.txt` in the game folder.
 - The OpenXR session and the instance must be destroyed before step 6. A
   runtime that has a session at the end of the process is the likely cause of
   the fault `0xc0000409` in `VirtualDesktop.LibOVRRT32_1.dll`. No run has
-  shown this: only a headset session can.
+  shown this.
 
 ### What the mod does
 
@@ -931,8 +934,9 @@ recorded. The launcher removes the key from `bwvr.ini` on each save.
 A desktop run has no OpenXR session. With `capture_every_seconds`, the self
 test of the bridge makes the shared textures on a Direct3D 11 device of its
 own. So a run shows the fault of the device with `exit_shutdown=0`, and a
-clean end with 1. Only a headset session shows the end of the OpenXR session
-and the record of `VirtualDesktop.LibOVRRT32_1.dll`.
+clean end with 1.
+
+The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
 
 ### A test save
 
@@ -1487,10 +1491,7 @@ draw calls and the runs of a frame, the causes that start a run, and the calls
 of the game that set a state. The count has hooks on 13 more calls of the
 device, so the times of a frame are a little longer than with `profile=1`.
 
-In a headset session, set `profile=1` in `bwvr.ini` after the last save of the
-launcher, because the launcher removes the key (see "Testing without a
-headset"). The windows then give the parts that only a headset has: the wait,
-the copy to the bridge and the frame to the runtime.
+The checks in a headset are in `headset-checks.md`, "Performance".
 
 ### The measure on the desktop
 
@@ -1831,12 +1832,10 @@ The proof that the picture is the same, from a desktop run of the six scenes:
   two frames of one kind, 0.5 to 1.2 percent differ: the villagers, the smoke
   and the clouds move.
 
-Not run: the merge in a headset, and the check of the triangles in the Temple,
-in a story, in a fight of Creatures and with the effect of a miracle. The
-check runs in each eye pass of the scene, so one session with
-`draw_merge_test=1` in the ini gives that proof: the line `draw merge   : the
-check of the triangles` of the log has the count of the eye passes with a
-different checksum. The check takes time of each frame.
+The check of the triangles runs in each eye pass of the scene, and it takes
+time of each frame.
+
+The checks in a headset are in `headset-checks.md`, "The picture in each eye".
 
 ### The slow frames
 
@@ -1881,8 +1880,6 @@ at the most in the same windows. The runtime of Virtual Desktop (VDXR) sets
 no timeout in these calls. It waits in `ovr_WaitToBeginFrame` and in
 `ovr_EndFrame` of the Virtual Desktop Streamer. So the cause is in the
 streamer or in the link to the headset, and not in the files of the game.
-Not known: whether a session with Direct3D 11 (`xr_vulkan=0`) has these
-frames too, and whether a turn of the head starts them.
 
 For each 450 frames the log of a session has this line:
 
@@ -1894,9 +1891,7 @@ It gives the longest call of `xrWaitFrame`, of `xrBeginFrame`, of
 `xrEndFrame` and of the copies to the swapchain images (with their acquire and
 wait) in the window, and the count of the calls of 20 ms or more.
 
-Only a headset session can show what the wait, the copy to the bridge and the
-frame to the runtime cost in a slow frame. Only a person can say if a sound
-that stops sounds the same with `audio_stop_wait` 0 and 1.
+The checks in a headset are in `headset-checks.md`, "Performance" and "Sound".
 
 ### The refresh rate of the headset
 
@@ -2022,8 +2017,9 @@ Creature pens, `backend=vulkan`, `profile=1`), one with each value:
 
 `file_read_ahead=0` gives each read to `ReadFile`, as the plain game does.
 With `test_keys=1`, Shift Q changes the value while the game runs. Each open
-file gives its position back to Windows at its next call. Not shown: a
-session in a headset, and a load of a saved game with the read ahead.
+file gives its position back to Windows at its next call.
+
+The checks in a headset are in `headset-checks.md`, "Performance".
 
 ### The clock of the game and the hooks of dxwrapper
 
@@ -2302,7 +2298,8 @@ The scene time of one walk holds the copies for the right eye, 0.29 to
   was seen.
 - Not with a pose for each eye (`head_camera=0` with head tracking). Then the
   frame has two walks.
-- Only a headset can show the feel of it.
+
+The checks in a headset are in `headset-checks.md`, "Performance".
 
 `one_walk_check=1`: on a frame that saves pictures, the right eye also gets
 its own walk, and its picture is saved as `walk2` beside the right eye of one
@@ -2788,10 +2785,12 @@ a frame, `render_thread=1`, on a Radeon RX 7900 XTX:
 | The frame (the frame thread sets it on the desktop) | 4.85 to 5.1 ms | 5.0 to 5.2 ms |
 
 The pictures of frame 3001 with DXVK and with Windows differ in 1.7 percent of
-the pixels, a little at edges and in the filter of textures. Not run: a
-session in a headset with DXVK, a PC with two GPUs, a GPU of NVIDIA or Intel.
+the pixels, a little at edges and in the filter of textures. Not run: a PC
+with two GPUs, a GPU of NVIDIA or Intel.
 The share needs DXVK and the OpenXR session on the same GPU. DXVK takes a
 dedicated GPU before an integrated one.
+
+The checks in a headset are in `headset-checks.md`, "The picture in each eye".
 
 ## The Vulkan renderer
 
@@ -3087,7 +3086,9 @@ left eye is 29.6. The hall has the light of the chandeliers and dark
 corners, as the picture of Direct3D 9 of the same scene in a run with
 dxwrapper (mean luma 33.3, the shadow test at frame 2600). With
 `vk_stage1=0` the mean luma is 83.8: the walls and the floor have the full
-colour of their texture and no shadow. Not run: a headset session.
+colour of their texture and no shadow.
+
+The checks in a headset are in `headset-checks.md`, "The picture in each eye".
 
 A row of a locked surface goes into a buffer of the CPU with streaming
 loads of SSE4.1 (MOVNTDQA) before the conversion, because a `Lock` of
@@ -3281,8 +3282,7 @@ after that gets no picture of the renderer (`VkSceneEyesWanted`,
 `VkScenePanelFor` and `VkSceneLastPicture` are false), and the log says so.
 Then start the game with the headset ready.
 
-**Only a headset can show:** the colors and the flicker of the eye
-pictures with the device of the session.
+The checks in a headset are in `headset-checks.md`, "The picture in each eye".
 
 **Not run yet:** a video, the Main Menu, a saved game, the Temple.
 
@@ -3373,8 +3373,9 @@ With `vk_window=0` a frame was 2.3 ms.
 
 In a session in the headset the mod makes no copy to the monitor
 (`skip_desktop_present=1`, "The copy to the monitor"), so the window gets no
-present and no swapchain. Not run: a session in the headset with
-`skip_desktop_present=0`.
+present and no swapchain.
+
+The checks in a headset are in `headset-checks.md`, "Performance".
 
 `vk_window=0` is the way through the CPU and GDI. With `test_keys=1`,
 Shift D changes it from the next present: a change to 0 takes the
@@ -3465,8 +3466,9 @@ With `test_frame_rate=60` the mod makes no present to the window, so on the
 desktop the file stays until the end of the run.
 
 **Not run:** a PC with no Vulkan 1.3 or no `vulkan-1.dll`, a fault of the
-driver, and a session with Vulkan that does not start. Only a headset shows
-the first picture of a session with Vulkan that deletes the file.
+driver, and a session with Vulkan that does not start.
+
+The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
 
 ### The address space
 
@@ -3543,7 +3545,7 @@ the log counts:
 
 **Open question: crashes with no address space left.** Two faults of
 players with the original file agree with a process that has no address
-space left. A headset play with the flag must show that they stop:
+space left:
 
 - With `backend=vulkan` on an NVIDIA GPU, the game can stop at the choice
   of the Creature with a write to address 0 in `nvoglv32.dll` (the Vulkan
@@ -3555,6 +3557,8 @@ space left. A headset play with the flag must show that they stop:
   a thread of SteamVR.
 
 In both, the dump fails with `0x80070008` (`ERROR_NOT_ENOUGH_MEMORY`).
+
+The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
 
 
 `foveation` (0 is the default, a test key: Shift O, the launcher row "Fewer
@@ -3730,8 +3734,10 @@ camera of the game on the desktop has about 70 degrees across, so a centre
 of 25 degrees on each side is 2717 by 2717 pixels of the picture: in a
 headset of about 110 degrees it is 1332 by 1332. The picture at frame 421
 has no edge between the two images, and with `foveation_show=1` the rect of
-the centre with its soft edge shows. Not run: a headset session, an eye
-tracker, the test key.
+the centre with its soft edge shows. Not run: an eye tracker, the test
+key.
+
+The checks in a headset are in `headset-checks.md`, "The picture in each eye".
 
 ## The session with Vulkan
 
@@ -3808,18 +3814,18 @@ longest frame of a window of 450 frames was 16 ms in most windows with the
 Vulkan eyes and 32 ms with the eyes of Direct3D 9. A window with a copy of
 a relay (a card, the panel, a menu) had 32 ms too.
 
-**Open: only a headset shows it.** Whether the eyes of the Creature have
-their eyeballs with the Vulkan eyes. In a session the renderer drew each
-draw of each window of 450 frames (0.0 not drawn, 3.5 to 12 draws a frame
-in another format of XYZRHW, "What it draws"). Whether a window with a card
-has no frames of 32 ms with `xr_vulkan_upload=1`. Whether the black flicker (at the start of a session, and while the Hand
-strokes the Creature) shows with `vk_scene_follow=1`. In desktop runs
-with 0 the left eye has the subtitle box and the Creature panel, and with
-1 it has neither ("The Vulkan renderer"). A session with Vulkan with
-SteamVR. The relays between Direct3D 11 and
-Vulkan on the drivers of NVIDIA and Intel. The frame time with the Vulkan
-eyes. The scenes that no desktop run compared yet: the
-story camera, the fades, the Temple and the game at night.
+In a session the renderer drew each draw of each window of 450 frames
+(0.0 not drawn, 3.5 to 12 draws a frame in another format of XYZRHW, "What
+it draws"). In desktop runs with `vk_scene_follow=0` the left eye has the
+subtitle box and the Creature panel, and with 1 it has neither ("The Vulkan
+renderer").
+
+**Open.** A session with Vulkan with SteamVR. The relays between Direct3D 11
+and Vulkan on the drivers of NVIDIA and Intel. The scenes that no desktop
+run compared yet: the story camera, the fades, the Temple and the game at
+night.
+
+The checks in a headset are in `headset-checks.md`, "The picture in each eye" and "Performance".
 
 ## How the threads wait
 
@@ -3870,8 +3876,10 @@ windows:
 With one physical core the spins of `thread_wait=0` take the cores from the
 frame thread. There the frames are 5.9 ms with no D3D7 thread and 8.7 ms with
 it. With 4, 6 and 16 cores the D3D7 thread makes each frame 0.05 to 0.14 ms
-shorter. Not run: a session in a headset with `thread_wait=1`, and the wait
-of the second thread for the GPU, which a desktop run does not have.
+shorter. A desktop run does not have the wait of the second thread for the
+GPU.
+
+The checks in a headset are in `headset-checks.md`, "Performance".
 
 ## The calls of DirectDraw and Direct3D 7 in a session
 
@@ -4899,6 +4907,8 @@ Ruled out as the cause: the full screen quad that `LH3DRender::FinishFrame` draw
 Open: the sun bobs a little as the head moves in the headset. The sun glare is the
 best candidate, and it is not proven.
 
+The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+
 ### Models keep their detail further out
 
 `LH3DObject::AddForDrawing` (`0x00815A70`, and its twin at `0x00816AD0`) chooses a
@@ -5163,8 +5173,9 @@ has `one_walk=0`.
 Open: no desktop run had a real lightning, of a storm or of a miracle. Only the
 test light is shown in a run, and no run had a light map of a particle. Not
 known: which effects have a particle with a light map, and whether the second
-eye pass has such a map by itself. The line of the window in the log of a
-session with such an effect shows it.
+eye pass has such a map by itself.
+
+The checks in a headset are in `headset-checks.md`, "The picture in each eye".
 
 ### The color over the picture at the end of a frame
 
@@ -5603,11 +5614,6 @@ section, so the uninstaller can put them back.
 
 ## Open items
 
-- The end of the OpenXR session at the exit of the game (`XrScreen::Stop` on
-  the exit path) has run in no headset session. See "The end of the mod".
-- A session that starts after a try on the thread of the tries
-  (`vr_start=1`), and the fall back to `vr_start=0`, have run in no headset
-  session. See "The start of the headset session".
 - A device lost after the bridge has started is not tested.
 - The worst frames of 31 to 52 ms have no explanation.
 - The sun bobs a little in the headset.
@@ -5617,3 +5623,5 @@ section, so the uninstaller can put them back.
   (about 3 ms in a heavy scene), are open ideas.
 - An off centre projection for each eye would draw about a third less.
 - The game turn could move off the render thread if its spike is large.
+
+The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".

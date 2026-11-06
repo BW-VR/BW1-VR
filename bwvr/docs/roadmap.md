@@ -370,6 +370,12 @@ that moves while the Hand takes it.
     `vk window` and `vk video` of the report. The session path of the quad
     layers (the copy of each card on the GPU, the panel quads of
     `ui_panel=1`, a screen in the room) has run in no session.
+  - With no headset the view copies the pixels of each card from the CPU.
+    A panel of 1024 by 1024 (the panel of places, the settings window) is
+    4 MB a present, and the present then costs about 0.3 ms more on the
+    frame thread and 1.1 ms more on the GPU. Copy only the part of a card
+    that changed, or copy it on a change only.
+  - The report counts the panel of places as a card, not as a panel.
 - **P9. The pointer on the interface panel**, and the screens with no
   scene (menus, loading, videos) on a panel in the room (`ui-layer.md`).
 - **P10. The tabletop mode** (play mode 3) is a test mode, on hold. Not built: a

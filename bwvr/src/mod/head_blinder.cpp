@@ -54,9 +54,9 @@ void ControllersGesturePulse(float amplitude, float seconds);
 // view, in world units.
 bool HeadCameraTableEye(float out[3]);
 // tabletop.cpp: the God view owns the view, and its scale in units for each
-// meter.
+// meter while it owns the view.
 bool TabletopGodOwnsView();
-float TabletopScale();
+float TabletopViewScale();
 // temple.cpp: the ray of a room of the Temple is on.
 bool TempleRayOn();
 // vignette.cpp: the eye of the pass that runs, and the draw.
@@ -116,7 +116,7 @@ bool DialogUp() {
 // overlay does nothing now.
 bool HeadClearance(float* clearance, float head[3]) {
   if (!TabletopGodOwnsView() || DialogUp() || TempleRayOn()) return false;
-  const float scale = TabletopScale();
+  const float scale = TabletopViewScale();
   if (!(scale > 0.0f) || !HeadCameraTableEye(head)) return false;
   float points[bm::kPoints][2];
   bm::AroundPoints(head[0], head[2], scale, points);
@@ -207,6 +207,10 @@ void HeadBlinderFrame() {
   g_shown = shown;
   g_full = full;
 }
+
+// head_blinder is on. tabletop.cpp then keeps the floor of the head at the
+// height of the head at the recenter pose (FloorHeadY).
+bool HeadBlinderOn() { return g_on; }
 
 // The level of now, from 0 to 1.
 float HeadBlinderLevel() { return g_level; }

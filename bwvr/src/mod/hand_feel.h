@@ -17,6 +17,7 @@ struct HandFeelHand {
   bool holding;    // the pointing hand has the hold pose
   bool relaxed;    // the hand has the relaxed pose
   bool mesh;       // the hand is the mesh of the hand model
+  bool land_held;  // the land holds the drawn hand up (hand_land.cpp)
   float position[3];
   float rotation[9];
   float length;    // of the hand, in world units

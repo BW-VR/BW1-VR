@@ -59,9 +59,11 @@ want.
    thing that you did not aim at, a halo or a glow that is lost on the land
    or too strong, or a pull by accident.
 10. **The fingers on the world.** Put a hand on the land, at a wall of a
-    house, on a villager and into the sea, and take a small rock. Wrong: a
-    finger that jumps, shakes, bends in the air or goes into the thing, a
-    claw on a small rock, or fingers that stop on the water.
+    house, on a villager and into the sea, and take a small rock. Push a
+    hand deep into the land and move it there. Wrong: a finger that jumps,
+    shakes, bends in the air or goes into the thing, a claw on a small rock,
+    fingers that stop on the water, a hand that goes into the land or jumps
+    on it, or a hand on the land that feels wrong over the real hand.
 11. **The haptics.** Feel the pulses of a take, a release, a stroke, the
     leash, a command and the land. Wrong: a pulse that is too weak or too
     strong, or a pattern that feels like a buzz or hides the pulse of a
@@ -164,8 +166,9 @@ agents: the log does not tell the item yet.
 - **White or invisible story people with Vulkan** (B38): the Lost Brother and
   the Lost Sister of Land 1, and Sable at the cow stone. Log: `vk scene     :
   a texture with no new image`.
-- **A grip that opens during a bulk take** (P21). Log: `the grip opens during
-  a bulk take`.
+- **A take at the Hand that stops when the hand moves away** (P21). Log:
+  `hand bulk    : the bulk take ends`, with the button of the game, the grip
+  and the distance from the pile, and `the grip opens during a bulk take`.
 - **An old picture in one eye** (B16). Log: `eye clean    : an eye pass drew
   no sky` names the scene of that frame.
 - **A lightning in one eye only** (B18). Log: `land light   :`. A flash with

@@ -472,8 +472,10 @@ in `src/mod/hand_direct.cpp`, with the grip point, the reach and the pixel in
 
 ### The rule
 
-The Hand is the real hand, one to one in place and size, always. There is no
-Go-Go reach and no growth with distance. Reach comes from the world: the God
+The Hand is the real hand, one to one in place and size, over the land. A
+real hand in the land is drawn on the land, straight over the real hand
+(hand-model.md, "The Hand stops at the land"). There is no Go-Go reach and no
+growth with distance. Reach comes from the world: the God
 view puts the land at about waist height (see [god-view.md](god-view.md)).
 
 ### When it acts
@@ -647,6 +649,11 @@ at every scale (7.5, 100 and 1000 units per meter, and 5 cm on the table with
 moves that the player did not move. The glow follows the point. The grab
 radius of the pick still measures from the point. On a real table the
 controller's grip is about 5 cm over the top when the fingers touch it.
+
+The drawn hand stops at the land too (`hand_land_stop=1`, hand-model.md,
+"The Hand stops at the land"). While the land holds the drawn hand up, the
+point goes up by the same lift in `HandDirectFrame`, before this test, so
+the point is the tip of the hand that the player sees.
 
 The game does not hold the point up. Its distance step ends the ray half a
 Hand before the land, but the depth hook and the pose hook replace both. The

@@ -2687,6 +2687,10 @@ bool ControllersGripCarries() {
 // as the pump last saw it, and the hand can act.
 bool ControllersGripClosed() { return g_on && RawDown(kRight) && Usable(); }
 
+// For the log of a bulk take (hand_direct.cpp): the right button of the game
+// is down now, from either source.
+bool ControllersGameRightDown() { return (g_game_mask & 2) != 0; }
+
 namespace {
 
 // Real button events, one at a time, from the window procedure.

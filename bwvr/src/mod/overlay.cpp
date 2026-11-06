@@ -109,6 +109,10 @@
 // target of the grip, and the hold pose closes on the body of the object in
 // the Hand. With hand_feel=0 the curls of the pose stay.
 //
+// THE LAND (docs/hand-model.md, "The Hand stops at the land"). A real hand
+// in the land is drawn on the land, straight over the real hand, with the
+// lift that hand_land.cpp latched for the frame. Hand feel gets that place.
+//
 // THE FINGERS FROM OUTSIDE. OverlaySetFinger gives one finger of one hand a
 // curl and a spread for the frame, in place of the curl that the poses give.
 // No file of the mod calls it.
@@ -136,6 +140,7 @@
 #include "glow_math.h"
 #include "hand_exact.h"
 #include "hand_feel.h"
+#include "hand_land.h"
 #include "hand_model.h"
 #include "overlay_math.h"
 #include "ray_glow_math.h"
@@ -406,6 +411,18 @@ struct MeshInput {
   float rotation[9];
 };
 MeshInput g_mesh_input[kHands];
+// The shape of the fingers of each hand as it was built last, for the stop
+// at the land of the next frame (hand_land.cpp).
+struct LastShape {
+  uint64_t frame = 0;
+  bool have = false;
+  bool mesh = false;
+  float curls[overlay_math::kFingers];
+  float outer[overlay_math::kFingers];
+  float spread[overlay_math::kFingers];
+  float thumb_turn = 0.0f;
+};
+LastShape g_last_shape[kHands];
 
 bool g_said_first = false;
 bool g_said_owner = false;
@@ -667,6 +684,16 @@ bool BuildMeshHand(int h, float curls[overlay_math::kFingers],
                       fingers)) {
     return false;
   }
+  LastShape& last = g_last_shape[h];
+  last.frame = g_frame;
+  last.have = true;
+  last.mesh = true;
+  for (int f = 0; f < overlay_math::kFingers; ++f) {
+    last.curls[f] = fingers.curl[f];
+    last.outer[f] = fingers.outer[f];
+    last.spread[f] = fingers.spread[f];
+  }
+  last.thumb_turn = fingers.thumb_turn;
   // The mesh of the hand model stands for the low poly hand. Its own index
   // tip is the tip for the log.
   HandModelIndexTip(h, g_index_tip[h]);
@@ -746,9 +773,13 @@ bool BuildFrame() {
     }
   }
   for (int h = 0; h < kHands; ++h) {
-    const OverlayHand& hand = hands.hand[h];
+    OverlayHand hand = hands.hand[h];
     if (!hand.valid) continue;
     if (other_only && h == hands.pointing) continue;
+    // THE STOP AT THE LAND (hand_land.cpp): a real hand in the land is drawn
+    // on the land, straight over the real hand. The intro has no land.
+    float land_lift = 0.0f;
+    if (!g_intro && HandLandLift(h, &land_lift)) hand.position[1] += land_lift;
     // A hand of the intro that does not show is not built. The low poly hand
     // has no alpha, so it shows only from half the opacity.
     if (g_intro && g_intro_opacity[h] < (mesh ? 0.01f : 0.5f)) continue;
@@ -811,6 +842,7 @@ bool BuildFrame() {
       feel.holding = pointing && have_context && context.holding;
       feel.relaxed = pose == overlay_math::kPoseRelaxed;
       feel.mesh = mesh;
+      feel.land_held = land_lift > 0.0f;
       for (int k = 0; k < 3; ++k) feel.position[k] = hand.position[k];
       for (int k = 0; k < 9; ++k) feel.rotation[k] = hand.rotation[k];
       feel.length = g_length;
@@ -863,6 +895,15 @@ bool BuildFrame() {
                                            ask.weight * (ask.curl - curls[f]));
         }
       }
+      LastShape& last = g_last_shape[h];
+      last.frame = g_frame;
+      last.have = true;
+      last.mesh = false;
+      for (int f = 0; f < overlay_math::kFingers; ++f) {
+        last.curls[f] = curls[f];
+        last.outer[f] = last.spread[f] = 0.0f;
+      }
+      last.thumb_turn = 0.0f;
       float tip[3];
       overlay_math::FingerTip(1, curls[1], tip);
       overlay_math::PlacePoint(hand.position, hand.rotation, g_length, left,
@@ -1384,6 +1425,27 @@ void OverlayIndexTipLocal(float out[3]) {
   overlay_math::FingerTip(1, overlay_math::kRestCurl, out);
 }
 
+// For hand_land.cpp: the shape of the fingers of a hand as it was built in
+// this frame or the frame before: the curls, and for the mesh the outer bends,
+// the spreads and the turn of the thumb. False when the hand was not built
+// then.
+bool OverlayLastShape(int hand, float curls[overlay_math::kFingers],
+                      float outer[overlay_math::kFingers],
+                      float spread[overlay_math::kFingers], float* thumb_turn,
+                      bool* mesh) {
+  if (hand < 0 || hand >= kHands) return false;
+  const LastShape& last = g_last_shape[hand];
+  if (!last.have || g_frame > last.frame + 1) return false;
+  for (int f = 0; f < overlay_math::kFingers; ++f) {
+    curls[f] = last.curls[f];
+    outer[f] = last.outer[f];
+    spread[f] = last.spread[f];
+  }
+  *thumb_turn = last.thumb_turn;
+  *mesh = last.mesh;
+  return true;
+}
+
 void OverlaySetEnabled(bool on) {
   g_on = on;
   QueryPerformanceFrequency(&g_frequency);
@@ -1686,6 +1748,7 @@ void OverlayDraw() {
 void OverlayReport() {
   HandModelReport();
   HandFeelReport();
+  HandLandReport();
   if (g_glow_frames > 0) {
     const double frames = static_cast<double>(g_glow_frames);
     ModLog("overlay      : the glow ribbons: %llu frames, %.0f triangles a "

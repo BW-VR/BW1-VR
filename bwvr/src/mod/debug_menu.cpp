@@ -222,6 +222,8 @@ int HandFeelValue();
 void HandFeelChange(const char* by);
 int HandFeelPinchValue();
 void HandFeelPinchChange(const char* by);
+int HandLandStopValue();
+void HandLandStopChange(const char* by);
 int HandModelSwapValue();
 void HandModelSwapChange(const char* by);
 int HandModelLookValue();
@@ -566,6 +568,8 @@ const Switch kSwitches[] = {
      HandFeelPinchValue, HandFeelPinchChange, L"fist|pinch"},
     {kGroupHand, L"Finger feel", L"Fingers react to the world", "hand_feel",
      HandFeelValue, HandFeelChange, L"off|on"},
+    {kGroupHand, L"Land stop", L"Hand stops at the land", "hand_land_stop",
+     HandLandStopValue, HandLandStopChange, L"off|on"},
     {kGroupHand, L"Game Hand", L"Mesh of the game's Hand", "hand_hide_game",
      HandExactHideValue, HandExactHideChange, L"shown|hidden"},
     {kGroupHand, L"Hand model", L"Model of the hands", "hand_model",
@@ -937,6 +941,9 @@ const wchar_t* const kTips[] = {
     // Finger feel
     L"On: the fingers react to the world. Off: the fingers have the curls of "
     L"the pose only.",
+    // Land stop
+    L"On: a hand that goes into the land stays on the land and slides along "
+    L"it. Off: the land hides the hand, and only the point stays on it.",
     // Game Hand
     L"Hidden: the mod hides the mesh of the game Hand while a controller "
     L"places it, and draws both hands. Shown: the game draws its Hand too.",

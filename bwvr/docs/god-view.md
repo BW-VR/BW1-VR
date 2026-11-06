@@ -932,10 +932,19 @@ under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
 - **When.** Only while the God view owns the view and no dialog box is up. In
   a room of the Temple, in a menu, in a story and in a cut scene the overlay
   does nothing, and an overlay that shows goes at once.
+- **The floor of the head.** When the view goes to a place of a game camera,
+  and in a zoom, a walk and a grab, the land under the head stays 10 cm
+  (`kGroundNearest`) below the head (`FloorHeadY` in `tabletop.cpp`). With
+  `head_blinder=1` that is 10 cm below the height of the head at the recenter
+  pose, not below the head now. So a head that goes down does not push the
+  land down, and nothing moves the view that the player did not move: the
+  head goes into the land, and the overlay covers it. With `head_blinder=0`
+  the floor follows the head now. The log has the line "the
+  floor of the head acts" each time that the floor moves the land down.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land. 0: the eyes see under the land. The launcher row "Head in the land". The switch "Head blinder" of the debug page |
+| `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land, and the floor of the head is at the height of the head at the recenter pose. 0: the eyes see under the land, and the floor of the head follows the head. The launcher row "Head in the land". The switch "Head blinder" of the debug page |
 
 The log has one line when the overlay starts, with the height of the head
 over the land and its place on the map, one line when the view is opaque,

@@ -173,7 +173,7 @@ inline void PlacesChecks() {
     for (int b = 0; b < kButtons; ++b) {
       float u = 0.0f, v = 0.0f, p[3];
       ButtonMiddle(b, &u, &v);
-      PanelPoint(panel, u, v, p);
+      menu_room_math::PointAt(panel, u, v, p);
       float dir[3] = {p[0] - head[0], p[1] - head[1], p[2] - head[2]};
       const float l = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
       for (int k = 0; k < 3; ++k) dir[k] /= l;
@@ -186,7 +186,7 @@ inline void PlacesChecks() {
     Check(hits, "a ray from the head to the middle of each button meets it",
           hits, 1);
     float bottom[3];
-    PanelPoint(panel, 0.5f, 1.0f, bottom);
+    menu_room_math::PointAt(panel, 0.5f, 1.0f, bottom);
     const float b[3] = {bottom[0] - head[0], bottom[1] - head[1],
                         bottom[2] - head[2]};
     const float bl = sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
@@ -194,6 +194,26 @@ inline void PlacesChecks() {
     Check(down > -30.0f && down < -20.0f,
           "the bottom edge is 20 to 30 degrees below eye level, above a hand "
           "that points", static_cast<int>(down), -27);
+  }
+
+  // THE KIT (panel_kit_math.h): the hit test of a list of rects, and the box
+  // with a rim that stays on the picture.
+  {
+    const int rects[2][4] = {{10, 10, 100, 50}, {200, 10, 100, 50}};
+    Check(panel_kit_math::HitRects(60.0f / 400, 30.0f / 100, 400, 100, rects,
+                                   2) == 0 &&
+              panel_kit_math::HitRects(250.0f / 400, 30.0f / 100, 400, 100,
+                                       rects, 2) == 1 &&
+              panel_kit_math::HitRects(150.0f / 400, 30.0f / 100, 400, 100,
+                                       rects, 2) == -1 &&
+              panel_kit_math::HitRects(1.5f, 0.3f, 400, 100, rects, 2) == -1,
+          "the kit finds the rect at a point, and none between two rects or "
+          "off the panel", 1, 1);
+    int box[4];
+    const int edge[4] = {0, 1, 400, 99};
+    panel_kit_math::RectBox(edge, 3, 400, 100, box);
+    Check(box[0] == 0 && box[1] == 0 && box[2] == 400 && box[3] == 100,
+          "a box with its rim stays on the picture", box[3], 100);
   }
 
   // THE TEST KEY places_test_buttons.

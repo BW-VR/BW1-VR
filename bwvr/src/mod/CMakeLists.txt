@@ -88,6 +88,7 @@ add_library(bwvr_mod SHARED
     miracle.cpp
     village.cpp
     radial_menu.cpp
+    panel_kit.cpp
     places_panel.cpp
     snapshot.cpp
     spell_book.cpp

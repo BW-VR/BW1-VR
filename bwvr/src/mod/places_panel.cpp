@@ -49,6 +49,9 @@
 // THE PICTURE uses the quad layer of the ring (kCardRing): the ring and the
 // panel never show at one time.
 //
+// The panel is built on panel_kit.h: the place in the room, the ray and the
+// trigger, the parchment and the copies of the parts are there.
+//
 //   places_panel=1            0: page 2 of the ring has the bookmark items
 //                             mark_set, mark_go and mark_back, and no panel
 //   hint_card_style=1         1: the parchment. 0: the dark panel
@@ -65,15 +68,11 @@
 #include <string.h>
 #include <wchar.h>
 
-#include <new>
-
-#include "../vr/xr_screen.h"
 #include "card_scroll.h"
 #include "controllers.h"
 #include "cutscene_window.h"
 #include "haptics.h"
-#include "menu_room.h"
-#include "menu_room_math.h"
+#include "panel_kit.h"
 #include "places_panel.h"
 #include "places_panel_math.h"
 #include "radial_menu.h"
@@ -82,10 +81,6 @@
 extern void ModLog(const char* format, ...);
 
 uint64_t ControllersFrameCount();
-void ControllersGesturePulse(float amplitude, float seconds);
-uint64_t HeadPoseOriginSerial();
-// hint_card.cpp: hint_card_style now, or below 0 while the cards are off.
-int HintCardStyleValue();
 // eye_capture.cpp
 void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
                       const void* pixels, int pitch, uint32_t width,
@@ -94,6 +89,7 @@ void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
 namespace {
 
 using namespace places_math;
+namespace kit = panel_kit;
 
 // --- the settings ----------------------------------------------------------------
 
@@ -107,37 +103,30 @@ int g_tests[kMostTests];
 int g_test_count = 0;
 int g_tests_used = 0;
 
-int IniKey(const char* key, int fallback) {
-  char path[MAX_PATH];
+bool IniPath(char path[MAX_PATH]) {
   const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-  if (length == 0 || length >= MAX_PATH) return fallback;
+  if (length == 0 || length >= MAX_PATH) return false;
   char* slash = strrchr(path, '\\');
-  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return fallback;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return false;
   slash[1] = 0;
   strcat_s(path, MAX_PATH, "bwvr.ini");
-  return static_cast<int>(GetPrivateProfileIntA("bwvr", key, fallback, path));
-}
-
-void IniText(const char* key, char* out, DWORD size) {
-  out[0] = 0;
-  char path[MAX_PATH];
-  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-  if (length == 0 || length >= MAX_PATH) return;
-  char* slash = strrchr(path, '\\');
-  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return;
-  slash[1] = 0;
-  strcat_s(path, MAX_PATH, "bwvr.ini");
-  GetPrivateProfileStringA("bwvr", key, "", out, size, path);
+  return true;
 }
 
 void ReadSettings() {
   if (g_read) return;
   g_read = true;
-  g_on = IniKey("places_panel", 1) != 0;
-  g_style_ini = IniKey("hint_card_style", 1) != 0 ? 1 : 0;
-  g_save = IniKey("places_panel_test_save", 0);
-  char text[256];
-  IniText("places_test_buttons", text, sizeof(text));
+  char path[MAX_PATH];
+  char text[256] = "";
+  if (IniPath(path)) {
+    g_on = GetPrivateProfileIntA("bwvr", "places_panel", 1, path) != 0;
+    g_style_ini =
+        GetPrivateProfileIntA("bwvr", "hint_card_style", 1, path) != 0 ? 1 : 0;
+    g_save = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "places_panel_test_save", 0, path));
+    GetPrivateProfileStringA("bwvr", "places_test_buttons", "", text,
+                             sizeof(text), path);
+  }
   g_test_count = ParseButtons(text, g_tests, kMostTests);
   ModLog("places       : places_panel=%d. %s%s", g_on ? 1 : 0,
          g_on ? "The ring item \"places\" opens a panel of the places and the "
@@ -154,12 +143,6 @@ void ReadSettings() {
   }
 }
 
-int CardStyle() {
-  const int live = HintCardStyleValue();
-  if (live >= 0) return live != 0 ? 1 : 0;
-  return g_style_ini;
-}
-
 double NowMs() {
   static LARGE_INTEGER frequency = {};
   if (frequency.QuadPart == 0) QueryPerformanceFrequency(&frequency);
@@ -171,22 +154,14 @@ double NowMs() {
 
 // --- the state -------------------------------------------------------------------
 
-bool g_open = false;
+kit::Room g_room = {};
 // The trigger stays with the panel after a press that closed it, until it
 // goes up. The pump reads this, so it is a LONG.
 volatile LONG g_holds = 0;
 bool g_hold_after = false;
-menu_room_math::Panel g_panel = {};
-uint64_t g_serial = 0;
-int g_hover = -1;
-int g_flash = -1;
-ULONGLONG g_flash_until = 0;
-Press g_press;
-float g_ray_meters = 0.0f;
 // The note of the last press, until then.
 wchar_t g_press_note[64] = L"";
 ULONGLONG g_press_note_until = 0;
-const ULONGLONG kFlashMs = 120;
 const ULONGLONG kPressNoteMs = 2000;
 
 // What each button can do now: latched once a frame.
@@ -208,7 +183,7 @@ bool LogRoom() {
 }
 
 void SetHolds() {
-  InterlockedExchange(&g_holds, (g_open || g_hold_after) ? 1 : 0);
+  InterlockedExchange(&g_holds, (g_room.open || g_hold_after) ? 1 : 0);
 }
 
 const char* ButtonName(int b, char* out, size_t size) {
@@ -271,359 +246,141 @@ void Latch() {
 }
 
 void Close(const char* why, bool hold) {
-  if (!g_open) return;
-  g_open = false;
-  g_hover = -1;
-  g_flash = -1;
+  if (!g_room.open) return;
+  kit::Close(&g_room);
   g_hold_after = hold;
   SetHolds();
   ModLog("places       : the panel closes: %s, frame %llu", why,
          ControllersFrameCount());
 }
 
+int HitButton(float u, float v, void*) { return ButtonAt(u, v); }
+
 // --- the picture -----------------------------------------------------------------
 
-// The looks of a button.
-const int kLookPlain = 0;
-const int kLookHover = 1;
-const int kLookFlash = 2;
-const int kLookDim = 3;
-const int kLooks = 4;
-
 struct Look {
-  uint8_t button[kButtons];
-  uint8_t seal[kMarks];  // 1 for a bookmark that is set
+  uint8_t button[kButtons];  // a panel_kit::Look
+  uint8_t seal[kMarks];      // 1 for a bookmark that is set
   wchar_t note[64];
   int style;
 };
-Look g_drawn;            // the picture in g_card, style -1 for none
+Look g_drawn;
 bool g_have_drawn = false;
 
-HDC g_dc = nullptr;
-HBITMAP g_dib = nullptr;
-uint32_t* g_bits = nullptr;  // the GDI picture: the dark look, and letters
-bool g_raster_failed = false;
+kit::Canvas g_canvas = {};
+kit::Tiles g_button_tiles = {};
+kit::Tiles g_seal_tiles = {};
 HFONT g_plain_font = nullptr;
 HFONT g_plain_small = nullptr;
+kit::Font g_title_font = {}, g_header_font = {}, g_button_font = {},
+          g_note_font = {}, g_digit_font = {};
+const char* g_digit_face = "";
+bool g_fonts_failed = false;
 
-const size_t kPictureBytes = static_cast<size_t>(kWidth) * kHeight * 4;
-uint8_t* g_page = nullptr;
-uint8_t* g_card = nullptr;
-uint8_t* g_tiles[kLooks][kButtons] = {};
-uint8_t* g_seal_tiles[2][kMarks] = {};
-bool g_parchment_failed = false;
-bool g_parchment_ready = false;
-
-// The fonts of the parchment, with the ascent and the height of each.
-struct Font {
-  HFONT font;
-  int cap;
-  int ascent;
-  int height;
-};
-Font g_title_font = {}, g_header_font = {}, g_button_font = {},
-     g_note_font = {}, g_digit_font = {};
-
-bool RasterStart() {
-  if (g_dc != nullptr) return true;
-  if (g_raster_failed) return false;
-  g_dc = CreateCompatibleDC(nullptr);
-  BITMAPINFO info;
-  memset(&info, 0, sizeof(info));
-  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  info.bmiHeader.biWidth = kWidth;
-  info.bmiHeader.biHeight = -kHeight;  // top first
-  info.bmiHeader.biPlanes = 1;
-  info.bmiHeader.biBitCount = 32;
-  info.bmiHeader.biCompression = BI_RGB;
-  void* bits = nullptr;
-  if (g_dc != nullptr) {
-    g_dib = CreateDIBSection(g_dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
-  }
-  const auto font = [](int em, int weight) {
-    return CreateFontW(-em, 0, 0, 0, weight, FALSE, FALSE, FALSE,
-                       DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
-                       ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS,
-                       L"Segoe UI");
-  };
-  g_plain_font = font(36, FW_SEMIBOLD);
-  g_plain_small = font(28, FW_NORMAL);
-  if (g_dc == nullptr || g_dib == nullptr || bits == nullptr ||
-      g_plain_font == nullptr || g_plain_small == nullptr) {
-    g_raster_failed = true;
-    ModLog("places       : GDI gave no picture for the panel, so the panel "
-           "does not show");
-    return false;
-  }
-  g_bits = static_cast<uint32_t*>(bits);
-  SelectObject(g_dc, g_dib);
-  SetBkMode(g_dc, TRANSPARENT);
-  return true;
-}
-
-// The words of a button.
-void Word(int b, wchar_t* out, size_t size) {
-  wcscpy_s(out, size, kKindWord[KindOf(b)]);
-}
-
-// THE DARK LOOK (hint_card_style=0): all of it each time that it changes.
-void RasterPlain(const Look& look) {
-  const auto fill = [](int x0, int y0, int x1, int y1, COLORREF color) {
-    HBRUSH brush = CreateSolidBrush(color);
-    RECT rect = {x0, y0, x1, y1};
-    FillRect(g_dc, &rect, brush);
-    DeleteObject(brush);
-  };
-  const auto text = [](HFONT font, COLORREF color, const wchar_t* words,
-                       int x0, int y0, int x1, int y1) {
-    SelectObject(g_dc, font);
-    SetTextColor(g_dc, color);
-    RECT rect = {x0, y0, x1, y1};
-    DrawTextW(g_dc, words, -1, &rect,
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-  };
-  fill(0, 0, kWidth, kHeight, RGB(22, 24, 28));
-  text(g_plain_font, RGB(235, 235, 235), L"Places", 0, kTitleTop, kWidth,
-       kTitleBottom);
-  text(g_plain_small, RGB(190, 190, 190), L"Bookmarks", 0, kHeaderTop, kWidth,
-       kHeaderBottom);
-  for (int m = 0; m < kMarks; ++m) {
-    int s[4];
-    SealBox(m, s);
-    fill(s[0], s[1], s[2], s[3],
-         look.seal[m] != 0 ? RGB(150, 40, 36) : RGB(60, 52, 50));
-    wchar_t digit[4];
-    swprintf_s(digit, L"%d", m + 1);
-    text(g_plain_font,
-         look.seal[m] != 0 ? RGB(250, 230, 210) : RGB(130, 120, 115), digit,
-         s[0], s[1], s[2], s[3]);
-  }
-  for (int b = 0; b < kButtons; ++b) {
-    int r[4];
-    ButtonRect(b, r);
-    COLORREF face = RGB(62, 66, 76), ink = RGB(235, 235, 235);
-    switch (look.button[b]) {
-      case kLookHover: face = RGB(205, 172, 96); ink = RGB(20, 20, 20); break;
-      case kLookFlash: face = RGB(250, 225, 150); ink = RGB(20, 20, 20); break;
-      case kLookDim: face = RGB(40, 42, 48); ink = RGB(110, 110, 110); break;
-      default: break;
-    }
-    fill(r[0], r[1], r[0] + r[2], r[1] + r[3], face);
-    wchar_t word[16];
-    Word(b, word, 16);
-    text(g_plain_small, ink, word, r[0], r[1], r[0] + r[2], r[1] + r[3]);
-  }
-  int n[4];
-  NoteBox(n);
-  text(g_plain_small, RGB(230, 190, 110), look.note, n[0], n[1], n[2], n[3]);
-  GdiFlush();
-  for (size_t i = 0; i < static_cast<size_t>(kWidth) * kHeight; ++i) {
-    g_bits[i] |= 0xFF000000u;
-  }
-}
-
-// --- the parchment (hint_card_style=1) -----------------------------------------
-
-Font MakeFont(HFONT font, int cap) {
-  Font f = {font, cap, 0, 0};
-  if (font == nullptr) return f;
-  TEXTMETRICW metrics;
-  SelectObject(g_dc, font);
-  GetTextMetricsW(g_dc, &metrics);
-  f.ascent = metrics.tmAscent;
-  f.height = metrics.tmHeight;
-  return f;
-}
-
-// White letters on black in the GDI picture, in the box, with the capital
-// letter in the middle of the box.
-void Letters(const Font& f, const wchar_t* words, int x0, int y0, int x1,
-             int y1) {
-  const size_t row = static_cast<size_t>(x1 - x0) * 4;
-  for (int y = y0; y < y1; ++y) {
-    memset(g_bits + static_cast<size_t>(y) * kWidth + x0, 0, row);
-  }
-  const int baseline = y0 + (y1 - y0 + f.cap) / 2;
-  SelectObject(g_dc, f.font);
-  SetTextColor(g_dc, RGB(255, 255, 255));
-  RECT rect = {x0, baseline - f.ascent, x1, baseline - f.ascent + f.height};
-  // The clip keeps the letters in the box: the box is all that changes.
-  HRGN clip = CreateRectRgn(x0, y0, x1, y1);
-  SelectClipRgn(g_dc, clip);
-  DrawTextW(g_dc, words, -1, &rect,
-            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP);
-  SelectClipRgn(g_dc, nullptr);
-  DeleteObject(clip);
-  GdiFlush();
-}
-
-void PageToCard(int x0, int y0, int x1, int y1) {
-  const size_t row = static_cast<size_t>(x1 - x0) * 4;
-  for (int y = y0; y < y1; ++y) {
-    const size_t at = (static_cast<size_t>(y) * kWidth + x0) * 4;
-    memcpy(g_card + at, g_page + at, row);
-  }
-}
-
-// A part that cannot act now: its box goes 65 percent of the way back to
-// the paper.
-void Fade(int x0, int y0, int x1, int y1) {
-  for (int y = y0; y < y1; ++y) {
-    const size_t at = (static_cast<size_t>(y) * kWidth + x0) * 4;
-    uint8_t* c = g_card + at;
-    const uint8_t* p = g_page + at;
-    for (int i = 0; i < (x1 - x0) * 4; ++i) {
-      c[i] = static_cast<uint8_t>(p[i] + ((c[i] - p[i]) * 90) / 256);
-    }
-  }
+// The page: the fonts, then the title and the header. The kit has loaded
+// the fonts of the cards (card_scroll::Start) before this.
+void DrawPage(kit::Canvas* c, void*) {
+  g_title_font = kit::WordsFont(c, 38);
+  g_header_font = kit::SealFont(c, 22);
+  g_button_font = kit::WordsFont(c, 26);
+  g_note_font = kit::WordsFont(c, 22);
+  g_digit_font = kit::DigitsFont(c, 30, &g_digit_face);
+  const int title[4] = {kLeft, kTitleTop, kRight, kTitleBottom};
+  kit::InkWords(c, g_title_font, L"Places", title, 5, true);
+  const int header[4] = {kLeft, kHeaderTop, kRight, kHeaderBottom};
+  kit::InkWords(c, g_header_font, L"Bookmarks", header, 9, true);
 }
 
 bool ParchmentStart() {
-  if (g_parchment_ready) return true;
-  if (g_parchment_failed) return false;
-  g_parchment_failed = true;
-  if (!card_scroll::Start(g_dc)) {
-    ModLog("places       : GDI gave no font for the parchment, so the panel "
-           "is dark");
-    return false;
-  }
-  const char* digit_face = "";
-  g_title_font = MakeFont(card_scroll::WordsFont(g_dc, 38), 38);
-  g_header_font = MakeFont(card_scroll::SealFont(g_dc, 22), 22);
-  g_button_font = MakeFont(card_scroll::WordsFont(g_dc, 26), 26);
-  g_note_font = MakeFont(card_scroll::WordsFont(g_dc, 22), 22);
-  g_digit_font = MakeFont(card_scroll::DigitsFont(g_dc, 30, &digit_face), 30);
-  g_page = new (std::nothrow) uint8_t[kPictureBytes];
-  g_card = new (std::nothrow) uint8_t[kPictureBytes];
+  if (g_fonts_failed) return false;
+  if (!kit::StartParchment(&g_canvas, &DrawPage, nullptr)) return false;
   if (g_title_font.font == nullptr || g_header_font.font == nullptr ||
       g_button_font.font == nullptr || g_note_font.font == nullptr ||
-      g_digit_font.font == nullptr || g_page == nullptr || g_card == nullptr) {
-    delete[] g_page;
-    delete[] g_card;
-    g_page = g_card = nullptr;
+      g_digit_font.font == nullptr ||
+      !kit::MakeTiles(&g_button_tiles, kButtons, kit::kLooks) ||
+      !kit::MakeTiles(&g_seal_tiles, kMarks, 2)) {
+    g_fonts_failed = true;
     ModLog("places       : no font or no memory for the parchment, so the "
            "panel is dark");
     return false;
   }
-  const double start = NowMs();
-  const card_scroll::Picture page = {g_page, kWidth, kWidth, kHeight};
-  card_scroll::Page(page, 4, 4, kWidth - 4, kHeight - 4, 17);
-  Letters(g_title_font, L"Places", kLeft, kTitleTop, kRight, kTitleBottom);
-  card_scroll::Ink(page, g_bits, kLeft, kTitleTop, kRight, kTitleBottom, 5);
-  Letters(g_header_font, L"Bookmarks", kLeft, kHeaderTop, kRight,
-          kHeaderBottom);
-  card_scroll::Ink(page, g_bits, kLeft, kHeaderTop, kRight, kHeaderBottom, 9);
-  g_parchment_failed = false;
-  g_parchment_ready = true;
-  ModLog("places       : the page of the parchment panel took %.2f ms (%s). "
-         "The numbers of the seals use %s", NowMs() - start,
-         card_scroll::FontNote(), digit_face);
+  static bool said = false;
+  if (!said) {
+    said = true;
+    ModLog("places       : the numbers of the seals use %s, so that they are "
+           "as high as a capital letter", g_digit_face);
+  }
   return true;
 }
 
-void CardToTile(const int box[4], uint8_t* tile) {
-  const size_t row = static_cast<size_t>(box[2] - box[0]) * 4;
-  for (int y = box[1]; y < box[3]; ++y) {
-    memcpy(tile + static_cast<size_t>(y - box[1]) * row,
-           g_card + (static_cast<size_t>(y) * kWidth + box[0]) * 4, row);
-  }
-}
-
-void TileToCard(const int box[4], const uint8_t* tile) {
-  const size_t row = static_cast<size_t>(box[2] - box[0]) * 4;
-  for (int y = box[1]; y < box[3]; ++y) {
-    memcpy(g_card + (static_cast<size_t>(y) * kWidth + box[0]) * 4,
-           tile + static_cast<size_t>(y - box[1]) * row, row);
-  }
-}
-
-void DrawButton(int b, int look) {
-  int box[4], r[4];
-  ButtonBox(b, box);
+void DrawButton(kit::Canvas* c, int b, int look, void*) {
+  int r[4];
   ButtonRect(b, r);
-  PageToCard(box[0], box[1], box[2], box[3]);
-  const card_scroll::Picture picture = {g_card, kWidth, kWidth, kHeight};
-  const int x0 = r[0], y0 = r[1], x1 = r[0] + r[2], y1 = r[1] + r[3];
-  const int key_look = look == kLookHover   ? card_scroll::kKeyHover
-                       : look == kLookFlash ? card_scroll::kKeyFlash
-                                            : card_scroll::kKeyPlain;
-  card_scroll::Key(picture, x0, y0, x1, y1, key_look, b * 7 + 3);
-  wchar_t word[16];
-  Word(b, word, 16);
-  Letters(g_button_font, word, x0, y0, x1, y1);
-  card_scroll::Ink(picture, g_bits, x0, y0, x1, y1, b * 7 + 3);
-  if (look == kLookDim) Fade(box[0], box[1], box[2], box[3]);
+  kit::Button(c, r, look, kKindWord[KindOf(b)], g_button_font, b * 7 + 3);
 }
 
-void DrawSeal(int m, bool set) {
+// A red wax seal with the number in the light ink of the wax. The seal of a
+// bookmark that is not set is pale.
+void DrawSeal(kit::Canvas* c, int m, int set, void*) {
   int s[4];
   SealBox(m, s);
-  PageToCard(s[0], s[1], s[2], s[3]);
-  const card_scroll::Picture picture = {g_card, kWidth, kWidth, kHeight};
+  kit::PageToCard(c, s);
+  const card_scroll::Picture picture = {c->card, c->width, c->width,
+                                        c->height};
   // The seal has its own small shadow inside the box.
-  const int x0 = s[0] + 4, y0 = s[1] + 2, x1 = s[2] - 6, y1 = s[3] - 6;
-  card_scroll::Seal(picture, x0, y0, x1, y1, 0, m * 11 + 5);
+  const int w[4] = {s[0] + 4, s[1] + 2, s[2] - 6, s[3] - 6};
+  card_scroll::Seal(picture, w[0], w[1], w[2], w[3], 0, m * 11 + 5);
+  const size_t row = static_cast<size_t>(w[2] - w[0]) * 4;
+  for (int y = w[1]; y < w[3]; ++y) {
+    memset(c->bits + static_cast<size_t>(y) * c->width + w[0], 0, row);
+  }
   wchar_t digit[4];
   swprintf_s(digit, L"%d", m + 1);
-  Letters(g_digit_font, digit, x0, y0, x1, y1);
-  card_scroll::SealInk(picture, g_bits, x0, y0, x1, y1, 0);
-  if (!set) Fade(s[0], s[1], s[2], s[3]);
+  const int baseline = w[1] + (w[3] - w[1] + g_digit_font.cap) / 2;
+  SelectObject(c->dc, g_digit_font.font);
+  SetTextColor(c->dc, RGB(255, 255, 255));
+  RECT rect = {w[0], baseline - g_digit_font.ascent, w[2],
+               baseline - g_digit_font.ascent + g_digit_font.height};
+  DrawTextW(c->dc, digit, -1, &rect,
+            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP);
+  GdiFlush();
+  card_scroll::SealInk(picture, c->bits, w[0], w[1], w[2], w[3], 0);
+  if (set == 0) kit::Fade(c, s);
 }
 
 void DrawNote(const wchar_t* note) {
   int n[4];
   NoteBox(n);
-  PageToCard(n[0], n[1], n[2], n[3]);
-  if (note[0] == 0) return;
-  const card_scroll::Picture picture = {g_card, kWidth, kWidth, kHeight};
-  Letters(g_note_font, note, n[0], n[1], n[2], n[3]);
-  card_scroll::Ink(picture, g_bits, n[0], n[1], n[2], n[3], 13);
-}
-
-// The look of each part in a tile: a copy, or a draw that makes the tile.
-// True for a copy.
-bool ShowButton(int b, int look) {
-  int box[4];
-  ButtonBox(b, box);
-  uint8_t*& tile = g_tiles[look][b];
-  if (tile != nullptr) {
-    TileToCard(box, tile);
-    return true;
-  }
-  DrawButton(b, look);
-  tile = new (std::nothrow)
-      uint8_t[static_cast<size_t>(box[2] - box[0]) * (box[3] - box[1]) * 4];
-  if (tile != nullptr) CardToTile(box, tile);
-  return false;
-}
-
-bool ShowSeal(int m, bool set) {
-  int s[4];
-  SealBox(m, s);
-  uint8_t*& tile = g_seal_tiles[set ? 1 : 0][m];
-  if (tile != nullptr) {
-    TileToCard(s, tile);
-    return true;
-  }
-  DrawSeal(m, set);
-  tile = new (std::nothrow)
-      uint8_t[static_cast<size_t>(s[2] - s[0]) * (s[3] - s[1]) * 4];
-  if (tile != nullptr) CardToTile(s, tile);
-  return false;
+  kit::PageToCard(&g_canvas, n);
+  kit::InkWords(&g_canvas, g_note_font, note, n, 13, false);
 }
 
 void Compose(const Look& look, uint64_t frame) {
   const double start = NowMs();
   const bool first = !g_have_drawn || g_drawn.style != 1;
-  if (first) memcpy(g_card, g_page, kPictureBytes);
+  if (first) kit::ClearCard(&g_canvas);
   int drawn = 0, copied = 0;
   for (int b = 0; b < kButtons; ++b) {
     if (!first && look.button[b] == g_drawn.button[b]) continue;
-    ShowButton(b, look.button[b]) ? ++copied : ++drawn;
+    int box[4];
+    ButtonBox(b, box);
+    if (kit::ShowPart(&g_canvas, &g_button_tiles, b, look.button[b], box,
+                      &DrawButton, nullptr)) {
+      ++copied;
+    } else {
+      ++drawn;
+    }
   }
   for (int m = 0; m < kMarks; ++m) {
     if (!first && look.seal[m] == g_drawn.seal[m]) continue;
-    ShowSeal(m, look.seal[m] != 0) ? ++copied : ++drawn;
+    int box[4];
+    SealBox(m, box);
+    if (kit::ShowPart(&g_canvas, &g_seal_tiles, m, look.seal[m], box,
+                      &DrawSeal, nullptr)) {
+      ++copied;
+    } else {
+      ++drawn;
+    }
   }
   if (first || wcscmp(look.note, g_drawn.note) != 0) {
     DrawNote(look.note);
@@ -640,23 +397,66 @@ void Compose(const Look& look, uint64_t frame) {
   }
 }
 
+// THE DARK LOOK (hint_card_style=0): all of it each time that it changes.
+void RasterPlain(const Look& look) {
+  kit::Canvas* c = &g_canvas;
+  if (g_plain_font == nullptr) {
+    const auto font = [](int em, int weight) {
+      return CreateFontW(-em, 0, 0, 0, weight, FALSE, FALSE, FALSE,
+                         DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS,
+                         L"Segoe UI");
+    };
+    g_plain_font = font(36, FW_SEMIBOLD);
+    g_plain_small = font(28, FW_NORMAL);
+  }
+  const int all[4] = {0, 0, kWidth, kHeight};
+  kit::PlainFill(c, all, RGB(22, 24, 28));
+  const int title[4] = {0, kTitleTop, kWidth, kTitleBottom};
+  kit::PlainText(c, g_plain_font, RGB(235, 235, 235), L"Places", title);
+  const int header[4] = {0, kHeaderTop, kWidth, kHeaderBottom};
+  kit::PlainText(c, g_plain_small, RGB(190, 190, 190), L"Bookmarks", header);
+  for (int m = 0; m < kMarks; ++m) {
+    int s[4];
+    SealBox(m, s);
+    kit::PlainFill(c, s,
+                   look.seal[m] != 0 ? RGB(150, 40, 36) : RGB(60, 52, 50));
+    wchar_t digit[4];
+    swprintf_s(digit, L"%d", m + 1);
+    kit::PlainText(c, g_plain_font,
+                   look.seal[m] != 0 ? RGB(250, 230, 210) : RGB(130, 120, 115),
+                   digit, s);
+  }
+  for (int b = 0; b < kButtons; ++b) {
+    int r[4];
+    ButtonRect(b, r);
+    kit::PlainButton(c, r, look.button[b], kKindWord[KindOf(b)],
+                     g_plain_small);
+  }
+  int n[4];
+  NoteBox(n);
+  kit::PlainText(c, g_plain_small, RGB(230, 190, 110), look.note, n);
+  kit::PlainDone(c);
+}
+
 void BuildLook(Look* look) {
   memset(look, 0, sizeof(*look));
-  look->style = CardStyle();
+  look->style = kit::CardStyle(g_style_ini);
+  const int flash = kit::Flashing(&g_room);
+  const int hover = g_room.hover;
   for (int b = 0; b < kButtons; ++b) {
     look->button[b] = static_cast<uint8_t>(
-        !g_can[b] ? kLookDim
-                  : (b == g_flash ? kLookFlash
-                                  : (b == g_hover ? kLookHover : kLookPlain)));
+        !g_can[b] ? kit::kDim
+                  : (b == flash ? kit::kFlash
+                                : (b == hover ? kit::kHover : kit::kPlain)));
   }
   for (int m = 0; m < kMarks; ++m) look->seal[m] = g_set[m] ? 1 : 0;
-  const ULONGLONG now = GetTickCount64();
-  if (g_press_note[0] != 0 && now < g_press_note_until) {
+  if (g_press_note[0] != 0 && GetTickCount64() < g_press_note_until) {
     wcsncpy_s(look->note, g_press_note, _TRUNCATE);
-  } else if (g_hover >= 0 && !g_can[g_hover]) {
-    wcsncpy_s(look->note, g_why[g_hover], _TRUNCATE);
-  } else if (g_hover >= 0) {
-    HoverNote(g_hover, look->note, 64);
+  } else if (hover >= 0 && !g_can[hover]) {
+    wcsncpy_s(look->note, g_why[hover], _TRUNCATE);
+  } else if (hover >= 0) {
+    HoverNote(hover, look->note, 64);
   }
 }
 
@@ -686,9 +486,7 @@ void Act(int b, uint64_t frame) {
            "frame %llu", name, why, frame);
     return;
   }
-  ControllersGesturePulse(0.3f, 0.02f);
-  g_flash = b;
-  g_flash_until = GetTickCount64() + kFlashMs;
+  kit::Pressed(&g_room, b);
   int key = 0, mods = 0;
   bool acted = true;
   if (kind == kClose) {
@@ -728,49 +526,40 @@ bool PlacesPanelOn() {
   return g_on;
 }
 
-bool PlacesPanelOpen() { return g_open; }
+bool PlacesPanelOpen() { return g_room.open; }
 
 bool PlacesPanelHoldsTrigger() {
   return InterlockedCompareExchange(&g_holds, 0, 0) != 0;
 }
 
 bool PlacesPanelRay(float* meters) {
-  *meters = g_open ? g_ray_meters : 0.0f;
-  return g_open;
+  *meters = g_room.open ? g_room.meters : 0.0f;
+  return g_room.open;
 }
 
 bool PlacesPanelOpenFromRing() {
   ReadSettings();
-  if (!g_on) return false;
-  float head[3], orientation[4];
-  if (!MenuRoomHeadPose(head, orientation)) return false;
-  const float yaw = menu_room_math::YawOf(orientation);
-  PlaceAt(head, yaw, &g_panel);
-  g_serial = HeadPoseOriginSerial();
-  g_open = true;
+  if (!g_on || !kit::Open(&g_room, kDistance, kPitch, kMeters, kMeters)) {
+    return false;
+  }
   g_hold_after = false;
-  g_hover = -1;
-  g_flash = -1;
   g_press_note[0] = 0;
-  // A trigger that is down now is not a press on a button.
-  g_press.down = g_press.was = true;
   SetHolds();
   ++g_opens;
+  const menu_room_math::Panel& p = g_room.panel;
   ModLog("places       : the panel opens, %.2f by %.2f m, its middle at %.2f "
-         "%.2f %.2f m, the head at %.2f %.2f %.2f m with a yaw of %.1f "
-         "degrees, frame %llu", g_panel.width, g_panel.height,
-         g_panel.position[0], g_panel.position[1], g_panel.position[2], head[0],
-         head[1], head[2], yaw * 57.29578f, ControllersFrameCount());
+         "%.2f %.2f m, frame %llu", p.width, p.height, p.position[0],
+         p.position[1], p.position[2], ControllersFrameCount());
   return true;
 }
 
 bool PlacesPanelTestTarget(float out[3]) {
   ReadSettings();
-  if (!g_open || g_test_count == 0) return false;
+  if (!g_room.open || g_test_count == 0) return false;
   const int b = g_tests[g_tests_used++ % g_test_count];
   float u = 0.0f, v = 0.0f;
   ButtonMiddle(b, &u, &v);
-  PanelPoint(g_panel, u, v, out);
+  kit::PointOf(g_room, u, v, out);
   char name[24];
   ModLog("places       : the word aimplaces aims at %s, at %.3f %.3f %.3f m",
          ButtonName(b, name, sizeof(name)), out[0], out[1], out[2]);
@@ -781,15 +570,16 @@ void PlacesPanelFrame() {
   ReadSettings();
   if (!g_on) return;
   const uint64_t frame = ControllersFrameCount();
-  float aim_p[3], aim_q[4], trigger = 0.0f;
-  const bool have_aim = ControllersPointingAim(aim_p, aim_q, &trigger);
 
   // After a press that closed the panel the trigger stays with the panel
   // until it goes up.
-  if (!g_open) {
-    if (g_hold_after && (!have_aim || trigger < 0.4f)) {
-      g_hold_after = false;
-      SetHolds();
+  if (!g_room.open) {
+    if (g_hold_after) {
+      float p[3], q[4], trigger = 0.0f;
+      if (!ControllersPointingAim(p, q, &trigger) || trigger < 0.4f) {
+        g_hold_after = false;
+        SetHolds();
+      }
     }
     return;
   }
@@ -808,66 +598,42 @@ void PlacesPanelFrame() {
     Close("a dialog box is up", false);
   } else if (CutsceneWindowFlat()) {
     Close("a cut scene plays", false);
-  } else if (bwvr::XrScreen::CardFailed(bwvr::kCardRing)) {
-    Close("the runtime refused the layer of the ring", false);
   } else if (!RadialMenuItemCan(radial_math::kItemPlaces, &note)) {
     char why[64];
     WideCharToMultiByte(CP_ACP, 0, note, -1, why, sizeof(why), nullptr,
                         nullptr);
     Close(why[0] != 0 ? why : "the game cannot take it now", false);
   }
-  if (!g_open) return;
+  if (!g_room.open) return;
 
-  // A recenter of the headset places the panel again in front of the head.
-  if (HeadPoseOriginSerial() != g_serial) {
-    float head[3], orientation[4];
-    if (MenuRoomHeadPose(head, orientation)) {
-      PlaceAt(head, menu_room_math::YawOf(orientation), &g_panel);
-      ModLog("places       : the panel goes in front of the head after a "
-             "recenter, its middle at %.2f %.2f %.2f m, frame %llu",
-             g_panel.position[0], g_panel.position[1], g_panel.position[2],
-             frame);
-    }
-    g_serial = HeadPoseOriginSerial();
+  if (kit::FollowRecenter(&g_room)) {
+    ModLog("places       : the panel goes in front of the head after a "
+           "recenter, its middle at %.2f %.2f %.2f m, frame %llu",
+           g_room.panel.position[0], g_room.panel.position[1],
+           g_room.panel.position[2], frame);
   }
 
   Latch();
-
-  // The button under the ray, and a light pulse at each new button.
-  int button = -1;
-  g_ray_meters = 0.0f;
-  if (have_aim) {
-    float direction[3];
-    menu_room_math::AimForward(aim_q, direction);
-    float u = 0.0f, v = 0.0f, t = 0.0f;
-    if (menu_room_math::Hit(aim_p, direction, g_panel, &u, &v, &t) &&
-        menu_room_math::Inside(u, v)) {
-      g_ray_meters = t;
-      button = ButtonAt(u, v);
-    }
+  const int before = g_room.hover;
+  float trigger = 0.0f;
+  const int pressed = kit::Step(&g_room, &HitButton, nullptr, &trigger);
+  if (g_room.hover != before && LogRoom()) {
+    char name[24];
+    ModLog("places       : the ray is on %s%s, frame %llu",
+           ButtonName(g_room.hover, name, sizeof(name)),
+           g_room.hover >= 0 && !g_can[g_room.hover]
+               ? ", which cannot act now"
+               : "",
+           frame);
   }
-  if (button != g_hover) {
-    if (button >= 0) ControllersGesturePulse(0.1f, 0.008f);
-    if (LogRoom()) {
-      char name[24];
-      ModLog("places       : the ray is on %s%s, frame %llu",
-             ButtonName(button, name, sizeof(name)),
-             button >= 0 && !g_can[button] ? ", which cannot act now" : "",
-             frame);
-    }
-  }
-  g_hover = button;
-
-  const int pressed = PressStep(&g_press, have_aim ? trigger : 0.0f, button);
   if (pressed >= 0) Act(pressed, frame);
-  if (!g_open) return;
-  if (g_flash >= 0 && GetTickCount64() >= g_flash_until) g_flash = -1;
+  if (!g_room.open) return;
 
   // The picture of this frame.
-  if (!RasterStart()) return;
+  if (!kit::Start(&g_canvas, kWidth, kHeight, "places      ")) return;
   Look look;
   BuildLook(&look);
-  const uint8_t* pixels = reinterpret_cast<const uint8_t*>(g_bits);
+  const uint8_t* pixels = reinterpret_cast<const uint8_t*>(g_canvas.bits);
   bool fresh = false;
   if (look.style != 0 && ParchmentStart()) {
     look.style = 1;
@@ -875,7 +641,7 @@ void PlacesPanelFrame() {
       Compose(look, frame);
       fresh = true;
     }
-    pixels = g_card;
+    pixels = g_canvas.card;
   } else {
     look.style = 0;
     if (!g_have_drawn || !SameLook(look, g_drawn)) {
@@ -894,23 +660,12 @@ void PlacesPanelFrame() {
     ++g_saved;
     char name[24];
     ModLog("places       : frame %llu, the saved picture has the ray on %s",
-           frame, ButtonName(g_hover, name, sizeof(name)));
+           frame, ButtonName(g_room.hover, name, sizeof(name)));
     EyeCaptureSaveUi("places", frame, 1, pixels, kWidth * 4, kWidth, kHeight);
   }
-  bwvr::CardLayer layer = {};
-  layer.visible = true;
-  layer.pixels = pixels;
-  layer.texture_width = kWidth;
-  layer.texture_height = kHeight;
-  layer.rect[0] = 0;
-  layer.rect[1] = 0;
-  layer.rect[2] = kWidth;
-  layer.rect[3] = kHeight;
-  for (int i = 0; i < 3; ++i) layer.position[i] = g_panel.position[i];
-  for (int i = 0; i < 4; ++i) layer.orientation[i] = g_panel.orientation[i];
-  layer.width = g_panel.width;
-  layer.height = g_panel.height;
-  bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
+  if (!kit::StageLayer(g_room, pixels, kWidth, kHeight)) {
+    Close("the runtime refused the layer of the ring", false);
+  }
 }
 
 void PlacesPanelReport() {

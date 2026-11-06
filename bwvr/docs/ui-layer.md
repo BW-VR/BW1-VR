@@ -2207,3 +2207,31 @@ ring         : the panel of places: the key Ctrl and 3, frame N
 places       : the trigger presses go 3, and it does not act: Bookmark 3 is not set, frame N
 places       : the panel closes: the player pressed land, frame N
 ```
+
+### 22.6 The parts for other panels
+
+The parts of the panel that are not places are in `panel_kit.h`,
+`panel_kit.cpp` and the pure `panel_kit_math.h`, so the next panels in the
+room can use them:
+
+- `panel_kit::Room`: `Open` places a panel in front of the head (a
+  distance, a pitch and a size), `FollowRecenter` places it again after a
+  recenter, and `Step` once a frame gives the part under the ray (a hit
+  function of the caller, a light pulse at each new part) and the part that
+  a pull of the trigger pressed. `Pressed` gives the stronger pulse and the
+  flash, and `StageLayer` sends the picture as the quad layer of the ring.
+- `panel_kit::Canvas`: the GDI picture, and the parchment. `StartParchment`
+  draws the page one time, with a function of the caller for the parts of
+  the page that never change. `InkWords`, `PageToCard` and `Fade` draw on
+  it.
+- `panel_kit::Tiles` and `ShowPart`: a copy of the box of each part in each
+  look, so a new picture copies the parts that changed.
+- `panel_kit::Button`: a button of the parchment in the looks plain, under
+  the ray, pressed and dim. `PlainButton` is the same button in the dark
+  look.
+- `panel_kit_math`: `PlaceAt`, `HitRects`, `RectBox`, and the trigger with
+  its band (`Press`, `PressStep`, `PressOpen`).
+
+The caller keeps the trigger from the game while its panel is open
+(`PlacesPanelHoldsTrigger` in the pump of `controllers.cpp`), and it decides
+what closes its panel.

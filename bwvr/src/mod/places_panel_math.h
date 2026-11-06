@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "menu_room_math.h"
+#include "panel_kit_math.h"
 #include "radial_menu_math.h"
 
 namespace places_math {
@@ -152,10 +153,7 @@ inline void ButtonRect(int i, int out[4]) {
 inline void ButtonBox(int i, int out[4]) {
   int r[4];
   ButtonRect(i, r);
-  out[0] = r[0] - kRim < 0 ? 0 : r[0] - kRim;
-  out[1] = r[1] - kRim < 0 ? 0 : r[1] - kRim;
-  out[2] = r[0] + r[2] + kRim > kWidth ? kWidth : r[0] + r[2] + kRim;
-  out[3] = r[1] + r[3] + kRim > kHeight ? kHeight : r[1] + r[3] + kRim;
+  panel_kit_math::RectBox(r, kRim, kWidth, kHeight, out);
 }
 
 // The wax seal of bookmark m: x0, y0, x1, y1.
@@ -178,17 +176,9 @@ inline void NoteBox(int out[4]) {
 // The button at u, v of the panel (0 to 1 across and down), or -1 for the
 // paper between the buttons and for a point off the panel.
 inline int ButtonAt(float u, float v) {
-  if (!(u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f)) return -1;
-  const float px = u * kWidth;
-  const float py = v * kHeight;
-  for (int i = 0; i < kButtons; ++i) {
-    int r[4];
-    ButtonRect(i, r);
-    if (px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + r[3]) {
-      return i;
-    }
-  }
-  return -1;
+  int rects[kButtons][4];
+  for (int i = 0; i < kButtons; ++i) ButtonRect(i, rects[i]);
+  return panel_kit_math::HitRects(u, v, kWidth, kHeight, rects, kButtons);
 }
 
 // The middle of button i in u, v.
@@ -243,25 +233,11 @@ inline bool MarkCan(int kind, bool usable, bool set) {
   return kind == kSet || set;
 }
 
-// --- the trigger -----------------------------------------------------------------
+// --- the trigger ---------------------------------------------------------------
 
-// THE PRESS of a button with the trigger: a press starts on the button
-// under the ray and acts at once. A press that starts off the buttons does
-// nothing, and the trigger must go up before the next press. The trigger is
-// down above 0.6 and up below 0.4.
-struct Press {
-  bool down = false;  // the trigger is down
-  bool was = false;   // it was down in the last frame
-};
-
-// One frame of the trigger. Returns the button to act on now, or -1.
-inline int PressStep(Press* p, float trigger, int button_under_ray) {
-  if (trigger > 0.6f) p->down = true;
-  if (trigger < 0.4f) p->down = false;
-  const bool edge = p->down && !p->was;
-  p->was = p->down;
-  return edge ? button_under_ray : -1;
-}
+// The press of a button: panel_kit_math::Press and PressStep.
+using panel_kit_math::Press;
+using panel_kit_math::PressStep;
 
 // --- the place -------------------------------------------------------------------
 
@@ -269,19 +245,8 @@ inline int PressStep(Press* p, float trigger, int button_under_ray) {
 // the yaw, at kDistance and kPitch, facing the head.
 inline void PlaceAt(const float head[3], float yaw,
                     menu_room_math::Panel* out) {
-  menu_room_math::PoseAt(head, yaw, kDistance, kPitch, out);
-  out->width = kMeters;
-  out->height = kMeters;
-}
-
-// The point of the room at u, v of the panel.
-inline void PanelPoint(const menu_room_math::Panel& panel, float u, float v,
-                    float out[3]) {
-  const float k[3] = {(u - 0.5f) * panel.width, (0.5f - v) * panel.height,
-                      0.0f};
-  float r[3];
-  controller_math::QuatRotate(panel.orientation, k, r);
-  for (int i = 0; i < 3; ++i) out[i] = panel.position[i] + r[i];
+  panel_kit_math::PlaceAt(head, yaw, kDistance, kPitch, kMeters, kMeters,
+                          out);
 }
 
 // --- the test key ----------------------------------------------------------------

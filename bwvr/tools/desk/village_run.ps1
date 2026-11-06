@@ -41,9 +41,10 @@
 #                "The book on the palm"): the steps of -Kind miracle with
 #                gesture_panel=0 and eye pictures of the corner, then
 #                gesture_panel=1 and the book on the palm.
-# The other kinds (charge, store, neartake, land, job, tree, throw, probe,
-# workshop, site, build, scaffold, turn, fartake, fartotem, choice, look,
-# book, controls) have a comment at their steps below.
+# The other kinds (charge, store, neartake, land, job, tree, throw,
+# throwlive, throwhouse, throwpile, probe, workshop, site, build, scaffold,
+# turn, fartake, fartotem, choice, look, book, controls) have a comment at
+# their steps below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -267,6 +268,89 @@ if ($Kind -eq 'totem') {
     if ($Seconds -eq 0) { $Seconds = 62 }
     if ($Steps -eq '') {
         $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 grip@1046+100 pull@1143+3 shot@1200+1 shot@1420+1'
+    }
+    $keys = "$keys;throw_log=1"
+} elseif ($Kind -eq 'throwlive') {
+    # A soft throw and a hard throw of a villager (bwvr/docs/throw.md, "The
+    # damage"). The first throw is the throw of -Kind throw: a pull of 15 cm
+    # over 3 frames, about 3 m/s. Then the Hand takes the nearest villager
+    # again, goes to the second point (head height, 30 cm before the head),
+    # and jumps to the third point in one frame as the grip opens: 42 cm
+    # forward, down and to the left, a throw of about 12.6 m/s. The census
+    # before, after the soft throw and after the hard throw gives the count
+    # of the villagers of the town that can worship. A villager that dies
+    # goes out of that count.
+    if ($Plan -eq '') { $Plan = 'gostore,store,villager,villager' }
+    if ($Census -eq '') { $Census = '890,1400,1700,1760,1800,1850,1900,2000' }
+    if ($Seconds -eq 0) { $Seconds = 72 }
+    $points = '0,-30,60 0,0,30 -25,-30,45'
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 grip@1046+100 pull@1143+3 shot@1200+1 shot@1300+1 ' +
+                 'seek@1420+1 grip@1426+120 point@1480+1 point@1545+1 shot@1550+1 shot@1580+1 shot@1640+1 ' +
+                 'shot@1750+1 shot@1950+1'
+    }
+    $keys = "$keys;throw_log=1"
+} elseif ($Kind -eq 'throwhouse' -or $Kind -eq 'throwhousefast') {
+    # A rock that falls onto a house (bwvr/docs/throw.md, "The damage",
+    # Abode::ReactToPhysicsImpact). The God view goes before the Village
+    # Store, the hand goes to the height of the head, and the word "aimfar"
+    # aims at the nearest rock in the view (far_test_aim_class=3). The grip
+    # and a pull fetch it. With the rock in the Hand the God view goes to
+    # 1810.8 2680.1 (the place "go", seek_go), 40 units before the house at
+    # 1850.2 2673.1 of the test save "temple". The Hand's point goes over
+    # that house at 1100 percent of its height, 19.6 cm of the room past its
+    # middle on the far side from the camera (the place "feel"). The rock in
+    # the Hand hangs about 7 units toward -x from the Hand's point, so it is
+    # then about 37 units (80 cm of the room) over the roof. The grip opens
+    # with a still hand, higher than release_fall_cm: the rock falls onto
+    # the roof. A throw down from a lower place does not touch the house: its
+    # real arc meets the land before the game's physics has the rock (0.1 to
+    # 0.2 s after the release), and the mod puts the rock on its arc at the
+    # land. Then the Hand's point goes 2 cm of the room beside the wall of
+    # the house (the second "feel"), and the log has the card of the hand
+    # there. The head looks 25 degrees down and not to the side, so the
+    # house is in the view. Eye pictures of the house before and after the
+    # hit. Give it -Set "backend=dxwrapper\ddraw.dll" for eye pictures.
+    #
+    # -Kind throwhousefast: the same, but the hand steps 20 cm down in one
+    # frame as the grip opens (the place "down", seek_step_cm=20), a throw of
+    # about 7.5 m/s down and toward the head. That throw moves the rock about
+    # 0.75 units toward -x for each unit of the fall, so the Hand's point
+    # goes 78 cm of the room past the middle of the house.
+    $fast = $Kind -eq 'throwhousefast'
+    if ($Plan -eq '') { $Plan = $(if ($fast) { 'gostore,go,feel,down,feel' } else { 'gostore,go,feel,feel' }) }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 66 }
+    $points = '0,-30,60 0,0,45'
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 point@1000+1 aimfar@1040+1 ' +
+                 'grip@1080+300 pull@1120+3 shot@1160+1 seek@1200+1 seek@1240+1 shot@1250+1 ' +
+                 $(if ($fast) { 'seek@1379+1 ' } else { '' }) +
+                 'shot@1382+1 shot@1400+1 shot@1420+1 shot@1440+1 shot@1500+1 seek@1600+1 shot@1620+1 shot@1700+1'
+    }
+    $gap = $(if ($fast) { '-78' } else { '-19.6' })
+    $keys = "fake_head_pitch=-25;$keys;far_test_aim_class=3;seek_step_cm=20;" +
+            "seek_go=1810.8,2680.1;seek_feel=house,1100,$gap|house,50,2;throw_log=1"
+} elseif ($Kind -eq 'throwpile') {
+    # Wood thrown into the pile of the Village Store. The grip takes wood
+    # from the pile and opens (the bundle stays in the Hand), as in -Kind
+    # store. The hand goes to the second point, 25 cm before the head and
+    # out of the reach of hold_target_cm of the store, and the grip closes.
+    # The hand pulls 15 cm toward the head, and then steps back over 3
+    # frames as the grip opens: a throw of about 3 m/s forward and down,
+    # toward the store about 58 cm before the head. A grip that opens with
+    # the bundle 15 cm over the pile is no throw: the store has the halo,
+    # and the game puts the wood into the store (packet 0x11). The lines
+    # "hand throw" have the flight, and the lines "village" and "hand bulk"
+    # what the game does with the bundle. Give it
+    # -Set "backend=dxwrapper\ddraw.dll" for eye pictures.
+    if ($Plan -eq '') { $Plan = 'gostore,store,pile' }
+    if ($Census -eq '') { $Census = '890,1700' }
+    if ($Seconds -eq 0) { $Seconds = 64 }
+    $points = '0,-30,60 0,-10,25'
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 grip@1080+120 point@1230+1 shot@1250+1 ' +
+                 'grip@1300+80 pull@1320+3 pull@1377+3 shot@1385+1 shot@1400+1 shot@1430+1 shot@1500+1 shot@1600+1'
     }
     $keys = "$keys;throw_log=1"
 } elseif ($Kind -eq 'probe') {

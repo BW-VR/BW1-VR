@@ -1006,6 +1006,12 @@ const wchar_t* const kTips[] = {
     // Hold stay
     L"On: a long grip on the far Creature makes it stay. Off: the leash click "
     L"goes out when the grip closes, and no grip makes it stay.",
+    // Open stroke
+    L"On: an open hand that stays 0.2 s in the body of your Creature strokes "
+    L"it with no grip. The open hand never slaps. Off: only the grip strokes.",
+    // Panel stays
+    L"On: the Creature panel shows while the Hand is at your Creature with no "
+    L"press, and for 3 s after the Hand goes. Off: only a press shows it.",
     // Stroke hand
     L"By size: the size of the Creature chooses the hand of a stroke. Flat: "
     L"the flat hand always. Finger: the index finger always. Fist: the fist.",

@@ -37,6 +37,10 @@ int OneWalkValue();
 bool OneWalkBeginPass(float separation);
 void OneWalkEndPass();
 bool OneWalkActive();
+// The eye separation of the pass in world units, 0 with no pass of one walk.
+// The right eye is that far along the right axis of the camera of the left
+// eye.
+float OneWalkSeparation();
 // The move of a vertex from the left eye to the right eye per unit of its rhw,
 // in pixels (one_walk_math::ShiftPerRhw), now in the pass, or at the last draw.
 float OneWalkShiftPerRhw();

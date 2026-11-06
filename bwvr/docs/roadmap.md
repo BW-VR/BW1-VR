@@ -974,7 +974,11 @@ game as it is.
   - The Temple:
     - The three rules of the view of a room, the fade in both eyes and the
       pool of the hall (B13): `temple_run.ps1` with the recipes of
-      `controllers.md`, 11.9.
+      `controllers.md`, 11.9. The place of each eye and the fade in two eye
+      passes need `one_walk=0`.
+    - A click on a door with a roll of the head of 15 and 30 degrees
+      (`temple_press_pixel`, the lines `temple       : a press in`):
+      `temple_run.ps1` with the door recipe of `controllers.md`, 11.9.
     - The entry and a door end at the rest pose, the ray and the cross end
       on the thing in both eyes, and the room stays level after a turn with
       the stick: `temple_run.ps1` with eye pictures.

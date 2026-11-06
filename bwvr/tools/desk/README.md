@@ -225,8 +225,12 @@ Known limits of the recipes:
 - `throw_queue.ps1 -Runs rollfar` does not take the rock in its roll. The
   word `aimfar` comes 1.6 s after the release. The rock is then 1.1 to 1.2 m
   of the room from the Hand, and the land hides it from the head (the log
-  says "seen 0"), so it is no far target. `dropfarroll` takes a rock that
-  rolls after a fall.
+  says "seen 0"), so it is no far target.
+- `throw_queue.ps1 -Runs dropfarroll` does not take a rock in its roll at a
+  render of 2760 by 2208. The rock falls 44 cm, turns in place and is at
+  rest after about 1 s. The rock is then about 57 degrees below the middle
+  of the view, and that render shows 48.8 degrees, so the second `aimfar`
+  gets no target.
 - `throw_queue.ps1 -Runs landgrip` does not close the grip on the rock on
   the land. With the head 25 degrees down, the word `aimfar` takes a
   tortoise, because a living thing comes first in the aim. With `-More
@@ -279,6 +283,10 @@ Known limits of the recipes:
   for a stay 0.2 to 2.7 s after its start. In one run of three of
   `hand_run.ps1 -Kind old` the Creature walked away before the third grip,
   and the third and the fourth grip had no target.
+- `creature_recipe.ps1 -Kind gift` and `-Kind giftfree` with no
+  `seek_class` can choose a place "hold" off the view (a fish farm at a
+  render of 2760 by 2208), and the controller code drops that press. Give
+  them `-Set "seek_class=Pig,Pig"`.
 - `village_run.ps1 -Kind scaffold` shows the join of two scaffolds and the
   tap that takes them apart. Its last opening of the grip makes no building
   site: the game has no place for a building there, and the hand is 18 cm
@@ -428,7 +436,12 @@ screens take about 9 s and the Lionhead logo 33 s, so a run of 54 s (the
 default) has the whole logo. Each `-Every` seconds (4 by default) the mod saves a picture of
 each eye, `bwvr-eye-left-1NNNNN.bmp` and `bwvr-eye-right-1NNNNN.bmp`. NNNNN is
 the stereo frame of the logo. Each picture is 14 MB at a render of 2208 by
-2208. After the run the script prints the lines of the log with the tag
+2208. With `backend=vulkan` the pictures `bwvr-eye-*` and `bwvr-vk-right-*`
+of the logo are black. Read `bwvr-vk-left-*`: a name that ends in 0 is the
+walk of eye 0, and a name that ends in 1 is the walk of eye 1. The run has
+no scripted controller, so `test_frame_rate` does not act, and the logo runs
+at the frame rate of the PC. After the run the script prints the lines of
+the log with the tag
 `intro`: the camera for each second of the effect clock, and for each pair of
 pictures the pixels of some orbs. `-Set` gives other keys, for example the
 test keys `intro_motion_test_seconds` and `intro_push_test_px`.

@@ -2596,7 +2596,7 @@ in a new game, with the dialog recipe of [god-view.md](god-view.md), section
 gets the Hand (`fake_controller_play_frame=2750`, `aim_queue.ps1` and
 `throw_queue.ps1` in `bwvr/tools/desk`).
 
-**Not shown in a run:** a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
+**Not shown in a run:** a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
 influence, a villager in the sea, the tether and the halo during a take at a
 distance, a take at a distance from a pile that the game deletes (the runs
 make that case with the test key and a pile of the store), a `Field` as a

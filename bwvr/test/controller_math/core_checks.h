@@ -52,6 +52,17 @@ inline void FastChecks() {
         "no top speed: the capacity gives the fast cores", 0, 0);
   const std::vector<cr::Core> none = {{0, 0, 0}, {1, 0, 0}};
   Check(cr::FastCores(none, {0, 1}).empty(), "no speed is known: no fast core", 0, 0);
+  // The cores of the Steam Frame: core 7 has a lower clock than the cores 2 to 4 and the highest capacity.
+  const std::vector<cr::Core> frame = {{0, 2265600, 216},  {1, 2265600, 216},  {2, 3148800, 855},
+                                       {3, 3148800, 855},  {4, 3148800, 855},  {5, 2956800, 803},
+                                       {6, 2956800, 803},  {7, 3052800, 1024}};
+  Check(Same(cr::TopCores(frame, {0, 1, 2, 3, 4, 5, 6, 7}), {7}),
+        "the top core is the core with the highest capacity, not the highest clock", 0, 0);
+  Check(Same(cr::TopCores(frame, {0, 1, 2, 3}), {2, 3}),
+        "only the cores that the app can use count, and two cores can be the top", 0, 0);
+  Check(Same(cr::TopCores(six, {0, 1, 2, 3, 4, 5}), {4, 5}),
+        "no capacity: the top speed gives the top cores", 0, 0);
+  Check(cr::TopCores(none, {0, 1}).empty(), "no speed is known: no top core", 0, 0);
 }
 
 inline void PlanChecks() {

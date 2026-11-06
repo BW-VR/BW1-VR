@@ -38,10 +38,10 @@ class ThreadCores {
   // THE FAST CORES (late_fast_cores): the session thread, the play thread and the reader of the
   // app on the fast cores, or on each core of the app again. It can change while a game runs.
   static void KeepOnFastCores(bool on);
-  // THE GAME ON THE FAST CORES (late_fast_game): the main thread of the game on the fast cores, or
-  // on each core of the app again. A short thread of its own looks for the process, so the
-  // caller does not wait for the read of /proc.
-  static void KeepGameOnFastCores(bool on);
+  // THE PLACE OF THE GAME (late_fast_game, late_top_game): the main thread of the game goes to each
+  // core of the app (0), to the fast cores (1) or to the top core (2). A short thread of its own
+  // looks for the process, so the caller does not wait for the read of /proc.
+  static void PlaceGame(int place);
 
  private:
   static void* Main(void* self);

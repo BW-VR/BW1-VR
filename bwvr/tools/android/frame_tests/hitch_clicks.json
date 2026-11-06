@@ -5,13 +5,14 @@
   "step_s": 20,
   "skip_s": 1,
   "step_prompt_s": 0,
-  "most_s": 240,
+  "most_s": 300,
   "track_marks": true,
   "cycle": [
-    {"step": "game each core", "keys": {"mark": 1, "late_fast_game": 0}},
-    {"step": "game fast cores", "keys": {"mark": 1, "late_fast_game": 1}}
+    {"step": "game each core", "keys": {"mark": 1, "late_fast_game": 0, "late_top_game": 0}},
+    {"step": "game fast cores", "keys": {"mark": 1, "late_fast_game": 1, "late_top_game": 0}},
+    {"step": "game top core", "keys": {"mark": 1, "late_fast_game": 0, "late_top_game": 1}}
   ],
-  "end_keys": {"mark": 0, "late_fast_game": 0},
+  "end_keys": {"mark": 0, "late_fast_game": 0, "late_top_game": 0},
   "end_prompt": "The test is done. You can quit the game.",
   "end_prompt_s": 8
 }

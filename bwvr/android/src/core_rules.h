@@ -148,6 +148,27 @@ inline std::vector<int> FastCores(const std::vector<Core>& cores, const std::vec
   return out;
 }
 
+// THE TOP CORES: of the cores that the app can use, each core with the highest capacity. The
+// capacity counts first, because a core with a lower clock can do more work. The top speed counts
+// only when no allowed core has a capacity. Empty when no core has a speed.
+inline std::vector<int> TopCores(const std::vector<Core>& cores, const std::vector<int>& allowed) {
+  bool any_capacity = false;
+  for (const Core& c : cores) {
+    if (Has(allowed, c.index) && c.capacity > 0) any_capacity = true;
+  }
+  long highest = 0;
+  for (const Core& c : cores) {
+    if (Has(allowed, c.index) && SpeedOf(c, !any_capacity) > highest) highest = SpeedOf(c, !any_capacity);
+  }
+  std::vector<int> out;
+  if (highest <= 0) return out;
+  for (const Core& c : cores) {
+    if (Has(allowed, c.index) && SpeedOf(c, !any_capacity) == highest) out.push_back(c.index);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
 // The value of thread_bind: 0, 1 or 2. Each other value is 0.
 inline int ParseBind(int value) { return value == 1 || value == 2 ? value : 0; }
 

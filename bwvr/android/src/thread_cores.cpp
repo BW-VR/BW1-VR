@@ -276,10 +276,11 @@ void ThreadCores::Run() {
 
 namespace {
 
-// The process of the game: a process of the user of the app with the name of an .exe. 0 with none.
+// The process of the game: the process with the name of the game. 0 with none. The name is the only
+// test: on the Steam Frame getuid() of the app need not be the owner that /proc shows, and
+// sched_setaffinity refuses a process of another user.
 int FindGamePid(std::string* name) {
   const int self = static_cast<int>(getpid());
-  const uid_t uid = getuid();
   DIR* dir = opendir("/proc");
   if (dir == nullptr) return 0;
   int found = 0;
@@ -287,10 +288,6 @@ int FindGamePid(std::string* name) {
     if (!IsNumber(e->d_name)) continue;
     const int pid = atoi(e->d_name);
     if (pid == self) continue;
-    char where[64];
-    snprintf(where, sizeof(where), "/proc/%s", e->d_name);
-    struct stat st;
-    if (stat(where, &st) != 0 || st.st_uid != uid) continue;
     char file[80];
     snprintf(file, sizeof(file), "/proc/%s/stat", e->d_name);
     ps::Task t;
@@ -310,37 +307,46 @@ int FindGamePid(std::string* name) {
   return found;
 }
 
-void* GameCoresMain(void* arg) {
-  const bool on = arg != nullptr;
+void* PlaceGameMain(void* arg) {
+  const int place = static_cast<int>(reinterpret_cast<intptr_t>(arg));
   const std::vector<int> allowed = AffinityOf(static_cast<int>(getpid()));
-  const cr::Plan plan = cr::MakePlan(2, "", ReadCores(), allowed);
+  const auto all = ReadCores();
+  const cr::Plan plan = cr::MakePlan(2, "", all, allowed);
   if (plan.bind == 0) {
-    AppLog("cores        : late_fast_game=%d binds no thread: %s", on ? 1 : 0, plan.why.c_str());
+    AppLog("cores        : the place %d of the game binds no thread: %s", place, plan.why.c_str());
     return nullptr;
   }
   std::string name;
   const int pid = FindGamePid(&name);
   if (pid == 0) {
-    AppLog("cores        : late_fast_game=%d finds no process of the game", on ? 1 : 0);
+    AppLog("cores        : the place %d of the game finds no process of the game (the app has the uid %d)",
+           place, static_cast<int>(getuid()));
     return nullptr;
   }
-  const std::vector<int>& cores = on ? plan.fast : allowed;
+  const std::vector<int> cores = place == 2 ? cr::TopCores(all, allowed) : place == 1 ? plan.fast : allowed;
   const int err = SetAffinity(pid, cores);
-  AppLog("cores        : late_fast_game=%d. The main thread %d (%s) of the game asks for the cores "
-         "%s, and sched_getaffinity gives %s, errno %d", on ? 1 : 0, pid, name.c_str(),
-         cr::CpuListText(cores).c_str(), cr::CpuListText(AffinityOf(pid)).c_str(), err);
+  char where[64];
+  snprintf(where, sizeof(where), "/proc/%d", pid);
+  struct stat st = {};
+  stat(where, &st);
+  AppLog("cores        : the place %d of the game (0: each core, 1: the fast cores, 2: the top core). "
+         "The main thread %d (%s) of the game asks for the cores "
+         "%s, and sched_getaffinity gives %s, errno %d. The app has the uid %d, and /proc shows the "
+         "owner %d", place, pid, name.c_str(), cr::CpuListText(cores).c_str(),
+         cr::CpuListText(AffinityOf(pid)).c_str(), err, static_cast<int>(getuid()),
+         static_cast<int>(st.st_uid));
   return nullptr;
 }
 
 }  // namespace
 
-void ThreadCores::KeepGameOnFastCores(bool on) {
+void ThreadCores::PlaceGame(int place) {
   pthread_t thread;
   pthread_attr_t attr;
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-  if (pthread_create(&thread, &attr, &GameCoresMain, on ? &thread : nullptr) != 0) {
-    AppLog("cores        : late_fast_game=%d: no thread for the change", on ? 1 : 0);
+  if (pthread_create(&thread, &attr, &PlaceGameMain, reinterpret_cast<void*>(static_cast<intptr_t>(place))) != 0) {
+    AppLog("cores        : the place %d of the game: no thread for the change", place);
   }
   pthread_attr_destroy(&attr);
 }

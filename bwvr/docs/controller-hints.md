@@ -962,7 +962,8 @@ pulse) and 0 (a short pulse). The word `promptkey` of the scripted controller
 does the same in a desktop run. `hint_learn` has no test key: the launcher
 row "Hints" sets it. `hint_card_style` has no key of the keyboard. With
 `debug_menu=1` the switch "Card look" (group Interface) of the debug page
-changes it, and each card draws its picture again in the next frame.
+changes it, and each card draws its picture again in the next frame. The
+ring follows it too (`controllers.md`, 10.4).
 
 ### 9.6 The log
 
@@ -1289,7 +1290,9 @@ Code: `src/mod/card_scroll.cpp` and `.h` (the art), `RasterScroll` in
 `third_party/fonts`.
 
 With `hint_card_style=1` (the default) each card is a small parchment scroll,
-to match the old world look of the game. The parts, from the back:
+to match the old world look of the game. The same key and the same art give
+the page of the spell book (`miracles.md`, "The spell book") and the seals
+and the card of the ring (`controllers.md`, 10.4). The parts, from the back:
 
 1. A soft drop shadow 3 px to the right and 5 px down. It comes from the
    outline of the shape with a distance test, so it needs no blur.

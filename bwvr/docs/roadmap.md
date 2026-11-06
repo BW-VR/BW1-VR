@@ -841,14 +841,14 @@ keeps the mod as it is.
     and make it smaller.
   - In the spell book, the ring of the chosen item goes past its cell, and
     the cell cuts its top and its bottom flat.
-  - The same look for the other cards that GDI draws: the ring
-    (`radial_menu.cpp`) and the keyboard (`vr_keyboard.cpp`). Keep their
-    layout. The ring has badges on a circle: a seal for each badge fits it.
-    The keyboard is opaque and fills its rect. The debug page draws no
-    picture of its own: it uses the ring.
+  - The same look for the keyboard (`vr_keyboard.cpp`). Keep its layout.
+    The keyboard is opaque and fills its rect.
   - Only a headset can show the contrast of the scroll against the sky and
     the land, and whether the grain or the ink shimmers when the headset
-    shows the card smaller than its picture.
+    shows the card smaller than its picture. For the ring
+    (`controllers.md`, 10.4): whether the gold of the chosen seal stands out
+    at a glance, whether the faded seals and the two lines of a switch read
+    at 32 cm, and whether the thin ring helps or is in the way.
   - The scroll is 1.1 cm wider and 0.8 cm higher than the plain card. In a
     headset, check that it does not hide the other hand more often.
 

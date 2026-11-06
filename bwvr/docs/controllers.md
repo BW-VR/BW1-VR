@@ -1799,11 +1799,52 @@ One picture of 1024 by 1024 pixels, drawn with GDI as the hint cards are
 `xr_screen.cpp`, over all other cards. 32 pixels are 1 cm at 100 percent: the
 ring is 32 cm across, the items are 11 cm from the middle, and a capital
 letter is about 8 mm high. Each item is a badge with a short word. The chosen
-item is light, and a card in the middle has its name. With no choice, a small
-dot marks the middle. The ring fades in in 0.10 s and out in 0.20 s, in place.
-The picture is drawn again only when it changes, so a frame with a new choice
-costs about 2 ms more. If the runtime refuses the layer of the ring, the ring
-does not show, and its items still act.
+item stands out, and a card in the middle has its name. With no choice, a
+small mark is in the middle. The ring fades in in 0.10 s and out in 0.20 s,
+in place. If the runtime refuses the layer of the ring, the ring does not
+show, and its items still act.
+
+**The look** follows `hint_card_style`, the key of the hint cards (the
+launcher row "Card look", `controller-hints.md`, 9.11). The ring reads the
+key from `bwvr.ini`, and it follows the switch "Card look" of the debug page
+while the hint cards are on.
+
+- 1 (the default): the scroll look of the hint cards (`card_scroll.h`). Each
+  item is a wax seal with its word in Alegreya SC, at the place and the size
+  of the badge. A thin ring of brown ink with a gold line in it goes from
+  seal to seal, so the ring reads as one object, and the world shows between
+  the seals. The card in the middle is a small parchment scroll with two
+  rolls: the name in dark brown ink and the note in red brown. With no
+  choice, a small red seal is in the middle.
+- 0: dark round boxes with white Segoe UI letters. The chosen item is light,
+  and a note is amber.
+
+**The wax of the scroll look.** On a hint card the wax has a meaning: green
+is the trigger, amber is the grip, and red is each other button. An item of
+the ring is not a button, so a plain item has the red wax. The chosen item
+has gold wax with dark letters, a gold rim and a soft glow, and it is 12 px
+wider and 8 px higher. The gold is lighter and more yellow than the amber of
+the grip, and only one item at a time has it. An item that cannot act now
+has a pale brown wax at an alpha of 0.6, and the thin ring does not show
+through it. The value of a switch (10.8) is gold on the red wax and dark red
+on the gold wax. `card_scroll::Seal` gives the red wax. The gold and the pale
+wax come from its shade: each pixel keeps its brightness against the middle
+brightness of the red wax. All the details are 4 px or more, as on the hint
+cards.
+
+**The cost.** The picture is drawn again only when it changes: at each change
+of the choice, of the page or of a value. The plain look draws all of it:
+1.3 to 5 ms in a desktop run. The scroll look keeps each seal and each card
+in a cache for its slot and its state (plain, chosen, faded), and draws again
+only a part that changed. A new picture is a clear, a copy of the parts and
+the thin ring. While the ring is open, each frame with no new picture puts
+one more part into the cache: the chosen seal and the card of a slot
+(`ScrollBake`, at most 1.8 ms in a frame). So some frames after the ring
+opens, a change of the choice is a copy only: 0.6 to 0.9 ms in a desktop
+run. A new page draws its seals, in about 4 ms. The first picture of the
+scroll look starts the fonts (13 ms), and the first page with switches takes
+about 26 ms, because GDI draws each letter of the two small fonts for the
+first time.
 
 ### 10.5 Keys
 
@@ -1818,6 +1859,7 @@ does not show, and its items still act.
 | `radial_menu_reach_cm` | 5 | How far the hand moves to pick an item, 2 to 15 |
 | `radial_menu_size_pct` | 100 | The size of the ring, 50 to 200 |
 | `radial_menu_creature` | 1 | 1 the item `creature` is one teleport in the God view, 0 it is the key of the game |
+| `hint_card_style` | 1 | The key of the hint cards (`controller-hints.md`, 9.5). 1 each item is a wax seal and the card in the middle is a parchment scroll. 0 dark round boxes with white letters (10.4). The launcher row "Card look" |
 | `radial_test_save` | 0 | A test key: the mod saves the first N pictures of the ring as `bwvr-ring-NNNNN.bmp` |
 | `debug_menu` | 0 | 1 puts the item `debug` on the ring (10.8). The launcher row "Debug menu" in the group "Testing" |
 
@@ -1850,7 +1892,15 @@ The lines "the game:" come from a watch of what the ring can change: the Temple
 and its room, the pause, the speed, the names, the details, the kind of the
 leash, each bookmark, and a cut scene. So a log from a headset session says
 what a choice did. The report of a window has the counts, and the longest
-draw of the picture in ms.
+draw of the picture in ms. The scroll look adds the count of the parts that
+went into the cache between the pictures, and the longest of those draws.
+
+Each of the first 40 new pictures of the ring has one line:
+
+```
+ring         : hint_card_style=1: each item is a wax seal, and the card in the middle is a parchment scroll
+ring         : frame 1120, a new picture of the ring in the scroll look took 0.61 ms. It drew 0 parts new, and the others came from the cache
+```
 
 ### 10.7 Tests
 
@@ -1877,6 +1927,17 @@ view where it was),
 the limit), `names`, `details`, `pause`, `help` (the key went out, what the
 help showed was not read), `playground` (the dialog box of the game is up),
 and the page change with More.
+
+The look [R] (`temple_run.ps1 -NoEnter`, the test save `temple`, dxwrapper,
+`debug_menu=1;radial_test_save=80;hint_card_fonts_test_dir=<folder>` and
+`fake_controller_left_points` with the places of the slots from
+`Get-BwvrRingChoice`): Y holds the ring open, and the left hand steps to
+`creature`, `town`, `leash_learning`, the middle and `enter`. A second hold
+goes through `more`, `debug` and the group Render to two switches. With
+`hint_card_style=1` the saved pictures show the seals, the gold chosen seal,
+the faded seal of `mark_go` (no bookmark), the scroll in the middle, the
+small seal with no choice, and the badges of two lines on the page Render.
+With `hint_card_style=0` the pictures are the dark boxes.
 
 The first visit of the Temple and of each room plays a guide of the game with
 the cinema bars. The game takes no key in the Temple then, and the ring does
@@ -1929,6 +1990,9 @@ Needs the headset:
 4. Whether the card in the middle is in the way of the hand.
 5. The order of the items.
 6. In the Temple: the view of each room, and the Hand at a door (section 11).
+7. The scroll look: whether the gold seal of the choice stands out at a
+   glance, whether the faded seals read against the land, and whether the
+   thin ring helps.
 
 ### 10.8 The debug page
 
@@ -1955,7 +2019,7 @@ nothing.
 | Page | Items |
 | --- | --- |
 | The groups | View, Picture, Render, Interface, Hand, Throw, Creature, Sound, Temple: each group that has a switch now |
-| A group | Its switches. A badge has the word of the switch, and its value under it in amber, for example "One walk" and "on". The card in the middle has the name of the switch and its ini key with the value, for example `one_walk=1 (on)` |
+| A group | Its switches. A badge has the word of the switch, and its value under it in a second color (10.4), for example "One walk" and "on". The card in the middle has the name of the switch and its ini key with the value, for example `one_walk=1 (on)` |
 
 Each page has `back` in the bottom slot: from a group to the page of the
 groups, and from the groups to the page with `debug`. A list of 7 items or

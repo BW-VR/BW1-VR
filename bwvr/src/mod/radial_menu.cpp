@@ -50,6 +50,10 @@
 //   radial_menu_creature=1     the item "creature" in the God view: 1 one
 //                              teleport to the Creature, 0 the key of the
 //                              game, which starts its follow camera
+//   hint_card_style=1          the key of the hint cards. 1 each item is a
+//                              wax seal and the card in the middle is a
+//                              parchment scroll (card_scroll.h). 0 dark
+//                              round boxes with white letters
 //
 // With test_keys=1, Ctrl and the 1 key of the number pad go through the two
 // ways while the stick can drive the ring: both, the button only, the stick
@@ -67,10 +71,12 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../vr/xr_screen.h"
 #include "audio.h"
+#include "card_scroll.h"
 #include "controllers.h"
 #include "cutscene_window.h"
 #include "debug_menu.h"
@@ -91,6 +97,9 @@ void ControllersGrabPulse(int hands, float amplitude, float seconds);
 void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
                       const void* pixels, int pitch, uint32_t width,
                       uint32_t height);
+// hint_card.cpp: hint_card_style now, which the switch "Card look" of the
+// debug page changes. kDebugCannot while the hint cards are off.
+int HintCardStyleValue();
 
 namespace {
 
@@ -109,6 +118,7 @@ int g_size_pct = 100;
 bool g_creature_teleport = true;
 bool g_test_keys = false;
 int g_save = 0;
+bool g_style = true;  // hint_card_style of bwvr.ini: the scroll look
 int g_items[kPages][kSlots];
 int g_pages = 1;
 int g_temple_items[kPages][kSlots];
@@ -321,6 +331,7 @@ void ReadSettings() {
   g_creature_teleport = IniKey("radial_menu_creature", 1) != 0;
   g_test_keys = IniKey("test_keys", 0) != 0;
   g_save = IniKey("radial_test_save", 0);
+  g_style = IniKey("hint_card_style", 1) != 0;
   g_settings.hand_in = g_reach_cm * 0.01f;
   g_settings.hand_out = g_reach_cm * 0.007f;
   ApplyWay();
@@ -371,6 +382,10 @@ void ReadSettings() {
                "on a controller with no face buttons it does"
              : "the stick does not open the ring",
          g_size_pct);
+  ModLog("ring         : hint_card_style=%d: %s", g_style ? 1 : 0,
+         g_style ? "each item is a wax seal, and the card in the middle is a "
+                   "parchment scroll"
+                 : "each item is a dark round box with white letters");
   ModLog("ring         : page 1: %s", a);
   if (g_pages > 1) ModLog("ring         : page 2: %s", b);
   ModLog("ring         : in the Temple: %s", c);
@@ -1009,6 +1024,7 @@ struct Look {
   int slot;                // the choice, or -1
   wchar_t name[48];        // the card in the middle: empty for none
   wchar_t note[48];
+  int scroll;              // 1 the scroll look (hint_card_style), 0 plain
 };
 
 HDC g_dc = nullptr;
@@ -1133,9 +1149,8 @@ bool SameLook(const Look& a, const Look& b) {
   return memcmp(&a, &b, sizeof(Look)) == 0;
 }
 
-bool Raster(const Look& look) {
-  if (!RasterStart()) return false;
-  const double start = NowSeconds();
+// The plain look (hint_card_style=0): dark round boxes with white letters.
+void RasterPlain(const Look& look) {
   memset(g_bits, 0, static_cast<size_t>(kSize) * kSize * 4);
   memset(g_base, 0, sizeof(g_base));
   // The letters first, white on black. The green of a pixel is its cover.
@@ -1266,12 +1281,683 @@ bool Raster(const Look& look) {
     Box(m - 8, m - 8, m + 8, m + 8, 8.0f, kWhite, 0.55f, kWhite, kSize,
         kWhite);
   }
+}
+
+// --- the scroll look -------------------------------------------------------------
+//
+// With hint_card_style=1 each item is a wax seal, and the card in the middle
+// is a parchment scroll with a roll at each side, as a hint card
+// (card_scroll.h). The layout is that of the plain look.
+//
+// THE WAX. On a hint card the wax of a seal has a meaning: green the trigger,
+// amber the grip, red each other button. An item of the ring is not a
+// button, so a plain item has the red wax. The chosen item has gold wax with
+// dark letters, a gold rim and a soft glow, and it is 12 px wider and 8 px
+// higher. Its gold is lighter and more yellow than the amber of the grip, and
+// only one item at a time has it. An item that cannot act now has a pale
+// brown wax at an alpha of 0.6. The value of a switch is gold on the red wax
+// and dark red on the gold wax.
+//
+// THE COST. The ring draws its picture again at each change of the choice.
+// So each seal and each card is drawn one time for its slot and its state
+// into a cache, and a new picture is a clear, a copy of the parts from the
+// cache, and the thin ring of ink and gold. Only a part that changed is drawn
+// again. While the ring is open, each frame with no new picture puts one
+// more part into the cache (ScrollBake). card_scroll::Seal gives the red wax. The gold wax and the pale wax
+// come from it: each pixel keeps its brightness against the middle
+// brightness of the red wax.
+
+const int kSealCap = 22;          // the capital letter of a word on a seal
+const int kSealSwitchCap = 19;    // the word of a switch
+const int kSealValueCap = 17;     // the value of a switch, in the words font
+const int kSealLineGap = 12;      // from the word of a switch to its value
+const int kScrollNameCap = 27;    // the name on the card
+const int kScrollLongCap = 19;    // a long name (a switch of the debug page)
+const int kScrollNoteCap = 20;
+const int kScrollLineGap = 16;    // from the name to the note
+const int kSealPad = 30;          // from the end of a seal to its word
+const int kSwitchSealPad = 40;
+const int kSealInside = 14;       // the words stay this far inside a seal
+const int kChosenWider = 12;
+const int kChosenHigher = 8;
+const int kSealEdge = 22;         // round a seal: its shadow, its rim, its glow
+const int kScrollCardMore = 40;   // the rolls make a card this much wider
+const int kScrollBodyOne = 64;    // the paper of a card with one line
+const int kScrollBodyTwo = 100;   // and with two lines
+const int kDotSeal = 36;          // the seal in the middle with no name
+// GDI draws the letters of one part into the work picture, and the part is
+// drawn in a picture with the same pitch.
+const int kWorkWidth = 640;
+const int kWorkHeight = 200;
+const int kRasterLogs = 40;
+
+const Rgb kGoldWax = {226.0f, 174.0f, 60.0f};
+const Rgb kGoldLight = {255.0f, 246.0f, 210.0f};
+const Rgb kPaleGold = {196.0f, 174.0f, 128.0f};
+const Rgb kPaleWax = {136.0f, 112.0f, 98.0f};
+const Rgb kPaleLight = {214.0f, 200.0f, 184.0f};
+const Rgb kRimGold = {255.0f, 220.0f, 120.0f};
+const Rgb kGlowGold = {255.0f, 196.0f, 80.0f};
+const Rgb kValueGold = {255.0f, 210.0f, 104.0f};
+const Rgb kValueRed = {128.0f, 26.0f, 16.0f};
+const Rgb kEdgeDark = {30.0f, 10.0f, 5.0f};
+const Rgb kEdgeLight = {255.0f, 232.0f, 168.0f};
+const Rgb kScrollNoteInk = {150.0f, 40.0f, 20.0f};
+const Rgb kLineInk = {70.0f, 40.0f, 18.0f};
+const Rgb kLineGold = {214.0f, 170.0f, 78.0f};
+
+// One part of the picture in the cache, and what it shows. The pixels are
+// BGRA with the color times the alpha, w by h, at x, y in the picture.
+struct Part {
+  uint8_t* px;
+  size_t room;
+  int x, y, w, h;
+  bool ok;
+  int item;
+  int value;
+  bool dim;
+  wchar_t name[48];
+  wchar_t note[48];
+};
+
+struct ScrollFont {
+  HFONT font;
+  int ascent;
+  int height;
+};
+
+bool g_scroll_ready = false;
+bool g_scroll_failed = false;
+HDC g_work_dc = nullptr;
+HBITMAP g_work_dib = nullptr;
+uint32_t* g_letters = nullptr;
+uint8_t g_work[kWorkWidth * kWorkHeight * 4];
+ScrollFont g_seal_word, g_seal_switch, g_seal_value;
+ScrollFont g_card_name, g_card_long, g_card_note;
+// Two seals for each slot (not chosen, chosen), a card for each slot and one
+// for a card with no slot, and the seal in the middle.
+Part g_seal_parts[kSlots][2];
+Part g_card_parts[kSlots + 1];
+Part g_dot_part;
+int g_scroll_new = 0;  // the parts that the picture now drew new
+int g_raster_logs = 0;
+
+// hint_card_style now. The switch "Card look" of the debug page changes it
+// for all the cards. While the hint cards are off, the key of bwvr.ini.
+int ScrollLookNow() {
+  const int style = HintCardStyleValue();
+  if (style == kDebugCannot) return g_style ? 1 : 0;
+  return style != 0 ? 1 : 0;
+}
+
+ScrollFont MakeScrollFont(HFONT font) {
+  ScrollFont f = {font, 0, 0};
+  if (font == nullptr) return f;
+  TEXTMETRICW metrics;
+  SelectObject(g_work_dc, font);
+  if (GetTextMetricsW(g_work_dc, &metrics)) {
+    f.ascent = metrics.tmAscent;
+    f.height = metrics.tmHeight;
+  }
+  return f;
+}
+
+// The work picture and the fonts of the scroll, one time. False keeps the
+// plain look.
+bool ScrollStart() {
+  if (g_scroll_ready) return true;
+  if (g_scroll_failed) return false;
+  g_scroll_failed = true;
+  g_work_dc = CreateCompatibleDC(nullptr);
+  if (g_work_dc == nullptr || !card_scroll::Start(g_work_dc)) {
+    ModLog("ring         : the scroll look has no font, so the ring has the "
+           "plain look");
+    return false;
+  }
+  BITMAPINFO info;
+  memset(&info, 0, sizeof(info));
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = kWorkWidth;
+  info.bmiHeader.biHeight = -kWorkHeight;  // top first
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  info.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr;
+  g_work_dib =
+      CreateDIBSection(g_work_dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+  if (g_work_dib == nullptr || bits == nullptr) {
+    ModLog("ring         : GDI gave no picture for the scroll look, so the "
+           "ring has the plain look");
+    return false;
+  }
+  g_letters = static_cast<uint32_t*>(bits);
+  SelectObject(g_work_dc, g_work_dib);
+  SetBkMode(g_work_dc, TRANSPARENT);
+  SetTextColor(g_work_dc, RGB(255, 255, 255));
+  g_seal_word = MakeScrollFont(card_scroll::SealFont(g_work_dc, kSealCap));
+  g_seal_switch =
+      MakeScrollFont(card_scroll::SealFont(g_work_dc, kSealSwitchCap));
+  g_seal_value =
+      MakeScrollFont(card_scroll::WordsFont(g_work_dc, kSealValueCap));
+  g_card_name =
+      MakeScrollFont(card_scroll::WordsFont(g_work_dc, kScrollNameCap));
+  g_card_long =
+      MakeScrollFont(card_scroll::WordsFont(g_work_dc, kScrollLongCap));
+  g_card_note =
+      MakeScrollFont(card_scroll::WordsFont(g_work_dc, kScrollNoteCap));
+  if (g_seal_word.font == nullptr || g_seal_switch.font == nullptr ||
+      g_seal_value.font == nullptr || g_card_name.font == nullptr ||
+      g_card_long.font == nullptr || g_card_note.font == nullptr) {
+    ModLog("ring         : GDI gave no font for the scroll look, so the ring "
+           "has the plain look");
+    return false;
+  }
+  g_scroll_failed = false;
+  g_scroll_ready = true;
+  return true;
+}
+
+int WorkWidth(const ScrollFont& f, const wchar_t* text) {
+  SelectObject(g_work_dc, f.font);
+  SIZE size = {0, 0};
+  GetTextExtentPoint32W(g_work_dc, text, static_cast<int>(wcslen(text)), &size);
+  return size.cx;
+}
+
+// The letters of one line, white on black, centered from left to right, on
+// the baseline.
+void WorkLetters(const ScrollFont& f, const wchar_t* text, int left, int right,
+                 int baseline) {
+  SelectObject(g_work_dc, f.font);
+  RECT r = {left, baseline - f.ascent, right, baseline - f.ascent + f.height};
+  DrawTextW(g_work_dc, text, -1, &r,
+            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP |
+                DT_END_ELLIPSIS | DT_NOCLIP);
+}
+
+// Clears w by h pixels of the work picture and of its letters.
+void WorkClear(int w, int h) {
+  for (int y = 0; y < h; ++y) {
+    memset(g_work + static_cast<size_t>(y) * kWorkWidth * 4, 0,
+           static_cast<size_t>(w) * 4);
+    memset(g_letters + static_cast<size_t>(y) * kWorkWidth, 0,
+           static_cast<size_t>(w) * 4);
+  }
+}
+
+// Keeps w by h pixels of the work picture in the part, at x, y.
+void KeepPart(Part* part, int x, int y, int w, int h) {
+  const size_t bytes = static_cast<size_t>(w) * h * 4;
+  if (part->room < bytes) {
+    uint8_t* px = static_cast<uint8_t*>(realloc(part->px, bytes));
+    if (px == nullptr) {
+      part->w = part->h = 0;
+      return;
+    }
+    part->px = px;
+    part->room = bytes;
+  }
+  for (int row = 0; row < h; ++row) {
+    memcpy(part->px + static_cast<size_t>(row) * w * 4,
+           g_work + static_cast<size_t>(row) * kWorkWidth * 4,
+           static_cast<size_t>(w) * 4);
+  }
+  part->x = x;
+  part->y = y;
+  part->w = w;
+  part->h = h;
+}
+
+// One part over the picture of the ring.
+void PutPart(const Part& part) {
+  for (int row = 0; row < part.h; ++row) {
+    const int y = part.y + row;
+    if (y < 0 || y >= kSize) continue;
+    const uint8_t* in = part.px + static_cast<size_t>(row) * part.w * 4;
+    uint8_t* out = g_base + static_cast<size_t>(y) * kSize * 4;
+    for (int col = 0; col < part.w; ++col, in += 4) {
+      const int x = part.x + col;
+      const int a = in[3];
+      if (a == 0 || x < 0 || x >= kSize) continue;
+      uint8_t* o = out + x * 4;
+      if (a == 255) {
+        memcpy(o, in, 4);
+        continue;
+      }
+      const int k = 255 - a;
+      for (int c = 0; c < 4; ++c) {
+        o[c] = static_cast<uint8_t>(in[c] + (o[c] * k + 127) / 255);
+      }
+    }
+  }
+}
+
+// One color over a pixel with its color times its alpha.
+void OverPixel(uint8_t* out, const Rgb& c, float a) {
+  if (a <= 0.0f) return;
+  if (a > 1.0f) a = 1.0f;
+  const float k = 1.0f - a;
+  out[0] = static_cast<uint8_t>(c.b * a + out[0] * k + 0.5f);
+  out[1] = static_cast<uint8_t>(c.g * a + out[1] * k + 0.5f);
+  out[2] = static_cast<uint8_t>(c.r * a + out[2] * k + 0.5f);
+  out[3] = static_cast<uint8_t>(255.0f * a + out[3] * k + 0.5f);
+}
+
+float Clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+
+// The signed distance to a box with round ends (as wide as high, or wider):
+// below 0 is inside.
+float PillDistance(float px, float py, float x0, float y0, float x1,
+                   float y1) {
+  const float r = 0.5f * (y1 - y0);
+  const float qx =
+      px < x0 + r ? x0 + r - px : (px > x1 - r ? px - (x1 - r) : 0.0f);
+  const float qy = py - 0.5f * (y0 + y1);
+  return sqrtf(qx * qx + qy * qy) - r;
+}
+
+// Gives the red wax of the seal in the picture the color wax. Each pixel
+// keeps its brightness against the middle brightness of the opaque wax, and
+// a brighter pixel (the lit side, the sheen) goes toward light.
+void Rewax(const card_scroll::Picture& p, const Rgb& wax, const Rgb& light) {
+  int count[256];
+  memset(count, 0, sizeof(count));
+  int total = 0;
+  for (int y = 0; y < p.height; ++y) {
+    const uint8_t* in = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    for (int x = 0; x < p.width; ++x, in += 4) {
+      if (in[3] != 255) continue;
+      ++count[(in[2] * 77 + in[1] * 150 + in[0] * 29) >> 8];
+      ++total;
+    }
+  }
+  if (total == 0) return;
+  int middle = 0;
+  for (int sum = 0; middle < 255; ++middle) {
+    sum += count[middle];
+    if (2 * sum >= total) break;
+  }
+  if (middle < 8) middle = 8;
+  const float per_middle = 1.0f / (256.0f * middle);
+  for (int y = 0; y < p.height; ++y) {
+    uint8_t* out = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    for (int x = 0; x < p.width; ++x, out += 4) {
+      const int a = out[3];
+      if (a == 0) continue;
+      const float alpha = a * (1.0f / 255.0f);
+      // The brightness of the pixel with no alpha, against the middle.
+      const float k = (out[2] * 77 + out[1] * 150 + out[0] * 29) *
+                      per_middle / alpha;
+      Rgb c;
+      if (k <= 1.0f) {
+        c = {wax.r * k, wax.g * k, wax.b * k};
+      } else {
+        const float t = Clamp01(k - 1.0f);
+        c = {wax.r + (light.r - wax.r) * t, wax.g + (light.g - wax.g) * t,
+             wax.b + (light.b - wax.b) * t};
+      }
+      out[0] = static_cast<uint8_t>(c.b * alpha + 0.5f);
+      out[1] = static_cast<uint8_t>(c.g * alpha + 0.5f);
+      out[2] = static_cast<uint8_t>(c.r * alpha + 0.5f);
+    }
+  }
+}
+
+// The gold rim and the glow of the chosen seal, under the seal: a band of
+// 4 px at 5 px out from the box, and a glow that ends 20 px out.
+void Rim(const card_scroll::Picture& p, int x0, int y0, int x1, int y1,
+         float strength) {
+  for (int y = 0; y < p.height; ++y) {
+    uint8_t* out = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    for (int x = 0; x < p.width; ++x, out += 4) {
+      const float d = PillDistance(x + 0.5f, y + 0.5f, static_cast<float>(x0),
+                                   static_cast<float>(y0),
+                                   static_cast<float>(x1),
+                                   static_cast<float>(y1));
+      if (d >= 20.0f || out[3] == 255) continue;
+      const float g = d < 9.0f ? 1.0f : 1.0f - (d - 9.0f) / 11.0f;
+      uint8_t src[4] = {0, 0, 0, 0};
+      OverPixel(src, kGlowGold, 0.42f * strength * g * g);
+      OverPixel(src, kRimGold,
+                0.95f * strength * Clamp01(d - 4.5f) * Clamp01(9.5f - d));
+      // Under the seal: the rim shows only where the seal does not cover.
+      const int k = 255 - out[3];
+      for (int c = 0; c < 4; ++c) {
+        out[c] = static_cast<uint8_t>(out[c] + (src[c] * k + 127) / 255);
+      }
+    }
+  }
+}
+
+// Letters of the work picture in one color, with an edge under them, in the
+// box. The edge is the letter 1 px up and 1 px left, as on a seal.
+void LineInk(const card_scroll::Picture& p, int x0, int y0, int x1, int y1,
+             const Rgb& ink, const Rgb& edge, float edge_alpha) {
+  if (x0 < 1) x0 = 1;
+  if (y0 < 1) y0 = 1;
+  if (x1 > p.width) x1 = p.width;
+  if (y1 > p.height) y1 = p.height;
+  for (int y = y0; y < y1; ++y) {
+    for (int x = x0; x < x1; ++x) {
+      const float letter =
+          ((g_letters[y * kWorkWidth + x] >> 8) & 0xFF) * (1.0f / 255.0f);
+      const float under =
+          ((g_letters[(y - 1) * kWorkWidth + x - 1] >> 8) & 0xFF) *
+          (1.0f / 255.0f);
+      if (letter <= 0.0f && under <= 0.0f) continue;
+      uint8_t* out = p.bgra + (static_cast<size_t>(y) * p.pitch + x) * 4;
+      OverPixel(out, edge, under * edge_alpha);
+      OverPixel(out, ink, letter);
+    }
+  }
+}
+
+// The seal of a slot in its part of the cache.
+void DrawSeal(Part* part, int slot, int item, int value, bool dim, bool lit) {
+  part->ok = true;
+  part->item = item;
+  part->value = value;
+  part->dim = dim;
+  part->w = part->h = 0;
+  const bool two = IsSwitchItem(item);
+  const wchar_t* word = L"";
+  wchar_t value_text[32] = L"";
+  if (two) {
+    word = DebugSwitchLabel(item - kItemSwitchBase);
+    DebugSwitchValueText(item - kItemSwitchBase, value, value_text, 32);
+  } else if (IsGroupItem(item)) {
+    word = DebugGroupName(item - kItemGroupBase);
+  } else if (item > kItemNone && item < kItems) {
+    word = kItemInfo[item].word;
+  }
+  if (word[0] == 0) return;
+  const ScrollFont& word_font = two ? g_seal_switch : g_seal_word;
+  int w = WorkWidth(word_font, word);
+  if (two) {
+    const int value_w = WorkWidth(g_seal_value, value_text);
+    if (value_w > w) w = value_w;
+  }
+  w += 2 * (two ? kSwitchSealPad : kSealPad);
+  if (w < kBadgeLeast) w = kBadgeLeast;
+  if (w > kBadgeMost) w = kBadgeMost;
+  int h = two ? kSwitchHeight : kBadgeHeight;
+  if (lit) {
+    w += kChosenWider;
+    h += kChosenHigher;
+  }
+  const int pw = w + 2 * kSealEdge;
+  const int ph = h + 2 * kSealEdge;
+  if (pw > kWorkWidth || ph > kWorkHeight) return;
+  WorkClear(pw, ph);
+  const card_scroll::Picture picture = {g_work, kWorkWidth, pw, ph};
+  const int x0 = kSealEdge, y0 = kSealEdge, x1 = x0 + w, y1 = y0 + h;
+  card_scroll::Seal(picture, x0, y0, x1, y1, 0, 11 + slot * 13);
+  if (lit) {
+    Rewax(picture, dim ? kPaleGold : kGoldWax, kGoldLight);
+    Rim(picture, x0, y0, x1, y1, dim ? 0.5f : 1.0f);
+  } else if (dim) {
+    Rewax(picture, kPaleWax, kPaleLight);
+  }
+
+  // The letters: one line in the middle, or the word and its value.
+  const int left = x0 + kSealInside, right = x1 - kSealInside;
+  int split = y1;
+  if (two) {
+    const int top = y0 + (h - kSealSwitchCap - kSealLineGap - kSealValueCap) / 2;
+    const int word_line = top + kSealSwitchCap;
+    WorkLetters(g_seal_switch, word, left, right, word_line);
+    WorkLetters(g_seal_value, value_text, left, right,
+                word_line + kSealLineGap + kSealValueCap);
+    split = word_line + kSealLineGap / 2;
+  } else {
+    WorkLetters(g_seal_word, word, left, right, y0 + (h + kSealCap) / 2);
+  }
+  GdiFlush();
+  // The gold wax has dark letters, as the amber wax of card_scroll.
+  const int tone = lit ? 2 : 0;
+  card_scroll::SealInk(picture, g_letters, x0, y0, x1, split, tone);
+  if (two) {
+    if (dim) {
+      card_scroll::SealInk(picture, g_letters, x0, split, x1, y1, tone);
+    } else if (lit) {
+      LineInk(picture, x0, split, x1, y1, kValueRed, kEdgeLight, 0.55f);
+    } else {
+      LineInk(picture, x0, split, x1, y1, kValueGold, kEdgeDark, 0.55f);
+    }
+  }
+  if (dim) {
+    // A dim seal is faded: all of it at a lower alpha.
+    const int scale = lit ? 218 : 154;
+    for (int y = 0; y < ph; ++y) {
+      uint8_t* out = g_work + static_cast<size_t>(y) * kWorkWidth * 4;
+      for (int i = 0; i < pw * 4; ++i) {
+        out[i] = static_cast<uint8_t>((out[i] * scale) >> 8);
+      }
+    }
+  }
+  float cx = 0.0f, cy = 0.0f;
+  SlotPixel(slot, kMiddle, kSlotRadius, &cx, &cy);
+  KeepPart(part, static_cast<int>(cx) - w / 2 - kSealEdge,
+           static_cast<int>(cy) - h / 2 - kSealEdge, pw, ph);
+}
+
+// The card in the middle, a small scroll, in its part of the cache.
+void DrawCard(Part* part, const wchar_t* name, const wchar_t* note) {
+  part->ok = true;
+  wcsncpy_s(part->name, name, _TRUNCATE);
+  wcsncpy_s(part->note, note, _TRUNCATE);
+  part->w = part->h = 0;
+  const bool two = note[0] != 0;
+  // A long name (a switch of the debug page) takes a smaller font, and the
+  // card can be wider, as in the plain look.
+  const ScrollFont* name_font = &g_card_name;
+  int name_cap = kScrollNameCap;
+  int most = kCardMost;
+  if (WorkWidth(g_card_name, name) + 2 * kCardPad > kCardMost) {
+    name_font = &g_card_long;
+    name_cap = kScrollLongCap;
+    most = kCardWide;
+  }
+  int text = WorkWidth(*name_font, name);
+  if (two) {
+    const int note_w = WorkWidth(g_card_note, note);
+    if (note_w > text) text = note_w;
+  }
+  int w = text + card_scroll::kWordsLeft + card_scroll::kWordsRight;
+  if (w > most + kScrollCardMore) w = most + kScrollCardMore;
+  const int body = two ? kScrollBodyTwo : kScrollBodyOne;
+  const int h = card_scroll::kPaperTop + body + card_scroll::kPaperBottom;
+  if (w > kWorkWidth || h > kWorkHeight) return;
+  WorkClear(w, h);
+  const card_scroll::Picture picture = {g_work, kWorkWidth, w, h};
+  const int paper_x1 = w - card_scroll::kEdgeRight;
+  card_scroll::Paper(picture, card_scroll::kEdgeLeft, card_scroll::kPaperTop,
+                     paper_x1, card_scroll::kPaperTop + body, 29);
+  const int left = card_scroll::kWordsLeft;
+  const int right = w - card_scroll::kWordsRight;
+  int split = h;
+  if (two) {
+    const int block = name_cap + kScrollLineGap + kScrollNoteCap;
+    const int name_line = card_scroll::kPaperTop + (body - block) / 2 + name_cap;
+    const int note_line = name_line + kScrollLineGap + kScrollNoteCap;
+    WorkLetters(*name_font, name, left, right, name_line);
+    WorkLetters(g_card_note, note, left, right, note_line);
+    split = name_line + kScrollLineGap / 2 + 2;
+  } else {
+    WorkLetters(*name_font, name, left, right,
+                card_scroll::kPaperTop + (body + name_cap) / 2);
+  }
+  GdiFlush();
+  card_scroll::Ink(picture, g_letters, 0, 0, w, split, 29);
+  if (two) {
+    LineInk(picture, 0, split, w, h, kScrollNoteInk, kScrollNoteInk, 0.0f);
+  }
+  // The middle of the paper is the middle of the ring.
+  const int paper_cx = (card_scroll::kEdgeLeft + paper_x1) / 2;
+  const int paper_cy = card_scroll::kPaperTop + body / 2;
+  KeepPart(part, static_cast<int>(kMiddle) - paper_cx,
+           static_cast<int>(kMiddle) - paper_cy, w, h);
+}
+
+// A small round seal marks the middle, where a release chooses nothing.
+void DrawDot(Part* part) {
+  part->ok = true;
+  part->w = part->h = 0;
+  const int side = kDotSeal + 2 * kSealEdge;
+  WorkClear(side, side);
+  const card_scroll::Picture picture = {g_work, kWorkWidth, side, side};
+  card_scroll::Seal(picture, kSealEdge, kSealEdge, kSealEdge + kDotSeal,
+                    kSealEdge + kDotSeal, 0, 7);
+  const int m = static_cast<int>(kMiddle);
+  KeepPart(part, m - side / 2, m - side / 2, side, side);
+}
+
+// The thin ring of ink with a gold line in it, on the circle of the items,
+// so the ring reads as one object. It goes under the seals, after them: a
+// pixel that a seal covers at an alpha of 0.5 or more has no line, so the
+// line does not show through a faded seal. The line of gold is 5 px and the
+// ink 11 px wide, so the headset shows no line of 1 px.
+void RingLine() {
+  const float r = kSlotRadius;
+  const float half = 6.0f;
+  const float outer = r + half, inner = r - half;
+  const int y_first = static_cast<int>(kMiddle - outer) - 1;
+  const int y_last = static_cast<int>(kMiddle + outer) + 1;
+  for (int y = y_first; y <= y_last; ++y) {
+    if (y < 0 || y >= kSize) continue;
+    const float dy = y + 0.5f - kMiddle;
+    if (outer * outer - dy * dy <= 0.0f) continue;
+    const float reach = sqrtf(outer * outer - dy * dy) + 1.0f;
+    const float hole =
+        inner * inner - dy * dy > 0.0f ? sqrtf(inner * inner - dy * dy) - 1.0f
+                                       : 0.0f;
+    // The left span and the right span of the row, not the inside.
+    const int left_end = static_cast<int>(kMiddle - hole);
+    int right_start = static_cast<int>(kMiddle + hole);
+    if (right_start <= left_end) right_start = left_end + 1;
+    const int spans[2][2] = {{static_cast<int>(kMiddle - reach), left_end},
+                             {right_start, static_cast<int>(kMiddle + reach)}};
+    uint8_t* row = g_base + static_cast<size_t>(y) * kSize * 4;
+    for (const auto& span : spans) {
+      const int x_first = span[0] < 0 ? 0 : span[0];
+      const int x_last = span[1] > kSize - 1 ? kSize - 1 : span[1];
+      for (int x = x_first; x <= x_last; ++x) {
+        const float dx = x + 0.5f - kMiddle;
+        const float d = fabsf(sqrtf(dx * dx + dy * dy) - r);
+        if (d >= half) continue;
+        uint8_t* out = row + x * 4;
+        if (out[3] >= 128) continue;
+        uint8_t line[4] = {0, 0, 0, 0};
+        OverPixel(line, kLineInk, 0.5f * Clamp01(5.5f - d));
+        OverPixel(line, kLineGold, 0.9f * Clamp01(2.5f - d));
+        const int k = (255 - out[3]) * (128 - out[3]) / 128;
+        for (int c = 0; c < 4; ++c) {
+          out[c] = static_cast<uint8_t>(out[c] + (line[c] * k + 127) / 255);
+        }
+      }
+    }
+  }
+}
+
+// The scroll look: the parts from the cache, and each part that changed.
+void RasterScroll(const Look& look) {
+  memset(g_base, 0, sizeof(g_base));
+  for (int i = 0; i < kSlots; ++i) {
+    const bool lit = i == look.slot;
+    Part& part = g_seal_parts[i][lit ? 1 : 0];
+    if (!part.ok || part.item != look.item[i] ||
+        part.value != look.value[i] || part.dim != look.dim[i]) {
+      DrawSeal(&part, i, look.item[i], look.value[i], look.dim[i], lit);
+      ++g_scroll_new;
+    }
+    if (part.w > 0) PutPart(part);
+  }
+  if (look.name[0] != 0) {
+    Part& card =
+        g_card_parts[look.slot >= 0 && look.slot < kSlots ? look.slot : kSlots];
+    if (!card.ok || wcscmp(card.name, look.name) != 0 ||
+        wcscmp(card.note, look.note) != 0) {
+      DrawCard(&card, look.name, look.note);
+      ++g_scroll_new;
+    }
+    if (card.w > 0) PutPart(card);
+  } else {
+    if (!g_dot_part.ok) {
+      DrawDot(&g_dot_part);
+      ++g_scroll_new;
+    }
+    if (g_dot_part.w > 0) PutPart(g_dot_part);
+  }
+  RingLine();
+}
+
+// While the ring is open and its picture does not change in a frame, one
+// part that a next choice can need goes into the cache in that frame: the
+// chosen seal and the card of a slot. So some frames after the ring opens, a
+// change of the choice is a copy of parts only.
+uint64_t g_baked = 0;
+double g_bake_ms = 0.0;
+
+void ScrollBake(const Look& look, const int (*items)[kSlots], int page,
+                const Facts& f) {
+  const double start = NowSeconds();
+  bool drew = false;
+  for (int i = 0; i < kSlots && !drew; ++i) {
+    if (i == look.slot) continue;
+    Part& seal = g_seal_parts[i][1];
+    if (!seal.ok || seal.item != look.item[i] ||
+        seal.value != look.value[i] || seal.dim != look.dim[i]) {
+      DrawSeal(&seal, i, look.item[i], look.value[i], look.dim[i], true);
+      drew = true;
+      break;
+    }
+    if (look.item[i] == kItemNone) continue;
+    const ItemNow now = StateOf(items[page][i], f);
+    wchar_t name[48], note[48];
+    wcsncpy_s(name, now.name, _TRUNCATE);
+    wcsncpy_s(note, NoteOf(now), _TRUNCATE);
+    if (name[0] == 0) continue;
+    Part& card = g_card_parts[i];
+    if (!card.ok || wcscmp(card.name, name) != 0 ||
+        wcscmp(card.note, note) != 0) {
+      DrawCard(&card, name, note);
+      drew = true;
+    }
+  }
+  if (!drew) return;
+  ++g_baked;
+  const double ms = (NowSeconds() - start) * 1000.0;
+  if (ms > g_bake_ms) g_bake_ms = ms;
+}
+
+bool Raster(const Look& look) {
+  if (!RasterStart()) return false;
+  const double start = NowSeconds();
+  g_scroll_new = 0;
+  const bool scroll = look.scroll != 0 && ScrollStart();
+  if (scroll) {
+    RasterScroll(look);
+  } else {
+    RasterPlain(look);
+  }
   g_drawn = look;
   g_have_drawn = true;
   g_staged_fade = -1.0f;
   ++g_rasters;
   const double ms = (NowSeconds() - start) * 1000.0;
   if (ms > g_raster_ms) g_raster_ms = ms;
+  if (g_raster_logs < kRasterLogs) {
+    ++g_raster_logs;
+    if (scroll) {
+      ModLog("ring         : frame %llu, a new picture of the ring in the "
+             "scroll look took %.2f ms. It drew %d parts new, and the others "
+             "came from the cache", ControllersFrameCount(), ms,
+             g_scroll_new);
+    } else {
+      ModLog("ring         : frame %llu, a new picture of the ring in the "
+             "plain look took %.2f ms", ControllersFrameCount(), ms);
+    }
+  }
   if (g_saved < g_save) {
     ++g_saved;
     EyeCaptureSaveUi("ring", ControllersFrameCount(), 1, g_base, kSize * 4,
@@ -1346,6 +2032,7 @@ void BuildLook(const int (*items)[kSlots], int page, int slot, const Facts& f,
                Look* look) {
   memset(look, 0, sizeof(*look));
   look->slot = slot;
+  look->scroll = ScrollLookNow();
   for (int i = 0; i < kSlots; ++i) {
     const int item = items[page][i];
     look->item[i] = item;
@@ -1631,7 +2318,11 @@ void RadialMenuFrame() {
   if (open) {
     Look look;
     BuildLook(items, g_state.page, g_state.slot, facts, &look);
-    if (!g_have_drawn || !SameLook(look, g_drawn)) Raster(look);
+    if (!g_have_drawn || !SameLook(look, g_drawn)) {
+      Raster(look);
+    } else if (look.scroll != 0 && g_scroll_ready) {
+      ScrollBake(look, items, g_state.page, facts);
+    }
   } else if (g_notice && (!g_have_drawn || !SameLook(g_notice_look, g_drawn))) {
     Raster(g_notice_look);
   }
@@ -1671,8 +2362,15 @@ void RadialMenuReport() {
            "longest draw took %.2f ms, and the longest step of the fade %.2f "
            "ms", g_rasters, g_raster_ms, g_stage_ms);
   }
+  if (g_baked > 0) {
+    ModLog("ring         : the scroll look put %llu parts into the cache "
+           "between the pictures. The longest took %.2f ms", g_baked,
+           g_bake_ms);
+  }
   g_opens = g_choices = g_refusals = g_no_choice = g_keys_sent = 0;
   g_blocked = 0;
   g_rasters = 0;
   g_raster_ms = g_stage_ms = 0.0;
+  g_baked = 0;
+  g_bake_ms = 0.0;
 }

@@ -173,8 +173,13 @@ agents: the log does not tell the item yet.
   the Lost Sister of Land 1, and Sable at the cow stone. Log: `vk scene     :
   a texture with no new image`.
 - **A take at the Hand that stops when the hand moves away** (P21). Log:
-  `hand bulk    : the bulk take ends`, with the button of the game, the grip
-  and the distance from the pile, and `the grip opens during a bulk take`.
+  `grip         : the grip falls fast during a bulk take and stays closed`
+  names the cause that `near_take_keeps=1` holds, with the grip values of
+  the last 12 frames. A take that still stops has `grip         : the grip
+  opens ... Its values over the last 12 frames` and `the grip opens during a
+  bulk take` (the real grip opened), or `hand bulk    : the bulk take ends`
+  with the button of the game down (the game ended it), with the distance
+  from the pile and the influence.
 - **An old picture in one eye** (B16). Log: `eye clean    : an eye pass drew
   no sky` names the scene of that frame.
 - **A lightning in one eye only** (B18). Log: `land light   :`. A flash with

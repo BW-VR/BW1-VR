@@ -9905,6 +9905,11 @@ namespace {
 //   fish    The Hand's point goes to the drawn fish nearest to it, of each
 //           fish farm of the game, within 2 m of the room. The place is the
 //           sprite of the fish (DrawnFishOf), not a candidate.
+//   open    The Hand's point goes 3 cm of the room over open land: the
+//           nearest point, on rings of 10 cm up to 1.5 m of the room round
+//           the point, that is land (not the sea) and 40 cm of the room or
+//           more from the body of each candidate. Of the points of the first
+//           ring with one, the one nearest to the camera.
 enum {
   kPlanNone = 0, kPlanScroll, kPlanAir, kPlanCrown, kPlanPalm, kPlanCreature,
   kPlanCreaturePalm, kPlanGo, kPlanPicture, kPlanScrolls, kPlanGoSite,
@@ -9918,7 +9923,9 @@ enum {
   // The bodies of hand feel and the sea (hand_feel.cpp).
   kPlanFeel, kPlanGoSea, kPlanSea, kPlanGoFeel,
   // The fish of a fish farm.
-  kPlanFish
+  kPlanFish,
+  // Open land for the stop at the land (hand_land.cpp).
+  kPlanOpen
 };
 int g_plan[16];
 int g_plan_count = -1;
@@ -10011,6 +10018,7 @@ int PlanCount() {
                      : n == 3 && strncmp(at, "sea", 3) == 0    ? kPlanSea
                      : n == 4 && strncmp(at, "fish", 4) == 0   ? kPlanFish
                      : n == 4 && strncmp(at, "down", 4) == 0   ? kPlanDown
+                     : n == 4 && strncmp(at, "open", 4) == 0   ? kPlanOpen
                                                                 : kPlanNone;
     if (word != kPlanNone) g_plan[g_plan_count++] = word;
     if (end == nullptr) break;
@@ -10523,6 +10531,59 @@ bool PlanPoint(int word, float out[3]) {
            "%.2f over the sea, %.1f cm of the room from where it is, frame "
            "%llu", out[0], out[1], out[2],
            units > 0.0f ? Distance(out, g_target) / units * 100.0f : 0.0f,
+           g_frame);
+    return true;
+  }
+  if (word == kPlanOpen) {
+    const float clear = 0.40f * units;
+    float best[3] = {0.0f, 0.0f, 0.0f};
+    bool have = false;
+    int ring_cm = 0;
+    for (int r = 0; r <= 150 && !have; r += 10) {
+      float best_camera = 1e30f;
+      const int steps = r == 0 ? 1 : 16;
+      for (int a = 0; a < steps; ++a) {
+        const float angle = 6.2831853f * static_cast<float>(a) / steps;
+        const float x = g_target[0] + r * 0.01f * units * cosf(angle);
+        const float z = g_target[2] + r * 0.01f * units * sinf(angle);
+        if (!(x > 0.0f && x < 5120.0f && z > 0.0f && z < 5120.0f)) continue;
+        const int32_t coords[3] = {static_cast<int32_t>(x * kMapScale),
+                                   static_cast<int32_t>(z * kMapScale), 0};
+        const float land =
+            reinterpret_cast<GetAltitudeFn>(kGetAltitude)(coords);
+        if (!(land > 0.0f && land < 5000.0f)) continue;
+        bool free = true;
+        for (int i = 0; i < g_candidate_count && free; ++i) {
+          const Candidate& c = g_candidates[i];
+          const float dx = c.position[0] - x, dz = c.position[2] - z;
+          const float radius = BodyOf(c.object).radius;
+          free = sqrtf(dx * dx + dz * dz) - (radius > 0.0f ? radius : 0.0f) >=
+                 clear;
+        }
+        if (!free) continue;
+        const float cx = x - Camera()[0], cz = z - Camera()[2];
+        const float to_camera = cx * cx + cz * cz;
+        if (to_camera < best_camera) {
+          best_camera = to_camera;
+          best[0] = x;
+          best[1] = land + 0.03f * units;
+          best[2] = z;
+          have = true;
+          ring_cm = r;
+        }
+      }
+    }
+    if (!have) {
+      ModLog("hand pick    : seek plan: open. No open land within 1.5 m of "
+             "the room of the Hand (%d candidates), frame %llu",
+             g_candidate_count, g_frame);
+      return false;
+    }
+    for (int k = 0; k < 3; ++k) out[k] = best[k];
+    ModLog("hand pick    : seek plan: open. The Hand's point goes 3 cm of the "
+           "room over open land at %.2f %.2f %.2f, %d cm of the room from "
+           "where it is, with no body of the %d candidates within 40 cm, "
+           "frame %llu", out[0], out[1], out[2], ring_cm, g_candidate_count,
            g_frame);
     return true;
   }

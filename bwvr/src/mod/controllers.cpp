@@ -1646,6 +1646,14 @@ uint64_t g_grip_down_ms = 0;
 bool g_grip_button_was = false;
 ULONGLONG g_right_close_ms = 0;  // the right control closed at this time
 uint64_t g_fast_opens = 0;      // openings by a fast fall, this window
+// near_take_keeps, read at the first pump: 1 keeps a fast fall of the grip
+// from opening it while a bulk take runs, so only a grip below 35% ends the
+// take. g_take_running is the fact of the last step of the grip machine.
+int g_near_take_keeps = -1;
+bool g_take_running = false;
+uint64_t g_take_falls_kept = 0;  // fast falls in a take that did not open
+int g_take_fall_logs = 0;
+const int kMaxTakeFallLogs = 40;
 uint64_t g_slow_opens = 0;      // openings below kGripOpenBelow
 int g_level_logs = 0;
 const int kMaxLevelLogs = 80;
@@ -2821,6 +2829,7 @@ controller_math::GripStepOut StepGrip(bool usable, bool far_claim) {
     g_grip_ms = static_cast<uint64_t>(NowSeconds() * 1000.0);
   }
   const GripStepOut out = GripStep(&g_hold, grip, facts, g_frame, g_grip_ms);
+  g_take_running = facts.direct && (facts.take || facts.mod_take);
   if (out.opened) HandDirectGripOpened();
   // How long the button was down for the game, for the log.
   if (out.button && !g_grip_button_was) g_grip_down_ms = g_grip_ms;
@@ -2954,6 +2963,21 @@ int ControllersPressHoldValue() {
   return g_installed && g_press_hold >= 0 ? g_press_hold : kDebugCannot;
 }
 
+void ControllersNearTakeKeepsChange(const char* by) {
+  if (g_near_take_keeps < 0) return;
+  g_near_take_keeps = g_near_take_keeps != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_near_take_keeps != 0 ? 0.30f : 0.08f);
+  ModLog("grip         : %s: near_take_keeps is %d now, frame %llu. %s", by,
+         g_near_take_keeps, g_frame,
+         g_near_take_keeps != 0
+             ? "Only a grip below 35% ends a bulk take"
+             : "A fast fall of the squeeze ends a bulk take too");
+}
+int ControllersNearTakeKeepsValue() {
+  return g_installed && g_near_take_keeps >= 0 ? g_near_take_keeps
+                                               : kDebugCannot;
+}
+
 namespace {
 
 // THE TEST KEY OF THE PRESS GUARD: Ctrl, Shift and Home (test_keys=1) turn
@@ -3072,6 +3096,37 @@ bool OpenStrokeStep(ULONGLONG now_ms, bool usable, bool far_claim) {
   return g_open_press.on;
 }
 
+// One value of a control, as GripLevelStep. With keep, a closed control does
+// not open on a fast fall (near_take_keeps, during a bulk take). The step
+// with the fast fall runs on a copy, so the log names each fall that the
+// rule kept closed, with the values of the last frames.
+bool TakeLevelStep(controller_math::GripLevel* level, float value, bool fast,
+                   bool keep, const char* name) {
+  if (!keep || !level->down) {
+    return controller_math::GripLevelStep(level, value, fast);
+  }
+  controller_math::GripLevel copy = *level;
+  const bool would = controller_math::GripLevelStep(&copy, value, true);
+  const bool stays = controller_math::GripLevelStep(level, value, false);
+  if (!would && stays) {
+    ++g_take_falls_kept;
+    if (g_take_fall_logs < kMaxTakeFallLogs) {
+      ++g_take_fall_logs;
+      char trace[160] = "";
+      size_t used = 0;
+      for (int i = 0; i < level->count && used + 8 < sizeof(trace); ++i) {
+        used += static_cast<size_t>(sprintf_s(
+            trace + used, sizeof(trace) - used, " %.2f", level->trace[i]));
+      }
+      ModLog("grip         : the %s falls fast during a bulk take and stays "
+             "closed (near_take_keeps=1), frame %llu. Its values over the "
+             "last %d frames:%s",
+             name, g_frame, level->count, trace);
+    }
+  }
+  return stays;
+}
+
 void PumpButtons(ULONGLONG now) {
   const bwvr::HandInput& hand = g_hands[PointingIndex()];
   // THE GRIP OPENS AT ONCE. The control that is the game's right button with
@@ -3112,6 +3167,16 @@ void PumpButtons(ULONGLONG now) {
                  "That is less than the 225 ms that the game needs for an "
                  "object that moves");
   }
+  if (g_near_take_keeps < 0) {
+    g_near_take_keeps = IniInt("near_take_keeps", 1) != 0 ? 1 : 0;
+    ModLog("grip         : near_take_keeps=%d. %s", g_near_take_keeps,
+           g_near_take_keeps != 0
+               ? "While a bulk take runs, at the Hand or at a distance, only "
+                 "a grip below 35% ends it. A fast fall of the squeeze does "
+                 "not open the grip then"
+               : "A fast fall of the squeeze opens the grip also during a "
+                 "bulk take, and ends the take");
+  }
   PollPressGuardKey();
   PollPressHoldKey();
   const bool trigger_was = g_trigger_down, grip_was = g_grip_down;
@@ -3123,10 +3188,15 @@ void PumpButtons(ULONGLONG now) {
   const bool fast =
       g_fast_open != 0 && HandDirectReleaseAtOnce() && DirectHandNow() &&
       !guarded;
-  g_trigger_down = controller_math::GripLevelStep(
-      &g_trigger_level, hand.trigger, fast && g_swap_buttons);
-  g_grip_down = controller_math::GripLevelStep(&g_grip_level, hand.squeeze,
-                                               fast && !g_swap_buttons);
+  // A BULK TAKE KEEPS ON (near_take_keeps): while a take runs, the control
+  // of the right button opens only below 35%.
+  const bool take_keeps = fast && g_near_take_keeps != 0 && g_take_running;
+  g_trigger_down =
+      TakeLevelStep(&g_trigger_level, hand.trigger, fast && g_swap_buttons,
+                    take_keeps && g_swap_buttons, "trigger");
+  g_grip_down =
+      TakeLevelStep(&g_grip_level, hand.squeeze, fast && !g_swap_buttons,
+                    take_keeps && !g_swap_buttons, "grip");
   if (g_swap_buttons ? (!trigger_was && g_trigger_down)
                      : (!grip_was && g_grip_down)) {
     g_right_close_ms = now;
@@ -5460,12 +5530,15 @@ void ControllersReport() {
     g_hold_held_on = g_hold_short = 0;
   }
   if (g_hold_take_opens != 0 || g_hold_take_ends != 0 || g_fast_opens != 0 ||
-      g_slow_opens != 0) {
+      g_slow_opens != 0 || g_take_falls_kept != 0) {
     ModLog("grip         : %llu openings on a fast fall and %llu below 35%%. "
            "%llu openings ended a bulk take, and the mod had to end %llu "
-           "takes, this window", g_fast_opens, g_slow_opens, g_hold_take_opens,
-           g_hold_take_ends);
+           "takes. %llu fast falls in a take stayed closed "
+           "(near_take_keeps=%d), this window", g_fast_opens, g_slow_opens,
+           g_hold_take_opens, g_hold_take_ends, g_take_falls_kept,
+           g_near_take_keeps);
     g_hold_take_opens = g_hold_take_ends = 0;
+    g_take_falls_kept = 0;
     g_fast_opens = g_slow_opens = 0;
   }
   if (g_open_starts != 0 || g_open_frames != 0) {

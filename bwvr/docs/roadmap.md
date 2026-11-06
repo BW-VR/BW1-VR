@@ -411,7 +411,9 @@ that moves while the Hand takes it.
   stop at the land (`hand_land_stop=1`, `hand-model.md`, "The Hand stops at
   the land"). Open: the same stop at the body of each solid object, with the
   bodies that hand feel already has (`hand_feel.cpp`, the bodies of the
-  draw).
+  draw). The overlay of a head under the land (`head_blinder`, `god-view.md`,
+  section 5.9) also counts only the land, and the same bodies can cover the
+  view of a head in a house or a rock.
 
 ### New features: miracles, comfort and help
 

@@ -59,6 +59,9 @@ void ControllersRecenterHoldChange(const char* by);
 // The comfort vignette (vignette.cpp).
 int VignetteValue();
 void VignetteChange(const char* by);
+// The overlay of a head under the land (head_blinder.cpp).
+int HeadBlinderValue();
+void HeadBlinderChange(const char* by);
 // The God view and the table (tabletop.cpp), the grab of the world
 // (world_grab.cpp).
 int TabletopValue();
@@ -375,6 +378,8 @@ const Switch kSwitches[] = {
      L"off|head|controller"},
     {kGroupView, L"Vignette", L"Edges dark in a move", "comfort_vignette",
      VignetteValue, VignetteChange, L"off|gentle|strong"},
+    {kGroupView, L"Head blinder", L"Cover the view in the land",
+     "head_blinder", HeadBlinderValue, HeadBlinderChange, L"off|on"},
     {kGroupView, L"Menu turn", L"No turn in a dialog box", "menu_stops_turn",
      ControllersMenuStopsTurnValue, ControllersMenuStopsTurnChange,
      L"turns|stops"},
@@ -721,6 +726,10 @@ const wchar_t* const kTips[] = {
     L"The edges of the view go dark while a control moves the view: a walk, "
     L"a zoom, a turn, a teleport or a grab of the world. Off, gentle or "
     L"strong.",
+    // Head blinder
+    L"On: when the head goes into the land, a gold and red overlay covers "
+    L"the view. It starts at the edge 5 cm over the land. Off: the eyes see "
+    L"under the land.",
     // Menu turn
     L"Stops: while a dialog box of the game is up, the stick does not turn "
     L"or zoom. Turns: the stick turns and zooms as at other times.",

@@ -31,7 +31,9 @@ want.
 3. **The size of the world.** Look at the land at your waist at each scale,
    and bring the Hand near your eyes. Wrong: a world that feels too large or
    too small, land or clouds that look wrong at a scale, or a Hand that the
-   view cuts near the eyes.
+   view cuts near the eyes. Then bend down slowly and put your head into a
+   hill. Wrong: you see under the land, the gold and red cover comes too late
+   or too soon, it flickers on a slope, or its color is hard on the eyes.
 4. **The zoom.** Zoom in and out with the stick. Then try the switch "Smooth
    zoom" (debug page, View). Wrong: discomfort, a blink, or a rate that is
    too fast or too slow.

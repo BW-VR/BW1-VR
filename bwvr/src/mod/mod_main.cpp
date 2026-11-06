@@ -197,6 +197,8 @@ void ComfortCameraSetSpawnTests(int temple_update, int x, int z, int flag,
 void ComfortCameraInstall();
 // vignette.cpp: comfort_vignette.
 void VignetteSetMode(int mode);
+// head_blinder.cpp: head_blinder.
+void HeadBlinderSetOn(bool on);
 void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
                             int close_distance, int close_zoom_pct,
                             int cut_degrees, int cut_percent,
@@ -427,6 +429,8 @@ bool g_camera_glide = false;
 int g_blink_ms = 0;
 // The comfort vignette: 0 off, 1 gentle, 2 strong (vignette.cpp).
 int g_comfort_vignette = 0;
+// The overlay of a head under the land (head_blinder.cpp).
+bool g_head_blinder = true;
 int g_zoom_step = 2;  // 0 the game's own, 1 small, 2 medium, 3 large
 // The turn events of a snap turn for the tutorial, and the turn of the game
 // camera about its own focus (comfort_camera.cpp).
@@ -1112,6 +1116,10 @@ void ReadSettings() {
     // control (docs/god-view.md, "The comfort of a move").
     g_comfort_vignette = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "comfort_vignette", 0, path));
+    // An opaque overlay when the head goes into the land (docs/god-view.md,
+    // "The head under the land").
+    g_head_blinder =
+        GetPrivateProfileIntA("bwvr", "head_blinder", 1, path) != 0;
   }
   g_instant_jumps =
       GetPrivateProfileIntA("bwvr", "instant_jumps", 1, path) != 0;
@@ -1832,6 +1840,7 @@ void StartVrStep() {
                              g_tilt_help_degrees);
     ComfortCameraInstall();
     VignetteSetMode(g_comfort_vignette);
+    HeadBlinderSetOn(g_head_blinder);
     ScriptCameraSetOptions(g_script_camera, g_script_min_distance,
                            g_script_min_height, g_script_close_distance,
                            g_script_close_zoom, g_script_cut_degrees,

@@ -209,6 +209,9 @@ void InfluenceEdgeReport();
 void VignetteFrame();
 void VignettePassEye(int eye);
 void VignetteReport();
+// head_blinder.cpp: the overlay of a head under the land.
+void HeadBlinderFrame();
+void HeadBlinderReport();
 // teleport.cpp: the teleport with a visible arc. See docs/god-view.md.
 void TeleportFrame();
 void TeleportReport();
@@ -1524,6 +1527,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   FrameFunction(kFpFnWater, WaterModeApply);
   FrameFunction(kFpFnTable, TabletopApplyFrame);
   VignetteFrame();
+  HeadBlinderFrame();
   FrameTimeBeforePasses();
   EyeCleanBeginPair();
   g_in_pass = true;
@@ -2105,6 +2109,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     OverlayReport();
     InfluenceEdgeReport();
     VignetteReport();
+    HeadBlinderReport();
     TeleportReport();
     CreatureCommandReport();
     MiracleReport();

@@ -897,8 +897,11 @@ The math test (`creature_touch_checks.h`) checks the panel that stays: it
 shows at the Hand, it stays 2.9 s and goes at 3 s after the Hand left, and
 not for a different Creature. `creature_recipe.ps1 -Kind open` is the run of
 the panel with no press: a picture at frame 1840 must have the box, and a
-picture at frame 2060 must not. No run reached the Creature at a render of
-3600 by 2880 (`creature.md`, section 8).
+picture at frame 2060 must not. On the test laptop (2760 by 2208, Direct3D
+9) the run shows the panel at the first touch of the open hand, the stay of
+3.0 s after the hand left (the panel goes 2.99 s after it), the box in the
+picture at frame 1840 and none at frame 2060. With
+`creature_panel_linger=0` it shows no panel.
 
 No desktop run has drawn the box. A run needs a game where the player owns a
 Creature: the God view rig of `god-view.md` with `ui_panel=2`, the fake hand

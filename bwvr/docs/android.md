@@ -4071,7 +4071,7 @@ the Vulkan instance of the session: `fovea_res=1` with `fovea_res_outer_pct=25`,
 `xr_compose_direct=1`, `xr_compose_take=1`, `xr_eye_mutable=1`, `vk_compose_fast=1`,
 `vk_compose_rate=2`, `tu_debug=sysmem`, `vk_bindless=1`, `vk_fast_shaders=1`, `vk_list_keep=1`,
 `vk_cheap_draws=1`, `vk_tiny_draws=1`, `vk_tiny_pixels=30`, `detail_by_scale=1`,
-`xr_panel_keep=1`, `move_stick_cap_ms=250`, `late_grab=1`, `late_prepare=1`, `late_prepare_gap=1`, `late_prebuild=1` and `late_fast_cores=1`. A value that the file has stays, also a 0, so a
+`xr_panel_keep=1`, `move_stick_cap_ms=250`, `late_grab=1`, `late_prepare=1`, `late_prepare_gap=1`, `late_prebuild=1`, `late_fast_cores=1` and `late_top_game=1`. A value that the file has stays, also a 0, so a
 save of the menu before this start can keep a default of the table. `frame_defaults=0` adds
 nothing. The log has "menu : frame_defaults=1. ...". `vk_mres_sort` stays 0: the sort takes about
 5 percent off a walk, and it adds work on the CPU. `vk_compose_rate=4` takes only 0.05 ms more off

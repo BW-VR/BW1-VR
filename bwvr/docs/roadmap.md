@@ -772,10 +772,13 @@ that moves while the Hand takes it.
   - The async reprojection. `steamvr.disableAsync=1` of SteamVR is for a test that shows a missed
     picture as a stutter. Its log has no line that says that the compositor took the value.
 
-  - The main thread of the game on the fast cores or on the top core (`late_fast_game`,
-    `late_top_game`). The blind compare
-    `frame_tests/hitch_clicks.json` measures it. The game has about 55 frames a second in a flight,
-    and a thing that moves in the world goes in the steps of these frames.
+  - The main thread of the game on the top core (`late_top_game=1`). No long game has shown the
+    heat of core 7 or a lower top speed there. A thread that the main thread starts after the
+    change can have only core 7, and no run with the key at 1 from the start has shown the masks.
+  - The game has about 70 to 80 frames a second in a flight, and a thing that moves in the world
+    goes in the steps of these frames. The main thread takes a whole core. The drawing part takes
+    about three times the time of the game turn. `land_objects_threads` and `gpu_mesh=1` take work
+    from it, and no run on the Steam Frame has measured them.
   - A turn and a zoom of two hands still go in the steps of the frames of the game: the shader
     would need a turn and a scale of each point.
 

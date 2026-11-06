@@ -2405,4 +2405,4 @@ ring and presses a toggle, both arrows of a switch of three values, the
 arrows of "Throw speed", a tab, the stick, the thumb, the track and Close,
 and closes the window with B and with the menu button.
 
-The check in a headset is in `headset-checks.md`, check 22.
+The check in a headset is in `headset-checks.md`, check 23.

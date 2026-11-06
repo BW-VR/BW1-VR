@@ -60,6 +60,11 @@
 //   test of the game decides.
 // - hold_creature_stay=1: a Creature that is the target of the object in the
 //   Hand stays the target to hold_target_cm from its body.
+// - scaffold_wrist_turn=1: while the Hand carries a scaffold and the
+//   controller owns the Hand, the roll of the wrist turns the building that
+//   the scaffold makes, one to one, and the building does not turn by itself
+//   (village_math.h, "The building of a scaffold in the Hand"). With 0 the
+//   game turns the building by itself, as in the plain game.
 // - Each change goes to the log with the tag "village".
 // - Test keys for the desktop runs (the launcher removes them):
 //   village_test_site, village_test_miracles, village_test_chants,
@@ -102,6 +107,9 @@ const char* HandDirectClass(void* object);
 bool HandDirectCreatureBody(void* creature, float out[3]);
 // miracle.cpp
 const char* MiracleSeedName(int type);
+// controllers.cpp
+bool ControllersPointingAim(float position[3], float orientation[4],
+                            float* trigger);
 
 namespace {
 
@@ -274,6 +282,21 @@ const uintptr_t kScaffoldValue = 0x006E9D10;
 // (0x006E8570) finds the place each game turn while the Hand carries the
 // scaffold, and the game then shows the building there.
 const uintptr_t kScaffoldPlanned = 0x006EA950;
+// THE BUILDING OF A SCAFFOLD IN THE HAND (village_math.h).
+// Scaffold::ProcessInHand, thiscall, no arguments, returns 1.
+const uintptr_t kScaffoldInHand = 0x006E8570;
+const uint8_t kScaffoldInHandBytes[12] = {0x56, 0x8B, 0xF1, 0x33, 0xC0, 0x66,
+                                          0x8B, 0x86, 0x88, 0x00, 0x00, 0x00};
+// Scaffold::DrawInHand, thiscall (GInterfaceStatus*), ret 4.
+const uintptr_t kScaffoldDraw = 0x005181A0;
+const uint8_t kScaffoldDrawBytes[9] = {0x81, 0xEC, 0x90, 0x01, 0x00,
+                                       0x00, 0x55, 0x56, 0x8B};
+const int kScaffoldInfoOf = 0x28;      // the GScaffoldInfo
+const int kScaffoldPlan = 0x6C;        // the PlannedAbode: +0x28 its angle
+const int kScaffoldAngle = 0x80;       // radians, 0 to 2 pi
+const int kScaffoldFlags = 0x88;       // a word. 0x200: no turn by itself
+const int kScaffoldInfoSpeed = 0x114;  // GScaffoldInfo: radians a game turn
+const int kGameMs = 0x25053C;          // GGame: the ms of the game
 // The infos of the buildings (GAbodeInfo::Find 0x00405B30 walks them): 147
 // records of 0x1C8 bytes. +0x120 is the kind of the building (0x84 is a
 // Workshop, the case of Abode::Create that calls Workshop::Create) and
@@ -401,6 +424,7 @@ struct Settings {
   bool creature_stay = true;  // hold_creature_stay
   bool gift = true;        // creature_gift: the test of the mod for a gift
   float gift_cm = 20.0f;   // creature_gift_cm: the reach of that test
+  bool wrist_turn = true;  // scaffold_wrist_turn
   bool test_keys = false;  // test_keys: Ctrl and numpad 4 change totem_hand,
                            // Ctrl and numpad 2 change hold_target
 };
@@ -1145,6 +1169,194 @@ void InstallGift() {
   }
 }
 
+// --- the building of a scaffold in the Hand ----------------------------------
+
+typedef uint32_t(__fastcall* ScaffoldInHandFn)(void* self, void* unused);
+typedef void(__fastcall* ScaffoldDrawFn)(void* self, void* unused,
+                                         void* status);
+ScaffoldInHandFn o_ScaffoldInHand = nullptr;
+ScaffoldDrawFn o_ScaffoldDraw = nullptr;
+bool g_turn_hooked = false;
+
+// The turn of now, latched once a frame of the controllers.
+struct WristTurn {
+  uint8_t* scaffold;    // the scaffold that the wrist turns, or null
+  float angle_at_take;  // the angle of the building when the turn started
+  float roll;           // the roll of the wrist since then, radians
+  float last_q[4];      // the aim of the last frame
+  bool have_q;
+  float wanted;         // the angle of the building now
+  uint64_t frame;       // the frame of the latch
+  uint64_t seen;        // the last frame with the scaffold in the Hand
+  float logged;         // the angle of the last log line
+  int logs;
+};
+WristTurn g_turn = {};
+const int kMaxTurnLogs = 60;
+uint64_t g_turn_frames = 0;  // frames in which the wrist set the angle
+
+float Degrees(float radians) { return radians * 57.29578f; }
+
+// The scaffold in the Hand of the player, or null.
+uint8_t* HeldScaffold() {
+  uint8_t* face = Face();
+  if (face == nullptr) return nullptr;
+  uint8_t* hand = *reinterpret_cast<uint8_t* const*>(face + kFaceHand);
+  if (hand == nullptr || IsBadReadPtr(hand + kHandHeld, 4)) return nullptr;
+  uint8_t* held = *reinterpret_cast<uint8_t* const*>(hand + kHandHeld);
+  if (held == nullptr || IsBadReadPtr(held, 0x9C) ||
+      TableOf(held) != kScaffoldTable) {
+    return nullptr;
+  }
+  return held;
+}
+
+// The speed of the turn of the game, radians a game turn.
+float SpeedOf(const uint8_t* scaffold) {
+  const uint8_t* info =
+      *reinterpret_cast<const uint8_t* const*>(scaffold + kScaffoldInfoOf);
+  if (info == nullptr || IsBadReadPtr(info + kScaffoldInfoSpeed, 4)) {
+    return 0.0f;
+  }
+  const float speed =
+      *reinterpret_cast<const float*>(info + kScaffoldInfoSpeed);
+  return speed == speed && fabsf(speed) < 1.0f ? speed : 0.0f;
+}
+
+// The angle of the building of this frame for the scaffold, latched once a
+// frame. False when the wrist does not turn it now: the key is off, the
+// scaffold is not in the Hand, or the controller does not own the Hand. Then
+// the game turns the building as it does.
+bool TurnNow(uint8_t* scaffold, float* wanted) {
+  if (!g_settings.wrist_turn || scaffold == nullptr) return false;
+  const uint64_t frame = ControllersFrameCount();
+  if (g_turn.scaffold == scaffold && g_turn.frame == frame) {
+    *wanted = g_turn.wanted;
+    return true;
+  }
+  float point[3];
+  if (scaffold != HeldScaffold() || !HandDirectRealPoint(point)) {
+    return false;
+  }
+  float position[3], q[4], trigger = 0.0f;
+  const bool aim = ControllersPointingAim(position, q, &trigger);
+  const float* angle =
+      reinterpret_cast<const float*>(scaffold + kScaffoldAngle);
+  if (g_turn.scaffold != scaffold || frame > g_turn.seen + 30) {
+    // A new take, or the same scaffold after a time out of the Hand.
+    g_turn = {};
+    g_turn.scaffold = scaffold;
+    g_turn.angle_at_take = village_math::WrapTwoPi(*angle);
+    g_turn.wanted = g_turn.angle_at_take;
+    g_turn.logged = g_turn.wanted;
+    ModLog("village      : scaffold_wrist_turn: the roll of the wrist turns "
+           "the building of the scaffold %p from %.1f degrees. The game "
+           "turns it by itself %.2f degrees each game turn, and not now, "
+           "frame %llu",
+           scaffold, Degrees(g_turn.wanted), Degrees(SpeedOf(scaffold)),
+           frame);
+  }
+  if (aim) {
+    if (g_turn.have_q) g_turn.roll += village_math::RollStep(g_turn.last_q, q);
+    for (int i = 0; i < 4; ++i) g_turn.last_q[i] = q[i];
+    g_turn.have_q = true;
+  }
+  // With no aim pose the building stays where it is.
+  g_turn.wanted =
+      village_math::BuildingAngle(g_turn.angle_at_take, g_turn.roll);
+  g_turn.frame = frame;
+  g_turn.seen = frame;
+  ++g_turn_frames;
+  const float moved = village_math::WrapPi(g_turn.wanted - g_turn.logged);
+  if (fabsf(moved) >= 5.0f / 57.29578f && g_turn.logs < kMaxTurnLogs) {
+    ++g_turn.logs;
+    g_turn.logged = g_turn.wanted;
+    ModLog("village      : the wrist rolled %.1f degrees since the take, so "
+           "the building of the scaffold %p is at %.1f degrees, frame %llu",
+           Degrees(g_turn.roll), scaffold, Degrees(g_turn.wanted), frame);
+  }
+  *wanted = g_turn.wanted;
+  return true;
+}
+
+// Before the game adds its speed: the angle that gives the wanted angle
+// after the add. After the call: the wanted angle, also when the game took
+// the angle of a planned building.
+uint32_t __fastcall h_ScaffoldInHand(void* self, void* unused) {
+  uint8_t* scaffold = static_cast<uint8_t*>(self);
+  float wanted = 0.0f;
+  if (!TurnNow(scaffold, &wanted)) return o_ScaffoldInHand(self, unused);
+  float* angle = reinterpret_cast<float*>(scaffold + kScaffoldAngle);
+  const uint16_t flags =
+      *reinterpret_cast<const uint16_t*>(scaffold + kScaffoldFlags);
+  const float add = (flags & 0x200) != 0 ? 0.0f : SpeedOf(scaffold);
+  *angle = village_math::AngleBeforeAdd(wanted, add);
+  const uint32_t result = o_ScaffoldInHand(self, unused);
+  *angle = wanted;
+  return result;
+}
+
+// The draw adds the part of the game turn that is gone times the speed. The
+// angle for the draw takes that away, and the angle of the game comes back
+// after the draw.
+void __fastcall h_ScaffoldDraw(void* self, void* unused, void* status) {
+  uint8_t* scaffold = static_cast<uint8_t*>(self);
+  float wanted = 0.0f;
+  uint8_t* game = *reinterpret_cast<uint8_t* const*>(kGame);
+  if (game == nullptr || IsBadReadPtr(game + kGameMs, 4) ||
+      !TurnNow(scaffold, &wanted)) {
+    o_ScaffoldDraw(self, unused, status);
+    return;
+  }
+  float* angle = reinterpret_cast<float*>(scaffold + kScaffoldAngle);
+  const float kept = *angle;
+  const uint32_t ms = *reinterpret_cast<const uint32_t*>(game + kGameMs);
+  const float part = static_cast<float>(ms % 100) * 0.01f;
+  *angle = village_math::WrapTwoPi(wanted - part * SpeedOf(scaffold));
+  o_ScaffoldDraw(self, unused, status);
+  *angle = kept;
+}
+
+void LogTurnKey(const char* from) {
+  ModLog("village      : %s: scaffold_wrist_turn=%d. %s, frame %llu", from,
+         g_settings.wrist_turn ? 1 : 0,
+         g_settings.wrist_turn
+             ? "While the Hand carries a scaffold, the roll of the wrist "
+               "turns its building one to one, and the building does not "
+               "turn by itself"
+             : "The building of a scaffold in the Hand turns by itself, as "
+               "in the plain game",
+         g_frame);
+}
+
+void InstallScaffoldTurn() {
+  if (!SameBytes(kScaffoldInHand, kScaffoldInHandBytes,
+                 sizeof(kScaffoldInHandBytes)) ||
+      !SameBytes(kScaffoldDraw, kScaffoldDrawBytes,
+                 sizeof(kScaffoldDrawBytes))) {
+    ModLog("village      : Scaffold::ProcessInHand or Scaffold::DrawInHand "
+           "does not have the bytes of the disassembly, so the mod does not "
+           "hook them and the building of a scaffold turns by itself");
+    return;
+  }
+  void* in_hand = reinterpret_cast<void*>(kScaffoldInHand);
+  void* draw = reinterpret_cast<void*>(kScaffoldDraw);
+  MH_STATUS status = MH_CreateHook(in_hand, &h_ScaffoldInHand,
+                                   reinterpret_cast<void**>(&o_ScaffoldInHand));
+  if (status == MH_OK) {
+    status = MH_CreateHook(draw, &h_ScaffoldDraw,
+                           reinterpret_cast<void**>(&o_ScaffoldDraw));
+  }
+  if (status == MH_OK) status = MH_EnableHook(in_hand);
+  if (status == MH_OK) status = MH_EnableHook(draw);
+  g_turn_hooked = status == MH_OK;
+  ModLog("hooks        : the building of a scaffold in the Hand, "
+         "Scaffold::ProcessInHand at 0x%08X and Scaffold::DrawInHand at "
+         "0x%08X %s",
+         static_cast<unsigned>(kScaffoldInHand),
+         static_cast<unsigned>(kScaffoldDraw), g_turn_hooked ? "ok" : "FAILED");
+}
+
 void Init() {
   if (g_ready) return;
   g_ready = true;
@@ -1161,6 +1373,7 @@ void Init() {
   if (g_settings.join_cm < 1.0f) g_settings.join_cm = 1.0f;
   if (g_settings.join_cm > 50.0f) g_settings.join_cm = 50.0f;
   g_settings.creature_stay = IniInt("hold_creature_stay", 1) != 0;
+  g_settings.wrist_turn = IniInt("scaffold_wrist_turn", 1) != 0;
   g_settings.gift = IniInt("creature_gift", 1) != 0;
   g_settings.gift_cm = static_cast<float>(IniInt("creature_gift_cm", 20));
   if (g_settings.gift_cm < 0.0f) g_settings.gift_cm = 0.0f;
@@ -1262,7 +1475,9 @@ void Init() {
            "to the new value after the release");
   }
   InstallGift();
+  InstallScaffoldTurn();
   LogKeys("totem_hand");
+  LogTurnKey("scaffold_wrist_turn");
   ModLog("village      : totem_take=%d. %s", g_settings.take ? 1 : 0,
          g_settings.take
              ? "The totem that the Hand moves is the source of a take: the "
@@ -1341,6 +1556,18 @@ void VillageHoldChange(const char* by) {
 int VillageHoldValue() {
   Init();
   return g_settings.join ? 1 : 0;
+}
+
+void VillageWristTurnChange(const char* by) {
+  Init();
+  g_settings.wrist_turn = !g_settings.wrist_turn;
+  ControllersGesturePulse(0.5f, g_settings.wrist_turn ? 0.24f : 0.08f);
+  LogTurnKey(by);
+}
+
+int VillageWristTurnValue() {
+  Init();
+  return g_settings.wrist_turn ? 1 : 0;
 }
 
 namespace {
@@ -2078,8 +2305,54 @@ void WatchVillager(uint8_t* hand) {
 void* g_plan_scaffold = nullptr;
 int g_plan_said = -1;
 
+// THE ANGLE OF THE BUILDING of a scaffold in the Hand, for the log: one line
+// each 120 frames while the Hand carries it, and one line when it leaves the
+// Hand, with the angle that the planned building got.
+uint8_t* g_angle_scaffold = nullptr;
+float g_angle_last = 0.0f;
+uint64_t g_angle_next = 0;
+int g_angle_logs = 0;
+const int kMaxAngleLogs = 24;
+
+void WatchAngle(uint8_t* held) {
+  if (g_angle_scaffold != nullptr && held != g_angle_scaffold) {
+    uint8_t* left = g_angle_scaffold;
+    g_angle_scaffold = nullptr;
+    if (g_angle_logs < kMaxAngleLogs) {
+      ++g_angle_logs;
+      float plan = -1.0f;
+      if (ScaffoldLives(left)) {
+        const uint8_t* abode =
+            *reinterpret_cast<const uint8_t* const*>(left + kScaffoldPlan);
+        if (abode != nullptr && !IsBadReadPtr(abode + 0x28, 4)) {
+          plan = Degrees(*reinterpret_cast<const float*>(abode + 0x28));
+        }
+      }
+      ModLog("village      : the scaffold %p left the Hand with its building "
+             "at %.1f degrees. Its planned building has %.1f degrees (-1: "
+             "none), frame %llu",
+             left, Degrees(g_angle_last), plan, g_frame);
+    }
+  }
+  if (held == nullptr) return;
+  g_angle_last = *reinterpret_cast<const float*>(held + kScaffoldAngle);
+  if (held != g_angle_scaffold) {
+    g_angle_scaffold = held;
+    g_angle_next = g_frame;
+  }
+  if (g_frame >= g_angle_next && g_angle_logs < kMaxAngleLogs) {
+    ++g_angle_logs;
+    g_angle_next = g_frame + 120;
+    ModLog("village      : the building of the scaffold %p in the Hand is at "
+           "%.1f degrees (scaffold_wrist_turn=%d), frame %llu",
+           held, Degrees(g_angle_last), g_settings.wrist_turn ? 1 : 0,
+           g_frame);
+  }
+}
+
 void WatchScaffold(uint8_t* hand) {
   uint8_t* held = *reinterpret_cast<uint8_t* const*>(hand + kHandHeld);
+  WatchAngle(ScaffoldLives(held) ? static_cast<uint8_t*>(held) : nullptr);
   if (!ScaffoldLives(held)) {
     g_plan_scaffold = nullptr;
     g_plan_said = -1;
@@ -2567,6 +2840,12 @@ bool VillageTestPlace(int place, float out[3]) {
 
 void VillageReport() {
   if (!g_ready) return;
+  if (g_turn_frames > 0) {
+    ModLog("village      : the roll of the wrist set the angle of the building "
+           "of a scaffold on %llu frames, this window (scaffold_wrist_turn=%d)",
+           g_turn_frames, g_settings.wrist_turn ? 1 : 0);
+    g_turn_frames = 0;
+  }
   if (g_join_frames > 0 || g_applies > 0) {
     ModLog("village      : an object in the Hand had a thing to go on on "
            "%llu frames, and the mod put that thing in the pick record %llu "

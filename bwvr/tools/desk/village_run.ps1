@@ -42,8 +42,8 @@
 #                gesture_panel=0 and eye pictures of the corner, then
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, job, tree, throw, probe, workshop, site,
-# build, scaffold, fartake, fartotem, choice, look, book) have a comment at
-# their steps below.
+# build, scaffold, turn, fartake, fartotem, choice, look, book) have a comment
+# at their steps below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -234,6 +234,25 @@ if ($Kind -eq 'totem') {
                  'grip@1400+120 seek@1560+1 seek@1640+1 grip@1700+40 shot@1840+1'
     }
     $keys = "$keys;village_test_scaffolds=1@930;seek_go=1860,2580|1860,2580"
+} elseif ($Kind -eq 'turn') {
+    # The building of a scaffold and the roll of the wrist (bwvr/docs/village.md,
+    # "The building of a scaffold and the wrist"). The grip takes one scaffold,
+    # and the God view goes to a place where the game builds (seek_go). The
+    # word "rot" turns the right hand to the next pose of fake_controller_rots:
+    # a roll of 45, of 90 and of -45 degrees, then a turn of the aim 25
+    # degrees to the left and 20 degrees up with the roll of -45 degrees
+    # (no roll, so no turn of the building). The grip opens: a building site
+    # at the angle of the wrist. An eye picture after each pose. With -Set
+    # "scaffold_wrist_turn=0" the building turns by itself, as in the plain
+    # game. Give it -Set 'backend=dxwrapper\ddraw.dll' for eye pictures.
+    if ($Plan -eq '') { $Plan = 'scaffold,go' }
+    if ($Census -eq '') { $Census = '960,1640' }
+    if ($Seconds -eq 0) { $Seconds = 70 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@1000+1 grip@1040+460 seek@1100+1 shot@1160+1 rot@1180+1 shot@1210+1 ' +
+                 'rot@1260+1 shot@1290+1 rot@1340+1 shot@1370+1 rot@1420+1 shot@1450+1 shot@1580+1'
+    }
+    $keys = "$keys;village_test_scaffolds=1@930;seek_go=1860,2580|1860,2580;fake_controller_rots=0,-30,45 0,-30,90 0,-30,-45 25,-10,-45"
 } elseif ($Kind -eq 'build') {
     # One scaffold on the land under the Hand: the grip takes it and opens at
     # the same place.

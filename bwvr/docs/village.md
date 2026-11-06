@@ -461,7 +461,10 @@ No press acts on them.
 - The Hand can take a scaffold that is not planted, or one whose building
   site has no work done (`Scaffold::ValidForPlaceInHand` `0x006E96A0`).
 - While the Hand carries it, `Scaffold::ProcessInHand` `0x006E8570` shows the
-  building that it would make at the place of the Hand.
+  building that it would make at the place of the Hand. The plain game turns
+  that building by itself, a step each game turn, and no key or mouse input
+  turns it. With the controller the roll of the wrist turns it ("The
+  building of a scaffold and the wrist").
 - A scaffold that the Hand lets go over a second scaffold joins it
   (`Scaffold::ValidToApplyThisToObject` `0x006E9900`, `Combine`
   `0x006E9B60`). The count of the scaffolds sets the kind of the building
@@ -479,6 +482,36 @@ No press acts on them.
 - A tap on a scaffold of two or more takes it apart
   (`Scaffold::InterfaceValidToTap` `0x006E9D80`, `InterfaceTap`
   `0x006E9DD0`).
+
+**The building of a scaffold and the wrist** (`scaffold_wrist_turn=1`).
+The angle of the building is `Scaffold+0x80`, in radians from 0 to 2 pi.
+`Scaffold::ProcessInHand` adds the speed of `GScaffoldInfo+0x114` (the info
+at `Scaffold+0x28`) to it each game turn, unless flag `0x200` of
+`Scaffold+0x88` is set, and tests the place with that angle
+(`MapCoords::IsSuitableForFixed`). `Scaffold::BuildBuilding` `0x006E9250`
+gives the angle to the planned building at the release, and
+`Scaffold::DrawInHand` `0x005181A0` draws the building at the angle plus the
+part of the speed of the game turn that is gone (the ms of `GGame+0x25053C`).
+A larger angle turns the building to the left as the head sees it from
+above.
+
+While the Hand carries a scaffold and the controller owns the Hand, the mod
+keeps the angle of the take, and each frame adds the roll of the wrist of
+that frame: the change of the bank of the aim of the pointing hand (the
+angle of its right axis below the level), or its turn about its own forward
+axis when the hand points almost straight down or up (`village_math.h`,
+`RollStep`). A turn of the aim to the side or up and down is no roll, so a
+hand that carries the scaffold over the land does not turn the building. A
+clockwise roll of the wrist, as the player sees it along the arm, turns the
+building clockwise as the head sees it from above, one to one, with no step.
+Before each call of `ProcessInHand` the mod writes the angle less the add of
+the game, and after the call the angle itself. For the draw it takes away
+the part of the speed that the draw adds, and puts the angle back after the
+draw. So the building does not turn by itself, and the place test, the
+picture and the building at the release have the angle of the wrist. With
+`scaffold_wrist_turn=0` the game turns the building by itself, as in the
+plain game. The switch "Scaffold turn" of the debug window (group Creature)
+changes the key in play.
 
 **A villager and a job.** While the Hand carries a villager,
 `Villager::InHand` `0x0076ADE0` looks for the objects near the villager each
@@ -703,6 +736,7 @@ The count of the villagers is the count of the game
 | `totem_hold` | 1 | 0: after the release the pole jumps back to the value that it showed before and slides to the new value, 5.2 s for each 1.0 of change, as in the plain game |
 | `hold_target`, `hold_target_cm` | 1, 6 | See `grab.md`, "An object in the Hand that goes onto a thing". The code also reads the old names `scaffold_join` and `scaffold_join_cm` as the defaults |
 | `villager_look_head` | 1 | 1: in the God view a script that turns a villager to the camera turns him to your head. 0: he turns to the game's camera |
+| `scaffold_wrist_turn` | 1 | 1: the roll of the wrist turns the building of a scaffold in the Hand, one to one, and the building does not turn by itself. 0: the game turns it by itself |
 
 The keys are read from `bwvr.ini`. They are not in the launcher.
 

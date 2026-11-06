@@ -336,6 +336,56 @@ inline void VillageChecks() {
         "in a cut scene the camera stays", 0, 0);
   Check(!FocusOnHead(false, true, camera_bits, camera_bits),
         "villager_look_head=0: the camera stays", 0, 0);
+
+  // THE BUILDING OF A SCAFFOLD AND THE ROLL OF THE WRIST.
+  {
+    const float d = 3.14159265f / 180.0f;
+    float base[4], rolled[4], swung[4], both[4];
+    controller_math::FakeOrientation(10.0f, -30.0f, 0.0f, base);
+    controller_math::FakeOrientation(10.0f, -30.0f, 45.0f, rolled);
+    controller_math::FakeOrientation(40.0f, 0.0f, 0.0f, swung);
+    controller_math::FakeOrientation(-20.0f, -50.0f, -60.0f, both);
+    float down[4];
+    controller_math::FakeOrientation(-20.0f, -50.0f, 0.0f, down);
+    Near("a roll of 45 degrees of the fake hand is a wrist roll of 45 degrees",
+         RollStep(base, rolled) / d, 45.0, 1e-3);
+    Near("a turn of the aim to the side and up is no wrist roll",
+         RollStep(base, swung) / d, 0.0, 1e-3);
+    Near("a roll of -60 degrees with a turn of the aim is -60 degrees",
+         RollStep(base, both) / d, -60.0, 1e-3);
+    Near("the twist about the forward axis of a pure roll is the roll",
+         ForwardTwist(down, both) / d, -60.0, 1e-3);
+    Near("the same pose is no roll", RollStep(rolled, rolled), 0.0, 1e-5);
+    // Steps of 60 degrees go past a half turn and on.
+    float sum = 0.0f;
+    float last[4] = {base[0], base[1], base[2], base[3]};
+    for (int step = 1; step <= 5; ++step) {
+      float q[4];
+      controller_math::FakeOrientation(10.0f, -30.0f, 60.0f * step, q);
+      sum += RollStep(last, q);
+      for (int i = 0; i < 4; ++i) last[i] = q[i];
+    }
+    Near("five steps of 60 degrees of the wrist are 300 degrees", sum / d,
+         300.0, 1e-2);
+    // A hand that points straight down: a turn about up is a turn about its
+    // forward axis. A turn to the left is counterclockwise from above, so
+    // it is a roll to the left.
+    float plumb[4], plumb_turned[4];
+    controller_math::FakeOrientation(0.0f, -89.0f, 0.0f, plumb);
+    controller_math::FakeOrientation(30.0f, -89.0f, 0.0f, plumb_turned);
+    Near("a hand that points down and turns 30 degrees left rolls -30 "
+         "degrees", RollStep(plumb, plumb_turned) / d, -30.0, 0.1);
+    Near("a clockwise roll of 30 degrees makes the angle 30 degrees less",
+         BuildingAngle(1.0f, 30.0f * d), 1.0f - 30.0f * d, 1e-5);
+    Near("the angle stays in 0 to 2 pi", BuildingAngle(0.1f, 30.0f * d),
+         0.1f - 30.0f * d + kTwoPi, 1e-5);
+    Near("an angle before the add of the game", AngleBeforeAdd(1.0f, 0.05f),
+         0.95, 1e-6);
+    // The game adds the speed and takes 2 pi away from a sum over 2 pi.
+    float game = AngleBeforeAdd(0.02f, 0.05f) + 0.05f;
+    if (game > kTwoPi) game -= kTwoPi;
+    Near("near 0 the add of the game gives the wanted angle", game, 0.02, 1e-5);
+  }
 }
 
 }  // namespace village_checks

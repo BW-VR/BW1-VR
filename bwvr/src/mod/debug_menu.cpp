@@ -269,6 +269,8 @@ int VillageTotemValue();
 void VillageTotemChange(const char* by);
 int VillageHoldValue();
 void VillageHoldChange(const char* by);
+int VillageWristTurnValue();
+void VillageWristTurnChange(const char* by);
 // The spell book (spell_book.cpp).
 int SpellBookValue();
 void SpellBookChange(const char* by);
@@ -628,6 +630,9 @@ const Switch kSwitches[] = {
      "totem_hand", VillageTotemValue, VillageTotemChange, L"off|on"},
     {kGroupCreature, L"Hold target", L"Halo on the thing at the Hand",
      "hold_target", VillageHoldValue, VillageHoldChange, L"off|on"},
+    {kGroupCreature, L"Scaffold turn", L"Wrist turns a scaffold building",
+     "scaffold_wrist_turn", VillageWristTurnValue, VillageWristTurnChange,
+     L"off|on"},
     {kGroupCreature, L"Spell book", L"X opens the spell book", "spell_book",
      SpellBookValue, SpellBookChange, L"off|on"},
     {kGroupCreature, L"Book pull", L"Pull a miracle out of the book",
@@ -1011,6 +1016,10 @@ const wchar_t* const kTips[] = {
     // Hold target
     L"On: with an object in the Hand, the target is the thing at the Hand, "
     L"with a halo. Off: the object behind the pixel of the Hand point.",
+    // Scaffold turn
+    L"On: with a scaffold in the Hand, a roll of the wrist turns the building "
+    L"one to one, and the building does not turn by itself. Off: the "
+    L"building turns by itself, as in the game.",
     // Spell book
     L"On: the first face button of the hand that does not point opens the "
     L"spell book. Off: that button has no job.",

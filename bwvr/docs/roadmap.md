@@ -482,9 +482,6 @@ keeps the mod as it is.
 
 **The village, the Creature and the help**
 
-- **F17. A turn of the wrist turns the building of a scaffold**
-  (`Scaffold::ProcessInHand` `0x006E8570`). The field of the angle is not
-  found yet.
 - **F18. The job icon of a villager in the Hand:** large, just over his head,
   and only for the villager in the Hand or under it. First the owner checks
   in a play whether the plain icon is a problem in a headset

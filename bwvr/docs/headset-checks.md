@@ -86,14 +86,18 @@ want.
     move the totem pole, and tap a leash post at the door of the Temple.
     Wrong: a tap that hits the item beside the one that you want, a pole that
     slides from the hand, or a count of the totem that is hard to hit.
+16. **The building of a scaffold.** Hold a scaffold over the land and roll
+    the wrist. Wrong: the building turns the other way than the wrist, turns
+    when the hand only moves, or a full turn of the building is hard to
+    make.
 
 ### The Creature
 
-16. **Stroke, slap and look.** Stroke the Creature slowly at each zoom, slap
+17. **Stroke, slap and look.** Stroke the Creature slowly at each zoom, slap
     it with the arm and with the wrist, and lean while it looks at you.
     Wrong: a slap that does not count, a stroke that counts as a slap, a
     touch in the air, or a look past your head.
-17. **Leash, commands and the stay.** With the leash on, tap the trigger at
+18. **Leash, commands and the stay.** With the leash on, tap the trigger at
     places and things. Hold the grip on the Creature for a stay, give it an
     object, and shake the leash hand. Wrong: the Creature goes to a different
     place, a command, a stay or a change of the leash by accident, or a real
@@ -101,30 +105,30 @@ want.
 
 ### Miracles
 
-18. **The spell book and the row of gestures.** Open the book (X, or the
+19. **The spell book and the row of gestures.** Open the book (X, or the
     palm up), pull a miracle out, and let one spring back. Hold B and look at
     the row over the palm. Wrong: a book or a row that is hard to read or to
     reach, a pull that feels stiff or loose, a book that opens by accident,
     or a bubble that looks wrong.
-19. **A gesture and a cast.** Draw miracles in the air, draw a circle for
+20. **A gesture and a cast.** Draw miracles in the air, draw a circle for
     Storm or a shield, and try the switch "Gesture point" (debug page,
     Creature). Take a miracle out with a shake and with a tap of B. Wrong: a
     draw that looks right and does not match (say which), a circle that gets
     a different size on the land, or a way out that acts by accident or not
     at all.
-20. **Water on a fire.** Set a house on fire with a Fireball, and pour Water
+21. **Water on a fire.** Set a house on fire with a Fireball, and pour Water
     on it. Wrong: the fire does not go out, or the pour looks wrong.
 
 ### The Temple
 
-21. **The rooms of the Temple.** Come in, turn and lean the head, go through
+22. **The rooms of the Temple.** Come in, turn and lean the head, go through
     doors, point at things, and look down at the pool of the hall. Wrong: a
     room that turns or tilts with the head, a room of a wrong size, one dark
     eye, a pace that is too fast or too slow, or a move at the pool.
 
 ### Menus and cards
 
-22. **The menus, the keyboard, the ring and the panel of places.** Open the
+23. **The menus, the keyboard, the ring and the panel of places.** Open the
     game menu and the ring, type the name of a god, open the panel of places
     from page 2 of the ring and go to a bookmark, and turn the head while a
     menu is open. Wrong: a panel that turns with the head or is at a bad
@@ -134,7 +138,7 @@ want.
     `debug_menu=1`, also open the debug window, read a note, and scroll a
     long group with the stick. Wrong: rows or notes hard to read, arrows hard
     to hit, or a scroll that is too fast or too slow.
-23. **The cards and the subtitles.** Read the hint cards at the wrist and the
+24. **The cards and the subtitles.** Read the hint cards at the wrist and the
     subtitle card while the hands work. Wrong: low contrast or a shimmer, a
     card that covers a hand or often changes side, a prompt that is late or
     stays too long, a subtitle card that moves while the head moves, or a
@@ -142,12 +146,12 @@ want.
 
 ### All through the play
 
-24. **The picture in both eyes.** Look for a fault in one eye only: a faint
+25. **The picture in both eyes.** Look for a fault in one eye only: a faint
     old picture, a flash of lightning, a flicker or a black frame. Also look
     at the edge of the view in a fast turn of the head, and turn the head at
     the load of a saved game. Wrong: a fault in one eye, black at the edge,
     or a picture that does not turn with the head at a load.
-25. **The sound.** Listen while you play. Wrong: a Creature that sounds at
+26. **The sound.** Listen while you play. Wrong: a Creature that sounds at
     the height of your ears and not below, a sea that turns with the view, a
     sound hard in one ear, a sound that lags a fast turn, a click or a cut, a
     loop that stops, or a cue that is too loud.
@@ -226,7 +230,7 @@ agents: the log does not tell the item yet.
 
 This section says what each miracle does in the plain game, so that a
 player and a desktop run can compare the mod with it. The owner checks one
-miracle (check 20, Water on a fire). Each line "To prove" is for a desktop
+miracle (check 21, Water on a fire). Each line "To prove" is for a desktop
 run (`roadmap.md`, R12): the effect is in the game state or in the eye
 pictures.
 
@@ -307,7 +311,7 @@ Water and Heal do not show.
 - **In the mod.** Keep the grip closed over the place, and open it to stop.
 - **Proved.** Desktop runs: the pour, the request from the spell book, and
   a power up from a Worship Site.
-- **The owner's check.** Check 20 of "What the owner checks".
+- **The owner's check.** Check 21 of "What the owner checks".
 - **To prove.** Water on a fire puts it out. Water on a field and on a forest
   changes their growth.
 

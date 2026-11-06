@@ -260,7 +260,8 @@ click of the game, and `-Fps 90` a run at 90 frames a second. The recipe
 reach its state (`bwvr/tools/desk/README.md`, "Known limits of the
 recipes").
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### A catch at once
 
@@ -419,7 +420,8 @@ to the sum of the turn (`0x00645FEE` adds the force of a step with a contact
 after the call of `fn_007FE260`, and the hook takes that force off before).
 
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## One point for each interaction
 
@@ -955,8 +957,8 @@ game, the red halo, the Creature as a choice, a scroll that wins over a tree tha
 the leash past its install. A place at 66 to 100 units a meter, the scale of
 the headset, is not run.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs" and
-"The Creature".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The bulk take
 
@@ -1301,7 +1303,8 @@ a fish is in it. The game did not give its grip hint over the land near a
 farm in the desktop runs, also with `hint_palm_check=0`. Only the math checks
 (`hint_checks.h`) show the rule of `hint_palm_check`.
 
-The checks in a headset are in `headset-checks.md`, "The village".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The log, tests and keys of the take
 
@@ -1349,7 +1352,8 @@ the hand pulled away from the store. A desktop run has the loop of a take of
 wood ([audio.md](audio.md), section 11). Desktop runs have the take of fish
 (see "The fish in the sea").
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The grab from a distance
 
@@ -2020,7 +2024,8 @@ In the test save `pen` these recipes take a small rock beside the tree and
 not the tree, so they need `-NewGame` (`tools/desk/README.md`, "Known limits
 of the recipes").
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The far touch
 
@@ -2228,7 +2233,8 @@ the Hand kept the rock until the grip opened.
 **Open.** Not run: a villager that comes to rest in a take, and
 the mouse.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### Show
 
@@ -2581,7 +2587,8 @@ land outside the influence, a multiplayer game, a fetch of a villager, a
 Creature or a building, the haptics on a real controller, and the look of the
 halo against open land (the pen is a slope).
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Many trees from a forest
 
@@ -2748,7 +2755,8 @@ that one. A `BigForest` gives the wood of one tree at each step with no tree tha
 leaves the picture, until the game deletes the forest. The take changes the tree
 in the Hand into wood.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## An object in the Hand that goes onto a thing
 
@@ -2953,8 +2961,8 @@ code with a different class), the altar and a sacrifice, a teleport, a thing out
 the influence (the red halo and its line), a villager at a field, at a building site
 and at the Workshop, and a scaffold that the Workshop makes.
 
-The checks in a headset are in `headset-checks.md`, "The village" and "The
-Creature".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Limits.** The draw offers a thing only when the point of its mesh is near the Hand.
 A very large building with its point far from the Hand's point can be no target, and

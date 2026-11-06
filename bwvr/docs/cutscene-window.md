@@ -818,4 +818,5 @@ pictures (`cutscene_window_capture=1`) are the proof. The checks are:
   story (section 7).
 - **The table** (play mode 3) has no window. Its stories play on the table.
 
-The checks in a headset are in `headset-checks.md`, "Cut scenes and stories".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

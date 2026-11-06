@@ -8,8 +8,9 @@ The doc of each area in `bwvr/docs` ends with the open questions and the
 known limits of that area. This file names the work, and the doc has the
 detail.
 
-The checks that only a headset can show are in `headset-checks.md`. An item
-here keeps the work to build, and that file keeps its check.
+The checks that only the owner in a headset can make, and the faults that
+the log of a normal play tells, are in `headset-checks.md`. The checks that
+a desktop run can prove are in R12. An item here keeps the work to build.
 
 ## Where it stands
 
@@ -50,7 +51,7 @@ These items come before the other work.
   villager turns 4.2 times a second in its flight 0.4 s after the release,
   also with the key at 1. Find what gives the villager its turn, and cut the
   turn in each step of the game. The scripted hand gives no turn at the
-  release (check: `headset-checks.md`).
+  release (check: R12).
 - **P20. The spell book: the open parts.** X opens a spell book over the
   hand that does not point, and the pointing hand pulls a miracle out of it
   with the grip: the game's own request (`spell_book=1`,
@@ -58,7 +59,7 @@ These items come before the other work.
   "The spell book"). The recipe `village_run.ps1 -Kind book` shows the
   open, the halo, the card, the pull, the spring back, the take and a
   refusal. The checks of the book, the row of gestures and the draw are in
-  `headset-checks.md`, "Miracles and gestures". Open:
+  `headset-checks.md`, "What the owner checks", and in R12. Open:
   - No line of a card names the draw button (B) while the Hand is empty. So a
     player of release 1.2.0, which has no book and no row of gestures, does
     not find how to ask for a miracle with a gesture. The tap of the grip on
@@ -88,8 +89,9 @@ These items come before the other work.
   texture when the upload of its new image fails. The log has the address
   space and a reason line for each texture read that gives no image ("A
   read with no new image"). Testers still get up to two crashes a day,
-  with the God view and with the flat view. The check of the crash and of
-  the white people is in `headset-checks.md`. The invisible body after the
+  with the God view and with the flat view. The log lines of the crash and of
+  the white people are in `headset-checks.md`, "Play as normal and send the
+  log". The invisible body after the
   quest has no known cause yet.
 - **B39. The camera turns around the Forest miracle.** Testers find that the
   camera turns in a circle at the Forest miracle, and that this must stop. It
@@ -107,8 +109,8 @@ These items come before the other work.
   rate of the rig and at 90 frames a second, with a rock in its fall, a rock
   that the hand threw up, a grip of 50 ms, a throw and a drop after the
   catch, and a fetch from a distance of a tree that still moves. The check
-  with a real hand is in `headset-checks.md`, "A catch at once". Still
-  open:
+  with a real hand is in `headset-checks.md`, "Throws and catches", and the
+  runs that are not made are in R12. Still open:
   - Not shown: a grip on an object that rolls for more than 1 s. The recipes
     `rollnear`, `rollfar`, `droproll` and `treenear` do not reach that state
     on the desktop (`bwvr/tools/desk/README.md`, "Known limits of the
@@ -167,12 +169,12 @@ These items come before the other work.
   fade of the Temple shows in both eyes (`temple_fade_eyes=1`).
   `controllers.md`, 11.4, has the three rules. The math checks cover them.
   Still open:
-  - No desktop run has shown the three rules. The recipes are in
-    `controllers.md`, 11.9. Make those runs first.
+  - No desktop run has shown the three rules (R12).
   - Single black frames showed at random times in the guide of the first
     visit of the hall. The cause is not known.
-  - The checks of the view, the fade and the black frames are in
-    `headset-checks.md`, "The Temple".
+  - The check of the view is in `headset-checks.md`, "The rooms of the
+    Temple", and the log line of the black frames is in "Play as normal and
+    send the log".
   - Not built: the depth of a guide in the cut scene window, and a ray of the
     room that starts at the eye (`controllers.md`, 11.9).
 - **B14. In a pass the second eye does not have zero as its frame time.**
@@ -207,7 +209,8 @@ These items come before the other work.
   made for it. Still open:
   - Not known: which thing of the game left such pixels in that session.
     The log of the session cannot place it.
-  - The check is in `headset-checks.md`, "No old picture in one eye".
+  - The log line of the fault is in `headset-checks.md`, "Play as normal
+    and send the log".
   - Not run: the video of a falling spell, the one scene of play that draws
     no sky. The first frame of such a scene is drawn as before.
 - **B17. The size of a speech bubble, and the name of a villager in a
@@ -218,8 +221,8 @@ These items come before the other work.
   18.5 has the recipes). Still open:
   - The size of a bubble comes from the depth of the sign in units, with no
     change for the scale of the God view.
-  - The check of the name is in `headset-checks.md`, "The name of a
-    villager".
+  - The check of the name is in `headset-checks.md`, "The words over the
+    land".
 - **B18. A flash of lightning in the left eye only.** In a headset session
   the white flashes of the lightning at the end of the quest of the singing
   stones showed in the left eye only. A lightning of a storm makes the land
@@ -229,8 +232,8 @@ These items come before the other work.
   "The lights on the land in the second eye pass"). A desktop run shows it
   with the test light (`land_light_test=1`), which is the light of a
   lightning of a storm. No run had a real lightning. Not known: whether the
-  flash of that session was a light on the land. The check is in
-  `headset-checks.md`, "A lightning in both eyes".
+  flash of that session was a light on the land. The log line of
+  the flash is in `headset-checks.md`, "Play as normal and send the log".
 - **B26. The tutorial: the steps that no run and no session has.** Each step
   of the tutorial waits for an input that a VR player can give with the
   controls of the mod (`god-view.md`, section 7, "The steps of the
@@ -238,8 +241,9 @@ These items come before the other work.
   tutorial of Land 1 from the walk to the village to the texts after the zoom
   lesson. Still open:
   - The end of the build of the Temple, the missionaries and the lessons of
-    Land 2 (the gestures, the shield, the fireball) have no run (check:
-    `headset-checks.md`, "The tutorial in play").
+    Land 2 (the gestures, the shield, the fireball) have no run. The log
+    line that they need is in `headset-checks.md`, "Play as normal and send
+    the log".
   - The lessons of the Gods' Playground after the step of the turn have no
     run. A desktop run shows the first walk of the Island Keeper and the step
     of the turn only with `script_view=0`. With `script_view=1` the Keeper did
@@ -277,7 +281,7 @@ that moves while the Hand takes it.
   `creature.md`, section 5.3). The stay is the locked select of the game,
   with no stroke, no lesson and no camera. Desktop runs show it with a
   Creature that stands and with a Creature that walks. The check is in
-  `headset-checks.md`, "The stay".
+  `headset-checks.md`, "Leash, commands and the stay".
 
   The leash click, the stay and a command act on the Creature of the local
   player only: the code compares each Creature with the Creature of that
@@ -303,8 +307,8 @@ that moves while the Hand takes it.
   - The default of the zoom: the stick zooms in steps of 1.5 times, and
     `god_zoom_smooth=1` gives a smooth zoom while the stick is held
     (`god-view.md`, section 2). Choose the default and the top rate
-    (`god_zoom_smooth_ms`) after the check in `headset-checks.md`, "The zoom
-    in steps or smooth".
+    (`god_zoom_smooth_ms`) after the check in `headset-checks.md`, "The
+    zoom".
   - A two hand grab as in Deisim: the player holds both grips, and the
     hands make the world smaller or larger and turn it. The mod has a
     version of this (`god-view.md`): both grips turn the land about up and
@@ -328,8 +332,7 @@ that moves while the Hand takes it.
   at a distance"). Desktop runs show the curve from a pile of wood of the
   Village Store, with the Hand 0.27 m to the side of the pile and 0.5 m over
   it. Open:
-  - The check of the look is in `headset-checks.md`, "A take at a
-    distance".
+  - The check of the look is in `headset-checks.md`, "A take of many".
   - A piece lives 1 s for each length of the way, and 8 pieces start in a
     second. So on a way of 2 m the pieces are 25 cm apart, and they go 2 m
     in a second. If that does not read well, the rule has both values
@@ -345,7 +348,7 @@ that moves while the Hand takes it.
   target"). Desktop runs show it in both eyes on a rock, a villager, a bush,
   a pile and the Village Store. Open:
   - The check of the strength, the pulse and the band of light is in
-    `headset-checks.md`, "The glow on the mesh of a target".
+    `headset-checks.md`, "The aim and the halo".
   - The Creature (`LH3DCreature::DrawNow`, `0x0048E260`) and a building in
     work (`0x00517F90`) do not draw through `Game3DObject::AddForDrawing`.
     They keep the halo. Wanted: the glow on their mesh.
@@ -382,10 +385,11 @@ that moves while the Hand takes it.
 - **P11. The intro in stereo** (`intro_vr`, off by default). Each eye has
   its own trails, the mark beside the logo has the depth of the logo, and
   the view goes along the camera path of the game with no turn
-  (`intro_motion=1`, `intro.md`). After the checks in `headset-checks.md`,
-  "The intro", choose the default of `intro_motion`, and decide if
-  `intro_vr` goes on. Not built: a speed for the orbs that a hand moved, and
-  a push of the hand in the flat intro (`intro.md`, "Open work").
+  (`intro_motion=1`, `intro.md`). After the check in `headset-checks.md`,
+  "The intro in stereo", decide if `intro_vr` goes on, and if
+  `intro_motion` needs a different default. Not built: a speed for the orbs
+  that a hand moved, and a push of the hand in the flat intro (`intro.md`,
+  "Open work").
 - **P12. Ideas from Half-Life: Alyx** that are not built are in
   `research-hla.md`, for the far grab, the teleport, the hands, the hints,
   the sound and comfort.
@@ -565,9 +569,10 @@ game as it is.
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:
-  - **The checks in a headset** of the frame time are in
-    `headset-checks.md`, "Performance". A desktop run has no wait for the
-    runtime, no copy to the bridge, no compositor and no encoder.
+  - **The log lines** of the frame time in a headset are in
+    `headset-checks.md`, "Play as normal and send the log". A desktop run
+    has no wait for the runtime, no copy to the bridge, no compositor and
+    no encoder.
   - **Frames of about 100 ms in a headset.** The worst frame of many report
     windows of a session through Virtual Desktop is 94 to 108 ms, with
     `backend=vulkan` and with `backend=dxwrapper`. The time is in the calls
@@ -603,9 +608,9 @@ game as it is.
     `Lock` of dxwrapper does for a surface that a copy used in the same
     frame. Then name the thing that the second write is for (the list at
     `0x00FAA7E0` of `LH3DIsland::Draw`).
-  - **The default of `frame_send`.** It stays 0 until the check in
-    `headset-checks.md`, "One wait a frame, and a second thread", compares
-    the values with the subtitle card on (`subtitle_read_ahead=1`,
+  - **The default of `frame_send`.** It stays 0 until a play with each value
+    and the subtitle card on (`headset-checks.md`, "The cost of a key in a
+    headset") compares them (`subtitle_read_ahead=1`,
     `ui-layer.md`, 17.2). A desktop run cannot show it: with no headset the
     mod makes no wait for the GPU.
   - **The cost of the lock of the Direct3D 9 device.** A device for two
@@ -634,11 +639,12 @@ game as it is.
     headset (SteamVR, Steam Frame) over the island with the filter, the
     buffers and one draw for both eyes, the scene walks are 4.5 to 5 ms, and
     the flush (`gpu_flush`) makes the time from `xrWaitFrame` to the end of
-    `xrEndFrame` 6.3 to 7.4 ms in place of 8.6 to 9.1 ms. Open: the check
-    in `headset-checks.md`, "The render thread in more scenes", then the
-    default value of `render_thread`. One start stopped at the logos with
-    `gpu_flush=128` (`hang_watch=1` shows the place if it comes again). The
-    two vertex loops of the engine run with SSE, with the bits of the game
+    `xrEndFrame` 6.3 to 7.4 ms in place of 8.6 to 9.1 ms. Open: the
+    pictures in R12 and the cost in `headset-checks.md`, "The cost of a key
+    in a headset", then the default value of `render_thread`. One start
+    stopped at the logos with `gpu_flush=128` (`hang_watch=1` shows the
+    place if it comes again). The two vertex loops of the engine run with
+    SSE, with the bits of the game
     (`fast_transform`, `backend.md`, "The vertex loops with SSE"): 0.25 ms
     less of the scene walks in a desktop run. The calls of Direct3D 7 of a
     walk can go to a thread of their own (`d3d7_thread`, `backend.md`, "The
@@ -804,7 +810,7 @@ game as it is.
 - **N14. The throw.** Not tested: a throw into a pile, and whether a thrown
   villager lives (`throw.md`).
 - **N15. The interface panel** (`ui_panel=1`). No run on the desktop
-  (`ui-layer.md`). The check is in `headset-checks.md`.
+  (`ui-layer.md`). The check is in R12.
 - **N17. Headset coverage.** Quest 3 through Virtual Desktop and Steam Frame
   through Proton have game coverage. Other headsets and runtimes need tests.
 - **N18. The x64 host for Steam Frame** (`xr_bridge=1`). Not tested: all
@@ -874,3 +880,203 @@ game as it is.
   each of the four. The keys of the keyboard that no code of the game or of
   the mod reads are few: a new test key needs a search first (`backend.md`,
   the hotkey table).
+- **R12. Checks that a desktop run can prove.** These checks need no person
+  in the headset: the scripted controller, the log and the eye pictures of
+  both eyes can prove them. Prove a line with a desktop run, then remove the
+  line and write the result in the doc of the area. A fault gets its own
+  item. Each line names the nearest recipe, or says "needs a recipe".
+  - The God view:
+    - A Hand 5 cm from the eye stays whole in both eye pictures
+      (`near_plane_cm`). Needs a recipe (`hand_run.ps1 -Kind fixed`).
+    - The stick: a thumb at rest gives no zoom and no walk (the dead zone of
+      30 percent), a small push, the edge of the map, and a steep slope that
+      keeps the land near the hands (P13). Needs a recipe.
+    - A still hand on a held grip of the land does not move the camera
+      (`the held camera moved`). Needs a recipe.
+    - The mouse pan: the land stays under the Hand and does not move after
+      the release (N11). Needs a recipe with the relative mouse input of the
+      mod.
+    - The arc and the ring of the teleport at 4000 units a meter, and the
+      limits of the ring (4 and 40 cm): `aim_queue.ps1 -Runs ring1,ring0`.
+    - The place at a camera of the game: 50 cm ahead, the height of the
+      look point on a slope, and the cut 1 s after "Keep your old Creature":
+      `spawn_run.ps1`.
+    - The camera zone at the Creature select: the bump each 500 ms and the
+      force field (`camera zone  :`). Needs a recipe in the test save `pen`.
+    - The Island Keeper of the Gods' Playground with `script_view=1` (B26),
+      and the quest `FollowUs`. Needs a recipe.
+  - The Hand and grabs:
+    - The poses of the mesh (the point, the flat hand, the fist), and a
+      finger that touches a rock, a villager and a tree: `hand_run.ps1 -Kind
+      one` with eye pictures.
+    - A hand file with more bones bends with no fold and no tear. Needs a
+      recipe.
+    - The left hand (`left_hand=1`): the Hand, the hand model and the menu
+      button on the left controller (`the left controller is the Hand`).
+      Needs a recipe with mirrored points.
+    - The aim presets with each hand as the pointing hand: `aim_queue.ps1
+      -Runs aim2`.
+    - The pick at the Hand: the reach of 4 cm, no take at the palm, the
+      limits of the far grab near an object (10 and 15 cm) and the touch at
+      1 cm (`hand pick`): `hand_run.ps1 -Kind one`.
+    - The rope of the leash starts at the hand: `creature_recipe.ps1 -Kind
+      leash` with eye pictures.
+    - The glow at the Hand's point (`hand_glow=1`): one place on the hand in
+      both eyes, not in the finger tip, and a hill hides it. Needs a recipe.
+    - The glow of the menu ray in the Temple: `temple_run.ps1` with eye
+      pictures.
+    - The glow on the mesh of a target by day, and on a mesh of the sorted
+      list (P15). Needs a recipe.
+    - A living thing beside a tree, a rock or a pile gets the halo, and the
+      halo stays on it: `village_run.ps1 -Kind choice`.
+    - The Creature, a miracle and a signpost in the aim, and a signpost
+      beside a miracle or the Creature at the Hand. Needs a recipe.
+    - The grip on the Creature at 15 cm gives the leash click and the
+      Creature state: `creature_recipe.ps1 -Kind state` with other points.
+    - A far aim past a near tree, house or pile gets the far target. Needs a
+      recipe (`hand_run.ps1 -Kind fixed`).
+    - The far grab: the range of 2 m, a villager in a crowd, and the ball on
+      the sea: `aim_queue.ps1 -Runs move2,move1b`.
+    - A catch at once of a rock that rolls for more than 1 s, and the guard
+      of a throw (B2): `throw_queue.ps1 -Runs dropfarroll`. The guard needs a
+      grip that opens over some frames.
+    - A tree that comes to rest in a take, at the Hand and from a distance
+      (B11): `throw_queue.ps1 -Runs treedropend`.
+    - A take at a distance from the pile of Wood or Food (B19): `village_run.ps1
+      -Kind fartake` with a pile from `miracle_run.ps1`.
+    - A short squeeze of a bulk take stops when the grip opens, and the Hand
+      stays at the controller (`hand bulk`): `village_run.ps1 -Kind store`.
+    - The take from a forest: after the fetch of one tree no bundle starts,
+      and one whole tree is still easy to take. Needs a recipe.
+    - The height of the Hand's point over the land (`hand`): `hand_run.ps1
+      -Kind fixed`.
+    - The fingers at a wall of a house and of the Village Store with
+      `hand_feel_offer` at 1 and 0, a rock and the crown of a tree as a body,
+      a villager that walks into a still hand, and a tree with the palm to
+      the side (N2). Needs a test save with a house in the view.
+    - A small object in a pinch does not glide at a change of the zoom.
+      Needs a recipe.
+    - One pulse at the first touch of the land and of a body
+      (`haptics      :`). Needs a recipe.
+  - Throws:
+    - The release at the opening of the grip, and a set down from a still
+      hand under 15 cm (`grip`, `hand throw`): `throw_queue.ps1 -Runs
+      early,fall,fallold`.
+    - A villager lives through a soft throw and dies from a hard one, a rock
+      breaks a house, and a throw goes into a pile (N14). Needs a recipe.
+    - The turn of a thrown villager (B35): `village_run.ps1 -Kind throw`.
+    - The landing on the slope of the pen, and a rock that stops its turn:
+      `throw_queue.ps1 -Runs land,base`.
+    - A tree thrown fast across the land and onto a slope comes to rest in
+      about 1 s, and it still rolls on a slope: `throw_queue.ps1 -Runs tree`.
+  - The Creature:
+    - The camera stays still at a press on the Creature (`creature_camera`):
+      `creature_recipe.ps1 -Kind state`. The Creature tutorial that goes on
+      needs a recipe.
+    - The gift at the first opening of the grip, and a move away that keeps
+      the object: `creature_recipe.ps1 -Kind gift` and `-Kind giftfree`.
+    - A short grip from a distance puts the leash on, and the Creature does
+      not turn to the hand: `creature_recipe.ps1 -Kind leash`.
+    - A stay that stops a walk (R9): `creature_recipe.ps1 -Kind tie`.
+    - A command: a tap at a place and at each kind of object, and a press
+      that becomes a walk 100 ms after the aim leaves the object:
+      `creature_recipe.ps1 -Kind walk` and `aim_queue.ps1 -Runs cmd1b`.
+    - A double press in 500 ms: the first tap sends the Creature, and the
+      second press ties the leash. Needs a recipe.
+    - A shake of 0.6 m/s takes the leash off. Needs a recipe.
+    - The Creature looks at the head with two still head poses
+      (`creature look:`). Needs a recipe.
+  - The village:
+    - The fish of a fish farm: the halo, the grip in the fish and the far
+      grab (B36). Needs a recipe.
+    - Wood onto the Village Store and onto a scaffold, with the halo of the
+      large thing: `village_run.ps1 -Kind store` and `-Kind scaffold`.
+    - The totem from a distance: `village_run.ps1 -Kind fartotem`.
+    - The reach of a scroll at each scale: `hand_run.ps1 -Kind one` at other
+      scales.
+  - Miracles:
+    - The bubble of the book with Direct3D 9 and with Vulkan, in both eyes:
+      `village_run.ps1 -Kind book`.
+    - The palm that opens the book, and the row of gestures:
+      `village_run.ps1 -Kind palm`.
+    - The trail at the fingertip does not hide the Hand's point. Needs a
+      recipe with eye pictures.
+    - The miracle in the real hand, and the target of a Creature miracle (3
+      cm, 6 degrees): `miracle_run.ps1 -Kind creature`.
+    - A shake of 0.6 m/s takes a miracle out, and a tap of B under 400 ms
+      cancels it: `miracle_run.ps1 -Kind cancel`.
+    - The effect of each miracle: each line "To prove" of `headset-checks.md`,
+      "The miracles of the game" (N6): `miracle_run.ps1` with `-Seeds`.
+  - The Temple:
+    - The three rules of the view of a room, the fade in both eyes and the
+      pool of the hall (B13): `temple_run.ps1` with the recipes of
+      `controllers.md`, 11.9.
+    - The entry and a door end at the rest pose, the ray and the cross end
+      on the thing in both eyes, and the room stays level after a turn with
+      the stick: `temple_run.ps1` with eye pictures.
+    - Each click of the rooms with the trigger and with the grip
+      (`temple       : the game gets the mouse message`): `temple_run.ps1
+      -Rooms`.
+    - A save in the Save Game Room with the game in Program Files and no
+      administrator rights (B37): `temple_run.ps1 -SaveTest`.
+    - The leash post that the Hand taps (`temple land  : the chosen leash post
+      is`). Needs a recipe.
+    - The light maps of the hall with Vulkan: `temple_run.ps1` with eye
+      pictures.
+  - Menus and cards:
+    - The menu panel in the room (`menu room    :`), and the arrow of the
+      game at the end of the ray. Needs a recipe.
+    - The keyboard in the headset: the name of a new god and a save message
+      (`keyboard     :`). Needs a recipe.
+    - The words of the card at the end of a take and of a fetch, and when the
+      Hand leaves a target. Needs a recipe.
+    - The words of the device in the help text after a change from the
+      controller to the mouse (`hints : census`, `help_test=1`). Needs a
+      recipe.
+    - "[Trigger] Continue" on the card for a text that waits for a click:
+      `creature_recipe.ps1 -Kind click`.
+    - The subtitle card moves one time after a turn of the head of more than
+      1 s, and the Creature panel shows on it. Needs a recipe with two head
+      poses.
+    - One card at its depth in both eyes: the signpost in one walk (B23), the
+      note over the Creature (B33, `note depth   :`), the hint at the game's
+      Hand (B34) and the tooltip at the Hand's point. Needs a recipe for
+      each (`ui-layer.md`, 18.5, has the recipes of the cards).
+    - The panel layers (`ui_panel=1`, N15) and the Creature panel on its
+      quad (`ui panel     :`). Needs a recipe.
+    - The debug page: three pages to a switch, at 0.45 s for each link.
+      Needs a recipe (`Get-BwvrRingChoice` in `game.ps1`).
+  - Stories:
+    - The layers of the cut scene window, and an opening with no column of
+      light: `verify_build.ps1`, the run `tland` (the first story), with eye
+      pictures.
+    - The place of the screen and of the subtitles when the head looks down
+      or to the side at the start of a story: the run `tland` with
+      `fake_head_pitch`.
+    - The video after the drowning boy stays on the screen of the window.
+      Needs a recipe.
+  - The intro:
+    - The size of the logo at the first stereo frame (`intro`), and the
+      trails in each eye with Vulkan and at the load of a saved game:
+      `intro_run.ps1`.
+    - The push of the hands in a reach of 30 cm, and a still hand with no
+      flicker: `intro_run.ps1` with the fake controller in the Lionhead logo.
+      Needs the words of the hands.
+  - The picture and the backend:
+    - With `fov_margin_pct` at 10 and 20 the world keeps its place and its
+      scale, and the Hand, the pointer, the Creature panel and a tooltip
+      stay at their places. Needs a recipe with eye pictures.
+    - The colors with Vulkan are the colors with Direct3D 9 on the land, in
+      the Temple and in a story: `perf_ab.ps1 -Pictures`.
+    - No edge between the center and the outer part with `fovea_res=1`.
+      Needs a recipe with eye pictures.
+    - The sun stays at one place in the sky with each value of `sun_glare`.
+      Needs a recipe with two still head poses.
+    - The merge of draw calls (`draw_merge_test=1`): 0 eye passes with a
+      different checksum in the Temple, a story, a fight and a miracle:
+      `bench_run.ps1` and `temple_run.ps1`.
+    - The same picture with the render thread, the SSE loops, the waits of
+      the threads, the parts of the Vulkan session and one walk (the outer
+      edge of the right eye): `perf_ab.ps1 -Pictures`.
+    - The fall back of the renderer Vulkan: the next start keeps Vulkan.
+      `desk_run.ps1 -VulkanPending`.

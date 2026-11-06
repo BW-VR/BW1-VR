@@ -402,7 +402,8 @@ stayed at the place of a guess: the math checks cover that rule.
 - A flying tree is tested in desktop runs only (a throw of 3.0 m/s, and a
   fall from the Hand, see "The landing of a tree"), and not in the headset.
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The landing of a thrown object
 
@@ -726,7 +727,8 @@ catch up of the picture (`kCatchUp`).
   game's own time until the land is flatter (8 s on the slope at the pen,
   which is 41 units high).
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The landing of a tree
 
@@ -766,7 +768,8 @@ game's landing. Rocks and other objects are not changed.
   target were the near rule while the tree falls past the Hand. The tumble is
   gone with the settle, so it can not move the candidate.
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The turn of a thrown object
 
@@ -927,7 +930,8 @@ after the cut.
   the hold of the game makes it from the swing of the object, and the mod
   draws the object in the Hand by itself.
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The height of a release
 
@@ -1022,7 +1026,8 @@ throw at each height.
 - Not tested in a desktop run: a pot, a villager and an animal that fall
   from the Hand, and an opening over a store at a height.
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The release at once
 
@@ -1167,4 +1172,5 @@ closes it again, and the trace of 12 values.
   section 12, a far target that is no tree (`far_test_influence=1`,
   `far_grab_max_m=4.0`) and a pull, a grip open and a release.
 
-The checks in a headset are in `headset-checks.md`, "Throws and catches".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

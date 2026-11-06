@@ -655,7 +655,8 @@ math test checks the clearance for the three scales.
 The tag `hand` logs, 20 frames after the target stops, the point's height
 over the land and how far the controller is under it, in cm of the room.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 6. The pose builder and the drawn Hand
 
@@ -996,7 +997,8 @@ palm in 0.12 s and turns with the hand.
 Not reached on the desktop: the PlayAnim state. Not shown on the desktop: the
 poses with a real controller.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. The two real hands and which one is the Hand
 

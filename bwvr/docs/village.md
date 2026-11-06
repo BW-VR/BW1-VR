@@ -258,7 +258,8 @@ puts the fake hand at a pixel pair of the two eye pictures. At a scale of
 29.6 units a meter, one pixel of disparity is about 17 cm at 3.4 m of the
 room, so the picture limits that test and not the body.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Not proven, and suspects:**
 
@@ -852,8 +853,8 @@ value after 100 frames (0.44) and 44 frames (0.22).
 - A scaffold of three or more.
 - A left handed player, and a multiplayer game.
 
-The checks in a headset are in `headset-checks.md`, "The village" and
-"Miracles and gestures".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Limits.** The pole follows the height of the hand only: the hand can move
 away sideways while the grip is closed. The mod does not change the game's
@@ -964,4 +965,5 @@ player is in the hall 3 frames later).
 3. The grab from a distance on a post or on the door.
 4. The lines of the card of the mod: no run had the hints of the game off.
 
-The checks in a headset are in `headset-checks.md`, "The Temple".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

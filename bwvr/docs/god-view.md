@@ -1640,9 +1640,8 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   `script_view=1` the Island Keeper did not start his first walk in the
   desktop runs (section 7).
 
-The checks in a headset are in `headset-checks.md`, "The God view and
-moving", "The Hand and grabs", "Cut scenes and stories", "Sound" and
-"Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 14. The teleport
 
@@ -1975,8 +1974,8 @@ each scale.
   walk around the mountain, where the game has the drag on and the jump off
   too.
 
-The checks in a headset are in `headset-checks.md`, "The God view and
-moving".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 15. The place at a camera of the game
 
@@ -2220,8 +2219,8 @@ the fake controller with `fake_controller_front=1`, and a render of 2560 by
   watch. Each one writes the game camera, which is a move of the player by
   the rule of 15.3.
 
-The checks in a headset are in `headset-checks.md`, "The God view and
-moving".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 16. The player that a script sees
 
@@ -2521,8 +2520,8 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   side of the screen also shows the rotate arrow of the game: no run has
   that in the God view.
 
-The checks in a headset are in `headset-checks.md`, "The God view and
-moving".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 17. The camera zone
 
@@ -2723,5 +2722,5 @@ pulse.
   (`AddSoundToAtom::ModifyAtomCore` and `fn_006E63C0`) still shake the
   view in the God view.
 
-The checks in a headset are in `headset-checks.md`, "The God view and
-moving".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

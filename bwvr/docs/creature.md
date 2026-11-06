@@ -1579,7 +1579,8 @@ same, although the angles of the game differ by 46 degrees of yaw and 34
 degrees of pitch. How much the look animations turn the head on the screen
 was not measured.
 
-The checks in a headset are in `headset-checks.md`, "The Creature".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 
 ## 6. A fight of Creatures
@@ -1726,7 +1727,8 @@ The numbers in these lines are an example: no run had a fight.
   without the ray of the Hand was not traced. Both buttons go to the same
   ray of the game.
 
-The checks in a headset are in `headset-checks.md`, "The Creature".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 7. Tests
 
@@ -1939,7 +1941,8 @@ now"), and the Creature state ends.
 
 ### 7.3 What the desktop cannot show
 
-The checks in a headset are in `headset-checks.md`, "The Creature".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. Not built, open
 

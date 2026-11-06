@@ -1244,7 +1244,8 @@ the game window in front), and the level balance by ear.
 - The loop of a bulk take: no run has the loop of food (sample 44), a field
   or a fish farm.
 
-The checks in a headset are in `headset-checks.md`, "Sound".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Open questions.**
 
@@ -1284,4 +1285,5 @@ They are flat by design.
 
 ## 14. Headset test of the sound of the world (10 minutes)
 
-The checks in a headset are in `headset-checks.md`, "Sound".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

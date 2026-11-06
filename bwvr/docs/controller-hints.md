@@ -627,8 +627,8 @@ bulk take shows "Amount: 57" and on, as text only. The words of the help text
 ### 8.6 What needs the headset
 
 The switch of the help text to the words of the mouse works in the desktop
-runs, at the start. The checks in a headset are in `headset-checks.md`,
-"Menus, cards and the ring".
+runs, at the start. The checks in a headset are in `headset-checks.md`, and
+the checks that a desktop run can prove are in `roadmap.md`, R12.
 
 ## 9. The hint card
 
@@ -1091,7 +1091,8 @@ The lines that the player knows (9.10) have their own math test
 The desktop has no runtime, so no desktop run shows the quad layers of the
 cards. The hand pose is from the game frame, and the runtime moves the quad
 only for the head. The desktop runs have 60 to 90 frames a second. The checks
-in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+in a headset are in `headset-checks.md`, and the checks that a desktop run can
+prove are in `roadmap.md`, R12.
 
 ### 9.9 Two cards and true hints
 
@@ -1331,7 +1332,8 @@ the noise tile and loads the fonts (about 8.5 ms), and GDI draws each letter
 of the new fonts for the first time. A line that is too long for 19 cm ends
 in "..." in both looks.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 10. A text that waits for a click
 
@@ -1514,4 +1516,5 @@ goes to the Creature select, and it has no scroll there too.
   happen for the time of a spoken line, when a quest starts while a
   different challenge script has the dialogue [I].
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

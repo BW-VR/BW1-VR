@@ -422,7 +422,8 @@ angle its pixels give it. The quad size sets the angle on the panel.
   to keep `ui_scale_pct` in the target and show the quad at about the display
   density.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 4.3 Normal placement
 
@@ -662,7 +663,8 @@ the panel batches cleanly, that the eye pictures lose the menus, and that a
 scripted click still works with the menu only on the panel. The code for the
 hit test does not change, so it should.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 10. Ini keys and the test key
 
@@ -868,7 +870,8 @@ on the Creature (`touchc`) and a capture (`shot`). The capture must show the
 box at 2.5 to 27.5 percent across and 25 to 58 percent down, and the log must
 show the values.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 14. Sources
 
@@ -983,7 +986,8 @@ limits, the scale about the Hand's point in the left eye, and the Hand's
 disparity for a point of the tooltip in both eyes. The desktop rig is the bulk
 take rig of `hand.md` with `help_test=1`.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 15.6 A hint at the game's Hand
 
@@ -1067,7 +1071,8 @@ hint "Move" is at the Hand in that run.
 - No run had a real tooltip of a thing under the Hand while the game placed
   the Hand. The test key draws through the same call with the same flags.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 16. The hint card
 
@@ -1316,8 +1321,8 @@ the card off they must be in the eye pictures.
 **Not tested:** a real subtitle of the game in a desktop run. The place of the
 game's subtitle box in the render is not measured.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the
-ring" and "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 17.9 In the cut scene window
 
@@ -1740,7 +1745,8 @@ eye, so the note is not at the depth of the Creature there either.
   learns from a miracle of the player. The test key uses the same function
   of the game.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 20. The menus in the room
 
@@ -1903,7 +1909,8 @@ runs do not show a frame with no scene that shows a menu (the front end),
 the game menu of Esc, the options, or the load box. The invented head does
 not turn in them.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 21. The keyboard in the headset
 
@@ -2070,7 +2077,8 @@ the card.
   first start of a profile. The profile guard of the desktop scripts takes
   a new profile away after a run, but no run has done it yet.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 21.6 The bake of the parchment
 

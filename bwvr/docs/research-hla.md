@@ -259,7 +259,8 @@ section 6, and `grab.md`.
 
 ### 2.4 Guide and open plans
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 - **Freeze the menu pointer after a press.** Keep the pointer pixel for a
   short time (HLA: 0.5 s) after the trigger goes down. The mod has no such

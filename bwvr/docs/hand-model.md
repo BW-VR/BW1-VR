@@ -609,7 +609,8 @@ of 255. The overlay costs about 0.1 ms a frame on the CPU for both hands.
   outer bend (its last bone) and the turn of the game's open hold pose. It
   has no other turn and no bend back.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## A hand that the player edited
 
@@ -734,7 +735,8 @@ for both hands, against 0.1 ms for the mesh of the game.
 **Open.** A hand that the player edited with his own Blender, and a file
 from another 3D editor.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Hands that react to the world
 
@@ -1395,7 +1397,8 @@ between 0 and 1 at a small target (a villager walks away), and what the
 pulses feel like. The camera of the God view looks down on the hand, so a
 picture shows a contact from above.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The glow at the Hand's point
 
@@ -1548,7 +1551,8 @@ at the Hand has the Hand in front of most of the halo.
 **Open.** On the desktop, a press at the edge of the view can start off the
 render while one eye shows gold.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The glow on the mesh of a target
 
@@ -1709,7 +1713,8 @@ of two runs.
 that comes through the clip of the engine, or a target by day: the test
 saves are at dusk.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Overlay renderer
 
@@ -1903,8 +1908,8 @@ and the left hand was the mirror image of the right.
 so a hand nearer to the eye than that is cut away. The God view brings it in
 to 5 cm.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs"
-and "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Haptics
 
@@ -1996,7 +2001,8 @@ The desktop shows only that a pulse goes out at the right frame: `target`,
 `command` and `leash off`. The call sites of `teleport`, `refused`,
 `gesture`, `power` and `world` have no desktop proof.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Haptics from the world
 
@@ -2100,4 +2106,5 @@ throw`). With `world_haptics=0` the same runs give the lines with no pulse.
 No run has shown `purr`: in the runs of the Creature state the game counted
 no stroke.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

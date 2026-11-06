@@ -501,7 +501,8 @@ Desktop. A desktop run sends no frame to a runtime. With
 `test_keys=1`, Ctrl, Shift and the slash key of the number pad step the value
 while the game runs.
 
-The checks in a headset are in `headset-checks.md`, "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The hold of the last frame
 
@@ -548,7 +549,8 @@ before it makes its layers (a flat frame or the intro in stereo with
 `backend=vulkan`), a frame of the hold in that time shows the new picture
 with the pose of the old one.
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The self test
 
@@ -735,7 +737,8 @@ monitor:
 .\bwvr\tools\desk\spawn_run.ps1 -Name vsh -Dll <build>\src\mod\Release\ddraw.dll -Save temple -Seconds 150 -Set "vr=1;stereo_headless=0;vr_start=1;vr_start_test_hang_try=2;vr_start_test_hang_ms=60000"
 ```
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The x64 host for Steam Frame
 
@@ -936,7 +939,8 @@ test of the bridge makes the shared textures on a Direct3D 11 device of its
 own. So a run shows the fault of the device with `exit_shutdown=0`, and a
 clean end with 1.
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### A test save
 
@@ -1491,7 +1495,8 @@ draw calls and the runs of a frame, the causes that start a run, and the calls
 of the game that set a state. The count has hooks on 13 more calls of the
 device, so the times of a frame are a little longer than with `profile=1`.
 
-The checks in a headset are in `headset-checks.md`, "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The measure on the desktop
 
@@ -1835,7 +1840,8 @@ The proof that the picture is the same, from a desktop run of the six scenes:
 The check of the triangles runs in each eye pass of the scene, and it takes
 time of each frame.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The slow frames
 
@@ -1891,7 +1897,8 @@ It gives the longest call of `xrWaitFrame`, of `xrBeginFrame`, of
 `xrEndFrame` and of the copies to the swapchain images (with their acquire and
 wait) in the window, and the count of the calls of 20 ms or more.
 
-The checks in a headset are in `headset-checks.md`, "Performance" and "Sound".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The refresh rate of the headset
 
@@ -2019,7 +2026,8 @@ Creature pens, `backend=vulkan`, `profile=1`), one with each value:
 With `test_keys=1`, Shift Q changes the value while the game runs. Each open
 file gives its position back to Windows at its next call.
 
-The checks in a headset are in `headset-checks.md`, "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The clock of the game and the hooks of dxwrapper
 
@@ -2299,7 +2307,8 @@ The scene time of one walk holds the copies for the right eye, 0.29 to
 - Not with a pose for each eye (`head_camera=0` with head tracking). Then the
   frame has two walks.
 
-The checks in a headset are in `headset-checks.md`, "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 `one_walk_check=1`: on a frame that saves pictures, the right eye also gets
 its own walk, and its picture is saved as `walk2` beside the right eye of one
@@ -2790,7 +2799,8 @@ with two GPUs, a GPU of NVIDIA or Intel.
 The share needs DXVK and the OpenXR session on the same GPU. DXVK takes a
 dedicated GPU before an integrated one.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The Vulkan renderer
 
@@ -3088,7 +3098,8 @@ dxwrapper (mean luma 33.3, the shadow test at frame 2600). With
 `vk_stage1=0` the mean luma is 83.8: the walls and the floor have the full
 colour of their texture and no shadow.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 A row of a locked surface goes into a buffer of the CPU with streaming
 loads of SSE4.1 (MOVNTDQA) before the conversion, because a `Lock` of
@@ -3282,7 +3293,8 @@ after that gets no picture of the renderer (`VkSceneEyesWanted`,
 `VkScenePanelFor` and `VkSceneLastPicture` are false), and the log says so.
 Then start the game with the headset ready.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Not run yet:** a video, the Main Menu, a saved game, the Temple.
 
@@ -3375,7 +3387,8 @@ In a session in the headset the mod makes no copy to the monitor
 (`skip_desktop_present=1`, "The copy to the monitor"), so the window gets no
 present and no swapchain.
 
-The checks in a headset are in `headset-checks.md`, "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 `vk_window=0` is the way through the CPU and GDI. With `test_keys=1`,
 Shift D changes it from the next present: a change to 0 takes the
@@ -3468,7 +3481,8 @@ desktop the file stays until the end of the run.
 **Not run:** a PC with no Vulkan 1.3 or no `vulkan-1.dll`, a fault of the
 driver, and a session with Vulkan that does not start.
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The address space
 
@@ -3558,7 +3572,8 @@ space left:
 
 In both, the dump fails with `0x80070008` (`ERROR_NOT_ENOUGH_MEMORY`).
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 
 `foveation` (0 is the default, a test key: Shift O, the launcher row "Fewer
@@ -3737,7 +3752,8 @@ has no edge between the two images, and with `foveation_show=1` the rect of
 the centre with its soft edge shows. Not run: an eye tracker, the test
 key.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The session with Vulkan
 
@@ -3825,7 +3841,8 @@ and Vulkan on the drivers of NVIDIA and Intel. The scenes that no desktop
 run compared yet: the story camera, the fades, the Temple and the game at
 night.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye" and "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## How the threads wait
 
@@ -3879,7 +3896,8 @@ it. With 4, 6 and 16 cores the D3D7 thread makes each frame 0.05 to 0.14 ms
 shorter. A desktop run does not have the wait of the second thread for the
 GPU.
 
-The checks in a headset are in `headset-checks.md`, "Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The calls of DirectDraw and Direct3D 7 in a session
 
@@ -4907,7 +4925,8 @@ Ruled out as the cause: the full screen quad that `LH3DRender::FinishFrame` draw
 Open: the sun bobs a little as the head moves in the headset. The sun glare is the
 best candidate, and it is not proven.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### Models keep their detail further out
 
@@ -5175,7 +5194,8 @@ test light is shown in a run, and no run had a light map of a particle. Not
 known: which effects have a particle with a light map, and whether the second
 eye pass has such a map by itself.
 
-The checks in a headset are in `headset-checks.md`, "The picture in each eye".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The color over the picture at the end of a frame
 
@@ -5624,4 +5644,5 @@ section, so the uninstaller can put them back.
 - An off centre projection for each eye would draw about a third less.
 - The game turn could move off the render thread if its spike is large.
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

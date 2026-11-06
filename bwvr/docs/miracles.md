@@ -1259,7 +1259,8 @@ pictures). What it shows:
   that is not its default, other than `miracle_hand`.
 - A left handed player, `controller_swap_buttons=1`, and a multiplayer game.
 
-The checks in a headset are in `headset-checks.md`, "Miracles and gestures".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Limits
 

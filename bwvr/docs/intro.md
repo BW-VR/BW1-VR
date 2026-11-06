@@ -386,12 +386,13 @@ keeps need the Direct3D 9 device of the backend (`gpu_bridge=1`, the default).
 With no keep the log has one line that says so.
 
 With `backend=vulkan` the Vulkan renderer keeps the trails: the walk of eye 0
-draws into target 0 and the walk of eye 1 into target 1, over the last
-picture of that eye (`IntroPassEye`, `vk_keep_picture=1`, `backend.md`, "The
-picture of the walk before"). The depth starts at the far plane in each walk.
-The game also plays this effect while it loads a saved game. A desktop run of
-the logo with `backend=vulkan` shows the trails in both eyes. The checks in a
-headset are in `headset-checks.md`, "The intro".
+draws into target 0 and the walk of eye 1 into target 1, over the last picture
+of that eye (`IntroPassEye`, `vk_keep_picture=1`, `backend.md`, "The picture
+of the walk before"). The depth starts at the far plane in each walk. The game
+also plays this effect while it loads a saved game. A desktop run of the logo
+with `backend=vulkan` shows the trails in both eyes. The checks in a headset
+are in `headset-checks.md`, and the checks that a desktop run can prove are in
+`roadmap.md`, R12.
 
 The scene has the same rule for each frame of play that keeps the picture of
 the frame before (`eye_clean`, `stereo-artifacts.md`, "The frame before of
@@ -711,8 +712,8 @@ No headset session has seen this state, so `intro_vr` stays 0.
 - The scripted hands of a desktop run move in steps, and a real hand moves a
   little in each frame.
 
-The checks in a headset are in `headset-checks.md`, "The intro" and
-"Performance".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The skip
 
@@ -819,7 +820,8 @@ a run does not wait for the logos (`tools/desk/README.md`, "A fast start"). A
 run that tests the logos gives the key the value 0, or a frame of its own.
 
 In a headset the hands come from `XrScreen`, and no desktop run has them. The
-checks in a headset are in `headset-checks.md`, "The intro".
+checks in a headset are in `headset-checks.md`, and the checks that a desktop
+run can prove are in `roadmap.md`, R12.
 
 ## The internet check
 
@@ -909,7 +911,8 @@ dx check     : the game asked DSETUP.dll for the version of DirectX. The mod ans
   is an easy extra.
 - With `intro_motion=3` the camera of the game turns, and the room of the
   head turns with it. The push in 3D takes that turn as a turn of the hand.
-- The headset check of the stereo intro (`headset-checks.md`, "The intro").
+- The headset check of the stereo intro (`headset-checks.md`, "The intro in
+  stereo").
 - Not verified: the exact particle count and array strides (the `0xC000` bound
   and the strides `0x34` and 12 suggest 4096 particles [I]), and that
   `0x00E85304` holds the mouse button bits.

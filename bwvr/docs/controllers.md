@@ -1171,8 +1171,8 @@ Desktop runs use the fake controller with `fake_head=1`. These checks apply:
    script presses and releases the trigger, the game sees one press and one
    release.
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start
-of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 5.6 The left hand
 
@@ -1224,7 +1224,8 @@ of the right hand points. The base pose of each hand is on the side of its
 controller. So each recipe runs with the left hand as it runs with the right
 hand.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 6. Risks and known limits
 
@@ -1277,7 +1278,8 @@ The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
 4. Whether a laser line or a dot at `T` helps in the pointer mode, or whether
    the Hand alone is enough. The mod draws any such mark, not the game.
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. The aim ray
 
@@ -1441,7 +1443,8 @@ grab and the Creature commands. Not run: Numpad 5 through the three presets,
 and a far fetch and a teleport with a preset (`aim_queue.ps1` has the run,
 with `aim_test_touch=700`).
 
-The checks in a headset are in `headset-checks.md`, "The Hand and grabs".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 9. The game window behind
 
@@ -1618,8 +1621,8 @@ Not proven on the desktop: `XrScreen::InputFocused` itself in a session (the
 fake controller stands for it), a real `WM_ACTIVATEAPP` from Windows, and a
 take of an object in the `deactivate` state.
 
-The checks in a headset are in `headset-checks.md`, "Stability and the start
-of a session".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 10. The ring
 
@@ -1962,8 +1965,8 @@ action key. Also not run: `room_options` (the same call with a different
 room), the two test keys with a real key, an Index controller, a controller
 with no face buttons, and a real controller.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the
-ring" and "The Temple".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 10.8 The debug page
 
@@ -2047,8 +2050,8 @@ next press of Y opens the ring on the page Render again, and "Foveation"
 goes on. `radial_test_save` saves each picture of the ring. With
 `debug_menu=0` page 2 has `help` in slot 5, and no page has `debug`.
 
-The checks in a headset are in `headset-checks.md`, "Menus, cards and the
-ring".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 11. The Temple
 
@@ -2742,4 +2745,5 @@ always starts in a new game.
   state 4, and in a run it did not turn while the box was up [R]. A box that
   comes up with the camera in the state 1 is not known.
 
-The checks in a headset are in `headset-checks.md`, "The Temple".
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

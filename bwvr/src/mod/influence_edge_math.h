@@ -85,18 +85,9 @@ int FindEdge(Inside inside, float x, float z, float range, int directions,
   return count;
 }
 
-// THE WALL. A strip of light stands on the edge: one quad between each two
-// rays that are next to each other, when both found the edge and the two
-// points are less than `join` apart. It goes up from the land at each edge
-// point by `height`. The light of a corner is `light` times:
-//
-//   close   1 at the hand, 0 at `range` from it along the land, squared
-//   bottom  1 at the land and 0 at the top
-//   strength  1 - (the distance of the hand from the nearest edge point) /
-//             range, so the wall grows while the hand comes to the edge
-//
-// `ground` gives the height of the land at x, z. Returns the count of
-// triangles, at most `room`.
+// THE GLOW AT THE EDGE. A soft round patch of light lies on the edge at the
+// point of the edge nearest to the hand, at the height of the hand, so the
+// player sees where the hand meets the limit.
 struct WallTriangle {
   float p[3][3];
   float light[3];
@@ -106,61 +97,106 @@ inline float Clamp01(float v) {
   return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 }
 
-inline float Strength(const float hand[3], const bool found[],
-                      const float edge[][2], int directions, float range) {
-  if (!(range > 0.0f)) return 0.0f;
+// The edge point nearest to the hand among the rays that found the edge, and
+// its distance along the land. False when no ray found it.
+inline bool NearestEdge(const float hand[3], const bool found[],
+                        const float edge[][2], int directions, float out[2],
+                        float* distance) {
   float nearest = -1.0f;
   for (int k = 0; k < directions; ++k) {
     if (!found[k]) continue;
     const float dx = edge[k][0] - hand[0], dz = edge[k][1] - hand[2];
     const float d = sqrtf(dx * dx + dz * dz);
-    if (nearest < 0.0f || d < nearest) nearest = d;
+    if (nearest < 0.0f || d < nearest) {
+      nearest = d;
+      out[0] = edge[k][0];
+      out[1] = edge[k][1];
+    }
   }
-  if (nearest < 0.0f) return 0.0f;
-  return Clamp01(1.0f - nearest / range);
+  if (nearest < 0.0f) return false;
+  *distance = nearest;
+  return true;
 }
 
-template <typename Ground>
-int BuildWall(Ground ground, const float hand[3], const bool found[],
-              const float edge[][2], int directions, float range,
-              float height, float join, float light, WallTriangle* out,
-              int room) {
-  const float strength = Strength(hand, found, edge, directions, range);
-  if (!(strength > 0.0f) || directions < 3) return 0;
+// The strength of the glow, 0 to 1, for a hand `distance` from the edge,
+// inside or outside the influence:
+//
+//   inside   0 at `range` and 1 at the edge, along t * t * (3 - 2 * t) with
+//            t = 1 - distance / range. So the start is faint: a hand at a
+//            quarter of the range from its start has 0.16
+//   outside  1 at the edge, down to `outside_share` in `touch`, and then
+//            down to 0 at `outside_range`: the faint patch where the hand
+//            went through, which shows the way back
+inline float GlowStrength(bool inside, float distance, float range,
+                          float touch, float outside_range,
+                          float outside_share) {
+  if (!(distance >= 0.0f)) distance = 0.0f;
+  if (inside) {
+    if (!(range > 0.0f)) return 0.0f;
+    const float t = Clamp01(1.0f - distance / range);
+    return t * t * (3.0f - 2.0f * t);
+  }
+  const float near_touch =
+      touch > 0.0f ? Clamp01(1.0f - distance / touch) : 0.0f;
+  const float faint = outside_range > 0.0f
+                          ? outside_share *
+                                Clamp01(1.0f - distance / outside_range)
+                          : 0.0f;
+  return near_touch > faint ? near_touch : faint;
+}
+
+// The patch: a disc of `radius` in the vertical plane through the edge point
+// `at` (x and z), with its middle at the height `y`. The plane faces the hand
+// at x and z of `hand`. The light is `light` in the middle, 0.55 of it at half
+// the radius and 0 at the rim, so the patch is soft. Returns the triangles,
+// at most `room`: kPatchTriangles for a patch.
+const int kPatchSides = 16;
+const int kPatchTriangles = kPatchSides * 3;
+inline int BuildPatch(const float at[2], float y, const float hand[3],
+                      float radius, float light, WallTriangle* out,
+                      int room) {
+  if (room < kPatchTriangles || !(radius > 0.0f) || !(light > 0.0f)) return 0;
+  float nx = at[0] - hand[0], nz = at[1] - hand[2];
+  float length = sqrtf(nx * nx + nz * nz);
+  if (!(length > 1e-6f)) {
+    nx = 1.0f;
+    nz = 0.0f;
+    length = 1.0f;
+  }
+  // Along the wall, level.
+  const float ux = -nz / length, uz = nx / length;
+  const float kTwoPi = 6.2831853f;
+  const float levels[3] = {light, 0.55f * light, 0.0f};
+  const float radii[3] = {0.0f, 0.5f * radius, radius};
+  float ring[3][kPatchSides][3];
+  for (int r = 0; r < 3; ++r) {
+    for (int k = 0; k < kPatchSides; ++k) {
+      const float a = kTwoPi * static_cast<float>(k) /
+                      static_cast<float>(kPatchSides);
+      const float c = cosf(a) * radii[r], s = sinf(a) * radii[r];
+      ring[r][k][0] = at[0] + ux * c;
+      ring[r][k][1] = y + s;
+      ring[r][k][2] = at[1] + uz * c;
+    }
+  }
   int n = 0;
-  for (int k = 0; k < directions; ++k) {
-    const int j = (k + 1) % directions;
-    if (!found[k] || !found[j]) continue;
-    const float dx = edge[j][0] - edge[k][0], dz = edge[j][1] - edge[k][1];
-    if (!(sqrtf(dx * dx + dz * dz) < join)) continue;
-    if (n + 2 > room) break;
-    float corner[4][3];
-    float level[4];
-    const int ends[2] = {k, j};
-    for (int e = 0; e < 2; ++e) {
-      const float* at = edge[ends[e]];
-      const float y = ground(at[0], at[1]);
-      const float hx = at[0] - hand[0], hz = at[1] - hand[2];
-      float close = Clamp01(1.0f - sqrtf(hx * hx + hz * hz) / range);
-      close *= close;
-      // e 0 and 1 are the bottom corners, 2 and 3 the top corners.
-      corner[e][0] = at[0];
-      corner[e][1] = y;
-      corner[e][2] = at[1];
-      corner[e + 2][0] = at[0];
-      corner[e + 2][1] = y + height;
-      corner[e + 2][2] = at[1];
-      level[e] = light * close * strength;
-      level[e + 2] = 0.0f;
+  const auto add = [&](const float* a, float la, const float* b, float lb,
+                       const float* c, float lc) {
+    WallTriangle& w = out[n++];
+    for (int i = 0; i < 3; ++i) {
+      w.p[0][i] = a[i];
+      w.p[1][i] = b[i];
+      w.p[2][i] = c[i];
     }
-    const int tri[2][3] = {{0, 1, 3}, {0, 3, 2}};
-    for (int t = 0; t < 2; ++t) {
-      WallTriangle& w = out[n++];
-      for (int v = 0; v < 3; ++v) {
-        for (int c = 0; c < 3; ++c) w.p[v][c] = corner[tri[t][v]][c];
-        w.light[v] = level[tri[t][v]];
-      }
-    }
+    w.light[0] = la;
+    w.light[1] = lb;
+    w.light[2] = lc;
+  };
+  for (int k = 0; k < kPatchSides; ++k) {
+    const int j = (k + 1) % kPatchSides;
+    add(ring[0][0], levels[0], ring[1][k], levels[1], ring[1][j], levels[1]);
+    add(ring[1][k], levels[1], ring[2][k], levels[2], ring[2][j], levels[2]);
+    add(ring[1][k], levels[1], ring[2][j], levels[2], ring[1][j], levels[1]);
   }
   return n;
 }

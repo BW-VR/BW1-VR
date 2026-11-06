@@ -183,8 +183,9 @@ float HeadPoseScale();
 // edge of the influence near the pointing hand.
 void InfluenceEdgeFrame(float units_per_meter);
 float InfluenceEdgeOpacity(int hand, const float point[3], float dt);
-int InfluenceEdgeWall(const float point[3], float units_per_meter,
+int InfluenceEdgeWall(int hand, const float point[3], float units_per_meter,
                       influence_math::WallTriangle* out, int room);
+void InfluenceEdgeColor(float rgb[3]);
 
 namespace {
 
@@ -229,12 +230,13 @@ uint64_t g_flat_logged_frame = 0;
 bool g_flat_logged_hit = false;
 // The pixels of the end of the ray in each eye picture, for the log.
 float g_flat_end[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
-// THE WALL AT THE EDGE OF THE INFLUENCE (influence_edge.cpp), in the world.
-// The glow draws it as added light.
-const int kWallMax = 64;
+// THE GLOW AT THE EDGE OF THE INFLUENCE (influence_edge.cpp): a patch for each
+// hand near the edge, in the world. The glow draws it as added light.
+const int kWallMax = kHands * influence_math::kPatchTriangles;
 influence_math::WallTriangle g_wall[kWallMax];
 int g_wall_count = 0;
-const float kWallColor[3] = {1.00f, 0.86f, 0.55f};
+// The color of the influence ring of the player (InfluenceEdgeColor).
+float g_wall_color[3] = {1.0f, 0.27f, 0.27f};
 // The tether of a far grab is a tube of one segment. The room of a ring
 // under a far target stays as spare room.
 const int kFarMaxTriangles = overlay_math::kRingMaxTriangles +
@@ -1308,7 +1310,7 @@ int DrawGlow(IDirect3DDevice7* device, const float m[12], float near_plane,
     for (int v = 0; v < 3; ++v) {
       for (int k = 0; k < 3; ++k) {
         tri.p[v][k] = g_wall[w].p[v][k];
-        tri.c[v][k] = kWallColor[k] * g_wall[w].light[v];
+        tri.c[v][k] = g_wall_color[k] * g_wall[w].light[v];
       }
     }
   }
@@ -1747,11 +1749,16 @@ void OverlayFrame() {
   }
   if (g_on || HandExactOn()) BuildFrame();
   g_pointing_drawn = g_hand_valid[g_pointing];
-  // The wall at the edge of the influence, near the point of the pointing
-  // hand (influence_wall).
-  if (g_hand_valid[g_pointing] && g_units_per_meter > 0.0f) {
-    g_wall_count = InfluenceEdgeWall(g_index_tip[g_pointing],
-                                     g_units_per_meter, g_wall, kWallMax);
+  // The glow at the edge of the influence near the point of each hand
+  // (influence_wall).
+  if (g_units_per_meter > 0.0f && (g_hand_valid[0] || g_hand_valid[1])) {
+    InfluenceEdgeColor(g_wall_color);
+    for (int h = 0; h < kHands; ++h) {
+      if (!g_hand_valid[h]) continue;
+      g_wall_count += InfluenceEdgeWall(h, g_index_tip[h], g_units_per_meter,
+                                        &g_wall[g_wall_count],
+                                        kWallMax - g_wall_count);
+    }
   }
   BuildTeleport();
   BuildCommand();

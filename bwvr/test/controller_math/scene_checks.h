@@ -199,8 +199,11 @@ inline void SceneChecks() {
     Check(found[0], "the ray toward the edge finds it", found[0], 1);
     Near("at the edge of the circle", edge[0][0], 100.0, 0.2);
     const float at[3] = {90.0f, 0.0f, 0.0f};
-    Near("its strength is a third", Strength(at, found, edge, 24, 15.0f),
-         1.0 / 3.0, 0.02);
+    float point[2] = {0.0f, 0.0f}, d = 0.0f;
+    Check(NearestEdge(at, found, edge, 24, point, &d),
+          "the nearest edge point is found", 1, 1);
+    Near("10 units from the hand", d, 10.0, 0.2);
+    Near("straight toward the edge", point[1], 0.0, 0.2);
     Check(!found[12], "the ray away from the edge finds nothing", found[12],
           0);
     const int out = FindEdge(circle, 105.0f, 0.0f, 15.0f, 24, 6, 5, found,
@@ -210,53 +213,66 @@ inline void SceneChecks() {
     Near("at the edge of the circle", edge[12][0], 100.0, 0.2);
   }
 
-  // THE WALL stands on the edge, near the hand only, with no light at its
-  // top, and grows when the hand comes nearer.
+  // THE STRENGTH of the glow: none far inside, faint at the start of the
+  // range, full at the touch, and a faint patch past the edge that goes.
   {
-    bool found[kMaxDirections];
-    float edge[kMaxDirections][2];
-    WallTriangle wall[64];
-    const auto flat = [](float, float) { return 20.0f; };
-    const float far_hand[3] = {80.0f, 40.0f, 0.0f};
-    FindEdge(circle, far_hand[0], far_hand[2], 15.0f, 24, 6, 5, found, edge);
-    Check(BuildWall(flat, far_hand, found, edge, 24, 15.0f, 50.0f, 11.25f,
-                    0.35f, wall, 64) == 0,
-          "a hand 20 units from the edge has no wall", 0, 0);
+    const float range = 15.0f, touch = 2.25f, out = 22.5f, share = 0.35f;
+    Near("no glow at the start of the range",
+         GlowStrength(true, 15.0f, range, touch, out, share), 0.0, 1e-6);
+    Near("no glow farther inside",
+         GlowStrength(true, 40.0f, range, touch, out, share), 0.0, 1e-6);
+    Check(GlowStrength(true, 11.25f, range, touch, out, share) < 0.2f,
+          "a quarter into the range the glow is faint",
+          GlowStrength(true, 11.25f, range, touch, out, share), 0.2);
+    Near("full at the touch",
+         GlowStrength(true, 0.0f, range, touch, out, share), 1.0, 1e-6);
+    float last = -1.0f;
+    bool rises = true;
+    for (int i = 0; i <= 30; ++i) {
+      const float g =
+          GlowStrength(true, 15.0f - 0.5f * i, range, touch, out, share);
+      if (g < last) rises = false;
+      last = g;
+    }
+    Check(rises, "the glow rises while the hand comes near", rises, 1);
+    Near("just past the edge it is full",
+         GlowStrength(false, 0.0f, range, touch, out, share), 1.0, 1e-6);
+    Near("past the touch it is the faint patch",
+         GlowStrength(false, 2.25f, range, touch, out, share),
+         0.35 * (1.0 - 2.25 / 22.5), 1e-5);
+    Near("far past the edge it is gone",
+         GlowStrength(false, 30.0f, range, touch, out, share), 0.0, 1e-6);
+  }
+
+  // THE PATCH lies in the vertical plane of the edge point, facing the hand,
+  // with its light in the middle and none at its rim.
+  {
+    WallTriangle patch[kPatchTriangles];
+    const float at[2] = {100.0f, 0.0f};
     const float hand[3] = {92.0f, 40.0f, 0.0f};
-    FindEdge(circle, hand[0], hand[2], 15.0f, 24, 6, 5, found, edge);
-    const int n = BuildWall(flat, hand, found, edge, 24, 15.0f, 50.0f, 11.25f,
-                            0.35f, wall, 64);
-    Check(n >= 2, "a hand 8 units from the edge has a wall", n, 2);
-    float most = 0.0f, top = 0.0f, lowest = 1e9f, highest = -1e9f;
+    const int n = BuildPatch(at, 40.0f, hand, 9.0f, 0.6f, patch,
+                             kPatchTriangles);
+    Check(n == kPatchTriangles, "a patch has its triangles", n,
+          kPatchTriangles);
+    bool flat = true, inside = true;
+    float most = 0.0f, rim = 0.0f;
     for (int t = 0; t < n; ++t) {
       for (int k = 0; k < 3; ++k) {
-        const float r = sqrtf(wall[t].p[k][0] * wall[t].p[k][0] +
-                              wall[t].p[k][2] * wall[t].p[k][2]);
-        Near("each corner is on the edge", r, 100.0, 0.3);
-        if (wall[t].p[k][1] > 20.5f) {
-          if (wall[t].light[k] > top) top = wall[t].light[k];
-        }
-        if (wall[t].light[k] > most) most = wall[t].light[k];
-        if (wall[t].p[k][1] < lowest) lowest = wall[t].p[k][1];
-        if (wall[t].p[k][1] > highest) highest = wall[t].p[k][1];
+        const float* q = patch[t].p[k];
+        if (fabsf(q[0] - 100.0f) > 1e-4f) flat = false;
+        const float r = sqrtf((q[1] - 40.0f) * (q[1] - 40.0f) + q[2] * q[2]);
+        if (r > 9.0f + 1e-4f) inside = false;
+        if (r > 8.99f && patch[t].light[k] > rim) rim = patch[t].light[k];
+        if (patch[t].light[k] > most) most = patch[t].light[k];
       }
     }
-    Near("the wall starts on the land", lowest, 20.0, 1e-4);
-    Near("and is 50 units high", highest, 70.0, 1e-4);
-    Near("its top has no light", top, 0.0, 1e-6);
-    Check(most > 0.0f && most <= 0.35f, "its light is faint", most, 0.35);
-    const float nearer[3] = {98.0f, 40.0f, 0.0f};
-    FindEdge(circle, nearer[0], nearer[2], 15.0f, 24, 6, 5, found, edge);
-    const int m = BuildWall(flat, nearer, found, edge, 24, 15.0f, 50.0f,
-                            11.25f, 0.35f, wall, 64);
-    float most2 = 0.0f;
-    for (int t = 0; t < m; ++t) {
-      for (int k = 0; k < 3; ++k) {
-        if (wall[t].light[k] > most2) most2 = wall[t].light[k];
-      }
-    }
-    Check(most2 > most, "the wall grows when the hand comes nearer", most2,
-          most);
+    Check(flat, "the patch is in the plane of the edge, facing the hand", flat,
+          1);
+    Check(inside, "the patch is round, 9 units from its middle", inside, 1);
+    Near("its middle has the light", most, 0.6, 1e-6);
+    Near("its rim has none", rim, 0.0, 1e-6);
+    Check(BuildPatch(at, 40.0f, hand, 9.0f, 0.0f, patch, kPatchTriangles) == 0,
+          "no light gives no patch", 0, 0);
   }
 }
 

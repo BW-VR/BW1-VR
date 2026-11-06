@@ -3795,6 +3795,9 @@ const char* RecenterClash(int rule) {
   return nullptr;
 }
 
+// The map of the buttons that acts on a controller (below).
+void MapOfController(int c, int out[button_map::kButtons]);
+
 void PumpRecenter() {
   const int rule = Comfort().recenter_hold;
   if (rule == comfort_math::kRecenterOff) {
@@ -3820,9 +3823,21 @@ void PumpRecenter() {
   if (comfort_math::RecenterStep(&g_recenter_hold, click, still,
                                  GetTickCount64() / 1000.0,
                                  kRecenterHoldSeconds)) {
-    ControllersRecenter(index == PointingIndex()
-                            ? "a hold of the stick click of the pointing hand"
-                            : "a hold of the stick click of the other hand");
+    // The words name the button that gives the slot of the stick click
+    // (the map of the buttons, MapButtons).
+    int map[button_map::kButtons];
+    MapOfController(index, map);
+    const int button =
+        button_map::ButtonOfSlot(map, button_map::kStickClick);
+    const wchar_t* word = button_map::ButtonWord(
+        button_map::KindOfProfile(HandProfileOf(index)), index == 0, button);
+    char by[96];
+    sprintf_s(by, "a hold of %ls of the %s",
+              word != nullptr && button != button_map::kStickClick
+                  ? word
+                  : L"the stick click",
+              index == PointingIndex() ? "pointing hand" : "other hand");
+    ControllersRecenter(by);
   }
 }
 
@@ -5740,17 +5755,18 @@ void ControllersButtonJobs(button_map::Jobs* out) {
   out->recenter_hold = Comfort().recenter_hold;
   out->book = SpellBookButtonOn();
   // The keys of the ring do not change while the game runs.
-  static int ring_button = -1;
+  static int ring_button = -1, ring_stick = 0;
   if (ring_button < 0) {
-    ring_button = IniInt("radial_menu", 1) != 0
-                      ? IniInt("radial_menu_button", 1)
-                      : 0;
+    const bool ring = IniInt("radial_menu", 1) != 0;
+    ring_button = ring ? IniInt("radial_menu_button", 1) : 0;
+    ring_stick = ring && ring_button != 3 &&
+                 IniInt("radial_menu_stick", 1) != 0;
   }
   out->ring_button = ring_button;
   out->swap_buttons = g_swap_buttons;
   out->world_grab = g_grab.on && g_grab.hand >= 1;
-  out->walk = StickWalks();
-  out->stick_ring = RadialMenuStickDrives();
+  out->walk = TabletopGodMoveStick() != walk_math::kRuleOff;
+  out->stick_ring = ring_stick != 0;
 }
 
 // The page Controls: a new map for the controller of the Hand (role 0) or of

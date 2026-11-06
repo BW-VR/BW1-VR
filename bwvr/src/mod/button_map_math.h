@@ -273,9 +273,19 @@ struct Jobs {
   // The fixed controls.
   bool swap_buttons;   // controller_swap_buttons
   bool world_grab;     // the grip of the other hand grabs the world
-  bool walk;           // the stick of the other hand walks
-  bool stick_ring;     // the stick of the other hand drives the ring
+  bool walk;           // move_stick is on: the stick of the other hand
+                       // walks while it does not drive the ring
+  bool stick_ring;     // radial_menu_stick is on, with a ring that the
+                       // trigger does not open
 };
+
+// The stick of the other hand drives the ring: with button_layout=0, and on
+// a controller with no face buttons (a Vive wand, a Mixed Reality
+// controller), where the stick or the pad is the control of the ring with
+// each layout (radial_menu.cpp, StickCanDrive).
+inline bool StickRing(const Jobs& j, int kind) {
+  return j.stick_ring && (j.layout == 0 || (kind != kTouch && kind != kIndex));
+}
 
 // The job of a slot of a controller of `kind`. `pointing` is the Hand.
 // `left` is the left controller: its menu button sends Esc with either hand
@@ -364,8 +374,10 @@ inline const wchar_t* FixedLabel(int kind, bool left, int control) {
   return kLabel[left ? 1 : 0][control];
 }
 
-// The job of a fixed control, in at most 13 letters.
-inline const wchar_t* FixedAction(const Jobs& j, bool pointing, int control) {
+// The job of a fixed control of a controller of `kind`, in at most 13
+// letters.
+inline const wchar_t* FixedAction(const Jobs& j, int kind, bool pointing,
+                                  int control) {
   if (pointing) {
     switch (control) {
       case kTrigger:
@@ -379,11 +391,11 @@ inline const wchar_t* FixedAction(const Jobs& j, bool pointing, int control) {
   switch (control) {
     case kTrigger:
       if (j.ring_button == 3) return L"Ring";
-      return j.layout == 0 && j.stick_ring ? L"Ring choice" : L"No job";
+      return StickRing(j, kind) ? L"Ring choice" : L"No job";
     case kGrip:
       return j.world_grab ? L"Move the land" : L"No job";
     default:
-      if (j.stick_ring) return L"Ring";
+      if (StickRing(j, kind)) return L"Ring";
       return j.walk ? L"Walk" : L"No job";
   }
 }

@@ -1244,6 +1244,12 @@ leash) and does what the game does on a match: `fn_005CE420(0)` and packet
 controller gives a pulse of 0.6 for 80 ms when the game turns the leash off.
 With the mouse, the game's own test acts.
 
+A desktop run (`creature_recipe.ps1 -Kind shake`) has 4 strokes of 15 cm in
+767 ms, the slowest at 0.75 m/s: the leash is off 34 ms after the shake. Pulls
+at about 0.4 m/s give no shake. With `leash_shake_mps=0.9` the same strokes
+give no shake. The scripted strokes are 15 cm long, so 4 strokes at 0.60 to
+0.67 m/s take more than 0.9 s, and no run shows a stroke at those speeds.
+
 ### 4.5 Keys
 
 | Key | Default | What it does |
@@ -1896,6 +1902,9 @@ creature_recipe.ps1 -Name <run> -Dll <dll> -Kind walk
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind gift
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind giftfree
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind open -NewGame
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind wide
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind walkstay
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind shake
 ```
 
 The kind `state` (the default) does these steps:

@@ -948,11 +948,12 @@ when the item names no other script:
 - The Hand's point is 11 cm from the Creature (`seek_plan=creature` and the
   word `slap`). With `hand_wide_creature=0` there is no target, and a grip
   does nothing. With the default the Creature is the target in the wide
-  reach, and a grip of 6 frames puts the leash on.
+  reach, and a grip of 6 frames puts the leash on. A grip that stays closed
+  at 9.7 and at 11.1 cm starts the Creature state, and a grip of 30 frames
+  takes the leash off (`creature_recipe.ps1 -Kind wide`).
 
 **Not proven on the desktop:** a miracle in the wide reach beside a signpost
-(the test miracle floats at the height of the Hand, so the point is in it), a
-grip that stays closed on the Creature in the wide reach, the body of a tree and the game's height in the
+(the test miracle floats at the height of the Hand, so the point is in it), the body of a tree and the game's height in the
 game, the red halo, the Creature as a choice, a scroll that wins over a tree that the point is in, and the hook of
 the leash past its install. A place at 66 to 100 units a meter, the scale of
 the headset, is not run.

@@ -1261,6 +1261,12 @@ view. At other times it is the life size scale. The game's value stays when it i
 nearer. 0 for a key keeps the game's near plane. Play modes 1 and 2 keep the
 game's near plane, because the hands are not in the world there.
 
+A desktop run (`hand_run.ps1 -Kind near`, six zoom steps in to 8.8 units a
+meter) has the near plane at 0.439 units (5.0 cm). The Hand at 20, 10, 7 and
+5 cm from the eye is whole in both eyes. With `near_plane_cm=0` the game's
+3.5 units (39.9 cm) cut both hands away. At 100 units a meter the game's
+value is 0.96 units (1.0 cm), so the key does not act there.
+
 Why 10 cm at 16 bit: 0.75 units (10 cm at the life size scale) is the near plane
 that the game uses with its camera 2.8 units over the land (`0.3 + 0.16 * h`).
 At 900 units a 16 bit step is then 16 units. It is 3.5 units with the game's 3.5
@@ -2278,6 +2284,11 @@ has more objects in view.
 
 The interface in the eye pictures is a part of the render. With a margin it
 is that much larger, and that much farther from the middle.
+
+No desktop run can show the margin: `PrepareHeadView` applies it only to the
+eye views of a runtime, so a desktop run keeps the view of
+`fov_absolute_deg`. The check is in `headset-checks.md`, "Play as normal and
+send the log".
 
 ### What it saves
 
@@ -5103,8 +5114,14 @@ Ruled out as the cause: the full screen quad that `LH3DRender::FinishFrame` draw
 `0x0082F617` (diffuse 0, a transparent fade) and `CloudInSky` (its per frame update at
 `0x005E25C0` drifts the 70 clouds in world space and reads no camera).
 
+A desktop run with the sun in the view (`sky_test_hour=13`, a head with a roll of
+25 degrees and a level head) has the glare on the disc of the sun in each pose,
+with `sun_glare` 0 and 1. With a still head the two values give the same sun:
+less than 0.2 percent of the pixels of the sun area differ by more than 6.
+
 Open: the sun bobs a little as the head moves in the headset. The sun glare is the
-best candidate, and it is not proven.
+best candidate, and it is not proven. Not run: `sun_glare=2`, and a head that
+moves.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.

@@ -37,9 +37,10 @@ want.
 4. **The zoom.** Zoom in and out with the stick. Then try the switch "Smooth
    zoom" (debug page, View). Wrong: discomfort, a blink, or a rate that is
    too fast or too slow.
-5. **The walk and the grab of the land.** Walk with the stick near and far
-   and on hills, and grab the land with one grip and with two grips. Wrong:
-   discomfort, a wrong speed, a view that bobs or stops and jumps, land that
+5. **The walk and the grab of the land.** Walk with the stick near and far,
+   with a small push, and on hills, and grab the land with one grip and with
+   two grips. Wrong: discomfort, a wrong speed, a walk with the thumb at
+   rest, a view that bobs or stops and jumps, land that
    shakes while the hand is still, or a bump at the edge of the Creature
    select that is too loud. Then set the launcher row "Comfort vignette" to
    gentle and to strong for a short walk. Wrong: it does not help, or it is
@@ -217,7 +218,15 @@ agents: the log does not tell the item yet.
   Key: one of these at 0 for a play. An agent puts the file
   `bwvr-capture-now.txt` beside `runblack.exe` during the play, and compares
   the pictures of the eye swapchains (`bwvr-xr-left-N.bmp`,
-  `bwvr-xr-right-N.bmp`) with a play with the defaults.
+  `bwvr-xr-right-N.bmp`) with a play with the defaults. The same compare
+  with `fov_margin_pct` at 10 and 20: the world, the Hand, the pointer, the
+  Creature panel and a tooltip keep their places and their scale.
+- **The Creature panel on its quad** (`ui_panel=1`, N15). Key:
+  `ui_panel=1`. Log: `ui panel     :` gives the frames on which the
+  Creature panel drew and the times that it went to the room.
+- **Heal on a sick villager**, for example in the plague quest (N6). Log:
+  `the game casts Heal`. Needs a log line: the health of the villagers under
+  the cast, before it and after it.
 - **Slow frames and stutter** (N1). Log: `worst frame  :`, `runtime calls:`
   and `slow frame   :`.
 - **The pace of the runtime at 120 Hz** (N1). Log: `display      : the
@@ -330,8 +339,9 @@ gives its prayer power back. A one-off miracle that you take out is lost.
 
 **What the desktop runs show now.** A desktop run shows that the game gets
 the cast (the log line `the game casts ...`). The eye pictures also show the
-effect of Food, Forest, Explosion and Freeze. The other effects in the world
-are not proven yet.
+effect of Food, Forest, Explosion, Freeze, Enlarge and Shrink, a Fireball on
+a house, Water on burning trees and the dome of a Physical Shield. The other
+effects in the world are not proven yet.
 
 **Which miracles you have.** The towns of each land give their miracles.
 The debug switch "All miracles" (debug page, Creature) gives each town all
@@ -359,10 +369,11 @@ Water and Heal do not show.
 - **Gesture.** Spiral, then the W shape. A pour.
 - **In the mod.** Keep the grip closed over the place, and open it to stop.
 - **Proved.** Desktop runs: the pour, the request from the spell book, and
-  a power up from a Worship Site.
+  a power up from a Worship Site. A pour of 27 casts puts out burning trees
+  (`miracle_run.ps1 -Kind fire`). A pour of 62 casts on a burning house does
+  not put out its fire (N6).
 - **The owner's check.** Check 21 of "What the owner checks".
-- **To prove.** Water on a fire puts it out. Water on a field and on a forest
-  changes their growth.
+- **To prove.** Water on a field and on a forest changes their growth.
 
 ### Food ("Horn of Plenty")
 
@@ -422,7 +433,8 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the cast at a place, and the request from the
   spell book.
 - **To prove.** Sick villagers under the Hand recover (for example in the
-  plague quest).
+  plague quest). A test save of Land 1 has no sick villager, so the check is
+  in "Play as normal and send the log".
 
 ### Fireball ("Sphere Aflame")
 
@@ -438,8 +450,9 @@ Water and Heal do not show.
 - **In the mod.** Close the grip, swing the hand, and open the grip. It flies
   with the speed of the hand.
 - **Proved.** Desktop runs: the throw with a step of the hand, not with a
-  real swing.
-- **To prove.** A house that a Fireball hits burns.
+  real swing. A Fireball that falls from a still hand onto a house sets it
+  on fire, and the house burns for 24 s and more (`miracle_run.ps1 -Kind
+  fire`).
 
 ### Lightning ("Forked Fire")
 
@@ -508,10 +521,11 @@ Water and Heal do not show.
 - **Cost.** 7000, and more for each second that it stands. No power up.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
 - **In the mod.** Close the grip and draw a circle over the land.
-- **Proved.** Desktop runs: only the refusal with no circle ("needs a circle
-  on the land first"). Not run: a cast.
-- **To prove.** The dome stands over the circle, and a rock thrown at it
-  stops.
+- **Proved.** Desktop runs: the refusal with no circle ("needs a circle on
+  the land first"), and the cast: the dome stands over the circle in the eye
+  pictures (`miracle_run.ps1 -Kind pshield`). A pig thrown at the dome goes
+  in, also with `throw_law=1` (N6).
+- **To prove.** A rock thrown at the dome stops.
 
 ### Teleport ("Instant Journey")
 
@@ -525,7 +539,10 @@ Water and Heal do not show.
 - **Gesture.** Spiral, then the house. At a place, two times.
 - **In the mod.** Close the grip with the Hand over the place. Not confirmed:
   whether the second site needs a second cast.
-- **Proved.** Not run (N6).
+- **Proved.** Desktop runs (`miracle_run.ps1 -Kind teleport`): one cast of a
+  one-off seed makes one site before the door of the Temple, and a villager
+  set down on it does not go. At the Village Store the game refuses the cast.
+  No second site shows (N6).
 - **To prove.** The two sites stand on the land, and villagers go in at one
   and come out at the other.
 
@@ -591,13 +608,13 @@ on the Creature. The gesture is the inverse spiral and then the shape below.
   Enlarge and Invisibility put their entry on the Creature, and Shrink and
   Enlarge change its base size (`miracle watch:`). At the door of the
   Temple the game draws the body at the size 0.22 with each spell
-  (`miracles.md`, "What a cast makes"). Invisibility makes the Creature
+  (`miracles.md`, "What a cast makes"). Away from the pen the drawn body
+  goes to 2.0 with Enlarge and to 0.2 with Shrink, and the eye pictures show
+  the change (`miracle_run.ps1 -Kind away`). Invisibility makes the Creature
   fizz to sparkles and a shadow. Not run: the other four (N6).
 - **To prove.** The narrator says that Freeze has worn off (no subtitle
-  line of the log has text). Shrink and Enlarge change the size of the body
-  away from the Temple. Weaken,
-  Strengthen, Compassion, Anger and Itchy each change the Creature as the
-  table says. A Creature miracle at a Creature outside the influence has a
+  line of the log has text). Weaken, Strengthen, Compassion, Anger and Itchy
+  each change the Creature as the table says. A Creature miracle at a Creature outside the influence has a
   red halo, and the card says why.
 
 **Miracles that a player does not cast.** The game has seven more Creature

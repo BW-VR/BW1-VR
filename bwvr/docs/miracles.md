@@ -1177,7 +1177,9 @@ What the game does to the Creature [V]:
   16 m to 0.22 at 14 m and nearer. So at the door of the Temple the body
   keeps the size 0.22 with each spell, also in the plain game. A desktop
   run in the test save `temple` shows the base size at 0.200 with Shrink
-  and 2.400 with Enlarge, and the drawn body at 0.220. The watch line gives
+  and 2.400 with Enlarge, and the drawn body at 0.220. Away from the pen
+  (61 m of the game from its point, `miracle_run.ps1 -Kind away`) the drawn
+  body goes to 2.000 with Enlarge and to 0.200 with Shrink. The watch line gives
   the metres from the point at the pen, and the size that the body gets in
   front of the pen. The walk also reads the base size
   (`LH3DCreature::GetNavRadius` `0x00480A60`).
@@ -1532,8 +1534,9 @@ pictures). What it shows:
   more often. The trail with the low poly hand, with `overlay=0` and on the
   table.
 
-- Teleport (the cast of Heal), and the Creature miracles other than Strong
-  and Freeze.
+- The second site of Teleport: one cast (`miracle_run.ps1 -Kind teleport`)
+  makes one site, and a villager on it does not go. The Creature miracles
+  other than Strong, Freeze, Shrink, Enlarge and Invisibility.
 - A Creature outside the influence (the red halo and its line), each reason
   of a refusal other than "needs a Creature" and "needs a circle on the
   land", a Worship Site or a dispenser as the target, and a magic fireball.

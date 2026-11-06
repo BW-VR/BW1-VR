@@ -1241,6 +1241,12 @@ of the right hand points. The base pose of each hand is on the side of its
 controller. So each recipe runs with the left hand as it runs with the right
 hand.
 
+`hand_run.ps1 -Kind left` shows the left controller as the Hand and the
+game's Hand as a left hand. The word `menu` (the left controller with
+`left_hand=1`) sends Esc and opens the Main Menu, and `lmenu` sends nothing.
+A second press does not close the Main Menu: the game does not close it with
+Esc.
+
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
 
@@ -2114,7 +2120,10 @@ left arrow. The table marks that line as a line of the ring only.
 
 **The debug pages of the ring** (`debug_window=0`). A link item goes to its
 page after 0.45 s with the hand on it, or at once with the trigger, as
-`More` does. A release on a link chooses nothing.
+`More` does. A release on a link chooses nothing. The recipe in the header
+of `temple_run.ps1` goes from page 2 to the groups, to Render and to "One
+walk", and each link changes the page 27 frames (0.45 s) after the hand comes
+to it.
 
 | Page | Items |
 | --- | --- |

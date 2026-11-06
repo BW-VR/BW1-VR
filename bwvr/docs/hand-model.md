@@ -671,7 +671,9 @@ with no clone has no reader, and the log of the mod says so.
 
 A vertex can have up to 4 bones. The game's own mesh has one bone for each
 vertex, so a mesh with more bones at a joint bends more smoothly than the
-game's.
+game's. No test shows a file with more bones: the only hand with the 22
+joints of the game is the hand of the game, and the repo has no file of the
+game.
 
 ### The fit
 
@@ -1390,9 +1392,15 @@ water under it in the same frame. With 0 no ring starts. The log says that the
 look of the water is on or off (`hand_feel_water_look`), but the captures do
 not show the part of the hand under the water.
 
-**Open: not shown on the desktop.** A building as a body near either hand
-(`hand_feel_offer`): the test save `pen` has no house in the view of the
-seek. The look of the water in a picture. A rock as a body (no run put a hand at
+In the test save `temple` (`village_run.ps1 -Kind wall`, 13.2 units a meter)
+the fingers of the right hand are in the body of the Village Store in 213 of
+217 frames. With `hand_feel_offer=0` the pick gets no more objects, and the
+fingers act the same.
+
+**Open: not shown on the desktop.** A finger at the wall of a house: at 44.4
+units a meter the Hand's point goes 1.5 cm into the body of a house and no
+finger does, and at 13.2 units a meter no house is within 2 m of the room.
+The look of the water in a picture. A rock as a body (no run put a hand at
 a rock), a finger at the crown of a tree, a villager or an animal that walks
 into a still hand, the Creature that comes to the hand, the spread of a flat
 hand in a picture, a real press of the test key, the approach at weights
@@ -1636,6 +1644,10 @@ turned camera gives the same numbers, and two eyes 6.68 units apart put the
 two discs `fx * e / d * hx` pixels apart, level, each on its own eye's line to
 the point. On the desktop both eyes put the disc on the tip of the index
 finger, and a villager under the point turns the disc gold and larger.
+`hand_run.ps1 -Kind glow` has the glow at the finger tip in both eyes, 58.0
+px apart as its depth asks, and the finger does not hide it. With the hand
+17 cm in the land (`hand_land_stop=0`) the hill hides the hand and the glow
+in both eyes.
 
 In one walk, a desktop run with `hand_glow=1`, `hand_glow_idle=1`,
 `one_walk_check=1` and four poses of the hand (`fake_controller_rots`) has
@@ -1809,9 +1821,13 @@ cost measure (`bench_run.ps1`, a target in each scene) shows no difference
 between `target_glow=1` and `target_glow=0` that is larger than the spread
 of two runs.
 
+`village_run.ps1 -Kind tglow` (`target_glow_log=30`) shows the glow in both
+eyes on the Village Store (393 vertices) and a pile, and the log has it on a
+tree and a villager. Each batch is in the call of the object.
+
 **Open.** No run has shown a mesh of the sorted list as a target, a mesh
-that comes through the clip of the engine, or a target by day: the test
-saves are at dusk.
+that comes through the clip of the engine, or a target by day: each run had
+the red sky of the evening. `sky_test_hour=13` sets the day.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.

@@ -720,10 +720,18 @@ catch up of the picture (`kCatchUp`).
 
 ### Open
 
-- Not tested: a throw into a pile of objects. A desktop run shows the landing
-  of a villager, of a rock in the sea and of a rock at 7.5 to 225 units per
-  meter ("Desktop runs" in "The throw physics", and "The rest after a
-  landing"). The log does not say whether a thrown villager lives.
+- Not tested: a rock thrown into a pile. A bundle of wood thrown at the pile
+  of the Village Store goes into the store at its first contact: the game
+  takes it out of its physics (`village_run.ps1 -Kind throwpile`). The card
+  of the store does not show the count of the throw.
+- A thrown villager lives through a throw of 3.0 m/s (1.8 m/s at the first
+  contact) and dies from a throw of 12.7 m/s (6.5 m/s at the first contact):
+  the census of the worship counts one villager less (`village_run.ps1 -Kind
+  throwlive`). No log line names the death. After the hard landing the
+  villager hops 2.2 m high in the room (`roadmap.md`, N14).
+- A rock thrown at 7.5 m/s at a house breaks its roof and a wall
+  (`village_run.ps1 -Kind throwhousefast`). A rock that falls 40 units from a
+  still hand stays against the house with no damage (`-Kind throwhouse`).
 - The rest after a landing: on a steep slope the object moves in the
   game's own time until the land is flatter (8 s on the slope at the pen,
   which is 41 units high).

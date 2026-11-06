@@ -487,6 +487,11 @@ the Hand, which the game puts on the same ray.
   not allow pan nothing until the release.
 - A zoom or a turn during the drag anchors the pan again, with no move.
 
+A desktop run with the test mouse (`hand_run.ps1 -Kind mousepan -Save
+temple`, no controller) shows the pan: the mouse takes the land 1.31 m from
+the head, the grabbed land stays within 0.000 cm of the mouse ray, and the
+view moves only on the frames in which the mouse moves.
+
 ### 5.4 What the game's land drag does
 
 This is the game's own drag with the mouse or with the trigger of the
@@ -630,6 +635,11 @@ and 20 degrees down while it holds. All are steps. The launcher removes these
 keys. After a run, the report has one line, `the held camera moved X units a
 frame on average, Y at most`. A real hand is never quite still, so in the
 headset this line shows the tracking noise times the gain.
+
+`hand_run.ps1 -Kind holdland` holds the grip on the land with still hands:
+the held camera moves 0.0000 units on each of 249 frames. A step of the hand
+of 10 cm up in a second grip moves the ground 10.00 cm up in the room, and
+the still frames after it move nothing.
 
 ### 5.7 The walk with the stick
 
@@ -1748,9 +1758,8 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   math test. An advisor goes to a place of the world in a desktop run only
   with a test (`tabletop.md`, "A spirit at a place of the world"). No desktop
   run has the sound.
-- **The mouse pan on the desktop** and the **tutorial events** (section 7)
-  have not run in the game. The numbers and the bits come from the binary.
-  The run is in section 12.
+- **The tutorial events** (section 7) have not run in the game. The
+  numbers and the bits come from the binary. The run is in section 12.
 - **The mouse** pans, zooms, turns and moves the ground. Its Hand still has
   the game's own size, which grows with the distance, and its throw has the
   speeds of the life size scale. These are in `hand_direct.cpp`.
@@ -1782,10 +1791,12 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   the Hand's point with no controller, a hill at the new place of the head,
   the mouse wheel with the look, or the key with a real key. These have the
   math test only.
-- **The walk with the stick** (section 5.7). No run has shown a small
-  push, the edge of the map, a push with the switch for the drag off, a
-  controller that points straight up or down, or the test key with a real
-  key. These have the math test or no test.
+- **The walk with the stick** (section 5.7). With `god_zone=0` a walk
+  (`village_run.ps1 -Kind walk`) stops at the edge of the map at x 5120 and
+  slides along it. No run has shown a small push, a hill within 10 cm of the
+  head, a push with the switch for the drag off, a controller that points
+  straight up or down, or the test key with a real key. These have the math
+  test or no test.
 - **The tutorial** (section 7, "The steps of the tutorial"). A desktop run
   and the log of a session in the headset show the tutorial of Land 1 from
   the walk to the village to the texts after the zoom lesson. On the walk to
@@ -2864,15 +2875,19 @@ the same view: the place stays at the limit while the stick pushes. They
 show the force field of the game at the edge of the zone, which the bumps
 pulse.
 
+With the renderer Direct3D 9 (`backend=dxwrapper\ddraw.dll`) the walk of
+`hand_run.ps1 -Kind zone` stops 50.0 units past the zone, and the game camera
+goes 10 units out of the zone for one update with its sound. The limit
+stopped 252 moves in 1 push, 9 bumps asked for the sound, and the game
+started 0 shakes. In the test save `temple` the zone of the island (x 888 to
+4120, z 1398 to 4379) stops a walk with the stick (`village_run.ps1 -Kind
+walk`).
+
 ### 17.7 Not tested, and what needs the headset
 
-- With the renderer Direct3D 9 (`backend=dxwrapper\ddraw.dll`) the runs
-  drew 73 frames in 48 s and 163 frames in 90 s while a person used the PC,
-  so the recipe did not come to its steps. The zone does not touch the
-  renderer, and no run has shown it with Direct3D 9.
 - The other zones of Land 1 have the same rule. The verify runs show the zone
-  `Land1Zone5.exc` in the test save `temple`, with no push. No run and no
-  session has shown a push at another zone.
+  `Land1Zone5.exc` in the test save `temple`, with no push. No session has
+  shown a push at a zone other than the zone of the Creature select.
 - `Influence::CalculatePlayerRawInfluence` and `CameraModeFollow::Update`
   also call `InsideInclusion`. What they do with the zone is not read.
 - The two other callers of `LH3DCameraChecker::Create`

@@ -649,7 +649,7 @@ The biggest cost is memory, and it is small against a headset render.
 | Part | State |
 | --- | --- |
 | The panel target, the switch, the share, the census and the captures (`ui_panel=2`) | built |
-| The panel layers in the headset (`ui_panel=1`): menu and help quads | built, never run with `ui_panel=1` on the desktop, never seen in a headset |
+| The panel layers in the headset (`ui_panel=1`): menu and help quads | built. A desktop run (`creature_recipe.ps1 -Kind open` with `ui_panel=1`) sends each batch to the panel (menu, help and the subtitle box) and none to the eyes, and no bind fails. Never seen in a headset |
 | The Creature panel quad | built (section 13) |
 | The subtitle card | built (section 17) |
 | Input on the panel (section 5) | planned for `ui_panel=1` |
@@ -661,10 +661,11 @@ The biggest cost is memory, and it is small against a headset render.
 | The panel over the monitor copy, when the monitor copy is on | planned |
 | The launcher: the interface size row changes meaning when `ui_panel` is 1, and says so | planned |
 
-With `ui_panel=1` these are unchecked on the desktop: that eye pass 1 skips
-the panel batches cleanly, that the eye pictures lose the menus, and that a
-scripted click still works with the menu only on the panel. The code for the
-hit test does not change, so it should.
+With `ui_panel=1` the desktop run has the Creature panel and the subtitle in
+the capture of the panel, and neither in the eye picture of that frame.
+Unchecked on the desktop: a scripted click with the menu only on the panel.
+The code for the hit test does not change, so it should. With no runtime no
+quad goes out, so the Creature panel on its quad needs a headset.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
@@ -1025,6 +1026,12 @@ limits, the scale about the Hand's point in the left eye, and the Hand's
 disparity for a point of the tooltip in both eyes. The desktop rig is the bulk
 take rig of `hand.md` with `help_test=1`.
 
+`village_run.ps1 -Kind tooltip` (`hint_card=0`) has the tooltip "Amount: 128"
+of a pile at the Hand's point, 0.77 m from the eyes, at the scale 0.358. Each
+eye has the same eye difference for the tooltip as for the Hand's point (84
+px), and both eye pictures have the label at the same place against the
+hand.
+
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
 
@@ -1357,8 +1364,16 @@ The desktop route runs with `subtitle_card_test=1` and `subtitle_selftest=1`:
 the two test lines must be on the card and not in the eye pictures, and with
 the card off they must be in the eye pictures.
 
-**Not tested:** a real subtitle of the game in a desktop run. The place of the
-game's subtitle box in the render is not measured.
+A desktop run (`creature_recipe.ps1 -Kind open` with
+`fake_head_yaw=70;fake_head_sweep=1` and the word `look`) shows the anchor.
+Heads 30 and 40 degrees from the card for 450 frames each move no card. A
+head 70 degrees from the card moves it one time, 62 frames later. While the
+Hand is at the Creature the rect of the card has the Creature panel, and the
+capture has the panel, the test lines and a subtitle of the game. The place
+of the quad in the room needs a headset.
+
+**Not tested:** the place of the game's subtitle box in the render is not
+measured.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.

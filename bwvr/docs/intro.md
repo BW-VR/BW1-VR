@@ -697,6 +697,15 @@ asks for -25.8 px), and the sky is on the same sphere. In the orbit the orbs
 are at the pixels of the camera of the orbs, and the sky is the sky of the
 rest pose.
 
+The header of `intro_run.ps1` has the keys of scripted hands. A run with
+them (Direct3D 9, `intro_distance_cm=60`, six steps of the right hand from
+40 to 70 cm in front of the head) has a reach of 30 cm (50.0 units). The
+hands move orbs in 3D in 497 frames, at most 2742 orbs in one frame. After
+the last step the orbs go home: 400 stereo frames later no orb is more than
+1 unit from its home, and the logo forms. The still hand has the opacity
+0.00 at each probe. The log has no count of the changes of the show of a
+hand, so a flicker of one frame does not show.
+
 ### What only a headset can show
 
 No headset session has seen this state, so `intro_vr` stays 0.

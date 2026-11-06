@@ -48,6 +48,7 @@
 
 #include "card_scroll.h"
 #include "controllers.h"
+#include "controls_page.h"
 #include "cutscene_window.h"
 #include "debug_menu.h"
 #include "debug_window.h"
@@ -164,13 +165,23 @@ void ReadSettings() {
   }
 }
 
+}  // namespace
+
 // The key into bwvr.ini, as the launcher writes it. False when Windows
-// refused the write.
-bool WriteKey(const char* key, int value) {
+// refused the write. The page Controls (controls_page.cpp) writes its keys
+// here too.
+bool SettingsPanelWriteKey(const char* key, int value) {
+  ReadSettings();
   char text[16];
   IniText(value, text, sizeof(text));
   return g_ini[0] != 0 &&
          WritePrivateProfileStringA("bwvr", key, text, g_ini) != FALSE;
+}
+
+namespace {
+
+bool WriteKey(const char* key, int value) {
+  return SettingsPanelWriteKey(key, value);
 }
 
 // --- a change --------------------------------------------------------------------
@@ -204,22 +215,47 @@ void Narrow(const wchar_t* in, char* out, size_t size) {
 }
 
 // --- the rows of the window ------------------------------------------------------
+//
+// The rows of the table, then the rows of the page Controls
+// (controls_page.cpp) as the last group, with controls_page=1. A row i of
+// kSettings or more is row i - kSettings of that page.
 
-int Groups() { return kGroups; }
+const int kControlsGroup = kGroups;
+bool IsControls(int i) { return i >= kSettings; }
+
+int Groups() { return kGroups + (ControlsPageOn() ? 1 : 0); }
 const wchar_t* GroupName(int g) {
+  if (g == kControlsGroup) return L"Controls";
   return g >= 0 && g < kGroups ? kGroupName[g] : L"";
 }
-int Count() { return kSettings; }
-int GroupOf(int i) { return kTable[i].group; }
-bool InWindow(int) { return true; }
-const wchar_t* Label(int i) { return kTable[i].label; }
-const wchar_t* Name(int i) { return kTable[i].name; }
-const wchar_t* Tip(int i) { return kTable[i].tip; }
+int Count() {
+  return kSettings + (ControlsPageOn() ? ControlsRowCount() : 0);
+}
+int GroupOf(int i) {
+  return IsControls(i) ? kControlsGroup : kTable[i].group;
+}
+bool InWindow(int i) {
+  return IsControls(i) ? ControlsRowIn(i - kSettings) : true;
+}
+const wchar_t* Label(int i) {
+  return IsControls(i) ? ControlsRowLabel(i - kSettings) : kTable[i].label;
+}
+const wchar_t* Name(int i) {
+  return IsControls(i) ? ControlsRowName(i - kSettings) : kTable[i].name;
+}
+const wchar_t* Tip(int i) {
+  return IsControls(i) ? ControlsRowTip(i - kSettings) : kTable[i].tip;
+}
 const wchar_t* RowNote(int i) {
+  if (IsControls(i)) return nullptr;
   return kTable[i].when == kNextStart ? L"at the next start" : nullptr;
 }
 
 void LastLine(int i, wchar_t* out, int size) {
+  if (IsControls(i)) {
+    ControlsRowLastLine(i - kSettings, out, size);
+    return;
+  }
   swprintf_s(out, size, L"Key: %hs. A change acts %s.", kTable[i].key,
              kTable[i].when == kNextStart ? L"at the next start of the game"
                                           : L"at once");
@@ -229,20 +265,43 @@ void LastLine(int i, wchar_t* out, int size) {
 // values, or -1 for a value that the list does not have.
 int Value(int i) {
   ReadSettings();
+  if (IsControls(i)) {
+    // The drawing of the page lights the control of the row under the ray.
+    const int hover = DebugWindowHoverSwitch();
+    ControlsSetHoverRow(hover >= kSettings ? hover - kSettings : -1);
+    return ControlsRowValue(i - kSettings);
+  }
   return IndexOfValue(kTable[i].values, g_value[i]);
 }
 
-int ValueCountOf(int i) { return ValueCount(kTable[i].values); }
+int ValueCountOf(int i) {
+  return IsControls(i) ? ControlsRowValueCount(i - kSettings)
+                       : ValueCount(kTable[i].values);
+}
 
 void ValueText(int i, int index, wchar_t* out, int size) {
+  if (IsControls(i)) {
+    ControlsRowValueText(i - kSettings, index, out, size);
+    return;
+  }
   if (!ValueAt(kTable[i].values, index, out, static_cast<size_t>(size),
                nullptr)) {
     swprintf_s(out, size, L"%d", g_value[i]);
   }
 }
 
+const uint8_t* Picture(int i, int value, int style) {
+  return IsControls(i) ? ControlsRowPicture(i - kSettings, value, style)
+                       : nullptr;
+}
+
+const wchar_t* FixedWord(int i) {
+  return IsControls(i) ? ControlsRowFixedWord(i - kSettings) : nullptr;
+}
+
 bool Step(int i, bool back) {
   ReadSettings();
+  if (IsControls(i)) return ControlsRowStep(i - kSettings, back);
   const Setting& s = kTable[i];
   const int count = ValueCount(s.values);
   const int index = StepIndex(IndexOfValue(s.values, g_value[i]), count, back);
@@ -295,6 +354,8 @@ const WindowRows kSettingsRows = {
     ValueText,
     Step,
     RowNote,
+    Picture,
+    FixedWord,
 };
 
 // --- the welcome page ------------------------------------------------------------
@@ -339,8 +400,8 @@ const wchar_t* const kWords[2] = {
     L"The land is at the height of your waist."};
 const wchar_t* const kButtonWord[kWelcomeParts] = {L"Settings", L"Play"};
 
-// The three controls. The ring button follows button_layout and the hand
-// that does not point.
+// The three controls. The ring button follows button_layout, the hand that
+// does not point and the map of its buttons (button_map_math.h).
 void ControlLines(wchar_t lines[kWelcomeControls][96]) {
   RingHand hand = {};
   const bool have = ControllersRingHand(&hand);
@@ -348,7 +409,15 @@ void ControlLines(wchar_t lines[kWelcomeControls][96]) {
   // The ring is on the hand that does not point: Y or X on the left hand,
   // B or A on the right hand.
   const bool left = !have || hand.left;
-  const wchar_t* ring = new_layout ? (left ? L"Y" : L"B") : (left ? L"X" : L"A");
+  const int side = left ? 0 : 1;
+  int map[button_map::kButtons];
+  ControllersButtonMapOf(side, map);
+  const wchar_t* ring = button_map::SlotWord(
+      ControllersKindOf(side), left, map,
+      new_layout ? button_map::kSecond : button_map::kFirst);
+  if (ring == nullptr) {
+    ring = new_layout ? (left ? L"Y" : L"B") : (left ? L"X" : L"A");
+  }
   wcscpy_s(lines[0], 96, L"Grip of your Hand: take, hold and throw");
   wcscpy_s(lines[1], 96, L"Grip of your other hand: pull the land to move");
   swprintf_s(lines[2], 96, L"%s: open the ring. Settings is on its page 2",

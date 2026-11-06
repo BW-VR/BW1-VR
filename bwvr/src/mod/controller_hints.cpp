@@ -52,17 +52,18 @@ struct Words {
   bool menu_on_pointing;      // the menu button is on the pointing hand
 };
 
+// Touch, the fake controller, an unknown profile and none yet are touch like
+// (button_map_math.h, KindOfProfile, in the order of Family).
 Family FamilyOf(const char* profile) {
-  if (strstr(profile, "simple") != nullptr) return kSimple;
-  if (strstr(profile, "index") != nullptr) return kIndex;
-  if (strstr(profile, "vive") != nullptr) return kWand;
-  if (strstr(profile, "microsoft") != nullptr) return kMixed;
-  // Touch, the fake controller, an unknown profile and none yet.
-  return kTouch;
+  return static_cast<Family>(button_map::KindOfProfile(profile));
 }
 
 // The one table. It follows the bindings of xr_screen.cpp (which controls a
-// profile has) and the mapping of controllers.cpp (what each one does).
+// profile has) and the mapping of controllers.cpp (what each one does). A
+// job of a face button, a stick click or a menu button reads a slot of the
+// Hand or of the other hand, and the word is the word of the button that the
+// map of the buttons gives that slot (button_map_math.h). With the maps as
+// made, each slot has its own button.
 Words BuildWords(const ControllerHintState& state, const char* profile) {
   Words w;
   memset(&w, 0, sizeof(w));
@@ -70,6 +71,20 @@ Words BuildWords(const ControllerHintState& state, const char* profile) {
   w.swap = state.swap_buttons;
   const bool left = state.left_handed;
   const Family f = w.family;
+  // The word of the button of a slot of the Hand (pointing) or of the other
+  // hand. The Hand is the left controller when the left hand points.
+  const auto slot_word = [&](bool pointing, int slot) {
+    return button_map::SlotWord(f, pointing ? left : !left,
+                                pointing ? state.map_hand : state.map_other,
+                                slot);
+  };
+  // The menu button of the left controller: a slot of the Hand when the left
+  // hand points, else of the other hand.
+  const auto left_menu_word = [&]() {
+    return button_map::SlotWord(f, true,
+                                left ? state.map_hand : state.map_other,
+                                button_map::kMenu);
+  };
   w.trigger = (f == kSimple) ? L"Select" : L"Trigger";
   w.grip = (f == kSimple) ? nullptr : L"Grip";
   if (f == kWand) {
@@ -88,43 +103,44 @@ Words BuildWords(const ControllerHintState& state, const char* profile) {
   }
   // Index has A and B on both hands. Touch has A and B on the right hand and
   // X and Y on the left one. The other profiles have no face buttons.
-  if (f == kTouch) {
-    w.jump = left ? L"X" : L"A";
-  } else if (f == kIndex) {
-    w.jump = L"A";
-  }
+  if (f == kTouch || f == kIndex) w.jump = slot_word(true, button_map::kFirst);
   if (state.gesture_button == 1) {
-    if (f == kTouch) w.gesture = left ? L"Y" : L"B";
-    if (f == kIndex) w.gesture = L"B";
+    if (f == kTouch || f == kIndex) {
+      w.gesture = slot_word(true, button_map::kSecond);
+    }
   } else if (state.gesture_button == 2 && w.stick != nullptr) {
-    w.gesture = (f == kWand) ? L"Pad click" : L"Stick click";
+    w.gesture = slot_word(true, button_map::kStickClick);
   }
   // The game menu (controllers.cpp, LatchEsc). With button_layout=1: the
   // menu button of the left controller, or the first face button of the hand
   // that does not point on an Index controller, which has no menu button.
   // With 0: the second face button of the hand that does not point.
   const bool new_layout = state.layout != 0;
-  if (f == kTouch) {
-    w.menu = new_layout ? L"Menu" : (left ? L"B" : L"Y");
+  // The game menu is on the menu button of the left controller, or on a face
+  // button of the other hand.
+  const bool menu_slot = (f == kTouch && new_layout) ||
+                         (f != kTouch && f != kIndex);
+  if (menu_slot) {
+    w.menu = left_menu_word();
   } else if (f == kIndex) {
-    w.menu = new_layout ? L"A" : L"B";
+    w.menu = slot_word(false, new_layout ? button_map::kFirst
+                                         : button_map::kSecond);
   } else {
-    w.menu = L"Menu";
+    w.menu = slot_word(false, button_map::kSecond);
   }
+  if (w.menu == nullptr) w.menu = L"Menu";
   // The menu button is on the left controller, which a left handed player
   // points with. A face button of the game menu is on the other hand.
-  w.menu_on_pointing = left && w.menu[0] == L'M';
+  w.menu_on_pointing = left && menu_slot;
   // The grab of the world (controllers.cpp, UpdateGrab): the grip of the
   // hand that does not point.
   if (state.world_grab && f != kSimple) w.world = L"Grip";
   // The ring (radial_menu.cpp): a face button of the hand that does not
   // point (the second one with button_layout=1, the first one with 0), or
   // the stick of that hand when only the stick opens it.
-  if (state.ring == 1) {
-    if (f == kTouch) {
-      w.ring = new_layout ? (left ? L"B" : L"Y") : (left ? L"A" : L"X");
-    }
-    if (f == kIndex) w.ring = new_layout ? L"B" : L"A";
+  if (state.ring == 1 && (f == kTouch || f == kIndex)) {
+    w.ring = slot_word(false, new_layout ? button_map::kSecond
+                                         : button_map::kFirst);
   }
   if (state.ring != 0 && w.ring == nullptr) w.ring = w.stick;
   // The walk (controllers.cpp, PumpWalk): the stick of the hand that does not
@@ -133,7 +149,9 @@ Words BuildWords(const ControllerHintState& state, const char* profile) {
   // The spell book (spell_book.cpp): the first face button of the hand that
   // does not point, with button_layout=1 on a Touch controller. On an Index
   // controller that button sends Esc.
-  if (state.book && new_layout && f == kTouch) w.book = left ? L"A" : L"X";
+  if (state.book && new_layout && f == kTouch) {
+    w.book = slot_word(false, button_map::kFirst);
+  }
   return w;
 }
 
@@ -148,7 +166,9 @@ uint32_t SignatureOf(const Words& w, const ControllerHintState& s) {
          (static_cast<uint32_t>(s.gesture_button & 3) << 6) |
          (static_cast<uint32_t>(s.ring & 3) << 9) |
          (s.layout != 0 ? 0x800u : 0u) | (w.menu_on_pointing ? 0x1000u : 0u) |
-         (s.walk ? 0x2000u : 0u) | (s.book ? 0x4000u : 0u);
+         (s.walk ? 0x2000u : 0u) | (s.book ? 0x4000u : 0u) |
+         (button_map::MapBits(s.map_hand) << 15) |
+         (button_map::MapBits(s.map_other) << 23);
 }
 
 // --- the census -------------------------------------------------------------
@@ -748,6 +768,8 @@ void ControllerHintsPass(int eye) {
 }
 
 bool ControllerHintsActive() { return g_active; }
+
+const char* ControllerHintsForcedProfile() { return g_forced; }
 
 const wchar_t* ControllerHintLabel(uint32_t code) {
   switch (code) {

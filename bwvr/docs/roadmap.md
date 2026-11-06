@@ -443,17 +443,17 @@ keeps the mod as it is.
   not turn then: a desktop run with `snap_turn=0` showed the same view before
   and after a push of the stick and a hold of the turn key (`god-view.md`,
   section 4). A smooth turn of the God view with the stick is not built.
-- **F11. The controls of the player in the headset.** The settings window
-  and the welcome page are in (`ui-layer.md`, 24). Open:
-  - A page to change the controls. The mod finds which controllers
-    the player has (the interaction profile that OpenXR gives,
-    `controller-hints.md`), draws a diagram of those controllers, lists each
-    button with its action, and lets the player give a button a different
-    action from a list of the actions that are free. The pictures in the
-    hints (below) use the same controller data and art.
-  - Pictures in the hints: a flat picture of each button, then a picture of
-    the controller with the button lit, then a 3D model of the controller
-    (`controller-hints.md`).
+- **F11. The controls of the player in the headset.** The settings window,
+  the welcome page and the page Controls are in (`ui-layer.md`, 24 and
+  24.6, `controllers.md`, 5.7). Open:
+  - The desktop runs of the page Controls (`village_run.ps1 -Kind
+    controls`, with the map, the defaults and `hint_profile`). A desktop run
+    has a Touch controller only: the profile of a real Index, wand or Mixed
+    Reality controller needs a headset with that controller.
+  - Pictures in the hints: a small picture of the button, lit, beside its
+    word on the hint card, from the drawing of the page Controls
+    (`controller_art_math.h`, key `hint_card_pictures`), then a 3D model of
+    the controller (`controller-hints.md`).
   - The art of each controller must be our own drawing, or a model with a
     license that lets us ship it (for example a model that the runtime
     gives through an OpenXR extension at run time).

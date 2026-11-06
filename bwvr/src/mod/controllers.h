@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "button_map_math.h"
+
 // The fake controller, from the ini keys of docs/controllers.md,
 // "4. The fake controller for desktop tests".
 // The fake hand never moves continuously. It stands in one pose, and it steps
@@ -159,9 +161,24 @@ struct ControllerHintState {
   bool walk;            // the stick of the other hand moves the player
   bool book;            // the first face button of the other hand opens the
                         // spell book (spell_book.cpp)
+  int map_hand[4];      // the map of the buttons of the controller of the
+  int map_other[4];     // Hand and of the other hand (button_map_math.h)
   char profile[64];     // of the pointing hand, "fake" for the fake controller
 };
 void ControllersHintState(ControllerHintState* out);
+
+// THE MAP OF THE BUTTONS (button_map_hand, button_map_other,
+// docs/controllers.md, "The map of the buttons"), for the page Controls of
+// the settings window (controls_page.cpp). c is a controller: 0 left, 1
+// right. The kind comes from the interaction profile of the controller
+// (button_map_math.h), and the map is the map that the page shows.
+int ControllersKindOf(int c);
+int ControllersPointingSide();
+void ControllersButtonMapOf(int c, int map[4]);
+void ControllersButtonJobs(button_map::Jobs* out);
+// A new map for the controller of the Hand (role 0) or of the other hand
+// (role 1). It acts when each button of both controllers is up.
+void ControllersSetButtonMap(int role, const int map[4], const char* by);
 // For the hint card: a push of the stick of the hand that does not point
 // moves the player now (move_stick). That stick has the job of the walk, no
 // reason refuses a push, and the game's switch for the drag of the land is

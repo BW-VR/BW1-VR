@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw, probe,
 # workshop, site, build, scaffold, turn, fartake, fartotem, choice, look,
-# book) have a comment at their steps below.
+# book, controls) have a comment at their steps below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -60,6 +60,7 @@ param(
     [string]$Go = '1860,2580|1840,2600|1880,2610|1850,2670|1790,2650|1900,2660',
     [int]$Lines = 160,
     [string]$Save = 'temple',
+    [string]$Parts = '',
     [switch]$NewGame
 )
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -202,6 +203,32 @@ if ($Kind -eq 'totem') {
                  'x@1540+4 shot@1560+1'
     }
     $keys = "$keys;spell_book_test_save=16"
+} elseif ($Kind -eq 'controls') {
+    # The page Controls of the settings window (bwvr/docs/ui-layer.md, "The
+    # page Controls", and bwvr/docs/controllers.md, "The map of the
+    # buttons"). The welcome page opens 3 s after the controllers can act
+    # (welcome_done=0), and the trigger presses its button Settings. In the
+    # settings window the trigger presses the tab Controls (tab3), then the
+    # right arrow of the row "Left Y" (right5): Y takes the job of the left
+    # stick click (the recenter hold), and the stick click takes the ring.
+    # The ray rests on the row "Right B" (row9), so the drawing lights B and
+    # the note shows. Close closes the window. Then a hold of the left stick
+    # click opens the ring, and a hold of Y recenters the view. Each new
+    # picture of the window is saved (debug_window_test_save).
+    # -Parts gives other parts of the window for the word aimdebug, and
+    # -Steps other steps. For the defaults: -Set "button_map_other=1324"
+    # -Parts "tab3 trackend row16 row11 close" and the steps of the comment
+    # in the desk README. -Set "hint_profile=valve/index_controller" draws
+    # Index controllers, and -Set "hint_card_style=0" the dark look.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Parts -eq '') { $Parts = 'tab3 right5 row9 close' }
+    if ($Steps -eq '') {
+        $Steps = 'aimdebug@1400+1 trigger@1410+4 aimdebug@1460+1 trigger@1470+4 ' +
+                 'aimdebug@1520+1 trigger@1530+4 aimdebug@1580+1 ' +
+                 'aimdebug@1680+1 trigger@1690+4 lstick_click@1760+60 y@1900+200'
+    }
+    $keys = "$keys;welcome_done=0;welcome_test_parts=settings;debug_test_parts=$Parts;debug_window_test_save=12"
 } elseif ($Kind -eq 'look') {
     # A villager that a script turns to the camera (bwvr/docs/village.md, "A
     # villager that a script turns to the player"). In the test save "temple"
@@ -473,9 +500,19 @@ if ($Kind -eq 'book') {
     $pattern = '^spell book   :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +
                '^controllers  : (the fake x|the word book|the first face button)|^haptics      : (cast|refused)|^hand         : state'
 }
+# The hint cards of this hand go in the list: the left hand for the page
+# Controls, which moves the jobs of the left controller.
+$hand = 'right'
+if ($Kind -eq 'controls') {
+    $pattern = '^controls     :|^settings     :|^hints        : the pointing hand|' +
+               '^controllers  : (the (left|right) controller (is|has)|the new map|button_map|.*recenters the view|the word aimdebug)|' +
+               '^ring         : the ring (opens|closes|does not)|^spell book   : the book (opens|closes)'
+    $hand = 'left'
+}
 $cards = @{}
-Get-Content $log | Where-Object { $_ -match $pattern -or $_ -match '^hint card    : frame \d+, the card of the right hand: (.*?)\. \d' } | ForEach-Object {
-    if ($_ -match '^hint card    : frame (\d+), the card of the right hand: (.*?)\. \d') {
+$card = "^hint card    : frame (\d+), the card of the $hand hand: (.*?)\. \d"
+Get-Content $log | Where-Object { $_ -match $pattern -or $_ -match $card } | ForEach-Object {
+    if ($_ -match $card) {
         # One line for each new text of the card.
         $text = $Matches[2] -replace '87\d\d Belief Left', 'N Belief Left'
         if (-not $cards.ContainsKey($text)) { $cards[$text] = 1; "card @$($Matches[1]): $text" }

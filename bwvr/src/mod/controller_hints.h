@@ -24,6 +24,10 @@ void ControllerHintsPass(int eye);
 // True while the words of the controller replace the mouse in the hints.
 bool ControllerHintsActive();
 
+// The profile of the test key hint_profile, or "" for the profile that the
+// runtime reports. The page Controls draws the kind of a forced profile.
+const char* ControllerHintsForcedProfile();
+
 // The word for a mouse button code of the game (1 left, 2 right, 4 middle,
 // 8 and 0x10 the wheel). Null when the controller has no such input, and then
 // the hint is hidden. The pointer stays valid for the whole frame.

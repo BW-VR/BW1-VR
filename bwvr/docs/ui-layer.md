@@ -2485,6 +2485,7 @@ label, what the setting does, and its key with "A change acts at once" or
 | Cards | Hints | `hint_learn` | Always, Until learned |
 | Cards | Card look | `hint_card_style` | Plain, Scroll |
 | Cards | Subtitle card | `subtitle_card` | Off, On. At the next start |
+| Controls | The page of 24.6 | `button_map_hand`, `button_map_other` | A job for each button |
 
 A row with two values is a toggle, with the "off" value first, so the knob
 is at the left for it. A row with more values has two arrows, and a step
@@ -2528,7 +2529,8 @@ settings window:
   is at the height of your waist."
 - three controls: the grip of the Hand, the grip of the other hand, and the
   button of the ring with "Settings is on its page 2". The button is Y, X, B
-  or A, as `button_layout` and the hand of the ring give it
+  or A, as `button_layout`, the hand of the ring and the map of the buttons
+  (24.6) give it
 - the buttons Settings and Play
 
 Settings closes the page and opens the settings window. Play closes the
@@ -2570,4 +2572,82 @@ with `settings_panel` 1 and 0, and the layout of the welcome page.
 
 A setting that the area reads only at its start (`grab_hand`,
 `subtitle_card`) acts at the next start. The other settings of the launcher
-stay in the launcher. A page to change the controls is in `roadmap.md`, F11.
+stay in the launcher.
+
+### 24.6 The page Controls
+
+The tab Controls of the settings window shows the controllers of the player
+and gives a job of a controller to a different button of the same
+controller. The code is in `controls_page.cpp`, `button_map_math.h` (the
+kinds, the buttons, the map and the jobs) and `controller_art_math.h` (the
+shapes of the drawing). `controllers.md`, 5.7, has the map.
+
+**The rows**, from the top:
+
+| Rows | What they are |
+| --- | --- |
+| The drawing | 4 rows, 692 by 304 pixels: the kind of the controllers at the top, the left and the right controller in ink, and a line of words for each control at the outer side: its name and its job, for example "B: Gesture". Under each controller: its side and "the Hand" or "other hand". The control of the row under the ray, and its line of words, are gold |
+| The buttons | One row for each button of the left and then of the right controller that a job can use: the first face button, the second face button, the stick click, the menu button. The label is the side and the button ("Left Y"), and the value is its job. The arrows give the button the next or the last job of the same controller |
+| Button defaults | A toggle. "In use" with the knob at the right when each button has its job as made. A press at "Changed" gives each button its job as made. A press at "In use" does nothing |
+| The fixed rows | The trigger, the grip and the stick of the left and of the right controller, dim, with their jobs in the place of "not now". The note of each row says why it stays |
+
+A controller that has a button that the map cannot move, or only one
+button, shows that button as a dim row with its job: the pad click of a Vive
+wand and the menu button of a simple controller. The rows follow the kind of
+the controller at the press of the tab.
+
+**A change.** The arrow of a button gives it the slot of the next button of
+the list, and that button takes the old slot of the first one. So each job
+keeps one button. The page writes `button_map_hand` or `button_map_other`
+into `bwvr.ini` at once, and `controllers.cpp` uses the new map when each of
+the four buttons of both controllers is up. The hint cards, the help words
+and the welcome page take the new buttons in the next frame
+(`controller-hints.md`, 8.3).
+
+**The drawing** is our own art: circles, capsules, rounded boxes and rings
+with a distance test, in the ink of the cards, with no logo and no outline of
+a product. Each kind has its own shapes (`ArtOf`): Touch (a round face with
+the stick, two face buttons and a menu button on the left), Index (a long
+body with a stick, A, B and a pad with no job), Vive wand (a ring, a pad
+and a menu button), Windows Mixed Reality (a ring, a stick, a pad with no
+job and a menu button) and simple (select and menu). The left controller is
+the mirror of the right one. A button with no job is pale. The trigger and
+the grip are tabs at the edge of the body. The page draws the picture one
+time for each look, and again when a job, a kind or the lit control
+changes: 1.2 to 1.9 ms, and 13 to 22 ms for the first picture with the first
+draw of each letter. Each row of the drawing is a band of that picture
+(`WindowRows::picture`).
+
+**The window** has two parts for the page: a row whose `value_count` is -1
+is a band of a picture, with no control, no note and no press. A dim row can
+have a word of its own (`WindowRows::fixed_word`), and then the bottom row
+says "Right grip stays on its job".
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `controls_page` | 1 | 0: the settings window has no tab Controls. The keys of the map still act |
+| `button_map_hand`, `button_map_other` | 1234 | The map of the buttons (`controllers.md`, 5.7). 1234 is the layout as made |
+| `hint_profile` | | Test key (`controller-hints.md`, 8). The page draws the kind of this profile |
+
+The log has the tag `controls`, and the map has lines of the tag
+`controllers`:
+
+```
+controllers  : the right controller is a Quest Touch controller (profile "/interaction_profiles/oculus/touch_controller"). Its buttons for the jobs: A, B, Stick click, frame 2
+controls     : the drawing of the Quest Touch and Quest Touch controllers took 1.88 ms (parchment), frame 731
+controls     : Left Y goes from Ring to Recenter, and Left stick click takes Ring. button_map_other=1324 is in bwvr.ini. It acts when each button is up, frame 760
+controllers  : the page Controls: button_map_other=1324: the page Controls moved jobs to other buttons, frame 760
+controllers  : the new map of the buttons acts now: button_map_hand=1234, button_map_other=1324, frame 761
+controls     : Button defaults: each button has its job as made. button_map_hand=1234 and button_map_other=1234 are in bwvr.ini, frame 902
+```
+
+The math checks are in `test/controller_math/button_map_checks.h`: the kind
+of each profile, the buttons of each kind, the 24 maps and their numbers, a
+map that does not fit a controller, the steps round the buttons, the jobs as
+made and with `button_layout=0`, the words and the labels, the place of the
+two controllers and of their words, the shapes of each kind in the frame and
+on the body, and the lines of words that keep apart. The desktop run is
+`village_run.ps1 -Kind controls` (`tools/desk/README.md`). A desktop run has
+the fake controller, which is a Touch controller: `hint_profile` draws the
+other kinds, but only a headset gives the profile of a real Index, wand or
+Mixed Reality controller.

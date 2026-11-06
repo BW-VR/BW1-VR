@@ -9123,6 +9123,9 @@ bool HandDirectInsideInfluence(float x, float z, bool* inside) {
   return true;
 }
 
+// For influence_edge.cpp, for its log: the CHand of the game, or null.
+void* HandDirectGameHand() { return g_hand; }
+
 bool HandDirectHandPosition(float out[3], bool* by_controller) {
   if (g_hand == nullptr) return false;
   const float* at = reinterpret_cast<const float*>(g_hand + kHandPosition);

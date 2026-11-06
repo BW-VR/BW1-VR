@@ -41,10 +41,10 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
 - The Forest miracle has a camera path of the game that turns the camera
   around the new forest. With the head on the camera the mod starts no such
   path, so the camera of the player stays (`miracle_camera_still=1`).
-- Outside the influence of the player the hands fade, the stream of the
-  game ends at the Hand's point in the air, and a faint wall of light shows
-  the edge near the pointing hand (`influence_fade`, `influence_stream_hand`,
-  `influence_wall`).
+- Outside the influence of the player the hands fade, and a faint wall of
+  light shows the edge near the pointing hand (`influence_fade`,
+  `influence_wall`). With `influence_stream_hand=1` the stream of the game
+  ends at the Hand's point in the air.
 
 ## Gestures in the plain game [V unless marked]
 
@@ -1023,12 +1023,18 @@ over the land, so three things change, each with a key:
   `Influence::CalculatePlayerInfluence` that `fn_005D1120` makes, at the land
   point of the grip of that hand. A hand under 90 percent writes no depth.
   The low poly hand has no alpha, so it does not fade.
-- **The stream at the hand** (`influence_stream_hand=1`). A hook of
-  `AddManaPathSprite` gives the land point of the Hand the height of the
+- **The stream at the hand** (`influence_stream_hand`, 0 by default). A hook
+  of `AddManaPathSprite` gives the land point of the Hand the height of the
   Hand's point over the land. That is the third field of the `MapCoords`,
   which `MapCoords::GetLHPoint` adds to the height of the land. So the
   stream of the game ends at the Hand's point in the air. Only the stream of
-  the Hand of the controller changes.
+  the Hand of the controller changes. No desktop run has had a stream of the
+  game yet, so the key is 0 until a run shows it. `CHand::Draw` calls
+  `GVirtualInfluence::Draw` (`0x0046D2A7`) also while the mod hides the mesh
+  of the game's Hand. But the update keeps the land point of the interface
+  (`GInterfaceStatus + 0x14`), and `Draw` needs a last point inside (`+0x08`
+  not 0). In the God view that land point can be away from the land under
+  the Hand. The report of the log has the state of the stream.
 - **The wall** (`influence_wall=1`). A faint wall of light stands on the edge
   near the point of the pointing hand while that point is less than 15 cm of
   the room from the edge, inside or outside (`influence_edge_math.h`). 24
@@ -1049,7 +1055,7 @@ God view and on the table.
 | --- | --- | --- |
 | `miracle_camera_still` | 1 | 1: a miracle with a camera path of the game (the Forest) starts no path while the head carries the camera, and the camera of the player stays. 0: the path turns the camera as the game makes it |
 | `influence_fade` | 1 | 1: outside the influence of the player each hand fades to 45 percent. 0: the hands do not fade |
-| `influence_stream_hand` | 1 | 1: the stream of the influence of the game ends at the Hand's point in the air. 0: it ends on the land under the Hand |
+| `influence_stream_hand` | 0 | 1: the stream of the influence of the game ends at the Hand's point in the air. 0: it ends on the land under the Hand, as the game draws it. 0 until a desktop run shows the stream |
 | `influence_wall` | 1 | 1: a faint wall of light shows the edge of the influence near the pointing hand, from 15 cm of the room before it. 0: no wall |
 | `miracle_hand` | 1 | 0: the game places the Hand with a miracle, and the mod gives no target, no cancel, no use of a seed and no lines |
 | `miracle_shake_mps` | 0.6 | The mean speed of each stroke of a shake, in m/s. 0 turns the shake off. 0.2 to 5 |
@@ -1112,6 +1118,8 @@ Test keys for the desktop runs only (the launcher removes them):
   `Influence::IsInPlayerRawInfluence` `0x005CD460`). Before that frame the
   fade and the wall count each point as inside. The pick of the game keeps
   the real influence.
+- `influence_wall_test_light_pct`: the light of the wall times this percent,
+  100 to 300, for the eye pictures of a desktop run.
 
 ## The log
 
@@ -1124,7 +1132,10 @@ that goes out of the influence or comes back into it, with its land point.
 The wall that shows or goes, with the rays that found the edge and its
 strength. The first stream that the game draws, with its two ends and the
 Hand's point. The first stream that ends at the Hand's point, with its
-height over the land. The test circle, with its middle and its radius. Each report
+height over the land. With the test circle or `influence_stream_hand=1` the
+report has the state of the stream of the game: the last point inside, the
+edge, the strength, the switch of a script, the land point of the interface
+and the Hand's point. The test circle, with its middle and its radius. Each report
 window has the frames with a fade and with the wall, and the calls of the
 stream.
 

@@ -1311,8 +1311,12 @@ const uintptr_t kGamePointerX = 0x00E852C0;
 uint64_t g_window_pixels = 0;
 uint64_t g_window_misses = 0;
 bool g_window_was_hit = false;
+// The pixel and the frame of the last line of the ray: a new line when the
+// pixel moves 8 px or more, at most one each 30 frames.
+float g_window_logged[2] = {0.0f, 0.0f};
+uint64_t g_window_logged_frame = 0;
 int g_window_logs = 0;
-const int kMaxWindowLogs = 40;
+const int kMaxWindowLogs = 80;
 
 void WindowPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
   (void)hand;
@@ -1350,9 +1354,17 @@ void WindowPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
   } else {
     ++g_window_misses;
   }
-  if (hit != g_window_was_hit && g_window_logs < kMaxWindowLogs) {
+  const bool moved =
+      hit && g_window_was_hit &&
+      (fabsf(p->x - g_window_logged[0]) >= 8.0f ||
+       fabsf(p->y - g_window_logged[1]) >= 8.0f) &&
+      g_frame >= g_window_logged_frame + 30;
+  if ((hit != g_window_was_hit || moved) && g_window_logs < kMaxWindowLogs) {
     ++g_window_logs;
+    g_window_logged_frame = g_frame;
     if (hit) {
+      g_window_logged[0] = p->x;
+      g_window_logged[1] = p->y;
       float lx = 0.0f, ly = 0.0f, rx = 0.0f, ry = 0.0f;
       cutscene_hands_math::EyePixel(view, 0, u, v, &lx, &ly);
       cutscene_hands_math::EyePixel(view, 1, u, v, &rx, &ry);

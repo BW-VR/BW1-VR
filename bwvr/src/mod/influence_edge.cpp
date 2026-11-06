@@ -29,6 +29,10 @@
 //                          MapCoords of the Hand the height of the Hand over
 //                          the land (the third field, which
 //                          MapCoords::GetLHPoint adds to the land)
+//                          0 by default: no desktop run has had a stream of
+//                          the game yet. GVirtualInfluence keeps the land
+//                          point of the interface (GInterfaceStatus+0x14),
+//                          and the report logs it with its state
 //   influence_wall         a faint wall of light stands on the edge near the
 //                          pointing hand while the hand is less than 15 cm of
 //                          the room from the edge (influence_edge_math.h).
@@ -60,6 +64,7 @@ extern void ModLog(const char* format, ...);
 // hand_direct.cpp
 bool HandDirectInsideInfluence(float x, float z, bool* inside);
 bool HandDirectHandPosition(float out[3], bool* by_controller);
+void* HandDirectGameHand();
 // controllers.cpp
 unsigned long long ControllersFrameCount();
 
@@ -87,7 +92,7 @@ RawInfluenceFn o_RawInfluence = nullptr;
 
 bool g_read = false;
 bool g_fade = true;
-bool g_stream_hand = true;
+bool g_stream_hand = false;
 bool g_wall = true;
 bool g_installed = false;
 
@@ -107,6 +112,9 @@ const int kMaxFadeLogs = 40;
 const float kWallRangeM = 0.15f;
 const float kWallHeightM = 0.5f;
 const float kWallLight = 0.35f;
+// The test key influence_wall_test_light_pct: the light of the wall times
+// this share, for an eye picture of a desktop run. 1 to 3.
+float g_wall_light = 1.0f;
 const int kWallRays = 24;
 const int kWallSteps = 6;
 const int kWallHalvings = 5;
@@ -145,7 +153,12 @@ void ReadKeys() {
         "bwvr", key, static_cast<UINT>(fallback), path));
   };
   g_fade = number("influence_fade", 1) != 0;
-  g_stream_hand = number("influence_stream_hand", 1) != 0;
+  g_stream_hand = number("influence_stream_hand", 0) != 0;
+  g_wall_light = static_cast<float>(number("influence_wall_test_light_pct",
+                                           100)) /
+                 100.0f;
+  if (!(g_wall_light > 0.0f)) g_wall_light = 1.0f;
+  if (g_wall_light > 3.0f) g_wall_light = 3.0f;
   g_wall = number("influence_wall", 1) != 0;
   g_test_cm = number("influence_test_circle_cm", 0);
   if (g_test_cm < 0) g_test_cm = 0;
@@ -350,7 +363,7 @@ int InfluenceEdgeWall(const float point[3], float units_per_meter,
     n = influence_math::BuildWall(
         [](float x, float z) { return LandHeight(x, z); }, point, found,
         edge, kWallRays, range, kWallHeightM * units_per_meter, 0.75f * range,
-        kWallLight, out, room);
+        kWallLight * g_wall_light, out, room);
   }
   const bool shows = n > 0;
   if (shows != g_wall_was && g_wall_logs < kMaxWallLogs) {
@@ -373,8 +386,44 @@ int InfluenceEdgeWall(const float point[3], float units_per_meter,
   return n;
 }
 
+// CHand+0x4850 is the GInterfaceStatus of the Hand, and its +0x130 is the
+// GVirtualInfluence, which keeps the land point of the interface (+0x14 of
+// the status) while it is inside the influence.
+const int kHandStatus = 0x4850;
+const int kStatusVirtual = 0x130;
+const int kStatusPoint = 0x14;
+
+// The state of the stream of the game, for the report: the last point inside
+// (+0x08, 0 before the first one), the edge (+0x14), the strength (+0x30)
+// and the switch of a script (+0x44, 1 is off).
+void LogVirtualInfluence() {
+  const uint8_t* hand = static_cast<const uint8_t*>(HandDirectGameHand());
+  if (hand == nullptr || IsBadReadPtr(hand + kHandStatus, 4)) return;
+  const uint8_t* status =
+      *reinterpret_cast<const uint8_t* const*>(hand + kHandStatus);
+  if (status == nullptr || IsBadReadPtr(status, kStatusVirtual + 4)) return;
+  const uint8_t* v =
+      *reinterpret_cast<const uint8_t* const*>(status + kStatusVirtual);
+  if (v == nullptr || IsBadReadPtr(v, 0x48)) return;
+  const int32_t* inside = reinterpret_cast<const int32_t*>(v + 0x08);
+  const int32_t* edge = reinterpret_cast<const int32_t*>(v + 0x14);
+  const int32_t* point = reinterpret_cast<const int32_t*>(status + kStatusPoint);
+  const float* hand_point = reinterpret_cast<const float*>(hand + 0x78);
+  ModLog("influence    : the stream of the game: the last point inside %.1f "
+         "%.1f, the edge %.1f %.1f, strength %.2f, %s. The land point of the "
+         "interface is %.1f %.1f, and the Hand's point is at %.1f %.1f",
+         inside[0] / kMapScale, inside[1] / kMapScale, edge[0] / kMapScale,
+         edge[1] / kMapScale, *reinterpret_cast<const float*>(v + 0x30),
+         *reinterpret_cast<const int32_t*>(v + 0x44) != 0
+             ? "off by a script"
+             : "on",
+         point[0] / kMapScale, point[1] / kMapScale, hand_point[0],
+         hand_point[2]);
+}
+
 // Once a report window.
 void InfluenceEdgeReport() {
+  if (g_test_cm > 0 || g_stream_hand) LogVirtualInfluence();
   if (g_fade_frames == 0 && g_wall_frames == 0 && g_stream_calls == 0 &&
       g_raw_tests == 0) {
     return;

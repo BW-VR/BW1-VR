@@ -32,31 +32,15 @@ inline void SeaDepthChecks() {
           b, 0);
   }
 
-  // The alpha: the game's cut, and the fade of sea_clear.
-  Near("the game: the byte 0 is clear", FloorAlpha(0, false), 0, 0);
-  Near("the game: the byte 1 is clear", FloorAlpha(1, false), 0, 0);
-  Near("the game: the byte 2 is opaque", FloorAlpha(2, false), 255, 0);
-  Near("the game: the byte 3 is opaque", FloorAlpha(3, false), 255, 0);
-  Near("clear: the byte 0 is clear", FloorAlpha(0, true), 0, 0);
-  Near("clear: the byte 1 shows a third", FloorAlpha(1, true), 85, 0);
-  Near("clear: the byte 2 shows two thirds", FloorAlpha(2, true), 170, 0);
-  Near("clear: the byte 3 is opaque", FloorAlpha(3, true), 255, 0);
-  Near("a byte of the land is opaque", FloorAlpha(4, true), 255, 0);
-
-  // The tables of the stubs.
+  // The table of the stub.
   {
     float heights[kSeaBytes];
-    uint8_t alphas[kSeaBytes];
-    FillTables(false, false, heights, alphas);
+    FillHeights(false, heights);
     bool game = true;
-    for (int b = 0; b < kSeaBytes; ++b) {
-      game = game && heights[b] == 0.0f &&
-             alphas[b] == (b < 2 ? 0 : 255);
-    }
-    Check(game, "both keys at 0 give the game's tables", 0, 0);
-    FillTables(true, true, heights, alphas);
+    for (int b = 0; b < kSeaBytes; ++b) game = game && heights[b] == 0.0f;
+    Check(game, "sea_depth=0 gives the game's table", 0, 0);
+    FillHeights(true, heights);
     Near("the table has the floor", heights[1], FloorHeight(1, true), 0);
-    Near("the table has the fade", alphas[2], 170, 0);
   }
 
   // The water line on the edge from a vertex of the byte 4 (2.68 units over

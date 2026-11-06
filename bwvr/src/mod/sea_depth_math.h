@@ -12,10 +12,6 @@
 // game's own step of 0.67 units for each byte under 4. So the land goes on
 // down past the water line, and the sea, which then draws after the land
 // with the depth test, cuts it at the real water line.
-//
-// sea_clear=1: the alpha of a vertex of the sea falls with its depth, in
-// equal steps from 255 at the byte 3 to 0 at the byte 0. So the floor near
-// the coast shows through the water, and it fades into the deep sea.
 
 #pragma once
 
@@ -36,24 +32,10 @@ inline float FloorHeight(int byte, bool floor) {
   return -kByteStep * static_cast<float>(kSeaBytes - byte);
 }
 
-// The alpha of a vertex of the sea with this byte, in a block with water.
-// clear off: the game's 0 for the bytes 0 and 1, and 255 for 2 and 3.
-// clear on: 0, 85, 170 and 255.
-inline uint8_t FloorAlpha(int byte, bool clear) {
-  if (byte < 0) return 0;
-  if (byte >= kSeaBytes) return 255;
-  if (!clear) return byte < 2 ? 0 : 255;
-  return static_cast<uint8_t>(byte * 255 / (kSeaBytes - 1));
-}
-
-// The tables that the stubs of the land draw read: one height and one alpha
-// for each byte of the sea.
-inline void FillTables(bool floor, bool clear, float heights[kSeaBytes],
-                       uint8_t alphas[kSeaBytes]) {
-  for (int b = 0; b < kSeaBytes; ++b) {
-    heights[b] = FloorHeight(b, floor);
-    alphas[b] = FloorAlpha(b, clear);
-  }
+// The table that the stub of the land draw reads: one height for each byte
+// of the sea.
+inline void FillHeights(bool floor, float heights[kSeaBytes]) {
+  for (int b = 0; b < kSeaBytes; ++b) heights[b] = FloorHeight(b, floor);
 }
 
 // Where the plane of the sea crosses the edge of a land triangle from a

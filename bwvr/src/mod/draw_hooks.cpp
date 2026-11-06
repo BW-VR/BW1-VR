@@ -148,6 +148,10 @@ bool IntroFlatVertex(float* x, float* y);
 void IntroDrawProbe(uint32_t caller, const void* verts, uint32_t count);
 // sea_depth.cpp: the states of the first batch of the land and of the sea.
 void SeaDepthBatch(uint32_t caller);
+// sea_depth.cpp: true when it keeps a batch of the waves on the coast, to
+// draw it after the sea.
+bool SeaDepthTakeBatch(uint32_t caller, void* verts, uint32_t count,
+                       uint16_t* idx, uint32_t n);
 void IntroFlatDone(bool drawn);
 
 namespace {
@@ -2670,6 +2674,11 @@ void __cdecl h_DrawAndClip2D(D3DPRIMITIVETYPE type, uint32_t fvf, void* verts,
 // those first vertices tracks the nearest geometry closely enough to aim at.
 void __fastcall h_DrawTriangle(void* verts, uint32_t count, uint16_t* idx,
                                uint32_t n) {
+  // The waves on the coast draw after the sea (sea_depth=1).
+  if (SeaDepthTakeBatch(reinterpret_cast<uint32_t>(_ReturnAddress()), verts,
+                        count, idx, n)) {
+    return;
+  }
   // World geometry never goes to the interface panel.
   PanelRelease();
   // The mesh of a target of the Hand gets its glow (target_glow.cpp).

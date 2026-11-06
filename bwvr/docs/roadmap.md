@@ -495,13 +495,12 @@ keeps the mod as it is.
   grip whether the object drops or flies. Open: whether the player wants a
   list of the game's words that the card leaves out.
 - **F23. The sea with depth.** The sea draws after the land with the depth
-  test, and the land of the sea goes under the water (`sea_depth`,
-  `sea_clear`, backend.md, "The sea with depth"). Open: the eye pictures
-  and the frame time of a desktop run with each key at 1 and 0, and the
-  states of the land draw in the log. The game has no sea floor deeper than
-  four bytes, so the water past the coast shows the reflection and the sky,
-  as before. Only a headset shows the depth of the water (headset check
-  27).
+  test, the land of the sea goes under the water, and the waves on the
+  coast draw after the sea (`sea_depth`, backend.md, "The sea with depth").
+  Open: eye pictures of a desktop run that show the foam of the waves over
+  the water line. The game has no sea floor deeper than four bytes, so the
+  water past the coast shows the reflection and the sky, as before. Only a
+  headset shows the depth of the water (headset check 27).
 - **F24. No wait of 20 ms at the stop of a sound.** `audio_stop_wait=0`
   skips the wait only for the sounds of the mod's mixer. The other sounds
   keep it: the logs of desktop runs have 1 or 2 such stops in each run. The

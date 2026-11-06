@@ -1,5 +1,5 @@
-// THE SEA WITH DEPTH (sea_depth, sea_clear). The math is in sea_depth_math.h.
-// See docs/backend.md, "The sea with depth".
+// THE SEA WITH DEPTH (sea_depth). The math is in sea_depth_math.h. See
+// docs/backend.md, "The sea with depth".
 //
 // WHAT THE GAME DRAWS. GLandscape::Draw draws the sky, the reflection of the
 // land (fn_007FF4F0, with no depth write), the plain sea (LH3DWater::Draw
@@ -8,11 +8,13 @@
 // test ALWAYS and no depth write, so it is only a background, and the land
 // draws over it. The land draw (fn_00874AA0) puts a vertex with an altitude
 // byte of 3 or less at the height 0, in the plane of the sea, and in a block
-// with water it gives a vertex with a byte of 0 or 1 an alpha of 0. So the
-// coast is a flat band of land on the plane of the sea that ends in a fade,
-// and the sea never covers the land.
+// with water it gives a vertex with a byte of 0 or 1 an alpha of 0. A second
+// pass of a block with water draws the waves on the coast (white foam with
+// an alpha that moves across the land). So the coast is a flat band of land
+// on the plane of the sea that ends in a fade and in foam, and the sea never
+// covers the land.
 //
-// sea_depth=1 makes three changes:
+// sea_depth=1 makes four changes:
 //  1. The land draw puts a vertex of the sea under the plane of the sea, by
 //     the game's step of a byte (sea_depth_math.h, FloorHeight). FloorStub
 //     takes the place of the load of 0.0 at 0x00874BB3 and at 0x0087508B
@@ -22,25 +24,29 @@
 //     land and then the sea.
 //  3. In that draw the plain sea has the depth test LESSEQUAL (SeaZFunc, in
 //     place of the code at 0x0087A25D). It still writes no depth.
+//  4. The waves on the coast (the DrawTriangle at 0x00875B98) draw after the
+//     sea. h_DrawTriangle gives each batch of the waves to SeaDepthTakeBatch,
+//     which keeps a copy of its vertices and indices. After the sea,
+//     ReplayWaves sets the material of the waves (0x00E9CD64) as the land
+//     draw does and draws the copies. The copies have the depth of the land,
+//     so they pass the depth test LESSEQUAL where the land is, and the sea
+//     writes no depth.
 // So the land over the water hides the sea, and the sea covers the land
-// under the water, in each eye at the real water line. A thing that draws
-// after the sea (a villager, the Creature, the hands) draws as before.
-//
-// sea_clear=1: AlphaStub gives a vertex of the sea in a block with water the
-// alpha of its depth (FloorAlpha), in place of the cut of the game at
-// 0x00874BC0 and at 0x0087509A. The test before each cut at 0x00874BBB and
-// 0x00875095 then takes the bytes 0 to 3, not only 0 and 1.
+// under the water, in each eye at the real water line. The foam of the waves
+// stays over the water line as in the game, and makes the edge soft. A
+// thing that draws after the sea (a villager, the Creature, the hands)
+// draws as before.
 //
 // The reflection pass draws the land through the same code. It keeps the
-// game's heights and alphas: the call at 0x005E48DD goes to SeaReflection,
-// which gives the stubs the tables of the game for that call.
+// game's heights: the call at 0x005E48DD goes to Reflection, which gives the
+// stub the table of the game for that call.
 //
-// The patches stay in place, and the tables and the flags decide. With both
-// keys at 0 the stubs give the game's values, and the sea draws at its own
-// place with ALWAYS. The changes need the plain sea (the tiling float
-// 0x00C38228 at 0, water_simple=1) and the x87 path of the land draw
-// (0x00EA9EB4 at 0). The game takes its SSE path of the land
-// (fn_007A1800) only on a Pentium 4.
+// The patches stay in place, and the table and the flags decide. With
+// sea_depth=0 the stub gives the game's height, and the sea and the waves
+// draw at their own places. The changes need the plain sea (the tiling
+// float 0x00C38228 at 0, water_simple=1) and the x87 path of the land draw
+// (0x00EA9EB4 at 0). The game takes its SSE path of the land (fn_007A1800)
+// only on a Pentium 4.
 //
 // Once a frame, before the scene walk (WaterModeApply), the mod latches the
 // state of the frame, so each eye pass and each block of a frame draws the
@@ -52,6 +58,8 @@
 #include <d3d.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <vector>
 
 #include "../common/bw_addresses.h"
 #include "debug_menu.h"
@@ -77,19 +85,28 @@ const uintptr_t kLandDraw = 0x007FF610;
 //   cmp eax, 3 / ... / jg (land)     eax is the altitude byte
 //   ... fld dword ptr [0x008AA398]   the height 0.0 of the sea
 //   test (block +0x928) / je         a block with water
-//   cmp eax, 1 / jg                  the bytes 0 and 1
-//   and dword ptr [esi+14h], 0FFFFFFh   the alpha 0
 const uintptr_t kLandBegin = 0x00874AA0;
 const uintptr_t kLandEnd = 0x00875C60;
 const uintptr_t kFloorSites[2] = {0x00874BB3, 0x0087508B};
 const uint8_t kFloorBytes[6] = {0xD9, 0x05, 0x98, 0xA3, 0x8A, 0x00};
-const uintptr_t kCutTestSites[2] = {0x00874BBB, 0x00875095};
-const uint8_t kCutTestBytes[3] = {0x83, 0xF8, 0x01};
-const uintptr_t kCutSites[2] = {0x00874BC0, 0x0087509A};
-const uint8_t kCutBytes[7] = {0x81, 0x66, 0x14, 0xFF, 0xFF, 0xFF, 0x00};
+
 // The return of the DrawTriangle of the waves on the coast, the pass of the
-// material 0x00E9CD64 over the land of a block with water.
+// material 0x00E9CD64 over the land of a block with water. Before it the
+// land draw sets that material and calls fn_0082FEB0(0) and
+// SetD3DTillingOn(0). After it, SetD3DTillingOff(0) and fn_0082FED0(0).
 const uintptr_t kWavesReturn = 0x00875B9D;
+const uintptr_t kWavesMaterial = 0x00E9CD64;  // LH3DMaterial*
+const uintptr_t kWavesBefore = 0x0082FEB0;
+const uintptr_t kWavesAfter = 0x0082FED0;
+const uintptr_t kTillingOn = 0x0082FF10;
+const uintptr_t kTillingOff = 0x0082FF50;
+const uintptr_t kDrawTriangle = 0x0082F810;
+// How the land draw sets a material (0x008753C1 and after).
+const uintptr_t kDoUpdateMaterial = 0x00C38714;  // int
+const uintptr_t kCurrentMaterial = 0x00ECA64C;   // LH3DMaterial*
+const uintptr_t kRenderModeTable = 0x00ECA618;   // pointer, 8 bytes a mode
+const uintptr_t kNeedTilling = 0x00ECA614;       // int
+const uintptr_t kCullCache = 0x00ECA248;
 
 // The plain sea fn_0087A090 sets the depth test ALWAYS with the cache of the
 // state at 0x00ECA24C, from 0x0087A25D to 0x0087A284. SeaZFunc does the same
@@ -113,26 +130,25 @@ const uintptr_t kSsePath = 0x00EA9EB4;
 
 typedef void(__fastcall* SeaDrawFn)(void* material);
 typedef void(__cdecl* DrawFn)();
+typedef void(__cdecl* ZeroFn)(int zero);
+typedef void(__fastcall* RenderModeFn)(void* material, int zero);
+typedef void(__fastcall* DrawTriangleFn)(void* verts, uint32_t count,
+                                          uint16_t* idx, uint32_t n);
 
-// The settings, and the debug window and the keys change them.
+// The setting. The debug window changes it.
 bool g_loaded = false;
 bool g_installed = false;
 int g_depth = 1;
-int g_clear = 1;
 
 // The state of this frame.
 bool g_frame_depth = false;
-bool g_frame_clear = false;
 const char* g_why_plain = nullptr;  // why the sea draws at its place
 
-// The tables of the stubs. The stubs read the row that the pointer gives:
-// the row of this frame, or the row of the game in the reflection pass.
+// The table of the stub. The stub reads the row that the pointer gives: the
+// row of this frame, or the row of the game in the reflection pass.
 float g_heights[sea_depth::kSeaBytes] = {};
-uint8_t g_alphas[sea_depth::kSeaBytes] = {0, 0, 255, 255};
 const float g_game_heights[sea_depth::kSeaBytes] = {};
-const uint8_t g_game_alphas[sea_depth::kSeaBytes] = {0, 0, 255, 255};
 const float* g_height_row = g_game_heights;
-const uint8_t* g_alpha_row = g_game_alphas;
 
 // The sea of the walk, kept until the land has drawn.
 void* g_sea_material = nullptr;
@@ -140,11 +156,25 @@ bool g_sea_waits = false;
 bool g_sea_tested = false;  // the depth test of SeaZFunc in this draw
 bool g_in_sea = false;      // a draw of the plain sea runs
 
+// The batches of the waves of one land draw, kept until the sea has drawn.
+struct WaveBatch {
+  size_t vertex_at;  // the first byte in g_wave_vertices
+  size_t index_at;   // the first index in g_wave_indices
+  uint32_t count;    // vertices
+  uint32_t n;        // indices
+};
+const size_t kVertexBytes = 32;  // FVF 0x1C4
+bool g_take_waves = false;
+std::vector<uint8_t> g_wave_vertices;
+std::vector<uint16_t> g_wave_indices;
+std::vector<WaveBatch> g_waves;
+
 // The counts of a report window.
 uint64_t g_frames = 0;
 uint64_t g_frames_depth = 0;
 uint64_t g_seas_after = 0;
 uint64_t g_seas_at_place = 0;
+uint64_t g_wave_batches = 0;
 
 // The states of the device in the first batch of each kind (the land, the
 // waves on the coast, the sea), for one line of the log each.
@@ -161,6 +191,11 @@ const D3DRENDERSTATETYPE kCensusStates[9] = {
     D3DRENDERSTATE_ALPHATESTENABLE, D3DRENDERSTATE_ALPHAREF,
     D3DRENDERSTATE_ALPHAFUNC};
 
+IDirect3DDevice7* Device() {
+  return *reinterpret_cast<IDirect3DDevice7* const*>(
+      bw::render::kDirect3DDevice7);
+}
+
 // The height of a vertex of the sea: in st0, as the fld of the game puts it.
 // eax holds the altitude byte, 0 to 3. The code after the call reads the
 // flags of a test before it, so no instruction here changes the flags.
@@ -174,21 +209,6 @@ __declspec(naked) void FloorStub() {
   }
 }
 
-// The alpha of a vertex of the sea in a block with water: the byte 3 of the
-// color at [esi+14h]. eax holds the altitude byte, 0 to 3.
-__declspec(naked) void AlphaStub() {
-  __asm {
-    push ecx
-    push edx
-    mov edx, dword ptr [g_alpha_row]
-    mov cl, byte ptr [edx + eax]
-    mov byte ptr [esi + 0x17], cl
-    pop edx
-    pop ecx
-    ret
-  }
-}
-
 // In place of the depth test ALWAYS of the plain sea. The cache of the game
 // gets the value, or -1 when the device refuses it, as the code of the game
 // does.
@@ -196,8 +216,7 @@ void SeaZFunc() {
   const DWORD want = g_sea_tested ? D3DCMP_LESSEQUAL : D3DCMP_ALWAYS;
   volatile int32_t* cache = reinterpret_cast<volatile int32_t*>(kZFuncCache);
   if (*cache == static_cast<int32_t>(want)) return;
-  IDirect3DDevice7* device = *reinterpret_cast<IDirect3DDevice7* const*>(
-      bw::render::kDirect3DDevice7);
+  IDirect3DDevice7* device = Device();
   if (device == nullptr) {
     *cache = -1;
     return;
@@ -212,6 +231,54 @@ void DrawSea(void* material) {
   g_in_sea = false;
 }
 
+// The material of the waves, as the land draw sets it before their pass.
+void SetWavesMaterial() {
+  void* material = *reinterpret_cast<void* const*>(kWavesMaterial);
+  if (*reinterpret_cast<const int*>(kDoUpdateMaterial) == 0 ||
+      material == nullptr) {
+    return;
+  }
+  *reinterpret_cast<void**>(kCurrentMaterial) = material;
+  const uintptr_t table =
+      *reinterpret_cast<const uintptr_t*>(kRenderModeTable);
+  const int mode = *reinterpret_cast<const int*>(material);
+  reinterpret_cast<RenderModeFn>(
+      *reinterpret_cast<const uintptr_t*>(table + mode * 8))(material, 0);
+  const uint8_t flags = reinterpret_cast<const uint8_t*>(material)[5];
+  if (*reinterpret_cast<const int*>(kNeedTilling) == 0 && (flags & 4) == 0) {
+    reinterpret_cast<ZeroFn>(kTillingOff)(0);
+  } else {
+    reinterpret_cast<ZeroFn>(kTillingOn)(0);
+  }
+  const DWORD cull = ((~flags & 1u) << 1) | 1u;
+  volatile DWORD* cache = reinterpret_cast<volatile DWORD*>(kCullCache);
+  if (*cache == cull) return;
+  IDirect3DDevice7* device = Device();
+  const HRESULT hr =
+      device != nullptr ? device->SetRenderState(D3DRENDERSTATE_CULLMODE, cull)
+                        : E_FAIL;
+  *cache = hr == D3D_OK ? cull : 0xFFFFFFFFu;
+}
+
+// The waves of the land draw, after the sea, with the steps of the land draw
+// round their DrawTriangle.
+void ReplayWaves() {
+  if (g_waves.empty()) return;
+  SetWavesMaterial();
+  reinterpret_cast<ZeroFn>(kWavesBefore)(0);
+  reinterpret_cast<ZeroFn>(kTillingOn)(0);
+  const DrawTriangleFn draw = reinterpret_cast<DrawTriangleFn>(kDrawTriangle);
+  for (size_t i = 0; i < g_waves.size(); ++i) {
+    const WaveBatch& w = g_waves[i];
+    draw(&g_wave_vertices[w.vertex_at], w.count, &g_wave_indices[w.index_at],
+         w.n);
+  }
+  reinterpret_cast<ZeroFn>(kTillingOff)(0);
+  reinterpret_cast<ZeroFn>(kWavesAfter)(0);
+  g_wave_batches += g_waves.size();
+  g_waves.clear();
+}
+
 // The call of the sea at 0x005E4E8C. ecx has the material.
 void __fastcall SeaHere(void* material) {
   if (g_frame_depth) {
@@ -223,24 +290,29 @@ void __fastcall SeaHere(void* material) {
   DrawSea(material);
 }
 
-// The call of the land at 0x005E4E96: the land, then the sea that waits.
+// The call of the land at 0x005E4E96: the land, then the sea that waits,
+// then the waves of the land.
 void LandThenSea() {
+  g_waves.clear();
+  g_wave_vertices.clear();
+  g_wave_indices.clear();
+  g_take_waves = g_sea_waits;
   reinterpret_cast<DrawFn>(kLandDraw)();
+  g_take_waves = false;
   if (!g_sea_waits) return;
   g_sea_waits = false;
   ++g_seas_after;
   g_sea_tested = true;
   DrawSea(g_sea_material);
   g_sea_tested = false;
+  ReplayWaves();
 }
 
-// The call of the reflection at 0x005E48DD, with the tables of the game.
+// The call of the reflection at 0x005E48DD, with the table of the game.
 void Reflection() {
   g_height_row = g_game_heights;
-  g_alpha_row = g_game_alphas;
   reinterpret_cast<DrawFn>(kReflectionDraw)();
   g_height_row = g_heights;
-  g_alpha_row = g_alphas;
 }
 
 bool SameBytes(uintptr_t site, const uint8_t* bytes, size_t n) {
@@ -280,19 +352,14 @@ void Load() {
     slash[1] = 0;
     strcat_s(path, MAX_PATH, "bwvr.ini");
     g_depth = GetPrivateProfileIntA("bwvr", "sea_depth", 1, path) != 0 ? 1 : 0;
-    g_clear = GetPrivateProfileIntA("bwvr", "sea_clear", 1, path) != 0 ? 1 : 0;
   }
 }
 
 const char* DepthWords(int on) {
-  return on != 0 ? "the sea draws after the land with the depth test, and "
-                   "the land goes on down under the water"
+  return on != 0 ? "the sea draws after the land with the depth test, the "
+                   "land goes on down under the water, and the waves on the "
+                   "coast draw after the sea"
                  : "the plain sea of the game";
-}
-
-const char* ClearWords(int on) {
-  return on != 0 ? "the floor near the coast fades into the deep sea"
-                 : "the game's cut of the floor";
 }
 
 }  // namespace
@@ -306,22 +373,17 @@ void SeaDepthInstall() {
               SameBytes(kLandCall, kLandBytes, 5) &&
               SameBytes(kZFuncSite, kZFuncBytes, sizeof(kZFuncBytes));
   for (int i = 0; i < 2; ++i) {
-    same = same && SameBytes(kFloorSites[i], kFloorBytes, 6) &&
-           SameBytes(kCutTestSites[i], kCutTestBytes, 3) &&
-           SameBytes(kCutSites[i], kCutBytes, 7);
+    same = same && SameBytes(kFloorSites[i], kFloorBytes, 6);
   }
   if (!same) {
     ModLog("sea depth    : the code of the sea and of the land is not the "
-           "code that this was read from, so nothing changes (sea_depth=%d, "
-           "sea_clear=%d have no effect)", g_depth, g_clear);
+           "code that this was read from, so nothing changes (sea_depth=%d "
+           "has no effect)", g_depth);
     return;
   }
   bool ok = true;
   for (int i = 0; i < 2; ++i) {
     ok = WriteCall(kFloorSites[i], &FloorStub, 1) && ok;
-    const uint8_t test[3] = {0x83, 0xF8, 0x03};  // cmp eax, 3
-    ok = Write(kCutTestSites[i], test, 3) && ok;
-    ok = WriteCall(kCutSites[i], &AlphaStub, 2) && ok;
   }
   // call SeaZFunc, then a jump over the rest of the old code.
   {
@@ -341,8 +403,7 @@ void SeaDepthInstall() {
   ok = WriteCall(kLandCall, reinterpret_cast<const void*>(&LandThenSea), 0) &&
        ok;
   g_installed = ok;
-  ModLog("sea depth    : sea_depth=%d: %s. sea_clear=%d: %s%s", g_depth,
-         DepthWords(g_depth), g_clear, ClearWords(g_clear),
+  ModLog("sea depth    : sea_depth=%d: %s%s", g_depth, DepthWords(g_depth),
          ok ? "" : ". A write to the code FAILED, so the state of the code is "
                    "not known");
 }
@@ -359,11 +420,9 @@ void SeaDepthFrame() {
                 : !x87 ? "the land draw takes the SSE path of the game"
                        : nullptr;
   g_frame_depth = g_depth != 0 && plain && x87;
-  g_frame_clear = g_clear != 0 && x87;
   if (g_frame_depth) ++g_frames_depth;
-  sea_depth::FillTables(g_frame_depth, g_frame_clear, g_heights, g_alphas);
+  sea_depth::FillHeights(g_frame_depth, g_heights);
   g_height_row = g_heights;
-  g_alpha_row = g_alphas;
   g_sea_waits = false;
 }
 
@@ -379,14 +438,35 @@ void SeaDepthBatch(uint32_t caller) {
   }
   if (kind < 0 || g_kind_seen[kind]) return;
   g_kind_seen[kind] = true;
-  IDirect3DDevice7* device = *reinterpret_cast<IDirect3DDevice7* const*>(
-      bw::render::kDirect3DDevice7);
+  IDirect3DDevice7* device = Device();
   for (int i = 0; i < 9; ++i) {
     g_kind_state[kind][i] = 99;
     if (device != nullptr) {
       device->GetRenderState(kCensusStates[i], &g_kind_state[kind][i]);
     }
   }
+}
+
+// draw_hooks.cpp, at the start of h_DrawTriangle: true when the batch is a
+// batch of the waves of a land draw whose sea waits. Then a copy of it draws
+// after the sea, and the batch does not draw now.
+bool SeaDepthTakeBatch(uint32_t caller, void* verts, uint32_t count,
+                       uint16_t* idx, uint32_t n) {
+  if (!g_take_waves || caller != kWavesReturn || verts == nullptr ||
+      idx == nullptr || count == 0 || n == 0) {
+    return false;
+  }
+  SeaDepthBatch(caller);
+  WaveBatch w;
+  w.vertex_at = g_wave_vertices.size();
+  w.index_at = g_wave_indices.size();
+  w.count = count;
+  w.n = n;
+  const uint8_t* v = static_cast<const uint8_t*>(verts);
+  g_wave_vertices.insert(g_wave_vertices.end(), v, v + count * kVertexBytes);
+  g_wave_indices.insert(g_wave_indices.end(), idx, idx + n);
+  g_waves.push_back(w);
+  return true;
 }
 
 // Once a report window.
@@ -403,14 +483,15 @@ void SeaDepthReport() {
   }
   if (g_frames == 0) return;
   ModLog("sea depth    : %llu frames, %llu with the sea after the land: %llu "
-         "draws of the sea after the land and %llu at its own place. The "
-         "floor fades into the deep sea: %s%s%s", g_frames, g_frames_depth,
-         g_seas_after, g_seas_at_place, g_frame_clear ? "yes" : "no",
+         "draws of the sea after the land and %llu at its own place, %llu "
+         "batches of the waves after the sea%s%s", g_frames, g_frames_depth,
+         g_seas_after, g_seas_at_place, g_wave_batches,
          g_why_plain != nullptr && g_depth != 0 ? ". The sea draws at its own "
                                                   "place, because "
                                                 : "",
          g_why_plain != nullptr && g_depth != 0 ? g_why_plain : "");
   g_frames = g_frames_depth = g_seas_after = g_seas_at_place = 0;
+  g_wave_batches = 0;
 }
 
 // The debug window (debug_menu.cpp).
@@ -427,21 +508,5 @@ void SeaDepthChange(const char* by) {
   ControllersGesturePulse(0.5f, g_depth != 0 ? 0.30f : 0.08f);
   ModLog("sea depth    : %s: sea_depth is %d now: %s, from the next frame, "
          "frame %llu", by, g_depth, DepthWords(g_depth),
-         ControllersFrameCount());
-}
-
-int SeaClearValue() {
-  Load();
-  if (!g_installed) return kDebugCannot;
-  return g_clear;
-}
-
-void SeaClearChange(const char* by) {
-  Load();
-  if (!g_installed) return;
-  g_clear = g_clear != 0 ? 0 : 1;
-  ControllersGesturePulse(0.5f, g_clear != 0 ? 0.30f : 0.08f);
-  ModLog("sea depth    : %s: sea_clear is %d now: %s, from the next frame, "
-         "frame %llu", by, g_clear, ClearWords(g_clear),
          ControllersFrameCount());
 }

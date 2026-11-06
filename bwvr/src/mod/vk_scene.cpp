@@ -451,6 +451,9 @@ int g_slot = 0;
 bool g_recording = false;
 bool g_picture = false;  // this walk writes its image to a file
 uint64_t g_picture_frame = 0;
+// THE VIEW FOR VIDEOS: the frame of a picture that the next present of the
+// window writes, 0 for none. The walk of the left eye sets it.
+volatile LONG64 g_video_picture = 0;
 
 // For the report.
 uint64_t g_walks = 0;
@@ -1524,9 +1527,11 @@ bool MakeTarget(uint32_t width, uint32_t height) {
                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT, &g_colors[i], 2) ||
+        // The view for videos samples the panel (vk_video.cpp).
         !vk::MakeImage(width, height, 1, vk::Get().color_format,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                           VK_IMAGE_USAGE_SAMPLED_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT, &g_panels[i])) {
       return false;
     }
@@ -3183,24 +3188,10 @@ void EndOnWorker(const void*) {
     f.vkWaitForFences(vk::Get().device, 1, &s.fence, VK_TRUE, UINT64_MAX);
     WritePicture(Target(), 0, "left", g_picture_frame);
     WritePicture(Target(), 1, "right", g_picture_frame);
-    // THE VIEW FOR VIDEOS: the part of the left eye that the window shows,
-    // at the pixels of the eye picture.
-    float part[4];
-    float shape = 0.0f;
-    if (StereoPassEye() == 0 && VideoViewWindow(true, part, &shape)) {
-      const vk::Image& t = Target();
-      const int32_t x0 = static_cast<int32_t>(part[0] * t.width + 0.5f);
-      const int32_t y0 = static_cast<int32_t>(part[1] * t.height + 0.5f);
-      const int32_t x1 = static_cast<int32_t>(part[2] * t.width + 0.5f);
-      const int32_t y1 = static_cast<int32_t>(part[3] * t.height + 0.5f);
-      if (x0 >= 0 && y0 >= 0 && x1 > x0 && y1 > y0 &&
-          x1 <= static_cast<int32_t>(t.width) &&
-          y1 <= static_cast<int32_t>(t.height)) {
-        WritePicture(t, 0, "video", g_picture_frame,
-                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, x0, y0,
-                     static_cast<uint32_t>(x1 - x0),
-                     static_cast<uint32_t>(y1 - y0));
-      }
+    // THE VIEW FOR VIDEOS: the next present of the window writes the
+    // picture of the video, with its quad layers (VkScenePresentWindow).
+    if (StereoPassEye() == 0) {
+      InterlockedExchange64(&g_video_picture, static_cast<LONG64>(g_picture_frame));
     }
     if (g_panel_drawn) {
       WritePicture(g_panels[g_target], 0, "panel", g_picture_frame);
@@ -4173,16 +4164,38 @@ void VkSceneKeepPictureToggle(const char* keys) {
          g_keep_picture ? 1 : 0);
 }
 
+VkImageView VkScenePanelView(uint64_t image) {
+  for (int i = 0; i < 2; ++i) {
+    if (image != 0 && (uint64_t)g_panels[i].image == image) {
+      return g_panels[i].view;
+    }
+  }
+  return VK_NULL_HANDLE;
+}
+
+void VkSceneWriteImage(const vk::Image& image, const char* what,
+                       uint64_t frame, VkImageLayout layout) {
+  WritePicture(image, 0, what, frame, layout);
+}
+
 bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height) {
   if (!g_ready || !g_present_ready) return false;
   // THE VIEW FOR VIDEOS (video_view.h): a part of the picture in a 16:9
-  // rect of the window.
+  // rect of the window, with the quad layers of the headset over it.
   float part[4];
   float shape = 0.0f;
   if (VideoViewWindow(g_present_from_eye, part, &shape)) {
+    static VideoDraw draws[kVideoDraws];
+    const int count = VideoViewDraws(part, draws);
+    const uint64_t picture = static_cast<uint64_t>(
+        InterlockedExchange64(&g_video_picture, 0));
+    if (picture != 0 && g_present_from_eye) {
+      VkWindowPicture(g_colors[g_present_index], part, draws, count,
+                      picture);
+    }
     return VkWindowPresent(static_cast<HWND>(window),
                            g_colors[g_present_index], width, height, part,
-                           shape);
+                           shape, draws, count);
   }
   return VkWindowPresent(static_cast<HWND>(window), g_colors[g_present_index],
                          width, height);

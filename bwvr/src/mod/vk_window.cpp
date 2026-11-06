@@ -6,12 +6,16 @@
 #include "vk_window.h"
 #include "debug_menu.h"
 #include "vk_fallback.h"
+#include "vk_video.h"
 #include "video_view_math.h"
 
 void ModLog(const char* format, ...);
 void ControllersGesturePulse(float amplitude, float seconds);
 // vk_scene.cpp: true while the Vulkan renderer runs.
 bool VkSceneOn();
+// vk_scene.cpp: an image to a file bwvr-vk-<what>-<frame>.bmp.
+void VkSceneWriteImage(const vk::Image& image, const char* what,
+                       uint64_t frame, VkImageLayout layout);
 
 namespace {
 
@@ -71,6 +75,11 @@ uint32_t g_height = 0;
 uint32_t g_asked_w = 0;  // the client area that the swapchain was made for
 uint32_t g_asked_h = 0;
 VkImage g_images[kMaxImages] = {};
+// THE LAYERS IN THE VIEW FOR VIDEOS: a view of each image, when the
+// swapchain can be a color attachment.
+VkImageView g_views[kMaxImages] = {};
+bool g_attachment = false;
+bool g_said_attachment = false;
 // The blit into the image is done, and the present can show it.
 VkSemaphore g_drawn[kMaxImages] = {};
 uint32_t g_image_count = 0;
@@ -84,6 +93,7 @@ uint64_t g_cpu_ticks = 0;   // the calls of VkWindowPresent that presented
 uint64_t g_gpu_ns = 0;      // the presents that the GPU did, read back
 uint64_t g_gpu_count = 0;
 uint64_t g_part_presents = 0;  // presents of a part (the view for videos)
+uint64_t g_layer_presents = 0;  // presents with quad layers over the part
 
 void Unusable(const char* what, VkResult r) {
   g_unusable = true;
@@ -224,6 +234,12 @@ void DropSwapchain() {
   vk::LockQueue();
   f.vkQueueWaitIdle(vk::Get().queue);
   vk::UnlockQueue();
+  for (uint32_t i = 0; i < kMaxImages; ++i) {
+    if (g_views[i] != VK_NULL_HANDLE) {
+      f.vkDestroyImageView(device, g_views[i], nullptr);
+      g_views[i] = VK_NULL_HANDLE;
+    }
+  }
   w.vkDestroySwapchainKHR(device, g_swapchain, nullptr);
   g_swapchain = VK_NULL_HANDLE;
   g_image_count = 0;
@@ -368,7 +384,11 @@ int MakeSwapchain(uint32_t width, uint32_t height) {
   info.imageColorSpace = chosen.colorSpace;
   info.imageExtent = extent;
   info.imageArrayLayers = 1;
-  info.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  // A color attachment too, for the quad layers in the view for videos.
+  const bool attachment =
+      (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0;
+  info.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                    (attachment ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0u);
   info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
   info.preTransform = caps.currentTransform;
   info.compositeAlpha = alpha;
@@ -390,6 +410,24 @@ int MakeSwapchain(uint32_t width, uint32_t height) {
       return -1;
     }
   }
+  g_attachment = attachment;
+  for (uint32_t i = 0; i < g_image_count && attachment; ++i) {
+    VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view.image = g_images[i];
+    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view.format = chosen.format;
+    view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (f.vkCreateImageView(core.device, &view, nullptr, &g_views[i]) !=
+        VK_SUCCESS) {
+      g_views[i] = VK_NULL_HANDLE;
+      g_attachment = false;
+    }
+  }
+  if (!g_attachment && !g_said_attachment) {
+    g_said_attachment = true;
+    ModLog("vk window    : the swapchain of the window cannot be a color "
+           "attachment, so the view for videos has no quad layers");
+  }
   g_format = chosen.format;
   g_mode = mode;
   g_width = extent.width;
@@ -404,6 +442,32 @@ int MakeSwapchain(uint32_t width, uint32_t height) {
            mode == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : "immediate");
   }
   return 1;
+}
+
+// The pixels of `part` of the picture (x0, y0, x1, y1 from 0 to 1), kept
+// inside it. All of it with no part or with a part of no size.
+void SourceRect(const vk::Image& source, const float* part, int32_t out[4]) {
+  const int32_t width = static_cast<int32_t>(source.width);
+  const int32_t height = static_cast<int32_t>(source.height);
+  out[0] = out[1] = 0;
+  out[2] = width;
+  out[3] = height;
+  if (part == nullptr) return;
+  const float sw = static_cast<float>(source.width);
+  const float sh = static_cast<float>(source.height);
+  int32_t x0 = static_cast<int32_t>(part[0] * sw + 0.5f);
+  int32_t y0 = static_cast<int32_t>(part[1] * sh + 0.5f);
+  int32_t x1 = static_cast<int32_t>(part[2] * sw + 0.5f);
+  int32_t y1 = static_cast<int32_t>(part[3] * sh + 0.5f);
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 > width) x1 = width;
+  if (y1 > height) y1 = height;
+  if (x1 <= x0 || y1 <= y0) return;
+  out[0] = x0;
+  out[1] = y0;
+  out[2] = x1;
+  out[3] = y1;
 }
 
 }  // namespace
@@ -436,7 +500,8 @@ int VkWindowValue() {
 bool VkWindowWanted() { return g_wanted && !g_unusable; }
 
 bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
-                     uint32_t height, const float* part, float aspect) {
+                     uint32_t height, const float* part, float aspect,
+                     const VideoDraw* draws, int draw_count) {
   if (!g_wanted || g_unusable || window == nullptr || width == 0 ||
       height == 0) {
     return false;
@@ -515,30 +580,9 @@ bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
               1);
   // The part of the picture, and its place in the window (THE VIEW FOR
   // VIDEOS). With no part and no aspect: all of it on all of the window.
-  int32_t sx0 = 0, sy0 = 0;
-  int32_t sx1 = static_cast<int32_t>(source.width);
-  int32_t sy1 = static_cast<int32_t>(source.height);
-  if (part != nullptr) {
-    const float sw = static_cast<float>(source.width);
-    const float sh = static_cast<float>(source.height);
-    sx0 = static_cast<int32_t>(part[0] * sw + 0.5f);
-    sy0 = static_cast<int32_t>(part[1] * sh + 0.5f);
-    sx1 = static_cast<int32_t>(part[2] * sw + 0.5f);
-    sy1 = static_cast<int32_t>(part[3] * sh + 0.5f);
-    if (sx0 < 0) sx0 = 0;
-    if (sy0 < 0) sy0 = 0;
-    if (sx1 > static_cast<int32_t>(source.width)) {
-      sx1 = static_cast<int32_t>(source.width);
-    }
-    if (sy1 > static_cast<int32_t>(source.height)) {
-      sy1 = static_cast<int32_t>(source.height);
-    }
-    if (sx1 <= sx0 || sy1 <= sy0) {
-      sx0 = sy0 = 0;
-      sx1 = static_cast<int32_t>(source.width);
-      sy1 = static_cast<int32_t>(source.height);
-    }
-  }
+  int32_t from[4];
+  SourceRect(source, part, from);
+  const int32_t sx0 = from[0], sy0 = from[1], sx1 = from[2], sy1 = from[3];
   video_view_math::Rect place = {0.0f, 0.0f, static_cast<float>(g_width),
                                  static_cast<float>(g_height)};
   if (aspect != 0.0f) {
@@ -577,9 +621,22 @@ bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
   f.vkCmdBlitImage(cb, source.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    g_images[index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &blit, VK_FILTER_LINEAR);
-  vk::Barrier(cb, g_images[index], VK_IMAGE_ASPECT_COLOR_BIT,
-              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1);
+  // THE LAYERS IN THE VIEW FOR VIDEOS over the area (vk_video.cpp).
+  const float area[4] = {static_cast<float>(dx0), static_cast<float>(dy0),
+                         static_cast<float>(dx1), static_cast<float>(dy1)};
+  if (draws != nullptr && draw_count > 0 && g_attachment &&
+      g_views[index] != VK_NULL_HANDLE) {
+    VkVideoCompose(cb, g_slot, g_images[index], g_views[index], g_format,
+                   g_width, g_height, area, draws, draw_count);
+    vk::Barrier(cb, g_images[index], VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1);
+    ++g_layer_presents;
+  } else {
+    vk::Barrier(cb, g_images[index], VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1);
+  }
   vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, source.layers);
@@ -641,6 +698,63 @@ bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
   return true;
 }
 
+void VkWindowPicture(const vk::Image& source, const float part[4],
+                     const VideoDraw* draws, int draw_count, uint64_t frame) {
+  if (!vk::Started() || source.image == VK_NULL_HANDLE) return;
+  int32_t s[4];
+  SourceRect(source, part, s);
+  const uint32_t pw = static_cast<uint32_t>(s[2] - s[0]);
+  const uint32_t ph = static_cast<uint32_t>(s[3] - s[1]);
+  // The format of the window, so the draws use the same pipeline.
+  const VkFormat format =
+      g_format != VK_FORMAT_UNDEFINED ? g_format : vk::Get().color_format;
+  vk::Image image = {};
+  if (!vk::MakeImage(pw, ph, 1, format,
+                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT, &image)) {
+    return;
+  }
+  VkCommandBuffer cb = vk::BeginOnce();
+  vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, source.layers);
+  vk::Barrier(cb, image.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              1);
+  VkImageBlit blit = {};
+  blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  blit.srcOffsets[0] = {s[0], s[1], 0};
+  blit.srcOffsets[1] = {s[2], s[3], 1};
+  blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  blit.dstOffsets[0] = {0, 0, 0};
+  blit.dstOffsets[1] = {static_cast<int32_t>(pw), static_cast<int32_t>(ph), 1};
+  f.vkCmdBlitImage(cb, source.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                   VK_FILTER_NEAREST);
+  vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, source.layers);
+  const float area[4] = {0.0f, 0.0f, static_cast<float>(pw),
+                         static_cast<float>(ph)};
+  if (draws != nullptr && draw_count > 0) {
+    VkVideoCompose(cb, kVkVideoSlots - 1, image.image, image.view, format,
+                   pw, ph, area, draws, draw_count);
+  } else {
+    vk::Barrier(cb, image.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1);
+  }
+  if (vk::EndOnce(cb)) {
+    ModLog("vk window    : the picture of the video of frame %llu has %d "
+           "quad layers", frame, draw_count);
+    VkSceneWriteImage(image, "video", frame,
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  }
+  vk::FreeImage(&image);
+}
+
 void VkWindowStop() {
   if (!g_loaded) return;
   DropSurface();
@@ -661,13 +775,17 @@ void VkWindowReport() {
                             static_cast<double>(g_gpu_count)
                       : -1.0;
   ModLog("vk window    : %llu presents through the swapchain of the window "
-         "(%llu of a part, for the view for videos), %llu with no free "
-         "image, %llu swapchains made so far. A present takes %.3f ms on the "
-         "frame thread and %.3f ms on the GPU (-1: no timestamps)",
-         g_presents, g_part_presents, g_no_image, g_made, cpu_ms, gpu_ms);
+         "(%llu of a part, for the view for videos, %llu with quad layers), "
+         "%llu with no free image, %llu swapchains made so far. A present "
+         "takes %.3f ms on the frame thread and %.3f ms on the GPU (-1: no "
+         "timestamps)",
+         g_presents, g_part_presents, g_layer_presents, g_no_image, g_made,
+         cpu_ms, gpu_ms);
+  VkVideoReport();
   g_presents = 0;
   g_no_image = 0;
   g_part_presents = 0;
+  g_layer_presents = 0;
   g_cpu_ticks = 0;
   g_gpu_ns = 0;
   g_gpu_count = 0;

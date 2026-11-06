@@ -199,7 +199,7 @@ void ComfortCameraInstall();
 void VignetteSetMode(int mode);
 // video_view.cpp: the view for videos (video_view.h).
 void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
-                         int marks);
+                         int marks, int layers);
 // head_blinder.cpp: head_blinder.
 void HeadBlinderSetOn(bool on);
 void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
@@ -433,8 +433,9 @@ int g_blink_ms = 0;
 // The comfort vignette: 0 off, 1 gentle, 2 strong (vignette.cpp).
 int g_comfort_vignette = 0;
 // The view for videos (video_view.cpp): video_view, video_view_down_pct,
-// video_view_fov_deg, video_view_smooth_ms and video_view_marks.
-int g_video_view[5] = {0, 20, 90, 150, 1};
+// video_view_fov_deg, video_view_smooth_ms, video_view_marks and
+// video_view_layers.
+int g_video_view[6] = {0, 20, 90, 150, 1, 1};
 // The overlay of a head under the land (head_blinder.cpp).
 bool g_head_blinder = true;
 int g_zoom_step = 2;  // 0 the game's own, 1 small, 2 medium, 3 large
@@ -1105,11 +1106,11 @@ void ReadSettings() {
   // THE VIEW FOR VIDEOS (docs/backend.md, "The view for videos"): a 16:9
   // area of the left eye in the window of the game, for a capture on the PC.
   {
-    const char* const keys[5] = {"video_view", "video_view_down_pct",
-                                 "video_view_fov_deg", "video_view_smooth_ms",
-                                 "video_view_marks"};
-    const int defaults[5] = {0, 20, 90, 150, 1};
-    for (int i = 0; i < 5; ++i) {
+    const char* const keys[6] = {"video_view",          "video_view_down_pct",
+                                 "video_view_fov_deg",  "video_view_smooth_ms",
+                                 "video_view_marks",    "video_view_layers"};
+    const int defaults[6] = {0, 20, 90, 150, 1, 1};
+    for (int i = 0; i < 6; ++i) {
       g_video_view[i] = static_cast<int>(
           GetPrivateProfileIntA("bwvr", keys[i], defaults[i], path));
     }
@@ -1859,7 +1860,7 @@ void StartVrStep() {
     ComfortCameraInstall();
     VignetteSetMode(g_comfort_vignette);
     VideoViewSetOptions(g_video_view[0], g_video_view[1], g_video_view[2],
-                        g_video_view[3], g_video_view[4]);
+                        g_video_view[3], g_video_view[4], g_video_view[5]);
     HeadBlinderSetOn(g_head_blinder);
     ScriptCameraSetOptions(g_script_camera, g_script_min_distance,
                            g_script_min_height, g_script_close_distance,

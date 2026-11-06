@@ -303,6 +303,8 @@ int VideoViewValue();
 void VideoViewChange(const char* by);
 int VideoViewMarksValue();
 void VideoViewMarksChange(const char* by);
+int VideoViewLayersValue();
+void VideoViewLayersChange(const char* by);
 int VideoViewDownValue();
 void VideoViewLowerChange(const char* by);
 void VideoViewHigherChange(const char* by);
@@ -453,6 +455,9 @@ const Switch kSwitches[] = {
      "video_view", VideoViewValue, VideoViewChange, L"off|on"},
     {kGroupPicture, L"Video marks", L"Corner marks of the video area",
      "video_view_marks", VideoViewMarksValue, VideoViewMarksChange,
+     L"off|on"},
+    {kGroupPicture, L"Video layers", L"Cards and panels in the video",
+     "video_view_layers", VideoViewLayersValue, VideoViewLayersChange,
      L"off|on"},
     {kGroupPicture, L"Video higher", L"Video area lower by, percent",
      "video_view_down_pct", VideoViewDownValue, VideoViewHigherChange, L"",
@@ -822,6 +827,9 @@ const wchar_t* const kTips[] = {
     // Video marks
     L"On: faint corner marks in the headset show the part of the view that "
     L"the video records. The video does not show them.",
+    // Video layers
+    L"On: the video also shows the cards, the ring and the panels of the "
+    L"headset, where the left eye sees them. Off: the eye picture only.",
     // Video higher
     L"The part that the video records goes 5 percent of the height up.",
     // Video lower

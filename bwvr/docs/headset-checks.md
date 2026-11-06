@@ -171,8 +171,9 @@ want.
     loop that stops, or a cue that is too loud.
 27. **The view for videos** (`video_view=1`). Record a short video of the
     game window with OBS while you play. Wrong: corner marks that you
-    cannot see or that disturb the play, a video that shakes, or a video
-    that cuts off what you look at.
+    cannot see or that disturb the play, a video that shakes, a video that
+    cuts off what you look at, or a card, the ring or a panel that is not
+    in the video or not where you saw it.
 
 ## Play as normal and send the log
 
@@ -241,7 +242,10 @@ agents: the log does not tell the item yet.
   down`.
 - **The game window behind.** Log: `the game window is behind`.
 - **The cost of the view for videos** (P7). Log: `vk window    :` with `A
-  present takes`, in a session with `video_view=1`.
+  present takes`, and `vk video     :`, in a session with `video_view=1`.
+- **The quad layers in the video in a session** (P7). Log: `video view   :
+  ... is in the video for the first time`, with `from its copy on the GPU`
+  for a card and `from the image of the panel` for a panel.
 - **The menu button of the left controller** (P13). Log: `controllers  : the
   menu button sends Esc`, or `the menu button is dropped`. A press with no
   such line is a press that Virtual Desktop kept.

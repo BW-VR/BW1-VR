@@ -233,9 +233,10 @@ const Setting kSettings[] = {
      "eye, so that OBS or a different capture tool can record it while you "
      "play in the headset. The video turns smoothly when your head shakes. "
      "Faint corner marks in the headset show the part that the video "
-     "records, and the video does not show them. Cards, the subtitles, the "
-     "ring and the menu panels are not in the video. It needs the Vulkan "
-     "renderer. It costs a little frame time."},
+     "records, and the video does not show them. The cards, the subtitles, "
+     "the ring and the menu panels are in the video, where your left eye "
+     "sees them. It needs the Vulkan renderer. It costs a little frame "
+     "time."},
     {kSlider, "video_view_down_pct", "Video lower by", "0|40|5|%", 20,
      "How far the middle of the video is below the middle of your view, as "
      "a percentage of the height of the view. In this game you look down "

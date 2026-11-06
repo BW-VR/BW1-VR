@@ -558,7 +558,26 @@ from the Hand's point. A desktop run shows 0.0 cm for each one.
 
 Open: the eye pictures of a desktop run show a red beam from the sky to the
 spire of the Temple at the cast. `SF_LightningBolt` has the fork, a glow and
-a light map, and no beam from the sky.
+a light map, and no beam from the sky. The game draws two streams of light
+in the color of the player, the red of the influence ring for player 0.
+Each is a `SpellPointInf` (`0x0069AC10`) from one point to another:
+
+- The stream of the influence (`GVirtualInfluence::Draw`,
+  `PSysGlobal::AddManaPathSprite`, `influence_edge.cpp`), from the edge of
+  the influence to the land under the Hand.
+- The prayer of a Worship Site for a spell (`Spell::CreateSpellPoint`
+  `0x007213D0`, `WorshipSite::CreateManaPathSprite` `0x0077B2C0`), between the
+  place of the spell (`Spell+0x14` or `Spell+0xCC`) and the thing at
+  `Spell+0xA0`. It comes for each 100 of the power of a spell that has a
+  Worship Site (`Spell::GetWorshipSite`).
+
+The mod does not draw a beam or a line in the player's color, and it does
+not change these streams by default. With the test key
+`influence_stream_test_log=1` the log has a line for each stream, 24 times
+and then each 200th time: the caller, the two ends, the height of each end
+over the land, the color and the Hand's point. A desktop run with the key
+then says whether the beam is one of these streams, and which end is in the
+sky.
 
 ### The way out
 
@@ -1225,6 +1244,8 @@ Test keys for the desktop runs only (the launcher removes them):
   Hand (`OneOffSpellSeed::Create`).
 - `miracle_test_cancel`: a list of frames. At each one the mod asks for a
   cancel.
+- `influence_stream_test_log=1`: a log line for each stream of light of the
+  game (see "The bolt of Lightning").
 - `spell_book_test_save`: the mod saves the first N pictures of the book as
   `bwvr-book-NNNNN.bmp`.
 - The word `book` of the scripted controller steps the pointing hand to the

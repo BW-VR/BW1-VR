@@ -809,6 +809,19 @@ inline float TurnKeepAfterLanding(float game_keep, bool brake_on, bool settle,
 // turn of the picture is kTurnCap at most (TurnCutFactor), and no momentum is
 // kept that the cap hides. The cut acts before a substep: a contact or a
 // torque in the steps of a substep can still turn the picture faster.
+//
+// THE TORQUE OF A GAME TURN. PhysOb::ZeroForces 0x007FD200 starts the
+// torque of each step from a constant torque at PhysOb+0x128 (0x007FD42C),
+// and PhysicsObject::GameTurnUpdate sets it to 0 at the end of each game
+// turn (0x00646093). Packet 0x40 adds to it (GPacket::ProcessPacket,
+// 0x0063CE87): 1.6 m |v| (-d.z, 0, d.x), with d the move of the land point
+// under the pointer after the release (0x00C5E640 minus 0x00C5E650).
+// CHand::GetRequiredState sends it 180 ms after the last frame of the hold
+// (0x0046CE86). The game gives that torque for 20 steps. The flight runs
+// `rate` times as many steps, so the momentum grows rate times as much, and
+// the picture shows it rate times as fast. So the mod multiplies the
+// constant torque by TurnTorqueFactor in the steps of the flight: the
+// picture then turns as fast as the game turns that torque.
 const float kTurnCap = 9.424778f;  // 3 pi radians a second, 0x009A2BB0
 
 // The length of the turn w = M^T (A L) of fn_007FE260. `axes` and `inverse`
@@ -833,6 +846,14 @@ inline float TurnSpeedOf(const float axes[9], const float inverse[9],
 // less.
 inline float TurnStartFactor(float rate) {
   return rate > 1.0f ? 1.0f / rate : 1.0f;
+}
+
+// The factor for the constant torque of a game turn in a substep of `rate`
+// steps: 1 / rate^2. The momentum that the torque gives in a game turn is
+// then 1 / rate of the game's, as TurnStartFactor gives for the release. 1
+// for a rate of 1 or less.
+inline float TurnTorqueFactor(float rate) {
+  return rate > 1.0f ? 1.0f / (rate * rate) : 1.0f;
 }
 
 // The factor for the momentum before a substep of `rate` steps, when the

@@ -43,16 +43,12 @@ is built, and no test has proven it.
 
 These items come before the other work.
 
-- **B35. A thrown object still turns fast in some throws.** Before each
-  substep the mod cuts the turn of the picture to 1.5 turns a second
-  (`throw_turn`, `throw.md`, "The turn of a thrown object"). In the desktop
-  runs a tree and a rock turn fast only at the first contact: 1.8 and 2.3
-  turns a second with the key at 1, against 2.6 and 6.6 with the key at 0. A
-  villager turns 4.2 times a second in its flight 0.46 s after the release,
-  also with the key at 1, and no point touches it then. The scripted hand
-  gives it no turn at the release (0.00 radians a second, `village_run.ps1
-  -Kind throw`). Find what gives the villager its turn, and cut the turn in
-  each step of the game.
+- **B35. A thrown object still turns fast in some throws.** Not run: the
+  cut of the torque of the flick (packet `0x40`, `throw_turn`, `throw.md`,
+  "The turn of a thrown object"). The villager of `village_run.ps1 -Kind
+  throw` must turn 1.5 times a second or less in its flight, and the rocks
+  and trees of `throw_queue.ps1` (`treefast`, `treeup`, `rockfast`) must
+  turn as in the table of `throw.md`.
 - **P20. The spell book: the open parts.** X opens a spell book over the
   hand that does not point, and the pointing hand pulls a miracle out of it
   with the grip: the game's own request (`spell_book=1`,
@@ -741,8 +737,13 @@ game as it is.
   - The Storm cloud shows as a flat grey band with straight edges in the
     eye pictures, also with `cloud_pole_pct=0`. Not known whether the plain
     game draws it so.
-  - A red beam comes down from the sky at a cast of Lightning. The effect
-    file of the game has no such beam, so something else draws it.
+  - A red beam comes down from the sky to the spire of the Temple at a cast
+    of Lightning. The effect file of the game has no such beam. The game
+    draws two streams of light in the player's color: the stream of the
+    influence, and the prayer of a Worship Site for a spell (`miracles.md`,
+    "The bolt of Lightning"). A desktop run with the test key
+    `influence_stream_test_log=1` logged no stream at the cast, so the
+    beam is not found yet. A column in that color stands in the sky.
   - Water puts out burning trees (27 casts of a desktop run) but not a
     burning house (62 casts). The pour starts 1.6 units over the roof. Not
     known whether a pour of the plain game puts out a house.

@@ -158,6 +158,10 @@ const int kObVelocity = 0xDC;
 const int kObSpeed = 0xF4;       // the length of the velocity
 const int kObForce = 0x104;
 const int kObTorque = 0x110;     // the torque of this step, 3 floats
+// The constant torque of this game turn [V, PhysOb::ZeroForces 0x007FD42C,
+// the clear at 0x00646093, packet 0x40 at 0x0063CE87]: each step starts its
+// torque from it. See throw_math.h, TurnTorqueFactor.
+const int kObTurnTorque = 0x128;
 const int kObMass = 0x134;
 // The constants of the contact, from a row of PhysicsConstants.txt
 // (PhysOb::SetUpConstants 0x007FB810): the spring and the second spring are
@@ -387,6 +391,10 @@ struct Flight {
   bool turn_rule;
   int turn_cuts;
   float turn_top_cut;    // the largest turn of the picture before a cut
+  // The constant torque of a game turn (packet 0x40), for the log: the
+  // substeps in which the mod cut it, and the first one is logged.
+  int torque_substeps;
+  bool torque_logged;
   // A release in the glide of a far fetch: the place of the picture at the
   // release, from the place in the Hand.
   bool has_lead;
@@ -746,11 +754,13 @@ void EndFlight(Flight* f, const char* why) {
            "the land. The game ran %d turns, %d substeps and %d steps for "
            "it, and %d substeps touched an object. The steps took %.2f ms. "
            "The mod cut the momentum of the turn in %d substeps, where the "
-           "picture would turn %.2f times a second at most (throw_turn=%d)",
+           "picture would turn %.2f times a second at most, and the torque "
+           "of a game turn in %d substeps (throw_turn=%d)",
            f->object, f->time, why, Flat(end, f->p0),
            Flat(end, f->p0) / f->s, f->turns, f->substeps, f->steps,
            f->hit_substeps, f->step_seconds * 1000.0, f->turn_cuts,
-           f->turn_top_cut / 6.2831853f, f->turn_rule ? 1 : 0);
+           f->turn_top_cut / 6.2831853f, f->torque_substeps,
+           f->turn_rule ? 1 : 0);
   }
   f->active = false;
   if (g_active > 0) --g_active;
@@ -811,6 +821,8 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
   f->turn_rule = g_turn;
   f->turn_cuts = 0;
   f->turn_top_cut = 0.0f;
+  f->torque_substeps = 0;
+  f->torque_logged = false;
   if (f->turn_rule) {
     const float factor = throw_math::TurnStartFactor(f->scale);
     for (int i = 0; i < 3; ++i) turn[i] *= factor;
@@ -1144,8 +1156,8 @@ int FlySubstep(Flight* f, uint8_t* ob) {
   // the rate of this substep times the game's turn. The momentum is cut so
   // that this is the game's cap at most, and the momentum that the cap of
   // the game hides is gone.
+  const float rate = hit ? 1.0f : f->scale;
   if (f->turn_rule) {
-    const float rate = hit ? 1.0f : f->scale;
     const float speed = TurnSpeed(ob);
     const float factor =
         throw_math::TurnCutFactor(speed, rate, throw_math::kTurnCap);
@@ -1155,6 +1167,53 @@ int FlySubstep(Flight* f, uint8_t* ob) {
       ++f->turn_cuts;
       if (speed * rate > f->turn_top_cut) f->turn_top_cut = speed * rate;
     }
+  }
+  // THE TORQUE OF A GAME TURN (throw_math::TurnTorqueFactor). Each step of
+  // the substep starts its torque from the constant torque, so the mod
+  // multiplies the constant torque by the factor for the steps of this
+  // substep, and puts the game's value back after them. The game's own
+  // PhysOb::ZeroForces of this substep copied the whole constant torque to
+  // the torque of the first step, so the first step loses the rest here.
+  float* turn_torque = reinterpret_cast<float*>(ob + kObTurnTorque);
+  const float torque_given[3] = {turn_torque[0], turn_torque[1],
+                                 turn_torque[2]};
+  const float torque_factor =
+      f->turn_rule ? throw_math::TurnTorqueFactor(rate) : 1.0f;
+  const bool torque_cut = torque_factor < 1.0f &&
+                          controller_math::Length(torque_given) > 1e-6f;
+  if (controller_math::Length(torque_given) > 1e-6f && !f->torque_logged &&
+      g_flight_logs < kMaxFlightLogs) {
+    f->torque_logged = true;
+    ++g_flight_logs;
+    // The momentum that the torque gives in the steps of one game turn, at
+    // this rate, and the turn of the picture that it adds.
+    float plain[3], flight[3];
+    for (int i = 0; i < 3; ++i) {
+      plain[i] = torque_given[i] * throw_math::kSubstepsInTurn *
+                 throw_math::kSubstep;
+      flight[i] = plain[i] * rate * torque_factor;
+    }
+    const float* axes = reinterpret_cast<const float*>(ob + kObAxes);
+    const float* inverse =
+        reinterpret_cast<const float*>(ob + kObInverseInertia);
+    ModLog("hand throw   : the game gives %p a torque of %.1f for one game "
+           "turn, %.3f s into its flight (packet 0x40, from the move of the "
+           "pointer after the release). In the plain game it adds %.2f "
+           "turns a second. In the flight at %.2f steps a substep it adds "
+           "%.2f turns a second of the picture (throw_turn=%d), before the "
+           "cut of each substep", f->object,
+           controller_math::Length(torque_given), f->time,
+           throw_math::TurnSpeedOf(axes, inverse, plain) / 6.2831853f, rate,
+           throw_math::TurnSpeedOf(axes, inverse, flight) * rate / 6.2831853f,
+           f->turn_rule ? 1 : 0);
+  }
+  if (torque_cut) {
+    float* torque = reinterpret_cast<float*>(ob + kObTorque);
+    for (int i = 0; i < 3; ++i) {
+      turn_torque[i] = torque_given[i] * torque_factor;
+      torque[i] -= torque_given[i] - turn_torque[i];
+    }
+    ++f->torque_substeps;
   }
   float* cap = reinterpret_cast<float*>(kCap);
   const float cap_before = *cap;
@@ -1193,6 +1252,9 @@ int FlySubstep(Flight* f, uint8_t* ob) {
     if (j + 1 >= steps || code != 1) break;
   }
   *cap = cap_before;
+  if (torque_cut) {
+    for (int i = 0; i < 3; ++i) turn_torque[i] = torque_given[i];
+  }
   // THE SUM OF THE TURN. After this call the game adds the force of this
   // last step to PhysicsObject+0x0C when the step had a contact
   // (0x00645FEE). The sum must then be the largest sum of 20 steps so far.

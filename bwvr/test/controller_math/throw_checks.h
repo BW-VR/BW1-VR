@@ -743,6 +743,27 @@ inline void ThrowChecks() {
           "cap for more than 2 s", kept_at_cap, 2.0);
     Check(cut_at_cap < 0.01, "with the cut the turn falls from the cap at "
           "once", cut_at_cap, 0.01);
+    // The constant torque of a game turn (packet 0x40). The game gives it
+    // for 20 steps. The flight runs 20 x rate steps with the factor, and the
+    // picture shows the turn of the game rate times as fast.
+    Near("the torque of a game turn is divided by the square of the rate",
+         TurnTorqueFactor(5.0f), 0.04, 1e-6);
+    Near("at the game's own rate the torque stays", TurnTorqueFactor(1.0f),
+         1.0, 1e-6);
+    Near("a rate below 1 does not make the torque larger",
+         TurnTorqueFactor(0.5f), 1.0, 1e-6);
+    {
+      const double torque = 2.0;  // momentum a second, one axis, inertia 1
+      const double game_steps = kSubstepsInTurn;
+      const double plain_turn = torque * game_steps * kSubstep;
+      const double flight_turn = torque * TurnTorqueFactor(5.0f) *
+                                 game_steps * 5.0 * kSubstep;
+      Near("the picture turns as fast as the game turns that torque",
+           flight_turn * 5.0, plain_turn, 1e-6);
+      Check(game_steps * 5.0 * kSubstep * torque * 5.0 > 20.0 * plain_turn,
+            "with no change the picture turns 25 times as fast",
+            game_steps * 5.0 * kSubstep * torque * 5.0, 20.0 * plain_turn);
+    }
   }
 
   // THE REST AFTER A LANDING (throw_land_rest).

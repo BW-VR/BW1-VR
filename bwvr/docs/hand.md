@@ -131,7 +131,7 @@ slot 6 on it [V].
 | `+0x48C0`, `+0x48C4` | its velocity. A spring with `0.03^dt` decay, clamped to 80 px from the point | [V] |
 | `+0x48C8..+0x48D0` | **throw velocity**, world units per second | [V] section 3 |
 | `+0x48D4..+0x48DC` | a point on the held object, in its local space | [V] used by the release, meaning [I] |
-| `+0x48F8`, `+0x48FC` | a timer and the last thrown object | [V] |
+| `+0x48F8`, `+0x48FC` | the time to packet `0x40` (180 ms from the last frame of a hold) and the last thrown object. The packet gives that object the torque of the flick (`throw.md`, "The turn of a thrown object") | [V] |
 | `+0x4904` | the held `Object*` | [V] ThrowObject, GetRequiredState |
 | `+0x4908` | nonzero: tug state | [V] GetRequiredState |
 | `+0x490C` | hold mode (switch in HandStateHolding::Update) | [V] |

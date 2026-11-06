@@ -21,9 +21,10 @@ object is in `grab.md`.
   object goes down as in the game (`throw_land_rest`).
 - A tree that falls comes to rest in about 1 s after its first contact
   (`throw_tree_settle`).
-- A thrown object turns at about the pace of the game. Before each substep
-  the mod cuts the turn of the picture to the game's cap of 1.5 turns a
-  second (`throw_turn`).
+- A thrown object turns at about the pace of the game. The mod scales the
+  turn of the release and the torque of the flick (packet `0x40`) to the
+  steps of the flight. Before each substep it cuts the turn of the picture to
+  the game's cap of 1.5 turns a second (`throw_turn`).
 - A still hand near the land sets the object down. A still hand higher up
   than `release_fall_cm` lets the object fall (see "The height of a
   release").
@@ -793,10 +794,20 @@ desktop run can prove are in `roadmap.md`, R12.
   (1.5 turns a second), and L keeps its size.
 - **The flight has almost no torque.** The drag of the mod is 0 until the
   first contact, and the weight acts at the center. So in the flight the
-  object keeps the turn of the release, less the turn factor. In the desktop
-  runs a tree and a rock got a small turn in the flight, less than 0.1 turns
-  a second of the picture. A villager got a large turn (see "What the
-  desktop runs show"). What gives these turns is not known.
+  object keeps the turn of the release, less the turn factor, until the
+  torque of the flick comes.
+- **The torque of the flick.** `PhysOb::ZeroForces` `0x007FD200` starts the
+  torque of each step from a constant torque at `PhysOb+0x128`
+  (`0x007FD42C`). `PhysicsObject::GameTurnUpdate` sets it to 0 at the end of
+  each game turn (`0x00646093`). `CHand::GetRequiredState` counts down
+  `CHand+0x48F8` from 180 ms after the last frame of a hold (`0x0046CDEC`).
+  At 0 it sends packet `0x40` for the last thrown object (`CHand+0x48FC`,
+  `0x0046CE86`) with the move d of the land point under the pointer since
+  that frame (`0x00C5E640` minus `0x00C5E650`). `GPacket::ProcessPacket`
+  adds `1.6 m |v| (-d.z, 0, d.x)` to the constant torque (`0x0063CE87`),
+  with m the mass and v the velocity. So a move of the pointer after the
+  release turns the object, for one game turn of torque. Each kind of
+  object gets it: a villager, a rock and a tree.
 
 ### Why a strong throw turns fast [I]
 
@@ -835,6 +846,14 @@ With `throw_turn=1` (the default):
    turn falls from the cap at once, at the pace of the turn factor. The cut
    acts before a substep. A contact or a torque in the steps of a substep
    can still turn the picture faster than the cap in that substep.
+3. **The torque of the flick.** In each substep of the flight the mod
+   multiplies the constant torque by 1 / r^2, with r the steps of the
+   substep (`TurnTorqueFactor`), and it puts the game's value back after the
+   steps. The game gives the torque for 20 steps, and the flight runs r
+   times as many steps. So the momentum of the flick is 1 / r of the game's,
+   as for the release, and the picture turns as fast as the game turns that
+   flick. A substep with a touch of another object runs one step and keeps
+   the torque.
 
 The flight latches the key when the game's physics has the object. The mod
 changes only the momentum. The place, the velocity, the contact and the
@@ -877,13 +896,14 @@ a villager at 3 m/s. The runs have 60 frames a second.
   can be the cause [I].
 - In the game turn of the contact the picture turns faster than the cap with
   the key at 1: 1.8 and 2.3 turns a second.
-- **The villager.** The game gives the villager a momentum in its flight with
-  no contact, 0.38 s after the release. In that game turn the game turns it
-  at 7.9 radians a second, and the picture turns 4.2 times a second with the
-  key at 1. The mod cut the momentum in 20 substeps, where the picture would
-  turn 6.8 times a second. The momentum comes back in the steps of each
-  substep, so the cut before a substep does not hold the cap [I]. No run has
-  a villager with the key at 0.
+- **The villager.** With the cut of the release and the cap only, the
+  villager of `village_run.ps1 -Kind throw` gets a turn in its flight with
+  no contact, in the third game turn after the physics has it. The picture
+  then turns 4.2 times a second. That is the torque of the flick: the torque
+  comes back in each step of a substep, so the cap before a substep can not
+  hold it. No run shows the flight with the cut of the torque of the flick
+  yet. The log line "the game gives ... a torque" says when the torque comes
+  and how fast the picture turns with it.
 - The eye pictures do not show the turn. They are still pictures, and the
   thrown object is small at that distance.
 
@@ -891,7 +911,7 @@ a villager at 3 m/s. The runs have 60 frames a second.
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `throw_turn` | 1 | 1: a thrown object turns as fast as the game turns it, and the mod cuts the turn of the picture to 1.5 turns a second before each substep. 0: the game's momentum, and the picture turns as many times faster as the flight runs steps of the game |
+| `throw_turn` | 1 | 1: a thrown object turns as fast as the game turns it: the mod divides the momentum of the release by the steps of a substep, the torque of the flick by the square of the steps, and it cuts the turn of the picture to 1.5 turns a second before each substep. 0: the game's momentum and torque, and the picture turns as many times faster as the flight runs steps of the game |
 
 The keys are read from `bwvr.ini`. The debug menu (`debug_menu=1`,
 `controllers.md`, 10.8) has the row "Throw turn" in the group of the throw:
@@ -904,9 +924,12 @@ Tag `hand throw`, with `throw_log=1`. "The game's physics has": the turn that
 the release gave in radians a second of the game's time, the turn of the
 picture after the change, and the value of `throw_turn`. Each turn of a
 flight: the size of the momentum, the turn of the last substep in the game's
-time, and the fastest turn of the picture in that turn. The end of a flight:
-the substeps in which the mod cut the momentum, and the turn of the picture
-that the cut stopped.
+time, and the fastest turn of the picture in that turn. "The game gives ...
+a torque", one time in a flight: the size of the torque of the flick, the
+time in the flight, and the turn that it adds in a game turn in the plain
+game and in the picture of the flight. The end of a flight: the substeps in
+which the mod cut the momentum, the turn of the picture that the cut stopped,
+and the substeps in which the mod cut the torque of the flick.
 
 ### Checks
 
@@ -914,7 +937,9 @@ that the cut stopped.
 the inverse of the inertia, the factor of the release at the rates 5, 1 and
 0.5, the cut at the cap, and two cases: a throw that the game turns at 1 turn
 a second shows 5 turns a second at 5 steps a substep with no change and 1
-turn a second with the change, and a momentum of 30 times the cap after a
+turn a second with the change, the factor of the torque of the flick, and a
+torque that turns the picture 25 times as fast with no change and as fast as
+the game with the change, and a momentum of 30 times the cap after a
 contact turns at the cap for 2.45 s with the game's momentum and not at all
 after the cut.
 

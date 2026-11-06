@@ -228,7 +228,9 @@ if ($Kind -eq 'totem') {
                  'aimdebug@1520+1 trigger@1530+4 aimdebug@1580+1 ' +
                  'aimdebug@1680+1 trigger@1690+4 lstick_click@1760+60 y@1900+200'
     }
-    $keys = "$keys;welcome_done=0;welcome_test_parts=settings;debug_test_parts=$Parts;debug_window_test_save=12"
+    # test_frame_rate=60: the frames of the steps count for a game at 60
+    # frames a second, also with the renderer Vulkan.
+    $keys = "$keys;welcome_done=0;welcome_test_parts=settings;debug_test_parts=$Parts;debug_window_test_save=12;test_frame_rate=60"
 } elseif ($Kind -eq 'look') {
     # A villager that a script turns to the camera (bwvr/docs/village.md, "A
     # villager that a script turns to the player"). In the test save "temple"

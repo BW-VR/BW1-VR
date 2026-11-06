@@ -387,7 +387,7 @@ const wchar_t* JobOf(const State& s, int side, int control) {
   const int fixed = control == art::kTrigger ? map::kTrigger
                     : control == art::kGrip  ? map::kGrip
                                              : map::kStick;
-  return map::FixedAction(s.jobs, side == s.pointing, fixed);
+  return map::FixedAction(s.jobs, s.kind[side], side == s.pointing, fixed);
 }
 
 // One controller and its lines of words.
@@ -536,7 +536,8 @@ int DrawingValue() {
       mix(static_cast<uint32_t>(ActionOf(s, c, b)));
     }
     for (int f = 0; f < map::kFixed; ++f) {
-      const wchar_t* w = map::FixedAction(s.jobs, c == s.pointing, f);
+      const wchar_t* w =
+          map::FixedAction(s.jobs, s.kind[c], c == s.pointing, f);
       mix(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(w)));
     }
   }
@@ -548,30 +549,23 @@ int DrawingValue() {
 
 // --- the notes -------------------------------------------------------------------
 
+// THE NOTES are short: a note of the parchment is at most half of the list
+// high (kNoteMost), and a longer note loses its last line.
 const wchar_t* const kButtonTip =
-    L"Point at an arrow to give this button a different job of the same "
-    L"controller. The button that had that job takes the old job of this "
-    L"button, so each job keeps one button. The hint cards show the new "
-    L"buttons.";
+    L"The arrows give this button a different job of this controller. The "
+    L"button that had that job takes the old job.";
 
 const wchar_t* const kFixedTip[2][map::kFixed] = {
     // The other hand.
-    {L"The trigger of your other hand chooses an item of the ring with the "
-     L"other layout of the buttons, and it moves the index finger of the hand "
-     L"that you see. So it stays.",
-     L"The grip of your other hand grabs the land: you close the hand to hold "
-     L"the land, as you close it to hold a thing. So it stays a grip.",
-     L"A stick pushes in a direction, for a walk. A button has no direction, "
-     L"so a stick stays a stick."},
+    {L"It chooses an item of the ring when the stick opens the ring, and it "
+     L"moves the index finger of your hand.",
+     L"It grabs the land: you close the hand to hold the land.",
+     L"A stick pushes in a direction. A button has no direction."},
     // The Hand.
-    {L"The trigger of your Hand is the click of the game, and the grip is the "
-     L"hand that takes, holds and throws. They stay, so the Hand works as the "
-     L"hand of the game. controller_swap_buttons=1 in bwvr.ini swaps the two.",
-     L"The grip of your Hand takes, holds and throws: you close the hand to "
-     L"hold a thing. So it stays the grip. controller_swap_buttons=1 in "
-     L"bwvr.ini swaps the trigger and the grip.",
-     L"A stick pushes in a direction, for a turn and a zoom. A button has no "
-     L"direction, so a stick stays a stick."}};
+    {L"It is the click of the game. controller_swap_buttons=1 swaps it with "
+     L"the grip.",
+     L"It takes, holds and throws: you close the hand to hold a thing.",
+     L"A stick pushes in a direction. A button has no direction."}};
 
 // Words of a row that change with the state are kept here for a frame.
 wchar_t g_label[kRows][24];
@@ -617,19 +611,17 @@ const wchar_t* ControlsRowName(int k) { return ControlsRowLabel(k); }
 
 const wchar_t* ControlsRowTip(int k) {
   if (k == kDefaultsRow) {
-    return L"Gives each button its job as made: the layout of the guide of "
-           L"the mod. Each job of the face buttons, the stick clicks and the "
-           L"menu button goes back to its own button.";
+    return L"Gives each button its job as made, as in the guide of the "
+           L"mod.";
   }
   int side = 0, which = 0;
   if (ButtonRow(k, &side, &which)) {
     const State s = Now();
     if (!CanStep(s, side, which)) {
       return s.kind[side] == map::kWand && which == map::kStickClick
-                 ? L"The pad of a wand turns and zooms only while you click "
-                   L"it, so the pad click stays with the pad."
-                 : L"This controller has no other button for this job, so it "
-                   L"stays.";
+                 ? L"The pad turns only while you click it, so the click "
+                   L"stays with the pad."
+                 : L"This controller has no other button for this job.";
     }
     return kButtonTip;
   }
@@ -648,8 +640,7 @@ void ControlsRowLastLine(int k, wchar_t* out, int size) {
   } else if (ButtonRow(k, &side, &which)) {
     const State s = Now();
     swprintf_s(out, size,
-               L"Key: %hs. A change acts at once, when you let go of each "
-               L"button.",
+               L"Key: %hs. A change acts when each button is up.",
                kMapKey[side == s.pointing ? 0 : 1]);
   } else {
     swprintf_s(out, size, L"This control stays on its job.");
@@ -702,7 +693,7 @@ const wchar_t* ControlsRowFixedWord(int k) {
     return g_word[k];
   }
   if (FixedRow(k, &side, &which)) {
-    return map::FixedAction(s.jobs, side == s.pointing, which);
+    return map::FixedAction(s.jobs, s.kind[side], side == s.pointing, which);
   }
   return nullptr;
 }

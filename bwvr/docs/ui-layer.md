@@ -2594,7 +2594,10 @@ shapes of the drawing). `controllers.md`, 5.7, has the map.
 A controller that has a button that the map cannot move, or only one
 button, shows that button as a dim row with its job: the pad click of a Vive
 wand and the menu button of a simple controller. The rows follow the kind of
-the controller at the press of the tab.
+the controller at the press of the tab. A Vive wand and a Mixed Reality
+controller have no face buttons, so the ring is on the pad or the stick of
+the other hand with each layout (`controllers.md`, 5.1): the fixed row of
+that stick says "Ring", and its trigger says "Ring choice".
 
 **A change.** The arrow of a button gives it the slot of the next button of
 the list, and that button takes the old slot of the first one. So each job

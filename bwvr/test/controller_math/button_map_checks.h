@@ -193,6 +193,20 @@ inline void ButtonMapChecks() {
   Check(labels, "the labels of the rows name the side and the button", labels,
         1);
 
+  // The ring of a controller with no face buttons is on its stick or pad
+  // with each layout, and on a Touch controller only with button_layout=0.
+  Jobs pad = j;
+  pad.stick_ring = true;
+  const bool wand = Same(FixedAction(pad, kWand, false, kStick), L"Ring") &&
+                    Same(FixedAction(pad, kMixed, false, kStick), L"Ring") &&
+                    Same(FixedAction(pad, kTouch, false, kStick), L"Walk") &&
+                    Same(FixedAction(pad, kWand, false, kTrigger),
+                         L"Ring choice");
+  pad.layout = 0;
+  Check(wand && Same(FixedAction(pad, kTouch, false, kStick), L"Ring"),
+        "the pad of a wand is the ring, and the stick of Touch walks with "
+        "button_layout=1", wand, 1);
+
   // Each word fits its place: a job between the arrows (13 letters), a
   // label in its row (18 letters).
   bool fit = true;
@@ -206,7 +220,9 @@ inline void ButtonMapChecks() {
   for (int k = 0; k < 3; ++k) {
     for (int p = 0; p < 2; ++p) {
       for (int f = 0; f < kFixed; ++f) {
-        if (wcslen(FixedAction(all[k], p != 0, f)) > 13) fit = false;
+        for (int kind = 0; kind < kKinds; ++kind) {
+          if (wcslen(FixedAction(all[k], kind, p != 0, f)) > 13) fit = false;
+        }
       }
     }
   }

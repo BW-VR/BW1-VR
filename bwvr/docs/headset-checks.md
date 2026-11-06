@@ -122,11 +122,13 @@ want.
 
 ### Menus and cards
 
-22. **The menus, the keyboard and the ring.** Open the game menu and the
-    ring, type the name of a god, and turn the head while a menu is open.
-    Wrong: a panel that turns with the head or is at a bad place, keys or a
-    ring that are blurred or hard to read, a ray that does not meet the arrow
-    of the game, or a thumb that lets go of Y.
+22. **The menus, the keyboard, the ring and the panel of places.** Open the
+    game menu and the ring, type the name of a god, open the panel of places
+    from page 2 of the ring and go to a bookmark, and turn the head while a
+    menu is open. Wrong: a panel that turns with the head or is at a bad
+    place, a panel that hides the pointing hand, keys, buttons or a ring that
+    are blurred or hard to read or hard to hit with the ray, a ray that does
+    not meet the arrow of the game, or a thumb that lets go of Y.
 23. **The cards and the subtitles.** Read the hint cards at the wrist and the
     subtitle card while the hands work. Wrong: low contrast or a shimmer, a
     card that covers a hand or often changes side, a prompt that is late or

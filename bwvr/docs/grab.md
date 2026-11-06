@@ -1362,9 +1362,10 @@ Test keys of `bwvr.ini`, for the desktop runs only:
 
 `village_run.ps1 -Kind neartake` closes the grip on a pile and moves the hand
 away from the pile while the grip stays closed. The take goes on with the
-hand 15, 36 and 48 cm of the room from the pile, until the grip opens. The
-scripted grip never falls, so the run is the same with each value of
-`near_take_keeps`.
+hand 15, 36 and 48 cm of the room from the pile, until the grip opens. Then
+the squeeze dips to 0.59 for 2 frames (the script word `gripdip`), a fast
+fall. With `near_take_keeps=1` the grip stays closed and the take goes on.
+With 0 the dip opens the grip and ends the take.
 
 **Not tested:** a field, a store inside the real influence, and a real grip
 that falls fast during a take (only a headset log shows it). A desktop run has the loop of a take of

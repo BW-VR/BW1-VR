@@ -401,13 +401,14 @@ that moves while the Hand takes it.
   distance: it ends a take only when the source is gone or empty, the Pot
   is full, or the Hand is outside the influence
   (`GInterfaceStatus::Process` `0x005DC4E0`). The desktop run cannot make
-  the fault happen: in `village_run.ps1 -Kind neartake` the take goes on
-  with the hand 15, 36 and 48 cm of the room from the pile, until the grip
-  opens. The scripted grip never falls. The likely cause is a real squeeze
-  that falls fast for a moment, which opens the grip (`grip_fast_open`). So
-  `near_take_keeps=1` lets only a grip below 35% end a bulk take. Open: a
-  headset log of a take with the hand moved away (`headset-checks.md`,
-  "Play as normal and send the log").
+  the fault happen with a steady grip: in `village_run.ps1 -Kind neartake`
+  the take goes on with the hand 15, 36 and 48 cm of the room from the
+  pile, until the grip opens. The likely cause is a real squeeze that falls
+  fast for a moment, which opens the grip (`grip_fast_open`). So
+  `near_take_keeps=1` lets only a grip below 35% end a bulk take, and the
+  same run makes such a fall with the word `gripdip`. Open: a headset log of
+  a take with the hand moved away (`headset-checks.md`, "Play as normal and
+  send the log").
 - **P23. The aim down from a chair: keep watch.** A seated player aims down
   less well than a standing player, because furniture can be in the way of
   the hand. Not planned. One idea: a launcher option that lets the grab

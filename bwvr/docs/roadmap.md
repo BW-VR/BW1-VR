@@ -516,15 +516,12 @@ keeps the mod as it is.
   31.25 s), 500 to 532 ms after its play, with a wait of 20.3 to 21.0 ms.
   So at the start only, not in play. Open: whether a play has more of them
   (the log of a play shows it, `headset-checks.md`).
-- **F26. The first picture of a card still costs.** `font_warm=1` draws
-  each letter of the 20 card fonts on a thread at the start (66 ms). In a
-  desktop run it cuts the first picture of the ring from 20.4 to 10.6 ms.
-  The first picture of the spell book stays at 9.7 to 10.1 ms (the text of
-  GDI about 8 ms), the page "No prayer power" at 7.8 to 7.9 ms, and the
-  first picture of the panel of places at 16.4 to 18.8 ms (the page 7.3 to
-  7.5 ms). Find where that time goes (a font size that the warm does not
-  draw, a GDI cost that is not the letters, or the first draw of the page)
-  and make it smaller.
+- **F26. The first picture of a card still costs.** The warm of the fonts
+  draws with DrawTextW (`controller-hints.md`, 9.11, "The first draw of a
+  font"). Open: the desktop runs that measure the first picture of the
+  spell book, the ring, the hint card and the panel of places with this
+  warm. After the text, the first picture of the panel of places still
+  draws its 42 parts (about 4 ms of keys) and its page (2 to 3 ms).
 
 ### Faults of the plain game
 

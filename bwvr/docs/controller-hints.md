@@ -1326,23 +1326,35 @@ pixel of the full mix. A new picture makes no blur. The picture is drawn
 again only when the words of the card change. The text of GDI costs most,
 not the paper.
 
-**The first draw of a font.** GDI makes each letter of a font at one size
-the first time that it draws it, and keeps it for the whole process, for
-each thread and each DC. For the words of a card that is 7 to 30 ms on the
-frame thread: at the first card, the first picture of the book, the ring,
-the keyboard, the panel of places and the debug window. With `font_warm=1`
+**The first draw of a font.** The first DrawTextW of a font at one size
+costs 6 to 11 ms: GDI makes each letter, and the text layout of Windows,
+which DrawTextW goes through, makes its own data for that font and size.
+Each card draws its words with DrawTextW. Both costs are for the whole
+process, for each thread and each DC. Without a warm they come on the frame
+thread at the first card, the first picture of the book, the ring, the
+keyboard, the panel of places and the debug window. With `font_warm=1`
 (the default) `card_scroll::WarmStart` starts a thread of the mod at the
 install of the hooks, with a priority below normal. The thread loads the
 fonts and makes the noise tile (`card_scroll::Start`, which the frame
 thread then finds done), then draws the printable ASCII, the letters of
 Latin-1, the quotes, the dashes and the dots one time in each font of the
-cards: the words in 15 sizes, the seals in 4 and the digits in 1. Each size
+cards, with DrawTextW: the words in 15 sizes, the seals in 4 and the digits
+in 1. Each size
 comes from a constant of the card that uses it (the table in
 `card_scroll.cpp`). A font that a card asks for and the table does not have
-gets a line in the log. In a test program outside the game GDI drew the 120
-letters of one size in 1.3 to 2.1 ms the first time and in 0.14 to 0.24 ms
-after the same draw on a second thread. The warm does nothing with
-`hint_card_style=0`, which uses Segoe UI.
+gets a line in the log. A draw with TextOutW is not enough: it makes the
+letters, but not the data of the text layout. A test program with
+`card_scroll.cpp` outside the game measured the first DrawTextW of a line of
+words: 6.6 to 10.9 ms with no warm, 7.2 to 10.5 ms after a warm with
+TextOutW, and 0.10 to 0.26 ms after a warm with DrawTextW. The warm takes
+about 0.3 s on its thread. The warm does nothing with `hint_card_style=0`,
+which uses Segoe UI.
+
+The other parts of a first picture are the parchment itself. In the same
+test a page of 1024 by 1024 px (`card_scroll::Page`) took 1.8 to 3.4 ms and
+a key 0.1 ms. The panel of places draws 42 parts in its first picture, so
+its keys are about 4 ms of it. Later pictures copy the parts
+(`panel_kit::Tiles`).
 
 **Tests.** A desktop run saves each new picture of a card with
 `hint_card_save_test=1`, and loads the fonts from the staged folder of its

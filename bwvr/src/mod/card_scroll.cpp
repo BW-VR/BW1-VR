@@ -431,12 +431,17 @@ void NoteCold(int kind, int cap) {
          "letter on the frame thread", kKinds[kind], cap);
 }
 
-// Draws each letter of the font once into the picture of dc.
+// Draws each letter of the font once into the picture of dc, with DrawTextW
+// as each card draws its words. A draw with TextOutW makes the letters, but
+// the first DrawTextW of a font still costs 7 to 10 ms after it: DrawTextW
+// goes the way of the text layout of Windows, and that way keeps its own
+// data for each font and size.
 void WarmFont(HDC dc, HFONT font) {
   if (font == nullptr) return;
   HGDIOBJ old = SelectObject(dc, font);
   for (const wchar_t* text : kWarmText) {
-    TextOutW(dc, 2, 2, text, static_cast<int>(wcslen(text)));
+    RECT box = {2, 2, 2046, 126};
+    DrawTextW(dc, text, -1, &box, DT_SINGLELINE | DT_NOPREFIX | DT_LEFT);
   }
   GdiFlush();
   SelectObject(dc, old);

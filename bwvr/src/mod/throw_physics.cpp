@@ -198,6 +198,9 @@ const uintptr_t kLocalObject = 0x00D47828;
 const uintptr_t kGetAltitude = 0x00803090;
 const float kMapScale = 6553.6f;
 const float kMapEdge = 5119.0f;
+// The land is under the sea where its altitude is less than this, and there
+// fn_007FD4D0 floats the object [V, 0x007FD5AB, the float at 0x008BF518].
+const float kSeaLand = 0.0001f;
 // Object and LH3DObject: the mesh at +0x40, and its matrix at +0x14 (the
 // position is at +0x38).
 const int kObjectMesh = 0x40;
@@ -394,6 +397,7 @@ struct Flight {
   // The constant torque of a game turn (packet 0x40), for the log: the
   // substeps in which the mod cut it, and the first one is logged.
   int torque_substeps;
+  int torque_step_cuts;  // the steps that the cap of a step cut
   bool torque_logged;
   // A release in the glide of a far fetch: the place of the picture at the
   // release, from the place in the Hand.
@@ -755,11 +759,13 @@ void EndFlight(Flight* f, const char* why) {
            "it, and %d substeps touched an object. The steps took %.2f ms. "
            "The mod cut the momentum of the turn in %d substeps, where the "
            "picture would turn %.2f times a second at most, and the torque "
-           "of a game turn in %d substeps (throw_turn=%d)",
+           "of a game turn in %d substeps, with the cap in %d steps of them "
+           "(throw_turn=%d)",
            f->object, f->time, why, Flat(end, f->p0),
            Flat(end, f->p0) / f->s, f->turns, f->substeps, f->steps,
            f->hit_substeps, f->step_seconds * 1000.0, f->turn_cuts,
            f->turn_top_cut / 6.2831853f, f->torque_substeps,
+           f->torque_step_cuts,
            f->turn_rule ? 1 : 0);
   }
   f->active = false;
@@ -822,6 +828,7 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
   f->turn_cuts = 0;
   f->turn_top_cut = 0.0f;
   f->torque_substeps = 0;
+  f->torque_step_cuts = 0;
   f->torque_logged = false;
   if (f->turn_rule) {
     const float factor = throw_math::TurnStartFactor(f->scale);
@@ -941,7 +948,10 @@ void FirstContact(Flight* f, uint8_t* ob, int step) {
          "away. The speed is %.1f units/s in the game's time (%.2f m/s of "
          "the room)", f->object, t, matrix[9], matrix[10], matrix[11],
          matrix[10] - Altitude(matrix[9], matrix[11]),
-         other != nullptr ? "an object" : "the land or the water", p[0],
+         other != nullptr ? "an object"
+         : Altitude(matrix[9], matrix[11]) < kSeaLand
+             ? "the water: the land is under the sea there"
+             : "the land", p[0],
          p[1], p[2], Gap(&matrix[9], p), Gap(&matrix[9], p) / f->s * 100.0f,
          speed, speed * f->scale / f->s);
   ++g_flight_logs;
@@ -1231,6 +1241,19 @@ int FlySubstep(Flight* f, uint8_t* ob) {
         (*reinterpret_cast<const int32_t*>(ob + kObContacts) > 0 ||
          ob[kObContact] != 0)) {
       FirstContact(f, ob, j);
+    }
+    // THE CAP IN EACH STEP (throw_math::TurnCutBeforeStep). In a substep
+    // with the torque of the flick, the momentum of this step has the cap
+    // of the picture at most.
+    if (torque_cut &&
+        throw_math::TurnCutBeforeStep(
+            reinterpret_cast<float*>(ob + kObTurn),
+            reinterpret_cast<const float*>(ob + kObTorque),
+            *reinterpret_cast<const float*>(ob + kObTurnKeep),
+            throw_math::kSubstep, reinterpret_cast<const float*>(ob + kObAxes),
+            reinterpret_cast<const float*>(ob + kObInverseInertia), rate,
+            throw_math::kTurnCap)) {
+      ++f->torque_step_cuts;
     }
     code = o_Integrate(ob, nullptr);
     ++done;

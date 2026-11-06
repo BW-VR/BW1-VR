@@ -571,13 +571,21 @@ Each is a `SpellPointInf` (`0x0069AC10`) from one point to another:
   `Spell+0xA0`. It comes for each 100 of the power of a spell that has a
   Worship Site (`Spell::GetWorshipSite`).
 
-The mod does not draw a beam or a line in the player's color, and it does
-not change these streams by default. With the test key
+The mod does not change these streams by default. With the test key
 `influence_stream_test_log=1` the log has a line for each stream, 24 times
 and then each 200th time: the caller, the two ends, the height of each end
-over the land, the color and the Hand's point. A desktop run with the key
-then says whether the beam is one of these streams, and which end is in the
-sky.
+over the land, the color and the Hand's point. Each report window also has
+the count of the streams, also when it is 0. A desktop run of a Lightning
+from a one-off seed with the key logged no stream. A one-off seed has no
+Worship Site, and the Hand stayed in the influence [I]. Its eye picture after the
+pour shows a column in the sky in the red of the influence ring (255 70 70),
+and not at the spire.
+
+The mod draws one thing in that red: the glow at the edge of the influence
+(`influence_wall`, "The glow at the edge"), a patch of 12 cm of the room at
+the edge nearest to each hand. Its lines `influence    : the glow at the
+edge` say when it shows and where. The game draws its influence ring in the
+same red. A run with `influence_wall=0` tells the two apart.
 
 ### The way out
 

@@ -561,6 +561,15 @@ void LogVirtualInfluence() {
 // Once a report window.
 void InfluenceEdgeReport() {
   if (g_test_cm > 0 || g_stream_hand) LogVirtualInfluence();
+  // influence_stream_test_log: the count of the streams, also when it is 0,
+  // so the log shows that the hook was there and the game made none.
+  if (g_stream_log) {
+    static uint64_t said = 0;
+    ModLog("influence    : the game made %llu streams of light in this "
+           "window, %llu in all (influence_stream_test_log=1)",
+           g_spell_points - said, g_spell_points);
+    said = g_spell_points;
+  }
   if (g_fade_frames == 0 && g_wall_frames == 0 && g_stream_calls == 0 &&
       g_raw_tests == 0) {
     return;

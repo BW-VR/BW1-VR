@@ -865,6 +865,29 @@ inline float TurnCutFactor(float turn_speed, float rate, float cap) {
   return cap / (turn_speed * rate);
 }
 
+// THE CAP IN EACH STEP OF A SUBSTEP WITH A TORQUE. The torque of the flick
+// comes back in each step of a substep, so a cut before the substep does
+// not hold the cap. fn_007FE260 makes the momentum of the step
+// L' = (L + torque dt) keep, and turns the object with w(L'). So before a
+// step the mod changes L so that L' has the cap at most:
+// L = L' f / keep - torque dt, with f = TurnCutFactor of w(L'). True when it
+// changed the momentum.
+inline bool TurnCutBeforeStep(float momentum[3], const float torque[3],
+                              float keep, float dt, const float axes[9],
+                              const float inverse[9], float rate,
+                              float cap) {
+  if (!(keep > 0.0f) || !(dt > 0.0f)) return false;
+  float next[3];
+  for (int i = 0; i < 3; ++i) next[i] = (momentum[i] + torque[i] * dt) * keep;
+  const float factor =
+      TurnCutFactor(TurnSpeedOf(axes, inverse, next), rate, cap);
+  if (!(factor < 1.0f)) return false;
+  for (int i = 0; i < 3; ++i) {
+    momentum[i] = next[i] * factor / keep - torque[i] * dt;
+  }
+  return true;
+}
+
 inline void LandBrake(const float push[3], const float velocity[3],
                       float mass, float friction, float out[3]) {
   out[0] = out[1] = out[2] = 0.0f;

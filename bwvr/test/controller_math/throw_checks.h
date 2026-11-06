@@ -764,6 +764,35 @@ inline void ThrowChecks() {
             "with no change the picture turns 25 times as fast",
             game_steps * 5.0 * kSubstep * torque * 5.0, 20.0 * plain_turn);
     }
+    // The cap in each step of a substep with a torque: the momentum of the
+    // step (L + torque dt) keep turns the picture at the cap at most, and a
+    // momentum below it does not change.
+    {
+      const float keep = 0.999f, rate = 3.33f;
+      const float torque[3] = {0.0f, 0.0f, 400.0f};
+      float momentum[3] = {0.0f, 0.0f, 0.4f * kTurnCap / rate * 8.0f};
+      // inverse z is 0.125: the turn is momentum z / 8.
+      int steps_over = 0;
+      for (int j = 0; j < 100; ++j) {
+        TurnCutBeforeStep(momentum, torque, keep, kSubstep, axes, inverse,
+                          rate, kTurnCap);
+        for (int i = 0; i < 3; ++i) {
+          momentum[i] = (momentum[i] + torque[i] * kSubstep) * keep;
+        }
+        if (TurnSpeedOf(axes, inverse, momentum) * rate > kTurnCap * 1.0001f) {
+          ++steps_over;
+        }
+      }
+      Check(steps_over == 0, "with the cap in each step no step turns the "
+            "picture past the cap", steps_over, 0);
+      Near("the momentum of the steps ends at the cap",
+           TurnSpeedOf(axes, inverse, momentum) * rate, kTurnCap, 1e-3);
+      float low[3] = {0.0f, 0.0f, 1.0f};
+      const float none[3] = {0.0f, 0.0f, 0.0f};
+      Check(!TurnCutBeforeStep(low, none, keep, kSubstep, axes, inverse, rate,
+                               kTurnCap) && low[2] == 1.0f,
+            "a momentum below the cap does not change", low[2], 1.0);
+    }
   }
 
   // THE REST AFTER A LANDING (throw_land_rest).

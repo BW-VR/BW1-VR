@@ -16,6 +16,29 @@
 #             script after the start dialog. With no -Points and no -Steps
 #             the run only closes the start dialog. A DLL of a build that
 #             has no test save needs -NewGame.
+#   near      The hand 20, 10, 7 and 5 cm in front of the head, with an eye
+#             picture at each place (near_plane_cm). Give it
+#             -Set "backend=dxwrapper\ddraw.dll" for eye pictures.
+#   holdland  The grip of the other hand holds the land for 250 frames with
+#             both hands still, and then for 250 frames with one step of
+#             10 cm of the other hand. The lines "grab" of each report
+#             window count the frames in which the camera moved.
+#   left      left_hand=1: the left controller is the Hand. The points are
+#             the mirror of the points of a right hand. The Hand goes 3 cm
+#             over open land and the grip closes there. Then the menu button
+#             of the right controller and of the left controller are pressed
+#             (only the left one sends Esc).
+#   glow      hand_glow=1 and hand_glow_idle=1: the Hand's point 3 cm over
+#             open land, 17 cm in the land with hand_land_stop=0 (the land
+#             hides the glow), back over the land, and at the nearest rock,
+#             with an eye picture at each place.
+#   forest    forest_take=1: the fetch of one tree from a forest at the store
+#             of Land 1, then the aim away from the forest with the grip
+#             still closed.
+#   zone      The walk with the stick out of the camera zone of the
+#             Creature select, and back.
+#   mousepan  The test mouse of the mod drags the land, with no controller.
+#             Give it -Save temple.
 #
 # THE START. The run starts in a test save (README.md, "A fast start"): the
 # save "pen" for the kinds one and fixed (the Creature pens of Land 1 after
@@ -135,6 +158,105 @@ if ($Kind -eq 'one') {
                   " nudge@$($b + 230)+1 nudge@$($b + 270)+1 seek@$($b + 300)+1" +
                   " rot@$($b + 340)+1 rot@$($b + 490)+1 slap@$($b + 560)+1 slap@$($b + 700)+1"
     }
+} elseif ($Kind -eq 'near') {
+    # The hand in front of the eyes, level, 20 to 5 cm from the middle of the
+    # head. First six zoom steps in, to about 8.8 units for each meter: there
+    # the near plane of the game (about 1 unit) is about 11 cm of the room,
+    # so near_plane_cm acts. At 100 units for each meter the game's plane is
+    # 1 cm, and the key does not change it. The log line "near plane" has
+    # the plane that the mod used. Compare with -Set "near_plane_cm=0".
+    $extra.fake_controller_points = "$first 0,-4,20 0,-3,10 0,-3,7 0,-2,5"
+    $Steps = 'stick_up@4600+10 stick_up@4630+10 stick_up@4660+10 stick_up@4690+10 stick_up@4720+10 stick_up@4750+10 ' +
+             'point@4800+1 shot@4830+1 point@4860+1 shot@4890+1 point@4920+1 shot@4950+1 ' +
+             'point@4980+1 shot@5010+1'
+} elseif ($Kind -eq 'holdland') {
+    # The other hand holds the land. The hands do not move from frame 4650 to
+    # 4900, so the camera must not move. Then a new grip, and one lpoint
+    # step of 10 cm up in it, so the camera moves one time.
+    $extra.fake_controller_points = "$first 16,-30,50"
+    $extra.fake_controller_left_points = '-16,-30,50 -16,-20,50'
+    $Steps = 'point@4600+1 lpoint@4600+1 lgrip@4650+250 shot@4700+1 shot@4890+1 ' +
+             'lgrip@5000+250 lpoint@5100+1 shot@5200+1'
+} elseif ($Kind -eq 'left') {
+    # The words of the right hand drive the left controller (controllers.md,
+    # 5.6). The word "menu" presses the menu button of the left controller,
+    # and "lmenu" the menu button of the right controller. The first Esc
+    # opens the game menu, and the second "menu" closes it.
+    $extra.left_hand = 1
+    $extra.fake_head_pitch = -25
+    $extra.seek_plan = 'open'
+    $extra.fake_controller_points = "$first -16,-30,45"
+    $Steps = 'point@4600+1 shot@4630+1 seek@4660+1 shot@4690+1 grip@4720+60 shot@4760+1 ' +
+             'point@4850+1 lmenu@4900+5 shot@4960+1 menu@5000+5 shot@5060+1 menu@5100+5 shot@5160+1'
+} elseif ($Kind -eq 'glow') {
+    # The glow at the Hand's point (hand-model.md, "The glow at the Hand's
+    # point"). With hand_land_stop=0 the hand goes into the land, and the
+    # land in front of the point hides the glow.
+    $extra.hand_glow = 1
+    $extra.hand_glow_idle = 1
+    $extra.hand_land_stop = 0
+    $extra.seek_step_cm = 20
+    $extra.fake_head_pitch = -25
+    $extra.seek_plan = 'open,down,up,hold'
+    $extra.seek_class = 'Rock'
+    $extra.fake_controller_points = "$first 0,-30,55"
+    $Steps = 'point@4600+1 seek@4630+1 shot@4660+1 seek@4700+1 shot@4730+1 seek@4770+1 shot@4800+1 ' +
+             'seek@4840+1 shot@4870+1'
+} elseif ($Kind -eq 'forest') {
+    # The take from a forest after a fetch of one tree (grab.md, "The take
+    # from a forest"), with forest_take=1. First to the store of Land 1, as
+    # for the kind one, where the trees are in forests. The hand goes up to
+    # the height of the head, and the word "aimfar" aims at the nearest tree
+    # (far_test_tree=1). The grip closes, and a pull fetches the tree. Then
+    # the word "aimturn" turns the aim 70 degrees away from the forest, and
+    # the grip stays closed: no second tree is in the cone for 300 ms, so the
+    # tree stays one tree and no bundle starts. The lines "forest take" say
+    # so. Compare with -Set "forest_take=0".
+    $s = '-16,-50,55'
+    $extra.fake_controller_points = "$first $s 0,-5,40"
+    $extra.fake_head_pitch = -25
+    $extra.far_grab = 1
+    $extra.far_test_tree = 1
+    $extra.far_test_no_trees = 0
+    $extra.far_grab_max_m = 0
+    $extra.forest_take = 1
+    $extra.fake_controller_turns = '70,0,0'
+    $store = 'stick_right@4600+8 stick_right@4630+8 stick_right@4660+8 stick_right@4690+8 ' +
+             'stick_down@4720+10 stick_down@4750+10 stick_down@4780+10 stick_down@4810+10 stick_down@4840+10 stick_down@4870+10'
+    # The pull fetches the tree about 3 frames after it starts. The turn
+    # comes 17 frames (280 ms) after the fetch, before the wait of 600 ms of
+    # the take is over. A turn before the fetch ends the lock.
+    $Steps = $store + ' point@4900+1 point@4920+1 aimfar@4950+1 shot@4960+1 grip@4990+200 pull@5020+3 ' +
+             'aimturn@5040+1 shot@5050+1 shot@5100+1 shot@5180+1'
+} elseif ($Kind -eq 'zone') {
+    # The camera zone of the Creature select (god-view.md, section 17). The
+    # stick of the other hand pushes forward for 8 s: the walk goes out of
+    # the zone of the script, stops at god_zone_margin past it, and the push
+    # past the limit asks the game for its sound of the block. Then a push
+    # back for 3 s. The lines "camera zone" have the limit and the bumps.
+    $extra.fake_controller_points = "$first 16,-30,50"
+    $Steps = 'point@4600+1 shot@4640+1 lstick_up@4660+480 shot@5100+1 lstick_down@5200+180 shot@5420+1'
+} elseif ($Kind -eq 'mousepan') {
+    # The mouse pan (god-view.md, section 5.3) with the test mouse of the mod
+    # and no controller. Give it -Save temple: the land at the door of the
+    # Temple allows a drag. The pointer goes to 50 and 70 percent of the
+    # render, the left button is down for 150 frames, and the pointer moves
+    # 4 render pixels on each of 50 frames to the right. The lines "god view"
+    # have the land that the mouse takes, the frames that the pan moved, the
+    # worst distance of the grabbed land from the mouse ray, and no move after
+    # the release. The words count the frames with a drawn scene from 0.
+    # With a fake controller the controller owns the pointer, and the test
+    # mouse does not act. So there is no controller, and the test mouse
+    # clicks "Continue Game" of the Main Menu of the test save first (50 and
+    # 45 percent of the render).
+    $extra.fake_controller = 0
+    $extra.controller_hand = 0
+    $extra.fake_mouse_step_px = 4
+    $extra.fake_mouse_x_pct = 50
+    $extra.fake_mouse_y_pct = 45
+    $extra.fake_mouse_script = 'home@150+1 button@170+4 home2@400+1 button@410+150 move_right@430+50'
+    $Steps = ''
+    if ($Seconds -le 0) { $Seconds = 20 }
 } else {
     $extra.fake_controller_points = ("$first $Points").Trim()
 }

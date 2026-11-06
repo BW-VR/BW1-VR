@@ -30,10 +30,11 @@
 #   end of the ray in each eye picture) and "controllers" (the pixel of the
 #   ray, and the pointer of the game at each press). With cutscene_hands=0
 #   the window has no hands and no ray, and a press goes to the pointer.
-# -Kind edge: the test key influence_test_circle_cm=50 makes the influence of
-#   the player a circle of 50 cm of the room around the land under the head.
-#   The hand steps forward from 20 cm to 80 cm in front of the head, with an
-#   eye picture at each step, and back. The log has the lines "influence":
+# -Kind edge: the test keys influence_test_circle_cm=25 and
+#   influence_test_circle_frame=230 make the influence of the player a circle
+#   of 25 cm of the room around the Hand's point at its first step. The hand
+#   steps forward in steps of 10 cm to 50 cm past that point, with an eye
+#   picture at each step, and back. The log has the lines "influence":
 #   the hand goes out of the influence and comes back, the wall shows and
 #   goes, and the stream of the game ends at the Hand's point.
 #
@@ -59,9 +60,14 @@ $keys = 'god_zoom_about=0;grab_hand=1;far_grab_max_m=0'
 $points = '0,-30,60 14,-32,56 -12,-31,58'
 $more = @()
 if ($Kind -eq 'forest') {
-    $keys = "$keys;far_test_influence=1;miracle_test_seeds=1@930"
+    # The steps of miracle_run.ps1 -Kind place: two zoom steps in (44.4 units
+    # for each meter), the look, the take of the seed and the press. With no
+    # zoom steps the game refuses the cast at this place of the hand.
+    $keys = "$keys;far_test_creature=1;far_test_influence=1;miracle_test_seeds=1@930"
+    $points = '0,-30,60 14,-32,56 -12,-31,58 10,-30,62 -6,-32,54 4,-31,64 0,-30,60 12,-31,58'
     if ($Steps -eq '') {
-        $Steps = 'look@860+5000 point@900+1 seek@960+1 grip@1000+3 point@1080+1 grip@1120+10 ' +
+        $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
+                 'seek@960+1 grip@1000+3 point@1080+1 grip@1120+10 ' +
                  'shot@1300+1 shot@1700+1 b@2600+5'
     }
     $pattern = '^script camera|^miracle      : .*(Forest|casts)|^god view     : .*(story|stands aside|your camera|goes to the game camera)|' +
@@ -79,11 +85,17 @@ if ($Kind -eq 'forest') {
     $pattern = '^overlay      : the hands in the cut scene window|^controllers  : the (ray of the pointing hand|left button (presses|is down))|' +
                '^cut scene    : (frame \d+: (the first|the eye pictures|the cinema)|cutscene_hands)|^hand model   : the first'
 } elseif ($Kind -eq 'edge') {
-    $keys = "$keys;influence_test_circle_cm=50"
-    $points = '0,-30,20 0,-30,30 0,-30,40 0,-30,50 0,-30,60 0,-30,70 0,-30,80 0,-30,40'
+    # The circle starts at frame 230 of the controllers, about 60 frames
+    # after the first step: its middle is the Hand's point at 20 cm in front
+    # of the head. Each next step is 10 cm (10 units at the start scale), so
+    # the Hand's point is 0, 10, 20, 30, 40 and 50 units from the middle, and
+    # then 20 again. The grip is behind the Hand's point, so the fade (at the
+    # grip) comes one or two steps after the edge.
+    $keys = "$keys;influence_test_circle_cm=25;influence_test_circle_frame=230"
+    $points = '0,-30,20 0,-30,30 0,-30,40 0,-30,50 0,-30,60 0,-30,70 0,-30,40'
     if ($Steps -eq '') {
         $w = @()
-        for ($k = 0; $k -lt 8; $k++) {
+        for ($k = 0; $k -lt 7; $k++) {
             $f = 900 + 120 * $k
             $w += "point@$f+1"
             $w += "shot@$($f + 60)+1"

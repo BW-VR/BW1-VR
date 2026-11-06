@@ -811,6 +811,7 @@ struct Pointing {
   // The menus in the room (menu_room.cpp): the pixel is where the aim ray
   // meets the menu panel in the room, not a pixel of the eye view.
   bool on_panel;
+  bool on_window;       // the aim is the ray of the cut scene window
 };
 
 bwvr::HandInput g_hands[2];
@@ -1329,6 +1330,9 @@ const int kMaxWindowLogs = 40;
 
 void WindowPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
   (void)hand;
+  // The ray of the window points as a ray of the menus in the room does, so
+  // the controller keeps the pointer (pointer_map.cpp, ChooseOwner).
+  p->on_window = true;
   menu_room_math::AimForward(g_aim_q[index], p->room_direction);
   const bw::tech::InfoTransform* info =
       reinterpret_cast<const bw::tech::InfoTransform*>(bw::tech::kInfoTransform);
@@ -4845,7 +4849,7 @@ int ControllersGestureSizeCm() { return g_gesture.size_cm; }
 // pixel.
 bool ControllerPointing() {
   return g_on && g_point.have_hand &&
-         (g_point.have_world || g_point.on_panel);
+         (g_point.have_world || g_point.on_panel || g_point.on_window);
 }
 
 // Whether the aim turned more than 1 degree from where it was when the mouse

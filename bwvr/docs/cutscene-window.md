@@ -629,6 +629,10 @@ flat frame has none. But the player sees both hands and a ray:
   where it meets the opening, with a mark at its end. A ray that misses the
   opening is 3 m long. It has no glow, because a glow ribbon turns to an eye
   camera of the world.
+- **The owner of the pointer.** The ray of the window is a pointing ray of
+  the controller, as the ray of the menus in the room is. So the controller
+  keeps the pointer in a flat frame (`pointer_map.cpp`, `ChooseOwner`), and
+  the hands draw.
 - **The click.** `controllers.cpp` (`WindowPixel`) puts the pointer of the
   game at the pixel of the game camera at the end of the ray: the mean of the
   two eye pixels, because the game camera of a flat frame is the middle of

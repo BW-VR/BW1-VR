@@ -762,8 +762,8 @@ that moves while the Hand takes it.
   108 ms there with no read of a file: the first run of the code under FEX).
 - **N0a. 144 Hz on the Steam Frame: what is open.** At 144 Hz a picture has 6.9 ms. With the values
   of the Steam Frame (`android.md`, "The values of the Steam Frame") at 200 percent, 99 percent of
-  the pictures end on the GPU within 6.65 ms of their tick, and about 1 picture a second comes
-  late. For 550 to 1300 draws a walk takes 1.1 to 2 ms on the GPU and the compose 1.12 ms, and the
+  the pictures end on the GPU within 5.93 ms of their tick, and in a flight about 0.05 pictures a
+  second repeat. For about 1600 draws a walk takes 1.9 ms on the GPU and the compose 1 ms, and the
   compositor of SteamVR takes about 1 ms. `tools/android/frame_test.py` measures each next step
   (`android.md`, "The test run"). Open:
   - A new install on a Steam Frame: no run has shown that a file with no keys gets all it needs.
@@ -772,12 +772,9 @@ that moves while the Hand takes it.
   - The async reprojection. `steamvr.disableAsync=1` of SteamVR is for a test that shows a missed
     picture as a stutter. Its log has no line that says that the compositor took the value.
 
-  - The small hiccups in a flight with the stick. The player clicks a stick at each hiccup in the
-    blind compare `frame_tests/hitch_clicks.json`, and most clicks come 300 to 600 ms after a repeated
-    picture. About 0.5 pictures a second still come late, mostly with a play of about 4 ms, also
-    for a list that draws again. The threads of the app can run on a core with a quarter of the
-    speed, and the log does not show the core of a picture. The compare now measures
-    `late_fast_cores`. Before it goes into the values of the Steam Frame, a run must show it.
+  - The main thread of the game on the fast cores. `thread_bind=2` binds it, and no run has
+    measured it on the Steam Frame. The game has about 55 frames a second in a flight, and a
+    thing that moves in the world goes in the steps of these frames.
   - A turn and a zoom of two hands still go in the steps of the frames of the game: the shader
     would need a turn and a scale of each point.
 

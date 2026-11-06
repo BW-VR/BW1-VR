@@ -45,6 +45,7 @@ constexpr Value kValues[] = {
     {"late_prepare", "1"},
     {"late_prepare_gap", "1"},
     {"late_prebuild", "1"},
+    {"late_fast_cores", "1"},
 };
 
 inline bool IsFrameRuntime(const std::string& runtime) {

@@ -33,21 +33,28 @@
 //                          the game yet. GVirtualInfluence keeps the land
 //                          point of the interface (GInterfaceStatus+0x14),
 //                          and the report logs it with its state
-//   influence_wall         a faint wall of light stands on the edge near the
-//                          pointing hand while the hand is less than 15 cm of
-//                          the room from the edge (influence_edge_math.h).
-//                          overlay.cpp draws it with the glow, as added light
+//   influence_wall         a soft round glow lies on the edge at the point
+//                          nearest to each hand, at the height of the hand,
+//                          while the hand is less than 20 cm of the room
+//                          inside the edge, and fainter while the hand is
+//                          past it (influence_edge_math.h, GlowStrength). It
+//                          has the red of the game's own influence ring: the
+//                          color of the ring of the player in the table at
+//                          0x00EA9EFC, which fn_00826510 fills and
+//                          InfluenceCircle (fn_008265F0) reads by the player
+//                          index of GetRemapedPlayer 0x0064D790. overlay.cpp
+//                          draws it with the glow, as added light
 //
-// The fade and the wall act only while the controller places the Hand. The
+// The fade and the glow act only while the controller places the Hand. The
 // stream acts only for the land point of the Hand of the controller.
 //
 // THE TEST KEY influence_test_circle_cm=R with influence_test_circle_frame=F:
 // from the first frame of the controllers at F or later with the Hand of the
 // controller, the influence of the player is a circle of R cm of the room
-// around the land point of the Hand's point of that frame. The fade, the wall
+// around the land point of the Hand's point of that frame. The fade, the glow
 // and the stream see it (the test hook of Influence::IsInPlayerRawInfluence
 // 0x005CD460, which GVirtualInfluence uses). Before that frame the fade and
-// the wall count each point as inside. The pick of the game keeps the real
+// the glow count each point as inside. The pick of the game keeps the real
 // influence. A desktop run that steps the hand from that point then has the
 // edge at a known distance. Never for play.
 
@@ -63,6 +70,7 @@
 extern void ModLog(const char* format, ...);
 // hand_direct.cpp
 bool HandDirectInsideInfluence(float x, float z, bool* inside);
+void* HandDirectPlayer();
 bool HandDirectHandPosition(float out[3], bool* by_controller);
 void* HandDirectGameHand();
 // controllers.cpp
@@ -106,13 +114,21 @@ uint64_t g_fade_frames = 0;
 int g_fade_logs = 0;
 const int kMaxFadeLogs = 40;
 
-// THE WALL: the range from the hand, its height and its light, in meters of
-// the room and in the share of full light. 24 rays, 6 steps and 5 halvings:
+// THE GLOW AT THE EDGE, in meters of the room. Inside the influence it starts
+// 20 cm from the edge: about one hand length, so it shows only when the hand
+// is about to touch the edge and not while the hand works near it. It is
+// strongest at the touch. Past the edge it falls to 35 percent in 3 cm, and
+// to 0 at 30 cm: the faint patch where the hand went through. The patch is
+// 12 cm across from its middle, about the size of the hand, and its light is
+// 0.6 at the most. 24 rays, 6 steps and 5 halvings:
 // a point of the edge to 1/192 of the range.
-const float kWallRangeM = 0.15f;
-const float kWallHeightM = 0.5f;
-const float kWallLight = 0.35f;
-// The test key influence_wall_test_light_pct: the light of the wall times
+const float kWallRangeM = 0.20f;
+const float kWallTouchM = 0.03f;
+const float kWallOutsideM = 0.30f;
+const float kWallOutsideShare = 0.35f;
+const float kPatchRadiusM = 0.12f;
+const float kWallLight = 0.6f;
+// The test key influence_wall_test_light_pct: the light of the glow times
 // this share, for an eye picture of a desktop run. 1 to 3.
 float g_wall_light = 1.0f;
 const int kWallRays = 24;
@@ -120,7 +136,13 @@ const int kWallSteps = 6;
 const int kWallHalvings = 5;
 uint64_t g_wall_frames = 0;
 uint64_t g_wall_triangles = 0;
-bool g_wall_was = false;
+bool g_wall_was[2] = {false, false};
+// THE COLOR of the influence ring of the player, 0 to 1, and its index.
+const uintptr_t kRingColors = 0x00EA9EFC;  // 8 D3D colors, 0xAARRGGBB
+const uintptr_t kGetPlayerNumber = 0x0064A790;  // GPlayer, thiscall
+const uintptr_t kGetRemappedPlayer = 0x0064D790;  // cdecl (number)
+float g_color[3] = {1.0f, 70.0f / 255.0f, 70.0f / 255.0f};
+int g_color_index = -1;
 int g_wall_logs = 0;
 const int kMaxWallLogs = 40;
 
@@ -172,7 +194,7 @@ bool CircleInside(float x, float z) {
   return dx * dx + dz * dz <= g_circle[2] * g_circle[2];
 }
 
-// The test of the influence that the fade and the wall use.
+// The test of the influence that the fade and the glow use.
 bool Inside(float x, float z, bool* inside) {
   if (g_have_circle) {
     *inside = CircleInside(x, z);
@@ -277,9 +299,9 @@ void InfluenceEdgeInstall() {
                        : "The stream of the influence ends on the land under "
                          "the Hand, as the game draws it");
   ModLog("influence    : influence_wall=%d. %s", g_wall ? 1 : 0,
-         g_wall ? "A faint wall of light shows the edge of the influence "
-                  "near the pointing hand, from 15 cm of the room before it"
-                : "No wall at the edge of the influence");
+         g_wall ? "A soft red glow shows the edge of the influence at each "
+                  "hand, from 20 cm of the room before the edge"
+                : "No glow at the edge of the influence");
   if (g_stream_hand) {
     Hook(kManaPathSprite, reinterpret_cast<void*>(&h_ManaPath),
          reinterpret_cast<void**>(&o_ManaPath),
@@ -309,7 +331,7 @@ void InfluenceEdgeFrame(float units_per_meter) {
   ModLog("influence    : test key influence_test_circle_cm=%d: from frame "
          "%llu the influence of the player is a circle of %.1f units around "
          "%.1f %.1f (the land point of the Hand's point), for the fade, the "
-         "wall and the stream", g_test_cm, ControllersFrameCount(),
+         "glow and the stream", g_test_cm, ControllersFrameCount(),
          g_circle[2], g_circle[0], g_circle[1]);
 }
 
@@ -339,15 +361,47 @@ float InfluenceEdgeOpacity(int hand, const float point[3], float dt) {
   return g_opacity[hand];
 }
 
-// overlay.cpp, once a frame: the wall near the pointing hand, at its point in
-// the world. Returns the count of triangles in `out`, at most `room`.
-int InfluenceEdgeWall(const float point[3], float units_per_meter,
+// overlay.cpp, once a frame: the color of the influence ring of the player,
+// 0 to 1, as the game draws the ring (see the top of this file).
+void InfluenceEdgeColor(float rgb[3]) {
+  void* player = HandDirectPlayer();
+  if (player != nullptr) {
+    typedef int(__fastcall * NumberFn)(void* self, void* unused);
+    typedef int(__cdecl * RemapFn)(int number);
+    const int number =
+        reinterpret_cast<NumberFn>(kGetPlayerNumber)(player, nullptr);
+    const int index = reinterpret_cast<RemapFn>(kGetRemappedPlayer)(number);
+    const uint32_t* table = reinterpret_cast<const uint32_t*>(kRingColors);
+    if (index >= 0 && index < 8 && !IsBadReadPtr(table + index, 4)) {
+      const uint32_t c = table[index];
+      g_color[0] = static_cast<float>((c >> 16) & 0xFFu) / 255.0f;
+      g_color[1] = static_cast<float>((c >> 8) & 0xFFu) / 255.0f;
+      g_color[2] = static_cast<float>(c & 0xFFu) / 255.0f;
+      if (index != g_color_index) {
+        g_color_index = index;
+        ModLog("influence    : the glow at the edge has the color of the "
+               "influence ring of the player: %d %d %d (player %d, ring "
+               "color %d of the game)", static_cast<int>((c >> 16) & 0xFFu),
+               static_cast<int>((c >> 8) & 0xFFu),
+               static_cast<int>(c & 0xFFu), number, index);
+      }
+    }
+  }
+  for (int k = 0; k < 3; ++k) rgb[k] = g_color[k];
+}
+
+// overlay.cpp, once a frame for each hand (0 the left hand, 1 the right
+// hand): the glow at the edge near the point of that hand in the world.
+// Returns the count of triangles in `out`, at most `room`.
+int InfluenceEdgeWall(int hand, const float point[3], float units_per_meter,
                       influence_math::WallTriangle* out, int room) {
   ReadKeys();
+  if (hand < 0 || hand > 1) return 0;
   if (!g_wall || !(units_per_meter > 0.0f)) return 0;
   bool here = true;
   if (!Inside(point[0], point[2], &here)) return 0;
-  const float range = kWallRangeM * units_per_meter;
+  const float range =
+      (here ? kWallRangeM : kWallOutsideM) * units_per_meter;
   bool found[influence_math::kMaxDirections];
   float edge[influence_math::kMaxDirections][2];
   const auto inside = [](float x, float z) {
@@ -358,27 +412,50 @@ int InfluenceEdgeWall(const float point[3], float units_per_meter,
   const int count = influence_math::FindEdge(
       inside, point[0], point[2], range, kWallRays, kWallSteps, kWallHalvings,
       found, edge);
+  float at[2] = {0.0f, 0.0f}, distance = 0.0f, strength = 0.0f;
+  float y = point[1];
   int n = 0;
-  if (count > 0) {
-    n = influence_math::BuildWall(
-        [](float x, float z) { return LandHeight(x, z); }, point, found,
-        edge, kWallRays, range, kWallHeightM * units_per_meter, 0.75f * range,
-        kWallLight * g_wall_light, out, room);
+  if (count > 0 &&
+      influence_math::NearestEdge(point, found, edge, kWallRays, at,
+                                  &distance)) {
+    strength = influence_math::GlowStrength(
+        here, distance, kWallRangeM * units_per_meter,
+        kWallTouchM * units_per_meter, kWallOutsideM * units_per_meter,
+        kWallOutsideShare);
+    // The middle of the patch is at the height of the hand, and never under
+    // the land at the edge.
+    const float land = LandHeight(at[0], at[1]);
+    if (y < land) y = land;
+    n = influence_math::BuildPatch(at, y, point,
+                                   kPatchRadiusM * units_per_meter,
+                                   kWallLight * g_wall_light * strength, out,
+                                   room);
   }
   const bool shows = n > 0;
-  if (shows != g_wall_was && g_wall_logs < kMaxWallLogs) {
+  if (shows != g_wall_was[hand] && g_wall_logs < kMaxWallLogs) {
     ++g_wall_logs;
-    ModLog("influence    : the wall at the edge %s, the pointing hand at "
-           "%.1f %.1f is %s the influence, %d of %d rays found the edge, %d "
-           "triangles, strength %.2f, frame %llu",
-           shows ? "shows" : "goes", point[0], point[2],
-           here ? "inside" : "outside", count, kWallRays, n,
-           count > 0 ? influence_math::Strength(point, found, edge, kWallRays,
-                                                range)
-                     : 0.0f,
+    ModLog("influence    : the glow at the edge %s for the %s hand at %.1f "
+           "%.1f, %s the influence, %.1f cm of the room from the edge, "
+           "strength %.2f, %d of %d rays found the edge, frame %llu",
+           shows ? "shows" : "goes", hand == 0 ? "left" : "right", point[0],
+           point[2], here ? "inside" : "outside",
+           distance / units_per_meter * 100.0f, strength, count, kWallRays,
            ControllersFrameCount());
   }
-  g_wall_was = shows;
+  // A line each 60 frames while it shows, with the strength, for the eye
+  // pictures of a desktop run.
+  static uint64_t said_frame[2] = {0, 0};
+  if (shows && g_wall_logs < kMaxWallLogs &&
+      ControllersFrameCount() >= said_frame[hand] + 60) {
+    said_frame[hand] = ControllersFrameCount();
+    ++g_wall_logs;
+    ModLog("influence    : the glow of the %s hand: %.1f cm of the room %s "
+           "the edge, strength %.2f, at %.1f %.1f %.1f, frame %llu",
+           hand == 0 ? "left" : "right",
+           distance / units_per_meter * 100.0f, here ? "inside" : "past",
+           strength, at[0], y, at[1], ControllersFrameCount());
+  }
+  g_wall_was[hand] = shows;
   if (shows) {
     ++g_wall_frames;
     g_wall_triangles += static_cast<uint64_t>(n);

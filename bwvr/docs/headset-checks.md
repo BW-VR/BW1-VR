@@ -51,9 +51,10 @@ want.
 7. **The hands on the controllers.** Look at each hand, and close the
    trigger and the grip slowly. Wrong: a hand off its controller, turned or
    of a wrong size, a finger that jumps, or an object that looks wrong in the
-   palm (name the object). Move a hand past the edge of your influence.
-   Wrong: a wall of light that is hard to see or in the way, or a fade that
-   is too strong.
+   palm (name the object). Reach slowly to the edge of your influence and
+   past it, with each hand. Wrong: a red glow at the edge that comes too
+   late or too early, that is hard to see or too strong, or a fade of the
+   hand that is too strong.
 8. **The grip.** Take things, set them down and let them go. Wrong: a take
    from a loose hand, a grip that lets go late or not at all, a drop by
    accident, or a job that needs the other button.

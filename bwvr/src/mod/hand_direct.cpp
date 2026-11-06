@@ -9222,6 +9222,13 @@ bool HandDirectInsideInfluence(float x, float z, bool* inside) {
   return true;
 }
 
+// For influence_edge.cpp: the GPlayer of the interface, or null.
+void* HandDirectPlayer() {
+  if (!g_installed || g_face == nullptr) return nullptr;
+  return reinterpret_cast<GetPlayerFn>(VTable(g_face)[kFaceGetPlayer / 4])(
+      g_face, nullptr);
+}
+
 // For influence_edge.cpp, for its log: the CHand of the game, or null.
 void* HandDirectGameHand() { return g_hand; }
 

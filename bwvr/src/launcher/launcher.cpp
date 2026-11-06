@@ -332,6 +332,11 @@ const Setting kSettings[] = {
      "world. The middle of the view stays clear. A faster move gives a "
      "darker edge. Some people feel less ill with it. Gentle: the edges get "
      "darker. Strong: only the middle of the view stays clear."},
+    {kValues, "head_blinder", "Head in the land", "Cover the view=1|Off=0", 1,
+     "When your head goes into a hill, a gold and red cover fills your view, "
+     "so you do not see under the land. It starts at the edge of the view "
+     "when your head is 5 cm over the land. Lift your head and the view "
+     "comes back. Off: you see under the land."},
     {kChoice, "blink", "Blink when you jump or turn", "Off|Short|Long", 0,
      "Shows black for a moment when you jump or turn. Short is 0.1 seconds "
      "and long is 0.2 seconds. Some people find a jump easier with a blink."},

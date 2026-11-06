@@ -903,6 +903,46 @@ The report of a window counts the times that the vignette came, the steps
 among them and the eye passes that drew it, and the pushes that a dialog box
 refused and the recenters.
 
+### 5.9 The head under the land
+
+The land is at the waist, so a player who bends down can put the head into a
+hill. The game draws no land from the inside, and the eyes then see what is
+under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
+(`head_blinder`, `head_blinder.cpp`, math in `blinder_math.h`).
+
+- **The head.** Once a frame the head point is the render head of the God
+  view, in the middle between the eyes. The land counts at the head point
+  and at four points 6 cm of the room around it, and the highest one counts,
+  so a steep slope in front of the face counts too. The land is
+  `LH3DIsland::GetAltitude`, as for the stop of the Hand at the land
+  (`hand-model.md`, "The Hand stops at the land"). A house, a rock and a tree
+  do not count yet (roadmap, P24).
+- **The strength.** From 5 cm over the land the overlay starts at the edge of
+  the view and grows inward along a smooth curve. At the land and under it
+  each eye sees only the overlay. The overlay comes in 0.1 s and goes in
+  0.25 s, in a straight line. It never moves the view.
+- **The picture.** A warm gold in the middle of the eye and a deep red from
+  50 degrees out. It is the last draw of the mod in each eye pass, after the
+  vignette (section 5.8), with the same states: no depth test, and the
+  vertices in the pixels of the eye with an rhw of 1. So the land does not
+  hide it, both renderers have it, and one walk for both eyes copies it into
+  the right eye. The head point is between the eyes, so both eyes get the
+  same overlay. The hint cards and the ring are layers of their own, and they
+  show over it.
+- **When.** Only while the God view owns the view and no dialog box is up. In
+  a room of the Temple, in a menu, in a story and in a cut scene the overlay
+  does nothing, and an overlay that shows goes at once.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land. 0: the eyes see under the land. The launcher row "Head in the land". The switch "Head blinder" of the debug page |
+
+The log has one line when the overlay starts, with the height of the head
+over the land and its place on the map, one line when the view is opaque,
+and one line when the overlay is gone, with its time and the lowest place of
+the head. The report of a window counts the times that the overlay showed,
+the opaque frames and the eye passes that drew it.
+
 ## 6. The Hand
 
 The Hand's size is the real hand at the scale now:

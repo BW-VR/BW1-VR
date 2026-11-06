@@ -50,6 +50,7 @@
 #include <string.h>
 
 #include "../common/bw_addresses.h"
+#include "blinder_math.h"
 #include "comfort_math.h"
 #include "debug_menu.h"
 
@@ -294,6 +295,9 @@ void VignetteFrame() {
 // stereo.cpp: the eye of the pass that runs, and -1 after it.
 void VignettePassEye(int eye) { g_eye = eye; }
 
+// The eye of the pass that runs, and -1 out of an eye pass (head_blinder.cpp).
+int VignetteEyeNow() { return g_eye; }
+
 // The level of now, from 0 to 1, for a test and the log.
 float VignetteLevel() { return g_level; }
 
@@ -347,6 +351,35 @@ void VignetteDraw() {
     return;
   }
   ++g_passes;
+}
+
+// THE DRAW OF THE HEAD BLINDER (head_blinder.cpp): count corners of a
+// triangle list in the pixels of the eye, each with its color and opacity,
+// with the states of the vignette. head_blinder.cpp calls it after
+// VignetteDraw, so it is the last draw of the eye pass. False when the draw
+// failed or the device is not there.
+bool VignetteDrawBlinder(const blinder_math::BlinderPoint* points, int count) {
+  static Vertex vertices[blinder_math::kBlinderVertices];
+  if (count <= 0 || count > blinder_math::kBlinderVertices) return false;
+  IDirect3DDevice7* device = *reinterpret_cast<IDirect3DDevice7* const*>(
+      bw::render::kDirect3DDevice7);
+  if (device == nullptr) return false;
+  for (int i = 0; i < count; ++i) {
+    Vertex& d = vertices[i];
+    d.x = points[i].x;
+    d.y = points[i].y;
+    d.z = 0.0f;
+    d.rhw = 1.0f;
+    d.diffuse = points[i].argb;
+    d.specular = 0xFF000000u;  // no fog, if the fog were on
+    d.u = 0.0f;
+    d.v = 0.0f;
+  }
+  SetStates(device);
+  const HRESULT result = device->DrawPrimitive(
+      D3DPT_TRIANGLELIST, kFvf, vertices, static_cast<DWORD>(count), 0);
+  PutStatesBack(device);
+  return SUCCEEDED(result);
 }
 
 // Once a report window.

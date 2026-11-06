@@ -515,12 +515,31 @@ drop. Only a new match counts: a circle that a refused cast left at
 `+0x17C` does not cast at the next press, and the release casts it as the
 game does. With `miracle_circle_cast=0` the cast comes when the grip opens.
 
-**The bolt of Lightning starts at the fingertip.** A fork of lightning in
-the Hand starts at the gesture place of its particle manager
-(`UR_Lightning::ActualModify` `0x006914C0`, the manager `+0x30`). That place
-is the Hand's point, and the Hand's point is the tip of the index finger at
-the rest curl (`hand-model.md`). So the bolt comes from the end of the index
-finger, and only a curl of that finger moves the tip away from the bolt.
+**The bolt of Lightning starts at the fingertip** (`miracle_bolt_hand=1`).
+A fork of lightning in the Hand starts at the gesture place of its particle
+manager (`UR_Lightning::ActualModify` `0x006914C0`, the manager `+0x30`,
+with the property `CastingFromHand` of `SF_LightningBolt`). The fork ends on
+objects and on the land within 60 units of that place, in the direction of
+the camera of the game. The game gives the gesture place to the spell on
+each game turn (`GInterfaceStatus::UpdateSpellInfo` `0x005DC8F0`, called by
+`Spell::ProcessMaintainRequest`): it copies `GInterfaceStatus+0xC8`, the
+Hand that packet `0x15` or `0x16` sent (`CHand+0x78`) and that the last game
+turn took over. A spell that is cast in the Hand then puts its cast place
+(`Spell+0xCC`) under that gesture place. A hook after the game's update
+writes the Hand's point of the real hand to the gesture place, for the spell
+of the seed in the Hand when that seed pours (Lightning, Water, Food and
+Wood). The Hand's point is the tip of the index finger at the rest curl
+(`hand-model.md`). So the bolt comes from the end of the index finger, and
+only a curl of that finger moves the tip away from the bolt. The log line
+`the spell ... gets its gesture place from the game at ...` gives the place
+of the game, its distance from the Hand's point and its height over it, the
+distance of `GInterfaceStatus+0xC8`, `+0xA4` and `CHand+0x78` from the
+Hand's point, and the distance of the camera of the game from the place of
+the game. With `miracle_bolt_hand=0` the mod keeps the place of the game.
+
+Open: in the eye pictures of a desktop run the bolt starts far behind the
+Temple and high over the land, at the end of a thin red line from the sky.
+The line above says if a place of the game is the cause, and which one.
 
 ### The way out
 
@@ -1067,6 +1086,37 @@ over the land, so three things change, each with a key:
 The fade and the glow act only while the controller places the Hand, in the
 God view and on the table.
 
+## What a cast makes
+
+`miracle_watch.cpp` reads the game after a cast and writes lines with the tag
+`miracle watch`. It changes nothing.
+
+- **A shield or a storm.** Each `SpellShield` (the two shields) is in a list
+  of the game (the first one at `0x00DA07F0`, the next at `+0x100`), and each
+  `SpellStormAndTornado` in another one (`0x00DA07F8`, `+0xF4`). For each new
+  spell a line says where it is, its distance from the land point of the
+  last cast at a circle, its radius (`Spell+0xBC`) in units and in cm of the
+  room, its life (`+0x38`), its strength (`+0x94`), its age and the limit of
+  its age (`+0xB8`, `+0x50`), and its caster (`+0xA0`). A shield line also
+  has the count of its domes (`MapShield`, `+0xF0`). A storm line says if
+  its particle system (`+0xEC`) is there: `SpellStormAndTornado::Process`
+  deletes it when the spell has no caster. A line comes every 2 s for 12 s,
+  and one line when the spell is gone, with its time.
+- **A Creature after a Creature miracle.** For 25 s after a cast on a
+  Creature, a line comes at each change and every 3 s. It gives the size of
+  the Creature for the game (`fn_004F5E60`), the base size
+  (`[Creature+0x160]+0x6C`), the size of the drawn body (the `LH3DCreature`
+  at `[Creature+0x160]+0x58`, `+0x90`), and each active entry of the table
+  of the spells on the Creature (`CreatureReceiveSpell`, `Creature+0x370`, 16
+  entries of `0x18` bytes from `+4`, active while `+4` is not 0). A Creature
+  miracle puts its entry there (`SpellCreature::InitWithObject`
+  `0x007222D0`). Entry 1 and entry 2 give the size while they are active.
+
+Open: the effect of Storm and of Spiritual Shield, and the change of Shrink,
+Enlarge and Invisibility, did not show in the eye pictures of a desktop run.
+The lines above say if the game made the spell, how large it is and how long
+it stands, and what the Creature miracle wrote on the Creature.
+
 ## Keys
 
 | Key | Default | What it does |
@@ -1080,6 +1130,7 @@ God view and on the table.
 | `miracle_cancel_button` | 1 | 0: the second face button does not cancel |
 | `miracle_cancel_ms` | 400 | The longest press of that button that is a cancel. 50 to 2000 |
 | `miracle_seed_use` | 1 | 0: the trigger does not make a carried seed active. Then only a short press of the grip does |
+| `miracle_bolt_hand` | 1 | 1: a pour in the Hand (Lightning, Water, Food, Wood) has the Hand's point of the real hand as its gesture place, so the bolt of Lightning starts at the index fingertip. 0: the place that the game gives |
 | `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
 | `miracle_touch_cm` | 3 | A body this near to the Hand's point is the target at the Hand, in cm of the room |
 | `miracle_cone_deg` | 6 | The cone of the aim for a new target at a distance |

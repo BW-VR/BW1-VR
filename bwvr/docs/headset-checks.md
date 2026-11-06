@@ -195,6 +195,12 @@ agents: the log does not tell the item yet.
   from the pile and the influence.
 - **An old picture in one eye** (B16). Log: `eye clean    : an eye pass drew
   no sky` names the scene of that frame.
+- **A miracle that shows nothing** (Storm, a shield, Shrink, Enlarge,
+  Invisibility). Log: `miracle watch:` says if the game made the spell, its
+  radius in cm of the room and how long it stands, or what a Creature
+  miracle wrote on the Creature and its size. The start of a pour, for
+  example the bolt of Lightning: `the spell ... gets its gesture place from
+  the game`.
 - **A lightning in one eye only** (B18). Log: `land light   :`. A flash with
   no such line is not a light on the land.
 - **Black frames** in the guide of the first visit of the Temple (B13), and

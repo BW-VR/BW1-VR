@@ -110,6 +110,7 @@ const int kStatusHolding = 0x90;     // a byte: the count of objects in the Hand
 // CHand.
 const int kHandState = 0x4878;
 const int kHandThrow = 0x48C8;       // the throw velocity, units per second
+const int kHandPlace = 0x78;         // the Hand of the game, an LHPoint
 const int kHandHeld = 0x4904;
 const int kHandFx = 0x4948;          // the effects of the Hand
 const int32_t kStateGrain = 8;
@@ -174,6 +175,21 @@ const uintptr_t kInBounds = 0x006042C0;
 const uintptr_t kIsLand = 0x00603720;
 // Influence::CalculatePlayerInfluence, cdecl, the value in st0.
 const uintptr_t kPlayerInfluence = 0x005CD170;
+// GInterfaceStatus::UpdateSpellInfo, thiscall (Spell*, PSysProcessInfo*),
+// ret 8. Spell::ProcessMaintainRequest (0x0072055D, through
+// GPlayer::UpdateSpellInfo) calls it on each game turn for the spell of a
+// player. It writes the gesture place of the particle system (info+0x0C) from
+// GInterfaceStatus+0xC8: the Hand of the game (CHand+0x78) that packet 0x15
+// or 0x16 sent and the last game turn took over. A spell that is cast in the
+// Hand then puts its cast place (Spell+0xCC) at that gesture place, and the
+// bolt of Lightning starts there (UR_Lightning::ActualModify 0x006914C0 with
+// CastingFromHand, the manager +0x30).
+const uintptr_t kUpdateSpellInfo = 0x005DC8F0;
+const int kInfoGesturePlace = 0x0C;  // PSysProcessInfo: an LHPoint
+const int kStatusHandSent = 0xA4;    // GInterfaceStatus: the Hand of the packet
+const int kStatusHandTurn = 0xC8;    // the Hand of the last game turn
+const int kStatusCamera = 0xB0;      // the camera of the game
+const int kSpellSeed = 0xAC;         // Spell: its SpellSeed
 // The held bits of the game's mouse: 1 the left button, 2 the right button.
 const uintptr_t kHeldBits = 0x00E85304;
 const float kMapScale = 6553.6f;
@@ -199,8 +215,11 @@ typedef int(__fastcall* RefuseFn)(void* self, void* unused, void* held,
 typedef int(__fastcall* CoordsFn)(const MapCoords* at, void* unused);
 typedef float(__cdecl* PlayerInfluenceFn)(const MapCoords* at, void* player,
                                           int a, int b, int c);
+typedef void(__fastcall* UpdateSpellInfoFn)(void* status, void* unused,
+                                            void* spell, void* info);
 
 RefuseFn o_Refuse = nullptr;
+UpdateSpellInfoFn o_UpdateSpellInfo = nullptr;
 FaceFn o_CastAtLand = nullptr;
 FaceFn o_CastOnObject = nullptr;
 
@@ -235,6 +254,7 @@ struct Settings {
   int tap_ms = 400;          // miracle_cancel_ms: the longest press that cancels
   bool seed_use = true;      // miracle_seed_use: the trigger uses a seed
   bool circle_cast = true;   // miracle_circle_cast: a closed circle casts
+  bool bolt_hand = true;     // miracle_bolt_hand: a pour starts at the Hand
   float cone_deg = 6.0f;     // miracle_cone_deg: a new target in the aim
   float keep_deg = 10.0f;    // miracle_keep_deg: the target stays to here
   float touch_cm = 3.0f;     // miracle_touch_cm
@@ -394,6 +414,7 @@ uint64_t g_refusals = 0;
 uint64_t g_cancels = 0;
 uint64_t g_uses = 0;
 uint64_t g_circle_casts = 0;
+uint64_t g_bolt_moves = 0;
 uint64_t g_record_puts = 0;
 uint64_t g_record_clears = 0;
 uint64_t g_target_frames = 0;
@@ -611,6 +632,11 @@ void SaidCast(const Facts& f, bool on_object) {
            "0x11)%s, frame %llu", SeedName(f.info.type),
            object != nullptr ? HandDirectClass(object) : "object", object,
            object == g_target ? ", the target with the halo" : "", g_frame);
+    if (object != nullptr &&
+        reinterpret_cast<VirtualIntFn>(VTable(object)[kIsCreature / 4])(
+            object, nullptr) != 0) {
+      MiracleWatchCreature(object, SeedName(f.info.type));
+    }
   } else {
     ModLog("miracle      : the game casts %s at the land point %.1f %.1f "
            "(packets 0x4D and 0x12). The Hand moves at %.1f %.1f %.1f units "
@@ -621,6 +647,10 @@ void SaidCast(const Facts& f, bool on_object) {
                ? sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) / g_units
                : 0.0f,
            f.action, g_frame);
+    if (f.info.gesture != 0) {
+      MiracleWatchCircle(SeedName(f.info.type), land[0] / kMapScale,
+                         land[1] / kMapScale);
+    }
   }
 }
 
@@ -658,6 +688,73 @@ int __fastcall h_CastOnObject(void* self, void* unused) {
   if (watch && sent) SaidCast(f, true);
   if (other && sent) VillageApplied(f.held, object);
   return result;
+}
+
+float RoomCm(const float* a, const float* b, float units) {
+  const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+  return units > 0.0f ? sqrtf(dx * dx + dy * dy + dz * dz) / units * 100.0f
+                      : 0.0f;
+}
+
+// THE START OF A POUR IS THE HAND (miracle_bolt_hand=1). The game gives the
+// spell of a pour in the Hand (Lightning, Water, Food, Wood) the Hand of its
+// last game turn as the gesture place. The mod writes the Hand's point of
+// the real hand there, after the game's own update. So the bolt of
+// Lightning starts at the index fingertip, and its cast place is under that
+// tip. Only the spell of the seed in the Hand of the local player changes.
+void __fastcall h_UpdateSpellInfo(void* status, void* unused, void* spell,
+                                  void* info) {
+  o_UpdateSpellInfo(status, unused, spell, info);
+  static void* said_spell = nullptr;
+  static uint64_t calls = 0;
+  static int logs = 0;
+  const int kMaxBoltLogs = 30;
+  Facts f;
+  if (!g_ready || spell == nullptr || info == nullptr || !Watching(&f) ||
+      f.seed == nullptr || f.status != status ||
+      f.info.cast != miracle_math::kCastPour ||
+      IsBadReadPtr(spell, kSpellSeed + 4) ||
+      *reinterpret_cast<void* const*>(static_cast<uint8_t*>(spell) +
+                                      kSpellSeed) != f.seed) {
+    return;
+  }
+  float point[3];
+  if (!HandDirectRealPoint(point)) return;
+  float* place =
+      reinterpret_cast<float*>(static_cast<uint8_t*>(info) + kInfoGesturePlace);
+  const float game[3] = {place[0], place[1], place[2]};
+  if (g_settings.on && g_settings.bolt_hand) {
+    for (int i = 0; i < 3; ++i) place[i] = point[i];
+    ++g_bolt_moves;
+  }
+  ++calls;
+  const bool first = spell != said_spell;
+  said_spell = spell;
+  if (!first && calls % 20 != 0) return;
+  if (logs >= kMaxBoltLogs) return;
+  ++logs;
+  const float units = HandDirectRoomUnits();
+  const uint8_t* s = static_cast<const uint8_t*>(status);
+  const float* sent = reinterpret_cast<const float*>(s + kStatusHandSent);
+  const float* turn = reinterpret_cast<const float*>(s + kStatusHandTurn);
+  const float* camera = reinterpret_cast<const float*>(s + kStatusCamera);
+  const float* hand = reinterpret_cast<const float*>(f.hand + kHandPlace);
+  ModLog("miracle      : the spell %p of %s gets its gesture place from the "
+         "game at %.1f %.1f %.1f, %.1f cm of the room from the Hand's point "
+         "%.1f %.1f %.1f and %.1f cm of the room above it. GInterfaceStatus+"
+         "0xC8 is %.1f cm and +0xA4 is %.1f cm from the Hand's point, CHand+"
+         "0x78 is %.1f cm from it, and the camera of the game is %.1f cm from "
+         "the place of the game. %s (miracle_bolt_hand=%d), call %llu, frame "
+         "%llu", spell, SeedName(f.info.type), game[0], game[1], game[2],
+         RoomCm(game, point, units), point[0], point[1], point[2],
+         units > 0.0f ? (game[1] - point[1]) / units * 100.0f : 0.0f,
+         RoomCm(turn, point, units), RoomCm(sent, point, units),
+         RoomCm(hand, point, units), RoomCm(camera, game, units),
+         g_settings.on && g_settings.bolt_hand
+             ? "The mod gives the spell the Hand's point, so the bolt starts "
+               "at the index fingertip"
+             : "The mod keeps the place of the game",
+         g_settings.bolt_hand ? 1 : 0, calls, g_frame);
 }
 
 bool HookOne(uintptr_t address, void* replacement, void** original,
@@ -699,6 +796,7 @@ void Init() {
   if (g_settings.tap_ms > 2000) g_settings.tap_ms = 2000;
   g_settings.seed_use = IniInt("miracle_seed_use", 1) != 0;
   g_settings.circle_cast = IniInt("miracle_circle_cast", 1) != 0;
+  g_settings.bolt_hand = IniInt("miracle_bolt_hand", 1) != 0;
   g_settings.cone_deg = IniFloat("miracle_cone_deg", 6.0f);
   if (!(g_settings.cone_deg >= 0.5f)) g_settings.cone_deg = 0.5f;
   if (g_settings.cone_deg > 30.0f) g_settings.cone_deg = 30.0f;
@@ -750,6 +848,9 @@ void Init() {
   HookOne(kCastOnObject, &h_CastOnObject,
           reinterpret_cast<void**>(&o_CastOnObject),
           "the cast on an object fn_005D30D0");
+  HookOne(kUpdateSpellInfo, &h_UpdateSpellInfo,
+          reinterpret_cast<void**>(&o_UpdateSpellInfo),
+          "the spell info of a player GInterfaceStatus::UpdateSpellInfo");
   LogKeys("miracle_hand");
   ModLog("miracle      : miracle_shake_mps=%.2f (%s). miracle_cancel_button="
          "%d: a press of the second face button of the pointing hand, shorter "
@@ -773,6 +874,12 @@ void Init() {
              ? "a miracle that needs a circle casts when the game matches the "
                "circle, with the grip still closed"
              : "a miracle that needs a circle casts when the grip opens");
+  ModLog("miracle      : miracle_bolt_hand=%d: %s",
+         g_settings.bolt_hand ? 1 : 0,
+         g_settings.bolt_hand
+             ? "a pour in the Hand (Lightning, Water, Food, Wood) starts at "
+               "the Hand's point of the real hand"
+             : "a pour in the Hand starts at the place that the game gives");
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 8 changes miracle_hand between 1 "
            "and 0 (test_keys=1)");
@@ -1135,6 +1242,7 @@ void MiracleFrame() {
     circle_was = circle;
   }
   CancelFrame(f, have);
+  MiracleWatchFrame(g_frame);
   // The end of a pour: the interface action is no pour action now (10 pours
   // on the land, 11 on an object).
   if (g_pour_casts > 0 && !(any && (seen.action == 10 || seen.action == 11))) {
@@ -1632,6 +1740,7 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
 
 void MiracleReport() {
   if (!g_ready) return;
+  MiracleWatchReport();
   if (g_frames_miracle == 0 && g_frames_seed == 0 && g_casts == 0 &&
       g_refusals == 0 && g_cancels == 0 && g_uses == 0 &&
       g_circle_casts == 0) {
@@ -1642,10 +1751,12 @@ void MiracleReport() {
          "cancels, %llu seeds used with the trigger. A target on %llu "
          "frames: the mod put it in the pick record %llu times and took "
          "another object out %llu times. %llu circles cast when they closed, "
-         "this window (miracle_hand=%d)",
+         "this window. The mod gave a pour the Hand's point %llu times "
+         "(miracle_hand=%d, miracle_bolt_hand=%d)",
          g_frames_miracle, g_frames_seed, g_casts, g_refusals, g_cancels,
          g_uses, g_target_frames, g_record_puts, g_record_clears,
-         g_circle_casts, g_settings.on ? 1 : 0);
+         g_circle_casts, g_bolt_moves, g_settings.on ? 1 : 0,
+         g_settings.bolt_hand ? 1 : 0);
   g_frames_miracle = 0;
   g_frames_seed = 0;
   g_casts = 0;
@@ -1653,6 +1764,7 @@ void MiracleReport() {
   g_cancels = 0;
   g_uses = 0;
   g_circle_casts = 0;
+  g_bolt_moves = 0;
   g_target_frames = 0;
   g_record_puts = 0;
   g_record_clears = 0;

@@ -32,6 +32,11 @@ bool PlacesPanelHoldsTrigger();
 // the panel.
 bool PlacesPanelRay(float* meters);
 
+// controllers.cpp: B of the pointing hand and the menu button close the
+// panel (places_close_buttons=1). True when the panel was open and the key
+// is on: then the press does no more.
+bool PlacesPanelCloseBy(const char* why);
+
 // controllers.cpp, for the word "aimplaces" of the scripted controller: the
 // middle of the next button of the test key places_test_buttons, in the
 // LOCAL space of OpenXR. False when the panel is closed or the list is

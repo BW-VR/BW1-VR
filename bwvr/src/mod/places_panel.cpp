@@ -32,7 +32,8 @@
 // "refused". Go, Follow, the places and Back close the panel. Set here and
 // Remove keep it open, so the player sees the seal of the bookmark change.
 // The ring, the spell book, a dialog box, a cut scene and the Temple close
-// it too.
+// it too. With places_close_buttons=1, B of the pointing hand and the menu
+// button close it, as they close the debug window.
 //
 // THE LOOK follows hint_card_style, as the keyboard in the headset does.
 // With 1 the panel is a page of the parchment of the cards
@@ -54,6 +55,9 @@
 //
 //   places_panel=1            0: page 2 of the ring has the bookmark items
 //                             mark_set, mark_go and mark_back, and no panel
+//   places_close_buttons=1    1: B of the pointing hand and the menu button
+//                             close the panel (controllers.cpp). 0: they do
+//                             not
 //   hint_card_style=1         1: the parchment. 0: the dark panel
 //   places_panel_test_save=0  N: saves the first N new pictures of the panel
 //                             as bwvr-places-<frame>.bmp (a test key)
@@ -95,6 +99,7 @@ namespace kit = panel_kit;
 
 bool g_read = false;
 bool g_on = true;
+bool g_close_buttons = true;  // places_close_buttons
 int g_style_ini = 1;
 int g_save = 0;
 int g_saved = 0;
@@ -120,6 +125,8 @@ void ReadSettings() {
   char text[256] = "";
   if (IniPath(path)) {
     g_on = GetPrivateProfileIntA("bwvr", "places_panel", 1, path) != 0;
+    g_close_buttons =
+        GetPrivateProfileIntA("bwvr", "places_close_buttons", 1, path) != 0;
     g_style_ini =
         GetPrivateProfileIntA("bwvr", "hint_card_style", 1, path) != 0 ? 1 : 0;
     g_save = static_cast<int>(
@@ -137,6 +144,12 @@ void ReadSettings() {
          g_save > 0 ? ". places_panel_test_save saves the first new pictures "
                       "of the panel (a test)"
                     : "");
+  if (g_on) {
+    ModLog("places       : places_close_buttons=%d: %s", g_close_buttons ? 1 : 0,
+           g_close_buttons ? "B of the pointing hand and the menu button close "
+                             "the panel"
+                           : "B and the menu button do not close the panel");
+  }
   if (g_test_count > 0) {
     ModLog("places       : places_test_buttons has %d buttons for the word "
            "aimplaces (a test)", g_test_count);
@@ -535,6 +548,13 @@ bool PlacesPanelHoldsTrigger() {
 bool PlacesPanelRay(float* meters) {
   *meters = g_room.open ? g_room.meters : 0.0f;
   return g_room.open;
+}
+
+bool PlacesPanelCloseBy(const char* why) {
+  ReadSettings();
+  if (!g_close_buttons || !g_room.open) return false;
+  Close(why, false);
+  return true;
 }
 
 bool PlacesPanelOpenFromRing() {

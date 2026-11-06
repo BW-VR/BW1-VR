@@ -2387,10 +2387,13 @@ void LatchGesture(bool back) {
   g_gesture_before = down;
   g_gesture_down = down;
   if (!down) g_gesture_need_up = false;
-  // THE DEBUG WINDOW (debug_window.cpp). A press of B closes it, and the
-  // draw button must go up before it draws.
+  // THE DEBUG WINDOW (debug_window.cpp) AND THE PANEL OF PLACES
+  // (places_panel.cpp). A press of B closes them, and the draw button must
+  // go up before it draws.
   const bool b = hand.active && hand.secondary;
-  if (b && !g_window_b_before && DebugWindowCloseBy("the player pressed B")) {
+  if (b && !g_window_b_before &&
+      (DebugWindowCloseBy("the player pressed B") |
+       PlacesPanelCloseBy("the player pressed B"))) {
     g_gesture_need_up = down;
   }
   g_window_b_before = b;
@@ -2584,10 +2587,11 @@ void LatchEsc() {
     face = free_hand.primary;
   }
   const bool down = (left.active && left.menu) || (free_hand.active && face);
-  // A press closes the debug window (debug_window.cpp), and then it sends no
-  // Esc.
+  // A press closes the debug window (debug_window.cpp) and the panel of
+  // places (places_panel.cpp), and then it sends no Esc.
   if (down && !g_esc_before && g_esc_prev_active && active &&
-      !DebugWindowCloseBy("the player pressed the menu button")) {
+      !(DebugWindowCloseBy("the player pressed the menu button") |
+        PlacesPanelCloseBy("the player pressed the menu button"))) {
     g_esc_event = true;
   }
   g_esc_before = down;

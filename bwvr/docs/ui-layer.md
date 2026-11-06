@@ -2124,7 +2124,9 @@ headset (section 21). The code is in `places_panel.cpp` and
 - **What closes the panel.** Go, Follow, the places and Back move the view,
   so they close the panel. Set here and Remove keep it open, so the player
   sees the seal change. Close, the ring, the spell book, a dialog box, a cut
-  scene and the Temple also close it.
+  scene and the Temple also close it. With `places_close_buttons=1` B of the
+  pointing hand and the menu button close it too, as they close the debug
+  window: B then draws no gesture, and the menu button sends no Esc.
 
 ### 22.2 The place
 
@@ -2193,6 +2195,7 @@ pixels, as the ring does. The ring and the panel never show at one time.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `places_panel` | 1 | 1: page 2 of the ring as made has the item `places`, and it opens the panel. 0: page 2 has `mark_set`, `mark_go` and `mark_back`, and the word `places` is an empty slot |
+| `places_close_buttons` | 1 | 1: B of the pointing hand and the menu button close the panel. 0: they do not, and B can start a gesture |
 | `hint_card_style` | 1 | 1: the panel is a page of parchment. 0: the dark panel |
 | `places_panel_test_save` | 0 | Test key. N saves the first N new pictures of the panel as `bwvr-places-FFFFF.bmp` over a checkerboard (FFFFF is the frame) |
 | `places_test_buttons` | | Test key. The buttons for the word `aimplaces` of the scripted controller, in order: `temple`, `creature`, `town`, `land`, `back`, `close`, and `go`, `set`, `follow`, `remove` with the number, for example `set3,land,go3` |
@@ -2206,6 +2209,8 @@ places       : the trigger presses set 3, frame N
 ring         : the panel of places: the key Ctrl and 3, frame N
 places       : the trigger presses go 3, and it does not act: Bookmark 3 is not set, frame N
 places       : the panel closes: the player pressed land, frame N
+places       : the panel closes: the player pressed B, frame N
+places       : the panel closes: the player pressed the menu button, frame N
 ```
 
 ### 22.6 The parts for other panels

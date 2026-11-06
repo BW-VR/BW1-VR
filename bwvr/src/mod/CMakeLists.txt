@@ -98,6 +98,7 @@ add_library(bwvr_mod SHARED
     temple.cpp
     throw_physics.cpp
     overlay.cpp
+    vignette.cpp
     teleport.cpp
     world_grab.cpp
     tabletop.cpp

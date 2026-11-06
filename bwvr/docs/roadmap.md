@@ -452,12 +452,12 @@ keeps the mod as it is.
   stronger.
 **Comfort and moving**
 
-- **F8. A comfort vignette** (off, gentle, strong): the edges of the view go
-  dark during a walk with the stick, a smooth zoom and a grab of the world.
-- **F9. A smooth turn** with the stick, and its speed (P4).
-- **F10. A recenter from the controllers:** a hold of the stick click of the
-  other hand for 1 s, and an item of the ring. Now only F11 and the
-  headset's own recenter do it.
+- **F9. A smooth turn in the God view.** "Turn in steps" off
+  (`snap_turn=0`) gives the game's own smooth turn of the turn keys and the
+  middle mouse, but that turn moves only the game camera. The God view does
+  not turn then: a desktop run with `snap_turn=0` showed the same view before
+  and after a push of the stick and a hold of the turn key (`god-view.md`,
+  section 4). A smooth turn of the God view with the stick is not built.
 - **F11. Settings in the headset, and the controls of the player.**
   - A panel of the most used settings (turn, teleport, vignette, main hand,
     move speed, recenter) that saves to `bwvr.ini`. The same panel shows
@@ -483,9 +483,6 @@ keeps the mod as it is.
   section 7), and the trigger clicks at the place of the mouse pointer,
   which the player cannot see. Wanted: the hands stay in view, and a ray
   from the pointing hand to the screen shows where the trigger clicks.
-- **F16. No turn and no zoom while a menu is up.** The walk, the teleport
-  and the grab of the world stop with a dialog box. `PumpStick` has no such
-  test for the snap turn and the zoom step.
 
 **The village, the Creature and the help**
 

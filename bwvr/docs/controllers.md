@@ -266,7 +266,7 @@ serves both hands.
 | `trigger` | float | The left mouse button |
 | `squeeze` | float | The right mouse button (the grip) |
 | `stick` | vector2f | Snap turn, zoom steps, the ring |
-| `stick_click` | boolean | The gesture button (`gesture_button=2`), the ring (`radial_menu_button=2`) |
+| `stick_click` | boolean | The gesture button (`gesture_button=2`), the ring (`radial_menu_button=2`), the recenter hold (`recenter_hold`) |
 | `primary` | boolean | A on the right hand, X on the left |
 | `secondary` | boolean | B on the right hand, Y on the left |
 | `menu` | boolean | The menu button |
@@ -892,6 +892,7 @@ The words that hold a button (or the stick at full) for `frames` frames:
 | `lgrip`, `ltrigger` | Grip, trigger of the left hand |
 | `gripdip` | While the word `grip` holds, the squeeze of the right grip reads 0.59 and not 1.0 for the frames of this word. One frame is a real hand that jerks away |
 | `lstick_left`, `lstick_right`, `lstick_up`, `lstick_down` | The stick of the left hand at full. Two words at the same time give a diagonal. The stick moves the player in the God view (`move_stick`), or drives the ring with `button_layout=0` |
+| `lstick_click` | The stick click of the left hand. A hold of 1 s recenters the view (`recenter_hold`) |
 | `nofocus` | The headset session has no focus of the runtime. Both fake hands are not active, as `XrScreen` gives them then |
 
 The words that act on the first frame of the word only:
@@ -982,8 +983,8 @@ The pointing hand is the right hand. When the left controller is the Hand
 | Trigger | The left button: click. A drag on the land moves nothing in the God view. With the leash on the Hand, a Creature command (`creature.md`). With a one-off seed in the Hand, it makes the seed active (`miracles.md`). While a text of the game waits for a click, the trigger is that click and nothing more (`controller-hints.md`, section 10) |
 | A | Hold to aim the teleport arc, let go to go there (`god-view.md`). `teleport=0` gives a jump to the object or the land under the Hand |
 | B (Y on the left hand) | Hold and draw: a gesture (`miracles.md`). A short press with a miracle in the Hand takes the miracle out. B while A is down cancels the teleport |
-| Stick left and right | One snap turn (5.4). In the Temple it turns the player in the room (11.4) |
-| Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`). In other views, a wheel click |
+| Stick left and right | One snap turn (5.4). In the Temple it turns the player in the room (11.4). No turn while a dialog box is up (`menu_stops_turn`, `god-view.md`, section 5.8) |
+| Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`), and no zoom while a dialog box is up (`menu_stops_turn`). In other views, a wheel click |
 | Stick click | The gesture button with `gesture_button=2` |
 | Dialog box up | The hand points a ray. The trigger is the left button and the grip the right button (3.6) |
 | In a room of the Temple | The hand points a ray. The trigger and the grip both click (11.3) |
@@ -996,6 +997,7 @@ The pointing hand is the right hand. When the left controller is the Hand
 | Y (B when the left hand points) | Hold: opens the ring, and the hand picks an item (section 10) |
 | X (A when the left hand points) | Opens and closes the spell book: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand holds one, and a pull of 10 cm takes it out |
 | Stick | In the God view: push it to move over the land (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
+| Stick click | Hold it for 1 s with the stick at rest: the view recenters, as F11 does (`recenter_hold`, `god-view.md`, section 5.8) |
 | Trigger | No job |
 | Menu button of the left controller | Esc: the game menu (3.6) |
 
@@ -1074,6 +1076,8 @@ default. Each control has one job, and one button opens the game menu.
 | `temple_pointer`, `temple_click`, `temple_camera_follow`, `temple_camera_drag`, `temple_camera_flight`, `temple_pointer_depth_cm`, `temple_turn`, `temple_taps` | see 11.6 | Section 11 |
 | `snap_turn` | 2 | 5.4 |
 | `zoom_step` | 2 | 5.4 |
+| `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it does (`god-view.md`, section 5.8). The switch "Menu turn" of the debug page. Not in the launcher |
+| `recenter_hold` | 1 | 1: a hold of 1 s of the stick click of the hand that does not point, with the stick at rest, recenters the view. 2: the stick click of the pointing hand. 0: no hold recenters (`god-view.md`, section 5.8). The switch "Recenter hold" of the debug page. Not in the launcher |
 
 The other keys of the Hand (the reach, the size, the throw, the Creature) are
 in `hand.md`, `throw.md` and `creature.md`. The keys of the grab of the world
@@ -1716,6 +1720,7 @@ key buffer of the game.
 | `playground` | The Gods' Playground | F2 |
 | `hall`, `room_creature`, `room_challenge`, `room_save`, `room_options`, `room_library` | The rooms of the Temple | The key of action `0x14` to `0x19` (F4 to F9) |
 | `leave` | Leave the Temple, or back to the hall | Esc |
+| `recenter` | Recenter the view | No key: the view recenters as F11 does, and both hands get a pulse (`ControllersRecenter`). It acts also where the game takes no key. Slot 2 of page 2 has it with `places_panel=1` |
 | `more` | More | The other page |
 | `debug` | The debug page | The first page of the debug page (10.8). An empty slot with `debug_menu=0` |
 | `back` | Back | The page before, on a page of the debug page |
@@ -1726,7 +1731,7 @@ The rings by default, from the top and clockwise:
 | Ring | Items |
 | --- | --- |
 | Page 1 (`radial_menu_items`) | `temple`, `creature`, `town`, `leash_learning`, `more`, `leash_compassion`, `leash_aggression`, `enter` |
-| Page 2 (`radial_menu_items2`) | `places`, `snapshot`, `none`, `pause`, `more`, `help`, `names`, `save` |
+| Page 2 (`radial_menu_items2`) | `places`, `snapshot`, `recenter`, `pause`, `more`, `help`, `names`, `save` |
 | Page 2 with `places_panel=0` | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `names`, `save` |
 | In the Temple (`radial_menu_items_temple`) | `hall`, `room_creature`, `room_challenge`, `room_save`, `leave`, `room_options`, `room_library`, `none` |
 
@@ -1734,8 +1739,8 @@ The order is how often a player needs an item: the Temple at the top, the
 moves of the view on the right, the leashes at the bottom. On page 2 the
 panel of places is at the top, because players did not find the bookmarks
 on the ring. The panel has all the moves to a place and each function of a
-bookmark, so page 2 needs no bookmark item. Slot 2 of page 2 is free for a
-next item. The ring of the
+bookmark, so page 2 needs no bookmark item. Slot 2 of page 2 has the
+recenter. The ring of the
 Temple shows by itself while the player is in the Temple (`GGame + 0x205A28`).
 
 **An item that cannot act now is dim,** and the card in the middle says why:
@@ -1992,9 +1997,8 @@ The code is `debug_menu.cpp` (the table of the switches), `debug_menu_math.h`
 **The place of the item.** A page of the ini that has the word `debug`
 holds it. Else the last page of the ring gets it: its first empty slot, or
 on a full page slot 5 (from 0 at the top and clockwise: the slot left of the
-bottom, `DebugSlot`). Page 2 as made has `debug` in its empty slot 2. With
-`places_panel=0` page 2 is full, so `debug` takes the place of `help`
-there. The ring of the Temple has it in its empty slot 7. The log names the
+bottom, `DebugSlot`). Page 2 is full, with `places_panel=1` and with
+`places_panel=0`, so `debug` takes the place of `help` there. The ring of the Temple has it in its empty slot 7. The log names the
 item that gives its slot.
 
 **The pages.** A link item goes to its page after 0.45 s with the hand on

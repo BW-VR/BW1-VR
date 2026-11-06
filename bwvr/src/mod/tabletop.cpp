@@ -77,6 +77,7 @@
 #include "MinHook.h"
 #include "../common/bw_addresses.h"
 #include "camera_zone.h"
+#include "comfort_math.h"
 #include "debug_menu.h"
 #include "hint_card.h"
 #include "hint_learn_math.h"
@@ -133,6 +134,10 @@ bool ComfortCameraTakeGodDrag();
 bool ComfortCameraDestinations(float position[3], float focus[3]);
 // controllers.cpp: a grip holds the world.
 bool ControllersGrabHeld();
+// vignette.cpp: a move of the view that the player makes with a control, with
+// the share of its full speed, and a step of the view in one frame.
+void VignetteMove(float share, const char* by);
+void VignetteStep(const char* by);
 // teleport.cpp: the camera help event of a jump (0x305 to the land, 0x306 to
 // an object under the Hand).
 int TeleportJumpEvent();
@@ -364,6 +369,13 @@ struct ZoomProbe {
 int g_god_ground = 0;
 int g_god_turn = 0;
 float g_god_turn_degrees = 45.0f;
+// THE COMFORT VIGNETTE (vignette.cpp): the view at the end of the last main
+// camera call, so the next call can measure what a grab of the world moved
+// in between. have is false after the view was built again.
+struct MotionMark {
+  bool have = false;
+  TablePose pose = {};
+} g_motion;
 // THE SMOOTH ZOOM (ApplyGodZoomHold). push is what the stick asked for since
 // the last main camera call, and fresh says that it asked. The rest is the
 // hold that runs: its direction, the scale and the land point under the head
@@ -1685,6 +1697,10 @@ void ApplyGodSteps() {
   ++g_god_version;
   if (placed) g_god_nonturn_version = g_god_version;
   ComfortCameraBlink();
+  VignetteStep(teleport    ? "a teleport"
+               : zoom != 0 ? "a zoom step"
+               : turn != 0 ? "a snap turn"
+                           : "a step of the ground");
   if (teleport) {
     float head_after[3];
     PoseWorld(Pose(), room, head, head_after);
@@ -1704,6 +1720,26 @@ void ApplyGodSteps() {
            g_heading * 57.29578f, g_god_version);
     Help(TeleportJumpEvent(), kInputButton);
   }
+}
+
+// THE COMFORT VIGNETTE (vignette.cpp): the share of the full speed of a
+// control that the view moved from one pose to the next in seconds: how far
+// the land under the head went across the room, the turn and the zoom
+// (comfort_math.h, MoveShare).
+float MotionShare(const TablePose& from, const TablePose& to, double seconds) {
+  if (!(from.scale > 0.0f) || !(to.scale > 0.0f)) return 0.0f;
+  float room[3], head[3], a[3], b[3];
+  TableRoom(room);
+  HeadRoom(head);
+  PoseWorld(from, room, head, a);
+  PoseWorld(to, room, head, b);
+  const float dx = b[0] - a[0], dz = b[2] - a[2];
+  const float meters =
+      sqrtf(dx * dx + dz * dz) * 2.0f / (from.scale + to.scale);
+  return comfort_math::MoveShare(meters,
+                                 Wrap(to.heading - from.heading) * 57.29578f,
+                                 to.scale / from.scale,
+                                 static_cast<float>(seconds));
 }
 
 double Seconds() {
@@ -2782,6 +2818,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
       g_god_zoom = g_god_ground = g_god_turn = 0;
       StopZoomHold("the God view stands aside", false);
       StopWalk("the God view stands aside", false);
+      g_motion.have = false;
       g_tele.pending = false;
       g_spawn.pending = false;
       g_spawn.again = false;
@@ -2865,16 +2902,32 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
       if (!PlaceGod(g_build_cause, position, focus, true)) return false;
       g_spawn.pending = false;
       g_spawn.again = false;
+      g_motion.have = false;
+    }
+    // THE COMFORT VIGNETTE: what a grab of the world moved since the last
+    // main camera call (TabletopMove).
+    if (g_motion.have && ControllersGrabHeld()) {
+      VignetteMove(MotionShare(g_motion.pose, Pose(), frame_seconds),
+                   "the grab of the world");
     }
     // A move of the game camera to a new place, once, as one cut.
     ApplyGodSpawn(asked_position, asked_focus);
     // The steps of the player, the smooth zoom and the walk with the stick,
     // once a frame, before anything reads the view of this frame. Then the
-    // pan of the mouse.
+    // pan of the mouse. The steps tell the vignette by themselves, and the
+    // smooth zoom and the walk give it the share of their move.
     ApplyGodSteps();
+    const TablePose before_moves = Pose();
     ApplyGodZoomHold(frame_seconds);
     ApplyGodWalk(frame_seconds);
+    if (g_hold.active || g_walk.active) {
+      VignetteMove(MotionShare(before_moves, Pose(), frame_seconds),
+                   g_walk.active ? "the walk with the stick"
+                                 : "the smooth zoom");
+    }
     MousePan(drag);
+    g_motion.pose = Pose();
+    g_motion.have = true;
   } else {
     if (!FitLand()) return false;
     if (!g_have_table) {

@@ -52,6 +52,7 @@
 #include "MinHook.h"
 #include "aim_math.h"
 #include "aim_smooth.h"
+#include "comfort_math.h"
 #include "controller_math.h"
 #include "controllers.h"
 #include "creature_command.h"
@@ -92,6 +93,8 @@ bool HeadCameraStageBasis(float basis_out[9]);
 bool HeadCameraGameCamera(float position[3], float focus[3]);
 // comfort_camera.cpp
 bool ComfortCameraRequestTurn(int direction);
+// head_pose.cpp: the recenter of F11 and of the headset's own menu.
+void HeadPoseRecenter();
 const void* ComfortCameraLastMode();
 // stereo.cpp
 bool StereoIdle();
@@ -306,6 +309,8 @@ enum FakeInput {
   // The panel of places: the aim of the right hand turns to the middle of
   // the next button of places_test_buttons (places_panel.cpp).
   kAimPlaces,
+  // The stick click of the left hand: the recenter hold (recenter_hold=1).
+  kLStickClick,
   kInputCount
 };
 
@@ -320,7 +325,7 @@ const char* const kInputName[kInputCount] = {
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
-    "book",       "lrot",       "aimplaces"};
+    "book",       "lrot",       "aimplaces",  "lstick_click"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -731,6 +736,7 @@ void FakeHand(int index, bwvr::HandInput* out) {
                     (g_held[kLStickLeft] ? 1.0f : 0.0f);
     out->stick[1] = (g_held[kLStickUp] ? 1.0f : 0.0f) -
                     (g_held[kLStickDown] ? 1.0f : 0.0f);
+    out->stick_click = g_held[kLStickClick];
   }
 }
 
@@ -2422,6 +2428,59 @@ int ButtonLayout() {
   return g_layout;
 }
 
+// THE COMFORT OF THE STICK (docs/god-view.md, "The comfort of a move", and
+// docs/controllers.md, 5.1). The keys of bwvr.ini:
+//
+//   menu_stops_turn=1     while a dialog box of the game is up, the stick
+//                         does not turn and does not zoom the God view. 0:
+//                         it does, as the walk does not
+//   recenter_hold=1       a hold of 1 s of the stick click recenters the view
+//                         (PumpRecenter): 1 the stick click of the hand that
+//                         does not point, 2 that of the pointing hand, 0 no
+//                         hold
+//
+// The switches of the debug page change each one while the game runs.
+struct ComfortSettings {
+  bool read = false;
+  int menu_stops_turn = 1;
+  int recenter_hold = comfort_math::kRecenterOther;
+} g_comfort;
+
+void LogMenuStopsTurn(const char* by) {
+  ModLog("controllers  : %s%smenu_stops_turn=%d. %s", by,
+         by[0] != 0 ? ": " : "", g_comfort.menu_stops_turn,
+         g_comfort.menu_stops_turn != 0
+             ? "While a dialog box is up, the stick does not turn and does "
+               "not zoom the God view"
+             : "The stick turns and zooms the God view also while a dialog "
+               "box is up");
+}
+
+void LogRecenterHold(const char* by) {
+  const int rule = g_comfort.recenter_hold;
+  ModLog("controllers  : %s%srecenter_hold=%d. %s", by,
+         by[0] != 0 ? ": " : "", rule,
+         rule == comfort_math::kRecenterOther
+             ? "Hold the stick click of the hand that does not point for 1 s, "
+               "with the stick at rest, to recenter the view"
+         : rule == comfort_math::kRecenterPointing
+             ? "Hold the stick click of the pointing hand for 1 s, with the "
+               "stick at rest, to recenter the view"
+             : "No hold of a stick click recenters the view");
+}
+
+const ComfortSettings& Comfort() {
+  if (!g_comfort.read) {
+    g_comfort.read = true;
+    g_comfort.menu_stops_turn = IniInt("menu_stops_turn", 1) != 0 ? 1 : 0;
+    g_comfort.recenter_hold = comfort_math::RecenterRule(
+        IniInt("recenter_hold", comfort_math::kRecenterOther));
+    LogMenuStopsTurn("");
+    LogRecenterHold("");
+  }
+  return g_comfort;
+}
+
 // The profile of a hand: "fake" for the scripted controller, and empty until
 // the runtime tells it.
 const char* HandProfileOf(int index) {
@@ -3165,6 +3224,17 @@ void PumpButtons(ULONGLONG now) {
 // starts with a fresh push only. A push that the view or a grab refused, and
 // a hold that stopped because the stick went to the side, must come back
 // below kStickBack before the stick zooms again.
+//
+// A DIALOG BOX (menu_stops_turn=1). While a box of the game is up, a push of
+// the stick does not turn and does not zoom the God view, as the walk, the
+// teleport and the grab of the world do not move it then. Each push is
+// refused once and counted, and it must come back before it acts. Outside
+// the God view the push forward and back is a wheel click, which a box can
+// use, so only the turn stops there. With "Turn in steps" off (snap_turn=0)
+// the stick does not turn, and the game's own smooth turn of the turn keys
+// and the middle mouse goes to the game camera only (comfort_camera.cpp).
+uint64_t g_menu_stick_refused = 0;
+
 void PumpStick(ULONGLONG now) {
   const bool was_holding = g_god_zoom_holding;
   g_god_zoom_holding = false;
@@ -3180,6 +3250,7 @@ void PumpStick(ULONGLONG now) {
   if (ay < kStickBack || !live) g_god_zoom_armed = true;
   const bool god = TabletopGodOwnsView();
   const bool smooth = god && TabletopGodZoomSmooth();
+  const bool menu = Comfort().menu_stops_turn != 0 && MenuUp();
   // No snap turn and no zoom step while a grab holds the world. The two hands
   // turn and zoom then. Each push is refused once and counted. A push for a
   // step is past kStickPast, and a push for the smooth zoom is past
@@ -3194,7 +3265,11 @@ void PumpStick(ULONGLONG now) {
   if (TempleTurnOn()) {
     if (live && g_turn_armed && ax > kStickPast && ax > ay) {
       g_turn_armed = false;
-      if (TempleTurn(hand.stick[0] > 0.0f ? 1 : -1)) Pulse(PointingIndex());
+      if (menu) {
+        ++g_menu_stick_refused;
+      } else if (TempleTurn(hand.stick[0] > 0.0f ? 1 : -1)) {
+        Pulse(PointingIndex());
+      }
     }
     g_wheel_tick = 0;
     return;
@@ -3216,7 +3291,28 @@ void PumpStick(ULONGLONG now) {
     }
     return;
   }
-  if (live && g_turn_armed && ax > kStickPast && ax > ay) {
+  bool skip_turn = false;
+  if (menu) {
+    const bool turn = live && g_turn_armed && ax > kStickPast && ax > ay;
+    const bool zoom = god && pushed && g_god_zoom_armed;
+    if (turn) g_turn_armed = false;
+    if (god && pushed) g_god_zoom_armed = false;
+    if (turn || zoom) {
+      ++g_menu_stick_refused;
+      if (g_event_logs < kMaxEventLogs) {
+        ++g_event_logs;
+        ModLog("controllers  : the stick %s is refused while a dialog box is "
+               "up (menu_stops_turn=1), frame %llu", turn ? "turn" : "zoom",
+               g_frame);
+      }
+    }
+    if (god) {
+      g_wheel_tick = 0;
+      return;
+    }
+    skip_turn = true;
+  }
+  if (!skip_turn && live && g_turn_armed && ax > kStickPast && ax > ay) {
     g_turn_armed = false;
     ++g_turns_asked;
     ComfortCameraRequestTurn(hand.stick[0] > 0.0f ? 1 : -1);
@@ -3281,6 +3377,63 @@ void PumpStick(ULONGLONG now) {
     }
   } else {
     g_wheel_tick = 0;
+  }
+}
+
+// THE RECENTER HOLD (recenter_hold, docs/controllers.md, 5.1). A hold of the
+// stick click of one hand for 1 s, with the stick at rest, recenters the
+// view as F11 and the headset's own recenter do (HeadPoseRecenter), with a
+// pulse on that hand. A push of the stick in the hold starts the time again,
+// so a click that comes with a walk or a turn does not recenter
+// (comfort_math.h, RecenterStep). The click must go up before the next hold.
+// The hold does not act when the stick click of that hand has a different
+// job: the ring with radial_menu_button=2 on the hand that does not point,
+// and the draw with gesture_button=2 on the pointing hand.
+comfort_math::RecenterHold g_recenter_hold;
+uint64_t g_recenters = 0;
+const double kRecenterHoldSeconds = 1.0;
+
+// The stick click of the hand of the rule has a different job.
+const char* RecenterClash(int rule) {
+  if (rule == comfort_math::kRecenterOther &&
+      IniInt("radial_menu", 1) != 0 && IniInt("radial_menu_button", 1) == 2) {
+    return "the stick click of that hand opens the ring "
+           "(radial_menu_button=2)";
+  }
+  if (rule == comfort_math::kRecenterPointing && g_gesture.button == 2) {
+    return "the stick click of that hand draws a gesture (gesture_button=2)";
+  }
+  return nullptr;
+}
+
+void PumpRecenter() {
+  const int rule = Comfort().recenter_hold;
+  if (rule == comfort_math::kRecenterOff) {
+    g_recenter_hold = comfort_math::RecenterHold();
+    return;
+  }
+  static int clash_said = -1;
+  const char* clash = RecenterClash(rule);
+  if (clash != nullptr) {
+    if (clash_said != rule) {
+      clash_said = rule;
+      ModLog("controllers  : recenter_hold=%d does not act: %s", rule, clash);
+    }
+    g_recenter_hold = comfort_math::RecenterHold();
+    return;
+  }
+  const int index =
+      rule == comfort_math::kRecenterOther ? OtherIndex() : PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  const bool click = hand.active && hand.stick_click;
+  const bool still = fabsf(hand.stick[0]) < kStickBack &&
+                     fabsf(hand.stick[1]) < kStickBack;
+  if (comfort_math::RecenterStep(&g_recenter_hold, click, still,
+                                 GetTickCount64() / 1000.0,
+                                 kRecenterHoldSeconds)) {
+    ControllersRecenter(index == PointingIndex()
+                            ? "a hold of the stick click of the pointing hand"
+                            : "a hold of the stick click of the other hand");
   }
 }
 
@@ -4997,8 +5150,59 @@ void ControllersPump() {
   PumpButtons(now);
   PumpStick(now);
   PumpWalk();
+  PumpRecenter();
   PumpEsc(now);
   RadialMenuPump(now);
+}
+
+// A recenter of the view from the controllers: the recenter hold, and the
+// item "recenter" of the ring. It acts as F11 does (HeadPoseRecenter), and
+// both hands get a pulse.
+void ControllersRecenter(const char* by) {
+  HeadPoseRecenter();
+  ++g_recenters;
+  if (g_on) {
+    PulseWith(0, 0.6f, 0.12f);
+    PulseWith(1, 0.6f, 0.12f);
+  }
+  ModLog("controllers  : %s recenters the view, frame %llu", by, g_frame);
+}
+
+// THE SWITCHES of the debug page: menu_stops_turn and recenter_hold. The
+// pointing hand gives a long pulse for a rule that acts and a short pulse
+// for the old rule.
+
+int ControllersMenuStopsTurnValue() {
+  if (!g_on || !TestSwitchesOn()) return kDebugCannot;
+  return Comfort().menu_stops_turn;
+}
+
+void ControllersMenuStopsTurnChange(const char* by) {
+  if (!g_on || !TestSwitchesOn()) return;
+  Comfort();
+  g_comfort.menu_stops_turn = g_comfort.menu_stops_turn != 0 ? 0 : 1;
+  PulseWith(PointingIndex(), 0.5f,
+            g_comfort.menu_stops_turn != 0 ? 0.30f : 0.08f);
+  LogMenuStopsTurn(by);
+}
+
+int ControllersRecenterHoldValue() {
+  if (!g_on || !TestSwitchesOn()) return kDebugCannot;
+  return Comfort().recenter_hold;
+}
+
+void ControllersRecenterHoldChange(const char* by) {
+  if (!g_on || !TestSwitchesOn()) return;
+  Comfort();
+  g_comfort.recenter_hold =
+      comfort_math::NextRecenterRule(g_comfort.recenter_hold);
+  g_recenter_hold = comfort_math::RecenterHold();
+  const int rule = g_comfort.recenter_hold;
+  PulseWith(PointingIndex(), 0.5f,
+            rule == comfort_math::kRecenterPointing ? 0.40f
+            : rule == comfort_math::kRecenterOther  ? 0.24f
+                                                    : 0.08f);
+  LogRecenterHold(by);
 }
 
 // A snap turn that the stick asked for has happened.
@@ -5041,6 +5245,12 @@ void ControllersReport() {
     ModLog("controllers  : the stick asked the God view for %llu zoom steps "
            "and %llu smooth zooms", g_god_zooms, g_god_holds);
     g_god_zooms = g_god_holds = 0;
+  }
+  if (g_menu_stick_refused != 0 || g_recenters != 0) {
+    ModLog("controllers  : %llu pushes of the stick were refused while a "
+           "dialog box was up. The controllers recentered the view %llu "
+           "times", g_menu_stick_refused, g_recenters);
+    g_menu_stick_refused = g_recenters = 0;
   }
   if (g_grab_starts != 0 || g_grab_claims != 0 || g_grab_refused != 0 ||
       g_grab_picks != 0 || g_grab_trigger_held != 0 ||

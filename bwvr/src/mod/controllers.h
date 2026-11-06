@@ -179,6 +179,11 @@ int ControllersButtonLayout();
 // and the word "layoutkey" of the scripted controller.
 void ControllersButtonLayoutToggle(const char* by);
 
+// A recenter of the view from the controllers, as F11 does: the recenter hold
+// (recenter_hold) and the item "recenter" of the ring. by names the input for
+// the log. Both hands get a pulse.
+void ControllersRecenter(const char* by);
+
 // The overlay renderer: each hand's grip pose in the world, one to one. See
 // docs/hand-model.md, "Overlay renderer".
 struct OverlayHand {

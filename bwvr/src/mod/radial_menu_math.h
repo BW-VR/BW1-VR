@@ -74,6 +74,7 @@ enum Item {
   kItemRoomLibrary,
   kItemHall,
   kItemLeave,
+  kItemRecenter,
   kItemMore,
   kItemDebug,
   kItemBack,
@@ -112,6 +113,7 @@ enum How {
   kHowPage,     // the other page of the ring
   kHowPanel,    // opens the panel of places (places_panel.cpp)
   kHowSnapshot, // saves the eye pictures and the log (snapshot.cpp)
+  kHowRecenter, // the recenter of the view (ControllersRecenter), no key
 };
 
 // The modifier word of the key buffer of the game.
@@ -167,6 +169,7 @@ const ItemInfo kItemInfo[kItems] = {
     {"room_library", L"Library", L"The Library", kHowAction, 0x19, 0, 1},
     {"hall", L"Hall", L"The hall of the Temple", kHowAction, 0x14, 0, 1},
     {"leave", L"Leave", L"Leave the Temple", kHowKey, 0x01, 0, 1},
+    {"recenter", L"Recenter", L"Recenter the view", kHowRecenter, 0, 0, 0},
     {"more", L"More", L"More", kHowPage, 0, 0, 0},
     {"debug", L"Debug", L"The debug page", kHowPage, 0, 0, 0},
     {"back", L"Back", L"Back", kHowPage, 0, 0, 0},
@@ -181,13 +184,14 @@ const char* const kDefaultPage1 =
     "temple,creature,town,leash_learning,more,leash_compassion,"
     "leash_aggression,enter";
 // Page 2 with the panel of places (places_panel=1): the panel holds the
-// places and the bookmarks. Slot 2 is free.
+// places and the bookmarks, so slot 2 holds the recenter.
 const char* const kDefaultPage2 =
-    "places,snapshot,none,pause,more,help,names,save";
+    "places,snapshot,recenter,pause,more,help,names,save";
 // Page 2 with places_panel=0: the bookmark items of the ring.
 const char* const kDefaultPage2Marks =
     "mark_set,mark_go,mark_back,pause,more,help,names,save";
-// In the Temple: the rooms and the way out.
+// In the Temple: the rooms and the way out. The empty slot is for the item
+// "debug" of debug_menu=1.
 const char* const kDefaultTemple =
     "hall,room_creature,room_challenge,room_save,leave,room_options,"
     "room_library,none";

@@ -49,6 +49,13 @@ int ControllersPressGuardValue();
 void ControllersPressGuardChange(const char* by);
 int ControllersPressHoldValue();
 void ControllersPressHoldChange(const char* by);
+int ControllersMenuStopsTurnValue();
+void ControllersMenuStopsTurnChange(const char* by);
+int ControllersRecenterHoldValue();
+void ControllersRecenterHoldChange(const char* by);
+// The comfort vignette (vignette.cpp).
+int VignetteValue();
+void VignetteChange(const char* by);
 // The God view and the table (tabletop.cpp), the grab of the world
 // (world_grab.cpp).
 int TabletopValue();
@@ -344,6 +351,14 @@ const Switch kSwitches[] = {
      TabletopGodMoveStickValue,
      [](const char*) { TabletopGodMoveStickCycle(); },
      L"off|head|controller"},
+    {kGroupView, L"Vignette", L"Edges dark in a move", "comfort_vignette",
+     VignetteValue, VignetteChange, L"off|gentle|strong"},
+    {kGroupView, L"Menu turn", L"No turn in a dialog box", "menu_stops_turn",
+     ControllersMenuStopsTurnValue, ControllersMenuStopsTurnChange,
+     L"turns|stops"},
+    {kGroupView, L"Recenter hold", L"Stick click held recenters",
+     "recenter_hold", ControllersRecenterHoldValue,
+     ControllersRecenterHoldChange, L"off|other hand|Hand"},
     {kGroupView, L"Grab test", L"Grab of the world: test step", "",
      WorldGrabTestValue, [](const char*) { WorldGrabCycleTest(); },
      L"as set|one to one|off"},

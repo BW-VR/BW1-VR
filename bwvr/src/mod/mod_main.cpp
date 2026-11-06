@@ -187,6 +187,8 @@ void ComfortCameraSetTurnHelp(int degrees_per_event, bool keeps_focus,
 void ComfortCameraSetSpawnTests(int temple_update, int x, int z, int flag,
                                 int toggle_update);
 void ComfortCameraInstall();
+// vignette.cpp: comfort_vignette.
+void VignetteSetMode(int mode);
 void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
                             int close_distance, int close_zoom_pct,
                             int cut_degrees, int cut_percent,
@@ -414,6 +416,8 @@ int g_snap_turn_deg = 45;
 bool g_instant_jumps = true;
 bool g_camera_glide = false;
 int g_blink_ms = 0;
+// The comfort vignette: 0 off, 1 gentle, 2 strong (vignette.cpp).
+int g_comfort_vignette = 0;
 int g_zoom_step = 2;  // 0 the game's own, 1 small, 2 medium, 3 large
 // The turn events of a snap turn for the tutorial, and the turn of the game
 // camera about its own focus (comfort_camera.cpp).
@@ -1088,6 +1092,10 @@ void ReadSettings() {
     const int blink =
         static_cast<int>(GetPrivateProfileIntA("bwvr", "blink", 0, path));
     g_blink_ms = (blink >= 0 && blink < 3) ? kBlinkSteps[blink] : 0;
+    // The edges of the view go dark in a move that the player makes with a
+    // control (docs/god-view.md, "The comfort of a move").
+    g_comfort_vignette = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "comfort_vignette", 0, path));
   }
   g_instant_jumps =
       GetPrivateProfileIntA("bwvr", "instant_jumps", 1, path) != 0;
@@ -1805,6 +1813,7 @@ void StartVrStep() {
     ComfortCameraSetTurnHelp(g_turn_help_degrees, g_god_turn_keeps_focus,
                              g_tilt_help_degrees);
     ComfortCameraInstall();
+    VignetteSetMode(g_comfort_vignette);
     ScriptCameraSetOptions(g_script_camera, g_script_min_distance,
                            g_script_min_height, g_script_close_distance,
                            g_script_close_zoom, g_script_cut_degrees,

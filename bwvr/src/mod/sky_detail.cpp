@@ -150,6 +150,8 @@ bool TabletopHidesMist(const void* mist);
 void HandGlowDraw();
 // overlay.cpp: the mod's own meshes, in each eye pass.
 void OverlayDraw();
+// vignette.cpp: the comfort vignette, in each eye pass.
+void VignetteDraw();
 // book_bubble.cpp: the game's bubble of a miracle that the hand pulls out of
 // the spell book.
 void BookBubbleDraw();
@@ -517,7 +519,9 @@ void __cdecl h_MoonTurn(const float* place, float* turn, float* mesh) {
 // glow shows on the overlay's hand too. The game's bubble of the spell book
 // (book_bubble.cpp) comes after the meshes: its glass is clear, so the hand
 // behind it must be there first. The game's gesture pictures over the palm
-// (gesture_panel.cpp) come last, with the same reason.
+// (gesture_panel.cpp) come after them, with the same reason. The comfort
+// vignette (vignette.cpp) is the last draw: it darkens each draw of the
+// world and of the mod at the edges of the view.
 void __cdecl h_SunGlare() {
   uint32_t* wanted = reinterpret_cast<uint32_t*>(kSunGlareWanted);
   ++g_glare_calls;
@@ -534,6 +538,7 @@ void __cdecl h_SunGlare() {
   BookBubbleDraw();
   GesturePanelDraw();
   HandGlowDraw();
+  VignetteDraw();
 }
 
 bool Hook(uintptr_t address, void* replacement, void** original,

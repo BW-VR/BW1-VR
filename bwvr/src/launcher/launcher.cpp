@@ -313,6 +313,13 @@ const Setting kSettings[] = {
     //  "Cut at the end: the view holds until the camera stops, then it cuts. "
     //  "With both cut choices, a long move also cuts on the way, a close shot "
     //  "gets a little more room, and the camera does not shake."},
+    {kValues, "comfort_vignette", "Comfort vignette",
+     "Off=0|Gentle=1|Strong=2", 0,
+     "The edges of your view go dark while you move with a control: the walk "
+     "with the stick, the zoom, a turn, a teleport and the grab of the "
+     "world. The middle of the view stays clear. A faster move gives a "
+     "darker edge. Some people feel less ill with it. Gentle: the edges get "
+     "darker. Strong: only the middle of the view stays clear."},
     {kChoice, "blink", "Blink when you jump or turn", "Off|Short|Long", 0,
      "Shows black for a moment when you jump or turn. Short is 0.1 seconds "
      "and long is 0.2 seconds. Some people find a jump easier with a blink."},

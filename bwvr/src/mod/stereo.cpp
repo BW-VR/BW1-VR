@@ -203,6 +203,11 @@ void TargetGlowReport();
 void OverlayFrame();
 void OverlayPassEye(int eye);
 void OverlayReport();
+// vignette.cpp: the comfort vignette. See docs/god-view.md, "The comfort of
+// a move".
+void VignetteFrame();
+void VignettePassEye(int eye);
+void VignetteReport();
 // teleport.cpp: the teleport with a visible arc. See docs/god-view.md.
 void TeleportFrame();
 void TeleportReport();
@@ -1517,6 +1522,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   FrameFunction(kFpFnOverlay, OverlayFrame);
   FrameFunction(kFpFnWater, WaterModeApply);
   FrameFunction(kFpFnTable, TabletopApplyFrame);
+  VignetteFrame();
   FrameTimeBeforePasses();
   EyeCleanBeginPair();
   g_in_pass = true;
@@ -1640,6 +1646,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     SceneSampleWalk(true);
     HandDirectPassBegin(eye);
     OverlayPassEye(eye);
+    VignettePassEye(eye);
     const uint64_t walk_start = profile ? FrameProfileTicks() : 0;
     FrameTimePass(eye);
     if (one_walk && eye == 0) {
@@ -1685,6 +1692,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     FrameTimePassDone(eye);
     const uint64_t walk_end = profile ? FrameProfileTicks() : 0;
     OverlayPassEye(-1);
+    VignettePassEye(-1);
     HandDirectPassDone(eye);
     SceneSampleWalk(false);
     QueryPerformanceCounter(&t3);
@@ -2094,6 +2102,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     HandGlowReport();
     TargetGlowReport();
     OverlayReport();
+    VignetteReport();
     TeleportReport();
     CreatureCommandReport();
     MiracleReport();

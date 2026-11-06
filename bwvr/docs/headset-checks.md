@@ -37,7 +37,9 @@ want.
    and on hills, and grab the land with one grip and with two grips. Wrong:
    discomfort, a wrong speed, a view that bobs or stops and jumps, land that
    shakes while the hand is still, or a bump at the edge of the Creature
-   select that is too loud.
+   select that is too loud. Then set the launcher row "Comfort vignette" to
+   gentle and to strong for a short walk. Wrong: it does not help, or it is
+   in the way.
 6. **The teleport.** Aim the arc at near and far land, and go to the village
    of Land 1. Wrong: an arc or a ring that is hard to see or to aim, or a way
    to the village that you cannot find.

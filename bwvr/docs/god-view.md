@@ -56,6 +56,10 @@ sets the flags of each mode.
   follows the land under the head through a smooth filter
   (`move_stick_follow_land`). It stops when the stick comes back (section
   5.7).
+- **Comfort.** `comfort_vignette` darkens the edges of the view during a move
+  that the player makes with a control. While a dialog box is up the stick
+  does not turn or zoom, and a hold of the stick click of the hand that does
+  not point recenters the view (section 5.8).
 - **The Hand** is always the real hand (`hand_real_cm`, 19 cm) at the scale
   now. Zoomed out, it is large against the villagers.
 - **The game camera** stays over the player's place at 400 units, for the
@@ -352,7 +356,15 @@ hears the turn. The view turns about the head: the world point of the head
 stays, and the heading changes by the step. A 90 degree turn right puts the
 land that was on the right in front.
 
-With "Turn in steps" off, there is no turn in the God view.
+With "Turn in steps" off (`snap_turn=0`), there is no turn in the God view:
+the stick does not turn, and the game's own smooth turn of the turn keys and
+the middle mouse turns only the game camera, not the view. A desktop run with
+`snap_turn=0` shows the same picture before and after a push of the stick
+and a hold of the turn key.
+
+While a dialog box is up, the stick does not turn (`menu_stops_turn`,
+section 5.8). A snap turn darkens the edges of the view with
+`comfort_vignette` (section 5.8).
 
 ## 5. Moving around: the grab and the mouse
 
@@ -796,6 +808,100 @@ rate at the refresh rate of the headset (for example 90 Hz in Virtual
 Desktop), or Space Warp, gives an even walk. The count in the line of the
 end shows how many frames came late. The report of a window has
 the count of the walks, their time and the frames that moved the view.
+
+### 5.8 The comfort of a move
+
+Three things help a player who feels ill when the view moves: the comfort
+vignette, a stick that does not turn or zoom while a dialog box is up, and a
+recenter from the controllers.
+
+**The comfort vignette** (`comfort_vignette`, `vignette.cpp`). The edges of
+the view go dark during a move that the player makes with a control and that
+the body does not feel. The middle of the view stays clear. These moves count:
+
+- the walk with the stick, the smooth zoom and the grab of the world with
+  one hand or two hands. Each one reports how fast the view moved in the
+  frame, as a share of the full speed of a control: 150 cm of the room each
+  second, a turn of 90 degrees each second, or a zoom of 1.5 times in 500 ms.
+  The largest of the three counts (`comfort_math.h`, `MoveShare`). So a slow
+  push of the stick gives a light vignette, and a grab that holds still gives
+  none.
+- a snap turn, a zoom step, a step of the ground and a teleport. Each one is
+  a step of one frame, and it puts the vignette at its full darkness at once.
+
+A move that the player did not make (a story, a move of the game camera, the
+view that is built again) and a move of the head give no vignette. The
+vignette comes in 0.15 s and goes in 0.3 s, in a straight line. It never
+moves the view.
+
+| Value | The middle of the eye is clear to | Full darkness from | The darkness at full speed |
+| --- | --- | --- | --- |
+| 0 | The vignette is off (the default) | | |
+| 1, gentle | 35 degrees | 58 degrees | 85%. The edge of the view of a Quest 3, about 50 degrees from the middle, gets about 60% |
+| 2, strong | 22 degrees | 45 degrees | 100%, black |
+
+The darkness goes along a smooth curve from the clear angle to the dark
+angle. The vignette is the last draw of the mod in each eye pass, after the
+world, the hands and the glow (`sky_detail.cpp`, `h_SunGlare`): 6 rings of 48
+black triangles with an alpha at each corner, in the pixels of the eye. The
+angles go to pixels with the projection of the game (`InfoTransform`). The
+draw has no depth test, so the land never hides it. The interface of the
+game draws after it, and the hint cards and the ring are layers of their own,
+so they stay clear. One walk for both eyes (`one_walk.cpp`) copies the batch
+into the right eye with no shift, because each vertex has an rhw of 1. The
+hands of the player are in the world pass too, so the edge darkens them.
+
+**No turn and no zoom while a dialog box is up** (`menu_stops_turn`,
+`PumpStick` in `controllers.cpp`). While a box of the game is up, for
+example the game menu of Esc, the walk, the teleport and the grab of the
+world do not move the view. With `menu_stops_turn=1` the stick of the
+pointing hand also does not turn and does not zoom the God view: the snap
+turn, the zoom step and the smooth zoom stop, and so does the turn in a room
+of the Temple. Each push is refused one time and counted, and it must come
+back to the middle before it acts after the box closes. Outside the God view
+the push forward and back is a wheel click, which a box can use, so only the
+turn stops there.
+
+**The recenter hold** (`recenter_hold`, `PumpRecenter` in
+`controllers.cpp`). Hold the stick click of the hand that does not point for
+1 s, with the stick at rest, and the view recenters as F11 and the
+recenter of the headset do (`HeadPoseRecenter`). Both hands get a pulse. A
+push of the stick in the hold starts the time again, so a click that comes
+with a walk does not recenter. On a Vive wand the click of the pad is a part
+of each push, and the same rule keeps a walk from a recenter. After a
+recenter the click must go up before the next hold. The hold does not act
+when the stick click of that hand has a different job: the ring with
+`radial_menu_button=2` on the hand that does not point, and the draw of a
+gesture with `gesture_button=2` on the pointing hand. The log says so one
+time. The item `recenter` of the ring does the same (`controllers.md`,
+10.2).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `comfort_vignette` | 0 | 0: the edges of the view stay clear. 1: a gentle vignette. 2: a strong vignette. The launcher row "Comfort vignette" |
+| `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it turns and zooms then |
+| `recenter_hold` | 1 | 1: a hold of 1 s of the stick click of the hand that does not point recenters the view. 2: the stick click of the pointing hand. 0: no hold recenters |
+
+The debug page of the ring (`debug_menu=1`, the group "View") has the
+switches "Vignette" (off, gentle, strong), "Menu turn" (turns, stops) and
+"Recenter hold" (off, the other hand, the Hand). The pointing hand gives a
+short pulse for the old value and a longer pulse for the others.
+
+The log:
+
+```
+vignette     : comfort_vignette=1 (gentle). In a move that you make with a control, the edges of the view go dark: clear to 35 degrees from the middle, and 85% dark from 58 degrees at full speed. It comes in 0.15 s and goes in 0.30 s
+vignette     : the edges of the view go dark (gentle), the walk with the stick, frame 272
+vignette     : the edges of the view are clear again after 2.97 s, with a top level of 1.00, frame 440
+vignette     : the edges of the view go dark (gentle), a snap turn, frame 772
+controllers  : the stick turn is refused while a dialog box is up (menu_stops_turn=1), frame 1121
+controllers  : a hold of the stick click of the other hand recenters the view, frame 1634
+head         : recentered on the next frame
+```
+
+The report of a window counts the times that the vignette came, the steps
+among them and the eye passes that drew it, and the pushes that a dialog box
+refused and the recenters.
 
 ## 6. The Hand
 
@@ -1293,8 +1399,10 @@ box closes, the direct hand comes back on the same frame.
 
 All in `[bwvr]`. The launcher has the play mode, the grab row, the two rows
 of the zoom and the row of the walk with the stick. The keys of the teleport
-are in section 14.6, the keys of the grab are in section 5.6, and the keys of
-the walk with the stick are in section 5.7.
+are in section 14.6, the keys of the grab are in section 5.6, the keys of
+the walk with the stick are in section 5.7, and the keys of the comfort of a
+move (the vignette, the stick in a dialog box and the recenter hold) are in
+section 5.8.
 
 | Key | Default | Meaning |
 | --- | --- | --- |

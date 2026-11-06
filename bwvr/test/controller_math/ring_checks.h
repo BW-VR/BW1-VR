@@ -70,9 +70,9 @@ inline void RingChecks() {
     Check(bad == 0 && items[4] == kItemMore,
           "the second page is known too, with More in the same slot", bad, 0);
     Check(items[0] == kItemPlaces && items[1] == kItemSnapshot &&
-              items[2] == kItemNone && items[3] == kItemPause,
+              items[2] == kItemRecenter && items[3] == kItemPause,
           "page 2 has the panel of places at the top, the snapshot beside it "
-          "and a free slot", items[0], kItemPlaces);
+          "and the recenter", items[0], kItemPlaces);
     bad = ParseItems(kDefaultPage2Marks, items, unknown, sizeof(unknown));
     Check(bad == 0 && items[0] == kItemMarkSet && items[1] == kItemMarkGo &&
               items[2] == kItemMarkBack && items[4] == kItemMore,
@@ -85,6 +85,10 @@ inline void RingChecks() {
     bad = ParseItems(kDefaultTemple, items, unknown, sizeof(unknown));
     Check(bad == 0 && items[4] == kItemLeave && items[7] == kItemNone,
           "the ring of the Temple has the way out at the bottom", bad, 0);
+    bad = ParseItems("recenter", items, unknown, sizeof(unknown));
+    Check(bad == 0 && items[0] == kItemRecenter &&
+              kItemInfo[kItemRecenter].how == kHowRecenter,
+          "the item recenter is known, and it is no key of the game", bad, 0);
     bad = ParseItems(" pause , ,help,nonsense,,", items, unknown,
                      sizeof(unknown));
     Check(bad == 1 && strcmp(unknown, "nonsense") == 0,

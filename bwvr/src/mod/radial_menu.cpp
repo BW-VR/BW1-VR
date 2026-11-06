@@ -828,6 +828,9 @@ ItemNow StateOf(int item, const Facts& f) {
     if (SnapshotBusy()) no(L"A snapshot saves now", "a snapshot saves now");
     return now;
   }
+  // The recenter is no key of the game, so each gate of the game keys lets
+  // it act.
+  if (info.how == kHowRecenter) return now;
   if (f.game == nullptr) {
     no(L"No game runs now", "no game runs");
     return now;
@@ -1002,6 +1005,10 @@ bool Choose(int item, const Facts& f, const ItemNow& now) {
       }
       break;
     }
+    case kHowRecenter:
+      ++g_choices;
+      ControllersRecenter("the item \"recenter\" of the ring");
+      return true;
     case kHowMarkSet: {
       const int index = MarkToSet(f.mark, g_last_mark);
       g_last_mark = index;

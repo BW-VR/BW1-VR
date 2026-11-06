@@ -157,6 +157,8 @@ want.
     the height of your ears and not below, a sea that turns with the view, a
     sound hard in one ear, a sound that lags a fast turn, a click or a cut, a
     loop that stops, or a cue that is too loud.
+27. **The sea at the coast.** Look at a beach near and far. Wrong: water
+    with no depth, a coast that flickers, or a seam where land meets water.
 
 ## Play as normal and send the log
 

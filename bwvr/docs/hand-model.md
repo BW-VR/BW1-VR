@@ -872,10 +872,13 @@ test ALWAYS (`0x0087A26D`) and no depth write (`0x0087A294`). The scanline
 sea of the flat game is the one layer of the water in screen space, and
 the mod does not use it in the God view. It has a swell and a fade with
 the distance, and nothing in it reacts to a thing in the water. So no
-layer that shows a thing in the water is missing in the VR picture. The
-sea writes no depth, and the land draws after it. So a finger under the
-plane of the sea is in front of the sea in the picture, and it shows as in
-the air. The hands of the mod draw at the end of the frame
+layer that shows a thing in the water is missing in the VR picture. With
+`sea_depth=1` the sea draws after the land with the depth test, and the
+land of the sea goes under the plane of the sea, down to 2.68 units
+(backend.md, "The sea with depth"). The sea writes no depth, and the hands
+draw after it. So a finger under the plane of the sea is in front of the
+sea in the picture, down to the land under the water. The hands of the mod
+draw at the end of the frame
 (`LH3DRender::FinishFrame`), with the depth test against the land and the
 objects.
 

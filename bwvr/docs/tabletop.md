@@ -388,7 +388,7 @@ and `table_center_x` and `table_center_z` replace the fit.
 | Source | Evidence |
 | --- | --- |
 | The sky dome, `LH3DSky::Draw` `0x0086B010`, placed once at (2560, 0, 2560) with scale 5, a sphere with a radius of about 240000 units. It sets `ZFUNC` to `ALWAYS` and draws the moon, the dome and the sun disc | [V]. Its only caller is a tail `jmp` at `0x005E2233` [V] |
-| The sea, drawn first as a background with `ZFUNC ALWAYS` and no depth write | `0x005E4E8C` calls the water before the land at `0x005E4E96` [V] |
+| The sea, drawn first as a background with `ZFUNC ALWAYS` and no depth write. With `sea_depth=1` it draws after the land with the depth test (backend.md, "The sea with depth") | `0x005E4E8C` calls the water before the land at `0x005E4E96` [V] |
 | Blocks past the radius, and the flat part of blocks on the edge. Cells with an altitude byte of 3 or less draw flat at y 0 | [V] |
 | Map objects on those blocks | they come from the listed blocks [V] |
 | Clouds and ground mist, `GWeather::DrawClouds` `0x0083FC90` and `LH3DMist::Draw` `0x007FA300`. They hang 300 to 500 units up, which is 15 to 25 cm over the table | [V] for the functions, [M, `sky_detail.cpp`] for the height |

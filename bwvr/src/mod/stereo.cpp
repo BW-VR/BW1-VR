@@ -143,6 +143,7 @@ void HeadCameraReport();
 void HeadCameraWorldIsUp();
 void SnapshotGuardReport();
 void WaterModeApply();
+void SeaDepthReport();
 void UiDepthCycleSubtitleDegrees();
 void HeadCameraSetHandAnchored(bool on);
 bool HeadCameraHandAnchored();
@@ -2062,6 +2063,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     GpuBridgeReport(g_timed_now);
     OneWalkReport(g_timed_now);
     PassGuardReport();
+    SeaDepthReport();
     FileReadAheadReport();
     FrameTimersReport(g_frames);
     FrameTimeReport();

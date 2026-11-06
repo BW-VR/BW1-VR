@@ -121,6 +121,10 @@ int OneWalkMarksValue();
 void OneWalkMarksToggle(const char* by);
 int LandLightEyesValue();
 void LandLightEyesChange(const char* by);
+int SeaDepthValue();
+void SeaDepthChange(const char* by);
+int SeaClearValue();
+void SeaClearChange(const char* by);
 int VkSceneEyesValue();
 void VkSceneEyesToggle(const char* by);
 int VkSceneKeepPictureValue();
@@ -416,6 +420,10 @@ const Switch kSwitches[] = {
     {kGroupPicture, L"Land light", L"Lights of the land in both eyes",
      "land_light_eyes", LandLightEyesValue, LandLightEyesChange,
      L"left eye|both eyes"},
+    {kGroupPicture, L"Sea depth", L"Land cuts the sea at the water line",
+     "sea_depth", SeaDepthValue, SeaDepthChange, L"plain|depth"},
+    {kGroupPicture, L"Sea clear", L"Floor fades into the deep sea",
+     "sea_clear", SeaClearValue, SeaClearChange, L"game|fade"},
     {kGroupPicture, L"Advisor size", L"Advisor size at a world place",
      "spirit_world_size", SpiritAnchorWorldSizeValue,
      [](const char*) { SpiritAnchorWorldSizeToggle(); },
@@ -761,6 +769,12 @@ const wchar_t* const kTips[] = {
     // Land light
     L"A light on the land that comes one time a frame, such as the light of a "
     L"lightning. It shows in both eyes, or in the left eye only.",
+    // Sea depth
+    L"Depth: the sea draws after the land with the depth test, so the land "
+    L"cuts it at the water line in each eye. Plain: the sea of the game.",
+    // Sea clear
+    L"Fade: the land under the water near the coast fades out with its "
+    L"depth. Game: the game cuts it at one line.",
     // Advisor size
     L"An advisor at a place of the world. Near size: the size that it has for "
     L"the eye at its usual place. Game: the size of the game.",

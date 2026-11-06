@@ -2020,7 +2020,7 @@ release of the button on it chooses it, as on `places`.
 | --- | --- |
 | The tabs at the left | One for each group: View, Picture, Render, Interface, Hand, Throw, Creature, Sound, Temple. A press shows the switches of the group. The tab of the group that shows is bright gold |
 | A row with a toggle | A switch with two values. The word of the value, and a slot with a knob of wax: green at the right for the value 1, red at the left for 0. A press anywhere on the row changes it |
-| A row with two arrows | A switch with more values, or with a number. The right arrow makes the step of the test key. The left arrow makes a step back for "Throw speed" and "Land speed". For each other switch the left arrow makes the same step as the right arrow, because the change function of a test key steps one way only, and many of them go between the value of the ini and one other value |
+| A row with two arrows | A switch with more values, or with a number. The right arrow makes the step of the test key. The left arrow makes a step back for "Throw speed", "Land speed" and "Video height". For each other switch the left arrow makes the same step as the right arrow, because the change function of a test key steps one way only, and many of them go between the value of the ini and one other value |
 | A dim row | A switch that cannot change now (its part is off, its hook is not in, or it is for the other renderer). It says "not now", and a press gives the pulse `refused` |
 | The scroll bar | When the group has more than 10 rows. The ray drags the thumb, and a press on the track goes one view up or down. While the ray is on the window, the stick of the pointing hand forward and back scrolls the list, and it does not zoom then (5.1) |
 | The note | When the ray rests on a row for 0.35 s, a small note of paper shows the name of the switch, what it does, and its ini key |
@@ -2033,9 +2033,10 @@ the trigger belongs to it, as for the panel of places (`ui-layer.md`,
 22.3). The next time, the window opens on the same group at the same row.
 
 "Throw slower" and "Throw faster" are two switches of the ring with one ini
-key, and so are "Land slower" and "Land faster". The window has one row for
-each pair, "Throw speed" and "Land speed", with the slower step on the left
-arrow. The table marks the slower line as a line of the ring only.
+key, and so are "Land slower" and "Land faster", and "Video higher" and
+"Video lower". The window has one row for each pair, "Throw speed", "Land
+speed" and "Video height", with the slower step (or the higher area) on the
+left arrow. The table marks that line as a line of the ring only.
 
 **The debug pages of the ring** (`debug_window=0`). A link item goes to its
 page after 0.45 s with the hand on it, or at once with the trigger, as

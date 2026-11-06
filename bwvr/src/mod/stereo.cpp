@@ -207,6 +207,10 @@ void InfluenceEdgeReport();
 // vignette.cpp: the comfort vignette. See docs/god-view.md, "The comfort of
 // a move".
 void VignetteFrame();
+// video_view.cpp: the view for videos.
+void VideoViewHead(const float orientation[4]);
+void VideoViewFrame();
+void VideoViewReport();
 void VignettePassEye(int eye);
 void VignetteReport();
 // teleport.cpp: the teleport with a visible arc. See docs/god-view.md.
@@ -1340,6 +1344,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     float fake_orientation[4];
     HeadPoseFakeEye(0, fake_position, fake_orientation);
     HeadPoseUpdate(centre, fake_orientation);
+    VideoViewHead(fake_orientation);
     // The subtitle card hangs in the room, so it needs the head of the frame.
     UiPanelHead(centre, fake_orientation);
     MenuRoomHead(centre, fake_orientation);
@@ -1369,6 +1374,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
         g_screen->SetRenderPose(e, g_rendered_position[e],
                                 g_rendered_orientation[e]);
       }
+      // The view for videos takes the head that the pictures are drawn from.
+      VideoViewHead(g_rendered_orientation[0]);
     }
     // DECLARE A POSE THE PICTURE COULD HAVE COME FROM.
     //
@@ -1524,6 +1531,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   FrameFunction(kFpFnWater, WaterModeApply);
   FrameFunction(kFpFnTable, TabletopApplyFrame);
   VignetteFrame();
+  VideoViewFrame();
   FrameTimeBeforePasses();
   EyeCleanBeginPair();
   g_in_pass = true;
@@ -2105,6 +2113,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     OverlayReport();
     InfluenceEdgeReport();
     VignetteReport();
+    VideoViewReport();
     TeleportReport();
     CreatureCommandReport();
     MiracleReport();

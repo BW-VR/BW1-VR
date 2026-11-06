@@ -102,6 +102,7 @@ add_library(bwvr_mod SHARED
     overlay.cpp
     influence_edge.cpp
     vignette.cpp
+    video_view.cpp
     teleport.cpp
     world_grab.cpp
     tabletop.cpp

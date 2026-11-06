@@ -69,6 +69,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/address_space.cpp`, `address_space_math.h` | The address space of the process in the log |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
+| `src/mod/video_view.cpp`, `video_view_math.h` | The view for videos in the window of the game, and its corner marks in the headset (`video_view`) |
 | `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
 | `src/common/exe_check.h`, `version.h` | The build check and the product name |
 
@@ -3393,7 +3394,8 @@ With `vk_window=0` a frame was 2.3 ms.
 
 In a session in the headset the mod makes no copy to the monitor
 (`skip_desktop_present=1`, "The copy to the monitor"), so the window gets no
-present and no swapchain.
+present and no swapchain. With `video_view=1` the window gets the view for
+videos ("The view for videos").
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
@@ -3403,6 +3405,90 @@ Shift D changes it from the next present: a change to 0 takes the
 swapchain and the surface away, so GDI can draw into the window again. The
 report of each 450 frames has the presents through the swapchain and the
 presents with no free image.
+
+### The view for videos
+
+`video_view=1` (`video_view.cpp`, `video_view_math.h`) puts a 16:9 area of
+the left eye picture into the window of the game on the PC. A capture tool
+(OBS or a similar tool) records that window while the headset plays. The
+player of this game looks down most of the time, with the head and with the
+eyes. A capture of the headset records the middle of the view, so it cuts
+off what the player looks at. The area of this view can be lower.
+
+**The area.** Once a frame, before the eye passes, the mod latches the area
+of the frame. The area is `video_view_fov_deg` wide at the middle of the
+eye picture (90 degrees), with the shape 16:9. Its middle is
+`video_view_down_pct` percent of the height of the eye picture below the
+middle of the picture (20). The projection of the game (`InfoTransform`)
+gives the pixels of a tangent. An area that is too large for the picture
+becomes smaller. A move down that takes the area past the bottom is less.
+The marks of both eye passes and the window use the area of the frame.
+
+**The smoothed head.** A smoothed direction follows the forward direction
+of the head with the time constant `video_view_smooth_ms` (150 ms). The area
+moves in the eye picture to where that direction is, so it moves against a
+shake of the head. The smoothed direction stays within 3 degrees of the
+head, so a fast turn moves the video with the head. Only the video has the
+smoothing. The headset shows the eye pictures 1:1 with the head. The area
+cannot turn, so a roll of the head is in the video. The math test has a
+shake of 1 degree at 8 Hz (the video moves less than 0.2 degrees), a step
+of 20 degrees (the video lags by 3 degrees, and is on the head 1 s later)
+and a turn of 10 degrees a second (a lag of about 1.5 degrees).
+
+**The marks.** With `video_view_marks=1` (the default) the mod draws faint
+white corner marks around the area in each eye pass, after the vignette and
+before the interface of the game: two bars at each corner, 2 px thick and 1
+px more for each 1000 px of height, with an alpha of 0.35. The marks are
+fixed to the head. Their place is the area with no smoothing, grown by the
+largest move of the smoothing (3 degrees) and a gap of 3 px. So the marks do
+not move by themselves, and the area never has a mark in it. The vertices
+have rhw 1, as the vignette has, so one walk puts each mark at the same
+pixel in both eyes.
+
+**The window.** In a headset session the mod does not copy the frame to the
+window (`skip_desktop_present`, "The copy to the monitor"). With
+`video_view=1` and a swapchain of the window (`backend=vulkan`,
+`vk_window=1`) the copy goes out. `VkWindowPresent` clears the swapchain
+image to black and blits the area into the largest 16:9 rect in the middle
+of the client area, with a linear filter. The mod does not change the size
+of the window. A picture with no eye pass (a menu with no scene) goes into
+the same place with its own shape. With `test_frame_rate` the copy goes out
+too, and the frame then waits, as in a session. With dxwrapper the view does
+not show, and the log says so one time.
+
+**What is not in the video.** The quad layers of the headset are not in the
+eye pictures, so they are not in the video: the hint cards, the subtitle
+card, the ring, the keyboard, the bubble of a miracle, the panels of the
+interface (the menus, the help and the Creature panel) and the walls of the
+cut scene window. The Hand, the hands, the land, the speech bubbles and the
+names of the villagers are in the eye picture.
+
+**The cost.** The report of each 450 frames has the time of a present of
+the window on the frame thread and on the GPU (two timestamps in its command
+buffer). In a session this is the cost of the view, because with
+`video_view=0` the window gets no present. The marks are one draw of 48
+vertices in each eye pass.
+
+**The log and the pictures.** At the start, one line with the keys, and at
+the first frame one line with the size of the eye picture and of the area.
+A head that turns faster than the smoothing gives a line at the start and
+at the end of the lag. The report has the frames with the area, the area
+now and the largest lag. A frame that saves pictures also writes
+`bwvr-vk-video-N.bmp`: the area of the left eye at the pixels of the eye
+picture, as the window shows it.
+
+```
+video view   : video_view=1. The window of the game shows a 16:9 area of the left eye picture, ...
+video view   : the eye picture is W by H, the area is w by h at x, y (its middle N px below the middle of the picture), ...
+video view   : the head turns faster than the smoothing, the area is 3.00 degrees behind the head, frame N
+video view   : the area is on the head again (0.09 degrees) after N frames, frame M
+vk window    : N presents through the swapchain of the window (N of a part, for the view for videos), ... A present takes X ms on the frame thread and Y ms on the GPU
+```
+
+The launcher has the rows "View for videos" and "Video lower by"
+(`launcher.md`). With `debug_menu=1` the debug window has the switches
+"Video view", "Video marks" and the row "Video height", which moves the area
+5 percent up or down (`controllers.md`, 10.8).
 
 ### The fall back of the renderer Vulkan
 
@@ -5577,6 +5663,11 @@ keys that the launcher sets.
 | `profile_sample_dump` | 0 | A test key: 1 writes each sample of `profile_sample` with the modules to `bwvr-samples.txt` beside `runblack.exe`. See "Where the time of the scene walk goes" |
 | `one_walk_marks`, `one_walk_marks_test_frame` | 1, 0 | See "The cards and the marks of the mod" |
 | `skip_desktop_present` | 1 | See "The copy to the monitor" |
+| `video_view` | 0 | 1: with `backend=vulkan` the window of the game shows a 16:9 area of the left eye picture, also in a headset session. 0: the window shows the whole left eye picture, and a session does not copy it to the window. The switch "Video view" of the debug page. See "The view for videos" |
+| `video_view_down_pct` | 20 | The middle of the area is this many percent of the height of the eye picture below its middle, 0 to 40. The row "Video height" of the debug window. See "The view for videos" |
+| `video_view_fov_deg` | 90 | The width of the area in degrees at the middle of the eye picture, 40 to 110. See "The view for videos" |
+| `video_view_smooth_ms` | 150 | The time constant of the smoothed head of the video, 0 to 1000. 0: the area follows the head with no smoothing. See "The view for videos" |
+| `video_view_marks` | 1 | 1: faint corner marks in the eye pictures show the area in the headset. 0: no marks. The switch "Video marks" of the debug page. See "The view for videos" |
 | `blt_texture_copy` | 1 | 1: the mod makes a copy with a texture and no stretch itself. 0: each copy goes to dxwrapper. See "The copy to the monitor" |
 | `test_frame_rate` | 0 | A test key of the desktop runs: the frame rate of a run with no copy to the monitor. See "The copy to the monitor" |
 | `anisotropy`, `force_mips` | 16, 1 | Texture filter. `force_mips` forces the mip filter |

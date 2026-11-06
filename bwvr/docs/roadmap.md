@@ -360,15 +360,18 @@ that moves while the Hand takes it.
   choose a gesture for each control: the grip, the trigger, the stick, and
   A, B, X and Y. The rules of the Hand stay: the real hand, one to one, and
   no motion that the player did not make.
-- **P7. A view for videos.** A 16:9 view in the game window for a capture
-  on the PC, so the owner records in the game and not through the headset.
-  It has the cards and the subtitles in it and a smoothed head. In the
-  headset, faint corner marks show the area that the video records. The
-  player can move that area up and down: the player of this game looks
-  down most of the time, with the head and with the eyes, so a capture of
-  the middle of the view cuts off what the player looks at. A key sets the
-  height (for example 20 percent of the height down from the middle as the
-  default), and a control in the game moves it.
+- **P7. A view for videos** (`video_view`, `backend.md`, "The view for
+  videos"). Open:
+  - The quad layers of the headset are not in the video: the hint cards,
+    the subtitle card, the ring, the keyboard, the bubble of a miracle and
+    the panels of the interface. They need a draw with blend into the
+    picture of the window: a small pipeline in `vk_window.cpp` (RenderDoc
+    has `glslangValidator` for its shaders).
+  - The height changes in the game only on the debug window ("Video
+    height"). A row of a settings panel or of the ring is not built.
+  - With dxwrapper the view does not show.
+  - No headset session has run it. The cost in a session is in the line
+    `vk window` of the report.
 - **P9. The pointer on the interface panel**, and the screens with no
   scene (menus, loading, videos) on a panel in the room (`ui-layer.md`).
 - **P10. The tabletop mode** (play mode 3) is a test mode, on hold. Not built: a

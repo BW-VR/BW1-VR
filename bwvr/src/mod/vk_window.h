@@ -35,8 +35,15 @@ int VkWindowValue();
 // presents it. False when the picture did not go to the window: then the
 // caller takes the way through the CPU. True also for a present that the
 // swapchain had no image for: the window keeps the picture before.
+//
+// THE VIEW FOR VIDEOS (video_view.h). `part`: null for the whole picture,
+// else the part of it (x0, y0, x1, y1 from 0 to 1). `aspect`: 0 for the
+// whole client area. Above 0: the largest rect of that shape (width over
+// height) in the middle of the client area, with black around it. Below 0:
+// the same with the shape of the part.
 bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
-                     uint32_t height);
+                     uint32_t height, const float* part = nullptr,
+                     float aspect = 0.0f);
 
 // The swapchain and the surface go, and GDI can draw into the window again.
 // A later present makes them again.

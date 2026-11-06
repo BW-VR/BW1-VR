@@ -197,6 +197,9 @@ void ComfortCameraSetSpawnTests(int temple_update, int x, int z, int flag,
 void ComfortCameraInstall();
 // vignette.cpp: comfort_vignette.
 void VignetteSetMode(int mode);
+// video_view.cpp: the view for videos (video_view.h).
+void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
+                         int marks);
 void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
                             int close_distance, int close_zoom_pct,
                             int cut_degrees, int cut_percent,
@@ -427,6 +430,9 @@ bool g_camera_glide = false;
 int g_blink_ms = 0;
 // The comfort vignette: 0 off, 1 gentle, 2 strong (vignette.cpp).
 int g_comfort_vignette = 0;
+// The view for videos (video_view.cpp): video_view, video_view_down_pct,
+// video_view_fov_deg, video_view_smooth_ms and video_view_marks.
+int g_video_view[5] = {0, 20, 90, 150, 1};
 int g_zoom_step = 2;  // 0 the game's own, 1 small, 2 medium, 3 large
 // The turn events of a snap turn for the tutorial, and the turn of the game
 // camera about its own focus (comfort_camera.cpp).
@@ -1092,6 +1098,18 @@ void ReadSettings() {
   g_cursor_trace = GetPrivateProfileIntA("bwvr", "cursor_trace", 0, path) != 0;
   g_window_w = GetPrivateProfileIntA("bwvr", "window_width", 0, path);
   g_window_h = GetPrivateProfileIntA("bwvr", "window_height", 0, path);
+  // THE VIEW FOR VIDEOS (docs/backend.md, "The view for videos"): a 16:9
+  // area of the left eye in the window of the game, for a capture on the PC.
+  {
+    const char* const keys[5] = {"video_view", "video_view_down_pct",
+                                 "video_view_fov_deg", "video_view_smooth_ms",
+                                 "video_view_marks"};
+    const int defaults[5] = {0, 20, 90, 150, 1};
+    for (int i = 0; i < 5; ++i) {
+      g_video_view[i] = static_cast<int>(
+          GetPrivateProfileIntA("bwvr", keys[i], defaults[i], path));
+    }
+  }
   // Off is the control for the anchor test: the Hand should then move
   // when the head turns, which is what makes the test mean something.
   g_hand_anchored =
@@ -1832,6 +1850,8 @@ void StartVrStep() {
                              g_tilt_help_degrees);
     ComfortCameraInstall();
     VignetteSetMode(g_comfort_vignette);
+    VideoViewSetOptions(g_video_view[0], g_video_view[1], g_video_view[2],
+                        g_video_view[3], g_video_view[4]);
     ScriptCameraSetOptions(g_script_camera, g_script_min_distance,
                            g_script_min_height, g_script_close_distance,
                            g_script_close_zoom, g_script_cut_degrees,

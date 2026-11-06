@@ -3588,6 +3588,7 @@ void CreatureChecks() {
 #include "refresh_rate_checks.h"
 #include "menu_room_checks.h"
 #include "comfort_checks.h"
+#include "video_view_checks.h"
 #include "glow_checks.h"
 #include "places_checks.h"
 #include "debug_window_checks.h"
@@ -4004,6 +4005,7 @@ int main() {
   one_walk_checks::OneWalkChecks();
   walk_checks::WalkChecks();
   comfort_checks::ComfortChecks();
+  video_view_checks::VideoViewChecks();
   blt_copy_checks::BltCopyChecks();
   read_ahead_checks::ReadAheadChecks();
   save_store_checks::SaveStoreChecks();

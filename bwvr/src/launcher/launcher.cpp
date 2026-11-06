@@ -228,6 +228,18 @@ const Setting kSettings[] = {
      "plays all around you, and the camera of the game moves you with all "
      "its motion. Choose it only if a camera that moves is no problem for "
      "you. A video of the game always plays on the screen."},
+    {kBool, "video_view", "View for videos", nullptr, 0,
+     "The game window on the PC shows a 16:9 part of the view of your left "
+     "eye, so that OBS or a different capture tool can record it while you "
+     "play in the headset. The video turns smoothly when your head shakes. "
+     "Faint corner marks in the headset show the part that the video "
+     "records, and the video does not show them. Cards, the subtitles, the "
+     "ring and the menu panels are not in the video. It needs the Vulkan "
+     "renderer. It costs a little frame time."},
+    {kSlider, "video_view_down_pct", "Video lower by", "0|40|5|%", 20,
+     "How far the middle of the video is below the middle of your view, as "
+     "a percentage of the height of the view. In this game you look down "
+     "most of the time, so the default is 20%. 0% is the middle."},
 
     // Not offered: the sizes and the depth of the interface in the eye
     // pictures have settled defaults. With controllers the hints and the

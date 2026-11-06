@@ -90,6 +90,7 @@ namespace vk {
   X(vkCmdCopyBufferToImage)           \
   X(vkCmdCopyImageToBuffer)           \
   X(vkCmdBlitImage)                   \
+  X(vkCmdClearColorImage)             \
   X(vkCmdBeginRendering)              \
   X(vkCmdEndRendering)                \
   X(vkCmdBindPipeline)                \

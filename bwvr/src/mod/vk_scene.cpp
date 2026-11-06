@@ -116,6 +116,7 @@
 #include "vk_scene.h"
 #include "vk_window.h"
 #include "vk_fallback.h"
+#include "video_view.h"
 #include "../common/bw_addresses.h"
 #include "fovea_res_math.h"
 #include "foveation_math.h"
@@ -149,6 +150,9 @@ bool g_direct = false;
 // small copy of it that the CPU reads.
 int g_present_index = 0;
 bool g_present_ready = false;
+// The picture of the window is the left eye of an eye pass (the view for
+// videos takes a part of it, video_view.h).
+bool g_present_from_eye = false;
 bool g_failed = false;
 bool g_ready = false;
 
@@ -1652,10 +1656,15 @@ bool Ready() {
 
 // Writes one layer of an image (an eye or the panel) to a file of 24 bits,
 // bottom up. `what` is the word in the name of the file.
+// rx, ry, rw and rh: a part of the image, or rw 0 for all of it.
 void WritePicture(const vk::Image& image, uint32_t layer, const char* what,
                   uint64_t frame,
-                  VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-  const uint32_t w = image.width, h = image.height;
+                  VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  int32_t rx = 0, int32_t ry = 0, uint32_t rw = 0,
+                  uint32_t rh = 0) {
+  const bool part = rw > 0 && rh > 0;
+  const uint32_t w = part ? rw : image.width;
+  const uint32_t h = part ? rh : image.height;
   vk::Buffer read;
   if (!vk::MakeBuffer(static_cast<VkDeviceSize>(w) * h * 4,
                       VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, &read)) {
@@ -1666,6 +1675,7 @@ void WritePicture(const vk::Image& image, uint32_t layer, const char* what,
               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, image.layers);
   VkBufferImageCopy copy = {};
   copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1};
+  if (part) copy.imageOffset = {rx, ry, 0};
   copy.imageExtent = {w, h, 1};
   f.vkCmdCopyImageToBuffer(cb, image.image,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, read.buffer,
@@ -3162,6 +3172,7 @@ void EndOnWorker(const void*) {
   if (StereoPassEye() <= 0) {
     g_present_index = g_target;
     g_present_ready = true;
+    g_present_from_eye = StereoPassEye() == 0;
   }
   if (g_panel_drawn) {
     g_panel_index = g_target;
@@ -3172,6 +3183,25 @@ void EndOnWorker(const void*) {
     f.vkWaitForFences(vk::Get().device, 1, &s.fence, VK_TRUE, UINT64_MAX);
     WritePicture(Target(), 0, "left", g_picture_frame);
     WritePicture(Target(), 1, "right", g_picture_frame);
+    // THE VIEW FOR VIDEOS: the part of the left eye that the window shows,
+    // at the pixels of the eye picture.
+    float part[4];
+    float shape = 0.0f;
+    if (StereoPassEye() == 0 && VideoViewWindow(true, part, &shape)) {
+      const vk::Image& t = Target();
+      const int32_t x0 = static_cast<int32_t>(part[0] * t.width + 0.5f);
+      const int32_t y0 = static_cast<int32_t>(part[1] * t.height + 0.5f);
+      const int32_t x1 = static_cast<int32_t>(part[2] * t.width + 0.5f);
+      const int32_t y1 = static_cast<int32_t>(part[3] * t.height + 0.5f);
+      if (x0 >= 0 && y0 >= 0 && x1 > x0 && y1 > y0 &&
+          x1 <= static_cast<int32_t>(t.width) &&
+          y1 <= static_cast<int32_t>(t.height)) {
+        WritePicture(t, 0, "video", g_picture_frame,
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, x0, y0,
+                     static_cast<uint32_t>(x1 - x0),
+                     static_cast<uint32_t>(y1 - y0));
+      }
+    }
     if (g_panel_drawn) {
       WritePicture(g_panels[g_target], 0, "panel", g_picture_frame);
     }
@@ -4145,6 +4175,15 @@ void VkSceneKeepPictureToggle(const char* keys) {
 
 bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height) {
   if (!g_ready || !g_present_ready) return false;
+  // THE VIEW FOR VIDEOS (video_view.h): a part of the picture in a 16:9
+  // rect of the window.
+  float part[4];
+  float shape = 0.0f;
+  if (VideoViewWindow(g_present_from_eye, part, &shape)) {
+    return VkWindowPresent(static_cast<HWND>(window),
+                           g_colors[g_present_index], width, height, part,
+                           shape);
+  }
   return VkWindowPresent(static_cast<HWND>(window), g_colors[g_present_index],
                          width, height);
 }

@@ -101,6 +101,11 @@ calls it. It keeps these rules, and a new script must keep them too:
   the test key `hint_counts_test_file` with a file in the folder of the run,
   and deletes that file before the run. So a run starts with no counts, and
   it does not write the file of the player.
+- The settings window of the mod writes `bwvr.ini` (`ui-layer.md`, 24).
+  `desk_test.ps1` keeps the ini as the run left it as `bwvr.ini.run` in the
+  folder of the run, and then puts the ini of the player back. Each run has
+  `welcome_done=1`, so the welcome page does not show. A run of the welcome
+  page gives `welcome_done=0`.
 - The tools never write the registry. A run starts `runblack.exe` directly,
   not the launcher. The game writes its own values there. In its start it
   writes the values of the profile that it read, so each value stays the

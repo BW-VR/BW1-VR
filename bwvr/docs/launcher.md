@@ -60,6 +60,17 @@ There are eight kinds of row:
 | `kSlider` | A slider with a value of its own. Its spec is the low value, the high value, the step and the unit, with a bar between them. Its label says the value and the unit. | The value, on the step. |
 | `kRenderer` | A list: Vulkan, Direct3D 9. | `backend` as text: `vulkan` or `dxwrapper\ddraw.dll` (see "Performance"). |
 
+## The settings window in the headset
+
+The mod has a window of the most used settings in the headset
+(`ui-layer.md`, 24). It writes the same keys into `bwvr.ini` in the same
+form: the value as a number, in the section `[bwvr]`. So the launcher shows
+a change of the headset the next time it opens, and a save of the launcher
+keeps the keys that it does not offer (`recenter_hold`, `teleport`,
+`move_stick_speed_cm`, `subtitle_card`, `welcome_done`). The test keys
+`welcome_test_save` and `welcome_test_parts` go with each save, as the other
+test keys do.
+
 ## What it does besides editing
 
 Every save also writes these:

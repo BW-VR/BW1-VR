@@ -1724,6 +1724,7 @@ key buffer of the game.
 | `leave` | Leave the Temple, or back to the hall | Esc |
 | `recenter` | Recenter the view | No key: the view recenters as F11 does, and both hands get a pulse (`ControllersRecenter`). It acts also where the game takes no key. Slot 2 of page 2 has it with `places_panel=1` |
 | `more` | More | The other page |
+| `settings` | The settings window | Opens the settings window (`ui-layer.md`, 24). An empty slot with `settings_panel=0` |
 | `debug` | The debug page | Opens the debug window, or with `debug_window=0` goes to the first page of the debug page (10.8). An empty slot with `debug_menu=0` |
 | `back` | Back | The page before, on a page of the debug page |
 | `none` | An empty slot | |
@@ -1733,8 +1734,9 @@ The rings by default, from the top and clockwise:
 | Ring | Items |
 | --- | --- |
 | Page 1 (`radial_menu_items`) | `temple`, `creature`, `town`, `leash_learning`, `more`, `leash_compassion`, `leash_aggression`, `enter` |
-| Page 2 (`radial_menu_items2`) | `places`, `snapshot`, `recenter`, `pause`, `more`, `help`, `names`, `save` |
-| Page 2 with `places_panel=0` | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `names`, `save` |
+| Page 2 (`radial_menu_items2`) | `places`, `snapshot`, `recenter`, `pause`, `more`, `help`, `settings`, `save` |
+| Page 2 with `places_panel=0` | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `settings`, `save` |
+| Page 2 with `settings_panel=0` | The same, with `names` in place of `settings` |
 | In the Temple (`radial_menu_items_temple`) | `hall`, `room_creature`, `room_challenge`, `room_save`, `leave`, `room_options`, `room_library`, `none` |
 
 The order is how often a player needs an item: the Temple at the top, the
@@ -1742,7 +1744,8 @@ moves of the view on the right, the leashes at the bottom. On page 2 the
 panel of places is at the top, because players did not find the bookmarks
 on the ring. The panel has all the moves to a place and each function of a
 bookmark, so page 2 needs no bookmark item. Slot 2 of page 2 has the
-recenter. The ring of the
+recenter, and slot 6 has the settings window. A player who wants the names
+of the villagers on the ring gives `names` a slot with `radial_menu_items2`. The ring of the
 Temple shows by itself while the player is in the Temple (`GGame + 0x205A28`).
 
 **An item that cannot act now is dim,** and the card in the middle says why:
@@ -1862,6 +1865,8 @@ first time.
 | `hint_card_style` | 1 | The key of the hint cards (`controller-hints.md`, 9.5). 1 each item is a wax seal and the card in the middle is a parchment scroll. 0 dark round boxes with white letters (10.4). The launcher row "Card look" |
 | `places_panel` | 1 | 1 page 2 as made has the item `places`, which opens the panel of places. 0 page 2 as made has `mark_set`, `mark_go` and `mark_back`, and the word `places` is an empty slot |
 | `snapshot_item` | 1 | 1 the item `snapshot` saves a snapshot for a report (10.9). 0 the word `snapshot` is an empty slot |
+| `settings_panel` | 1 | 1 page 2 as made has the item `settings`, which opens the settings window (10.10). 0 page 2 as made has `names`, and the word `settings` is an empty slot |
+| `welcome_page` | 1 | 1 the welcome page shows at the first start, while `bwvr.ini` has no `welcome_done=1` (10.10). 0 it never shows |
 | `radial_test_save` | 0 | A test key: the mod saves the first N pictures of the ring as `bwvr-ring-NNNNN.bmp` |
 | `snapshot_test_dir` | | A test key: the snapshots go into this folder, and not into `bwvr\captures` of the game folder |
 | `debug_menu` | 0 | 1 puts the item `debug` on the ring (10.8). The launcher row "Debug menu" in the group "Testing" |
@@ -2174,6 +2179,19 @@ after the thread started the folder had `shared-left.png` and
 2880) and `bwvr.log`. With `backend=vulkan` the folder had `vk-left.png`
 and `vk-right.png` and the pictures of the hint cards. Only a headset shows
 the files of a session (`eye` and `xr`) and the note on the card.
+
+### 10.10 The settings window and the welcome page
+
+The item `settings` of page 2 opens the settings window: the debug window of
+10.8 with the settings that a player changes most, in the words of the
+launcher, in three tabs (Moving, Hands, Cards). A change writes its key into
+`bwvr.ini` at once, and most settings act at once. The welcome page shows one
+time, at the first start: two lines about the mod, three controls, and the
+buttons Settings and Play. The ray and the trigger of the pointing hand, B
+and the menu button work as on the debug window, and the word `aimdebug` of
+the scripted controller aims at the parts of the window that is open
+(`debug_test_parts`), or at the buttons of the welcome page
+(`welcome_test_parts`). See `ui-layer.md`, section 24.
 
 ## 11. The Temple
 

@@ -437,11 +437,9 @@ keeps the mod as it is.
   not turn then: a desktop run with `snap_turn=0` showed the same view before
   and after a push of the stick and a hold of the turn key (`god-view.md`,
   section 4). A smooth turn of the God view with the stick is not built.
-- **F11. Settings in the headset, and the controls of the player.**
-  - A panel of the most used settings (turn, teleport, vignette, main hand,
-    move speed, recenter) that saves to `bwvr.ini`. The same panel shows
-    one time at the start of a new game, as a welcome page.
-  - Later, a page to change the controls. The mod finds which controllers
+- **F11. The controls of the player in the headset.** The settings window
+  and the welcome page are in (`ui-layer.md`, 24). Open:
+  - A page to change the controls. The mod finds which controllers
     the player has (the interaction profile that OpenXR gives,
     `controller-hints.md`), draws a diagram of those controllers, lists each
     button with its action, and lets the player give a button a different

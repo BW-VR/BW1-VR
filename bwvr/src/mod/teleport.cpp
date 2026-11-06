@@ -642,6 +642,17 @@ void TeleportRingChange(const char* by) {
   LogRuleMode(by);
 }
 
+// The settings window (settings_panel.cpp): teleport at once. With 0 the
+// press of A goes to the game again.
+bool TeleportSetOn(bool on, const char* by) {
+  if (!g_installed) return false;
+  g_settings.on = on;
+  ModLog("teleport     : %s: teleport=%d. %s", by, on ? 1 : 0,
+         on ? "Hold A to aim an arc, and let go of A to go to the ring"
+            : "A does the jump of the game");
+  return true;
+}
+
 int TeleportRingValue() {
   if (!g_installed || !g_settings.on) return kDebugCannot;
   return g_settings.ring_mode;

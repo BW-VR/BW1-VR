@@ -1,15 +1,54 @@
 // The debug window: the switches of the debug page (debug_menu.cpp) in a
 // window of parchment, fixed in the room in front of the player. The item
 // "debug" of the ring opens it with debug_window=1, and the ray and the
-// trigger of the pointing hand change its switches. See debug_window.cpp,
+// trigger of the pointing hand change its switches. The settings window
+// (settings_panel.cpp) is the same window with the settings of the player. See debug_window.cpp,
 // docs/controllers.md, "The debug window", and docs/ui-layer.md, "The debug
 // window".
 
 #pragma once
 
+// THE ROWS of the window. The window shows one list at a time: the switches
+// of the debug page (debug_menu.cpp), or the settings of the player
+// (settings_panel.cpp). The layout, the parts, the bake and the closes are
+// the same for each list.
+struct WindowRows {
+  int slot;              // 0 the debug switches, 1 the settings: the copies
+                         // of the parts of each list are kept apart
+  const char* tag;       // the start of each log line, 13 letters
+  const wchar_t* title;  // at the top of the window
+  const wchar_t* idle;   // the bottom row while no change shows
+  int (*groups)();
+  const wchar_t* (*group_name)(int group);
+  int (*count)();
+  int (*group)(int i);
+  bool (*in_window)(int i);
+  const wchar_t* (*label)(int i);  // the label of the row
+  const wchar_t* (*name)(int i);   // the first line of the note
+  const wchar_t* (*tip)(int i);    // what it does
+  // The last line of the note: the ini key, and when a change acts.
+  void (*last_line)(int i, wchar_t* out, int size);
+  int (*value)(int i);  // the value now, or kDebugCannot
+  int (*value_count)(int i);  // the words of the values, 0 for a number
+  void (*value_text)(int i, int value, wchar_t* out, int size);
+  bool (*step)(int i, bool back);  // false when it cannot change now
+  // Small words under the label of the row, for example "at the next
+  // start", or null. The bottom row adds them after a change.
+  const wchar_t* (*row_note)(int i);
+};
+const int kWindowSlots = 2;
+
 // radial_menu.cpp, at the choice of the item "debug": the window opens in
-// front of the head. False when the head has no pose yet.
+// front of the head with the debug switches. False when the head has no
+// pose yet.
 bool DebugWindowOpenFromRing();
+
+// The window opens in front of the head with the rows of `rows`. An open
+// window changes to those rows. False when the head has no pose yet.
+bool DebugWindowOpenWith(const WindowRows* rows);
+
+// The rows that show now, or null when the window is closed.
+const WindowRows* DebugWindowRows();
 
 // True while the window is open. It uses the quad layer of the ring, so
 // RadialMenuShows is true then too.

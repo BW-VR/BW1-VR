@@ -81,6 +81,7 @@ enum Item {
   kItemPlaces,
   kItemSnapshot,
   kItemDebugWindow,
+  kItemSettings,
   kItems
 };
 
@@ -116,6 +117,7 @@ enum How {
   kHowSnapshot, // saves the eye pictures and the log (snapshot.cpp)
   kHowRecenter, // the recenter of the view (ControllersRecenter), no key
   kHowWindow,   // opens the debug window (debug_window.cpp)
+  kHowSettings, // opens the settings window (settings_panel.cpp)
 };
 
 // The modifier word of the key buffer of the game.
@@ -180,6 +182,7 @@ const ItemInfo kItemInfo[kItems] = {
      0, 0},
     // The item "debug" with debug_window=1 (radial_menu.cpp, PlaceDebug).
     {"debug_window", L"Debug", L"The debug window", kHowWindow, 0, 0, 0},
+    {"settings", L"Settings", L"The settings window", kHowSettings, 0, 0, 0},
 };
 
 // The rings as made. The order is how often a player needs an item, from the
@@ -194,6 +197,13 @@ const char* const kDefaultPage2 =
 // Page 2 with places_panel=0: the bookmark items of the ring.
 const char* const kDefaultPage2Marks =
     "mark_set,mark_go,mark_back,pause,more,help,names,save";
+// The same two pages with settings_panel=1: "settings" has the slot of
+// "names". A player who wants the names of the villagers on the ring gives
+// "names" a slot with radial_menu_items2.
+const char* const kDefaultPage2Settings =
+    "places,snapshot,recenter,pause,more,help,settings,save";
+const char* const kDefaultPage2MarksSettings =
+    "mark_set,mark_go,mark_back,pause,more,help,settings,save";
 // In the Temple: the rooms and the way out. The empty slot is for the item
 // "debug" of debug_menu=1.
 const char* const kDefaultTemple =

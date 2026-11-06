@@ -70,6 +70,7 @@
 #include "miracle.h"
 #include "note_depth.h"
 #include "debug_window.h"
+#include "settings_panel.h"
 #include "places_panel.h"
 #include "radial_menu.h"
 #include "spell_book.h"
@@ -1051,7 +1052,7 @@ void AimPlaces() {
 // debug_test_parts on the open debug window.
 void AimDebug() {
   float local[3];
-  if (!DebugWindowTestTarget(local)) {
+  if (!DebugWindowTestTarget(local) && !WelcomePageTestTarget(local)) {
     ModLog("controllers  : the word aimdebug: the debug window is not open, "
            "or debug_test_parts has no part in the view, frame %llu",
            g_frame);
@@ -2530,7 +2531,8 @@ void LatchGesture(bool back) {
   const bool b = hand.active && hand.secondary;
   if (b && !g_window_b_before &&
       (DebugWindowCloseBy("the player pressed B") |
-       PlacesPanelCloseBy("the player pressed B"))) {
+       PlacesPanelCloseBy("the player pressed B") |
+       WelcomePageCloseBy("the player pressed B"))) {
     g_gesture_need_up = down;
   }
   g_window_b_before = b;
@@ -2728,7 +2730,8 @@ void LatchEsc() {
   // places (places_panel.cpp), and then it sends no Esc.
   if (down && !g_esc_before && g_esc_prev_active && active &&
       !(DebugWindowCloseBy("the player pressed the menu button") |
-        PlacesPanelCloseBy("the player pressed the menu button"))) {
+        PlacesPanelCloseBy("the player pressed the menu button") |
+        WelcomePageCloseBy("the player pressed the menu button"))) {
     g_esc_event = true;
   }
   g_esc_before = down;
@@ -3403,7 +3406,8 @@ void PumpButtons(ULONGLONG now) {
   // (debug_window.cpp). While one is open, the trigger presses its parts
   // and does not reach the game.
   const bool panel_claim =
-      PlacesPanelHoldsTrigger() || DebugWindowHoldsTrigger();
+      PlacesPanelHoldsTrigger() || DebugWindowHoldsTrigger() ||
+      WelcomePageHoldsTrigger();
   bool command_claim = panel_claim;
   {
     const bool ok = usable && DirectHandNow() && g_pointer_owned &&
@@ -4617,6 +4621,7 @@ void ControllersFrame() {
   LatchEsc();
   RadialMenuFrame();
   PlacesPanelFrame();
+  WelcomePageFrame();
   DebugWindowFrame();
   SpellBookFrame();
   GesturePanelFrame();
@@ -5279,6 +5284,7 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
   float panel_meters = 0.0f;
   bool panel = PlacesPanelRay(&panel_meters);
   if (!panel) panel = DebugWindowRay(&panel_meters);
+  if (!panel) panel = WelcomePageRay(&panel_meters);
   if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn() || panel)) {
     return false;
   }
@@ -5644,6 +5650,38 @@ void ControllersRecenterHoldChange(const char* by) {
   LogRecenterHold(by);
 }
 
+// The settings window (settings_panel.cpp): recenter_hold, left_hand and
+// creature_stroke_open at once. UpdateHandSide moves the Hand to the other
+// controller when each button is up.
+void ControllersSetRecenterHold(int rule, const char* by) {
+  Comfort();
+  if (rule < comfort_math::kRecenterOff ||
+      rule > comfort_math::kRecenterPointing) {
+    rule = comfort_math::kRecenterOther;
+  }
+  g_comfort.recenter_hold = rule;
+  g_recenter_hold = comfort_math::RecenterHold();
+  LogRecenterHold(by);
+}
+
+void ControllersSetLeftHand(int key, const char* by) {
+  g_left_hand_key = key < -1 || key > 1 ? -1 : key;
+  ModLog("controllers  : %s: left_hand=%d now (%s), frame %llu", by,
+         g_left_hand_key,
+         g_left_hand_key < 0    ? "the left hand option of the game chooses "
+                                  "the Hand"
+         : g_left_hand_key == 0 ? "the right controller is the Hand"
+                                : "the left controller is the Hand",
+         g_frame);
+}
+
+void ControllersSetOpenStroke(int on, const char* by) {
+  if (g_open_stroke < 0) return;
+  g_open_stroke = on != 0 ? 1 : 0;
+  ModLog("controllers  : %s: creature_stroke_open is %d now, frame %llu", by,
+         g_open_stroke, g_frame);
+}
+
 // A snap turn that the stick asked for has happened.
 void ControllersSnapTurned() {
   ++g_turns_done;
@@ -5677,6 +5715,7 @@ void ControllersReport() {
   RadialMenuReport();
   PlacesPanelReport();
   DebugWindowReport();
+  SettingsPanelReport();
   SpellBookReport();
   GesturePanelReport();
   TempleReport();

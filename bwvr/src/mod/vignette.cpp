@@ -361,6 +361,16 @@ void VignetteReport() {
 // THE SWITCH "Vignette" of the debug page: off, gentle, strong. The pointing
 // hand gives a short pulse for off, a medium pulse for gentle and a long
 // pulse for strong.
+// The settings window (settings_panel.cpp): comfort_vignette at once.
+void VignetteSet(int mode, const char* by) {
+  if (mode < comfort_math::kVignetteOff || mode > comfort_math::kVignetteStrong) {
+    mode = comfort_math::kVignetteOff;
+  }
+  g_mode = mode;
+  if (g_mode == comfort_math::kVignetteOff) g_level = 0.0f;
+  LogMode(by);
+}
+
 int VignetteValue() {
   return TestSwitchesOn() ? g_mode : kDebugCannot;
 }

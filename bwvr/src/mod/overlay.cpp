@@ -1647,6 +1647,16 @@ void OverlayRayGlowChange(const char* by) {
 
 int OverlayTrailValue() { return g_trail_on ? 1 : 0; }
 
+// The settings window (settings_panel.cpp): gesture_trail at once.
+void OverlaySetTrail(bool on, const char* by) {
+  g_trail_on = on;
+  ModLog("overlay      : %s: gesture_trail=%d. %s, frame %llu", by,
+         on ? 1 : 0,
+         on ? "A ribbon follows the point of the draw of a gesture"
+            : "A gesture shows no trail",
+         ControllersFrameCount());
+}
+
 void OverlayTrailChange(const char* by) {
   g_trail_on = !g_trail_on;
   ControllersGrabPulse(1, 0.5f, g_trail_on ? 0.40f : 0.08f);

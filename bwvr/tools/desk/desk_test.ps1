@@ -95,6 +95,9 @@ try {
     # file bwvr-hint-counts.ini of the game folder, which is the player's.
     # The file of the run before goes first, so each run starts with no
     # counts.
+    # welcome_done=1: the welcome page of the first start (settings_panel.cpp)
+    # does not show, so it does not take the trigger of a recipe. A run of
+    # the welcome page gives welcome_done=0 in -Extra.
     $counts = Join-Path $out 'bwvr-hint-counts.ini'
     Remove-Item -LiteralPath $counts, "$counts.new" -Force -ErrorAction SilentlyContinue
     $keys = [ordered]@{
@@ -107,6 +110,7 @@ try {
         god_zoom_forward_in = 1
         god_zoom_smooth = 0
         hint_counts_test_file = $counts
+        welcome_done = 1
     }
     foreach ($k in $Extra.Keys) { $keys[$k] = $Extra[$k] }
 
@@ -176,6 +180,8 @@ try {
     Start-Sleep -Milliseconds 800
     Watch-Desk 'after the end of the game'
     Copy-Item $log (Join-Path $out 'bwvr.log') -Force
+    # The ini as the run left it: the settings window writes its keys there.
+    Copy-Item $ini (Join-Path $out 'bwvr.ini.run') -Force
     "game exited on its own: $exited"
     Get-ChildItem $game -Filter 'bwvr-*.bmp' -ErrorAction SilentlyContinue |
         Move-Item -Destination $out -Force

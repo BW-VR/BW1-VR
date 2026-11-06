@@ -2101,6 +2101,14 @@ snapshot     : 2 pictures as PNG and 0 as BMP in <folder> (0 could not move). Th
 snapshot     : saved, asked at frame N: the pictures of stereo frame M (2 as PNG, 0 as BMP) and the log in <folder>, in T ms on a thread of its own
 ```
 
+A desktop run (the test save `temple`, dxwrapper, `snapshot_test_dir`) chose
+the item on page 2. The next stereo frame saved its eye pictures, and 0.85 s
+after the thread started the folder had `shared-left.png` and
+`shared-right.png` (6 MB each from 31 MB BMP files at a render of 3600 by
+2880) and `bwvr.log`. With `backend=vulkan` the folder had `vk-left.png`
+and `vk-right.png` and the pictures of the hint cards. Only a headset shows
+the files of a session (`eye` and `xr`) and the note on the card.
+
 ## 11. The Temple
 
 The player can go into the Temple, use each room and come out with the

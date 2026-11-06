@@ -2245,11 +2245,36 @@ items of the places, what closes the panel and what is dim, one press for
 each pull of the trigger, the place 1 m out and 12 degrees down, a ray from
 the head to each button, and the test key.
 
-The desktop recipe opens the panel from page 2 of the ring (Y, the left
-hand to More, then to `places`), and the word `aimplaces` aims the ray at
-the buttons of `places_test_buttons`. No desktop run has shown the panel
-yet.
+A desktop run (the test save `temple`, dxwrapper, `test_frame_rate=60`,
+`aim_preset=0`, `places_panel_test_save=60`,
+`places_test_buttons=set3,land,go3,follow3,remove3,go3,close`) opens the
+panel from page 2 of the ring five times: Y, the left hand to More, then to
+`places`. The word `aimplaces` aims the ray at each button, and the word
+`trigger` presses it.
+
+- The panel opens at 0.00 -0.21 -0.98 m from a head at 0 0 0.
+- Set here 3 sends Ctrl and 3, and bookmark 3 is set in the next frame.
+  The panel stays open, and its seal turns red.
+- Land sends F3, the panel closes, and the God view goes to the jump of
+  the game camera.
+- Go 3 sends 3, the panel closes, and the view goes back to the Temple,
+  where bookmark 3 is.
+- Follow 3 sends Shift and 3. Bookmark 3 is on the land, not on an object,
+  so the game camera stays where it is.
+- Remove 3 sends Ctrl, Shift and 3, and bookmark 3 is not set in the next
+  frame. Go 3 is then dim, and its press does not act, with the note
+  "Bookmark 3 is not set". Close closes the panel.
+- The log has no line of a press of the left button of the game.
+- With `backend=vulkan` and `hint_card_style=0` the dark panel shows, the
+  press of the dim Go 1 does not act, and Close closes the panel.
+- With `places_panel=0` and `snapshot_item=0` page 2 is `mark_set`,
+  `mark_go`, `mark_back`, `pause`, `more`, `debug`, `names`, `save` (the
+  owner's ini has `debug_menu=1`), and the three bookmark items send Ctrl
+  and 1, Ctrl and Tab, and Backspace, as before.
+- The first picture of the panel draws its 42 parts in 18 ms, and the page
+  takes 8 ms one time. Each other new picture takes 0.4 to 1.6 ms, or 0.01
+  ms when it only copies.
 
 Only a headset shows the panel, its place and its size, whether the ray
 finds a button with ease, whether a hand that points stays below the
-panel, and whether Follow is of use in the God view.
+panel, and what Follow does with a bookmark on an object in the God view.

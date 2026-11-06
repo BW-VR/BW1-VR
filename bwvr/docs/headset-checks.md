@@ -132,10 +132,11 @@ want.
 
 ### The Temple
 
-22. **The rooms of the Temple.** Come in, turn and lean the head, go through
-    doors, point at things, and look down at the pool of the hall. Wrong: a
-    room that turns or tilts with the head, a room of a wrong size, one dark
-    eye, a pace that is too fast or too slow, or a move at the pool.
+22. **The rooms of the Temple.** Come in, turn, tilt and lean the head, go
+    through doors, point at things, and look down at the pool of the hall.
+    Wrong: a room that turns or tilts with the head, a room of a wrong size,
+    one dark eye, a pace that is too fast or too slow, a move at the pool, a
+    door that a tilted head cannot open, or a second hand in the room.
 
 ### Menus and cards
 
@@ -185,6 +186,9 @@ agents: the log does not tell the item yet.
 - **White or invisible story people with Vulkan** (B38): the Lost Brother and
   the Lost Sister of Land 1, and Sable at the cow stone. Log: `vk scene     :
   a texture with no new image`.
+- **A save in the Save Game Room** of a game in Program Files with no
+  administrator rights. Log: `save store   :` gives each call that the mod
+  made again on the VirtualStore copy.
 - **A take at the Hand that stops when the hand moves away** (P21). Log:
   `grip         : the grip falls fast during a bulk take and stays closed`
   names the cause that `near_take_keeps=1` holds, with the grip values of
@@ -206,6 +210,12 @@ agents: the log does not tell the item yet.
 - **Black frames** in the guide of the first visit of the Temple (B13), and
   with the Vulkan session on the renderer Direct3D 9. Key: `eye_test_luma=1`.
   Log: `eye test     :`.
+- **The same picture with each part of the session with Vulkan**
+  (`vk_eyes`, `xr_vulkan_upload`, `backend.md`, "The session with Vulkan").
+  Key: one of these at 0 for a play. An agent puts the file
+  `bwvr-capture-now.txt` beside `runblack.exe` during the play, and compares
+  the pictures of the eye swapchains (`bwvr-xr-left-N.bmp`,
+  `bwvr-xr-right-N.bmp`) with a play with the defaults.
 - **Slow frames and stutter** (N1). Log: `worst frame  :`, `runtime calls:`
   and `slow frame   :`.
 - **The pace of the runtime at 120 Hz** (N1). Log: `display      : the
@@ -314,8 +324,9 @@ Take a miracle out: tap B, or shake the hand. A miracle from a Worship Site
 gives its prayer power back. A one-off miracle that you take out is lost.
 
 **What the desktop runs show now.** A desktop run shows that the game gets
-the cast (the log line `the game casts ...`). The effect in the world over
-time, for example a field that grows, is not proven yet.
+the cast (the log line `the game casts ...`). The eye pictures also show the
+effect of Food, Forest, Explosion and Freeze. The other effects in the world
+are not proven yet.
 
 **Which miracles you have.** The towns of each land give their miracles.
 The debug switch "All miracles" (debug page, Creature) gives each town all
@@ -360,11 +371,10 @@ Water and Heal do not show.
   another tooltip call it "Poisoned Food", food that makes people sick.
 - **Gesture.** Spiral, then the S shape. A pour.
 - **In the mod.** Keep the grip closed over the place.
-- **Proved.** Desktop runs: the pour, the request from the spell book, and a
-  power up.
-- **To prove.** Food poured near a village lies on the land under the Hand.
-  Food with a power up: say what it makes (more food, or food that makes
-  people sick).
+- **Proved.** Desktop runs: the pour, the request from the spell book, a
+  power up, and food that falls and lies on the land under the Hand.
+- **To prove.** Food with a power up: say what it makes (more food, or food
+  that makes people sick).
 
 ### Wood ("Structure Elemental")
 
@@ -389,8 +399,8 @@ Water and Heal do not show.
 - **In the mod.** Close the grip with the Hand over the place. The game has
   a camera path that turns around the new forest. The mod starts no path, so
   the camera stays (`miracle_camera_still=1`).
-- **Proved.** Desktop runs: the cast at a place.
-- **To prove.** Trees stand at the place under the Hand, and the view does
+- **Proved.** Desktop runs: the cast at a place. Young trees stand at the
+  place under the Hand 8 s after the cast and grow taller, and the view does
   not turn.
 
 ### Heal ("Wellness")
@@ -524,8 +534,9 @@ Water and Heal do not show.
   60000.
 - **Gesture.** Spiral, then the star. At a place.
 - **In the mod.** Close the grip with the Hand over the place.
-- **Proved.** Desktop runs: the cast at a place.
-- **To prove.** The blast is at the place under the Hand.
+- **Proved.** Desktop runs: the cast at a place. The blast is at the place
+  under the Hand, and craters with smoke and rocks lie around that place
+  after it.
 
 ### Flying Flock ("Sky Full", the tooltip "Winged Creatures")
 
@@ -536,7 +547,7 @@ Water and Heal do not show.
 - **Cost.** 12000. No power up.
 - **Gesture.** Spiral, then the square spiral. A throw.
 - **In the mod.** Close the grip, swing the hand, and open it.
-- **Proved.** Desktop runs: the throw.
+- **Proved.** Desktop runs: the throw. The birds come out at the hand.
 - **To prove.** The birds fly where the throw goes.
 
 ### Ground Flock ("Beasts of Earth", the tooltip "Wolves")
@@ -569,14 +580,16 @@ on the Creature. The gesture is the inverse spiral and then the shape below.
 | Anger ("Aggressive") | It makes it furious | 6000 | The vertical line |
 | Itchy ("Holy Flies") | It irritates it | 8000 | The reverse S |
 
-- **Proved.** Desktop runs: Strengthen and Freeze on a Creature. Shrink,
+- **Proved.** Desktop runs: Strengthen and Freeze on a Creature. After
+  Freeze the Creature is blue and stands still for at least 11 s, and it
+  has its usual color 14 s after the cast. Shrink,
   Enlarge and Invisibility put their entry on the Creature, and Shrink and
   Enlarge change its base size (`miracle watch:`). At the door of the
   Temple the game draws the body at the size 0.22 with each spell
   (`miracles.md`, "What a cast makes"). Invisibility makes the Creature
   fizz to sparkles and a shadow. Not run: the other four (N6).
-- **To prove.** Freeze stops the Creature, and the narrator later says that
-  the miracle has worn off. Shrink and Enlarge change the size of the body
+- **To prove.** The narrator says that Freeze has worn off (no subtitle
+  line of the log has text). Shrink and Enlarge change the size of the body
   away from the Temple. Weaken,
   Strengthen, Compassion, Anger and Itchy each change the Creature as the
   table says. A Creature miracle at a Creature outside the influence has a

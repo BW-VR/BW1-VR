@@ -1407,8 +1407,8 @@ and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
   fingers of the right hand during the pull and at the snap, and the
   fingers in front of it hide a part of it. When the Miracle is in the
   Hand, the ball is gone and the game's own glow of Food is in the Hand.
-  With Vulkan the log shows the same draws, but the eye pictures of a
-  desktop run are black.
+  With Vulkan (and `test_frame_rate=60`) the log shows the same draws, and
+  the eye pictures show the same bubble in both eyes.
 - The pull of 15 cm: the bubble snaps into the hand at 10.1 cm, in the same
   frame as the take. With `spell_book_pull_cm=0` the grip is the take, and
   the card says "[Grip] Take Food".

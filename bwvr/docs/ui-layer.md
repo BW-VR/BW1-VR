@@ -2235,3 +2235,21 @@ room can use them:
 The caller keeps the trigger from the game while its panel is open
 (`PlacesPanelHoldsTrigger` in the pump of `controllers.cpp`), and it decides
 what closes its panel.
+
+### 22.7 Tests and limits
+
+The math checks are in `test/controller_math/places_checks.h`: the buttons
+and their kinds, each button on the paper, no two boxes with the rim that
+overlap, the middle of each button finds it, the keys of a bookmark, the
+items of the places, what closes the panel and what is dim, one press for
+each pull of the trigger, the place 1 m out and 12 degrees down, a ray from
+the head to each button, and the test key.
+
+The desktop recipe opens the panel from page 2 of the ring (Y, the left
+hand to More, then to `places`), and the word `aimplaces` aims the ray at
+the buttons of `places_test_buttons`. No desktop run has shown the panel
+yet.
+
+Only a headset shows the panel, its place and its size, whether the ray
+finds a button with ease, whether a hand that points stays below the
+panel, and whether Follow is of use in the God view.

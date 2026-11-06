@@ -98,6 +98,7 @@
 #include "places_panel.h"
 #include "radial_menu.h"
 #include "radial_menu_math.h"
+#include "settings_panel.h"
 #include "snapshot.h"
 #include "tabletop.h"
 
@@ -135,6 +136,7 @@ int g_save = 0;
 bool g_style = true;  // hint_card_style of bwvr.ini: the scroll look
 bool g_places = true;    // places_panel
 bool g_snapshot = true;  // snapshot_item
+bool g_settings_item = true;  // settings_panel
 int g_items[kPages][kSlots];
 int g_pages = 1;
 int g_temple_items[kPages][kSlots];
@@ -332,10 +334,13 @@ void ReadPage(const char* key, const char* fallback, int out[kSlots]) {
   // An item whose key is 0 is an empty slot.
   for (int i = 0; i < kSlots; ++i) {
     if ((out[i] == kItemPlaces && !g_places) ||
-        (out[i] == kItemSnapshot && !g_snapshot)) {
+        (out[i] == kItemSnapshot && !g_snapshot) ||
+        (out[i] == kItemSettings && !g_settings_item)) {
       ModLog("ring         : %s: the item \"%s\" is an empty slot, because "
              "%s=0", key, kItemInfo[out[i]].id,
-             out[i] == kItemPlaces ? "places_panel" : "snapshot_item");
+             out[i] == kItemPlaces     ? "places_panel"
+             : out[i] == kItemSnapshot ? "snapshot_item"
+                                       : "settings_panel");
       out[i] = kItemNone;
     }
   }
@@ -379,6 +384,7 @@ void ReadSettings() {
   g_style = IniKey("hint_card_style", 1) != 0;
   g_places = PlacesPanelOn();
   g_snapshot = SnapshotOn();
+  g_settings_item = SettingsPanelOn();
   g_settings.hand_in = g_reach_cm * 0.01f;
   g_settings.hand_out = g_reach_cm * 0.007f;
   ApplyWay();
@@ -387,8 +393,11 @@ void ReadSettings() {
     return;
   }
   ReadPage("radial_menu_items", kDefaultPage1, g_items[0]);
-  ReadPage("radial_menu_items2", g_places ? kDefaultPage2 : kDefaultPage2Marks,
-           g_items[1]);
+  const char* const page2 =
+      g_settings_item ? (g_places ? kDefaultPage2Settings
+                                  : kDefaultPage2MarksSettings)
+                      : (g_places ? kDefaultPage2 : kDefaultPage2Marks);
+  ReadPage("radial_menu_items2", page2, g_items[1]);
   ReadPage("radial_menu_items_temple", kDefaultTemple, g_temple_items[0]);
   for (int i = 0; i < kSlots; ++i) g_temple_items[1][i] = kItemNone;
   g_pages = PageHasItems(g_items[1]) ? 2 : 1;
@@ -844,7 +853,7 @@ ItemNow StateOf(int item, const Facts& f) {
     return now;
   }
   if (item == kItemMore || item == kItemDebug || item == kItemBack ||
-      item == kItemDebugWindow) {
+      item == kItemDebugWindow || item == kItemSettings) {
     return now;
   }
   // The snapshot needs no game: it saves what the headset shows.
@@ -1062,6 +1071,18 @@ bool Choose(int item, const Facts& f, const ItemNow& now) {
       ++g_choices;
       ModLog("ring         : the player chose \"debug\": the debug window "
              "opens, frame %llu", frame);
+      return true;
+    case kHowSettings:
+      if (!SettingsPanelOpenFromRing()) {
+        ++g_refusals;
+        ModLog("ring         : the player chose \"settings\", and the "
+               "settings window does not open: the head has no pose yet, "
+               "frame %llu", frame);
+        return false;
+      }
+      ++g_choices;
+      ModLog("ring         : the player chose \"settings\": the settings "
+             "window opens, frame %llu", frame);
       return true;
     case kHowSnapshot:
       if (!SnapshotStart(frame)) {
@@ -2194,7 +2215,7 @@ bool RadialMenuOpen() { return g_state_ready && g_state.open != kClosed; }
 
 bool RadialMenuShows() {
   return RadialMenuOpen() || g_fade > 0.0f || PlacesPanelOpen() ||
-         DebugWindowOpen();
+         DebugWindowOpen() || WelcomePageOpen();
 }
 
 bool RadialMenuItemCan(int item, const wchar_t** note) {

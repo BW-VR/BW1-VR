@@ -3690,6 +3690,35 @@ void TabletopGodMoveStickCycle() {
   LogMoveStick("test key     ");
 }
 
+// The settings window (settings_panel.cpp): move_stick,
+// move_stick_speed_cm and god_zoom_smooth at once. A walk or a hold of the
+// zoom that runs stops, as for the test keys.
+void TabletopGodSetMoveStick(int rule, const char* by) {
+  g_settings.move_stick = walk_math::Rule(rule);
+  if (g_installed) StopWalk("the settings window changed move_stick", true);
+  ModLog("tabletop     : %s: move_stick=%d now", by, g_settings.move_stick);
+}
+
+void TabletopGodSetMoveSpeed(int cm, const char* by) {
+  if (cm < 10) cm = 10;
+  if (cm > 500) cm = 500;
+  g_settings.move_stick_speed_cm = cm;
+  ModLog("tabletop     : %s: move_stick_speed_cm=%d now: a full push moves "
+         "you %d cm of the room each second", by, cm, cm);
+}
+
+void TabletopGodSetZoomSmooth(int smooth, const char* by) {
+  g_settings.god_zoom_smooth = smooth != 0 ? 1 : 0;
+  if (g_installed && smooth == 0) {
+    StopZoomHold("the settings window chose the steps", true);
+  }
+  ModLog("tabletop     : %s: god_zoom_smooth=%d now. %s", by,
+         g_settings.god_zoom_smooth,
+         g_settings.god_zoom_smooth != 0
+             ? "The stick zooms while it is held"
+             : "One push of the stick is one zoom step");
+}
+
 // The value of move_stick for the debug page: 0, 1 or 2.
 int TabletopGodMoveStickValue() {
   if (!g_installed || !g_settings.god || !TestSwitchesOn()) {

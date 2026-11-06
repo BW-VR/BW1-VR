@@ -2644,6 +2644,26 @@ void HintCardStyleToggle(const char* by) {
          g_style != 0 ? "the cards are scrolls" : "the cards are plain");
 }
 
+// The settings window (settings_panel.cpp): hint_learn and
+// hint_card_style at once. Each card draws its picture again in the next
+// frame.
+void HintCardSetLearn(int learn, const char* by) {
+  ReadSettings();
+  g_learn = learn != 0 ? 1 : 0;
+  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  ModLog("hint card    : %s: hint_learn is %d now (%s)", by, g_learn,
+         g_learn != 0 ? "a line goes away after its action 3 times"
+                      : "each line always shows");
+}
+
+void HintCardSetStyle(int style, const char* by) {
+  ReadSettings();
+  g_style = style != 0 ? 1 : 0;
+  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  ModLog("hint card    : %s: hint_card_style is %d now (%s)", by, g_style,
+         g_style != 0 ? "the cards are scrolls" : "the cards are plain");
+}
+
 int HintCardStyleValue() {
   if (!CardsCanShow()) return kDebugCannot;
   return g_style;

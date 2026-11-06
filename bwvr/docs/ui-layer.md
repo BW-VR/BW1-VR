@@ -2344,7 +2344,7 @@ The picture is 1024 by 1024 pixels:
 
 | Part | Where | What it is |
 | --- | --- | --- |
-| The title | The top | "Debug switches" |
+| The title | The top | "Debug switches", or "Settings" for the settings window (section 24) |
 | The tabs | A column at the left, 196 by 62 px each | One for each group. The tab of the group that shows is bright gold (`kOn`) |
 | The list | 692 by 760 px, 10 rows of 76 px | The switches of the group, one row for each: the label at the left and the control at the right. An ink rule is at the foot of each row, and above and below the list |
 | The scroll bar | At the right of the list | Only for a group with more than 10 rows. The thumb is the share of the list in the view, at least 56 px |
@@ -2394,9 +2394,10 @@ is a page of parchment, with the words in Alegreya (a capital of 24 px for a
 label) and the values in Alegreya SC. With 0 it is dark, in Segoe UI, and
 the mod draws all of it each time that it changes.
 
-**The bake.** The page with the title and the rules is drawn one time. Each
+**The bake.** The page with the rules is drawn one time. The title is drawn
+on the card when the list changes, so each list has its own title. Each
 tab and Close in each look is drawn the first time that it shows, and the
-mod keeps a copy (`panel_kit::Tiles`). Each row of the group shows the paper
+mod keeps a copy (`panel_kit::Tiles`), apart for each list. Each row of the group shows the paper
 of the first row of the list, so a copy of a row can go to each place of the
 list. A row is drawn into a picture of its own when its value or the look of
 its control changes, and a new picture copies the rows that show. So a
@@ -2447,3 +2448,126 @@ arrows of "Throw speed", a tab, the stick, the thumb, the track and Close,
 and closes the window with B and with the menu button.
 
 The check in a headset is in `headset-checks.md`, check 23.
+
+## 24. The settings window and the welcome page
+
+The settings window is the debug window of section 23 with the settings of
+the player as its rows. The item `settings` of page 2 of the ring opens it,
+and so does the button Settings of the welcome page. The welcome page shows
+one time, at the first start of the mod. The code is in
+`settings_panel.cpp` and `settings_panel_math.h`. The window code in
+`debug_window.cpp` takes its rows from a table of functions (`WindowRows`
+in `debug_window.h`): one for the debug switches, one for the settings.
+
+### 24.1 The rows
+
+The place, the parts, the look, the bake, the stick and the closes are those
+of section 23. The title is "Settings", and the bottom row says "Point at a
+setting to read what it does". The words are the words of the launcher
+(`launcher.md`), so a player knows them. The note of a row has the launcher
+label, what the setting does, and its key with "A change acts at once" or
+"A change acts at the next start of the game".
+
+| Tab | Row | Key | Values |
+| --- | --- | --- | --- |
+| Moving | Turn in steps | `snap_turn` | Off, 30, 45, 90 degrees |
+| Moving | Teleport | `teleport` | Off, On |
+| Moving | Stick walk | `move_stick` | Off, Head, Controller |
+| Moving | Walk speed | `move_stick_speed_cm` | Slow 75, Normal 150, Fast 250, Very fast 400 |
+| Moving | Smooth zoom | `god_zoom_smooth` | In steps, Smooth |
+| Moving | Comfort vignette | `comfort_vignette` | Off, Gentle, Strong |
+| Moving | Blink | `blink` | Off, Short, Long |
+| Moving | Recenter hold | `recenter_hold` | Off, Other hand, Hand |
+| Hands | Hand | `left_hand` | Game, Right, Left |
+| Hands | Grab the world | `grab_hand` | Off, Other grip, Either grip. At the next start |
+| Hands | Gesture trail | `gesture_trail` | Off, On |
+| Hands | Open hand stroke | `creature_stroke_open` | Off, On |
+| Cards | Hints | `hint_learn` | Always, Until learned |
+| Cards | Card look | `hint_card_style` | Plain, Scroll |
+| Cards | Subtitle card | `subtitle_card` | Off, On. At the next start |
+
+A row with two values is a toggle, with the "off" value first, so the knob
+is at the left for it. A row with more values has two arrows, and a step
+goes round the list. A value in `bwvr.ini` that the list does not have shows
+as its number, and the right arrow goes to the first value of the list. A
+row that acts at the next start has the small words "at the next start"
+under its label, and the bottom row adds them after a change.
+
+### 24.2 A change
+
+A change writes the key into `bwvr.ini` at once, as the launcher writes it:
+`WritePrivateProfileString` in the section `[bwvr]`, with the value as a
+number. Then a row that acts at once calls the change function of its area,
+which writes its own log line:
+
+| Key | The change function |
+| --- | --- |
+| `snap_turn`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetBlink` |
+| `teleport` | `TeleportSetOn` |
+| `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk or a hold of the zoom that runs stops |
+| `comfort_vignette` | `VignetteSet` |
+| `recenter_hold`, `left_hand`, `creature_stroke_open` | `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `ControllersSetOpenStroke`. The Hand changes to the other controller when each button is up |
+| `hint_learn`, `hint_card_style` | `HintCardSetLearn`, `HintCardSetStyle`. The cards, the ring, the spell book and the windows take the new look in the next frame |
+| `gesture_trail` | `OverlaySetTrail` |
+
+These functions do not need `test_keys=1`, and they give no pulse: the press
+of the row gives the pulse of the kit. The window never writes the registry
+or a file of the game. When Windows refuses the write, the change acts for
+this game only, and the log says so.
+
+### 24.3 The welcome page
+
+The page shows when `welcome_page=1` and `bwvr.ini` has no
+`welcome_done=1`. It waits until the controllers can act for 3 s, with no
+dialog box, no cut scene, no ring, no spell book and no other panel. It is
+a parchment page of 1024 by 640 pixels, 56 by 35 cm, at the place of the
+settings window:
+
+- the title "Welcome to Black & White VR"
+- "Your hands are the Hand of your god, at their true size." and "The land
+  is at the height of your waist."
+- three controls: the grip of the Hand, the grip of the other hand, and the
+  button of the ring with "Settings is on its page 2". The button is Y, X, B
+  or A, as `button_layout` and the hand of the ring give it
+- the buttons Settings and Play
+
+Settings closes the page and opens the settings window. Play closes the
+page. A press of either button, B of the pointing hand and the menu button
+write `welcome_done=1`. The ring, the spell book, a dialog box and a cut
+scene close the page with no write, and it shows again when they are gone.
+The words are drawn one time into the page, and each button in each look is
+copied, so a change under the ray copies one button.
+
+### 24.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `settings_panel` | 1 | 1: page 2 of the ring as made has the item `settings` in the slot of `names` (`controllers.md`, 10.2). 0: page 2 has `names`, and the word `settings` is an empty slot |
+| `welcome_page` | 1 | 0: the welcome page never shows |
+| `welcome_done` | 0 | The mod writes 1 after the welcome page. The desktop runs set 1 (`tools/desk/desk_test.ps1`) |
+| `welcome_test_save` | 0 | Test key. N saves the first N pictures of the welcome page as `bwvr-welcome-FFFFF.bmp`. The pictures of the settings window come from `debug_window_test_save` |
+| `welcome_test_parts` | | Test key. The buttons for the word `aimdebug` while the page is open: `settings`, `play` |
+
+The log has the tag `settings`, and the window lines of the settings window
+have it too:
+
+```
+settings     : settings_panel=1: page 2 of the ring as made has the item "settings". welcome_page=1, welcome_done=0: the welcome page shows at this start
+settings     : the welcome page opens, 0.56 by 0.35 m, its middle at 0.00 -0.21 -0.98 m, frame 412
+settings     : the welcome page closes: the player pressed Settings. welcome_done=1 is in bwvr.ini, so the page does not show again, frame 530
+settings     : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group Moving with 8 switches, frame 531
+settings     : snap_turn goes from 2 to 3 (90 degrees), written to bwvr.ini. It acts at once, frame 650
+comfort      : the settings window: turn in steps of 90 degrees now
+```
+
+### 24.5 Tests and limits
+
+The math checks are in `test/controller_math/settings_panel_checks.h`: the
+table (each line in its group, a key of its own, the default among its
+values, labels and value words that fit), the words and numbers of the
+values, the step round a list, the text for `bwvr.ini`, the ring as made
+with `settings_panel` 1 and 0, and the layout of the welcome page.
+
+A setting that the area reads only at its start (`grab_hand`,
+`subtitle_card`) acts at the next start. The other settings of the launcher
+stay in the launcher. A page to change the controls is in `roadmap.md`, F11.

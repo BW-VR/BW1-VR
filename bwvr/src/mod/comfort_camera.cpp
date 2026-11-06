@@ -1795,6 +1795,24 @@ bool ComfortCameraSnapping() { return Snapping(); }
 // The angle of a snap turn, in degrees. 0 with the snap turns off.
 float ComfortCameraSnapDegrees() { return g_snap_degrees; }
 
+// The settings window (settings_panel.cpp): snap_turn and blink at once. The
+// next update of the game mode reads them.
+void ComfortCameraSetSnap(int degrees, const char* by) {
+  g_snap_degrees = static_cast<float>(degrees > 0 ? degrees : 0);
+  if (g_snap_degrees > 0.0f) {
+    ModLog("comfort      : %s: turn in steps of %.0f degrees now", by,
+           g_snap_degrees);
+  } else {
+    ModLog("comfort      : %s: the game's own smooth turning now", by);
+  }
+}
+
+void ComfortCameraSetBlink(int ms, const char* by) {
+  g_blink_ms = static_cast<DWORD>(ms > 0 ? ms : 0);
+  ModLog("comfort      : %s: a jump and a turn blink for %lu ms now", by,
+         static_cast<unsigned long>(g_blink_ms));
+}
+
 // The CameraModeNew3 whose update runs now, and null outside that update.
 // pointer_map.cpp uses it to find the camera code's rays.
 const void* ComfortCameraMode() { return g_mode; }

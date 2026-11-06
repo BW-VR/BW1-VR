@@ -1093,6 +1093,22 @@ void SaveCaptures(uint64_t frame) {
 
 }  // namespace
 
+// The hook of the Creature panel (h_CreaturePanelDraw). It latches what the
+// game draws for the quad of ui_panel=1, and it arms the panel with no press
+// (creature_panel_linger) with each value of ui_panel.
+void InstallCreaturePanelHook() {
+  if (g_creature_hooked) return;
+  void* target = reinterpret_cast<void*>(kCreaturePanelDraw);
+  MH_STATUS status =
+      MH_CreateHook(target, reinterpret_cast<void*>(&h_CreaturePanelDraw),
+                    reinterpret_cast<void**>(&o_CreaturePanelDraw));
+  if (status == MH_OK) status = MH_EnableHook(target);
+  g_creature_hooked = status == MH_OK;
+  ModLog("hooks        : the Creature panel draw at 0x%08X %s",
+         static_cast<unsigned>(kCreaturePanelDraw),
+         g_creature_hooked ? "ok" : "FAILED");
+}
+
 void UiPanelSetOptions(const UiPanelSettings& settings) {
   g_settings = settings;
   if (g_settings.mode < kUiPanelOff || g_settings.mode > kUiPanelTest) {
@@ -1104,6 +1120,9 @@ void UiPanelSetOptions(const UiPanelSettings& settings) {
                      g_settings.vr_keyboard != 0,
                      g_settings.mode == kUiPanelOff);
   if (g_settings.mode == kUiPanelOff) {
+    // The panel with no press needs the hook also when the interface stays
+    // in the eye pictures.
+    if (g_settings.creature_panel_linger != 0) InstallCreaturePanelHook();
     // The subtitle card needs the panel target, and the hook that puts the
     // game's target back after the subtitle box. It needs no share: its
     // picture goes to the headset through the CPU, as the hint cards do.
@@ -1144,18 +1163,8 @@ void UiPanelSetOptions(const UiPanelSettings& settings) {
   }
   GpuBridgePanelWant(true, g_settings.mode == kUiPanelLayer);
   UiPanelInstallHooks();
-  // The Creature panel: the hook only latches what the game draws.
-  if (!g_creature_hooked) {
-    void* target = reinterpret_cast<void*>(kCreaturePanelDraw);
-    MH_STATUS status =
-        MH_CreateHook(target, reinterpret_cast<void*>(&h_CreaturePanelDraw),
-                      reinterpret_cast<void**>(&o_CreaturePanelDraw));
-    if (status == MH_OK) status = MH_EnableHook(target);
-    g_creature_hooked = status == MH_OK;
-    ModLog("hooks        : the Creature panel draw at 0x%08X %s",
-           static_cast<unsigned>(kCreaturePanelDraw),
-           g_creature_hooked ? "ok" : "FAILED");
-  }
+  // The Creature panel: the hook latches what the game draws.
+  InstallCreaturePanelHook();
   ModLog("ui panel     : ui_panel=%d, %s", g_settings.mode,
          ModeName(g_settings.mode));
   ModLog("ui panel     : the menu panel %d cm ahead at %d degrees, %d px a "
@@ -1422,6 +1431,7 @@ int UiPanelLingerValue() { return g_settings.creature_panel_linger != 0 ? 1 : 0;
 void UiPanelLingerChange(const char* by) {
   g_settings.creature_panel_linger =
       g_settings.creature_panel_linger != 0 ? 0 : 1;
+  if (g_settings.creature_panel_linger != 0) InstallCreaturePanelHook();
   ControllersGesturePulse(0.5f,
                           g_settings.creature_panel_linger != 0 ? 0.30f : 0.08f);
   ModLog("ui panel     : %s: creature_panel_linger is %d now", by,

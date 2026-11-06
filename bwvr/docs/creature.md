@@ -985,6 +985,10 @@ A hand that moves still moves, so the game still plays its strokes. The
 press sends no leash click (`h_InteractCamera`), also when it is short. A
 slap needs the grip, as before.
 
+**The card.** While the mod holds the press for the open hand, the card of
+the pointing hand says "Move the hand to stroke" and Grip "Close and swing
+to slap". A press of the grip on the Creature keeps Grip "Stroke or slap".
+
 `creature_stroke_open=0` keeps the old way: only the grip strokes the
 Creature. The launcher row is "Stroke with the open hand". The debug page has
 the switch "Open stroke" (group Creature).

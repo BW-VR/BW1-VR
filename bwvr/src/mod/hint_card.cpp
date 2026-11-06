@@ -144,6 +144,8 @@ void ControllersGesturePulse(float amplitude, float seconds);
 // controllers.cpp: the grip of the pointing hand is closed, as the pump last
 // saw it.
 bool ControllersGripClosed();
+// The press of the open hand on the Creature (creature_stroke_open).
+bool ControllersOpenStrokeOn();
 // controllers.cpp: a push of the stick of the other hand moves the player now.
 bool ControllersWalkPossible();
 // hand_direct.cpp: the Hand's point and what a press does there.
@@ -864,6 +866,18 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       break;
     }
     case kCtxCreature:
+      // THE STROKE WITH THE OPEN HAND (creature_stroke_open): the mod holds
+      // the press, so the open hand strokes with no button, and a slap needs
+      // the grip.
+      if (ControllersOpenStrokeOn()) {
+        Content* out = &cards[kPointing];
+        if (out->count < kMaxLines) {
+          SetLine(&out->line[out->count++], nullptr,
+                  L"Move the hand to stroke", kToneNone, 0);
+        }
+        AddPrompt(cards, kWordGrab, L"Close and swing to slap", kToneGrab);
+        break;
+      }
       // The touch of the Creature is the game's right press, so it is the
       // grip. The game's own hint there is "Interact" for that button.
       AddPrompt(cards, kWordGrab, L"Stroke or slap", kToneGrab);

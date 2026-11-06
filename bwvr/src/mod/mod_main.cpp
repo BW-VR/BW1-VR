@@ -149,6 +149,8 @@ void HandDirectInstall();
 void MiracleInstall();
 void VillageInstall();
 void HandDirectInstallTable();
+// influence_edge.cpp
+void InfluenceEdgeInstall();
 void HandDirectInstallCreatureCamera(int mode);
 // hand_glow.cpp: the glow at the Hand's point.
 void HandGlowSetEnabled(bool on);
@@ -199,6 +201,7 @@ void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
                             int close_distance, int close_zoom_pct,
                             int cut_degrees, int cut_percent,
                             bool hold_follow);
+void ScriptCameraSetMiracleCamera(bool still, bool head_tracking);
 void ScriptCameraInstall();
 void SkyDetailInstall();
 void SkyDetailRelease();
@@ -433,6 +436,9 @@ bool g_god_turn_keeps_focus = true;
 // The camera the story moves, see script_camera.cpp. 0 as the game moves it,
 // 1 a cut at the start of each move, 2 a cut at the end of each move.
 int g_script_camera = 2;
+// 1 starts no camera path of a particle effect of the game, for example the
+// Forest miracle, while the head carries the camera (script_camera.cpp).
+bool g_miracle_camera_still = true;
 float g_detail_distance = 5.0f;  // how far out models keep their detail
 // Below 0 keeps the default in script_camera.cpp.
 int g_script_min_distance = -1;
@@ -1134,6 +1140,8 @@ void ReadSettings() {
     if (GetPrivateProfileIntA("bwvr", "cutscene_immersive", 0, path) != 0) {
       g_script_camera = 0;
     }
+    g_miracle_camera_still =
+        GetPrivateProfileIntA("bwvr", "miracle_camera_still", 1, path) != 0;
   }
   // How far out models keep their detail: the game's own, 2, 3 or 5 times.
   {
@@ -1828,6 +1836,7 @@ void StartVrStep() {
                            g_script_min_height, g_script_close_distance,
                            g_script_close_zoom, g_script_cut_degrees,
                            g_script_cut_percent, g_script_follow);
+    ScriptCameraSetMiracleCamera(g_miracle_camera_still, g_head_tracking);
     ScriptCameraInstall();
     PointerMapSetDragSmoothing(g_drag_smoothing_ms);
     PointerMapSetFakeMouse(g_fake_mouse_script, g_fake_mouse_step_px,
@@ -1948,6 +1957,9 @@ void StartVrStep() {
       // The pick of the direct hand on the table (docs/tabletop.md, "The hand on the table").
       // The God view needs it too: zoomed out, a villager is a few pixels.
       if (g_controllers && g_direct_hand.mode == 1) HandDirectInstallTable();
+      // The influence at the real hand: the fade, the stream and the wall
+      // (influence_edge.cpp).
+      if (g_controllers) InfluenceEdgeInstall();
     }
     // The near plane of the game camera. Only where the head moves the
     // camera (play modes 0, 3 and 4), because there the real hand is in the

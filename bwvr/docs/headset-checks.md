@@ -22,7 +22,9 @@ want.
    play one story with the launcher row "Cut scenes" at "Around you". Wrong:
    a screen or subtitles at a bad place or size, a close shot or a cut that
    hurts the eyes, an advisor that is too low or moves with the head, or a
-   story around you that makes you sick.
+   story around you that makes you sick. Point at the screen in the window.
+   Wrong: hands or a ray that are not at your real hands, or a ray that is
+   hard to see on the scene.
 
 ### The God view
 
@@ -49,7 +51,9 @@ want.
 7. **The hands on the controllers.** Look at each hand, and close the
    trigger and the grip slowly. Wrong: a hand off its controller, turned or
    of a wrong size, a finger that jumps, or an object that looks wrong in the
-   palm (name the object).
+   palm (name the object). Move a hand past the edge of your influence.
+   Wrong: a wall of light that is hard to see or in the way, or a fade that
+   is too strong.
 8. **The grip.** Take things, set them down and let them go. Wrong: a take
    from a loose hand, a grip that lets go late or not at all, a drop by
    accident, or a job that needs the other button.
@@ -365,12 +369,12 @@ Water and Heal do not show.
 - **How to see that it worked.** New trees stand at the place.
 - **Cost.** 13000. No power up.
 - **Gesture.** Spiral, then the Cyrillic L. At a place.
-- **In the mod.** Close the grip with the Hand over the place.
+- **In the mod.** Close the grip with the Hand over the place. The game has
+  a camera path that turns around the new forest. The mod starts no path, so
+  the camera stays (`miracle_camera_still=1`).
 - **Proved.** Desktop runs: the cast at a place.
-- **A fault of the mod.** Testers find that the camera turns in a circle at
-  the Forest miracle (B39). No game file says that the plain game turns the
-  camera there.
-- **To prove.** Trees stand at the place under the Hand.
+- **To prove.** Trees stand at the place under the Hand, and the view does
+  not turn.
 
 ### Heal ("Wellness")
 

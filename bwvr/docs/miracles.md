@@ -38,6 +38,13 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
 - While that palm is up, the gesture pictures of the game show in a row over
   it: what the player can draw now. While B is down, or while a chain or a
   power up goes on, the palm shows the row and not the book.
+- The Forest miracle has a camera path of the game that turns the camera
+  around the new forest. With the head on the camera the mod starts no such
+  path, so the camera of the player stays (`miracle_camera_still=1`).
+- Outside the influence of the player the hands fade, the stream of the
+  game ends at the Hand's point in the air, and a faint wall of light shows
+  the edge near the pointing hand (`influence_fade`, `influence_stream_hand`,
+  `influence_wall`).
 
 ## Gestures in the plain game [V unless marked]
 
@@ -968,10 +975,85 @@ With `spell_book_palm=0` the palm always shows the row.
 With `gesture_panel=0` the game draws its pictures as before, and the
 headset does not show them.
 
+### The camera path of a miracle (`miracle_camera_still=1`)
+
+**What the game does [V].** A particle effect of the game can have a camera
+path (`Particle3DAnimWithCamera`). The Forest miracle has one. At a cast of
+the player, `Particle3DAnimWithCamera::GameUpdate` `0x006C86F0` pushes a
+`CameraModePath` (`0x00460E50`). The camera then turns around the new forest
+while the trees grow, and `StopCamera` `0x006C86C0` takes the path off at the
+end of the effect. The update starts a path only for the interface that casts
+(`PSysManager::NetUnsafeIsMyInterfaceCasting`), and only while the int at
+`0x00C029E0` is not 0. The game has 1 there in its data and never writes it.
+In the God view the path is a camera of a story (`script_camera.cpp`): the
+God view stands aside, and the view turns with no move of the player. A
+desktop run with no change has the line "the camera belongs to
+CameraModePath" at the frame of the cast.
+
+**What the mod does.** With `miracle_camera_still=1` and a play mode in
+which the head carries the camera (2, 3 and 4), `script_camera.cpp` writes 0
+at `0x00C029E0` one time, before the first frame of play. The effect of the
+miracle plays as before, and the camera of the player stays. The God view
+does not stand aside. The write is one time only: a change while a path
+plays clears the mark of the path (`+0x34` of the effect), and then the game
+does not take the path off. With `miracle_camera_still=0` the path plays as
+the game makes it. Play mode 1 (the window) keeps the path.
+
+### The influence at the hand
+
+**What the plain game does at the edge [V].** The Hand of the mouse can go
+past the edge of the player's influence. There it acts on nothing. The hand
+mode of an object is `0x12` (a touch) and not a pick up
+(`Object::InterfaceMustBeInInfluenceForInteraction`), and each game turn of a
+take ends the take (`GInterfaceStatus::Process`, `0x005DC540`). The look of
+the Hand does not change. `GVirtualInfluence` (`GInterfaceStatus + 0x130`)
+keeps the last land point of the Hand inside the influence (`+0x08`). Its
+update (`0x0076CD40`) gives a strength (`+0x30`) of 1 there. Outside, the
+strength goes down with the distance from that point and with the time, to 0
+under 0.1. While the strength is above 0, `GVirtualInfluence::Draw`
+`0x0076D000` finds the edge between that point and the Hand (`+0x14`). Then
+it calls `PSysGlobal::AddManaPathSprite` `0x0068FB20` at `0x0076D1C2`: a
+stream of light from the edge to the land point under the Hand, and a sound.
+A script can turn the stream off (`SET_VIRTUAL_INFLUENCE`,
+`GPlayer::SetVirtualInfluence` `0x0064C3B0`).
+
+**What the mod does** (`influence_edge.cpp`). The real hand is in the air
+over the land, so three things change, each with a key:
+
+- **The fade** (`influence_fade=1`). Outside the influence each hand fades to
+  45 percent in 0.25 s, and inside it comes back in the same time
+  (`HandModelSetOpacity`). The test is the game's own: the call of
+  `Influence::CalculatePlayerInfluence` that `fn_005D1120` makes, at the land
+  point of the grip of that hand. A hand under 90 percent writes no depth.
+  The low poly hand has no alpha, so it does not fade.
+- **The stream at the hand** (`influence_stream_hand=1`). A hook of
+  `AddManaPathSprite` gives the land point of the Hand the height of the
+  Hand's point over the land. That is the third field of the `MapCoords`,
+  which `MapCoords::GetLHPoint` adds to the height of the land. So the
+  stream of the game ends at the Hand's point in the air. Only the stream of
+  the Hand of the controller changes.
+- **The wall** (`influence_wall=1`). A faint wall of light stands on the edge
+  near the point of the pointing hand while that point is less than 15 cm of
+  the room from the edge, inside or outside (`influence_edge_math.h`). 24
+  rays go out from the land point of the hand to 15 cm, and each finds the
+  first point where the influence changes. The wall is 50 cm of the room
+  high. Its light is pale gold, 0.35 of full light at the most, and it goes
+  to 0 at its top and at 15 cm from the hand. It grows while the hand comes
+  near the edge. The overlay draws it with the glow, as added light, with
+  the depth test, so the land in front hides it. Most frames have no edge
+  near the hand, and then the search costs 48 tests of the influence.
+
+The fade and the wall act only while the controller places the Hand, in the
+God view and on the table.
+
 ## Keys
 
 | Key | Default | What it does |
 | --- | --- | --- |
+| `miracle_camera_still` | 1 | 1: a miracle with a camera path of the game (the Forest) starts no path while the head carries the camera, and the camera of the player stays. 0: the path turns the camera as the game makes it |
+| `influence_fade` | 1 | 1: outside the influence of the player each hand fades to 45 percent. 0: the hands do not fade |
+| `influence_stream_hand` | 1 | 1: the stream of the influence of the game ends at the Hand's point in the air. 0: it ends on the land under the Hand |
+| `influence_wall` | 1 | 1: a faint wall of light shows the edge of the influence near the pointing hand, from 15 cm of the room before it. 0: no wall |
 | `miracle_hand` | 1 | 0: the game places the Hand with a miracle, and the mod gives no target, no cancel, no use of a seed and no lines |
 | `miracle_shake_mps` | 0.6 | The mean speed of each stroke of a shake, in m/s. 0 turns the shake off. 0.2 to 5 |
 | `miracle_cancel_button` | 1 | 0: the second face button does not cancel |
@@ -1025,8 +1107,26 @@ Test keys for the desktop runs only (the launcher removes them):
 - `gesture_panel_test_frame`: at this frame of the scripted controller
   `gesture_panel` changes, so one run shows the corner of the game and the
   row over the palm.
+- `influence_test_circle_cm`: from the first frame with the Hand of the
+  controller, the influence of the player is a circle of this many cm of the
+  room around the land under the game camera, which the God view keeps over
+  the land under the head. The fade, the wall and the stream see it (a test
+  hook of `Influence::IsInPlayerRawInfluence` `0x005CD460`). The pick of the
+  game keeps the real influence.
 
 ## The log
+
+The tag `script camera` has one line at the start with
+`miracle_camera_still`, the address of the switch and its old value. A
+camera path that plays has the line "the camera belongs to CameraModePath".
+
+The tag `influence` has the three keys at the start, and these lines: a hand
+that goes out of the influence or comes back into it, with its land point.
+The wall that shows or goes, with the rays that found the edge and its
+strength. The first stream that ends at the Hand's point, with its height
+over the land. The test circle, with its middle and its radius. Each report
+window has the frames with a fade and with the wall, and the calls of the
+stream.
 
 The tag `miracle` has one line for each change:
 
@@ -1100,6 +1200,16 @@ that the game makes, the first draw with its place and size, and a check of
 the game's code that fails.
 
 ## Tests
+
+The math test (`scene_checks.h`) covers the influence at the hand: the fade
+in 0.25 s and back, a long frame, the edge of a circle from inside and from
+outside, no edge for a hand far from it, the wall on the edge with no light
+at its top, no wall 20 units from the edge, and a wall that grows when the
+hand comes nearer.
+
+`scene_run.ps1 -Kind forest` casts Forest from a seed of
+`miracle_test_seeds`, and `-Kind edge` steps the hand across the edge of
+the test circle with an eye picture at each step (`tools/desk/README.md`).
 
 The math test (`miracle_checks.h`) covers the lines of the card for each kind
 of miracle, each reason of a refusal in the order of the game, the target at
@@ -1261,6 +1371,10 @@ pictures). What it shows:
 - The line of the card with `miracle_seed_use=0`, and each key at a value
   that is not its default, other than `miracle_hand`.
 - A left handed player, `controller_swap_buttons=1`, and a multiplayer game.
+- Which other particle effects of the game have a camera path. Each one that
+  has one plays no path with `miracle_camera_still=1`.
+- The stream of the influence while a script has the virtual influence off.
+  Then the game draws no stream, with each value of the key.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.

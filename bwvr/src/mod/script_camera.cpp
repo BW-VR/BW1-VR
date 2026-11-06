@@ -75,7 +75,21 @@
 // cut and each owner change also tells spirit_anchor.cpp to place the spirits
 // again.
 //
-// 7. NOT IN THE CUT SCENE WINDOW. While the cinema bars are up in the God
+// 7. NO CAMERA PATH OF A MIRACLE. A particle effect of the game can have a
+//    camera path (Particle3DAnimWithCamera). The Forest miracle has one: at
+//    the cast of the player, Particle3DAnimWithCamera::GameUpdate 0x006C86F0
+//    pushes a CameraModePath, and the camera turns around the new forest
+//    while the trees grow. The God view stands aside for it, so the view
+//    turns with no move of the player. The update starts the path only while
+//    the int at 0x00C029E0 is not 0. The game sets it to 1 in its data and
+//    never writes it. With miracle_camera_still=1 and a play mode in which
+//    the head carries the camera, ScriptCameraSetMiracleCamera writes 0
+//    there once, before the first frame of play. The effect itself plays,
+//    and the camera of the player stays. The write is once only: a change
+//    while a path plays would clear the mark of the path, and the game
+//    would not take the path off the stack.
+//
+// 8. NOT IN THE CUT SCENE WINDOW. While the cinema bars are up in the God
 //    view, the picture is on a screen in the room (cutscene_window.cpp). In
 //    those frames this file acts as variant 0: the game moves the camera,
 //    and a shake plays. The owner is still read, so ScriptCameraStoryOwns
@@ -109,6 +123,9 @@ const int kGameCamera = 0x2502C0;
 const uintptr_t kFromGameCamera = 0x00442627;  // GCamera::Update, main call
 const uintptr_t kFromHandDemo = 0x005DB125;    // the hand demo's own call
 const uintptr_t kStartCameraShake = 0x0068F400;
+// Not 0: a particle effect with a camera path starts the path
+// (Particle3DAnimWithCamera::GameUpdate 0x006C86F0 reads it).
+const uintptr_t kEffectCameraPaths = 0x00C029E0;
 // LH3DMapCoords from a world x and z, then the ground height there.
 const uintptr_t kMakeMapCoords = 0x004427B0;
 const uintptr_t kGetAltitude = 0x00803090;
@@ -578,6 +595,37 @@ void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
          "the view distance. Follow cameras %s.", g_cut_degrees,
          g_cut_share * 100.0f,
          g_hold_follow ? "are held" : "move as the game moves them");
+}
+
+// mod_main.cpp, once, before the first frame of play: miracle_camera_still,
+// and whether the head carries the camera in this play mode. See 7 above.
+void ScriptCameraSetMiracleCamera(bool still, bool head_tracking) {
+  int* paths = reinterpret_cast<int*>(kEffectCameraPaths);
+  if (!still || !head_tracking) {
+    ModLog("script camera: miracle_camera_still=%d. %s", still ? 1 : 0,
+           still ? "This play mode does not put the head on the camera, so a "
+                   "miracle with a camera path (the Forest) turns the camera "
+                   "as the game does it"
+                 : "A miracle with a camera path (the Forest) turns the camera "
+                   "as the game does it");
+    return;
+  }
+  DWORD old = 0;
+  if (!VirtualProtect(paths, sizeof(int), PAGE_READWRITE, &old)) {
+    ModLog("script camera: miracle_camera_still=1, but the mod cannot write "
+           "the switch of the camera paths at 0x%08X (error %lu). A miracle "
+           "with a camera path turns the camera",
+           static_cast<unsigned>(kEffectCameraPaths), GetLastError());
+    return;
+  }
+  const int was = *paths;
+  *paths = 0;
+  DWORD unused = 0;
+  VirtualProtect(paths, sizeof(int), old, &unused);
+  ModLog("script camera: miracle_camera_still=1. A miracle with a camera path "
+         "(the Forest) starts no path: the effect plays, and the camera of the "
+         "player stays (the switch at 0x%08X was %d, now 0)",
+         static_cast<unsigned>(kEffectCameraPaths), was);
 }
 
 void ScriptCameraInstall() {

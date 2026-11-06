@@ -211,6 +211,11 @@ struct OverlayHands {
   float map_gain;
 };
 bool ControllersOverlayHands(OverlayHands* out);
+// The same in a frame of the cut scene window (cutscene_hands=1): the hands in
+// the room of the hands (HeadPoseToRoom), which is the world of the overlay
+// then, and the aim ray of the pointing hand in that room.
+bool ControllersOverlayHandsRoom(OverlayHands* out);
+bool ControllersRoomAim(float origin[3], float direction[3]);
 
 // The teleport: the pointing hand's A and B buttons, and its aim. See
 // teleport.cpp and docs/god-view.md, "The teleport".

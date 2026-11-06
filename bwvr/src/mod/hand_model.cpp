@@ -58,6 +58,7 @@
 #include <string.h>
 
 #include "../common/bw_addresses.h"
+#include "cutscene_hands_math.h"
 #include "debug_menu.h"
 #include "hand_feel.h"
 #include "hand_feel_math.h"
@@ -1183,12 +1184,17 @@ void CornerOf(const Built& built, int v, Corner* out) {
   out->uv[1] = g_mesh.uv[v * 2 + 1];
 }
 
+// HandModelSetFrontDepth and HandModelSetRoomLight.
+bool g_front_depth = false;
+bool g_room_light = false;
+
 void Emit(const Corner& corner, float near_plane, float half_x, float half_y,
           Vertex* out) {
   out->x = (1.0f + corner.c[0] / corner.c[2]) * half_x;
   out->y = (1.0f - corner.c[1] / corner.c[2]) * half_y;
   out->rhw = near_plane / corner.c[2];
   out->z = 1.0f - out->rhw;
+  if (g_front_depth) out->z = cutscene_hands_math::FrontDepth(out->z);
   uint32_t color = 0;
   for (int k = 0; k < 4; ++k) {
     float value = corner.color[k];
@@ -1355,7 +1361,11 @@ bool HandModelBuild(int hand, const float position[3], const float rotation[9],
                 &built.mirror);
   // The direction to the light of the game, from the hand.
   float light[3] = {g_light[0], g_light[1], g_light[2]};
-  if (g_light_is_position) {
+  if (g_room_light) {
+    light[0] = 0.0f;
+    light[1] = 1.0f;
+    light[2] = 0.0f;
+  } else if (g_light_is_position) {
     for (int i = 0; i < 3; ++i) light[i] -= position[i];
   }
   if (!hx::Normalize(light)) {
@@ -1443,6 +1453,10 @@ bool HandModelIndexTip(int hand, float out[3]) {
 }
 
 bool HandModelBuilt() { return g_built[0].valid || g_built[1].valid; }
+
+void HandModelSetRoomLight(bool on) { g_room_light = on; }
+
+void HandModelSetFrontDepth(bool on) { g_front_depth = on; }
 
 void HandModelSetOpacity(int hand, float opacity) {
   if (hand < 0 || hand > 1) return;

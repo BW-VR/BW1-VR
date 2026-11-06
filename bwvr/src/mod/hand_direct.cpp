@@ -9114,6 +9114,15 @@ bool HandDirectExactFacts(float target[3], float* size, uint64_t* frame) {
 // position (CHand+0x78), and whether the controller places the Hand in this
 // frame. With the controller, the position is the target, the point that the
 // glow marks. False with no CHand.
+// For influence_edge.cpp: whether the land point x, z is inside the player's
+// influence, by the call that fn_005D1120 makes for GInterface+0x48. False
+// when the mod has no interface of the game yet.
+bool HandDirectInsideInfluence(float x, float z, bool* inside) {
+  if (!g_installed || g_face == nullptr) return false;
+  *inside = InsideInfluence(g_face, ClampToMap(x), ClampToMap(z));
+  return true;
+}
+
 bool HandDirectHandPosition(float out[3], bool* by_controller) {
   if (g_hand == nullptr) return false;
   const float* at = reinterpret_cast<const float*>(g_hand + kHandPosition);

@@ -36,12 +36,15 @@ The code is in `src/mod/cutscene_window.cpp` and `cutscene_window_math.h`.
   the player and the scene. They are not in the measure of the depth.
 - **A video of the game** (the birth of the god after the drowning boy) is on
   the screen plane, the same picture for both eyes.
+- **The hands.** Both hands show at the real hands, in front of the screen,
+  and a ray goes from the pointing hand to the screen. The trigger clicks at
+  the pixel that the ray meets (section 7, "The hands in the window").
 - **The leave.** The next frame is a full view frame, with the God view built
   where the story left the camera. The walls open in 0.5 s. Nothing in the view
   moves while they open.
 - **The keys.** `cutscene_window` (1) is the window. `cutscene_face_head`,
   `cutscene_depth`, `cutscene_subtitles`, `cutscene_edge_columns` and
-  `cutscene_video` and `cutscene_advisors` (all 1) are its parts, and 0 turns each part off. With `test_keys=1`, numpad 0
+  `cutscene_video`, `cutscene_advisors` and `cutscene_hands` (all 1) are its parts, and 0 turns each part off. With `test_keys=1`, numpad 0
   changes the window live and numpad 1 the depth limit.
 - **A mouse player** with no headset gets no change.
 
@@ -148,13 +151,15 @@ In a flat frame:
 | `draw_hooks.cpp` | The cinema bars show. The help text has the size of the game, not `ui_scale_pct`. The help text goes to the subtitle card (section 7). Each world batch of both eye passes goes to the measure of the nearest thing (section 6.4) |
 | `near_plane.cpp` | The near plane of the game stays |
 | `xr_screen.cpp` | The eye pictures go out as two quads at the opening, not as a projection layer. Each eye shows its picture less the crop (section 6.2). The subtitle card goes over them |
-| `controllers.cpp` | A press of the trigger needs no pixel in view. It is a plain click |
+| `controllers.cpp` | A press of the trigger needs no pixel in view. It is a plain click. With `cutscene_hands=1` the pointer goes to the pixel of the ray first (section 7) |
+| `overlay.cpp` | With `cutscene_hands=1` the hands and the ray are in the room, and each eye draws them with its camera on the screen (section 7) |
 
 Every module that asks `HeadCameraEnabled` gets a no in a flat frame: the
 pointer (`pointer_map.cpp`), the spirits (`spirit_anchor.cpp`), the ears
 (`audio_listener.cpp`), the teleport and the world lock of the interface. Each
-then does what it does in play mode 1. The hands of the mod find no room
+then does what it does in play mode 1. The hands of the mod find no world
 (`HeadCameraStageBasis` gives nothing), so they place no Hand and pick nothing.
+With `cutscene_hands=1` the overlay draws them in the room (section 7).
 
 The state changes after the frame went out and before the next main camera
 call. `EnterFlat` and `LeaveFlat` change the view angle at that same time, so no
@@ -592,16 +597,55 @@ the player and the scene.
 The advisors are not fixed in the room, and their sound comes from the game
 camera.
 
-**The hands.** The mod places no Hand, draws no glow and no ray, and shows no hint
-card. The teleport, the grab of the land, the zoom steps and the far grab do not
-act: each needs the room, and a flat frame has none.
+**The hands in the window** (`cutscene_hands=1`). The mod places no Hand of
+the game, draws no glow and shows no hint card. The teleport, the grab of the
+land, the zoom steps and the far grab do not act: each needs the world, and a
+flat frame has none. But the player sees both hands and a ray:
+
+- **The room of the hands.** `overlay.cpp` builds the hands in the room of
+  `HeadPoseToRoom` and not in the world (`ControllersOverlayHandsRoom`), as
+  for the intro: no context of the game, and no fingers that feel the world.
+  The pointing hand has the point pose. The light comes from straight up.
+- **The camera of an eye on the screen** (`cutscene_hands_math.h`). An eye
+  sees a point of the room along the line from the eye to it. That line meets
+  the screen at one point, and the eye picture has the point at the pixel of
+  that point of the screen. So each eye sees the hand in its true direction,
+  and the two eyes see it at its true place in front of the screen. The
+  camera of each eye (`EyeCamera`) is in the form of the overlay, so the
+  overlay and the hand model project with it as in the full view. The eyes
+  are the head of the frame (`CutsceneWindowHead`) and half of the distance
+  between the eyes to each side. The pixels of the screen are the columns
+  that the opening shows of each eye picture (`window_math::Columns`) and all
+  of its rows.
+- **In front of the scene.** The scene is on the screen or behind it, and a
+  hand is nearer. So each depth of a hand goes to the front of the depth
+  buffer (`FrontDepth`, 0.0005 to 0.0205), and the parts of a hand keep their
+  order. An advisor in front of the screen does not hide a hand.
+- **One walk.** The pass of the left eye draws the hands for the left eye
+  only, and then for the right eye only with the camera of the right eye
+  (`kOneWalkLeftOnly`, `kOneWalkRightOnly`). With two walks each pass draws
+  its own eye.
+- **The ray** goes from the aim point of the pointing hand to the point
+  where it meets the opening, with a mark at its end. A ray that misses the
+  opening is 3 m long. It has no glow, because a glow ribbon turns to an eye
+  camera of the world.
+- **The click.** `controllers.cpp` (`WindowPixel`) puts the pointer of the
+  game at the pixel of the game camera at the end of the ray: the mean of the
+  two eye pixels, because the game camera of a flat frame is the middle of
+  the two eye cameras. A press of the trigger then clicks there. A ray that
+  misses the opening gives no pixel, and the pointer stays where it is.
+- **The hands outside the opening** do not show: past the opening there is
+  only black.
+
+With `cutscene_hands=0` the window has no hands and no ray, and the trigger
+clicks at the place of the pointer.
 
 **The buttons that a cut scene needs:**
 
 | Button | In the window |
 | --- | --- |
 | The left menu button (and Y on the left controller with `button_layout=0`) | Esc. The game drops Esc while a script holds the cinema bars (`GGame::ProcessKey` `0x0063EF20` tests `HelpSystem + 0x45E8` and `+ 0x45EC`) [V]. So Esc does nothing in a story, on a monitor too, and it opens the menu again after the story |
-| The trigger | A left click at the place of the pointer |
+| The trigger | A left click at the place of the pointer. With `cutscene_hands=1` that is the end of the ray, when the ray meets the opening |
 | The mouse and the keys | As on a monitor |
 | F11 | Recenter. The screen moves in front of the head |
 
@@ -627,6 +671,7 @@ All in `[bwvr]`. None is in the launcher.
 | `cutscene_video` | 1 | 1 puts a video of the game in the window on the screen plane, the same picture for both eyes (section 7). 0 gives the video no rule of the window: in one walk the two eyes see it at two places on the screen |
 | `cutscene_advisors` | 1 | 1 puts each advisor in front of the screen, `cutscene_advisor_distance_cm` from the eyes, and leaves it out of the measure of the nearest thing (section 7). 0 draws the advisors as the scene draws them, in the measure |
 | `cutscene_advisor_distance_cm` | 133 | The distance of an advisor from the eyes, 30 to `screen_distance_cm` |
+| `cutscene_hands` | 1 | 1 shows both hands and a ray in the window, and the trigger clicks at the pixel of the ray (section 7). 0 shows no hand and no ray, and the trigger clicks at the place of the pointer |
 | `cutscene_window_capture` | 0 | A test: 1 saves the eye pictures of the second and the 90th frame in the window, of the second frame after it, and of the 31st frame with an advisor in the window (three times at most) |
 | `cutscene_window_test_off`, `cutscene_window_test_on` | 0, 0 | A test with no key press: at the first frame number the window goes off, and at the second it goes on, as numpad 0 does |
 | `cutscene_depth_test_off`, `cutscene_depth_test_on` | 0, 0 | The same for the depth limit, as numpad 1 does |
@@ -666,6 +711,14 @@ of the advisors. Then the log has these lines:
   A line says when an advisor comes to the edge of the opening, when it has
   room again, and when it is not in the window. The report has the frames
   with an advisor and the batches that got the place in front.
+- With `cutscene_hands=1`, the tag `overlay`: the first draw of the hands in
+  the window, each change of the ray onto the opening or off it, and each 300
+  frames. The line has the pixels of the index tip of the pointing hand and
+  of the end of the ray in each eye picture. The tag `controllers`: the place
+  of the end of the ray on the screen and its pixel in each eye picture and
+  in the game camera, when the ray comes onto the opening or goes off it.
+  Each press of a button in the window has a line with the pointer of the
+  game.
 - The frame that the bars go down, the frame that the cut scene is over, the
   frame that the window ends, and the frame that the full view is open again. At
   the end, the `god view` tag has a line with the game camera, the waist point
@@ -723,6 +776,13 @@ the frames of a change, and 400 lines for the depth.
   the difference, each vertex keeps its column between the eyes, and in one
   walk its depth from the middle), the first frame with no move, and the
   extent of a batch.
+- The hands (`scene_checks.h`): a point on the screen is at the pixel of its
+  place in each eye, the two pixels are the crop apart, and the pixel of the
+  game camera is their mean. A point in front of the screen is where the line
+  from each eye meets the screen, with more crossing than the screen. An eye
+  that moves to the right sees a near point move to the left. The ray meets
+  the opening, misses it to the side, and meets nothing to the back. The
+  depth of a hand is at the front and keeps its order.
 - The edge columns: the right eye does not show its first column and the left
   eye does not show its last one, both eyes show the same number of columns,
   the two parts stay the crop apart, and an edge that leaves less than half of
@@ -762,6 +822,13 @@ pictures (`cutscene_window_capture=1`) are the proof. The checks are:
   screen.
 
 ## 11. Not built, not tested, and what needs the headset
+
+- **The hands in the window on the desktop:** `scene_run.ps1 -Kind window`
+  puts the window up with `cutscene_window_test_bars` and steps the hand to
+  three points with an eye picture and a press at each. The place of the
+  hands in front of the screen is depth that only a headset shows.
+- **A hand outside the opening** does not show, also while it is in the view
+  of the head.
 
 - **How much depth a shot keeps** after a near thing left it. The two times of
   the rule (2 s and 4 s) have no ini key. Shorter times give more depth and a

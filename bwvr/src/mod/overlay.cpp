@@ -131,12 +131,16 @@
 #include "controller_math.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "cutscene_hands_math.h"
+#include "cutscene_window.h"
 #include "far_grab.h"
 #include "gesture_trail_math.h"
 #include "glow_math.h"
 #include "hand_exact.h"
 #include "hand_feel.h"
 #include "hand_model.h"
+#include "influence_edge_math.h"
+#include "one_walk.h"
 #include "overlay_math.h"
 #include "ray_glow_math.h"
 #include "teleport.h"
@@ -168,6 +172,14 @@ bool HandDirectHandPosition(float out[3], bool* by_controller);
 int HandDirectStrokeHand(float curl[5]);
 // hand_exact.cpp: the game's Hand is the pointing hand.
 bool HandExactOn();
+// head_pose.cpp: the units of the room of the hands in a meter.
+float HeadPoseScale();
+// influence_edge.cpp: the test circle, the fade of a hand, and the wall at the
+// edge of the influence near the pointing hand.
+void InfluenceEdgeFrame(float units_per_meter);
+float InfluenceEdgeOpacity(int hand, const float point[3], float dt);
+int InfluenceEdgeWall(const float point[3], float units_per_meter,
+                      influence_math::WallTriangle* out, int room);
 
 namespace {
 
@@ -184,6 +196,40 @@ const int kHands = 2;
 bool g_intro = false;
 bool g_intro_built = false;
 float g_intro_opacity[kHands] = {1.0f, 1.0f};
+// THE CUT SCENE WINDOW (cutscene_hands=1, docs/cutscene-window.md, "The hands
+// in the window"). A flat frame has no world for the hands, so the room of
+// the hands (HeadPoseToRoom) is the world of the overlay: g_room while
+// BuildFrame builds the hands there, as for the intro with no context of the
+// game and no fingers that feel the world. g_flat is a flat frame that draws
+// them. Each eye draws them with its camera on the screen of the window
+// (cutscene_hands_math.h, EyeCamera), at the front of the depth buffer.
+bool g_room = false;
+bool g_flat = false;
+cutscene_hands_math::View g_view;
+// The ray of the pointing hand in the window: its end, and if it meets the
+// opening there.
+float g_flat_ray[2][3];
+bool g_flat_ray_hits = false;
+bool g_have_flat_ray = false;
+// The near plane of the cameras of the eyes, in meters of the room.
+const float kFlatNearM = 0.02f;
+// A ray that misses the opening is this long, in meters of the room.
+const float kFlatMissM = 3.0f;
+uint64_t g_flat_frames = 0;
+uint64_t g_flat_hits = 0;
+uint64_t g_flat_draws = 0;
+int g_flat_logs = 0;
+const int kMaxFlatLogs = 30;
+uint64_t g_flat_logged_frame = 0;
+bool g_flat_logged_hit = false;
+// The pixels of the end of the ray in each eye picture, for the log.
+float g_flat_end[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
+// THE WALL AT THE EDGE OF THE INFLUENCE (influence_edge.cpp), in the world.
+// The glow draws it as added light.
+const int kWallMax = 64;
+influence_math::WallTriangle g_wall[kWallMax];
+int g_wall_count = 0;
+const float kWallColor[3] = {1.00f, 0.86f, 0.55f};
 // The tether of a far grab is a tube of one segment. The room of a ring
 // under a far target stays as spare room.
 const int kFarMaxTriangles = overlay_math::kRingMaxTriangles +
@@ -697,7 +743,13 @@ bool BuildFrame() {
     return false;
   }
   OverlayHands hands;
-  if (!ControllersOverlayHands(&hands)) return false;
+  if (!(g_room ? ControllersOverlayHandsRoom(&hands)
+               : ControllersOverlayHands(&hands))) {
+    return false;
+  }
+  // The influence at the hand: the test circle of a desktop run starts here.
+  const bool game_world = !g_intro && !g_room;
+  if (game_world) InfluenceEdgeFrame(hands.units_per_meter);
   if (!g_said_owner) {
     g_said_owner = true;
     if (++g_owner_logs <= kMaxOwnerLogs) {
@@ -713,10 +765,10 @@ bool BuildFrame() {
   // With the exact Hand and overlay=0, only the other hand. With the mesh of
   // the game's Hand hidden, both hands.
   const bool other_only =
-      !g_intro && !g_on && HandExactOn() && !HandExactHidesGame();
+      game_world && !g_on && HandExactOn() && !HandExactHidesGame();
   HandExactContext context;
   memset(&context, 0, sizeof(context));
-  const bool have_context = !g_intro && HandExactGetContext(&context);
+  const bool have_context = game_world && HandExactGetContext(&context);
   // The color of the skin: the player's alignment, or the plain skin.
   float skin[3] = {kSkin[0], kSkin[1], kSkin[2]};
   if (have_context && context.have_alignment && HandExactTint()) {
@@ -778,7 +830,7 @@ bool BuildFrame() {
     // THE TICKLE: while the pointing hand strokes the Creature, the fingers
     // move a little with the path of the real hand. A hand that is still has
     // still fingers.
-    if (pointing && !g_intro && overlay_math::kFingers == 5) {
+    if (pointing && game_world && overlay_math::kFingers == 5) {
       float tickle[5];
       if (HandDirectStrokeHand(tickle) != 0) {
         for (int f = 0; f < 5; ++f) {
@@ -799,7 +851,7 @@ bool BuildFrame() {
     // bodies near the hand change the curls of the pose (hand_feel.cpp).
     HandFeelShape shape;
     memset(&shape, 0, sizeof(shape));
-    if (!g_intro) {
+    if (game_world) {
       HandFeelHand feel;
       feel.hand = h;
       feel.pointing = pointing;
@@ -826,7 +878,11 @@ bool BuildFrame() {
     for (int k = 0; k < 3; ++k) input.position[k] = hand.position[k];
     for (int k = 0; k < 9; ++k) input.rotation[k] = hand.rotation[k];
     const bool left = h == 0;
-    HandModelSetOpacity(h, g_intro ? g_intro_opacity[h] : 1.0f);
+    // Outside the influence of the player a hand fades (influence_fade).
+    HandModelSetOpacity(h, g_intro ? g_intro_opacity[h]
+                           : game_world
+                               ? InfluenceEdgeOpacity(h, hand.position, dt)
+                               : 1.0f);
     float mesh_curls[overlay_math::kFingers];
     memcpy(mesh_curls, curls, sizeof(mesh_curls));
     if (mesh && BuildMeshHand(h, mesh_curls, shape)) {
@@ -1007,15 +1063,14 @@ void BuildFar() {
 // a mouse (controllers.cpp, ControllersMenuRay), and this thin line shows the
 // player where it points. Warm white, 2 mm of the room across. It draws with
 // overlay=0 too.
-void BuildMenuRay() {
-  g_menu_ray_triangles = 0;
-  float line[2][3], units = 0.0f;
-  if (!ControllersMenuRay(line[0], line[1], &units) || !(units > 0.0f)) return;
+// A RAY OF THE POINTING HAND: a tube along `line`, a mark at its end, the
+// light of the ray, and with `glow` its glow. Returns the triangles added.
+int AddRayLine(float line[2][3], float units, bool glow) {
   const int start = g_count;
   g_count += overlay_math::BuildTube(line, 2, kMenuRayRadiusM * units,
                                      &g_world[g_count],
                                      kMaxTriangles - g_count);
-  AddRayGlow(line, 2, units, kMenuGlowM, kMenuRay);
+  if (glow) AddRayGlow(line, 2, units, kMenuGlowM, kMenuRay);
   // A MARK AT THE END: a small cross across the ray. In a room of the Temple
   // the game's Hand does not show, so the end of the line is the cursor, and
   // a line of this width is hard to see on a wall some meters away. The cross
@@ -1060,13 +1115,44 @@ void BuildMenuRay() {
       for (int k = 0; k < 3; ++k) g_color[t][v][k] = kMenuRay[k] * level;
     }
   }
-  g_menu_ray_triangles = g_count - start;
+  return g_count - start;
+}
+
+void BuildMenuRay() {
+  g_menu_ray_triangles = 0;
+  float line[2][3], units = 0.0f;
+  if (!ControllersMenuRay(line[0], line[1], &units) || !(units > 0.0f)) return;
+  g_menu_ray_triangles = AddRayLine(line, units, true);
   static bool said = false;
   if (!said && g_menu_ray_triangles > 0) {
     said = true;
     ModLog("overlay      : the ray of the menu is drawn, %d triangles, frame "
            "%llu", g_menu_ray_triangles, g_frame);
   }
+}
+
+// THE RAY IN THE CUT SCENE WINDOW (g_room): from the aim point of the
+// pointing hand to the point where it meets the opening of the screen, or
+// kFlatMissM long when it does not meet it. The trigger clicks at the pixel of
+// that point (controllers.cpp, WindowPixel).
+void BuildFlatRay() {
+  float origin[3], direction[3];
+  if (!ControllersRoomAim(origin, direction)) return;
+  const float units = HeadPoseScale();
+  if (!(units > 0.0f)) return;
+  float u = 0.0f, v = 0.0f, t = 0.0f;
+  bool inside = false;
+  const bool plane = cutscene_hands_math::HitPlane(g_view, origin, direction,
+                                                   &u, &v, &t, &inside);
+  g_flat_ray_hits = plane && inside;
+  const float length = g_flat_ray_hits ? t : kFlatMissM * units;
+  for (int k = 0; k < 3; ++k) {
+    g_flat_ray[0][k] = origin[k];
+    g_flat_ray[1][k] = origin[k] + direction[k] * length;
+  }
+  AddRayLine(g_flat_ray, units, false);
+  g_have_flat_ray = true;
+  if (g_flat_ray_hits) ++g_flat_hits;
 }
 
 // THE TRAIL OF A GESTURE. While the draw button is held and the hand may draw
@@ -1163,15 +1249,27 @@ void ProjectTips(int eye, const float m[12], float near_plane, float hx,
 int DrawGlow(IDirect3DDevice7* device, const float m[12], float near_plane,
              float hx, float hy, HRESULT* result) {
   *result = S_OK;
-  if (g_glow_lines == 0) return 0;
+  if (g_glow_lines == 0 && g_wall_count == 0) return 0;
   float eye[3];
-  if (!glow_math::CameraPlace(m, eye)) return 0;
   int triangles = 0;
-  for (int l = 0; l < g_glow_lines; ++l) {
-    const GlowLine& line = g_glow_line[l];
-    triangles += glow_math::BuildRibbon(&g_glow_point[line.first], line.count,
-                                        eye, &g_glow_triangle[triangles],
-                                        kGlowMaxTriangles - triangles);
+  if (g_glow_lines > 0 && glow_math::CameraPlace(m, eye)) {
+    for (int l = 0; l < g_glow_lines; ++l) {
+      const GlowLine& line = g_glow_line[l];
+      triangles += glow_math::BuildRibbon(
+          &g_glow_point[line.first], line.count, eye,
+          &g_glow_triangle[triangles], kGlowMaxTriangles - triangles);
+    }
+  }
+  // THE WALL at the edge of the influence: triangles of the world with their
+  // own light, the same for both eyes.
+  for (int w = 0; w < g_wall_count && triangles < kGlowMaxTriangles; ++w) {
+    glow_math::Triangle& tri = g_glow_triangle[triangles++];
+    for (int v = 0; v < 3; ++v) {
+      for (int k = 0; k < 3; ++k) {
+        tri.p[v][k] = g_wall[w].p[v][k];
+        tri.c[v][k] = kWallColor[k] * g_wall[w].light[v];
+      }
+    }
   }
   g_glow_triangles = triangles;
   int n = 0;
@@ -1302,6 +1400,152 @@ void CountCost() {
          Ms(g_cost_ticks - g_cost_build_ticks) / frames);
 }
 
+// ONE EYE OF A FLAT FRAME (g_flat): the hands and the ray of the room with
+// the camera of that eye on the screen of the window. Each depth goes to the
+// front of the depth buffer (cutscene_hands_math::FrontDepth), so the scene,
+// which is on the screen or behind it, never hides a hand. Returns the
+// triangles drawn, or -1 when a draw failed.
+int DrawFlatEye(IDirect3DDevice7* device, int eye, float hx, float hy) {
+  float m[12];
+  if (!cutscene_hands_math::EyeCamera(g_view, eye, hx, hy, m)) return 0;
+  const float near_plane = kFlatNearM * HeadPoseScale();
+  int n = 0;
+  int drawn = 0;
+  for (int t = 0; t < g_count; ++t) {
+    float c[3][3];
+    for (int v = 0; v < 3; ++v) {
+      overlay_math::ToCamera(m, g_world[t].p[v], c[v]);
+    }
+    ScreenVertex out[6];
+    const int pieces = overlay_math::ClipTriangle(c, g_color[t], near_plane,
+                                                  hx, hy, out);
+    for (int p = 0; p < pieces; ++p) {
+      const ScreenVertex* corner = &out[p * 3];
+      if (overlay_math::OffScreen(corner, hx, hy)) continue;
+      for (int v = 0; v < 3; ++v) {
+        Vertex& d = g_vertices[n++];
+        d.x = corner[v].x;
+        d.y = corner[v].y;
+        d.z = cutscene_hands_math::FrontDepth(corner[v].z);
+        d.rhw = corner[v].rhw;
+        d.diffuse = Color(corner[v].color);
+        d.specular = 0xFF000000u;
+        d.u = 0.0f;
+        d.v = 0.0f;
+      }
+      ++drawn;
+    }
+  }
+  HRESULT result = S_OK;
+  if (n > 0) {
+    SetStates(device, false);
+    result = device->DrawPrimitive(D3DPT_TRIANGLELIST, kFvf, g_vertices,
+                                   static_cast<DWORD>(n), 0);
+    PutStatesBack(device);
+  }
+  int mesh = 0;
+  if (g_mesh_hands) {
+    HandModelSetFrontDepth(true);
+    mesh = HandModelDraw(device, m, near_plane, hx, hy);
+    HandModelSetFrontDepth(false);
+  }
+  // The pixels of the index tip of each hand and of the end of the ray, for
+  // the log.
+  const float white[3] = {1.0f, 1.0f, 1.0f};
+  for (int h = 0; h < kHands; ++h) {
+    g_tip_seen[eye][h] = false;
+    if (!g_hand_valid[h]) continue;
+    float c[3];
+    overlay_math::ToCamera(m, g_index_tip[h], c);
+    if (!(c[2] >= near_plane)) continue;
+    ScreenVertex v;
+    overlay_math::Project(c, white, near_plane, hx, hy, &v);
+    g_tip_screen[eye][h][0] = v.x;
+    g_tip_screen[eye][h][1] = v.y;
+    g_tip_seen[eye][h] = true;
+  }
+  if (g_have_flat_ray) {
+    float c[3];
+    overlay_math::ToCamera(m, g_flat_ray[1], c);
+    if (c[2] >= near_plane) {
+      ScreenVertex v;
+      overlay_math::Project(c, white, near_plane, hx, hy, &v);
+      g_flat_end[eye][0] = v.x;
+      g_flat_end[eye][1] = v.y;
+    }
+  }
+  if (FAILED(result) || mesh < 0) return -1;
+  return drawn + mesh;
+}
+
+// The draw of a flat frame in an eye pass. In one walk the pass of the left
+// eye is the only pass: it draws the left eye only and then the right eye
+// only, each with its own camera. With two walks each pass draws its eye.
+void DrawFlat(int eye) {
+  if (eye < 0 || eye > 1 || g_asked_frame[eye] == g_frame) return;
+  g_asked_frame[eye] = g_frame;
+  IDirect3DDevice7* device =
+      *reinterpret_cast<IDirect3DDevice7* const*>(
+          bw::render::kDirect3DDevice7);
+  if (device == nullptr) return;
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(
+          bw::tech::kInfoTransform);
+  const float hx = info->half_res_x, hy = info->half_res_y;
+  if (!(hx > 0.0f) || !(hy > 0.0f)) return;
+  int drawn = 0;
+  bool failed = false;
+  const bool both = eye == 0 && OneWalkActive();
+  if (both) {
+    for (int e = 0; e < 2; ++e) {
+      OneWalkSetMode(e == 0 ? kOneWalkLeftOnly : kOneWalkRightOnly);
+      const int d = DrawFlatEye(device, e, hx, hy);
+      if (d < 0) failed = true;
+      if (d > 0) drawn += d;
+    }
+    OneWalkSetMode(kOneWalkBoth);
+  } else {
+    const int d = DrawFlatEye(device, eye, hx, hy);
+    if (d < 0) failed = true;
+    if (d > 0) drawn += d;
+  }
+  if (failed) {
+    ++g_failed;
+    if (!g_said_failed) {
+      g_said_failed = true;
+      ModLog("overlay      : the draw of the hands in the cut scene window "
+             "failed");
+    }
+  }
+  if (drawn <= 0) return;
+  ++g_flat_draws;
+  // One line on the first draw, when the ray comes onto the opening or goes
+  // off it, and each 300 frames.
+  const bool last_eye = both || eye == 1;
+  if (!last_eye || g_flat_logs >= kMaxFlatLogs) return;
+  const bool change = g_flat_ray_hits != g_flat_logged_hit;
+  if (g_flat_logged_frame != 0 && !change &&
+      g_frame < g_flat_logged_frame + 300) {
+    return;
+  }
+  g_flat_logged_hit = g_flat_ray_hits;
+  g_flat_logged_frame = g_frame;
+  ++g_flat_logs;
+  const int p = g_pointing;
+  ModLog("overlay      : the hands in the cut scene window, frame %llu: %d "
+         "triangles in the two eyes. The index tip of the pointing hand is at "
+         "%.1f %.1f in the left eye picture and at %.1f %.1f in the right "
+         "one%s. The ray %s at %.1f %.1f and %.1f %.1f",
+         ControllersFrameCount(), drawn, g_tip_screen[0][p][0],
+         g_tip_screen[0][p][1], g_tip_screen[1][p][0], g_tip_screen[1][p][1],
+         g_tip_seen[0][p] && g_tip_seen[1][p]
+             ? ""
+             : " (not in front of both eyes)",
+         g_flat_ray_hits ? "meets the screen" : "misses the screen and ends",
+         g_flat_end[0][0], g_flat_end[0][1], g_flat_end[1][0],
+         g_flat_end[1][1]);
+}
+
 }  // namespace
 
 // The world to camera matrix of this eye pass. The four camera matrices go
@@ -1393,6 +1637,8 @@ void OverlaySetEnabled(bool on) {
                                  : "off");
 }
 
+void OverlayHandPoints(int hand);
+
 // stereo.cpp, once a frame, after the hands of the frame are known and
 // before the eye passes.
 void OverlayFrame() {
@@ -1415,8 +1661,36 @@ void OverlayFrame() {
   if (g_clock_base == 0) g_clock_base = start;
   g_seconds = static_cast<float>(Ms(start - g_clock_base) * 0.001);
   HandFeelFrame();
+  g_flat = false;
+  g_have_flat_ray = false;
+  g_wall_count = 0;
+  if (CutsceneWindowFlat() && CutsceneWindowHands()) {
+    // THE CUT SCENE WINDOW: the hands and the ray in the room, or nothing.
+    // With cutscene_hands=0 the frame goes on as below, and the build of the
+    // world finds no room for the hands.
+    if ((g_on || HandExactOn()) && CutsceneWindowRoomView(&g_view)) {
+      OverlayHandPoints(g_pointing);
+      HandModelSetRoomLight(true);
+      g_room = true;
+      BuildFrame();
+      g_room = false;
+      HandModelSetRoomLight(false);
+      if (ControllersOwnPointer()) BuildFlatRay();
+      g_flat = g_count > 0 || g_mesh_hands;
+      if (g_flat) ++g_flat_frames;
+    }
+    g_pointing_drawn = g_hand_valid[g_pointing];
+    g_build_ticks = Now() - start;
+    return;
+  }
   if (g_on || HandExactOn()) BuildFrame();
   g_pointing_drawn = g_hand_valid[g_pointing];
+  // The wall at the edge of the influence, near the point of the pointing
+  // hand (influence_wall).
+  if (g_hand_valid[g_pointing] && g_units_per_meter > 0.0f) {
+    g_wall_count = InfluenceEdgeWall(g_index_tip[g_pointing],
+                                     g_units_per_meter, g_wall, kWallMax);
+  }
   BuildTeleport();
   BuildCommand();
   BuildMenuRay();
@@ -1566,7 +1840,14 @@ bool OverlayFingerJoints(int hand, int finger, float curl, float spread,
 // FinishFrame. Draws only inside an eye pass, and at most once in each eye
 // pass of a frame.
 void OverlayDraw() {
-  if (g_count == 0 && !g_mesh_hands && g_glow_lines == 0) return;
+  if (g_flat) {
+    DrawFlat(g_eye);
+    return;
+  }
+  if (g_count == 0 && !g_mesh_hands && g_glow_lines == 0 &&
+      g_wall_count == 0) {
+    return;
+  }
   const int eye = g_eye;
   if (eye < 0 || eye > 1 || g_asked_frame[eye] == g_frame) return;
   g_asked_frame[eye] = g_frame;

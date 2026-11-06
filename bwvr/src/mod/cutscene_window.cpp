@@ -81,6 +81,7 @@
 #include "../vr/xr_screen.h"
 #include "MinHook.h"
 #include "cutscene_window.h"
+#include "cutscene_hands_math.h"
 #include "cutscene_window_math.h"
 #include "one_walk_math.h"
 
@@ -92,6 +93,9 @@ bool ScriptCameraStoryOwns();
 bool HeadPoseOrigin(float position_out[3], float rotation_out[4]);
 uint64_t HeadPoseOriginSerial();
 float HeadPoseScale();
+// head_pose.cpp: a pose of the LOCAL space in the room of the hands.
+bool HeadPoseToRoom(const float position[3], const float orientation[4],
+                    float rotation_out[9], float translation_out[3]);
 // head_camera.cpp: the head goes on the camera in the full view.
 bool HeadCameraOn();
 // frame_source.cpp: the size of the render.
@@ -152,11 +156,14 @@ struct Settings {
   // With the window off, a video of the game plays on the screen of the
   // window (cutscene_video_window).
   bool video_window;
+  // The hands and the ray of the pointing hand in the window, and the click
+  // at the pixel of the ray (cutscene_hands).
+  bool hands;
 };
 Settings g_set = {false, true, true, 2.0f, 2.6f,          0.5f, 3.0f,
                   false, 0,    0,    true, kDepthNearest, 0.0f, 0,
                   0,     true, 1.4f, 0,    1,
-                  true,  true, 1.33f, 0,   true};
+                  true,  true, 1.33f, 0,   true, true};
 
 window_math::State g_state = {false, 1.0f};
 bool g_wanted = false;
@@ -169,6 +176,8 @@ float g_saved_fov = 0.0f;
 bool g_have_head = false;
 float g_head[3] = {0.0f, 0.0f, 0.0f};
 float g_head_turn[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+// The distance between the eyes of the last frame, in meters.
+float g_ipd = 0.064f;
 bool g_have_anchor = false;
 window_math::Anchor g_anchor = {};
 uint64_t g_anchor_serial = 0;  // the recenter count when the anchor was set
@@ -363,6 +372,7 @@ void ReadSettings() {
   g_set.video = number("cutscene_video", 1) != 0;
   g_set.video_window = number("cutscene_video_window", 1) != 0;
   g_set.advisors = number("cutscene_advisors", 1) != 0;
+  g_set.hands = number("cutscene_hands", 1) != 0;
   g_set.advisor_distance =
       limit(number("cutscene_advisor_distance_cm", 133), 30,
             static_cast<int>(g_set.distance * 100.0f + 0.5f)) /
@@ -413,6 +423,13 @@ void ReadSettings() {
                  "on the screen of the window"
                : "A video of the game fills the picture of each eye");
   }
+  ModLog("cut scene    : cutscene_hands=%d. %s", g_set.hands ? 1 : 0,
+         g_set.hands
+             ? "In the window both hands show at the real hands, a ray goes "
+               "from the pointing hand to the screen, and the trigger clicks "
+               "at the pixel of the ray"
+             : "In the window no hand and no ray show, and the trigger "
+               "clicks at the place of the pointer");
   if (g_set.advisors) {
     ModLog("cut scene    : cutscene_advisors=1. In the window an advisor is "
            "%.2f m from the eyes (cutscene_advisor_distance_cm), in front of "
@@ -817,6 +834,7 @@ void CutsceneWindowHead(const float center[3], const float orientation[4]) {
 bool CutsceneWindowBeginFlat(float ipd, uint64_t frame, float* separation,
                              float* ui_shift) {
   g_crop = 0;
+  if (ipd > 0.0f) g_ipd = ipd;
   if (!g_state.flat || g_set.depth == kDepthOff) return false;
   const bw::tech::InfoTransform* info = Info();
   const float* near_at = reinterpret_cast<const float*>(bw::tech::kNearPlane);
@@ -1046,6 +1064,53 @@ bool CutsceneWindowAdvisorBatch(int eye, const void* verts, uint32_t count,
   return true;
 }
 
+bool CutsceneWindowHands() {
+  ReadSettings();
+  return g_set.hands && g_set.god;
+}
+
+bool CutsceneWindowRoomView(cutscene_hands_math::View* out) {
+  if (!g_state.flat || !g_have_head) return false;
+  const bw::tech::InfoTransform* info = Info();
+  if (info == nullptr) return false;
+  window_math::Screen opening;
+  OpeningNow(g_crop, &opening);
+  float axes[9], center[3];
+  if (!HeadPoseToRoom(opening.position, opening.orientation, axes, center)) {
+    return false;
+  }
+  const float scale = HeadPoseScale();
+  for (int k = 0; k < 3; ++k) {
+    out->center[k] = center[k];
+    out->right[k] = axes[k * 3 + 0];
+    out->up[k] = axes[k * 3 + 1];
+    out->forward[k] = axes[k * 3 + 2];
+  }
+  out->width = opening.width * scale;
+  out->height = opening.height * scale;
+  // The eyes: the middle of the head and half of the distance between the
+  // eyes along the right axis of the head (x y z w).
+  const float* q = g_head_turn;
+  const float right[3] = {1.0f - 2.0f * (q[1] * q[1] + q[2] * q[2]),
+                          2.0f * (q[0] * q[1] + q[3] * q[2]),
+                          2.0f * (q[0] * q[2] - q[3] * q[1])};
+  for (int e = 0; e < 2; ++e) {
+    const float side = (e == 0 ? -0.5f : 0.5f) * g_ipd;
+    const float at[3] = {g_head[0] + side * right[0],
+                         g_head[1] + side * right[1],
+                         g_head[2] + side * right[2]};
+    float unused[9];
+    if (!HeadPoseToRoom(at, g_head_turn, unused, out->eye[e])) return false;
+    const window_math::EyeColumns columns =
+        window_math::Columns(e, g_crop, g_set.edge, info->res_x);
+    out->column[e] = static_cast<float>(columns.offset);
+    out->columns[e] = static_cast<float>(columns.width);
+  }
+  out->rows = static_cast<float>(info->res_y);
+  return out->width > 0.0f && out->height > 0.0f && out->columns[0] > 0.0f &&
+         out->columns[1] > 0.0f;
+}
+
 bool CutsceneWindowSubtitles() { return g_state.flat && g_set.subtitles; }
 
 bool CutsceneWindowSubtitleQuad(uint32_t render_w, uint32_t render_h,
@@ -1084,6 +1149,7 @@ bool CutsceneWindowSubtitleQuad(uint32_t render_w, uint32_t render_h,
 
 void CutsceneWindowStage(bool to_headset, uint64_t frame, float ipd) {
   if (g_state.flat) ++g_flat_frames;
+  if (ipd > 0.0f) g_ipd = ipd;
   const bool changing = !g_state.flat && g_state.open < 1.0f;
   if (changing) ++g_change_frames;
   // The first flat frame gets a log line too.

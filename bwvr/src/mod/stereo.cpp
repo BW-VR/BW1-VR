@@ -203,6 +203,7 @@ void TargetGlowReport();
 void OverlayFrame();
 void OverlayPassEye(int eye);
 void OverlayReport();
+void InfluenceEdgeReport();
 // vignette.cpp: the comfort vignette. See docs/god-view.md, "The comfort of
 // a move".
 void VignetteFrame();
@@ -2102,6 +2103,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     HandGlowReport();
     TargetGlowReport();
     OverlayReport();
+    InfluenceEdgeReport();
     VignetteReport();
     TeleportReport();
     CreatureCommandReport();

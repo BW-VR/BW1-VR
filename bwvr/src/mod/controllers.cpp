@@ -56,6 +56,8 @@
 #include "controller_math.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "cutscene_hands_math.h"
+#include "cutscene_window.h"
 #include "debug_menu.h"
 #include "far_grab.h"
 #include "frame_profile.h"
@@ -196,8 +198,6 @@ void HintCardMovesToggle(const char* by);
 
 void ControllersPump();
 bool ControllersFarAllowed(const char** why);
-// cutscene_window.cpp: this frame draws on the screen of the cut scene window.
-bool CutsceneWindowFlat();
 // intro_vr.cpp: true while the Lionhead intro draws in stereo.
 bool IntroBlocksButtons();
 // hand_direct.cpp: the CHand of this frame.
@@ -1299,6 +1299,75 @@ float PanelPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
   return meters;
 }
 
+// THE CUT SCENE WINDOW (cutscene_hands=1, docs/cutscene-window.md, "The
+// hands in the window"). In a flat frame the aim ray of the pointing hand
+// meets the screen of the window in the room. The pixel of the game camera at
+// that point is the pixel of the pointer, so a press of the trigger clicks
+// there. A ray that misses the opening gives no pixel, and the pointer stays
+// where it is.
+// The pointer of the game in render pixels (pointer_map.cpp writes it).
+const uintptr_t kGamePointerX = 0x00E852C0;
+uint64_t g_window_pixels = 0;
+uint64_t g_window_misses = 0;
+bool g_window_was_hit = false;
+int g_window_logs = 0;
+const int kMaxWindowLogs = 40;
+
+void WindowPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
+  (void)hand;
+  menu_room_math::AimForward(g_aim_q[index], p->room_direction);
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(bw::tech::kInfoTransform);
+  if (!IsBadReadPtr(info, sizeof(*info))) {
+    p->render_w = static_cast<float>(info->res_x);
+    p->render_h = static_cast<float>(info->res_y);
+  }
+  cutscene_hands_math::View view;
+  float m[9], origin[3], direction[3];
+  float u = 0.0f, v = 0.0f, t = 0.0f;
+  bool inside = false;
+  bool hit = false;
+  if (CutsceneWindowRoomView(&view) &&
+      HeadPoseToRoom(g_aim_p[index], g_aim_q[index], m, origin)) {
+    controller_math::AimDirection(m, direction);
+    hit = cutscene_hands_math::HitPlane(view, origin, direction, &u, &v, &t,
+                                        &inside) &&
+          inside;
+  }
+  if (hit) {
+    cutscene_hands_math::GamePixel(view, u, v, &p->x, &p->y);
+    p->have_pixel = true;
+    p->off_view = false;
+    p->hand_x = p->x;
+    p->hand_y = p->y;
+    p->have_hand_pixel = true;
+    p->hand_off_view = false;
+    ++g_window_pixels;
+  } else {
+    ++g_window_misses;
+  }
+  if (hit != g_window_was_hit && g_window_logs < kMaxWindowLogs) {
+    ++g_window_logs;
+    if (hit) {
+      float lx = 0.0f, ly = 0.0f, rx = 0.0f, ry = 0.0f;
+      cutscene_hands_math::EyePixel(view, 0, u, v, &lx, &ly);
+      cutscene_hands_math::EyePixel(view, 1, u, v, &rx, &ry);
+      ModLog("controllers  : the ray of the pointing hand meets the screen "
+             "of the cut scene window %.2f m right and %.2f m up of its "
+             "middle, %.2f m from the hand. The pointer goes to the pixel "
+             "%.1f %.1f of the game camera (the left eye picture %.1f %.1f, "
+             "the right eye picture %.1f %.1f), frame %llu",
+             u / HeadPoseScale(), v / HeadPoseScale(), t / HeadPoseScale(),
+             p->x, p->y, lx, ly, rx, ry, g_frame);
+    } else {
+      ModLog("controllers  : the ray of the pointing hand does not meet the "
+             "screen of the cut scene window, so the pointer stays where it "
+             "is, frame %llu", g_frame);
+    }
+  }
+  g_window_was_hit = hit;
+}
+
 void Compute() {
   Pointing& p = g_point;
   memset(&p, 0, sizeof(p));
@@ -1329,6 +1398,10 @@ void Compute() {
     // The turn of the aim, for the owner rule (ControllerMoved).
     menu_room_math::AimForward(g_aim_q[index], p.room_direction);
     PanelPixel(hand, index, &p);
+    return;
+  }
+  if (CutsceneWindowFlat() && CutsceneWindowHands()) {
+    WindowPixel(hand, index, &p);
     return;
   }
 
@@ -2057,6 +2130,23 @@ void ReconcileController(int button, ULONGLONG now, bool quiet = false) {
              flag == kDoubleFlag[button] ? " (double click)"
              : quiet                     ? " (the click of the open grip)"
                                          : "",
+             g_frame);
+    }
+    // In the cut scene window the press goes to the place of the pointer of
+    // the game. With cutscene_hands=1 that is the pixel of the ray.
+    if (CutsceneWindowFlat() && g_window_logs < kMaxWindowLogs) {
+      ++g_window_logs;
+      const int32_t* px = reinterpret_cast<const int32_t*>(kGamePointerX);
+      const bool readable = !IsBadReadPtr(px, sizeof(int32_t) * 2);
+      ModLog("controllers  : the %s button presses in the cut scene window "
+             "at the pointer of the game %d %d. %s, frame %llu",
+             kButtonName[button], readable ? px[0] : -1,
+             readable ? px[1] : -1,
+             !CutsceneWindowHands()
+                 ? "cutscene_hands=0: the pointer is where it was"
+             : g_window_was_hit ? "The ray of the pointing hand meets the screen"
+                                : "The ray misses the screen, so the pointer "
+                                  "is where it was",
              g_frame);
     }
   } else {
@@ -4726,6 +4816,53 @@ bool ControllersOverlayHands(OverlayHands* out) {
     o.squeeze = hand.squeeze;
     o.valid = true;
   }
+  return true;
+}
+
+// For overlay.cpp in a frame of the cut scene window (cutscene_hands=1): the
+// hands as ControllersOverlayHands gives them, but in the room of the hands
+// (HeadPoseToRoom) and not in the world. The room is the world of the
+// overlay then: no table, no game camera and a gain of 1.
+bool ControllersOverlayHandsRoom(OverlayHands* out) {
+  memset(out, 0, sizeof(*out));
+  if (!g_on || g_frame == 0) return false;
+  out->units_per_meter = HeadPoseScale();
+  out->pointing = PointingIndex();
+  out->frame = g_frame;
+  for (int i = 0; i < 9; ++i) out->map_basis[i] = (i % 4) == 0 ? 1.0f : 0.0f;
+  out->map_gain = 1.0f;
+  for (int index = 0; index < 2; ++index) {
+    const bwvr::HandInput& hand = g_hands[index];
+    OverlayHand& o = out->hand[index];
+    const bool grip_pose = hand.grip_valid;
+    if (!hand.active || !(grip_pose || hand.aim_valid)) continue;
+    if (!Tracked(grip_pose ? hand.grip_tracked : hand.aim_tracked,
+                 &g_overlay_seen_tracked[index])) {
+      continue;
+    }
+    if (!HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
+                        grip_pose ? hand.grip_orientation
+                                  : hand.aim_orientation,
+                        o.rotation, o.position)) {
+      continue;
+    }
+    o.trigger = hand.trigger;
+    o.squeeze = hand.squeeze;
+    o.valid = true;
+  }
+  return true;
+}
+
+// For overlay.cpp in the same frames: the aim ray of the pointing hand in the
+// room of the hands. False when the hand has no aim pose.
+bool ControllersRoomAim(float origin[3], float direction[3]) {
+  if (!g_on || g_frame == 0) return false;
+  const int index = PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || !hand.aim_valid) return false;
+  float m[9];
+  if (!HeadPoseToRoom(g_aim_p[index], g_aim_q[index], m, origin)) return false;
+  controller_math::AimDirection(m, direction);
   return true;
 }
 

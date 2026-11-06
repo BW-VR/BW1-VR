@@ -81,6 +81,14 @@ bool HandModelBuilt();
 // multiplies the alpha of the texture. It stays until the next call.
 void HandModelSetOpacity(int hand, float opacity);
 
+// THE CUT SCENE WINDOW (overlay.cpp, cutscene_hands). With `on` the next
+// builds take a light from straight up in place of the light of the game,
+// because the hands are in the room and not in the world. With FrontDepth on
+// the draw puts each depth at the front of the depth buffer
+// (cutscene_hands_math::FrontDepth).
+void HandModelSetRoomLight(bool on);
+void HandModelSetFrontDepth(bool on);
+
 // In an eye pass: draws the hands of this frame with the camera of the eye.
 // Returns the count of triangles drawn, or -1 when the draw failed.
 int HandModelDraw(IDirect3DDevice7* device, const float camera[12],

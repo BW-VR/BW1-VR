@@ -93,13 +93,6 @@ These items come before the other work.
   the white people are in `headset-checks.md`, "Play as normal and send the
   log". The invisible body after the
   quest has no known cause yet.
-- **B39. The camera turns around the Forest miracle.** Testers find that the
-  camera turns in a circle at the Forest miracle, and that this must stop. It
-  occurs with the cut scene around the player and with the window. This is
-  motion that the player did not make. Not known: which script or cut scene
-  of the game turns the camera, and when it starts. Find it in a desktop
-  run first. Then hold the camera still or let the head control it, with a
-  key whose old value keeps the turn.
 - **B2. A catch at once.** A press of the grip on
   an object that moves (it falls, flies or rolls) puts the object in the
   hand from the first frame after the press. The game sends its pick up at
@@ -436,14 +429,6 @@ keeps the mod as it is.
 
 **Miracles and gestures**
 
-- **F5. The influence at the hand.** Outside the influence of the player,
-  the hands fade (`HandModelSetOpacity`), and the stream of the influence
-  starts at the hand, not on the land under it
-  (`GVirtualInfluence::Draw` `0x0076D000`, the call of
-  `PSysGlobal::AddManaPathSprite` at `0x0076D1C2`). Also a faint wall of
-  light at the edge of the influence, only near the hand and only while the
-  hand comes near the edge, so the player sees the limit before the hand
-  goes past it. A key for each part.
 - **F6. The fireball and the speed of a throw.** On hold: the owner tests
   the throw with the mod's own physics first. A fireball leaves at the
   game's filtered speed of the Hand (`CHand+0x48C8`), and no run had a real
@@ -474,11 +459,6 @@ keeps the mod as it is.
   - The art of each controller must be our own drawing, or a model with a
     license that lets us ship it (for example a model that the runtime
     gives through an OpenXR extension at run time).
-- **F15. The hands in the cut scene window.** While a cut scene plays in
-  the window, the mod draws no hands and no ray (`cutscene-window.md`,
-  section 7), and the trigger clicks at the place of the mouse pointer,
-  which the player cannot see. Wanted: the hands stay in view, and a ray
-  from the pointing hand to the screen shows where the trigger clicks.
 
 **The village, the Creature and the help**
 
@@ -548,6 +528,14 @@ game as it is.
 
 ### Built, and not proven or not finished
 
+- **B39, F5 and F15 wait for their desktop runs** (`scene_run.ps1`, kinds
+  `forest`, `edge` and `window`). The camera of the player stays at the
+  Forest miracle (`miracle_camera_still`, `miracles.md`, "The camera path of
+  a miracle"). The hands fade outside the influence, the stream ends at the
+  Hand and a wall shows the edge (`influence_fade`, `influence_stream_hand`,
+  `influence_wall`, `miracles.md`, "The influence at the hand"). The hands
+  and a ray show in the cut scene window, and the trigger clicks at the
+  pixel of the ray (`cutscene_hands`, `cutscene-window.md`, section 7).
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:

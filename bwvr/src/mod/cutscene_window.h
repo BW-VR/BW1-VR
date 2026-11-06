@@ -62,6 +62,18 @@ bool CutsceneWindowAdvisorBatch(int eye, const void* verts, uint32_t count,
                                 const uint16_t* idx, uint32_t n,
                                 window_math::AdvisorShift* shift);
 
+// THE HANDS IN THE WINDOW (cutscene_hands). Hands is true when the key is on
+// in the God view. RoomView gives the screen of a flat frame in the room of
+// the hands (HeadPoseToRoom): the opening, its axes, the two eyes and the
+// columns of each eye picture that the opening shows. False outside a flat
+// frame. overlay.cpp draws the hands and the ray with it, and controllers.cpp
+// puts the pointer at the pixel of the ray.
+namespace cutscene_hands_math {
+struct View;
+}
+bool CutsceneWindowHands();
+bool CutsceneWindowRoomView(cutscene_hands_math::View* out);
+
 // THE SUBTITLES. True in a flat frame whose subtitles go to the subtitle card
 // (ui_panel.cpp). SubtitleQuad gives the place of the card for the part of
 // the render that the game drew its text in: `rect` is x, y, width and height

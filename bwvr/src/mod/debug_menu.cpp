@@ -263,6 +263,11 @@ int CreatureCommandRuleValue();
 void CreatureCommandRuleChange(const char* by);
 int CreatureStayModeValue();
 void CreatureStayModeChange(const char* by);
+// The Creature with no press (controllers.cpp, ui_panel.cpp).
+int ControllersOpenStrokeValue();
+void ControllersOpenStrokeChange(const char* by);
+int UiPanelLingerValue();
+void UiPanelLingerChange(const char* by);
 int MiracleHandValue();
 void MiracleHandChange(const char* by);
 int VillageTotemValue();
@@ -612,6 +617,12 @@ const Switch kSwitches[] = {
     {kGroupCreature, L"Hold stay", L"Long grip makes the Creature stay",
      "creature_hold_stay", CreatureStayModeValue, CreatureStayModeChange,
      L"off|on"},
+    {kGroupCreature, L"Open stroke", L"Open hand strokes the Creature",
+     "creature_stroke_open", ControllersOpenStrokeValue,
+     ControllersOpenStrokeChange, L"grip only|open hand"},
+    {kGroupCreature, L"Panel stays", L"Creature panel with no press",
+     "creature_panel_linger", UiPanelLingerValue, UiPanelLingerChange,
+     L"press only|stays"},
     {kGroupCreature, L"Stroke hand", L"Hand of a stroke",
      "creature_stroke_hand", HandDirectStrokeHandValue,
      HandDirectStrokeHandChange, L"by size|flat|finger|fist"},

@@ -49,6 +49,10 @@ struct UiPanelSettings {
   int help_px_per_deg = 44;     // ui_help_px_per_deg, at a 2880 px render
   int help_rect[4] = {0, 0, 0, 0};  // ui_help_rect
   int creature_panel = kCreaturePanelNear;  // creature_panel
+  // 1: the Creature panel shows while the Hand is at the player's Creature
+  // with no press, and for 3 s after the Hand left it. 0: only while a press
+  // holds the Creature, as the game arms it.
+  int creature_panel_linger = 1;            // creature_panel_linger
   // With ui_panel=0 (docs/ui-layer.md, "The menus in the room"): 1 the
   // menus of the game on a panel that is fixed in the room, 0 the menus in
   // the eye pictures, fixed to the head.

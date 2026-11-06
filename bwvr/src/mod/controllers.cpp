@@ -56,6 +56,8 @@
 #include "controller_math.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "creature_stay.h"
+#include "creature_touch_math.h"
 #include "debug_menu.h"
 #include "far_grab.h"
 #include "frame_profile.h"
@@ -135,6 +137,11 @@ bool HandDirectModTake();
 // hand_direct.cpp: the release at once is on now (release_at_once, and the
 // A/B key of test_keys=1). The fast opening of the grip follows it.
 bool HandDirectReleaseAtOnce();
+// hand_direct.cpp: the player's own Creature at the Hand, and the gap from
+// the Hand's point to its body in cm of the room. See docs/creature.md, "The
+// stroke with the open hand".
+void* HandDirectCreatureAtHand(bool empty);
+bool HandDirectOwnCreatureGap(void* creature, float* gap_cm);
 // hand_direct.cpp: on the table, offer the objects in a wider ball around the
 // Hand to the pick for a few frames, for the word "seek".
 void HandDirectWidenPick(int frames);
@@ -2976,6 +2983,91 @@ void PollPressHoldKey() {
   ControllersPressHoldChange("Shift and the plus key of the number pad");
 }
 
+// THE STROKE WITH THE OPEN HAND (creature_stroke_open, docs/creature.md,
+// "The stroke with the open hand"). The game strokes the Creature only in the
+// Creature state of the Hand, and only a press of its Action button on the
+// Creature starts that state. So while the open hand stays in the body of the
+// player's Creature, the mod holds that button down for the player
+// (creature_touch_math.h). The grip and the trigger must be open. A grip that
+// closes in the press takes the press, and then a slap counts as before.
+// hand_direct.cpp keeps the open hand under the speed of a slap and sends no
+// leash click for such a press. 0 keeps the old way: only the grip presses.
+int g_open_stroke = -1;           // creature_stroke_open
+creature_touch_math::Press g_open_press;
+void* g_open_creature = nullptr;  // the Creature of the press
+uint64_t g_open_starts = 0;
+uint64_t g_open_frames = 0;
+int g_open_logs = 0;
+const int kMaxOpenLogs = 60;
+
+// One step, once a frame. True while the mod holds the Action button.
+bool OpenStrokeStep(ULONGLONG now_ms, bool usable, bool far_claim) {
+  using namespace creature_touch_math;
+  if (g_open_stroke < 0) {
+    g_open_stroke = IniInt("creature_stroke_open", 1) != 0 ? 1 : 0;
+    ModLog("controllers  : creature_stroke_open=%d. %s", g_open_stroke,
+           g_open_stroke != 0
+               ? "An open hand that stays in the body of your Creature for "
+                 "0.2 s strokes it: the mod holds the Action button of the "
+                 "game until the hand is out of the body. The open hand "
+                 "never slaps. A slap needs the grip"
+               : "Only the grip strokes the Creature");
+  }
+  const double now = static_cast<double>(now_ms) / 1000.0;
+  // The controls of the game's two buttons.
+  const bool right_control = g_swap_buttons ? g_trigger_down : g_grip_down;
+  const bool left_control = g_swap_buttons ? g_grip_down : g_trigger_down;
+  const bool hand_ok = g_open_stroke != 0 && usable && DirectHandNow() &&
+                       g_pointer_owned && !left_control;
+  void* creature =
+      g_open_press.on ? g_open_creature : HandDirectCreatureAtHand(true);
+  float gap_cm = 0.0f;
+  const bool have_gap =
+      creature != nullptr && HandDirectOwnCreatureGap(creature, &gap_cm);
+  const bool can_start = hand_ok && creature != nullptr && !far_claim &&
+                         !GrabHeld() && !g_jump_control && !g_gesture_held &&
+                         !TeleportAiming() && !MenuUp() && !TempleRayOn() &&
+                         !CreatureStayHolds() && !g_button[kRight].need_up &&
+                         InView();
+  const double age = now - g_open_press.started;
+  const int event =
+      Step(&g_open_press, now, can_start, hand_ok, have_gap, gap_cm,
+           static_cast<float>(g_direct.creature_touch_cm), right_control);
+  if (event == kStart) {
+    g_open_creature = creature;
+    ++g_open_starts;
+  }
+  if (g_open_press.on) ++g_open_frames;
+  if (event != kNothing && g_open_logs < kMaxOpenLogs) {
+    ++g_open_logs;
+    if (event == kStart) {
+      ModLog("controllers  : the open hand is in the body of your Creature "
+             "%p for %.0f ms: the mod holds the Action button of the game "
+             "for a stroke. The Hand's point is %.1f cm in the body "
+             "(creature_stroke_open=1), frame %llu",
+             creature, kDwellSeconds * 1000.0, -gap_cm, g_frame);
+    } else if (event == kEndOut && have_gap) {
+      ModLog("controllers  : the press of the open hand ends after %.0f ms: "
+             "the Hand's point is %.1f cm out of the body, past %d cm "
+             "(creature_touch_cm), frame %llu", age * 1000.0, gap_cm,
+             g_direct.creature_touch_cm, g_frame);
+    } else {
+      ModLog("controllers  : the press of the open hand ends after %.0f ms: "
+             "%s, frame %llu", age * 1000.0,
+             event == kEndGrip
+                 ? "the grip closed, and the press goes on as a press of the "
+                   "grip"
+                 : event == kEndOut
+                       ? "the mod does not know the body of the Creature now"
+                       : "the hand cannot stroke now (the trigger, a menu, "
+                         "or the controller does not place the Hand)",
+             g_frame);
+    }
+  }
+  if (!g_open_press.on) g_open_creature = nullptr;
+  return g_open_press.on;
+}
+
 void PumpButtons(ULONGLONG now) {
   const bwvr::HandInput& hand = g_hands[PointingIndex()];
   // THE GRIP OPENS AT ONCE. The control that is the game's right button with
@@ -3133,6 +3225,10 @@ void PumpButtons(ULONGLONG now) {
     }
   }
 
+  // THE STROKE WITH THE OPEN HAND: the mod holds the Action button while the
+  // open hand stays in the body of the player's Creature.
+  const bool open_press = OpenStrokeStep(now, usable, far_claim);
+
   // The A button starts a jump when no source holds the left button, and no
   // grab holds the world.
   if (g_a_event) {
@@ -3205,7 +3301,8 @@ void PumpButtons(ULONGLONG now) {
       g_button[b].need_up = true;
     }
     const bool held_by_hold = hold_on && b == kRight;
-    const bool asks = held_by_hold ? hold.button : ButtonDown(b);
+    const bool asks = (held_by_hold ? hold.button : ButtonDown(b)) ||
+                      (open_press && b == kRight);
     // The click of an open grip lets go and picks nothing. It needs no fresh
     // press and no pixel in view, and a grab of the world does not hold it
     // back: a throw often ends with the hand out of view.
@@ -5123,6 +5220,20 @@ int ControllersThrowGainPct() { return g_direct.throw_gain_pct; }
 float ControllersCreatureSlapMps() { return g_direct.creature_slap_mps; }
 int ControllersCreatureTouchCm() { return g_direct.creature_touch_cm; }
 bool ControllersCreatureSlapWait() { return g_direct.creature_slap_wait; }
+// The press of the open hand on the Creature is on (creature_stroke_open).
+bool ControllersOpenStrokeOn() { return g_open_press.on; }
+// The switch of the debug page for creature_stroke_open. A press that runs
+// ends at the next pump.
+int ControllersOpenStrokeValue() {
+  return g_on && g_open_stroke >= 0 ? g_open_stroke : kDebugCannot;
+}
+void ControllersOpenStrokeChange(const char* by) {
+  if (g_open_stroke < 0) return;
+  g_open_stroke = g_open_stroke != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_open_stroke != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: creature_stroke_open is %d now, frame %llu", by,
+         g_open_stroke, g_frame);
+}
 
 // A controller button changed since the owner rule last asked.
 bool ControllersButtonEvent() {
@@ -5352,6 +5463,12 @@ void ControllersReport() {
            g_hold_take_ends);
     g_hold_take_opens = g_hold_take_ends = 0;
     g_fast_opens = g_slow_opens = 0;
+  }
+  if (g_open_starts != 0 || g_open_frames != 0) {
+    ModLog("controllers  : %llu presses of the open hand on your Creature, "
+           "and %llu frames with the Action button held for one, this window",
+           g_open_starts, g_open_frames);
+    g_open_starts = g_open_frames = 0;
   }
   // The focus test of the camera, in a window in which the mod changed its
   // answer.

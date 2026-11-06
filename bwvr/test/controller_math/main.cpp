@@ -3589,6 +3589,7 @@ void CreatureChecks() {
 #include "glow_checks.h"
 #include "places_checks.h"
 #include "debug_window_checks.h"
+#include "creature_touch_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -3989,6 +3990,7 @@ int main() {
   fish_checks::FishChecks();
   zoom_checks::ZoomChecks();
   stay_checks::StayChecks();
+  creature_touch_checks::CreatureTouchChecks();
   look_checks::LookChecks();
   text_click_checks::TextClickChecks();
   script_frame_checks::ScriptFrameChecks();

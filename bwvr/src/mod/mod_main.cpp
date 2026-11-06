@@ -1041,6 +1041,10 @@ void ReadSettings() {
     // The Creature panel: 0 off, 1 fixed in the room, 2 near the Creature.
     u.creature_panel = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "creature_panel", 2, path));
+    // The panel with no press, and its stay after the Hand left. 0: only
+    // while a press holds the Creature.
+    u.creature_panel_linger = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "creature_panel_linger", 1, path));
     // The menus on a panel that is fixed in the room, with ui_panel=0, and
     // the keyboard in the headset under it. 0 keeps the menus in the eye
     // pictures, fixed to the head. docs/ui-layer.md, "The menus in the room".

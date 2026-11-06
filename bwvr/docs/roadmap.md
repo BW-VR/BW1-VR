@@ -400,15 +400,14 @@ that moves while the Hand takes it.
   at the Hand acts as the take at a distance. The game has no test of the
   distance: it ends a take only when the source is gone or empty, the Pot
   is full, or the Hand is outside the influence
-  (`GInterfaceStatus::Process` `0x005DC4E0`). So the mod most likely lets
-  the game's button go up. Places to look: `ReleaseController` and the
-  test of the view for a held button in `controllers.cpp`, the paths of
-  `need_up`, and `far_claim` in `StepGrip`. A headset log of the fault
-  shows which: "grip : the grip opens during a bulk take" means the
-  button went up. The line `hand bulk    : the bulk take ends` gives the
-  button of the game, the grip, the interface action, the distance from the
-  pile and the influence at the end, and `village_run.ps1 -Kind neartake`
-  makes the case on the desktop.
+  (`GInterfaceStatus::Process` `0x005DC4E0`). The desktop run cannot make
+  the fault happen: in `village_run.ps1 -Kind neartake` the take goes on
+  with the hand 15, 36 and 48 cm of the room from the pile, until the grip
+  opens. The scripted grip never falls. The likely cause is a real squeeze
+  that falls fast for a moment, which opens the grip (`grip_fast_open`). So
+  `near_take_keeps=1` lets only a grip below 35% end a bulk take. Open: a
+  headset log of a take with the hand moved away (`headset-checks.md`,
+  "Play as normal and send the log").
 - **P23. The aim down from a chair: keep watch.** A seated player aims down
   less well than a standing player, because furniture can be in the way of
   the hand. Not planned. One idea: a launcher option that lets the grab

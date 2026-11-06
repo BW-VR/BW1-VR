@@ -224,6 +224,8 @@ int HandFeelPinchValue();
 void HandFeelPinchChange(const char* by);
 int HandLandStopValue();
 void HandLandStopChange(const char* by);
+int ControllersNearTakeKeepsValue();
+void ControllersNearTakeKeepsChange(const char* by);
 int HandModelSwapValue();
 void HandModelSwapChange(const char* by);
 int HandModelLookValue();
@@ -560,6 +562,9 @@ const Switch kSwitches[] = {
     {kGroupHand, L"Press hold", L"Game button held for a pick",
      "grip_press_hold", ControllersPressHoldValue, ControllersPressHoldChange,
      L"off|on"},
+    {kGroupHand, L"Take keeps", L"A take ends only on an open grip",
+     "near_take_keeps", ControllersNearTakeKeepsValue,
+     ControllersNearTakeKeepsChange, L"off|on"},
     {kGroupHand, L"Take guard", L"Hold back the rest during a take",
      "catch_rest_guard", ThrowTakeValue, ThrowTakeChange, L"off|on"},
     {kGroupHand, L"Catch at once", L"Catch a moving object at once",
@@ -928,6 +933,9 @@ const wchar_t* const kTips[] = {
     // Press hold
     L"On: the game button stays down until the game has the object in its "
     L"Hand. Off: it goes up 167 ms after the object comes into the Hand.",
+    // Take keeps
+    L"On: while a bulk take runs, only a grip below 35 percent ends it. Off: "
+    L"a fast fall of the grip ends the take too.",
     // Take guard
     L"On: while the Hand takes an object, the mod holds back the end of its "
     L"physics, so a tree stays a tree. Off: the tree can die, and the Hand is "

@@ -1146,6 +1146,14 @@ take has no sound. See [audio.md](audio.md), 6.4, for the God view.
    take the Pot is in the Hand with the grip open (OpenHeld). The next close
    carries it, and the next opening lets go. A pile that runs out while the grip
    is closed gives a carry.
+
+   **Only an open grip ends a take** (`near_take_keeps=1`). While a take runs,
+   at the Hand or at a distance, the grip opens only below 35%. A fast fall of
+   the squeeze (`grip_fast_open`) does not open it then, so a real hand that
+   moves away from the pile and relaxes its squeeze for a moment keeps the
+   take. The log has each fall that the rule kept closed, with the values of
+   the last 12 frames. With `near_take_keeps=0` a fast fall ends the take, as
+   it ends a carry. The debug page has the switch "Take keeps".
 2. **The source is a choice.** `Choose` counts a bulk source (`TakeValid`, the
    tests of `FUN_005D1330`), and a holdable object wins a tie. So the pile goes
    in the next record, and the game gives `0xD`. The glow is gold over a source.
@@ -1317,8 +1325,13 @@ the mod puts the source back. "The take still runs with the grip open, so the
 mod ends it", with the method. Each report window counts the takes, the frames
 of a take, the pumps where the grip was the game's button, the steps where the
 record held the source, the steps where the mod put it back, and the takes that
-the mod ended. Tag `grip`: "the grip opens during a bulk take" and "the bulk
-take still runs after the grip opened". Tag `hand pick` says when the choice is
+the mod ended. The end of a take has the facts of that moment: the right
+button of the game, the grip, the interface action, the distance of the
+Hand's point from the source across the land, and whether the land under it
+is inside the influence. A take also has one line with the same facts at 15,
+30, 60 and 120 cm of the room from the source. Tag `grip`: "the grip opens
+during a bulk take", "the bulk take still runs after the grip opened", and
+"the grip falls fast during a bulk take and stays closed". Tag `hand pick` says when the choice is
 a bulk source, and whether it is inside the player's influence.
 
 The math tests are `BulkTakeChecks` and `TakeRuleChecks`
@@ -1347,8 +1360,14 @@ Test keys of `bwvr.ini`, for the desktop runs only:
   `fish_take=0`. A run puts the Hand on the fish first, and then shows a grip
   there with the old behavior.
 
-**Not tested:** a field, a store inside the real influence, and a take with
-the hand pulled away from the store. A desktop run has the loop of a take of
+`village_run.ps1 -Kind neartake` closes the grip on a pile and moves the hand
+away from the pile while the grip stays closed. The take goes on with the
+hand 15, 36 and 48 cm of the room from the pile, until the grip opens. The
+scripted grip never falls, so the run is the same with each value of
+`near_take_keeps`.
+
+**Not tested:** a field, a store inside the real influence, and a real grip
+that falls fast during a take (only a headset log shows it). A desktop run has the loop of a take of
 wood ([audio.md](audio.md), section 11). Desktop runs have the take of fish
 (see "The fish in the sea").
 

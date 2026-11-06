@@ -1489,9 +1489,13 @@ The math test (`hand_land_checks.h`) has the low poly hand, 19 units long at
   once at the first touch, not after a gap of 0.1 s, and again after 0.2 s.
 
 The desktop run is `village_run.ps1 -Kind land` (`bwvr/tools/desk`). It
-puts the Hand's point over the base of a tree near the Village Store, pushes
-the real hand 15 cm into the land, moves it sideways in the land and takes it
-up again, with an eye picture at each place.
+puts the Hand's point 3 cm over open land near the Village Store (the seek
+word `open`), pushes the real hand 12 cm into the land, moves it sideways in
+the land and takes it up again, with an eye picture at each place. A run
+with the hand at a pile of the store had the touch at 7.3 cm of the room and
+the end of the touch after 239 frames, with 14.0 cm of lift at the most, and
+one pulse. With `hand_feel=0` a finger tip stopped the hand at 11.7 cm, with
+20.1 cm at the most. With `hand_land_stop=0` the log had no touch.
 
 The checks in a headset are in `headset-checks.md`.
 

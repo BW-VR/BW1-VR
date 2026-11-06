@@ -134,7 +134,9 @@ if ($Kind -eq 'totem') {
     # times 10 cm up (up, seek_step_cm=10). The lines "hand bulk" have the
     # amount in the Hand, one line at 15, 30, 60 and 120 cm of the room from
     # the pile, and the end of the take with the button of the game, the grip,
-    # the interface action and the influence at that time.
+    # the interface action and the influence at that time. The scripted grip
+    # never falls, so the take goes on to the opening of the grip with each
+    # value of near_take_keeps.
     if ($Plan -eq '') { $Plan = 'gostore,store,pile,up,up,up' }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 75 }
@@ -145,15 +147,15 @@ if ($Kind -eq 'totem') {
     $keys = "$keys;seek_step_cm=10"
 } elseif ($Kind -eq 'land') {
     # The Hand stops at the land (bwvr/docs/hand-model.md, "The Hand stops at
-    # the land"). The Hand's point goes 2 units over the base of the tree
-    # nearest to the Village Store (treebase), then 15 cm of the room down
-    # (down, seek_step_cm=15), so the real hand is in the land. The hand
-    # steps 2 cm to the side (nudge), 12 cm to the other side (slap) and back
-    # (slap) in the land, and then 15 cm up from the drawn point (up), out of
-    # the land. An eye picture at each place. Give it
+    # the land"). Near the Village Store the Hand's point goes 3 cm over open
+    # land (open: no body within 40 cm of the room), then 15 cm of the room
+    # down (down, seek_step_cm=15), so the real hand is 12 cm in the land. The
+    # hand steps 2 cm to the side (nudge), 12 cm to the other side (slap) and
+    # back (slap) in the land, and then 15 cm up from the drawn point (up),
+    # out of the land. An eye picture at each place. Give it
     # -Set "backend=dxwrapper\ddraw.dll" for the eye pictures. The lines
     # "hand land" have the touch, the lift and the end of the touch.
-    if ($Plan -eq '') { $Plan = 'gostore,treebase,down,up' }
+    if ($Plan -eq '') { $Plan = 'gostore,open,down,up' }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 55 }
     if ($Steps -eq '') {

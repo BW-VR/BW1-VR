@@ -854,6 +854,13 @@ With `throw_turn=1` (the default):
    as for the release, and the picture turns as fast as the game turns that
    flick. A substep with a touch of another object runs one step and keeps
    the torque.
+4. **The cap in each step.** The torque of the flick comes back in each
+   step, so in a substep with that torque the cut before the substep does
+   not hold the cap. In such a substep the mod also changes the momentum
+   before each step, so that the momentum of that step
+   (`(L + torque dt) keep`, as `fn_007FE260` makes it) turns the picture at
+   the cap at most (`TurnCutBeforeStep`). Other substeps, and so each
+   contact, keep the cut before the substep only.
 
 The flight latches the key when the game's physics has the object. The mod
 changes only the momentum. The place, the velocity, the contact and the
@@ -879,6 +886,11 @@ a villager at 3 m/s. The runs have 60 frames a second.
 - **The contact.** The table gives the fastest turn of the picture in one
   game turn, in turns a second.
 
+The table is from runs at a render size in which each throw lands on the
+land. The scripted hand aims by the render size, so at another size a throw
+can land in the sea, and then the first contact is the water. The line
+"first contact of" says which one it is.
+
 | Throw | `throw_turn=1` | `throw_turn=0` | Substeps that the mod cut |
 | --- | --- | --- | --- |
 | Tree across the land | 1.2 | 1.0 | 0 |
@@ -896,14 +908,17 @@ a villager at 3 m/s. The runs have 60 frames a second.
   can be the cause [I].
 - In the game turn of the contact the picture turns faster than the cap with
   the key at 1: 1.8 and 2.3 turns a second.
-- **The villager.** With the cut of the release and the cap only, the
-  villager of `village_run.ps1 -Kind throw` gets a turn in its flight with
-  no contact, in the third game turn after the physics has it. The picture
-  then turns 4.2 times a second. That is the torque of the flick: the torque
-  comes back in each step of a substep, so the cap before a substep can not
-  hold it. No run shows the flight with the cut of the torque of the flick
-  yet. The log line "the game gives ... a torque" says when the torque comes
-  and how fast the picture turns with it.
+- **The villager.** The villager of `village_run.ps1 -Kind throw` gets the
+  torque of the flick 0.35 s into its flight, with no contact. With the key
+  at 0 that torque adds 88 turns a second to the picture, and the picture
+  turns 5.0 times a second for the rest of the flight. With the factor of
+  the torque (step 3) and no cap in each step, the picture turns 1.78 times
+  a second in the game turn of the torque and 1.5 or less after it. No run
+  has the cap in each step (step 4) yet. The log line "the game gives ... a
+  torque" says when the torque comes and how fast the picture turns with it.
+- **The torque of the flick on a tree and a rock.** The scripted hand gives
+  a tree and a rock a small torque of the flick: 0.01 turns a second of the
+  picture or less.
 - The eye pictures do not show the turn. They are still pictures, and the
   thrown object is small at that distance.
 

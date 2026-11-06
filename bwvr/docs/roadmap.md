@@ -44,11 +44,11 @@ is built, and no test has proven it.
 These items come before the other work.
 
 - **B35. A thrown object still turns fast in some throws.** Not run: the
-  cut of the torque of the flick (packet `0x40`, `throw_turn`, `throw.md`,
-  "The turn of a thrown object"). The villager of `village_run.ps1 -Kind
-  throw` must turn 1.5 times a second or less in its flight, and the rocks
-  and trees of `throw_queue.ps1` (`treefast`, `treeup`, `rockfast`) must
-  turn as in the table of `throw.md`.
+  cap in each step of a substep with the torque of the flick (packet
+  `0x40`, `throw_turn`, `throw.md`, "The turn of a thrown object"). The
+  villager of `village_run.ps1 -Kind throw` must turn 1.5 times a second or
+  less in its flight. The table of `throw.md` for a tree and a rock needs a
+  run in which each throw lands on the land.
 - **P20. The spell book: the open parts.** X opens a spell book over the
   hand that does not point, and the pointing hand pulls a miracle out of it
   with the grip: the game's own request (`spell_book=1`,
@@ -743,7 +743,8 @@ game as it is.
     influence, and the prayer of a Worship Site for a spell (`miracles.md`,
     "The bolt of Lightning"). A desktop run with the test key
     `influence_stream_test_log=1` logged no stream at the cast, so the
-    beam is not found yet. A column in that color stands in the sky.
+    beam is not found yet. A column in that color stands in the sky. Not
+    run: the A/B with `influence_wall=0`, and eye pictures during the pour.
   - Water puts out burning trees (27 casts of a desktop run) but not a
     burning house (62 casts). The pour starts 1.6 units over the roof. Not
     known whether a pour of the plain game puts out a house.

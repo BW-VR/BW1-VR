@@ -626,10 +626,9 @@ bulk take shows "Amount: 57" and on, as text only. The words of the help text
 
 ### 8.6 What needs the headset
 
-- Whether the word in the cap reads at the real size.
-- The switch of the help text when the player puts the controller down and uses
-  the mouse (it works in the desktop runs, at the start).
-- A census of a play session (section 7).
+The switch of the help text to the words of the mouse works in the desktop
+runs, at the start. The checks in a headset are in `headset-checks.md`,
+"Menus, cards and the ring".
 
 ## 9. The hint card
 
@@ -1089,26 +1088,10 @@ sharp at 40 pixels a cm.
 The lines that the player knows (9.10) have their own math test
 (`learn_checks.h`) and desktop runs of their own (9.10, "Tests").
 
-**Needs the headset.**
-
-- The quad layers themselves: the swapchain of each card, its alpha over the
-  world, and two cards in one frame. The desktop has no runtime.
-- Whether a letter of 8 mm reads at 40 to 60 cm (`hint_card_size_pct`).
-- Whether the side of the wrist is the right place while the hand works, and
-  how often the card changes side.
-- Whether the card steps against the hand at a low frame rate. The hand pose is
-  from the game frame, and the runtime moves the quad only for the head.
-- The prompts in play: the dwell, the time of the show and the counts.
-- The words of the card at the end of a take and of a fetch, and when the
-  Hand leaves a target, at the frame rate of the headset (`hint_words=3`, the
-  0.25 s of `kOwnedSeconds`). The desktop runs have 60 to 90 frames a second.
-- Whether the left card is easy to see while the right hand works, and whether
-  the land prompt at the left wrist teaches the grip.
-- The lines of the moves (`prompt_moves`): whether the left card with four
-  lines is easy to read, and whether "Stick Move" and "A Teleport" teach the
-  two ways to move at the start of the tutorial.
-- Whether 3 uses and 10 minutes of play are right for a new player, and
-  whether a player misses a line that went away (`hint_learn`, 9.10).
+The desktop has no runtime, so no desktop run shows the quad layers of the
+cards. The hand pose is from the game frame, and the runtime moves the quad
+only for the head. The desktop runs have 60 to 90 frames a second. The checks
+in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ### 9.9 Two cards and true hints
 
@@ -1348,9 +1331,7 @@ the noise tile and loads the fonts (about 8.5 ms), and GDI draws each letter
 of the new fonts for the first time. A line that is too long for 19 cm ends
 in "..." in both looks.
 
-**Needs the headset.** The contrast of the scroll against the sky and the
-land, whether the grain or the ink shimmers, and whether the larger scroll
-hides the other hand more often.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ## 10. A text that waits for a click
 
@@ -1532,6 +1513,5 @@ goes to the Creature select, and it has no scroll there too.
   `backend.md`), and the cut scene window does not open. The same must
   happen for the time of a spoken line, when a quest starts while a
   different challenge script has the dialogue [I].
-- The card is at the wrist of the pointing hand. Only a headset shows
-  whether a player sees the prompt there while a text stays on the subtitle
-  card.
+
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".

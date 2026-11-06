@@ -390,8 +390,8 @@ draws into target 0 and the walk of eye 1 into target 1, over the last
 picture of that eye (`IntroPassEye`, `vk_keep_picture=1`, `backend.md`, "The
 picture of the walk before"). The depth starts at the far plane in each walk.
 The game also plays this effect while it loads a saved game. A desktop run of
-the logo with `backend=vulkan` shows the trails in both eyes. Only a headset
-can show that no eye flickers.
+the logo with `backend=vulkan` shows the trails in both eyes. The checks in a
+headset are in `headset-checks.md`, "The intro".
 
 The scene has the same rule for each frame of play that keeps the picture of
 the frame before (`eye_clean`, `stereo-artifacts.md`, "The frame before of
@@ -700,31 +700,19 @@ rest pose.
 
 No headset session has seen this state, so `intro_vr` stays 0.
 
-- Whether the doubling is gone for the eye. The orbs are 3.6 cm apart on a
-  grid, and the cloud is 1.8 m deep at 3 m. Two orbs that are neighbors in the
-  picture can be far apart in depth, and the eye can then see one of them
-  double. That is the geometry of the scene, not a fault of a draw. A larger
-  `intro_distance_cm` makes each eye difference smaller.
-- Whether the motion of `intro_motion=1` is comfortable, and if not, whether
-  `intro_motion=2` is. Which value is the default.
-- Orbs that pass near the eyes with `intro_motion=1`: an orb a few cm from one
-  eye shows large in that eye only.
-- The size of the logo. The effect builds the logo in mode 0, before the mod
-  sets the view of the headset at the first stereo frame. So in a headset the
-  logo can be smaller than in a desktop run, which has its view from the
-  start [I]. The log has the width.
-- The frame rate with two effect calls and four copies of the picture for the
-  keeps. On the desktop each call includes a `Flip` that waits for the
+- Two orbs that are neighbors in the picture can be far apart in depth, and
+  the eye can then see one of them double. That is the geometry of the scene,
+  not a fault of a draw.
+- The effect builds the logo in mode 0, before the mod sets the view of the
+  headset at the first stereo frame. So in a headset the logo can be smaller
+  than in a desktop run, which has its view from the start [I].
+- On the desktop each effect call includes a `Flip` that waits for the
   display. With a headset `PresentWatchSkipDesktop` skips them.
-- The menu button skip, and the pulses of the test keys.
-- The push in 3D: whether the orbs move with the real hands, and whether the
-  reach is right (`intro_push_radius_cm`). The scripted hands of a desktop
-  run move in steps, and a real hand moves a little in each frame.
-- The show of the hands: whether the shake of the tracking of a hand at rest
-  stays below the speed of a motion, and whether the times to come and to go
-  feel right.
-- Which `intro_distance_cm` puts the logo in the reach of the arms and still
-  shows it well.
+- The scripted hands of a desktop run move in steps, and a real hand moves a
+  little in each frame.
+
+The checks in a headset are in `headset-checks.md`, "The intro" and
+"Performance".
 
 ## The skip
 
@@ -830,9 +818,8 @@ Each run of the scripts in `bwvr/tools/desk` has `intro_skip_test_frame=5`, so
 a run does not wait for the logos (`tools/desk/README.md`, "A fast start"). A
 run that tests the logos gives the key the value 0, or a frame of its own.
 
-**Needs the headset:** a press of a real controller. The hands come from
-`XrScreen` there, and no desktop run has them. Also how early in the first logo
-screen the runtime gives input.
+In a headset the hands come from `XrScreen`, and no desktop run has them. The
+checks in a headset are in `headset-checks.md`, "The intro".
 
 ## The internet check
 
@@ -922,8 +909,7 @@ dx check     : the game asked DSETUP.dll for the version of DirectX. The mod ans
   is an easy extra.
 - With `intro_motion=3` the camera of the game turns, and the room of the
   head turns with it. The push in 3D takes that turn as a turn of the hand.
-- The headset check of the stereo intro (see "What only a headset can
-  show").
+- The headset check of the stereo intro (`headset-checks.md`, "The intro").
 - Not verified: the exact particle count and array strides (the `0xC000` bound
   and the strides `0x34` and 12 suggest 4096 particles [I]), and that
   `0x00E85304` holds the mouse button bits.

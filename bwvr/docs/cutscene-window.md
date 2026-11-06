@@ -765,32 +765,21 @@ pictures (`cutscene_window_capture=1`) are the proof. The checks are:
 
 - **How much depth a shot keeps** after a near thing left it. The two times of
   the rule (2 s and 4 s) have no ini key. Shorter times give more depth and a
-  change that shows more. Only the headset can say what is right.
-- **Needs the headset:** all of the layers. The walls, the two eye quads with
-  their crop, the black past them and the subtitle card over them go out only with
-  a headset. A quad that shows a part of its picture (`imageRect`), and a card
-  over the eye quads, are not shown by a desktop run.
-- **Only the headset can show** that the left edge of the opening has no column
-  of light, and whether the opening reads as one solid rectangle,
-  whether a close shot is comfortable, whether the scale of a close shot (the eye
-  cameras nearer to each other) looks right, and whether the change of the depth
-  at a cut and at a thing that comes near shows. Numpad 1 gives a comparison in
-  one shot.
-- **Only the headset can show** that the video after the drowning boy stays on
-  the screen when the head turns and tilts. A desktop run has a fixed head. It
+  change that shows more.
+- **All of the layers go out only with a headset:** the walls, the two eye
+  quads with their crop, the black past them and the subtitle card over them. A quad
+  that shows a part of its picture (`imageRect`), and a card over the eye quads,
+  are not shown by a desktop run.
+- **The video after the drowning boy:** a desktop run has a fixed head. It
   shows the two eye pictures of a frame of the video.
-- **Also for the headset:** the place of the screen when a story starts while the
-  head looks down or to the side, and the size and the place of the subtitles
-  under the scene (21 to 26 degrees below eye level for two lines).
 - **A thing smaller than one cell of the grid** (4.4 degrees) can be in front of
   the screen: the nearest depth is the second nearest cell.
 - **A draw that does not go through `DrawTriangle`** is not in the measure. Which
   draws of the scene those are is not measured. The log names the caller of the
   nearest vertex, so a log of a shot shows what set its depth.
-- **The advisors, for the headset:** whether 1.33 m is a good place, and how
-  the change of the depth looks when an advisor comes in from a side of the
-  picture. At the edge it is on the screen plane, and it comes to its place
-  in front after about 23 px of motion in a render 3600 columns wide.
+- **An advisor that comes in from a side** of the picture is on the screen
+  plane at the edge. It comes to its place in front after about 23 px of motion
+  in a render 3600 columns wide.
 - **The advisors in two walks** (`one_walk=0`): the two eye pictures of an
   advisor do not show one pose. A block match of an advisor finds no clear
   match (a mean difference of 23 to 25 of 255, against 5 to 6 in one walk).
@@ -807,7 +796,7 @@ pictures (`cutscene_window_capture=1`) are the proof. The checks are:
   the window ends (`controllers.md`, section 6).
 - **A thing that comes into view inside a shot** takes the plane with it in one
   frame. That is a step of the depth of all the picture, with no motion of the
-  picture itself. It then goes back slowly. How that looks is for the headset.
+  picture itself. It then goes back slowly.
 - **The frame of a cut** has the plane of the shot before, for that one frame.
 - **A skip of a story is not built.** The game has no input that ends a story
   [V]. `GGame::ProcessKey` drops Esc while a script holds the bars. The game can
@@ -828,3 +817,5 @@ pictures (`cutscene_window_capture=1`) are the proof. The checks are:
   LOCAL space and not the place of the window. The Esc menu cannot open in a
   story (section 7).
 - **The table** (play mode 3) has no window. Its stories play on the table.
+
+The checks in a headset are in `headset-checks.md`, "Cut scenes and stories".

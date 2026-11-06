@@ -414,14 +414,15 @@ angle its pixels give it. The quad size sets the angle on the panel.
   35 px becomes 1.25 to 2.2 degrees. The texture is magnified 1.6 times, so
   the letters are a little soft. The other way is to draw the menus larger in
   the target and give the pointer the inverse scale (5.4), which is sharper.
-  An A/B in the headset decides.
 - **Help panel, 44 px per degree** (`ui_help_px_per_deg`, at a 2880 px tall
   render, scaled with the render height as the help text is). On the panel
   the help layer draws at the game's own size, 77 px letters at a 2880 px
   render [M], which is 1.75 degrees. The compositor then reduces the quad
   about 1.8 times with no mip levels, which can crawl [I]. The other way is
   to keep `ui_scale_pct` in the target and show the quad at about the display
-  density. An A/B in the headset decides.
+  density.
+
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ### 4.3 Normal placement
 
@@ -661,9 +662,7 @@ the panel batches cleanly, that the eye pictures lose the menus, and that a
 scripted click still works with the menu only on the panel. The code for the
 hit test does not change, so it should.
 
-Only a headset shows: the panel swapchain, `SetPanelTexture`, the quad layers,
-their place and size, the alpha over the world, the sRGB edges of 3.3, the
-recenter, and whether Virtual Desktop composes quad layers before the encode.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ## 10. Ini keys and the test key
 
@@ -869,8 +868,7 @@ on the Creature (`touchc`) and a capture (`shot`). The capture must show the
 box at 2.5 to 27.5 percent across and 25 to 58 percent down, and the log must
 show the values.
 
-Needs the headset: the place and the size of the quad, its alpha over the
-world, and whether 15 cm to the left keeps it clear of the Hand.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ## 14. Sources
 
@@ -985,8 +983,7 @@ limits, the scale about the Hand's point in the left eye, and the Hand's
 disparity for a point of the tooltip in both eyes. The desktop rig is the bulk
 take rig of `hand.md` with `help_test=1`.
 
-**Needs the headset.** Whether 2.5 cm reads well at 40 to 80 cm, whether the
-label fuses at the hand's depth, and where the Hand's mesh hides it.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ### 15.6 A hint at the game's Hand
 
@@ -1069,7 +1066,8 @@ hint "Move" is at the Hand in that run.
 
 - No run had a real tooltip of a thing under the Hand while the game placed
   the Hand. The test key draws through the same call with the same flags.
-- Only a headset can show that the hint fuses with the Hand and the land.
+
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ## 16. The hint card
 
@@ -1318,16 +1316,8 @@ the card off they must be in the eye pictures.
 **Not tested:** a real subtitle of the game in a desktop run. The place of the
 game's subtitle box in the render is not measured.
 
-**Needs the headset.**
-
-- The subtitle card as a quad layer: its swapchain of 1440 by 1440 pixels, the
-  alpha of the game's subtitle box over the world, and its colors.
-- Whether the letters read well at 1 degree, and whether 17 degrees below eye
-  level at 1.6 m is a good place while the hands work.
-- Whether the row at 93 percent is the middle of the game's subtitle box.
-- A move of the card after a turn of the head, with its fade.
-- The time of the copy at 2880 by 2880, from the report line.
-- The Creature panel on the card.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the
+ring" and "Performance".
 
 ### 17.9 In the cut scene window
 
@@ -1749,7 +1739,8 @@ eye, so the note is not at the depth of the Creature there either.
 - No run has shown a note that the game made by itself: a Creature that
   learns from a miracle of the player. The test key uses the same function
   of the game.
-- Only a headset can show that the note fuses with the Creature.
+
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ## 20. The menus in the room
 
@@ -1912,9 +1903,7 @@ runs do not show a frame with no scene that shows a menu (the front end),
 the game menu of Esc, the options, or the load box. The invented head does
 not turn in them.
 
-Only a headset shows these: the quad of the panel and its place, that the
-panel stays in the room while the head turns, the screen of a frame with no
-scene, and that the ray and the arrow of the game meet on the panel.
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ## 21. The keyboard in the headset
 
@@ -2077,11 +2066,11 @@ the card.
   the first picture and 3 ms for the first small letters).
 
 - The hand does not press a key by touch. Only the ray and the trigger do.
-- Only a headset shows the card, its place under the panel, and how the
-  keys read.
 - The text box of a frame with no scene (the name of a new god) needs the
   first start of a profile. The profile guard of the desktop scripts takes
   a new profile away after a run, but no run has done it yet.
+
+The checks in a headset are in `headset-checks.md`, "Menus, cards and the ring".
 
 ### 21.6 The bake of the parchment
 

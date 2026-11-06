@@ -1241,9 +1241,10 @@ the game window in front), and the level balance by ear.
   the in game bank (the Hand over an object) starts at the Hand, and its
   maximum in the bank is 300 units, so it is probably such a sound. Which
   sounds of this kind are missing in the God view is not known.
-- The loop of a bulk take: only a person can say how it sounds in the
-  headset and how loud it is beside the other sounds. No run has the loop of
-  food (sample 44), a field or a fish farm.
+- The loop of a bulk take: no run has the loop of food (sample 44), a field
+  or a fish farm.
+
+The checks in a headset are in `headset-checks.md`, "Sound".
 
 **Open questions.**
 
@@ -1283,40 +1284,4 @@ They are flat by design.
 
 ## 14. Headset test of the sound of the world (10 minutes)
 
-Use a game with the Creature. The view starts at the door of the Temple with
-the Creature in front. Ctrl Shift F12 (with test keys on) steps the sound
-back, one change for each press, and the fifth press is the new sound again.
-
-1. **Height (2 minutes).** Stand still and look ahead. The Creature is on the
-   land at your waist. Its steps and its voice must come from below and
-   ahead, not from the height of your ears. Listen to a bird: it must be at
-   the height of your ears or over them. Press Ctrl Shift F12 two times for
-   QMixer's sound, and three times more for the new sound.
-2. **Near (1 minute).** Put your head 20 cm from the Creature, or hold a
-   thing that makes a sound near one ear. The sound must stay in both ears
-   and not sit hard in one.
-3. **The bed (1 minute).** Go to the shore. Note in which ear the sea is.
-   Turn the view with the stick, 4 steps. The sea must stay where it is in
-   the world, so after 4 steps it is in the other ear. Turn your head: the
-   same. A single wave must come from the side of the sea.
-4. **The Creature (1 minute).** Put the head near the Creature. Its steps must
-   be clear within arm's reach and become quiet at 1 to 2 m. Turn the head:
-   they stay where the Creature is.
-5. **The zoom (2 minutes).** Stand in a village. Zoom out step by step to the
-   far end. The voices and the small sounds must go away. Throw a rock at a
-   house, or cast a miracle: the crash must carry, low and dull. Zoom in again:
-   the small sounds come back.
-6. **Distance (1 minute).** Teleport away from a sound that loops (a fire, the
-   Temple, a vortex) and back. It must get quiet and dull with the distance,
-   and it must be there again when you come back, with no cut.
-7. **The cues (1 minute).** A turn step, a zoom step, a teleport, and the left
-   grip on the land. Each one has a soft sound. `audio_cues_pct` sets their
-   level, and `audio_cues=0` turns them off.
-8. **The advisors (1 minute).** They must sound as in the game. So must the
-   speech of a story.
-9. **All the time:** a click, a sound from a wrong side, a sound that lags a
-   fast turn of the head. Say when, and send `bwvr.log`.
-10. **If the sound lags a turn of the head:** set `audio_latency_ms=25` and
-    play again. The log line "QMixer writes the stream" must then say about
-    66 ms, and "passed a write 0 times". A crackle or a count over 0 means
-    that 25 is too low for the headset: go back to 0.
+The checks in a headset are in `headset-checks.md`, "Sound".

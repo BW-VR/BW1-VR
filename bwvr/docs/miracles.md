@@ -657,7 +657,10 @@ cell keeps its place. The words are in dark brown Alegreya at the capital
 letter height of Segoe UI, a dim item is light brown, and the reason of a
 refusal is red brown. The bubbles keep their blue and amber fill with white
 gestures. The cell under the hand is tan with a deep gold halo, and the
-other bubbles have a brown ring. With `hint_card_style=0` the book is the
+other bubbles have a brown ring. The halo stays inside the tan cell: its
+outer edge is 4 px below the top of the cell or 0.16 of a cell out from the
+bubble, and it is 0.10 of a cell wide or more, so the fill of that bubble
+is a little smaller (`spell_book_math::BubbleRing`). With `hint_card_style=0` the book is the
 dark panel with an alpha of 0.86 and white Segoe UI letters.
 
 **The pick.** The grip point of the pointing hand within 45 percent of a cell

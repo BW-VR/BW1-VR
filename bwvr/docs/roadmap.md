@@ -526,8 +526,6 @@ keeps the mod as it is.
     ink 0.25. Possible fixes: a static file of Alegreya Bold in place of the
     variable font, or a draw of the letters of each size before their first
     use, off the game thread.
-  - In the spell book, the ring of the chosen item goes past its cell, and
-    the cell cuts its top and its bottom flat.
   - The checks of the look of the scroll, the ring and the keyboard are in
     `headset-checks.md`.
 

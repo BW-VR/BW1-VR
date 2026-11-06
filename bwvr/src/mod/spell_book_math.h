@@ -352,4 +352,30 @@ inline bool BubbleHole(const Plane& p, const float head[3], const float at[3],
   return true;
 }
 
+// THE RING ROUND A BUBBLE, in pixels of the picture, y down. The bubble has
+// its middle at bubble_y and the radius bubble_r, and its cell starts at
+// cell_top and is cell pixels high. Each item has a thin ring of 0.06 of a
+// cell round its bubble. The bubble is 0.10 of a cell above the middle of
+// its cell, so the thin ring just fits under the top of the cell. The item
+// under the hand has a gold ring of 0.10 of a cell or more. It ends 4 px
+// inside the cell (1 px inside the lit cell, which is 3 px inside the cell)
+// or 0.16 of a cell out from the bubble, and the fill of the bubble gives
+// way to it.
+struct Ring {
+  float outer;  // the outer edge of the ring
+  float fill;   // the radius of the fill of the bubble, and the inner edge
+};
+
+inline Ring BubbleRing(float bubble_y, float bubble_r, float cell_top,
+                       float cell, bool lit) {
+  if (!lit) return {bubble_r + 0.06f * cell, bubble_r};
+  const float wide = bubble_r + 0.16f * cell;
+  const float room = bubble_y - (cell_top + 4.0f);
+  Ring r;
+  r.outer = room < wide ? room : wide;
+  const float inner = r.outer - 0.10f * cell;
+  r.fill = inner < bubble_r ? inner : bubble_r;
+  return r;
+}
+
 }  // namespace spell_book_math

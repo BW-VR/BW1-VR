@@ -953,9 +953,10 @@ void Raster(const Look& look) {
     const Rgb& fill = !look.can[i] ? kDimFill
                       : IsCreatureType(look.type[i]) ? kCreatureFill
                                                      : kGod;
-    const float halo = br + (lit ? 0.16f : 0.06f) * cell;
     const int x0 = static_cast<int>(cx - 0.5f * cell);
     const int y0 = static_cast<int>(cy - 0.5f * cell);
+    // The ring stays inside its cell (spell_book_math::BubbleRing).
+    const Ring halo = BubbleRing(by, br, static_cast<float>(y0), cell, lit);
     const int x1 = static_cast<int>(cx + 0.5f * cell);
     const int y1 = static_cast<int>(cy + 0.5f * cell);
     for (int y = y0 < 0 ? 0 : y0; y < y1 && y < h; ++y) {
@@ -972,7 +973,8 @@ void Raster(const Look& look) {
         const float d = sqrtf((px - bx) * (px - bx) + (py - by) * (py - by));
         // The halo: a ring of gold round the bubble of the item under the
         // hand, and a thin ring of light round each other bubble.
-        const float ring = Clamp01(halo + 0.5f - d) * Clamp01(d - br + 0.5f);
+        const float ring = Clamp01(halo.outer + 0.5f - d) *
+                           Clamp01(d - halo.fill + 0.5f);
         if (i == look.pulled) {
           // The empty socket of a bubble that the hand pulls out.
           const float edge = Clamp01(br + 0.5f - d) * Clamp01(d - br + 3.5f);
@@ -984,7 +986,8 @@ void Raster(const Look& look) {
         } else {
           Over(out, ring_color, ring_alpha * ring);
         }
-        Over(out, fill, (look.can[i] ? 0.95f : 0.6f) * Clamp01(br + 0.5f - d));
+        Over(out, fill,
+             (look.can[i] ? 0.95f : 0.6f) * Clamp01(halo.fill + 0.5f - d));
       }
     }
   }

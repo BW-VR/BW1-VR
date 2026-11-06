@@ -296,6 +296,38 @@ inline void SpellBookChecks() {
     Check(BubbleHole(page, head, half_in, 0.03f, &hole) && hole.r > 0.02f,
           "a ball with a part in front of the page makes a hole", 0, 0);
   }
+
+  // THE RING ROUND A BUBBLE stays inside its cell at each size of a cell
+  // (the cells of 4, 5 and 6.5 cm are 128 to 208 px), the gold ring is wider
+  // than the thin ring, and the thin ring keeps the bubble as it is.
+  {
+    bool inside = true, thin = true, gold = true, fill = true;
+    for (int cell = 100; cell <= 240; cell += 2) {
+      const float c = static_cast<float>(cell);
+      const float top = 40.0f;
+      const float by = top + 0.5f * c - 0.10f * c;
+      const float br = 0.33f * c;
+      const Ring lit = BubbleRing(by, br, top, c, true);
+      const Ring plain = BubbleRing(by, br, top, c, false);
+      if (by - lit.outer < top + 4.0f - 1e-4f) inside = false;
+      if (by - plain.outer < top) inside = false;
+      if (lit.outer - lit.fill < 0.10f * c - 1e-4f ||
+          lit.outer - lit.fill <= plain.outer - plain.fill) {
+        gold = false;
+      }
+      if (lit.fill > br || lit.fill < 0.75f * br) fill = false;
+      if (fabsf(plain.outer - (br + 0.06f * c)) > 1e-4f || plain.fill != br) {
+        thin = false;
+      }
+    }
+    Check(inside, "the ring of a bubble stays inside its cell", inside, 1);
+    Check(gold, "the gold ring is 0.10 of a cell or more, wider than the "
+          "thin ring", gold, 1);
+    Check(fill, "the fill of the bubble under the hand keeps 3/4 of its "
+          "radius or more", fill, 1);
+    Check(thin, "the thin ring is 0.06 of a cell, and the bubble keeps its "
+          "radius", thin, 1);
+  }
 }
 
 }  // namespace spell_book_checks

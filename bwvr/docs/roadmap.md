@@ -488,16 +488,6 @@ keeps the mod as it is.
   (`headset-checks.md`). Build it only if it is. The draw of the icon is
   not traced (`Abode::DiscipleInHandNear` `0x00407420`,
   `GGuidance::MakeDiscipleSFX` `0x0071BF10`).
-- **F19. The Creature with no press.** The plain game shows the Creature
-  panel only while a press holds the Creature. Wanted: the open hand at the
-  Creature shows the panel, the panel stays about 3 s after the hand goes,
-  and an open hand that stays in the body strokes the Creature with no grip.
-  The code is on the branch `agent/creature` (`creature_stroke_open`,
-  `creature_panel_linger`). It waits for a desktop run: no Creature recipe
-  makes the Creature the target at a render of 3600 by 2880, also not the
-  old recipe of the grip (`creature.md`, section 8). Fix the recipes first.
-  A gift needs the opening of the grip, because the game starts a gift only
-  on a click with the object in the Hand.
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

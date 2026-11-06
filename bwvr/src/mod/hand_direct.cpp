@@ -9567,6 +9567,8 @@ void* HandDirectCreatureAtHand(bool empty) {
       (empty && !HandEmpty())) {
     return nullptr;
   }
+  // A press that holds the Creature, also before the Creature state starts.
+  if (g_virtual && g_virtual_creature == own) return own;
   const int32_t state = State(g_hand);
   if (state == kStateCreature) return TouchObject(g_hand) == own ? own : nullptr;
   if (state == kStateNormal && g_choice == own && !g_choice_far) return own;

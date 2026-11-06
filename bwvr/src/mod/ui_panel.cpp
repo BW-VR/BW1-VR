@@ -108,6 +108,8 @@ bool TabletopRoom(float origin[3], float basis[9], float center[3],
 // the controller places (the panel that stays).
 void* HandDirectOwnCreature();
 void* HandDirectCreatureAtHand(bool empty);
+// controllers.cpp: the press of the open hand on the Creature is on.
+bool ControllersOpenStrokeOn();
 
 namespace {
 
@@ -345,7 +347,12 @@ const void* LingerFrame(bool game_armed) {
   }
   const double now = NowSeconds();
   const void* own = HandDirectOwnCreature();
-  const bool at = HandDirectCreatureAtHand(false) != nullptr;
+  // A press of the open hand counts as the Hand at the Creature from its
+  // start: the Hand leaves its Normal state before the Creature state
+  // starts, and the game arms its own panel only when its locked select has
+  // begun. So the stay does not start in the press.
+  const bool at = HandDirectCreatureAtHand(false) != nullptr ||
+                  (own != nullptr && ControllersOpenStrokeOn());
   bool arm = creature_touch_math::LingerStep(
       &g_linger, own, at, game_armed, now, creature_touch_math::kLingerSeconds);
   if (arm && !LingerWrite(own)) arm = false;
@@ -1401,19 +1408,8 @@ void UiPanelHead(const float center[3], const float orientation[4]) {
   g_sub.have_head = true;
 }
 
-void UiPanelReport() {
-  HintCardReport();
-  MenuRoomReport();
-  if (g_settings.mode == kUiPanelOff) {
-    if (g_sub.set.on) {
-      SubtitleReport();
-      UiPanelReportRoutes();
-      GpuBridgePanelReport();
-    }
-    return;
-  }
-  UiPanelReportRoutes();
-  GpuBridgePanelReport();
+// The line of the Creature panel in the report, with each value of ui_panel.
+void CreaturePanelReport() {
   if (g_creature_draws != 0) {
     ModLog("ui panel     : the Creature panel drew on %llu frames and went to "
            "the room %llu times this window. The mod armed it on %llu of the "
@@ -1424,6 +1420,22 @@ void UiPanelReport() {
     g_creature_shows = 0;
     g_linger_frames = 0;
   }
+}
+
+void UiPanelReport() {
+  HintCardReport();
+  MenuRoomReport();
+  CreaturePanelReport();
+  if (g_settings.mode == kUiPanelOff) {
+    if (g_sub.set.on) {
+      SubtitleReport();
+      UiPanelReportRoutes();
+      GpuBridgePanelReport();
+    }
+    return;
+  }
+  UiPanelReportRoutes();
+  GpuBridgePanelReport();
 }
 
 // The switch of the debug page for creature_panel_linger.

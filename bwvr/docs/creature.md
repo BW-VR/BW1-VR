@@ -2030,9 +2030,11 @@ desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. Not built, open
 
-- **No Creature recipe reaches the Creature with the profile of the game
-  folder.** The cause is the profile and the test save, not the render size,
-  the zoom or the points of the recipe:
+- **No Creature recipe reaches the Creature on the owner's PC.** The Creature
+  runs go to the test laptop: its test save `temple` has a Creature with its
+  mesh (`make_test_save.ps1` on the profile of the laptop). On the owner's PC
+  the cause is the profile and the test save, not the render size, the zoom
+  or the points of the recipe:
   - The test save `temple` was made with the profile of the old install. In
     a run of it now, the game draws the shadow of the Creature at the door
     of the Temple and no mesh (the eye pictures of a run with Direct3D 9).
@@ -2047,21 +2049,10 @@ desktop run can prove are in `roadmap.md`, R12.
     pointer and the points of the hand are the same as in the runs at 2208
     by 2208 that had the Creature as the target.
 
-  So a run of the Creature needs a profile with a Creature that the game
-  keeps, and then a new test save `temple` (`make_test_save.ps1 -Name
-  temple`). The tools never change a profile, so this needs the owner. Until
-  then no desktop run can prove a change of the Creature.
+  So a run of the Creature on that PC needs a profile with a Creature that
+  the game keeps, and then a new test save `temple` (`make_test_save.ps1
+  -Name temple`). The tools never change a profile, so this needs the owner.
 
-- **The touch with no press** (`creature_touch`). The
-  Hand within 25 cm of the body would press the trigger for the player, and
-  the release past 35 cm. The mod must then hold the game's right button for
-  the player (`controllers.cpp`, `PumpButtons`). The hand passes the Creature
-  each time the player reaches for an object near it, and the Creature learns
-  from each stroke and slap. So the touch needs a guard: an open hand (no
-  finger on the trigger and the grip, which the Touch controllers report) and
-  0.2 s in the body. A slap comes from outside the body in one or two frames,
-  so it cannot wait 0.2 s, and it keeps the grip. It waits for a headset test
-  of the touch above.
 - **A `OneOffSpellSeed`** gets a tap and no leash, as in the game.
 - **A stroke at 44 units a meter** with the fake hand gives the `stroke` ticks
   of the mod in some runs and no stroke of the game. The speed of a step

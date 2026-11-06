@@ -94,9 +94,11 @@ want.
 ### The Creature
 
 17. **Stroke, slap and look.** Stroke the Creature slowly at each zoom, slap
-    it with the arm and with the wrist, and lean while it looks at you.
-    Wrong: a slap that does not count, a stroke that counts as a slap, a
-    touch in the air, or a look past your head.
+    it with the arm and with the wrist, and lean while it looks at you. Also
+    rest the open hand in its body and move it slowly, and reach past it to
+    a thing near it. Wrong: a slap that does not count, a stroke that counts
+    as a slap, a touch in the air, a look past your head, a stroke when the
+    hand only goes past, or a Creature panel that goes on and off.
 18. **Leash, commands and the stay.** With the leash on, tap the trigger at
     places and things. Hold the grip on the Creature for a stay, give it an
     object, and shake the leash hand. Wrong: the Creature goes to a different

@@ -591,7 +591,9 @@ the hints in the view. Set controller_hints=0 to keep the mouse hints.
 
 A card is a small parchment scroll with dark letters. The button word
 is on a wax seal: green for the trigger, amber for the grip and red
-for the other buttons. The spell book is a page of the same parchment.
+for the other buttons. The spell book and the keyboard for a name are
+pages of the same parchment, and each item of the ring menu is a wax
+seal.
 In the launcher, "Card look" is "Scroll" (the default) or "Plain" (key
 hint_card_style, 0 gives dark cards with white letters).
 

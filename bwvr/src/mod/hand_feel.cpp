@@ -952,6 +952,13 @@ int HandFeelPinchValue() {
   return g_set.on && g_set.pinch ? (g_pinch.live ? 1 : 0) : kDebugCannot;
 }
 
+// For hand_land.cpp: the fingers bend on the land now (hand_feel=1,
+// hand_feel_land=1, and the switch is on).
+bool HandFeelBendsOnLand() {
+  LoadSettings();
+  return g_set.on && g_set.land && g_live;
+}
+
 void HandFeelFrame() {
   LoadSettings();
   g_frame = ControllersFrameCount();
@@ -1066,9 +1073,12 @@ void HandFeelCurls(const HandFeelHand& in,
   if (in_what == hf::kInBody) ++g_in_body;
   if (stuck) ++g_stuck;
   // THE PULSE, when a finger first meets the land (or a body, when the
-  // bodies come in this step).
+  // bodies come in this step), or when the land first holds the drawn hand
+  // up (hand_land.cpp). A finger and the palm that touch at one time give
+  // one pulse.
   bool pulsed = false;
-  if (hf::MeetPulse(in_what != hf::kInNothing, in.dt, &state.quiet) &&
+  if (hf::MeetPulse(in_what != hf::kInNothing || in.land_held, in.dt,
+                    &state.quiet) &&
       g_set.pulse) {
     ++g_pulses;
     pulsed = true;

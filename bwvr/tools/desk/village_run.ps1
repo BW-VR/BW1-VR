@@ -41,9 +41,9 @@
 #                "The book on the palm"): the steps of -Kind miracle with
 #                gesture_panel=0 and eye pictures of the corner, then
 #                gesture_panel=1 and the book on the palm.
-# The other kinds (charge, store, job, tree, throw, probe, workshop, site,
-# build, scaffold, turn, fartake, fartotem, choice, look, book) have a comment
-# at their steps below.
+# The other kinds (charge, store, neartake, land, job, tree, throw, probe,
+# workshop, site, build, scaffold, turn, fartake, fartotem, choice, look,
+# book) have a comment at their steps below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -126,6 +126,41 @@ if ($Kind -eq 'totem') {
         $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 grip@1080+120 seek@1230+1 seek@1250+1 ' +
                  'seek@1280+1 grip@1330+40 shot@1450+1'
     }
+} elseif ($Kind -eq 'neartake') {
+    # A take at the Hand that goes on while the hand moves away from the pile
+    # (bwvr/docs/grab.md, "The bulk take"). The grip closes on a pile of the
+    # Village Store and stays closed for 600 frames. In that time the hand
+    # steps 12 cm to the side (slap), 15 cm toward the head (pull) and three
+    # times 10 cm up (up, seek_step_cm=10). The lines "hand bulk" have the
+    # amount in the Hand, one line at 15, 30, 60 and 120 cm of the room from
+    # the pile, and the end of the take with the button of the game, the grip,
+    # the interface action and the influence at that time.
+    if ($Plan -eq '') { $Plan = 'gostore,store,pile,up,up,up' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 75 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 shot@1070+1 grip@1080+600 slap@1160+1 ' +
+                 'pull@1220+10 shot@1260+1 seek@1300+1 seek@1340+1 seek@1380+1 shot@1420+1 shot@1660+1 shot@1720+1'
+    }
+    $keys = "$keys;seek_step_cm=10"
+} elseif ($Kind -eq 'land') {
+    # The Hand stops at the land (bwvr/docs/hand-model.md, "The Hand stops at
+    # the land"). The Hand's point goes 2 units over the base of the tree
+    # nearest to the Village Store (treebase), then 15 cm of the room down
+    # (down, seek_step_cm=15), so the real hand is in the land. The hand
+    # steps 2 cm to the side (nudge), 12 cm to the other side (slap) and back
+    # (slap) in the land, and then 15 cm up from the drawn point (up), out of
+    # the land. An eye picture at each place. Give it
+    # -Set "backend=dxwrapper\ddraw.dll" for the eye pictures. The lines
+    # "hand land" have the touch, the lift and the end of the touch.
+    if ($Plan -eq '') { $Plan = 'gostore,treebase,down,up' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 55 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 shot@1030+1 seek@1060+1 shot@1090+1 nudge@1120+1 shot@1150+1 ' +
+                 'slap@1180+1 shot@1210+1 slap@1240+1 shot@1270+1 seek@1300+1 shot@1330+1'
+    }
+    $keys = "$keys;seek_step_cm=15"
 } elseif ($Kind -eq 'job') {
     # A villager near the Village Store: the grip takes him, the hand goes to
     # the point of the store and the grip opens. The log has his job.
@@ -408,7 +443,11 @@ $log = Join-Path $sp "desk-$Name\bwvr.log"
 if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
 $pattern = '^village      :|^miracle      : (?!miracle_)|^hand pick    : seek plan|^hand bulk    :|^hand press   : the grip pressed|' +
            '^haptics      : (effect (3|14|15|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
-           '^hand         : state|^gesture      : (the draw|the game)|^controllers  : the right button press started off|^grip         :|^hand (throw|drop|hold|take) *:|^villager look:'
+           '^hand         : state|^gesture      : (the draw|the game)|^controllers  : the right button press started off|^controllers  : the right button is|^grip         :|^hand (throw|drop|hold|take) *:|^hand land    :|^villager look:'
+if ($Kind -eq 'land') {
+    $pattern = '^hand land    :|^hand pick    : seek plan|^hand         : the point is|^hand feel    : (a finger|the fingers of)|' +
+               '^controllers  : (haptic pulse|the fake)|^haptics      : surface'
+}
 if ($Kind -eq 'choice') {
     $pattern = '^far grab    : (far_grab_choice|far_grab_stay|the cone of a living|target|no target|the target \S+ \(\w+\) keeps|test: (aimfar|the tree))|^hand pick    : seek plan'
 }

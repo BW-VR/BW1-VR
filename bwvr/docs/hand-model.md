@@ -8,6 +8,7 @@ This doc is about how the hands look and feel. It has these parts:
   on both real hands"), and a mesh that the player edited ("A hand that the
   player edited").
 - Fingers that react to the world ("Hands that react to the world").
+- The hand that stays on the land ("The Hand stops at the land").
 - The glow at the Hand's point ("The glow at the Hand's point").
 - The renderer that draws the mod's own meshes in the game's frame ("Overlay
   renderer").
@@ -23,6 +24,7 @@ about Half-Life: Alyx that this doc uses.
 | Subject | Source files in `bwvr/src/mod` |
 | --- | --- |
 | The mod's hands | `hand_model.cpp`, `hand_model_math.h`, `hand_model_file.cpp` |
+| The stop at the land | `hand_land.cpp`, `hand_land_math.h` |
 | Poses, curls, the overlay | `overlay.cpp`, `overlay_math.h` |
 | Fingers and the world | `hand_feel.cpp`, `hand_feel_math.h` |
 | The glow at the Hand's point and the halos | `hand_glow.cpp` |
@@ -30,9 +32,11 @@ about Half-Life: Alyx that this doc uses.
 | Pulses | `haptics.cpp`, `haptics_math.h` |
 | The export tool | `bwvr/tools/hand_export/` |
 
-The rule for all of it: the Hand is the real hand, 1:1 in size and place. The
-mod changes only how the fingers bend. It never moves or turns a hand, and it
-makes no motion that the player did not make.
+The rule for all of it: the Hand is the real hand, 1:1 in size and place,
+over the land. A real hand in the land is drawn on the land, straight over
+the real hand ("The Hand stops at the land"). Over the land the mod changes
+only how the fingers bend. It never turns a hand, and it makes no motion
+that the player did not make.
 
 ## The model of the Hand
 
@@ -760,13 +764,10 @@ Half-Life: Alyx files. The ones that count here:
 - A hand that hits the world gives a pulse by the force of the hit, at most
   one in 0.2 s.
 
-In Half-Life: Alyx the hand stops at a surface. The mod cannot do that: the
-Hand is the real hand, 1:1, and its place and its turn never change. So in
-the mod only the fingers react. A hand that the player pushes into the land
-goes into the land, and the land hides it. The one exception is the land test
-of the Hand's point, which lifts the pointing hand so that the tip of its
-index finger stays 0.5 cm over the land (hand.md, "5. The touch of the
-land").
+In Half-Life: Alyx the hand stops at a surface. In the mod the hand stops
+only at the land ("The Hand stops at the land"): the fingers bend on the
+land first, and the palm and the knuckles then stay on it. At a body only
+the fingers react, and the hand can go into the body.
 
 **What the game gives cheaply.**
 
@@ -848,7 +849,10 @@ patch), and each finger test takes its height from that grid.
   height.
 - A hand with the palm down has fingers that open as it comes to the land,
   until the flat hand lies on it.
-- A hand that is under the land has no free curl. The land hides it.
+- A hand that is under the land has no free curl. With `hand_land_stop=1`
+  the palm and the knuckles stay on the land ("The Hand stops at the
+  land"), so this comes only with `hand_land_stop=0`, and the land then
+  hides the hand.
 - The index finger of the pointing hand bends on the land too. Its tip is
   the Hand's point, and the land test keeps that point 0.5 cm over the
   land, so the glow and the tip of the bent finger are both on the land.
@@ -1340,9 +1344,8 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
 
 ### Limits
 
-- The hand does not stop at the land or at a body. A hand that the player
-  pushes into the land goes into it, with its fingers bent, and the land
-  hides it.
+- The hand does not stop at a body. A hand that the player pushes into a
+  house, a rock or a tree goes into it, with its fingers bent.
 - A body is a cheap form. The box of a house has no roof slope: at a hut
   with a roof down to the land a finger stops in the air before the slope
   of the roof. The crown of a tree is a spheroid, and the box of the Creature is the box of its mesh
@@ -1399,6 +1402,98 @@ picture shows a contact from above.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
+
+## The Hand stops at the land
+
+The drawn hands do not go through the land. The code is in
+`src/mod/hand_land.cpp`, and the pure math is in `src/mod/hand_land_math.h`.
+
+### What the mod does
+
+- **Over the land** the drawn hand is the real hand, 1:1.
+- **In the land.** When the real hand goes into the land, the drawn hand goes
+  straight up until no point of it is in the land. So it stays on the land at
+  the point where it went in, and it slides along the land when the real
+  hand moves sideways. When the real hand comes up, the drawn hand is the
+  real hand again, in the same frame. The lift has no filter, so the drawn
+  hand moves only when the real hand moves.
+- **The points that stop the hand.** The 8 corners of the palm and the
+  knuckle of each finger. The fingers bend on the land by hand feel ("Hands
+  that react to the world"), as before. With `hand_feel=0` or
+  `hand_feel_land=0` the fingers cannot bend, so each joint of each finger,
+  the middle of each segment and the Hand's point stop the hand too. A joint
+  keeps the radius of its finger over the land, and a corner of the skin (a
+  finger tip, a corner of the palm) keeps 5 mm of the room.
+- **The land only.** The height is `LH3DIsland::GetAltitude` `0x00803090` at
+  each point, with the sea and the places off the map at 0, as hand feel has
+  it. A house, a rock and a tree do not stop the hand.
+- **What follows the drawn hand.** The mesh of each hand, the low poly hands,
+  and hand feel. The Hand's point of the pointing hand goes up by the same
+  lift (`HandLandPointLift`), so the glow, the pick, a take and a click act
+  at the hand that the player sees. The Hand's point still stops 5 mm over
+  the land by itself (hand.md, "5. The touch of the land").
+- **What keeps the real hand.** The grab of the land, the grab with two
+  hands, the far grab, the teleport aim and the speed of a throw. A grip that
+  holds the land with the hand in it moves the land as before.
+- **No copy under the land.** Nothing of the real hand shows in the land.
+- **The pulse.** One faint pulse (`surface`) when a hand first touches the
+  land, and none while it rests on the land or slides along it. With
+  `hand_feel=1` hand feel sends it, by its rule for a finger that meets the
+  land, so a finger and the palm that touch at one time give one pulse. With
+  `hand_feel=0` the stop sends it by the same rule.
+- **When.** Only while the God view or the table owns the view and the
+  controller owns the pointer, as hand feel. In a menu, in a room of the
+  Temple, in a cut scene and in the intro the hands are the real hands.
+
+**Once a frame.** The first call of a frame makes the lift of both hands
+from the grip poses of the frame and the shape of the fingers of the last
+frame (`OverlayLastShape`). That call comes from `HandDirectFrame`, before
+the overlay builds the hands. Each later call in the frame gets the same
+numbers, so the game's point and the drawn hand agree.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `hand_land_stop` | 1 | 1: a hand in the land is drawn on the land, and the Hand's point goes with it. 0: the drawn hands are the real hands also in the land, the land hides them, and only the Hand's point stops 5 mm over the land |
+
+The debug page has the switch "Land stop" in the group of the Hand.
+
+### The log
+
+The tag `hand land`. At the start, the key. For each hand, each touch of the
+land (80 lines at most): the lift in cm of the room, and the kind of the
+point that is lowest. Each end of a touch: the frames of the touch and the
+largest lift. Once, the first frame in which the Hand's point goes up with
+the drawn hand. Once a report window: the hand frames on the land, the
+frames of the point, the pulses with `hand_feel=0` and the count of the land
+heights.
+
+### Tests
+
+The math test (`hand_land_checks.h`) has the low poly hand, 19 units long at
+100 units a meter, on a flat land and on a slope:
+
+- The points: 44 for a hand, and 13 (the palm and the knuckles) with fingers
+  that bend.
+- Over the land there is no lift. A hand with the palm down that goes 0.5, 10
+  and 60 units into the land goes up by that depth, rests on the land with
+  its gap, and does not move sideways. A hand that points down stops on its
+  tip, and the Hand's point stays 5 mm over the land.
+- A hand 10 units under a slope stays on the slope in each step of a slide,
+  and slides with the real hand. A hand that comes up has no lift as soon as
+  it is over the land. A still hand has the same lift in each frame.
+- With fingers that bend, finger tips in the land give no lift, and the hand
+  goes up when the knuckles go into the land.
+- The Hand's point is on the hand within 2 cm of the room. The pulse comes
+  once at the first touch, not after a gap of 0.1 s, and again after 0.2 s.
+
+The desktop run is `village_run.ps1 -Kind land` (`bwvr/tools/desk`). It
+puts the Hand's point over the base of a tree near the Village Store, pushes
+the real hand 15 cm into the land, moves it sideways in the land and takes it
+up again, with an eye picture at each place.
+
+The checks in a headset are in `headset-checks.md`.
 
 ## The glow at the Hand's point
 

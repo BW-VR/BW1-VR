@@ -405,29 +405,20 @@ that moves while the Hand takes it.
   test of the view for a held button in `controllers.cpp`, the paths of
   `need_up`, and `far_claim` in `StepGrip`. A headset log of the fault
   shows which: "grip : the grip opens during a bulk take" means the
-  button went up.
+  button went up. The line `hand bulk    : the bulk take ends` gives the
+  button of the game, the grip, the interface action, the distance from the
+  pile and the influence at the end, and `village_run.ps1 -Kind neartake`
+  makes the case on the desktop.
 - **P23. The aim down from a chair: keep watch.** A seated player aims down
   less well than a standing player, because furniture can be in the way of
   the hand. Not planned. One idea: a launcher option that lets the grab
   with two hands tilt the world. A tilted world makes the physics and other
   parts more difficult, so wait for more reports first.
-- **P24. The Hand stops at the land.** Wanted: the drawn hands do not go
-  through the land. Now a hand that the player pushes into the land goes
-  into it, and the land hides it (`hand-model.md`, "What the mod does").
-  Only the tip of the pointing finger stays 0.5 cm over the land. Plan: when
-  the real hand goes under the land, the drawn hand stays on the land at
-  the point where it went in, and slides with the real hand along the land.
-  It comes back to the real hand when the real hand comes up. A pulse tells
-  the player that the hand touches the land. The game's height of the land
-  (`LH3DIsland::GetAltitude` `0x00803090`) gives the stop for each joint
-  of the hand mesh. Before the build, decide:
-  - This changes the rule "the Hand is the real hand, 1:1" (`CLAUDE.md`,
-    `hand-model.md`). The new rule: 1:1 above the land, and on the land
-    when the real hand is under it.
-  - Which point the game reads (the Hand's point, a take, a far grab and
-    the grab of the land) while the drawn hand stays on the land.
-  - Whether a faint copy of the real hand shows under the land.
-  - Buildings and rocks: the land only, or each solid object too.
+- **P24. The Hand stops at a house, a rock and a tree.** The drawn hands
+  stop at the land (`hand_land_stop=1`, `hand-model.md`, "The Hand stops at
+  the land"). Open: the same stop at the body of each solid object, with the
+  bodies that hand feel already has (`hand_feel.cpp`, the bodies of the
+  draw).
 
 ### New features: miracles, comfort and help
 
@@ -913,6 +904,11 @@ game as it is.
       and one whole tree is still easy to take. Needs a recipe.
     - The height of the Hand's point over the land (`hand`): `hand_run.ps1
       -Kind fixed`.
+    - A hand pushed into the land stays on the land, slides along it and
+      comes back to the real hand (`hand land`, eye pictures with the
+      renderer Direct3D 9): `village_run.ps1 -Kind land`.
+    - A take at the Hand goes on while the hand moves away from the pile
+      (`hand bulk`): `village_run.ps1 -Kind neartake`.
     - The fingers at a wall of a house and of the Village Store with
       `hand_feel_offer` at 1 and 0, a rock and the crown of a tree as a body,
       a villager that walks into a still hand, and a tree with the palm to

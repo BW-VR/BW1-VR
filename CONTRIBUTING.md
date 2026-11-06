@@ -148,8 +148,10 @@ Each doc holds the current state and the plans. The history is in git.
 - **No motion that the player did not make.** No automatic sway, glide or
   bob of the view. When the game moves its camera, the mod cuts or shows the
   scene on a screen. This is the first rule of comfort.
-- **The Hand is the real hand, 1:1** in place and size. No extended reach.
-  Reach comes from the scale of the world, and from the far grab.
+- **The Hand is the real hand, 1:1** in place and size, over the land. A
+  real hand in the land is drawn on the land, straight over the real hand.
+  No extended reach. Reach comes from the scale of the world, and from the
+  far grab.
 - **A change of behavior has an ini key**, and the old behavior is one of
   its values. Give a test key for a live A/B when the change is about feel
   (`test_keys=1`). Check which keys are free first.

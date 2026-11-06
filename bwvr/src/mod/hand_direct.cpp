@@ -64,7 +64,8 @@
 // shows the throw spring. See docs/grab.md, "The grip holds".
 //
 // THE LAND. The point stops 5 mm of the room over the land, so it touches
-// the land and the objects on it at every scale (ResolveLand).
+// the land and the objects on it at every scale (ResolveLand). While the land
+// holds the drawn hand up (hand_land.cpp), the point goes up with it.
 //
 // THE CREATURE BY TOUCH (docs/creature.md, "The Creature by touch"). A press on
 // the Creature puts the Hand in the Creature state (7). There the game moves
@@ -140,6 +141,7 @@
 #include "forest_take.h"
 #include "hand_feel.h"
 #include "hand_feel_math.h"
+#include "hand_land.h"
 #include "haptics.h"
 #include "miracle.h"
 #include "spell_book.h"
@@ -199,6 +201,10 @@ bool ComfortCameraGameMoves();
 // 0x300 + low, and now. controllers.cpp: a grip holds the land.
 bool ComfortCameraHelpClock(int low, int32_t* at, int32_t* now);
 bool ControllersGrabHeld();
+// controllers.cpp: the grip is closed and the hand can act, and the right
+// button of the game is down, for the log of a bulk take.
+bool ControllersGripClosed();
+bool ControllersGameRightDown();
 // tabletop.cpp: the teleport of the God view, for the test word "go".
 bool TabletopGodTeleport(const float target[3]);
 // temple.cpp: the door of the Temple (0) or the next leash post (1), for the
@@ -1662,6 +1668,38 @@ bool IsFishFarm(void* object) {
              reinterpret_cast<void*>(kFishFarmTable);
 }
 
+bool InsideInfluence(uint8_t* face, float x, float z);
+float ClampToMap(float v);
+
+// THE FACTS OF A TAKE, for the log of a take that ends: the game's right
+// button and the grip, the interface action, how far the Hand's point is
+// from the source across the land, and the influence of the player under the
+// Hand. A take that ends with the button down was ended by the game or by the
+// mod, not by the grip.
+float g_take_source_xz[2] = {0.0f, 0.0f};
+int g_take_far_band = 0;
+void TakeFacts(const uint8_t* face, char* out, size_t size) {
+  const int32_t action =
+      face != nullptr ? *reinterpret_cast<const int32_t*>(face + kFaceAction)
+                      : -1;
+  const float units = RoomUnits();
+  const float dx = g_point[0] - g_take_source_xz[0];
+  const float dz = g_point[2] - g_take_source_xz[1];
+  const float cm =
+      units > 0.0f ? sqrtf(dx * dx + dz * dz) / units * 100.0f : 0.0f;
+  const bool inside =
+      g_face != nullptr && face == g_face &&
+      InsideInfluence(g_face, ClampToMap(g_point[0]), ClampToMap(g_point[2]));
+  sprintf_s(out, size,
+            "the right button of the game is %s, the grip is %s, the "
+            "interface action is %d, the Hand's point is %.1f cm of the room "
+            "from the source across the land, and the land under it is %s "
+            "the influence",
+            ControllersGameRightDown() ? "down" : "up",
+            ControllersGripClosed() ? "closed" : "open", action, cm,
+            inside ? "inside" : "outside");
+}
+
 // Once a frame: each start and end of a bulk take, and the amount in the
 // Hand while it grows. With the mouse too, as a reference.
 void LogTake(const uint8_t* face, const uint8_t* hand) {
@@ -1690,11 +1728,19 @@ void LogTake(const uint8_t* face, const uint8_t* hand) {
                "Hand holds a %s of %u, frame %llu", name, ClassName(held),
                amount, g_frame);
       }
+      const int32_t* at = reinterpret_cast<const int32_t*>(
+          static_cast<const uint8_t*>(object) + kThingPosition);
+      g_take_source_xz[0] = static_cast<float>(at[0]) / kMapScale;
+      g_take_source_xz[1] = static_cast<float>(at[1]) / kMapScale;
+      g_take_far_band = 0;
     } else if (g_take_logs < kMaxTakeLogs) {
       ++g_take_logs;
+      char facts[320];
+      TakeFacts(face, facts, sizeof(facts));
       ModLog("hand bulk    : the bulk take ends after %d game turns. The Hand "
-             "holds %s of %u, frame %llu", g_take_turns,
-             held != nullptr ? ClassName(held) : "nothing", amount, g_frame);
+             "holds %s of %u. At the end %s, frame %llu", g_take_turns,
+             held != nullptr ? ClassName(held) : "nothing", amount, facts,
+             g_frame);
     }
     g_take_object = object;
     g_take_amount = amount;
@@ -1708,6 +1754,24 @@ void LogTake(const uint8_t* face, const uint8_t* hand) {
   }
   if (object == nullptr) return;
   ++g_take_frames;
+  // The Hand goes away from the source: one line at 15, 30, 60 and 120 cm of
+  // the room across the land, with the facts of the take.
+  {
+    const float units = RoomUnits();
+    const float dx = g_point[0] - g_take_source_xz[0];
+    const float dz = g_point[2] - g_take_source_xz[1];
+    const float cm =
+        units > 0.0f ? sqrtf(dx * dx + dz * dz) / units * 100.0f : 0.0f;
+    const int band = cm >= 120.0f ? 4 : cm >= 60.0f ? 3 : cm >= 30.0f ? 2
+                     : cm >= 15.0f ? 1 : 0;
+    if (band > g_take_far_band && g_take_logs < kMaxTakeLogs) {
+      ++g_take_logs;
+      char facts[320];
+      TakeFacts(face, facts, sizeof(facts));
+      ModLog("hand bulk    : during the take %s, frame %llu", facts, g_frame);
+    }
+    if (band > g_take_far_band) g_take_far_band = band;
+  }
   // The states of the interface during a take, on each change: the object of
   // the next pick record (the game's release step reads it), the pick lock
   // and the interface action. A log of a take that does not end shows here
@@ -8808,6 +8872,14 @@ void HandDirectFrame() {
     } else {
       g_history_count = 0;
     }
+  }
+  // THE STOP AT THE LAND (hand_land.cpp). While the land holds the drawn hand
+  // up, the Hand's point is the tip of the drawn hand, so the glow, the pick
+  // and a take act where the player sees the hand. The motion of the throw
+  // above keeps the real hand.
+  {
+    float lift = 0.0f;
+    if (HandLandPointLift(point, &lift)) point[1] += lift;
   }
   // THE POINT OF THE FLAT HAND. The palm of the frame before gives the offset
   // from the tip to the palm. In the Creature state with the flat hand the

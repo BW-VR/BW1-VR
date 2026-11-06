@@ -78,6 +78,7 @@ add_library(bwvr_mod SHARED
     hand_model.cpp
     hand_model_file.cpp
     hand_feel.cpp
+    hand_land.cpp
     far_grab.cpp
     take_stream.cpp
     forest_take.cpp

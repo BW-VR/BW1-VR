@@ -368,6 +368,11 @@ const Setting kSettings[] = {
      "the trigger, amber for the grip). The spell book and the keyboard are "
      "pages of the same parchment. Each item of the ring is a wax seal. "
      "Plain: dark cards with white letters."},
+    {kBool, "creature_stroke_open", "Stroke with the open hand", nullptr, 1,
+     "Put your open hand on your Creature and keep it there for a moment. "
+     "Then move the hand slowly to stroke the Creature. You do not need the "
+     "grip. The open hand never slaps. For a slap, close the grip. Off: only "
+     "the grip strokes the Creature."},
 
     {kGroup, nullptr, "Launcher", nullptr, 0, nullptr},
     {kBool, "large_address", "Use 4 GB of memory", nullptr, 1,

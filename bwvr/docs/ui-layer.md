@@ -683,6 +683,7 @@ desktop run can prove are in `roadmap.md`, R12.
 | `ui_help_px_per_deg` | 44 | help panel scale at a 2880 px tall render. It scales with the render height, as the help text does. |
 | `ui_help_rect` | 0 | the help rect in render pixels. 0 takes the default of 4.1. |
 | `creature_panel` | 2 | the Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature (section 13) |
+| `creature_panel_linger` | 1 | 1 the Creature panel shows while the Hand is at the player's Creature with no press, and for 3 s after the Hand left. 0 only while a press holds the Creature (section 13.2) |
 | `menu_room`, `menu_room_test` | 1, 0 | the menus in the room with `ui_panel=0` (section 20) |
 | `vr_keyboard` | 1 | the keyboard in the headset (section 21) |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4 |
@@ -817,9 +818,12 @@ The camera part is in `creature.md` (the Creature by touch).
   second one does not.
 - `Creature::Draw` (`0x00517910`) arms it with alpha 255 and layout 1 when the
   Creature has bit `0x10` of `Object+0x24` and is
-  `GInterface::GetInteractObject`, the object of the next pick record. So the
-  panel shows whenever the Hand is over the player's Creature, not only in the
-  Creature state. `CameraModeFollow::Update` arms it with layout 0.
+  `GInterface::GetInteractObject`, the object of the next pick record. The
+  locked select of a press sets bit `0x10` (`creature.md`, section 1.7). So
+  the plain game shows the panel while a press holds the Creature, from the
+  start of the locked select, and not only in the Creature state. A Hand over
+  the Creature with no press shows no panel. `CameraModeFollow::Update` arms
+  it with layout 0.
 - The four values, at `0x00CC62EC` down to `0x00CC62E0`: a = 1 - (vtable
   `+0x11C`), b = 1 - `[+0x160]+0x1C`, c = `[+0x160]+0x30`, and d = the lesson
   total `+0xD8` of the Creature state. The labels are the help texts
@@ -834,6 +838,21 @@ The camera part is in `creature.md` (the Creature by touch).
 
 ### 13.2 What the mod does
 
+- **The panel with no press** (`creature_panel_linger=1`). In the first call
+  of a frame the hook on `fn_005178D0` arms the panel itself when the game did
+  not arm it, while the controller places the Hand at the player's Creature:
+  the target at the Hand's point, or the Creature of the touch
+  (`HandDirectCreatureAtHand`). It writes the alpha 255, layout 1 and the
+  values a, b and c as `Creature::Draw` computes them. The value d (the lesson
+  total) keeps the value of the last Creature state, as the game's own panel
+  has it before a stroke. A Creature that does not live gets no panel.
+- **The panel stays.** After the Hand left the Creature, and after the end of
+  a press, the hook arms the panel for 3 s more (`creature_touch_math.h`,
+  `LingerStep`). So the panel does not go on and off at the edge of the body.
+  A different Creature, or no Creature of the player, ends the stay at once.
+  The mouse keeps the plain game: no panel with no press, and the 3 s after a
+  press. `creature_panel_linger=0` keeps the plain game for the controller
+  too. The debug page has the switch "Panel stays" (group Creature).
 - A hook on `fn_005178D0` latches, once a frame, that the panel drew, its
   layout and its four values. For layout 1 it also reads the Creature of the
   pick (`GInterface+0x400`) and puts its head in the LOCAL space: the base
@@ -852,20 +871,31 @@ The camera part is in `creature.md` (the Creature by touch).
 | 1 | Fixed in the room: 0.9 m out, 35 degrees to the left of the recenter yaw and 15 degrees down, facing the head. A recenter moves it. |
 | 2 (default) | Near the Creature. When the panel shows, it goes 30 cm over the Creature's head and 15 cm to its left as the eyes see it, then 0.5 to 1.5 m from the eyes, facing them (`CreaturePanelPoint`, `FacePose`). It stays there while it shows and until it was hidden for 1 s, so it does not follow a Creature that walks. With no head (layout 0, or no head pose) it goes to the place of 1. |
 
-The log, once each time the panel shows:
+The log, once each time the panel shows, and for the panel with no press
+one line when the mod arms it, one when the Hand leaves and one when it goes:
 
 ```
 ui panel     : the Creature panel shows (layout 1, values 0.62 0.80 0.45 0.10), near the Creature at 0.31 1.18 -0.74 m, 0.84 m from the eyes, 0.35 by 0.45 m, rect 64 712 736 976
+ui panel     : the Hand is at your Creature 2925A6F0 with no press: the mod shows the Creature panel (creature_panel_linger=1), frame 931
+ui panel     : the Hand left your Creature: the Creature panel stays for 3.0 s, frame 1800
+ui panel     : the Creature panel goes, 3.00 s after the Hand left your Creature, frame 1980
 ```
 
-The report window adds how many frames it drew and how many times it went to
-the room. `XrScreen` counts its quad layers.
+The report window adds how many frames it drew, on how many of them the mod
+armed it, and how many times it went to the room. `XrScreen` counts its quad layers.
 
 ### 13.3 Tests
 
 The math test checks the face of the quad (its front points at the eyes, with
 no roll), the place near the Creature (to the left, over the head, 0.5 to
 1.5 m from the eyes), and the room to LOCAL against `head_pose.cpp`.
+
+The math test (`creature_touch_checks.h`) checks the panel that stays: it
+shows at the Hand, it stays 2.9 s and goes at 3 s after the Hand left, and
+not for a different Creature. `creature_recipe.ps1 -Kind open` is the run of
+the panel with no press: a picture at frame 1840 must have the box, and a
+picture at frame 2060 must not. No run reached the Creature at a render of
+3600 by 2880 (`creature.md`, section 8).
 
 No desktop run has drawn the box. A run needs a game where the player owns a
 Creature: the God view rig of `god-view.md` with `ui_panel=2`, the fake hand

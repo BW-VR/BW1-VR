@@ -130,6 +130,7 @@
 #include "creature_command.h"
 #include "creature_look.h"
 #include "creature_stay.h"
+#include "creature_touch_math.h"
 #include "debug_menu.h"
 #include "far_choice_math.h"
 #include "far_grab.h"
@@ -167,6 +168,9 @@ int ControllersThrowGainPct();
 float ControllersCreatureSlapMps();
 int ControllersCreatureTouchCm();
 bool ControllersCreatureSlapWait();
+// The press of the open hand on the Creature (creature_stroke_open, see
+// controllers.cpp): true while the mod holds the Action button for it.
+bool ControllersOpenStrokeOn();
 // head_pose.cpp
 float HeadPoseScale();
 // tabletop.cpp: the Hand's size and the scale while the table owns the view,
@@ -1158,6 +1162,7 @@ uint64_t g_touch_vetoes = 0;     // mesh hits refused: the Hand is not in it
 uint64_t g_touch_forced = 0;     // slap branches forced by the swept test
 uint64_t g_touch_kept = 0;       // frames the pick kept the Creature
 uint64_t g_touch_waits = 0;      // states that started with no wait
+uint64_t g_open_slow = 0;        // frames of the open hand read under a slap
 int g_touch_logs = 0;
 const int kMaxTouchLogs = 60;
 // THE OPEN HAND ON THE CREATURE (docs/creature.md, "The open hand"). The hand
@@ -1270,6 +1275,9 @@ bool g_virtual = false;
 const void* g_virtual_hand = nullptr;
 void* g_virtual_creature = nullptr;
 double g_virtual_since = 0.0;
+// The press came from the open hand (creature_stroke_open): it is no leash
+// click, also when it is short.
+bool g_virtual_open = false;
 uint64_t g_virtual_count = 0;
 uint64_t g_leash_clicks = 0;
 // The leash click: a press shorter than this, in real time. The game's own
@@ -2529,8 +2537,11 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
   g_touch_inside = g_touch_valid && g_touch_gap <= 0.0f;
   // One tick when the contact point goes into the body.
   if (g_touch_inside && !was_inside) HapticsPulse(haptics_math::kTouch);
-  // A change of the hand moves the contact point, and that is no slap.
-  g_touch_entered = g_touch_valid && g_touch_from_valid &&
+  // A change of the hand moves the contact point, and that is no slap. The
+  // open hand never slaps (creature_stroke_open), so it forces no slap
+  // branch either.
+  const bool open_press = ControllersOpenStrokeOn();
+  g_touch_entered = !open_press && g_touch_valid && g_touch_from_valid &&
                     g_stroke_finger == g_stroke_was_finger &&
                     controller_math::CapsuleEntered(g_touch_body,
                                                     g_touch_from, contact);
@@ -2609,6 +2620,15 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
   g_creature_real = g_stroke_mode == kStrokeBefore
                         ? g_creature_grip
                         : near_math::SlapSpeed(g_creature_grip, g_creature_tip);
+  // THE OPEN HAND NEVER SLAPS (creature_stroke_open). In a press that the
+  // mod holds for the open hand, the game reads a speed under the speed of a
+  // slap. A hand that moves still moves, so the game still sees a stroke. A
+  // slap needs the grip.
+  if (open_press) {
+    const float full = g_creature_real;
+    g_creature_real = creature_touch_math::OpenSpeed(full, SlapMps());
+    if (g_creature_real < full) ++g_open_slow;
+  }
   g_creature_speed = g_creature_k * g_creature_real;
   // The game starts its slap effect inside the Update that follows. The
   // pulse of that effect takes its strength from this speed (haptics.cpp).
@@ -3057,6 +3077,7 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
           g_virtual_hand = hand;
           g_virtual_creature = creature;
           g_virtual_since = NowSeconds();
+          g_virtual_open = ControllersOpenStrokeOn();
           ++g_virtual_count;
           if (g_touch_logs < kMaxTouchLogs) {
             ++g_touch_logs;
@@ -3068,6 +3089,7 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
       }
       return;
     }
+    if (g_virtual && ControllersOpenStrokeOn()) g_virtual_open = true;
     o_InteractCamera(self, unused, mode);
     return;
   }
@@ -3081,7 +3103,7 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
           VTable(creature)[kCreatureGetPlayer / 4])(creature, nullptr);
       mine = player != nullptr && player == LocalPlayer();
     }
-    const bool click = held < kLeashSeconds && mine;
+    const bool click = held < kLeashSeconds && mine && !g_virtual_open;
     if (click) {
       void* game = *reinterpret_cast<void* const*>(kGame);
       if (game != nullptr) {
@@ -3098,8 +3120,10 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
              "0x%X). %s, frame %llu", held * 1000.0, mode,
              click ? "A short press on your Creature: the leash click "
                      "(packet 0x5F)"
-                   : (mine ? "Not a short press, so no leash click"
-                           : "Not your Creature, so no leash click"),
+                   : g_virtual_open
+                         ? "A press of the open hand, so no leash click"
+                         : (mine ? "Not a short press, so no leash click"
+                                 : "Not your Creature, so no leash click"),
              g_frame);
     }
   }
@@ -9520,6 +9544,51 @@ bool HandDirectCreatureBody(void* creature, float out[3]) {
   return creature != nullptr && BodyPlace(creature, out) != 0;
 }
 
+// THE CREATURE WITH NO PRESS (docs/creature.md, "The stroke with the open
+// hand", and docs/ui-layer.md, "The Creature panel").
+//
+// The Creature of the local player, or null.
+void* HandDirectOwnCreature() {
+  if (!g_installed) return nullptr;
+  const uint8_t* player = static_cast<const uint8_t*>(LocalPlayer());
+  if (player == nullptr || IsBadReadPtr(player + kPlayerCreature, 4)) {
+    return nullptr;
+  }
+  return *reinterpret_cast<void* const*>(player + kPlayerCreature);
+}
+
+// The player's own Creature while the controller places the Hand at it, or
+// null: the target at the Hand's point in the Normal state (the capsule of
+// the choice), or the Creature of the touch in the Creature state. With
+// empty, the Hand must be empty too. The mouse keeps the plain game.
+void* HandDirectCreatureAtHand(bool empty) {
+  void* own = HandDirectOwnCreature();
+  if (own == nullptr || !g_owns || g_hand == nullptr ||
+      (empty && !HandEmpty())) {
+    return nullptr;
+  }
+  const int32_t state = State(g_hand);
+  if (state == kStateCreature) return TouchObject(g_hand) == own ? own : nullptr;
+  if (state == kStateNormal && g_choice == own && !g_choice_far) return own;
+  return nullptr;
+}
+
+// The gap from the Hand's point to the body of the player's own Creature, in
+// cm of the room. 0 or less is in the body (the capsule of the choice, with
+// no creature_touch_cm). False while the controller does not place the Hand,
+// in a fight (a press on the Creature is a block there), and with no body.
+bool HandDirectOwnCreatureGap(void* creature, float* gap_cm) {
+  if (!g_installed || !g_owns || g_hand == nullptr || creature == nullptr ||
+      creature != HandDirectOwnCreature() || InFight()) {
+    return false;
+  }
+  controller_math::Capsule body;
+  const float units = RoomUnits();
+  if (!CreatureBody(creature, &body) || !(units > 0.0f)) return false;
+  *gap_cm = controller_math::CapsuleGap(body, g_target) / units * 100.0f;
+  return true;
+}
+
 // For forest_take.cpp (docs/grab.md, "Many trees from a forest"): the trees
 // and the forests that the draw offered in this frame and that the Hand can
 // take, with the body of each. A tree in a hand is not in the list. And
@@ -11625,15 +11694,16 @@ void HandDirectReport() {
     g_turns_asked = g_turns_given = 0;
   }
   if (g_virtual_count != 0 || g_touch_vetoes != 0 || g_touch_forced != 0 ||
-      g_touch_kept != 0) {
+      g_touch_kept != 0 || g_open_slow != 0) {
     ModLog("hand creature: %llu presses with no camera move, %llu leash "
            "clicks, %llu states with no wait, %llu mesh hits refused at a "
            "distance, %llu slap branches forced by the swept test, %llu "
-           "frames the pick kept the Creature, this window", g_virtual_count,
-           g_leash_clicks, g_touch_waits, g_touch_vetoes, g_touch_forced,
-           g_touch_kept);
+           "frames the pick kept the Creature, %llu frames in which the game "
+           "read the open hand slower than a slap, this window",
+           g_virtual_count, g_leash_clicks, g_touch_waits, g_touch_vetoes,
+           g_touch_forced, g_touch_kept, g_open_slow);
     g_virtual_count = g_leash_clicks = g_touch_waits = 0;
-    g_touch_vetoes = g_touch_forced = g_touch_kept = 0;
+    g_touch_vetoes = g_touch_forced = g_touch_kept = g_open_slow = 0;
   }
   if (g_candidate_limit == kMaxCandidates) {
     ModLog("hand         : on the table, at most %d objects offered in one "

@@ -33,6 +33,9 @@ Other docs:
   that is not in the capsule touches nothing.
 - The hand of a stroke is open: the index finger when the Creature is small
   in the player's view, the flat hand when it is large.
+- An open hand that stays in the body of the player's Creature for 0.2 s
+  strokes it with no grip (`creature_stroke_open=1`). The open hand never
+  slaps. A slap needs the grip.
 - An object in the Hand that the player lets go at the Creature is a gift:
   the Creature takes it from the Hand. The gift goes on while the hand is
   at the Creature (`creature_gift=1`), with the leash and with no leash.
@@ -790,6 +793,8 @@ Value 3 of `creature_stroke_hand` gives the fist stroke:
 | `creature_open_wait` | 1 | The hand opens when a press on the Creature is 450 ms old. 0 gives a fist until the state starts |
 | `creature_palm_point` | 1 | With the flat hand of a stroke the Hand's point is the palm. 0 gives the tip of the index finger |
 | `creature_panel` | 2 | The Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature. See `ui-layer.md` |
+| `creature_panel_linger` | 1 | 1: the Creature panel shows while the Hand is at the player's Creature with no press, and for 3 s after the Hand left. 0: only while a press holds the Creature. See `ui-layer.md`, section 13 |
+| `creature_stroke_open` | 1 | 1: an open hand that stays in the body for 0.2 s strokes the Creature, and never slaps (section 2.10). 0: only the grip strokes the Creature |
 
 **Test keys** (with `test_keys=1`):
 
@@ -913,6 +918,15 @@ the leash ends 80 to 110 ms after its start in desktop runs.
 
 The keys are not in the launcher.
 
+**The gift needs the opening of the grip.** The game starts a gift only at a
+press of the Action button with the object in the Hand and the Creature in
+the pick record (packet `0x1F`, section 1.8). Packet `0x1F` has one sender
+(`fn_005D3080`), and the forced take of action `0x8E` (`fn_0047A1D0`) has one
+caller, the handler of that packet. So with the mouse, an object held at the
+Creature with no click is no gift. The mod keeps the opening of the grip as
+that press, and an object held at the Creature with the grip closed stays in
+the Hand.
+
 **The log.** The tag `village` has one line for each change of a gift:
 
 - "a gift starts": the Creature, the object, the Hand's point from the body,
@@ -930,6 +944,62 @@ The report window has the counts of the gifts that started, that the
 Creature took and that the game ended, and the count of the packets that the
 mod held back. It also has the frames in which a Creature stayed the target
 past its body.
+
+### 2.10 The stroke with the open hand (`creature_stroke_open`)
+
+The game strokes the Creature only in the Creature state of the Hand, and
+only a press of its Action button on the Creature starts that state (section
+1.2). So while the open hand stays in the body of the player's Creature, the
+mod holds that button down for the player. The code is `OpenStrokeStep` in
+`controllers.cpp`, with the pure rule in `creature_touch_math.h`.
+
+**The start.** All of these must be true for 0.2 s:
+
+- The controller places the Hand, and the Hand is empty.
+- The grip and the trigger are open.
+- The target at the Hand's point is the player's own Creature
+  (`HandDirectCreatureAtHand`), and the Hand's point is in the capsule of the
+  choice (section 3).
+- No grip from a distance, no grab of the world, no gesture, no teleport aim,
+  no dialog box, no ray of the Temple, no stay and no fight.
+
+A hand that goes past the Creature to an object near it is in the body for
+less than 0.2 s, so it does not stroke the Creature. The Creature learns from
+each stroke, so this wait is a guard. With the press the game starts its
+locked select, and the Creature stops and turns to the player, as for a
+press of the grip.
+
+**The end.** The press ends when the Hand's point is more than
+`creature_touch_cm` (5 cm of the room) out of the body, and not before it is
+0.5 s old. So the game never reads the press as a click: a short press on the
+Creature is the leash click, and with the leash on the Hand a release before
+225 ms is a click on the object (section 1.7). The press also ends at once
+when the trigger closes, when a menu opens, or when the controller does not
+place the Hand. When the grip closes in the press, the button stays down, and
+the press goes on as a press of the grip.
+
+**No slap with the open hand.** In a press of the open hand, `TouchFrame`
+gives the game 0.8 times the speed of a slap at most
+(`creature_touch_math::OpenSpeed`), and the swept test forces no slap branch.
+A hand that moves still moves, so the game still plays its strokes. The
+press sends no leash click (`h_InteractCamera`), also when it is short. A
+slap needs the grip, as before.
+
+`creature_stroke_open=0` keeps the old way: only the grip strokes the
+Creature. The launcher row is "Stroke with the open hand". The debug page has
+the switch "Open stroke" (group Creature).
+
+**The log.** The tag `controllers`. Examples of the format:
+
+```
+controllers  : the open hand is in the body of your Creature 2925A6F0 for 200 ms: the mod holds the Action button of the game for a stroke. The Hand's point is 0.4 cm in the body (creature_stroke_open=1), frame 931
+controllers  : the press of the open hand ends after 1840 ms: the Hand's point is 12.6 cm out of the body, past 5 cm (creature_touch_cm), frame 1080
+```
+
+The tag `hand creature` says "A press of the open hand, so no leash click" at
+the end of such a press. The report window has the count of the presses of
+the open hand and of their frames, and the frames in which the game read the
+open hand slower than a slap.
 
 ## 3. The body of the Creature before a press
 
@@ -1773,6 +1843,15 @@ The math tests are in `bwvr/test/controller_math/` and run with
   no stay), a hand that is lost before and in a stay, a key that changes
   while the grip is closed, the wait of the end (`EndNow`), and the distance
   and the watch for the log (`GoesOn`, `WatchDone`).
+- The Creature with no press (`creature_touch_checks.h`): the press of the
+  open hand starts after 0.2 s in the body, not for a hand that goes through
+  the body in 0.15 s or goes in and out each 0.1 s, not with the grip closed.
+  It stays 4 cm out of the body and ends 6 cm out, it lasts 0.5 s at the
+  least, a grip takes it, a hand that cannot go on ends it at once, and a
+  hand that stays presses again after a grip. The open hand is under the
+  speed of a slap at each limit, and a slow stroke keeps its speed. The panel
+  that stays: it shows at the Hand, it stays 2.9 s and goes at 3 s, not for a
+  different Creature, and not after a frame with no Creature.
 - The near target is in `far_checks.h` (see `grab.md`).
 - A fight (`fight_checks.h`): the ray of a press from a Hand at the side of
   the body, at the legs, over the head, in the body and on the axis, a body
@@ -1812,6 +1891,7 @@ creature_recipe.ps1 -Name <run> -Dll <dll> -Kind click
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind walk
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind gift
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind giftfree
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind open -NewGame
 ```
 
 The kind `state` (the default) does these steps:
@@ -1946,16 +2026,17 @@ desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. Not built, open
 
-- **The touch with no press** (`creature_touch`). The
-  Hand within 25 cm of the body would press the trigger for the player, and
-  the release past 35 cm. The mod must then hold the game's right button for
-  the player (`controllers.cpp`, `PumpButtons`). The hand passes the Creature
-  each time the player reaches for an object near it, and the Creature learns
-  from each stroke and slap. So the touch needs a guard: an open hand (no
-  finger on the trigger and the grip, which the Touch controllers report) and
-  0.2 s in the body. A slap comes from outside the body in one or two frames,
-  so it cannot wait 0.2 s, and it keeps the grip. It waits for a headset test
-  of the touch above.
+- **No run reaches the Creature at a render of 3600 by 2880.** In the test
+  save `temple`, the word `seek` puts the Hand's point on the body bone of
+  the Creature, but the draw offers no Creature near the Hand, and the pick
+  record stays empty. So `creature_recipe.ps1 -Kind state` presses the grip
+  with no target, and `-Kind open` starts no press of the open hand and arms
+  no panel. This is so with the renderer Vulkan and with Direct3D 9, and
+  with the head 25 degrees down. The Creature recipes of 2208 by 2208 had
+  the Creature as the target. The cause is not known. So the stroke with
+  the open hand (2.10) and the panel with no press (`ui-layer.md`, 13.2)
+  have the math tests and no run.
+
 - **A `OneOffSpellSeed`** gets a tap and no leash, as in the game.
 - **A stroke at 44 units a meter** with the fake hand gives the `stroke` ticks
   of the mod in some runs and no stroke of the game. The speed of a step

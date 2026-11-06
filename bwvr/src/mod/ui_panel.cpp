@@ -70,6 +70,7 @@
 #include "../vr/xr_screen.h"
 #include "MinHook.h"
 #include "controller_math.h"
+#include "creature_touch_math.h"
 #include "cutscene_window.h"
 #include "debug_menu.h"
 #include "hint_card.h"
@@ -103,6 +104,10 @@ bool HeadCameraStageBasis(float basis_out[9]);
 bool HeadCameraGameCamera(float position[3], float focus[3]);
 bool TabletopRoom(float origin[3], float basis[9], float center[3],
                   float* gain);
+// hand_direct.cpp: the player's Creature, and the Creature at the Hand that
+// the controller places (the panel that stays).
+void* HandDirectOwnCreature();
+void* HandDirectCreatureAtHand(bool empty);
 
 namespace {
 
@@ -159,8 +164,10 @@ const char* ModeName(int mode) {
 // THE CREATURE PANEL. fn_005178D0, from the help text callback (0x005CD03C),
 // draws the box with DrawCreatureStats (0x00517080) when the alpha at
 // 0x00CC630C is above 0, and then clears the alpha and the layout. cdecl, no
-// arguments, plain ret. Creature::Draw arms it with layout 1 while the Hand
-// is over the player's Creature. CameraModeFollow::Update arms it with
+// arguments, plain ret. Creature::Draw arms it with layout 1 while a press
+// holds the player's Creature (the locked select sets bit 0x10 of
+// Object+0x24), and the mod arms it with no press (LingerFrame).
+// CameraModeFollow::Update arms it with
 // layout 0. The four values are a, b, c and d of DrawCreatureStats, at
 // 0x00CC62EC down to 0x00CC62E0.
 const uintptr_t kCreaturePanelDraw = 0x005178D0;
@@ -249,16 +256,22 @@ bool WorldToLocal(const float world[3], float local_out[3],
 
 // The head of the Creature that armed the panel, in LOCAL meters. Layout 1
 // only: Creature::Draw armed it for the object of the pick (the test of
-// GetInteractObject, bit 0x10 of Object+0x24). The head is the base of the
-// LH3DCreature (+0x78) raised by 15 * size (+0x90), the height of S.
-bool CreatureHead() {
+// GetInteractObject, bit 0x10 of Object+0x24), or the mod armed it for
+// `armed` (the panel that stays). The head is the base of the LH3DCreature
+// (+0x78) raised by 15 * size (+0x90), the height of S.
+bool CreatureHead(const void* armed) {
   if (g_creature_layout != 1) return false;
-  void* game = *reinterpret_cast<void* const*>(kGame);
-  if (game == nullptr) return false;
-  void* face = reinterpret_cast<MyInterfaceFn>(kMyInterface)(game, nullptr);
-  const uint8_t* object = ReadPointer(face, kFaceNextObject);
-  if (object == nullptr || IsBadReadPtr(object, 0x168) ||
-      (object[0x24] & 0x10) == 0) {
+  const uint8_t* object = static_cast<const uint8_t*>(armed);
+  if (object == nullptr) {
+    void* game = *reinterpret_cast<void* const*>(kGame);
+    if (game == nullptr) return false;
+    void* face = reinterpret_cast<MyInterfaceFn>(kMyInterface)(game, nullptr);
+    object = ReadPointer(face, kFaceNextObject);
+    if (object == nullptr || IsBadReadPtr(object, 0x168) ||
+        (object[0x24] & 0x10) == 0) {
+      return false;
+    }
+  } else if (IsBadReadPtr(object, 0x168)) {
     return false;
   }
   const uint8_t* model = ReadPointer(ReadPointer(object, 0x160), 0x58);
@@ -270,17 +283,123 @@ bool CreatureHead() {
   return WorldToLocal(head, g_creature_head, g_creature_eyes);
 }
 
+// THE PANEL THAT STAYS (creature_panel_linger, docs/ui-layer.md, "The
+// Creature panel", and creature_touch_math.h). The game arms the panel only
+// while a press holds the Creature (the locked select sets bit 0x10). The mod
+// arms it also while the Hand is at the player's Creature with no press, and
+// for kLingerSeconds after the Hand left, with the values that
+// Creature::Draw (0x00517910) writes: a = 1 - (vtable +0x11C), b = 1 -
+// [+0x160]+0x1C, c = [+0x160]+0x30. The lesson total d keeps the value of the
+// last Creature state, as the game's own panel has it before a stroke.
+const int kCreatureLives = 0x2C;    // a vtable slot of the Creature
+const int kCreatureValueA = 0x11C;  // a vtable slot: 1 - a
+const int kCreatureMind = 0x160;
+typedef int(__fastcall* CreatureIntFn)(const void* self, void* unused);
+typedef float(__fastcall* CreatureFloatFn)(const void* self, void* unused);
+creature_touch_math::Linger g_linger;
+uint64_t g_linger_frame = 0;   // the frame of the last step
+bool g_linger_arming = false;  // the mod armed the panel in the last frame
+bool g_linger_at = false;      // the Hand was at the Creature then
+double g_linger_left = 0.0;    // the time the Hand left the Creature
+bool g_linger_said = false;
+uint64_t g_linger_frames = 0;  // frames the mod armed the panel
+int g_linger_logs = 0;
+const int kMaxLingerLogs = 40;
+
+// The mod arms the panel of this frame for the player's Creature. False when
+// the Creature cannot be read or does not live.
+bool LingerWrite(const void* creature) {
+  const uint8_t* bytes = static_cast<const uint8_t*>(creature);
+  if (bytes == nullptr || IsBadReadPtr(bytes, kCreatureMind + 4)) return false;
+  void* const* table = *reinterpret_cast<void* const* const*>(bytes);
+  if (table == nullptr ||
+      IsBadReadPtr(table, static_cast<UINT_PTR>(kCreatureValueA) + 4)) {
+    return false;
+  }
+  if (reinterpret_cast<CreatureIntFn>(table[kCreatureLives / 4])(
+          creature, nullptr) == 0) {
+    return false;
+  }
+  const uint8_t* mind = ReadPointer(creature, kCreatureMind);
+  if (mind == nullptr || IsBadReadPtr(mind, 0x34)) return false;
+  const float a = reinterpret_cast<CreatureFloatFn>(
+      table[kCreatureValueA / 4])(creature, nullptr);
+  float* v = reinterpret_cast<float*>(kCreaturePanelValues);
+  v[3] = 1.0f - a;
+  v[2] = 1.0f - *reinterpret_cast<const float*>(mind + 0x1C);
+  v[1] = *reinterpret_cast<const float*>(mind + 0x30);
+  *reinterpret_cast<int32_t*>(kCreaturePanelAlpha) = 255;
+  *reinterpret_cast<int32_t*>(kCreaturePanelLayout) = 1;
+  return true;
+}
+
+// Once a frame, before the game draws the panel. The Creature that the mod
+// armed the panel for, or null.
+const void* LingerFrame(bool game_armed) {
+  if (g_settings.creature_panel_linger == 0) return nullptr;
+  if (!g_linger_said) {
+    g_linger_said = true;
+    ModLog("ui panel     : creature_panel_linger=1. The Creature panel shows "
+           "while the Hand is at your Creature with no press, and for %.1f s "
+           "after the Hand left it", creature_touch_math::kLingerSeconds);
+  }
+  const double now = NowSeconds();
+  const void* own = HandDirectOwnCreature();
+  const bool at = HandDirectCreatureAtHand(false) != nullptr;
+  bool arm = creature_touch_math::LingerStep(
+      &g_linger, own, at, game_armed, now, creature_touch_math::kLingerSeconds);
+  if (arm && !LingerWrite(own)) arm = false;
+  if (arm) ++g_linger_frames;
+  // The log: the start of a show by the mod, the Hand that leaves, and the
+  // end of the stay.
+  if (g_linger_logs < kMaxLingerLogs) {
+    if (arm && !g_linger_arming && at) {
+      ++g_linger_logs;
+      ModLog("ui panel     : the Hand is at your Creature %p with no press: "
+             "the mod shows the Creature panel (creature_panel_linger=1), "
+             "frame %llu", own, g_frame);
+    } else if (arm && g_linger_at && !at) {
+      ++g_linger_logs;
+      g_linger_left = now;
+      ModLog("ui panel     : the Hand left your Creature: the Creature panel "
+             "stays for %.1f s, frame %llu",
+             creature_touch_math::kLingerSeconds, g_frame);
+    } else if (!arm && g_linger_arming && !game_armed) {
+      ++g_linger_logs;
+      ModLog("ui panel     : the Creature panel goes, %.2f s after the Hand "
+             "left your Creature, frame %llu",
+             g_linger_at ? 0.0 : now - g_linger_left, g_frame);
+    }
+  }
+  if (arm && g_linger_at && !at) g_linger_left = now;
+  g_linger_arming = arm;
+  g_linger_at = at;
+  return arm ? own : nullptr;
+}
+
 void __cdecl h_CreaturePanelDraw() {
-  const int32_t alpha = *reinterpret_cast<const int32_t*>(kCreaturePanelAlpha);
-  // Once a frame: the first eye pass draws it and clears the alpha.
-  if (alpha > 0 && g_creature_frame != g_frame) {
-    g_creature_frame = g_frame;
-    ++g_creature_draws;
-    g_creature_layout =
-        *reinterpret_cast<const int32_t*>(kCreaturePanelLayout);
-    const float* v = reinterpret_cast<const float*>(kCreaturePanelValues);
-    for (int i = 0; i < 4; ++i) g_creature_values[i] = v[3 - i];
-    g_creature_have_head = CreatureHead();
+  int32_t alpha = *reinterpret_cast<const int32_t*>(kCreaturePanelAlpha);
+  // Once a frame: the first eye pass draws it and clears the alpha. The mod
+  // arms it in the first call of a frame only, so the second eye pass does
+  // not draw it again.
+  if (g_creature_frame != g_frame) {
+    const void* armed = nullptr;
+    if (g_linger_frame != g_frame) {
+      g_linger_frame = g_frame;
+      armed = LingerFrame(alpha > 0);
+      if (armed != nullptr) {
+        alpha = *reinterpret_cast<const int32_t*>(kCreaturePanelAlpha);
+      }
+    }
+    if (alpha > 0) {
+      g_creature_frame = g_frame;
+      ++g_creature_draws;
+      g_creature_layout =
+          *reinterpret_cast<const int32_t*>(kCreaturePanelLayout);
+      const float* v = reinterpret_cast<const float*>(kCreaturePanelValues);
+      for (int i = 0; i < 4; ++i) g_creature_values[i] = v[3 - i];
+      g_creature_have_head = CreatureHead(armed);
+    }
   }
   o_CreaturePanelDraw();
 }
@@ -1288,9 +1407,23 @@ void UiPanelReport() {
   GpuBridgePanelReport();
   if (g_creature_draws != 0) {
     ModLog("ui panel     : the Creature panel drew on %llu frames and went to "
-           "the room %llu times this window (creature_panel=%d)",
-           g_creature_draws, g_creature_shows, g_settings.creature_panel);
+           "the room %llu times this window. The mod armed it on %llu of the "
+           "frames, with no press (creature_panel=%d, creature_panel_linger="
+           "%d)", g_creature_draws, g_creature_shows, g_linger_frames,
+           g_settings.creature_panel, g_settings.creature_panel_linger);
     g_creature_draws = 0;
     g_creature_shows = 0;
+    g_linger_frames = 0;
   }
+}
+
+// The switch of the debug page for creature_panel_linger.
+int UiPanelLingerValue() { return g_settings.creature_panel_linger != 0 ? 1 : 0; }
+void UiPanelLingerChange(const char* by) {
+  g_settings.creature_panel_linger =
+      g_settings.creature_panel_linger != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f,
+                          g_settings.creature_panel_linger != 0 ? 0.30f : 0.08f);
+  ModLog("ui panel     : %s: creature_panel_linger is %d now", by,
+         g_settings.creature_panel_linger);
 }

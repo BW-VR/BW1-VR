@@ -70,6 +70,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
 | `src/mod/video_view.cpp`, `video_view_math.h` | The view for videos in the window of the game, and its corner marks in the headset (`video_view`) |
+| `src/mod/vk_video.cpp`, `vk_video.vert`, `vk_video.frag`, `video_layers_math.h` | The quad layers of the headset in the view for videos (`video_view_layers`) |
 | `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
 | `src/common/exe_check.h`, `version.h` | The build check and the product name |
 
@@ -3454,41 +3455,127 @@ of the client area, with a linear filter. The mod does not change the size
 of the window. A picture with no eye pass (a menu with no scene) goes into
 the same place with its own shape. With `test_frame_rate` the copy goes out
 too, and the frame then waits, as in a session. With dxwrapper the view does
-not show, and the log says so one time.
+not show, and the log says so one time (see "The view for videos with
+dxwrapper").
 
-**What is not in the video.** The quad layers of the headset are not in the
-eye pictures, so they are not in the video: the hint cards, the subtitle
-card, the ring, the keyboard, the bubble of a miracle, the panels of the
-interface (the menus, the help and the Creature panel) and the walls of the
-cut scene window. The Hand, the hands, the land, the speech bubbles and the
-names of the villagers are in the eye picture.
+**The layers in the video.** The quad layers of the headset are not in the
+eye pictures: the hint cards, the subtitle card, the ring (with the panels
+of `panel_kit.cpp` on it: the places, the settings and the debug window),
+the keyboard, the bubble of a miracle, the panels of the interface (the
+menus, the help and the Creature panel, `ui_panel=1`) and the walls of the
+cut scene window. With `video_view_layers=1` (the default) the mod draws
+them over the area in the window, at the place and the size where the left
+eye sees them, in the order of the runtime, with their alpha. With
+`video_view_layers=0` the window shows the eye picture only. The Hand, the
+hands, the land, the speech bubbles and the names of the villagers are in
+the eye picture.
+
+- The record. In a session each frame keeps a record of its quad layers as
+  `BuildFrame` gives them to the runtime (`XrScreen::WantVideoLayers`): the
+  panels, the cards in their order, then the walls. With no headset no
+  frame takes the staged layers, so the mod makes the record after the eye
+  passes (`XrScreen::RecordVideoLayers`). That record has the cards and the
+  walls, but no panel: the panel quads need a session.
+- The place. Each corner of a quad goes to the left eye picture
+  (`video_layers_math.h`). In a frame of the world the map is the pose of
+  the left eye that the pictures are drawn from, with the projection of the
+  game (`InfoTransform`). For a screen in the room (the cut scene window,
+  the menus in the room) the map takes a point to the place on the screen
+  where the left eye sees it, and from there to the part of the eye
+  picture that the screen shows. Then the corner goes to the area, and to
+  the rect of the area in the window. Each map is linear in homogeneous
+  coordinates, so the GPU draws the texture with the perspective of the
+  eye. The GPU cuts a quad 1 cm in front of the eye, and a scissor cuts it
+  at the edge of the area.
+- The textures. In a session with Vulkan each upload of a card into its
+  swapchain (`xr_vulkan_upload=1`) also copies the same buffer into an
+  image of the card on the GPU, so the view has no copy on the CPU. A card
+  with no such image (a desktop run, a session with the relay of Direct3D
+  11) comes from the pixels of the CPU: the view copies the part that shows
+  into an image of its own. A panel quad samples the panel image of the
+  Vulkan renderer, which has `VK_IMAGE_USAGE_SAMPLED_BIT` for this. A wall
+  is black with its alpha.
+- The draw (`vk_video.cpp`, `vk_video.vert`, `vk_video.frag`). After the
+  blit of the area, one draw of a strip of 4 vertices for each quad goes
+  into the swapchain image, with the blend ONE and ONE_MINUS_SRC_ALPHA: the
+  cards and the panels hold the color multiplied by the alpha. The
+  swapchain gets `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT` for this. A window
+  whose swapchain cannot have it shows no layers, and the log says so one
+  time. The SPIR-V is in `vk_video_vert.h` and `vk_video_frag.h`. RenderDoc
+  has the compiler: `"C:\Program Files\RenderDoc\plugins\spirv\glslangValidator.exe"
+  -V --target-env vulkan1.3 --vn kVkVideoVert -o vk_video_vert.h
+  vk_video.vert`, and the same for `vk_video.frag` with `kVkVideoFrag`.
+  The build does not need the compiler.
+- Known limits. The window is UNORM, so the blend is in the gamma of the
+  picture. The runtime blends in linear light, so the soft edges of a card
+  can be a little darker in the headset. With the x64 host for Steam Frame
+  the layers go to the host, and the video has none.
 
 **The cost.** The report of each 450 frames has the time of a present of
 the window on the frame thread and on the GPU (two timestamps in its command
 buffer). In a session this is the cost of the view, because with
-`video_view=0` the window gets no present. The marks are one draw of 48
-vertices in each eye pass.
+`video_view=0` the window gets no present. The time of the GPU includes the
+draws of the layers. The line `vk video` has the time of the draws on the
+frame thread and the copies of the pixels of the CPU. The marks are one
+draw of 48 vertices in each eye pass.
 
 **The log and the pictures.** At the start, one line with the keys, and at
 the first frame one line with the size of the eye picture and of the area.
 A head that turns faster than the smoothing gives a line at the start and
 at the end of the lag. The report has the frames with the area, the area
-now and the largest lag. A frame that saves pictures also writes
-`bwvr-vk-video-N.bmp`: the area of the left eye at the pixels of the eye
-picture, as the window shows it.
+now and the largest lag. The first draw of each card, of a panel and of a
+wall gives a line with its place in the area and its texture. The report
+also has the windows with layers and the quads that were drawn and that
+were outside the area. A frame that saves pictures also writes
+`bwvr-vk-video-N.bmp` at the next present of the window: the area of the
+left eye at the pixels of the eye picture, with the quad layers over it, as
+the window shows it.
 
 ```
 video view   : video_view=1. The window of the game shows a 16:9 area of the left eye picture, ...
 video view   : the eye picture is W by H, the area is w by h at x, y (its middle N px below the middle of the picture), ...
 video view   : the head turns faster than the smoothing, the area is 3.00 degrees behind the head, frame N
 video view   : the area is on the head again (0.09 degrees) after N frames, frame M
-vk window    : N presents through the swapchain of the window (N of a part, for the view for videos), ... A present takes X ms on the frame thread and Y ms on the GPU
+video view   : the ring is in the video for the first time, frame N, from x0, y0 to x1, y1 of the area (0 to 1 across and down), over the world, from its copy on the GPU
+video view   : N windows with quad layers, N quads drawn (N cards, N panels, N walls), N quads outside the area
+vk window    : the picture of the video of frame N has N quad layers
+vk window    : N presents through the swapchain of the window (N of a part, for the view for videos, N with quad layers), ... A present takes X ms on the frame thread and Y ms on the GPU
+vk video     : N windows with quad layers, N quads drawn, N with no texture, N copies of the pixels of the CPU (X KB each), X ms on the frame thread for each window
 ```
 
 The launcher has the rows "View for videos" and "Video lower by"
 (`launcher.md`). With `debug_menu=1` the debug window has the switches
-"Video view", "Video marks" and the row "Video height", which moves the area
+"Video view", "Video marks", "Video layers" and the row "Video height", which moves the area
 5 percent up or down (`controllers.md`, 10.8).
+
+### The view for videos with dxwrapper
+
+With dxwrapper the view does not show in a session. The copy to the
+monitor goes through dxwrapper, and it costs about 8 ms of each frame at
+1920 by 1080 ("The copy to the monitor"). The mod cannot change how
+dxwrapper makes that copy.
+
+A cheaper copy is possible, but it is not built. In a session the GPU
+bridge has the left eye picture in a texture of the Direct3D 11 device of
+the session (`gpu_bridge.cpp`). A DXGI swapchain with the flip model on the
+window of the game could take the area of that texture with
+`CopySubresourceRegion` and present it with no wait for the monitor. That
+is a copy on the GPU of some MB, so it is much less than 1 ms. These points
+stop it now:
+
+- The immediate context of Direct3D 11 is not safe on two threads. With
+  `frame_send=2` or the hold, the second thread uses it for the copies and
+  `xrEndFrame` (`frame_send.cpp`). The copy to the window must then run on
+  that thread, or wait for it.
+- The window has the Direct3D 9 device of dxwrapper. A DXGI swapchain on
+  the same window must not meet a present of dxwrapper, for example a
+  desktop run or the frames before the session.
+- With the x64 host for Steam Frame the Direct3D 11 device is in the host
+  process.
+- No desktop run can show it: a desktop run has no Direct3D 11 device of a
+  session. Only a session in the headset can.
+
+`backend=vulkan` is the default, and it has the view with its layers.
 
 ### The fall back of the renderer Vulkan
 
@@ -5668,6 +5755,7 @@ keys that the launcher sets.
 | `video_view_fov_deg` | 90 | The width of the area in degrees at the middle of the eye picture, 40 to 110. See "The view for videos" |
 | `video_view_smooth_ms` | 150 | The time constant of the smoothed head of the video, 0 to 1000. 0: the area follows the head with no smoothing. See "The view for videos" |
 | `video_view_marks` | 1 | 1: faint corner marks in the eye pictures show the area in the headset. 0: no marks. The switch "Video marks" of the debug page. See "The view for videos" |
+| `video_view_layers` | 1 | 1: the quad layers of the headset (the cards, the ring, the panels and the walls of the cut scene window) are in the view for videos, where the left eye sees them. 0: the window shows the eye picture only. The switch "Video layers" of the debug page. See "The view for videos" |
 | `blt_texture_copy` | 1 | 1: the mod makes a copy with a texture and no stretch itself. 0: each copy goes to dxwrapper. See "The copy to the monitor" |
 | `test_frame_rate` | 0 | A test key of the desktop runs: the frame rate of a run with no copy to the monitor. See "The copy to the monitor" |
 | `anisotropy`, `force_mips` | 16, 1 | Texture filter. `force_mips` forces the mip filter |

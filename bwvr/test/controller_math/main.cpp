@@ -3589,6 +3589,7 @@ void CreatureChecks() {
 #include "menu_room_checks.h"
 #include "comfort_checks.h"
 #include "video_view_checks.h"
+#include "video_layers_checks.h"
 #include "blinder_checks.h"
 #include "glow_checks.h"
 #include "places_checks.h"
@@ -4008,6 +4009,7 @@ int main() {
   walk_checks::WalkChecks();
   comfort_checks::ComfortChecks();
   video_view_checks::VideoViewChecks();
+  video_layers_checks::VideoLayersChecks();
   blinder_checks::BlinderChecks();
   blt_copy_checks::BltCopyChecks();
   read_ahead_checks::ReadAheadChecks();

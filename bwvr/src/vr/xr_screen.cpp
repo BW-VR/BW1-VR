@@ -257,6 +257,73 @@ bool g_mask_failed = false;
 // The picture of the walls: one color, so it is small.
 const uint32_t kMaskSize = 16;
 
+// THE LAYERS FOR THE VIDEO (XrScreen::WantVideoLayers). Only the frame
+// thread writes and reads them.
+bool g_video_wanted = false;
+VideoLayers g_video = {};
+bool g_have_video = false;
+
+void VideoBegin(bool screen) {
+  g_video.count = 0;
+  g_video.screen = screen;
+}
+
+VideoQuad* VideoAdd(int kind, int index) {
+  if (g_video.count >= kVideoLayers) return nullptr;
+  VideoQuad* q = &g_video.quads[g_video.count++];
+  *q = {};
+  q->kind = kind;
+  q->index = index;
+  q->orientation[3] = 1.0f;
+  return q;
+}
+
+void VideoCard(int card, const CardLayer& layer, uint64_t view,
+               uint32_t view_format) {
+  VideoQuad* q = VideoAdd(kVideoCard, card);
+  if (q == nullptr) return;
+  for (int i = 0; i < 3; ++i) q->position[i] = layer.position[i];
+  for (int i = 0; i < 4; ++i) q->orientation[i] = layer.orientation[i];
+  q->width = layer.width;
+  q->height = layer.height;
+  for (int i = 0; i < 4; ++i) q->rect[i] = layer.rect[i];
+  q->texture_width = layer.texture_width;
+  q->texture_height = layer.texture_height;
+  q->pixels = layer.pixels;
+  q->view = view;
+  q->view_format = view_format;
+}
+
+// The walls of a cut scene window with walls.
+void VideoWalls(const WindowLayer& window) {
+  for (int k = 0; k < 4; ++k) {
+    VideoQuad* q = VideoAdd(kVideoWall, k);
+    if (q == nullptr) return;
+    for (int i = 0; i < 3; ++i) q->position[i] = window.wall_position[k][i];
+    for (int i = 0; i < 4; ++i) q->orientation[i] = window.orientation[i];
+    q->width = window.wall_size[k][0];
+    q->height = window.wall_size[k][1];
+    q->alpha = window.alpha > 1.0f ? 1.0f : window.alpha;
+  }
+}
+
+void VideoEnd() {
+  ++g_video.serial;
+  g_have_video = true;
+}
+
+// The checks of SendCard on a card, with no swapchain.
+bool CardShape(const CardLayer& card) {
+  const int32_t x = card.rect[0], y = card.rect[1];
+  const int32_t w = card.rect[2], h = card.rect[3];
+  return card.pixels != nullptr && card.texture_width > 0 &&
+         card.texture_height > 0 && card.texture_width <= 8192 &&
+         card.texture_height <= 8192 && x >= 0 && y >= 0 && w > 0 && h > 0 &&
+         x + w <= static_cast<int32_t>(card.texture_width) &&
+         y + h <= static_cast<int32_t>(card.texture_height) &&
+         card.width > 0.0f && card.height > 0.0f;
+}
+
 // THE VULKAN OF A SESSION WITH VULKAN (XrScreen::UseVulkan). The runtime
 // makes the instance and the device at the first Start with Vulkan. They
 // stay until the end of the process: the renderer of the mod draws with
@@ -288,6 +355,8 @@ const uint32_t kMaskSize = 16;
   X(vkResetFences)                        \
   X(vkCreateImage)                        \
   X(vkDestroyImage)                       \
+  X(vkCreateImageView)                    \
+  X(vkDestroyImageView)                   \
   X(vkGetImageMemoryRequirements)         \
   X(vkAllocateMemory)                     \
   X(vkFreeMemory)                         \
@@ -516,8 +585,32 @@ struct XrScreen::Impl {
     bool logged = false;
     uint64_t layers = 0;  // for the report
     int misses = 0;       // frames in a row with no image for the card
+    // THE COPY FOR THE VIDEO (WantVideoLayers): an image of the size of the
+    // picture that each upload with Vulkan also writes, for the view for
+    // videos. It is in the layout SHADER_READ_ONLY_OPTIMAL after the first
+    // write.
+    VkImage mirror = VK_NULL_HANDLE;
+    VkDeviceMemory mirror_memory = VK_NULL_HANDLE;
+    VkImageView mirror_view = VK_NULL_HANDLE;
+    VkFormat mirror_format = VK_FORMAT_UNDEFINED;
+    bool mirror_written = false;
+    bool mirror_failed = false;
+    bool mirror_fresh = false;  // the last SendCard wrote the image
   };
   CardChain cards[kCards];
+  bool MakeMirror(CardChain& chain, VkFormat image_format);
+  void FreeMirror(CardChain& chain);
+  // A card that went out in this frame, into the record of the video, with
+  // its copy on the GPU when SendCard wrote it.
+  void VideoOfCard(int card) {
+    const CardChain& chain = cards[card];
+    VideoCard(card, g_staged_card[card],
+              chain.mirror_fresh ? (uint64_t)chain.mirror_view : 0,
+              static_cast<uint32_t>(chain.mirror_format));
+  }
+  // The panel image of this frame (SetPanelVulkan, a late frame), for the
+  // record of the video.
+  uint64_t video_panel_image = 0;
 
   // The walls of the cut scene window: one swapchain, made at the first
   // frame with walls, and four quads of it.
@@ -742,9 +835,14 @@ struct XrScreen::Impl {
   // The rect x, y, w, h of `pixels` (rows of `pitch` bytes, 4 bytes for each
   // pixel) into the acquired image `image` of the swapchain, at the same
   // place. swap_red_blue swaps bytes 0 and 2 of each pixel.
+  // mirror: with an image of the size of the swapchain, the rect goes into
+  // it too (THE COPY FOR THE VIDEO). *mirror_written is false for an image
+  // with no write yet, and true after this one.
   bool UploadVulkan(XrSwapchain chain, uint32_t image, const uint8_t* pixels,
                     uint32_t pitch, int32_t x, int32_t y, int32_t w,
-                    int32_t h, bool swap_red_blue);
+                    int32_t h, bool swap_red_blue,
+                    VkImage mirror = VK_NULL_HANDLE,
+                    bool* mirror_written = nullptr);
   void FreeStages();
 
   bool CreateInput();                  // Start, after the LOCAL space
@@ -2142,6 +2240,8 @@ void XrScreen::Impl::DestroyCard(int index) {
   chain.swizzle = nullptr;
   chain.width = 0;
   chain.height = 0;
+  FreeMirror(chain);
+  chain.mirror_failed = false;
 }
 
 // One card of this frame: the pixels go into the next image of its
@@ -2225,9 +2325,18 @@ bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
   const bool red_first = format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
                          format == DXGI_FORMAT_R8G8B8A8_UNORM;
   const bool with_vulkan = UploadsWithVulkan(chain.swapchain);
+  // THE COPY FOR THE VIDEO: in the byte order of the swapchain, as UNORM.
+  const bool mirror =
+      g_video_wanted && with_vulkan &&
+      MakeMirror(chain, red_first ? VK_FORMAT_R8G8B8A8_UNORM
+                                  : VK_FORMAT_B8G8R8A8_UNORM);
+  chain.mirror_fresh = false;
   if (waited && image < chain.image_count && with_vulkan) {
-    UploadVulkan(chain.swapchain, image, card.pixels, chain.width * 4, x, y, w,
-                 h, red_first);
+    const bool sent = UploadVulkan(
+        chain.swapchain, image, card.pixels, chain.width * 4, x, y, w, h,
+        red_first, mirror ? chain.mirror : VK_NULL_HANDLE,
+        &chain.mirror_written);
+    chain.mirror_fresh = mirror && sent;
   } else if (waited && image < chain.image_count && context != nullptr) {
     const uint32_t pitch = chain.width * 4;
     const uint8_t* source = card.pixels;
@@ -2290,6 +2399,76 @@ void XrScreen::StageWindow(const WindowLayer& layer) {
 }
 
 void XrScreen::DropStagedWindow() { g_have_staged_window = false; }
+
+void XrScreen::WantVideoLayers(bool on) {
+  g_video_wanted = on;
+  if (!on) g_have_video = false;
+}
+
+bool XrScreen::VideoLayersOf(VideoLayers* out) {
+  if (!g_video_wanted || !g_have_video || out == nullptr) return false;
+  *out = g_video;
+  return true;
+}
+
+// A frame with no runtime: the layers that a frame of BuildFrame would have,
+// with no panel (the panel quads need a session) and with the pixels of the
+// CPU for each card.
+void XrScreen::RecordVideoLayers(const float eye_position[3], uint32_t width,
+                                 uint32_t height) {
+  if (!g_video_wanted) return;
+  const bool window_staged = g_have_staged_window;
+  const WindowLayer window = g_staged_window;
+  g_have_staged_window = false;
+  const bool screen = window_staged && window.screen;
+  VideoBegin(screen);
+  if (screen) {
+    for (int k = 0; k < 3; ++k) {
+      g_video.screen_position[k] = window.position[k];
+      g_video.eye_position[k] = eye_position[k];
+    }
+    for (int k = 0; k < 4; ++k) {
+      g_video.screen_orientation[k] = window.orientation[k];
+    }
+    g_video.screen_width = window.width;
+    g_video.screen_height = window.height;
+    float part[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    if (window.rect[2] > 0 && window.rect[3] > 0 && width > 0 && height > 0) {
+      const float w = static_cast<float>(width), h = static_cast<float>(height);
+      part[0] = static_cast<float>(window.rect[0]) / w;
+      part[1] = static_cast<float>(window.rect[1]) / h;
+      part[2] = static_cast<float>(window.rect[0] + window.rect[2]) / w;
+      part[3] = static_cast<float>(window.rect[1] + window.rect[3]) / h;
+    }
+    for (int k = 0; k < 4; ++k) g_video.screen_part[k] = part[k];
+    const int over[2] = {kCardSubtitles, kCardKeyboard};
+    for (int i = 0; i < 2; ++i) {
+      const int card = over[i];
+      if (g_have_staged_card[card] && g_staged_card[card].visible &&
+          !g_card_failed[card] && CardShape(g_staged_card[card])) {
+        VideoCard(card, g_staged_card[card], 0, 0);
+      }
+    }
+  } else {
+    const int card_order[kCards] = {kCardSubtitles, kCardHintPointing,
+                                    kCardHintOther,  kCardRing,
+                                    kCardBubble,     kCardKeyboard};
+    for (int i = 0; i < kCards; ++i) {
+      const int card = card_order[i];
+      if (g_have_staged_card[card] && g_staged_card[card].visible &&
+          !g_card_failed[card] && CardShape(g_staged_card[card])) {
+        VideoCard(card, g_staged_card[card], 0, 0);
+      }
+    }
+    bool walls = window_staged && window.mask && window.alpha > 0.004f;
+    for (int k = 0; k < 4 && walls; ++k) {
+      walls = window.wall_size[k][0] > 0.0f && window.wall_size[k][1] > 0.0f;
+    }
+    if (walls) VideoWalls(window);
+  }
+  for (int i = 0; i < kCards; ++i) g_have_staged_card[i] = false;
+  VideoEnd();
+}
 
 void XrScreen::Impl::DestroyMask() {
   DestroyChain(&mask_swapchain);
@@ -2442,6 +2621,7 @@ void XrScreen::SetPanelVulkan(uint64_t image) {
   if (s.Check(s.CopyVulkan(s.panel_swapchain, image, 0),
               "the copy of a Vulkan panel")) {
     s.panel_acquired = 0;
+    s.video_panel_image = image;
   }
 }
 
@@ -2793,6 +2973,9 @@ bool XrScreen::BuildFrame() {
     uint32_t layer_count = 0;
     layers[layer_count++] =
         reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
+    // THE LAYERS FOR THE VIDEO: each quad below goes into the record too,
+    // in the same order.
+    if (g_video_wanted) VideoBegin(false);
 
     // THE INTERFACE PANELS, over the world. OpenXR draws a later layer over
     // an earlier one. Without the unpremultiplied flag the runtime reads the
@@ -2831,6 +3014,20 @@ bool XrScreen::BuildFrame() {
         layers[layer_count++] =
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad);
         ++s.panel_layers[i];
+        VideoQuad* video = g_video_wanted ? VideoAdd(kVideoPanel, i) : nullptr;
+        if (video != nullptr) {
+          for (int k = 0; k < 3; ++k) video->position[k] = q.position[k];
+          for (int k = 0; k < 4; ++k) video->orientation[k] = q.orientation[k];
+          video->width = q.width;
+          video->height = q.height;
+          video->rect[0] = x;
+          video->rect[1] = y;
+          video->rect[2] = w;
+          video->rect[3] = h;
+          video->texture_width = s.width;
+          video->texture_height = s.height;
+          video->panel_image = s.video_panel_image;
+        }
       }
       if (layer_count > 1) {
         b.with_panel = true;
@@ -2864,6 +3061,7 @@ bool XrScreen::BuildFrame() {
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(
                 &card_quads[card]);
         with_card[card] = true;
+        if (g_video_wanted) s.VideoOfCard(card);
       }
       g_have_staged_card[card] = false;
     }
@@ -2876,7 +3074,10 @@ bool XrScreen::BuildFrame() {
         layers[layer_count++] =
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(&walls[k]);
       }
+      if (g_video_wanted) VideoWalls(window);
     }
+    if (g_video_wanted) VideoEnd();
+    s.video_panel_image = 0;
 
     ++presented_;
     for (int eye = 0; eye < 2; ++eye) s.acquired[eye] = -1;
@@ -2961,8 +3162,35 @@ bool XrScreen::BuildFrame() {
     layers[layer_count] =
         reinterpret_cast<const XrCompositionLayerBaseHeader*>(
             &quads[layer_count]);
+    // THE LAYERS FOR THE VIDEO: the screen that the left eye picture is on.
+    if (g_video_wanted && eye == 0) {
+      VideoBegin(true);
+      g_video.screen_position[0] = quad.pose.position.x;
+      g_video.screen_position[1] = quad.pose.position.y;
+      g_video.screen_position[2] = quad.pose.position.z;
+      for (int k = 0; k < 3; ++k) {
+        g_video.eye_position[k] = views_[0].position[k];
+      }
+      g_video.screen_orientation[0] = quad.pose.orientation.x;
+      g_video.screen_orientation[1] = quad.pose.orientation.y;
+      g_video.screen_orientation[2] = quad.pose.orientation.z;
+      g_video.screen_orientation[3] = quad.pose.orientation.w;
+      g_video.screen_width = quad.size.width;
+      g_video.screen_height = quad.size.height;
+      const float sw = static_cast<float>(s.width);
+      const float sh = static_cast<float>(s.height);
+      const XrRect2Di& r = quad.subImage.imageRect;
+      g_video.screen_part[0] = static_cast<float>(r.offset.x) / sw;
+      g_video.screen_part[1] = static_cast<float>(r.offset.y) / sh;
+      g_video.screen_part[2] =
+          static_cast<float>(r.offset.x + r.extent.width) / sw;
+      g_video.screen_part[3] =
+          static_cast<float>(r.offset.y + r.extent.height) / sh;
+    }
     ++layer_count;
   }
+  const bool video_screen =
+      g_video_wanted && layer_count > 0 && s.acquired[0] >= 0;
 
   if (layer_count > 0) ++presented_;
   if (as_screen && layer_count > 0 && part[2] > 0) {
@@ -3006,6 +3234,7 @@ bool XrScreen::BuildFrame() {
     layers[layer_count++] =
         reinterpret_cast<const XrCompositionLayerBaseHeader*>(&subtitle_quad);
     with_subtitles = true;
+    if (video_screen) s.VideoOfCard(kCardSubtitles);
     if (!s.logged_window_card) {
       s.logged_window_card = true;
       s.log("  openxr: the subtitle card goes out as one quad layer over the "
@@ -3023,8 +3252,11 @@ bool XrScreen::BuildFrame() {
     layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
         &b.card_quads[kCardKeyboard]);
     b.with_card[kCardKeyboard] = true;
+    if (video_screen) s.VideoOfCard(kCardKeyboard);
   }
   for (int i = 0; i < kCards; ++i) g_have_staged_card[i] = false;
+  if (video_screen) VideoEnd();
+  s.video_panel_image = 0;
 
   b.layer_count = layer_count;
   QueryPerformanceCounter(&b.built);
@@ -3173,6 +3405,7 @@ void XrScreen::EndFrameLate(const LateFrame& frame, bool on_thread) {
   if (!s.vulkan) s.late.panel_vulkan = 0;
   s.panel_acquired =
       s.late.panel_texture != nullptr || s.late.panel_vulkan != 0 ? 0 : -1;
+  s.video_panel_image = s.late.panel_vulkan;
   if (!BuildFrame()) return;
   ++s.late_frames;
   if (on_thread && s.StartSendThread()) {
@@ -3560,6 +3793,7 @@ void XrScreen::Stop() {
   }
   s.DestroyMask();
   if (was_started) g_have_staged_window = false;
+  g_have_video = false;
   // The action spaces go before the session.
   s.DestroyInput();
   if (s.view_space != XR_NULL_HANDLE) {
@@ -4420,6 +4654,96 @@ bool XrScreen::Impl::Push(VkChain& chain, uint32_t image) {
   return ok;
 }
 
+// THE COPY FOR THE VIDEO of a card: an image of the size of the card on the
+// GPU, which the view for videos samples. False when it cannot be made.
+// Then the view for videos copies the pixels of the CPU itself.
+bool XrScreen::Impl::MakeMirror(CardChain& chain, VkFormat image_format) {
+  if (chain.mirror != VK_NULL_HANDLE && chain.mirror_format == image_format) {
+    return true;
+  }
+  if (chain.mirror_failed) return false;
+  FreeMirror(chain);
+  VkImageCreateInfo info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  info.imageType = VK_IMAGE_TYPE_2D;
+  info.format = image_format;
+  info.extent = {chain.width, chain.height, 1};
+  info.mipLevels = 1;
+  info.arrayLayers = 1;
+  info.samples = VK_SAMPLE_COUNT_1_BIT;
+  info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  bool ok = vkf.vkCreateImage(g_vk.device, &info, nullptr, &chain.mirror) ==
+            VK_SUCCESS;
+  VkMemoryRequirements req = {};
+  if (ok) vkf.vkGetImageMemoryRequirements(g_vk.device, chain.mirror, &req);
+  uint32_t type = UINT32_MAX;
+  for (uint32_t i = 0; ok && i < g_vk.memory.memoryTypeCount; ++i) {
+    if ((req.memoryTypeBits & (1u << i)) != 0 &&
+        (g_vk.memory.memoryTypes[i].propertyFlags &
+         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+      type = i;
+      break;
+    }
+  }
+  VkMemoryAllocateInfo allocate = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  allocate.allocationSize = req.size;
+  allocate.memoryTypeIndex = type;
+  ok = ok && type != UINT32_MAX &&
+       vkf.vkAllocateMemory(g_vk.device, &allocate, nullptr,
+                            &chain.mirror_memory) == VK_SUCCESS &&
+       vkf.vkBindImageMemory(g_vk.device, chain.mirror, chain.mirror_memory,
+                             0) == VK_SUCCESS;
+  if (ok) {
+    VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view.image = chain.mirror;
+    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view.format = image_format;
+    view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    ok = vkf.vkCreateImageView(g_vk.device, &view, nullptr,
+                               &chain.mirror_view) == VK_SUCCESS;
+  }
+  if (!ok) {
+    FreeMirror(chain);
+    chain.mirror_failed = true;
+    log("  openxr: no copy of a card for the view for videos, so the view "
+        "copies the pixels of the CPU");
+    return false;
+  }
+  chain.mirror_format = image_format;
+  chain.mirror_written = false;
+  return true;
+}
+
+// The view for videos can still read the image in the queue, so the queue
+// becomes idle first. This comes only at a new size of a card and at the end.
+void XrScreen::Impl::FreeMirror(CardChain& chain) {
+  if (chain.mirror == VK_NULL_HANDLE && chain.mirror_memory == VK_NULL_HANDLE) {
+    return;
+  }
+  {
+    QueueGuard guard(true);
+    vkf.vkDeviceWaitIdle(g_vk.device);
+  }
+  // The record of the last frame can name this view.
+  g_have_video = false;
+  if (chain.mirror_view != VK_NULL_HANDLE) {
+    vkf.vkDestroyImageView(g_vk.device, chain.mirror_view, nullptr);
+  }
+  if (chain.mirror != VK_NULL_HANDLE) {
+    vkf.vkDestroyImage(g_vk.device, chain.mirror, nullptr);
+  }
+  if (chain.mirror_memory != VK_NULL_HANDLE) {
+    vkf.vkFreeMemory(g_vk.device, chain.mirror_memory, nullptr);
+  }
+  chain.mirror = VK_NULL_HANDLE;
+  chain.mirror_memory = VK_NULL_HANDLE;
+  chain.mirror_view = VK_NULL_HANDLE;
+  chain.mirror_format = VK_FORMAT_UNDEFINED;
+  chain.mirror_written = false;
+}
+
 void XrScreen::Impl::FreeStages() {
   for (int i = 0; i < kVkSlots; ++i) {
     Stage& stage = vk_stage[i];
@@ -4441,7 +4765,8 @@ void XrScreen::Impl::FreeStages() {
 bool XrScreen::Impl::UploadVulkan(XrSwapchain chain, uint32_t image,
                                   const uint8_t* pixels, uint32_t pitch,
                                   int32_t x, int32_t y, int32_t w, int32_t h,
-                                  bool swap_red_blue) {
+                                  bool swap_red_blue, VkImage mirror,
+                                  bool* mirror_written) {
   LARGE_INTEGER start, done;
   QueryPerformanceCounter(&start);
   VkChain* c = FindChain(chain);
@@ -4550,6 +4875,36 @@ bool XrScreen::Impl::UploadVulkan(XrSwapchain chain, uint32_t image,
   vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
                            nullptr, 1, &after);
+  // THE COPY FOR THE VIDEO: the same buffer into the image of the video.
+  // The view for videos reads it in a later submit to this queue, and the
+  // barrier before the copy waits for each read of the frame before.
+  if (mirror != VK_NULL_HANDLE && mirror_written != nullptr) {
+    VkImageMemoryBarrier to = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    to.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to.oldLayout = *mirror_written ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                   : VK_IMAGE_LAYOUT_UNDEFINED;
+    to.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to.image = mirror;
+    to.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &to);
+    vkf.vkCmdCopyBufferToImage(cb, stage.buffer, mirror,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                               &region);
+    VkImageMemoryBarrier back = to;
+    back.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr,
+                             0, nullptr, 1, &back);
+    *mirror_written = true;
+  }
   const bool ok = EndCopy(cb);
   QueryPerformanceCounter(&done);
   vk_upload_ticks += static_cast<uint64_t>(done.QuadPart - start.QuadPart);

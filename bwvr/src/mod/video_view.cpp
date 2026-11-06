@@ -39,10 +39,18 @@
 // black around it. A picture with no eye pass (a menu) fills the 16:9 rect
 // with its own shape.
 //
-// WHAT IS NOT IN THE VIDEO. The quad layers of the headset are not in the
-// eye pictures: the hint cards, the subtitle card, the ring, the keyboard,
-// the bubble of a miracle, the panels of the interface and the walls of the
-// cut scene window.
+// THE LAYERS (video_view_layers). The quad layers of the headset are not in
+// the eye pictures: the hint cards, the subtitle card, the ring and the
+// panels of panel_kit.cpp on it, the keyboard, the bubble of a miracle, the
+// panels of the interface and the walls of the cut scene window. The
+// session keeps a record of the quads of each frame, in the order of the
+// runtime (XrScreen::WantVideoLayers). With no headset the record comes
+// from what the mod staged (VideoViewEndPasses). VideoViewDraws takes each
+// corner of a quad to the left eye picture (video_layers_math.h): with the
+// pose of the left eye that the pictures are drawn from and the projection
+// of the game, or for a screen in the room, to the place on the screen
+// where the eye sees it. Then to the area of the window. vk_window.cpp
+// draws them over the area with their alpha (vk_video.cpp).
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -53,6 +61,8 @@
 
 #include "../common/bw_addresses.h"
 #include "debug_menu.h"
+#include "../vr/xr_screen.h"
+#include "video_layers_math.h"
 #include "video_view.h"
 #include "video_view_math.h"
 
@@ -70,17 +80,20 @@ bool VkWindowWanted();
 namespace {
 
 namespace vm = video_view_math;
+namespace lm = video_layers_math;
 
 bool g_on = false;
 int g_down = vm::kDownDefault;
 int g_fov = vm::kFovDefault;
 int g_smooth_ms = vm::kSmoothDefault;
 bool g_marks = true;
+bool g_layers = true;  // video_view_layers
 // backend=vulkan, read once: ProxyBackendVulkan reads the ini file.
 bool g_vulkan = false;
 
-// The head of the frame.
+// The left eye of the frame.
 float g_head[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+float g_eye[3] = {0.0f, 0.0f, 0.0f};
 vm::Smooth g_smooth = {{0.0f, 0.0f, -1.0f}, false};
 LARGE_INTEGER g_last = {};
 bool g_have_last = false;
@@ -94,6 +107,26 @@ vm::Rect g_area = {};    // with no smoothing, for the marks
 vm::Rect g_moved = {};   // with the smoothing, for the window
 float g_margin_x = 0.0f, g_margin_y = 0.0f;
 uint64_t g_drawn_frame[2] = {0, 0};
+// The tangents of the half angles of the eye picture, and the left eye of
+// the frame, for the layers.
+float g_tan_x = 0.0f, g_tan_y = 0.0f;
+float g_frame_eye[3] = {0.0f, 0.0f, 0.0f};
+float g_frame_head[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+// The serial of the last record that went into the window, so a record goes
+// into one window only.
+uint64_t g_used_serial = 0;
+// For the report: the windows with layers, the quads drawn and the quads
+// outside the area, and each kind once in the log.
+uint64_t g_layer_windows = 0;
+uint64_t g_layer_draws = 0;
+uint64_t g_layer_outside = 0;
+uint64_t g_layer_cards = 0, g_layer_panels = 0, g_layer_walls = 0;
+// The first draw of each card, of a panel and of a wall goes into the log.
+const int kSaidCount = bwvr::kCards + 2;
+bool g_said[kSaidCount] = {};
+const char* const kCardNames[bwvr::kCards] = {
+    "the hint card of the pointing hand", "the hint card of the other hand",
+    "the subtitle card", "the ring", "the keyboard", "the bubble card"};
 
 // For the log and the report.
 bool g_said_size = false;
@@ -221,25 +254,35 @@ void LogKeys(const char* by) {
          "%d%% of the height below the middle of the picture "
          "(video_view_down_pct). Smoothed head %d ms within %.0f degrees "
          "(video_view_smooth_ms), corner marks in the headset %s "
-         "(video_view_marks=%d)",
+         "(video_view_marks=%d), the quad layers of the headset %s "
+         "(video_view_layers=%d)",
          by, colon, g_fov, g_down, g_smooth_ms, vm::kBandDeg,
-         g_marks ? "on" : "off", g_marks ? 1 : 0);
+         g_marks ? "on" : "off", g_marks ? 1 : 0,
+         g_layers ? "in the video" : "not in the video", g_layers ? 1 : 0);
+}
+
+// The session keeps the record of the layers only while the video wants it.
+void WantLayers() {
+  bwvr::XrScreen::WantVideoLayers(g_on && g_layers && g_vulkan);
 }
 
 }  // namespace
 
 void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
-                         int marks) {
+                         int marks, int layers) {
   g_on = on != 0;
   g_down = vm::ClampDown(down_pct);
   g_fov = vm::ClampFov(fov_deg);
   g_smooth_ms = vm::ClampSmooth(smooth_ms);
   g_marks = marks != 0;
+  g_layers = layers != 0;
   g_vulkan = ProxyBackendVulkan();
+  WantLayers();
   LogKeys("");
 }
 
-void VideoViewHead(const float orientation[4]) {
+void VideoViewHead(const float position[3], const float orientation[4]) {
+  for (int i = 0; i < 3; ++i) g_eye[i] = position[i];
   for (int i = 0; i < 4; ++i) g_head[i] = orientation[i];
 }
 
@@ -282,6 +325,10 @@ void VideoViewFrame() {
   const float band = tanf(band_rad);
   g_width = 2.0f * hx;
   g_height = 2.0f * hy;
+  g_tan_x = hx / fx;
+  g_tan_y = hy / fy;
+  for (int i = 0; i < 3; ++i) g_frame_eye[i] = g_eye[i];
+  for (int i = 0; i < 4; ++i) g_frame_head[i] = g_head[i];
   g_margin_x = band * fx;
   g_margin_y = band * fy;
   g_area = vm::Area(g_width, g_height, fx, g_fov, g_down, g_margin_x,
@@ -410,6 +457,128 @@ bool VideoViewWindow(bool from_eye, float uv[4], float* aspect) {
   return true;
 }
 
+void VideoViewEndPasses(bool to_headset) {
+  if (to_headset || !g_on || !g_layers || !g_vulkan || !g_valid) return;
+  bwvr::XrScreen::RecordVideoLayers(g_frame_eye,
+                                    static_cast<uint32_t>(g_width),
+                                    static_cast<uint32_t>(g_height));
+}
+
+int VideoViewDraws(const float uv[4], VideoDraw out[kVideoDraws]) {
+  if (!g_on || !g_layers || !g_vulkan) return 0;
+  // Static: the record is about 2 KB.
+  static bwvr::VideoLayers record;
+  if (!bwvr::XrScreen::VideoLayersOf(&record) ||
+      record.serial == g_used_serial) {
+    return 0;
+  }
+  g_used_serial = record.serial;
+  lm::Map map;
+  if (record.screen) {
+    if (!lm::ScreenMap(record.eye_position, record.screen_position,
+                       record.screen_orientation, record.screen_width,
+                       record.screen_height, record.screen_part, &map)) {
+      return 0;
+    }
+  } else {
+    if (!g_valid || !(g_tan_x > 0.0f) || !(g_tan_y > 0.0f)) return 0;
+    map = lm::EyeMap(g_frame_eye, g_frame_head, g_tan_x, g_tan_y);
+  }
+  int n = 0;
+  for (int i = 0; i < record.count && n < kVideoDraws; ++i) {
+    const bwvr::VideoQuad& q = record.quads[i];
+    VideoDraw& d = out[n];
+    d = {};
+    float corners[4][3];
+    lm::Corners(q.position, q.orientation, q.width, q.height, corners);
+    for (int c = 0; c < 4; ++c) {
+      float uvw[3];
+      lm::Apply(map, corners[c], uvw);
+      lm::ToArea(uvw, uv, map.near_w, d.corner[c]);
+    }
+    if (!lm::InArea(d.corner)) {
+      ++g_layer_outside;
+      continue;
+    }
+    for (int k = 0; k < 4; ++k) d.color[k] = 1.0f;
+    int said = -1;
+    if (q.kind == bwvr::kVideoWall) {
+      // Black with the alpha: the color times the alpha is 0.
+      d.source = kVideoWhite;
+      d.color[0] = d.color[1] = d.color[2] = 0.0f;
+      d.color[3] = q.alpha;
+      d.uv[0] = d.uv[1] = 0.0f;
+      d.uv[2] = d.uv[3] = 1.0f;
+      ++g_layer_walls;
+      said = bwvr::kCards + 1;
+    } else if (q.kind == bwvr::kVideoPanel) {
+      if (q.panel_image == 0 || q.texture_width == 0 ||
+          q.texture_height == 0) {
+        continue;
+      }
+      d.source = kVideoPanel;
+      d.handle = q.panel_image;
+      lm::TextureRect(q.rect, static_cast<float>(q.texture_width),
+                      static_cast<float>(q.texture_height), d.uv);
+      ++g_layer_panels;
+      said = bwvr::kCards;
+    } else {
+      if (q.texture_width == 0 || q.texture_height == 0) continue;
+      if (q.view != 0) {
+        d.source = kVideoView;
+        d.handle = q.view;
+        d.format = q.view_format;
+      } else if (q.pixels != nullptr) {
+        d.source = kVideoPixels;
+        d.pixels = q.pixels;
+        d.texture_width = q.texture_width;
+        d.texture_height = q.texture_height;
+        for (int k = 0; k < 4; ++k) d.rect[k] = q.rect[k];
+      } else {
+        continue;
+      }
+      d.card = q.index;
+      lm::TextureRect(q.rect, static_cast<float>(q.texture_width),
+                      static_cast<float>(q.texture_height), d.uv);
+      ++g_layer_cards;
+      if (q.index >= 0 && q.index < bwvr::kCards) said = q.index;
+    }
+    ++n;
+    if (said >= 0 && !g_said[said]) {
+      g_said[said] = true;
+      // The place in the area of the corners in front of the eye.
+      float x0 = 2.0f, y0 = 2.0f, x1 = -1.0f, y1 = -1.0f;
+      for (int c = 0; c < 4; ++c) {
+        if (!(d.corner[c][3] > 0.0f)) continue;
+        const float x = d.corner[c][0] / d.corner[c][3];
+        const float y = d.corner[c][1] / d.corner[c][3];
+        x0 = x < x0 ? x : x0;
+        y0 = y < y0 ? y : y0;
+        x1 = x > x1 ? x : x1;
+        y1 = y > y1 ? y : y1;
+      }
+      const char* what = said < bwvr::kCards   ? kCardNames[said]
+                         : said == bwvr::kCards ? "a panel of the interface"
+                                                : "a wall of the cut scene "
+                                                  "window";
+      ModLog("video view   : %s is in the video for the first time, frame "
+             "%llu, from %.2f, %.2f to %.2f, %.2f of the area (0 to 1 across "
+             "and down), %s, from %s",
+             what, ControllersFrameCount(), x0, y0, x1, y1,
+             record.screen ? "over the screen in the room" : "over the world",
+             d.source == kVideoView     ? "its copy on the GPU"
+             : d.source == kVideoPixels ? "the pixels of the CPU"
+             : d.source == kVideoPanel  ? "the image of the panel"
+                                        : "a color");
+    }
+  }
+  if (n > 0) {
+    ++g_layer_windows;
+    g_layer_draws += static_cast<uint64_t>(n);
+  }
+  return n;
+}
+
 void VideoViewReport() {
   if (!g_on || g_frames == 0) return;
   ModLog("video view   : %llu frames with the area, %llu to the window, the "
@@ -417,7 +586,16 @@ void VideoViewReport() {
          "of the area at the most, marks in %llu eye passes, %llu failed",
          g_frames, g_windows, g_moved.x1 - g_moved.x0, g_moved.y1 - g_moved.y0,
          g_moved.x0, g_moved.y0, g_lag_window, g_mark_passes, g_mark_failed);
+  if (g_layers && g_vulkan) {
+    ModLog("video view   : %llu windows with quad layers, %llu quads drawn "
+           "(%llu cards, %llu panels, %llu walls), %llu quads outside the "
+           "area",
+           g_layer_windows, g_layer_draws, g_layer_cards, g_layer_panels,
+           g_layer_walls, g_layer_outside);
+  }
   g_frames = g_windows = g_mark_passes = g_mark_failed = 0;
+  g_layer_windows = g_layer_draws = g_layer_outside = 0;
+  g_layer_cards = g_layer_panels = g_layer_walls = 0;
   g_lag_window = 0.0f;
 }
 
@@ -431,6 +609,7 @@ int VideoViewValue() {
 void VideoViewChange(const char* by) {
   g_on = !g_on;
   if (!g_on) g_valid = false;
+  WantLayers();
   ControllersGesturePulse(0.5f, g_on ? 0.30f : 0.08f);
   LogKeys(by);
 }
@@ -444,6 +623,19 @@ void VideoViewMarksChange(const char* by) {
   if (!g_on) return;
   g_marks = !g_marks;
   ControllersGesturePulse(0.5f, g_marks ? 0.30f : 0.08f);
+  LogKeys(by);
+}
+
+int VideoViewLayersValue() {
+  if (!g_vulkan || !g_on) return kDebugCannot;
+  return g_layers ? 1 : 0;
+}
+
+void VideoViewLayersChange(const char* by) {
+  if (!g_on) return;
+  g_layers = !g_layers;
+  WantLayers();
+  ControllersGesturePulse(0.5f, g_layers ? 0.30f : 0.08f);
   LogKeys(by);
 }
 

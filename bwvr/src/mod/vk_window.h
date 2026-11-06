@@ -19,6 +19,7 @@
 
 #include <windows.h>
 
+#include "video_view.h"
 #include "vk_core.h"
 
 // vk_window of bwvr.ini: 1 (the default) a swapchain of Vulkan. 0: the way
@@ -40,10 +41,20 @@ int VkWindowValue();
 // else the part of it (x0, y0, x1, y1 from 0 to 1). `aspect`: 0 for the
 // whole client area. Above 0: the largest rect of that shape (width over
 // height) in the middle of the client area, with black around it. Below 0:
-// the same with the shape of the part.
+// the same with the shape of the part. `draws`: the quad layers of the
+// headset over the part (video_view.h, VideoViewDraws), drawn with
+// vk_video.cpp when the swapchain can be a color attachment.
 bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
                      uint32_t height, const float* part = nullptr,
-                     float aspect = 0.0f);
+                     float aspect = 0.0f, const VideoDraw* draws = nullptr,
+                     int draw_count = 0);
+
+// THE PICTURE OF THE VIDEO: the part of layer 0 of `source` at the pixels of
+// the source, with the draws over it, goes to the file
+// bwvr-vk-video-<frame>.bmp beside the game. It waits for the GPU, so it is
+// for a frame that saves pictures only.
+void VkWindowPicture(const vk::Image& source, const float part[4],
+                     const VideoDraw* draws, int draw_count, uint64_t frame);
 
 // The swapchain and the surface go, and GDI can draw into the window again.
 // A later present makes them again.

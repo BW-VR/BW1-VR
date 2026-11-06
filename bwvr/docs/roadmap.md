@@ -361,16 +361,15 @@ that moves while the Hand takes it.
   no motion that the player did not make.
 - **P7. A view for videos** (`video_view`, `backend.md`, "The view for
   videos"). Open:
-  - The quad layers of the headset are not in the video: the hint cards,
-    the subtitle card, the ring, the keyboard, the bubble of a miracle and
-    the panels of the interface. They need a draw with blend into the
-    picture of the window: a small pipeline in `vk_window.cpp` (RenderDoc
-    has `glslangValidator` for its shaders).
   - The height changes in the game only on the debug window ("Video
     height"). A row of a settings panel or of the ring is not built.
-  - With dxwrapper the view does not show.
-  - No headset session has run it. The cost in a session is in the line
-    `vk window` of the report.
+  - With dxwrapper the view does not show. A copy through a DXGI swapchain
+    of the Direct3D 11 device of the session is possible, with the limits
+    in `backend.md`, "The view for videos with dxwrapper".
+  - No headset session has run it. The cost in a session is in the lines
+    `vk window` and `vk video` of the report. The session path of the quad
+    layers (the copy of each card on the GPU, the panel quads of
+    `ui_panel=1`, a screen in the room) has run in no session.
 - **P9. The pointer on the interface panel**, and the screens with no
   scene (menus, loading, videos) on a panel in the room (`ui-layer.md`).
 - **P10. The tabletop mode** (play mode 3) is a test mode, on hold. Not built: a

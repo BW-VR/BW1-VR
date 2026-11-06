@@ -208,8 +208,9 @@ void InfluenceEdgeReport();
 // a move".
 void VignetteFrame();
 // video_view.cpp: the view for videos.
-void VideoViewHead(const float orientation[4]);
+void VideoViewHead(const float position[3], const float orientation[4]);
 void VideoViewFrame();
+void VideoViewEndPasses(bool to_headset);
 void VideoViewReport();
 void VignettePassEye(int eye);
 void VignetteReport();
@@ -1347,7 +1348,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     float fake_orientation[4];
     HeadPoseFakeEye(0, fake_position, fake_orientation);
     HeadPoseUpdate(centre, fake_orientation);
-    VideoViewHead(fake_orientation);
+    VideoViewHead(fake_position, fake_orientation);
     // The subtitle card hangs in the room, so it needs the head of the frame.
     UiPanelHead(centre, fake_orientation);
     MenuRoomHead(centre, fake_orientation);
@@ -1378,7 +1379,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
                                 g_rendered_orientation[e]);
       }
       // The view for videos takes the head that the pictures are drawn from.
-      VideoViewHead(g_rendered_orientation[0]);
+      VideoViewHead(g_rendered_position[0], g_rendered_orientation[0]);
     }
     // DECLARE A POSE THE PICTURE COULD HAVE COME FROM.
     //
@@ -1947,6 +1948,9 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   {
     const uint64_t end_start = profile ? FrameProfileTicks() : 0;
     CutsceneWindowStage(to_headset, g_frames + 1, eyes_apart);
+    // With no headset no frame takes the staged layers, so the view for
+    // videos makes their record here.
+    VideoViewEndPasses(to_headset);
     // A wait for the GPU on this thread is time of the eye pictures, as the
     // wait after each eye pass is.
     uint64_t gpu_wait = 0;

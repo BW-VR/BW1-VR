@@ -45,6 +45,8 @@ bool ProxyBackendVulkan();
 void DrawMergeFlush();
 // controllers.cpp: how many frames the controllers have seen.
 uint64_t ControllersFrameCount();
+// video_view.cpp: the window shows the view for videos, also in a session.
+bool VideoViewPresentWanted();
 
 namespace {
 
@@ -382,17 +384,27 @@ HRESULT WINAPI h_Blt(IDirectDrawSurface7* self, LPRECT destination,
   }
   // self is the destination surface. A copy onto the primary surface is the
   // frame going to the monitor, and while the headset is on it is wasted.
-  if (g_skip_present && IsPrimary(self)) {
+  // With the view for videos (video_view=1) the window is the video, so the
+  // copy goes out.
+  const bool video = (g_skip_present || g_test_rate > 0) && IsPrimary(self) &&
+                     VideoViewPresentWanted();
+  if (g_skip_present && !video && IsPrimary(self)) {
     ++g_skipped;
     return DD_OK;
   }
   // A desktop test at the frame rate of a headset: no copy, and the frame
-  // lasts 1/N s at the least.
+  // lasts 1/N s at the least. With the view for videos the copy goes out,
+  // as in a session, and then the frame waits.
   if (g_test_rate > 0 && ControllersFrameCount() >= kTestRateFrom &&
       IsPrimary(self)) {
-    ++g_skipped;
+    HRESULT shown = DD_OK;
+    if (video) {
+      shown = o_Blt(self, destination, source, source_rect, flags, fx);
+    } else {
+      ++g_skipped;
+    }
     PaceFrame();
-    return DD_OK;
+    return shown;
   }
   LARGE_INTEGER before, after;
   QueryPerformanceCounter(&before);

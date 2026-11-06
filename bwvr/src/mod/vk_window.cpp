@@ -6,6 +6,7 @@
 #include "vk_window.h"
 #include "debug_menu.h"
 #include "vk_fallback.h"
+#include "video_view_math.h"
 
 void ModLog(const char* format, ...);
 void ControllersGesturePulse(float amplitude, float seconds);
@@ -55,6 +56,10 @@ struct Slot {
 Slot g_slots[kSlots] = {};
 int g_slot = 0;
 bool g_slots_made = false;
+// THE TIME OF A PRESENT ON THE GPU: two timestamps in the command buffer of
+// each slot, read when the frame thread waits for the fence of the slot.
+// VK_NULL_HANDLE when the queue has no timestamps.
+VkQueryPool g_times = VK_NULL_HANDLE;
 
 HWND g_window = nullptr;
 VkSurfaceKHR g_surface = VK_NULL_HANDLE;
@@ -75,6 +80,10 @@ bool g_remake = false;  // the swapchain is out of date
 uint64_t g_presents = 0;
 uint64_t g_no_image = 0;
 uint64_t g_made = 0;
+uint64_t g_cpu_ticks = 0;   // the calls of VkWindowPresent that presented
+uint64_t g_gpu_ns = 0;      // the presents that the GPU did, read back
+uint64_t g_gpu_count = 0;
+uint64_t g_part_presents = 0;  // presents of a part (the view for videos)
 
 void Unusable(const char* what, VkResult r) {
   g_unusable = true;
@@ -160,9 +169,36 @@ bool MakeSlots() {
     if (s.acquired == VK_NULL_HANDLE) return false;
     s.pending = false;
   }
+  if (core.timestamp_ns > 0.0f && core.timestamp_bits > 0) {
+    VkQueryPoolCreateInfo times = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    times.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    times.queryCount = 2 * kSlots;
+    if (f.vkCreateQueryPool(core.device, &times, nullptr, &g_times) !=
+        VK_SUCCESS) {
+      g_times = VK_NULL_HANDLE;
+    }
+  }
   g_slot = 0;
   g_slots_made = true;
   return true;
+}
+
+// The time of the present of slot i on the GPU, after the wait for its fence.
+void ReadTimes(int i) {
+  if (g_times == VK_NULL_HANDLE) return;
+  uint64_t t[2] = {0, 0};
+  if (f.vkGetQueryPoolResults(vk::Get().device, g_times,
+                              static_cast<uint32_t>(2 * i), 2, sizeof(t), t,
+                              sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) !=
+      VK_SUCCESS) {
+    return;
+  }
+  const uint32_t bits = vk::Get().timestamp_bits;
+  const uint64_t mask = bits >= 64 ? ~0ull : ((1ull << bits) - 1ull);
+  const uint64_t ticks = (t[1] - t[0]) & mask;
+  g_gpu_ns += static_cast<uint64_t>(static_cast<double>(ticks) *
+                                    vk::Get().timestamp_ns);
+  ++g_gpu_count;
 }
 
 // Waits until the GPU has done each present in flight.
@@ -173,6 +209,7 @@ void WaitSlots() {
     if (!g_slots[i].pending) continue;
     f.vkWaitForFences(device, 1, &g_slots[i].fence, VK_TRUE, UINT64_MAX);
     g_slots[i].pending = false;
+    ReadTimes(i);
   }
 }
 
@@ -399,7 +436,7 @@ int VkWindowValue() {
 bool VkWindowWanted() { return g_wanted && !g_unusable; }
 
 bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
-                     uint32_t height) {
+                     uint32_t height, const float* part, float aspect) {
   if (!g_wanted || g_unusable || window == nullptr || width == 0 ||
       height == 0) {
     return false;
@@ -420,12 +457,15 @@ bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
     if (made == 0) return true;
   }
 
+  LARGE_INTEGER start;
+  QueryPerformanceCounter(&start);
   const vk::Core& core = vk::Get();
   Slot& s = g_slots[g_slot];
   // The slot of three presents ago: the GPU has done it, or nearly.
   if (s.pending) {
     f.vkWaitForFences(core.device, 1, &s.fence, VK_TRUE, UINT64_MAX);
     s.pending = false;
+    ReadTimes(g_slot);
   }
   // No wait for an image: with none free the window keeps its picture.
   uint32_t index = 0;
@@ -461,19 +501,79 @@ bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
   VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   f.vkBeginCommandBuffer(cb, &begin);
+  const uint32_t query = static_cast<uint32_t>(2 * g_slot);
+  if (g_times != VK_NULL_HANDLE) {
+    f.vkCmdResetQueryPool(cb, g_times, query, 2);
+    f.vkCmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, g_times,
+                           query);
+  }
   vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, source.layers);
   vk::Barrier(cb, g_images[index], VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
               1);
+  // The part of the picture, and its place in the window (THE VIEW FOR
+  // VIDEOS). With no part and no aspect: all of it on all of the window.
+  int32_t sx0 = 0, sy0 = 0;
+  int32_t sx1 = static_cast<int32_t>(source.width);
+  int32_t sy1 = static_cast<int32_t>(source.height);
+  if (part != nullptr) {
+    const float sw = static_cast<float>(source.width);
+    const float sh = static_cast<float>(source.height);
+    sx0 = static_cast<int32_t>(part[0] * sw + 0.5f);
+    sy0 = static_cast<int32_t>(part[1] * sh + 0.5f);
+    sx1 = static_cast<int32_t>(part[2] * sw + 0.5f);
+    sy1 = static_cast<int32_t>(part[3] * sh + 0.5f);
+    if (sx0 < 0) sx0 = 0;
+    if (sy0 < 0) sy0 = 0;
+    if (sx1 > static_cast<int32_t>(source.width)) {
+      sx1 = static_cast<int32_t>(source.width);
+    }
+    if (sy1 > static_cast<int32_t>(source.height)) {
+      sy1 = static_cast<int32_t>(source.height);
+    }
+    if (sx1 <= sx0 || sy1 <= sy0) {
+      sx0 = sy0 = 0;
+      sx1 = static_cast<int32_t>(source.width);
+      sy1 = static_cast<int32_t>(source.height);
+    }
+  }
+  video_view_math::Rect place = {0.0f, 0.0f, static_cast<float>(g_width),
+                                 static_cast<float>(g_height)};
+  if (aspect != 0.0f) {
+    const float shape =
+        aspect > 0.0f ? aspect
+                      : static_cast<float>(sx1 - sx0) /
+                            static_cast<float>(sy1 - sy0);
+    place = video_view_math::Fit(static_cast<float>(g_width),
+                                 static_cast<float>(g_height), shape);
+  }
+  const int32_t dx0 = static_cast<int32_t>(place.x0);
+  const int32_t dy0 = static_cast<int32_t>(place.y0);
+  const int32_t dx1 = static_cast<int32_t>(place.x1);
+  const int32_t dy1 = static_cast<int32_t>(place.y1);
+  if (dx0 > 0 || dy0 > 0 || dx1 < static_cast<int32_t>(g_width) ||
+      dy1 < static_cast<int32_t>(g_height)) {
+    // Black around the picture. The blit comes after the clear.
+    VkClearColorValue black = {};
+    black.float32[3] = 1.0f;
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    f.vkCmdClearColorImage(cb, g_images[index],
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1,
+                           &range);
+    vk::Barrier(cb, g_images[index], VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1);
+  }
+  if (part != nullptr || aspect != 0.0f) ++g_part_presents;
   VkImageBlit blit = {};
   blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  blit.srcOffsets[1] = {static_cast<int32_t>(source.width),
-                        static_cast<int32_t>(source.height), 1};
+  blit.srcOffsets[0] = {sx0, sy0, 0};
+  blit.srcOffsets[1] = {sx1, sy1, 1};
   blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  blit.dstOffsets[1] = {static_cast<int32_t>(g_width),
-                        static_cast<int32_t>(g_height), 1};
+  blit.dstOffsets[0] = {dx0, dy0, 0};
+  blit.dstOffsets[1] = {dx1, dy1, 1};
   f.vkCmdBlitImage(cb, source.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    g_images[index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &blit, VK_FILTER_LINEAR);
@@ -483,6 +583,10 @@ bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
   vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, source.layers);
+  if (g_times != VK_NULL_HANDLE) {
+    f.vkCmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, g_times,
+                           query + 1);
+  }
   f.vkEndCommandBuffer(cb);
 
   VkSemaphoreSubmitInfo wait = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
@@ -530,6 +634,9 @@ bool VkWindowPresent(HWND window, const vk::Image& source, uint32_t width,
     return true;
   }
   ++g_presents;
+  LARGE_INTEGER end;
+  QueryPerformanceCounter(&end);
+  g_cpu_ticks += static_cast<uint64_t>(end.QuadPart - start.QuadPart);
   VkFallbackPicture("the window, through the swapchain");
   return true;
 }
@@ -541,9 +648,27 @@ void VkWindowStop() {
 
 void VkWindowReport() {
   if (g_presents == 0 && g_no_image == 0) return;
-  ModLog("vk window    : %llu presents through the swapchain of the window, "
-         "%llu with no free image, %llu swapchains made so far",
-         g_presents, g_no_image, g_made);
+  LARGE_INTEGER frequency;
+  QueryPerformanceFrequency(&frequency);
+  const double cpu_ms =
+      g_presents > 0 && frequency.QuadPart > 0
+          ? 1000.0 * static_cast<double>(g_cpu_ticks) /
+                static_cast<double>(frequency.QuadPart) /
+                static_cast<double>(g_presents)
+          : 0.0;
+  const double gpu_ms =
+      g_gpu_count > 0 ? static_cast<double>(g_gpu_ns) * 1e-6 /
+                            static_cast<double>(g_gpu_count)
+                      : -1.0;
+  ModLog("vk window    : %llu presents through the swapchain of the window "
+         "(%llu of a part, for the view for videos), %llu with no free "
+         "image, %llu swapchains made so far. A present takes %.3f ms on the "
+         "frame thread and %.3f ms on the GPU (-1: no timestamps)",
+         g_presents, g_part_presents, g_no_image, g_made, cpu_ms, gpu_ms);
   g_presents = 0;
   g_no_image = 0;
+  g_part_presents = 0;
+  g_cpu_ticks = 0;
+  g_gpu_ns = 0;
+  g_gpu_count = 0;
 }

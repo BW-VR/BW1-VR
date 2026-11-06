@@ -152,6 +152,8 @@ void HandGlowDraw();
 void OverlayDraw();
 // vignette.cpp: the comfort vignette, in each eye pass.
 void VignetteDraw();
+// video_view.cpp: the corner marks of the view for videos.
+void VideoViewDrawMarks();
 // book_bubble.cpp: the game's bubble of a miracle that the hand pulls out of
 // the spell book.
 void BookBubbleDraw();
@@ -539,6 +541,7 @@ void __cdecl h_SunGlare() {
   GesturePanelDraw();
   HandGlowDraw();
   VignetteDraw();
+  VideoViewDrawMarks();
 }
 
 bool Hook(uintptr_t address, void* replacement, void** original,

@@ -291,6 +291,14 @@ void ControllersGesturePointChange(const char* by);
 int OverlayTrailValue();
 void OverlayTrailChange(const char* by);
 int OverlayRayGlowValue();
+// The view for videos (video_view.cpp).
+int VideoViewValue();
+void VideoViewChange(const char* by);
+int VideoViewMarksValue();
+void VideoViewMarksChange(const char* by);
+int VideoViewDownValue();
+void VideoViewLowerChange(const char* by);
+void VideoViewHigherChange(const char* by);
 void OverlayRayGlowChange(const char* by);
 // The sound (audio_listener.cpp, audio_voices.cpp, audio_range.cpp).
 int AudioModeValue();
@@ -432,6 +440,17 @@ const Switch kSwitches[] = {
      L"white|diffuse"},
     {kGroupPicture, L"Ray glow", L"Glow along the rays and the arc",
      "ray_glow", OverlayRayGlowValue, OverlayRayGlowChange, L"off|on"},
+    {kGroupPicture, L"Video view", L"16:9 view for videos in the window",
+     "video_view", VideoViewValue, VideoViewChange, L"off|on"},
+    {kGroupPicture, L"Video marks", L"Corner marks of the video area",
+     "video_view_marks", VideoViewMarksValue, VideoViewMarksChange,
+     L"off|on"},
+    {kGroupPicture, L"Video higher", L"Video area lower by, percent",
+     "video_view_down_pct", VideoViewDownValue, VideoViewHigherChange, L"",
+     nullptr, false},
+    {kGroupPicture, L"Video lower", L"Video area lower by, percent",
+     "video_view_down_pct", VideoViewDownValue, VideoViewLowerChange, L"",
+     VideoViewHigherChange, true, L"Video height"},
 
     // Render
     {kGroupRender, L"One walk", L"One walk for both eyes", "one_walk",
@@ -779,6 +798,18 @@ const wchar_t* const kTips[] = {
     // Ray glow
     L"On: the menu ray, the far grab tether and the teleport arc glow, with a "
     L"light that runs from the hand. Off: plain tubes.",
+    // Video view
+    L"On: the game window on the PC shows a 16:9 part of the left eye for a "
+    L"video capture, with a smoothed head. Only with the Vulkan renderer.",
+    // Video marks
+    L"On: faint corner marks in the headset show the part of the view that "
+    L"the video records. The video does not show them.",
+    // Video higher
+    L"The part that the video records goes 5 percent of the height up.",
+    // Video lower
+    L"How far the middle of the video is below the middle of the view, in "
+    L"percent of the height. The right arrow moves it 5 percent down, the "
+    L"left arrow 5 percent up.",
     // One walk
     L"Walks the scene of the game one time for both eyes. Off walks it one "
     L"time for each eye, which costs more time.",

@@ -157,6 +157,10 @@ want.
     the height of your ears and not below, a sea that turns with the view, a
     sound hard in one ear, a sound that lags a fast turn, a click or a cut, a
     loop that stops, or a cue that is too loud.
+27. **The view for videos** (`video_view=1`). Record a short video of the
+    game window with OBS while you play. Wrong: corner marks that you
+    cannot see or that disturb the play, a video that shakes, or a video
+    that cuts off what you look at.
 
 ## Play as normal and send the log
 
@@ -203,6 +207,8 @@ agents: the log does not tell the item yet.
 - **The end at Quit.** Log: the last line is `shutdown     : the mod is shut
   down`.
 - **The game window behind.** Log: `the game window is behind`.
+- **The cost of the view for videos** (P7). Log: `vk window    :` with `A
+  present takes`, in a session with `video_view=1`.
 - **The menu button of the left controller** (P13). Log: `controllers  : the
   menu button sends Esc`, or `the menu button is dropped`. A press with no
   such line is a press that Virtual Desktop kept.

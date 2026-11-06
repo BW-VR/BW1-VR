@@ -100,6 +100,7 @@ add_library(bwvr_mod SHARED
     throw_physics.cpp
     overlay.cpp
     vignette.cpp
+    video_view.cpp
     teleport.cpp
     world_grab.cpp
     tabletop.cpp

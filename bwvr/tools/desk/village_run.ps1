@@ -44,7 +44,7 @@
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwpile, probe, workshop, site, build, scaffold,
 # turn, fartake, fartotem, choice, look, book, walk, wall, pinch, aimsign,
-# aimmiracle, aimpast, tglow) have a comment at their steps below.
+# aimmiracle, aimpast, tglow, tooltip) have a comment at their steps below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -127,6 +127,21 @@ if ($Kind -eq 'totem') {
         $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 grip@1080+120 seek@1230+1 seek@1250+1 ' +
                  'seek@1280+1 grip@1330+40 shot@1450+1'
     }
+} elseif ($Kind -eq 'tooltip') {
+    # The tooltip at the Hand's point (bwvr/docs/ui-layer.md, 15.3). With
+    # hint_card=0 a tooltip of the game draws in the eye pictures and not on
+    # the card. The Hand's point goes onto a pile of the Village Store, and
+    # the grip collects from it: the game gives the tooltip "Amount". An eye
+    # picture before the grip and two in the take. The lines "ui hint" give
+    # the box of each tooltip in each eye and its place at the Hand, and the
+    # report of "ui depth" counts the tooltips at the Hand of the controller.
+    if ($Plan -eq '') { $Plan = 'gostore,store,pile' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 45 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 shot@1070+1 grip@1080+150 shot@1150+1 shot@1210+1'
+    }
+    $keys = "$keys;hint_card=0;help_test=1"
 } elseif ($Kind -eq 'neartake') {
     # A take at the Hand that goes on while the hand moves away from the pile
     # (bwvr/docs/grab.md, "The bulk take"). The grip closes on a pile of the
@@ -687,6 +702,9 @@ if ($Kind -eq 'pinch') {
 }
 if ($Kind -in 'aimsign', 'aimmiracle', 'aimpast') {
     $pattern = '^hand pick    : seek plan|^far grab    : (target|no target|stays on|is off|the target|your Creature|test: (aimfar|the))|^miracle      : test seed'
+}
+if ($Kind -eq 'tooltip') {
+    $pattern = '^hand pick    : seek plan|^ui hint      : .*(tooltip|at the Hand)|^ui depth     : \d+ tooltips'
 }
 if ($Kind -eq 'tglow') {
     $pattern = '^hand pick    : seek plan|^target glow  : (the mesh|test: a batch|\S+ \S+ has no mesh)'

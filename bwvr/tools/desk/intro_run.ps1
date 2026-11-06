@@ -22,6 +22,15 @@
 #    "intro" nearest to it has the clock of the effect.
 # -Set is a list of ini keys, "key=value;key=value".
 #
+# The hands in the logo (docs/intro.md, "The push in 3D"): -Set with
+# fake_controller=2, controller_hand=1, fake_controller_points and
+# fake_controller_script gives scripted hands. The script counts the stereo
+# frames of the logo, and with Direct3D 9 the logo has about 1740 of them.
+# intro_distance_cm=60 puts the orbs 42 to 78 cm in front of the head, so
+# a hand at 40 to 70 cm goes through them. Use no trigger and no face
+# button: a press of them skips the logo. The line "the hands moved orbs in
+# 3D" at the end of the logo has the count.
+#
 # The run has intro_probe=1: one line of the log for each second of the clock
 # of the effect, with the camera of the game, the camera of the mod and its
 # heading. After the run the script prints the lines of the log that have

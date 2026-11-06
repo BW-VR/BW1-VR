@@ -43,8 +43,9 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, controls) have a comment at
-# their steps below.
+# turn, fartake, fartotem, choice, look, book, controls, walk, wall, pinch,
+# aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
+# below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -128,6 +129,21 @@ if ($Kind -eq 'totem') {
         $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 grip@1080+120 seek@1230+1 seek@1250+1 ' +
                  'seek@1280+1 grip@1330+40 shot@1450+1'
     }
+} elseif ($Kind -eq 'tooltip') {
+    # The tooltip at the Hand's point (bwvr/docs/ui-layer.md, 15.3). With
+    # hint_card=0 a tooltip of the game draws in the eye pictures and not on
+    # the card. The Hand's point goes onto a pile of the Village Store, and
+    # the grip collects from it: the game gives the tooltip "Amount". An eye
+    # picture before the grip and two in the take. The lines "ui hint" give
+    # the box of each tooltip in each eye and its place at the Hand, and the
+    # report of "ui depth" counts the tooltips at the Hand of the controller.
+    if ($Plan -eq '') { $Plan = 'gostore,store,pile' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 45 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 shot@1070+1 grip@1080+150 shot@1150+1 shot@1210+1'
+    }
+    $keys = "$keys;hint_card=0;help_test=1"
 } elseif ($Kind -eq 'neartake') {
     # A take at the Hand that goes on while the hand moves away from the pile
     # (bwvr/docs/grab.md, "The bulk take"). The grip closes on a pile of the
@@ -502,6 +518,132 @@ if ($Kind -eq 'totem') {
         $Steps += "shot@$at+1"
     }
     $keys = "$keys;far_test_aim_class=1;far_test_aim_toward=1;far_test_aim_pair=1;far_test_aim_blends=$blends"
+} elseif ($Kind -eq 'walk') {
+    # The walk with the stick to the edge of the map (bwvr/docs/god-view.md,
+    # section 5.7). From the door of the Temple the stick of the other hand
+    # pushes forward for 40 s, at 100 units for each meter: 6000 units, more
+    # than the way to the wall of 3400 units from the middle of the map. The
+    # line of the end of the walk has the way, the frames that moved, and how
+    # far the land went down for a hill near the head. An eye picture at the
+    # start, on the way and at the end. Give it
+    # -Set "backend=dxwrapper\ddraw.dll" for eye pictures.
+    if ($Plan -eq '') { $Plan = 'up' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 70 }
+    if ($Steps -eq '') {
+        $Steps = 'point@900+1 shot@930+1 lstick_up@940+2400 shot@1500+1 shot@2400+1 shot@3330+1 shot@3400+1'
+    }
+} elseif ($Kind -eq 'wall') {
+    # The fingers at the wall of a house and of the Village Store
+    # (bwvr/docs/hand-model.md, "Hands that react to the world"). Before the
+    # Village Store the Hand's point goes to the side of the nearest house
+    # at half its height, with a gap of 0, then 1.5 cm in its body, then to
+    # the side of the Village Store. An eye picture at each place. The lines
+    # "hand feel" have the bodies and the curls of the fingers, and the
+    # lines "haptics" the pulse at the first touch. Five zoom steps in (13.2
+    # units for each meter, so a house is about 25 cm high), as in the runs
+    # of hand-model.md. Compare with -Set "hand_feel_offer=0".
+    if ($Plan -eq '') { $Plan = 'gostore,feel,feel,feel' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 50 }
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 stick_up@860+10 stick_up@890+10 stick_up@920+10 point@950+1 ' +
+                 'seek@970+1 seek@1050+1 shot@1080+1 seek@1130+1 shot@1160+1 seek@1210+1 shot@1240+1'
+    }
+    $keys = "$keys;seek_feel=house,50,0|house,50,-1.5|StoragePit,50,0"
+} elseif ($Kind -eq 'pinch') {
+    # A small rock in the pinch at a change of the zoom (bwvr/docs/hand-model.md,
+    # "The pinch"). Before the Village Store no rock is within 2 m of the
+    # room of the Hand, so the far grab fetches the nearest rock in the view
+    # (far_test_aim_class=3), as in -Kind throwhouse, and the grip stays
+    # closed. Two zoom steps out (44.4 to 100 units for each meter) make the
+    # rock smaller against the hand, and two steps in make it larger again.
+    # Eye pictures 3, 9 and 20 frames after each step. The lines "hand feel
+    # ... the Hand holds" have the size of the rock against the hand and the
+    # pose at each change.
+    if ($Plan -eq '') { $Plan = 'gostore' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 60 }
+    $points = '0,-30,60 0,0,45 0,-15,40'
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 point@1000+1 aimfar@1040+1 ' +
+                 'grip@1080+560 pull@1120+3 point@1160+1 shot@1190+1'
+        foreach ($z in @(@('stick_down', 1220), @('stick_down', 1320), @('stick_up', 1420), @('stick_up', 1520))) {
+            $Steps += " $($z[0])@$($z[1])+10 shot@$($z[1])+1 shot@$($z[1] + 6)+1 shot@$($z[1] + 17)+1"
+        }
+    }
+    $keys = "fake_head_pitch=-25;$keys;far_test_aim_class=3"
+} elseif ($Kind -eq 'aimsign') {
+    # Your Creature and the signpost at the door of the Temple in the aim
+    # (bwvr/docs/grab.md, "The cone and the choice"). The hand goes to the
+    # height of the head. The word "aimfar" aims at the body of your
+    # Creature (far_test_aim_class=4), and each later word turns the aim
+    # along the line from the Creature to the base of the nearest signpost
+    # (far_test_aim_toward=3), past it, and back. The lines "far grab" have
+    # each target and why it won. The word "look" turns the head 30 degrees
+    # to the left and 20 degrees down, as in creature_recipe.ps1 -Kind
+    # leash: the draw offers the Creature only while the view shows it.
+    if ($Plan -eq '') { $Plan = 'up' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 45 }
+    $points = '0,-30,60 0,0,45'
+    $blends = '0,50,100,130,100,50,0'
+    if ($Steps -eq '') {
+        $Steps = 'look@800+1200 point@860+1 point@880+1 '
+        $at = 920
+        foreach ($b in $blends.Split(',')) { $Steps += "aimfar@$at+1 shot@$($at + 10)+1 "; $at += 30 }
+    }
+    $keys = "$keys;far_test_aim_class=4;far_test_aim_toward=3;far_test_aim_blends=$blends;far_test_least_cm=20"
+} elseif ($Kind -eq 'aimmiracle') {
+    # A miracle on the land in the aim. The test key miracle_test_seeds puts
+    # a one-off seed of Forest (type 1) on the land under the Hand, as in
+    # miracle_run.ps1, and the hand goes back to the height of the head. The
+    # word "aimfar" aims at the nearest miracle that the Hand can take
+    # (far_test_aim_class=8), and then toward the signpost at the door
+    # (far_test_aim_toward=3).
+    if ($Plan -eq '') { $Plan = 'up' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 50 }
+    $points = '0,-30,60 0,0,45'
+    $blends = '0,50,100,50,0'
+    if ($Steps -eq '') {
+        $Steps = 'point@900+1 shot@960+1 point@1000+1 '
+        $at = 1040
+        foreach ($b in $blends.Split(',')) { $Steps += "aimfar@$at+1 shot@$($at + 10)+1 "; $at += 30 }
+    }
+    $keys = "$keys;miracle_test_seeds=1@930;far_test_aim_class=8;far_test_aim_toward=3;far_test_aim_blends=$blends;far_touch=0;far_test_least_cm=20"
+} elseif ($Kind -eq 'aimpast') {
+    # A far aim past a near house, tree and pile (bwvr/docs/grab.md, "Near
+    # objects win"). Before the Village Store the Hand's point goes 3 cm of
+    # the room from the side of the nearest house, then 7 cm from a tree,
+    # then 4 cm over a pile of the store. At each place the word "aimfar"
+    # aims at the nearest villager (far_test_aim_class=1). The lines
+    # "far grab" say if the far grab stays on and which object is the far
+    # target.
+    if ($Plan -eq '') { $Plan = 'gostore,feel,feel,store,pile,up' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 55 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 aimfar@1030+1 shot@1040+1 seek@1100+1 aimfar@1130+1 shot@1140+1 ' +
+                 'seek@1200+1 seek@1230+1 seek@1260+1 aimfar@1290+1 shot@1300+1'
+    }
+    $keys = "$keys;seek_feel=house,50,3|Tree,50,7;far_test_aim_class=1;far_touch=0"
+} elseif ($Kind -eq 'tglow') {
+    # The glow on the mesh of a target (bwvr/docs/hand-model.md, "The glow on
+    # the mesh of a target") in the light of the day of the test save. The
+    # Hand's point goes over the Village Store, onto a pile of the store, to
+    # the base of a tree and to a villager, with an eye picture at each.
+    # target_glow_log=30 gives the first batches of each target: a batch
+    # "after the call of the object" is a mesh of the sorted list. Compare
+    # with -Set "target_glow=0" (the halo).
+    if ($Plan -eq '') { $Plan = 'gostore,store,pile,treebase,villager' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 50 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 seek@1000+1 shot@1030+1 seek@1060+1 shot@1090+1 seek@1120+1 shot@1150+1 ' +
+                 'seek@1180+1 shot@1210+1'
+    }
+    $keys = "$keys;target_glow_log=30"
 } elseif ($Kind -eq 'palm') {
     # The steps of -Kind miracle with an eye picture at each state of the
     # game's gesture pictures, first with gesture_panel=0: the pictures of an
@@ -579,8 +721,26 @@ if ($Kind -eq 'fartake') {
                '^hand pick    : (seek plan|the Hand holds)|^hand press   : the grip pressed|^grip         : (?!\d)|^hand throw   : (release|the object left)|' +
                '^audio play   : .* in game (44|98),|^audio chan   : .* in game (44|98) |^audio take   :|^take stream  :'
 }
+if ($Kind -eq 'walk') {
+    $pattern = '^god view     : (the walk|walk check)|^controllers  : the stick of the other hand'
+}
+if ($Kind -eq 'wall') {
+    $pattern = '^hand pick    : seek plan|^hand feel    : (the fingers|a finger|the \w+ \S+ has the box)|^haptics      : (?!\d)'
+}
+if ($Kind -eq 'pinch') {
+    $pattern = '^hand pick    : seek plan|^hand feel    : the Hand holds|^god view     : zoomed'
+}
+if ($Kind -in 'aimsign', 'aimmiracle', 'aimpast') {
+    $pattern = '^hand pick    : seek plan|^far grab    : (target|no target|stays on|is off|the target|your Creature|test: (aimfar|the))|^miracle      : test seed'
+}
+if ($Kind -eq 'tooltip') {
+    $pattern = '^hand pick    : seek plan|^ui hint      : .*(tooltip|at the Hand)|^ui depth     : \d+ tooltips'
+}
+if ($Kind -eq 'tglow') {
+    $pattern = '^hand pick    : seek plan|^target glow  : (the mesh|test: a batch|\S+ \S+ has no mesh)'
+}
 if ($Kind -eq 'palm') {
-    $pattern = '^gesture panel:|^spell book   : (the book|the palm)|^controllers  : the fake left hand'
+    $pattern ='^gesture panel:|^spell book   : (the book|the palm)|^controllers  : the fake left hand'
 }
 if ($Kind -eq 'book') {
     $pattern = '^spell book   :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +

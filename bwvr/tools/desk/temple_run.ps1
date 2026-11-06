@@ -58,6 +58,26 @@
 #   temple_run.ps1 -Name tpl4 -Dll <dll> -Seconds 250 `
 #     -Set "temple_test_camera_trace=1;fake_controller_turns=-36,7,1;fake_controller_temple_frame=3600" `
 #     -Steps "aimturn@3600+1 trigger@3660+6"
+#
+# The taps on the leash posts at the door (village.md, "The door of the
+# Temple and the leash posts"): -NoEnter, and each word "seek" puts the
+# Hand's point on the next post (seek_plan=post), where a grip of 6 frames
+# taps it. The lines "temple land" give the chosen post after each tap:
+#
+#   temple_run.ps1 -Name tpl5 -Dll <dll> -NoEnter -Seconds 40 `
+#     -Set "seek_plan=post,post,post,post;fake_head_pitch=-25" `
+#     -Steps "point@830+1 seek@860+1 grip@900+6 seek@980+1 grip@1000+6 seek@1080+1 grip@1100+6 seek@1180+1 grip@1200+6"
+#
+# The debug pages of the ring (controllers.md, 10.8) with debug_window=0:
+# one hold of Y, and the left hand steps to "more" (slot 4), back to the
+# middle, to "debug" (slot 5 of page 2), to the group Render (slot 2) and to
+# "One walk" (slot 0). The hand stays 44 frames on each link, more than the
+# 0.45 s of a link. The release on "One walk" chooses it. The places are
+# those of Get-BwvrRingChoice in game.ps1:
+#
+#   temple_run.ps1 -Name tpl6 -Dll <dll> -NoEnter -Seconds 35 `
+#     -Set "debug_menu=1;debug_window=0;fake_controller_left_points=-17,-38,30 -20,-30,35 -24,-36,28 -20,-30,35 -11,-30,40 -20,-30,35 -23,-22,40 -20,-30,35" `
+#     -Steps "y@900+190 lpoint@906+1 lpoint@950+1 lpoint@960+1 lpoint@1004+1 lpoint@1014+1 lpoint@1058+1 lpoint@1068+1 lpoint@1096+1"
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,

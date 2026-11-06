@@ -3,6 +3,10 @@
 #
 #   aim_queue.ps1 -Dll <dll> -Runs aim2,move1b,cmd1b -Tag b
 #   aim_queue.ps1 -Dll <dll> -Runs aim2 -NewGame
+#   aim_queue.ps1 -Dll <dll> -Runs cmd1b -Set "test_frame_rate=60"
+#
+# -Set gives more ini keys to each run, after the keys of the recipe, so a key
+# of -Set replaces a key of the recipe with the same name.
 #
 # THE START. Each run starts in the test save "pen" (README.md, "A fast
 # start"): the Creature pens of Land 1 after the first story, which is the
@@ -18,6 +22,7 @@ param(
     [switch]$Now,
     [int]$WaitMinutes = 60,
     [string]$Save = 'pen',
+    [string]$Set = '',
     [switch]$NewGame
 )
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -121,6 +126,8 @@ foreach ($run in $Runs) {
     # The start of a run in a test save is 49 s shorter than the start of a
     # new game with the first story.
     $seconds = $d.Seconds
+    $keys = $d.Set
+    if ($Set -ne '') { $keys = "$keys;$Set" }
     $more = @{}
     if ($start) {
         $seconds = $d.Seconds - 49
@@ -128,9 +135,9 @@ foreach ($run in $Runs) {
     }
     "=== $name $(Get-Date -Format s), $(if ($start) { "the test save '$start'" } else { 'a new game' }), $seconds s"
     if ($Now) {
-        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $d.Set -Steps $d.Steps -Points $d.Points -Seconds $seconds -Now -WaitMinutes $WaitMinutes @more
+        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $keys -Steps $d.Steps -Points $d.Points -Seconds $seconds -Now -WaitMinutes $WaitMinutes @more
     } else {
-        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $d.Set -Steps $d.Steps -Points $d.Points -Seconds $seconds -Minutes $Minutes @more
+        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $keys -Steps $d.Steps -Points $d.Points -Seconds $seconds -Minutes $Minutes @more
     }
     $o
     if (-not (Test-BwvrVerdict $o 'RUN DONE')) { "QUEUE STOPPED at $name"; exit 2 }

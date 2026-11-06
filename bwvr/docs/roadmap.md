@@ -743,10 +743,15 @@ game as it is.
     game draws it so.
   - A red beam comes down from the sky at a cast of Lightning. The effect
     file of the game has no such beam, so something else draws it.
-  - Enlarge and Shrink change the base size of the Creature, and the game
-    draws the body at 0.22 within 16 m in front of the pen of the Temple
-    (`fn_004EFCE0`). No recipe casts them on a Creature away from the pen,
-    so no picture shows the change of size.
+  - Water puts out burning trees (27 casts of a desktop run) but not a
+    burning house (62 casts). The pour starts 1.6 units over the roof. Not
+    known whether a pour of the plain game puts out a house.
+  - A thrown object of the player goes into the player's own Physical
+    Shield, also with the game's own physics (`throw_law=1`). Not known
+    whether the plain game stops it.
+  - Teleport: one cast makes one site, and a villager on it does not go. Not
+    known how the plain game makes the second site.
+  - Heal has no run: a test save of Land 1 has no sick villager.
   - A shield of a small circle loses about 24 of its life a second, so a
     circle of 23 cm lasts about 3.5 minutes. The cost grows with the square
     of the size, as in the plain game.
@@ -1009,10 +1014,6 @@ game as it is.
       Needs a recipe with two still head poses.
     - The merge of draw calls (`draw_merge_test=1`) in a fight of Creatures:
       0 eye passes with a different checksum. Needs a recipe with a fight.
-- **R13. Two faults of the desktop scripts.**
-  - `perf_ab.ps1 -Pictures` compares `bwvr-shared-left-03000.bmp` with the
-    pictures after it, but the mod names the pictures 03001 to 03004. So
-    the compare stops with "Parameter is not valid" after the first run, and
-    the script makes no table.
-  - `temple_run.ps1 -SaveTest` with `menu_room_test=1` makes no save: the
-    start dialog of the new game stays up, and the ring does not open.
+- **R13. A fault of a desktop script.** `temple_run.ps1 -SaveTest` with
+  `menu_room_test=1` makes no save: the start dialog of the new game stays
+  up, and the ring does not open.

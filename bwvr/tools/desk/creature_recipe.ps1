@@ -81,16 +81,16 @@
 # -Kind gift:
 #   The gift of an object to the Creature, with the leash on
 #   (bwvr/docs/creature.md, section 2.9). After two zoom steps in: the grip
-#   from a distance puts the leash on. The Hand's point goes to the nearest object
-#   that the Hand can hold (the place "hold" of seek_plan), and the grip
+#   from a distance puts the leash on. The Hand's point goes to the nearest pig
+#   (the place "hold" of seek_plan), and the grip
 #   closes for 200 frames. The hand goes back to its point and then to the
 #   body bone of the Creature (the place "creature"), and the grip opens
 #   there: the first gift. Then the same with a second object, and the Hand's
 #   point goes 9 cm of the room down from the body bone before the grip
 #   opens (the place "down", seek_step_cm=9): the second gift, with the Hand
-#   past the reach of the test of the game. -Set "seek_class=Pig,Pig" gives
-#   a class for each object. With -Set "creature_gift=0" the test of the game
-#   decides.
+#   past the reach of the test of the game. The recipe has
+#   seek_class=Pig,Pig, so each object is a pig. -Set "seek_class=..." gives
+#   other classes. With -Set "creature_gift=0" the test of the game decides.
 # -Kind giftfree:
 #   The same with no leash.
 # -Kind look:
@@ -234,13 +234,15 @@ if ($Kind -eq 'stay') {
              'aimcmd@1140+1 shot@1200+1 ' +
              'aimcmd@1300+1 trigger@1320+6 aimcmd@1400+1 trigger@1420+60 shot@1500+1'
 } elseif ($Kind -eq 'gift' -or $Kind -eq 'giftfree') {
-    # The place "hold" needs no class by default: the nearest object that
-    # the Hand can hold. The grip opens 80 frames after the last step of the
-    # hand, so the opening is no throw. Each gift has 300 frames before the
-    # hand moves again.
+    # The place "hold" takes an object of the class of seek_class: a pig for
+    # each gift. With no class it takes the nearest object that the Hand can
+    # hold, and at the door of the Temple that can be a fish farm below the
+    # view, so the press is dropped. The grip opens 80 frames after the last
+    # step of the hand, so the opening is no throw. Each gift has 300 frames
+    # before the hand moves again.
     $new = 80
     $watch = 0
-    $keys = 'seek_step_cm=9;' + $keys.Replace('seek_plan=creature', 'seek_plan=hold,creature,hold,creature,down')
+    $keys = 'seek_step_cm=9;seek_class=Pig,Pig;' + $keys.Replace('seek_plan=creature', 'seek_plan=hold,creature,hold,creature,down')
     $leash = ''
     if ($Kind -eq 'gift') { $leash = 'aimfar@930+1 grip@950+6 ' }
     $steps = 'stick_up@800+10 stick_up@830+10 look@860+2700 point@900+1 ' + $leash +

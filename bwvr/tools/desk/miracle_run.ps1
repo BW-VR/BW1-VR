@@ -26,8 +26,8 @@
 #   Water (9): hold the grip for 90 frames, and a tap of B. Water stays in
 #   the Hand after a pour, and the tap takes it out. Then Heal (7): a press.
 #   Then a Creature seed that the Hand carries, and the trigger.
-# The other kinds (cancel, place, shield) have a comment at their steps
-# below. -Seeds gives other seed types to the steps of a kind (the types are
+# The other kinds (cancel, place, shield, away, fire, pshield, teleport) have
+# a comment at their steps below. -Seeds gives other seed types to the steps of a kind (the types are
 # in bwvr/docs/miracles.md), and -Steps gives other steps.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
@@ -48,7 +48,97 @@ if (-not $NewGame) { $start = Confirm-BwvrTestSave $Save $Dll }
 # (god_zoom_about=0).
 $keys = 'god_zoom_about=0;far_test_creature=1;far_test_influence=1;grab_hand=1;far_grab_max_m=0'
 $points = '0,-30,60 14,-32,56 -12,-31,58 10,-30,62 -6,-32,54 4,-31,64 0,-30,60 12,-31,58'
-if ($Kind -eq 'throw') {
+# The longest run in a test save, in seconds.
+$most = 65
+if ($Kind -eq 'away') {
+    # Enlarge (14) and then Shrink (13) on the Creature away from the pen of
+    # the Temple. At 100 units a meter: the grip from a distance puts the
+    # leash on, and a double press of the trigger on a lantern (the word
+    # "aimcmd") ties the leash to it. The Creature walks about 40 units to
+    # the lantern, out of the 16 m of the game in front of the pen in which
+    # the game draws the body at the size 0.22. Then each seed: a tap makes
+    # it active, and a press with the aim on the Creature from a distance
+    # casts it. The lines "miracle watch" give the metres from the point at
+    # the pen and the size of the drawn body.
+    if ($Seeds -eq '') { $Seeds = '14@1800 13@2500' }
+    $most = 75
+    if ($Steps -eq '') {
+        $Steps = 'look@800+300 point@860+1 aimfar@890+1 grip@910+6 aimcmd@1000+1 shot@1010+1 ' +
+                 'trigger@1020+6 trigger@1037+6 shot@1700+1 ' +
+                 'seek@1830+1 grip@1870+3 aimfar@2000+1 grip@2040+10 shot@2060+1 shot@2200+1 shot@2300+1 ' +
+                 'point@2480+1 seek@2530+1 grip@2570+3 aimfar@2650+1 grip@2690+10 shot@2710+1 shot@2850+1'
+    }
+} elseif ($Kind -eq 'fire') {
+    # A Fireball (2) on a house, then Water (9) on the fire. At 100 units a
+    # meter the God view goes before the Village Store (the place "gostore"
+    # of seek_plan), near the round house at 1804.7 2651.1 of the test save
+    # "temple". The head looks 25 degrees down, so the seed under the
+    # Hand is in the view. The tap makes the seed active, the Hand's point
+    # goes 4 cm of the room into the house at 150 percent of its height (over
+    # the roof, the place "feel" of seek_feel), and a still grip of 40 frames
+    # opens there: the ball falls onto the house. The hand then goes back to
+    # a point before the head, so the hand does not hide the house in the eye
+    # pictures of the fire. Then the Water seed: two seeks 60 and 80 frames
+    # after the seed comes (it is not a candidate at once), a tap, the Hand
+    # over the same house, a pour of 150 frames, and a tap of B. -Set
+    # "seek_plan=go,hold,feel,hold,hold,feel;seek_go=x,z" gives a different
+    # place.
+    if ($Seeds -eq '') { $Seeds = '2@960 9@1600' }
+    $most = 75
+    $keys = "fake_head_pitch=-25;$keys;seek_plan=gostore,hold,feel,hold,hold,feel;" +
+            'seek_class=OneOffSpellSeed,OneOffSpellSeed,OneOffSpellSeed;seek_feel=house,150,-4|house,150,-4'
+    if ($Steps -eq '') {
+        $Steps = 'point@900+1 seek@920+1 shot@950+1 seek@990+1 grip@1000+3 seek@1060+1 shot@1070+1 ' +
+                 'grip@1100+40 point@1150+1 shot@1160+1 shot@1210+1 shot@1300+1 shot@1450+1 shot@1580+1 ' +
+                 'seek@1660+1 seek@1680+1 grip@1690+3 seek@1740+1 grip@1780+150 shot@1840+1 shot@1920+1 ' +
+                 'b@2000+5 point@2010+1 shot@2040+1 shot@2200+1 shot@2400+1 shot@2600+1'
+    }
+} elseif ($Kind -eq 'pshield') {
+    # A Physical Shield (5) with the circle (template 5, as -Kind shield),
+    # and then an object thrown at the dome. At the door of the Temple no
+    # rock is within 2 m of the room of the Hand, so the object is the
+    # nearest pig (the place "hold" of seek_plan, seek_class). -Set
+    # "seek_class=OneOffSpellSeed,Rock" takes a rock in a save that has one.
+    # The Hand goes to the second point, 5 cm before the head, and jumps to
+    # the third point in one frame as the grip opens: a throw of about 12 m/s
+    # forward and down. At 44 units a meter the dome has its middle about 47
+    # cm before the head, and the third point is outside it, so the object
+    # flies at the dome. Eye pictures of the flight. The lines "miracle
+    # watch" give the place and the radius of the shield, and the lines
+    # "hand throw" the flight.
+    if ($Seeds -eq '') { $Seeds = '5@930' }
+    $keys = "$keys;fake_controller_gestures=5;seek_plan=hold,hold;seek_class=OneOffSpellSeed,Pig;throw_log=1"
+    $points = '0,-30,60 0,0,5 0,-15,20'
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
+                 'seek@960+1 grip@1000+3 trace@1100+200 grip@1106+150 shot@1300+1 ' +
+                 'seek@1400+1 grip@1440+120 point@1500+1 point@1559+1 shot@1565+1 shot@1580+1 ' +
+                 'shot@1600+1 shot@1630+1 shot@1700+1 shot@1850+1'
+    }
+} elseif ($Kind -eq 'teleport') {
+    # Teleport (28). At 100 units a meter the God view goes to 1827 2537,
+    # before the door of the Temple (the place "go" of seek_plan, seek_go).
+    # The head looks 25 degrees down, so the seed under the Hand is in the
+    # view. A tap makes the seed active, the hand goes back to its point, and
+    # a press casts the miracle at the land point under the Hand: one cast
+    # makes the teleport there. (At the Village Store the game refuses the
+    # cast.) Then the God view goes before the Village Store (the place
+    # "gostore"), and the Hand takes the nearest villager that the game can
+    # give a job (the place "villager"). The God view goes back to 1827 2537
+    # with the villager in the Hand, the hand goes 10 cm under its first
+    # point, and the grip opens with a still hand: the villager goes down
+    # onto the teleport. Eye pictures of the teleport and of the villager.
+    if ($Seeds -eq '') { $Seeds = '28@960' }
+    $most = 70
+    $keys = "fake_head_pitch=-25;$keys;seek_plan=go,hold,gostore,villager,go;" +
+            'seek_go=1827,2537|1827,2537;seek_class=OneOffSpellSeed'
+    $points = '0,-30,60 0,-30,60 0,-40,60'
+    if ($Steps -eq '') {
+        $Steps = 'point@900+1 seek@920+1 seek@1000+1 grip@1010+3 point@1080+1 grip@1100+10 shot@1130+1 ' +
+                 'seek@1200+1 seek@1250+1 grip@1260+300 seek@1330+1 point@1380+1 shot@1420+1 ' +
+                 'shot@1570+1 shot@1620+1 shot@1700+1 shot@1800+1 shot@1950+1 shot@2150+1'
+    }
+} elseif ($Kind -eq 'throw') {
     if ($Seeds -eq '') { $Seeds = '2@930 9@1330 7@1730 16@2030' }
     if ($Steps -eq '') {
         $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
@@ -109,7 +199,7 @@ if ($start) {
     # frame at which the controller first places the Hand, as frame 800. The
     # start is 10 s shorter than the start of a new game.
     $keys = "fake_controller_play_frame=800;$keys"
-    if ($Seconds -le 0) { $Seconds = Get-BwvrSaveSeconds $Steps 800 65 }
+    if ($Seconds -le 0) { $Seconds = Get-BwvrSaveSeconds $Steps 800 $most }
 } elseif ($Seconds -le 0) {
     $Seconds = 75
 }
@@ -121,7 +211,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $log = Join-Path $sp "desk-$Name\bwvr.log"
 if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
 $pattern = '^miracle      :|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
-           '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state'
+           '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state|^miracle watch: |' +
+           '^hand pick    : seek plan|^creature cmd : (the leash|a double press|test: aimcmd)|' +
+           '^far grab    : (the grip closed|the grip opened)|^hand throw   : release'
 Get-Content $log | Where-Object { $_ -match $pattern } | ForEach-Object {
     $_.Substring(0, [Math]::Min(420, $_.Length))
 } | Select-Object -First 220

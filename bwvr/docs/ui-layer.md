@@ -845,7 +845,10 @@ The camera part is in `creature.md` (the Creature by touch).
   (`HandDirectCreatureAtHand`). It writes the alpha 255, layout 1 and the
   values a, b and c as `Creature::Draw` computes them. The value d (the lesson
   total) keeps the value of the last Creature state, as the game's own panel
-  has it before a stroke. A Creature that does not live gets no panel.
+  has it before a stroke. A Creature that does not live gets no panel. The
+  hook is in with each value of `ui_panel`. With `ui_panel=0` the panel then
+  draws where the game draws it: in the eye pictures, or with the help text
+  on the subtitle card (section 17).
 - **The panel stays.** After the Hand left the Creature, and after the end of
   a press, the hook arms the panel for 3 s more (`creature_touch_math.h`,
   `LingerStep`). So the panel does not go on and off at the edge of the body.

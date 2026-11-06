@@ -752,7 +752,7 @@ once a frame, and the first match counts, in this order:
 | The Hand holds an object | `HandDirectGlowFacts`, holding | Grip: "Open to drop". In a forest, or with the bundle of a take from a forest: the line of `forest_take.cpp`. |
 | An object to take | hand mode 9 | Grip: "Take" |
 | A pile, a field or a fish farm | hand mode `0xD` | Grip: "Hold to collect" |
-| The Hand touches the Creature | hand mode `0x13` | Grip: "Stroke or slap" |
+| The Hand touches the Creature | hand mode `0x13` | Grip: "Stroke or slap". While the mod holds the press for the open hand (`creature_stroke_open`, `creature.md`, 2.10): "Move the hand to stroke", and Grip: "Close and swing to slap" |
 | The land, with the leash on | hand mode 3 with the leash | Trigger: "Send the Creature", A: "Teleport" while a press of A can move the player |
 | The land | hand mode 3 | On the card of the other hand: the world word "Move the land" (the grip of the other hand, in the God view and on the table), the walk word "Move" (the stick of the other hand) while a push of the stick moves the player, the ring word "Ring menu", the book word "Spells" while a press can open the spell book (`SpellBookCanOpen`), and the first time the menu word "Game menu". On the card of the pointing hand: A "Teleport" (or "Jump" with `teleport=0`) while a press of A can move the player. In the old immersive view the trigger moves the land, so Trigger: "Move the land" shows on the card of the pointing hand. |
 

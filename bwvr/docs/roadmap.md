@@ -817,11 +817,12 @@ game as it is.
 - **R11. The run `vc` of `verify_build.ps1` does not reach the Creature.**
   At a render of 3600 by 2880 and with the profile of the new install, the
   recipe of the Creature at the door of the Temple (test save `temple`)
-  puts the Hand about 30 cm of the room from the Creature, so "the Creature
-  state starts" is missing in each build. The other runs of
-  `verify_build.ps1` pass. Find whether the place of the camera after the
-  load or the size of the render moves the Hand off the Creature, and
-  correct the recipe.
+  has no Creature to touch, so "the Creature state starts" is missing in
+  each build. The other runs of `verify_build.ps1` pass. The cause is the
+  profile, not the recipe (`creature.md`, section 8): in the test save of
+  the old profile the Creature draws only its shadow, and "Keep your old
+  Creature" keeps no Creature with the new profile. Needs a profile with a
+  Creature, and then `make_test_save.ps1 -Name temple`.
 - **R3. The game window is in front in a desktop run.** Windows gives the
   front to the game window of a run on a PC that nobody uses, with no call
   of the game process (`bwvr/tools/desk/README.md`, and `backend.md`, "Who

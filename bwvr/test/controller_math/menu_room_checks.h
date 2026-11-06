@@ -169,6 +169,23 @@ inline void KeyboardChecks() {
   Check(fits, "each key is on the card", fits, 1);
   Check(apart, "no two keys overlap", apart, 1);
 
+  // The boxes of the parchment keys, with their rim of 3 px, do not overlap,
+  // so a copy of one box does not change a different key.
+  bool boxes_apart = true;
+  for (int i = 0; i < kKeyCount; ++i) {
+    int a[4];
+    KeyBox(i, w, h, margin, gap, 3, a);
+    for (int j = i + 1; j < kKeyCount; ++j) {
+      int b[4];
+      KeyBox(j, w, h, margin, gap, 3, b);
+      if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]) {
+        boxes_apart = false;
+      }
+    }
+  }
+  Check(boxes_apart, "no two key boxes with a rim of 3 px overlap",
+        boxes_apart, 1);
+
   // The key at the center of each key is that key.
   bool found = true;
   for (int i = 0; i < kKeyCount; ++i) {

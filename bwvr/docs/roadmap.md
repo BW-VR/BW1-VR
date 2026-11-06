@@ -834,15 +834,24 @@ keeps the mod as it is.
   170 ms.
 - **F25. The scroll look for the other cards.** The hint cards are
   parchment scrolls with wax seals (`hint_card_style=1`,
-  `controller-hints.md`, section 9.11). The art is in `card_scroll.h`. Open:
-  - The spell book is a page of the same parchment (`miracles.md`, "The
-    spell book"). Its longest draw is 8.7 to 10.2 ms, against 3 to 6 ms for
-    the dark panel, and the page itself is only about 1.3 ms. Find the rest
-    and make it smaller.
+  `controller-hints.md`, section 9.11). The spell book and the keyboard in
+  the headset are pages of the same parchment, and each item of the ring is
+  a wax seal. The art is in `card_scroll.h`. Open:
+  - The first use of a font size costs most. GDI makes each letter of
+    Alegreya the first time that it draws it at a size, and that takes 7 to
+    10 ms for the words of a card. The first hint card takes 18 ms (with
+    `card_scroll::Start`), the spell book 10 to 12 ms when it opens and 7.5
+    ms for the first note, and the keyboard 17 ms when it opens and 7 ms at
+    the first change of Shift. A later picture of the book takes 1.8 to 2.3
+    ms: the text 0.4 to 0.6, the page 0.55, the cells 0.5 to 0.9 and the
+    ink 0.25. Possible fixes: a static file of Alegreya Bold in place of the
+    variable font, or a draw of the letters of each size before their first
+    use, off the game thread.
   - In the spell book, the ring of the chosen item goes past its cell, and
     the cell cuts its top and its bottom flat.
-  - The same look for the keyboard (`vr_keyboard.cpp`). Keep its layout.
-    The keyboard is opaque and fills its rect.
+  - Only a headset can show whether the keys of the parchment keyboard
+    (`ui-layer.md`, section 21) and the gold of the key under the ray read
+    at 55 to 80 cm.
   - Only a headset can show the contrast of the scroll against the sky and
     the land, and whether the grain or the ink shimmers when the headset
     shows the card smaller than its picture. For the ring

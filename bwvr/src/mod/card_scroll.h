@@ -12,7 +12,9 @@
 // of 1 pixel would shimmer. The smallest cell of the noise is 4 pixels.
 //
 // THE COST. A redraw makes no blur. The drop shadow comes from the outline of
-// the shape (a distance test), and each pixel reads the tile.
+// the shape (a distance test). Start bakes the color of the paper into the
+// tile, so a pixel of paper is one read and the burn of its edge. A pixel
+// deep in the paper is one read only: the tile also holds it with the burn.
 
 #pragma once
 
@@ -95,5 +97,19 @@ void Ink(const Picture& picture, const uint32_t* letters, int x0, int y0,
 // The word on a seal, in the box of the seal, in the color for its wax.
 void SealInk(const Picture& picture, const uint32_t* letters, int x0, int y0,
              int x1, int y1, int tone);
+
+// The looks of a key of the keyboard in the headset (vr_keyboard.cpp).
+const int kKeyPlain = 0;  // a frame of ink round a face pressed into the paper
+const int kKeyHover = 1;  // the key under the ray: a gold face and a gold rim
+const int kKeyFlash = 2;  // the key that the trigger pressed: bright gold
+const int kKeyLooks = 3;
+// The rim of a key goes this far out from the key.
+const int kKeyRim = 3;
+
+// A key from x0 to x1 and from y0 to y1, over the paper that is there. It
+// changes only the box of the key and kKeyRim pixels round it. look is
+// kKeyPlain, kKeyHover or kKeyFlash. The letter goes on with Ink.
+void Key(const Picture& picture, int x0, int y0, int x1, int y1, int look,
+         int seed);
 
 }  // namespace card_scroll

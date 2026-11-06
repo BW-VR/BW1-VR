@@ -1169,10 +1169,12 @@ and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
 - One picture of the book takes 3 to 6 ms to draw with
   `hint_card_style=0`. The book draws it only when it changes (2 or 3 times
   for each open). With `hint_card_style=1` the pictures are the page of
-  parchment, and the longest draw of a window is 8.7 to 10.2 ms. The page
-  itself takes about 1.3 ms at 800 by 400 px. The cause of the rest is not
-  measured yet: the first draw of each letter of Alegreya at a new size is a
-  candidate.
+  parchment. At 624 by 304 px a picture takes 1.8 to 2.3 ms: the text of
+  GDI 0.4 to 0.6 ms, the page 0.55, the cells 0.5 to 0.9 and the ink 0.25.
+  The first picture takes 10 to 12 ms and the first note 7.5 ms, because
+  GDI makes each letter of Alegreya the first time that it draws it at a
+  size. The log has the parts of the first 12 pictures (`spell book : a new
+  picture of the book`).
 - With `spell_book=0`, X makes the log line of no job, and no book opens.
 - With `debug_all_miracles=1` the book has 6 miracles, and a take with 0
   chants puts the Miracle in the Hand (see "The limit of 6 icons").

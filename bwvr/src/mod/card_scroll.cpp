@@ -161,6 +161,43 @@ inline int BurnStep(float depth) {
   return i < kBurnSteps ? i : kBurnSteps - 1;
 }
 
+// A pixel this deep in the paper, or deeper, has the last step of the burn.
+const float kDeep = 64.0f;
+
+// --- the bake ----------------------------------------------------------------
+
+// Start bakes the paper of each pixel of the tile, so a redraw does not mix
+// the noise again. g_paper is kPaper times the blotch and the grain. g_deep
+// is the opaque BGRA pixel at kDeep or more from each edge, where the burn
+// is at its last step: one read gives the pixel that the full mix gives,
+// bit for bit.
+Rgb g_paper[kTile * kTile];
+uint32_t g_deep[kTile * kTile];
+
+inline int TileIndex(int x, int y) {
+  return (y & kTileMask) * kTile + (x & kTileMask);
+}
+
+// An opaque pixel of the color, as Paper and Page write it.
+inline void Opaque(uint8_t* out, const Rgb& c) {
+  out[0] = static_cast<uint8_t>(c.b > 255.0f ? 255.0f : c.b);
+  out[1] = static_cast<uint8_t>(c.g > 255.0f ? 255.0f : c.g);
+  out[2] = static_cast<uint8_t>(c.r > 255.0f ? 255.0f : c.r);
+  out[3] = 255;
+}
+
+void MakeBake() {
+  const int last = kBurnSteps - 1;
+  for (int i = 0; i < kTile * kTile; ++i) {
+    const float k = (0.84f + 0.28f * g_blotch[i]) * (1.0f + g_grain[i]);
+    g_paper[i] = Scale(kPaper, k);
+    const float burn = g_burn_near[last] + g_burn_far[last] * g_mid[i];
+    uint8_t pixel[4];
+    Opaque(pixel, Mix(g_paper[i], kBurnt, Clamp01(burn)));
+    memcpy(&g_deep[i], pixel, 4);
+  }
+}
+
 // --- the fonts ---------------------------------------------------------------
 
 bool g_started = false;
@@ -291,6 +328,7 @@ bool Start(HDC dc) {
   QueryPerformanceCounter(&t0);
   MakeTile();
   MakeBurn();
+  MakeBake();
   char font_dir[MAX_PATH] = "";
   char ini[MAX_PATH];
   const DWORD length = GetModuleFileNameA(nullptr, ini, MAX_PATH);
@@ -339,6 +377,7 @@ void Paper(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
   // near a roll, and the shade of the cylinder of a roll.
   static float edge_top[kMaxWidth], edge_bottom[kMaxWidth];
   static float side[kMaxWidth], roll_shade[kMaxWidth];
+  static bool side_none[kMaxWidth];  // the shade near a roll is 1 exactly
   for (int x = 0; x < w; ++x) {
     const float px = x + 0.5f;
     edge_top[x] = top + 5.2f * (Tile(g_mid, x + ox, 7 + oy) - 0.5f) +
@@ -348,6 +387,7 @@ void Paper(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
     float e = px - l1 < r0 - px ? px - l1 : r0 - px;
     if (e < 0.0f) e = 0.0f;
     side[x] = 1.0f - 0.38f * expf(-e / 6.0f);
+    side_none[x] = side[x] == 1.0f;
     const bool left = px < 0.5f * (l0 + r1);
     const float t = Clamp01(left ? (px - l0) / rw : (px - r0) / rw);
     const float cylinder = 0.5f + 0.5f * sinf(3.14159265f * t);
@@ -376,6 +416,12 @@ void Paper(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
         const float dh = body_l - px > px - body_r ? body_l - px : px - body_r;
         body_d = dv > dh ? dv : dh;
         cover_body = Clamp01(0.5f - body_d);
+        // Deep in the body, away from the rolls and their shade: the baked
+        // pixel.
+        if (body_d <= -kDeep && side_none[x]) {
+          memcpy(out, &g_deep[TileIndex(x + ox, y + oy)], 4);
+          continue;
+        }
       }
       float roll_d = 1e6f;
       const bool in_left = px < l1 + 1.0f;
@@ -403,22 +449,15 @@ void Paper(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
         }
       }
       if (cover_body > 0.0f) {
-        const int tx = x + ox, ty = y + oy;
-        const float k = (0.84f + 0.28f * Tile(g_blotch, tx, ty)) *
-                        (1.0f + Tile(g_grain, tx, ty));
-        Rgb color = Scale(kPaper, k);
+        const int t = TileIndex(x + ox, y + oy);
         const float depth = -body_d;
         const int step = BurnStep(depth);
-        const float burn =
-            g_burn_near[step] + g_burn_far[step] * Tile(g_mid, tx, ty);
-        color = Mix(color, kBurnt, Clamp01(burn));
+        const float burn = g_burn_near[step] + g_burn_far[step] * g_mid[t];
+        Rgb color = Mix(g_paper[t], kBurnt, Clamp01(burn));
         color = Scale(color, side[x]);
         if (cover_body >= 1.0f) {
           // Most pixels: opaque paper, so no blend.
-          out[0] = static_cast<uint8_t>(color.b > 255.0f ? 255.0f : color.b);
-          out[1] = static_cast<uint8_t>(color.g > 255.0f ? 255.0f : color.g);
-          out[2] = static_cast<uint8_t>(color.r > 255.0f ? 255.0f : color.r);
-          out[3] = 255;
+          Opaque(out, color);
         } else {
           Over(out, color, cover_body);
         }
@@ -478,20 +517,18 @@ void Page(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
       if (py - edge_bottom[x] > d) d = py - edge_bottom[x];
       if (edge_left[y] - px > d) d = edge_left[y] - px;
       if (px - edge_right[y] > d) d = px - edge_right[y];
+      const int t = TileIndex(x + ox, y + oy);
+      if (d <= -kDeep) {
+        memcpy(out, &g_deep[t], 4);
+        continue;
+      }
       const float cover = Clamp01(0.5f - d);
       if (cover <= 0.0f) continue;
-      const int tx = x + ox, ty = y + oy;
-      const float k = (0.84f + 0.28f * Tile(g_blotch, tx, ty)) *
-                      (1.0f + Tile(g_grain, tx, ty));
       const int step = BurnStep(-d);
-      const float burn =
-          g_burn_near[step] + g_burn_far[step] * Tile(g_mid, tx, ty);
-      const Rgb color = Mix(Scale(kPaper, k), kBurnt, Clamp01(burn));
+      const float burn = g_burn_near[step] + g_burn_far[step] * g_mid[t];
+      const Rgb color = Mix(g_paper[t], kBurnt, Clamp01(burn));
       if (cover >= 1.0f) {
-        out[0] = static_cast<uint8_t>(color.b > 255.0f ? 255.0f : color.b);
-        out[1] = static_cast<uint8_t>(color.g > 255.0f ? 255.0f : color.g);
-        out[2] = static_cast<uint8_t>(color.r > 255.0f ? 255.0f : color.r);
-        out[3] = 255;
+        Opaque(out, color);
       } else {
         Over(out, color, cover);
       }
@@ -641,6 +678,86 @@ void SealInk(const Picture& picture, const uint32_t* letters, int x0, int y0,
       uint8_t* out = picture.bgra + (static_cast<size_t>(y) * pitch + x) * 4;
       Over(out, edge, under * 0.55f);
       Over(out, kWaxInk[tone & 3], letter);
+    }
+  }
+}
+
+void Key(const Picture& picture, int x0, int y0, int x1, int y1, int look,
+         int seed) {
+  // The face, the frame of ink and the rim for each look. The rim of the
+  // plain key is the bleed of its ink.
+  const Rgb kFace[kKeyLooks] = {
+      {0.0f, 0.0f, 0.0f}, {224.0f, 146.0f, 28.0f}, {255.0f, 228.0f, 96.0f}};
+  const float kFaceAlpha[kKeyLooks] = {0.07f, 0.72f, 0.92f};
+  const Rgb kFrame[kKeyLooks] = {
+      kInk, {150.0f, 88.0f, 10.0f}, {196.0f, 128.0f, 24.0f}};
+  const float kFrameAlpha[kKeyLooks] = {0.85f, 0.95f, 0.95f};
+  const Rgb kRim[kKeyLooks] = {
+      kInkBleed, {255.0f, 204.0f, 72.0f}, {255.0f, 248.0f, 200.0f}};
+  const float kRimAlpha[kKeyLooks] = {0.2f, 0.95f, 1.0f};
+  if (look < 0 || look >= kKeyLooks) look = kKeyPlain;
+  const float fx0 = static_cast<float>(x0), fy0 = static_cast<float>(y0);
+  const float fx1 = static_cast<float>(x1), fy1 = static_cast<float>(y1);
+  const float cx = 0.5f * (fx0 + fx1), cy = 0.5f * (fy0 + fy1);
+  const float radius = 9.0f;
+  const float half_x = 0.5f * (fx1 - fx0) - radius;
+  const float half_y = 0.5f * (fy1 - fy0) - radius;
+  const float light_x = -0.6f, light_y = -0.8f;
+  const float frame = 3.0f;  // the width of the frame of ink
+  const float rim = look == kKeyPlain ? 1.5f : static_cast<float>(kKeyRim);
+  const int ox = seed * 37 + 11, oy = seed * 23 + 5;
+  for (int y = y0 - kKeyRim; y < y1 + kKeyRim; ++y) {
+    if (y < 0 || y >= picture.height) continue;
+    const float py = y + 0.5f;
+    for (int x = x0 - kKeyRim; x < x1 + kKeyRim; ++x) {
+      if (x < 0 || x >= picture.width) continue;
+      const float px = x + 0.5f;
+      // The distance to the edge of the key, and the direction out of the
+      // key at the nearest point of the edge.
+      const float sx = px < cx ? -1.0f : 1.0f;
+      const float sy = py < cy ? -1.0f : 1.0f;
+      const float qx = fabsf(px - cx) - half_x;
+      const float qy = fabsf(py - cy) - half_y;
+      float d, nx, ny;
+      if (qx > 0.0f && qy > 0.0f) {
+        const float length = sqrtf(qx * qx + qy * qy);
+        d = length - radius;
+        nx = sx * qx / length;
+        ny = sy * qy / length;
+      } else if (qx > qy) {
+        d = qx - radius;
+        nx = sx;
+        ny = 0.0f;
+      } else {
+        d = qy - radius;
+        nx = 0.0f;
+        ny = sy;
+      }
+      // The edge of the ink is not straight.
+      d += 1.0f * (Tile(g_fine, x + ox, y + oy) - 0.5f);
+      uint8_t* out =
+          picture.bgra + (static_cast<size_t>(y) * picture.pitch + x) * 4;
+      if (d < 0.5f) {
+        // The face, then its wall: the face is lower than the paper, so the
+        // wall at the top and the left is in shade and the wall at the
+        // bottom and the right has the light.
+        const float inside = Clamp01(0.5f - d);
+        Over(out, kFace[look], kFaceAlpha[look] * inside);
+        const float wall = 1.0f - Smooth(0.0f, 6.0f, -d);
+        const float lit = -(nx * light_x + ny * light_y);
+        if (lit < 0.0f) {
+          Over(out, kBlack, 0.32f * wall * -lit * inside);
+        } else {
+          Over(out, kSheen, 0.28f * wall * lit * inside);
+        }
+      }
+      if (look != kKeyPlain || d > -0.5f) {
+        const float glow = Clamp01(rim + 0.3f - d) * Clamp01(d + frame);
+        Over(out, kRim[look], kRimAlpha[look] * glow);
+      }
+      const float ink = Clamp01(0.5f - d) * Clamp01(d + frame + 0.5f);
+      const float strength = 0.9f + 0.1f * Tile(g_mid, x + ox, y + oy);
+      Over(out, kFrame[look], kFrameAlpha[look] * ink * strength);
     }
   }
 }

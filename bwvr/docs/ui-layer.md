@@ -650,7 +650,7 @@ The biggest cost is memory, and it is small against a headset render.
 | Input on the panel (section 5) | planned for `ui_panel=1` |
 | Screens with no scene on a screen quad (section 6) | planned. A screen with a menu goes to the place of the menu panel (section 20) |
 | The menus in the room (section 20) | built, math checks. A desktop run shows the Main Menu of the start on the panel and a click through it, with Vulkan and with dxwrapper. Never seen in a headset |
-| The keyboard in the headset (section 21) | built, math checks. A desktop run types into the box of a save name and closes it with Cancel. Never seen in a headset |
+| The keyboard in the headset (section 21) | built, math checks. A desktop run types into the box of a save name and closes it with Cancel, and saves the pictures of the parchment card and of the dark card. Never seen in a headset |
 | Tabletop placement of the panels (4.4) | planned |
 | A line from the controller to the panel hit | planned |
 | The panel over the monitor copy, when the monitor copy is on | planned |
@@ -1965,9 +1965,24 @@ which calls `SetupEdit::KeyDown` `0x0040BAF0`. `ProcessWindowMessages` calls
 - **The place.** The keyboard card hangs from the anchor of the panel
   (20.3): 1 m from the head, 35 degrees below eye level, tilted to face the
   head. It is 70 cm wide (38 degrees) and 26 cm high. It is nearer than the
-  panel and below the dialog, and it is opaque. In a frame with the scene it
-  is a card over the projection layer. In a frame with no scene it is a card
-  over the screen of the menu.
+  panel and below the dialog. In a frame with the scene it is a card over
+  the projection layer. In a frame with no scene it is a card over the
+  screen of the menu.
+- **The look** follows `hint_card_style`, the key of the hint cards (the
+  launcher row "Card look", and the switch "Card look" of the debug page).
+  With 1 the card is a page of the parchment of the hint cards
+  (`controller-hints.md`, 9.11), with a torn and burnt edge. Past the torn
+  edge the card is clear. Each key is a frame of dark ink round a face that
+  is pressed into the paper: the wall at the top and the left of the face is
+  in shade, and the wall at the bottom and the right has the light. The
+  letter is in dark ink in Alegreya Bold, with a capital of 30 px, and the
+  words Space, Back, Enter and Shift are in Alegreya SC with a capital of
+  19 px. The key under the ray has a gold face, a frame of dark gold and a
+  rim of bright gold 3 px wide. The key that the trigger pressed has a face
+  of bright yellow gold and a pale rim for 120 ms. While Shift is on, the Shift key has a red
+  wax seal with its word in light letters. With 0 the card is dark and
+  opaque, with grey keys in Segoe UI: the key under the ray is gold, the
+  pressed key is pale gold, and Shift on is blue.
 - **The keys.** Five rows: the digits and Backspace, three rows of letters
   with Enter and Shift, and the space bar. Shift makes the next letter a
   capital. It is on when the keyboard opens, so the first letter of a name
@@ -1992,6 +2007,8 @@ which calls `SetupEdit::KeyDown` `0x0040BAF0`. `ProcessWindowMessages` calls
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `vr_keyboard` | 1 | 1: the keyboard shows while a text box has the focus. 0: no keyboard |
+| `hint_card_style` | 1 | 1: the keyboard is a page of parchment with keys of ink. 0: the dark keyboard. The key also sets the look of the hint cards and of the spell book |
+| `vr_keyboard_test_save` | 0 | Test key. N saves the first N new pictures of the keyboard as `bwvr-keyboard-FFFFF.bmp` over a checkerboard (FFFFF is the frame), each with a log line that names the key under the ray, the key of the flash and the Shift |
 
 The log has the tag `keyboard`: one line when the keyboard shows, with its
 place, one line for each key that goes to the game, and one line when it
@@ -2006,7 +2023,8 @@ keyboard     : the keyboard goes away: no text box has the focus
 ### 21.5 Tests and limits
 
 The math checks are in `test/controller_math/menu_room_checks.h`: each key
-is on the card, no two keys overlap, the center of each key finds that key,
+is on the card, no two keys overlap, no two boxes of a key with its rim of
+3 px overlap, the center of each key finds that key,
 what each kind of key sends, the shift, and one key for each pull of the
 trigger.
 
@@ -2039,6 +2057,20 @@ temple_run.ps1 -Name kbd -Dll <dll> -Rooms "room_save@3400" -Points "0,-2,30"
 
 The run does not use Esc to close the box. A desktop capture does not save
 the keyboard card. The log and the text in the panel capture show the keys.
+With `vr_keyboard_test_save=24` in `-Set` the run saves each new picture of
+the card.
+
+- With `hint_card_style=1` the pictures show the page, the red seal of
+  Shift on, the gold key under the ray (B, W, Backspace), the bright yellow
+  flash of each press, and the small letters after the B.
+- The page takes 1.2 ms one time. The first picture draws the 40 keys in
+  17 ms, most of it the first draw of each letter by GDI. The first change
+  of Shift draws the 26 letters and Shift again in 7 ms. Each other new
+  picture draws 1 or 2 keys in 0.2 to 0.3 ms, or copies the boxes of the
+  keys in less than 0.01 ms.
+- With `hint_card_style=0` the pictures show the dark card. Each new
+  picture of the dark card draws all of it, in 0.9 to 1.2 ms (7.7 ms for
+  the first picture and 3 ms for the first small letters).
 
 - The hand does not press a key by touch. Only the ray and the trigger do.
 - Only a headset shows the card, its place under the panel, and how the
@@ -2046,3 +2078,14 @@ the keyboard card. The log and the text in the panel capture show the keys.
 - The text box of a frame with no scene (the name of a new god) needs the
   first start of a profile. The profile guard of the desktop scripts takes
   a new profile away after a run, but no run has done it yet.
+
+### 21.6 The bake of the parchment
+
+The page is drawn one time, into a picture of its own. A key in a look
+(plain, under the ray, pressed) is drawn the first time that it shows, over
+the page, and the mod keeps a copy of its box: the key and its rim of 3 px
+(`card_scroll::kKeyRim`). The letters and Shift have a copy for Shift on and
+one for Shift off. A new picture of the card copies the box of each key
+whose look changed, and draws only a key that has no copy yet. The card
+needs two pictures of 1.5 MB (the page and the card) and at most 240 copies
+of about 26 KB.

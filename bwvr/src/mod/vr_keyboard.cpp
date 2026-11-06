@@ -20,14 +20,34 @@
 // the key to the box (fn_00408F80, then SetupEdit::KeyDown 0x0040BAF0). So
 // Backspace and Enter act as the game makes them act.
 //
-//   vr_keyboard=1  0: no keyboard in the headset
+// THE LOOK follows hint_card_style, the key of the hint cards. With 1 the
+// card is a page of parchment (card_scroll.h) with a torn edge. Each key is
+// a frame of ink round a face that is pressed into the paper, with its letter
+// in dark ink. The key under the ray has a gold face and a gold rim, the key
+// that the trigger pressed is bright yellow for 120 ms, and Shift is a red wax
+// seal while it is on. With 0 the card is dark and opaque, with grey keys.
+//
+// THE BAKE of the parchment. The page is drawn one time. Each key in each of
+// its looks is drawn one time, when it first shows, and a copy of its box is
+// kept. A new picture of the card copies the box of each key whose look
+// changed, so most new pictures only copy.
+//
+//   vr_keyboard=1            0: no keyboard in the headset
+//   hint_card_style=1        1: the keyboard is a page of parchment. 0: the
+//                            dark keyboard. The switch "Card look" of the
+//                            debug page changes it too
+//   vr_keyboard_test_save=0  N: saves the first N new pictures of the card
+//                            as bwvr-keyboard-<frame>.bmp (a test key)
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <new>
+
 #include "../vr/xr_screen.h"
+#include "card_scroll.h"
 #include "menu_room.h"
 #include "vr_keyboard_math.h"
 
@@ -35,6 +55,13 @@ extern void ModLog(const char* format, ...);
 
 // controllers.cpp
 void ControllersGesturePulse(float amplitude, float seconds);
+// hint_card.cpp: hint_card_style now (the debug page can change it), or
+// kDebugCannot (below 0) while the hint cards cannot show.
+int HintCardStyleValue();
+// eye_capture.cpp
+void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
+                      const void* pixels, int pitch, uint32_t width,
+                      uint32_t height);
 
 namespace {
 
@@ -83,8 +110,27 @@ struct Look {
   int hover;
   int flash;
   bool shift;
+  int style;  // hint_card_style
 };
-Look g_drawn = {-2, -2, false};
+Look g_drawn = {-2, -2, false, 0};  // the dark card in g_bits
+
+bool SameLook(const Look& a, const Look& b) {
+  return a.hover == b.hover && a.flash == b.flash && a.shift == b.shift &&
+         a.style == b.style;
+}
+
+// The keys of bwvr.ini, read one time.
+bool g_read = false;
+int g_style_ini = 1;  // hint_card_style
+int g_save = 0;       // vr_keyboard_test_save
+int g_saved = 0;
+
+// The time of each new picture of the card.
+uint64_t g_draws = 0;
+double g_draw_ms = 0.0;
+double g_draw_most_ms = 0.0;
+int g_draw_logs = 0;
+const int kMaxDrawLogs = 40;
 
 // A WM_KEYUP that waits.
 HWND g_up_window = nullptr;
@@ -97,6 +143,48 @@ uint64_t g_opens = 0;
 uint64_t g_keys = 0;
 int g_key_logs = 0;
 const int kMaxKeyLogs = 60;
+
+int IniKey(const char* key, int fallback) {
+  char path[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) return fallback;
+  char* slash = strrchr(path, '\\');
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return fallback;
+  slash[1] = 0;
+  strcat_s(path, MAX_PATH, "bwvr.ini");
+  return static_cast<int>(GetPrivateProfileIntA("bwvr", key, fallback, path));
+}
+
+void ReadSettings() {
+  if (g_read) return;
+  g_read = true;
+  g_style_ini = IniKey("hint_card_style", 1) != 0 ? 1 : 0;
+  g_save = IniKey("vr_keyboard_test_save", 0);
+  ModLog("keyboard     : hint_card_style=%d, %s%s", g_style_ini,
+         g_style_ini != 0 ? "the keyboard is a page of parchment with keys "
+                            "of ink"
+                          : "the keyboard is dark with grey keys",
+         g_save > 0 ? ". vr_keyboard_test_save saves the first new pictures "
+                      "of the card (a test)"
+                    : "");
+}
+
+// hint_card_style now: the switch of the debug page, else bwvr.ini.
+int CardStyle() {
+  ReadSettings();
+  const int live = HintCardStyleValue();
+  if (live >= 0) return live != 0 ? 1 : 0;
+  return g_style_ini;
+}
+
+double NowMs() {
+  static LARGE_INTEGER frequency = {};
+  if (frequency.QuadPart == 0) QueryPerformanceFrequency(&frequency);
+  LARGE_INTEGER count;
+  QueryPerformanceCounter(&count);
+  return static_cast<double>(count.QuadPart) * 1000.0 /
+         static_cast<double>(frequency.QuadPart);
+}
 
 HWND GameWindow() {
   HWND window = *reinterpret_cast<const HWND*>(kGameWindow);
@@ -202,6 +290,24 @@ void Fill(const int r[4], COLORREF color) {
   DeleteObject(brush);
 }
 
+// The word or the letter on key i.
+void Label(int i, bool shift, wchar_t label[8]) {
+  const vr_keyboard_math::Key& k = vr_keyboard_math::kKeys[i];
+  memset(label, 0, 8 * sizeof(wchar_t));
+  switch (k.kind) {
+    case vr_keyboard_math::kSpace: wcscpy_s(label, 8, L"Space"); break;
+    case vr_keyboard_math::kBack: wcscpy_s(label, 8, L"Back"); break;
+    case vr_keyboard_math::kEnter: wcscpy_s(label, 8, L"Enter"); break;
+    case vr_keyboard_math::kShift: wcscpy_s(label, 8, L"Shift"); break;
+    default: {
+      char c = k.label;
+      if (c >= 'A' && c <= 'Z' && !shift) c = static_cast<char>(c - 'A' + 'a');
+      label[0] = static_cast<wchar_t>(c);
+      break;
+    }
+  }
+}
+
 void Raster(const Look& look) {
   const int all[4] = {0, 0, kWidth, kHeight};
   Fill(all, RGB(22, 24, 28));
@@ -218,19 +324,8 @@ void Raster(const Look& look) {
     if (i == look.flash) face = RGB(250, 225, 150);
     if (i == look.hover || i == look.flash) text = RGB(20, 20, 20);
     Fill(r, face);
-    wchar_t label[8] = {0};
-    switch (k.kind) {
-      case vr_keyboard_math::kSpace: wcscpy_s(label, L"Space"); break;
-      case vr_keyboard_math::kBack: wcscpy_s(label, L"Back"); break;
-      case vr_keyboard_math::kEnter: wcscpy_s(label, L"Enter"); break;
-      case vr_keyboard_math::kShift: wcscpy_s(label, L"Shift"); break;
-      default: {
-        char c = k.label;
-        if (c >= 'A' && c <= 'Z' && !look.shift) c = static_cast<char>(c - 'A' + 'a');
-        label[0] = static_cast<wchar_t>(c);
-        break;
-      }
-    }
+    wchar_t label[8];
+    Label(i, look.shift, label);
     SelectObject(g_dc, k.kind == vr_keyboard_math::kChar ? g_font : g_word_font);
     SetTextColor(g_dc, text);
     RECT rect = {r[0], r[1], r[0] + r[2], r[1] + r[3]};
@@ -241,6 +336,206 @@ void Raster(const Look& look) {
   // the premultiplied alpha of the card.
   for (int i = 0; i < kWidth * kHeight; ++i) g_bits[i] |= 0xFF000000u;
   g_drawn = look;
+}
+
+// --- the parchment (hint_card_style=1) -----------------------------------------
+
+// The capital letter of a key, and of a word on a key, in pixels.
+const int kInkCap = 30;
+const int kWordCap = 19;
+// The wax seal of Shift is this far inside the key.
+const int kWaxInsetX = 7;
+const int kWaxInsetY = 8;
+
+const size_t kPictureBytes = static_cast<size_t>(kWidth) * kHeight * 4;
+uint8_t* g_page = nullptr;  // the page with no keys
+uint8_t* g_card = nullptr;  // the picture that the layer shows
+// The box of each key in each look, for Shift off [0] and on [1]. Only the
+// letters and Shift change with Shift: the other keys use [0].
+uint8_t* g_tiles[2][card_scroll::kKeyLooks][vr_keyboard_math::kKeyCount] = {};
+Look g_card_look = {-2, -2, false, -1};  // style -1: g_card has no picture
+bool g_parchment_failed = false;
+HFONT g_ink_font = nullptr;
+HFONT g_ink_word_font = nullptr;
+int g_ink_ascent = 0, g_ink_height = 0;
+int g_word_ascent = 0, g_word_height = 0;
+
+bool ParchmentStart() {
+  if (g_card != nullptr) return true;
+  if (g_parchment_failed) return false;
+  g_parchment_failed = true;
+  if (!card_scroll::Start(g_dc)) {
+    ModLog("keyboard     : GDI gave no font for the parchment, so the keyboard "
+           "is dark");
+    return false;
+  }
+  g_ink_font = card_scroll::WordsFont(g_dc, kInkCap);
+  g_ink_word_font = card_scroll::SealFont(g_dc, kWordCap);
+  g_page = new (std::nothrow) uint8_t[kPictureBytes];
+  g_card = new (std::nothrow) uint8_t[kPictureBytes];
+  if (g_ink_font == nullptr || g_ink_word_font == nullptr ||
+      g_page == nullptr || g_card == nullptr) {
+    delete[] g_page;
+    delete[] g_card;
+    g_page = g_card = nullptr;
+    ModLog("keyboard     : no font or no memory for the parchment, so the "
+           "keyboard is dark");
+    return false;
+  }
+  TEXTMETRICW metrics;
+  SelectObject(g_dc, g_ink_font);
+  GetTextMetricsW(g_dc, &metrics);
+  g_ink_ascent = metrics.tmAscent;
+  g_ink_height = metrics.tmHeight;
+  SelectObject(g_dc, g_ink_word_font);
+  GetTextMetricsW(g_dc, &metrics);
+  g_word_ascent = metrics.tmAscent;
+  g_word_height = metrics.tmHeight;
+  const double start = NowMs();
+  const card_scroll::Picture page = {g_page, kWidth, kWidth, kHeight};
+  card_scroll::Page(page, 4, 4, kWidth - 4, kHeight - 4, 9);
+  g_parchment_failed = false;
+  ModLog("keyboard     : the page of the parchment keyboard took %.2f ms (%s)",
+         NowMs() - start, card_scroll::FontNote());
+  return true;
+}
+
+int LookOf(int i, const Look& look) {
+  if (i == look.flash) return card_scroll::kKeyFlash;
+  if (i == look.hover) return card_scroll::kKeyHover;
+  return card_scroll::kKeyPlain;
+}
+
+bool ShiftChanges(int i) {
+  const vr_keyboard_math::Key& k = vr_keyboard_math::kKeys[i];
+  return k.kind == vr_keyboard_math::kShift ||
+         (k.kind == vr_keyboard_math::kChar && k.label >= 'A' &&
+          k.label <= 'Z');
+}
+
+void Box(int i, int box[4]) {
+  vr_keyboard_math::KeyBox(i, kWidth, kHeight, kMargin, kGap,
+                           card_scroll::kKeyRim, box);
+}
+
+// A copy of the box of key i from the card to its tile, and back.
+void CardToTile(int i, uint8_t* tile) {
+  int box[4];
+  Box(i, box);
+  const size_t row = static_cast<size_t>(box[2] - box[0]) * 4;
+  for (int y = box[1]; y < box[3]; ++y) {
+    memcpy(tile + static_cast<size_t>(y - box[1]) * row,
+           g_card + (static_cast<size_t>(y) * kWidth + box[0]) * 4, row);
+  }
+}
+
+void TileToCard(int i, const uint8_t* tile) {
+  int box[4];
+  Box(i, box);
+  const size_t row = static_cast<size_t>(box[2] - box[0]) * 4;
+  for (int y = box[1]; y < box[3]; ++y) {
+    memcpy(g_card + (static_cast<size_t>(y) * kWidth + box[0]) * 4,
+           tile + static_cast<size_t>(y - box[1]) * row, row);
+  }
+}
+
+// Draws key i in the look into the card, over the page.
+void DrawKey(int i, bool shift, int look) {
+  int box[4];
+  Box(i, box);
+  const size_t row = static_cast<size_t>(box[2] - box[0]) * 4;
+  for (int y = box[1]; y < box[3]; ++y) {
+    const size_t at = (static_cast<size_t>(y) * kWidth + box[0]) * 4;
+    memcpy(g_card + at, g_page + at, row);
+  }
+  const card_scroll::Picture picture = {g_card, kWidth, kWidth, kHeight};
+  int r[4];
+  vr_keyboard_math::KeyRect(i, kWidth, kHeight, kMargin, kGap, r);
+  const int x0 = r[0], y0 = r[1], x1 = r[0] + r[2], y1 = r[1] + r[3];
+  const vr_keyboard_math::Key& k = vr_keyboard_math::kKeys[i];
+  card_scroll::Key(picture, x0, y0, x1, y1, look, i * 7 + 3);
+  const bool wax = k.kind == vr_keyboard_math::kShift && shift;
+  if (wax) {
+    card_scroll::Seal(picture, x0 + kWaxInsetX, y0 + kWaxInsetY,
+                      x1 - kWaxInsetX, y1 - kWaxInsetY, 0, i * 7 + 5);
+  }
+  // The letter, white on black, with its capital in the middle of the key.
+  // Then the ink.
+  for (int y = box[1]; y < box[3]; ++y) {
+    memset(g_bits + static_cast<size_t>(y) * kWidth + box[0], 0, row);
+  }
+  wchar_t label[8];
+  Label(i, shift, label);
+  const bool word = k.kind != vr_keyboard_math::kChar;
+  const int cap = word ? kWordCap : kInkCap;
+  const int ascent = word ? g_word_ascent : g_ink_ascent;
+  const int height = word ? g_word_height : g_ink_height;
+  const int baseline = y0 + (r[3] + cap) / 2;
+  SelectObject(g_dc, word ? g_ink_word_font : g_ink_font);
+  SetTextColor(g_dc, RGB(255, 255, 255));
+  RECT rect = {x0, baseline - ascent, x1, baseline - ascent + height};
+  DrawTextW(g_dc, label, -1, &rect,
+            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP | DT_NOCLIP);
+  GdiFlush();
+  if (wax) {
+    card_scroll::SealInk(picture, g_bits, x0 + kWaxInsetX, y0 + kWaxInsetY,
+                         x1 - kWaxInsetX, y1 - kWaxInsetY, 0);
+  } else {
+    card_scroll::Ink(picture, g_bits, x0, y0, x1, y1, i * 7 + 3);
+  }
+}
+
+// Puts key i in the look into the card: a copy of its tile, or a draw that
+// makes the tile. False for a draw.
+bool ShowKey(int i, bool shift, int look) {
+  const int s = shift && ShiftChanges(i) ? 1 : 0;
+  uint8_t*& tile = g_tiles[s][look][i];
+  if (tile != nullptr) {
+    TileToCard(i, tile);
+    return true;
+  }
+  DrawKey(i, shift, look);
+  int box[4];
+  Box(i, box);
+  tile = new (std::nothrow)
+      uint8_t[static_cast<size_t>(box[2] - box[0]) * (box[3] - box[1]) * 4];
+  if (tile != nullptr) CardToTile(i, tile);
+  return false;
+}
+
+// Makes the card show the look: the keys whose look changed, and all the
+// keys for the first picture.
+void Compose(const Look& look, uint64_t frame) {
+  const double start = NowMs();
+  const bool first = g_card_look.style < 0;
+  if (first) memcpy(g_card, g_page, kPictureBytes);
+  int drawn = 0, copied = 0;
+  for (int i = 0; i < vr_keyboard_math::kKeyCount; ++i) {
+    const int now = LookOf(i, look);
+    if (!first && now == LookOf(i, g_card_look) &&
+        (look.shift == g_card_look.shift || !ShiftChanges(i))) {
+      continue;
+    }
+    if (ShowKey(i, look.shift, now)) {
+      ++copied;
+    } else {
+      ++drawn;
+    }
+  }
+  g_card_look = look;
+  // The letters of the parchment are in g_bits now, so the dark card must
+  // draw again.
+  g_drawn.hover = -2;
+  const double ms = NowMs() - start;
+  ++g_draws;
+  g_draw_ms += ms;
+  if (ms > g_draw_most_ms) g_draw_most_ms = ms;
+  if (g_draw_logs < kMaxDrawLogs) {
+    ++g_draw_logs;
+    ModLog("keyboard     : frame %llu, a new picture of the parchment "
+           "keyboard took %.2f ms: %d keys drawn and %d keys copied", frame, ms,
+           drawn, copied);
+  }
 }
 
 void Close(const char* why) {
@@ -330,14 +625,42 @@ void VrKeyboardFrame(uint64_t frame) {
   if (g_flash >= 0 && now >= g_flash_until) g_flash = -1;
 
   if (!RasterStart()) return;
-  const Look look = {g_hover, g_flash, g_shift.on};
-  if (look.hover != g_drawn.hover || look.flash != g_drawn.flash ||
-      look.shift != g_drawn.shift) {
+  const Look look = {g_hover, g_flash, g_shift.on, CardStyle()};
+  const uint8_t* pixels = reinterpret_cast<const uint8_t*>(g_bits);
+  bool fresh = false;
+  if (look.style != 0 && ParchmentStart()) {
+    if (!SameLook(look, g_card_look)) {
+      Compose(look, frame);
+      fresh = true;
+    }
+    pixels = g_card;
+  } else if (!SameLook(look, g_drawn)) {
+    const double start = NowMs();
     Raster(look);
+    const double ms = NowMs() - start;
+    ++g_draws;
+    g_draw_ms += ms;
+    if (ms > g_draw_most_ms) g_draw_most_ms = ms;
+    if (g_draw_logs < kMaxDrawLogs) {
+      ++g_draw_logs;
+      ModLog("keyboard     : frame %llu, a new picture of the dark keyboard "
+             "took %.2f ms", frame, ms);
+    }
+    fresh = true;
+  }
+  if (fresh && g_saved < g_save) {
+    ++g_saved;
+    char name[8];
+    ModLog("keyboard     : frame %llu, the saved picture has the ray on %s, "
+           "the flash on %s, and Shift %s", frame,
+           look.hover >= 0 ? KeyName(look.hover, name, sizeof(name)) : "no key",
+           look.flash >= 0 ? KeyName(look.flash, name + 4, 4) : "no key",
+           look.shift ? "on" : "off");
+    EyeCaptureSaveUi("keyboard", frame, 1, pixels, kWidth * 4, kWidth, kHeight);
   }
   bwvr::CardLayer layer = {};
   layer.visible = true;
-  layer.pixels = reinterpret_cast<const uint8_t*>(g_bits);
+  layer.pixels = pixels;
   layer.texture_width = kWidth;
   layer.texture_height = kHeight;
   layer.rect[0] = 0;
@@ -352,9 +675,16 @@ void VrKeyboardFrame(uint64_t frame) {
 }
 
 void VrKeyboardReport() {
-  if (g_opens + g_keys == 0) return;
+  if (g_opens + g_keys + g_draws == 0) return;
   ModLog("keyboard     : the keyboard showed %llu times, and %llu keys were "
          "pressed this window", g_opens, g_keys);
+  if (g_draws > 0) {
+    ModLog("keyboard     : %llu new pictures of the keyboard, %.2f ms each on "
+           "average and %.2f ms at the most", g_draws,
+           g_draw_ms / static_cast<double>(g_draws), g_draw_most_ms);
+  }
   g_opens = 0;
   g_keys = 0;
+  g_draws = 0;
+  g_draw_ms = g_draw_most_ms = 0.0;
 }

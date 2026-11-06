@@ -946,7 +946,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `prompt_moves` | 1 | 1 the prompt of the land has the line of the walk with the stick while a push moves the player, and the line of A shows only while a press of A can move the player. 0 no line for the walk, and the line of A shows in each case (9.4) |
 | `hint_learn` | 1 | 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). The launcher row "Hints": "Until learned" is 1, "Always" is 0 |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
-| `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0 |
+| `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`) and of the keyboard in the headset (`ui-layer.md`, section 21) |
 | `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
 | `hint_card_fonts_test_dir` | empty | Test key. The folder of the font files of the scroll. Empty is `bwvr-fonts` beside `runblack.exe`. A desktop run sets the staged folder `bwvr\out\stage\bwvr-fonts` of its worktree |
 
@@ -963,7 +963,7 @@ does the same in a desktop run. `hint_learn` has no test key: the launcher
 row "Hints" sets it. `hint_card_style` has no key of the keyboard. With
 `debug_menu=1` the switch "Card look" (group Interface) of the debug page
 changes it, and each card draws its picture again in the next frame. The
-ring follows it too (`controllers.md`, 10.4).
+ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
 
 ### 9.6 The log
 
@@ -1325,8 +1325,14 @@ UI, and the log says so. No font of the game is used.
 (about 26 pixels of the view for each cm at 55 cm), so a detail of 1 px would
 shimmer. The smallest cell of the noise is 4 px. `card_scroll::Start` makes
 one noise tile of 256 by 256 pixels and the tables of the burnt edge, one
-time. A new picture reads the tile and makes no blur. The picture is drawn
-again only when the words of the card change.
+time. It also bakes the paper into the tile: the color of each pixel with
+its light and dark areas and its grain, and the opaque pixel 64 px or more
+from each edge, where the burn of the edge is at its last step. A pixel of
+paper is then one read and the burn of its edge, and a pixel deep in the
+paper is one read only. A baked pixel is the same, bit for bit, as the
+pixel of the full mix. A new picture makes no blur. The picture is drawn
+again only when the words of the card change. The text of GDI costs most,
+not the paper (roadmap F25).
 
 **Tests.** A desktop run saves each new picture of a card with
 `hint_card_save_test=1`, and loads the fonts from the staged folder of its

@@ -63,6 +63,19 @@ inline void KeyRect(int i, int width, int height, int margin, int gap,
   out[3] = static_cast<int>(row_h - gap);
 }
 
+// The box of key i with `rim` more pixels at each side, cut to the card: x0,
+// y0, x1, y1. The parchment keyboard draws a key and its rim in this box, and
+// a new picture of the card copies the box of each key that changed.
+inline void KeyBox(int i, int width, int height, int margin, int gap, int rim,
+                   int out[4]) {
+  int r[4];
+  KeyRect(i, width, height, margin, gap, r);
+  out[0] = r[0] - rim < 0 ? 0 : r[0] - rim;
+  out[1] = r[1] - rim < 0 ? 0 : r[1] - rim;
+  out[2] = r[0] + r[2] + rim > width ? width : r[0] + r[2] + rim;
+  out[3] = r[1] + r[3] + rim > height ? height : r[1] + r[3] + rim;
+}
+
 // The key at u, v of the card (0 to 1 across and down), or -1 for the space
 // between the keys and for a point off the card.
 inline int KeyAt(float u, float v, int width, int height, int margin,

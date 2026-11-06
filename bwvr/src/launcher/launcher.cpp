@@ -355,11 +355,12 @@ const Setting kSettings[] = {
      "tutorial, each line shows. Always: each line always shows. To show all "
      "lines again, delete bwvr-hint-counts.ini in the game folder."},
     {kValues, "hint_card_style", "Card look", "Scroll=1|Plain=0", 1,
-     "The look of the cards beside your wrists, of the spell book and of the "
-     "ring menu. Scroll: a small parchment scroll with dark letters, and the "
-     "button word on a wax seal (green for the trigger, amber for the grip). "
-     "The spell book is a page of the same parchment. Each item of the ring "
-     "is a wax seal. Plain: dark cards with white letters."},
+     "The look of the cards beside your wrists, of the spell book, of the "
+     "ring menu and of the keyboard for a name. Scroll: a small parchment "
+     "scroll with dark letters, and the button word on a wax seal (green for "
+     "the trigger, amber for the grip). The spell book and the keyboard are "
+     "pages of the same parchment. Each item of the ring is a wax seal. "
+     "Plain: dark cards with white letters."},
 
     {kGroup, nullptr, "Launcher", nullptr, 0, nullptr},
     {kBool, "large_address", "Use 4 GB of memory", nullptr, 1,

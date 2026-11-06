@@ -479,6 +479,10 @@ uint64_t g_pulls = 0, g_snaps = 0, g_backs = 0;
 uint64_t g_opens = 0, g_closes = 0, g_plucks = 0, g_refusals = 0;
 uint64_t g_requests = 0, g_arrived = 0, g_rasters = 0;
 double g_raster_ms = 0.0;
+// The parts of the first draws of the book. A size of a font costs most at
+// its first use, when GDI makes its letters.
+int g_draw_logs = 0;
+const int kMaxDrawLogs = 12;
 int g_logs = 0;
 const int kMaxLogs = 400;
 
@@ -909,6 +913,7 @@ void Raster(const Look& look) {
                   DT_END_ELLIPSIS);
   }
   GdiFlush();
+  const double t_text = NowSeconds();
 
   // The shapes, then the ink over them.
   if (g_page) {
@@ -932,6 +937,7 @@ void Raster(const Look& look) {
       }
     }
   }
+  const double t_page = NowSeconds();
   const Rgb& cell_lit = g_page ? kPageCellLit : kCellLit;
   const float cell_lit_alpha = g_page ? 0.55f : 0.9f;
   const Rgb& halo_color = g_page ? kPageHalo : kHalo;
@@ -982,6 +988,7 @@ void Raster(const Look& look) {
       }
     }
   }
+  const double t_cells = NowSeconds();
   for (int y = 0; y < h; ++y) {
     uint8_t* row = g_base + static_cast<size_t>(y) * kTexture * 4;
     const uint32_t* letters = g_bits + static_cast<size_t>(y) * kTexture;
@@ -1030,6 +1037,14 @@ void Raster(const Look& look) {
   ++g_rasters;
   const double ms = (NowSeconds() - start) * 1000.0;
   if (ms > g_raster_ms) g_raster_ms = ms;
+  if (g_draw_logs < kMaxDrawLogs) {
+    ++g_draw_logs;
+    ModLog("spell book   : a new picture of the book, %d by %d px, took %.2f "
+           "ms: the text of GDI %.2f, the %s %.2f, the cells %.2f and the ink "
+           "%.2f ms", w, h, ms, (t_text - start) * 1000.0,
+           g_page ? "page" : "panel", (t_page - t_text) * 1000.0,
+           (t_cells - t_page) * 1000.0, ms - (t_cells - start) * 1000.0);
+  }
   if (g_saved < g_save) {
     ++g_saved;
     EyeCaptureSaveUi("book", ControllersFrameCount(), 1, g_base, kTexture * 4,

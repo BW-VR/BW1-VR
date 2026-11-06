@@ -236,7 +236,7 @@ move the camera in steps.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Card look | Scroll | Key `hint_card_style`, a value. 1 Scroll: each hint card is a parchment scroll with dark letters, and the button word is on a wax seal. The spell book is a page of the same parchment, and each item of the ring is a wax seal. 0 Plain: dark cards with white letters (`controller-hints.md`, 9.11, `miracles.md`, "The spell book", and `controllers.md`, 10.4). |
+| Card look | Scroll | Key `hint_card_style`, a value. 1 Scroll: each hint card is a parchment scroll with dark letters, and the button word is on a wax seal. The spell book and the keyboard in the headset are pages of the same parchment, and each item of the ring is a wax seal. 0 Plain: dark cards with white letters (`controller-hints.md`, 9.11, `miracles.md`, "The spell book", `controllers.md`, 10.4, and `ui-layer.md`, section 21). |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |
 | Trail for gestures | on | Key `gesture_trail`. While you hold the draw button and draw a gesture, a gold ribbon follows the tip of the index finger. It fades after 1.5 s and goes out when the button goes up (`miracles.md`, "The trail at the fingertip"). |
 | Glow on the rays | on | Key `ray_glow`. The ray of the menu, the tether of the far grab and the arc of the teleport get a soft glow and a light that runs along them from the hand (`hand-model.md`, "The glow ribbons"). |

@@ -406,21 +406,6 @@ that moves while the Hand takes it.
   `need_up`, and `far_claim` in `StepGrip`. A headset log of the fault
   shows which: "grip : the grip opens during a bulk take" means the
   button went up.
-- **P22. A panel of places to go.** Page 2 of the ring sets a bookmark
-  (`mark_set`), goes to the next one (`mark_go`) and goes back
-  (`mark_back`), see `controllers.md`. Testers do not find a way to go to a
-  bookmark. Plan: one item of the ring opens a panel of buttons, and the
-  pointing hand presses them with the ray and the trigger, as on the
-  keyboard in the headset (`ui-layer.md`, section 21). The panel has:
-  - the places of the game: the Temple, the Creature, the next town and
-    the middle of the land,
-  - the 7 bookmarks of the game, each with Go, Set here, Follow and Remove
-    (`controls-audit.md`, item 1). A bookmark that is not set is dim,
-  - Back (Backspace), and a button that closes the panel.
-
-  A press of Go closes the panel. Set and Remove keep it open. The panel is
-  fixed in the room, as the menu panel is. The bookmark items of page 2 of
-  the ring give their slots to other items. A key keeps the old items.
 - **P23. The aim down from a chair: keep watch.** A seated player aims down
   less well than a standing player, because furniture can be in the way of
   the hand. Not planned. One idea: a launcher option that lets the grab
@@ -493,8 +478,6 @@ keeps the mod as it is.
   in a frame with no scene, so the headset shows a still view. Show
   "Saving..." on the hint card. Find first whether the card layer still
   goes to the headset while the game thread saves.
-- **F13. A snapshot for a bug report:** an item of the ring saves the eye
-  pictures and a copy of the log in `bwvr\captures`.
 - **F15. The hands in the cut scene window.** While a cut scene plays in
   the window, the mod draws no hands and no ray (`cutscene-window.md`,
   section 7), and the trigger clicks at the place of the mouse pointer,

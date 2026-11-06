@@ -1706,6 +1706,8 @@ key buffer of the game.
 | `mark_set` | Set a bookmark here | Ctrl and the number of the first bookmark that is not set. With all 7 set: the one after the last one that the ring set (`MarkToSet`) |
 | `mark_go` | Go to the next bookmark | Ctrl and Tab |
 | `mark_back` | Go back | Backspace |
+| `places` | Places and bookmarks | Opens the panel of places (`ui-layer.md`, "The panel of places"): the Temple, the Creature, the next town, the middle of the land, and Go, Set here, Follow and Remove for each of the 7 bookmarks. Not in the Temple. An empty slot with `places_panel=0` |
+| `snapshot` | A snapshot for a report | Saves the eye pictures of the next frame and a copy of the log in a folder of its own (10.9). An empty slot with `snapshot_item=0` |
 | `pause` | Pause the game | P |
 | `slower`, `faster` | Make the game slower, faster | Alt and 1, Alt and 2 |
 | `help` | Help of the game | The key of action `0x00` (F1) |
@@ -1724,11 +1726,16 @@ The rings by default, from the top and clockwise:
 | Ring | Items |
 | --- | --- |
 | Page 1 (`radial_menu_items`) | `temple`, `creature`, `town`, `leash_learning`, `more`, `leash_compassion`, `leash_aggression`, `enter` |
-| Page 2 (`radial_menu_items2`) | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `names`, `save` |
+| Page 2 (`radial_menu_items2`) | `places`, `snapshot`, `none`, `pause`, `more`, `help`, `names`, `save` |
+| Page 2 with `places_panel=0` | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `names`, `save` |
 | In the Temple (`radial_menu_items_temple`) | `hall`, `room_creature`, `room_challenge`, `room_save`, `leave`, `room_options`, `room_library`, `none` |
 
 The order is how often a player needs an item: the Temple at the top, the
-moves of the view on the right, the leashes at the bottom. The ring of the
+moves of the view on the right, the leashes at the bottom. On page 2 the
+panel of places is at the top, because players did not find the bookmarks
+on the ring. The panel has all the moves to a place and each function of a
+bookmark, so page 2 needs no bookmark item. Slot 2 of page 2 is free for a
+next item. The ring of the
 Temple shows by itself while the player is in the Temple (`GGame + 0x205A28`).
 
 **An item that cannot act now is dim,** and the card in the middle says why:
@@ -1846,7 +1853,10 @@ first time.
 | `radial_menu_size_pct` | 100 | The size of the ring, 50 to 200 |
 | `radial_menu_creature` | 1 | 1 the item `creature` is one teleport in the God view, 0 it is the key of the game |
 | `hint_card_style` | 1 | The key of the hint cards (`controller-hints.md`, 9.5). 1 each item is a wax seal and the card in the middle is a parchment scroll. 0 dark round boxes with white letters (10.4). The launcher row "Card look" |
+| `places_panel` | 1 | 1 page 2 as made has the item `places`, which opens the panel of places. 0 page 2 as made has `mark_set`, `mark_go` and `mark_back`, and the word `places` is an empty slot |
+| `snapshot_item` | 1 | 1 the item `snapshot` saves a snapshot for a report (10.9). 0 the word `snapshot` is an empty slot |
 | `radial_test_save` | 0 | A test key: the mod saves the first N pictures of the ring as `bwvr-ring-NNNNN.bmp` |
+| `snapshot_test_dir` | | A test key: the snapshots go into this folder, and not into `bwvr\captures` of the game folder |
 | `debug_menu` | 0 | 1 puts the item `debug` on the ring (10.8). The launcher row "Debug menu" in the group "Testing" |
 
 **The test keys.** With `test_keys=1`, Ctrl and the Menu key change
@@ -1982,9 +1992,10 @@ The code is `debug_menu.cpp` (the table of the switches), `debug_menu_math.h`
 **The place of the item.** A page of the ini that has the word `debug`
 holds it. Else the last page of the ring gets it: its first empty slot, or
 on a full page slot 5 (from 0 at the top and clockwise: the slot left of the
-bottom, `DebugSlot`). Page 2 as made is full, so `debug` takes the place of
-`help` there. The ring of the Temple has it in its empty slot 7. The log
-names the item that gives its slot.
+bottom, `DebugSlot`). Page 2 as made has `debug` in its empty slot 2. With
+`places_panel=0` page 2 is full, so `debug` takes the place of `help`
+there. The ring of the Temple has it in its empty slot 7. The log names the
+item that gives its slot.
 
 **The pages.** A link item goes to its page after 0.45 s with the hand on
 it, or at once with the trigger, as `More` does. A release on a link chooses
@@ -2048,10 +2059,47 @@ with Vulkan): Y and four steps of the left hand go through `More`, `debug`
 and the group Render to "One walk", and the release turns one walk off. The
 next press of Y opens the ring on the page Render again, and "Foveation"
 goes on. `radial_test_save` saves each picture of the ring. With
-`debug_menu=0` page 2 has `help` in slot 5, and no page has `debug`.
+`debug_menu=0` page 2 has `help` in slot 5, and no page has `debug`. These
+runs had the page 2 of `places_panel=0`.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
+
+### 10.9 The snapshot
+
+A player in the headset who sees a fault has no keyboard for F12, and does
+not know where the log is. The item `snapshot` of the ring saves what a
+report needs in one folder. The code is `snapshot.cpp`.
+
+- **The pictures.** The choice asks the eye capture (`eye_capture.cpp`,
+  `EyeCaptureArmNext`) for the next stereo frame, as F12 does. That frame
+  writes its pictures beside `runblack.exe`: the eyes of the frame, the
+  images of the renderer Vulkan, and in a session the images of the eye
+  swapchains (`backend.md`, the key F12).
+- **The folder.** 1 s later a thread of its own moves each picture of that
+  frame into `bwvr\captures\snapshot-YYYYMMDD-HHMMSS` of the game folder.
+  It writes each one as a PNG of 24 bits with the Windows Imaging Component,
+  and it deletes the BMP. The PNG has no alpha, because the alpha of some
+  eye pictures is 0. A picture that WIC cannot write goes into the folder as
+  a BMP. The picture `before` (the target before the eye passes) is not the
+  view, so it stays where it is. The name of a file is the kind of the
+  picture, for example `vk-left.png` or `xr-right.png`.
+- **The log.** Then the thread copies `bwvr.log` into the folder. Its last
+  line names the pictures. The game thread does no file work, so no frame
+  waits for the disk.
+- **The card.** The ring stays after the choice, and its card says "It
+  saves the pictures". When the folder is ready, the hand of the ring gets
+  the pulse `activate`, and the card says "Saved in bwvr\captures" for
+  1.8 s. A save that failed gives the pulse `refused` and the note "The save
+  failed". While a snapshot saves, the item is dim.
+
+The log has the tag `snapshot`:
+
+```
+snapshot     : the player asked for a snapshot, frame N. The next frame saves the eye pictures
+snapshot     : 2 pictures as PNG and 0 as BMP in <folder> (0 could not move). The copy of the log ends with this line
+snapshot     : saved, asked at frame N: the pictures of stereo frame M (2 as PNG, 0 as BMP) and the log in <folder>, in T ms on a thread of its own
+```
 
 ## 11. The Temple
 

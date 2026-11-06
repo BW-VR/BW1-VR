@@ -44,6 +44,15 @@
 //   radial_menu_items          the 8 items of the first page, from the top
 //                              and clockwise, with commas
 //   radial_menu_items2         the second page. "more" changes the page
+//   places_panel=1             1 the item "places" opens the panel of
+//                              places and bookmarks (places_panel.cpp), and
+//                              page 2 as made has it in place of the three
+//                              bookmark items. 0 page 2 has mark_set,
+//                              mark_go and mark_back, and the word "places"
+//                              is an empty slot
+//   snapshot_item=1            1 the item "snapshot" saves the eye pictures
+//                              and a copy of the log for a report
+//                              (snapshot.cpp). 0 the word is an empty slot
 //   radial_menu_items_temple   the ring in the Temple
 //   radial_menu_reach_cm=5     how far the hand moves to pick an item
 //   radial_menu_size_pct=100   the size of the ring, 50 to 200
@@ -83,8 +92,10 @@
 #include "debug_menu_math.h"
 #include "haptics.h"
 #include "hint_card_math.h"
+#include "places_panel.h"
 #include "radial_menu.h"
 #include "radial_menu_math.h"
+#include "snapshot.h"
 #include "tabletop.h"
 
 extern void ModLog(const char* format, ...);
@@ -119,6 +130,8 @@ bool g_creature_teleport = true;
 bool g_test_keys = false;
 int g_save = 0;
 bool g_style = true;  // hint_card_style of bwvr.ini: the scroll look
+bool g_places = true;    // places_panel
+bool g_snapshot = true;  // snapshot_item
 int g_items[kPages][kSlots];
 int g_pages = 1;
 int g_temple_items[kPages][kSlots];
@@ -294,6 +307,16 @@ void ReadPage(const char* key, const char* fallback, int out[kSlots]) {
            "first one is \"%s\"). Each such slot is empty", key, bad,
            bad == 1 ? "" : "s", unknown);
   }
+  // An item whose key is 0 is an empty slot.
+  for (int i = 0; i < kSlots; ++i) {
+    if ((out[i] == kItemPlaces && !g_places) ||
+        (out[i] == kItemSnapshot && !g_snapshot)) {
+      ModLog("ring         : %s: the item \"%s\" is an empty slot, because "
+             "%s=0", key, kItemInfo[out[i]].id,
+             out[i] == kItemPlaces ? "places_panel" : "snapshot_item");
+      out[i] = kItemNone;
+    }
+  }
 }
 
 // The stick can drive the ring: radial_menu_stick is 1, and the layout of the
@@ -332,6 +355,8 @@ void ReadSettings() {
   g_test_keys = IniKey("test_keys", 0) != 0;
   g_save = IniKey("radial_test_save", 0);
   g_style = IniKey("hint_card_style", 1) != 0;
+  g_places = PlacesPanelOn();
+  g_snapshot = SnapshotOn();
   g_settings.hand_in = g_reach_cm * 0.01f;
   g_settings.hand_out = g_reach_cm * 0.007f;
   ApplyWay();
@@ -340,7 +365,8 @@ void ReadSettings() {
     return;
   }
   ReadPage("radial_menu_items", kDefaultPage1, g_items[0]);
-  ReadPage("radial_menu_items2", kDefaultPage2, g_items[1]);
+  ReadPage("radial_menu_items2", g_places ? kDefaultPage2 : kDefaultPage2Marks,
+           g_items[1]);
   ReadPage("radial_menu_items_temple", kDefaultTemple, g_temple_items[0]);
   for (int i = 0; i < kSlots; ++i) g_temple_items[1][i] = kItemNone;
   g_pages = PageHasItems(g_items[1]) ? 2 : 1;
@@ -386,6 +412,15 @@ void ReadSettings() {
          g_style ? "each item is a wax seal, and the card in the middle is a "
                    "parchment scroll"
                  : "each item is a dark round box with white letters");
+  ModLog("ring         : places_panel=%d: %s. snapshot_item=%d: %s",
+         g_places ? 1 : 0,
+         g_places ? "the item \"places\" opens the panel of places and "
+                    "bookmarks"
+                  : "page 2 as made has the bookmark items of the ring",
+         g_snapshot ? 1 : 0,
+         g_snapshot ? "the item \"snapshot\" saves the eye pictures and the "
+                      "log for a report"
+                    : "no snapshot item");
   ModLog("ring         : page 1: %s", a);
   if (g_pages > 1) ModLog("ring         : page 2: %s", b);
   ModLog("ring         : in the Temple: %s", c);
@@ -788,6 +823,11 @@ ItemNow StateOf(int item, const Facts& f) {
   if (item == kItemMore || item == kItemDebug || item == kItemBack) {
     return now;
   }
+  // The snapshot needs no game: it saves what the headset shows.
+  if (item == kItemSnapshot) {
+    if (SnapshotBusy()) no(L"A snapshot saves now", "a snapshot saves now");
+    return now;
+  }
   if (f.game == nullptr) {
     no(L"No game runs now", "no game runs");
     return now;
@@ -845,6 +885,12 @@ ItemNow StateOf(int item, const Facts& f) {
         bool any = false;
         for (int i = 0; i < kMarks; ++i) any = any || f.mark[i];
         if (!any) no(L"No bookmark is set", "no bookmark is set");
+      }
+      break;
+    case kItemPlaces:
+      if (f.temple) {
+        no(L"Not in the Temple", "the player is in the Temple, where the "
+                                 "bookmarks do nothing");
       }
       break;
     case kItemPause:
@@ -963,6 +1009,25 @@ bool Choose(int item, const Facts& f, const ItemNow& now) {
       mods = kModCtrl;
       break;
     }
+    case kHowPanel:
+      if (!PlacesPanelOpenFromRing()) {
+        ++g_refusals;
+        ModLog("ring         : the player chose \"places\", and the panel "
+               "does not open: the head has no pose yet, frame %llu", frame);
+        return false;
+      }
+      ++g_choices;
+      ModLog("ring         : the player chose \"places\": the panel of places "
+             "opens, frame %llu", frame);
+      return true;
+    case kHowSnapshot:
+      if (!SnapshotStart(frame)) {
+        ++g_refusals;
+        return false;
+      }
+      ++g_choices;
+      ModLog("ring         : the player chose \"snapshot\", frame %llu", frame);
+      return true;
     default:
       return false;
   }
@@ -1995,6 +2060,9 @@ float g_fade = 0.0f;
 double g_show_until = 0.0;       // a notice stays until then
 bool g_notice = false;
 Look g_notice_look;
+// The notice of the snapshot: it stays while the snapshot saves, and then it
+// says how the save went.
+bool g_snapshot_notice = false;
 bool g_was_temple = false;
 // A button that is down when the hand wakes is not a press.
 bool g_button_seen_up = false;
@@ -2081,7 +2149,52 @@ void RadialMenuWayChange(const char* by) {
 
 bool RadialMenuOpen() { return g_state_ready && g_state.open != kClosed; }
 
-bool RadialMenuShows() { return RadialMenuOpen() || g_fade > 0.0f; }
+bool RadialMenuShows() {
+  return RadialMenuOpen() || g_fade > 0.0f || PlacesPanelOpen();
+}
+
+bool RadialMenuItemCan(int item, const wchar_t** note) {
+  ReadSettings();
+  Facts f;
+  ReadFacts(&f);
+  const ItemNow now = StateOf(item, f);
+  if (note != nullptr) *note = now.note;
+  return now.can;
+}
+
+bool RadialMenuItemAct(int item) {
+  ReadSettings();
+  Facts f;
+  ReadFacts(&f);
+  const ItemNow now = StateOf(item, f);
+  return Choose(item, f, now);
+}
+
+void RadialMenuQueueKey(int key, int mods) {
+  QueueKey(key, mods);
+  ModLog("ring         : the panel of places: the key %s%s, frame %llu",
+         ModsName(mods), KeyName(key), ControllersFrameCount());
+}
+
+bool RadialMenuMarks(bool set[kMarks], const wchar_t** note) {
+  Facts f;
+  const bool have = ReadFacts(&f);
+  for (int i = 0; i < kMarks; ++i) set[i] = have && f.mark[i];
+  const wchar_t* why = nullptr;
+  if (!have) {
+    why = L"No game runs now";
+  } else if (f.keys_off) {
+    why = L"The game takes no keys now";
+  } else if (f.cutscene) {
+    why = L"Not in a cut scene";
+  } else if (f.temple) {
+    why = L"Not in the Temple";
+  } else if (!f.marks_on || !f.moves_on || !f.jumps_on) {
+    why = L"The game has this off now";
+  }
+  if (note != nullptr) *note = why != nullptr ? why : L"";
+  return why == nullptr;
+}
 
 int RadialMenuHintMode() {
   ReadSettings();
@@ -2291,6 +2404,17 @@ void RadialMenuFrame() {
       g_return_until = IsSwitchItem(item) ? now + kReturnSeconds : 0.0;
       g_return_page = ev.chosen_page;
       g_return_temple = temple;
+      // THE SNAPSHOT. The ring stays, and its card says that the pictures
+      // save. SnapshotFrame below changes the note when the save is over.
+      if (item == kItemSnapshot) {
+        g_notice = true;
+        g_snapshot_notice = true;
+        g_show_until = now + kNoticeSeconds;
+        BuildLook(items, ev.chosen_page, ev.chosen, facts, &g_notice_look);
+        for (int i = 0; i < kSlots; ++i) g_notice_look.dim[i] = true;
+        wcsncpy_s(g_notice_look.name, L"Snapshot", _TRUNCATE);
+        wcsncpy_s(g_notice_look.note, L"It saves the pictures", _TRUNCATE);
+      }
     } else {
       // The ring stays for a moment and says why.
       HapticsPulseHands(1, haptics_math::kRefused);
@@ -2310,6 +2434,22 @@ void RadialMenuFrame() {
              in.can_open ? "" : ": ", in.can_open ? "" : why, frame);
     }
   }
+
+  // THE SNAPSHOT. A pulse when its files are saved, and the note on the
+  // card. A ring that opens over the notice takes the place of the notice.
+  const int saved = SnapshotFrame();
+  if (saved != 0) {
+    HapticsPulseHands(1, saved > 0 ? haptics_math::kActivate
+                                   : haptics_math::kRefused);
+    if (g_snapshot_notice && g_notice && g_state.open == kClosed) {
+      g_show_until = now + kNoticeSeconds;
+      wcsncpy_s(g_notice_look.note, SnapshotNote(), _TRUNCATE);
+    }
+    g_snapshot_notice = false;
+  } else if (g_snapshot_notice && g_notice && SnapshotBusy()) {
+    g_show_until = now + kNoticeSeconds;
+  }
+  if (g_state.open != kClosed) g_snapshot_notice = false;
 
   // The picture of this frame.
   const bool open = g_state.open != kClosed;

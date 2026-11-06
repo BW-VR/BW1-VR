@@ -69,6 +69,19 @@ inline void RingChecks() {
     bad = ParseItems(kDefaultPage2, items, unknown, sizeof(unknown));
     Check(bad == 0 && items[4] == kItemMore,
           "the second page is known too, with More in the same slot", bad, 0);
+    Check(items[0] == kItemPlaces && items[1] == kItemSnapshot &&
+              items[2] == kItemNone && items[3] == kItemPause,
+          "page 2 has the panel of places at the top, the snapshot beside it "
+          "and a free slot", items[0], kItemPlaces);
+    bad = ParseItems(kDefaultPage2Marks, items, unknown, sizeof(unknown));
+    Check(bad == 0 && items[0] == kItemMarkSet && items[1] == kItemMarkGo &&
+              items[2] == kItemMarkBack && items[4] == kItemMore,
+          "page 2 of places_panel=0 has the three bookmark items", bad, 0);
+    Check(kItemInfo[kItemPlaces].how == kHowPanel &&
+              kItemInfo[kItemSnapshot].how == kHowSnapshot &&
+              !IsLinkItem(kItemPlaces) && !IsLinkItem(kItemSnapshot),
+          "the items places and snapshot act on a release, as other items do",
+          1, 1);
     bad = ParseItems(kDefaultTemple, items, unknown, sizeof(unknown));
     Check(bad == 0 && items[4] == kItemLeave && items[7] == kItemNone,
           "the ring of the Temple has the way out at the bottom", bad, 0);
@@ -209,7 +222,8 @@ inline void RingChecks() {
   int pages[kPages][kSlots];
   char unknown[16];
   ParseItems(kDefaultPage1, pages[0], unknown, sizeof(unknown));
-  ParseItems(kDefaultPage2, pages[1], unknown, sizeof(unknown));
+  // A page 2 with no empty slot (places_panel=0).
+  ParseItems(kDefaultPage2Marks, pages[1], unknown, sizeof(unknown));
   const Settings set = DefaultSettings();
   {
     State st;

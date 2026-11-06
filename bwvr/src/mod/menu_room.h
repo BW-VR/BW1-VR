@@ -28,6 +28,9 @@ bool MenuRoomEnabled();
 // stereo.cpp, once a frame, beside UiPanelHead: the head center and the
 // orientation of the head in the LOCAL space.
 void MenuRoomHead(const float center[3], const float orientation[4]);
+// The head of the last MenuRoomHead. The panel of places (places_panel.cpp)
+// opens in front of it. False before the first head.
+bool MenuRoomHeadPose(float center[3], float orientation[4]);
 // Once a stereo frame, before the eye passes (UiPanelBeginFrame). It latches
 // whether the menus of this frame go to the panel in the room.
 bool MenuRoomBeginFrame(bool to_headset, bool projection, uint64_t frame);

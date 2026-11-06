@@ -88,6 +88,8 @@ add_library(bwvr_mod SHARED
     miracle.cpp
     village.cpp
     radial_menu.cpp
+    places_panel.cpp
+    snapshot.cpp
     spell_book.cpp
     book_bubble.cpp
     gesture_panel.cpp
@@ -124,6 +126,10 @@ set_target_properties(bwvr_mod PROPERTIES
 )
 
 target_link_libraries(bwvr_mod PRIVATE minhook bwvr_vr d3d9 d3d11)
+# The snapshot (snapshot.cpp) writes PNG files with the Windows Imaging
+# Component. It calls only COM, so the mod imports no function of
+# windowscodecs.dll: the library gives the GUIDs.
+target_link_libraries(bwvr_mod PRIVATE ole32 windowscodecs)
 
 # Windows loads d3d11.dll and dxgi.dll at the first call of the mod, and not
 # at the start of the game. So backend=vulkan with vulkan_only=1 loads no

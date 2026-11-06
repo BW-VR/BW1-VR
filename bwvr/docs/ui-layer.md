@@ -43,6 +43,9 @@ Marks, as in `tabletop.md`:
   are on a panel that is fixed in the room, and the ray of the controller
   points on it (section 20). While a text box has the focus, a keyboard
   shows below that panel (section 21).
+- The item `places` of the ring opens a panel of the places of the game and
+  its 7 bookmarks in front of the player, fixed in the room. The ray and
+  the trigger press its buttons (section 22).
 - With `ui_panel=1` the pointer on the panel is not built (section 5). The
   menus draw on the panel at their own pixels, but the pointer still comes
   from the eye view.
@@ -2090,3 +2093,117 @@ one for Shift off. A new picture of the card copies the box of each key
 whose look changed, and draws only a key that has no copy yet. The card
 needs two pictures of 1.5 MB (the page and the card) and at most 240 copies
 of about 26 KB.
+
+## 22. The panel of places
+
+The item `places` of the ring (`controllers.md`, section 10) opens a page
+of buttons for the places of the game and its 7 bookmarks. The ray and the
+trigger of the pointing hand press its buttons, as on the keyboard in the
+headset (section 21). The code is in `places_panel.cpp` and
+`places_panel_math.h`.
+
+### 22.1 What the panel has
+
+| Row | Buttons | What a press does |
+| --- | --- | --- |
+| The places | Temple, Creature, Town, Land | The items `temple`, `creature`, `town` and `land` of the ring: the Temple key two times, one teleport to the Creature in the God view, Tab, and the key of the whole land |
+| Bookmarks 1 to 7 | A wax seal with the number, then Go, Set here, Follow, Remove | The key of the number with no modifier, with Ctrl, with Shift, and with Ctrl and Shift (`controls-audit.md`, section 3) |
+| The bottom row | Back, the note, Close | Back is the item `mark_back` of the ring (Backspace). Close closes the panel |
+
+- **The keys go the way of the ring.** Each key goes into the key buffer of
+  the game at the next pass of the pump (`controllers.md`, 10.3). So each
+  gate of the game holds: a dialog box, a cut scene, the tutorial.
+- **A button that cannot act now is dim.** Go, Follow and Remove of a
+  bookmark that is not set are dim. All the bookmark buttons are dim while
+  the game takes no bookmark key (`0x009CD384`, the two flags of the control
+  map). A place is dim for the reasons of its item on the ring, for example
+  "You have no Creature". The seal of a bookmark that is not set is pale.
+- **The note** between Back and Close says what the button under the ray
+  does ("Set bookmark 3 at the Hand"), or why it is dim ("Bookmark 3 is not
+  set"). After a press it says what the press did for 2 s.
+- **What closes the panel.** Go, Follow, the places and Back move the view,
+  so they close the panel. Set here and Remove keep it open, so the player
+  sees the seal change. Close, the ring, the spell book, a dialog box, a cut
+  scene and the Temple also close it.
+
+### 22.2 The place
+
+The panel opens in the frame of the choice on the ring, in front of the
+head of that frame (`places_math::PlaceAt`):
+
+- The anchor is the head of the frame and its yaw, as for the menu panel
+  (20.3). The middle of the panel is 1 m from the head, 12 degrees below eye
+  level, and the panel turns to face the head. It has no roll.
+- It is 56 by 56 cm, 31 degrees at 1 m: from about 3 degrees above eye
+  level to 27 degrees below it. A button is 11 by 4 cm, about the size of a
+  key of the keyboard.
+- After that the panel stays at its place in the room. The player moves
+  and the panel does not. A recenter puts it in front of the head again.
+
+Why there. The God view has no menu panel in the room, so the panel needs
+a place of its own. 1 m is out of the reach of the hand, so the ray, and not
+a touch, presses a button. The panel is a quad layer over the world, and a
+quad layer covers each thing of the eye pictures behind it, also the hand.
+A hand that points at the panel is lower than its bottom edge, so the panel
+does not cover that hand.
+
+### 22.3 The ray and the trigger
+
+- The aim ray of the pointing hand shows while the panel is open
+  (`ControllersMenuRay`). It ends at the panel, or 2 m from the hand when
+  it is not on the panel. The hand has the pose of a pointing finger.
+- The button under the ray is gold, and the hand gets a light pulse at each
+  new button (8 ms at 0.1), as on the keyboard.
+- A pull of the trigger past 60 percent presses the button under the ray,
+  with a pulse of 20 ms at 0.3 and a short flash of the button. The trigger
+  must go below 40 percent before the next press. A pull that starts off
+  the buttons presses nothing. A press of a dim button gives the pulse
+  `refused`.
+- While the panel is open, the trigger belongs to the panel, and no press
+  goes to the game (the pump of `controllers.cpp`). After a press that
+  closed the panel, the trigger stays with the panel until it goes up. So
+  the press that closed the panel is no click in the game.
+
+### 22.4 The look
+
+The look follows `hint_card_style`, as the keyboard does (21.3).
+
+- With 1 the panel is a page of the parchment of the cards (`card_scroll.h`)
+  with a torn edge. The title "Places" is in Alegreya Bold with a capital of
+  38 px, and the header "Bookmarks" in Alegreya SC. Each button is a key of
+  ink with its word in dark ink (a capital of 26 px). The button under the
+  ray has a gold face and a gold rim, and the pressed button is bright
+  yellow gold for 120 ms. A dim button and the pale seal go 65 percent of
+  the way back to the paper. Each bookmark has a red wax seal with its
+  number in the digits of the keyboard (Palatino Linotype).
+- With 0 the panel is dark and opaque, with grey buttons in Segoe UI: gold
+  under the ray, pale gold for a press, dark grey for a dim button.
+
+**The bake.** The page with the title and the header is drawn one time. A
+button in each look (plain, under the ray, pressed, dim) and a seal in each
+look (set, not set) are drawn the first time that they show, and the mod
+keeps a copy of the box. A new picture copies the box of each part whose
+look changed. The note is drawn again each time that it changes.
+
+The panel uses the quad layer of the ring (`kCardRing`), 1024 by 1024
+pixels, as the ring does. The ring and the panel never show at one time.
+
+### 22.5 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `places_panel` | 1 | 1: page 2 of the ring as made has the item `places`, and it opens the panel. 0: page 2 has `mark_set`, `mark_go` and `mark_back`, and the word `places` is an empty slot |
+| `hint_card_style` | 1 | 1: the panel is a page of parchment. 0: the dark panel |
+| `places_panel_test_save` | 0 | Test key. N saves the first N new pictures of the panel as `bwvr-places-FFFFF.bmp` over a checkerboard (FFFFF is the frame) |
+| `places_test_buttons` | | Test key. The buttons for the word `aimplaces` of the scripted controller, in order: `temple`, `creature`, `town`, `land`, `back`, `close`, and `go`, `set`, `follow`, `remove` with the number, for example `set3,land,go3` |
+
+The log has the tag `places`:
+
+```
+places       : the panel opens, 0.56 by 0.56 m, its middle at x y z m, the head at x y z m with a yaw of Y degrees, frame N
+places       : the ray is on set 3, frame N
+places       : the trigger presses set 3, frame N
+ring         : the panel of places: the key Ctrl and 3, frame N
+places       : the trigger presses go 3, and it does not act: Bookmark 3 is not set, frame N
+places       : the panel closes: the player pressed land, frame N
+```

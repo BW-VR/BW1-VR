@@ -240,6 +240,13 @@ void MenuRoomHead(const float center[3], const float orientation[4]) {
   g_have_head = true;
 }
 
+bool MenuRoomHeadPose(float center[3], float orientation[4]) {
+  if (!g_have_head) return false;
+  for (int i = 0; i < 3; ++i) center[i] = g_head[i];
+  for (int i = 0; i < 4; ++i) orientation[i] = g_head_q[i];
+  return true;
+}
+
 bool MenuRoomBeginFrame(bool to_headset, bool projection, uint64_t frame) {
   g_frame_on = false;
   g_flat_on = false;

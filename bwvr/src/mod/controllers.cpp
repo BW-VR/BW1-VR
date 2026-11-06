@@ -64,6 +64,7 @@
 #include "menu_room_math.h"
 #include "miracle.h"
 #include "note_depth.h"
+#include "places_panel.h"
 #include "radial_menu.h"
 #include "spell_book.h"
 #include "gesture_panel.h"
@@ -302,6 +303,9 @@ enum FakeInput {
   // fake_controller_left_rots: the palm that turns up (spell_book_palm,
   // gesture_panel).
   kLRot,
+  // The panel of places: the aim of the right hand turns to the middle of
+  // the next button of places_test_buttons (places_panel.cpp).
+  kAimPlaces,
   kInputCount
 };
 
@@ -316,7 +320,7 @@ const char* const kInputName[kInputCount] = {
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
-    "book",       "lrot"};
+    "book",       "lrot",       "aimplaces"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -992,6 +996,31 @@ void AimTemple() {
          g_aim_yaw, g_aim_pitch, g_frame);
 }
 
+// The word "aimplaces": the hand stays where it is, and its aim turns to the
+// middle of the next button of places_test_buttons on the open panel of
+// places. The panel and the aim point are in the LOCAL space: right is +X,
+// up is +Y, forward is -Z.
+void AimPlaces() {
+  float local[3];
+  if (!PlacesPanelTestTarget(local)) {
+    ModLog("controllers  : the word aimplaces: the panel of places is not "
+           "open, or places_test_buttons has no button, frame %llu", g_frame);
+    return;
+  }
+  const float* from = g_aim_p[g_left_handed ? 0 : 1];
+  const float d[3] = {local[0] - from[0], local[1] - from[1],
+                      -(local[2] - from[2])};
+  if (!controller_math::FakeAimAngles(d, &g_aim_yaw, &g_aim_pitch)) return;
+  float turn_yaw = 0.0f, turn_pitch = 0.0f;
+  AimTurnOfPointingHand(&turn_yaw, &turn_pitch);
+  g_aim_yaw -= turn_yaw;
+  g_aim_pitch -= turn_pitch;
+  g_aim_set = true;
+  ModLog("controllers  : the fake hand aims its ray at a button of the panel "
+         "of places: the pose has yaw %.2f, pitch %.2f degrees, at frame %llu",
+         g_aim_yaw, g_aim_pitch, g_frame);
+}
+
 void UpdateScript() {
   if (g_script_play < 0) {
     g_script_play = IniInt("fake_controller_play_frame", 0);
@@ -1086,6 +1115,7 @@ void UpdateScript() {
              "%llu", turn[0], turn[1], g_aim_yaw, g_aim_pitch, g_frame);
     }
     if (step.input == kAimTemple && t == step.start) AimTemple();
+    if (step.input == kAimPlaces && t == step.start) AimPlaces();
     if (step.input == kPull && t == step.start) {
       // 15 cm toward the head center, or back to where the hand was.
       float here[3];
@@ -1180,7 +1210,7 @@ void UpdateScript() {
         i == kTouchCreature || i == kRot || i == kAimFar || i == kPull ||
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
-        i == kMoveKey || i == kBook) {
+        i == kMoveKey || i == kBook || i == kAimPlaces) {
       continue;
     }
     if (i == kPose2) {
@@ -2977,13 +3007,18 @@ void PumpButtons(ULONGLONG now) {
   // the trigger is no command and makes no seed active: it goes to the game.
   const bool click_waits = TextClickFlag();
   const bool click_on = TextClickOn();
-  bool command_claim = false;
+  // THE PANEL OF PLACES (places_panel.cpp). While it is open, the trigger
+  // presses its buttons and does not reach the game.
+  const bool panel_claim = PlacesPanelHoldsTrigger();
+  bool command_claim = panel_claim;
   {
     const bool ok = usable && DirectHandNow() && g_pointer_owned &&
+                    !panel_claim &&
                     !g_swap_buttons && !GrabHeld() && !far_claim &&
                     !g_jump_control && !g_gesture_held && !TeleportAiming() &&
                     text_click_math::TriggerMayCommand(click_on, click_waits);
-    command_claim = CreatureCommandPumpTrigger(RawDown(kLeft), ok);
+    command_claim =
+        CreatureCommandPumpTrigger(RawDown(kLeft), ok) || panel_claim;
     // A SEED IN THE HAND. While the Hand carries a one-off seed, a press of
     // the trigger makes the seed active and does not reach the game
     // (miracle.cpp).
@@ -4079,6 +4114,7 @@ void ControllersFrame() {
   PollLayoutKeys();
   LatchEsc();
   RadialMenuFrame();
+  PlacesPanelFrame();
   SpellBookFrame();
   GesturePanelFrame();
 }
@@ -4268,6 +4304,18 @@ bool ControllersRingHand(RingHand* out) {
   out->squeeze = hand.squeeze;
   out->stick[0] = hand.stick[0];
   out->stick[1] = hand.stick[1];
+  return true;
+}
+
+bool ControllersPointingAim(float position[3], float orientation[4],
+                            float* trigger) {
+  if (!g_on || !g_installed || g_frame == 0) return false;
+  const int index = PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || !hand.aim_valid) return false;
+  for (int i = 0; i < 3; ++i) position[i] = g_aim_p[index][i];
+  for (int i = 0; i < 4; ++i) orientation[i] = g_aim_q[index][i];
+  *trigger = hand.trigger;
   return true;
 }
 
@@ -4649,7 +4697,13 @@ bool ControllersFarAllowed(const char** why) {
 // and a point kMenuRayMeters of the room along the aim. units is the world
 // units in a meter of the room. False when there is no ray to draw.
 bool ControllersMenuRay(float from[3], float to[3], float* units) {
-  if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn())) return false;
+  // The panel of places has the ray too: to the panel, or 2 m long when the
+  // ray is off the panel.
+  float panel_meters = 0.0f;
+  const bool panel = PlacesPanelRay(&panel_meters);
+  if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn() || panel)) {
+    return false;
+  }
   TeleportInput in;
   if (!ControllersTeleportInput(&in) || !in.have_aim) return false;
   // The ray ends where the cursor is in both eyes: at the depth of the menu,
@@ -4662,7 +4716,8 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
     *units = in.units_per_meter;
     return true;
   }
-  const float kMenuRayMeters = 2.0f;
+  const float kMenuRayMeters =
+      panel && panel_meters > 0.0f ? panel_meters : 2.0f;
   float a[3], b[3];
   for (int i = 0; i < 3; ++i) {
     a[i] = in.origin_m[i];
@@ -4977,6 +5032,7 @@ void ControllersReport() {
     g_dropped = g_forced_releases = 0;
   }
   RadialMenuReport();
+  PlacesPanelReport();
   SpellBookReport();
   GesturePanelReport();
   TempleReport();

@@ -16,9 +16,23 @@ void RadialMenuPump(unsigned long long now_ms);
 bool RadialMenuOpen();
 
 // True while the picture of the ring shows: the ring is open, it fades out,
-// or it shows a notice. The spell book (spell_book.cpp) shares the quad
-// layer of the ring, and it does not open while the ring shows.
+// or it shows a notice, or the panel of places is open (places_panel.cpp).
+// The spell book (spell_book.cpp) and the panel share the quad layer of the
+// ring, and the book does not open while the ring shows.
 bool RadialMenuShows();
+
+// THE PANEL OF PLACES (places_panel.cpp) uses the items of the ring and its
+// keys. An item is a radial_math::Item.
+//
+// Whether the item can act now, and the note of the card when it cannot.
+bool RadialMenuItemCan(int item, const wchar_t** note);
+// The item acts as a choice on the ring does. True when it acted.
+bool RadialMenuItemAct(int item);
+// A key into the key buffer of the game at the next pass of the pump.
+void RadialMenuQueueKey(int key, int mods);
+// Which of the 7 bookmarks of the game are set, and whether the game takes
+// the bookmark keys now. note gets the reason when it does not.
+bool RadialMenuMarks(bool set[7], const wchar_t** note);
 
 // For the hints: 0 the ring is off, 1 its button opens it, 2 only the stick
 // opens it.

@@ -263,3 +263,9 @@ struct RingHand {
   float head[3];      // the head center
 };
 bool ControllersRingHand(RingHand* out);
+
+// The aim ray of the pointing hand in this frame, in the LOCAL space (the
+// pose of UpdateAim), and the value of its trigger, 0 to 1. For the panel of
+// places (places_panel.cpp). False when the hand has no aim pose.
+bool ControllersPointingAim(float position[3], float orientation[4],
+                            float* trigger);

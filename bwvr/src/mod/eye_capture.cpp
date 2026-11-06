@@ -187,8 +187,27 @@ void EyeCaptureArmNow(uint64_t stereo_frame) {
   ModLog("eye capture  : armed for stereo frame %llu", stereo_frame);
 }
 
+// THE SNAPSHOT (snapshot.cpp) does not know the count of the stereo frames.
+// It asks for the next frame, and the first ask of a frame arms the frame
+// after it. EyeCaptureNextArmed gives that frame, or 0 until it is known.
+volatile LONG g_arm_next = 0;
+volatile LONG g_next_armed = 0;
+
+void EyeCaptureArmNext() {
+  InterlockedExchange(&g_next_armed, 0);
+  InterlockedExchange(&g_arm_next, 1);
+}
+
+uint64_t EyeCaptureNextArmed() {
+  return static_cast<uint64_t>(InterlockedCompareExchange(&g_next_armed, 0, 0));
+}
+
 bool EyeCaptureWanted(uint64_t stereo_frame) {
   if (!g_loaded) Load();
+  if (InterlockedExchange(&g_arm_next, 0) != 0) {
+    EyeCaptureArmNow(stereo_frame + 1);
+    InterlockedExchange(&g_next_armed, static_cast<LONG>(stereo_frame + 1));
+  }
   if (g_armed_frame != 0 && stereo_frame == g_armed_frame) return true;
   for (int i = 0; i < g_wanted_count; ++i) {
     if (g_wanted[i] == stereo_frame) return true;

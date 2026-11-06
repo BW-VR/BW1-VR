@@ -118,13 +118,13 @@ wins.
 | F2 | Asks "Are you sure you want to go to the Gods' Playground?", then goes there (single player) | Ring (ini), `playground` [R] |
 | P | Pause on and off (`PauseGame` `0x0054AE20`, single player) | Ring, `pause`, page 2 [R] |
 | Alt 1, Alt 2 | The game speed: half as fast (0.5 at the least), two times as fast (2.0 at the most). `GGame::SetSpeed` `0x005537F0` | Ring (ini), `slower`, `faster` [R] |
-| 1 to 7 | Go to the bookmark of that number (`fn_0043A070`) | Ring, `mark_go`: the next bookmark (Ctrl Tab). No way to a bookmark by its number |
-| Ctrl with 1 to 7 | Set the bookmark at the place of the Hand, or on the object under it (`fn_00439E50`) | Ring, `mark_set`, page 2: the first bookmark that is not set [R] |
-| Shift with 1 to 7 | Follow the object of the bookmark (`fn_0043A390`) | No way |
-| Ctrl Shift with 1 to 7 | Remove the bookmark | No way |
+| 1 to 7 | Go to the bookmark of that number (`fn_0043A070`) | The panel of places (ring, `places`, page 2): Go on the row of the bookmark. With `places_panel=0`, ring `mark_go`: the next bookmark (Ctrl Tab) |
+| Ctrl with 1 to 7 | Set the bookmark at the place of the Hand, or on the object under it (`fn_00439E50`) | The panel of places: Set here. With `places_panel=0`, ring `mark_set`: the first bookmark that is not set [R] |
+| Shift with 1 to 7 | Follow the object of the bookmark (`fn_0043A390`) | The panel of places: Follow |
+| Ctrl Shift with 1 to 7 | Remove the bookmark (`fn_00439D40`) | The panel of places: Remove |
 | Tab | Go to the next town of the player (`fn_0043AA60`) | Ring, `town` [R] |
 | Ctrl Tab, Shift Tab | Go to the next or the previous bookmark | Ring, `mark_go`, for the next one [R]. No way to the previous one |
-| Backspace | Go back to the place of before the last move to a bookmark | Ring, `mark_back`, page 2 [R] |
+| Backspace | Go back to the place of before the last move to a bookmark (`fn_0043A380`) | The panel of places: Back. With `places_panel=0`, ring `mark_back`, page 2 [R] |
 | R | Do the last miracle again (`fn_005D0410`). The readme: "same as using the repeat Gesture" | B and the gesture [D]. No key |
 | M | Start the choice of a miracle (`fn_005D03D0`). The readme: "same as using the Miracle Gesture" | B and the gesture [D]. No key |
 | Ctrl Alt T | Saves a snapshot of the Creature | No way. A small thing |
@@ -132,7 +132,11 @@ wins.
 | Ctrl Shift, held | The camera goes near the Hand (the readme) | Not needed |
 
 The bookmarks act only while `0x009CD384` is not 0 and the two flags of the
-control map are on. A bookmark does nothing in the Temple.
+control map are on. A bookmark does nothing in the Temple. `ProcessKey` reads
+the modifier word of the key buffer for the keys 1 to 7 [V]: Ctrl with no
+Alt sets, Shift follows, Ctrl and Shift remove, and no modifier goes. Go,
+Follow and Remove act only on a bookmark that is set (bit 0 of
+`0x00C58B34 + 0x24 * n`).
 
 No other code reads a key by its number. A scan of the code for the address
 of each byte of the key table found only: the modifier keys in
@@ -207,10 +211,8 @@ game with the cinema bars. The game takes no key in the Temple then
 These functions have no way with the controllers. A player needs the keyboard
 for each of them.
 
-1. **A bookmark by its number**, **follow a bookmark** (Shift and the
-   number), **remove a bookmark** (Ctrl Shift and the number), and **go to
-   the previous bookmark** (Shift Tab). The ring sets a bookmark, goes to the
-   next one and goes back.
+1. **Go to the previous bookmark** (Shift Tab). The panel of places has
+   each bookmark by its number, so this is a small thing.
 2. **Text:** the name of a save game, and the talk line of a multiplayer game.
    These need a keyboard. With the controllers a save has an empty message.
 3. **The snapshot of the Creature** (Ctrl Alt T).
@@ -237,7 +239,7 @@ and the stick for the ring and Y for Esc (`controllers.md`, 5.1).
 | The rooms | The ring of the Temple: `room_creature`, `room_challenge`, `room_save`, `room_options`, `room_library`, `hall`, `leave`. The Creature Room, the Challenge Room, the Save Game Room and the Library were chosen in runs [R]. The Options Room is the same call with a different room |
 | The Creature | `creature`. In the God view it is one teleport to the Creature, because the key of the game starts a follow camera |
 | The kind of the leash | `leash_learning`, `leash_compassion`, `leash_aggression` |
-| Bookmarks | `mark_set`, `mark_go`, `mark_back` on page 2. Follow and remove are not on the ring |
+| Bookmarks | `places` on page 2 opens the panel of places: Go, Set here, Follow and Remove for each of the 7 bookmarks, and Back. With `places_panel=0`: `mark_set`, `mark_go`, `mark_back` on page 2 |
 | The next town | `town` |
 | The whole land | `land`, by the ini. In the God view the view goes to the middle of the land at the scale of now |
 | Pause and speed | `pause` on page 2. `slower` and `faster` by the ini |

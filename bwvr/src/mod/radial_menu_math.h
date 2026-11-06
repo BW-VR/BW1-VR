@@ -77,6 +77,8 @@ enum Item {
   kItemMore,
   kItemDebug,
   kItemBack,
+  kItemPlaces,
+  kItemSnapshot,
   kItems
 };
 
@@ -108,6 +110,8 @@ enum How {
   kHowLeash,    // a kind of the leash: the action that steps to that kind
   kHowMarkSet,  // Ctrl and the number of a free bookmark
   kHowPage,     // the other page of the ring
+  kHowPanel,    // opens the panel of places (places_panel.cpp)
+  kHowSnapshot, // saves the eye pictures and the log (snapshot.cpp)
 };
 
 // The modifier word of the key buffer of the game.
@@ -166,6 +170,9 @@ const ItemInfo kItemInfo[kItems] = {
     {"more", L"More", L"More", kHowPage, 0, 0, 0},
     {"debug", L"Debug", L"The debug page", kHowPage, 0, 0, 0},
     {"back", L"Back", L"Back", kHowPage, 0, 0, 0},
+    {"places", L"Places", L"Places and bookmarks", kHowPanel, 0, 0, 0},
+    {"snapshot", L"Snapshot", L"A snapshot for a report", kHowSnapshot, 0,
+     0, 0},
 };
 
 // The rings as made. The order is how often a player needs an item, from the
@@ -173,7 +180,12 @@ const ItemInfo kItemInfo[kItems] = {
 const char* const kDefaultPage1 =
     "temple,creature,town,leash_learning,more,leash_compassion,"
     "leash_aggression,enter";
+// Page 2 with the panel of places (places_panel=1): the panel holds the
+// places and the bookmarks. Slot 2 is free.
 const char* const kDefaultPage2 =
+    "places,snapshot,none,pause,more,help,names,save";
+// Page 2 with places_panel=0: the bookmark items of the ring.
+const char* const kDefaultPage2Marks =
     "mark_set,mark_go,mark_back,pause,more,help,names,save";
 // In the Temple: the rooms and the way out.
 const char* const kDefaultTemple =

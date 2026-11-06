@@ -2026,16 +2026,28 @@ desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. Not built, open
 
-- **No run reaches the Creature at a render of 3600 by 2880.** In the test
-  save `temple`, the word `seek` puts the Hand's point on the body bone of
-  the Creature, but the draw offers no Creature near the Hand, and the pick
-  record stays empty. So `creature_recipe.ps1 -Kind state` presses the grip
-  with no target, and `-Kind open` starts no press of the open hand and arms
-  no panel. This is so with the renderer Vulkan and with Direct3D 9, and
-  with the head 25 degrees down. The Creature recipes of 2208 by 2208 had
-  the Creature as the target. The cause is not known. So the stroke with
-  the open hand (2.10) and the panel with no press (`ui-layer.md`, 13.2)
-  have the math tests and no run.
+- **No Creature recipe reaches the Creature with the profile of the game
+  folder.** The cause is the profile and the test save, not the render size,
+  the zoom or the points of the recipe:
+  - The test save `temple` was made with the profile of the old install. In
+    a run of it now, the game draws the shadow of the Creature at the door
+    of the Temple and no mesh (the eye pictures of a run with Direct3D 9).
+    Its body bone is there, but the draw never offers the Creature and the
+    game's own pick does not hit it, also with the Hand's pixel on the land
+    under it. So `-Kind state` presses the grip with no target.
+  - A new game with "Keep your old Creature" does not keep a Creature with
+    this profile: the game starts the first view of the land and a story,
+    and the player has no Creature. The click on that row works (a run
+    with a picture after each click on the rows of the start dialog).
+  - The zoom of the recipe (44.4 units a meter), the land under the
+    pointer and the points of the hand are the same as in the runs at 2208
+    by 2208 that had the Creature as the target.
+
+  So a run of the Creature needs a profile with a Creature that the game
+  keeps, and then a new test save `temple` (`make_test_save.ps1 -Name
+  temple`). The tools never change a profile, so this needs the owner. Until
+  then the stroke with the open hand (2.10) and the panel with no press
+  (`ui-layer.md`, 13.2) have only the math tests.
 
 - **A `OneOffSpellSeed`** gets a tap and no leash, as in the game.
 - **A stroke at 44 units a meter** with the fake hand gives the `stroke` ticks

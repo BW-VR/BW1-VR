@@ -66,7 +66,8 @@ inline const Setting kSettings[] = {
      "your headset asks for. The headset's own figure is read when the game "
      "runs, and shown beside the slider. Note that the mod renders a wider "
      "view than the headset needs, so 100% is a little softer than native and "
-     "about 115% matches it."},
+     "about 115% matches it. When a headset has too little memory, the game "
+     "starts with a lower value, and the row shows that size."},
     {kValues, "anisotropy", "Anisotropic filtering",
      "Off=1|2x=2|4x=4|8x=8|16x=16", 16,
      "Sharpens textures seen at a shallow angle, such as the ground. 16x is "

@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -52,6 +53,7 @@
 #include "picture_ring.h"
 #include "play_rules.h"
 #include "frame_defaults.h"
+#include "memory_guard.h"
 #include "pose_log.h"
 #include "remote_control.h"
 #include "steamvr_settings.h"
@@ -1722,6 +1724,37 @@ void TakeProfile(App* app, WineRuntime::Game* game) {
 // the launcher, each start saves the settings first. Then the keys of the
 // run, the live stream and the input channel in this process, and the game
 // in Wine.
+// THE LIMIT OF THE MEMORY (memory_guard.h, memory_guard=1 by default): at each Play, before the
+// size of the render goes to the game.
+void ApplyMemoryGuard(App* app) {
+  app->menu.SetScaleLimit(0);
+  if (app->ini.GetInt("bwvr", "memory_guard", 1) == 0) {
+    AppLog("memory guard : memory_guard=0. The render takes resolution_pct=%d", app->menu.ScalePct());
+    return;
+  }
+  const int available = memory_guard::AvailableMb(ReadTextFile("/proc/meminfo"));
+  if (available < 0) {
+    AppLog("memory guard : memory_guard=1, but /proc/meminfo has no MemAvailable, so the render "
+           "takes resolution_pct=%d", app->menu.ScalePct());
+    return;
+  }
+  const bool take = app->ini.GetInt("bwvr", "xr_compose_take", 0) != 0 &&
+                    app->ini.GetInt("bwvr", "xr_compose_direct", 0) != 0 &&
+                    !app->xr.RendererOnSecondQueue();
+  const memory_guard::Cost cost = take ? memory_guard::kComposeAtTake : memory_guard::kEyesInRing;
+  const int wanted = app->menu.ScalePct();
+  const int limit = memory_guard::LimitPct(wanted, cost, available, [app](int percent, int* w, int* h) {
+    app->menu.RenderSizeAt(percent, w, h);
+  });
+  int width = 0, height = 0;
+  app->menu.RenderSizeAt(limit, &width, &height);
+  AppLog("memory guard : memory_guard=1. %d MB are free, and a render of %d by %d needs about %d MB "
+         "with the eye pictures %s. resolution_pct=%d, and the render takes %d percent",
+         available, width, height, memory_guard::NeedMb(cost, width, height),
+         take ? "of the compose at the take" : "in the ring", wanted, limit);
+  if (limit < wanted) app->menu.SetScaleLimit(limit);
+}
+
 void Play(App* app, bool new_game) {
   const char* name = new_game ? "Play, new game" : "Play in VR";
   Save(app);
@@ -1769,6 +1802,7 @@ void Play(App* app, bool new_game) {
   if (!app->input_live.On()) app->input_live.Start(app->game.folder + "/bwvr-input.chan", 0);
   WineRuntime::Game game;
   game.new_game = new_game;
+  ApplyMemoryGuard(app);
   app->menu.RenderSize(&game.width, &game.height);
   TakeProfile(app, &game);
   // box64_strongmem (the row of the page Testing) and box64_env (bwvr.ini
@@ -2644,25 +2678,34 @@ void TakeDisplayRates(App* app) {
   }
 }
 
-// THE VALUES OF THE STEAM FRAME (frame_defaults.h, frame_defaults=1 by default): before the
-// Vulkan instance of the session, so that the driver gets tu_debug at this start too.
+// THE VALUES OF A HEADSET (frame_defaults.h, frame_defaults=1 and quest_defaults=1 by default):
+// before the Vulkan instance of the session, so that the driver gets tu_debug and the device gets
+// its queues at this start too.
 void RuntimeKnown(App* app, const std::string& runtime) {
-  if (!frame_defaults::IsFrameRuntime(runtime)) return;
-  if (app->ini.GetInt("bwvr", "frame_defaults", 1) == 0) {
-    AppLog("menu         : frame_defaults=0. The app adds no values of the Steam Frame");
+  char model[PROP_VALUE_MAX] = "";
+  __system_property_get("ro.product.model", model);
+  const bool frame = frame_defaults::IsFrameRuntime(runtime);
+  const bool quest = frame_defaults::IsQuest3(runtime, model);
+  if (!frame && !quest) return;
+  const char* const key = frame ? "frame_defaults" : "quest_defaults";
+  const char* const name = frame ? "the Steam Frame" : "a Quest 3";
+  if (app->ini.GetInt("bwvr", key, 1) == 0) {
+    AppLog("menu         : %s=0. The app adds no values of %s", key, name);
     return;
   }
-  const int added = frame_defaults::Seed(&app->ini);
+  const int added = frame ? frame_defaults::Seed(&app->ini, frame_defaults::kValues)
+                          : frame_defaults::Seed(&app->ini, frame_defaults::kQuestValues);
   if (added == 0) return;
   if (!WriteTextFile(app->game.ini_path, app->ini.Text())) {
-    AppLog("menu         : the values of the Steam Frame cannot go into %s, so they count only "
-           "for this start of the app", app->game.ini_path.c_str());
+    AppLog("menu         : the values of %s cannot go into %s, so they count only for this start "
+           "of the app", name, app->game.ini_path.c_str());
   }
   app->menu.Load(app->ini);
   const std::string tu_debug = app->ini.Get("bwvr", "tu_debug", "");
   if (!tu_debug.empty()) setenv("TU_DEBUG", tu_debug.c_str(), 1);
-  AppLog("menu         : frame_defaults=1. The runtime is %s, and %d values of the Steam Frame "
-         "went into bwvr.ini", runtime.c_str(), added);
+  app->xr.SetQueues(app->ini.GetInt("bwvr", "frame_loop_queues", 2));
+  AppLog("menu         : %s=1. The runtime is %s, the model is %s, and %d values of %s went into "
+         "bwvr.ini", key, runtime.c_str(), model, added, name);
 }
 
 void Load(App* app) {

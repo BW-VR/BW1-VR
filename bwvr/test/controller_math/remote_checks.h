@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "../../android/src/frame_defaults.h"
+#include "../../android/src/memory_guard.h"
 #include "../../src/common/settings_table.h"
 #include "../../src/mod/detail_scale_math.h"
 #include "../../src/mod/remote_math.h"
@@ -88,15 +89,82 @@ inline void FrameDefaultsChecks() {
   Check(!fd::IsFrameRuntime("Oculus"), "another runtime keeps the defaults of the keys", 0, 0);
   const int count = static_cast<int>(sizeof(fd::kValues) / sizeof(fd::kValues[0]));
   bwvr_ini::IniText empty("");
-  Check(fd::Seed(&empty) == count, "an empty file gets each value", count, count);
+  Check(fd::Seed(&empty, fd::kValues) == count, "an empty file gets each value", count, count);
   Check(empty.GetInt("bwvr", "vk_compose_rate", 0) == 2, "the file has the value of the compose",
         empty.GetInt("bwvr", "vk_compose_rate", 0), 2);
   Check(empty.Get("bwvr", "tu_debug", "") == "sysmem", "the file has a value that is a word", 0, 0);
-  Check(fd::Seed(&empty) == 0, "a second time adds nothing", 0, 0);
+  Check(fd::Seed(&empty, fd::kValues) == 0, "a second time adds nothing", 0, 0);
   bwvr_ini::IniText own("[bwvr]\r\nvk_tiny_draws=0\r\nresolution_pct=150\r\n");
-  Check(fd::Seed(&own) == count - 1, "a value of the file is not added", count - 1, count - 1);
+  Check(fd::Seed(&own, fd::kValues) == count - 1, "a value of the file is not added", count - 1,
+        count - 1);
   Check(own.GetInt("bwvr", "vk_tiny_draws", 1) == 0, "a 0 of the player stays", 0, 0);
   Check(own.GetInt("bwvr", "resolution_pct", 0) == 150, "another key of the player stays", 150, 150);
+}
+
+inline void QuestDefaultsChecks() {
+  namespace fd = frame_defaults;
+  Check(fd::IsQuest3("Oculus", "Quest 3"), "the runtime of Meta on a Quest 3 takes its values", 1, 1);
+  Check(fd::IsQuest3("Oculus", "Quest 3S"), "a Quest 3S has the name of a Quest 3 in its model", 1, 1);
+  Check(!fd::IsQuest3("Oculus", "Quest 2") && !fd::IsQuest3("Oculus", "Quest Pro"),
+        "another Quest keeps the defaults of the keys", 0, 0);
+  Check(!fd::IsQuest3("SteamVR/OpenXR", "Quest 3"), "another runtime on a Quest 3 keeps the defaults",
+        0, 0);
+  const int count = static_cast<int>(sizeof(fd::kQuestValues) / sizeof(fd::kQuestValues[0]));
+  bwvr_ini::IniText empty("");
+  Check(fd::Seed(&empty, fd::kQuestValues) == count, "an empty file gets each value", count, count);
+  Check(empty.GetInt("bwvr", "frame_loop_queues", 2) == 1, "one queue for the compose at the take",
+        empty.GetInt("bwvr", "frame_loop_queues", 2), 1);
+  Check(empty.GetInt("bwvr", "xr_compose_take", 0) == 1, "the compose at the take is on",
+        empty.GetInt("bwvr", "xr_compose_take", 0), 1);
+  Check(!empty.Has("bwvr", "late_top_game") && !empty.Has("bwvr", "late_fast_cores"),
+        "a Quest 3 gets no binding of threads to cores", 0, 0);
+  Check(!empty.Has("bwvr", "tu_debug"), "a Quest 3 gets no key of the driver of the Steam Frame", 0, 0);
+  bwvr_ini::IniText own("[bwvr]\r\nframe_loop_queues=2\r\n");
+  Check(fd::Seed(&own, fd::kQuestValues) == count - 1, "a value of the file is not added", count - 1,
+        count - 1);
+  Check(own.GetInt("bwvr", "frame_loop_queues", 0) == 2, "the value of the player stays", 2, 2);
+}
+
+inline void MemoryGuardChecks() {
+  namespace mg = memory_guard;
+  namespace st = bwvr_settings;
+  Check(mg::AvailableMb("MemTotal:  7943084 kB\nMemFree: 2211244 kB\nMemAvailable:    4501740 kB\n"
+                        "Buffers: 1 kB\n") == 4396,
+        "MemAvailable in MB", mg::AvailableMb("MemAvailable: 4501740 kB\n"), 4396);
+  Check(mg::AvailableMb("MemTotal: 1 kB\n") == -1, "no line gives -1", 0, 0);
+  // The size of a render on a Quest 3, as a run shows it.
+  const auto size = [](int percent, int* w, int* h) {
+    st::ScaleToPixels(percent, 1680, 1760, 0, true, 25, w, h);
+  };
+  int w = 0, h = 0;
+  size(100, &w, &h);
+  Check(w == 2200 && h == 1760, "the render at 100 percent", w, 2200);
+  size(150, &w, &h);
+  Check(w == 3300 && h == 2640, "the render at 150 percent", w, 3300);
+  size(200, &w, &h);
+  Check(w == 4096 && h == 3520, "the render at 200 percent", w, 4096);
+  // The fall of MemAvailable in the runs on a Quest 3.
+  Near("the compose at the take at 100 percent", mg::NeedMb(mg::kComposeAtTake, 2200, 1760), 2050, 100);
+  Near("the compose at the take at 150 percent", mg::NeedMb(mg::kComposeAtTake, 3300, 2640), 2550, 100);
+  Near("the eye pictures in the ring at 100 percent", mg::NeedMb(mg::kEyesInRing, 2200, 1760), 4200, 100);
+  // A Quest 3 with no game has about 4449 MB free. The eye pictures in the ring at 200 percent need
+  // more than that, and the run of that case stopped each thread.
+  Check(mg::NeedMb(mg::kEyesInRing, 4096, 3520) > 4449, "200 percent with the ring does not fit",
+        mg::NeedMb(mg::kEyesInRing, 4096, 3520), 4449);
+  Check(mg::LimitPct(200, mg::kEyesInRing, 4449, size) == 100, "the ring goes down to 100 percent",
+        mg::LimitPct(200, mg::kEyesInRing, 4449, size), 100);
+  Check(mg::LimitPct(200, mg::kComposeAtTake, 4449, size) == 200, "the compose at the take fits at 200",
+        mg::LimitPct(200, mg::kComposeAtTake, 4449, size), 200);
+  const int some = mg::LimitPct(200, mg::kComposeAtTake, 3000, size);
+  size(some, &w, &h);
+  Check(some < 200 && some >= 100 && mg::Fits(mg::kComposeAtTake, w, h, 3000),
+        "with less memory the scale goes down to a size that fits", some, 150);
+  Check(mg::LimitPct(200, mg::kComposeAtTake, 500, size) == 100, "the limit stops at 100 percent",
+        mg::LimitPct(200, mg::kComposeAtTake, 500, size), 100);
+  Check(mg::LimitPct(80, mg::kComposeAtTake, 100, size) == 80, "a scale below 100 percent stays",
+        mg::LimitPct(80, mg::kComposeAtTake, 100, size), 80);
+  Check(mg::LimitPct(200, mg::kEyesInRing, -1, size) == 200, "with no number the scale stays",
+        mg::LimitPct(200, mg::kEyesInRing, -1, size), 200);
 }
 
 inline void TinyChecks() {
@@ -113,6 +181,8 @@ inline void RemoteChecks() {
   DetailScaleChecks();
   DetailTableChecks();
   FrameDefaultsChecks();
+  QuestDefaultsChecks();
+  MemoryGuardChecks();
   TinyChecks();
   {
     const char* text = "serial=12\r\nstep=detail 3x\ndetail_distance=2\n\nno equal\n=x\nprompt=\n";

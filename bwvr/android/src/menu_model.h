@@ -159,12 +159,34 @@ class Menu {
   // The size of the render for the registry of the game (ScreenW, ScreenH),
   // from the resolution scale and the values of the ini.
   void RenderSize(int* width, int* height) const {
-    int percent = 100, margin = 0;
+    int percent = ScalePct();
+    if (scale_limit_ > 0 && scale_limit_ < percent) percent = scale_limit_;
+    RenderSizeAt(percent, width, height);
+  }
+
+  // The value of the row "Resolution scale".
+  int ScalePct() const {
+    for (int i = 0; i < st::kSettingCount; ++i) {
+      const char* key = st::kSettings[i].key;
+      if (key != nullptr && strcmp(key, "resolution_pct") == 0) return values_[i];
+    }
+    return 100;
+  }
+
+  // THE LIMIT OF THE MEMORY (memory_guard.h): the scale of the render when it is lower than the
+  // row, and 0 for no limit. bwvr.ini keeps the value of the row.
+  void SetScaleLimit(int percent) {
+    scale_limit_ = percent;
+    ++revision_;
+  }
+
+  // The size of the render at a scale.
+  void RenderSizeAt(int percent, int* width, int* height) const {
+    int margin = 0;
     bool one_walk = true;
     for (int i = 0; i < st::kSettingCount; ++i) {
       const char* key = st::kSettings[i].key;
       if (key == nullptr) continue;
-      if (strcmp(key, "resolution_pct") == 0) percent = values_[i];
       if (strcmp(key, "fov_margin_pct") == 0) {
         margin = st::ChoiceValue(st::kSettings[i].choices, values_[i]);
       }
@@ -703,6 +725,7 @@ class Menu {
   int headset_width_ = 2064;
   int headset_height_ = 2208;
   int guard_pct_ = 25;
+  int scale_limit_ = 0;
   std::vector<int> display_rates_;
   int display_wanted_ = 0;
   int display_hz_ = 0;

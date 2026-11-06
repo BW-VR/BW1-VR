@@ -768,7 +768,13 @@ that moves while the Hand takes it.
   (`android.md`, "The test run"). Open:
   - A new install on a Steam Frame: no run has shown that a file with no keys gets all it needs.
     `steamvr_app_key` is not in the list, because its value depends on the install.
-  - A Quest 3: no run has shown these keys there.
+  - A Quest 3 (`android.md`, "The values of a Quest 3"). No run has shown a new install, 200
+    percent with the compose at the take, or a Quest 3S. At 150 percent and 120 Hz a heavy view takes
+    17 ms a picture on the GPU (a walk 8.7 ms, the compose 5.5 ms, the panel 2.8 ms), and the session
+    falls to 65 to 85 frames a second. A draw there writes at about 11.5 GB/s, so the cost goes with
+    the pixels.
+  - A fault of the game on a Quest 3: a read fault at `runblack.exe+0x47F822` when a dialog box
+    closed, one time, with two queues. The cause is not known.
   - The async reprojection. `steamvr.disableAsync=1` of SteamVR is for a test that shows a missed
     picture as a stutter. Its log has no line that says that the compositor took the value.
 

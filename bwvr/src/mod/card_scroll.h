@@ -67,6 +67,12 @@ bool Start(HDC dc);
 HFONT WordsFont(HDC dc, int cap);
 HFONT SealFont(HDC dc, int cap);
 
+// A font for digits that are as high as a capital letter, with a capital
+// letter of cap pixels: Palatino Linotype, then Book Antiqua, then Cambria
+// (all fonts of Windows), then the font of the words. face gets the name of
+// the face in use, for the log.
+HFONT DigitsFont(HDC dc, int cap, const char** face);
+
 // The fonts in use, for the log.
 const char* FontNote();
 

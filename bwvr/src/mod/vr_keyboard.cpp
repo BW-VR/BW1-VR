@@ -357,8 +357,10 @@ Look g_card_look = {-2, -2, false, -1};  // style -1: g_card has no picture
 bool g_parchment_failed = false;
 HFONT g_ink_font = nullptr;
 HFONT g_ink_word_font = nullptr;
+HFONT g_ink_digit_font = nullptr;
 int g_ink_ascent = 0, g_ink_height = 0;
 int g_word_ascent = 0, g_word_height = 0;
+int g_digit_ascent = 0, g_digit_height = 0;
 
 bool ParchmentStart() {
   if (g_card != nullptr) return true;
@@ -371,10 +373,12 @@ bool ParchmentStart() {
   }
   g_ink_font = card_scroll::WordsFont(g_dc, kInkCap);
   g_ink_word_font = card_scroll::SealFont(g_dc, kWordCap);
+  const char* digit_face = "";
+  g_ink_digit_font = card_scroll::DigitsFont(g_dc, kInkCap, &digit_face);
   g_page = new (std::nothrow) uint8_t[kPictureBytes];
   g_card = new (std::nothrow) uint8_t[kPictureBytes];
   if (g_ink_font == nullptr || g_ink_word_font == nullptr ||
-      g_page == nullptr || g_card == nullptr) {
+      g_ink_digit_font == nullptr || g_page == nullptr || g_card == nullptr) {
     delete[] g_page;
     delete[] g_card;
     g_page = g_card = nullptr;
@@ -391,12 +395,17 @@ bool ParchmentStart() {
   GetTextMetricsW(g_dc, &metrics);
   g_word_ascent = metrics.tmAscent;
   g_word_height = metrics.tmHeight;
+  SelectObject(g_dc, g_ink_digit_font);
+  GetTextMetricsW(g_dc, &metrics);
+  g_digit_ascent = metrics.tmAscent;
+  g_digit_height = metrics.tmHeight;
   const double start = NowMs();
   const card_scroll::Picture page = {g_page, kWidth, kWidth, kHeight};
   card_scroll::Page(page, 4, 4, kWidth - 4, kHeight - 4, 9);
   g_parchment_failed = false;
-  ModLog("keyboard     : the page of the parchment keyboard took %.2f ms (%s)",
-         NowMs() - start, card_scroll::FontNote());
+  ModLog("keyboard     : the page of the parchment keyboard took %.2f ms (%s). "
+         "The digits use %s, so that they are as high as a capital letter",
+         NowMs() - start, card_scroll::FontNote(), digit_face);
   return true;
 }
 
@@ -467,11 +476,15 @@ void DrawKey(int i, bool shift, int look) {
   wchar_t label[8];
   Label(i, shift, label);
   const bool word = k.kind != vr_keyboard_math::kChar;
+  const bool digit = !word && k.label >= '0' && k.label <= '9';
   const int cap = word ? kWordCap : kInkCap;
-  const int ascent = word ? g_word_ascent : g_ink_ascent;
-  const int height = word ? g_word_height : g_ink_height;
+  const int ascent =
+      word ? g_word_ascent : (digit ? g_digit_ascent : g_ink_ascent);
+  const int height =
+      word ? g_word_height : (digit ? g_digit_height : g_ink_height);
   const int baseline = y0 + (r[3] + cap) / 2;
-  SelectObject(g_dc, word ? g_ink_word_font : g_ink_font);
+  SelectObject(g_dc, word ? g_ink_word_font
+                          : (digit ? g_ink_digit_font : g_ink_font));
   SetTextColor(g_dc, RGB(255, 255, 255));
   RECT rect = {x0, baseline - ascent, x1, baseline - ascent + height};
   DrawTextW(g_dc, label, -1, &rect,

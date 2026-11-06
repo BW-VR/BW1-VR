@@ -1976,13 +1976,17 @@ which calls `SetupEdit::KeyDown` `0x0040BAF0`. `ProcessWindowMessages` calls
   is pressed into the paper: the wall at the top and the left of the face is
   in shade, and the wall at the bottom and the right has the light. The
   letter is in dark ink in Alegreya Bold, with a capital of 30 px, and the
-  words Space, Back, Enter and Shift are in Alegreya SC with a capital of
-  19 px. The key under the ray has a gold face, a frame of dark gold and a
-  rim of bright gold 3 px wide. The key that the trigger pressed has a face
-  of bright yellow gold and a pale rim for 120 ms. While Shift is on, the Shift key has a red
-  wax seal with its word in light letters. With 0 the card is dark and
-  opaque, with grey keys in Segoe UI: the key under the ray is gold, the
-  pressed key is pale gold, and Shift on is blue.
+  words Space, Back, Enter and Shift are in Alegreya SC with a capital of 19
+  px. Alegreya has old style digits only, and its zero looks like a small o.
+  So the digits are in Palatino Linotype Bold (then Book Antiqua, then
+  Cambria, all fonts of Windows), as high as a capital letter, and the zero
+  is narrower than the O. The key under the ray has a gold face, a frame of
+  dark gold and a rim of bright gold 3 px wide. The key that the trigger
+  pressed has a face of bright yellow gold and a pale rim for 120 ms. While
+  Shift is on, the Shift key has a red wax seal with its word in light
+  letters. With 0 the card is dark and opaque, with grey keys in Segoe UI:
+  the key under the ray is gold, the pressed key is pale gold, and Shift on
+  is blue.
 - **The keys.** Five rows: the digits and Backspace, three rows of letters
   with Enter and Shift, and the space bar. Shift makes the next letter a
   capital. It is on when the keyboard opens, so the first letter of a name

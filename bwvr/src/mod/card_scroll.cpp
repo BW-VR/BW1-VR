@@ -351,6 +351,24 @@ HFONT WordsFont(HDC dc, int cap) { return FontForCap(dc, g_words_face, cap); }
 
 HFONT SealFont(HDC dc, int cap) { return FontForCap(dc, g_seal_face, cap); }
 
+HFONT DigitsFont(HDC dc, int cap, const char** face) {
+  // Alegreya and Alegreya SC have old style digits only, and GDI cannot ask
+  // for the lining digits of a font. These faces of Windows have lining
+  // digits, and their zero is narrower than their capital O.
+  const wchar_t* const faces[] = {L"Palatino Linotype", L"Book Antiqua",
+                                  L"Cambria"};
+  const char* const names[] = {"Palatino Linotype", "Book Antiqua",
+                               "Cambria"};
+  for (int i = 0; i < 3; ++i) {
+    if (HaveFace(dc, faces[i])) {
+      if (face != nullptr) *face = names[i];
+      return FontForCap(dc, faces[i], cap);
+    }
+  }
+  if (face != nullptr) *face = "the font of the words";
+  return FontForCap(dc, g_words_face, cap);
+}
+
 const char* FontNote() { return g_note; }
 
 double StartMs() { return g_start_ms; }

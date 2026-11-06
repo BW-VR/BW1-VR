@@ -732,17 +732,20 @@ game as it is.
   store, the altar, a gift to the Creature, the red halo outside the
   influence, a Workshop that gives scaffolds, villagers that make chants,
   and Heal from its icon at the Worship Site.
-- **N6. Miracles.** Not run: teleport, the Creature miracles other than
-  Strong and Freeze, and each reason of a refusal but "needs a Creature"
-  and "needs a circle on the land". Testers find the circle of a shield
-  hard to draw to the correct size. The cause: the game reads the path of
-  the hand on a plane that faces the head, at `gesture_size_cm` for a third
-  of the height of the render (`gesture_air.cpp`). So the size of the
-  circle on the land does not follow the size of the hand's circle over
-  the land. A possible fix: while the player draws the circle of such a
-  miracle, give the game the pixel of the Hand's own point, so the points
-  on the land are under the real hand. The match uses angles and a loose
-  class of the aspect, so it should still match. Not built.
+- **N6. Miracles.** Not run: teleport, and each reason of a refusal but
+  "needs a Creature" and "needs a circle on the land". Open:
+  - The Storm cloud shows as a flat grey band with straight edges in the
+    eye pictures, also with `cloud_pole_pct=0`. Not known whether the plain
+    game draws it so.
+  - A red beam comes down from the sky at a cast of Lightning. The effect
+    file of the game has no such beam, so something else draws it.
+  - Enlarge and Shrink change the base size of the Creature, and the game
+    draws the body at 0.22 within 16 m in front of the pen of the Temple
+    (`fn_004EFCE0`). No recipe casts them on a Creature away from the pen,
+    so no picture shows the change of size.
+  - A shield of a small circle loses about 24 of its life a second, so a
+    circle of 23 cm lasts about 3.5 minutes. The cost grows with the square
+    of the size, as in the plain game.
 - **N8. The scripts and the engine camera.** The scripts get the place of
   the player. Not changed: the 114 markers at "camera position",
   `GetFacingCameraPosition`, and the other readers of the engine camera.

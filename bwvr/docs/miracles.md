@@ -1104,12 +1104,14 @@ Test keys for the desktop runs only (the launcher removes them):
 - `gesture_panel_test_frame`: at this frame of the scripted controller
   `gesture_panel` changes, so one run shows the corner of the game and the
   row over the palm.
-- `influence_test_circle_cm`: from the first frame with the Hand of the
+- `influence_test_circle_cm` and `influence_test_circle_frame`: from the
+  first frame of the controllers at that frame or later with the Hand of the
   controller, the influence of the player is a circle of this many cm of the
-  room around the land under the game camera, which the God view keeps over
-  the land under the head. The fade, the wall and the stream see it (a test
-  hook of `Influence::IsInPlayerRawInfluence` `0x005CD460`). The pick of the
-  game keeps the real influence.
+  room around the land point of the Hand's point of that frame. The fade, the
+  wall and the stream see it (a test hook of
+  `Influence::IsInPlayerRawInfluence` `0x005CD460`). Before that frame the
+  fade and the wall count each point as inside. The pick of the game keeps
+  the real influence.
 
 ## The log
 
@@ -1120,8 +1122,9 @@ camera path that plays has the line "the camera belongs to CameraModePath".
 The tag `influence` has the three keys at the start, and these lines: a hand
 that goes out of the influence or comes back into it, with its land point.
 The wall that shows or goes, with the rays that found the edge and its
-strength. The first stream that ends at the Hand's point, with its height
-over the land. The test circle, with its middle and its radius. Each report
+strength. The first stream that the game draws, with its two ends and the
+Hand's point. The first stream that ends at the Hand's point, with its
+height over the land. The test circle, with its middle and its radius. Each report
 window has the frames with a fade and with the wall, and the calls of the
 stream.
 

@@ -71,6 +71,7 @@
 
 #include "../common/bw_addresses.h"
 #include "MinHook.h"
+#include "cutscene_window.h"
 #include "menu_room.h"
 
 extern void ModLog(const char* format, ...);
@@ -1883,9 +1884,12 @@ bool ChooseOwner(bool focused, bool real_focus, bool mouse_moved) {
   const bool turned = ControllerMoved();
   const int mode = ControllersOwnerMode();
   // A frame with no scene has no head camera, but the menus in the room
-  // take a ray of the controller there too.
+  // take a ray of the controller there too. So does the screen of the cut
+  // scene window with cutscene_hands=1: the ray of the pointing hand gives
+  // the pixel there (controllers.cpp, WindowPixel).
+  const bool window = CutsceneWindowFlat() && CutsceneWindowHands();
   const bool usable = mode != 2 && focused && ControllerPointing() &&
-                      (MenuRoomFlatNow() ||
+                      (MenuRoomFlatNow() || window ||
                        (!StereoIdle() && HeadCameraEnabled()));
   // A source that holds a button keeps the pointer (see above).
   if (mode == 2) {

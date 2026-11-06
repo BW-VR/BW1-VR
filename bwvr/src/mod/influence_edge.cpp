@@ -37,14 +37,15 @@
 // The fade and the wall act only while the controller places the Hand. The
 // stream acts only for the land point of the Hand of the controller.
 //
-// THE TEST KEY influence_test_circle_cm=R: from the first frame with the Hand
-// of the controller, the influence of the player is a circle of R cm of the
-// room around the land point of the game camera of that frame, which the God
-// view keeps over the land under the head. The fade, the wall and the stream
-// see it (the test hook of Influence::IsInPlayerRawInfluence 0x005CD460,
-// which GVirtualInfluence uses). The pick of the game keeps the real
-// influence. A desktop run with a fixed head then has the edge at a known
-// distance in front of the head. Never for play.
+// THE TEST KEY influence_test_circle_cm=R with influence_test_circle_frame=F:
+// from the first frame of the controllers at F or later with the Hand of the
+// controller, the influence of the player is a circle of R cm of the room
+// around the land point of the Hand's point of that frame. The fade, the wall
+// and the stream see it (the test hook of Influence::IsInPlayerRawInfluence
+// 0x005CD460, which GVirtualInfluence uses). Before that frame the fade and
+// the wall count each point as inside. The pick of the game keeps the real
+// influence. A desktop run that steps the hand from that point then has the
+// edge at a known distance. Never for play.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -61,8 +62,7 @@ bool HandDirectInsideInfluence(float x, float z, bool* inside);
 bool HandDirectHandPosition(float out[3], bool* by_controller);
 // controllers.cpp
 unsigned long long ControllersFrameCount();
-// head_camera.cpp: the game camera of the last main call.
-bool HeadCameraGameCamera(float position[3], float focus[3]);
+
 
 namespace {
 
@@ -121,9 +121,11 @@ uint64_t g_stream_calls = 0;
 uint64_t g_stream_lifted = 0;
 float g_last_lift = 0.0f;
 bool g_said_stream = false;
+bool g_said_call = false;
 
 // THE TEST CIRCLE.
 int g_test_cm = 0;
+uint64_t g_test_frame = 0;
 bool g_have_circle = false;
 float g_circle[3] = {0.0f, 0.0f, 0.0f};  // x, z and the radius in units
 uint64_t g_raw_tests = 0;
@@ -148,6 +150,8 @@ void ReadKeys() {
   g_test_cm = number("influence_test_circle_cm", 0);
   if (g_test_cm < 0) g_test_cm = 0;
   if (g_test_cm > 1000) g_test_cm = 1000;
+  const int frame = number("influence_test_circle_frame", 0);
+  g_test_frame = frame > 0 ? static_cast<uint64_t>(frame) : 0;
 }
 
 bool CircleInside(float x, float z) {
@@ -159,6 +163,10 @@ bool CircleInside(float x, float z) {
 bool Inside(float x, float z, bool* inside) {
   if (g_have_circle) {
     *inside = CircleInside(x, z);
+    return true;
+  }
+  if (g_test_cm > 0) {
+    *inside = true;
     return true;
   }
   return HandDirectInsideInfluence(x, z, inside);
@@ -175,10 +183,27 @@ float LandHeight(float x, float z) {
 void __cdecl h_ManaPath(MapCoords* from, MapCoords* to, uint32_t color,
                         float fraction) {
   ++g_stream_calls;
-  float hand[3];
+  float hand[3] = {0.0f, 0.0f, 0.0f};
   bool by_controller = false;
+  const bool have_hand = HandDirectHandPosition(hand, &by_controller);
+  if (!g_said_call && to != nullptr && from != nullptr &&
+      !IsBadReadPtr(to, sizeof(*to)) && !IsBadReadPtr(from, sizeof(*from))) {
+    g_said_call = true;
+    ModLog("influence    : the game draws the stream of the influence from "
+           "%.1f %.1f to %.1f %.1f (strength %.2f). The Hand's point is at "
+           "%.1f %.1f %.1f, %s, frame %llu",
+           static_cast<float>(from->x) / kMapScale,
+           static_cast<float>(from->z) / kMapScale,
+           static_cast<float>(to->x) / kMapScale,
+           static_cast<float>(to->z) / kMapScale, fraction, hand[0], hand[1],
+           hand[2],
+           !have_hand       ? "with no Hand"
+           : by_controller  ? "placed by the controller"
+                            : "not placed by the controller",
+           ControllersFrameCount());
+  }
   if (g_stream_hand && to != nullptr && !IsBadWritePtr(to, sizeof(*to)) &&
-      HandDirectHandPosition(hand, &by_controller) && by_controller) {
+      have_hand && by_controller) {
     MapCoords flat = *to;
     flat.over = 0.0f;
     float land[3] = {0.0f, 0.0f, 0.0f};
@@ -260,24 +285,19 @@ void InfluenceEdgeInstall() {
 void InfluenceEdgeFrame(float units_per_meter) {
   ReadKeys();
   if (g_test_cm <= 0 || g_have_circle || !(units_per_meter > 0.0f)) return;
-  float hand[3], camera[3], focus[3];
+  if (ControllersFrameCount() < g_test_frame) return;
+  float hand[3];
   bool by_controller = false;
-  if (!HandDirectHandPosition(hand, &by_controller) || !by_controller ||
-      !HeadCameraGameCamera(camera, focus)) {
-    return;
-  }
-  g_circle[0] = camera[0];
-  g_circle[1] = camera[2];
+  if (!HandDirectHandPosition(hand, &by_controller) || !by_controller) return;
+  g_circle[0] = hand[0];
+  g_circle[1] = hand[2];
   g_circle[2] = static_cast<float>(g_test_cm) * 0.01f * units_per_meter;
   g_have_circle = true;
   ModLog("influence    : test key influence_test_circle_cm=%d: from frame "
          "%llu the influence of the player is a circle of %.1f units around "
-         "%.1f %.1f (the game camera), for the fade, the wall and the "
-         "stream. The Hand is at %.1f %.1f, %.1f units from the middle",
-         g_test_cm, ControllersFrameCount(), g_circle[2], g_circle[0],
-         g_circle[1], hand[0], hand[2],
-         sqrtf((hand[0] - g_circle[0]) * (hand[0] - g_circle[0]) +
-               (hand[2] - g_circle[1]) * (hand[2] - g_circle[1])));
+         "%.1f %.1f (the land point of the Hand's point), for the fade, the "
+         "wall and the stream", g_test_cm, ControllersFrameCount(),
+         g_circle[2], g_circle[0], g_circle[1]);
 }
 
 // overlay.cpp, once a frame for each hand that it builds: the opacity of the

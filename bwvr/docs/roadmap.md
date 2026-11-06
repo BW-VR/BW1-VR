@@ -516,12 +516,13 @@ keeps the mod as it is.
   31.25 s), 500 to 532 ms after its play, with a wait of 20.3 to 21.0 ms.
   So at the start only, not in play. Open: whether a play has more of them
   (the log of a play shows it, `headset-checks.md`).
-- **F26. The first picture of a card still costs.** The warm of the fonts
-  draws with DrawTextW (`controller-hints.md`, 9.11, "The first draw of a
-  font"). Open: the desktop runs that measure the first picture of the
-  spell book, the ring, the hint card and the panel of places with this
-  warm. After the text, the first picture of the panel of places still
-  draws its 42 parts (about 4 ms of keys) and its page (2 to 3 ms).
+- **F26. The first picture of the panel of places costs 11 ms.** The warm
+  of the fonts draws with DrawTextW (`controller-hints.md`, 9.11, "The
+  first draw of a font"). With it, the first pictures in a desktop run take
+  1.2 ms (the hint card), 2.5 ms (the spell book, 0.7 ms of text), 6.2 ms
+  (the ring) and 11.2 ms (the panel of places, its page 4.8 ms). The panel
+  draws its page and its 42 parts in its first picture. Open: draw the
+  page and the plain parts before the panel opens, off the game thread.
 
 ### Faults of the plain game
 

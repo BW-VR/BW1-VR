@@ -149,6 +149,7 @@ int g_camera_follow = 0;  // temple_camera_follow
 int g_camera_flight = 0;  // temple_camera_flight
 int g_camera_screen = 1;  // temple_camera_screen
 int g_press_rule = 1;     // temple_press_pixel
+int g_hide_hand = 1;      // temple_hide_hand
 int g_view = 1;           // temple_view
 int g_fade_eyes = 1;      // temple_fade_eyes
 int g_turn = 1;           // temple_turn
@@ -197,6 +198,7 @@ void Load() {
   g_camera_flight = IniInt("temple_camera_flight", 0) != 0 ? 1 : 0;
   g_camera_screen = IniInt("temple_camera_screen", 1) != 0 ? 1 : 0;
   g_press_rule = IniInt("temple_press_pixel", 1) != 0 ? 1 : 0;
+  g_hide_hand = IniInt("temple_hide_hand", 1) != 0 ? 1 : 0;
   g_view = IniInt("temple_view", 1) != 0 ? 1 : 0;
   g_fade_eyes = IniInt("temple_fade_eyes", 1) != 0 ? 1 : 0;
   HeadCameraRoomView(g_view);
@@ -293,6 +295,12 @@ void Load() {
              : "The camera code of a room gets a press at the pixel of the "
                "view of the head, which has the roll and the lean of the "
                "head");
+  ModLog("temple       : temple_hide_hand=%d. %s", g_hide_hand,
+         g_hide_hand != 0
+             ? "In a room the game's Hand is not drawn while the ray is on: "
+               "the ray and its cross are the pointer"
+             : "In a room the game draws its Hand at the pointer, in front "
+               "of the thing under the pointer");
   ModLog("temple       : temple_fade_eyes=%d. %s", g_fade_eyes,
          g_fade_eyes != 0
              ? "The fade of the Temple shows in both eyes"
@@ -1962,6 +1970,13 @@ void TempleBeforeScene() {
 }
 
 bool TempleRayOn() { return g_ray_on; }
+
+bool TempleHidesHand() { return g_hide_hand != 0 && g_ray_on; }
+
+int TempleHideHandRule() {
+  Load();
+  return g_hide_hand;
+}
 
 int TempleClick() {
   if (g_test_click_frame > 0 &&

@@ -990,13 +990,28 @@ int g_script_play = -1;
 int g_script_play_after = 1000;
 bool g_script_shift_known = false;
 int64_t g_script_shift = 0;
+// THE SCRIPT AFTER THE GUIDE OF THE HALL (the test key
+// fake_controller_temple_frame, script_frame_math.h, CountedTwice). With the
+// key at N, the steps from frame N on count from the frame at which the ray
+// of the Temple was on for 30 frames in a row: that frame is N.
+int g_script_temple = -1;
+bool g_temple_shift_known = false;
+int64_t g_temple_shift = 0;
+int g_temple_ray_frames = 0;
+
+// The number that a step or a test key with the frame `own` compares with
+// `own` on the frame `frame`, with the two anchors.
+uint64_t CountedFrame(uint64_t frame, uint64_t own) {
+  return script_frame_math::CountedTwice(
+      frame, own, g_script_play, g_script_shift_known, g_script_shift,
+      g_script_temple, g_temple_shift_known, g_temple_shift);
+}
 // The word "deactivate" came. The pump acts on it.
 bool g_fake_deactivate = false;
 
 // The frame that a step of the script compares with its own frames.
 uint64_t StepFrame(const ScriptStep& step) {
-  return script_frame_math::Counted(g_frame, step.start, g_script_play,
-                                    g_script_shift_known, g_script_shift);
+  return CountedFrame(g_frame, step.start);
 }
 
 // The word "aimtemple": the hand stays where it is, and its aim turns to the
@@ -1093,6 +1108,25 @@ void UpdateScript() {
            g_script_shift < 0 ? -g_script_shift : g_script_shift,
            g_script_shift < 0 ? "sooner" : "later",
            SecondsSinceProcessStart());
+  }
+  if (g_script_temple < 0) {
+    g_script_temple = IniInt("fake_controller_temple_frame", 0);
+  }
+  if (g_script_temple > 0 && !g_temple_shift_known) {
+    g_temple_ray_frames = TempleRayOn() ? g_temple_ray_frames + 1 : 0;
+    const uint64_t first = script_frame_math::Counted(
+        g_frame, static_cast<uint64_t>(g_script_temple), g_script_play,
+        g_script_shift_known, g_script_shift);
+    if (g_temple_ray_frames >= script_frame_math::kTempleSteadyFrames &&
+        first > 0) {
+      g_temple_shift_known = true;
+      g_temple_shift = static_cast<int64_t>(first) - g_script_temple;
+      ModLog("controllers  : the ray of the Temple is on for %d frames in a "
+             "row at frame %llu. The steps of the script from frame %d on "
+             "count from this frame (fake_controller_temple_frame)",
+             script_frame_math::kTempleSteadyFrames, g_frame,
+             g_script_temple);
+    }
   }
   bool now[kInputCount] = {false};
   for (int i = 0; i < g_script_count; ++i) {
@@ -4527,9 +4561,8 @@ void MouseOwnerTestFrame() {
   if (at < 0) at = IniInt("mouse_owner_test_frame", 0);
   if (at <= 0 || g_owner_mode == 2) return;
   // As ControllersTestFrame counts it (fake_controller_play_frame).
-  if (script_frame_math::Counted(g_frame, static_cast<uint64_t>(at),
-                                g_script_play, g_script_shift_known,
-                                g_script_shift) != static_cast<uint64_t>(at)) {
+  if (CountedFrame(g_frame, static_cast<uint64_t>(at)) !=
+      static_cast<uint64_t>(at)) {
     return;
   }
   g_owner_mode = 2;
@@ -5464,8 +5497,7 @@ uint64_t ControllersFrameCount() { return g_frame; }
 // keep their distance when the run starts in a test save. Without the key of
 // the script, the number is `frame`.
 uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame) {
-  return script_frame_math::Counted(frame, key_frame, g_script_play,
-                                    g_script_shift_known, g_script_shift);
+  return CountedFrame(frame, key_frame);
 }
 
 // For the land drag probe: the pointing grip and the head in the

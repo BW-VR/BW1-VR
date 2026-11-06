@@ -16,6 +16,12 @@ bool TempleInside();
 // 1. The direct hand then steps aside, as it does for a dialog box.
 bool TempleRayOn();
 
+// THE GAME'S HAND IN A ROOM (temple_hide_hand). True while the ray is on and
+// the key is 1: hand_exact.cpp then does not draw the mesh of the game's
+// Hand. The value of the key, for the log.
+bool TempleHidesHand();
+int TempleHideHandRule();
+
 // temple_click now: 1 the trigger and the grip are both the Action button of
 // the game, 0 the plain buttons.
 int TempleClick();

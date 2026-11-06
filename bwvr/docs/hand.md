@@ -828,8 +828,11 @@ drew the pointing hand in this frame. So one hand is always there, each other
 part of `CHand::Draw` still runs, and the mouse player sees the game's Hand as
 the game draws it. MinHook puts the bytes back when the mod unloads. The hook
 is made only when the first bytes of the function, the two call sites and the
-vtable slot are as the disassembly gave them. In the states Invisible, Totem,
-MultiPickUp and Citadel the game's Hand is not exact, so its mesh stays drawn.
+vtable slot are as the disassembly gave them. In the states Invisible, Totem
+and MultiPickUp the game's Hand is not exact, so its mesh stays drawn. In the
+state Citadel, in a room of the Temple, the hook skips the draw while the ray
+of the pointing hand is on and the overlay drew that hand
+(`temple_hide_hand`, `controllers.md`, 11.1).
 The overlay then draws both of the mod's hands (see
 [hand-model.md](hand-model.md)). The shadow of the game's Hand on the land
 still draws, with the game's fingers.

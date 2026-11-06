@@ -948,6 +948,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`), of the ring (`controllers.md`, 10.4) and of the keyboard in the headset (`ui-layer.md`, section 21) |
 | `hint_card_saving` | 1 | 1 while the game saves, the card of the pointing hand says "Saving..." (9.12). 0 the cards say nothing in a save |
 | `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
+| `font_warm` | 1 | 1 a thread of the mod draws each letter of each font of the cards one time at the start of the game (9.11, "The first draw of a font"). 0 the first draw of each font of a card makes its letters on the frame thread |
 | `hint_card_fonts_test_dir` | empty | Test key. The folder of the font files of the scroll. Empty is `bwvr-fonts` beside `runblack.exe`. A desktop run sets the staged folder `bwvr\out\stage\bwvr-fonts` of its worktree |
 
 `hint_card.cpp` reads the keys itself, at the first frame. With `test_keys=1`
@@ -971,10 +972,16 @@ ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
   one line each for `prompt_timing`, `hint_words`, `prompt_moves` and
   `hint_card_style`.
 - `card scroll : the words use Alegreya and the seals use Alegreya SC, from
-  the folder bwvr-fonts. The noise tile and the fonts took 8.5 ms`: once, at
-  the first picture of a scroll. When a font file does not load, the line
-  names the font in its place (Georgia, then Segoe UI) and the first file
-  that did not load.
+  the folder bwvr-fonts. The noise tile and the fonts took 8.5 ms on the warm
+  thread`: once, on the thread of the warm, or on the frame thread at the
+  first picture of a scroll with `font_warm=0`. When a font file does not
+  load, the line names the font in its place (Georgia, then Segoe UI) and
+  the first file that did not load.
+- `card scroll : font_warm=1: a thread of the mod drew each letter of 20
+  fonts of the cards one time in N ms`: once, at the start of the game.
+- `card scroll : a card asks for the font of the words with a capital of N
+  px, and the warm did not draw it`: once for each such font. The table
+  `kWarm...Caps` of `card_scroll.cpp` must then get the new size.
 - `hint card : frame N, a new picture of the card of the pointing hand in
   the scroll look, 501 by 119 px, took 1.80 ms`: one line for each new
   picture (24 lines at most). The report window has a line with the count of
@@ -1317,7 +1324,25 @@ paper is then one read and the burn of its edge, and a pixel deep in the
 paper is one read only. A baked pixel is the same, bit for bit, as the
 pixel of the full mix. A new picture makes no blur. The picture is drawn
 again only when the words of the card change. The text of GDI costs most,
-not the paper (roadmap F25).
+not the paper.
+
+**The first draw of a font.** GDI makes each letter of a font at one size
+the first time that it draws it, and keeps it for the whole process, for
+each thread and each DC. For the words of a card that is 7 to 30 ms on the
+frame thread: at the first card, the first picture of the book, the ring,
+the keyboard, the panel of places and the debug window. With `font_warm=1`
+(the default) `card_scroll::WarmStart` starts a thread of the mod at the
+install of the hooks, with a priority below normal. The thread loads the
+fonts and makes the noise tile (`card_scroll::Start`, which the frame
+thread then finds done), then draws the printable ASCII, the letters of
+Latin-1, the quotes, the dashes and the dots one time in each font of the
+cards: the words in 15 sizes, the seals in 4 and the digits in 1. Each size
+comes from a constant of the card that uses it (the table in
+`card_scroll.cpp`). A font that a card asks for and the table does not have
+gets a line in the log. In a test program outside the game GDI drew the 120
+letters of one size in 1.3 to 2.1 ms the first time and in 0.14 to 0.24 ms
+after the same draw on a second thread. The warm does nothing with
+`hint_card_style=0`, which uses Segoe UI.
 
 **Tests.** A desktop run saves each new picture of a card with
 `hint_card_save_test=1`, and loads the fonts from the staged folder of its

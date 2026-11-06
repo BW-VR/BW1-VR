@@ -11,6 +11,13 @@
 // THE GRAIN. The headset shows a card smaller than its picture, so a detail
 // of 1 pixel would shimmer. The smallest cell of the noise is 4 pixels.
 //
+// THE FIRST DRAW OF A FONT. GDI makes each letter of a font at a size the
+// first time that it draws it, and keeps it for the process. For the words
+// of a card that is 7 to 30 ms. With font_warm=1 a thread of the mod draws
+// each letter of each font of the cards one time at the start of the game
+// (WarmStart), so the first card, the book, the ring, the keyboard and the
+// panels show with no such cost on the frame thread.
+//
 // THE COST. A redraw makes no blur. The drop shadow comes from the outline of
 // the shape (a distance test). Start bakes the color of the paper into the
 // tile, so a pixel of paper is one read and the burn of its edge. A pixel
@@ -57,7 +64,8 @@ struct Picture {
 };
 
 // Makes the noise tile and loads the fonts, one time for all the cards. dc
-// is a memory DC for the font tests. The fonts are in the folder bwvr-fonts
+// is a memory DC for the font tests. Each thread can call it: the second
+// call waits for the first one to end. The fonts are in the folder bwvr-fonts
 // beside runblack.exe, or in the folder of the test key
 // hint_card_fonts_test_dir of bwvr.ini. False when GDI gives no font: the
 // caller keeps its plain look.
@@ -75,6 +83,12 @@ HFONT DigitsFont(HDC dc, int cap, const char** face);
 
 // The fonts in use, for the log.
 const char* FontNote();
+
+// font_warm=1 and hint_card_style=1 in bwvr.ini: starts a thread of the mod
+// that calls Start and then draws each letter of each font of the cards one
+// time (the table kWarm of card_scroll.cpp). mod_main.cpp calls it at the
+// install of the hooks. One time only.
+void WarmStart();
 
 // The time that Start took, in ms.
 double StartMs();

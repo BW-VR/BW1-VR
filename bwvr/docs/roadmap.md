@@ -511,23 +511,6 @@ keeps the mod as it is.
   skips the wait only for the sounds of the mod's mixer. The other sounds
   still make the game thread wait, and this can stop the game for 40 to
   170 ms. Another change may already have removed it: measure first.
-- **F25. The scroll look for the other cards.** The hint cards are
-  parchment scrolls with wax seals (`hint_card_style=1`,
-  `controller-hints.md`, section 9.11). The spell book and the keyboard in
-  the headset are pages of the same parchment, and each item of the ring is
-  a wax seal. The art is in `card_scroll.h`. Open:
-  - The first use of a font size costs most. GDI makes each letter of
-    Alegreya the first time that it draws it at a size, and that takes 7 to
-    10 ms for the words of a card. The first hint card takes 18 ms (with
-    `card_scroll::Start`), the spell book 10 to 12 ms when it opens and 7.5
-    ms for the first note, and the keyboard 17 ms when it opens and 7 ms at
-    the first change of Shift. A later picture of the book takes 1.8 to 2.3
-    ms: the text 0.4 to 0.6, the page 0.55, the cells 0.5 to 0.9 and the
-    ink 0.25. Possible fixes: a static file of Alegreya Bold in place of the
-    variable font, or a draw of the letters of each size before their first
-    use, off the game thread.
-  - The checks of the look of the scroll, the ring and the keyboard are in
-    `headset-checks.md`.
 
 ### Faults of the plain game
 

@@ -200,6 +200,12 @@ void MakeBake() {
 
 // --- the fonts ---------------------------------------------------------------
 
+// Start runs on the frame thread or on the thread of the warm, so one lock
+// keeps the second call out until the first one is done.
+SRWLOCK g_start_lock = SRWLOCK_INIT;
+// The thread of the warm of the fonts (WarmStart), and whether it runs.
+DWORD g_warm_thread = 0;
+volatile LONG g_warm_started = 0;
 bool g_started = false;
 bool g_ok = false;
 double g_start_ms = 0.0;
@@ -320,7 +326,20 @@ void LoadFonts(HDC dc, const char* dir) {
 
 }  // namespace
 
+namespace {
+bool StartLocked(HDC dc);
+}  // namespace
+
 bool Start(HDC dc) {
+  AcquireSRWLockExclusive(&g_start_lock);
+  const bool ok = StartLocked(dc);
+  ReleaseSRWLockExclusive(&g_start_lock);
+  return ok;
+}
+
+namespace {
+
+bool StartLocked(HDC dc) {
   if (g_started) return g_ok;
   g_started = true;
   LARGE_INTEGER t0, t1, f;
@@ -342,16 +361,186 @@ bool Start(HDC dc) {
   QueryPerformanceCounter(&t1);
   g_start_ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
   g_ok = g_words_face[0] != 0;
-  ModLog("card scroll  : %s. The noise tile and the fonts took %.1f ms",
-         g_ok ? g_note : "GDI gave no font for the words", g_start_ms);
+  ModLog("card scroll  : %s. The noise tile and the fonts took %.1f ms on "
+         "the %s thread",
+         g_ok ? g_note : "GDI gave no font for the words", g_start_ms,
+         g_warm_thread == GetCurrentThreadId() ? "warm" : "frame");
   return g_ok;
 }
 
-HFONT WordsFont(HDC dc, int cap) { return FontForCap(dc, g_words_face, cap); }
+// --- the warm of the fonts ---------------------------------------------------
 
-HFONT SealFont(HDC dc, int cap) { return FontForCap(dc, g_seal_face, cap); }
+// The fonts of the cards, and the capital letter of each in pixels. Each cap
+// comes from a constant of the card that uses it:
+//   hint_card.cpp     words 31 (kScrollTextCap), seals 23 (kScrollSealCap)
+//   radial_menu.cpp   seals 22 (kSealCap), 19 (kSealSwitchCap), words 17
+//                     (kSealValueCap), 27 (kScrollNameCap), 19
+//                     (kScrollLongCap), 20 (kScrollNoteCap)
+//   vr_keyboard.cpp   words 30 (kInkCap), seals 19 (kWordCap), digits 30
+//   spell_book.cpp    words 37, 25, 21, 17 and 14 (7/10 of the em 54, 36,
+//                     30, 25 and 21)
+//   places_panel.cpp  words 38, 26 and 22, seals 22, digits 30
+//   debug_window.cpp  words 36, 24, 22, 21 and 19, seals 21
+// A card that asks for a font that is not here gets a line in the log, so a
+// change of a constant shows.
+enum { kWarmWords = 0, kWarmSeal = 1, kWarmDigits = 2 };
+const int kWarmWordCaps[] = {14, 17, 19, 20, 21, 22, 24, 25,
+                             26, 27, 30, 31, 36, 37, 38};
+const int kWarmSealCaps[] = {19, 21, 22, 23};
+const int kWarmDigitCaps[] = {30};
+
+// The letters of the cards: the printable ASCII, the letters of Latin-1, and
+// the quotes, the dashes and the dots of the game's text.
+const wchar_t* const kWarmText[] = {
+    L" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNO",
+    L"PQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+    L"\u00A0\u00A1\u00A2\u00A3\u00A9\u00AB\u00AE\u00B0\u00B4\u00B7\u00BB"
+    L"\u00BF\u00C0\u00C1\u00C2\u00C4\u00C7\u00C8\u00C9\u00CA\u00CB\u00CD"
+    L"\u00CE\u00D1\u00D3\u00D4\u00D6\u00D9\u00DA\u00DC\u00DF",
+    L"\u00E0\u00E1\u00E2\u00E4\u00E7\u00E8\u00E9\u00EA\u00EB\u00EC\u00ED"
+    L"\u00EE\u00EF\u00F1\u00F2\u00F3\u00F4\u00F6\u00F9\u00FA\u00FB\u00FC"
+    L"\u2013\u2014\u2018\u2019\u201C\u201D\u2026"};
+
+double g_warm_ms = 0.0;
+
+bool Warmed(int kind, int cap) {
+  const int* caps = kind == kWarmWords   ? kWarmWordCaps
+                    : kind == kWarmSeal  ? kWarmSealCaps
+                                         : kWarmDigitCaps;
+  const int count =
+      kind == kWarmWords  ? static_cast<int>(sizeof(kWarmWordCaps) / sizeof(int))
+      : kind == kWarmSeal ? static_cast<int>(sizeof(kWarmSealCaps) / sizeof(int))
+                          : static_cast<int>(sizeof(kWarmDigitCaps) / sizeof(int));
+  for (int i = 0; i < count; ++i) {
+    if (caps[i] == cap) return true;
+  }
+  return false;
+}
+
+// One line for each font that a card asks for and the warm did not draw.
+void NoteCold(int kind, int cap) {
+  static uint64_t said[3] = {0, 0, 0};
+  if (InterlockedCompareExchange(&g_warm_started, 0, 0) == 0 || cap < 0 ||
+      cap >= 64 || Warmed(kind, cap) || (said[kind] >> cap) & 1) {
+    return;
+  }
+  said[kind] |= 1ull << cap;
+  static const char* const kKinds[] = {"words", "seals", "digits"};
+  ModLog("card scroll  : a card asks for the font of the %s with a capital "
+         "of %d px, and the warm did not draw it. Its first draw makes each "
+         "letter on the frame thread", kKinds[kind], cap);
+}
+
+// Draws each letter of the font once into the picture of dc.
+void WarmFont(HDC dc, HFONT font) {
+  if (font == nullptr) return;
+  HGDIOBJ old = SelectObject(dc, font);
+  for (const wchar_t* text : kWarmText) {
+    TextOutW(dc, 2, 2, text, static_cast<int>(wcslen(text)));
+  }
+  GdiFlush();
+  SelectObject(dc, old);
+  DeleteObject(font);
+}
+
+DWORD WINAPI WarmThread(void*) {
+  LARGE_INTEGER t0, t1, f;
+  QueryPerformanceFrequency(&f);
+  QueryPerformanceCounter(&t0);
+  HDC dc = CreateCompatibleDC(nullptr);
+  BITMAPINFO info;
+  memset(&info, 0, sizeof(info));
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = 2048;
+  info.bmiHeader.biHeight = -128;
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  info.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr;
+  HBITMAP dib = dc != nullptr ? CreateDIBSection(dc, &info, DIB_RGB_COLORS,
+                                                 &bits, nullptr, 0)
+                              : nullptr;
+  int fonts = 0;
+  if (dib != nullptr) {
+    HGDIOBJ old_bitmap = SelectObject(dc, dib);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(255, 255, 255));
+    if (Start(dc)) {
+      for (int cap : kWarmWordCaps) {
+        WarmFont(dc, FontForCap(dc, g_words_face, cap));
+        ++fonts;
+      }
+      for (int cap : kWarmSealCaps) {
+        WarmFont(dc, FontForCap(dc, g_seal_face, cap));
+        ++fonts;
+      }
+      for (int cap : kWarmDigitCaps) {
+        WarmFont(dc, DigitsFont(dc, cap, nullptr));
+        ++fonts;
+      }
+    }
+    SelectObject(dc, old_bitmap);
+    DeleteObject(dib);
+  }
+  if (dc != nullptr) DeleteDC(dc);
+  QueryPerformanceCounter(&t1);
+  g_warm_ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+  ModLog("card scroll  : font_warm=1: a thread of the mod drew each letter of "
+         "%d fonts of the cards one time in %.1f ms, with the noise tile and "
+         "the load of the fonts. So the first draw of a card does not make "
+         "the letters on the frame thread",
+         fonts, g_warm_ms);
+  return 0;
+}
+
+}  // namespace
+
+HFONT WordsFont(HDC dc, int cap) {
+  NoteCold(kWarmWords, cap);
+  return FontForCap(dc, g_words_face, cap);
+}
+
+HFONT SealFont(HDC dc, int cap) {
+  NoteCold(kWarmSeal, cap);
+  return FontForCap(dc, g_seal_face, cap);
+}
+
+void WarmStart() {
+  if (InterlockedExchange(&g_warm_started, 1) != 0) return;
+  char ini[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, ini, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(ini, '\\') : nullptr;
+  int warm = 1, style = 1;
+  if (slash != nullptr && strlen(ini) + 9 < MAX_PATH) {
+    strcpy_s(slash + 1, MAX_PATH - (slash + 1 - ini), "bwvr.ini");
+    warm = static_cast<int>(GetPrivateProfileIntA("bwvr", "font_warm", 1, ini));
+    style = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "hint_card_style", 1, ini));
+  }
+  if (warm == 0 || style == 0) {
+    // With no warm, NoteCold says nothing.
+    InterlockedExchange(&g_warm_started, 0);
+    ModLog("card scroll  : font_warm=%d, hint_card_style=%d: no thread draws "
+           "the letters of the fonts at the start. The first draw of each "
+           "font of a card makes its letters on the frame thread",
+           warm, style);
+    return;
+  }
+  HANDLE thread = CreateThread(nullptr, 0, &WarmThread, nullptr,
+                               CREATE_SUSPENDED, &g_warm_thread);
+  if (thread == nullptr) {
+    InterlockedExchange(&g_warm_started, 0);
+    ModLog("card scroll  : font_warm=1, but Windows gave no thread for the "
+           "warm of the fonts");
+    return;
+  }
+  SetThreadPriority(thread, THREAD_PRIORITY_BELOW_NORMAL);
+  ResumeThread(thread);
+  CloseHandle(thread);
+}
 
 HFONT DigitsFont(HDC dc, int cap, const char** face) {
+  if (GetCurrentThreadId() != g_warm_thread) NoteCold(kWarmDigits, cap);
   // Alegreya and Alegreya SC have old style digits only, and GDI cannot ask
   // for the lining digits of a font. These faces of Windows have lining
   // digits, and their zero is narrower than their capital O.

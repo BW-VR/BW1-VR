@@ -121,6 +121,11 @@ void HangWatchFrame();
 // controllers.cpp
 void ControllerHintsSetOptions(bool on, const char* forced_profile);
 bool ControllerHintsInstall();
+// card_scroll.cpp: the thread that draws the letters of the fonts of the
+// cards one time at the start (font_warm).
+namespace card_scroll {
+void WarmStart();
+}
 void ControllersSetOptions(bool on, int left_hand, bool haptics,
                            bool swap_buttons);
 void ControllersSetFake(const FakeControllerSettings& fake);
@@ -1881,6 +1886,7 @@ void StartVrStep() {
     ControllersInstall();
     ControllerHintsSetOptions(g_controller_hints, g_hint_profile);
     ControllerHintsInstall();
+    card_scroll::WarmStart();
     if (g_controllers) {
       ControllersSetDirect(g_direct_hand);
       if (g_direct_hand.mode == 1) {

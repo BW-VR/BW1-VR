@@ -71,13 +71,24 @@ function Get-ExpectedSha1 {
     return $m.Matches[0].Groups[1].Value
 }
 
+# The SHA-1 of the same file with the flag LARGE_ADDRESS_AWARE. The launcher
+# and the desktop runs set that flag (large_address=1), so the game folder
+# has this file after a start.
+function Get-ExpectedSha1LargeAddress {
+    $header = Join-Path $Bwvr 'src\common\bw_addresses.h'
+    $text = Get-Content -LiteralPath $header -Raw
+    $m = [regex]::Match($text, 'kExpectedSha1LargeAddress\[\]\s*=\s*"([0-9a-f]{40})"')
+    if (-not $m.Success) { Stop-Dev "Cannot read kExpectedSha1LargeAddress from:`n$header" }
+    return $m.Groups[1].Value
+}
+
 # Empty when the folder holds the right game. Else the reason.
 function Test-GameFolder([string]$Dir) {
     $exe = Join-Path $Dir 'runblack.exe'
     if (-not (Test-Path -LiteralPath $exe)) { return "There is no runblack.exe in:`n$Dir" }
     $have = (Get-FileHash -Algorithm SHA1 -LiteralPath $exe).Hash.ToLowerInvariant()
     $want = Get-ExpectedSha1
-    if ($have -ne $want) {
+    if ($have -ne $want -and $have -ne (Get-ExpectedSha1LargeAddress)) {
         return ("runblack.exe in this folder is not the file of the unofficial patch v1.42:`n$Dir`n" +
             "  its SHA-1 is  $have`n  the mod fits  $want`n" +
             "Install the game, then the official patches 1.10 and 1.20, then the`n" +

@@ -1537,6 +1537,7 @@ const char* const kRetiredKeys[] = {
     "exit_test_frame", "crash_test_frame", "target_check_test_frame",
     "registry_test_guard", "intro_skip_test_frame",
     "fake_controller_play_frame", "fake_controller_play_after",
+    "fake_controller_temple_frame",
     "menu_skip_test_frame", "intro_motion_test_seconds",
     "intro_push_test_px",
     // More keys for desktop tests: each key that the mod reads with _test in

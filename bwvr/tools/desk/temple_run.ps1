@@ -50,10 +50,13 @@
 # A click on a door of the hall needs an aim: the door of the Save Game Room
 # is 36 degrees to the right and 7 degrees up from the rest pose of the hall
 # camera. The key temple_test_camera_trace=1 gives one line for each second
-# with the state and the pose of the camera of the room:
+# with the state and the pose of the camera of the room. The guide of the hall
+# ends at a different frame in each run, so fake_controller_temple_frame=3600
+# makes the steps from frame 3600 on wait until the ray is on after the guide
+# (docs/controllers.md, 4.3):
 #
 #   temple_run.ps1 -Name tpl4 -Dll <dll> -Seconds 250 `
-#     -Set "temple_test_camera_trace=1;fake_controller_turns=-36,7,1" `
+#     -Set "temple_test_camera_trace=1;fake_controller_turns=-36,7,1;fake_controller_temple_frame=3600" `
 #     -Steps "aimturn@3600+1 trigger@3660+6"
 param(
     [Parameter(Mandatory = $true)][string]$Name,

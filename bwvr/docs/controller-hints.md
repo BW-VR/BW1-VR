@@ -274,7 +274,10 @@ card with no game call.
 
 ## 3. Controller art
 
-The mod must not ship art it may not ship. Three levels. None is built.
+The mod must not ship art it may not ship. Three levels. The page Controls
+of the settings window has a drawing of each kind of controller in code
+(`ui-layer.md`, 24.6), from which level (b) can come. No level is in the
+hints.
 
 ### (a) Flat icons per profile
 
@@ -342,7 +345,8 @@ the lit part changes. A model in the hand can hide the Hand of the game, so
 draw it beside the Hand, or only when the Hand is idle.
 
 **Controller families.** The mod uses the profile string from
-`XrScreen::HandProfile` (`FamilyOf` in `controller_hints.cpp`):
+`XrScreen::HandProfile` (`FamilyOf` in `controller_hints.cpp`, which is
+`button_map::KindOfProfile`, `controllers.md`, 5.7):
 
 | Family | Profiles | Layout |
 | --- | --- | --- |
@@ -412,7 +416,8 @@ The words and the card are built. These parts are open, in the order of effort:
    options controls page, so switch it by input state.
 2. **A picture of the controller with the button lit.** One silhouette per
    family, one lit control per variant (section 3, level b), with a bright
-   accent on the used control. Show it through the atlas if 64 by 64 is clear.
+   accent on the used control. The drawing of the page Controls has the
+   shapes and the lit control (`controller_art_math.h`). Show it through the atlas if 64 by 64 is clear.
    If not, show it through `DrawBox` with an own material (way D) or on the
    hint card. The Touch controller shape on a Quest 3 differs from the Touch
    Plus shape, so use one generic shape for the family.
@@ -542,7 +547,10 @@ The labels come from one function, `BuildWords`. It follows `xr_screen.cpp`
 | book (the spell book, `spell_book=1`), `button_layout=1` | X, or A when the left hand points | none: that button sends Esc | none |
 
 The words follow the layout of the buttons in use (`button_layout`,
-`controllers.md`, 5.1). The test key of the layout builds the words again, so
+`controllers.md`, 5.1), and the map of the buttons (`button_map_hand`,
+`button_map_other`, `controllers.md`, 5.7): the word of a job is the word of
+the button that the map gives its slot. With the map as made, the table
+above holds. The test key of the layout builds the words again, so
 the next card shows the new buttons. The word of the menu button of the left
 controller is on the card of the left hand: the other hand, or the pointing
 hand of a left handed player (`ControllerHintMenuOnPointing`). The cards have

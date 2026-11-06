@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 // THE ROWS of the window. The window shows one list at a time: the switches
 // of the debug page (debug_menu.cpp), or the settings of the player
 // (settings_panel.cpp). The layout, the parts, the bake and the closes are
@@ -35,6 +37,15 @@ struct WindowRows {
   // Small words under the label of the row, for example "at the next
   // start", or null. The bottom row adds them after a change.
   const wchar_t* (*row_note)(int i);
+  // Null, or for a row whose value_count is -1: its band of a drawing,
+  // kWellWidth by kRowPitch pixels (debug_window_math.h), BGRA with the
+  // color multiplied by the alpha, in the look `style` (hint_card_style). The
+  // window lays it over the paper of the row. A new value draws the row
+  // again.
+  const uint8_t* (*picture)(int i, int value, int style);
+  // Null, or the word of a row that cannot change (value kDebugCannot), in
+  // the place of "not now": the job of a control that stays fixed.
+  const wchar_t* (*fixed_word)(int i);
 };
 const int kWindowSlots = 2;
 
@@ -49,6 +60,10 @@ bool DebugWindowOpenWith(const WindowRows* rows);
 
 // The rows that show now, or null when the window is closed.
 const WindowRows* DebugWindowRows();
+
+// The switch of the row under the ray, or -1. For a picture that lights the
+// part of a row (controls_page.cpp).
+int DebugWindowHoverSwitch();
 
 // True while the window is open. It uses the quad layer of the ring, so
 // RadialMenuShows is true then too.

@@ -94,6 +94,7 @@ add_library(bwvr_mod SHARED
     places_panel.cpp
     debug_window.cpp
     settings_panel.cpp
+    controls_page.cpp
     snapshot.cpp
     spell_book.cpp
     book_bubble.cpp

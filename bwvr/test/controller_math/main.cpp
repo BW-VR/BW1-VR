@@ -3594,6 +3594,7 @@ void CreatureChecks() {
 #include "places_checks.h"
 #include "debug_window_checks.h"
 #include "settings_panel_checks.h"
+#include "button_map_checks.h"
 #include "creature_touch_checks.h"
 
 int main() {
@@ -4035,6 +4036,7 @@ int main() {
   places_checks::PlacesChecks();
   debug_window_checks::DebugWindowChecks();
   settings_panel_checks::SettingsPanelChecks();
+  button_map_checks::ButtonMapChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

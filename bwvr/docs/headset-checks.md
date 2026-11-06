@@ -223,6 +223,8 @@ agents: the log does not tell the item yet.
   the press meets`, not `has no land point`.
 - **The sound stream.** Log: `audio mixer  : QMixer writes the stream`, with
   "passed a write 0 times".
+- **A stop of a sound that keeps its wait** (F24). Log: `audio mixer  : a
+  stop kept its wait` names the sound.
 - **The lines that the player knows.** Log: `hint card    : hint_learn=1: on
   N frames a line that the`.
 

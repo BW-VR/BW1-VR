@@ -174,6 +174,13 @@ struct ChannelState {
   float polar_range;    // the range of the polar position of the DLL
   int polar_play;       // the play in which it was set
   int done_looks;       // looks in a row at which QMixer played nothing
+  // The last play on the channel, for the log of a stop that keeps its wait.
+  int play_kind;        // an AudioPlayKind, or -1 for a play from no call
+                        // of LHSamplePlay
+  int play_channels;    // of the wave, or 0 when it cannot be read
+  int play_rate;
+  DWORD play_bytes;
+  DWORD play_tick;      // GetTickCount at the play
 };
 
 struct Listener {
@@ -245,6 +252,9 @@ DWORD g_stop_thread = 0;
 volatile LONG g_stop_skipped = 0;
 volatile LONG g_stop_kept = 0;
 LONG g_stop_reported = -1;
+// A line for each of the first stops that keep the wait.
+volatile LONG g_stop_kept_logs = 0;
+const LONG kMaxStopKeptLogs = 24;
 // audio_stop_wait_test: the frame of the controllers at which the test key
 // acts by itself, for a desktop run. 0 is off.
 int g_stop_test_frame = 0;
@@ -531,6 +541,18 @@ DWORD WINAPI h_PlayEx(void* session, int channel, DWORD flags, void* wave,
     c.shadowed = false;
     const uint8_t* w = static_cast<const uint8_t*>(wave);
     const int rate = AudioOutRate();
+    c.play_kind = g_in_play ? g_play_kind : -1;
+    c.play_channels = 0;
+    c.play_rate = 0;
+    c.play_bytes = 0;
+    c.play_tick = GetTickCount();
+    if (Readable(w, kWaveSize)) {
+      const PCMWAVEFORMAT* f =
+          reinterpret_cast<const PCMWAVEFORMAT*>(w + kWaveFormat);
+      c.play_channels = f->wf.nChannels;
+      c.play_rate = static_cast<int>(f->wf.nSamplesPerSec);
+      c.play_bytes = *reinterpret_cast<const DWORD*>(w + kWaveBytes);
+    }
     // A place that was set in this play makes it a positional sample. The
     // bed of the atmosphere is the flat stereo wave of LHAtmosProcess.
     // Before the first ears are known a voice has no direction and no
@@ -701,8 +723,8 @@ void WINAPI h_StopSleep(DWORD ms) {
   const int channel =
       g_stop_thread == GetCurrentThreadId() ? g_stop_channel : -1;
   g_stop_channel = -1;
-  if (g_stop_wait == 0 && g_on && ms == kStopWaitMs && channel >= 0 &&
-      channel < kChannels) {
+  const bool known = channel >= 0 && channel < kChannels;
+  if (g_stop_wait == 0 && g_on && ms == kStopWaitMs && known) {
     ChannelState& c = g_channels[channel];
     if (c.shadowed && c.muted) {
       c.stop_skipped = true;
@@ -711,7 +733,42 @@ void WINAPI h_StopSleep(DWORD ms) {
     }
   }
   InterlockedIncrement(&g_stop_kept);
+  LARGE_INTEGER t0, t1, f;
+  QueryPerformanceCounter(&t0);
   o_StopSleep(ms);
+  QueryPerformanceCounter(&t1);
+  // THE MEASURE OF A STOP THAT KEEPS ITS WAIT: which sound it is, and how
+  // long the thread waits.
+  if (InterlockedIncrement(&g_stop_kept_logs) > kMaxStopKeptLogs) return;
+  QueryPerformanceFrequency(&f);
+  const double waited =
+      static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+  static const char* const kKindNames[] = {"other", "effect", "animation",
+                                           "atmosphere", "advisor"};
+  if (!known) {
+    ModLog("audio mixer  : a stop kept its wait of %lu ms and waited %.1f ms. "
+           "The mod knows no channel for it (audio_stop_wait=%d), frame %llu",
+           ms, waited, g_stop_wait, ControllersFrameCount());
+    return;
+  }
+  const ChannelState& c = g_channels[channel];
+  const int kind = c.play_kind;
+  const double seconds =
+      c.play_channels > 0 && c.play_rate > 0
+          ? static_cast<double>(c.play_bytes) / (2.0 * c.play_channels) /
+                c.play_rate
+          : 0.0;
+  ModLog("audio mixer  : a stop kept its wait of %lu ms and waited %.1f ms: "
+         "channel %d, %s, played by QMixer (%s), a wave of %d channel(s) at "
+         "%d Hz and %.2f s, %lu ms after its play (audio_stop_wait=%d), "
+         "frame %llu",
+         ms, waited, channel,
+         kind >= 0 && kind <= kAudioAdvisor ? kKindNames[kind]
+                                            : "no call of LHSamplePlay",
+         c.shadowed ? "the mod also plays it" : "the mod does not play it",
+         c.play_channels, c.play_rate, seconds,
+         static_cast<unsigned long>(GetTickCount() - c.play_tick), g_stop_wait,
+         ControllersFrameCount());
 }
 
 // The hook of the Sleep of the audio DLL, when the DLL is the known one.

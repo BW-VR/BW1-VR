@@ -934,9 +934,15 @@ must be `6A 14 FF 15`. If they are not, the audio DLL is not the known one:
 the mod changes nothing, and the log says so. `audio_stop_wait=1` gives each
 stop its wait, as in the game. The mixer report (each 30 s) counts the stops:
 
+The first 24 stops that keep their wait each have a line with the channel,
+the kind of the play (`other`, `effect`, `animation`, `atmosphere`,
+`advisor`, or no call of `LHSamplePlay`), whether the mixer of the mod also
+plays it, the wave, the time since its play and the time of the wait:
+
 ```
 audio mixer  : audio_stop_wait=0. The audio DLL calls Sleep(20) on the thread of the game when it stops a sound that plays. The mod skips that wait for a sound that the mixer of the mod plays: QMixer is silent for it, and the voice of the mod fades the same way. A sound that QMixer plays keeps the wait
 audio mixer  : the audio DLL stopped 26 sounds that played. The mod skipped the wait of 20 ms for 24 of them, and 2 kept it (audio_stop_wait=0)
+audio mixer  : a stop kept its wait of 20 ms and waited W ms: channel C, effect, played by QMixer (the mod does not play it), a wave of 1 channel(s) at R Hz and S s, T ms after its play (audio_stop_wait=0), frame N
 ```
 
 With `test_keys=1`, Ctrl and Pause change `audio_stop_wait` between 0 and 1

@@ -509,8 +509,11 @@ keeps the mod as it is.
   test.
 - **F24. No wait of 20 ms at the stop of a sound.** `audio_stop_wait=0`
   skips the wait only for the sounds of the mod's mixer. The other sounds
-  still make the game thread wait, and this can stop the game for 40 to
-  170 ms. Another change may already have removed it: measure first.
+  keep it: the logs of desktop runs have 1 or 2 such stops in each run. The
+  log names each one (`audio.md`, 7.6): the kind of the sound, its
+  wave and the time of the wait. Open: read those lines from a desktop run
+  and from a play, and decide whether a stop of a sound that QMixer plays
+  can skip its wait with no click.
 
 ### Faults of the plain game
 

@@ -134,21 +134,24 @@ if ($Kind -eq 'totem') {
     # times 10 cm up (up, seek_step_cm=10). The lines "hand bulk" have the
     # amount in the Hand, one line at 15, 30, 60 and 120 cm of the room from
     # the pile, and the end of the take with the button of the game, the grip,
-    # the interface action and the influence at that time. The scripted grip
-    # never falls, so the take goes on to the opening of the grip with each
-    # value of near_take_keeps.
+    # the interface action and the influence at that time. At step 1400 the
+    # squeeze dips to 0.59 for 2 frames (gripdip), a fast fall. With
+    # near_take_keeps=1 the line "the grip falls fast during a bulk take and
+    # stays closed" comes, and the take goes on to the opening of the grip.
+    # With 0 the dip opens the grip and ends the take.
     if ($Plan -eq '') { $Plan = 'gostore,store,pile,up,up,up' }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 75 }
     if ($Steps -eq '') {
         $Steps = $pre + 'seek@920+1 seek@1000+1 seek@1040+1 shot@1070+1 grip@1080+600 slap@1160+1 ' +
-                 'pull@1220+10 shot@1260+1 seek@1300+1 seek@1340+1 seek@1380+1 shot@1420+1 shot@1660+1 shot@1720+1'
+                 'pull@1220+10 shot@1260+1 seek@1300+1 seek@1340+1 seek@1380+1 gripdip@1400+2 shot@1420+1 shot@1660+1 shot@1720+1'
     }
     $keys = "$keys;seek_step_cm=10"
 } elseif ($Kind -eq 'land') {
     # The Hand stops at the land (bwvr/docs/hand-model.md, "The Hand stops at
     # the land"). Near the Village Store the Hand's point goes 3 cm over open
-    # land (open: no body within 40 cm of the room), then 15 cm of the room
+    # land in the middle of the view (open: no body within 40 cm of the
+    # room), then 15 cm of the room
     # down (down, seek_step_cm=15), so the real hand is 12 cm in the land. The
     # hand steps 2 cm to the side (nudge), 12 cm to the other side (slap) and
     # back (slap) in the land, and then 15 cm up from the drawn point (up),

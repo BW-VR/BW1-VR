@@ -205,6 +205,9 @@ bool ControllersGrabHeld();
 // button of the game is down, for the log of a bulk take.
 bool ControllersGripClosed();
 bool ControllersGameRightDown();
+// controllers.cpp: the render pixel of a point, for the test word "open".
+bool ControllersPointPixel(const float point[3], float* x, float* y,
+                           float* width, float* height);
 // tabletop.cpp: the teleport of the God view, for the test word "go".
 bool TabletopGodTeleport(const float target[3]);
 // temple.cpp: the door of the Temple (0) or the next leash post (1), for the
@@ -9907,9 +9910,10 @@ namespace {
 //           sprite of the fish (DrawnFishOf), not a candidate.
 //   open    The Hand's point goes 3 cm of the room over open land: the
 //           nearest point, on rings of 10 cm up to 1.5 m of the room round
-//           the point, that is land (not the sea) and 40 cm of the room or
-//           more from the body of each candidate. Of the points of the first
-//           ring with one, the one nearest to the camera.
+//           the point, that is land (not the sea), in the middle of the view
+//           (20 to 80 percent across, 35 to 85 percent down the render) and
+//           40 cm of the room or more from the body of each candidate. Of
+//           the points of the first ring with one, the lowest in the view.
 enum {
   kPlanNone = 0, kPlanScroll, kPlanAir, kPlanCrown, kPlanPalm, kPlanCreature,
   kPlanCreaturePalm, kPlanGo, kPlanPicture, kPlanScrolls, kPlanGoSite,
@@ -10537,10 +10541,12 @@ bool PlanPoint(int word, float out[3]) {
   if (word == kPlanOpen) {
     const float clear = 0.40f * units;
     float best[3] = {0.0f, 0.0f, 0.0f};
+    float best_pixel[2] = {0.0f, 0.0f};
     bool have = false;
     int ring_cm = 0;
+    int off_view = 0;
     for (int r = 0; r <= 150 && !have; r += 10) {
-      float best_camera = 1e30f;
+      float lowest = -1.0f;
       const int steps = r == 0 ? 1 : 16;
       for (int a = 0; a < steps; ++a) {
         const float angle = 6.2831853f * static_cast<float>(a) / steps;
@@ -10552,6 +10558,16 @@ bool PlanPoint(int word, float out[3]) {
         const float land =
             reinterpret_cast<GetAltitudeFn>(kGetAltitude)(coords);
         if (!(land > 0.0f && land < 5000.0f)) continue;
+        // In the view: the middle 60 percent across, and from 35 to 85
+        // percent down the picture, so the hand over the point shows.
+        const float at[3] = {x, land, z};
+        float px = 0.0f, py = 0.0f, w = 0.0f, h = 0.0f;
+        if (!ControllersPointPixel(at, &px, &py, &w, &h) ||
+            px < 0.2f * w || px > 0.8f * w || py < 0.35f * h ||
+            py > 0.85f * h) {
+          ++off_view;
+          continue;
+        }
         bool free = true;
         for (int i = 0; i < g_candidate_count && free; ++i) {
           const Candidate& c = g_candidates[i];
@@ -10561,29 +10577,33 @@ bool PlanPoint(int word, float out[3]) {
                  clear;
         }
         if (!free) continue;
-        const float cx = x - Camera()[0], cz = z - Camera()[2];
-        const float to_camera = cx * cx + cz * cz;
-        if (to_camera < best_camera) {
-          best_camera = to_camera;
+        // Of the first ring with a point, the point lowest in the picture.
+        if (py > lowest) {
+          lowest = py;
           best[0] = x;
           best[1] = land + 0.03f * units;
           best[2] = z;
+          best_pixel[0] = px / w;
+          best_pixel[1] = py / h;
           have = true;
           ring_cm = r;
         }
       }
     }
     if (!have) {
-      ModLog("hand pick    : seek plan: open. No open land within 1.5 m of "
-             "the room of the Hand (%d candidates), frame %llu",
-             g_candidate_count, g_frame);
+      ModLog("hand pick    : seek plan: open. No open land in the view within "
+             "1.5 m of the room of the Hand (%d candidates, %d points off the "
+             "middle of the view), frame %llu",
+             g_candidate_count, off_view, g_frame);
       return false;
     }
     for (int k = 0; k < 3; ++k) out[k] = best[k];
     ModLog("hand pick    : seek plan: open. The Hand's point goes 3 cm of the "
            "room over open land at %.2f %.2f %.2f, %d cm of the room from "
-           "where it is, with no body of the %d candidates within 40 cm, "
-           "frame %llu", out[0], out[1], out[2], ring_cm, g_candidate_count,
+           "where it is, with no body of the %d candidates within 40 cm. The "
+           "land there is at %.0f percent across and %.0f percent down the "
+           "picture, frame %llu", out[0], out[1], out[2], ring_cm,
+           g_candidate_count, best_pixel[0] * 100.0f, best_pixel[1] * 100.0f,
            g_frame);
     return true;
   }

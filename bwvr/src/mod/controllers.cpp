@@ -382,6 +382,13 @@ uint64_t g_pull_start = 0;
 uint64_t g_pull_frames = 0;
 // The exact Hand: the offset from the grip to the real index tip in the
 // world, on the last frame, so the word "seek" puts the tip on the object.
+// The camera of the render pixel of the last frame, for the pixel of other
+// points (ControllersPointPixel).
+float g_pixel_eye[3] = {0.0f, 0.0f, 0.0f};
+float g_pixel_room[9];
+float g_pixel_head[9];
+controller_math::Screen g_pixel_screen = {0.0f, 0.0f, 0.0f, 0.0f};
+bool g_have_pixel_camera = false;
 bool g_have_tip_offset = false;
 float g_last_tip_offset[3] = {0.0f, 0.0f, 0.0f};
 // The words "lean" and "look" step the invented head. Without a "lean" word,
@@ -1500,6 +1507,15 @@ void Compute() {
   }
   p.render_w = 2.0f * screen.hx;
   p.render_h = 2.0f * screen.hy;
+  // The camera of the pixel of this frame, for the pixel of other points
+  // (ControllersPointPixel).
+  for (int i = 0; i < 3; ++i) g_pixel_eye[i] = eye[i];
+  for (int i = 0; i < 9; ++i) {
+    g_pixel_room[i] = room[i];
+    g_pixel_head[i] = head[i];
+  }
+  g_pixel_screen = screen;
+  g_have_pixel_camera = true;
   if (p.have_grip) {
     p.have_hand_pixel = controller_math::PointPixel(
         eye, room, head, p.reach, screen, &p.hand_x, &p.hand_y,
@@ -4537,6 +4553,24 @@ bool ControllerRenderPixel(float* x, float* y, bool* off_view) {
 // active box is not 0 while the Lionhead logo plays, so ControllerRenderPixel
 // gives the pixel of the aim ray there. False with controller_hand=0. With
 // no pixel of the Hand, off_view is true.
+// For a test word (hand_direct.cpp, seek_plan "open"): the render pixel of a
+// point of the world with the camera of the pixel of the Hand of this frame,
+// and the size of the render. False with no camera, and for a point off the
+// render.
+bool ControllersPointPixel(const float point[3], float* x, float* y,
+                           float* width, float* height) {
+  if (!g_have_pixel_camera) return false;
+  bool off = true;
+  if (!controller_math::PointPixel(g_pixel_eye, g_pixel_room, g_pixel_head,
+                                   point, g_pixel_screen, x, y, &off) ||
+      off) {
+    return false;
+  }
+  *width = 2.0f * g_pixel_screen.hx;
+  *height = 2.0f * g_pixel_screen.hy;
+  return true;
+}
+
 bool ControllerHandPixel(float* x, float* y, bool* off_view) {
   if (!DirectMode()) return false;
   if (!g_point.have_hand_pixel) {

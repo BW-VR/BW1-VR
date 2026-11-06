@@ -232,4 +232,30 @@ inline bool UseStep(Use* u, bool hand_empty, bool seed_lives, bool miracle,
   return true;
 }
 
+// THE CIRCLE OF A PATH: the middle of the points of the path of the Hand,
+// and the widest span between two points across the land (x and z). The game
+// makes the size of a circle as 1.05 times its width across the view. False
+// with no point.
+inline bool CircleOfPath(const float (*path)[3], int count, float middle[3],
+                         float* widest) {
+  middle[0] = middle[1] = middle[2] = 0.0f;
+  *widest = 0.0f;
+  if (count <= 0) return false;
+  for (int i = 0; i < count; ++i) {
+    for (int k = 0; k < 3; ++k) middle[k] += path[i][k];
+  }
+  for (int k = 0; k < 3; ++k) middle[k] /= static_cast<float>(count);
+  float most = 0.0f;
+  for (int i = 0; i < count; ++i) {
+    for (int j = i + 1; j < count; ++j) {
+      const float dx = path[i][0] - path[j][0];
+      const float dz = path[i][2] - path[j][2];
+      const float d = dx * dx + dz * dz;
+      if (d > most) most = d;
+    }
+  }
+  *widest = sqrtf(most);
+  return true;
+}
+
 }  // namespace miracle_math

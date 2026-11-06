@@ -54,6 +54,25 @@ inline void ScriptFrameChecks() {
   // A frame before the shift gives no number below 0.
   Check(Counted(10, 2750, 2750, true, 850) == 0,
         "a frame before the Hand counts as 0", 0, 0);
+
+  // The second anchor: a test save (the first shift -730) and the ray of the
+  // Temple steady at the frame 3000 of the game, which counts as 3730. The
+  // anchor is 3600, so its shift is 130.
+  const int64_t temple_shift = 3730 - 3600;
+  Check(CountedTwice(3000, 3600, 800, true, -730, 3600, true, temple_shift) ==
+            3600,
+        "the frame at which the ray is steady counts as the anchor", 0, 0);
+  Check(CountedTwice(3060, 3660, 800, true, -730, 3600, true, temple_shift) ==
+            3660,
+        "a step 60 frames after the anchor comes 60 frames after it", 0, 0);
+  Check(CountedTwice(2000, 3600, 800, true, -730, 3600, false, 0) == 0,
+        "a step after the anchor waits while the ray is not steady", 0, 0);
+  Check(CountedTwice(200, 930, 800, true, -730, 3600, false, 0) == 930,
+        "a step before the anchor keeps the first anchor only", 0, 0);
+  Check(CountedTwice(30, 3600, 800, false, 0, 3600, true, -2000) == 0,
+        "while the first anchor waits the second one waits too", 0, 0);
+  Check(CountedTwice(3000, 3600, 0, false, 0, 0, false, 0) == 3000,
+        "with both keys off the number is the frame", 0, 0);
 }
 
 }  // namespace script_frame_checks

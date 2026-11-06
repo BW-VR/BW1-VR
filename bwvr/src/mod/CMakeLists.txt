@@ -87,6 +87,7 @@ add_library(bwvr_mod SHARED
     creature_stay.cpp
     creature_look.cpp
     miracle.cpp
+    miracle_watch.cpp
     village.cpp
     radial_menu.cpp
     panel_kit.cpp
@@ -104,6 +105,7 @@ add_library(bwvr_mod SHARED
     influence_edge.cpp
     vignette.cpp
     video_view.cpp
+    head_blinder.cpp
     teleport.cpp
     world_grab.cpp
     tabletop.cpp

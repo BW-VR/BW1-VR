@@ -455,7 +455,7 @@ inline void EyeOfMatrix(const float m[12], float eye[3]) {
 // updates that end a flight and bring a camera to its rest pose get the
 // middle of the view too. An update with a real pointer (the mouse, or a
 // press on empty space) keeps the view of the head: its pixel is a pixel of
-// that view.
+// that view. For a press with the ray, PressPixel gives that pixel.
 //
 // head_on: the head is on the camera now. neutral: the mod gives this update
 // the middle of the view. rest: this update ends a flight, or it is the
@@ -463,6 +463,54 @@ inline void EyeOfMatrix(const float m[12], float eye[3]) {
 // camera to its rest pose.
 inline bool CameraOwnScreen(int rule, bool head_on, bool neutral, bool rest) {
   return rule != 0 && head_on && (neutral || rest);
+}
+
+// THE PIXEL OF A PRESS FOR THE CAMERA CODE OF A ROOM (temple_press_pixel).
+// The update of a room camera finds a door with a ray from the pixel of a
+// press on empty space (InnerCamera::CalcDoorHit 0x007969E0, and
+// InnerCamera::RayCast 0x00795980). That ray starts at the stored camera of
+// the engine, which is the camera of the game with no lean. It goes along the
+// pixel as the rotation of the engine has it (LH3DTech::Get3DPointFromScreen
+// 0x0081B370). That rotation has the turn and the pitch of the head, but no
+// roll: the per eye matrix adds the roll in the eye passes. The pixel of the
+// pointer is a pixel of the view of the head, with its roll and its lean. So
+// with a tilted head the ray of the camera code goes to a different place
+// than the ray that the player sees, and a click on a door can miss the door.
+//
+// With temple_press_pixel=1 the camera code gets the pixel that puts its own
+// ray through the end of the ray of the player. m is the world to camera
+// matrix of the engine with no scale (p_camera = p_world * m, the rotation
+// part only), camera is the stored camera, and point is the end of the ray.
+// The screen is the half size and the two field of view scalars of the
+// engine. False when the point is not in front of the camera.
+inline bool PressPixel(const float m[9], const float camera[3],
+                       const float point[3], float hx, float hy, float fx,
+                       float fy, float* x, float* y) {
+  const float d[3] = {point[0] - camera[0], point[1] - camera[1],
+                      point[2] - camera[2]};
+  float c[3];
+  for (int j = 0; j < 3; ++j) {
+    c[j] = d[0] * m[0 * 3 + j] + d[1] * m[1 * 3 + j] + d[2] * m[2 * 3 + j];
+  }
+  if (!(c[2] > 1e-4f) || !(fx > 0.0f) || !(fy > 0.0f)) return false;
+  *x = hx + hx * fx * c[0] / c[2];
+  *y = hy - hy * fy * c[1] / c[2];
+  return true;
+}
+
+// The direction of the ray of the camera code for a pixel, as a unit vector
+// in the world: LH3DTech::Get3DPointFromScreen with the same matrix and
+// screen as PressPixel, less the stored camera.
+inline void PixelRay(const float m[9], float hx, float hy, float fx, float fy,
+                     float x, float y, float out[3]) {
+  const float v[3] = {(x - hx) / (hx * fx), (hy - y) / (hy * fy), 1.0f};
+  for (int i = 0; i < 3; ++i) {
+    out[i] = m[i * 3 + 0] * v[0] + m[i * 3 + 1] * v[1] + m[i * 3 + 2] * v[2];
+  }
+  const float length = sqrtf(Dot(out, out));
+  if (length > 1e-6f) {
+    for (int i = 0; i < 3; ++i) out[i] /= length;
+  }
 }
 
 // THE FADE OF THE TEMPLE IN THE SECOND EYE PASS (temple_fade_eyes).

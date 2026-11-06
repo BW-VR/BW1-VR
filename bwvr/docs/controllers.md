@@ -845,6 +845,7 @@ The scripts in `bwvr/tools/desk/` use these keys and words.
 | `fake_controller_gesture_cm` | 30 | The side of the square for `trace`, in front of the head, 5 to 200 |
 | `fake_controller_play_frame` | 0 | See 4.3. A test key |
 | `fake_controller_play_after` | 1000 | See 4.3. A test key |
+| `fake_controller_temple_frame` | 0 | See 4.3. The steps from frame N on wait for the ray of the Temple. A test key |
 | `fake_controller_front` | 0 | 1 lets the fake controller act while the game window is not in front, also with `controller_window_behind=0`. The fake controller already stands for a headset session that has the focus of the runtime (section 9), so the key is rarely needed |
 | `fake_head_right_cm`, `fake_head_up_cm`, `fake_head_forward_cm` | 0 | A still lean of the invented head. The words `lean` and `look` use it |
 
@@ -962,6 +963,15 @@ places the Hand some frames after the Main Menu of the start closes
 `fake_controller_play_after=60`. The steps from frame N on then come sooner
 than their numbers, and the log says how many frames sooner. With M at 1000
 or more, a script keeps its frames when the Hand comes before frame N.
+
+`fake_controller_temple_frame=T` is a second anchor for the Temple. The guide
+of the first visit of the hall has a length in seconds, so it ends at a
+different frame in each run. The steps from frame T on count from the frame
+at which the ray of the Temple was on for 30 frames in a row (after the
+guide, `TempleRayOn`). That frame is T. The first anchor counts first, and
+its number is the frame of the second anchor. The test keys with a frame of
+their own count the same way. The log has the line `the ray of the Temple is
+on for 30 frames in a row` with the frame of the game.
 
 The clicks of the start dialog turn the pose of the fake hand. So a preset on
 the fake hand must start after the dialog (`aim_test_touch=N`). In a run with
@@ -2400,8 +2410,14 @@ action, pixel, drag).
 **The Hand** [V]. The Hand has the state of the Temple (`HandStateCitadel`,
 state 10, `Update` `0x005B0D00`). It is at the pixel of the pointer, 5 units
 nearer to the camera than the point at `0x00E360C8`, and from 4 to 300 units
-away. With the hands of the overlay on, the Hand of the game does not show in
-a room: the two real hands and the ray show.
+away. While the ray is on, the mod does not draw the mesh of that Hand
+(`temple_hide_hand=1`): the two real hands, the ray and its cross show. The
+state of the Hand, its place and the pick of the game stay as the game makes
+them. Only the draw of the mesh stops, in the same hook that hides the game's
+Hand on the land (`hand_hide_game`, `hand.md`). So with `hand_hide_game=0` the
+Hand shows in a room too. With `test_keys=1` the minus key of the number pad
+shows and hides the mesh, also in a room. While a guide plays, and with
+`temple_pointer=0`, the ray is off and the game draws its Hand.
 
 **The keys** [V]. Esc in a room goes to the hall, and in the hall it leaves
 the Temple (`fn_00794830`). F4 to F9 go to a room (`fn_00794900`). Each other
@@ -2510,18 +2526,28 @@ A frame in the Temple with no update of the room camera has no main camera
 call. The mod then gives the camera of the room to the engine before the
 scene walk (`TempleBeforeScene`), so each frame has its head pose.
 
+With one walk (`one_walk=1`, the default, `backend.md`, "One walk for both
+eyes") only the pass of the left eye walks the scene, so the game builds the
+camera of the room one time in a frame. That pass draws the right eye too:
+each vertex moves by the disparity of its depth, which is the camera of the
+left eye moved by the separation along its right axis, with its roll. So the
+room has stereo with one walk and with two walks.
+
 With `temple_view=0` the call in the pass stays as the game makes it. Each eye
 pass then draws the room from the middle of the head, with the newest head
-pose and with no roll. The two eye pictures are then one picture, so the room
-has no depth. The headset gets a level picture with a pose that has the roll
+pose and with no roll. With two walks (`one_walk=0`) the two eye pictures are
+then one picture, so the room has no depth. With one walk the left eye is at
+the middle of the head, and the right eye is one separation to the right of
+it. The headset gets a level picture with a pose that has the roll
 of the head, so the room tilts with the head. The picture is also one frame
 of head motion away from the pose that the frame declares, so the room moves
 with each move of the head. The hands and the ray of the overlay have the
 camera of the eye with each value.
 
 The log has one check line for each window (11.7): how far the view of an
-eye pass was from the head pose of its frame, in degrees, and how far apart
-the cameras of the two eyes were. With `temple_view=1` the first number is 0.
+eye pass was from the head pose of its frame, in degrees, how far apart the
+cameras of the two eyes were, and how far the camera of a pass was from the
+middle of the head. With `temple_view=1` the first number is 0.
 
 **The camera does not follow the pointer** (`temple_camera_follow=0`). A hook
 on `InnerCamera::Update` gives the camera the middle of the view as the
@@ -2559,6 +2585,28 @@ and the drag flag. So the camera gets the pointer for such a press. The same
 hook gives it the pixel of the press, and that pixel stays until the button
 goes up. The door acts at the press. The camera sees a pointer that does not
 move, so it does not turn.
+
+**The pixel of a press is a pixel of the camera code** (`temple_press_pixel=1`).
+The camera finds the door with its own ray from the pixel of the press
+(`InnerCamera::RayCast`, 11.1). That ray starts at the stored camera of the
+engine, which is the camera of the game with no lean. It goes along the pixel
+as the rotation of the engine has it (`LH3DTech::Get3DPointFromScreen` at the
+near plane). That rotation has the turn and the pitch of the head, but no
+roll: the per eye matrix adds the roll in the eye passes. The pixel of the
+pointer is a pixel of the view of the head, with its roll and its lean. So
+with a tilted head the ray of the camera goes to a different place than the
+ray that the player sees. At a roll of 15 degrees a click on the door of the
+Save Game Room at the right of the view missed the door.
+
+At the first update of a press the mod gives the camera of the room to the
+engine (`InnerCamera::PreDraw`), as the update of the game does first. It then
+reads the rotation and the stored camera of the engine, and it finds the pixel
+that puts the ray of the camera through the end of the ray of the hand
+(`temple_math::PressPixel`). The camera gets that pixel for the whole press.
+So a door opens at each roll and each lean of the head. With no roll and no
+lean the two pixels are one pixel. A press with no ray (the mouse, or
+`temple_pointer=0`) keeps the pixel of the pointer.
+`temple_press_pixel=0` gives the camera the pixel of the view of the head.
 
 **The camera does not fly to its rest pose** (`temple_camera_flight=0`). When
 the player comes into the Temple, the camera of the hall flies along a path:
@@ -2600,7 +2648,10 @@ gets the same fade as the first eye. The frame time of the game goes back
 after the call. With `temple_fade_eyes=0` the second eye pass skips the whole
 function, and only the left eye has the fade: at each entry of the Temple, at
 each change of the room and when the player leaves the Temple, the left eye
-is dark (or white) for about one second and the right eye is not.
+is dark (or white) for about one second and the right eye is not. This
+key acts only with two walks (`one_walk=0`). With one walk no second eye pass
+walks the scene, and the right eye gets the fade of the left eye with each
+value.
 
 A room from the ring, and Esc in a room, go through `Temple::GoToRoom`. The
 game ends the flight itself there, with the Temple black and with two updates
@@ -2653,7 +2704,9 @@ button. A dialog box in the Temple keeps the card of a dialog box.
 | `temple_camera_flight` | 0 | 0 the camera of a room is at its rest pose at once when the player comes into the room. 1 the camera flies there, as in the plain game |
 | `temple_view` | 1 | 1 each eye pass draws a room from the head pose of the frame, with its roll and the place of its eye. 0 each eye pass draws from the camera that the game builds in the pass: the newest head pose, no roll, and one place for both eyes |
 | `temple_camera_screen` | 1 | 1 the camera code of a room reads a neutral pointer in the screen of the game camera, so the head does not turn the camera. 0 it reads it in the view of the head |
-| `temple_fade_eyes` | 1 | 1 the fade of the Temple shows in both eyes. 0 it shows in the left eye only |
+| `temple_press_pixel` | 1 | 1 the camera code of a room gets a press as the pixel that puts its own ray through the end of the ray of the hand, so a door opens at each roll and lean of the head. 0 it gets the pixel of the view of the head |
+| `temple_hide_hand` | 1 | 1 the mesh of the game's Hand is not drawn in a room while the ray is on. 0 the game draws its Hand at the pointer, in front of the thing under it |
+| `temple_fade_eyes` | 1 | 1 the fade of the Temple shows in both eyes. 0 it shows in the left eye only, with two walks (`one_walk=0`) |
 | `temple_pointer_depth_cm` | 300 | The depth of the ray before the game gives a point, 50 to 2000 |
 | `temple_turn` | 1 | 1 the stick of the pointing hand turns the player in a room by one step. 0 the stick does what it does on the land |
 | `temple_taps` | 1 | On the land: 1 the leash posts at the Temple are targets of the grip (`village.md`) |
@@ -2707,12 +2760,16 @@ temple       : in the Creature Room a guide of the game plays, so the ray is off
 temple       : the pointer is on a check box that is on (sub mesh 2) at the pixel 423 2531, at 9.60 0.00 9.21 in the world, frame 3547
 temple       : the game gets the mouse message 3 at the pixel 503 2520 in the hall, with the pointer on a check box that is on (sub mesh 2). The mouse object holds the Action button. The thing under the pointer is 0.1 cm from the ray, frame 3581
 temple       : the room starts the drag of a control, frame 3582
+temple       : a press in the hall at the pixel 1956 812 of the view of the head. The camera code of the room gets the pixel <x> <y> (temple_press_pixel=1): its ray goes 0.0 cm of the room from the end of the ray of the hand, and the ray of the pixel of the head goes <d> cm from it. The head has a roll of 15.0 degrees, frame <f>
+hand exact   : in a room of the Temple the mesh of the game's Hand is not drawn (temple_hide_hand=1). The ray and its cross are the pointer, frame <f>
+hand exact   : in the state of the Temple 900 draws of the mesh of the game's Hand were hidden and 0 were drawn this window (temple_hide_hand=1)
+temple       : after the update of the press at the pixel <x> <y> the camera of the hall has the state 3 (it had 1). The state 3 is the way through a door, frame <f>
 temple       : the camera of the hall moved from frame 1950 to frame 5312: it turned 37.0 degrees to the side and 16.2 degrees up, and it went 17.68 units. Along its path it turned 312.0 degrees in all and went 122.88 units. At the start the mouse object held no button, and the drag of the room was 0
 temple       : the camera of the hall does not fly to its rest pose (temple_camera_flight=0). The mod ends the flight of the game in one cut: the clock of the flight was at 0.00 s of 5.50 s. The camera is at 0.00 9.92 18.32 with a heading of 180.0 degrees and a pitch of -5.1 degrees, which is 5.3 degrees and 56.00 units from its pose before the cut. The path ends at 0.00 9.92 18.32, and 10 updates of 1 s brought the camera 0.00 units from there to its rest pose. It has the state 1, and the fade of the Temple is 1.15, frame 121
 temple       : the game changed the room to the Save Game Room and ended the flight of its camera itself. The mod brings the camera to its rest pose in the same update (temple_camera_flight=0): 10 updates of 1 s moved it 5.66 units and 43.3 degrees. It is at -95.39 4.80 -87.32 with a heading of 87.8 degrees and a pitch of 32.2 degrees, and the fade of the Temple is 1.20, frame 4400
 temple       : the Save Game Room has 5 saved games (the number and the name of each one): [...]
 temple       : the stick turns the player 45 degrees to the right in the hall, 45 degrees to the right in all in this visit, frame 2800
-temple       : in 900 eye passes the game built the camera of a room. The view of the pass was 0.00 degrees at the most from the head pose of its frame, and the roll of that pose was 20.0 degrees at the most. The cameras of the two eyes were 6.68 to 6.68 cm of the room apart in 450 frames (temple_view=1). 0 passes had no head pose of the frame. 450 camera calls of a room went through with no head, for the camera code of the room
+temple       : in 450 eye passes the game built the camera of a room. The view of the pass was 0.00 degrees at the most from the head pose of its frame, and the roll of that pose was 20.0 degrees at the most. The cameras of the two eyes were 6.68 to 6.68 cm of the room apart in 450 frames, 450 of them in one walk, where the right eye is the left eye moved by the separation of one walk. The camera of a pass was 3.34 to 3.34 cm of the room from the middle of the head (temple_view=1). 0 passes had no head pose of the frame. 450 camera calls of a room went through with no head, for the camera code of the room
 temple       : 450 updates of a room camera read the screen of the game camera this window (temple_camera_screen=1), and the mod made the main camera call of 0 frames that had none
 pass guard   : the fade of the Temple went to the second eye with no time step in 450 passes (temple_fade_eyes=1)
 ```
@@ -2721,9 +2778,27 @@ The line `in ... eye passes the game built the camera of a room` is the check
 of the view, one time for each window of 450 frames. `head_camera.cpp` reads
 the matrix of the engine after the build of each eye pass. The first number is
 the angle between that view and the view of the head pose of the frame. With
-`temple_view=1` it is 0, and the two eye cameras are the distance of the eyes
-apart. With `temple_view=0` it is the roll of the head and the turn of the
-head since the main camera call, and the two cameras are 0 cm apart.
+`temple_view=1` it is 0, the two eye cameras are the distance of the eyes
+apart, and the camera of a pass is half of that distance from the middle of
+the head. With `temple_view=0` the angle is the roll of the head and the turn
+of the head since the main camera call, and the camera of a pass is at the
+middle of the head (0 cm). The two cameras are then 0 cm apart with two walks,
+and one separation apart with one walk.
+
+With two walks (`one_walk=0`) the game builds the camera of the room in each
+eye pass, and a pair is the cameras of the two passes of a frame. With one
+walk only the pass of the left eye walks the scene. Its pair is the camera of
+that pass and the same camera moved by the separation of one walk along its
+right axis, because that is the view that one walk gives the right eye
+(`backend.md`, "One walk for both eyes"). The distance from the middle of the
+head is a read of the matrix of the engine before and after the mod gave the
+pass the camera of its eye, so it shows the place of the eye with each walk.
+
+Each press with the ray has a line with the pixel of the view of the head,
+the pixel that the camera code gets, and how far the ray of the camera code
+goes from the end of the ray of the hand with each pixel. The line after it
+has the state of the camera after the update of the press: 3 is the way
+through a door.
 
 Each press in a room has a line with the message, the pixel, the control under
 the pointer and the distance from that thing to the ray. So a log from a
@@ -2750,7 +2825,10 @@ a camera, and the sums along the path of a move. For the view of a room it
 covers the rule of `temple_view`, the angle between two views, the roll of a
 view, the view of the head from the level view of the engine and the roll of
 the per eye matrix, the places of the two eye cameras, the rule of
-`temple_camera_screen`, and the fade of the Temple with a frame time of 0:
+`temple_camera_screen`, the pixel of a press for the camera code (with a roll
+of 15 degrees and a lean of 2 units the ray of that pixel goes through the end
+of the ray, and the ray of the pixel of the head misses it by more than 5
+units), and the fade of the Temple with a frame time of 0:
 the second eye gets the same fade, and the fade does not move. The checks of
 the brightness test are in `eye_luma_checks.h` (`backend.md`, "Testing
 without a headset").
@@ -2819,20 +2897,27 @@ always starts in a new game.
 ### 11.9 Not done, not proven, and what needs the headset
 
 - **The view of a room, the screen of the camera code and the fade in both
-  eyes have no desktop run.** The math checks cover the rules. The recipes
-  that show them, each one with the default values and with
+  eyes.** The math checks cover the rules. The recipes that show them, each
+  one with the default values and with
   `temple_view=0;temple_camera_screen=0;temple_fade_eyes=0`:
   - `temple_run.ps1 -Set "eye_test_luma=1;temple_test_camera_trace=1;fake_head_pitch=-40;fake_head_roll=20" -Seconds 150 -Rooms "room_save@3400 leave@5600 leave@6100" -Steps "shot@3300+1 shot@5100+1 look@5200+200 shot@5260+1"`.
     The head looks 40 degrees down with a roll of 20 degrees, and the word
     `look` turns it in one step. The ring goes to the Save Game Room and back,
     and then out of the Temple. The line of the cut of the hall has the place
     of the camera: `0.00 9.92 18.32` is the rest pose, and `0.00 14.39 14.41`
-    is the view of the pool. The check line of the view (11.7) has the angle
-    and the distance of the eyes. The lines `eye test` name each run of
-    frames with one dark eye.
-  - The same with `fake_head_roll=15;fake_controller_turns=-36,7,1` and no
-    pitch, and `-Steps "aimturn@3600+1 trigger@3660+6 shot@4400+1"`: the way
-    through the door of the Save Game Room.
+    is the view of the pool. The check line of the view (11.7) has the angle,
+    the distance of the eyes and the place of the eye of a pass. With one walk
+    (the default) `eye_test_luma` reads no picture, and `temple_fade_eyes`
+    does not act. With `one_walk=0` in `-Set` each eye pass walks the scene:
+    the check line has the pairs of two walks, and the lines `eye test` name
+    each run of frames with one dark eye.
+  - The same with
+    `fake_head_roll=15;fake_controller_turns=-36,7,1;fake_controller_temple_frame=3600`
+    and no pitch, and `-Steps "aimturn@3600+1 trigger@3660+6 shot@4400+1"`:
+    the way through the door of the Save Game Room. The steps wait for the
+    end of the guide of the hall (4.3). The line of the press has the
+    pixel that the camera code gets, and the line after it has the state 3.
+    With `temple_press_pixel=0` the camera keeps the state 1.
 - **Black frames in the guide of the hall.** A headset session had single
   black frames at random times in the guide of the first visit. In that
   session the camera of the hall was at its view of the pool for the whole
@@ -2850,13 +2935,16 @@ always starts in a new game.
   the game with no lean and no eye. So the point under the pointer
   (`0x00E360C8`) is off by the lean of the head: in a headset session it was
   17 to 61 cm from the ray, and the depth of the ray then kept its value of
-  before on many frames. The pick of a control does not use that ray.
-- **The thing under the pointer is found with the right eye.** The game finds
-  the sub mesh under its pointer when it draws the room, so with
-  `temple_view=1` it finds it with the camera of the second eye pass. The
-  pixel of the pointer is the end of the ray as the middle of the head sees
-  it. So the thing that the game finds is half of the distance between the
-  eyes to the right of the end of the ray, at each depth.
+  before on many frames. The pick of a control does not use that ray. A press
+  gets its own pixel for that ray (`temple_press_pixel`, 11.4), so a door
+  opens.
+- **The thing under the pointer is found with one eye.** The game finds the
+  sub mesh under its pointer when it draws the room, so with `temple_view=1`
+  it finds it with the camera of the last eye pass that walks the scene: the
+  left eye with one walk, and the right eye with two walks. The pixel of the
+  pointer is the end of the ray as the middle of the head sees it. So the
+  thing that the game finds is half of the distance between the eyes to the
+  side of the end of the ray, at each depth.
 - **The hall draws at 50 to 56 frames a second in a headset while the pool is
   in the view**, and at 89 with the scroll wall in the view (a render of 2880
   by 2880).

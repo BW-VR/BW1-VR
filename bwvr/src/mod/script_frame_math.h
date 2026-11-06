@@ -33,4 +33,21 @@ inline uint64_t Counted(uint64_t frame, uint64_t own, int play, bool known,
   return counted > 0 ? static_cast<uint64_t>(counted) : 0;
 }
 
+// THE SECOND ANCHOR (the test key fake_controller_temple_frame). The steps
+// from the frame `temple` on count from the frame at which the ray of the
+// Temple was on for kTempleSteadyFrames frames in a row, and that frame is
+// `temple`. The guide of the first visit of the hall has a length in
+// seconds, so its end comes at a different frame in each run. The first
+// anchor counts first: its number is the frame for the second anchor. While
+// the first anchor waits (0), the second one waits too.
+const int kTempleSteadyFrames = 30;
+
+inline uint64_t CountedTwice(uint64_t frame, uint64_t own, int play,
+                             bool known, int64_t shift, int temple,
+                             bool temple_known, int64_t temple_shift) {
+  const uint64_t first = Counted(frame, own, play, known, shift);
+  if (first == 0) return 0;
+  return Counted(first, own, temple, temple_known, temple_shift);
+}
+
 }  // namespace script_frame_math

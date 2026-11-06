@@ -134,6 +134,8 @@ bool ComfortCameraTakeGodDrag();
 bool ComfortCameraDestinations(float position[3], float focus[3]);
 // controllers.cpp: a grip holds the world.
 bool ControllersGrabHeld();
+// head_blinder.cpp: head_blinder is on.
+bool HeadBlinderOn();
 // vignette.cpp: a move of the view that the player makes with a control, with
 // the share of its full speed, and a step of the view in one frame.
 void VignetteMove(float share, const char* by);
@@ -1013,6 +1015,31 @@ void LookPoint(const float position[3], const float focus[3], float out[3]) {
 // waist. With use_pair, a game camera that is where the view put it brings
 // the view back where it was (g_pair). False when the game camera looks
 // straight down, and then nothing changes.
+// THE FLOOR OF THE HEAD (docs/god-view.md, section 5.9). When the view goes
+// to a place, and in a zoom, a walk and a grab, the land under the head stays
+// kGroundNearest below a height of the head in the room. With head_blinder=1
+// that height is the height of the head at the recenter pose (0 in the
+// room), so a head that goes down does not push the land down: the land
+// stays where it is, and the overlay of head_blinder.cpp covers the view of
+// a head in the land. With head_blinder=0 it is the height of the head now.
+float FloorHeadY(const float head[3]) {
+  return HeadBlinderOn() ? 0.0f : head[1];
+}
+
+// A log line when the floor of the head moves the land down.
+void LogFloor(const char* where, float down_m, const float head[3]) {
+  static int said = 0;
+  if (said >= 40 || !(down_m > 0.0005f)) return;
+  ++said;
+  ModLog("god view     : the floor of the head acts (%s): the land goes "
+         "%.1f cm down in the room, so the land under your head stays %.0f cm "
+         "below the %s. Your head is %.1f cm %s the recenter pose", where,
+         down_m * 100.0f, kGroundNearest * 100.0f,
+         HeadBlinderOn() ? "height of your head at the recenter pose"
+                         : "head",
+         fabsf(head[1]) * 100.0f, head[1] < 0.0f ? "below" : "above");
+}
+
 bool PlaceGod(const char* cause, const float position[3],
               const float focus[3], bool use_pair) {
   float camera_heading = 0.0f;
@@ -1041,11 +1068,14 @@ bool PlaceGod(const char* cause, const float position[3],
     float at[3];
     PoseWorld(before, room, head, at);
     look_room_y = GroundInRoom(before, room, GroundAt(at[0], at[2]));
-    if (look_room_y > head[1] - kGroundNearest) {
-      look_room_y = head[1] - kGroundNearest;
+    const float floor_head = FloorHeadY(head);
+    if (look_room_y > floor_head - kGroundNearest) {
+      LogFloor("the place of a game camera",
+               look_room_y - (floor_head - kGroundNearest), head);
+      look_room_y = floor_head - kGroundNearest;
     }
-    if (look_room_y < head[1] - kGroundFarthest) {
-      look_room_y = head[1] - kGroundFarthest;
+    if (look_room_y < floor_head - kGroundFarthest) {
+      look_room_y = floor_head - kGroundFarthest;
     }
   } else if (had) {
     float lift = (GroundAt(g_center[0], g_center[2]) - g_center[1]) / g_scale;
@@ -1098,8 +1128,11 @@ bool PlaceGod(const char* cause, const float position[3],
       float at[3];
       PoseWorld(to, room, head, at);
       const float under = GroundInRoom(to, room, GroundAt(at[0], at[2]));
-      const float top = head[1] - kGroundNearest;
-      if (under > top) to.center[1] += (under - top) * to.scale;
+      const float top = FloorHeadY(head) - kGroundNearest;
+      if (under > top) {
+        LogFloor("a hill at the place of a game camera", under - top, head);
+        to.center[1] += (under - top) * to.scale;
+      }
     }
   }
 
@@ -1524,9 +1557,10 @@ float ZoomClearHead(TablePose* pose, const float room[3],
                     const float head[3]) {
   const float y = zoom_math::ClearHead(
       pose->center[1], LandUnderHead(*pose, room, head), room[1], pose->scale,
-      head[1], kGroundNearest);
+      FloorHeadY(head), kGroundNearest);
   const float down = (y - pose->center[1]) / pose->scale;
   pose->center[1] = y;
+  LogFloor("a zoom or a walk", down, head);
   return down;
 }
 
@@ -3101,8 +3135,8 @@ bool TabletopGodLimitHeight(TablePose* pose, bool* cut) {
   const float land = GroundAt(at[0], at[2]);
   const float wanted = pose->center[1];
   const float limited =
-      GodGroundHeight(wanted, g_center[1], land, room[1], pose->scale, head[1],
-                      kGroundNearest, kGroundFarthest);
+      GodGroundHeight(wanted, g_center[1], land, room[1], pose->scale,
+                      FloorHeadY(head), kGroundNearest, kGroundFarthest);
   pose->center[1] = limited;
   if (cut != nullptr) *cut = limited != wanted;
   return true;

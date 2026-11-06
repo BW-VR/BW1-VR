@@ -102,6 +102,10 @@ extern void ModLog(const char* format, ...);
 
 // overlay.cpp: the overlay drew the pointing hand in this frame.
 bool OverlayPointingHandDrawn();
+// temple.cpp: the mesh of the game's Hand is hidden in a room of the Temple
+// now (temple_hide_hand, and the ray is on), and the value of the key.
+bool TempleHidesHand();
+int TempleHideHandRule();
 // controllers.cpp: the frame count, and a pulse on the pointing hand.
 uint64_t ControllersFrameCount();
 void ControllersGesturePulse(float amplitude, float seconds);
@@ -165,6 +169,7 @@ const int32_t kStateHolding = 4;
 const int32_t kStateCreature = 7;
 const int32_t kStateGrain = 8;
 const int32_t kStatePlayAnim = 9;
+const int32_t kStateCitadel = 10;  // HandStateCitadel, in the Temple
 
 // ONE PAIR OF HANDS. The draw of the Hand's mesh: fn_00813BA0, thiscall with
 // no arguments, at +0x108 of the vtable 0x009A3068 [V]. CHand::Draw calls it
@@ -278,6 +283,11 @@ bool g_wrist_said[kMeasuredStates] = {false};
 bool g_lock_ok = false;
 uint64_t g_locked_composes = 0;
 uint64_t g_hidden_draws = 0;
+// The draws of the Hand's mesh in the state of the Temple this window: hidden
+// and drawn.
+uint64_t g_temple_hidden = 0;
+uint64_t g_temple_drawn = 0;
+bool g_said_temple = false;
 bool g_said_hidden = false;
 bool g_said_vtable = false;
 bool g_key_down = false;
@@ -711,12 +721,36 @@ void CheckDrawn(const uint8_t* hand) {
 // THE MESH IS HIDDEN. True for the Hand's own mesh while the controller places
 // the Hand in a state where the mod's hand stands for it, and the overlay drew
 // the pointing hand in this frame. So one hand is always there.
+//
+// IN A ROOM OF THE TEMPLE (temple_hide_hand, docs/controllers.md, 11.2) the
+// Hand has the state of the Temple, and the game puts it at the pixel of the
+// pointer, 5 units in front of the thing under the pointer. The direct hand
+// steps aside there, and the ray of the pointing hand with its cross is the
+// pointer. So the mesh of the game's Hand is hidden while the ray is on. The
+// state, the place and the pick of the Hand stay as the game makes them: only
+// the draw of the mesh stops.
 bool HideNow(void* mesh) {
   bool active = false;
   const uint8_t* hand = static_cast<const uint8_t*>(HandDirectHand(&active));
-  if (!active || hand == nullptr) return false;
+  if (hand == nullptr) return false;
   if (*reinterpret_cast<void* const*>(hand + kHandMesh) != mesh) return false;
   const int32_t state = *reinterpret_cast<const int32_t*>(hand + kHandState);
+  if (state == kStateCitadel) {
+    const bool hide = TempleHidesHand() && OverlayPointingHandDrawn();
+    if (hide) {
+      ++g_temple_hidden;
+    } else {
+      ++g_temple_drawn;
+    }
+    if (hide && !g_said_temple) {
+      g_said_temple = true;
+      ModLog("hand exact   : in a room of the Temple the mesh of the game's "
+             "Hand is not drawn (temple_hide_hand=1). The ray and its cross "
+             "are the pointer, frame %llu", ControllersFrameCount());
+    }
+    return hide;
+  }
+  if (!active) return false;
   return ExactState(state) && OverlayPointingHandDrawn();
 }
 
@@ -1190,6 +1224,13 @@ bool HandExactAddPrepareHook(void (*hook)(void* hand)) {
 // Once a report window (hand_direct.cpp calls it from its report).
 void HandExactReport() {
   if (!g_installed) return;
+  if (g_temple_hidden != 0 || g_temple_drawn != 0) {
+    ModLog("hand exact   : in the state of the Temple %llu draws of the mesh "
+           "of the game's Hand were hidden and %llu were drawn this window "
+           "(temple_hide_hand=%d)", g_temple_hidden, g_temple_drawn,
+           TempleHideHandRule());
+    g_temple_hidden = g_temple_drawn = 0;
+  }
   if (g_exact_composes == 0 && g_game_composes == 0) return;
   ModLog("hand exact   : %llu exact composes, %llu as the game made them, %llu "
          "old poses moved to the new root, %llu blends ended with no known "

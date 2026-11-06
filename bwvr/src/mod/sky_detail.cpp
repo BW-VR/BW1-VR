@@ -154,6 +154,8 @@ void OverlayDraw();
 void VignetteDraw();
 // video_view.cpp: the corner marks of the view for videos.
 void VideoViewDrawMarks();
+// head_blinder.cpp: the overlay of a head under the land, in each eye pass.
+void HeadBlinderDraw();
 // book_bubble.cpp: the game's bubble of a miracle that the hand pulls out of
 // the spell book.
 void BookBubbleDraw();
@@ -522,8 +524,9 @@ void __cdecl h_MoonTurn(const float* place, float* turn, float* mesh) {
 // (book_bubble.cpp) comes after the meshes: its glass is clear, so the hand
 // behind it must be there first. The game's gesture pictures over the palm
 // (gesture_panel.cpp) come after them, with the same reason. The comfort
-// vignette (vignette.cpp) is the last draw: it darkens each draw of the
-// world and of the mod at the edges of the view.
+// vignette (vignette.cpp) darkens each draw of the world and of the mod at
+// the edges of the view, and the head blinder (head_blinder.cpp) is the last
+// draw: it covers the view of a head under the land.
 void __cdecl h_SunGlare() {
   uint32_t* wanted = reinterpret_cast<uint32_t*>(kSunGlareWanted);
   ++g_glare_calls;
@@ -542,6 +545,7 @@ void __cdecl h_SunGlare() {
   HandGlowDraw();
   VignetteDraw();
   VideoViewDrawMarks();
+  HeadBlinderDraw();
 }
 
 bool Hook(uintptr_t address, void* replacement, void** original,

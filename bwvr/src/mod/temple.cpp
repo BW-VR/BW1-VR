@@ -57,6 +57,7 @@ bool HeadCameraEnabled();
 void HeadCameraRoomView(int rule);
 void HeadCameraRoomGameView(bool on);
 bool HeadCameraFrameRecorded();
+float HeadCameraRoll();
 // comfort_camera.cpp: a moment of black at a cut, when the player asked for
 // one.
 void ComfortCameraBlink();
@@ -147,6 +148,8 @@ int g_camera_drag = 0;    // temple_camera_drag
 int g_camera_follow = 0;  // temple_camera_follow
 int g_camera_flight = 0;  // temple_camera_flight
 int g_camera_screen = 1;  // temple_camera_screen
+int g_press_rule = 1;     // temple_press_pixel
+int g_hide_hand = 1;      // temple_hide_hand
 int g_view = 1;           // temple_view
 int g_fade_eyes = 1;      // temple_fade_eyes
 int g_turn = 1;           // temple_turn
@@ -194,6 +197,8 @@ void Load() {
   g_camera_follow = IniInt("temple_camera_follow", 0) != 0 ? 1 : 0;
   g_camera_flight = IniInt("temple_camera_flight", 0) != 0 ? 1 : 0;
   g_camera_screen = IniInt("temple_camera_screen", 1) != 0 ? 1 : 0;
+  g_press_rule = IniInt("temple_press_pixel", 1) != 0 ? 1 : 0;
+  g_hide_hand = IniInt("temple_hide_hand", 1) != 0 ? 1 : 0;
   g_view = IniInt("temple_view", 1) != 0 ? 1 : 0;
   g_fade_eyes = IniInt("temple_fade_eyes", 1) != 0 ? 1 : 0;
   HeadCameraRoomView(g_view);
@@ -282,6 +287,20 @@ void Load() {
              : "The camera code of a room reads a neutral pointer in the "
                "view of the head: a head that looks down at the pool of the "
                "hall turns the camera of the hall");
+  ModLog("temple       : temple_press_pixel=%d. %s", g_press_rule,
+         g_press_rule != 0
+             ? "The camera code of a room gets a press as the pixel that "
+               "puts its own ray through the end of the ray, so a door "
+               "opens at each roll and lean of the head"
+             : "The camera code of a room gets a press at the pixel of the "
+               "view of the head, which has the roll and the lean of the "
+               "head");
+  ModLog("temple       : temple_hide_hand=%d. %s", g_hide_hand,
+         g_hide_hand != 0
+             ? "In a room the game's Hand is not drawn while the ray is on: "
+               "the ray and its cross are the pointer"
+             : "In a room the game draws its Hand at the pointer, in front "
+               "of the thing under the pointer");
   ModLog("temple       : temple_fade_eyes=%d. %s", g_fade_eyes,
          g_fade_eyes != 0
              ? "The fade of the Temple shows in both eyes"
@@ -795,7 +814,9 @@ bool CameraFollows() {
 // (CalcDoorHit). So the camera must get the pointer for a press. But the
 // same press turns the camera when the pointer moves with the button down.
 // So for a press on empty space the camera gets the pixel of the press, and
-// that pixel stays until the button goes up.
+// that pixel stays until the button goes up. With temple_press_pixel=1 it is
+// the pixel of the press in the screen of the camera code
+// (PressOnCameraScreen).
 bool g_press_latched = false;
 int g_press_pixel[2] = {0, 0};
 uint64_t g_neutral_frames = 0;
@@ -1074,15 +1095,80 @@ void RoomChangeAfter(uint8_t* camera, bool new_camera, const Flight& flight,
          *reinterpret_cast<const float*>(kFade), g_frame);
 }
 
+// THE PIXEL OF A PRESS FOR THE CAMERA CODE (temple_press_pixel,
+// temple_math.h, PressPixel). The camera code finds a door with its own ray
+// from the pixel of the press. The update of the game first gives its camera
+// to the engine (InnerCamera::PreDraw). The mod does that call now, so the
+// engine has the rotation and the stored camera that the ray of the update
+// reads. Then out gets the pixel that puts that ray through the end of the
+// ray of the player. False, and out as it was, when that cannot be.
+int g_press_logs = 0;
+const int kMaxPressLogs = 60;
+
+bool PressOnCameraScreen(uint8_t* camera, const int* pixel, int out[2]) {
+  if (g_press_rule == 0 || !g_have_ray || !g_have_asked ||
+      !(g_ray_units > 0.0f) || !HeadCameraEnabled() || !GameInTemple() ||
+      camera == nullptr || IsBadReadPtr(camera, kCameraSize)) {
+    return false;
+  }
+  CameraPreDraw(camera);
+  const float* m =
+      reinterpret_cast<const float*>(bw::tech::kWorldToCameraUnscaled);
+  const float* stored = reinterpret_cast<const float*>(bw::tech::kCameraPos);
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(
+          bw::tech::kInfoTransform);
+  if (IsBadReadPtr(m, sizeof(float) * 9) ||
+      IsBadReadPtr(stored, sizeof(float) * 3) ||
+      IsBadReadPtr(info, sizeof(*info))) {
+    return false;
+  }
+  const float hx = info->half_res_x, hy = info->half_res_y;
+  const float fx = info->inv_half_tan_fov_x, fy = info->inv_half_tan_fov_y;
+  float x = 0.0f, y = 0.0f;
+  if (!temple_math::PressPixel(m, stored, g_asked, hx, hy, fx, fy, &x, &y)) {
+    return false;
+  }
+  out[0] = static_cast<int>(floorf(x + 0.5f));
+  out[1] = static_cast<int>(floorf(y + 0.5f));
+  if (g_press_logs < kMaxPressLogs) {
+    ++g_press_logs;
+    // How far the ray of the camera code goes from the end of the ray of the
+    // player, with the pixel of the view of the head and with the new pixel.
+    float before[3], after[3];
+    temple_math::PixelRay(m, hx, hy, fx, fy, static_cast<float>(pixel[0]),
+                          static_cast<float>(pixel[1]), before);
+    temple_math::PixelRay(m, hx, hy, fx, fy, static_cast<float>(out[0]),
+                          static_cast<float>(out[1]), after);
+    ModLog("temple       : a press in %s at the pixel %d %d of the view of "
+           "the head. The camera code of the room gets the pixel %d %d "
+           "(temple_press_pixel=1): its ray goes %.1f cm of the room from the "
+           "end of the ray of the hand, and the ray of the pixel of the head "
+           "goes %.1f cm from it. The head has a roll of %.1f degrees, frame "
+           "%llu", RoomName(RoomOfCamera(camera)), pixel[0], pixel[1], out[0],
+           out[1],
+           temple_math::PointToRay(stored, after, g_asked) / g_ray_units *
+               100.0f,
+           temple_math::PointToRay(stored, before, g_asked) / g_ray_units *
+               100.0f,
+           HeadCameraRoll() * 57.29578f, g_frame);
+  }
+  return true;
+}
+
 void __fastcall h_CameraUpdate(void* self, void* unused, void* room,
                                float seconds, int held, int action,
                                const int* pixel, int drag) {
   static int held_before = -1, drag_before = -1;
   static int said = 0;
   const int drag_now = drag & 0xFF;
+  uint8_t* camera = static_cast<uint8_t*>(self);
   int given[2] = {0, 0};
   // The mod gives this update the middle of the view as its pointer.
   bool neutral = false;
+  // This update is the first one of a press: the log gives the state of the
+  // camera after it.
+  bool press_start = false;
   // While a guide plays the ray is off, and the room gives the camera no
   // button. The camera of the room can have the state of the room then, so
   // it gets the middle of the view as it does with the ray on.
@@ -1093,8 +1179,12 @@ void __fastcall h_CameraUpdate(void* self, void* unused, void* room,
     if (drag_now != 0 && down) {
       if (!g_press_latched) {
         g_press_latched = true;
+        press_start = true;
         g_press_pixel[0] = pixel[0];
         g_press_pixel[1] = pixel[1];
+        if (g_camera_drag == 0) {
+          PressOnCameraScreen(camera, pixel, g_press_pixel);
+        }
       }
       if (g_camera_drag == 0) {
         given[0] = g_press_pixel[0];
@@ -1133,7 +1223,6 @@ void __fastcall h_CameraUpdate(void* self, void* unused, void* room,
   g_update_drag = drag_now;
   // The first update of a camera after a different camera: a new room.
   static uint8_t* camera_before = nullptr;
-  uint8_t* camera = static_cast<uint8_t*>(self);
   const bool new_camera = camera != camera_before;
   camera_before = camera;
   Flight flight;
@@ -1154,7 +1243,21 @@ void __fastcall h_CameraUpdate(void* self, void* unused, void* room,
     if (!neutral && pixel != nullptr && MiddlePixel(middle)) pixel = middle;
     HeadCameraRoomGameView(true);
   }
+  const int state_before =
+      camera != nullptr && !IsBadReadPtr(camera, kCameraSize)
+          ? *reinterpret_cast<const int32_t*>(camera + kCameraState)
+          : -1;
   o_CameraUpdate(self, unused, room, seconds, held, action, pixel, drag);
+  if (press_start && g_press_logs < kMaxPressLogs && state_before >= 0) {
+    ++g_press_logs;
+    const int state_after =
+        *reinterpret_cast<const int32_t*>(camera + kCameraState);
+    ModLog("temple       : after the update of the press at the pixel %d %d "
+           "the camera of %s has the state %d (it had %d). The state 3 is "
+           "the way through a door, frame %llu",
+           pixel[0], pixel[1], RoomName(RoomOfCamera(camera)), state_after,
+           state_before, g_frame);
+  }
   FlightAfter(camera, flight, room, pixel);
   RoomChangeAfter(camera, new_camera, flight, room, pixel);
   if (own_screen) {
@@ -1867,6 +1970,13 @@ void TempleBeforeScene() {
 }
 
 bool TempleRayOn() { return g_ray_on; }
+
+bool TempleHidesHand() { return g_hide_hand != 0 && g_ray_on; }
+
+int TempleHideHandRule() {
+  Load();
+  return g_hide_hand;
+}
 
 int TempleClick() {
   if (g_test_click_frame > 0 &&

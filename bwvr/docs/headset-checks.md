@@ -31,7 +31,9 @@ want.
 3. **The size of the world.** Look at the land at your waist at each scale,
    and bring the Hand near your eyes. Wrong: a world that feels too large or
    too small, land or clouds that look wrong at a scale, or a Hand that the
-   view cuts near the eyes.
+   view cuts near the eyes. Then bend down slowly and put your head into a
+   hill. Wrong: you see under the land, the gold and red cover comes too late
+   or too soon, it flickers on a slope, or its color is hard on the eyes.
 4. **The zoom.** Zoom in and out with the stick. Then try the switch "Smooth
    zoom" (debug page, View). Wrong: discomfort, a blink, or a rate that is
    too fast or too slow.
@@ -193,6 +195,12 @@ agents: the log does not tell the item yet.
   from the pile and the influence.
 - **An old picture in one eye** (B16). Log: `eye clean    : an eye pass drew
   no sky` names the scene of that frame.
+- **A miracle that shows nothing** (Storm, a shield, Shrink, Enlarge,
+  Invisibility). Log: `miracle watch:` says if the game made the spell, its
+  radius in cm of the room and how long it stands, or what a Creature
+  miracle wrote on the Creature and its size. The start of a pour, for
+  example the bolt of Lightning: `the spell ... gets its gesture place from
+  the game`.
 - **A lightning in one eye only** (B18). Log: `land light   :`. A flash with
   no such line is not a light on the land.
 - **Black frames** in the guide of the first visit of the Temple (B13), and
@@ -424,15 +432,19 @@ Water and Heal do not show.
   the cast. The power ups give a larger, more forked bolt. The Creature can
   learn it.
 - **How to see that it worked.** The bolt starts at the tip of the index
-  finger and hits the place under the Hand. The land goes white in both eyes
-  (B18). Not confirmed: what the bolt does to each kind of target.
+  finger and forks to objects and to the land near the Hand, in the
+  direction in which the camera of the game looks. Near the Temple it goes
+  to the spire. The land goes white in both eyes (B18). Not confirmed: what
+  the bolt does to each kind of target.
 - **Cost.** 5000. The power ups (inverse spiral, then spiral): 7500 and
   10000.
 - **Gesture.** Spiral, then a fork. A pour.
 - **In the mod.** Keep the grip closed over the target.
-- **Proved.** Desktop runs: the pour.
-- **To prove.** The bolt starts at the tip of the index finger and hits the
-  place under the Hand, in both eyes.
+- **Proved.** Desktop runs: the pour, and the start of the bolt at the
+  Hand's point (`the spell ... gets its gesture place from the game`, 0.0
+  cm).
+- **To prove.** The bolt starts at the tip of the index finger in both
+  eyes, with the Hand in the air.
 
 ### Storm ("Storm of Ages")
 
@@ -449,8 +461,11 @@ Water and Heal do not show.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
 - **In the mod.** Close the grip and draw a circle over the land. The cast
   comes when the game matches the circle.
-- **Proved.** Desktop runs: the circle and the cast.
-- **To prove.** The storm stands over the circle.
+- **Proved.** Desktop runs: the circle, the cast, and the storm under the
+  hand (`miracle_circle_hand`): a grey cloud in front of the Hand, and a
+  dark sky.
+- **To prove.** The shape of the cloud near the head (`miracles.md`, "The
+  cloud of a Storm").
 
 ### Spiritual Shield ("Sanctuary")
 
@@ -464,9 +479,9 @@ Water and Heal do not show.
   `info.dat`, although a help text names a larger shield.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
 - **In the mod.** Close the grip and draw a circle over the land.
-- **Proved.** Desktop runs: the circle and the cast.
-- **To prove.** The dome stands over the circle, and a miracle cast at it
-  does not get in.
+- **Proved.** Desktop runs: the circle, the cast, and a dome at the
+  fingertips (`miracle_circle_hand`) that stands for more than 12 s.
+- **To prove.** A miracle cast at the dome does not get in.
 
 ### Physical Shield ("Armor of Faith")
 
@@ -554,10 +569,15 @@ on the Creature. The gesture is the inverse spiral and then the shape below.
 | Anger ("Aggressive") | It makes it furious | 6000 | The vertical line |
 | Itchy ("Holy Flies") | It irritates it | 8000 | The reverse S |
 
-- **Proved.** Desktop runs: Strengthen and Freeze on a Creature. Not run:
-  the other seven (N6).
+- **Proved.** Desktop runs: Strengthen and Freeze on a Creature. Shrink,
+  Enlarge and Invisibility put their entry on the Creature, and Shrink and
+  Enlarge change its base size (`miracle watch:`). At the door of the
+  Temple the game draws the body at the size 0.22 with each spell
+  (`miracles.md`, "What a cast makes"). Invisibility makes the Creature
+  fizz to sparkles and a shadow. Not run: the other four (N6).
 - **To prove.** Freeze stops the Creature, and the narrator later says that
-  the miracle has worn off. Shrink, Enlarge, Invisibility, Weaken,
+  the miracle has worn off. Shrink and Enlarge change the size of the body
+  away from the Temple. Weaken,
   Strengthen, Compassion, Anger and Itchy each change the Creature as the
   table says. A Creature miracle at a Creature outside the influence has a
   red halo, and the card says why.

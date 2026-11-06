@@ -670,7 +670,7 @@ that moves while the Hand takes it.
   its motion (`script_camera=0`). A video of the game plays on the screen
   of the window. The window stays the default. No run has shown the motion:
   a desktop run has no head to feel it.
-- **P5. Hand tracking.** The player plays with the hands and no
+- **P5. Hand tracking.** On hold. The player plays with the hands and no
   controllers: the Hand follows the real hand and its fingers, one to one,
   as it follows a controller. First find what the headset gives to the
   game: whether Virtual Desktop (VDXR) gives a 32 bit OpenXR program the
@@ -678,14 +678,18 @@ that moves while the Hand takes it.
   choose a gesture for each control: the grip, the trigger, the stick, and
   A, B, X and Y. The rules of the Hand stay: the real hand, one to one, and
   no motion that the player did not make.
-- **P7. A view for videos.** A 16:9 view in the game window with the cards
-  and the subtitles in it and a smoothed head, for a capture on the PC.
-- **P8. Pictures in the hints.** A flat picture of each button, then a
-  picture of the controller with the button lit, then a 3D model of the
-  controller (`controller-hints.md`).
+- **P7. A view for videos.** A 16:9 view in the game window for a capture
+  on the PC, so the owner records in the game and not through the headset.
+  It has the cards and the subtitles in it and a smoothed head. In the
+  headset, faint corner marks show the area that the video records. The
+  player can move that area up and down: the player of this game looks
+  down most of the time, with the head and with the eyes, so a capture of
+  the middle of the view cuts off what the player looks at. A key sets the
+  height (for example 20 percent of the height down from the middle as the
+  default), and a control in the game moves it.
 - **P9. The pointer on the interface panel**, and the screens with no
   scene (menus, loading, videos) on a panel in the room (`ui-layer.md`).
-- **P10. The tabletop mode** (play mode 3) is a test mode. Not built: a
+- **P10. The tabletop mode** (play mode 3) is a test mode, on hold. Not built: a
   game camera over the table, the mouse, the wheel, the stick and the
   double click for the table, the ring and the depth key for the key color,
   and the place of the table in a real room (`tabletop.md`).
@@ -776,13 +780,16 @@ keeps the mod as it is.
   the hands fade (`HandModelSetOpacity`), and the stream of the influence
   starts at the hand, not on the land under it
   (`GVirtualInfluence::Draw` `0x0076D000`, the call of
-  `PSysGlobal::AddManaPathSprite` at `0x0076D1C2`).
-- **F6. The fireball and the speed of a throw.** A fireball leaves at the
+  `PSysGlobal::AddManaPathSprite` at `0x0076D1C2`). Also a faint wall of
+  light at the edge of the influence, only near the hand and only while the
+  hand comes near the edge, so the player sees the limit before the hand
+  goes past it. A key for each part.
+- **F6. The fireball and the speed of a throw.** On hold: the owner tests
+  the throw with the mod's own physics first. A fireball leaves at the
   game's filtered speed of the Hand (`CHand+0x48C8`), and no run had a real
   swing. If it flies short in a headset, a key scales that speed. For other
   objects, a key `throw_speed_pct` (100: the real speed) can make a throw
   stronger.
-
 **Comfort and moving**
 
 - **F8. A comfort vignette** (off, gentle, strong): the edges of the view go
@@ -791,17 +798,33 @@ keeps the mod as it is.
 - **F10. A recenter from the controllers:** a hold of the stick click of the
   other hand for 1 s, and an item of the ring. Now only F11 and the
   headset's own recenter do it.
-- **F11. Settings in the headset.** A panel of the most used settings
-  (turn, teleport, vignette, main hand, move speed, recenter) that saves to
-  `bwvr.ini`. The same panel shows one time at the start of a new game.
+- **F11. Settings in the headset, and the controls of the player.**
+  - A panel of the most used settings (turn, teleport, vignette, main hand,
+    move speed, recenter) that saves to `bwvr.ini`. The same panel shows
+    one time at the start of a new game, as a welcome page.
+  - Later, a page to change the controls. The mod finds which controllers
+    the player has (the interaction profile that OpenXR gives,
+    `controller-hints.md`), draws a diagram of those controllers, lists each
+    button with its action, and lets the player give a button a different
+    action from a list of the actions that are free. The pictures in the
+    hints (below) use the same controller data and art.
+  - Pictures in the hints: a flat picture of each button, then a picture of
+    the controller with the button lit, then a 3D model of the controller
+    (`controller-hints.md`).
+  - The art of each controller must be our own drawing, or a model with a
+    license that lets us ship it (for example a model that the runtime
+    gives through an OpenXR extension at run time).
 - **F12. "Saving..." while the game saves.** The save box of the game draws
   in a frame with no scene, so the headset shows a still view. Show
   "Saving..." on the hint card. Find first whether the card layer still
   goes to the headset while the game thread saves.
 - **F13. A snapshot for a bug report:** an item of the ring saves the eye
   pictures and a copy of the log in `bwvr\captures`.
-- **F15. The cut scene window:** a ray and the hands in the window, so the
-  trigger points at what it clicks.
+- **F15. The hands in the cut scene window.** While a cut scene plays in
+  the window, the mod draws no hands and no ray (`cutscene-window.md`,
+  section 7), and the trigger clicks at the place of the mouse pointer,
+  which the player cannot see. Wanted: the hands stay in view, and a ray
+  from the pointing hand to the screen shows where the trigger clicks.
 - **F16. No turn and no zoom while a menu is up.** The walk, the teleport
   and the grab of the world stop with a dialog box. `PumpStick` has no such
   test for the snap turn and the zoom step.
@@ -812,7 +835,9 @@ keeps the mod as it is.
   (`Scaffold::ProcessInHand` `0x006E8570`). The field of the angle is not
   found yet.
 - **F18. The job icon of a villager in the Hand:** large, just over his head,
-  and only for the villager in the Hand or under it. The draw of the icon is
+  and only for the villager in the Hand or under it. First the owner checks
+  in a play whether the plain icon is a problem in a headset
+  (`headset-checks.md`). Build it only if it is. The draw of the icon is
   not traced (`Abode::DiscipleInHandNear` `0x00407420`,
   `GGuidance::MakeDiscipleSFX` `0x0071BF10`).
 - **F19. The Creature with no press.** The Creature panel of the game
@@ -831,7 +856,7 @@ keeps the mod as it is.
 - **F24. No wait of 20 ms at the stop of a sound.** `audio_stop_wait=0`
   skips the wait only for the sounds of the mod's mixer. The other sounds
   still make the game thread wait, and this can stop the game for 40 to
-  170 ms.
+  170 ms. Another change may already have removed it: measure first.
 - **F25. The scroll look for the other cards.** The hint cards are
   parchment scrolls with wax seals (`hint_card_style=1`,
   `controller-hints.md`, section 9.11). The spell book and the keyboard in
@@ -867,7 +892,7 @@ These faults are in the game with the unofficial patch v1.42, not in the
 mod. A fix is a change of behavior, with a key whose old value keeps the
 game as it is.
 
-- **G1. Silver Scrolls of Land 3.** Testers report that a guru (a yogi)
+- **G1. Silver Scrolls of Land 3.** On hold until the owner plays Land 3. Testers report that a guru (a yogi)
   sees the player from behind, and that trees go away in the puzzle of the
   trees. Not known: the quest of each fault, and the script or the code that
   has it. Make each fault occur in a desktop run first.

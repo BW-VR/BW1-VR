@@ -139,6 +139,7 @@ then the doc of your area in `bwvr/docs/`:
 | `launcher.md`, `installer.md` | The launcher and the installer |
 | `address-map.md`, `software-tnl.md`, `stereo-artifacts.md`, `input-devices.md` | Facts about the game's code and its renderer |
 | `research-hla.md` | Notes on Half-Life: Alyx as a guide for the hands |
+| `headset-checks.md` | The checks that only a headset can show, and a guide to each miracle of the game |
 
 Each doc holds the current state and the plans. The history is in git.
 

@@ -379,8 +379,8 @@ float g_god_turn_degrees = 45.0f;
 // frames. help is the degrees that comfort_camera.cpp did not take yet for
 // the turn events of the tutorial. The check after a hold compares the
 // heading kHoldCheckFrames frames after the stop with the heading at the
-// stop. display is the time of the same frames from the display times of
-// the headset (god_display_time), for the log only.
+// stop. cpu is the time of the same frames from the clock of the CPU, for
+// the log only.
 struct TurnHold {
   float share = 0.0f;
   float rate = 0.0f;
@@ -390,7 +390,7 @@ struct TurnHold {
   float start_heading = 0.0f;
   float degrees = 0.0f;
   double seconds = 0.0;
-  double display = 0.0;
+  double cpu = 0.0;
   uint64_t frames = 0;
   float help = 0.0f;
   int help_direction = 0;
@@ -1830,12 +1830,12 @@ void StopTurnHold(const char* cause, bool view_stays) {
                           : 0.0;
   ModLog("god view     : the smooth turn stops, %s. It turned %.2f degrees %s "
          "in %.3f s of %llu frames (%.1f degrees a second), heading %.2f to "
-         "%.2f degrees. The display times of the headset gave %.3f s for "
-         "these frames, frame %llu", cause, fabsf(g_turn_hold.degrees),
+         "%.2f degrees. The clock of the CPU gave %.3f s for these "
+         "frames, frame %llu", cause, fabsf(g_turn_hold.degrees),
          g_turn_hold.direction > 0 ? "right" : "left", g_turn_hold.seconds,
          g_turn_hold.frames, fabs(rate),
          g_turn_hold.start_heading * 57.29578f, g_heading * 57.29578f,
-         g_turn_hold.display, ControllersFrameCount());
+         g_turn_hold.cpu, ControllersFrameCount());
 }
 
 // THE SMOOTH TURN (snap_turn=4, docs/god-view.md, section 4). While the
@@ -1845,13 +1845,12 @@ void StopTurnHold(const char* cause, bool view_stays) {
 // time of the frame, with the cap of the smooth zoom
 // (comfort_math::SmoothTurnDegrees).
 //
-// THE TIME OF A FRAME is the real time of the CPU between this main camera
-// call and the one before (frame_seconds), latched once for the frame. It is
-// not the time from the display times of the headset (display_seconds,
-// god_display_time). Those times follow the frames of the runtime, and a
-// game that does not draw each frame of the runtime can get a time that is
-// shorter than its frame, and the turn is then short of its speed. The log
-// gives both times for each hold. comfort_camera.cpp gives the request
+// THE TIME OF A FRAME is the time of the walk and the smooth zoom
+// (frame_seconds), latched once for the frame: the time between the display
+// times of two frames of the headset (god_display_time=1), and the time of
+// the CPU between two main camera calls with no session or with
+// god_display_time=0. The stop line of a hold also gives the time of the
+// CPU for the same frames (cpu_seconds). comfort_camera.cpp gives the request
 // with the tests of a snap turn (TabletopGodTurnHold). A frame with no
 // request turns nothing, so the turn stops in the frame in which the stick
 // comes back, and nothing glides.
@@ -1862,7 +1861,7 @@ void StopTurnHold(const char* cause, bool view_stays) {
 // turns, as for a walk, so the game camera follows the view. The turn keeps
 // to no camera zone of the game: it turns about the head and does not move
 // the player.
-void ApplyGodTurnHold(double frame_seconds, double display_seconds) {
+void ApplyGodTurnHold(double frame_seconds, double cpu_seconds) {
   const float share = g_turn_hold.fresh ? g_turn_hold.share : 0.0f;
   const float rate = g_turn_hold.rate;
   g_turn_hold.fresh = false;
@@ -1893,7 +1892,7 @@ void ApplyGodTurnHold(double frame_seconds, double display_seconds) {
     g_turn_hold.start_heading = g_heading;
     g_turn_hold.degrees = 0.0f;
     g_turn_hold.seconds = 0.0;
-    g_turn_hold.display = 0.0;
+    g_turn_hold.cpu = 0.0;
     g_turn_hold.frames = 0;
     g_turn_hold.check_frames = 0;
     ++g_turn_holds;
@@ -1910,8 +1909,7 @@ void ApplyGodTurnHold(double frame_seconds, double display_seconds) {
   const float seconds = zoom_math::FrameSeconds(frame_seconds, kHoldFrameCap);
   ++g_turn_hold.frames;
   g_turn_hold.seconds += seconds;
-  g_turn_hold.display +=
-      zoom_math::FrameSeconds(display_seconds, kHoldFrameCap);
+  g_turn_hold.cpu += zoom_math::FrameSeconds(cpu_seconds, kHoldFrameCap);
   if (degrees != 0.0f) {
     float room[3], head[3];
     TableRoom(room);
@@ -3040,7 +3038,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
     const double clock = Seconds();
     double frame_seconds = g_god_clock > 0.0 ? clock - g_god_clock : 0.0;
     g_god_clock = clock;
-    // The real time of the frame, for the smooth turn (ApplyGodTurnHold).
+    // The time of the CPU, for the log of the smooth turn.
     const double cpu_seconds = frame_seconds;
     const double display = ModDisplaySeconds();
     if (g_settings.god_display_time != 0 && display > 0.0 &&
@@ -3124,7 +3122,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
     const TablePose before_moves = Pose();
     ApplyGodZoomHold(frame_seconds);
     ApplyGodWalk(frame_seconds);
-    ApplyGodTurnHold(cpu_seconds, frame_seconds);
+    ApplyGodTurnHold(frame_seconds, cpu_seconds);
     if (g_hold.active || g_walk.active || g_turn_hold.active) {
       VignetteMove(MotionShare(before_moves, Pose(), frame_seconds),
                    g_walk.active   ? "the walk with the stick"

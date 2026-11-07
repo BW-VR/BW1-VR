@@ -348,7 +348,9 @@ Water and Heal do not show.
   confirmed: what it does to a villager or to the Creature (no game file says
   it does anything).
 - **How to see that it worked.** The fire test is the clear one: set a house
-  on fire with a Fireball, and pour Water on it. The fire must go out. The
+  on fire with a Fireball, and pour Water on it. Each drop lowers the heat
+  of the house by a small part, so a house needs a long pour, and it can
+  catch fire again from a fire near it. The
   growth of a field or a forest is slow, and the game gives no message for
   it. Not confirmed: how fast the growth is, and whether a field shows a
   change at once.
@@ -358,7 +360,7 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the pour, the request from the spell book, and
   a power up from a Worship Site. A pour of 27 casts puts out burning trees
   (`miracle_run.ps1 -Kind fire`). A pour of 62 casts on a burning house does
-  not put out its fire (N6).
+  not put out its fire (B41).
 - **The owner's check.** Check 21 of "What the owner checks".
 - **To prove.** Water on a field and on a forest changes their growth.
 
@@ -449,8 +451,9 @@ Water and Heal do not show.
 - **How to see that it worked.** The bolt starts at the tip of the index
   finger and forks to objects and to the land near the Hand, in the
   direction in which the camera of the game looks. Near the Temple it goes
-  to the spire. The land goes white in both eyes (B18). Not confirmed: what
-  the bolt does to each kind of target.
+  to the spire. The land goes white in both eyes (B18). The thin red column
+  over the Temple is the beam of the Temple heart of the game, in the color
+  of the player. Not confirmed: what the bolt does to each kind of target.
 - **Cost.** 5000. The power ups (inverse spiral, then spiral): 7500 and
   10000.
 - **Gesture.** Spiral, then a fork. A pour.
@@ -480,7 +483,8 @@ Water and Heal do not show.
   hand (`miracle_circle_hand`): a grey cloud in front of the Hand, and a
   dark sky.
 - **To prove.** The shape of the cloud near the head (`miracles.md`, "The
-  cloud of a Storm").
+  cloud of a Storm"). The game draws the cloud as many particles, so a flat
+  band is a fault (B43).
 
 ### Spiritual Shield ("Sanctuary")
 
@@ -501,7 +505,10 @@ Water and Heal do not show.
 ### Physical Shield ("Armor of Faith")
 
 - **Plain game.** A shield over a circle that you draw. It stops rocks and
-  other solid objects, but miracles go through. It uses prayer power for as
+  other solid objects, also those that you throw, but miracles go through.
+  A thrown object bounces off, and each hit takes strength from the shield.
+  When the strength is gone, the shield breaks. The town marks the thrower
+  as an attacker. It uses prayer power for as
   long as it stands. The Creature can learn it.
 - **How to see that it worked.** A dome stands over the circle. A rock that
   you throw at it stops.
@@ -511,25 +518,29 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the refusal with no circle ("needs a circle on
   the land first"), and the cast: the dome stands over the circle in the eye
   pictures (`miracle_run.ps1 -Kind pshield`). A pig thrown at the dome goes
-  in, also with `throw_law=1` (N6).
+  in, also with `throw_law=1` (B42).
 - **To prove.** A rock thrown at the dome stops.
 
 ### Teleport ("Instant Journey")
 
-- **Plain game.** You put two teleport sites on the land. Villagers then go
-  from one to the other at once. A tip of the game says to put them at the
+- **Plain game.** Each cast puts one teleport site on the land, so two casts
+  make two sites. A villager or the Creature that goes into a site comes out
+  at the other site that is nearest its destination. Villagers on the way
+  to worship use the sites when that is shorter. You can pick up a site and
+  move it, and a shake in the Hand cancels it. The sites use prayer power
+  until you cancel them. A tip of the game says to put them at the
   Village Store and the Worship Site, a forest or the fields. The Creature
   can learn it.
 - **How to see that it worked.** Two sites stand on the land, and villagers
   go in at one and come out at the other.
 - **Cost.** 5000. No power up.
 - **Gesture.** Spiral, then the house. At a place, two times.
-- **In the mod.** Close the grip with the Hand over the place. Not confirmed:
-  whether the second site needs a second cast.
+- **In the mod.** Close the grip with the Hand over the place. Cast it again
+  for the second site.
 - **Proved.** Desktop runs (`miracle_run.ps1 -Kind teleport`): one cast of a
   one-off seed makes one site before the door of the Temple, and a villager
   set down on it does not go. At the Village Store the game refuses the cast.
-  No second site shows (N6).
+  No run made a second cast.
 - **To prove.** The two sites stand on the land, and villagers go in at one
   and come out at the other.
 

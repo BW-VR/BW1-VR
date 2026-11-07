@@ -1197,9 +1197,10 @@ drifts. Its cloud is an `LH3DMist`, as the clouds of the sky. The mod
 limits the pole of each cloud to `cloud_pole_pct` percent of its distance
 (`backend.md`, "Clouds"), so a storm cloud near the head is flat.
 
-Open: in the full view the cloud of a Storm is a flat grey band with
-straight edges. A desktop run with `cloud_pole_pct=0` says if the limit of
-the pole makes it.
+Open (B43 in the roadmap): in the full view the cloud of a Storm is a flat
+grey band with straight edges, also with `cloud_pole_pct=0`. The cast of
+the game also starts many particles (type 106, `PARTICLE_TYPE_STORM_CAST`),
+so the plain game has no flat band.
 
 ## Keys
 
@@ -1534,8 +1535,9 @@ pictures). What it shows:
   more often. The trail with the low poly hand, with `overlay=0` and on the
   table.
 
-- The second site of Teleport: one cast (`miracle_run.ps1 -Kind teleport`)
-  makes one site, and a villager on it does not go. The Creature miracles
+- Two casts of Teleport. Each cast makes one site, and a villager or the
+  Creature that goes into a site comes out at the nearest other site of the
+  player. `miracle_run.ps1 -Kind teleport` makes one cast. The Creature miracles
   other than Strong, Freeze, Shrink, Enlarge and Invisibility.
 - A Creature outside the influence (the red halo and its line), each reason
   of a refusal other than "needs a Creature" and "needs a circle on the

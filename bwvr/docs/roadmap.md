@@ -90,6 +90,33 @@ These items come before the other work.
   the white people are in `headset-checks.md`, "Play as normal and send the
   log". The invisible body after the
   quest has no known cause yet.
+- **B41. Water does not put out a burning house.** A pour of 62 casts on
+  a burning house does not put out its fire, and 27 casts put out burning
+  trees (`miracle_run.ps1 -Kind fire`). In the game the Water spell sends
+  its effect (burn -4000, radius 1) each turn at a random point near the
+  spell, at the height of the land plus 0.4 (`SpellWater::Process`). An
+  object gets it when the point is inside its fire radius plus 1 to the
+  side and inside its height plus 1 up and down
+  (`EffectValues::ApplyEffectToMapPos`). Each drop lowers the heat by a
+  part that the heat capacity divides, and a house near other fires can
+  catch fire again. So a house goes out after many drops, and maybe only
+  for a while. Find whether the place of the spell in the mod (at the Hand,
+  over the roof) moves the points of the effect away from the house, and
+  how many drops the plain game needs.
+- **B42. A thrown object goes into the Physical Shield of the player.** A
+  pig thrown at the player's own dome goes in, also with the game's own
+  physics (`throw_law=1`). In the game the shield is a body of the physics
+  that a thrown object hits and bounces off, with no test of the owner
+  (`PhysicalShield::ReactToPhysicsImpact`). Each hit takes strength from
+  the shield in proportion to the momentum. So the plain game stops it.
+  Find why the throw of the mod does not meet the body of the shield.
+- **B43. The Storm cloud is a flat grey band.** In the eye pictures the
+  cloud of a Storm is a flat grey band with straight edges, also with
+  `cloud_pole_pct=0`. The game draws the cloud as many particles (type 106,
+  `PARTICLE_TYPE_STORM_CAST`, the rules `UR_StormCast` and
+  `UR_CloudGather`), so the plain game has no flat band. Find what flattens
+  it: the face of the sprites (`clouds_head_free`), one walk, or the near
+  plane.
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view
@@ -582,23 +609,10 @@ game as it is.
   and Heal from its icon at the Worship Site.
 - **N6. Miracles.** Not run: each reason of a refusal but "needs a
   Creature" and "needs a circle on the land". Open:
-  - The Storm cloud shows as a flat grey band with straight edges in the
-    eye pictures, also with `cloud_pole_pct=0`. Not known whether the plain
-    game draws it so.
-  - At a cast of Lightning a thin red column comes down from the sky to
-    the spire of the Temple, and the bolt goes from it into the spire. The
-    column has the red of the influence ring of the player (255 70 70). It
-    also shows with `influence_wall=0`, and the game makes no stream of
-    light at the cast, so the game draws it. Not known whether a player of
-    the plain game sees it so.
-  - Water puts out burning trees (27 casts of a desktop run) but not a
-    burning house (62 casts). The pour starts 1.6 units over the roof. Not
-    known whether a pour of the plain game puts out a house.
-  - A thrown object of the player goes into the player's own Physical
-    Shield, also with the game's own physics (`throw_law=1`). Not known
-    whether the plain game stops it.
-  - Teleport: one cast makes one site, and a villager on it does not go. Not
-    known how the plain game makes the second site.
+  - Teleport: each cast makes one site, and the game adds it to the list of
+    sites of the player. A villager or the Creature that goes into a site
+    comes out at the other site of that player that is nearest its
+    destination. So a second site needs a second cast. Not run: two casts.
   - Heal has no run: a test save of Land 1 has no sick villager. The log
     check is in `headset-checks.md`, "Play as normal and send the log".
   - A shield of a small circle loses about 24 of its life a second, so a
@@ -629,7 +643,10 @@ game as it is.
 - **N14. The throw.** Not tested: a rock thrown into a pile (`throw.md`).
   Open: after a landing at 6.5 m/s a thrown villager hops 2.2 m high in the
   room, for 2.8 s. The bounce keeps 50 percent of the speed, in the time of
-  the game. Not known whether the plain game makes so high a hop.
+  the game. The physics constants of the game give a villager much more
+  damping than a rock (`Data\PhysicsConstants.txt`, row 7: SpringK 26.25,
+  DampK 3.05), so a large hop is not expected. Not known whether the plain
+  game makes so high a hop.
 - **N15. The interface panel** (`ui_panel=1`). A desktop run shows the
   route of the batches to the panel and none in the eyes (`ui-layer.md`,
   section 9). Not run: a scripted click with the menu only on the panel,

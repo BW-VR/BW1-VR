@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, controls, walk, wall,
+# turn, fartake, fartotem, choice, look, book, controls, rayover, walk, wall,
 # housestop, headhouse, pinch,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -249,6 +249,29 @@ if ($Kind -eq 'totem') {
     # test_frame_rate=60: the frames of the steps count for a game at 60
     # frames a second, also with the renderer Vulkan.
     $keys = "$keys;welcome_done=0;welcome_test_parts=settings;debug_test_parts=$Parts;debug_window_test_save=12;test_frame_rate=60"
+} elseif ($Kind -eq 'rayover') {
+    # The ray over the panels in the room (bwvr/docs/ui-layer.md, "The ray
+    # over the panels"). The welcome page opens 3 s after the controllers can
+    # act (welcome_done=0). The word aimdebug aims the ray at its button
+    # Settings, and the eye pictures come while the ray rests there. The
+    # trigger presses Settings, the ray aims at the tab Controls (tab3) of the
+    # settings window, more eye pictures, and the trigger presses Close. The
+    # strip of the ray is saved (ray_card_test_save), and so are the first
+    # pictures of the page and the window. Give it
+    # -Set 'backend=dxwrapper\ddraw.dll' for eye pictures, and
+    # -Set 'video_view=1' with the Vulkan renderer for the pictures of the
+    # view for videos, which have the panels and the strip over the eye
+    # picture. Compare with -Set 'ray_over_panels=0'.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Parts -eq '') { $Parts = 'tab3 close' }
+    if ($Steps -eq '') {
+        $Steps = 'aimdebug@1400+1 shot@1420+1 trigger@1440+4 aimdebug@1490+1 shot@1510+1 ' +
+                 'aimdebug@1540+1 trigger@1550+4 shot@1580+1'
+    }
+    # test_frame_rate=60: the frames of the steps count for a game at 60
+    # frames a second, also with the renderer Vulkan.
+    $keys = "$keys;welcome_done=0;welcome_test_parts=settings;debug_test_parts=$Parts;welcome_test_save=2;debug_window_test_save=2;ray_card_test_save=3;test_frame_rate=60"
 } elseif ($Kind -eq 'look') {
     # A villager that a script turns to the camera (bwvr/docs/village.md, "A
     # villager that a script turns to the player"). In the test save "temple"
@@ -818,6 +841,10 @@ if ($Kind -eq 'controls') {
                '^controllers  : (the (left|right) controller (is|has)|the new map|button_map|.*recenters the view|the word aimdebug)|' +
                '^ring         : the ring (opens|closes|does not)|^spell book   : the book (opens|closes)'
     $hand = 'left'
+}
+if ($Kind -eq 'rayover') {
+    $pattern = '^ray card     :|^settings     :|^debug window : the window opens|^overlay      : (the ray of the menu|the glow of a ray|ray_glow)|' +
+               '^controllers  : the fake hand aims|^eye capture  :|^video view   : the (ray|ring)|^vk window    : the picture'
 }
 $cards = @{}
 $card = "^hint card    : frame (\d+), the card of the $hand hand: (.*?)\. \d"

@@ -57,7 +57,9 @@ want.
    Take near and far things: a villager among trees, a tree beside the
    Creature, a thing past a near tree. Wrong: rays that differ, a halo on a
    thing that you did not aim at, a halo or a glow that is lost on the land
-   or too strong, or a pull by accident.
+   or too strong, or a pull by accident. The glow of the ray, the tether and
+   the arc is the whole line. Wrong: a glow that is hard to see on the land
+   or the sky.
 8. **The fingers on the world.** Put a hand on the land, at a wall of a
     house, on a villager and into the sea, and take a small rock. Push a
     hand deep into the land, into a wall of a house and into a tree trunk,
@@ -138,7 +140,9 @@ want.
     menu is open. Wrong: a panel that turns with the head or is at a bad
     place, a panel that hides the pointing hand, keys, buttons or a ring that
     are blurred or hard to read or hard to hit with the ray, a ray that does
-    not meet the arrow of the game, or a thumb that lets go of Y. With
+    not meet the arrow of the game, or a thumb that lets go of Y. Wrong
+    also: a ray that a panel or the welcome page hides, or a mark at the end
+    of the ray that is hard to see on the paper. With
     `debug_menu=1`, also open the debug window, read a note, and scroll a
     long group with the stick. Wrong: rows or notes hard to read, arrows hard
     to hit, or a scroll that is too fast or too slow. Open the settings

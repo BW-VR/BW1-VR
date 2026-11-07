@@ -3542,7 +3542,8 @@ dxwrapper").
 **The layers in the video.** The quad layers of the headset are not in the
 eye pictures: the hint cards, the subtitle card, the ring (with the panels
 of `panel_kit.cpp` on it: the places, the settings and the debug window),
-the keyboard, the bubble of a miracle, the panels of the interface (the
+the keyboard, the bubble of a miracle, the ray over the panels
+(`ui-layer.md`, "The ray over the panels"), the panels of the interface (the
 menus, the help and the Creature panel, `ui_panel=1`) and the walls of the
 cut scene window. With `video_view_layers=1` (the default) the mod draws
 them over the area in the window, at the place and the size where the left

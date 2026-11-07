@@ -132,7 +132,8 @@ const int kSaidCount = bwvr::kCards + 3;
 bool g_said[kSaidCount] = {};
 const char* const kCardNames[bwvr::kCards] = {
     "the hint card of the pointing hand", "the hint card of the other hand",
-    "the subtitle card", "the ring", "the keyboard", "the bubble card"};
+    "the subtitle card", "the ring", "the keyboard", "the bubble card",
+    "the ray over the panels"};
 
 // For the log and the report.
 bool g_said_size = false;

@@ -13,6 +13,23 @@
 //
 // A very long line (a ray to a wall) has fewer, wider bands, so the ribbon
 // does not need more than kMaxSamples points.
+//
+// THE GLOW ALONE (ray_glow_only=1). The ribbon is the whole ray: no tube is
+// under it. So the ribbon is kOnlyWidth as wide as the ribbon over a tube,
+// its rim is darker, and its core keeps most of its light between two bands.
+// The middle also hides a share of the picture behind it (kOnlyOpacity), so
+// the core reads as a solid line on a bright picture. The corners across,
+// from the middle line (0) to the edge (1 half width):
+//
+//                   middle         rim at 0.5     edge   alpha
+//   over a tube     1.00 x band    0.65 x band    0      0
+//   glow alone      0.70 to 1.00   0.55 x band    0      0.55 x the light
+//
+// "band" is Pulse, 0.40 to 1. The light between two corners is a straight
+// line (glow_math.h). At the peak of a band the light is half the core light
+// 0.62 half widths from the middle over a tube, and 0.55 half widths for the
+// glow alone. Between two bands the core of the glow alone has 0.70 of its
+// light and the rim 0.22, so the core stands out from the rim.
 
 #pragma once
 
@@ -28,6 +45,40 @@ const float kFadeInM = 0.06f;
 const int kMaxSamples = 64;
 // A band has this many samples.
 const float kSamplesPerBand = 6.0f;
+
+// The ribbon over a tube: the light at the middle line and at the rim.
+const float kCore = 1.00f;
+const float kRim = 0.65f;
+// The place of the rim corners, a share of the half width (glow_math.h).
+const float kRimAt = 0.50f;
+// The glow alone (see THE GLOW ALONE).
+const float kOnlyWidth = 0.80f;
+const float kOnlyRim = 0.55f;
+const float kOnlySteady = 0.50f;
+const float kOnlyOpacity = 0.55f;
+
+// The light at the middle line for the light of the band (Pulse) there.
+// Over a tube it follows the band. For the glow alone kOnlySteady of it stays
+// at all times, and only the rest follows the band.
+inline float CoreLight(float band, bool only) {
+  return only ? kCore * (kOnlySteady + (1.0f - kOnlySteady) * band)
+              : kCore * band;
+}
+
+// The light at the rim for the light of the band.
+inline float RimLight(float band, bool only) {
+  return (only ? kOnlyRim : kRim) * band;
+}
+
+// The light across the ribbon at a share x of the half width (0 the middle
+// line, 1 the edge), as the corners of glow_math.h give it: core at 0, rim at
+// kRimAt, none at 1, and a straight line between two corners.
+inline float Across(float x, float core, float rim) {
+  if (x < 0.0f) x = -x;
+  if (x >= 1.0f) return 0.0f;
+  if (x <= kRimAt) return core + (rim - core) * (x / kRimAt);
+  return rim * (1.0f - x) / (1.0f - kRimAt);
+}
 
 // The distance, in meters of the room, between two bands on a line of the
 // given length.

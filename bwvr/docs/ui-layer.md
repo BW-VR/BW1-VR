@@ -46,6 +46,8 @@ Marks, as in `tabletop.md`:
 - The item `places` of the ring opens a panel of the places of the game and
   its 7 bookmarks in front of the player, fixed in the room. The ray and
   the trigger press its buttons (section 22).
+- While a panel in the room is open, the ray of the pointing hand is a quad
+  layer over the panels, so a panel does not hide it (section 25).
 - With `ui_panel=1` the pointer on the panel is not built (section 5). The
   menus draw on the panel at their own pixels, but the pointer still comes
   from the eye view.
@@ -1911,9 +1913,9 @@ draws its own arrow at that pixel, on the panel.
   is then off the view, and a press does not reach the game.
 - A ray that does not meet the plane of the panel gives no pixel. The
   pointer keeps its last pixel.
-- In a frame with the scene the thin ray of the hand ends on the panel. A
-  frame with no scene draws no ray, and the arrow of the game shows the
-  pointer.
+- In a frame with the scene the thin ray of the hand ends on the panel, and
+  it shows over the panel (section 25). A frame with no scene draws no ray,
+  and the arrow of the game shows the pointer.
 - In a frame with no scene the controller can own the pointer
   (`ChooseOwner` in `pointer_map.cpp`, `Usable` in `controllers.cpp`). The
   front end calls no `LHMouse::UpdateDeltaPos`, so `MenuRoomFlatFrame` calls
@@ -2060,7 +2062,8 @@ which calls `SetupEdit::KeyDown` `0x0040BAF0`. `ProcessWindowMessages` calls
   capital. It is on when the keyboard opens, so the first letter of a name
   is a capital.
 - **The ray.** The keyboard is nearer than the panel, so the ray of the
-  pointing hand meets it first. The key under the ray has a highlight, and
+  pointing hand meets it first, and the ray shows over the keyboard
+  (section 25). The key under the ray has a highlight, and
   the hand gets a light pulse at each new key. With the ray on the keyboard
   the pointer of the game is off the view, so the trigger makes no click in
   the game.
@@ -2222,7 +2225,8 @@ does not cover that hand.
 
 - The aim ray of the pointing hand shows while the panel is open
   (`ControllersMenuRay`). It ends at the panel, or 2 m from the hand when
-  it is not on the panel. The hand has the pose of a pointing finger.
+  it is not on the panel, and it shows over the panel (section 25). The
+  hand has the pose of a pointing finger.
 - The button under the ray is gold, and the hand gets a light pulse at each
   new button (8 ms at 0.1), as on the keyboard.
 - A pull of the trigger past 60 percent presses the button under the ray,
@@ -2727,3 +2731,85 @@ on the body, and the lines of words that keep apart. The desktop run is
 the fake controller, which is a Touch controller: `hint_profile` draws the
 other kinds, but only a headset gives the profile of a real Index, wand or
 Mixed Reality controller.
+
+## 25. The ray over the panels
+
+A panel in the room is a quad layer, and the runtime draws each quad layer
+over the eye pictures (4.3). The ray of the pointing hand is in the eye
+pictures (`hand-model.md`, "Overlay renderer"). So a panel hides the part
+of the ray in front of it, and the player cannot see where the ray points
+on the panel. With `ray_over_panels=1` (the default) the ray goes out as a
+quad layer of its own while a panel in the room is open. The code is in
+`ray_card.cpp` and `ray_card_math.h`.
+
+### 25.1 When
+
+The ray goes over the panels while the menu ray shows
+(`ControllersMenuRay`) and one of these is open (`ControllersPanelRay`):
+
+- a panel of `panel_kit.cpp`: the panel of places (22), the settings window
+  and the debug window (23, 24) and the welcome page (24.3)
+- the menus in the room in a frame with the scene: the menu panel and the
+  keyboard (20, 21)
+
+The ray of a dialog box in the eye pictures (`menu_room=0`) and the ray of
+a room of the Temple stay in the eye pictures, because no quad hides them.
+A frame with no scene draws no ray (20.4).
+
+### 25.2 The strip
+
+- The quad is a flat strip along the ray in the LOCAL space. It goes from
+  the aim point of the hand to the end of the ray: the point on the panel or
+  on the keyboard, or 2 m from the hand when the ray is off the panel. It
+  turns about the ray to face the middle of the head, so both eyes see a
+  line at its true place in the room.
+- It is the last quad layer of the frame (`kCardRay`), after the panels and
+  the other cards, so no panel hides it.
+- The eye pictures then have no menu ray, so the player sees one ray. When
+  the runtime refuses the layer, the ray goes back to the eye pictures, and
+  the log says so one time.
+- The look is the look of the ray in the eye pictures (`hand-model.md`, "The
+  glow ribbons"): the glow alone (`ray_glow=1`, `ray_glow_only=1`), a tube
+  under a glow (`ray_glow_only=0`) or a plain tube (`ray_glow=0`). The light
+  runs along the strip as it runs along the ribbon. The strip is 1.92 cm
+  across for the glow alone, 2.4 cm for a tube under a glow and 1.2 cm for a
+  plain tube.
+- A round mark is at the end of the ray: a disc 6 mm across in the color of
+  the ray, in a ring of dark ink 1 cm across. The ink shows on the bright
+  paper of a panel, and the disc shows on the land.
+- The picture is 32 by 1024 pixels. The mod draws it on the CPU in each
+  frame, because the light moves, and it goes to the swapchain of the card
+  in each frame (128 KB).
+- The view for videos draws the strip as it draws the other cards
+  (`backend.md`, "The view for videos").
+
+### 25.3 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `ray_over_panels` | 1 | 0: the ray stays in the eye pictures, and a panel hides the part of it in front of the panel. The switch "Ray on panels" of the debug page (the group Picture) |
+| `ray_card_test_save` | 0 | Test key. N saves the first N pictures of the strip as `bwvr-raycard-FFFFF.bmp` over a checkerboard |
+
+The log has the tag `ray card`. One line at the start, one line at the
+first frame of each run of frames with the strip (40 at the most) and one
+at its end, and the count in each report:
+
+```
+ray card     : ray_over_panels=1: while a panel in the room is open, the ray of the pointing hand goes out as a quad layer over the panels
+ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m), a strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the way to the head. The look: the glow alone, and a mark of 1.0 cm at the end. The eye pictures have no ray
+ray card     : the ray is no longer over the panels, frame N, after M frames
+ray card     : N frames had the ray over the panels
+```
+
+### 25.4 Tests and limits
+
+The math checks are in `test/controller_math/ray_card_checks.h`: the three
+looks, the place of the strip (along the ray, the front square to the ray
+and toward the head, a right hand set of axes, a ray that points at the
+head, a ray of 5 mm), and the picture (the middle line, the rim, the edge,
+the hand, the mark and its ink, the tube, the bytes of the picture).
+
+- The strip is over the hand where the ray starts, because a quad layer
+  has no depth. The glow alone has no light at the hand and full light from
+  6 cm. A tube starts at the hand.
+- Only a headset shows how the strip looks over a panel and over the land.

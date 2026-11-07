@@ -373,6 +373,14 @@ game as it is.
 
 ### Built, and not proven or not finished
 
+- **P25. The glow alone and the ray over the panels.** With
+  `ray_glow_only=1` the glow is the whole ray, the tether and the arc, with
+  no tube under it (`hand-model.md`, "The glow ribbons"). With
+  `ray_over_panels=1` the menu ray goes over the panels in the room as a
+  quad layer of its own, with a mark at its end (`ui-layer.md`, 25). The
+  math checks pass. Not run: `village_run.ps1 -Kind rayover` with each key at
+  1 and 0, and `aim_queue.ps1 -Runs ring1` and `village_run.ps1 -Kind
+  fartotem` with `ray_glow_only` at 1 and 0.
 - **F5. The stream of the influence at the hand.** The hook that ends the
   stream of the game at the Hand's point is built, but no desktop run had a
   stream of the game, so `influence_stream_hand` is 0. The update of the

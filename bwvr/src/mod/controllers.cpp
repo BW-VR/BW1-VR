@@ -822,6 +822,9 @@ struct Pointing {
   // The menus in the room (menu_room.cpp): the pixel is where the aim ray
   // meets the menu panel in the room, not a pixel of the eye view.
   bool on_panel;
+  // The length of the ray to the menu panel or the keyboard in the LOCAL
+  // space, in meters, 0 when it meets neither (ControllersPanelRay).
+  float panel_meters;
   bool on_window;       // the aim is the ray of the cut scene window
 };
 
@@ -1705,6 +1708,7 @@ void Compute() {
   if (MenuRoomSurface()) {
     const float scale = HeadPoseScale() * (p.table ? gain : 1.0f);
     const float meters = PanelPixel(hand, index, &p);
+    p.panel_meters = meters;
     // With no panel under the ray, the drawn ray has its own length.
     p.menu_depth = meters > 0.0f && scale > 0.0f;
     if (p.menu_depth) p.target_distance = meters * scale;
@@ -5595,6 +5599,35 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
             in.map[i * 3 + 1] * b[1] + in.map[i * 3 + 2] * b[2];
   }
   *units = in.units_per_meter;
+  return true;
+}
+
+// THE RAY OVER THE PANELS (ray_card.cpp, docs/ui-layer.md, "The ray over
+// the panels"). The ray of ControllersMenuRay in the LOCAL space of the
+// runtime, in meters, when the panels in the room can hide it: a panel of
+// panel_kit (the places, the settings and debug window, the welcome page) is
+// open, or the menus are on the panel in the room in a frame with the scene.
+// It has the length of the drawn ray: to the panel or the keyboard, or 2 m.
+// False for the ray of a dialog box in the eye pictures and of the Temple.
+bool ControllersPanelRay(float from[3], float to[3]) {
+  float meters = 0.0f;
+  bool panel = PlacesPanelRay(&meters);
+  if (!panel) panel = DebugWindowRay(&meters);
+  if (!panel) panel = WelcomePageRay(&meters);
+  const bool room =
+      !panel && MenuUp() && MenuRoomSurface() && !MenuRoomFlatNow();
+  if (!g_on || !g_pointer_owned || !(panel || room)) return false;
+  if (room) meters = g_point.panel_meters;
+  const int index = PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || !hand.aim_valid) return false;
+  if (!(meters > 0.0f)) meters = 2.0f;
+  float d[3];
+  menu_room_math::AimForward(g_aim_q[index], d);
+  for (int i = 0; i < 3; ++i) {
+    from[i] = g_aim_p[index][i];
+    to[i] = from[i] + d[i] * meters;
+  }
   return true;
 }
 

@@ -95,13 +95,17 @@ struct PanelQuad {
 //                      keyboard in the headset"). It also shows over a screen.
 //   kCardBubble        the bubble of a miracle that the pointing hand pulls
 //                      out of the spell book (docs/miracles.md, "The pull")
+//   kCardRay           the ray of the pointing hand while it ends on a panel
+//                      in the room, over all the other quads (docs/ui-layer.md,
+//                      "The ray over the panels")
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
 const int kCardRing = 3;
 const int kCardKeyboard = 4;
 const int kCardBubble = 5;
-const int kCards = 6;
+const int kCardRay = 6;
+const int kCards = 7;
 
 // The picture of a hint card.
 const uint32_t kHintCardWidth = 768;

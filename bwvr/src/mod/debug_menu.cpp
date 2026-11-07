@@ -308,6 +308,11 @@ void ControllersGesturePointChange(const char* by);
 int OverlayTrailValue();
 void OverlayTrailChange(const char* by);
 int OverlayRayGlowValue();
+int OverlayRayGlowOnlyValue();
+void OverlayRayGlowOnlyChange(const char* by);
+// The ray over the panels in the room (ray_card.cpp).
+int RayCardValue();
+void RayCardChange(const char* by);
 // The view for videos (video_view.cpp).
 int VideoViewValue();
 void VideoViewChange(const char* by);
@@ -466,6 +471,11 @@ const Switch kSwitches[] = {
      L"white|diffuse"},
     {kGroupPicture, L"Ray glow", L"Glow along the rays and the arc",
      "ray_glow", OverlayRayGlowValue, OverlayRayGlowChange, L"off|on"},
+    {kGroupPicture, L"Glow only", L"The glow is the whole ray",
+     "ray_glow_only", OverlayRayGlowOnlyValue, OverlayRayGlowOnlyChange,
+     L"tube|glow"},
+    {kGroupPicture, L"Ray on panels", L"Ray over the panels in the room",
+     "ray_over_panels", RayCardValue, RayCardChange, L"under|over"},
     {kGroupPicture, L"Video view", L"16:9 view for videos in the window",
      "video_view", VideoViewValue, VideoViewChange, L"off|on"},
     {kGroupPicture, L"Video marks", L"Corner marks of the video area",
@@ -852,6 +862,12 @@ const wchar_t* const kTips[] = {
     // Ray glow
     L"On: the menu ray, the far grab tether and the teleport arc glow, with a "
     L"light that runs from the hand. Off: plain tubes.",
+    // Glow only
+    L"Glow: with Ray glow on, the glow alone is the ray, narrower and with a "
+    L"solid core. Tube: the glow is over a thin tube.",
+    // Ray on panels
+    L"Over: while a panel in the room is open, the ray shows over the panel "
+    L"and has a mark at its end. Under: the panel hides the ray.",
     // Video view
     L"On: the game window on the PC shows a 16:9 part of the left eye for a "
     L"video capture, with a smoothed head. Only with the Vulkan renderer.",

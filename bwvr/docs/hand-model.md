@@ -2007,7 +2007,9 @@ arc and ring (`teleport.cpp`) are a second source with their own switch: they
 draw while the player aims, with `overlay=0` too. They are a tube of 6 sides,
 6 mm of the room across, and a ring on the land. Cyan means a valid target
 and red means a target that is not valid. They are opaque, with the depth test
-and the depth write on. With `ray_glow=1` each of them also has a glow ribbon.
+and the depth write on. With `ray_glow=1` each line also has a glow ribbon,
+and with `ray_glow_only=1` (the default) the ribbon is the whole line, with
+no tube.
 
 **The glow ribbons** (`glow_math.h`, `ray_glow_math.h`,
 `gesture_trail_math.h`). A ribbon is a flat strip along a line of points.
@@ -2016,9 +2018,12 @@ corners across. The light is none at the two edges, the rim light half way
 from the middle to each edge, and the core light on the middle line. The
 light between two corners is a straight line, so the strip is a soft glow
 with no edge. The draw adds this light to the picture, tests the depth and
-writes no depth. So land in front of a ribbon hides it, and a ribbon hides
-nothing. The ribbons draw after the meshes: a hand in front of a ribbon
-hides it, and a ribbon in front of a hand adds its light to the hand. A
+writes no depth. A ribbon can also hide a share of the picture behind it:
+the blend is source one and destination one less the source alpha, and the
+alpha of a corner is a share of its light (0 for the trail and for a ray over
+a tube, so these only add light). So land in front of a ribbon hides it. The
+ribbons draw after the meshes: a hand in front of a ribbon hides it, and a
+ribbon in front of a hand adds its light to the hand. A
 ribbon is built again in each eye pass, because it turns to the eye of that
 pass (`glow_math::BuildRibbon`, with the place of the eye from the world to
 camera matrix). The cut at the near plane, the projection and the vertex
@@ -2026,16 +2031,32 @@ format are those of the meshes. Two sources use it:
 
 - **The glow of a ray** (`ray_glow=1`, the default). The menu ray, the
   tether of the far grab, the arc of the teleport and the arc of a Creature
-  command each get a ribbon along their tube. The tube stays as it is. The
-  ribbon is 1.2 cm (menu ray), 1 cm (tether) or 2.5 cm (arc) of the room from
-  the middle to the edge, and has the color of the tube. Its light is a
-  bright band that runs along the line from the hand outward: one band each
-  0.30 m, at 0.9 m/s. Between two bands the light is 40 percent of the
-  band. The light is none at the hand and full from 6 cm. The line is cut
-  in samples, 6 for each band and 64 at most, so a line longer than 10 m has
-  wider bands. Only the look of the line moves. The ray, the arc and the
-  world stay where they are, and the clock is read once a frame, so both
-  eyes show the same light. With `ray_glow=0` the lines are plain tubes.
+  command each get a ribbon along the line, in the color of the line. Its
+  light is a bright band that runs along the line from the hand outward: one
+  band each 0.30 m, at 0.9 m/s. The light is none at the hand and full from
+  6 cm. The line is cut in samples, 6 for each band and 64 at most, so a line
+  longer than 10 m has wider bands. Only the look of the line moves. The ray,
+  the arc and the world stay where they are, and the clock is read once a
+  frame, so both eyes show the same light. With `ray_glow=0` the lines are
+  plain tubes.
+- **The glow alone** (`ray_glow_only=1`, the default, `ray_glow_math.h`).
+  The ribbon is the whole line: no tube is under it. The ribbon is 0.96 cm
+  (menu ray), 0.8 cm (tether) or 2 cm (arc) of the room from the middle to
+  the edge. Its core keeps 70 percent of its light between two bands, its
+  rim is dark, and the core hides 55 percent of the picture behind it, so
+  the core reads as a solid line on a bright picture. With
+  `ray_glow_only=0` the tube stays, and the ribbon over it is 1.2 cm, 1 cm
+  or 2.5 cm, with a light that only adds. The two profiles, from the middle
+  line to the edge, with "band" the light of the band (0.40 to 1):
+
+  | | Middle | Rim, at 0.5 | Edge | Alpha | Half light at a band |
+  | --- | --- | --- | --- | --- | --- |
+  | Over a tube | 1.00 x band | 0.65 x band | 0 | 0 | 0.62 half widths, 0.74 cm for the menu ray |
+  | Glow alone | 0.70 to 1.00 | 0.55 x band | 0 | 0.55 x the light | 0.55 half widths, 0.52 cm for the menu ray |
+
+  While a panel in the room is open, the menu ray goes over the panel as a
+  quad layer of its own with the same look (`ui-layer.md`, "The ray over
+  the panels").
 - **The trail of a gesture** (`gesture_trail=1`, see `miracles.md`, "The
   trail at the fingertip").
 
@@ -2051,7 +2072,9 @@ too (hand.md, "8. The two real hands and which one is the Hand"). There is no la
 
 `ray_glow` (1): the glow ribbons of the rays (see "The glow ribbons"). 0 gives
 plain tubes. The launcher row "Glow on the rays", and the switch "Ray glow" of
-the debug page (the group Picture). `gesture_trail` (1) is the trail of a
+the debug page (the group Picture). `ray_glow_only` (1): with `ray_glow=1`
+the glow is the whole ray. 0 keeps the tube under the wider glow. The switch
+"Glow only" of the debug page. `gesture_trail` (1) is the trail of a
 gesture (`miracles.md`).
 
 **The log.** The tag is `overlay`. One line at the first draw, and one at
@@ -2066,9 +2089,9 @@ CPU, with the build and the draws apart. Each report window counts the draws,
 the triangles, the triangles that crossed the near plane and the triangles
 off the screen.
 
-The glow has its own lines: the values of `ray_glow` and `gesture_trail` at the
-start, the first glow of a ray, and each start and end of a trail (30 at the
-most). After each report window with a glow, one line gives the frames, the
+The glow has its own lines: the values of `ray_glow`, `ray_glow_only` and
+`gesture_trail` at the start, the first glow of a ray (with the look), and
+each start and end of a trail (30 at the most). After each report window with a glow, one line gives the frames, the
 triangles in each eye and the CPU time of the two glow draws.
 
 **Tests.** The math test (`OverlayChecks`):
@@ -2097,7 +2120,9 @@ of the build, the place of the eye from the camera matrix, the trail (the
 light, the points, the keep time, the release, a new draw, a full buffer, the
 same count at 72, 90 and 120 Hz) and the glow of a ray (the period, the
 samples, the bands that move outward, the fade at the hand, the point along
-a polyline).
+a polyline). The checks of the glow alone (`ray_card_checks.h`): the light
+across the ribbon, the core and the rim between two bands, and the half
+light of the two profiles.
 
 Desktop runs with dxwrapper, `test_frame_rate=60` and `ray_glow=1` against
 `ray_glow=0` (`aim_run.ps1` with the recipe `ring1`, and `village_run.ps1

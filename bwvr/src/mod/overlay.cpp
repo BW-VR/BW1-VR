@@ -89,9 +89,10 @@
 // turns to the eye (glow_math.h). Two users:
 //
 //   ray_glow       the menu ray, the tether of the far grab and the arc of
-//                  the teleport get a glow round the tube and a light that
-//                  runs along the line from the hand outward
-//                  (ray_glow_math.h). Only the look of the line moves
+//                  the teleport get a glow and a light that runs along the
+//                  line from the hand outward (ray_glow_math.h). Only the
+//                  look of the line moves. With ray_glow_only=1 the glow is
+//                  the whole line, with no tube under it
 //   gesture_trail  while the draw button is held, a ribbon follows the point
 //                  of the draw, the tip of the index finger, so the player
 //                  sees the gesture (gesture_trail_math.h). It has the room as
@@ -160,6 +161,12 @@ void StereoReapplyEye();
 bool ControllersOwnPointer();
 // controllers.cpp: the ray of the pointing hand while a dialog box is up.
 bool ControllersMenuRay(float from[3], float to[3], float* units);
+// ray_card.cpp: the ray of the menu as a quad layer over the panels in the
+// room. True when the ray of this frame is there.
+bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
+                  float tube_radius_m, const float rgb[3], float seconds,
+                  uint64_t frame);
+void RayCardReport();
 int ControllersHandCm();
 int ControllersHandScalePct();
 // controllers.cpp: the draw button and the points of the last controllers
@@ -275,14 +282,12 @@ int g_menu_ray_triangles = 0;
 const float kRingInner = 0.75f;
 const float kRingLiftM = 0.02f;
 
-// THE GLOW. The half width of the ribbon of each ray, in meters of the room.
-// The tube of each is a third to a sixth of it.
+// THE GLOW. The half width of the ribbon of each ray over its tube, in meters
+// of the room. The tube of each is a third to a sixth of it. The glow alone
+// (ray_glow_only=1) is ray_glow_math::kOnlyWidth of it.
 const float kMenuGlowM = 0.012f;
 const float kFarGlowM = 0.010f;
 const float kArcGlowM = 0.025f;
-// The light of a ray at the middle line of its ribbon, and at the rim.
-const float kRayCore = 1.00f;
-const float kRayRim = 0.65f;
 // The trail: the half width of its ribbon in meters of the room, and its
 // colors, a warm gold core with an amber rim. The gold shows on the land and
 // on the sky.
@@ -317,21 +322,27 @@ const int kGlowMaxTriangles = kGlowMaxPoints * glow_math::kTrianglesPerSegment;
 struct GlowLine {
   int first;
   int count;
+  float opacity;  // the alpha is this share of the light, 0 to add the light
 };
 glow_math::Point g_glow_point[kGlowMaxPoints];
 GlowLine g_glow_line[kGlowMaxLines];
 int g_glow_points = 0;
 int g_glow_lines = 0;
 glow_math::Triangle g_glow_triangle[kGlowMaxTriangles];
+float g_glow_opacity[kGlowMaxTriangles];
 // The cut at the near plane makes at most two triangles of one.
 Vertex g_glow_vertices[kGlowMaxTriangles * 2 * 3];
 bool g_ray_glow = true;
+// ray_glow_only: the glow of a ray is the whole ray, with no tube under it.
+bool g_ray_glow_only = true;
 bool g_trail_on = true;
 
 // THE STATES the draw changes. The depth buffer stays on as the game has it.
 // Only when it is off does the draw turn it on. The meshes write depth and
-// use no blend. The glow adds its light (source one, destination one), tests
-// the depth and writes none. kKeep leaves a state as the game has it.
+// use no blend. The glow adds its light and hides the share alpha of the
+// picture behind it (source one, destination one less the source alpha). A
+// glow with an alpha of 0 only adds its light. It tests the depth and writes
+// none. kKeep leaves a state as the game has it.
 struct RenderSet {
   D3DRENDERSTATETYPE state;
   DWORD value;  // the meshes
@@ -344,7 +355,7 @@ const RenderSet kRender[] = {
     {D3DRENDERSTATE_ZFUNC, D3DCMP_LESSEQUAL, D3DCMP_LESSEQUAL},
     {D3DRENDERSTATE_ALPHABLENDENABLE, FALSE, TRUE},
     {D3DRENDERSTATE_SRCBLEND, kKeep, D3DBLEND_ONE},
-    {D3DRENDERSTATE_DESTBLEND, kKeep, D3DBLEND_ONE},
+    {D3DRENDERSTATE_DESTBLEND, kKeep, D3DBLEND_INVSRCALPHA},
     {D3DRENDERSTATE_ALPHATESTENABLE, FALSE, FALSE},
     {D3DRENDERSTATE_FOGENABLE, FALSE, FALSE},
     {D3DRENDERSTATE_CULLMODE, D3DCULL_NONE, D3DCULL_NONE},
@@ -547,15 +558,29 @@ uint32_t Color(const float rgb[3]) {
   return out;
 }
 
+// A color of the glow: the light, and an alpha of `opacity` times the
+// brightest part of the light. The alpha is then a straight line of the
+// light too, so it stays right where the cut at the near plane makes a new
+// corner.
+uint32_t GlowColor(const float rgb[3], float opacity) {
+  float most = rgb[0] > rgb[1] ? rgb[0] : rgb[1];
+  if (rgb[2] > most) most = rgb[2];
+  float a = opacity * most * 255.0f;
+  if (!(a > 0.0f)) a = 0.0f;
+  if (a > 255.0f) a = 255.0f;
+  return (Color(rgb) & 0x00FFFFFFu) | (static_cast<uint32_t>(a + 0.5f) << 24);
+}
+
 // THE GLOW OF A RAY (ray_glow_math.h): a ribbon along a line of the world, with
 // a point at equal distances along it. The light of a point is the bright band
 // that runs from the first point of the line outward. units is the world
-// units in a meter of the room. Nothing when ray_glow is off.
-void AddRayGlow(const float (*points)[3], int count, float units,
+// units in a meter of the room. half_width_m is the half width over a tube.
+// Nothing when ray_glow is off. True when the ribbon is in this frame.
+bool AddRayGlow(const float (*points)[3], int count, float units,
                 float half_width_m, const float color[3]) {
-  if (!g_ray_glow || count < 2 || !(units > 0.0f)) return;
+  if (!g_ray_glow || count < 2 || !(units > 0.0f)) return false;
   if (count > overlay_math::kArcMaxPoints) count = overlay_math::kArcMaxPoints;
-  if (g_glow_lines >= kGlowMaxLines) return;
+  if (g_glow_lines >= kGlowMaxLines) return false;
   float cumulative[overlay_math::kArcMaxPoints];
   cumulative[0] = 0.0f;
   for (int i = 1; i < count; ++i) {
@@ -564,32 +589,45 @@ void AddRayGlow(const float (*points)[3], int count, float units,
   }
   const float length = cumulative[count - 1];
   const float length_m = length / units;
-  if (!(length_m > 0.02f)) return;
+  if (!(length_m > 0.02f)) return false;
   const int n = ray_glow_math::Samples(length_m);
-  if (g_glow_points + n > kGlowMaxPoints) return;
+  if (g_glow_points + n > kGlowMaxPoints) return false;
   const float period = ray_glow_math::Period(length_m);
+  const bool only = g_ray_glow_only;
   GlowLine& line = g_glow_line[g_glow_lines++];
   line.first = g_glow_points;
   line.count = n;
+  line.opacity = only ? ray_glow_math::kOnlyOpacity : 0.0f;
+  const float half =
+      half_width_m * (only ? ray_glow_math::kOnlyWidth : 1.0f) * units;
   for (int i = 0; i < n; ++i) {
     const float s = length * static_cast<float>(i) / static_cast<float>(n - 1);
     glow_math::Point& p = g_glow_point[g_glow_points++];
     ray_glow_math::AlongPolyline(points, cumulative, count, s, p.p);
     const float meters = s / units;
-    const float light = ray_glow_math::Pulse(meters, g_seconds, period) *
-                        ray_glow_math::FadeIn(meters);
-    p.half_width = half_width_m * units;
+    const float band = ray_glow_math::Pulse(meters, g_seconds, period);
+    const float fade = ray_glow_math::FadeIn(meters);
+    const float core = ray_glow_math::CoreLight(band, only) * fade;
+    const float rim = ray_glow_math::RimLight(band, only) * fade;
+    p.half_width = half;
     for (int k = 0; k < 3; ++k) {
-      p.core[k] = color[k] * light * kRayCore;
-      p.rim[k] = color[k] * light * kRayRim;
+      p.core[k] = color[k] * core;
+      p.rim[k] = color[k] * rim;
     }
   }
   if (!g_said_ray_glow) {
     g_said_ray_glow = true;
     ModLog("overlay      : the glow of a ray is drawn, %d points on a line "
-           "of %.2f m, frame %llu", n, length_m, g_frame);
+           "of %.2f m, frame %llu. %s", n, length_m, g_frame,
+           only ? "The glow is the whole line (ray_glow_only=1)"
+                : "The glow is over the tube of the line");
   }
+  return true;
 }
+
+// The tube of a ray goes under its glow, or alone when the ray has no glow.
+// With ray_glow_only=1 a ray with its glow has no tube.
+bool RayTube(bool glow) { return !glow || !g_ray_glow_only; }
 
 void SetStates(IDirect3DDevice7* device, bool glow) {
   int unread = 0;
@@ -1003,11 +1041,11 @@ void BuildTeleport() {
   if (!(units > 0.0f)) return;
   const float* base = d.valid ? kArcValid : kArcInvalid;
   const int start = g_count;
-  if (d.count >= 2) {
+  if (d.count >= 2 &&
+      RayTube(AddRayGlow(d.points, d.count, units, kArcGlowM, base))) {
     g_count += overlay_math::BuildTube(d.points, d.count, kTubeRadiusM * units,
                                        &g_world[g_count],
                                        kMaxTriangles - g_count);
-    AddRayGlow(d.points, d.count, units, kArcGlowM, base);
   }
   if (d.ring) {
     const float outer = d.ring_cm * 0.01f * units;
@@ -1039,11 +1077,11 @@ void BuildCommand() {
   if (!(units > 0.0f)) return;
   const float* base = d.valid ? kCommandValid : kArcInvalid;
   const int start = g_count;
-  if (d.count >= 2) {
+  if (d.count >= 2 &&
+      RayTube(AddRayGlow(d.points, d.count, units, kArcGlowM, base))) {
     g_count += overlay_math::BuildTube(d.points, d.count, kTubeRadiusM * units,
                                        &g_world[g_count],
                                        kMaxTriangles - g_count);
-    AddRayGlow(d.points, d.count, units, kArcGlowM, base);
   }
   if (d.ring) {
     const float outer = d.ring_cm * 0.01f * units;
@@ -1112,10 +1150,11 @@ void BuildFar() {
     line[0][i] = d.hand[i];
     line[1][i] = d.object[i];
   }
-  g_count += overlay_math::BuildTube(line, 2, kFarTubeRadiusM * units,
-                                     &g_world[g_count],
-                                     kMaxTriangles - g_count);
-  AddRayGlow(line, 2, units, kFarGlowM, kFarGold);
+  if (RayTube(AddRayGlow(line, 2, units, kFarGlowM, kFarGold))) {
+    g_count += overlay_math::BuildTube(line, 2, kFarTubeRadiusM * units,
+                                       &g_world[g_count],
+                                       kMaxTriangles - g_count);
+  }
   for (int t = start; t < g_count; ++t) {
     for (int v = 0; v < 3; ++v) {
       const float level =
@@ -1142,10 +1181,11 @@ void BuildFar() {
 // light of the ray, and with `glow` its glow. Returns the triangles added.
 int AddRayLine(float line[2][3], float units, bool glow) {
   const int start = g_count;
-  g_count += overlay_math::BuildTube(line, 2, kMenuRayRadiusM * units,
-                                     &g_world[g_count],
-                                     kMaxTriangles - g_count);
-  if (glow) AddRayGlow(line, 2, units, kMenuGlowM, kMenuRay);
+  if (RayTube(glow && AddRayGlow(line, 2, units, kMenuGlowM, kMenuRay))) {
+    g_count += overlay_math::BuildTube(line, 2, kMenuRayRadiusM * units,
+                                       &g_world[g_count],
+                                       kMaxTriangles - g_count);
+  }
   // A MARK AT THE END: a small cross across the ray. In a room of the Temple
   // the game's Hand does not show, so the end of the line is the cursor, and
   // a line of this width is hard to see on a wall some meters away. The cross
@@ -1193,10 +1233,19 @@ int AddRayLine(float line[2][3], float units, bool glow) {
   return g_count - start;
 }
 
+// THE RAY OVER THE PANELS (ray_card.cpp): while a panel in the room is open,
+// the quad layer of the panel would hide this ray. The ray then goes out as a
+// quad layer of its own after the panels, and the eye pictures get no ray.
 void BuildMenuRay() {
   g_menu_ray_triangles = 0;
   float line[2][3], units = 0.0f;
-  if (!ControllersMenuRay(line[0], line[1], &units) || !(units > 0.0f)) return;
+  const bool ray =
+      ControllersMenuRay(line[0], line[1], &units) && units > 0.0f;
+  if (RayCardFrame(ray, g_ray_glow, g_ray_glow_only, kMenuGlowM,
+                   kMenuRayRadiusM, kMenuRay, g_seconds, g_frame) ||
+      !ray) {
+    return;
+  }
   g_menu_ray_triangles = AddRayLine(line, units, true);
   static bool said = false;
   if (!said && g_menu_ray_triangles > 0) {
@@ -1281,6 +1330,7 @@ void BuildGestureTrail() {
   GlowLine& line = g_glow_line[g_glow_lines++];
   line.first = g_glow_points;
   line.count = n;
+  line.opacity = 0.0f;
   for (int i = 0; i < n; ++i) {
     const bool live = i == g_trail.count;
     const float* room = live ? g_trail.live : g_trail.point[i];
@@ -1330,14 +1380,19 @@ int DrawGlow(IDirect3DDevice7* device, const float m[12], float near_plane,
   if (g_glow_lines > 0 && glow_math::CameraPlace(m, eye)) {
     for (int l = 0; l < g_glow_lines; ++l) {
       const GlowLine& line = g_glow_line[l];
-      triangles += glow_math::BuildRibbon(
+      const int made = glow_math::BuildRibbon(
           &g_glow_point[line.first], line.count, eye,
           &g_glow_triangle[triangles], kGlowMaxTriangles - triangles);
+      for (int t = triangles; t < triangles + made; ++t) {
+        g_glow_opacity[t] = line.opacity;
+      }
+      triangles += made;
     }
   }
   // THE WALL at the edge of the influence: triangles of the world with their
   // own light, the same for both eyes.
   for (int w = 0; w < g_wall_count && triangles < kGlowMaxTriangles; ++w) {
+    g_glow_opacity[triangles] = 0.0f;
     glow_math::Triangle& tri = g_glow_triangle[triangles++];
     for (int v = 0; v < 3; ++v) {
       for (int k = 0; k < 3; ++k) {
@@ -1365,7 +1420,7 @@ int DrawGlow(IDirect3DDevice7* device, const float m[12], float near_plane,
         d.y = corner[v].y;
         d.z = corner[v].z;
         d.rhw = corner[v].rhw;
-        d.diffuse = Color(corner[v].color);
+        d.diffuse = GlowColor(corner[v].color, g_glow_opacity[t]);
         d.specular = 0xFF000000u;
         d.u = 0.0f;
         d.v = 0.0f;
@@ -1674,6 +1729,29 @@ void OverlayRayGlowChange(const char* by) {
          g_ray_glow ? 1 : 0,
          g_ray_glow ? "The menu ray, the tether and the arc have a glow"
                     : "The menu ray, the tether and the arc are plain tubes",
+         ControllersFrameCount());
+}
+
+// mod_main.cpp: ray_glow_only.
+void OverlaySetRayGlowOnly(bool on) {
+  g_ray_glow_only = on;
+  ModLog("overlay      : ray_glow_only=%d: %s", on ? 1 : 0,
+         on ? "with ray_glow=1 the glow is the whole ray: no tube, a band "
+              "0.8 times as wide, a darker rim, and a core that keeps its "
+              "light and hides 55 percent of the picture behind it"
+            : "with ray_glow=1 the glow is over the tube of the ray, and only "
+              "adds its light");
+}
+
+int OverlayRayGlowOnlyValue() { return g_ray_glow_only ? 1 : 0; }
+
+void OverlayRayGlowOnlyChange(const char* by) {
+  g_ray_glow_only = !g_ray_glow_only;
+  ControllersGrabPulse(1, 0.5f, g_ray_glow_only ? 0.40f : 0.08f);
+  ModLog("overlay      : %s: ray_glow_only=%d. %s, frame %llu", by,
+         g_ray_glow_only ? 1 : 0,
+         g_ray_glow_only ? "The glow is the whole ray, with no tube"
+                         : "The glow is over the tube of the ray",
          ControllersFrameCount());
 }
 
@@ -2077,6 +2155,7 @@ void OverlayDraw() {
 
 // Once a report window.
 void OverlayReport() {
+  RayCardReport();
   HandModelReport();
   HandFeelReport();
   HandLandReport();

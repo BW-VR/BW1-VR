@@ -105,6 +105,7 @@ add_library(bwvr_mod SHARED
     temple.cpp
     throw_physics.cpp
     overlay.cpp
+    ray_card.cpp
     influence_edge.cpp
     vignette.cpp
     video_view.cpp

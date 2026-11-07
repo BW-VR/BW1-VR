@@ -269,6 +269,11 @@ bool ControllersLocalToWorld(const float local[3], float world[3],
 // owns the pointer. The two ends are in the world. False when none is drawn.
 bool ControllersMenuRay(float from[3], float to[3], float* units);
 
+// The same ray in the LOCAL space of the runtime, in meters, while it can be
+// under a panel in the room (docs/ui-layer.md, "The ray over the panels").
+// False when no panel in the room is open.
+bool ControllersPanelRay(float from[3], float to[3]);
+
 // The ring (radial_menu.cpp, docs/controllers.md, "The ring"): the hand that
 // does not point, from the last controllers frame. The poses are in the LOCAL
 // space of OpenXR, in meters.

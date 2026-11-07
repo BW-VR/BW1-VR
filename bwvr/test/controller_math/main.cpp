@@ -3641,6 +3641,7 @@ void CreatureChecks() {
 #include "video_layers_checks.h"
 #include "blinder_checks.h"
 #include "glow_checks.h"
+#include "ray_card_checks.h"
 #include "places_checks.h"
 #include "debug_window_checks.h"
 #include "settings_panel_checks.h"
@@ -4088,6 +4089,8 @@ int main() {
   menu_room_checks::MenuRoomChecks();
   menu_room_checks::KeyboardChecks();
   glow_checks::GlowChecks();
+  ray_card_checks::GlowAloneChecks();
+  ray_card_checks::RayCardChecks();
   places_checks::PlacesChecks();
   debug_window_checks::DebugWindowChecks();
   settings_panel_checks::SettingsPanelChecks();

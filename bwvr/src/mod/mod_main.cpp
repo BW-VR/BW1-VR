@@ -164,6 +164,9 @@ void HandGlowSetEnabled(bool on);
 // overlay.cpp: the mod's own meshes, a test hand at each controller.
 void OverlaySetEnabled(bool on);
 void OverlaySetGlow(bool rays, bool trail);
+void OverlaySetRayGlowOnly(bool on);
+// ray_card.cpp: ray_over_panels and the test key ray_card_test_save.
+void RayCardSetOptions(bool on, int test_save);
 void PresentWatchSetEnabled(bool on);
 void PresentWatchInstall();
 void PresentWatchSkipDesktop(bool on);
@@ -554,10 +557,14 @@ bool g_hand_glow = false;
 TargetGlowSettings g_target_glow;
 // The mod draws its own test hand at each controller (overlay.cpp).
 bool g_overlay = false;
-// The glow of the rays (ray_glow) and the trail of a gesture (gesture_trail),
-// both drawn by overlay.cpp.
+// The glow of the rays (ray_glow), the glow alone (ray_glow_only) and the
+// trail of a gesture (gesture_trail), all drawn by overlay.cpp. The ray over
+// the panels in the room (ray_over_panels, ray_card.cpp).
 bool g_ray_glow = true;
+bool g_ray_glow_only = true;
 bool g_gesture_trail = true;
+bool g_ray_over_panels = true;
+int g_ray_card_test_save = 0;
 // The teleport with a visible arc (teleport.cpp). See docs/god-view.md.
 TeleportSettings g_teleport;
 // The grab from a distance (far_grab.cpp), and the square root law of the
@@ -1600,7 +1607,12 @@ void ReadSettings() {
     // The glow of the rays and the trail of a gesture. See docs/hand-model.md,
     // "The glow ribbons".
     g_ray_glow = number("ray_glow", 1) != 0;
+    g_ray_glow_only = number("ray_glow_only", 1) != 0;
     g_gesture_trail = number("gesture_trail", 1) != 0;
+    // The ray over the panels in the room. See docs/ui-layer.md, "The ray
+    // over the panels".
+    g_ray_over_panels = number("ray_over_panels", 1) != 0;
+    g_ray_card_test_save = number("ray_card_test_save", 0);
   }
   // How many game units a metre is worth. The default keeps the neck and
   // the eyes agreeing: the mod renders with eye_separation world units for
@@ -2019,6 +2031,8 @@ void StartVrStep() {
       PointerMapSetGrabProbe(g_grab.probe);
       ControllersSetGesture(g_gesture);
       OverlaySetGlow(g_ray_glow, g_gesture_trail);
+      OverlaySetRayGlowOnly(g_ray_glow_only);
+      RayCardSetOptions(g_ray_over_panels, g_ray_card_test_save);
       if (g_gesture.button != 0) GestureAirInstall();
       if (g_overlay) OverlaySetEnabled(true);
     }

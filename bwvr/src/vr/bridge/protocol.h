@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 namespace bwvr::bridge {
-constexpr uint32_t kMagic = 0x42575242, kVersion = 2;
+constexpr uint32_t kMagic = 0x42575242, kVersion = 3;
 constexpr uint32_t kPayload = 32 * 1024 * 1024;
 enum Command : uint32_t { Instance = 1, System, Session, Begin, EyeTexture,
   EyePixels, PanelTexture, Panels, Card, Window, End, Haptic, Stop, Probe };

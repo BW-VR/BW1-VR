@@ -173,6 +173,10 @@ void ControllersHintState(ControllerHintState* out);
 // right. The kind comes from the interaction profile of the controller
 // (button_map_math.h), and the map is the map that the page shows.
 int ControllersKindOf(int c);
+// True when the runtime gave the interaction profile of controller c (or the
+// fake controller runs), so ControllersKindOf is the kind of that
+// controller.
+bool ControllersProfileKnown(int c);
 int ControllersPointingSide();
 void ControllersButtonMapOf(int c, int map[4]);
 void ControllersButtonJobs(button_map::Jobs* out);

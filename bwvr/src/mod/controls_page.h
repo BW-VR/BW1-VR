@@ -27,6 +27,10 @@ void ControlsRowValueText(int k, int value, wchar_t* out, int size);
 bool ControlsRowStep(int k, bool back);
 const uint8_t* ControlsRowPicture(int k, int value, int style);
 const wchar_t* ControlsRowFixedWord(int k);
+// controllers.cpp, once a frame: with panel_warm=1, when the profiles of
+// both controllers are known, a thread of the mod draws the drawing of the
+// controllers one time, so the first show of the page does not draw it.
+void ControlsPageWarmFrame();
 
 // The row of the page under the ray, or -1: the drawing lights its control.
 void ControlsSetHoverRow(int k);

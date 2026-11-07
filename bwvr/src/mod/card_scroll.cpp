@@ -388,12 +388,13 @@ bool StartLocked(HDC dc) {
 //                     30, 25 and 21)
 //   places_panel.cpp  words 38, 26 and 22, seals 22, digits 30
 //   debug_window.cpp  words 36, 24, 22, 21 and 19, seals 21
+//   controls_page.cpp words 17 and 13, seals 12 (kCap of Fonts)
 // A card that asks for a font that is not here gets a line in the log, so a
 // change of a constant shows.
 enum { kWarmWords = 0, kWarmSeal = 1, kWarmDigits = 2 };
-const int kWarmWordCaps[] = {14, 17, 19, 20, 21, 22, 24, 25,
-                             26, 27, 30, 31, 36, 37, 38};
-const int kWarmSealCaps[] = {19, 21, 22, 23};
+const int kWarmWordCaps[] = {13, 14, 17, 19, 20, 21, 22, 24,
+                             25, 26, 27, 30, 31, 36, 37, 38};
+const int kWarmSealCaps[] = {12, 19, 21, 22, 23};
 const int kWarmDigitCaps[] = {30};
 
 // The letters of the cards: the printable ASCII, the letters of Latin-1, and

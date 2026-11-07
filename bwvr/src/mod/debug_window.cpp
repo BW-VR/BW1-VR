@@ -275,11 +275,14 @@ int Groups() {
   return n < kMostTabs ? n : kMostTabs;
 }
 
-unsigned char KindOf(int i, int value) {
-  int count = g_src->value_count(i);
-  if (count < 0 && g_src->picture == nullptr) count = 0;
+// The kind of row of switch i of the list `src` at `value`.
+unsigned char KindIn(const WindowRows* src, int i, int value) {
+  int count = src->value_count(i);
+  if (count < 0 && src->picture == nullptr) count = 0;
   return static_cast<unsigned char>(KindOfRow(count, value == kDebugCannot));
 }
+
+unsigned char KindOf(int i, int value) { return KindIn(g_src, i, value); }
 
 void Latch() {
   for (int r = 0; r < g_rows; ++r) {
@@ -290,16 +293,18 @@ void Latch() {
 }
 
 // The word of a row that cannot change: the word of the list, or "not now".
-const wchar_t* DimWord(int i) {
-  const wchar_t* w = g_src->fixed_word != nullptr ? g_src->fixed_word(i)
-                                                  : nullptr;
+const wchar_t* DimWordIn(const WindowRows* src, int i) {
+  const wchar_t* w = src->fixed_word != nullptr ? src->fixed_word(i) : nullptr;
   return w != nullptr ? w : L"not now";
 }
 
+const wchar_t* DimWord(int i) { return DimWordIn(g_src, i); }
+
 // A band of a drawing over the row. dst is the left of the row, with the
 // pitch of the picture of the window, and lines y0 to y1 of the band change.
-void LayPicture(int i, int value, int style, uint8_t* dst, int y0, int y1) {
-  const uint8_t* src = g_src->picture(i, value, style);
+void LayPictureIn(const WindowRows* rows, int i, int value, int style,
+                  uint8_t* dst, int y0, int y1) {
+  const uint8_t* src = rows->picture(i, value, style);
   if (src == nullptr) return;
   for (int y = y0; y < y1; ++y) {
     const uint8_t* s = src + static_cast<size_t>(y) * kWellWidth * 4;
@@ -312,6 +317,10 @@ void LayPicture(int i, int value, int style, uint8_t* dst, int y0, int y1) {
       }
     }
   }
+}
+
+void LayPicture(int i, int value, int style, uint8_t* dst, int y0, int y1) {
+  LayPictureIn(g_src, i, value, style, dst, y0, y1);
 }
 
 void FillGroup(int group) {
@@ -517,32 +526,32 @@ void DrawTab(kit::Canvas* c, int part, int look, void* context) {
               part == kMostTabs ? g_label_font : g_tab_font, part * 7 + 3);
 }
 
-// Row r of the group in its look: into the picture of its row.
-void DrawRow(int r, const RowLook& look) {
+// Row r of the group in its look, for switch i of the list `src`: into the
+// picture of its row. `rule` puts a rule at its foot.
+void DrawRowOf(const WindowRows* src, int i, bool rule, int r,
+               const RowLook& look) {
   const card_scroll::Picture to = RowPicture(g_scratch);
   for (int y = 0; y < kRowPitch; ++y) {
     memcpy(g_scratch + static_cast<size_t>(y) * kWidth * 4,
            g_band + static_cast<size_t>(y) * kWidth * 4,
            static_cast<size_t>(kWellWidth) * 4);
   }
-  const int i = g_switch[r];
   const int seed = i * 5 + 1;
   int box[4];
   LabelBox(box);
-  const wchar_t* small = g_src->row_note != nullptr ? g_src->row_note(i)
-                                                    : nullptr;
+  const wchar_t* small = src->row_note != nullptr ? src->row_note(i) : nullptr;
   if (look.kind == kRowPicture) {
-    LayPicture(i, look.value, 1, g_scratch, 0, kRowPitch);
+    LayPictureIn(src, i, look.value, 1, g_scratch, 0, kRowPitch);
   } else if (small != nullptr) {
     // The label in the top part of the box, the small words under it.
     const int top[4] = {box[0], box[1] - 4, box[2], box[1] + 32};
-    kit::InkWordsIn(&g_canvas, to, g_label_font, g_src->label(i), top, seed,
+    kit::InkWordsIn(&g_canvas, to, g_label_font, src->label(i), top, seed,
                     kit::kLeftAlign);
     const int under[4] = {box[0], box[1] + 34, box[2], box[3] + 4};
     kit::InkWordsIn(&g_canvas, to, g_small_font, small, under, seed + 4,
                     kit::kLeftAlign);
   } else {
-    kit::InkWordsIn(&g_canvas, to, g_label_font, g_src->label(i), box, seed,
+    kit::InkWordsIn(&g_canvas, to, g_label_font, src->label(i), box, seed,
                     kit::kLeftAlign);
   }
   wchar_t word[32];
@@ -550,13 +559,13 @@ void DrawRow(int r, const RowLook& look) {
     // A picture has no control.
   } else if (look.kind == kRowDim) {
     ValueBox(kRowArrows, box);
-    kit::InkWordsIn(&g_canvas, to, g_value_font, DimWord(i), box, seed + 1,
-                    kit::kCenter);
+    kit::InkWordsIn(&g_canvas, to, g_value_font, DimWordIn(src, i), box,
+                    seed + 1, kit::kCenter);
     const int all[4] = {0, 0, kWellWidth, kRowPitch - 3};
     const card_scroll::Picture under = RowPicture(g_band);
     kit::FadeBox(to, under, all);
   } else if (look.kind == kRowToggle) {
-    g_src->value_text(i, look.value, word, 32);
+    src->value_text(i, look.value, word, 32);
     ValueBox(kRowToggle, box);
     kit::InkWordsIn(&g_canvas, to, g_value_font, word, box, seed + 1,
                     kit::kRightAlign);
@@ -564,7 +573,7 @@ void DrawRow(int r, const RowLook& look) {
     PillRect(pill);
     kit::Toggle(&g_canvas, to, pill, look.row, look.value != 0, seed + 2);
   } else {
-    g_src->value_text(i, look.value, word, 32);
+    src->value_text(i, look.value, word, 32);
     ValueBox(kRowArrows, box);
     kit::InkWordsIn(&g_canvas, to, g_value_font, word, box, seed + 1,
                     kit::kCenter);
@@ -574,10 +583,7 @@ void DrawRow(int r, const RowLook& look) {
     RightArrowRect(a);
     kit::ArrowKey(&g_canvas, to, a, look.right, false, seed + 3);
   }
-  // A rule at the foot of the row: the join of two rows is under it. The
-  // bands of one picture have no rule between them.
-  if (look.kind != kRowPicture ||
-      (r + 1 < g_rows && g_kind[r + 1] != kRowPicture)) {
+  if (rule) {
     Rule(g_scratch, kWidth, 10, kWellWidth - 10, kRowPitch - 3, kRowPitch - 1,
          200);
   }
@@ -590,6 +596,14 @@ void DrawRow(int r, const RowLook& look) {
   }
   g_tile_look[r] = look;
   g_tile_ok[r] = true;
+}
+
+void DrawRow(int r, const RowLook& look) {
+  // A rule at the foot of the row: the join of two rows is under it. The
+  // bands of one picture have no rule between them.
+  const bool rule = look.kind != kRowPicture ||
+                    (r + 1 < g_rows && g_kind[r + 1] != kRowPicture);
+  DrawRowOf(g_src, g_switch[r], rule, r, look);
 }
 
 // The note of row r over the card. The note of the last switch is kept, so
@@ -1338,8 +1352,7 @@ void DebugWindowWarm() {
     return;
   }
   // The tabs and Close of each list as its first picture shows them: the
-  // first group is on, and the other tabs are plain. The rows hold the
-  // values of now, so they are drawn at the open.
+  // first group is on, and the other tabs are plain.
   const WindowRows* lists[kWindowSlots] = {debug ? &kDebugRows : nullptr,
                                            settings ? SettingsPanelRows()
                                                     : nullptr};
@@ -1360,11 +1373,31 @@ void DebugWindowWarm() {
       ++parts;
     }
   }
-  ModLog("debug window : panel_warm=1: the thread of the warm drew the page "
-         "and %d tabs of the window in %.1f ms (%s%s%s), so the first picture "
-         "of the window copies them", parts, NowMs() - start,
-         settings ? "the settings" : "", settings && debug ? " and " : "",
-         debug ? "the debug switches" : "");
+  // The rows of the first group of the settings, with the values of
+  // bwvr.ini, as the first open shows them with no ray on them. The open
+  // compares the look of each row (SameRow) and draws again only a row
+  // whose value changed. The switches of the debug page hold states of the
+  // game, so their rows are drawn at the open.
+  int rows_drawn = 0;
+  if (settings) {
+    const WindowRows* rows = SettingsPanelRows();
+    int switches[kMostRows], values[kMostRows];
+    const int n = SettingsPanelWarmRows(0, switches, values, kMostRows);
+    for (int r = 0; r < n; ++r) {
+      RowLook look;
+      memset(&look, 0, sizeof(look));
+      look.value = values[r];
+      look.kind = KindIn(rows, switches[r], values[r]);
+      DrawRowOf(rows, switches[r], true, r, look);
+      ++rows_drawn;
+    }
+    g_tile_group = rows->slot * 100 + 0;
+  }
+  ModLog("debug window : panel_warm=1: the thread of the warm drew the page, "
+         "%d tabs and %d rows of the window in %.1f ms (%s%s%s), so the first "
+         "picture of the window copies them", parts, rows_drawn,
+         NowMs() - start, settings ? "the settings" : "",
+         settings && debug ? " and " : "", debug ? "the debug switches" : "");
 }
 
 void DebugWindowReport() {

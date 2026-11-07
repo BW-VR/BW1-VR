@@ -865,9 +865,8 @@ game as it is.
       scale of `-Kind left` the hands are too small to judge.
     - The limits of the far grab near an object (10 and 15 cm, `hand
       pick`): `hand_run.ps1 -Kind one` with `far_grab=1`.
-    - The glow on the mesh of a target by day, and on a mesh of the sorted
-      list (P15): `village_run.ps1 -Kind tglow` with `sky_test_hour=13`. No
-      target of that recipe is a mesh of the sorted list.
+    - The glow on a mesh of the sorted list (P15). Needs a recipe: no
+      target of `village_run.ps1 -Kind tglow` is a mesh of the sorted list.
     - A living thing beside a rock or a pile gets the halo, and the halo
       stays on it: `village_run.ps1 -Kind choice` at a rock and at a pile.
     - A signpost in the aim, and a signpost beside a miracle or the Creature
@@ -921,17 +920,13 @@ game as it is.
   - The village:
     - The fish of a fish farm: the halo, the grip in the fish and the far
       grab (B36). Needs a recipe.
-    - Wood onto a scaffold, and the halo of the Village Store in the eye
-      pictures while the Hand holds wood over it: `village_run.ps1 -Kind
-      store` and `-Kind scaffold` with eye pictures.
+    - Wood onto a scaffold. Needs a recipe: `village_test_scaffolds` makes
+      the first scaffold at the place of the pile in the store, so the wood
+      goes onto the pile. The scaffolds must be away from the store.
     - The reach of a scroll near its limit of 10 cm (`scroll_reach_cm`) at
       each scale, and a scroll near the Hand at about 4000 units a meter:
       `hand_run.ps1 -Kind one` at other scales.
   - Miracles:
-    - The trail at the fingertip does not hide the glow at the Hand's point.
-      With the default `hand_glow_idle=0` the glow is off in a draw, so the
-      check needs `hand_glow_idle=1`: the recipe of `miracles.md`, "The trail
-      at the fingertip".
     - The limits of the target of a Creature miracle (3 cm, 6 degrees), and
       the limit of 0.6 m/s of a shake that takes a miracle out. Needs a
       recipe near each limit: `miracle_run.ps1 -Kind creature` and `-Kind
@@ -947,23 +942,15 @@ game as it is.
       in the Save Game Room the word `look` does not turn the camera with
       `temple_camera_screen` at 1 or at 0. Find what the plain game does
       there.
-    - A click on a door with a roll of the head of 15, 30 and -30 degrees,
-      and with `temple_press_pixel=0` (the lines `temple       : a press
-      in`): `temple_run.ps1` with the door recipe of `controllers.md`, 11.9.
-    - The game's Hand does not show in the hall and in the Save Game Room
-      with `temple_hide_hand=1`, and shows with 0: `temple_run.ps1` with the
-      door recipe and eye pictures.
+    - The game's Hand does not show in the Save Game Room with
+      `temple_hide_hand=1`: `temple_run.ps1` with the door recipe and a shot
+      with the ray on in that room.
     - A click on a pad of the pool, on a scroll, and on a control of the
       Challenge Room and of the Library (`temple       : the game gets the
       mouse message`): `temple_run.ps1 -Rooms`.
   - Menus and cards:
     - The keyboard for the name of a new god at the first start of a profile
       (`keyboard     :`). Needs a recipe.
-    - The words of the card at the end of a take and of a fetch, with
-      `hint_held_latch=1` (`controller-hints.md`, 9.4): `hand_run.ps1 -Kind
-      forest` with no "Pull to fetch" while the tree is in the Hand, and
-      `village_run.ps1 -Kind scaffold` with no frame of no words between
-      "Combine Scaffolds" and "Build".
     - A help text of the game with the words of the mouse in an eye picture,
       after a change from the controller to the mouse:
       `creature_recipe.ps1 -Kind leash` with `help_test=1` and
@@ -972,21 +959,14 @@ game as it is.
     - The hint at the game's Hand (B34) in an eye picture at a nearer zoom.
       Needs a recipe: `village_run.ps1 -Kind tooltip` is the recipe of the
       tooltip.
-    - The tooltip beyond the fingertip (`hint_hand_tip=1`, `ui-layer.md`,
-      15.3): `village_run.ps1 -Kind tooltip`, with "Amount" clear of the
-      index finger in both eye pictures.
   - The intro:
-    - A still hand moves no orb (`intro_push_room=1`, `intro.md`, "The push
-      in 3D"): `intro_run.ps1` with the scripted hands of its header, with
-      no line "a hand moves N orbs in 3D" before the first step of the
-      hands.
     - A still hand with no flicker of one frame: `intro_run.ps1` with the
       scripted hands of its header. Needs a log line: a count of the changes
       of the show of a hand.
   - The picture and the backend:
-    - The sun with `sun_glare=2`, and with a head that moves in steps:
-      `temple_run.ps1 -NoEnter` with `sky_test_hour=13`, two turns of the
-      stick, and `fake_head_pitch=15;fake_head_roll=25;fake_head_sweep=1`.
+    - The sun with a head that moves in steps. A still head gives the same
+      sun with `sun_glare` 0 and 1, and 2 hides the glare. Needs a recipe
+      with head steps: `temple_run.ps1 -NoEnter` with `sky_test_hour=13`.
     - The merge of draw calls (`draw_merge_test=1`) in a fight of Creatures:
       0 eye passes with a different checksum. Needs a recipe with a fight.
 - **R13. A fault of a desktop script.** `temple_run.ps1 -SaveTest` with

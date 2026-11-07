@@ -21,6 +21,9 @@
 #   creature_recipe.ps1 -Name x19 -Dll <dll> -Kind walkstay
 #   creature_recipe.ps1 -Name x20 -Dll <dll> -Kind shake
 #   creature_recipe.ps1 -Name x21 -Dll <dll> -Kind shake -Set "leash_shake_mps=0.9"
+#   creature_recipe.ps1 -Name x22 -Dll <dll> -Kind ring
+#   creature_recipe.ps1 -Name x23 -Dll <dll> -Kind ring -Set "far_grab_max_m=1"
+#   creature_recipe.ps1 -Name x24 -Dll <dll> -Kind ring -Set "command_look=0"
 #
 #   creature_recipe.ps1 -Name x9 -Dll <dll> -Kind leash -NewGame
 #
@@ -58,9 +61,22 @@
 #   At 100 units a meter: the grip from a distance (the leash goes on), the
 #   aim on an object that a command can act on (the word "aimcmd"), and two
 #   short presses of the trigger: the Creature goes to the object, and the
-#   leash is tied to it. Then six times the word "seek", 300 frames apart:
-#   each one gives a log line with the place of the Creature, so the log
-#   shows its walk to the object.
+#   leash is tied to it. The aim goes on the object that holds the leash
+#   again (the word "aimcmd" takes only that object while the leash is
+#   tied), and a picture shows its ring. Then six times the word "seek", 300
+#   frames apart: each one gives a log line with the place of the Creature,
+#   so the log shows its walk to the object.
+# -Kind ring:
+#   The look of a target of a command (command_look, bwvr/docs/creature.md,
+#   "The look of a target"). The leash counts as on from frame 820
+#   (creature_command_test: no packet goes out), so the grab from a distance
+#   can take each object (no far_test_creature) to far_grab_max_m=2. The aim
+#   goes on an object that a command can act on (the word "aimcmd"),
+#   pictures at 930 and 1030, and a tap of the trigger at 1100. With the
+#   tree of the door of the Temple about 1.4 m from the head, the tree is a
+#   target of both: a gold glow, the green ring, and the card has a line for
+#   each button. With -Set "far_grab_max_m=1" the tree is past the range of
+#   the grip: the ring only, and the card says "Grip Too far to take".
 # -Kind walk:
 #   The walk mode of a command (creature_command_rule, bwvr/docs/creature.md,
 #   section 4.1). At 100 units a meter: the grip from a distance puts the
@@ -319,8 +335,17 @@ if ($Kind -eq 'stay') {
     $new = 75
     $watch = 0
     $steps = 'look@800+2600 point@860+1 aimfar@890+1 grip@910+6 aimcmd@1000+1 shot@1010+1 ' +
-             'trigger@1020+6 trigger@1037+6 seek@1100+1 seek@1400+1 seek@1700+1 seek@2000+1 ' +
+             'trigger@1020+6 trigger@1037+6 aimcmd@1070+1 shot@1090+1 ' +
+             'seek@1100+1 seek@1400+1 seek@1700+1 seek@2000+1 ' +
              'seek@2300+1 seek@2600+1 shot@2610+1'
+} elseif ($Kind -eq 'ring') {
+    # The leash counts as on, with no packet, so the grip at the Creature
+    # does not need far_test_creature. The steps need no grip.
+    $watch = 0
+    $keys = $keys.Replace('far_test_creature=1;', '').Replace('far_grab_max_m=0;', 'far_grab_max_m=2;') +
+            ';creature_command_test=820'
+    $steps = 'look@800+600 point@860+1 aimcmd@900+1 shot@930+1 aimcmd@1000+1 shot@1030+1 ' +
+             'trigger@1100+6 shot@1200+1'
 } elseif ($Kind -eq 'wide') {
     # The seek can step the hand 2 frames after the word, and it clears the
     # step to the side, so the word "slap" or "pull" comes 4 frames after it.
@@ -396,6 +421,13 @@ if ($Kind -eq 'open') {
                '^ui panel     : (creature_panel_linger|the Hand is at|the Hand left|the Creature panel (goes|drew))|' +
                '^save card    : |^hooks        : GameOSFile|^hint card    : (hint_card_saving|frame \d+, the game saves|frame \d+, the pointing card now says)|' +
                '^hand pick    : seek plan'
+}
+if ($Kind -eq 'ring' -or $Kind -eq 'tie') {
+    $pattern = '^creature cmd : (command_look|the aim is on|the Hand is on|the target \w+ has the ring|the trigger|' +
+               'a double press|the leash|test: aimcmd)|' +
+               '^far grab    : (the \w+ \w+ in the cone holds|the grip closed|the grip opened|target [0-9A-F]+ )|' +
+               '^hand pick    : grip_skips_tied|^hand glow    : a halo|' +
+               '^hint card    : frame \d+, the pointing card now says'
 }
 if ($Kind -eq 'walk') {
     $pattern ='^creature cmd : (creature_command_rule|the leash|the aim is on|the trigger|a double press|test: aimcmd)|' +

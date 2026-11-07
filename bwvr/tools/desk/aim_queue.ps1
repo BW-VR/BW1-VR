@@ -96,6 +96,22 @@ $defs = @{
         Points = ''
         Seconds = 103
     }
+    # ring4k1 and ring4k0: the steps of ring1 and ring0, then six more zoom
+    # steps out (about 3840 units a meter) and one more A. The aim logs the
+    # radius of the ring at that scale, where the limit of 40 cm of the ring
+    # acts.
+    ring4k1 = @{
+        Set = "god_zoom_about=0;fake_controller_front=1;fake_controller_play_frame=2750;aim_test_touch=$from;teleport_ring_mode=1;fake_controller_turns=0,-60,1"
+        Steps = 'point@2990+1 aimfar@3000+1 grip@3060+90 pull@3100+3 pull@3170+3 point@3200+1 aimturn@3205+1 a@3215+30 shot@3230+1 stick_up@3260+10 stick_up@3290+10 point@3320+1 a@3340+30 shot@3355+1 stick_down@3390+10 stick_down@3420+10 stick_down@3450+10 stick_down@3480+10 stick_down@3510+10 point@3550+1 a@3570+30 shot@3585+1 stick_down@3620+10 stick_down@3650+10 stick_down@3680+10 stick_down@3710+10 stick_down@3740+10 stick_down@3770+10 point@3810+1 a@3830+30 shot@3845+1'
+        Points = ''
+        Seconds = 110
+    }
+    ring4k0 = @{
+        Set = "god_zoom_about=0;fake_controller_front=1;fake_controller_play_frame=2750;aim_test_touch=$from;teleport_ring_mode=0;fake_controller_turns=0,-60,1"
+        Steps = 'point@2990+1 aimfar@3000+1 grip@3060+90 pull@3100+3 pull@3170+3 point@3200+1 aimturn@3205+1 a@3215+30 shot@3230+1 stick_up@3260+10 stick_up@3290+10 point@3320+1 a@3340+30 shot@3355+1 stick_down@3390+10 stick_down@3420+10 stick_down@3450+10 stick_down@3480+10 stick_down@3510+10 point@3550+1 a@3570+30 shot@3585+1 stick_down@3620+10 stick_down@3650+10 stick_down@3680+10 stick_down@3710+10 stick_down@3740+10 stick_down@3770+10 point@3810+1 a@3830+30 shot@3845+1'
+        Points = ''
+        Seconds = 110
+    }
     # other: the aim at a Creature that is not the Creature of the player
     # (far_test_aim_class=6). In the test save "pen" the Creatures of the pens
     # have no player. A grip that stays closed for 1 s and a short grip come

@@ -1636,17 +1636,22 @@ left of the left hand. The column is at the distance of the controller from
 the head. Each card faces the head from its own middle, with no roll, so a
 card above or below the controller tilts to the head and is square to its
 own line of sight. The inner edges of the cards are on one line, 2 cm past
-the outline of the hand and of the box of the controller, so no card is on
+the outline of the palm and of the box of the controller, so no card is on
 the hand or on the controller. In the view the cards are 6 mm apart: the
 place of each card comes from the corners of the card above it as the head
 sees them, because a tilted card is taller in the view than in the plane of
-the controller. The middle of the cards with a button is at the mean height
-of their buttons.
-The side changes as the card at the wrist does (9.3): when the outline goes
-4 cm farther to the side of the cards than to the other side.
+the controller. The middle of the column is at the height of the middle of
+the controller (within 1.2 cm), so the column stays beside the controller.
+The cards with no button are at the top of the column.
+
+The cards do not change side. A hand that holds a controller is closed, so
+the tips of the open fingers are not in the outline (only the corners of the
+palm), and the side of the card at the wrist (9.3) does not apply.
 
 The order of the cards is the one with no crossing of the lines in the view.
-Stack tries each order (24 for 4 cards) and takes the one with the fewest
+In a frame with the same cards as the frame before, Stack tries the order of
+that frame first and keeps it when its lines do not cross. Else it tries each
+order (24 for 4 cards) and takes the one with the fewest
 crossings, then the one with the least vertical distance from each button to
 its card. A line goes from its button to the inner edge of its card, and
 the column is outside the outline, so a line does not go over a card. A card
@@ -1709,9 +1714,17 @@ live comparison.
   showed. The report of the hint card has the frames of the cards of the
   buttons, and the cards that did not show.
 
-**The cost.** The CPU puts each corner of the model and of its outline on
-the screen in each eye, as the overlay does. The cost of a frame is the
-build and all its eye passes, and the next build closes it. The triangles
+**The cost.** The load welds the vertices with the same place and normal in
+a part (Touch v3: 12111 vertices in the file, 4048 after the weld; Touch v2:
+10005 and 2270; Vive Cosmos: 14838 and 10001; Vive wand: 17551 and 15190),
+and keeps each vertex, its normal and its corner of the outline in the grip
+space. A frame computes again only the vertices of the parts that a press
+moves, and the color of each vertex from a table of the light. Each eye puts
+each corner on the screen once, with one matrix from the grip space to the
+camera, and the triangles go to compact lists, so each draw sends only the
+vertices that it uses. The cost of a frame is the build and all its eye
+passes, and the next build closes it. The log line gives the vertices that
+the draws sent. The triangles
 of a hand: Touch Plus 4470, Touch Pro 4106, Touch v3 5831, Touch v2 3335,
 Index 8933, Vive wand 17344, Vive Cosmos 18476, Vive Focus 3 4619, HP 6716,
 Windows Mixed Reality 6006, Pico 4 4525, the controller with only a trigger

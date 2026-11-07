@@ -73,6 +73,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
+
 #include "../vr/xr_screen.h"
 #include "controller_art_math.h"
 #include "controllers.h"
@@ -189,6 +191,9 @@ enum Input { kInNone, kInTrigger, kInSqueeze, kInStickClick, kInPrimary,
              kInSecondary, kInMenu, kInStickX, kInStickY };
 
 const int kMostVertices = 60000;
+// THE OUTLINE of the body: each corner of the shell is this far out along
+// its normal, in meters of the grip space.
+const float kShellM = 0.0012f;
 
 struct Model {
   char id[kNameSize];
@@ -210,6 +215,13 @@ struct Model {
   float anchor_half[art::kControls][3];  // the half size of its box
   float low[3], high[3];  // the box of the meshes at rest, grip space
   double load_ms;
+  // Each vertex in the grip space at rest, its normal, and its corner of the
+  // outline. A part under a node of a press moves, and the others do not.
+  float* grip_pos;
+  float* grip_nrm;
+  float* grip_shell;
+  bool* part_moving;
+  int read_vertices;  // before the weld
 };
 
 void FreeModel(Model* m) {
@@ -221,6 +233,10 @@ void FreeModel(Model* m) {
   free(m->normal);
   free(m->index);
   free(m->triangle_part);
+  free(m->grip_pos);
+  free(m->grip_nrm);
+  free(m->grip_shell);
+  free(m->part_moving);
   free(m);
 }
 
@@ -265,6 +281,76 @@ void InputOf(const char* name, int* input, int* axis) {
   } else if (strncmp(name, "menu", 4) == 0) {
     *input = kInMenu;
   }
+}
+
+// THE WELD. Many files have each corner of a face as a vertex of its own,
+// also where faces share the place and the normal of the corner. One vertex
+// for each place and normal in a part gives fewer corners to put on the
+// screen in each eye. A place is the same when its floats are the same, and
+// a normal is the same within about 2.5 degrees.
+void Weld(Model* m) {
+  const int n = m->vertices;
+  int* order = static_cast<int*>(malloc(sizeof(int) * (n > 0 ? n : 1)));
+  int* remap = static_cast<int*>(malloc(sizeof(int) * (n > 0 ? n : 1)));
+  float* pos = static_cast<float*>(malloc(sizeof(float) * 3 * (n > 0 ? n : 1)));
+  float* nrm = static_cast<float*>(malloc(sizeof(float) * 3 * (n > 0 ? n : 1)));
+  if (order == nullptr || remap == nullptr || pos == nullptr ||
+      nrm == nullptr) {
+    free(order);
+    free(remap);
+    free(pos);
+    free(nrm);
+    return;
+  }
+  const float* src = m->position;
+  auto same_place = [src](int x, int y) {
+    return memcmp(&src[x * 3], &src[y * 3], sizeof(float) * 3) == 0;
+  };
+  int out = 0;
+  for (int p = 0; p < m->parts; ++p) {
+    Part& part = m->part[p];
+    for (int k = 0; k < part.count; ++k) order[k] = part.first + k;
+    std::sort(order, order + part.count, [src](int x, int y) {
+      const int c = memcmp(&src[x * 3], &src[y * 3], sizeof(float) * 3);
+      return c != 0 ? c < 0 : x < y;
+    });
+    const int first = out;
+    for (int i = 0; i < part.count; ++i) {
+      const int v = order[i];
+      int match = -1;
+      for (int j = i - 1; j >= 0 && same_place(order[j], v); --j) {
+        const int w = order[j];
+        const float* a = &m->normal[v * 3];
+        const float* b = &m->normal[w * 3];
+        if (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] > 0.999f) {
+          match = remap[w];
+          break;
+        }
+      }
+      if (match >= 0) {
+        remap[v] = match;
+        continue;
+      }
+      for (int k = 0; k < 3; ++k) {
+        pos[out * 3 + k] = m->position[v * 3 + k];
+        nrm[out * 3 + k] = m->normal[v * 3 + k];
+      }
+      remap[v] = out++;
+    }
+    part.first = first;
+    part.count = out - first;
+  }
+  for (int i = 0; i < m->triangles * 3; ++i) {
+    m->index[i] = static_cast<uint32_t>(remap[m->index[i]]);
+  }
+  free(m->position);
+  free(m->normal);
+  m->position = pos;
+  m->normal = nrm;
+  m->read_vertices = m->vertices;
+  m->vertices = out;
+  free(order);
+  free(remap);
 }
 
 #ifdef BWVR_HAVE_CGLTF
@@ -473,6 +559,7 @@ Model* ReadModel(const char* path, const char* id, bool left, char* why,
   m->triangles = t;
   m->parts = pn;
   cgltf_free(data);
+  Weld(m);
 
   // The rest pose: the box, and the anchor of each control.
   for (int s = 0; s < m->nodes; ++s) {
@@ -526,6 +613,42 @@ Model* ReadModel(const char* path, const char* id, bool left, char* why,
       for (int a = 0; a < 3; ++a) m->anchor[c][a] = at.m[9 + a];
     }
   }
+  // The vertices in the grip space at rest, and the parts that move.
+  m->grip_pos = static_cast<float*>(malloc(sizeof(float) * 3 * m->vertices));
+  m->grip_nrm = static_cast<float*>(malloc(sizeof(float) * 3 * m->vertices));
+  m->grip_shell =
+      static_cast<float*>(malloc(sizeof(float) * 3 * m->vertices));
+  m->part_moving = static_cast<bool*>(calloc(m->parts > 0 ? m->parts : 1, 1));
+  if (m->grip_pos == nullptr || m->grip_nrm == nullptr ||
+      m->grip_shell == nullptr || m->part_moving == nullptr) {
+    _snprintf_s(why, why_size, _TRUNCATE, "no memory for %s", path);
+    FreeModel(m);
+    return nullptr;
+  }
+  for (int p = 0; p < m->parts; ++p) {
+    const Part& part = m->part[p];
+    const Node& d = m->node[part.node];
+    for (int at = part.node; at >= 0; at = m->node[at].parent) {
+      if (m->node[at].min_node >= 0 && m->node[at].input != kInNone) {
+        m->part_moving[p] = true;
+      }
+    }
+    for (int k = 0; k < part.count; ++k) {
+      const int at = part.first + k;
+      float* g = &m->grip_pos[at * 3];
+      float* gn = &m->grip_nrm[at * 3];
+      hm::MatrixPoint(d.model, &m->position[at * 3], g);
+      const float* n = &m->normal[at * 3];
+      for (int a = 0; a < 3; ++a) {
+        gn[a] = d.model.m[a] * n[0] + d.model.m[3 + a] * n[1] +
+                d.model.m[6 + a] * n[2];
+      }
+      overlay_math::Normalize(gn);
+      for (int a = 0; a < 3; ++a) {
+        m->grip_shell[at * 3 + a] = g[a] + gn[a] * kShellM;
+      }
+    }
+  }
   return m;
 }
 
@@ -577,6 +700,9 @@ const char* const kControlName[art::kControls] = {
     "first face button", "second face button", "stick click", "menu button",
     "trigger", "grip", "stick", "pad"};
 
+// The arrays of the frame of a side for its new model (Grow, below).
+void PrepareSide(int side);
+
 void TakeLoad(int side) {
   if (g_thread[side] == nullptr) return;
   if (WaitForSingleObject(g_thread[side], 0) != WAIT_OBJECT_0) return;
@@ -595,6 +721,8 @@ void TakeLoad(int side) {
   g_model[side] = load.result;
   load.result = nullptr;
   const Model& m = *g_model[side];
+  // The arrays of the frame, now and not at the first hint.
+  PrepareSide(side);
   char controls[256] = "";
   for (int c = 0; c < art::kControls; ++c) {
     if (m.value_node[c] < 0) continue;
@@ -604,9 +732,11 @@ void TakeLoad(int side) {
     strncat_s(controls, one, _TRUNCATE);
   }
   ModLog("hint model   : the model %s of the %s hand loaded in %.1f ms on a "
-         "thread: %d nodes, %d meshes, %d vertices, %d triangles, a box of "
+         "thread: %d nodes, %d meshes, %d vertices (%d in the file), %d "
+         "triangles, a box of "
          "%.1f by %.1f by %.1f cm. The controls with a node: %s", m.id, name,
-         load.ms, m.nodes, m.parts, m.vertices, m.triangles,
+         load.ms, m.nodes, m.parts, m.vertices, m.read_vertices,
+         m.triangles,
          (m.high[0] - m.low[0]) * 100.0f, (m.high[1] - m.low[1]) * 100.0f,
          (m.high[2] - m.low[2]) * 100.0f, controls);
 }
@@ -672,6 +802,11 @@ struct Side {
   // The side of the cards in the view, and right in the view.
   int stack_side;
   float last_right[3];
+  // The order of the cards from the top in the last frame, and the controls
+  // of the cards then.
+  int column_count;
+  int column[kHintModelCards];
+  int column_control[kHintModelCards];
   uint64_t frames_shown;
   bool said_show;
 };
@@ -718,8 +853,7 @@ const float kMarkRadiusM = 0.006f;
 
 // THE OUTLINE of the body: a dark ink edge at the silhouette, so the faint
 // body reads on bright land. It is the shell of the back faces, pushed out
-// along the normals by this much, behind the front faces of the body.
-const float kOutlineM = 0.0012f;
+// along the normals by kShellM, behind the front faces of the body.
 const float kOutlineAlpha = 0.85f;
 
 // The colors. The lit buttons are a warm gold, the body is a warm
@@ -728,18 +862,40 @@ const float kGold[3] = {1.00f, 0.76f, 0.28f};
 const float kParchment[3] = {0.92f, 0.74f, 0.48f};
 const float kInk[3] = {0.24f, 0.13f, 0.05f};
 
+// THE MESH OF A SIDE in this frame. The model keeps each vertex in the grip
+// space at rest (grip_pos, grip_nrm, grip_shell). A side keeps its own copy,
+// and each frame changes only the vertices of the parts that a press moves.
+// The grip space goes to the world with the pose of the hand:
+//
+//   world = position + rotation * (x, y, -z) * units
+//
+// so the frame needs no world position for each vertex. Each eye puts the
+// vertices on its screen with one matrix (DrawSide).
 struct Built {
   bool have;
-  int vertices;  // of the model, then the extras
-  float* world;   // 3 floats a vertex
-  float* normal;  // 3 floats a vertex, in the world
+  const Model* copied;  // the model of the copy in pos, nrm and shell
+  int capacity;
+  float* pos;    // the grip space, 3 floats a vertex
+  float* nrm;
+  float* shell;  // the corner of the outline, pushed out along the normal
   uint32_t* color;
-  bool* lit;      // the vertex is a lit part or an extra
-  int extra_first;
+  bool* lit;     // the vertex is in a lit part
+  float rotation[9];
+  float position[3];
+  float units;
+  // The lines and the marks, in the world.
   int extra_vertices;
   int extra_triangles;
+  float extra_world[kExtraVertices * 3];
+  uint32_t extra_color[kExtraVertices];
   uint32_t extra_index[kExtraTriangles * 3];
-  int lit_controls[art::kControls];
+  // The cache of one eye: the screen vertex of each vertex, the eye that
+  // made it, and the place of each vertex in each draw of that eye.
+  ScreenVertex* screen;
+  int* stamp;
+  int* map_lit;
+  int* map_back;
+  int* map_front;
 };
 Built g_built[2] = {};
 uint64_t g_build_frame = 0;
@@ -747,17 +903,21 @@ bool g_any_built = false;
 // The controllers frame of the last build. A frame that did not build (the
 // mouse owns the pointer, the intro, a flat frame) draws nothing.
 uint64_t g_built_controllers_frame = 0;
+int g_eye_stamp = 0;
 
-// The draw of one eye: the vertices on the screen, and three lists.
-ScreenVertex* g_screen_vertex = nullptr;
-ScreenVertex* g_shell_vertex = nullptr;  // the outline, pushed out
+// The draws of one eye: compact vertex lists, so a draw sends only the
+// vertices that it uses.
+ScreenVertex* g_draw_lit = nullptr;
+ScreenVertex* g_draw_back = nullptr;
+ScreenVertex* g_draw_shell = nullptr;
+ScreenVertex* g_draw_front = nullptr;
 WORD* g_list_lit = nullptr;
 WORD* g_list_back = nullptr;
 WORD* g_list_front = nullptr;
-int g_screen_capacity = 0;
+int g_draw_capacity = 0;
 int g_list_capacity = 0;
 
-// THE COST, on the CPU: the build of a frame and the draws of its two eyes.
+// THE COST, on the CPU: the build of a frame and the draws of its eyes.
 LARGE_INTEGER g_frequency = {};
 int64_t g_build_ticks = 0;
 int64_t g_draw_ticks = 0;
@@ -765,7 +925,9 @@ int64_t g_cost_sum = 0;
 int64_t g_cost_most = 0;
 uint64_t g_cost_frames = 0;
 uint64_t g_cost_triangles = 0;
+uint64_t g_cost_sent = 0;   // the vertices that the draws sent
 int g_frame_triangles = 0;
+int g_frame_sent = 0;
 int g_frame_draws = 0;      // the draws of the eyes of the last build
 uint64_t g_cost_eyes = 0;   // the draws of the eyes in the window
 float g_units = 0.0f;       // world units in a meter of the room, this frame
@@ -801,19 +963,62 @@ uint32_t Argb(const float rgb[3], float level, float alpha) {
   return out;
 }
 
-bool Grow(Built* b, int vertices) {
-  if (b->vertices >= vertices && b->world != nullptr) return true;
-  free(b->world);
-  free(b->normal);
-  free(b->color);
-  free(b->lit);
-  b->world = static_cast<float*>(malloc(sizeof(float) * 3 * vertices));
-  b->normal = static_cast<float*>(malloc(sizeof(float) * 3 * vertices));
-  b->color = static_cast<uint32_t*>(malloc(sizeof(uint32_t) * vertices));
-  b->lit = static_cast<bool*>(malloc(sizeof(bool) * vertices));
-  b->vertices = vertices;
-  return b->world != nullptr && b->normal != nullptr && b->color != nullptr &&
-         b->lit != nullptr;
+template <typename T>
+bool GrowArray(T** p, int count) {
+  free(*p);
+  *p = static_cast<T*>(malloc(sizeof(T) * (count > 0 ? count : 1)));
+  return *p != nullptr;
+}
+
+// The arrays of a side and of the draws for a model. The load calls it on
+// the frame thread when it takes the model, so no hint frame allocates.
+bool Grow(Built* b, const Model& m) {
+  if (b->capacity < m.vertices) {
+    bool ok = GrowArray(&b->pos, m.vertices * 3) &&
+              GrowArray(&b->nrm, m.vertices * 3) &&
+              GrowArray(&b->shell, m.vertices * 3) &&
+              GrowArray(&b->color, m.vertices) &&
+              GrowArray(&b->lit, m.vertices) &&
+              GrowArray(&b->screen, m.vertices) &&
+              GrowArray(&b->stamp, m.vertices) &&
+              GrowArray(&b->map_lit, m.vertices) &&
+              GrowArray(&b->map_back, m.vertices) &&
+              GrowArray(&b->map_front, m.vertices);
+    b->capacity = ok ? m.vertices : 0;
+    b->copied = nullptr;
+    if (!ok) return false;
+    for (int v = 0; v < m.vertices; ++v) b->stamp[v] = -1;
+  }
+  const int vertices = m.vertices + kExtraVertices;
+  const int indices = m.triangles * 3 + kExtraTriangles * 3;
+  if (vertices > g_draw_capacity) {
+    const bool ok = GrowArray(&g_draw_lit, vertices) &&
+                    GrowArray(&g_draw_back, vertices) &&
+                    GrowArray(&g_draw_shell, vertices) &&
+                    GrowArray(&g_draw_front, vertices);
+    g_draw_capacity = ok ? vertices : 0;
+    if (!ok) return false;
+  }
+  if (indices > g_list_capacity) {
+    const bool ok = GrowArray(&g_list_lit, indices) &&
+                    GrowArray(&g_list_back, indices) &&
+                    GrowArray(&g_list_front, indices);
+    g_list_capacity = ok ? indices : 0;
+    if (!ok) return false;
+  }
+  if (b->copied != &m) {
+    memcpy(b->pos, m.grip_pos, sizeof(float) * 3 * m.vertices);
+    memcpy(b->nrm, m.grip_nrm, sizeof(float) * 3 * m.vertices);
+    memcpy(b->shell, m.grip_shell, sizeof(float) * 3 * m.vertices);
+    b->copied = &m;
+  }
+  return true;
+}
+
+void PrepareSide(int side) {
+  if (g_model[side] == nullptr) return;
+  g_built[side].copied = nullptr;
+  Grow(&g_built[side], *g_model[side]);
 }
 
 float InputValue(const bwvr::HandInput& in, int input) {
@@ -830,12 +1035,6 @@ float InputValue(const bwvr::HandInput& in, int input) {
   }
 }
 
-// The light of the overlay: from straight above, with some ambient.
-float Level(const float n[3], float ambient) {
-  const float up = n[1] > 0.0f ? n[1] : 0.0f;
-  return ambient + (1.0f - ambient) * up;
-}
-
 // A point of the grip space in the world (THE PLACE above).
 void GripToWorld(const OverlayHand& hand, float units, const float p[3],
                  float out[3]) {
@@ -846,7 +1045,7 @@ void GripToWorld(const OverlayHand& hand, float units, const float p[3],
   }
 }
 
-// The extras: a tube from a to b, and a diamond at a point.
+// The extras: a tube from a to b, and a diamond at a point, in the world.
 void AddTube(Built* b, const float a[3], const float c[3], float radius,
              uint32_t color) {
   float axis[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
@@ -868,7 +1067,7 @@ void AddTube(Built* b, const float a[3], const float c[3], float radius,
   const float other[3] = {axis[1] * side[2] - axis[2] * side[1],
                           axis[2] * side[0] - axis[0] * side[2],
                           axis[0] * side[1] - axis[1] * side[0]};
-  const int first = b->extra_first + b->extra_vertices;
+  const int first = b->extra_vertices;
   for (int e = 0; e < 2; ++e) {
     const float* end = e == 0 ? a : c;
     for (int s = 0; s < kLineSides; ++s) {
@@ -876,12 +1075,10 @@ void AddTube(Built* b, const float a[3], const float c[3], float radius,
       const float cs = cosf(angle), sn = sinf(angle);
       const int v = first + e * kLineSides + s;
       for (int k = 0; k < 3; ++k) {
-        const float n = side[k] * cs + other[k] * sn;
-        b->world[v * 3 + k] = end[k] + n * radius;
-        b->normal[v * 3 + k] = n;
+        b->extra_world[v * 3 + k] = end[k] + (side[k] * cs + other[k] * sn) *
+                                                 radius;
       }
-      b->color[v] = color;
-      b->lit[v] = true;
+      b->extra_color[v] = color;
     }
   }
   for (int s = 0; s < kLineSides; ++s) {
@@ -900,16 +1097,14 @@ void AddDiamond(Built* b, const float at[3], float radius, uint32_t color) {
       b->extra_triangles + 8 > kExtraTriangles) {
     return;
   }
-  const int first = b->extra_first + b->extra_vertices;
+  const int first = b->extra_vertices;
   const float dir[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
                            {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
   for (int i = 0; i < 6; ++i) {
     for (int k = 0; k < 3; ++k) {
-      b->world[(first + i) * 3 + k] = at[k] + dir[i][k] * radius;
-      b->normal[(first + i) * 3 + k] = dir[i][k];
+      b->extra_world[(first + i) * 3 + k] = at[k] + dir[i][k] * radius;
     }
-    b->color[first + i] = color;
-    b->lit[first + i] = true;
+    b->extra_color[first + i] = color;
   }
   const int face[8][3] = {{0, 2, 4}, {2, 1, 4}, {1, 3, 4}, {3, 0, 4},
                           {2, 0, 5}, {1, 2, 5}, {3, 1, 5}, {0, 3, 5}};
@@ -921,7 +1116,11 @@ void AddDiamond(Built* b, const float at[3], float radius, uint32_t color) {
   b->extra_vertices += 6;
 }
 
-// The meshes of one side in the world for this frame.
+// The colors of a frame: 64 steps of the light for the gold and for the
+// parchment, so each vertex is one table read.
+const int kLevels = 64;
+
+// The meshes of one side for this frame.
 void BuildSide(int side, const OverlayHand& real, const float stop[3],
                float units) {
   OverlayHand hand = real;
@@ -929,28 +1128,31 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
   Built& b = g_built[side];
   b.have = false;
   const Side& s = g_side[side];
-  const Model* m = g_model[side];
+  Model* m = g_model[side];
   if (m == nullptr || !real.valid || !(s.fade > 0.0f) || !(units > 0.0f)) {
     return;
   }
-  if (!Grow(&b, m->vertices + kExtraVertices)) return;
+  if (!Grow(&b, *m)) return;
+  for (int k = 0; k < 9; ++k) b.rotation[k] = hand.rotation[k];
+  for (int k = 0; k < 3; ++k) b.position[k] = hand.position[k];
+  b.units = units;
   bwvr::HandInput input;
   memset(&input, 0, sizeof(input));
   ControllersHandInput(side, &input);
-  // The nodes, with the press.
-  Model* mm = g_model[side];
-  for (int o = 0; o < mm->nodes; ++o) {
-    Node& d = mm->node[mm->order[o]];
+  // The nodes, with the press. Only the parts under a node of a press move,
+  // so only their vertices change.
+  for (int o = 0; o < m->nodes; ++o) {
+    Node& d = m->node[m->order[o]];
     hm::Matrix local = d.rest_matrix;
     if (d.min_node >= 0 && d.input != kInNone) {
       hm::Trs trs;
-      hm::LerpTrs(mm->node[d.min_node].rest, mm->node[d.max_node].rest,
+      hm::LerpTrs(m->node[d.min_node].rest, m->node[d.max_node].rest,
                   hm::ResponseWeight(d.axis, InputValue(input, d.input)),
                   &trs);
       hm::MatrixOfTrs(trs, &local);
     }
     if (d.parent >= 0) {
-      hm::MatrixMultiply(mm->node[d.parent].model, local, &d.model);
+      hm::MatrixMultiply(m->node[d.parent].model, local, &d.model);
     } else {
       d.model = local;
     }
@@ -964,7 +1166,15 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
     if (m->value_node[control] >= 0) lit_owner[lit_count++] = m->value_node[control];
   }
   const float fade = s.fade;
-  const uint32_t ink = Argb(kInk, 1.0f, fade);
+  uint32_t gold[kLevels + 1], parchment[kLevels + 1];
+  for (int l = 0; l <= kLevels; ++l) {
+    const float up = static_cast<float>(l) / kLevels;
+    gold[l] = Argb(kGold, 0.55f + 0.45f * up, fade);
+    parchment[l] = Argb(kParchment, 0.50f + 0.50f * up, hm::kBodyAlpha * fade);
+  }
+  // The y of a normal in the world: the second row of the rotation, with
+  // the flip of z.
+  const float ry[3] = {hand.rotation[3], hand.rotation[4], -hand.rotation[5]};
   for (int p = 0; p < m->parts; ++p) {
     const Part& part = m->part[p];
     const Node& d = m->node[part.node];
@@ -972,39 +1182,38 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
     for (int l = 0; l < lit_count; ++l) {
       if (d.owner >= 0 && d.owner == lit_owner[l]) lit = true;
     }
+    if (m->part_moving[p]) {
+      for (int k = 0; k < part.count; ++k) {
+        const int v = part.first + k;
+        float* g = &b.pos[v * 3];
+        float* gn = &b.nrm[v * 3];
+        hm::MatrixPoint(d.model, &m->position[v * 3], g);
+        const float* n = &m->normal[v * 3];
+        for (int a = 0; a < 3; ++a) {
+          gn[a] = d.model.m[a] * n[0] + d.model.m[3 + a] * n[1] +
+                  d.model.m[6 + a] * n[2];
+        }
+        overlay_math::Normalize(gn);
+        for (int a = 0; a < 3; ++a) {
+          b.shell[v * 3 + a] = g[a] + gn[a] * kShellM;
+        }
+      }
+    }
+    const uint32_t* table = lit ? gold : parchment;
     for (int k = 0; k < part.count; ++k) {
       const int v = part.first + k;
-      float g[3], gn[3], w[3];
-      hm::MatrixPoint(d.model, &m->position[v * 3], g);
-      const float* n = &m->normal[v * 3];
-      for (int a = 0; a < 3; ++a) {
-        gn[a] = d.model.m[a] * n[0] + d.model.m[3 + a] * n[1] +
-                d.model.m[6 + a] * n[2];
-      }
-      GripToWorld(hand, units, g, w);
-      // The normal in the world: the rotation of the hand and the flip of z.
-      const float q[3] = {gn[0], gn[1], -gn[2]};
-      float wn[3];
-      for (int r = 0; r < 3; ++r) {
-        wn[r] = hand.rotation[r * 3 + 0] * q[0] +
-                hand.rotation[r * 3 + 1] * q[1] +
-                hand.rotation[r * 3 + 2] * q[2];
-      }
-      overlay_math::Normalize(wn);
-      for (int a = 0; a < 3; ++a) {
-        b.world[v * 3 + a] = w[a];
-        b.normal[v * 3 + a] = wn[a];
-      }
+      const float* gn = &b.nrm[v * 3];
+      float up = ry[0] * gn[0] + ry[1] * gn[1] + ry[2] * gn[2];
+      if (!(up > 0.0f)) up = 0.0f;
+      if (up > 1.0f) up = 1.0f;
+      b.color[v] = table[static_cast<int>(up * kLevels + 0.5f)];
       b.lit[v] = lit;
-      b.color[v] = lit ? Argb(kGold, Level(wn, 0.55f), fade)
-                       : Argb(kParchment, Level(wn, 0.50f),
-                              hm::kBodyAlpha * fade);
     }
   }
   // The lines and the marks.
-  b.extra_first = m->vertices;
   b.extra_vertices = 0;
   b.extra_triangles = 0;
+  const uint32_t ink = Argb(kInk, 1.0f, fade);
   const float line_radius = kLineRadiusM * units;
   for (int c = 0; c < s.count; ++c) {
     const int control = s.card[c].control;
@@ -1028,40 +1237,33 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
       } else {
         rest_model = value.rest_matrix;
       }
-      float x[3];
-      {
-        const float* a = rest_model.m;
-        const float d[3] = {m->anchor[control][0] - a[9],
-                            m->anchor[control][1] - a[10],
-                            m->anchor[control][2] - a[11]};
-        // The inverse of the 3 by 3 part.
-        const float c00 = a[4] * a[8] - a[7] * a[5];
-        const float c01 = a[7] * a[2] - a[1] * a[8];
-        const float c02 = a[1] * a[5] - a[4] * a[2];
-        const float det = a[0] * c00 + a[3] * c01 + a[6] * c02;
-        if (fabsf(det) > 1e-12f) {
-          const float inv[9] = {
-              c00 / det, c01 / det, c02 / det,
-              (a[6] * a[5] - a[3] * a[8]) / det,
-              (a[0] * a[8] - a[6] * a[2]) / det,
-              (a[3] * a[2] - a[0] * a[5]) / det,
-              (a[3] * a[7] - a[6] * a[4]) / det,
-              (a[6] * a[1] - a[0] * a[7]) / det,
-              (a[0] * a[4] - a[3] * a[1]) / det};
-          for (int k = 0; k < 3; ++k) {
-            x[k] = inv[k] * d[0] + inv[3 + k] * d[1] + inv[6 + k] * d[2];
-          }
-          hm::MatrixPoint(value.model, x, anchor);
-        } else {
-          for (int k = 0; k < 3; ++k) anchor[k] = m->anchor[control][k];
+      const float* a = rest_model.m;
+      const float d[3] = {m->anchor[control][0] - a[9],
+                          m->anchor[control][1] - a[10],
+                          m->anchor[control][2] - a[11]};
+      const float c00 = a[4] * a[8] - a[7] * a[5];
+      const float c01 = a[7] * a[2] - a[1] * a[8];
+      const float c02 = a[1] * a[5] - a[4] * a[2];
+      const float det = a[0] * c00 + a[3] * c01 + a[6] * c02;
+      if (fabsf(det) > 1e-12f) {
+        const float inv[9] = {
+            c00 / det, c01 / det, c02 / det,
+            (a[6] * a[5] - a[3] * a[8]) / det,
+            (a[0] * a[8] - a[6] * a[2]) / det,
+            (a[3] * a[2] - a[0] * a[5]) / det,
+            (a[3] * a[7] - a[6] * a[4]) / det,
+            (a[6] * a[1] - a[0] * a[7]) / det,
+            (a[0] * a[4] - a[3] * a[1]) / det};
+        float x[3];
+        for (int k = 0; k < 3; ++k) {
+          x[k] = inv[k] * d[0] + inv[3 + k] * d[1] + inv[6 + k] * d[2];
         }
+        hm::MatrixPoint(value.model, x, anchor);
+      } else {
+        for (int k = 0; k < 3; ++k) anchor[k] = m->anchor[control][k];
       }
-    } else {
-      for (int k = 0; k < 3; ++k) anchor[k] = value.model.m[9 + k];
-    }
-    // A lit part hides the middle of its box, so the line starts where it
-    // leaves the box, toward its card, and a dot of ink marks that place.
-    if (m->lit_mesh[control]) {
+      // A lit part hides the middle of its box, so the line starts where it
+      // leaves the box, toward its card, and a dot of ink marks that place.
       float dir[3] = {s.edge[c][0] - anchor[0], s.edge[c][1] - anchor[1],
                       s.edge[c][2] - anchor[2]};
       overlay_math::Normalize(dir);
@@ -1074,6 +1276,8 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
       }
       if (t > 0.05f) t = 0.0f;
       for (int k = 0; k < 3; ++k) anchor[k] += dir[k] * t;
+    } else {
+      for (int k = 0; k < 3; ++k) anchor[k] = value.model.m[9 + k];
     }
     float from[3], to[3];
     GripToWorld(hand, units, anchor, from);
@@ -1176,32 +1380,6 @@ void PutStatesBack(IDirect3DDevice7* device) {
   }
 }
 
-bool GrowScreen(int vertices, int indices) {
-  if (vertices > g_screen_capacity) {
-    free(g_screen_vertex);
-    free(g_shell_vertex);
-    g_screen_vertex =
-        static_cast<ScreenVertex*>(malloc(sizeof(ScreenVertex) * vertices));
-    g_shell_vertex =
-        static_cast<ScreenVertex*>(malloc(sizeof(ScreenVertex) * vertices));
-    g_screen_capacity =
-        g_screen_vertex != nullptr && g_shell_vertex != nullptr ? vertices : 0;
-  }
-  if (indices > g_list_capacity) {
-    free(g_list_lit);
-    free(g_list_back);
-    free(g_list_front);
-    g_list_lit = static_cast<WORD*>(malloc(sizeof(WORD) * indices));
-    g_list_back = static_cast<WORD*>(malloc(sizeof(WORD) * indices));
-    g_list_front = static_cast<WORD*>(malloc(sizeof(WORD) * indices));
-    g_list_capacity = g_list_lit != nullptr && g_list_back != nullptr &&
-                              g_list_front != nullptr
-                          ? indices
-                          : 0;
-  }
-  return g_screen_capacity >= vertices && g_list_capacity >= indices;
-}
-
 // The eye in the world, from the camera matrix of overlay_math::ToCamera.
 bool EyeOf(const float m[12], float eye[3]) {
   // camera = A * p + t, with the columns of A at m[0..2], m[3..5], m[6..8].
@@ -1229,154 +1407,187 @@ bool EyeOf(const float m[12], float eye[3]) {
   return true;
 }
 
+// One corner on the screen: camera = c * p + c0, then the projection of the
+// overlay (overlay_math.h, Project). False in front of the near plane.
+inline bool ProjectCorner(const float c[9], const float c0[3], const float p[3],
+                          float near_plane, float hx, float hy,
+                          uint32_t color, ScreenVertex* out) {
+  const float z = c[6] * p[0] + c[7] * p[1] + c[8] * p[2] + c0[2];
+  if (z < near_plane) return false;
+  const float x = c[0] * p[0] + c[1] * p[1] + c[2] * p[2] + c0[0];
+  const float y = c[3] * p[0] + c[4] * p[1] + c[5] * p[2] + c0[1];
+  const float inv = 1.0f / z;
+  out->x = (1.0f + x * inv) * hx;
+  out->y = (1.0f - y * inv) * hy;
+  out->rhw = near_plane * inv;
+  out->z = 1.0f - out->rhw;
+  out->diffuse = color;
+  out->specular = 0xFF000000u;
+  out->u = out->v = 0.0f;
+  return true;
+}
+
+// THE DRAW OF ONE SIDE in one eye. The grip space goes to the camera with
+// one matrix: camera = A * (position + R * F * p * units) + t, where A and t
+// are the camera of the eye and F flips z. Each corner is put on the screen
+// once, and the triangles go to four compact lists, so a draw sends only the
+// vertices it uses. The side that the eye sees comes from the first normal
+// of a triangle and the eye in the grip space.
 int DrawSide(IDirect3DDevice7* device, int side, const float m[12],
              float near_plane, float hx, float hy, const float eye[3],
-             float units, HRESULT* result) {
-  const Built& b = g_built[side];
+             HRESULT* result) {
+  Built& b = g_built[side];
   const Model* model = g_model[side];
-  if (!b.have || model == nullptr) return 0;
-  const int vertices = model->vertices + b.extra_vertices;
-  const int indices = (model->triangles + b.extra_triangles) * 3;
-  if (vertices > 65535 || !GrowScreen(vertices, indices)) return 0;
-  for (int v = 0; v < vertices; ++v) {
-    const int at = v;
-    float c[3];
-    overlay_math::ToCamera(m, &b.world[at * 3], c);
-    ScreenVertex& s = g_screen_vertex[v];
-    if (c[2] < near_plane) {
-      s.rhw = -1.0f;  // in front of the near plane: no triangle uses it
-      continue;
-    }
-    s.x = (1.0f + c[0] / c[2]) * hx;
-    s.y = (1.0f - c[1] / c[2]) * hy;
-    s.rhw = near_plane / c[2];
-    s.z = 1.0f - s.rhw;
-    s.diffuse = b.color[at];
-    s.specular = 0xFF000000u;
-    s.u = s.v = 0.0f;
+  if (!b.have || model == nullptr || b.copied != model) return 0;
+  // A, as rows, from the columns of m.
+  const float a[9] = {m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]};
+  float r[9];  // R * F * units
+  for (int i = 0; i < 3; ++i) {
+    r[i * 3 + 0] = b.rotation[i * 3 + 0] * b.units;
+    r[i * 3 + 1] = b.rotation[i * 3 + 1] * b.units;
+    r[i * 3 + 2] = -b.rotation[i * 3 + 2] * b.units;
   }
-  // The shell of the outline: each corner of the body pushed out along its
-  // normal, in ink.
-  const float push = kOutlineM * units;
-  const uint32_t outline = Argb(kInk, 1.0f, kOutlineAlpha * g_side[side].fade);
-  for (int v = 0; v < model->vertices; ++v) {
-    ScreenVertex& s = g_shell_vertex[v];
-    if (b.lit[v]) {
-      s.rhw = -1.0f;
-      continue;
+  float c[9], c0[3];
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      c[i * 3 + j] = a[i * 3 + 0] * r[0 * 3 + j] + a[i * 3 + 1] * r[1 * 3 + j] +
+                     a[i * 3 + 2] * r[2 * 3 + j];
     }
-    float p[3], c[3];
-    for (int k = 0; k < 3; ++k) {
-      p[k] = b.world[v * 3 + k] + b.normal[v * 3 + k] * push;
-    }
-    overlay_math::ToCamera(m, p, c);
-    if (c[2] < near_plane) {
-      s.rhw = -1.0f;
-      continue;
-    }
-    s.x = (1.0f + c[0] / c[2]) * hx;
-    s.y = (1.0f - c[1] / c[2]) * hy;
-    s.rhw = near_plane / c[2];
-    s.z = 1.0f - s.rhw;
-    s.diffuse = outline;
-    s.specular = 0xFF000000u;
-    s.u = s.v = 0.0f;
+    c0[i] = a[i * 3 + 0] * b.position[0] + a[i * 3 + 1] * b.position[1] +
+            a[i * 3 + 2] * b.position[2] + m[9 + i];
   }
-  int lit = 0, back = 0, front = 0;
-  auto put = [&](const uint32_t* t) {
-    const ScreenVertex& a = g_screen_vertex[t[0]];
-    const ScreenVertex& bb = g_screen_vertex[t[1]];
-    const ScreenVertex& cc = g_screen_vertex[t[2]];
-    if (a.rhw < 0.0f || bb.rhw < 0.0f || cc.rhw < 0.0f) return;
-    WORD* list;
-    int* n;
-    if (b.lit[t[0]]) {
-      list = g_list_lit;
-      n = &lit;
-    } else {
-      // The side that the eye sees, from the normals and the eye.
-      float facing = 0.0f;
+  // The eye in the grip space: F * R^T * (eye - position) / units.
+  const float d[3] = {eye[0] - b.position[0], eye[1] - b.position[1],
+                      eye[2] - b.position[2]};
+  float e[3];
+  for (int j = 0; j < 3; ++j) {
+    e[j] = (b.rotation[0 * 3 + j] * d[0] + b.rotation[1 * 3 + j] * d[1] +
+            b.rotation[2 * 3 + j] * d[2]) /
+           b.units;
+  }
+  e[2] = -e[2];
+  const uint32_t outline =
+      Argb(kInk, 1.0f, kOutlineAlpha * g_side[side].fade);
+  const int stamp = ++g_eye_stamp;
+  int n_lit = 0, n_back = 0, n_front = 0;
+  int i_lit = 0, i_back = 0, i_front = 0;
+  for (int t = 0; t < model->triangles; ++t) {
+    const uint32_t* tri = &model->index[t * 3];
+    bool seen = true;
+    for (int k = 0; k < 3 && seen; ++k) {
+      const uint32_t v = tri[k];
+      if (b.stamp[v] != stamp) {
+        b.stamp[v] = stamp;
+        b.map_lit[v] = b.map_back[v] = b.map_front[v] = -1;
+        if (!ProjectCorner(c, c0, &b.pos[v * 3], near_plane, hx, hy,
+                           b.color[v], &b.screen[v])) {
+          b.screen[v].rhw = -1.0f;
+        }
+      }
+      if (b.screen[v].rhw < 0.0f) seen = false;
+    }
+    if (!seen) continue;
+    if (b.lit[tri[0]]) {
       for (int k = 0; k < 3; ++k) {
-        const float* p = &b.world[t[k] * 3];
-        const float* nn = &b.normal[t[k] * 3];
-        facing += nn[0] * (eye[0] - p[0]) + nn[1] * (eye[1] - p[1]) +
-                  nn[2] * (eye[2] - p[2]);
+        const uint32_t v = tri[k];
+        if (b.map_lit[v] < 0) {
+          b.map_lit[v] = n_lit;
+          g_draw_lit[n_lit++] = b.screen[v];
+        }
+        g_list_lit[i_lit++] = static_cast<WORD>(b.map_lit[v]);
       }
-      if (facing > 0.0f) {
-        list = g_list_front;
-        n = &front;
-      } else {
-        list = g_list_back;
-        n = &back;
-      }
+      continue;
     }
-    list[(*n)++] = static_cast<WORD>(t[0]);
-    list[(*n)++] = static_cast<WORD>(t[1]);
-    list[(*n)++] = static_cast<WORD>(t[2]);
+    const float* p0 = &b.pos[tri[0] * 3];
+    const float* n0 = &b.nrm[tri[0] * 3];
+    const bool front = n0[0] * (e[0] - p0[0]) + n0[1] * (e[1] - p0[1]) +
+                           n0[2] * (e[2] - p0[2]) >
+                       0.0f;
+    if (front) {
+      for (int k = 0; k < 3; ++k) {
+        const uint32_t v = tri[k];
+        if (b.map_front[v] < 0) {
+          b.map_front[v] = n_front;
+          g_draw_front[n_front++] = b.screen[v];
+        }
+        g_list_front[i_front++] = static_cast<WORD>(b.map_front[v]);
+      }
+      continue;
+    }
+    // A back face, and its corner of the outline. A corner of the outline in
+    // front of the near plane takes the corner of the body.
+    for (int k = 0; k < 3; ++k) {
+      const uint32_t v = tri[k];
+      if (b.map_back[v] < 0) {
+        b.map_back[v] = n_back;
+        g_draw_back[n_back] = b.screen[v];
+        if (!ProjectCorner(c, c0, &b.shell[v * 3], near_plane, hx, hy,
+                           outline, &g_draw_shell[n_back])) {
+          g_draw_shell[n_back] = b.screen[v];
+          g_draw_shell[n_back].diffuse = outline;
+        }
+        ++n_back;
+      }
+      g_list_back[i_back++] = static_cast<WORD>(b.map_back[v]);
+    }
+  }
+  // The lines and the marks, from the world, after the lit parts.
+  const int extra_base = n_lit;
+  bool extra_ok = true;
+  for (int v = 0; v < b.extra_vertices; ++v) {
+    float cam[3];
+    overlay_math::ToCamera(m, &b.extra_world[v * 3], cam);
+    ScreenVertex& s = g_draw_lit[n_lit + v];
+    if (cam[2] < near_plane) {
+      extra_ok = false;
+      break;
+    }
+    s.x = (1.0f + cam[0] / cam[2]) * hx;
+    s.y = (1.0f - cam[1] / cam[2]) * hy;
+    s.rhw = near_plane / cam[2];
+    s.z = 1.0f - s.rhw;
+    s.diffuse = b.extra_color[v];
+    s.specular = 0xFF000000u;
+    s.u = s.v = 0.0f;
+  }
+  if (extra_ok && b.extra_vertices > 0) {
+    n_lit += b.extra_vertices;
+    for (int k = 0; k < b.extra_triangles * 3; ++k) {
+      g_list_lit[i_lit++] = static_cast<WORD>(extra_base + b.extra_index[k]);
+    }
+  }
+  if (n_lit > 65535 || n_back > 65535 || n_front > 65535) return 0;
+
+  auto draw = [&](const ScreenVertex* vertices, int count, const WORD* list,
+                  int indices) {
+    if (count <= 0 || indices <= 0) return;
+    const HRESULT hr = device->DrawIndexedPrimitive(
+        D3DPT_TRIANGLELIST, kFvf, const_cast<ScreenVertex*>(vertices),
+        static_cast<DWORD>(count), const_cast<WORD*>(list),
+        static_cast<DWORD>(indices), 0);
+    if (FAILED(hr)) *result = hr;
+    g_frame_sent += count;
   };
-  for (int t = 0; t < model->triangles; ++t) put(&model->index[t * 3]);
-  for (int t = 0; t < b.extra_triangles; ++t) put(&b.extra_index[t * 3]);
-  const DWORD count = static_cast<DWORD>(vertices);
-  if (lit > 0) {
-    device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
-    const HRESULT r = device->DrawIndexedPrimitive(
-        D3DPT_TRIANGLELIST, kFvf, g_screen_vertex, count, g_list_lit,
-        static_cast<DWORD>(lit), 0);
-    if (FAILED(r)) *result = r;
-  }
+  device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+  draw(g_draw_lit, n_lit, g_list_lit, i_lit);
   device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
-  if (back > 0) {
-    const HRESULT r = device->DrawIndexedPrimitive(
-        D3DPT_TRIANGLELIST, kFvf, g_screen_vertex, count, g_list_back,
-        static_cast<DWORD>(back), 0);
-    if (FAILED(r)) *result = r;
-  }
+  draw(g_draw_back, n_back, g_list_back, i_back);
   // THE OUTLINE. First the front faces write only their depth (the blend
   // keeps the picture as it is). Then the shell of the back faces draws in
   // ink: inside the silhouette the front faces are nearer and hide it, so
   // only a thin edge round the body shows.
-  int shell = 0;
-  if (front > 0 && back > 0) {
+  if (i_front > 0 && i_back > 0) {
     device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
     device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_ZERO);
     device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE);
-    HRESULT r = device->DrawIndexedPrimitive(
-        D3DPT_TRIANGLELIST, kFvf, g_screen_vertex, count, g_list_front,
-        static_cast<DWORD>(front), 0);
-    if (FAILED(r)) *result = r;
+    draw(g_draw_front, n_front, g_list_front, i_front);
     device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
     device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
     device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
-    // The shell uses the same triangles as the back faces, with the corners
-    // of the shell. A corner of the shell in front of the near plane drops
-    // its triangle.
-    int n = 0;
-    for (int i = 0; i + 2 < back; i += 3) {
-      if (g_shell_vertex[g_list_back[i]].rhw < 0.0f ||
-          g_shell_vertex[g_list_back[i + 1]].rhw < 0.0f ||
-          g_shell_vertex[g_list_back[i + 2]].rhw < 0.0f) {
-        continue;
-      }
-      g_list_lit[n++] = g_list_back[i];
-      g_list_lit[n++] = g_list_back[i + 1];
-      g_list_lit[n++] = g_list_back[i + 2];
-    }
-    if (n > 0) {
-      r = device->DrawIndexedPrimitive(
-          D3DPT_TRIANGLELIST, kFvf, g_shell_vertex,
-          static_cast<DWORD>(model->vertices), g_list_lit,
-          static_cast<DWORD>(n), 0);
-      if (FAILED(r)) *result = r;
-    }
-    shell = n;
+    draw(g_draw_shell, n_back, g_list_back, i_back);
   }
-  if (front > 0) {
-    const HRESULT r = device->DrawIndexedPrimitive(
-        D3DPT_TRIANGLELIST, kFvf, g_screen_vertex, count, g_list_front,
-        static_cast<DWORD>(front), 0);
-    if (FAILED(r)) *result = r;
-  }
-  return (lit + back + front + shell) / 3;
+  draw(g_draw_front, n_front, g_list_front, i_front);
+  return (i_lit + i_back * 2 + i_front) / 3;
 }
 
 // THE TEST KEY: Ctrl Shift H, with test_keys=1, while the game is in front.
@@ -1417,6 +1628,11 @@ bool HintModelHasControl(int side, int control) {
   return m != nullptr && m->value_node[control] >= 0;
 }
 
+// The palm corners of hint_card_math::HandOutline, and a hysteresis that no
+// outline reaches, so the side does not change.
+const int kPalmCorners = 8;
+const float kNoSideChange = 1000.0f;
+
 bool HintModelPlace(int which, const HintModelCard* cards, int count,
                     bool show, float dt, HintModelPlaced* out) {
   float grip[3], turn[4], head[3];
@@ -1448,7 +1664,9 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
     }
   }
   if (s.count <= 0) return false;
-  // The outline: the hand, and the box of the controller.
+  // The outline: the corners of the palm (HandOutline gives them first),
+  // and the box of the controller. A hand that holds a controller is
+  // closed, so the tips of the open fingers do not count.
   const float hand_length = ControllersHandCm() * 0.01f *
                             (ControllersHandScalePct() * 0.01f);
   const float hand_m = hand_length > 0.05f ? hand_length : 0.19f;
@@ -1458,8 +1676,7 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
     const float corner[3] = {(c & 1) ? m->high[0] : m->low[0],
                              (c & 2) ? m->high[1] : m->low[1],
                              (c & 4) ? m->high[2] : m->low[2]};
-    GripToLocal(grip, turn, corner,
-                outline[hint_card_math::kOutlinePoints + c]);
+    GripToLocal(grip, turn, corner, outline[kPalmCorners + c]);
   }
   const float middle[3] = {0.5f * (m->low[0] + m->high[0]),
                            0.5f * (m->low[1] + m->high[1]),
@@ -1469,7 +1686,7 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
   for (int k = 0; k < 3; ++k) in.head[k] = head[k];
   GripToLocal(grip, turn, middle, in.center);
   in.outline = outline;
-  in.outline_count = hint_card_math::kOutlinePoints + 8;
+  in.outline_count = kPalmCorners + 8;
   in.side = s.fade > 0.0f && s.stack_side != 0 ? s.stack_side : 0;
   in.first = left ? -1 : 1;
   for (int k = 0; k < 3; ++k) {
@@ -1481,7 +1698,8 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
   }
   in.gap = 0.02f;
   in.spacing = 0.006f;
-  in.hysteresis = 0.04f;
+  // The cards of a controller stay on the outer side of the hand.
+  in.hysteresis = kNoSideChange;
   in.count = s.count;
   for (int i = 0; i < s.count; ++i) {
     in.width[i] = s.card[i].width;
@@ -1493,8 +1711,25 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
       GripToLocal(grip, turn, m->anchor[control], in.anchor[i]);
     }
   }
+  // The order of the last frame, for the same cards.
+  in.keep_count = 0;
+  if (s.column_count == s.count) {
+    bool same = true;
+    for (int i = 0; i < s.count; ++i) {
+      if (s.column_control[i] != s.card[i].control) same = false;
+    }
+    if (same) {
+      in.keep_count = s.count;
+      for (int i = 0; i < s.count; ++i) in.keep_column[i] = s.column[i];
+    }
+  }
   hm::StackOut stack;
   if (!hm::Stack(in, &stack)) return false;
+  s.column_count = s.count;
+  for (int i = 0; i < s.count; ++i) {
+    s.column[stack.slot[i]] = i;
+    s.column_control[i] = s.card[i].control;
+  }
   s.stack_side = stack.side;
   for (int k = 0; k < 3; ++k) s.last_right[k] = stack.right[k];
   for (int i = 0; i < s.count; ++i) {
@@ -1520,16 +1755,19 @@ void CloseCost() {
   ++g_cost_frames;
   g_cost_eyes += static_cast<uint64_t>(g_frame_draws);
   g_cost_triangles += static_cast<uint64_t>(g_frame_triangles);
+  g_cost_sent += static_cast<uint64_t>(g_frame_sent);
   g_frame_draws = 0;
+  g_frame_sent = 0;
   if (!g_said_cost && g_cost_frames >= 120) {
     g_said_cost = true;
     ModLog("hint model   : the controllers cost %.3f ms a frame on the CPU "
            "over %llu frames (the build and %.1f eye passes a frame), %.3f ms "
-           "at most, %llu triangles a frame",
+           "at most, %llu triangles and %llu vertices sent a frame",
            Ms(g_cost_sum) / static_cast<double>(g_cost_frames), g_cost_frames,
            static_cast<double>(g_cost_eyes) /
                static_cast<double>(g_cost_frames),
-           Ms(g_cost_most), g_cost_triangles / g_cost_frames);
+           Ms(g_cost_most), g_cost_triangles / g_cost_frames,
+           g_cost_sent / g_cost_frames);
   }
 }
 
@@ -1574,7 +1812,7 @@ int HintModelDraw(IDirect3DDevice7* device, const float camera[12],
   int drawn = 0;
   for (int side = 0; side < 2; ++side) {
     drawn += DrawSide(device, side, camera, near_plane, half_x, half_y, eye,
-                      g_units, &result);
+                      &result);
   }
   // The depth write goes back to the value of SetStates, so PutStatesBack
   // puts back the value of the game.
@@ -1623,5 +1861,5 @@ void HintModelReport() {
          g_cost_frames);
   g_side[0].frames_shown = g_side[1].frames_shown = 0;
   g_cost_sum = g_cost_most = 0;
-  g_cost_frames = g_cost_triangles = g_cost_eyes = 0;
+  g_cost_frames = g_cost_triangles = g_cost_eyes = g_cost_sent = 0;
 }

@@ -181,7 +181,8 @@ inline void HintModelChecks() {
   // THE CARDS OF THE BUTTONS, in 3000 poses of play with 1 to 4 cards.
   uint32_t seed = 4242u;
   int placed = 0, crossed = 0, overlapped = 0, covered = 0, off_edge = 0;
-  int outer = 0, faced = 0, poses = 0, cards = 0;
+  int outer = 0, faced = 0, poses = 0, cards = 0, off_middle = 0;
+  float worst_middle = 0.0f;
   float worst_reach = 0.0f;
   for (int n = 0; n < 3000; ++n) {
     float q[4];
@@ -200,7 +201,9 @@ inline void HintModelChecks() {
     float turned[3];
     controller_math::QuatRotate(q, shift, turned);
     for (int k = 0; k < 3; ++k) center[k] = grip[k] + turned[k];
-    BoxCorners(center, q, half, &outline[hint_card_math::kOutlinePoints]);
+    // The palm corners (the first 8 points of HandOutline) and the box of
+    // the controller, as hint_model.cpp gives them.
+    BoxCorners(center, q, half, &outline[8]);
     hm::StackIn in;
     memset(&in, 0, sizeof(in));
     for (int k = 0; k < 3; ++k) {
@@ -208,13 +211,13 @@ inline void HintModelChecks() {
       in.center[k] = center[k];
     }
     in.outline = outline;
-    in.outline_count = hint_card_math::kOutlinePoints + 8;
+    in.outline_count = 16;
     in.side = 0;
     in.first = left ? -1 : 1;
     in.last_right[0] = 1.0f;
     in.gap = 0.02f;
     in.spacing = 0.006f;
-    in.hysteresis = 0.04f;
+    in.hysteresis = 1000.0f;  // the cards keep the outer side
     in.count = 1 + static_cast<int>(Random(&seed) * 3.99f);
     for (int i = 0; i < in.count; ++i) {
       in.width[i] = 0.04f + Random(&seed) * 0.08f;
@@ -233,6 +236,19 @@ inline void HintModelChecks() {
     ++placed;
     if (out.crossings != 0) ++crossed;
     if (out.side == (left ? -1 : 1)) ++outer;
+    {
+      float lowest = 1e9f, highest = -1e9f;
+      for (int i = 0; i < in.count; ++i) {
+        const float h = (out.center[i][0] - center[0]) * out.up[0] +
+                        (out.center[i][1] - center[1]) * out.up[1] +
+                        (out.center[i][2] - center[2]) * out.up[2];
+        if (h < lowest) lowest = h;
+        if (h > highest) highest = h;
+      }
+      const float middle = fabsf(0.5f * (lowest + highest));
+      if (middle > worst_middle) worst_middle = middle;
+      if (middle > 0.015f) ++off_middle;
+    }
     hint_card_math::Card card[hm::kMaxCards];
     for (int i = 0; i < in.count; ++i) {
       for (int k = 0; k < 3; ++k) card[i].center[k] = out.center[i][k];
@@ -294,8 +310,10 @@ inline void HintModelChecks() {
         "its card", off_edge, 0);
   Check(faced == cards, "each card faces the head from its own middle "
         "(less than 1 degree off its line of sight)", faced, cards);
-  Check(outer * 100 >= 90 * placed, "90 percent and more of the poses have "
-        "the cards on the outer side of the hand", outer, placed);
+  Check(outer == placed, "each pose has the cards on the outer side of the "
+        "hand", outer, placed);
+  Check(off_middle == 0, "the middle of each column is within 1.5 cm of the "
+        "height of the middle of the controller", worst_middle, 0.015);
   Check(worst_reach < 0.35f, "no card is more than 35 cm from the middle of "
         "the controller", worst_reach, 0.35);
 

@@ -130,6 +130,7 @@
 #include "controller_hints.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "creature_command_math.h"
 #include "debug_menu.h"
 #include "far_grab.h"
 #include "forest_take.h"
@@ -138,6 +139,7 @@
 #include "hint_learn_math.h"
 #include "hint_picture_math.h"
 #include "miracle.h"
+#include "near_math.h"
 #include "radial_menu.h"
 #include "spell_book.h"
 #include "temple.h"
@@ -172,6 +174,12 @@ void* HandDirectHand(bool* active);
 // (tree_plant_math.h), or -1. And the A/B key of that text.
 int HandDirectTreeVerdict();
 bool HandDirectPalmOff();
+// hand_direct.cpp, one target (docs/grab.md): the object that a press of the
+// grip acts on at the Hand's point, or null. acts is false when the influence
+// stops the press. And what a press of the grip does there, as a
+// near_math::Kind.
+void* HandDirectNearTargetObject(bool* acts);
+int HandDirectPressKind();
 void HandDirectTreeHintToggle();
 void HandDirectRootsToggle();
 // tabletop.cpp: the God view or the table makes the picture.
@@ -855,6 +863,40 @@ void AddLeashBackPrompts(Content cards[kHands]) {
   }
 }
 
+// THE LINE OF THE GRIP AT A TARGET OF A COMMAND (command_look=1). The grip
+// has no far target here. So the line of the grip says what the grip does at
+// the Hand's point, or why it does nothing at the target of the trigger: the
+// target is past the range of the grab from a distance (far_grab_max_m), or
+// the Hand cannot take it (the object that holds the tied leash, a house,
+// a target outside the influence). The line of nothing has the tone of the
+// other buttons, not the gold of the grip.
+void AddCommandGripPrompt(Content cards[kHands]) {
+  if (!CreatureCommandLookOn()) return;
+  bool acts = false;
+  if (HandDirectNearTargetObject(&acts) != nullptr && acts) {
+    switch (HandDirectPressKind()) {
+      case near_math::kHold:
+        AddPrompt(cards, kWordGrab, L"Take", kToneGrab,
+                  hint_learn_math::kSkillTake);
+        return;
+      case near_math::kTake:
+        AddPrompt(cards, kWordGrab, L"Hold to collect", kToneGrab,
+                  hint_learn_math::kSkillCollect);
+        return;
+      case near_math::kTap:
+        AddPrompt(cards, kWordGrab, L"Activate", kToneGrab);
+        return;
+      default:
+        break;
+    }
+  }
+  AddPrompt(cards, kWordGrab,
+            CreatureCommandGripAt() == command_math::kGripTooFar
+                ? L"Too far to take"
+                : L"Cannot take",
+            kToneOther);
+}
+
 // THE WORDS OF THE MOD for the object in the Hand (hint_held_latch), while
 // the game has no hint for it yet: the words of a tree that the opening does
 // not plant (the card gives them to the hint of the game too), the line of a
@@ -1008,9 +1050,16 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       break;
     case kCtxCommand:
       AddCommandPrompts(cards);
+      AddCommandGripPrompt(cards);
       break;
     case kCtxLeashBack:
       AddLeashBackPrompts(cards);
+      // A grip on your Creature changes the leash when the grab from a
+      // distance has it as its target. So only the object that holds the
+      // leash gets the line of the grip.
+      if (CreatureCommandHint() == kCommandHintTied) {
+        AddCommandGripPrompt(cards);
+      }
       break;
     case kCtxLeashOff:
       AddPrompt(cards, kWordAction, L"Take the leash off", kToneAction);
@@ -1132,6 +1181,10 @@ struct CardState {
   int rect_h;
   float fade;
   float staged_fade;
+  // The number of the staged picture (CardLayer::serial): a new one at each
+  // new picture in `staged`, so the view for videos copies the card only
+  // after a change.
+  uint32_t serial;
   bool visible;
   // Right in the view, from the last frame that had one, and the side of the
   // wrist that the card is on (CardPose). 0 is no side yet.
@@ -1631,6 +1684,7 @@ bool Raster(const Content& content, CardState* card) {
 void Stage(CardState* card) {
   if (card->staged_fade == card->fade) return;
   card->staged_fade = card->fade;
+  card->serial = bwvr::XrScreen::NewCardSerial();
   const int width = static_cast<int>(kHintCardWidth);
   const int scale = static_cast<int>(card->fade * 256.0f + 0.5f);
   for (int y = 0; y < card->rect_h; ++y) {
@@ -2672,6 +2726,7 @@ void HintCardEndFrame() {
     for (int i = 0; i < 4; ++i) layer.orientation[i] = p.card.orientation[i];
     layer.width = p.width;
     layer.height = p.height;
+    layer.serial = c.serial;
     bwvr::XrScreen::StageCard(
         h == kPointing ? bwvr::kCardHintPointing : bwvr::kCardHintOther,
         layer);
@@ -2780,6 +2835,7 @@ bool HintCardSavingLayer(bwvr::CardLayer* out) {
   for (int i = 0; i < 4; ++i) layer.orientation[i] = p.card.orientation[i];
   layer.width = p.width;
   layer.height = p.height;
+  layer.serial = c.serial;
   *out = layer;
   ModLog("hint card    : frame %llu, the game saves: the card of the %s hand "
          "says \"Saving...\", %.1f by %.1f cm at %.3f %.3f %.3f m, until the "

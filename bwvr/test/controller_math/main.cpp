@@ -2258,6 +2258,12 @@ void TeleportChecks() {
             "the disc or the cross is inside the inner radius", cross_far,
             15.0);
     }
+    // The ring around an object has the band and no disc.
+    const int band = overlay_math::BuildLandRing(
+        100.0f, 200.0f, 15.0f, 20.0f, 2.0f, true, slope, ring,
+        overlay_math::kRingMaxTriangles, false);
+    Near("the ring around an object has the band only: 48 triangles", band,
+         48.0, 0.0);
   }
 }
 

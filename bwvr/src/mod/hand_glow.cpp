@@ -187,7 +187,7 @@ const Style kHaloInvalid = {"a far target outside the influence", 0.0f, 255,
 // THE HALO of a Creature command (creature_command.cpp): green, the color of
 // the trigger. It shows around the object that the leashed Creature goes to
 // when the trigger is pressed. A far target has the gold halo, also when the
-// trigger can send the Creature to it.
+// trigger can send the Creature to it. Only with command_look=0.
 const Style kHaloCommand = {"a target of the Creature", 0.0f, 70, 255, 150,
                             0.50f, 0.65f};
 // THE HALO of the target of a miracle (miracle.cpp): gold, the color of the
@@ -578,6 +578,11 @@ void DrawOneHalo(IDirect3DDevice7* device, const FarDraw& d,
 // target of the grip in its wide cone, and a target of a command in its tight
 // cone. Then each has its halo, gold for the grip and green for the trigger.
 // One object that is both has the gold halo.
+//
+// With command_look=1 the target of a command has no halo. Its mark is a
+// green ring on the land (overlay.cpp, BuildCommandRing). So each halo and
+// each glow on a mesh is a target of the grip, and a red far target stays
+// red.
 struct Halo {
   FarDraw draw;
   const Style* style;

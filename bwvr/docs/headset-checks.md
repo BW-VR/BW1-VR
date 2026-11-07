@@ -116,7 +116,9 @@ want.
     places and things. Hold the grip on the Creature for a stay, give it an
     object, and shake the leash hand. Wrong: the Creature goes to a different
     place, a command, a stay or a change of the leash by accident, or a real
-    shake that does nothing.
+    shake that does nothing. Also wrong: a green ring on the land that is
+    hard to see or that you take for a target of the grip, or a glow on a
+    thing that the grip does not take.
 
 ### Miracles
 

@@ -276,6 +276,8 @@ void ThrowLandFasterChange(const char* by);
 // creature_stay.cpp, miracle.cpp, village.cpp, spell_book.cpp).
 int CreatureCommandRuleValue();
 void CreatureCommandRuleChange(const char* by);
+int CreatureCommandLookValue();
+void CreatureCommandLookChange(const char* by);
 int CreatureStayModeValue();
 void CreatureStayModeChange(const char* by);
 // The Creature with no press (controllers.cpp, ui_panel.cpp).
@@ -671,6 +673,9 @@ const Switch kSwitches[] = {
     {kGroupCreature, L"Command rule", L"Rule of the Creature command",
      "creature_command_rule", CreatureCommandRuleValue,
      CreatureCommandRuleChange, L""},
+    {kGroupCreature, L"Command look", L"Mark of a target of the trigger",
+     "command_look", CreatureCommandLookValue, CreatureCommandLookChange,
+     L"halo|ring"},
     {kGroupCreature, L"Hold stay", L"Long grip makes the Creature stay",
      "creature_hold_stay", CreatureStayModeValue, CreatureStayModeChange,
      L"off|on"},
@@ -1098,6 +1103,10 @@ const wchar_t* const kTips[] = {
     // Command rule
     L"4: a press on the land stays a walk. 3 and 2: a press goes to a live "
     L"target. 1: the press fixes its kind. A step goes down to 1, then to 4.",
+    // Command look
+    L"Ring: a target of the trigger has a green ring on the land, and a glow "
+    L"shows only what the grip acts on. Halo: a target of the trigger has a "
+    L"green halo.",
     // Hold stay
     L"On: a long grip on the far Creature makes it stay. Off: the leash click "
     L"goes out when the grip closes, and no grip makes it stay.",

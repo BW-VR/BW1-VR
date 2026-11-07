@@ -671,9 +671,19 @@ void VrKeyboardFrame(uint64_t frame) {
            look.shift ? "on" : "off");
     EyeCaptureSaveUi("keyboard", frame, 1, pixels, kWidth * 4, kWidth, kHeight);
   }
+  // THE NUMBER OF THE PICTURE (CardLayer::serial): new at each new picture
+  // and at each change between the dark card and the parchment, so the view
+  // for videos copies the 1.5 MB of the keyboard only after a change.
+  static uint32_t serial = 0;
+  static const uint8_t* serial_pixels = nullptr;
+  if (fresh || serial == 0 || pixels != serial_pixels) {
+    serial = bwvr::XrScreen::NewCardSerial();
+    serial_pixels = pixels;
+  }
   bwvr::CardLayer layer = {};
   layer.visible = true;
   layer.pixels = pixels;
+  layer.serial = serial;
   layer.texture_width = kWidth;
   layer.texture_height = kHeight;
   layer.rect[0] = 0;

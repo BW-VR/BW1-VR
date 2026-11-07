@@ -90,22 +90,16 @@ These items come before the other work.
   the white people are in `headset-checks.md`, "Play as normal and send the
   log". The invisible body after the
   quest has no known cause yet.
-- **B43. The Storm cloud is a flat grey band.** In the eye pictures the
-  cloud of a Storm is a flat grey band with straight edges, also with
-  `cloud_pole_pct=0`. The game draws the cloud as many particles (type 106,
-  `PARTICLE_TYPE_STORM_CAST`, the rules `UR_StormCast` and
-  `UR_CloudGather`), so the plain game has no flat band. The band is made
-  of sky clouds of the storm: with the sky clouds hidden it goes and the
-  red sky shows. The engine flattens a sky cloud near the horizon of the
-  eye, and the eye of the God view is low and near those clouds.
-  `cloud_round_near=1000` keeps a sky cloud round nearer than 1000 units,
-  and a desktop run showed the band gone. The clouds of the storm hang 6 to
-  20 units from the eye, so round they are dark masses at the face. A sky
-  cloud now fades by the gap from the eye to its surface in the room
-  (`cloud_fade_near_cm=15`, `cloud_fade_far_cm=60`, `backend.md`,
-  "Clouds"). Open: a run that shows the storm with the fade, with no fade
-  and with `cloud_round_near=0` (`miracle_run.ps1 -Kind storm`). Only a
-  headset can show the look of the clouds overhead in depth.
+- **B43. The clouds of a Storm in the God view.** The game flattens a sky
+  cloud near the horizon of the eye, and the eye of the God view is low and
+  near the clouds of a Storm, so they made a flat grey band.
+  `cloud_round_near=1000` keeps a near sky cloud round, and
+  `cloud_fade_near_cm=15` with `cloud_fade_far_cm=60` clears a cloud near
+  the eye (`backend.md`, "Clouds"). A desktop run shows no band. Late in the
+  storm a round cloud that is half clear lies over the Temple. With
+  `cloud_round_near=0` and the fade, only a thin band shows at the horizon.
+  Open: the owner chooses the look in the headset (round clouds or flat
+  clouds, each with the fade).
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view

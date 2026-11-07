@@ -491,9 +491,9 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the circle, the cast, and the storm under the
   hand (`miracle_circle_hand`): a grey cloud in front of the Hand, and a
   dark sky.
-- **To prove.** The shape of the cloud near the head (`miracles.md`, "The
-  cloud of a Storm"). The game draws the cloud as many particles, so a flat
-  band is a fault (B43).
+- **The owner's choice.** The look of the clouds over and near the head
+  (B43): round clouds that clear near the eye (the default), or the flat
+  clouds of the game that clear near the eye (`cloud_round_near=0`).
 
 ### Spiritual Shield ("Sanctuary")
 

@@ -102,6 +102,22 @@ inline const char* ModelOfProfile(const char* profile, const char* system) {
   return nullptr;
 }
 
+// The side of a normal for the simpler body: 0 to 5, the axis of the largest
+// part of the normal (x, y, z) times 2, plus 1 when that part is negative.
+// Two opposite normals always have different sides. The two faces of a thin
+// part (a ring, a strap) then stay in different cells, so the body keeps its
+// thickness and each face keeps its own normal for the outline.
+inline int NormalSide(const float n[3]) {
+  const float ax = fabsf(n[0]), ay = fabsf(n[1]), az = fabsf(n[2]);
+  int axis = 0;
+  if (ay > ax && ay >= az) {
+    axis = 1;
+  } else if (az > ax && az > ay) {
+    axis = 2;
+  }
+  return axis * 2 + (n[axis] < 0.0f ? 1 : 0);
+}
+
 // The node names that can hold a control of the drawing of the page
 // Controls (controller_art::kFirst to kPad), in the order to try them. Each
 // name is a base: the node is base + "_pressed_value". The left Touch

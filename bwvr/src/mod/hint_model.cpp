@@ -57,6 +57,11 @@
 //                         drawn pictures of the buttons. A hand with no
 //                         model has the cards of 1. Ctrl Shift H switches it,
 //                         with test_keys=1
+//   hint_body_fine=1      1 the simpler body of a heavy model has cells of
+//                         3.4 mm at most, and a cell for each side of the
+//                         normal, so the ink outline of a thin part does not
+//                         break. 0 the cells grow until the body has 2500
+//                         triangles, with one cell for all the normals
 //   hint_model_test       a test key: the folder of a model (for example
 //                         valve-index) for both hands, in place of the one of
 //                         the profile
@@ -114,6 +119,7 @@ namespace art = controller_art;
 bool g_read = false;
 int g_style = 2;          // hint_style, and its test key
 bool g_test_keys = false;
+bool g_body_fine = true;  // hint_body_fine
 char g_test_model[64] = "";
 char g_dir[MAX_PATH] = "";
 
@@ -140,6 +146,7 @@ void ReadSettings() {
                                                    ini));
   if (g_style != 1) g_style = 2;
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, ini) != 0;
+  g_body_fine = GetPrivateProfileIntA("bwvr", "hint_body_fine", 1, ini) != 0;
   GetPrivateProfileStringA("bwvr", "hint_model_test", "", g_test_model,
                            sizeof(g_test_model), ini);
   char dir[MAX_PATH] = "";
@@ -297,7 +304,14 @@ void InputOf(const char* name, int* input, int* axis) {
 // triangle with two corners in one cell goes. The cell starts at 2 mm and
 // grows by 30 percent until the body has kBodyTriangles or less. The lit
 // parts keep all their detail.
+//
+// With hint_body_fine=1 the cell stops at kMostCellM (2, 2.6 and 3.4 mm),
+// also when the body then has more triangles, and a cell is also for one
+// side of the normal (hint_model::NormalSide). A larger cell, or one cell
+// for the two faces of a thin part (a ring, a strap), makes the part one
+// sheet with a mean normal of almost zero, and its ink outline breaks.
 const int kBodyTriangles = 2500;
+const float kMostCellM = 0.0034f;  // with hint_body_fine=1
 
 bool BodyPart(const Model& m, int p) {
   return !m.part_moving[p] && m.node[m.part[p].node].owner < 0;
@@ -329,10 +343,15 @@ void SimplifyBody(Model* m) {
           continue;
         }
         const float* g = &m->grip_pos[v * 3];
+        // 8 bits of the part, 3 of the side and 17 for each axis (cells of
+        // 2 mm or more, so more than 100 m each way).
         uint64_t key = static_cast<uint64_t>(p) & 0xFF;
+        key = (key << 3) |
+              static_cast<uint64_t>(
+                  g_body_fine ? hm::NormalSide(&m->grip_nrm[v * 3]) : 0);
         for (int a = 0; a < 3; ++a) {
-          const int64_t c = static_cast<int64_t>(floorf(g[a] / cell)) + (1 << 17);
-          key = (key << 18) | (static_cast<uint64_t>(c) & 0x3FFFF);
+          const int64_t c = static_cast<int64_t>(floorf(g[a] / cell)) + (1 << 16);
+          key = (key << 17) | (static_cast<uint64_t>(c) & 0x1FFFF);
         }
         auto found = cells.find(key);
         if (found == cells.end()) {
@@ -351,6 +370,7 @@ void SimplifyBody(Model* m) {
       if (a != b && b != c && a != c) ++kept;
     }
     if (kept <= kBodyTriangles) break;
+    if (g_body_fine && cell * 1.3f > kMostCellM) break;
   }
   // The new vertices: each part in its order, a body part as its cells.
   std::vector<float> sum_pos(clusters * 3, 0.0f), sum_nrm(clusters * 3, 0.0f);
@@ -897,10 +917,12 @@ void TakeLoad(int side) {
   ModLog("hint model   : the model %s of the %s hand loaded in %.1f ms on a "
          "thread: %d nodes, %d meshes, %d vertices (%d in the file), %d "
          "triangles, the body %d triangles (%d in the file, cells of %.1f "
-         "mm), a box of "
+         "mm%s), a box of "
          "%.1f by %.1f by %.1f cm. The controls with a node: %s", m.id, name,
          load.ms, m.nodes, m.parts, m.vertices, m.read_vertices,
          m.triangles, m.body_kept, m.body_read, m.body_cell * 1000.0f,
+         m.body_cell > 0.0f && g_body_fine ? ", hint_body_fine"
+                                            : "",
          (m.high[0] - m.low[0]) * 100.0f, (m.high[1] - m.low[1]) * 100.0f,
          (m.high[2] - m.low[2]) * 100.0f, controls);
 }

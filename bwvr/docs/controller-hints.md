@@ -1682,6 +1682,7 @@ shows each card. The controller and the lines are in the eye pictures.
 | Key of `bwvr.ini` | Default | Meaning |
 | --- | --- | --- |
 | `hint_style` | 2 | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3), with the pictures of the buttons (9.13). The launcher row "Hints with the controller" |
+| `hint_body_fine` | 1 | 1 the simpler body of a heavy model has cells of 3.4 mm at most and a cell for each side of the normal, so the ink outline of a thin part (a ring, a strap) does not break. 0 the cells grow until the body has 2500 triangles, with one cell for all the normals |
 | `hint_model_test` | empty | Test key. The folder of a model for both hands, for example `valve-index`, in place of the model of the profile |
 | `hint_model_test_dir` | empty | Test key. The folder of the models. Empty is `bwvr-controllers` beside `runblack.exe`. `desk_test.ps1` sets `bwvr\assets\controllers` of its worktree |
 
@@ -1715,12 +1716,26 @@ a part (Touch v3: 12111 vertices in the file, 4048 after the weld; Touch v2:
 10005 and 2270; Vive Cosmos: 14838 and 10001; Vive wand: 17551 and 15190),
 and keeps each vertex, its normal and its corner of the outline in the grip
 space. A body with more than 2500 triangles gets a simpler mesh at the load:
-its vertices go into cells of a grid (from 2 mm, 30 percent larger each step,
+its vertices go into cells of a grid (2 mm, then 30 percent larger each step,
 until it has 2500 triangles or less), one vertex for each cell at the mean
-place and normal. The lit parts and the parts that move keep all their
-detail. The Vive wand body has 14288 triangles in the file and 1930 after,
-the Vive Cosmos 15740 and 1702, the Index 7213 and 2130, the Touch v3 4341 and
-2411. The load line gives both counts and the cell. A frame computes again
+place and normal. With `hint_body_fine=1` the cell stops at 3.4 mm, and each
+cell is also for one side of the normal (the largest axis of the normal and
+its sign, `NormalSide`). Two opposite normals are never in one cell, so the
+two faces of a thin part (the ring of a Touch v3 or a Cosmos, the strap of
+an Index) stay apart. With one cell for both faces, or a cell larger than
+the part is thick, the part becomes one sheet with a mean normal of almost
+zero, and its outline breaks. The lit parts and the parts that move keep
+all their detail. The body in the file and after the load:
+
+| Model | In the file | `hint_body_fine=1` | `hint_body_fine=0` |
+| --- | --- | --- | --- |
+| Vive wand | 14288 | 6853 (cells of 3.4 mm) | 1930 (7.4 mm) |
+| Vive Cosmos | 15740 | 6934 (3.4 mm) | 1702 (7.4 mm) |
+| Index | 7213 | 4333 (3.4 mm) | 2130 (5.7 mm) |
+| Touch v3 | 4341 | 3104 (3.4 mm) | 2411 (4.4 mm) |
+| Touch Plus | 3163 | 2345 (2 mm) | 2221 (2 mm) |
+
+The load line gives both counts and the cell. A frame computes again
 only the vertices of the parts that a press
 moves, and the color of each vertex from a table of the light. Each eye puts
 each corner on the screen once, with one matrix from the grip space to the
@@ -1728,12 +1743,12 @@ camera, and the triangles go to compact lists, so each draw sends only the
 vertices that it uses. The cost of a frame is the build and all its eye
 passes, and the next build closes it. The log line gives the vertices that
 the draws sent. The triangles
-of a hand: Touch Plus 4470, Touch Pro 4106, Touch v3 5831, Touch v2 3335,
-Index 8933, Vive wand 17344, Vive Cosmos 18476, Vive Focus 3 4619, HP 6716,
-Windows Mixed Reality 6006, Pico 4 4525, the controller with only a trigger
-3814. The goal is under 0.3 ms a frame for two controllers and four cards.
-The Vive wand and the Vive Cosmos have four times the triangles of the
-Touch Plus, so they cost more.
+of a hand after the load, with `hint_body_fine=1`: Touch Plus 3652, Touch
+Pro 3201, Touch v3 4594, Touch v2 3335, Index 6053, Vive wand 9909, Vive
+Cosmos 9670, Vive Focus 3 3444, HP 4826, Pico 4 3835, the controller with
+only a trigger 2682. The goal is under 0.3 ms a frame for two controllers and four cards.
+The Vive wand and the Vive Cosmos have almost three times the triangles of
+the Touch Plus, so they cost more.
 
 **Tests.** The math test (`hint_model_checks.h`): the model of each profile
 and headset name, the nodes of each control, the control of each word, the
@@ -1744,7 +1759,9 @@ inner edge of its card as it is turned, and each card is less than 1 degree
 off its own line of sight. A test program outside
 the game loaded each model with `hint_model.cpp`, placed four cards and drew
 the controllers on the CPU: each model loads, and its lit parts are the
-trigger, the grip and A.
+trigger, the grip and A. It also drew each model with `hint_body_fine` at 1
+and 0 and with no simpler body: at 1 the outlines of the rings and the
+strap are continuous, as with no simpler body.
 
 The desktop runs: `hand_run.ps1 -Kind hints` holds both fake controllers
 as a player holds them (the grips turned 60 degrees up), 40 cm ahead and

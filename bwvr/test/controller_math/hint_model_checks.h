@@ -80,6 +80,26 @@ inline void HintModelChecks() {
   Check(none, "no profile yet, and an unknown profile, give no model (the "
         "cards of hint_style=1)", none, 1);
 
+  // THE SIDE OF A NORMAL in the simpler body: two opposite normals never
+  // share a side, and a normal near an axis has the side of that axis.
+  uint32_t side_seed = 77;
+  int opposite_same = 0;
+  for (int i = 0; i < 2000; ++i) {
+    float n[3] = {Random(&side_seed) * 2.0f - 1.0f,
+                  Random(&side_seed) * 2.0f - 1.0f,
+                  Random(&side_seed) * 2.0f - 1.0f};
+    const float back[3] = {-n[0], -n[1], -n[2]};
+    if (hm::NormalSide(n) == hm::NormalSide(back)) ++opposite_same;
+  }
+  Check(opposite_same == 0, "two opposite normals always have different "
+        "sides, so the two faces of a thin part stay apart", opposite_same, 0);
+  const float px[3] = {0.9f, 0.3f, -0.2f}, ny[3] = {0.1f, -0.95f, 0.2f};
+  const float pz[3] = {0.0f, 0.0f, 1.0f}, nz[3] = {0.4f, 0.4f, -0.8f};
+  const bool sides = hm::NormalSide(px) == 0 && hm::NormalSide(ny) == 3 &&
+                     hm::NormalSide(pz) == 4 && hm::NormalSide(nz) == 5;
+  Check(sides, "a normal near an axis has the side of that axis and its sign",
+        sides, 1);
+
   // THE NODES OF EACH CONTROL.
   const char* bases[hm::kMostBases];
   const bool nodes =

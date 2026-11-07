@@ -120,6 +120,14 @@ struct CardLayer {
   float orientation[4];  // x y z w, the front of the quad is its +z side
   float width;           // meters
   float height;
+  // A number that changes with each new picture in `pixels`
+  // (XrScreen::NewCardSerial). 0 when the card does not say: then a copy of
+  // the pixels for the view for videos goes out at each present.
+  uint32_t serial;
+  // The picture is a panel in the room of panel_kit (the panel of places,
+  // the settings window, the debug window, the welcome page) on the quad of
+  // this card, for the report of the view for videos.
+  bool room_panel;
 };
 
 // THE CUT SCENE WINDOW of one frame (docs/cutscene-window.md). All poses are
@@ -188,6 +196,8 @@ struct VideoQuad {
   const uint8_t* pixels;
   uint64_t view;
   uint32_t view_format;
+  uint32_t serial;  // as CardLayer::serial
+  bool room_panel;  // as CardLayer::room_panel
   // A panel quad: the VkImage of the panel (SetPanelVulkan), 0 when the
   // panel went out from a texture of Direct3D 11.
   uint64_t panel_image;
@@ -459,6 +469,9 @@ class XrScreen {
   // go back to the eye pictures.
   static void StageCard(int card, const CardLayer& layer);
   static bool CardFailed(int card);
+  // A new number for CardLayer::serial, for a card that drew a new picture.
+  // Each call on each thread gives a new number, never 0.
+  static uint32_t NewCardSerial();
   // THE CARD OF A LONG WAIT. A frame thread that will give no frame for a
   // time (a save of the game) puts a card into the layers that the hold
   // sends again (SetHoldMs), in place of that card of the last frame. So the

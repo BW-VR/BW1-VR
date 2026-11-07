@@ -377,12 +377,9 @@ that moves while the Hand takes it.
     `vk window` and `vk video` of the report. The session path of the quad
     layers (the copy of each card on the GPU, the panel quads of
     `ui_panel=1`, a screen in the room) has run in no session.
-  - With no headset the view copies the pixels of each card from the CPU.
-    A panel of 1024 by 1024 (the panel of places, the settings window) is
-    4 MB a present, and the present then costs about 0.3 ms more on the
-    frame thread and 1.1 ms more on the GPU. Copy only the part of a card
-    that changed, or copy it on a change only.
-  - The report counts the panel of places as a card, not as a panel.
+  - With no headset the hint cards, the subtitle card, the keyboard (1.5
+    MB) and the bubble card give no number of their picture, so the view
+    copies them from the CPU at each present (`video_view_copy_changed`).
 - **P9. The pointer on the interface panel**, and the screens with no
   scene (menus, loading, videos) on a panel in the room (`ui-layer.md`).
 - **P10. The tabletop mode** (play mode 3) is a test mode, on hold. Not built: a
@@ -497,13 +494,13 @@ keeps the mod as it is.
   31.25 s), 500 to 532 ms after its play, with a wait of 20.3 to 21.0 ms.
   So at the start only, not in play. Open: whether a play has more of them
   (the log of a play shows it, `headset-checks.md`).
-- **F26. The first picture of the panel of places costs 11 ms.** The warm
-  of the fonts draws with DrawTextW (`controller-hints.md`, 9.11, "The
-  first draw of a font"). With it, the first pictures in a desktop run take
-  1.2 ms (the hint card), 2.5 ms (the spell book, 0.7 ms of text), 6.2 ms
-  (the ring) and 11.2 ms (the panel of places, its page 4.8 ms). The panel
-  draws its page and its 42 parts in its first picture. Open: draw the
-  page and the plain parts before the panel opens, off the game thread.
+- **F26. The rows of the settings window at its first open.** The warm
+  draws the page and the parts of the panel of places, and the page and the
+  tabs of the settings window (`panel_warm`, `controller-hints.md`, 9.11,
+  "The warm of the panels"). The rows of the window hold the values of now,
+  so its first picture still draws them on the frame thread. Open: the cost
+  of that first picture in a desktop run, and a warm of the rows of the
+  first group if it is large.
 
 ### Faults of the plain game
 

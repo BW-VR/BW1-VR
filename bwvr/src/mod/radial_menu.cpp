@@ -1170,6 +1170,8 @@ uint8_t g_staged[kSize * kSize * 4];
 Look g_drawn;
 bool g_have_drawn = false;
 float g_staged_fade = -1.0f;
+// The number of the staged picture (bwvr::CardLayer::serial).
+uint32_t g_staged_serial = 0;
 int g_saved = 0;
 
 bool RasterStart() {
@@ -2109,6 +2111,7 @@ void Stage(float fade) {
       g_staged[i] = static_cast<uint8_t>((g_base[i] * scale) >> 8);
     }
   }
+  g_staged_serial = bwvr::XrScreen::NewCardSerial();
   const double ms = (NowSeconds() - start) * 1000.0;
   if (ms > g_stage_ms) g_stage_ms = ms;
 }
@@ -2552,6 +2555,7 @@ void RadialMenuFrame() {
   for (int i = 0; i < 4; ++i) layer.orientation[i] = g_plane.orientation[i];
   layer.width = size;
   layer.height = size;
+  layer.serial = g_staged_serial;
   bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
 }
 

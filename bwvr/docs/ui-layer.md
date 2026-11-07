@@ -2256,6 +2256,13 @@ look (set, not set) are drawn the first time that they show, and the mod
 keeps a copy of the box. A new picture copies the box of each part whose
 look changed. The note is drawn again each time that it changes.
 
+**The warm.** With `panel_warm=1` (the default) the thread of the warm of
+the fonts also draws the page, each button plain and dim, and each seal in
+its two looks, at the start of the game (`controller-hints.md`, 9.11, "The
+first draw of a font"). That is 82 parts. So the first picture of the panel
+copies its parts and draws only the note. With `panel_warm=0` the first
+picture draws the page and each part on the frame thread.
+
 The panel uses the quad layer of the ring (`kCardRing`), 1024 by 1024
 pixels, as the ring does. The ring and the panel never show at one time.
 
@@ -2265,6 +2272,7 @@ pixels, as the ring does. The ring and the panel never show at one time.
 | --- | --- | --- |
 | `places_panel` | 1 | 1: page 2 of the ring as made has the item `places`, and it opens the panel. 0: page 2 has `mark_set`, `mark_go` and `mark_back`, and the word `places` is an empty slot |
 | `places_close_buttons` | 1 | 1: B of the pointing hand and the menu button close the panel. 0: they do not, and B can start a gesture |
+| `panel_warm` | 1 | 1: the thread of the warm of the fonts draws the page and the parts of the first picture at the start (22.4, "The warm"). 0: the first picture draws them on the frame thread. The warm needs `font_warm=1` and `hint_card_style=1` |
 | `hint_card_style` | 1 | 1: the panel is a page of parchment. 0: the dark panel |
 | `places_panel_test_save` | 0 | Test key. N saves the first N new pictures of the panel as `bwvr-places-FFFFF.bmp` over a checkerboard (FFFFF is the frame) |
 | `places_test_buttons` | | Test key. The buttons for the word `aimplaces` of the scripted controller, in order: `temple`, `creature`, `town`, `land`, `back`, `close`, and `go`, `set`, `follow`, `remove` with the number, for example `set3,land,go3` |
@@ -2438,6 +2446,13 @@ scroll copies rows, and a change under the ray draws one or two rows. The
 note is drawn one time for each switch and laid over the rows again after a
 change. The scroll bar and the bottom row are drawn when they change.
 
+**The warm.** With `panel_warm=1` the thread of the warm of the fonts also
+draws the page, and the tabs and Close as a first picture shows them: the
+first group on, the other tabs plain. It does this for the settings
+(`settings_panel=1`) and for the debug switches (`debug_menu=1`). The rows
+hold the values of now, so the first picture draws them on the frame
+thread, with the title and the bottom row.
+
 Costs in a desktop run: the first picture 31 ms (the first draw of each
 letter by GDI), a change under the ray 0.4 to 0.9 ms, and 1.8 to 1.9 ms
 while a note shows (the note is laid over the rows again), a frame of a
@@ -2456,6 +2471,7 @@ the note.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `debug_window` | 1 | With `debug_menu=1`: 1 the item `debug` opens the window. 0 it goes to the debug pages of the ring |
+| `panel_warm` | 1 | 1: the thread of the warm of the fonts draws the page and the tabs of the first picture at the start (23.3, "The warm"). 0: the first picture draws them on the frame thread |
 | `hint_card_style` | 1 | 1: the parchment. 0: the dark window |
 | `debug_window_test_save` | 0 | Test key. N saves the first N pictures of the window with a new group, a new value, a note or a scroll of 3 rows as `bwvr-debugwin-FFFFF.bmp` over a checkerboard |
 | `debug_test_parts` | | Test key. The parts for the word `aimdebug` of the scripted controller: `tab3`, `row5`, `left5`, `right5` (from 0), `thumb`, `trackend` and `close` |

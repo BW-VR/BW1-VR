@@ -14,6 +14,11 @@ bool SettingsPanelOn();
 // in front of the head. False when the head has no pose yet.
 bool SettingsPanelOpenFromRing();
 
+// The rows of the settings window, for the warm of the window
+// (DebugWindowWarm).
+struct WindowRows;
+const WindowRows* SettingsPanelRows();
+
 // THE WELCOME PAGE. controllers.cpp calls these as it calls the functions
 // of the debug window (debug_window.h).
 

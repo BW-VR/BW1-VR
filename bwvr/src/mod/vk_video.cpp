@@ -44,10 +44,15 @@ VkPipeline g_pipelines[kFormats] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 vk::Image g_white = {};
 bool g_white_ready = false;
 // THE PIXELS OF THE CPU: an image for each card, and a buffer for each
-// slot.
+// slot. Each image keeps what its last copy came from: the pixels, the
+// number of the picture and the part. A draw of the same picture uses the
+// image with no copy.
 const int kCards = 8;
 vk::Image g_cards[kCards] = {};
 bool g_card_written[kCards] = {};
+const uint8_t* g_card_pixels[kCards] = {};
+uint32_t g_card_serial[kCards] = {};
+int32_t g_card_rect[kCards][4] = {};
 vk::Buffer g_stage[kVkVideoSlots] = {};
 
 // For the report.
@@ -55,6 +60,7 @@ uint64_t g_composes = 0;
 uint64_t g_draws = 0;
 uint64_t g_uploads = 0;
 uint64_t g_upload_bytes = 0;
+uint64_t g_kept = 0;  // draws of a picture that the image of the card had
 uint64_t g_ticks = 0;  // the time of VkVideoCompose on the frame thread
 uint64_t g_skipped = 0;  // draws with no texture
 
@@ -276,14 +282,35 @@ vk::Image* CardImage(int card, uint32_t width, uint32_t height) {
   return &image;
 }
 
+// True when the image of the card holds the picture of the draw: the draw
+// gives the number of its picture (VideoDraw::serial), and the last copy
+// came from the same pixels, number, part and size.
+bool Kept(const VideoDraw& d) {
+  if (d.serial == 0 || d.card < 0 || d.card >= kCards) return false;
+  const vk::Image& image = g_cards[d.card];
+  return g_card_written[d.card] && image.image != VK_NULL_HANDLE &&
+         image.width == d.texture_width && image.height == d.texture_height &&
+         g_card_pixels[d.card] == d.pixels &&
+         g_card_serial[d.card] == d.serial &&
+         memcmp(g_card_rect[d.card], d.rect, sizeof(d.rect)) == 0;
+}
+
 // THE PIXELS OF THE CPU of each such draw go into the buffer of the slot,
-// and from there into the image of the card. Writes the view of each draw
-// into views (VK_NULL_HANDLE for a draw that cannot have its texture).
+// and from there into the image of the card. A draw whose picture the image
+// has already (Kept) uses the image with no copy. Writes the view of each
+// draw into views (VK_NULL_HANDLE for a draw that cannot have its texture).
 void Upload(VkCommandBuffer cb, int slot, const VideoDraw* draws, int count,
             VkImageView views[kVideoDraws]) {
   VkDeviceSize bytes = 0;
   for (int i = 0; i < count; ++i) {
-    if (draws[i].source != kVideoPixels) continue;
+    if (draws[i].source != kVideoPixels || draws[i].pixels == nullptr) {
+      continue;
+    }
+    if (Kept(draws[i])) {
+      views[i] = g_cards[draws[i].card].view;
+      ++g_kept;
+      continue;
+    }
     bytes += static_cast<VkDeviceSize>(draws[i].rect[2]) * draws[i].rect[3] * 4;
   }
   if (bytes == 0) return;
@@ -299,7 +326,10 @@ void Upload(VkCommandBuffer cb, int slot, const VideoDraw* draws, int count,
   VkDeviceSize offset = 0;
   for (int i = 0; i < count; ++i) {
     const VideoDraw& d = draws[i];
-    if (d.source != kVideoPixels || d.pixels == nullptr) continue;
+    if (d.source != kVideoPixels || d.pixels == nullptr ||
+        views[i] != VK_NULL_HANDLE) {
+      continue;
+    }
     vk::Image* image = CardImage(d.card, d.texture_width, d.texture_height);
     if (image == nullptr) continue;
     const int32_t x = d.rect[0], y = d.rect[1], w = d.rect[2], h = d.rect[3];
@@ -328,6 +358,9 @@ void Upload(VkCommandBuffer cb, int slot, const VideoDraw* draws, int count,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
     g_card_written[d.card] = true;
+    g_card_pixels[d.card] = d.pixels;
+    g_card_serial[d.card] = d.serial;
+    memcpy(g_card_rect[d.card], d.rect, sizeof(d.rect));
     views[i] = image->view;
     offset += static_cast<VkDeviceSize>(row) * h;
     ++g_uploads;
@@ -487,12 +520,14 @@ void VkVideoReport() {
                         : 0.0;
   ModLog("vk video     : %llu windows with quad layers, %llu quads drawn, "
          "%llu with no texture, %llu copies of the pixels of the CPU "
-         "(%.1f KB each), %.3f ms on the frame thread for each window",
+         "(%.1f KB each), %llu draws with no copy because the picture did "
+         "not change, %.3f ms on the frame thread for each window",
          g_composes, g_draws, g_skipped, g_uploads,
          g_uploads > 0 ? static_cast<double>(g_upload_bytes) / 1024.0 /
                              static_cast<double>(g_uploads)
                        : 0.0,
-         ms);
+         g_kept, ms);
   g_composes = g_draws = g_skipped = g_uploads = g_upload_bytes = 0;
+  g_kept = 0;
   g_ticks = 0;
 }

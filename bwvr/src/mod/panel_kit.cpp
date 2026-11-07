@@ -194,7 +194,7 @@ void PointOf(const Room& room, float u, float v, float out[3]) {
 }
 
 bool StageLayer(const Room& room, const uint8_t* pixels, int width,
-                int height) {
+                int height, uint32_t serial) {
   if (bwvr::XrScreen::CardFailed(bwvr::kCardRing)) return false;
   bwvr::CardLayer layer = {};
   layer.visible = true;
@@ -209,6 +209,8 @@ bool StageLayer(const Room& room, const uint8_t* pixels, int width,
   for (int i = 0; i < 4; ++i) layer.orientation[i] = room.panel.orientation[i];
   layer.width = room.panel.width;
   layer.height = room.panel.height;
+  layer.serial = serial;
+  layer.room_panel = true;
   bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
   return true;
 }
@@ -599,6 +601,26 @@ int CardStyle(int ini) {
   const int live = HintCardStyleValue();
   if (live >= 0) return live != 0 ? 1 : 0;
   return ini != 0 ? 1 : 0;
+}
+
+bool WarmOn() {
+  static int on = -1;
+  if (on >= 0) return on != 0;
+  on = 1;
+  char path[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash != nullptr && strlen(path) + 9 < MAX_PATH) {
+    strcpy_s(slash + 1, MAX_PATH - (slash + 1 - path), "bwvr.ini");
+    on = GetPrivateProfileIntA("bwvr", "panel_warm", 1, path) != 0 ? 1 : 0;
+  }
+  ModLog("panel kit    : panel_warm=%d: %s", on,
+         on != 0 ? "the thread of the warm draws the page and the parts of "
+                   "the first picture of the panel of places and of the "
+                   "settings window"
+                 : "each panel draws its page and its parts in its first "
+                   "picture, on the frame thread");
+  return on != 0;
 }
 
 }  // namespace panel_kit

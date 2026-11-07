@@ -45,7 +45,10 @@
 // THE BAKE. The page with the title is drawn one time. Each button in each
 // of its looks, and each seal, is drawn the first time that it shows, and a
 // copy of its box is kept. A new picture copies the box of each part whose
-// look changed. Only the note is drawn each time that it changes.
+// look changed. Only the note is drawn each time that it changes. With
+// panel_warm=1 the thread of the warm of the fonts draws the page, each
+// button plain and dim and each seal in its two looks at the start
+// (PlacesPanelWarm), so the first picture copies them.
 //
 // THE PICTURE uses the quad layer of the ring (kCardRing): the ring and the
 // panel never show at one time.
@@ -59,6 +62,9 @@
 //                             close the panel (controllers.cpp). 0: they do
 //                             not
 //   hint_card_style=1         1: the parchment. 0: the dark panel
+//   panel_warm=1              1: the thread of the warm draws the page and
+//                             the parts of a first picture. 0: the first
+//                             picture draws them on the frame thread
 //   places_panel_test_save=0  N: saves the first N new pictures of the panel
 //                             as bwvr-places-<frame>.bmp (a test key)
 //   places_test_buttons       a test key: the buttons for the word
@@ -72,6 +78,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "../vr/xr_screen.h"
 #include "card_scroll.h"
 #include "controllers.h"
 #include "cutscene_window.h"
@@ -279,6 +286,7 @@ struct Look {
 };
 Look g_drawn;
 bool g_have_drawn = false;
+uint32_t g_serial = 0;  // the number of the picture (panel_kit::StageLayer)
 
 kit::Canvas g_canvas = {};
 kit::Tiles g_button_tiles = {};
@@ -649,7 +657,9 @@ void PlacesPanelFrame() {
   if (pressed >= 0) Act(pressed, frame);
   if (!g_room.open) return;
 
-  // The picture of this frame.
+  // The picture of this frame. The thread of the warm can have the canvas
+  // (PlacesPanelWarm).
+  card_scroll::WarmWait();
   if (!kit::Start(&g_canvas, kWidth, kHeight, "places      ")) return;
   Look look;
   BuildLook(&look);
@@ -676,6 +686,7 @@ void PlacesPanelFrame() {
   }
   g_drawn = look;
   g_have_drawn = true;
+  if (fresh) g_serial = bwvr::XrScreen::NewCardSerial();
   if (fresh && g_saved < g_save) {
     ++g_saved;
     char name[24];
@@ -683,9 +694,47 @@ void PlacesPanelFrame() {
            frame, ButtonName(g_room.hover, name, sizeof(name)));
     EyeCaptureSaveUi("places", frame, 1, pixels, kWidth * 4, kWidth, kHeight);
   }
-  if (!kit::StageLayer(g_room, pixels, kWidth, kHeight)) {
+  if (!kit::StageLayer(g_room, pixels, kWidth, kHeight, g_serial)) {
     Close("the runtime refused the layer of the ring", false);
   }
+}
+
+void PlacesPanelWarm() {
+  char path[MAX_PATH];
+  if (!IniPath(path) ||
+      GetPrivateProfileIntA("bwvr", "places_panel", 1, path) == 0 ||
+      !kit::WarmOn()) {
+    return;
+  }
+  const double start = NowMs();
+  if (!kit::Start(&g_canvas, kWidth, kHeight, "places      ") ||
+      !ParchmentStart()) {
+    return;
+  }
+  // Each button can show plain or dim in a first picture, and each seal set
+  // or not set.
+  int parts = 0;
+  for (int b = 0; b < kButtons; ++b) {
+    int box[4];
+    ButtonBox(b, box);
+    const int looks[2] = {kit::kPlain, kit::kDim};
+    for (int look : looks) {
+      kit::ShowPart(&g_canvas, &g_button_tiles, b, look, box, &DrawButton,
+                    nullptr);
+      ++parts;
+    }
+  }
+  for (int m = 0; m < kMarks; ++m) {
+    int box[4];
+    SealBox(m, box);
+    for (int set = 0; set < 2; ++set) {
+      kit::ShowPart(&g_canvas, &g_seal_tiles, m, set, box, &DrawSeal, nullptr);
+      ++parts;
+    }
+  }
+  ModLog("places       : panel_warm=1: the thread of the warm drew the page "
+         "and %d parts of the panel in %.1f ms, so the first picture of the "
+         "panel copies them", parts, NowMs() - start);
 }
 
 void PlacesPanelReport() {

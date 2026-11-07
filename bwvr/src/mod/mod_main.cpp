@@ -123,10 +123,16 @@ void HangWatchFrame();
 void ControllerHintsSetOptions(bool on, const char* forced_profile);
 bool ControllerHintsInstall();
 // card_scroll.cpp: the thread that draws the letters of the fonts of the
-// cards one time at the start (font_warm).
+// cards one time at the start (font_warm), and then the page and the parts
+// of the panels (panel_warm).
 namespace card_scroll {
+typedef void (*WarmJob)();
+void WarmAdd(WarmJob job);
 void WarmStart();
 }
+// places_panel.cpp, debug_window.cpp: the jobs of that thread.
+void PlacesPanelWarm();
+void DebugWindowWarm();
 void ControllersSetOptions(bool on, int left_hand, bool haptics,
                            bool swap_buttons);
 void ControllersSetFake(const FakeControllerSettings& fake);
@@ -200,7 +206,7 @@ void ComfortCameraInstall();
 void VignetteSetMode(int mode);
 // video_view.cpp: the view for videos (video_view.h).
 void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
-                         int marks, int layers);
+                         int marks, int layers, int copy_changed);
 // head_blinder.cpp: head_blinder and head_blinder_objects.
 void HeadBlinderSetOn(bool on, bool objects);
 void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
@@ -435,9 +441,9 @@ int g_blink_ms = 0;
 // The comfort vignette: 0 off, 1 gentle, 2 strong (vignette.cpp).
 int g_comfort_vignette = 0;
 // The view for videos (video_view.cpp): video_view, video_view_down_pct,
-// video_view_fov_deg, video_view_smooth_ms, video_view_marks and
-// video_view_layers.
-int g_video_view[6] = {0, 20, 90, 150, 1, 1};
+// video_view_fov_deg, video_view_smooth_ms, video_view_marks,
+// video_view_layers and video_view_copy_changed.
+int g_video_view[7] = {0, 20, 90, 150, 1, 1, 1};
 // The overlay of a head under the land, and in a house, a rock or a tree
 // trunk (head_blinder.cpp).
 bool g_head_blinder = true;
@@ -1117,11 +1123,12 @@ void ReadSettings() {
   // THE VIEW FOR VIDEOS (docs/backend.md, "The view for videos"): a 16:9
   // area of the left eye in the window of the game, for a capture on the PC.
   {
-    const char* const keys[6] = {"video_view",          "video_view_down_pct",
+    const char* const keys[7] = {"video_view",          "video_view_down_pct",
                                  "video_view_fov_deg",  "video_view_smooth_ms",
-                                 "video_view_marks",    "video_view_layers"};
-    const int defaults[6] = {0, 20, 90, 150, 1, 1};
-    for (int i = 0; i < 6; ++i) {
+                                 "video_view_marks",    "video_view_layers",
+                                 "video_view_copy_changed"};
+    const int defaults[7] = {0, 20, 90, 150, 1, 1, 1};
+    for (int i = 0; i < 7; ++i) {
       g_video_view[i] = static_cast<int>(
           GetPrivateProfileIntA("bwvr", keys[i], defaults[i], path));
     }
@@ -1882,7 +1889,8 @@ void StartVrStep() {
     ComfortCameraInstall();
     VignetteSetMode(g_comfort_vignette);
     VideoViewSetOptions(g_video_view[0], g_video_view[1], g_video_view[2],
-                        g_video_view[3], g_video_view[4], g_video_view[5]);
+                        g_video_view[3], g_video_view[4], g_video_view[5],
+                        g_video_view[6]);
     HeadBlinderSetOn(g_head_blinder, g_head_blinder_objects);
     ScriptCameraSetOptions(g_script_camera, g_script_min_distance,
                            g_script_min_height, g_script_close_distance,
@@ -1952,6 +1960,8 @@ void StartVrStep() {
     ControllersInstall();
     ControllerHintsSetOptions(g_controller_hints, g_hint_profile);
     ControllerHintsInstall();
+    card_scroll::WarmAdd(&PlacesPanelWarm);
+    card_scroll::WarmAdd(&DebugWindowWarm);
     card_scroll::WarmStart();
     if (g_controllers) {
       ControllersSetDirect(g_direct_hand);

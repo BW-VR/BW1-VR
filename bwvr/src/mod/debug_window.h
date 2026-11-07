@@ -98,5 +98,11 @@ bool DebugWindowCloseBy(const char* why);
 // the part is not in the view.
 bool DebugWindowTestTarget(float out[3]);
 
+// A job of the thread of the warm of the fonts (card_scroll::WarmAdd), with
+// panel_warm=1: the page of the parchment, and the tabs and Close of the
+// settings (settings_panel=1) and of the debug switches (debug_menu=1), as
+// a first picture shows them.
+void DebugWindowWarm();
+
 // Once a report window.
 void DebugWindowReport();

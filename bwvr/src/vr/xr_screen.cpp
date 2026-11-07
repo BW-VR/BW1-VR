@@ -292,6 +292,8 @@ void VideoCard(int card, const CardLayer& layer, uint64_t view,
   q->pixels = layer.pixels;
   q->view = view;
   q->view_format = view_format;
+  q->serial = layer.serial;
+  q->room_panel = layer.room_panel;
 }
 
 // The walls of a cut scene window with walls.
@@ -2193,6 +2195,13 @@ void XrScreen::StageCard(int card, const CardLayer& layer) {
   if (card < 0 || card >= kCards) return;
   g_staged_card[card] = layer;
   g_have_staged_card[card] = true;
+}
+
+uint32_t XrScreen::NewCardSerial() {
+  static volatile LONG serial = 0;
+  LONG n = InterlockedIncrement(&serial);
+  if (n == 0) n = InterlockedIncrement(&serial);
+  return static_cast<uint32_t>(n);
 }
 
 bool XrScreen::CardFailed(int card) {

@@ -41,6 +41,7 @@ enum When {
 // The settings, in the order of the table.
 enum Id {
   kSnapTurn,
+  kTurnSpeed,
   kTeleport,
   kMoveStick,
   kMoveSpeed,
@@ -71,10 +72,17 @@ struct Setting {
 };
 
 const Setting kTable[kSettings] = {
-    {kSnapTurn, kGroupMoving, "snap_turn", L"Turn in steps", L"Turn in steps",
-     L"Off=0|30 degrees=1|45 degrees=2|90 degrees=3", 2, kNow,
-     L"Push the stick of your Hand left or right to turn in one step. You "
-     L"stay where you are. Off gives the smooth turn of the game."},
+    {kSnapTurn, kGroupMoving, "snap_turn", L"Turn", L"Turn",
+     L"Off=0|30 degrees=1|45 degrees=2|90 degrees=3|Smooth=4", 2, kNow,
+     L"Push the stick of your Hand left or right to turn. You stay where you "
+     L"are. 30, 45 or 90 degrees: one push turns you in one step. Smooth: "
+     L"you turn while you hold the stick, and a larger push turns faster. "
+     L"Off: the stick does not turn you."},
+    {kTurnSpeed, kGroupMoving, "smooth_turn_speed", L"Turn speed",
+     L"Speed of the smooth turn", L"Slow=45|Normal=90|Fast=135|Very fast=180",
+     90, kNow,
+     L"How fast the smooth turn turns you at a full push of the stick. "
+     L"Normal is a quarter turn each second. It acts when Turn is Smooth."},
     {kTeleport, kGroupMoving, "teleport", L"Teleport", L"Teleport",
      L"Off=0|On=1", 1, kNow,
      L"Hold A to aim an arc. Let go of A to go to the ring at its end. B "
@@ -217,11 +225,15 @@ inline void IniText(int value, char* out, size_t size) {
 
 // THE VALUES OF TWO KEYS are a place in a list of the mod (mod_main.cpp):
 // snap_turn 0 to 3 is 0, 30, 45 or 90 degrees, and blink 0 to 2 is 0, 100 or
-// 200 ms. A value out of the list gives the default of the mod.
+// 200 ms. A value out of the list gives the default of the mod. snap_turn 4
+// is the smooth turn of the God view (SnapTurnSmooth). The turns that have
+// no smooth turn (the middle mouse, a view that is not the God view, a room
+// of the Temple) then turn in steps of 45 degrees.
 inline int SnapDegrees(int snap_turn) {
-  static const int kSteps[] = {0, 30, 45, 90};
-  return snap_turn >= 0 && snap_turn < 4 ? kSteps[snap_turn] : 45;
+  static const int kSteps[] = {0, 30, 45, 90, 45};
+  return snap_turn >= 0 && snap_turn < 5 ? kSteps[snap_turn] : 45;
 }
+inline bool SnapTurnSmooth(int snap_turn) { return snap_turn == 4; }
 inline int BlinkMs(int blink) {
   static const int kSteps[] = {0, 100, 200};
   return blink >= 0 && blink < 3 ? kSteps[blink] : 0;

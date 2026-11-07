@@ -304,12 +304,10 @@ keeps the mod as it is.
   stronger.
 **Comfort and moving**
 
-- **F9. A smooth turn in the God view.** "Turn in steps" off
-  (`snap_turn=0`) gives the game's own smooth turn of the turn keys and the
-  middle mouse, but that turn moves only the game camera. The God view does
-  not turn then: a desktop run with `snap_turn=0` showed the same view before
-  and after a push of the stick and a hold of the turn key (`god-view.md`,
-  section 4). A smooth turn of the God view with the stick is not built.
+- **F9. A smooth turn in the God view.** The value Smooth of the row "Turn"
+  (`snap_turn=4`, `smooth_turn_speed`) is built (`god-view.md`, section 4).
+  Open: the desktop runs with a full push and a half push of 1 s, and
+  `snap_turn=2` to show the snap turn.
 - **F11. The controls of the player in the headset.** The settings window,
   the welcome page and the page Controls are in (`ui-layer.md`, 24 and
   24.6, `controllers.md`, 5.7). Open:

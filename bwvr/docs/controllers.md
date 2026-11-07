@@ -1086,7 +1086,8 @@ default. Each control has one job, and one button opens the game menu.
 | `aim_pitch_deg`, `aim_yaw_deg` | 0, 0 | Section 8 |
 | `radial_menu` | 1 | Section 10. The other keys of the ring are in 10.5 |
 | `temple_pointer`, `temple_click`, `temple_camera_follow`, `temple_camera_drag`, `temple_camera_flight`, `temple_pointer_depth_cm`, `temple_turn`, `temple_taps` | see 11.6 | Section 11 |
-| `snap_turn` | 2 | 5.4 |
+| `snap_turn` | 2 | 5.4. 4 is the smooth turn of the God view (`god-view.md`, section 4) |
+| `smooth_turn_speed` | 90 | The degrees a second of the smooth turn at a full push, 10 to 360 (`god-view.md`, section 4). The row "Turn speed" of the settings window. Not in the launcher |
 | `zoom_step` | 2 | 5.4 |
 | `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it does (`god-view.md`, section 5.8). The switch "Menu turn" of the debug page. Not in the launcher |
 | `recenter_hold` | 1 | 1: a hold of 1 s of the stick click of the hand that does not point, with the stick at rest, recenters the view. 2: the stick click of the pointing hand. 0: no hold recenters (`god-view.md`, section 5.8). The switch "Recenter hold" of the debug page. Not in the launcher |
@@ -1142,7 +1143,7 @@ this.
 
 | Motion of the game | What the mod does | Key |
 | --- | --- | --- |
-| The middle mouse turns and tilts smoothly | A turn key, a drag with the middle mouse, or a push of the stick turns the heading by one step in one frame. The position stays. The middle mouse does not tilt | `snap_turn`: 0 off, 1 30 degrees, 2 45 degrees (default), 3 90 degrees |
+| The middle mouse turns and tilts smoothly | A turn key, a drag with the middle mouse, or a push of the stick turns the heading by one step in one frame. The position stays. The middle mouse does not tilt | `snap_turn`: 0 off, 1 30 degrees, 2 45 degrees (default), 3 90 degrees, 4 smooth: in the God view the stick and a held turn key turn the view while they are held (`god-view.md`, section 4), and the other turns go in steps of 45 degrees |
 | A double click flies the camera for about 2.25 s | The flight ends in the same frame | `instant_jumps` (1) |
 | After a land drag the camera glides on for about 0.3 s | The camera follows the drag exactly and stops at the release | `camera_glide` (0) |
 | A wheel click zooms by a small step | One click changes the distance by a fixed ratio. The first click acts at once. Clicks in the next 150 ms join the next step, three at most | `zoom_step`: 0 the step of the game, 1 small (1.12 times), 2 medium (1.20 times, default), 3 large (1.30 times) |

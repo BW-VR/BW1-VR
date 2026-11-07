@@ -130,6 +130,20 @@ inline void SettingsPanelChecks() {
   Check(SnapDegrees(3) == 90 && SnapDegrees(0) == 0 && SnapDegrees(9) == 45,
         "snap_turn 3 is 90 degrees, 0 is off, and a value out of the list is "
         "45", SnapDegrees(3), 90);
+  Check(SnapTurnSmooth(4) && !SnapTurnSmooth(2) && SnapDegrees(4) == 45,
+        "snap_turn 4 is the smooth turn, with steps of 45 degrees where no "
+        "smooth turn is", SnapDegrees(4), 45);
+  {
+    wchar_t word[40];
+    int v = 0;
+    const bool ok = ValueAt(kTable[kSnapTurn].values, 4, word, 40, &v);
+    Check(ok && wcscmp(word, L"Smooth") == 0 && v == 4,
+          "the fifth value of the turn is \"Smooth\", 4", v, 4);
+    Check(IndexOfValue(kTable[kTurnSpeed].values, 90) == 1 &&
+              kTable[kTurnSpeed].fallback == 90,
+          "the turn speed is 90 degrees a second by default, the second value",
+          IndexOfValue(kTable[kTurnSpeed].values, 90), 1);
+  }
   Check(BlinkMs(2) == 200 && BlinkMs(5) == 0,
         "blink 2 is 200 ms, and a value out of the list is no blink",
         BlinkMs(2), 200);

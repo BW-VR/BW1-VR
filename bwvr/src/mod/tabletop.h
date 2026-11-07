@@ -212,6 +212,16 @@ uint64_t TabletopTakeTeleportMoves();
 // by degrees, about the head. The same rule: once, at the next main call.
 bool TabletopGodTurn(int direction, float degrees);
 
+// THE SMOOTH TURN (snap_turn=4): a turn of the God view about the head for
+// the next main camera call, by share (-1 full left to 1 full right) times
+// degrees_per_second times the time of that frame. comfort_camera.cpp asks
+// again for each frame, and a frame with no request turns nothing. False
+// when the God view does not own the view. TabletopGodTakeSmoothTurn gives
+// the degrees that the smooth turn turned since the last call, for the turn
+// events of the tutorial, and their direction.
+bool TabletopGodTurnHold(float share, float degrees_per_second);
+float TabletopGodTakeSmoothTurn(int* direction);
+
 // The game's own camera over the player's place, for comfort_camera.cpp to
 // write after the game's update of the player's camera mode, once for each
 // version. The version goes up each time the player moves the view. False

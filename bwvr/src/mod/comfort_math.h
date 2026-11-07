@@ -1,5 +1,6 @@
 // THE COMFORT OF A MOVE (docs/god-view.md, "The comfort of a move"): the
-// vignette and the recenter hold. Pure functions: no Windows
+// vignette, the smooth turn (section 4) and the recenter hold. Pure
+// functions: no Windows
 // and no game. The checks are in test/controller_math/comfort_checks.h.
 
 #pragma once
@@ -192,6 +193,75 @@ inline int BuildVignette(const VignetteShape& shape, float level, float cx,
     }
   }
   return n;
+}
+
+// --- the smooth turn (snap_turn=4) -----------------------------------------------
+
+// snap_turn 4 is the smooth turn of the God view. 0 to 3 are off and the
+// steps of 30, 45 and 90 degrees.
+const int kSnapTurnSmooth = 4;
+
+// smooth_turn_speed: the degrees a second of a full push. The default is a
+// quarter turn a second, which is also the full turn speed of the vignette
+// (kFullDegreesPerSecond): a full push gives the full darkness, and a half
+// push a lighter edge.
+const int kSmoothTurnDefault = 90;
+const int kSmoothTurnLeast = 10;
+const int kSmoothTurnMost = 360;
+
+inline int SmoothTurnSpeed(int value) {
+  if (value < kSmoothTurnLeast) return kSmoothTurnLeast;
+  return value > kSmoothTurnMost ? kSmoothTurnMost : value;
+}
+
+// THE PUSH. The side axis of the stick, -1 (full left) to 1 (full right), to
+// the share of the full speed, with the same sign. Up to dead the share is 0.
+// From dead to full the part t of the travel goes along the curve
+// t * (1 + t) / 2, and from full on the share is 1. The curve starts at half
+// the slope of a straight line, so a small push gives a slow turn that is
+// easy to hold, and it does not have the dead part at the start that a
+// square (t * t) gives. Half the travel past the dead zone gives 3/8 of the
+// speed.
+inline float SmoothTurnShare(float stick, float dead, float full) {
+  if (!(stick == stick)) return 0.0f;
+  const float a = stick < 0.0f ? -stick : stick;
+  if (!(a > dead)) return 0.0f;
+  float t = 1.0f;
+  if (full > dead && a < full) t = (a - dead) / (full - dead);
+  const float share = t * (1.0f + t) * 0.5f;
+  return stick < 0.0f ? -share : share;
+}
+
+// THE TURN OF ONE FRAME, in degrees (positive to the right): the share times
+// the speed times the time of the frame. The time counts at most cap, so a
+// frame that took long (a load, a stall) does not make a jump. A share of 0
+// or a time that is not above 0 gives exactly 0: the view does not turn.
+inline float SmoothTurnDegrees(float share, float degrees_per_second,
+                               double seconds, float cap) {
+  if (share == 0.0f || !(share == share) || !(seconds > 0.0)) return 0.0f;
+  if (!(degrees_per_second > 0.0f)) return 0.0f;
+  if (share > 1.0f) share = 1.0f;
+  if (share < -1.0f) share = -1.0f;
+  float s = static_cast<float>(seconds);
+  if (s > cap) s = cap;
+  return share * degrees_per_second * s;
+}
+
+// THE TURN EVENTS OF THE HELP (turn_help_degrees). The degrees that the
+// smooth turn turned go into *carried, and each degrees_per_event of them is
+// one turn event of the game's help. 0 or less counts as 45, the step of a
+// snap turn that sends one event. Returns the count of new events.
+inline int SmoothTurnEvents(float* carried, float degrees,
+                            float degrees_per_event) {
+  const float unit = degrees_per_event > 0.0f ? degrees_per_event : 45.0f;
+  if (!(*carried >= 0.0f)) *carried = 0.0f;
+  if (degrees == degrees) *carried += degrees < 0.0f ? -degrees : degrees;
+  int events = 0;
+  while (*carried >= unit && events < 1000) {
+    *carried -= unit;
+    ++events;
+  }
+  return events;
 }
 
 // --- the recenter hold (recenter_hold) -------------------------------------------

@@ -101,6 +101,10 @@ bool HeadCameraStageBasis(float basis_out[9]);
 bool HeadCameraGameCamera(float position[3], float focus[3]);
 // comfort_camera.cpp
 bool ComfortCameraRequestTurn(int direction);
+// The smooth turn of the God view (snap_turn=4): on, and the request of a
+// push of the stick, -1 full left to 1 full right.
+bool ComfortCameraSmoothTurn();
+bool ComfortCameraRequestSmoothTurn(float share);
 // head_pose.cpp: the recenter of F11 and of the headset's own menu.
 void HeadPoseRecenter();
 const void* ComfortCameraLastMode();
@@ -656,6 +660,8 @@ void RightHandCm(float cm[3]) {
 // block below).
 float FakeLeftAimFix();
 
+float FakeStickScale();
+
 void FakeHand(int index, bwvr::HandInput* out) {
   const bool both = g_fake.mode >= 2;
   // The job of this controller in the script: 1 the words of the right hand
@@ -742,6 +748,8 @@ void FakeHand(int index, bwvr::HandInput* out) {
                     (g_held[kStickLeft] ? 1.0f : 0.0f);
     out->stick[1] = (g_held[kStickUp] ? 1.0f : 0.0f) -
                     (g_held[kStickDown] ? 1.0f : 0.0f);
+    out->stick[0] *= FakeStickScale();
+    out->stick[1] *= FakeStickScale();
     out->stick_click = g_held[kStickClick];
     out->primary = g_held[kA];
     out->secondary = g_held[kB];
@@ -1860,6 +1868,14 @@ uint64_t g_god_zooms = 0;
 const float kStickFull = 0.95f;
 bool g_god_zoom_holding = false;
 uint64_t g_god_holds = 0;
+// The smooth turn of the God view (snap_turn=4): the stick to the side past
+// kStickBack turns the view while it is held, at a rate that follows the
+// push along a curve (comfort_math::SmoothTurnShare) and is full from
+// kStickFull. A hold starts with a fresh push only, and it holds only in a
+// pump that asks the God view again.
+bool g_god_turn_holding = false;
+uint64_t g_god_turn_holds = 0;
+uint64_t g_god_turn_refused = 0;
 bool g_other_before[3] = {false};  // B or Y, the menu button, the stick click
 
 // Which owner the test key Ctrl+F12 asks for: automatic, controller only or
@@ -1959,6 +1975,26 @@ bool FakeFront() {
     }
   }
   return on == 1;
+}
+
+// A TEST KEY for desktop runs, fake_controller_stick_pct (100): how far the
+// words of the stick of the right hand push it, in percent of a full push. So
+// a run can push the stick by half (the smooth turn). Read only with the fake
+// controller on.
+float FakeStickScale() {
+  if (g_fake.mode == 0) return 1.0f;
+  static int pct = -1;
+  if (pct < 0) {
+    pct = IniInt("fake_controller_stick_pct", 100);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    if (pct != 100) {
+      ModLog("controllers  : fake_controller_stick_pct=%d (a test). The words "
+             "of the stick of the right hand push it %d%% of a full push",
+             pct, pct);
+    }
+  }
+  return static_cast<float>(pct) * 0.01f;
 }
 
 // THE GAME WINDOW BEHIND (docs/controllers.md, "9. The game window behind"). A
@@ -3610,14 +3646,24 @@ void PumpButtons(ULONGLONG now) {
 // teleport and the grab of the world do not move it then. Each push is
 // refused once and counted, and it must come back before it acts. Outside
 // the God view the push forward and back is a wheel click, which a box can
-// use, so only the turn stops there. With "Turn in steps" off (snap_turn=0)
-// the stick does not turn, and the game's own smooth turn of the turn keys
-// and the middle mouse goes to the game camera only (comfort_camera.cpp).
+// use, so only the turn stops there. With the turn off (snap_turn=0) the
+// stick does not turn, and the game's own smooth turn of the turn keys and
+// the middle mouse goes to the game camera only (comfort_camera.cpp).
+//
+// THE SMOOTH TURN (snap_turn=4). In the God view the stick to the side past
+// kStickBack turns the view while it is held, and the pump asks again on
+// each pass (ComfortCameraRequestSmoothTurn). The larger axis of the stick
+// wins, as for the smooth zoom. A push that the God view, MayTurn, a grab or
+// a dialog box refused, and a hold that stopped because the stick went
+// forward or back, must come back below kStickBack before the stick turns
+// again. Outside the God view the stick turns in steps of 45 degrees.
 uint64_t g_menu_stick_refused = 0;
 
 void PumpStick(ULONGLONG now) {
   const bool was_holding = g_god_zoom_holding;
   g_god_zoom_holding = false;
+  const bool was_turning = g_god_turn_holding;
+  g_god_turn_holding = false;
   if (!Usable()) {
     g_wheel_tick = 0;
     return;
@@ -3630,6 +3676,10 @@ void PumpStick(ULONGLONG now) {
   if (ay < kStickBack || !live) g_god_zoom_armed = true;
   const bool god = TabletopGodOwnsView();
   const bool smooth = god && TabletopGodZoomSmooth();
+  const bool smooth_turn = god && ComfortCameraSmoothTurn();
+  // A push for a snap turn is past kStickPast, and a push for the smooth
+  // turn is past kStickBack.
+  const float turn_past = smooth_turn ? kStickBack : kStickPast;
   const bool menu = Comfort().menu_stops_turn != 0 && MenuUp();
   // No snap turn and no zoom step while a grab holds the world. The two hands
   // turn and zoom then. Each push is refused once and counted. A push for a
@@ -3655,7 +3705,7 @@ void PumpStick(ULONGLONG now) {
     return;
   }
   if (GrabHeld()) {
-    const bool turn = live && g_turn_armed && ax > kStickPast && ax > ay;
+    const bool turn = live && g_turn_armed && ax > turn_past && ax > ay;
     const bool zoom = pushed && !g_zoom_blocked;
     if (turn) g_turn_armed = false;
     // A push that the grab refused must come back before it zooms.
@@ -3673,7 +3723,7 @@ void PumpStick(ULONGLONG now) {
   }
   bool skip_turn = false;
   if (menu) {
-    const bool turn = live && g_turn_armed && ax > kStickPast && ax > ay;
+    const bool turn = live && g_turn_armed && ax > turn_past && ax > ay;
     const bool zoom = god && pushed && g_god_zoom_armed;
     if (turn) g_turn_armed = false;
     if (god && pushed) g_god_zoom_armed = false;
@@ -3692,7 +3742,37 @@ void PumpStick(ULONGLONG now) {
     }
     skip_turn = true;
   }
-  if (!skip_turn && live && g_turn_armed && ax > kStickPast && ax > ay) {
+  if (smooth_turn) {
+    // The rate follows the push.
+    const bool side = live && ax > kStickBack && ax > ay;
+    if (!skip_turn && side && (was_turning || g_turn_armed)) {
+      g_turn_armed = false;
+      const float share = comfort_math::SmoothTurnShare(
+          hand.stick[0], kStickBack, kStickFull);
+      g_god_turn_holding = ComfortCameraRequestSmoothTurn(share);
+      if (g_god_turn_holding && !was_turning) {
+        ++g_god_turn_holds;
+        ++g_turns_asked;
+        Pulse(PointingIndex());
+        if (g_event_logs < kMaxEventLogs) {
+          ++g_event_logs;
+          ModLog("controllers  : the stick starts a smooth turn %s of the God "
+                 "view, %.0f%% of the full speed, frame %llu",
+                 share > 0.0f ? "right" : "left", fabsf(share) * 100.0f,
+                 g_frame);
+        }
+      } else if (!g_god_turn_holding && !was_turning) {
+        ++g_god_turn_refused;
+        if (g_event_logs < kMaxEventLogs) {
+          ++g_event_logs;
+          ModLog("controllers  : the smooth turn of the stick is refused (the "
+                 "turn switch of the game, a fight or a drag of the Hand), "
+                 "frame %llu", g_frame);
+        }
+      }
+    }
+  } else if (!skip_turn && live && g_turn_armed && ax > kStickPast &&
+             ax > ay) {
     g_turn_armed = false;
     ++g_turns_asked;
     ComfortCameraRequestTurn(hand.stick[0] > 0.0f ? 1 : -1);
@@ -5980,6 +6060,12 @@ void ControllersReport() {
     ModLog("controllers  : the stick asked the God view for %llu zoom steps "
            "and %llu smooth zooms", g_god_zooms, g_god_holds);
     g_god_zooms = g_god_holds = 0;
+  }
+  if (g_god_turn_holds != 0 || g_god_turn_refused != 0) {
+    ModLog("controllers  : the stick started %llu smooth turns of the God "
+           "view, and %llu pushes were refused", g_god_turn_holds,
+           g_god_turn_refused);
+    g_god_turn_holds = g_god_turn_refused = 0;
   }
   if (g_menu_stick_refused != 0 || g_recenters != 0) {
     ModLog("controllers  : %llu pushes of the stick were refused while a "

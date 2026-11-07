@@ -266,12 +266,16 @@ const Setting kSettings[] = {
     //  "scenery does not poke through it."},
 
     {kGroup, nullptr, "Moving around", nullptr, 0, nullptr},
-    {kChoice, "snap_turn", "Turn in steps", "Off|30 degrees|45 degrees|90 degrees",
-     2,
+    {kChoice, "snap_turn", "Turn",
+     "Off|30 degrees|45 degrees|90 degrees|Smooth", 2,
      "Push the stick of your Hand left or right, drag sideways with the middle "
-     "mouse button, or press a turn key, to turn in one step. You stay "
-     "where you are. The middle mouse button does not tilt the camera. Off "
-     "gives the smooth turn and tilt of the game."},
+     "mouse button, or press a turn key, to turn. You stay where you are. "
+     "30, 45 or 90 degrees: you turn in one step. Smooth: in the God view you "
+     "turn while you hold the stick or the turn key, and a larger push turns "
+     "faster. The middle mouse button then turns in steps of 45 degrees. The "
+     "middle mouse button does not tilt the camera. Off: the stick does not "
+     "turn you, and the turn keys and the middle mouse button turn and tilt "
+     "the camera of the game."},
     {kValues, "god_zoom_smooth", "Zoom with the stick", "In steps=0|Smooth=1",
      0,
      "In steps: one push of the stick of your Hand forward or back is one zoom "
@@ -1528,7 +1532,8 @@ const char* const kRetiredKeys[] = {
     "fake_controller_script", "fake_controller_points",
     "fake_controller_left_points", "fake_head_right_cm", "fake_head_up_cm",
     "fake_head_forward_cm", "grab_probe", "fake_controller_gestures",
-    "fake_controller_gesture_cm", "fake_controller_front", "hint_profile",
+    "fake_controller_gesture_cm", "fake_controller_front",
+    "fake_controller_stick_pct", "hint_profile",
     "hint_selftest",   "miracle_test_seeds", "miracle_test_cancel",
     "fake_mouse_script", "fake_mouse_step_px", "fake_mouse_x_pct",
     "fake_mouse_y_pct", "fake_mouse_x2_pct", "fake_mouse_y2_pct",

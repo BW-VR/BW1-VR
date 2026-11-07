@@ -371,6 +371,38 @@ struct ZoomProbe {
 int g_god_ground = 0;
 int g_god_turn = 0;
 float g_god_turn_degrees = 45.0f;
+// THE SMOOTH TURN (ApplyGodTurnHold, snap_turn=4). share is the push that
+// the stick or a turn key asked for since the last main camera call (-1
+// full left to 1 full right), rate the degrees a second of a full push, and
+// fresh says that a request came. The rest is the hold that runs: its
+// direction, the heading at its start, the degrees and the time of its
+// frames. help is the degrees that comfort_camera.cpp did not take yet for
+// the turn events of the tutorial. The check after a hold compares the
+// heading kHoldCheckFrames frames after the stop with the heading at the
+// stop.
+struct TurnHold {
+  float share = 0.0f;
+  float rate = 0.0f;
+  bool fresh = false;
+  bool active = false;
+  int direction = 0;
+  float start_heading = 0.0f;
+  float degrees = 0.0f;
+  double seconds = 0.0;
+  uint64_t frames = 0;
+  float help = 0.0f;
+  int help_direction = 0;
+  int check_frames = 0;
+  float check_heading = 0.0f;
+  uint64_t check_version = 0;
+} g_turn_hold;
+uint64_t g_turn_holds = 0;
+// The log has one line for each frame of the first kTurnFrameLogHolds holds,
+// at most kTurnFrameLogFrames frames each: the heading of the view in that
+// frame.
+const uint64_t kTurnFrameLogHolds = 4;
+const uint64_t kTurnFrameLogFrames = 240;
+void StopTurnHold(const char* cause, bool view_stays);
 // THE COMFORT VIGNETTE (vignette.cpp): the view at the end of the last main
 // camera call, so the next call can measure what a grab of the world moved
 // in between. have is false after the view was built again.
@@ -1141,6 +1173,7 @@ bool PlaceGod(const char* cause, const float position[3],
   g_heading = to.heading;
   g_god_zoom = g_god_ground = g_god_turn = 0;
   StopZoomHold("the view went to a camera of the game", false);
+  StopTurnHold("the view went to a camera of the game", false);
   g_tele.pending = false;
   g_pan = {};
   Derive();
@@ -1774,6 +1807,122 @@ float MotionShare(const TablePose& from, const TablePose& to, double seconds) {
                                  Wrap(to.heading - from.heading) * 57.29578f,
                                  to.scale / from.scale,
                                  static_cast<float>(seconds));
+}
+
+// THE END OF A HOLD of the smooth turn: the stick or the turn key came back,
+// or the view cannot turn. A request that waits is dropped. One log line
+// gives the degrees and the time of the frames of the hold, and the heading
+// at the start and at the end. view_stays: the check after the hold starts,
+// so the log shows that the view does not turn on after the stop.
+void StopTurnHold(const char* cause, bool view_stays) {
+  g_turn_hold.fresh = false;
+  g_turn_hold.share = 0.0f;
+  if (!g_turn_hold.active) return;
+  g_turn_hold.active = false;
+  g_turn_hold.check_frames = view_stays ? kHoldCheckFrames : 0;
+  g_turn_hold.check_heading = g_heading;
+  g_turn_hold.check_version = g_god_version;
+  if (!GodLog()) return;
+  const double rate = g_turn_hold.seconds > 0.0
+                          ? g_turn_hold.degrees / g_turn_hold.seconds
+                          : 0.0;
+  ModLog("god view     : the smooth turn stops, %s. It turned %.2f degrees %s "
+         "in %.3f s of %llu frames (%.1f degrees a second), heading %.2f to "
+         "%.2f degrees, frame %llu", cause, fabsf(g_turn_hold.degrees),
+         g_turn_hold.direction > 0 ? "right" : "left", g_turn_hold.seconds,
+         g_turn_hold.frames, fabs(rate),
+         g_turn_hold.start_heading * 57.29578f, g_heading * 57.29578f,
+         ControllersFrameCount());
+}
+
+// THE SMOOTH TURN (snap_turn=4, docs/god-view.md, section 4). While the
+// stick of the pointing hand is held to the side, or a turn key is held, the
+// view turns about the head as a snap turn does (GodTurn), by a small angle
+// in each frame: the share of the push times smooth_turn_speed times the
+// time of the frame, with the cap of the smooth zoom
+// (comfort_math::SmoothTurnDegrees). comfort_camera.cpp gives the request
+// with the tests of a snap turn (TabletopGodTurnHold). A frame with no
+// request turns nothing, so the turn stops in the frame in which the stick
+// comes back, and nothing glides.
+//
+// A turn alone does not raise g_god_nonturn_version, so the game camera
+// turns about its own focus, as for a snap turn (god_turn_keeps_focus,
+// TabletopGodTurnedOnly). The version of the view goes up on each frame that
+// turns, as for a walk, so the game camera follows the view. The turn keeps
+// to no camera zone of the game: it turns about the head and does not move
+// the player.
+void ApplyGodTurnHold(double frame_seconds) {
+  const float share = g_turn_hold.fresh ? g_turn_hold.share : 0.0f;
+  const float rate = g_turn_hold.rate;
+  g_turn_hold.fresh = false;
+  g_turn_hold.share = 0.0f;
+  if (g_turn_hold.check_frames > 0 && --g_turn_hold.check_frames == 0 &&
+      GodLog()) {
+    if (g_turn_hold.check_version != g_god_version) {
+      ModLog("god view     : turn check, the view moved again in the %d "
+             "frames after the stop, so there is no check", kHoldCheckFrames);
+    } else {
+      ModLog("god view     : turn check, %d frames after the stop the "
+             "heading is %.3f degrees, and it was %.3f degrees at the stop",
+             kHoldCheckFrames, g_heading * 57.29578f,
+             g_turn_hold.check_heading * 57.29578f);
+    }
+  }
+  if (share == 0.0f) {
+    StopTurnHold("the stick asks for no turn now", true);
+    return;
+  }
+  const int direction = share > 0.0f ? 1 : -1;
+  if (g_turn_hold.active && direction != g_turn_hold.direction) {
+    StopTurnHold("the stick went the other way", true);
+  }
+  if (!g_turn_hold.active) {
+    g_turn_hold.active = true;
+    g_turn_hold.direction = direction;
+    g_turn_hold.start_heading = g_heading;
+    g_turn_hold.degrees = 0.0f;
+    g_turn_hold.seconds = 0.0;
+    g_turn_hold.frames = 0;
+    g_turn_hold.check_frames = 0;
+    ++g_turn_holds;
+    if (GodLog()) {
+      ModLog("god view     : the smooth turn starts to the %s, %.0f%% of a "
+             "full push, at %.0f degrees a second for a full push "
+             "(smooth_turn_speed), heading %.2f degrees, frame %llu",
+             direction > 0 ? "right" : "left", fabsf(share) * 100.0f, rate,
+             g_heading * 57.29578f, ControllersFrameCount());
+    }
+  }
+  const float degrees = comfort_math::SmoothTurnDegrees(
+      share, rate, frame_seconds, kHoldFrameCap);
+  const float seconds = zoom_math::FrameSeconds(frame_seconds, kHoldFrameCap);
+  ++g_turn_hold.frames;
+  g_turn_hold.seconds += seconds;
+  if (degrees != 0.0f) {
+    float room[3], head[3];
+    TableRoom(room);
+    HeadRoom(head);
+    TablePose next;
+    GodTurn(Pose(), room, head, degrees / 57.29578f, &next);
+    g_center[0] = ClampMap(next.center[0]);
+    g_center[2] = ClampMap(next.center[2]);
+    g_center[1] = next.center[1];
+    g_heading = Wrap(next.heading);
+    g_scale = next.scale;
+    Derive();
+    ++g_serial;
+    ++g_god_version;
+    g_turn_hold.degrees += degrees;
+    g_turn_hold.help += fabsf(degrees);
+    g_turn_hold.help_direction = direction;
+  }
+  if (g_turn_holds <= kTurnFrameLogHolds &&
+      g_turn_hold.frames <= kTurnFrameLogFrames) {
+    ModLog("god view     : smooth turn frame %llu of the hold: %.3f degrees "
+           "in %.4f s at %.0f%% of a full push, heading %.3f degrees, frame "
+           "%llu", g_turn_hold.frames, degrees, seconds, share * 100.0f,
+           g_heading * 57.29578f, ControllersFrameCount());
+  }
 }
 
 double Seconds() {
@@ -2565,6 +2714,7 @@ void __fastcall h_ClearMap(void* game, void* unused) {
   g_pair.have = false;
   g_god_zoom = g_god_ground = g_god_turn = 0;
   StopZoomHold("a load or a new game", false);
+  StopTurnHold("a load or a new game", false);
   g_tele.pending = false;
   g_spawn.pending = false;
   g_spawn.again = false;
@@ -2785,6 +2935,7 @@ void TabletopChange(const char* by) {
   g_god_zoom = g_god_ground = g_god_turn = 0;
   StopZoomHold(by, false);
   StopWalk(by, false);
+  StopTurnHold(by, false);
   g_spawn.pending = false;
   g_spawn.again = false;
   g_pan = {};
@@ -2822,6 +2973,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
              g_settings.god ? "God view" : "table");
     }
     StopWalk("the game draws from another camera", false);
+    StopTurnHold("the game draws from another camera", false);
     return false;
   }
   g_said_aside = false;
@@ -2852,6 +3004,7 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
       g_god_zoom = g_god_ground = g_god_turn = 0;
       StopZoomHold("the God view stands aside", false);
       StopWalk("the God view stands aside", false);
+      StopTurnHold("the God view stands aside", false);
       g_motion.have = false;
       g_tele.pending = false;
       g_spawn.pending = false;
@@ -2946,18 +3099,21 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
     }
     // A move of the game camera to a new place, once, as one cut.
     ApplyGodSpawn(asked_position, asked_focus);
-    // The steps of the player, the smooth zoom and the walk with the stick,
-    // once a frame, before anything reads the view of this frame. Then the
-    // pan of the mouse. The steps tell the vignette by themselves, and the
-    // smooth zoom and the walk give it the share of their move.
+    // The steps of the player, the smooth zoom, the walk with the stick and
+    // the smooth turn, once a frame, before anything reads the view of this
+    // frame. Then the pan of the mouse. The steps tell the vignette by
+    // themselves, and the smooth zoom, the walk and the smooth turn give it
+    // the share of their move.
     ApplyGodSteps();
     const TablePose before_moves = Pose();
     ApplyGodZoomHold(frame_seconds);
     ApplyGodWalk(frame_seconds);
-    if (g_hold.active || g_walk.active) {
+    ApplyGodTurnHold(frame_seconds);
+    if (g_hold.active || g_walk.active || g_turn_hold.active) {
       VignetteMove(MotionShare(before_moves, Pose(), frame_seconds),
-                   g_walk.active ? "the walk with the stick"
-                                 : "the smooth zoom");
+                   g_walk.active   ? "the walk with the stick"
+                   : g_hold.active ? "the smooth zoom"
+                                   : "the smooth turn");
     }
     MousePan(drag);
     g_motion.pose = Pose();
@@ -3770,6 +3926,31 @@ bool TabletopGodTurn(int direction, float degrees) {
   return true;
 }
 
+// THE SMOOTH TURN: the request of comfort_camera.cpp for the next frame
+// (ApplyGodTurnHold). The last request before a main camera call counts, and
+// that call uses it once.
+bool TabletopGodTurnHold(float share, float degrees_per_second) {
+  if (!TabletopGodOwnsView() || !(share == share) || share == 0.0f ||
+      !(degrees_per_second > 0.0f)) {
+    return false;
+  }
+  if (share > 1.0f) share = 1.0f;
+  if (share < -1.0f) share = -1.0f;
+  g_turn_hold.share = share;
+  g_turn_hold.rate = degrees_per_second;
+  g_turn_hold.fresh = true;
+  return true;
+}
+
+// The degrees that the smooth turn turned since the last call, for the turn
+// events of the tutorial, and their direction (1 right, -1 left).
+float TabletopGodTakeSmoothTurn(int* direction) {
+  const float degrees = g_turn_hold.help;
+  *direction = g_turn_hold.help_direction;
+  g_turn_hold.help = 0.0f;
+  return degrees;
+}
+
 // THE GAME'S CAMERA OVER THE PLAYER'S PLACE. It looks at the land under the
 // recenter pose, along the heading of the view, from 400 units away and 50
 // degrees above. So the game decides the sounds, the detail and its limits
@@ -3813,7 +3994,8 @@ bool TabletopGodGameCamera(float position[3], float focus[3],
     // place and the scale, and so have the start and the end of a walk with
     // the stick.
     static int said = 0;
-    if (said < 40 && g_scale > 0.0f && !g_hold.active && !g_walk.active) {
+    if (said < 40 && g_scale > 0.0f && !g_hold.active && !g_walk.active &&
+        !g_turn_hold.active) {
       ++said;
       ModLog("god view     : the game camera is over the %s at %.1f %.1f, %.1f "
              "units per meter",

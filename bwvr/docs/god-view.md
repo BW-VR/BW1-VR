@@ -56,6 +56,9 @@ sets the flags of each mode.
   follows the land under the head through a smooth filter
   (`move_stick_follow_land`). It stops when the stick comes back (section
   5.7).
+- **The turn.** The stick of the Hand to the side turns the view about the
+  head: in one step of 30, 45 or 90 degrees, or with `snap_turn=4` smoothly
+  while it is held, faster with a larger push (section 4).
 - **Comfort.** `comfort_vignette` darkens the edges of the view during a move
   that the player makes with a control. While a dialog box is up the stick
   does not turn or zoom, and a hold of the stick click of the hand that does
@@ -348,23 +351,79 @@ goes under the new head position.
 
 ## 4. The turn
 
-The right stick left or right turns the view by the snap turn step (45
-degrees by default, the launcher's "Turn in steps"). The turn keys and the
-middle mouse do the same. The request goes through `comfort_camera.cpp`, so
-the tutorial's turn switch and `MayTurn` still apply, and the tutorial still
-hears the turn. The view turns about the head: the world point of the head
-stays, and the heading changes by the step. A 90 degree turn right puts the
-land that was on the right in front.
+The launcher row "Turn" (`snap_turn`) has five values: Off (0), 30, 45 and
+90 degrees (1 to 3), and Smooth (4). The default is 45 degrees.
 
-With "Turn in steps" off (`snap_turn=0`), there is no turn in the God view:
-the stick does not turn, and the game's own smooth turn of the turn keys and
-the middle mouse turns only the game camera, not the view. A desktop run with
+**The snap turn** (1 to 3). The right stick left or right turns the view by
+the step. The turn keys and the middle mouse do the same. The request goes
+through `comfort_camera.cpp`, so the tutorial's turn switch and `MayTurn`
+still apply, and the tutorial still hears the turn. The view turns about the
+head: the world point of the head stays, and the heading changes by the
+step. A 90 degree turn right puts the land that was on the right in front.
+
+**The smooth turn** (4). While the right stick is held to the side, the view
+turns about the head, as for a snap turn, by a small angle in each frame
+(`ApplyGodTurnHold` in `tabletop.cpp`). The speed follows the push:
+
+- Up to 0.3 of the travel of the stick (the dead zone of the smooth zoom),
+  the view does not turn.
+- From 0.3 to 0.95, the part t of that travel gives the share t (1 + t) / 2
+  of the full speed (`comfort_math.h`, `SmoothTurnShare`). Half that travel
+  gives 3/8 of the speed, and a push of the stick to 0.5 gives about a fifth.
+  The curve starts at half the slope of a straight line, so a small push is
+  a slow turn that is easy to hold.
+- From 0.95 on, the view turns at `smooth_turn_speed` (90 degrees a second
+  by default).
+
+The default speed is a quarter turn a second. It is also the full turn speed
+of the comfort vignette, so a full push gives the full darkness of the
+vignette and a small push a light edge. The turn of a frame is the share
+times the speed times the time of the frame, at most 0.05 s, so a long frame
+does not make a jump.
+
+The turn stops in the frame in which the stick comes back into the dead
+zone: a frame with no request turns nothing, and nothing glides. The larger
+axis of the stick wins, so one frame never zooms and turns. A push that the
+game refused (the turn switch of the tutorial, a fight, a drag of the Hand),
+a grab of the world, a dialog box, and a hold that stopped because the stick
+went forward or back, must come back into the dead zone before the stick
+turns again. A held turn key turns the view at the full speed. A drag of the
+middle mouse turns in steps of 45 degrees, and so do a view that is not the
+God view and a room of the Temple.
+
+The smooth turn writes as a snap turn writes. A turn alone turns the game
+camera about its own focus (`god_turn_keeps_focus`), and the version of the
+view goes up in each frame that turns, so the game camera follows. For the
+tutorial, each `turn_help_degrees` of the turn (5) is one turn event of the
+game's help, one in each game turn (45 degrees with `turn_help_degrees=0`).
+The settings window changes the turn and its speed at once.
+
+With the turn off (`snap_turn=0`), there is no turn in the God view: the
+stick does not turn, and the game's own smooth turn of the turn keys and the
+middle mouse turns only the game camera, not the view. A desktop run with
 `snap_turn=0` shows the same picture before and after a push of the stick
 and a hold of the turn key.
 
 While a dialog box is up, the stick does not turn (`menu_stops_turn`,
-section 5.8). A snap turn darkens the edges of the view with
-`comfort_vignette` (section 5.8).
+section 5.8). A snap turn puts the comfort vignette at its full darkness at
+once, and the smooth turn darkens the edges by its speed (`comfort_vignette`,
+section 5.8).
+
+The log of the smooth turn:
+
+```
+comfort      : snap_turn=4. In the God view the stick and a held turn key turn the view smoothly, 90 degrees a second for a full push (smooth_turn_speed). The middle mouse and the other views turn in steps of 45 degrees. No tilt from the middle mouse
+controllers  : the stick starts a smooth turn right of the God view, 100% of the full speed, frame 4640
+god view     : the smooth turn starts to the right, 100% of a full push, at 90 degrees a second for a full push (smooth_turn_speed), heading 12.40 degrees, frame 4640
+god view     : smooth turn frame 1 of the hold: 1.500 degrees in 0.0167 s at 100% of a full push, heading 13.900 degrees, frame 4640
+god view     : the smooth turn stops, the stick asks for no turn now. It turned 90.00 degrees right in 1.000 s of 60 frames (90.0 degrees a second), heading 12.40 to 102.40 degrees, frame 4700
+god view     : turn check, 30 frames after the stop the heading is 102.400 degrees, and it was 102.400 degrees at the stop
+```
+
+The log has one line for each frame of the first 4 holds, at most 240 frames
+each. The report of a window counts the requests that the God view took,
+the ones that `MayTurn` and a grab refused, and the turn events that the
+smooth turn owed to the help.
 
 ## 5. Moving around: the grab and the mouse
 
@@ -829,8 +888,9 @@ recenter from the controllers.
 the view go dark during a move that the player makes with a control and that
 the body does not feel. The middle of the view stays clear. These moves count:
 
-- the walk with the stick, the smooth zoom and the grab of the world with
-  one hand or two hands. Each one reports how fast the view moved in the
+- the walk with the stick, the smooth zoom, the smooth turn and the grab of
+  the world with one hand or two hands. Each one reports how fast the view
+  moved in the
   frame, as a share of the full speed of a control: 150 cm of the room each
   second, a turn of 90 degrees each second, or a zoom of 1.5 times in 500 ms.
   The largest of the three counts (`comfort_math.h`, `MoveShare`). So a slow
@@ -866,7 +926,8 @@ hands of the player are in the world pass too, so the edge darkens them.
 example the game menu of Esc, the walk, the teleport and the grab of the
 world do not move the view. With `menu_stops_turn=1` the stick of the
 pointing hand also does not turn and does not zoom the God view: the snap
-turn, the zoom step and the smooth zoom stop, and so does the turn in a room
+turn, the smooth turn, the zoom step and the smooth zoom stop, and so does
+the turn in a room
 of the Temple. Each push is refused one time and counted, and it must come
 back to the middle before it acts after the box closes. Outside the God view
 the push forward and back is a wheel click, which a box can use, so only the
@@ -1093,7 +1154,8 @@ God view keeps to the same bits:
   14.1).
 - A two hand grab turns only with bit 2 and zooms only with bit 4
   (`TabletopGrabAllows`, called by `world_grab.cpp`).
-- A snap turn needs bit 2 (`MayTurn` in `comfort_camera.cpp`).
+- A snap turn and the smooth turn need bit 2 (`MayTurn` in
+  `comfort_camera.cpp`).
 - The mouse double click needs bit 0x10, because it is the jump of the game.
 
 **The interface levels** [V: the disassembly and
@@ -1200,7 +1262,9 @@ full turn of snap turns:
   degrees of its angle (`table_math::SnapTurnEvents`): 9 for 45 degrees. It
   sends the first at once, and `PayTurnEvents` sends one of the others in
   each new game turn. One full turn of snap turns is 72 events for each size
-  of the step. 0 gives one event for a snap turn.
+  of the step. 0 gives one event for a snap turn. The smooth turn owes one
+  event for each 5 degrees that it turned (`comfort_math::SmoothTurnEvents`),
+  so one full turn is 72 events too.
 - `god_turn_keeps_focus` (1): the game camera keeps the focus that the script
   put (section 7, "A snap turn alone keeps the focus").
 
@@ -1504,6 +1568,8 @@ section 5.8.
 | `god_zone` | 1 | 1: in a camera zone of a script the game camera stays in the zone, the player's place goes at most `god_zone_margin` past it, and the view does not shake (section 17). 0: the game pushes its camera back into the zone, with its sound and its shake. The debug page has the switch "Camera zone" |
 | `god_zone_margin` | 50 | How far the player's place goes past the camera zone, in world units, 0 to 2000 (section 17) |
 | `god_turn_keeps_focus` | 1 | 1: a snap turn alone turns the game camera about its own focus (section 7). 0: it puts the game camera over the land under the head |
+| `snap_turn` | 2 | The turn (section 4). 0: off. 1, 2, 3: a snap turn of 30, 45 or 90 degrees. 4: the smooth turn of the God view. The launcher row "Turn" |
+| `smooth_turn_speed` | 90 | The degrees a second of the smooth turn at a full push of the stick, 10 to 360 (section 4). The settings window has the row "Turn speed" (45, 90, 135 and 180), and the launcher has no row for it |
 | `tilt_help_degrees` | 3 | A look of the head up or down at 20 degrees a second or faster counts as the game's tilt: one tilt event of the help for each so many degrees, one in each game turn (section 7, "The tutorial"). 0: the head sends no tilt events |
 | `turn_help_degrees` | 5 | A snap turn counts as one turn event of the help for each so many degrees, one in each game turn, so the turn lesson of the tutorial ends with one full turn (section 7, "The turn lesson"). 0: one event for a snap turn |
 | `script_distance` | 1 | 1: a script that measures the distance from the camera gets the distance from the player (section 16). 0: the game's camera |
@@ -1519,7 +1585,9 @@ the face buttons of the left hand, `lmenu`, its menu button, `lgrip` and
 `lpoint`, the grip and the points of the left hand
 (`fake_controller_left_points`), `lstick_left`, `lstick_right`, `lstick_up`
 and `lstick_down`, the stick of the left hand, and `movekey`, the test key of
-`move_stick`.
+`move_stick`. The test key `fake_controller_stick_pct` (100) sets how far
+the words of the right stick push it, in percent of a full push, so a run
+can push the stick by half for the smooth turn.
 
 **The test mouse.** A desktop run must not move the real mouse. So
 `fake_mouse_script` moves the pointer and presses the left button inside the

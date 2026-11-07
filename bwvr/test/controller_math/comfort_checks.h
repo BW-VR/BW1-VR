@@ -143,6 +143,80 @@ inline void ComfortChecks() {
          1200.0f * tanf(22.0f * 3.14159265f / 180.0f), 0.01);
   }
 
+  // THE SMOOTH TURN.
+  {
+    Check(SmoothTurnSpeed(0) == 10 && SmoothTurnSpeed(90) == 90 &&
+              SmoothTurnSpeed(1000) == 360,
+          "smooth_turn_speed is 10 to 360 degrees a second",
+          SmoothTurnSpeed(1000), 360);
+    Check(kSmoothTurnDefault == static_cast<int>(kFullDegreesPerSecond),
+          "a full push at the default speed is the full speed of the vignette",
+          kSmoothTurnDefault, 90);
+    const float dead = 0.3f, full = 0.95f;
+    Near("the dead zone turns nothing", SmoothTurnShare(0.3f, dead, full), 0.0,
+         1e-7);
+    Near("nor a push to the left in it", SmoothTurnShare(-0.2f, dead, full),
+         0.0, 1e-7);
+    Near("a full push is the full speed", SmoothTurnShare(1.0f, dead, full),
+         1.0, 1e-6);
+    Near("and from full on", SmoothTurnShare(0.95f, dead, full), 1.0, 1e-6);
+    Near("half the travel past the dead zone is 3/8 of the speed",
+         SmoothTurnShare(0.625f, dead, full), 0.375, 1e-5);
+    Near("a push to the left has the same share, to the left",
+         SmoothTurnShare(-0.625f, dead, full), -0.375, 1e-5);
+    // A half push of the stick (0.5): t = 0.2 / 0.65.
+    const double t = 0.2 / 0.65;
+    Near("a half push of the stick is about a fifth of the speed",
+         SmoothTurnShare(0.5f, dead, full), t * (1.0 + t) / 2.0, 1e-5);
+    Check(SmoothTurnShare(0.4f, dead, full) < SmoothTurnShare(0.5f, dead, full) &&
+              SmoothTurnShare(0.5f, dead, full) <
+                  SmoothTurnShare(0.8f, dead, full),
+          "a larger push turns faster", SmoothTurnShare(0.8f, dead, full),
+          0.0);
+    Near("just past the dead zone the turn starts at half the slope of a line",
+         SmoothTurnShare(0.3065f, dead, full) / (0.0065 / 0.65), 0.5, 0.01);
+    Near("a value that is not a number turns nothing",
+         SmoothTurnShare(sqrtf(-1.0f), dead, full), 0.0, 1e-7);
+
+    Near("a full push at 90 degrees a second for 1/60 s is 1.5 degrees",
+         SmoothTurnDegrees(1.0f, 90.0f, 1.0 / 60.0, 0.05f), 1.5, 1e-5);
+    Near("to the left it is negative",
+         SmoothTurnDegrees(-1.0f, 90.0f, 1.0 / 60.0, 0.05f), -1.5, 1e-5);
+    Near("a long frame counts as the cap", SmoothTurnDegrees(1.0f, 90.0f, 0.5,
+                                                             0.05f),
+         4.5, 1e-5);
+    Near("a share of 0 turns exactly nothing",
+         SmoothTurnDegrees(0.0f, 90.0f, 1.0 / 60.0, 0.05f), 0.0, 0.0);
+    Near("a frame with no time turns nothing",
+         SmoothTurnDegrees(1.0f, 90.0f, 0.0, 0.05f), 0.0, 0.0);
+    {
+      // 60 frames of 1/60 s at a full push: 90 degrees, at a half push of
+      // the stick about 18 degrees.
+      double sum = 0.0, half = 0.0;
+      const float share = SmoothTurnShare(0.5f, dead, full);
+      for (int i = 0; i < 60; ++i) {
+        sum += SmoothTurnDegrees(1.0f, 90.0f, 1.0 / 60.0, 0.05f);
+        half += SmoothTurnDegrees(share, 90.0f, 1.0 / 60.0, 0.05f);
+      }
+      Near("a full push held 1 s turns 90 degrees", sum, 90.0, 1e-3);
+      Near("a half push held 1 s turns about 18 degrees", half,
+           90.0 * t * (1.0 + t) / 2.0, 1e-3);
+    }
+
+    float carried = 0.0f;
+    Check(SmoothTurnEvents(&carried, 4.0f, 5.0f) == 0,
+          "4 degrees are no turn event of 5 degrees", 0, 0);
+    Check(SmoothTurnEvents(&carried, 7.0f, 5.0f) == 2,
+          "4 and 7 degrees are two events of 5 degrees", 2, 2);
+    Near("and 1 degree waits for the next", carried, 1.0, 1e-5);
+    Check(SmoothTurnEvents(&carried, -4.0f, 5.0f) == 1,
+          "a turn to the left counts too", 1, 1);
+    float zero = 0.0f;
+    Check(SmoothTurnEvents(&zero, 44.0f, 0.0f) == 0 &&
+              SmoothTurnEvents(&zero, 1.0f, 0.0f) == 1,
+          "with turn_help_degrees=0 each 45 degrees are one event", 1, 1);
+  }
+
   // THE RECENTER HOLD.
   {
     RecenterHold hold;

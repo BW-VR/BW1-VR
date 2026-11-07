@@ -196,6 +196,7 @@ void CursorTraceFrame(uint64_t frame);
 // comfort_camera.cpp
 void ComfortCameraSetOptions(int snap_degrees, bool instant_jumps, bool glide,
                              int blink_ms);
+void ComfortCameraSetSmoothTurn(bool smooth, int degrees_per_second);
 void ComfortCameraSetZoomStep(int step);
 void ComfortCameraSetTurnHelp(int degrees_per_event, bool keeps_focus,
                               int tilt_degrees);
@@ -441,6 +442,8 @@ int g_window_h = 0;
 bool g_hand_anchored = true;
 // Moving around. The launcher stores the two choices as an index.
 int g_snap_turn_deg = 45;
+bool g_smooth_turn = false;
+int g_smooth_turn_speed = 90;
 bool g_instant_jumps = true;
 bool g_camera_glide = false;
 int g_blink_ms = 0;
@@ -1147,11 +1150,17 @@ void ReadSettings() {
   // makes a headset uncomfortable, so the camera turns in steps, jumps land
   // at once, and nothing glides. See comfort_camera.cpp.
   {
-    static const int kSnapSteps[] = {0, 30, 45, 90};
+    // snap_turn 4 is the smooth turn of the God view. The turns that have
+    // no smooth turn then go in steps of 45 degrees (docs/god-view.md,
+    // section 4).
+    static const int kSnapSteps[] = {0, 30, 45, 90, 45};
     static const int kBlinkSteps[] = {0, 100, 200};
     const int snap = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "snap_turn", 2, path));
-    g_snap_turn_deg = (snap >= 0 && snap < 4) ? kSnapSteps[snap] : 45;
+    g_snap_turn_deg = (snap >= 0 && snap < 5) ? kSnapSteps[snap] : 45;
+    g_smooth_turn = snap == 4;
+    g_smooth_turn_speed = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "smooth_turn_speed", 90, path));
     const int blink =
         static_cast<int>(GetPrivateProfileIntA("bwvr", "blink", 0, path));
     g_blink_ms = (blink >= 0 && blink < 3) ? kBlinkSteps[blink] : 0;
@@ -1891,6 +1900,7 @@ void StartVrStep() {
     PointerMapInstall();
     HeadCameraInstall();
     PointerMapSetRebuild(g_game_camera_rebuild);
+    ComfortCameraSetSmoothTurn(g_smooth_turn, g_smooth_turn_speed);
     ComfortCameraSetOptions(g_snap_turn_deg, g_instant_jumps, g_camera_glide,
                             g_blink_ms);
     ComfortCameraSetZoomStep(g_zoom_step);

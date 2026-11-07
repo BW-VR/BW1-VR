@@ -71,7 +71,8 @@ void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
                       uint32_t height);
 
 // The change functions of the areas.
-void ComfortCameraSetSnap(int degrees, const char* by);
+void ComfortCameraSetSnap(int degrees, bool smooth, const char* by);
+void ComfortCameraSetTurnSpeed(int degrees_per_second, const char* by);
 void ComfortCameraSetBlink(int ms, const char* by);
 bool TeleportSetOn(bool on, const char* by);
 void TabletopGodSetMoveStick(int rule, const char* by);
@@ -190,7 +191,10 @@ bool WriteKey(const char* key, int value) {
 // The change function of the area, for a setting that acts at once.
 void ApplyLive(int id, int v) {
   switch (id) {
-    case kSnapTurn: ComfortCameraSetSnap(SnapDegrees(v), kBy); break;
+    case kSnapTurn:
+      ComfortCameraSetSnap(SnapDegrees(v), SnapTurnSmooth(v), kBy);
+      break;
+    case kTurnSpeed: ComfortCameraSetTurnSpeed(v, kBy); break;
     case kTeleport: TeleportSetOn(v != 0, kBy); break;
     case kMoveStick: TabletopGodSetMoveStick(v, kBy); break;
     case kMoveSpeed: TabletopGodSetMoveSpeed(v, kBy); break;

@@ -2529,7 +2529,8 @@ label, what the setting does, and its key with "A change acts at once" or
 
 | Tab | Row | Key | Values |
 | --- | --- | --- | --- |
-| Moving | Turn in steps | `snap_turn` | Off, 30, 45, 90 degrees |
+| Moving | Turn | `snap_turn` | Off, 30, 45, 90 degrees, Smooth |
+| Moving | Turn speed | `smooth_turn_speed` | Slow 45, Normal 90, Fast 135, Very fast 180 (degrees a second) |
 | Moving | Teleport | `teleport` | Off, On |
 | Moving | Stick walk | `move_stick` | Off, Head, Controller |
 | Moving | Walk speed | `move_stick_speed_cm` | Slow 75, Normal 150, Fast 250, Very fast 400 |
@@ -2562,7 +2563,7 @@ which writes its own log line:
 
 | Key | The change function |
 | --- | --- |
-| `snap_turn`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetBlink` |
+| `snap_turn`, `smooth_turn_speed`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetTurnSpeed`, `ComfortCameraSetBlink` |
 | `teleport` | `TeleportSetOn` |
 | `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk or a hold of the zoom that runs stops |
 | `comfort_vignette` | `VignetteSet` |
@@ -2616,7 +2617,7 @@ have it too:
 settings     : settings_panel=1: page 2 of the ring as made has the item "settings". welcome_page=1, welcome_done=0: the welcome page shows at this start
 settings     : the welcome page opens, 0.56 by 0.35 m, its middle at 0.00 -0.21 -0.98 m, frame 412
 settings     : the welcome page closes: the player pressed Settings. welcome_done=1 is in bwvr.ini, so the page does not show again, frame 530
-settings     : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group Moving with 8 switches, frame 531
+settings     : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group Moving with 9 switches, frame 531
 settings     : snap_turn goes from 2 to 3 (90 degrees), written to bwvr.ini. It acts at once, frame 650
 comfort      : the settings window: turn in steps of 90 degrees now
 ```

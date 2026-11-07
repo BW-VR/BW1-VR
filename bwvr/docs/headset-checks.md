@@ -31,7 +31,10 @@ want.
    hill, and then into a house. Wrong: you see under the land or into the
    house, the gold and red cover comes too late or too soon, it flickers on
    a slope, or its color is hard on the eyes.
-3. **The comfort vignette.** Set the launcher row "Comfort vignette" to
+3. **The turn and the comfort vignette.** Set the settings row "Turn" to
+   Smooth, and turn with a small push and a full push. Wrong: discomfort,
+   or a speed or a curve of the push that feels wrong. Then set the
+   launcher row "Comfort vignette" to
    gentle and to strong for a short walk. Wrong: it does not help, or it is
    in the way.
 4. **The teleport.** Aim the arc at near and far land, and go to the village

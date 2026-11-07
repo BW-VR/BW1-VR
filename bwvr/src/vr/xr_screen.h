@@ -95,6 +95,12 @@ struct PanelQuad {
 //                      keyboard in the headset"). It also shows over a screen.
 //   kCardBubble        the bubble of a miracle that the pointing hand pulls
 //                      out of the spell book (docs/miracles.md, "The pull")
+//   kCardHintButton0   to kCardHintButton0 + kHintButtonCards - 1: with
+//                      hint_style=2 each lit button of a controller has a
+//                      card of its own. These cards and the two hint cards
+//                      above are the cards of the buttons
+//                      (docs/controller-hints.md, "The controller in the
+//                      hand")
 //   kCardRay           the ray of the pointing hand while it ends on a panel
 //                      in the room, over all the other quads (docs/ui-layer.md,
 //                      "The ray over the panels")
@@ -104,8 +110,18 @@ const int kCardSubtitles = 2;
 const int kCardRing = 3;
 const int kCardKeyboard = 4;
 const int kCardBubble = 5;
-const int kCardRay = 6;
-const int kCards = 7;
+const int kCardHintButton0 = 6;
+const int kHintButtonCards = 4;
+const int kCardRay = 10;
+const int kCards = 11;
+
+// True for a card that holds hints: the two hint cards and the cards of
+// the buttons.
+inline bool IsHintCard(int card) {
+  return card == kCardHintPointing || card == kCardHintOther ||
+         (card >= kCardHintButton0 &&
+          card < kCardHintButton0 + kHintButtonCards);
+}
 
 // The picture of a hint card.
 const uint32_t kHintCardWidth = 768;
@@ -610,6 +626,9 @@ class XrScreen {
   // The interaction profile the runtime chose for a hand, for example
   // "oculus/touch_controller". Empty when nothing is bound.
   const char* HandProfile(int index) const;
+  // The name of the headset that the runtime gives (XrSystemProperties), or
+  // an empty string. The bridge does not send it.
+  const char* SystemName() const;
 
   // True while the session has input focus. The headset menu takes it away.
   bool InputFocused() const;

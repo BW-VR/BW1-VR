@@ -47,7 +47,7 @@ bool g_white_ready = false;
 // slot. Each image keeps what its last copy came from: the pixels, the
 // number of the picture and the part. A draw of the same picture uses the
 // image with no copy.
-const int kCards = 8;
+const int kCards = 12;
 vk::Image g_cards[kCards] = {};
 bool g_card_written[kCards] = {};
 const uint8_t* g_card_pixels[kCards] = {};

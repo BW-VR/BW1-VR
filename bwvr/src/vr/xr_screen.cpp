@@ -241,11 +241,17 @@ bool g_have_staged_card[kCards] = {};
 bool g_card_failed[kCards] = {};
 const char* const kCardName[kCards] = {
     "hint card of the pointing hand", "hint card of the other hand",
-    "subtitle card", "ring", "keyboard", "bubble card", "ray card"};
+    "subtitle card", "ring", "keyboard", "bubble card",
+    "first card of a button", "second card of a button",
+    "third card of a button", "fourth card of a button",
+    "ray card"};
+static_assert(kCardRay + 1 == kCards,
+              "each card has a name");
 // What a card holds, for the line that says where it goes after a failure.
 const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
                                         "items of the ring", "keys",
-                                        "pulled miracles",
+                                        "pulled miracles", "hints", "hints",
+                                        "hints", "hints",
                                         "rays over the panels"};
 // The runtime refused a frame with a quad of the interface panel.
 bool g_panel_refused = false;
@@ -1248,6 +1254,11 @@ bool XrScreen::RecommendedSize(uint32_t* width, uint32_t* height) const {
 const char* XrScreen::HandProfile(int index) const {
   if (remote_) return remote_->packet->state.profiles[index ? 1 : 0];
   return impl_->profile[index ? 1 : 0];
+}
+
+const char* XrScreen::SystemName() const {
+  if (remote_) return "";
+  return impl_->system_name;
 }
 
 bool XrScreen::InputFocused() const {
@@ -2460,10 +2471,11 @@ void XrScreen::RecordVideoLayers(const float eye_position[3], uint32_t width,
       }
     }
   } else {
-    const int card_order[kCards] = {kCardSubtitles, kCardHintPointing,
-                                    kCardHintOther,  kCardRing,
-                                    kCardBubble,     kCardKeyboard,
-                                    kCardRay};
+    const int card_order[kCards] = {
+        kCardSubtitles,       kCardHintPointing,    kCardHintOther,
+        kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
+        kCardHintButton0 + 3, kCardRing,            kCardBubble,
+        kCardKeyboard, kCardRay};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&
@@ -2705,6 +2717,17 @@ void XrScreen::ReportUpload(uint64_t frames) {
           s.cards[kCardHintPointing].layers, s.cards[kCardHintOther].layers);
     s.cards[kCardHintPointing].layers = 0;
     s.cards[kCardHintOther].layers = 0;
+  }
+  {
+    uint64_t buttons = 0;
+    for (int i = 0; i < kHintButtonCards; ++i) {
+      buttons += s.cards[kCardHintButton0 + i].layers;
+      s.cards[kCardHintButton0 + i].layers = 0;
+    }
+    if (buttons > 0) {
+      s.log("  hint card    : %llu quad layers of the cards of the buttons "
+            "over the projection", buttons);
+    }
   }
   if (s.cards[kCardSubtitles].layers > 0) {
     s.log("  subtitles    : %llu quad layers of the subtitle card over the "
@@ -3063,10 +3086,11 @@ bool XrScreen::BuildFrame() {
     // keyboard.
     XrCompositionLayerQuad* card_quads = b.card_quads;
     bool* with_card = b.with_card;
-    const int card_order[kCards] = {kCardSubtitles, kCardHintPointing,
-                                    kCardHintOther,  kCardRing,
-                                    kCardBubble,     kCardKeyboard,
-                                    kCardRay};
+    const int card_order[kCards] = {
+        kCardSubtitles,       kCardHintPointing,    kCardHintOther,
+        kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
+        kCardHintButton0 + 3, kCardRing,            kCardBubble,
+        kCardKeyboard, kCardRay};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&
@@ -3320,9 +3344,14 @@ void XrScreen::FinishFrame() {
         s.log("  openxr: the runtime refused a frame with the subtitle card, "
               "so the subtitles stay in the eye pictures");
       } else if (b.with_card[kCardHintPointing] ||
-                 b.with_card[kCardHintOther]) {
-        g_card_failed[kCardHintPointing] = true;
-        g_card_failed[kCardHintOther] = true;
+                 b.with_card[kCardHintOther] ||
+                 b.with_card[kCardHintButton0] ||
+                 b.with_card[kCardHintButton0 + 1] ||
+                 b.with_card[kCardHintButton0 + 2] ||
+                 b.with_card[kCardHintButton0 + 3]) {
+        for (int i = 0; i < kCards; ++i) {
+          if (IsHintCard(i)) g_card_failed[i] = true;
+        }
         s.log("  openxr: the runtime refused a frame with a hint card, so the "
               "hints stay in the eye pictures");
       } else if (b.with_panel && !g_panel_refused) {

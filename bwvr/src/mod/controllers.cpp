@@ -5878,6 +5878,37 @@ const char* ControllersProfileOf(int side) {
   return HandProfileOf(side < 0 || side > 1 ? 0 : side);
 }
 
+// For hint_model.cpp: the turn of the head in the LOCAL space, the mean of
+// the turns of the two eyes. False when the eyes are not known.
+void HeadPoseFakeEye(int eye, float position[3], float orientation[4]);
+bool ControllersHeadTurn(float out[4]) {
+  float q[2][4];
+  if (g_fake.mode != 0) {
+    float position[3];
+    HeadPoseFakeEye(0, position, q[0]);
+    HeadPoseFakeEye(1, position, q[1]);
+  } else if (g_screen != nullptr && g_screen->eye(0).valid &&
+             g_screen->eye(1).valid) {
+    for (int e = 0; e < 2; ++e) {
+      for (int i = 0; i < 4; ++i) q[e][i] = g_screen->eye(e).orientation[i];
+    }
+  } else {
+    return false;
+  }
+  const float dot = q[0][0] * q[1][0] + q[0][1] * q[1][1] +
+                    q[0][2] * q[1][2] + q[0][3] * q[1][3];
+  const float sign = dot < 0.0f ? -1.0f : 1.0f;
+  float length = 0.0f;
+  for (int i = 0; i < 4; ++i) {
+    out[i] = q[0][i] + sign * q[1][i];
+    length += out[i] * out[i];
+  }
+  length = sqrtf(length);
+  if (!(length > 1e-6f)) return false;
+  for (int i = 0; i < 4; ++i) out[i] /= length;
+  return true;
+}
+
 const char* ControllersSystemName() {
   if (g_fake.mode != 0 || g_screen == nullptr) return "";
   return g_screen->SystemName();

@@ -1546,8 +1546,7 @@ With `hint_style=2` (the default) the mod does what Half-Life: Alyx does
    hint ends.
 2. The body of the controller is faint: a warm parchment tone at 30
    percent alpha, with a dark brown ink outline at its silhouette, so it
-   reads on bright land. Its back faces draw first and its front faces
-   after them, so the shape reads.
+   reads on bright land.
 3. Each button of a hint is solid and lit in a warm gold. A pressed button
    moves as the model says (the press, below).
 4. Each lit button has its own small scroll card beside the controller, with
@@ -1632,12 +1631,13 @@ cards:
 
 **The place of the cards** (`Stack`). The cards of a hand are a column on the
 outer side of the hand, as the head sees it: right of the right hand and
-left of the left hand. The column is at the distance of the controller from
-the head. Each card faces the head from its own middle, with no roll, so a
-card above or below the controller tilts to the head and is square to its
-own line of sight. The inner edges of the cards are on one line, 2 cm past
-the outline of the palm and of the box of the controller, so no card is on
-the hand or on the controller. In the view the cards are 6 mm apart: the
+left of the left hand. The column is laid out in the view of the head (the
+mean turn of the two eyes): the inner edges of the cards are on a line that
+is vertical in the view, 2 cm (at the distance of the controller) past the
+outline of the palm and of the box of the controller as the head sees it, so
+no card is on the hand or on the controller. Each card faces the head from
+its own middle, and its width is level in the view, so a head that looks
+down sees no card turned. In the view the cards are 6 mm apart: the
 place of each card comes from the corners of the card above it as the head
 sees them, because a tilted card is taller in the view than in the plane of
 the controller. The middle of the column is at the height of the middle of
@@ -1661,15 +1661,11 @@ hand that would overlap a card of the hand that points does not show.
 **The depth.** The controller, the diamond and the lines draw in the eye
 pictures, after the opaque meshes of the overlay and before the mesh of the
 hands, with the depth of the scene (`overlay.cpp`). So the land can hide
-them. The lit parts and the lines write depth. Each eye draws the body in
-this order:
-
-1. The back faces, with the alpha and no depth write.
-2. The front faces write only their depth.
-3. The outline: the back faces again, each corner pushed out 1.2 mm along
-   its normal, in ink. Inside the silhouette the front faces are nearer and
-   hide it, so only a thin edge round the body shows.
-4. The front faces, with the alpha.
+them. Each eye has three draws: the lit parts and the lines, then the front
+faces of the body (faint, with the depth write), then the outline: the back
+faces again, each corner pushed out 1.2 mm along its normal, in ink. Inside
+the silhouette the front faces are nearer and hide the outline, so only a
+thin edge round the body shows. The back faces of the body do not draw.
 
 So the body writes the depth of its front faces, and the faint hand, which
 draws after the controller, does not show behind the body. The cards are
@@ -1718,7 +1714,14 @@ live comparison.
 a part (Touch v3: 12111 vertices in the file, 4048 after the weld; Touch v2:
 10005 and 2270; Vive Cosmos: 14838 and 10001; Vive wand: 17551 and 15190),
 and keeps each vertex, its normal and its corner of the outline in the grip
-space. A frame computes again only the vertices of the parts that a press
+space. A body with more than 2500 triangles gets a simpler mesh at the load:
+its vertices go into cells of a grid (from 2 mm, 30 percent larger each step,
+until it has 2500 triangles or less), one vertex for each cell at the mean
+place and normal. The lit parts and the parts that move keep all their
+detail. The Vive wand body has 14288 triangles in the file and 1930 after,
+the Vive Cosmos 15740 and 1702, the Index 7213 and 2130, the Touch v3 4341 and
+2411. The load line gives both counts and the cell. A frame computes again
+only the vertices of the parts that a press
 moves, and the color of each vertex from a table of the light. Each eye puts
 each corner on the screen once, with one matrix from the grip space to the
 camera, and the triangles go to compact lists, so each draw sends only the

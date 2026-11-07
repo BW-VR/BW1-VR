@@ -74,6 +74,8 @@
 #include <string.h>
 
 #include <algorithm>
+#include <unordered_map>
+#include <vector>
 
 #include "../vr/xr_screen.h"
 #include "controller_art_math.h"
@@ -97,6 +99,7 @@ bool ControllersCardPose(int which, float grip_position[3],
 bool ControllersHandInput(int side, bwvr::HandInput* out);
 const char* ControllersProfileOf(int side);
 const char* ControllersSystemName();
+bool ControllersHeadTurn(float out[4]);
 int ControllersHandCm();
 int ControllersHandScalePct();
 uint64_t ControllersFrameCount();
@@ -222,6 +225,9 @@ struct Model {
   float* grip_shell;
   bool* part_moving;
   int read_vertices;  // before the weld
+  int body_read;      // the triangles of the body in the file
+  int body_kept;      // and after SimplifyBody
+  float body_cell;    // the cell of SimplifyBody in meters, or 0
 };
 
 void FreeModel(Model* m) {
@@ -281,6 +287,162 @@ void InputOf(const char* name, int* input, int* axis) {
   } else if (strncmp(name, "menu", 4) == 0) {
     *input = kInMenu;
   }
+}
+
+// THE BODY OF A HEAVY MODEL. The body is faint, so it needs less detail
+// than the lit parts. A part that is not a control and that no press moves
+// is body. When the body has more than kBodyTriangles triangles, the load
+// puts its vertices in cells of a grid in the grip space: one vertex for
+// each cell of each part, at the mean place, with the mean normal. A
+// triangle with two corners in one cell goes. The cell starts at 2 mm and
+// grows by 30 percent until the body has kBodyTriangles or less. The lit
+// parts keep all their detail.
+const int kBodyTriangles = 2500;
+
+bool BodyPart(const Model& m, int p) {
+  return !m.part_moving[p] && m.node[m.part[p].node].owner < 0;
+}
+
+void SimplifyBody(Model* m) {
+  int body = 0;
+  for (int t = 0; t < m->triangles; ++t) {
+    if (BodyPart(*m, m->triangle_part[t])) ++body;
+  }
+  m->body_read = m->body_kept = body;
+  m->body_cell = 0.0f;
+  if (body <= kBodyTriangles) return;
+  std::vector<int> cluster(m->vertices, -1);
+  std::unordered_map<uint64_t, int> cells;
+  float cell = 0.002f;
+  int clusters = 0;
+  int kept = body;
+  for (int round = 0; round < 16; ++round, cell *= 1.3f) {
+    cells.clear();
+    clusters = 0;
+    for (int p = 0; p < m->parts; ++p) {
+      const Part& part = m->part[p];
+      const bool is_body = BodyPart(*m, p);
+      for (int k = 0; k < part.count; ++k) {
+        const int v = part.first + k;
+        if (!is_body) {
+          cluster[v] = -1;
+          continue;
+        }
+        const float* g = &m->grip_pos[v * 3];
+        uint64_t key = static_cast<uint64_t>(p) & 0xFF;
+        for (int a = 0; a < 3; ++a) {
+          const int64_t c = static_cast<int64_t>(floorf(g[a] / cell)) + (1 << 17);
+          key = (key << 18) | (static_cast<uint64_t>(c) & 0x3FFFF);
+        }
+        auto found = cells.find(key);
+        if (found == cells.end()) {
+          cells.emplace(key, clusters);
+          cluster[v] = clusters++;
+        } else {
+          cluster[v] = found->second;
+        }
+      }
+    }
+    kept = 0;
+    for (int t = 0; t < m->triangles; ++t) {
+      if (!BodyPart(*m, m->triangle_part[t])) continue;
+      const uint32_t* i = &m->index[t * 3];
+      const int a = cluster[i[0]], b = cluster[i[1]], c = cluster[i[2]];
+      if (a != b && b != c && a != c) ++kept;
+    }
+    if (kept <= kBodyTriangles) break;
+  }
+  // The new vertices: each part in its order, a body part as its cells.
+  std::vector<float> sum_pos(clusters * 3, 0.0f), sum_nrm(clusters * 3, 0.0f);
+  std::vector<int> count(clusters, 0);
+  for (int v = 0; v < m->vertices; ++v) {
+    const int c = cluster[v];
+    if (c < 0) continue;
+    for (int a = 0; a < 3; ++a) {
+      sum_pos[c * 3 + a] += m->grip_pos[v * 3 + a];
+      sum_nrm[c * 3 + a] += m->grip_nrm[v * 3 + a];
+    }
+    ++count[c];
+  }
+  const int most = m->vertices;  // the new count is never more
+  float* position = static_cast<float*>(malloc(sizeof(float) * 3 * most));
+  float* normal = static_cast<float*>(malloc(sizeof(float) * 3 * most));
+  float* grip_pos = static_cast<float*>(malloc(sizeof(float) * 3 * most));
+  float* grip_nrm = static_cast<float*>(malloc(sizeof(float) * 3 * most));
+  float* grip_shell = static_cast<float*>(malloc(sizeof(float) * 3 * most));
+  if (position == nullptr || normal == nullptr || grip_pos == nullptr ||
+      grip_nrm == nullptr || grip_shell == nullptr) {
+    free(position); free(normal); free(grip_pos); free(grip_nrm);
+    free(grip_shell);
+    return;
+  }
+  std::vector<int> remap(m->vertices, -1);
+  std::vector<int> cluster_new(clusters, -1);
+  int out = 0;
+  for (int p = 0; p < m->parts; ++p) {
+    Part& part = m->part[p];
+    const int first = out;
+    for (int k = 0; k < part.count; ++k) {
+      const int v = part.first + k;
+      const int c = cluster[v];
+      if (c >= 0) {
+        if (cluster_new[c] < 0) {
+          cluster_new[c] = out;
+          float n[3];
+          for (int a = 0; a < 3; ++a) {
+            grip_pos[out * 3 + a] = sum_pos[c * 3 + a] / count[c];
+            n[a] = sum_nrm[c * 3 + a];
+          }
+          overlay_math::Normalize(n);
+          for (int a = 0; a < 3; ++a) {
+            grip_nrm[out * 3 + a] = n[a];
+            grip_shell[out * 3 + a] = grip_pos[out * 3 + a] + n[a] * kShellM;
+            // A body part never moves, so the space of its node is not in
+            // use. The place in the grip space stands in for it.
+            position[out * 3 + a] = grip_pos[out * 3 + a];
+            normal[out * 3 + a] = n[a];
+          }
+          ++out;
+        }
+        remap[v] = cluster_new[c];
+      } else {
+        for (int a = 0; a < 3; ++a) {
+          position[out * 3 + a] = m->position[v * 3 + a];
+          normal[out * 3 + a] = m->normal[v * 3 + a];
+          grip_pos[out * 3 + a] = m->grip_pos[v * 3 + a];
+          grip_nrm[out * 3 + a] = m->grip_nrm[v * 3 + a];
+          grip_shell[out * 3 + a] = m->grip_shell[v * 3 + a];
+        }
+        remap[v] = out++;
+      }
+    }
+    part.first = first;
+    part.count = out - first;
+  }
+  int t_out = 0;
+  for (int t = 0; t < m->triangles; ++t) {
+    const uint32_t* i = &m->index[t * 3];
+    const uint32_t a = static_cast<uint32_t>(remap[i[0]]);
+    const uint32_t b = static_cast<uint32_t>(remap[i[1]]);
+    const uint32_t c = static_cast<uint32_t>(remap[i[2]]);
+    if (a == b || b == c || a == c) continue;
+    m->index[t_out * 3 + 0] = a;
+    m->index[t_out * 3 + 1] = b;
+    m->index[t_out * 3 + 2] = c;
+    m->triangle_part[t_out] = m->triangle_part[t];
+    ++t_out;
+  }
+  free(m->position); free(m->normal); free(m->grip_pos); free(m->grip_nrm);
+  free(m->grip_shell);
+  m->position = position;
+  m->normal = normal;
+  m->grip_pos = grip_pos;
+  m->grip_nrm = grip_nrm;
+  m->grip_shell = grip_shell;
+  m->vertices = out;
+  m->triangles = t_out;
+  m->body_kept = kept;
+  m->body_cell = cell;
 }
 
 // THE WELD. Many files have each corner of a face as a vertex of its own,
@@ -649,6 +811,7 @@ Model* ReadModel(const char* path, const char* id, bool left, char* why,
       }
     }
   }
+  SimplifyBody(m);
   return m;
 }
 
@@ -733,10 +896,11 @@ void TakeLoad(int side) {
   }
   ModLog("hint model   : the model %s of the %s hand loaded in %.1f ms on a "
          "thread: %d nodes, %d meshes, %d vertices (%d in the file), %d "
-         "triangles, a box of "
+         "triangles, the body %d triangles (%d in the file, cells of %.1f "
+         "mm), a box of "
          "%.1f by %.1f by %.1f cm. The controls with a node: %s", m.id, name,
          load.ms, m.nodes, m.parts, m.vertices, m.read_vertices,
-         m.triangles,
+         m.triangles, m.body_kept, m.body_read, m.body_cell * 1000.0f,
          (m.high[0] - m.low[0]) * 100.0f, (m.high[1] - m.low[1]) * 100.0f,
          (m.high[2] - m.low[2]) * 100.0f, controls);
 }
@@ -1520,7 +1684,6 @@ int DrawSide(IDirect3DDevice7* device, int side, const float m[12],
       const uint32_t v = tri[k];
       if (b.map_back[v] < 0) {
         b.map_back[v] = n_back;
-        g_draw_back[n_back] = b.screen[v];
         if (!ProjectCorner(c, c0, &b.shell[v * 3], near_plane, hx, hy,
                            outline, &g_draw_shell[n_back])) {
           g_draw_shell[n_back] = b.screen[v];
@@ -1568,26 +1731,18 @@ int DrawSide(IDirect3DDevice7* device, int side, const float m[12],
     if (FAILED(hr)) *result = hr;
     g_frame_sent += count;
   };
+  // THREE DRAWS. The lit parts and the lines, with the depth write. The
+  // front faces of the body, faint, with the depth write, so the outline
+  // does not show inside the silhouette. The outline: the shell of the back
+  // faces in ink, behind the front faces, so only a thin edge round the body
+  // shows. The back faces of the body do not draw: under the outline and the
+  // front faces they add little.
   device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
   draw(g_draw_lit, n_lit, g_list_lit, i_lit);
-  device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
-  draw(g_draw_back, n_back, g_list_back, i_back);
-  // THE OUTLINE. First the front faces write only their depth (the blend
-  // keeps the picture as it is). Then the shell of the back faces draws in
-  // ink: inside the silhouette the front faces are nearer and hide it, so
-  // only a thin edge round the body shows.
-  if (i_front > 0 && i_back > 0) {
-    device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
-    device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_ZERO);
-    device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE);
-    draw(g_draw_front, n_front, g_list_front, i_front);
-    device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
-    device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
-    device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
-    draw(g_draw_shell, n_back, g_list_back, i_back);
-  }
   draw(g_draw_front, n_front, g_list_front, i_front);
-  return (i_lit + i_back * 2 + i_front) / 3;
+  device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
+  draw(g_draw_shell, n_back, g_list_back, i_back);
+  return (i_lit + i_back + i_front) / 3;
 }
 
 // THE TEST KEY: Ctrl Shift H, with test_keys=1, while the game is in front.
@@ -1628,10 +1783,8 @@ bool HintModelHasControl(int side, int control) {
   return m != nullptr && m->value_node[control] >= 0;
 }
 
-// The palm corners of hint_card_math::HandOutline, and a hysteresis that no
-// outline reaches, so the side does not change.
+// The palm corners of hint_card_math::HandOutline.
 const int kPalmCorners = 8;
-const float kNoSideChange = 1000.0f;
 
 bool HintModelPlace(int which, const HintModelCard* cards, int count,
                     bool show, float dt, HintModelPlaced* out) {
@@ -1698,8 +1851,15 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
   }
   in.gap = 0.02f;
   in.spacing = 0.006f;
-  // The cards of a controller stay on the outer side of the hand.
-  in.hysteresis = kNoSideChange;
+  // The right and the up of the head, so the column and the cards are level
+  // in the view.
+  float head_turn[4];
+  if (ControllersHeadTurn(head_turn)) {
+    const float x_axis[3] = {1.0f, 0.0f, 0.0f};
+    const float y_axis[3] = {0.0f, 1.0f, 0.0f};
+    controller_math::QuatRotate(head_turn, x_axis, in.head_right);
+    controller_math::QuatRotate(head_turn, y_axis, in.head_up);
+  }
   in.count = s.count;
   for (int i = 0; i < s.count; ++i) {
     in.width[i] = s.card[i].width;

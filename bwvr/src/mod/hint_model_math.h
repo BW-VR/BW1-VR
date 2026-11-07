@@ -313,7 +313,10 @@ struct StackIn {
   float last_right[3];
   float gap;         // from the outline to the inner edge of the cards
   float spacing;     // between two cards
-  float hysteresis;  // of the change of side (hint_card_math::CardPose)
+  // Right and up of the head, unit vectors. All zero: a head with no roll
+  // that looks at the controller.
+  float head_right[3];
+  float head_up[3];
   int count;
   float width[kMaxCards];
   float height[kMaxCards];
@@ -390,17 +393,80 @@ struct ColumnFrame {
   const float* v;
   const float* r;
   const float* u;
+  const float* head_right;
   float side;
   float x_inner;
+  // The line of the inner edges: through `origin`, along `dir`. dir is the
+  // up of the head made square to the line of sight to origin, so the line
+  // is vertical in the view.
+  float origin[3];
+  float dir[3];
 };
+
+// The turn of a quad whose axes are x, y and z (unit vectors, right handed).
+inline void QuatFromAxes(const float x[3], const float y[3], const float z[3],
+                         float q[4]) {
+  const float trace = x[0] + y[1] + z[2];
+  if (trace > 0.0f) {
+    const float s = sqrtf(trace + 1.0f) * 2.0f;
+    q[3] = 0.25f * s;
+    q[0] = (y[2] - z[1]) / s;
+    q[1] = (z[0] - x[2]) / s;
+    q[2] = (x[1] - y[0]) / s;
+  } else if (x[0] > y[1] && x[0] > z[2]) {
+    const float s = sqrtf(1.0f + x[0] - y[1] - z[2]) * 2.0f;
+    q[3] = (y[2] - z[1]) / s;
+    q[0] = 0.25f * s;
+    q[1] = (y[0] + x[1]) / s;
+    q[2] = (z[0] + x[2]) / s;
+  } else if (y[1] > z[2]) {
+    const float s = sqrtf(1.0f + y[1] - x[0] - z[2]) * 2.0f;
+    q[3] = (z[0] - x[2]) / s;
+    q[0] = (y[0] + x[1]) / s;
+    q[1] = 0.25f * s;
+    q[2] = (z[1] + y[2]) / s;
+  } else {
+    const float s = sqrtf(1.0f + z[2] - x[0] - y[1]) * 2.0f;
+    q[3] = (x[1] - y[0]) / s;
+    q[0] = (z[0] + x[2]) / s;
+    q[1] = (z[1] + y[2]) / s;
+    q[2] = 0.25f * s;
+  }
+}
+
+// A card that faces the head from `center` and is level in the view: its
+// front (+z) goes to the head, and its width (+x) is in the plane of the
+// line of sight and the right of the head, so the head sees it with no roll.
+inline void LevelFacePose(const float center[3], const float head[3],
+                          const float head_right[3], float q[4]) {
+  float z[3] = {head[0] - center[0], head[1] - center[1], head[2] - center[2]};
+  overlay_math::Normalize(z);
+  const float along = head_right[0] * z[0] + head_right[1] * z[1] +
+                      head_right[2] * z[2];
+  float x[3] = {head_right[0] - along * z[0], head_right[1] - along * z[1],
+                head_right[2] - along * z[2]};
+  overlay_math::Normalize(x);
+  const float y[3] = {z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2],
+                      z[0] * x[1] - z[1] * x[0]};
+  QuatFromAxes(x, y, z, q);
+}
 
 inline void PlaceCard(const StackIn& in, const ColumnFrame& f, int i,
                       float y, StackOut* out, float* top, float* bottom) {
-  const float x_center = f.side * (f.x_inner + 0.5f * in.width[i]);
-  for (int k = 0; k < 3; ++k) {
-    out->center[i][k] = f.center[k] + f.r[k] * x_center + f.u[k] * y;
+  // The inner edge of the card is on the line of the column, and the card
+  // goes out from it along its own width. Its width depends on its turn, and
+  // its turn on its place, so two steps.
+  float e[3];
+  for (int k = 0; k < 3; ++k) e[k] = f.origin[k] + f.dir[k] * y;
+  const float half = 0.5f * in.width[i] * f.side;
+  const float x_axis_first[3] = {1.0f, 0.0f, 0.0f};
+  LevelFacePose(e, f.head, f.head_right, out->orientation[i]);
+  for (int step = 0; step < 2; ++step) {
+    float cx[3];
+    controller_math::QuatRotate(out->orientation[i], x_axis_first, cx);
+    for (int k = 0; k < 3; ++k) out->center[i][k] = e[k] + cx[k] * half;
+    LevelFacePose(out->center[i], f.head, f.head_right, out->orientation[i]);
   }
-  controller_math::FacePose(out->center[i], f.head, out->orientation[i]);
   const float x_axis[3] = {1.0f, 0.0f, 0.0f};
   const float y_axis[3] = {0.0f, 1.0f, 0.0f};
   float card_right[3], card_up[3];
@@ -468,41 +534,105 @@ inline void PlaceColumn(const StackIn& in, const ColumnFrame& f,
 
 inline bool Stack(const StackIn& in, StackOut* out) {
   if (in.count <= 0 || in.count > kMaxCards) return false;
-  float most_width = 0.0f;
-  for (int i = 0; i < in.count; ++i) {
-    if (in.width[i] > most_width) most_width = in.width[i];
-  }
-  // The side, right in the view and the extent come from the pose of the
-  // hint card, with the middle of the controller in the place of the wrist.
-  hint_card_math::Hand hand;
-  for (int k = 0; k < 3; ++k) {
-    hand.wrist[k] = in.center[k];
-    hand.tip[k] = in.center[k];
-    hand.fingers[k] = 0.0f;
-  }
-  hint_card_math::Card pose;
-  if (!hint_card_math::CardPose(hand, in.outline, in.outline_count, in.head,
-                                most_width, in.gap, in.hysteresis,
-                                in.last_right, in.side, in.first, &pose)) {
-    return false;
-  }
-  out->side = pose.side;
-  out->changed = pose.changed;
-  out->extent = pose.extent;
+  // THE FRAME OF THE COLUMN. v is the line of sight to the middle of the
+  // controller. r and u are the right and the up of the head, made square
+  // to v. A line along u through the controller is vertical in the view of
+  // the head, and a line along r is level, so the column is a column as the
+  // head sees it.
   float v[3] = {in.center[0] - in.head[0], in.center[1] - in.head[1],
                 in.center[2] - in.head[2]};
-  overlay_math::Normalize(v);
-  const float* r = pose.right;
-  // u = r x v: up in the view.
-  float u[3] = {r[1] * v[2] - r[2] * v[1], r[2] * v[0] - r[0] * v[2],
-                r[0] * v[1] - r[1] * v[0]};
+  const float distance = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+  if (!(distance > 1e-4f)) return false;
+  for (int k = 0; k < 3; ++k) v[k] /= distance;
+  float head_right[3] = {in.head_right[0], in.head_right[1], in.head_right[2]};
+  float head_up[3] = {in.head_up[0], in.head_up[1], in.head_up[2]};
+  if (head_right[0] * head_right[0] + head_right[1] * head_right[1] +
+          head_right[2] * head_right[2] < 0.5f) {
+    // No head given: level, and to the right of the line of sight.
+    head_right[0] = -v[2];
+    head_right[1] = 0.0f;
+    head_right[2] = v[0];
+    overlay_math::Normalize(head_right);
+    head_up[0] = 0.0f;
+    head_up[1] = 1.0f;
+    head_up[2] = 0.0f;
+  }
+  float r[3], u[3];
+  {
+    const float a = head_right[0] * v[0] + head_right[1] * v[1] +
+                    head_right[2] * v[2];
+    const float b = head_up[0] * v[0] + head_up[1] * v[1] + head_up[2] * v[2];
+    for (int k = 0; k < 3; ++k) {
+      r[k] = head_right[k] - a * v[k];
+      u[k] = head_up[k] - b * v[k];
+    }
+  }
+  if (r[0] * r[0] + r[1] * r[1] + r[2] * r[2] < 0.01f ||
+      u[0] * u[0] + u[1] * u[1] + u[2] * u[2] < 0.01f) {
+    return false;
+  }
+  overlay_math::Normalize(r);
   overlay_math::Normalize(u);
+  // The side: the outer side of the hand, and it does not change.
+  const int side = in.side == -1 || in.side == 1 ? in.side
+                   : in.first < 0                 ? -1
+                                                  : 1;
+  // THE INNER EDGE, from the outline as the head sees it: x of a point in
+  // the view is its offset along the right of the head over its depth along
+  // the forward of the head. The edge is `gap` (at the depth of the
+  // controller) past the outline point farthest to the side of the cards.
+  const float fwd[3] = {head_up[1] * head_right[2] - head_up[2] * head_right[1],
+                        head_up[2] * head_right[0] - head_up[0] * head_right[2],
+                        head_up[0] * head_right[1] - head_up[1] * head_right[0]};
+  auto view_x = [&](const float p[3]) {
+    const float d[3] = {p[0] - in.head[0], p[1] - in.head[1],
+                        p[2] - in.head[2]};
+    float depth = d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2];
+    if (depth < 0.05f) depth = 0.05f;
+    return (d[0] * head_right[0] + d[1] * head_right[1] +
+            d[2] * head_right[2]) / depth;
+  };
+  const float c_depth = distance * (v[0] * fwd[0] + v[1] * fwd[1] +
+                                    v[2] * fwd[2]);
+  if (!(c_depth > 0.05f)) return false;
+  float most = side * view_x(in.center);
+  for (int p = 0; p < in.outline_count; ++p) {
+    const float x = side * view_x(in.outline[p]);
+    if (x > most) most = x;
+  }
+  const float target = side * (most + in.gap / c_depth);
+  // The offset along r that puts the point center + offset * r at `target`.
+  const float ca = (in.center[0] - in.head[0]) * head_right[0] +
+                   (in.center[1] - in.head[1]) * head_right[1] +
+                   (in.center[2] - in.head[2]) * head_right[2];
+  const float r_right = r[0] * head_right[0] + r[1] * head_right[1] +
+                        r[2] * head_right[2];
+  const float r_fwd = r[0] * fwd[0] + r[1] * fwd[1] + r[2] * fwd[2];
+  const float denominator = r_right - target * r_fwd;
+  if (!(fabsf(denominator) > 1e-4f)) return false;
+  float x_inner = side * (target * c_depth - ca) / denominator;
+  if (x_inner < in.gap) x_inner = in.gap;
+  const float extent = x_inner - in.gap;
+  out->side = side;
+  out->changed = false;
+  out->extent = extent;
   for (int k = 0; k < 3; ++k) {
     out->right[k] = r[k];
     out->up[k] = u[k];
   }
-  ColumnFrame frame = {in.head, in.center, v, r, u,
-                       static_cast<float>(pose.side), pose.extent + in.gap};
+  ColumnFrame frame = {in.head, in.center, v, r, u, head_right,
+                       static_cast<float>(side), x_inner, {}, {}};
+  {
+    float d[3];
+    for (int k = 0; k < 3; ++k) {
+      frame.origin[k] = in.center[k] + r[k] * side * frame.x_inner;
+      d[k] = frame.origin[k] - in.head[k];
+    }
+    overlay_math::Normalize(d);
+    const float b = head_up[0] * d[0] + head_up[1] * d[1] + head_up[2] * d[2];
+    for (int k = 0; k < 3; ++k) frame.dir[k] = head_up[k] - b * d[k];
+    overlay_math::Normalize(frame.dir);
+  }
 
   // Each button in the view.
   float anchor_view[kMaxCards][2];

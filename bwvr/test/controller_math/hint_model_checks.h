@@ -183,6 +183,8 @@ inline void HintModelChecks() {
   int placed = 0, crossed = 0, overlapped = 0, covered = 0, off_edge = 0;
   int outer = 0, faced = 0, poses = 0, cards = 0, off_middle = 0;
   float worst_middle = 0.0f;
+  float worst_roll = 0.0f;    // the height of one end of a card over the other, in the view
+  float worst_column = 0.0f;  // the spread of the inner edges across the view
   float worst_reach = 0.0f;
   for (int n = 0; n < 3000; ++n) {
     float q[4];
@@ -217,7 +219,10 @@ inline void HintModelChecks() {
     in.last_right[0] = 1.0f;
     in.gap = 0.02f;
     in.spacing = 0.006f;
-    in.hysteresis = 1000.0f;  // the cards keep the outer side
+    // A head that looks 25 degrees down.
+    in.head_right[0] = 1.0f;
+    in.head_up[1] = cosf(25.0f * 0.0174533f);
+    in.head_up[2] = -sinf(25.0f * 0.0174533f);
     in.count = 1 + static_cast<int>(Random(&seed) * 3.99f);
     for (int i = 0; i < in.count; ++i) {
       in.width[i] = 0.04f + Random(&seed) * 0.08f;
@@ -236,6 +241,37 @@ inline void HintModelChecks() {
     ++placed;
     if (out.crossings != 0) ++crossed;
     if (out.side == (left ? -1 : 1)) ++outer;
+    {
+      // The view of the head: x along its right, y along its up, over the
+      // depth along its forward.
+      const float fwd[3] = {0.0f, -sinf(25.0f * 0.0174533f),
+                            -cosf(25.0f * 0.0174533f)};
+      auto view = [&](const float p[3], float o[2]) {
+        const float d = p[0] * fwd[0] + p[1] * fwd[1] + p[2] * fwd[2];
+        o[0] = (p[0] * in.head_right[0] + p[1] * in.head_right[1] +
+                p[2] * in.head_right[2]) / d;
+        o[1] = (p[0] * in.head_up[0] + p[1] * in.head_up[1] +
+                p[2] * in.head_up[2]) / d;
+      };
+      float x_low = 1e9f, x_high = -1e9f;
+      for (int i = 0; i < in.count; ++i) {
+        const float x_axis[3] = {1.0f, 0.0f, 0.0f};
+        float cx[3];
+        controller_math::QuatRotate(out.orientation[i], x_axis, cx);
+        float end0[3], end1[3], va[2], vb[2], ve[2];
+        for (int k = 0; k < 3; ++k) {
+          end0[k] = out.center[i][k] - cx[k] * 0.5f * in.width[i];
+          end1[k] = out.center[i][k] + cx[k] * 0.5f * in.width[i];
+        }
+        view(end0, va);
+        view(end1, vb);
+        view(out.edge[i], ve);
+        if (fabsf(va[1] - vb[1]) > worst_roll) worst_roll = fabsf(va[1] - vb[1]);
+        if (ve[0] < x_low) x_low = ve[0];
+        if (ve[0] > x_high) x_high = ve[0];
+      }
+      if (x_high - x_low > worst_column) worst_column = x_high - x_low;
+    }
     {
       float lowest = 1e9f, highest = -1e9f;
       for (int i = 0; i < in.count; ++i) {
@@ -312,6 +348,11 @@ inline void HintModelChecks() {
         "(less than 1 degree off its line of sight)", faced, cards);
   Check(outer == placed, "each pose has the cards on the outer side of the "
         "hand", outer, placed);
+  Check(worst_roll < 0.001f, "each card is level in the view of a head that "
+        "looks 25 degrees down", worst_roll, 0.001);
+  Check(worst_column < 0.01f, "the inner edges of the cards of a hand are on "
+        "a vertical line in the view (spread under 0.6 degrees)", worst_column,
+        0.01);
   Check(off_middle == 0, "the middle of each column is within 1.5 cm of the "
         "height of the middle of the controller", worst_middle, 0.015);
   Check(worst_reach < 0.35f, "no card is more than 35 cm from the middle of "
@@ -335,7 +376,6 @@ inline void HintModelChecks() {
     in.last_right[0] = 1.0f;
     in.gap = 0.02f;
     in.spacing = 0.006f;
-    in.hysteresis = 0.04f;
     in.count = 2;
     for (int i = 0; i < 2; ++i) {
       in.width[i] = 0.06f;

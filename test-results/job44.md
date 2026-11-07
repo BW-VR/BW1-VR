@@ -17,3 +17,10 @@ Each branch: `.\dev.ps1 build -Clean` (5948 and 5951 checks, 0 failed). Each log
 - st-snap45 (`snap_turn=2`): PROVEN. One line "turned right by 45 degrees about your head, heading now 101.1 degrees", and no smooth turn lines. The pictures turn 45 degrees.
 
 Pictures: C:\BW1-VR\local\shots\job44\cant-sheet.png and smoothturn-sheet.png.
+## Job 47: the smooth turn again (agent/smoothturn edfd868)
+
+`.\dev.ps1 build -Clean`: 5951 checks, 0 failed. Each log has "build edfd868" and "game renders at 2760x2208". The hold is at the log frames 221 to 281, after the pacing of test_frame_rate starts.
+
+- st-smooth-full3: PROVEN. "the smooth turn starts to the right, 100% of a full push ... heading 56.14 degrees, frame 221", "smooth turn frame 1 of the hold: 1.493 degrees in 0.0166 s at 100% of a full push", "It turned 92.92 degrees right in 1.032 s of 60 frames (90.0 degrees a second), heading 56.14 to 149.06 degrees. The clock of the CPU gave 1.032 s for these frames", and "turn check, 30 frames after the stop the heading is 149.061 degrees, and it was 149.061 degrees at the stop". The vignette goes dark at frame 222 and is clear again after 1.34 s. Pictures: 4780 is mid-turn with dark edges, 4840 is equal to 4900, and they are turned about 90 degrees from 4720.
+- st-smooth-half3: PROVEN. "20% of a full push", "0.288 degrees in 0.0159 s", "It turned 18.10 degrees right in 1.000 s of 60 frames (18.1 degrees a second) ... The clock of the CPU gave 1.000 s", and the turn check holds (74.245).
+- st-walk3: PROVEN IN PART. "A full push moves you 150 cm of the room each second", then "You went 143.29 units over the land, which is 143.29 cm of the room ... The stick was pushed for 1.001 s, which gives 144.2 cm of the room each second, and the view moved on 60 of 60 frames", and "walk check, 30 frames after the stop the waist point is at 2313.25 3203.77, and it was at 2313.25 3203.77 at the stop: 0.000 units apart". The walk is short because the camera zone stopped it at the end: "the walk with the stick asked for your place at 2313.9 3206.0, 52.0 units past the zone. It stops at 2312.5 3204.5, 50.0 units past it (the limit of god_zone_margin=50 ...)".

@@ -3592,6 +3592,7 @@ void CreatureChecks() {
 #include "feel_checks.h"
 #include "pinch_checks.h"
 #include "hand_land_checks.h"
+#include "solid_checks.h"
 #include "feel_shape_checks.h"
 #include "temple_checks.h"
 #include "take_stream_checks.h"
@@ -4031,6 +4032,7 @@ int main() {
   feel_checks::FeelChecks();
   pinch_checks::PinchChecks();
   hand_land_checks::HandLandChecks();
+  solid_checks::SolidChecks();
   feel_shape_checks::FeelShapeChecks();
   temple_checks::TempleChecks();
   eye_luma_checks::EyeLumaChecks();

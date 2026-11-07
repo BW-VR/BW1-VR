@@ -110,8 +110,9 @@
 // the Hand. With hand_feel=0 the curls of the pose stay.
 //
 // THE LAND (docs/hand-model.md, "The Hand stops at the land"). A real hand
-// in the land is drawn on the land, straight over the real hand, with the
-// lift that hand_land.cpp latched for the frame. Hand feel gets that place.
+// in the land is drawn on the land, straight over the real hand, and a real
+// hand in a house, a rock or a tree trunk is drawn on its surface, with the
+// offset that hand_land.cpp latched for the frame. Hand feel gets that place.
 //
 // THE FINGERS FROM OUTSIDE. OverlaySetFinger gives one finger of one hand a
 // curl and a spread for the frame, in place of the curl that the poses give.
@@ -830,10 +831,14 @@ bool BuildFrame() {
     OverlayHand hand = hands.hand[h];
     if (!hand.valid) continue;
     if (other_only && h == hands.pointing) continue;
-    // THE STOP AT THE LAND (hand_land.cpp): a real hand in the land is drawn
-    // on the land, straight over the real hand. The intro has no land.
-    float land_lift = 0.0f;
-    if (!g_intro && HandLandLift(h, &land_lift)) hand.position[1] += land_lift;
+    // THE STOP AT THE LAND AND AT THE SOLIDS (hand_land.cpp): a real hand in
+    // the land is drawn on the land, straight over the real hand, and a real
+    // hand in a house, a rock or a tree trunk is drawn on its surface. The
+    // intro has no land.
+    float stop[3];
+    if (!g_intro && HandLandOffset(h, stop)) {
+      for (int k = 0; k < 3; ++k) hand.position[k] += stop[k];
+    }
     // A hand of the intro that does not show is not built. The low poly hand
     // has no alpha, so it shows only from half the opacity.
     if (g_intro && g_intro_opacity[h] < (mesh ? 0.01f : 0.5f)) continue;
@@ -896,7 +901,7 @@ bool BuildFrame() {
       feel.holding = pointing && have_context && context.holding;
       feel.relaxed = pose == overlay_math::kPoseRelaxed;
       feel.mesh = mesh;
-      feel.land_held = land_lift > 0.0f;
+      feel.land_held = !g_intro && HandLandHeld(h);
       for (int k = 0; k < 3; ++k) feel.position[k] = hand.position[k];
       for (int k = 0; k < 9; ++k) feel.rotation[k] = hand.rotation[k];
       feel.length = g_length;

@@ -32,8 +32,9 @@ want.
    and bring the Hand near your eyes. Wrong: a world that feels too large or
    too small, land or clouds that look wrong at a scale, or a Hand that the
    view cuts near the eyes. Then bend down slowly and put your head into a
-   hill. Wrong: you see under the land, the gold and red cover comes too late
-   or too soon, it flickers on a slope, or its color is hard on the eyes.
+   hill, and then into a house. Wrong: you see under the land or into the
+   house, the gold and red cover comes too late or too soon, it flickers on
+   a slope, or its color is hard on the eyes.
 4. **The zoom.** Zoom in and out with the stick. Then try the switch "Smooth
    zoom" (debug page, View). Wrong: discomfort, a blink, or a rate that is
    too fast or too slow.
@@ -68,10 +69,12 @@ want.
    or too strong, or a pull by accident.
 10. **The fingers on the world.** Put a hand on the land, at a wall of a
     house, on a villager and into the sea, and take a small rock. Push a
-    hand deep into the land and move it there. Wrong: a finger that jumps,
+    hand deep into the land, into a wall of a house and into a tree trunk,
+    and move it there. Wrong: a finger that jumps,
     shakes, bends in the air or goes into the thing, a claw on a small rock,
-    fingers that stop on the water, a hand that goes into the land or jumps
-    on it, or a hand on the land that feels wrong over the real hand.
+    fingers that stop on the water, a hand that goes into the land or a wall,
+    or jumps on it, or a hand on the land or a wall that feels wrong beside
+    the real hand.
 11. **The haptics.** Feel the pulses of a take, a release, a stroke, the
     leash, a command and the land. Wrong: a pulse that is too weak or too
     strong, or a pattern that feels like a buzz or hides the pulse of a

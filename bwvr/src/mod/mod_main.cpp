@@ -262,6 +262,7 @@ void UiDepthSetAccounting(bool on);
 void UiDepthSetHintMode(int mode);
 void UiDepthSetHintSelfTest(int mode);
 void UiDepthSetHintHandDepth(int on, int test_frame);
+void UiDepthSetHintHandTip(int on);
 void UiDepthSetHintScale(float scale);
 DWORD TextureFilterInstall(int requested_anisotropy);
 void TextureFilterReport();
@@ -520,6 +521,10 @@ int g_hint_selftest = 0;
 // Hand (draw_hooks.cpp, HandHintMove), and its test key with a frame.
 int g_hint_hand_depth = 1;
 int g_hint_hand_depth_test_frame = 0;
+// hint_hand_tip: 1 puts a tooltip at the Hand beyond the fingertip, on the
+// side away from the palm (docs/ui-layer.md, 15.3). 0 puts it 6 cm to the
+// right of the place of the game.
+int g_hint_hand_tip = 1;
 char g_hint_profile[64] = {0};
 bool g_controller_haptics = true;
 FakeControllerSettings g_fake_controller;
@@ -1323,6 +1328,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "hint_hand_depth", 1, path) != 0 ? 1 : 0;
   g_hint_hand_depth_test_frame = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "hint_hand_depth_test_frame", 0, path));
+  g_hint_hand_tip =
+      GetPrivateProfileIntA("bwvr", "hint_hand_tip", 1, path) != 0 ? 1 : 0;
   {
     FakeControllerSettings& f = g_fake_controller;
     const auto number = [&](const char* key, int fallback) {
@@ -1914,6 +1921,7 @@ void StartVrStep() {
     UiDepthSetHintScale(g_hint_scale);
     UiDepthSetHintFlat(g_hint_flat);
     UiDepthSetHintHandDepth(g_hint_hand_depth, g_hint_hand_depth_test_frame);
+    UiDepthSetHintHandTip(g_hint_hand_tip);
     UiDepthSetSubtitleLift(g_subtitle_lift);
     UiDepthSetSubtitleDegrees(g_subtitle_degrees);
     // After UiDepthInstall, and before GpuBridgeStart below.

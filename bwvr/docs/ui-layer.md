@@ -995,10 +995,22 @@ in `controller_math.h`):
 1. The size. The box of the call becomes `kHintHandCm` (2.5 cm) of the room
    high at the Hand's depth. The scale is 0.22 at 1 m and 0.40 at 0.55 m, and
    it stays between 0.1 and 3.
-2. The left eye scales the tooltip about the Hand's point, at the game's
-   layout, and moves it `kHintHandSideCm` (6 cm) to the right. It keeps that
-   place as an offset from the Hand's point.
-3. The right eye puts the tooltip at the same offset from its own Hand's
+2. The left eye scales the tooltip about the Hand's point. It keeps the
+   place of step 3 as an offset from the Hand's point.
+3. The place, with `hint_hand_tip=1`: beyond the fingertip. The Hand's
+   point is at the tip of the index finger, and the hand lies from there
+   back to the palm. So in the picture no part of the hand is on the far
+   side of a line through the tip, away from the palm. `hand_glow.cpp`
+   projects the middle of the palm of the mod's hand (`HandExactPalm`) in
+   each eye, and `HintBeyondTip` (`controller_math.h`) puts the tooltip on
+   the line from the palm through the tip, with its nearest edge
+   `kHintTipGapCm` (1.5 cm) of the room past the tip. When the palm is less
+   than 2 cm from the tip in the picture, the finger points along the view,
+   and the tooltip goes up from the tip. With the hand held low and
+   pointing forward, that is above and beyond the fingertip. When the mod
+   does not draw its hand, and with `hint_hand_tip=0`, the tooltip keeps
+   the game's layout and moves `kHintHandSideCm` (6 cm) to the right.
+4. The right eye puts the tooltip at the same offset from its own Hand's
    point. So both eyes give the tooltip the Hand's disparity, and it shows at
    the Hand's depth, beside the hand.
 
@@ -1008,8 +1020,9 @@ The game's mouse picture hint (the widget band) is not changed. With the control
 hints become key caps and take the tooltip path.
 
 The game draws its Hand after the help, so the mesh can hide a part of a
-label. The offset of 6 cm keeps a label clear of the arm and of the bundle in
-the Hand. That value is not yet checked in a desktop run.
+label. The place beyond the fingertip keeps a label clear of the finger, of
+the palm and of the bundle in the Hand. The move of 6 cm to the right does
+not: the finger can go to the right of the point in the picture.
 
 ### 15.4 The log
 
@@ -1017,14 +1030,18 @@ On a sample frame (every 150 frames, and when a tooltip with a new text
 shows) the tag `ui hint` gives each tooltip, hand hint picture and subtitle
 bar with the eye, its box as the game drew it, the pointer and the Hand's
 point in that eye. A second line gives the scale and the place at the Hand.
-The report of the `ui depth` tag counts the tooltips at the Hand.
+With `hint_hand_tip=1` a third line gives the palm and the tip in the left
+eye, the size of the box, and the gap: `the tooltip goes beyond the
+fingertip: the palm is at X Y and the tip at X Y`. With no palm it says that
+the tooltip goes 6 cm to the right. The report of the `ui depth` tag counts
+the tooltips at the Hand and those beyond the fingertip.
 
 ### 15.5 Tests
 
 The math test (`HintHandChecks`) covers the size at 1 m and at 0.55 m, the
-limits, the scale about the Hand's point in the left eye, and the Hand's
-disparity for a point of the tooltip in both eyes. The desktop rig is the bulk
-take rig of `hand.md` with `help_test=1`.
+limits, the scale about the Hand's point in the left eye, the Hand's
+disparity for a point of the tooltip in both eyes, and the place beyond the
+fingertip (`HintBeyondTip`) for a finger across the view and along it.
 
 `village_run.ps1 -Kind tooltip` (`hint_card=0`) has the tooltip "Amount: 128"
 of a pile at the Hand's point, 0.77 m from the eyes, at the scale 0.358. Each
@@ -1083,6 +1100,7 @@ of the game takes the flat path then.
 | Key of `bwvr.ini` | Default | Meaning |
 | --- | --- | --- |
 | `hint_hand_depth` | 1 | 1: a tooltip or a hint of the game at the game's Hand has the depth of the Hand. 0: the same pixel in both eyes |
+| `hint_hand_tip` | 1 | 1: a tooltip at the Hand of the controller goes beyond the fingertip, on the side away from the palm (15.3). 0: it keeps the game's layout, 6 cm to the right |
 
 With `test_keys=1`, Ctrl, Shift and the slash key change `hint_hand_depth` in
 play, with a long pulse for 1 and a short pulse for 0. Test keys for the

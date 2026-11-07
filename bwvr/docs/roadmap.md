@@ -994,6 +994,9 @@ game as it is.
     - The hint at the game's Hand (B34) in an eye picture at a nearer zoom.
       Needs a recipe: `village_run.ps1 -Kind tooltip` is the recipe of the
       tooltip.
+    - The tooltip beyond the fingertip (`hint_hand_tip=1`, `ui-layer.md`,
+      15.3): `village_run.ps1 -Kind tooltip`, with "Amount" clear of the
+      index finger in both eye pictures.
   - The intro:
     - A still hand with no flicker of one frame: `intro_run.ps1` with the
       scripted hands of its header. Needs a log line: a count of the changes

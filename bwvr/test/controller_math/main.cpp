@@ -3253,6 +3253,47 @@ void HintHandChecks() {
   Near("and no vertical disparity", far_l[1] - far_r[1], 0.0, 1e-3);
   Near("the size between two points is scaled",
        (far_l[0] - corner_l[0]), 100.0 * s1, 1e-3);
+
+  // BEYOND THE FINGERTIP (hint_hand_tip). A box of 80 by 30 px, a gap of 15
+  // px. The palm is down and to the right of the tip: the finger points up
+  // and to the left, and the box goes up and to the left of the tip.
+  {
+    const float tip[2] = {1000.0f, 1000.0f};
+    const float palm[2] = {1060.0f, 1080.0f};  // 100 px away, along 0.6 0.8
+    float corner[2];
+    HintBeyondTip(tip, palm, 80.0f, 30.0f, 15.0f, 20.0f, corner);
+    const float right = corner[0] + 80.0f, bottom = corner[1] + 30.0f;
+    // Each corner of the box is at least the gap past the tip along -u.
+    const float u[2] = {-0.6f, -0.8f};
+    float least = 1e9f;
+    const float xs[2] = {corner[0], right}, ys[2] = {corner[1], bottom};
+    for (int i = 0; i < 2; ++i) {
+      for (int j = 0; j < 2; ++j) {
+        const float along = (xs[i] - tip[0]) * u[0] + (ys[j] - tip[1]) * u[1];
+        if (along < least) least = along;
+      }
+    }
+    Near("the nearest corner of the box is the gap past the tip", least, 15.0,
+         1e-3);
+    Check(right < tip[0] + 1.0f || bottom < tip[1],
+          "the box is on the side of the tip away from the palm", 1, 1);
+    // A palm 10 px from the tip: the finger points along the view, and the
+    // box goes up from the tip, with its middle over the tip.
+    const float near_palm[2] = {1006.0f, 1008.0f};
+    HintBeyondTip(tip, near_palm, 80.0f, 30.0f, 15.0f, 20.0f, corner);
+    Near("a finger along the view: the box is over the tip (x)",
+         corner[0] + 40.0f, 1000.0, 1e-3);
+    Near("its bottom is the gap over the tip", corner[1] + 30.0f, 985.0,
+         1e-3);
+    // The palm on the left: the box goes to the right, its middle at the
+    // height of the tip.
+    const float left_palm[2] = {900.0f, 1000.0f};
+    HintBeyondTip(tip, left_palm, 80.0f, 30.0f, 15.0f, 20.0f, corner);
+    Near("the palm on the left: the left edge is the gap past the tip",
+         corner[0], 1015.0, 1e-3);
+    Near("and the middle is at the height of the tip", corner[1] + 15.0f,
+         1000.0, 1e-3);
+  }
 }
 
 // THE CREATURE BY TOUCH (docs/creature.md, "The Creature by touch"): the body

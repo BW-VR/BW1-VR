@@ -297,9 +297,8 @@ keeps the mod as it is.
   - The controller in the hand with its lit buttons and their cards
     (`hint_style=2`, `controller-hints.md`, 9.14). Desktop runs show the
     cards on the outer side of each hand, level in the view, with no
-    crossings, at 0.2 to 0.42 ms a frame. Open: a desktop run of
-    `hint_body_fine=1` (the ink outline of the rings and of the strap of the
-    Index, and the cost of the Vive wand and the Cosmos). Only a headset can show whether
+    crossings, with a continuous ink outline, at 0.2 to 0.6 ms a frame.
+    Only a headset can show whether
     the model is at the real controller and whether the cards read at
     55 cm (`headset-checks.md`, 21).
 

@@ -1748,7 +1748,15 @@ Pro 3201, Touch v3 4594, Touch v2 3335, Index 6053, Vive wand 9909, Vive
 Cosmos 9670, Vive Focus 3 3444, HP 4826, Pico 4 3835, the controller with
 only a trigger 2682. The goal is under 0.3 ms a frame for two controllers and four cards.
 The Vive wand and the Vive Cosmos have almost three times the triangles of
-the Touch Plus, so they cost more.
+the Touch Plus, so they cost more. Desktop runs (Direct3D 9, the hints
+recipe, the last window of 450 frames), `hint_body_fine` at 1 and 0: Touch
+Plus 0.205 and 0.183 ms, Touch v3 0.239 and 0.206, Index 0.305 and 0.196,
+Cosmos 0.414 and 0.206, Vive wand 0.587 and 0.360. The fine body loads in 7
+to 14 ms on the thread.
+
+The outline also draws short ink dashes inside the body where the surface
+folds (along the handle of the Index). The full model of the file has
+them too. They do not hide the shape.
 
 **Tests.** The math test (`hint_model_checks.h`): the model of each profile
 and headset name, the nodes of each control, the control of each word, the

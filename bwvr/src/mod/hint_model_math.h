@@ -327,7 +327,9 @@ struct StackOut {
   float right[3];    // right in the view
   float up[3];       // up in the view
   float extent;      // how far the outline goes to the side of the cards
-  float orientation[4];       // of each card: square to the line of sight
+  // The turn of each card: square to the line of sight from the head to its
+  // own middle, with no roll.
+  float orientation[kMaxCards][4];
   float center[kMaxCards][3];
   float edge[kMaxCards][3];   // the middle of the inner edge of each card
   int slot[kMaxCards];        // the place of each card from the top, 0 first
@@ -368,14 +370,98 @@ inline bool SegmentsCross(const float a0[2], const float a1[2],
          ((d3 > 0.0f && d4 < 0.0f) || (d3 < 0.0f && d4 > 0.0f));
 }
 
+// One column of cards from the top, in the order `column`. Each card faces
+// the head from its own middle, so a card above or below the controller is
+// tilted to the head, and in the view it is taller than in the plane of the
+// controller. So each card goes under the card above it as the head sees
+// them: its top corners are `spacing` under the bottom corners of the card
+// above, in the view. The cards with a button have their middle at the mean
+// height of their buttons in the view (`mean`), and the cards with no button
+// go above them. `x_inner` is the inner edge of the column in the plane of
+// the controller.
+struct ColumnFrame {
+  const float* head;
+  const float* center;
+  const float* v;
+  const float* r;
+  const float* u;
+  float side;
+  float x_inner;
+};
+
+inline void PlaceCard(const StackIn& in, const ColumnFrame& f, int i,
+                      float y, StackOut* out, float* top, float* bottom) {
+  const float x_center = f.side * (f.x_inner + 0.5f * in.width[i]);
+  for (int k = 0; k < 3; ++k) {
+    out->center[i][k] = f.center[k] + f.r[k] * x_center + f.u[k] * y;
+  }
+  controller_math::FacePose(out->center[i], f.head, out->orientation[i]);
+  const float x_axis[3] = {1.0f, 0.0f, 0.0f};
+  const float y_axis[3] = {0.0f, 1.0f, 0.0f};
+  float card_right[3], card_up[3];
+  controller_math::QuatRotate(out->orientation[i], x_axis, card_right);
+  controller_math::QuatRotate(out->orientation[i], y_axis, card_up);
+  *top = -1e9f;
+  *bottom = 1e9f;
+  for (int c = 0; c < 4; ++c) {
+    const float sx = (c & 1) ? 0.5f : -0.5f;
+    const float sy = (c & 2) ? 0.5f : -0.5f;
+    float corner[3];
+    for (int k = 0; k < 3; ++k) {
+      corner[k] = out->center[i][k] + card_right[k] * sx * in.width[i] +
+                  card_up[k] * sy * in.height[i];
+    }
+    float view[2];
+    ViewPoint(corner, f.head, f.center, f.v, f.r, f.u, view);
+    if (sy > 0.0f && view[1] > *top) *top = view[1];
+    if (sy < 0.0f && view[1] < *bottom) *bottom = view[1];
+  }
+  for (int k = 0; k < 3; ++k) {
+    out->edge[i][k] =
+        out->center[i][k] - f.side * card_right[k] * 0.5f * in.width[i];
+  }
+}
+
+inline void PlaceColumn(const StackIn& in, const ColumnFrame& f,
+                        const int column[], int fixed_count, float mean,
+                        bool anchored, StackOut* out) {
+  float start = 0.0f;
+  for (int pass = 0; pass < 2; ++pass) {
+    float cursor = start;
+    float block_top = 0.0f, block_bottom = 0.0f;
+    for (int s = 0; s < in.count; ++s) {
+      const int i = column[s];
+      // The middle for a top at the cursor, in three steps: the tilt of a
+      // card changes with its height.
+      float y = cursor - 0.5f * in.height[i];
+      float top = 0.0f, bottom = 0.0f;
+      for (int step = 0; step < 3; ++step) {
+        PlaceCard(in, f, i, y, out, &top, &bottom);
+        y += cursor - top;
+      }
+      PlaceCard(in, f, i, y, out, &top, &bottom);
+      if (s == fixed_count) block_top = top;
+      block_bottom = bottom;
+      cursor = bottom - in.spacing;
+    }
+    if (pass == 0) {
+      if (anchored && fixed_count < in.count) {
+        start += mean - 0.5f * (block_top + block_bottom);
+      } else {
+        start += 0.5f * (start - (cursor + in.spacing));
+      }
+    }
+  }
+}
+
 inline bool Stack(const StackIn& in, StackOut* out) {
   if (in.count <= 0 || in.count > kMaxCards) return false;
   float most_width = 0.0f;
   for (int i = 0; i < in.count; ++i) {
     if (in.width[i] > most_width) most_width = in.width[i];
   }
-  // The side, right in the view and the turn come from the pose of the hint
-  // card, with the middle of the controller in the place of the wrist.
+  // The side, right in the view and the extent come from the pose of the
+  // hint card, with the middle of the controller in the place of the wrist.
   hint_card_math::Hand hand;
   for (int k = 0; k < 3; ++k) {
     hand.wrist[k] = in.center[k];
@@ -391,7 +477,6 @@ inline bool Stack(const StackIn& in, StackOut* out) {
   out->side = pose.side;
   out->changed = pose.changed;
   out->extent = pose.extent;
-  for (int k = 0; k < 4; ++k) out->orientation[k] = pose.orientation[k];
   float v[3] = {in.center[0] - in.head[0], in.center[1] - in.head[1],
                 in.center[2] - in.head[2]};
   overlay_math::Normalize(v);
@@ -404,8 +489,8 @@ inline bool Stack(const StackIn& in, StackOut* out) {
     out->right[k] = r[k];
     out->up[k] = u[k];
   }
-  const float side = static_cast<float>(pose.side);
-  const float inner = pose.extent + in.gap;
+  ColumnFrame frame = {in.head, in.center, v, r, u,
+                       static_cast<float>(pose.side), pose.extent + in.gap};
 
   // The height of each button in the view, and their mean.
   float anchor_view[kMaxCards][2];
@@ -420,7 +505,7 @@ inline bool Stack(const StackIn& in, StackOut* out) {
   if (anchored > 0) mean /= static_cast<float>(anchored);
 
   // The cards with no button go first. The order of the others is the best
-  // of all orders (4 cards have 24).
+  // of all orders (4 cards have 24), with the cards as they are turned.
   int fixed[kMaxCards], movable[kMaxCards];
   int fixed_count = 0, movable_count = 0;
   for (int i = 0; i < in.count; ++i) {
@@ -430,8 +515,7 @@ inline bool Stack(const StackIn& in, StackOut* out) {
       fixed[fixed_count++] = i;
     }
   }
-  int best_order[kMaxCards];
-  float best_y[kMaxCards];
+  int best_column[kMaxCards];
   int best_crossings = 1 << 20;
   float best_cost = 1e30f;
   int order[kMaxCards];
@@ -440,41 +524,27 @@ inline bool Stack(const StackIn& in, StackOut* out) {
   int c[kMaxCards] = {0, 0, 0, 0};
   bool more = true;
   int step = 0;
+  StackOut trial;
   while (more) {
-    // The cards from the top: the fixed ones, then this order.
     int column[kMaxCards];
     int n = 0;
     for (int i = 0; i < fixed_count; ++i) column[n++] = fixed[i];
     for (int i = 0; i < movable_count; ++i) column[n++] = order[i];
-    float total = in.spacing * static_cast<float>(in.count - 1);
-    for (int i = 0; i < in.count; ++i) total += in.height[i];
-    // The middle of the cards with a button is at the mean height of the
-    // buttons.
-    float fixed_height = 0.0f;
-    for (int i = 0; i < fixed_count; ++i) {
-      fixed_height += in.height[fixed[i]] + in.spacing;
-    }
-    const float movable_height = total - fixed_height;
-    const float top = anchored > 0 ? mean + 0.5f * movable_height + fixed_height
-                                   : 0.5f * total;
-    float y[kMaxCards];
-    float at = top;
-    for (int s = 0; s < n; ++s) {
-      const int i = column[s];
-      y[i] = at - 0.5f * in.height[i];
-      at -= in.height[i] + in.spacing;
-    }
+    PlaceColumn(in, frame, column, fixed_count, mean, anchored > 0, &trial);
     int crossings = 0;
     float cost = 0.0f;
+    float edge_view[kMaxCards][2];
+    for (int a = 0; a < in.count; ++a) {
+      ViewPoint(trial.edge[a], in.head, in.center, v, r, u, edge_view[a]);
+    }
     for (int a = 0; a < in.count; ++a) {
       if (!in.has_anchor[a]) continue;
-      const float d = y[a] - anchor_view[a][1];
+      const float d = edge_view[a][1] - anchor_view[a][1];
       cost += d * d;
-      const float a1[2] = {side * inner, y[a]};
       for (int b = a + 1; b < in.count; ++b) {
         if (!in.has_anchor[b]) continue;
-        const float b1[2] = {side * inner, y[b]};
-        if (SegmentsCross(anchor_view[a], a1, anchor_view[b], b1)) {
+        if (SegmentsCross(anchor_view[a], edge_view[a], anchor_view[b],
+                          edge_view[b])) {
           ++crossings;
         }
       }
@@ -483,8 +553,7 @@ inline bool Stack(const StackIn& in, StackOut* out) {
         (crossings == best_crossings && cost < best_cost)) {
       best_crossings = crossings;
       best_cost = cost;
-      for (int s = 0; s < n; ++s) best_order[s] = column[s];
-      for (int i = 0; i < in.count; ++i) best_y[i] = y[i];
+      for (int s = 0; s < n; ++s) best_column[s] = column[s];
     }
     // The next order (Heap's method, one step).
     more = false;
@@ -503,16 +572,9 @@ inline bool Stack(const StackIn& in, StackOut* out) {
       ++step;
     }
   }
+  PlaceColumn(in, frame, best_column, fixed_count, mean, anchored > 0, out);
   out->crossings = best_crossings;
-  for (int s = 0; s < in.count; ++s) out->slot[best_order[s]] = s;
-  for (int i = 0; i < in.count; ++i) {
-    const float x_edge = side * inner;
-    const float x_center = side * (inner + 0.5f * in.width[i]);
-    for (int k = 0; k < 3; ++k) {
-      out->edge[i][k] = in.center[k] + r[k] * x_edge + u[k] * best_y[i];
-      out->center[i][k] = in.center[k] + r[k] * x_center + u[k] * best_y[i];
-    }
-  }
+  for (int s = 0; s < in.count; ++s) out->slot[best_column[s]] = s;
   return true;
 }
 

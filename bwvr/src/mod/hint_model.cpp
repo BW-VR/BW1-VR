@@ -1395,8 +1395,10 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
   for (int i = 0; i < s.count; ++i) {
     LocalToGrip(grip, turn, stack.edge[i], s.edge[i]);
     for (int k = 0; k < 3; ++k) out->center[i][k] = stack.center[i][k];
+    for (int k = 0; k < 4; ++k) {
+      out->orientation[i][k] = stack.orientation[i][k];
+    }
   }
-  for (int k = 0; k < 4; ++k) out->orientation[k] = stack.orientation[k];
   out->side = stack.side;
   out->changed = stack.changed;
   return true;

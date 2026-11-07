@@ -38,7 +38,7 @@ struct HintModelCard {
 };
 struct HintModelPlaced {
   float center[kHintModelCards][3];
-  float orientation[4];
+  float orientation[kHintModelCards][4];  // each card faces the head
   int side;  // -1 the cards are left of the controller in the view, 1 right
   bool changed;
 };

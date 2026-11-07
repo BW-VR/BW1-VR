@@ -1631,10 +1631,15 @@ cards:
 **The place of the cards** (`Stack`). The cards of a hand are a column on the
 outer side of the hand, as the head sees it: right of the right hand and
 left of the left hand. The column is at the distance of the controller from
-the head, and each card faces the head with no roll. The inner edges of the
-cards are on one line, 2 cm past the outline of the hand and of the box of
-the controller, so no card is on the hand or on the controller. The cards
-are 6 mm apart, and their middle is at the mean height of their buttons.
+the head. Each card faces the head from its own middle, with no roll, so a
+card above or below the controller tilts to the head and is square to its
+own line of sight. The inner edges of the cards are on one line, 2 cm past
+the outline of the hand and of the box of the controller, so no card is on
+the hand or on the controller. In the view the cards are 6 mm apart: the
+place of each card comes from the corners of the card above it as the head
+sees them, because a tilted card is taller in the view than in the plane of
+the controller. The middle of the cards with a button is at the mean height
+of their buttons.
 The side changes as the card at the wrist does (9.3): when the outline goes
 4 cm farther to the side of the cards than to the other side.
 
@@ -1701,7 +1706,8 @@ and headset name, the nodes of each control, the control of each word, the
 press, the crossing of two lines, and 3000 poses of play with 1 to 4 cards:
 no two lines cross in the view, no two cards of a hand overlap, no card
 covers a point of the hand or of the controller, each line ends at the
-inner edge of its card, and the cards face the head. A test program outside
+inner edge of its card as it is turned, and each card is less than 1 degree
+off its own line of sight. A test program outside
 the game loaded each model with `hint_model.cpp`, placed four cards and drew
 the controllers on the CPU: each model loads, and its lit parts are the
 trigger, the grip and A.

@@ -236,12 +236,18 @@ inline void HintModelChecks() {
     hint_card_math::Card card[hm::kMaxCards];
     for (int i = 0; i < in.count; ++i) {
       for (int k = 0; k < 3; ++k) card[i].center[k] = out.center[i][k];
-      for (int k = 0; k < 4; ++k) card[i].orientation[k] = out.orientation[k];
-      // The line ends on the inner edge of its card.
+      for (int k = 0; k < 4; ++k) {
+        card[i].orientation[k] = out.orientation[i][k];
+      }
+      // The line ends on the inner edge of its card, along the width of the
+      // card as it is turned.
       float d[3];
       for (int k = 0; k < 3; ++k) d[k] = out.center[i][k] - out.edge[i][k];
-      const float along = d[0] * out.right[0] + d[1] * out.right[1] +
-                          d[2] * out.right[2];
+      const float x_axis[3] = {1.0f, 0.0f, 0.0f};
+      float card_right[3];
+      controller_math::QuatRotate(out.orientation[i], x_axis, card_right);
+      const float along = d[0] * card_right[0] + d[1] * card_right[1] +
+                          d[2] * card_right[2];
       if (fabsf(fabsf(along) - 0.5f * in.width[i]) > 1e-4f ||
           fabsf(controller_math::Distance(out.center[i], out.edge[i]) -
                 0.5f * in.width[i]) > 1e-4f) {
@@ -253,12 +259,12 @@ inline void HintModelChecks() {
       // The front of the card faces the head.
       const float front_local[3] = {0.0f, 0.0f, 1.0f};
       float front[3];
-      controller_math::QuatRotate(out.orientation, front_local, front);
+      controller_math::QuatRotate(out.orientation[i], front_local, front);
       float to_head[3];
       for (int k = 0; k < 3; ++k) to_head[k] = head[k] - out.center[i][k];
       overlay_math::Normalize(to_head);
       if (front[0] * to_head[0] + front[1] * to_head[1] +
-              front[2] * to_head[2] > 0.95f) {
+              front[2] * to_head[2] > 0.99985f) {
         ++faced;
       }
       if (hint_card_math::CardCoversAny(card[i], in.width[i], in.height[i],
@@ -286,9 +292,8 @@ inline void HintModelChecks() {
         "controller in the view", covered, 0);
   Check(off_edge == 0, "each line ends at the middle of the inner edge of "
         "its card", off_edge, 0);
-  Check(faced * 100 >= 99 * cards, "the cards face the head (99 "
-        "percent and more of the cards are within 18 degrees of the head)",
-        faced, cards);
+  Check(faced == cards, "each card faces the head from its own middle "
+        "(less than 1 degree off its line of sight)", faced, cards);
   Check(outer * 100 >= 90 * placed, "90 percent and more of the poses have "
         "the cards on the outer side of the hand", outer, placed);
   Check(worst_reach < 0.35f, "no card is more than 35 cm from the middle of "

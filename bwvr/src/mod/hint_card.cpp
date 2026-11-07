@@ -2181,7 +2181,7 @@ void ModelCards(Content content[kHands], Plan plan[kHands],
     for (int i = 0; i < mh.count; ++i) {
       for (int k = 0; k < 3; ++k) pc.card[i].center[k] = where.center[i][k];
       for (int k = 0; k < 4; ++k) {
-        pc.card[i].orientation[k] = where.orientation[k];
+        pc.card[i].orientation[k] = where.orientation[i][k];
       }
       pc.width[i] = cards[i].width;
       pc.height[i] = cards[i].height;

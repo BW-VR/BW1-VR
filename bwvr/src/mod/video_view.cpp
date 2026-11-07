@@ -50,7 +50,9 @@
 // pose of the left eye that the pictures are drawn from and the projection
 // of the game, or for a screen in the room, to the place on the screen
 // where the eye sees it. Then to the area of the window. vk_window.cpp
-// draws them over the area with their alpha (vk_video.cpp).
+// draws them over the area with their alpha (vk_video.cpp). A card from the
+// pixels of the CPU gives the number of its picture
+// (video_view_copy_changed), so vk_video.cpp copies it only when it changes.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -88,6 +90,7 @@ int g_fov = vm::kFovDefault;
 int g_smooth_ms = vm::kSmoothDefault;
 bool g_marks = true;
 bool g_layers = true;  // video_view_layers
+bool g_copy_changed = true;  // video_view_copy_changed
 // backend=vulkan, read once: ProxyBackendVulkan reads the ini file.
 bool g_vulkan = false;
 
@@ -121,8 +124,11 @@ uint64_t g_layer_windows = 0;
 uint64_t g_layer_draws = 0;
 uint64_t g_layer_outside = 0;
 uint64_t g_layer_cards = 0, g_layer_panels = 0, g_layer_walls = 0;
-// The first draw of each card, of a panel and of a wall goes into the log.
-const int kSaidCount = bwvr::kCards + 2;
+uint64_t g_layer_room_panels = 0;  // the panels of panel_kit on a card
+// The first draw of each card, of a panel of the interface, of a wall and of
+// a panel in the room goes into the log.
+const int kSaidRoomPanel = bwvr::kCards + 2;
+const int kSaidCount = bwvr::kCards + 3;
 bool g_said[kSaidCount] = {};
 const char* const kCardNames[bwvr::kCards] = {
     "the hint card of the pointing hand", "the hint card of the other hand",
@@ -255,10 +261,13 @@ void LogKeys(const char* by) {
          "(video_view_down_pct). Smoothed head %d ms within %.0f degrees "
          "(video_view_smooth_ms), corner marks in the headset %s "
          "(video_view_marks=%d), the quad layers of the headset %s "
-         "(video_view_layers=%d)",
+         "(video_view_layers=%d), a copy of the pixels of a card %s "
+         "(video_view_copy_changed=%d)",
          by, colon, g_fov, g_down, g_smooth_ms, vm::kBandDeg,
          g_marks ? "on" : "off", g_marks ? 1 : 0,
-         g_layers ? "in the video" : "not in the video", g_layers ? 1 : 0);
+         g_layers ? "in the video" : "not in the video", g_layers ? 1 : 0,
+         g_copy_changed ? "only after a new picture" : "at each present",
+         g_copy_changed ? 1 : 0);
 }
 
 // The session keeps the record of the layers only while the video wants it.
@@ -269,8 +278,9 @@ void WantLayers() {
 }  // namespace
 
 void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
-                         int marks, int layers) {
+                         int marks, int layers, int copy_changed) {
   g_on = on != 0;
+  g_copy_changed = copy_changed != 0;
   g_down = vm::ClampDown(down_pct);
   g_fov = vm::ClampFov(fov_deg);
   g_smooth_ms = vm::ClampSmooth(smooth_ms);
@@ -534,14 +544,20 @@ int VideoViewDraws(const float uv[4], VideoDraw out[kVideoDraws]) {
         d.texture_width = q.texture_width;
         d.texture_height = q.texture_height;
         for (int k = 0; k < 4; ++k) d.rect[k] = q.rect[k];
+        d.serial = g_copy_changed ? q.serial : 0;
       } else {
         continue;
       }
       d.card = q.index;
       lm::TextureRect(q.rect, static_cast<float>(q.texture_width),
                       static_cast<float>(q.texture_height), d.uv);
-      ++g_layer_cards;
-      if (q.index >= 0 && q.index < bwvr::kCards) said = q.index;
+      if (q.room_panel) {
+        ++g_layer_room_panels;
+        said = kSaidRoomPanel;
+      } else {
+        ++g_layer_cards;
+        if (q.index >= 0 && q.index < bwvr::kCards) said = q.index;
+      }
     }
     ++n;
     if (said >= 0 && !g_said[said]) {
@@ -557,10 +573,12 @@ int VideoViewDraws(const float uv[4], VideoDraw out[kVideoDraws]) {
         x1 = x > x1 ? x : x1;
         y1 = y > y1 ? y : y1;
       }
-      const char* what = said < bwvr::kCards   ? kCardNames[said]
-                         : said == bwvr::kCards ? "a panel of the interface"
-                                                : "a wall of the cut scene "
-                                                  "window";
+      const char* what =
+          said < bwvr::kCards       ? kCardNames[said]
+          : said == bwvr::kCards    ? "a panel of the interface"
+          : said == kSaidRoomPanel  ? "a panel in the room (the places, the "
+                                      "settings or the debug window)"
+                                    : "a wall of the cut scene window";
       ModLog("video view   : %s is in the video for the first time, frame "
              "%llu, from %.2f, %.2f to %.2f, %.2f of the area (0 to 1 across "
              "and down), %s, from %s",
@@ -588,14 +606,15 @@ void VideoViewReport() {
          g_moved.x0, g_moved.y0, g_lag_window, g_mark_passes, g_mark_failed);
   if (g_layers && g_vulkan) {
     ModLog("video view   : %llu windows with quad layers, %llu quads drawn "
-           "(%llu cards, %llu panels, %llu walls), %llu quads outside the "
-           "area",
-           g_layer_windows, g_layer_draws, g_layer_cards, g_layer_panels,
-           g_layer_walls, g_layer_outside);
+           "(%llu cards, %llu panels: %llu of the interface and %llu in the "
+           "room, %llu walls), %llu quads outside the area",
+           g_layer_windows, g_layer_draws, g_layer_cards,
+           g_layer_panels + g_layer_room_panels, g_layer_panels,
+           g_layer_room_panels, g_layer_walls, g_layer_outside);
   }
   g_frames = g_windows = g_mark_passes = g_mark_failed = 0;
   g_layer_windows = g_layer_draws = g_layer_outside = 0;
-  g_layer_cards = g_layer_panels = g_layer_walls = 0;
+  g_layer_cards = g_layer_panels = g_layer_walls = g_layer_room_panels = 0;
   g_lag_window = 0.0f;
 }
 

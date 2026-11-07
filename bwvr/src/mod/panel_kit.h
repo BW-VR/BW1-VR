@@ -80,10 +80,12 @@ void PointOf(const Room& room, float u, float v, float out[3]);
 
 // The quad layer of this frame: the picture of width by height pixels
 // (BGRA, the color multiplied by the alpha) at the place of the panel. The
-// panel uses the quad layer of the ring (kCardRing). False when the runtime
-// refused that layer.
+// panel uses the quad layer of the ring (kCardRing). serial is the number of
+// the picture (bwvr::XrScreen::NewCardSerial): the panel takes a new number
+// for each new picture, so the view for videos copies the picture only when
+// it changes. False when the runtime refused that layer.
 bool StageLayer(const Room& room, const uint8_t* pixels, int width,
-                int height);
+                int height, uint32_t serial);
 
 // --- the picture -----------------------------------------------------------------
 
@@ -242,5 +244,15 @@ void PlainDone(Canvas* canvas);
 // hint_card_style now: the switch "Card look" of the debug page, else
 // `ini` (the value of bwvr.ini).
 int CardStyle(int ini);
+
+// THE WARM OF A PANEL. With panel_warm=1 (bwvr.ini) a panel adds a job to
+// the thread of the warm of the fonts (card_scroll::WarmAdd). The job draws
+// the page and the parts of a first picture, and keeps their copies
+// (Tiles), so the first picture on the frame thread copies them. The panel
+// calls card_scroll::WarmWait before it uses its canvas. With 0 the first
+// picture draws the page and each part on the frame thread. The warm runs
+// only with font_warm=1 and hint_card_style=1. WarmOn reads the key one
+// time, and only the thread of the warm calls it.
+bool WarmOn();
 
 }  // namespace panel_kit

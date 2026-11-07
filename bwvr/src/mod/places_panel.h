@@ -43,5 +43,10 @@ bool PlacesPanelCloseBy(const char* why);
 // empty.
 bool PlacesPanelTestTarget(float out[3]);
 
+// A job of the thread of the warm of the fonts (card_scroll::WarmAdd), with
+// panel_warm=1: the page of the parchment, and each button and seal in the
+// looks of a first picture, so the first open copies them.
+void PlacesPanelWarm();
+
 // Once a report window.
 void PlacesPanelReport();

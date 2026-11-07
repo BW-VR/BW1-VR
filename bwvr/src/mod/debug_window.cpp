@@ -54,6 +54,10 @@
 //   debug_window=1             0: the item "debug" goes to the debug pages
 //                              of the ring (debug_menu.cpp)
 //   hint_card_style=1          1: the parchment. 0: the dark window
+//   panel_warm=1               1: the thread of the warm draws the page and
+//                              the tabs of a first picture
+//                              (DebugWindowWarm). 0: the first picture
+//                              draws them on the frame thread
 //   debug_window_test_save=0   N: saves the first N pictures of the window
 //                              with a new group, a new value, a note or a
 //                              scroll as bwvr-debugwin-<frame>.bmp (a test
@@ -73,6 +77,7 @@
 
 #include <new>
 
+#include "../vr/xr_screen.h"
 #include "card_scroll.h"
 #include "controllers.h"
 #include "cutscene_window.h"
@@ -82,6 +87,7 @@
 #include "haptics.h"
 #include "panel_kit.h"
 #include "radial_menu.h"
+#include "settings_panel.h"
 #include "spell_book.h"
 
 extern void ModLog(const char* format, ...);
@@ -402,6 +408,7 @@ struct Look {
 };
 Look g_drawn;
 bool g_have_drawn = false;
+uint32_t g_serial = 0;  // the number of the picture (panel_kit::StageLayer)
 Look g_saved_look;
 bool g_have_saved = false;
 
@@ -499,10 +506,14 @@ void TabRectOf(int part, int r[4]) {
   }
 }
 
-void DrawTab(kit::Canvas* c, int part, int look, void*) {
+// context is the list of the tab (the warm), or null for the list that
+// shows.
+void DrawTab(kit::Canvas* c, int part, int look, void* context) {
+  const WindowRows* rows =
+      context != nullptr ? static_cast<const WindowRows*>(context) : g_src;
   int r[4];
   TabRectOf(part, r);
-  kit::Button(c, r, look, part == kMostTabs ? L"Close" : g_src->group_name(part),
+  kit::Button(c, r, look, part == kMostTabs ? L"Close" : rows->group_name(part),
               part == kMostTabs ? g_label_font : g_tab_font, part * 7 + 3);
 }
 
@@ -1264,7 +1275,9 @@ void DebugWindowFrame() {
     }
   }
 
-  // The picture of this frame.
+  // The picture of this frame. The thread of the warm can have the canvas
+  // (DebugWindowWarm).
+  card_scroll::WarmWait();
   if (!kit::Start(&g_canvas, kWidth, kHeight, "debug window ")) return;
   Look look;
   BuildLook(&look);
@@ -1291,6 +1304,7 @@ void DebugWindowFrame() {
   }
   g_drawn = look;
   g_have_drawn = true;
+  if (fresh) g_serial = bwvr::XrScreen::NewCardSerial();
   if (fresh && g_saved < g_save && WorthSaving(look)) {
     ++g_saved;
     g_saved_look = look;
@@ -1304,9 +1318,53 @@ void DebugWindowFrame() {
     EyeCaptureSaveUi("debugwin", frame, 1, pixels, kWidth * 4, kWidth,
                      kHeight);
   }
-  if (!kit::StageLayer(g_room, pixels, kWidth, kHeight)) {
+  if (!kit::StageLayer(g_room, pixels, kWidth, kHeight, g_serial)) {
     Close("the runtime refused the layer of the ring", false);
   }
+}
+
+void DebugWindowWarm() {
+  char path[MAX_PATH];
+  if (!IniPath(path)) return;
+  const bool debug =
+      GetPrivateProfileIntA("bwvr", "debug_menu", 0, path) != 0 &&
+      GetPrivateProfileIntA("bwvr", "debug_window", 1, path) != 0;
+  const bool settings =
+      GetPrivateProfileIntA("bwvr", "settings_panel", 1, path) != 0;
+  if ((!debug && !settings) || !kit::WarmOn()) return;
+  const double start = NowMs();
+  if (!kit::Start(&g_canvas, kWidth, kHeight, "debug window ") ||
+      !ParchmentStart()) {
+    return;
+  }
+  // The tabs and Close of each list as its first picture shows them: the
+  // first group is on, and the other tabs are plain. The rows hold the
+  // values of now, so they are drawn at the open.
+  const WindowRows* lists[kWindowSlots] = {debug ? &kDebugRows : nullptr,
+                                           settings ? SettingsPanelRows()
+                                                    : nullptr};
+  int parts = 0;
+  for (const WindowRows* rows : lists) {
+    if (rows == nullptr) continue;
+    for (int part = 0; part < kTabParts; ++part) {
+      if (part < kMostTabs) {
+        const wchar_t* name = rows->group_name(part);
+        if (name == nullptr || name[0] == 0) continue;
+      }
+      int r[4], box[4];
+      TabRectOf(part, r);
+      panel_kit_math::RectBox(r, kit::kRim, kWidth, kHeight, box);
+      kit::ShowPart(&g_canvas, &g_tab_tiles[rows->slot], part,
+                    part == 0 ? kit::kOn : kit::kPlain, box, &DrawTab,
+                    const_cast<WindowRows*>(rows));
+      ++parts;
+    }
+  }
+  ModLog("debug window : panel_warm=1: the thread of the warm drew the page "
+         "and %d tabs of the window in %.1f ms (%s%s%s), so the first picture "
+         "of the window copies them", parts, NowMs() - start,
+         settings ? "the settings" : "", settings && debug ? " and " : "",
+         debug ? "the debug switches" : "");
 }
 
 void DebugWindowReport() {

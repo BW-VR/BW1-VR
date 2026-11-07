@@ -988,6 +988,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_card_saving` | 1 | 1 while the game saves, the card of the pointing hand says "Saving..." (9.12). 0 the cards say nothing in a save |
 | `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
 | `font_warm` | 1 | 1 a thread of the mod draws each letter of each font of the cards one time at the start of the game (9.11, "The first draw of a font"). 0 the first draw of each font of a card makes its letters on the frame thread |
+| `panel_warm` | 1 | With `font_warm=1`: 1 the same thread then draws the page and the parts of the first picture of the panel of places and of the settings window (9.11, "The warm of the panels"). 0 the first picture of each panel draws them on the frame thread |
 | `hint_card_fonts_test_dir` | empty | Test key. The folder of the font files of the scroll. Empty is `bwvr-fonts` beside `runblack.exe`. A desktop run sets the staged folder `bwvr\out\stage\bwvr-fonts` of its worktree |
 
 `hint_card.cpp` reads the keys itself, at the first frame. With `test_keys=1`
@@ -1407,6 +1408,15 @@ test a page of 1024 by 1024 px (`card_scroll::Page`) took 1.8 to 3.4 ms and
 a key 0.1 ms. The panel of places draws 42 parts in its first picture, so
 its keys are about 4 ms of it. Later pictures copy the parts
 (`panel_kit::Tiles`).
+
+**The warm of the panels.** With `panel_warm=1` (the default) the thread of
+the warm runs jobs after the fonts (`card_scroll::WarmAdd`). The job of the
+panel of places draws its page and the parts of a first picture. The job of
+the window of the settings and of the debug switches draws its page and its
+tabs (`ui-layer.md`, 22.4 and 23.3). So the first open of a panel copies
+these parts. A panel that a job draws waits for the end of the thread
+before it uses its picture (`card_scroll::WarmWait`). The thread ends long
+before a player can open a panel. When a panel waits, the log says so.
 
 **Tests.** A desktop run saves each new picture of a card with
 `hint_card_save_test=1`, and loads the fonts from the staged folder of its

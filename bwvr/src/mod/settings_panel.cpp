@@ -46,6 +46,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "../vr/xr_screen.h"
 #include "card_scroll.h"
 #include "controllers.h"
 #include "controls_page.h"
@@ -380,6 +381,8 @@ struct Look {
 };
 Look g_drawn;
 bool g_have_drawn = false;
+// The number of the picture (panel_kit::StageLayer).
+uint32_t g_welcome_serial = 0;
 
 double NowSeconds() {
   static LARGE_INTEGER frequency = {};
@@ -585,6 +588,8 @@ bool SettingsPanelOpenFromRing() {
   return DebugWindowOpenWith(&kSettingsRows);
 }
 
+const WindowRows* SettingsPanelRows() { return &kSettingsRows; }
+
 bool WelcomePageOpen() { return g_room.open; }
 
 bool WelcomePageHoldsTrigger() {
@@ -733,12 +738,14 @@ void WelcomePageFrame() {
   }
   g_drawn = look;
   g_have_drawn = true;
+  if (fresh) g_welcome_serial = bwvr::XrScreen::NewCardSerial();
   if (fresh && g_welcome_saved < g_welcome_save) {
     ++g_welcome_saved;
     EyeCaptureSaveUi("welcome", frame, 1, pixels, kWelcomeWidth * 4,
                      kWelcomeWidth, kWelcomeHeight);
   }
-  if (!kit::StageLayer(g_room, pixels, kWelcomeWidth, kWelcomeHeight)) {
+  if (!kit::StageLayer(g_room, pixels, kWelcomeWidth, kWelcomeHeight,
+                       g_welcome_serial)) {
     Close("the runtime refused the layer of the ring", false, false);
   }
 }

@@ -206,6 +206,13 @@ SRWLOCK g_start_lock = SRWLOCK_INIT;
 // The thread of the warm of the fonts (WarmStart), and whether it runs.
 DWORD g_warm_thread = 0;
 volatile LONG g_warm_started = 0;
+// The jobs of the thread after the fonts (WarmAdd), and the event that the
+// thread sets at its end. g_warm_over is 1 after a WarmWait saw that end.
+const int kMostJobs = 4;
+WarmJob g_jobs[kMostJobs] = {};
+int g_job_count = 0;
+HANDLE g_warm_done = nullptr;
+volatile LONG g_warm_over = 0;
 bool g_started = false;
 bool g_ok = false;
 double g_start_ms = 0.0;
@@ -495,6 +502,9 @@ DWORD WINAPI WarmThread(void*) {
          "the load of the fonts. So the first draw of a card does not make "
          "the letters on the frame thread",
          fonts, g_warm_ms);
+  // The jobs come after the fonts, so their letters are warm too.
+  for (int i = 0; i < g_job_count; ++i) g_jobs[i]();
+  SetEvent(g_warm_done);
   return 0;
 }
 
@@ -531,9 +541,17 @@ void WarmStart() {
            warm, style);
     return;
   }
-  HANDLE thread = CreateThread(nullptr, 0, &WarmThread, nullptr,
-                               CREATE_SUSPENDED, &g_warm_thread);
+  // The event is set before the thread exists, so a WarmWait of the frame
+  // thread always finds it.
+  g_warm_done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  HANDLE thread =
+      g_warm_done != nullptr
+          ? CreateThread(nullptr, 0, &WarmThread, nullptr, CREATE_SUSPENDED,
+                         &g_warm_thread)
+          : nullptr;
   if (thread == nullptr) {
+    if (g_warm_done != nullptr) CloseHandle(g_warm_done);
+    g_warm_done = nullptr;
     InterlockedExchange(&g_warm_started, 0);
     ModLog("card scroll  : font_warm=1, but Windows gave no thread for the "
            "warm of the fonts");
@@ -542,6 +560,35 @@ void WarmStart() {
   SetThreadPriority(thread, THREAD_PRIORITY_BELOW_NORMAL);
   ResumeThread(thread);
   CloseHandle(thread);
+}
+
+void WarmAdd(WarmJob job) {
+  if (job == nullptr || g_job_count >= kMostJobs ||
+      InterlockedCompareExchange(&g_warm_started, 0, 0) != 0) {
+    return;
+  }
+  g_jobs[g_job_count++] = job;
+}
+
+double WarmWait() {
+  if (InterlockedCompareExchange(&g_warm_over, 0, 0) != 0) return 0.0;
+  if (g_warm_done == nullptr || GetCurrentThreadId() == g_warm_thread) {
+    return 0.0;
+  }
+  if (WaitForSingleObject(g_warm_done, 0) == WAIT_OBJECT_0) {
+    InterlockedExchange(&g_warm_over, 1);
+    return 0.0;
+  }
+  LARGE_INTEGER t0, t1, f;
+  QueryPerformanceFrequency(&f);
+  QueryPerformanceCounter(&t0);
+  WaitForSingleObject(g_warm_done, INFINITE);
+  QueryPerformanceCounter(&t1);
+  InterlockedExchange(&g_warm_over, 1);
+  const double ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+  ModLog("card scroll  : a panel waited %.1f ms on the frame thread for the "
+         "end of the warm", ms);
+  return ms;
 }
 
 HFONT DigitsFont(HDC dc, int cap, const char** face) {

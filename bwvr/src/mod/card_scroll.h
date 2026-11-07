@@ -91,6 +91,20 @@ const char* FontNote();
 // install of the hooks. One time only.
 void WarmStart();
 
+// A job for the thread of the warm, after the letters of the fonts: the page
+// and the parts of a panel (panel_warm, panel_kit.h). mod_main.cpp adds each
+// job before WarmStart. At most 4 jobs. A job runs on the thread of the
+// warm, so the frame thread must not use what the job makes until WarmWait
+// returns.
+typedef void (*WarmJob)();
+void WarmAdd(WarmJob job);
+
+// Returns when the thread of the warm has ended, with its jobs. It returns
+// at once when the thread has ended, when no thread started, and on the
+// thread of the warm. A panel that a job draws calls it before it uses its
+// picture. The answer is the time of the wait in ms.
+double WarmWait();
+
 // The time that Start took, in ms.
 double StartMs();
 

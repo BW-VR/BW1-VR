@@ -713,6 +713,8 @@ int g_width_px = 0, g_height_px = 0;
 Look g_drawn;
 bool g_have_drawn = false;
 bool g_staged_new = false;
+// The number of the staged picture (bwvr::CardLayer::serial).
+uint32_t g_staged_serial = 0;
 // The hole of the game's bubble in the page in this frame, and whether the
 // staged picture has a hole now.
 spell_book_math::Hole g_hole = {};
@@ -1526,6 +1528,7 @@ void StagePicture(uint64_t frame) {
   const bool holed = g_hole_frame == frame && g_hole_frame != 0;
   if (g_staged_new || holed || g_staged_holed) {
     g_staged_new = false;
+    g_staged_serial = bwvr::XrScreen::NewCardSerial();
     for (int y = 0; y < g_height_px; ++y) {
       memcpy(g_staged + static_cast<size_t>(y) * kTexture * 4,
              g_base + static_cast<size_t>(y) * kTexture * 4,
@@ -1860,6 +1863,7 @@ void SpellBookFrame() {
   for (int i = 0; i < 4; ++i) layer.orientation[i] = g_plane.orientation[i];
   layer.width = g_width_px / kPixelsPerMeter;
   layer.height = g_height_px / kPixelsPerMeter;
+  layer.serial = g_staged_serial;
   bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
 }
 

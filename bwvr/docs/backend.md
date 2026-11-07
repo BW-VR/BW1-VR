@@ -3573,7 +3573,13 @@ the eye picture.
   image of the card on the GPU, so the view has no copy on the CPU. A card
   with no such image (a desktop run, a session with the relay of Direct3D
   11) comes from the pixels of the CPU: the view copies the part that shows
-  into an image of its own. A panel quad samples the panel image of the
+  into an image of its own. With `video_view_copy_changed=1` (the default)
+  it copies a card only when the card has a new picture. The ring, the
+  spell book and the panels of `panel_kit.cpp` give a new number with each
+  new picture (`CardLayer::serial`), and the image of the card keeps the
+  number of its last copy. The hint cards, the subtitle card, the keyboard
+  and the bubble card give no number, so the view copies them at each
+  present. A panel 1024 by 1024 px is 4 MB for each copy. A panel quad samples the panel image of the
   Vulkan renderer, which has `VK_IMAGE_USAGE_SAMPLED_BIT` for this. A wall
   is black with its alpha.
 - The draw (`vk_video.cpp`, `vk_video.vert`, `vk_video.frag`). After the
@@ -3607,7 +3613,9 @@ at the end of the lag. The report has the frames with the area, the area
 now and the largest lag. The first draw of each card, of a panel and of a
 wall gives a line with its place in the area and its texture. The report
 also has the windows with layers and the quads that were drawn and that
-were outside the area. A frame that saves pictures also writes
+were outside the area. A panel of `panel_kit.cpp` on the quad of the ring
+(the places, the settings, the debug window, the welcome page) counts as a
+panel in the room, apart from the panels of the interface. A frame that saves pictures also writes
 `bwvr-vk-video-N.bmp` at the next present of the window: the area of the
 left eye at the pixels of the eye picture, with the quad layers over it, as
 the window shows it.
@@ -3618,10 +3626,10 @@ video view   : the eye picture is W by H, the area is w by h at x, y (its middle
 video view   : the head turns faster than the smoothing, the area is 3.00 degrees behind the head, frame N
 video view   : the area is on the head again (0.09 degrees) after N frames, frame M
 video view   : the ring is in the video for the first time, frame N, from x0, y0 to x1, y1 of the area (0 to 1 across and down), over the world, from its copy on the GPU
-video view   : N windows with quad layers, N quads drawn (N cards, N panels, N walls), N quads outside the area
+video view   : N windows with quad layers, N quads drawn (N cards, N panels: N of the interface and N in the room, N walls), N quads outside the area
 vk window    : the picture of the video of frame N has N quad layers
 vk window    : N presents through the swapchain of the window (N of a part, for the view for videos, N with quad layers), ... A present takes X ms on the frame thread and Y ms on the GPU
-vk video     : N windows with quad layers, N quads drawn, N with no texture, N copies of the pixels of the CPU (X KB each), X ms on the frame thread for each window
+vk video     : N windows with quad layers, N quads drawn, N with no texture, N copies of the pixels of the CPU (X KB each), N draws with no copy because the picture did not change, X ms on the frame thread for each window
 ```
 
 The launcher has the rows "View for videos" and "Video lower by"
@@ -5847,6 +5855,7 @@ keys that the launcher sets.
 | `video_view_smooth_ms` | 150 | The time constant of the smoothed head of the video, 0 to 1000. 0: the area follows the head with no smoothing. See "The view for videos" |
 | `video_view_marks` | 1 | 1: faint corner marks in the eye pictures show the area in the headset. 0: no marks. The switch "Video marks" of the debug page. See "The view for videos" |
 | `video_view_layers` | 1 | 1: the quad layers of the headset (the cards, the ring, the panels and the walls of the cut scene window) are in the view for videos, where the left eye sees them. 0: the window shows the eye picture only. The switch "Video layers" of the debug page. See "The view for videos" |
+| `video_view_copy_changed` | 1 | 1: the view for videos copies the pixels of the CPU of a card only after the card drew a new picture. 0: it copies each such card at each present. See "The view for videos", "The layers in the video" |
 | `blt_texture_copy` | 1 | 1: the mod makes a copy with a texture and no stretch itself. 0: each copy goes to dxwrapper. See "The copy to the monitor" |
 | `test_frame_rate` | 0 | A test key of the desktop runs: the frame rate of a run with no copy to the monitor. See "The copy to the monitor" |
 | `anisotropy`, `force_mips` | 16, 1 | Texture filter. `force_mips` forces the mip filter |

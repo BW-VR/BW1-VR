@@ -9,10 +9,10 @@
 #include <stdint.h>
 
 // mod_main.cpp: the keys video_view, video_view_down_pct,
-// video_view_fov_deg, video_view_smooth_ms, video_view_marks and
-// video_view_layers.
+// video_view_fov_deg, video_view_smooth_ms, video_view_marks,
+// video_view_layers and video_view_copy_changed.
 void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
-                         int marks, int layers);
+                         int marks, int layers, int copy_changed);
 
 // stereo.cpp: the pose of the left eye (meters and x y z w, in the space of
 // the head poses) that the eye pictures of this frame are drawn from.
@@ -64,6 +64,10 @@ struct VideoDraw {
   uint32_t texture_height;
   int32_t rect[4];
   int card;
+  // kVideoPixels: the number of the picture (bwvr::CardLayer::serial). The
+  // copy of the pixels goes out only when it changes. 0: a copy at each
+  // present (video_view_copy_changed=0, or a card that does not say).
+  uint32_t serial;
 };
 // The draws over the area `uv` of VideoViewWindow, for this frame. 0 with
 // video_view_layers=0, with no record of this frame, and with no quad in the

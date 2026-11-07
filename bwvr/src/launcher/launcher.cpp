@@ -1576,7 +1576,7 @@ const char* const kRetiredKeys[] = {
     "help_test", "hint_counts_test_file", "land_light_test",
     "near_test_flips", "sky_test_frame", "sky_test_trace",
     "sky_test_hour", "sky_test_mist_log", "sky_test_mist_hide",
-    "sky_test_mist_hide_all",
+    "sky_test_mist_hide_all", "sky_test_round_frame",
     "spawn_test_flag", "sprite_test_frame",
     "sprite_test_trace",
     "spawn_test_temple",

@@ -142,6 +142,21 @@ inline void SkyChecks() {
   const float a_table = MistScale(30.0f, true, 4.0f, cloud, below);
   Near("the ratio gives the scale from the table camera",
        a_head * (a_table / a_head), a_table, 1e-4);
+  // The flatten of a near sky cloud (cloud_round_near=1000).
+  Near("a sky cloud nearer than the limit is round",
+       NearFlatten(3.0f, 600.0f, 1000.0f), 1.0, 1e-6);
+  Near("half way to 2 times the limit it has half of the flatten",
+       NearFlatten(3.0f, 1500.0f, 1000.0f), 2.0, 1e-6);
+  Near("from 2 times the limit it has the full flatten",
+       NearFlatten(3.0f, 2500.0f, 1000.0f), 3.0, 1e-6);
+  Near("a limit of 0 keeps the flatten of the engine",
+       NearFlatten(3.0f, 10.0f, 0.0f), 3.0, 1e-6);
+  Near("a flatten of 1 stays 1", NearFlatten(1.0f, 10.0f, 1000.0f), 1.0,
+       1e-6);
+  Near("a round near cloud is not flattened at the horizon",
+       MistScale(30.0f, true, NearFlatten(4.0f, 600.0f, 1000.0f), cloud,
+                 side),
+       30.0, 1e-4);
 }
 
 }  // namespace sky_checks

@@ -1300,7 +1300,10 @@ is not a sky cloud and take those mists out of the picture from a frame
 desktop run the storm had 17 such mists, for example a dome of 47 units 534
 units away, and none of them was drawn after the frame of the hide, but the
 band stayed. With `sky_test_mist_hide_all` the band goes and the red sky of
-the storm shows. So the band is made of sky clouds of the storm.
+the storm shows. So the band is made of sky clouds of the storm. The engine
+flattens a sky cloud near the horizon of the eye, and in the God view the
+eye is low and near the clouds of the storm. `cloud_round_near` keeps a near
+sky cloud round (`backend.md`, "Clouds").
 
 Open (B43 in the roadmap): in the full view the cloud of a Storm is a flat
 grey band with straight edges, also with `cloud_pole_pct=0`. The cast of

@@ -164,17 +164,18 @@ if ($Kind -eq 'away') {
     # A Storm (0) with the circle (template 5), for the look of its cloud
     # (miracles.md, "The cloud of a Storm"). The grip stays closed while the
     # hand steps through the circle, and the game casts when the circle
-    # closes. The test key sky_test_mist_log gives a line for each mist that
-    # is not a sky cloud. From frame 1560 sky_test_mist_hide does not draw
-    # them, and from frame 1640 sky_test_mist_hide_all draws no mist and no
-    # sky cloud, so the eye pictures before, between and after those frames
-    # show what the mists draw. Give it the dxwrapper renderer for the
-    # pictures.
+    # closes. The test key sky_test_mist_log gives a line for each mist and
+    # each sky cloud, with its place, its size and its flatten. Eye pictures
+    # before the cast (frame 1050) and after it. -Set "cloud_round_near=0"
+    # gives the flatten of the engine for each sky cloud, and -Set
+    # "sky_test_mist_hide=1560;sky_test_mist_hide_all=1640" takes the mists
+    # and then the sky clouds out of the picture from those frames. Give it
+    # the dxwrapper renderer for the pictures.
     if ($Seeds -eq '') { $Seeds = '0@930' }
-    $keys = "$keys;fake_controller_gestures=5;sky_test_mist_log=1;sky_test_mist_hide=1560;sky_test_mist_hide_all=1640"
+    $keys = "$keys;fake_controller_gestures=5;sky_test_mist_log=1"
     if ($Steps -eq '') {
         $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
-                 'seek@960+1 grip@1000+3 trace@1100+200 grip@1106+150 point@1300+1 ' +
+                 'seek@960+1 grip@1000+3 shot@1050+1 trace@1100+200 grip@1106+150 point@1300+1 ' +
                  'shot@1330+1 shot@1400+1 shot@1480+1 shot@1540+1 shot@1580+1 shot@1620+1 shot@1660+1 shot@1720+1'
     }
 } elseif ($Kind -eq 'throw') {
@@ -249,7 +250,7 @@ if ($Set -ne '') { $keys = "$keys;$Set" }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $log = Join-Path $sp "desk-$Name\bwvr.log"
 if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
-$pattern = '^miracle      :|^sky mist     :|^sky          : sky_test_mist|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
+$pattern = '^miracle      :|^sky mist     :|^sky cloud    :|^sky          : (sky_test|cloud_round|the test keys|.*near sky cloud)|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
            '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state|^miracle watch: |' +
            '^hand pick    : seek plan|^creature cmd : (the leash|a double press|test: aimcmd)|' +
            '^far grab    : (the grip closed|the grip opened)|^hand throw   : release'

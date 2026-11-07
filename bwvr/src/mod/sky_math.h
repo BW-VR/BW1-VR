@@ -158,4 +158,19 @@ inline float MistScale(float scale, bool sky_cloud, float flatten,
   return scale / divisor;
 }
 
+// THE FLATTEN OF A NEAR SKY CLOUD (cloud_round_near). The engine flattens a
+// sky cloud that is near the horizon of the eye: its height on the screen is
+// its width divided by up to `flatten` (MistScale). That is the look of a far
+// cloud. A cloud of a storm can hang near the eye in the God view, and then
+// each cloud is a flat band. The flatten term that a cloud gets: 1 (round)
+// nearer than `limit` units, the full term from 2 times `limit` on, and a
+// straight line between. A limit of 0 or less keeps the full term.
+inline float NearFlatten(float flatten, float distance, float limit) {
+  if (!(limit > 0.0f) || !(flatten > 1.0f)) return flatten;
+  float k = (distance - limit) / limit;
+  if (k < 0.0f) k = 0.0f;
+  if (k > 1.0f) k = 1.0f;
+  return 1.0f + (flatten - 1.0f) * k;
+}
+
 }  // namespace sky_math

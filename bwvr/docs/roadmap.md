@@ -95,10 +95,13 @@ These items come before the other work.
   `cloud_pole_pct=0`. The game draws the cloud as many particles (type 106,
   `PARTICLE_TYPE_STORM_CAST`, the rules `UR_StormCast` and
   `UR_CloudGather`), so the plain game has no flat band. The band is made
-  of sky clouds of the storm: with the other mists hidden the band stays,
-  and with the sky clouds hidden too it goes and the red sky shows
-  (`miracles.md`, "The cloud of a Storm"). Open: which rule of the mod for
-  the sky clouds makes them a band.
+  of sky clouds of the storm: with the sky clouds hidden it goes and the
+  red sky shows. The engine flattens a sky cloud near the horizon of the
+  eye, and the eye of the God view is low and near those clouds.
+  `cloud_round_near=1000` keeps a sky cloud round nearer than 1000 units
+  (`backend.md`, "Clouds"). Open: a run that shows the clouds of the storm
+  round with the key, the band with 0, and the distances of the clouds in
+  the lines `sky cloud` (`miracle_run.ps1 -Kind storm`).
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view

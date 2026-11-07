@@ -338,6 +338,22 @@ bool LimitPole(float a, float distance, float basis[9]) {
 // frame M the mod draws no mist at all, the sky clouds too. So eye pictures
 // before and after each frame tell what the mists draw.
 bool g_mist_log = false;
+// cloud_round_near: a sky cloud nearer than this many units to the stored
+// camera keeps its round shape (sky_math::NearFlatten). 0 is the engine's
+// flatten for each cloud. sky_test_round_frame: at this frame of the steps
+// the key goes to 0 and back from its value, one time, for one run with
+// each value.
+float g_round_near = 1000.0f;
+uint64_t g_round_test_frame = 0;
+bool g_round_test_done = false;
+uint64_t g_rounded = 0;        // draws of a sky cloud with less flatten
+// The sky clouds for the log of sky_test_mist_log.
+const int kSkySeen = 80;
+const void* g_sky_seen[kSkySeen];
+int g_sky_seen_count = 0;
+float g_sky_nearest = 0.0f;
+float g_sky_lowest = 0.0f;     // the least height of a sky cloud over the eye
+uint64_t g_sky_logged_draws = 0;
 uint64_t g_mist_hide_frame = 0;
 uint64_t g_mist_hide_all_frame = 0;
 bool g_mist_hide_said = false;
@@ -425,6 +441,52 @@ void MistLog(const void* self, const float position[3], float scale,
          limited ? "The pole limit made its pole shorter"
                  : "The pole limit did not act",
          ControllersFrameCount());
+}
+
+// One line for each new sky cloud (up to 80), and the nearest and the
+// lowest one for the report.
+void SkyCloudLog(const void* self, const float position[3], float scale,
+                 float a, float flatten, float used, float distance,
+                 const float* stored, bool limited) {
+  const float over = position[1] - stored[1];
+  const float d[3] = {position[0] - stored[0], position[1] - stored[1],
+                      position[2] - stored[2]};
+  const float from_stored = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+  if (g_sky_logged_draws == 0 || from_stored < g_sky_nearest) {
+    g_sky_nearest = from_stored;
+  }
+  if (g_sky_logged_draws == 0 || over < g_sky_lowest) g_sky_lowest = over;
+  ++g_sky_logged_draws;
+  for (int i = 0; i < g_sky_seen_count; ++i) {
+    if (g_sky_seen[i] == self) return;
+  }
+  if (g_sky_seen_count >= kSkySeen) return;
+  g_sky_seen[g_sky_seen_count++] = self;
+  ModLog("sky cloud    : a sky cloud %p at %.0f %.0f %.0f, %.0f units from "
+         "the stored camera and %.0f units over it (%.0f from the point that "
+         "it faces). Its dome is %.0f units wide (20 times the scale %.2f) "
+         "and %.0f units high on the screen (20 times A %.2f): the flatten "
+         "of the engine is %.2f, and the cloud gets %.2f "
+         "(cloud_round_near=%.0f). %s, frame %llu", self, position[0],
+         position[1], position[2], from_stored, over, distance,
+         kDomeHeight * scale, scale, kDomeHeight * fabsf(a), a, flatten, used,
+         g_round_near,
+         limited ? "The pole limit made its pole shorter"
+                 : "The pole limit did not act",
+         ControllersFrameCount());
+}
+
+// At sky_test_round_frame cloud_round_near goes to 0, or from 0 to 1000.
+void RoundTestCheck() {
+  if (g_round_test_frame == 0 || g_round_test_done) return;
+  const uint64_t frame = ControllersFrameCount();
+  if (ControllersTestFrame(g_round_test_frame, frame) < g_round_test_frame) {
+    return;
+  }
+  g_round_test_done = true;
+  g_round_near = g_round_near > 0.0f ? 0.0f : 1000.0f;
+  ModLog("sky          : sky_test_round_frame at frame %llu: "
+         "cloud_round_near=%.0f now", frame, g_round_near);
 }
 
 // At the first frame of play, the time of day of sky_test_hour.
@@ -517,6 +579,11 @@ void TraceDome(const void* mist, const float place[3], const float basis[9],
 void __fastcall h_MistDraw(void* self, void* unused) {
   if (TabletopHidesMist(self)) return;
   if (self != nullptr && MistHidden(static_cast<const uint8_t*>(self))) return;
+  RoundTestCheck();
+  // The flatten that a near sky cloud gets for this draw, and the value of
+  // the game to put back after it.
+  float* flatten_field = nullptr;
+  float flatten_game = 0.0f;
   TestFrameCheck();
   if (g_head_free && self != nullptr) {
     const uint8_t* mist = static_cast<const uint8_t*>(self);
@@ -525,8 +592,10 @@ void __fastcall h_MistDraw(void* self, void* unused) {
     // The engine measures the flatten of a cloud from the stored camera.
     const float* stored = reinterpret_cast<const float*>(kStoredPosition);
     float table[3];
-    const bool table_faced =
-        g_clouds_head_free && HeadCameraTableCamera(table);
+    // The rule of the near sky clouds acts in a table frame (the table and
+    // the God view), where the eye can be near a cloud of a storm.
+    const bool in_table = HeadCameraTableCamera(table);
+    const bool table_faced = g_clouds_head_free && in_table;
     const float* eye = table_faced ? table : stored;
     // Forward, from the camera to the cloud.
     float f[3] = {position[0] - eye[0], position[1] - eye[1],
@@ -552,8 +621,24 @@ void __fastcall h_MistDraw(void* self, void* unused) {
                         u[0], u[1], u[2]};
       const float scale = *reinterpret_cast<const float*>(mist + kMistScale);
       const bool sky_cloud = (mist[kMistFlags] & kMistSkyCloud) != 0;
-      const float flatten =
+      const float flatten_own =
           *reinterpret_cast<const float*>(mist + kMistFlatten);
+      // The engine measures the flatten from the stored camera.
+      const float stored_d[3] = {position[0] - stored[0],
+                                 position[1] - stored[1],
+                                 position[2] - stored[2]};
+      const float flatten =
+          sky_cloud && in_table ? sky_math::NearFlatten(
+                          flatten_own, sqrtf(sky_math::Dot3(stored_d, stored_d)),
+                          g_round_near)
+                    : flatten_own;
+      if (flatten != flatten_own) {
+        flatten_field = reinterpret_cast<float*>(
+            static_cast<uint8_t*>(self) + kMistFlatten);
+        flatten_game = flatten_own;
+        *flatten_field = flatten;
+        ++g_rounded;
+      }
       const float a_engine =
           sky_math::MistScale(scale, sky_cloud, flatten, position, stored);
       float a = a_engine;
@@ -578,11 +663,16 @@ void __fastcall h_MistDraw(void* self, void* unused) {
         MistLog(self, position, scale, a, flatten, mist[kMistFlags], distance,
                 stored, table_faced, limited);
       }
+      if (g_mist_log && sky_cloud) {
+        SkyCloudLog(self, position, scale, a, flatten_own, flatten, distance,
+                    stored, limited);
+      }
       memcpy(reinterpret_cast<void*>(kMistBasis), basis, sizeof(basis));
       if (g_trace) TraceDome(self, position, basis, scale, a_engine, eye);
     }
   }
   o_MistDraw(self, unused);
+  if (flatten_field != nullptr) *flatten_field = flatten_game;
 }
 
 // The moon, in both of its calls. See THE MOON above.
@@ -686,6 +776,18 @@ void SkyDetailInstall() {
     const int hide =
         static_cast<int>(GetPrivateProfileIntA("bwvr", "sky_test_mist_hide", 0, path));
     g_mist_hide_frame = hide > 0 ? static_cast<uint64_t>(hide) : 0;
+    const int round = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "cloud_round_near", 1000, path));
+    g_round_near = round > 0 ? static_cast<float>(round) : 0.0f;
+    const int round_test = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "sky_test_round_frame", 0, path));
+    g_round_test_frame =
+        round_test > 0 ? static_cast<uint64_t>(round_test) : 0;
+    ModLog("sky          : cloud_round_near=%d. %s", round > 0 ? round : 0,
+           round > 0 ? "A sky cloud nearer than this many units keeps its "
+                       "round shape, with the full flatten of the engine "
+                       "from 2 times it"
+                     : "Each sky cloud has the flatten of the engine");
     const int hide_all = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "sky_test_mist_hide_all", 0, path));
     g_mist_hide_all_frame = hide_all > 0 ? static_cast<uint64_t>(hide_all) : 0;
@@ -758,6 +860,17 @@ void SkyDetailReport() {
            "mist draws (%llu of them sky clouds)", g_poles_limited,
            g_dome_draws, g_sky_draws);
   }
+  if (g_rounded > 0) {
+    ModLog("sky          : %llu draws of a near sky cloud had less flatten "
+           "(cloud_round_near=%.0f)", g_rounded, g_round_near);
+  }
+  g_rounded = 0;
+  if (g_mist_log && g_sky_logged_draws > 0) {
+    ModLog("sky cloud    : %llu draws of a sky cloud, the nearest %.0f units "
+           "from the stored camera, the lowest %.0f units over it",
+           g_sky_logged_draws, g_sky_nearest, g_sky_lowest);
+  }
+  g_sky_logged_draws = 0;
   if (g_mist_hide_frame != 0 || g_mist_hide_all_frame != 0) {
     ModLog("sky          : the test keys of the mists hid %llu draws of a "
            "mist that is not a sky cloud and %llu draws of a sky cloud",

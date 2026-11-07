@@ -5114,6 +5114,19 @@ basis by `A` from the stored camera. The mod gives those rows the ratio of `A` f
 the table camera to `A` from the render head (`sky_math.h`, `MistScale`), so the
 shape of a cloud does not change with the head either.
 
+**A near sky cloud stays round** (`cloud_round_near`, default 1000). The engine
+divides the height of a sky cloud on the screen by up to its flatten term (`+0x8C`)
+when the cloud is near the horizon of the eye (`0x007FA4B7` to `0x007FA4DC`). That
+is the look of a far cloud from the high camera of the plain game. In a table frame
+the eye is low, and the sky clouds of a storm can hang near it. Then the engine
+flattens each one, and together they can make one flat grey band (B43 in the
+roadmap). In a table frame a sky cloud nearer
+than `cloud_round_near` units to the stored camera gets the flatten term 1 (round),
+the full term from 2 times that distance on, and a straight line between
+(`sky_math.h`, `NearFlatten`). The mod writes the term at `+0x8C` for the draw and
+puts the game's value back after it. 0 gives each cloud the flatten of the engine.
+The full view does not change.
+
 `clouds_head_free` (default 1) picks the point in a table frame: 1 the table camera,
 0 the render head. The full view is the same with each value. The pole limit uses
 the distance to the point that the cloud faces.
@@ -5154,7 +5167,7 @@ The sun disc (`fn_0086C140`) is a fixed quad and reads no camera turn. The dome
 (`fn_0086B6B0`) is a sphere about a fixed point. The sun glare has its own key (see
 "The sun glare").
 
-Six test keys are for desktop runs. The launcher removes them from `bwvr.ini` on
+Seven test keys are for desktop runs. The launcher removes them from `bwvr.ini` on
 each save.
 
 - `sky_test_frame=N`: at frame N of the scripted controller, `clouds_head_free` and
@@ -5185,6 +5198,13 @@ each save.
   Two eye pictures, before and after that frame, show what those mists draw.
 - `sky_test_mist_hide_all=M`: from frame M the mod draws no mist and no sky
   cloud. The line of the report gives the draws that each key hid.
+- With `sky_test_mist_log=1` there is also a line `sky cloud` for each new sky
+  cloud, up to 80: its place, its distance from the stored camera and its height
+  over it, its width and its height on the screen, the flatten of the engine and
+  the flatten that it gets. Each report has the nearest and the lowest sky cloud,
+  and the count of the draws that `cloud_round_near` made rounder.
+- `sky_test_round_frame=N`: at frame N of the steps `cloud_round_near` goes to 0,
+  or from 0 to 1000, one time.
 
 ### Sprites with world up
 
@@ -5853,9 +5873,10 @@ keys that the launcher sets.
 | `spirit_anchor` | 1 | See "The advisors" |
 | `spirit_world_size` | 1 | The size of an advisor at a place of the world. See "The advisors" and `tabletop.md` |
 | `cloud_pole_pct`, `sun_glare`, `detail_distance` | 25, 0, 3 | See "Sky, clouds and detail" |
+| `cloud_round_near` | 1000 | In the table and the God view a sky cloud nearer than this many units keeps its round shape, and the flatten of the engine comes back to its full value at 2 times the distance (see "Clouds"). 0: each sky cloud has the flatten of the engine |
 | `clouds_head_free` | 1 | 1: in the table and the God view the clouds face the table camera, so a move of the head does not turn them. 0: they face the render head. See "Clouds" |
 | `moon_world_up` | 1 | 1: the moon turns with world up, so it stays fixed in the sky. 0: it turns with the camera of the head. See "The moon" |
-| `sky_test_frame`, `sky_test_trace`, `sky_test_hour`, `sky_test_mist_log`, `sky_test_mist_hide`, `sky_test_mist_hide_all` | 0, 0, -1, 0, 0, 0 | Test keys of the desktop runs. See "The moon" |
+| `sky_test_frame`, `sky_test_trace`, `sky_test_hour`, `sky_test_mist_log`, `sky_test_mist_hide`, `sky_test_mist_hide_all`, `sky_test_round_frame` | 0, 0, -1, 0, 0, 0, 0 | Test keys of the desktop runs. See "The moon" |
 | `sprite_world_up` | 1 | 1: smoke, fire and the other sprites keep world up, so they do not roll with the head. 0: they roll with the head. See "Sprites with world up" |
 | `sprite_test_frame`, `sprite_test_trace` | 0, 0 | Test keys of the desktop runs. See "Sprites with world up" |
 | `freeze_time` | 1 | See "Time, bars and the second eye pass" |

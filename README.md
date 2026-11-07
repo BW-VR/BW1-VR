@@ -2,8 +2,7 @@
 
 The original Black & White (2001) in VR. This is a mod for the real game, not
 a remake: the villagers, the Creature, the quests and the advisors are the
-game's own. Your hands are the Hand. The land is at the height of your waist,
-and you reach in.
+game's own, and you play with motion controllers.
 
 [![Support the mod on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/buckzor)
 

@@ -2583,9 +2583,9 @@ dialog box, no cut scene, no ring, no spell book and no other panel. It is
 a parchment page of 1024 by 640 pixels, 56 by 35 cm, at the place of the
 settings window:
 
-- the title "Welcome to Black & White VR"
-- "Your hands are the Hand of your god, at their true size." and "The land
-  is at the height of your waist."
+- the title "Welcome to the Black & White VR Mod"
+- "You can change the settings at any time." and "The mod is a work in
+  progress, so expect some bugs."
 - three controls: the grip of the Hand, the grip of the other hand, and the
   button of the ring with "Settings is on its page 2". The button is Y, X, B
   or A, as `button_layout`, the hand of the ring and the map of the buttons

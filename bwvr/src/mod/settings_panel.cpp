@@ -397,10 +397,10 @@ void SetHolds() {
   InterlockedExchange(&g_holds, (g_room.open || g_hold_after) ? 1 : 0);
 }
 
-const wchar_t* const kTitle = L"Welcome to Black & White VR";
+const wchar_t* const kTitle = L"Welcome to the Black & White VR Mod";
 const wchar_t* const kWords[2] = {
-    L"Your hands are the Hand of your god, at their true size.",
-    L"The land is at the height of your waist."};
+    L"You can change the settings at any time.",
+    L"The mod is a work in progress, so expect some bugs."};
 const wchar_t* const kButtonWord[kWelcomeParts] = {L"Settings", L"Play"};
 
 // The three controls. The ring button follows button_layout, the hand that

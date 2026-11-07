@@ -146,6 +146,7 @@
 #include "hand_feel.h"
 #include "hand_land.h"
 #include "hand_model.h"
+#include "hint_model.h"
 #include "influence_edge_math.h"
 #include "one_walk.h"
 #include "overlay_math.h"
@@ -955,10 +956,13 @@ bool BuildFrame() {
     for (int k = 0; k < 3; ++k) input.position[k] = hand.position[k];
     for (int k = 0; k < 9; ++k) input.rotation[k] = hand.rotation[k];
     const bool left = h == 0;
-    // Outside the influence of the player a hand fades (influence_fade).
+    // Outside the influence of the player a hand fades (influence_fade). A
+    // hand goes faint while the controller of a hint shows in it
+    // (hint_model.cpp).
     HandModelSetOpacity(h, g_intro ? g_intro_opacity[h]
                            : game_world
-                               ? InfluenceEdgeOpacity(h, hand.position, dt)
+                               ? InfluenceEdgeOpacity(h, hand.position, dt) *
+                                     HintModelHandOpacity(h)
                                : 1.0f);
     float mesh_curls[overlay_math::kFingers];
     memcpy(mesh_curls, curls, sizeof(mesh_curls));
@@ -1028,7 +1032,18 @@ bool BuildFrame() {
     g_squeeze[h] = hand.squeeze;
     for (int k = 0; k < 3; ++k) g_grip[h][k] = hand.position[k];
   }
-  return g_count > 0 || g_mesh_hands;
+  // THE CONTROLLERS OF THE HINTS (hint_style=2), in the drawn hands: with
+  // the stop at the land of each hand, as the hand has it.
+  if (game_world) {
+    float stops[kHands][3] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+    for (int h = 0; h < kHands; ++h) {
+      if (hands.hand[h].valid && !HandLandOffset(h, stops[h])) {
+        stops[h][0] = stops[h][1] = stops[h][2] = 0.0f;
+      }
+    }
+    HintModelBuild(hands, stops);
+  }
+  return g_count > 0 || g_mesh_hands || HintModelHasDraw();
 }
 
 // THE ARC AND THE RING of the teleport, after the hands. Nothing when the
@@ -2035,7 +2050,7 @@ void OverlayDraw() {
     return;
   }
   if (g_count == 0 && !g_mesh_hands && g_glow_lines == 0 &&
-      g_wall_count == 0) {
+      g_wall_count == 0 && !HintModelHasDraw()) {
     return;
   }
   const int eye = g_eye;
@@ -2102,6 +2117,14 @@ void OverlayDraw() {
     PutStatesBack(device);
   }
   if (g_teleport_triangles > 0) TeleportCountDraw(1, drawn);
+  // The controllers of the hints: their lit buttons write depth, and their
+  // faint bodies blend. The faint hands draw over them, so a controller
+  // shows through its hand.
+  int model_drawn = 0;
+  if (HintModelHasDraw()) {
+    model_drawn = HintModelDraw(device, m, near_plane, hx, hy);
+    if (model_drawn > 0) drawn += model_drawn;
+  }
   // The mesh of the game, after the opaque parts: its wrist fades, so what
   // is behind it must be there first.
   int mesh_drawn = 0;
@@ -2118,7 +2141,7 @@ void OverlayDraw() {
   if (glow_drawn > 0) drawn += glow_drawn;
   if (FAILED(glow_result)) result = glow_result;
   g_eye_ticks[eye] = Now() - start;
-  if (n == 0 && mesh_drawn <= 0 && glow_drawn <= 0) {
+  if (n == 0 && mesh_drawn <= 0 && glow_drawn <= 0 && model_drawn <= 0) {
     ++g_nothing;
     return;
   }

@@ -137,6 +137,8 @@
 #include "hint_card.h"
 #include "hint_card_math.h"
 #include "hint_learn_math.h"
+#include "hint_model.h"
+#include "hint_model_math.h"
 #include "hint_picture_math.h"
 #include "miracle.h"
 #include "near_math.h"
@@ -1197,13 +1199,24 @@ struct CardState {
   uint64_t frames_hidden;  // the card would hide the other hand or card
   uint64_t side_changes;
 };
-CardState g_cards[kHands] = {};
+// The cards: kPointing and kOther are the cards at the wrists. With
+// hint_style=2 they and the other slots are the cards of the lit buttons
+// (ModelCards).
+const int kSlots = 2 + bwvr::kHintButtonCards;
+CardState g_cards[kSlots] = {};
 bool g_cards_ready = false;
+
+// The card of the headset of each slot.
+int CardOfSlot(int slot) {
+  return slot == kPointing ? bwvr::kCardHintPointing
+         : slot == kOther  ? bwvr::kCardHintOther
+                           : bwvr::kCardHintButton0 + slot - 2;
+}
 
 void CardsStart() {
   if (g_cards_ready) return;
   g_cards_ready = true;
-  for (int h = 0; h < kHands; ++h) {
+  for (int h = 0; h < kSlots; ++h) {
     g_cards[h].staged_fade = -1.0f;
     g_cards[h].last_right[0] = 1.0f;
   }
@@ -1664,8 +1677,11 @@ bool Raster(const Content& content, CardState* card) {
       if (content.line[i].picture > 0) ++pictures;
     }
     ModLog("hint card    : frame %llu, a new picture of the card of the %s "
-           "hand in the %s look, %d by %d px, with %d pictures of buttons, "
-           "took %.2f ms", g_frame, hand == kPointing ? "pointing" : "other",
+           "in the %s look, %d by %d px, with %d pictures of buttons, "
+           "took %.2f ms", g_frame,
+           hand == kPointing ? "pointing hand"
+           : hand == kOther  ? "other hand"
+                             : "a button",
            scroll ? "scroll" : "plain", card->rect_w, card->rect_h, pictures,
            ms);
   }
@@ -1982,6 +1998,316 @@ struct Plan {
   bool show;
 };
 
+// --- the cards of the buttons (hint_style=2, hint_model.cpp) ---------------------
+
+// THE CONTROLLER IN THE HAND. A hand with a model of its controller has one
+// small card for each lit button, beside the controller, in place of the card
+// at the wrist. The words of a card are the lines of that button. The lit
+// button shows which button it is, so the seal of a line goes when the word
+// is only the name of the button. A word with " x2" or " hold" keeps its
+// seal, so the player sees the double press or the hold. The lines with no
+// button, and the lines of a button that the model has no node for (the menu
+// button of a Touch controller), are one card with no line of ink, with
+// their seals. The cards have no drawn pictures of the buttons.
+//
+// THE SLOTS. The hand that points takes its own slot (kPointing) and then the
+// slots of the buttons. The other hand takes kOther and then the slots that
+// are left. A hand keeps its last cards while they fade out.
+struct ModelHand {
+  int count;
+  Content group[kHintModelCards];
+  int control[kHintModelCards];
+  int slot[kHintModelCards];
+  bool visible;
+  Content logged[kHintModelCards];
+  int logged_count;
+};
+ModelHand g_model_hand[kHands] = {};
+uint64_t g_model_frames[kHands] = {0, 0};
+uint64_t g_model_hidden[kHands] = {0, 0};
+
+// The groups of a content: the card with no button first, then one card for
+// each control, in the order of the lines.
+int ModelGroups(const Content& content, bool left, Content group[],
+                int control[]) {
+  const int side = left ? 0 : 1;
+  const int kind = KindOfSide(side);
+  int count = 0;
+  int free_group = -1;
+  for (int i = 0; i < content.count; ++i) {
+    Line line = content.line[i];
+    line.picture = 0;
+    bool plain = false;
+    int c = hint_model::ControlOfWord(kind, left, line.button, &plain);
+    if (c >= 0 && !HintModelHasControl(side, c)) c = -1;
+    int at = -1;
+    for (int g = 0; g < count; ++g) {
+      if (control[g] == c) at = g;
+    }
+    if (at < 0) {
+      if (count >= kHintModelCards) {
+        // More groups than cards: the line goes to the card with no button.
+        if (free_group < 0) continue;
+        at = free_group;
+        c = -1;
+      } else {
+        at = count++;
+        control[at] = c;
+        group[at].count = 0;
+        if (c < 0) free_group = at;
+      }
+    }
+    if (c >= 0 && plain) line.button[0] = 0;
+    if (line.button[0] == 0) line.tone = kToneNone;
+    if (line.button[0] == 0 && line.text[0] == 0) continue;
+    Content& g = group[at];
+    if (g.count < kMaxLines) g.line[g.count++] = line;
+  }
+  // The card with no button goes first.
+  if (free_group > 0) {
+    const Content keep = group[free_group];
+    for (int g = free_group; g > 0; --g) {
+      group[g] = group[g - 1];
+      control[g] = control[g - 1];
+    }
+    group[0] = keep;
+    control[0] = -1;
+  }
+  int kept = 0;
+  for (int g = 0; g < count; ++g) {
+    if (group[g].count == 0) continue;
+    group[kept] = group[g];
+    control[kept] = control[g];
+    ++kept;
+  }
+  return kept;
+}
+
+void ModelCardsOff() {
+  for (int h = 0; h < kHands; ++h) {
+    HintModelPlaced placed;
+    HintModelPlace(h, nullptr, 0, false, 1.0f, &placed);
+    g_model_hand[h].count = 0;
+    g_model_hand[h].visible = false;
+  }
+}
+
+void ModelCards(Content content[kHands], Plan plan[kHands],
+                const bool use_model[kHands], const float head[3], float dt,
+                int shown) {
+  const float size = g_size_pct * 0.01f;
+  bool slot_used[kSlots] = {};
+  for (int h = 0; h < kHands; ++h) {
+    if (!use_model[h]) slot_used[h] = true;  // the card at the wrist
+  }
+  struct Placed {
+    bool have;
+    int count;
+    hint_card_math::Card card[kHintModelCards];
+    float width[kHintModelCards];
+    float height[kHintModelCards];
+  };
+  Placed placed_cards[kHands] = {};
+  bool show_hand[kHands] = {false, false};
+  for (int h = 0; h < kHands; ++h) {
+    if (!use_model[h]) continue;
+    Plan& p = plan[h];
+    ModelHand& mh = g_model_hand[h];
+    const bool show = content[h].count > 0;
+    show_hand[h] = show;
+    if (show) {
+      Content group[kHintModelCards];
+      int control[kHintModelCards];
+      const int count = ModelGroups(content[h], p.left, group, control);
+      mh.count = count;
+      for (int i = 0; i < count; ++i) {
+        mh.group[i] = group[i];
+        mh.control[i] = control[i];
+      }
+    }
+    // The slots: the own slot of the hand first.
+    for (int i = 0; i < mh.count; ++i) {
+      int slot = -1;
+      if (!slot_used[h]) {
+        slot = h;
+      } else {
+        for (int s = 2; s < kSlots && slot < 0; ++s) {
+          if (!slot_used[s]) slot = s;
+        }
+      }
+      mh.slot[i] = slot;
+      if (slot >= 0) slot_used[slot] = true;
+    }
+    // A new picture for each card with new words. A card that does not
+    // raster, or that has no slot, drops out.
+    {
+      int kept = 0;
+      for (int i = 0; i < mh.count; ++i) {
+        if (mh.slot[i] < 0) continue;
+        CardState& c = g_cards[mh.slot[i]];
+        if (!SameContent(mh.group[i], c.drawn) && !Raster(mh.group[i], &c)) {
+          continue;
+        }
+        mh.group[kept] = mh.group[i];
+        mh.control[kept] = mh.control[i];
+        mh.slot[kept] = mh.slot[i];
+        ++kept;
+      }
+      mh.count = kept;
+    }
+    HintModelCard cards[kHintModelCards];
+    for (int i = 0; i < mh.count; ++i) {
+      const CardState& c = g_cards[mh.slot[i]];
+      cards[i].control = mh.control[i];
+      hint_card_math::CardSize(c.rect_w, c.rect_h, kPixelsPerMeter / size,
+                               kMostWidth * size, &cards[i].width,
+                               &cards[i].height);
+    }
+    HintModelPlaced where;
+    const bool have = mh.count > 0 &&
+                      HintModelPlace(h, cards, mh.count, show, dt, &where);
+    if (!have) {
+      if (mh.count == 0) HintModelPlace(h, nullptr, 0, false, dt, &where);
+      for (int i = 0; i < mh.count; ++i) {
+        g_cards[mh.slot[i]].fade = 0.0f;
+        g_cards[mh.slot[i]].visible = false;
+      }
+      mh.visible = false;
+      continue;
+    }
+    Placed& pc = placed_cards[h];
+    pc.have = true;
+    pc.count = mh.count;
+    for (int i = 0; i < mh.count; ++i) {
+      for (int k = 0; k < 3; ++k) pc.card[i].center[k] = where.center[i][k];
+      for (int k = 0; k < 4; ++k) {
+        pc.card[i].orientation[k] = where.orientation[k];
+      }
+      pc.width[i] = cards[i].width;
+      pc.height[i] = cards[i].height;
+    }
+  }
+  // A card must not hide the other hand. The cards of the other hand do not
+  // show where they overlap a card of the hand that points.
+  bool hide[kHands][kHintModelCards] = {};
+  for (int h = 0; h < kHands; ++h) {
+    const Placed& pc = placed_cards[h];
+    if (!pc.have) continue;
+    const Plan& other = plan[1 - h];
+    for (int i = 0; i < pc.count; ++i) {
+      if (other.have_hand &&
+          hint_card_math::CardCoversAny(pc.card[i], pc.width[i], pc.height[i],
+                                        kOtherHandMargin, head, other.outline,
+                                        hint_card_math::kOutlinePoints)) {
+        hide[h][i] = true;
+      }
+      if (h != kOther || !placed_cards[kPointing].have) continue;
+      const Placed& mine = placed_cards[kPointing];
+      for (int j = 0; j < mine.count; ++j) {
+        if (hint_card_math::CardsOverlap(mine.card[j], mine.width[j],
+                                         mine.height[j], pc.card[i],
+                                         pc.width[i], pc.height[i], head)) {
+          hide[h][i] = true;
+        }
+      }
+    }
+  }
+  for (int h = 0; h < kHands; ++h) {
+    const Placed& pc = placed_cards[h];
+    ModelHand& mh = g_model_hand[h];
+    if (!pc.have) continue;
+    bool any = false;
+    for (int i = 0; i < pc.count; ++i) {
+      CardState& c = g_cards[mh.slot[i]];
+      const bool show = show_hand[h] && !hide[h][i];
+      if (hide[h][i] && show_hand[h]) ++g_model_hidden[h];
+      c.fade = hint_card_math::FadeStep(
+          c.fade, show, dt,
+          show ? (g_timing != 0 ? kFadeInTargetSeconds : kFadeInSeconds)
+               : kFadeOutSeconds);
+      if (c.fade <= 0.0f) {
+        c.visible = false;
+        c.fade = 0.0f;
+        continue;
+      }
+      any = true;
+      Stage(&c);
+      bwvr::CardLayer layer = {};
+      layer.visible = true;
+      layer.pixels = c.staged;
+      layer.texture_width = kHintCardWidth;
+      layer.texture_height = kHintCardHeight;
+      layer.rect[2] = c.rect_w;
+      layer.rect[3] = c.rect_h;
+      for (int k = 0; k < 3; ++k) layer.position[k] = pc.card[i].center[k];
+      for (int k = 0; k < 4; ++k) {
+        layer.orientation[k] = pc.card[i].orientation[k];
+      }
+      layer.width = pc.width[i];
+      layer.height = pc.height[i];
+      layer.serial = c.serial;
+      bwvr::XrScreen::StageCard(CardOfSlot(mh.slot[i]), layer);
+      ++c.frames_shown;
+      c.visible = true;
+      if (g_capture) {
+        char name[48];
+        _snprintf_s(name, _TRUNCATE, "hintcard-%s-button%d",
+                    plan[h].left ? "left" : "right", i);
+        EyeCaptureSaveUi(name, g_frame, 1, c.staged,
+                         static_cast<int>(kHintCardWidth) * 4,
+                         static_cast<uint32_t>(c.rect_w),
+                         static_cast<uint32_t>(c.rect_h));
+      }
+    }
+    if (any) ++g_model_frames[h];
+    // The last cards of a hint that ended free their slots when they are
+    // gone.
+    if (!any && !show_hand[h]) {
+      mh.count = 0;
+      mh.visible = false;
+      continue;
+    }
+    // The log: one line each time the cards of a hand change.
+    bool changed = !mh.visible || mh.logged_count != mh.count;
+    for (int i = 0; i < mh.count && !changed; ++i) {
+      changed = !SameContent(mh.logged[i], mh.group[i]);
+    }
+    mh.visible = any;
+    if (any && show_hand[h] && (changed || g_capture) &&
+        (g_logs < kMaxLogs || g_capture)) {
+      ++g_logs;
+      mh.logged_count = mh.count;
+      char all[900] = "";
+      for (int i = 0; i < mh.count; ++i) {
+        mh.logged[i] = mh.group[i];
+        char words[320];
+        Describe(mh.group[i], words, sizeof(words));
+        char one[480];
+        _snprintf_s(one, _TRUNCATE, "%s%s (%s, %.1f by %.1f cm, at %.3f %.3f "
+                    "%.3f m%s)", i > 0 ? "; " : "", words,
+                    mh.control[i] >= 0 ? kControlWord[mh.control[i]]
+                                       : "no button",
+                    pc.width[i] * 100.0f, pc.height[i] * 100.0f,
+                    pc.card[i].center[0], pc.card[i].center[1],
+                    pc.card[i].center[2],
+                    hide[h][i] ? ", hidden: it would cover the other hand"
+                               : "");
+        strncat_s(all, one, _TRUNCATE);
+      }
+      ModLog("hint card    : frame %llu, the controller of the %s hand has %d "
+             "cards: %s%s%s", g_frame, plan[h].left ? "left" : "right",
+             mh.count, all, shown != kCtxNone ? ". The prompt is for " : "",
+             shown != kCtxNone ? kContextName[shown] : "");
+    }
+  }
+  // A slot that no card uses now is gone at once.
+  for (int s = 0; s < kSlots; ++s) {
+    if (slot_used[s]) continue;
+    g_cards[s].fade = 0.0f;
+    g_cards[s].visible = false;
+  }
+}
+
 // --- the lines that the player knows: the frame ------------------------------------
 
 // CameraHelp::EnabledFeatures: the camera controls of the game that a script
@@ -2254,10 +2580,11 @@ void HintCardEndFrame() {
   if (!g_route || g_route_frame != g_frame) {
     // The hints are in the eye pictures, or no controller points. The cards
     // are gone at once, so a hint never shows at two places.
-    for (int h = 0; h < kHands; ++h) {
+    for (int h = 0; h < kSlots; ++h) {
       g_cards[h].fade = 0.0f;
       g_cards[h].visible = false;
     }
+    ModelCardsOff();
     g_game.count = 0;
     g_game_age = 0;
     hint_card_math::PromptStep(&g_prompt_state, kCtxNone, now,
@@ -2641,6 +2968,8 @@ void HintCardEndFrame() {
   const float size = g_size_pct * 0.01f;
   Plan plan[kHands] = {};
   float head[3] = {0.0f, 0.0f, 0.0f};
+  bool use_model[kHands] = {false, false};
+  HintModelPollKey();
   for (int h = 0; h < kHands; ++h) {
     Plan& p = plan[h];
     CardState& c = g_cards[h];
@@ -2653,6 +2982,15 @@ void HintCardEndFrame() {
                                    hand_m, &p.hand);
       hint_card_math::HandOutline(p.grip_position, p.grip_orientation, p.left,
                                   hand_m, p.outline);
+    }
+    // THE CONTROLLER IN THE HAND (hint_style=2): a hand with a model has
+    // the cards of its buttons (ModelCards), and no card at the wrist. The
+    // model loads at the first routed frame, before the first hint.
+    use_model[h] = false;
+    if (p.have_hand && HintModelStyle() == 2 &&
+        HintModelReady(p.left ? 0 : 1)) {
+      use_model[h] = true;
+      continue;
     }
     if (content[h].count > 0 && !p.have_hand) ++c.frames_no_hand;
     p.show = content[h].count > 0 && p.have_hand;
@@ -2678,12 +3016,13 @@ void HintCardEndFrame() {
     // A card at the face is not readable, and it hides the view.
     if (p.eye_distance < kMinEyeDistance) p.placed = false;
   }
+  ModelCards(content, plan, use_model, head, dt, shown);
   // A card must not hide the other hand, and the two cards must not overlap.
   // The card of the hand that points wins.
   for (int h = 0; h < kHands; ++h) {
     Plan& p = plan[h];
     const Plan& other = plan[1 - h];
-    if (!p.show || !p.placed) continue;
+    if (use_model[h] || !p.show || !p.placed) continue;
     bool hides = other.have_hand &&
                  hint_card_math::CardCoversAny(
                      p.card, p.width, p.height, kOtherHandMargin, head,
@@ -2702,6 +3041,7 @@ void HintCardEndFrame() {
   for (int h = 0; h < kHands; ++h) {
     Plan& p = plan[h];
     CardState& c = g_cards[h];
+    if (use_model[h]) continue;
     const bool show = p.show && p.placed;
     c.fade = hint_card_math::FadeStep(
         c.fade, show, dt,
@@ -3017,7 +3357,7 @@ void HintCardStyleToggle(const char* by) {
   ReadSettings();
   if (!CardsCanShow()) return;
   g_style = g_style != 0 ? 0 : 1;
-  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
   ControllersGesturePulse(0.5f, g_style != 0 ? 0.30f : 0.08f);
   ModLog("test key     : %s: hint_card_style is %d now (%s)", by, g_style,
          g_style != 0 ? "the cards are scrolls" : "the cards are plain");
@@ -3029,7 +3369,7 @@ void HintCardPicturesToggle(const char* by) {
   ReadSettings();
   if (!CardsCanShow()) return;
   g_pictures = g_pictures != 0 ? 0 : 1;
-  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
   ControllersGesturePulse(0.5f, g_pictures != 0 ? 0.30f : 0.08f);
   ModLog("test key     : %s: hint_card_pictures is %d now (%s)", by,
          g_pictures,
@@ -3048,7 +3388,7 @@ int HintCardPicturesValue() {
 void HintCardSetLearn(int learn, const char* by) {
   ReadSettings();
   g_learn = learn != 0 ? 1 : 0;
-  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
   ModLog("hint card    : %s: hint_learn is %d now (%s)", by, g_learn,
          g_learn != 0 ? "a line goes away after its action 3 times"
                       : "each line always shows");
@@ -3057,7 +3397,7 @@ void HintCardSetLearn(int learn, const char* by) {
 void HintCardSetStyle(int style, const char* by) {
   ReadSettings();
   g_style = style != 0 ? 1 : 0;
-  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
   ModLog("hint card    : %s: hint_card_style is %d now (%s)", by, g_style,
          g_style != 0 ? "the cards are scrolls" : "the cards are plain");
 }
@@ -3092,7 +3432,18 @@ void HintCardLearnDone(int skill, const char* how) {
 }
 
 void HintCardReport() {
+  HintModelReport();
   if (g_frames_routed == 0) return;
+  if (g_model_frames[0] + g_model_frames[1] > 0) {
+    ModLog("hint card    : the cards of the buttons showed in %llu frames of "
+           "the pointing hand and %llu of the other hand. %llu cards of the "
+           "pointing hand and %llu of the other hand did not show, because "
+           "they would cover the other hand or a card of the pointing hand",
+           g_model_frames[0], g_model_frames[1], g_model_hidden[0],
+           g_model_hidden[1]);
+    g_model_frames[0] = g_model_frames[1] = 0;
+    g_model_hidden[0] = g_model_hidden[1] = 0;
+  }
   const CardState& a = g_cards[kPointing];
   const CardState& b = g_cards[kOther];
   if (g_learn != 0) {

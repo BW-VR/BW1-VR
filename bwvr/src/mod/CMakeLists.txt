@@ -79,6 +79,7 @@ add_library(bwvr_mod SHARED
     hand_exact.cpp
     hand_model.cpp
     hand_model_file.cpp
+    hint_model.cpp
     hand_feel.cpp
     hand_land.cpp
     far_grab.cpp
@@ -160,9 +161,10 @@ if(NOT EXISTS "${VULKAN_HEADERS_DIR}/vulkan/vulkan.h")
 endif()
 target_include_directories(bwvr_mod PRIVATE "${VULKAN_HEADERS_DIR}")
 
-# The reader of a hand that the player edited (hand_model_file.cpp) uses
-# cgltf, one header with the MIT license. With no clone of it the mod builds
-# with no reader, and the log of the mod says so.
+# The reader of a hand that the player edited (hand_model_file.cpp) and of
+# the controller models of the hints (hint_model.cpp) uses cgltf, one header
+# with the MIT license. With no clone of it the mod builds with no reader,
+# and the log of the mod says so.
 set(CGLTF_DIR "${BWVR_THIRD_PARTY}/cgltf")
 if(EXISTS "${CGLTF_DIR}/cgltf.h")
   target_include_directories(bwvr_mod PRIVATE "${CGLTF_DIR}")

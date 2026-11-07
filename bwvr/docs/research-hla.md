@@ -876,13 +876,17 @@ something." [G] `closecaption_english.dat`.
 
 ### 7.2 The mod
 
-One card beside each wrist shows the hints of that hand (`hint_card=1`), with
-the tooltips of the game and the prompts of the mod. A prompt shows after a
+While a hand has a hint, the model of its controller shows in the hand, with
+each button of the hint lit in gold and a small scroll card for each lit
+button, with a line of ink to the button (`hint_style=2`). The models are the
+WebXR Input Profiles, so the lit button follows the bindings of the mod, as
+in HLA. The cards have the tooltips of the game and the prompts of the mod. A prompt shows after a
 dwell, for 4 to 6 s, and 2 to 4 times in a session (`prompts=1`). A line that
 teaches an action goes away after the player did the action 3 times, and
 comes back after 10 minutes of play with no use of it. The counts are in a
-file beside the ini (`hint_learn=1`). The mod has no picture of the
-controller and no lit button. [M] `controller-hints.md`.
+file beside the ini (`hint_learn=1`). With `hint_style=1` one card beside each
+wrist has the lines of that hand, with a drawn picture of each button. [M]
+`controller-hints.md`, 9.14.
 
 ### 7.3 Guide and open plans
 
@@ -895,9 +899,6 @@ controller and no lit button. [M] `controller-hints.md`.
    helps. HLA waits 5 s for the teleport. Cost: small.
 3. **One quiet sound when a new prompt opens**, with at least 4 s between two
    sounds. Use a sound of the game. Cost: small.
-4. **Light the button on a picture of the controller.** This is the last step
-   of `controller-hints.md`. HLA shows that it is the right goal: the hint
-   names the action and the picture follows the bindings. Cost: large.
 
 ## 8. Sound
 

@@ -98,8 +98,12 @@ try {
     # welcome_done=1: the welcome page of the first start (settings_panel.cpp)
     # does not show, so it does not take the trigger of a recipe. A run of
     # the welcome page gives welcome_done=0 in -Extra.
+    # hint_model_test_dir: the controller models of the hints
+    # (hint_style=2) come from bwvr\assets\controllers of this worktree, so
+    # a run needs no install of the models in the game folder.
     $counts = Join-Path $out 'bwvr-hint-counts.ini'
     Remove-Item -LiteralPath $counts, "$counts.new" -Force -ErrorAction SilentlyContinue
+    $models = Join-Path (Split-Path -Parent (Split-Path -Parent $sp)) 'assets\controllers'
     $keys = [ordered]@{
         vr = 0; stereo = 1; stereo_headless = 1; fake_head = 1;
         fake_head_yaw = 0; fake_head_pitch = 0; fov_absolute_deg = 110
@@ -111,6 +115,7 @@ try {
         god_zoom_smooth = 0
         hint_counts_test_file = $counts
         welcome_done = 1
+        hint_model_test_dir = $models
     }
     foreach ($k in $Extra.Keys) { $keys[$k] = $Extra[$k] }
 

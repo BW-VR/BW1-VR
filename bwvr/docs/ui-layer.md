@@ -1171,6 +1171,12 @@ facts:
   the panel. It goes to the card.
 - With `ui_panel=0` the test key Ctrl Shift F11 switches the cards on and off:
   the hint cards and the subtitle card (`UiPanelToggle`).
+- With `hint_style=2` each lit button of a controller has a card of its own
+  (`controller-hints.md`, 9.14). The two hint cards and four cards of the
+  buttons (`kCardHintButton0` to `+3`) are six quads at most, each with its
+  own swapchain of 768 by 320 pixels. They go after the card of the other
+  hand, in the same way. When the runtime refuses a frame with one of them,
+  all hint cards are off. The view for videos shows them too.
 
 ## 17. The subtitle card
 

@@ -155,7 +155,10 @@ want.
     stays too long, a subtitle card that moves while the head moves, a
     save of the game with no "Saving..." card in view for the whole save,
     or a picture of a button beside its word that is hard to read or does
-    not show where the button is on your controller.
+    not show where the button is on your controller. The controller in the
+    hand (`hint_style=2`): wrong is a model that is not at your real
+    controller, a lit button that is not the one to press, or a card whose
+    line you cannot follow to its button.
 
 ### All through the play
 

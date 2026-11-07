@@ -5864,6 +5864,25 @@ int ControllersKindOf(int c) {
 
 int ControllersPointingSide() { return PointingIndex(); }
 
+// For hint_model.cpp: the input of one controller (0 the left, 1 the right)
+// in this frame, as ControllersFrame took it, and the name of the headset.
+bool ControllersHandInput(int side, bwvr::HandInput* out) {
+  if (!g_on || g_frame == 0 || side < 0 || side > 1) return false;
+  *out = g_hands[side];
+  return true;
+}
+
+// The interaction profile of one controller (0 the left, 1 the right):
+// "fake" for the fake controller, "" before the runtime gives one.
+const char* ControllersProfileOf(int side) {
+  return HandProfileOf(side < 0 || side > 1 ? 0 : side);
+}
+
+const char* ControllersSystemName() {
+  if (g_fake.mode != 0 || g_screen == nullptr) return "";
+  return g_screen->SystemName();
+}
+
 void ControllersButtonMapOf(int c, int map[button_map::kButtons]) {
   MapOfController(c < 0 || c > 1 ? 1 : c, map);
 }

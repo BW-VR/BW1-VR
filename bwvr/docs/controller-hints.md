@@ -2,10 +2,13 @@
 
 This file records how the game draws its mouse and key hints, what the mod
 does with them while a controller is in use, how the hint cards work, and
-what is still open (pictures in the hints of the game, and models).
+what is still open (pictures in the hints of the game).
 
-While a controller owns the pointer, the hints show on one card beside the
-wrist of each hand, with prompts for the controller (section 9). The words of
+While a controller owns the pointer, the hints show on cards with prompts for
+the controller (section 9). With `hint_style=2` (the default) a hand with a
+hint shows the model of its controller, with each button of the hint lit and
+a small card for each lit button (9.14). With `hint_style=1` the cards are at
+the wrists. The words of
 the controller replace the mouse words in the game's help text (section 8).
 
 Marks: **[V]** verified (disassembly, symbols, the game files or the SDK
@@ -47,8 +50,12 @@ All addresses are for `runblack.exe` v1.42, image base `0x00400000`.
 - Each line of a button on a card has a small picture of the controller
   with that button lit, from the drawing of the page Controls
   (`hint_card_pictures`, 9.13).
-- Not built: glyph pictures of the buttons in the hints of the game, and the
-  runtime's 3D model (section 5).
+- While a hand has a hint, the model of its controller (WebXR Input
+  Profiles, MIT) shows in the hand with each button of the hint lit, and each
+  lit button has its own scroll card with a line of ink to it
+  (`hint_style=2`, 9.14).
+- Not built: glyph pictures of the buttons in the hints of the game
+  (section 5).
 
 ## 1. How the hint icons work
 
@@ -280,7 +287,8 @@ card with no game call.
 The mod must not ship art it may not ship. Three levels. The page Controls
 of the settings window has a drawing of each kind of controller in code
 (`ui-layer.md`, 24.6). Level (b) comes from it, on the hint cards (9.13).
-No level is in the hints that the game draws.
+Level (c) is the model of each controller in the hand (9.14). No level is in
+the hints that the game draws.
 
 ### (a) Flat icons per profile
 
@@ -314,38 +322,23 @@ This is the "modern VR" look at a small size.
 
 ### (c) A 3D model of the controller in the player's hand
 
-The real controller model, drawn at the real controller pose, with the button
-lit and a label. The runtime can supply the model.
+The real controller model, drawn at the real controller pose, with the
+button lit and a label. Built with `hint_style=2` (9.14).
 
-**What the SDK offers** [V, `third_party/OpenXR-SDK`, version 1.1.43]:
+**The models.** The mod ships the models of the WebXR Input Profiles
+(`bwvr/assets/controllers`, MIT, Copyright 2019 Amazon). The installer puts
+them in `bwvr-controllers` of the game folder. The README of the folder has
+the source, the version and the trademark note of the project: some models
+show the trademarks of the makers, and the license gives no right to use
+them. So a model shows only for the controller that it shows. The mod reads
+the meshes and the nodes, and draws them in its own colors. It does not read
+the textures, so no logo of a texture shows.
 
-- `XR_MSFT_controller_model` (`xrGetControllerModelKeyMSFT`,
-  `xrLoadControllerModelMSFT`, `xrGetControllerModelStateMSFT`). The runtime
-  gives a binary glTF and per node poses that move the button and stick nodes.
-- `XR_FB_render_model` (`xrGetRenderModelPropertiesFB`,
-  `xrLoadRenderModelFB`). The runtime gives a glTF for a path such as a
-  controller.
-
-**What a runtime supports.** `XR_MSFT_controller_model` is a Windows Mixed
-Reality feature. `XR_FB_render_model` is a Meta feature [I]. Virtual Desktop's
-32 bit OpenXR runtime lists neither [M]. `xr_screen.cpp` asks for only
-`XR_KHR_D3D11_ENABLE_EXTENSION_NAME` and logs the extensions that the runtime
-lists. The models may use compressed textures (KTX2 with Basis) [I]. A viewer
-needs a glTF reader (tinygltf or cgltf, both MIT) and a Basis transcoder
-(Apache 2.0) [I].
-
-**Legal.** The runtime hands the model to the app at run time. The mod does not
-ship it and must not save it into the mod folder or the repository. If a
-runtime offers nothing, do not ship a copy of a maker's model. Options that
-stay legal: a generic controller mesh the author makes, or the silhouette art
-from (b).
-
-**Other cost.** The mod needs a small glTF renderer on the Direct3D 11 side
-(`xr_screen`), a place in the frame for it, and a link from the hint code
-("hint active: this button"). It needs a model per hand and node names for each
-button, which differ by maker. The model stays still with the controller. Only
-the lit part changes. A model in the hand can hide the Hand of the game, so
-draw it beside the Hand, or only when the Hand is idle.
+**What a runtime offers** [V, `third_party/OpenXR-SDK`, version 1.1.43].
+`XR_MSFT_controller_model` (Windows Mixed Reality) and `XR_FB_render_model`
+(Meta) give a model at run time. Virtual Desktop's 32 bit OpenXR runtime
+lists neither [M]. The mod does not use them: the shipped models work with
+each runtime.
 
 **Controller families.** The mod uses the profile string from
 `XrScreen::HandProfile` (`FamilyOf` in `controller_hints.cpp`, which is
@@ -401,7 +394,8 @@ disk.
 
 ## 5. Plans for pictures
 
-The words and the card are built. These parts are open, in the order of effort:
+The words, the cards and the model in the hand (9.14) are built. This part
+is open:
 
 1. **Flat glyph atlas.** Replace the mouse picture in every hint by a
    controller glyph, including the screen edge hint and the controls page.
@@ -417,17 +411,6 @@ The words and the card are built. These parts are open, in the order of effort:
    release of the old material [?]. A 64 by 64 cell at the 20 percent hint size
    is about 13 pixels, which may be too small. The atlas also shows on the
    options controls page, so switch it by input state.
-2. **The runtime's 3D model.** Ask for the extension at `xrCreateInstance`
-   only if the runtime lists it. Load the glTF at session start, read the node
-   names, and render on the Direct3D 11 side at the hand's grip pose in the
-   LOCAL space, only while a hint is active. The model has no motion that the
-   player did not make. Fall back to the pictures of the card (9.13) when the
-   runtime has no model. This is the largest item. The main risk is that the runtime offers
-   no model (it offers none now, section 3).
-
-The card of section 9 is the place for item 2: it draws on the XR side
-at the grip pose, only while a hint is active, with no motion that the player
-did not make.
 
 ## 6. Risks that cut across
 
@@ -972,6 +955,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 
 | Key of `bwvr.ini` | Default | Meaning |
 | --- | --- | --- |
+| `hint_style` | 2 | 2 the model of the controller in the hand, with a card for each lit button (9.14). 1 the card at each wrist |
 | `hint_card` | 1 | 1 shows the hints on the card while a controller points. 0 draws them in the eye pictures (`ui-layer.md`, section 15). |
 | `prompts` | 1 | 0 no prompts, 1 the first times, 2 always |
 | `hint_card_size_pct` | 100 | The size of the card, 50 to 200 |
@@ -1107,11 +1091,9 @@ in the same way.
 
 ### 9.7 What is not built
 
-- Glyph pictures of the buttons in the hints of the game, and the runtime's
-  model (section 5). The badge, the seal and the picture of the button
-  (9.13) are the mod's own art and need no picture of a real controller.
-- Virtual Desktop's runtime lists no controller model extension [M], so a
-  model is not possible there.
+- Glyph pictures of the buttons in the hints of the game (section 5). The
+  badge, the seal and the picture of the button (9.13) are the mod's own
+  art.
 
 ### 9.8 Tests
 
@@ -1546,6 +1528,193 @@ come from `hint_profile`.
 
 Only a headset can show whether a picture is clear at 55 cm, and whether
 the player finds the button from it (`headset-checks.md`).
+
+### 9.14 The controller in the hand
+
+Code: `src/mod/hint_model.cpp` and `.h` (the load, the place, the draw),
+`src/mod/hint_model_math.h` (the model of each profile, the nodes, the press,
+the place of the cards), `ModelCards` in `src/mod/hint_card.cpp` (the
+cards), and the cards of the buttons in `src/vr/xr_screen.h`
+(`kCardHintButton0`). The checks are in
+`test/controller_math/hint_model_checks.h`.
+
+With `hint_style=2` (the default) the mod does what Half-Life: Alyx does
+(`research-hla.md`, section 7), in the look of the scroll cards:
+
+1. While a hand has a hint, the model of its controller fades in at the
+   real grip pose of that hand, in 0.2 s. It fades out in 0.35 s when the
+   hint ends.
+2. The body of the controller is faint: a parchment tone at 30 percent
+   alpha. Its back faces draw first and its front faces after them, so the
+   shape reads.
+3. Each button of a hint is solid and lit in a warm gold. A pressed button
+   moves as the model says (the press, below).
+4. Each lit button has its own small scroll card beside the controller, with
+   a thin line of ink from the button to the middle of the inner edge of
+   its card.
+5. The hand of the player stays, at 35 percent of its opacity
+   (`HandOpacity`). So the player still sees where the Hand touches, and the
+   controller shows through the hand.
+
+The logic of when a line shows does not change: the prompts (9.4), the
+hints of the game (9.9) and the lines that the player knows (9.10) are the
+same. Only the look and the place change.
+
+**The model of each controller** (`ModelOfProfile`). The models are in
+`bwvr-controllers` beside the mod (section 3 (c)). The interaction profile
+gives the model. Virtual Desktop gives `oculus/touch_controller` for each
+Quest, so the name of the headset (`XrSystemProperties`, the log line
+`openxr: headset`) tells the Touch controllers apart:
+
+| Profile | Name of the headset | Model |
+| --- | --- | --- |
+| `oculus/touch_controller`, and `fake` | "Quest 3", "Quest 3S", an other name | `meta-quest-touch-plus` |
+| `oculus/touch_controller` | "Pro" | `meta-quest-touch-pro` |
+| `oculus/touch_controller` | "Quest 2", "Quest2" | `oculus-touch-v3` |
+| `oculus/touch_controller` | "Quest" (the first one), "Rift S" | `oculus-touch-v2` |
+| any | "Pico" | `pico-4` |
+| `valve/index_controller` | | `valve-index` |
+| `htc/vive_controller` | | `htc-vive` (one file for both hands) |
+| `htc/vive_cosmos_controller`, `htc/vive_focus3_controller` | | `htc-vive-cosmos`, `htc-vive-focus-3` |
+| `microsoft/motion_controller` | "HP", "Reverb" | `hp-mixed-reality` |
+| `microsoft/motion_controller` | an other name | `microsoft-mixed-reality` |
+| `khr/simple_controller` | | `generic-trigger` |
+
+No profile yet, or an other profile, gives no model. Then that hand has the
+card at the wrist of `hint_style=1`, with the drawn pictures of the buttons
+(9.13). The same is true while a model loads, and when a model does not
+load. The bridge to the Steam Frame host does not send the name of the
+headset, so there a Touch profile gives the Touch Plus.
+
+**The load.** At the first frame in which the hints go to the cards, the mod
+starts a thread for the model of each hand. cgltf reads the meshes, the
+normals and the nodes, and no texture. A test program outside the game measured
+0.4 to 2.7 ms for each file. The model in use changes when the profile or the test key
+changes.
+
+**The nodes** (`NodeBases`). Each control of the drawing of the page
+Controls (`controller_art.h`) has a node of the model: `a_button` (`x_button`
+on a left Touch), `b_button` (`y_button`), `xr_standard_trigger`,
+`xr_standard_squeeze` (the grip), `xr_standard_thumbstick` (the stick and
+its click, or `xr_standard_touchpad` on a wand), and `menu`. The node is the
+base and `_pressed_value`. The meshes under that node are the lit part. The
+control of a line comes from its button word (`ControlOfWord`), so a change
+of the map of the buttons changes the lit button too. Two controls have no
+mesh of their own: the grip of an Index (its value node has no mesh, so a
+small gold diamond marks it), and the menu button of a Touch controller (no
+node at all, so its line goes to the card with no button).
+
+**The press.** A value node goes between its `_min` and `_max` nodes with
+the value of the control, as the WebXR profiles say: the trigger and the
+grip with their travel, a face button and the stick click with the press,
+and the stick with its two axes. The touch dot of a pad does not show.
+
+**The cards of the buttons** (`ModelCards`). The lines of a hand go to its
+cards:
+
+- One card for each lit button, with the lines of that button.
+- The lit button shows which button it is. So a line has no seal when its
+  button word is only the name of the button ("Grip", "A"). A word with
+  " x2" or " hold" keeps its seal, so the player sees the double press or
+  the hold.
+- The lines with no button (a hint of the game such as "Temple Health:
+  100%"), and the lines of a button with no node, are one card with no line
+  of ink, with their seals. It is the top card.
+- A hand has 4 cards at most. The hand that points takes its own card and
+  then the cards of the buttons (`kCardHintButton0` to `+3`). The other hand
+  takes its own card and the cards that are left. So both hands have 6 cards
+  at most.
+- The cards have the scroll look (or the plain look with
+  `hint_card_style=0`), the size of the hint card (9.3), and no drawn
+  pictures of the buttons.
+
+**The place of the cards** (`Stack`). The cards of a hand are a column on the
+outer side of the hand, as the head sees it: right of the right hand and
+left of the left hand. The column is at the distance of the controller from
+the head, and each card faces the head with no roll. The inner edges of the
+cards are on one line, 2 cm past the outline of the hand and of the box of
+the controller, so no card is on the hand or on the controller. The cards
+are 6 mm apart, and their middle is at the mean height of their buttons.
+The side changes as the card at the wrist does (9.3): when the outline goes
+4 cm farther to the side of the cards than to the other side.
+
+The order of the cards is the one with no crossing of the lines in the view.
+Stack tries each order (24 for 4 cards) and takes the one with the fewest
+crossings, then the one with the least vertical distance from each button to
+its card. A line goes from its button to the inner edge of its card, and
+the column is outside the outline, so a line does not go over a card. A card
+of a hand that would hide the other hand does not show. A card of the other
+hand that would overlap a card of the hand that points does not show.
+
+**The depth.** The controller, the diamond and the lines draw in the eye
+pictures, after the opaque meshes of the overlay and before the mesh of the
+hands, with the depth of the scene (`overlay.cpp`). So the land can hide
+them. The lit parts and the lines write depth. The faint body does not.
+The cards are quad layers, as each hint card is (9.2), so the Hand cannot
+hide them. A real hand in the land is drawn on the land (`hand-model.md`,
+"The Hand stops at the land"), and its controller goes with the drawn hand.
+The line still ends at the edge of its card.
+
+**The view for videos** (`video_view=1`) shows the cards of the buttons as it
+shows each card. The controller and the lines are in the eye pictures.
+
+**The keys.**
+
+| Key of `bwvr.ini` | Default | Meaning |
+| --- | --- | --- |
+| `hint_style` | 2 | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3), with the pictures of the buttons (9.13). The launcher row "Hints with the controller" |
+| `hint_model_test` | empty | Test key. The folder of a model for both hands, for example `valve-index`, in place of the model of the profile |
+| `hint_model_test_dir` | empty | Test key. The folder of the models. Empty is `bwvr-controllers` beside `runblack.exe`. `desk_test.ps1` sets `bwvr\assets\controllers` of its worktree |
+
+With `test_keys=1`, Ctrl Shift H switches `hint_style` between 2 and 1, for a
+live comparison.
+
+**The log.**
+
+- `hint model   : hint_style=2, ...` once, with the folder of the models.
+- `hint model   : the right hand reports the profile "oculus/touch_controller"
+  and the headset "Meta Quest 3", so the model is meta-quest-touch-plus`:
+  once for each hand, and again when the model changes.
+- `hint model   : the model meta-quest-touch-plus of the right hand loaded in
+  0.4 ms on a thread: 31 nodes, 6 meshes, 3340 vertices, 4470 triangles, a
+  box of 6.8 by 6.0 by 12.3 cm. The controls with a node: first face button,
+  ...`: once for each load, or the reason when the load failed.
+- `hint model   : the controller meta-quest-touch-plus shows in the right
+  hand, with 2 cards`: the first time for each hand.
+- `hint card    : frame N, the controller of the right hand has 2 cards: Take
+  (grip, 4.1 by 2.2 cm, at x y z m); [A] Teleport (first face button, ...)`:
+  each time the cards of a hand change, in the 160 lines of 9.6.
+- `hint model   : the controllers cost N ms a frame on the CPU over 120
+  frames (the build and both eyes), N ms at most, N triangles a frame`:
+  once, and in each report window with the frames in which each controller
+  showed. The report of the hint card has the frames of the cards of the
+  buttons, and the cards that did not show.
+
+**The cost.** The CPU puts each corner of the model on the screen in each
+eye, as the overlay does. The Touch Plus has 4470 triangles a hand. The
+goal is under 0.3 ms a frame for two controllers and four cards. The Vive
+wand and the Vive Cosmos have about 18000 triangles a hand, four times as
+many, so they cost more.
+
+**Tests.** The math test (`hint_model_checks.h`): the model of each profile
+and headset name, the nodes of each control, the control of each word, the
+press, the crossing of two lines, and 3000 poses of play with 1 to 4 cards:
+no two lines cross in the view, no two cards of a hand overlap, no card
+covers a point of the hand or of the controller, each line ends at the
+inner edge of its card, and the cards face the head. A test program outside
+the game loaded each model with `hint_model.cpp`, placed four cards and drew
+the controllers on the CPU: each model loads, and its lit parts are the
+trigger, the grip and A.
+
+The desktop runs: a hint on each hand with the fake controller (a Touch
+Plus), each model with `hint_model_test`, two and three hints at once, the
+cost, and `hint_style` at 1 and 2. They save the eye pictures and the
+pictures of the cards (`hint_card_save_test=1`).
+
+Only a headset can show whether the model is at the real controller (the
+grip pose of each runtime and the origin of each model), whether the faint
+body and the gold buttons read at 55 cm over the land, and whether the cards
+and their lines are easy to follow (`headset-checks.md`).
 
 ## 10. A text that waits for a click
 

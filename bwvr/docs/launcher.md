@@ -252,6 +252,7 @@ move the camera in steps.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| Hints with the controller | Controller in the hand | Key `hint_style`, a value. 2 Controller in the hand: while a hand has a hint, a faint model of its controller shows in that hand, each button of the hint is lit in gold, and each lit button has its own small scroll card with a line of ink to the button. 1 Cards at the wrists: one card beside each wrist. A controller with no model has the cards at the wrists (`controller-hints.md`, 9.14). |
 | Card look | Scroll | Key `hint_card_style`, a value. 1 Scroll: each hint card is a parchment scroll with dark letters, and the button word is on a wax seal. The spell book and the keyboard in the headset are pages of the same parchment, and each item of the ring is a wax seal. 0 Plain: dark cards with white letters (`controller-hints.md`, 9.11, `miracles.md`, "The spell book", `controllers.md`, 10.4, and `ui-layer.md`, section 21). |
 | Button pictures on the cards | on | Key `hint_card_pictures`. 1: each line of a button on a hint card has a small picture of the controller with that button lit, beside the button word. 0: the button word only (`controller-hints.md`, 9.13). |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |

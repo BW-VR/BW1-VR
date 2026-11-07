@@ -384,6 +384,14 @@ const Setting kSettings[] = {
      "back after 10 minutes of play without that action. In a lesson of the "
      "tutorial, each line shows. Always: each line always shows. To show all "
      "lines again, delete bwvr-hint-counts.ini in the game folder."},
+    {kValues, "hint_style", "Hints with the controller",
+     "Controller in the hand=2|Cards at the wrists=1", 2,
+     "Controller in the hand: while a hand has a hint, a faint model of your "
+     "controller shows in that hand. Each button of the hint is lit in gold, "
+     "and each lit button has its own small card with a line to the button. "
+     "Cards at the wrists: one card beside each wrist, with a small picture "
+     "of the button. A controller with no model has the cards at the "
+     "wrists."},
     {kValues, "hint_card_style", "Card look", "Scroll=1|Plain=0", 1,
      "The look of the cards beside your wrists, of the spell book, of the "
      "ring menu and of the keyboard for a name. Scroll: a small parchment "

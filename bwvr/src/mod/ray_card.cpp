@@ -147,28 +147,21 @@ bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
   if (!g_was_on) {
     g_was_on = true;
     g_run_start = frame;
-    // The angle between the front of the strip and the way to the head.
-    float front[3];
-    const float z[3] = {0.0f, 0.0f, 1.0f};
-    rc::Rotate(quad.orientation, z, front);
-    float to_head[3];
-    for (int i = 0; i < 3; ++i) to_head[i] = head[i] - quad.position[i];
-    const float lh = sqrtf(rc::Dot(to_head, to_head));
-    const float facing =
-        lh > 1e-6f ? acosf(fmaxf(-1.0f, fminf(1.0f, rc::Dot(front, to_head) /
-                                                    lh))) * 57.29578f
-                   : 0.0f;
+    const rc::Facing facing = rc::FacingOf(quad, from, to, head);
     if (!g_said_first || g_run_logs < kMaxRunLogs) {
       if (g_said_first) ++g_run_logs;
       g_said_first = true;
       ModLog("ray card     : the ray goes over the panels as a quad layer, "
              "frame %llu: from %.3f %.3f %.3f to %.3f %.3f %.3f m (%.2f m), "
              "a strip %.1f cm across and %.2f m long at %.3f %.3f %.3f m. "
-             "Its front is %.1f degrees from the way to the head. The look: "
+             "Its front is %.1f degrees from the best turn to the head, and "
+             "the head sees it at %.1f degrees from its plane (90 is face "
+             "on, a ray that points away from the head has less). The look: "
              "%s, and a mark of %.1f cm at the end. The eye pictures have no "
              "ray", frame, from[0], from[1], from[2], to[0], to[1], to[2],
              length, quad.width * 100.0f, quad.height, quad.position[0],
-             quad.position[1], quad.position[2], facing,
+             quad.position[1], quad.position[2], facing.off_best_deg,
+             facing.sight_deg,
              look.only ? "the glow alone"
                        : (look.glow ? "a tube under a glow" : "a plain tube"),
              look.end_radius * 200.0f);

@@ -2796,7 +2796,7 @@ at its end, and the count in each report:
 
 ```
 ray card     : ray_over_panels=1: while a panel in the room is open, the ray of the pointing hand goes out as a quad layer over the panels
-ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m), a strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the way to the head. The look: the glow alone, and a mark of 1.0 cm at the end. The eye pictures have no ray
+ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m), a strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a mark of 1.0 cm at the end. The eye pictures have no ray
 ray card     : the ray is no longer over the panels, frame N, after M frames
 ray card     : N frames had the ray over the panels
 ```
@@ -2806,9 +2806,23 @@ ray card     : N frames had the ray over the panels
 The math checks are in `test/controller_math/ray_card_checks.h`: the three
 looks, the place of the strip (along the ray, the front square to the ray
 and toward the head, a right hand set of axes, a ray that points at the
-head, a ray of 5 mm), and the picture (the middle line, the rim, the edge,
-the hand, the mark and its ink, the tube, the bytes of the picture).
+head, a ray of 5 mm), how the head sees the strip (a ray of a desktop run
+5 degrees from the line of sight, where no turn about the ray faces the head
+more, and a ray up and out from the hand), and the picture (the middle line,
+the rim, the edge, the hand, the mark and its ink, the tube, the bytes of
+the picture).
 
+The desktop run is `village_run.ps1 -Kind rayover`. The fake hand is 1 m in
+front of the head, at the depth of the panel, so its ray misses the panel
+and is 2 m long, and it points about 5 degrees from the line of sight. So the
+head sees the strip at 5 degrees from its plane, and the strip is thin in the
+pictures of the view for videos. The glow ribbon of the eye pictures has the
+same plane.
+
+- The strip holds the ray, so it can only turn about the ray. A ray that
+  points away from the head is seen at a small angle and looks thin, as a
+  real line does. In a headset the hand is below the eyes, so the ray to a
+  panel goes up and out at an angle.
 - The strip is over the hand where the ray starts, because a quad layer
   has no depth. The glow alone has no light at the hand and full light from
   6 cm. A tube starts at the hand.

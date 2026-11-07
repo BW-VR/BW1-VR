@@ -182,6 +182,42 @@ inline bool Place(const float from[3], const float to[3], const float head[3],
   return true;
 }
 
+// HOW THE HEAD SEES THE STRIP. The strip holds the ray, so its front can only
+// turn about the ray. off_best_deg is the angle between the front and the
+// part of the way to the head that is square to the ray: 0 is the best turn.
+// sight_deg is the angle between the ray and the line from the strip middle
+// to the head: the head sees the strip at this angle from its plane, 90 is
+// face on. A ray that points away from the head has a small sight_deg, and
+// no turn about the ray makes it more. The glow ribbon of the eye pictures
+// (glow_math::Sides) has the same plane, so it is seen at the same angle.
+struct Facing {
+  float off_best_deg;
+  float sight_deg;
+};
+
+inline Facing FacingOf(const Quad& quad, const float from[3],
+                       const float to[3], const float head[3]) {
+  Facing out = {0.0f, 90.0f};
+  float y[3] = {to[0] - from[0], to[1] - from[1], to[2] - from[2]};
+  float w[3];
+  for (int k = 0; k < 3; ++k) w[k] = head[k] - quad.position[k];
+  if (!Unit(y)) return out;
+  const float lw = sqrtf(Dot(w, w));
+  if (!(lw > 1e-6f)) return out;
+  const float along = Dot(w, y);
+  float square[3];
+  for (int k = 0; k < 3; ++k) square[k] = w[k] - along * y[k];
+  const float z[3] = {0.0f, 0.0f, 1.0f};
+  float front[3];
+  Rotate(quad.orientation, z, front);
+  const float c = Unit(square) ? Dot(front, square) : 1.0f;
+  const float s = fabsf(along) / lw;
+  out.off_best_deg = acosf(c > 1.0f ? 1.0f : (c < -1.0f ? -1.0f : c)) *
+                     57.29578f;
+  out.sight_deg = acosf(s > 1.0f ? 1.0f : s) * 57.29578f;
+  return out;
+}
+
 inline float Clamp01(float v) {
   return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 }

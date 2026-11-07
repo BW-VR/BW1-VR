@@ -164,6 +164,60 @@ inline void RayCardChecks() {
   Check(placed && fabsf(Dot(az, at)) < 1e-4f,
         "a ray that points at the head has a strip square to it", Dot(az, at),
         0.0);
+  // THE CASE OF A DESKTOP RUN: the head at 0 0 0 and a ray of 2 m from
+  // 0 0 -1 that points 5 degrees from the line of sight. The front is the
+  // best turn about the ray, and no turn about the ray faces the head more.
+  {
+    const float f3[3] = {0.0f, 0.0f, -1.0f};
+    const float t3[3] = {-0.277f, -0.209f, -2.970f};
+    const float h3[3] = {0.0f, 0.0f, 0.0f};
+    Quad q3;
+    float l3 = 0.0f;
+    const bool p3 = Place(f3, t3, h3, only, &q3, &l3);
+    const Facing face = FacingOf(q3, f3, t3, h3);
+    Check(p3 && face.off_best_deg < 0.1f,
+          "a run case: the front is 0 degrees from the best turn to the head",
+          face.off_best_deg, 0.0);
+    Near("a run case: the head sees the strip at 5 degrees from its plane",
+         face.sight_deg, 5.0, 0.1);
+    float front[3], w[3];
+    Rotate(q3.orientation, ez, front);
+    for (int k = 0; k < 3; ++k) w[k] = h3[k] - q3.position[k];
+    Unit(w);
+    const float chosen = Dot(front, w);
+    float u3[3] = {t3[0] - f3[0], t3[1] - f3[1], t3[2] - f3[2]};
+    Unit(u3);
+    float a3[3], b3[3];
+    Rotate(q3.orientation, ex, a3);
+    Cross(u3, a3, b3);
+    float best = -2.0f;
+    for (int i = 0; i < 360; ++i) {
+      const float r = 0.0174533f * static_cast<float>(i);
+      float n[3];
+      for (int k = 0; k < 3; ++k) n[k] = cosf(r) * b3[k] + sinf(r) * a3[k];
+      const float d = Dot(n, w);
+      if (d > best) best = d;
+    }
+    Check(chosen >= best - 1e-4f,
+          "a run case: no turn about the ray faces the head more", chosen,
+          best);
+    Near("a run case: the best front is 85 degrees from the way to the head",
+         acosf(chosen) * 57.29578f, 85.0, 0.1);
+  }
+  // A ray up and out from a hand below the eyes, 30 degrees up from the
+  // ground, is seen at about 20 degrees.
+  {
+    const float f4[3] = {0.0f, -0.4f, -0.4f};
+    const float t4[3] = {0.0f, -0.4f + 0.5f, -0.4f - 0.866f};
+    const float h4[3] = {0.0f, -0.4f, 0.6f};
+    Quad q4;
+    float l4 = 0.0f;
+    Place(f4, t4, h4, only, &q4, &l4);
+    const Facing face = FacingOf(q4, f4, t4, h4);
+    Check(face.off_best_deg < 0.1f && face.sight_deg > 15.0f,
+          "a ray up and out from the hand is seen at more than 15 degrees",
+          face.sight_deg, 30.0);
+  }
   // A ray of less than 1 cm has none.
   const float near_end[3] = {0.1f, 1.0f, -0.305f};
   Check(!Place(from, near_end, head, only, &q, &length),

@@ -998,6 +998,10 @@ game as it is.
       15.3): `village_run.ps1 -Kind tooltip`, with "Amount" clear of the
       index finger in both eye pictures.
   - The intro:
+    - A still hand moves no orb (`intro_push_room=1`, `intro.md`, "The push
+      in 3D"): `intro_run.ps1` with the scripted hands of its header, with
+      no line "a hand moves N orbs in 3D" before the first step of the
+      hands.
     - A still hand with no flicker of one frame: `intro_run.ps1` with the
       scripted hands of its header. Needs a log line: a count of the changes
       of the show of a hand.

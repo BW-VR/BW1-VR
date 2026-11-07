@@ -455,6 +455,16 @@ one to one and it has one hand only.
 3. The spring of the effect then pulls each orb back to its home, and the
    orbs draw. The second eye pass moves no orb.
 
+**Only a motion of the player** (`intro_push_room=1`). The pose of a hand
+against the camera also changes when the camera turns along the path, when
+the head moves, or when the scale of the room changes, and the player did not
+move the hand then. So `HandsFrame` also keeps the pose of each hand in the
+room (`ControllersOverlayHandsRoom`, the position in meters), and a hand
+moves orbs only when that pose changed since the pair before
+(`intro_motion::HandStill`: 0.1 mm and 0.00001 of a row of the turn). A hand
+that is still in the room moves no orb. `intro_push_room=0` lets each change
+of the pose against the camera move orbs.
+
 A hand reaches an orb only when the orb is in the reach of the arm. With
 `intro_distance_cm=300` the formed logo is 2.1 m to 3.9 m from the head, and
 only the orbit at the start of `intro_motion=1` goes between the orbs. With
@@ -571,6 +581,7 @@ the intro" is cleared when mode 2 runs.
 | `intro_controller` | 1 | Run the controller frame, so the aim moves the pointer |
 | `intro_push_3d` | 1 | 1: each hand takes the orbs in its reach in 3D, and the hands give the mouse no motion. 0: the pointing hand pushes through the pointer, with the two keys below |
 | `intro_push_radius_cm` | 30 | The reach of a hand for the push in 3D, in cm of the room, 2 to 100 |
+| `intro_push_room` | 1 | 1: a hand moves orbs in 3D only when its pose in the room changed. 0: each change of its pose against the camera moves orbs |
 | `intro_hand_depth` | 1 | 1: the hands draw after the sky and before the orbs, so an orb in front of a hand draws over it. 0: the hands draw after the orbs, over each orb |
 | `intro_hand_show` | 1 | 0: no hand models. 1: a hand shows while it moves. 2: a hand shows while it is tracked |
 | `intro_hand_push_pct` | 100 | With `intro_push_3d=0`: the motion of the pixel of the hand, in percent, that goes to the motion of the mouse, so the hand pushes the orbs. 0 to 400. 0: only a mouse pushes the orbs |
@@ -648,6 +659,11 @@ The tag is `intro`:
 - The first frame in which a hand moves orbs in 3D, with the reach in units.
   At the end: the frames in which the hands moved orbs, the orbs in all, the
   most in one frame, and the frames in which a hand showed.
+- With `intro_push_room=1`: the first pair in which a hand that is still in
+  the room moves no orb (`the right hand is still in the room, so it moves
+  no orb`), with the move of its pose against the camera in cm and the scale
+  of the room in this pair and in the pair before. At the end: the count of
+  such pairs.
 - With `intro_probe=1`, each 100 pairs: the pointer, the pointer that the
   push of the game read, and the count of orbs more than 1 unit from their
   home. Also the place of the right hand against the camera, its speed and
@@ -660,7 +676,7 @@ The tag is `intro`:
 
 ### The math test
 
-`intro_motion_checks.h` (89 checks) covers the camera path against the camera
+`intro_motion_checks.h` (93 checks) covers the camera path against the camera
 that the game asked for in a run, the ease, the fixed heading, the cameras of
 each value of `intro_motion` (the place of the game with no turn, the room
 that stays still, the model that stays in front of the head), the step of the
@@ -668,7 +684,8 @@ test key, the scale and the speed, the pixel of a flat corner on the plane of
 the logo for each eye, the motion of the mouse from the motion of the hand
 (the percent, the fraction of a slow hand, and no motion after a gap), the
 push in 3D (one to one, the soft edge, the reach, a turn of the hand, a hand
-that does not move), and the show of the hands (the shake of the tracking
+that does not move, a hand that is still in the room through a change of the
+scale), and the show of the hands (the shake of the tracking
 of a hand at rest, the times to come and to go, a hand that is not
 tracked).
 

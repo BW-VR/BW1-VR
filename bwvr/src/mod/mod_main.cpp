@@ -101,6 +101,7 @@ void IntroSetTests(int motion_seconds, int push_pixels);
 void IntroSetHandPush(int percent, bool hand_point);
 void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
                    bool hand_depth);
+void IntroSetPushRoom(bool on);
 void IntroSetScreen(bwvr::XrScreen* screen);
 void IntroInstall();
 bool IntroFinishFrame();
@@ -710,6 +711,8 @@ bool g_intro_push_3d = true;
 int g_intro_push_radius_cm = 30;
 int g_intro_hand_show = 1;
 bool g_intro_hand_depth = true;
+// In the intro a hand moves orbs only when the player moved it in the room.
+bool g_intro_push_room = true;
 bool g_intro_probe = false;
 // Tests of the desktop runs.
 int g_intro_motion_test_seconds = 0;
@@ -1767,6 +1770,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "intro_hand_show", 1, path));
   g_intro_hand_depth =
       GetPrivateProfileIntA("bwvr", "intro_hand_depth", 1, path) != 0;
+  g_intro_push_room =
+      GetPrivateProfileIntA("bwvr", "intro_push_room", 1, path) != 0;
   g_intro_probe = GetPrivateProfileIntA("bwvr", "intro_probe", 0, path) != 0;
   g_fix_unscaled =
       GetPrivateProfileIntA("bwvr", "fix_unscaled", 1, path) != 0;
@@ -2057,6 +2062,7 @@ void StartVrStep() {
     IntroSetHandPush(g_intro_hand_push_pct, g_intro_hand_point);
     IntroSetHands(g_intro_push_3d, g_intro_push_radius_cm, g_intro_hand_show,
                   g_intro_hand_depth);
+    IntroSetPushRoom(g_intro_push_room);
     IntroInstall();
     EyeCleanSetOptions(g_eye_clean, g_eye_clean_test, g_eye_clean_test_frame);
     EyeCleanInstall();

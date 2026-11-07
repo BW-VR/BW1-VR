@@ -862,8 +862,9 @@ of the object in the Hand ("Drop").
 
 With `hint_words=3` the context of the fetch stays for those frames
 (`FetchKeepStep` in `hint_card_math.h`). So the card says "Grip Pull to fetch"
-from the frame in which the far target comes until the hint of the object in
-the Hand comes. The rule:
+from the frame in which the far target comes until the Hand holds the object
+(`hint_held_latch=1`), or until the hint of the object in the Hand comes
+(`hint_held_latch=0`). The rule:
 
 1. It starts when the far target goes while the card has the prompt "Pull to
    fetch", or less than 0.15 s after that prompt showed. The grip must be
@@ -871,16 +872,48 @@ the Hand comes. The rule:
    (`FarGrabGlideOrigin`: the game took the press of the fetch). A far target
    that goes for a different reason starts nothing. A far target with a
    different prompt (a scroll, a bulk source, the Creature) starts nothing.
-2. It holds while the Hand is empty and on no target. It also holds while the
-   Hand has the object and the game still gives the hint that the prompt
-   owned. It holds too while the Hand has the object, the object is still on
-   its way, and the game gives no hint for the grip (`FetchWaits`).
-3. It ends when the Hand has the object and the game gives a new hint for
-   the grip. It also ends as the take in work ends: a different context comes,
-   the grip opens, or 1.0 s passed since the far target went.
+2. It holds while the Hand is empty and on no target.
+3. With `hint_held_latch=1` it ends in the frame in which the Hand holds the
+   object (see "One text for one object in the Hand"). With
+   `hint_held_latch=0` it also holds while the Hand has the object and the
+   game still gives the hint that the prompt owned, and while the object is
+   still on its way and the game gives no hint for the grip (`FetchWaits`).
+   It then ends when the game gives a new hint for the grip.
+4. It also ends as the take in work ends: a different context comes, the
+   grip opens, or 1.0 s passed since the far target went.
 
 With `hint_words` 2 or less the hint of the game for the grip shows from the
 end of the far target until the hint of the object in the Hand comes.
+
+**One text for one object in the Hand** (`hint_held_latch=1`). The context of
+a frame comes from the facts of that frame. The game gives its hint for the
+object in the Hand 0 to 6 frames after the Hand has it. Later it can give no
+hint for the grip for a frame or two, for example while the aim turns, or
+while its hint for the object changes from one text to another ("Combine
+Scaffolds", then "Build"). So:
+
+1. The fetch in work ends in the frame in which the Hand holds the object,
+   and it does not start while the Hand holds an object. From that frame
+   until the game gives a new hint for the grip (1.0 s at most), the line of
+   the grip has the words of the mod for the object in the Hand
+   (`HoldWords`): the words of a tree that the opening does not plant
+   ("Lower to plant. Open to drop", the same words that the card gives to
+   the hint of the game), the line of a take from a forest, "Open to plant"
+   for a tree that the opening plants, or "Open to drop". The hint of the
+   take that the prompt owned does not show then (`OwnedStale`). So the card
+   says what the grip does with the object from the first frame with the
+   object in the Hand. With `hint_held_latch=0` the card says "Pull to
+   fetch" until the hint of the game comes, and the fetch in work can start
+   again while the object is still on its way.
+2. A far target that is not locked is no context while the Hand holds an
+   object. The far grab is not ready then, and such a target is the state of
+   the frame before.
+3. A frame with no words on the pointing card, while the Hand holds the same
+   object as in the last frame with words, keeps those words for 0.10 s at
+   most (`kHeldGapSeconds`). A card with no words for one or two frames
+   between two hints of the game for the same object is a blink.
+
+`hint_held_latch=0` gives each frame the words of its own context.
 
 **After the prompt went.** The card has the hint of the game for the button of
 a target for some frames after the target went: 1 to 11 frames in desktop
@@ -948,6 +981,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_card_size_pct` | 100 | The size of the card, 50 to 200 |
 | `prompt_timing` | 1 | 1 the prompt of a target shows at once, stays while the target is there and shows each time. 0 the dwell, hold and count for all prompts (9.4) |
 | `hint_words` | 3 | 1 the prompt of a target owns its button and a hint of the game with no words does not show. 2 is 1, and the prompt of a take also keeps the grip from the close of the grip until the Hand holds the object. 3 is 2, and the prompt of a fetch keeps the grip from the end of the far target until the Hand holds the object, and a hint of the game that a prompt owned does not show for 0.25 s after the prompt went. 0 the hint of the game takes the place of the prompt, as it comes (9.4) |
+| `hint_held_latch` | 1 | 1 the card keeps one text for one object in the Hand: a fetch in work ends in the frame in which the Hand holds the object, and the card has the words of the mod for the object until the game gives its hint for it. A far target with no lock is no context while the Hand holds an object, and a frame with no words keeps the words for the same object for 0.10 s at most. 0 each frame has the words of its own context, and the fetch in work waits for the hint of the game (9.4, "One text for one object in the Hand") |
 | `hint_palm_check` | 1 | 1 a grip hint of the game over the land does not show while the search at the palm is off, because a press there acts on no object. 0 it shows (9.9) |
 | `text_click` | 1 | 1 shows the prompt of a text that waits for a click in each view, and makes the trigger that click. 0 gives that prompt the rule of each other hint of the left button (section 10) |
 | `prompt_moves` | 1 | 1 the prompt of the land has the line of the walk with the stick while a push moves the player, and the line of A shows only while a press of A can move the player. 0 no line for the walk, and the line of A shows in each case (9.4) |
@@ -1015,6 +1049,17 @@ ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
   (or `the grip opened`, or `the time limit passed`): one line for the start
   and one for the end of each fetch in work, with `hint_words=3`. These lines
   count in the same 60 lines.
+- `hint card : frame N, the Hand holds P, the object of the fetch, and the
+  game gives no new hint for the grip yet. The prompt of the fetch goes now,
+  and the card has the words of the mod for the object`, `hint card : frame
+  N, the words of the mod for P end after K frames: the game gives its hint
+  for the grip` (or `the Hand does not hold it now`, or `the time limit
+  passed`), `hint card : frame N, the pointing card keeps "[Grip] Combine Scaffolds": the Hand holds the
+  same object P, and this frame has no words for it. The context is ..., the
+  prompt is ..., and the game gives K lines, J of them on the card`, and
+  `hint card : frame N, the far target T is no context: the Hand holds P`:
+  with `hint_held_latch=1` (60 lines at most). The report window has the
+  count of each, with `hint_held_latch=N`.
 - `hint card : frame N, the hint "[Grip] Pick Up" of the game did not show on
   K frames after its prompt went at frame M: the game gives it no more` (or
   `the time limit passed, so it shows now`, or `a prompt owns it again`): one

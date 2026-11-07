@@ -75,6 +75,17 @@
 //                        (OwnedStale). 0 the hint of the game takes the place
 //                        of the prompt. Ctrl and Home change it, with
 //                        test_keys=1
+//   hint_held_latch=1    1 the card keeps one text for one object in the
+//                        Hand: a fetch in work ends in the frame in which
+//                        the Hand holds the object, and the card has the
+//                        words of the mod for that object until the game
+//                        gives its hint for it. A far target that is not
+//                        locked is no context while the Hand holds an
+//                        object, and a frame with no words for the same
+//                        object in the Hand keeps the words of the frame
+//                        before, for kHeldGapSeconds at most. 0 each frame
+//                        has the words of its own context, and a fetch in
+//                        work waits for the hint of the game
 //   text_click=1         0 gives the prompt "Continue" the rule of each other
 //                        hint of the left button (text_click.cpp)
 //   prompt_moves=1       1 the prompt of the land has the line of the walk
@@ -151,6 +162,8 @@ bool ControllersWalkPossible();
 // hand_direct.cpp: the Hand's point and what a press does there.
 bool HandDirectGlowFacts(float point[3], float* length, int32_t* mode,
                          bool* holding, int* eye, uint64_t* frame);
+// hand_direct.cpp: the CHand that the controller places.
+void* HandDirectHand(bool* active);
 // hand_direct.cpp: what the opening of the grip does with a tree in the Hand
 // (tree_plant_math.h), or -1. And the A/B key of that text.
 int HandDirectTreeVerdict();
@@ -179,6 +192,7 @@ bool g_toggled_off = false;  // the test key
 bool g_test_keys = false;    // test_keys
 int g_timing = 1;            // prompt_timing, and its test key
 int g_words = 3;             // hint_words, and its test key
+int g_held_latch = 1;        // hint_held_latch
 int g_moves = 1;             // prompt_moves, and its test key
 int g_learn = 1;             // hint_learn
 bool g_palm_check = true;    // hint_palm_check (GameHintTrue, palm_off)
@@ -300,6 +314,13 @@ void ReadSettings() {
   g_timing = IniKey("prompt_timing", 1) != 0 ? 1 : 0;
   g_words = IniKey("hint_words", 3);
   if (g_words < 0 || g_words > 3) g_words = 3;
+  g_held_latch = IniKey("hint_held_latch", 1) != 0 ? 1 : 0;
+  ModLog("hint card    : hint_held_latch=%d, %s", g_held_latch,
+         g_held_latch != 0
+             ? "the card keeps one text for one object in the Hand: no "
+               "prompt of a fetch for the object in the Hand, and a frame "
+               "with no words keeps the words of the frame before for 0.10 s"
+             : "each frame has the words of its own context");
   g_moves = IniKey("prompt_moves", 1) != 0 ? 1 : 0;
   g_learn = IniKey("hint_learn", 1) != 0 ? 1 : 0;
   g_size_pct = IniKey("hint_card_size_pct", 100);
@@ -454,6 +475,45 @@ bool g_have_facts = false;
 uint64_t g_facts_frame = 0;
 int32_t g_facts_mode = 0;
 bool g_facts_holding = false;
+void* g_facts_held = nullptr;  // the object in the Hand at that time
+
+// ONE TEXT FOR ONE OBJECT IN THE HAND (hint_held_latch). The context of a
+// frame comes from the facts of that frame. The game gives its hint for the
+// object in the Hand 0 to 6 frames after the Hand has it, and while the aim
+// turns it can give no hint for the grip for a frame or two. So:
+//   - THE OBJECT OF A FETCH. A fetch in work ends in the frame in which the
+//     Hand holds the object: it does not wait for the hint of the game, and
+//     it does not start again while the Hand holds an object. From that
+//     frame until the game gives a new hint for the grip (kTakeKeepSeconds
+//     at most), the line of the grip has the words of the mod for the object
+//     in the Hand (HoldWords): the words of a tree that the opening does not
+//     plant, as the card gives them to the hint of the game, the line of a
+//     take from a forest, or the line of the object in the Hand. The hint
+//     of the take that the prompt owned does not show (OwnedStale).
+//   - A far target that is not locked is no context while the Hand holds an
+//     object: the far grab is not ready then, and its state is one frame
+//     old.
+//   - A frame with no words on the pointing card, with the same object in
+//     the Hand as the last frame with words, keeps those words for
+//     kHeldGapSeconds at most. A card with no words between two hints of
+//     the game for the same object is a blink.
+const int kHandHeldObject = 0x4904;  // CHand: the object in the Hand
+const double kHeldGapSeconds = 0.10;
+void* g_hold_object = nullptr;    // the object of the fetch, in the Hand
+double g_hold_since = 0.0;
+uint64_t g_hold_frame = 0;
+uint64_t g_hold_frames = 0;       // frames with the words of the mod
+uint64_t g_holds = 0;
+Content g_held_words = {};
+void* g_held_words_object = nullptr;
+double g_held_words_time = 0.0;
+bool g_held_gap = false;          // the card keeps the words in this gap
+uint64_t g_held_gap_start = 0;
+uint64_t g_held_gaps = 0;         // gaps that the card kept words in
+uint64_t g_held_gap_frames = 0;
+uint64_t g_far_held_frames = 0;   // frames with a far target and an object
+int g_held_logs = 0;
+const int kMaxHeldLogs = 60;
 
 // --- the prompts -----------------------------------------------------------------
 
@@ -659,7 +719,16 @@ int ContextNow() {
   if (command == kCommandHintAim) return kCtxCommandAim;
   FarDraw far_draw = {};
   if (FarGrabDrawState(&far_draw) && far_draw.active && far_draw.valid) {
-    return kCtxFar;
+    const bool held = g_have_facts && g_facts_frame == g_frame &&
+                      g_facts_holding;
+    if (!(g_held_latch != 0 && held && !far_draw.locked)) return kCtxFar;
+    ++g_far_held_frames;
+    if (g_held_logs < kMaxHeldLogs) {
+      ++g_held_logs;
+      ModLog("hint card    : frame %llu, the far target %p is no context: the "
+             "Hand holds %p, and the far grab has no lock (hint_held_latch=1)",
+             g_frame, far_draw.target, g_facts_held);
+    }
   }
   if (command == kCommandHintObject) return kCtxCommand;
   if (command == kCommandHintCreature) return kCtxLeashOff;
@@ -771,6 +840,21 @@ void AddLeashBackPrompts(Content cards[kHands]) {
   } else {
     AddPromptTwice(cards, kWordAction, L"Take the leash back", kToneAction);
   }
+}
+
+// THE WORDS OF THE MOD for the object in the Hand (hint_held_latch), while
+// the game has no hint for it yet: the words of a tree that the opening does
+// not plant (the card gives them to the hint of the game too), the line of a
+// take from a forest, or the line of the object in the Hand.
+const wchar_t* HoldWords() {
+  const int verdict = HandDirectTreeVerdict();
+  const wchar_t* tree =
+      verdict > 0 ? tree_plant_math::VerdictText(verdict) : nullptr;
+  if (tree != nullptr) return tree;
+  const wchar_t* forest = ForestTakeHint();
+  if (forest != nullptr) return forest;
+  if (verdict == tree_plant_math::kPlants) return L"Open to plant";
+  return L"Open to drop";
 }
 
 void AddPrompts(Content cards[kHands], int context, bool first_show) {
@@ -1946,6 +2030,14 @@ void HintCardLatchContext(int eye) {
   g_facts_frame = g_frame;
   g_have_facts = HandDirectGlowFacts(point, &length, &g_facts_mode,
                                      &g_facts_holding, &now_eye, &frame);
+  g_facts_held = nullptr;
+  bool active = false;
+  const uint8_t* hand =
+      static_cast<const uint8_t*>(HandDirectHand(&active));
+  if (g_have_facts && g_facts_holding && hand != nullptr &&
+      !IsBadReadPtr(hand + kHandHeldObject, sizeof(void*))) {
+    g_facts_held = *reinterpret_cast<void* const*>(hand + kHandHeldObject);
+  }
 }
 
 static void PollTimingKey();
@@ -1979,6 +2071,9 @@ void HintCardEndFrame() {
     g_fetch_prompt = false;
     g_fetch_kept = false;
     g_owned_count = 0;
+    g_hold_object = nullptr;
+    g_held_words_object = nullptr;
+    g_held_gap = false;
     return;
   }
 
@@ -2029,15 +2124,53 @@ void HintCardEndFrame() {
     // game has a new hint for the object in the Hand.
     void* coming_object = nullptr;
     float coming_from[3];
-    const bool coming = FarGrabGlideOrigin(&coming_object, coming_from);
+    bool coming = FarGrabGlideOrigin(&coming_object, coming_from);
     fetch = context == kCtxFar && FarTargetIsFetch();
+    // THE OBJECT OF A FETCH (hint_held_latch): the fetch in work ends in
+    // the frame in which the Hand holds the object, and it does not start
+    // while the Hand holds one. The words of the mod for the object start in
+    // that frame (HoldWords).
+    void* held = g_have_facts && g_facts_frame == g_frame && g_facts_holding
+                     ? g_facts_held
+                     : nullptr;
+    const bool fetch_before =
+        g_fetch_keep.on || (g_prompt_shown == kCtxFar && g_fetch_prompt);
+    const bool waits =
+        g_held_latch == 0 && context == kCtxHolding &&
+        hint_card_math::FetchWaits(stale, NewGripHint(), coming);
     const hint_card_math::TakeKeepOut fetch_keep =
         hint_card_math::FetchKeepStep(
-            &g_fetch_keep, fetch, empty,
-            context == kCtxHolding &&
-                hint_card_math::FetchWaits(stale, NewGripHint(), coming),
-            coming, g_prompt_shown == kCtxFar && g_fetch_prompt, grip, now,
+            &g_fetch_keep, fetch, empty, waits, coming,
+            g_prompt_shown == kCtxFar && g_fetch_prompt, grip, now,
             kLingerSeconds, kTakeKeepSeconds);
+    if (g_hold_object != nullptr &&
+        (held != g_hold_object || NewGripHint() ||
+         now - g_hold_since > kTakeKeepSeconds)) {
+      if (g_held_logs < kMaxHeldLogs) {
+        ++g_held_logs;
+        ModLog("hint card    : frame %llu, the words of the mod for %p end "
+               "after %llu frames: %s (hint_held_latch=1)", g_frame,
+               g_hold_object, g_frame - g_hold_frame,
+               held != g_hold_object ? "the Hand does not hold it now"
+               : NewGripHint()       ? "the game gives its hint for the grip"
+                                     : "the time limit passed");
+      }
+      g_hold_object = nullptr;
+    }
+    if (g_held_latch != 0 && held != nullptr && fetch_before &&
+        context == kCtxHolding && !NewGripHint() && g_hold_object != held) {
+      g_hold_object = held;
+      g_hold_since = now;
+      g_hold_frame = g_frame;
+      ++g_holds;
+      if (g_held_logs < kMaxHeldLogs) {
+        ++g_held_logs;
+        ModLog("hint card    : frame %llu, the Hand holds %p, the object of "
+               "the fetch, and the game gives no new hint for the grip yet. "
+               "The prompt of the fetch goes now, and the card has the words "
+               "of the mod for the object (hint_held_latch=1)", g_frame, held);
+      }
+    }
     if (g_words >= 3) {
       if (fetch_keep.started) {
         g_fetch_keep_frame = g_frame;
@@ -2195,6 +2328,12 @@ void HintCardEndFrame() {
     game.count = kept;
   }
   AddPrompts(content, shown, first_show);
+  // THE OBJECT OF A FETCH (hint_held_latch): the line of the grip for the
+  // object in the Hand, until the game gives its hint for it.
+  if (g_hold_object != nullptr) {
+    AddPrompt(content, kWordGrab, HoldWords(), kToneGrab);
+    ++g_hold_frames;
+  }
   // THE CLICK PROMPT (text_click.cpp): while it shows, each press of its
   // button is the click. AddPrompt adds no line for the same button. A line
   // for two presses or for a hold of that button ("Trigger x2") goes too.
@@ -2238,6 +2377,46 @@ void HintCardEndFrame() {
                hint_card_math::LingerOpen(g_target_time, now,
                                           kLingerSeconds)) {
       for (int h = 0; h < kHands; ++h) content[h] = g_target_words[h];
+    }
+  }
+  // THE SAME OBJECT IN THE HAND (hint_held_latch): a frame with no words on
+  // the pointing card keeps the words of the last frame with words for the
+  // same object, for kHeldGapSeconds at most.
+  {
+    void* held = g_have_facts && g_facts_frame == g_frame && g_facts_holding
+                     ? g_facts_held
+                     : nullptr;
+    if (held != nullptr && content[kPointing].count > 0) {
+      g_held_words = content[kPointing];
+      g_held_words_object = held;
+      g_held_words_time = now;
+      g_held_gap = false;
+    } else if (g_held_latch != 0 && held != nullptr &&
+               held == g_held_words_object &&
+               content[kPointing].count == 0 &&
+               now - g_held_words_time < kHeldGapSeconds) {
+      content[kPointing] = g_held_words;
+      ++g_held_gap_frames;
+      if (!g_held_gap) {
+        g_held_gap = true;
+        g_held_gap_start = g_frame;
+        ++g_held_gaps;
+        if (g_held_logs < kMaxHeldLogs) {
+          ++g_held_logs;
+          char words[320];
+          Describe(g_held_words, words, sizeof(words));
+          ModLog("hint card    : frame %llu, the pointing card keeps \"%s\": "
+                 "the Hand holds the same object %p, and this frame has no "
+                 "words for it. The context is %s, the prompt is %s, and the "
+                 "game gives %d lines, %d of them on the card "
+                 "(hint_held_latch=1)",
+                 g_frame, words, held, kContextName[raw_context],
+                 kContextName[shown], g_noted.count, g_game.count);
+        }
+      }
+    } else {
+      if (held == nullptr) g_held_words_object = nullptr;
+      g_held_gap = false;
     }
   }
   if ((!SameContent(content[kPointing], g_timing_words) &&
@@ -2732,6 +2911,12 @@ void HintCardReport() {
          g_words, g_empty_hints, g_owned_hints, g_take_keeps,
          g_take_keep_frames, g_fetch_keeps, g_fetch_keep_frames,
          g_stale_hints);
+  ModLog("hint card    : hint_held_latch=%d: the card kept its words for the "
+         "same object in the Hand in %llu gaps (%llu frames), the card had the "
+         "words of the mod for the object of a fetch %llu times (%llu "
+         "frames), and a far target with no lock was no context on %llu "
+         "frames with an object in the Hand", g_held_latch, g_held_gaps,
+         g_held_gap_frames, g_holds, g_hold_frames, g_far_held_frames);
   ModLog("hint card    : %llu and %llu frames had words and no tracked hand. "
          "%llu and %llu frames a card did not show, because it was on the "
          "other hand or on the other card. The cards changed side %llu and "

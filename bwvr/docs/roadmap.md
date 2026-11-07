@@ -986,6 +986,11 @@ game as it is.
   - Menus and cards:
     - The keyboard for the name of a new god at the first start of a profile
       (`keyboard     :`). Needs a recipe.
+    - The words of the card at the end of a take and of a fetch, with
+      `hint_held_latch=1` (`controller-hints.md`, 9.4): `hand_run.ps1 -Kind
+      forest` with no "Pull to fetch" while the tree is in the Hand, and
+      `village_run.ps1 -Kind scaffold` with no frame of no words between
+      "Combine Scaffolds" and "Build".
     - A help text of the game with the words of the mouse in an eye picture,
       after a change from the controller to the mouse:
       `creature_recipe.ps1 -Kind leash` with `help_test=1` and

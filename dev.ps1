@@ -219,7 +219,15 @@ function Invoke-Uninstall {
         $path = Join-Path $game $rel
         if (Test-Path -LiteralPath $path) { [System.IO.File]::Delete($path) }
     }
-    foreach ($folder in @('dxwrapper', 'bwvr-fonts')) {
+    $models = Join-Path $game 'bwvr-controllers'
+    if (Test-Path -LiteralPath $models) {
+        foreach ($sub in @(Get-ChildItem -LiteralPath $models -Directory -Force)) {
+            if (@(Get-ChildItem -LiteralPath $sub.FullName -Force).Count -eq 0) {
+                [System.IO.Directory]::Delete($sub.FullName, $false)
+            }
+        }
+    }
+    foreach ($folder in @('dxwrapper', 'bwvr-fonts', 'bwvr-controllers')) {
         $sub = Join-Path $game $folder
         if ((Test-Path -LiteralPath $sub) -and @(Get-ChildItem -LiteralPath $sub -Force).Count -eq 0) {
             [System.IO.Directory]::Delete($sub, $false)

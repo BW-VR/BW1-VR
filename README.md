@@ -175,7 +175,11 @@ The code and the documents of the mod have the MIT license, see
 [`LICENSE`](LICENSE). The code of other projects in `third_party/` keeps its
 own license, see [`third_party/README.md`](third_party/README.md). The cards
 use the fonts Alegreya and Alegreya SC by The Alegreya Project Authors, under
-the SIL Open Font License 1.1.
+the SIL Open Font License 1.1. The controller models of the hints come from
+the WebXR Input Profiles (Copyright 2019 Amazon, MIT license), see
+[`bwvr/assets/controllers/README.md`](bwvr/assets/controllers/README.md). Some
+models show the trademarks of the makers of the controllers. The license does
+not give a right to use these trademarks.
 
 This is an unofficial mod, made by a fan. Electronic Arts and Lionhead
 Studios did not make it, do not endorse it, and have no connection with it.

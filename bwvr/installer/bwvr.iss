@@ -164,6 +164,10 @@ Source: "{#Payload}\bwvr-fonts\Alegreya[wght].ttf"; DestDir: "{app}\bwvr-fonts";
 Source: "{#Payload}\bwvr-fonts\AlegreyaSC-Bold.ttf"; DestDir: "{app}\bwvr-fonts"; Flags: ignoreversion
 Source: "{#Payload}\bwvr-fonts\OFL.txt"; DestDir: "{app}\bwvr-fonts"; Flags: ignoreversion
 
+; The controller models of the hints (MIT, the text is in LICENSE.md), one
+; folder for each controller.
+Source: "{#Payload}\bwvr-controllers\*"; DestDir: "{app}\bwvr-controllers"; Flags: ignoreversion recursesubdirs createallsubdirs
+
 ; The game folder already holds a readme.txt, from 2001. Windows does not
 ; care about the case of a file name, so ours has to be called something
 ; else. The names match the launcher, so the mod's files sit together.
@@ -879,4 +883,5 @@ begin
   { The folder is the game's, so it stays. Only our own subfolder goes. }
   RemoveDir(ExpandConstant('{app}\dxwrapper'));
   RemoveDir(ExpandConstant('{app}\bwvr-fonts'));
+  DelTree(ExpandConstant('{app}\bwvr-controllers'), True, False, True);
 end;

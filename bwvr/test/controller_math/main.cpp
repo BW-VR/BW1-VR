@@ -3647,6 +3647,7 @@ void CreatureChecks() {
 #include "settings_panel_checks.h"
 #include "button_map_checks.h"
 #include "hint_picture_checks.h"
+#include "hint_model_checks.h"
 #include "creature_touch_checks.h"
 #include "eye_cant_checks.h"
 
@@ -4096,6 +4097,7 @@ int main() {
   settings_panel_checks::SettingsPanelChecks();
   button_map_checks::ButtonMapChecks();
   hint_picture_checks::HintPictureChecks();
+  hint_model_checks::HintModelChecks();
   eye_cant_checks::EyeCantChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);

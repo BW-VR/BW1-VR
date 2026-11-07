@@ -1326,4 +1326,10 @@ The cards use the fonts Alegreya and Alegreya SC by The Alegreya
 Project Authors, under the SIL Open Font License 1.1. The license is
 in the notices file and in the bwvr-fonts folder.
 
+The controller models of the hints come from the WebXR Input
+Profiles, Copyright 2019 Amazon, under the MIT license. The license
+is in the notices file and in the bwvr-controllers folder. Some
+models show the trademarks of the makers of the controllers. The
+license does not give a right to use these trademarks.
+
 Copyright (C) 2026 Buck.

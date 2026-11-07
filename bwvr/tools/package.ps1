@@ -124,6 +124,19 @@ $Payload = @(
        What = 'the third party notices' }
 )
 
+# The controller models of the hints (MIT, from the WebXR Input Profiles,
+# bwvr\assets\controllers\README.md). Each file of the folder ships, in
+# bwvr-controllers of the game folder, with the same subfolders. The README
+# of the folder is for the repo and does not ship.
+$ModelDir = Join-Path $BwvrRoot 'assets\controllers'
+foreach ($file in (Get-ChildItem -LiteralPath $ModelDir -Recurse -File | Sort-Object FullName)) {
+    $rel = $file.FullName.Substring($ModelDir.Length).TrimStart('\')
+    if ($rel -eq 'README.md') { continue }
+    $Payload += @{ Dest = ('bwvr-controllers\' + $rel)
+                   Src  = $file.FullName
+                   What = 'a controller model of the hints' }
+}
+
 # --------------------------------------------------------------- the helpers
 
 function Write-Step([string]$Text) {

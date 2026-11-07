@@ -1270,35 +1270,6 @@ uint64_t g_bakes = 0;
 int g_bake_logs = 0;
 const int kMaxBakeLogs = 24;
 
-// The colors of the picture in each look: the ink of the card, the color of
-// the badge or the wax of the tone for the lit control.
-hint_picture::Look LookOf(bool scroll, int tone) {
-  using hint_picture::Paint;
-  static const Paint kWax[4] = {{160.0f, 30.0f, 26.0f},
-                                {36.0f, 124.0f, 60.0f},
-                                {204.0f, 128.0f, 22.0f},
-                                {160.0f, 30.0f, 26.0f}};
-  hint_picture::Look look;
-  if (scroll) {
-    // The ink and the wax of card_scroll.cpp.
-    look.ink = {52.0f, 30.0f, 14.0f};
-    look.lit = kWax[tone & 3];
-    look.edge = look.ink;
-    look.wash = {120.0f, 80.0f, 30.0f};
-    look.wash_a = 0.07f;
-  } else {
-    const Rgb& badge = kBadgeColor[(tone & 3) == kToneNone ? kToneOther
-                                                           : (tone & 3)];
-    look.ink = {226.0f, 226.0f, 226.0f};
-    look.lit = {badge.r, badge.g, badge.b};
-    look.edge = {kBadgeTextColor.r, kBadgeTextColor.g, kBadgeTextColor.b};
-    look.wash = {255.0f, 255.0f, 255.0f};
-    look.wash_a = 0.08f;
-  }
-  look.dim = 0.6f;
-  return look;
-}
-
 const char* const kKindWord[button_map::kKinds] = {"Touch", "Index", "wand",
                                                    "Mixed Reality", "simple"};
 const char* const kControlWord[controller_art::kControls] = {
@@ -1322,7 +1293,8 @@ const uint8_t* Picture(const Line& line, bool scroll) {
   QueryPerformanceFrequency(&frequency);
   QueryPerformanceCounter(&t0);
   const bool ok = hint_picture::Bake(kind, left, at,
-                                     LookOf(scroll, line.tone), b.bgra);
+                                     hint_picture::LookOf(scroll, line.tone),
+                                     b.bgra);
   QueryPerformanceCounter(&t1);
   b.key = ok ? key : 0;
   if (!ok) return nullptr;
@@ -1330,9 +1302,11 @@ const uint8_t* Picture(const Line& line, bool scroll) {
   if (g_bake_logs < kMaxBakeLogs) {
     ++g_bake_logs;
     ModLog("hint card    : frame %llu, the picture of the %s %s %s for \"%ls\" "
-           "in the %s look, %d by %d px, took %.2f ms", g_frame,
+           "(%s view) in the %s look, %d by %d px, took %.2f ms", g_frame,
            left ? "left" : "right", kKindWord[kind % button_map::kKinds],
-           kControlWord[at], line.button, scroll ? "scroll" : "plain",
+           kControlWord[at], line.button,
+           hint_picture::SideView(kind, at) ? "side" : "top",
+           scroll ? "scroll" : "plain",
            hint_picture::kSize, hint_picture::kSize,
            (t1.QuadPart - t0.QuadPart) * 1000.0 /
                static_cast<double>(frequency.QuadPart));

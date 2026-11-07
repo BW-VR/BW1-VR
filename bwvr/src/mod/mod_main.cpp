@@ -606,7 +606,7 @@ bool g_stereo_headless = false;
 
 // The Lionhead intro in stereo. Off by default while it is tested. See
 // intro_vr.cpp and docs/intro.md.
-bool g_intro_vr = false;
+bool g_intro_vr = true;
 // 0 the camera stays at the rest pose, 1 it goes along the path of the game
 // and does not turn, 2 the orbs are a model in front of the player, 3 the
 // camera of the game with its turns.
@@ -1607,7 +1607,7 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "draw_probe_delay", 0, path);
   g_stereo_headless =
       GetPrivateProfileIntA("bwvr", "stereo_headless", 0, path) != 0;
-  g_intro_vr = GetPrivateProfileIntA("bwvr", "intro_vr", 0, path) != 0;
+  g_intro_vr = GetPrivateProfileIntA("bwvr", "intro_vr", 1, path) != 0;
   g_intro_motion = GetPrivateProfileIntA("bwvr", "intro_motion", 1, path);
   g_intro_speed_pct =
       GetPrivateProfileIntA("bwvr", "intro_speed_pct", 100, path);

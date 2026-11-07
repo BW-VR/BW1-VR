@@ -28,8 +28,9 @@
 #   in front of the head, with an eye picture and a press of the trigger at
 #   each. The log has the lines "overlay" (the pixels of the hands and of the
 #   end of the ray in each eye picture) and "controllers" (the pixel of the
-#   ray, and the pointer of the game at each press). With cutscene_hands=0
-#   the window has no hands and no ray, and a press goes to the pointer.
+#   ray, and the pointer of the game at each press). Give -Set
+#   "cutscene_hands=1" for the hands: with the default 0 the window has no
+#   hands and no ray, and a press goes to the pointer.
 # -Kind edge: the test keys influence_test_circle_cm=25 and
 #   influence_test_circle_frame=230 make the influence of the player a circle
 #   of 25 cm of the room around the Hand's point at its first step. The hand

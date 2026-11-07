@@ -216,7 +216,7 @@ const Setting kSettings[] = {
     //  "How many game units a real meter is worth, in tenths. 75 means 7.5 "
     //  "units, which keeps what your eyes see and what your neck feels the same "
     //  "size."},
-    {kBool, "intro_vr", "Intro in stereo", nullptr, 0,
+    {kBool, "intro_vr", "Intro in stereo", nullptr, 1,
      "Shows the Lionhead logo at the start of the game in 3D around you. Your "
      "view moves through the orbs on the path of the game, and it does not "
      "turn: you look where your head looks. The menu button skips it. This "

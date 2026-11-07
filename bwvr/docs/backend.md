@@ -5755,7 +5755,7 @@ keys that the launcher sets.
 | `eye_separation_milli` | 0 | 0 asks the headset |
 | `head_units_per_meter_x10` | 75 | World units per meter, in tenths |
 | `head_roll`, `water_simple` | 1, 1 | See "Roll and the sea" |
-| `sea_depth` | 1 | 1: the land of the sea goes on down under the water and fades into the sea by its depth, and the light of the Hand on the water writes no depth. 0: the flat coast of the game. See "The sea with depth" |
+| `sea_depth` | 0 | 1: the land of the sea goes on down under the water and fades into the sea by its depth, and the light of the Hand on the water writes no depth. 0: the flat coast of the game. See "The sea with depth" |
 | `head_camera` | 1 | The head on the camera |
 | `hand_anchored` | 1 | The Hand keeps its place in the room |
 | `game_camera_rebuild` | 1 | See "The game camera's own screen" |

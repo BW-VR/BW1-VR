@@ -244,7 +244,7 @@ void Load() {
   if (slash != nullptr && strlen(path) + 9 < MAX_PATH) {
     slash[1] = 0;
     strcat_s(path, MAX_PATH, "bwvr.ini");
-    g_depth = GetPrivateProfileIntA("bwvr", "sea_depth", 1, path) != 0 ? 1 : 0;
+    g_depth = GetPrivateProfileIntA("bwvr", "sea_depth", 0, path) != 0 ? 1 : 0;
   }
 }
 

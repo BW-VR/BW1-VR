@@ -166,9 +166,6 @@ want.
     cannot see or that disturb the play, a video that shakes, a video that
     cuts off what you look at, or a card, the ring or a panel that is not
     in the video or not where you saw it.
-25. **The sea at the coast** (`sea_depth=1`). Look at a beach near and far.
-    Wrong: water with no depth, a floor that looks dry, or a coast that
-    flickers.
 
 ## Play as normal and send the log
 

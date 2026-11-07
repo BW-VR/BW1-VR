@@ -261,13 +261,6 @@ These items come before the other work.
   game camera over the table, the mouse, the wheel, the stick and the
   double click for the table, the ring and the depth key for the key color,
   and the place of the table in a real room (`tabletop.md`).
-- **P11. The intro in stereo** (`intro_vr`, off by default). Each eye has
-  its own trails, the mark beside the logo has the depth of the logo, and
-  the view goes along the camera path of the game with no turn
-  (`intro_motion=1`, `intro.md`). The owner found it good in the headset.
-  Open: whether `intro_vr` goes on by default. Not built: a speed for the
-  orbs that a hand moved, and a push of the hand in the flat intro
-  (`intro.md`, "Open work").
 - **P12. Ideas from Half-Life: Alyx** that are not built are in
   `research-hla.md`, for the far grab, the teleport, the hands, the hints,
   the sound and comfort.
@@ -346,14 +339,15 @@ keeps the mod as it is.
   (`hidden_hints=Throw,Drop`), because the arm decides at the opening of the
   grip whether the object drops or flies. Open: whether the player wants a
   list of the game's words that the card leaves out.
-- **F23. The sea with depth.** The land of the sea goes on down under the
-  water and fades into the sea by its depth, and the light of the Hand on
-  the water writes no depth (`sea_depth`, backend.md, "The sea with
-  depth"). Open: no desktop run had the light of the Hand on the water in
-  the scene (it shows when the scene is dark), so its draw with no depth
-  write has no run. An object in the water shows down to the floor with no
-  tint of the sea. Only a headset shows the depth of the water (headset
-  check 28).
+- **F23. The sea with depth.** `sea_depth=1` puts the land of the sea under
+  the water and fades it into the sea by its depth (backend.md, "The sea
+  with depth"). It is off by default: in a headset the land of the coast
+  has holes, and in the intro cut scene the parents on the beach stand over
+  the ground. So the land of the coast goes too low, or the edge of a block
+  with water does not meet the next block. Open: find and fix the holes and
+  the low beach, then a headset check. No desktop run had the light of the
+  Hand on the water in the scene, so its draw with no depth write has no
+  run.
 - **F24. No wait of 20 ms at the stop of a sound.** `audio_stop_wait=0`
   skips the wait only for the sounds of the mod's mixer. The other sounds
   keep it: the logs of desktop runs have 1 or 2 such stops in each run. The

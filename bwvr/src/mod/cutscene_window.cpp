@@ -372,7 +372,7 @@ void ReadSettings() {
   g_set.video = number("cutscene_video", 1) != 0;
   g_set.video_window = number("cutscene_video_window", 1) != 0;
   g_set.advisors = number("cutscene_advisors", 1) != 0;
-  g_set.hands = number("cutscene_hands", 1) != 0;
+  g_set.hands = number("cutscene_hands", 0) != 0;
   g_set.advisor_distance =
       limit(number("cutscene_advisor_distance_cm", 133), 30,
             static_cast<int>(g_set.distance * 100.0f + 0.5f)) /

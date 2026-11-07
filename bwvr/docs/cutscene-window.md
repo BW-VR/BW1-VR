@@ -44,7 +44,7 @@ The code is in `src/mod/cutscene_window.cpp` and `cutscene_window_math.h`.
   moves while they open.
 - **The keys.** `cutscene_window` (1) is the window. `cutscene_face_head`,
   `cutscene_depth`, `cutscene_subtitles`, `cutscene_edge_columns` and
-  `cutscene_video`, `cutscene_advisors` and `cutscene_hands` (all 1) are its parts, and 0 turns each part off. With `test_keys=1`, numpad 0
+  `cutscene_video` and `cutscene_advisors` (all 1) are its parts, and 0 turns each part off. `cutscene_hands` (0) shows the hands and a ray in the window. With `test_keys=1`, numpad 0
   changes the window live and numpad 1 the depth limit.
 - **A mouse player** with no headset gets no change.
 
@@ -675,7 +675,7 @@ All in `[bwvr]`. None is in the launcher.
 | `cutscene_video` | 1 | 1 puts a video of the game in the window on the screen plane, the same picture for both eyes (section 7). 0 gives the video no rule of the window: in one walk the two eyes see it at two places on the screen |
 | `cutscene_advisors` | 1 | 1 puts each advisor in front of the screen, `cutscene_advisor_distance_cm` from the eyes, and leaves it out of the measure of the nearest thing (section 7). 0 draws the advisors as the scene draws them, in the measure |
 | `cutscene_advisor_distance_cm` | 133 | The distance of an advisor from the eyes, 30 to `screen_distance_cm` |
-| `cutscene_hands` | 1 | 1 shows both hands and a ray in the window, and the trigger clicks at the pixel of the ray (section 7). 0 shows no hand and no ray, and the trigger clicks at the place of the pointer |
+| `cutscene_hands` | 0 | 1 shows both hands and a ray in the window, and the trigger clicks at the pixel of the ray (section 7). 0 shows no hand and no ray, and the trigger clicks at the place of the pointer |
 | `cutscene_window_capture` | 0 | A test: 1 saves the eye pictures of the second and the 90th frame in the window, of the second frame after it, and of the 31st frame with an advisor in the window (three times at most) |
 | `cutscene_window_test_off`, `cutscene_window_test_on` | 0, 0 | A test with no key press: at the first frame number the window goes off, and at the second it goes on, as numpad 0 does |
 | `cutscene_depth_test_off`, `cutscene_depth_test_on` | 0, 0 | The same for the depth limit, as numpad 1 does |

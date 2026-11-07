@@ -17,8 +17,7 @@ from the code and not confirmed by a run.
 - With `intro_vr=1`, the mod runs `RunAlexFX` one time for each eye, with the
   head tracked. The view goes along the camera path of the game and does not
   turn (`intro_motion=1`). Each eye has its own trails, and the mark beside the
-  logo has the depth of the logo. `intro_vr` is off by default: no headset
-  session has checked this state.
+  logo has the depth of the logo. `intro_vr` is on by default.
 - In the logo in stereo, each hand takes the orbs in its reach with its own
   motion, one to one, in 3D (`intro_push_3d`). The hand models of the game
   show while a hand moves (`intro_hand_show`).
@@ -245,7 +244,7 @@ device: the place of the pointer alone moves no orb.
 
 ## The intro in stereo
 
-The key `intro_vr` turns it on. The default is 0, and with 0 nothing is hooked.
+The key `intro_vr` turns it on. The default is 1. With 0 nothing is hooked.
 The core idea is to run the `RunAlexFX` of the game twice per frame, one time for
 each eye, with the clock and the simulation frozen on the second call. It is the
 same rule that `stereo.cpp` uses for `Process3dEngine`. The mod does not rebuild

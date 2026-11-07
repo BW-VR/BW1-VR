@@ -121,6 +121,10 @@ bool HandExactHeldMatrix(void* object, float out[12]);
 // tabletop.cpp and head_pose.cpp: the world units in a meter of the room.
 float TabletopViewScale();
 float HeadPoseScale();
+// hand_direct.cpp: the boxes of the meshes near the Hand, from the first eye
+// pass, and the class of an object.
+int HandDirectArcBoxes(void* objects[], throw_math::Box out[], int max);
+const char* HandDirectClass(void* object);
 
 namespace {
 
@@ -158,6 +162,10 @@ const int kObVelocity = 0xDC;
 const int kObSpeed = 0xF4;       // the length of the velocity
 const int kObForce = 0x104;
 const int kObTorque = 0x110;     // the torque of this step, 3 floats
+// The constant torque of this game turn [V, PhysOb::ZeroForces 0x007FD42C,
+// the clear at 0x00646093, packet 0x40 at 0x0063CE87]: each step starts its
+// torque from it. See throw_math.h, TurnTorqueFactor.
+const int kObTurnTorque = 0x128;
 const int kObMass = 0x134;
 // The constants of the contact, from a row of PhysicsConstants.txt
 // (PhysOb::SetUpConstants 0x007FB810): the spring and the second spring are
@@ -194,6 +202,9 @@ const uintptr_t kLocalObject = 0x00D47828;
 const uintptr_t kGetAltitude = 0x00803090;
 const float kMapScale = 6553.6f;
 const float kMapEdge = 5119.0f;
+// The land is under the sea where its altitude is less than this, and there
+// fn_007FD4D0 floats the object [V, 0x007FD5AB, the float at 0x008BF518].
+const float kSeaLand = 0.0001f;
 // Object and LH3DObject: the mesh at +0x40, and its matrix at +0x14 (the
 // position is at +0x38).
 const int kObjectMesh = 0x40;
@@ -222,6 +233,10 @@ IntegrateFn o_Integrate = nullptr;
 DrawAllFn o_DrawAll = nullptr;
 
 int g_law = 2;
+// THE OBJECTS ON THE ARC (throw_arc_objects): true stops the real arc where it
+// goes into the box of the mesh of an object near the Hand, before the game's
+// physics has the object. false tests the land only.
+bool g_arc_objects = true;
 // throw_log: 1 logs each turn and each third frame, 2 also logs each substep
 // and each frame after the first contact.
 int g_log = 0;
@@ -303,6 +318,11 @@ struct Flight {
   bool leaves;
   double land_t;
   float land[3];
+  // The arc meets the box of an object first (throw_arc_objects): lands is
+  // true, and land is the point where the arc goes into the box.
+  bool hits_object;
+  void* hit;
+  int near_boxes;        // the boxes near the arc, for the log
   // The physics.
   double time;           // the seconds of the flight that the state is at
   float remainder;
@@ -387,6 +407,11 @@ struct Flight {
   bool turn_rule;
   int turn_cuts;
   float turn_top_cut;    // the largest turn of the picture before a cut
+  // The constant torque of a game turn (packet 0x40), for the log: the
+  // substeps in which the mod cut it, and the first one is logged.
+  int torque_substeps;
+  int torque_step_cuts;  // the steps that the cap of a step cut
+  bool torque_logged;
   // A release in the glide of a far fetch: the place of the picture at the
   // release, from the place in the Hand.
   bool has_lead;
@@ -546,14 +571,62 @@ float TurnShown(const Flight& f, float turn_speed) {
 }
 
 // Where the real arc meets the land. It goes along the arc in steps of 2 ms,
-// for 6 s at most.
+// for 6 s at most. With throw_arc_objects=1 it also stops where the arc goes
+// into the box of the mesh of an object near the Hand, in the time before
+// the game's physics can have the object (kHeldLimit). From that time the
+// game's physics tests the objects itself.
 void FindLanding(Flight* f) {
   f->lands = f->leaves = false;
+  f->hits_object = false;
+  f->hit = nullptr;
+  f->near_boxes = 0;
   f->land_t = 0.0;
+  const int kMaxNear = 16;
+  void* near_objects[kMaxNear];
+  throw_math::Box near_boxes[kMaxNear];
+  int near_count = 0;
+  if (g_arc_objects) {
+    void* objects[64];
+    throw_math::Box boxes[64];
+    const int count = HandDirectArcBoxes(objects, boxes, 64);
+    float low[3], high[3];
+    throw_math::ArcBounds(f->p0, f->v0, f->gs, kHeldLimit, 1.0f, low, high);
+    for (int i = 0; i < count && near_count < kMaxNear; ++i) {
+      if (objects[i] == f->object) continue;
+      if (!throw_math::BoxNear(boxes[i], low, high)) continue;
+      near_objects[near_count] = objects[i];
+      near_boxes[near_count++] = boxes[i];
+    }
+    f->near_boxes = near_count;
+  }
+  float before[3] = {f->p0[0], f->p0[1], f->p0[2]};
   for (int k = 1; k <= 3000; ++k) {
     const double t = k * 0.002;
     float p[3], v[3];
     throw_math::RealArc(f->p0, f->v0, f->gs, t, p, v);
+    if (near_count > 0 && t <= kHeldLimit + 0.002) {
+      int first = -1;
+      float first_u = 2.0f;
+      for (int i = 0; i < near_count; ++i) {
+        float u = 0.0f;
+        if (throw_math::SegmentEntersBox(near_boxes[i], before, p, &u) &&
+            u < first_u) {
+          first = i;
+          first_u = u;
+        }
+      }
+      if (first >= 0) {
+        f->lands = true;
+        f->hits_object = true;
+        f->hit = near_objects[first];
+        f->land_t = t - 0.002 * (1.0 - first_u);
+        float at[3];
+        throw_math::RealArc(f->p0, f->v0, f->gs, f->land_t, at, v);
+        for (int i = 0; i < 3; ++i) f->land[i] = at[i];
+        return;
+      }
+    }
+    for (int i = 0; i < 3; ++i) before[i] = p[i];
     if (!OnMap(p[0], p[2])) {
       f->leaves = true;
       f->land_t = t;
@@ -746,11 +819,15 @@ void EndFlight(Flight* f, const char* why) {
            "the land. The game ran %d turns, %d substeps and %d steps for "
            "it, and %d substeps touched an object. The steps took %.2f ms. "
            "The mod cut the momentum of the turn in %d substeps, where the "
-           "picture would turn %.2f times a second at most (throw_turn=%d)",
+           "picture would turn %.2f times a second at most, and the torque "
+           "of a game turn in %d substeps, with the cap in %d steps of them "
+           "(throw_turn=%d)",
            f->object, f->time, why, Flat(end, f->p0),
            Flat(end, f->p0) / f->s, f->turns, f->substeps, f->steps,
            f->hit_substeps, f->step_seconds * 1000.0, f->turn_cuts,
-           f->turn_top_cut / 6.2831853f, f->turn_rule ? 1 : 0);
+           f->turn_top_cut / 6.2831853f, f->torque_substeps,
+           f->torque_step_cuts,
+           f->turn_rule ? 1 : 0);
   }
   f->active = false;
   if (g_active > 0) --g_active;
@@ -795,10 +872,42 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
     position[i] += p[i] - matrix[9 + i];
     velocity[i] = v[i] / f->scale;
   }
+  // AT THE BOX OF AN OBJECT (throw_arc_objects): the arc stopped where it
+  // goes into the box. The center goes one radius back along the arc, so the
+  // object touches the object there and is not in it. The velocity of the
+  // arc at that time goes on into the object, and the game's contact gives
+  // the hit and the damage.
+  float back = 0.0f;
+  if (f->hits_object && t >= f->land_t && radius > 0.0f && radius < 1000.0f) {
+    const float speed = controller_math::Length(v);
+    if (speed > 1e-4f) {
+      back = radius;
+      for (int i = 0; i < 3; ++i) position[i] -= v[i] / speed * radius;
+    }
+  }
   // Not in the land: the center stays one radius or more over it.
   if (radius > 0.0f && radius < 1000.0f && OnMap(position[0], position[2])) {
     const float floor = Altitude(position[0], position[2]) + radius;
     if (position[1] < floor) position[1] = floor;
+  }
+  if (f->hits_object && g_flight_logs < kMaxFlightLogs) {
+    ++g_flight_logs;
+    ModLog("hand throw   : the game's physics has %p %.0f ms after the "
+           "release, and the arc met the box of the %s %p after %.0f ms. %s",
+           f->object, t * 1000.0, HandDirectClass(f->hit), f->hit,
+           f->land_t * 1000.0,
+           t >= f->land_t
+               ? "The object starts at the box, one radius back along the "
+                 "arc, with the velocity of the arc toward the object "
+                 "(throw_arc_objects=1)"
+               : "The game's physics has it before it gets there, and the "
+                 "game tests the objects from now");
+    if (back > 0.0f) {
+      ++g_flight_logs;
+      ModLog("hand throw   : the center of %p went %.2f units back along the "
+             "arc to %.1f %.1f %.1f", f->object, back, position[0],
+             position[1], position[2]);
+    }
   }
   f->drag = *reinterpret_cast<const float*>(ob + kObDrag);
   *reinterpret_cast<float*>(ob + kObDrag) = 0.0f;
@@ -811,6 +920,9 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
   f->turn_rule = g_turn;
   f->turn_cuts = 0;
   f->turn_top_cut = 0.0f;
+  f->torque_substeps = 0;
+  f->torque_step_cuts = 0;
+  f->torque_logged = false;
   if (f->turn_rule) {
     const float factor = throw_math::TurnStartFactor(f->scale);
     for (int i = 0; i < 3; ++i) turn[i] *= factor;
@@ -929,7 +1041,10 @@ void FirstContact(Flight* f, uint8_t* ob, int step) {
          "away. The speed is %.1f units/s in the game's time (%.2f m/s of "
          "the room)", f->object, t, matrix[9], matrix[10], matrix[11],
          matrix[10] - Altitude(matrix[9], matrix[11]),
-         other != nullptr ? "an object" : "the land or the water", p[0],
+         other != nullptr ? "an object"
+         : Altitude(matrix[9], matrix[11]) < kSeaLand
+             ? "the water: the land is under the sea there"
+             : "the land", p[0],
          p[1], p[2], Gap(&matrix[9], p), Gap(&matrix[9], p) / f->s * 100.0f,
          speed, speed * f->scale / f->s);
   ++g_flight_logs;
@@ -1144,8 +1259,8 @@ int FlySubstep(Flight* f, uint8_t* ob) {
   // the rate of this substep times the game's turn. The momentum is cut so
   // that this is the game's cap at most, and the momentum that the cap of
   // the game hides is gone.
+  const float rate = hit ? 1.0f : f->scale;
   if (f->turn_rule) {
-    const float rate = hit ? 1.0f : f->scale;
     const float speed = TurnSpeed(ob);
     const float factor =
         throw_math::TurnCutFactor(speed, rate, throw_math::kTurnCap);
@@ -1155,6 +1270,53 @@ int FlySubstep(Flight* f, uint8_t* ob) {
       ++f->turn_cuts;
       if (speed * rate > f->turn_top_cut) f->turn_top_cut = speed * rate;
     }
+  }
+  // THE TORQUE OF A GAME TURN (throw_math::TurnTorqueFactor). Each step of
+  // the substep starts its torque from the constant torque, so the mod
+  // multiplies the constant torque by the factor for the steps of this
+  // substep, and puts the game's value back after them. The game's own
+  // PhysOb::ZeroForces of this substep copied the whole constant torque to
+  // the torque of the first step, so the first step loses the rest here.
+  float* turn_torque = reinterpret_cast<float*>(ob + kObTurnTorque);
+  const float torque_given[3] = {turn_torque[0], turn_torque[1],
+                                 turn_torque[2]};
+  const float torque_factor =
+      f->turn_rule ? throw_math::TurnTorqueFactor(rate) : 1.0f;
+  const bool torque_cut = torque_factor < 1.0f &&
+                          controller_math::Length(torque_given) > 1e-6f;
+  if (controller_math::Length(torque_given) > 1e-6f && !f->torque_logged &&
+      g_flight_logs < kMaxFlightLogs) {
+    f->torque_logged = true;
+    ++g_flight_logs;
+    // The momentum that the torque gives in the steps of one game turn, at
+    // this rate, and the turn of the picture that it adds.
+    float plain[3], flight[3];
+    for (int i = 0; i < 3; ++i) {
+      plain[i] = torque_given[i] * throw_math::kSubstepsInTurn *
+                 throw_math::kSubstep;
+      flight[i] = plain[i] * rate * torque_factor;
+    }
+    const float* axes = reinterpret_cast<const float*>(ob + kObAxes);
+    const float* inverse =
+        reinterpret_cast<const float*>(ob + kObInverseInertia);
+    ModLog("hand throw   : the game gives %p a torque of %.1f for one game "
+           "turn, %.3f s into its flight (packet 0x40, from the move of the "
+           "pointer after the release). In the plain game it adds %.2f "
+           "turns a second. In the flight at %.2f steps a substep it adds "
+           "%.2f turns a second of the picture (throw_turn=%d), before the "
+           "cut of each substep", f->object,
+           controller_math::Length(torque_given), f->time,
+           throw_math::TurnSpeedOf(axes, inverse, plain) / 6.2831853f, rate,
+           throw_math::TurnSpeedOf(axes, inverse, flight) * rate / 6.2831853f,
+           f->turn_rule ? 1 : 0);
+  }
+  if (torque_cut) {
+    float* torque = reinterpret_cast<float*>(ob + kObTorque);
+    for (int i = 0; i < 3; ++i) {
+      turn_torque[i] = torque_given[i] * torque_factor;
+      torque[i] -= torque_given[i] - turn_torque[i];
+    }
+    ++f->torque_substeps;
   }
   float* cap = reinterpret_cast<float*>(kCap);
   const float cap_before = *cap;
@@ -1172,6 +1334,19 @@ int FlySubstep(Flight* f, uint8_t* ob) {
         (*reinterpret_cast<const int32_t*>(ob + kObContacts) > 0 ||
          ob[kObContact] != 0)) {
       FirstContact(f, ob, j);
+    }
+    // THE CAP IN EACH STEP (throw_math::TurnCutBeforeStep). In a substep
+    // with the torque of the flick, the momentum of this step has the cap
+    // of the picture at most.
+    if (torque_cut &&
+        throw_math::TurnCutBeforeStep(
+            reinterpret_cast<float*>(ob + kObTurn),
+            reinterpret_cast<const float*>(ob + kObTorque),
+            *reinterpret_cast<const float*>(ob + kObTurnKeep),
+            throw_math::kSubstep, reinterpret_cast<const float*>(ob + kObAxes),
+            reinterpret_cast<const float*>(ob + kObInverseInertia), rate,
+            throw_math::kTurnCap)) {
+      ++f->torque_step_cuts;
     }
     code = o_Integrate(ob, nullptr);
     ++done;
@@ -1193,6 +1368,9 @@ int FlySubstep(Flight* f, uint8_t* ob) {
     if (j + 1 >= steps || code != 1) break;
   }
   *cap = cap_before;
+  if (torque_cut) {
+    for (int i = 0; i < 3; ++i) turn_torque[i] = torque_given[i];
+  }
   // THE SUM OF THE TURN. After this call the game adds the force of this
   // last step to PhysicsObject+0x0C when the step had a contact
   // (0x00645FEE). The sum must then be the largest sum of 20 steps so far.
@@ -2434,6 +2612,8 @@ void ThrowPhysicsSetDraw(int rule) {
   g_draw = rule != 0 ? throw_math::kDrawReal : throw_math::kDrawFlight;
 }
 
+void ThrowPhysicsSetArcObjects(bool on) { g_arc_objects = on; }
+
 void ThrowPhysicsSetFall(int limit_cm) {
   if (limit_cm < 0) limit_cm = 0;
   if (limit_cm > 1000) limit_cm = 1000;
@@ -2526,6 +2706,13 @@ void ThrowPhysicsInstall() {
                      "law",
          prepare_hook ? "in the Hand's draw" : "only in the physics draw",
          g_log ? ". throw_log logs each flight in full" : "");
+  ModLog("hand throw   : throw_arc_objects=%d, %s", g_arc_objects ? 1 : 0,
+         g_arc_objects
+             ? "before the game's physics has a thrown object, its real arc "
+               "stops at the box of the mesh of an object near the Hand, as "
+               "it stops at the land"
+             : "before the game's physics has a thrown object, its real arc "
+               "stops at the land only");
   ModLog("hand throw   : the time factor is %.2f: a throw flies the same "
          "arc as the real throw, %.2f times slower. Trees %s", g_slow,
          g_slow, g_trees ? "fly the same way (throw_trees=1)"
@@ -2792,12 +2979,24 @@ void ThrowPhysicsReleased(void* held) {
   FindLanding(f);
   if (g_flight_logs >= kMaxFlightLogs) return;
   ++g_flight_logs;
-  char where[200];
-  if (f->lands) {
+  char where[320];
+  if (f->hits_object) {
+    sprintf_s(where, "The real arc meets the box of the %s %p after %.2f s at "
+              "%.1f %.1f %.1f, %.1f units over the land, before the land "
+              "(throw_arc_objects=1, %d boxes near the arc)",
+              HandDirectClass(f->hit), f->hit, f->land_t, f->land[0],
+              f->land[1], f->land[2],
+              f->land[1] - Altitude(f->land[0], f->land[2]), f->near_boxes);
+  } else if (f->lands) {
     sprintf_s(where, "The real arc meets the land after %.2f s at %.1f %.1f "
-              "%.1f, %.1f units (%.2f m of the room) away",
+              "%.1f, %.1f units (%.2f m of the room) away%s",
               f->land_t, f->land[0], f->land[1], f->land[2],
-              Flat(f->land, f->p0), Flat(f->land, f->p0) / f->s);
+              Flat(f->land, f->p0), Flat(f->land, f->p0) / f->s,
+              !g_arc_objects ? " (throw_arc_objects=0: the arc tests no "
+                               "object)"
+              : f->near_boxes > 0 ? ". It goes into no box of an object near "
+                                    "it"
+                                  : ". No box of an object is near it");
   } else if (f->leaves) {
     sprintf_s(where, "The real arc leaves the map after %.2f s", f->land_t);
   } else {

@@ -92,12 +92,15 @@ const int kControlHeight = 56;
 const int kArrowWidth = 60;
 const int kPillWidth = 112;
 
-// The kinds of a row.
-enum RowKind { kRowToggle = 0, kRowArrows = 1, kRowDim = 2 };
+// The kinds of a row. A picture row shows a band of a drawing of the list
+// (WindowRows::picture), and the ray does not press it.
+enum RowKind { kRowToggle = 0, kRowArrows = 1, kRowDim = 2, kRowPicture = 3 };
 
 // The kind of a row for a switch with `values` words of its values (0 for
-// a switch whose value is a number), or for a switch that cannot change now.
+// a switch whose value is a number, -1 for a picture row), or for a switch
+// that cannot change now.
 inline int KindOfRow(int values, bool cannot) {
+  if (values < 0) return kRowPicture;
   if (cannot) return kRowDim;
   return values == 2 ? kRowToggle : kRowArrows;
 }

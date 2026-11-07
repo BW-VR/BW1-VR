@@ -989,7 +989,10 @@ yet" when that is so. The lines of each press are the lines of `hand press`.
 Desktop runs (the God view, `fake_controller=2`, Land 1, the choice "Keep
 your old Creature", `temple_run.ps1 -NoEnter`) have shown a tap at each post
 (the chosen post changes and the packet kind follows) and at the door (the
-player is in the hall 3 frames later).
+player is in the hall 3 frames later). The recipe of the taps on the posts
+is in the header of `temple_run.ps1`: each tap changes the chosen post 3 to
+7 frames after the press, and the card has the lines of the mod ("[Grip] Tap
+for the Leash of Aggression", then "The Leash of Aggression is chosen").
 
 **Not tested:**
 
@@ -997,7 +1000,6 @@ player is in the hall 3 frames later).
 2. The door before the story turns it on: the card says "Tap to go into the
    Temple" then too. The log has the state of the door.
 3. The grab from a distance on a post or on the door.
-4. The lines of the card of the mod: no run had the hints of the game off.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.

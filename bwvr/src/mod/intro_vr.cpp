@@ -53,7 +53,10 @@
 // THE PUSH IN 3D. In the first eye pass, after the sky and before the effect
 // moves and draws the orbs, each hand takes the orbs in its reach with its
 // own motion, one to one (Push3d, intro_push_3d). Then the spring of the
-// effect pulls them back to their homes. The overlay draws the hand models of
+// effect pulls them back to their homes. A hand moves orbs only when the
+// player moved it in the room (intro_push_room): the pose against the camera
+// also changes when the camera turns, the head moves or the scale of the
+// room changes, and that is no motion of the hand. The overlay draws the hand models of
 // the game in each eye pass, and a hand shows while it moves (HandsFrame,
 // intro_hand_show).
 //
@@ -229,6 +232,7 @@ int g_hand_push_pct = 100;     // intro_hand_push_pct: the hand pushes the orbs
 int g_hand_push_set_pct = 100; // the value of the ini, for the test key
 bool g_hand_point = true;      // intro_hand_point: the pointer is at the hand
 bool g_push_3d = true;         // intro_push_3d: each hand pushes in 3D
+bool g_push_room = true;       // intro_push_room: only a motion in the room
 float g_push_radius_m = 0.30f; // intro_push_radius_cm
 int g_hand_show = 1;           // intro_hand_show: 0 off, 1 while moving, 2 on
 bool g_hand_depth = true;      // intro_hand_depth: hands before the orbs
@@ -313,6 +317,16 @@ bool g_hand_now_valid[2] = {false, false};
 bool g_hand_before_valid[2] = {false, false};
 uint64_t g_hand_pose_pair = 0;
 float g_hand_units = 0.0f;       // world units in a meter of the room
+float g_hand_units_before = 0.0f;
+// The pose of each hand in the room (ControllersOverlayHandsRoom), in
+// meters, for this pair and the pair before: a hand moves orbs only when
+// this pose changed (intro_motion::HandStill).
+intro_motion::HandPose g_room_now[2];
+intro_motion::HandPose g_room_before[2];
+bool g_room_now_valid[2] = {false, false};
+bool g_room_before_valid[2] = {false, false};
+uint64_t g_still_skips = 0;      // pairs of a still hand that moved no orb
+bool g_still_said = false;
 intro_motion::HandShow g_show[2];
 float g_show_opacity[2] = {0.0f, 0.0f};
 bool g_overlay_on = false;       // the overlay built the hands of this pair
@@ -954,7 +968,24 @@ void HandsFrame(float dt) {
                     hands.units_per_meter > 0.0f;
   const bool next = g_hand_pose_pair + 1 == g_pairs;
   g_hand_pose_pair = g_pairs;
+  g_hand_units_before = g_hand_units;
   if (have) g_hand_units = hands.units_per_meter;
+  OverlayHands room;
+  const bool have_room = ControllersOverlayHandsRoom(&room);
+  for (int h = 0; h < 2; ++h) {
+    g_room_before[h] = g_room_now[h];
+    g_room_before_valid[h] = next && g_room_now_valid[h];
+    g_room_now_valid[h] = have_room && room.hand[h].valid &&
+                          room.units_per_meter > 0.0f;
+    if (g_room_now_valid[h]) {
+      for (int k = 0; k < 3; ++k) {
+        g_room_now[h].position[k] =
+            room.hand[h].position[k] / room.units_per_meter;
+      }
+      memcpy(g_room_now[h].rotation, room.hand[h].rotation,
+             sizeof(g_room_now[h].rotation));
+    }
+  }
   bool any_shows = false;
   for (int h = 0; h < 2; ++h) {
     g_hand_before[h] = g_hand_now[h];
@@ -1008,6 +1039,29 @@ void Push3d() {
     // give each orb a small move of the rounding.
     if (memcmp(&g_hand_before[h], &g_hand_now[h], sizeof(g_hand_now[h])) ==
         0) {
+      continue;
+    }
+    // A HAND THAT IS STILL IN THE ROOM (intro_push_room) moves no orb. Its
+    // pose against the camera changed, but the player did not move it.
+    if (g_push_room && g_room_now_valid[h] && g_room_before_valid[h] &&
+        intro_motion::HandStill(g_room_before[h], g_room_now[h])) {
+      ++g_still_skips;
+      if (!g_still_said) {
+        g_still_said = true;
+        float shift[3];
+        for (int k = 0; k < 3; ++k) {
+          shift[k] = g_hand_now[h].position[k] - g_hand_before[h].position[k];
+        }
+        const float units = g_hand_units > 0.0f ? g_hand_units : 1.0f;
+        ModLog("intro        : the %s hand is still in the room, so it moves "
+               "no orb, clock %.2f. Its pose against the camera moved %.2f "
+               "cm of the room, and the room has %.2f units a meter now and "
+               "%.2f in the pair before (intro_push_room=1)",
+               h == 0 ? "left" : "right", *Clock(),
+               sqrtf(shift[0] * shift[0] + shift[1] * shift[1] +
+                     shift[2] * shift[2]) / units * 100.0f,
+               g_hand_units, g_hand_units_before);
+      }
       continue;
     }
     intro_motion::HandPose before = g_hand_before[h];
@@ -1216,11 +1270,16 @@ void __cdecl h_RunAlexFx(int mode) {
              "hand showed in %llu frames (intro_hand_show=%d)",
              g_push_3d_frames, g_push_3d_orbs, g_push_3d_most,
              g_push_3d ? 1 : 0, g_show_frames, g_hand_show);
+      ModLog("intro        : a hand that was still in the room moved no orb "
+             "on %llu pairs, while its pose against the camera changed "
+             "(intro_push_room=%d)", g_still_skips, g_push_room ? 1 : 0);
     }
     g_hand.have = false;
     g_have_hand_point = false;
     g_hand_now_valid[0] = g_hand_now_valid[1] = false;
     g_hand_before_valid[0] = g_hand_before_valid[1] = false;
+    g_room_now_valid[0] = g_room_now_valid[1] = false;
+    g_room_before_valid[0] = g_room_before_valid[1] = false;
     g_overlay_on = false;
     return;
   }
@@ -1559,6 +1618,10 @@ void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
   g_hand_depth = hand_depth;
 }
 
+// intro_push_room: a hand moves orbs only when its pose in the room changed.
+// false lets each change of its pose against the camera move orbs.
+void IntroSetPushRoom(bool on) { g_push_room = on; }
+
 void IntroInstall() {
   if (!g_on || g_installed) return;
   if (!CodeIsWhatWeExpect()) return;
@@ -1586,13 +1649,13 @@ void IntroInstall() {
          "intro_motion=2), the clock of the effect runs at %d percent, "
          "intro_eye_trails=%d, intro_text_place=%d, intro_push_once=%d, "
          "controller %s, intro_hand_push_pct=%d, intro_hand_point=%d, "
-         "intro_push_3d=%d with a reach of %.0f cm, intro_hand_show=%d, "
-         "intro_hand_depth=%d",
+         "intro_push_3d=%d with a reach of %.0f cm, intro_push_room=%d, "
+         "intro_hand_show=%d, intro_hand_depth=%d",
          g_motion, MotionText(g_motion), g_distance_m, g_model_distance_m,
          g_speed_pct, g_eye_trails ? 1 : 0, g_text_place ? 1 : 0,
          g_push_once ? 1 : 0, g_controller ? "on" : "off", g_hand_push_pct,
          g_hand_point ? 1 : 0, g_push_3d ? 1 : 0, g_push_radius_m * 100.0f,
-         g_hand_show, g_hand_depth ? 1 : 0);
+         g_push_room ? 1 : 0, g_hand_show, g_hand_depth ? 1 : 0);
   if (g_test_keys) {
     ModLog("intro        : test_keys=1: while the logo plays in stereo, Shift "
            "and Page Up step intro_motion, Shift and Page Down switch "

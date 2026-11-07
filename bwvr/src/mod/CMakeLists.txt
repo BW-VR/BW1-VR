@@ -43,6 +43,7 @@ add_library(bwvr_mod SHARED
     vk_core.cpp
     vk_scene.cpp
     vk_window.cpp
+    vk_video.cpp
     vk_fallback.cpp
     frame_time.cpp
     fov.cpp
@@ -51,6 +52,7 @@ add_library(bwvr_mod SHARED
     head_camera.cpp
     snapshot_guard.cpp
     water_mode.cpp
+    sea_depth.cpp
     ui_worldlock.cpp
     pointer_map.cpp
     cursor_trace.cpp
@@ -94,6 +96,7 @@ add_library(bwvr_mod SHARED
     places_panel.cpp
     debug_window.cpp
     settings_panel.cpp
+    controls_page.cpp
     snapshot.cpp
     spell_book.cpp
     book_bubble.cpp

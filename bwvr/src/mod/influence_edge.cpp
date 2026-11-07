@@ -48,6 +48,15 @@
 // The fade and the glow act only while the controller places the Hand. The
 // stream acts only for the land point of the Hand of the controller.
 //
+// THE TEST KEY influence_stream_test_log=1 logs each stream of light of the
+// game that SpellPointInf::SpellPointInf 0x0069AC10 makes: the two ends, the
+// height of each end over the land, the color, the caller and the Hand's
+// point, 24 times and then each 200th time. Two callers make one: the
+// stream of the influence (PSysGlobal::AddManaPathSprite, 0x0068FC19) and
+// the prayer power that a Worship Site gives a spell
+// (WorshipSite::CreateManaPathSprite 0x0077B2C0, from
+// Spell::CreateSpellPoint). The mod changes nothing in the stream.
+//
 // THE TEST KEY influence_test_circle_cm=R with influence_test_circle_frame=F:
 // from the first frame of the controllers at F or later with the Hand of the
 // controller, the influence of the player is a circle of R cm of the room
@@ -60,6 +69,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <intrin.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
@@ -82,6 +92,13 @@ namespace {
 const uintptr_t kManaPathSprite = 0x0068FB20;  // cdecl, 4 arguments
 const uintptr_t kRawInfluence = 0x005CD460;    // cdecl (coords, player)
 const uintptr_t kGetLHPoint = 0x00605C40;      // MapCoords, thiscall
+// SpellPointInf::SpellPointInf, thiscall (const LHPoint& a, float size,
+// const LHPoint& b, unsigned color), ret 0x10. It keeps a at +0x24, b at
+// +0x18, the size at +0x14 and the color at +0x30 [V, 0x0069AC18 to
+// 0x0069AC53]. The return addresses of its two callers:
+const uintptr_t kSpellPoint = 0x0069AC10;
+const uintptr_t kSpellPointByInfluence = 0x0068FC1E;
+const uintptr_t kSpellPointByWorshipSite = 0x0077B386;
 const float kMapScale = 6553.6f;
 
 struct MapCoords {
@@ -95,7 +112,12 @@ typedef int(__cdecl* RawInfluenceFn)(const MapCoords* at, void* player);
 typedef float*(__fastcall* GetLHPointFn)(const MapCoords* self, void* unused,
                                          float* out);
 
+typedef void*(__fastcall* SpellPointFn)(void* self, void* unused,
+                                        const float* a, float size,
+                                        const float* b, uint32_t color);
+
 ManaPathFn o_ManaPath = nullptr;
+SpellPointFn o_SpellPoint = nullptr;
 RawInfluenceFn o_RawInfluence = nullptr;
 
 bool g_read = false;
@@ -152,6 +174,11 @@ uint64_t g_stream_lifted = 0;
 float g_last_lift = 0.0f;
 bool g_said_stream = false;
 bool g_said_call = false;
+// influence_stream_test_log: the log of each stream of light of the game.
+bool g_stream_log = false;
+uint64_t g_spell_points = 0;
+const uint64_t kSpellPointLogs = 24;
+const uint64_t kSpellPointEvery = 200;
 
 // THE TEST CIRCLE.
 int g_test_cm = 0;
@@ -182,6 +209,7 @@ void ReadKeys() {
   if (!(g_wall_light > 0.0f)) g_wall_light = 1.0f;
   if (g_wall_light > 3.0f) g_wall_light = 3.0f;
   g_wall = number("influence_wall", 1) != 0;
+  g_stream_log = number("influence_stream_test_log", 0) != 0;
   g_test_cm = number("influence_test_circle_cm", 0);
   if (g_test_cm < 0) g_test_cm = 0;
   if (g_test_cm > 1000) g_test_cm = 1000;
@@ -260,6 +288,33 @@ void __cdecl h_ManaPath(MapCoords* from, MapCoords* to, uint32_t color,
   o_ManaPath(from, to, color, fraction);
 }
 
+void* __fastcall h_SpellPoint(void* self, void* unused, const float* a,
+                               float size, const float* b, uint32_t color) {
+  const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  ++g_spell_points;
+  if ((g_spell_points <= kSpellPointLogs ||
+       g_spell_points % kSpellPointEvery == 0) &&
+      a != nullptr && b != nullptr && !IsBadReadPtr(a, 12) &&
+      !IsBadReadPtr(b, 12)) {
+    float hand[3] = {0.0f, 0.0f, 0.0f};
+    bool by_controller = false;
+    const bool have_hand = HandDirectHandPosition(hand, &by_controller);
+    ModLog("influence    : stream %llu of the game (%s, caller 0x%08X): from "
+           "%.1f %.1f %.1f (%.1f units over the land) to %.1f %.1f %.1f (%.1f "
+           "units over the land), size %.1f, color %08X. The Hand's point is "
+           "at %.1f %.1f %.1f%s, frame %llu", g_spell_points,
+           caller == kSpellPointByInfluence     ? "the influence"
+           : caller == kSpellPointByWorshipSite ? "the prayer of a Worship "
+                                                  "Site for a spell"
+                                                : "another caller",
+           static_cast<unsigned>(caller), a[0], a[1], a[2],
+           a[1] - LandHeight(a[0], a[2]), b[0], b[1], b[2],
+           b[1] - LandHeight(b[0], b[2]), size, color, hand[0], hand[1],
+           hand[2], have_hand ? "" : " (no Hand)", ControllersFrameCount());
+  }
+  return o_SpellPoint(self, unused, a, size, b, color);
+}
+
 int __cdecl h_RawInfluence(const MapCoords* at, void* player) {
   if (g_have_circle && at != nullptr && !IsBadReadPtr(at, sizeof(*at))) {
     ++g_raw_tests;
@@ -306,6 +361,11 @@ void InfluenceEdgeInstall() {
     Hook(kManaPathSprite, reinterpret_cast<void*>(&h_ManaPath),
          reinterpret_cast<void**>(&o_ManaPath),
          "PSysGlobal::AddManaPathSprite (the stream of the influence)");
+  }
+  if (g_stream_log) {
+    Hook(kSpellPoint, reinterpret_cast<void*>(&h_SpellPoint),
+         reinterpret_cast<void**>(&o_SpellPoint),
+         "SpellPointInf::SpellPointInf (test key influence_stream_test_log)");
   }
   if (g_test_cm > 0) {
     Hook(kRawInfluence, reinterpret_cast<void*>(&h_RawInfluence),
@@ -501,6 +561,15 @@ void LogVirtualInfluence() {
 // Once a report window.
 void InfluenceEdgeReport() {
   if (g_test_cm > 0 || g_stream_hand) LogVirtualInfluence();
+  // influence_stream_test_log: the count of the streams, also when it is 0,
+  // so the log shows that the hook was there and the game made none.
+  if (g_stream_log) {
+    static uint64_t said = 0;
+    ModLog("influence    : the game made %llu streams of light in this "
+           "window, %llu in all (influence_stream_test_log=1)",
+           g_spell_points - said, g_spell_points);
+    said = g_spell_points;
+  }
   if (g_fade_frames == 0 && g_wall_frames == 0 && g_stream_calls == 0 &&
       g_raw_tests == 0) {
     return;

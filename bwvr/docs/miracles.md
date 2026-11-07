@@ -558,7 +558,34 @@ from the Hand's point. A desktop run shows 0.0 cm for each one.
 
 Open: the eye pictures of a desktop run show a red beam from the sky to the
 spire of the Temple at the cast. `SF_LightningBolt` has the fork, a glow and
-a light map, and no beam from the sky.
+a light map, and no beam from the sky. The game draws two streams of light
+in the color of the player, the red of the influence ring for player 0.
+Each is a `SpellPointInf` (`0x0069AC10`) from one point to another:
+
+- The stream of the influence (`GVirtualInfluence::Draw`,
+  `PSysGlobal::AddManaPathSprite`, `influence_edge.cpp`), from the edge of
+  the influence to the land under the Hand.
+- The prayer of a Worship Site for a spell (`Spell::CreateSpellPoint`
+  `0x007213D0`, `WorshipSite::CreateManaPathSprite` `0x0077B2C0`), between the
+  place of the spell (`Spell+0x14` or `Spell+0xCC`) and the thing at
+  `Spell+0xA0`. It comes for each 100 of the power of a spell that has a
+  Worship Site (`Spell::GetWorshipSite`).
+
+The mod does not change these streams by default. With the test key
+`influence_stream_test_log=1` the log has a line for each stream, 24 times
+and then each 200th time: the caller, the two ends, the height of each end
+over the land, the color and the Hand's point. Each report window also has
+the count of the streams, also when it is 0. A desktop run of a Lightning
+from a one-off seed with the key logged no stream. A one-off seed has no
+Worship Site, and the Hand stayed in the influence [I]. Its eye picture after the
+pour shows a column in the sky in the red of the influence ring (255 70 70),
+and not at the spire.
+
+The mod draws one thing in that red: the glow at the edge of the influence
+(`influence_wall`, "The glow at the edge"), a patch of 12 cm of the room at
+the edge nearest to each hand. Its lines `influence    : the glow at the
+edge` say when it shows and where. The game draws its influence ring in the
+same red. A run with `influence_wall=0` tells the two apart.
 
 ### The way out
 
@@ -1150,7 +1177,9 @@ What the game does to the Creature [V]:
   16 m to 0.22 at 14 m and nearer. So at the door of the Temple the body
   keeps the size 0.22 with each spell, also in the plain game. A desktop
   run in the test save `temple` shows the base size at 0.200 with Shrink
-  and 2.400 with Enlarge, and the drawn body at 0.220. The watch line gives
+  and 2.400 with Enlarge, and the drawn body at 0.220. Away from the pen
+  (61 m of the game from its point, `miracle_run.ps1 -Kind away`) the drawn
+  body goes to 2.000 with Enlarge and to 0.200 with Shrink. The watch line gives
   the metres from the point at the pen, and the size that the body gets in
   front of the pen. The walk also reads the base size
   (`LH3DCreature::GetNavRadius` `0x00480A60`).
@@ -1225,6 +1254,8 @@ Test keys for the desktop runs only (the launcher removes them):
   Hand (`OneOffSpellSeed::Create`).
 - `miracle_test_cancel`: a list of frames. At each one the mod asks for a
   cancel.
+- `influence_stream_test_log=1`: a log line for each stream of light of the
+  game (see "The bolt of Lightning").
 - `spell_book_test_save`: the mod saves the first N pictures of the book as
   `bwvr-book-NNNNN.bmp`.
 - The word `book` of the scripted controller steps the pointing hand to the
@@ -1407,8 +1438,8 @@ and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
   fingers of the right hand during the pull and at the snap, and the
   fingers in front of it hide a part of it. When the Miracle is in the
   Hand, the ball is gone and the game's own glow of Food is in the Hand.
-  With Vulkan the log shows the same draws, but the eye pictures of a
-  desktop run are black.
+  With Vulkan (and `test_frame_rate=60`) the log shows the same draws, and
+  the eye pictures show the same bubble in both eyes.
 - The pull of 15 cm: the bubble snaps into the hand at 10.1 cm, in the same
   frame as the take. With `spell_book_pull_cm=0` the grip is the take, and
   the card says "[Grip] Take Food".
@@ -1503,8 +1534,9 @@ pictures). What it shows:
   more often. The trail with the low poly hand, with `overlay=0` and on the
   table.
 
-- Teleport (the cast of Heal), and the Creature miracles other than Strong
-  and Freeze.
+- The second site of Teleport: one cast (`miracle_run.ps1 -Kind teleport`)
+  makes one site, and a villager on it does not go. The Creature miracles
+  other than Strong, Freeze, Shrink, Enlarge and Invisibility.
 - A Creature outside the influence (the red halo and its line), each reason
   of a refusal other than "needs a Creature" and "needs a circle on the
   land", a Worship Site or a dispenser as the target, and a magic fireball.

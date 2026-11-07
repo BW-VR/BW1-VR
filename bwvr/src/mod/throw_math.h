@@ -238,6 +238,107 @@ inline void RealArc(const float p0[3], const float v0[3], float s, double t,
   v[1] = static_cast<float>(v0[1] - g * t);
 }
 
+// THE OBJECTS ON THE ARC (throw_arc_objects). The game's physics has the
+// object some game turns after the release. Until then the mod draws the
+// real arc, and the game's physics then starts at the place of the arc at
+// that time. The game tests the objects only from that time. So the arc
+// tests the box of the mesh of each object near the Hand, and it stops where
+// it goes into a box, as it stops at the land.
+//
+// A box: its middle, three axes of length 1 (row by row) and half its sizes
+// along them.
+struct Box {
+  float middle[3];
+  float axis[9];
+  float half[3];
+};
+
+// True when p is in the box.
+inline bool InBox(const Box& b, const float p[3]) {
+  for (int j = 0; j < 3; ++j) {
+    float along = 0.0f;
+    for (int k = 0; k < 3; ++k) {
+      along += (p[k] - b.middle[k]) * b.axis[j * 3 + k];
+    }
+    if (fabsf(along) > b.half[j]) return false;
+  }
+  return true;
+}
+
+// The part u (0 to 1) of the segment from a to c where it goes into the box.
+// False when a is in the box already (a release inside an object is the
+// game's own case), or when the segment does not go into the box.
+inline bool SegmentEntersBox(const Box& b, const float a[3], const float c[3],
+                             float* u) {
+  float low = 0.0f, high = 1.0f;
+  bool inside = true;
+  for (int j = 0; j < 3; ++j) {
+    float from = 0.0f, step = 0.0f;
+    for (int k = 0; k < 3; ++k) {
+      from += (a[k] - b.middle[k]) * b.axis[j * 3 + k];
+      step += (c[k] - a[k]) * b.axis[j * 3 + k];
+    }
+    if (fabsf(from) > b.half[j]) inside = false;
+    if (fabsf(step) < 1e-9f) {
+      if (fabsf(from) > b.half[j]) return false;
+      continue;
+    }
+    float t0 = (-b.half[j] - from) / step;
+    float t1 = (b.half[j] - from) / step;
+    if (t0 > t1) {
+      const float swap = t0;
+      t0 = t1;
+      t1 = swap;
+    }
+    if (t0 > low) low = t0;
+    if (t1 < high) high = t1;
+    if (low > high) return false;
+  }
+  if (inside) return false;
+  *u = low;
+  return true;
+}
+
+// The box around the points of the arc from the release to `seconds` (no
+// more than the time where the arc meets the land), grown by `margin`. An
+// object whose box is outside it cannot be on the arc in that time.
+inline void ArcBounds(const float p0[3], const float v0[3], float s,
+                      double seconds, float margin, float low[3],
+                      float high[3]) {
+  for (int i = 0; i < 3; ++i) low[i] = high[i] = p0[i];
+  const int steps = 16;
+  for (int k = 1; k <= steps; ++k) {
+    float p[3], v[3];
+    RealArc(p0, v0, s, seconds * k / steps, p, v);
+    for (int i = 0; i < 3; ++i) {
+      if (p[i] < low[i]) low[i] = p[i];
+      if (p[i] > high[i]) high[i] = p[i];
+    }
+  }
+  // The arc bends between two samples: the largest gap from the chord is
+  // s g (seconds / steps)^2 / 8 along up.
+  const double part = seconds / steps;
+  const float bend =
+      static_cast<float>(static_cast<double>(s) * kGravity * part * part / 8.0);
+  for (int i = 0; i < 3; ++i) {
+    low[i] -= margin + (i == 1 ? bend : 0.0f);
+    high[i] += margin + (i == 1 ? bend : 0.0f);
+  }
+}
+
+// True when the box of b (its corners) and the box from low to high, along
+// the world axes, have a part in common.
+inline bool BoxNear(const Box& b, const float low[3], const float high[3]) {
+  for (int k = 0; k < 3; ++k) {
+    float extent = 0.0f;
+    for (int j = 0; j < 3; ++j) extent += fabsf(b.axis[j * 3 + k]) * b.half[j];
+    if (b.middle[k] + extent < low[k] || b.middle[k] - extent > high[k]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // One step of the game's integrator in a free flight with no drag
 // (fn_007FD4D0 adds the weight, and fn_007FE260 adds the force to the
 // velocity and then the velocity to the position). The math test flies an
@@ -809,6 +910,19 @@ inline float TurnKeepAfterLanding(float game_keep, bool brake_on, bool settle,
 // turn of the picture is kTurnCap at most (TurnCutFactor), and no momentum is
 // kept that the cap hides. The cut acts before a substep: a contact or a
 // torque in the steps of a substep can still turn the picture faster.
+//
+// THE TORQUE OF A GAME TURN. PhysOb::ZeroForces 0x007FD200 starts the
+// torque of each step from a constant torque at PhysOb+0x128 (0x007FD42C),
+// and PhysicsObject::GameTurnUpdate sets it to 0 at the end of each game
+// turn (0x00646093). Packet 0x40 adds to it (GPacket::ProcessPacket,
+// 0x0063CE87): 1.6 m |v| (-d.z, 0, d.x), with d the move of the land point
+// under the pointer after the release (0x00C5E640 minus 0x00C5E650).
+// CHand::GetRequiredState sends it 180 ms after the last frame of the hold
+// (0x0046CE86). The game gives that torque for 20 steps. The flight runs
+// `rate` times as many steps, so the momentum grows rate times as much, and
+// the picture shows it rate times as fast. So the mod multiplies the
+// constant torque by TurnTorqueFactor in the steps of the flight: the
+// picture then turns as fast as the game turns that torque.
 const float kTurnCap = 9.424778f;  // 3 pi radians a second, 0x009A2BB0
 
 // The length of the turn w = M^T (A L) of fn_007FE260. `axes` and `inverse`
@@ -835,6 +949,14 @@ inline float TurnStartFactor(float rate) {
   return rate > 1.0f ? 1.0f / rate : 1.0f;
 }
 
+// The factor for the constant torque of a game turn in a substep of `rate`
+// steps: 1 / rate^2. The momentum that the torque gives in a game turn is
+// then 1 / rate of the game's, as TurnStartFactor gives for the release. 1
+// for a rate of 1 or less.
+inline float TurnTorqueFactor(float rate) {
+  return rate > 1.0f ? 1.0f / (rate * rate) : 1.0f;
+}
+
 // The factor for the momentum before a substep of `rate` steps, when the
 // game turns the object at `turn_speed` radians a second. The picture then
 // turns at `cap` radians a second at most: the answer is 1 when it does.
@@ -842,6 +964,29 @@ inline float TurnCutFactor(float turn_speed, float rate, float cap) {
   if (!(rate > 0.0f) || !(cap > 0.0f)) return 1.0f;
   if (!(turn_speed * rate > cap)) return 1.0f;
   return cap / (turn_speed * rate);
+}
+
+// THE CAP IN EACH STEP OF A SUBSTEP WITH A TORQUE. The torque of the flick
+// comes back in each step of a substep, so a cut before the substep does
+// not hold the cap. fn_007FE260 makes the momentum of the step
+// L' = (L + torque dt) keep, and turns the object with w(L'). So before a
+// step the mod changes L so that L' has the cap at most:
+// L = L' f / keep - torque dt, with f = TurnCutFactor of w(L'). True when it
+// changed the momentum.
+inline bool TurnCutBeforeStep(float momentum[3], const float torque[3],
+                              float keep, float dt, const float axes[9],
+                              const float inverse[9], float rate,
+                              float cap) {
+  if (!(keep > 0.0f) || !(dt > 0.0f)) return false;
+  float next[3];
+  for (int i = 0; i < 3; ++i) next[i] = (momentum[i] + torque[i] * dt) * keep;
+  const float factor =
+      TurnCutFactor(TurnSpeedOf(axes, inverse, next), rate, cap);
+  if (!(factor < 1.0f)) return false;
+  for (int i = 0; i < 3; ++i) {
+    momentum[i] = next[i] * factor / keep - torque[i] * dt;
+  }
+  return true;
 }
 
 inline void LandBrake(const float push[3], const float velocity[3],

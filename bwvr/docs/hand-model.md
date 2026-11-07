@@ -671,7 +671,9 @@ with no clone has no reader, and the log of the mod says so.
 
 A vertex can have up to 4 bones. The game's own mesh has one bone for each
 vertex, so a mesh with more bones at a joint bends more smoothly than the
-game's.
+game's. No test shows a file with more bones: the only hand with the 22
+joints of the game is the hand of the game, and the repo has no file of the
+game.
 
 ### The fit
 
@@ -879,7 +881,9 @@ the distance, and nothing in it reacts to a thing in the water. So no
 layer that shows a thing in the water is missing in the VR picture. The
 sea writes no depth, and the land draws after it. So a finger under the
 plane of the sea is in front of the sea in the picture, and it shows as in
-the air. The hands of the mod draw at the end of the frame
+the air. With `sea_depth=1` the land of the sea goes on down under the
+plane, to 2.68 units (backend.md, "The sea with depth"), so a finger under
+the plane shows down to that floor. The hands of the mod draw at the end of the frame
 (`LH3DRender::FinishFrame`), with the depth test against the land and the
 objects.
 
@@ -1292,6 +1296,8 @@ these runs (`hand_direct.cpp`):
 - `gofeel`: the God view teleports to 50 cm of the room before the side of
   the body of the nearest object in the view of the class of the next entry
   of `seek_feel`.
+- `gointo`: the same, but the head goes over the middle of the body of that
+  object (the head blinder in a house, `god-view.md`, section 5.9).
 - `feel`: the Hand's point goes to the body of the nearest object of that
   class. An entry of `seek_feel` is `class,height,gap,side`, with entries
   between bars: the height on the body in percent, the gap from its surface
@@ -1344,8 +1350,9 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
 
 ### Limits
 
-- The hand does not stop at a body. A hand that the player pushes into a
-  house, a rock or a tree goes into it, with its fingers bent.
+- A hand stops at a house, a rock and a tree trunk ("The Hand stops at the
+  land"), but not at a villager, an animal or the Creature. A hand that the
+  player pushes into one of these goes into it, with its fingers bent.
 - A body is a cheap form. The box of a house has no roof slope: at a hut
   with a roof down to the land a finger stops in the air before the slope
   of the roof. The crown of a tree is a spheroid, and the box of the Creature is the box of its mesh
@@ -1390,9 +1397,15 @@ water under it in the same frame. With 0 no ring starts. The log says that the
 look of the water is on or off (`hand_feel_water_look`), but the captures do
 not show the part of the hand under the water.
 
-**Open: not shown on the desktop.** A building as a body near either hand
-(`hand_feel_offer`): the test save `pen` has no house in the view of the
-seek. The look of the water in a picture. A rock as a body (no run put a hand at
+In the test save `temple` (`village_run.ps1 -Kind wall`, 13.2 units a meter)
+the fingers of the right hand are in the body of the Village Store in 213 of
+217 frames. With `hand_feel_offer=0` the pick gets no more objects, and the
+fingers act the same.
+
+**Open: not shown on the desktop.** A finger at the wall of a house: at 44.4
+units a meter the Hand's point goes 1.5 cm into the body of a house and no
+finger does, and at 13.2 units a meter no house is within 2 m of the room.
+The look of the water in a picture. A rock as a body (no run put a hand at
 a rock), a finger at the crown of a tree, a villager or an animal that walks
 into a still hand, the Creature that comes to the hand, the spread of a flat
 hand in a picture, a real press of the test key, the approach at weights
@@ -1405,8 +1418,10 @@ desktop run can prove are in `roadmap.md`, R12.
 
 ## The Hand stops at the land
 
-The drawn hands do not go through the land. The code is in
-`src/mod/hand_land.cpp`, and the pure math is in `src/mod/hand_land_math.h`.
+The drawn hands do not go through the land, a house, a rock or a tree
+trunk. The code is in `src/mod/hand_land.cpp`, and the pure math is in
+`src/mod/hand_land_math.h` (the land) and `src/mod/solid_math.h` (the
+solids).
 
 ### What the mod does
 
@@ -1424,14 +1439,53 @@ The drawn hands do not go through the land. The code is in
   the middle of each segment and the Hand's point stop the hand too. A joint
   keeps the radius of its finger over the land, and a corner of the skin (a
   finger tip, a corner of the palm) keeps 5 mm of the room.
-- **The land only.** The height is `LH3DIsland::GetAltitude` `0x00803090` at
-  each point, with the sea and the places off the map at 0, as hand feel has
-  it. A house, a rock and a tree do not stop the hand.
+- **The land.** The height is `LH3DIsland::GetAltitude` `0x00803090` at each
+  point, with the sea and the places off the map at 0, as hand feel has it.
+- **The solids** (`hand_object_stop`). A house, a rock and a tree trunk stop
+  the drawn hand too. When the real hand goes into one, the drawn hand goes
+  out of it along one direction until no point of it is in the solid. So it
+  stays on the surface and slides along it with the real hand. Each point of
+  the hand stops at a solid, also with fingers that bend on the land: hand
+  feel bends a finger only when it is in a body, and the stop keeps the
+  fingers out of the solid. The push comes first, and then the lift over the
+  land of the pushed hand.
+  - A house is the box of the mesh of an `Abode`, a `Creche`, a `Windmill`
+    or a `Workshop`, with the turn of the object, as hand feel has it. A
+    rock is the box of the mesh of a `Rock`. The box holds each part of the
+    mesh and the air between them, so only a closed building is a solid.
+    The Village Store (`StoragePit`) is an open pit with no roof: its box
+    (radius 15.45 units) holds its inside and the air over it. The hand
+    goes out by the face of the box with the least push at the first touch, and that face
+    holds while the touch holds. So the drawn hand does not jump to the far
+    face when the real hand goes past the middle of the house. A face that
+    points down does not count.
+  - A touch starts only with a push of 10 cm of the room or less. A real
+    hand that a teleport or a zoom puts deeper into a solid is drawn as the
+    real hand until it comes out. A touch that holds can grow past 10 cm.
+  - A tree is its trunk only: an upright cylinder of a quarter of the
+    radius of the tree, from the land to half its height. The leaves do not
+    stop the hand. The hand goes out along the level line from the axis of
+    the trunk to the palm of the real hand, so it goes round the trunk with
+    the real hand. It keeps its side when the palm goes past the axis.
+  - These are not solids: the Village Store, a `Graveyard`, a `TownCentre`,
+    a `Wonder`, a field, a villager, an animal, the Creature, a
+    forest, a scroll, the object in the Hand, a box with no half size of 2
+    cm of the room or more, and a trunk with a radius of less than 1 cm of
+    the room. On the table (a hand of more than 60 world units) no solid
+    counts.
+  - The solids are those of the first eye pass of the frame before
+    (`LatchSolids` in `hand_direct.cpp`, after the world of that pass). The
+    hook of the screen test of the draw also offers an object to the pick
+    when the ball round its box is within one hand length and 10 cm of the
+    room of the middle of the palm of a real hand. So a wall near the hand
+    that does not point is in the list.
 - **What follows the drawn hand.** The mesh of each hand, the low poly hands,
   and hand feel. The Hand's point of the pointing hand goes up by the same
   lift (`HandLandPointLift`), so the glow, the pick, a take and a click act
   at the hand that the player sees. The Hand's point still stops 5 mm over
-  the land by itself (hand.md, "5. The touch of the land").
+  the land by itself (hand.md, "5. The touch of the land"). The solids do not
+  move the Hand's point: it goes into a body to choose it, so the glow and a
+  take of a rock act at the real hand.
 - **What keeps the real hand.** The grab of the land, the grab with two
   hands, the far grab, the teleport aim and the speed of a throw. A grip that
   holds the land with the hand in it moves the land as before.
@@ -1440,12 +1494,13 @@ The drawn hands do not go through the land. The code is in
   land, and none while it rests on the land or slides along it. With
   `hand_feel=1` hand feel sends it, by its rule for a finger that meets the
   land, so a finger and the palm that touch at one time give one pulse. With
-  `hand_feel=0` the stop sends it by the same rule.
+  `hand_feel=0` the stop sends it by the same rule. A solid has its own
+  pulse by the same rule, from the stop.
 - **When.** Only while the God view or the table owns the view and the
   controller owns the pointer, as hand feel. In a menu, in a room of the
   Temple, in a cut scene and in the intro the hands are the real hands.
 
-**Once a frame.** The first call of a frame makes the lift of both hands
+**Once a frame.** The first call of a frame makes the offset of both hands
 from the grip poses of the frame and the shape of the fingers of the last
 frame (`OverlayLastShape`). That call comes from `HandDirectFrame`, before
 the overlay builds the hands. Each later call in the frame gets the same
@@ -1456,18 +1511,27 @@ numbers, so the game's point and the drawn hand agree.
 | Key | Default | What it does |
 | --- | --- | --- |
 | `hand_land_stop` | 1 | 1: a hand in the land is drawn on the land, and the Hand's point goes with it. 0: the drawn hands are the real hands also in the land, the land hides them, and only the Hand's point stops 5 mm over the land |
+| `hand_object_stop` | 1 | 1: a hand in a house, a rock or a tree trunk is drawn on its surface. 0: the drawn hands go into them |
 
-The debug page has the switch "Land stop" in the group of the Hand.
+The debug page has the switches "Land stop" and "Object stop" in the group
+of the Hand.
 
 ### The log
 
-The tag `hand land`. At the start, the key. For each hand, each touch of the
-land (80 lines at most): the lift in cm of the room, and the kind of the
-point that is lowest. Each end of a touch: the frames of the touch and the
-largest lift. Once, the first frame in which the Hand's point goes up with
-the drawn hand. Once a report window: the hand frames on the land, the
-frames of the point, the pulses with `hand_feel=0` and the count of the land
-heights.
+The tag `hand land`. At the start, the two keys. For each hand, each touch
+of the land (80 lines at most): the lift in cm of the room, and the kind of
+the point that is lowest. Each end of a touch: the frames of the touch and
+the largest lift. Each touch of a solid (80 lines at most): its class and
+address, the face of its box (in the axes of the box) or its trunk, the push
+in cm of the room, the direction of the push in the world, the palm of the
+real hand, the middle of the solid and the count of the solids near. Each end of the
+touch of the solids: the frames and the largest push. Each change of the push by 1 cm of the room or more while the touch holds. Once, the first frame
+in which the Hand's point goes up with the drawn hand. Once a report window:
+the hand frames on the land, the frames of the point, the pulses with
+`hand_feel=0` and the count of the land heights. A second line has the hand
+frames that a solid held, their pulses, the first eye passes that kept the
+solids, the solids that they kept, the solids near the hands and the objects
+that went to the pick only for a hand or the head.
 
 ### Tests
 
@@ -1488,6 +1552,24 @@ The math test (`hand_land_checks.h`) has the low poly hand, 19 units long at
 - The Hand's point is on the hand within 2 cm of the room. The pulse comes
   once at the first touch, not after a gap of 0.1 s, and again after 0.2 s.
 
+The math test of the solids (`solid_checks.h`) has a house of 20 by 10 by
+20 units and a trunk of radius 2:
+
+- Out of the house there is no push. A point 1 unit into a wall goes out to
+  the wall and its gap, along that face only. A point that goes past the
+  middle of the house stays on the same face. A point that slides along the
+  wall slides with the real point. A point out of the wall or past the
+  corner is free at once.
+- A point in the roof rests on the roof. A point at the floor goes out by
+  the nearest wall, never down. The push of a turned house follows its turn.
+- A point in a trunk goes out to its radius, goes round it with the palm,
+  and keeps its side past the axis. A point in the leaves has no push. A
+  point between two houses goes out of both.
+- The low poly hand with its fingers 2 units into a wall goes out along the
+  face, with no point in the box, and a still hand has the same push in each
+  frame. A stone of 2 cm of the room does not count, and the same stone at
+  13.2 units a meter does. The distance of the head to a box and to a trunk.
+
 The desktop run is `village_run.ps1 -Kind land` (`bwvr/tools/desk`). It
 puts the Hand's point 3 cm over open land near the Village Store, in the
 middle of the view (the seek word `open`), pushes the real hand 12 cm into
@@ -1497,6 +1579,21 @@ with the hand at a pile of the store had the touch at 7.3 cm of the room and
 the end of the touch after 239 frames, with 14.0 cm of lift at the most, and
 one pulse. With `hand_feel=0` a finger tip stopped the hand at 11.7 cm, with
 20.1 cm at the most. With `hand_land_stop=0` the log had no touch.
+
+The desktop run of the solids is `village_run.ps1 -Kind housestop`. At
+29.6 units a meter the Hand's point goes to the side of a house across the
+view: 3 cm out of the wall, 2 cm and 5 cm in its box, and 3 cm out again,
+with an eye picture at each place. No desktop run has shown the stop at a
+house yet.
+
+**Limits of the solids.** A solid is the box of the whole mesh, so an open
+building is no solid, and a building with parts at different heights stops
+the hand in the air over its low parts. The box of a house has no roof
+slope. A trunk is a
+quarter of the radius of the crown of the tree. The Hand's point keeps the
+real hand, so the glow is in the solid while the drawn index finger is on
+its surface. An object in the Hand stays at the real hand, as it does in the
+land.
 
 The checks in a headset are in `headset-checks.md`.
 
@@ -1636,6 +1733,10 @@ turned camera gives the same numbers, and two eyes 6.68 units apart put the
 two discs `fx * e / d * hx` pixels apart, level, each on its own eye's line to
 the point. On the desktop both eyes put the disc on the tip of the index
 finger, and a villager under the point turns the disc gold and larger.
+`hand_run.ps1 -Kind glow` has the glow at the finger tip in both eyes, 58.0
+px apart as its depth asks, and the finger does not hide it. With the hand
+17 cm in the land (`hand_land_stop=0`) the hill hides the hand and the glow
+in both eyes.
 
 In one walk, a desktop run with `hand_glow=1`, `hand_glow_idle=1`,
 `one_walk_check=1` and four poses of the hand (`fake_controller_rots`) has
@@ -1809,9 +1910,14 @@ cost measure (`bench_run.ps1`, a target in each scene) shows no difference
 between `target_glow=1` and `target_glow=0` that is larger than the spread
 of two runs.
 
+`village_run.ps1 -Kind tglow` (`target_glow_log=30`) shows the glow in both
+eyes on the Village Store (393 vertices) and a pile, and the log has it on a
+tree and a villager. Each batch is in the call of the object.
+
 **Open.** No run has shown a mesh of the sorted list as a target, a mesh
-that comes through the clip of the engine, or a target by day: the test
-saves are at dusk.
+that comes through the clip of the engine, or a target by day: each run had
+the sky of the evening or the night, because the game takes the time of day
+from the clock of the PC. `sky_test_hour=13` sets the day.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.

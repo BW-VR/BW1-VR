@@ -269,12 +269,42 @@ int Groups() {
   return n < kMostTabs ? n : kMostTabs;
 }
 
+unsigned char KindOf(int i, int value) {
+  int count = g_src->value_count(i);
+  if (count < 0 && g_src->picture == nullptr) count = 0;
+  return static_cast<unsigned char>(KindOfRow(count, value == kDebugCannot));
+}
+
 void Latch() {
   for (int r = 0; r < g_rows; ++r) {
     const int i = g_switch[r];
     g_value[r] = g_src->value(i);
-    g_kind[r] = static_cast<unsigned char>(KindOfRow(
-        g_src->value_count(i), g_value[r] == kDebugCannot));
+    g_kind[r] = KindOf(i, g_value[r]);
+  }
+}
+
+// The word of a row that cannot change: the word of the list, or "not now".
+const wchar_t* DimWord(int i) {
+  const wchar_t* w = g_src->fixed_word != nullptr ? g_src->fixed_word(i)
+                                                  : nullptr;
+  return w != nullptr ? w : L"not now";
+}
+
+// A band of a drawing over the row. dst is the left of the row, with the
+// pitch of the picture of the window, and lines y0 to y1 of the band change.
+void LayPicture(int i, int value, int style, uint8_t* dst, int y0, int y1) {
+  const uint8_t* src = g_src->picture(i, value, style);
+  if (src == nullptr) return;
+  for (int y = y0; y < y1; ++y) {
+    const uint8_t* s = src + static_cast<size_t>(y) * kWellWidth * 4;
+    uint8_t* d = dst + static_cast<size_t>(y) * kWidth * 4;
+    for (int x = 0; x < kWellWidth; ++x, s += 4, d += 4) {
+      const int a = s[3];
+      if (a == 0) continue;
+      for (int k = 0; k < 3; ++k) {
+        d[k] = static_cast<uint8_t>(s[k] + d[k] * (255 - a) / 255);
+      }
+    }
   }
 }
 
@@ -490,7 +520,9 @@ void DrawRow(int r, const RowLook& look) {
   LabelBox(box);
   const wchar_t* small = g_src->row_note != nullptr ? g_src->row_note(i)
                                                     : nullptr;
-  if (small != nullptr) {
+  if (look.kind == kRowPicture) {
+    LayPicture(i, look.value, 1, g_scratch, 0, kRowPitch);
+  } else if (small != nullptr) {
     // The label in the top part of the box, the small words under it.
     const int top[4] = {box[0], box[1] - 4, box[2], box[1] + 32};
     kit::InkWordsIn(&g_canvas, to, g_label_font, g_src->label(i), top, seed,
@@ -503,9 +535,11 @@ void DrawRow(int r, const RowLook& look) {
                     kit::kLeftAlign);
   }
   wchar_t word[32];
-  if (look.kind == kRowDim) {
+  if (look.kind == kRowPicture) {
+    // A picture has no control.
+  } else if (look.kind == kRowDim) {
     ValueBox(kRowArrows, box);
-    kit::InkWordsIn(&g_canvas, to, g_value_font, L"not now", box, seed + 1,
+    kit::InkWordsIn(&g_canvas, to, g_value_font, DimWord(i), box, seed + 1,
                     kit::kCenter);
     const int all[4] = {0, 0, kWellWidth, kRowPitch - 3};
     const card_scroll::Picture under = RowPicture(g_band);
@@ -529,9 +563,13 @@ void DrawRow(int r, const RowLook& look) {
     RightArrowRect(a);
     kit::ArrowKey(&g_canvas, to, a, look.right, false, seed + 3);
   }
-  // A rule at the foot of the row: the join of two rows is under it.
-  Rule(g_scratch, kWidth, 10, kWellWidth - 10, kRowPitch - 3, kRowPitch - 1,
-       200);
+  // A rule at the foot of the row: the join of two rows is under it. The
+  // bands of one picture have no rule between them.
+  if (look.kind != kRowPicture ||
+      (r + 1 < g_rows && g_kind[r + 1] != kRowPicture)) {
+    Rule(g_scratch, kWidth, 10, kWellWidth - 10, kRowPitch - 3, kRowPitch - 1,
+         200);
+  }
   if (g_tile[r] == nullptr) g_tile[r] = new (std::nothrow) uint8_t[kTileBytes];
   if (g_tile[r] == nullptr) return;
   const size_t row = static_cast<size_t>(kWellWidth) * 4;
@@ -734,6 +772,17 @@ void RasterPlain(const Look& look) {
     if (top + kRowPitch <= kWellTop || top >= kWellBottom) continue;
     const RowLook& l = look.row[row];
     const int i = g_switch[row];
+    if (l.kind == kRowPicture) {
+      // The band over the dark list, in the lines of the list only.
+      GdiFlush();
+      const int y0 = top < kWellTop ? kWellTop - top : 0;
+      const int y1 = top + kRowPitch > kWellBottom ? kWellBottom - top
+                                                   : kRowPitch;
+      uint8_t* dst = reinterpret_cast<uint8_t*>(c->bits) +
+                     (static_cast<size_t>(top) * kWidth + kWellLeft) * 4;
+      LayPicture(i, l.value, 0, dst, y0, y1);
+      continue;
+    }
     const bool dim = l.kind == kRowDim;
     int b[4];
     LabelBox(b);
@@ -757,7 +806,7 @@ void RasterPlain(const Look& look) {
     const int value[4] = {kWellLeft + b[0], top + b[1], kWellLeft + b[2],
                           top + b[3]};
     if (dim) {
-      PlainWords(g_plain_small, RGB(110, 110, 110), L"not now", value,
+      PlainWords(g_plain_small, RGB(110, 110, 110), DimWord(i), value,
                  DT_CENTER);
     } else if (l.kind == kRowToggle) {
       PlainWords(g_plain_small, RGB(230, 190, 110), word, value, DT_RIGHT);
@@ -869,8 +918,12 @@ void BuildLook(Look* look) {
     wcsncpy_s(look->status, g_status, _TRUNCATE);
   } else if (hover_row >= 0 && hover_row < g_rows &&
              g_kind[hover_row] == kRowDim) {
-    swprintf_s(look->status, L"%s cannot change now",
-               g_src->label(g_switch[hover_row]));
+    const int i = g_switch[hover_row];
+    if (g_src->fixed_word != nullptr && g_src->fixed_word(i) != nullptr) {
+      swprintf_s(look->status, L"%s stays on its job", g_src->label(i));
+    } else {
+      swprintf_s(look->status, L"%s cannot change now", g_src->label(i));
+    }
   } else {
     wcscpy_s(look->status, g_src->idle);
   }
@@ -962,6 +1015,8 @@ void Act(int part, uint64_t frame) {
   const int i = g_switch[r];
   const wchar_t* label = g_src->label(i);
   wchar_t words[96];
+  // A press on a picture does nothing.
+  if (g_kind[r] == kRowPicture) return;
   if (g_kind[r] == kRowDim) {
     ++g_refused;
     HapticsPulse(haptics_math::kRefused);
@@ -985,8 +1040,7 @@ void Act(int part, uint64_t frame) {
   ++g_steps;
   kit::Flash(&g_room, g_kind[r] == kRowToggle ? RowPartOf(r, kOnRow) : part);
   g_value[r] = g_src->value(i);
-  g_kind[r] = static_cast<unsigned char>(
-      KindOfRow(g_src->value_count(i), g_value[r] == kDebugCannot));
+  g_kind[r] = KindOf(i, g_value[r]);
   wchar_t word[32];
   g_src->value_text(i, g_value[r], word, 32);
   const wchar_t* small = g_src->row_note != nullptr ? g_src->row_note(i)
@@ -1031,6 +1085,12 @@ void StickStep(double dt, uint64_t frame) {
 }  // namespace
 
 bool DebugWindowOpen() { return g_room.open; }
+
+int DebugWindowHoverSwitch() {
+  if (!g_room.open) return -1;
+  const int r = RowOf(g_room.hover);
+  return r >= 0 && r < g_rows ? g_switch[r] : -1;
+}
 
 bool DebugWindowHoldsTrigger() {
   return InterlockedCompareExchange(&g_holds, 0, 0) != 0;
@@ -1184,7 +1244,9 @@ void DebugWindowFrame() {
   StickStep(dt, frame);
 
   // The note of the row under the ray, after a rest on it.
-  const int rest = g_drag ? -1 : RowOf(g_room.hover);
+  // A picture has no note.
+  int rest = g_drag ? -1 : RowOf(g_room.hover);
+  if (rest >= 0 && rest < g_rows && g_kind[rest] == kRowPicture) rest = -1;
   if (rest != g_rest_row) {
     g_rest_row = rest;
     g_rest_since = now;

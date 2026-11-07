@@ -62,6 +62,8 @@ void VignetteChange(const char* by);
 // The overlay of a head under the land (head_blinder.cpp).
 int HeadBlinderValue();
 void HeadBlinderChange(const char* by);
+int HeadBlinderObjectsValue();
+void HeadBlinderObjectsChange(const char* by);
 // The God view and the table (tabletop.cpp), the grab of the world
 // (world_grab.cpp).
 int TabletopValue();
@@ -108,6 +110,8 @@ int HintCardMovesValue();
 void HintCardMovesToggle(const char* by);
 int HintCardStyleValue();
 void HintCardStyleToggle(const char* by);
+int HintCardPicturesValue();
+void HintCardPicturesToggle(const char* by);
 int TextClickValue();
 void TextClickChange(const char* by);
 int SpiritAnchorWorldSizeValue();
@@ -124,6 +128,8 @@ int OneWalkMarksValue();
 void OneWalkMarksToggle(const char* by);
 int LandLightEyesValue();
 void LandLightEyesChange(const char* by);
+int SeaDepthValue();
+void SeaDepthChange(const char* by);
 int VkSceneEyesValue();
 void VkSceneEyesToggle(const char* by);
 int VkSceneKeepPictureValue();
@@ -227,6 +233,8 @@ int HandFeelPinchValue();
 void HandFeelPinchChange(const char* by);
 int HandLandStopValue();
 void HandLandStopChange(const char* by);
+int HandObjectStopValue();
+void HandObjectStopChange(const char* by);
 int ControllersNearTakeKeepsValue();
 void ControllersNearTakeKeepsChange(const char* by);
 int HandModelSwapValue();
@@ -303,6 +311,8 @@ int VideoViewValue();
 void VideoViewChange(const char* by);
 int VideoViewMarksValue();
 void VideoViewMarksChange(const char* by);
+int VideoViewLayersValue();
+void VideoViewLayersChange(const char* by);
 int VideoViewDownValue();
 void VideoViewLowerChange(const char* by);
 void VideoViewHigherChange(const char* by);
@@ -388,6 +398,9 @@ const Switch kSwitches[] = {
      VignetteValue, VignetteChange, L"off|gentle|strong"},
     {kGroupView, L"Head blinder", L"Cover the view in the land",
      "head_blinder", HeadBlinderValue, HeadBlinderChange, L"off|on"},
+    {kGroupView, L"Blinder solids", L"Cover the view in a house",
+     "head_blinder_objects", HeadBlinderObjectsValue, HeadBlinderObjectsChange,
+     L"land only|solids too"},
     {kGroupView, L"Menu turn", L"No turn in a dialog box", "menu_stops_turn",
      ControllersMenuStopsTurnValue, ControllersMenuStopsTurnChange,
      L"turns|stops"},
@@ -433,6 +446,8 @@ const Switch kSwitches[] = {
     {kGroupPicture, L"Land light", L"Lights of the land in both eyes",
      "land_light_eyes", LandLightEyesValue, LandLightEyesChange,
      L"left eye|both eyes"},
+    {kGroupPicture, L"Sea depth", L"Land goes down under the water",
+     "sea_depth", SeaDepthValue, SeaDepthChange, L"flat|depth"},
     {kGroupPicture, L"Advisor size", L"Advisor size at a world place",
      "spirit_world_size", SpiritAnchorWorldSizeValue,
      [](const char*) { SpiritAnchorWorldSizeToggle(); },
@@ -453,6 +468,9 @@ const Switch kSwitches[] = {
      "video_view", VideoViewValue, VideoViewChange, L"off|on"},
     {kGroupPicture, L"Video marks", L"Corner marks of the video area",
      "video_view_marks", VideoViewMarksValue, VideoViewMarksChange,
+     L"off|on"},
+    {kGroupPicture, L"Video layers", L"Cards and panels in the video",
+     "video_view_layers", VideoViewLayersValue, VideoViewLayersChange,
      L"off|on"},
     {kGroupPicture, L"Video higher", L"Video area lower by, percent",
      "video_view_down_pct", VideoViewDownValue, VideoViewHigherChange, L"",
@@ -549,6 +567,9 @@ const Switch kSwitches[] = {
     {kGroupInterface, L"Card look", L"Cards, ring and keys as scrolls",
      "hint_card_style", HintCardStyleValue, HintCardStyleToggle,
      L"plain|scroll"},
+    {kGroupInterface, L"Card pictures", L"Picture of the button on a card",
+     "hint_card_pictures", HintCardPicturesValue, HintCardPicturesToggle,
+     L"off|on"},
     {kGroupInterface, L"Tree card", L"Card of a tree in the Hand",
      "tree_plant_hint", HandDirectTreeHintValue, HandDirectTreeHintToggle,
      L"off|on"},
@@ -606,6 +627,9 @@ const Switch kSwitches[] = {
      HandFeelValue, HandFeelChange, L"off|on"},
     {kGroupHand, L"Land stop", L"Hand stops at the land", "hand_land_stop",
      HandLandStopValue, HandLandStopChange, L"off|on"},
+    {kGroupHand, L"Object stop", L"Hand stops at a house or rock",
+     "hand_object_stop", HandObjectStopValue, HandObjectStopChange,
+     L"off|on"},
     {kGroupHand, L"Game Hand", L"Mesh of the game's Hand", "hand_hide_game",
      HandExactHideValue, HandExactHideChange, L"shown|hidden"},
     {kGroupHand, L"Hand model", L"Model of the hands", "hand_model",
@@ -749,6 +773,10 @@ const wchar_t* const kTips[] = {
     L"On: when the head goes into the land, a gold and red overlay covers "
     L"the view. It starts at the edge 5 cm over the land. Off: the eyes see "
     L"under the land.",
+    // Blinder solids
+    L"Solids too: a house, a rock and a tree trunk cover the view as the "
+    L"land does when the head goes into them. Land only: the eyes see into "
+    L"a house and a rock.",
     // Menu turn
     L"Stops: while a dialog box of the game is up, the stick does not turn "
     L"or zoom. Turns: the stick turns and zooms as at other times.",
@@ -798,6 +826,9 @@ const wchar_t* const kTips[] = {
     // Land light
     L"A light on the land that comes one time a frame, such as the light of a "
     L"lightning. It shows in both eyes, or in the left eye only.",
+    // Sea depth
+    L"Depth: the land of the sea goes down under the water and fades into "
+    L"the sea by its depth. Flat: the flat coast of the game.",
     // Advisor size
     L"An advisor at a place of the world. Near size: the size that it has for "
     L"the eye at its usual place. Game: the size of the game.",
@@ -822,6 +853,9 @@ const wchar_t* const kTips[] = {
     // Video marks
     L"On: faint corner marks in the headset show the part of the view that "
     L"the video records. The video does not show them.",
+    // Video layers
+    L"On: the video also shows the cards, the ring and the panels of the "
+    L"headset, where the left eye sees them. Off: the eye picture only.",
     // Video higher
     L"The part that the video records goes 5 percent of the height up.",
     // Video lower
@@ -936,6 +970,9 @@ const wchar_t* const kTips[] = {
     // Card look
     L"Scroll: the cards, the ring, the spell book and the keyboard are "
     L"parchment scrolls with wax seals. Plain: dark cards with white letters.",
+    // Card pictures
+    L"On: a line of a button has a small picture of the controller with that "
+    L"button lit. Off: the button word only.",
     // Tree card
     L"On: the card says what an open grip does with a tree in the Hand. Off: "
     L"the card shows the text of the game, Plant, each time.",
@@ -1008,6 +1045,9 @@ const wchar_t* const kTips[] = {
     // Land stop
     L"On: a hand that goes into the land stays on the land and slides along "
     L"it. Off: the land hides the hand, and only the point stays on it.",
+    // Object stop
+    L"On: a hand that goes into a house, a rock or a tree trunk stays on its "
+    L"surface and slides along it. Off: the hand goes into them.",
     // Game Hand
     L"Hidden: the mod hides the mesh of the game Hand while a controller "
     L"places it, and draws both hands. Shown: the game draws its Hand too.",

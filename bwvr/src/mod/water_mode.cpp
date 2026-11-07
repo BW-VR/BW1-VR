@@ -31,6 +31,9 @@
 #include "../common/bw_addresses.h"
 
 extern void ModLog(const char* format, ...);
+// sea_depth.cpp: the land of the sea under the water.
+void SeaDepthInstall();
+void SeaDepthFrame();
 
 namespace {
 
@@ -46,6 +49,7 @@ void WaterModeSetSimple(bool on) {
   ModLog("water        : the %s sea, which %s roll",
          on ? "plain world space" : "scanline",
          on ? "survives" : "cannot take");
+  SeaDepthInstall();
 }
 
 bool WaterModeSimple() { return g_simple; }
@@ -66,4 +70,5 @@ void WaterModeApply() {
       ModLog("water        : tiling %.2f -> %.2f", g_original, wanted);
     }
   }
+  SeaDepthFrame();
 }

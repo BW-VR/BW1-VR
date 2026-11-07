@@ -1766,6 +1766,33 @@ inline void HintAtHandPoint(const float hand[2], const float first[2],
   for (int i = 0; i < 2; ++i) p[i] = hand[i] + s * (p[i] - first[i] + offset[i]);
 }
 
+// THE PLACE BEYOND THE FINGERTIP (hint_hand_tip). The Hand's point is at the
+// tip of the index finger, and the hand lies from there back to the palm. So
+// in the picture the hand is on the side of the palm of a line through the
+// tip, and the side beyond the tip has no part of the hand. The tooltip goes
+// on that side: along the line from the palm to the tip, with its nearest
+// edge gap pixels past the tip. When the palm is less than least pixels from
+// the tip in the picture, the finger points along the view, and the tooltip
+// goes up from the tip. tip and palm are pixels in this eye, w and h the size
+// of the tooltip in pixels as it shows. out is its top left corner.
+inline void HintBeyondTip(const float tip[2], const float palm[2], float w,
+                          float h, float gap, float least, float out[2]) {
+  float u[2] = {tip[0] - palm[0], tip[1] - palm[1]};
+  const float length = sqrtf(u[0] * u[0] + u[1] * u[1]);
+  if (length > least && length > 0.0f) {
+    u[0] /= length;
+    u[1] /= length;
+  } else {
+    u[0] = 0.0f;
+    u[1] = -1.0f;
+  }
+  // From the middle of the box to its edge along u.
+  const float reach = 0.5f * (fabsf(u[0]) * w + fabsf(u[1]) * h);
+  const float d = gap + reach;
+  out[0] = tip[0] + u[0] * d - 0.5f * w;
+  out[1] = tip[1] + u[1] * d - 0.5f * h;
+}
+
 // THE GRAB FROM A DISTANCE (docs/grab.md, "The grab from a distance").
 //
 // THE CONE. The pointing hand's aim ray picks an object when the angle from

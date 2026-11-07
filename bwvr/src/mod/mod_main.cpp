@@ -101,6 +101,7 @@ void IntroSetTests(int motion_seconds, int push_pixels);
 void IntroSetHandPush(int percent, bool hand_point);
 void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
                    bool hand_depth);
+void IntroSetPushRoom(bool on);
 void IntroSetScreen(bwvr::XrScreen* screen);
 void IntroInstall();
 bool IntroFinishFrame();
@@ -199,9 +200,9 @@ void ComfortCameraInstall();
 void VignetteSetMode(int mode);
 // video_view.cpp: the view for videos (video_view.h).
 void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
-                         int marks);
-// head_blinder.cpp: head_blinder.
-void HeadBlinderSetOn(bool on);
+                         int marks, int layers);
+// head_blinder.cpp: head_blinder and head_blinder_objects.
+void HeadBlinderSetOn(bool on, bool objects);
 void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
                             int close_distance, int close_zoom_pct,
                             int cut_degrees, int cut_percent,
@@ -262,6 +263,7 @@ void UiDepthSetAccounting(bool on);
 void UiDepthSetHintMode(int mode);
 void UiDepthSetHintSelfTest(int mode);
 void UiDepthSetHintHandDepth(int on, int test_frame);
+void UiDepthSetHintHandTip(int on);
 void UiDepthSetHintScale(float scale);
 DWORD TextureFilterInstall(int requested_anisotropy);
 void TextureFilterReport();
@@ -433,10 +435,13 @@ int g_blink_ms = 0;
 // The comfort vignette: 0 off, 1 gentle, 2 strong (vignette.cpp).
 int g_comfort_vignette = 0;
 // The view for videos (video_view.cpp): video_view, video_view_down_pct,
-// video_view_fov_deg, video_view_smooth_ms and video_view_marks.
-int g_video_view[5] = {0, 20, 90, 150, 1};
-// The overlay of a head under the land (head_blinder.cpp).
+// video_view_fov_deg, video_view_smooth_ms, video_view_marks and
+// video_view_layers.
+int g_video_view[6] = {0, 20, 90, 150, 1, 1};
+// The overlay of a head under the land, and in a house, a rock or a tree
+// trunk (head_blinder.cpp).
 bool g_head_blinder = true;
+bool g_head_blinder_objects = true;
 int g_zoom_step = 2;  // 0 the game's own, 1 small, 2 medium, 3 large
 // The turn events of a snap turn for the tutorial, and the turn of the game
 // camera about its own focus (comfort_camera.cpp).
@@ -519,6 +524,10 @@ int g_hint_selftest = 0;
 // Hand (draw_hooks.cpp, HandHintMove), and its test key with a frame.
 int g_hint_hand_depth = 1;
 int g_hint_hand_depth_test_frame = 0;
+// hint_hand_tip: 1 puts a tooltip at the Hand beyond the fingertip, on the
+// side away from the palm (docs/ui-layer.md, 15.3). 0 puts it 6 cm to the
+// right of the place of the game.
+int g_hint_hand_tip = 1;
 char g_hint_profile[64] = {0};
 bool g_controller_haptics = true;
 FakeControllerSettings g_fake_controller;
@@ -557,6 +566,7 @@ int g_throw_tree_settle = 1;
 int g_throw_turn = 1;
 int g_throw_land_rest = 1;
 int g_throw_draw = 1;
+int g_throw_arc_objects = 1;
 // The take of an object that comes to rest (throw_physics.cpp).
 int g_catch_rest_guard = 1;
 int g_catch_rest_test = 0;
@@ -703,6 +713,8 @@ bool g_intro_push_3d = true;
 int g_intro_push_radius_cm = 30;
 int g_intro_hand_show = 1;
 bool g_intro_hand_depth = true;
+// In the intro a hand moves orbs only when the player moved it in the room.
+bool g_intro_push_room = true;
 bool g_intro_probe = false;
 // Tests of the desktop runs.
 int g_intro_motion_test_seconds = 0;
@@ -1105,11 +1117,11 @@ void ReadSettings() {
   // THE VIEW FOR VIDEOS (docs/backend.md, "The view for videos"): a 16:9
   // area of the left eye in the window of the game, for a capture on the PC.
   {
-    const char* const keys[5] = {"video_view", "video_view_down_pct",
-                                 "video_view_fov_deg", "video_view_smooth_ms",
-                                 "video_view_marks"};
-    const int defaults[5] = {0, 20, 90, 150, 1};
-    for (int i = 0; i < 5; ++i) {
+    const char* const keys[6] = {"video_view",          "video_view_down_pct",
+                                 "video_view_fov_deg",  "video_view_smooth_ms",
+                                 "video_view_marks",    "video_view_layers"};
+    const int defaults[6] = {0, 20, 90, 150, 1, 1};
+    for (int i = 0; i < 6; ++i) {
       g_video_view[i] = static_cast<int>(
           GetPrivateProfileIntA("bwvr", keys[i], defaults[i], path));
     }
@@ -1138,6 +1150,9 @@ void ReadSettings() {
     // "The head under the land").
     g_head_blinder =
         GetPrivateProfileIntA("bwvr", "head_blinder", 1, path) != 0;
+    // The solids count too: a house, a rock and a tree trunk.
+    g_head_blinder_objects =
+        GetPrivateProfileIntA("bwvr", "head_blinder_objects", 1, path) != 0;
   }
   g_instant_jumps =
       GetPrivateProfileIntA("bwvr", "instant_jumps", 1, path) != 0;
@@ -1321,6 +1336,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "hint_hand_depth", 1, path) != 0 ? 1 : 0;
   g_hint_hand_depth_test_frame = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "hint_hand_depth_test_frame", 0, path));
+  g_hint_hand_tip =
+      GetPrivateProfileIntA("bwvr", "hint_hand_tip", 1, path) != 0 ? 1 : 0;
   {
     FakeControllerSettings& f = g_fake_controller;
     const auto number = [&](const char* key, int fallback) {
@@ -1476,6 +1493,10 @@ void ReadSettings() {
     // the picture of a thrown object, and the picture does not go back to a
     // place behind a guess. 0 gives each substep its time of the flight.
     g_throw_draw = number("throw_draw", 1);
+    // throw_arc_objects: 1 stops the real arc of a thrown object at the box
+    // of the mesh of an object near the Hand, before the game's physics has
+    // the object. 0 stops it at the land only.
+    g_throw_arc_objects = number("throw_arc_objects", 1);
     g_far_grab.throw_law = g_throw_law != 0;
     // far_grab_max_m: a far target is at most this many meters of the room
     // from the head, along the floor. 0 gives no limit.
@@ -1754,6 +1775,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "intro_hand_show", 1, path));
   g_intro_hand_depth =
       GetPrivateProfileIntA("bwvr", "intro_hand_depth", 1, path) != 0;
+  g_intro_push_room =
+      GetPrivateProfileIntA("bwvr", "intro_push_room", 1, path) != 0;
   g_intro_probe = GetPrivateProfileIntA("bwvr", "intro_probe", 0, path) != 0;
   g_fix_unscaled =
       GetPrivateProfileIntA("bwvr", "fix_unscaled", 1, path) != 0;
@@ -1859,8 +1882,8 @@ void StartVrStep() {
     ComfortCameraInstall();
     VignetteSetMode(g_comfort_vignette);
     VideoViewSetOptions(g_video_view[0], g_video_view[1], g_video_view[2],
-                        g_video_view[3], g_video_view[4]);
-    HeadBlinderSetOn(g_head_blinder);
+                        g_video_view[3], g_video_view[4], g_video_view[5]);
+    HeadBlinderSetOn(g_head_blinder, g_head_blinder_objects);
     ScriptCameraSetOptions(g_script_camera, g_script_min_distance,
                            g_script_min_height, g_script_close_distance,
                            g_script_close_zoom, g_script_cut_degrees,
@@ -1908,6 +1931,7 @@ void StartVrStep() {
     UiDepthSetHintScale(g_hint_scale);
     UiDepthSetHintFlat(g_hint_flat);
     UiDepthSetHintHandDepth(g_hint_hand_depth, g_hint_hand_depth_test_frame);
+    UiDepthSetHintHandTip(g_hint_hand_tip);
     UiDepthSetSubtitleLift(g_subtitle_lift);
     UiDepthSetSubtitleDegrees(g_subtitle_degrees);
     // After UiDepthInstall, and before GpuBridgeStart below.
@@ -1947,6 +1971,7 @@ void StartVrStep() {
         ThrowPhysicsSetTake(g_catch_rest_guard != 0, g_catch_rest_test);
         ThrowPhysicsSetCatch(g_catch_at_once);
         ThrowPhysicsSetDraw(g_throw_draw);
+        ThrowPhysicsSetArcObjects(g_throw_arc_objects != 0);
         ThrowPhysicsInstallEarly();
         FarGrabInstall();
         TakeStreamSetOptions(g_take_stream, g_test_keys);
@@ -2042,6 +2067,7 @@ void StartVrStep() {
     IntroSetHandPush(g_intro_hand_push_pct, g_intro_hand_point);
     IntroSetHands(g_intro_push_3d, g_intro_push_radius_cm, g_intro_hand_show,
                   g_intro_hand_depth);
+    IntroSetPushRoom(g_intro_push_room);
     IntroInstall();
     EyeCleanSetOptions(g_eye_clean, g_eye_clean_test, g_eye_clean_test_frame);
     EyeCleanInstall();

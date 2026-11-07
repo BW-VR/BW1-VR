@@ -148,7 +148,9 @@
 #include "village.h"
 #include "village_math.h"
 #include "near_math.h"
+#include "solid_math.h"
 #include "table_math.h"
+#include "throw_math.h"
 #include "throw_physics.h"
 #include "tree_body.h"
 #include "tree_plant_math.h"
@@ -182,6 +184,11 @@ float TabletopViewScale();
 // tabletop.cpp: true while the table or the God view owns the view.
 bool TabletopOwnsView();
 bool TabletopGodOwnsView();
+// head_blinder.cpp: the head point that wants the solids near it, and its
+// bound in world units (head_blinder_objects).
+bool HeadBlinderSolidPoint(float point[3], float* bound);
+// Below: the points that want the solids near them (LatchSolids).
+int SolidPoints(float points[3][3], float bound[3]);
 // head_camera.cpp: the rotation and the position that the scene was drawn
 // from, in the world.
 bool HeadCameraRenderBasis(float basis_out[9], float position_out[3]);
@@ -776,6 +783,7 @@ bool g_near_pick = false;
 float g_near_bound_sq = 0.0f;
 int g_wide_frames = 0;
 uint64_t g_near_offers = 0;
+uint64_t g_solid_offers = 0;
 uint64_t g_kept_offers = 0;
 // The table owned the last frame and its size went to the Hand.
 bool g_table_hand = false;
@@ -3456,6 +3464,32 @@ int __fastcall h_ScreenTest(const void* bounds, void* unused,
         ++g_near_offers;
         HandFeelOffered();
         return result;
+      }
+    }
+  }
+  // THE SOLIDS NEAR THE HANDS AND THE HEAD (LatchSolids): the same test of
+  // the ball round the box, at the middle of each real hand
+  // (hand_object_stop) and at the head (head_blinder_objects). So a house
+  // that the head goes into is in the list too, when the Hand is far from it.
+  if (g_near_pick) {
+    float points[3][3], bound[3];
+    const int wants = SolidPoints(points, bound);
+    const float* box = static_cast<const float*>(bounds);
+    float middle[3], radius = 0.0f;
+    if (wants > 0 &&
+        hand_feel::OfferBall(box + 1, box[7],
+                             reinterpret_cast<const float*>(object + kMeshRows),
+                             at,
+                             *reinterpret_cast<const float*>(object +
+                                                             kObjectScale),
+                             middle, &radius)) {
+      for (int p = 0; p < wants; ++p) {
+        if (hand_feel::OfferGap(middle, radius, points[p]) <= bound[p]) {
+          *under = 1;
+          ++g_near_offers;
+          ++g_solid_offers;
+          return result;
+        }
       }
     }
   }
@@ -9065,7 +9099,11 @@ bool HandDirectGlowFacts(float point[3], float* length, int32_t* mode,
 // made now, from the candidates that the draw of this pass offered. So the
 // glow and the halo of this frame show the object that the next press acts
 // on. The second eye pass draws the same.
+void LatchArcBoxes();
+void LatchSolids();
 void HandDirectChooseNow() {
+  LatchArcBoxes();
+  LatchSolids();
   if (!g_one_target || !g_active || g_hand == nullptr || g_face == nullptr ||
       g_eye != 0) {
     return;
@@ -9845,6 +9883,216 @@ bool HandDirectFeelBody(int index, void** object, float base[3], float* radius,
   return true;
 }
 
+// THE BOXES ON THE ARC OF A THROW (throw_physics.cpp, throw_arc_objects,
+// docs/throw.md, "The objects on the arc"). The mesh of a candidate is good
+// for its frame only, and a release comes in the game's step, so the first
+// eye pass keeps the box of the mesh of each candidate near the Hand while
+// the Hand holds an object. A tree, a forest, a scroll and a body with no box
+// of its mesh are not in the list.
+const int kMaxArcBoxes = 64;
+void* g_arc_objects[kMaxArcBoxes];
+throw_math::Box g_arc_boxes[kMaxArcBoxes];
+int g_arc_count = 0;
+uint64_t g_arc_frame = 0;
+
+// The reach of the list: this many meters of the room from the Hand's point.
+const float kArcBoxMeters = 4.0f;
+
+void LatchArcBoxes() {
+  if (g_eye != 0 || g_arc_frame == g_frame) return;
+  g_arc_frame = g_frame;
+  g_arc_count = 0;
+  if (!g_active || g_hand == nullptr || HandEmpty()) return;
+  void* held = *reinterpret_cast<void* const*>(g_hand + kHandHeld);
+  const float reach = kArcBoxMeters * RoomUnits();
+  for (int i = 0; i < g_candidate_count && g_arc_count < kMaxArcBoxes; ++i) {
+    if (g_candidates[i].object == held) continue;
+    if (!(Distance(g_candidates[i].position, g_target) < reach)) continue;
+    void* object = nullptr;
+    float base[3], radius = 0.0f, height = 0.0f, axis[9], half[3];
+    int kind = -1;
+    if (!HandDirectFeelBody(i, &object, base, &radius, &height, &kind, axis,
+                            half) ||
+        kind != 4) {
+      continue;
+    }
+    throw_math::Box& b = g_arc_boxes[g_arc_count];
+    for (int k = 0; k < 3; ++k) {
+      b.middle[k] = base[k];
+      b.half[k] = half[k];
+    }
+    for (int k = 0; k < 9; ++k) b.axis[k] = axis[k];
+    g_arc_objects[g_arc_count++] = object;
+  }
+}
+
+// For throw_physics.cpp: the boxes that the first eye pass of this frame or
+// of the frame before kept, at most max. The count, 0 when the list is older.
+int HandDirectArcBoxes(void* objects[], throw_math::Box out[], int max) {
+  if (g_arc_frame + 1 < g_frame) return 0;
+  int n = g_arc_count < max ? g_arc_count : max;
+  for (int i = 0; i < n; ++i) {
+    objects[i] = g_arc_objects[i];
+    out[i] = g_arc_boxes[i];
+  }
+  return n;
+}
+
+// THE SOLIDS NEAR THE HANDS AND THE HEAD (hand_land.cpp, hand_object_stop,
+// and head_blinder.cpp, head_blinder_objects. See docs/hand-model.md, "The
+// Hand stops at the land", and solid_math.h). The mesh of a candidate is good
+// for its frame only, and the hands and the head use the solids before the
+// eye passes of the next frame. So the first eye pass keeps the solid of each
+// candidate near a hand or the head:
+//   - a house: the box of the mesh of an Abode, a Creche, a Windmill or a
+//     Workshop,
+//   - a rock: the box of the mesh of a Rock,
+//   - a tree: the trunk of its body (hand_feel_math.h, BodyGapAt).
+// The box of the mesh holds each part of the mesh and the air between them,
+// so only a closed building is a solid. The Village Store (a StoragePit) is
+// an open pit with no roof: its box holds its inside and the air over it,
+// and the game draws a normal view with the head in it. A Graveyard, a
+// TownCentre, a Wonder, a field, a villager, an animal, the Creature, a
+// forest, a scroll and the object in the Hand are not solids either. Neither
+// is a small solid (solid_math::Counts).
+const int kMaxSolids = solid_math::kMostSolids;
+void* g_solid_objects[kMaxSolids];
+solid_math::Solid g_solids[kMaxSolids];
+int g_solid_count = 0;
+uint64_t g_solid_frame = 0;
+uint64_t g_solid_latches = 0;
+uint64_t g_solid_kept = 0;
+// No solid has a radius of more than this, in world units: a house has 4 to
+// 6 units, and the Workshop is smaller than the Village Store (15.5 units).
+const float kSolidFar = 40.0f;
+
+const char* const kSolidClasses[] = {"Abode", "Creche", "Windmill", "Workshop",
+                                     "Rock"};
+
+bool SolidClass(void* object) {
+  const char* name = ClassName(object);
+  for (const char* solid : kSolidClasses) {
+    if (strcmp(name, solid) == 0) return true;
+  }
+  return false;
+}
+
+// The points that want the solids near them, and the bound of each, in
+// world units: the middle of each real hand (hand_land.cpp) and the head
+// (head_blinder.cpp). Once a frame: the screen test asks for each object.
+float g_solid_point[3][3];
+float g_solid_bound[3];
+int g_solid_wants = 0;
+uint64_t g_solid_points_frame = ~0ull;
+
+int SolidPoints(float points[3][3], float bound[3]) {
+  if (g_solid_points_frame != g_frame) {
+    g_solid_points_frame = g_frame;
+    g_solid_wants = HandLandSolidPoints(g_solid_point, g_solid_bound);
+    if (HeadBlinderSolidPoint(g_solid_point[g_solid_wants],
+                              &g_solid_bound[g_solid_wants])) {
+      ++g_solid_wants;
+    }
+  }
+  for (int p = 0; p < g_solid_wants; ++p) {
+    for (int k = 0; k < 3; ++k) points[p][k] = g_solid_point[p][k];
+    bound[p] = g_solid_bound[p];
+  }
+  return g_solid_wants;
+}
+
+void LatchSolids() {
+  if (g_eye != 0 || g_solid_frame == g_frame) return;
+  g_solid_frame = g_frame;
+  g_solid_count = 0;
+  if (!g_active || g_hand == nullptr) return;
+  float points[3][3], bound[3];
+  const int wants = SolidPoints(points, bound);
+  if (wants == 0) return;
+  ++g_solid_latches;
+  void* held = *reinterpret_cast<void* const*>(g_hand + kHandHeld);
+  const float units = RoomUnits();
+  for (int i = 0; i < g_candidate_count && g_solid_count < kMaxSolids; ++i) {
+    void* candidate = g_candidates[i].object;
+    if (candidate == held) continue;
+    // The first cut, before the class and the body: the point of the object
+    // is near a point that wants the solids. No solid has a radius of more
+    // than kSolidFar world units.
+    const float* at = g_candidates[i].position;
+    bool near_point = false;
+    for (int p = 0; p < wants && !near_point; ++p) {
+      const float dx = at[0] - points[p][0], dz = at[2] - points[p][2];
+      const float most = bound[p] + kSolidFar;
+      near_point = dx * dx + dz * dz <= most * most;
+    }
+    if (!near_point) continue;
+    const bool tree = IsTreeObject(candidate);
+    if (!tree && !SolidClass(candidate)) continue;
+    void* object = nullptr;
+    float base[3], radius = 0.0f, height = 0.0f, axis[9], half[3];
+    int kind = -1;
+    if (!HandDirectFeelBody(i, &object, base, &radius, &height, &kind, axis,
+                            half) ||
+        kind != (tree ? 1 : 4)) {
+      continue;
+    }
+    solid_math::Solid s = {};
+    if (tree) {
+      s.kind = solid_math::kTrunk;
+      for (int k = 0; k < 3; ++k) s.middle[k] = base[k];
+      s.radius = near_math::kTrunkShare * radius;
+      s.height = 0.5f * height;
+    } else {
+      s.kind = solid_math::kBox;
+      for (int k = 0; k < 3; ++k) {
+        s.middle[k] = base[k];
+        s.half[k] = half[k];
+      }
+      for (int k = 0; k < 9; ++k) s.axis[k] = axis[k];
+    }
+    if (!solid_math::Counts(s, units)) continue;
+    bool near_one = false;
+    for (int p = 0; p < wants && !near_one; ++p) {
+      near_one = solid_math::Distance(s, points[p]) <= bound[p];
+    }
+    if (!near_one) continue;
+    g_solids[g_solid_count] = s;
+    g_solid_objects[g_solid_count++] = object;
+    ++g_solid_kept;
+  }
+}
+
+// For hand_land.cpp and head_blinder.cpp: the solids that the first eye pass
+// of the frame before kept, at most max. The count, 0 when the list is older.
+int HandDirectSolids(void* objects[], solid_math::Solid out[], int max) {
+  if (g_solid_frame + 1 < g_frame) return 0;
+  const int n = g_solid_count < max ? g_solid_count : max;
+  for (int i = 0; i < n; ++i) {
+    objects[i] = g_solid_objects[i];
+    out[i] = g_solids[i];
+  }
+  return n;
+}
+
+// For the log: the class of a solid that the list has.
+const char* HandDirectSolidClass(void* object) {
+  for (int i = 0; i < g_solid_count; ++i) {
+    if (g_solid_objects[i] == object) return ClassName(object);
+  }
+  return "solid";
+}
+
+// For the report of hand_land.cpp: the first eye passes that kept the
+// solids, the solids that they kept and the objects that went to the pick
+// only for a solid point, since the last call.
+void HandDirectSolidCounts(uint64_t* latches, uint64_t* kept,
+                           uint64_t* offers) {
+  *latches = g_solid_latches;
+  *kept = g_solid_kept;
+  *offers = g_solid_offers;
+  g_solid_latches = g_solid_kept = g_solid_offers = 0;
+}
+
 namespace {
 
 // THE TEST KEY seek_plan, for the desktop runs of one target. A list of
@@ -9918,6 +10166,9 @@ namespace {
 //           the room before the side of the body of the nearest object of
 //           the class of the next entry of seek_feel, within 30 m of the
 //           room, in the view. The hand does not move.
+//   gointo  As gofeel, but the head goes over the land at the middle of the
+//           body of that object, so a head lower than the object is in it
+//           (head_blinder_objects). The hand does not move.
 //   gosea   The God view teleports: the head goes over the land 60 cm of the
 //           room before the nearest point of the sea in the view, within 30
 //           m of the room. The hand does not move.
@@ -9945,6 +10196,8 @@ enum {
   kPlanGoShop, kPlanShop, kPlanTreeBase,
   // The bodies of hand feel and the sea (hand_feel.cpp).
   kPlanFeel, kPlanGoSea, kPlanSea, kPlanGoFeel,
+  // The head into a house (head_blinder.cpp).
+  kPlanGoInto,
   // The fish of a fish farm.
   kPlanFish,
   // Open land for the stop at the land (hand_land.cpp).
@@ -10037,6 +10290,7 @@ int PlanCount() {
                      : n == 4 && strncmp(at, "hold", 4) == 0   ? kPlanHold
                      : n == 4 && strncmp(at, "feel", 4) == 0   ? kPlanFeel
                      : n == 6 && strncmp(at, "gofeel", 6) == 0 ? kPlanGoFeel
+                     : n == 6 && strncmp(at, "gointo", 6) == 0 ? kPlanGoInto
                      : n == 5 && strncmp(at, "gosea", 5) == 0  ? kPlanGoSea
                      : n == 3 && strncmp(at, "sea", 3) == 0    ? kPlanSea
                      : n == 4 && strncmp(at, "fish", 4) == 0   ? kPlanFish
@@ -10354,13 +10608,15 @@ bool PlanPoint(int word, float out[3]) {
     PlanCensus(out, status, units);
     return true;
   }
-  if (word == kPlanGoFeel) {
+  if (word == kPlanGoFeel || word == kPlanGoInto) {
+    const bool into = word == kPlanGoInto;
+    const char* name = into ? "gointo" : "gofeel";
     char cls[48] = "";
     float height_pct = 0.0f, gap_cm = 0.0f;
     const int entry = g_plan_feel_used++;
     if (!FeelEntry(entry, cls, sizeof(cls), &height_pct, &gap_cm)) {
-      ModLog("hand pick    : seek plan: gofeel. The test key seek_feel has no "
-             "entry %d, frame %llu", entry, g_frame);
+      ModLog("hand pick    : seek plan: %s. The test key seek_feel has no "
+             "entry %d, frame %llu", name, entry, g_frame);
       return false;
     }
     const bool any = strcmp(cls, "any") == 0;
@@ -10392,8 +10648,8 @@ bool PlanPoint(int word, float out[3]) {
       }
     }
     if (found < 0) {
-      ModLog("hand pick    : seek plan: gofeel %s. No such object in the view "
-             "within 30 m of the room (%d candidates), frame %llu", cls,
+      ModLog("hand pick    : seek plan: %s %s. No such object in the view "
+             "within 30 m of the room (%d candidates), frame %llu", name, cls,
              g_candidate_count, g_frame);
       return false;
     }
@@ -10403,20 +10659,27 @@ bool PlanPoint(int word, float out[3]) {
     // 50 cm of the room before the side of its body, so the head is not in
     // a house that is larger than the room at a zoom in.
     float back = 0.5f * units;
+    float middle[2] = {at[0], at[2]};
     {
       void* object = nullptr;
       hand_feel::Body b;
       if (HandDirectFeelBody(found, &object, b.base, &b.radius, &b.height,
                              &b.kind, b.axis, b.half)) {
         back += b.radius;
+        middle[0] = b.base[0];
+        middle[1] = b.base[2];
       }
     }
-    const float target[3] = {at[0] - d[0] / flat * back, 0.0f,
-                             at[2] - d[1] / flat * back};
+    float target[3] = {at[0] - d[0] / flat * back, 0.0f,
+                       at[2] - d[1] / flat * back};
+    if (into) {
+      target[0] = middle[0];
+      target[2] = middle[1];
+    }
     const bool went = TabletopGodTeleport(target);
-    ModLog("hand pick    : seek plan: gofeel %s. The nearest one in the view "
+    ModLog("hand pick    : seek plan: %s %s. The nearest one in the view "
            "is %p at %.1f %.1f %.1f, %.1f m of the room from the camera. %s "
-           "%.1f %.1f, frame %llu", cls, g_candidates[found].object, at[0],
+           "%.1f %.1f, frame %llu", name, cls, g_candidates[found].object, at[0],
            at[1], at[2], units > 0.0f ? best / units : 0.0f,
            went ? "The God view teleports: the head goes over the land at"
                 : "The God view does not own the view, so no teleport to",

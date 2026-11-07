@@ -487,6 +487,11 @@ the Hand, which the game puts on the same ray.
   not allow pan nothing until the release.
 - A zoom or a turn during the drag anchors the pan again, with no move.
 
+A desktop run with the test mouse (`hand_run.ps1 -Kind mousepan -Save
+temple`, no controller) shows the pan: the mouse takes the land 1.31 m from
+the head, the grabbed land stays within 0.000 cm of the mouse ray, and the
+view moves only on the frames in which the mouse moves.
+
 ### 5.4 What the game's land drag does
 
 This is the game's own drag with the mouse or with the trigger of the
@@ -630,6 +635,11 @@ and 20 degrees down while it holds. All are steps. The launcher removes these
 keys. After a run, the report has one line, `the held camera moved X units a
 frame on average, Y at most`. A real hand is never quite still, so in the
 headset this line shows the tracking noise times the gain.
+
+`hand_run.ps1 -Kind holdland` holds the grip on the land with still hands:
+the held camera moves 0.0000 units on each of 249 frames. A step of the hand
+of 10 cm up in a second grip moves the ground 10.00 cm up in the room, and
+the still frames after it move nothing.
 
 ### 5.7 The walk with the stick
 
@@ -915,8 +925,20 @@ under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
   and at four points 6 cm of the room around it, and the highest one counts,
   so a steep slope in front of the face counts too. The land is
   `LH3DIsland::GetAltitude`, as for the stop of the Hand at the land
-  (`hand-model.md`, "The Hand stops at the land"). A house, a rock and a tree
-  do not count yet (roadmap, P24).
+  (`hand-model.md`, "The Hand stops at the land").
+- **The solids** (`head_blinder_objects`). A house, a rock and a tree trunk
+  count too, with the solids that stop the Hand (`hand-model.md`, "The
+  Hand stops at the land"): the box of the mesh of a house and of a rock,
+  and the trunk of a tree. The clearance is the least of the height over the
+  land and the distance from the head point to each solid, so the overlay
+  starts 5 cm out of a wall and is opaque in the house. The hook of the
+  screen test of the draw offers each object whose ball round its box is
+  within 15 cm of the room of the head, so the house that the head goes
+  into is in the list also when the Hand is far from it. A solid stays in
+  the list of the blinder while the head is within 15 cm of it, for 600
+  frames at most after the last frame that had it. So a house that the draw
+  stops to offer while the head is in it still counts. A field, a villager,
+  an animal and the Creature do not count.
 - **The strength.** From 5 cm over the land the overlay starts at the edge of
   the view and grows inward along a smooth curve. At the land and under it
   each eye sees only the overlay. The overlay comes in 0.1 s and goes in
@@ -945,12 +967,21 @@ under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land, and the floor of the head is at the height of the head at the recenter pose. 0: the eyes see under the land, and the floor of the head follows the head. The launcher row "Head in the land". The switch "Head blinder" of the debug page |
+| `head_blinder_objects` | 1 | 1: a house, a rock and a tree trunk cover the view as the land does. 0: only the land counts, and the eyes see into a house. The switch "Blinder solids" of the debug page |
 
-The log has one line when the overlay starts, with the height of the head
-over the land and its place on the map, one line when the view is opaque,
-and one line when the overlay is gone, with its time and the lowest place of
-the head. The report of a window counts the times that the overlay showed,
-the opaque frames and the eye passes that drew it.
+The log has one line when the overlay starts, with the clearance of the
+head, what it is near (the land, or the class and the address of a solid)
+and its place on the map. One line when the view is opaque, with the same
+facts. One line when the overlay is gone, with its time and the least
+clearance of the head. The report of a window counts the times that the
+overlay showed, the opaque frames and the eye passes that drew it.
+
+The desktop run of the solids is `village_run.ps1 -Kind headhouse`. At 29.6
+units a meter a house is about 11 cm high. The head goes over the middle of
+a house (the seek word `gointo`), then 55 cm down into its box for 120
+frames, and up again. No desktop run has shown the overlay in a house yet.
+The Village Store is no solid: it is an open pit, and the game draws a
+normal view with the head in it.
 
 ## 6. The Hand
 
@@ -1748,9 +1779,8 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   math test. An advisor goes to a place of the world in a desktop run only
   with a test (`tabletop.md`, "A spirit at a place of the world"). No desktop
   run has the sound.
-- **The mouse pan on the desktop** and the **tutorial events** (section 7)
-  have not run in the game. The numbers and the bits come from the binary.
-  The run is in section 12.
+- **The tutorial events** (section 7) have not run in the game. The
+  numbers and the bits come from the binary. The run is in section 12.
 - **The mouse** pans, zooms, turns and moves the ground. Its Hand still has
   the game's own size, which grows with the distance, and its throw has the
   speeds of the life size scale. These are in `hand_direct.cpp`.
@@ -1782,10 +1812,12 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   the Hand's point with no controller, a hill at the new place of the head,
   the mouse wheel with the look, or the key with a real key. These have the
   math test only.
-- **The walk with the stick** (section 5.7). No run has shown a small
-  push, the edge of the map, a push with the switch for the drag off, a
-  controller that points straight up or down, or the test key with a real
-  key. These have the math test or no test.
+- **The walk with the stick** (section 5.7). With `god_zone=0` a walk
+  (`village_run.ps1 -Kind walk`) stops at the edge of the map at x 5120 and
+  slides along it. No run has shown a small push, a hill within 10 cm of the
+  head, a push with the switch for the drag off, a controller that points
+  straight up or down, or the test key with a real key. These have the math
+  test or no test.
 - **The tutorial** (section 7, "The steps of the tutorial"). A desktop run
   and the log of a session in the headset show the tutorial of Land 1 from
   the walk to the village to the texts after the zoom lesson. On the walk to
@@ -2864,15 +2896,19 @@ the same view: the place stays at the limit while the stick pushes. They
 show the force field of the game at the edge of the zone, which the bumps
 pulse.
 
+With the renderer Direct3D 9 (`backend=dxwrapper\ddraw.dll`) the walk of
+`hand_run.ps1 -Kind zone` stops 50.0 units past the zone, and the game camera
+goes 10 units out of the zone for one update with its sound. The limit
+stopped 252 moves in 1 push, 9 bumps asked for the sound, and the game
+started 0 shakes. In the test save `temple` the zone of the island (x 888 to
+4120, z 1398 to 4379) stops a walk with the stick (`village_run.ps1 -Kind
+walk`).
+
 ### 17.7 Not tested, and what needs the headset
 
-- With the renderer Direct3D 9 (`backend=dxwrapper\ddraw.dll`) the runs
-  drew 73 frames in 48 s and 163 frames in 90 s while a person used the PC,
-  so the recipe did not come to its steps. The zone does not touch the
-  renderer, and no run has shown it with Direct3D 9.
 - The other zones of Land 1 have the same rule. The verify runs show the zone
-  `Land1Zone5.exc` in the test save `temple`, with no push. No run and no
-  session has shown a push at another zone.
+  `Land1Zone5.exc` in the test save `temple`, with no push. No session has
+  shown a push at a zone other than the zone of the Creature select.
 - `Influence::CalculatePlayerRawInfluence` and `CameraModeFollow::Update`
   also call `InsideInclusion`. What they do with the zone is not read.
 - The two other callers of `LH3DCameraChecker::Create`

@@ -948,11 +948,12 @@ when the item names no other script:
 - The Hand's point is 11 cm from the Creature (`seek_plan=creature` and the
   word `slap`). With `hand_wide_creature=0` there is no target, and a grip
   does nothing. With the default the Creature is the target in the wide
-  reach, and a grip of 6 frames puts the leash on.
+  reach, and a grip of 6 frames puts the leash on. A grip that stays closed
+  at 9.7 and at 11.1 cm starts the Creature state, and a grip of 30 frames
+  takes the leash off (`creature_recipe.ps1 -Kind wide`).
 
 **Not proven on the desktop:** a miracle in the wide reach beside a signpost
-(the test miracle floats at the height of the Hand, so the point is in it), a
-grip that stays closed on the Creature in the wide reach, the body of a tree and the game's height in the
+(the test miracle floats at the height of the Hand, so the point is in it), the body of a tree and the game's height in the
 game, the red halo, the Creature as a choice, a scroll that wins over a tree that the point is in, and the hook of
 the leash past its install. A place at 66 to 100 units a meter, the scale of
 the headset, is not run.
@@ -2596,7 +2597,7 @@ in a new game, with the dialog recipe of [god-view.md](god-view.md), section
 gets the Hand (`fake_controller_play_frame=2750`, `aim_queue.ps1` and
 `throw_queue.ps1` in `bwvr/tools/desk`).
 
-**Not shown in a run:** a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
+**Not shown in a run:** a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
 influence, a villager in the sea, the tether and the halo during a take at a
 distance, a take at a distance from a pile that the game deletes (the runs
 make that case with the test key and a pile of the store), a `Field` as a

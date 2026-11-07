@@ -85,6 +85,11 @@ bool ThrowPhysicsCatchFrom(void* object, float matrix[12]);
 // back after a wait. 0: each substep has its time of the flight. With
 // test_keys=1, Ctrl with Scroll Lock goes between the two.
 void ThrowPhysicsSetDraw(int rule);
+// throw_arc_objects: 1 stops the real arc of a thrown object where it goes
+// into the box of the mesh of an object near the Hand, in the time before
+// the game's physics has the object (docs/throw.md, "The objects on the
+// arc"). 0 stops it at the land only.
+void ThrowPhysicsSetArcObjects(bool on);
 // release_fall_cm: a hand that is still at the opening of the grip sets the
 // object down only when its point is this many cm of the room over the land
 // or less. Higher up the object falls. 0 sets it down at each height. With

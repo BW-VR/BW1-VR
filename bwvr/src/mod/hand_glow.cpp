@@ -131,6 +131,8 @@ void OverlayEyeMatrix(float m[12]);
 float TabletopViewScale();
 // head_pose.cpp: units per meter at the life size scale.
 float HeadPoseScale();
+// hand_exact.cpp: the middle of the palm of the mod's hand in the world.
+bool HandExactPalm(float out[3], uint64_t* frame, int32_t* state);
 
 namespace {
 
@@ -304,8 +306,13 @@ struct EyePoint {
   bool valid;
   uint64_t frame;
   float x, y, meters;
+  // The middle of the palm of the mod's hand in this eye (HandExactPalm), for
+  // the tooltip beyond the fingertip (draw_hooks.cpp, hint_hand_tip).
+  bool palm;
+  float palm_x, palm_y;
 };
 EyePoint g_eye_point[2] = {};
+float g_palm_right_x = 0.0f;  // one walk: the palm in the right eye
 
 // The world to camera matrix of each eye pass and the half size of the
 // render, from the last frame that drew: the desktop test word "picture"
@@ -828,6 +835,21 @@ void HandGlowDraw() {
     p.x = at.x;
     p.y = at.y;
     p.meters = p.valid ? at.depth / units_per_meter : 0.0f;
+    {
+      float palm[3];
+      uint64_t palm_frame = 0;
+      int32_t palm_state = 0;
+      GlowDisc palm_at = {};
+      p.palm = HandExactPalm(palm, &palm_frame, &palm_state) &&
+               GlowProject(m, info->half_res_x, info->half_res_y, near_plane,
+                           palm, 0.0f, 0.0f, &palm_at);
+      p.palm_x = palm_at.x;
+      p.palm_y = palm_at.y;
+      if (p.palm && eye == 0 && OneWalkActive() && palm_at.depth > 0.0f) {
+        g_palm_right_x = palm_at.x +
+                         OneWalkShiftPerRhw() * near_plane / palm_at.depth;
+      }
+    }
     // ONE WALK (one_walk.cpp). The right eye has no pass of its own. Its
     // point and its camera are those of the left eye, moved by the disparity
     // of the depth (one_walk_math.h): x moves by per_rhw * near / depth, and
@@ -839,6 +861,7 @@ void HandGlowDraw() {
       if (right.valid && at.depth > 0.0f) {
         right.x += per_rhw * near_plane / at.depth;
       }
+      if (right.palm) right.palm_x = g_palm_right_x;
       for (int i = 0; i < 12; ++i) g_eye_matrix[1][i] = m[i];
       if (info->half_res_x > 0.0f) {
         g_eye_matrix[1][9] += per_rhw * near_plane / info->half_res_x;
@@ -985,6 +1008,19 @@ bool HandGlowEyePoint(int eye, float* x, float* y, float* meters) {
   *x = p.x;
   *y = p.y;
   *meters = p.meters;
+  return true;
+}
+
+// For draw_hooks.cpp: the middle of the palm of the mod's hand in this eye,
+// from the same pass as HandGlowEyePoint. False when the mod does not draw
+// its hand, or the palm is not in the picture.
+bool HandGlowEyePalm(int eye, float* x, float* y) {
+  float hx = 0.0f, hy = 0.0f, meters = 0.0f;
+  if (!HandGlowEyePoint(eye, &hx, &hy, &meters)) return false;
+  const EyePoint& p = g_eye_point[eye];
+  if (!p.palm) return false;
+  *x = p.palm_x;
+  *y = p.palm_y;
   return true;
 }
 

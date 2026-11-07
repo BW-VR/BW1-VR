@@ -42,9 +42,11 @@
 #                gesture_panel=0 and eye pictures of the corner, then
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
-# throwlive, throwhouse, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, walk, wall, pinch, aimsign,
-# aimmiracle, aimpast, tglow, tooltip) have a comment at their steps below.
+# throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
+# turn, fartake, fartotem, choice, look, book, controls, walk, wall,
+# housestop, headhouse, pinch,
+# aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
+# below.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -61,6 +63,7 @@ param(
     [string]$Go = '1860,2580|1840,2600|1880,2610|1850,2670|1790,2650|1900,2660',
     [int]$Lines = 160,
     [string]$Save = 'temple',
+    [string]$Parts = '',
     [switch]$NewGame
 )
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -218,6 +221,34 @@ if ($Kind -eq 'totem') {
                  'x@1540+4 shot@1560+1'
     }
     $keys = "$keys;spell_book_test_save=16"
+} elseif ($Kind -eq 'controls') {
+    # The page Controls of the settings window (bwvr/docs/ui-layer.md, "The
+    # page Controls", and bwvr/docs/controllers.md, "The map of the
+    # buttons"). The welcome page opens 3 s after the controllers can act
+    # (welcome_done=0), and the trigger presses its button Settings. In the
+    # settings window the trigger presses the tab Controls (tab3), then the
+    # right arrow of the row "Left Y" (right5): Y takes the job of the left
+    # stick click (the recenter hold), and the stick click takes the ring.
+    # The ray rests on the row "Right B" (row9), so the drawing lights B and
+    # the note shows. Close closes the window. Then a hold of the left stick
+    # click opens the ring, and a hold of Y recenters the view. Each new
+    # picture of the window is saved (debug_window_test_save).
+    # -Parts gives other parts of the window for the word aimdebug, and
+    # -Steps other steps. For the defaults: -Set "button_map_other=1324"
+    # -Parts "tab3 trackend row16 row11 close" and the steps of the comment
+    # in the desk README. -Set "hint_profile=valve/index_controller" draws
+    # Index controllers, and -Set "hint_card_style=0" the dark look.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Parts -eq '') { $Parts = 'tab3 right5 row9 close' }
+    if ($Steps -eq '') {
+        $Steps = 'aimdebug@1400+1 trigger@1410+4 aimdebug@1460+1 trigger@1470+4 ' +
+                 'aimdebug@1520+1 trigger@1530+4 aimdebug@1580+1 ' +
+                 'aimdebug@1680+1 trigger@1690+4 lstick_click@1760+60 y@1900+200'
+    }
+    # test_frame_rate=60: the frames of the steps count for a game at 60
+    # frames a second, also with the renderer Vulkan.
+    $keys = "$keys;welcome_done=0;welcome_test_parts=settings;debug_test_parts=$Parts;debug_window_test_save=12;test_frame_rate=60"
 } elseif ($Kind -eq 'look') {
     # A villager that a script turns to the camera (bwvr/docs/village.md, "A
     # villager that a script turns to the player"). In the test save "temple"
@@ -276,7 +307,7 @@ if ($Kind -eq 'totem') {
                  'shot@1750+1 shot@1950+1'
     }
     $keys = "$keys;throw_log=1"
-} elseif ($Kind -eq 'throwhouse' -or $Kind -eq 'throwhousefast') {
+} elseif ($Kind -in 'throwhouse', 'throwhousefast', 'throwhouselow') {
     # A rock that falls onto a house (bwvr/docs/throw.md, "The damage",
     # Abode::ReactToPhysicsImpact). The God view goes before the Village
     # Store, the hand goes to the height of the head, and the word "aimfar"
@@ -289,10 +320,11 @@ if ($Kind -eq 'totem') {
     # the Hand hangs about 7 units toward -x from the Hand's point, so it is
     # then about 37 units (80 cm of the room) over the roof. The grip opens
     # with a still hand, higher than release_fall_cm: the rock falls onto
-    # the roof. A throw down from a lower place does not touch the house: its
-    # real arc meets the land before the game's physics has the rock (0.1 to
-    # 0.2 s after the release), and the mod puts the rock on its arc at the
-    # land. Then the Hand's point goes 2 cm of the room beside the wall of
+    # the roof. A throw down from a lower place meets the house on its real
+    # arc before the game's physics has the rock (0.1 to 0.2 s after the
+    # release). With throw_arc_objects=1 the arc stops at the box of the
+    # house, and the line "The real arc meets the box of the Abode" says so.
+    # Then the Hand's point goes 2 cm of the room beside the wall of
     # the house (the second "feel"), and the log has the card of the hand
     # there. The head looks 25 degrees down and not to the side, so the
     # house is in the view. Eye pictures of the house before and after the
@@ -303,7 +335,18 @@ if ($Kind -eq 'totem') {
     # about 7.5 m/s down and toward the head. That throw moves the rock about
     # 0.75 units toward -x for each unit of the fall, so the Hand's point
     # goes 78 cm of the room past the middle of the house.
-    $fast = $Kind -eq 'throwhousefast'
+    #
+    # -Kind throwhouselow: the throw of throwhousefast from a low place, the
+    # Hand's point at 300 percent of the height of the house and 44 cm of the
+    # room past its middle. The rock is about 5 units over the roof at the
+    # release, and the real arc meets the box of the house after about 0.01
+    # s, before the game's physics has the rock (bwvr/docs/throw.md, "The
+    # objects on the arc"). With throw_arc_objects=1 the log has "meets the
+    # box of the Abode ... before the land" and a first contact "(an
+    # object)", and the roof breaks. Compare with -Set "throw_arc_objects=0".
+    # A fall from a still hand does not give this case: the rock does not
+    # meet the roof before the game has it.
+    $fast = $Kind -in 'throwhousefast', 'throwhouselow'
     if ($Plan -eq '') { $Plan = $(if ($fast) { 'gostore,go,feel,down,feel' } else { 'gostore,go,feel,feel' }) }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 66 }
@@ -314,9 +357,10 @@ if ($Kind -eq 'totem') {
                  $(if ($fast) { 'seek@1379+1 ' } else { '' }) +
                  'shot@1382+1 shot@1400+1 shot@1420+1 shot@1440+1 shot@1500+1 seek@1600+1 shot@1620+1 shot@1700+1'
     }
-    $gap = $(if ($fast) { '-78' } else { '-19.6' })
+    $gap = $(if ($Kind -eq 'throwhouselow') { '-44' } elseif ($fast) { '-78' } else { '-19.6' })
+    $height = $(if ($Kind -eq 'throwhouselow') { '300' } else { '1100' })
     $keys = "fake_head_pitch=-25;$keys;far_test_aim_class=3;seek_step_cm=20;" +
-            "seek_go=1810.8,2680.1;seek_feel=house,1100,$gap|house,50,2;throw_log=1"
+            "seek_go=1810.8,2680.1;seek_feel=house,$height,$gap|house,50,2;throw_log=1"
 } elseif ($Kind -eq 'throwpile') {
     # Wood thrown into the pile of the Village Store. The grip takes wood
     # from the pile and opens (the bundle stays in the Hand), as in -Kind
@@ -521,6 +565,50 @@ if ($Kind -eq 'totem') {
                  'seek@970+1 seek@1050+1 shot@1080+1 seek@1130+1 shot@1160+1 seek@1210+1 shot@1240+1'
     }
     $keys = "$keys;seek_feel=house,50,0|house,50,-1.5|StoragePit,50,0"
+} elseif ($Kind -eq 'housestop') {
+    # The Hand stops at the wall of a house (bwvr/docs/hand-model.md, "The
+    # Hand stops at the land"). Two zoom steps in (44.4 units for each
+    # meter). The God view goes before the Village Store (gostore), then 50
+    # cm before the side of the nearest house (gofeel), and one more zoom
+    # step in (29.6 units for each meter, so a house is about 11 cm high).
+    # The Hand's point then goes to the side of that house across the view
+    # (the fourth number 1 of seek_feel), at 70 percent of its height: 6 cm
+    # out of the wall, then 2 cm and 5 cm in the box, then 6 cm out again.
+    # At 3 cm out the hand of the fake controller already touches the box.
+    # An eye picture at each place: with hand_object_stop=1 the drawn hand
+    # stays at the wall in the pictures in the box. The lines "hand land"
+    # have the touch, the face of the box, each change of the push and the
+    # end of the touch. Compare with -Set "hand_object_stop=0". Give it
+    # -Set "backend=dxwrapper\ddraw.dll" for the eye pictures.
+    if ($Plan -eq '') { $Plan = 'gostore,gofeel,feel,feel,feel,feel' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 55 }
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 seek@1000+1 stick_up@1040+10 ' +
+                 'seek@1090+1 shot@1120+1 seek@1160+1 shot@1190+1 seek@1230+1 shot@1260+1 seek@1300+1 shot@1330+1'
+    }
+    $keys = "$keys;seek_feel=house,50,0|house,70,6,1|house,70,-2,1|house,70,-5,1|house,70,6,1"
+} elseif ($Kind -eq 'headhouse') {
+    # The head blinder in a house (bwvr/docs/god-view.md, "The head under the
+    # land"). Two zoom steps in (44.4 units for each meter). The God view
+    # goes before the Village Store (gostore), then 50 cm before the side of
+    # the nearest house (gofeel), one more zoom step in (29.6 units for each
+    # meter, so a house is about 11 cm high), and then the head goes over the
+    # middle of the nearest house (gointo), about 62 cm over the land. The
+    # word "lean" puts the fake head 55 cm lower for 120 frames, into the box
+    # of the house, and then the head comes up again. Eye pictures over the
+    # house, two in it and one after it. The lines "head blinder" have the
+    # start of the overlay, the house, the opaque view and the end. Compare
+    # with -Set "head_blinder_objects=0". Give it
+    # -Set "backend=dxwrapper\ddraw.dll" for the eye pictures.
+    if ($Plan -eq '') { $Plan = 'gostore,gofeel,gointo' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 50 }
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 seek@1000+1 stick_up@1040+10 ' +
+                 'seek@1090+1 shot@1120+1 lean@1160+120 shot@1200+1 shot@1250+1 shot@1330+1'
+    }
+    $keys = "$keys;seek_feel=house,50,0|house,50,0;fake_head_up_cm=-55"
 } elseif ($Kind -eq 'pinch') {
     # A small rock in the pinch at a change of the zoom (bwvr/docs/hand-model.md,
     # "The pinch"). Before the Village Store no rock is within 2 m of the
@@ -697,6 +785,12 @@ if ($Kind -eq 'walk') {
 if ($Kind -eq 'wall') {
     $pattern = '^hand pick    : seek plan|^hand feel    : (the fingers|a finger|the \w+ \S+ has the box)|^haptics      : (?!\d)'
 }
+if ($Kind -eq 'housestop') {
+    $pattern = '^hand pick    : seek plan|^hand land    :|^hand feel    : (the fingers|the \w+ \S+ has the box)|^haptics      : surface'
+}
+if ($Kind -eq 'headhouse') {
+    $pattern = '^hand pick    : seek plan|^head blinder :|^hand land    : (hand_object_stop|this window a solid)'
+}
 if ($Kind -eq 'pinch') {
     $pattern = '^hand pick    : seek plan|^hand feel    : the Hand holds|^god view     : zoomed'
 }
@@ -716,9 +810,19 @@ if ($Kind -eq 'book') {
     $pattern = '^spell book   :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +
                '^controllers  : (the fake x|the word book|the first face button)|^haptics      : (cast|refused)|^hand         : state'
 }
+# The hint cards of this hand go in the list: the left hand for the page
+# Controls, which moves the jobs of the left controller.
+$hand = 'right'
+if ($Kind -eq 'controls') {
+    $pattern = '^controls     :|^settings     :|^hints        : the pointing hand|' +
+               '^controllers  : (the (left|right) controller (is|has)|the new map|button_map|.*recenters the view|the word aimdebug)|' +
+               '^ring         : the ring (opens|closes|does not)|^spell book   : the book (opens|closes)'
+    $hand = 'left'
+}
 $cards = @{}
-Get-Content $log | Where-Object { $_ -match $pattern -or $_ -match '^hint card    : frame \d+, the card of the right hand: (.*?)\. \d' } | ForEach-Object {
-    if ($_ -match '^hint card    : frame (\d+), the card of the right hand: (.*?)\. \d') {
+$card = "^hint card    : frame (\d+), the card of the $hand hand: (.*?)\. \d"
+Get-Content $log | Where-Object { $_ -match $pattern -or $_ -match $card } | ForEach-Object {
+    if ($_ -match $card) {
         # One line for each new text of the card.
         $text = $Matches[2] -replace '87\d\d Belief Left', 'N Belief Left'
         if (-not $cards.ContainsKey($text)) { $cards[$text] = 1; "card @$($Matches[1]): $text" }

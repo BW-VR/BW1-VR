@@ -130,6 +130,7 @@ bool CutsceneWindowAdvisorBatch(int eye, const void* verts, uint32_t count,
 // and its depth in meters of the room. False while the controller does not
 // place the Hand.
 bool HandGlowEyePoint(int eye, float* x, float* y, float* meters);
+bool HandGlowEyePalm(int eye, float* x, float* y);
 
 // target_glow.cpp: a batch of the world with the vertex format 0x1C4. The
 // vertices of a target of the Hand get their glow. caller is for the log.
@@ -1400,8 +1401,23 @@ int g_tooltip_flat_count = 0;
 // kHintHandSideCm to the right of the game's place. ui_scale_pct,
 // hint_scale_pct and hint_flat do not change it. With the mouse, nothing of
 // this runs.
+//
+// BEYOND THE FINGERTIP (hint_hand_tip=1). The move to the right does not
+// keep a label clear of the index finger: the finger lies from the point
+// back to the palm, and in the picture it can go to the right. The mod
+// knows the palm of its hand. So the left eye puts the tooltip on the side
+// of the point away from the palm, kHintTipGapCm past the tip
+// (controller_math.h, HintBeyondTip), and the right eye keeps that place
+// from its own Hand's point. With no palm (the game's hand mesh shows), the
+// tooltip has the place of hint_hand_tip=0.
 const float kHintHandCm = 2.5f;
 const float kHintHandSideCm = 6.0f;
+const float kHintTipGapCm = 1.5f;
+// The palm nearer to the tip than this in the picture: the finger points
+// along the view.
+const float kHintTipLeastCm = 2.0f;
+int g_hint_hand_tip = 1;
+uint64_t g_tooltips_beyond_tip = 0;
 struct TooltipHand {
   uint32_t key;
   float offset[2];  // the top left of the first batch less the Hand's point
@@ -1672,7 +1688,7 @@ void HintLog(const char* what, const wchar_t* text, float x0, float x1,
 // scale and the place at the Hand for this tooltip in this eye. x and y are
 // the top left of the batch, and height its height in pixels. False with the
 // mouse, outside the eye passes, or when a value is not usable.
-bool TooltipAtHand(float x, float y, float height) {
+bool TooltipAtHand(float x, float y, float width, float height) {
   if (g_eye < 0 || g_eye > 1) return false;
   float hx = 0.0f, hy = 0.0f, meters = 0.0f;
   if (!HandGlowEyePoint(g_eye, &hx, &hy, &meters)) return false;
@@ -1696,6 +1712,32 @@ bool TooltipAtHand(float x, float y, float height) {
   const float room_px = focal * 0.01f / meters / s;  // one cm, before s
   g_tooltip_offset[0] = x - hx + kHintHandSideCm * room_px;
   g_tooltip_offset[1] = y - hy;
+  float px = 0.0f, py = 0.0f;
+  const bool beyond =
+      g_hint_hand_tip != 0 && HandGlowEyePalm(g_eye, &px, &py);
+  if (beyond) {
+    const float tip[2] = {hx, hy};
+    const float palm[2] = {px, py};
+    const float cm = room_px * s;  // one cm as it shows
+    float corner[2];
+    controller_math::HintBeyondTip(tip, palm, s * width, s * height,
+                                   kHintTipGapCm * cm, kHintTipLeastCm * cm,
+                                   corner);
+    g_tooltip_offset[0] = (corner[0] - hx) / s;
+    g_tooltip_offset[1] = (corner[1] - hy) / s;
+    if (g_eye == 0) ++g_tooltips_beyond_tip;
+    if (g_eye == 0 && HintSample()) {
+      ModLog("ui hint      : frame %llu eye %d, the tooltip goes beyond the "
+             "fingertip: the palm is at %.0f %.0f and the tip at %.0f %.0f, so "
+             "the box of %.0f by %.0f px goes %.1f cm past the tip, away from "
+             "the palm (hint_hand_tip=1)", g_ui_frame, g_eye, px, py, hx, hy,
+             s * width, s * height, kHintTipGapCm);
+    }
+  } else if (g_hint_hand_tip != 0 && g_eye == 0 && HintSample()) {
+    ModLog("ui hint      : frame %llu eye %d, the tooltip goes %.0f cm to the "
+           "right: the mod does not draw its hand, so the palm is not known",
+           g_ui_frame, g_eye, kHintHandSideCm);
+  }
   int found = -1;
   for (int i = 0; i < g_tooltip_hand_count; ++i) {
     if (g_tooltip_hand[i].key == g_tooltip_key) found = i;
@@ -1746,7 +1788,8 @@ bool TooltipIn(void* verts, uint32_t fvf, uint32_t count) {
     g_tooltip_ax = (x_low + x_high) * 0.5f;
     g_tooltip_ay = (y_low + y_high) * 0.5f;
     g_tooltip_dx = 0.0f;
-    g_tooltip_at_hand = TooltipAtHand(x_low, y_low, y_high - y_low);
+    g_tooltip_at_hand =
+        TooltipAtHand(x_low, y_low, x_high - x_low, y_high - y_low);
     const float left = g_tooltip_ax + (x_low - g_tooltip_ax) * g_ui_scale;
     if (g_hint_flat && g_eye == 0) {
       float known = 0.0f;
@@ -3069,6 +3112,16 @@ const char* HintHandDepthText(int on) {
 }
 }  // namespace
 
+void UiDepthSetHintHandTip(int on) {
+  g_hint_hand_tip = on != 0 ? 1 : 0;
+  ModLog("ui depth     : hint_hand_tip=%d, %s", g_hint_hand_tip,
+         g_hint_hand_tip != 0
+             ? "a tooltip at the Hand goes beyond the fingertip, on the side "
+               "away from the palm"
+             : "a tooltip at the Hand goes 6 cm to the right of the place of "
+               "the game");
+}
+
 void UiDepthSetHintHandDepth(int on, int test_frame) {
   g_hint_hand_depth = on != 0 ? 1 : 0;
   g_hint_hand_depth_test_frame = test_frame;
@@ -3280,11 +3333,14 @@ void UiDepthReportHelp() {
   }
   if (g_tooltips_kept > 0 || g_tooltips_dropped > 0) {
     ModLog("ui depth     : %llu tooltips drawn, %llu second copies skipped, "
-           "%llu at the Hand of the controller", g_tooltips_kept,
-           g_tooltips_dropped, g_tooltips_at_hand);
+           "%llu at the Hand of the controller, %llu of them beyond the "
+           "fingertip in the left eye (hint_hand_tip=%d)", g_tooltips_kept,
+           g_tooltips_dropped, g_tooltips_at_hand, g_tooltips_beyond_tip,
+           g_hint_hand_tip);
     g_tooltips_kept = 0;
     g_tooltips_dropped = 0;
     g_tooltips_at_hand = 0;
+    g_tooltips_beyond_tip = 0;
   }
   if (g_tooltips_to_card > 0) {
     ModLog("ui depth     : %llu tooltip calls went to the hint card and did "

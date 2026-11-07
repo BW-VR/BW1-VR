@@ -67,7 +67,8 @@ The mod has a window of the most used settings in the headset
 form: the value as a number, in the section `[bwvr]`. So the launcher shows
 a change of the headset the next time it opens, and a save of the launcher
 keeps the keys that it does not offer (`recenter_hold`, `teleport`,
-`move_stick_speed_cm`, `subtitle_card`, `welcome_done`). The test keys
+`move_stick_speed_cm`, `subtitle_card`, `welcome_done`, and the map of the
+buttons of the page Controls: `button_map_hand`, `button_map_other`). The test keys
 `welcome_test_save` and `welcome_test_parts` go with each save, as the other
 test keys do.
 
@@ -225,7 +226,7 @@ where the parts are.
 | --- | --- | --- |
 | Play mode | God view | Key `play_mode`, a value and not an index. 4 God view: the land is at your waist, so your hands can reach it, with motion controllers or with the mouse (see `god-view.md`). 1 Stereoscopic window: a 3D screen in front of you, and your head does not move the camera. 3 Tabletop (test): the island is a model on a table in front of you (see `tabletop.md`). A window that follows the head is mode 2, which the launcher does not offer. An ini with `play_mode=0` gets the God view. |
 | Intro in stereo | off | The Lionhead logo at the start shows in 3D around you. The view goes along the camera path of the game and does not turn. The menu button skips it. It is a test: no headset session has checked it. Key `intro_vr`. The key `intro_motion` chooses the motion, and the launcher has no row for it. See `intro.md`. |
-| View for videos | off | Key `video_view`. The game window on the PC shows a 16:9 part of the left eye, for a capture with OBS while the headset plays. The video has a smoothed head, and faint corner marks in the headset show its part. It needs the Vulkan renderer (`backend.md`, "The view for videos") |
+| View for videos | off | Key `video_view`. The game window on the PC shows a 16:9 part of the left eye, for a capture with OBS while the headset plays. The video has a smoothed head, and faint corner marks in the headset show its part. The cards, the subtitles, the ring and the panels of the headset are in the video, where the left eye sees them (`video_view_layers`). It needs the Vulkan renderer (`backend.md`, "The view for videos") |
 | Video lower by | 20% | A slider from 0 to 40 in steps of 5. Key `video_view_down_pct`: how far the middle of the video is below the middle of the view, in percent of the height of the view |
 | Cut scenes | In a window | Key `cutscene_immersive`, a value. 0 In a window: a cut scene plays on the screen of the cut scene window (`cutscene-window.md`). 1 Around you: no window, and the camera of the game moves the player with all its motion (`script_camera=0`). A video of the game still plays on the screen (`cutscene_video_window`). |
 
@@ -244,7 +245,7 @@ move the camera in steps.
 | Move with the other stick | Head direction | Key `move_stick`, a value. In the God view the stick of the other hand (the left stick, or the right stick of a left handed player) moves you over the land while you push it, and you stop when you let it go. 1 Head direction: forward is where the head faces. 2 Controller direction: forward is where that controller points. 0 Off: the stick does not move you. A walk with a stick makes some players ill, so the row has Off (`god-view.md`, section 5.7). The key `move_stick_speed_cm` sets the speed, and the launcher has no row for it. |
 | Walk follows the land | On | Key `move_stick_follow_land`, a value. 1 On: while you move with the left stick, the height of the view follows the land under the head through a smooth filter, so the land stays at the same height below the hands. A long hill moves the view, a small bump does not, and the view moves only while the stick is pushed. 0 Off: the view keeps its height (`god-view.md`, section 5.7). |
 | Comfort vignette | Off | Key `comfort_vignette`, a value. 0 Off. 1 Gentle. 2 Strong. The edges of the view go dark while the player moves with a control: the walk with the stick, a zoom, a snap turn, a teleport and the grab of the world. A faster move gives a darker edge. Gentle is clear to 35 degrees from the middle of the eye, and strong is clear only to 22 degrees and black from 45 degrees (`god-view.md`, section 5.8). |
-| Head in the land | Cover the view | Key `head_blinder`, a value. 1 Cover the view: when the head goes into the land, a gold and red overlay fills the view, so the player does not see under the land. It starts at the edge of the view 5 cm over the land, and the view is opaque at the land and under it. 0 Off: the eyes see under the land (`god-view.md`, section 5.9). |
+| Head in the land | Cover the view | Key `head_blinder`, a value. 1 Cover the view: when the head goes into the land, a house or a rock, a gold and red overlay fills the view, so the player does not see under the land or into the house. It starts at the edge of the view 5 cm over the land, and the view is opaque at the land and under it. The house and the rock have their own key, `head_blinder_objects`, which the launcher does not show. 0 Off: the eyes see under the land (`god-view.md`, section 5.9). |
 | Blink when you jump or turn | off | Key `blink`, index 0 to 2: off, short (0.1 seconds), long (0.2 seconds). Black after a jump, a turn and a story camera cut. |
 
 ### Controllers
@@ -252,6 +253,7 @@ move the camera in steps.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Card look | Scroll | Key `hint_card_style`, a value. 1 Scroll: each hint card is a parchment scroll with dark letters, and the button word is on a wax seal. The spell book and the keyboard in the headset are pages of the same parchment, and each item of the ring is a wax seal. 0 Plain: dark cards with white letters (`controller-hints.md`, 9.11, `miracles.md`, "The spell book", `controllers.md`, 10.4, and `ui-layer.md`, section 21). |
+| Button pictures on the cards | on | Key `hint_card_pictures`. 1: each line of a button on a hint card has a small picture of the controller with that button lit, beside the button word. 0: the button word only (`controller-hints.md`, 9.13). |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |
 | Trail for gestures | on | Key `gesture_trail`. While you hold the draw button and draw a gesture, a gold ribbon follows the tip of the index finger. It fades after 1.5 s and goes out when the button goes up (`miracles.md`, "The trail at the fingertip"). |
 | Glow on the rays | on | Key `ray_glow`. The ray of the menu, the tether of the far grab and the arc of the teleport get a soft glow and a light that runs along them from the hand (`hand-model.md`, "The glow ribbons"). |

@@ -1090,6 +1090,7 @@ default. Each control has one job, and one button opens the game menu.
 | `zoom_step` | 2 | 5.4 |
 | `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it does (`god-view.md`, section 5.8). The switch "Menu turn" of the debug page. Not in the launcher |
 | `recenter_hold` | 1 | 1: a hold of 1 s of the stick click of the hand that does not point, with the stick at rest, recenters the view. 2: the stick click of the pointing hand. 0: no hold recenters (`god-view.md`, section 5.8). The switch "Recenter hold" of the debug page. Not in the launcher |
+| `button_map_hand`, `button_map_other` | 1234, 1234 | The map of the buttons (5.7). The page Controls of the settings window writes them. Not in the launcher |
 
 The other keys of the Hand (the reach, the size, the throw, the Creature) are
 in `hand.md`, `throw.md` and `creature.md`. The keys of the grab of the world
@@ -1240,8 +1241,72 @@ of the right hand points. The base pose of each hand is on the side of its
 controller. So each recipe runs with the left hand as it runs with the right
 hand.
 
+`hand_run.ps1 -Kind left` shows the left controller as the Hand and the
+game's Hand as a left hand. The word `menu` (the left controller with
+`left_hand=1`) sends Esc and opens the Main Menu, and `lmenu` sends nothing.
+A second press does not close the Main Menu: the game does not close it with
+Esc.
+
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
+
+### 5.7 The map of the buttons
+
+**The kind of a controller.** `ControllersFrame` reads the interaction
+profile of each controller each frame. At a change, the log names its kind
+(`button_map::KindOfProfile`) and the buttons that the kind gives to the
+jobs:
+
+| Kind | Profile | The buttons for the jobs |
+| --- | --- | --- |
+| Quest Touch | `oculus/touch_controller`, the fake controller, no profile yet, any other profile | A and B, or X and Y, the stick click, and the menu button of the left controller |
+| Index | `valve/index_controller` | A, B, the stick click |
+| Vive wand | `htc/vive_controller` | the pad click, the menu button |
+| Windows Mixed Reality | `microsoft/motion_controller` | the stick click, the menu button |
+| generic | `khr/simple_controller` | the menu button |
+
+**The slots.** Each job of 5.1 reads one of four buttons of a controller:
+the first face button, the second face button, the stick click or the menu
+button. These are the four slots. The map gives each slot a button of the
+same controller. The map of the controller of the Hand and the map of the
+controller of the other hand are apart, so a job stays with its hand when
+the Hand changes sides (5.6).
+
+**The map** is a number of four digits, one for each button in the order
+first face button, second face button, stick click, menu button. Each digit
+is the slot that the button gives, from 1 to 4. 1234 gives each slot its own
+button. 2134 gives the job of B to A and the job of A to B. After the read of
+the hands, `MapButtons` puts each button into its slot of `g_hands`, so each
+reader of the buttons (the teleport, the gesture, the ring, the spell book,
+Esc, the recenter hold, the closes of the windows, the pulses) sees the map
+with no change of its own. The pose, the trigger, the grip and the stick do
+not change.
+
+- A new map waits until each of the four buttons of both controllers is up,
+  so no press goes to the wrong job.
+- A number that is not a map of the four buttons (each digit from 1 to 4 one
+  time) gives 1234, and the log says so.
+- A map that moves a button that the controller does not have, or the pad
+  click of a Vive wand, acts as 1234 on that controller, and the log says so.
+  The pad of a wand turns and zooms only while it is clicked (`StickLive`),
+  so the pad and its click are one control.
+- The trigger, the grip and the sticks stay with their jobs. The trigger and
+  the grip of the Hand are the two buttons of the game, and the grip holds
+  with a closed hand. The grip of the other hand grabs the land. A stick
+  pushes in a direction. The trigger of the other hand chooses an item of
+  the ring with `button_layout=0`. `controller_swap_buttons` swaps the
+  trigger and the grip of the Hand.
+
+The page Controls of the settings window makes the map (`ui-layer.md`,
+24.6). The hint words follow it (`controller-hints.md`, 8.3).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `button_map_hand` | 1234 | The map of the buttons of the controller of the Hand. 1234: each button has its job as made |
+| `button_map_other` | 1234 | The map of the buttons of the controller of the other hand |
+
+The scripted controller presses the buttons before the map: the word `y`
+with `button_map_other=1324` is a hold of the recenter.
 
 ## 6. Risks and known limits
 
@@ -2055,7 +2120,10 @@ left arrow. The table marks that line as a line of the ring only.
 
 **The debug pages of the ring** (`debug_window=0`). A link item goes to its
 page after 0.45 s with the hand on it, or at once with the trigger, as
-`More` does. A release on a link chooses nothing.
+`More` does. A release on a link chooses nothing. The recipe in the header
+of `temple_run.ps1` goes from page 2 to the groups, to Render and to "One
+walk", and each link changes the page 27 frames (0.45 s) after the hand comes
+to it.
 
 | Page | Items |
 | --- | --- |
@@ -2194,8 +2262,10 @@ the files of a session (`eye` and `xr`) and the note on the card.
 
 The item `settings` of page 2 opens the settings window: the debug window of
 10.8 with the settings that a player changes most, in the words of the
-launcher, in three tabs (Moving, Hands, Cards). A change writes its key into
-`bwvr.ini` at once, and most settings act at once. The welcome page shows one
+launcher, in three tabs (Moving, Hands, Cards), and the tab Controls: a
+drawing of the controllers of the player and a job for each button (5.7). A
+change writes its key into `bwvr.ini` at once, and most settings act at
+once. The welcome page shows one
 time, at the first start: two lines about the mod, three controls, and the
 buttons Settings and Play. The ray and the trigger of the pointing hand, B
 and the menu button work as on the debug window, and the word `aimdebug` of

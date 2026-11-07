@@ -233,9 +233,10 @@ const Setting kSettings[] = {
      "eye, so that OBS or a different capture tool can record it while you "
      "play in the headset. The video turns smoothly when your head shakes. "
      "Faint corner marks in the headset show the part that the video "
-     "records, and the video does not show them. Cards, the subtitles, the "
-     "ring and the menu panels are not in the video. It needs the Vulkan "
-     "renderer. It costs a little frame time."},
+     "records, and the video does not show them. The cards, the subtitles, "
+     "the ring and the menu panels are in the video, where your left eye "
+     "sees them. It needs the Vulkan renderer. It costs a little frame "
+     "time."},
     {kSlider, "video_view_down_pct", "Video lower by", "0|40|5|%", 20,
      "How far the middle of the video is below the middle of your view, as "
      "a percentage of the height of the view. In this game you look down "
@@ -333,8 +334,9 @@ const Setting kSettings[] = {
      "darker edge. Some people feel less ill with it. Gentle: the edges get "
      "darker. Strong: only the middle of the view stays clear."},
     {kValues, "head_blinder", "Head in the land", "Cover the view=1|Off=0", 1,
-     "When your head goes into a hill, a gold and red cover fills your view, "
-     "so you do not see under the land. It starts at the edge of the view "
+     "When your head goes into a hill, a house or a rock, a gold and red "
+     "cover fills your view, so you do not see under the land or into the "
+     "house. It starts at the edge of the view "
      "when your head is 5 cm over the land. Lift your head and the view "
      "comes back. Off: you see under the land."},
     {kChoice, "blink", "Blink when you jump or turn", "Off|Short|Long", 0,
@@ -385,6 +387,10 @@ const Setting kSettings[] = {
      "the trigger, amber for the grip). The spell book and the keyboard are "
      "pages of the same parchment. Each item of the ring is a wax seal. "
      "Plain: dark cards with white letters."},
+    {kBool, "hint_card_pictures", "Button pictures on the cards", nullptr, 1,
+     "Each line of a button on the cards beside your wrists has a small "
+     "picture of your controller, with that button lit. Off: the cards show "
+     "the button words only."},
     {kBool, "creature_stroke_open", "Stroke with the open hand", nullptr, 1,
      "Put your open hand on your Creature and keep it there for a moment. "
      "Then move the hand slowly to stroke the Creature. You do not need the "

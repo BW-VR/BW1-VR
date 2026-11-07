@@ -52,6 +52,7 @@
 #include "MinHook.h"
 #include "aim_math.h"
 #include "aim_smooth.h"
+#include "button_map_math.h"
 #include "comfort_math.h"
 #include "controller_math.h"
 #include "controllers.h"
@@ -71,6 +72,7 @@
 #include "note_depth.h"
 #include "debug_window.h"
 #include "settings_panel.h"
+#include "controls_page.h"
 #include "places_panel.h"
 #include "radial_menu.h"
 #include "spell_book.h"
@@ -3793,6 +3795,9 @@ const char* RecenterClash(int rule) {
   return nullptr;
 }
 
+// The map of the buttons that acts on a controller (below).
+void MapOfController(int c, int out[button_map::kButtons]);
+
 void PumpRecenter() {
   const int rule = Comfort().recenter_hold;
   if (rule == comfort_math::kRecenterOff) {
@@ -3818,9 +3823,21 @@ void PumpRecenter() {
   if (comfort_math::RecenterStep(&g_recenter_hold, click, still,
                                  GetTickCount64() / 1000.0,
                                  kRecenterHoldSeconds)) {
-    ControllersRecenter(index == PointingIndex()
-                            ? "a hold of the stick click of the pointing hand"
-                            : "a hold of the stick click of the other hand");
+    // The words name the button that gives the slot of the stick click
+    // (the map of the buttons, MapButtons).
+    int map[button_map::kButtons];
+    MapOfController(index, map);
+    const int button =
+        button_map::ButtonOfSlot(map, button_map::kStickClick);
+    const wchar_t* word = button_map::ButtonWord(
+        button_map::KindOfProfile(HandProfileOf(index)), index == 0, button);
+    char by[96];
+    sprintf_s(by, "a hold of %ls of the %s",
+              word != nullptr && button != button_map::kStickClick
+                  ? word
+                  : L"the stick click",
+              index == PointingIndex() ? "pointing hand" : "other hand");
+    ControllersRecenter(by);
   }
 }
 
@@ -4570,6 +4587,153 @@ void MouseOwnerTestFrame() {
          "is now %s, frame %llu", kOwnerModeName[g_owner_mode], g_frame);
 }
 
+// --- the map of the buttons --------------------------------------------------
+//
+// THE MAP OF THE BUTTONS (docs/controllers.md, "The map of the buttons"). The
+// page Controls of the settings window lets the player give a job of a
+// controller to a different button of the same controller. The jobs read the
+// four buttons of g_hands (primary, secondary, stick_click, menu). After the
+// read of the hands, MapButtons puts each button into the slot that the map
+// gives it, so each reader after it sees the map with no change of its own.
+//
+//   button_map_hand=1234    the map of the controller of the Hand
+//   button_map_other=1234   the map of the controller of the other hand
+//
+// Each digit is the slot that a button gives: first face button, second face
+// button, stick click, menu button (button_map_math.h). 1234 is the layout as
+// made. A new map waits until each of the four buttons of both controllers
+// is up, so no press goes to the wrong job. A map that moves a button that
+// the controller does not have acts as 1234, and the log says so.
+//
+// THE KIND of each controller comes from its interaction profile. The log
+// names it at each change.
+struct ButtonMapState {
+  bool read = false;
+  int want[2][button_map::kButtons];  // 0 the Hand, 1 the other hand
+  int now[2][button_map::kButtons];
+  bool waits = false;
+  int kind[2] = {-1, -1};             // of each controller: 0 left, 1 right
+  char profile[2][64] = {};
+  bool refused[2] = {false, false};   // the map does not fit the controller
+} g_map;
+
+const char* const kMapKey[2] = {"button_map_hand", "button_map_other"};
+
+void LogButtonMap(int role, const char* by) {
+  ModLog("controllers  : %s%s%s=%d: %s, frame %llu", by,
+         by[0] != 0 ? ": " : "", kMapKey[role],
+         button_map::MapValue(g_map.want[role]),
+         button_map::IsAsMade(g_map.want[role])
+             ? "each button has its job as made"
+             : "the page Controls moved jobs to other buttons",
+         g_frame);
+}
+
+void ReadButtonMap() {
+  if (g_map.read) return;
+  g_map.read = true;
+  for (int role = 0; role < 2; ++role) {
+    const int value = IniInt(kMapKey[role], button_map::kAsMade);
+    if (!button_map::ParseMap(value, g_map.want[role])) {
+      ModLog("controllers  : %s=%d is not a map of the four buttons (each "
+             "digit 1 to 4 one time), so the buttons are as made",
+             kMapKey[role], value);
+    }
+    memcpy(g_map.now[role], g_map.want[role], sizeof(g_map.now[role]));
+    if (!button_map::IsAsMade(g_map.want[role])) LogButtonMap(role, "");
+  }
+}
+
+bool FourButtonsUp(const bwvr::HandInput& h) {
+  return !h.primary && !h.secondary && !h.stick_click && !h.menu;
+}
+
+// The kind of each controller, and a line of the log at each change of its
+// profile.
+void UpdateKinds() {
+  for (int c = 0; c < 2; ++c) {
+    const char* profile = HandProfileOf(c);
+    if (g_map.kind[c] >= 0 && strcmp(profile, g_map.profile[c]) == 0) {
+      continue;
+    }
+    strcpy_s(g_map.profile[c], profile);
+    g_map.kind[c] = button_map::KindOfProfile(profile);
+    g_map.refused[c] = false;
+    const bool left = c == 0;
+    wchar_t words[96] = L"";
+    for (int b = 0; b < button_map::kButtons; ++b) {
+      const wchar_t* w = button_map::ButtonWord(g_map.kind[c], left, b);
+      if (w == nullptr) continue;
+      if (words[0] != 0) wcscat_s(words, L", ");
+      wcscat_s(words, w);
+    }
+    if (profile[0] == 0) {
+      ModLog("controllers  : the %s controller has no interaction profile "
+             "yet, so the mod takes it as a %s controller, frame %llu",
+             left ? "left" : "right",
+             button_map::kKindLog[g_map.kind[c]], g_frame);
+    } else {
+      ModLog("controllers  : the %s controller is a %s controller (profile "
+             "\"%s\"). Its buttons for the jobs: %ls, frame %llu",
+             left ? "left" : "right", button_map::kKindLog[g_map.kind[c]],
+             profile, words[0] != 0 ? words : L"none", g_frame);
+    }
+  }
+}
+
+// Once a frame, after the read of the hands: each button into its slot.
+void MapButtons() {
+  ReadButtonMap();
+  UpdateKinds();
+  if (g_map.waits && FourButtonsUp(g_hands[0]) && FourButtonsUp(g_hands[1])) {
+    g_map.waits = false;
+    memcpy(g_map.now, g_map.want, sizeof(g_map.now));
+    ModLog("controllers  : the new map of the buttons acts now: %s=%d, "
+           "%s=%d, frame %llu", kMapKey[0],
+           button_map::MapValue(g_map.now[0]), kMapKey[1],
+           button_map::MapValue(g_map.now[1]), g_frame);
+  }
+  for (int c = 0; c < 2; ++c) {
+    const int role = c == PointingIndex() ? 0 : 1;
+    const int* map = g_map.now[role];
+    if (button_map::IsAsMade(map)) continue;
+    if (!button_map::FitsController(map, g_map.kind[c], c == 0)) {
+      if (!g_map.refused[c]) {
+        g_map.refused[c] = true;
+        ModLog("controllers  : %s=%d moves a button that the %s %s "
+               "controller does not have, so its buttons are as made, "
+               "frame %llu", kMapKey[role], button_map::MapValue(map),
+               c == 0 ? "left" : "right",
+               button_map::kKindLog[g_map.kind[c]], g_frame);
+      }
+      continue;
+    }
+    bwvr::HandInput& h = g_hands[c];
+    const bool button[button_map::kButtons] = {h.primary, h.secondary,
+                                               h.stick_click, h.menu};
+    bool slot[button_map::kButtons];
+    button_map::Apply(map, button, slot);
+    h.primary = slot[button_map::kFirst];
+    h.secondary = slot[button_map::kSecond];
+    h.stick_click = slot[button_map::kStickClick];
+    h.menu = slot[button_map::kMenu];
+  }
+}
+
+// The map that acts on a controller now: as made when it does not fit.
+void MapOfController(int c, int out[button_map::kButtons]) {
+  ReadButtonMap();
+  const int role = c == PointingIndex() ? 0 : 1;
+  const int kind = g_map.kind[c] >= 0 ? g_map.kind[c]
+                                      : button_map::KindOfProfile(
+                                            HandProfileOf(c));
+  if (button_map::FitsController(g_map.want[role], kind, c == 0)) {
+    memcpy(out, g_map.want[role], sizeof(int) * button_map::kButtons);
+  } else {
+    button_map::AsMade(out);
+  }
+}
+
 }  // namespace
 
 // Once for each frame the scene is drawn, after the head pose of the frame is
@@ -4587,6 +4751,7 @@ void ControllersFrame() {
   } else {
     return;
   }
+  MapButtons();
   LatchFront();
   LogBothButtons();
   UpdateAim();
@@ -4778,6 +4943,8 @@ void ControllersHintState(ControllerHintState* out) {
   out->layout = ButtonLayout();
   out->walk = StickWalks();
   out->book = SpellBookButtonOn();
+  MapOfController(PointingIndex(), out->map_hand);
+  MapOfController(OtherIndex(), out->map_other);
   if (g_fake.mode != 0) {
     strcpy_s(out->profile, "fake");
   } else if (g_screen != nullptr) {
@@ -5565,6 +5732,56 @@ int ControllersOwnerModeValue() {
 
 int ControllersButtonLayout() { return ButtonLayout(); }
 
+// For the page Controls (controls_page.cpp) and the hints: the kind of a
+// controller (0 left, 1 right), the map that acts on it, and the settings
+// that give the slots their jobs.
+int ControllersKindOf(int c) {
+  if (c < 0 || c > 1) return button_map::kTouch;
+  return g_map.kind[c] >= 0 ? g_map.kind[c]
+                            : button_map::KindOfProfile(HandProfileOf(c));
+}
+
+int ControllersPointingSide() { return PointingIndex(); }
+
+void ControllersButtonMapOf(int c, int map[button_map::kButtons]) {
+  MapOfController(c < 0 || c > 1 ? 1 : c, map);
+}
+
+void ControllersButtonJobs(button_map::Jobs* out) {
+  memset(out, 0, sizeof(*out));
+  out->layout = ButtonLayout();
+  out->teleport = TeleportOwnsA();
+  out->gesture_button = g_gesture.button;
+  out->recenter_hold = Comfort().recenter_hold;
+  out->book = SpellBookButtonOn();
+  // The keys of the ring do not change while the game runs.
+  static int ring_button = -1, ring_stick = 0;
+  if (ring_button < 0) {
+    const bool ring = IniInt("radial_menu", 1) != 0;
+    ring_button = ring ? IniInt("radial_menu_button", 1) : 0;
+    ring_stick = ring && ring_button != 3 &&
+                 IniInt("radial_menu_stick", 1) != 0;
+  }
+  out->ring_button = ring_button;
+  out->swap_buttons = g_swap_buttons;
+  out->world_grab = g_grab.on && g_grab.hand >= 1;
+  out->walk = TabletopGodMoveStick() != walk_math::kRuleOff;
+  out->stick_ring = ring_stick != 0;
+}
+
+// The page Controls: a new map for the controller of the Hand (role 0) or of
+// the other hand (role 1). It acts when each button of both controllers is
+// up (MapButtons).
+void ControllersSetButtonMap(int role, const int map[button_map::kButtons],
+                             const char* by) {
+  if (role < 0 || role > 1) return;
+  ReadButtonMap();
+  memcpy(g_map.want[role], map, sizeof(g_map.want[role]));
+  g_map.waits = true;
+  g_map.refused[0] = g_map.refused[1] = false;
+  LogButtonMap(role, by);
+}
+
 // The value of the switch of button_layout on the debug page.
 int ControllersButtonLayoutValue() {
   return g_on ? ButtonLayout() : kDebugCannot;
@@ -5748,6 +5965,7 @@ void ControllersReport() {
   PlacesPanelReport();
   DebugWindowReport();
   SettingsPanelReport();
+  ControlsPageReport();
   SpellBookReport();
   GesturePanelReport();
   TempleReport();

@@ -159,6 +159,59 @@ struct WindowLayer {
   int32_t rect[4];
 };
 
+// THE LAYERS FOR THE VIDEO (video_view_layers, docs/backend.md, "The view
+// for videos"). The quad layers of one frame over the left eye picture, in
+// the order that the runtime composes them (the first one under the
+// others). The mod draws them into the view for videos in the window.
+const int kVideoPanel = 0;  // a quad of the interface panel
+const int kVideoCard = 1;   // a card
+const int kVideoWall = 2;   // a wall of the cut scene window: black, alpha
+const int kVideoLayers = 2 + kPanelQuads + kCards + 4;
+
+struct VideoQuad {
+  int kind;   // kVideoPanel, kVideoCard or kVideoWall
+  int index;  // the panel quad (kPanelMenu ...) or the card (kCardRing ...)
+  float position[3];     // meters, in the LOCAL space
+  float orientation[4];  // x y z w, the front of the quad is its +z side
+  float width;           // meters
+  float height;
+  // The part of the picture that shows: x, y, width, height in pixels of a
+  // picture of texture_width by texture_height.
+  int32_t rect[4];
+  uint32_t texture_width;
+  uint32_t texture_height;
+  // A card: the pixels of the CPU (as CardLayer::pixels, valid until the
+  // mod stages the card again), and in a session with Vulkan a VkImageView
+  // of a copy of the card on the GPU, in the layout
+  // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, in the format `view_format`
+  // (a VkFormat). 0: no copy, so the mod copies the pixels.
+  const uint8_t* pixels;
+  uint64_t view;
+  uint32_t view_format;
+  // A panel quad: the VkImage of the panel (SetPanelVulkan), 0 when the
+  // panel went out from a texture of Direct3D 11.
+  uint64_t panel_image;
+  float alpha;  // a wall
+};
+
+struct VideoLayers {
+  uint64_t serial;  // one more for each frame that made a record
+  // A frame with the world (a projection layer), or a screen: the left eye
+  // picture on a quad in the room (the cut scene window, the menus in the
+  // room). Then the quads go over that screen.
+  bool screen;
+  float screen_position[3];
+  float screen_orientation[4];
+  float screen_width;
+  float screen_height;
+  // The part of the left eye picture that the screen shows: x0, y0, x1, y1
+  // from 0 to 1.
+  float screen_part[4];
+  float eye_position[3];  // the left eye, for a screen
+  int count;
+  VideoQuad quads[kVideoLayers];
+};
+
 // THE VULKAN OF A SESSION WITH VULKAN (XrScreen::UseVulkan). The runtime
 // makes the instance and the device. They stay until the end of the
 // process, because the Vulkan renderer of the mod (vk_core.cpp) draws with
@@ -415,6 +468,20 @@ class XrScreen {
   // True after the runtime refused a frame with a quad of the interface
   // panel. Then the menus must go back to the eye pictures.
   static bool PanelFailed();
+
+  // THE LAYERS FOR THE VIDEO. With WantVideoLayers(true) each frame that
+  // goes to the runtime keeps a record of its quad layers, and in a session
+  // with Vulkan each card also goes into a copy on the GPU for the video.
+  // VideoLayersOf gives the record of the last frame, false when there is
+  // none. With no session, RecordVideoLayers makes the record from what the
+  // mod staged for this frame, in the order of a frame with a runtime, and
+  // the staged cards and window are then used. eye_position is the left eye,
+  // and width by height the eye picture (for a screen). Static, so the mod
+  // can call them with no XrScreen at hand. All on the frame thread.
+  static void WantVideoLayers(bool on);
+  static bool VideoLayersOf(VideoLayers* out);
+  static void RecordVideoLayers(const float eye_position[3], uint32_t width,
+                                uint32_t height);
 
   // THE CUT SCENE WINDOW. Stage it before EndFrame, and EndFrame uses it in
   // that frame only. Static, so the mod can stage with no XrScreen at hand.

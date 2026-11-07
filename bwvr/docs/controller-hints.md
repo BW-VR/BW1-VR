@@ -2,7 +2,7 @@
 
 This file records how the game draws its mouse and key hints, what the mod
 does with them while a controller is in use, how the hint cards work, and
-what is still open (pictures of the controllers and models).
+what is still open (pictures in the hints of the game, and models).
 
 While a controller owns the pointer, the hints show on one card beside the
 wrist of each hand, with prompts for the controller (section 9). The words of
@@ -44,8 +44,11 @@ All addresses are for `runblack.exe` v1.42, image base `0x00400000`.
 - A line of a prompt that teaches an action goes away after the player did
   the action 3 times, and comes back after 10 minutes of play with no use of
   it. In a lesson of the tutorial each line shows (`hint_learn`, 9.10).
-- Not built: glyph pictures of the buttons, a picture of the controller with
-  the button lit, and the runtime's 3D model (section 5).
+- Each line of a button on a card has a small picture of the controller
+  with that button lit, from the drawing of the page Controls
+  (`hint_card_pictures`, 9.13).
+- Not built: glyph pictures of the buttons in the hints of the game, and the
+  runtime's 3D model (section 5).
 
 ## 1. How the hint icons work
 
@@ -274,7 +277,10 @@ card with no game call.
 
 ## 3. Controller art
 
-The mod must not ship art it may not ship. Three levels. None is built.
+The mod must not ship art it may not ship. Three levels. The page Controls
+of the settings window has a drawing of each kind of controller in code
+(`ui-layer.md`, 24.6). Level (b) comes from it, on the hint cards (9.13).
+No level is in the hints that the game draws.
 
 ### (a) Flat icons per profile
 
@@ -342,7 +348,8 @@ the lit part changes. A model in the hand can hide the Hand of the game, so
 draw it beside the Hand, or only when the Hand is idle.
 
 **Controller families.** The mod uses the profile string from
-`XrScreen::HandProfile` (`FamilyOf` in `controller_hints.cpp`):
+`XrScreen::HandProfile` (`FamilyOf` in `controller_hints.cpp`, which is
+`button_map::KindOfProfile`, `controllers.md`, 5.7):
 
 | Family | Profiles | Layout |
 | --- | --- | --- |
@@ -410,21 +417,15 @@ The words and the card are built. These parts are open, in the order of effort:
    release of the old material [?]. A 64 by 64 cell at the 20 percent hint size
    is about 13 pixels, which may be too small. The atlas also shows on the
    options controls page, so switch it by input state.
-2. **A picture of the controller with the button lit.** One silhouette per
-   family, one lit control per variant (section 3, level b), with a bright
-   accent on the used control. Show it through the atlas if 64 by 64 is clear.
-   If not, show it through `DrawBox` with an own material (way D) or on the
-   hint card. The Touch controller shape on a Quest 3 differs from the Touch
-   Plus shape, so use one generic shape for the family.
-3. **The runtime's 3D model.** Ask for the extension at `xrCreateInstance`
+2. **The runtime's 3D model.** Ask for the extension at `xrCreateInstance`
    only if the runtime lists it. Load the glTF at session start, read the node
    names, and render on the Direct3D 11 side at the hand's grip pose in the
    LOCAL space, only while a hint is active. The model has no motion that the
-   player did not make. Fall back to the picture of item 2 when the runtime has
-   no model. This is the largest item. The main risk is that the runtime offers
+   player did not make. Fall back to the pictures of the card (9.13) when the
+   runtime has no model. This is the largest item. The main risk is that the runtime offers
    no model (it offers none now, section 3).
 
-The card of section 9 is the place for items 2 and 3: they draw on the XR side
+The card of section 9 is the place for item 2: it draws on the XR side
 at the grip pose, only while a hint is active, with no motion that the player
 did not make.
 
@@ -542,7 +543,10 @@ The labels come from one function, `BuildWords`. It follows `xr_screen.cpp`
 | book (the spell book, `spell_book=1`), `button_layout=1` | X, or A when the left hand points | none: that button sends Esc | none |
 
 The words follow the layout of the buttons in use (`button_layout`,
-`controllers.md`, 5.1). The test key of the layout builds the words again, so
+`controllers.md`, 5.1), and the map of the buttons (`button_map_hand`,
+`button_map_other`, `controllers.md`, 5.7): the word of a job is the word of
+the button that the map gives its slot. With the map as made, the table
+above holds. The test key of the layout builds the words again, so
 the next card shows the new buttons. The word of the menu button of the left
 controller is on the card of the left hand: the other hand, or the pointing
 hand of a left handed player (`ControllerHintMenuOnPointing`). The cards have
@@ -854,8 +858,9 @@ of the object in the Hand ("Drop").
 
 With `hint_words=3` the context of the fetch stays for those frames
 (`FetchKeepStep` in `hint_card_math.h`). So the card says "Grip Pull to fetch"
-from the frame in which the far target comes until the hint of the object in
-the Hand comes. The rule:
+from the frame in which the far target comes until the Hand holds the object
+(`hint_held_latch=1`), or until the hint of the object in the Hand comes
+(`hint_held_latch=0`). The rule:
 
 1. It starts when the far target goes while the card has the prompt "Pull to
    fetch", or less than 0.15 s after that prompt showed. The grip must be
@@ -863,16 +868,48 @@ the Hand comes. The rule:
    (`FarGrabGlideOrigin`: the game took the press of the fetch). A far target
    that goes for a different reason starts nothing. A far target with a
    different prompt (a scroll, a bulk source, the Creature) starts nothing.
-2. It holds while the Hand is empty and on no target. It also holds while the
-   Hand has the object and the game still gives the hint that the prompt
-   owned. It holds too while the Hand has the object, the object is still on
-   its way, and the game gives no hint for the grip (`FetchWaits`).
-3. It ends when the Hand has the object and the game gives a new hint for
-   the grip. It also ends as the take in work ends: a different context comes,
-   the grip opens, or 1.0 s passed since the far target went.
+2. It holds while the Hand is empty and on no target.
+3. With `hint_held_latch=1` it ends in the frame in which the Hand holds the
+   object (see "One text for one object in the Hand"). With
+   `hint_held_latch=0` it also holds while the Hand has the object and the
+   game still gives the hint that the prompt owned, and while the object is
+   still on its way and the game gives no hint for the grip (`FetchWaits`).
+   It then ends when the game gives a new hint for the grip.
+4. It also ends as the take in work ends: a different context comes, the
+   grip opens, or 1.0 s passed since the far target went.
 
 With `hint_words` 2 or less the hint of the game for the grip shows from the
 end of the far target until the hint of the object in the Hand comes.
+
+**One text for one object in the Hand** (`hint_held_latch=1`). The context of
+a frame comes from the facts of that frame. The game gives its hint for the
+object in the Hand 0 to 6 frames after the Hand has it. Later it can give no
+hint for the grip for a frame or two, for example while the aim turns, or
+while its hint for the object changes from one text to another ("Combine
+Scaffolds", then "Build"). So:
+
+1. The fetch in work ends in the frame in which the Hand holds the object,
+   and it does not start while the Hand holds an object. From that frame
+   until the game gives a new hint for the grip (1.0 s at most), the line of
+   the grip has the words of the mod for the object in the Hand
+   (`HoldWords`): the words of a tree that the opening does not plant
+   ("Lower to plant. Open to drop", the same words that the card gives to
+   the hint of the game), the line of a take from a forest, "Open to plant"
+   for a tree that the opening plants, or "Open to drop". The hint of the
+   take that the prompt owned does not show then (`OwnedStale`). So the card
+   says what the grip does with the object from the first frame with the
+   object in the Hand. With `hint_held_latch=0` the card says "Pull to
+   fetch" until the hint of the game comes, and the fetch in work can start
+   again while the object is still on its way.
+2. A far target that is not locked is no context while the Hand holds an
+   object. The far grab is not ready then, and such a target is the state of
+   the frame before.
+3. A frame with no words on the pointing card, while the Hand holds the same
+   object as in the last frame with words, keeps those words for 0.10 s at
+   most (`kHeldGapSeconds`). A card with no words for one or two frames
+   between two hints of the game for the same object is a blink.
+
+`hint_held_latch=0` gives each frame the words of its own context.
 
 **After the prompt went.** The card has the hint of the game for the button of
 a target for some frames after the target went: 1 to 11 frames in desktop
@@ -940,12 +977,14 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_card_size_pct` | 100 | The size of the card, 50 to 200 |
 | `prompt_timing` | 1 | 1 the prompt of a target shows at once, stays while the target is there and shows each time. 0 the dwell, hold and count for all prompts (9.4) |
 | `hint_words` | 3 | 1 the prompt of a target owns its button and a hint of the game with no words does not show. 2 is 1, and the prompt of a take also keeps the grip from the close of the grip until the Hand holds the object. 3 is 2, and the prompt of a fetch keeps the grip from the end of the far target until the Hand holds the object, and a hint of the game that a prompt owned does not show for 0.25 s after the prompt went. 0 the hint of the game takes the place of the prompt, as it comes (9.4) |
+| `hint_held_latch` | 1 | 1 the card keeps one text for one object in the Hand: a fetch in work ends in the frame in which the Hand holds the object, and the card has the words of the mod for the object until the game gives its hint for it. A far target with no lock is no context while the Hand holds an object, and a frame with no words keeps the words for the same object for 0.10 s at most. 0 each frame has the words of its own context, and the fetch in work waits for the hint of the game (9.4, "One text for one object in the Hand") |
 | `hint_palm_check` | 1 | 1 a grip hint of the game over the land does not show while the search at the palm is off, because a press there acts on no object. 0 it shows (9.9) |
 | `text_click` | 1 | 1 shows the prompt of a text that waits for a click in each view, and makes the trigger that click. 0 gives that prompt the rule of each other hint of the left button (section 10) |
 | `prompt_moves` | 1 | 1 the prompt of the land has the line of the walk with the stick while a push moves the player, and the line of A shows only while a press of A can move the player. 0 no line for the walk, and the line of A shows in each case (9.4) |
 | `hint_learn` | 1 | 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). The launcher row "Hints": "Until learned" is 1, "Always" is 0 |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
 | `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`), of the ring (`controllers.md`, 10.4) and of the keyboard in the headset (`ui-layer.md`, section 21) |
+| `hint_card_pictures` | 1 | 1 each line of a button has a small picture of the controller with that button lit, before the badge or the seal (9.13). 0 the button word only. The launcher row "Button pictures on the cards" |
 | `hint_card_saving` | 1 | 1 while the game saves, the card of the pointing hand says "Saving..." (9.12). 0 the cards say nothing in a save |
 | `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
 | `font_warm` | 1 | 1 a thread of the mod draws each letter of each font of the cards one time at the start of the game (9.11, "The first draw of a font"). 0 the first draw of each font of a card makes its letters on the frame thread |
@@ -965,6 +1004,8 @@ row "Hints" sets it. `hint_card_style` has no key of the keyboard. With
 `debug_menu=1` the switch "Card look" (group Interface) of the debug page
 changes it, and each card draws its picture again in the next frame. The
 ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
+The switch "Card pictures" of the same group changes `hint_card_pictures`
+in the same way.
 
 ### 9.6 The log
 
@@ -1007,6 +1048,17 @@ ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
   (or `the grip opened`, or `the time limit passed`): one line for the start
   and one for the end of each fetch in work, with `hint_words=3`. These lines
   count in the same 60 lines.
+- `hint card : frame N, the Hand holds P, the object of the fetch, and the
+  game gives no new hint for the grip yet. The prompt of the fetch goes now,
+  and the card has the words of the mod for the object`, `hint card : frame
+  N, the words of the mod for P end after K frames: the game gives its hint
+  for the grip` (or `the Hand does not hold it now`, or `the time limit
+  passed`), `hint card : frame N, the pointing card keeps "[Grip] Combine Scaffolds": the Hand holds the
+  same object P, and this frame has no words for it. The context is ..., the
+  prompt is ..., and the game gives K lines, J of them on the card`, and
+  `hint card : frame N, the far target T is no context: the Hand holds P`:
+  with `hint_held_latch=1` (60 lines at most). The report window has the
+  count of each, with `hint_held_latch=N`.
 - `hint card : frame N, the hint "[Grip] Pick Up" of the game did not show on
   K frames after its prompt went at frame M: the game gives it no more` (or
   `the time limit passed, so it shows now`, or `a prompt owns it again`): one
@@ -1054,9 +1106,9 @@ ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
 
 ### 9.7 What is not built
 
-- Glyph pictures of the buttons, a picture of the controller with the button
-  lit, and the runtime's model (section 5). The badge with the button word is
-  the mod's own art and needs no picture of a real controller.
+- Glyph pictures of the buttons in the hints of the game, and the runtime's
+  model (section 5). The badge, the seal and the picture of the button
+  (9.13) are the mod's own art and need no picture of a real controller.
 - Virtual Desktop's runtime lists no controller model extension [M], so a
   model is not possible there.
 
@@ -1406,6 +1458,82 @@ A new game of the desktop saves near frame 830, so
 no headset session, so it shows the picture and the log, not the hold. Only
 a headset can show that the card stays in the view for the whole save, and
 with `xr_hold_ms=0` there is no hold and no card.
+
+### 9.13 The pictures of the buttons
+
+Code: `src/mod/hint_picture_math.h` (the picture) and `PutPictures` in
+`src/mod/hint_card.cpp` (the layout). The checks are in
+`test/controller_math/hint_picture_checks.h`.
+
+With `hint_card_pictures=1` (the default) each line of a button has a small
+picture before its badge or its seal: a drawing of the controller with the
+button of the line lit. The words stay. A line with no button, or with a
+button that the drawing does not show, has no picture.
+
+**Two views.** The face buttons, the stick, the pad and the menu button are
+on the top of a controller. Their picture is a part of the drawing of the
+page Controls (`controller_art_math.h`, `ui-layer.md`, 24.6), seen from
+above. The trigger and the grip are under the controller and on its handle.
+Their picture is the side of the controller (`SideOf`): the head, the
+handle, the stick on the top, the trigger under the front of the head and
+the grip on the handle. Each kind has its own side: the flat head of a
+Touch controller, the long bar of an Index controller, and the ring and the
+long handle of a wand and of a Mixed Reality controller. The select button
+of a simple controller is on its top. All of it is our own art in code.
+
+**The button of a line.** The mod finds the control from the button word
+and from the controller of the card (`ControlOfWord`). The words are those
+of `controller_hints.cpp`, so a change of the map of the buttons changes the
+picture too. "A x2" and "Grip hold" name the same control as "A" and "Grip".
+The kind of the controller comes from its interaction profile, or from the
+test key `hint_profile`, as on the page Controls. The left controller is the
+mirror of the right one, and the menu button of a Touch controller is only
+on the left one.
+
+**The window.** A full controller from above in the height of a row would
+be too small: a face button would be about 4 px of the view at 55 cm. So
+the picture of a top view is a square window of 140 units of the drawing
+around the lit control, in 60 by 60 px of the card (1.5 cm). Each window of
+a top view has the same scale, so a face button of a Touch controller is
+about 10 px of the card and 7 px of the view. When the part of the body
+that has the control fits in the window, the window holds all of it: the
+whole ring of the face buttons of a Touch controller. Else the control is
+in the middle of the window, and the window goes at most 16 units past the
+drawing. A side view holds the whole controller, with a margin of 7 units.
+The edge of the picture fades out over 5 px, with round corners, so a cut
+outline does not end in a hard line.
+
+**The look** (`LookOf`). On the scroll the outline is a dark brown ink,
+darker than the words, 3.4 px wide, and the body has a pale fill, so the
+shape reads on the paper. On the plain card the outline is light gray, 3 px
+wide, on a slate fill. The other controls are at 85 percent on the scroll
+and 75 percent on the plain card. The lit control has the color of its
+badge or its seal: green for the trigger, amber or gold for the grip, red on
+the scroll and white on the plain card for the other buttons. It has a soft
+halo of the same color and a thin edge in ink.
+
+**The layout.** The picture is in the middle of its row, before the badge
+or the seal, with 10 px to it. While one line of a card has a picture, each
+line of a button has the place of a picture, so the badges and the seals
+stay in one column. A line with no button starts at the left edge. A picture makes its line 70 px wider. A line that is too
+long for 19 cm ends in "...", as with no picture.
+
+**The cost.** The mod makes each picture one time for each look and tone
+(`Bake`), and keeps 24 of them. A new picture of a card copies the pictures
+of its lines. Each bake writes a line in the log, 24 at most:
+`hint card : frame N, the picture of the right Touch first face button for
+"A" in the scroll look, 60 by 60 px, took N ms`. The line of each new
+picture of a card gives the count of its pictures of buttons.
+
+**Tests.** A desktop run with `hint_card_save_test=1` saves each new
+picture of a card (9.11). The run is the six takes at the store of Land 1
+(9.10) with `hint_learn=0;prompts=2`, one time for each kind with
+`hint_profile`, and one time with `hint_card_pictures=0`. A desktop run has
+the fake controller only, which is a Touch controller, so the other kinds
+come from `hint_profile`.
+
+Only a headset can show whether a picture is clear at 55 cm, and whether
+the player finds the button from it (`headset-checks.md`).
 
 ## 10. A text that waits for a click
 

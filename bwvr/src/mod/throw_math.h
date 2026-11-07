@@ -238,6 +238,107 @@ inline void RealArc(const float p0[3], const float v0[3], float s, double t,
   v[1] = static_cast<float>(v0[1] - g * t);
 }
 
+// THE OBJECTS ON THE ARC (throw_arc_objects). The game's physics has the
+// object some game turns after the release. Until then the mod draws the
+// real arc, and the game's physics then starts at the place of the arc at
+// that time. The game tests the objects only from that time. So the arc
+// tests the box of the mesh of each object near the Hand, and it stops where
+// it goes into a box, as it stops at the land.
+//
+// A box: its middle, three axes of length 1 (row by row) and half its sizes
+// along them.
+struct Box {
+  float middle[3];
+  float axis[9];
+  float half[3];
+};
+
+// True when p is in the box.
+inline bool InBox(const Box& b, const float p[3]) {
+  for (int j = 0; j < 3; ++j) {
+    float along = 0.0f;
+    for (int k = 0; k < 3; ++k) {
+      along += (p[k] - b.middle[k]) * b.axis[j * 3 + k];
+    }
+    if (fabsf(along) > b.half[j]) return false;
+  }
+  return true;
+}
+
+// The part u (0 to 1) of the segment from a to c where it goes into the box.
+// False when a is in the box already (a release inside an object is the
+// game's own case), or when the segment does not go into the box.
+inline bool SegmentEntersBox(const Box& b, const float a[3], const float c[3],
+                             float* u) {
+  float low = 0.0f, high = 1.0f;
+  bool inside = true;
+  for (int j = 0; j < 3; ++j) {
+    float from = 0.0f, step = 0.0f;
+    for (int k = 0; k < 3; ++k) {
+      from += (a[k] - b.middle[k]) * b.axis[j * 3 + k];
+      step += (c[k] - a[k]) * b.axis[j * 3 + k];
+    }
+    if (fabsf(from) > b.half[j]) inside = false;
+    if (fabsf(step) < 1e-9f) {
+      if (fabsf(from) > b.half[j]) return false;
+      continue;
+    }
+    float t0 = (-b.half[j] - from) / step;
+    float t1 = (b.half[j] - from) / step;
+    if (t0 > t1) {
+      const float swap = t0;
+      t0 = t1;
+      t1 = swap;
+    }
+    if (t0 > low) low = t0;
+    if (t1 < high) high = t1;
+    if (low > high) return false;
+  }
+  if (inside) return false;
+  *u = low;
+  return true;
+}
+
+// The box around the points of the arc from the release to `seconds` (no
+// more than the time where the arc meets the land), grown by `margin`. An
+// object whose box is outside it cannot be on the arc in that time.
+inline void ArcBounds(const float p0[3], const float v0[3], float s,
+                      double seconds, float margin, float low[3],
+                      float high[3]) {
+  for (int i = 0; i < 3; ++i) low[i] = high[i] = p0[i];
+  const int steps = 16;
+  for (int k = 1; k <= steps; ++k) {
+    float p[3], v[3];
+    RealArc(p0, v0, s, seconds * k / steps, p, v);
+    for (int i = 0; i < 3; ++i) {
+      if (p[i] < low[i]) low[i] = p[i];
+      if (p[i] > high[i]) high[i] = p[i];
+    }
+  }
+  // The arc bends between two samples: the largest gap from the chord is
+  // s g (seconds / steps)^2 / 8 along up.
+  const double part = seconds / steps;
+  const float bend =
+      static_cast<float>(static_cast<double>(s) * kGravity * part * part / 8.0);
+  for (int i = 0; i < 3; ++i) {
+    low[i] -= margin + (i == 1 ? bend : 0.0f);
+    high[i] += margin + (i == 1 ? bend : 0.0f);
+  }
+}
+
+// True when the box of b (its corners) and the box from low to high, along
+// the world axes, have a part in common.
+inline bool BoxNear(const Box& b, const float low[3], const float high[3]) {
+  for (int k = 0; k < 3; ++k) {
+    float extent = 0.0f;
+    for (int j = 0; j < 3; ++j) extent += fabsf(b.axis[j * 3 + k]) * b.half[j];
+    if (b.middle[k] + extent < low[k] || b.middle[k] - extent > high[k]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // One step of the game's integrator in a free flight with no drag
 // (fn_007FD4D0 adds the weight, and fn_007FE260 adds the force to the
 // velocity and then the velocity to the position). The math test flies an

@@ -149,6 +149,7 @@
 #include "village_math.h"
 #include "near_math.h"
 #include "table_math.h"
+#include "throw_math.h"
 #include "throw_physics.h"
 #include "tree_body.h"
 #include "tree_plant_math.h"
@@ -9065,7 +9066,9 @@ bool HandDirectGlowFacts(float point[3], float* length, int32_t* mode,
 // made now, from the candidates that the draw of this pass offered. So the
 // glow and the halo of this frame show the object that the next press acts
 // on. The second eye pass draws the same.
+void LatchArcBoxes();
 void HandDirectChooseNow() {
+  LatchArcBoxes();
   if (!g_one_target || !g_active || g_hand == nullptr || g_face == nullptr ||
       g_eye != 0) {
     return;
@@ -9843,6 +9846,61 @@ bool HandDirectFeelBody(int index, void** object, float base[3], float* radius,
   for (int i = 0; i < 3; ++i) base[i] = center[i];
   *kind = 4;
   return true;
+}
+
+// THE BOXES ON THE ARC OF A THROW (throw_physics.cpp, throw_arc_objects,
+// docs/throw.md, "The objects on the arc"). The mesh of a candidate is good
+// for its frame only, and a release comes in the game's step, so the first
+// eye pass keeps the box of the mesh of each candidate near the Hand while
+// the Hand holds an object. A tree, a forest, a scroll and a body with no box
+// of its mesh are not in the list.
+const int kMaxArcBoxes = 64;
+void* g_arc_objects[kMaxArcBoxes];
+throw_math::Box g_arc_boxes[kMaxArcBoxes];
+int g_arc_count = 0;
+uint64_t g_arc_frame = 0;
+
+// The reach of the list: this many meters of the room from the Hand's point.
+const float kArcBoxMeters = 4.0f;
+
+void LatchArcBoxes() {
+  if (g_eye != 0 || g_arc_frame == g_frame) return;
+  g_arc_frame = g_frame;
+  g_arc_count = 0;
+  if (!g_active || g_hand == nullptr || HandEmpty()) return;
+  void* held = *reinterpret_cast<void* const*>(g_hand + kHandHeld);
+  const float reach = kArcBoxMeters * RoomUnits();
+  for (int i = 0; i < g_candidate_count && g_arc_count < kMaxArcBoxes; ++i) {
+    if (g_candidates[i].object == held) continue;
+    if (!(Distance(g_candidates[i].position, g_target) < reach)) continue;
+    void* object = nullptr;
+    float base[3], radius = 0.0f, height = 0.0f, axis[9], half[3];
+    int kind = -1;
+    if (!HandDirectFeelBody(i, &object, base, &radius, &height, &kind, axis,
+                            half) ||
+        kind != 4) {
+      continue;
+    }
+    throw_math::Box& b = g_arc_boxes[g_arc_count];
+    for (int k = 0; k < 3; ++k) {
+      b.middle[k] = base[k];
+      b.half[k] = half[k];
+    }
+    for (int k = 0; k < 9; ++k) b.axis[k] = axis[k];
+    g_arc_objects[g_arc_count++] = object;
+  }
+}
+
+// For throw_physics.cpp: the boxes that the first eye pass of this frame or
+// of the frame before kept, at most max. The count, 0 when the list is older.
+int HandDirectArcBoxes(void* objects[], throw_math::Box out[], int max) {
+  if (g_arc_frame + 1 < g_frame) return 0;
+  int n = g_arc_count < max ? g_arc_count : max;
+  for (int i = 0; i < n; ++i) {
+    objects[i] = g_arc_objects[i];
+    out[i] = g_arc_boxes[i];
+  }
+  return n;
 }
 
 namespace {

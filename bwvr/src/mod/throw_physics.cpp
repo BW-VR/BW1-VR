@@ -121,6 +121,10 @@ bool HandExactHeldMatrix(void* object, float out[12]);
 // tabletop.cpp and head_pose.cpp: the world units in a meter of the room.
 float TabletopViewScale();
 float HeadPoseScale();
+// hand_direct.cpp: the boxes of the meshes near the Hand, from the first eye
+// pass, and the class of an object.
+int HandDirectArcBoxes(void* objects[], throw_math::Box out[], int max);
+const char* HandDirectClass(void* object);
 
 namespace {
 
@@ -229,6 +233,10 @@ IntegrateFn o_Integrate = nullptr;
 DrawAllFn o_DrawAll = nullptr;
 
 int g_law = 2;
+// THE OBJECTS ON THE ARC (throw_arc_objects): true stops the real arc where it
+// goes into the box of the mesh of an object near the Hand, before the game's
+// physics has the object. false tests the land only.
+bool g_arc_objects = true;
 // throw_log: 1 logs each turn and each third frame, 2 also logs each substep
 // and each frame after the first contact.
 int g_log = 0;
@@ -310,6 +318,11 @@ struct Flight {
   bool leaves;
   double land_t;
   float land[3];
+  // The arc meets the box of an object first (throw_arc_objects): lands is
+  // true, and land is the point where the arc goes into the box.
+  bool hits_object;
+  void* hit;
+  int near_boxes;        // the boxes near the arc, for the log
   // The physics.
   double time;           // the seconds of the flight that the state is at
   float remainder;
@@ -558,14 +571,62 @@ float TurnShown(const Flight& f, float turn_speed) {
 }
 
 // Where the real arc meets the land. It goes along the arc in steps of 2 ms,
-// for 6 s at most.
+// for 6 s at most. With throw_arc_objects=1 it also stops where the arc goes
+// into the box of the mesh of an object near the Hand, in the time before
+// the game's physics can have the object (kHeldLimit). From that time the
+// game's physics tests the objects itself.
 void FindLanding(Flight* f) {
   f->lands = f->leaves = false;
+  f->hits_object = false;
+  f->hit = nullptr;
+  f->near_boxes = 0;
   f->land_t = 0.0;
+  const int kMaxNear = 16;
+  void* near_objects[kMaxNear];
+  throw_math::Box near_boxes[kMaxNear];
+  int near_count = 0;
+  if (g_arc_objects) {
+    void* objects[64];
+    throw_math::Box boxes[64];
+    const int count = HandDirectArcBoxes(objects, boxes, 64);
+    float low[3], high[3];
+    throw_math::ArcBounds(f->p0, f->v0, f->gs, kHeldLimit, 1.0f, low, high);
+    for (int i = 0; i < count && near_count < kMaxNear; ++i) {
+      if (objects[i] == f->object) continue;
+      if (!throw_math::BoxNear(boxes[i], low, high)) continue;
+      near_objects[near_count] = objects[i];
+      near_boxes[near_count++] = boxes[i];
+    }
+    f->near_boxes = near_count;
+  }
+  float before[3] = {f->p0[0], f->p0[1], f->p0[2]};
   for (int k = 1; k <= 3000; ++k) {
     const double t = k * 0.002;
     float p[3], v[3];
     throw_math::RealArc(f->p0, f->v0, f->gs, t, p, v);
+    if (near_count > 0 && t <= kHeldLimit + 0.002) {
+      int first = -1;
+      float first_u = 2.0f;
+      for (int i = 0; i < near_count; ++i) {
+        float u = 0.0f;
+        if (throw_math::SegmentEntersBox(near_boxes[i], before, p, &u) &&
+            u < first_u) {
+          first = i;
+          first_u = u;
+        }
+      }
+      if (first >= 0) {
+        f->lands = true;
+        f->hits_object = true;
+        f->hit = near_objects[first];
+        f->land_t = t - 0.002 * (1.0 - first_u);
+        float at[3];
+        throw_math::RealArc(f->p0, f->v0, f->gs, f->land_t, at, v);
+        for (int i = 0; i < 3; ++i) f->land[i] = at[i];
+        return;
+      }
+    }
+    for (int i = 0; i < 3; ++i) before[i] = p[i];
     if (!OnMap(p[0], p[2])) {
       f->leaves = true;
       f->land_t = t;
@@ -811,10 +872,42 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
     position[i] += p[i] - matrix[9 + i];
     velocity[i] = v[i] / f->scale;
   }
+  // AT THE BOX OF AN OBJECT (throw_arc_objects): the arc stopped where it
+  // goes into the box. The center goes one radius back along the arc, so the
+  // object touches the object there and is not in it. The velocity of the
+  // arc at that time goes on into the object, and the game's contact gives
+  // the hit and the damage.
+  float back = 0.0f;
+  if (f->hits_object && t >= f->land_t && radius > 0.0f && radius < 1000.0f) {
+    const float speed = controller_math::Length(v);
+    if (speed > 1e-4f) {
+      back = radius;
+      for (int i = 0; i < 3; ++i) position[i] -= v[i] / speed * radius;
+    }
+  }
   // Not in the land: the center stays one radius or more over it.
   if (radius > 0.0f && radius < 1000.0f && OnMap(position[0], position[2])) {
     const float floor = Altitude(position[0], position[2]) + radius;
     if (position[1] < floor) position[1] = floor;
+  }
+  if (f->hits_object && g_flight_logs < kMaxFlightLogs) {
+    ++g_flight_logs;
+    ModLog("hand throw   : the game's physics has %p %.0f ms after the "
+           "release, and the arc met the box of the %s %p after %.0f ms. %s",
+           f->object, t * 1000.0, HandDirectClass(f->hit), f->hit,
+           f->land_t * 1000.0,
+           t >= f->land_t
+               ? "The object starts at the box, one radius back along the "
+                 "arc, with the velocity of the arc toward the object "
+                 "(throw_arc_objects=1)"
+               : "The game's physics has it before it gets there, and the "
+                 "game tests the objects from now");
+    if (back > 0.0f) {
+      ++g_flight_logs;
+      ModLog("hand throw   : the center of %p went %.2f units back along the "
+             "arc to %.1f %.1f %.1f", f->object, back, position[0],
+             position[1], position[2]);
+    }
   }
   f->drag = *reinterpret_cast<const float*>(ob + kObDrag);
   *reinterpret_cast<float*>(ob + kObDrag) = 0.0f;
@@ -2519,6 +2612,8 @@ void ThrowPhysicsSetDraw(int rule) {
   g_draw = rule != 0 ? throw_math::kDrawReal : throw_math::kDrawFlight;
 }
 
+void ThrowPhysicsSetArcObjects(bool on) { g_arc_objects = on; }
+
 void ThrowPhysicsSetFall(int limit_cm) {
   if (limit_cm < 0) limit_cm = 0;
   if (limit_cm > 1000) limit_cm = 1000;
@@ -2611,6 +2706,13 @@ void ThrowPhysicsInstall() {
                      "law",
          prepare_hook ? "in the Hand's draw" : "only in the physics draw",
          g_log ? ". throw_log logs each flight in full" : "");
+  ModLog("hand throw   : throw_arc_objects=%d, %s", g_arc_objects ? 1 : 0,
+         g_arc_objects
+             ? "before the game's physics has a thrown object, its real arc "
+               "stops at the box of the mesh of an object near the Hand, as "
+               "it stops at the land"
+             : "before the game's physics has a thrown object, its real arc "
+               "stops at the land only");
   ModLog("hand throw   : the time factor is %.2f: a throw flies the same "
          "arc as the real throw, %.2f times slower. Trees %s", g_slow,
          g_slow, g_trees ? "fly the same way (throw_trees=1)"
@@ -2877,12 +2979,24 @@ void ThrowPhysicsReleased(void* held) {
   FindLanding(f);
   if (g_flight_logs >= kMaxFlightLogs) return;
   ++g_flight_logs;
-  char where[200];
-  if (f->lands) {
+  char where[320];
+  if (f->hits_object) {
+    sprintf_s(where, "The real arc meets the box of the %s %p after %.2f s at "
+              "%.1f %.1f %.1f, %.1f units over the land, before the land "
+              "(throw_arc_objects=1, %d boxes near the arc)",
+              HandDirectClass(f->hit), f->hit, f->land_t, f->land[0],
+              f->land[1], f->land[2],
+              f->land[1] - Altitude(f->land[0], f->land[2]), f->near_boxes);
+  } else if (f->lands) {
     sprintf_s(where, "The real arc meets the land after %.2f s at %.1f %.1f "
-              "%.1f, %.1f units (%.2f m of the room) away",
+              "%.1f, %.1f units (%.2f m of the room) away%s",
               f->land_t, f->land[0], f->land[1], f->land[2],
-              Flat(f->land, f->p0), Flat(f->land, f->p0) / f->s);
+              Flat(f->land, f->p0), Flat(f->land, f->p0) / f->s,
+              !g_arc_objects ? " (throw_arc_objects=0: the arc tests no "
+                               "object)"
+              : f->near_boxes > 0 ? ". It goes into no box of an object near "
+                                    "it"
+                                  : ". No box of an object is near it");
   } else if (f->leaves) {
     sprintf_s(where, "The real arc leaves the map after %.2f s", f->land_t);
   } else {

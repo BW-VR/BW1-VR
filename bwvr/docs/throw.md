@@ -139,8 +139,9 @@ game sees the speeds of its own physics.
    the flight starts, from the mesh position of that moment.
 2. **The first frames.** The game holds the object in the Hand until the drop
    action of a game turn. In that time the mod draws the object on the real
-   arc `p0 + s v t - s g t^2 / 2`, stopped at the land. So the object leaves
-   the hand on the frame of the release action.
+   arc `p0 + s v t - s g t^2 / 2`, stopped at the land or at an object (see
+   "The objects on the arc"). So the object leaves the hand on the frame of
+   the release action.
 3. **The state.** A call before `GameTurnUpdate` (`pass_guard.cpp` has the
    hook) finds the entry of the object. On the first turn it moves the PhysOb
    to the place of the arc at that time and writes the velocity `sqrt(s) v`,
@@ -207,6 +208,45 @@ A multiplayer game uses the square root law for each throw, because all
 players must run the same physics. The mouse player's throw does not pass
 through the release hook. Each object that the player did not throw keeps the
 game's physics.
+
+### The objects on the arc
+
+The game's physics has the thrown object 0.1 to 0.2 s after the release (at
+most `kHeldLimit`, 0.6 s). Until then the mod draws the real arc, and the
+game's physics then starts at the place of the arc at that time. The game
+tests the objects only from that time. A throw down from a low place meets a
+house on its arc in that time. With an arc that stops only at the land, the
+mod puts the object at the land inside the house, and the game's physics
+sees no contact with the house.
+
+With `throw_arc_objects=1` the arc also stops where it goes into the box of
+the mesh of an object near the Hand:
+
+- The first eye pass of each frame keeps the box of the mesh of each
+  candidate of the draw that is within 4 m of the room of the Hand's point,
+  while the Hand holds an object (`HandDirectArcBoxes` in `hand_direct.cpp`,
+  the box of `HandDirectFeelBody`). A tree, a forest, a scroll and an object
+  with no box of its mesh are not in the list. The object in the Hand is not
+  in it.
+- At the release, `FindLanding` keeps the boxes that are near the arc of
+  the first 0.6 s (`ArcBounds`, `BoxNear` in `throw_math.h`). Along the arc
+  in steps of 2 ms it finds where the arc first goes into one of them
+  (`SegmentEntersBox`). A release inside a box is the game's own case, and
+  that box does not stop the arc.
+- The arc stops there, as it stops at the land. When the game's physics has
+  the object after that time, the center goes one radius back along the
+  arc, and the object gets the velocity of the arc at that point. So the
+  game's contact gives the hit and the damage, as for a fast throw that the
+  game's physics has before the house.
+- After the game's physics has the object, nothing changes: the game tests
+  the objects itself.
+
+`throw_arc_objects=0` stops the arc at the land only.
+
+The log line of the start says "The real arc meets the box of the Abode ...
+before the land", with the count of boxes near the arc. The line of the
+physics says where the object starts. The first contact then says "(an
+object)" for the house.
 
 **The game's state is ahead.** A turn works out the next 0.1 s of the flight,
 and the mod draws it as the time comes. So the Object of the game is up to
@@ -283,6 +323,7 @@ times as long.
 | `release_fall_cm` | 15 | The height of the Hand's point over the land, in cm of the room, above which a still hand lets the object fall. 0 sets it down at each height |
 | `throw_trees` | 1 | 1 lets a thrown tree fly as a rock does. 0 gives the tree the game's physics |
 | `throw_draw` | 1 | Where the mod draws a thrown object between the steps of the game (see "The picture between the steps"). 1: a substep with a touch of another object is 5 ms of the picture, the picture stays at a guess until the object comes to it, and the clock falls back after a wait. 0: each substep has its time of the flight |
+| `throw_arc_objects` | 1 | 1: before the game's physics has a thrown object, its real arc stops at the box of the mesh of an object near the Hand, as it stops at the land (see "The objects on the arc"). 0: the arc stops at the land only |
 
 Outside the God view and the table (play modes 0 to 2) the throw uses the
 gain of `throw_law=0`.
@@ -316,7 +357,7 @@ gain of `throw_law=0`.
 Tag `hand throw`. The release: the top speed and its time before the release,
 the mean of 80 ms, the speed of the flight in units per second, the speed in
 the game's time, and what the release sent. The start: where the real arc
-meets the land, and when. "The game's physics has" the object: the delay, the
+meets the land or the box of an object, and when. "The game's physics has" the object: the delay, the
 place of the game and of the flight, the mass, the radius and the drag. The
 first contact: the time, the place, and the distance from the real arc at that
 time. The end: the time, the cause, the distance across the land, the count of

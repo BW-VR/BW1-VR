@@ -43,13 +43,6 @@ is built, and no test has proven it.
 
 These items come before the other work.
 
-- **B40. A rock thrown down at a house goes through it.** A throw down
-  from 5 units over the land (`village_run.ps1 -Kind throwhouse`) meets the
-  land on its arc after 0.04 s, before the game's physics has the rock
-  (about 0.18 s). The mod then puts the rock on its arc at the land, inside
-  the house: the first contact says "(the land or the water)", and no
-  substep touches an object. A fast throw at the house hits it and breaks
-  it. The arc before the game takes the rock must test the objects too.
 - **B35. A thrown object that hits the water turns fast.** A rock of
   `throw_queue.ps1 -Runs rockfast` that lands in the sea turns 2.36 times a
   second of the picture with no point that touches, over the cap of 1.5

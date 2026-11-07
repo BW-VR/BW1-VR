@@ -319,10 +319,11 @@ if ($Kind -eq 'totem') {
     # the Hand hangs about 7 units toward -x from the Hand's point, so it is
     # then about 37 units (80 cm of the room) over the roof. The grip opens
     # with a still hand, higher than release_fall_cm: the rock falls onto
-    # the roof. A throw down from a lower place does not touch the house: its
-    # real arc meets the land before the game's physics has the rock (0.1 to
-    # 0.2 s after the release), and the mod puts the rock on its arc at the
-    # land. Then the Hand's point goes 2 cm of the room beside the wall of
+    # the roof. A throw down from a lower place meets the house on its real
+    # arc before the game's physics has the rock (0.1 to 0.2 s after the
+    # release). With throw_arc_objects=1 the arc stops at the box of the
+    # house, and the line "The real arc meets the box of the Abode" says so.
+    # Then the Hand's point goes 2 cm of the room beside the wall of
     # the house (the second "feel"), and the log has the card of the hand
     # there. The head looks 25 degrees down and not to the side, so the
     # house is in the view. Eye pictures of the house before and after the

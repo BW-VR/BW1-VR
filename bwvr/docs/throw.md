@@ -259,10 +259,10 @@ points of a moving body against the faces of the dome
 (`PhysOb::CheckVFaces` `0x007FDA60`) when the two balls meet [V]. Two parts
 of the real flight have no such test: the arc before the game's physics has
 the object, and the extra steps of a substep. So without help a thrown
-object goes through the dome. A desktop run showed it: the arc met the box
-of the Temple inside the dome first, and the pig came to rest inside. With
-the game's physics (`throw_law=1`) the game tested the pair, and the pig
-came to rest on top of the dome.
+object goes through the dome: with `throw_shield=0` the arc meets the box of
+the Temple inside the dome first, and a pig comes to rest inside, 7.5 units
+from its middle. With the game's physics (`throw_law=1`) the game tests the
+pair, and the pig comes to rest on top of the dome.
 
 With `throw_shield=1` (the default):
 
@@ -280,8 +280,12 @@ With `throw_shield=1` (the default):
 
 A release inside the ball of a shield is the game's own case: the arc does
 not stop at that ball, and the steps near it are the game's steps.
-`throw_shield=0` tests the shield only in the game's own steps. The log
-lines: "The real arc meets the ball of the body of the PhysicalShield ...",
+A desktop run with `throw_shield=1` (`miracle_run.ps1 -Kind pshield`): the
+arc meets the ball of the shield 0.06 s after the release, the flight takes
+the game's steps from 0.16 s, the first contact is with the shield after
+0.217 s, and the pig comes to rest on the land outside the dome, 19.3 units
+from its middle. `throw_shield=0` tests the shield only in the game's own
+steps. The log lines: "The real arc meets the ball of the body of the PhysicalShield ...",
 and "... comes near the ball of a Physical Shield ... the flight takes the
 game's one step in a substep there".
 

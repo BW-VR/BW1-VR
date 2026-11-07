@@ -1201,8 +1201,10 @@ God view and on the table.
   height of the object), its temperature before and after the drop, the
   temperature at which it burns, and its heat capacity. A line at the end of
   a pour gives the count of drops and of the drops that cooled a fire. Then
-  for 30 s a line each second gives the temperature of the object nearest to
-  the last drop, or says that its fire is out.
+  for 30 s a line each second gives each burning object that was near a
+  drop: its place, its temperature, its fire fraction (`GetFireFraction`
+  `0x007303E0`) and whether it has a graphic of flames (`FireEffect+0x2C`,
+  which `FireEffect::Draw` draws), or says that its fire is out.
 - **A Physical Shield in the physics.** A line gives the body of each new
   shield: its middle, the radius of its ball, its points (their height and
   their farthest distance from the middle), its faces, and its rest byte,
@@ -1277,8 +1279,11 @@ took its temperature from 213.3 to 37.5 in 6 drops. A second run took it
 from 196.7 to 19.1, under 150 from the fourth drop. So the house goes out
 in the game's own way. The lines each second after the pour follow each
 burning object that was near a drop, with its fire fraction and whether it
-has a graphic of flames, because a pile of wood or a store beside the
-house can burn on.
+has a graphic of flames. In two runs the house was out after the pour,
+with no flames on it. The flames that stay are on a pile of wood beside the
+store (it burns at 90, and it stays at 190 to 247) and on trees near it
+(they burn at 110, and they stay at 220). The pour did not fall on them, so
+they burn on, as in the plain game.
 
 **The cloud of a Storm.** The particle system of the cast
 (`SF_StormCast`) ends at 6 s: its pieces die at the age of 6 s
@@ -1294,8 +1299,8 @@ is not a sky cloud and take those mists out of the picture from a frame
 (`backend.md`, "Clouds"). `miracle_run.ps1 -Kind storm` uses them. In a
 desktop run the storm had 17 such mists, for example a dome of 47 units 534
 units away, and none of them was drawn after the frame of the hide, but the
-band stayed. So the band is not such a mist. `sky_test_mist_hide_all` also
-takes the sky clouds out of the picture.
+band stayed. With `sky_test_mist_hide_all` the band goes and the red sky of
+the storm shows. So the band is made of sky clouds of the storm.
 
 Open (B43 in the roadmap): in the full view the cloud of a Storm is a flat
 grey band with straight edges, also with `cloud_pole_pct=0`. The cast of

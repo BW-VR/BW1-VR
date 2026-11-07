@@ -90,32 +90,15 @@ These items come before the other work.
   the white people are in `headset-checks.md`, "Play as normal and send the
   log". The invisible body after the
   quest has no known cause yet.
-- **B41. Flames at a house after a pour of Water.** The drops fall on the
-  house and take its temperature under 150, at which it burns, in 4 to 6
-  drops, so the house goes out in the game's own way (`miracles.md`,
-  "Water on a fire"). The eye pictures still show flames at the house after
-  the pour. Open: whether those flames are a pile of wood or the store
-  beside the house, or a graphic of flames on the house that does not burn.
-  The lines each second after the pour give each fire near it with its
-  fire fraction and its graphic (`miracle_run.ps1 -Kind fire`, `-Kind
-  firelong`).
-- **B42. A thrown object goes into the Physical Shield of the player.** The
-  arc of the real flight and the extra steps of a substep have no test of
-  the dome, so a pig went in and hit the Temple inside. With the game's
-  physics (`throw_law=1`) the pig came to rest on top of the dome.
-  `throw_shield=1` stops the arc at the ball of the body of the shield and
-  takes the game's step near it (`throw.md`, "A Physical Shield on the
-  arc"). Open: a run that shows the pig bounce off the side of the dome, and
-  a rock that takes strength from the shield.
 - **B43. The Storm cloud is a flat grey band.** In the eye pictures the
   cloud of a Storm is a flat grey band with straight edges, also with
   `cloud_pole_pct=0`. The game draws the cloud as many particles (type 106,
   `PARTICLE_TYPE_STORM_CAST`, the rules `UR_StormCast` and
-  `UR_CloudGather`), so the plain game has no flat band. The band is not a
-  mist that is not a sky cloud: with those hidden from a frame on, the band
-  stayed (`miracles.md`, "The cloud of a Storm"). Open: a run with
-  `sky_test_mist_hide_all`, which hides the sky clouds too
-  (`miracle_run.ps1 -Kind storm`).
+  `UR_CloudGather`), so the plain game has no flat band. The band is made
+  of sky clouds of the storm: with the other mists hidden the band stays,
+  and with the sky clouds hidden too it goes and the red sky shows
+  (`miracles.md`, "The cloud of a Storm"). Open: which rule of the mod for
+  the sky clouds makes them a band.
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view

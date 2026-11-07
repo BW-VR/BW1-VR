@@ -247,6 +247,7 @@ float g_lod_factor = 1.0f;
 
 // For the report. Each eye pass draws every dome, so both passes count.
 uint64_t g_dome_draws = 0;
+uint64_t g_sky_draws = 0;     // of them, the sky clouds
 uint64_t g_poles_limited = 0;
 uint64_t g_glare_calls = 0;
 uint64_t g_glare_wanted = 0;
@@ -570,6 +571,7 @@ void __fastcall h_MistDraw(void* self, void* unused) {
         ++g_table_faced;
       }
       ++g_dome_draws;
+      if (sky_cloud) ++g_sky_draws;
       const bool limited = LimitPole(a, distance, basis);
       if (limited) ++g_poles_limited;
       if (g_mist_log && !sky_cloud) {
@@ -753,7 +755,13 @@ void SkyDetailReport() {
   if (!g_hooked) return;
   if (g_dome_draws > 0) {
     ModLog("sky          : the pole limit acted on %llu of %llu cloud and "
-           "mist draws", g_poles_limited, g_dome_draws);
+           "mist draws (%llu of them sky clouds)", g_poles_limited,
+           g_dome_draws, g_sky_draws);
+  }
+  if (g_mist_hide_frame != 0 || g_mist_hide_all_frame != 0) {
+    ModLog("sky          : the test keys of the mists hid %llu draws of a "
+           "mist that is not a sky cloud and %llu draws of a sky cloud",
+           g_mist_hidden, g_sky_hidden);
   }
   if (g_glare_wanted > 0) {
     ModLog("sky          : %llu of %llu passes asked for a sun glare, %s",
@@ -793,6 +801,7 @@ void SkyDetailReport() {
            "to the next", g_moon_tilt_most, g_moon_step_most);
   }
   g_dome_draws = 0;
+  g_sky_draws = 0;
   g_poles_limited = 0;
   g_glare_calls = 0;
   g_glare_wanted = 0;

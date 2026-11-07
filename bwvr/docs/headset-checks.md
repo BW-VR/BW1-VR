@@ -366,10 +366,10 @@ Water and Heal do not show.
 - **In the mod.** Keep the grip closed over the place, and open it to stop.
 - **Proved.** Desktop runs: the pour, the request from the spell book, and
   a power up from a Worship Site. A pour of 27 casts puts out burning trees
-  (`miracle_run.ps1 -Kind fire`). A pour of 62 casts on a burning house does
-  not put out its fire (B41). The lines "miracle watch" of each drop show
-  that the drops fall on the house and take it under the temperature at
-  which it burns in 4 to 6 drops (`miracles.md`, "Water on a fire").
+  (`miracle_run.ps1 -Kind fire`). A pour on a burning house puts it out:
+  the drops take it under the temperature at which it burns in 4 to 7
+  drops, and no flames stay on it. A pile of wood and trees beside it, which
+  the pour does not reach, burn on (`miracles.md`, "Water on a fire").
 - **The owner's check.** Check 21 of "What the owner checks".
 - **To prove.** Water on a field and on a forest changes their growth.
 
@@ -528,11 +528,10 @@ Water and Heal do not show.
 - **In the mod.** Close the grip and draw a circle over the land.
 - **Proved.** Desktop runs: the refusal with no circle ("needs a circle on
   the land first"), and the cast: the dome stands over the circle in the eye
-  pictures (`miracle_run.ps1 -Kind pshield`). A pig thrown at the dome goes
-  in with the real flight, and the arc of the flight did not test the
-  dome. With `throw_shield=1` the flight stops at the dome and the game's
-  physics takes it there (B42, `throw.md`, "A Physical Shield on the
-  arc").
+  pictures (`miracle_run.ps1 -Kind pshield`). A pig thrown at the dome
+  touches the shield and comes to rest on the land outside it, 19 units from
+  its middle (`throw_shield=1`, `throw.md`, "A Physical Shield on the arc").
+  With `throw_shield=0` it comes to rest inside.
 - **To prove.** A rock thrown at the dome stops.
 
 ### Teleport ("Instant Journey")

@@ -1303,7 +1303,10 @@ band stayed. With `sky_test_mist_hide_all` the band goes and the red sky of
 the storm shows. So the band is made of sky clouds of the storm. The engine
 flattens a sky cloud near the horizon of the eye, and in the God view the
 eye is low and near the clouds of the storm. `cloud_round_near` keeps a near
-sky cloud round (`backend.md`, "Clouds").
+sky cloud round. A desktop run showed the band gone, but the clouds of the
+storm hang 6 to 20 units from the eye, and a round one is a dark mass at the
+face. So a sky cloud fades by its gap from the eye in the room
+(`cloud_fade_near_cm`, `cloud_fade_far_cm`, `backend.md`, "Clouds").
 
 Open (B43 in the roadmap): in the full view the cloud of a Storm is a flat
 grey band with straight edges, also with `cloud_pole_pct=0`. The cast of

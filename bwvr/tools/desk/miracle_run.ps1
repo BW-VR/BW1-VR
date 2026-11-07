@@ -250,7 +250,7 @@ if ($Set -ne '') { $keys = "$keys;$Set" }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $log = Join-Path $sp "desk-$Name\bwvr.log"
 if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
-$pattern = '^miracle      :|^sky mist     :|^sky cloud    :|^sky          : (sky_test|cloud_round|the test keys|.*near sky cloud)|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
+$pattern = '^miracle      :|^sky mist     :|^sky cloud    :|^sky          : (sky_test|cloud_round|cloud_fade|the test keys|.*near sky cloud)|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
            '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state|^miracle watch: |' +
            '^hand pick    : seek plan|^creature cmd : (the leash|a double press|test: aimcmd)|' +
            '^far grab    : (the grip closed|the grip opened)|^hand throw   : release'

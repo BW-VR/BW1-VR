@@ -153,6 +153,22 @@ inline void SkyChecks() {
        NearFlatten(3.0f, 10.0f, 0.0f), 3.0, 1e-6);
   Near("a flatten of 1 stays 1", NearFlatten(1.0f, 10.0f, 1000.0f), 1.0,
        1e-6);
+  // The fade of a near sky cloud (15 cm and 60 cm of the room).
+  Near("the eye in a cloud: the cloud is clear",
+       CloudFade(-5.0f, 15.0f, 60.0f), 0.0, 1e-6);
+  Near("at 15 cm from its surface the cloud is clear",
+       CloudFade(15.0f, 15.0f, 60.0f), 0.0, 1e-6);
+  Near("half way the cloud keeps half of its draw",
+       CloudFade(37.5f, 15.0f, 60.0f), 0.5, 1e-6);
+  Near("at 60 cm and more the cloud is whole",
+       CloudFade(80.0f, 15.0f, 60.0f), 1.0, 1e-6);
+  Near("a far limit of 0 keeps the cloud whole",
+       CloudFade(-5.0f, 15.0f, 0.0f), 1.0, 1e-6);
+  Near("a cloud of 300 units 315 units away at 100 units a meter is 15 cm "
+       "from the eye",
+       CloudGapCm(315.0f, 300.0f, 100.0f), 15.0, 1e-4);
+  Near("the same cloud at 10 units a meter is 150 cm from the eye",
+       CloudGapCm(315.0f, 300.0f, 10.0f), 150.0, 1e-4);
   Near("a round near cloud is not flattened at the horizon",
        MistScale(30.0f, true, NearFlatten(4.0f, 600.0f, 1000.0f), cloud,
                  side),

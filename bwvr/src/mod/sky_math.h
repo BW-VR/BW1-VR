@@ -173,4 +173,26 @@ inline float NearFlatten(float flatten, float distance, float limit) {
   return 1.0f + (flatten - 1.0f) * k;
 }
 
+// THE FADE OF A NEAR SKY CLOUD (cloud_fade_near_cm, cloud_fade_far_cm). The
+// share of its draw that a sky cloud keeps, from the gap between the eye and
+// the surface of the cloud in cm of the room (less than 0: the eye is in
+// it). 0 at `near_cm` or less, 1 at `far_cm` or more, and a smooth step
+// between. A far limit of 0 or less, or one that is not past the near limit,
+// keeps each cloud whole.
+inline float CloudFade(float gap_cm, float near_cm, float far_cm) {
+  if (!(far_cm > 0.0f) || !(far_cm > near_cm)) return 1.0f;
+  float k = (gap_cm - near_cm) / (far_cm - near_cm);
+  if (k <= 0.0f) return 0.0f;
+  if (k >= 1.0f) return 1.0f;
+  return k * k * (3.0f - 2.0f * k);
+}
+
+// The gap from the eye to the surface of a cloud, in cm of the room. The
+// cloud is a ball of `radius` units about its place: the dome of a cloud is
+// 20 times its scale wide (mist.l3d).
+inline float CloudGapCm(float distance, float radius, float units_per_meter) {
+  if (!(units_per_meter > 0.0f)) return 1e9f;
+  return (distance - radius) / units_per_meter * 100.0f;
+}
+
 }  // namespace sky_math

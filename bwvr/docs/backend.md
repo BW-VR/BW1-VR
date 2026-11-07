@@ -5127,6 +5127,20 @@ the full term from 2 times that distance on, and a straight line between
 puts the game's value back after it. 0 gives each cloud the flatten of the engine.
 The full view does not change.
 
+**A sky cloud at the eye fades** (`cloud_fade_near_cm` 15, `cloud_fade_far_cm` 60).
+In the God view the sky clouds of a storm hang 6 to 20 units from the eye, so a
+round one is a dark mass that fills the view. In a table frame the stored camera is
+the render head of the pass, so the mod measures the gap from the eye to the
+surface of the cloud there. The cloud is a ball 20 times its scale wide, and the
+gap is in cm of the room, so the rule acts the same at each zoom
+(`sky_math.h`, `CloudGapCm`, `CloudFade`). The eye in the cloud, or within the
+near distance of its surface: the mod does not draw it. From there to the far
+distance its draw goes from clear to whole in a smooth step: the mod gives the
+alpha of the color of the object (`+0x4C`) that share for the draw, and puts the
+game's color back after it. A far distance of 0 draws each cloud whole. The report
+has the count of the clear draws, of the draws with a part of their alpha with
+the mean share, and of the whole draws near the eye.
+
 `clouds_head_free` (default 1) picks the point in a table frame: 1 the table camera,
 0 the render head. The full view is the same with each value. The pole limit uses
 the distance to the point that the cloud faces.
@@ -5873,6 +5887,7 @@ keys that the launcher sets.
 | `spirit_anchor` | 1 | See "The advisors" |
 | `spirit_world_size` | 1 | The size of an advisor at a place of the world. See "The advisors" and `tabletop.md` |
 | `cloud_pole_pct`, `sun_glare`, `detail_distance` | 25, 0, 3 | See "Sky, clouds and detail" |
+| `cloud_fade_near_cm`, `cloud_fade_far_cm` | 15, 60 | In the table and the God view a sky cloud is clear when the eye is in it or within the near distance of its surface, and whole from the far distance on, in cm of the room (see "Clouds"). A far distance of 0: each sky cloud is whole |
 | `cloud_round_near` | 1000 | In the table and the God view a sky cloud nearer than this many units keeps its round shape, and the flatten of the engine comes back to its full value at 2 times the distance (see "Clouds"). 0: each sky cloud has the flatten of the engine |
 | `clouds_head_free` | 1 | 1: in the table and the God view the clouds face the table camera, so a move of the head does not turn them. 0: they face the render head. See "Clouds" |
 | `moon_world_up` | 1 | 1: the moon turns with world up, so it stays fixed in the sky. 0: it turns with the camera of the head. See "The moon" |

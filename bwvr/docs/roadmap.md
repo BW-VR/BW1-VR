@@ -98,10 +98,14 @@ These items come before the other work.
   of sky clouds of the storm: with the sky clouds hidden it goes and the
   red sky shows. The engine flattens a sky cloud near the horizon of the
   eye, and the eye of the God view is low and near those clouds.
-  `cloud_round_near=1000` keeps a sky cloud round nearer than 1000 units
-  (`backend.md`, "Clouds"). Open: a run that shows the clouds of the storm
-  round with the key, the band with 0, and the distances of the clouds in
-  the lines `sky cloud` (`miracle_run.ps1 -Kind storm`).
+  `cloud_round_near=1000` keeps a sky cloud round nearer than 1000 units,
+  and a desktop run showed the band gone. The clouds of the storm hang 6 to
+  20 units from the eye, so round they are dark masses at the face. A sky
+  cloud now fades by the gap from the eye to its surface in the room
+  (`cloud_fade_near_cm=15`, `cloud_fade_far_cm=60`, `backend.md`,
+  "Clouds"). Open: a run that shows the storm with the fade, with no fade
+  and with `cloud_round_near=0` (`miracle_run.ps1 -Kind storm`). Only a
+  headset can show the look of the clouds overhead in depth.
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view

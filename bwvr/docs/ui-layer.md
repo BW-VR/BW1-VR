@@ -2797,7 +2797,7 @@ the most), and the count in each report:
 
 ```
 ray card     : ray_over_panels=1: while a panel in the room is open, the ray of the pointing hand goes out as a quad layer over the panels
-ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m). It meets no panel, so it is 2 m long. A strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a mark of 1.0 cm at the end. The eye pictures have no ray
+ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m). It meets no panel, so it is 2 m long. A strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a mark of 1.6 cm at the end. The eye pictures have no ray
 ray card     : the end of the ray over the panels moves, frame N: from X Y Z to X Y Z m (L m). It ends on the panel, and the mark is there. ...
 ray card     : the ray is no longer over the panels, frame N, after M frames
 ray card     : N frames had the ray over the panels

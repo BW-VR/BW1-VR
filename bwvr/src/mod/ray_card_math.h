@@ -39,7 +39,7 @@ const int kAlong = 1024;
 // The radius of the mark at the end, in meters of the room. The inner disc
 // has the color of the ray. The ring round it is dark ink, so the mark shows
 // on the bright paper of a panel and on the dark land.
-const float kEndM = 0.005f;
+const float kEndM = 0.008f;
 const float kEndInnerShare = 0.6f;
 const float kInk[3] = {0.08f, 0.06f, 0.04f};
 const float kInkAlpha = 0.75f;

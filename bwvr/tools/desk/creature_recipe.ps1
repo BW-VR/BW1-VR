@@ -340,10 +340,12 @@ if ($Kind -eq 'stay') {
              'seek@2300+1 seek@2600+1 shot@2610+1'
 } elseif ($Kind -eq 'ring') {
     # The leash counts as on, with no packet, so the grip at the Creature
-    # does not need far_test_creature. The steps need no grip.
+    # does not need far_test_creature. The steps need no grip. The key
+    # creature_command_test counts the frames of the log, which start about
+    # 730 frames after the frames of the steps, so 90 is before aimcmd@900.
     $watch = 0
     $keys = $keys.Replace('far_test_creature=1;', '').Replace('far_grab_max_m=0;', 'far_grab_max_m=2;') +
-            ';creature_command_test=820'
+            ';creature_command_test=90'
     $steps = 'look@800+600 point@860+1 aimcmd@900+1 shot@930+1 aimcmd@1000+1 shot@1030+1 ' +
              'trigger@1100+6 shot@1200+1'
 } elseif ($Kind -eq 'wide') {

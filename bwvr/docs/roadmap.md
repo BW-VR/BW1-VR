@@ -479,19 +479,14 @@ keeps the mod as it is.
   (`hidden_hints=Throw,Drop`), because the arm decides at the opening of the
   grip whether the object drops or flies. Open: whether the player wants a
   list of the game's words that the card leaves out.
-- **F23. The sea with depth:** the coast at its real depth. The game draws
-  the plain sea (`0x0087A090`) before the land with the depth test ALWAYS,
-  and the land puts each sea vertex (altitude byte 3 or less) at height 0.
-  The branch `agent/sea` (`sea_depth`) slopes the land under the water down
-  by 0.67 units a byte, draws the sea after the land with LESSEQUAL, and
-  draws the coast waves after the sea. Desktop runs: no crash, cost under
-  0.1 ms, and the sea covers the sand under the water in both eyes. Not
-  landed, because two faults show in the eye pictures: a bright orange
-  diamond tile in the water with sharp edges and no tint, and a hard
-  straight cut along the land triangles where the land comes out of the
-  water, with no foam over it. Find what draws that tile and why the
-  waves do not cover the cut, then run the coast recipe again
-  (`hand_run.ps1 -Kind fixed`, `seek_plan=gosea`).
+- **F23. The sea with depth.** The land of the sea goes on down under the
+  water and fades into the sea by its depth, and the light of the Hand on
+  the water writes no depth (`sea_depth`, backend.md, "The sea with
+  depth"). Open: no desktop run had the light of the Hand on the water in
+  the scene (it shows when the scene is dark), so its draw with no depth
+  write has no run. An object in the water shows down to the floor with no
+  tint of the sea. Only a headset shows the depth of the water (headset
+  check 28).
 - **F24. No wait of 20 ms at the stop of a sound.** `audio_stop_wait=0`
   skips the wait only for the sounds of the mod's mixer. The other sounds
   keep it: the logs of desktop runs have 1 or 2 such stops in each run. The

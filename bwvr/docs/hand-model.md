@@ -881,7 +881,9 @@ the distance, and nothing in it reacts to a thing in the water. So no
 layer that shows a thing in the water is missing in the VR picture. The
 sea writes no depth, and the land draws after it. So a finger under the
 plane of the sea is in front of the sea in the picture, and it shows as in
-the air. The hands of the mod draw at the end of the frame
+the air. With `sea_depth=1` the land of the sea goes on down under the
+plane, to 2.68 units (backend.md, "The sea with depth"), so a finger under
+the plane shows down to that floor. The hands of the mod draw at the end of the frame
 (`LH3DRender::FinishFrame`), with the depth test against the land and the
 objects.
 

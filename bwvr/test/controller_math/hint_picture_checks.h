@@ -62,28 +62,32 @@ inline void HintPictureChecks() {
   Check(others, "the words of Index, the wand, Mixed Reality and the simple "
         "controller name their controls", others, 1);
 
-  // THE WINDOW: each control that the drawing shows is inside its picture,
-  // clear of the fade at the edge, on both sides.
-  bool inside = true;
+  // THE VIEWS: each control that the drawing shows is inside its picture,
+  // clear of the fade at the edge, on both sides. The trigger and the grip
+  // have a side view, the select button of a simple controller has not.
+  bool inside = true, sides = true;
   float worst = 1e9f;
   for (int kind = 0; kind < map::kKinds; ++kind) {
     for (int side = 0; side < 2; ++side) {
       const bool left = side == 0;
-      const art::Art a = art::ArtOf(kind);
       for (int c = 0; c < art::kControls; ++c) {
         if (c == art::kStickClick || !art::Shows(kind, left, c)) continue;
-        float cx = 0.0f, cy = 0.0f;
-        hp::Window(kind, c, &cx, &cy);
+        hp::View v;
+        if (!hp::ViewOf(kind, left, c, &v)) {
+          inside = false;
+          continue;
+        }
+        const bool want = (c == art::kTrigger || c == art::kGrip) &&
+                          kind != map::kSimple;
+        if (hp::SideView(kind, c) != want) sides = false;
         float b[4];
-        art::Bounds(a.control[c], b);
-        const float s = hp::Scale();
+        art::Bounds(v.lit, b);
         // The box in px of the picture. The mirror keeps its width.
-        const float bx0 = (b[0] - cx) * s + hp::kSize * 0.5f;
-        const float bx1 = (b[2] - cx) * s + hp::kSize * 0.5f;
-        const float by0 = (b[1] - cy) * s + hp::kSize * 0.5f;
-        const float by1 = (b[3] - cy) * s + hp::kSize * 0.5f;
-        const float x_margin = bx0 < hp::kSize - bx1 ? bx0 : hp::kSize - bx1;
-        const float y_margin = by0 < hp::kSize - by1 ? by0 : hp::kSize - by1;
+        float x0, y0, x1, y1;
+        hp::ToPixel(v, false, b[0], b[1], &x0, &y0);
+        hp::ToPixel(v, false, b[2], b[3], &x1, &y1);
+        const float x_margin = x0 < hp::kSize - x1 ? x0 : hp::kSize - x1;
+        const float y_margin = y0 < hp::kSize - y1 ? y0 : hp::kSize - y1;
         const float margin = x_margin < y_margin ? x_margin : y_margin;
         if (margin < worst) worst = margin;
         if (margin < 3.0f) inside = false;
@@ -92,12 +96,46 @@ inline void HintPictureChecks() {
   }
   Check(inside, "each control is 3 px or more inside its picture (the worst "
         "margin in px)", worst, 3.0);
-  float tx = 0.0f, ty = 0.0f;
-  hp::Window(map::kTouch, art::kTrigger, &tx, &ty);
-  Check(ty - hp::kWindow * 0.5f >= -hp::kPast - 1e-3f &&
-            ty - hp::kWindow * 0.5f < 0.0f,
-        "the window of the trigger at the top goes past the drawing by at "
-        "most kPast", ty - hp::kWindow * 0.5f, -hp::kPast);
+  Check(sides, "the trigger and the grip have a side view, and the select "
+        "button of a simple controller a top view", sides, 1);
+  // The window of a face button of a Touch controller holds its whole ring.
+  bool ring = true;
+  {
+    const art::Art touch = art::ArtOf(map::kTouch);
+    float r[4];
+    art::Bounds(touch.body[0], r);
+    const int buttons[3] = {art::kFirst, art::kSecond, art::kStick};
+    for (int i = 0; i < 3; ++i) {
+      hp::View v;
+      hp::ViewOf(map::kTouch, false, buttons[i], &v);
+      float x0, y0, x1, y1;
+      hp::ToPixel(v, false, r[0], r[1], &x0, &y0);
+      hp::ToPixel(v, false, r[2], r[3], &x1, &y1);
+      if (x0 < 0.0f || y0 < 0.0f || x1 > hp::kSize || y1 > hp::kSize) {
+        ring = false;
+      }
+    }
+  }
+  Check(ring, "the picture of a face button or the stick of a Touch "
+        "controller holds the whole ring", ring, 1);
+  // A side view holds the whole controller.
+  bool whole = true;
+  for (int kind = 0; kind < map::kSimple; ++kind) {
+    hp::View v;
+    hp::ViewOf(kind, false, art::kGrip, &v);
+    for (int n = 0; n < v.bodies; ++n) {
+      float b[4];
+      art::Bounds(v.body[n], b);
+      float x0, y0, x1, y1;
+      hp::ToPixel(v, false, b[0], b[1], &x0, &y0);
+      hp::ToPixel(v, false, b[2], b[3], &x1, &y1);
+      if (x0 < 2.0f || y0 < 2.0f || x1 > hp::kSize - 2.0f ||
+          y1 > hp::kSize - 2.0f) {
+        whole = false;
+      }
+    }
+  }
+  Check(whole, "a side view holds the whole controller", whole, 1);
   Near("the middle of a picture has no fade", hp::EdgeFade(30.0f, 30.0f), 1.0,
        1e-6);
   Near("a corner of a picture fades out", hp::EdgeFade(0.5f, 0.5f), 0.0,
@@ -106,8 +144,7 @@ inline void HintPictureChecks() {
   // THE PICTURE.
   static uint8_t right[hp::kSize * hp::kSize * 4];
   static uint8_t left[hp::kSize * hp::kSize * 4];
-  hp::Look look = {{52, 30, 14}, {36, 124, 60}, {52, 30, 14},
-                   {120, 80, 30}, 0.07f, 0.6f};
+  const hp::Look look = hp::LookOf(true, 1);
   const bool made = hp::Bake(map::kIndex, false, art::kTrigger, look, right) &&
                     hp::Bake(map::kIndex, true, art::kTrigger, look, left);
   Check(made, "the trigger of an Index controller has a picture", made, 1);
@@ -123,19 +160,24 @@ inline void HintPictureChecks() {
   }
   Check(mirror, "the picture of the left controller is the mirror of the "
         "right one", mirror, 1);
-  // The middle of the lit trigger has the color of the tone.
-  const art::Art index = art::ArtOf(map::kIndex);
-  float cx = 0.0f, cy = 0.0f;
-  hp::Window(map::kIndex, art::kTrigger, &cx, &cy);
-  const art::Shape& trigger = index.control[art::kTrigger];
-  const float mx = (trigger.x0 + trigger.x1) * 0.5f;
-  const float my = (trigger.y0 + trigger.y1) * 0.5f;
-  const int px = static_cast<int>((mx - cx) * hp::Scale() + hp::kSize * 0.5f);
-  const int py = static_cast<int>((my - cy) * hp::Scale() + hp::kSize * 0.5f);
+  // The middle of the lit trigger has the color of the tone: the green wax.
+  hp::View view;
+  hp::ViewOf(map::kIndex, false, art::kTrigger, &view);
+  float fx = 0.0f, fy = 0.0f;
+  hp::ToPixel(view, false, (view.lit.x0 + view.lit.x1) * 0.5f,
+              (view.lit.y0 + view.lit.y1) * 0.5f, &fx, &fy);
+  const int px = static_cast<int>(fx), py = static_cast<int>(fy);
   const uint8_t* lit = right + (py * hp::kSize + px) * 4;
   Check(lit[3] >= 240 && lit[1] > lit[2] && lit[1] > lit[0],
-        "the middle of the lit control is opaque and green",
-        lit[1], 124);
+        "the middle of the lit control is opaque and green", lit[1], 124);
+  // The body has a pale fill on the scroll, so its shape reads on the paper.
+  const art::Shape& bar = view.body[0];
+  hp::ToPixel(view, false, bar.x0 + (bar.x1 - bar.x0) * 0.3f,
+              bar.y0 + (bar.y1 - bar.y0) * 0.3f, &fx, &fy);
+  const uint8_t* body =
+      right + (static_cast<int>(fy) * hp::kSize + static_cast<int>(fx)) * 4;
+  Check(body[3] >= 220 && body[2] >= 220, "the body on the scroll is pale "
+        "and opaque (red)", body[2], 232);
   const uint8_t* corner = right;
   Check(corner[3] == 0, "a corner of the picture is clear", corner[3], 0);
   static uint8_t none[hp::kSize * hp::kSize * 4];
@@ -150,20 +192,21 @@ inline void HintPictureChecks() {
   hp::Put(right, card, 80, 80, 70, 10, 5);
   const uint8_t* kept = card + (5 * 80 + 10) * 4;  // a clear corner
   const uint8_t* over = card + ((5 + py) * 80 + 10 + px) * 4;
-  Check(kept[0] == 200 && kept[3] == 200 && over[1] == lit[1] &&
-            over[3] == 255,
-        "a clear pixel keeps the card, and an opaque one takes the picture",
-        over[1], lit[1]);
-  // A card of 30 by 20 px in a buffer of 80 by 70: the put writes no pixel
+  // Over: the picture, and the card times what the picture lets through.
+  const int want = lit[1] + (200 * (255 - lit[3]) + 127) / 255;
+  Check(kept[0] == 200 && kept[3] == 200 && over[1] == want,
+        "a clear pixel keeps the card, and a pixel of the picture goes over "
+        "it", over[1], want);
+  // A card of 45 by 40 px in a buffer of 80 by 70: the put writes no pixel
   // out of the card.
   for (int i = 0; i < 80 * 70 * 4; ++i) card[i] = 200;
-  hp::Put(right, card, 80, 30, 20, 10, 5);
+  hp::Put(right, card, 80, 45, 40, 10, 5);
   int outside = 0, written = 0;
   for (int y = 0; y < 70; ++y) {
     for (int x = 0; x < 80; ++x) {
       const bool changed = card[(y * 80 + x) * 4 + 3] != 200;
-      if (changed && (x >= 30 || y >= 20)) ++outside;
-      if (changed && x < 30 && y < 20) ++written;
+      if (changed && (x >= 45 || y >= 40)) ++outside;
+      if (changed && x < 45 && y < 40) ++written;
     }
   }
   Check(outside == 0 && written > 0,

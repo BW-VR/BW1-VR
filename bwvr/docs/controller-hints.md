@@ -1466,10 +1466,20 @@ Code: `src/mod/hint_picture_math.h` (the picture) and `PutPictures` in
 `test/controller_math/hint_picture_checks.h`.
 
 With `hint_card_pictures=1` (the default) each line of a button has a small
-picture before its badge or its seal. The picture shows a part of the
-drawing of the page Controls (`controller_art_math.h`, `ui-layer.md`, 24.6)
-with the button of the line lit. The words stay. A line with no button, or
-with a button that the drawing does not show, has no picture.
+picture before its badge or its seal: a drawing of the controller with the
+button of the line lit. The words stay. A line with no button, or with a
+button that the drawing does not show, has no picture.
+
+**Two views.** The face buttons, the stick, the pad and the menu button are
+on the top of a controller. Their picture is a part of the drawing of the
+page Controls (`controller_art_math.h`, `ui-layer.md`, 24.6), seen from
+above. The trigger and the grip are under the controller and on its handle.
+Their picture is the side of the controller (`SideOf`): the head, the
+handle, the stick on the top, the trigger under the front of the head and
+the grip on the handle. Each kind has its own side: the flat head of a
+Touch controller, the long bar of an Index controller, and the ring and the
+long handle of a wand and of a Mixed Reality controller. The select button
+of a simple controller is on its top. All of it is our own art in code.
 
 **The button of a line.** The mod finds the control from the button word
 and from the controller of the card (`ControlOfWord`). The words are those
@@ -1480,20 +1490,24 @@ test key `hint_profile`, as on the page Controls. The left controller is the
 mirror of the right one, and the menu button of a Touch controller is only
 on the left one.
 
-**The window.** A full controller in the height of a row would be too
-small: a face button would be about 4 px of the view at 55 cm. So each
-picture is a square window of 120 units of the drawing around the lit
-control, in 60 by 60 px of the card (1.5 cm). Each window has the same
-scale, so a face button is about 12 px of the card and 8 px of the view.
-The window holds the controls around the lit one and the outline of the
-controller, so the player sees where the control is. At the top and at the
-bottom of a controller the window goes at most 16 units past the drawing.
-The edge of the window fades out over 6 px, with round corners, so a cut
+**The window.** A full controller from above in the height of a row would
+be too small: a face button would be about 4 px of the view at 55 cm. So
+the picture of a top view is a square window of 140 units of the drawing
+around the lit control, in 60 by 60 px of the card (1.5 cm). Each window of
+a top view has the same scale, so a face button of a Touch controller is
+about 10 px of the card and 7 px of the view. When the part of the body
+that has the control fits in the window, the window holds all of it: the
+whole ring of the face buttons of a Touch controller. Else the control is
+in the middle of the window, and the window goes at most 16 units past the
+drawing. A side view holds the whole controller, with a margin of 7 units.
+The edge of the picture fades out over 5 px, with round corners, so a cut
 outline does not end in a hard line.
 
-**The look.** The outline of the controller and the other controls are in
-the ink of the card: dark brown on the scroll, light gray on the plain card.
-The other controls are at 60 percent. The lit control has the color of its
+**The look** (`LookOf`). On the scroll the outline is a dark brown ink,
+darker than the words, 3.4 px wide, and the body has a pale fill, so the
+shape reads on the paper. On the plain card the outline is light gray, 3 px
+wide, on a slate fill. The other controls are at 85 percent on the scroll
+and 75 percent on the plain card. The lit control has the color of its
 badge or its seal: green for the trigger, amber or gold for the grip, red on
 the scroll and white on the plain card for the other buttons. It has a soft
 halo of the same color and a thin edge in ink.

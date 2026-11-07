@@ -494,13 +494,13 @@ keeps the mod as it is.
   31.25 s), 500 to 532 ms after its play, with a wait of 20.3 to 21.0 ms.
   So at the start only, not in play. Open: whether a play has more of them
   (the log of a play shows it, `headset-checks.md`).
-- **F26. The rows of the settings window at its first open.** The warm
-  draws the page and the parts of the panel of places, and the page and the
-  tabs of the settings window (`panel_warm`, `controller-hints.md`, 9.11,
-  "The warm of the panels"). The rows of the window hold the values of now,
-  so its first picture still draws them on the frame thread. Open: the cost
-  of that first picture in a desktop run, and a warm of the rows of the
-  first group if it is large.
+- **F26. The first open of the settings window.** The warm draws the page,
+  the tabs and the rows of the first group of the settings, and a thread
+  draws the drawing of the page Controls (`panel_warm`, `ui-layer.md`, 23.3
+  and 24.6). With the page and the tabs only, the first picture took 4.3
+  ms (4.8 ms with no warm), and the first show of the page Controls 15.4 ms
+  (17.9 ms), with about 11 ms for the drawing. Open: the times with the
+  rows and the drawing from the warm, in a desktop run.
 
 ### Faults of the plain game
 

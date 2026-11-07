@@ -4821,6 +4821,7 @@ void ControllersFrame() {
   PlacesPanelFrame();
   WelcomePageFrame();
   DebugWindowFrame();
+  ControlsPageWarmFrame();
   SpellBookFrame();
   GesturePanelFrame();
 }
@@ -5735,6 +5736,11 @@ int ControllersButtonLayout() { return ButtonLayout(); }
 // For the page Controls (controls_page.cpp) and the hints: the kind of a
 // controller (0 left, 1 right), the map that acts on it, and the settings
 // that give the slots their jobs.
+bool ControllersProfileKnown(int c) {
+  const char* profile = HandProfileOf(c < 0 || c > 1 ? 1 : c);
+  return profile != nullptr && profile[0] != 0;
+}
+
 int ControllersKindOf(int c) {
   if (c < 0 || c > 1) return button_map::kTouch;
   return g_map.kind[c] >= 0 ? g_map.kind[c]

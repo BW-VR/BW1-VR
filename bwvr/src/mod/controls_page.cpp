@@ -36,8 +36,17 @@
 // is code. The words go through a GDI picture of the page, as the words of
 // the cards do.
 //
+// THE WARM. The drawing takes about 11 ms. With panel_warm=1 the frame
+// thread waits until it knows the interaction profile of both controllers
+// (ControlsPageWarmFrame). Then it takes the state of that frame, and a
+// thread of the mod draws the drawing with no lit control. When the page
+// first shows the same state, its rows use that drawing. The page waits
+// for the end of the thread before it uses the drawing (WaitWarm).
+//
 //   controls_page=1    0: the settings window has no tab Controls. The keys
 //                      of the map still act
+//   panel_warm=1       0: the first show of the page draws the drawing on
+//                      the frame thread
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -83,6 +92,8 @@ bool g_read = false;
 bool g_on = true;
 int g_hover = -1;
 uint64_t g_steps = 0, g_defaults = 0, g_draws = 0;
+int g_style_ini = 1;    // hint_card_style
+bool g_warm_on = true;  // panel_warm
 double g_draw_ms = 0.0, g_draw_most_ms = 0.0;
 
 void Read() {
@@ -95,6 +106,9 @@ void Read() {
     slash[1] = 0;
     strcat_s(path, "bwvr.ini");
     g_on = GetPrivateProfileIntA("bwvr", "controls_page", 1, path) != 0;
+    g_style_ini =
+        GetPrivateProfileIntA("bwvr", "hint_card_style", 1, path) != 0 ? 1 : 0;
+    g_warm_on = GetPrivateProfileIntA("bwvr", "panel_warm", 1, path) != 0;
   }
   ModLog("controls     : controls_page=%d: %s", g_on ? 1 : 0,
          g_on ? "the settings window has the tab Controls"
@@ -216,6 +230,7 @@ inline float Cover(float d) {
 }
 
 uint8_t* g_picture[2] = {nullptr, nullptr};  // the dark look, the parchment
+DWORD g_warm_id = 0;  // the thread of the warm of the drawing
 int g_drawn_value[2] = {-1, -1};
 kit::Canvas g_letters = {};
 HFONT g_font[2][3] = {};  // each look: the head, the lines, the letters
@@ -491,11 +506,13 @@ void DrawSide(uint8_t* to, int style, const State& s, int side, int lit) {
         foot, DT_CENTER, ink, 1.0f);
 }
 
-void Draw(int style, int lit) {
+// The drawing in `style` for the state s, with the control `lit` lit. The
+// thread of the warm calls it too, with the state that the frame thread
+// took.
+void Draw(int style, int lit, const State& s) {
   const double start = NowMs();
   uint8_t* to = g_picture[style];
   memset(to, 0, static_cast<size_t>(art::kWidth) * art::kHeight * 4);
-  const State s = Now();
   const Paint& ink = kInk[style];
   const int kind = s.kind[s.pointing];
   wchar_t head[96];
@@ -515,16 +532,16 @@ void Draw(int style, int lit) {
   if (ms > g_draw_most_ms) g_draw_most_ms = ms;
   if (g_draws <= 4) {
     ModLog("controls     : the drawing of the %s and %s controllers took "
-           "%.2f ms (%s), frame %llu", map::kKindLog[s.kind[0]],
-           map::kKindLog[s.kind[1]], ms,
-           style != 0 ? "parchment" : "dark", ControllersFrameCount());
+           "%.2f ms (%s), frame %llu, on the %s thread",
+           map::kKindLog[s.kind[0]], map::kKindLog[s.kind[1]], ms,
+           style != 0 ? "parchment" : "dark", ControllersFrameCount(),
+           GetCurrentThreadId() == g_warm_id ? "warm" : "frame");
   }
 }
 
 // The value of the rows of the drawing: what it shows. A change draws it
 // again.
-int DrawingValue() {
-  const State s = Now();
+int DrawingValueOf(const State& s, int lit) {
   uint32_t h = 2166136261u;
   const auto mix = [&](uint32_t v) {
     h ^= v;
@@ -542,9 +559,37 @@ int DrawingValue() {
     }
   }
   mix(static_cast<uint32_t>(s.pointing));
-  const int lit = LitOf(g_hover);
   return static_cast<int>(((h & 0xFFFFFu) << 6) |
                           static_cast<uint32_t>(lit + 1));
+}
+
+int DrawingValue() { return DrawingValueOf(Now(), LitOf(g_hover)); }
+
+// --- the warm of the drawing -----------------------------------------------------
+
+bool g_warm_tried = false;
+HANDLE g_warm = nullptr;  // the thread, until the frame thread saw its end
+State g_warm_state;
+int g_warm_style = 1;
+int g_warm_value = -1;
+
+DWORD WINAPI WarmDrawing(void*) {
+  Draw(g_warm_style, -1, g_warm_state);
+  return 0;
+}
+
+// On the frame thread, before a use of the drawing or of its letters.
+void WaitWarm() {
+  if (g_warm == nullptr) return;
+  if (WaitForSingleObject(g_warm, 0) != WAIT_OBJECT_0) {
+    const double start = NowMs();
+    WaitForSingleObject(g_warm, INFINITE);
+    ModLog("controls     : the page waited %.1f ms on the frame thread for "
+           "the warm of the drawing", NowMs() - start);
+  }
+  CloseHandle(g_warm);
+  g_warm = nullptr;
+  g_drawn_value[g_warm_style] = g_warm_value;
 }
 
 // --- the notes -------------------------------------------------------------------
@@ -755,6 +800,7 @@ bool ControlsRowStep(int k, bool back) {
 
 const uint8_t* ControlsRowPicture(int k, int value, int style) {
   if (k < 0 || k >= kPictureRows) return nullptr;
+  WaitWarm();
   style = style != 0 ? 1 : 0;
   const size_t bytes = static_cast<size_t>(art::kWidth) * art::kHeight * 4;
   if (g_picture[style] == nullptr) {
@@ -763,7 +809,7 @@ const uint8_t* ControlsRowPicture(int k, int value, int style) {
     g_drawn_value[style] = -1;
   }
   if (g_drawn_value[style] != value) {
-    Draw(style, static_cast<int>(value & 63) - 1);
+    Draw(style, static_cast<int>(value & 63) - 1, Now());
     g_drawn_value[style] = value;
   }
   return g_picture[style] +
@@ -771,6 +817,44 @@ const uint8_t* ControlsRowPicture(int k, int value, int style) {
 }
 
 void ControlsSetHoverRow(int k) { g_hover = k; }
+
+void ControlsPageWarmFrame() {
+  if (g_warm_tried) return;
+  Read();
+  if (!g_on || !g_warm_on || g_draws > 0) {
+    g_warm_tried = true;
+    return;
+  }
+  const char* forced = ControllerHintsForcedProfile();
+  if ((forced == nullptr || forced[0] == 0) &&
+      (!ControllersProfileKnown(0) || !ControllersProfileKnown(1))) {
+    return;
+  }
+  g_warm_tried = true;
+  g_warm_style = kit::CardStyle(g_style_ini);
+  g_warm_state = Now();
+  g_warm_value = DrawingValueOf(g_warm_state, -1);
+  const size_t bytes = static_cast<size_t>(art::kWidth) * art::kHeight * 4;
+  if (g_picture[g_warm_style] == nullptr) {
+    g_picture[g_warm_style] = new (std::nothrow) uint8_t[bytes];
+    if (g_picture[g_warm_style] == nullptr) return;
+    g_drawn_value[g_warm_style] = -1;
+  }
+  HANDLE thread = CreateThread(nullptr, 0, &WarmDrawing, nullptr,
+                               CREATE_SUSPENDED, &g_warm_id);
+  if (thread == nullptr) {
+    ModLog("controls     : panel_warm=1, but Windows gave no thread for the "
+           "warm of the drawing, so the page draws it when it shows");
+    return;
+  }
+  g_warm = thread;
+  ModLog("controls     : panel_warm=1: the profiles of the controllers are "
+         "known (%s and %s), so a thread of the mod draws the drawing for the "
+         "page Controls, frame %llu", map::kKindLog[g_warm_state.kind[0]],
+         map::kKindLog[g_warm_state.kind[1]], ControllersFrameCount());
+  SetThreadPriority(thread, THREAD_PRIORITY_BELOW_NORMAL);
+  ResumeThread(thread);
+}
 
 void ControlsPageReport() {
   if (g_steps + g_defaults + g_draws == 0) return;

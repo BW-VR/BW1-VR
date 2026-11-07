@@ -2363,9 +2363,11 @@ panel from page 2 of the ring five times: Y, the left hand to More, then to
   `mark_go`, `mark_back`, `pause`, `more`, `debug`, `names`, `save` (the
   owner's ini has `debug_menu=1`), and the three bookmark items send Ctrl
   and 1, Ctrl and Tab, and Backspace, as before.
-- The first picture of the panel draws its 42 parts in 18 ms, and the page
-  takes 8 ms one time. Each other new picture takes 0.4 to 1.6 ms, or 0.01
-  ms when it only copies.
+- With `panel_warm=1` the thread of the warm draws the page and 82 parts in
+  28 ms at the start, and the first picture of the panel takes 0.66 ms: 1
+  part drawn (the note) and 41 copied. With `panel_warm=0` the first
+  picture takes 10.6 ms with 42 parts drawn, and the page 4.7 ms more. Each
+  other new picture takes 0.4 to 1.6 ms, or 0.01 ms when it only copies.
 
 Only a headset shows the panel, its place and its size, whether the ray
 finds a button with ease, whether a hand that points stays below the
@@ -2449,12 +2451,20 @@ change. The scroll bar and the bottom row are drawn when they change.
 **The warm.** With `panel_warm=1` the thread of the warm of the fonts also
 draws the page, and the tabs and Close as a first picture shows them: the
 first group on, the other tabs plain. It does this for the settings
-(`settings_panel=1`) and for the debug switches (`debug_menu=1`). The rows
-hold the values of now, so the first picture draws them on the frame
-thread, with the title and the bottom row.
+(`settings_panel=1`) and for the debug switches (`debug_menu=1`). For the
+settings it also draws each row of the first group with its value in
+`bwvr.ini` and no ray on it (`SettingsPanelWarmRows`). The first open
+compares the look of each row, and it draws again only a row whose value
+changed. The title, the scroll bar and the bottom row are drawn at the open.
+The switches of the debug page hold states of the game, so their rows are
+drawn at the open. The drawing of the controllers of the page Controls has
+its own warm (24.6).
 
-Costs in a desktop run: the first picture 31 ms (the first draw of each
-letter by GDI), a change under the ray 0.4 to 0.9 ms, and 1.8 to 1.9 ms
+Costs in a desktop run with the fonts warm: the first picture of the
+settings 4.8 ms with 15 parts drawn (`panel_warm=0`), and 4.3 ms with the
+page and 5 tabs from the warm (5.6 ms on its thread). The first show of the
+page Controls 17.9 ms, or 15.4 ms with the tabs from the warm, and its
+drawing of the controllers is about 11 ms of it. A change under the ray 0.4 to 0.9 ms, and 1.8 to 1.9 ms
 while a note shows (the note is laid over the rows again), a frame of a
 scroll by the stick 0.6 to 1.8 ms, a new group 5 ms, the first draw of a
 note 4 to 6 ms. The report of each window gives
@@ -2471,7 +2481,7 @@ the note.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `debug_window` | 1 | With `debug_menu=1`: 1 the item `debug` opens the window. 0 it goes to the debug pages of the ring |
-| `panel_warm` | 1 | 1: the thread of the warm of the fonts draws the page and the tabs of the first picture at the start (23.3, "The warm"). 0: the first picture draws them on the frame thread |
+| `panel_warm` | 1 | 1: the thread of the warm of the fonts draws the page, the tabs and the rows of the first group of the settings at the start (23.3, "The warm"). 0: the first picture draws them on the frame thread |
 | `hint_card_style` | 1 | 1: the parchment. 0: the dark window |
 | `debug_window_test_save` | 0 | Test key. N saves the first N pictures of the window with a new group, a new value, a note or a scroll of 3 rows as `bwvr-debugwin-FFFFF.bmp` over a checkerboard |
 | `debug_test_parts` | | Test key. The parts for the word `aimdebug` of the scripted controller: `tab3`, `row5`, `left5`, `right5` (from 0), `thumb`, `trackend` and `close` |
@@ -2670,6 +2680,17 @@ changes: 1.2 to 1.9 ms, and 13 to 22 ms for the first picture with the first
 draw of each letter. Each row of the drawing is a band of that picture
 (`WindowRows::picture`).
 
+**The warm of the drawing.** With `panel_warm=1` the frame thread waits
+until the runtime gives the interaction profile of both controllers (or a
+`hint_profile`). Then it takes the state of that frame (the kinds, the maps,
+the hand that points and the jobs), and a thread of the mod draws the
+picture with no lit control (`ControlsPageWarmFrame`). When the page first
+shows the same state, it uses that picture. A change of the state before
+the open draws the picture again at the open. The page waits for the end of
+the thread before it uses the picture, and the log says when it waits. The
+font warm (`controller-hints.md`, 9.11) also has the three fonts of the
+drawing.
+
 **The window** has two parts for the page: a row whose `value_count` is -1
 is a band of a picture, with no control, no note and no press. A dim row can
 have a word of its own (`WindowRows::fixed_word`), and then the bottom row
@@ -2678,6 +2699,7 @@ says "Right grip stays on its job".
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `controls_page` | 1 | 0: the settings window has no tab Controls. The keys of the map still act |
+| `panel_warm` | 1 | 1: a thread of the mod draws the drawing of the controllers when their profiles are known. 0: the first show of the page draws it on the frame thread |
 | `button_map_hand`, `button_map_other` | 1234 | The map of the buttons (`controllers.md`, 5.7). 1234 is the layout as made |
 | `hint_profile` | | Test key (`controller-hints.md`, 8). The page draws the kind of this profile |
 
@@ -2686,7 +2708,8 @@ The log has the tag `controls`, and the map has lines of the tag
 
 ```
 controllers  : the right controller is a Quest Touch controller (profile "/interaction_profiles/oculus/touch_controller"). Its buttons for the jobs: A, B, Stick click, frame 2
-controls     : the drawing of the Quest Touch and Quest Touch controllers took 1.88 ms (parchment), frame 731
+controls     : panel_warm=1: the profiles of the controllers are known (Quest Touch and Quest Touch), so a thread of the mod draws the drawing for the page Controls, frame N
+controls     : the drawing of the Quest Touch and Quest Touch controllers took 1.88 ms (parchment), frame 731, on the frame thread
 controls     : Left Y goes from Ring to Recenter, and Left stick click takes Ring. button_map_other=1324 is in bwvr.ini. It acts when each button is up, frame 760
 controllers  : the page Controls: button_map_other=1324: the page Controls moved jobs to other buttons, frame 760
 controllers  : the new map of the buttons acts now: button_map_hand=1234, button_map_other=1324, frame 761

@@ -590,6 +590,25 @@ bool SettingsPanelOpenFromRing() {
 
 const WindowRows* SettingsPanelRows() { return &kSettingsRows; }
 
+int SettingsPanelWarmRows(int group, int* switches, int* values, int most) {
+  char path[MAX_PATH];
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash = length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return 0;
+  slash[1] = 0;
+  strcat_s(path, MAX_PATH, "bwvr.ini");
+  int n = 0;
+  for (int i = 0; i < kSettings && n < most; ++i) {
+    if (kTable[i].group != group) continue;
+    const int v = static_cast<int>(GetPrivateProfileIntA(
+        "bwvr", kTable[i].key, kTable[i].fallback, path));
+    switches[n] = i;
+    values[n] = IndexOfValue(kTable[i].values, v);
+    ++n;
+  }
+  return n;
+}
+
 bool WelcomePageOpen() { return g_room.open; }
 
 bool WelcomePageHoldsTrigger() {

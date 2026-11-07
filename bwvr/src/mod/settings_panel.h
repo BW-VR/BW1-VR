@@ -18,6 +18,11 @@ bool SettingsPanelOpenFromRing();
 // (DebugWindowWarm).
 struct WindowRows;
 const WindowRows* SettingsPanelRows();
+// For the same warm, on its thread: the settings of `group` in the order of
+// the rows of the window, and the value of each row as the window gives it
+// (the place in the list of its values), from bwvr.ini. The answer is the
+// count, at most `most`. It uses no state of the window.
+int SettingsPanelWarmRows(int group, int* switches, int* values, int most);
 
 // THE WELCOME PAGE. controllers.cpp calls these as it calls the functions
 // of the debug window (debug_window.h).

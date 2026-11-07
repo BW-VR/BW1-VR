@@ -386,6 +386,10 @@ const Setting kSettings[] = {
      "the trigger, amber for the grip). The spell book and the keyboard are "
      "pages of the same parchment. Each item of the ring is a wax seal. "
      "Plain: dark cards with white letters."},
+    {kBool, "hint_card_pictures", "Button pictures on the cards", nullptr, 1,
+     "Each line of a button on the cards beside your wrists has a small "
+     "picture of your controller, with that button lit. Off: the cards show "
+     "the button words only."},
     {kBool, "creature_stroke_open", "Stroke with the open hand", nullptr, 1,
      "Put your open hand on your Creature and keep it there for a moment. "
      "Then move the hand slowly to stroke the Creature. You do not need the "

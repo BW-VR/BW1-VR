@@ -2,7 +2,7 @@
 
 This file records how the game draws its mouse and key hints, what the mod
 does with them while a controller is in use, how the hint cards work, and
-what is still open (pictures of the controllers and models).
+what is still open (pictures in the hints of the game, and models).
 
 While a controller owns the pointer, the hints show on one card beside the
 wrist of each hand, with prompts for the controller (section 9). The words of
@@ -44,8 +44,11 @@ All addresses are for `runblack.exe` v1.42, image base `0x00400000`.
 - A line of a prompt that teaches an action goes away after the player did
   the action 3 times, and comes back after 10 minutes of play with no use of
   it. In a lesson of the tutorial each line shows (`hint_learn`, 9.10).
-- Not built: glyph pictures of the buttons, a picture of the controller with
-  the button lit, and the runtime's 3D model (section 5).
+- Each line of a button on a card has a small picture of the controller
+  with that button lit, from the drawing of the page Controls
+  (`hint_card_pictures`, 9.13).
+- Not built: glyph pictures of the buttons in the hints of the game, and the
+  runtime's 3D model (section 5).
 
 ## 1. How the hint icons work
 
@@ -276,8 +279,8 @@ card with no game call.
 
 The mod must not ship art it may not ship. Three levels. The page Controls
 of the settings window has a drawing of each kind of controller in code
-(`ui-layer.md`, 24.6), from which level (b) can come. No level is in the
-hints.
+(`ui-layer.md`, 24.6). Level (b) comes from it, on the hint cards (9.13).
+No level is in the hints that the game draws.
 
 ### (a) Flat icons per profile
 
@@ -414,22 +417,15 @@ The words and the card are built. These parts are open, in the order of effort:
    release of the old material [?]. A 64 by 64 cell at the 20 percent hint size
    is about 13 pixels, which may be too small. The atlas also shows on the
    options controls page, so switch it by input state.
-2. **A picture of the controller with the button lit.** One silhouette per
-   family, one lit control per variant (section 3, level b), with a bright
-   accent on the used control. The drawing of the page Controls has the
-   shapes and the lit control (`controller_art_math.h`). Show it through the atlas if 64 by 64 is clear.
-   If not, show it through `DrawBox` with an own material (way D) or on the
-   hint card. The Touch controller shape on a Quest 3 differs from the Touch
-   Plus shape, so use one generic shape for the family.
-3. **The runtime's 3D model.** Ask for the extension at `xrCreateInstance`
+2. **The runtime's 3D model.** Ask for the extension at `xrCreateInstance`
    only if the runtime lists it. Load the glTF at session start, read the node
    names, and render on the Direct3D 11 side at the hand's grip pose in the
    LOCAL space, only while a hint is active. The model has no motion that the
-   player did not make. Fall back to the picture of item 2 when the runtime has
-   no model. This is the largest item. The main risk is that the runtime offers
+   player did not make. Fall back to the pictures of the card (9.13) when the
+   runtime has no model. This is the largest item. The main risk is that the runtime offers
    no model (it offers none now, section 3).
 
-The card of section 9 is the place for items 2 and 3: they draw on the XR side
+The card of section 9 is the place for item 2: it draws on the XR side
 at the grip pose, only while a hint is active, with no motion that the player
 did not make.
 
@@ -988,6 +984,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_learn` | 1 | 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). The launcher row "Hints": "Until learned" is 1, "Always" is 0 |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
 | `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`), of the ring (`controllers.md`, 10.4) and of the keyboard in the headset (`ui-layer.md`, section 21) |
+| `hint_card_pictures` | 1 | 1 each line of a button has a small picture of the controller with that button lit, before the badge or the seal (9.13). 0 the button word only. The launcher row "Button pictures on the cards" |
 | `hint_card_saving` | 1 | 1 while the game saves, the card of the pointing hand says "Saving..." (9.12). 0 the cards say nothing in a save |
 | `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
 | `font_warm` | 1 | 1 a thread of the mod draws each letter of each font of the cards one time at the start of the game (9.11, "The first draw of a font"). 0 the first draw of each font of a card makes its letters on the frame thread |
@@ -1007,6 +1004,8 @@ row "Hints" sets it. `hint_card_style` has no key of the keyboard. With
 `debug_menu=1` the switch "Card look" (group Interface) of the debug page
 changes it, and each card draws its picture again in the next frame. The
 ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
+The switch "Card pictures" of the same group changes `hint_card_pictures`
+in the same way.
 
 ### 9.6 The log
 
@@ -1107,9 +1106,9 @@ ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
 
 ### 9.7 What is not built
 
-- Glyph pictures of the buttons, a picture of the controller with the button
-  lit, and the runtime's model (section 5). The badge with the button word is
-  the mod's own art and needs no picture of a real controller.
+- Glyph pictures of the buttons in the hints of the game, and the runtime's
+  model (section 5). The badge, the seal and the picture of the button
+  (9.13) are the mod's own art and need no picture of a real controller.
 - Virtual Desktop's runtime lists no controller model extension [M], so a
   model is not possible there.
 
@@ -1459,6 +1458,68 @@ A new game of the desktop saves near frame 830, so
 no headset session, so it shows the picture and the log, not the hold. Only
 a headset can show that the card stays in the view for the whole save, and
 with `xr_hold_ms=0` there is no hold and no card.
+
+### 9.13 The pictures of the buttons
+
+Code: `src/mod/hint_picture_math.h` (the picture) and `PutPictures` in
+`src/mod/hint_card.cpp` (the layout). The checks are in
+`test/controller_math/hint_picture_checks.h`.
+
+With `hint_card_pictures=1` (the default) each line of a button has a small
+picture before its badge or its seal. The picture shows a part of the
+drawing of the page Controls (`controller_art_math.h`, `ui-layer.md`, 24.6)
+with the button of the line lit. The words stay. A line with no button, or
+with a button that the drawing does not show, has no picture.
+
+**The button of a line.** The mod finds the control from the button word
+and from the controller of the card (`ControlOfWord`). The words are those
+of `controller_hints.cpp`, so a change of the map of the buttons changes the
+picture too. "A x2" and "Grip hold" name the same control as "A" and "Grip".
+The kind of the controller comes from its interaction profile, or from the
+test key `hint_profile`, as on the page Controls. The left controller is the
+mirror of the right one, and the menu button of a Touch controller is only
+on the left one.
+
+**The window.** A full controller in the height of a row would be too
+small: a face button would be about 4 px of the view at 55 cm. So each
+picture is a square window of 120 units of the drawing around the lit
+control, in 60 by 60 px of the card (1.5 cm). Each window has the same
+scale, so a face button is about 12 px of the card and 8 px of the view.
+The window holds the controls around the lit one and the outline of the
+controller, so the player sees where the control is. At the top and at the
+bottom of a controller the window goes at most 16 units past the drawing.
+The edge of the window fades out over 6 px, with round corners, so a cut
+outline does not end in a hard line.
+
+**The look.** The outline of the controller and the other controls are in
+the ink of the card: dark brown on the scroll, light gray on the plain card.
+The other controls are at 60 percent. The lit control has the color of its
+badge or its seal: green for the trigger, amber or gold for the grip, red on
+the scroll and white on the plain card for the other buttons. It has a soft
+halo of the same color and a thin edge in ink.
+
+**The layout.** The picture is in the middle of its row, before the badge
+or the seal, with 10 px to it. While one line of a card has a picture, each
+line of a button has the place of a picture, so the badges and the seals
+stay in one column. A line with no button starts at the left edge. A picture makes its line 70 px wider. A line that is too
+long for 19 cm ends in "...", as with no picture.
+
+**The cost.** The mod makes each picture one time for each look and tone
+(`Bake`), and keeps 24 of them. A new picture of a card copies the pictures
+of its lines. Each bake writes a line in the log, 24 at most:
+`hint card : frame N, the picture of the right Touch first face button for
+"A" in the scroll look, 60 by 60 px, took N ms`. The line of each new
+picture of a card gives the count of its pictures of buttons.
+
+**Tests.** A desktop run with `hint_card_save_test=1` saves each new
+picture of a card (9.11). The run is the six takes at the store of Land 1
+(9.10) with `hint_learn=0;prompts=2`, one time for each kind with
+`hint_profile`, and one time with `hint_card_pictures=0`. A desktop run has
+the fake controller only, which is a Touch controller, so the other kinds
+come from `hint_profile`.
+
+Only a headset can show whether a picture is clear at 55 cm, and whether
+the player finds the button from it (`headset-checks.md`).
 
 ## 10. A text that waits for a click
 

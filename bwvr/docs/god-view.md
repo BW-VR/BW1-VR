@@ -379,7 +379,11 @@ The default speed is a quarter turn a second. It is also the full turn speed
 of the comfort vignette, so a full push gives the full darkness of the
 vignette and a small push a light edge. The turn of a frame is the share
 times the speed times the time of the frame, at most 0.05 s, so a long frame
-does not make a jump.
+does not make a jump. The time of the frame is the real time between two
+main camera calls, latched once for the frame. It is not the time from the
+display times of the headset (`god_display_time`), which follow the frames
+of the runtime: a game that does not draw each frame of the runtime gets a
+time that is shorter than its frame there, and the turn is then short.
 
 The turn stops in the frame in which the stick comes back into the dead
 zone: a frame with no request turns nothing, and nothing glides. The larger
@@ -412,16 +416,16 @@ section 5.8).
 The log of the smooth turn:
 
 ```
-comfort      : snap_turn=4. In the God view the stick and a held turn key turn the view smoothly, 90 degrees a second for a full push (smooth_turn_speed). The middle mouse and the other views turn in steps of 45 degrees. No tilt from the middle mouse
-controllers  : the stick starts a smooth turn right of the God view, 100% of the full speed, frame 4640
-god view     : the smooth turn starts to the right, 100% of a full push, at 90 degrees a second for a full push (smooth_turn_speed), heading 12.40 degrees, frame 4640
-god view     : smooth turn frame 1 of the hold: 1.500 degrees in 0.0167 s at 100% of a full push, heading 13.900 degrees, frame 4640
-god view     : the smooth turn stops, the stick asks for no turn now. It turned 90.00 degrees right in 1.000 s of 60 frames (90.0 degrees a second), heading 12.40 to 102.40 degrees, frame 4700
-god view     : turn check, 30 frames after the stop the heading is 102.400 degrees, and it was 102.400 degrees at the stop
+god view     : the smooth turn starts to the right, 100% of a full push, at 90 degrees a second for a full push (smooth_turn_speed), heading 56.14 degrees, frame 121
+god view     : smooth turn frame 1 of the hold: 1.500 degrees in 0.0167 s at 100% of a full push, heading 57.640 degrees, frame 121
+god view     : the smooth turn stops, the stick asks for no turn now. It turned 90.00 degrees right in 1.000 s of 60 frames (90.0 degrees a second), heading 56.14 to 146.14 degrees. The display times of the headset gave 0.811 s for these frames, frame 181
+god view     : turn check, 30 frames after the stop the heading is 146.140 degrees, and it was 146.140 degrees at the stop
 ```
 
-The log has one line for each frame of the first 4 holds, at most 240 frames
-each. The report of a window counts the requests that the God view took,
+The first line is from a desktop run with a full push of 1 s at 60 frames a
+second. The numbers of the other lines show the format, for frames of
+1/60 s. The log has one line for each frame of the first 4 holds, at most
+240 frames each. The report of a window counts the requests that the God view took,
 the ones that `MayTurn` and a grab refused, and the turn events that the
 smooth turn owed to the help.
 

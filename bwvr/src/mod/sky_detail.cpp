@@ -333,11 +333,15 @@ bool LimitPole(float a, float distance, float basis[9]) {
 // weather, of a storm or of the ground: flag 2 at +0x80 is clear).
 // sky_test_mist_log=1 gives one line for each new such mist and a line in
 // each report window. sky_test_mist_hide=N: from frame N of the scripted
-// controller the mod does not draw them, so two eye pictures tell what they
-// are.
+// controller the mod does not draw them. sky_test_mist_hide_all=M: from
+// frame M the mod draws no mist at all, the sky clouds too. So eye pictures
+// before and after each frame tell what the mists draw.
 bool g_mist_log = false;
 uint64_t g_mist_hide_frame = 0;
+uint64_t g_mist_hide_all_frame = 0;
 bool g_mist_hide_said = false;
+bool g_mist_hide_all_said = false;
+uint64_t g_sky_hidden = 0;      // sky clouds that the test key hid
 const int kMistSeen = 40;
 const void* g_mist_seen[kMistSeen];
 int g_mist_seen_count = 0;
@@ -356,21 +360,40 @@ bool MistIniPath(char path[MAX_PATH]) {
   return true;
 }
 
-bool MistHidden(const uint8_t* mist) {
-  if (g_mist_hide_frame == 0 || (mist[kMistFlags] & kMistSkyCloud) != 0) {
-    return false;
-  }
+// The frame of a test key is reached. The line comes at the first draw of
+// any mist from that frame on, so it comes also when no mist of the kind
+// that the key hides is drawn.
+bool MistKeyReached(uint64_t key, bool* said, const char* text,
+                    const char* what) {
+  if (key == 0) return false;
   const uint64_t frame = ControllersFrameCount();
-  if (ControllersTestFrame(g_mist_hide_frame, frame) < g_mist_hide_frame) {
-    return false;
+  if (ControllersTestFrame(key, frame) < key) return false;
+  if (!*said) {
+    *said = true;
+    ModLog("sky          : %s: from frame %llu (the frame %llu of the "
+           "steps) the mod does not draw %s", text, frame, key, what);
   }
-  if (!g_mist_hide_said) {
-    g_mist_hide_said = true;
-    ModLog("sky          : sky_test_mist_hide: from frame %llu the mod does "
-           "not draw a mist that is not a sky cloud", frame);
-  }
-  ++g_mist_hidden;
   return true;
+}
+
+bool MistHidden(const uint8_t* mist) {
+  const bool sky = (mist[kMistFlags] & kMistSkyCloud) != 0;
+  const bool hide_all = MistKeyReached(g_mist_hide_all_frame,
+                                       &g_mist_hide_all_said,
+                                       "sky_test_mist_hide_all",
+                                       "a mist or a sky cloud");
+  const bool hide = MistKeyReached(g_mist_hide_frame, &g_mist_hide_said,
+                                   "sky_test_mist_hide",
+                                   "a mist that is not a sky cloud");
+  if (hide_all || (hide && !sky)) {
+    if (sky) {
+      ++g_sky_hidden;
+    } else {
+      ++g_mist_hidden;
+    }
+    return true;
+  }
+  return false;
 }
 
 void MistLog(const void* self, const float position[3], float scale,
@@ -661,9 +684,13 @@ void SkyDetailInstall() {
     const int hide =
         static_cast<int>(GetPrivateProfileIntA("bwvr", "sky_test_mist_hide", 0, path));
     g_mist_hide_frame = hide > 0 ? static_cast<uint64_t>(hide) : 0;
-    if (g_mist_log || g_mist_hide_frame != 0) {
+    const int hide_all = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "sky_test_mist_hide_all", 0, path));
+    g_mist_hide_all_frame = hide_all > 0 ? static_cast<uint64_t>(hide_all) : 0;
+    if (g_mist_log || g_mist_hide_frame != 0 || g_mist_hide_all_frame != 0) {
       ModLog("sky          : the test keys of the mists: sky_test_mist_log=%d, "
-             "sky_test_mist_hide=%d", g_mist_log ? 1 : 0, hide);
+             "sky_test_mist_hide=%d, sky_test_mist_hide_all=%d",
+             g_mist_log ? 1 : 0, hide, hide_all);
     }
   }
   Hook(kMistDraw, reinterpret_cast<void*>(&h_MistDraw),
@@ -736,14 +763,16 @@ void SkyDetailReport() {
     ModLog("sky          : %llu of %llu cloud and mist draws faced the table "
            "camera", g_table_faced, g_dome_draws);
   }
-  if (g_mist_log && (g_mist_draws > 0 || g_mist_hidden > 0)) {
+  if (g_mist_log) {
     ModLog("sky mist     : %llu draws of a mist that is not a sky cloud, the "
            "nearest %.0f units from the point that it faces, the widest dome "
-           "%.0f units, and %llu draws that the test key hid", g_mist_draws,
-           g_mist_nearest, g_mist_widest, g_mist_hidden);
+           "%.0f units. The test keys hid %llu draws of such mists and %llu "
+           "draws of sky clouds", g_mist_draws, g_mist_nearest, g_mist_widest,
+           g_mist_hidden, g_sky_hidden);
   }
   g_mist_draws = 0;
   g_mist_hidden = 0;
+  g_sky_hidden = 0;
   g_mist_nearest = 0.0f;
   g_mist_widest = 0.0f;
   if (g_moon_turns > 0) {

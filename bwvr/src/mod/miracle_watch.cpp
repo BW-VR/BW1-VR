@@ -544,12 +544,28 @@ double g_drop_since = 0.0;
 double g_drop_last = 0.0;
 int g_drop_logs = 0;
 const int kMaxDropLogs = 150;
-// The burning object nearest to the last drop, for the line each second.
-void* g_watch_fire_object = nullptr;
+// The burning objects near the pour, for the lines each second: each object
+// that was within 30 units of a drop.
+const int kMaxWatchFires = 6;
+void* g_watch_fires[kMaxWatchFires];
+bool g_watch_fire_out[kMaxWatchFires];   // its line "no fire now" came
+int g_watch_fire_count = 0;
+MapCoords g_last_drop = {};
 double g_watch_fire_said = 0.0;
 int g_watch_fire_logs = 0;
-const int kMaxWatchFireLogs = 60;
+const int kMaxWatchFireLogs = 200;
 const double kWatchFireSeconds = 30.0;
+const int kFireGraphic = 0x2C;   // FireEffect::Draw draws this, or nothing
+const float kFractionStart = 0.9f;  // GetFireFraction 0x007303E0
+
+void WatchFire(void* object) {
+  for (int i = 0; i < g_watch_fire_count; ++i) {
+    if (g_watch_fires[i] == object) return;
+  }
+  if (g_watch_fire_count >= kMaxWatchFires) return;
+  g_watch_fire_out[g_watch_fire_count] = false;
+  g_watch_fires[g_watch_fire_count++] = object;
+}
 
 void DropSummary(const char* why) {
   if (g_drop_spell == nullptr || g_drops == 0) return;
@@ -606,10 +622,10 @@ int __fastcall h_SpellEffect(void* spell, void* unused, const void* event) {
     }
   }
   if (cooled > 0) ++g_drops_cooled;
-  if (nearest >= 0) {
-    g_watch_fire_object = fires[nearest].object;
-    g_watch_fire_said = t;
-  }
+  if (g_drops == 1) g_watch_fire_count = 0;
+  for (int i = 0; i < count; ++i) WatchFire(fires[i].object);
+  g_last_drop = drop;
+  if (count > 0) g_watch_fire_said = t;
   if (!(g_drops <= 12 || g_drops % 10 == 0) || g_drop_logs >= kMaxDropLogs) {
     return result;
   }
@@ -662,46 +678,68 @@ int __fastcall h_SpellEffect(void* spell, void* unused, const void* event) {
   return result;
 }
 
-// Each second after a drop, for 30 s: the temperature of the burning object
-// nearest to the last drop.
+// Each second after a drop, for 30 s: each burning object that was near the
+// pour, with the temperature of its fire, the fire fraction of the game
+// (FireEffect::GetFireFraction 0x007303E0: 0 at 0.9 times the temperature at
+// which it burns, 1 at 2 times it) and whether it has a graphic of flames
+// (FireEffect+0x2C, which FireEffect::Draw 0x00730330 draws).
 void DropsFrame() {
   const double t = NowSeconds();
   if (g_drop_spell != nullptr && g_drops > 0 && t - g_drop_last > 3.0) {
     DropSummary("no drop for 3 s");
     g_drop_spell = nullptr;
   }
-  if (g_watch_fire_object == nullptr || t - g_watch_fire_said < 1.0) return;
+  if (g_watch_fire_count == 0 || t - g_watch_fire_said < 1.0) return;
   if (t - g_drop_last > kWatchFireSeconds ||
       g_watch_fire_logs >= kMaxWatchFireLogs) {
-    g_watch_fire_object = nullptr;
+    g_watch_fire_count = 0;
     return;
   }
   g_watch_fire_said = t;
-  ++g_watch_fire_logs;
-  void* object = g_watch_fire_object;
-  if (!LiveObject(object, kObjectFire + 4)) {
-    ModLog("miracle watch: the object %p that the Water fell on is gone, "
-           "%.1f s after the last drop, frame %llu", object, t - g_drop_last,
+  for (int i = 0; i < g_watch_fire_count; ++i) {
+    void* object = g_watch_fires[i];
+    if (g_watch_fire_out[i] || g_watch_fire_logs >= kMaxWatchFireLogs) {
+      continue;
+    }
+    ++g_watch_fire_logs;
+    if (!LiveObject(object, kObjectFire + 4)) {
+      ModLog("miracle watch: the object %p that was near the Water is gone, "
+             "%.1f s after the last drop, frame %llu", object,
+             t - g_drop_last, g_last_frame);
+      g_watch_fire_out[i] = true;
+      continue;
+    }
+    const MapCoords& at = *reinterpret_cast<const MapCoords*>(
+        static_cast<uint8_t*>(object) + kObjectPlace);
+    const float dx = (at.x - g_last_drop.x) / kMapScale;
+    const float dz = (at.z - g_last_drop.z) / kMapScale;
+    const float from_drop = sqrtf(dx * dx + dz * dz);
+    const uint8_t* fire = Read<uint8_t*>(object, kObjectFire);
+    if (fire == nullptr || IsBadReadPtr(fire, kFireGraphic + 4)) {
+      ModLog("miracle watch: %p (%s) at %.1f %.1f, %.1f units from the last "
+             "drop, has no fire now, %.1f s after the last drop of Water, "
+             "frame %llu", object, HandDirectClass(object), at.x / kMapScale,
+             at.z / kMapScale, from_drop, t - g_drop_last, g_last_frame);
+      g_watch_fire_out[i] = true;
+      continue;
+    }
+    const float temperature = Read<float>(fire, kFireTemperature);
+    const float ignition = Ignition(object);
+    float fraction = (temperature - kFractionStart * ignition) /
+                     ((2.0f - kFractionStart) * ignition);
+    if (fraction < 0.0f) fraction = 0.0f;
+    if (fraction > 1.0f) fraction = 1.0f;
+    ModLog("miracle watch: %p (%s) at %.1f %.1f, %.1f units from the last "
+           "drop, %.1f s after the last drop of Water: the temperature of "
+           "its fire is %.1f, so it %s (it burns at %.1f or more). The fire "
+           "fraction is %.2f, and it %s a graphic of flames, frame %llu",
+           object, HandDirectClass(object), at.x / kMapScale,
+           at.z / kMapScale, from_drop, t - g_drop_last, temperature,
+           temperature >= ignition ? "burns" : "does not burn", ignition,
+           fraction,
+           Read<void*>(fire, kFireGraphic) != nullptr ? "has" : "has no",
            g_last_frame);
-    g_watch_fire_object = nullptr;
-    return;
   }
-  const uint8_t* fire = Read<uint8_t*>(object, kObjectFire);
-  if (fire == nullptr || IsBadReadPtr(fire, kFireTemperature + 4)) {
-    ModLog("miracle watch: %p (%s) has no fire now, %.1f s after the last "
-           "drop of Water, frame %llu", object, HandDirectClass(object),
-           t - g_drop_last, g_last_frame);
-    g_watch_fire_object = nullptr;
-    return;
-  }
-  const float temperature = Read<float>(fire, kFireTemperature);
-  const float ignition = Ignition(object);
-  ModLog("miracle watch: %p (%s), %.1f s after the last drop of Water: the "
-         "temperature of its fire is %.1f, so it %s (it burns at %.1f or "
-         "more), frame %llu", object, HandDirectClass(object),
-         t - g_drop_last, temperature,
-         temperature >= ignition ? "burns" : "does not burn", ignition,
-         g_last_frame);
 }
 
 // --- the physics of a Physical Shield ---------------------------------------

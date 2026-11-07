@@ -299,6 +299,39 @@ inline bool SegmentEntersBox(const Box& b, const float a[3], const float c[3],
   return true;
 }
 
+// THE BALL OF A BODY OF THE PHYSICS (the dome of a Physical Shield). The
+// part u (0 to 1) of the segment from a to c where it goes into the ball
+// with the middle m and the radius r. False when a is in the ball already
+// (a release inside it is the game's own case), or when the segment does
+// not reach the ball.
+inline bool SegmentEntersBall(const float m[3], float r, const float a[3],
+                              const float c[3], float* u) {
+  float d[3], f[3];
+  for (int k = 0; k < 3; ++k) {
+    d[k] = c[k] - a[k];
+    f[k] = a[k] - m[k];
+  }
+  const float dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+  const float fd = f[0] * d[0] + f[1] * d[1] + f[2] * d[2];
+  const float ff = f[0] * f[0] + f[1] * f[1] + f[2] * f[2] - r * r;
+  if (ff <= 0.0f || dd < 1e-12f) return false;
+  const float disc = fd * fd - dd * ff;
+  if (disc < 0.0f) return false;
+  const float t = (-fd - sqrtf(disc)) / dd;
+  if (t < 0.0f || t > 1.0f) return false;
+  *u = t;
+  return true;
+}
+
+// True when the ball (p, r) is less than `margin` from the ball (m, big):
+// the gap between their surfaces is less than `margin`.
+inline bool BallsNear(const float p[3], float r, const float m[3], float big,
+                      float margin) {
+  const float d[3] = {p[0] - m[0], p[1] - m[1], p[2] - m[2]};
+  const float reach = r + big + margin;
+  return d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < reach * reach;
+}
+
 // The box around the points of the arc from the release to `seconds` (no
 // more than the time where the arc meets the land), grown by `margin`. An
 // object whose box is outside it cannot be on the arc in that time.

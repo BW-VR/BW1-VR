@@ -589,6 +589,7 @@ int g_throw_turn = 1;
 int g_throw_land_rest = 1;
 int g_throw_draw = 1;
 int g_throw_arc_objects = 1;
+int g_throw_shield = 1;
 // The take of an object that comes to rest (throw_physics.cpp).
 int g_catch_rest_guard = 1;
 int g_catch_rest_test = 0;
@@ -1530,6 +1531,7 @@ void ReadSettings() {
     // of the mesh of an object near the Hand, before the game's physics has
     // the object. 0 stops it at the land only.
     g_throw_arc_objects = number("throw_arc_objects", 1);
+    g_throw_shield = number("throw_shield", 1);
     g_far_grab.throw_law = g_throw_law != 0;
     // far_grab_max_m: a far target is at most this many meters of the room
     // from the head, along the floor. 0 gives no limit.
@@ -2016,6 +2018,7 @@ void StartVrStep() {
         ThrowPhysicsSetCatch(g_catch_at_once);
         ThrowPhysicsSetDraw(g_throw_draw);
         ThrowPhysicsSetArcObjects(g_throw_arc_objects != 0);
+        ThrowPhysicsSetShield(g_throw_shield != 0);
         ThrowPhysicsInstallEarly();
         FarGrabInstall();
         TakeStreamSetOptions(g_take_stream, g_test_keys);

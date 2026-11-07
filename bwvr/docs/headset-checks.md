@@ -367,8 +367,9 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the pour, the request from the spell book, and
   a power up from a Worship Site. A pour of 27 casts puts out burning trees
   (`miracle_run.ps1 -Kind fire`). A pour of 62 casts on a burning house does
-  not put out its fire (B41). The lines "miracle watch" of each drop give
-  the temperature of the house (`miracles.md`, "Water on a fire").
+  not put out its fire (B41). The lines "miracle watch" of each drop show
+  that the drops fall on the house and take it under the temperature at
+  which it burns in 4 to 6 drops (`miracles.md`, "Water on a fire").
 - **The owner's check.** Check 21 of "What the owner checks".
 - **To prove.** Water on a field and on a forest changes their growth.
 
@@ -528,8 +529,10 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the refusal with no circle ("needs a circle on
   the land first"), and the cast: the dome stands over the circle in the eye
   pictures (`miracle_run.ps1 -Kind pshield`). A pig thrown at the dome goes
-  in, also with `throw_law=1` (B42). The lines "miracle watch" of that run
-  give the body of the shield in the physics and the tests of the pair.
+  in with the real flight, and the arc of the flight did not test the
+  dome. With `throw_shield=1` the flight stops at the dome and the game's
+  physics takes it there (B42, `throw.md`, "A Physical Shield on the
+  arc").
 - **To prove.** A rock thrown at the dome stops.
 
 ### Teleport ("Instant Journey")
@@ -550,13 +553,11 @@ Water and Heal do not show.
   for the second site. The real hand can take a site, and a villager in the
   Hand goes onto a site when the grip opens over it
   (`miracle_site_pick=1`, `miracles.md`).
-- **Proved.** Desktop runs (`miracle_run.ps1 -Kind teleport`): one cast of a
-  one-off seed makes one site before the door of the Temple, and a villager
-  set down on it does not go. At the Village Store the game refuses the cast.
-  `miracle_run.ps1 -Kind teleport` makes two sites and puts a villager on
-  the first one. It has not run yet.
-- **To prove.** The two sites stand on the land, and villagers go in at one
-  and come out at the other.
+- **Proved.** Desktop runs (`miracle_run.ps1 -Kind teleport`): two casts of
+  one-off seeds make two sites before the door of the Temple, about 35 units
+  apart. A villager that the Hand puts on the first site comes out at the
+  second one. At the Village Store the game refuses the cast.
+- **To prove.** A villager on the way to worship uses the sites by himself.
 
 ### Explosion ("Blast Extremis", the tooltip "Mega-Blast")
 

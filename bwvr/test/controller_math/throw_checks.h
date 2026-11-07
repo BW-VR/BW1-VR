@@ -1242,6 +1242,40 @@ inline void ThrowChecks() {
     Check(p[1] >= low[1] && p[1] <= high[1] && p[0] <= high[0],
           "the end of the arc is in its bounds", 1, 1);
   }
+
+  // THE BALL OF A PHYSICAL SHIELD (throw_shield). A ball of 10 units with its
+  // middle at 0 5 0.
+  {
+    const float m[3] = {0.0f, 5.0f, 0.0f};
+    const float high[3] = {0.0f, 30.0f, 0.0f};
+    const float low[3] = {0.0f, 0.0f, 0.0f};
+    float u = -1.0f;
+    Check(SegmentEntersBall(m, 10.0f, high, low, &u),
+          "a fall onto the ball goes into it", 1, 1);
+    Near("it goes in at the top of the ball, 15 units high",
+         30.0f - 30.0f * u, 15.0, 1e-4);
+    const float side[3] = {-30.0f, 5.0f, 0.0f};
+    const float past[3] = {30.0f, 5.0f, 0.0f};
+    Check(SegmentEntersBall(m, 10.0f, side, past, &u),
+          "a throw across the ball goes into it", 1, 1);
+    Near("it goes in at the side, 10 units from the middle",
+         -30.0f + 60.0f * u, -10.0, 1e-4);
+    const float in[3] = {1.0f, 6.0f, 0.0f};
+    Check(!SegmentEntersBall(m, 10.0f, in, past, &u),
+          "a release inside the ball is the game's own case", 0, 0);
+    const float beside[3] = {-30.0f, 5.0f, 12.0f};
+    const float beside_end[3] = {30.0f, 5.0f, 12.0f};
+    Check(!SegmentEntersBall(m, 10.0f, beside, beside_end, &u),
+          "a throw beside the ball does not go into it", 0, 0);
+    const float short_end[3] = {-20.0f, 5.0f, 0.0f};
+    Check(!SegmentEntersBall(m, 10.0f, side, short_end, &u),
+          "a segment that stops before the ball does not go into it", 0, 0);
+    const float pig[3] = {13.0f, 5.0f, 0.0f};
+    Check(BallsNear(pig, 1.0f, m, 10.0f, 3.0f),
+          "a pig 2 units from the ball is near it", 1, 1);
+    Check(!BallsNear(pig, 1.0f, m, 10.0f, 1.0f),
+          "with a margin of 1 unit it is not near", 0, 0);
+  }
 }
 
 }  // namespace throw_checks

@@ -5154,7 +5154,7 @@ The sun disc (`fn_0086C140`) is a fixed quad and reads no camera turn. The dome
 (`fn_0086B6B0`) is a sphere about a fixed point. The sun glare has its own key (see
 "The sun glare").
 
-Five test keys are for desktop runs. The launcher removes them from `bwvr.ini` on
+Six test keys are for desktop runs. The launcher removes them from `bwvr.ini` on
 each save.
 
 - `sky_test_frame=N`: at frame N of the scripted controller, `clouds_head_free` and
@@ -5181,8 +5181,10 @@ each save.
   dome.
 - `sky_test_mist_hide=N`: from frame N of the scripted controller (a frame of the
   steps in a test save) the mod does not draw a mist that is not a sky cloud, and
-  the log says so one time. Two eye pictures, before and after that frame, show
-  what those mists draw.
+  the log says so one time, at the first draw of any mist from that frame on.
+  Two eye pictures, before and after that frame, show what those mists draw.
+- `sky_test_mist_hide_all=M`: from frame M the mod draws no mist and no sky
+  cloud. The line of the report gives the draws that each key hid.
 
 ### Sprites with world up
 
@@ -5853,7 +5855,7 @@ keys that the launcher sets.
 | `cloud_pole_pct`, `sun_glare`, `detail_distance` | 25, 0, 3 | See "Sky, clouds and detail" |
 | `clouds_head_free` | 1 | 1: in the table and the God view the clouds face the table camera, so a move of the head does not turn them. 0: they face the render head. See "Clouds" |
 | `moon_world_up` | 1 | 1: the moon turns with world up, so it stays fixed in the sky. 0: it turns with the camera of the head. See "The moon" |
-| `sky_test_frame`, `sky_test_trace`, `sky_test_hour`, `sky_test_mist_log`, `sky_test_mist_hide` | 0, 0, -1, 0, 0 | Test keys of the desktop runs. See "The moon" |
+| `sky_test_frame`, `sky_test_trace`, `sky_test_hour`, `sky_test_mist_log`, `sky_test_mist_hide`, `sky_test_mist_hide_all` | 0, 0, -1, 0, 0, 0 | Test keys of the desktop runs. See "The moon" |
 | `sprite_world_up` | 1 | 1: smoke, fire and the other sprites keep world up, so they do not roll with the head. 0: they roll with the head. See "Sprites with world up" |
 | `sprite_test_frame`, `sprite_test_trace` | 0, 0 | Test keys of the desktop runs. See "Sprites with world up" |
 | `freeze_time` | 1 | See "Time, bars and the second eye pass" |

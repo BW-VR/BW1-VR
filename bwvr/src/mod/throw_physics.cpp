@@ -237,6 +237,9 @@ int g_law = 2;
 // goes into the box of the mesh of an object near the Hand, before the game's
 // physics has the object. false tests the land only.
 bool g_arc_objects = true;
+// throw_shield: the ball of a Physical Shield stops the arc, and the flight
+// takes the game's step near it.
+bool g_shield = true;
 // throw_log: 1 logs each turn and each third frame, 2 also logs each substep
 // and each frame after the first contact.
 int g_log = 0;
@@ -322,6 +325,10 @@ struct Flight {
   // true, and land is the point where the arc goes into the box.
   bool hits_object;
   void* hit;
+  // The arc goes into the ball of a Physical Shield first (throw_shield):
+  // hits_object is true too, and hit is the shield.
+  bool hits_shield;
+  bool shield_logged;    // the line of the flight near a shield came
   int near_boxes;        // the boxes near the arc, for the log
   // The physics.
   double time;           // the seconds of the flight that the state is at
@@ -570,6 +577,38 @@ float TurnShown(const Flight& f, float turn_speed) {
   return shown;
 }
 
+// THE BODIES OF THE PHYSICAL SHIELDS [V, PhysicalShield::
+// GetAlwaysRemainsInPhysicsInternalSystem 0x0072CAF0]: each one stays in the
+// array of the physics, with the ball of its body at PhysOb+0xA0 and +0x150.
+// The game tests the points of a moving body against the faces of the dome
+// (PhysOb::CheckVFaces 0x007FDA60) once a substep when the two balls meet.
+// The extra steps of the real flight have no such test, and the arc before
+// the game's physics has none at all.
+const uintptr_t kPhysicalShieldTable = 0x00983F64;
+const int kMaxShields = 4;
+
+int ShieldBalls(float middle[][3], float radius[], void* objects[], int most) {
+  uint8_t* base = *reinterpret_cast<uint8_t* const*>(kPhysicsArray);
+  const int32_t count = *reinterpret_cast<const int32_t*>(kPhysicsCount);
+  if (base == nullptr || count <= 0 || count > 4096) return 0;
+  int found = 0;
+  for (int i = 0; i < count && found < most; ++i) {
+    const uint8_t* entry = base + i * kEntrySize;
+    void* object = *reinterpret_cast<void* const*>(entry + kEntryObject);
+    if (object == nullptr || IsBadReadPtr(object, 4) ||
+        *static_cast<const uintptr_t*>(object) != kPhysicalShieldTable) {
+      continue;
+    }
+    const uint8_t* ob = entry + kEntryPhysOb;
+    const float* at = reinterpret_cast<const float*>(ob + kObPosition);
+    for (int k = 0; k < 3; ++k) middle[found][k] = at[k];
+    radius[found] = *reinterpret_cast<const float*>(ob + kObRadius);
+    objects[found] = object;
+    if (radius[found] > 0.0f && radius[found] < 1000.0f) ++found;
+  }
+  return found;
+}
+
 // Where the real arc meets the land. It goes along the arc in steps of 2 ms,
 // for 6 s at most. With throw_arc_objects=1 it also stops where the arc goes
 // into the box of the mesh of an object near the Hand, in the time before
@@ -578,6 +617,7 @@ float TurnShown(const Flight& f, float turn_speed) {
 void FindLanding(Flight* f) {
   f->lands = f->leaves = false;
   f->hits_object = false;
+  f->hits_shield = false;
   f->hit = nullptr;
   f->near_boxes = 0;
   f->land_t = 0.0;
@@ -599,6 +639,12 @@ void FindLanding(Flight* f) {
     }
     f->near_boxes = near_count;
   }
+  float shield_middle[kMaxShields][3], shield_radius[kMaxShields];
+  void* shield_object[kMaxShields];
+  const int shields =
+      g_shield ? ShieldBalls(shield_middle, shield_radius, shield_object,
+                             kMaxShields)
+               : 0;
   float before[3] = {f->p0[0], f->p0[1], f->p0[2]};
   for (int k = 1; k <= 3000; ++k) {
     const double t = k * 0.002;
@@ -614,6 +660,28 @@ void FindLanding(Flight* f) {
           first = i;
           first_u = u;
         }
+      }
+      // The ball of a shield is in front of the boxes in it.
+      int shield = -1;
+      for (int i = 0; i < shields; ++i) {
+        float u = 0.0f;
+        if (throw_math::SegmentEntersBall(shield_middle[i], shield_radius[i],
+                                          before, p, &u) &&
+            u < first_u) {
+          shield = i;
+          first_u = u;
+        }
+      }
+      if (shield >= 0) {
+        f->lands = true;
+        f->hits_object = true;
+        f->hits_shield = true;
+        f->hit = shield_object[shield];
+        f->land_t = t - 0.002 * (1.0 - first_u);
+        float at[3];
+        throw_math::RealArc(f->p0, f->v0, f->gs, f->land_t, at, v);
+        for (int i = 0; i < 3; ++i) f->land[i] = at[i];
+        return;
       }
       if (first >= 0) {
         f->lands = true;
@@ -1211,10 +1279,38 @@ int FlySubstep(Flight* f, uint8_t* ob) {
   uint8_t* entry = ob - kEntryPhysOb;
   // Another object touched this one in this substep (fn_007FDA60 wrote
   // PhysOb+0x78). Then the game's one step runs.
-  const bool hit = *reinterpret_cast<void* const*>(ob + kObHitBy) != nullptr;
-  if (!hit && f->substep_open) {
+  const bool touched =
+      *reinterpret_cast<void* const*>(ob + kObHitBy) != nullptr;
+  if (!touched && f->substep_open) {
     *reinterpret_cast<void**>(ob + kObHitBy) = f->hit_before;
   }
+  // Near the ball of a Physical Shield the game's one step runs too, so the
+  // game tests the pair after each step of the object (throw_shield). The
+  // margin is the way of one step of the flight and 1 unit.
+  bool near_shield = false;
+  if (g_shield) {
+    float middle[kMaxShields][3], radius[kMaxShields];
+    void* objects[kMaxShields];
+    const int shields = ShieldBalls(middle, radius, objects, kMaxShields);
+    const float* at = reinterpret_cast<const float*>(ob + kObPosition);
+    const float* v = reinterpret_cast<const float*>(ob + kObVelocity);
+    const float margin =
+        controller_math::Length(v) * throw_math::kSubstep * f->scale + 1.0f;
+    const float own = *reinterpret_cast<const float*>(ob + kObRadius);
+    for (int i = 0; i < shields && !near_shield; ++i) {
+      near_shield = throw_math::BallsNear(at, own, middle[i], radius[i], margin);
+    }
+    if (near_shield && !f->shield_logged && g_flight_logs < kMaxFlightLogs) {
+      f->shield_logged = true;
+      ++g_flight_logs;
+      ModLog("hand throw   : %p comes near the ball of a Physical Shield "
+             "%.3f s into its flight, at %.1f %.1f %.1f: the flight takes the "
+             "game's one step in a substep there, so the game tests the "
+             "faces of the dome (throw_shield=1)", f->object, f->time, at[0],
+             at[1], at[2]);
+    }
+  }
+  const bool hit = touched || near_shield;
   f->substep_open = false;
   // The rate of this substep. After the first contact it goes to the rate of
   // the land, by the time that the object touched.
@@ -2625,6 +2721,8 @@ void ThrowPhysicsSetDraw(int rule) {
 
 void ThrowPhysicsSetArcObjects(bool on) { g_arc_objects = on; }
 
+void ThrowPhysicsSetShield(bool on) { g_shield = on; }
+
 void ThrowPhysicsSetFall(int limit_cm) {
   if (limit_cm < 0) limit_cm = 0;
   if (limit_cm > 1000) limit_cm = 1000;
@@ -2717,6 +2815,12 @@ void ThrowPhysicsInstall() {
                      "law",
          prepare_hook ? "in the Hand's draw" : "only in the physics draw",
          g_log ? ". throw_log logs each flight in full" : "");
+  ModLog("hand throw   : throw_shield=%d, %s", g_shield ? 1 : 0,
+         g_shield
+             ? "the real arc stops at the ball of the body of a Physical "
+               "Shield, and the flight takes the game's one step in a "
+               "substep near it"
+             : "the game tests a Physical Shield only in its own steps");
   ModLog("hand throw   : throw_arc_objects=%d, %s", g_arc_objects ? 1 : 0,
          g_arc_objects
              ? "before the game's physics has a thrown object, its real arc "
@@ -2991,7 +3095,14 @@ void ThrowPhysicsReleased(void* held) {
   if (g_flight_logs >= kMaxFlightLogs) return;
   ++g_flight_logs;
   char where[320];
-  if (f->hits_object) {
+  if (f->hits_shield) {
+    sprintf_s(where, "The real arc meets the ball of the body of the %s %p "
+              "after %.2f s at %.1f %.1f %.1f, %.1f units over the land, "
+              "before the land (throw_shield=1)",
+              HandDirectClass(f->hit), f->hit, f->land_t, f->land[0],
+              f->land[1], f->land[2],
+              f->land[1] - Altitude(f->land[0], f->land[2]));
+  } else if (f->hits_object) {
     sprintf_s(where, "The real arc meets the box of the %s %p after %.2f s at "
               "%.1f %.1f %.1f, %.1f units over the land, before the land "
               "(throw_arc_objects=1, %d boxes near the arc)",

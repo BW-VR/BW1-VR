@@ -246,7 +246,44 @@ the mesh of an object near the Hand:
 The log line of the start says "The real arc meets the box of the Abode ...
 before the land", with the count of boxes near the arc. The line of the
 physics says where the object starts. The first contact then says "(an
-object)" for the house.
+object, P (Abode))" for the house: the object of the other body and its
+class.
+
+### A Physical Shield on the arc
+
+The body of a Physical Shield stays in the array of the physics
+(`PhysicalShield::GetAlwaysRemainsInPhysicsInternalSystem` `0x0072CAF0`).
+It is built one time at the full size of the dome, and it has a ball
+(`PhysOb+0xA0`, `+0x150`) and faces. In each substep the game tests the
+points of a moving body against the faces of the dome
+(`PhysOb::CheckVFaces` `0x007FDA60`) when the two balls meet [V]. Two parts
+of the real flight have no such test: the arc before the game's physics has
+the object, and the extra steps of a substep. So without help a thrown
+object goes through the dome. A desktop run showed it: the arc met the box
+of the Temple inside the dome first, and the pig came to rest inside. With
+the game's physics (`throw_law=1`) the game tested the pair, and the pig
+came to rest on top of the dome.
+
+With `throw_shield=1` (the default):
+
+- The arc stops where it goes into the ball of the body of a shield, as it
+  stops at the box of a mesh (`throw_math::SegmentEntersBall`). The ball of
+  a shield is in front of the boxes in it. The game's physics then gets the
+  object one radius back along the arc, with the speed of the arc there.
+- While the ball of the object is near the ball of a shield (the gap is
+  less than the way of one step of the flight and 1 unit,
+  `throw_math::BallsNear`), the flight takes the game's one step in a
+  substep, as in a substep in which another object touched it. So the game
+  tests the faces of the dome after each step of the object, and the object
+  bounces off the dome. Near the dome the object moves in the game's own
+  time.
+
+A release inside the ball of a shield is the game's own case: the arc does
+not stop at that ball, and the steps near it are the game's steps.
+`throw_shield=0` tests the shield only in the game's own steps. The log
+lines: "The real arc meets the ball of the body of the PhysicalShield ...",
+and "... comes near the ball of a Physical Shield ... the flight takes the
+game's one step in a substep there".
 
 **The game's state is ahead.** A turn works out the next 0.1 s of the flight,
 and the mod draws it as the time comes. So the Object of the game is up to
@@ -323,6 +360,7 @@ times as long.
 | `release_fall_cm` | 15 | The height of the Hand's point over the land, in cm of the room, above which a still hand lets the object fall. 0 sets it down at each height |
 | `throw_trees` | 1 | 1 lets a thrown tree fly as a rock does. 0 gives the tree the game's physics |
 | `throw_draw` | 1 | Where the mod draws a thrown object between the steps of the game (see "The picture between the steps"). 1: a substep with a touch of another object is 5 ms of the picture, the picture stays at a guess until the object comes to it, and the clock falls back after a wait. 0: each substep has its time of the flight |
+| `throw_shield` | 1 | 1: the real arc stops at the ball of the body of a Physical Shield, and the flight takes the game's one step in a substep near it, so the object bounces off the dome (see "A Physical Shield on the arc"). 0: the game tests the shield only in its own steps |
 | `throw_arc_objects` | 1 | 1: before the game's physics has a thrown object, its real arc stops at the box of the mesh of an object near the Hand, as it stops at the land (see "The objects on the arc"). 0: the arc stops at the land only |
 
 Outside the God view and the table (play modes 0 to 2) the throw uses the

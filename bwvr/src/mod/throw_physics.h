@@ -90,6 +90,12 @@ void ThrowPhysicsSetDraw(int rule);
 // the game's physics has the object (docs/throw.md, "The objects on the
 // arc"). 0 stops it at the land only.
 void ThrowPhysicsSetArcObjects(bool on);
+// throw_shield: 1 stops the real arc where it goes into the ball of the body
+// of a Physical Shield, and the flight takes only the game's own step in a
+// substep while the ball of the object is near that ball, so the game's
+// test of the pair finds the faces of the dome (docs/throw.md, "A Physical
+// Shield on the arc"). 0 tests the shield only in the game's steps.
+void ThrowPhysicsSetShield(bool on);
 // release_fall_cm: a hand that is still at the opening of the grip sets the
 // object down only when its point is this many cm of the room over the land
 // or less. Higher up the object falls. 0 sets it down at each height. With

@@ -90,50 +90,32 @@ These items come before the other work.
   the white people are in `headset-checks.md`, "Play as normal and send the
   log". The invisible body after the
   quest has no known cause yet.
-- **B41. Water does not put out a burning house.** A pour of 62 casts on
-  a burning house does not put out its fire, and 27 casts put out burning
-  trees (`miracle_run.ps1 -Kind fire`). In the game the Water spell sends
-  its effect (burn -4000, radius 1) each turn at a random point near the
-  spell, at the height of the land plus 0.4 (`SpellWater::Process`). An
-  object gets it when the point is inside its fire radius plus 1 to the
-  side and inside its height plus 1 up and down
-  (`EffectValues::ApplyEffectToMapPos`). Each drop lowers the heat by a
-  part that the heat capacity divides, and a house near other fires can
-  catch fire again. So a house goes out after many drops, and maybe only
-  for a while. The place of the spell is the land under the Hand's point,
-  and the run had that point 4 units from the middle of the house, inside
-  its radius, so the drops fall on the house (`miracles.md`, "Water on a
-  fire"). Each drop moves the temperature toward the temperature of the
-  land minus 4000 by 10 divided by the heat capacity of the gap. Open: the
-  heat capacity of a house and the count of drops that it needs. The lines
-  "drop N of the Water spell" give the terms of the test and the
-  temperature at each drop (`miracle_run.ps1 -Kind fire` and `-Kind
-  firelong`, a pour of 15 s).
-- **B42. A thrown object goes into the Physical Shield of the player.** A
-  pig thrown at the player's own dome goes in, also with the game's own
-  physics (`throw_law=1`). In the game the shield is a body of the physics
-  that a thrown object hits and bounces off, with no test of the owner. A
-  hit of an object that breaks houses (a rock) takes strength from the
-  shield in proportion to the momentum (`PhysicalShield::ReactToPhysicsImpact`
-  `0x0072D610`), and a pig takes none. The body is built one time at the
-  full size of the dome (0.017 times the radius of the spell is the scale),
-  and the game tests the points of a thrown body against its faces
-  (`PhysOb::CheckVFaces`) when the balls of the two bodies meet. Open: why
-  the pig goes in. The lines "the physics has the body of the Physical
-  Shield" and "the moving body of" give the body, the tests of the pair and
-  their contacts, and the line "first contact" names the class of the
-  object (`miracle_run.ps1 -Kind pshield`, with `throw_law` 2 and 1).
+- **B41. Flames at a house after a pour of Water.** The drops fall on the
+  house and take its temperature under 150, at which it burns, in 4 to 6
+  drops, so the house goes out in the game's own way (`miracles.md`,
+  "Water on a fire"). The eye pictures still show flames at the house after
+  the pour. Open: whether those flames are a pile of wood or the store
+  beside the house, or a graphic of flames on the house that does not burn.
+  The lines each second after the pour give each fire near it with its
+  fire fraction and its graphic (`miracle_run.ps1 -Kind fire`, `-Kind
+  firelong`).
+- **B42. A thrown object goes into the Physical Shield of the player.** The
+  arc of the real flight and the extra steps of a substep have no test of
+  the dome, so a pig went in and hit the Temple inside. With the game's
+  physics (`throw_law=1`) the pig came to rest on top of the dome.
+  `throw_shield=1` stops the arc at the ball of the body of the shield and
+  takes the game's step near it (`throw.md`, "A Physical Shield on the
+  arc"). Open: a run that shows the pig bounce off the side of the dome, and
+  a rock that takes strength from the shield.
 - **B43. The Storm cloud is a flat grey band.** In the eye pictures the
   cloud of a Storm is a flat grey band with straight edges, also with
   `cloud_pole_pct=0`. The game draws the cloud as many particles (type 106,
   `PARTICLE_TYPE_STORM_CAST`, the rules `UR_StormCast` and
-  `UR_CloudGather`), so the plain game has no flat band. The weather and
-  the particles also make `LH3DMist` domes, which the mod turns and flattens
-  as the sky clouds (`miracles.md`, "The cloud of a Storm"). Open: what
-  draws the band. `miracle_run.ps1 -Kind storm` logs each mist that is not
-  a sky cloud and hides them from a frame (`sky_test_mist_log`,
-  `sky_test_mist_hide`), so two eye pictures tell if the band is such a
-  mist.
+  `UR_CloudGather`), so the plain game has no flat band. The band is not a
+  mist that is not a sky cloud: with those hidden from a frame on, the band
+  stayed (`miracles.md`, "The cloud of a Storm"). Open: a run with
+  `sky_test_mist_hide_all`, which hides the sky clouds too
+  (`miracle_run.ps1 -Kind storm`).
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view
@@ -623,10 +605,6 @@ game as it is.
   and Heal from its icon at the Worship Site.
 - **N6. Miracles.** Not run: each reason of a refusal but "needs a
   Creature" and "needs a circle on the land". Open:
-  - Teleport: each cast makes one site, and the game adds it to the list of
-    sites of the player. A villager or the Creature that goes into a site
-    comes out at the other site of that player that is nearest its
-    destination. So a second site needs a second cast. Not run: two casts.
   - Heal has no run: a test save of Land 1 has no sick villager. The log
     check is in `headset-checks.md`, "Play as normal and send the log".
   - A shield of a small circle loses about 24 of its life a second, so a

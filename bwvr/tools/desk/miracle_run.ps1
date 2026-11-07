@@ -165,15 +165,17 @@ if ($Kind -eq 'away') {
     # (miracles.md, "The cloud of a Storm"). The grip stays closed while the
     # hand steps through the circle, and the game casts when the circle
     # closes. The test key sky_test_mist_log gives a line for each mist that
-    # is not a sky cloud, and from frame 1560 sky_test_mist_hide does not
-    # draw them, so the eye pictures before and after that frame show what
-    # the mists draw. Give it the dxwrapper renderer for the pictures.
+    # is not a sky cloud. From frame 1560 sky_test_mist_hide does not draw
+    # them, and from frame 1640 sky_test_mist_hide_all draws no mist and no
+    # sky cloud, so the eye pictures before, between and after those frames
+    # show what the mists draw. Give it the dxwrapper renderer for the
+    # pictures.
     if ($Seeds -eq '') { $Seeds = '0@930' }
-    $keys = "$keys;fake_controller_gestures=5;sky_test_mist_log=1;sky_test_mist_hide=1560"
+    $keys = "$keys;fake_controller_gestures=5;sky_test_mist_log=1;sky_test_mist_hide=1560;sky_test_mist_hide_all=1640"
     if ($Steps -eq '') {
         $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
                  'seek@960+1 grip@1000+3 trace@1100+200 grip@1106+150 point@1300+1 ' +
-                 'shot@1330+1 shot@1400+1 shot@1480+1 shot@1540+1 shot@1580+1 shot@1640+1 shot@1720+1'
+                 'shot@1330+1 shot@1400+1 shot@1480+1 shot@1540+1 shot@1580+1 shot@1620+1 shot@1660+1 shot@1720+1'
     }
 } elseif ($Kind -eq 'throw') {
     if ($Seeds -eq '') { $Seeds = '2@930 9@1330 7@1730 16@2030' }

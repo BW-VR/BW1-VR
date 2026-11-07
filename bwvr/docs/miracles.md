@@ -609,6 +609,13 @@ line `the teleport site ... is a candidate of the real hand` comes for each
 new site. With `miracle_site_pick=0` the real hand has no site as a
 candidate.
 
+A desktop run (`miracle_run.ps1 -Kind teleport`) makes two sites about 35
+units apart before the door of the Temple. The villager that the Hand puts
+on site A goes into it and comes out at site B: 0.5 s to 5 s after the
+teleport he is 1.4 to 5.1 units from site B. With `miracle_site_pick=0`
+the site is no candidate, the game sets the villager down, and no teleport
+comes.
+
 ### The way out
 
 Two inputs take a miracle out of the Hand:
@@ -1263,9 +1270,15 @@ of drops that a fire needs goes up with the heat capacity of the object.
 The fire also heats itself in each game turn (`FireEffect::ProcessList`
 `0x00730760`, `fn_0072EFB0`). A pour on a burning house in a desktop run
 had its Hand's point 4 units from the middle of the house (inside its
-radius), so the drops fall on the house. The lines "miracle watch" of the
-drops say which test fails, if one fails, and how fast the temperature
-falls.
+radius), so the drops fall on the house. A house has a heat capacity of
+2000 and burns at 150 or more. In a desktop run the first drop was 2.72
+units from the middle of the house (its fire radius is 4.30), and the drops
+took its temperature from 213.3 to 37.5 in 6 drops. A second run took it
+from 196.7 to 19.1, under 150 from the fourth drop. So the house goes out
+in the game's own way. The lines each second after the pour follow each
+burning object that was near a drop, with its fire fraction and whether it
+has a graphic of flames, because a pile of wood or a store beside the
+house can burn on.
 
 **The cloud of a Storm.** The particle system of the cast
 (`SF_StormCast`) ends at 6 s: its pieces die at the age of 6 s
@@ -1278,7 +1291,11 @@ its pole to `cloud_pole_pct` percent of its distance (`backend.md`,
 "Clouds"), so a storm cloud near the head is flat. The test keys
 `sky_test_mist_log` and `sky_test_mist_hide` give a line for each mist that
 is not a sky cloud and take those mists out of the picture from a frame
-(`backend.md`, "Clouds"). `miracle_run.ps1 -Kind storm` uses them.
+(`backend.md`, "Clouds"). `miracle_run.ps1 -Kind storm` uses them. In a
+desktop run the storm had 17 such mists, for example a dome of 47 units 534
+units away, and none of them was drawn after the frame of the hide, but the
+band stayed. So the band is not such a mist. `sky_test_mist_hide_all` also
+takes the sky clouds out of the picture.
 
 Open (B43 in the roadmap): in the full view the cloud of a Storm is a flat
 grey band with straight edges, also with `cloud_pole_pct=0`. The cast of

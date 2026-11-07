@@ -42,7 +42,7 @@
 #                gesture_panel=0 and eye pictures of the corner, then
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
-# throwlive, throwhouse, throwpile, probe, workshop, site, build, scaffold,
+# throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
 # turn, fartake, fartotem, choice, look, book, controls, walk, wall, pinch,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -306,7 +306,7 @@ if ($Kind -eq 'totem') {
                  'shot@1750+1 shot@1950+1'
     }
     $keys = "$keys;throw_log=1"
-} elseif ($Kind -eq 'throwhouse' -or $Kind -eq 'throwhousefast') {
+} elseif ($Kind -in 'throwhouse', 'throwhousefast', 'throwhouselow') {
     # A rock that falls onto a house (bwvr/docs/throw.md, "The damage",
     # Abode::ReactToPhysicsImpact). The God view goes before the Village
     # Store, the hand goes to the height of the head, and the word "aimfar"
@@ -334,7 +334,18 @@ if ($Kind -eq 'totem') {
     # about 7.5 m/s down and toward the head. That throw moves the rock about
     # 0.75 units toward -x for each unit of the fall, so the Hand's point
     # goes 78 cm of the room past the middle of the house.
-    $fast = $Kind -eq 'throwhousefast'
+    #
+    # -Kind throwhouselow: the throw of throwhousefast from a low place, the
+    # Hand's point at 300 percent of the height of the house and 44 cm of the
+    # room past its middle. The rock is about 5 units over the roof at the
+    # release, and the real arc meets the box of the house after about 0.01
+    # s, before the game's physics has the rock (bwvr/docs/throw.md, "The
+    # objects on the arc"). With throw_arc_objects=1 the log has "meets the
+    # box of the Abode ... before the land" and a first contact "(an
+    # object)", and the roof breaks. Compare with -Set "throw_arc_objects=0".
+    # A fall from a still hand does not give this case: the rock does not
+    # meet the roof before the game has it.
+    $fast = $Kind -in 'throwhousefast', 'throwhouselow'
     if ($Plan -eq '') { $Plan = $(if ($fast) { 'gostore,go,feel,down,feel' } else { 'gostore,go,feel,feel' }) }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 66 }
@@ -345,9 +356,10 @@ if ($Kind -eq 'totem') {
                  $(if ($fast) { 'seek@1379+1 ' } else { '' }) +
                  'shot@1382+1 shot@1400+1 shot@1420+1 shot@1440+1 shot@1500+1 seek@1600+1 shot@1620+1 shot@1700+1'
     }
-    $gap = $(if ($fast) { '-78' } else { '-19.6' })
+    $gap = $(if ($Kind -eq 'throwhouselow') { '-44' } elseif ($fast) { '-78' } else { '-19.6' })
+    $height = $(if ($Kind -eq 'throwhouselow') { '300' } else { '1100' })
     $keys = "fake_head_pitch=-25;$keys;far_test_aim_class=3;seek_step_cm=20;" +
-            "seek_go=1810.8,2680.1;seek_feel=house,1100,$gap|house,50,2;throw_log=1"
+            "seek_go=1810.8,2680.1;seek_feel=house,$height,$gap|house,50,2;throw_log=1"
 } elseif ($Kind -eq 'throwpile') {
     # Wood thrown into the pile of the Village Store. The grip takes wood
     # from the pile and opens (the bundle stays in the Hand), as in -Kind

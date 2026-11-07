@@ -773,6 +773,11 @@ catch up of the picture (`kCatchUp`).
 - A rock thrown at 7.5 m/s at a house breaks its roof and a wall
   (`village_run.ps1 -Kind throwhousefast`). A rock that falls 40 units from a
   still hand stays against the house with no damage (`-Kind throwhouse`).
+- The same throw from 5 units over the roof (`-Kind throwhouselow`, 7.6 m/s)
+  meets the box of the house after 0.01 s, before the game's physics has
+  the rock. The rock starts at the box, its first contact is with the house
+  after 0.135 s, and the roof breaks. With `throw_arc_objects=0` the rock
+  goes through the house to the land.
 - The rest after a landing: on a steep slope the object moves in the
   game's own time until the land is flatter (8 s on the slope at the pen,
   which is 41 units high).

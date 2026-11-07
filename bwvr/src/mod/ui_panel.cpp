@@ -541,6 +541,11 @@ struct SubtitleState {
   uint8_t* pixels = nullptr;
   uint32_t texture_w = 0;
   uint32_t texture_h = 0;
+  // The number of the picture in `pixels` (CardLayer::serial), and the size
+  // of the last copy.
+  uint32_t serial = 0;
+  uint32_t copied_w = 0;
+  uint32_t copied_h = 0;
   int read_failures = 0;     // frames in a row with no copy of the panel
   bool read_failed = false;
   double last_time = 0.0;
@@ -774,24 +779,42 @@ int SubtitleCopy(const int rect[4], uint32_t render_w, uint32_t render_h,
     return kCopyFailed;
   }
   s.read_failures = 0;
+  // THE NUMBER OF THE PICTURE (CardLayer::serial). The game draws the help
+  // text again in each frame, so the copy compares each row with the row of
+  // the last copy. A new size or a changed row gives a new number, and the
+  // view for videos copies the card only then.
+  bool changed = s.serial == 0 || w != s.copied_w || h != s.copied_h;
   if (s.pixels == nullptr || s.texture_w != texture_w ||
       s.texture_h != texture_h) {
     delete[] s.pixels;
     s.pixels = new uint8_t[static_cast<size_t>(texture_w) * texture_h * 4];
     s.texture_w = texture_w;
     s.texture_h = texture_h;
+    changed = true;
   }
   const int scale = static_cast<int>(fade * 256.0f + 0.5f);
   for (uint32_t y = 0; y < h; ++y) {
     const uint8_t* in = source + static_cast<size_t>(y) * pitch;
     uint8_t* out = s.pixels + static_cast<size_t>(y) * texture_w * 4;
     if (scale >= 256) {
-      memcpy(out, in, static_cast<size_t>(w) * 4);
+      if (changed || memcmp(out, in, static_cast<size_t>(w) * 4) != 0) {
+        changed = true;
+        memcpy(out, in, static_cast<size_t>(w) * 4);
+      }
     } else {
       for (uint32_t i = 0; i < w * 4; ++i) {
-        out[i] = static_cast<uint8_t>((in[i] * scale) >> 8);
+        const uint8_t value = static_cast<uint8_t>((in[i] * scale) >> 8);
+        if (out[i] != value) {
+          out[i] = value;
+          changed = true;
+        }
       }
     }
+  }
+  if (changed) {
+    s.serial = bwvr::XrScreen::NewCardSerial();
+    s.copied_w = w;
+    s.copied_h = h;
   }
   read_done();
   QueryPerformanceCounter(&t1);
@@ -854,6 +877,7 @@ void SubtitleWindowCard(const int rect[4], uint32_t render_w,
   layer.rect[1] = 0;
   layer.rect[2] = static_cast<int32_t>(w);
   layer.rect[3] = static_cast<int32_t>(h);
+  layer.serial = s.serial;
   bwvr::XrScreen::StageCard(bwvr::kCardSubtitles, layer);
   ++s.frames_shown;
   const bool fresh = !s.window_showing;
@@ -1012,6 +1036,7 @@ void SubtitleEndPasses() {
   for (int i = 0; i < 4; ++i) layer.orientation[i] = quad.orientation[i];
   layer.width = quad.width;
   layer.height = quad.height;
+  layer.serial = s.serial;
   if (s.shown.fade > 0.0f) {
     bwvr::XrScreen::StageCard(bwvr::kCardSubtitles, layer);
     ++s.frames_shown;

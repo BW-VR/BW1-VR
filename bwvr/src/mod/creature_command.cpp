@@ -299,6 +299,10 @@ struct Settings {
   // creature_command_double_ms: a second press on the same object this soon
   // after the first press ties the leash. 0 turns the double press off.
   int double_ms = 500;
+  // command_look: 1 gives the target of a command a green ring on the land
+  // and no halo, and the card says what the grip does there. 0 gives it the
+  // green halo, and the card has the lines of the trigger only.
+  int look = 1;
   bool test_keys = false;  // test_keys: Ctrl and numpad 5 change the rule
 };
 Settings g_settings;
@@ -362,6 +366,7 @@ struct Target {
   float radius;
   float height;       // of the body that the aim was measured against
   float te;
+  float head_m;       // meters of the room from the head, along the floor
   bool at_hand;       // the object at the Hand's point, not in the aim
   bool can_tie;       // the leash can go on it (CanTie)
   bool holds_leash;   // the leash is tied to it now
@@ -756,6 +761,21 @@ void LogRule(const char* from) {
   }
 }
 
+// The line of command_look, at the start and at each change on the debug
+// page.
+void LogLook(const char* from) {
+  ModLog("creature cmd : %s: command_look=%d. %s, frame %llu", from,
+         g_settings.look,
+         g_settings.look != 0
+             ? "A target of a command has a green ring on the land around "
+               "its base, and no halo. A glow or a halo shows only what the "
+               "grip acts on. The card says what the grip does at the target "
+               "of the command"
+             : "A target of a command has the green halo. The card has the "
+               "lines of the trigger only",
+         g_frame);
+}
+
 void Init() {
   if (g_ready) return;
   g_ready = true;
@@ -799,6 +819,7 @@ void Init() {
   g_settings.double_ms = IniInt("creature_command_double_ms", 500);
   if (g_settings.double_ms < 0) g_settings.double_ms = 0;
   if (g_settings.double_ms > 2000) g_settings.double_ms = 2000;
+  g_settings.look = IniInt("command_look", 1) != 0 ? 1 : 0;
   g_settings.test_keys = IniInt("test_keys", 0) != 0;
   command_math::ShakeReset(&g_shake);
   if (g_settings.on) {
@@ -836,6 +857,7 @@ void Init() {
     ModLog("creature cmd : creature_command_double_ms=0, so a double press "
            "does not tie the leash");
   }
+  LogLook("command_look");
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 5 changes creature_command_rule "
            "from 4 to 3 to 2 to 1 and back (test_keys=1)");
@@ -867,6 +889,19 @@ void CreatureCommandRuleChange(const char* by) {
 int CreatureCommandRuleValue() {
   if (!g_ready || !g_settings.on) return kDebugCannot;
   return g_settings.rule;
+}
+
+// The switch of command_look on the debug page.
+void CreatureCommandLookChange(const char* by) {
+  if (!g_ready || !g_settings.on) return;
+  g_settings.look = g_settings.look != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_settings.look != 0 ? 0.30f : 0.08f);
+  LogLook(by);
+}
+
+int CreatureCommandLookValue() {
+  if (!g_ready || !g_settings.on) return kDebugCannot;
+  return g_settings.look;
 }
 
 namespace {
@@ -1798,6 +1833,8 @@ void CreatureCommandSelect() {
   }
   if (pick < 0) return;
   g_target = found[pick];
+  g_target.head_m =
+      controller_math::FarFloorMeters(eye, g_target.position, units);
   strcpy_s(g_target.name, g_target.kind == kTargetCreature
                               ? "Creature"
                               : HandDirectClass(g_target.object));
@@ -2148,11 +2185,51 @@ void CreatureCommandFrame() {
 }
 
 bool CreatureCommandHalo(FarDraw* out, bool* far_target) {
-  if (!g_halo.active) return false;
+  if (!g_halo.active || g_settings.look != 0) return false;
   *out = g_halo;
   out->target = g_halo_object;
   *far_target = FarGrabTargetObject() == g_halo_object;
   return true;
+}
+
+// THE RING OF THE TARGET (command_look=1). The glow and the halo show what
+// the grip acts on, and a ring on the land shows where the trigger sends the
+// Creature, as the ring of a command to the land does. So a target that only
+// the trigger acts on has a ring and no glow, and a target of both has both.
+// The ring is the latch of the halo, so both eye passes draw the same one.
+bool CreatureCommandRing(TeleportDraw* out) {
+  if (!g_halo.active || g_settings.look == 0) return false;
+  const float units = g_halo.units_per_meter;
+  if (!(units > 0.0f)) return false;
+  *out = {};
+  out->active = true;
+  out->valid = true;
+  out->count = 0;
+  out->ring = true;
+  for (int k = 0; k < 3; ++k) out->target[k] = g_halo.object[k];
+  out->units_per_meter = units;
+  out->ring_cm = command_math::TargetRingCm(
+      g_halo.radius, units, static_cast<float>(g_settings.ring_cm));
+  static int said = 0;
+  static void* said_object = nullptr;
+  if (said < 20 && said_object != g_halo_object) {
+    ++said;
+    said_object = g_halo_object;
+    ModLog("creature cmd : the target %p has the ring of a command, with an "
+           "outer radius of %.0f cm of the room, at %.1f %.1f %.1f "
+           "(command_look=1). The grip %s, frame %llu",
+           g_halo_object, out->ring_cm, out->target[0], out->target[1],
+           out->target[2],
+           FarGrabTargetObject() == g_halo_object
+               ? "has it as its far target too"
+               : "does not have it as its far target",
+           g_frame);
+  }
+  return true;
+}
+
+bool CreatureCommandLookOn() {
+  return g_ready && g_settings.on && g_settings.look != 0;
 }
 
 bool CreatureCommandDrawState(TeleportDraw* out) {
@@ -2201,6 +2278,13 @@ bool CreatureCommandCanTie() {
   if (!g_ready || !g_settings.on || !g_live) return false;
   const Target* t = HintTarget();
   return t->kind == kTargetObject && t->can_tie;
+}
+
+int CreatureCommandGripAt() {
+  const Target* t = HintTarget();
+  return command_math::GripAtTargetOf(
+      FarGrabOn(), FarGrabMaxMeters(),
+      t->kind != kTargetNone ? t->head_m : 0.0f);
 }
 
 void CreatureCommandReport() {

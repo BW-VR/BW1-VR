@@ -3574,12 +3574,17 @@ the eye picture.
   with no such image (a desktop run, a session with the relay of Direct3D
   11) comes from the pixels of the CPU: the view copies the part that shows
   into an image of its own. With `video_view_copy_changed=1` (the default)
-  it copies a card only when the card has a new picture. The ring, the
-  spell book and the panels of `panel_kit.cpp` give a new number with each
-  new picture (`CardLayer::serial`), and the image of the card keeps the
-  number of its last copy. The hint cards, the subtitle card, the keyboard
-  and the bubble card give no number, so the view copies them at each
-  present. A panel 1024 by 1024 px is 4 MB for each copy. A panel quad samples the panel image of the
+  it copies a card only when the card has a new picture. Each card gives a
+  new number with each new picture (`CardLayer::serial`), and the image of
+  the card keeps the number of its last copy. The ring, the spell book and
+  the panels of `panel_kit.cpp` give a new number when they draw. A hint
+  card gives one when its picture or its fade changes, the bubble card at
+  each draw of the bubble, and the keyboard at each new picture and at a
+  change between the dark card and the parchment. The game draws the help
+  text of the subtitle card again in each frame, so its copy compares each
+  row with the row of the last copy, and only a changed row or a new size
+  gives a new number. A panel 1024 by 1024 px is 4 MB for each copy, and
+  the keyboard is 1.5 MB. A panel quad samples the panel image of the
   Vulkan renderer, which has `VK_IMAGE_USAGE_SAMPLED_BIT` for this. A wall
   is black with its alpha.
 - The draw (`vk_video.cpp`, `vk_video.vert`, `vk_video.frag`). After the

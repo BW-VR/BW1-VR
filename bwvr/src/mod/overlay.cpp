@@ -1069,6 +1069,33 @@ void BuildCommand() {
   }
 }
 
+// THE RING OF THE TARGET OF A COMMAND (command_look=1, creature_command.cpp).
+// A green ring on the land around the base of the object that the trigger
+// sends the Creature to, with no disc in its middle. The glow and the halo
+// show the target of the grip, so the ring tells a target of the trigger
+// from a target of the grip at a glance. The depth test of the overlay lets
+// the object hide the back of the ring. It takes the room of the teleport's
+// triangles, as BuildCommand does. It draws with overlay=0 too.
+void BuildCommandRing() {
+  TeleportDraw d;
+  if (g_teleport_triangles > 0 || !CreatureCommandRing(&d)) return;
+  const float units = d.units_per_meter;
+  if (!(units > 0.0f)) return;
+  const int start = g_count;
+  const float outer = d.ring_cm * 0.01f * units;
+  g_count += overlay_math::BuildLandRing(
+      d.target[0], d.target[2], outer * kRingInner, outer, kRingLiftM * units,
+      true, [](float x, float z) { return TeleportGround(x, z); },
+      &g_world[g_count], kMaxTriangles - g_count, false);
+  for (int t = start; t < g_count; ++t) {
+    for (int v = 0; v < 3; ++v) {
+      const float level =
+          overlay_math::LightLevel(g_world[t].n[v], kArcAmbient);
+      for (int k = 0; k < 3; ++k) g_color[t][v][k] = kCommandValid[k] * level;
+    }
+  }
+}
+
 // THE TETHER OF A FAR GRAB (far_grab.cpp). After the lock, and while the game
 // takes from a far bulk source, a thin tube goes from the Hand's point to the
 // object. It draws with overlay=0 too. Nothing is drawn on the land under the
@@ -1777,6 +1804,7 @@ void OverlayFrame() {
   }
   BuildTeleport();
   BuildCommand();
+  BuildCommandRing();
   BuildMenuRay();
   BuildFar();
   BuildGestureTrail();

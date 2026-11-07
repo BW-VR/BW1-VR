@@ -1638,8 +1638,8 @@ does not pick up there.
 
 **The halos.** Other discs use the same draw: the halo around the target of
 the grip at the Hand's point, a far target, the target of a Creature command
-(green), the target of a miracle and the thing that takes the object in the
-Hand. The halo is gold, or red when the influence stops the press. The halo
+(green, only with `command_look=0`), the target of a miracle and the thing
+that takes the object in the Hand. The halo is gold, or red when the influence stops the press. The halo
 is as large as the body of its target. For a tall body it is an ellipse along
 the image of the upright axis. grab.md ("One target" and "The grab from a
 distance"), creature.md and miracles.md say when each halo shows. The halo
@@ -1771,7 +1771,11 @@ is a rule of the glow: which object, and gold, red or green.
 | --- | --- |
 | The target of the grip at the Hand's point, a far target, the target of a miracle, the thing that takes the object in the Hand | gold (255, 190, 40) |
 | The same targets when the influence or the game stops the press | red (255, 70, 50) |
-| The target of a Creature command | green (70, 255, 150) |
+| The target of a Creature command, with `command_look=0` | green (70, 255, 150) |
+
+With `command_look=1` (the default) the target of a Creature command has no
+glow and no halo. It has a green ring on the land (`creature.md`, "The look
+of a target"). So each glow is a target of the grip.
 
 **The look.** The mesh gets a share of that color on top of its texture. The
 share is the product of five numbers (`target_glow_math.h`):

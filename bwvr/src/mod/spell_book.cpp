@@ -1063,6 +1063,9 @@ void Raster(const Look& look) {
 const int kBubbleTexture = 256;
 uint8_t g_bubble[kBubbleTexture * kBubbleTexture * 4];
 int g_bubble_px = 0;
+// The number of the picture of the bubble (CardLayer::serial), new at each
+// draw, so the view for videos copies the bubble card only after a change.
+uint32_t g_bubble_serial = 0;
 
 bool RasterBubble(int type, const Layout& l) {
   if (!RasterStart() || type < 0 || type >= kSeedTypes || l.count <= 0) {
@@ -1102,6 +1105,7 @@ bool RasterBubble(int type, const Layout& l) {
     }
   }
   g_bubble_px = side;
+  g_bubble_serial = bwvr::XrScreen::NewCardSerial();
   // The GDI ink of the book is gone, so the next picture of the book draws
   // all of it again.
   g_have_drawn = false;
@@ -1132,6 +1136,7 @@ void StageBubble(const float at[3], const float head[3]) {
   controller_math::FacePose(at, head, layer.orientation);
   layer.width = g_bubble_px / kPixelsPerMeter;
   layer.height = layer.width;
+  layer.serial = g_bubble_serial;
   bwvr::XrScreen::StageCard(bwvr::kCardBubble, layer);
 }
 

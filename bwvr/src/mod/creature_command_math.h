@@ -577,4 +577,31 @@ inline bool DoublePress(double press_s, double first_press_s, double window_s,
   return press_s >= first_press_s && press_s - first_press_s <= window_s;
 }
 
+// THE RING OF A TARGET OF A COMMAND (command_look=1). A green ring on the
+// land around the base of the object, as the ring of a command to the land.
+// Its outer radius is kTargetRingGrow times the 2D radius of the object plus
+// kTargetRingPlusCm of the room, and at least least_cm (teleport_ring_cm).
+// The answer is in centimeters of the room.
+const float kTargetRingGrow = 1.35f;
+const float kTargetRingPlusCm = 3.0f;
+inline float TargetRingCm(float radius_units, float units_per_meter,
+                          float least_cm) {
+  if (!(units_per_meter > 0.0f)) return least_cm;
+  const float r = radius_units > 0.0f ? radius_units : 0.0f;
+  const float cm =
+      kTargetRingGrow * r / units_per_meter * 100.0f + kTargetRingPlusCm;
+  return cm > least_cm ? cm : least_cm;
+}
+
+// THE GRIP AT A TARGET OF A COMMAND, for the line of the grip on the card
+// (command_look=1), when the grip has no target of its own. A target past
+// the range of the grab from a distance is too far. Each other target is
+// one that the grip cannot take: the object that holds the tied leash, an
+// object that the Hand cannot hold, or a target outside the influence.
+enum GripAtTarget { kGripTooFar, kGripCannot };
+inline int GripAtTargetOf(bool far_on, float far_max_m, float head_m) {
+  if (far_on && far_max_m > 0.0f && head_m > far_max_m) return kGripTooFar;
+  return kGripCannot;
+}
+
 }  // namespace command_math

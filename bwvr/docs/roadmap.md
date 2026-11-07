@@ -244,24 +244,6 @@ These items come before the other work.
     too narrow, or if only the fixed head of the run is at fault.
   - The game tells the player to press F2 for the Gods' Playground, and no
     page of the ring has the item `playground` by default.
-- **B31. With the leash on, a grip at a distance takes nothing from some
-  objects.** The grab at a distance has no test of the leash: with the
-  leash on it takes each object in its range. Three rules stop a grip
-  there, and the halo does not tell them apart:
-  - The target of a Creature command has its halo to 10 m of the room from
-    the head (`creature_command_max_m`), and the grab at a distance takes an
-    object to 2 m (`far_grab_max_m`). So a tree at 2.2 m has the halo of a
-    command, and a grip on it takes nothing.
-  - The game does not let the Hand take the object that holds a tied
-    leash. A press on that object is a press for the leash (hand mode
-    `0x20`), at the Hand and from a distance.
-  - Near objects win (`grab.md`): an object that a press acts on near the
-    Hand's point turns the grab at a distance off. A Creature on the leash
-    comes to the Hand, so this happens more often with the leash on.
-
-  To decide: a halo or a line of the card that shows which objects the
-  grip takes, a longer range of the grab while the leash is on, or no
-  change.
 B1b, B2 and B4 are one package: a thing that is held, thrown, or
 that moves while the Hand takes it.
 
@@ -377,9 +359,6 @@ that moves while the Hand takes it.
     `vk window` and `vk video` of the report. The session path of the quad
     layers (the copy of each card on the GPU, the panel quads of
     `ui_panel=1`, a screen in the room) has run in no session.
-  - With no headset the hint cards, the subtitle card, the keyboard (1.5
-    MB) and the bubble card give no number of their picture, so the view
-    copies them from the CPU at each present (`video_view_copy_changed`).
 - **P9. The pointer on the interface panel**, and the screens with no
   scene (menus, loading, videos) on a panel in the room (`ui-layer.md`).
 - **P10. The tabletop mode** (play mode 3) is a test mode, on hold. Not built: a

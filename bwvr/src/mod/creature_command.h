@@ -27,10 +27,21 @@ void CreatureCommandFrame();
 // Once a report window.
 void CreatureCommandReport();
 
-// hand_glow.cpp: the halo of the target of the command. False for none.
-// far_target is true when the target is the target of the grab from a
-// distance too, which has its own halo.
+// hand_glow.cpp: the halo of the target of the command. False for none, and
+// always false with command_look=1. far_target is true when the target is
+// the target of the grab from a distance too, which has its own halo.
 bool CreatureCommandHalo(FarDraw* out, bool* far_target);
+
+// overlay.cpp, command_look=1: the green ring on the land around the base of
+// the target of the command. False for none. The ring has no arc.
+bool CreatureCommandRing(TeleportDraw* out);
+
+// hint_card.cpp: command_look=1, so the card says what the grip does at the
+// target of a command.
+bool CreatureCommandLookOn();
+// hint_card.cpp: why the grip does not act on the target of the hint, when
+// the grip has no target of its own (command_math::GripAtTarget).
+int CreatureCommandGripAt();
 
 // overlay.cpp: the arc and the ring of the land aim. False for none.
 bool CreatureCommandDrawState(TeleportDraw* out);

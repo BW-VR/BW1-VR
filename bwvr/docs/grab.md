@@ -1653,7 +1653,15 @@ not count, and a player who leans toward an object brings it into range. The
 head is the eye point of the aim ray (`ControllersFarRay`). The target of the
 last frame stays to 15 cm more (`FarInRange`, `kFarRangeKeepM`), so a small move
 of the head does not turn the target off and on. `far_grab_max_m=0` gives no
-limit. An object past the range gets no halo and no lock.
+limit. An object past the range gets no halo and no lock. With the leash on,
+the target of a Creature command can be past this range (to 10 m,
+`creature_command_max_m`). It then has the green ring of a command and no
+glow, and the card says "Grip Too far to take" (`creature.md`, "The look of
+a target").
+
+**The object that holds a tied leash** is no far target and no target at the
+Hand (`grip_skips_tied=1`, `creature.md`, section 5.2): the game takes
+nothing from it.
 
 **Classes of far targets.**
 
@@ -2327,6 +2335,7 @@ not jump.
 | `far_grab_near_cm`, `far_grab_near_out_cm`, `far_grab_beside_loose` | 10, 15, 1 | See "Near objects win" |
 | `far_touch` | 1 | 1 makes a scroll in the aim a far target that the grip activates |
 | `far_leash` | 1 | The leash click on the player's own Creature at a distance (see [creature.md](creature.md)) |
+| `grip_skips_tied` | 1 | The object that holds a tied leash is no target of the grip, at the Hand and from a distance. 0: it is a target as each other object (see [creature.md](creature.md), section 5.2) |
 | `far_take_carry` | 1 | 1: when the source of a take at a distance goes away while the grip is closed, the grip machine keeps the grip and the grip carries the bundle. 0: the far grab holds the grip back until it opens, and the machine lets the bundle go at once (see "A bulk source at a distance"). Test key: Shift and Backspace |
 | `take_stream` | 1 | 1: the pieces of the stream of a take at a distance go on a curve from the top of the source to the Hand. 0: the line of the game, from the land under the Hand (see "The stream of a take at a distance"). Test key: Ctrl, Shift and the minus key |
 | `creature_hold_stay`, `creature_hold_stay_ms`, `creature_stay_look` | 1, 350, 1 | A grip that stays closed on the far Creature makes it stay (see [creature.md](creature.md), section 5.3). Test key: Shift and End |

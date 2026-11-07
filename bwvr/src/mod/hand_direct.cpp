@@ -2989,6 +2989,33 @@ int LeashKind(void* creature) {
       *reinterpret_cast<void* const*>(leash + kLeashObject) != nullptr);
 }
 
+// THE OBJECT THAT HOLDS A TIED LEASH (grip_skips_tied, docs/creature.md,
+// "The leash on an object"). GLeashStatus+0x24 of the local interface. The
+// game does not let the Hand take that object: a press on it is a press for
+// the leash, and it takes nothing. So with grip_skips_tied=1 it is no target
+// of the grip, at the Hand and from a distance, and it has no gold halo. The
+// trigger keeps it as its target: a double press takes the leash back.
+// Latched once a frame, because the choice asks for each candidate.
+bool g_skip_tied = true;
+uint64_t g_far_tied_out = 0;  // frames in which the far aim left it out
+void* g_tied_object = nullptr;
+uint64_t g_tied_frame = ~0ull;
+
+void* TiedLeashObject() {
+  if (g_tied_frame == g_frame) return g_tied_object;
+  g_tied_frame = g_frame;
+  g_tied_object = nullptr;
+  if (!g_skip_tied || g_face == nullptr) return nullptr;
+  const uint8_t* status =
+      *reinterpret_cast<uint8_t* const*>(g_face + kFaceStatus);
+  if (status == nullptr) return nullptr;
+  const uint8_t* leash =
+      *reinterpret_cast<uint8_t* const*>(status + kStatusLeash);
+  if (leash == nullptr) return nullptr;
+  g_tied_object = *reinterpret_cast<void* const*>(leash + kLeashObject);
+  return g_tied_object;
+}
+
 // A FIGHT OF CREATURES (docs/creature.md, "A fight of Creatures").
 // Creature::IsFighting 0x0047B1C0 reads the LH3DCreature of the Creature
 // (+0x160, then +0x58): in a fight the LH3DCreature of the other Creature is
@@ -3329,6 +3356,8 @@ bool ClickScroll(void* object) {
 
 int PressKind(void* object, void* status) {
   if (g_one_target && IsCreatureObject(object)) return near_math::kCreature;
+  // The object that holds a tied leash is no target of the grip.
+  if (object != nullptr && object == TiedLeashObject()) return near_math::kNone;
   // A FishFarm with fish says yes to ValidForPlaceInHand too. The press of
   // the game tests the take first, so a grip on it takes fish.
   if (FishTakeOn(g_frame) && IsFishFarm(object) && TakeValid(object, status)) {
@@ -5872,6 +5901,22 @@ void FarSelect() {
       ++g_far_out_of_range;
       continue;
     }
+    // The object that holds a tied leash: the grip takes nothing from it
+    // (grip_skips_tied=1).
+    if (c.object == TiedLeashObject()) {
+      ++g_far_tied_out;
+      static void* said = nullptr;
+      static int says = 0;
+      if (said != c.object && says < 10) {
+        said = c.object;
+        ++says;
+        ModLog("far grab    : the %s %p in the cone holds the tied leash, so "
+               "it is no far target (grip_skips_tied=1). The trigger takes "
+               "the leash back from it, frame %llu",
+               ClassName(c.object), c.object, g_frame);
+      }
+      continue;
+    }
     // A bulk source (a pile of a store, a field, a fish farm) is a target
     // too: the grip takes from it at a distance. A scroll that a press taps
     // is one too: the grip activates it (the far touch). Else the object
@@ -7835,6 +7880,14 @@ void InstallNear() {
   }
   ScriptPlayerInstall();
   g_far_leash = IniKey("far_leash", 1) != 0;
+  g_skip_tied = IniKey("grip_skips_tied", 1) != 0;
+  ModLog("hand pick    : grip_skips_tied=%d. %s", g_skip_tied ? 1 : 0,
+         g_skip_tied
+             ? "The object that holds a tied leash is no target of the grip, "
+               "at the Hand and from a distance, because the grip takes "
+               "nothing from it"
+             : "The object that holds a tied leash is a target of the grip "
+               "as each other object");
   g_fight_grip = IniKey("fight_grip", 1) != 0;
   ModLog("hand fight   : fight_grip=%d. %s", g_fight_grip ? 1 : 0,
          g_fight_grip
@@ -12024,13 +12077,13 @@ void HandDirectReport() {
   if (g_far_offers != 0 || g_far_land_writes != 0) {
     ModLog("far grab    : %llu objects offered to the pick by the cone, %llu "
            "candidates in the cone that the land hides, %llu past the range "
-           "of %.1f m from the head, and the land point of the record written "
-           "on %llu game turns of a fetch, this window. The locked target "
-           "went to the pick %llu times",
+           "of %.1f m from the head, %llu that hold the tied leash, and the "
+           "land point of the record written on %llu game turns of a fetch, "
+           "this window. The locked target went to the pick %llu times",
            g_far_offers, g_far_hidden, g_far_out_of_range, FarGrabMaxMeters(),
-           g_far_land_writes, g_far_keep_offers);
+           g_far_tied_out, g_far_land_writes, g_far_keep_offers);
     g_far_offers = g_far_land_writes = g_far_hidden = 0;
-    g_far_out_of_range = 0;
+    g_far_out_of_range = g_far_tied_out = 0;
     g_far_keep_offers = 0;
   }
   FarGrabReport();

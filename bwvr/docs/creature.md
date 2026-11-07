@@ -1061,7 +1061,7 @@ With no leash, the trigger does what it does in the plain game.
 
 | The trigger, with the leash on the Hand | What it does |
 | --- | --- |
-| The aim is on an object | The halo of the object shows, green |
+| The aim is on an object | A green ring on the land around the base of the object (`command_look=1`). With `command_look=0`, a green halo. In this section "the halo of the object" is that mark |
 | The aim is on no object | The arc and the ring show the land, in the same frame |
 | A press that began on the land (no object in the cone at the press), `creature_command_rule=3` and 4 | It is a walk command for as long as the trigger is held. The aim moves the land point, the arc and the ring follow it, and no object takes the halo or the command, also when the aim is on a tree, a rock or a villager. The far target of the grip has no halo in this time either (`CreatureCommandWalkHeld`), unless the grip holds it. The prompt is "Trigger Release to send". The aim must be on the object before the press to command the Creature to it |
 | A press that began on an object, with the aim on it, `creature_command_rule=4` | The halo of that object shows for as long as the aim stays on it. While the press is held, only that object is a target: no other object takes the halo |
@@ -1187,16 +1187,42 @@ of the leash, and a forest has many.
 sends nothing when the game deleted the object in that time
 (`HandDirectObjectLives`).
 
-**The two halos.** The target of the grab from a distance is the target of a
-command too, when it is in the cone of the command. One case is different: a
-living thing has the target of the command by its rank or by the stay rule,
-and the far target is not a living thing. Then the living thing keeps the
-command. So a tree that the grip can fetch does not take the command from a
-villager that is out of the range of the grip. When the two targets are
-different objects, each has its halo: gold for the grip and green for the
-trigger (`DrawHalo` in `hand_glow.cpp`). A red far target that is the target
-of a command has the green halo. A gold far target and a locked one keep their
-halo.
+**The two targets.** The target of the grab from a distance is the target
+of a command too, when it is in the cone of the command. One case is
+different: a living thing has the target of the command by its rank or by
+the stay rule, and the far target is not a living thing. Then the living
+thing keeps the command. So a tree that the grip can fetch does not take the
+command from a villager that is out of the range of the grip.
+
+**The look of a target** (`command_look=1`, the default). A glow or a halo
+shows only a target of the grip: gold when the grip acts on it, red when
+the influence stops it (`hand_glow.cpp`, `target_glow.cpp`). The target of a
+command has a green ring on the land around its base, with no glow
+(`CreatureCommandRing`, `BuildCommandRing` in `overlay.cpp`). It is the
+ring of a command to the land, without the disc in its middle. Its outer
+radius is 1.35 times the 2D radius of the object plus 3 cm of the room, and
+at least `teleport_ring_cm` (`command_math::TargetRingCm`). So at a glance:
+
+| The look | The grip | The trigger |
+| --- | --- | --- |
+| A gold glow and a green ring | Acts on it | Sends the Creature to it |
+| A green ring only | Takes nothing from it | Sends the Creature to it |
+| A gold glow only | Acts on it | Sends the Creature to a different object, or to the land |
+| A red glow and a green ring | Cannot take it: it is outside the influence | Sends the Creature to it |
+
+A target of the command past the range of the grip (`far_grab_max_m`, 2 m)
+and in the range of the command (`creature_command_max_m`, 10 m) has the
+ring only. So has an object that the Hand cannot hold, for example a house,
+and the object that holds a tied leash (section 5.2). The object at the
+Hand that a press acts on has its gold halo, and when it is the target of
+a command, the ring too.
+
+With `command_look=0` the target of a command has a green halo, and the
+glow on its mesh is green. When the two targets are different objects, each
+has its halo: gold for the grip and green for the trigger. A red far target
+that is the target of a command has the green halo. A gold far target and a
+locked one keep their halo. The switch "Command look" of the debug page
+changes the key while the game runs.
 
 **The land command and the sea.** The mod does not send a point in the sea.
 The ring is red there. A sailor in the sea is a target as an object.
@@ -1264,6 +1290,7 @@ give no shake. The scripted strokes are 15 cm long, so 4 strokes at 0.60 to
 | `far_grab_choice`, `far_grab_stay` | 2, 1 | The choice among the objects in the cone, and the target that stays (section 4.3, and `grab.md`). Test keys: Ctrl and Delete, Ctrl and Backspace |
 | `creature_command_behind_cm` | 30 | The land in front wins past this many cm of the room, plus 20 percent of the distance. -1 turns the rule off |
 | `creature_command_double_ms` | 500 | The time of a double press (section 5.2). 0 turns the double press off |
+| `command_look` | 1 | 1: the target of a command has a green ring on the land and no halo, a glow shows only a target of the grip, and the card says what the grip does at the target of a command ("The look of a target" in section 4.3, and section 4.6). 0: the green halo, and the card has the lines of the trigger only. The switch "Command look" of the debug page |
 | `teleport_reach_m`, `teleport_ring_cm` | 10, 11 | The arc and the ring of the land aim. See `god-view.md` |
 
 **The A/B key.** With `test_keys=1`, Ctrl with the 5 key of the number pad
@@ -1295,6 +1322,22 @@ trim (numpad 8, 2, 4, 6 and 5) do not act while Ctrl is down.
 | The leash is tied, and the aim is on the object that holds it | "Trigger x2 Take the leash back" |
 | The leash is tied, and the aim is on the player's own Creature | "Trigger Take the leash back" |
 
+**The line of the grip** (`command_look=1`). When the grip has no far
+target, the card of a target of a command, and of the object that holds a
+tied leash, also says what the grip does (`AddCommandGripPrompt` in
+`hint_card.cpp`):
+
+| When | The line of the grip |
+| --- | --- |
+| An object at the Hand that a press acts on | What the press does there: "Grip Take", "Grip Hold to collect" or "Grip Activate" |
+| The target of the command is farther from the head than `far_grab_max_m`, along the floor | "Grip Too far to take" |
+| Each other target: a house, the object that holds the tied leash, a target outside the influence | "Grip Cannot take" |
+
+The line that says the grip does nothing has the color of the other
+buttons, not the gold of the grip. While the grip has a far target, the
+card has the line of the far target (section 5.1). With `command_look=0` the
+card has the lines of the trigger only.
+
 ### 4.7 The log
 
 The tag `creature cmd`: the keys at the start, each new target, each press
@@ -1317,6 +1360,15 @@ creature cmd : the trigger opens after 2518 ms, a hold, so the target that shows
 creature cmd : a shake of the hand: 4 strokes in 510 ms, the slowest at 0.88 m/s, the last one 12 cm long. A stroke needs 0.60 m/s (leash_shake_mps). The leash click (packet 0x5F), frame 6010
 creature cmd : the leash is off, 70 ms after the shake, frame 6016
 creature cmd : creature_command_rule=4. While the trigger was held, what shows changed 1 times, and 1 presses on an object became a walk. The range left out 54490 objects, and the land in front left out 125 objects of the cone. 0 double presses tied the leash, and 0 took it back
+```
+
+With `command_look=1` each new target with a ring gives one line (20 at
+most), and the far grab gives one line for each object that holds the tied
+leash in its cone (10 at most). The format:
+
+```
+creature cmd : the target 2AA30804 has the ring of a command, with an outer radius of 30 cm of the room, at 1999.8 52.4 2497.6 (command_look=1). The grip does not have it as its far target, frame 953
+far grab    : the Tree 2A67A804 in the cone holds the tied leash, so it is no far target (grip_skips_tied=1). The trigger takes the leash back from it, frame 1030
 ```
 
 ## 5. The grip from a distance: the leash and the stay
@@ -1395,6 +1447,7 @@ that is not the player's, with each state of the leash. The test key
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `far_leash` | 1 | Your Creature in the aim is a target of the leash and of the stay. 0 takes the Creature out of the far targets |
+| `grip_skips_tied` | 1 | The object that holds a tied leash is no target of the grip, at the Hand and from a distance (section 5.2). 0: the grip can aim at it as at each other object |
 | `far_grab_creature` | 1 | 1: the aim measures your Creature by its body and takes it from the game. 0: by the point of its mesh, at its feet, and only when the draw offered it |
 | `creature_hold_stay` | 1 | See section 5.3. 0: the leash click goes out at the close of the grip, and no grip makes the Creature stay |
 | `far_test_creature` | 0 | A test key. 1: only your Creature is a far target, and the word `aimfar` aims at it |
@@ -1432,9 +1485,18 @@ click, except a `OneOffSpellSeed`. So the same objects can take the leash.
 
 The card (`AddPromptTwice` in `hint_card.cpp`) has two lines for an object
 that can take the leash: "Trigger Send the Creature" and "Trigger x2 Tie the
-leash". While the leash is tied, the object that holds it has the green halo
-and the line "Trigger x2 Take the leash back", and your Creature has "Trigger
-Take the leash back".
+leash". While the leash is tied, the object that holds it has the green ring
+(or the green halo with `command_look=0`) and the line "Trigger x2 Take the
+leash back", and your Creature has "Trigger Take the leash back".
+
+**The grip does not take the object that holds the leash.** The game does
+not let the Hand take it: a press on it is a press for the leash, and it
+takes nothing. So with `grip_skips_tied=1` (the default) that object is no
+target of the grip. The choice at the Hand leaves it out (`PressKind` in
+`hand_direct.cpp`), and the grab from a distance leaves it out of its cone,
+with a log line. It has no gold halo, and the card says "Grip Cannot take".
+The trigger keeps it as its target. With `grip_skips_tied=0` the grip can
+aim at it as at each other object.
 
 What the Creature does on a tied leash is the game's own.
 

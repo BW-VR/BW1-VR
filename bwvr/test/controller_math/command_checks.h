@@ -730,6 +730,37 @@ inline void LiveChecks() {
     Check(!DoublePress(10.30, -1e9, 0.5, &house, &house),
           "with no tap before it, a press is no double press", 0, 0);
   }
+
+  // THE RING OF A TARGET OF A COMMAND.
+  {
+    // A tree of radius 20 units at 100 units a meter: 1.35 * 20 cm + 3 cm.
+    const float tree = TargetRingCm(20.0f, 100.0f, 11.0f);
+    Check(fabs(tree - 30.0f) < 0.01f,
+          "the ring of a tree of 20 cm has an outer radius of 30 cm", tree,
+          30.0);
+    const float small = TargetRingCm(2.0f, 100.0f, 11.0f);
+    Check(fabs(small - 11.0f) < 0.01f,
+          "a small object has the ring of a command to the land", small,
+          11.0);
+    Check(fabs(TargetRingCm(20.0f, 0.0f, 11.0f) - 11.0f) < 0.01f,
+          "with no scale the ring has its least size", 0, 0);
+    Check(fabs(TargetRingCm(-5.0f, 100.0f, 2.0f) - 3.0f) < 0.01f,
+          "a radius below 0 counts as 0", 0, 0);
+  }
+
+  // THE GRIP AT A TARGET OF A COMMAND.
+  {
+    Check(GripAtTargetOf(true, 2.0f, 2.2f) == kGripTooFar,
+          "a tree at 2.2 m with far_grab_max_m=2 is too far for the grip", 0,
+          0);
+    Check(GripAtTargetOf(true, 2.0f, 1.5f) == kGripCannot,
+          "a target in the range that the grip does not take: cannot take", 0,
+          0);
+    Check(GripAtTargetOf(true, 0.0f, 9.0f) == kGripCannot,
+          "far_grab_max_m=0 has no range, so no target is too far", 0, 0);
+    Check(GripAtTargetOf(false, 2.0f, 9.0f) == kGripCannot,
+          "far_grab=0: no target is too far", 0, 0);
+  }
 }
 
 }  // namespace command_checks

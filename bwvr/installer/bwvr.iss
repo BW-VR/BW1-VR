@@ -135,6 +135,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; file in it that the launcher writes is given them on its own, below.
 Name: "{app}\dxwrapper"
 
+[InstallDelete]
+; The model folder is the mod's own. An install puts in a new copy, so a model
+; that this version does not ship does not stay.
+Type: filesandordirs; Name: "{app}wvr-controllers"
+
 [Files]
 ; The mod. BeforeInstall saves a ddraw.dll that belongs to the player, and
 ; ignoreversion is needed because the DLL carries a version resource that a

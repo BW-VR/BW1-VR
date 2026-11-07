@@ -300,8 +300,7 @@ keeps the mod as it is.
     crossings, at 0.2 to 0.42 ms a frame. Open: the simpler body of a heavy
     model breaks its ink outline (the ring of the Vive, the Cosmos and the
     Touch v3, the strap of the Index), so the thin parts need smaller cells.
-    The model `microsoft-mixed-reality` says "All rights reserved" in its
-    file: the owner decides if it stays. Only a headset can show whether
+    Only a headset can show whether
     the model is at the real controller and whether the cards read at
     55 cm (`headset-checks.md`, 21).
 

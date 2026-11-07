@@ -61,8 +61,8 @@ inline void HintModelChecks() {
          "htc-vive-cosmos") &&
       Is(hm::ModelOfProfile("htc/vive_focus3_controller", ""),
          "htc-vive-focus-3") &&
-      Is(hm::ModelOfProfile("microsoft/motion_controller", "Samsung"),
-         "microsoft-mixed-reality") &&
+      hm::ModelOfProfile("microsoft/motion_controller", "Samsung") ==
+          nullptr &&
       Is(hm::ModelOfProfile("microsoft/motion_controller", "HP Reverb G2"),
          "hp-mixed-reality") &&
       Is(hm::ModelOfProfile("hp/mixed_reality_controller", ""),

@@ -35,10 +35,6 @@ of the mod. The mod reads the meshes and the nodes of each file and draws them
 in its own colors. It does not read the textures, so no logo of a texture
 shows.
 
-The `microsoft-mixed-reality` glb files also have the text "© Microsoft 2017.
-All rights reserved." in their `asset.copyright` field. The project ships them
-under the MIT license of the package.
-
 ## The profiles
 
 | Folder | Controllers | Files |
@@ -52,12 +48,12 @@ under the MIT license of the package.
 | `htc-vive-cosmos` | Vive Cosmos | `left.glb`, `right.glb` |
 | `htc-vive-focus-3` | Vive Focus 3 | `left.glb`, `right.glb` |
 | `hp-mixed-reality` | HP Reverb G2 | `left.glb`, `right.glb` |
-| `microsoft-mixed-reality` | Windows Mixed Reality | `left.glb`, `right.glb` |
 | `pico-4` | Pico 4 | `left.glb`, `right.glb` |
 | `generic-trigger` | A controller with only a trigger (`khr/simple_controller`) | `left.glb`, `right.glb`, `none.glb` |
 
 `hint_model_math.h` (`ModelOfProfile`) gives the folder for the interaction
-profile and the name of the headset. An other profile has no model, and the
+profile and the name of the headset. An other profile has no model (also a Mixed Reality controller that is not
+from HP), and the
 cards keep the look of `hint_style=1`. `profilesList.json` lists all profiles
 of the project, also the ones that are not in this folder.
 

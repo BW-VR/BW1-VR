@@ -193,6 +193,27 @@ function Invoke-Install {
         foreach ($ini in @('dxwrapper\dxwrapper.ini', 'dxwrapper\ddraw.ini')) {
             [void][BwvrDev.Ini]::WritePrivateProfileString('General', 'RealDllPath', $system, (Join-Path $game $ini))
         }
+        # A file of the last install that this build does not ship goes, so an
+        # old controller model does not stay in the game folder.
+        $markerPath = Join-Path $game $Marker
+        if (Test-Path -LiteralPath $markerPath) {
+            $old = @(Get-Content -LiteralPath $markerPath | Select-Object -Skip 3 | Where-Object { $_.Trim() -ne '' })
+            $gone = 0
+            foreach ($rel in $old) {
+                if ($done -contains $rel) { continue }
+                $path = Join-Path $game $rel
+                if (Test-Path -LiteralPath $path -PathType Leaf) { [System.IO.File]::Delete($path); $gone++ }
+            }
+            $models = Join-Path $game 'bwvr-controllers'
+            if (Test-Path -LiteralPath $models) {
+                foreach ($sub in @(Get-ChildItem -LiteralPath $models -Directory -Force)) {
+                    if (@(Get-ChildItem -LiteralPath $sub.FullName -Force).Count -eq 0) {
+                        [System.IO.Directory]::Delete($sub.FullName, $false)
+                    }
+                }
+            }
+            if ($gone -gt 0) { Note "removed $gone files of the last install that this build does not ship" }
+        }
         $id = (& git -C $Repo rev-parse --short=7 HEAD 2>$null)
         @("Put here by dev.ps1 of the Black & White VR Mod repo.", "build $id, $(Get-Date -Format s)", '') + $done |
             Set-Content -LiteralPath (Join-Path $game $Marker) -Encoding ascii

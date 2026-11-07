@@ -1578,7 +1578,7 @@ Quest, so the name of the headset (`XrSystemProperties`, the log line
 | `htc/vive_controller` | | `htc-vive` (one file for both hands) |
 | `htc/vive_cosmos_controller`, `htc/vive_focus3_controller` | | `htc-vive-cosmos`, `htc-vive-focus-3` |
 | `microsoft/motion_controller` | "HP", "Reverb" | `hp-mixed-reality` |
-| `microsoft/motion_controller` | an other name | `microsoft-mixed-reality` |
+| `microsoft/motion_controller` | an other name | no model (the first Mixed Reality controllers have a touchpad) |
 | `khr/simple_controller` | | `generic-trigger` |
 
 No profile yet, or an other profile, gives no model. Then that hand has the

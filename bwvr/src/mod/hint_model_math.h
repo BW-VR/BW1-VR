@@ -90,11 +90,13 @@ inline const char* ModelOfProfile(const char* profile, const char* system) {
   if (HasNoCase(profile, "vive_focus3")) return "htc-vive-focus-3";
   if (HasNoCase(profile, "htc/vive_controller")) return "htc-vive";
   if (HasNoCase(profile, "hp/mixed_reality")) return "hp-mixed-reality";
+  // The first Mixed Reality controllers have a touchpad and no A, B, X or Y.
+  // The HP model does not fit them, and the mod ships no model of them.
   if (HasNoCase(profile, "microsoft/motion_controller")) {
     if (HasNoCase(system, "hp") || HasNoCase(system, "reverb")) {
       return "hp-mixed-reality";
     }
-    return "microsoft-mixed-reality";
+    return nullptr;
   }
   if (HasNoCase(profile, "khr/simple")) return "generic-trigger";
   return nullptr;

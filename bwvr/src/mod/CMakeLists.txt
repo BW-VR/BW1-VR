@@ -52,6 +52,7 @@ add_library(bwvr_mod SHARED
     head_camera.cpp
     snapshot_guard.cpp
     water_mode.cpp
+    sea_depth.cpp
     ui_worldlock.cpp
     pointer_map.cpp
     cursor_trace.cpp

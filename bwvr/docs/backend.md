@@ -56,7 +56,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/eye_clean.cpp` | The frame before of each eye: the clean of each eye pass, and the keeps of the eye pictures |
 | `src/mod/bubble_card.cpp` | A speech bubble of the game as one card at the depth of its sign, and the name of a villager as one card at the depth of the villager |
 | `src/mod/note_depth.cpp` | A note of the game over a thing (the percent of a lesson over the Creature) at the depth of its place |
-| `src/mod/sky_detail.cpp`, `water_mode.cpp` | Clouds, the moon, sun glare, detail distance, the sea |
+| `src/mod/sky_detail.cpp`, `water_mode.cpp`, `sea_depth.cpp` | Clouds, the moon, sun glare, detail distance, the sea, the sea with depth |
 | `src/mod/sprite_up.cpp`, `sprite_math.h` | Smoke, fire and the other sprites with world up |
 | `src/mod/spirit_anchor.cpp` | The advisors |
 | `src/mod/near_plane.cpp` | The near plane |
@@ -244,6 +244,76 @@ The cached camera forward at `0x00EA1DD4` (written by
 `LH3DTech::UpdateWorldToCamera` at `0x00819773`) is read by the water at
 `0x008799F6` and `0x008799FF`, only as a sub pixel swell. `LH3DSky::Draw`
 (`0x0086B010`) is ordinary world geometry from `data\weathersystem\sky.l3d`.
+
+### The sea with depth
+
+`GLandscape::Draw` draws the sky, the reflection of the land (`fn_007FF4F0`,
+with no depth write), the light of the Hand on the water (`fn_005E3F70`,
+`0x005E4E6B`), the sea (`0x005E4E8C`), and then the land (`fn_007FF610`,
+`0x005E4E96`) [V]. The sea has the depth test ALWAYS and no depth write, so
+it is a translucent background, and the land draws over it. The land draw
+`fn_00874AA0` gives a vertex the height of its altitude byte times 0.67. A
+byte of 3 or less is sea, and the vertex is at the height 0, in the plane of
+the sea. In a block with water (block `+0x928`) a vertex with a byte of 0 or
+1 gets an alpha of 0 in its specular color, and a vertex with a byte of 2 or
+3 stays opaque [V]. The land and the waves on the coast (the material
+`0x00E9CD64`, a second pass of the same vertices) take their alpha from that
+color [V]. So the coast of the game is a flat band of land on the plane of
+the sea that fades into the sea. The land has no sea floor under the plane:
+the data has only the four bytes of the sea.
+
+With `sea_depth=1` (`sea_depth.cpp`, `sea_depth_math.h`) the draws keep
+their order, and the land of the sea in a block with water changes:
+
+- A vertex of the sea goes under the plane of the sea, by the game's step
+  of 0.67 units for each byte under 4: the byte 3 is at -0.67 and the byte 0
+  at -2.68. A stub takes the place of the load of 0.0 in each vertex loop
+  (`0x00874BB3`, `0x0087508B`). The land then crosses the water 80 percent
+  along the edge from a vertex of the byte 4 to a vertex of the byte 3.
+- The alpha of a vertex of the sea falls with its depth: 170 for the byte 3,
+  85 for the byte 2, and 0 for the bytes 1 and 0, as in the game. The test of
+  the cut (`cmp eax, 1` at `0x00874BBB` and `0x00875095`) tests 3, and a
+  stub takes the place of the cut (`0x00874BC0`, `0x0087509A`).
+- The light of the Hand (a square of 120 units at the height 0, additive,
+  with the depth test ALWAYS) draws with no depth write. Its depth would
+  hide the land under the water in that square, and the square would show
+  as a bright tile with hard edges in the water. The sea draws over it, as
+  in the game.
+
+So the land goes on down under the water, and it fades into the sea that
+draws behind it. In each eye the floor near the coast is at its depth under
+the water, and the deeper floor shows less and the sea more. The sea and the
+land have no depth test between them, so the coast has the soft fade of the
+game and no hard line at the water line. The waves on the coast draw on the
+same vertices, so the foam lies on the land and on the floor under the
+water, and it fades with the alpha of the floor. A block with no water flag
+keeps the game's heights and alphas. The reflection pass keeps the game's
+tables (the call at `0x005E48DD`). The game logic does not change:
+`GetAltitude` still gives 0 for the sea.
+
+The sea stays a background with no depth test. It is one flat quad with
+one alpha, so a depth test against the land would cut it on a hard line at
+the water line. The foam is a pass over the land, so it cannot hide such a
+line.
+
+Both renderers get the same draws, because the change is in the draws of
+the game. There is no new draw. The stubs add a few instructions to each
+vertex of the sea. The changes need the x87 path of the land draw
+(`0x00EA9EB4` at 0). The game takes its SSE path (`fn_007A1800`) only on a
+Pentium 4, and then the coast stays flat. With `sea_depth=0` the stubs give
+the game's values, and the light of the Hand writes its depth. The debug
+window has the switch "Sea depth" (Picture). Each report window has one
+line:
+
+```
+sea depth    : 450 frames, 450 with the floor under the water, 450 draws of the light of the Hand on the water, 450 of them with no depth write
+```
+
+The light of the Hand draws only at night and only near the sea. Open: a
+thing that the game draws before the sea with a depth under the plane (a
+villager in the water) hides the floor behind it, as a thing in the water
+does. An object that draws after the land shows down to the floor under the
+water with no tint of the sea.
 
 ### Where the Hand comes from
 
@@ -5671,6 +5741,7 @@ keys that the launcher sets.
 | `eye_separation_milli` | 0 | 0 asks the headset |
 | `head_units_per_meter_x10` | 75 | World units per meter, in tenths |
 | `head_roll`, `water_simple` | 1, 1 | See "Roll and the sea" |
+| `sea_depth` | 1 | 1: the land of the sea goes on down under the water and fades into the sea by its depth, and the light of the Hand on the water writes no depth. 0: the flat coast of the game. See "The sea with depth" |
 | `head_camera` | 1 | The head on the camera |
 | `hand_anchored` | 1 | The Hand keeps its place in the room |
 | `game_camera_rebuild` | 1 | See "The game camera's own screen" |

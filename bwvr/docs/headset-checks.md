@@ -14,11 +14,7 @@ want.
 
 ### The start
 
-1. **The intro in stereo.** Turn on the launcher row "Intro in stereo", and
-   watch the Lionhead logo. Wrong: an orb that shows double or large in one
-   eye, a logo out of the reach of the arms, a motion that is not
-   comfortable, or orbs that do not move with the hands.
-2. **The stories.** Watch the first story of a new game in the window. Then
+1. **The stories.** Watch the first story of a new game in the window. Then
    play one story with the launcher row "Cut scenes" at "Around you". Wrong:
    a screen or subtitles at a bad place or size, a close shot or a cut that
    hurts the eyes, an advisor that is too low or moves with the head, or a
@@ -28,46 +24,38 @@ want.
 
 ### The God view
 
-3. **The size of the world.** Look at the land at your waist at each scale,
+2. **The size of the world.** Look at the land at your waist at each scale,
    and bring the Hand near your eyes. Wrong: a world that feels too large or
    too small, land or clouds that look wrong at a scale, or a Hand that the
    view cuts near the eyes. Then bend down slowly and put your head into a
    hill, and then into a house. Wrong: you see under the land or into the
    house, the gold and red cover comes too late or too soon, it flickers on
    a slope, or its color is hard on the eyes.
-4. **The zoom.** Zoom in and out with the stick. Then try the switch "Smooth
-   zoom" (debug page, View). Wrong: discomfort, a blink, or a rate that is
-   too fast or too slow.
-5. **The walk and the grab of the land.** Walk with the stick near and far,
-   with a small push, and on hills, and grab the land with one grip and with
-   two grips. Wrong: discomfort, a wrong speed, a walk with the thumb at
-   rest, a view that bobs or stops and jumps, land that
-   shakes while the hand is still, or a bump at the edge of the Creature
-   select that is too loud. Then set the launcher row "Comfort vignette" to
+3. **The comfort vignette.** Set the launcher row "Comfort vignette" to
    gentle and to strong for a short walk. Wrong: it does not help, or it is
    in the way.
-6. **The teleport.** Aim the arc at near and far land, and go to the village
+4. **The teleport.** Aim the arc at near and far land, and go to the village
    of Land 1. Wrong: an arc or a ring that is hard to see or to aim, or a way
    to the village that you cannot find.
 
 ### The Hand
 
-7. **The hands on the controllers.** Look at each hand, and close the
+5. **The hands on the controllers.** Look at each hand, and close the
    trigger and the grip slowly. Wrong: a hand off its controller, turned or
    of a wrong size, a finger that jumps, or an object that looks wrong in the
    palm (name the object). Reach slowly to the edge of your influence and
    past it, with each hand. Wrong: a red glow at the edge that comes too
    late or too early, that is hard to see or too strong, or a fade of the
    hand that is too strong.
-8. **The grip.** Take things, set them down and let them go. Wrong: a take
+6. **The grip.** Take things, set them down and let them go. Wrong: a take
    from a loose hand, a grip that lets go late or not at all, a drop by
    accident, or a job that needs the other button.
-9. **The aim and the halo.** Compare the ray with the ray of the Quest menu.
+7. **The aim and the halo.** Compare the ray with the ray of the Quest menu.
    Take near and far things: a villager among trees, a tree beside the
    Creature, a thing past a near tree. Wrong: rays that differ, a halo on a
    thing that you did not aim at, a halo or a glow that is lost on the land
    or too strong, or a pull by accident.
-10. **The fingers on the world.** Put a hand on the land, at a wall of a
+8. **The fingers on the world.** Put a hand on the land, at a wall of a
     house, on a villager and into the sea, and take a small rock. Push a
     hand deep into the land, into a wall of a house and into a tree trunk,
     and move it there. Wrong: a finger that jumps,
@@ -75,70 +63,65 @@ want.
     fingers that stop on the water, a hand that goes into the land or a wall,
     or jumps on it, or a hand on the land or a wall that feels wrong beside
     the real hand.
-11. **The haptics.** Feel the pulses of a take, a release, a stroke, the
+9. **The haptics.** Feel the pulses of a take, a release, a stroke, the
     leash, a command and the land. Wrong: a pulse that is too weak or too
     strong, or a pattern that feels like a buzz or hides the pulse of a
     control.
-12. **Throws and catches.** Throw rocks, villagers, trees and a Fireball at
-    each scale, and catch a rock in its fall. Wrong: a throw that goes too
-    short, too far or in a wrong direction, a quick set down that throws, a
-    flight or a landing that looks wrong, or a catch that feels late.
-13. **A take of many.** Take wood or food from a store and from a forest, at
-    the Hand and from a distance, and take a tree from a distance. Wrong: a
-    stream or a count that is hard to read in depth, a pace that feels wrong,
-    or a pile of the far tree that is not the pit that you mean.
-
+10. **Throws.** Throw rocks, villagers, trees and a Fireball at
+    each scale. Wrong: a throw that goes too short, too far or in a wrong
+    direction, a quick set down that throws, or a flight or a landing that
+    looks wrong.
 ### The village
 
-14. **The words over the land.** Hold a villager and read his job icon. Read
+11. **The words over the land.** Hold a villager and read his job icon. Read
     the name of a villager, a signpost, the yellow note over the Creature and
     a tooltip at the Hand's point. Wrong: a text that is too small, hard to
     read, double, or not at the depth of its thing. Say if the job icon is a
     problem: F18 waits for that answer.
-15. **Small targets.** Tap the icons of a Worship Site, reach for a scroll,
+12. **Small targets.** Tap the icons of a Worship Site, reach for a scroll,
     move the totem pole, and tap a leash post at the door of the Temple.
     Wrong: a tap that hits the item beside the one that you want, a pole that
     slides from the hand, or a count of the totem that is hard to hit.
-16. **The building of a scaffold.** Hold a scaffold over the land and roll
+13. **The building of a scaffold.** Hold a scaffold over the land and roll
     the wrist. Wrong: the building turns the other way than the wrist, turns
     when the hand only moves, or a full turn of the building is hard to
     make.
 
 ### The Creature
 
-17. **Stroke, slap and look.** Stroke the Creature slowly at each zoom, slap
+14. **Stroke, slap and look.** Stroke the Creature slowly at each zoom, slap
     it with the arm and with the wrist, and lean while it looks at you. Also
     rest the open hand in its body and move it slowly, and reach past it to
     a thing near it. Wrong: a slap that does not count, a stroke that counts
     as a slap, a touch in the air, a look past your head, a stroke when the
     hand only goes past, or a Creature panel that goes on and off.
-18. **Leash, commands and the stay.** With the leash on, tap the trigger at
-    places and things. Hold the grip on the Creature for a stay, give it an
-    object, and shake the leash hand. Wrong: the Creature goes to a different
-    place, a command, a stay or a change of the leash by accident, or a real
+15. **Leash and commands.** With the leash on, tap the trigger at
+    places and things, give it an object, and shake the leash hand. Wrong: the
+    Creature goes to a different place, a command or a change of the leash
+    by accident, or a real
     shake that does nothing. Also wrong: a green ring on the land that is
     hard to see or that you take for a target of the grip, or a glow on a
     thing that the grip does not take.
 
 ### Miracles
 
-19. **The spell book and the row of gestures.** Open the book (X, or the
+16. **The spell book and the row of gestures.** Open the book (X, or the
     palm up), pull a miracle out, and let one spring back. Hold B and look at
     the row over the palm. Wrong: a book or a row that is hard to read or to
     reach, a pull that feels stiff or loose, a book that opens by accident,
     or a bubble that looks wrong.
-20. **A gesture and a cast.** Draw miracles in the air, draw a circle for
+17. **A gesture and a cast.** Draw miracles in the air, draw a circle for
     Storm or a shield, and try the switch "Gesture point" (debug page,
     Creature). Take a miracle out with a shake and with a tap of B. Wrong: a
     draw that looks right and does not match (say which), a circle that gets
     a different size on the land, or a way out that acts by accident or not
     at all.
-21. **Water on a fire.** Set a house on fire with a Fireball, and pour Water
+18. **Water on a fire.** Set a house on fire with a Fireball, and pour Water
     on it. Wrong: the fire does not go out, or the pour looks wrong.
 
 ### The Temple
 
-22. **The rooms of the Temple.** Come in, turn, tilt and lean the head, go
+19. **The rooms of the Temple.** Come in, turn, tilt and lean the head, go
     through doors, point at things, and look down at the pool of the hall.
     Wrong: a room that turns or tilts with the head, a room of a wrong size,
     one dark eye, a pace that is too fast or too slow, a move at the pool, a
@@ -146,7 +129,7 @@ want.
 
 ### Menus and cards
 
-23. **The menus, the keyboard, the ring and the panel of places.** Open the
+20. **The menus, the keyboard, the ring and the panel of places.** Open the
     game menu and the ring, type the name of a god, open the panel of places
     from page 2 of the ring and go to a bookmark, and turn the head while a
     menu is open. Wrong: a panel that turns with the head or is at a bad
@@ -159,7 +142,7 @@ want.
     window from page 2 of the ring. Wrong: a label, a value or the words
     "at the next start" that are hard to read, or a drawing on the tab
     Controls that does not look like your controllers.
-24. **The cards and the subtitles.** Read the hint cards at the wrist and the
+21. **The cards and the subtitles.** Read the hint cards at the wrist and the
     subtitle card while the hands work. Wrong: low contrast or a shimmer, a
     card that covers a hand or often changes side, a prompt that is late or
     stays too long, a subtitle card that moves while the head moves, a
@@ -169,21 +152,21 @@ want.
 
 ### All through the play
 
-25. **The picture in both eyes.** Look for a fault in one eye only: a faint
+22. **The picture in both eyes.** Look for a fault in one eye only: a faint
     old picture, a flash of lightning, a flicker or a black frame. Also look
     at the edge of the view in a fast turn of the head, and turn the head at
     the load of a saved game. Wrong: a fault in one eye, black at the edge,
     or a picture that does not turn with the head at a load.
-26. **The sound.** Listen while you play. Wrong: a Creature that sounds at
+23. **The sound.** Listen while you play. Wrong: a Creature that sounds at
     the height of your ears and not below, a sea that turns with the view, a
     sound hard in one ear, a sound that lags a fast turn, a click or a cut, a
     loop that stops, or a cue that is too loud.
-27. **The view for videos** (`video_view=1`). Record a short video of the
+24. **The view for videos** (`video_view=1`). Record a short video of the
     game window with OBS while you play. Wrong: corner marks that you
     cannot see or that disturb the play, a video that shakes, a video that
     cuts off what you look at, or a card, the ring or a panel that is not
     in the video or not where you saw it.
-28. **The sea at the coast** (`sea_depth=1`). Look at a beach near and far.
+25. **The sea at the coast** (`sea_depth=1`). Look at a beach near and far.
     Wrong: water with no depth, a floor that looks dry, or a coast that
     flickers.
 
@@ -266,9 +249,6 @@ agents: the log does not tell the item yet.
 - **The quad layers in the video in a session** (P7). Log: `video view   :
   ... is in the video for the first time`, with `from its copy on the GPU`
   for a card and `from the image of the panel` for a panel.
-- **The menu button of the left controller** (P13). Log: `controllers  : the
-  menu button sends Esc`, or `the menu button is dropped`. A press with no
-  such line is a press that Virtual Desktop kept.
 - **The menu of Virtual Desktop with the trigger held.** Log: `openxr:
   session state` gives each change of the focus. Needs a log line: a button
   that is down when the focus comes back, and the frame at which the mod
@@ -276,9 +256,6 @@ agents: the log does not tell the item yet.
 - **A controller after a long cut scene** (B24). Needs a log line: each
   change of the active state of a controller that the runtime gives, with
   the frame.
-- **The steps of the tutorial** (B26). Needs a log line: each step of the
-  tutorial that starts and ends, with its name, and a step that waits for
-  more than 2 minutes.
 - **A quest that waits for the player**, for example the Island Keeper of the
   Gods' Playground and the mother of `FollowUs`. Log: `scripts      :` gives
   each question of a script about the player. Needs a log line: a script

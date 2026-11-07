@@ -90,50 +90,6 @@ These items come before the other work.
   the white people are in `headset-checks.md`, "Play as normal and send the
   log". The invisible body after the
   quest has no known cause yet.
-- **B2. A catch at once.** A press of the grip on
-  an object that moves (it falls, flies or rolls) puts the object in the
-  hand from the first frame after the press. The game sends its pick up at
-  once, the body of the object stays where it is, and the mod draws the
-  object in the Hand (`catch_at_once=1`, `grab.md`, "A catch at once"). No
-  such press is a click, so no rock splits. Desktop runs show it at the frame
-  rate of the rig and at 90 frames a second, with a rock in its fall, a rock
-  that the hand threw up, a grip of 50 ms, a throw and a drop after the
-  catch, and a fetch from a distance of a tree that still moves. The check
-  with a real hand is in `headset-checks.md`, "Throws and catches", and the
-  runs that are not made are in R12. Still open:
-  - Not shown: a grip on an object that rolls for more than 1 s. The recipes
-    `rollnear`, `rollfar`, `droproll`, `dropfarroll` and `treenear` do not
-    reach that state on the desktop (`bwvr/tools/desk/README.md`, "Known
-    limits of the recipes").
-  - Not shown in a run: the guard of a throw. The scripted grip opens in one
-    frame, so it is fully open at once. The math checks have the rule.
-  - A press with no target when a ball rolls 23 to 32 cm from the Hand's
-    point: the object is past its reach of the pick, and the aim is not on
-    it, so the grip does nothing.
-  - A tree that is let go comes to rest in about 1 s now
-    (`throw_tree_settle`, `throw.md`, "The landing of a tree"). Not shown in a
-    desktop run: a far target that hides and shows by itself, and a tree
-    thrown fast across the land. A tree that does not move for 0.5 s is at
-    rest, also while its torque is over the limit of the rest test of the game
-    (`throw_land_rest`, `throw.md`, "The rest after a landing"). A tree thrown
-    at 3 m/s left the physics 2.6 and 4.3 s after the release
-    (`throw_queue.ps1 -Runs tree`).
-- **B4. The lean alone at a place where the game plants a tree.** The card
-  says "Hold upright to plant" for a tree that leans more than 0.2 rad in the
-  Hand, and the tree has the same lean in the physics of the game
-  (`throw_queue.ps1 -Runs treelean -NewGame` in `bwvr/tools/desk`). That run
-  is at a place where a body is in the way, so it does not show that the lean
-  alone stops the planting. Not run: the turn of `treelean` at the place of
-  `-Runs treeleft`, where the game plants an upright tree. The card does not
-  count a near object of a class whose body the mod does not make: a
-  fragment, a field crop, a chess piece, the heart of a citadel and a shield
-  (`grab.md`, "The test of the mod").
-- **B1b. The roots pile of a far grab.** `far_roots_at_tree=1` puts the pile
-  at the roots, as for a tree that the Hand takes (check:
-  `headset-checks.md`). Not run: a tree that comes from a distance and is then
-  planted again. A tree that is thrown, or that falls from more than
-  `release_fall_cm`, is not planted by the game: it takes the path of a dead
-  tree.
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view
@@ -226,102 +182,15 @@ These items come before the other work.
   lightning of a storm. No run had a real lightning. Not known: whether the
   flash of that session was a light on the land. The log line of
   the flash is in `headset-checks.md`, "Play as normal and send the log".
-- **B26. The tutorial: the steps that no run and no session has.** Each step
-  of the tutorial waits for an input that a VR player can give with the
-  controls of the mod (`god-view.md`, section 7, "The steps of the
-  tutorial"). A desktop run and the log of a session in the headset show the
-  tutorial of Land 1 from the walk to the village to the texts after the zoom
-  lesson. Still open:
-  - The end of the build of the Temple, the missionaries and the lessons of
-    Land 2 (the gestures, the shield, the fireball) have no run. The log
-    line that they need is in `headset-checks.md`, "Play as normal and send
-    the log".
-  - The lessons of the Gods' Playground after the step of the turn have no
-    run. A desktop run shows the first walk of the Island Keeper and the step
-    of the turn only with `script_view=0`. With `script_view=1` the Keeper did
-    not start his walk, also when an eye picture showed him in the view
-    (`god-view.md`, section 7). Find out if the view test of the head is
-    too narrow, or if only the fixed head of the run is at fault.
-  - The game tells the player to press F2 for the Gods' Playground, and no
-    page of the ring has the item `playground` by default.
-B1b, B2 and B4 are one package: a thing that is held, thrown, or
-that moves while the Hand takes it.
 
 ### Changes to the controls
 
-- **P2. The stay of the Creature.** A grip from a distance that stays
-  closed on the Creature makes it stop and stay until the grip opens. A
-  short grip changes the leash when it opens (`creature_hold_stay=1`,
-  `creature.md`, section 5.3). The stay is the locked select of the game,
-  with no stroke, no lesson and no camera. Desktop runs show it with a
-  Creature that stands and with a Creature that walks. The check is in
-  `headset-checks.md`, "Leash, commands and the stay".
-
-  The leash click, the stay and a command act on the Creature of the local
-  player only: the code compares each Creature with the Creature of that
-  player, and a Creature that is not the player's own is no far target
-  (`creature.md`, section 5.1, "Only your own Creature"). The math checks
-  have the rule. Not run: the aim and the grip at a Creature that is not
-  the player's (`aim_queue.ps1 -Runs other` in `bwvr/tools/desk`), a game
-  with the Creature of a different god (a skirmish or a multiplayer game),
-  a start that the game refuses, and a grip that closes again before the
-  end of a stay went to the game.
-
-  Open: with the leash on, the game starts its press on the Creature 17 to
+- **P2. A fast click on the Creature with the leash on.** With the leash
+  on, the game starts its press on the Creature 17 to
   22 frames after the grip closes (2 to 7 frames with the leash off). So a
   grip of 100 ms with the leash on gives no leash click
   (`creature_recipe.ps1 -Kind wide`). Not known whether a fast click on the
   Creature with the leash on takes the leash off in the plain game.
-- **P4. A choice of control scheme, the default of the zoom, and a two
-  hand grab as in Deisim.**
-  - A choice of control scheme: more options, so that each player chooses
-    how the controls work. The launcher offers the turn in steps, the zoom
-    in steps or smooth, the center of the zoom, the walk with the stick of
-    the other hand (along the direction of the head, along the direction of
-    the controller, or off), and the grip that grabs the world
-    (`launcher.md`, "Moving around" and "Controllers"). The layout of the
-    buttons of the other hand has an ini key and no row (`button_layout`,
-    `controllers.md`, 5.1). Not built: a smooth turn with the stick, and a
-    choice in the game (the launcher runs before the game). Keep the scheme
-    of now as the default.
-  - The default of the zoom: the stick zooms in steps of 1.5 times, and
-    `god_zoom_smooth=1` gives a smooth zoom while the stick is held
-    (`god-view.md`, section 2). Choose the default and the top rate
-    (`god_zoom_smooth_ms`) after the check in `headset-checks.md`, "The
-    zoom".
-  - A two hand grab as in Deisim: the player holds both grips, and the
-    hands make the world smaller or larger and turn it. The mod has a
-    version of this (`god-view.md`): both grips turn the land about up and
-    scale it with the spread of the hands, about the land point under the
-    middle of the hands. Before the work starts, compare the controls of
-    the mod with the controls of Deisim. Points to compare: the turn is
-    only about up here, the height of the land stays, and the grip of the
-    Hand also takes objects.
-- **P13. The walk with the stick and the layout of the left controller.**
-  The stick of the hand that does not point moves the player over the land
-  of the God view while it is pushed (`move_stick=1`, `god-view.md`, section
-  5.7). The menu button of the left controller opens the game menu, Y opens
-  the ring, and X opens the spell book (`button_layout=1`, `controllers.md`,
-  5.1). The math checks and desktop runs show the rules. The checks are in
-  `headset-checks.md`. The scripted stick has full pushes only, so a small
-  push and the dead zone have only the math checks. Not run: a push with
-  the switch for the drag off, an Index controller, and a controller with
-  no face buttons.
-- **P14. The stream of a take at a distance.** In a
-  take at a distance the pieces of wood or grain go on a curve from the top
-  of the source to the Hand (`take_stream`, `grab.md`, "The stream of a take
-  at a distance"). Desktop runs show the curve from a pile of wood of the
-  Village Store, with the Hand 0.27 m to the side of the pile and 0.5 m over
-  it. Open:
-  - The check of the look is in `headset-checks.md`, "A take of many".
-  - A piece lives 1 s for each length of the way, and 8 pieces start in a
-    second. So on a way of 2 m the pieces are 25 cm apart, and they go 2 m
-    in a second. If that does not read well, the rule has both values
-    (`RaiseTime` at `+0x2C`, `EmitRate` at `+0x30`), and the hook can change
-    them for a take at a distance.
-  - No run has shown the stream from a pile of food, a field or
-    the pile of a miracle, a way that is long along the floor, and a pile
-    that goes down in the take.
 - **P15. The glow on the mesh of a target, and the targets that keep the
   halo.** The mesh of a target of the Hand glows in
   the color of its halo, with a pulse and a band of light that goes up the
@@ -368,11 +237,10 @@ that moves while the Hand takes it.
 - **P11. The intro in stereo** (`intro_vr`, off by default). Each eye has
   its own trails, the mark beside the logo has the depth of the logo, and
   the view goes along the camera path of the game with no turn
-  (`intro_motion=1`, `intro.md`). After the check in `headset-checks.md`,
-  "The intro in stereo", decide if `intro_vr` goes on, and if
-  `intro_motion` needs a different default. Not built: a speed for the orbs
-  that a hand moved, and a push of the hand in the flat intro (`intro.md`,
-  "Open work").
+  (`intro_motion=1`, `intro.md`). The owner found it good in the headset.
+  Open: whether `intro_vr` goes on by default. Not built: a speed for the
+  orbs that a hand moved, and a push of the hand in the flat intro
+  (`intro.md`, "Open work").
 - **P12. Ideas from Half-Life: Alyx** that are not built are in
   `research-hla.md`, for the far grab, the teleport, the hands, the hints,
   the sound and comfort.
@@ -392,11 +260,6 @@ that moves while the Hand takes it.
   same run makes such a fall with the word `gripdip`. Open: a headset log of
   a take with the hand moved away (`headset-checks.md`, "Play as normal and
   send the log").
-- **P23. The aim down from a chair: keep watch.** A seated player aims down
-  less well than a standing player, because furniture can be in the way of
-  the hand. Not planned. One idea: a launcher option that lets the grab
-  with two hands tilt the world. A tilted world makes the physics and other
-  parts more difficult, so wait for more reports first.
 - **P24. The Hand stops at a house, a rock and a tree.** The drawn hands
   stop at the land and at the box of a house and a rock and the trunk of a
   tree (`hand_land_stop`, `hand_object_stop`, `hand-model.md`, "The Hand
@@ -781,9 +644,6 @@ game as it is.
 
 ### The repo, the release and the tools
 
-- **R1. The installer and a person.** No person has run the installer on a
-  real game folder and told the result: the install, an update over a
-  build that is installed, and the uninstall.
 - **R2. No desktop run chooses a Creature at the Creature select.** A
   Creature in a pen has no player. A grip on it starts no Creature state, a
   press of the trigger there starts a drag of the land, and the double click
@@ -844,14 +704,15 @@ game as it is.
   line and write the result in the doc of the area. A fault gets its own
   item. Each line names the nearest recipe, or says "needs a recipe".
   - The God view:
-    - A steep slope that keeps the land near the hands (P13):
+    - A steep slope that keeps the land near the hands
+      (`move_stick_follow_land`):
       `village_run.ps1 -Kind walk` goes over the sea and a coast, and no
       hill comes within 10 cm of the head. Needs a walk over a hill.
     - The limit of 40 cm of the ring of the teleport. With rule 1 the ring
       is 11 units of the world, so it reaches 40 cm only below about 27.5
       units a meter: a recipe with zoom steps in. The lower limit of 4 cm
       holds at 3844 units a meter (`aim_queue.ps1 -Runs ring4k1,ring4k0`).
-    - The Island Keeper of the Gods' Playground with `script_view=1` (B26):
+    - The Island Keeper of the Gods' Playground with `script_view=1`:
       the way of `god-view.md`, section 7, from the test save `temple`.
       Needs the measured point of "Yes." and the place of the Keeper. The
       quest `FollowUs`: `spawn_run.ps1 -Choice normal` to the first story of
@@ -882,11 +743,6 @@ game as it is.
       the far grab stays off. The pile there is in the body of the Village
       Store.
     - The far grab of a villager in a crowd. Needs a recipe.
-    - A catch at once of a rock that rolls for more than 1 s, and the guard
-      of a throw (B2). Needs a recipe: in `throw_queue.ps1 -Runs
-      dropfarroll` the rock does not roll (`bwvr/tools/desk/README.md`,
-      "Known limits of the recipes"). The guard needs a grip that opens over
-      some frames.
     - A tree that comes to rest in a take, at the Hand and from a distance
       (B11). Needs a recipe: `throw_queue.ps1 -Runs treedropend` gives no
       line `hand take ... came to rest`, at 60 frames a second and with no

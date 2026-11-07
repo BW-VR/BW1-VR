@@ -1827,7 +1827,8 @@ tree and a villager. Each batch is in the call of the object.
 
 **Open.** No run has shown a mesh of the sorted list as a target, a mesh
 that comes through the clip of the engine, or a target by day: each run had
-the red sky of the evening. `sky_test_hour=13` sets the day.
+the sky of the evening or the night, because the game takes the time of day
+from the clock of the PC. `sky_test_hour=13` sets the day.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.

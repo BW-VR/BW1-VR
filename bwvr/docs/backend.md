@@ -5029,8 +5029,10 @@ each save.
   hour H (`GLandAlignement::SetTime` `0x005E22E0`, and the visual time at
   `0x00BF3380`). The time then goes on as the game moves it. `LH3DAtmos::UpdateGame`
   gives the moon the height `1100 * cos(15 * t) - 150`, with `t` from the visual time
-  (`fn_0086A160`), so the moon shows at night. The time of day comes from the game
-  and not from the clock of the PC: the test save "pen" is at dusk.
+  (`fn_0086A160`), so the moon shows at night. The game takes the time of day
+  from the clock of the PC, so a desktop run at night shows the night sky. A run
+  that must show the day needs `sky_test_hour` (12 or 13). The count of the passes
+  that ask for a sun glare is the same at night, so it does not show the sun.
 
 ### Sprites with world up
 

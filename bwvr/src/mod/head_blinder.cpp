@@ -221,6 +221,12 @@ bool HeadClearance(float* clearance, float head[3]) {
   return *clearance == *clearance;
 }
 
+// The word for the place of the head against what it is near, for the log.
+const char* Where(float clearance) {
+  if (clearance < 0.0f) return g_near_solid ? "in" : "under";
+  return g_near_solid ? "out of" : "over";
+}
+
 // The name of what the head is near, for the log: "the land", or the class
 // and the address of a solid.
 const char* NearName() {
@@ -305,8 +311,8 @@ void HeadBlinderFrame() {
     if (g_logs < kMaxLogs) {
       ++g_logs;
       ModLog("head blinder : the overlay starts, your head is %.1f cm %s %s at "
-             "%.1f %.1f, frame %llu", g_clearance * 100.0f,
-             g_near_solid ? "out of" : "over", NearName(), head[0], head[2],
+             "%.1f %.1f, frame %llu", fabsf(g_clearance) * 100.0f,
+             Where(g_clearance), NearName(), head[0], head[2],
              ControllersFrameCount());
     }
   }
@@ -319,9 +325,7 @@ void HeadBlinderFrame() {
     ++g_logs;
     ModLog("head blinder : the view is opaque, your head is %.1f cm %s %s, "
            "frame %llu", fabsf(g_clearance) * 100.0f,
-           g_clearance < 0.0f ? (g_near_solid ? "in" : "under")
-                              : (g_near_solid ? "out of" : "over"),
-           NearName(), ControllersFrameCount());
+           Where(g_clearance), NearName(), ControllersFrameCount());
   }
   if (!shown && g_shown && g_logs < kMaxLogs) {
     ++g_logs;

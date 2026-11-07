@@ -976,12 +976,12 @@ facts. One line when the overlay is gone, with its time and the least
 clearance of the head. The report of a window counts the times that the
 overlay showed, the opaque frames and the eye passes that drew it.
 
-The desktop run of the solids is `village_run.ps1 -Kind headstore`. At 13.2
-units a meter the Village Store is about 1 m high. The God view goes before
-the store, then the head goes over the middle of the store (the seek word
-`gointo`, into its box), and then before the store again. No desktop run
-has shown the overlay in a building yet. Whether the draw shows a building
-from the inside, or does not draw it, is open.
+The desktop run of the solids is `village_run.ps1 -Kind headhouse`. At 29.6
+units a meter a house is about 11 cm high. The head goes over the middle of
+a house (the seek word `gointo`), then 55 cm down into its box for 120
+frames, and up again. No desktop run has shown the overlay in a house yet.
+The Village Store is no solid: it is an open pit, and the game draws a
+normal view with the head in it.
 
 ## 6. The Hand
 

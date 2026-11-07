@@ -131,6 +131,9 @@ const float kSolidsMaxLength = 60.0f;
 // or less. A real hand that a teleport or a zoom puts deeper into a solid is
 // drawn as the real hand until it comes out (solid_math.h, Push).
 const float kStartMostM = 0.10f;
+// The log has a line when the push of a touch that holds changes by this
+// many meters of the room.
+const float kPushLogM = 0.01f;
 
 bool g_loaded = false;
 bool g_on = true;           // hand_land_stop
@@ -161,6 +164,7 @@ struct HandState {
   float solid_quiet = 10.0f;
   uint64_t solid_frames = 0;
   float most_push = 0.0f;
+  float logged_push = 0.0f;
   // The middle of the palm of the real hand, and its bound for the solids.
   bool have_palm = false;
   float palm[3] = {0, 0, 0};
@@ -190,8 +194,9 @@ const char* const kPointName[] = {"a corner of the palm",
                                   "a joint of a finger",
                                   "the middle of a segment of a finger",
                                   "the tip of a finger", "the Hand's point"};
-const char* const kFaceName[] = {"+x", "-x", "+y (the top)", "-y", "+z",
-                                 "-z"};
+// The faces of a box, in the axes of the box (the turn of the object).
+const char* const kFaceName[] = {"+1", "-1", "+2 (the top)", "-2", "+3",
+                                 "-3"};
 
 void LoadSettings() {
   if (g_loaded) return;
@@ -473,17 +478,23 @@ void Latch() {
         const sm::Touch& t = s.touch[0].touch;
         char where[64];
         if (solid.kind == sm::kBox) {
-          sprintf_s(where, "the face %s of its box", kFaceName[t.face]);
+          sprintf_s(where, "the face %s of its box (axis 1 %.2f %.2f %.2f)",
+                    kFaceName[t.face], solid.axis[0], solid.axis[1],
+                    solid.axis[2]);
         } else {
           sprintf_s(where, "its trunk");
         }
         ModLog("hand land    : the %s hand touches the %s %p at %s, frame "
                "%llu. The solid holds the drawn hand %.2f cm of the room out "
-               "of it, along %.2f %.2f %.2f. %d solids are near",
+               "of it, along %.2f %.2f %.2f in the world. The palm of the "
+               "real hand is at %.1f %.1f %.1f, the middle of the solid at "
+               "%.1f %.1f %.1f. %d solids are near",
                h == 0 ? "left" : "right",
                HandDirectSolidClass(objects[first_solid[h]]),
                objects[first_solid[h]], where, g_frame, push / units * 100.0f,
-               t.dir[0], t.dir[1], t.dir[2], solid_count);
+               t.dir[0], t.dir[1], t.dir[2], s.palm[0], s.palm[1], s.palm[2],
+               solid.middle[0], solid.middle[1], solid.middle[2], solid_count);
+        s.logged_push = push;
       } else {
         ModLog("hand land    : the %s hand is free of the solids again, frame "
                "%llu, after %llu frames. A solid held it out by %.2f cm of "
@@ -493,6 +504,19 @@ void Latch() {
                s.most_push / units * 100.0f,
                held ? " over the land" : "");
       }
+    }
+    // A push that changes by kPushLogM or more while the touch holds.
+    if (solid_held && s.solid_held &&
+        fabsf(push - s.logged_push) >= kPushLogM * units &&
+        g_solid_logs < kMaxSolidLogs) {
+      ++g_solid_logs;
+      ModLog("hand land    : the %s hand stays on the solid, frame %llu. The "
+             "solid holds the drawn hand %.2f cm of the room out of it now "
+             "(%.2f cm before). The palm of the real hand is at %.1f %.1f "
+             "%.1f",
+             h == 0 ? "left" : "right", g_frame, push / units * 100.0f,
+             s.logged_push / units * 100.0f, s.palm[0], s.palm[1], s.palm[2]);
+      s.logged_push = push;
     }
     if (solid_held && !s.solid_held) {
       s.solid_frames = 1;

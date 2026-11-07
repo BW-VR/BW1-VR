@@ -1295,7 +1295,7 @@ these runs (`hand_direct.cpp`):
   the body of the nearest object in the view of the class of the next entry
   of `seek_feel`.
 - `gointo`: the same, but the head goes over the middle of the body of that
-  object (the head blinder in a building, `god-view.md`, section 5.9).
+  object (the head blinder in a house, `god-view.md`, section 5.9).
 - `feel`: the Hand's point goes to the body of the nearest object of that
   class. An entry of `seek_feel` is `class,height,gap,side`, with entries
   between bars: the height on the body in percent, the gap from its surface
@@ -1447,11 +1447,13 @@ solids).
   feel bends a finger only when it is in a body, and the stop keeps the
   fingers out of the solid. The push comes first, and then the lift over the
   land of the pushed hand.
-  - A house is the box of the mesh of an `Abode`, a `Creche`, a `Graveyard`,
-    a `StoragePit` (the Village Store), a `TownCentre`, a `Windmill`, a
-    `Workshop` or a `Wonder`, with the turn of the object, as hand feel has
-    it. A rock is the box of the mesh of a `Rock`. The hand goes out by the
-    face of the box with the least push at the first touch, and that face
+  - A house is the box of the mesh of an `Abode`, a `Creche`, a `Windmill`
+    or a `Workshop`, with the turn of the object, as hand feel has it. A
+    rock is the box of the mesh of a `Rock`. The box holds each part of the
+    mesh and the air between them, so only a closed building is a solid.
+    The Village Store (`StoragePit`) is an open pit with no roof: its box
+    (radius 15.45 units) holds its inside and the air over it. The hand
+    goes out by the face of the box with the least push at the first touch, and that face
     holds while the touch holds. So the drawn hand does not jump to the far
     face when the real hand goes past the middle of the house. A face that
     points down does not count.
@@ -1463,7 +1465,8 @@ solids).
     stop the hand. The hand goes out along the level line from the axis of
     the trunk to the palm of the real hand, so it goes round the trunk with
     the real hand. It keeps its side when the palm goes past the axis.
-  - These are not solids: a field, a villager, an animal, the Creature, a
+  - These are not solids: the Village Store, a `Graveyard`, a `TownCentre`,
+    a `Wonder`, a field, a villager, an animal, the Creature, a
     forest, a scroll, the object in the Hand, a box with no half size of 2
     cm of the room or more, and a trunk with a radius of less than 1 cm of
     the room. On the table (a hand of more than 60 world units) no solid
@@ -1517,9 +1520,10 @@ The tag `hand land`. At the start, the two keys. For each hand, each touch
 of the land (80 lines at most): the lift in cm of the room, and the kind of
 the point that is lowest. Each end of a touch: the frames of the touch and
 the largest lift. Each touch of a solid (80 lines at most): its class and
-address, the face of its box or its trunk, the push in cm of the room, the
-direction of the push and the count of the solids near. Each end of the
-touch of the solids: the frames and the largest push. Once, the first frame
+address, the face of its box (in the axes of the box) or its trunk, the push
+in cm of the room, the direction of the push in the world, the palm of the
+real hand, the middle of the solid and the count of the solids near. Each end of the
+touch of the solids: the frames and the largest push. Each change of the push by 1 cm of the room or more while the touch holds. Once, the first frame
 in which the Hand's point goes up with the drawn hand. Once a report window:
 the hand frames on the land, the frames of the point, the pulses with
 `hand_feel=0` and the count of the land heights. A second line has the hand
@@ -1574,14 +1578,16 @@ the end of the touch after 239 frames, with 14.0 cm of lift at the most, and
 one pulse. With `hand_feel=0` a finger tip stopped the hand at 11.7 cm, with
 20.1 cm at the most. With `hand_land_stop=0` the log had no touch.
 
-The desktop run of the solids is `village_run.ps1 -Kind wallstop`. At 13.2
-units a meter the Hand's point goes 2 cm before the side of the Village
-Store, then 2 cm and 6 cm into its box, and out again, with an eye picture
-at each place. No desktop run has shown the stop at a solid yet.
+The desktop run of the solids is `village_run.ps1 -Kind housestop`. At
+29.6 units a meter the Hand's point goes to the side of a house across the
+view: 3 cm out of the wall, 2 cm and 5 cm in its box, and 3 cm out again,
+with an eye picture at each place. No desktop run has shown the stop at a
+house yet.
 
-**Limits of the solids.** A solid is the box of the whole mesh. The Village
-Store is round, so the corners of its box are out of its wall, and a hand
-there stops in the air. The box of a house has no roof slope. A trunk is a
+**Limits of the solids.** A solid is the box of the whole mesh, so an open
+building is no solid, and a building with parts at different heights stops
+the hand in the air over its low parts. The box of a house has no roof
+slope. A trunk is a
 quarter of the radius of the crown of the tree. The Hand's point keeps the
 real hand, so the glow is in the solid while the drawn index finger is on
 its surface. An object in the Hand stays at the real hand, as it does in the

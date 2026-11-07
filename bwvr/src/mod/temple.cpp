@@ -1400,6 +1400,10 @@ int __cdecl h_Invisible(void* object, const float* point, float radius) {
       }
     }
   }
+  if (object != nullptr && point != nullptr && !IsBadReadPtr(point, 12) &&
+      Finite3(point)) {
+    MiracleOfferSite(object, point, radius);
+  }
   return o_Invisible(object, point, radius);
 }
 
@@ -1554,7 +1558,8 @@ void Install() {
           "the leash posts of a Temple (the taps on the land)");
   HookOne(kInvisibleCollision, &h_Invisible,
           reinterpret_cast<void**>(&o_Invisible),
-          "GInterface::SendInvisibleDrawCollision (the leash posts)");
+          "GInterface::SendInvisibleDrawCollision (the leash posts and the "
+          "teleport sites)");
 }
 
 // --- the watch of the camera of the room ------------------------------------------

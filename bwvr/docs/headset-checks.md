@@ -367,7 +367,8 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the pour, the request from the spell book, and
   a power up from a Worship Site. A pour of 27 casts puts out burning trees
   (`miracle_run.ps1 -Kind fire`). A pour of 62 casts on a burning house does
-  not put out its fire (B41).
+  not put out its fire (B41). The lines "miracle watch" of each drop give
+  the temperature of the house (`miracles.md`, "Water on a fire").
 - **The owner's check.** Check 21 of "What the owner checks".
 - **To prove.** Water on a field and on a forest changes their growth.
 
@@ -513,10 +514,12 @@ Water and Heal do not show.
 
 - **Plain game.** A shield over a circle that you draw. It stops rocks and
   other solid objects, also those that you throw, but miracles go through.
-  A thrown object bounces off, and each hit takes strength from the shield.
-  When the strength is gone, the shield breaks. The town marks the thrower
-  as an attacker. It uses prayer power for as
-  long as it stands. The Creature can learn it.
+  A thrown object bounces off. Each hit of an object that breaks houses (a
+  rock) takes strength from the shield
+  (`PhysicalShield::ReactToPhysicsImpact`), and a pig takes none. When the
+  strength is gone, the shield breaks. The town marks the thrower as an
+  attacker. It uses prayer power for as long as it stands. The Creature can
+  learn it.
 - **How to see that it worked.** A dome stands over the circle. A rock that
   you throw at it stops.
 - **Cost.** 7000, and more for each second that it stands. No power up.
@@ -525,7 +528,8 @@ Water and Heal do not show.
 - **Proved.** Desktop runs: the refusal with no circle ("needs a circle on
   the land first"), and the cast: the dome stands over the circle in the eye
   pictures (`miracle_run.ps1 -Kind pshield`). A pig thrown at the dome goes
-  in, also with `throw_law=1` (B42).
+  in, also with `throw_law=1` (B42). The lines "miracle watch" of that run
+  give the body of the shield in the physics and the tests of the pair.
 - **To prove.** A rock thrown at the dome stops.
 
 ### Teleport ("Instant Journey")
@@ -543,11 +547,14 @@ Water and Heal do not show.
 - **Cost.** 5000. No power up.
 - **Gesture.** Spiral, then the house. At a place, two times.
 - **In the mod.** Close the grip with the Hand over the place. Cast it again
-  for the second site.
+  for the second site. The real hand can take a site, and a villager in the
+  Hand goes onto a site when the grip opens over it
+  (`miracle_site_pick=1`, `miracles.md`).
 - **Proved.** Desktop runs (`miracle_run.ps1 -Kind teleport`): one cast of a
   one-off seed makes one site before the door of the Temple, and a villager
   set down on it does not go. At the Village Store the game refuses the cast.
-  No run made a second cast.
+  `miracle_run.ps1 -Kind teleport` makes two sites and puts a villager on
+  the first one. It has not run yet.
 - **To prove.** The two sites stand on the land, and villagers go in at one
   and come out at the other.
 

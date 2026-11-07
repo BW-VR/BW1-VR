@@ -587,6 +587,28 @@ the edge nearest to each hand. Its lines `influence    : the glow at the
 edge` say when it shows and where. The game draws its influence ring in the
 same red. A run with `influence_wall=0` tells the two apart.
 
+### A teleport site in the pick (`miracle_site_pick=1`)
+
+`MagicTeleport::Draw` (`0x005FCCC0`) gives the site to the pick of the game
+as a ball of 3 units (`GInterface::SendInvisibleDrawCollision`
+`0x00519960`) while its spell has a seed (`Spell+0xAC`) [V]. So in the plain
+game the pointer can take a site and move it, and a villager in the Hand
+goes onto a site: `Villager::ApplyThisToObject` calls
+`MagicTeleport::ApplyVillagerDirectlyToTeleport` (`0x005FC4F0`), and
+`MagicTeleport::DoTeleport` sends him to the other site that is nearest his
+destination. With one site, `DoTeleport` has no other site and gives 0.
+
+The pick of the real hand takes its candidates from the meshes that the
+draw offers, and a site has no mesh. So the hook on
+`SendInvisibleDrawCollision` (`temple.cpp`, which also offers the leash
+posts) gives a site the ball of the game as a candidate of the real hand
+(`MiracleOfferSite`, `HandDirectOffer`). The game's own tests then say what
+the grip does to it, and a villager in the Hand goes onto a site as onto a
+house ("An object in the Hand that goes onto a thing", `grab.md`). The log
+line `the teleport site ... is a candidate of the real hand` comes for each
+new site. With `miracle_site_pick=0` the real hand has no site as a
+candidate.
+
 ### The way out
 
 Two inputs take a miracle out of the Hand:
@@ -1162,6 +1184,35 @@ God view and on the table.
   `Creature+0x370`, 16 entries of `0x18` bytes from `+4`, active while `+4`
   is not 0). A Creature miracle puts its entry there
   (`SpellCreature::InitWithObject` `0x007222D0`).
+- **The drops of Water.** A hook on `Spell::ApplyDefaultSpellEffect`
+  (`0x00720C30`) reads each drop of a Water spell (see "Water on a fire"
+  below). For the first 12 drops of a spell and each 10th drop after them, a
+  line gives the drop, its distance from the place of the spell and from the
+  Hand's point, the burning object nearest to it with the terms of the test
+  of the game (the distance from the middle of its fire, its fire radius, the
+  height of the land under the drop over the base of the object, and the
+  height of the object), its temperature before and after the drop, the
+  temperature at which it burns, and its heat capacity. A line at the end of
+  a pour gives the count of drops and of the drops that cooled a fire. Then
+  for 30 s a line each second gives the temperature of the object nearest to
+  the last drop, or says that its fire is out.
+- **A Physical Shield in the physics.** A line gives the body of each new
+  shield: its middle, the radius of its ball, its points (their height and
+  their farthest distance from the middle), its faces, and its rest byte,
+  with the scale of the object and the radius of its spell. While a body
+  that moves is within 3 times that radius plus 20 units of the middle, a
+  line each 6 frames gives its distance from the middle, the sum of the two
+  radii (the game tests the pair only when the distance is less), the count
+  of its points in the ball of the shield, its speed, and the tests of
+  `PhysOb::CheckVFaces` (`0x007FDA60`, hooked) between it and the shield,
+  with their contacts. The line "first contact" of a throw names the class
+  of the object that the thrown object touched (`throw.md`).
+- **A teleport.** A line gives the teleport sites of the player when their
+  list changes (`GPlayer+0xA58`, the next one at `+0x88`), each with its place,
+  its spell and the seed of the spell. A hook on `MagicTeleport::DoTeleport`
+  (`0x005FC790`) gives the Living that goes in, the site, its place before and
+  after the call and the site nearest to it after the call. Lines 0.5 s, 2 s
+  and 5 s later give its place and its distance from each site.
 
 What the game does to the Creature [V]:
 
@@ -1190,12 +1241,44 @@ What the game does to the Creature [V]:
   while the switch `0x00D00DE4` is set. A desktop run shows the fizz at
   0.75 in the draw, and only sparkles and a shadow in the eye pictures.
 
+**Water on a fire** [V]. `SpellWater::Process` (`0x00724ED0`) makes one
+drop each game turn: a point 0.3 to 0.3 + 0.7 R units from the place of the
+spell (`Spell+0xCC`), in a random direction, with R from the info of Water
+(`fn_005FACE0`). The place of the spell is the land under the gesture place
+that the game gives the spell (see "The bolt of Lightning starts at the
+Hand's point"), so in the mod it is the land under the Hand's point.
+`Spell::ApplyDefaultSpellEffect` puts the place of the effect at the drop
+with a height of 0, and `EffectValues::ApplyEffectToMapPos` (`0x00525100`)
+gives the effect to each object when two tests pass: the drop is less than
+the fire radius of the object (`GetDefaultFireRadius`, the 2D radius) plus
+the radius of the effect from the middle of its fire (the place of the
+object), and the land under the drop is less than the height of the object
+plus that radius from its base. `FireEffect::ApplyEffectToFireEffectIfNecessary`
+(`0x00730670`) then moves the temperature of the fire toward the temperature
+of the land plus the burn of the effect, by 10 divided by the heat capacity
+of the object (`GetHeatCapacity`, `[Object+0x28]+0xB0`) of the gap, at most
+the full gap. The object burns while its temperature is at least its
+combustion temperature (`[Object+0x28]+0xB4`, at least 40). So the number
+of drops that a fire needs goes up with the heat capacity of the object.
+The fire also heats itself in each game turn (`FireEffect::ProcessList`
+`0x00730760`, `fn_0072EFB0`). A pour on a burning house in a desktop run
+had its Hand's point 4 units from the middle of the house (inside its
+radius), so the drops fall on the house. The lines "miracle watch" of the
+drops say which test fails, if one fails, and how fast the temperature
+falls.
+
 **The cloud of a Storm.** The particle system of the cast
 (`SF_StormCast`) ends at 6 s: its pieces die at the age of 6 s
 (`RemoveRuleOldAgeOnly`, `DieAge`). The storm spell stands on, and it
-drifts. Its cloud is an `LH3DMist`, as the clouds of the sky. The mod
-limits the pole of each cloud to `cloud_pole_pct` percent of its distance
-(`backend.md`, "Clouds"), so a storm cloud near the head is flat.
+drifts. Its cloud is an `LH3DMist`, as the clouds of the sky. The weather
+of the game also makes mists (`GWeather::DrawClouds` `0x0083FC90`), and a
+particle can make one (`ParticleMistCreator::CreateLH3DMist`
+`0x006AA5A0`). The mod turns each mist to the point that it faces and limits
+its pole to `cloud_pole_pct` percent of its distance (`backend.md`,
+"Clouds"), so a storm cloud near the head is flat. The test keys
+`sky_test_mist_log` and `sky_test_mist_hide` give a line for each mist that
+is not a sky cloud and take those mists out of the picture from a frame
+(`backend.md`, "Clouds"). `miracle_run.ps1 -Kind storm` uses them.
 
 Open (B43 in the roadmap): in the full view the cloud of a Storm is a flat
 grey band with straight edges, also with `cloud_pole_pct=0`. The cast of
@@ -1216,6 +1299,7 @@ so the plain game has no flat band.
 | `miracle_cancel_ms` | 400 | The longest press of that button that is a cancel. 50 to 2000 |
 | `miracle_seed_use` | 1 | 0: the trigger does not make a carried seed active. Then only a short press of the grip does |
 | `miracle_circle_hand` | 1 | 1: the circle of a Storm or a shield is on the land under the middle of the path of the real hand, with 1.05 times the widest span of that path as its size. 0: the circle that the game makes from the pixels of the path |
+| `miracle_site_pick` | 1 | 1: a teleport site that the game offers to its pick is a candidate of the real hand, so the Hand can take a site and put a villager on it. 0: the real hand has no site as a candidate |
 | `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
 | `miracle_touch_cm` | 3 | A body this near to the Hand's point is the target at the Hand, in cm of the room |
 | `miracle_cone_deg` | 6 | The cone of the aim for a new target at a distance |

@@ -70,6 +70,9 @@ int MiracleHint(MiracleLine lines[kMiracleLines]);
 // at a cast at the circle of a Storm or a shield (the middle of the circle),
 // and the Creature at a cast on a Creature. The report runs once a report
 // window.
+// MiracleWatchInstall puts in the hooks of the watch, which only read and log:
+// the drops of Water, the bodies near a Physical Shield, and a teleport.
+void MiracleWatchInstall();
 void MiracleWatchFrame(uint64_t frame, int hand_state);
 void MiracleWatchCircle(const char* name, float x, float z);
 void MiracleWatchCreature(void* creature, const char* name);
@@ -78,3 +81,8 @@ void MiracleWatchReport();
 // gesture_air.cpp, through controllers.cpp: the grip is closed with a miracle
 // that needs a circle on the land, so the path of the hand goes to the game.
 bool MiracleDrawsCircle();
+
+// temple.cpp, in GInterface::SendInvisibleDrawCollision: the game offers an
+// object with no mesh to its pick as a ball. A teleport site becomes a
+// candidate of the real hand (miracle_site_pick=1). True when it does.
+bool MiracleOfferSite(void* object, const float point[3], float radius);

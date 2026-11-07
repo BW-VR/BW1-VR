@@ -72,6 +72,8 @@ float HandDirectRadius(void* object);
 const char* HandDirectClass(void* object);
 bool HandDirectCreatureBody(void* creature, float out[3]);
 bool HandDirectRecordTarget(void* object, const float position[3]);
+bool HandDirectOffer(void* object, const float position[3], float radius,
+                     const char** words);
 float HandDirectRoomUnits();
 bool HandDirectRealPoint(float out[3]);
 
@@ -267,6 +269,7 @@ struct Settings {
   float keep_deg = 10.0f;    // miracle_keep_deg: the target stays to here
   float touch_cm = 3.0f;     // miracle_touch_cm
   float max_m = 4.0f;        // miracle_max_m: 0 is no limit
+  bool site_pick = true;     // miracle_site_pick: a teleport site is a candidate
   bool test_keys = false;    // test_keys: Ctrl and numpad 8 change miracle_hand
 };
 Settings g_settings;
@@ -823,6 +826,7 @@ void Init() {
   g_settings.max_m = IniFloat("miracle_max_m", 4.0f);
   if (!(g_settings.max_m > 0.0f)) g_settings.max_m = 0.0f;
   if (g_settings.max_m > 100.0f) g_settings.max_m = 100.0f;
+  g_settings.site_pick = IniInt("miracle_site_pick", 1) != 0;
   g_settings.test_keys = IniInt("test_keys", 0) != 0;
   command_math::ShakeReset(&g_shake);
   // The test keys of the desktop runs.
@@ -862,7 +866,14 @@ void Init() {
   HookOne(kUpdateSpellInfo, &h_UpdateSpellInfo,
           reinterpret_cast<void**>(&o_UpdateSpellInfo),
           "the spell info of a player GInterfaceStatus::UpdateSpellInfo");
+  MiracleWatchInstall();
   LogKeys("miracle_hand");
+  ModLog("miracle      : miracle_site_pick=%d. %s", g_settings.site_pick ? 1 : 0,
+         g_settings.site_pick
+             ? "A teleport site that the game offers to its pick is a "
+               "candidate of the real hand, so the Hand can take the site and "
+               "put a villager on it"
+             : "The real hand has no teleport site as a candidate");
   ModLog("miracle      : miracle_shake_mps=%.2f (%s). miracle_cancel_button="
          "%d: a press of the second face button of the pointing hand, shorter "
          "than %d ms (miracle_cancel_ms), takes the miracle out of the Hand. "
@@ -1154,6 +1165,39 @@ void LogChanges(const Facts& f, bool have) {
 void MiracleInstall() { Init(); }
 
 const char* MiracleSeedName(int type) { return SeedName(type); }
+
+// A TELEPORT SITE IN THE PICK [V, runblack.exe 1.42]. MagicTeleport::Draw
+// (0x005FCCC0) gives the site to the pick of the game as a ball of 3 units
+// (GInterface::SendInvisibleDrawCollision 0x00519960) while its spell has a
+// seed (Spell+0xAC). So in the plain game the pointer can take a site and
+// move it, and a villager in the Hand goes onto it: Villager::
+// ApplyThisToObject (0x00752FF8) calls MagicTeleport::
+// ApplyVillagerDirectlyToTeleport, and the villager comes out at the other
+// site. The pick of the real hand takes its candidates from the meshes that
+// the draw offers, and a site has no mesh, so the mod gives it the ball of
+// the game (HandDirectOffer).
+bool MiracleOfferSite(void* object, const float point[3], float radius) {
+  const uintptr_t kMagicTeleportTable = 0x0092C110;
+  if (!g_ready || !g_settings.site_pick || object == nullptr ||
+      IsBadReadPtr(object, 4) ||
+      *static_cast<const uintptr_t*>(object) != kMagicTeleportTable) {
+    return false;
+  }
+  const char* words = "";
+  const float ball = radius > 0.1f && radius < 50.0f ? radius : 3.0f;
+  const bool offered = HandDirectOffer(object, point, ball, &words);
+  static void* said = nullptr;
+  static int logs = 0;
+  if (offered && object != said && logs < 20) {
+    said = object;
+    ++logs;
+    ModLog("miracle      : the teleport site %p at %.1f %.1f %.1f is a "
+           "candidate of the real hand, a ball of %.1f units (%s), frame %llu",
+           object, point[0], point[1], point[2], ball,
+           words[0] != 0 ? words : "the game names no tap", g_frame);
+  }
+  return offered;
+}
 
 bool MiraclePlacesHand() {
   Init();

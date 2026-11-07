@@ -26,9 +26,10 @@
 #   Water (9): hold the grip for 90 frames, and a tap of B. Water stays in
 #   the Hand after a pour, and the tap takes it out. Then Heal (7): a press.
 #   Then a Creature seed that the Hand carries, and the trigger.
-# The other kinds (cancel, place, shield, away, fire, pshield, teleport) have
-# a comment at their steps below. -Seeds gives other seed types to the steps of a kind (the types are
-# in bwvr/docs/miracles.md), and -Steps gives other steps.
+# The other kinds (cancel, place, shield, away, fire, firelong, pshield,
+# teleport, storm) have a comment at their steps below. -Seeds gives other
+# seed types to the steps of a kind (the types are in bwvr/docs/miracles.md),
+# and -Steps gives other steps.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Dll,
@@ -93,6 +94,21 @@ if ($Kind -eq 'away') {
                  'seek@1660+1 seek@1680+1 grip@1690+3 seek@1740+1 grip@1780+150 shot@1840+1 shot@1920+1 ' +
                  'b@2000+5 point@2010+1 shot@2040+1 shot@2200+1 shot@2400+1 shot@2600+1'
     }
+} elseif ($Kind -eq 'firelong') {
+    # As -Kind fire, with a pour of 900 frames (15 s) on the burning house,
+    # and eye pictures during the pour and after it. The lines "miracle
+    # watch" give each drop, the temperature of the house, and its
+    # temperature each second for 30 s after the last drop.
+    if ($Seeds -eq '') { $Seeds = '2@960 9@1600' }
+    $most = 100
+    $keys = "fake_head_pitch=-25;$keys;seek_plan=gostore,hold,feel,hold,hold,feel;" +
+            'seek_class=OneOffSpellSeed,OneOffSpellSeed,OneOffSpellSeed;seek_feel=house,150,-4|house,150,-4'
+    if ($Steps -eq '') {
+        $Steps = 'point@900+1 seek@920+1 shot@950+1 seek@990+1 grip@1000+3 seek@1060+1 shot@1070+1 ' +
+                 'grip@1100+40 point@1150+1 shot@1160+1 shot@1300+1 shot@1580+1 ' +
+                 'seek@1660+1 seek@1680+1 grip@1690+3 seek@1740+1 grip@1780+900 shot@1900+1 shot@2200+1 ' +
+                 'shot@2500+1 shot@2660+1 b@2720+5 point@2730+1 shot@2760+1 shot@2900+1 shot@3100+1 shot@3400+1'
+    }
 } elseif ($Kind -eq 'pshield') {
     # A Physical Shield (5) with the circle (template 5, as -Kind shield),
     # and then an object thrown at the dome. At the door of the Temple no
@@ -116,27 +132,48 @@ if ($Kind -eq 'away') {
                  'shot@1600+1 shot@1630+1 shot@1700+1 shot@1850+1'
     }
 } elseif ($Kind -eq 'teleport') {
-    # Teleport (28). At 100 units a meter the God view goes to 1827 2537,
-    # before the door of the Temple (the place "go" of seek_plan, seek_go).
-    # The head looks 25 degrees down, so the seed under the Hand is in the
-    # view. A tap makes the seed active, the hand goes back to its point, and
-    # a press casts the miracle at the land point under the Hand: one cast
-    # makes the teleport there. (At the Village Store the game refuses the
-    # cast.) Then the God view goes before the Village Store (the place
+    # Two Teleport casts (28) at two places, and a villager that goes in at
+    # one site and comes out at the other. At 100 units a meter the God view
+    # goes to 1827 2537, before the door of the Temple (the place "go" of
+    # seek_plan, seek_go). The head looks 25 degrees down, so a seed under
+    # the Hand is in the view. A tap makes the first seed active, the hand
+    # goes back to its point, and a press casts the miracle at the land point
+    # under the Hand: site A. Then the hand goes 35 cm nearer to the head,
+    # the second seed comes under it, and a tap and a press there make site
+    # B, about 35 units from site A. (At the Village Store the game refuses
+    # the cast.) Then the God view goes before the Village Store (the place
     # "gostore"), and the Hand takes the nearest villager that the game can
     # give a job (the place "villager"). The God view goes back to 1827 2537
     # with the villager in the Hand, the hand goes 10 cm under its first
-    # point, and the grip opens with a still hand: the villager goes down
-    # onto the teleport. Eye pictures of the teleport and of the villager.
-    if ($Seeds -eq '') { $Seeds = '28@960' }
-    $most = 70
-    $keys = "fake_head_pitch=-25;$keys;seek_plan=go,hold,gostore,villager,go;" +
-            'seek_go=1827,2537|1827,2537;seek_class=OneOffSpellSeed'
-    $points = '0,-30,60 0,-30,60 0,-40,60'
+    # point, over site A, and the grip opens: the Hand puts the villager on
+    # the site (miracle_site_pick=1), and the game sends him to site B. The
+    # lines "miracle watch" give the sites, the teleport and the place of the
+    # villager after it. Eye pictures of the two sites and of the villager.
+    if ($Seeds -eq '') { $Seeds = '28@960 28@1220' }
+    $most = 75
+    $keys = "fake_head_pitch=-25;$keys;seek_plan=go,hold,hold,gostore,villager,go;" +
+            'seek_go=1827,2537|1827,2537;seek_class=OneOffSpellSeed,OneOffSpellSeed'
+    $points = '0,-30,60 0,-30,60 0,-30,25 0,-30,25 0,-40,60'
     if ($Steps -eq '') {
         $Steps = 'point@900+1 seek@920+1 seek@1000+1 grip@1010+3 point@1080+1 grip@1100+10 shot@1130+1 ' +
-                 'seek@1200+1 seek@1250+1 grip@1260+300 seek@1330+1 point@1380+1 shot@1420+1 ' +
-                 'shot@1570+1 shot@1620+1 shot@1700+1 shot@1800+1 shot@1950+1 shot@2150+1'
+                 'point@1180+1 seek@1260+1 grip@1270+3 point@1340+1 grip@1360+10 shot@1390+1 ' +
+                 'seek@1440+1 seek@1490+1 grip@1500+300 seek@1570+1 point@1620+1 shot@1700+1 ' +
+                 'shot@1810+1 shot@1840+1 shot@1900+1 shot@2000+1 shot@2150+1'
+    }
+} elseif ($Kind -eq 'storm') {
+    # A Storm (0) with the circle (template 5), for the look of its cloud
+    # (miracles.md, "The cloud of a Storm"). The grip stays closed while the
+    # hand steps through the circle, and the game casts when the circle
+    # closes. The test key sky_test_mist_log gives a line for each mist that
+    # is not a sky cloud, and from frame 1560 sky_test_mist_hide does not
+    # draw them, so the eye pictures before and after that frame show what
+    # the mists draw. Give it the dxwrapper renderer for the pictures.
+    if ($Seeds -eq '') { $Seeds = '0@930' }
+    $keys = "$keys;fake_controller_gestures=5;sky_test_mist_log=1;sky_test_mist_hide=1560"
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
+                 'seek@960+1 grip@1000+3 trace@1100+200 grip@1106+150 point@1300+1 ' +
+                 'shot@1330+1 shot@1400+1 shot@1480+1 shot@1540+1 shot@1580+1 shot@1640+1 shot@1720+1'
     }
 } elseif ($Kind -eq 'throw') {
     if ($Seeds -eq '') { $Seeds = '2@930 9@1330 7@1730 16@2030' }
@@ -210,7 +247,7 @@ if ($Set -ne '') { $keys = "$keys;$Set" }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $log = Join-Path $sp "desk-$Name\bwvr.log"
 if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
-$pattern = '^miracle      :|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
+$pattern = '^miracle      :|^sky mist     :|^sky          : sky_test_mist|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
            '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state|^miracle watch: |' +
            '^hand pick    : seek plan|^creature cmd : (the leash|a double press|test: aimcmd)|' +
            '^far grab    : (the grip closed|the grip opened)|^hand throw   : release'

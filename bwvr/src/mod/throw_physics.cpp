@@ -1035,13 +1035,24 @@ void FirstContact(Flight* f, uint8_t* ob, int step) {
   const float* velocity = reinterpret_cast<const float*>(ob + kObVelocity);
   const float speed = controller_math::Length(velocity);
   const void* other = *reinterpret_cast<void* const*>(ob + kObHitBy);
+  // The other body is the PhysOb of an entry of the physics: its object.
+  char hit[96] = "an object";
+  if (other != nullptr) {
+    const uint8_t* entry = static_cast<const uint8_t*>(other) - kEntryPhysOb;
+    void* object = !IsBadReadPtr(entry + kEntryObject, 4)
+                       ? *reinterpret_cast<void* const*>(entry + kEntryObject)
+                       : nullptr;
+    if (object != nullptr && !IsBadReadPtr(object, 4)) {
+      sprintf_s(hit, "an object, %p (%s)", object, HandDirectClass(object));
+    }
+  }
   ModLog("hand throw   : first contact of %p after %.3f s of the flight, at "
          "%.1f %.1f %.1f, %.1f units over the land (%s). The real arc is at "
          "%.1f %.1f %.1f at that time, %.2f units (%.1f cm of the room) "
          "away. The speed is %.1f units/s in the game's time (%.2f m/s of "
          "the room)", f->object, t, matrix[9], matrix[10], matrix[11],
          matrix[10] - Altitude(matrix[9], matrix[11]),
-         other != nullptr ? "an object"
+         other != nullptr ? hit
          : Altitude(matrix[9], matrix[11]) < kSeaLand
              ? "the water: the land is under the sea there"
              : "the land", p[0],

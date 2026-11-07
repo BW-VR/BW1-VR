@@ -39,6 +39,36 @@
 //   ProcessState (0x004737F9) gives +0x12B0 and the fizz material to the
 //   draw of the body ([LH3DCreature+0x482C]+0xA0 and +0x9C) while the global
 //   0x00D00DE4 is set.
+// - Water (SpellWater::Process 0x00724ED0) makes one drop each game turn: a
+//   point 0.3 to 0.3 + 0.7 R units from the place of the spell (Spell+0xCC,
+//   a MapCoords, R from fn_005FACE0 of GMagicWaterInfo) in a random
+//   direction. Spell::ApplyDefaultSpellEffect (0x00720C30, event 2) puts the
+//   place of the spell (Spell+0x14) at that point with a height of 0, and
+//   EffectValues::ApplyEffectToMapPos (0x00525100) gives the effect to each
+//   object that IsEffectReceiver accepts, when the point is less than its
+//   fire radius (slot 0x5F4) plus the radius of the effect from the middle of
+//   its fire (slot 0x5F0), and the land under the point is less than its
+//   height (slot 0x42C) plus that radius from the base of the object.
+//   FireEffect::ApplyEffectToFireEffectIfNecessary (0x00730670) then moves
+//   the temperature of the fire (FireEffect+0x14) toward the temperature of
+//   the land plus the burn of the effect, by 10 divided by the heat capacity
+//   (slot 0x5E4) of the gap. An object burns while its temperature is at
+//   least its combustion temperature ([Object+0x28]+0xB4, at least 40,
+//   fn_00730180). The fires are a list from GGame+0x205C14, the next one at
+//   +0x3C, the object at +0x1C (FireEffect::ProcessList 0x00730760).
+// - A Physical Shield is a body of the physics that stays in the array of
+//   the physics (PhysicalShield::GetAlwaysRemainsInPhysicsInternalSystem).
+//   Its body is built one time, at the full size of the dome (PhysOb::
+//   Initialise 0x007FB780 with the scale of the object, 0.017 times the
+//   radius of the spell). In each substep PhysicsObject::GameTurnUpdate
+//   tests two bodies when their balls (PhysOb+0xA0, +0x150) meet, and then
+//   PhysOb::CheckVFaces (0x007FDA60) tests the points of one body against the
+//   faces of the other. A contact adds 1 to PhysOb+0x158.
+// - Each teleport site of a player (MagicTeleport) is in a list from
+//   GPlayer+0xA58, the next one at +0x88, its spell at +0x9C.
+//   MagicTeleport::DoTeleport (0x005FC790, thiscall, the Living and a flag,
+//   ret 8) moves a Living to the other site that is nearest its
+//   destination.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -47,12 +77,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "MinHook.h"
 #include "miracle.h"
 
 extern void ModLog(const char* format, ...);
 
-// hand_direct.cpp: game units in a meter of the room.
+// hand_direct.cpp: game units in a meter of the room, the class of an
+// object, and the point of the real hand.
 float HandDirectRoomUnits();
+const char* HandDirectClass(void* object);
+bool HandDirectRealPoint(float out[3]);
 
 namespace {
 
@@ -410,8 +444,630 @@ void CreatureFrame(uint64_t frame, int hand_state) {
 }
 
 uint64_t g_frames = 0;
+uint64_t g_last_frame = 0;
+
+typedef float(__fastcall* ObjectFloatFn)(void* self, void* unused);
+typedef void(__fastcall* ObjectCoordsFn)(void* self, void* unused,
+                                         MapCoords* out);
+
+float SlotFloat(void* object, int slot) {
+  return reinterpret_cast<ObjectFloatFn>(
+      (*static_cast<void***>(object))[slot / 4])(object, nullptr);
+}
+
+bool HookAt(uintptr_t address, const uint8_t* bytes, size_t size,
+            void* replacement, void** original, const char* name) {
+  const void* target = reinterpret_cast<const void*>(address);
+  MH_STATUS status = MH_ERROR_NOT_EXECUTABLE;
+  if (!IsBadReadPtr(target, size) && memcmp(target, bytes, size) == 0) {
+    status = MH_CreateHook(const_cast<void*>(target), replacement, original);
+    if (status == MH_OK) status = MH_EnableHook(const_cast<void*>(target));
+  }
+  ModLog("hooks        : %s at 0x%08X %s", name,
+         static_cast<unsigned>(address),
+         status == MH_OK ? "ok" : "FAILED (other bytes, or no hook)");
+  return status == MH_OK;
+}
+
+// --- the drops of Water -----------------------------------------------------
+
+const uintptr_t kSpellEffect = 0x00720C30;  // thiscall (SpellEventInfo*), ret 4
+const uint8_t kSpellEffectBytes[6] = {0x83, 0xEC, 0x68, 0x53, 0x55, 0x56};
+const uintptr_t kSpellWaterTable = 0x008F553C;
+const int kEventDrop = 2;
+const int kEventPoint = 0x04;        // an LHPoint
+const int kSpellCastPlace = 0xCC;    // MapCoords
+const uintptr_t kGame = 0x00D0195C;
+const int kGameFires = 0x205C14;
+const int kFireFlags = 0x0A;         // bit 1: ProcessList skips the fire
+const int kFireTemperature = 0x14;
+const int kFireObject = 0x1C;
+const int kFireNext = 0x3C;
+const int kObjectPlace = 0x14;       // MapCoords
+const int kObjectInfo = 0x28;
+const int kObjectFire = 0x44;
+const int kInfoCombustion = 0xB4;
+const int kSlotFireCentre = 0x5F0;   // GetDefaultFireCentrePos (MapCoords*)
+const int kSlotFireRadius = 0x5F4;   // GetDefaultFireRadius
+const int kSlotHeight = 0x42C;       // GetHeight
+const int kSlotHeatCapacity = 0x5E4; // GetHeatCapacity
+const float kFireRange = 30.0f;      // units: the fires that a line counts
+const float kLeastIgnition = 40.0f;  // fn_00730180
+
+typedef int(__fastcall* SpellEffectFn)(void* spell, void* unused,
+                                       const void* event);
+SpellEffectFn o_SpellEffect = nullptr;
+
+struct Fire {
+  uint8_t* fire;
+  void* object;
+  float before;
+};
+const int kMostFires = 16;
+
+int CollectFires(const MapCoords& at, Fire out[], int most) {
+  const uint8_t* game = *reinterpret_cast<uint8_t* const*>(kGame);
+  if (game == nullptr || IsBadReadPtr(game + kGameFires, 4)) return 0;
+  int count = 0, guard = 0;
+  for (uint8_t* f = Read<uint8_t*>(game, kGameFires);
+       f != nullptr && count < most && guard < 4096;
+       f = Read<uint8_t*>(f, kFireNext), ++guard) {
+    if (IsBadReadPtr(f, kFireNext + 4)) break;
+    if ((f[kFireFlags] & 1) != 0) continue;
+    void* object = Read<void*>(f, kFireObject);
+    if (!LiveObject(object, kObjectFire + 4)) continue;
+    const MapCoords& p = *reinterpret_cast<const MapCoords*>(
+        static_cast<uint8_t*>(object) + kObjectPlace);
+    const float dx = (p.x - at.x) / kMapScale, dz = (p.z - at.z) / kMapScale;
+    if (dx * dx + dz * dz > kFireRange * kFireRange) continue;
+    out[count].fire = f;
+    out[count].object = object;
+    out[count].before = Read<float>(f, kFireTemperature);
+    ++count;
+  }
+  return count;
+}
+
+float Ignition(void* object) {
+  const uint8_t* info = Read<uint8_t*>(object, kObjectInfo);
+  if (info == nullptr || IsBadReadPtr(info, kInfoCombustion + 4)) {
+    return kLeastIgnition;
+  }
+  const float t = Read<float>(info, kInfoCombustion);
+  return t > kLeastIgnition ? t : kLeastIgnition;
+}
+
+void* g_drop_spell = nullptr;
+int g_drops = 0;           // the drops of this spell
+int g_drops_cooled = 0;    // the drops that cooled a burning object
+double g_drop_since = 0.0;
+double g_drop_last = 0.0;
+int g_drop_logs = 0;
+const int kMaxDropLogs = 150;
+// The burning object nearest to the last drop, for the line each second.
+void* g_watch_fire_object = nullptr;
+double g_watch_fire_said = 0.0;
+int g_watch_fire_logs = 0;
+const int kMaxWatchFireLogs = 60;
+const double kWatchFireSeconds = 30.0;
+
+void DropSummary(const char* why) {
+  if (g_drop_spell == nullptr || g_drops == 0) return;
+  if (g_drop_logs < kMaxDropLogs) {
+    ++g_drop_logs;
+    ModLog("miracle watch: the Water spell %p made %d drops in %.1f s (%s), "
+           "and %d of them cooled a burning object, frame %llu",
+           g_drop_spell, g_drops, g_drop_last - g_drop_since, why,
+           g_drops_cooled, g_last_frame);
+  }
+}
+
+int __fastcall h_SpellEffect(void* spell, void* unused, const void* event) {
+  const bool water =
+      spell != nullptr && !IsBadReadPtr(spell, kSpellCastPlace + 12) &&
+      *static_cast<const uintptr_t*>(spell) == kSpellWaterTable &&
+      event != nullptr && !IsBadReadPtr(event, kEventPoint + 12) &&
+      Read<int32_t>(event, 0) == kEventDrop;
+  if (!water) return o_SpellEffect(spell, unused, event);
+  const float* point =
+      reinterpret_cast<const float*>(static_cast<const uint8_t*>(event) +
+                                     kEventPoint);
+  // The point as the game makes it (0x00720C83 to 0x00720CB1).
+  const MapCoords drop = {static_cast<int32_t>(point[0] * kMapScale),
+                          static_cast<int32_t>(point[2] * kMapScale), 0.0f};
+  Fire fires[kMostFires];
+  const int count = CollectFires(drop, fires, kMostFires);
+  const int result = o_SpellEffect(spell, unused, event);
+  const double t = NowSeconds();
+  if (spell != g_drop_spell) {
+    DropSummary("a new spell starts");
+    g_drop_spell = spell;
+    g_drops = 0;
+    g_drops_cooled = 0;
+    g_drop_since = t;
+  }
+  ++g_drops;
+  g_drop_last = t;
+  int cooled = 0, nearest = -1;
+  float best = 1e30f;
+  float centre_d[kMostFires];
+  MapCoords centre[kMostFires];
+  for (int i = 0; i < count; ++i) {
+    if (Read<float>(fires[i].fire, kFireTemperature) < fires[i].before) {
+      ++cooled;
+    }
+    reinterpret_cast<ObjectCoordsFn>(
+        (*static_cast<void***>(fires[i].object))[kSlotFireCentre / 4])(
+        fires[i].object, nullptr, &centre[i]);
+    centre_d[i] = reinterpret_cast<MetresFn>(kMetres)(&drop, &centre[i]);
+    if (centre_d[i] < best) {
+      best = centre_d[i];
+      nearest = i;
+    }
+  }
+  if (cooled > 0) ++g_drops_cooled;
+  if (nearest >= 0) {
+    g_watch_fire_object = fires[nearest].object;
+    g_watch_fire_said = t;
+  }
+  if (!(g_drops <= 12 || g_drops % 10 == 0) || g_drop_logs >= kMaxDropLogs) {
+    return result;
+  }
+  ++g_drop_logs;
+  const uint8_t* s = static_cast<const uint8_t*>(spell);
+  const MapCoords& place =
+      *reinterpret_cast<const MapCoords*>(s + kSpellCastPlace);
+  const float px = place.x / kMapScale, pz = place.z / kMapScale;
+  const float x = drop.x / kMapScale, z = drop.z / kMapScale;
+  float hand[3];
+  char from_hand[96] = "";
+  if (HandDirectRealPoint(hand)) {
+    snprintf(from_hand, sizeof(from_hand),
+             " and %.1f units across the land from the Hand's point",
+             sqrtf((x - hand[0]) * (x - hand[0]) + (z - hand[2]) * (z - hand[2])));
+  }
+  if (nearest < 0) {
+    ModLog("miracle watch: drop %d of the Water spell %p at %.1f %.1f, %.1f "
+           "units from the place of the spell (%.1f %.1f)%s. No burning "
+           "object is within %.0f units, frame %llu", g_drops, spell, x, z,
+           sqrtf((x - px) * (x - px) + (z - pz) * (z - pz)), px, pz,
+           from_hand, kFireRange, g_last_frame);
+    return result;
+  }
+  const Fire& f = fires[nearest];
+  uint8_t* object = static_cast<uint8_t*>(f.object);
+  const float radius = SlotFloat(object, kSlotFireRadius);
+  const float height = SlotFloat(object, kSlotHeight);
+  const float capacity = SlotFloat(object, kSlotHeatCapacity);
+  const AltitudeFn altitude = reinterpret_cast<AltitudeFn>(kAltitude);
+  const MapCoords& base =
+      *reinterpret_cast<const MapCoords*>(object + kObjectPlace);
+  const float up = fabsf(altitude(&drop, nullptr) -
+                         (altitude(&base, nullptr) + base.over));
+  ModLog("miracle watch: drop %d of the Water spell %p at %.1f %.1f, %.1f "
+         "units from the place of the spell (%.1f %.1f)%s. The nearest "
+         "burning object is %p (%s) with the middle of its fire at %.1f "
+         "%.1f: the drop is %.2f units from that middle, and its fire radius "
+         "is %.2f (the effect comes when the distance is less than that "
+         "radius plus the radius of the effect). The land under the drop is "
+         "%.2f units from the base of the object, which is %.2f high. Its "
+         "temperature goes from %.1f to %.1f: it burns at %.1f or more, and "
+         "its heat capacity is %.2f. The drop cooled %d of the %d burning "
+         "objects within %.0f units, frame %llu", g_drops, spell, x, z,
+         sqrtf((x - px) * (x - px) + (z - pz) * (z - pz)), px, pz, from_hand,
+         object, HandDirectClass(object), centre[nearest].x / kMapScale,
+         centre[nearest].z / kMapScale, centre_d[nearest], radius, up, height,
+         f.before, Read<float>(f.fire, kFireTemperature), Ignition(object),
+         capacity, cooled, count, kFireRange, g_last_frame);
+  return result;
+}
+
+// Each second after a drop, for 30 s: the temperature of the burning object
+// nearest to the last drop.
+void DropsFrame() {
+  const double t = NowSeconds();
+  if (g_drop_spell != nullptr && g_drops > 0 && t - g_drop_last > 3.0) {
+    DropSummary("no drop for 3 s");
+    g_drop_spell = nullptr;
+  }
+  if (g_watch_fire_object == nullptr || t - g_watch_fire_said < 1.0) return;
+  if (t - g_drop_last > kWatchFireSeconds ||
+      g_watch_fire_logs >= kMaxWatchFireLogs) {
+    g_watch_fire_object = nullptr;
+    return;
+  }
+  g_watch_fire_said = t;
+  ++g_watch_fire_logs;
+  void* object = g_watch_fire_object;
+  if (!LiveObject(object, kObjectFire + 4)) {
+    ModLog("miracle watch: the object %p that the Water fell on is gone, "
+           "%.1f s after the last drop, frame %llu", object, t - g_drop_last,
+           g_last_frame);
+    g_watch_fire_object = nullptr;
+    return;
+  }
+  const uint8_t* fire = Read<uint8_t*>(object, kObjectFire);
+  if (fire == nullptr || IsBadReadPtr(fire, kFireTemperature + 4)) {
+    ModLog("miracle watch: %p (%s) has no fire now, %.1f s after the last "
+           "drop of Water, frame %llu", object, HandDirectClass(object),
+           t - g_drop_last, g_last_frame);
+    g_watch_fire_object = nullptr;
+    return;
+  }
+  const float temperature = Read<float>(fire, kFireTemperature);
+  const float ignition = Ignition(object);
+  ModLog("miracle watch: %p (%s), %.1f s after the last drop of Water: the "
+         "temperature of its fire is %.1f, so it %s (it burns at %.1f or "
+         "more), frame %llu", object, HandDirectClass(object),
+         t - g_drop_last, temperature,
+         temperature >= ignition ? "burns" : "does not burn", ignition,
+         g_last_frame);
+}
+
+// --- the physics of a Physical Shield ---------------------------------------
+
+const uintptr_t kPhysicsArray = 0x00D47814;
+const uintptr_t kPhysicsCount = 0x00D47818;
+const int kEntrySize = 0x1DC;
+const int kEntryObject = 0x18;
+const int kEntryPhysOb = 0x28;
+const int kObCentre = 0xA0;          // LHPoint
+const int kObVelocity = 0xDC;        // LHPoint
+const int kObRadius = 0x150;         // the ball of the body
+const int kObPoints = 0x154;
+const int kObContacts = 0x158;
+const int kObPointList = 0x15C;
+const int kObFaces = 0x160;
+const int kObBox = 0x168;            // a CollideBox, or null
+const int kObRest = 0x174;           // a byte
+const int kPointSize = 0x50;
+const int kPointPlace = 0x34;        // LHPoint in the world
+const int kObjectScale = 0x50;       // Object::GetScale
+const int kShieldSpell = 0x60;       // MapShield: its SpellShield
+const uintptr_t kPhysicalShieldTable = 0x00983F64;
+const uintptr_t kCheckFaces = 0x007FDA60;  // thiscall (PhysOb* other), ret 4
+const uint8_t kCheckFacesBytes[5] = {0x83, 0xEC, 0x3C, 0x53, 0x55};
+
+typedef void(__fastcall* CheckFacesFn)(void* ob, void* unused, void* other);
+CheckFacesFn o_CheckFaces = nullptr;
+
+// The tests of CheckVFaces with a shield since the last line.
+struct ShieldPairs {
+  int into_calls, into_contacts;   // the points of a mover against a shield
+  int out_calls, out_contacts;     // the points of a shield against a mover
+};
+ShieldPairs g_pairs = {};
+bool g_shield_in_physics = false;
+void* g_shield_said = nullptr;
+int g_shield_logs = 0;
+const int kMaxShieldLogs = 120;
+uint64_t g_shield_line_frame = 0;
+
+uint8_t* EntryOfOb(void* ob) {
+  uint8_t* base = *reinterpret_cast<uint8_t* const*>(kPhysicsArray);
+  const int32_t count = *reinterpret_cast<const int32_t*>(kPhysicsCount);
+  uint8_t* entry = static_cast<uint8_t*>(ob) - kEntryPhysOb;
+  if (base == nullptr || count <= 0 || entry < base ||
+      entry >= base + count * kEntrySize ||
+      (entry - base) % kEntrySize != 0) {
+    return nullptr;
+  }
+  return entry;
+}
+
+bool ShieldEntry(const uint8_t* entry) {
+  void* object = Read<void*>(entry, kEntryObject);
+  return object != nullptr && !IsBadReadPtr(object, 4) &&
+         *static_cast<const uintptr_t*>(object) == kPhysicalShieldTable;
+}
+
+void __fastcall h_CheckFaces(void* ob, void* unused, void* other) {
+  if (!g_shield_in_physics || ob == nullptr || other == nullptr) {
+    o_CheckFaces(ob, unused, other);
+    return;
+  }
+  const int32_t before = Read<int32_t>(ob, kObContacts);
+  o_CheckFaces(ob, unused, other);
+  const int32_t added = Read<int32_t>(ob, kObContacts) - before;
+  const uint8_t* to = EntryOfOb(other);
+  const uint8_t* from = EntryOfOb(ob);
+  if (to != nullptr && ShieldEntry(to)) {
+    ++g_pairs.into_calls;
+    g_pairs.into_contacts += added;
+  } else if (from != nullptr && ShieldEntry(from)) {
+    ++g_pairs.out_calls;
+    g_pairs.out_contacts += added;
+  }
+}
+
+float Gap3(const float* a, const float* b) {
+  const float d[3] = {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+  return sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+}
+
+void ShieldLine(const uint8_t* shield_entry) {
+  void* shield = Read<void*>(shield_entry, kEntryObject);
+  const uint8_t* ob = shield_entry + kEntryPhysOb;
+  const float* c = reinterpret_cast<const float*>(ob + kObCentre);
+  const int32_t points = Read<int32_t>(ob, kObPoints);
+  const uint8_t* list = Read<uint8_t*>(ob, kObPointList);
+  float far_point = 0.0f, low = 0.0f, high = 0.0f;
+  if (list != nullptr && points > 0 && points < 4096 &&
+      !IsBadReadPtr(list, points * kPointSize)) {
+    for (int i = 0; i < points; ++i) {
+      const float* p =
+          reinterpret_cast<const float*>(list + i * kPointSize + kPointPlace);
+      const float d = Gap3(p, c);
+      if (d > far_point) far_point = d;
+      if (i == 0 || p[1] < low) low = p[1];
+      if (i == 0 || p[1] > high) high = p[1];
+    }
+  }
+  const uint8_t* spell = Read<uint8_t*>(shield, kShieldSpell);
+  const float spell_radius =
+      spell != nullptr && !IsBadReadPtr(spell, kSpellSize + 4)
+          ? Read<float>(spell, kSpellSize)
+          : -1.0f;
+  ModLog("miracle watch: the physics has the body of the Physical Shield %p "
+         "(the scale of the object %.3f, the radius of its spell %.1f units): "
+         "its middle is at %.1f %.1f %.1f, the radius of its ball is %.1f, "
+         "and it has %d points from %.1f to %.1f high and to %.1f units from "
+         "the middle, %d faces, %s, and its rest byte is %d, frame %llu",
+         shield, Read<float>(shield, kObjectScale), spell_radius, c[0], c[1],
+         c[2], Read<float>(ob, kObRadius), points, low, high, far_point,
+         Read<int32_t>(ob, kObFaces),
+         Read<void*>(ob, kObBox) != nullptr ? "a box of collision"
+                                            : "no box of collision",
+         ob[kObRest], g_last_frame);
+}
+
+// Once a frame: the shields in the physics, and each moving body near one.
+void ShieldsFrame() {
+  uint8_t* base = *reinterpret_cast<uint8_t* const*>(kPhysicsArray);
+  const int32_t count = *reinterpret_cast<const int32_t*>(kPhysicsCount);
+  g_shield_in_physics = false;
+  if (base == nullptr || count <= 0 || count > 4096 ||
+      IsBadReadPtr(base, count * kEntrySize)) {
+    return;
+  }
+  const uint8_t* shield = nullptr;
+  for (int i = 0; i < count && shield == nullptr; ++i) {
+    if (ShieldEntry(base + i * kEntrySize)) shield = base + i * kEntrySize;
+  }
+  if (shield == nullptr) return;
+  g_shield_in_physics = true;
+  void* shield_object = Read<void*>(shield, kEntryObject);
+  if (shield_object != g_shield_said && g_shield_logs < kMaxShieldLogs) {
+    ++g_shield_logs;
+    g_shield_said = shield_object;
+    ShieldLine(shield);
+  }
+  // A line each 6 frames while a moving body is near the shield.
+  if (g_last_frame < g_shield_line_frame + 6 ||
+      g_shield_logs >= kMaxShieldLogs) {
+    return;
+  }
+  const uint8_t* sob = shield + kEntryPhysOb;
+  const float* sc = reinterpret_cast<const float*>(sob + kObCentre);
+  const float sr = Read<float>(sob, kObRadius);
+  bool said = false;
+  for (int i = 0; i < count && g_shield_logs < kMaxShieldLogs; ++i) {
+    const uint8_t* entry = base + i * kEntrySize;
+    const uint8_t* ob = entry + kEntryPhysOb;
+    if (entry == shield || ob[kObRest] != 0 || ShieldEntry(entry)) continue;
+    const float* c = reinterpret_cast<const float*>(ob + kObCentre);
+    const float d = Gap3(c, sc);
+    const float r = Read<float>(ob, kObRadius);
+    if (!(d < 3.0f * sr + 20.0f)) continue;
+    const int32_t points = Read<int32_t>(ob, kObPoints);
+    const uint8_t* list = Read<uint8_t*>(ob, kObPointList);
+    int inside = 0;
+    if (list != nullptr && points > 0 && points < 1024 &&
+        !IsBadReadPtr(list, points * kPointSize)) {
+      for (int k = 0; k < points; ++k) {
+        const float* p = reinterpret_cast<const float*>(
+            list + k * kPointSize + kPointPlace);
+        if (Gap3(p, sc) < sr) ++inside;
+      }
+    }
+    void* object = Read<void*>(entry, kEntryObject);
+    const float* v = reinterpret_cast<const float*>(ob + kObVelocity);
+    ++g_shield_logs;
+    said = true;
+    ModLog("miracle watch: the moving body of %p (%s) at %.1f %.1f %.1f is "
+           "%.1f units from the middle of the body of the Physical Shield "
+           "(the sum of the two radii is %.1f: the game tests the pair when "
+           "the distance is less). %d of its %d points are inside the ball "
+           "of the shield, and its speed is %.1f units/s. Since the last "
+           "line the game tested the points of moving bodies against the "
+           "shield %d times with %d contacts, and the points of the shield "
+           "against them %d times with %d contacts, frame %llu",
+           object, LiveObject(object, 4) ? HandDirectClass(object) : "gone",
+           c[0], c[1], c[2], d, sr + r, inside, points,
+           sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]),
+           g_pairs.into_calls, g_pairs.into_contacts, g_pairs.out_calls,
+           g_pairs.out_contacts, g_last_frame);
+  }
+  if (said) {
+    g_shield_line_frame = g_last_frame;
+    g_pairs = {};
+  }
+}
+
+// --- the teleport sites -----------------------------------------------------
+
+const int kGamePlayers = 0x18;
+const int kGamePlayerSize = 0xA60;
+const int kGameLocalPlayer = 0x205A59;  // a byte
+const int kPlayerTeleports = 0xA58;
+const int kTeleportNext = 0x88;
+const int kTeleportSpell = 0x9C;
+const int kSpellSeedOf = 0xAC;
+const uintptr_t kMagicTeleportTable = 0x0092C110;
+const uintptr_t kDoTeleport = 0x005FC790;
+const uint8_t kDoTeleportBytes[7] = {0x83, 0xEC, 0x3C, 0x53, 0x55, 0x56, 0x57};
+
+typedef int(__fastcall* DoTeleportFn)(void* site, void* unused, void* living,
+                                      int flag);
+DoTeleportFn o_DoTeleport = nullptr;
+
+const int kMaxSites = 8;
+void* g_sites[kMaxSites];
+int g_site_count = -1;
+int g_site_logs = 0;
+const int kMaxSiteLogs = 60;
+
+int ListSites(void* out[], int most) {
+  const uint8_t* game = *reinterpret_cast<uint8_t* const*>(kGame);
+  if (game == nullptr || IsBadReadPtr(game + kGameLocalPlayer, 1)) return 0;
+  const uint8_t* player =
+      game + kGamePlayers + kGamePlayerSize * game[kGameLocalPlayer];
+  if (IsBadReadPtr(player + kPlayerTeleports, 4)) return 0;
+  int count = 0;
+  for (void* site = Read<void*>(player, kPlayerTeleports);
+       site != nullptr && count < most; site = Read<void*>(site, kTeleportNext)) {
+    if (IsBadReadPtr(site, kTeleportSpell + 4) ||
+        *static_cast<const uintptr_t*>(site) != kMagicTeleportTable) {
+      break;
+    }
+    out[count++] = site;
+  }
+  return count;
+}
+
+void SitesFrame() {
+  if (g_last_frame % 30 != 0 || g_site_logs >= kMaxSiteLogs) return;
+  void* now[kMaxSites];
+  const int count = ListSites(now, kMaxSites);
+  bool same = count == g_site_count;
+  for (int i = 0; same && i < count; ++i) same = now[i] == g_sites[i];
+  if (same) return;
+  for (int i = 0; i < count; ++i) g_sites[i] = now[i];
+  g_site_count = count;
+  ++g_site_logs;
+  char list[400];
+  int used = 0;
+  list[0] = 0;
+  for (int i = 0; i < count && used < 360; ++i) {
+    const uint8_t* site = static_cast<const uint8_t*>(now[i]);
+    const MapCoords& p = *reinterpret_cast<const MapCoords*>(site + kObjectPlace);
+    const uint8_t* spell = Read<uint8_t*>(site, kTeleportSpell);
+    void* seed = spell != nullptr && !IsBadReadPtr(spell, kSpellSeedOf + 4)
+                     ? Read<void*>(spell, kSpellSeedOf)
+                     : nullptr;
+    used += snprintf(list + used, sizeof(list) - used,
+                     "%s%p at %.1f %.1f (spell %p, seed %p)",
+                     used > 0 ? ", " : "", now[i], p.x / kMapScale,
+                     p.z / kMapScale, spell, seed);
+  }
+  ModLog("miracle watch: the player has %d teleport sites%s%s, frame %llu",
+         count, count > 0 ? ": " : "", list, g_last_frame);
+}
+
+// The Living of the last teleport, for the lines after it.
+void* g_follow_living = nullptr;
+double g_follow_since = 0.0;
+int g_follow_step = 0;
+const double kFollowSeconds[3] = {0.5, 2.0, 5.0};
+
+// The place of the Living 0.5 s, 2 s and 5 s after its teleport.
+void TeleportFollow() {
+  if (g_follow_living == nullptr) return;
+  const double t = NowSeconds() - g_follow_since;
+  if (t < kFollowSeconds[g_follow_step]) return;
+  void* living = g_follow_living;
+  if (++g_follow_step >= 3) g_follow_living = nullptr;
+  if (!LiveObject(living, kObjectPlace + 12) || g_site_logs >= kMaxSiteLogs) {
+    return;
+  }
+  ++g_site_logs;
+  const MapCoords& at = *reinterpret_cast<const MapCoords*>(
+      static_cast<uint8_t*>(living) + kObjectPlace);
+  void* sites[kMaxSites];
+  const int count = ListSites(sites, kMaxSites);
+  char list[200];
+  int used = 0;
+  list[0] = 0;
+  for (int i = 0; i < count && used < 160; ++i) {
+    const MapCoords& p = *reinterpret_cast<const MapCoords*>(
+        static_cast<uint8_t*>(sites[i]) + kObjectPlace);
+    const float dx = (p.x - at.x) / kMapScale, dz = (p.z - at.z) / kMapScale;
+    used += snprintf(list + used, sizeof(list) - used, "%s%.1f units from %p",
+                     used > 0 ? ", " : "", sqrtf(dx * dx + dz * dz), sites[i]);
+  }
+  ModLog("miracle watch: %.1f s after its teleport %p (%s) is at %.1f %.1f: "
+         "%s, frame %llu", t, living, HandDirectClass(living),
+         at.x / kMapScale, at.z / kMapScale, count > 0 ? list : "no site",
+         g_last_frame);
+}
+
+int __fastcall h_DoTeleport(void* site, void* unused, void* living,
+                            int flag) {
+  MapCoords before = {};
+  const bool have = LiveObject(living, kObjectPlace + 12);
+  if (have) {
+    before = *reinterpret_cast<const MapCoords*>(
+        static_cast<uint8_t*>(living) + kObjectPlace);
+  }
+  const int result = o_DoTeleport(site, unused, living, flag);
+  if (!have || g_site_logs >= kMaxSiteLogs) return result;
+  ++g_site_logs;
+  const MapCoords after = *reinterpret_cast<const MapCoords*>(
+      static_cast<uint8_t*>(living) + kObjectPlace);
+  const MapCoords& in = *reinterpret_cast<const MapCoords*>(
+      static_cast<uint8_t*>(site) + kObjectPlace);
+  void* sites[kMaxSites];
+  const int count = ListSites(sites, kMaxSites);
+  // The site nearest to the place after the call.
+  void* out = nullptr;
+  float best = 1e30f;
+  for (int i = 0; i < count; ++i) {
+    const MapCoords& p = *reinterpret_cast<const MapCoords*>(
+        static_cast<uint8_t*>(sites[i]) + kObjectPlace);
+    const float dx = (p.x - after.x) / kMapScale;
+    const float dz = (p.z - after.z) / kMapScale;
+    const float d = sqrtf(dx * dx + dz * dz);
+    if (d < best) {
+      best = d;
+      out = sites[i];
+    }
+  }
+  const float mx = (after.x - before.x) / kMapScale;
+  const float mz = (after.z - before.z) / kMapScale;
+  g_follow_living = living;
+  g_follow_since = NowSeconds();
+  g_follow_step = 0;
+  ModLog("miracle watch: the game sends %p (%s) into the teleport site %p at "
+         "%.1f %.1f (MagicTeleport::DoTeleport gives %d). It was at %.1f "
+         "%.1f and is at %.1f %.1f now, %.1f units away. The nearest site to "
+         "it now is %p, %.1f units away, frame %llu", living,
+         HandDirectClass(living), site, in.x / kMapScale, in.z / kMapScale,
+         result, before.x / kMapScale, before.z / kMapScale,
+         after.x / kMapScale, after.z / kMapScale, sqrtf(mx * mx + mz * mz),
+         out, best, g_last_frame);
+  return result;
+}
+
+bool g_installed = false;
 
 }  // namespace
+
+void MiracleWatchInstall() {
+  if (g_installed) return;
+  g_installed = true;
+  HookAt(kSpellEffect, kSpellEffectBytes, sizeof(kSpellEffectBytes),
+         reinterpret_cast<void*>(&h_SpellEffect),
+         reinterpret_cast<void**>(&o_SpellEffect),
+         "Spell::ApplyDefaultSpellEffect (the log of the drops of Water)");
+  HookAt(kCheckFaces, kCheckFacesBytes, sizeof(kCheckFacesBytes),
+         reinterpret_cast<void*>(&h_CheckFaces),
+         reinterpret_cast<void**>(&o_CheckFaces),
+         "PhysOb::CheckVFaces (the log of a Physical Shield)");
+  HookAt(kDoTeleport, kDoTeleportBytes, sizeof(kDoTeleportBytes),
+         reinterpret_cast<void*>(&h_DoTeleport),
+         reinterpret_cast<void**>(&o_DoTeleport),
+         "MagicTeleport::DoTeleport (the log of a teleport)");
+}
 
 void MiracleWatchCircle(const char* name, float x, float z) {
   g_cast_name = name != nullptr ? name : "";
@@ -431,8 +1087,13 @@ void MiracleWatchCreature(void* creature, const char* name) {
 
 void MiracleWatchFrame(uint64_t frame, int hand_state) {
   ++g_frames;
+  g_last_frame = frame;
   SpellsFrame(frame);
   CreatureFrame(frame, hand_state);
+  DropsFrame();
+  ShieldsFrame();
+  SitesFrame();
+  TeleportFollow();
 }
 
 void MiracleWatchReport() {

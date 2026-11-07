@@ -137,6 +137,7 @@ extern void ModLog(const char* format, ...);
 bool HeadCameraTableCamera(float out[3]);
 // controllers.cpp: the frame number that the scripted controller counts.
 uint64_t ControllersFrameCount();
+uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame);
 // head_camera.cpp: the room, which is world up and the game camera's
 // heading. Columns are right, up and forward, in world space.
 bool HeadCameraStageBasis(float basis_out[9]);
@@ -328,6 +329,80 @@ bool LimitPole(float a, float distance, float basis[9]) {
   return true;
 }
 
+// THE MISTS THAT ARE NOT SKY CLOUDS, for the desktop runs (a mist of the
+// weather, of a storm or of the ground: flag 2 at +0x80 is clear).
+// sky_test_mist_log=1 gives one line for each new such mist and a line in
+// each report window. sky_test_mist_hide=N: from frame N of the scripted
+// controller the mod does not draw them, so two eye pictures tell what they
+// are.
+bool g_mist_log = false;
+uint64_t g_mist_hide_frame = 0;
+bool g_mist_hide_said = false;
+const int kMistSeen = 40;
+const void* g_mist_seen[kMistSeen];
+int g_mist_seen_count = 0;
+uint64_t g_mist_draws = 0;      // this report window
+uint64_t g_mist_hidden = 0;
+float g_mist_nearest = 0.0f;
+float g_mist_widest = 0.0f;
+
+bool MistIniPath(char path[MAX_PATH]) {
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash =
+      length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return false;
+  slash[1] = 0;
+  strcat_s(path, MAX_PATH, "bwvr.ini");
+  return true;
+}
+
+bool MistHidden(const uint8_t* mist) {
+  if (g_mist_hide_frame == 0 || (mist[kMistFlags] & kMistSkyCloud) != 0) {
+    return false;
+  }
+  const uint64_t frame = ControllersFrameCount();
+  if (ControllersTestFrame(g_mist_hide_frame, frame) < g_mist_hide_frame) {
+    return false;
+  }
+  if (!g_mist_hide_said) {
+    g_mist_hide_said = true;
+    ModLog("sky          : sky_test_mist_hide: from frame %llu the mod does "
+           "not draw a mist that is not a sky cloud", frame);
+  }
+  ++g_mist_hidden;
+  return true;
+}
+
+void MistLog(const void* self, const float position[3], float scale,
+             float a, float flatten, uint8_t flags, float distance,
+             const float* stored, bool table_faced, bool limited) {
+  ++g_mist_draws;
+  const float radius = kDomeHeight * scale;
+  if (g_mist_draws == 1 || distance < g_mist_nearest) {
+    g_mist_nearest = distance;
+  }
+  if (radius > g_mist_widest) g_mist_widest = radius;
+  for (int i = 0; i < g_mist_seen_count; ++i) {
+    if (g_mist_seen[i] == self) return;
+  }
+  if (g_mist_seen_count >= kMistSeen) return;
+  g_mist_seen[g_mist_seen_count++] = self;
+  const float d[3] = {position[0] - stored[0], position[1] - stored[1],
+                      position[2] - stored[2]};
+  ModLog("sky mist     : a mist that is not a sky cloud, %p, at %.0f %.0f "
+         "%.0f: its dome has a radius of %.0f units (20 times the scale %.2f) "
+         "and a pole of %.0f units (20 times A %.2f, the flatten %.2f, the "
+         "flags 0x%02X). It is %.0f units from the point that it faces (%s) "
+         "and %.0f units from the stored camera. %s, frame %llu", self,
+         position[0], position[1], position[2], radius, scale,
+         kDomeHeight * fabsf(a), a, flatten, flags, distance,
+         table_faced ? "the table camera" : "the stored camera",
+         sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]),
+         limited ? "The pole limit made its pole shorter"
+                 : "The pole limit did not act",
+         ControllersFrameCount());
+}
+
 // At the first frame of play, the time of day of sky_test_hour.
 void TestHourCheck() {
   if (g_test_hour < 0 || g_test_hour_done) return;
@@ -417,6 +492,7 @@ void TraceDome(const void* mist, const float place[3], const float basis[9],
 
 void __fastcall h_MistDraw(void* self, void* unused) {
   if (TabletopHidesMist(self)) return;
+  if (self != nullptr && MistHidden(static_cast<const uint8_t*>(self))) return;
   TestFrameCheck();
   if (g_head_free && self != nullptr) {
     const uint8_t* mist = static_cast<const uint8_t*>(self);
@@ -471,7 +547,12 @@ void __fastcall h_MistDraw(void* self, void* unused) {
         ++g_table_faced;
       }
       ++g_dome_draws;
-      if (LimitPole(a, distance, basis)) ++g_poles_limited;
+      const bool limited = LimitPole(a, distance, basis);
+      if (limited) ++g_poles_limited;
+      if (g_mist_log && !sky_cloud) {
+        MistLog(self, position, scale, a, flatten, mist[kMistFlags], distance,
+                stored, table_faced, limited);
+      }
       memcpy(reinterpret_cast<void*>(kMistBasis), basis, sizeof(basis));
       if (g_trace) TraceDome(self, position, basis, scale, a_engine, eye);
     }
@@ -574,6 +655,17 @@ const char* GlareModeText(int mode) {
 void SkyDetailInstall() {
   if (g_hooked) return;
   g_hooked = true;
+  char path[MAX_PATH];
+  if (MistIniPath(path)) {
+    g_mist_log = GetPrivateProfileIntA("bwvr", "sky_test_mist_log", 0, path) != 0;
+    const int hide =
+        static_cast<int>(GetPrivateProfileIntA("bwvr", "sky_test_mist_hide", 0, path));
+    g_mist_hide_frame = hide > 0 ? static_cast<uint64_t>(hide) : 0;
+    if (g_mist_log || g_mist_hide_frame != 0) {
+      ModLog("sky          : the test keys of the mists: sky_test_mist_log=%d, "
+             "sky_test_mist_hide=%d", g_mist_log ? 1 : 0, hide);
+    }
+  }
   Hook(kMistDraw, reinterpret_cast<void*>(&h_MistDraw),
        reinterpret_cast<void**>(&o_MistDraw), "LH3DMist::Draw");
   Hook(kSunGlare, reinterpret_cast<void*>(&h_SunGlare),
@@ -644,6 +736,16 @@ void SkyDetailReport() {
     ModLog("sky          : %llu of %llu cloud and mist draws faced the table "
            "camera", g_table_faced, g_dome_draws);
   }
+  if (g_mist_log && (g_mist_draws > 0 || g_mist_hidden > 0)) {
+    ModLog("sky mist     : %llu draws of a mist that is not a sky cloud, the "
+           "nearest %.0f units from the point that it faces, the widest dome "
+           "%.0f units, and %llu draws that the test key hid", g_mist_draws,
+           g_mist_nearest, g_mist_widest, g_mist_hidden);
+  }
+  g_mist_draws = 0;
+  g_mist_hidden = 0;
+  g_mist_nearest = 0.0f;
+  g_mist_widest = 0.0f;
   if (g_moon_turns > 0) {
     ModLog("sky          : the moon was turned %llu times, %llu of them with "
            "world up", g_moon_turns, g_moon_level);

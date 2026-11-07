@@ -717,10 +717,6 @@ game as it is.
       (`move_stick_follow_land`):
       `village_run.ps1 -Kind walk` goes over the sea and a coast, and no
       hill comes within 10 cm of the head. Needs a walk over a hill.
-    - The limit of 40 cm of the ring of the teleport. With rule 1 the ring
-      is 11 units of the world, so it reaches 40 cm only below about 27.5
-      units a meter: a recipe with zoom steps in. The lower limit of 4 cm
-      holds at 3844 units a meter (`aim_queue.ps1 -Runs ring4k1,ring4k0`).
     - The Island Keeper of the Gods' Playground with `script_view=1`:
       the way of `god-view.md`, section 7, from the test save `temple`.
       Needs the measured point of "Yes." and the place of the Keeper. The

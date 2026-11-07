@@ -1544,14 +1544,16 @@ With `hint_style=2` (the default) the mod does what Half-Life: Alyx does
 1. While a hand has a hint, the model of its controller fades in at the
    real grip pose of that hand, in 0.2 s. It fades out in 0.35 s when the
    hint ends.
-2. The body of the controller is faint: a parchment tone at 30 percent
-   alpha. Its back faces draw first and its front faces after them, so the
-   shape reads.
+2. The body of the controller is faint: a warm parchment tone at 30
+   percent alpha, with a dark brown ink outline at its silhouette, so it
+   reads on bright land. Its back faces draw first and its front faces
+   after them, so the shape reads.
 3. Each button of a hint is solid and lit in a warm gold. A pressed button
    moves as the model says (the press, below).
 4. Each lit button has its own small scroll card beside the controller, with
-   a thin line of ink from the button to the middle of the inner edge of
-   its card.
+   a line of ink, 2 mm across, from the button to the middle of the inner
+   edge of its card. A dot of ink marks the place where the line leaves the
+   box of its button.
 5. The hand of the player stays, at 35 percent of its opacity
    (`HandOpacity`). So the player still sees where the Hand touches, and the
    controller shows through the hand.
@@ -1654,8 +1656,19 @@ hand that would overlap a card of the hand that points does not show.
 **The depth.** The controller, the diamond and the lines draw in the eye
 pictures, after the opaque meshes of the overlay and before the mesh of the
 hands, with the depth of the scene (`overlay.cpp`). So the land can hide
-them. The lit parts and the lines write depth. The faint body does not.
-The cards are quad layers, as each hint card is (9.2), so the Hand cannot
+them. The lit parts and the lines write depth. Each eye draws the body in
+this order:
+
+1. The back faces, with the alpha and no depth write.
+2. The front faces write only their depth.
+3. The outline: the back faces again, each corner pushed out 1.2 mm along
+   its normal, in ink. Inside the silhouette the front faces are nearer and
+   hide it, so only a thin edge round the body shows.
+4. The front faces, with the alpha.
+
+So the body writes the depth of its front faces, and the faint hand, which
+draws after the controller, does not show behind the body. The cards are
+quad layers, as each hint card is (9.2), so the Hand cannot
 hide them. A real hand in the land is drawn on the land (`hand-model.md`,
 "The Hand stops at the land"), and its controller goes with the drawn hand.
 The line still ends at the edge of its card.
@@ -1690,16 +1703,21 @@ live comparison.
   (grip, 4.1 by 2.2 cm, at x y z m); [A] Teleport (first face button, ...)`:
   each time the cards of a hand change, in the 160 lines of 9.6.
 - `hint model   : the controllers cost N ms a frame on the CPU over 120
-  frames (the build and both eyes), N ms at most, N triangles a frame`:
+  frames (the build and 2.0 eye passes a frame), N ms at most, N triangles
+  a frame`:
   once, and in each report window with the frames in which each controller
   showed. The report of the hint card has the frames of the cards of the
   buttons, and the cards that did not show.
 
-**The cost.** The CPU puts each corner of the model on the screen in each
-eye, as the overlay does. The Touch Plus has 4470 triangles a hand. The
-goal is under 0.3 ms a frame for two controllers and four cards. The Vive
-wand and the Vive Cosmos have about 18000 triangles a hand, four times as
-many, so they cost more.
+**The cost.** The CPU puts each corner of the model and of its outline on
+the screen in each eye, as the overlay does. The cost of a frame is the
+build and all its eye passes, and the next build closes it. The triangles
+of a hand: Touch Plus 4470, Touch Pro 4106, Touch v3 5831, Touch v2 3335,
+Index 8933, Vive wand 17344, Vive Cosmos 18476, Vive Focus 3 4619, HP 6716,
+Windows Mixed Reality 6006, Pico 4 4525, the controller with only a trigger
+3814. The goal is under 0.3 ms a frame for two controllers and four cards.
+The Vive wand and the Vive Cosmos have four times the triangles of the
+Touch Plus, so they cost more.
 
 **Tests.** The math test (`hint_model_checks.h`): the model of each profile
 and headset name, the nodes of each control, the control of each word, the
@@ -1712,10 +1730,29 @@ the game loaded each model with `hint_model.cpp`, placed four cards and drew
 the controllers on the CPU: each model loads, and its lit parts are the
 trigger, the grip and A.
 
-The desktop runs: a hint on each hand with the fake controller (a Touch
-Plus), each model with `hint_model_test`, two and three hints at once, the
-cost, and `hint_style` at 1 and 2. They save the eye pictures and the
-pictures of the cards (`hint_card_save_test=1`).
+The desktop runs: `hand_run.ps1 -Kind hints` holds both fake controllers
+as a player holds them (the grips turned 60 degrees up), 40 cm ahead and
+25 cm down, so both controllers are
+in the view, with the cards of the land prompt on both hands
+(`prompts=2`). A run with each model (`hint_model_test`), the cost, and
+`hint_style` at 1 and 2. With Direct3D 9 they save the eye pictures, and
+with Vulkan and `video_view=1` the pictures of the view for videos
+(`bwvr-vk-video-N.bmp`), which have the cards over the eye picture.
+
+**The fit in the hand.** The models and the drawn hand use the same grip
+pose (`OverlayHand`), so they turn together. The test program drew the low
+poly hand of the overlay at the grip of each model, and gave the box of
+each model in the grip space. The frames agree: the fingers of the hand
+open along -y, the back of the right hand is at +x (the strap of the Index
+goes to +8.9 cm, over the back of the hand), and the handle of each
+controller goes along z through the closed fingers, under the line of the
+knuckles. The trigger is about 3 cm under the origin and 2.5 cm ahead, at
+the index finger. The grip button of a Touch is at x -0.6 cm, on the side
+of the finger tips. The -z axis of the grip goes through the closed
+fingers from the little finger to the thumb, so in a natural hold it points
+up and ahead. A fake controller at a pitch of 0 has the forearm straight up,
+and its controller and hand look turned on their side. Only a headset shows
+the fit with the grip pose of a real runtime.
 
 Only a headset can show whether the model is at the real controller (the
 grip pose of each runtime and the origin of each model), whether the faint

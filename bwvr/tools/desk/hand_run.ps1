@@ -39,6 +39,17 @@
 #             Creature select, and back.
 #   mousepan  The test mouse of the mod drags the land, with no controller.
 #             Give it -Save temple.
+#   hints     The controller in the hand (hint_style=2, controller-hints.md,
+#             9.14): both hands 40 cm ahead of the head, 25 cm down and
+#             18 cm to each side, the grips turned 60 degrees up and 10
+#             degrees in, as a player holds them. The head looks 25 degrees down, so
+#             both controllers are in the view over the land. The land
+#             prompt gives the cards of both hands (with prompts=2). Eye
+#             pictures before and after the cards come, and with the grip
+#             of the left hand held (the lit grip moves). Give it
+#             -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60" for eye
+#             pictures, or "video_view=1;test_frame_rate=60" with Vulkan for
+#             pictures of the view for videos with the cards in them.
 #
 # THE START. The run starts in a test save (README.md, "A fast start"): the
 # save "pen" for the kinds one and fixed (the Creature pens of Land 1 after
@@ -188,6 +199,23 @@ if ($Kind -eq 'one') {
     $extra.fake_controller_points = "$first -16,-30,45"
     $Steps = 'point@4600+1 shot@4630+1 seek@4660+1 shot@4690+1 grip@4720+60 shot@4760+1 ' +
              'point@4850+1 lmenu@4900+5 shot@4960+1 menu@5000+5 shot@5060+1 menu@5100+5 shot@5160+1'
+} elseif ($Kind -eq 'hints') {
+    # The hands as a player holds the controllers: 40 cm ahead, 25 cm down,
+    # 18 cm to each side. The -z axis of a grip goes through the closed
+    # fingers from the little finger to the thumb, so in a natural hold it
+    # points up and ahead, and the forearm goes back from the hand. A grip at
+    # a pitch of 0 has the forearm straight up. So the grips turn 60 degrees
+    # up and 10 degrees in. The rots are yaw,pitch,roll (a positive yaw turns
+    # left, a positive pitch turns up).
+    # The land prompt needs 1.5 s of the land under the Hand, so the cards
+    # show from about frame 4700 at 60 frames a second.
+    $extra.fake_head_pitch = -25
+    $extra.fake_controller_points = "$first 18,-25,40"
+    $extra.fake_controller_left_points = '-18,-25,40'
+    $extra.fake_controller_rots = '10,60,0'
+    $extra.fake_controller_left_rots = '-10,60,0'
+    $Steps = 'point@4600+1 lpoint@4600+1 rot@4600+1 lrot@4600+1 shot@4640+1 ' +
+             'shot@4760+1 shot@4840+1 lgrip@4880+80 shot@4920+1 shot@5000+1'
 } elseif ($Kind -eq 'glow') {
     # The glow at the Hand's point (hand-model.md, "The glow at the Hand's
     # point"). With hand_land_stop=0 the hand goes into the land, and the

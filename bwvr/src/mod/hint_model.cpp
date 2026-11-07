@@ -38,11 +38,13 @@
 // THE DRAW. In each eye pass, after the opaque meshes of the overlay and
 // before the mesh of the hands, with the depth of the scene, so the land can
 // hide the controller. The CPU puts each corner on the screen as the
-// overlay does (overlay_math.h, Project). Three draws: the lit buttons and
-// the lines, with the depth write on, then the back faces of the body, then
-// its front faces, both with an alpha and no depth write. So the faint body
-// reads as a shape. A triangle with a corner in front of the near plane is
-// not drawn: the controller is at the length of an arm.
+// overlay does (overlay_math.h, Project). The draws: the lit buttons and
+// the lines with the depth write on, the back faces of the body with an
+// alpha, the depth of its front faces, the ink outline (the shell of the back
+// faces, pushed out along the normals, which the front faces hide inside the
+// silhouette), and the front faces with an alpha. So the faint body reads as
+// a shape on bright land. A triangle with a corner in front of the near
+// plane is not drawn: the controller is at the length of an arm.
 //
 // THE HAND goes faint (hint_model_math.h, HandOpacity) while its controller
 // shows. It stays, so the player still sees where the Hand touches, and the
@@ -205,6 +207,7 @@ struct Model {
   int value_node[art::kControls];  // or -1
   bool lit_mesh[art::kControls];   // the control has a mesh of its own
   float anchor[art::kControls][3];  // in the grip space, at rest
+  float anchor_half[art::kControls][3];  // the half size of its box
   float low[3], high[3];  // the box of the meshes at rest, grip space
   double load_ms;
 };
@@ -516,6 +519,7 @@ Model* ReadModel(const char* path, const char* id, bool left, char* why,
     if (m->lit_mesh[c]) {
       for (int a = 0; a < 3; ++a) {
         m->anchor[c][a] = 0.5f * (c_low[c][a] + c_high[c][a]);
+        m->anchor_half[c][a] = 0.5f * (c_high[c][a] - c_low[c][a]);
       }
     } else if (m->value_node[c] >= 0) {
       const hm::Matrix& at = m->node[m->value_node[c]].model;
@@ -701,19 +705,28 @@ static_assert(sizeof(ScreenVertex) == 32, "the game's vertex is 32 bytes");
 const DWORD kFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR |
                    D3DFVF_TEX1;
 
-// THE LINES and the marks: a tube of 4 sides for each line, and a small
-// diamond at a button with no mesh of its own (the grip of an Index).
-const int kLineSides = 4;
-const int kExtraVertices = kHintModelCards * (kLineSides * 2 + 6) + 8;
-const int kExtraTriangles = kHintModelCards * (kLineSides * 2 + 8) + 8;
-const float kLineRadiusM = 0.0007f;
+// THE LINES and the marks: a tube of 6 sides for each line, 2 mm across as
+// a stroke of ink, a dot of ink where the line leaves its button, and a
+// small gold diamond at a button with no mesh of its own (the grip of an
+// Index).
+const int kLineSides = 6;
+const int kExtraVertices = kHintModelCards * (kLineSides * 2 + 12) + 8;
+const int kExtraTriangles = kHintModelCards * (kLineSides * 2 + 16) + 8;
+const float kLineRadiusM = 0.0010f;
+const float kDotRadiusM = 0.0024f;
 const float kMarkRadiusM = 0.006f;
 
-// The colors. The lit buttons are a warm gold, the body is parchment, and
-// the lines are a dark ink.
+// THE OUTLINE of the body: a dark ink edge at the silhouette, so the faint
+// body reads on bright land. It is the shell of the back faces, pushed out
+// along the normals by this much, behind the front faces of the body.
+const float kOutlineM = 0.0012f;
+const float kOutlineAlpha = 0.85f;
+
+// The colors. The lit buttons are a warm gold, the body is a warm
+// parchment, and the lines and the outline are a dark brown ink.
 const float kGold[3] = {1.00f, 0.76f, 0.28f};
-const float kParchment[3] = {0.93f, 0.85f, 0.68f};
-const float kInk[3] = {0.22f, 0.13f, 0.06f};
+const float kParchment[3] = {0.92f, 0.74f, 0.48f};
+const float kInk[3] = {0.24f, 0.13f, 0.05f};
 
 struct Built {
   bool have;
@@ -737,6 +750,7 @@ uint64_t g_built_controllers_frame = 0;
 
 // The draw of one eye: the vertices on the screen, and three lists.
 ScreenVertex* g_screen_vertex = nullptr;
+ScreenVertex* g_shell_vertex = nullptr;  // the outline, pushed out
 WORD* g_list_lit = nullptr;
 WORD* g_list_back = nullptr;
 WORD* g_list_front = nullptr;
@@ -752,6 +766,9 @@ int64_t g_cost_most = 0;
 uint64_t g_cost_frames = 0;
 uint64_t g_cost_triangles = 0;
 int g_frame_triangles = 0;
+int g_frame_draws = 0;      // the draws of the eyes of the last build
+uint64_t g_cost_eyes = 0;   // the draws of the eyes in the window
+float g_units = 0.0f;       // world units in a meter of the room, this frame
 bool g_said_cost = false;
 bool g_said_draw = false;
 bool g_said_failed = false;
@@ -1042,11 +1059,29 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
     } else {
       for (int k = 0; k < 3; ++k) anchor[k] = value.model.m[9 + k];
     }
+    // A lit part hides the middle of its box, so the line starts where it
+    // leaves the box, toward its card, and a dot of ink marks that place.
+    if (m->lit_mesh[control]) {
+      float dir[3] = {s.edge[c][0] - anchor[0], s.edge[c][1] - anchor[1],
+                      s.edge[c][2] - anchor[2]};
+      overlay_math::Normalize(dir);
+      float t = 1e9f;
+      for (int k = 0; k < 3; ++k) {
+        if (fabsf(dir[k]) > 1e-6f) {
+          const float tk = m->anchor_half[control][k] / fabsf(dir[k]);
+          if (tk < t) t = tk;
+        }
+      }
+      if (t > 0.05f) t = 0.0f;
+      for (int k = 0; k < 3; ++k) anchor[k] += dir[k] * t;
+    }
     float from[3], to[3];
     GripToWorld(hand, units, anchor, from);
     GripToWorld(real, units, s.edge[c], to);
     AddTube(&b, from, to, line_radius, ink);
-    if (!m->lit_mesh[control]) {
+    if (m->lit_mesh[control]) {
+      AddDiamond(&b, from, kDotRadiusM * units, ink);
+    } else {
       AddDiamond(&b, from, kMarkRadiusM * units, Argb(kGold, 1.0f, fade));
     }
   }
@@ -1144,9 +1179,13 @@ void PutStatesBack(IDirect3DDevice7* device) {
 bool GrowScreen(int vertices, int indices) {
   if (vertices > g_screen_capacity) {
     free(g_screen_vertex);
+    free(g_shell_vertex);
     g_screen_vertex =
         static_cast<ScreenVertex*>(malloc(sizeof(ScreenVertex) * vertices));
-    g_screen_capacity = g_screen_vertex != nullptr ? vertices : 0;
+    g_shell_vertex =
+        static_cast<ScreenVertex*>(malloc(sizeof(ScreenVertex) * vertices));
+    g_screen_capacity =
+        g_screen_vertex != nullptr && g_shell_vertex != nullptr ? vertices : 0;
   }
   if (indices > g_list_capacity) {
     free(g_list_lit);
@@ -1192,7 +1231,7 @@ bool EyeOf(const float m[12], float eye[3]) {
 
 int DrawSide(IDirect3DDevice7* device, int side, const float m[12],
              float near_plane, float hx, float hy, const float eye[3],
-             HRESULT* result) {
+             float units, HRESULT* result) {
   const Built& b = g_built[side];
   const Model* model = g_model[side];
   if (!b.have || model == nullptr) return 0;
@@ -1213,6 +1252,33 @@ int DrawSide(IDirect3DDevice7* device, int side, const float m[12],
     s.rhw = near_plane / c[2];
     s.z = 1.0f - s.rhw;
     s.diffuse = b.color[at];
+    s.specular = 0xFF000000u;
+    s.u = s.v = 0.0f;
+  }
+  // The shell of the outline: each corner of the body pushed out along its
+  // normal, in ink.
+  const float push = kOutlineM * units;
+  const uint32_t outline = Argb(kInk, 1.0f, kOutlineAlpha * g_side[side].fade);
+  for (int v = 0; v < model->vertices; ++v) {
+    ScreenVertex& s = g_shell_vertex[v];
+    if (b.lit[v]) {
+      s.rhw = -1.0f;
+      continue;
+    }
+    float p[3], c[3];
+    for (int k = 0; k < 3; ++k) {
+      p[k] = b.world[v * 3 + k] + b.normal[v * 3 + k] * push;
+    }
+    overlay_math::ToCamera(m, p, c);
+    if (c[2] < near_plane) {
+      s.rhw = -1.0f;
+      continue;
+    }
+    s.x = (1.0f + c[0] / c[2]) * hx;
+    s.y = (1.0f - c[1] / c[2]) * hy;
+    s.rhw = near_plane / c[2];
+    s.z = 1.0f - s.rhw;
+    s.diffuse = outline;
     s.specular = 0xFF000000u;
     s.u = s.v = 0.0f;
   }
@@ -1265,13 +1331,52 @@ int DrawSide(IDirect3DDevice7* device, int side, const float m[12],
         static_cast<DWORD>(back), 0);
     if (FAILED(r)) *result = r;
   }
+  // THE OUTLINE. First the front faces write only their depth (the blend
+  // keeps the picture as it is). Then the shell of the back faces draws in
+  // ink: inside the silhouette the front faces are nearer and hide it, so
+  // only a thin edge round the body shows.
+  int shell = 0;
+  if (front > 0 && back > 0) {
+    device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+    device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_ZERO);
+    device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE);
+    HRESULT r = device->DrawIndexedPrimitive(
+        D3DPT_TRIANGLELIST, kFvf, g_screen_vertex, count, g_list_front,
+        static_cast<DWORD>(front), 0);
+    if (FAILED(r)) *result = r;
+    device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
+    device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    // The shell uses the same triangles as the back faces, with the corners
+    // of the shell. A corner of the shell in front of the near plane drops
+    // its triangle.
+    int n = 0;
+    for (int i = 0; i + 2 < back; i += 3) {
+      if (g_shell_vertex[g_list_back[i]].rhw < 0.0f ||
+          g_shell_vertex[g_list_back[i + 1]].rhw < 0.0f ||
+          g_shell_vertex[g_list_back[i + 2]].rhw < 0.0f) {
+        continue;
+      }
+      g_list_lit[n++] = g_list_back[i];
+      g_list_lit[n++] = g_list_back[i + 1];
+      g_list_lit[n++] = g_list_back[i + 2];
+    }
+    if (n > 0) {
+      r = device->DrawIndexedPrimitive(
+          D3DPT_TRIANGLELIST, kFvf, g_shell_vertex,
+          static_cast<DWORD>(model->vertices), g_list_lit,
+          static_cast<DWORD>(n), 0);
+      if (FAILED(r)) *result = r;
+    }
+    shell = n;
+  }
   if (front > 0) {
     const HRESULT r = device->DrawIndexedPrimitive(
         D3DPT_TRIANGLELIST, kFvf, g_screen_vertex, count, g_list_front,
         static_cast<DWORD>(front), 0);
     if (FAILED(r)) *result = r;
   }
-  return (lit + back + front) / 3;
+  return (lit + back + front + shell) / 3;
 }
 
 // THE TEST KEY: Ctrl Shift H, with test_keys=1, while the game is in front.
@@ -1404,9 +1509,35 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
   return true;
 }
 
+// THE COST of a frame is the build and the draws of all its eye passes. A
+// build closes the frame before it, so the count does not depend on the
+// number of eye passes of a frame.
+void CloseCost() {
+  if (g_frame_draws <= 0) return;
+  const int64_t cost = g_build_ticks + g_draw_ticks;
+  g_cost_sum += cost;
+  if (cost > g_cost_most) g_cost_most = cost;
+  ++g_cost_frames;
+  g_cost_eyes += static_cast<uint64_t>(g_frame_draws);
+  g_cost_triangles += static_cast<uint64_t>(g_frame_triangles);
+  g_frame_draws = 0;
+  if (!g_said_cost && g_cost_frames >= 120) {
+    g_said_cost = true;
+    ModLog("hint model   : the controllers cost %.3f ms a frame on the CPU "
+           "over %llu frames (the build and %.1f eye passes a frame), %.3f ms "
+           "at most, %llu triangles a frame",
+           Ms(g_cost_sum) / static_cast<double>(g_cost_frames), g_cost_frames,
+           static_cast<double>(g_cost_eyes) /
+               static_cast<double>(g_cost_frames),
+           Ms(g_cost_most), g_cost_triangles / g_cost_frames);
+  }
+}
+
 void HintModelBuild(const OverlayHands& hands, const float stop[2][3]) {
   if (g_frequency.QuadPart == 0) QueryPerformanceFrequency(&g_frequency);
+  CloseCost();
   const int64_t start = Now();
+  g_units = hands.units_per_meter;
   g_any_built = false;
   ++g_build_frame;
   g_built_controllers_frame = ControllersFrameCount();
@@ -1435,8 +1566,6 @@ float HintModelHandOpacity(int side) {
 int HintModelDraw(IDirect3DDevice7* device, const float camera[12],
                   float near_plane, float half_x, float half_y) {
   if (!HintModelHasDraw() || device == nullptr) return 0;
-  static uint64_t s_last_eye_frame[2] = {0, 0};
-  static int s_eye = 0;
   const int64_t start = Now();
   float eye[3];
   if (!EyeOf(camera, eye)) return 0;
@@ -1445,30 +1574,15 @@ int HintModelDraw(IDirect3DDevice7* device, const float camera[12],
   int drawn = 0;
   for (int side = 0; side < 2; ++side) {
     drawn += DrawSide(device, side, camera, near_plane, half_x, half_y, eye,
-                      &result);
+                      g_units, &result);
   }
+  // The depth write goes back to the value of SetStates, so PutStatesBack
+  // puts back the value of the game.
+  device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
   PutStatesBack(device);
   g_draw_ticks += Now() - start;
   g_frame_triangles += drawn;
-  // The cost of a frame: the build and the two eyes. The second eye of a
-  // frame closes it.
-  s_eye = s_last_eye_frame[0] == g_build_frame ? 1 : 0;
-  s_last_eye_frame[s_eye] = g_build_frame;
-  if (s_eye == 1) {
-    const int64_t cost = g_build_ticks + g_draw_ticks;
-    g_cost_sum += cost;
-    if (cost > g_cost_most) g_cost_most = cost;
-    ++g_cost_frames;
-    g_cost_triangles += static_cast<uint64_t>(g_frame_triangles);
-    if (!g_said_cost && g_cost_frames >= 120) {
-      g_said_cost = true;
-      ModLog("hint model   : the controllers cost %.3f ms a frame on the CPU "
-             "over %llu frames (the build and both eyes), %.3f ms at most, "
-             "%llu triangles a frame",
-             Ms(g_cost_sum) / static_cast<double>(g_cost_frames), g_cost_frames,
-             Ms(g_cost_most), g_cost_triangles / g_cost_frames);
-    }
-  }
+  ++g_frame_draws;
   if (FAILED(result)) {
     if (!g_said_failed) {
       g_said_failed = true;
@@ -1496,9 +1610,10 @@ void HintModelReport() {
       g_side[1].frames_shown == 0) {
     return;
   }
+  CloseCost();
   ModLog("hint model   : the controller showed in %llu frames of the left hand "
          "and %llu of the right hand. The cost: %.3f ms a frame, %.3f ms at "
-         "most, %llu triangles a frame, over %llu frames",
+         "most, %llu triangles a frame, over %llu frames with a draw",
          g_side[0].frames_shown, g_side[1].frames_shown,
          g_cost_frames > 0
              ? Ms(g_cost_sum) / static_cast<double>(g_cost_frames)
@@ -1508,5 +1623,5 @@ void HintModelReport() {
          g_cost_frames);
   g_side[0].frames_shown = g_side[1].frames_shown = 0;
   g_cost_sum = g_cost_most = 0;
-  g_cost_frames = g_cost_triangles = 0;
+  g_cost_frames = g_cost_triangles = g_cost_eyes = 0;
 }

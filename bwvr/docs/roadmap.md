@@ -647,6 +647,10 @@ game as it is.
   and the quads in a headset.
 - **N17. Headset coverage.** Quest 3 through Virtual Desktop and Steam Frame
   through Proton have game coverage. Other headsets and runtimes need tests.
+  A headset with canted views (Pimax) needs a test: with `eye_cant=1` each
+  eye draws with the turn of its own view (backend.md, "Canted views"). A
+  player with a Pimax must say if the two pictures fuse in play, and the log
+  line `eye cant` gives the cant of his views.
 - **N18. The x64 host for Steam Frame** (`xr_bridge=1`). Not tested: all
   controls, the haptics, the loss of the device, long sessions, and the
   install and the uninstall of the add-on on a clean setup. The game ran

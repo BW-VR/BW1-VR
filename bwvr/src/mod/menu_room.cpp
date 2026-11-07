@@ -54,6 +54,9 @@ extern void ModLog(const char* format, ...);
 
 // head_pose.cpp
 uint64_t HeadPoseOriginSerial();
+// stereo.cpp: the head of two views (canted views).
+void StereoHeadOfViews(const float view0[4], const float view1[4],
+                       float head[4]);
 // controllers.cpp
 void ControllersFrame();
 // pointer_map.cpp
@@ -332,7 +335,9 @@ bool MenuRoomFlatFrame(uint64_t frame) {
     for (int i = 0; i < 3; ++i) {
       center[i] = (left.position[i] + right.position[i]) * 0.5f;
     }
-    MenuRoomHead(center, left.orientation);
+    float head[4];
+    StereoHeadOfViews(left.orientation, right.orientation, head);
+    MenuRoomHead(center, head);
   }
   // The picture of a frame with no scene has the size of the eye swapchain.
   const uint32_t w = g_screen->width();

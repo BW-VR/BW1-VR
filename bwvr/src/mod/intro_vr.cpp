@@ -113,6 +113,7 @@
 #include "vk_scene.h"
 #include "controllers.h"
 #include "intro_motion_math.h"
+#include "eye_cant_math.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -120,6 +121,10 @@ extern void ModLog(const char* format, ...);
 void StereoIntroPrepareView(bool to_headset);
 bool StereoIntroAllowed();
 bool StereoHeadTrackingOn();
+// The head of a frame and the turn of each view from it (canted views).
+bool StereoSolveViews(const float view0[4], const float view1[4],
+                      bool declare_roll, float head[4], float declared[2][4],
+                      float turn[2][4]);
 bool StereoIsHeadless();
 bool StereoCaptureIntervalDue();
 void StereoMarkPresented();
@@ -247,6 +252,10 @@ bwvr::XrScreen* g_screen = nullptr;
 
 // The state of the pair that is running.
 int g_eye = -1;                // the eye pass that is running, or -1
+// The turn of each view from the head of this frame, and true when a view is
+// canted (StereoSolveViews).
+float g_eye_turn[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
+bool g_eye_canted = false;
 bool g_to_headset = false;
 uint32_t g_pass_delta = 0;     // what StartFrame must leave in g_delta_time
 bool g_pass_delta_valid = false;
@@ -443,7 +452,9 @@ void __cdecl h_StartFrame() {
 // Process3dEngineBody in stereo.cpp.
 void UpdateHead() {
   g_have_eyes = false;
+  g_eye_canted = false;
   if (!StereoHeadTrackingOn()) return;
+  const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
   if (g_to_headset) {
     const bwvr::EyeView& left = g_screen->eye(0);
     const bwvr::EyeView& right = g_screen->eye(1);
@@ -464,19 +475,18 @@ void UpdateHead() {
     const float ipd = sqrtf(dx * dx + dy * dy + dz * dz);
     if (ipd > 0.03f && ipd < 0.12f) g_separation_m = ipd;
     HeadPoseSetHead(center);
-    HeadPoseUpdate(center, left.orientation);
+    // The head is the mean of the two views, and each eye turns from it by
+    // the turn of its view.
+    float head[4];
+    float declared[2][4];
+    g_eye_canted = StereoSolveViews(left.orientation, right.orientation,
+                                    declare_roll, head, declared, g_eye_turn);
+    HeadPoseUpdate(center, head);
     // This frame draws from this frame's pose, so that is the pose to
     // declare. The scene of stereo.cpp draws from the pose of the frame
     // before, because its camera call runs before the frame begins.
-    const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
     for (int e = 0; e < 2; ++e) {
-      float orientation[4];
-      if (declare_roll) {
-        memcpy(orientation, g_eye_orientation[e], sizeof(orientation));
-      } else {
-        HeadPoseStripRoll(g_eye_orientation[e], orientation);
-      }
-      g_screen->SetRenderPose(e, g_eye_position[e], orientation);
+      g_screen->SetRenderPose(e, g_eye_position[e], declared[e]);
     }
     g_have_eyes = true;
   } else if (HeadPoseFakeOn()) {
@@ -486,7 +496,12 @@ void UpdateHead() {
     for (int e = 0; e < 2; ++e) {
       HeadPoseFakeEye(e, g_eye_position[e], g_eye_orientation[e]);
     }
-    HeadPoseUpdate(center, g_eye_orientation[0]);
+    float head[4];
+    float declared[2][4];
+    g_eye_canted =
+        StereoSolveViews(g_eye_orientation[0], g_eye_orientation[1],
+                         declare_roll, head, declared, g_eye_turn);
+    HeadPoseUpdate(center, head);
     g_have_eyes = true;
   }
 }
@@ -1486,7 +1501,13 @@ void IntroCameraBuilt() {
     }
   }
   const float roll = HeadCameraRoll();
-  if (roll > 0.0005f || roll < -0.0005f) {
+  if (g_have_eyes && g_eye_canted) {
+    // A canted view: the roll, then the turn of the view of this eye.
+    float h[9];
+    float offset[3];
+    eye_cant::EyeMatrix(g_eye_turn[g_eye], roll, d, h, offset);
+    EyeCameraSetPose(h, offset, false);
+  } else if (roll > 0.0005f || roll < -0.0005f) {
     const float c = cosf(roll), s = sinf(roll);
     const float rz[9] = {c, s, 0.0f, -s, c, 0.0f, 0.0f, 0.0f, 1.0f};
     const float offset[3] = {d, 0.0f, 0.0f};

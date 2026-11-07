@@ -28,6 +28,8 @@
 #include <math.h>
 #include <stdint.h>
 
+#include "eye_cant_math.h"
+
 extern void ModLog(const char* format, ...);
 // spirit_anchor.cpp: tell the advisors that the view changed at once.
 void SpiritAnchorCameraCut();
@@ -328,6 +330,19 @@ void HeadPoseFakeCenter(float out[3]) {
   out[2] = -g_fake_lean[2] * k;
 }
 
+// A CANT FOR THE INVENTED HEAD (fake_eye_cant_deg, docs/backend.md, "Canted
+// views"). Each view turns outward from the head by this angle, as the views
+// of a Pimax do. 0 gives two equal orientations, as a Quest gives.
+float g_fake_cant_deg = 0.0f;
+
+void HeadPoseSetFakeCant(float degrees) {
+  g_fake_cant_deg = degrees;
+  if (degrees != 0.0f) {
+    ModLog("head         : each view of the invented head turns %.1f degrees "
+           "outward from the head (fake_eye_cant_deg)", degrees);
+  }
+}
+
 // The pose the runtime would have reported for one eye.
 void HeadPoseFakeEye(int eye, float position[3], float orientation[4]) {
   // Yaw about up, then pitch about right, then roll about forward, which is
@@ -342,10 +357,16 @@ void HeadPoseFakeEye(int eye, float position[3], float orientation[4]) {
   Quat pitch = {sp, 0.0f, 0.0f, cp};
   Quat roll = {0.0f, 0.0f, -sr, cr};
   const Quat head = Multiply(Multiply(yaw, pitch), roll);
-  orientation[0] = head.x;
-  orientation[1] = head.y;
-  orientation[2] = head.z;
-  orientation[3] = head.w;
+  // The view of the eye turns from the head by the cant, in the frame of the
+  // head.
+  float cant[4];
+  eye_cant::FakeTurn(eye, g_fake_cant_deg, cant);
+  const Quat view =
+      Multiply(head, Quat{cant[0], cant[1], cant[2], cant[3]});
+  orientation[0] = view.x;
+  orientation[1] = view.y;
+  orientation[2] = view.z;
+  orientation[3] = view.w;
 
   // The eyes sit either side of the head, carried round by its rotation.
   const float half = (eye == 0 ? -0.5f : 0.5f) * g_fake_separation;

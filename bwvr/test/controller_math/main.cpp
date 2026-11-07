@@ -3647,6 +3647,7 @@ void CreatureChecks() {
 #include "button_map_checks.h"
 #include "hint_picture_checks.h"
 #include "creature_touch_checks.h"
+#include "eye_cant_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4092,6 +4093,7 @@ int main() {
   settings_panel_checks::SettingsPanelChecks();
   button_map_checks::ButtonMapChecks();
   hint_picture_checks::HintPictureChecks();
+  eye_cant_checks::EyeCantChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

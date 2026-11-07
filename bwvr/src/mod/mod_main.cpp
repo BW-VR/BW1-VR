@@ -249,6 +249,8 @@ void HeadCameraSetEnabled(bool on);
 void StereoSetHeadTracking(bool on);
 void StereoSetHeadFov(float degrees);
 void StereoSetFovMargin(int percent);
+void StereoSetEyeCant(int mode);
+void HeadPoseSetFakeCant(float degrees);
 void HeadPoseSetScale(float units_per_meter);
 void HeadPoseSetEnabled(bool on);
 void HeadPoseSetFake(bool on, float yaw_degrees, float pitch_degrees,
@@ -408,6 +410,10 @@ TabletopSettings g_table;
 float g_head_fov_deg = 0.0f;
 // The margin of the render past the view of the headset, in percent.
 int g_fov_margin_pct = 0;
+// eye_cant: each eye of a headset with canted views draws with the turn of
+// its own view. fake_eye_cant_deg: a cant for the invented head.
+int g_eye_cant = 1;
+float g_fake_eye_cant_deg = 0.0f;
 float g_fov_absolute_deg = 0.0f;
 bool g_skip_snapshot = true;
 bool g_water_simple = true;
@@ -1306,6 +1312,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "head_fov_deg", 0, path));
   g_fov_margin_pct = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "fov_margin_pct", 0, path));
+  // Not in the launcher. 0 only to test the fault that it fixes.
+  g_eye_cant = GetPrivateProfileIntA("bwvr", "eye_cant", 1, path) != 0 ? 1 : 0;
+  g_fake_eye_cant_deg = static_cast<float>(static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "fake_eye_cant_deg", 0, path)));
   // An invented head, for testing on the desktop with no headset.
   g_fake_head = GetPrivateProfileIntA("bwvr", "fake_head", 0, path) != 0;
   g_head_camera =
@@ -1948,7 +1958,9 @@ void StartVrStep() {
     HeadPoseSetScale(g_head_units_per_meter);
     StereoSetHeadFov(g_head_fov_deg);
     StereoSetFovMargin(g_fov_margin_pct);
+    StereoSetEyeCant(g_eye_cant);
     HeadPoseSetFake(g_fake_head, g_fake_yaw, g_fake_pitch, g_fake_roll);
+    HeadPoseSetFakeCant(g_fake_head ? g_fake_eye_cant_deg : 0.0f);
     HeadPoseFakeSweep(g_fake_sweep);
     if (g_fake_head) {
       HeadPoseSetFakeLean(g_fake_lean_cm[0], g_fake_lean_cm[1],

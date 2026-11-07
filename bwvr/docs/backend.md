@@ -4433,6 +4433,61 @@ it. When the render leaves out the roll, the mod takes the roll out of the
 declared pose too. A level picture in a tilted frustum would tilt the world with
 the head.
 
+### Canted views
+
+Some headsets (Pimax) turn the view of each eye outward from the head by
+some degrees: the runtime gives each view its own orientation. On a Quest
+the two orientations are equal. The layer declares the orientation of each
+view, so each eye picture must come from the orientation of its own view.
+A picture of the right eye that has the orientation of the left eye shows
+turned by two times the cant, and the player sees a double picture.
+
+With `eye_cant=1` (default):
+
+- The head of the frame is the mean of the two view orientations
+  (`eye_cant_math.h`, `Mean`). The camera of the engine, the Hand, the
+  panels, the menu room and the cut scene window take this head.
+- Each eye pass turns its camera from the head by the turn of its declared
+  view (`Relative`). The per eye matrix is the roll, then that turn:
+  `h = R * C`. The eye stays on the right axis of the head, so the offset
+  in the frame of the eye is `d = offset_x * (row 0 of C)` (`EyeMatrix`).
+  The rendered half angle is the widest angle of either view about its own
+  orientation, so the outer edge of a canted view has a picture.
+- The turn of a frame comes from the same pose as the camera of the engine
+  of that frame: the pose of the frame before (`g_rendered_turn`,
+  `g_frame_turn` in `stereo.cpp`). The intro in stereo draws from the pose
+  of its own frame, and it takes the turn of that pose.
+- A frame with a canted view has a walk for each eye, because one walk
+  moves the vertices of the right eye sideways only ("One walk for both
+  eyes"). Below 0.1 degrees a view is not canted, and the frame keeps one
+  walk.
+
+With `eye_cant=0` the head is the view of eye 0, and both eye passes draw
+with its orientation.
+
+The first frame with two views logs the turn of each view from the mean,
+with each value of the key:
+
+```
+eye cant     : the view of eye 0 turns 10.00 degrees from the head (yaw 10.00 to the left, pitch 0.00 up, roll 0.00 to the right), and the view of eye 1 10.00 degrees (yaw -10.00, pitch 0.00, roll 0.00). The head is the mean of the two views
+eye cant     : eye_cant=1. The views are canted. Each eye pass turns its camera by the turn of its view, and the scene has a walk for each eye (no one walk)
+```
+
+`fake_eye_cant_deg` is a test key of the desktop runs. It turns each view
+of the invented head outward by that many degrees (`HeadPoseFakeEye`). With
+`eye_cant=1` the left eye picture then turns to the left and the right eye
+picture to the right. With `eye_cant=0` both pictures turn to the left.
+
+Known limits:
+
+- Only a headset with canted views can show that the two pictures fuse. A
+  player of a Pimax can also turn on "Parallel projections" in Pimax Play.
+  The runtime then gives two views with one orientation.
+- A flat batch of the interface that stays in an eye picture has the same
+  place in both eye pictures. The turn of a canted view does not move it.
+  With the panels, the cards and the subtitle card in the headset, few
+  such batches stay.
+
 ### Recenter
 
 F11 makes the way the head faces now the straight ahead direction. See "Keys for
@@ -5757,6 +5812,7 @@ keys that the launcher sets.
 | `head_roll`, `water_simple` | 1, 1 | See "Roll and the sea" |
 | `sea_depth` | 0 | 1: the land of the sea goes on down under the water and fades into the sea by its depth, and the light of the Hand on the water writes no depth. 0: the flat coast of the game. See "The sea with depth" |
 | `head_camera` | 1 | The head on the camera |
+| `eye_cant` | 1 | 1: with canted views (Pimax) the head is the mean of the two views, and each eye pass turns its camera by the turn of its view. 0: the head is the view of eye 0, and both eyes draw with its orientation. No test key. See "Canted views" |
 | `hand_anchored` | 1 | The Hand keeps its place in the room |
 | `game_camera_rebuild` | 1 | See "The game camera's own screen" |
 | `pointer_scale`, `pointer_clip` | 1, 1 | See "The window is the input device" |
@@ -5878,6 +5934,7 @@ keys that the launcher sets.
 | `target_glow_pct`, `target_glow_anim` | 45, 3 | The strength of that glow, 0 to 200 percent of the halo color. Its animation: 0 steady, 1 the pulse, 2 the band of light that goes up the mesh, 3 both |
 | `target_glow_test_keys`, `target_glow_log` | none, 0 | Test keys of the desktop runs. See the same section |
 | `fake_head`, `fake_head_yaw`, `fake_head_pitch`, `fake_head_roll`, `fake_head_sweep`, `stereo_headless`, `fov_absolute_deg`, `head_fov_deg` | 0 | See "Testing without a headset" |
+| `fake_eye_cant_deg` | 0 | A test key of the desktop runs. Each view of the invented head turns outward by this many degrees. See "Canted views" |
 
 ## Ready to hand out
 

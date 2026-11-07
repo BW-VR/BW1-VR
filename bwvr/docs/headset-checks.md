@@ -190,6 +190,9 @@ agents: the log does not tell the item yet.
   bulk take` (the real grip opened), or `hand bulk    : the bulk take ends`
   with the button of the game down (the game ended it), with the distance
   from the pile and the influence.
+- **A double picture in play on a headset with canted views** (Pimax, N17).
+  Log: `eye cant     :` gives the turn of each view from the head, and if
+  each eye pass turns its camera by it (`eye_cant=1`).
 - **An old picture in one eye** (B16). Log: `eye clean    : an eye pass drew
   no sky` names the scene of that frame.
 - **A miracle that shows nothing** (Storm, a shield, Shrink, Enlarge,

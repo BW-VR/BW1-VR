@@ -61,6 +61,7 @@
 #include <math.h>
 
 #include "one_walk.h"
+#include "eye_cant_math.h"
 #include "MinHook.h"
 #include "../common/bw_addresses.h"
 #include "../vr/xr_screen.h"
@@ -385,6 +386,19 @@ const float kDefaultIpd = 0.0668f;
 float g_rendered_position[2][3] = {{0, 0, 0}, {0, 0, 0}};
 float g_rendered_orientation[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
 bool g_head_camera_pose_ready = false;
+// CANTED VIEWS (eye_cant, docs/backend.md, "Canted views"). 1: the head of
+// the frame is the mean of the two views, and each eye pass turns its camera
+// by the turn of its own view from the head. 0: the head is the view of eye
+// 0, and both eye passes draw with its orientation.
+int g_eye_cant = 1;
+// The turn of each declared view from the declared head, of the pose in
+// g_rendered_orientation, and the turn of the pose that the camera of the
+// engine of this frame used, for the eye passes.
+float g_rendered_turn[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
+bool g_rendered_canted = false;
+float g_frame_turn[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
+bool g_frame_canted = false;
+bool g_cant_logged = false;
 float g_head_fov_deg = 0.0f;  // 0 means ask the headset
 // How far the render goes past what the headset asks for, in percent of the
 // tangent of the half angle. 0 to 30.
@@ -1101,6 +1115,84 @@ void PollHotkeys() {
   hint_down = hint_now;
 }
 
+// THE HEAD OF A FRAME AND THE TURN OF EACH VIEW FROM IT.
+//
+// view0 and view1 are the orientations of the two views. head gets the head
+// for the camera of the engine, the Hand and the panels: the mean of the two
+// views with eye_cant=1, and the view of eye 0 with eye_cant=0. declared gets
+// the orientation that the layer declares for each eye: the view, with no
+// roll when the render has no roll. turn gets the turn of each declared view
+// from the declared head, which the per eye matrix carries
+// (eye_cant_math.h, EyeMatrix). True when a view turns from the head and
+// eye_cant=1.
+//
+// The first call logs the turn of each view from the mean of the two views,
+// with each value of eye_cant, so a log of a player tells if the headset has
+// canted views.
+bool SolveViews(const float view0[4], const float view1[4], bool declare_roll,
+                float head[4], float declared[2][4], float turn[2][4]) {
+  const float* view[2] = {view0, view1};
+  float mean[4];
+  eye_cant::Mean(view0, view1, mean);
+  if (!g_cant_logged) {
+    g_cant_logged = true;
+    float measured[2][4];
+    float angle[2], yaw[2], pitch[2], roll[2];
+    for (int e = 0; e < 2; ++e) {
+      eye_cant::Relative(mean, view[e], measured[e]);
+      angle[e] = eye_cant::AngleDeg(measured[e]);
+      eye_cant::Angles(measured[e], &yaw[e], &pitch[e], &roll[e]);
+    }
+    const bool canted = angle[0] > eye_cant::kCantedDeg ||
+                        angle[1] > eye_cant::kCantedDeg;
+    ModLog("eye cant     : the view of eye 0 turns %.2f degrees from the head "
+           "(yaw %.2f to the left, pitch %.2f up, roll %.2f to the right), "
+           "and the view of eye 1 %.2f degrees (yaw %.2f, pitch %.2f, roll "
+           "%.2f). The head is the mean of the two views",
+           angle[0], yaw[0], pitch[0], roll[0], angle[1], yaw[1], pitch[1],
+           roll[1]);
+    if (!canted) {
+      ModLog("eye cant     : eye_cant=%d. The views are not canted, so both "
+             "eye passes draw from the orientation of the head",
+             g_eye_cant);
+    } else if (g_eye_cant != 0) {
+      ModLog("eye cant     : eye_cant=1. The views are canted. Each eye pass "
+             "turns its camera by the turn of its view, and the scene has a "
+             "walk for each eye (no one walk)");
+    } else {
+      ModLog("eye cant     : eye_cant=0. The views are canted, but both eye "
+             "passes draw from the orientation of the view of eye 0");
+    }
+  }
+  bool canted = false;
+  if (g_eye_cant != 0) {
+    for (int i = 0; i < 4; ++i) head[i] = mean[i];
+  } else {
+    for (int i = 0; i < 4; ++i) head[i] = view0[i];
+  }
+  float head_declared[4];
+  if (declare_roll) {
+    for (int i = 0; i < 4; ++i) head_declared[i] = head[i];
+  } else {
+    HeadPoseStripRoll(head, head_declared);
+  }
+  for (int e = 0; e < 2; ++e) {
+    if (declare_roll) {
+      for (int i = 0; i < 4; ++i) declared[e][i] = view[e][i];
+    } else {
+      HeadPoseStripRoll(view[e], declared[e]);
+    }
+    if (g_eye_cant != 0) {
+      eye_cant::Relative(head_declared, declared[e], turn[e]);
+      if (eye_cant::AngleDeg(turn[e]) > eye_cant::kCantedDeg) canted = true;
+    } else {
+      turn[e][0] = turn[e][1] = turn[e][2] = 0.0f;
+      turn[e][3] = 1.0f;
+    }
+  }
+  return canted;
+}
+
 // THE HEAD TRACKING SETUP, once. The render has to cover what the headset asks for,
 // and the game renders a symmetric frustum whose vertical angle comes from
 // the render aspect. So take the widest half angle of either eye in either
@@ -1341,19 +1433,30 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
 
   // An invented head sits at the origin by construction, or at its still
   // lean, so the centre is known without asking the runtime.
+  // The render carries the roll, or the declared pose has none.
+  const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
+  // No eye pass turns by a cant until a head below says so.
+  g_frame_canted = false;
   if (g_head_tracking && !to_headset && HeadPoseFakeOn()) {
     float centre[3];
     HeadPoseFakeCenter(centre);
     HeadPoseSetHead(centre);
-    float fake_position[3];
-    float fake_orientation[4];
-    HeadPoseFakeEye(0, fake_position, fake_orientation);
-    HeadPoseUpdate(centre, fake_orientation);
-    VideoViewHead(fake_position, fake_orientation);
+    float fake_position[2][3];
+    float fake_view[2][4];
+    HeadPoseFakeEye(0, fake_position[0], fake_view[0]);
+    HeadPoseFakeEye(1, fake_position[1], fake_view[1]);
+    // The invented head holds still, so the turn of this frame is the turn
+    // of the camera of the engine too.
+    float head[4];
+    float declared[2][4];
+    g_frame_canted = SolveViews(fake_view[0], fake_view[1], declare_roll,
+                                head, declared, g_frame_turn);
+    HeadPoseUpdate(centre, head);
+    VideoViewHead(fake_position[0], fake_view[0]);
     // The subtitle card hangs in the room, so it needs the head of the frame.
-    UiPanelHead(centre, fake_orientation);
-    MenuRoomHead(centre, fake_orientation);
-    CutsceneWindowHead(centre, fake_orientation);
+    UiPanelHead(centre, head);
+    MenuRoomHead(centre, head);
+    CutsceneWindowHead(centre, head);
   }
   if (g_head_tracking && to_headset && g_screen->eye(0).valid &&
       g_screen->eye(1).valid) {
@@ -1381,6 +1484,9 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
       }
       // The view for videos takes the head that the pictures are drawn from.
       VideoViewHead(g_rendered_position[0], g_rendered_orientation[0]);
+      // The turn of each view of that pose, for the eye passes of this frame.
+      memcpy(g_frame_turn, g_rendered_turn, sizeof(g_frame_turn));
+      g_frame_canted = g_rendered_canted;
     }
     // DECLARE A POSE THE PICTURE COULD HAVE COME FROM.
     //
@@ -1391,25 +1497,24 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     // carries the player's tilt, so the runtime shows a level picture inside a
     // tilted frustum and the whole world tilts with the player's head. Take
     // the roll out of the claim whenever the render leaves it out.
-    const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
+    //
+    // A CANTED VIEW. The head of the frame is the mean of the two views, and
+    // the turn of each declared view from it goes to the eye passes of the
+    // next frame, with this pose (SolveViews).
+    float head[4];
+    g_rendered_canted = SolveViews(
+        g_screen->eye(0).orientation, g_screen->eye(1).orientation,
+        declare_roll, head, g_rendered_orientation, g_rendered_turn);
     for (int e = 0; e < 2; ++e) {
       for (int i = 0; i < 3; ++i) {
         g_rendered_position[e][i] = g_screen->eye(e).position[i];
       }
-      if (declare_roll) {
-        for (int i = 0; i < 4; ++i) {
-          g_rendered_orientation[e][i] = g_screen->eye(e).orientation[i];
-        }
-      } else {
-        HeadPoseStripRoll(g_screen->eye(e).orientation,
-                          g_rendered_orientation[e]);
-      }
     }
     g_head_camera_pose_ready = true;
-    HeadPoseUpdate(center, g_screen->eye(0).orientation);
-    UiPanelHead(center, g_screen->eye(0).orientation);
-    MenuRoomHead(center, g_screen->eye(0).orientation);
-    CutsceneWindowHead(center, g_screen->eye(0).orientation);
+    HeadPoseUpdate(center, head);
+    UiPanelHead(center, head);
+    MenuRoomHead(center, head);
+    CutsceneWindowHead(center, head);
   }
 
   UiDepthNewFrame();
@@ -1558,7 +1663,10 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   // both eyes into the layers of its target.
   const bool pose_per_eye = g_head_tracking && !flat && !HeadCameraEnabled() &&
                             (to_headset || HeadPoseFakeOn());
-  const bool one_walk = OneWalkWanted() && !pose_per_eye &&
+  // A canted view turns the camera of each eye, so the eyes differ in more
+  // than the sideways offset, as with a pose for each eye.
+  const bool cant_eyes = g_frame_canted && !flat;
+  const bool one_walk = OneWalkWanted() && !pose_per_eye && !cant_eyes &&
                         !g_headless_grab &&
                         (!to_headset || GpuBridgeReady() || VkSceneDirect());
   bool one_walk_done = false;
@@ -1619,7 +1727,15 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
       // already in every matrix the engine built. What is left is the eye
       // offset and the roll, and both go in here.
       const float roll = frame_roll;
-      if (roll > 0.0005f || roll < -0.0005f) {
+      if (cant_eyes) {
+        // A canted view: the roll, then the turn of the view of this eye
+        // from the head, and the eye on the right axis of the head.
+        float h[9];
+        float offset[3];
+        eye_cant::EyeMatrix(g_frame_turn[eye], roll, d, h, offset);
+        EyeCameraSetPose(h, offset);
+        KeepEyePose(h, offset);
+      } else if (roll > 0.0005f || roll < -0.0005f) {
         // A rotation about the camera's forward axis, in the row vector
         // convention the matrix uses.
         const float c = cosf(roll), s = sinf(roll);
@@ -2249,6 +2365,26 @@ void StereoSetTestKeys(bool on) { g_test_keys = on; }
 
 // The world around you instead of a screen in front of you.
 void StereoSetHeadFov(float degrees) { g_head_fov_deg = degrees; }
+void StereoSetEyeCant(int mode) { g_eye_cant = mode != 0 ? 1 : 0; }
+
+// For intro_vr.cpp: the head of a frame and the turn of each view from it.
+// See SolveViews.
+bool StereoSolveViews(const float view0[4], const float view1[4],
+                      bool declare_roll, float head[4], float declared[2][4],
+                      float turn[2][4]) {
+  return SolveViews(view0, view1, declare_roll, head, declared, turn);
+}
+
+// For menu_room.cpp: the head of two views, with no declared pose.
+void StereoHeadOfViews(const float view0[4], const float view1[4],
+                       float head[4]) {
+  if (g_eye_cant != 0) {
+    eye_cant::Mean(view0, view1, head);
+  } else {
+    for (int i = 0; i < 4; ++i) head[i] = view0[i];
+  }
+}
+
 void StereoSetFovMargin(int percent) {
   g_fov_margin_pct = percent < 0 ? 0 : (percent > 30 ? 30 : percent);
 }

@@ -304,10 +304,6 @@ keeps the mod as it is.
   stronger.
 **Comfort and moving**
 
-- **F9. A smooth turn in the God view.** The value Smooth of the row "Turn"
-  (`snap_turn=4`, `smooth_turn_speed`) is built (`god-view.md`, section 4).
-  Open: the desktop runs with a full push and a half push of 1 s, and
-  `snap_turn=2` to show the snap turn.
 - **F11. The controls of the player in the headset.** The settings window,
   the welcome page and the page Controls are in (`ui-layer.md`, 24 and
   24.6, `controllers.md`, 5.7). Open:

@@ -428,15 +428,14 @@ section 5.8).
 The log of the smooth turn:
 
 ```
-god view     : the smooth turn starts to the right, 100% of a full push, at 90 degrees a second for a full push (smooth_turn_speed), heading 56.14 degrees, frame 121
-god view     : smooth turn frame 1 of the hold: 1.500 degrees in 0.0167 s at 100% of a full push, heading 57.640 degrees, frame 121
-god view     : the smooth turn stops, the stick asks for no turn now. It turned 90.00 degrees right in 1.000 s of 60 frames (90.0 degrees a second), heading 56.14 to 146.14 degrees. The clock of the CPU gave 1.000 s for these frames, frame 181
-god view     : turn check, 30 frames after the stop the heading is 146.140 degrees, and it was 146.140 degrees at the stop
+god view     : the smooth turn starts to the right, 100% of a full push, at 90 degrees a second for a full push (smooth_turn_speed), heading 56.14 degrees, frame 221
+god view     : smooth turn frame 1 of the hold: 1.493 degrees in 0.0166 s at 100% of a full push, heading 57.634 degrees, frame 221
+god view     : the smooth turn stops, the stick asks for no turn now. It turned 92.92 degrees right in 1.032 s of 60 frames (90.0 degrees a second), heading 56.14 to 149.06 degrees. The clock of the CPU gave 1.032 s for these frames, frame 281
+god view     : turn check, 30 frames after the stop the heading is 149.061 degrees, and it was 149.061 degrees at the stop
 ```
 
-The first line is from a desktop run with a full push of 1 s at 60 frames a
-second. The numbers of the other lines show the format, for frames of
-1/60 s. The log has one line for each frame of the first 4 holds, at most
+The lines are from a desktop run with a full push of 1 s at 60 frames a
+second. The log has one line for each frame of the first 4 holds, at most
 240 frames each. The report of a window counts the requests that the God view took,
 the ones that `MayTurn` and a grab refused, and the turn events that the
 smooth turn owed to the help.

@@ -43,7 +43,8 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, controls, walk, wall, pinch,
+# turn, fartake, fartotem, choice, look, book, controls, walk, wall,
+# wallstop, headstore, pinch,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
 param(
@@ -564,6 +565,43 @@ if ($Kind -eq 'totem') {
                  'seek@970+1 seek@1050+1 shot@1080+1 seek@1130+1 shot@1160+1 seek@1210+1 shot@1240+1'
     }
     $keys = "$keys;seek_feel=house,50,0|house,50,-1.5|StoragePit,50,0"
+} elseif ($Kind -eq 'wallstop') {
+    # The Hand stops at a solid (bwvr/docs/hand-model.md, "The Hand stops at
+    # the land"). Five zoom steps in (13.2 units for each meter), as in
+    # -Kind wall. Before the Village Store the Hand's point goes 2 cm before
+    # the side of the store at half its height, then 2 cm and 6 cm into its
+    # body, then 2 cm before it again. An eye picture at each place. The
+    # lines "hand land" have the touch of the solid, the face of the box, the
+    # push and the end of the touch. Compare with -Set "hand_object_stop=0".
+    # Give it -Set "backend=dxwrapper\ddraw.dll" for the eye pictures.
+    if ($Plan -eq '') { $Plan = 'gostore,feel,feel,feel,feel' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 55 }
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 stick_up@860+10 stick_up@890+10 stick_up@920+10 point@950+1 ' +
+                 'seek@970+1 seek@1050+1 shot@1080+1 seek@1130+1 shot@1160+1 seek@1210+1 shot@1240+1 ' +
+                 'seek@1290+1 shot@1320+1'
+    }
+    $keys = "$keys;seek_feel=StoragePit,50,2|StoragePit,50,-2|StoragePit,50,-6|StoragePit,50,2"
+} elseif ($Kind -eq 'headstore') {
+    # The head blinder in a building (bwvr/docs/god-view.md, "The head under
+    # the land"). Five zoom steps in (13.2 units for each meter, so the
+    # Village Store is about 1 m high and the head, 62 cm over the land, is
+    # lower than its roof). The God view goes before the Village Store
+    # (gostore), then the head goes over the middle of the store (gointo),
+    # into its box, and then before the store again (gostore). An eye picture
+    # at each place, and two in the store. The lines "head blinder" have the
+    # start of the overlay, the solid, the opaque view and the end. Compare
+    # with -Set "head_blinder_objects=0". Give it
+    # -Set "backend=dxwrapper\ddraw.dll" for the eye pictures.
+    if ($Plan -eq '') { $Plan = 'gostore,gointo,gostore' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 50 }
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 stick_up@860+10 stick_up@890+10 stick_up@920+10 point@950+1 ' +
+                 'seek@970+1 shot@1010+1 seek@1050+1 shot@1090+1 shot@1130+1 seek@1170+1 shot@1230+1'
+    }
+    $keys = "$keys;seek_feel=StoragePit,50,0"
 } elseif ($Kind -eq 'pinch') {
     # A small rock in the pinch at a change of the zoom (bwvr/docs/hand-model.md,
     # "The pinch"). Before the Village Store no rock is within 2 m of the
@@ -739,6 +777,12 @@ if ($Kind -eq 'walk') {
 }
 if ($Kind -eq 'wall') {
     $pattern = '^hand pick    : seek plan|^hand feel    : (the fingers|a finger|the \w+ \S+ has the box)|^haptics      : (?!\d)'
+}
+if ($Kind -eq 'wallstop') {
+    $pattern = '^hand pick    : seek plan|^hand land    :|^hand feel    : (the fingers|the \w+ \S+ has the box)|^haptics      : surface'
+}
+if ($Kind -eq 'headstore') {
+    $pattern = '^hand pick    : seek plan|^head blinder :|^hand land    : (hand_object_stop|this window a solid)'
 }
 if ($Kind -eq 'pinch') {
     $pattern = '^hand pick    : seek plan|^hand feel    : the Hand holds|^god view     : zoomed'

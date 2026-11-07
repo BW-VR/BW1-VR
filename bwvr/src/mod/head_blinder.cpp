@@ -13,8 +13,16 @@
 // four points 6 cm of the room around it, and the highest one counts
 // (blinder_math.h, Clearance), so a steep slope in front of the face counts
 // too. The land is LH3DIsland::GetAltitude, with the sea and the places off
-// the map at 0, as hand_land.cpp has it. Only the land: a building, a rock
-// and a tree do not count.
+// the map at 0, as hand_land.cpp has it.
+//
+// THE SOLIDS (head_blinder_objects). A house, a rock and a tree trunk count
+// too: the solids that the first eye pass of the last frame kept near the
+// head (hand_direct.cpp, LatchSolids, and solid_math.h). The clearance is the
+// least of the height over the land and the distance from the head point to
+// each solid. The draw can stop to offer a house that the head is in, so a
+// solid stays in the list of this file while the head is near it, for
+// kKeepFrames at most after the last frame that had it. A field, a villager,
+// an animal and the Creature do not count.
 //
 // THE STRENGTH. From 5 cm over the land the overlay starts at the edge of the
 // view, and at the land and under it the view is opaque (blinder_math.h,
@@ -34,17 +42,22 @@
 //
 // THE KEYS of bwvr.ini:
 //
-//   head_blinder=1   0 no overlay. The switch "Head blinder" of the debug
-//                    page changes it while the game runs
+//   head_blinder=1           0 no overlay. The switch "Head blinder" of the
+//                            debug page changes it while the game runs
+//   head_blinder_objects=1   0 only the land counts. The switch "Blinder
+//                            solids" of the debug page changes it
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "../common/bw_addresses.h"
 #include "blinder_math.h"
 #include "debug_menu.h"
+#include "solid_math.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -62,10 +75,36 @@ bool TempleRayOn();
 // vignette.cpp: the eye of the pass that runs, and the draw.
 int VignetteEyeNow();
 bool VignetteDrawBlinder(const blinder_math::BlinderPoint* points, int count);
+// hand_direct.cpp: the solids that the first eye pass of the last frame
+// kept, and the class of one for the log.
+int HandDirectSolids(void* objects[], solid_math::Solid out[], int max);
+const char* HandDirectSolidClass(void* object);
 
 namespace {
 
 namespace bm = blinder_math;
+namespace sm = solid_math;
+
+// THE SOLIDS NEAR THE HEAD: within kSolidNearM meters of the room of the
+// head point, kept for kKeepFrames after the last frame that had them.
+const float kSolidNearM = 0.15f;
+const uint64_t kKeepFrames = 600;
+const int kMaxKept = 16;
+struct Kept {
+  void* object;
+  sm::Solid solid;
+  uint64_t seen;
+};
+Kept g_kept[kMaxKept];
+int g_kept_count = 0;
+bool g_objects = true;  // head_blinder_objects
+// The last head point of the God view, for the offer of the draw.
+bool g_have_head = false;
+float g_head[3] = {0.0f, 0.0f, 0.0f};
+float g_head_scale = 0.0f;
+// What the clearance of the last frame came from: the land, or a solid.
+void* g_near_object = nullptr;
+bool g_near_solid = false;
 
 // LH3DIsland::GetAltitude, fastcall on the map coordinates (hand_land.cpp).
 const uintptr_t kGetAltitude = 0x00803090;
@@ -112,12 +151,52 @@ bool DialogUp() {
   return *reinterpret_cast<const uintptr_t*>(kActiveBox) != 0;
 }
 
+// THE SOLIDS NEAR THE HEAD of this frame: the list of hand_direct.cpp adds
+// to the kept list and refreshes it, and a kept solid goes when the head is
+// far from it or when no list had it for kKeepFrames.
+void KeepSolids(const float head[3], float scale) {
+  static void* objects[sm::kMostSolids];
+  static sm::Solid solids[sm::kMostSolids];
+  const int count = HandDirectSolids(objects, solids, sm::kMostSolids);
+  const float near_units = kSolidNearM * scale;
+  for (int i = 0; i < count; ++i) {
+    if (!(sm::Distance(solids[i], head) <= near_units)) continue;
+    int slot = -1;
+    for (int k = 0; k < g_kept_count; ++k) {
+      if (g_kept[k].object == objects[i]) slot = k;
+    }
+    if (slot < 0) {
+      if (g_kept_count >= kMaxKept) continue;
+      slot = g_kept_count++;
+    }
+    g_kept[slot].object = objects[i];
+    g_kept[slot].solid = solids[i];
+    g_kept[slot].seen = g_frame;
+  }
+  int n = 0;
+  for (int k = 0; k < g_kept_count; ++k) {
+    if (g_kept[k].seen + kKeepFrames < g_frame ||
+        !(sm::Distance(g_kept[k].solid, head) <= near_units)) {
+      continue;
+    }
+    g_kept[n++] = g_kept[k];
+  }
+  g_kept_count = n;
+}
+
 // The clearance of the head now, in meters of the room, or false when the
 // overlay does nothing now.
 bool HeadClearance(float* clearance, float head[3]) {
-  if (!TabletopGodOwnsView() || DialogUp() || TempleRayOn()) return false;
+  g_have_head = false;
+  if (!TabletopGodOwnsView() || DialogUp() || TempleRayOn()) {
+    g_kept_count = 0;
+    return false;
+  }
   const float scale = TabletopViewScale();
   if (!(scale > 0.0f) || !HeadCameraTableEye(head)) return false;
+  for (int k = 0; k < 3; ++k) g_head[k] = head[k];
+  g_head_scale = scale;
+  g_have_head = true;
   float points[bm::kPoints][2];
   bm::AroundPoints(head[0], head[2], scale, points);
   float ground[bm::kPoints];
@@ -125,7 +204,31 @@ bool HeadClearance(float* clearance, float head[3]) {
     ground[i] = Ground(points[i][0], points[i][1]);
   }
   *clearance = bm::Clearance(head[1], ground, bm::kPoints, scale);
+  g_near_solid = false;
+  if (g_objects) {
+    KeepSolids(head, scale);
+    for (int k = 0; k < g_kept_count; ++k) {
+      const float d = sm::Distance(g_kept[k].solid, head) / scale;
+      if (d < *clearance) {
+        *clearance = d;
+        g_near_solid = true;
+        g_near_object = g_kept[k].object;
+      }
+    }
+  } else {
+    g_kept_count = 0;
+  }
   return *clearance == *clearance;
+}
+
+// The name of what the head is near, for the log: "the land", or the class
+// and the address of a solid.
+const char* NearName() {
+  static char name[96];
+  if (!g_near_solid) return "the land";
+  sprintf_s(name, "the %s %p", HandDirectSolidClass(g_near_object),
+            g_near_object);
+  return name;
 }
 
 void LogSetting(const char* by) {
@@ -135,14 +238,34 @@ void LogSetting(const char* by) {
                 "fills the view of your eyes. It starts at the edge 5 cm over "
                 "the land, and it is opaque at the land and under it"
               : "The eyes see under the land when the head goes into it");
+  ModLog("head blinder : %s%shead_blinder_objects=%d. %s", by,
+         by[0] != 0 ? ": " : "", g_objects ? 1 : 0,
+         g_objects ? "A house, a rock and a tree trunk count as the land "
+                     "does: the overlay starts 5 cm out of them, and it is "
+                     "opaque in them"
+                   : "Only the land counts. The eyes see into a house and a "
+                     "rock");
 }
 
 }  // namespace
 
-// mod_main.cpp: head_blinder.
-void HeadBlinderSetOn(bool on) {
+// mod_main.cpp: head_blinder and head_blinder_objects.
+void HeadBlinderSetOn(bool on, bool objects) {
   g_on = on;
+  g_objects = objects;
   LogSetting("");
+}
+
+// For hand_direct.cpp: the head point of the last frame of the God view, and
+// the bound in world units within which the solids near it count. False when
+// the solids do not count now.
+bool HeadBlinderSolidPoint(float point[3], float* bound) {
+  if (!g_on || !g_objects || !g_have_head || !(g_head_scale > 0.0f)) {
+    return false;
+  }
+  for (int k = 0; k < 3; ++k) point[k] = g_head[k];
+  *bound = kSolidNearM * g_head_scale;
+  return true;
 }
 
 // Once a frame, before the eye passes (stereo.cpp).
@@ -181,9 +304,10 @@ void HeadBlinderFrame() {
     g_least = g_clearance;
     if (g_logs < kMaxLogs) {
       ++g_logs;
-      ModLog("head blinder : the overlay starts, your head is %.1f cm over the "
-             "land at %.1f %.1f, frame %llu", g_clearance * 100.0f, head[0],
-             head[2], ControllersFrameCount());
+      ModLog("head blinder : the overlay starts, your head is %.1f cm %s %s at "
+             "%.1f %.1f, frame %llu", g_clearance * 100.0f,
+             g_near_solid ? "out of" : "over", NearName(), head[0], head[2],
+             ControllersFrameCount());
     }
   }
   if (shown) {
@@ -193,15 +317,17 @@ void HeadBlinderFrame() {
   if (full) ++g_full_frames;
   if (full && !g_full && g_logs < kMaxLogs) {
     ++g_logs;
-    ModLog("head blinder : the view is opaque, your head is %.1f cm %s the "
-           "land, frame %llu", fabsf(g_clearance) * 100.0f,
-           g_clearance < 0.0f ? "under" : "over", ControllersFrameCount());
+    ModLog("head blinder : the view is opaque, your head is %.1f cm %s %s, "
+           "frame %llu", fabsf(g_clearance) * 100.0f,
+           g_clearance < 0.0f ? (g_near_solid ? "in" : "under")
+                              : (g_near_solid ? "out of" : "over"),
+           NearName(), ControllersFrameCount());
   }
   if (!shown && g_shown && g_logs < kMaxLogs) {
     ++g_logs;
-    ModLog("head blinder : the overlay is gone after %.2f s. Your head went "
-           "down to %.1f cm %s the land, frame %llu", g_shown_seconds,
-           fabsf(g_least) * 100.0f, g_least < 0.0f ? "under" : "over",
+    ModLog("head blinder : the overlay is gone after %.2f s. The least "
+           "clearance of your head was %.1f cm (less than 0: in the land or "
+           "in a solid), frame %llu", g_shown_seconds, g_least * 100.0f,
            ControllersFrameCount());
   }
   g_shown = shown;
@@ -257,5 +383,18 @@ void HeadBlinderChange(const char* by) {
   g_on = !g_on;
   if (!g_on) g_level = 0.0f;
   ControllersGesturePulse(0.5f, g_on ? 0.30f : 0.08f);
+  LogSetting(by);
+}
+
+// THE SWITCH "Blinder solids" of the debug page: only the land, or the land
+// and the solids. The pulses are those of "Head blinder".
+int HeadBlinderObjectsValue() {
+  return TestSwitchesOn() && g_on ? (g_objects ? 1 : 0) : kDebugCannot;
+}
+
+void HeadBlinderObjectsChange(const char* by) {
+  g_objects = !g_objects;
+  if (!g_objects) g_kept_count = 0;
+  ControllersGesturePulse(0.5f, g_objects ? 0.30f : 0.08f);
   LogSetting(by);
 }

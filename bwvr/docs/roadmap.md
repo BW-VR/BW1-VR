@@ -422,12 +422,13 @@ that moves while the Hand takes it.
   with two hands tilt the world. A tilted world makes the physics and other
   parts more difficult, so wait for more reports first.
 - **P24. The Hand stops at a house, a rock and a tree.** The drawn hands
-  stop at the land (`hand_land_stop=1`, `hand-model.md`, "The Hand stops at
-  the land"). Open: the same stop at the body of each solid object, with the
-  bodies that hand feel already has (`hand_feel.cpp`, the bodies of the
-  draw). The overlay of a head under the land (`head_blinder`, `god-view.md`,
-  section 5.9) also counts only the land, and the same bodies can cover the
-  view of a head in a house or a rock.
+  stop at the land and at the box of a house and a rock and the trunk of a
+  tree (`hand_land_stop`, `hand_object_stop`, `hand-model.md`, "The Hand
+  stops at the land"). The head blinder counts the same solids
+  (`head_blinder_objects`, `god-view.md`, section 5.9). Open: the desktop
+  runs `village_run.ps1 -Kind wallstop` and `-Kind headstore`, each key at 1
+  and 0. Whether the draw shows a building with the head in it. The box of
+  the round Village Store stops a hand in the air at its corners.
 
 ### New features: miracles, comfort and help
 

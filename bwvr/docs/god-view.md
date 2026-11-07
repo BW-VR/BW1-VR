@@ -925,8 +925,20 @@ under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
   and at four points 6 cm of the room around it, and the highest one counts,
   so a steep slope in front of the face counts too. The land is
   `LH3DIsland::GetAltitude`, as for the stop of the Hand at the land
-  (`hand-model.md`, "The Hand stops at the land"). A house, a rock and a tree
-  do not count yet (roadmap, P24).
+  (`hand-model.md`, "The Hand stops at the land").
+- **The solids** (`head_blinder_objects`). A house, a rock and a tree trunk
+  count too, with the solids that stop the Hand (`hand-model.md`, "The
+  Hand stops at the land"): the box of the mesh of a house and of a rock,
+  and the trunk of a tree. The clearance is the least of the height over the
+  land and the distance from the head point to each solid, so the overlay
+  starts 5 cm out of a wall and is opaque in the house. The hook of the
+  screen test of the draw offers each object whose ball round its box is
+  within 15 cm of the room of the head, so the house that the head goes
+  into is in the list also when the Hand is far from it. A solid stays in
+  the list of the blinder while the head is within 15 cm of it, for 600
+  frames at most after the last frame that had it. So a house that the draw
+  stops to offer while the head is in it still counts. A field, a villager,
+  an animal and the Creature do not count.
 - **The strength.** From 5 cm over the land the overlay starts at the edge of
   the view and grows inward along a smooth curve. At the land and under it
   each eye sees only the overlay. The overlay comes in 0.1 s and goes in
@@ -955,12 +967,21 @@ under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land, and the floor of the head is at the height of the head at the recenter pose. 0: the eyes see under the land, and the floor of the head follows the head. The launcher row "Head in the land". The switch "Head blinder" of the debug page |
+| `head_blinder_objects` | 1 | 1: a house, a rock and a tree trunk cover the view as the land does. 0: only the land counts, and the eyes see into a house. The switch "Blinder solids" of the debug page |
 
-The log has one line when the overlay starts, with the height of the head
-over the land and its place on the map, one line when the view is opaque,
-and one line when the overlay is gone, with its time and the lowest place of
-the head. The report of a window counts the times that the overlay showed,
-the opaque frames and the eye passes that drew it.
+The log has one line when the overlay starts, with the clearance of the
+head, what it is near (the land, or the class and the address of a solid)
+and its place on the map. One line when the view is opaque, with the same
+facts. One line when the overlay is gone, with its time and the least
+clearance of the head. The report of a window counts the times that the
+overlay showed, the opaque frames and the eye passes that drew it.
+
+The desktop run of the solids is `village_run.ps1 -Kind headstore`. At 13.2
+units a meter the Village Store is about 1 m high. The God view goes before
+the store, then the head goes over the middle of the store (the seek word
+`gointo`, into its box), and then before the store again. No desktop run
+has shown the overlay in a building yet. Whether the draw shows a building
+from the inside, or does not draw it, is open.
 
 ## 6. The Hand
 

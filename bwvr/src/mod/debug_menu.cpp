@@ -62,6 +62,8 @@ void VignetteChange(const char* by);
 // The overlay of a head under the land (head_blinder.cpp).
 int HeadBlinderValue();
 void HeadBlinderChange(const char* by);
+int HeadBlinderObjectsValue();
+void HeadBlinderObjectsChange(const char* by);
 // The God view and the table (tabletop.cpp), the grab of the world
 // (world_grab.cpp).
 int TabletopValue();
@@ -231,6 +233,8 @@ int HandFeelPinchValue();
 void HandFeelPinchChange(const char* by);
 int HandLandStopValue();
 void HandLandStopChange(const char* by);
+int HandObjectStopValue();
+void HandObjectStopChange(const char* by);
 int ControllersNearTakeKeepsValue();
 void ControllersNearTakeKeepsChange(const char* by);
 int HandModelSwapValue();
@@ -394,6 +398,9 @@ const Switch kSwitches[] = {
      VignetteValue, VignetteChange, L"off|gentle|strong"},
     {kGroupView, L"Head blinder", L"Cover the view in the land",
      "head_blinder", HeadBlinderValue, HeadBlinderChange, L"off|on"},
+    {kGroupView, L"Blinder solids", L"Cover the view in a house",
+     "head_blinder_objects", HeadBlinderObjectsValue, HeadBlinderObjectsChange,
+     L"land only|solids too"},
     {kGroupView, L"Menu turn", L"No turn in a dialog box", "menu_stops_turn",
      ControllersMenuStopsTurnValue, ControllersMenuStopsTurnChange,
      L"turns|stops"},
@@ -620,6 +627,9 @@ const Switch kSwitches[] = {
      HandFeelValue, HandFeelChange, L"off|on"},
     {kGroupHand, L"Land stop", L"Hand stops at the land", "hand_land_stop",
      HandLandStopValue, HandLandStopChange, L"off|on"},
+    {kGroupHand, L"Object stop", L"Hand stops at a house or rock",
+     "hand_object_stop", HandObjectStopValue, HandObjectStopChange,
+     L"off|on"},
     {kGroupHand, L"Game Hand", L"Mesh of the game's Hand", "hand_hide_game",
      HandExactHideValue, HandExactHideChange, L"shown|hidden"},
     {kGroupHand, L"Hand model", L"Model of the hands", "hand_model",
@@ -763,6 +773,10 @@ const wchar_t* const kTips[] = {
     L"On: when the head goes into the land, a gold and red overlay covers "
     L"the view. It starts at the edge 5 cm over the land. Off: the eyes see "
     L"under the land.",
+    // Blinder solids
+    L"Solids too: a house, a rock and a tree trunk cover the view as the "
+    L"land does when the head goes into them. Land only: the eyes see into "
+    L"a house and a rock.",
     // Menu turn
     L"Stops: while a dialog box of the game is up, the stick does not turn "
     L"or zoom. Turns: the stick turns and zooms as at other times.",
@@ -1031,6 +1045,9 @@ const wchar_t* const kTips[] = {
     // Land stop
     L"On: a hand that goes into the land stays on the land and slides along "
     L"it. Off: the land hides the hand, and only the point stays on it.",
+    // Object stop
+    L"On: a hand that goes into a house, a rock or a tree trunk stays on its "
+    L"surface and slides along it. Off: the hand goes into them.",
     // Game Hand
     L"Hidden: the mod hides the mesh of the game Hand while a controller "
     L"places it, and draws both hands. Shown: the game draws its Hand too.",

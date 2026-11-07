@@ -378,9 +378,10 @@ game as it is.
   no tube under it (`hand-model.md`, "The glow ribbons"). With
   `ray_over_panels=1` the menu ray goes over the panels in the room as a
   quad layer of its own, with a mark at its end (`ui-layer.md`, 25). The
-  math checks pass. Not run: `village_run.ps1 -Kind rayover` with each key at
-  1 and 0, and `aim_queue.ps1 -Runs ring1` and `village_run.ps1 -Kind
-  fartotem` with `ray_glow_only` at 1 and 0.
+  desktop runs show the arc, the tether and the menu ray with each look, and
+  the strip over the welcome page and the settings window in the view for
+  videos. Open: a run of `village_run.ps1 -Kind rayover` with the hand below
+  the eyes, which ends the strip on a button with its mark on the paper.
 - **F5. The stream of the influence at the hand.** The hook that ends the
   stream of the game at the Hand's point is built, but no desktop run had a
   stream of the game, so `influence_stream_hand` is 0. The update of the

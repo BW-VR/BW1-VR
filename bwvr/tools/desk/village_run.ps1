@@ -252,22 +252,27 @@ if ($Kind -eq 'totem') {
 } elseif ($Kind -eq 'rayover') {
     # The ray over the panels in the room (bwvr/docs/ui-layer.md, "The ray
     # over the panels"). The welcome page opens 3 s after the controllers can
-    # act (welcome_done=0). The word aimdebug aims the ray at its button
+    # act (welcome_done=0). The word point puts the hand where a player holds
+    # it: 15 cm right, 25 cm down and 35 cm in front of the head, below the
+    # eyes and in front of the panel (the first point of the list is the
+    # point of the Main Menu). The word aimdebug aims the ray at the button
     # Settings, and the eye pictures come while the ray rests there. The
-    # trigger presses Settings, the ray aims at the tab Controls (tab3) of the
-    # settings window, more eye pictures, and the trigger presses Close. The
-    # strip of the ray is saved (ray_card_test_save), and so are the first
-    # pictures of the page and the window. Give it
+    # trigger presses Settings, which opens the settings window. The ray
+    # rests on the row 2 of the window until its note shows, more eye
+    # pictures, and the trigger presses Close. The strip of the ray is saved
+    # (ray_card_test_save), and so are the first pictures of the page and the
+    # window. Give it
     # -Set 'backend=dxwrapper\ddraw.dll' for eye pictures, and
     # -Set 'video_view=1' with the Vulkan renderer for the pictures of the
     # view for videos, which have the panels and the strip over the eye
     # picture. Compare with -Set 'ray_over_panels=0'.
     if ($Plan -eq '') { $Plan = 'gosite' }
     if ($Census -eq '') { $Census = '890' }
-    if ($Parts -eq '') { $Parts = 'tab3 close' }
+    if ($Parts -eq '') { $Parts = 'row2 close' }
+    $points = '15,-25,35'
     if ($Steps -eq '') {
-        $Steps = 'aimdebug@1400+1 shot@1420+1 trigger@1440+4 aimdebug@1490+1 shot@1510+1 ' +
-                 'aimdebug@1540+1 trigger@1550+4 shot@1580+1'
+        $Steps = 'point@1380+1 aimdebug@1400+1 shot@1420+1 trigger@1440+4 aimdebug@1490+1 shot@1530+1 ' +
+                 'aimdebug@1560+1 trigger@1570+4 shot@1600+1'
     }
     # test_frame_rate=60: the frames of the steps count for a game at 60
     # frames a second, also with the renderer Vulkan.
@@ -844,7 +849,7 @@ if ($Kind -eq 'controls') {
 }
 if ($Kind -eq 'rayover') {
     $pattern = '^ray card     :|^settings     :|^debug window : the window opens|^overlay      : (the ray of the menu|the glow of a ray|ray_glow)|' +
-               '^controllers  : the fake hand aims|^eye capture  :|^video view   : the (ray|ring)|^vk window    : the picture'
+               '^controllers  : the fake hand (aims|steps)|^debug window : (the note|the trigger)|^eye capture  :|^video view   : the (ray|ring)|^vk window    : the picture'
 }
 $cards = @{}
 $card = "^hint card    : frame (\d+), the card of the $hand hand: (.*?)\. \d"

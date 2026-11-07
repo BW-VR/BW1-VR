@@ -46,10 +46,12 @@ int g_save = 0;
 int g_saved = 0;
 uint8_t g_pixels[rc::kAcross * rc::kAlong * 4];
 // The log: the first strip, each start and end of a run of frames with the
-// strip (40 at the most), and the count in each report.
+// strip, and each frame in which the end of the ray goes onto a panel or off
+// it (40 lines at the most), and the count in each report.
 bool g_said_first = false;
 bool g_said_failed = false;
 bool g_was_on = false;
+bool g_was_on_panel = false;
 uint64_t g_run_start = 0;
 int g_run_logs = 0;
 const int kMaxRunLogs = 40;
@@ -110,7 +112,9 @@ bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
     return false;
   }
   float from[3], to[3], head[3], head_q[4];
-  if (!ControllersPanelRay(from, to) || !MenuRoomHeadPose(head, head_q)) {
+  bool on_panel = false;
+  if (!ControllersPanelRay(from, to, &on_panel) ||
+      !MenuRoomHeadPose(head, head_q)) {
     RayCardEndRun(frame);
     return false;
   }
@@ -144,28 +148,35 @@ bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
                      rc::kAcross, rc::kAlong);
   }
   ++g_frames;
-  if (!g_was_on) {
+  const bool start = !g_was_on;
+  const bool moved = g_was_on && on_panel != g_was_on_panel;
+  if (start) {
     g_was_on = true;
     g_run_start = frame;
+  }
+  g_was_on_panel = on_panel;
+  if ((start || moved) && (!g_said_first || g_run_logs < kMaxRunLogs)) {
+    if (g_said_first) ++g_run_logs;
+    g_said_first = true;
     const rc::Facing facing = rc::FacingOf(quad, from, to, head);
-    if (!g_said_first || g_run_logs < kMaxRunLogs) {
-      if (g_said_first) ++g_run_logs;
-      g_said_first = true;
-      ModLog("ray card     : the ray goes over the panels as a quad layer, "
-             "frame %llu: from %.3f %.3f %.3f to %.3f %.3f %.3f m (%.2f m), "
-             "a strip %.1f cm across and %.2f m long at %.3f %.3f %.3f m. "
-             "Its front is %.1f degrees from the best turn to the head, and "
-             "the head sees it at %.1f degrees from its plane (90 is face "
-             "on, a ray that points away from the head has less). The look: "
-             "%s, and a mark of %.1f cm at the end. The eye pictures have no "
-             "ray", frame, from[0], from[1], from[2], to[0], to[1], to[2],
-             length, quad.width * 100.0f, quad.height, quad.position[0],
-             quad.position[1], quad.position[2], facing.off_best_deg,
-             facing.sight_deg,
-             look.only ? "the glow alone"
-                       : (look.glow ? "a tube under a glow" : "a plain tube"),
-             look.end_radius * 200.0f);
-    }
+    ModLog("ray card     : %s, frame %llu: from %.3f %.3f %.3f to %.3f %.3f "
+           "%.3f m (%.2f m). %s. A strip %.1f cm across and %.2f m long at "
+           "%.3f %.3f %.3f m. Its front is %.1f degrees from the best turn "
+           "to the head, and the head sees it at %.1f degrees from its plane "
+           "(90 is face on, a ray that points away from the head has less). "
+           "The look: %s, and a mark of %.1f cm at the end. The eye pictures "
+           "have no ray",
+           start ? "the ray goes over the panels as a quad layer"
+                 : "the end of the ray over the panels moves",
+           frame, from[0], from[1], from[2], to[0], to[1], to[2], length,
+           on_panel ? "It ends on the panel, and the mark is there"
+                    : "It meets no panel, so it is 2 m long",
+           quad.width * 100.0f, quad.height, quad.position[0],
+           quad.position[1], quad.position[2], facing.off_best_deg,
+           facing.sight_deg,
+           look.only ? "the glow alone"
+                     : (look.glow ? "a tube under a glow" : "a plain tube"),
+           look.end_radius * 200.0f);
   }
   return true;
 }

@@ -5608,8 +5608,9 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
 // panel_kit (the places, the settings and debug window, the welcome page) is
 // open, or the menus are on the panel in the room in a frame with the scene.
 // It has the length of the drawn ray: to the panel or the keyboard, or 2 m.
+// *on_panel is true when it ends on the panel or the keyboard.
 // False for the ray of a dialog box in the eye pictures and of the Temple.
-bool ControllersPanelRay(float from[3], float to[3]) {
+bool ControllersPanelRay(float from[3], float to[3], bool* on_panel) {
   float meters = 0.0f;
   bool panel = PlacesPanelRay(&meters);
   if (!panel) panel = DebugWindowRay(&meters);
@@ -5621,7 +5622,8 @@ bool ControllersPanelRay(float from[3], float to[3]) {
   const int index = PointingIndex();
   const bwvr::HandInput& hand = g_hands[index];
   if (!hand.active || !hand.aim_valid) return false;
-  if (!(meters > 0.0f)) meters = 2.0f;
+  *on_panel = meters > 0.0f;
+  if (!*on_panel) meters = 2.0f;
   float d[3];
   menu_room_math::AimForward(g_aim_q[index], d);
   for (int i = 0; i < 3; ++i) {

@@ -2791,12 +2791,14 @@ A frame with no scene draws no ray (20.4).
 | `ray_card_test_save` | 0 | Test key. N saves the first N pictures of the strip as `bwvr-raycard-FFFFF.bmp` over a checkerboard |
 
 The log has the tag `ray card`. One line at the start, one line at the
-first frame of each run of frames with the strip (40 at the most) and one
-at its end, and the count in each report:
+first frame of each run of frames with the strip, at each frame in which the
+end of the ray goes onto a panel or off it, and at the end of the run (40 at
+the most), and the count in each report:
 
 ```
 ray card     : ray_over_panels=1: while a panel in the room is open, the ray of the pointing hand goes out as a quad layer over the panels
-ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m), a strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a mark of 1.0 cm at the end. The eye pictures have no ray
+ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m). It meets no panel, so it is 2 m long. A strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a mark of 1.0 cm at the end. The eye pictures have no ray
+ray card     : the end of the ray over the panels moves, frame N: from X Y Z to X Y Z m (L m). It ends on the panel, and the mark is there. ...
 ray card     : the ray is no longer over the panels, frame N, after M frames
 ray card     : N frames had the ray over the panels
 ```
@@ -2812,12 +2814,15 @@ more, and a ray up and out from the hand), and the picture (the middle line,
 the rim, the edge, the hand, the mark and its ink, the tube, the bytes of
 the picture).
 
-The desktop run is `village_run.ps1 -Kind rayover`. The fake hand is 1 m in
-front of the head, at the depth of the panel, so its ray misses the panel
-and is 2 m long, and it points about 5 degrees from the line of sight. So the
-head sees the strip at 5 degrees from its plane, and the strip is thin in the
-pictures of the view for videos. The glow ribbon of the eye pictures has the
-same plane.
+The desktop run is `village_run.ps1 -Kind rayover`. It puts the fake hand
+where a player holds it, 15 cm right, 25 cm down and 35 cm in front of the
+head, and rests the ray on the button Settings of the welcome page and on a
+row of the settings window. Before the word `point`, the fake hand is at the
+point of the Main Menu, 1 m in front of the head and at the depth of the
+panel. Its ray then meets no panel, is 2 m long and points about 5 degrees
+from the line of sight, so the head sees the strip at 5 degrees from its
+plane, and it is thin. The glow ribbon of the eye pictures has the same
+plane.
 
 - The strip holds the ray, so it can only turn about the ray. A ray that
   points away from the head is seen at a small angle and looks thin, as a

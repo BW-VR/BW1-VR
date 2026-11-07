@@ -271,8 +271,9 @@ bool ControllersMenuRay(float from[3], float to[3], float* units);
 
 // The same ray in the LOCAL space of the runtime, in meters, while it can be
 // under a panel in the room (docs/ui-layer.md, "The ray over the panels").
-// False when no panel in the room is open.
-bool ControllersPanelRay(float from[3], float to[3]);
+// False when no panel in the room is open. *on_panel is true when the ray
+// ends on a panel or on the keyboard, and false for a ray of 2 m.
+bool ControllersPanelRay(float from[3], float to[3], bool* on_panel);
 
 // The ring (radial_menu.cpp, docs/controllers.md, "The ring"): the hand that
 // does not point, from the last controllers frame. The poses are in the LOCAL

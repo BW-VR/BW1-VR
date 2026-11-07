@@ -44,7 +44,7 @@
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
 # turn, fartake, fartotem, choice, look, book, controls, walk, wall,
-# wallstop, headstore, pinch,
+# housestop, headhouse, pinch,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
 param(
@@ -565,43 +565,50 @@ if ($Kind -eq 'totem') {
                  'seek@970+1 seek@1050+1 shot@1080+1 seek@1130+1 shot@1160+1 seek@1210+1 shot@1240+1'
     }
     $keys = "$keys;seek_feel=house,50,0|house,50,-1.5|StoragePit,50,0"
-} elseif ($Kind -eq 'wallstop') {
-    # The Hand stops at a solid (bwvr/docs/hand-model.md, "The Hand stops at
-    # the land"). Five zoom steps in (13.2 units for each meter), as in
-    # -Kind wall. Before the Village Store the Hand's point goes 2 cm before
-    # the side of the store at half its height, then 2 cm and 6 cm into its
-    # body, then 2 cm before it again. An eye picture at each place. The
-    # lines "hand land" have the touch of the solid, the face of the box, the
-    # push and the end of the touch. Compare with -Set "hand_object_stop=0".
-    # Give it -Set "backend=dxwrapper\ddraw.dll" for the eye pictures.
-    if ($Plan -eq '') { $Plan = 'gostore,feel,feel,feel,feel' }
+} elseif ($Kind -eq 'housestop') {
+    # The Hand stops at the wall of a house (bwvr/docs/hand-model.md, "The
+    # Hand stops at the land"). Two zoom steps in (44.4 units for each
+    # meter). The God view goes before the Village Store (gostore), then 50
+    # cm before the side of the nearest house (gofeel), and one more zoom
+    # step in (29.6 units for each meter, so a house is about 11 cm high).
+    # The Hand's point then goes to the side of that house across the view
+    # (the fourth number 1 of seek_feel), at 70 percent of its height: 6 cm
+    # out of the wall, then 2 cm and 5 cm in the box, then 6 cm out again.
+    # At 3 cm out the hand of the fake controller already touches the box.
+    # An eye picture at each place: with hand_object_stop=1 the drawn hand
+    # stays at the wall in the pictures in the box. The lines "hand land"
+    # have the touch, the face of the box, each change of the push and the
+    # end of the touch. Compare with -Set "hand_object_stop=0". Give it
+    # -Set "backend=dxwrapper\ddraw.dll" for the eye pictures.
+    if ($Plan -eq '') { $Plan = 'gostore,gofeel,feel,feel,feel,feel' }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 55 }
     if ($Steps -eq '') {
-        $Steps = 'stick_up@800+10 stick_up@830+10 stick_up@860+10 stick_up@890+10 stick_up@920+10 point@950+1 ' +
-                 'seek@970+1 seek@1050+1 shot@1080+1 seek@1130+1 shot@1160+1 seek@1210+1 shot@1240+1 ' +
-                 'seek@1290+1 shot@1320+1'
+        $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 seek@1000+1 stick_up@1040+10 ' +
+                 'seek@1090+1 shot@1120+1 seek@1160+1 shot@1190+1 seek@1230+1 shot@1260+1 seek@1300+1 shot@1330+1'
     }
-    $keys = "$keys;seek_feel=StoragePit,50,2|StoragePit,50,-2|StoragePit,50,-6|StoragePit,50,2"
-} elseif ($Kind -eq 'headstore') {
-    # The head blinder in a building (bwvr/docs/god-view.md, "The head under
-    # the land"). Five zoom steps in (13.2 units for each meter, so the
-    # Village Store is about 1 m high and the head, 62 cm over the land, is
-    # lower than its roof). The God view goes before the Village Store
-    # (gostore), then the head goes over the middle of the store (gointo),
-    # into its box, and then before the store again (gostore). An eye picture
-    # at each place, and two in the store. The lines "head blinder" have the
-    # start of the overlay, the solid, the opaque view and the end. Compare
+    $keys = "$keys;seek_feel=house,50,0|house,70,6,1|house,70,-2,1|house,70,-5,1|house,70,6,1"
+} elseif ($Kind -eq 'headhouse') {
+    # The head blinder in a house (bwvr/docs/god-view.md, "The head under the
+    # land"). Two zoom steps in (44.4 units for each meter). The God view
+    # goes before the Village Store (gostore), then 50 cm before the side of
+    # the nearest house (gofeel), one more zoom step in (29.6 units for each
+    # meter, so a house is about 11 cm high), and then the head goes over the
+    # middle of the nearest house (gointo), about 62 cm over the land. The
+    # word "lean" puts the fake head 55 cm lower for 120 frames, into the box
+    # of the house, and then the head comes up again. Eye pictures over the
+    # house, two in it and one after it. The lines "head blinder" have the
+    # start of the overlay, the house, the opaque view and the end. Compare
     # with -Set "head_blinder_objects=0". Give it
     # -Set "backend=dxwrapper\ddraw.dll" for the eye pictures.
-    if ($Plan -eq '') { $Plan = 'gostore,gointo,gostore' }
+    if ($Plan -eq '') { $Plan = 'gostore,gofeel,gointo' }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 50 }
     if ($Steps -eq '') {
-        $Steps = 'stick_up@800+10 stick_up@830+10 stick_up@860+10 stick_up@890+10 stick_up@920+10 point@950+1 ' +
-                 'seek@970+1 shot@1010+1 seek@1050+1 shot@1090+1 shot@1130+1 seek@1170+1 shot@1230+1'
+        $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 seek@1000+1 stick_up@1040+10 ' +
+                 'seek@1090+1 shot@1120+1 lean@1160+120 shot@1200+1 shot@1250+1 shot@1330+1'
     }
-    $keys = "$keys;seek_feel=StoragePit,50,0"
+    $keys = "$keys;seek_feel=house,50,0|house,50,0;fake_head_up_cm=-55"
 } elseif ($Kind -eq 'pinch') {
     # A small rock in the pinch at a change of the zoom (bwvr/docs/hand-model.md,
     # "The pinch"). Before the Village Store no rock is within 2 m of the
@@ -778,10 +785,10 @@ if ($Kind -eq 'walk') {
 if ($Kind -eq 'wall') {
     $pattern = '^hand pick    : seek plan|^hand feel    : (the fingers|a finger|the \w+ \S+ has the box)|^haptics      : (?!\d)'
 }
-if ($Kind -eq 'wallstop') {
+if ($Kind -eq 'housestop') {
     $pattern = '^hand pick    : seek plan|^hand land    :|^hand feel    : (the fingers|the \w+ \S+ has the box)|^haptics      : surface'
 }
-if ($Kind -eq 'headstore') {
+if ($Kind -eq 'headhouse') {
     $pattern = '^hand pick    : seek plan|^head blinder :|^hand land    : (hand_object_stop|this window a solid)'
 }
 if ($Kind -eq 'pinch') {

@@ -9944,14 +9944,17 @@ int HandDirectArcBoxes(void* objects[], throw_math::Box out[], int max) {
 // for its frame only, and the hands and the head use the solids before the
 // eye passes of the next frame. So the first eye pass keeps the solid of each
 // candidate near a hand or the head:
-//   - a house: the box of the mesh of an Abode, a Creche, a Graveyard, a
-//     StoragePit (the Village Store), a TownCentre, a Windmill, a Workshop
-//     or a Wonder,
+//   - a house: the box of the mesh of an Abode, a Creche, a Windmill or a
+//     Workshop,
 //   - a rock: the box of the mesh of a Rock,
 //   - a tree: the trunk of its body (hand_feel_math.h, BodyGapAt).
-// A field, a villager, an animal, the Creature, a forest, a scroll and the
-// object in the Hand are not solids. Neither is a small solid
-// (solid_math::Counts).
+// The box of the mesh holds each part of the mesh and the air between them,
+// so only a closed building is a solid. The Village Store (a StoragePit) is
+// an open pit with no roof: its box holds its inside and the air over it,
+// and the game draws a normal view with the head in it. A Graveyard, a
+// TownCentre, a Wonder, a field, a villager, an animal, the Creature, a
+// forest, a scroll and the object in the Hand are not solids either. Neither
+// is a small solid (solid_math::Counts).
 const int kMaxSolids = solid_math::kMostSolids;
 void* g_solid_objects[kMaxSolids];
 solid_math::Solid g_solids[kMaxSolids];
@@ -9959,12 +9962,12 @@ int g_solid_count = 0;
 uint64_t g_solid_frame = 0;
 uint64_t g_solid_latches = 0;
 uint64_t g_solid_kept = 0;
-// The Village Store has a radius of 15.5 units.
+// No solid has a radius of more than this, in world units: a house has 4 to
+// 6 units, and the Workshop is smaller than the Village Store (15.5 units).
 const float kSolidFar = 40.0f;
 
-const char* const kSolidClasses[] = {"Abode",     "Creche",   "Graveyard",
-                                     "StoragePit", "TownCentre", "Windmill",
-                                     "Workshop",  "Wonder",   "Rock"};
+const char* const kSolidClasses[] = {"Abode", "Creche", "Windmill", "Workshop",
+                                     "Rock"};
 
 bool SolidClass(void* object) {
   const char* name = ClassName(object);

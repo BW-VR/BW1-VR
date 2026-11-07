@@ -426,9 +426,9 @@ that moves while the Hand takes it.
   tree (`hand_land_stop`, `hand_object_stop`, `hand-model.md`, "The Hand
   stops at the land"). The head blinder counts the same solids
   (`head_blinder_objects`, `god-view.md`, section 5.9). Open: the desktop
-  runs `village_run.ps1 -Kind wallstop` and `-Kind headstore`, each key at 1
-  and 0. Whether the draw shows a building with the head in it. The box of
-  the round Village Store stops a hand in the air at its corners.
+  runs `village_run.ps1 -Kind housestop` and `-Kind headhouse`, each key at
+  1 and 0. A solid is the box of the whole mesh, so an open building is no
+  solid. The game's own collision of a building could give its walls.
 
 ### New features: miracles, comfort and help
 

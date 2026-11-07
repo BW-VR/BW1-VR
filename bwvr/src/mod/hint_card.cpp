@@ -106,6 +106,9 @@
 //   hint_card_style=1    1 the card is a parchment scroll with dark ink and a
 //                        wax seal for each button word (card_scroll.h). 0 the
 //                        plain dark card with white Segoe UI letters
+//   hint_card_pictures=1  1 a line of a button has a small picture of the
+//                        controller with that button lit, before the button
+//                        word (hint_picture_math.h). 0 the button word only
 //   hint_card_save_test=0  1 saves each new picture of a card as
 //                        bwvr-hintcard-draw-NNN-NNNNN.bmp (40 at most)
 //   hint_card_fonts_test_dir  a desktop test loads the fonts of the scroll
@@ -133,6 +136,7 @@
 #include "hint_card.h"
 #include "hint_card_math.h"
 #include "hint_learn_math.h"
+#include "hint_picture_math.h"
 #include "miracle.h"
 #include "radial_menu.h"
 #include "spell_book.h"
@@ -197,6 +201,7 @@ int g_moves = 1;             // prompt_moves, and its test key
 int g_learn = 1;             // hint_learn
 bool g_palm_check = true;    // hint_palm_check (GameHintTrue, palm_off)
 int g_style = 1;             // hint_card_style
+int g_pictures = 1;          // hint_card_pictures
 bool g_save_test = false;    // hint_card_save_test
 bool g_saving = true;        // hint_card_saving
 // A hint of the game that a prompt owned does not show for this long after
@@ -330,6 +335,12 @@ void ReadSettings() {
                         "while a press there acts on no object"
                       : "a grip hint of the game over the land shows");
   g_style = IniKey("hint_card_style", 1) != 0 ? 1 : 0;
+  g_pictures = IniKey("hint_card_pictures", 1) != 0 ? 1 : 0;
+  ModLog("hint card    : hint_card_pictures=%d, %s", g_pictures,
+         g_pictures != 0 ? "a line of a button has a small picture of the "
+                           "controller with that button lit, before the "
+                           "button word"
+                         : "the lines have the button words only");
   g_save_test = IniKey("hint_card_save_test", 0) != 0;
   g_saving = IniKey("hint_card_saving", 1) != 0;
   ModLog("hint card    : hint_card_saving=%d, %s", g_saving ? 1 : 0,
@@ -423,6 +434,7 @@ struct Line {
   uint32_t code;       // the mouse button code of a hint of the game, or 0
   bool click;          // the prompt of a text that waits for a click
   int skill;           // the action that a prompt teaches, or kNoSkill
+  int picture;         // the picture of the button (PictureOf), or 0
 };
 struct Content {
   int count;
@@ -443,6 +455,7 @@ bool SameContent(const Content& a, const Content& b) {
   if (a.count != b.count) return false;
   for (int i = 0; i < a.count; ++i) {
     if (a.line[i].tone != b.line[i].tone ||
+        a.line[i].picture != b.line[i].picture ||
         wcscmp(a.line[i].button, b.line[i].button) != 0 ||
         wcscmp(a.line[i].text, b.line[i].text) != 0) {
       return false;
@@ -1077,6 +1090,11 @@ const int kScrollTextCap = 31;
 const int kScrollSealCap = 23;
 const int kScrollSealMin = kBadgeHeight + 12;  // the narrowest seal
 const int kScrollSealPad = 22;  // from the end of a seal to its word
+// THE PICTURES OF THE BUTTONS (hint_card_pictures=1, hint_picture_math.h).
+// A line of a button has a picture of hint_picture::kSize px before its
+// badge or seal, in the middle of the row. While one line of a card has a
+// picture, each line of a button has the place of a picture, so the badges
+// and the seals stay in one column.
 // A soft fade: the card comes in 0.25 s and goes in 0.35 s, in place.
 const float kFadeInSeconds = 0.25f;
 const float kFadeOutSeconds = 0.35f;
@@ -1210,6 +1228,139 @@ const Rgb kBadgeColor[4] = {
     {232.0f, 236.0f, 242.0f},  // any other button
 };
 
+// --- the pictures of the buttons -------------------------------------------------
+
+// The picture of a line: 1 + the kind, the side and the control of the
+// drawing, or 0 for no picture. `left` is the controller of the card.
+int PictureOf(const Line& line, int kind, bool left) {
+  if (g_pictures == 0 || line.button[0] == 0) return 0;
+  const int control = hint_picture::ControlOfWord(kind, left, line.button);
+  if (control < 0) return 0;
+  return 1 + (kind * 2 + (left ? 1 : 0)) * controller_art::kControls + control;
+}
+
+// The kind of the controller of a side (0 left, 1 right): the kind of the
+// test key hint_profile, as the page Controls draws it, or of the profile
+// that the runtime reports.
+int KindOfSide(int side) {
+  const char* forced = ControllerHintsForcedProfile();
+  if (forced != nullptr && forced[0] != 0) {
+    return button_map::KindOfProfile(forced);
+  }
+  return ControllersKindOf(side);
+}
+
+void SetPictures(Content* content, bool left) {
+  const int kind = KindOfSide(left ? 0 : 1);
+  for (int i = 0; i < content->count; ++i) {
+    content->line[i].picture = PictureOf(content->line[i], kind, left);
+  }
+}
+
+// THE BAKE. A picture is made one time for each look and tone, and each new
+// picture of a card copies it. The cards of a play need few of them.
+struct Baked {
+  int key;  // the picture, the look and the tone, or 0
+  uint8_t bgra[hint_picture::kSize * hint_picture::kSize * 4];
+};
+const int kBakes = 24;
+Baked g_baked[kBakes] = {};
+int g_bake_next = 0;
+uint64_t g_bakes = 0;
+int g_bake_logs = 0;
+const int kMaxBakeLogs = 24;
+
+// The colors of the picture in each look: the ink of the card, the color of
+// the badge or the wax of the tone for the lit control.
+hint_picture::Look LookOf(bool scroll, int tone) {
+  using hint_picture::Paint;
+  static const Paint kWax[4] = {{160.0f, 30.0f, 26.0f},
+                                {36.0f, 124.0f, 60.0f},
+                                {204.0f, 128.0f, 22.0f},
+                                {160.0f, 30.0f, 26.0f}};
+  hint_picture::Look look;
+  if (scroll) {
+    // The ink and the wax of card_scroll.cpp.
+    look.ink = {52.0f, 30.0f, 14.0f};
+    look.lit = kWax[tone & 3];
+    look.edge = look.ink;
+    look.wash = {120.0f, 80.0f, 30.0f};
+    look.wash_a = 0.07f;
+  } else {
+    const Rgb& badge = kBadgeColor[(tone & 3) == kToneNone ? kToneOther
+                                                           : (tone & 3)];
+    look.ink = {226.0f, 226.0f, 226.0f};
+    look.lit = {badge.r, badge.g, badge.b};
+    look.edge = {kBadgeTextColor.r, kBadgeTextColor.g, kBadgeTextColor.b};
+    look.wash = {255.0f, 255.0f, 255.0f};
+    look.wash_a = 0.08f;
+  }
+  look.dim = 0.6f;
+  return look;
+}
+
+const char* const kKindWord[button_map::kKinds] = {"Touch", "Index", "wand",
+                                                   "Mixed Reality", "simple"};
+const char* const kControlWord[controller_art::kControls] = {
+    "first face button", "second face button", "stick click", "menu button",
+    "trigger", "grip", "stick", "pad"};
+
+// The baked picture of a line, or null.
+const uint8_t* Picture(const Line& line, bool scroll) {
+  if (line.picture <= 0) return nullptr;
+  const int key = (line.picture * 2 + (scroll ? 1 : 0)) * 4 + (line.tone & 3);
+  for (int i = 0; i < kBakes; ++i) {
+    if (g_baked[i].key == key) return g_baked[i].bgra;
+  }
+  const int at = (line.picture - 1) % controller_art::kControls;
+  const int rest = (line.picture - 1) / controller_art::kControls;
+  const int kind = rest / 2;
+  const bool left = (rest % 2) != 0;
+  Baked& b = g_baked[g_bake_next];
+  g_bake_next = (g_bake_next + 1) % kBakes;
+  LARGE_INTEGER t0, t1, frequency;
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&t0);
+  const bool ok = hint_picture::Bake(kind, left, at,
+                                     LookOf(scroll, line.tone), b.bgra);
+  QueryPerformanceCounter(&t1);
+  b.key = ok ? key : 0;
+  if (!ok) return nullptr;
+  ++g_bakes;
+  if (g_bake_logs < kMaxBakeLogs) {
+    ++g_bake_logs;
+    ModLog("hint card    : frame %llu, the picture of the %s %s %s for \"%ls\" "
+           "in the %s look, %d by %d px, took %.2f ms", g_frame,
+           left ? "left" : "right", kKindWord[kind % button_map::kKinds],
+           kControlWord[at], line.button, scroll ? "scroll" : "plain",
+           hint_picture::kSize, hint_picture::kSize,
+           (t1.QuadPart - t0.QuadPart) * 1000.0 /
+               static_cast<double>(frequency.QuadPart));
+  }
+  return b.bgra;
+}
+
+// True when a line of the content has a picture.
+bool HasPictures(const Content& content) {
+  for (int i = 0; i < content.count; ++i) {
+    if (content.line[i].picture > 0) return true;
+  }
+  return false;
+}
+
+// The pictures of the lines into the base picture of a card. x is the left
+// of the column of the pictures, and top0 the top of the first row.
+void PutPictures(const Content& content, CardState* card, bool scroll, int x,
+                 int top0, int card_w, int card_h) {
+  for (int i = 0; i < content.count; ++i) {
+    const uint8_t* picture = Picture(content.line[i], scroll);
+    if (picture == nullptr) continue;
+    const int y = top0 + i * kRow + (kBadgeHeight - hint_picture::kSize) / 2;
+    hint_picture::Put(picture, card->base, static_cast<int>(kHintCardWidth),
+                      card_w, card_h, x, y);
+  }
+}
+
 // Draws the content into the base picture of the card in the plain look
 // (hint_card_style=0). The used part starts at 0, 0 and is rect_w by rect_h.
 bool RasterPlain(const Content& content, CardState* card) {
@@ -1219,9 +1370,13 @@ bool RasterPlain(const Content& content, CardState* card) {
   int badge_x0[kMaxLines], badge_x1[kMaxLines], text_x0[kMaxLines];
   int text_w[kMaxLines];
   int most = 0;
+  const bool pictures = HasPictures(content);
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
     int x = kPad;
+    if (pictures && line.button[0] != 0) {
+      x += hint_picture::kSize + hint_picture::kGap;
+    }
     badge_x0[i] = badge_x1[i] = x;
     if (line.button[0] != 0) {
       int w = TextWidth(g_badge_font, line.button) + 2 * kBadgePad;
@@ -1314,6 +1469,7 @@ bool RasterPlain(const Content& content, CardState* card) {
       out[3] = static_cast<uint8_t>(255.0f * alpha + 0.5f);
     }
   }
+  if (pictures) PutPictures(content, card, false, kPad, kPad, card_w, card_h);
   card->rect_w = card_w;
   card->rect_h = card_h;
   card->drawn = content;
@@ -1359,9 +1515,13 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
   int seal_x0[kMaxLines], seal_x1[kMaxLines], text_x0[kMaxLines];
   wchar_t seal_word[kMaxLines][24];
   int most = 0;
+  const bool pictures = HasPictures(content);
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
     int x = card_scroll::kWordsLeft;
+    if (pictures && line.button[0] != 0) {
+      x += hint_picture::kSize + hint_picture::kGap;
+    }
     seal_x0[i] = seal_x1[i] = x;
     seal_word[i][0] = 0;
     if (line.button[0] != 0) {
@@ -1439,6 +1599,10 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
     card_scroll::SealInk(picture, g_bits, seal_x0[i], top, seal_x1[i],
                          top + kBadgeHeight, content.line[i].tone & 3);
   }
+  if (pictures) {
+    PutPictures(content, card, true, card_scroll::kWordsLeft,
+                card_scroll::kPaperTop + kPad, card_w, card_h);
+  }
 
   card->rect_w = card_w;
   card->rect_h = card_h;
@@ -1468,10 +1632,15 @@ bool Raster(const Content& content, CardState* card) {
   if (ms > g_draw_most_ms) g_draw_most_ms = ms;
   if (g_draw_logs < kMaxDrawLogs) {
     ++g_draw_logs;
+    int pictures = 0;
+    for (int i = 0; i < content.count; ++i) {
+      if (content.line[i].picture > 0) ++pictures;
+    }
     ModLog("hint card    : frame %llu, a new picture of the card of the %s "
-           "hand in the %s look, %d by %d px, took %.2f ms", g_frame,
-           hand == kPointing ? "pointing" : "other",
-           scroll ? "scroll" : "plain", card->rect_w, card->rect_h, ms);
+           "hand in the %s look, %d by %d px, with %d pictures of buttons, "
+           "took %.2f ms", g_frame, hand == kPointing ? "pointing" : "other",
+           scroll ? "scroll" : "plain", card->rect_w, card->rect_h, pictures,
+           ms);
   }
   if (g_save_test && g_saved_draws < kMaxSavedDraws) {
     char name[48];
@@ -2459,6 +2628,7 @@ void HintCardEndFrame() {
     }
     if (content[h].count > 0 && !p.have_hand) ++c.frames_no_hand;
     p.show = content[h].count > 0 && p.have_hand;
+    if (p.show) SetPictures(&content[h], p.left);
     if (p.show && !SameContent(content[h], c.drawn)) {
       if (!Raster(content[h], &c)) return;
     }
@@ -2823,6 +2993,25 @@ void HintCardStyleToggle(const char* by) {
          g_style != 0 ? "the cards are scrolls" : "the cards are plain");
 }
 
+// The debug page: hint_card_pictures changes between 1 and 0. Each card
+// draws its picture again in the next frame.
+void HintCardPicturesToggle(const char* by) {
+  ReadSettings();
+  if (!CardsCanShow()) return;
+  g_pictures = g_pictures != 0 ? 0 : 1;
+  for (int h = 0; h < kHands; ++h) g_cards[h].drawn.count = -1;
+  ControllersGesturePulse(0.5f, g_pictures != 0 ? 0.30f : 0.08f);
+  ModLog("test key     : %s: hint_card_pictures is %d now (%s)", by,
+         g_pictures,
+         g_pictures != 0 ? "a line of a button has a picture of the button"
+                         : "the lines have the button words only");
+}
+
+int HintCardPicturesValue() {
+  if (!CardsCanShow()) return kDebugCannot;
+  return g_pictures;
+}
+
 // The settings window (settings_panel.cpp): hint_learn and
 // hint_card_style at once. Each card draws its picture again in the next
 // frame.
@@ -2925,10 +3114,13 @@ void HintCardReport() {
          a.side_changes, b.side_changes);
   if (g_draws > 0) {
     ModLog("hint card    : %llu new pictures of the cards in the %s look, %.2f "
-           "ms each on average and %.2f ms at the most",
+           "ms each on average and %.2f ms at the most. %llu new pictures of "
+           "buttons (hint_card_pictures=%d)",
            g_draws, g_style != 0 && !g_scroll_failed ? "scroll" : "plain",
-           g_draw_ms / static_cast<double>(g_draws), g_draw_most_ms);
+           g_draw_ms / static_cast<double>(g_draws), g_draw_most_ms, g_bakes,
+           g_pictures);
     g_draws = 0;
+    g_bakes = 0;
     g_draw_ms = g_draw_most_ms = 0.0;
   }
   if (g_click_shown != 0 || g_click_hidden != 0) {

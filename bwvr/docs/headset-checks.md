@@ -157,8 +157,10 @@ want.
 24. **The cards and the subtitles.** Read the hint cards at the wrist and the
     subtitle card while the hands work. Wrong: low contrast or a shimmer, a
     card that covers a hand or often changes side, a prompt that is late or
-    stays too long, a subtitle card that moves while the head moves, or a
-    save of the game with no "Saving..." card in view for the whole save.
+    stays too long, a subtitle card that moves while the head moves, a
+    save of the game with no "Saving..." card in view for the whole save,
+    or a picture of a button beside its word that is hard to read or does
+    not show where the button is on your controller.
 
 ### All through the play
 

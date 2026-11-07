@@ -457,10 +457,10 @@ keeps the mod as it is.
     controls`, with the map, the defaults and `hint_profile`). A desktop run
     has a Touch controller only: the profile of a real Index, wand or Mixed
     Reality controller needs a headset with that controller.
-  - Pictures in the hints: a small picture of the button, lit, beside its
-    word on the hint card, from the drawing of the page Controls
-    (`controller_art_math.h`, key `hint_card_pictures`), then a 3D model of
-    the controller (`controller-hints.md`).
+  - A 3D model of the controller in the hints (`controller-hints.md`,
+    section 5). The hint cards have a picture of each button
+    (`hint_card_pictures`, `controller-hints.md`, 9.13). Only a headset can
+    show whether that picture is clear at 55 cm.
   - The art of each controller must be our own drawing, or a model with a
     license that lets us ship it (for example a model that the runtime
     gives through an OpenXR extension at run time).

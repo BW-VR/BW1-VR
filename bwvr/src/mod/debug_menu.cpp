@@ -108,6 +108,8 @@ int HintCardMovesValue();
 void HintCardMovesToggle(const char* by);
 int HintCardStyleValue();
 void HintCardStyleToggle(const char* by);
+int HintCardPicturesValue();
+void HintCardPicturesToggle(const char* by);
 int TextClickValue();
 void TextClickChange(const char* by);
 int SpiritAnchorWorldSizeValue();
@@ -558,6 +560,9 @@ const Switch kSwitches[] = {
     {kGroupInterface, L"Card look", L"Cards, ring and keys as scrolls",
      "hint_card_style", HintCardStyleValue, HintCardStyleToggle,
      L"plain|scroll"},
+    {kGroupInterface, L"Card pictures", L"Picture of the button on a card",
+     "hint_card_pictures", HintCardPicturesValue, HintCardPicturesToggle,
+     L"off|on"},
     {kGroupInterface, L"Tree card", L"Card of a tree in the Hand",
      "tree_plant_hint", HandDirectTreeHintValue, HandDirectTreeHintToggle,
      L"off|on"},
@@ -951,6 +956,9 @@ const wchar_t* const kTips[] = {
     // Card look
     L"Scroll: the cards, the ring, the spell book and the keyboard are "
     L"parchment scrolls with wax seals. Plain: dark cards with white letters.",
+    // Card pictures
+    L"On: a line of a button has a small picture of the controller with that "
+    L"button lit. Off: the button word only.",
     // Tree card
     L"On: the card says what an open grip does with a tree in the Hand. Off: "
     L"the card shows the text of the game, Plant, each time.",

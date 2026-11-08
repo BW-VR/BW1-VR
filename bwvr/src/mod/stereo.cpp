@@ -426,6 +426,9 @@ bool g_profile_ready = false;
 // the game, that decides what resolution is affordable, so it needs measuring
 // on its own.
 bool g_headless_grab = false;
+// The last frame drew both eyes in one walk, so the wide target of one walk
+// has its eye pictures (the save picture, snapshot_guard.cpp).
+bool g_frame_one_walk = false;
 
 // Run the two passes with no headset and no OpenXR at all.
 //
@@ -2049,6 +2052,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   DrawProbeBeginPass(-1);
   EyeCleanEndPair();
   g_in_pass = false;
+  g_frame_one_walk = one_walk_done;
   if (EyeLumaOn()) EyeLumaFrame(ControllersFrameCount());
 
   // Put everything back, because the Hand, the interface and the next game
@@ -2564,3 +2568,5 @@ void StereoReport() {
   if (!g_enabled) return;
   ModLog("stereo       : %llu frames rendered twice", g_frames);
 }
+
+bool StereoFrameOneWalk() { return g_frame_one_walk; }

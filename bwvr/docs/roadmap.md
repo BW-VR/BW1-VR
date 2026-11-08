@@ -577,10 +577,11 @@ game as it is.
   the game's fingers. The textures of an edited hand file are not read.
 - **N4. The Temple.** Not done: a click on a frame of the Challenge Room,
   a text of the Library, a value of the options box, a drag of a scroll.
-  Suspects: the picture of a new save is flat magenta, the waist point is
-  8.4 units higher after a load, the ray ends short of the pointer in the
-  left eye in a dialog box inside the Temple, and the leash posts are 1.4
-  cm from each other at the scale of the start. In the ring menu: with
+  Not seen in a run: the picture of a save in the Save Game Room, which the
+  game now makes from the eye picture (backend.md, "The save picture").
+  Suspects: the waist point is 8.4 units higher after a load, the ray ends
+  short of the pointer in the left eye in a dialog box inside the Temple,
+  and the leash posts are 1.4 cm from each other at the scale of the start. In the ring menu: with
   `button_layout=0` a thumb on the left stick can open it, and a jump to the
   town or to a bookmark takes the heading of the game camera.
 - **N5. The village.** Not run: food, an animal or crops set down at a

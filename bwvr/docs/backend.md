@@ -43,6 +43,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/present_watch.cpp` | Skips the copy to the monitor |
 | `src/mod/file_read_ahead.cpp` | The read ahead of the files of `LHFile`: a small read comes from a copy of the file (`file_read_ahead`) |
 | `src/mod/save_store.cpp`, `save_store_math.h` | The calls of a save in the VirtualStore of the user, when Windows refuses them in Program Files (`save_virtual_store`) |
+| `src/mod/snapshot_guard.cpp`, `save_picture_math.h` | The save picture in VR: the game reads a surface of the mod with the eye picture (`save_picture`) |
 | `src/mod/stereo.cpp` | The scene walk twice, the hotkeys, the view setup |
 | `src/mod/head_camera.cpp`, `head_pose.cpp`, `eye_camera.cpp` | The head on the camera, the per eye matrix |
 | `src/mod/fov.cpp` | `LH3DTech::ChangeFov` hook |
@@ -1291,6 +1292,99 @@ save store   : Windows refused MoveFileA(<slot folder>\0.sav.tmp, <slot folder>\
   The mod does not rename such files. The next save in that slot replaces
   them.
 
+## The save picture
+
+### What the game does [V]
+
+`ScriptedScreenShot::Request` (`0x00828E90`) asks for a picture and calls
+`ScriptedScreenShot::Process` (`0x00821750`) at once. `GGame::Loop` calls
+`Process` each frame too, before `FlipScreen`. The callers of `Request`:
+
+| Caller | When |
+| --- | --- |
+| `SaveGameRoom::InstantSaveGame` (`0x00793006`) | Each save: the Save Game Room, the quick save, the auto saves and the save of slot 20 on the exit path |
+| `GGame::GoInsideCitadel` (`0x00553FF5`) | The player goes from the land into the Temple (the place of the game `0x00BEC284` is 7) |
+| `CreatureRoom::TakeScreenShot`, `fn_00784690` | The pictures of the Creature Room |
+
+A save asks for the half picture: `Process` locks the primary surface and
+reads 256 by 128 points of it, with a step of `LHScreen::width / 256` and
+`LHScreen::height / 128`. It writes them into the top half of the texture
+`Saved Games\Pictures\save_game_picture_temporary.raw` of the profile
+(`LoadTextureCitadel` `0x0082AB40`, `SaveTextureCitadel` `0x0082A8E0`), and a
+thumbnail of 128 by 64 into the bottom half. The texture is an `LH3DCT`: DXT1
+blocks of 256 by 256 pixels, 32896 bytes in the file. `SaveTextureCitadel`
+makes the blocks with a `Blt` from a texture of 16 bit RGB pixels. Then
+`fn_007923D0` copies the two halves into the pictures of the slot
+(`save_game_picture_hires_N.raw`, `save_game_picture_lores_N.raw`) with two
+`Blt` between DXT1 textures with rects (`0 0 256 128` and `0 128 128 192`),
+and the Save Game Room loads its pictures again (`fn_007928D0`,
+`fn_00792850`). The full picture (`TakeFullScreen` `0x00821370`) reads 400
+by 300 points in the same way.
+
+`Process` takes the base pointer, the pitch and the format from the locked
+surface, and the extent from `LHScreen::width` and `height`. It clamps
+nothing. In VR the primary surface is the window, which is not the size of
+the render, so the read walks off the end of a row. A square render in a
+window stops the game with an access violation. And the window does not hold
+the picture that the player sees.
+
+### What the mod does
+
+`save_picture=1` (the default, `snapshot_guard.cpp`, `save_picture_math.h`).
+While VR runs, a hook on `Process` gives the game a primary surface of the
+mod for the call: 512 by 384 pixels of 32 bits, and `LHScreen::width` and
+`height` of that size. The pixels are the middle of the eye picture of the
+last frame: the middle 0.6 of its width, in the shape of 4 by 3, each pixel
+the mean of its box. The game then makes the picture, the texture and the
+thumbnail with its own code, and the call puts the primary surface and the
+size back. The eye picture comes from:
+
+| Backend | The eye picture |
+| --- | --- |
+| `backend=vulkan` | The left eye of the picture of the window (`VkSceneReadPicture`): a copy of the part to the CPU that waits for the GPU |
+| dxwrapper, a frame of one walk | The left half of the wide target (`OneWalkReadEye`) |
+| dxwrapper, two walks | The render target of the game (`FrameSourceBegin`): the eye of the last walk |
+
+With no eye picture the call is skipped, and the save has no new picture.
+The eye picture has no interface: the interface of the game is on its own
+layer in VR. In the Temple the picture is the room, as the screen of the
+plain game is then the room.
+
+`save_picture=0` skips the call while VR runs and clears the request flag
+(`0x00EB99B4`) as the original does. The save then has no new picture.
+`skip_snapshot=0` gives each call to the game with its own screen, also in
+VR.
+
+With `backend=vulkan` the textures of the picture are surfaces of the mod
+(`vk_ddraw.cpp`). `vk_blt_blocks=1` (the default) makes the two copies that
+the game needs: a `Blt` from RGB pixels into DXT1 blocks makes the blocks
+(`EncodeDxt1Block`: the ends of the box of the colors of a block, along the
+diagonal that follows the colors, and the nearest of the four colors for
+each pixel), and a `Blt` between two textures of one DXT format copies the
+blocks of its rects (`blt_copy::CopyBlocks`). `vk_blt_blocks=0` refuses the
+first `Blt` and copies all the bytes of the source in the second, so a save
+with the picture of the mod writes over the pictures of the other slots of
+the texture. With dxwrapper the copies go as in "The copy to the monitor"
+(`blt_texture_copy`), and the first one goes to `D3DXLoadSurfaceFromSurface`.
+
+The log has one line for each of the first 12 pictures, and the report of
+`vk_ddraw` counts the copies of blocks:
+
+```
+snapshot     : save_picture=1. The game makes each save picture from a surface of the mod with the middle of the left eye picture, 512 x 384, because its screen in VR is not the picture that the player sees
+snapshot     : the game made a save picture from the left eye of the Vulkan renderer (save_picture=1): the middle 60% of the width of 2064 x 2208, at 512 x 384. Its mean light is 0.38, and 0.2% of it is black. The eye picture took 14.2 ms and the call of the game 6.1 ms. The texture is .\Profiles\<profile>\Saved Games\Pictures\save_game_picture_temporary.raw
+vk ddraw     : 2 copies from RGB into DXT1 blocks, and 2 copies of the blocks of a rect (vk_blt_blocks=1)
+```
+
+`save_picture_test_dump=1`, a test key: after each picture, the picture of
+the mod goes to `bwvr-save-picture-N.bmp` beside `runblack.exe`, and a copy
+of the texture that the game wrote goes to `bwvr-save-picture-N.raw`.
+
+**Not known.** The look of the picture of a save in the Save Game Room in
+the headset (a desktop run shows the files and the room). The save of slot
+20 on the exit path has no frame after it, so it takes the eye picture of
+the last frame of the game.
+
 ## The depth buffer
 
 The game gets a 16 bit Z buffer unless `depth24=1`. The default is 1.
@@ -1502,8 +1596,8 @@ present      : the mod copies with a texture. Destination 256 x 256, ...
 present      : the mod made N copies between two textures, and M failed
 ```
 
-`blt_texture_copy=0` gives each copy to dxwrapper. Not known: whether a save
-picture looks right in the Save Game Room.
+`blt_texture_copy=0` gives each copy to dxwrapper. The copies of a save
+picture are in "The save picture".
 
 Full screen is not an alternative. It would flip instead of copy, but it crashes
 the game (one fault at offset `0xdededede`, a freed pointer, and one inside the
@@ -6016,6 +6110,7 @@ keys that the launcher sets.
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
 | `vk_upload_keep` | 1 | With `backend=vulkan`: 1 a texture that the game wrote keeps its old image until the new image has its pixels, so a failed upload does not make it white. 0 the old image goes first. See "The Vulkan renderer", "A new image for a texture that the game wrote" |
 | `vk_texture_forget` | 1 | With `backend=vulkan`: 1 the renderer forgets the texture of a surface that the game releases, so a new surface at the same address gets a new texture. 0 the texture stays with its image until the game writes the new surface. See "The Vulkan renderer", "A surface that goes away" |
+| `vk_blt_blocks` | 1 | With `backend=vulkan`: 1 a `Blt` from RGB pixels into DXT1 blocks makes the blocks, and a `Blt` between two textures of one DXT format copies the blocks of its rects. 0 the first is refused, and the second copies all the bytes. See "The save picture" |
 | `vk_surface_heap` | 1 | With `backend=vulkan`: 1 the pixels of a surface come from the heap of the process. 0 each surface takes a block of `VirtualAlloc`, at least 64 KB of the address space. See "The address space" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |
 | `foveation_inner_deg`, `foveation_outer_deg` | 0, 0 | The degrees of the full rate and of 2 by 2 around the centre of the fovea. 0 takes the degrees of the level. See "Foveated rendering" |
@@ -6038,7 +6133,9 @@ keys that the launcher sets.
 | `blt_texture_copy` | 1 | 1: the mod makes a copy with a texture and no stretch itself. 0: each copy goes to dxwrapper. See "The copy to the monitor" |
 | `test_frame_rate` | 0 | A test key of the desktop runs: the frame rate of a run with no copy to the monitor. See "The copy to the monitor" |
 | `anisotropy`, `force_mips` | 16, 1 | Texture filter. `force_mips` forces the mip filter |
-| `skip_snapshot` | 1 | |
+| `skip_snapshot` | 1 | 1: while VR runs, the mod decides the save picture (`save_picture`). 0: the game makes each save picture from its own screen, which reads past the end of a square window. See "The save picture" |
+| `save_picture` | 1 | 1: in VR the game makes each save picture from a surface of the mod with the middle of the left eye picture. 0: no save picture in VR. See "The save picture" |
+| `save_picture_test_dump` | 0 | A test key: each save picture of the mod goes to `bwvr-save-picture-N.bmp`, and the texture of the game to `bwvr-save-picture-N.raw`, beside `runblack.exe` |
 | `test_keys` | 0 | The test keys |
 | `file_read_ahead` | 1 | 1: a read of less than 64 KB from a file that LHFile opens to read comes from a copy of the next 256 KB of the file. 0: each read goes to `ReadFile`, as in the plain game. A test key: Shift Q. See "The read ahead of the files of the game" |
 | `save_virtual_store` | 1 | 1: when Windows refuses a call of `LHOSFile` (exists, open, delete, rename) to a file in Program Files in a virtualized game process, the mod makes the call again on the VirtualStore copy of the file. So a save ends with `<slot>.sav` and `SaveGame.inf`. 0: each call goes to Windows as the game makes it. No test key. See "A save in the VirtualStore" |

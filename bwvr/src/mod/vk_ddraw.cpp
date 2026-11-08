@@ -48,6 +48,8 @@
 #include "vk_prim_math.h"
 #include "vk_texture_math.h"
 #include "address_space_math.h"
+#include "blt_copy_math.h"
+#include "save_picture_math.h"
 
 void ModLog(const char* format, ...);
 
@@ -136,6 +138,15 @@ volatile LONG g_surfaces_made = 0;
 volatile LONG g_presents = 0;
 volatile LONG g_dxt_blts = 0;
 volatile LONG g_copy_blts = 0;
+// vk_blt_blocks of bwvr.ini: 1 (the default) a Blt from RGB pixels into DXT1
+// blocks makes the blocks (save_picture_math.h, EncodeDxt1Block), and a Blt
+// between two surfaces of one DXT format copies the blocks of its rects. The
+// game makes each save picture with these two (docs/backend.md, "The save
+// picture"). 0: the first is refused, and the second copies all the bytes of
+// the source.
+bool g_blt_blocks = true;
+volatile LONG g_encode_blts = 0;
+volatile LONG g_part_blts = 0;
 volatile LONG g_fills = 0;
 volatile LONG g_line_draws = 0;
 volatile LONG g_line_prims = 0;
@@ -1812,7 +1823,12 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
   const DDPIXELFORMAT& dp = desc_.ddpfPixelFormat;
   const uint32_t dbpp = PixelBytes(dp);
   const uint32_t sbpp = PixelBytes(sp);
-  if (dbpp == 0 && !((dp.dwFlags & DDPF_FOURCC) && (sp.dwFlags & DDPF_FOURCC))) {
+  // RGB pixels into DXT1 blocks: the save picture (vk_blt_blocks).
+  const bool encode = g_blt_blocks && dbpp == 0 &&
+                      (dp.dwFlags & DDPF_FOURCC) && dp.dwFourCC == kDxt1 &&
+                      sbpp != 0 && (sp.dwFlags & DDPF_FOURCC) == 0;
+  if (dbpp == 0 && !encode &&
+      !((dp.dwFlags & DDPF_FOURCC) && (sp.dwFlags & DDPF_FOURCC))) {
     return NotMade("IDirectDrawSurface7::Blt (to a surface of blocks)");
   }
   const uint8_t* src = from->Pixels();
@@ -1827,10 +1843,78 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
   const LONG dw = dr.right - dr.left, dh = dr.bottom - dr.top;
   const LONG sw = sr.right - sr.left, sh = sr.bottom - sr.top;
   if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return DD_OK;
-  // Blocks to blocks of one format: a copy of the bytes.
+  if (encode) {
+    if (dw != sw || dh != sh ||
+        !blt_copy::OnBlocks(dr.left, dr.top, dr.right, dr.bottom,
+                            static_cast<int>(desc_.dwWidth),
+                            static_cast<int>(desc_.dwHeight)) ||
+        sr.left < 0 || sr.top < 0 ||
+        sr.right > static_cast<LONG>(from->desc_.dwWidth) ||
+        sr.bottom > static_cast<LONG>(from->desc_.dwHeight)) {
+      return NotMade("IDirectDrawSurface7::Blt (RGB to DXT1 with a stretch)");
+    }
+    vk_texture_math::Channel cr, cg, cb;
+    vk_texture_math::BuildChannel(sp.dwRBitMask, 0, &cr);
+    vk_texture_math::BuildChannel(sp.dwGBitMask, 0, &cg);
+    vk_texture_math::BuildChannel(sp.dwBBitMask, 0, &cb);
+    for (LONG by = 0; by < dh; by += 4) {
+      uint8_t* row = dst + ((dr.top + by) / 4) * pitch_;
+      for (LONG bx = 0; bx < dw; bx += 4) {
+        // A block at the edge repeats its last row and column.
+        uint8_t block[16][4];
+        for (LONG y = 0; y < 4; ++y) {
+          const LONG sy = sr.top + (by + y < dh ? by + y : dh - 1);
+          for (LONG x = 0; x < 4; ++x) {
+            const LONG sx = sr.left + (bx + x < dw ? bx + x : dw - 1);
+            const uint32_t p =
+                LoadPixel(src + sy * from->pitch_ + sx * sbpp, sbpp);
+            uint8_t* o = block[y * 4 + x];
+            o[0] = static_cast<uint8_t>(
+                vk_texture_math::ChannelValue(p, cr, sp.dwRBitMask));
+            o[1] = static_cast<uint8_t>(
+                vk_texture_math::ChannelValue(p, cg, sp.dwGBitMask));
+            o[2] = static_cast<uint8_t>(
+                vk_texture_math::ChannelValue(p, cb, sp.dwBBitMask));
+            o[3] = 255;
+          }
+        }
+        save_picture::EncodeDxt1Block(block, row + ((dr.left + bx) / 4) * 8);
+      }
+    }
+    InterlockedIncrement(&g_encode_blts);
+    VkSceneSurfaceWritten(this);
+    return DD_OK;
+  }
+  // Blocks to blocks of one format: a copy of the bytes, or of the blocks of
+  // the rects.
   if (dbpp == 0) {
-    if (sp.dwFourCC != dp.dwFourCC || bytes_ != from->bytes_) {
+    const bool whole = sr.left == 0 && sr.top == 0 && dr.left == 0 &&
+                       dr.top == 0 &&
+                       sw == static_cast<LONG>(from->desc_.dwWidth) &&
+                       sh == static_cast<LONG>(from->desc_.dwHeight) &&
+                       dw == static_cast<LONG>(desc_.dwWidth) &&
+                       dh == static_cast<LONG>(desc_.dwHeight);
+    if (sp.dwFourCC != dp.dwFourCC) {
       return NotMade("IDirectDrawSurface7::Blt (blocks of two formats)");
+    }
+    if (g_blt_blocks && !whole) {
+      if (dw != sw || dh != sh || sr.left < 0 || sr.top < 0 ||
+          sr.right > static_cast<LONG>(from->desc_.dwWidth) ||
+          sr.bottom > static_cast<LONG>(from->desc_.dwHeight) ||
+          !blt_copy::OnBlocks(dr.left, dr.top, dr.right, dr.bottom,
+                              static_cast<int>(desc_.dwWidth),
+                              static_cast<int>(desc_.dwHeight)) ||
+          !blt_copy::CopyBlocks(src, from->pitch_, sr.left, sr.top, dst,
+                                pitch_, dr.left, dr.top, dw, dh,
+                                static_cast<int>(BlockBytes(dp.dwFourCC)))) {
+        return NotMade("IDirectDrawSurface7::Blt (blocks with a stretch)");
+      }
+      InterlockedIncrement(&g_part_blts);
+      VkSceneSurfaceWritten(this);
+      return DD_OK;
+    }
+    if (bytes_ != from->bytes_) {
+      return NotMade("IDirectDrawSurface7::Blt (blocks of two sizes)");
     }
     memcpy(dst, src, bytes_);
     InterlockedIncrement(&g_copy_blts);
@@ -2127,6 +2211,18 @@ HRESULT Create(ProxyCreateFn, GUID*, void** out, IUnknown*) {
 
 }  // namespace
 
+void VkDdrawSetBlocks(int on) {
+  g_blt_blocks = on != 0;
+  ModLog("vk ddraw     : vk_blt_blocks=%d. %s", g_blt_blocks ? 1 : 0,
+         g_blt_blocks
+             ? "A Blt from RGB pixels into DXT1 blocks makes the blocks, and "
+               "a Blt between two surfaces of one DXT format copies the "
+               "blocks of its rects (the save pictures)"
+             : "A Blt from RGB pixels into DXT1 blocks is refused, and a Blt "
+               "between two surfaces of one DXT format copies all the bytes "
+               "of the source");
+}
+
 void VkDdrawInstall(int lines, int surface_heap) {
   g_on = true;
   g_lines = lines != 0;
@@ -2155,6 +2251,13 @@ void VkDdrawReport(unsigned long long frames) {
          "failed since the start",
          g_surface_heap ? 1 : 0, g_pixel_surfaces, g_pixel_kb / 1024.0,
          g_pixel_space_kb / 1024.0, g_pixel_failures);
+  const LONG encodes = InterlockedExchange(&g_encode_blts, 0);
+  const LONG parts = InterlockedExchange(&g_part_blts, 0);
+  if (encodes != 0 || parts != 0) {
+    ModLog("vk ddraw     : %ld copies from RGB into DXT1 blocks, and %ld copies "
+           "of the blocks of a rect (vk_blt_blocks=%d)",
+           encodes, parts, g_blt_blocks ? 1 : 0);
+  }
   const LONG line_draws = InterlockedExchange(&g_line_draws, 0);
   if (line_draws != 0) {
     ModLog("vk ddraw     : %ld draws of points or lines in the window, as %ld "

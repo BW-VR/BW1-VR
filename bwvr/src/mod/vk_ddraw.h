@@ -15,6 +15,9 @@
 // (1: the pixels of a surface come from the heap, 0: from a block of
 // VirtualAlloc for each surface).
 void VkDdrawInstall(int lines, int surface_heap);
+// vk_blt_blocks of bwvr.ini (vk_ddraw.cpp): 1 a Blt makes DXT1 blocks from
+// RGB pixels and copies the blocks of a rect, 0 the old way.
+void VkDdrawSetBlocks(int on);
 bool VkDdrawOn();
 
 // For the report of each 450 frames: the calls of each method that the

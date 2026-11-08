@@ -640,7 +640,9 @@ The biggest cost is memory, and it is small against a headset render.
    behind the menu [I]. The camera code would get the last world pixel (5.5),
    but the Hand would not.
 9. **Readers of the screen.** `ScriptedScreenShot::Process`, the save
-   picture, is skipped while VR runs [V, `snapshot_guard.cpp`].
+   picture, reads a surface of the mod with the middle of the left eye
+   picture while VR runs [V, `snapshot_guard.cpp`, backend.md, "The save
+   picture"].
    `CreatureRoom::TakeScreenShot`, `GScript::SnapShot` and
    `SaveCreatureSnapshot` also read the screen [V for the names, I for what
    they read]. Their pictures lose the interface, which is better. The copy to
@@ -938,7 +940,7 @@ desktop run can prove are in `roadmap.md`, R12.
   subtitles in the world, and that read worse than subtitles on the view. A
   real layer needs a second render target and control of the render target
   switch, which section 2 gives.
-- `bwvr/src/mod/snapshot_guard.cpp`: the save picture is skipped in VR.
+- `bwvr/src/mod/snapshot_guard.cpp`: the save picture in VR.
 - `bwvr/src/mod/head_pose.cpp`: the recenter origin.
 - `bwvr/docs/backend.md`, `tabletop.md`, `controllers.md`, `hand.md`.
 - dxwrapper 1.8.8600.25, `ddraw/IDirect3DDeviceX.cpp`,

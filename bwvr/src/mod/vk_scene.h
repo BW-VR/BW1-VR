@@ -213,6 +213,17 @@ bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height);
 // change of the size.
 const uint8_t* VkScenePresentPixels(uint32_t width, uint32_t height,
                                     int* pitch);
+// THE SAVE PICTURE (snapshot_guard.cpp, docs/backend.md, "The save
+// picture"), on the frame thread. The size of the picture of the window
+// (the last walk of the left eye, or of a scene with no eye pass), and a
+// part of it for the CPU. `take` gets the pixels of the part: 4 bytes a
+// pixel, rows of w pixels, the red first when red_first is true. The read
+// waits for the GPU. False when there is no picture or a step failed.
+bool VkScenePictureSize(uint32_t* width, uint32_t* height);
+typedef void (*VkScenePictureFn)(const uint8_t* pixels, int pitch, uint32_t w,
+                                 uint32_t h, bool red_first, void* context);
+bool VkSceneReadPicture(int32_t x, int32_t y, uint32_t w, uint32_t h,
+                        VkScenePictureFn take, void* context);
 // FOVEATED RENDERING (foveation of bwvr.ini, docs/backend.md, "Foveated
 // rendering"). level: 0 (the default) each pixel of the eye pictures has the
 // full rate. 1 light, 2 medium, 3 strong: the part around the centre of the

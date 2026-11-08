@@ -4311,6 +4311,59 @@ const uint8_t* VkScenePresentPixels(uint32_t width, uint32_t height,
   return pixels;
 }
 
+bool VkScenePictureSize(uint32_t* width, uint32_t* height) {
+  if (!g_ready || !g_present_ready) return false;
+  const vk::Image& source = g_colors[g_present_index];
+  if (source.image == VK_NULL_HANDLE) return false;
+  *width = source.width;
+  *height = source.height;
+  return true;
+}
+
+bool VkSceneReadPicture(int32_t x, int32_t y, uint32_t w, uint32_t h,
+                        VkScenePictureFn take, void* context) {
+  if (!g_ready || !g_present_ready || take == nullptr || w == 0 || h == 0 ||
+      x < 0 || y < 0) {
+    return false;
+  }
+  const vk::Image& source = g_colors[g_present_index];
+  if (source.image == VK_NULL_HANDLE ||
+      static_cast<uint32_t>(x) + w > source.width ||
+      static_cast<uint32_t>(y) + h > source.height) {
+    return false;
+  }
+  vk::Buffer read;
+  if (!vk::MakeBuffer(static_cast<VkDeviceSize>(w) * h * 4,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, &read)) {
+    return false;
+  }
+  VkCommandBuffer cb = vk::BeginOnce();
+  if (cb == VK_NULL_HANDLE) {
+    vk::FreeBuffer(&read);
+    return false;
+  }
+  vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, source.layers);
+  VkBufferImageCopy copy = {};
+  copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copy.imageOffset = {x, y, 0};
+  copy.imageExtent = {w, h, 1};
+  f.vkCmdCopyImageToBuffer(cb, source.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, read.buffer,
+                           1, &copy);
+  vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, source.layers);
+  const bool ok = vk::EndOnce(cb);
+  if (ok) {
+    take(static_cast<const uint8_t*>(read.mapped), static_cast<int>(w) * 4,
+         w, h, source.format != VK_FORMAT_B8G8R8A8_UNORM, context);
+  }
+  vk::FreeBuffer(&read);
+  return ok;
+}
+
 void VkSceneSetOnly(int on, int test) {
   g_only_mode = on != 0;
   g_only_test = test != 0;

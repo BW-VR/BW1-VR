@@ -3618,6 +3618,7 @@ void CreatureChecks() {
 #include "one_walk_checks.h"
 #include "walk_checks.h"
 #include "blt_copy_checks.h"
+#include "save_picture_checks.h"
 #include "read_ahead_checks.h"
 #include "save_store_checks.h"
 #include "target_glow_checks.h"
@@ -4074,6 +4075,7 @@ int main() {
   video_layers_checks::VideoLayersChecks();
   blinder_checks::BlinderChecks();
   blt_copy_checks::BltCopyChecks();
+  save_picture_checks::SavePictureChecks();
   read_ahead_checks::ReadAheadChecks();
   save_store_checks::SaveStoreChecks();
   take_stream_checks::TakeStreamChecks();

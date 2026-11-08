@@ -181,6 +181,7 @@ void InputWatchInstall();
 void HeadCameraInstall();
 void SnapshotGuardInstall();
 void SnapshotGuardSetSkip(bool on);
+void SnapshotGuardSetPicture(bool on, bool dump);
 void WaterModeSetSimple(bool on);
 void HeadCameraSetRoll(bool on);
 void StereoSetImmersive(bool on);
@@ -428,6 +429,10 @@ int g_eye_cant = 1;
 float g_fake_eye_cant_deg = 0.0f;
 float g_fov_absolute_deg = 0.0f;
 bool g_skip_snapshot = true;
+// save_picture: 1 the game makes a save picture in VR from a surface of the
+// mod with the eye picture (snapshot_guard.cpp). 0 no save picture in VR.
+bool g_save_picture = true;
+bool g_save_picture_dump = false;
 bool g_water_simple = true;
 bool g_head_roll = true;
 
@@ -1060,6 +1065,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "fov_absolute_deg", 0, path));
   g_skip_snapshot =
       GetPrivateProfileIntA("bwvr", "skip_snapshot", 1, path) != 0;
+  g_save_picture =
+      GetPrivateProfileIntA("bwvr", "save_picture", 1, path) != 0;
+  g_save_picture_dump =
+      GetPrivateProfileIntA("bwvr", "save_picture_test_dump", 0, path) != 0;
   // HEAD ROLL IS ON, AND IT DECIDES THE SEA.
   //
   // Without roll the world tilts with the player's head instead of staying
@@ -2111,7 +2120,10 @@ void StartVrStep() {
       // the real hand in the world.
       if (g_controllers) GesturePanelInstall();
     }
-    // The thumbnail reads past the end of a square window, so it goes.
+    // The save picture: the screen of the game in VR is not the picture
+    // that the player sees, and the game reads past the end of a square
+    // window.
+    SnapshotGuardSetPicture(g_save_picture, g_save_picture_dump);
     SnapshotGuardSetSkip(g_skip_snapshot);
     WaterModeSetSimple(g_water_simple);
     HeadCameraSetRoll(g_head_roll);
@@ -3381,6 +3393,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
             static_cast<int>(GetPrivateProfileIntA("bwvr", "vk_lines", 1, ini)),
             static_cast<int>(
                 GetPrivateProfileIntA("bwvr", "vk_surface_heap", 1, ini)));
+        VkDdrawSetBlocks(static_cast<int>(
+            GetPrivateProfileIntA("bwvr", "vk_blt_blocks", 1, ini)));
         // Before the first present of the game.
         VkWindowSetOptions(static_cast<int>(
             GetPrivateProfileIntA("bwvr", "vk_window", 1, ini)));

@@ -134,19 +134,31 @@ inline void ControlsLayoutChecks() {
         for (int w = 0; w < n; ++w) {
           if (u == w) continue;
           if (row_of[u] == row_of[w]) ++wrong;
-          if (anchors[u][1] < anchors[w][1] && row_of[u] > row_of[w]) ++wrong;
-          if (lay::Cross(st[u], kn[u], st[w], kn[w]) ||
-              lay::Cross(kn[u], en[u], kn[w], en[w]) ||
-              lay::Cross(st[u], kn[u], kn[w], en[w])) {
-            ++wrong;
-          }
+          if (lay::Clash(st[u], kn[u], en[u], st[w], kn[w], en[w])) ++wrong;
         }
       }
     }
     Check(wrong == 0 && routed > 100,
           "in 300 sets of 6 or 7 controls, each routed set has one row for "
-          "each control, in the order of the controls from the top, and no "
-          "two parts of its leaders cross", routed, 300);
+          "each control, and no leader crosses another or runs within 9 px "
+          "of the ring of another", routed, 300);
+    // THE OWNER'S CASE: on the left model the stick, the Y button on the
+    // face, and the trigger at the side next to the boxes, a little lower
+    // than Y. The stick takes the row at its height, so Y would take the
+    // row of the trigger, and its line would run over the ring of the
+    // trigger. So the trigger takes the row above the row of Y.
+    const float owner[3][2] = {
+        {320.0f, 405.0f}, {350.0f, 440.0f}, {428.0f, 452.0f}};
+    float rows7[lay::kMostBoxes];
+    for (int r = 0; r < 7; ++r) rows7[r] = 293.0f + 80.0f * r;
+    int row3[3];
+    float s3[3][2], k3[3][2], e3[3][2];
+    const bool done = lay::Route(owner, 3, 453.0f, 453.0f, rows7, 7, row3,
+                                 s3, k3, e3);
+    Check(done && row3[2] < row3[1] &&
+              !lay::Clash(s3[1], k3[1], e3[1], s3[2], k3[2], e3[2]),
+          "the trigger at the side takes the row above Y, so the line to Y "
+          "does not run over the ring of the trigger", row3[2], row3[1] - 1);
     int rows_l[4], rows_r[4];
     lay::BoxRect(true, 0, 7, 420.0f, rows_l);
     lay::BoxRect(false, 0, 7, 420.0f, rows_r);

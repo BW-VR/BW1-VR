@@ -2726,8 +2726,12 @@ Each controller has a half of the page:
   the rows in their order from the top of the model, each as near to its
   own height as the rows let it (`Route`), so the lines are short and run
   side by side, and a line crosses the body only to reach a button on the
-  face. When two lines would cross, the side uses the order of the least
-  length (`LeaderOrder`): two straight lines of such an order never cross.
+  face. Two lines clash when they cross or when one runs within 9 pixels of
+  the ring of the other (`Clash`), as the line to Y over the ring of the
+  trigger at the side of a Touch model. Then the two controls swap their
+  rows, so the trigger has the row above Y and a short line. When lines
+  still clash, the side uses the order of the least length (`LeaderOrder`):
+  two straight lines of such an order never cross.
 - **Under the ray** a box is gold, and its leader, its ring and its
   control on the model are gold too. The bottom row says the control and
   its job ("Left Y: Ring"), with "(always)" for a control that keeps its
@@ -2774,9 +2778,9 @@ The log has the tag `controls`, and the map has lines of the tag
 ```
 controllers  : the right controller is a Quest Touch controller (profile "/interaction_profiles/oculus/touch_controller"). Its buttons for the jobs: A, B, Stick click, frame 2
 controls     : panel_warm=1: the models of the controllers are loaded (meta-quest-touch-plus and meta-quest-touch-plus), so a thread of the mod draws their pictures for the page Controls, frame N
-controls     : the page with the models (meta-quest-touch-plus and meta-quest-touch-plus, parchment): part 0 left Stick click: Recenter (a list), part 1 left Stick: Walk, part 2 left Y button: Ring (a list), part 3 left Trigger: Not used, ...
+controls     : the page with the models (meta-quest-touch-plus and meta-quest-touch-plus, parchment): part 0 left Stick click: Recenter (a list), part 1 left Stick: Walk, part 2 left Trigger: Not used, part 3 left Y button: Ring (a list), ...
 controls     : a picture of the page took 3.65 ms, frame 731
-settings     : the trigger presses the part 2 of the page: its list of 4 items opens, frame 740
+settings     : the trigger presses the part 3 of the page: its list of 4 items opens, frame 740
 controls     : the list of Left Y: it goes from Ring to Recenter, and Left stick click takes Ring. button_map_other=1324 is in bwvr.ini. It acts when each button is up, frame 760
 controllers  : the new map of the buttons acts now: button_map_hand=1234, button_map_other=1324, frame 761
 controls     : Reset Defaults: each button has its job as made. button_map_hand=1234 and button_map_other=1234 are in bwvr.ini, frame 902

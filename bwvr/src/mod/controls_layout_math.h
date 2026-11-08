@@ -26,10 +26,11 @@
 // as the rows let it, so the lines are short and run side by side. The boxes
 // are next to the side of the model that faces them, where the trigger and
 // the grip are, so a line crosses the body only to reach a button on the
-// face. When two lines still cross (two controls at one height), the caller
-// uses the order of the least length (LeaderOrder): two straight lines of
-// such an order never cross, because a swap of the boxes of two lines that
-// cross makes both lines shorter.
+// face. Two lines that clash (they cross, or one runs over the ring at the
+// end of the other) swap their rows (Clash). When lines still clash, the
+// caller uses the order of the least length (LeaderOrder): two straight
+// lines of such an order never cross, because a swap of the boxes of two
+// lines that cross makes both lines shorter.
 
 #pragma once
 
@@ -164,14 +165,49 @@ inline bool Cross(const float a[2], const float b[2], const float c[2],
          ((d3 > 0.0f && d4 < 0.0f) || (d3 < 0.0f && d4 > 0.0f));
 }
 
+// THE CLEARANCE of two leaders, each from a start over a knee to an end (a
+// ring on its control). They clash when two of their parts cross, or when a
+// part of one passes within kRingClear pixels of the end of the other: then
+// the line runs over that ring, and the eye cannot tell the two apart.
+const float kRingClear = 9.0f;
+inline float DistanceToSegment(const float p[2], const float a[2],
+                               const float b[2]) {
+  const float bx = b[0] - a[0], by = b[1] - a[1];
+  const float bb = bx * bx + by * by;
+  float t = bb > 0.0f ? ((p[0] - a[0]) * bx + (p[1] - a[1]) * by) / bb : 0.0f;
+  t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+  const float dx = p[0] - a[0] - bx * t, dy = p[1] - a[1] - by * t;
+  return sqrtf(dx * dx + dy * dy);
+}
+inline bool Clash(const float sa[2], const float ka[2], const float ea[2],
+                  const float sb[2], const float kb[2], const float eb[2]) {
+  const float* pa[2][2] = {{sa, ka}, {ka, ea}};
+  const float* pb[2][2] = {{sb, kb}, {kb, eb}};
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 2; ++j) {
+      if (Cross(pa[i][0], pa[i][1], pb[j][0], pb[j][1])) return true;
+    }
+    if (DistanceToSegment(eb, pa[i][0], pa[i][1]) < kRingClear) return true;
+    if (DistanceToSegment(ea, pb[i][0], pb[i][1]) < kRingClear) return true;
+  }
+  return false;
+}
+
 // THE ROUTE of the leaders of one side. anchors[k] is the point of control
 // k on the model, start_x the x of the side of the boxes that faces the
 // model, and slot_y the middles of the `rows` rows. row_of[k] gets the row
-// of control k, and the points of its line go into start and end. knee_x
-// gives a knee: a line from the box goes level to knee_x at the height of
-// its row, and then to its control. With knee_x equal to start_x the line is
-// straight. The heights that the rows follow keep kKneeGap apart. False when
-// two lines cross, or when the side has more controls than rows.
+// of control k, and the points of its line go into start, knee and end.
+// knee_x gives a knee: a line from the box goes level to knee_x at the
+// height of its row, and then to its control. With knee_x equal to start_x
+// the line is straight.
+//
+// The controls take the rows in their order from the top of the model, each
+// as near to its height as the rows let it (the heights keep kKneeGap
+// apart). When two leaders clash (Clash: they cross, or one runs over the
+// ring of the other, as the line to a face button over the ring of the
+// trigger at the side), the two controls swap their places in the order,
+// and the rows follow again. False when the leaders still clash, or when
+// the side has more controls than rows.
 const float kKneeGap = 10.0f;
 inline bool Route(const float anchors[][2], int count, float knee_x,
                   float start_x, const float slot_y[], int rows, int row_of[],
@@ -189,61 +225,69 @@ inline bool Route(const float anchors[][2], int count, float knee_x,
       order[j - 1] = t;
     }
   }
-  float ky[kMostBoxes];
-  for (int j = 0; j < count; ++j) {
-    ky[j] = anchors[order[j]][1];
-    if (j > 0 && ky[j] < ky[j - 1] + kKneeGap) ky[j] = ky[j - 1] + kKneeGap;
-  }
-  // The rows in the same order, with the least sum of the heights from a
-  // row to its knee: a table of the first j controls in the first r rows.
-  float best[kMostBoxes + 1][kMostBoxes + 1];
-  bool take[kMostBoxes + 1][kMostBoxes + 1];
-  for (int j = 0; j <= count; ++j) {
-    for (int r = 0; r <= rows; ++r) {
-      best[j][r] = 1e30f;
-      take[j][r] = false;
+  for (int tries = 0; tries < 4 * kMostBoxes; ++tries) {
+    float ky[kMostBoxes];
+    for (int j = 0; j < count; ++j) {
+      ky[j] = anchors[order[j]][1];
+      if (j > 0 && ky[j] < ky[j - 1] + kKneeGap) ky[j] = ky[j - 1] + kKneeGap;
     }
-  }
-  for (int r = 0; r <= rows; ++r) best[0][r] = 0.0f;
-  for (int j = 1; j <= count; ++j) {
-    for (int r = j; r <= rows; ++r) {
-      const float skip = best[j][r - 1];
-      const float use = best[j - 1][r - 1] + fabsf(slot_y[r - 1] - ky[j - 1]);
-      if (use <= skip) {
-        best[j][r] = use;
-        take[j][r] = true;
-      } else {
-        best[j][r] = skip;
+    // The rows in the same order, with the least sum of the heights from a
+    // row to its knee: a table of the first j controls in the first r rows.
+    float best[kMostBoxes + 1][kMostBoxes + 1];
+    bool take[kMostBoxes + 1][kMostBoxes + 1];
+    for (int j = 0; j <= count; ++j) {
+      for (int r = 0; r <= rows; ++r) {
+        best[j][r] = 1e30f;
+        take[j][r] = false;
       }
     }
-  }
-  for (int j = count, r = rows; j > 0; --r) {
-    if (take[j][r]) {
-      row_of[order[j - 1]] = r - 1;
-      --j;
-    }
-  }
-  for (int j = 0; j < count; ++j) {
-    const int k = order[j];
-    start[k][0] = start_x;
-    start[k][1] = slot_y[row_of[k]];
-    knee[k][0] = knee_x;
-    knee[k][1] = slot_y[row_of[k]];
-    end[k][0] = anchors[k][0];
-    end[k][1] = anchors[k][1];
-  }
-  for (int a = 0; a < count; ++a) {
-    for (int b = a + 1; b < count; ++b) {
-      const float* pa[2][2] = {{start[a], knee[a]}, {knee[a], end[a]}};
-      const float* pb[2][2] = {{start[b], knee[b]}, {knee[b], end[b]}};
-      for (int i = 0; i < 2; ++i) {
-        for (int j = 0; j < 2; ++j) {
-          if (Cross(pa[i][0], pa[i][1], pb[j][0], pb[j][1])) return false;
+    for (int r = 0; r <= rows; ++r) best[0][r] = 0.0f;
+    for (int j = 1; j <= count; ++j) {
+      for (int r = j; r <= rows; ++r) {
+        const float skip = best[j][r - 1];
+        const float use =
+            best[j - 1][r - 1] + fabsf(slot_y[r - 1] - ky[j - 1]);
+        if (use <= skip) {
+          best[j][r] = use;
+          take[j][r] = true;
+        } else {
+          best[j][r] = skip;
         }
       }
     }
+    for (int j = count, r = rows; j > 0; --r) {
+      if (take[j][r]) {
+        row_of[order[j - 1]] = r - 1;
+        --j;
+      }
+    }
+    for (int j = 0; j < count; ++j) {
+      const int k = order[j];
+      start[k][0] = start_x;
+      start[k][1] = slot_y[row_of[k]];
+      knee[k][0] = knee_x;
+      knee[k][1] = slot_y[row_of[k]];
+      end[k][0] = anchors[k][0];
+      end[k][1] = anchors[k][1];
+    }
+    // The first two leaders that clash swap their places in the order.
+    int clash_i = -1, clash_j = -1;
+    for (int i = 0; i < count && clash_i < 0; ++i) {
+      for (int j = i + 1; j < count; ++j) {
+        const int a = order[i], b = order[j];
+        if (Clash(start[a], knee[a], end[a], start[b], knee[b], end[b])) {
+          clash_i = i;
+          clash_j = j;
+          break;
+        }
+      }
+    }
+    if (clash_i < 0) return true;
+    const int t = order[clash_i];
+    order[clash_i] = order[clash_j];
+    order[clash_j] = t;
   }
-  return true;
+  return false;
 }
 
 // --- the parts of the page -------------------------------------------------------

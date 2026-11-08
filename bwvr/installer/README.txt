@@ -63,11 +63,10 @@ HOW TO START
 4. Press "Play in VR".
 
 The launcher saves your settings, starts the game in the headset,
-and closes. The game starts a new game, and the start dialog of the
-game opens first. "Play, continue" does the same, but the game loads
-the game that you played last: the save that the game made when you
-quit. To make "Play in VR" load that save, set start_new_game=0 in
-bwvr.ini. Then the second button is "Play, new game".
+and closes. The game loads the game that you played last (the save
+that the game made when you quit) and opens its Main Menu. Select
+Continue Game to play. "Play, new game" does the same, but it starts
+a new game, and the start dialog of the game opens first.
 "Save Config" keeps your settings and does not start the game.
 
 If the headset is not connected when the game starts, the game plays

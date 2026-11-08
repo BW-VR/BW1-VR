@@ -36,6 +36,10 @@
 // Menu. No button of the first tab of the Main Menu starts a new game. That
 // button is in the tab of the profiles.
 //
+// start_new_game=0 (the default) keeps the start of the plain game: the save
+// of the exit and the Main Menu. The launcher button "Play, new game" gives
+// the word -NEWGAME, and the start dialog opens first.
+//
 // With start_new_game=1 the mod gives the game the word -NEWGAME: it sets
 // the byte of that word (0x00D46AB9) from DllMain, before WinMain. Only
 // ScanParameters (0x00641AA0) writes the byte, and it writes only a 1. Only
@@ -152,7 +156,7 @@ void SkipMainMenu() {
 
 // From DllMain, before WinMain: start_new_game.
 void GameStartChoose() {
-  const int key = IniInt("start_new_game", 1);
+  const int key = IniInt("start_new_game", 0);
   if (key == 0) {
     ModLog("game start   : start_new_game=0. With no word on the command "
            "line the game loads the save of the exit (slot 20) and opens its "

@@ -26,8 +26,8 @@ game"):
 
 | `start_new_game` | "Play in VR" | The second play button |
 | --- | --- | --- |
-| 1 (the default) | A new game. The start dialog of the fan patch is the first menu | "Play, continue": the word `-CONTINUE`. The game loads the save of the exit and opens its Main Menu |
-| 0 | The game loads the save of the exit and opens its Main Menu | "Play, new game": the word `-NEWGAME`. A new game with the start dialog |
+| 0 (the default) | The game loads the save of the exit and opens its Main Menu | "Play, new game": the word `-NEWGAME`. A new game, and the start dialog of the fan patch is the first menu |
+| 1 | A new game. The start dialog is the first menu | "Play, continue": the word `-CONTINUE`. The game loads the save of the exit and opens its Main Menu |
 
 With no save of the exit, each of the two starts a new game. The launcher
 reads the key when it opens. It has no row for the key.

@@ -90,9 +90,9 @@ entry. Virtual Desktop and SteamVR have one.
 1. Start your VR software and connect the headset.
 2. Open the shortcut "Black & White VR Mod". The launcher names the runtime
    that it found.
-3. Select "Play in VR". The game starts a new game, and the start dialog
-   of the game opens first. "Play, continue" loads the game that you played
-   last.
+3. Select "Play in VR" to continue the game that you played last. Select
+   "Play, new game" to start a new game. The start dialog of the game then
+   opens first.
 4. In the headset, press a trigger or A to skip the logos. Press F11 on the
    keyboard if the view is not in front of you.
 

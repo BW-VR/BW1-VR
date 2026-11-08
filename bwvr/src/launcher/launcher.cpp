@@ -1791,12 +1791,12 @@ bool StartGame(const char* parameters, HANDLE* process) {
   return true;
 }
 
-// The second way to play. With start_new_game=1 (the default) the mod
-// starts a new game with the start dialog of the fan patch, so the second
-// button continues the save of the exit with the word -CONTINUE of the mod.
-// With start_new_game=0 the game continues that save, so the second button
-// starts a new game with -NEWGAME.
-bool StartNewGameKey() { return ReadIni("start_new_game", 1) != 0; }
+// The second way to play. With start_new_game=0 (the default) the game
+// continues the save of the exit, so the second button starts a new game
+// with -NEWGAME, and the start dialog of the fan patch opens first. With
+// start_new_game=1 the mod starts a new game, so the second button
+// continues the save of the exit with the word -CONTINUE of the mod.
+bool StartNewGameKey() { return ReadIni("start_new_game", 0) != 0; }
 
 void Play(bool second_way) {
   SaveAll();
@@ -2266,16 +2266,19 @@ void BuildControls() {
              ? "Start the game in the headset. A new game starts, and the "
                "start dialog of the game opens first: skip the tutorial, or "
                "keep your old Creature."
-             : "Start the game in the headset. The game loads the save that "
-               "it made when you quit, and opens its Main Menu.");
+             : "Start the game in the headset and continue the game that "
+               "you played last. The game loads the save that it made when "
+               "you quit, and opens its Main Menu. With no save, a new game "
+               "starts.");
   AddTip(g_buttons[kButtonFresh],
          StartNewGameKey()
              ? "Continue the game that you played last. The game loads the "
                "save that it made when you quit, and opens its Main Menu. "
                "\"Play in VR\" starts a new game with the start dialog: skip "
                "the tutorial, or keep your old Creature."
-             : "Start a new game. The start dialog of the game opens first: "
-               "skip the tutorial, or keep your old Creature.");
+             : "Start a new game in the headset. The start dialog of the "
+               "game opens first: skip the tutorial, or keep your old "
+               "Creature.");
   AddTip(g_buttons[kButtonSave],
          "Write the settings without starting the game.");
   AddTip(g_buttons[kButtonPlain],

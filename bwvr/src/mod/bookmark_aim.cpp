@@ -96,6 +96,13 @@ struct MapCoords {
 // The aim: an object in a cone this wide past its own size, and the land up
 // to this far along the ray, in meters of the room.
 const float kConeDeg = 1.5f;
+// THE HOLD on an object: a player cannot keep a ray on a villager that
+// walks. So the object of the last frame stays the target while the ray is
+// within kKeepSize of its size and kKeepDeg round it, and for kKeepFrames
+// frames in which the draw does not offer it.
+const float kKeepSize = 1.6f;
+const float kKeepDeg = 4.0f;
+const int kKeepFrames = 10;
 const float kLandMostM = 60.0f;
 const float kLandStepM = 0.05f;
 const float kRingCm = 10.0f;
@@ -122,6 +129,8 @@ int g_mark = -1;
 Target g_target = {};
 int g_last_kind = kTargetNone;
 void* g_last_object = nullptr;
+Target g_kept = {};
+int g_kept_misses = 0;
 bool g_grip_before = false;
 bool g_need_up = false;    // the grip was down at the start of the aim
 bool g_hold = false;       // the grip that set the bookmark is still down
@@ -162,6 +171,7 @@ float Ground(float x, float z) { return TeleportGround(x, z); }
 
 // The target of the aim ray now: the object that it is on, or its land point.
 void Aim() {
+  const Target last = g_target;
   g_target = Target{};
   float origin[3], direction[3], eye[3], units = 0.0f;
   if (!ControllersFarRay(origin, direction, &units, eye) || !(units > 0.0f)) {
@@ -176,7 +186,9 @@ void Aim() {
   // THE OBJECT: the nearest to the ray in its size and a cone of kConeDeg,
   // and not behind the land of the ray.
   const float cone = tanf(kConeDeg * 0.01745329f);
+  const float keep_cone = tanf(kKeepDeg * 0.01745329f);
   float best = 1e30f;
+  bool last_seen = false;
   for (int i = 0; i < HandDirectConeCount(); ++i) {
     void* object = nullptr;
     float at[3];
@@ -189,13 +201,20 @@ void Aim() {
     const float along =
         v[0] * direction[0] + v[1] * direction[1] + v[2] * direction[2];
     if (!(along > 0.3f * units)) continue;
-    if (land >= 0.0f && along > land + radius) continue;
+    const bool is_last = last.kind == kTargetObject && object == last.object;
+    if (land >= 0.0f && along > land + (is_last ? 2.0f : 1.0f) * radius) {
+      continue;
+    }
     float off[3];
     for (int k = 0; k < 3; ++k) off[k] = v[k] - along * direction[k];
     const float across = controller_math::Length(off);
-    const float allowed = 0.9f * radius + along * cone;
+    const float allowed = is_last ? kKeepSize * radius + along * keep_cone
+                                  : 0.9f * radius + along * cone;
     if (across > allowed) continue;
-    const float score = across / allowed + along / (200.0f * units);
+    if (is_last) last_seen = true;
+    // The object of the last frame wins over a new one.
+    const float score = across / allowed + along / (200.0f * units) -
+                        (is_last ? 1.0f : 0.0f);
     if (score >= best || !HandDirectSeen(at, radius)) continue;
     best = score;
     g_target.kind = kTargetObject;
@@ -209,6 +228,17 @@ void Aim() {
       g_target.base[k] = at[k];
     }
   }
+  // The object of the last frame that the draw did not offer stays for a
+  // few frames, while it lives.
+  if (g_target.kind != kTargetObject && last.kind == kTargetObject &&
+      !last_seen && g_kept_misses < kKeepFrames &&
+      !IsBadReadPtr(last.object, 0x20) &&
+      *reinterpret_cast<void* const*>(last.object) == last.vtable) {
+    ++g_kept_misses;
+    g_target = last;
+    return;
+  }
+  if (g_target.kind == kTargetObject) g_kept_misses = 0;
   if (g_target.kind == kTargetObject || !(land > 0.0f)) return;
   float point[3];
   for (int k = 0; k < 3; ++k) point[k] = origin[k] + direction[k] * land;

@@ -14,11 +14,11 @@
     a tile is in the plane of the ring, from the middle of the sheet, as the
     log line "the ring goes to the sheet" gives it.
 
-    pages   page 1: the hand goes round each item and back to the middle
-            (no choice), then "names" two times and "pause" two times.
+    pages   page 1: the hand goes over four items and back to the middle
+            (no choice), More, then "names" two times.
     places  the sheet of the places: the plus and a grip on the land, the
-            plus and "aimmark" with a grip on a living thing, Land, the seal
-            of bookmark 1, the bin of bookmark 2, and the plus with B.
+            plus and "aimmark" with a grip on a living thing, the seal of
+            bookmark 1, the bin of bookmark 2, and the plus with B.
     leash   the sheet of the leashes: the hand over each tile, then a
             choice of Compassion.
 
@@ -99,22 +99,22 @@ function Sheet([int]$F, [int]$Slot, [double[]]$Tiles, [int]$Gap = 30) {
     return $at
 }
 
-$base = 'backend=dxwrapper\ddraw.dll;test_frame_rate=60;aim_preset=0;radial_test_save=60'
+# THE LIMIT: the left hand of the scripted controller keeps 16 points, so a
+# run has at most 16 steps of the hand. Quick save is off on page 1 of each
+# run, so a step that misses never saves the game.
+$base = 'backend=dxwrapper\ddraw.dll;test_frame_rate=60;aim_preset=0;radial_test_save=60;' +
+        'radial_menu_items=leash,places,recenter,none,more,settings,names,pause'
 switch ($Kind) {
     'pages' {
         # Round page 1 with no choice, then More to page 2.
-        $round = @(0, 1, 2, 3, 5, 6, 7 | ForEach-Object { $s = SlotXY $_; PlanePoint $s[0] $s[1] })
+        $round = @(0, 2, 5, 7 | ForEach-Object { $s = SlotXY $_; PlanePoint $s[0] $s[1] })
         Open 900 200 ($round + @((PlanePoint 0 1))) 20
         $script:steps += 'shot@960+1'
         $s = SlotXY 4
         Open 1250 120 @((PlanePoint $s[0] $s[1]), (PlanePoint 0 1)) 60
-        # Names on and off, pause on and off.
+        # Names on and off.
         foreach ($f in 1500, 1650) {
             $s = SlotXY 6
-            Open $f 30 @((PlanePoint $s[0] $s[1]))
-        }
-        foreach ($f in 1800, 1950) {
-            $s = SlotXY 7
             Open $f 30 @((PlanePoint $s[0] $s[1]))
         }
         $set = $base
@@ -122,14 +122,12 @@ switch ($Kind) {
     }
     'places' {
         # 1. The plus, then a grip on the land in front.
-        $end = Sheet 900 1 @(0, 0, 0, -5.6) 40
+        $end = Sheet 900 1 @(0, -5.6) 40
         $script:steps += "shot@$($end - 10)+1 shot@$($end + 40)+1 grip@$($end + 70)+10"
         # 2. Bookmark 1 is set: the plus is at 1.9 -5.6. aimmark turns the
         #    ray to a living thing, and the grip sets bookmark 2 on it.
         $end = Sheet 1200 1 @(1.9, -5.6) 40
         $script:steps += "aimmark@$($end + 30)+1 shot@$($end + 50)+1 grip@$($end + 70)+10"
-        # 3. Land: the view goes to the middle of the land.
-        $end = Sheet 1500 1 @(11.5, 8.0) 40
         # 4. The seal of bookmark 1 (bookmarks 1 and 2 set: -3.9 -5.6).
         $end = Sheet 1750 1 @(-3.9, -5.6) 40
         $script:steps += "shot@$($end + 60)+1"

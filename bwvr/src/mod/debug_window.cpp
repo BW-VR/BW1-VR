@@ -800,19 +800,23 @@ void NoticeIcon(const card_scroll::Picture& to, float cx, float cy) {
 }
 
 // The words of the bottom row in the box: one line in the middle of the
-// box, or two lines of a smaller font when they do not fit in one.
+// box, in the font of the bottom row or in the smaller font of the notes,
+// else two lines of the small font, each whole in the box.
 void StatusWords(const card_scroll::Picture& to, const wchar_t* words,
                  const int box[4]) {
   kit::Canvas* c = &g_canvas;
-  const int one = kit::InkLines(c, to, g_status_font, L"Ag", box, 13, false);
-  if (kit::InkLines(c, to, g_status_font, words, box, 13, false) <= one) {
-    kit::InkWordsIn(c, to, g_status_font, words, box, 13, kit::kLeftAlign);
-    return;
+  const kit::Font* fonts[2] = {&g_status_font, &g_note_font};
+  for (const kit::Font* font : fonts) {
+    const int one = kit::InkLines(c, to, *font, L"Ag", box, 13, false);
+    if (kit::InkLines(c, to, *font, words, box, 13, false) <= one) {
+      kit::InkWordsIn(c, to, *font, words, box, 13, kit::kLeftAlign);
+      return;
+    }
   }
-  const int all = kit::InkLines(c, to, g_note_font, words, box, 13, false);
+  const int all = kit::InkLines(c, to, g_small_font, words, box, 13, false);
   const int top = box[1] + (box[3] - box[1] - all) / 2;
   const int b[4] = {box[0], top < box[1] ? box[1] : top, box[2], box[3]};
-  kit::InkLines(c, to, g_note_font, words, b, 13, true);
+  kit::InkLines(c, to, g_small_font, words, b, 13, true);
 }
 
 // The parchment look: the parts that changed. The log says when only the

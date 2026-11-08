@@ -3651,6 +3651,7 @@ void CreatureChecks() {
 #include "creature_touch_checks.h"
 #include "eye_cant_checks.h"
 #include "view_check_checks.h"
+#include "panel_raster_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4101,6 +4102,7 @@ int main() {
   hint_model_checks::HintModelChecks();
   eye_cant_checks::EyeCantChecks();
   view_check_checks::ViewCheckChecks();
+  panel_raster_checks::PanelRasterChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

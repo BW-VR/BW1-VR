@@ -29,3 +29,11 @@
 - "the player chose "names": the key scan code 0x31, frame 801", "the villager names are on, frame 802". Again at frame 951: "the villager names are off".
 - The pause is not tested: at frame 1221 the ring opens at -0.160 -0.240 -0.420 m (not at -0.200 -0.300 -0.350 m), the hand is on "save", and "the player chose "save"" at frame 1251. "save card : the game saved in 216 ms (result 1), frame 1377". desk_run put the profile back after the run: the files of the profile in the game folder have their old times.
 - The ring pictures (mod art, in test-results/job66): page 1 with the new icons (the leash, the places pin, the names card), page 2, and the cards "Show villager names", "Hide villager names", "Pause the game" and "Quick save".
+
+## Job 70: rg5b and rg6b (agent/radial 57fd9c9)
+
+`.\dev.ps1 build -Clean`: 6160 checks, 0 failed. Both are RUN DONE. Page 1: "leash, places_page, recenter, none, more, settings, names, pause". Each ring opens at -0.200 -0.300 -0.350 m.
+
+- rg5b: bookmark 1 is set on the land. For bookmark 2 the test aim is on the Sheep 13AD5D30 at frame 593, then "the aim is on the land at 1998.3 2324.4, frame 605", and the grip at 631 sets bookmark 2 on the land. No fn_00439F70 line. Eye shot 1340: the ray ends at a gold mark on the land, and no creature has a halo. Bookmark 1 moves the view. Remove bookmark 2 gives "bookmark 2 is not set". The last sheet has "add at 1.9 -5.6", and "the aim of bookmark 2 stops: the player pressed B, frame 1651".
+- rg6b: the round closes with no choice, More shows page 2, the names go on and off. No save line.
+- The profile after the runs: the files of Profiles\_B_u_c_k in the game folder and in its VirtualStore copy have their old times (6 November). The rg6 save of job 66 is not in the profile.

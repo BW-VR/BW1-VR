@@ -18,7 +18,7 @@
 
 There is no "job icon : the job icon N over a villager" line and no "draws of the job icon this window" line in either run. The hook did not go in (the line above).
 
-Also, the zoom and the seek steps did not act in either run. There is no "zoomed" line and no "seek plan" line, although bwvr.ini.run has `seek_plan=gostore,store,villager,villager,store` and the steps stick_up@800, stick_up@830 and seek@920 to seek@1260. The view stays at the start place before the Village Store, and the Hand holds no villager. The ring steps acted.
+The seek steps and the grip acted: seek plan gostore (frame 192), store (272), villager 13AE1054 (312 and 422), store (532), and "the grip picks it up" for the Villager 13AE1054 at frame 424, with the fake grip down at frame 430. To reach the villager, the fake hand steps to -142.5 -39.8 64.8 cm, so the held villager is out of the left eye pictures. The zoom did not act: "the stick asks the God view to zoom in" at frames 71 and 101, and no "zoomed" line follows. The view stays at 100 units per meter.
 
 ## The names
 
@@ -28,7 +28,7 @@ Also, the zoom and the seek steps did not act in either run. There is no "zoomed
 
 ## Measured in the left eye pictures (log frame 403)
 
-- The job icon: not seen in A or in B (no villager in the Hand, and no hook).
+- The job icon: not seen in A or in B (the held villager is out of the pictures, and no hook).
 - A capital letter of a details card: about 10 px high in A, about 19 px in B.
 - The B cards are whole, and the text is clear. Many cards are in view at the same time, so in B the cards of near villagers overlap each other, and the column of cards over the far villagers reaches the top edge of the view. A card does not overlap itself.
 

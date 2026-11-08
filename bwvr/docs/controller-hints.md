@@ -1547,15 +1547,17 @@ With `hint_style=2` (the default) the mod does what Half-Life: Alyx does
 2. The body of the controller is faint: a warm parchment tone at 30
    percent alpha, with a dark brown ink outline at its silhouette, so it
    reads on bright land.
-3. Each button of a hint is solid and lit in a warm gold. A pressed button
-   moves as the model says (the press, below).
+3. Each button of a hint is solid and lit in a warm gold that pulses: one
+   slow beat a second, from 35 percent of the light to full light and back
+   (`PulseLevel`). A new set of lit buttons starts at full light. A pressed
+   button moves as the model says (the press, below).
 4. Each lit button has its own small scroll card beside the controller, with
    a line of ink, 2 mm across, from the button to the middle of the inner
    edge of its card. A dot of ink marks the place where the line leaves the
    box of its button.
-5. The hand of the player stays, at 35 percent of its opacity
-   (`HandOpacity`). So the player still sees where the Hand touches, and the
-   controller shows through the hand.
+5. The hand of the player stays, at 68 percent of its opacity
+   (`HandOpacity`, `hint_hand_opacity_pct`). So the player still sees where
+   the Hand touches, and the controller shows through the hand.
 
 The logic of when a line shows does not change: the prompts (9.4), the
 hints of the game (9.9) and the lines that the player knows (9.10) are the
@@ -1682,6 +1684,8 @@ shows each card. The controller and the lines are in the eye pictures.
 | Key of `bwvr.ini` | Default | Meaning |
 | --- | --- | --- |
 | `hint_style` | 2 | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3), with the pictures of the buttons (9.13). The launcher row "Hints with the controller" |
+| `hint_hand_opacity_pct` | 68 | The opacity of the hand while its controller shows, in percent. 35 is the fainter hand |
+| `hint_pulse` | 1 | 1 the lit buttons pulse, one beat a second from 35 percent of the light to full light. 0 a steady light |
 | `hint_body_fine` | 1 | 1 the simpler body of a heavy model has cells of 3.4 mm at most and a cell for each side of the normal, so the ink outline of a thin part (a ring, a strap) does not break. 0 the cells grow until the body has 2500 triangles, with one cell for all the normals |
 | `hint_model_test` | empty | Test key. The folder of a model for both hands, for example `valve-index`, in place of the model of the profile |
 | `hint_model_test_dir` | empty | Test key. The folder of the models. Empty is `bwvr-controllers` beside `runblack.exe`. `desk_test.ps1` sets `bwvr\assets\controllers` of its worktree |
@@ -1691,7 +1695,9 @@ live comparison.
 
 **The log.**
 
-- `hint model   : hint_style=2, ...` once, with the folder of the models.
+- `hint model   : hint_style=2, ...` once, with the folder of the models,
+  and `hint model   : hint_hand_opacity_pct=68, ... hint_pulse=1, ...` with
+  the opacity of the hand and the light of the lit buttons.
 - `hint model   : the right hand reports the profile "oculus/touch_controller"
   and the headset "Meta Quest 3", so the model is meta-quest-touch-plus`:
   once for each hand, and again when the model changes.

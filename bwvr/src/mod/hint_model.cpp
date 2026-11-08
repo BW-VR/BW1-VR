@@ -62,6 +62,11 @@
 //                         normal, so the ink outline of a thin part does not
 //                         break. 0 the cells grow until the body has 2500
 //                         triangles, with one cell for all the normals
+//   hint_hand_opacity_pct=68
+//                         the opacity of the hand while its controller
+//                         shows, in percent. 35 is the fainter hand
+//   hint_pulse=1          1 the lit buttons pulse, one slow beat a second
+//                         from dim to full light. 0 a steady light
 //   hint_model_test       a test key: the folder of a model (for example
 //                         valve-index) for both hands, in place of the one of
 //                         the profile
@@ -120,6 +125,8 @@ bool g_read = false;
 int g_style = 2;          // hint_style, and its test key
 bool g_test_keys = false;
 bool g_body_fine = true;  // hint_body_fine
+int g_hand_opacity_pct = hint_model::kHandOpacityPct;  // hint_hand_opacity_pct
+bool g_pulse = true;      // hint_pulse
 char g_test_model[64] = "";
 char g_dir[MAX_PATH] = "";
 
@@ -147,6 +154,11 @@ void ReadSettings() {
   if (g_style != 1) g_style = 2;
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, ini) != 0;
   g_body_fine = GetPrivateProfileIntA("bwvr", "hint_body_fine", 1, ini) != 0;
+  g_hand_opacity_pct = static_cast<int>(GetPrivateProfileIntA(
+      "bwvr", "hint_hand_opacity_pct", hint_model::kHandOpacityPct, ini));
+  if (g_hand_opacity_pct < 0) g_hand_opacity_pct = 0;
+  if (g_hand_opacity_pct > 100) g_hand_opacity_pct = 100;
+  g_pulse = GetPrivateProfileIntA("bwvr", "hint_pulse", 1, ini) != 0;
   GetPrivateProfileStringA("bwvr", "hint_model_test", "", g_test_model,
                            sizeof(g_test_model), ini);
   char dir[MAX_PATH] = "";
@@ -170,6 +182,12 @@ void ReadSettings() {
                       : "the hints are on the cards at the wrists",
          g_dir, g_test_model[0] != 0 ? ". hint_model_test gives the model " : "",
          g_test_model);
+  ModLog("hint model   : hint_hand_opacity_pct=%d, the hand is at %d percent of "
+         "its opacity while its controller shows. hint_pulse=%d, %s",
+         g_hand_opacity_pct, g_hand_opacity_pct, g_pulse ? 1 : 0,
+         g_pulse ? "the lit buttons pulse from dim to full light, one beat a "
+                   "second"
+                 : "the lit buttons have a steady light");
 }
 
 // --- the model -----------------------------------------------------------------------
@@ -995,6 +1013,10 @@ struct Side {
   int column_control[kHintModelCards];
   uint64_t frames_shown;
   bool said_show;
+  // The pulse of the lit buttons: the controls that are lit (a bit for each
+  // control), and the time when that set began.
+  unsigned pulse_controls;
+  int64_t pulse_start;
 };
 Side g_side[2] = {};
 
@@ -1313,7 +1335,7 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
   for (int k = 0; k < 3; ++k) hand.position[k] += stop[k];
   Built& b = g_built[side];
   b.have = false;
-  const Side& s = g_side[side];
+  Side& s = g_side[side];
   Model* m = g_model[side];
   if (m == nullptr || !real.valid || !(s.fade > 0.0f) || !(units > 0.0f)) {
     return;
@@ -1352,10 +1374,26 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
     if (m->value_node[control] >= 0) lit_owner[lit_count++] = m->value_node[control];
   }
   const float fade = s.fade;
+  // THE PULSE. A new set of lit buttons starts its beat at full light. The
+  // time is read once in a frame, so both eyes have one light.
+  unsigned controls = 0;
+  for (int c = 0; c < s.count; ++c) {
+    const int control = s.card[c].control;
+    if (control >= 0 && control < art::kControls) controls |= 1u << control;
+  }
+  const int64_t now = Now();
+  if (controls != s.pulse_controls || s.pulse_start == 0) {
+    s.pulse_controls = controls;
+    s.pulse_start = now;
+  }
+  const float pulse =
+      g_pulse ? hm::PulseLevel(static_cast<double>(now - s.pulse_start) /
+                               static_cast<double>(g_frequency.QuadPart))
+              : 1.0f;
   uint32_t gold[kLevels + 1], parchment[kLevels + 1];
   for (int l = 0; l <= kLevels; ++l) {
     const float up = static_cast<float>(l) / kLevels;
-    gold[l] = Argb(kGold, 0.55f + 0.45f * up, fade);
+    gold[l] = Argb(kGold, (0.55f + 0.45f * up) * pulse, fade);
     parchment[l] = Argb(kParchment, 0.50f + 0.50f * up, hm::kBodyAlpha * fade);
   }
   // The y of a normal in the world: the second row of the rotation, with
@@ -1472,7 +1510,7 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
     if (m->lit_mesh[control]) {
       AddDiamond(&b, from, kDotRadiusM * units, ink);
     } else {
-      AddDiamond(&b, from, kMarkRadiusM * units, Argb(kGold, 1.0f, fade));
+      AddDiamond(&b, from, kMarkRadiusM * units, Argb(kGold, pulse, fade));
     }
   }
   b.have = true;
@@ -1830,6 +1868,8 @@ bool HintModelPlace(int which, const HintModelCard* cards, int count,
   s.show = show && count > 0;
   s.fade = hint_card_math::FadeStep(
       s.fade, s.show, dt, s.show ? hm::kModelFadeIn : hm::kModelFadeOut);
+  // A controller that faded out starts its next pulse at full light.
+  if (!(s.fade > 0.0f)) s.pulse_start = 0;
   if (s.show) {
     ++s.frames_shown;
     if (!s.said_show) {
@@ -1980,7 +2020,7 @@ float HintModelHandOpacity(int side) {
   if (side < 0 || side > 1 || g_style != 2 || g_model[side] == nullptr) {
     return 1.0f;
   }
-  return hm::HandOpacity(g_side[side].fade);
+  return hm::HandOpacity(g_side[side].fade, g_hand_opacity_pct);
 }
 
 int HintModelDraw(IDirect3DDevice7* device, const float camera[12],

@@ -417,10 +417,44 @@ inline void HintModelChecks() {
 
   // THE HAND WHILE THE CONTROLLER SHOWS.
   const bool faint = hm::HandOpacity(0.0f) == 1.0f &&
-                     fabsf(hm::HandOpacity(1.0f) - 0.35f) < 1e-6f &&
-                     hm::HandOpacity(2.0f) == hm::HandOpacity(1.0f);
-  Check(faint, "the hand goes to 35 percent while the controller shows, and "
-        "back with the fade", hm::HandOpacity(1.0f), 0.35);
+                     fabsf(hm::HandOpacity(1.0f) - 0.68f) < 1e-6f &&
+                     hm::HandOpacity(2.0f) == hm::HandOpacity(1.0f) &&
+                     fabsf(hm::HandOpacity(0.5f) - 0.84f) < 1e-6f;
+  Check(faint, "the hand goes to 68 percent while the controller shows, and "
+        "back with the fade", hm::HandOpacity(1.0f), 0.68);
+  // Half of the clear part of the old 35 percent: 1 - (1 - 0.35) / 2.
+  Near("68 percent is the old clear part halved, to a percent",
+       hm::HandOpacity(1.0f), 1.0 - (1.0 - 0.35) * 0.5, 0.0051);
+  Near("hint_hand_opacity_pct=35 gives the old opacity",
+       hm::HandOpacity(1.0f, hm::kHandOpacityPctOld), 0.35, 1e-6);
+  Near("hint_hand_opacity_pct=100 keeps the hand", hm::HandOpacity(1.0f, 100),
+       1.0, 1e-6);
+
+  // THE PULSE OF A LIT BUTTON.
+  Near("the pulse starts at full light", hm::PulseLevel(0.0), 1.0, 1e-6);
+  Near("half a beat later it is dim", hm::PulseLevel(0.5 / hm::kPulseHz),
+       hm::kPulseDim, 1e-5);
+  Near("one beat later it is full again", hm::PulseLevel(1.0 / hm::kPulseHz),
+       1.0, 1e-5);
+  Near("a beat is one second", hm::kPulseHz, 1.0, 1e-6);
+  {
+    // The light stays in the range, and no frame of 90 Hz steps by more
+    // than 4 percent: a smooth beat, with no flash.
+    float low = 1.0f, high = 0.0f, step = 0.0f;
+    float last = hm::PulseLevel(0.0);
+    for (int f = 1; f <= 900; ++f) {
+      const float level = hm::PulseLevel(f / 90.0);
+      if (level < low) low = level;
+      if (level > high) high = level;
+      if (fabsf(level - last) > step) step = fabsf(level - last);
+      last = level;
+    }
+    Check(low >= hm::kPulseDim - 1e-5f && high <= 1.0f + 1e-6f,
+          "the pulse stays between the dim level and full light", low,
+          hm::kPulseDim);
+    Check(step < 0.04f, "a frame of 90 Hz changes the light by less than 4 "
+          "percent", step, 0.04);
+  }
 }
 
 }  // namespace hint_model_checks

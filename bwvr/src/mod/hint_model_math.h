@@ -788,15 +788,43 @@ const float kModelFadeIn = 0.20f;
 const float kModelFadeOut = 0.35f;
 // The alpha of the body of the controller, at full fade.
 const float kBodyAlpha = 0.30f;
-// The share of the opacity of the hand that goes while the controller
-// shows: the hand stays, faint, so the player still sees where the Hand
-// touches, and the controller shows through it.
-const float kHandFaint = 0.65f;
+// The opacity of the hand while the controller shows, in percent
+// (hint_hand_opacity_pct). The hand stays, faint, so the player still sees
+// where the Hand touches, and the controller shows through it. 68 percent
+// keeps half of the clear part of 35 percent: 1 - (1 - 0.35) / 2 = 0.675.
+const int kHandOpacityPct = 68;
+const int kHandOpacityPctOld = 35;
 
-inline float HandOpacity(float fade) {
+// The opacity of the hand at a fade of its controller: 1 with no
+// controller, opacity_pct at full fade.
+inline float HandOpacity(float fade, int opacity_pct = kHandOpacityPct) {
   if (!(fade > 0.0f)) return 1.0f;
   if (fade > 1.0f) fade = 1.0f;
-  return 1.0f - kHandFaint * fade;
+  if (opacity_pct < 0) opacity_pct = 0;
+  if (opacity_pct > 100) opacity_pct = 100;
+  const float faint = 1.0f - static_cast<float>(opacity_pct) * 0.01f;
+  return 1.0f - faint * fade;
+}
+
+// THE PULSE of a lit button (hint_pulse=1). The gold of the lit parts goes
+// from full to kPulseDim of its light and back, kPulseHz times a second, on
+// a cosine with no hard step. It starts at full when the lit buttons of the
+// hand change, so a new hint shows at full light first. One beat a second
+// is fast enough to call the eye, and slow enough to read as a call and not
+// as a warning flash. The dim level keeps the button gold and solid on the
+// faint body, so the player can find it at each moment of the beat.
+const float kPulseHz = 1.0f;
+const float kPulseDim = 0.35f;
+
+// The light of a lit part, from 0 to 1, seconds after the start of its
+// pulse. 1 at the start and at each whole beat, kPulseDim at each half beat.
+inline float PulseLevel(double seconds) {
+  if (!(seconds > 0.0)) return 1.0f;
+  double beats = seconds * static_cast<double>(kPulseHz);
+  beats -= floor(beats);
+  const float wave =
+      0.5f + 0.5f * static_cast<float>(cos(6.283185307179586 * beats));
+  return kPulseDim + (1.0f - kPulseDim) * wave;
 }
 
 }  // namespace hint_model

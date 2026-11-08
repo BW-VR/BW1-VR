@@ -207,6 +207,13 @@ inline float LowestScale(int tenths, float life) {
 // than need may go on while it does not come nearer. Gives the share of the
 // step, from 0 to 1. Twenty halvings find the limit within a millionth of
 // the step.
+//
+// Only a step in can stop. A step out makes the world smaller about the
+// point of the zoom and lifts the head over the land, so it always goes: the
+// player must be able to zoom out of each place. MayStop gives true for the
+// ratio of a step in (less than 1).
+inline bool MayStop(float ratio) { return ratio < 1.0f; }
+
 template <typename Clear>
 inline float StepShare(Clear clear, float need) {
   const float now = clear(0.0f);

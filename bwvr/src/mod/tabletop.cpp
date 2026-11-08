@@ -1655,7 +1655,9 @@ float ZoomSolidRatio(const TablePose& pose, const float room[3],
   stop->short_step = false;
   stop->full_cm = 0.0f;
   stop->object = nullptr;
-  if (g_settings.god_zoom_solid_stop == 0 || ratio == 1.0f) return ratio;
+  if (g_settings.god_zoom_solid_stop == 0 || !zoom_math::MayStop(ratio)) {
+    return ratio;
+  }
   static void* objects[solid_math::kMostSolids];
   static solid_math::Solid solids[solid_math::kMostSolids];
   const int count =

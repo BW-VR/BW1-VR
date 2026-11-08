@@ -450,6 +450,11 @@ inline void StepShareChecks() {
   const auto worse = [](float t) { return 0.02f - 0.10f * t; };
   Check(StepShare(worse, 0.05f) < 1e-5f, "a head nearer than the limit does "
         "not go nearer", StepShare(worse, 0.05f), 0);
+  // Only a step in can stop. A step out always goes, also when it brings
+  // the head nearer to a solid.
+  Check(MayStop(1.0f / 1.5f), "a step in can stop at a solid", 1, 1);
+  Check(!MayStop(1.5f), "a step out never stops at a solid", 0, 0);
+  Check(!MayStop(1.0f), "no step does not stop", 0, 0);
 }
 
 inline void ZoomChecks() {

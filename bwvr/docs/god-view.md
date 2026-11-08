@@ -254,7 +254,9 @@ rules keep a house from covering the view of a head that is not in it:
   room for the Hand between the eyes and the wall, and the eyes see the
   wall with the land beside it. The overlay of the head blinder starts at
   5 cm, and a value of 5 stops the step there. A step that cannot go at all
-  is refused. A head that is already nearer than the limit may zoom away
+  is refused. Only a step in stops: a step out makes the world smaller about
+  the point of the zoom and lifts the head over the land, so it always goes,
+  and the player can zoom out of each place. A head that is already nearer than the limit may zoom away
   from the solid, but not nearer. The eaves of the roof can be nearer than
   the limit, because the box of a house below the life size scale is its
   walls. The

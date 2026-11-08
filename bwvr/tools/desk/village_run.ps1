@@ -245,9 +245,13 @@ if ($Kind -eq 'totem') {
     if ($Census -eq '') { $Census = '890' }
     if ($Parts -eq '') { $Parts = 'tab2 page1 item2 page9 close' }
     if ($Steps -eq '') {
-        $Steps = 'aimdebug@1400+1 trigger@1410+4 aimdebug@1460+1 trigger@1470+4 ' +
-                 'aimdebug@1520+1 trigger@1530+4 aimdebug@1580+1 ' +
-                 'aimdebug@1680+1 trigger@1690+4 lstick_click@1760+60 y@1900+200'
+        # The first aimdebug aims at the button of the welcome page, then
+        # one aimdebug for each word of -Parts. The shots are eye pictures
+        # (with the renderer dxwrapper): the tab Controls, the list, the
+        # new job, and the ray on B.
+        $Steps = 'aimdebug@1400+1 trigger@1410+4 aimdebug@1460+1 trigger@1470+4 shot@1500+1 ' +
+                 'aimdebug@1520+1 trigger@1530+4 shot@1560+1 aimdebug@1580+1 trigger@1590+4 shot@1620+1 ' +
+                 'aimdebug@1640+1 shot@1680+1 aimdebug@1700+1 trigger@1710+4 lstick_click@1780+60 y@1920+200'
     }
     # test_frame_rate=60: the frames of the steps count for a game at 60
     # frames a second, also with the renderer Vulkan.

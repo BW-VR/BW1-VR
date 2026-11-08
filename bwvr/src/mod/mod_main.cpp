@@ -967,7 +967,7 @@ void ReadSettings() {
     // THE GOD VIEW (play_mode=4). Not in the launcher, except the play mode.
     // The ground is god_ground_down_cm below the head at the last recenter.
     // The view starts at god_units_per_meter, and a zoom step changes the
-    // scale by god_zoom_step_pct, from the life size scale up to
+    // scale by god_zoom_step_pct, from god_near_units_per_meter_x10 up to
     // god_far_units_per_meter. A ground step is god_ground_step_cm.
     t.god_down_cm = number("god_ground_down_cm", 60);
     t.god_units_per_meter = number("god_units_per_meter", 100);
@@ -995,6 +995,9 @@ void ReadSettings() {
     t.god_zoom_about_test = number("god_zoom_about_test", 0);
     t.god_step_cm = number("god_ground_step_cm", 5);
     t.god_most_units = number("god_far_units_per_meter", 4000);
+    // The nearest zoom, in tenths: 10 is 1 unit for each meter, where a
+    // villager is as high as the player. 75 is the life size scale.
+    t.god_least_tenths = number("god_near_units_per_meter_x10", 10);
     // Where the player goes when the game puts its own camera at a place:
     // 1 follows the game, with the land point that the camera looks at
     // god_spawn_ahead_cm in front of the head. 0 builds the view only at the

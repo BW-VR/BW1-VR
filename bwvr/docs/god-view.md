@@ -42,7 +42,8 @@ sets the flags of each mode.
 - **The zoom** changes the scale about the land point that the player looks
   at (`god_zoom_about`, 1), so the thing in the middle of the view stays where
   it is and only its size changes. The ground keeps its height. It goes from
-  the life size scale (7.5 units per meter) to 4000, in steps of 1.5 times.
+  1 unit per meter, where a villager is as high as the player, to 4000, in
+  steps of 1.5 times.
   With `god_zoom_smooth=1` the stick zooms while it is held, with no steps.
 - **The ground height** goes up and down with the left grip: the hand pulls
   the land up and down one to one. The mouse player has steps of 5 cm (the
@@ -140,7 +141,7 @@ room:
 
 ```
 W  = the point of the zoom
-s' = s * ratio,  kept between 7.5 and god_far_units_per_meter
+s' = s * ratio,  kept between the lowest scale and god_far_units_per_meter
 G' = W + (s' / s) * (G - W)
 ```
 
@@ -197,11 +198,41 @@ high. A pan can bring one over the head. So the level is first kept between
 nearer to that height. After 14 steps out at the life size scale, a hill top
 12.73 m over the head is 5.6 cm under it.
 
-**The limits.** 7.5 units per meter is the life size scale of
+**The limits.** The lowest scale is 1 unit per meter
+(`god_near_units_per_meter_x10`, 10). A villager is about 1.6 units high: the
+body that the hand pick finds has a half height of 0.70 to 0.85 units, and
+the game holds a villager with a height of 1.66 units. So at 1 unit per meter
+a villager is 1.6 m high in the room, as high as the player, and the eyes of
+a player who stands with the land at the feet are at the eyes of a villager.
+A value of 75 stops the zoom at the life size scale (7.5 units per meter,
+`head_units_per_meter_x10`), and 0 takes that scale from
 `head_units_per_meter_x10`. At 4000 an arm of 70 cm reaches 2800 units, which
 is inside the Hand's reach of 5600 (section 8). `god_far_units_per_meter` can
-go up to 8000. A step at a limit does nothing and is logged. From 7.5 to 4000
-is 16 steps.
+go up to 8000. A step at a limit does nothing and is logged. From the start
+scale of 100, 12 steps in go to 1 unit per meter. From 1 to 4000 is 21
+steps, and 5 steps out from 1 go past the life size scale, to 7.6.
+
+**Below the life size scale.** Each distance of the room stays the same as at
+the other scales: the Hand is 19 cm long (size 0.06), the near plane is 5 cm
+(0.05 units, section 8), the walk goes 150 cm a second (1.5 units), the reach
+of the teleport arc is 10 units. The distance factor of the ears is 0.25,
+so a sound with the maximum 300 carries 75 m of the room (`audio.md`, 6.3). The values of section 8 that follow the scale stay the
+game's own below a gain of 1. The land under the head keeps the height that
+the player gave it. A zoom in does not lower it: the player pulls the land
+down with the grip of the other hand, to at most 2.5 m below the head
+(section 3). At 1 unit per meter with the land 60 cm below the head, a
+villager stands 1 m over the eyes. With the land 1.4 to 1.6 m below the head,
+the player sees the village from the eyes of a villager. The head stops at
+houses as at each scale (section 5.9), so a house that the player walks into
+covers the view. The land of the game has cells of 10 units, which are 10 m at
+1 unit per meter, so the land looks flat and its texture is soft there.
+
+A zoom in that comes to the lowest scale logs one line, and it comes again
+only after the scale went above it:
+
+```
+god view     : the zoom is at its lowest scale, 1.00 units per meter (god_near_units_per_meter_x10=10). A villager of 1.6 units is 1.60 m high in the room, and the land under your head is 0.60 m below it
+```
 
 **The inputs.** The right stick forward zooms out, and back zooms in
 (`god_zoom_forward_in=0`, "Stick forward" in the launcher). With 1 the stick
@@ -459,7 +490,8 @@ and the ground limits added.
   the press stays, so two hands move the land only across.
 - The solve is from the press every time, so a head that moves with still
   hands moves nothing, and nothing moves after the release.
-- The scale stays between 7.5 and `god_far_units_per_meter`. The mouse pan
+- The scale stays between the lowest scale (section 2) and
+  `god_far_units_per_meter`. The mouse pan
   never lifts or drops the view: its hand is on the level plane of the press.
 - The game's camera switches hold for the grab (section 7, "The tutorial").
   While the switch for the drag is off, the grab moves nothing, and it
@@ -1067,8 +1099,8 @@ The Hand's size is the real hand at the scale now:
 size = hand_real_cm * hand_scale_pct / 100 * s / 3.2
 ```
 
-It is 19 cm long in the room at every scale: size 0.45 at 7.5 units per
-meter, 5.9 at 100, and 237.5 at 4000. So zoomed out it is large against the
+It is 19 cm long in the room at every scale: size 0.06 at 1 unit per meter,
+0.45 at 7.5 units per meter, 5.9 at 100, and 237.5 at 4000. So zoomed out it is large against the
 villagers, and a held villager takes the size of the Hand, as the game does.
 
 The controllers place the Hand through the God view's room with no reach
@@ -1432,8 +1464,9 @@ at the table scale"), but they follow the scale. The gain is `s / 7.5`.
 | Fog | `0x00C37204` | the game's below a gain of 3, off above it |
 | Reflection | `0x00E9CD8C` | the game's below a gain of 3, off above it |
 
-At the life size scale every value is the game's own. A distance in the room
-stays the same at every zoom. The fog ends at 900 units, which is 40 m of the
+At the life size scale and below it every value is the game's own: a value
+never goes below the game's. Above it a distance in the room stays the same
+at every zoom. The fog ends at 900 units, which is 40 m of the
 room at a gain of 3 (22.5 units per meter). Past that the fog would cover the
 island, so it goes off, as on the table.
 
@@ -1448,6 +1481,7 @@ bit) the game's 3.5 is nearer, and it stays.
 
 | Scale (units per meter) | Near plane, 24 bit | Near plane, 16 bit |
 | --- | --- | --- |
+| 1 (the lowest scale) | 0.05 units, 5 cm | 0.1 units, 10 cm |
 | 7.5 (life size) | 0.375 units, 5 cm | 0.75 units, 10 cm |
 | 22.5 | 1.125 units, 5 cm | 2.25 units, 10 cm |
 | 35 | 1.75 units, 5 cm | 3.5 units, the game's |
@@ -1579,6 +1613,7 @@ section 5.8.
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
+| `god_near_units_per_meter_x10` | 10 | The nearest zoom, in tenths of a unit per meter (section 2, "The limits"). 10: 1 unit per meter, where a villager is as high as the player. 75: the life size scale. 0: the life size scale of `head_units_per_meter_x10` |
 | `god_spawn` | 1 | 1: the player goes where the game puts its own camera (section 15). 0: the view is built at the start, a load and the end of a story only, with the focus under the recenter pose |
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
 | `god_camera_at` | 1 | 1: the game camera is over the land point under the head. 0: over the recenter place (section 7). Ctrl and Numpad 1 change it with `test_keys=1` |
@@ -1682,6 +1717,11 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
   under the head moves a half and a third of the distance to the point, and
   the step back puts it under the head again. The point of a hold keeps its
   room point while the head turns 9 degrees.
+- The lowest scale (`zoom_checks.h`, `LowestChecks`): the default key gives
+  1 unit per meter, 75 and 0 give 7.5, and a villager of 1.6 units is 1.6 m
+  high there. 12 steps in from 100 stop at 1, 5 steps out from 1 give 7.59,
+  a key of 75 stops a step in at 7.5, and a step to the lowest scale keeps
+  the point of the zoom in the room.
 - A ground step raises every land point 5 cm in the room and not across, and a
   step down puts it back.
 - A snap turn keeps the head's world point, and a turn of 90 degrees right
@@ -2079,14 +2119,14 @@ stays, and the glow over it is 2.5 cm. The ring has no glow.
 
 **The size of the ring.** By default (`teleport_ring_mode=1`) the ring has one
 size in the world: an outer radius of 11 units (`teleport_ring_units`). The
-God view scale goes from 7.5 units a meter (life size) to 4000, and the start
+God view scale goes from 1 unit a meter to 4000, and the start
 scale is 100. At the start scale the ring is 11 cm of the room. It gets
 larger in the room when the player zooms in and smaller when the player zooms
 out, but never smaller than 4 cm (`teleport_ring_min_cm`) and never larger
 than 40 cm (`teleport_ring_max_cm`). So the ring says how large the place is
 from 27.5 to 275 units a meter (about 3 zoom steps in and 4 steps out from
 the start scale). Outside this range it has the limit: 40 cm at life size
-(0.3 units) and 4 cm at 4000 units a meter (160 units). The lift of 2 cm
+(3 units), 40 cm at 1 unit a meter (0.4 units), and 4 cm at 4000 units a meter (160 units). The lift of 2 cm
 stays in the room at each size. The rule is in `teleport_math.h`.
 `teleport_ring_mode=0` gives a ring of one size in the room
 (`teleport_ring_cm`, 11 by default). The overlay

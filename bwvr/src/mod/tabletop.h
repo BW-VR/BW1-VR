@@ -45,6 +45,10 @@ struct TabletopSettings {
   int god_zoom_about_test = 0;   // god_zoom_about_test: a test, see below
   int god_step_cm = 5;           // god_ground_step_cm: one ground step
   int god_most_units = 4000;     // god_far_units_per_meter: the farthest zoom
+  // The nearest zoom, in tenths of a unit for each meter: 10 is about the
+  // eyes of a villager, 75 is the life size scale, and 0 takes the life size
+  // scale of head_units_per_meter_x10 (docs/god-view.md, "The limits").
+  int god_least_tenths = 10;     // god_near_units_per_meter_x10
   // Where the player goes when the game puts its own camera at a place
   // (docs/god-view.md, "The place at a camera of the game").
   int god_spawn = 1;             // god_spawn: 1 follows the game, 0 does not

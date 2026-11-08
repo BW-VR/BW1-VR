@@ -949,11 +949,11 @@ TablePose Pose() {
   return pose;
 }
 
-// The limits of the scale in the God view: the life size scale, and
+// The limits of the scale in the God view: god_near_units_per_meter_x10 (1
+// unit for each meter, where a villager is as high as the player), and
 // god_far_units_per_meter.
 float GodLowest() {
-  const float life = HeadPoseScale();
-  return life > 0.0f ? life : 7.5f;
+  return zoom_math::LowestScale(g_settings.god_least_tenths, HeadPoseScale());
 }
 
 float GodHighest() {
@@ -1599,6 +1599,34 @@ float ZoomClearHead(TablePose* pose, const float room[3],
   return down;
 }
 
+// THE LOWEST SCALE. One log line each time a zoom in comes to the lowest
+// scale (god_near_units_per_meter_x10): the size of a villager in the room,
+// and the land under the head. Below the life size scale the land stays at
+// the height that the player gave it, so a player who wants the eyes of a
+// villager lowers the land with the grip of the other hand. The line comes
+// again only after the scale went above the lowest scale.
+bool g_said_lowest = false;
+
+void SayLowest(const TablePose& pose, const float room[3],
+               const float head[3]) {
+  const float lowest = GodLowest();
+  if (!(pose.scale <= lowest * 1.0001f)) {
+    g_said_lowest = false;
+    return;
+  }
+  if (g_said_lowest || !ZoomLog()) return;
+  g_said_lowest = true;
+  float at[3];
+  PoseWorld(pose, room, head, at);
+  const float under = head[1] - GroundInRoom(pose, room, GroundAt(at[0], at[2]));
+  ModLog("god view     : the zoom is at its lowest scale, %.2f units per meter "
+         "(god_near_units_per_meter_x10=%d). A villager of %.1f units is "
+         "%.2f m high in the room, and the land under your head is %.2f m "
+         "below it", lowest, g_settings.god_least_tenths,
+         zoom_math::kVillagerUnits, zoom_math::kVillagerUnits / pose.scale,
+         under);
+}
+
 // THE STEPS OF THE GOD VIEW, once a frame, at the main camera call: a snap
 // turn, a zoom step and a step of the ground, each at most once. Each one
 // is an instant step, never a glide. A step moves the land under the player
@@ -1690,6 +1718,7 @@ void ApplyGodSteps() {
       pose = next;
       moved = true;
       placed = true;
+      SayLowest(next, room, head);
       Help(kHelpZoom, kInputWheel);
     } else {
       ++g_god_refused;
@@ -2164,6 +2193,7 @@ void ApplyGodZoomHold(double frame_seconds) {
   g_hold.under[0] = under[0];
   g_hold.under[1] = under[2];
   PoseRoom(Pose(), room, g_hold.point.pivot, g_hold.point_now);
+  SayLowest(Pose(), room, head);
   Help(kHelpZoom, kInputWheel);
 }
 
@@ -2822,6 +2852,12 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   // Hand (kReach).
   if (g_settings.god_most_units < 10) g_settings.god_most_units = 10;
   if (g_settings.god_most_units > 8000) g_settings.god_most_units = 8000;
+  // 0 is the life size scale. 1 is a tenth of a unit for each meter, where
+  // a villager is 16 m high.
+  if (g_settings.god_least_tenths < 0) g_settings.god_least_tenths = 0;
+  if (g_settings.god_least_tenths > 10 * g_settings.god_most_units) {
+    g_settings.god_least_tenths = 10 * g_settings.god_most_units;
+  }
   g_settings.god_spawn = g_settings.god_spawn != 0 ? 1 : 0;
   if (g_settings.god_spawn_ahead_cm < 0) g_settings.god_spawn_ahead_cm = 0;
   if (g_settings.god_spawn_ahead_cm > 150) g_settings.god_spawn_ahead_cm = 150;

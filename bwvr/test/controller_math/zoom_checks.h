@@ -357,6 +357,76 @@ inline void ZoomPointChecks() {
   }
 }
 
+// THE LOWEST SCALE (god_near_units_per_meter_x10, zoom_math.h): the key, the
+// steps from the start scale and back to the life size scale, and the room
+// point of the zoom at 1 unit for each meter.
+inline void LowestChecks() {
+  using namespace table_math;
+  using namespace zoom_math;
+  printf("\nThe lowest scale of the God view\n");
+  Near("the default is 1 unit for each meter",
+       LowestScale(kLowestTenths, 7.5f), 1.0, 1e-6);
+  Near("a key of 75 gives the life size scale", LowestScale(75, 7.5f), 7.5,
+       1e-6);
+  Near("a key of 0 takes the life size scale of the head",
+       LowestScale(0, 7.5f), 7.5, 1e-6);
+  Near("a key of 0 with no scale of the head gives 7.5",
+       LowestScale(0, 0.0f), 7.5, 1e-6);
+  Near("at the lowest scale a villager is 1.6 m high in the room",
+       kVillagerUnits / LowestScale(kLowestTenths, 7.5f), 1.6, 1e-5);
+
+  // The steps in from the start scale of 100. Each step divides the scale by
+  // 1.5, and the last one stops at the lowest scale.
+  const float room[3] = {0.0f, -0.6f, 0.0f};
+  const float head[3] = {0.0f, 0.0f, 0.0f};
+  const float low = LowestScale(kLowestTenths, 7.5f), high = 4000.0f;
+  TablePose pose = {{2000.0f, 30.0f, 2500.0f}, 0.0f, 100.0f};
+  int steps = 0;
+  for (int i = 0; i < 40; ++i) {
+    TablePose next;
+    if (GodZoom(pose, room, head, 30.0f, 1.0f / 1.5f, low, high, &next) ==
+        1.0f) {
+      break;
+    }
+    pose = next;
+    ++steps;
+  }
+  Check(steps == 12, "12 steps in go from 100 to the lowest scale", steps, 12);
+  Near("the steps in stop at 1 unit for each meter", pose.scale, 1.0, 1e-6);
+  // From the lowest scale, 5 steps out pass the life size scale.
+  int out = 0;
+  while (pose.scale < 7.5f && out < 40) {
+    TablePose next;
+    GodZoom(pose, room, head, 30.0f, 1.5f, low, high, &next);
+    pose = next;
+    ++out;
+  }
+  Check(out == 5, "5 steps out go from the lowest scale past 7.5", out, 5);
+  Near("5 steps out give 7.59 units for each meter", pose.scale, 7.59375,
+       1e-4);
+  // A key of 75 keeps the zoom at the life size scale.
+  TablePose life = {{2000.0f, 30.0f, 2500.0f}, 0.0f, 7.5f};
+  TablePose next = life;
+  const float kept = GodZoom(life, room, head, 30.0f, 1.0f / 1.5f,
+                             LowestScale(75, 7.5f), high, &next);
+  Check(kept == 1.0f && next.scale == 7.5f,
+        "with a key of 75 a step in at 7.5 changes nothing", next.scale, 7.5);
+
+  // At 1 unit for each meter a zoom keeps its point in the room, and the
+  // land under the head keeps its height in the room.
+  TablePose at = {{2000.0f, 30.0f, 2500.0f}, 0.0f, 1.5f};
+  const float pivot[3] = {2000.4f, 30.0f, 2500.7f};
+  float before[3], after[3];
+  PoseRoom(at, room, pivot, before);
+  GodZoomAbout(at, pivot, 1.0f / 1.5f, low, high, &next);
+  PoseRoom(next, room, pivot, after);
+  float off = 0.0f;
+  for (int k = 0; k < 3; ++k) off += (after[k] - before[k]) * (after[k] - before[k]);
+  Check(sqrtf(off) < 1e-4f && next.scale == 1.0f,
+        "a step to the lowest scale keeps the point of the zoom in the room",
+        sqrtf(off) * 100.0f, 0);
+}
+
 inline void ZoomChecks() {
   using namespace table_math;
   using namespace zoom_math;
@@ -562,6 +632,7 @@ inline void ZoomChecks() {
           pose.scale, high);
   }
   ZoomPointChecks();
+  LowestChecks();
 }
 
 }  // namespace zoom_checks

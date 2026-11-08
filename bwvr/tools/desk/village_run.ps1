@@ -44,7 +44,7 @@
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
 # turn, fartake, fartotem, choice, look, book, controls, rayover, walk, wall,
-# housestop, headhouse, pinch,
+# housestop, headhouse, pinch, small,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
 param(
@@ -721,6 +721,36 @@ if ($Kind -eq 'totem') {
                  'seek@1200+1 seek@1230+1 seek@1260+1 aimfar@1290+1 shot@1300+1'
     }
     $keys = "$keys;seek_feel=house,50,3|Tree,50,7;far_test_aim_class=1;far_touch=0"
+} elseif ($Kind -eq 'small') {
+    # The lowest scale of the zoom (bwvr/docs/god-view.md, "The limits"). Two
+    # zoom steps in (44.4 units for each meter), the God view before the
+    # Village Store (gostore), and the Hand's point at a villager there
+    # (villager). With god_zoom_about=2 each zoom step keeps the Hand's point
+    # in the room, so the villager stays at the Hand. Eleven steps in: ten go
+    # to 1 unit for each meter (god_near_units_per_meter_x10=10), where a
+    # villager is 1.6 m high, and the last one is at the limit. Then the grip
+    # of the left hand lowers the land 80 cm, to 1.4 m below the head, so the
+    # eyes are at the height of the eyes of a villager. Then the Hand 15 cm
+    # and 8 cm in front of the eyes (the near plane of 5 cm of the room), and
+    # five steps out to 7.6 units for each meter, past the life size scale.
+    # An eye picture at each place. The head looks straight ahead. Compare
+    # with -Set "god_near_units_per_meter_x10=75": the zoom stops at 7.5.
+    # Give it -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60" for the
+    # eye pictures.
+    if ($Plan -eq '') { $Plan = 'gostore,villager' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 60 }
+    $points = '0,-30,60 0,-5,15 0,-3,8'
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 seek@1000+1 shot@1030+1'
+        for ($f = 1060; $f -le 1360; $f += 30) { $Steps += " stick_up@$($f)+10" }
+        $Steps += ' shot@1400+1 shot@1460+1 ' +
+                  'lpoint@1480+1 lgrip@1500+130 lpoint@1530+1 lpoint@1560+1 lpoint@1590+1 shot@1660+1 ' +
+                  'point@1700+1 shot@1730+1 point@1760+1 shot@1790+1'
+        for ($f = 1830; $f -le 1950; $f += 30) { $Steps += " stick_down@$($f)+10" }
+        $Steps += ' shot@1990+1'
+    }
+    $keys = "$keys;god_zoom_about=2;fake_controller_left_points=-16,-30,50 -16,-60,50 -16,-90,50 -16,-110,50"
 } elseif ($Kind -eq 'tglow') {
     # The glow on the mesh of a target (bwvr/docs/hand-model.md, "The glow on
     # the mesh of a target") in the light of the day of the test save. The
@@ -834,6 +864,9 @@ if ($Kind -in 'aimsign', 'aimmiracle', 'aimpast') {
 }
 if ($Kind -eq 'tooltip') {
     $pattern = '^hand pick    : seek plan|^ui hint      : .*(tooltip|at the Hand)|^ui depth     : \d+ tooltips'
+}
+if ($Kind -eq 'small') {
+    $pattern = '^hand pick    : seek plan|^god view     : (on\.|zoomed|the zoom is|the Hand is)|^near plane   :|^grab         :|^head blinder :|^tabletop     : the Z buffer'
 }
 if ($Kind -eq 'tglow') {
     $pattern = '^hand pick    : seek plan|^target glow  : (the mesh|test: a batch|\S+ \S+ has no mesh)'

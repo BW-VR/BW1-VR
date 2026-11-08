@@ -582,6 +582,7 @@ far a sound carries. With the power 0.5 (`audio_zoom_pct=50`):
 
 | Scale (units a meter) | k | A sound with the maximum 300 carries | One with the maximum 2000 carries |
 | --- | --- | --- | --- |
+| 1 (the lowest zoom) | 0.25 | 75 m | 500 m |
 | 7.5 (life size) | 0.68 | 27 m | 183 m |
 | 100 | 2.5 | 7.5 m | 50 m |
 | 225 | 3.75 | 5 m | 33 m |

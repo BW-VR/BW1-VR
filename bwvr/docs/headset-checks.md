@@ -30,7 +30,9 @@ want.
    view cuts near the eyes. Then bend down slowly and put your head into a
    hill, and then into a house. Wrong: you see under the land or into the
    house, the gold and red cover comes too late or too soon, it flickers on
-   a slope, or its color is hard on the eyes.
+   a slope, or its color is hard on the eyes. At the nearest zoom, with the
+   land pulled down to your feet, a villager must look as high as you.
+   Wrong: land or villagers that flicker or look wrong there.
 3. **The turn and the comfort vignette.** Set the settings row "Turn" to
    Smooth, and turn with a small push and a full push. Wrong: discomfort,
    or a speed or a curve of the push that feels wrong. Then set the

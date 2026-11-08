@@ -183,6 +183,23 @@ inline float FrameRatio(float push, float step, float step_seconds,
   return powf(step, -push * seconds / step_seconds);
 }
 
+// THE LOWEST SCALE OF THE ZOOM (god_near_units_per_meter_x10), in units of
+// the world for each meter of the room. The key is in tenths of a unit. A
+// villager is about kVillagerUnits high: the body that the hand pick finds
+// has a half height of 0.70 to 0.85 units, and the game holds a villager
+// with a height of 1.66 units. So at 1 unit for each meter a villager is as
+// high as a player, and his eyes are at the eyes of a player who stands with
+// the land at his feet. A key of 75 gives the life size scale, and 0 takes
+// that scale from head_units_per_meter_x10 (life). The zoom in then stops at
+// it.
+const int kLowestTenths = 10;
+const float kVillagerUnits = 1.6f;
+
+inline float LowestScale(int tenths, float life) {
+  if (tenths <= 0) return life > 0.0f ? life : 7.5f;
+  return static_cast<float>(tenths) * 0.1f;
+}
+
 // How many zoom steps a change of the scale is, for the log: 1 for a change
 // by the ratio of one step, in or out.
 inline float Steps(float from, float to, float step) {

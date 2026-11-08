@@ -365,6 +365,9 @@ float g_eye_move[3] = {0.0f, 0.0f, 0.0f};  // for EyeCameraSetPose
 // was rendered from the pose and frustum it reports, and a broken promise
 // shears the world when the head moves.
 bool g_head_tracking = false;
+// The frame goes to the headset (Process3dEngineBody), for the check of the
+// view (StereoDeclaredView).
+bool g_frame_to_headset = false;
 bool g_head_ready = false;
 // A WINDOW TO LOOK THROUGH, for anyone the full view makes ill. With this off
 // the picture stays on a quad at a fixed distance: the head still tracks, but the screen stays put in front of the
@@ -1316,6 +1319,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   PollHotkeys();
   const bool to_headset = g_screen != nullptr && g_screen->running() &&
                           g_screen->eyes() > 1;
+  g_frame_to_headset = to_headset;
   if (!g_enabled || !g_stereo_on || (!to_headset && !g_headless)) {
     o_Process3dEngine(self, unused);
     return;
@@ -2284,6 +2288,53 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
 
 // True while the two eye passes are running, so the mono path stands aside.
 bool StereoInPass() { return g_in_pass; }
+
+// fov.cpp: the angle that the game renders now.
+float FovUsed();
+
+// THE VIEW THAT AN EYE PICTURE DECLARES, for the check of the view
+// (view_check.cpp). With a headset it is the view of the projection layer of
+// this frame (XrScreen::DeclaredView). With the invented head it is the view
+// that a layer would declare: the pose of the invented eye, and the frustum
+// of the render (the angle of fov.cpp and the aspect of the render). The
+// angles are in radians, as XrFovf has them. False with no head on the eye
+// passes.
+bool StereoDeclaredView(int eye, float position[3], float orientation[4],
+                        float fov[4], float size[2]) {
+  if (!g_in_pass || !g_head_tracking || CutsceneWindowFlat()) return false;
+  if (g_frame_to_headset) {
+    bwvr::EyeView v;
+    if (g_screen == nullptr || !g_screen->DeclaredView(eye, &v)) return false;
+    for (int i = 0; i < 3; ++i) position[i] = v.position[i];
+    for (int i = 0; i < 4; ++i) orientation[i] = v.orientation[i];
+    fov[0] = v.fov_left;
+    fov[1] = v.fov_right;
+    fov[2] = v.fov_up;
+    fov[3] = v.fov_down;
+    size[0] = static_cast<float>(g_screen->width());
+    size[1] = static_cast<float>(g_screen->height());
+    return true;
+  }
+  if (!HeadPoseFakeOn()) return false;
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(
+          bw::tech::kInfoTransform);
+  if (IsBadReadPtr(info, sizeof(*info)) || info->res_x <= 0 ||
+      info->res_y <= 0) {
+    return false;
+  }
+  const float half = 0.5f * FovUsed();
+  if (!(half > 0.0f)) return false;
+  HeadPoseFakeEye(eye, position, orientation);
+  size[0] = static_cast<float>(info->res_x);
+  size[1] = static_cast<float>(info->res_y);
+  const float aspect_half = atanf(tanf(half) * size[1] / size[0]);
+  fov[0] = -half;
+  fov[1] = half;
+  fov[2] = aspect_half;
+  fov[3] = -aspect_half;
+  return true;
+}
 
 // Gives the engine the camera of the eye pass that is running again, after
 // something inside the walk put another camera on it. It makes the call the

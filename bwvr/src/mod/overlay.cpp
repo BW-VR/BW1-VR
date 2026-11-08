@@ -168,6 +168,10 @@ bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
                   float tube_radius_m, const float rgb[3], float seconds,
                   uint64_t frame);
 void RayCardReport();
+// view_check.cpp
+void ViewCheckEye(int eye, const float m[12], float near_plane, float half_x,
+                  float half_y);
+void ViewCheckReport();
 int ControllersHandCm();
 int ControllersHandScalePct();
 // controllers.cpp: the draw button and the points of the last controllers
@@ -2075,6 +2079,8 @@ void OverlayDraw() {
 
   float m[12];
   OverlayEyeMatrix(m);
+  // The check of the view: the grip points through this matrix.
+  ViewCheckEye(eye, m, near_plane, hx, hy);
   int n = 0;
   int drawn = 0;
   for (int t = 0; t < g_count; ++t) {
@@ -2179,6 +2185,7 @@ void OverlayDraw() {
 // Once a report window.
 void OverlayReport() {
   RayCardReport();
+  ViewCheckReport();
   HandModelReport();
   HandFeelReport();
   HandLandReport();

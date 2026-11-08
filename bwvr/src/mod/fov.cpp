@@ -134,6 +134,10 @@ void FovSetAbsolute(float radians) {
 
 float FovAbsolute() { return g_absolute; }
 
+// The horizontal angle that the game renders now, in radians: the last value
+// that went to LH3DTech::ChangeFov. 0 before the first call.
+float FovUsed() { return g_used; }
+
 void FovInstall() {
   if (g_installed) return;
   void* target = reinterpret_cast<void*>(kChangeFov);

@@ -1686,6 +1686,7 @@ shows each card. The controller and the lines are in the eye pictures.
 | `hint_style` | 2 | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3), with the pictures of the buttons (9.13). The launcher row "Hints with the controller" |
 | `hint_hand_opacity_pct` | 68 | The opacity of the hand while its controller shows, in percent. 35 is the fainter hand |
 | `hint_pulse` | 1 | 1 the lit buttons pulse, one beat a second from 35 percent of the light to full light. 0 a steady light |
+| `view_check` | 1 | 1 the check of the view (9.15) runs in the God view and writes its log lines. 0 no check |
 | `hint_body_fine` | 1 | 1 the simpler body of a heavy model has cells of 3.4 mm at most and a cell for each side of the normal, so the ink outline of a thin part (a ring, a strap) does not break. 0 the cells grow until the body has 2500 triangles, with one cell for all the normals |
 | `hint_model_test` | empty | Test key. The folder of a model for both hands, for example `valve-index`, in place of the model of the profile |
 | `hint_model_test_dir` | empty | Test key. The folder of the models. Empty is `bwvr-controllers` beside `runblack.exe`. `desk_test.ps1` sets `bwvr\assets\controllers` of its worktree |
@@ -1801,10 +1802,95 @@ up and ahead. A fake controller at a pitch of 0 has the forearm straight up,
 and its controller and hand look turned on their side. Only a headset shows
 the fit with the grip pose of a real runtime.
 
-Only a headset can show whether the model is at the real controller (the
-grip pose of each runtime and the origin of each model), whether the faint
-body and the gold buttons read at 55 cm over the land, and whether the cards
-and their lines are easy to follow (`headset-checks.md`).
+The check of the view (9.15) shows whether the mod draws the controller and
+the hand at the grip pose that the runtime gives. Only a headset can show
+whether that grip pose and the origin of each model are at the real
+controller, whether the faint body and the pulse of the gold buttons read at
+55 cm over the land, and whether the cards and their lines are easy to
+follow (`headset-checks.md`).
+
+### 9.15 The place of the controller
+
+In a session with Virtual Desktop on a Quest 3, the controller in the hand
+and the hand show 2 to 3 cm nearer to the head than the controllers that the
+menu of the Quest draws, with the hand held still. A still offset is not a
+delay. This section gives each step from the poses of the runtime to the
+pixels of the eye pictures, and the check of the whole chain.
+
+Code: `src/mod/view_check_math.h` (the math), `src/mod/view_check.cpp` (the
+check in the game), `XrScreen::DeclaredView` in `src/vr/xr_screen.cpp` (the
+views that the projection layer declares), and `StereoDeclaredView` in
+`stereo.cpp`. The checks are in `test/controller_math/view_check_checks.h`.
+
+**The chain.** Each step must keep a point of the room at its place:
+
+| Step | What the mod does | Why it keeps the place |
+| --- | --- | --- |
+| The head | The middle of the two eye positions of `xrLocateViews` (LOCAL), in the room of `head_pose.cpp` | The same function puts the grip in the room |
+| The God view | `world = P0 + Lt * (s / 7.5) * room`, for the head (the lean of `head_camera.cpp`) and for the grip (`ControllersOverlayHands`) | One map, one gain and one basis for both |
+| The turn | `R = L * H`. The engine builds a camera with no roll, and each eye pass adds the roll | `eye_camera.cpp` puts the eye offset after the roll, on the rolled right axis |
+| The eyes | Each eye pass moves the camera by half the separation: the IPD of the runtime times `s` | The log gives 6.3 world units at 100 units a meter for 63.3 mm |
+| One walk | The right eye is the left eye with each vertex moved by `per_rhw * rhw` | `one_walk_math.h`: exact for each depth |
+| The frustum | `LH3DTech::ChangeFov` gives `1 / tan(half)` across and `aspect / tan(half)` up, with the aspect of the render (square pixels) | The layer declares the same half angle, and the vertical angle of the same aspect |
+| The picture | The Vulkan target goes to the swapchain with a copy of the same size (`vkCmdCopyImage`) | No crop and no scale |
+| The pose of the layer | The eye poses that the render used (the frame before), with the frustum of the render (`DeclaredView`) | The engine built its camera from those poses |
+| The controller | The model of the WebXR profile at the grip pose: `world = position + rotation * (x, y, -z) * units` | The origin of a WebXR model is the grip space |
+
+**The check in the game.** In each eye pass of the God view,
+`ViewCheckEye` puts the grip point of each hand on the screen with the
+matrix of the eye pass (`OverlayEyeMatrix`, the matrix that draws the
+controller and the hand). With one walk the right eye gets the move of one
+walk. The same grip point, as the runtime gives it in LOCAL, goes through
+the view that `DeclaredView` gives for each eye. Two numbers come out:
+
+- the distance between the two pixels of each eye, and
+- the place where the two eyes see the grip: the ray of each pixel of the
+  game through its declared view, and the point where the two rays meet. Its
+  error along the line from the middle of the head to the grip is the error
+  of depth.
+
+The invented head of a desktop run has no layer. Then the check takes the
+views that a layer would declare: the pose of each invented eye
+(`HeadPoseFakeEye`, with `fake_eye_cant_deg`) and the frustum of the render.
+
+**The math test** runs the chain with the real `head_pose.cpp` and
+`controller_math.h`, and with the steps of `head_camera.cpp`,
+`eye_camera.cpp`, `LH3DTech::UpdateWorldToCamera`, `ChangeFov` and one walk
+as those files do them. In 1080 cases (the scales 7.5 to 4000, three
+headings, six turns of the head with roll, three leans and four hands), the
+worst pixel is 0.8 pixels from its declared pixel (0.03 degrees), and the
+worst error of depth is 0.3 mm. That is the float precision of the game at
+the life size scale, where the world is 1500 units from its origin and a
+hand is 3 units from the eye. A planted error shows with the size that the
+geometry gives: a separation 6 percent too large shows the grip 2.67 cm
+nearer at 47 cm, and both eyes 2.5 cm forward show it 2.1 cm nearer along
+the line to the grip.
+
+**The cause.** The chain of the mod has no step that moves a still grip
+point toward the head. When the check in the game agrees in the session of
+the owner, the error is before the mod: the grip pose that Virtual Desktop
+gives is not the grip pose of the runtime of the Quest, for which the WebXR
+model is made. Virtual Desktop gives the aim pose 60 degrees down from the
+grip pose, at 0.0, -6.7 and -7.3 cm in the frame of the grip (the log line
+`controllers  : ... the runtime puts the aim pose`).
+
+**The log.**
+
+- `view check   : view_check=1. ...` once.
+- `view check   : frame N, the right hand. The grip point is 50.5 cm from the
+  middle of the head. The game draws it at pixel ... and the declared views
+  put it at ... (0.02 and 0.03 pixels apart). The two eyes see it 0.01 cm
+  nearer to the head, and 0.00 cm to the side. The declared eyes are 63.3 mm
+  apart, the pictures are 3600 by 2880 with the tangents ...`: once, with the
+  first point.
+- `view check   : N points of the grip. On average the two eyes see the grip
+  N cm nearer to the head ..., the worst N cm ... The worst gap of a pixel of
+  the game and a pixel of the declared view is N pixels`: in each report
+  window with points.
+
+Open: the check in a session of the owner. If it shows the chain exact, the
+grip pose of Virtual Desktop is the cause. A trim of the grip pose for
+Virtual Desktop then needs the size and the direction of the offset.
 
 ## 10. A text that waits for a click
 

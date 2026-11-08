@@ -5334,6 +5334,24 @@ bool ControllersOverlayHands(OverlayHands* out) {
   return true;
 }
 
+// The grip point of a hand in the LOCAL space of the runtime, from the same
+// sample as ControllersOverlayHands, with the same tests: the check of the
+// view (view_check.cpp) compares the place where the overlay draws the grip
+// with this point. False for a hand that the overlay does not draw.
+bool ControllersGripLocal(int index, float out[3]) {
+  if (!g_on || g_frame == 0 || index < 0 || index > 1) return false;
+  const bwvr::HandInput& hand = g_hands[index];
+  const bool grip_pose = hand.grip_valid;
+  if (!hand.active || !(grip_pose || hand.aim_valid)) return false;
+  if (!Tracked(grip_pose ? hand.grip_tracked : hand.aim_tracked,
+               &g_overlay_seen_tracked[index])) {
+    return false;
+  }
+  const float* p = grip_pose ? hand.grip_position : hand.aim_position;
+  for (int i = 0; i < 3; ++i) out[i] = p[i];
+  return true;
+}
+
 // For overlay.cpp in a frame of the cut scene window (cutscene_hands=1): the
 // hands as ControllersOverlayHands gives them, but in the room of the hands
 // (HeadPoseToRoom) and not in the world. The room is the world of the

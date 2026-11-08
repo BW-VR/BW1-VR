@@ -609,6 +609,12 @@ class XrScreen {
   void SetRenderPose(int index, const float position[3],
                      const float orientation[4]);
 
+  // The view that the projection layer of this frame declares for an eye:
+  // the pose from SetRenderPose (or the pose of BeginFrame), and the frustum
+  // of the render (SetRenderHalfAngle and the aspect of the eye picture).
+  // The layer takes its views from here. False when the eye has no pose.
+  bool DeclaredView(int index, EyeView* out) const;
+
   // True once after the headset recentered its own space, for example from
   // the Quest menu, when the poses of this frame are in the new space. The
   // mod keeps its own origin, so it has to recenter too. See head_pose.cpp.

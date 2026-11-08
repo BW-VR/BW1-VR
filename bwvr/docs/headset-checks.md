@@ -279,6 +279,9 @@ agents: the log does not tell the item yet.
   stop kept its wait` names the sound.
 - **The lines that the player knows.** Log: `hint card    : hint_learn=1: on
   N frames a line that the`.
+- **The place of the controller in the hand** (`controller-hints.md`, 9.15).
+  Log: `view check   :` gives how far from the grip pose of the runtime the
+  two eyes see the drawn grip, in cm and in pixels.
 
 ## The miracles of the game
 

@@ -308,12 +308,6 @@ keeps the mod as it is.
 
 **The village, the Creature and the help**
 
-- **F18. The job icon of a villager in the Hand:** large, just over his head,
-  and only for the villager in the Hand or under it. First the owner checks
-  in a play whether the plain icon is a problem in a headset
-  (`headset-checks.md`). Build it only if it is. The draw of the icon is
-  not traced (`Abode::DiscipleInHandNear` `0x00407420`,
-  `GGuidance::MakeDiscipleSFX` `0x0071BF10`).
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

@@ -29,6 +29,8 @@ the Temple).
   the grip. The rules for the grip are in `grab.md`.
 - A villager that a script turns to "camera position" turns to the head
   of the player. A villager turns his whole body and has no pitch.
+- The job icon over a villager is 2 times the size of the game, and the card
+  of the name of a villager is 1.5 times its size.
 - The door of the Temple and the leash posts are targets of a tap. The mod
   adds the posts as candidates, because the game offers them to the pick as
   invisible balls.
@@ -588,6 +590,47 @@ villager turns his body to the player and does not look up. The Creature
 and a group of things get the head too, because the word gives them the
 same point.
 
+### The job icon and the name over a villager [V]
+
+**The icon.** The game shows the job icon over one villager only: the
+villager in the Hand, else the villager under the Hand.
+`GInterface::PreDrawProcess` `0x005CE9E0` gives him to
+`Villager::ShowDiscipleIcon` `0x00756170`, which keeps his 3D object at
+`0x00EB99E4` and his icon at `0x00EB99E8`. The draw of his object calls
+`fn_008241B0`, which fills the sprite at `0x00EB99D8` and gives it to the Z
+sort (`LH3DSprite::AddDrawing` `0x00840C70`, the call at `0x008243E2`). The
+middle of the icon is 2.5 radii of the villager over the top of his
+bounding sphere. Its half size is the distance from the camera times
+8 / half_res_x. So the icon has one angle at each distance, and a larger
+render makes it smaller: 0.51 degrees across at a render of 3600 by 2880,
+0.67 degrees at 2760 by 2208.
+
+With `job_icon_scale_pct=200` a hook of `AddDrawing` acts only on that call
+(`job_icon.cpp`, `job_icon_math.h`). It makes the half size and the offsets
+of the sprite 2 times larger. It moves the middle up along the up of the
+sprite in the camera plane (with the turn of `sprite_world_up`), so the
+lower edge stays where the game puts it and the icon does not go into the
+head. The game computes the size again in each eye pass, and the hook scales
+each pass one time.
+
+**The name.** `VillagerName::Add` `0x007629E0` makes the card of the name of
+a person of a quest (the action Show Villager Names, bit `0x20000` of
+`g_game + 0x14`) and the card of the details of a villager (Show Villager
+Details). Its text is 16 px of the render high at full fade: the fade times
+the 16.0 at `0x008AB6E8`. The edge of the text is the fade times the 6.0 at
+`0x008AB35C`, and the box comes from the text and the edge. So a card has
+one angle at each distance too. At the size of the game a capital letter is
+about 10 px, 0.6 degrees at 17 px in a degree. That is the least that reads
+at a glance.
+
+With `villager_name_scale_pct=150` the two multiplications of `Add`
+(`0x00762BA5`, `0x00762BBF`) read floats of the mod, 1.5 times 16 and 6, so
+the game makes the whole card larger with its own layout. A capital is then
+about 15 px, 0.9 degrees. The game does not move the cards of near
+villagers apart, so a larger scale makes them overlap more. At 200 the cards
+of near villagers overlap each other, and the column of cards over far
+villagers reaches the top of the view.
+
 ### What the real hand can do
 
 | Thing | With the real hand |
@@ -736,6 +779,8 @@ The count of the villagers is the count of the game
 | `totem_hold` | 1 | 0: after the release the pole jumps back to the value that it showed before and slides to the new value, 5.2 s for each 1.0 of change, as in the plain game |
 | `hold_target`, `hold_target_cm` | 1, 6 | See `grab.md`, "An object in the Hand that goes onto a thing". The code also reads the old names `scaffold_join` and `scaffold_join_cm` as the defaults |
 | `villager_look_head` | 1 | 1: in the God view a script that turns a villager to the camera turns him to your head. 0: he turns to the game's camera |
+| `job_icon_scale_pct` | 200 | The size of the job icon over a villager in the Hand or under it, in percent of the size of the game, 50 to 400. Its lower edge stays in place. 100: the size of the game |
+| `villager_name_scale_pct` | 150 | The size of the card of the name and of the details of a villager, in percent of the size of the game, 50 to 400. 100: the size of the game |
 | `scaffold_wrist_turn` | 1 | 1: the roll of the wrist turns the building of a scaffold in the Hand, one to one, and the building does not turn by itself. 0: the game turns it by itself |
 
 The keys are read from `bwvr.ini`. They are not in the launcher.
@@ -819,6 +864,14 @@ The tag `villager look` has the turns to the camera:
 - One line each report window: the turns to the head, the turns to the game
   camera in the God view, and the turns in a cut scene.
 
+The tag `job icon` has the key at the start and the first four draws of the
+icon: the distance, the half size and the angle and the pixels across as the
+game gives them and as the mod draws them, and how far the middle moved
+up. One line each report window has the count of the draws and the last
+angle. The tag `names` has the same for the first four name cards: the
+lines, the depth, the height of a line in pixels and in degrees, and the
+pixels in a degree.
+
 The lines of a miracle in the Hand have the tag `miracle`, and they say
 "from a Worship Site". A press with the miracle at its icon gives "the game
 takes ... back at the ... of its Worship Site".
@@ -875,6 +928,18 @@ Vulkan and with dxwrapper, and the eye pictures show the solid pole at that
 height and no ghost. With `totem_hold=0` the pole is back at 0.00 when the
 locked select ends, with the ghost at the new value, and it comes to the new
 value after 100 frames (0.44) and 44 frames (0.22).
+
+The job icon and the names (`village_run.ps1 -Kind job`, render 2760 by
+2208, 16.9 px in a degree): the icon over a villager in the Hand, 75 units
+from the camera, is 0.67 degrees across (13.7 px) with
+`job_icon_scale_pct=100` and 1.34 degrees (27.3 px) with 200, with its
+middle 0.44 units higher, one old half size. The fake hand of that recipe
+holds the villager out of the view, so no eye picture shows the icon. With
+the details of the villagers on (the ring item `details`), a line of a card
+is 16.0 px (0.95 degrees) at 100 and 32.0 px (1.90 degrees) at 200, and a
+capital letter is about 10 px and 19 px. The math test
+(`job_icon_checks.h`) covers the size, the lower edge with an aspect,
+offsets and a turn of the draw, and the angles of the log.
 
 **Not run on the desktop:**
 

@@ -78,11 +78,7 @@ want.
     looks wrong.
 ### The village
 
-11. **The words over the land.** Hold a villager and read his job icon. Read
-    the name of a villager, a signpost, the yellow note over the Creature and
-    a tooltip at the Hand's point. Wrong: a text that is too small, hard to
-    read, double, or not at the depth of its thing. Say if the job icon is a
-    problem: F18 waits for that answer.
+11. **The words over the land.** Wrong: the job icon (2 times) or the name of a villager (150 percent) is hard to read at a glance.
 12. **Small targets.** Tap the icons of a Worship Site, reach for a scroll,
     move the totem pole, and tap a leash post at the door of the Temple.
     Wrong: a tap that hits the item beside the one that you want, a pole that

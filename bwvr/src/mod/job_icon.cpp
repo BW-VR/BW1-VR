@@ -30,6 +30,13 @@
 // 16 and 6 times the scale, so the game makes the whole card larger with its
 // own layout. With 100 the mod does not change the code. The hook of Add
 // only reads the card for the log. [V]
+//
+// At the size of the game a capital letter of a card is about 10 px of the
+// render, 0.6 degrees at 17 px in a degree, which is the least that reads
+// at a glance in the headset. The default 150 makes it about 15 px, 0.9
+// degrees. The game puts each card over its villager and does not move the
+// cards of near villagers apart, so a larger scale makes them overlap more,
+// and the column of cards over far villagers reaches the top of the view.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -51,9 +58,9 @@ namespace {
 using job_icon_math::Sprite;
 
 // LH3DSprite::AddDrawing: __thiscall, the sprite in ecx, no argument, a
-// plain ret.
+// plain ret. It starts with "fld dword ptr [ecx + 8]" and "push 0".
 const uintptr_t kAddDrawing = 0x00840C70;
-const uint8_t kAddDrawingBytes[6] = {0xD9, 0x41, 0x08, 0x6A, 0x00, 0x51};
+const uint8_t kAddDrawingBytes[5] = {0xD9, 0x41, 0x08, 0x6A, 0x00};
 // The return address of the call for the job icon in fn_008241B0.
 const uintptr_t kIconFrom = 0x008243E7;
 const uintptr_t kIconSprite = 0x00EB99D8;  // LH3DSprite*
@@ -85,9 +92,9 @@ AddDrawingFn o_AddDrawing = nullptr;
 NameAddFn o_NameAdd = nullptr;
 
 int g_icon_pct = 200;  // job_icon_scale_pct
-int g_name_pct = 100;  // villager_name_scale_pct
+int g_name_pct = 150;  // villager_name_scale_pct
 float g_icon_k = 2.0f;
-float g_name_k = 1.0f;
+float g_name_k = 1.5f;
 // The floats that the two instructions of Add read with a scale.
 float g_name_height = kNameHeight;
 float g_name_edge = kNameEdge;
@@ -116,7 +123,7 @@ void Load() {
   strcat_s(path, MAX_PATH, "bwvr.ini");
   g_icon_pct = GetPrivateProfileIntA("bwvr", "job_icon_scale_pct", 200, path);
   g_name_pct =
-      GetPrivateProfileIntA("bwvr", "villager_name_scale_pct", 100, path);
+      GetPrivateProfileIntA("bwvr", "villager_name_scale_pct", 150, path);
   g_icon_k = job_icon_math::ScaleFromPercent(g_icon_pct);
   g_name_k = job_icon_math::ScaleFromPercent(g_name_pct);
   g_icon_pct = static_cast<int>(g_icon_k * 100.0f + 0.5f);

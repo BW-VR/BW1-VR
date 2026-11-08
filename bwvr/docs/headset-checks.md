@@ -147,11 +147,12 @@ want.
     long group with the stick. Wrong: rows or notes hard to read, arrows hard
     to hit, or a scroll that is too fast or too slow. Open the settings
     window from page 2 of the ring. Wrong: a label, a value or the words
-    "at the next start" that are hard to read, or a drawing on the tab
-    Controls that does not look like your controllers.
+    "at the next start" that are hard to read, text that shimmers when the
+    head moves, or a drawing on the tab Controls that does not look like
+    your controllers.
 21. **The cards and the subtitles.** Read the hint cards at the wrist and the
     subtitle card while the hands work. Wrong: low contrast or a shimmer, a
-    card that covers a hand or often changes side, a prompt that is late or
+    faint line around a card, a card that covers a hand or often changes side, a prompt that is late or
     stays too long, a subtitle card that moves while the head moves, a
     save of the game with no "Saving..." card in view for the whole save,
     or a picture of a button beside its word that is hard to read or does
@@ -259,6 +260,11 @@ agents: the log does not tell the item yet.
 - **The quad layers in the video in a session** (P7). Log: `video view   :
   ... is in the video for the first time`, with `from its copy on the GPU`
   for a card and `from the image of the panel` for a panel.
+- **The mip levels of the cards** (`ui-layer.md`, section 26). Log:
+  `openxr: the ... has its own swapchain, ... 4 mip level(s), a clear edge`
+  for each card, and no line `the runtime refused a swapchain of the ...
+  with 4 mip levels`. The line `cards        :` of each report gives the
+  cost of a new picture.
 - **The menu of Virtual Desktop with the trigger held.** Log: `openxr:
   session state` gives each change of the focus. Needs a log line: a button
   that is down when the focus comes back, and the frame at which the mod

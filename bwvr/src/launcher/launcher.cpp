@@ -1548,6 +1548,7 @@ const char* const kRetiredKeys[] = {
     "radial_test_save", "spell_book_test_save", "gesture_panel_test_frame",
     "places_panel_test_save", "places_test_buttons", "snapshot_test_dir",
     "debug_window_test_save", "debug_test_parts", "welcome_test_save",
+    "card_send_test_save",
     "welcome_test_parts",
     "village_test_chants", "village_test_census",
     "village_test_icon", "village_test_site", "seek_step_cm",

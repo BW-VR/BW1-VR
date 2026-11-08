@@ -326,6 +326,10 @@ void CrashReportInstall(const char* ini);
 void CrashReportFrame(uint64_t frame);
 
 void ModLog(const char* format, ...);
+// eye_capture.cpp: a picture of the mod as a BMP.
+void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
+                      const void* pixels, int pitch, uint32_t width,
+                      uint32_t height);
 
 namespace {
 
@@ -800,6 +804,15 @@ double g_vr_code_ms = 0.0;
 const int kVrRetryMs = 3000;
 const int kMaxVrTries = 40;
 uint64_t g_frame = 0;
+
+// THE TEST PICTURES OF THE CARDS (card_send_test_save,
+// XrScreen::SetCardTestSave): the levels over a checkerboard, the views as
+// they are.
+void SaveCardTest(const char* name, const uint8_t* bgra, int pitch,
+                  uint32_t width, uint32_t height, bool over_checker) {
+  EyeCaptureSaveUi(name, g_frame, over_checker ? 1 : 2, bgra, pitch, width,
+                   height);
+}
 
 typedef void(__cdecl* FinishFrameFn)();
 FinishFrameFn o_FinishFrame = nullptr;
@@ -1755,6 +1768,15 @@ void ReadSettings() {
   g_vk_eyes = GetPrivateProfileIntA("bwvr", "vk_eyes", 1, path) != 0 ? 1 : 0;
   g_xr_vulkan_upload =
       GetPrivateProfileIntA("bwvr", "xr_vulkan_upload", 1, path) != 0 ? 1 : 0;
+  // How a card goes into its swapchain (docs/ui-layer.md, "The edge and the
+  // mip levels of a card").
+  bwvr::XrScreen::SetCardSending(
+      GetPrivateProfileIntA("bwvr", "card_edge_clear", 1, path) != 0,
+      GetPrivateProfileIntA("bwvr", "card_mips", 1, path) != 0);
+  bwvr::XrScreen::SetCardTestSave(
+      static_cast<int>(
+          GetPrivateProfileIntA("bwvr", "card_send_test_save", 0, path)),
+      &SaveCardTest, &ModLog);
   g_xr_hold_ms = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "xr_hold_ms", 30, path));
   g_refresh_rate_hz = static_cast<int>(

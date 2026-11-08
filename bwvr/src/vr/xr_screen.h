@@ -489,6 +489,26 @@ class XrScreen {
   // go back to the eye pictures.
   static void StageCard(int card, const CardLayer& layer);
   static bool CardFailed(int card);
+  // HOW A CARD GOES INTO ITS SWAPCHAIN (docs/ui-layer.md, "The edge and the
+  // mip levels of a card", card_send_math.h). clear_edge: the swapchain
+  // holds the picture with clear texels around it, and the quad shows some
+  // of them, so its edge is clear (card_edge_clear). mips: the swapchain has
+  // mip levels that the CPU makes after each new picture (card_mips). A
+  // change takes effect at the next swapchain of a card. Before Start, and
+  // static so the mod can set it with no XrScreen at hand. Both are on when
+  // the mod does not call it (the x64 host).
+  static void SetCardSending(bool clear_edge, bool mips);
+  // THE TEST PICTURES (card_send_test_save=N). For the first N new pictures
+  // of the cards, StageCard makes the levels of the picture as SendCard
+  // does, also with no session, and gives two pictures to `save`: the
+  // levels side by side (over_checker: with alpha, to show over a
+  // checkerboard), and a model of the view of the headset the old way and
+  // with the clear edge and the levels. The facts go to `log`, as one line
+  // for each picture.
+  typedef void (*CardSaveFn)(const char* name, const uint8_t* bgra,
+                             int pitch_bytes, uint32_t width,
+                             uint32_t height, bool over_checker);
+  static void SetCardTestSave(int count, CardSaveFn save, LogFn log);
   // A new number for CardLayer::serial, for a card that drew a new picture.
   // Each call on each thread gives a new number, never 0.
   static uint32_t NewCardSerial();

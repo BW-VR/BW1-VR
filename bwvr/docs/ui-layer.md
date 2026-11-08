@@ -48,6 +48,9 @@ Marks, as in `tabletop.md`:
   the trigger press its buttons (section 22).
 - While a panel in the room is open, the ray of the pointing hand is a quad
   layer over the panels, so a panel does not hide it (section 25).
+- Each card goes into its swapchain with a frame of clear texels and with
+  mip levels, so its edge is clear and its text does not shimmer when the
+  head moves (section 26).
 - With `ui_panel=1` the pointer on the panel is not built (section 5). The
   menus draw on the panel at their own pixels, but the pointer still comes
   from the eye view.
@@ -741,6 +744,7 @@ card between the card and the eye pictures. Ctrl Shift F12 is the audio key.
 | `src/mod/stereo.cpp` | Latches the route before the eye passes. After eye pass 0 it saves the capture and copies the panel before the eye 0 capture. |
 | `src/mod/mod_main.cpp` | The ini keys. `FinishFrame` outside the eye passes, and the last release after it. |
 | `src/vr/xr_screen.cpp` | The panel swapchain, `SetPanelTexture`, `SetPanelQuads`, `StagePanelQuad`, the cards, and the quad layers after the projection layer |
+| `src/vr/card_send_math.h` | The clear edge and the mip levels of a card, and a model of the view of the headset (section 26) |
 | `src/mod/head_pose.cpp` | `HeadPoseOrigin`, the recenter pose in the LOCAL space |
 | `src/mod/controller_math.h` | `PanelPose`, `PanelWidth`, `WorldToRoom`, `RoomToLocal`, `FacePose`, `CreaturePanelPoint`, tested in `test/controller_math` |
 | `src/mod/subtitle_card_math.h` | The pure math of the subtitle card |
@@ -2482,8 +2486,8 @@ note 4 to 6 ms. The report of each window gives
 the average, the most, and the most for a change under the ray only.
 
 The window uses the quad layer of the ring (`kCardRing`), 1024 by 1024
-pixels. The ring, the panel of places and the window never show at one
-time. Memory: the page and the card (4 MB each), a picture of 692 by 76 px
+pixels, with the clear edge and the mip levels of section 26. The ring, the
+panel of places and the window never show at one time. Memory: the page and the card (4 MB each), a picture of 692 by 76 px
 for each row of the group (210 KB each, 24 rows in the group Render), and
 the note.
 
@@ -2839,3 +2843,143 @@ plane.
   has no depth. The glow alone has no light at the hand and full light from
   6 cm. A tube starts at the hand.
 - Only a headset shows how the strip looks over a panel and over the land.
+
+## 26. The edge and the mip levels of a card
+
+Each card (the hint cards, the cards of the buttons, the subtitle card, the
+ring with the panels of `panel_kit.cpp` on it, the keyboard, the bubble and
+the ray over the panels) is a picture of the CPU on a quad layer. The
+compositor of the runtime samples the quad. The code is in `SendCard` of
+`xr_screen.cpp` and in the pure `card_send_math.h`.
+
+### 26.1 Why
+
+- **The edge.** The sampler of the compositor reads the texels around the
+  edge of the rect of the quad. Past the rect each swapchain image holds an
+  older picture of the card, or no write at all, and each of the 3 images
+  holds a different one. So a quad that shows only the rect of its picture
+  can have a faint line at its edge that changes from frame to frame.
+- **The text.** A Quest 3 through Virtual Desktop renders about 21 pixels a
+  degree at the middle of the view (2688 pixels for the tangents from -54
+  to 40 degrees). A hint card has 40 texels a cm: 1.3 texels a pixel at
+  35 cm and 2.3 at 60 cm. The settings window and the debug window have
+  1024 texels across 56 cm: 1.5 texels a pixel at 1 m. With one mip level
+  the sampler skips texels, so thin lines of ink come and go when the head
+  moves. The menus of the game on the menu panel have 16 texels a degree,
+  fewer than the pixels, so their letters do not do this.
+
+### 26.2 What the mod does
+
+- **The clear edge** (`card_edge_clear=1`). The swapchain of a card is 40
+  texels larger than its picture, and more to a multiple of 8. The picture
+  goes in with 8 clear texels around it inside the rect of the quad (the
+  frame), and 8 clear texels more outside the rect (the apron). Each upload
+  writes the picture, the frame and the apron, so the sampler reads only
+  clear texels at the edge of the quad. The quad grows by the share of the
+  frame, and the frame is the same at each side. So the picture keeps its
+  size and its place in the room.
+- **The mip levels** (`card_mips=1`). The swapchain of a card has up to 4
+  mip levels, and no level is less than 8 texels at a side. After each new
+  picture the CPU makes each level from the one above it: each texel is the
+  mean of 2 by 2 texels. The mean is of the bytes, in the gamma of the
+  picture, as the mod blends its cards. So a thin line of ink keeps a
+  little more of its dark at a distance. A card holds the color multiplied
+  by the alpha, so the mean needs no other step, and a clear texel stays
+  clear. The part that an upload writes starts and ends on a multiple of 8,
+  so each level is exactly half of the level above it.
+- **A new picture only.** Each card gives a new number with each new picture
+  (`CardLayer::serial`). The mod keeps the levels of the last picture of
+  each card, and makes them again only for a new number. Then it compares
+  each row of the picture with the last one, and makes the levels again
+  only for the bands of 8 rows that changed. A card with the number 0 gets
+  its levels again in each frame. Each frame still writes the levels into
+  the next swapchain image, because each image holds an older picture.
+- **The flags.** The quad has `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT`
+  and not `XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT`, so the runtime
+  reads the color as multiplied by the alpha, which is what each card holds.
+  The first picture of each card counts the texels with more color than
+  alpha, and the log says whether the picture is correct.
+- **Where the levels can go.** With Vulkan (`xr_vulkan_upload=1`, or a
+  session with no Direct3D 11) one copy of the buffer writes each level. A
+  session with Direct3D 11 writes each level with `UpdateSubresource`. The
+  relay of Direct3D 11 in a session with Vulkan (`xr_vulkan_upload=0`)
+  copies level 0 only, so there each card has one level and the clear
+  edge. A runtime that refuses a swapchain with mip levels gets one level
+  for each card from then on, and the log says so.
+- **The view for videos** shows the picture of each card as before, with no
+  frame and from level 0 (`backend.md`, "The view for videos").
+
+### 26.3 Cost
+
+On this PC a new picture of a panel of 1024 by 1024 texels takes about
+0.9 ms for a new layout and 0.3 to 0.7 ms for a change of one row (the
+compare of the rows is most of it). A hint card is about a tenth of that.
+The buffer of all levels has 4/3 of the texels of the picture with its
+frame and apron. So the copy into the swapchain in each frame is about 1.4
+times as large as without them: 5.9 MB in place of 4 MB for a panel, and
+about 1 MB for a hint card. The memory is one buffer of the levels for
+each card.
+
+### 26.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `card_edge_clear` | 1 | 1: the clear edge (26.2). 0: the swapchain is the size of the picture, and the quad shows the rect of the picture only |
+| `card_mips` | 1 | 1: up to 4 mip levels, made on the CPU after each new picture. 0: one level |
+| `card_send_test_save` | 0 | Test key. For the first N new pictures of the cards that stay for two frames (not a step of a fade, and not the ray), also with no headset: `bwvr-cardsend-NN-levels-FFFFF.bmp` (the levels side by side over a checkerboard) and `bwvr-cardsend-NN-views-FFFFF.bmp` (the model of the view, 26.5), and one line `card send` for each picture |
+
+A change of `card_edge_clear` or `card_mips` takes effect at the next start
+of the game.
+
+```
+  openxr: the hint card of the pointing hand has its own swapchain, 808 by 360, 4 mip level(s), a clear edge of 8 texels around the picture, 3 images
+  openxr: the first picture of the hint card of the pointing hand has 0 texels with more color than alpha, so its color is multiplied by its alpha
+  openxr: the runtime refused a swapchain of the ring with 4 mip levels (-N), so each card has one level
+  cards        : N new pictures of the cards made ready for their swapchains (card_edge_clear=1, card_mips=1), X ms each on average and Y ms at the most. N of their N rows changed, and N copies of the levels went to the GPU
+card send    : picture N, the ring, 1024 by 1024 px, 4 level(s), a clear edge: made ready in X ms, 0 straight texels. At 0.60 m (0.90 texels a pixel) the shimmer is A the old way and B now (C for the ideal sampler), the edge E and F. At 1.00 m ...
+```
+
+### 26.5 The model of the view, and the tests
+
+`card_send_math.h` also has a model of a compositor, for the checks and the
+test pictures. It views the quad straight on at a scale in texels a pixel.
+It takes a bilinear sample of level 0 (one level), a trilinear sample (the
+levels), or the ideal sample (the mean of the texels under each pixel). For
+the old way the model reads past the rect what the picture of the card
+holds there.
+
+- **The shimmer** is how much the light of a block of 8 by 8 pixels changes
+  over 8 views, each shifted by 1/8 of a pixel across and down, in steps of
+  1/255. A sampler that skips texels hits a thin line at one shift and
+  misses it at the next. Part of the number comes from the move of the ink
+  across the edges of the blocks. The ideal sampler gives that part alone.
+- **The edge** is the largest alpha of the outer ring of pixels of the
+  quad, over 4 shifts.
+- **The views** of the test pictures: a row for each distance (0.35 and
+  0.60 m for a card of the hints, 0.60 and 1.00 m for a panel) and each
+  shift (0 and half a pixel), the old way at the left and the new way at
+  the right, over grey. A panel shows its top left part only.
+
+The math checks are in `test/controller_math/card_send_checks.h`: the
+layout of the old way, each box in its swapchain, the frame of 8 texels,
+the boxes on multiples of 8, the place and size of the picture, the levels
+for each size, the mean of each level, clear texels in the frame and the
+apron of each level, the color multiplied by the alpha, a change of one
+row, and red first. With a test card of thin lines of ink and an older
+card past its rect:
+
+| Texels a pixel | Shimmer, one level | Shimmer, the levels | Shimmer, ideal |
+| --- | --- | --- | --- |
+| 1.15 | 6.49 | 5.74 | 5.21 |
+| 2.00 | 11.67 | 6.15 | 6.86 |
+| 3.30 | 37.36 | 5.88 | 5.79 |
+
+The edge has an alpha of 0.50 the old way and 0 with the clear edge.
+
+A desktop run has no headset session, so `SendCard` does not run in it.
+`card_send_test_save` runs the same code on the pictures of the cards in a
+desktop run, and saves the levels and the model views.
+
+Only a headset shows whether the runtime samples the mip levels of a quad
+(the OpenXR specification lets the runtime choose), and how the text and
+the edge of the cards look.

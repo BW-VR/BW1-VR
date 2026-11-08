@@ -661,8 +661,9 @@ is 1, no hint of the game draws in an eye picture:
    glow at the Hand's point. Other buttons have a red seal or a light badge.
 4. `XrScreen::StageCard` gives the picture and its pose to
    `XrScreen::EndFrame`. That makes a small swapchain at the first layer of a
-   card, writes the part that shows, and adds one quad layer for the card in
-   the LOCAL space, after the projection layer and the panels.
+   card, writes the part that shows with a frame of clear texels and its mip
+   levels (`ui-layer.md`, section 26), and adds one quad layer for the card
+   in the LOCAL space, after the projection layer and the panels.
 
 The runtime puts the quad again for each displayed frame from the head pose, so
 a slow frame of the game does not double it when the head moves.
@@ -1350,7 +1351,9 @@ UI, and the log says so. No font of the game is used.
 
 **The grain and the cost.** The headset shows a card smaller than its picture
 (about 26 pixels of the view for each cm at 55 cm), so a detail of 1 px would
-shimmer. The smallest cell of the noise is 4 px. `card_scroll::Start` makes
+shimmer. The smallest cell of the noise is 4 px. The swapchain of each card
+also has mip levels and a clear edge (`ui-layer.md`, section 26), so the
+thin lines of the words do not shimmer and the edge of the quad is clear. `card_scroll::Start` makes
 one noise tile of 256 by 256 pixels and the tables of the burnt edge, one
 time. It also bakes the paper into the tile: the color of each pixel with
 its light and dark areas and its grain, and the opaque pixel 64 px or more

@@ -287,13 +287,15 @@ keeps the mod as it is.
   stronger.
 **Comfort and moving**
 
-- **F11. The controls of the player in the headset.** The settings window,
-  the welcome page and the page Controls are in (`ui-layer.md`, 24 and
-  24.6, `controllers.md`, 5.7). Open:
+- **F11. The controls of the player in the headset.** The VR Settings
+  window, the welcome page and the page Controls with the models of the
+  controllers are in (`ui-layer.md`, 24 and 24.6, `controllers.md`, 5.7).
+  Open:
   - The desktop runs of the page Controls (`village_run.ps1 -Kind
-    controls`, with the map, the defaults and `hint_profile`). A desktop run
-    has a Touch controller only: the profile of a real Index, wand or Mixed
-    Reality controller needs a headset with that controller.
+    controls`: a list, a new job that acts, Reset Defaults, and
+    `hint_profile`). A desktop run has a Touch controller only: the profile
+    of a real Index, wand or Mixed Reality controller needs a headset with
+    that controller.
   - The controller in the hand with its lit buttons and their cards
     (`hint_style=2`, `controller-hints.md`, 9.14). Desktop runs show the
     cards on the outer side of each hand, level in the view, with no
@@ -332,13 +334,13 @@ keeps the mod as it is.
   31.25 s), 500 to 532 ms after its play, with a wait of 20.3 to 21.0 ms.
   So at the start only, not in play. Open: whether a play has more of them
   (the log of a play shows it, `headset-checks.md`).
-- **F26. The first open of the settings window.** The warm draws the page,
-  the tabs and the rows of the first group of the settings, and a thread
-  draws the drawing of the page Controls (`panel_warm`, `ui-layer.md`, 23.3
-  and 24.6). With the page and the tabs only, the first picture took 4.3
-  ms (4.8 ms with no warm), and the first show of the page Controls 15.4 ms
-  (17.9 ms), with about 11 ms for the drawing. Open: the times with the
-  rows and the drawing from the warm, in a desktop run.
+- **F26. The first open of the VR Settings window.** The warm draws the
+  page, the tabs and the rows of the first group of the settings, and a
+  thread draws the pictures of the models of the page Controls
+  (`panel_warm`, `ui-layer.md`, 23.3 and 24.6). With the page and the tabs
+  only, the first picture took 4.3 ms (4.8 ms with no warm). Off the game,
+  the pictures of two Touch Plus models take 42 ms each, and a picture of
+  the page 3.7 ms. Open: the times in a desktop run.
 
 ### Faults of the plain game
 

@@ -34,3 +34,13 @@ zoomB2 (the stop at 7.5): each picture shows the land. At 1400 and 1460 a house 
 So the scale 7.5 draws the world, and the scale 1.0 draws none of it. The pictures do not show at which step between 7.5 and 1.0 the world goes. A run with a picture after each step (zoomA3) is queued after the jobs 59 and 60.
 
 The pictures stay on the laptop: C:\wt-zoom\bwvr\tools\desk\desk-zoomA2 and desk-zoomB2.
+
+## zoomA3: a picture after each step in
+
+The same run as zoomA2, with a shot 25 frames after each zoom step in (log frames 358 to 658). The steps are 29.6, 19.8, 13.2, 8.8, 5.9, 3.9, 2.6, 1.7, 1.2, 1.0 and the limit.
+
+- 29.6 to 3.9 (log 358 to 508): the land, the houses, the fence and the Hand draw. The view comes nearer at each step.
+- 2.6 (log 538): the land and a house are near and large, and a villager is in front of the house. The world draws.
+- 1.7, 1.2 and 1.0 (log 568 to 673): no world. Only the orange-brown fog color, the two advisors, a small white shape and the subtitle card.
+
+So the world goes between 2.6 and 1.7 units per meter.

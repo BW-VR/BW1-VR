@@ -93,6 +93,7 @@
 #include "one_walk_math.h"
 #include "../common/bw_addresses.h"
 #include "controller_math.h"
+#include "bookmark_aim.h"
 #include "creature_command.h"
 #include "far_grab.h"
 #include "miracle.h"
@@ -588,7 +589,7 @@ struct Halo {
   const Style* style;
 };
 
-int Halos(Halo out[4]) {
+int Halos(Halo out[5]) {
   int n = 0;
   FarDraw d, c, m;
   bool same = false;
@@ -626,13 +627,20 @@ int Halos(Halo out[4]) {
     out[n].draw = v;
     out[n++].style = v.valid ? &kHaloHold : &kHaloInvalid;
   }
+  // THE OBJECT OF THE AIM OF A NEW BOOKMARK (bookmark_aim.cpp): the grip
+  // sets the bookmark on it.
+  FarDraw b;
+  if (BookmarkAimHalo(&b)) {
+    out[n].draw = b;
+    out[n++].style = &kHaloValid;
+  }
   return n;
 }
 
 // The halos, once in each eye pass of a frame. A target whose mesh glows has
 // no halo (target_glow=1).
 void DrawHalo() {
-  Halo halos[4];
+  Halo halos[5];
   const int count = Halos(halos);
   if (count == 0) return;
   int eye = -1;
@@ -969,7 +977,7 @@ void HandGlowDraw() {
 // influence stops the press.
 int HandGlowTargets(TargetGlowMark* out, int max) {
   int n = 0;
-  Halo halos[4];
+  Halo halos[5];
   const int count = Halos(halos);
   for (int i = 0; i < count && n < max; ++i) {
     if (halos[i].draw.target == nullptr) continue;

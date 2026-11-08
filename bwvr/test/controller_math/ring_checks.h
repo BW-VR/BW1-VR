@@ -19,8 +19,8 @@ inline void RingChecks() {
       if (a.id == nullptr || a.id[0] == 0 || a.word[0] == 0 || a.name[0] == 0) {
         words = false;
       }
-      // A word of 10 letters fits the badge, and a name of 23 fits the card.
-      if (wcslen(a.word) > 10 || wcslen(a.name) > 23) fit = false;
+      // A word of 11 letters fits the badge, and a name of 23 fits the card.
+      if (wcslen(a.word) > 11 || wcslen(a.name) > 23) fit = false;
       for (int k = i + 1; k < kItems; ++k) {
         if (strcmp(a.id, kItemInfo[k].id) == 0) unique = false;
       }

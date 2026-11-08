@@ -130,10 +130,12 @@ want.
 
 ### Menus and cards
 
-20. **The menus, the keyboard, the ring and the panel of places.** Open the
-    game menu and the ring, type the name of a god, open the panel of places
-    from page 2 of the ring and go to a bookmark, and turn the head while a
-    menu is open. Wrong: a panel that turns with the head or is at a bad
+20. **The menus, the keyboard, the ring and its sheets.** Open the game menu
+    and the ring, type the name of a god, add a bookmark from the sheet of
+    the places with the ray and the grip, go to it, choose a leash on the
+    sheet of the leashes, and turn the head while a menu is open. Wrong: an
+    icon or a word of the ring that you cannot read at a glance, or a tile of
+    a sheet that is hard to put the hand on. Wrong: a panel that turns with the head or is at a bad
     place, a panel that hides the pointing hand, keys, buttons or a ring that
     are blurred or hard to read or hard to hit with the ray, a ray that does
     not meet the arrow of the game, or a thumb that lets go of Y. Wrong

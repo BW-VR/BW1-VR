@@ -1721,7 +1721,9 @@ the Creature, pause, bookmarks and more. `controls-audit.md` lists them. The
 ring holds those functions on the hand that does not point.
 
 The code is `radial_menu.cpp` (the settings, the game side, the picture, the
-frame) and `radial_menu_math.h` (the items, the pick, the ring step by step).
+frame), `radial_menu_math.h` (the items, the pick, the ring step by step),
+`ring_icon_math.h` (the icons), `ring_sheet_math.h` (the sheets of the places
+and of the leashes) and `bookmark_aim.cpp` (the aim of a new bookmark).
 `controllers.cpp` has small parts: `ControllersRingHand`, the call of
 `RadialMenuFrame` at the end of `ControllersFrame`, the call of
 `RadialMenuPump` in `ControllersPump`, and one test in `TriggerBlocks`.
@@ -1779,6 +1781,16 @@ choose". A choice that does not act gives the pulse `refused`.
 **While the ring is open,** a grip does not start a grab of the world
 (`TriggerBlocks`), and the hint card of that hand does not show.
 
+**A sheet.** The items `leash` and `places` go to a sheet: a page that is
+not a ring (10.11, 10.12). They are links, as `More` is: after 0.45 s with
+the hand on the item, or at once with the trigger of the stick way. The
+middle of the sheet is the place of the hand at that moment, so the hand
+starts in the middle, where no tile is. Each tile of a sheet is where the
+picture shows it, and the hand picks the tile that it is over
+(`SheetPick`). A tile stays chosen while the hand is 1 cm or less out of
+its box. The release chooses the tile, and a release in the middle chooses
+nothing. With the stick, the stick at its end is 13 cm from the middle.
+
 ### 10.2 The items
 
 The words are the words of `bwvr.ini`. "How" is what the mod writes into the
@@ -1796,19 +1808,20 @@ key buffer of the game.
 | `mark_set` | Set a bookmark here | Ctrl and the number of the first bookmark that is not set. With all 7 set: the one after the last one that the ring set (`MarkToSet`) |
 | `mark_go` | Go to the next bookmark | Ctrl and Tab |
 | `mark_back` | Go back | Backspace |
-| `places` | Places and bookmarks | Opens the panel of places (`ui-layer.md`, "The panel of places"): the Temple, the Creature, the next town, the middle of the land, and Go, Set here, Follow and Remove for each of the 7 bookmarks. Not in the Temple. An empty slot with `places_panel=0` |
+| `leash` | Choose a leash | Goes to the sheet of the leashes (10.12) |
+| `places` | Places and bookmarks | Goes to the sheet of the places (10.11), as the word `places_page` does. With `places_sheet=0` it opens the panel of places (`ui-layer.md`, "The panel of places"). Not in the Temple. An empty slot with `places_panel=0` |
 | `snapshot` | A snapshot for a report | Saves the eye pictures of the next frame and a copy of the log in a folder of its own (10.9). An empty slot with `snapshot_item=0` |
 | `pause` | Pause the game | P |
 | `slower`, `faster` | Make the game slower, faster | Alt and 1, Alt and 2 |
 | `help` | Help of the game | The key of action `0x00` (F1) |
-| `names`, `details` | Villager names, villager details | The key of action `0x1B` (N), `0x1C` (S) |
+| `names`, `details` | Show villager names, villager details | The key of action `0x1B` (N), `0x1C` (S). The card says "Hide villager names" while the names show |
 | `save`, `load` | Quick save, quick load | The key of action `0x1D` (Ctrl S), `0x1E` (Ctrl L) |
 | `playground` | The Gods' Playground | F2 |
 | `hall`, `room_creature`, `room_challenge`, `room_save`, `room_options`, `room_library` | The rooms of the Temple | The key of action `0x14` to `0x19` (F4 to F9) |
 | `leave` | Leave the Temple, or back to the hall | Esc |
 | `recenter` | Recenter the view | No key: the view recenters as F11 does, and both hands get a pulse (`ControllersRecenter`). It acts also where the game takes no key. Slot 2 of page 2 has it with `places_panel=1` |
 | `more` | More | The other page |
-| `settings` | The settings window | Opens the settings window (`ui-layer.md`, 24). An empty slot with `settings_panel=0` |
+| `settings` | VR Settings | Opens the window of the VR Settings (`ui-layer.md`, 24). An empty slot with `settings_panel=0` |
 | `debug` | The debug page | Opens the debug window, or with `debug_window=0` goes to the first page of the debug page (10.8). An empty slot with `debug_menu=0` |
 | `back` | Back | The page before, on a page of the debug page |
 | `none` | An empty slot | |
@@ -1817,20 +1830,28 @@ The rings by default, from the top and clockwise:
 
 | Ring | Items |
 | --- | --- |
-| Page 1 (`radial_menu_items`) | `temple`, `creature`, `town`, `leash_learning`, `more`, `leash_compassion`, `leash_aggression`, `enter` |
-| Page 2 (`radial_menu_items2`) | `places`, `snapshot`, `recenter`, `pause`, `more`, `help`, `settings`, `save` |
-| Page 2 with `places_panel=0` | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `settings`, `save` |
-| Page 2 with `settings_panel=0` | The same, with `names` in place of `settings` |
+| Page 1 (`radial_menu_items`) | `leash`, `places`, `recenter`, `save`, `more`, `settings`, `names`, `pause` |
+| Page 2 (`radial_menu_items2`) | `snapshot`, `help`, `details`, `faster`, `more`, `slower`, `none`, `none` |
 | In the Temple (`radial_menu_items_temple`) | `hall`, `room_creature`, `room_challenge`, `room_save`, `leave`, `room_options`, `room_library`, `none` |
 
-The order is how often a player needs an item: the Temple at the top, the
-moves of the view on the right, the leashes at the bottom. On page 2 the
-panel of places is at the top, because players did not find the bookmarks
-on the ring. The panel has all the moves to a place and each function of a
-bookmark, so page 2 needs no bookmark item. Slot 2 of page 2 has the
-recenter, and slot 6 has the settings window. A player who wants the names
-of the villagers on the ring gives `names` a slot with `radial_menu_items2`. The ring of the
-Temple shows by itself while the player is in the Temple (`GGame + 0x205A28`).
+Page 1 has what a player needs at a glance. The leashes are at the top and
+the places at the top right, because a player uses them most. The places,
+the bookmarks and the three leashes are on their sheets, so no item of a
+place, of a bookmark or of one leash is on the ring. The recenter is at the
+right. Quick save, the VR Settings, the names of the villagers and the
+pause go round the bottom and the left. Page 2 has the snapshot, the help
+of the game, the villager details and the speed of the game. Its empty
+slot 6 is for the item `debug` (10.8). The ring of the Temple shows by
+itself while the player is in the Temple (`GGame + 0x205A28`).
+
+The old rings (`ring_pages=0`):
+
+| Ring | Items |
+| --- | --- |
+| Page 1 | `temple`, `creature`, `town`, `leash_learning`, `more`, `leash_compassion`, `leash_aggression`, `enter` |
+| Page 2 | `places`, `snapshot`, `recenter`, `pause`, `more`, `help`, `settings`, `save` |
+| Page 2 with `places_panel=0` | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `settings`, `save` |
+| Page 2 with `settings_panel=0` | The same, with `names` in place of `settings` |
 
 **An item that cannot act now is dim,** and the card in the middle says why:
 no Creature, a kind of leash that the Creature does not have, no bookmark set,
@@ -1891,6 +1912,19 @@ small mark is in the middle. The ring fades in in 0.10 s and out in 0.20 s,
 in place. If the runtime refuses the layer of the ring, the ring does not
 show, and its items still act.
 
+**The round seals** (`ring_icons=1`). Each item is a round seal of red wax,
+96 px (3 cm) across. The wax has the ring of a stamp and the icon of the
+item, pressed in as the letters of a word are. The word of the item is
+under the seal, in light letters with a dark edge of 3 px, so it reads on
+the land, on the sea and on the sky. The thin ring of ink and gold goes
+from seal to seal, and it fades out 14 px before a word. The chosen seal is
+102 px, with the gold wax, the rim and the glow, and its word is gold. The
+icons are shapes that the mod draws in code (`ring_icon_math.h`): no
+picture comes from a file. Each stroke of an icon is 4 px or more at the
+size of a seal. The pause shows the icon of play while the game is paused.
+A switch and a group of the debug pages have their word on a seal, as with
+`ring_icons=0`.
+
 **The look** follows `hint_card_style`, the key of the hint cards (the
 launcher row "Card look", `controller-hints.md`, 9.11). The ring reads the
 key from `bwvr.ini`, and it follows the switch "Card look" of the debug page
@@ -1947,7 +1981,12 @@ first time.
 | `radial_menu_size_pct` | 100 | The size of the ring, 50 to 200 |
 | `radial_menu_creature` | 1 | 1 the item `creature` is one teleport in the God view, 0 it is the key of the game |
 | `hint_card_style` | 1 | The key of the hint cards (`controller-hints.md`, 9.5). 1 each item is a wax seal and the card in the middle is a parchment scroll. 0 dark round boxes with white letters (10.4). The launcher row "Card look" |
-| `places_panel` | 1 | 1 page 2 as made has the item `places`, which opens the panel of places. 0 page 2 as made has `mark_set`, `mark_go` and `mark_back`, and the word `places` is an empty slot |
+| `ring_pages` | 1 | 1 the pages as made of 10.2: the leashes, the places, the recenter, quick save, the VR Settings and the names on page 1. 0 the old pages, with the places and the leashes on page 1 |
+| `ring_icons` | 1 | 1 each item is a round seal with its icon and its word under it (10.4). 0 each item is a seal with its word |
+| `places_sheet` | 1 | 1 the item `places` goes to the sheet of the places (10.11). 0 it opens the panel of places (`ui-layer.md`, section 22) |
+| `bookmark_aim` | 1 | 1 the seal with the plus of the sheet of the places waits for the grip at the aim of the pointing hand (10.11). 0 it sets the bookmark at the Hand, as Ctrl and the number do |
+| `bookmark_test_aim` | | A test key: the word `aimmark` of the scripted controller aims at the nearest living thing of the cone with `living` |
+| `places_panel` | 1 | 0 the word `places` is an empty slot. With `ring_pages=0`, page 2 as made then has `mark_set`, `mark_go` and `mark_back` |
 | `snapshot_item` | 1 | 1 the item `snapshot` saves a snapshot for a report (10.9). 0 the word `snapshot` is an empty slot |
 | `settings_panel` | 1 | 1 page 2 as made has the item `settings`, which opens the settings window (10.10). 0 page 2 as made has `names`, and the word `settings` is an empty slot |
 | `welcome_page` | 1 | 1 the welcome page shows at the first start, while `bwvr.ini` has no `welcome_done=1` (10.10). 0 it never shows |
@@ -1990,6 +2029,19 @@ what a choice did. The report of a window has the counts, and the longest
 draw of the picture in ms. The scroll look adds the count of the parts that
 went into the cache between the pictures, and the longest of those draws.
 
+A sheet and the aim of a bookmark:
+
+```
+ring         : the ring goes to the sheet of the places, its middle at the hand, 5.0 cm to the right and 5.0 cm up from the middle of the ring. The tiles, in cm from the middle of the sheet: creature at -12.3 8.3, [...], mark3 at -3.9 -6.6, remove3 at -3.9 -10.3, add at 3.9 -6.6, frame 812
+ring         : the choice on the sheet is Bookmark 3 (tile 8), with the hand 0.2 cm to the right and -6.4 cm up from its middle, frame 830
+ring         : the player chose "Bookmark 3": the key 3, frame 845
+ring         : the player chose "Add a bookmark": bookmark 2 waits for the grip at the point of the aim (bookmark_aim=1), frame 901
+bookmark aim : the aim is on the land at 1830.2 2411.7, frame 902
+bookmark aim : the grip sets bookmark 2 on the land at 1830.2 2411.7 (Bookmark::SetBookMark), 1.4 m of the room along the ray, frame 960
+bookmark aim : the grip sets bookmark 4 on the Villager 0x1C2D9F40 at 1822.0 2400.5 (fn_00439F70), 1.2 m of the room along the ray, frame 1210
+bookmark aim : the aim of bookmark 5 stops: the player pressed B, frame 1300
+```
+
 Each of the first 40 new pictures of the ring has one line:
 
 ```
@@ -2007,6 +2059,15 @@ release, the middle, More with its dwell, a ring that cannot open or stay
 open, an empty slot), the ring with the stick and the trigger (through the
 middle, the rest, More, a trigger that was down before), the kind of the
 leash, the bookmark to set, and the tutorial switches.
+`ring_sheet_checks.h` covers the icons (each one covers a fair part of its
+box and nothing at its edge, and each item has one), the pages as made, the
+layout of the sheets (no two boxes overlap, each box is in the picture,
+the middle is free), the keys of a bookmark, the pick on a sheet with its
+margin, and the ring to a sheet with the button and with the stick.
+
+The offline pictures of the ring come from `radial_menu.cpp` itself, built
+with stubs of the game on a PC with no game: the pages, the chosen seal,
+the dim seal, the sheets and the old look. They show the mod art only.
 
 Desktop runs [R] (the God view, `fake_controller=2`, the start choice "Keep
 your old Creature"): each choice goes into the key buffer of the game, and the
@@ -2282,6 +2343,75 @@ and the menu button work as on the debug window, and the word `aimdebug` of
 the scripted controller aims at the parts of the window that is open
 (`debug_test_parts`), or at the buttons of the welcome page
 (`welcome_test_parts`). See `ui-layer.md`, section 24.
+
+### 10.11 The sheet of the places
+
+The item `places` goes to a sheet with the places of the game and the
+bookmarks (`places_sheet=1`). It has the look of the ring: round seals with
+icons, and the card in the middle.
+
+![The sheet of the places](images/ring-sheet-places.png)
+
+| Row | Tiles | What a choice does |
+| --- | --- | --- |
+| Places | Creature, Town, Temple, Inside, Land, Back | The items `creature`, `town`, `temple`, `enter`, `land` and `mark_back` of the ring (10.2). Back goes to the place before the last move to a bookmark |
+| Bookmarks | A seal with the number of each bookmark that is set, then a seal with a plus | A number goes to its bookmark: the key of the number (`fn_0043A070`). The plus adds a bookmark (below). It is dim when all 7 are set |
+| Bins | A small seal with a bin under each bookmark | It removes that bookmark: Ctrl, Shift and the number (`fn_00439D40`) |
+
+The rows have the headers "Places" and "Bookmarks". The places are 7 to 12
+cm above the middle, and the bookmarks with their bins 5 to 12 cm below it,
+so the hand starts on no tile. A seal is dim for the reason of its item on
+the ring,
+and each tile of a bookmark is dim while the game takes no bookmark key: in
+the Temple, in a cut scene, and while the tutorial has the bookmarks off.
+The card says why. The follow of the game (Shift and the number) is not on
+the sheet: it moves the view by itself.
+
+**The plus** (`bookmark_aim=1`). The ring closes, and the pointing hand
+shows its ray. Its card says "Set a bookmark" for the grip and "Stop" for B.
+An object in the ray gets the gold halo: the object must be in its own size
+and 1.5 degrees round the ray, and in front of the land of the ray. Else
+the land point of the ray gets a gold ring of 10 cm. A press of the grip
+sets the first bookmark that is not set at that target, and the controller
+gives the pulse `activate`. A press with no target gives the pulse
+`refused`, and the aim stays. B of the pointing hand, the menu button and
+the ring stop the aim. While the aim is on, the grip belongs to it: no
+grab of the world, no far grab and no press of the game. The far grab
+selects nothing then.
+
+**How the mod sets it** (`bookmark_aim.cpp`). The game's own functions, on
+the game thread at the pump, behind the gates of the bookmark keys:
+
+- An object: `fn_00439F70` (cdecl: the bookmark, the object). The bookmark
+  holds the object. `Bookmark::ProcessAll` `0x00439DD0` copies the map
+  point of the object into the bookmark in each frame. So the seal of the
+  bookmark goes to the place where the object is at that time, and nothing
+  follows it after that.
+- A land point: `Bookmark::SetBookMark` `0x00439E50` (cdecl: the
+  bookmark, a `MapCoords`). The game sets the bookmark on the object of its
+  pick record (`GInterface+0x400`) when it has one, and that object is
+  under the Hand, not under the ray. So the mod clears that field for the
+  call and puts it back.
+
+Both functions keep the offset of the game camera from the point, as the
+key Ctrl and the number does. With `bookmark_aim=0` the plus sends Ctrl
+and the number, and the game sets the bookmark at the Hand.
+
+### 10.12 The sheet of the leashes
+
+The item `leash` goes to a sheet with the three leashes: Compassion,
+Learning and Aggression, from the left, as from good to evil. Each tile is
+a page of parchment with a picture of its leash and its name. The chosen
+tile has the gold rim and the glow. The leash of now has a small red seal
+with a tick. A leash that the Creature does not have is dim. A choice is
+the item `leash_compassion`, `leash_learning` or `leash_aggression` of the
+ring (10.2). The tiles are 3 to 12 cm above the middle, and the card is
+under them.
+
+![The sheet of the leashes](images/ring-sheet-leash.png)
+
+**The picture of a leash.** A tile shows the icon of its kind (a heart, a
+book, the marks of a claw) until the mod has the picture of the leash.
 
 ## 11. The Temple
 

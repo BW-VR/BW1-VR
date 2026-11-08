@@ -143,6 +143,7 @@
 #include "hand_feel_math.h"
 #include "hand_land.h"
 #include "haptics.h"
+#include "bookmark_aim.h"
 #include "miracle.h"
 #include "spell_book.h"
 #include "village.h"
@@ -7592,9 +7593,11 @@ void FarFrameStep(bool active) {
   // ready.
   // A MIRACLE IN THE HAND (miracle.cpp) aims with the same cone: the Hand is
   // not empty then, so the far grab is not ready.
+  // THE AIM OF A NEW BOOKMARK (bookmark_aim.cpp) takes an object of the
+  // same cone.
   const bool command = f.usable && f.have_ray &&
                        (CreatureCommandWantsCone() || MiracleWantsCone() ||
-                        ForestTakeWantsCone());
+                        ForestTakeWantsCone() || BookmarkAimWantsCone());
   if (!f.ready && !command) return;
   g_far_ready = f.ready;
   g_far_ray = true;

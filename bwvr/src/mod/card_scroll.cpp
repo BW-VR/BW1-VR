@@ -382,7 +382,9 @@ bool StartLocked(HDC dc) {
 //   hint_card.cpp     words 31 (kScrollTextCap), seals 23 (kScrollSealCap)
 //   radial_menu.cpp   seals 22 (kSealCap), 19 (kSealSwitchCap), words 17
 //                     (kSealValueCap), 27 (kScrollNameCap), 19
-//                     (kScrollLongCap), 20 (kScrollNoteCap)
+//                     (kScrollLongCap), 20 (kScrollNoteCap), seals 19
+//                     (kLabelCap) and 23 (kTileNameCap), digits 40
+//                     (kDigitsCap)
 //   vr_keyboard.cpp   words 30 (kInkCap), seals 19 (kWordCap), digits 30
 //   spell_book.cpp    words 37, 25, 21, 17 and 14 (7/10 of the em 54, 36,
 //                     30, 25 and 21)
@@ -395,7 +397,7 @@ enum { kWarmWords = 0, kWarmSeal = 1, kWarmDigits = 2 };
 const int kWarmWordCaps[] = {13, 14, 17, 19, 20, 21, 22, 24,
                              25, 26, 27, 30, 31, 36, 37, 38};
 const int kWarmSealCaps[] = {12, 19, 21, 22, 23};
-const int kWarmDigitCaps[] = {30};
+const int kWarmDigitCaps[] = {30, 40};
 
 // The letters of the cards: the printable ASCII, the letters of Latin-1, and
 // the quotes, the dashes and the dots of the game's text.

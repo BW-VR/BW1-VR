@@ -139,6 +139,7 @@
 #include "creature_command.h"
 #include "cutscene_hands_math.h"
 #include "cutscene_window.h"
+#include "bookmark_aim.h"
 #include "far_grab.h"
 #include "gesture_trail_math.h"
 #include "glow_math.h"
@@ -1153,6 +1154,30 @@ void BuildCommandRing() {
   }
 }
 
+// THE RING OF THE AIM OF A NEW BOOKMARK (bookmark_aim.cpp): a gold ring on
+// the land round the land point of the aim ray, where the grip sets the
+// bookmark. It takes the room of the teleport's triangles, as
+// BuildCommandRing does.
+void BuildMarkRing() {
+  TeleportDraw d;
+  if (g_teleport_triangles > 0 || !BookmarkAimRing(&d)) return;
+  const float units = d.units_per_meter;
+  if (!(units > 0.0f)) return;
+  const int start = g_count;
+  const float outer = d.ring_cm * 0.01f * units;
+  g_count += overlay_math::BuildLandRing(
+      d.target[0], d.target[2], outer * kRingInner, outer, kRingLiftM * units,
+      true, [](float x, float z) { return TeleportGround(x, z); },
+      &g_world[g_count], kMaxTriangles - g_count, false);
+  for (int t = start; t < g_count; ++t) {
+    for (int v = 0; v < 3; ++v) {
+      const float level =
+          overlay_math::LightLevel(g_world[t].n[v], kArcAmbient);
+      for (int k = 0; k < 3; ++k) g_color[t][v][k] = kFarGold[k] * level;
+    }
+  }
+}
+
 // THE TETHER OF A FAR GRAB (far_grab.cpp). After the lock, and while the game
 // takes from a far bulk source, a thin tube goes from the Hand's point to the
 // object. It draws with overlay=0 too. Nothing is drawn on the land under the
@@ -1902,6 +1927,7 @@ void OverlayFrame() {
   BuildTeleport();
   BuildCommand();
   BuildCommandRing();
+  BuildMarkRing();
   BuildMenuRay();
   BuildFar();
   BuildGestureTrail();

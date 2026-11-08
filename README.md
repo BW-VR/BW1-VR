@@ -118,7 +118,7 @@ Creature select". To keep your Creature, select "Keep your old Creature".
 | --- | --- |
 | Grip | Grab the land and pull to move. With both grips: turn and zoom |
 | Stick | Move over the land, in the direction of your head |
-| Y | Hold for a ring menu: Temple, Creature, town, leashes, save |
+| Y | Hold for a ring menu: leashes, places and bookmarks, recenter, quick save, VR Settings |
 | Menu button | The game menu. In a menu, point with the line and click with the trigger |
 
 The full list is in "Black & White VR Mod readme.txt" in your game folder.
@@ -129,8 +129,8 @@ The full list is in "Black & White VR Mod readme.txt" in your game folder.
   down, or when the world is not where you expect it.
 - A thing that your Hand can act on glows gold. A red glow means that the
   thing is outside your influence.
-- Save the game before you start a quest. Quick save is in the ring menu,
-  under "More".
+- Save the game before you start a quest. Quick save is on the first page
+  of the ring menu.
 - If the frame rate is low, lower "Resolution scale" in the launcher.
 - A walk with the left stick makes some people ill. If it makes you ill, turn
   off "Move with the other stick" in the launcher. Then move with the left

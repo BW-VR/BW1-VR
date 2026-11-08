@@ -74,6 +74,7 @@
 #include "settings_panel.h"
 #include "controls_page.h"
 #include "places_panel.h"
+#include "bookmark_aim.h"
 #include "radial_menu.h"
 #include "spell_book.h"
 #include "gesture_panel.h"
@@ -329,6 +330,9 @@ enum FakeInput {
   // The debug window: the aim of the right hand turns to the middle of the
   // next part of debug_test_parts (debug_window.cpp).
   kAimDebug,
+  // The aim of a new bookmark: the aim of the right hand turns to the target
+  // of the test key bookmark_test_aim (bookmark_aim.cpp).
+  kAimMark,
   kInputCount
 };
 
@@ -344,7 +348,7 @@ const char* const kInputName[kInputCount] = {
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
     "book",       "lrot",       "aimplaces",  "lstick_click",
-    "aimdebug"};
+    "aimdebug",   "aimmark"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -450,6 +454,7 @@ const int kSeekLine = 1;      // "seekc": a point on the line to the Creature
 const int kSeekBody = 2;      // "touchc": the Creature's body bone
 const int kSeekFar = 3;       // "aimfar": a far target, to aim at
 const int kSeekCommand = 4;   // "aimcmd": a target of a Creature command
+const int kSeekMark = 5;      // "aimmark": a target of a new bookmark
 int g_seek_due_kind = kSeekObject;
 
 struct ScriptStep {
@@ -893,7 +898,7 @@ void AimTurnOfPointingHand(float* yaw_left_deg, float* pitch_up_deg);
 // the reach curve backward from the anchor, then the room.
 void Seek(int kind) {
   if (g_last_table && g_seek_due == 0) {
-    if (kind == kSeekFar || kind == kSeekCommand) {
+    if (kind == kSeekFar || kind == kSeekCommand || kind == kSeekMark) {
       HandDirectWidenFar(3, 6.5f);
     } else {
       HandDirectWidenPick(3);
@@ -905,13 +910,15 @@ void Seek(int kind) {
   g_seek_due = 0;
   float world[3];
   const float scale = HeadPoseScale();
-  if (kind == kSeekFar || kind == kSeekCommand) {
+  if (kind == kSeekFar || kind == kSeekCommand || kind == kSeekMark) {
     // "aimfar": the hand stays where it is, and its aim turns to the object.
     // Only on the table and in the God view, where the room is the table's.
-    // "aimcmd" is the same with a target of a Creature command.
+    // "aimcmd" is the same with a target of a Creature command, and
+    // "aimmark" with a target of a new bookmark.
     if (!g_have_last_room || scale <= 0.0f || !g_last_table ||
-        !(kind == kSeekFar ? HandDirectSeekFarPoint(world)
-                           : CreatureCommandTestPoint(world))) {
+        !(kind == kSeekFar       ? HandDirectSeekFarPoint(world)
+          : kind == kSeekCommand ? CreatureCommandTestPoint(world)
+                                 : BookmarkAimTestPoint(world))) {
       ModLog("controllers  : the fake hand has nothing far to aim at, frame "
              "%llu", g_frame);
       return;
@@ -1215,6 +1222,7 @@ void UpdateScript() {
     if (step.input == kAimTemple && t == step.start) AimTemple();
     if (step.input == kAimPlaces && t == step.start) AimPlaces();
     if (step.input == kAimDebug && t == step.start) AimDebug();
+    if (step.input == kAimMark && t == step.start) Seek(kSeekMark);
     if (step.input == kPull && t == step.start) {
       // 15 cm toward the head center, or back to where the hand was.
       float here[3];
@@ -1309,7 +1317,8 @@ void UpdateScript() {
         i == kTouchCreature || i == kRot || i == kAimFar || i == kPull ||
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
-        i == kMoveKey || i == kBook || i == kAimPlaces || i == kAimDebug) {
+        i == kMoveKey || i == kBook || i == kAimPlaces || i == kAimDebug ||
+        i == kAimMark) {
       continue;
     }
     if (i == kPose2) {
@@ -2608,6 +2617,7 @@ void LatchGesture(bool back) {
   if (b && !g_window_b_before &&
       (DebugWindowCloseBy("the player pressed B") |
        PlacesPanelCloseBy("the player pressed B") |
+       BookmarkAimStopBy("the player pressed B") |
        WelcomePageCloseBy("the player pressed B"))) {
     g_gesture_need_up = down;
   }
@@ -2807,6 +2817,7 @@ void LatchEsc() {
   if (down && !g_esc_before && g_esc_prev_active && active &&
       !(DebugWindowCloseBy("the player pressed the menu button") |
         PlacesPanelCloseBy("the player pressed the menu button") |
+        BookmarkAimStopBy("the player pressed the menu button") |
         WelcomePageCloseBy("the player pressed the menu button"))) {
     g_esc_event = true;
   }
@@ -3464,8 +3475,13 @@ void PumpButtons(ULONGLONG now) {
     // the game and the grab of the world do not get that press
     // (spell_book.cpp).
     const bool book_claim = SpellBookPumpGrip(RawDown(kRight));
-    far_claim = FarGrabPumpGrip(RawDown(kRight) && !book_claim, ok, can_hold);
-    far_claim = far_claim || book_claim;
+    // THE AIM OF A NEW BOOKMARK: the grip sets the bookmark at the target of
+    // the ray, and the game and the grab of the world do not get that press
+    // (bookmark_aim.cpp).
+    const bool mark_claim = BookmarkAimPumpGrip(RawDown(kRight));
+    far_claim = FarGrabPumpGrip(RawDown(kRight) && !book_claim && !mark_claim,
+                                ok, can_hold);
+    far_claim = far_claim || book_claim || mark_claim;
   }
   UpdateGrab(usable, back, far_claim);
   // THE CREATURE COMMAND. While the leash is on the Hand, a press of the
@@ -4902,6 +4918,7 @@ void ControllersFrame() {
   PollLayoutKeys();
   LatchEsc();
   RadialMenuFrame();
+  BookmarkAimFrame();
   PlacesPanelFrame();
   WelcomePageFrame();
   DebugWindowFrame();
@@ -5569,6 +5586,10 @@ bool ControllersFarAllowed(const char** why) {
     *why = "a jump, a gesture or a teleport runs";
     return false;
   }
+  if (BookmarkAimActive()) {
+    *why = "the aim of a new bookmark runs";
+    return false;
+  }
   if (RawDown(kLeft) || ((g_game_mask | g_mouse_mask | g_ctrl_mask) & 1) != 0) {
     *why = "the trigger is down";
     return false;
@@ -5588,6 +5609,8 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
   bool panel = PlacesPanelRay(&panel_meters);
   if (!panel) panel = DebugWindowRay(&panel_meters);
   if (!panel) panel = WelcomePageRay(&panel_meters);
+  // The aim of a new bookmark: to its target, or 2 m long with none.
+  if (!panel) panel = BookmarkAimRay(&panel_meters);
   if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn() || panel)) {
     return false;
   }
@@ -6152,6 +6175,7 @@ void ControllersReport() {
   }
   RadialMenuReport();
   PlacesPanelReport();
+  BookmarkAimReport();
   DebugWindowReport();
   SettingsPanelReport();
   ControlsPageReport();

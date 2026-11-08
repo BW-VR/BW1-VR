@@ -125,6 +125,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bookmark_aim.h"
 #include "../vr/xr_screen.h"
 #include "card_scroll.h"
 #include "controller_hints.h"
@@ -587,6 +588,9 @@ enum Context {
   // refused a miracle of the book a moment ago. Its lines name the miracle
   // under the pointing hand.
   kCtxBook,
+  // The seal with the plus of the sheet of the places waits for the grip at
+  // the aim of the pointing hand (bookmark_aim.cpp).
+  kCtxMark,
   kContexts
 };
 // PromptStep counts the shows of each context, and it takes a context past
@@ -602,7 +606,7 @@ const char* const kContextName[kContexts] = {
     "the land, with the leash on", "a leash that is tied to an object",
     "a miracle in the Hand", "the totem or a miracle icon",
     "a room of the Temple", "the door of the Temple or a leash post",
-    "the spell book"};
+    "the spell book", "the aim of a new bookmark"};
 
 // The dwell, the hold and the count of each context (PromptStep).
 const hint_card_math::PromptRule kRules[kContexts] = {
@@ -625,6 +629,7 @@ const hint_card_math::PromptRule kRules[kContexts] = {
     {0.5f, 6.0f, 3},   // a room of the Temple
     {0.3f, 5.0f, 4},   // the door of the Temple or a leash post
     {0.0f, 5.0f, 4},   // the spell book: it always shows too
+    {0.0f, 5.0f, 4},   // the aim of a new bookmark: it always shows too
 };
 
 // True for a context about a thing that the Hand or the aim is on. The
@@ -645,6 +650,7 @@ bool IsTargetContext(int context) {
     case kCtxVillage:
     case kCtxTempleLand:
     case kCtxBook:
+    case kCtxMark:
       return true;
     default:
       return false;
@@ -737,6 +743,11 @@ bool TriggerDragsLand() {
 
 int ContextNow() {
   float from[3], to[3], units = 0.0f;
+  // The aim of a new bookmark has the ray of a menu, and its own lines.
+  {
+    MiracleLine lines[kMiracleLines];
+    if (BookmarkAimHint(lines) > 0) return kCtxMark;
+  }
   // The ray of a dialog box, or of a room of the Temple. A dialog box in the
   // Temple keeps the lines of a dialog box.
   if (ControllersMenuRay(from, to, &units)) {
@@ -1085,7 +1096,8 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
     case kCtxMiracle:
     case kCtxTempleLand:
     case kCtxVillage:
-    case kCtxBook: {
+    case kCtxBook:
+    case kCtxMark: {
       // The lines come from miracle.cpp: what the grip does with this
       // miracle now, why the game refused the last cast, and the cancel. Or
       // from village.cpp: what the grip does at the totem or at a miracle
@@ -1093,9 +1105,11 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       MiracleLine lines[kMiracleLines];
       // Or from temple.cpp: the door of the Temple or a leash post.
       // Or from spell_book.cpp: the miracle under the pointing hand.
+      // Or from bookmark_aim.cpp: the grip sets a bookmark, and B stops.
       const int count = context == kCtxMiracle      ? MiracleHint(lines)
                         : context == kCtxTempleLand ? TempleLandHint(lines)
                         : context == kCtxBook       ? SpellBookHint(lines)
+                        : context == kCtxMark       ? BookmarkAimHint(lines)
                                                     : VillageHint(lines);
       for (int i = 0; i < count; ++i) {
         if (lines[i].word >= 0) {
@@ -2782,7 +2796,7 @@ void HintCardEndFrame() {
     // hint of the game, which comes a few frames later, must not change the
     // words.
     if (context != kCtxNone && context != kCtxMiracle &&
-        context != kCtxVillage && context != kCtxBook &&
+        context != kCtxVillage && context != kCtxBook && context != kCtxMark &&
         !(g_words != 0 && IsTargetContext(context))) {
       Content probe[kHands] = {g_game, {}};
       AddPrompts(probe, context, false);
@@ -2800,7 +2814,7 @@ void HintCardEndFrame() {
         hint_card_math::TargetRule(kRules[context], target, at_once),
         hint_card_math::PromptAlways(target, at_once, g_prompts == 2) ||
             context == kCtxMiracle || context == kCtxVillage ||
-            context == kCtxBook);
+            context == kCtxBook || context == kCtxMark);
     if (shown != kCtxNone && shown != g_prompt_shown) {
       ++g_prompt_shows[shown];
     }
@@ -2818,7 +2832,8 @@ void HintCardEndFrame() {
   // The hints of the game are for the hand that points. Each prompt goes to
   // the card of the hand that holds its control.
   Content content[kHands] = {g_game, {}};
-  if (shown == kCtxMiracle || shown == kCtxVillage || shown == kCtxBook) {
+  if (shown == kCtxMiracle || shown == kCtxVillage || shown == kCtxBook ||
+      shown == kCtxMark) {
     // A MIRACLE IN THE HAND: the lines of the mod say what the controls do,
     // so the hints of the game for a button go, and one line of its text
     // stays (the name of the miracle). Then the three lines of the mod fit.

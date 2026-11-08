@@ -44,12 +44,19 @@
 //   radial_menu_items          the 8 items of the first page, from the top
 //                              and clockwise, with commas
 //   radial_menu_items2         the second page. "more" changes the page
-//   places_panel=1             1 the item "places" opens the panel of
-//                              places and bookmarks (places_panel.cpp), and
-//                              page 2 as made has it in place of the three
-//                              bookmark items. 0 page 2 has mark_set,
-//                              mark_go and mark_back, and the word "places"
-//                              is an empty slot
+//   ring_pages=1               1 the pages as made start with the leashes,
+//                              the places, the recenter, quick save, the VR
+//                              Settings and the names (kDefaultRing1). 0 the
+//                              old pages, with the places and the leashes
+//                              on page 1 (kDefaultPage1)
+//   ring_icons=1               1 each item is a round wax seal with its icon
+//                              and its word under it. 0 a seal with the word
+//   places_sheet=1             1 the item "places" goes to the sheet of the
+//                              places on the ring. 0 it opens the panel of
+//                              places (places_panel.cpp)
+//   places_panel=1             0 the word "places" is an empty slot, and the
+//                              old page 2 (ring_pages=0) has mark_set,
+//                              mark_go and mark_back
 //   snapshot_item=1            1 the item "snapshot" saves the eye pictures
 //                              and a copy of the log for a report
 //                              (snapshot.cpp). 0 the word is an empty slot
@@ -98,6 +105,9 @@
 #include "places_panel.h"
 #include "radial_menu.h"
 #include "radial_menu_math.h"
+#include "ring_sheet_math.h"
+#include "bookmark_aim.h"
+#include "leash_model.h"
 #include "settings_panel.h"
 #include "snapshot.h"
 #include "tabletop.h"
@@ -137,6 +147,9 @@ bool g_style = true;  // hint_card_style of bwvr.ini: the scroll look
 bool g_places = true;    // places_panel
 bool g_snapshot = true;  // snapshot_item
 bool g_settings_item = true;  // settings_panel
+bool g_ring_pages = true;     // ring_pages: the pages as made
+bool g_icons = true;          // ring_icons: a round seal with an icon
+bool g_places_sheet = true;   // places_sheet: "places" goes to the sheet
 int g_items[kPages][kSlots];
 int g_pages = 1;
 int g_temple_items[kPages][kSlots];
@@ -333,6 +346,11 @@ void ReadPage(const char* key, const char* fallback, int out[kSlots]) {
   }
   // An item whose key is 0 is an empty slot.
   for (int i = 0; i < kSlots; ++i) {
+    // With places_sheet=1 the word "places" goes to the sheet of the places.
+    if (out[i] == kItemPlaces && g_places && g_places_sheet) {
+      out[i] = kItemPlacesPage;
+      continue;
+    }
     if ((out[i] == kItemPlaces && !g_places) ||
         (out[i] == kItemSnapshot && !g_snapshot) ||
         (out[i] == kItemSettings && !g_settings_item)) {
@@ -385,6 +403,9 @@ void ReadSettings() {
   g_places = PlacesPanelOn();
   g_snapshot = SnapshotOn();
   g_settings_item = SettingsPanelOn();
+  g_ring_pages = IniKey("ring_pages", 1) != 0;
+  g_icons = IniKey("ring_icons", 1) != 0;
+  g_places_sheet = IniKey("places_sheet", 1) != 0;
   g_settings.hand_in = g_reach_cm * 0.01f;
   g_settings.hand_out = g_reach_cm * 0.007f;
   ApplyWay();
@@ -392,11 +413,13 @@ void ReadSettings() {
     ModLog("ring         : radial_menu=0, the ring is off");
     return;
   }
-  ReadPage("radial_menu_items", kDefaultPage1, g_items[0]);
+  ReadPage("radial_menu_items", g_ring_pages ? kDefaultRing1 : kDefaultPage1,
+           g_items[0]);
   const char* const page2 =
-      g_settings_item ? (g_places ? kDefaultPage2Settings
-                                  : kDefaultPage2MarksSettings)
-                      : (g_places ? kDefaultPage2 : kDefaultPage2Marks);
+      g_ring_pages ? kDefaultRing2
+      : g_settings_item
+          ? (g_places ? kDefaultPage2Settings : kDefaultPage2MarksSettings)
+          : (g_places ? kDefaultPage2 : kDefaultPage2Marks);
   ReadPage("radial_menu_items2", page2, g_items[1]);
   ReadPage("radial_menu_items_temple", kDefaultTemple, g_temple_items[0]);
   for (int i = 0; i < kSlots; ++i) g_temple_items[1][i] = kItemNone;
@@ -444,11 +467,23 @@ void ReadSettings() {
          g_style ? "each item is a wax seal, and the card in the middle is a "
                    "parchment scroll"
                  : "each item is a dark round box with white letters");
-  ModLog("ring         : places_panel=%d: %s. snapshot_item=%d: %s",
-         g_places ? 1 : 0,
-         g_places ? "the item \"places\" opens the panel of places and "
-                    "bookmarks"
-                  : "page 2 as made has the bookmark items of the ring",
+  ModLog("ring         : ring_pages=%d: %s. ring_icons=%d: %s",
+         g_ring_pages ? 1 : 0,
+         g_ring_pages ? "page 1 as made has the leashes, the places, the "
+                        "recenter, quick save, the VR Settings and the names"
+                      : "the old pages as made",
+         g_icons ? 1 : 0,
+         g_icons ? "each item is a round wax seal with its icon, and its word "
+                   "is under it"
+                 : "each item is a seal with its word");
+  ModLog("ring         : places_panel=%d, places_sheet=%d: %s. "
+         "snapshot_item=%d: %s",
+         g_places ? 1 : 0, g_places_sheet ? 1 : 0,
+         !g_places ? "the word \"places\" is an empty slot"
+         : g_places_sheet
+             ? "the item \"places\" goes to the sheet of the places and the "
+               "bookmarks on the ring"
+             : "the item \"places\" opens the panel of places and bookmarks",
          g_snapshot ? 1 : 0,
          g_snapshot ? "the item \"snapshot\" saves the eye pictures and the "
                       "log for a report"
@@ -923,7 +958,13 @@ ItemNow StateOf(int item, const Facts& f) {
         if (!any) no(L"No bookmark is set", "no bookmark is set");
       }
       break;
+    case kItemLeash:
+      if (f.creature == nullptr) {
+        no(L"You have no Creature", "the player has no Creature");
+      }
+      break;
     case kItemPlaces:
+    case kItemPlacesPage:
       if (f.temple) {
         no(L"Not in the Temple", "the player is in the Temple, where the "
                                  "bookmarks do nothing");
@@ -941,7 +982,7 @@ ItemNow StateOf(int item, const Facts& f) {
                               "the speed is 2.0, the most");
       break;
     case kItemNames:
-      now.note = f.names ? L"They show now" : L"";
+      if (f.names) now.name = L"Hide villager names";
       break;
     case kItemDetails:
       now.note = f.details ? L"They show now" : L"";
@@ -971,6 +1012,135 @@ ItemNow StateOf(int item, const Facts& f) {
       break;
   }
   return now;
+}
+
+// Why the game takes no bookmark key now, or null when it takes them.
+const wchar_t* MarksWhy(const Facts& f, const char** why) {
+  *why = "";
+  if (f.game == nullptr) {
+    *why = "no game runs";
+    return L"No game runs now";
+  }
+  if (f.keys_off) {
+    *why = "the game takes no keys now";
+    return L"The game takes no keys now";
+  }
+  if (f.cutscene) {
+    *why = "a cut scene plays";
+    return L"Not in a cut scene";
+  }
+  if (f.temple) {
+    *why = "the player is in the Temple";
+    return L"Not in the Temple";
+  }
+  if (!f.marks_on || !f.moves_on || !f.jumps_on) {
+    *why = "the game has the bookmarks off now";
+    return L"The game has this off now";
+  }
+  return nullptr;
+}
+
+const wchar_t* const kMarkNames[kMarks] = {
+    L"Bookmark 1", L"Bookmark 2", L"Bookmark 3", L"Bookmark 4",
+    L"Bookmark 5", L"Bookmark 6", L"Bookmark 7"};
+const wchar_t* const kRemoveNames[kMarks] = {
+    L"Remove bookmark 1", L"Remove bookmark 2", L"Remove bookmark 3",
+    L"Remove bookmark 4", L"Remove bookmark 5", L"Remove bookmark 6",
+    L"Remove bookmark 7"};
+
+int LeashItem(int kind);
+
+// What the card says for a tile of a sheet, and whether the tile can act.
+ItemNow TileNow(const ring_sheet_math::Tile& t, const Facts& f) {
+  if (t.kind == ring_sheet_math::kTilePlace) {
+    ItemNow now = StateOf(t.arg, f);
+    if (t.arg == kItemMarkBack && now.can) {
+      now.note = L"To the place before the last bookmark";
+    }
+    return now;
+  }
+  if (t.kind == ring_sheet_math::kTileLeash) {
+    return StateOf(LeashItem(t.arg), f);
+  }
+  ItemNow now = {true, L"", L"", "", {0}, false};
+  const int mark = t.arg >= 0 && t.arg < kMarks ? t.arg : 0;
+  switch (t.kind) {
+    case ring_sheet_math::kTileMark:
+      now.name = kMarkNames[mark];
+      now.note = L"Go there";
+      break;
+    case ring_sheet_math::kTileRemove:
+      now.name = kRemoveNames[mark];
+      break;
+    case ring_sheet_math::kTileAdd:
+      now.name = L"Add a bookmark";
+      now.note = BookmarkAimOn() ? L"Point, then press the grip"
+                                 : L"At the Hand";
+      break;
+    default:
+      break;
+  }
+  const char* why = "";
+  const wchar_t* note = MarksWhy(f, &why);
+  if (note == nullptr && t.kind == ring_sheet_math::kTileAdd &&
+      ring_sheet_math::FreeMark(f.mark) < 0) {
+    note = L"All 7 bookmarks are set";
+    why = "all 7 bookmarks are set";
+  }
+  if (note != nullptr) {
+    now.can = false;
+    now.note = note;
+    now.why = why;
+  }
+  return now;
+}
+
+bool Choose(int item, const Facts& f, const ItemNow& now);
+
+// The player chose a tile of a sheet. True when it acted.
+bool ChooseTile(const ring_sheet_math::Tile& t, const Facts& f,
+                const ItemNow& now) {
+  const uint64_t frame = ControllersFrameCount();
+  if (t.kind == ring_sheet_math::kTilePlace) return Choose(t.arg, f, now);
+  if (t.kind == ring_sheet_math::kTileLeash) {
+    return Choose(LeashItem(t.arg), f, now);
+  }
+  char name[48];
+  Narrow(now.name, name, sizeof(name));
+  if (!now.can) {
+    ++g_refusals;
+    ModLog("ring         : the player chose \"%s\" on the sheet of the "
+           "places, and it does not act: %s, frame %llu", name, now.why,
+           frame);
+    return false;
+  }
+  if (t.kind == ring_sheet_math::kTileAdd) {
+    const int mark = ring_sheet_math::FreeMark(f.mark);
+    if (BookmarkAimOn()) {
+      if (!BookmarkAimStart(mark)) {
+        ++g_refusals;
+        return false;
+      }
+      ++g_choices;
+      ModLog("ring         : the player chose \"Add a bookmark\": bookmark "
+             "%d waits for the grip at the point of the aim "
+             "(bookmark_aim=1), frame %llu", mark + 1, frame);
+      return true;
+    }
+    QueueKey(0x02 + mark, kModCtrl);
+    ++g_choices;
+    ModLog("ring         : the player chose \"Add a bookmark\": the key Ctrl "
+           "and %d sets bookmark %d at the Hand (bookmark_aim=0), frame %llu",
+           mark + 1, mark + 1, frame);
+    return true;
+  }
+  int key = 0, mods = 0;
+  if (!ring_sheet_math::MarkKey(t, &key, &mods)) return false;
+  QueueKey(key, mods);
+  ++g_choices;
+  ModLog("ring         : the player chose \"%s\": the key %s%s, frame %llu",
+         name, ModsName(mods), KeyName(key), frame);
+  return true;
 }
 
 // The player chose an item. True when its keys are queued.
@@ -1154,6 +1324,16 @@ struct Look {
   wchar_t name[48];        // the card in the middle: empty for none
   wchar_t note[48];
   int scroll;              // 1 the scroll look (hint_card_style), 0 plain
+  int icons;               // 1 a round seal with an icon (ring_icons)
+  // A SHEET (ring_sheet_math.h): its tiles, in place of the items. slot is
+  // then a tile.
+  int sheet;
+  int tiles;
+  int tile_kind[kMaxTiles];
+  int tile_arg[kMaxTiles];
+  bool tile_dim[kMaxTiles];
+  int leash_now;           // the kind of the leash now, 0 for none
+  int turn;                // the turn of the pictures of the leashes, in steps
 };
 
 HDC g_dc = nullptr;
@@ -1456,10 +1636,28 @@ const int kScrollCardMore = 40;   // the rolls make a card this much wider
 const int kScrollBodyOne = 64;    // the paper of a card with one line
 const int kScrollBodyTwo = 100;   // and with two lines
 const int kDotSeal = 36;          // the seal in the middle with no name
+// THE ROUND SEAL of an item with an icon (ring_icons=1). card_scroll::Seal
+// draws a box of at most 102 px high, so the chosen seal is 102 px.
+const int kMedal = 96;
+const int kMedalChosen = 102;
+const int kMedalIcon = 56;        // the icon in a seal of kMedal px
+const int kStampInset = 10;       // the ring of the stamp, in from the edge
+const float kStampWidth = 4.0f;
+const int kLabelCap = 19;         // the word under a round seal
+const int kLabelGap = 4;
+const int kLabelHalo = 3;         // the dark edge round its letters
+const int kDigitsCap = 40;        // the number on the seal of a bookmark
+const int kTileNameCap = 23;      // the name on a tile of a leash
+const int kHeaderY = 642;         // the header "Bookmarks" of the places
+const int kPlacesHeaderY = 108;   // and the header "Places"
+// The turn of the pictures of the leashes: kTurnSteps steps in one turn,
+// one turn in kTurnSeconds.
+const int kTurnSteps = 90;
+const double kTurnSeconds = 9.0;
 // GDI draws the letters of one part into the work picture, and the part is
 // drawn in a picture with the same pitch.
 const int kWorkWidth = 640;
-const int kWorkHeight = 200;
+const int kWorkHeight = 360;
 const int kRasterLogs = 40;
 
 const Rgb kGoldWax = {226.0f, 174.0f, 60.0f};
@@ -1476,6 +1674,8 @@ const Rgb kEdgeLight = {255.0f, 232.0f, 168.0f};
 const Rgb kScrollNoteInk = {150.0f, 40.0f, 20.0f};
 const Rgb kLineInk = {70.0f, 40.0f, 18.0f};
 const Rgb kLineGold = {214.0f, 170.0f, 78.0f};
+const Rgb kLabelInk = {255.0f, 238.0f, 210.0f};
+const Rgb kLabelLit = {255.0f, 222.0f, 130.0f};
 
 // One part of the picture in the cache, and what it shows. The pixels are
 // BGRA with the color times the alpha, w by h, at x, y in the picture.
@@ -1489,6 +1689,10 @@ struct Part {
   bool dim;
   wchar_t name[48];
   wchar_t note[48];
+  int style;     // 0 a seal with a word, 1 a round seal, 2 a tile of a leash
+  int arg;       // the kind and the argument of a tile, or -1
+  int cx, cy;    // the middle of a tile or of a card, in pixels
+  int word_box[4];  // the word under a round seal, in the picture: x0 y0 x1 y1
 };
 
 struct ScrollFont {
@@ -1505,11 +1709,21 @@ uint32_t* g_letters = nullptr;
 uint8_t g_work[kWorkWidth * kWorkHeight * 4];
 ScrollFont g_seal_word, g_seal_switch, g_seal_value;
 ScrollFont g_card_name, g_card_long, g_card_note;
+ScrollFont g_label;       // the word under a round seal
+ScrollFont g_digits;      // the number of a bookmark on its seal
+ScrollFont g_tile_name;   // the name on a tile of a leash
 // Two seals for each slot (not chosen, chosen), a card for each slot and one
 // for a card with no slot, and the seal in the middle.
 Part g_seal_parts[kSlots][2];
 Part g_card_parts[kSlots + 1];
 Part g_dot_part;
+// The tiles of a sheet (not chosen, chosen), its card and its headers.
+Part g_tile_parts[kMaxTiles][2];
+Part g_sheet_card;
+Part g_mark_header;
+Part g_places_header;
+// The tiles of each sheet now (ring_sheet_math.h), by SheetId.
+ring_sheet_math::Layout g_layout[kSheets];
 int g_scroll_new = 0;  // the parts that the picture now drew new
 int g_raster_logs = 0;
 
@@ -1576,9 +1790,16 @@ bool ScrollStart() {
       MakeScrollFont(card_scroll::WordsFont(g_work_dc, kScrollLongCap));
   g_card_note =
       MakeScrollFont(card_scroll::WordsFont(g_work_dc, kScrollNoteCap));
+  g_label = MakeScrollFont(card_scroll::SealFont(g_work_dc, kLabelCap));
+  const char* digits_face = "";
+  g_digits = MakeScrollFont(
+      card_scroll::DigitsFont(g_work_dc, kDigitsCap, &digits_face));
+  g_tile_name = MakeScrollFont(card_scroll::SealFont(g_work_dc, kTileNameCap));
   if (g_seal_word.font == nullptr || g_seal_switch.font == nullptr ||
       g_seal_value.font == nullptr || g_card_name.font == nullptr ||
-      g_card_long.font == nullptr || g_card_note.font == nullptr) {
+      g_card_long.font == nullptr || g_card_note.font == nullptr ||
+      g_label.font == nullptr || g_digits.font == nullptr ||
+      g_tile_name.font == nullptr) {
     ModLog("ring         : GDI gave no font for the scroll look, so the ring "
            "has the plain look");
     return false;
@@ -1873,8 +2094,10 @@ void DrawSeal(Part* part, int slot, int item, int value, bool dim, bool lit) {
 }
 
 // The card in the middle, a small scroll, in its part of the cache.
-void DrawCard(Part* part, const wchar_t* name, const wchar_t* note) {
+void DrawCard(Part* part, const wchar_t* name, const wchar_t* note,
+              int cy = static_cast<int>(kMiddle)) {
   part->ok = true;
+  part->cy = cy;
   wcsncpy_s(part->name, name, _TRUNCATE);
   wcsncpy_s(part->note, note, _TRUNCATE);
   part->w = part->h = 0;
@@ -1926,8 +2149,7 @@ void DrawCard(Part* part, const wchar_t* name, const wchar_t* note) {
   // The middle of the paper is the middle of the ring.
   const int paper_cx = (card_scroll::kEdgeLeft + paper_x1) / 2;
   const int paper_cy = card_scroll::kPaperTop + body / 2;
-  KeepPart(part, static_cast<int>(kMiddle) - paper_cx,
-           static_cast<int>(kMiddle) - paper_cy, w, h);
+  KeepPart(part, static_cast<int>(kMiddle) - paper_cx, cy - paper_cy, w, h);
 }
 
 // A small round seal marks the middle, where a release chooses nothing.
@@ -1943,11 +2165,275 @@ void DrawDot(Part* part) {
   KeepPart(part, m - side / 2, m - side / 2, side, side);
 }
 
+// --- the round seals and the sheets ---------------------------------------------
+
+// The icon into the letters of the work picture, as GDI puts a letter there:
+// the green of a pixel is its cover. A pixel keeps the larger cover.
+void IconLetters(int icon, float x0, float y0, float size) {
+  const int left = static_cast<int>(x0) - 1, top = static_cast<int>(y0) - 1;
+  const int right = static_cast<int>(x0 + size) + 2;
+  const int bottom = static_cast<int>(y0 + size) + 2;
+  for (int y = top < 0 ? 0 : top; y < bottom && y < kWorkHeight; ++y) {
+    for (int x = left < 0 ? 0 : left; x < right && x < kWorkWidth; ++x) {
+      const float cover = ring_icon_math::IconCover(icon, x0, y0, size,
+                                                    x + 0.5f, y + 0.5f);
+      if (cover <= 0.0f) continue;
+      uint32_t& out = g_letters[y * kWorkWidth + x];
+      const uint32_t v = static_cast<uint32_t>(cover * 255.0f + 0.5f);
+      if (v > ((out >> 8) & 0xFF)) out = (v << 16) | (v << 8) | v;
+    }
+  }
+}
+
+// The ring of the stamp in a round seal: the edge of the die that pressed the
+// wax, a thin circle in from the edge, in the letters of the work picture.
+void StampLetters(float cx, float cy, float radius) {
+  const int r = static_cast<int>(radius + kStampWidth) + 2;
+  for (int y = static_cast<int>(cy) - r; y <= static_cast<int>(cy) + r; ++y) {
+    if (y < 0 || y >= kWorkHeight) continue;
+    for (int x = static_cast<int>(cx) - r; x <= static_cast<int>(cx) + r;
+         ++x) {
+      if (x < 0 || x >= kWorkWidth) continue;
+      const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+      const float d = fabsf(sqrtf(dx * dx + dy * dy) - radius) -
+                      0.5f * kStampWidth;
+      const float cover = Clamp01(0.5f - d);
+      if (cover <= 0.0f) continue;
+      uint32_t& out = g_letters[y * kWorkWidth + x];
+      const uint32_t v = static_cast<uint32_t>(cover * 255.0f + 0.5f);
+      if (v > ((out >> 8) & 0xFF)) out = (v << 16) | (v << 8) | v;
+    }
+  }
+}
+
+// THE WORD UNDER A ROUND SEAL. It shows over the world, with no paper, so
+// its letters have a dark edge of kLabelHalo px all round: light letters on
+// a dark edge read on the land, on the sea and on the sky.
+void LabelInk(const card_scroll::Picture& p, int x0, int y0, int x1, int y1,
+              bool lit) {
+  if (x0 < kLabelHalo) x0 = kLabelHalo;
+  if (y0 < kLabelHalo) y0 = kLabelHalo;
+  if (x1 > p.width - kLabelHalo) x1 = p.width - kLabelHalo;
+  if (y1 > p.height - kLabelHalo) y1 = p.height - kLabelHalo;
+  const auto at = [](int x, int y) {
+    return ((g_letters[y * kWorkWidth + x] >> 8) & 0xFF) * (1.0f / 255.0f);
+  };
+  const float reach = kLabelHalo + 0.5f;
+  for (int y = y0 - kLabelHalo; y < y1 + kLabelHalo; ++y) {
+    for (int x = x0 - kLabelHalo; x < x1 + kLabelHalo; ++x) {
+      float edge = 0.0f;
+      for (int j = -kLabelHalo; j <= kLabelHalo; ++j) {
+        for (int i = -kLabelHalo; i <= kLabelHalo; ++i) {
+          const int sx = x + i, sy = y + j;
+          if (sx < x0 || sx >= x1 || sy < y0 || sy >= y1) continue;
+          const float d = sqrtf(static_cast<float>(i * i + j * j));
+          const float a = at(sx, sy) * Clamp01(reach - d);
+          if (a > edge) edge = a;
+        }
+      }
+      if (edge <= 0.0f) continue;
+      uint8_t* out = p.bgra + (static_cast<size_t>(y) * p.pitch + x) * 4;
+      OverPixel(out, kEdgeDark, 0.82f * edge);
+      const float letter =
+          x >= x0 && x < x1 && y >= y0 && y < y1 ? at(x, y) : 0.0f;
+      OverPixel(out, lit ? kLabelLit : kLabelInk, letter);
+    }
+  }
+}
+
+// All of the work picture at a lower alpha: a dim part.
+void FadeWork(int w, int h, int scale) {
+  for (int y = 0; y < h; ++y) {
+    uint8_t* out = g_work + static_cast<size_t>(y) * kWorkWidth * 4;
+    for (int i = 0; i < w * 4; ++i) {
+      out[i] = static_cast<uint8_t>((out[i] * scale) >> 8);
+    }
+  }
+}
+
+// THE ROUND SEAL of an item: red wax pressed with the ring of a stamp and
+// the icon, or the number of a bookmark, and its word under it. The chosen
+// seal has the gold wax, the rim and the glow, and the gold word. The middle
+// of the seal is at cx, cy of the picture. word can be null.
+void DrawMedal(Part* part, int cx, int cy, int size, int icon,
+               const wchar_t* digits, const wchar_t* word, bool lit,
+               bool dim, int seed) {
+  part->ok = true;
+  part->w = part->h = 0;
+  part->word_box[0] = part->word_box[1] = part->word_box[2] =
+      part->word_box[3] = 0;
+  int d = lit ? size + (kMedalChosen - kMedal) : size;
+  if (d > kMedalChosen) d = kMedalChosen;
+  const bool has_word = word != nullptr && word[0] != 0;
+  const int word_w = has_word ? WorkWidth(g_label, word) : 0;
+  const int word_h = has_word ? g_label.height : 0;
+  int pw = d + 2 * kSealEdge;
+  if (word_w + 2 * kLabelHalo + 8 > pw) pw = word_w + 2 * kLabelHalo + 8;
+  const int ph = d + 2 * kSealEdge +
+                 (has_word ? kLabelGap + word_h + kLabelHalo - kSealEdge + 6
+                           : 0);
+  if (pw > kWorkWidth || ph > kWorkHeight) return;
+  WorkClear(pw, ph);
+  const card_scroll::Picture picture = {g_work, kWorkWidth, pw, ph};
+  const int x0 = (pw - d) / 2, y0 = kSealEdge, x1 = x0 + d, y1 = y0 + d;
+  card_scroll::Seal(picture, x0, y0, x1, y1, 0, seed);
+  if (lit) {
+    Rewax(picture, dim ? kPaleGold : kGoldWax, kGoldLight);
+    Rim(picture, x0, y0, x1, y1, dim ? 0.5f : 1.0f);
+  } else if (dim) {
+    Rewax(picture, kPaleWax, kPaleLight);
+  }
+  // The stamp: its ring and its emblem.
+  const float mx = 0.5f * (x0 + x1), my = 0.5f * (y0 + y1);
+  StampLetters(mx, my, 0.5f * d - kStampInset);
+  if (digits != nullptr) {
+    WorkLetters(g_digits, digits, x0, x1, y0 + (d + kDigitsCap) / 2);
+    GdiFlush();
+  } else {
+    const float is = static_cast<float>(kMedalIcon) * d / kMedal;
+    IconLetters(icon, mx - 0.5f * is, my - 0.5f * is, is);
+  }
+  card_scroll::SealInk(picture, g_letters, x0, y0, x1, y1, lit ? 2 : 0);
+  int word_top = 0;
+  if (has_word) {
+    word_top = y1 + kLabelGap;
+    WorkLetters(g_label, word, 0, pw, word_top + g_label.ascent);
+    GdiFlush();
+    LabelInk(picture, 0, word_top, pw, word_top + word_h, lit);
+  }
+  if (dim) FadeWork(pw, ph, lit ? 218 : 154);
+  const int left = cx - pw / 2, top = cy - (y0 + d / 2);
+  KeepPart(part, left, top, pw, ph);
+  if (has_word) {
+    part->word_box[0] = left + (pw - word_w) / 2 - kLabelHalo;
+    part->word_box[1] = top + word_top - kLabelHalo;
+    part->word_box[2] = left + (pw + word_w) / 2 + kLabelHalo;
+    part->word_box[3] = top + word_top + word_h + kLabelHalo;
+  }
+}
+
+// A header over a row of a sheet: light words with the dark edge.
+void DrawHeader(Part* part, int cx, int cy, const wchar_t* words) {
+  part->ok = true;
+  part->w = part->h = 0;
+  const int w = WorkWidth(g_label, words) + 2 * kLabelHalo + 8;
+  const int h = g_label.height + 2 * kLabelHalo + 4;
+  if (w > kWorkWidth || h > kWorkHeight) return;
+  WorkClear(w, h);
+  const card_scroll::Picture picture = {g_work, kWorkWidth, w, h};
+  const int top = kLabelHalo + 2;
+  WorkLetters(g_label, words, 0, w, top + g_label.ascent);
+  GdiFlush();
+  LabelInk(picture, 0, top, w, top + g_label.height, false);
+  KeepPart(part, cx - w / 2, cy - h / 2, w, h);
+}
+
+// The gold rim and the glow of a chosen tile, round a box with round corners
+// of radius r: as Rim for a seal.
+void RimBox(const card_scroll::Picture& p, int x0, int y0, int x1, int y1,
+            float r, float strength) {
+  for (int y = 0; y < p.height; ++y) {
+    uint8_t* out = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    for (int x = 0; x < p.width; ++x, out += 4) {
+      const float px = x + 0.5f, py = y + 0.5f;
+      const float cx = 0.5f * (x0 + x1), cy = 0.5f * (y0 + y1);
+      const float qx = fabsf(px - cx) - (0.5f * (x1 - x0) - r);
+      const float qy = fabsf(py - cy) - (0.5f * (y1 - y0) - r);
+      const float ox = qx > 0.0f ? qx : 0.0f, oy = qy > 0.0f ? qy : 0.0f;
+      const float d = sqrtf(ox * ox + oy * oy) - r +
+                      ((qx > qy ? qx : qy) < 0.0f ? (qx > qy ? qx : qy) : 0.0f);
+      if (d >= 20.0f || out[3] == 255) continue;
+      const float g = d < 9.0f ? 1.0f : 1.0f - (d - 9.0f) / 11.0f;
+      uint8_t src[4] = {0, 0, 0, 0};
+      OverPixel(src, kGlowGold, 0.42f * strength * g * g);
+      OverPixel(src, kRimGold,
+                0.95f * strength * Clamp01(d - 3.5f) * Clamp01(8.5f - d));
+      const int k = 255 - out[3];
+      for (int c = 0; c < 4; ++c) {
+        out[c] = static_cast<uint8_t>(out[c] + (src[c] * k + 127) / 255);
+      }
+    }
+  }
+}
+
+// The word and the icon of each kind of the leash, 1 to 3.
+const wchar_t* LeashWord(int kind) {
+  return kind == 1 ? L"Aggression" : kind == 2 ? L"Learning" : L"Compassion";
+}
+int LeashItem(int kind) {
+  return kind == 1 ? kItemLeashAggression
+         : kind == 2 ? kItemLeashLearning
+                     : kItemLeashCompassion;
+}
+
+// THE PICTURE OF A LEASH on its tile: the turn of the picture is `turn`
+// steps. True when the picture is drawn. With no picture the tile shows the
+// icon of the kind.
+bool LeashPicture(const card_scroll::Picture& picture, int kind, int turn,
+                  int x0, int y0, int size);
+
+// A TILE OF A LEASH: a page of the parchment with the picture of the leash
+// and its name. The chosen tile has the gold rim and glow. The leash of now
+// has a small red seal with a tick at its top right.
+void DrawLeashTile(Part* part, const ring_sheet_math::Tile& tile, bool lit,
+                   bool dim, bool now, int turn) {
+  part->ok = true;
+  part->w = part->h = 0;
+  const int w = ring_sheet_math::kLeashWidth;
+  const int h = ring_sheet_math::kLeashHeight;
+  const int pw = w + 2 * kSealEdge, ph = h + 2 * kSealEdge;
+  static_assert(ring_sheet_math::kLeashWidth + 2 * kSealEdge <= kWorkWidth &&
+                    ring_sheet_math::kLeashHeight + 2 * kSealEdge <=
+                        kWorkHeight,
+                "a tile of a leash fits the work picture");
+  WorkClear(pw, ph);
+  const card_scroll::Picture picture = {g_work, kWorkWidth, pw, ph};
+  const int x0 = kSealEdge, y0 = kSealEdge, x1 = x0 + w, y1 = y0 + h;
+  card_scroll::Page(picture, x0, y0, x1, y1, 41 + tile.arg * 7);
+  const int size = ring_sheet_math::kLeashPicture;
+  const int px = x0 + (w - size) / 2, py = y0 + 18;
+  const int kind = tile.arg;
+  if (!LeashPicture(picture, kind, turn, px, py, size)) {
+    const float is = 0.55f * size;
+    IconLetters(ItemIcon(LeashItem(kind)), px + 0.5f * (size - is),
+                py + 0.5f * (size - is), is);
+  }
+  const int name_line = y1 - 30;
+  WorkLetters(g_tile_name, LeashWord(kind), x0, x1, name_line);
+  GdiFlush();
+  card_scroll::Ink(picture, g_letters, x0, y0, x1, y1, 29);
+  if (now) {
+    const int sd = 50;
+    const int sx0 = x1 - sd - 8, sy0 = y0 + 8;
+    card_scroll::Seal(picture, sx0, sy0, sx0 + sd, sy0 + sd, 0, 5);
+    for (int y = sy0; y < sy0 + sd; ++y) {
+      memset(g_letters + static_cast<size_t>(y) * kWorkWidth + sx0, 0,
+             static_cast<size_t>(sd) * 4);
+    }
+    IconLetters(ring_icon_math::kIconTick, sx0 + 9.0f, sy0 + 9.0f, sd - 18.0f);
+    card_scroll::SealInk(picture, g_letters, sx0, sy0, sx0 + sd, sy0 + sd, 0);
+  }
+  if (lit) RimBox(picture, x0, y0, x1, y1, 6.0f, dim ? 0.5f : 1.0f);
+  if (dim) FadeWork(pw, ph, lit ? 218 : 154);
+  KeepPart(part, tile.cx - pw / 2, tile.cy - ph / 2, pw, ph);
+}
+
+bool LeashPicture(const card_scroll::Picture& picture, int kind, int turn,
+                  int x0, int y0, int size) {
+  return LeashModelDraw(picture.bgra, picture.pitch, kind,
+                        turn * (360.0f / kTurnSteps), x0, y0, size);
+}
+
 // The thin ring of ink with a gold line in it, on the circle of the items,
 // so the ring reads as one object. It goes under the seals, after them: a
 // pixel that a seal covers at an alpha of 0.5 or more has no line, so the
 // line does not show through a faded seal. The line of gold is 5 px and the
 // ink 11 px wide, so the headset shows no line of 1 px.
+// The boxes of the words of the round seals of the page now: the thin ring
+// does not go through a word.
+int g_line_skip[kSlots][4];
+const float kLineFade = 14.0f;
+
 void RingLine() {
   const float r = kSlotRadius;
   const float half = 6.0f;
@@ -1978,9 +2464,22 @@ void RingLine() {
         if (d >= half) continue;
         uint8_t* out = row + x * 4;
         if (out[3] >= 128) continue;
+        // The line fades out in kLineFade px before the box of a word.
+        float keep = 1.0f;
+        for (int s = 0; s < kSlots; ++s) {
+          const int* b = g_line_skip[s];
+          if (b[2] <= b[0]) continue;
+          const float ox = x + 0.5f < b[0] ? b[0] - (x + 0.5f)
+                           : x + 0.5f > b[2] ? x + 0.5f - b[2] : 0.0f;
+          const float oy = y + 0.5f < b[1] ? b[1] - (y + 0.5f)
+                           : y + 0.5f > b[3] ? y + 0.5f - b[3] : 0.0f;
+          const float k = Clamp01(sqrtf(ox * ox + oy * oy) / kLineFade);
+          if (k < keep) keep = k;
+        }
+        if (keep <= 0.0f) continue;
         uint8_t line[4] = {0, 0, 0, 0};
-        OverPixel(line, kLineInk, 0.5f * Clamp01(5.5f - d));
-        OverPixel(line, kLineGold, 0.9f * Clamp01(2.5f - d));
+        OverPixel(line, kLineInk, 0.5f * keep * Clamp01(5.5f - d));
+        OverPixel(line, kLineGold, 0.9f * keep * Clamp01(2.5f - d));
         const int k = (255 - out[3]) * (128 - out[3]) / 128;
         for (int c = 0; c < 4; ++c) {
           out[c] = static_cast<uint8_t>(out[c] + (line[c] * k + 127) / 255);
@@ -1990,18 +2489,156 @@ void RingLine() {
   }
 }
 
-// The scroll look: the parts from the cache, and each part that changed.
-void RasterScroll(const Look& look) {
-  memset(g_base, 0, sizeof(g_base));
-  for (int i = 0; i < kSlots; ++i) {
+// The icon of the item of a slot with ring_icons=1, or kIconNone: then the
+// item is a seal with its word. A pause that is on shows the icon of play.
+int SlotIcon(const Look& look, int i) {
+  if (look.icons == 0) return ring_icon_math::kIconNone;
+  if (look.item[i] == kItemPause && look.value[i] != 0) {
+    return ring_icon_math::kIconPlay;
+  }
+  return ItemIcon(look.item[i]);
+}
+
+// The seal of a slot in its part of the cache: a round seal with its icon,
+// or a seal with its word.
+void DrawSlot(Part* part, const Look& look, int i, bool lit) {
+  const int icon = SlotIcon(look, i);
+  if (icon == ring_icon_math::kIconNone) {
+    DrawSeal(part, i, look.item[i], look.value[i], look.dim[i], lit);
+    part->style = 0;
+    part->word_box[0] = part->word_box[1] = part->word_box[2] =
+        part->word_box[3] = 0;
+    return;
+  }
+  float cx = 0.0f, cy = 0.0f;
+  SlotPixel(i, kMiddle, kSlotRadius, &cx, &cy);
+  DrawMedal(part, static_cast<int>(cx), static_cast<int>(cy), kMedal, icon,
+            nullptr, kItemInfo[look.item[i]].word, lit, look.dim[i],
+            11 + i * 13);
+  part->item = look.item[i];
+  part->value = look.value[i];
+  part->dim = look.dim[i];
+  part->style = 1;
+}
+
+bool SlotPartOk(const Part& part, const Look& look, int i) {
+  return part.ok && part.item == look.item[i] &&
+         part.value == look.value[i] && part.dim == look.dim[i] &&
+         part.style ==
+             (SlotIcon(look, i) == ring_icon_math::kIconNone ? 0 : 1);
+}
+
+// The words of the numbers of the bookmarks.
+const wchar_t* const kMarkDigits[kMarks] = {L"1", L"2", L"3", L"4",
+                                            L"5", L"6", L"7"};
+
+// The part of tile i of a sheet.
+void DrawTile(Part* part, const Look& look, int i, bool lit) {
+  const ring_sheet_math::Tile& t = g_layout[look.sheet].tile[i];
+  const bool dim = look.tile_dim[i];
+  const int seed = 17 + i * 11;
+  switch (look.tile_kind[i]) {
+    case ring_sheet_math::kTilePlace:
+      DrawMedal(part, t.cx, t.cy, t.size, ItemIcon(look.tile_arg[i]), nullptr,
+                kItemInfo[look.tile_arg[i]].word, lit, dim, seed);
+      break;
+    case ring_sheet_math::kTileMark:
+      DrawMedal(part, t.cx, t.cy, t.size, ring_icon_math::kIconNone,
+                kMarkDigits[look.tile_arg[i] % kMarks], nullptr, lit, dim,
+                seed);
+      break;
+    case ring_sheet_math::kTileAdd:
+      DrawMedal(part, t.cx, t.cy, t.size, ring_icon_math::kIconPlus, nullptr,
+                nullptr, lit, dim, seed);
+      break;
+    case ring_sheet_math::kTileRemove:
+      DrawMedal(part, t.cx, t.cy, t.size, ring_icon_math::kIconBin, nullptr,
+                nullptr, lit, dim, seed);
+      break;
+    case ring_sheet_math::kTileLeash:
+      DrawLeashTile(part, t, lit, dim, look.leash_now == look.tile_arg[i],
+                    look.turn);
+      break;
+    default:
+      part->ok = true;
+      part->w = part->h = 0;
+      break;
+  }
+  part->style = 2;
+  part->item = look.tile_kind[i];
+  part->arg = look.tile_arg[i];
+  part->dim = dim;
+  part->value = look.tile_kind[i] == ring_sheet_math::kTileLeash
+                    ? look.turn * 8 + (look.leash_now == look.tile_arg[i])
+                    : 0;
+}
+
+bool TilePartOk(const Part& part, const Look& look, int i) {
+  const ring_sheet_math::Tile& t = g_layout[look.sheet].tile[i];
+  const int value = look.tile_kind[i] == ring_sheet_math::kTileLeash
+                        ? look.turn * 8 + (look.leash_now == look.tile_arg[i])
+                        : 0;
+  return part.ok && part.style == 2 && part.item == look.tile_kind[i] &&
+         part.arg == look.tile_arg[i] && part.dim == look.tile_dim[i] &&
+         part.value == value && part.cy == t.cy && part.cx == t.cx;
+}
+
+// The scroll look of a sheet: its tiles, the header of the bookmarks and the
+// card. A sheet has no thin ring.
+void RasterSheet(const Look& look) {
+  for (int i = 0; i < look.tiles; ++i) {
     const bool lit = i == look.slot;
-    Part& part = g_seal_parts[i][lit ? 1 : 0];
-    if (!part.ok || part.item != look.item[i] ||
-        part.value != look.value[i] || part.dim != look.dim[i]) {
-      DrawSeal(&part, i, look.item[i], look.value[i], look.dim[i], lit);
+    Part& part = g_tile_parts[i][lit ? 1 : 0];
+    if (!TilePartOk(part, look, i)) {
+      DrawTile(&part, look, i, lit);
+      part.cy = g_layout[look.sheet].tile[i].cy;
+      part.cx = g_layout[look.sheet].tile[i].cx;
       ++g_scroll_new;
     }
     if (part.w > 0) PutPart(part);
+  }
+  if (look.sheet == kSheetPlaces) {
+    if (!g_mark_header.ok) {
+      DrawHeader(&g_mark_header, static_cast<int>(kMiddle), kHeaderY,
+                 L"Bookmarks");
+      ++g_scroll_new;
+    }
+    if (g_mark_header.w > 0) PutPart(g_mark_header);
+    if (!g_places_header.ok) {
+      DrawHeader(&g_places_header, static_cast<int>(kMiddle), kPlacesHeaderY,
+                 L"Places");
+      ++g_scroll_new;
+    }
+    if (g_places_header.w > 0) PutPart(g_places_header);
+  }
+  if (look.name[0] != 0) {
+    const int cy = g_layout[look.sheet].card_y;
+    if (!g_sheet_card.ok || g_sheet_card.cy != cy ||
+        wcscmp(g_sheet_card.name, look.name) != 0 ||
+        wcscmp(g_sheet_card.note, look.note) != 0) {
+      DrawCard(&g_sheet_card, look.name, look.note, cy);
+      ++g_scroll_new;
+    }
+    if (g_sheet_card.w > 0) PutPart(g_sheet_card);
+  }
+}
+
+// The scroll look: the parts from the cache, and each part that changed.
+void RasterScroll(const Look& look) {
+  memset(g_base, 0, sizeof(g_base));
+  if (look.sheet != kSheetNone) {
+    RasterSheet(look);
+    return;
+  }
+  for (int i = 0; i < kSlots; ++i) {
+    const bool lit = i == look.slot;
+    Part& part = g_seal_parts[i][lit ? 1 : 0];
+    if (!SlotPartOk(part, look, i)) {
+      DrawSlot(&part, look, i, lit);
+      ++g_scroll_new;
+    }
+    if (part.w > 0) PutPart(part);
+    for (int k = 0; k < 4; ++k) g_line_skip[i][k] = part.word_box[k];
   }
   if (look.name[0] != 0) {
     Part& card =
@@ -2033,12 +2670,23 @@ void ScrollBake(const Look& look, const int (*items)[kSlots], int page,
                 const Facts& f) {
   const double start = NowSeconds();
   bool drew = false;
-  for (int i = 0; i < kSlots && !drew; ++i) {
+  if (look.sheet != kSheetNone) {
+    for (int i = 0; i < look.tiles && !drew; ++i) {
+      if (i == look.slot) continue;
+      Part& tile = g_tile_parts[i][1];
+      if (!TilePartOk(tile, look, i)) {
+        DrawTile(&tile, look, i, true);
+        tile.cy = g_layout[look.sheet].tile[i].cy;
+        tile.cx = g_layout[look.sheet].tile[i].cx;
+        drew = true;
+      }
+    }
+  }
+  for (int i = 0; i < kSlots && !drew && look.sheet == kSheetNone; ++i) {
     if (i == look.slot) continue;
     Part& seal = g_seal_parts[i][1];
-    if (!seal.ok || seal.item != look.item[i] ||
-        seal.value != look.value[i] || seal.dim != look.dim[i]) {
-      DrawSeal(&seal, i, look.item[i], look.value[i], look.dim[i], true);
+    if (!SlotPartOk(seal, look, i)) {
+      DrawSlot(&seal, look, i, true);
       drew = true;
       break;
     }
@@ -2120,6 +2768,11 @@ void Stage(float fade) {
 
 State g_state;
 bool g_state_ready = false;
+// The boxes of the tiles of each sheet on the plane of the ring, by SheetId.
+Sheet g_sheets[kSheets];
+// The middle of the picture on the plane of the ring: the middle of the sheet
+// that shows, or 0 0 for a ring.
+float g_draw_middle[2] = {0.0f, 0.0f};
 Plane g_plane;
 bool g_have_plane = false;
 bool g_left = true;
@@ -2163,16 +2816,45 @@ void PollTestKey() {
   RadialMenuWayChange("Ctrl and numpad 1");
 }
 
-void BuildLook(const int (*items)[kSlots], int page, int slot, const Facts& f,
-               Look* look) {
+void BuildLook(const int (*items)[kSlots], int page, int slot, int sheet,
+               const Facts& f, Look* look) {
   memset(look, 0, sizeof(*look));
   look->slot = slot;
   look->scroll = ScrollLookNow();
+  look->icons = g_icons ? 1 : 0;
+  if (sheet != kSheetNone && sheet < kSheets) {
+    const ring_sheet_math::Layout& layout = g_layout[sheet];
+    look->sheet = sheet;
+    look->tiles = layout.count;
+    for (int i = 0; i < layout.count; ++i) {
+      look->tile_kind[i] = layout.tile[i].kind;
+      look->tile_arg[i] = layout.tile[i].arg;
+      look->tile_dim[i] = !TileNow(layout.tile[i], f).can;
+    }
+    look->leash_now = f.leash_known && f.creature != nullptr ? f.leash_kind
+                                                             : 0;
+    if (sheet == kSheetLeash && LeashPicturesOn()) {
+      look->turn = static_cast<int>(NowSeconds() / kTurnSeconds *
+                                    kTurnSteps) % kTurnSteps;
+    }
+    if (slot >= 0 && slot < layout.count) {
+      const ItemNow now = TileNow(layout.tile[slot], f);
+      wcsncpy_s(look->name, now.name, _TRUNCATE);
+      wcsncpy_s(look->note, NoteOf(now), _TRUNCATE);
+    } else {
+      wcsncpy_s(look->name, sheet == kSheetLeash ? L"Choose a leash"
+                                                 : L"Places",
+                _TRUNCATE);
+    }
+    return;
+  }
   for (int i = 0; i < kSlots; ++i) {
     const int item = items[page][i];
     look->item[i] = item;
     look->value[i] =
-        IsSwitchItem(item) ? DebugSwitchValue(item - kItemSwitchBase) : 0;
+        IsSwitchItem(item)   ? DebugSwitchValue(item - kItemSwitchBase)
+        : item == kItemPause ? (f.paused ? 1 : 0)
+                             : 0;
     look->dim[i] = item != kItemNone && !StateOf(item, f).can;
   }
   if (slot >= 0) {
@@ -2402,6 +3084,21 @@ void RadialMenuFrame() {
     g_trigger_down = false;
   }
 
+  // THE SHEETS of this frame: the places with the bookmarks that are set
+  // now, and the leashes.
+  {
+    bool set[kMarks];
+    for (int i = 0; i < kMarks; ++i) set[i] = have_game && facts.mark[i];
+    ring_sheet_math::PlacesLayout(set, &g_layout[kSheetPlaces]);
+    ring_sheet_math::LeashLayout(&g_layout[kSheetLeash]);
+    g_layout[kSheetNone].count = 0;
+    const float per_pixel = 1.0f / kPixelsPerMeter * (g_size_pct * 0.01f);
+    for (int k = 0; k < kSheets; ++k) {
+      ring_sheet_math::SheetOf(g_layout[k], per_pixel, &g_sheets[k]);
+    }
+    in.sheets = g_sheets;
+  }
+
   Events ev;
   Step(&g_state, g_settings, in, items, ring.pages.links, pages, &ev);
 
@@ -2415,6 +3112,8 @@ void RadialMenuFrame() {
   }
   if (ev.opened) {
     ++g_opens;
+    // A ring that opens ends the wait for the grip of a new bookmark.
+    BookmarkAimStopBy("the ring opened");
     g_left = hand.left;
     PlaneAt(hand.position, hand.head, &g_plane);
     g_have_plane = true;
@@ -2435,7 +3134,42 @@ void RadialMenuFrame() {
     }
     HapticsPulseHands(1, haptics_math::kTick);
   }
-  if (ev.paged && LogRoom()) {
+  if (ev.sheeted && LogRoom()) {
+    // Each tile with the middle of its box from the hand, for a recipe of the
+    // scripted controller.
+    const ring_sheet_math::Layout& layout = g_layout[g_state.sheet];
+    const float per_pixel = 1.0f / kPixelsPerMeter * (g_size_pct * 0.01f);
+    char words[600];
+    words[0] = 0;
+    for (int i = 0; i < layout.count; ++i) {
+      float x = 0.0f, y = 0.0f;
+      ring_sheet_math::TileMiddle(layout, i, per_pixel, &x, &y);
+      const ring_sheet_math::Tile& t = layout.tile[i];
+      char word[32];
+      if (t.kind == ring_sheet_math::kTilePlace) {
+        strcpy_s(word, kItemInfo[t.arg].id);
+      } else if (t.kind == ring_sheet_math::kTileAdd) {
+        strcpy_s(word, "add");
+      } else {
+        sprintf_s(word, "%s%d",
+                  t.kind == ring_sheet_math::kTileMark     ? "mark"
+                  : t.kind == ring_sheet_math::kTileRemove ? "remove"
+                                                           : "leash",
+                  t.kind == ring_sheet_math::kTileLeash ? t.arg : t.arg + 1);
+      }
+      char one[64];
+      sprintf_s(one, "%s%s at %.1f %.1f", i > 0 ? ", " : "", word,
+                x * 100.0f, y * 100.0f);
+      strncat_s(words, sizeof(words), one, _TRUNCATE);
+    }
+    ModLog("ring         : the ring goes to the sheet of the %s, its middle at "
+           "the hand, %.1f cm to the right and %.1f cm up from the middle of "
+           "the ring. The tiles, in cm from the middle of the sheet: %s, "
+           "frame %llu", g_state.sheet == kSheetLeash ? "leashes" : "places",
+           g_state.sheet_middle[0] * 100.0f, g_state.sheet_middle[1] * 100.0f,
+           words, frame);
+  }
+  if (ev.paged && !ev.sheeted && LogRoom()) {
     char words[300], title[80];
     PageWords(items[g_state.page], words, sizeof(words));
     PageTitle(ring, temple, g_state.page, title, sizeof(title));
@@ -2448,7 +3182,19 @@ void RadialMenuFrame() {
       AudioCue(kAudioCueRingMove, g_left ? -0.4f : 0.4f);
     }
     if (LogRoom()) {
-      if (g_state.open == kOpenButton) {
+      if (g_state.sheet != kSheetNone) {
+        char name[48] = "the middle";
+        if (g_state.slot >= 0) {
+          Narrow(TileNow(g_layout[g_state.sheet].tile[g_state.slot], facts)
+                     .name,
+                 name, sizeof(name));
+        }
+        ModLog("ring         : the choice on the sheet is %s (tile %d), with "
+               "the hand %.1f cm to the right and %.1f cm up from its "
+               "middle, frame %llu", name, g_state.slot,
+               (in.hand[0] - g_state.sheet_middle[0]) * 100.0f,
+               (in.hand[1] - g_state.sheet_middle[1]) * 100.0f, frame);
+      } else if (g_state.open == kOpenButton) {
         ModLog("ring         : the choice is %s, with the hand %.1f cm to the "
                "right and %.1f cm up from the middle, frame %llu",
                SlotWord(items, g_state), in.hand[0] * 100.0f,
@@ -2460,7 +3206,29 @@ void RadialMenuFrame() {
       }
     }
   }
-  if (ev.chosen >= 0) {
+  if (ev.chosen >= 0 && ev.chosen_sheet != kSheetNone) {
+    // A TILE OF A SHEET.
+    const ring_sheet_math::Tile& tile = g_layout[ev.chosen_sheet].tile[ev.chosen];
+    const ItemNow tile_now = TileNow(tile, facts);
+    if (ChooseTile(tile, facts, tile_now)) {
+      HapticsPulseHands(1, haptics_math::kActivate);
+      AudioCue(kAudioCueRingChoose, g_left ? -0.4f : 0.4f);
+      g_return_until = 0.0;
+    } else {
+      HapticsPulseHands(1, haptics_math::kRefused);
+      g_notice = true;
+      g_show_until = now + kNoticeSeconds;
+      BuildLook(items, ev.chosen_page, ev.chosen, ev.chosen_sheet, facts,
+                &g_notice_look);
+      for (int i = 0; i < g_notice_look.tiles; ++i) {
+        g_notice_look.tile_dim[i] = true;
+      }
+      wcsncpy_s(g_notice_look.name, tile_now.name, _TRUNCATE);
+      wcsncpy_s(g_notice_look.note,
+                NoteOf(tile_now)[0] != 0 ? NoteOf(tile_now) : L"Not now",
+                _TRUNCATE);
+    }
+  } else if (ev.chosen >= 0) {
     const int item = items[ev.chosen_page][ev.chosen];
     const ItemNow item_now = StateOf(item, facts);
     if (Choose(item, facts, item_now)) {
@@ -2478,7 +3246,8 @@ void RadialMenuFrame() {
         g_notice = true;
         g_snapshot_notice = true;
         g_show_until = now + kNoticeSeconds;
-        BuildLook(items, ev.chosen_page, ev.chosen, facts, &g_notice_look);
+        BuildLook(items, ev.chosen_page, ev.chosen, kSheetNone, facts,
+                  &g_notice_look);
         for (int i = 0; i < kSlots; ++i) g_notice_look.dim[i] = true;
         wcsncpy_s(g_notice_look.name, L"Snapshot", _TRUNCATE);
         wcsncpy_s(g_notice_look.note, L"It saves the pictures", _TRUNCATE);
@@ -2488,7 +3257,8 @@ void RadialMenuFrame() {
       HapticsPulseHands(1, haptics_math::kRefused);
       g_notice = true;
       g_show_until = now + kNoticeSeconds;
-      BuildLook(items, ev.chosen_page, ev.chosen, facts, &g_notice_look);
+      BuildLook(items, ev.chosen_page, ev.chosen, kSheetNone, facts,
+                &g_notice_look);
       for (int i = 0; i < kSlots; ++i) g_notice_look.dim[i] = true;
       wcsncpy_s(g_notice_look.name, item_now.name, _TRUNCATE);
       wcsncpy_s(g_notice_look.note,
@@ -2524,8 +3294,12 @@ void RadialMenuFrame() {
   const bool show = open || (g_notice && now < g_show_until);
   if (g_notice && !show) g_notice = false;
   if (open) {
+    g_draw_middle[0] = g_state.sheet != kSheetNone ? g_state.sheet_middle[0]
+                                                   : 0.0f;
+    g_draw_middle[1] = g_state.sheet != kSheetNone ? g_state.sheet_middle[1]
+                                                   : 0.0f;
     Look look;
-    BuildLook(items, g_state.page, g_state.slot, facts, &look);
+    BuildLook(items, g_state.page, g_state.slot, g_state.sheet, facts, &look);
     if (!g_have_drawn || !SameLook(look, g_drawn)) {
       Raster(look);
     } else if (look.scroll != 0 && g_scroll_ready) {
@@ -2551,7 +3325,12 @@ void RadialMenuFrame() {
   layer.rect[1] = 0;
   layer.rect[2] = kSize;
   layer.rect[3] = kSize;
-  for (int i = 0; i < 3; ++i) layer.position[i] = g_plane.center[i];
+  // A sheet has its middle at the hand of the change to the sheet.
+  for (int i = 0; i < 3; ++i) {
+    layer.position[i] = g_plane.center[i] +
+                        g_plane.right[i] * g_draw_middle[0] +
+                        g_plane.up[i] * g_draw_middle[1];
+  }
   for (int i = 0; i < 4; ++i) layer.orientation[i] = g_plane.orientation[i];
   layer.width = size;
   layer.height = size;

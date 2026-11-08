@@ -3589,6 +3589,7 @@ void CreatureChecks() {
 #include "stay_checks.h"
 #include "look_checks.h"
 #include "ring_checks.h"
+#include "ring_sheet_checks.h"
 #include "debug_menu_checks.h"
 #include "teleport_checks.h"
 #include "spell_book_checks.h"
@@ -4038,6 +4039,7 @@ int main() {
   aim_checks::AimChecks();
   miracle_checks::MiracleChecks();
   ring_checks::RingChecks();
+  ring_sheet_checks::RingSheetChecks();
   debug_menu_checks::DebugMenuChecks();
   teleport_checks::TeleportChecks();
   spell_book_checks::SpellBookChecks();

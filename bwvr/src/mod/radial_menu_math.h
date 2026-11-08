@@ -30,6 +30,7 @@
 #include <string.h>
 
 #include "controller_math.h"
+#include "ring_icon_math.h"
 
 namespace radial_math {
 
@@ -82,6 +83,8 @@ enum Item {
   kItemSnapshot,
   kItemDebugWindow,
   kItemSettings,
+  kItemLeash,
+  kItemPlacesPage,
   kItems
 };
 
@@ -98,10 +101,24 @@ inline bool IsGroupItem(int item) {
 inline bool IsSwitchItem(int item) {
   return item >= kItemSwitchBase && item < kItemSwitchBase + kMaxSwitches;
 }
-// An item that goes to a page. A release on it chooses nothing.
+// THE SHEETS. A sheet is a page of the ring that is not a ring: its parts
+// (the tiles) are where the picture shows them, and the hand picks the tile
+// that it is over (SheetPick). The item "leash" goes to the sheet of the
+// three leashes, and the item "places_page" to the sheet of the places and
+// the bookmarks.
+enum SheetId { kSheetNone, kSheetPlaces, kSheetLeash, kSheets };
+
+inline int SheetOfItem(int item) {
+  if (item == kItemLeash) return kSheetLeash;
+  if (item == kItemPlacesPage) return kSheetPlaces;
+  return kSheetNone;
+}
+
+// An item that goes to a page or to a sheet. A release on it chooses
+// nothing.
 inline bool IsLinkItem(int item) {
   return item == kItemMore || item == kItemDebug || item == kItemBack ||
-         IsGroupItem(item);
+         IsGroupItem(item) || SheetOfItem(item) != kSheetNone;
 }
 
 // How an item acts. Each one goes through the key path of the game
@@ -118,6 +135,7 @@ enum How {
   kHowRecenter, // the recenter of the view (ControllersRecenter), no key
   kHowWindow,   // opens the debug window (debug_window.cpp)
   kHowSettings, // opens the settings window (settings_panel.cpp)
+  kHowSheet,    // goes to a sheet of the ring (the leashes, the places)
 };
 
 // The modifier word of the key buffer of the game.
@@ -158,7 +176,7 @@ const ItemInfo kItemInfo[kItems] = {
     {"slower", L"Slower", L"Make the game slower", kHowKey, 0x02, kModAlt, 1},
     {"faster", L"Faster", L"Make the game faster", kHowKey, 0x03, kModAlt, 1},
     {"help", L"Help", L"Help of the game", kHowAction, 0x00, 0, 1},
-    {"names", L"Names", L"Villager names", kHowAction, 0x1B, 0, 1},
+    {"names", L"Names", L"Show villager names", kHowAction, 0x1B, 0, 1},
     {"details", L"Details", L"Villager details", kHowAction, 0x1C, 0, 1},
     {"save", L"Save", L"Quick save", kHowAction, 0x1D, 0, 1},
     {"load", L"Load", L"Quick load", kHowAction, 0x1E, 0, 1},
@@ -182,12 +200,74 @@ const ItemInfo kItemInfo[kItems] = {
      0, 0},
     // The item "debug" with debug_window=1 (radial_menu.cpp, PlaceDebug).
     {"debug_window", L"Debug", L"The debug window", kHowWindow, 0, 0, 0},
-    {"settings", L"Settings", L"The VR Settings window", kHowSettings, 0, 0,
-     0},
+    {"settings", L"VR Settings", L"VR Settings", kHowSettings, 0, 0, 0},
+    {"leash", L"Leash", L"Choose a leash", kHowSheet, 0, 0, 0},
+    // The item "places" with places_sheet=1 (radial_menu.cpp, ReadPage).
+    {"places_page", L"Places", L"Places and bookmarks", kHowSheet, 0, 0, 0},
 };
 
-// The rings as made. The order is how often a player needs an item, from the
-// top and clockwise, with "More" at the bottom of each page.
+// THE ICON of an item (ring_icon_math.h), or kIconNone for an item that has
+// only its word: a switch and a group of the debug page.
+inline int ItemIcon(int item) {
+  using namespace ring_icon_math;
+  switch (item) {
+    case kItemTemple: return kIconTemple;
+    case kItemEnter: return kIconEnter;
+    case kItemCreature: return kIconCreature;
+    case kItemTown: return kIconTown;
+    case kItemLand: return kIconLand;
+    case kItemLeashNext: return kIconLeashNext;
+    case kItemLeashPrevious: return kIconLeashPrevious;
+    case kItemLeashAggression: return kIconAggression;
+    case kItemLeashLearning: return kIconLearning;
+    case kItemLeashCompassion: return kIconCompassion;
+    case kItemMarkSet: return kIconMarkSet;
+    case kItemMarkGo: return kIconMarkGo;
+    case kItemMarkBack: return kIconBack;
+    case kItemPause: return kIconPause;
+    case kItemSlower: return kIconSlower;
+    case kItemFaster: return kIconFaster;
+    case kItemHelp: return kIconHelp;
+    case kItemNames: return kIconNames;
+    case kItemDetails: return kIconDetails;
+    case kItemSave: return kIconSave;
+    case kItemLoad: return kIconLoad;
+    case kItemPlayground: return kIconPlayground;
+    case kItemRoomCreature: return kIconCreature;
+    case kItemRoomChallenge: return kIconChallenge;
+    case kItemRoomSave: return kIconSave;
+    case kItemRoomOptions: return kIconSettings;
+    case kItemRoomLibrary: return kIconLibrary;
+    case kItemHall: return kIconTemple;
+    case kItemLeave: return kIconLeave;
+    case kItemRecenter: return kIconRecenter;
+    case kItemMore: return kIconMore;
+    case kItemDebug: return kIconDebug;
+    case kItemBack: return kIconBack;
+    case kItemPlaces: return kIconPlaces;
+    case kItemSnapshot: return kIconSnapshot;
+    case kItemDebugWindow: return kIconDebug;
+    case kItemSettings: return kIconSettings;
+    case kItemLeash: return kIconLeash;
+    case kItemPlacesPage: return kIconPlaces;
+    default: return kIconNone;
+  }
+}
+
+// THE RINGS AS MADE (ring_pages=1), from the top and clockwise, with "More"
+// at the bottom of each page. Page 1 has what a player needs at a glance.
+// The leashes are at the top and the places at the top right, because they
+// move the most. The recenter is at the right. Quick save, the VR Settings,
+// the names of the villagers and the pause go round the bottom and the left.
+// "places" goes to the sheet of the places with places_sheet=1, so no item
+// of a place or of a bookmark is on the ring.
+const char* const kDefaultRing1 =
+    "leash,places,recenter,save,more,settings,names,pause";
+const char* const kDefaultRing2 =
+    "snapshot,help,details,faster,more,slower,none,none";
+
+// THE OLD RINGS (ring_pages=0). The order is how often a player needs an
+// item, from the top and clockwise, with "More" at the bottom of each page.
 const char* const kDefaultPage1 =
     "temple,creature,town,leash_learning,more,leash_compassion,"
     "leash_aggression,enter";
@@ -320,6 +400,37 @@ inline int Pick(float x, float y, int before, float in, float out,
   return SlotOf(x, y);
 }
 
+// THE PICK ON A SHEET. Each tile has a box on the plane of the sheet: x0 y0
+// x1 y1 in meters, x to the right and y up from the middle of the sheet. A
+// point picks the tile whose box holds it. The tile of `before` stays while
+// the point is in its box grown by `margin`, so a hand that shakes at the
+// edge of two tiles does not flip the choice. -1 for a point that is in no
+// box: the middle of the sheet has no tile, and a release there chooses
+// nothing.
+const int kMaxTiles = 24;
+
+struct Sheet {
+  int count;
+  float box[kMaxTiles][4];
+};
+
+inline bool InBox(const float box[4], float x, float y, float margin) {
+  return x >= box[0] - margin && x <= box[2] + margin &&
+         y >= box[1] - margin && y <= box[3] + margin;
+}
+
+inline int SheetPick(const Sheet& sheet, float x, float y, int before,
+                     float margin) {
+  if (before >= 0 && before < sheet.count &&
+      InBox(sheet.box[before], x, y, margin)) {
+    return before;
+  }
+  for (int i = 0; i < sheet.count && i < kMaxTiles; ++i) {
+    if (InBox(sheet.box[i], x, y, 0.0f)) return i;
+  }
+  return -1;
+}
+
 // --- the plane -------------------------------------------------------------------
 
 // The ring in the LOCAL space of OpenXR (right handed, meters, y up). It is a
@@ -371,6 +482,8 @@ struct Settings {
   float margin_deg;
   float dwell;        // seconds on "More" before the page changes
   float stick_rest;   // seconds of the stick in the middle before it closes
+  float tile_margin;  // meters: a tile of a sheet stays this far out of its box
+  float stick_reach;  // meters on a sheet for the stick at its end
 };
 
 inline Settings DefaultSettings() {
@@ -384,6 +497,8 @@ inline Settings DefaultSettings() {
   s.margin_deg = 6.0f;
   s.dwell = 0.45f;
   s.stick_rest = 0.5f;
+  s.tile_margin = 0.01f;
+  s.stick_reach = 0.13f;
   return s;
 }
 
@@ -395,6 +510,9 @@ struct Input {
   bool have_hand;    // hand[] is known
   float hand[2];     // the hand on the plane of the ring, meters
   double time;       // seconds
+  // The tiles of each sheet now, by SheetId, or null for a ring with no
+  // sheet.
+  const Sheet* sheets;
 };
 
 enum Open { kClosed, kOpenButton, kOpenStick };
@@ -410,6 +528,10 @@ struct State {
   bool button_before;
   bool trigger_before;
   bool stick_back;     // the stick must go back to the middle before it opens
+  int sheet;           // the sheet that shows (SheetId), or kSheetNone
+  // The middle of the sheet on the plane of the ring: the hand at the change
+  // to the sheet, so the hand starts in the middle, where no tile is.
+  float sheet_middle[2];
 };
 
 struct Events {
@@ -420,6 +542,8 @@ struct Events {
   bool blocked;    // the button went down and the ring could not open
   int chosen;      // the slot that was chosen, or -1
   int chosen_page;
+  int chosen_sheet;  // the sheet of the choice: then chosen is a tile
+  bool sheeted;      // the ring went to a sheet in this step
 };
 
 inline void Reset(State* state) {
@@ -476,6 +600,7 @@ inline void Step(State* st, const Settings& set, const Input& in,
     }
     st->page = st->open_page >= 0 && st->open_page < pages ? st->open_page
                                                            : 0;
+    st->sheet = kSheetNone;
     st->slot = -1;
     st->dead_slot = -1;
     st->slot_since = in.time;
@@ -488,6 +613,7 @@ inline void Step(State* st, const Settings& set, const Input& in,
     st->open = kClosed;
     st->slot = -1;
     st->dead_slot = -1;
+    st->sheet = kSheetNone;
     ev->closed = true;
   };
   if (!in.can_open) {
@@ -495,16 +621,30 @@ inline void Step(State* st, const Settings& set, const Input& in,
     return;
   }
   int pick = st->slot;
+  const Sheet* sheet = st->sheet != kSheetNone && in.sheets != nullptr
+                           ? &in.sheets[st->sheet]
+                           : nullptr;
+  const int before = st->slot >= 0 ? st->slot : st->dead_slot;
   if (st->open == kOpenButton) {
-    if (in.have_hand) {
-      pick = Pick(in.hand[0], in.hand[1], st->slot >= 0 ? st->slot
-                                                         : st->dead_slot,
-                  set.hand_in, set.hand_out, set.margin_deg);
+    if (in.have_hand && sheet != nullptr) {
+      pick = SheetPick(*sheet, in.hand[0] - st->sheet_middle[0],
+                       in.hand[1] - st->sheet_middle[1], before,
+                       set.tile_margin);
+    } else if (in.have_hand) {
+      pick = Pick(in.hand[0], in.hand[1], before, set.hand_in, set.hand_out,
+                  set.margin_deg);
     }
   } else {
-    pick = Pick(in.stick[0], in.stick[1],
-                st->slot >= 0 ? st->slot : st->dead_slot, set.stick_in,
-                set.stick_out, set.margin_deg);
+    if (sheet != nullptr) {
+      pick = stick_r < set.stick_out
+                 ? -1
+                 : SheetPick(*sheet, in.stick[0] * set.stick_reach,
+                             in.stick[1] * set.stick_reach, before,
+                             set.tile_margin);
+    } else {
+      pick = Pick(in.stick[0], in.stick[1], before, set.stick_in,
+                  set.stick_out, set.margin_deg);
+    }
     if (stick_r < set.stick_out) {
       // The stick is in the middle. It can be on its way to an item on the
       // other side, so the ring waits. A stick that rests there closes the
@@ -527,16 +667,28 @@ inline void Step(State* st, const Settings& set, const Input& in,
       st->dead_slot = -1;
     }
   }
-  if (pick >= 0 && items[st->page][pick] == kItemNone) pick = -1;
+  if (sheet == nullptr && pick >= 0 && items[st->page][pick] == kItemNone) {
+    pick = -1;
+  }
   if (pick != st->slot) {
     st->slot = pick;
     st->slot_since = in.time;
     ev->moved = true;
   }
-  // A link item ("More", "debug", "back", a group) goes to its page. On a
-  // link the release and the trigger choose nothing.
-  const bool on_link = st->slot >= 0 && IsLinkItem(items[st->page][st->slot]);
-  const int link_to = LinkOf(items, links, pages, st->page, st->slot);
+  // A link item ("More", "debug", "back", a group, a sheet) goes to its page
+  // or its sheet. On a link the release and the trigger choose nothing. A
+  // sheet has no link.
+  const bool on_link = sheet == nullptr && st->slot >= 0 &&
+                       IsLinkItem(items[st->page][st->slot]);
+  const int sheet_to =
+      on_link && in.sheets != nullptr ? SheetOfItem(items[st->page][st->slot])
+                                      : kSheetNone;
+  const int link_to = sheet_to != kSheetNone
+                          ? st->page
+                          : (sheet == nullptr
+                                 ? LinkOf(items, links, pages, st->page,
+                                          st->slot)
+                                 : -1);
   const auto turn_page = [&]() {
     st->dead_slot = st->slot;
     st->slot = -1;
@@ -544,6 +696,24 @@ inline void Step(State* st, const Settings& set, const Input& in,
     st->slot_since = in.time;
     ev->paged = true;
     ev->moved = true;
+    if (sheet_to == kSheetNone) return;
+    // THE SHEET. With the button its middle is the hand now. With the stick
+    // the stick is still out, so the tile under it is not live until the
+    // stick leaves it.
+    st->sheet = sheet_to;
+    ev->sheeted = true;
+    st->dead_slot = -1;
+    if (st->open == kOpenButton) {
+      st->sheet_middle[0] = in.hand[0];
+      st->sheet_middle[1] = in.hand[1];
+    } else {
+      st->sheet_middle[0] = st->sheet_middle[1] = 0.0f;
+      if (stick_r >= set.stick_out) {
+        st->dead_slot = SheetPick(in.sheets[sheet_to],
+                                  in.stick[0] * set.stick_reach,
+                                  in.stick[1] * set.stick_reach, -1, 0.0f);
+      }
+    }
   };
 
   if (st->open == kOpenButton) {
@@ -552,6 +722,7 @@ inline void Step(State* st, const Settings& set, const Input& in,
       if (st->slot >= 0 && !on_link) {
         ev->chosen = st->slot;
         ev->chosen_page = st->page;
+        ev->chosen_sheet = st->sheet;
       }
       close();
       return;
@@ -563,6 +734,7 @@ inline void Step(State* st, const Settings& set, const Input& in,
     }
     ev->chosen = st->slot;
     ev->chosen_page = st->page;
+    ev->chosen_sheet = st->sheet;
     // The stick is still out. It must come back before the ring opens again.
     st->stick_back = true;
     close();

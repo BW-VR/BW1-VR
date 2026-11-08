@@ -2181,8 +2181,11 @@ of about 26 KB.
 
 ## 22. The panel of places
 
-The item `places` of the ring (`controllers.md`, section 10) opens a page
-of buttons for the places of the game and its 7 bookmarks. The ray and the
+With `places_sheet=0` the item `places` of the ring (`controllers.md`,
+section 10) opens a page of buttons for the places of the game and its 7
+bookmarks. With `places_sheet=1` (the default) the item goes to the sheet
+of the places on the ring (`controllers.md`, 10.11), and this panel does
+not open. The ray and the
 trigger of the pointing hand press its buttons, as on the keyboard in the
 headset (section 21). The code is in `places_panel.cpp` and
 `places_panel_math.h`.

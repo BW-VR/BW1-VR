@@ -95,6 +95,8 @@ add_library(bwvr_mod SHARED
     miracle_watch.cpp
     village.cpp
     radial_menu.cpp
+    bookmark_aim.cpp
+    leash_model.cpp
     panel_kit.cpp
     places_panel.cpp
     debug_window.cpp

@@ -221,17 +221,27 @@ game's own below a gain of 1. The land under the head keeps the height that
 the player gave it. A zoom in does not lower it: the player pulls the land
 down with the grip of the other hand, to at most 2.5 m below the head
 (section 3). At 1 unit per meter with the land 60 cm below the head, a
-villager stands 1 m over the eyes. With the land 1.4 to 1.6 m below the head,
+villager stands 1 m over the eyes. With `god_zoom_about` 1 and 2 a zoom
+moves the head over the land, and the land under the new place of the head
+can be higher or lower than the level of the zoom. At a small scale a small
+change of the land is a large change in the room: 0.5 units are 50 cm at 1
+unit per meter. So after a zoom in about a point that is not under the head,
+the land under the head can be 10 cm below it (`ZoomClearHead`) or far
+below it. With the land 1.4 to 1.6 m below the head,
 the player sees the village from the eyes of a villager. The head stops at
 houses as at each scale (section 5.9), so a house that the player walks into
 covers the view. The land of the game has cells of 10 units, which are 10 m at
 1 unit per meter, so the land looks flat and its texture is soft there.
 
-A zoom in that comes to the lowest scale logs one line, and it comes again
+Below twice the life size scale (15 units per meter) the zoom check of each
+step has one more line: the height of the eye over the land, the near plane,
+the fog of the game and the overlay of the head blinder after the step. A
+zoom in that comes to the lowest scale logs one line, and it comes again
 only after the scale went above it:
 
 ```
 god view     : the zoom is at its lowest scale, 1.00 units per meter (god_near_units_per_meter_x10=10). A villager of 1.6 units is 1.60 m high in the room, and the land under your head is 0.60 m below it
+god view     : zoom check, the scene at 1.00 units per meter: the eye is 0.60 units over the land, the near plane is 0.050 units (5.0 cm of the room), the fog of the game is on from 400 to 900 units, and the head blinder covers 0% (your head is 60.0 cm from the land)
 ```
 
 **The inputs.** The right stick forward zooms out, and back zooms in

@@ -737,9 +737,11 @@ if ($Kind -eq 'totem') {
     # with -Set "god_near_units_per_meter_x10=75": the zoom stops at 7.5.
     # Give it -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60" for the
     # eye pictures.
+    # The run takes 100 s by default, also in a test save: the steps go to
+    # frame 1990, and a run with test_frame_rate=60 must not end before them.
     if ($Plan -eq '') { $Plan = 'gostore,villager' }
     if ($Census -eq '') { $Census = '890' }
-    if ($Seconds -eq 0) { $Seconds = 60 }
+    if ($Seconds -eq 0) { $Seconds = 100; $given = $true }
     $points = '0,-30,60 0,-5,15 0,-3,8'
     if ($Steps -eq '') {
         $Steps = 'stick_up@800+10 stick_up@830+10 point@900+1 seek@920+1 seek@1000+1 shot@1030+1'
@@ -866,7 +868,7 @@ if ($Kind -eq 'tooltip') {
     $pattern = '^hand pick    : seek plan|^ui hint      : .*(tooltip|at the Hand)|^ui depth     : \d+ tooltips'
 }
 if ($Kind -eq 'small') {
-    $pattern = '^hand pick    : seek plan|^god view     : (on\.|zoomed|the zoom is|the Hand is)|^near plane   :|^grab         :|^head blinder :|^tabletop     : the Z buffer'
+    $pattern = '^hand pick    : seek plan|^god view     : (on\.|zoomed|the zoom is|zoom check, the scene|the Hand is)|^near plane   :|^grab         :|^head blinder :|^tabletop     : the Z buffer'
 }
 if ($Kind -eq 'tglow') {
     $pattern = '^hand pick    : seek plan|^target glow  : (the mesh|test: a batch|\S+ \S+ has no mesh)'

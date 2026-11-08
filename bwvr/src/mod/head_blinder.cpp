@@ -345,6 +345,13 @@ bool HeadBlinderOn() { return g_on; }
 // The level of now, from 0 to 1.
 float HeadBlinderLevel() { return g_level; }
 
+// For the zoom check of tabletop.cpp: the clearance of the head of the last
+// frame, in meters of the room, and what it is near.
+float HeadBlinderClearance(const char** what) {
+  *what = NearName();
+  return g_clearance;
+}
+
 // sky_detail.cpp, after VignetteDraw: the last draw of the eye pass.
 void HeadBlinderDraw() {
   if (!(g_level > 0.0f)) return;

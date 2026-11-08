@@ -134,8 +134,11 @@ bool ComfortCameraTakeGodDrag();
 bool ComfortCameraDestinations(float position[3], float focus[3]);
 // controllers.cpp: a grip holds the world.
 bool ControllersGrabHeld();
-// head_blinder.cpp: head_blinder is on.
+// head_blinder.cpp: head_blinder is on, the level of its overlay (0 to 1),
+// and the clearance of the head with what it is near.
 bool HeadBlinderOn();
+float HeadBlinderLevel();
+float HeadBlinderClearance(const char** what);
 // vignette.cpp: a move of the view that the player makes with a control, with
 // the share of its full speed, and a step of the view in one frame.
 void VignetteMove(float share, const char* by);
@@ -203,6 +206,10 @@ typedef void*(__fastcall* MyInterfaceFn)(void* game, void* unused);
 
 // The values of docs/tabletop.md, "What the engine does at the table scale".
 const uintptr_t kFog = 0x00C37204;          // int, the Fog setting of BWSetup
+// The fog start and end of the land and the objects, in units of depth.
+// The sky writes them each frame (docs/tabletop.md, "The mechanisms").
+const uintptr_t kFogStart = 0x00C37220;     // float
+const uintptr_t kFogEnd = 0x00C37224;       // float
 const uintptr_t kVanish = 0x00C37200;       // float, 700
 const uintptr_t kSizeCap = 0x00C37EC8;      // float, 5
 const uintptr_t kDetailNear = 0x00E9C4FC;   // float, 1600
@@ -3131,6 +3138,27 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
                sqrtf(dx * dx + dz * dz) / g_zoom_probe.scale * 100.0f,
                g_zoom_probe.eye[0], g_zoom_probe.eye[2], eye[0], eye[2],
                sqrtf(off) * 100.0f);
+        // NEAR THE LOWEST SCALE: what the eyes get after the step. The
+        // height of the eye over the land, the near plane, the fog of the
+        // game and the overlay of the head blinder. One of them can hide the
+        // land at a small scale.
+        if (g_zoom_probe.scale < 2.0f * HeadPoseScale()) {
+          const char* what = "";
+          const float clearance = HeadBlinderClearance(&what);
+          const float near_plane =
+              *reinterpret_cast<const float*>(bw::tech::kNearPlane);
+          ModLog("god view     : zoom check, the scene at %.2f units per "
+                 "meter: the eye is %.2f units over the land, the near "
+                 "plane is %.3f units (%.1f cm of the room), the fog of the "
+                 "game is %s from %.0f to %.0f units, and the head blinder "
+                 "covers %.0f%% (your head is %.1f cm from %s)",
+                 g_zoom_probe.scale, eye[1] - GroundAt(eye[0], eye[2]),
+                 near_plane, near_plane / g_zoom_probe.scale * 100.0f,
+                 *reinterpret_cast<const int32_t*>(kFog) != 0 ? "on" : "off",
+                 *reinterpret_cast<const float*>(kFogStart),
+                 *reinterpret_cast<const float*>(kFogEnd),
+                 HeadBlinderLevel() * 100.0f, clearance * 100.0f, what);
+        }
       }
     }
     if (!g_have_table) {
